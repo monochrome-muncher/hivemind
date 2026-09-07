@@ -121,9 +121,7 @@ def _parse_dt(value: str | None, field_name: str) -> datetime | None:
     try:
         parsed = datetime.fromisoformat(value)
     except ValueError as exc:
-        raise ValueError(
-            f"{field_name} must be an ISO-8601 timestamp, got {value!r}"
-        ) from exc
+        raise ValueError(f"{field_name} must be an ISO-8601 timestamp, got {value!r}") from exc
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
     return parsed
@@ -135,9 +133,7 @@ def _parse_kind(value: str | None) -> Kind | None:
     try:
         return Kind(value)
     except ValueError as exc:
-        raise ValueError(
-            f"kind must be one of fact|insight|decision, got {value!r}"
-        ) from exc
+        raise ValueError(f"kind must be one of fact|insight|decision, got {value!r}") from exc
 
 
 def _parse_sources(raw: list[dict[str, str]] | None) -> tuple[Source, ...]:
@@ -149,8 +145,7 @@ def _parse_sources(raw: list[dict[str, str]] | None) -> tuple[Source, ...]:
             source_type = SourceType(item.get("type", ""))
         except ValueError as exc:
             raise ValueError(
-                f"source type must be one of path|url|session|other, "
-                f"got {item.get('type')!r}"
+                f"source type must be one of path|url|session|other, got {item.get('type')!r}"
             ) from exc
         ref = item.get("ref")
         if not ref:
@@ -187,9 +182,7 @@ def _build_filters(
     )
 
 
-async def _supersession_chain(
-    app: McpHivemind, entry: Entry
-) -> tuple[list[Entry], list[Entry]]:
+async def _supersession_chain(app: McpHivemind, entry: Entry) -> tuple[list[Entry], list[Entry]]:
     """Return ``(successors, superseded)`` for an entry's supersession chain.
 
     ``successors`` are the newer versions reachable by following
@@ -409,9 +402,7 @@ async def hive_withdraw(
     acting credential on ``McpHivemind`` decides the authorization.
     """
     try:
-        entry = await app.governance_service.withdraw(
-            app.credential, entry_id, reason
-        )
+        entry = await app.governance_service.withdraw(app.credential, entry_id, reason)
     except PermissionDenied as exc:
         return _error(ERR_PERMISSION_DENIED, str(exc))
     except LookupError as exc:
@@ -435,9 +426,7 @@ async def hive_feedback(
     try:
         parsed_verdict = Verdict(verdict)
     except ValueError:
-        return _error(
-            "invalid_verdict", f"verdict must be helpful|stale|wrong, got {verdict!r}"
-        )
+        return _error("invalid_verdict", f"verdict must be helpful|stale|wrong, got {verdict!r}")
     try:
         outcome = await app.governance_service.record_feedback(
             app.credential, entry_id, parsed_verdict, note

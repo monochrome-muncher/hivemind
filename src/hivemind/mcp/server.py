@@ -63,8 +63,7 @@ _DESC_LIST = (
     "ranges."
 )
 _DESC_WITHDRAW = (
-    "Withdraw an entry (retract without replacing). Only the author or an "
-    "admin may withdraw."
+    "Withdraw an entry (retract without replacing). Only the author or an admin may withdraw."
 )
 _DESC_FEEDBACK = (
     "Report helpful|stale|wrong on an entry the agent relied on. One verdict "
@@ -198,9 +197,7 @@ def build_server(app: McpHivemind) -> MCPServer:
         verdict: str,
         note: str | None = None,
     ) -> dict[str, Any]:
-        return await hive_feedback(
-            app, entry_id=entry_id, verdict=verdict, note=note
-        )
+        return await hive_feedback(app, entry_id=entry_id, verdict=verdict, note=note)
 
     return server
 

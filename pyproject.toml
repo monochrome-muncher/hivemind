@@ -17,7 +17,7 @@ dependencies = [
 
 [project.scripts]
 hivemind-api = "hivemind.api.main:run"
-hivemind-mcp = "hivemind.mcp_server:main"
+hivemind-mcp = "hivemind.mcp.server:main"
 hivemind-migrate = "hivemind.pgstore.migrations:main"
 hivemind-keys = "hivemind.auth.keys:main"
 

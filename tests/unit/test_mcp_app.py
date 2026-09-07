@@ -30,9 +30,7 @@ BOB = Credential(user_id="bob", agent_id="agent-2")
 ADMIN = Credential(user_id="ops", agent_id="admin-agent", is_admin=True)
 
 
-def build_app(
-    store: MemoryStore, credential: Credential, clock
-) -> McpHivemind:
+def build_app(store: MemoryStore, credential: Credential, clock) -> McpHivemind:
     """Assemble a ``McpHivemind`` over a shared store (deterministic clock)."""
     embedder = make_embedder()
     config = make_search_config()
@@ -161,9 +159,7 @@ async def test_hive_search_respects_kind_filter(app: McpHivemind) -> None:
 
 
 async def test_hive_get_returns_full_entry(app: McpHivemind) -> None:
-    written = await hive_write(
-        app, kind="insight", summary="Analysis", body="Long body text"
-    )
+    written = await hive_write(app, kind="insight", summary="Analysis", body="Long body text")
     fetched = await hive_get(app, written["id"])
     assert "error" not in fetched
     assert fetched["body"] == "Long body text"
@@ -179,9 +175,7 @@ async def test_hive_get_include_history_surfaces_successor(
     app: McpHivemind,
 ) -> None:
     old = await hive_write(app, kind="fact", summary="v1: 15 min expiry")
-    new = await hive_write(
-        app, kind="fact", summary="v2: 30 min expiry", supersedes=[old["id"]]
-    )
+    new = await hive_write(app, kind="fact", summary="v2: 30 min expiry", supersedes=[old["id"]])
     # The successor lists the entry it superseded.
     with_history = await hive_get(app, new["id"], include_history=True)
     assert "error" not in with_history
@@ -198,9 +192,7 @@ async def test_hive_get_include_history_surfaces_successor(
 
 async def test_hive_list_filters_by_kind_and_tags(app: McpHivemind) -> None:
     await hive_write(app, kind="fact", summary="fact x", tags=["x"])
-    decision = await hive_write(
-        app, kind="decision", summary="decision x", tags=["x"]
-    )
+    decision = await hive_write(app, kind="decision", summary="decision x", tags=["x"])
     result = await hive_list(app, kind="fact", tags=["x"])
     assert result["count"] == 1
     assert result["entries"][0]["id"] is not None

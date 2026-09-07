@@ -5,6 +5,8 @@ The OpenAI-compatible endpoint is the only supported provider in v1
 single deploy-time endpoint knob.
 """
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 from hivemind.embeddings.openai_compat import (
@@ -17,7 +19,7 @@ if TYPE_CHECKING:
     from hivemind.ports import Embedder
 
 
-def build_embedder(settings: "Settings") -> "Embedder":
+def build_embedder(settings: Settings) -> Embedder:
     """The ``hivemind.embeddings.build_embedder(settings)`` factory that
     the API's lazy builder (``hivemind.api.main._build_embedder``) calls
     to obtain the production embedder from service settings."""

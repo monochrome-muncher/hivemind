@@ -151,9 +151,7 @@ class OpenAICompatEmbedder:
             )
         vector = self._parse_response(response)
         if len(vector) != self._dim:
-            raise EmbeddingError(
-                f"expected {self._dim} dims, got {len(vector)}"
-            )
+            raise EmbeddingError(f"expected {self._dim} dims, got {len(vector)}")
         return vector
 
     def _parse_response(self, response: httpx.Response) -> list[float]:

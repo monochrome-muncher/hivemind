@@ -63,9 +63,7 @@ async def test_registered_write_tool_roundtrip(app: McpHivemind) -> None:
     """The registered ``hive_write`` tool, called through ``call_tool``,
     delegates to the plain function and persists into the store."""
     server = build_server(app)
-    result = await server.call_tool(
-        "hive_write", {"kind": "fact", "summary": "hello via mcp"}
-    )
+    result = await server.call_tool("hive_write", {"kind": "fact", "summary": "hello via mcp"})
     assert result.is_error is False
     assert len(result.content) == 1
     payload = json.loads(result.content[0].text)
