@@ -1,0 +1,178 @@
+"""The Hivemind REST routes (SPEC.md §5.1).
+
+Routes stay thin: pydantic validation, service calls, and
+exception -> ApiError mapping. No business rules live here — those
+are in the service layer (SPEC.md §5, ADR 0001).
+
+Error codes: ``missing_api_key``/``unknown_api_key`` (401),
+``forbidden`` (403), ``not_found`` (404), ``conflict`` (409), and
+``invalid_entry``/``agent_identity_required`` (422).
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Query
+
+from hivemind.api.deps import (
+    HivemindApp,
+    api_error,
+    require_credential,
+)
+from hivemind.api.schemas import (
+    CreateEntryRequest,
+    EntryOut,
+    FeedbackOut,
+    FeedbackRequest,
+    HealthOut,
+    HitOut,
+    SearchRequest,
+    WithdrawRequest,
+)
+from hivemind.domain.entry import EntryDraft, EntryFilters, Kind, Source
+from hivemind.ports import Credential
+from hivemind.services.governance import PermissionDenied
+
+require = Annotated[Credential, Depends(require_credential)]
+
+
+def build_router(app: HivemindApp) -> APIRouter:
+    """Build the /v1 router (SPEC.md §5.1)."""
+    router = APIRouter(prefix="/v1")
+
+    @router.get("/health", response_model=HealthOut)
+    async def health() -> HealthOut:
+        """Liveness/readiness (public, no auth — SPEC.md §5.1)."""
+        return HealthOut(status="ok")
+
+    @router.post("/entries", response_model=EntryOut, status_code=201)
+    async def create_entry(payload: CreateEntryRequest, credential: require) -> EntryOut:
+        """Create an entry (SPEC.md §4.1, §8.1).
+
+        ``author`` is stamped from the credential; ``agent`` comes
+        from the agent sub-key, or the self-reported value for plain
+        user keys. Entries are immutable once created (ADR 0001).
+        """
+        agent = credential.agent_id or payload.agent
+        if agent is None:
+            raise api_error(
+                422,
+                "agent_identity_required",
+                "agent identity is required: use an agent sub-key or pass 'agent'",
+            )
+        try:
+            # Draft validation (SPEC.md §4.1) runs here: a malformed draft
+            # (e.g. out-of-range importance) is a 422, not a 500.
+            draft = EntryDraft(
+                kind=payload.kind,
+                summary=payload.summary,
+                author=credential.user_id,
+                agent=agent,
+                body=payload.body,
+                payload=payload.payload,
+                sources=tuple(Source(type=s.type, ref=s.ref) for s in payload.sources),
+                tags=tuple(payload.tags),
+                occurred_at=payload.occurred_at,
+                importance=payload.importance,
+                scope=payload.scope,
+                supersedes=tuple(payload.supersedes),
+            )
+            entry = await app.write_service.write(draft)
+        except ValueError as exc:
+            raise api_error(422, "invalid_entry", str(exc)) from exc
+        return EntryOut.from_entry(entry)
+
+    @router.get("/entries/{entry_id}", response_model=EntryOut)
+    async def get_entry(entry_id: str, credential: require) -> EntryOut:
+        """Fetch the full entry, body included (SPEC.md §5.1)."""
+        entry = await app.store.get_entry(entry_id)
+        if entry is None:
+            raise api_error(404, "not_found", f"unknown entry: {entry_id}")
+        return EntryOut.from_entry(entry)
+
+    @router.get("/entries", response_model=list[EntryOut])
+    async def list_entries(
+        credential: require,
+        kind: Annotated[Kind | None, Query()] = None,
+        tags: Annotated[list[str] | None, Query()] = None,
+        scope: Annotated[str | None, Query()] = None,
+        author: Annotated[str | None, Query()] = None,
+        agent: Annotated[str | None, Query()] = None,
+        occurred_from: Annotated[datetime | None, Query()] = None,
+        occurred_to: Annotated[datetime | None, Query()] = None,
+        include_inactive: bool = False,
+        limit: Annotated[int | None, Query(ge=1)] = None,
+        offset: Annotated[int | None, Query(ge=0)] = 0,
+    ) -> list[EntryOut]:
+        """List/filter entries without a query (SPEC.md §5.1, §5.3)."""
+        filters = EntryFilters(
+            kind=kind,
+            tags=tuple(tags or ()),
+            scope=scope,
+            author=author,
+            agent=agent,
+            occurred_from=occurred_from,
+            occurred_to=occurred_to,
+            include_inactive=include_inactive,
+        )
+        effective_limit = limit if limit is not None else app.search_config.default_limit
+        effective_offset = offset if offset is not None else 0
+        entries = await app.store.list_entries(
+            filters, limit=effective_limit, offset=effective_offset
+        )
+        return [EntryOut.from_entry(e) for e in entries]
+
+    @router.post("/search", response_model=list[HitOut])
+    async def search(request: SearchRequest, credential: require) -> list[HitOut]:
+        """Hybrid search with filters; compact hits, no bodies (SPEC.md §6)."""
+        filters = EntryFilters(
+            kind=request.kind,
+            tags=tuple(request.tags),
+            scope=request.scope,
+            author=request.author,
+            agent=request.agent,
+            occurred_from=request.occurred_from,
+            occurred_to=request.occurred_to,
+            include_inactive=request.include_inactive,
+        )
+        hits = await app.search_service.search(request.query, filters, limit=request.limit)
+        return [HitOut.from_hit(h) for h in hits]
+
+    @router.post("/entries/{entry_id}/withdraw", response_model=EntryOut)
+    async def withdraw(entry_id: str, request: WithdrawRequest, credential: require) -> EntryOut:
+        """Withdraw an entry (SPEC.md §4.1): the author or an admin.
+
+        404 unknown entry, 403 non-author, 409 already inactive.
+        """
+        try:
+            entry = await app.governance_service.withdraw(credential, entry_id, request.reason)
+        except LookupError:
+            raise api_error(404, "not_found", f"unknown entry: {entry_id}") from None
+        except PermissionDenied as exc:
+            raise api_error(403, "forbidden", str(exc)) from exc
+        except ValueError as exc:
+            raise api_error(409, "conflict", str(exc)) from exc
+        return EntryOut.from_entry(entry)
+
+    @router.post("/entries/{entry_id}/feedback", response_model=FeedbackOut)
+    async def feedback(entry_id: str, request: FeedbackRequest, credential: require) -> FeedbackOut:
+        """Report a verdict on an entry (SPEC.md §4.2); upsert per reporter."""
+        try:
+            outcome = await app.governance_service.record_feedback(
+                credential, entry_id, request.verdict, request.note
+            )
+        except LookupError:
+            raise api_error(404, "not_found", f"unknown entry: {entry_id}") from None
+        except ValueError as exc:
+            # The service raises ValueError when the caller's agent identity
+            # is unresolved (a plain user key without a self-reported agent).
+            raise api_error(422, "agent_identity_required", str(exc)) from exc
+        return FeedbackOut(
+            entry_id=outcome.feedback.entry_id,
+            verdict=outcome.feedback.verdict,
+            quality=outcome.quality,
+        )
+
+    return router
