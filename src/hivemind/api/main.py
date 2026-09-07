@@ -93,11 +93,11 @@ def _lazy_module(name: str, missing_hint: str) -> Any:
 
 
 def _build_store(settings: Settings) -> Store:
-    """Build the production Store (the pgstore lane, ADR 0007)."""
-    module = _lazy_module("hivemind.pgstore", "pass an explicit store")
+    """Build the production Store (the store lane, ADR 0007)."""
+    module = _lazy_module("hivemind.store", "pass an explicit store")
     builder = getattr(module, "build_store", None)
     if builder is None:
-        raise RuntimeError("hivemind.pgstore does not expose build_store(settings) -> Store")
+        raise RuntimeError("hivemind.store does not expose build_store(settings) -> Store")
     return cast(Store, builder(settings))
 
 
@@ -113,11 +113,12 @@ def _build_embedder(settings: Settings) -> Embedder:
 
 
 def _build_authenticator(settings: Settings) -> Authenticator:
-    """Build the production Authenticator (ADR 0008: keys in Postgres)."""
-    module = _lazy_module("hivemind.auth", "pass an explicit authenticator")
+    """Build the production Authenticator (ADR 0008: keys live in the
+    store lane's credentials table)."""
+    module = _lazy_module("hivemind.store", "pass an explicit authenticator")
     builder = getattr(module, "build_authenticator", None)
     if builder is None:
         raise RuntimeError(
-            "hivemind.auth does not expose build_authenticator(settings) -> Authenticator"
+            "hivemind.store does not expose build_authenticator(settings) -> Authenticator"
         )
     return cast(Authenticator, builder(settings))
