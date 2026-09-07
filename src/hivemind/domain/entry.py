@@ -1,0 +1,200 @@
+"""Hivemind domain entities (SPEC.md §4).
+
+Pure data, no I/O: this layer is shared by every adapter (in-memory
+store, Postgres store, API schemas, MCP tools). Identity is a UUID
+string so the domain stays storage-agnostic.
+"""
+
+from __future__ import annotations
+
+import uuid
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from enum import StrEnum
+from typing import Any
+
+
+def new_entry_id() -> str:
+    """A fresh entry ID (uuid4, stored as a plain string in the domain)."""
+    return str(uuid.uuid4())
+
+
+def _utcnow() -> datetime:
+    return datetime.now(UTC)
+
+
+class Kind(StrEnum):
+    """The category of an entry (SPEC.md §4.1)."""
+
+    FACT = "fact"
+    INSIGHT = "insight"
+    DECISION = "decision"
+
+
+class EntryState(StrEnum):
+    """Lifecycle state of an entry (SPEC.md §4.1)."""
+
+    ACTIVE = "active"
+    SUPERSEDED = "superseded"
+    WITHDRAWN = "withdrawn"
+
+
+class SourceType(StrEnum):
+    """What a source reference points at."""
+
+    PATH = "path"
+    URL = "url"
+    SESSION = "session"
+    OTHER = "other"
+
+
+@dataclass(frozen=True, slots=True)
+class Source:
+    """A provenance pointer to where an entry came from (file, URL, session)."""
+
+    type: SourceType
+    ref: str
+
+
+@dataclass(frozen=True, slots=True)
+class EntryDraft:
+    """A write request: everything the writer supplies for a new entry.
+
+    ``occurred_at`` defaults to now but is backdatable (the "memory
+    date"); ``created_at`` is assigned by the store at insert time.
+    """
+
+    kind: Kind
+    summary: str
+    author: str
+    agent: str
+    body: str | None = None
+    payload: dict[str, Any] | None = None
+    sources: tuple[Source, ...] = ()
+    tags: tuple[str, ...] = ()
+    occurred_at: datetime | None = None
+    importance: int = 3
+    scope: str = "org"
+    supersedes: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not 1 <= self.importance <= 5:
+            raise ValueError(f"importance must be 1..5, got {self.importance}")
+        if not self.summary.strip():
+            raise ValueError("summary must be non-empty")
+        if not self.author.strip():
+            raise ValueError("author must be non-empty")
+        if not self.agent.strip():
+            raise ValueError("agent must be non-empty")
+
+    def resolved_occurred_at(self) -> datetime:
+        """The entry's memory date: the supplied value, or now."""
+        return self.occurred_at or _utcnow()
+
+    @property
+    def supersedes_ids(self) -> tuple[str, ...]:
+        return self.supersedes
+
+
+@dataclass(frozen=True, slots=True)
+class Entry:
+    """A stored unit of memory (SPEC.md §4.1).
+
+    Immutable by design (ADR 0001): corrections happen only via
+    supersession (a new entry) or withdrawal (a state flip), never by
+    editing an existing entry's fields.
+    """
+
+    id: str
+    kind: Kind
+    summary: str
+    author: str
+    agent: str
+    occurred_at: datetime
+    created_at: datetime
+    body: str | None = None
+    payload: dict[str, Any] | None = None
+    sources: tuple[Source, ...] = ()
+    tags: tuple[str, ...] = ()
+    importance: int = 3
+    scope: str = "org"
+    embedding: tuple[float, ...] | None = None
+    embedding_model: str | None = None
+    state: EntryState = EntryState.ACTIVE
+    superseded_by: str | None = None
+    withdrawn_reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EntryFilters:
+    """Filter set shared by search and list (SPEC.md §5.3).
+
+    ``tags`` is AND-semantics: an entry must carry every listed tag.
+    ``include_inactive`` surfaces superseded/withdrawn entries; by
+    default only ``active`` entries are visible (SPEC.md §6.3).
+    """
+
+    kind: Kind | None = None
+    tags: tuple[str, ...] = ()
+    scope: str | None = None
+    author: str | None = None
+    agent: str | None = None
+    occurred_from: datetime | None = None
+    occurred_to: datetime | None = None
+    created_from: datetime | None = None
+    created_to: datetime | None = None
+    include_inactive: bool = False
+
+    def matches(self, entry: Entry) -> bool:
+        """Pure filter evaluation — shared by every store adapter."""
+        if not self.include_inactive and entry.state is not EntryState.ACTIVE:
+            return False
+        if self.kind is not None and entry.kind is not self.kind:
+            return False
+        if self.scope is not None and entry.scope != self.scope:
+            return False
+        if self.author is not None and entry.author != self.author:
+            return False
+        if self.agent is not None and entry.agent != self.agent:
+            return False
+        if self.occurred_from is not None and entry.occurred_at < self.occurred_from:
+            return False
+        if self.occurred_to is not None and entry.occurred_at > self.occurred_to:
+            return False
+        if self.created_from is not None and entry.created_at < self.created_from:
+            return False
+        if self.created_to is not None and entry.created_at > self.created_to:
+            return False
+        entry_tags = set(entry.tags)
+        return not any(tag not in entry_tags for tag in self.tags)
+
+
+def embeddable_text(
+    summary: str,
+    body: str | None,
+    prefix_chars: int = 2048,
+) -> str:
+    """The text an entry is embedded from (SPEC.md §7): the summary plus a
+    bounded prefix of the body (~512 tokens ≈ 2048 chars in v1)."""
+    text = summary
+    if body:
+        text = f"{text}\n{body[:prefix_chars]}"
+    return text
+
+
+def new_id() -> str:
+    return new_entry_id()
+
+
+__all__ = [
+    "Entry",
+    "EntryDraft",
+    "EntryFilters",
+    "EntryState",
+    "Kind",
+    "Source",
+    "SourceType",
+    "embeddable_text",
+    "field",
+    "new_entry_id",
+]

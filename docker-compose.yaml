@@ -1,0 +1,25 @@
+# docker-compose for local development: Postgres 16 + pgvector
+#   make pg          -> start the database
+#   make pg-down     -> stop it
+#   make migrate     -> apply migrations
+#   make dev         -> run the API locally
+#   make test        -> run the test suite (integration tests use this DB)
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: hivemind
+      POSTGRES_USER: hivemind
+      POSTGRES_PASSWORD: hivemind
+    ports:
+      - "5432:5432"
+    volumes:
+      - hivemind-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hivemind"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  hivemind-pg-data:
