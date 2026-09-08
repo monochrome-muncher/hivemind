@@ -42,6 +42,10 @@ _Avoid_: owner, creator, user
 The agent instance (framework + instance identifier) that performed a read or write. Recorded on every entry for provenance.
 _Avoid_: bot, worker, client
 
+**Embedding model**:
+The model that produced an entry's vector; recorded on the entry so vector provenance is traceable (SPEC §7, ADR 0005).
+_Avoid_: embedding service, vector store
+
 **Provenance**:
 The origin trail of an entry: author, agent, occurrence time, creation time, and source references.
 _Avoid_: audit, lineage
@@ -51,6 +55,10 @@ _Avoid_: audit, lineage
 **Supersession**:
 The explicit replacement of one entry by a newer one; the superseded entry is retained and hidden by default. Supersession is a claim, not an arbitration — the reading agent decides.
 _Avoid_: overwrite, update, invalidate (say "supersede"; never "update an entry" — entries are immutable)
+
+**Supersession chain**:
+The ordered set of versions reachable from an entry by following supersession links — its successors (what replaced it) and its superseded (what it replaced). The `?history` walk (SPEC §5.1).
+_Avoid_: version history, audit trail
 
 **Withdrawal**:
 Marking an entry no longer valid without replacing it (retraction, or admin correction). Withdrawn entries are retained, never deleted.
@@ -70,6 +78,10 @@ _Avoid_: rating, review
 When the observation behind an entry was actually made; may predate creation (backdating allowed). The basis of the "memory date" filter.
 _Avoid_: timestamp (always say occurrence time or creation time explicitly)
 
+**Memory date**:
+The agent-facing name for occurrence time: when the observation/analysis actually happened, not when it was written into the pool.
+_Avoid_: created_at, ingest time (that is creation time)
+
 **Creation time**:
 When the entry was written into the pool (server-assigned, immutable).
 _Avoid_: timestamp
@@ -83,3 +95,17 @@ _Avoid_: pause, session disable, opt-out
 **Scope**:
 The intended audience of an entry. In v1 every entry is org-wide; the field exists as a seam for future narrowing (team, project, channel).
 _Avoid_: namespace, channel (those are the future concepts, not the v1 value)
+
+### Retrieval
+
+**Hybrid search**:
+The v1 search pipeline: keyword (Postgres FTS) and vector (pgvector) streams, fused by RRF, then decay-aware rescore (SPEC §6).
+_Avoid_: full-text search, semantic search (each is one stream alone)
+
+**Hit**:
+A compact search result: entry id, kind, summary, key metadata, and the retrieval score — deliberately no body. The full entry is opened on demand (progressive disclosure).
+_Avoid_: result, snippet, match
+
+**Progressive disclosure**:
+The token economy of retrieval: scan many compact hits first, open the full entry only when needed.
+_Avoid_: lazy loading, pagination

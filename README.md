@@ -9,7 +9,7 @@ Hivemind is a shared memory service for the AI agents of an organization: one Po
 - **Explicit writes only** — the agent decides what matters; no passive transcript capture
 - **Flat org pool** — everyone can read and write everything in the org (a `scope` tag is the seam for future narrowing)
 - **Append-only, supersession-based** — entries are immutable; a successor always outranks what it superseded
-- **Hybrid retrieval** — BM25-style keyword + pgvector dense, fused (RRF), re-scored by importance × recency × feedback quality
+- **Hybrid retrieval** — keyword (Postgres FTS) + pgvector dense, fused (RRF), re-scored by importance × recency × feedback quality (a true-BM25 extension is a drop-in upgrade, not a v1 dependency — SPEC §6.2)
 - **Dumb outcome feedback** — `helpful` / `stale` / `wrong` per entry nudges retrieval ranking; no learned tuning
 - **Agent-facing API** — REST (canonical) + MCP tools (`hive_write`, `hive_search`, `hive_get`, `hive_list`, `hive_withdraw`, `hive_feedback`); no direct DB access, no human UI in v1
 

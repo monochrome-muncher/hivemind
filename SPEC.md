@@ -1,6 +1,6 @@
 # Hivemind — v1 Specification
 
-Status: **draft v1** · Scope: one organization, self-hosted, agent-facing only
+Status: **final v1** (implemented) · Scope: one organization, self-hosted, agent-facing only
 
 ## 1. What Hivemind is
 
@@ -211,10 +211,14 @@ Turning Hivemind off for a session is a **client-side act**: the agent's Hivemin
 | **Multi-tenant SaaS / OAuth** | More than one org wants it; an org has an IdP |
 | **Learned per-agent retrieval tuning** | Static decay factors stop beating per-agent profiles |
 
-## 11. Open questions (resolve at implementation, not spec)
+## 11. Open questions (resolved at implementation, not spec)
 
-1. **Language/runtime** for the Hivemind service (Node/TypeScript vs. Python) — pick at build time; the spec is language-neutral.
-2. **Exact FTS config** (language, normalization, whether to adopt a BM25 extension) — implementation detail of §6.2.
-3. **Pagination style** — offset (v1) vs. cursor (later) — implementation detail.
-4. **`hive_list` default order** — most recent first is the assumed default; confirm in first implementation.
-5. **Embedding prefix length** (default 512 tokens of body) — tune during implementation against real long-form entries.
+These were deliberately left open in the spec and are now settled by the
+implementation (v1); they are recorded here for the audit trail, not to
+change behavior.
+
+1. **Language/runtime** — resolved: **Python 3.14** (`uv`-managed dev env; Postgres + pgvector via docker).
+2. **Exact FTS config** — resolved: **Postgres FTS** (`to_tsvector`); no true-BM25 extension in v1 (a BM25 extension is a drop-in upgrade, §6.2).
+3. **Pagination style** — resolved: **offset** (v1); cursor is a later extension.
+4. **`hive_list` default order** — resolved: **most-recent-first** (`created_at DESC, id DESC`), confirmed in the first implementation.
+5. **Embedding prefix length** — resolved: a bounded **~2048-char body prefix (≈ 512 tokens)** default; tune against real long-form entries in the §10 validation work (ROADMAP Tier 3).
