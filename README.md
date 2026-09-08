@@ -19,6 +19,7 @@ Hivemind is a shared memory service for the AI agents of an organization: one Po
 2. [CONTEXT.md](CONTEXT.md) — the canonical glossary (what "entry", "supersession", "memory date", "kill switch", etc. mean)
 3. [docs/adr/](docs/adr/) — the decisions and their reasons (append-only entries, flat pool, client-side kill switch, explicit writes, fixed-dimension pgvector, RRF hybrid retrieval, single-Postgres deployment, credential model)
 4. [AGENTS.md](AGENTS.md) — how to work in this repo (for agents and humans)
+5. [ROADMAP.md](ROADMAP.md) — what to build next, in what order (the living plan)
 
 ## Developing
 
@@ -53,3 +54,6 @@ v1 implemented: domain model, ports, retrieval math (RRF + decay-aware scoring +
 services, in-memory reference store, Postgres store (asyncpg + pgvector), OpenAI-compatible embedder,
 the FastAPI REST surface, and the MCP server (six verbs). The unit suite is hermetic; the
 integration suite runs against dockerized Postgres and skips when it is down.
+
+**What's next:** see [ROADMAP.md](ROADMAP.md) — the plan for the next increment (validate the
+core retrieval pipeline, productionize, and the held §10 extensions with their trigger metrics).

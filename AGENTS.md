@@ -10,6 +10,7 @@ Read in this order:
 2. [SPEC.md](SPEC.md) — the v1 spec; the source of truth for scope and behavior
 3. [CONTEXT.md](CONTEXT.md) — the glossary; the source of truth for **terminology**
 4. [docs/adr/](docs/adr/) — decisions and their reasons; read the relevant ADR before touching the area it governs
+5. [ROADMAP.md](ROADMAP.md) — what to build next, in what order (the living plan; see the §10 trigger-metric definitions)
 
 ## Commands
 
@@ -57,4 +58,4 @@ Environment: the service reads `HIVEMIND_*` env vars (see `src/hivemind/config.p
 
 ## State of this repo
 
-Spec + docs (`README.md`, `SPEC.md`, `CONTEXT.md`, `AGENTS.md`, `CLAUDE.md`, `docs/adr/0001`–`0008`) plus the v1 implementation: domain, ports, retrieval math, services, in-memory store, Postgres store (asyncpg + pgvector), OpenAI-compatible embedder, FastAPI REST surface, and the MCP server. The unit suite is hermetic; the integration suite runs against dockerized Postgres and skips when it is down.
+Spec + docs (`README.md`, `SPEC.md`, `CONTEXT.md`, `AGENTS.md`, `CLAUDE.md`, `ROADMAP.md`, `docs/adr/0001`–`0008`) plus the v1 implementation: domain, ports, retrieval math, services, in-memory store, Postgres store (asyncpg + pgvector), OpenAI-compatible embedder, FastAPI REST surface, and the MCP server. The unit suite is hermetic; the integration suite runs against dockerized Postgres and skips when it is down.
