@@ -20,6 +20,36 @@ Hivemind is a shared memory service for the AI agents of an organization: one Po
 3. [docs/adr/](docs/adr/) — the decisions and their reasons (append-only entries, flat pool, client-side kill switch, explicit writes, fixed-dimension pgvector, RRF hybrid retrieval, single-Postgres deployment, credential model)
 4. [AGENTS.md](AGENTS.md) — how to work in this repo (for agents and humans)
 
+## Developing
+
+The dev environment is `uv`-managed (Python 3.14); Postgres (with pgvector) runs in docker.
+
+```bash
+make install        # uv sync (creates .venv)
+make pg             # start Postgres (pgvector) in docker on :5432
+make migrate        # apply idempotent DB migrations
+make test-unit      # unit tests only (no Postgres needed)
+make test           # full suite (integration tests skip cleanly if Postgres is down)
+make check          # mypy strict + ruff
+make api            # run the REST API (hivemind-api)
+make mcp            # run the MCP stdio server (hivemind-mcp)
+```
+
+Configuration is via `HIVEMIND_*` environment variables (see `src/hivemind/config.py`):
+`HIVEMIND_DATABASE_URL` (default `postgresql://hivemind:hivemind@localhost:5432/hivemind`),
+`HIVEMIND_EMBEDDING_ENDPOINT` / `HIVEMIND_EMBEDDING_API_KEY` / `HIVEMIND_EMBEDDING_MODEL` /
+`HIVEMIND_EMBEDDING_DIM` (the deploy-time embedding decision, ADR 0005), and the retrieval knobs
+(`HIVEMIND_RRF_K`, `HIVEMIND_WEIGHT_KEYWORD`, `HIVEMIND_WEIGHT_VECTOR`, `HIVEMIND_HALF_LIFE_DAYS`, ...).
+
+Architecture in one line: `domain` (pure data) → `ports` (the seams) → `services` (orchestration) →
+adapters (`memstore`, `store` (Postgres), `embeddings`, `api`, `mcp`). Tests live at the seams:
+hermetic unit tests (`tests/unit`, fakes in `tests/fakes.py`) and Postgres-backed integration tests
+(`tests/integration`, skip cleanly when the DB is unreachable). See [AGENTS.md](AGENTS.md) for the
+full architecture map and the quality bar.
+
 ## Status
 
-Specification-complete, implementation not started. The repo currently contains the spec, glossary, and ADRs only.
+v1 implemented: domain model, ports, retrieval math (RRF + decay-aware scoring + feedback quality),
+services, in-memory reference store, Postgres store (asyncpg + pgvector), OpenAI-compatible embedder,
+the FastAPI REST surface, and the MCP server (six verbs). The unit suite is hermetic; the
+integration suite runs against dockerized Postgres and skips when it is down.

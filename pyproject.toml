@@ -18,8 +18,8 @@ dependencies = [
 [project.scripts]
 hivemind-api = "hivemind.api.main:run"
 hivemind-mcp = "hivemind.mcp.server:main"
-hivemind-migrate = "hivemind.pgstore.migrations:main"
-hivemind-keys = "hivemind.auth.keys:main"
+hivemind-migrate = "hivemind.store.migrate:main"
+hivemind-keys = "hivemind.store.keys:main"
 
 [build-system]
 requires = ["uv_build>=0.12.5,<0.13.0"]
@@ -54,3 +54,10 @@ strict = true
 mypy_path = "src"
 packages = ["hivemind"]
 explicit_package_bases = true
+
+# asyncpg and pgvector ship no py.typed markers; silence the missing-stub
+# import errors for these two third-party packages (the rest of the codebase
+# stays fully type-checked).
+[[tool.mypy.overrides]]
+module = ["asyncpg.*", "pgvector.*"]
+ignore_missing_imports = true
