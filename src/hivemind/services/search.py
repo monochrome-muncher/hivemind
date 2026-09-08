@@ -78,16 +78,19 @@ class SearchService:
         query: str,
         filters: EntryFilters | None = None,
         limit: int | None = None,
+        offset: int | None = None,
     ) -> list[Hit]:
         """Run a hybrid query and return compact hits, best first.
 
         Pipeline: keyword + vector streams (each ``candidate_top_k``)
         -> RRF fusion -> decay-aware rescore -> supersession invariant
-        -> pagination. Superseded/withdrawn entries are excluded
-        unless ``filters.include_inactive`` is set.
+        -> pagination (``offset`` then ``limit``; SPEC.md §5.3).
+        Superseded/withdrawn entries are excluded unless
+        ``filters.include_inactive`` is set.
         """
         filters = filters or EntryFilters()
         limit = limit if limit is not None else self._config.default_limit
+        offset = offset or 0
         top_k = self._config.candidate_top_k
 
         # 1. Dual-stream retrieval.
@@ -134,8 +137,11 @@ class SearchService:
         # 5. Supersession ranking invariant (SPEC.md §6.3).
         ordered = apply_supersession_invariant(scored, entry_scores)
 
-        # 6. Pagination.
-        return [self._to_hit(entry, entry_scores[entry.id]) for entry in ordered[:limit]]
+        # 6. Pagination (SPEC.md §5.3: limit/offset on search and list).
+        return [
+            self._to_hit(entry, entry_scores[entry.id])
+            for entry in ordered[offset : offset + limit]
+        ]
 
     def _to_hit(self, entry: Entry, score: float) -> Hit:
         return Hit(

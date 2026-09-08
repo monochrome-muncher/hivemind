@@ -31,10 +31,19 @@ from hivemind.domain.feedback import Feedback, FeedbackCounts
 class Store(Protocol):
     """Read/write access to the memory pool."""
 
-    async def create_entry(self, draft: EntryDraft, embedding: list[float] | None = None) -> Entry:
+    async def create_entry(
+        self,
+        draft: EntryDraft,
+        embedding: list[float] | None = None,
+        embedding_model: str | None = None,
+    ) -> Entry:
         """Insert a new entry and flip any ``draft.supersedes`` targets
         to the ``superseded`` state (SPEC.md §4.1). Returns the stored
-        Entry (with server-assigned ``id``/``created_at``)."""
+        Entry (with server-assigned ``id``/``created_at``).
+
+        ``embedding_model`` (SPEC.md §7) records which model produced
+        ``embedding`` so the vector's provenance is traceable per entry.
+        """
         ...
 
     async def get_entry(self, entry_id: str) -> Entry | None: ...
@@ -52,9 +61,11 @@ class Store(Protocol):
 
     async def withdraw_entry(self, entry_id: str, reason: str | None, by_user: str) -> Entry:
         """Flip an entry to ``withdrawn`` (SPEC.md §4.1). Only active
-        entries can be withdrawn; ``by_user`` is the audit record of who
-        did it. Raises ``KeyError`` if unknown, ``ValueError`` if not
-        active."""
+        entries can be withdrawn; ``by_user`` is the API-layer audit of
+        who withdrew it (v1 persists the reason, not the withdrawer —
+        SPEC.md §4.1 lists ``withdrawn_reason`` only). Raises
+        ``KeyError`` if unknown, ``ValueError`` if not active.
+        """
         ...
 
     async def search_keyword(self, query: str, filters: EntryFilters, limit: int) -> list[str]:

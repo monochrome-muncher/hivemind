@@ -182,40 +182,47 @@ class PgStore:
 
     # -- write path -------------------------------------------------------------
 
-    async def create_entry(self, draft: EntryDraft, embedding: list[float] | None = None) -> Entry:
+    async def create_entry(
+        self,
+        draft: EntryDraft,
+        embedding: list[float] | None = None,
+        embedding_model: str | None = None,
+    ) -> Entry:
         """Insert a new entry and flip any ``draft.supersedes`` targets
         to the ``superseded`` state (SPEC.md §4.1).
 
-        The new entry's ``id`` is a uuid4 assigned here and
-        ``created_at`` is the database's ``now()``; the row is read
-        back so the returned ``Entry`` matches what is stored.
+        The insert and the supersession flip run in a single transaction
+        (m4): a crash between them must not leave a new entry whose
+        supersession targets were never flipped. ``embedding_model``
+        (SPEC.md §7) records which model produced ``embedding``.
         """
         entry_id = str(uuid.uuid4())
         occurred_at = draft.resolved_occurred_at()
 
         pool = await self._ensure_pool()
         async with pool.acquire() as conn:
-            await conn.execute(
-                INSERT_ENTRY,
-                entry_id,
-                draft.kind.value,
-                draft.summary,
-                draft.body,
-                json.dumps(draft.payload) if draft.payload is not None else None,  # jsonb
-                json.dumps(_encode_sources(draft.sources)),  # jsonb
-                list(draft.tags),
-                occurred_at,
-                draft.author,
-                draft.agent,
-                draft.importance,
-                draft.scope,
-                embedding,
-                None,  # embedding_model: tracked at the embedder layer in v1
-            )
-            if draft.supersedes:
-                targets = _valid_uuids(draft.supersedes)
-                if targets:
-                    await conn.execute(FLIP_SUPERSEDED, entry_id, targets)
+            async with conn.transaction():
+                await conn.execute(
+                    INSERT_ENTRY,
+                    entry_id,
+                    draft.kind.value,
+                    draft.summary,
+                    draft.body,
+                    json.dumps(draft.payload) if draft.payload is not None else None,  # jsonb
+                    json.dumps(_encode_sources(draft.sources)),  # jsonb
+                    list(draft.tags),
+                    occurred_at,
+                    draft.author,
+                    draft.agent,
+                    draft.importance,
+                    draft.scope,
+                    embedding,
+                    embedding_model,  # SPEC.md §7: model that produced the vector
+                )
+                if draft.supersedes:
+                    targets = _valid_uuids(draft.supersedes)
+                    if targets:
+                        await conn.execute(FLIP_SUPERSEDED, entry_id, targets)
             row = await conn.fetchrow(SELECT_ENTRY, entry_id)
         assert row is not None
         return _row_to_entry(row)
@@ -266,8 +273,9 @@ class PgStore:
 
         Raises ``KeyError`` if the entry does not exist and
         ``ValueError`` if it is not active (the port contract).
-        ``by_user`` is the audit record of who withdrew it; v1 records
-        the reason but not the withdrawer (SPEC.md §11).
+        ``by_user`` is the API-layer audit of who withdrew it; v1
+        persists the reason only (SPEC.md §4.1 lists ``withdrawn_reason``,
+        not a ``withdrawn_by`` column).
         """
         if not _is_valid_uuid(entry_id):
             raise KeyError(f"unknown entry: {entry_id}")

@@ -365,3 +365,15 @@ async def test_migrate_is_idempotent(pg) -> None:
     store, _auth, _ = pg
     entry = await store.create_entry(draft("still works"))
     assert entry.state is EntryState.ACTIVE
+
+
+async def test_create_entry_records_embedding_model(pg) -> None:
+    """SPEC.md §7: the store records the embedding model per entry."""
+    store, _, dim = pg
+    entry = await store.create_entry(
+        draft("Embedded fact"), make_vec(dim, 1), embedding_model="test-model"
+    )
+    assert entry.embedding_model == "test-model"
+    reloaded = await store.get_entry(entry.id)
+    assert reloaded is not None
+    assert reloaded.embedding_model == "test-model"

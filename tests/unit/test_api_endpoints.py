@@ -54,6 +54,17 @@ def make_hivemind_app() -> HivemindApp:
     )
 
 
+def make_app_with_clock(clock) -> HivemindApp:
+    """A HivemindApp over a caller-controlled clock (for created_at tests)."""
+    return create_app_for_config(
+        Settings(),
+        store=MemoryStore(clock),
+        embedder=make_embedder(),
+        authenticator=make_authenticator(),
+        search_config=make_search_config(),
+    )
+
+
 def make_client(app: HivemindApp) -> httpx.AsyncClient:
     transport = httpx.ASGITransport(app=create_app(app))
     return httpx.AsyncClient(transport=transport, base_url="http://hivemind.test")
@@ -447,3 +458,189 @@ class TestSupersessionInvariants:
         # The successor outranks the superseded entry (SPEC.md §6.3).
         assert v2["id"] in visible_ids and v1["id"] in visible_ids
         assert visible_ids.index(v2["id"]) < visible_ids.index(v1["id"])
+
+
+# --------------------------------------------------------------------------- #
+# Review-fix seams (SPEC.md §5.1/§5.3/§6.4/§8.1)
+# --------------------------------------------------------------------------- #
+class TestHistoryChain:
+    async def test_get_with_history_returns_successors_and_superseded(self) -> None:
+        client = make_client(make_hivemind_app())
+        async with client:
+            r1 = await post_entry(client, "key-alice", "token TTL v1", body="15 min")
+            r2 = await post_entry(
+                client,
+                "key-alice",
+                "token TTL v2",
+                body="30 min",
+                supersedes=[r1["id"]],
+            )
+            # Fetch the oldest with history -> it should list its successor.
+            resp = await client.get(
+                f"/v1/entries/{r1['id']}",
+                params={"history": "true"},
+                headers={"X-API-Key": "key-bob"},
+            )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["history"] is not None
+        assert [e["id"] for e in body["history"]["successors"]] == [r2["id"]]
+        assert body["history"]["superseded"] == []
+
+    async def test_get_without_history_omits_chain(self) -> None:
+        client = make_client(make_hivemind_app())
+        async with client:
+            r1 = await post_entry(client, "key-alice", "v1")
+            await post_entry(client, "key-alice", "v2", supersedes=[r1["id"]])
+            resp = await client.get(f"/v1/entries/{r1['id']}", headers={"X-API-Key": "key-bob"})
+        assert resp.status_code == 200
+        assert resp.json().get("history") in (None, {})
+
+
+class TestSearchFiltersAndPaging:
+    async def test_search_offset_paginates(self) -> None:
+        client = make_client(make_hivemind_app())
+        async with client:
+            for i in range(5):
+                await post_entry(client, "key-alice", f"cohort note number {i}")
+            resp = await client.post(
+                "/v1/search",
+                json={"query": "cohort note", "limit": 2, "offset": 1},
+                headers={"X-API-Key": "key-bob"},
+            )
+        assert resp.status_code == 200
+        assert len(resp.json()) == 2
+
+    async def test_search_created_range_filters(self) -> None:
+        """SPEC.md §5.3: ``created_from``/``created_to`` are created_at (store time)."""
+        from datetime import timedelta
+
+        from tests.fakes import FIXED_NOW, make_clock
+
+        clock = make_clock()
+        app = make_app_with_clock(clock)
+        client = make_client(app)
+        async with client:
+            old = await post_entry(client, "key-alice", "old cohort insight")
+            clock.advance_days(10)
+            new = await post_entry(client, "key-alice", "new cohort insight")
+            resp = await client.post(
+                "/v1/search",
+                json={
+                    "query": "cohort insight",
+                    "created_from": (FIXED_NOW + timedelta(days=5)).isoformat(),
+                },
+                headers={"X-API-Key": "key-bob"},
+            )
+        hits = resp.json()
+        ids = {h["entry_id"] for h in hits}
+        assert new["id"] in ids
+        assert old["id"] not in ids
+
+    async def test_list_created_range_filters(self) -> None:
+        """SPEC.md §5.3: ``created_from``/``created_to`` on the list endpoint."""
+        from datetime import timedelta
+
+        from tests.fakes import FIXED_NOW, make_clock
+
+        clock = make_clock()
+        app = make_app_with_clock(clock)
+        client = make_client(app)
+        async with client:
+            old = await post_entry(client, "key-alice", "old entry")
+            clock.advance_days(10)
+            new = await post_entry(client, "key-alice", "new entry")
+            resp = await client.get(
+                "/v1/entries",
+                params={
+                    "created_from": (FIXED_NOW + timedelta(days=5)).isoformat(),
+                    "limit": "50",
+                },
+                headers={"X-API-Key": "key-bob"},
+            )
+        ids = {e["id"] for e in resp.json()}
+        assert new["id"] in ids
+        assert old["id"] not in ids
+
+
+class TestFeedbackAgentResolution:
+    async def test_user_key_self_reports_agent(self) -> None:
+        client = make_client(make_hivemind_app())
+        async with client:
+            e = await post_entry(client, "key-alice", "a fact")
+            resp = await client.post(
+                f"/v1/entries/{e['id']}/feedback",
+                json={"verdict": "helpful", "agent": "claude-code"},
+                headers={"X-API-Key": "key-alice-user"},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["verdict"] == "helpful"
+
+    async def test_user_key_without_agent_is_422(self) -> None:
+        client = make_client(make_hivemind_app())
+        async with client:
+            e = await post_entry(client, "key-alice", "a fact")
+            resp = await client.post(
+                f"/v1/entries/{e['id']}/feedback",
+                json={"verdict": "stale"},
+                headers={"X-API-Key": "key-alice-user"},
+            )
+        assert resp.status_code == 422
+        assert resp.json()["error"]["code"] == "agent_identity_required"
+
+
+class TestEmbeddingFailure:
+    async def test_create_maps_embedding_error_to_502(self) -> None:
+        from hivemind.api.main import create_app_for_config
+        from hivemind.config import Settings
+        from hivemind.embeddings import EmbeddingError
+        from hivemind.memstore import MemoryStore
+        from tests.fakes import make_clock, make_search_config
+
+        class ExplodingEmbedder:
+            dimension = 4
+
+            @property
+            def model_name(self) -> str:
+                return "exploding"
+
+            async def embed_text(self, text):
+                raise EmbeddingError("embedding endpoint is down")
+
+            async def embed_entry(self, draft):
+                raise EmbeddingError("embedding endpoint is down")
+
+            def entry_embeddable_text(self, draft) -> str:
+                return draft.summary
+
+        app = create_app_for_config(
+            Settings(),
+            store=MemoryStore(make_clock()),
+            embedder=ExplodingEmbedder(),
+            authenticator=make_authenticator(),
+            search_config=make_search_config(),
+        )
+        client = make_client(app)
+        async with client:
+            resp = await client.post(
+                "/v1/entries",
+                json={"kind": "fact", "summary": "needs an embedding", "agent": "a"},
+                headers={"X-API-Key": "key-alice-user"},
+            )
+        assert resp.status_code == 502
+        assert resp.json()["error"]["code"] == "embedding_unavailable"
+
+
+class TestNaiveDatetimeNormalization:
+    async def test_naive_occurred_at_normalized_to_utc(self) -> None:
+        from hivemind.api.schemas import CreateEntryRequest
+
+        aware = CreateEntryRequest(
+            kind="fact",
+            summary="x",
+            agent="a",
+            occurred_at="2026-06-01T12:00:00",  # naive
+        )
+        assert aware.occurred_at is not None
+        assert aware.occurred_at.tzinfo is not None
+        assert aware.occurred_at.utcoffset() is not None

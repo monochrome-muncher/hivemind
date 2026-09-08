@@ -8,14 +8,24 @@ raw config) across the wire.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from hivemind.domain.entry import Entry, Kind, SourceType
 from hivemind.domain.feedback import Verdict
 from hivemind.services.search import Hit
+
+
+def _to_utc(value: datetime | None) -> datetime | None:
+    """Normalize a naive datetime to UTC (SPEC.md §6.4 / §8: the pool is
+    UTC-based; a bare timestamp is assumed UTC so downstream asyncpg
+    ``timestamptz`` columns and the recency rescore never see a naive
+    value)."""
+    if value is not None and value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value
 
 
 class SourceModel(BaseModel):
@@ -45,6 +55,12 @@ class CreateEntryRequest(BaseModel):
     supersedes: list[str] = []
     agent: str | None = None
 
+    @field_validator("occurred_at")
+    @classmethod
+    def _occurred_at_utc(cls, v: datetime | None) -> datetime | None:
+        """Naive ``occurred_at`` is assumed UTC (SPEC.md §6.4)."""
+        return _to_utc(v)
+
 
 class SourceOut(BaseModel):
     """A provenance pointer as serialized in an entry."""
@@ -73,6 +89,9 @@ class EntryOut(BaseModel):
     state: str
     superseded_by: str | None = None
     withdrawn_reason: str | None = None
+    # The supersession chain (SPEC.md §5.1 ``?history=true``): optional,
+    # populated only when the caller asks for it.
+    history: dict[str, list[EntryOut]] | None = None
 
     @classmethod
     def from_entry(cls, entry: Entry) -> EntryOut:
@@ -139,8 +158,17 @@ class SearchRequest(BaseModel):
     agent: str | None = None
     occurred_from: datetime | None = None
     occurred_to: datetime | None = None
+    created_from: datetime | None = None
+    created_to: datetime | None = None
     include_inactive: bool = False
     limit: int | None = None
+    offset: int | None = None
+
+    @field_validator("occurred_from", "occurred_to", "created_from", "created_to")
+    @classmethod
+    def _utc_ranges(cls, v: datetime | None) -> datetime | None:
+        """Naive range bounds are assumed UTC (SPEC.md §5.3, §6.4)."""
+        return _to_utc(v)
 
 
 class WithdrawRequest(BaseModel):
@@ -154,6 +182,9 @@ class FeedbackRequest(BaseModel):
 
     verdict: Verdict
     note: str | None = None
+    # A plain user key self-reports the agent instance (SPEC.md §8.1);
+    # ignored for agent sub-keys (the credential's agent wins).
+    agent: str | None = None
 
 
 class FeedbackOut(BaseModel):

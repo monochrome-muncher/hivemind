@@ -8,7 +8,7 @@ string so the domain stays storage-agnostic.
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
@@ -17,6 +17,10 @@ from typing import Any
 def new_entry_id() -> str:
     """A fresh entry ID (uuid4, stored as a plain string in the domain)."""
     return str(uuid.uuid4())
+
+
+# SPEC.md §4.1: the summary is a short blurb (≤ ~280 chars), not a body.
+_SUMMARY_MAX_CHARS = 280
 
 
 def _utcnow() -> datetime:
@@ -82,6 +86,10 @@ class EntryDraft:
             raise ValueError(f"importance must be 1..5, got {self.importance}")
         if not self.summary.strip():
             raise ValueError("summary must be non-empty")
+        if len(self.summary) > _SUMMARY_MAX_CHARS:
+            raise ValueError(
+                f"summary must be at most {_SUMMARY_MAX_CHARS} characters (got {len(self.summary)})"
+            )
         if not self.author.strip():
             raise ValueError("author must be non-empty")
         if not self.agent.strip():
@@ -182,10 +190,6 @@ def embeddable_text(
     return text
 
 
-def new_id() -> str:
-    return new_entry_id()
-
-
 __all__ = [
     "Entry",
     "EntryDraft",
@@ -195,6 +199,5 @@ __all__ = [
     "Source",
     "SourceType",
     "embeddable_text",
-    "field",
     "new_entry_id",
 ]

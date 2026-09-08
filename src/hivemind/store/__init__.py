@@ -18,18 +18,24 @@ from hivemind.config import Settings
 from hivemind.ports import Authenticator, Store
 from hivemind.store.auth import PgAuthenticator, key_hash
 from hivemind.store.migrate import main as migrate_main
-from hivemind.store.migrate import migrate
+
+# Re-export the async migration runner under a non-colliding name: binding
+# the name ``migrate`` on the package would shadow the ``migrate`` submodule
+# (a classic ``__init__``/submodule name clash), breaking attribute access to
+# ``hivemind.store.migrate``. The function still lives at
+# ``hivemind.store.migrate.migrate`` for direct importers.
+from hivemind.store.migrate import migrate as apply_migrations
 from hivemind.store.pgstore import PgStore
 from hivemind.store.pool import make_pool
 
 __all__ = [
     "PgAuthenticator",
     "PgStore",
+    "apply_migrations",
     "build_authenticator",
     "build_store",
     "key_hash",
     "make_pool",
-    "migrate",
     "migrate_main",
 ]
 

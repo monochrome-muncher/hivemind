@@ -11,17 +11,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from hivemind.config import SearchConfig
 from hivemind.domain.entry import Entry, EntryDraft
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.ports import Credential, Embedder, Store
-from hivemind.retrieval.scoring import (
-    HELPFUL_WEIGHT,
-    QUALITY_MAX,
-    QUALITY_MIN,
-    STALE_WEIGHT,
-    WRONG_WEIGHT,
-    feedback_quality,
-)
+from hivemind.retrieval.scoring import feedback_quality
 
 
 class PermissionDenied(Exception):
@@ -46,9 +40,15 @@ class WriteService:
         self._embedder = embedder
 
     async def write(self, draft: EntryDraft) -> Entry:
-        """Embed-then-persist a fully-resolved entry draft."""
+        """Embed-then-persist a fully-resolved entry draft.
+
+        The embedding model name is recorded per entry (SPEC.md §7) so
+        the vector's provenance is traceable.
+        """
         embedding = await self._embedder.embed_entry(draft)
-        return await self._store.create_entry(draft, embedding)
+        return await self._store.create_entry(
+            draft, embedding, embedding_model=self._embedder.model_name
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,10 +63,17 @@ class FeedbackOutcome:
 class GovernanceService:
     """Withdrawal and feedback (SPEC.md §4.1, §8.1): the author may
     withdraw their own entries, an admin may withdraw any; feedback is
-    open to any authenticated caller who used the entry."""
+    open to any authenticated caller who used the entry.
 
-    def __init__(self, store: Store) -> None:
+    ``config`` supplies the quality-formula weights (SPEC.md §6.4:
+    “the formula is a config value, not a constant in code”); a default
+    ``SearchConfig`` (the v1 defaults) is used when omitted, so the
+    service's reported quality always matches what search uses.
+    """
+
+    def __init__(self, store: Store, config: SearchConfig | None = None) -> None:
         self._store = store
+        self._config = config or SearchConfig()
 
     async def withdraw(
         self, credential: Credential, entry_id: str, reason: str | None = None
@@ -89,14 +96,16 @@ class GovernanceService:
         entry_id: str,
         verdict: Verdict,
         note: str | None = None,
+        agent: str | None = None,
     ) -> FeedbackOutcome:
         """Upsert the caller's verdict for an entry (SPEC.md §4.2).
 
         One row per (entry, user, agent): the reporter's latest verdict
-        wins. The caller must have resolved the agent identity (agent
-        sub-key, or the self-reported instance ID for user keys).
+        wins. The agent identity is the acting sub-key's agent, or the
+        ``agent`` self-reported by a plain user key (SPEC.md §8.1).
         """
-        if credential.agent_id is None:
+        effective_agent = credential.agent_id or agent
+        if effective_agent is None:
             raise ValueError(
                 "the caller's agent identity must be resolved before "
                 "recording feedback (SPEC.md §8.1)"
@@ -107,7 +116,7 @@ class GovernanceService:
         feedback = Feedback(
             entry_id=entry_id,
             user=credential.user_id,
-            agent=credential.agent_id,
+            agent=effective_agent,
             verdict=verdict,
             note=note,
             updated_at=_utcnow(),
@@ -119,13 +128,20 @@ class GovernanceService:
         )
 
     async def quality(self, entry_id: str) -> float:
-        """The current quality multiplier for an entry's retrieval score."""
-        counts = await self._store.feedback_counts(entry_id)
+        """The current quality multiplier for an entry's retrieval score.
+
+        Uses the configured weights (SPEC.md §6.4) so the multiplier
+        reported here always matches the one search rescoring applies.
+        """
+        helpful, stale, wrong = await self._store.feedback_counts(entry_id)
+        cfg = self._config
         return feedback_quality(
-            *counts,
-            helpful_weight=HELPFUL_WEIGHT,
-            stale_weight=STALE_WEIGHT,
-            wrong_weight=WRONG_WEIGHT,
-            min_quality=QUALITY_MIN,
-            max_quality=QUALITY_MAX,
+            helpful,
+            stale,
+            wrong,
+            helpful_weight=cfg.quality_helpful_weight,
+            stale_weight=cfg.quality_stale_weight,
+            wrong_weight=cfg.quality_wrong_weight,
+            min_quality=cfg.quality_min,
+            max_quality=cfg.quality_max,
         )

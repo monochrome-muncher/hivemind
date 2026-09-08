@@ -177,3 +177,15 @@ def _feedback(entry_id: str, user: str):
         agent="agent-x",
         verdict=Verdict.WRONG,
     )
+
+
+class TestPagination:
+    async def test_offset_paginates(self, embedder, search_config) -> None:
+        """SPEC.md §5.3: search is limit/offset paginated."""
+        store = MemoryStore(make_clock())
+        for i in range(5):
+            await create(store, f"cohort note number {i}")
+        service = make_service(store, embedder, search_config)
+        full = await service.search("cohort note", limit=5)
+        paged = await service.search("cohort note", limit=2, offset=1)
+        assert [h.entry_id for h in paged] == [h.entry_id for h in full[1:3]]

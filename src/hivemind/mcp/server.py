@@ -119,6 +119,7 @@ def build_server(app: McpHivemind) -> MCPServer:
     async def _hive_search(
         query: str,
         limit: int | None = None,
+        offset: int | None = None,
         kind: str | None = None,
         tags: list[str] | None = None,
         scope: str | None = None,
@@ -134,6 +135,7 @@ def build_server(app: McpHivemind) -> MCPServer:
             app,
             query=query,
             limit=limit,
+            offset=offset,
             kind=kind,
             tags=tags,
             scope=scope,
@@ -196,8 +198,9 @@ def build_server(app: McpHivemind) -> MCPServer:
         entry_id: str,
         verdict: str,
         note: str | None = None,
+        agent: str | None = None,
     ) -> dict[str, Any]:
-        return await hive_feedback(app, entry_id=entry_id, verdict=verdict, note=note)
+        return await hive_feedback(app, entry_id=entry_id, verdict=verdict, note=note, agent=agent)
 
     return server
 
@@ -208,14 +211,15 @@ def main() -> None:
     store = MemoryStore()
     embedder = LocalEmbedder(dimension=settings.embedding_dim)
     write_service = WriteService(store, embedder)
-    search_service = SearchService(store, embedder, settings.search_config())
-    governance_service = GovernanceService(store)
+    search_config = settings.search_config()
+    search_service = SearchService(store, embedder, search_config)
+    governance_service = GovernanceService(store, search_config)
     app = McpHivemind(
         store=store,
         write_service=write_service,
         search_service=search_service,
         governance_service=governance_service,
-        search_config=settings.search_config(),
+        search_config=search_config,
         credential=Credential(user_id="dev", agent_id="hivemind-mcp"),
     )
     server = build_server(app)

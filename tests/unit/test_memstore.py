@@ -246,3 +246,44 @@ async def test_occurred_range_filter(store: MemoryStore) -> None:
         limit=10,
     )
     assert {e.id for e in from_to} == {early.id, late.id}
+
+
+async def test_list_entries_orders_newest_first() -> None:
+    """SPEC.md §11.4: most-recent-first is the assumed default list order."""
+    from tests.fakes import make_clock
+
+    clock = make_clock()
+    store = MemoryStore(clock)
+    first = await store.create_entry(draft("first"))
+    clock.advance_days(1)
+    second = await store.create_entry(draft("second"))
+    clock.advance_days(1)
+    third = await store.create_entry(draft("third"))
+    listed = await store.list_entries(EntryFilters(), limit=10)
+    assert [e.id for e in listed] == [third.id, second.id, first.id]
+
+
+async def test_list_entries_tie_breaks_by_id_desc(store: MemoryStore) -> None:
+    """Same ``created_at`` (fixed clock) -> order by id DESC (matches PgStore)."""
+    a = await store.create_entry(draft("a"))
+    b = await store.create_entry(draft("b"))
+    c = await store.create_entry(draft("c"))
+    listed = await store.list_entries(EntryFilters(), limit=10)
+    assert [e.id for e in listed] == sorted([a.id, b.id, c.id], reverse=True)
+
+
+async def test_create_entry_records_embedding_model(store: MemoryStore) -> None:
+    """SPEC.md §7: the store records the embedding model per entry."""
+    entry = await store.create_entry(
+        draft("Uses embeddings"), [0.1, 0.2], embedding_model="fake-embedder"
+    )
+    assert entry.embedding_model == "fake-embedder"
+    reloaded = await store.get_entry(entry.id)
+    assert reloaded is not None
+    assert reloaded.embedding_model == "fake-embedder"
+
+
+def test_summary_over_280_chars_is_rejected() -> None:
+    """SPEC.md §4.1: summary is a short blurb (~280 chars, not a body)."""
+    with pytest.raises(ValueError, match="280"):
+        draft("x" * 281)

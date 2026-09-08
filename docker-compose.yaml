@@ -2,7 +2,7 @@
 #   make pg          -> start the database
 #   make pg-down     -> stop it
 #   make migrate     -> apply migrations
-#   make dev         -> run the API locally
+#   make api         -> run the REST API locally
 #   make test        -> run the test suite (integration tests use this DB)
 services:
   postgres:

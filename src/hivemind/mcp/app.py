@@ -32,6 +32,7 @@ from hivemind.domain.entry import (
 )
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.ports import Credential, Store
+from hivemind.services.chain import supersession_chain
 from hivemind.services.governance import (
     GovernanceService,
     PermissionDenied,
@@ -45,10 +46,6 @@ ERR_NOT_FOUND = "not_found"
 ERR_PERMISSION_DENIED = "permission_denied"
 ERR_NOT_ACTIVE = "not_active"
 ERR_AGENT_UNRESOLVED = "agent_unresolved"
-
-# Supersession chains in a corrupt pool could loop; bound both walks.
-_MAX_SUPERSEDE_HOPS = 256
-_REVERSE_SCAN_PAGE = 200
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,57 +182,11 @@ def _build_filters(
 async def _supersession_chain(app: McpHivemind, entry: Entry) -> tuple[list[Entry], list[Entry]]:
     """Return ``(successors, superseded)`` for an entry's supersession chain.
 
-    ``successors`` are the newer versions reachable by following
-    ``superseded_by`` forward. ``superseded`` are the older versions this
-    entry replaced. Both walks are bounded so a corrupt chain cannot loop.
+    Delegates to the shared ``supersession_chain`` service (SPEC.md
+    §5.1 ``?history`` / §5.2 ``hive_get``) so REST and MCP walk the
+    chain identically.
     """
-    successors: list[Entry] = []
-    cursor = entry
-    for _ in range(_MAX_SUPERSEDE_HOPS):
-        next_id = cursor.superseded_by
-        if next_id is None:
-            break
-        nxt = await app.store.get_entry(next_id)
-        if nxt is None:
-            break
-        successors.append(nxt)
-        cursor = nxt
-
-    # The v1 stores have no reverse index, so walk backwards with a single
-    # bounded paginated scan that builds a ``superseded_by -> [entries]`` map.
-    superseded: list[Entry] = []
-    reverse: dict[str, list[Entry]] = {}
-    offset = 0
-    while True:
-        batch = await app.store.list_entries(
-            EntryFilters(include_inactive=True),
-            limit=_REVERSE_SCAN_PAGE,
-            offset=offset,
-        )
-        if not batch:
-            break
-        for e in batch:
-            if e.superseded_by is not None:
-                reverse.setdefault(e.superseded_by, []).append(e)
-        if len(batch) < _REVERSE_SCAN_PAGE:
-            break
-        offset += _REVERSE_SCAN_PAGE
-
-    frontier = [entry]
-    seen = {entry.id}
-    for _ in range(_MAX_SUPERSEDE_HOPS):
-        if not frontier:
-            break
-        next_frontier: list[Entry] = []
-        for node in frontier:
-            for pred in reverse.get(node.id, ()):
-                if pred.id in seen:
-                    continue
-                superseded.append(pred)
-                seen.add(pred.id)
-                next_frontier.append(pred)
-        frontier = next_frontier
-    return successors, superseded
+    return await supersession_chain(app.store, entry)
 
 
 # --------------------------------------------------------------------------- #
@@ -263,9 +214,17 @@ async def hive_write(
     ``kind`` is one of ``fact|insight|decision``; ``summary`` is required
     (it is the embedded text). ``occurred_at`` is the backdatable
     "memory date" (ISO-8601). Provenance falls back to the acting
-    credential when ``author``/``agent`` are omitted (SPEC §8.1).
+    credential when ``author``/``agent`` are omitted (SPEC §8.1); a
+    plain user key must self-report the agent instance (no fabricated
+    ``unknown`` identity — the write is rejected instead).
     """
     cred = app.credential
+    resolved_agent = agent or cred.agent_id
+    if resolved_agent is None:
+        return _error(
+            ERR_AGENT_UNRESOLVED,
+            "agent identity is required: use an agent sub-key or pass 'agent'",
+        )
     try:
         parsed_kind = Kind(kind)
         parsed_sources = _parse_sources(sources)
@@ -273,7 +232,7 @@ async def hive_write(
             kind=parsed_kind,
             summary=summary,
             author=author or cred.user_id,
-            agent=agent or (cred.agent_id or "unknown"),
+            agent=resolved_agent,
             body=body,
             payload=payload,
             sources=parsed_sources,
@@ -287,8 +246,6 @@ async def hive_write(
         return _error(ERR_INVALID_INPUT, str(exc))
     try:
         entry = await app.write_service.write(draft)
-    except LookupError as exc:
-        return _error("supersede_target_missing", str(exc))
     except ValueError as exc:
         return _error(ERR_INVALID_INPUT, str(exc))
     return _entry_dict(entry)
@@ -298,6 +255,7 @@ async def hive_search(
     app: McpHivemind,
     query: str,
     limit: int | None = None,
+    offset: int | None = None,
     kind: str | None = None,
     tags: list[str] | None = None,
     scope: str | None = None,
@@ -312,7 +270,8 @@ async def hive_search(
     """Hybrid search over the pool; returns compact hits (no bodies).
 
     Superseded / withdrawn entries are hidden unless ``include_inactive``
-    (SPEC §6.3). Open an interesting hit with ``hive_get``.
+    (SPEC §6.3). Open an interesting hit with ``hive_get``. ``limit``/
+    ``offset`` paginate the result (SPEC §5.3).
     """
     try:
         filters = _build_filters(
@@ -329,7 +288,7 @@ async def hive_search(
         )
     except ValueError as exc:
         return _error(ERR_INVALID_INPUT, str(exc))
-    hits = await app.search_service.search(query, filters, limit)
+    hits = await app.search_service.search(query, filters, limit, offset=offset)
     return {"count": len(hits), "hits": [_hit_dict(h) for h in hits]}
 
 
@@ -417,11 +376,13 @@ async def hive_feedback(
     entry_id: str,
     verdict: str,
     note: str | None = None,
+    agent: str | None = None,
 ) -> dict[str, object]:
     """Report ``helpful|stale|wrong`` on an entry the caller relied on.
 
     One row per (entry, user, agent); the latest verdict wins (SPEC §4.2).
-    The acting credential supplies the reporter identity.
+    The acting credential supplies the reporter identity; a plain user key
+    self-reports the agent instance via ``agent`` (SPEC §8.1).
     """
     try:
         parsed_verdict = Verdict(verdict)
@@ -429,7 +390,7 @@ async def hive_feedback(
         return _error("invalid_verdict", f"verdict must be helpful|stale|wrong, got {verdict!r}")
     try:
         outcome = await app.governance_service.record_feedback(
-            app.credential, entry_id, parsed_verdict, note
+            app.credential, entry_id, parsed_verdict, note, agent=agent
         )
     except LookupError as exc:
         return _error(ERR_NOT_FOUND, str(exc))

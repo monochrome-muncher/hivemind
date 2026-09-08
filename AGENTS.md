@@ -35,7 +35,7 @@ Environment: the service reads `HIVEMIND_*` env vars (see `src/hivemind/config.p
 - `src/hivemind/domain/` — the frozen domain (Entry, EntryDraft, filters, enums). No I/O.
 - `src/hivemind/ports.py` — the SEAMS: `Store`, `Embedder`, `Authenticator` protocols + `Credential`. Code against these, never against a concrete adapter.
 - `src/hivemind/retrieval/` — the pure retrieval math (RRF fusion, decay-aware scoring, feedback quality). No I/O; unit-tested against hand-computed values.
-- `src/hivemind/services/` — the orchestration layer (SearchService, WriteService, GovernanceService). The deep modules: small interfaces, deep behavior.
+- `src/hivemind/services/` — the orchestration layer, the deep modules (small interfaces, deep behavior). `search.py` = `SearchService` (hybrid retrieval, SPEC §6); `governance.py` = `WriteService` + `GovernanceService` (write, withdraw, feedback, SPEC §4.1/§4.2); `chain.py` = `supersession_chain` (the shared `?history` walk, SPEC §5.1/§5.2).
 - `src/hivemind/memstore.py` — `MemoryStore`: the in-memory reference Store (dev + unit tests).
 - `src/hivemind/store/` — `PgStore` + `PgAuthenticator` (asyncpg + pgvector), migrations, and the `build_store` / `build_authenticator` factories.
 - `src/hivemind/embeddings/` — `OpenAICompatEmbedder` (the `Embedder` port's production implementation) + the `build_embedder` factory.

@@ -46,7 +46,9 @@ def create_app_for_config(
         authenticator=authenticator,
         search_config=search_config,
         write_service=WriteService(store, embedder),
-        governance_service=GovernanceService(store),
+        # The quality-formula weights are config (SPEC.md §6.4): the
+        # governance service reports the same multiplier search rescoring uses.
+        governance_service=GovernanceService(store, search_config),
         search_service=SearchService(store, embedder, search_config),
     )
 

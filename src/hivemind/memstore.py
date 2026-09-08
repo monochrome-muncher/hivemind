@@ -66,7 +66,18 @@ class MemoryStore:
 
     # -- write path -------------------------------------------------------
 
-    async def create_entry(self, draft: EntryDraft, embedding: list[float] | None = None) -> Entry:
+    async def create_entry(
+        self,
+        draft: EntryDraft,
+        embedding: list[float] | None = None,
+        embedding_model: str | None = None,
+    ) -> Entry:
+        """Insert a new entry, flipping any ``draft.supersedes`` targets to
+        the ``superseded`` state (SPEC.md §4.1, §7).
+
+        ``embedding`` / ``embedding_model`` are recorded on the entry so
+        the model that produced the vector is traceable (SPEC.md §7).
+        """
         now = self._clock()
         entry = Entry(
             id=new_entry_id(),
@@ -83,7 +94,7 @@ class MemoryStore:
             importance=draft.importance,
             scope=draft.scope,
             embedding=tuple(embedding) if embedding is not None else None,
-            embedding_model=None,
+            embedding_model=embedding_model,
         )
         with self._lock:
             self._entries[entry.id] = entry
@@ -143,7 +154,9 @@ class MemoryStore:
             matches = [
                 _copy(entry) for entry in self._entries.values() if filters.matches(_copy(entry))
             ]
-            matches.sort(key=lambda e: e.created_at)
+            # Most-recent-first (SPEC.md §11.4), tie-broken by id DESC to
+            # match PgStore's `ORDER BY created_at DESC, id DESC` exactly.
+            matches.sort(key=lambda e: (e.created_at, e.id), reverse=True)
             return matches[offset : offset + limit]
 
     async def search_keyword(self, query: str, filters: EntryFilters, limit: int) -> list[str]:

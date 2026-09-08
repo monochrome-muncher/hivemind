@@ -148,3 +148,52 @@ class TestGovernanceService:
             )
         # 1.0 - 3*0.25 = 0.25 -> clamped to 0.5
         assert await governance.quality(entry.id) == pytest.approx(0.5)
+
+
+async def test_feedback_quality_uses_configured_weights() -> None:
+    """SPEC.md §6.4: the quality formula is config, not a code constant.
+
+    The governance service must report the same multiplier search uses,
+    so it takes the same ``SearchConfig`` the search service does.
+    """
+    from hivemind.config import SearchConfig
+    from hivemind.memstore import MemoryStore
+    from hivemind.services.governance import GovernanceService
+
+    store = MemoryStore(make_clock())
+    entry = await store.create_entry(make_draft("a fact"))
+
+    # A config with a much heavier wrong-weight changes the reported quality.
+    custom = SearchConfig(quality_wrong_weight=0.9, quality_min=0.0)
+    governance = GovernanceService(store, custom)
+    await governance.record_feedback(
+        Credential(user_id="u1", agent_id="a1"), entry.id, Verdict.WRONG
+    )
+    # custom: 1.0 - 0.9 = 0.1 (above quality_min=0.0, so no clamping)
+    assert await governance.quality(entry.id) == pytest.approx(0.1)
+
+    # The default-config service reports a different value for the same
+    # feedback (1.0 - 0.25 = 0.75), proving the weights come from config.
+    default_gov = GovernanceService(store)
+    assert await default_gov.quality(entry.id) == pytest.approx(0.75)
+
+
+async def test_feedback_accepts_self_reported_agent() -> None:
+    """SPEC.md §8.1: a plain user key self-reports the agent instance."""
+    from hivemind.memstore import MemoryStore
+    from hivemind.services.governance import GovernanceService
+
+    store = MemoryStore(make_clock())
+    governance = GovernanceService(store)
+    entry = await store.create_entry(make_draft("a fact"))
+
+    # A plain user key (no agent_id) + a self-reported agent succeeds.
+    await governance.record_feedback(
+        Credential(user_id="alice"), entry.id, Verdict.HELPFUL, agent="claude-code"
+    )
+    counts = await store.feedback_counts(entry_id=entry.id)
+    assert counts == (1, 0, 0)
+
+    # No credential agent AND no self-reported agent -> ValueError.
+    with pytest.raises(ValueError, match="agent identity"):
+        await governance.record_feedback(Credential(user_id="bob"), entry.id, Verdict.STALE)

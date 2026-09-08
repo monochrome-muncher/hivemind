@@ -5,13 +5,14 @@ exception -> ApiError mapping. No business rules live here — those
 are in the service layer (SPEC.md §5, ADR 0001).
 
 Error codes: ``missing_api_key``/``unknown_api_key`` (401),
-``forbidden`` (403), ``not_found`` (404), ``conflict`` (409), and
-``invalid_entry``/``agent_identity_required`` (422).
+``forbidden`` (403), ``not_found`` (404), ``conflict`` (409),
+``embedding_unavailable`` (502), and ``invalid_entry``/
+``agent_identity_required`` (422).
 """
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -32,10 +33,19 @@ from hivemind.api.schemas import (
     WithdrawRequest,
 )
 from hivemind.domain.entry import EntryDraft, EntryFilters, Kind, Source
+from hivemind.embeddings import EmbeddingError
 from hivemind.ports import Credential
+from hivemind.services.chain import supersession_chain
 from hivemind.services.governance import PermissionDenied
 
 require = Annotated[Credential, Depends(require_credential)]
+
+
+def _to_utc(value: datetime | None) -> datetime | None:
+    """Naive query-param datetimes are assumed UTC (SPEC.md §6.4)."""
+    if isinstance(value, datetime) and value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value
 
 
 def build_router(app: HivemindApp) -> APIRouter:
@@ -80,17 +90,36 @@ def build_router(app: HivemindApp) -> APIRouter:
                 supersedes=tuple(payload.supersedes),
             )
             entry = await app.write_service.write(draft)
+        except EmbeddingError as exc:
+            # The embedding endpoint is a dependency (SPEC.md §7, ADR 0005):
+            # a failure is a 502 (bad gateway), not a bare 500 (m7).
+            raise api_error(502, "embedding_unavailable", str(exc)) from exc
         except ValueError as exc:
             raise api_error(422, "invalid_entry", str(exc)) from exc
         return EntryOut.from_entry(entry)
 
     @router.get("/entries/{entry_id}", response_model=EntryOut)
-    async def get_entry(entry_id: str, credential: require) -> EntryOut:
-        """Fetch the full entry, body included (SPEC.md §5.1)."""
+    async def get_entry(
+        entry_id: str,
+        credential: require,
+        history: bool = False,
+    ) -> EntryOut:
+        """Fetch the full entry, body included (SPEC.md §5.1).
+
+        ``?history=true`` adds the supersession chain (successors +
+        superseded) — the same bounded walk the MCP ``hive_get`` uses.
+        """
         entry = await app.store.get_entry(entry_id)
         if entry is None:
             raise api_error(404, "not_found", f"unknown entry: {entry_id}")
-        return EntryOut.from_entry(entry)
+        out = EntryOut.from_entry(entry)
+        if history:
+            successors, superseded = await supersession_chain(app.store, entry)
+            out.history = {
+                "successors": [EntryOut.from_entry(e) for e in successors],
+                "superseded": [EntryOut.from_entry(e) for e in superseded],
+            }
+        return out
 
     @router.get("/entries", response_model=list[EntryOut])
     async def list_entries(
@@ -102,6 +131,8 @@ def build_router(app: HivemindApp) -> APIRouter:
         agent: Annotated[str | None, Query()] = None,
         occurred_from: Annotated[datetime | None, Query()] = None,
         occurred_to: Annotated[datetime | None, Query()] = None,
+        created_from: Annotated[datetime | None, Query()] = None,
+        created_to: Annotated[datetime | None, Query()] = None,
         include_inactive: bool = False,
         limit: Annotated[int | None, Query(ge=1)] = None,
         offset: Annotated[int | None, Query(ge=0)] = 0,
@@ -113,8 +144,10 @@ def build_router(app: HivemindApp) -> APIRouter:
             scope=scope,
             author=author,
             agent=agent,
-            occurred_from=occurred_from,
-            occurred_to=occurred_to,
+            occurred_from=_to_utc(occurred_from),
+            occurred_to=_to_utc(occurred_to),
+            created_from=_to_utc(created_from),
+            created_to=_to_utc(created_to),
             include_inactive=include_inactive,
         )
         effective_limit = limit if limit is not None else app.search_config.default_limit
@@ -135,9 +168,13 @@ def build_router(app: HivemindApp) -> APIRouter:
             agent=request.agent,
             occurred_from=request.occurred_from,
             occurred_to=request.occurred_to,
+            created_from=request.created_from,
+            created_to=request.created_to,
             include_inactive=request.include_inactive,
         )
-        hits = await app.search_service.search(request.query, filters, limit=request.limit)
+        hits = await app.search_service.search(
+            request.query, filters, request.limit, offset=request.offset
+        )
         return [HitOut.from_hit(h) for h in hits]
 
     @router.post("/entries/{entry_id}/withdraw", response_model=EntryOut)
@@ -158,10 +195,18 @@ def build_router(app: HivemindApp) -> APIRouter:
 
     @router.post("/entries/{entry_id}/feedback", response_model=FeedbackOut)
     async def feedback(entry_id: str, request: FeedbackRequest, credential: require) -> FeedbackOut:
-        """Report a verdict on an entry (SPEC.md §4.2); upsert per reporter."""
+        """Report a verdict on an entry (SPEC.md §4.2); upsert per reporter.
+
+        A plain user key self-reports the agent instance via ``agent``
+        (SPEC.md §8.1); an agent sub-key's credential agent wins.
+        """
         try:
             outcome = await app.governance_service.record_feedback(
-                credential, entry_id, request.verdict, request.note
+                credential,
+                entry_id,
+                request.verdict,
+                request.note,
+                agent=request.agent,
             )
         except LookupError:
             raise api_error(404, "not_found", f"unknown entry: {entry_id}") from None

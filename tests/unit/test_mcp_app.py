@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 
 from hivemind.mcp.app import (
+    ERR_AGENT_UNRESOLVED,
     McpHivemind,
     hive_feedback,
     hive_get,
@@ -271,3 +272,57 @@ async def test_hive_feedback_rejects_unknown_verdict(app: McpHivemind) -> None:
 async def test_hive_feedback_unknown_entry_returns_error(app: McpHivemind) -> None:
     result = await hive_feedback(app, "no-such-id", verdict="helpful")
     assert result.get("error", {}).get("code") == "not_found"
+
+
+# --------------------------------------------------------------------------- #
+# Review-fix seams (SPEC.md §5.2/§5.3/§8.1)
+# --------------------------------------------------------------------------- #
+async def test_hive_write_user_key_without_agent_is_rejected() -> None:
+    """SPEC.md §8.1: a plain user key must self-report the agent; no
+    fabricated ``unknown`` identity (n3)."""
+    clock = make_clock()
+    store = MemoryStore(clock)
+    user_key_app = build_app(
+        store, Credential(user_id="alice"), clock
+    )  # plain user key: no agent_id
+    result = await hive_write(user_key_app, kind="fact", summary="needs an agent")
+    assert result.get("error", {}).get("code") == ERR_AGENT_UNRESOLVED
+
+
+async def test_hive_write_user_key_with_self_reported_agent() -> None:
+    clock = make_clock()
+    store = MemoryStore(clock)
+    user_key_app = build_app(store, Credential(user_id="alice"), clock)
+    result = await hive_write(
+        user_key_app, kind="fact", summary="self-reported", agent="claude-code"
+    )
+    assert "error" not in result
+    assert result["agent"] == "claude-code"
+
+
+async def test_hive_feedback_user_key_self_reports_agent(app: McpHivemind) -> None:
+    """SPEC.md §8.1: a plain user key self-reports the agent (m5)."""
+    clock = make_clock()
+    store = app.store
+    user_key_app = build_app(store, Credential(user_id="alice"), clock)
+    entry = await hive_write(user_key_app, kind="fact", summary="a fact", agent="claude-code")
+    result = await hive_feedback(user_key_app, entry["id"], verdict="helpful", agent="claude-code")
+    assert "error" not in result
+    assert result["feedback"]["agent"] == "claude-code"
+
+
+async def test_hive_feedback_user_key_without_agent_is_rejected(app: McpHivemind) -> None:
+    clock = make_clock()
+    store = app.store
+    user_key_app = build_app(store, Credential(user_id="alice"), clock)
+    entry = await hive_write(user_key_app, kind="fact", summary="a fact", agent="claude-code")
+    result = await hive_feedback(user_key_app, entry["id"], verdict="stale")
+    assert result.get("error", {}).get("code") == ERR_AGENT_UNRESOLVED
+
+
+async def test_hive_search_offset_paginates(app: McpHivemind) -> None:
+    """SPEC.md §5.3: limit/offset on search (parity with list)."""
+    for i in range(5):
+        await hive_write(app, kind="fact", summary=f"cohort note number {i}")
+    result = await hive_search(app, "cohort note", limit=2, offset=1)
+    assert result["count"] == 2
