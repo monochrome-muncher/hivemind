@@ -1,0 +1,16 @@
+# Keep the build context small: the image build only needs pyproject.toml,
+# README.md (required by the build backend), uv.lock, and src/.
+.git
+.venv
+.mypy_cache
+.pytest_cache
+.ruff_cache
+__pycache__
+*.pyc
+tests
+docs
+AGENTS.md
+CLAUDE.md
+CONTEXT.md
+ROADMAP.md
+SPEC.md

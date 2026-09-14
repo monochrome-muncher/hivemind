@@ -6,6 +6,7 @@
 #   make pg-down     -> stop it
 #   make migrate     -> apply migrations
 #   make api         -> run the REST API locally
+#   make mcp-http    -> start the hostable streamable-HTTP MCP runner (detached docker service, :8088)
 #   make test        -> run the test suite (integration tests use this DB)
 services:
   postgres:
@@ -63,6 +64,58 @@ services:
       - "8001:8000"
     volumes:
       - hivemind-vllm-cache:/root/.cache/huggingface
+
+  # Hostable, multi-agent streamable-HTTP MCP runner (ADR 0010):
+  # ONE long-lived process serving an UNLIMITED number of agents, each
+  # authenticating PER REQUEST with its own agent-scoped key (ADR 0008).
+  # Built from this repo (Dockerfile); reads/writes the shared Postgres
+  # pool and embeds via the local vLLM server (ADR 0005).
+  #
+  # - The container binds 0.0.0.0:8088; the HOST port is 8088 by default
+  #   - override with HIVEMIND_MCP_HTTP_PORT (e.g.
+  #   `HIVEMIND_MCP_HTTP_PORT=9000 make mcp-http`).
+  # - The DSN + embedder point at the SIBLING services on the compose
+  #   network (postgres:5432 / vllm:8000), not the host-published ports.
+  # - Keys live in the Postgres `credentials` table, so any agent-scoped
+  #   key issued via `hivemind-keys issue` works from this service.
+  mcp-http:
+    build: .
+    image: hivemind-mcp-http
+    environment:
+      HIVEMIND_HOST: "0.0.0.0"
+      HIVEMIND_PORT: "8088"
+      HIVEMIND_DATABASE_URL: postgresql://hivemind:hivemind@postgres:5432/hivemind
+      HIVEMIND_EMBEDDING_ENDPOINT: http://vllm:8000/v1
+      HIVEMIND_EMBEDDING_MODEL: Qwen/Qwen3-Embedding-0.6B
+      HIVEMIND_EMBEDDING_DIM: "512"
+    ports:
+      - "${HIVEMIND_MCP_HTTP_PORT:-8088}:8088"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      vllm:
+        condition: service_started
+    healthcheck:
+      # A 401 from the auth middleware means the whole stack (uvicorn +
+      # the middleware) is up and serving; connection-refused means
+      # uvicorn has not bound yet. 8088 is the container port (fixed),
+      # so this works regardless of the host port mapping.
+      test:
+        - CMD-SHELL
+        - |
+          python -c "
+          import urllib.request, urllib.error, sys
+          try:
+              urllib.request.urlopen('http://127.0.0.1:8088/mcp', timeout=3)
+          except urllib.error.HTTPError as e:
+              sys.exit(0 if e.code == 401 else 1)
+          except Exception:
+              sys.exit(1)
+          "
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
 
 volumes:
   hivemind-pg-data:

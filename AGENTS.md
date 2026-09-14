@@ -27,6 +27,9 @@ The dev environment is `uv`-managed (Python 3.14); Postgres (with pgvector) runs
 | Auto-format + auto-fix | `make format` |
 | Run the REST API | `make api` (or `uv run hivemind-api`) |
 | Run the MCP server (stdio) | `make mcp` (or `uv run hivemind-mcp`) |
+| Run the Postgres-backed MCP runner (per-agent, stdio; ADR 0009) | `make mcp-pg` (or `uv run hivemind-mcp-pg`) |
+| Run the hostable streamable-HTTP MCP runner (detached docker service, host port 8088; ADR 0010) | `make mcp-http` (or `docker compose up -d mcp-http`) |
+| Stop the mcp-http docker service / run it as a local process | `make mcp-http-down` / `make mcp-http-dev` |
 | Stop Postgres / wipe its data | `make pg-down` / `make pg-reset` |
 
 Environment: the service reads `HIVEMIND_*` env vars (see `src/hivemind/config.py`). The dev default is `HIVEMIND_DATABASE_URL=postgresql://hivemind:hivemind@localhost:5432/hivemind`. Embedding knobs: `HIVEMIND_EMBEDDING_ENDPOINT` / `_API_KEY` / `_MODEL` / `_DIM` (ADR 0005).
@@ -41,7 +44,7 @@ Environment: the service reads `HIVEMIND_*` env vars (see `src/hivemind/config.p
 - `src/hivemind/store/` — `PgStore` + `PgAuthenticator` (asyncpg + pgvector), migrations, and the `build_store` / `build_authenticator` factories.
 - `src/hivemind/embeddings/` — `OpenAICompatEmbedder` (the `Embedder` port's production implementation) + the `build_embedder` factory.
 - `src/hivemind/api/` — the FastAPI surface (REST §5.1): schemas, deps (auth), routes, main.
-- `src/hivemind/mcp/` — the MCP server (six verbs, §5.2): app, server, local embedder.
+- `src/hivemind/mcp/` — the MCP server (six verbs, §5.2): app, server (stdio dev + per-agent `hivemind-mcp-pg` runners), http (hostable streamable-HTTP runner, ADR 0010), local embedder.
 - `tests/unit/` — hermetic unit tests (fakes from `tests/fakes.py`; no Postgres, no network).
 - `tests/integration/` — Postgres-backed Store tests; they SKIP cleanly when the DB is unreachable.
 
@@ -58,4 +61,4 @@ Environment: the service reads `HIVEMIND_*` env vars (see `src/hivemind/config.p
 
 ## State of this repo
 
-Spec + docs (`README.md`, `SPEC.md`, `CONTEXT.md`, `AGENTS.md`, `CLAUDE.md`, `ROADMAP.md`, `docs/adr/0001`–`0008`) plus the v1 implementation: domain, ports, retrieval math, services, in-memory store, Postgres store (asyncpg + pgvector), OpenAI-compatible embedder, FastAPI REST surface, and the MCP server. The unit suite is hermetic; the integration suite runs against dockerized Postgres and skips when it is down.
+Spec + docs (`README.md`, `SPEC.md`, `CONTEXT.md`, `AGENTS.md`, `CLAUDE.md`, `ROADMAP.md`, `docs/adr/0001`–`0010`) plus the v1 implementation: domain, ports, retrieval math, services, in-memory store, Postgres store (asyncpg + pgvector), OpenAI-compatible embedder, FastAPI REST surface, and the MCP surface (three runners: stdio dev, per-agent Postgres `hivemind-mcp-pg`, and the hostable streamable-HTTP `hivemind-mcp-http` — shipped as a detached docker-compose service, host port 8088). The unit suite is hermetic; the integration suite runs against dockerized Postgres and skips when it is down.
