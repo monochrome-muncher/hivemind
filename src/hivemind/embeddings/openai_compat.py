@@ -9,8 +9,15 @@ embedder (close it via ``aclose``).
 The request shape follows the OpenAI embeddings API:
 
     POST {base_url}/embeddings
-    {"model": "<model>", "input": "<text>"}
+    {"model": "<model>", "input": "<text>", "dimensions": <dim>}
     -> {"data": [{"embedding": [f, ...]}], ...}
+
+The ``dimensions`` field asks the endpoint to produce the deploy-time
+dimension (ADR 0005): Matryoshka-capable providers (OpenAI
+text-embedding-3-*, vLLM embedding servers) truncate to exactly that
+length, and the response length is validated on every call. Endpoints
+that cannot honor the dimension reject the request, which surfaces as
+an ``EmbeddingError`` — the dimension is a deploy-time contract.
 
 Embedding model and dimension are recorded per entry (ADR 0005); the
 dimension is a deploy-time decision and validated on every response.
@@ -66,8 +73,8 @@ class OpenAICompatEmbedder:
             model_name: The embedding model identifier (recorded per
                 entry, ADR 0005).
             dim: The fixed vector dimension (deploy-time decision,
-                ADR 0005); responses with a different length are
-                rejected.
+                ADR 0005); requested via the OpenAI ``dimensions``
+                field and validated on every response.
             timeout: The request timeout used only when the embedder
                 builds its own client.
         """
@@ -134,7 +141,13 @@ class OpenAICompatEmbedder:
         headers: dict[str, str] = {}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
-        payload: dict[str, str] = {"model": self._model_name, "input": text}
+        payload: dict[str, Any] = {
+            "model": self._model_name,
+            "input": text,
+            # The deploy-time dimension (ADR 0005): Matryoshka-capable
+            # providers truncate to this length; see the module docstring.
+            "dimensions": self._dim,
+        }
         try:
             response = await self._client.post(
                 f"{self._base_url}/embeddings",

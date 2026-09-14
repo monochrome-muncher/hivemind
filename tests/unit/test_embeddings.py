@@ -3,7 +3,7 @@
 The embedder is exercised through an injected ``httpx.MockTransport`` —
 no network, no real embeddings endpoint. The seam is the ``Embedder``
 port: behavior is asserted in terms of the wire request (endpoint,
-model, input, auth header) and the returned vector.
+model, input, dimensions, auth header) and the returned vector.
 
 Expected vectors are literal OpenAI-shape responses
 (``{"data": [{"embedding": [...]}]}``), never values recomputed the way
@@ -94,7 +94,11 @@ class TestEmbedText:
         request = env.requests[-1]
         assert str(request.url) == f"{BASE_URL}/embeddings"
         assert request.method == "POST"
-        assert env.last_body == {"model": "fake-model", "input": "churn cohorts"}
+        assert env.last_body == {
+            "model": "fake-model",
+            "input": "churn cohorts",
+            "dimensions": 4,  # make_embedder's default dim
+        }
 
     async def test_auth_header_present_when_key_configured(self) -> None:
         env = MockEnv()
@@ -146,6 +150,30 @@ class TestEmbedEntry:
         assert len(expected) < len(draft.body or "")
         # The port method agrees with what was actually sent.
         assert embedder.entry_embeddable_text(draft) == expected
+
+
+class TestDimensionsField:
+    """The deploy-time dimension (ADR 0005) rides on the OpenAI ``dimensions`` field."""
+
+    async def test_request_sends_the_configured_dimension(self) -> None:
+        dim = 512
+        env = MockEnv(
+            handler=lambda request: httpx.Response(
+                200,
+                json={"data": [{"object": "embedding", "index": 0, "embedding": [0.1] * dim}]},
+            )
+        )
+        embedder = make_embedder(env, dim=dim)
+        await embedder.embed_text("x")
+        assert env.last_body["dimensions"] == 512
+
+    async def test_a_provider_that_ignores_dimensions_is_rejected(self) -> None:
+        """A provider that ignores ``dimensions`` returns the native dim; the response check fails."""
+        env = MockEnv()  # answers with a 4-dim vector
+        embedder = make_embedder(env, dim=512)
+        with pytest.raises(EmbeddingError) as exc_info:
+            await embedder.embed_text("x")
+        assert "expected 512 dims, got 4" in str(exc_info.value)
 
 
 class TestFactoryAndProtocol:

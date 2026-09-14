@@ -185,6 +185,33 @@ One **self-hosted instance per organization**, one `docker compose` file: **Hive
 
 Turning Hivemind off for a session is a **client-side act**: the agent's Hivemind integration (its MCP server entry / enabled flag) is disabled for that session, so the tools simply aren't available and the pool is untouched. **The server has no session registry and is unaware of off sessions.** The spec's only server-side commitment is that an absent client is indistinguishable from a quiet one.
 
+### 8.4 MCP runners (ADR 0009)
+
+The MCP stdio surface ships **two runners**:
+
+* **`hivemind-mcp`** — the **dev** path: in-memory store + local hash embedder + a hard-coded `dev` credential. Zero network, ephemeral, single identity; for exercising the six `hive_*` tools with no dependencies.
+* **`hivemind-mcp-pg`** — the **production** path: a DSN-backed `PgStore` + the operator-configured OpenAI-compatible embedder (ADR 0005), with the acting credential resolved by verifying `HIVEMIND_MCP_KEY` against the Postgres `credentials` table (ADR 0008).
+
+**Unified multi-agent pool:** several agents each run their own `hivemind-mcp-pg` process with a distinct `HIVEMIND_MCP_KEY` (an agent-scoped sub-key, ADR 0008). All of them read/write the **same** Postgres pool over a **unified** MCP interface (the identical six `hive_*` tools) while every write carries that agent's *verified* provenance (author + agent instance, server-filled from the key). Revoking an agent's key revokes its access immediately. The dev runner (`hivemind-mcp`) is unchanged.
+
+### 8.5 The hostable streamable-HTTP runner (ADR 0010)
+
+`hivemind-mcp-http` is the **hostable, multi-agent** form of the Postgres-backed runner (ADR 0009): a **single** long-lived streamable-HTTP process serving an **unlimited** number of agents, each authenticating **per request** with its own agent-scoped key (ADR 0008).
+
+* **One process, one pool, per-request auth.** One `hivemind-mcp-http` process owns one `PgStore` + one embedder + one `Authenticator` pool (the same DSN / embedder / credentials the REST API uses). Each request presents its own key; a thin ASGI middleware verifies it against the `credentials` table (ADR 0008) and re-binds the shared, *stateless* services to that credential on every tool dispatch. One process = many agents.
+* **Immediate revocation.** Because the credential is resolved **per request** (not once at process start, as in `hivemind-mcp-pg`), `hivemind-keys revoke` takes effect on the very next request — no restart required.
+* **Per-request transport: stateless streamable-HTTP.** The server runs the SDK's stateless streamable-HTTP transport (one request = one self-contained exchange). The pool is stateless with respect to sessions, so this is a natural fit.
+
+**MCP runners, at a glance** (three runners, one pool):
+
+| runner | process | pool | credential | revocation |
+|---|---|---|---|---|
+| `hivemind-mcp` (dev, ADR 0009) | in-memory | in-memory (ephemeral) | hard-coded `dev` | n/a |
+| `hivemind-mcp-pg` (per-agent, ADR 0009) | one per agent | shared Postgres | `HIVEMIND_MCP_KEY`, verified at start | next restart |
+| `hivemind-mcp-http` (hostable, ADR 0010) | one shared | shared Postgres | per-request, verified per request | immediate |
+
+Both `hivemind-mcp-pg` and `hivemind-mcp-http` read/write the same pool with the same verified provenance; choose the per-agent runner for a small dev setup, the hostable runner when many agents share one machine.
+
 ## 9. Non-goals (v1) — the explicit list
 
 - No human-facing UI (agent-only; a read-only web search is a later extension)
