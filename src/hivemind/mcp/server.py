@@ -4,7 +4,13 @@
 an ``MCPServer`` (mcp 2.x) as closures bound to a single ``McpHivemind``
 app instance. ``main`` builds a self-contained dev server (in-memory
 store + local embedder, per the v1 dev path) and runs the stdio
-transport. A DSN-backed ``PgStore`` is a documented follow-up.
+transport. ``main_pg`` (console: ``hivemind-mcp-pg``) builds the
+production runner: a DSN-backed ``PgStore`` + OpenAI-compatible embedder
+plus a per-agent credential resolved from ``HIVEMIND_MCP_KEY`` (ADR 0009),
+so multiple agents share one pool over a unified MCP interface.
+``main_http`` (console: ``hivemind-mcp-http``, see ``hivemind.mcp.http``)
+is the hostable form: one long-lived streamable-HTTP process serving an
+unlimited number of agents, each authenticating *per request* (ADR 0010).
 
 The installed ``mcp`` package is v2.x: the server class is
 ``MCPServer`` (not ``FastMCP``), tools are registered with
@@ -15,6 +21,9 @@ started with ``await server.run_stdio_async()``.
 from __future__ import annotations
 
 import asyncio
+import os
+from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
@@ -71,18 +80,42 @@ _DESC_FEEDBACK = (
 )
 
 
-def build_server(app: McpHivemind) -> MCPServer:
+def build_server(
+    app: McpHivemind,
+    *,
+    credential_provider: Callable[[], Credential | None] | None = None,
+) -> MCPServer:
     """Build an ``MCPServer`` exposing exactly the six Hivemind tools.
 
     Each registered tool is a closure over ``app`` so the LLM only ever
     sees the LLM-facing arguments; the acting identity and services are
     bound, not exposed as arguments.
+
+    ``credential_provider`` (optional) turns this into a *shared,
+    multi-agent* server: when provided, every tool dispatch resolves the
+    acting credential by re-binding ``app``'s (stateless) services to
+    ``credential_provider()``. The stdio / dev path passes nothing, so
+    one process = one agent (the fixed ``app``). The streamable-HTTP path
+    (see ``hivemind.mcp.http``) passes a per-request provider, so one
+    process = many agents (ADR 0010).
     """
     server = MCPServer(
         name="hivemind",
         description="Shared memory pool for an organization's AI agents.",
         instructions=_INSTRUCTIONS,
     )
+
+    def resolve_app() -> McpHivemind:
+        """The acting ``McpHivemind`` for this dispatch: the shared,
+        stateless services, re-bound to the current credential when a
+        provider is set (the identity varies per request; the services
+        do not)."""
+        if credential_provider is None:
+            return app
+        credential = credential_provider()
+        if credential is None or credential == app.credential:
+            return app
+        return replace(app, credential=credential)
 
     @server.tool(name="hive_write", description=_DESC_WRITE)
     async def _hive_write(
@@ -100,7 +133,7 @@ def build_server(app: McpHivemind) -> MCPServer:
         agent: str | None = None,
     ) -> dict[str, Any]:
         return await hive_write(
-            app,
+            resolve_app(),
             kind=kind,
             summary=summary,
             body=body,
@@ -132,7 +165,7 @@ def build_server(app: McpHivemind) -> MCPServer:
         include_inactive: bool = False,
     ) -> dict[str, Any]:
         return await hive_search(
-            app,
+            resolve_app(),
             query=query,
             limit=limit,
             offset=offset,
@@ -153,7 +186,7 @@ def build_server(app: McpHivemind) -> MCPServer:
         entry_id: str,
         include_history: bool = False,
     ) -> dict[str, Any]:
-        return await hive_get(app, entry_id=entry_id, include_history=include_history)
+        return await hive_get(resolve_app(), entry_id=entry_id, include_history=include_history)
 
     @server.tool(name="hive_list", description=_DESC_LIST)
     async def _hive_list(
@@ -171,7 +204,7 @@ def build_server(app: McpHivemind) -> MCPServer:
         offset: int = 0,
     ) -> dict[str, Any]:
         return await hive_list(
-            app,
+            resolve_app(),
             kind=kind,
             tags=tags,
             scope=scope,
@@ -191,7 +224,7 @@ def build_server(app: McpHivemind) -> MCPServer:
         entry_id: str,
         reason: str | None = None,
     ) -> dict[str, Any]:
-        return await hive_withdraw(app, entry_id=entry_id, reason=reason)
+        return await hive_withdraw(resolve_app(), entry_id=entry_id, reason=reason)
 
     @server.tool(name="hive_feedback", description=_DESC_FEEDBACK)
     async def _hive_feedback(
@@ -200,7 +233,9 @@ def build_server(app: McpHivemind) -> MCPServer:
         note: str | None = None,
         agent: str | None = None,
     ) -> dict[str, Any]:
-        return await hive_feedback(app, entry_id=entry_id, verdict=verdict, note=note, agent=agent)
+        return await hive_feedback(
+            resolve_app(), entry_id=entry_id, verdict=verdict, note=note, agent=agent
+        )
 
     return server
 
@@ -224,3 +259,76 @@ def main() -> None:
     )
     server = build_server(app)
     asyncio.run(server.run_stdio_async())
+
+
+def _mcp_key_missing_hint() -> str:
+    """The error text when ``HIVEMIND_MCP_KEY`` is unset."""
+    return (
+        "HIVEMIND_MCP_KEY is required to run hivemind-mcp-pg. Issue an "
+        "agent-scoped key, then set it in the agent's MCP config:\n"
+        "  uv run hivemind-keys issue --user <user> --agent <agent>\n"
+        '  {"command": "uv", "args": ["run", "--directory", "<repo>", "hivemind-mcp-pg"],\n'
+        '   "env": {"HIVEMIND_MCP_KEY": "hm_..."}}'
+    )
+
+
+def _mcp_key_unknown_hint() -> str:
+    """The error text when the key is set but is not a known credential."""
+    return (
+        "HIVEMIND_MCP_KEY is not a known credential. Issue it first, then retry:\n"
+        "  uv run hivemind-keys issue --user <user> --agent <agent>\n"
+        "  (list existing credential hashes: uv run hivemind-keys list)"
+    )
+
+
+def main_pg() -> None:
+    """Build a Postgres-backed stdio server and run the transport.
+
+    The multi-agent production runner (ADR 0009): every agent runs its
+    own ``hivemind-mcp-pg`` process with its own ``HIVEMIND_MCP_KEY``
+    (a raw ``hm_...`` key issued via ``hivemind-keys``), so all agents
+    read/write the same Postgres pool over a unified MCP interface while
+    each write carries its agent's *verified* provenance (SPEC §8.1,
+    ADR 0008). The real ``PgStore`` + OpenAI-compatible embedder are
+    built from ``Settings`` (env-driven); the acting credential is
+    resolved by verifying the key against the Postgres ``credentials``
+    table. The store/embedder/authenticator pools are torn down on exit.
+    """
+    from hivemind.embeddings import build_embedder
+    from hivemind.store import build_authenticator, build_store
+
+    settings = Settings()
+    raw_key = os.environ.get("HIVEMIND_MCP_KEY", "").strip()
+    if not raw_key:
+        raise SystemExit(_mcp_key_missing_hint())
+
+    store = build_store(settings)
+    embedder = build_embedder(settings)
+    authenticator = build_authenticator(settings)
+
+    async def _run() -> None:
+        credential = await authenticator.verify(raw_key)
+        if credential is None:
+            raise SystemExit(_mcp_key_unknown_hint())
+        search_config = settings.search_config()
+        app = McpHivemind(
+            store=store,
+            write_service=WriteService(store, embedder),
+            search_service=SearchService(store, embedder, search_config),
+            governance_service=GovernanceService(store, search_config),
+            search_config=search_config,
+            credential=credential,
+        )
+        server = build_server(app)
+        try:
+            await server.run_stdio_async()
+        finally:
+            for closer in (
+                getattr(store, "close", None),
+                getattr(embedder, "aclose", None),
+                getattr(authenticator, "close", None),
+            ):
+                if closer is not None:
+                    await closer()
+
+    asyncio.run(_run())

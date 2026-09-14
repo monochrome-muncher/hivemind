@@ -1,7 +1,19 @@
 # Hivemind dev workflow. All commands are thin wrappers around uv + docker compose.
 .DEFAULT_GOAL := help
 PG_DSN ?= postgresql://hivemind:hivemind@localhost:5432/hivemind
+# Local vLLM dev embedding endpoint (make vllm; ADR 0005 self-hosted path).
+# Override on a target to point at a different embeddings endpoint, e.g.
+# `make api HIVEMIND_EMBEDDING_ENDPOINT=https://api.openai.com/v1`.
 export HIVEMIND_DATABASE_URL ?= $(PG_DSN)
+export HIVEMIND_EMBEDDING_ENDPOINT ?= http://localhost:8001/v1
+export HIVEMIND_EMBEDDING_MODEL ?= Qwen/Qwen3-Embedding-0.6B
+export HIVEMIND_EMBEDDING_DIM ?= 512
+# Per-agent credential for the Postgres-backed MCP runner (ADR 0009). Leave
+# empty unless overriding; an agent's MCP config sets its own key.
+export HIVEMIND_MCP_KEY ?=
+# Host/port for the hostable streamable-HTTP MCP runner (ADR 0010).
+export HIVEMIND_HOST ?= 127.0.0.1
+export HIVEMIND_PORT ?= 8000
 
 .PHONY: help
 help: ## Show this help
@@ -15,6 +27,10 @@ install: ## Install all dependencies (dev + runtime)
 pg: ## Start Postgres + pgvector (docker)
 	docker compose up -d postgres
 
+.PHONY: vllm
+vllm: ## Start the local vLLM embedding server (CPU docker; Qwen3-Embedding on :8001)
+	docker compose up -d vllm
+
 .PHONY: pg-down
 pg-down: ## Stop Postgres
 	docker compose down
@@ -24,7 +40,7 @@ pg-reset: ## Stop Postgres and wipe its data volume
 	docker compose down -v
 
 .PHONY: migrate
-migrate: ## Apply database migrations
+migrate: ## Apply database migrations (provisions the embedding column at $(HIVEMIND_EMBEDDING_DIM); changing the dim needs `make pg-reset` first)
 	uv run hivemind-migrate
 
 .PHONY: api
@@ -34,6 +50,14 @@ api: ## Run the REST API on :8000
 .PHONY: mcp
 mcp: ## Run the MCP server over stdio (wire into your agent's MCP config)
 	uv run hivemind-mcp
+
+.PHONY: mcp-pg
+mcp-pg: ## Run the Postgres-backed MCP server over stdio (HIVEMIND_MCP_KEY required; ADR 0009)
+	uv run hivemind-mcp-pg
+
+.PHONY: mcp-http
+mcp-http: ## Run the hostable, multi-agent streamable-HTTP MCP server (one process, many agents; ADR 0010)
+	uv run hivemind-mcp-http
 
 .PHONY: test
 test: ## Run the full test suite (unit + integration; integration needs `make pg`)

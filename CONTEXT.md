@@ -96,6 +96,20 @@ _Avoid_: pause, session disable, opt-out
 The intended audience of an entry. In v1 every entry is org-wide; the field exists as a seam for future narrowing (team, project, channel).
 _Avoid_: namespace, channel (those are the future concepts, not the v1 value)
 
+### Surfaces
+
+**MCP runner**:
+The process that exposes Hivemind's six `hive_*` tools to an agent. Three kinds: the dev runner (`hivemind-mcp`, in-memory, stdio), the per-agent Postgres-backed runner (`hivemind-mcp-pg`, ADR 0009, one process per agent), and the hostable streamable-HTTP runner (`hivemind-mcp-http`, ADR 0010, one shared process, many agents). All read/write the same pool; every write carries verified provenance.
+_Avoid_: Hivemind client (implies a library client), agent connector
+
+**Per-agent credential**:
+The agent-scoped sub-key (ADR 0008) bound to one (author, agent instance); it is what a `hivemind-mcp-pg` process presents so its writes carry verified provenance. One key per agent, distinct per agent, verified once at process start.
+_Avoid_: token, API key (say "credential" or "sub-key"; "API key" is the generic REST term)
+
+**Per-request credential**:
+The acting identity a hostable `hivemind-mcp-http` process resolves **per HTTP request**: the request presents an agent-scoped sub-key (ADR 0008), a thin ASGI middleware verifies it against the `credentials` table (ADR 0008), and the shared, stateless services are re-bound to that credential on every tool dispatch. Because it is resolved per request, revocation is immediate (ADR 0010).
+_Avoid_: per-agent credential (that is the stdio runner's one-credential-per-process model), session identity
+
 ### Retrieval
 
 **Hybrid search**:

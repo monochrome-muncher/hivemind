@@ -1,5 +1,8 @@
-# docker-compose for local development: Postgres 16 + pgvector
+# docker-compose for local development: Postgres 16 + pgvector, plus a CPU
+# vLLM embedding server for a fully local setup (ADR 0005: self-hosted
+# embeddings, no data leaves the machine).
 #   make pg          -> start the database
+#   make vllm        -> start the local vLLM embedding server (:8001)
 #   make pg-down     -> stop it
 #   make migrate     -> apply migrations
 #   make api         -> run the REST API locally
@@ -21,5 +24,46 @@ services:
       timeout: 3s
       retries: 10
 
+  # Local CPU inference embedding server (ADR 0005: self-hosted provider).
+  # Official vLLM CPU build, pinned to a release for reproducibility.
+  # Serves Qwen/Qwen3-Embedding-0.6B on :8001 (matches the default
+  # HIVEMIND_EMBEDDING_ENDPOINT http://localhost:8001/v1).
+  #
+  # - --runner pooling --convert embed: run the (generative-architecture)
+  #   model in embedding mode, exposing /v1/embeddings (OpenAI-compatible).
+  # - Qwen3-Embedding-0.6B is Matryoshka (32..1024 dims) but its
+  #   config.json does not declare it, so vLLM only honors the
+  #   `dimensions` request field once `is_matryoshka` is overridden.
+  #   512 is one of the model's trained MRL dimensions and matches
+  #   HIVEMIND_EMBEDDING_DIM for this setup.
+  # - CPU build needs AVX2 (AVX-512 recommended); x86_64 tag below.
+  #   On ARM: use the same tag family's v0.29.0-arm64 instead.
+  # - The HF cache volume persists the ~600 MB model download.
+  vllm:
+    image: vllm/vllm-openai-cpu:v0.29.0-x86_64
+    # vLLM's multiprocess IPC needs /dev/shm headroom (64 MiB default is
+    # too small); 4 GiB matches the vLLM docker deployment guidance.
+    shm_size: "4g"
+    command:
+      - "--model"
+      - "Qwen/Qwen3-Embedding-0.6B"
+      - "--runner"
+      - "pooling"
+      - "--convert"
+      - "embed"
+      - "--hf-overrides"
+      - '{"is_matryoshka": true, "matryoshka_dimensions": [32, 64, 128, 256, 512, 768, 1024]}'
+      # Despite the flag name, on the CPU backend --gpu-memory-utilization
+      # sets the fraction of host RAM vLLM reserves. The default (0.92)
+      # fails on a busy dev machine; 0.3 is ample for a 0.6B model and
+      # keeps the service from contending with other processes.
+      - "--gpu-memory-utilization"
+      - "0.3"
+    ports:
+      - "8001:8000"
+    volumes:
+      - hivemind-vllm-cache:/root/.cache/huggingface
+
 volumes:
   hivemind-pg-data:
+  hivemind-vllm-cache:
