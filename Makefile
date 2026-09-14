@@ -14,6 +14,9 @@ export HIVEMIND_MCP_KEY ?=
 # Host/port for the hostable streamable-HTTP MCP runner (ADR 0010).
 export HIVEMIND_HOST ?= 127.0.0.1
 export HIVEMIND_PORT ?= 8000
+# Host port for the mcp-http docker service (default/fallback 8088). The
+# container always binds 8088 - only the host mapping changes.
+export HIVEMIND_MCP_HTTP_PORT ?= 8088
 
 .PHONY: help
 help: ## Show this help
@@ -56,8 +59,16 @@ mcp-pg: ## Run the Postgres-backed MCP server over stdio (HIVEMIND_MCP_KEY requi
 	uv run hivemind-mcp-pg
 
 .PHONY: mcp-http
-mcp-http: ## Run the hostable, multi-agent streamable-HTTP MCP server (one process, many agents; ADR 0010)
+mcp-http: ## Run the hostable, multi-agent streamable-HTTP MCP server as a detached docker service (host port $(HIVEMIND_MCP_HTTP_PORT), default 8088; ADR 0010)
+	docker compose up -d mcp-http
+
+.PHONY: mcp-http-dev
+mcp-http-dev: ## Run the streamable-HTTP MCP server as a local process instead of docker (HIVEMIND_HOST/HIVEMIND_PORT; ADR 0010)
 	uv run hivemind-mcp-http
+
+.PHONY: mcp-http-down
+mcp-http-down: ## Stop the mcp-http docker service
+	docker compose down mcp-http
 
 .PHONY: test
 test: ## Run the full test suite (unit + integration; integration needs `make pg`)

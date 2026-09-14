@@ -36,7 +36,9 @@ make check          # mypy strict + ruff
 make api            # run the REST API (hivemind-api)
 make mcp            # run the MCP dev server over stdio (hivemind-mcp; in-memory)
 make mcp-pg         # run the Postgres-backed MCP server over stdio (hivemind-mcp-pg; ADR 0009)
-make mcp-http       # run the hostable, multi-agent streamable-HTTP MCP server (hivemind-mcp-http; ADR 0010)
+make mcp-http       # run the hostable, multi-agent streamable-HTTP MCP server as a detached Docker service (host port 8088; ADR 0010)
+make mcp-http-down  # stop the mcp-http Docker service
+make mcp-http-dev   # run the same runner as a local process instead of Docker (HIVEMIND_HOST/HIVEMIND_PORT)
 ```
 
 Configuration is via `HIVEMIND_*` environment variables (see `src/hivemind/config.py`):
@@ -126,11 +128,18 @@ revoked key is cut off on the very next request (no restart — the
 per-request credential model of ADR 0010, vs. the per-process model of
 ADR 0009).
 
+`make mcp-http` ships it as a **detached docker-compose service**: one
+container (built from this repo's Dockerfile) that reads/writes the
+shared pool and embeds via the local vLLM, published on **host port 8088
+by default** (override with `HIVEMIND_MCP_HTTP_PORT=9000 make mcp-http`).
+`make mcp-http-down` stops it; `make mcp-http-dev` runs the same runner
+as a local process instead of Docker.
+
 ```bash
 make pg && make vllm && make migrate
 uv run hivemind-keys issue --user alice --agent agent-a   # -> hm_...
 uv run hivemind-keys issue --user alice --agent agent-b   # -> hm_...
-make mcp-http    # one process, many agents (default 127.0.0.1:8000)
+make mcp-http    # start the detached Docker service (host port 8088)
 ```
 
 Each agent's MCP config points at the **same** endpoint, with its own key:
@@ -139,7 +148,7 @@ Each agent's MCP config points at the **same** endpoint, with its own key:
 {
   "mcpServers": {
     "hivemind": {
-      "url": "http://localhost:8000/mcp",
+      "url": "http://localhost:8088/mcp",
       "headers": { "Authorization": "Bearer hm_…_key" }   // each agent: its own key
     }
   }

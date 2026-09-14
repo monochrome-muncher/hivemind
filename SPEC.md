@@ -201,6 +201,7 @@ The MCP stdio surface ships **two runners**:
 * **One process, one pool, per-request auth.** One `hivemind-mcp-http` process owns one `PgStore` + one embedder + one `Authenticator` pool (the same DSN / embedder / credentials the REST API uses). Each request presents its own key; a thin ASGI middleware verifies it against the `credentials` table (ADR 0008) and re-binds the shared, *stateless* services to that credential on every tool dispatch. One process = many agents.
 * **Immediate revocation.** Because the credential is resolved **per request** (not once at process start, as in `hivemind-mcp-pg`), `hivemind-keys revoke` takes effect on the very next request — no restart required.
 * **Per-request transport: stateless streamable-HTTP.** The server runs the SDK's stateless streamable-HTTP transport (one request = one self-contained exchange). The pool is stateless with respect to sessions, so this is a natural fit.
+* **Deployment shape: a detached compose service.** `make mcp-http` ships the runner as a detached docker-compose service (one container built from the repo's Dockerfile), published on host port 8088 by default (override with `HIVEMIND_MCP_HTTP_PORT`). The container reads/writes the shared pool and embeds via the local vLLM on the compose network, so pool + embedder + runner come up with a single `docker compose up -d` (ADR 0007).
 
 **MCP runners, at a glance** (three runners, one pool):
 
