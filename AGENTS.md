@@ -44,7 +44,7 @@ Environment: the service reads `HIVEMIND_*` env vars (see `src/hivemind/config.p
 - `src/hivemind/store/` — `PgStore` + `PgAuthenticator` (asyncpg + pgvector), migrations, and the `build_store` / `build_authenticator` factories.
 - `src/hivemind/embeddings/` — `OpenAICompatEmbedder` (the `Embedder` port's production implementation) + the `build_embedder` factory.
 - `src/hivemind/api/` — the FastAPI surface (REST §5.1): schemas, deps (auth), routes, main.
-- `src/hivemind/mcp/` — the MCP server (six verbs, §5.2): app, server (stdio dev + per-agent `hivemind-mcp-pg` runners), http (hostable streamable-HTTP runner, ADR 0010), local embedder.
+- `src/hivemind/mcp/` — the MCP server (seven verbs, §5.2): app, server (stdio dev + per-agent `hivemind-mcp-pg` runners), http (hostable streamable-HTTP runner, ADR 0010), local embedder.
 - `tests/unit/` — hermetic unit tests (fakes from `tests/fakes.py`; no Postgres, no network).
 - `tests/integration/` — Postgres-backed Store tests; they SKIP cleanly when the DB is unreachable.
 
@@ -61,4 +61,6 @@ Environment: the service reads `HIVEMIND_*` env vars (see `src/hivemind/config.p
 
 ## State of this repo
 
-Spec + docs (`README.md`, `SPEC.md`, `CONTEXT.md`, `AGENTS.md`, `CLAUDE.md`, `ROADMAP.md`, `docs/adr/0001`–`0010`) plus the v1 implementation: domain, ports, retrieval math, services, in-memory store, Postgres store (asyncpg + pgvector), OpenAI-compatible embedder, FastAPI REST surface, and the MCP surface (three runners: stdio dev, per-agent Postgres `hivemind-mcp-pg`, and the hostable streamable-HTTP `hivemind-mcp-http` — shipped as a detached docker-compose service, host port 8088). The unit suite is hermetic; the integration suite runs against dockerized Postgres and skips when it is down.
+Spec + docs (`README.md`, `SPEC.md`, `CONTEXT.md`, `AGENTS.md`, `CLAUDE.md`, `ROADMAP.md`, `docs/adr/0001`–`0012`) plus the v1 implementation: domain, ports, retrieval math, services, in-memory store, Postgres store (asyncpg + pgvector), OpenAI-compatible embedder, FastAPI REST surface, and the MCP surface (three runners: stdio dev, per-agent Postgres `hivemind-mcp-pg`, and the hostable streamable-HTTP `hivemind-mcp-http` — shipped as a detached docker-compose service, host port 8088). The unit suite is hermetic; the integration suite runs against dockerized Postgres and skips when it is down.
+
+**Committed, not yet implemented:** access control — fleets + trust levels (ADR 0011, supersedes ADR 0002) and the shared org key + admin-issued agent keys (ADR 0012, supersedes ADR 0008's key kinds) — is committed in the docs (SPEC §12, ADRs 0011–0012, glossary in `CONTEXT.md`) but has **no code yet**; it is sequenced as the ROADMAP Tier 2 track (domain/store first, then registration + admin surface, then runner/credential migration).
