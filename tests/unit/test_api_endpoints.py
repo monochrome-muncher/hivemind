@@ -750,8 +750,8 @@ class TestAccessEndpoints:
         )
         client = make_client(app)
         async with client:
-            resp = await client.put(
-                "/v1/admin/agents/alice/trust-level",
+            resp = await client.patch(
+                "/v1/admin/agents/alice",
                 json={"trust_level": 0},
                 headers={"X-API-Key": "key-admin"},
             )
@@ -760,17 +760,48 @@ class TestAccessEndpoints:
         assert resp.json()["trust_level"] == 0
         assert resp.json()["status"] == "active"
 
+    async def test_patch_home_fleet_reparents(self) -> None:
+        app = make_hivemind_app()
+        await app.store.register_agent("alice")
+        fa = await app.store.create_fleet("data-eng")
+        fb = await app.store.create_fleet("ml")
+        await app.store.activate_agent(
+            "alice", trust_level=TrustLevel.CONTRIBUTOR, home_fleet_id=fa.id
+        )
+        client = make_client(app)
+        async with client:
+            resp = await client.patch(
+                "/v1/admin/agents/alice",
+                json={"home_fleet_id": fb.id},
+                headers={"X-API-Key": "key-admin"},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["home_fleet_id"] == fb.id
+
+    async def test_patch_empty_body_is_422(self) -> None:
+        app = make_hivemind_app()
+        await app.store.register_agent("alice")
+        client = make_client(app)
+        async with client:
+            resp = await client.patch(
+                "/v1/admin/agents/alice",
+                json={},
+                headers={"X-API-Key": "key-admin"},
+            )
+        assert resp.status_code == 422
+        assert resp.json()["error"]["code"] == "update_required"
+
     async def test_revoke_agent_admin_only(self) -> None:
         app = make_hivemind_app()
         await app.store.register_agent("alice")
         client = make_client(app)
         async with client:
-            denied = await client.delete(
-                "/v1/admin/agents/alice", headers={"X-API-Key": "key-org"}
+            denied = await client.post(
+                "/v1/admin/agents/alice/revoke", headers={"X-API-Key": "key-org"}
             )
             assert denied.status_code == 403
-            ok = await client.delete(
-                "/v1/admin/agents/alice", headers={"X-API-Key": "key-admin"}
+            ok = await client.post(
+                "/v1/admin/agents/alice/revoke", headers={"X-API-Key": "key-admin"}
             )
         assert ok.status_code == 200
 

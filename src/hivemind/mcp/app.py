@@ -439,14 +439,18 @@ async def hive_register(
 ) -> dict[str, object]:
     """Register (or re-register) an agent (ADR 0012).
 
-    Gated on the org or admin key (a low-privilege bootstrap act); creates
-    a ``pending`` agent (level 0, no fleet). Re-registering a pending name
-    is idempotent; an *active* name is a conflict (the name stays reserved
-    — pick a new one, ADR 0012). The agent is dormant until an admin
-    activates it (sets its trust level + home fleet and issues its key).
+    Gated on the **org key only** (SPEC §5.2: the MCP verb is the agent's
+    first contact with Hivemind; the REST surface also accepts an admin
+    key for human-driven registration). Creates a ``pending`` agent
+    (level 0, no fleet). Re-registering a pending name is idempotent;
+    an *active* name is a conflict (the name stays reserved — pick a new
+    one, ADR 0012). The agent is dormant until an admin activates it
+    (sets its trust level + home fleet and issues its key).
     """
     try:
-        agent = await app.access_service.register(name, app.credential, owner_alias=owner_alias)
+        agent = await app.access_service.register(
+            name, app.credential, owner_alias=owner_alias, org_only=True
+        )
     except PermissionDenied as exc:
         return _error(ERR_PERMISSION_DENIED, str(exc))
     except ValueError as exc:

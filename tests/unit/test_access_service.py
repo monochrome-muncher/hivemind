@@ -87,6 +87,21 @@ async def test_register_with_agent_key_denied() -> None:
         await service.register("alice", agent_credential())
 
 
+async def test_register_org_only_allows_org_key() -> None:
+    # The MCP hive_register gate (SPEC §5.2): org key only.
+    service, _, _ = make_service()
+    agent = await service.register("alice", org_credential(), org_only=True)
+    assert agent.status is AgentStatus.PENDING
+
+
+async def test_register_org_only_denies_admin_key() -> None:
+    # org_only=True rejects the admin key (the REST surface accepts it;
+    # the MCP verb does not — SPEC §5.1 vs §5.2).
+    service, _, _ = make_service()
+    with pytest.raises(PermissionDenied):
+        await service.register("alice", admin_credential(), org_only=True)
+
+
 # -- activation (admin-gated; key issued once, ADR 0012) -------------------
 
 
