@@ -29,6 +29,7 @@ from hivemind.mcp.http import (
 from hivemind.mcp.server import build_server
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
+from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService, WriteService
 from hivemind.services.search import SearchService
 from tests.fakes import make_clock, make_embedder, make_search_config
@@ -48,6 +49,7 @@ def make_app(credential: Credential) -> McpHivemind:
         write_service=WriteService(store, make_embedder()),
         search_service=SearchService(store, make_embedder(), config, now_fn=clock),
         governance_service=GovernanceService(store, config),
+        access_service=AccessService(store),
         search_config=config,
         credential=credential,
     )

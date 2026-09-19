@@ -32,6 +32,7 @@ from hivemind.domain.entry import (
 )
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.ports import Credential, Store
+from hivemind.services.access import AccessService, resolve_write_scope
 from hivemind.services.chain import supersession_chain
 from hivemind.services.governance import (
     GovernanceService,
@@ -50,18 +51,20 @@ ERR_AGENT_UNRESOLVED = "agent_unresolved"
 
 @dataclass(frozen=True, slots=True)
 class McpHivemind:
-    """The object the six tool functions operate on.
+    """The object the tool functions operate on.
 
-    Holds the three services plus the store (for ``hive_get`` /
-    ``hive_list``, which the services do not expose) and the acting
-    ``credential`` (the agent identity that all writes / governance act
-    as, per SPEC §8.1 / ADR 0008).
+    Holds the services, the store (for ``hive_get`` / ``hive_list`` / the
+    access-plane verbs, which the services do not expose), the acting
+    ``credential`` (the agent identity all writes / governance act as,
+    per SPEC §8.1 / ADR 0008), and the ``access_service`` (the
+    registration / fleet / trust verbs, ADRs 0011-0012).
     """
 
     store: Store
     write_service: WriteService
     search_service: SearchService
     governance_service: GovernanceService
+    access_service: AccessService
     search_config: SearchConfig
     credential: Credential
 
@@ -228,10 +231,16 @@ async def hive_write(
     try:
         parsed_kind = Kind(kind)
         parsed_sources = _parse_sources(sources)
+        # The write-scope is resolved from the credential (ADRs 0011-0012):
+        # the default is the highest scope the trust level permits, an
+        # out-of-permission scope is rejected, and the entry's ``author``
+        # is the agent's registered name (verified server-side, ADR 0012).
+        resolution = resolve_write_scope(cred, scope)
+        resolved_author = author or (cred.agent_name or cred.user_id)
         draft = EntryDraft(
             kind=parsed_kind,
             summary=summary,
-            author=author or cred.user_id,
+            author=resolved_author,
             agent=resolved_agent,
             body=body,
             payload=payload,
@@ -239,9 +248,12 @@ async def hive_write(
             tags=tuple(tags or ()),
             occurred_at=_parse_dt(occurred_at, "occurred_at"),
             importance=importance,
-            scope=scope,
+            scope=resolution.scope,
+            fleet_id=resolution.fleet_id,
             supersedes=tuple(supersedes or ()),
         )
+    except PermissionDenied as exc:
+        return _error(ERR_PERMISSION_DENIED, str(exc))
     except ValueError as exc:
         return _error(ERR_INVALID_INPUT, str(exc))
     try:
@@ -288,7 +300,9 @@ async def hive_search(
         )
     except ValueError as exc:
         return _error(ERR_INVALID_INPUT, str(exc))
-    hits = await app.search_service.search(query, filters, limit, offset=offset)
+    hits = await app.search_service.search(
+        query, filters, limit, offset=offset, visibility=app.credential.visibility()
+    )
     return {"count": len(hits), "hits": [_hit_dict(h) for h in hits]}
 
 
@@ -346,7 +360,12 @@ async def hive_list(
     except ValueError as exc:
         return _error(ERR_INVALID_INPUT, str(exc))
     effective_limit = limit if limit is not None else app.search_config.default_limit
-    entries = await app.store.list_entries(filters, limit=effective_limit, offset=offset)
+    entries = await app.store.list_entries(
+        filters,
+        limit=effective_limit,
+        offset=offset,
+        visibility=app.credential.visibility(),
+    )
     return {"count": len(entries), "entries": [_entry_dict(e) for e in entries]}
 
 
@@ -410,4 +429,31 @@ async def hive_feedback(
             "note": fb.note,
             "updated_at": fb.updated_at.isoformat() if fb.updated_at else None,
         },
+    }
+
+
+async def hive_register(
+    app: McpHivemind,
+    name: str,
+    owner_alias: str | None = None,
+) -> dict[str, object]:
+    """Register (or re-register) an agent (ADR 0012).
+
+    Gated on the org or admin key (a low-privilege bootstrap act); creates
+    a ``pending`` agent (level 0, no fleet). Re-registering a pending name
+    is idempotent; an *active* name is a conflict (the name stays reserved
+    — pick a new one, ADR 0012). The agent is dormant until an admin
+    activates it (sets its trust level + home fleet and issues its key).
+    """
+    try:
+        agent = await app.access_service.register(name, app.credential, owner_alias=owner_alias)
+    except PermissionDenied as exc:
+        return _error(ERR_PERMISSION_DENIED, str(exc))
+    except ValueError as exc:
+        return _error("name_conflict", str(exc))
+    return {
+        "name": agent.name,
+        "status": agent.status.value,
+        "trust_level": agent.trust_level.value,
+        "home_fleet_id": agent.home_fleet_id,
     }

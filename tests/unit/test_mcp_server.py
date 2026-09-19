@@ -17,6 +17,7 @@ from hivemind.mcp.app import McpHivemind, hive_write
 from hivemind.mcp.server import build_server
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
+from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService, WriteService
 from hivemind.services.search import SearchService
 from tests.fakes import make_clock, make_embedder, make_search_config
@@ -28,6 +29,7 @@ EXPECTED_TOOLS = [
     "hive_list",
     "hive_withdraw",
     "hive_feedback",
+    "hive_register",
 ]
 
 
@@ -42,6 +44,7 @@ def make_app() -> McpHivemind:
         write_service=WriteService(store, embedder),
         search_service=SearchService(store, embedder, config, now_fn=clock),
         governance_service=GovernanceService(store),
+        access_service=AccessService(store),
         search_config=config,
         credential=Credential(user_id="dev", agent_id="hivemind-mcp"),
     )
@@ -52,7 +55,7 @@ def app() -> McpHivemind:
     return make_app()
 
 
-async def test_build_server_registers_exactly_six_tools(app: McpHivemind) -> None:
+async def test_build_server_registers_expected_tools(app: McpHivemind) -> None:
     server = build_server(app)
     tools = await server.list_tools()
     names = sorted(t.name for t in tools)

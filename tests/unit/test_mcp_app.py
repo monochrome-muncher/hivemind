@@ -10,18 +10,22 @@ from __future__ import annotations
 
 import pytest
 
+from hivemind.domain.access import TrustLevel
 from hivemind.mcp.app import (
     ERR_AGENT_UNRESOLVED,
+    ERR_PERMISSION_DENIED,
     McpHivemind,
     hive_feedback,
     hive_get,
     hive_list,
+    hive_register,
     hive_search,
     hive_withdraw,
     hive_write,
 )
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
+from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService, WriteService
 from hivemind.services.search import SearchService
 from tests.fakes import make_clock, make_embedder, make_search_config
@@ -29,6 +33,7 @@ from tests.fakes import make_clock, make_embedder, make_search_config
 ALICE = Credential(user_id="alice", agent_id="agent-1")
 BOB = Credential(user_id="bob", agent_id="agent-2")
 ADMIN = Credential(user_id="ops", agent_id="admin-agent", is_admin=True)
+ORG = Credential(user_id="org", is_org=True, access_controlled=True)
 
 
 def build_app(store: MemoryStore, credential: Credential, clock) -> McpHivemind:
@@ -40,6 +45,7 @@ def build_app(store: MemoryStore, credential: Credential, clock) -> McpHivemind:
         write_service=WriteService(store, embedder),
         search_service=SearchService(store, embedder, config, now_fn=clock),
         governance_service=GovernanceService(store),
+        access_service=AccessService(store),
         search_config=config,
         credential=credential,
     )
@@ -326,3 +332,43 @@ async def test_hive_search_offset_paginates(app: McpHivemind) -> None:
         await hive_write(app, kind="fact", summary=f"cohort note number {i}")
     result = await hive_search(app, "cohort note", limit=2, offset=1)
     assert result["count"] == 2
+
+
+class TestHiveRegister:
+    """The hive_register tool (ADR 0012): agent registration, org/admin-gated."""
+
+    async def test_register_with_org_key_creates_pending(self) -> None:
+        clock = make_clock()
+        store = MemoryStore(clock)
+        app = build_app(store, ORG, clock)
+        result = await hive_register(app, "alice")
+        assert "error" not in result
+        assert result["name"] == "alice"
+        assert result["status"] == "pending"
+        assert result["trust_level"] == 0
+
+    async def test_register_with_admin_key(self) -> None:
+        clock = make_clock()
+        store = MemoryStore(clock)
+        app = build_app(store, ADMIN, clock)
+        result = await hive_register(app, "bob", owner_alias="bob@example.com")
+        assert "error" not in result
+        assert result["name"] == "bob"
+
+    async def test_register_with_plain_agent_key_denied(self) -> None:
+        # A plain agent key (not org/admin) may not register (ADR 0012).
+        clock = make_clock()
+        store = MemoryStore(clock)
+        app = build_app(store, ALICE, clock)
+        result = await hive_register(app, "alice")
+        assert result["error"]["code"] == ERR_PERMISSION_DENIED
+
+    async def test_register_active_name_conflicts(self) -> None:
+        clock = make_clock()
+        store = MemoryStore(clock)
+        await store.register_agent("alice")
+        fleet = await store.create_fleet("data-eng")
+        await store.activate_agent("alice", trust_level=TrustLevel.LURKER, home_fleet_id=fleet.id)
+        app = build_app(store, ORG, clock)
+        result = await hive_register(app, "alice")
+        assert result["error"]["code"] == "name_conflict"
