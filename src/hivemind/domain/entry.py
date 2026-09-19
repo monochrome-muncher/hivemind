@@ -79,6 +79,7 @@ class EntryDraft:
     occurred_at: datetime | None = None
     importance: int = 3
     scope: str = "org"
+    fleet_id: str | None = None
     supersedes: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -126,6 +127,7 @@ class Entry:
     tags: tuple[str, ...] = ()
     importance: int = 3
     scope: str = "org"
+    fleet_id: str | None = None
     embedding: tuple[float, ...] | None = None
     embedding_model: str | None = None
     state: EntryState = EntryState.ACTIVE
@@ -145,6 +147,7 @@ class EntryFilters:
     kind: Kind | None = None
     tags: tuple[str, ...] = ()
     scope: str | None = None
+    fleet_id: str | None = None
     author: str | None = None
     agent: str | None = None
     occurred_from: datetime | None = None
@@ -160,6 +163,8 @@ class EntryFilters:
         if self.kind is not None and entry.kind is not self.kind:
             return False
         if self.scope is not None and entry.scope != self.scope:
+            return False
+        if self.fleet_id is not None and entry.fleet_id != self.fleet_id:
             return False
         if self.author is not None and entry.author != self.author:
             return False

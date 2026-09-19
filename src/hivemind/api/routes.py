@@ -23,18 +23,28 @@ from hivemind.api.deps import (
     require_credential,
 )
 from hivemind.api.schemas import (
+    ActivateAgentRequest,
+    AgentOut,
     CreateEntryRequest,
+    CreateFleetRequest,
     EntryOut,
     FeedbackOut,
     FeedbackRequest,
+    FleetOut,
     HealthOut,
     HitOut,
+    KeyIssuedOut,
+    RegisterAgentRequest,
     SearchRequest,
+    SetHomeFleetRequest,
+    SetTrustLevelRequest,
     WithdrawRequest,
 )
+from hivemind.domain.access import TrustLevel
 from hivemind.domain.entry import EntryDraft, EntryFilters, Kind, Source
 from hivemind.embeddings import EmbeddingError
 from hivemind.ports import Credential
+from hivemind.services.access import resolve_write_scope
 from hivemind.services.chain import supersession_chain
 from hivemind.services.governance import PermissionDenied
 
@@ -73,12 +83,19 @@ def build_router(app: HivemindApp) -> APIRouter:
                 "agent identity is required: use an agent sub-key or pass 'agent'",
             )
         try:
+            # The write scope is resolved from the credential (ADR 0011-0012):
+            # the default is the highest scope the trust level permits, an
+            # out-of-permission scope is rejected (403), and the entry's
+            # ``author`` is the agent's registered name (verified server-
+            # side, never self-reported — ADR 0012).
+            author = credential.agent_name or credential.user_id
+            resolution = resolve_write_scope(credential, payload.scope)
             # Draft validation (SPEC.md §4.1) runs here: a malformed draft
             # (e.g. out-of-range importance) is a 422, not a 500.
             draft = EntryDraft(
                 kind=payload.kind,
                 summary=payload.summary,
-                author=credential.user_id,
+                author=author,
                 agent=agent,
                 body=payload.body,
                 payload=payload.payload,
@@ -86,10 +103,13 @@ def build_router(app: HivemindApp) -> APIRouter:
                 tags=tuple(payload.tags),
                 occurred_at=payload.occurred_at,
                 importance=payload.importance,
-                scope=payload.scope,
+                scope=resolution.scope,
+                fleet_id=resolution.fleet_id,
                 supersedes=tuple(payload.supersedes),
             )
             entry = await app.write_service.write(draft)
+        except PermissionDenied as exc:
+            raise api_error(403, "forbidden", str(exc)) from exc
         except EmbeddingError as exc:
             # The embedding endpoint is a dependency (SPEC.md §7, ADR 0005):
             # a failure is a 502 (bad gateway), not a bare 500 (m7).
@@ -153,7 +173,10 @@ def build_router(app: HivemindApp) -> APIRouter:
         effective_limit = limit if limit is not None else app.search_config.default_limit
         effective_offset = offset if offset is not None else 0
         entries = await app.store.list_entries(
-            filters, limit=effective_limit, offset=effective_offset
+            filters,
+            limit=effective_limit,
+            offset=effective_offset,
+            visibility=credential.visibility(),
         )
         return [EntryOut.from_entry(e) for e in entries]
 
@@ -173,7 +196,11 @@ def build_router(app: HivemindApp) -> APIRouter:
             include_inactive=request.include_inactive,
         )
         hits = await app.search_service.search(
-            request.query, filters, request.limit, offset=request.offset
+            request.query,
+            filters,
+            request.limit,
+            offset=request.offset,
+            visibility=credential.visibility(),
         )
         return [HitOut.from_hit(h) for h in hits]
 
@@ -219,5 +246,129 @@ def build_router(app: HivemindApp) -> APIRouter:
             verdict=outcome.feedback.verdict,
             quality=outcome.quality,
         )
+
+    # --- Agent registration + fleet/trust management (ADRs 0011-0012) ------
+
+    @router.post("/agents", response_model=AgentOut, status_code=201)
+    async def register_agent(payload: RegisterAgentRequest, credential: require) -> AgentOut:
+        """Register (or re-register) an agent (ADR 0012). Gated on the org
+        or admin key; creates a ``pending`` agent (level 0, no fleet).
+        Re-registering a pending name is idempotent; an active name is a
+        conflict (the name stays reserved — pick a new one, ADR 0012).
+        """
+        try:
+            agent = await app.access_service.register(
+                payload.name, credential, owner_alias=payload.owner_alias
+            )
+        except PermissionDenied as exc:
+            raise api_error(403, "forbidden", str(exc)) from exc
+        except ValueError as exc:
+            raise api_error(409, "name_conflict", str(exc)) from exc
+        return AgentOut.from_agent(agent)
+
+    @router.post("/admin/fleets", response_model=FleetOut, status_code=201)
+    async def create_fleet(payload: CreateFleetRequest, credential: require) -> FleetOut:
+        """Create a named fleet (admin-gated, ADR 0012)."""
+        try:
+            fleet = await app.access_service.create_fleet(payload.name, credential)
+        except PermissionDenied as exc:
+            raise api_error(403, "forbidden", str(exc)) from exc
+        except ValueError as exc:
+            raise api_error(409, "fleet_exists", str(exc)) from exc
+        return FleetOut.from_fleet(fleet)
+
+    @router.get("/admin/fleets", response_model=list[FleetOut])
+    async def list_fleets(credential: require) -> list[FleetOut]:
+        """List fleets (admin-gated, ADR 0012)."""
+        try:
+            fleets = await app.access_service.list_fleets(credential)
+        except PermissionDenied as exc:
+            raise api_error(403, "forbidden", str(exc)) from exc
+        return [FleetOut.from_fleet(f) for f in fleets]
+
+    @router.get("/admin/agents", response_model=list[AgentOut])
+    async def list_agents(credential: require) -> list[AgentOut]:
+        """List registered agents (admin-gated, ADR 0012)."""
+        try:
+            agents = await app.access_service.list_agents(credential)
+        except PermissionDenied as exc:
+            raise api_error(403, "forbidden", str(exc)) from exc
+        return [AgentOut.from_agent(a) for a in agents]
+
+    @router.post("/admin/agents/{name}/activate", response_model=KeyIssuedOut)
+    async def activate_agent(
+        name: str, payload: ActivateAgentRequest, credential: require
+    ) -> KeyIssuedOut:
+        """Activate a pending agent (admin-gated, ADR 0012): set trust
+        level + home fleet, flip to ``active``, and issue the agent key
+        **once** (returned here, never stored again).
+        """
+        try:
+            _agent, key = await app.access_service.activate(
+                name,
+                TrustLevel(payload.trust_level),
+                payload.home_fleet_id,
+                credential,
+            )
+        except PermissionDenied as exc:
+            raise api_error(403, "forbidden", str(exc)) from exc
+        except KeyError as exc:
+            raise api_error(404, "not_found", str(exc)) from exc
+        return KeyIssuedOut(key=key)
+
+    @router.put("/admin/agents/{name}/trust-level", response_model=AgentOut)
+    async def set_trust_level(
+        name: str, payload: SetTrustLevelRequest, credential: require
+    ) -> AgentOut:
+        """Promote/demote an agent's trust level (admin-gated, ADR 0011).
+        Demotion to level 0 is *dormant* (key still valid, no access) —
+        distinct from revocation (ADR 0012).
+        """
+        try:
+            agent = await app.access_service.set_trust_level(
+                name, TrustLevel(payload.trust_level), credential
+            )
+        except PermissionDenied as exc:
+            raise api_error(403, "forbidden", str(exc)) from exc
+        except KeyError as exc:
+            raise api_error(404, "not_found", str(exc)) from exc
+        return AgentOut.from_agent(agent)
+
+    @router.put("/admin/agents/{name}/home-fleet", response_model=AgentOut)
+    async def set_home_fleet(
+        name: str, payload: SetHomeFleetRequest, credential: require
+    ) -> AgentOut:
+        """Re-parent an agent to a new home fleet (admin-gated, ADR 0011).
+        The agent's earlier ``fleet``-scoped entries stay in the fleet
+        they were written into (never re-parented).
+        """
+        try:
+            agent = await app.access_service.set_home_fleet(name, payload.home_fleet_id, credential)
+        except PermissionDenied as exc:
+            raise api_error(403, "forbidden", str(exc)) from exc
+        except KeyError as exc:
+            raise api_error(404, "not_found", str(exc)) from exc
+        return AgentOut.from_agent(agent)
+
+    @router.delete("/admin/agents/{name}")
+    async def revoke_agent(name: str, credential: require) -> None:
+        """Revoke an agent's key (admin-gated, ADR 0012). The agent record
+        + name stay reserved (dormant); the key is dead.
+        """
+        try:
+            await app.access_service.revoke(name, credential)
+        except PermissionDenied as exc:
+            raise api_error(403, "forbidden", str(exc)) from exc
+
+    @router.post("/admin/org-key/rotate", response_model=KeyIssuedOut)
+    async def rotate_org_key(credential: require) -> KeyIssuedOut:
+        """Rotate the shared org key — the cluster kill switch (ADR 0012).
+        All prior org keys stop working; the new key is returned once.
+        """
+        try:
+            key = await app.access_service.rotate_org_key(credential)
+        except PermissionDenied as exc:
+            raise api_error(403, "forbidden", str(exc)) from exc
+        return KeyIssuedOut(key=key)
 
     return router

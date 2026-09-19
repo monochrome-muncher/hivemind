@@ -71,10 +71,43 @@ CREATE TABLE IF NOT EXISTS feedbacks (
 );
 
 -- Credentials (ADR 0008): key_hash is the sha256 of the raw API key.
+-- The v2 access model (ADR 0012) reinterprets `kind` (org/agent/admin) and
+-- adds `agent_name` (the registered agent an agent-key binds to; the
+-- agent's trust level + home fleet live on the `agents` row, ADR 0011).
 CREATE TABLE IF NOT EXISTS credentials (
     key_hash   text PRIMARY KEY,
-    kind       text NOT NULL CHECK (kind IN ('user', 'agent', 'admin')),
+    kind       text NOT NULL CHECK (kind IN ('org', 'user', 'agent', 'admin')),
     user_id    text NOT NULL,
     agent_id   text,
+    agent_name text,
     created_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- Access control (ADRs 0011-0012): fleets + registered agents, and the
+-- entry's fleet reference (an entry is fixed to the fleet it was written
+-- into, ADR 0011; re-parenting an agent never moves existing entries).
+CREATE TABLE IF NOT EXISTS fleets (
+    id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    name       text NOT NULL UNIQUE,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS agents (
+    name           text PRIMARY KEY,
+    status         text NOT NULL DEFAULT 'pending'
+                   CHECK (status IN ('pending', 'active')),
+    trust_level    int  NOT NULL DEFAULT 0
+                   CHECK (trust_level BETWEEN 0 AND 3),
+    home_fleet_id  uuid REFERENCES fleets (id),
+    owner_alias    text,
+    created_at     timestamptz NOT NULL DEFAULT now(),
+    activated_at   timestamptz
+);
+
+-- New column on an existing `entries` table (idempotent; a fresh DB already
+-- has it via the CREATE above only if re-created, so ADD COLUMN IF NOT
+-- EXISTS is the portable path).
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS fleet_id uuid;
+CREATE INDEX IF NOT EXISTS entries_fleet_idx ON entries (fleet_id);
+CREATE INDEX IF NOT EXISTS entries_author_idx ON entries (author);
+CREATE INDEX IF NOT EXISTS agents_fleet_idx ON agents (home_fleet_id);

@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse
 from hivemind.api.schemas import ErrorBody
 from hivemind.config import SearchConfig
 from hivemind.ports import Authenticator, Credential, Embedder, Store
+from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService, WriteService
 from hivemind.services.search import SearchService
 
@@ -33,6 +34,7 @@ class HivemindApp:
     write_service: WriteService
     governance_service: GovernanceService
     search_service: SearchService
+    access_service: AccessService
 
 
 class ApiError(Exception):

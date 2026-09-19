@@ -17,19 +17,45 @@ import pytest
 from hivemind.api.deps import HivemindApp, create_app
 from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
+from hivemind.domain.access import TrustLevel
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from tests.fakes import make_clock, make_embedder, make_search_config
 
 
 class FakeAuthenticator:
-    """Dict-backed Authenticator (SPEC.md §8.1): user + agent sub-keys."""
+    """Dict-backed Authenticator (SPEC.md §8.1, ADR 0012): user + agent
+    sub-keys + key management (the full ``Authenticator`` port)."""
 
     def __init__(self, keys: dict[str, Credential]) -> None:
         self._keys = keys
+        self._org_key: str | None = None
 
     async def verify(self, key: str) -> Credential | None:
         return self._keys.get(key)
+
+    async def issue_agent_key(self, agent_name: str) -> str:
+        raw_key = f"hm_agent_{agent_name}"
+        self._keys[raw_key] = Credential(
+            user_id=agent_name, agent_name=agent_name, access_controlled=True
+        )
+        return raw_key
+
+    async def revoke_agent_key(self, agent_name: str) -> None:
+        raw_key = f"hm_agent_{agent_name}"
+        self._keys.pop(raw_key, None)
+
+    async def rotate_org_key(self) -> str:
+        if self._org_key is not None:
+            self._keys.pop(self._org_key, None)
+        self._org_key = "hm_org"
+        self._keys[self._org_key] = Credential(user_id="org", is_org=True, access_controlled=True)
+        return self._org_key
+
+    async def issue_admin_key(self) -> str:
+        raw_key = "hm_admin_new"
+        self._keys[raw_key] = Credential(user_id="admin", is_admin=True)
+        return raw_key
 
 
 def make_authenticator() -> FakeAuthenticator:
@@ -39,6 +65,8 @@ def make_authenticator() -> FakeAuthenticator:
             "key-bob": Credential(user_id="bob", agent_id="agent-bob"),
             "key-alice-user": Credential(user_id="alice"),
             "key-admin": Credential(user_id="ops", agent_id="admin-agent", is_admin=True),
+            # v2 access-model keys (ADRs 0011-0012):
+            "key-org": Credential(user_id="org", is_org=True, access_controlled=True),
         }
     )
 
@@ -644,3 +672,116 @@ class TestNaiveDatetimeNormalization:
         assert aware.occurred_at is not None
         assert aware.occurred_at.tzinfo is not None
         assert aware.occurred_at.utcoffset() is not None
+
+
+class TestAccessEndpoints:
+    """Agent registration + fleet/trust management (ADRs 0011-0012, SPEC §12)."""
+
+    async def test_register_agent_with_org_key(self) -> None:
+        client = make_client(make_hivemind_app())
+        async with client:
+            resp = await client.post(
+                "/v1/agents",
+                json={"name": "alice"},
+                headers={"X-API-Key": "key-org"},
+            )
+        assert resp.status_code == 201
+        agent = resp.json()
+        assert agent["name"] == "alice"
+        assert agent["status"] == "pending"
+        assert agent["trust_level"] == 0
+
+    async def test_register_agent_with_agent_key_denied(self) -> None:
+        # An agent key (not org/admin) may not register (ADR 0012).
+        client = make_client(make_hivemind_app())
+        async with client:
+            resp = await client.post(
+                "/v1/agents",
+                json={"name": "alice"},
+                headers={"X-API-Key": "key-alice"},
+            )
+        assert resp.status_code == 403
+        assert resp.json()["error"]["code"] == "forbidden"
+
+    async def test_create_fleet_admin_only(self) -> None:
+        client = make_client(make_hivemind_app())
+        async with client:
+            ok = await client.post(
+                "/v1/admin/fleets",
+                json={"name": "data-eng"},
+                headers={"X-API-Key": "key-admin"},
+            )
+            assert ok.status_code == 201
+            assert ok.json()["name"] == "data-eng"
+            denied = await client.post(
+                "/v1/admin/fleets",
+                json={"name": "ml"},
+                headers={"X-API-Key": "key-org"},
+            )
+        assert denied.status_code == 403
+
+    async def test_activate_agent_issues_key_once(self) -> None:
+        app = make_hivemind_app()
+        # Seed: a pending agent + a home fleet.
+        await app.store.register_agent("alice")
+        fleet = await app.store.create_fleet("data-eng")
+        client = make_client(app)
+        async with client:
+            resp = await client.post(
+                "/v1/admin/agents/alice/activate",
+                json={"trust_level": 2, "home_fleet_id": fleet.id},
+                headers={"X-API-Key": "key-admin"},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["key"]  # the raw key is returned once
+        # The agent is now active at level 2 with the home fleet.
+        agent = await app.store.get_agent("alice")
+        assert agent is not None
+        assert agent.status.value == "active"
+        assert agent.trust_level.value == 2
+
+    async def test_set_trust_level_demotes(self) -> None:
+        app = make_hivemind_app()
+        await app.store.register_agent("alice")
+        fleet = await app.store.create_fleet("data-eng")
+        await app.store.activate_agent(
+            "alice", trust_level=TrustLevel.PRIVILEGED, home_fleet_id=fleet.id
+        )
+        client = make_client(app)
+        async with client:
+            resp = await client.put(
+                "/v1/admin/agents/alice/trust-level",
+                json={"trust_level": 0},
+                headers={"X-API-Key": "key-admin"},
+            )
+        assert resp.status_code == 200
+        # Demotion to level 0 is *dormant* (still active, no access).
+        assert resp.json()["trust_level"] == 0
+        assert resp.json()["status"] == "active"
+
+    async def test_revoke_agent_admin_only(self) -> None:
+        app = make_hivemind_app()
+        await app.store.register_agent("alice")
+        client = make_client(app)
+        async with client:
+            denied = await client.delete(
+                "/v1/admin/agents/alice", headers={"X-API-Key": "key-org"}
+            )
+            assert denied.status_code == 403
+            ok = await client.delete(
+                "/v1/admin/agents/alice", headers={"X-API-Key": "key-admin"}
+            )
+        assert ok.status_code == 200
+
+    async def test_rotate_org_key_admin_only(self) -> None:
+        client = make_client(make_hivemind_app())
+        async with client:
+            denied = await client.post(
+                "/v1/admin/org-key/rotate", headers={"X-API-Key": "key-org"}
+            )
+            assert denied.status_code == 403
+            ok = await client.post(
+                "/v1/admin/org-key/rotate", headers={"X-API-Key": "key-admin"}
+            )
+        assert ok.status_code == 200
+        assert ok.json()["key"]  # a new raw org key is returned once
