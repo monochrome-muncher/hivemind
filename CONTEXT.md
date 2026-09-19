@@ -9,11 +9,11 @@ This file is the canonical glossary for the project. It is a vocabulary, not a s
 ### Core concepts
 
 **Hivemind**:
-The shared memory service for one organization. One organization, one pool.
+The shared memory service for one organization. One organization, one pool (partitioned by fleets and trust levels — §12, ADR 0011).
 _Avoid_: backend, memory database
 
 **Entry**:
-One unit of memory: a distilled observation, analysis, or decision written by an agent and readable by every agent in the organization.
+One unit of memory: a distilled observation, analysis, or decision written by an agent, visible according to its scope and the reader's trust level (§12, ADR 0011).
 _Avoid_: memory, record, note, post
 
 **Kind**:
@@ -35,12 +35,12 @@ _Avoid_: ruling, resolution
 ### Provenance
 
 **Author**:
-The human who owns an entry, determined by the credential used to write it. The author is accountable for the entries under their key.
-_Avoid_: owner, creator, user
+The verified writer of an entry: the writing agent's registered name, filled server-side from the agent key (ADR 0012). The author is accountable for the entries under that name.
+_Avoid_: owner (that is the human's alias, not the entry's writer), creator, user
 
 **Agent**:
-The agent instance (framework + instance identifier) that performed a read or write. Recorded on every entry for provenance.
-_Avoid_: bot, worker, client
+A registered identity in the cluster: a unique name bound to one agent key (trust level + home fleet, ADR 0012). Recorded on every entry as `author` — server-verified, never self-reported.
+_Avoid_: bot, worker, client, user
 
 **Embedding model**:
 The model that produced an entry's vector; recorded on the entry so vector provenance is traceable (SPEC §7, ADR 0005).
@@ -93,22 +93,56 @@ Disabling an agent's Hivemind integration for a session (e.g., during non-analys
 _Avoid_: pause, session disable, opt-out
 
 **Scope**:
-The intended audience of an entry. In v1 every entry is org-wide; the field exists as a seam for future narrowing (team, project, channel).
-_Avoid_: namespace, channel (those are the future concepts, not the v1 value)
+The intended audience of an entry: `self` (the writing agent only), `fleet` (the home fleet it was written into — fixed at write time), or `org` (legacy, read-only). An omitted scope resolves to the highest value the writer's trust level permits (§12, ADR 0011).
+_Avoid_: namespace, channel (those are the §10 extensions), visibility
+
+### Access (ADR 0011–0012)
+
+**Fleet**:
+A named group of agents that can share `fleet`-scoped entries. Created by the admin; no deletion in this increment (ADR 0011).
+_Avoid_: team, group, channel (the §10 extension), org (that is the whole cluster)
+
+**Home fleet**:
+The single fleet an agent belongs to (ADR 0011). Admin-assigned and re-assignable; an agent's earlier entries stay in the fleet they were written into — moving an agent does not move its entries.
+_Avoid_: primary group, default fleet
+
+**Trust level**:
+The agent's cumulative privilege ladder, 0–3: `untrusted` (nothing), `lurker` (own + home-fleet read, own write), `contributor` (+ home-fleet write), `privileged` (+ read across all fleets, writes stay local).
+_Avoid_: role, permission, clearance
+
+**Pending agent**:
+An agent that has registered (unique name + owner alias) but not been activated: trust level `untrusted`, no data-plane access. Activation by the admin issues its agent key (ADR 0012).
+_Avoid_: registered agent (ambiguous with active), queued agent, provisional agent
+
+**Registration**:
+An agent's first contact with Hivemind: a unique agent name plus the owner's alias, creating a pending record (ADR 0012). Names are durable — revocation does not release a name.
+_Avoid_: signup, onboarding, enrollment
+
+**Owner alias**:
+The human name or address (username or email) an agent self-reports at registration so the admin can deliver its agent key out-of-band (ADR 0012). A contact field on the agent record, not a per-entry provenance claim.
+_Avoid_: author (that is the entry's verified writer), user, account
+
+**Org key**:
+The single credential shared by the whole cluster (ADR 0012). It gates registration + health only — all data-plane privilege comes from the agent key. Rotating it is the cluster-wide kill switch.
+_Avoid_: shared key, membership key, cluster key
+
+**Admin key**:
+The single credential gating the admin surface: agent/fleet listing, activation, promote/demote, revoke, fleet creation, org-key rotation (ADR 0012).
+_Avoid_: operator key, root key, superuser
 
 ### Surfaces
 
 **MCP runner**:
-The process that exposes Hivemind's six `hive_*` tools to an agent. Three kinds: the dev runner (`hivemind-mcp`, in-memory, stdio), the per-agent Postgres-backed runner (`hivemind-mcp-pg`, ADR 0009, one process per agent), and the hostable streamable-HTTP runner (`hivemind-mcp-http`, ADR 0010, one shared process, many agents). All read/write the same pool; every write carries verified provenance.
+The process that exposes Hivemind's seven `hive_*` tools to an agent. Three kinds: the dev runner (`hivemind-mcp`, in-memory, stdio), the per-agent Postgres-backed runner (`hivemind-mcp-pg`, ADR 0009, one process per agent), and the hostable streamable-HTTP runner (`hivemind-mcp-http`, ADR 0010, one shared process, many agents). All read/write the same pool; every write carries verified provenance.
 _Avoid_: Hivemind client (implies a library client), agent connector
 
-**Per-agent credential**:
-The agent-scoped sub-key (ADR 0008) bound to one (author, agent instance); it is what a `hivemind-mcp-pg` process presents so its writes carry verified provenance. One key per agent, distinct per agent, verified once at process start.
-_Avoid_: token, API key (say "credential" or "sub-key"; "API key" is the generic REST term)
+**Agent key**:
+The admin-issued credential bound to one registered agent (ADR 0012, supersedes the ADR 0008 sub-key). Carries the agent's trust level and home fleet; it is what the MCP runners present so their writes carry verified provenance. One key per agent, returned once at activation.
+_Avoid_: sub-key (the ADR 0008 term), token, API key (that is the generic REST term; say "agent key")
 
 **Per-request credential**:
-The acting identity a hostable `hivemind-mcp-http` process resolves **per HTTP request**: the request presents an agent-scoped sub-key (ADR 0008), a thin ASGI middleware verifies it against the `credentials` table (ADR 0008), and the shared, stateless services are re-bound to that credential on every tool dispatch. Because it is resolved per request, revocation is immediate (ADR 0010).
-_Avoid_: per-agent credential (that is the stdio runner's one-credential-per-process model), session identity
+The acting identity a hostable `hivemind-mcp-http` process resolves **per HTTP request**: the request presents an agent key (ADR 0012), a thin ASGI middleware verifies it against the `credentials` table (ADR 0012), and the shared, stateless services are re-bound to that credential on every tool dispatch. Because it is resolved per request, revocation is immediate (ADR 0010).
+_Avoid_: agent key (that is the credential itself; this term is the per-request resolution of it), session identity
 
 ### Retrieval
 

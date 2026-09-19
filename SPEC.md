@@ -10,7 +10,7 @@ The problem it solves:
 
 > Analyst 1 works with agent 1 on day 1 and records important findings. Days later, analyst 2 sits down with agent 2. Agent 2 should be able to **dig through** the important facts and analyses agent 1 left behind — instead of the organization re-learning the same things, or analyst 2 re-doing analysis work that already exists.
 
-v1 is **explicit-write, flat-pool, single-org, self-hosted**. Everything else is a documented extension (§10).
+v1 is **explicit-write, flat-pool, single-org, self-hosted**. Everything else is a documented extension (§10). Fleet scoping and trust levels (v2, ADRs 0011–0012) supersede the flat pool — see §12.
 
 ## 2. Canonical scenario
 
@@ -25,7 +25,7 @@ Hivemind deliberately stands on existing work rather than reinventing it. Borrow
 
 | Project | What Hivemind borrows | What Hivemind deliberately does differently |
 |---|---|---|
-| **Caura** (fleet memory, MCP-native) | Supersession ranking invariant (a successor always outranks what it superseded); agent-scoped credentials; outcome feedback as a first-class signal | No trust tiers, no knowledge graph, no passive "Interviewer" capture, no Redis, no managed SaaS — one Postgres, one org |
+| **Caura** (fleet memory, MCP-native) | Supersession ranking invariant (a successor always outranks what it superseded); agent-scoped credentials; outcome feedback as a first-class signal | No trust tiers, no knowledge graph, no passive "Interviewer" capture, no Redis, no managed SaaS — one Postgres, one org *(the trust-tier + fleet-scoping divergence was re-adopted in v2: ADRs 0011–0012, §12)* |
 | **agentmemory** (coding-agent memory) | Progressive disclosure (compact hits → explicit get); hybrid BM25+vector retrieval with rank fusion; decay-aware ranking | Explicit, deliberate writes only (no hook-based passive capture of every tool call); no P2P mesh |
 | **Zep / Graphiti** | Temporal validity thinking (an entry's "memory date" vs. its ingest time) | Flat entries with derived validity — no temporal knowledge graph in v1 |
 | **Mem0** | Simple write/search ergonomics as the core API shape | Shared org pool rather than per-user memory; org-governed, not library-embedded |
@@ -50,10 +50,10 @@ One entry entity; a `kind` enum carries the distinction. There are no other read
 | `tags` | string[] (optional) | Free-form labels, filterable |
 | `occurred_at` | timestamptz | **The "memory date."** When the observation/analysis actually happened. Defaults to now; **backdatable** (e.g., "fact learned from a January report, written up today") |
 | `created_at` | timestamptz | Ingest time, server-assigned |
-| `author` | user id | From the credential (who the agent acts for) |
-| `agent` | agent instance id | Framework/instance identifier |
+| `author` | agent name | The agent's registered name, server-filled from the agent key (never self-reported; ADR 0012) |
+| `agent` | agent instance id | Framework/instance identifier (retired from writes in v2 — ADR 0012; kept in the schema for existing data) |
 | `importance` | 1–5 (int) | Writer-declared; feeds retrieval scoring |
-| `scope` | `org` (v1) | The flat-pool tag; seam for future narrowing (§10, ADR 0002) |
+| `scope` | `self` \| `fleet` \| `org` (legacy) | The entry's audience: the author agent only, the home fleet it was written into (fixed at write time), or the legacy org-wide value (read-only); an omitted scope resolves to the highest value the writer's trust level permits (§12, ADR 0011) |
 | `embedding` | vector(dim) | Generated at write time (§7) |
 | `state` | `active` \| `superseded` \| `withdrawn` | Default `active` |
 | `supersedes` | entry id[] (optional) | Ids of entries this entry supersedes; targets flip to `superseded` |
@@ -87,7 +87,7 @@ Counts are per-entry (any reporter). Defaults: no feedback → `quality = 1.0`. 
 
 ### 4.3 What is *not* in the model (v1)
 
-No sessions on the server (the kill switch is client-side, ADR 0003). No personal spaces, no channels, no knowledge graph, no binary blobs (artifacts are **referenced**, not stored), no user/role tables beyond credential mapping, no UI.
+No sessions on the server (the kill switch is client-side, ADR 0003). No knowledge graph, no binary blobs (artifacts are **referenced**, not stored), no user/role tables beyond credential mapping, no UI. *(v2 adds the `agents` + `fleets` registration tables — ADR 0012 — and self/fleet scoping — ADR 0011; still no user/role model and no UI.)*
 
 ## 5. API surface
 
@@ -104,8 +104,16 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | `POST /v1/entries/{id}/withdraw` | Withdraw own entry (or any, with admin credential) |
 | `POST /v1/entries/{id}/feedback` | Report `helpful`/`stale`/`wrong` (+note) |
 | `GET /v1/health` | Liveness/readiness |
+| `POST /v1/agents` | Register an agent (org key or admin key; `{name, owner_alias?}`) → pending agent (§12, ADR 0012) |
+| `GET /v1/admin/agents` | List agents: status, trust level, home fleet, owner alias (admin key) |
+| `GET /v1/admin/fleets` | List fleets (admin key) |
+| `POST /v1/admin/fleets` | Create a fleet (admin key; no deletion in this increment — ADR 0011) |
+| `POST /v1/admin/agents/{name}/activate` | Set trust level (default `lurker`) + home fleet; **returns the generated agent key once** (admin key; §12.3) |
+| `PATCH /v1/admin/agents/{name}` | Change trust level / home fleet — demotion to `untrusted` = dormant (admin key) |
+| `POST /v1/admin/agents/{name}/revoke` | Kill the agent's key (admin key; the name stays reserved — ADR 0012) |
+| `POST /v1/admin/org-key/rotate` | Rotate the shared org key — the cluster-wide kill switch (admin key) |
 
-### 5.2 MCP tools (the agent's mental model — six verbs)
+### 5.2 MCP tools (the agent's mental model — seven verbs)
 
 | Tool | Maps to |
 |---|---|
@@ -115,6 +123,7 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | `hive_list` | `GET /v1/entries` |
 | `hive_withdraw` | `POST /v1/entries/{id}/withdraw` |
 | `hive_feedback` | `POST /v1/entries/{id}/feedback` |
+| `hive_register` | `POST /v1/agents` (org key only — the agent's first contact with Hivemind; §12.3) |
 
 A typical agent prompt contract: *"recall before you analyze; write what you learn; supersede, don't duplicate; report when something you relied on proved wrong."*
 
@@ -165,15 +174,15 @@ A fresh, important, well-remembered entry beats a slightly-more-similar but stal
 
 ## 8. Identity, credentials, deployment
 
-### 8.1 Credentials (ADR 0008)
+### 8.1 Credentials (ADR 0012)
 
 | Credential | Binds | Effect |
 |---|---|---|
-| **user key** | the human author | Entry's `author` = key's user; the agent self-reports its instance id via header/body |
-| **agent sub-key** | (user, agent instance) | `author` **and** `agent` are server-filled from the key — agent attribution is verified, not self-reported |
-| **admin key** | operator | May withdraw any entry |
+| **org key** | the whole cluster (shared) | Gates registration + health only; rotation is the cluster-wide kill switch (ADR 0012) |
+| **agent key** | one registered agent | Carries the agent's trust level + home fleet; `author` is server-filled with the agent's registered name (§12, ADR 0012) |
+| **admin key** | the operator | The admin surface: activate / promote / demote / revoke, fleets, org-key rotation (§12.4) |
 
-v1 has no OAuth/SSO; keys are issued by the org operator. (An org with an IdP is a v2 story.)
+No OAuth/SSO; keys are issued by the org operator via the admin surface (§12.4). (An org with an IdP is a later story.) This table supersedes ADR 0008's key kinds (`user`/`agent`/`admin`) — ADR 0012. The agent key is now the credential the MCP runners verify (ADRs 0009–0010).
 
 ### 8.2 Deployment (ADR 0007)
 
@@ -189,17 +198,17 @@ Turning Hivemind off for a session is a **client-side act**: the agent's Hivemin
 
 The MCP stdio surface ships **two runners**:
 
-* **`hivemind-mcp`** — the **dev** path: in-memory store + local hash embedder + a hard-coded `dev` credential. Zero network, ephemeral, single identity; for exercising the six `hive_*` tools with no dependencies.
-* **`hivemind-mcp-pg`** — the **production** path: a DSN-backed `PgStore` + the operator-configured OpenAI-compatible embedder (ADR 0005), with the acting credential resolved by verifying `HIVEMIND_MCP_KEY` against the Postgres `credentials` table (ADR 0008).
+* **`hivemind-mcp`** — the **dev** path: in-memory store + local hash embedder + a hard-coded `dev` credential. Zero network, ephemeral, single identity; for exercising the seven `hive_*` tools with no dependencies.
+* **`hivemind-mcp-pg`** — the **production** path: a DSN-backed `PgStore` + the operator-configured OpenAI-compatible embedder (ADR 0005), with the acting credential resolved by verifying `HIVEMIND_MCP_KEY` against the Postgres `credentials` table (ADR 0012).
 
-**Unified multi-agent pool:** several agents each run their own `hivemind-mcp-pg` process with a distinct `HIVEMIND_MCP_KEY` (an agent-scoped sub-key, ADR 0008). All of them read/write the **same** Postgres pool over a **unified** MCP interface (the identical six `hive_*` tools) while every write carries that agent's *verified* provenance (author + agent instance, server-filled from the key). Revoking an agent's key revokes its access immediately. The dev runner (`hivemind-mcp`) is unchanged.
+**Unified multi-agent pool:** several agents each run their own `hivemind-mcp-pg` process with a distinct `HIVEMIND_MCP_KEY` (an **agent key**, ADR 0012). All of them read/write the **same** Postgres pool over a **unified** MCP interface (the identical seven `hive_*` tools) while every write carries that agent's *verified* provenance (its registered name, server-filled from the key). Revoking an agent's key revokes its access immediately. The dev runner (`hivemind-mcp`) is unchanged.
 
 ### 8.5 The hostable streamable-HTTP runner (ADR 0010)
 
-`hivemind-mcp-http` is the **hostable, multi-agent** form of the Postgres-backed runner (ADR 0009): a **single** long-lived streamable-HTTP process serving an **unlimited** number of agents, each authenticating **per request** with its own agent-scoped key (ADR 0008).
+`hivemind-mcp-http` is the **hostable, multi-agent** form of the Postgres-backed runner (ADR 0009): a **single** long-lived streamable-HTTP process serving an **unlimited** number of agents, each authenticating **per request** with its own agent key (ADR 0012).
 
-* **One process, one pool, per-request auth.** One `hivemind-mcp-http` process owns one `PgStore` + one embedder + one `Authenticator` pool (the same DSN / embedder / credentials the REST API uses). Each request presents its own key; a thin ASGI middleware verifies it against the `credentials` table (ADR 0008) and re-binds the shared, *stateless* services to that credential on every tool dispatch. One process = many agents.
-* **Immediate revocation.** Because the credential is resolved **per request** (not once at process start, as in `hivemind-mcp-pg`), `hivemind-keys revoke` takes effect on the very next request — no restart required.
+* **One process, one pool, per-request auth.** One `hivemind-mcp-http` process owns one `PgStore` + one embedder + one `Authenticator` pool (the same DSN / embedder / credentials the REST API uses). Each request presents its own key; a thin ASGI middleware verifies it against the `credentials` table (ADR 0012) and re-binds the shared, *stateless* services to that credential on every tool dispatch. One process = many agents.
+* **Immediate revocation.** Because the credential is resolved **per request** (not once at process start, as in `hivemind-mcp-pg`), admin revocation (`POST /v1/admin/agents/{name}/revoke`) takes effect on the very next request — no restart required.
 * **Per-request transport: stateless streamable-HTTP.** The server runs the SDK's stateless streamable-HTTP transport (one request = one self-contained exchange). The pool is stateless with respect to sessions, so this is a natural fit.
 * **Deployment shape: a detached compose service.** `make mcp-http` ships the runner as a detached docker-compose service (one container built from the repo's Dockerfile), published on host port 8088 by default (override with `HIVEMIND_MCP_HTTP_PORT`). The container reads/writes the shared pool and embeds via the local vLLM on the compose network, so pool + embedder + runner come up with a single `docker compose up -d` (ADR 0007).
 
@@ -208,8 +217,8 @@ The MCP stdio surface ships **two runners**:
 | runner | process | pool | credential | revocation |
 |---|---|---|---|---|
 | `hivemind-mcp` (dev, ADR 0009) | in-memory | in-memory (ephemeral) | hard-coded `dev` | n/a |
-| `hivemind-mcp-pg` (per-agent, ADR 0009) | one per agent | shared Postgres | `HIVEMIND_MCP_KEY`, verified at start | next restart |
-| `hivemind-mcp-http` (hostable, ADR 0010) | one shared | shared Postgres | per-request, verified per request | immediate |
+| `hivemind-mcp-pg` (per-agent, ADR 0009) | one per agent | shared Postgres | agent key (`HIVEMIND_MCP_KEY`, ADR 0012), verified at start | next restart |
+| `hivemind-mcp-http` (hostable, ADR 0010) | one shared | shared Postgres | agent key (ADR 0012), verified per request | immediate |
 
 Both `hivemind-mcp-pg` and `hivemind-mcp-http` read/write the same pool with the same verified provenance; choose the per-agent runner for a small dev setup, the hostable runner when many agents share one machine.
 
@@ -218,8 +227,8 @@ Both `hivemind-mcp-pg` and `hivemind-mcp-http` read/write the same pool with the
 - No human-facing UI (agent-only; a read-only web search is a later extension)
 - No passive capture of transcripts/tool events (explicit writes only, ADR 0004)
 - No knowledge graph, no entity extraction, no auto-contradiction detection
-- No curation/verification workflow, no trust tiers, no PII pipeline
-- No personal spaces, channels, or multi-tenant SaaS
+- No curation/verification workflow, no PII pipeline (trust levels are §12, not a non-goal — ADR 0011)
+- No multi-tenant SaaS (single-org; self/fleet scoping is §12, ADR 0011)
 - No binary/artifact storage (references only)
 - No OAuth/SSO, no per-agent learned retrieval tuning
 - No HA, sharding, or Redis-backed scale-out
@@ -229,8 +238,8 @@ Both `hivemind-mcp-pg` and `hivemind-mcp-http` read/write the same pool with the
 | Extension | Trigger to build it |
 |---|---|
 | **Passive capture** — ingest raw session transcripts, distill with an LLM (crash-safe, dedup'd) | "Agents forget to write" becomes the bottleneck |
-| **Private staging + publish** — write to a personal scratch, promote to the pool | Analysts want to try analyses before sharing |
-| **Namespaces / channels** — team/project/topic scopes with membership | The flat pool grows too noisy; `scope` tag is the seam |
+| **Private staging + publish** — write to a personal scratch, *promote* it to the fleet | Analysts want to try analyses before sharing. *Partially satisfied: the `self` scope (ADR 0011) is the personal scratch; what remains is promotion — a curation story (see Curation workflow)* |
+| **Namespaces / channels** — multi-fleet membership, per-fleet promotion, cross-fleet writes | The flat pool grows too noisy. *Partially satisfied: fleets + one home fleet per agent (ADR 0011) cover single-fleet needs; multi-fleet membership is the remaining extension* |
 | **Binary artifacts** — S3-backed artifact store behind `sources` | Analysis references outgrow file/URL references |
 | **Knowledge graph** — entity extraction + graph-expanded retrieval | Cross-entry entity linking pays off in retrieval quality |
 | **LLM-assisted contradiction detection** — flag likely conflicts for human review | Explicit supersession can't keep up with contradictory writes |
@@ -250,3 +259,48 @@ change behavior.
 3. **Pagination style** — resolved: **offset** (v1); cursor is a later extension.
 4. **`hive_list` default order** — resolved: **most-recent-first** (`created_at DESC, id DESC`), confirmed in the first implementation.
 5. **Embedding prefix length** — resolved: a bounded **~2048-char body prefix (≈ 512 tokens)** default; tune against real long-form entries in the §10 validation work (ROADMAP Tier 3).
+
+## 12. Fleets, trust levels, and registration (v2 — ADRs 0011–0012)
+
+This section supersedes the flat-pool commitment of §1 and the "no trust tiers" non-goal of §9. ADR 0011 owns the fleet/trust model; ADR 0012 owns the credential model. This section is the spec commitment; the ADRs own the *why*.
+
+### 12.1 Fleets and scope
+
+* A **fleet** is a named group of agents. The admin creates fleets (`POST /v1/admin/fleets`); **no fleet deletion in this increment** (ADR 0011).
+* Every active agent belongs to exactly **one home fleet** — admin-assigned, re-assignable at any time via `PATCH /v1/admin/agents/{name}`. One home fleet per agent in this increment; multi-fleet membership is a §10 extension.
+* An entry is written into exactly one scope: `self` (the author agent only) or `fleet` (the home fleet it was written into). **An entry's fleet membership is fixed at write time** — when an agent moves fleets, its earlier entries stay in the old fleet (ADR 0011).
+* Legacy `scope='org'` entries are **read-only**: no new write may use `org`; they remain readable at trust level 1+.
+* **Default scope**: an omitted scope resolves to the **highest value the writer's trust level permits** (`lurker` → `self`; `contributor`/`privileged` → `fleet`). An *explicit* out-of-permission scope (e.g. `fleet` at `lurker`) is a permission error naming the required level.
+
+### 12.2 Trust levels (cumulative)
+
+| Level | Name | Reads | Writes |
+|---|---|---|---|
+| 0 | `untrusted` | nothing | nothing |
+| 1 | `lurker` | own + home fleet | own (`self`) |
+| 2 | `contributor` | own + home fleet | own + home fleet |
+| 3 | `privileged` | own + home fleet + **every fleet** | own + home fleet only (read-broad, write-local) |
+
+* At level 0 (`untrusted`) — what pending and demoted agents sit at — all read verbs return **empty results** (the visibility filter hides everything); writes and feedback are explicit permission errors.
+* Reads beyond visibility behave **as if the entry does not exist** (no existence leaking).
+* `self`-scoped entries are private to their author **even at level 3** (that is what `self` is for).
+* **Feedback and withdrawal follow readability**: an agent may feedback entries it can read, and withdraw its own entries; the admin key may withdraw any entry (the §4.1 withdrawal rules now ride the trust matrix).
+
+### 12.3 Registration and activation
+
+1. **Registration** — an agent (or a human on its behalf, via `POST /v1/agents` — the seam a future human-facing frontend plugs into) registers a **unique agent name** plus the **owner's alias** (a username or email the admin uses to reach the owner). `hive_register` (MCP, org key only) or `POST /v1/agents` (REST; org key or admin key). This creates a **pending** agent at trust level 0 — no data-plane access. *Name already pending → idempotent no-op ("registered — awaiting admin activation"); name already active → "name already registered to an active agent — choose a new name."*
+2. **Activation** — the admin activates via `POST /v1/admin/agents/{name}/activate`, setting the trust level (default `lurker`) and the home fleet (required; fleets are created first). The service generates the agent key and returns it **once** — the only moment a key is ever shown. The admin delivers the key **out-of-band** (chat/DM/email, using the owner alias); the service has **no notification channel**.
+3. **Live traffic** — an active agent presents the org key + its agent key on every request; per-agent / per-request verification (ADRs 0009–0010) applies unchanged. **Demotion** (to `untrusted`) and **revocation** are distinct verbs: demotion keeps the key valid but the agent can do nothing; revocation kills the key (hard dead end) and the **name stays reserved** (ADR 0012).
+
+### 12.4 Admin surface
+
+| Endpoint | Effect |
+|---|---|
+| `GET /v1/admin/agents` / `GET /v1/admin/fleets` | List agents (status, level, home fleet, alias) / fleets |
+| `POST /v1/admin/fleets` | Create a fleet (ADR 0011: no deletion in this increment) |
+| `POST /v1/admin/agents/{name}/activate` | Set level + home fleet; **returns the agent key once** (§12.3) |
+| `PATCH /v1/admin/agents/{name}` | Change level / home fleet (demotion to `untrusted` = dormant) |
+| `POST /v1/admin/agents/{name}/revoke` | Kill the key (name stays reserved; re-activation issues a *new* key) |
+| `POST /v1/admin/org-key/rotate` | Rotate the org key — the cluster-wide kill switch |
+
+The single admin key gates this surface; admin-issued entries use the reserved name `admin` (ADR 0012).
