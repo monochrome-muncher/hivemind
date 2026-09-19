@@ -26,6 +26,12 @@ from hivemind.config import Settings
 
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
+# The applied schema generation (ADR 0013): a small marker recorded in
+# ``schema_migrations`` after each successful migrate, so an operator can
+# tell whether a live pool is up to date. **Bump this on every schema.sql
+# change** (each schema generation gets a new version).
+SCHEMA_VERSION = "5"
+
 
 def _schema_sql(dim: int) -> str:
     """Load schema.sql with the embedding dimension substituted in."""
@@ -108,12 +114,40 @@ async def migrate(dsn: str, dim: int = 1536) -> None:
 
     Each top-level statement is executed individually, so the migration
     is safe to re-run and the plpgsql trigger function (a dollar-quoted
-    block containing ``;``) is handled correctly.
+    block containing ``;``) is handled correctly. After the schema is
+    applied, the schema generation (``SCHEMA_VERSION``, ADR 0013) is
+    recorded in ``schema_migrations`` (a single upsert), so a live pool
+    can be checked for drift.
     """
     conn = await asyncpg.connect(dsn)
     try:
         for statement in _split_statements(_schema_sql(dim)):
             await conn.execute(statement)
+        # Record the applied schema generation (ADR 0013 forward-migration
+        # tracking): a single upsert, so re-running migrate is idempotent.
+        await conn.execute(
+            "INSERT INTO schema_migrations (version) VALUES ($1) "
+            "ON CONFLICT (version) DO UPDATE SET applied_at = now()",
+            SCHEMA_VERSION,
+        )
+    finally:
+        await conn.close()
+
+
+async def current_schema_version(dsn: str) -> str | None:
+    """The applied schema generation (ADR 0013), or ``None`` if the pool
+    has never been migrated (the ``schema_migrations`` table is absent
+    or empty). Used by the ops / health surface to check for drift.
+    """
+    conn = await asyncpg.connect(dsn)
+    try:
+        try:
+            row = await conn.fetchrow(
+                "SELECT version FROM schema_migrations ORDER BY applied_at DESC LIMIT 1"
+            )
+        except asyncpg.exceptions.UndefinedTableError:
+            return None  # pre-ADR-0013 pool (no schema_migrations table)
+        return row["version"] if row is not None else None
     finally:
         await conn.close()
 
