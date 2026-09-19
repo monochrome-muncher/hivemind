@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from hivemind.config import SearchConfig
+from hivemind.domain.access import Visibility
 from hivemind.domain.entry import (
     Entry,
     EntryFilters,
@@ -79,6 +80,8 @@ class SearchService:
         filters: EntryFilters | None = None,
         limit: int | None = None,
         offset: int | None = None,
+        *,
+        visibility: Visibility | None = None,
     ) -> list[Hit]:
         """Run a hybrid query and return compact hits, best first.
 
@@ -93,10 +96,15 @@ class SearchService:
         offset = offset or 0
         top_k = self._config.candidate_top_k
 
-        # 1. Dual-stream retrieval.
-        keyword_ids = await self._store.search_keyword(query, filters, top_k)
+        # 1. Dual-stream retrieval (restricted to the caller's visibility,
+        # ADR 0011 when ``visibility`` is supplied).
+        keyword_ids = await self._store.search_keyword(
+            query, filters, top_k, visibility=visibility
+        )
         query_vector = await self._embedder.embed_text(query)
-        vector_ids = await self._store.search_vector(query_vector, filters, top_k)
+        vector_ids = await self._store.search_vector(
+            query_vector, filters, top_k, visibility=visibility
+        )
 
         # 2. RRF fusion (configurable weights, SPEC.md §6.2).
         fused = rrf_fuse(

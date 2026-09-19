@@ -13,6 +13,7 @@ from typing import Any
 
 from pydantic import BaseModel, field_validator
 
+from hivemind.domain.access import Agent, Fleet
 from hivemind.domain.entry import Entry, Kind, SourceType
 from hivemind.domain.feedback import Verdict
 from hivemind.services.search import Hit
@@ -207,3 +208,85 @@ class ErrorBody(BaseModel):
 
     code: str
     message: str
+
+
+# --- Access-control (ADRs 0011-0012, SPEC §12) -----------------------------
+
+
+class RegisterAgentRequest(BaseModel):
+    """Register an agent (ADR 0012): the name is the org-unique identity
+    (it becomes the entry ``author``); ``owner_alias`` is an optional
+    owner contact for the org key holder (out-of-band delivery)."""
+
+    name: str
+    owner_alias: str | None = None
+
+
+class ActivateAgentRequest(BaseModel):
+    """Activate a pending agent (ADR 0012): set its trust level + home
+    fleet; the agent key is issued once."""
+
+    trust_level: int
+    home_fleet_id: str
+
+
+class SetTrustLevelRequest(BaseModel):
+    """Promote/demote an agent's trust level (ADR 0011)."""
+
+    trust_level: int
+
+
+class SetHomeFleetRequest(BaseModel):
+    """Re-parent an agent to a new home fleet (ADR 0011)."""
+
+    home_fleet_id: str
+
+
+class CreateFleetRequest(BaseModel):
+    """Create a named fleet (ADR 0011)."""
+
+    name: str
+
+
+class AgentOut(BaseModel):
+    """A registered agent (ADR 0012)."""
+
+    name: str
+    status: str
+    trust_level: int
+    home_fleet_id: str | None
+    owner_alias: str | None = None
+    created_at: str | None = None
+    activated_at: str | None = None
+
+    @classmethod
+    def from_agent(cls, agent: Agent) -> AgentOut:
+        return cls(
+            name=agent.name,
+            status=agent.status.value,
+            trust_level=agent.trust_level.value,
+            home_fleet_id=agent.home_fleet_id,
+            owner_alias=agent.owner_alias,
+            created_at=agent.created_at.isoformat() if agent.created_at else None,
+            activated_at=agent.activated_at.isoformat() if agent.activated_at else None,
+        )
+
+
+class FleetOut(BaseModel):
+    """A fleet (ADR 0011)."""
+
+    id: str
+    name: str
+    created_at: str
+
+    @classmethod
+    def from_fleet(cls, fleet: Fleet) -> FleetOut:
+        return cls(id=fleet.id, name=fleet.name, created_at=fleet.created_at.isoformat())
+
+
+class KeyIssuedOut(BaseModel):
+    """A freshly issued key (returned **once**, ADR 0012)."""
+
+    key: str
+
+    note: str = "store this key now; it is shown only once"

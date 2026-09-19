@@ -25,6 +25,13 @@ from typing import Any
 
 import asyncpg
 
+from hivemind.domain.access import (
+    Agent,
+    AgentStatus,
+    Fleet,
+    TrustLevel,
+    Visibility,
+)
 from hivemind.domain.entry import (
     Entry,
     EntryDraft,
@@ -42,24 +49,45 @@ from hivemind.store.pool import make_pool
 INSERT_ENTRY = """
 INSERT INTO entries (
     id, kind, summary, body, payload, sources, tags,
-    occurred_at, author, agent, importance, scope,
+    occurred_at, author, agent, importance, scope, fleet_id,
     embedding, embedding_model
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
 )
 """
-# 14 explicit columns/values; ``created_at`` falls back to the schema's
+# 15 explicit columns/values; ``created_at`` falls back to the schema's
 # ``now()`` default, so it is not in the value list.
 
 _ENTRY_COLUMNS = """
     id, kind, summary, body, payload, sources, tags, occurred_at,
-    created_at, author, agent, importance, scope, embedding,
+    created_at, author, agent, importance, scope, fleet_id, embedding,
     embedding_model, state, superseded_by, withdrawn_reason
 """
 
 SELECT_ENTRY = "SELECT " + _ENTRY_COLUMNS + " FROM entries WHERE id = $1"
 
 SELECT_ENTRIES = "SELECT " + _ENTRY_COLUMNS + " FROM entries WHERE id = ANY($1)"
+
+# --- Fleet / agent access-control SQL (ADRs 0011-0012) ---------------------
+
+SELECT_FLEET_BY_NAME = "SELECT 1 FROM fleets WHERE name = $1"
+INSERT_FLEET = "INSERT INTO fleets (name) VALUES ($1) RETURNING id, name, created_at"
+GET_FLEET = "SELECT id, name, created_at FROM fleets WHERE id = $1"
+LIST_FLEETS = "SELECT id, name, created_at FROM fleets ORDER BY created_at"
+
+GET_AGENT = "SELECT * FROM agents WHERE name = $1"
+INSERT_AGENT = (
+    "INSERT INTO agents (name, owner_alias, status, trust_level) "
+    "VALUES ($1, $2, 'pending', 0) RETURNING *"
+)
+BACKFILL_AGENT_ALIAS = "UPDATE agents SET owner_alias = $2 WHERE name = $1 AND owner_alias IS NULL"
+LIST_AGENTS = "SELECT * FROM agents ORDER BY name"
+ACTIVATE_AGENT = (
+    "UPDATE agents SET status = 'active', trust_level = $2, home_fleet_id = $3, "
+    "activated_at = now() WHERE name = $1 RETURNING *"
+)
+SET_AGENT_LEVEL = "UPDATE agents SET trust_level = $2 WHERE name = $1 RETURNING *"
+SET_AGENT_FLEET = "UPDATE agents SET home_fleet_id = $2 WHERE name = $1 RETURNING *"
 
 FLIP_SUPERSEDED = """
 UPDATE entries
@@ -104,13 +132,18 @@ GROUP BY entry_id
 """
 
 
-def _filter_conditions(filters: EntryFilters) -> tuple[list[str], list[Any]]:
-    """Translate an ``EntryFilters`` into WHERE-fragments + parameters.
+def _filter_conditions(
+    filters: EntryFilters, visibility: Visibility | None = None
+) -> tuple[list[str], list[Any]]:
+    """Translate an ``EntryFilters`` (and an optional ``Visibility``, ADR
+    0011) into WHERE-fragments + parameters.
 
     Mirrors ``EntryFilters.matches`` exactly (SPEC.md §5.3): by default
-    only active entries are visible; ``include_inactive`` lifts the
-    state restriction. Tags use AND-semantics (``tags @> $n``: the
-    entry must carry every listed tag).
+    only active entries are visible; ``include_inactive`` lifts the state
+    restriction. Tags use AND-semantics (``tags @> $n``). When
+    ``visibility`` is supplied, an extra clause restricts the result to
+    entries visible to that reader (the trust-level matrix, ADR 0011);
+    ``None`` keeps the v1 flat-pool behavior.
     """
     clauses: list[str] = []
     params: list[Any] = []
@@ -140,7 +173,53 @@ def _filter_conditions(filters: EntryFilters) -> tuple[list[str], list[Any]]:
     if filters.created_to is not None:
         add("created_at <= ?", filters.created_to)
 
+    vis_clause = _visibility_clause(visibility, params)
+    if vis_clause is not None:
+        clauses.append(vis_clause)
+
     return clauses, params
+
+
+def _visibility_clause(
+    visibility: Visibility | None, params: list[Any]
+) -> str | None:
+    """The SQL fragment restricting results to entries visible to
+    ``visibility`` (ADR 0011). Appends its parameters to ``params`` and
+    returns the clause (or ``None`` for no restriction).
+
+    Mirrors ``domain.access.entry_is_visible``:
+      * ``None`` / admin  -> no clause (see everything / v1 flat pool).
+      * level 0 (untrusted) -> ``FALSE`` (see nothing).
+      * level 1/2 (lurker/contributor) -> ``org`` OR own ``self`` OR
+        (own ``fleet`` within the home fleet).
+      * level 3 (privileged) -> ``org`` OR own ``self`` OR any ``fleet``
+        (read-broad, write-local).
+    """
+    if visibility is None or visibility.is_admin:
+        return None
+    if visibility.level == TrustLevel.UNTRUSTED:
+        return "FALSE"
+
+    def _p(value: Any) -> str:
+        params.append(value)
+        return f"${len(params)}"
+
+    name_p = _p(visibility.name)
+    if visibility.level == TrustLevel.PRIVILEGED:
+        # L3: read-broad — every fleet's ``fleet`` entries are visible.
+        return (
+            "(scope = 'org' "
+            f"OR (scope = 'self' AND author = {name_p}) "
+            "OR scope = 'fleet')"
+        )
+    # L1/L2: own + home fleet (+ legacy org). Fleet entries are visible
+    # only if they are the reader's own or in the reader's home fleet.
+    home_p = _p(visibility.home_fleet_id)
+    return (
+        "(scope = 'org' "
+        f"OR (scope = 'self' AND author = {name_p}) "
+        f"OR (scope = 'fleet' AND (author = {name_p} OR fleet_id = {home_p})))"
+    )
 
 
 def _is_valid_uuid(value: str) -> bool:
@@ -216,6 +295,7 @@ class PgStore:
                     draft.agent,
                     draft.importance,
                     draft.scope,
+                    draft.fleet_id,
                     embedding,
                     embedding_model,  # SPEC.md §7: model that produced the vector
                 )
@@ -247,10 +327,19 @@ class PgStore:
         return {str(row["id"]): _row_to_entry(row) for row in rows}
 
     async def list_entries(
-        self, filters: EntryFilters, limit: int = 20, offset: int = 0
+        self,
+        filters: EntryFilters,
+        limit: int = 20,
+        offset: int = 0,
+        *,
+        visibility: Visibility | None = None,
     ) -> list[Entry]:
-        """Filter-only listing (SPEC.md §5.1 ``GET /v1/entries``)."""
-        clauses, params = _filter_conditions(filters)
+        """Filter-only listing (SPEC.md §5.1 ``GET /v1/entries``).
+
+        When ``visibility`` is supplied, only entries visible to that
+        reader are returned (ADR 0011); ``None`` keeps the v1 flat pool.
+        """
+        clauses, params = _filter_conditions(filters, visibility)
         where = " AND ".join(clauses) if clauses else "TRUE"
         sql = (
             "SELECT "
@@ -292,11 +381,19 @@ class PgStore:
 
     # -- search -------------------------------------------------------------------
 
-    async def search_keyword(self, query: str, filters: EntryFilters, limit: int) -> list[str]:
+    async def search_keyword(
+        self,
+        query: str,
+        filters: EntryFilters,
+        limit: int,
+        *,
+        visibility: Visibility | None = None,
+    ) -> list[str]:
         """Ranked entry IDs by ``ts_rank`` over the maintained tsvector
         (SPEC.md §6.2 keyword stream). ``plainto_tsquery`` tokenizes the
-        query safely (no operator injection)."""
-        clauses, params = _filter_conditions(filters)
+        query safely (no operator injection). When ``visibility`` is
+        supplied, only visible entries are candidates (ADR 0011)."""
+        clauses, params = _filter_conditions(filters, visibility)
         query_idx = len(params) + 1
         clauses.append(f"search_tsv @@ plainto_tsquery('english', ${query_idx})")
         params.append(query)
@@ -314,11 +411,18 @@ class PgStore:
         return [str(r["id"]) for r in rows]
 
     async def search_vector(
-        self, embedding: list[float], filters: EntryFilters, limit: int
+        self,
+        embedding: list[float],
+        filters: EntryFilters,
+        limit: int,
+        *,
+        visibility: Visibility | None = None,
     ) -> list[str]:
         """Ranked entry IDs by cosine distance to ``embedding``
-        (SPEC.md §6.2 vector stream; the pgvector ``<=>`` operator)."""
-        clauses, params = _filter_conditions(filters)
+        (SPEC.md §6.2 vector stream; the pgvector ``<=>`` operator).
+        When ``visibility`` is supplied, only visible entries are
+        candidates (ADR 0011)."""
+        clauses, params = _filter_conditions(filters, visibility)
         clauses.append("embedding IS NOT NULL")
         vec_idx = len(params) + 1
         where = " AND ".join(clauses) if clauses else "TRUE"
@@ -374,6 +478,108 @@ class PgStore:
             counts[str(r["entry_id"])] = (r["helpful"], r["stale"], r["wrong"])
         return counts
 
+    # -- fleets (ADR 0011) ------------------------------------------------------
+
+    async def create_fleet(self, name: str) -> Fleet:
+        """Create a named fleet (ADR 0011). ``ValueError`` if the name
+        already exists."""
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            dup = await conn.fetchrow(SELECT_FLEET_BY_NAME, name)
+            if dup is not None:
+                raise ValueError(f"fleet already exists: {name!r}")
+            row = await conn.fetchrow(INSERT_FLEET, name)
+        assert row is not None
+        return _row_to_fleet(row)
+
+    async def list_fleets(self) -> list[Fleet]:
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(LIST_FLEETS)
+        return [_row_to_fleet(r) for r in rows]
+
+    async def get_fleet(self, fleet_id: str) -> Fleet | None:
+        if not _is_valid_uuid(fleet_id):
+            return None
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(GET_FLEET, fleet_id)
+        return _row_to_fleet(row) if row is not None else None
+
+    # -- agent registration / activation (ADR 0012) ----------------------------
+
+    async def register_agent(self, name: str, owner_alias: str | None = None) -> Agent:
+        """Register (or re-register) an agent (ADR 0012). Idempotent: an
+        existing record is returned (only ``owner_alias`` back-filled if it
+        was missing); a new record is ``pending`` (level 0, no fleet).
+        """
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            existing = await conn.fetchrow(GET_AGENT, name)
+            if existing is None:
+                row = await conn.fetchrow(INSERT_AGENT, name, owner_alias)
+            else:
+                if owner_alias is not None:
+                    await conn.execute(BACKFILL_AGENT_ALIAS, name, owner_alias)
+                row = await conn.fetchrow(GET_AGENT, name)
+        assert row is not None
+        return _row_to_agent(row)
+
+    async def get_agent(self, name: str) -> Agent | None:
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(GET_AGENT, name)
+        return _row_to_agent(row) if row is not None else None
+
+    async def list_agents(self) -> list[Agent]:
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(LIST_AGENTS)
+        return [_row_to_agent(r) for r in rows]
+
+    async def activate_agent(
+        self, name: str, *, trust_level: TrustLevel, home_fleet_id: str
+    ) -> Agent:
+        """Activate a pending agent: set trust level + home fleet, flip to
+        ``active`` (ADR 0012). ``KeyError`` if unknown.
+        """
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            existing = await conn.fetchrow(GET_AGENT, name)
+            if existing is None:
+                raise KeyError(f"unknown agent: {name}")
+            row = await conn.fetchrow(ACTIVATE_AGENT, name, trust_level.value, home_fleet_id)
+        assert row is not None
+        return _row_to_agent(row)
+
+    async def set_agent_trust_level(self, name: str, level: TrustLevel) -> Agent:
+        """Promote/demote an agent's trust level (ADR 0011). ``KeyError``
+        if unknown. Demotion to level 0 is *dormant* (still active, no
+        access) — distinct from revocation (ADR 0012).
+        """
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            existing = await conn.fetchrow(GET_AGENT, name)
+            if existing is None:
+                raise KeyError(f"unknown agent: {name}")
+            row = await conn.fetchrow(SET_AGENT_LEVEL, name, level.value)
+        assert row is not None
+        return _row_to_agent(row)
+
+    async def set_agent_home_fleet(self, name: str, fleet_id: str) -> Agent:
+        """Re-parent an agent to a new home fleet (ADR 0011). The agent's
+        earlier ``fleet``-scoped entries stay in the fleet they were written
+        into (never re-parented). ``KeyError`` if unknown.
+        """
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            existing = await conn.fetchrow(GET_AGENT, name)
+            if existing is None:
+                raise KeyError(f"unknown agent: {name}")
+            row = await conn.fetchrow(SET_AGENT_FLEET, name, fleet_id)
+        assert row is not None
+        return _row_to_agent(row)
+
 
 # --- mappers --------------------------------------------------------------------
 
@@ -424,9 +630,28 @@ def _row_to_entry(row: asyncpg.Record) -> Entry:
         tags=tuple(row["tags"]) if row["tags"] else (),
         importance=row["importance"],
         scope=row["scope"],
+        fleet_id=str(row["fleet_id"]) if row["fleet_id"] else None,
         embedding=_embedding_to_tuple(row["embedding"]),
         embedding_model=row["embedding_model"],
         state=EntryState(row["state"]),
         superseded_by=str(row["superseded_by"]) if row["superseded_by"] else None,
         withdrawn_reason=row["withdrawn_reason"],
+    )
+
+
+def _row_to_fleet(row: asyncpg.Record) -> Fleet:
+    """Map a ``fleets`` row to the domain ``Fleet`` (ADR 0011)."""
+    return Fleet(id=str(row["id"]), name=row["name"], created_at=row["created_at"])
+
+
+def _row_to_agent(row: asyncpg.Record) -> Agent:
+    """Map an ``agents`` row to the domain ``Agent`` (ADR 0012)."""
+    return Agent(
+        name=row["name"],
+        status=AgentStatus(row["status"]),
+        trust_level=TrustLevel(row["trust_level"]),
+        home_fleet_id=str(row["home_fleet_id"]) if row["home_fleet_id"] else None,
+        owner_alias=row["owner_alias"],
+        created_at=row["created_at"],
+        activated_at=row["activated_at"],
     )

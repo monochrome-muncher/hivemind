@@ -17,9 +17,19 @@ from __future__ import annotations
 
 import math
 import threading
+import uuid
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime
 
+from hivemind.domain.access import (
+    Agent,
+    AgentStatus,
+    Fleet,
+    TrustLevel,
+    Visibility,
+    entry_is_visible,
+)
 from hivemind.domain.entry import (
     Entry,
     EntryDraft,
@@ -63,6 +73,8 @@ class MemoryStore:
         self._lock = threading.RLock()
         self._entries: dict[str, Entry] = {}
         self._feedback: dict[tuple[str, str, str], Feedback] = {}
+        self._fleets: dict[str, Fleet] = {}
+        self._agents: dict[str, Agent] = {}
 
     # -- write path -------------------------------------------------------
 
@@ -93,6 +105,7 @@ class MemoryStore:
             tags=tuple(draft.tags),
             importance=draft.importance,
             scope=draft.scope,
+            fleet_id=draft.fleet_id,
             embedding=tuple(embedding) if embedding is not None else None,
             embedding_model=embedding_model,
         )
@@ -149,24 +162,30 @@ class MemoryStore:
         filters: EntryFilters,
         limit: int = 20,
         offset: int = 0,
+        *,
+        visibility: Visibility | None = None,
     ) -> list[Entry]:
         with self._lock:
             matches = [
-                _copy(entry) for entry in self._entries.values() if filters.matches(_copy(entry))
+                _copy(entry)
+                for entry in self._entries.values()
+                if filters.matches(_copy(entry)) and self._visible(entry, visibility)
             ]
             # Most-recent-first (SPEC.md §11.4), tie-broken by id DESC to
             # match PgStore's `ORDER BY created_at DESC, id DESC` exactly.
             matches.sort(key=lambda e: (e.created_at, e.id), reverse=True)
             return matches[offset : offset + limit]
 
-    async def search_keyword(self, query: str, filters: EntryFilters, limit: int) -> list[str]:
+    async def search_keyword(
+        self, query: str, filters: EntryFilters, limit: int, *, visibility: Visibility | None = None
+    ) -> list[str]:
         query_tokens = _tokens(query)
         if not query_tokens:
             return []
         with self._lock:
             rows: list[tuple[float, datetime, str]] = []
             for entry in self._entries.values():
-                if not filters.matches(entry):
+                if not filters.matches(entry) or not self._visible(entry, visibility):
                     continue
                 haystack = _tokens(embeddable_text(entry.summary, entry.body)) | {
                     tag.lower() for tag in entry.tags
@@ -179,12 +198,17 @@ class MemoryStore:
             return [eid for _, _, eid in rows[:limit]]
 
     async def search_vector(
-        self, vector: list[float], filters: EntryFilters, limit: int
+        self,
+        vector: list[float],
+        filters: EntryFilters,
+        limit: int,
+        *,
+        visibility: Visibility | None = None,
     ) -> list[str]:
         with self._lock:
             rows: list[tuple[float, datetime, str]] = []
             for entry in self._entries.values():
-                if not filters.matches(entry):
+                if not filters.matches(entry) or not self._visible(entry, visibility):
                     continue
                 if entry.embedding is None:
                     continue
@@ -195,6 +219,14 @@ class MemoryStore:
             rows.sort(key=lambda r: (-r[0], r[1], r[2]))
             return [eid for _, _, eid in rows[:limit]]
 
+    def _visible(self, entry: Entry, visibility: Visibility | None) -> bool:
+        """Whether ``entry`` passes the optional visibility filter.
+
+        ``visibility is None`` → v1 flat-pool behavior (no filter);
+        otherwise apply the trust-level matrix (ADR 0011).
+        """
+        return visibility is None or entry_is_visible(entry, visibility)
+
     async def feedback_counts(self, entry_id: str) -> FeedbackCounts:
         with self._lock:
             return _count_for(self._feedback, entry_id)
@@ -204,6 +236,102 @@ class MemoryStore:
             return {
                 eid: _count_for(self._feedback, eid) for eid in entry_ids if eid in self._entries
             }
+
+    # -- fleets (ADR 0011) --------------------------------------------------
+
+    async def create_fleet(self, name: str) -> Fleet:
+        """Create a named fleet (ADR 0011). ``ValueError`` if the name exists."""
+        with self._lock:
+            for existing in self._fleets.values():
+                if existing.name == name:
+                    raise ValueError(f"fleet already exists: {name!r}")
+            fleet = Fleet(id=str(uuid.uuid4()), name=name, created_at=self._clock())
+            self._fleets[fleet.id] = fleet
+            return fleet
+
+    async def list_fleets(self) -> list[Fleet]:
+        with self._lock:
+            return list(self._fleets.values())
+
+    async def get_fleet(self, fleet_id: str) -> Fleet | None:
+        with self._lock:
+            return self._fleets.get(fleet_id)
+
+    # -- agent registration / activation (ADR 0012) --------------------------
+
+    async def register_agent(self, name: str, owner_alias: str | None = None) -> Agent:
+        """Register (or re-register) an agent (ADR 0012). Idempotent: an
+        existing record is returned unchanged (only ``owner_alias`` is
+        back-filled if newly supplied); a new record is ``pending``.
+        """
+        with self._lock:
+            existing = self._agents.get(name)
+            if existing is not None:
+                if owner_alias is not None and existing.owner_alias is None:
+                    existing = replace(existing, owner_alias=owner_alias)
+                    self._agents[name] = existing
+                return existing
+            agent = Agent(
+                name=name,
+                status=AgentStatus.PENDING,
+                trust_level=TrustLevel.UNTRUSTED,
+                owner_alias=owner_alias,
+                created_at=self._clock(),
+            )
+            self._agents[name] = agent
+            return agent
+
+    async def get_agent(self, name: str) -> Agent | None:
+        with self._lock:
+            return self._agents.get(name)
+
+    async def list_agents(self) -> list[Agent]:
+        with self._lock:
+            return list(self._agents.values())
+
+    async def activate_agent(
+        self, name: str, *, trust_level: TrustLevel, home_fleet_id: str
+    ) -> Agent:
+        """Activate a pending agent: set trust level + home fleet, flip to
+        ``active`` (ADR 0012). ``KeyError`` if unknown."""
+        with self._lock:
+            agent = self._agents.get(name)
+            if agent is None:
+                raise KeyError(f"unknown agent: {name}")
+            activated = replace(
+                agent,
+                status=AgentStatus.ACTIVE,
+                trust_level=trust_level,
+                home_fleet_id=home_fleet_id,
+                activated_at=self._clock(),
+            )
+            self._agents[name] = activated
+            return activated
+
+    async def set_agent_trust_level(self, name: str, level: TrustLevel) -> Agent:
+        """Promote/demote an agent's trust level (ADR 0011). ``KeyError`` if
+        unknown. Demotion to level 0 is *dormant* (still active, no access).
+        """
+        with self._lock:
+            agent = self._agents.get(name)
+            if agent is None:
+                raise KeyError(f"unknown agent: {name}")
+            updated = replace(agent, trust_level=level)
+            self._agents[name] = updated
+            return updated
+
+    async def set_agent_home_fleet(self, name: str, fleet_id: str) -> Agent:
+        """Re-parent an agent to a new home fleet (ADR 0011). The agent's
+        earlier ``fleet``-scoped entries stay in the fleet they were written
+        into (never re-parented). ``KeyError`` if unknown.
+        """
+        with self._lock:
+            agent = self._agents.get(name)
+            if agent is None:
+                raise KeyError(f"unknown agent: {name}")
+            updated = replace(agent, home_fleet_id=fleet_id)
+            self._agents[name] = updated
+            return updated
 
 
 def _count_for(feedback: dict[tuple[str, str, str], Feedback], entry_id: str) -> FeedbackCounts:
@@ -241,6 +369,7 @@ def _with_state(
         tags=entry.tags,
         importance=entry.importance,
         scope=entry.scope,
+        fleet_id=entry.fleet_id,
         embedding=entry.embedding,
         embedding_model=entry.embedding_model,
         state=state,
@@ -265,6 +394,7 @@ def _copy(entry: Entry) -> Entry:
         tags=tuple(entry.tags),
         importance=entry.importance,
         scope=entry.scope,
+        fleet_id=entry.fleet_id,
         embedding=tuple(entry.embedding) if entry.embedding is not None else None,
         embedding_model=entry.embedding_model,
         state=entry.state,

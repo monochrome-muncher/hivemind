@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 from hivemind.config import SearchConfig
 from hivemind.domain.entry import EntryDraft, embeddable_text
 from hivemind.memstore import MemoryStore
-from hivemind.ports import entry_embeddable_text
+from hivemind.ports import Credential, entry_embeddable_text
 
 FIXED_NOW = datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC)
 
@@ -94,3 +94,61 @@ def make_search_config() -> SearchConfig:
 def make_entry_clocks(n: int) -> list[FixedClock]:
     """n independent clocks all starting at FIXED_NOW."""
     return [FixedClock(FIXED_NOW) for _ in range(n)]
+
+
+class FakeAuthenticator:
+    """An in-memory ``Authenticator`` fake for unit tests (TDD at the seam).
+
+    Implements the full ``Authenticator`` port (verify + key management,
+    ADR 0012). ``verify`` returns pre-registered credentials; key
+    management is in-memory. The org + admin keys are pre-registered.
+    """
+
+    def __init__(
+        self,
+        agent_credentials: dict[str, Credential] | None = None,
+        org_key: str = "hm_org",
+        admin_key: str = "hm_admin",
+    ) -> None:
+        self._by_key: dict[str, Credential] = {
+            org_key: Credential(user_id="org", is_org=True),
+            admin_key: Credential(user_id="admin", is_admin=True),
+        }
+        self._issued_agent_keys: dict[str, str] = {}
+        self._rotations = 0
+
+    async def verify(self, key: str) -> Credential | None:
+        return self._by_key.get(key)
+
+    async def issue_agent_key(self, agent_name: str) -> str:
+        """Issue an agent key bound to ``agent_name``; return the raw key once."""
+        raw = f"hm_agent_{agent_name}"
+        self._issued_agent_keys[agent_name] = raw
+        self._by_key[raw] = Credential(
+            user_id=agent_name, agent_name=agent_name
+        )
+        return raw
+
+    async def revoke_agent_key(self, agent_name: str) -> None:
+        raw = self._issued_agent_keys.pop(agent_name, None)
+        if raw is not None:
+            self._by_key.pop(raw, None)
+
+    async def rotate_org_key(self) -> str:
+        self._by_key.pop("hm_org" if self._rotations == 0 else f"hm_org_{self._rotations - 1}", None)
+        self._rotations += 1
+        new_key = f"hm_org_{self._rotations}"
+        self._by_key[new_key] = Credential(user_id="org", is_org=True)
+        return new_key
+
+    async def issue_admin_key(self) -> str:
+        raw = f"hm_admin_{len(self._by_key)}"
+        self._by_key[raw] = Credential(user_id="admin", is_admin=True)
+        return raw
+
+
+def make_authenticator(
+    agent_credentials: dict[str, Credential] | None = None,
+) -> FakeAuthenticator:
+    """A ``FakeAuthenticator`` with the given pre-registered agent credentials."""
+    return FakeAuthenticator(agent_credentials=agent_credentials)
