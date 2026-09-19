@@ -347,13 +347,14 @@ class TestHiveRegister:
         assert result["status"] == "pending"
         assert result["trust_level"] == 0
 
-    async def test_register_with_admin_key(self) -> None:
+    async def test_register_with_admin_key_denied(self) -> None:
+        # SPEC §5.2: the MCP hive_register verb is org-key only (the REST
+        # surface also accepts an admin key; the MCP verb does not).
         clock = make_clock()
         store = MemoryStore(clock)
         app = build_app(store, ADMIN, clock)
-        result = await hive_register(app, "bob", owner_alias="bob@example.com")
-        assert "error" not in result
-        assert result["name"] == "bob"
+        result = await hive_register(app, "bob")
+        assert result["error"]["code"] == ERR_PERMISSION_DENIED
 
     async def test_register_with_plain_agent_key_denied(self) -> None:
         # A plain agent key (not org/admin) may not register (ADR 0012).

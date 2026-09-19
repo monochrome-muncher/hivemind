@@ -53,17 +53,25 @@ class AccessService:
     # -- registration (gated: org or admin key, ADR 0012) ------------------
 
     async def register(
-        self, name: str, credential: Credential, owner_alias: str | None = None
+        self,
+        name: str,
+        credential: Credential,
+        owner_alias: str | None = None,
+        *,
+        org_only: bool = False,
     ) -> Agent:
         """Register (or re-register) an agent (ADR 0012).
 
-        Idempotent: re-registering a pending name returns the existing
-        record; an *active* name is a conflict (the name stays reserved
-        — pick a new one, ADR 0012). Registration creates a ``pending``
-        agent (level 0, no fleet); it is dormant until an admin
-        activates it.
+        Gated on the org or admin key (REST, SPEC §5.1); the MCP
+        ``hive_register`` verb is **org-key only** (SPEC §5.2) — pass
+        ``org_only=True``. Idempotent: re-registering a pending name
+        returns the existing record; an *active* name is a conflict
+        (the name stays reserved — pick a new one, ADR 0012).
         """
-        self._require_org_or_admin(credential)
+        if org_only:
+            self._require_org(credential)
+        else:
+            self._require_org_or_admin(credential)
         existing = await self._store.get_agent(name)
         if existing is not None and existing.status.value == "active":
             raise ValueError("agent name already active (name is reserved; pick a new one)")
@@ -140,6 +148,10 @@ class AccessService:
     def _require_org_or_admin(self, credential: Credential) -> None:
         if not (credential.is_org or credential.is_admin):
             raise PermissionDenied("registration requires an org or admin key (ADR 0012)")
+
+    def _require_org(self, credential: Credential) -> None:
+        if not credential.is_org:
+            raise PermissionDenied("hive_register is gated on the org key (SPEC §5.2)")
 
     def _require_admin(self, credential: Credential) -> None:
         if not credential.is_admin:

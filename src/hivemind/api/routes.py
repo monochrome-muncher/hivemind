@@ -40,11 +40,10 @@ from hivemind.api.schemas import (
     MetricsOut,
     RegisterAgentRequest,
     SearchRequest,
-    SetHomeFleetRequest,
-    SetTrustLevelRequest,
+    UpdateAgentRequest,
     WithdrawRequest,
 )
-from hivemind.domain.access import TrustLevel
+from hivemind.domain.access import Agent, TrustLevel
 from hivemind.domain.entry import EntryDraft, EntryFilters, Kind, Source
 from hivemind.embeddings import EmbeddingError
 from hivemind.ports import Credential
@@ -335,45 +334,46 @@ def build_router(app: HivemindApp) -> APIRouter:
             raise api_error(404, "not_found", str(exc)) from exc
         return KeyIssuedOut(key=key)
 
-    @router.put("/admin/agents/{name}/trust-level", response_model=AgentOut)
-    async def set_trust_level(
-        name: str, payload: SetTrustLevelRequest, credential: require
-    ) -> AgentOut:
-        """Promote/demote an agent's trust level (admin-gated, ADR 0011).
-        Demotion to level 0 is *dormant* (key still valid, no access) —
-        distinct from revocation (ADR 0012).
+    @router.patch("/admin/agents/{name}", response_model=AgentOut)
+    async def update_agent(name: str, payload: UpdateAgentRequest, credential: require) -> AgentOut:
+        """Change an agent's trust level and/or home fleet (admin-gated,
+        ADR 0011 — SPEC §5.1 ``PATCH /v1/admin/agents/{name}``).
+        Demotion to ``untrusted`` (level 0) is *dormant* (key still
+        valid, no access) — distinct from revocation (ADR 0012).
+        Re-parenting never moves the agent's earlier ``fleet``-scoped
+        entries (they stay in the fleet they were written into).
         """
-        try:
-            agent = await app.access_service.set_trust_level(
-                name, TrustLevel(payload.trust_level), credential
+        if payload.trust_level is None and payload.home_fleet_id is None:
+            raise api_error(
+                422, "update_required", "supply trust_level and/or home_fleet_id"
             )
-        except PermissionDenied as exc:
-            raise api_error(403, "forbidden", str(exc)) from exc
-        except KeyError as exc:
-            raise api_error(404, "not_found", str(exc)) from exc
-        return AgentOut.from_agent(agent)
-
-    @router.put("/admin/agents/{name}/home-fleet", response_model=AgentOut)
-    async def set_home_fleet(
-        name: str, payload: SetHomeFleetRequest, credential: require
-    ) -> AgentOut:
-        """Re-parent an agent to a new home fleet (admin-gated, ADR 0011).
-        The agent's earlier ``fleet``-scoped entries stay in the fleet
-        they were written into (never re-parented).
-        """
         try:
-            agent = await app.access_service.set_home_fleet(name, payload.home_fleet_id, credential)
+            agent: Agent | None = None
+            if payload.trust_level is not None:
+                agent = await app.access_service.set_trust_level(
+                    name, TrustLevel(payload.trust_level), credential
+                )
+            if payload.home_fleet_id is not None:
+                agent = await app.access_service.set_home_fleet(
+                    name, payload.home_fleet_id, credential
+                )
+            if agent is None:
+                # Neither field changed anything; still resolve the agent
+                # (404 for an unknown name, SPEC §5.1).
+                agent = await app.store.get_agent(name)
+                if agent is None:
+                    raise KeyError(f"unknown agent: {name}")
         except PermissionDenied as exc:
             raise api_error(403, "forbidden", str(exc)) from exc
         except KeyError as exc:
             raise api_error(404, "not_found", str(exc)) from exc
         return AgentOut.from_agent(agent)
 
-    @router.delete("/admin/agents/{name}")
+    @router.post("/admin/agents/{name}/revoke")
     async def revoke_agent(name: str, credential: require) -> None:
-        """Revoke an agent's key (admin-gated, ADR 0012). The agent record
-        + name stay reserved (dormant); the key is dead.
-        """
+        """Revoke an agent's key (admin-gated, ADR 0012 — SPEC §5.1
+        ``POST /v1/admin/agents/{name}/revoke``). The agent record +
+        name stay reserved (dormant); the key is dead."""
         try:
             await app.access_service.revoke(name, credential)
         except PermissionDenied as exc:

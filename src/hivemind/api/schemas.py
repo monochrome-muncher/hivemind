@@ -224,22 +224,20 @@ class RegisterAgentRequest(BaseModel):
 
 class ActivateAgentRequest(BaseModel):
     """Activate a pending agent (ADR 0012): set its trust level + home
-    fleet; the agent key is issued once."""
+    fleet; the agent key is issued once. The trust level defaults to
+    `lurker` (1) (SPEC §5.1)."""
 
-    trust_level: int
+    trust_level: int = 1
     home_fleet_id: str
 
 
-class SetTrustLevelRequest(BaseModel):
-    """Promote/demote an agent's trust level (ADR 0011)."""
+class UpdateAgentRequest(BaseModel):
+    """Change an agent's trust level and/or home fleet (the SPEC §5.1
+    ``PATCH /v1/admin/agents/{name}`` body; ADR 0011). At least one
+    field must be supplied."""
 
-    trust_level: int
-
-
-class SetHomeFleetRequest(BaseModel):
-    """Re-parent an agent to a new home fleet (ADR 0011)."""
-
-    home_fleet_id: str
+    trust_level: int | None = None
+    home_fleet_id: str | None = None
 
 
 class CreateFleetRequest(BaseModel):
