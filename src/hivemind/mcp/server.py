@@ -34,6 +34,7 @@ from hivemind.mcp.app import (
     hive_feedback,
     hive_get,
     hive_list,
+    hive_register,
     hive_search,
     hive_withdraw,
     hive_write,
@@ -41,6 +42,7 @@ from hivemind.mcp.app import (
 from hivemind.mcp.local_embedder import LocalEmbedder
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
+from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService, WriteService
 from hivemind.services.search import SearchService
 
@@ -75,8 +77,15 @@ _DESC_WITHDRAW = (
     "Withdraw an entry (retract without replacing). Only the author or an admin may withdraw."
 )
 _DESC_FEEDBACK = (
-    "Report helpful|stale|wrong on an entry the agent relied on. One verdict "
-    "per (entry, user, agent); the latest wins."
+    "Report helpful|stale|wrong on an entry the caller relied on. "
+    "One row per (entry, user, agent); the latest verdict wins (SPEC §4.2)."
+)
+
+_DESC_REGISTER = (
+    "Register (or re-register) an agent (ADR 0012). Gated on the org or admin "
+    "key; creates a 'pending' agent (level 0, no fleet). Re-registering a "
+    "pending name is idempotent; an active name is a conflict (the name stays "
+    "reserved — pick a new one, ADR 0012)."
 )
 
 
@@ -226,6 +235,13 @@ def build_server(
     ) -> dict[str, Any]:
         return await hive_withdraw(resolve_app(), entry_id=entry_id, reason=reason)
 
+    @server.tool(name="hive_register", description=_DESC_REGISTER)
+    async def _hive_register(
+        name: str,
+        owner_alias: str | None = None,
+    ) -> dict[str, Any]:
+        return await hive_register(resolve_app(), name=name, owner_alias=owner_alias)
+
     @server.tool(name="hive_feedback", description=_DESC_FEEDBACK)
     async def _hive_feedback(
         entry_id: str,
@@ -254,6 +270,7 @@ def main() -> None:
         write_service=write_service,
         search_service=search_service,
         governance_service=governance_service,
+        access_service=AccessService(store),
         search_config=search_config,
         credential=Credential(user_id="dev", agent_id="hivemind-mcp"),
     )
@@ -316,6 +333,7 @@ def main_pg() -> None:
             write_service=WriteService(store, embedder),
             search_service=SearchService(store, embedder, search_config),
             governance_service=GovernanceService(store, search_config),
+            access_service=AccessService(store, authenticator),
             search_config=search_config,
             credential=credential,
         )

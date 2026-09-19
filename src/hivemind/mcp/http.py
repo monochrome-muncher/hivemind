@@ -34,6 +34,7 @@ from hivemind.config import Settings
 from hivemind.mcp.app import McpHivemind
 from hivemind.mcp.server import build_server
 from hivemind.ports import Authenticator, Credential, Embedder, Store
+from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService, WriteService
 from hivemind.services.search import SearchService
 
@@ -145,6 +146,7 @@ def build_http_app(
         write_service=WriteService(store, embedder),
         search_service=SearchService(store, embedder, search_config),
         governance_service=GovernanceService(store, search_config),
+        access_service=AccessService(store, authenticator),
         search_config=search_config,
         credential=Credential(user_id="shared", agent_id="hivemind-mcp-http"),
     )

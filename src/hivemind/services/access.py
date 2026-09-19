@@ -34,9 +34,21 @@ class AccessService:
     the admin key (elevated acts).
     """
 
-    def __init__(self, store: Store, authenticator: Authenticator) -> None:
+    def __init__(self, store: Store, authenticator: Authenticator | None = None) -> None:
         self._store = store
         self._authenticator = authenticator
+
+    def _require_authenticator(self) -> Authenticator:
+        """Key-management ops (activate / revoke / rotate) need the
+        authenticator; store-only ops (register / fleet / level) do not.
+        In dev (in-memory) mode there is no authenticator, so key
+        management is unavailable (a production concern, ADR 0012).
+        """
+        if self._authenticator is None:
+            raise PermissionDenied(
+                "key management requires an authenticator (not configured in dev mode)"
+            )
+        return self._authenticator
 
     # -- registration (gated: org or admin key, ADR 0012) ------------------
 
@@ -74,7 +86,7 @@ class AccessService:
         agent = await self._store.activate_agent(
             name, trust_level=trust_level, home_fleet_id=home_fleet_id
         )
-        key = await self._authenticator.issue_agent_key(name)
+        key = await self._require_authenticator().issue_agent_key(name)
         return agent, key
 
     async def create_fleet(self, name: str, credential: Credential) -> Fleet:
@@ -104,14 +116,14 @@ class AccessService:
         """Revoke an agent's key (admin-gated, ADR 0012). The agent record
         + name stay reserved (dormant); the key is dead."""
         self._require_admin(credential)
-        await self._authenticator.revoke_agent_key(name)
+        await self._require_authenticator().revoke_agent_key(name)
 
     async def rotate_org_key(self, credential: Credential) -> str:
         """Rotate the shared org key — the cluster kill switch (ADR 0012).
         All prior org keys stop working; the new key is returned once.
         Admin-gated."""
         self._require_admin(credential)
-        return await self._authenticator.rotate_org_key()
+        return await self._require_authenticator().rotate_org_key()
 
     # -- read (admin-gated listing) ------------------------------------------
 
