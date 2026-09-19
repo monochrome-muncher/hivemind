@@ -83,6 +83,16 @@ class Store(Protocol):
         (ADR 0011); ``None`` keeps the v1 flat-pool behavior."""
         ...
 
+    async def count_entries(
+        self, filters: EntryFilters, *, visibility: Visibility | None = None
+    ) -> int:
+        """Count entries matching ``filters`` (SPEC §5.3; the minimal
+        usage-counters surface, ROADMAP §3.3). A cheap ``COUNT`` in
+        Postgres, not a full ``list_entries`` fetch. ``visibility``
+        behaves like ``list_entries`` (ADR 0011); ``None`` keeps the
+        flat-pool count."""
+        ...
+
     async def search_keyword(
         self, query: str, filters: EntryFilters, limit: int, *, visibility: Visibility | None = None
     ) -> list[str]:

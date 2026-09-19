@@ -176,6 +176,18 @@ class MemoryStore:
             matches.sort(key=lambda e: (e.created_at, e.id), reverse=True)
             return matches[offset : offset + limit]
 
+    async def count_entries(
+        self, filters: EntryFilters, *, visibility: Visibility | None = None
+    ) -> int:
+        """Count entries matching ``filters`` (the minimal usage-counters
+        surface, ROADMAP §3.3) — a cheap count, not a full fetch."""
+        with self._lock:
+            return sum(
+                1
+                for entry in self._entries.values()
+                if filters.matches(_copy(entry)) and self._visible(entry, visibility)
+            )
+
     async def search_keyword(
         self, query: str, filters: EntryFilters, limit: int, *, visibility: Visibility | None = None
     ) -> list[str]:

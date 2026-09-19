@@ -20,6 +20,7 @@ from hivemind.config import SearchConfig
 from hivemind.ports import Authenticator, Credential, Embedder, Store
 from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService, WriteService
+from hivemind.services.metrics import MetricsService
 from hivemind.services.search import SearchService
 
 
@@ -35,6 +36,7 @@ class HivemindApp:
     governance_service: GovernanceService
     search_service: SearchService
     access_service: AccessService
+    metrics_service: MetricsService
 
 
 class ApiError(Exception):
