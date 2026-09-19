@@ -28,10 +28,14 @@
   rotation), the REST surface (`POST /v1/agents` + the admin endpoints),
   the MCP surface (`hive_register` + write-scope + visibility), and the
   reduced `hivemind-keys` CLI.
-- **What's next:** Tier 3 (productionize - the ops runbook, forward
-  migration, usage counters) is the next workstream. It is no longer
-  blocked: Tier 2 (access control) has landed, so the key-rotation story
-  (3.1) can now be written against the settled key model.
+- **What's next:** Tier 3 (productionize) is largely shipped: the ops
+  runbook (3.1, `docs/ops-runbook.md`), the forward-migration path
+  (3.2, ADR 0013 + `schema_migrations` tracking), and the usage counters
+  (3.3, `MetricsService` + `GET /v1/metrics`). The next workstream is
+  **Tier 4** (close the SPEC §11 open items: the BM25-vs-FTS decision and
+  the embedding-prefix tuning, both now measurable with the §1.1 eval
+  harness) — or a production Tier 4 decision that the eval numbers
+  justify.
 
 ## The keystone: build the measurement instrument first
 
@@ -137,22 +141,22 @@ kinds). Tier 3.1 (the key-rotation runbook) is **blocked by Tier 2** —
 you can't write a rotation story for a key model that's about to
 change.
 
-## Tier 3 — productionize (former Tier 2)
+## Tier 3 — productionize (former Tier 2)  *(shipped: 3.1 + 3.2; 3.3 shipped earlier)*
 
-### 3.1 Ops runbook
+### 3.1 Ops runbook  *(shipped: `docs/ops-runbook.md`)*
 Deployment, **backups** (single-node Postgres, ADR 0007),
 monitoring / health, and a **key issuance + rotation** story — now
 *defined* by ADR 0012 (the admin surface + org-key rotation define
 "who issues keys and how they rotate"). **Blocked by Tier 2.**
 
-### 3.2 Forward-migration path
+### 3.2 Forward-migration path  *(shipped: ADR 0013 + `schema_migrations` tracking)*
 `make migrate` is an idempotent full re-apply of the schema. There is
 no zero-downtime **forward** schema-evolution story for a system with
 live data — define how a new column / index lands without rewriting the
 whole pool. *(Note: the Tier 2 schema change (fleets / agents /
 entry-fleet refs) is the first real test of this story.)*
 
-### 3.3 Usage counters (trigger instrumentation)
+### 3.3 Usage counters (trigger instrumentation)  *(shipped: `MetricsService` + `GET /v1/metrics`)*
 A minimal metrics surface — writes, feedbacks, supersessions, distinct
 `scope` tags in use, `sources` by type, per-agent query counts. This
 makes the **usage-based** SPEC §10 triggers (below) measurable rather
