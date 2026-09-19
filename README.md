@@ -2,22 +2,22 @@
 
 Hivemind is a shared memory service for the AI agents of an organization: one Postgres-backed pool that every agent in the org reads and writes, so work done with one agent (analyst 1, agent 1, day one) is diggable work for every other agent (analyst 2, agent 2, days later).
 
-**v1 in one paragraph.** Agents write distilled, explicit **entries** — a `fact`, an `insight` (long-form analysis), or a `decision` — each carrying full provenance (author, agent, memory date, sources) and an optional `supersedes` link. Agents retrieve via **hybrid search** (keyword + vector, RRF-fused, decay-aware) with **progressive disclosure** (compact hits first, full entry on `get`). The pool is **append-only**: corrections are explicit **supersessions**, nothing is edited or silently deleted; entries can also be **withdrawn** (own, or any by the org operator). A **client-side kill switch** lets an agent's owner turn Hivemind off for a session (spitballing, non-analyst work) without the server ever knowing. One self-hosted instance per organization: one service + one Postgres (pgvector), docker-compose, no Redis.
+**v1 in one paragraph.** Agents write distilled, explicit **entries** — a `fact`, an `insight` (long-form analysis), or a `decision` — each carrying full provenance (author, agent, memory date, sources) and an optional `supersedes` link. Agents retrieve via **hybrid search** (keyword + vector, RRF-fused, decay-aware) with **progressive disclosure** (compact hits first, full entry on `get`). The pool is **append-only**: corrections are explicit **supersessions**, nothing is edited or silently deleted; entries can also be **withdrawn** (own, or any by the org operator). A **client-side kill switch** lets an agent's owner turn Hivemind off for a session (spitballing, non-analyist work) without the server ever knowing. One self-hosted instance per organization: one service + one Postgres (pgvector), docker-compose, no Redis. **Access is gated by the fleet/trust model** (SPEC §12, ADRs 0011–0012): each agent registers under a name, sits in one home fleet, and carries a trust level (0–3) that decides what it can read/write — `self` stays private even at the top level, and level 0 sees nothing (see Key properties + SPEC §12).
 
 ## Key properties (v1)
 
 - **Explicit writes only** — the agent decides what matters; no passive transcript capture
-- **Flat org pool** — everyone can read and write everything in the org (a `scope` tag is the seam for future narrowing)
+- **Fleets + trust levels** (ADR 0011) — entries carry a `scope` (`self` / `fleet` / `org`) + a fleet reference; visibility is the trust-level matrix (L3 reads broad, writes local; `self` stays private even at L3; level 0 reads nothing). One home fleet per agent; legacy `org` scope is read-only for L≥1
 - **Append-only, supersession-based** — entries are immutable; a successor always outranks what it superseded
 - **Hybrid retrieval** — keyword (Postgres FTS) + pgvector dense, fused (RRF), re-scored by importance × recency × feedback quality (a true-BM25 extension is a drop-in upgrade, not a v1 dependency — SPEC §6.2)
 - **Dumb outcome feedback** — `helpful` / `stale` / `wrong` per entry nudges retrieval ranking; no learned tuning
-- **Agent-facing API** — REST (canonical) + MCP tools (`hive_write`, `hive_search`, `hive_get`, `hive_list`, `hive_withdraw`, `hive_feedback`); no direct DB access, no human UI in v1
+- **Agent-facing API** — REST (canonical) + MCP tools (`hive_write`, `hive_search`, `hive_get`, `hive_list`, `hive_withdraw`, `hive_feedback`, `hive_register`); no direct DB access, no human UI in v1
 
 ## Reading order
 
 1. [SPEC.md](SPEC.md) — the full v1 spec: domain model, API, retrieval, deployment, non-goals, and documented extensions
 2. [CONTEXT.md](CONTEXT.md) — the canonical glossary (what "entry", "supersession", "memory date", "kill switch", etc. mean)
-3. [docs/adr/](docs/adr/) — the decisions and their reasons (append-only entries, flat pool, client-side kill switch, explicit writes, fixed-dimension pgvector, RRF hybrid retrieval, single-Postgres deployment, credential model)
+3. [docs/adr/](docs/adr/) — the decisions and their reasons (append-only entries, flat pool, client-side kill switch, explicit writes, fixed-dimension pgvector, RRF hybrid retrieval, single-Postgres deployment, credential model, fleets + trust levels, shared org key + agent keys, forward-migration tracking)
 4. [AGENTS.md](AGENTS.md) — how to work in this repo (for agents and humans)
 5. [ROADMAP.md](ROADMAP.md) — what to build next, in what order (the living plan)
 
@@ -66,7 +66,7 @@ dimension is a deploy-time contract).
 ## Multi-agent: one pool over a unified MCP interface (ADR 0009)
 
 Several agents on the same machine share **one** Postgres pool over a
-**unified** MCP interface (the same six `hive_*` tools) — not by calling
+**unified** MCP interface (the same seven `hive_*` tools) — not by calling
 REST directly, but each running its own Postgres-backed MCP runner
 (`hivemind-mcp-pg`) under its own verified credential. Each runner talks
 to the same `PgStore` + the same embedder, so every agent reads/writes the
@@ -77,12 +77,13 @@ same pool while its writes carry that agent's *verified* provenance
    ```bash
    make pg && make vllm && make migrate
    ```
-2. Issue one agent-scoped sub-key per agent (one per agent, distinct):
+2. Issue one agent key per registered agent (one per agent, distinct — ADR 0012):
    ```bash
-   uv run hivemind-keys issue --user alice --agent agent-a   # -> hm_...
-   uv run hivemind-keys issue --user alice --agent agent-b   # -> hm_...
-   uv run hivemind-keys issue --user alice --agent agent-c   # -> hm_...
+   uv run hivemind-keys issue-agent --name agent-a   # -> hm_...
+   uv run hivemind-keys issue-agent --name agent-b   # -> hm_...
+   uv run hivemind-keys issue-agent --name agent-c   # -> hm_...
    ```
+   (The agent key carries the agent's trust level + home fleet — the `author` on its writes is the registered name, server-filled from the key — ADR 0012.)
 3. Point each agent's MCP config at the same runner, each with its own key:
    ```jsonc
    {
@@ -103,8 +104,8 @@ same pool while its writes carry that agent's *verified* provenance
    ```
 
 All three agents now read/write the **same** pool. A write by agent-b is
-attributed to `author=alice, agent=agent-b` (verified from the key, not
-self-reported). Revoking an agent's key (`hivemind-keys revoke`) cuts it
+attributed to `author=agent-b` (the registered name, verified from the key,
+not self-reported — ADR 0012). Revoking an agent's key (`hivemind-keys revoke --name agent-b`) cuts it
 off immediately. The REST API (`make api`) remains available in parallel
 for non-MCP clients; it is **not** required by the MCP runners.
 
@@ -121,7 +122,7 @@ small dev machine: one process per agent. When **many** agents share one
 machine, run the **hostable** runner instead: a single long-lived
 `hivemind-mcp-http` process serving an unlimited number of agents over
 streamable-HTTP, each authenticating **per request** with its own
-agent-scoped key (ADR 0008). One `PgStore` + one embedder + one
+agent-scoped key (ADR 0012: the agent key, issued at activation). One `PgStore` + one embedder + one
 `Authenticator` pool (the same DSN / embedder / credentials the REST API
 uses); every write carries that agent's *verified* provenance, and a
 revoked key is cut off on the very next request (no restart — the
@@ -137,8 +138,8 @@ as a local process instead of Docker.
 
 ```bash
 make pg && make vllm && make migrate
-uv run hivemind-keys issue --user alice --agent agent-a   # -> hm_...
-uv run hivemind-keys issue --user alice --agent agent-b   # -> hm_...
+uv run hivemind-keys issue-agent --name agent-a   # -> hm_...
+uv run hivemind-keys issue-agent --name agent-b   # -> hm_...
 make mcp-http    # start the detached Docker service (host port 8088)
 ```
 
@@ -156,17 +157,13 @@ Each agent's MCP config points at the **same** endpoint, with its own key:
 ```
 
 The hostable runner is **per-request**: every request verifies its own key
-against the `credentials` table, so `hivemind-keys revoke` takes effect
+against the `credentials` table, so `hivemind-keys revoke --name <agent>` takes effect
 immediately (no restart). Use `hivemind-mcp-pg` (per-agent) for a few
 agents on one box; use `hivemind-mcp-http` (hostable) when many agents
 share one machine or when you want immediate revocation.
 
 ## Status
 
-v1 implemented: domain model, ports, retrieval math (RRF + decay-aware scoring + feedback quality),
-services, in-memory reference store, Postgres store (asyncpg + pgvector), OpenAI-compatible embedder,
-the FastAPI REST surface, and the MCP server (six verbs). The unit suite is hermetic; the
-integration suite runs against dockerized Postgres and skips when it is down.
+v1 + the access-control increment are implemented: domain model, ports, retrieval math (RRF + decay-aware scoring + feedback quality + retrieval-quality metrics), services, in-memory reference store, Postgres store (asyncpg + pgvector), OpenAI-compatible embedder, the FastAPI REST surface, and the MCP server (seven verbs). The access-control & fleet model (ADRs 0011–0012, SPEC §12) is implemented end to end (domain, the `Store` seam, the v2 key model, `AccessService`, the REST + MCP surfaces, the reduced `hivemind-keys` CLI). The retrieval eval harness (`tests/eval/`) reports hit@k / MRR / nDCG on a committed golden set with a CI gate pinning a floor on them. The minimal usage-counters surface (`MetricsService` + `GET /v1/metrics`) and the forward-migration path (ADR 0013 + `schema_migrations` tracking) are in place; the ops story lives in `docs/ops-runbook.md`. The unit suite is hermetic; the integration suite runs against dockerized Postgres and skips when it is down.
 
-**What's next:** see [ROADMAP.md](ROADMAP.md) — the plan for the next increment (validate the
-core retrieval pipeline, productionize, and the held §10 extensions with their trigger metrics).
+**What's next:** see [ROADMAP.md](ROADMAP.md) — Tier 4 (close the SPEC §11 open items: the BM25-vs-FTS decision + embedding-prefix tuning, now measurable with the eval harness) is the next workstream; the §10 extensions stay held until their triggers fire.

@@ -157,3 +157,31 @@ _Avoid_: result, snippet, match
 **Progressive disclosure**:
 The token economy of retrieval: scan many compact hits first, open the full entry only when needed.
 _Avoid_: lazy loading, pagination
+
+### Evaluation (ROADMAP §1.1)
+
+**Golden set**:
+The committed, deterministic entry corpus + query set (each query → the entry(ies) it should surface) that the retrieval eval runs on (`tests/eval/golden.py`). Fixed and small on purpose: it is the yardstick, not a benchmark.
+_Avoid_: benchmark corpus, fixture set, test data
+
+**Retrieval metrics** (hit@k / MRR / nDCG):
+The signals the eval reports over the golden set: fraction of queries with a relevant hit in the top-k, mean reciprocal rank of the first relevant hit, and normalized DCG (ranking quality) — the measurable dials for the ~10 config knobs (ROADMAP §1.1).
+_Avoid_: search quality score, ranking score (that is a per-hit score), relevance score
+
+**Eval gate**:
+The CI floor pinned on the retrieval metrics: an improvement passes, a regression below the bar fails the suite (retrieval quality is *measured*, not vibes — ROADMAP §1.1).
+_Avoid_: quality threshold, search-quality SLA, retrieval budget
+
+### Operations (Tier 3)
+
+**Forward migration**:
+How a schema change lands on a live pool without a rewrite: the idempotent `schema.sql` re-apply (the DDL forward path) + the occasional ordered, idempotent data-migration script (a backfill DDL can't express) — ADR 0013.
+_Avoid_: schema upgrade, DB release, data patch (that is the data-migration script alone)
+
+**Schema version**:
+The applied schema generation, recorded in the `schema_migrations` table after each successful migrate (ADR 0013); reading it tells you whether a live pool is up to date (drift check).
+_Avoid_: DB version, migration cursor, schema fingerprint
+
+**Usage counters**:
+The minimal operational metrics surface (`GET /v1/metrics`, admin-gated): entries / fleets / agents counters (trust-level distribution, writes per fleet, pending-agent count) that make the SPEC §10 usage-based triggers measurable rather than guesswork (ROADMAP §3.3).
+_Avoid_: analytics, telemetry (that is the broader §10 story), dashboards (a UI is a non-goal, SPEC §9)
