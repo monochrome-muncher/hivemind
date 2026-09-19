@@ -112,6 +112,7 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | `PATCH /v1/admin/agents/{name}` | Change trust level / home fleet — demotion to `untrusted` = dormant (admin key) |
 | `POST /v1/admin/agents/{name}/revoke` | Kill the agent's key (admin key; the name stays reserved — ADR 0012) |
 | `POST /v1/admin/org-key/rotate` | Rotate the shared org key — the cluster-wide kill switch (admin key) |
+| `GET /v1/metrics` | Usage counters: entries / fleets / agents (trust-level distribution, writes per fleet, pending count) — operational data (admin key; ROADMAP §3.3) |
 
 ### 5.2 MCP tools (the agent's mental model — seven verbs)
 

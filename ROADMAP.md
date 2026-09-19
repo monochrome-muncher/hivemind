@@ -37,19 +37,20 @@
   harness) — or a production Tier 4 decision that the eval numbers
   justify.
 
-## The keystone: build the measurement instrument first
+## The keystone is shipped: measure, then Tier 4
 
-The retrieval **eval harness** (§1.1) is the single highest-leverage
-next step, because it does three things at once:
+The retrieval **eval harness** (§1.1) — the single highest-leverage next
+step — has **landed**: it de-risks v1's core (rankings are now measured,
+not vibes), it is a reproducible CI gate against retrieval regressions,
+and it is the same instrument that lets you *measure* the two
+retrieval-quality triggers in SPEC §10 (knowledge graph, per-agent
+tuning), turning those future extensions from "vibes" into
+data-driven decisions.
 
-1. de-risks v1's core (proves / improves ranking quality),
-2. becomes a reproducible CI gate against retrieval regressions, and
-3. is the same instrument that lets you *measure* the two
-   retrieval-quality triggers in SPEC §10 (knowledge graph, per-agent
-   tuning) — turning those future extensions from "vibes" into
-   data-driven decisions.
-
----
+With the keystone shipped, the next workstream is **Tier 4** (close the
+SPEC §11 open items: the BM25-vs-FTS decision + the embedding-prefix
+tuning) — both decisions are now measurable with the §1.1 harness
+instead of guesses.
 
 ## Tier 1 — validate the core  *(shipped)*
 
@@ -200,13 +201,16 @@ so the later decision is data-driven. Two kinds:
 
 ## If you do one thing
 
-The eval harness (1.1) and access control (Tier 2) are both shipped. The
-next keystone is **Tier 3, productionize** — starting with **3.1, the ops
-runbook** (deployment, backups, health, and the key issuance / rotation
-story, now writable against the settled ADR 0012 key model). It is the
-gating item: 3.2 (forward migration) and 3.3 (usage counters) build on a
-stable, operable deployment, and the §10 trigger instrumentation (3.3)
-pairs with the §1.1 harness to make the Tier 5 decisions data-driven.
+Tier 1 (the eval harness), Tier 2 (access control), and Tier 3
+(productionize) are all shipped. The next keystone is **Tier 4 — close
+the SPEC §11 open items**, starting with **4.1, the BM25-vs-FTS
+decision**: run the §1.1 harness (and a BM25 variant) over the golden
+set, see where the Postgres-FTS keyword stream ranks under, and adopt
+BM25 with a new ADR only if the numbers say so. **4.2** (the
+embedding-prefix tuning) uses the same harness on real long-form
+entries. Tier 5 (the §10 extensions) stays held until its triggers fire
+— the §1.1 harness + §3.3 counters are the instruments that will tell
+you when.
 
 ## How to use this document
 
