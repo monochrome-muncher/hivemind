@@ -186,6 +186,17 @@ production usage, no trigger has fired.
 "when it feels noisy," define a *measurable* condition per extension
 so the later decision is data-driven. Two kinds:
 
+> **Scale ambition (updated).** The org's target has grown from the
+> ~50 agents in ADR 0007 to **300+ users/agents across multiple
+> fleets**. That still fits comfortably on one Postgres node + one API
+> process (a few writes/sec at peak, index-backed reads) — so the
+> *single-node decision* in ADR 0007 holds; what changes is the
+> constant, not the decision. "Multiple fleets" is a logical partition
+> (`fleet_id` + trust-level visibility, ADR 0011), not a new
+> infrastructure. The infra question (Redis / multiple replicas) only
+> opens when the **scale-out trigger** below fires — it is *not*
+> triggered by 300 agents or by multiple fleets.
+
 | §10 extension | Trigger (spec wording) | Measure to watch | Instrument |
 |---|---|---|---|
 | Knowledge graph | "entity linking pays off in retrieval" | hit@k gap on entity-linked queries vs. plain hybrid | §1.1 harness |
@@ -198,6 +209,8 @@ so the later decision is data-driven. Two kinds:
 | Curation workflow | "org wants a 'librarian'" | feedback (helpful/stale/wrong) accumulating without action; stale/wrong entries still in top-k | §3.3 counters + §1.1 harness |
 | Human read-only UI | "analysts want to see the pool" | direct demand for human browsing (usage signal, not a metric) | qualitative |
 | Multi-tenant SaaS / OAuth | "more than one org; an org has an IdP" | count of distinct orgs / tenants requested (count > 1) | §3.3 counters |
+| Redis (cache / rate limits / queue) | "API scales to multiple replicas; org demands distributed rate limiting" | API replicas > 1, or distinct orgs > 1, or a cross-process per-agent rate-limit ceiling is needed *(in-process / Postgres-based rate limiting suffices at single-replica; a Redis queue for embedding is superseded by the Postgres-outbox design below)* | §3.3 counters + replica count |
+| Async embedding pipeline | "embedding latency/throughput starts blocking writes" | p95 write latency; embedder failure/retry rate; backlog of unembedded entries *(design: a Postgres **outbox** — insert entry with `embedding IS NULL` in the same transaction, then a `FOR UPDATE SKIP LOCKED` worker embeds + updates; a single source of truth, no second queue service. New ADR required: it changes write semantics — an entry is vector-searchable only after its vector lands)* | §3.3 counters + p95 write latency |
 
 ## If you do one thing
 
