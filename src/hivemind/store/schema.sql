@@ -7,6 +7,15 @@
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS btree_gin;
 
+-- Forward-migration tracking (ADR 0013): records the applied schema
+-- generation (a small upsert after each successful migrate), so an
+-- operator — or the health / metrics surface — can tell whether a live
+-- pool is up to date.
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version    text PRIMARY KEY,
+    applied_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS entries (
     id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     kind          text NOT NULL CHECK (kind IN ('fact', 'insight', 'decision')),
