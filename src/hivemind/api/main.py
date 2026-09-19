@@ -19,6 +19,7 @@ from hivemind.config import SearchConfig, Settings
 from hivemind.ports import Authenticator, Embedder, Store
 from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService, WriteService
+from hivemind.services.metrics import MetricsService
 from hivemind.services.search import SearchService
 
 
@@ -52,6 +53,7 @@ def create_app_for_config(
         governance_service=GovernanceService(store, search_config),
         search_service=SearchService(store, embedder, search_config),
         access_service=AccessService(store, authenticator),
+        metrics_service=MetricsService(store),
     )
 
 

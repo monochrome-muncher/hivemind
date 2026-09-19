@@ -25,15 +25,19 @@ from hivemind.api.deps import (
 from hivemind.api.schemas import (
     ActivateAgentRequest,
     AgentOut,
+    AgentsMetrics,
     CreateEntryRequest,
     CreateFleetRequest,
+    EntriesMetrics,
     EntryOut,
     FeedbackOut,
     FeedbackRequest,
     FleetOut,
+    FleetsMetrics,
     HealthOut,
     HitOut,
     KeyIssuedOut,
+    MetricsOut,
     RegisterAgentRequest,
     SearchRequest,
     SetHomeFleetRequest,
@@ -66,6 +70,21 @@ def build_router(app: HivemindApp) -> APIRouter:
     async def health() -> HealthOut:
         """Liveness/readiness (public, no auth — SPEC.md §5.1)."""
         return HealthOut(status="ok")
+
+    @router.get("/metrics", response_model=MetricsOut)
+    async def metrics(credential: require) -> MetricsOut:
+        """Usage counters (ROADMAP §3.3, Tier 3). Admin-gated: the report
+        is operational data (usage volume, fleet writes, trust-level
+        distribution, pending-agent count). Makes the SPEC §10
+        usage-based triggers measurable (pair with the §1.1 eval harness)."""
+        if not credential.is_admin:
+            raise api_error(403, "forbidden", "metrics requires an admin key")
+        report = await app.metrics_service.usage_report()
+        return MetricsOut(
+            entries=EntriesMetrics(**report["entries"]),
+            fleets=FleetsMetrics(**report["fleets"]),
+            agents=AgentsMetrics(**report["agents"]),
+        )
 
     @router.post("/entries", response_model=EntryOut, status_code=201)
     async def create_entry(payload: CreateEntryRequest, credential: require) -> EntryOut:

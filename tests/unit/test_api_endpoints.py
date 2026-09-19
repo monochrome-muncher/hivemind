@@ -18,6 +18,7 @@ from hivemind.api.deps import HivemindApp, create_app
 from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
+from hivemind.domain.entry import EntryDraft
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from tests.fakes import make_clock, make_embedder, make_search_config
@@ -785,3 +786,40 @@ class TestAccessEndpoints:
             )
         assert ok.status_code == 200
         assert ok.json()["key"]  # a new raw org key is returned once
+
+
+class TestMetricsEndpoint:
+    """GET /v1/metrics: the minimal usage-counters surface (ROADMAP §3.3)."""
+
+    async def test_metrics_reports_usage_counters(self) -> None:
+        app = make_hivemind_app()
+        # Seed: two fleets with writes, one pending agent, one active.
+        store = app.store
+        f1 = await store.create_fleet("data-eng")
+        await store.create_entry(
+            EntryDraft(kind="fact", summary="s1", author="alice", agent="a1", scope="fleet", fleet_id=f1.id),
+            [0.1, 0.1, 0.1, 0.1],
+        )
+        await store.create_entry(
+            EntryDraft(kind="insight", summary="s2", author="bob", agent="b1", scope="org"),
+            [0.1, 0.1, 0.1, 0.1],
+        )
+        await store.register_agent("pending-agent")
+        client = make_client(app)
+        async with client:
+            resp = await client.get("/v1/metrics", headers={"X-API-Key": "key-admin"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["entries"]["total"] == 2
+        assert data["entries"]["by_scope"] == {"fleet": 1, "org": 1}
+        assert data["fleets"]["total"] == 1
+        assert data["fleets"]["writes_by_fleet"] == {"data-eng": 1}
+        assert data["agents"]["total"] == 1
+        assert data["agents"]["pending"] == 1
+
+    async def test_metrics_requires_admin_key(self) -> None:
+        client = make_client(make_hivemind_app())
+        async with client:
+            denied = await client.get("/v1/metrics", headers={"X-API-Key": "key-alice"})
+            assert denied.status_code == 403
+            assert denied.json()["error"]["code"] == "forbidden"

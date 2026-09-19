@@ -160,6 +160,8 @@ def _filter_conditions(
         add("tags @> ?", list(filters.tags))
     if filters.scope is not None:
         add("scope = ?", filters.scope)
+    if filters.fleet_id is not None:
+        add("fleet_id = ?", filters.fleet_id)
     if filters.author is not None:
         add("author = ?", filters.author)
     if filters.agent is not None:
@@ -356,6 +358,21 @@ class PgStore:
         async with pool.acquire() as conn:
             rows = await conn.fetch(sql, *params, limit, offset)
         return [_row_to_entry(row) for row in rows]
+
+    async def count_entries(
+        self, filters: EntryFilters, *, visibility: Visibility | None = None
+    ) -> int:
+        """Count entries matching ``filters`` (the minimal usage-counters
+        surface, ROADMAP §3.3) — a cheap ``COUNT`` in Postgres, not a
+        full fetch. ``visibility`` behaves like ``list_entries``
+        (ADR 0011); ``None`` keeps the v1 flat-pool count."""
+        clauses, params = _filter_conditions(filters, visibility)
+        where = " AND ".join(clauses) if clauses else "TRUE"
+        sql = "SELECT count(*) AS n FROM entries WHERE " + where
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(sql, *params)
+        return int(row["n"]) if row is not None else 0
 
     async def withdraw_entry(self, entry_id: str, reason: str | None, by_user: str) -> Entry:
         """Flip an entry to ``withdrawn`` (SPEC.md §4.1).

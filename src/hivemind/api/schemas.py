@@ -290,3 +290,41 @@ class KeyIssuedOut(BaseModel):
     key: str
 
     note: str = "store this key now; it is shown only once"
+
+
+# --- Usage counters (ROADMAP §3.3, Tier 3) ----------------------------------
+
+
+class EntriesMetrics(BaseModel):
+    """Entry usage counters (ROADMAP §3.3)."""
+
+    total: int
+    active: int
+    inactive: int
+    by_scope: dict[str, int] = {}
+    by_kind: dict[str, int] = {}
+
+
+class FleetsMetrics(BaseModel):
+    """Fleet usage counters (writes per fleet, the §12 counter)."""
+
+    total: int
+    writes_by_fleet: dict[str, int] = {}
+
+
+class AgentsMetrics(BaseModel):
+    """Agent usage counters (the §12 counters: trust-level distribution,
+    pending-agent count, ADR 0012)."""
+
+    total: int
+    pending: int
+    active: int
+    by_trust_level: dict[str, int] = {}
+
+
+class MetricsOut(BaseModel):
+    """The minimal usage-counters report (ROADMAP §3.3, admin-gated)."""
+
+    entries: EntriesMetrics
+    fleets: FleetsMetrics
+    agents: AgentsMetrics
