@@ -13,19 +13,25 @@
   embeddings, REST API, MCP server) is implemented, integrated on
   `main`, and green (mypy strict + ruff clean; full suite green
   including the live-Postgres integration tests).
-- **But code-complete ≠ validated.** The core retrieval pipeline runs
-  ~10 config knobs at uncalibrated spec defaults with **no evaluation
-  harness** — there is no way to know whether the rankings are actually
-  good, and no way to catch regressions in retrieval quality. For a
-  system whose entire value is "an agent finds the *right* memory,"
-  that black box is the top risk.
-- **Access control is now a committed capability, not a §10
-  extension.** ADR 0011 (fleets + trust levels, superseding ADR 0002's
-  flat pool) and ADR 0012 (shared org key + admin-issued agent keys,
-  superseding ADR 0008's key kinds) define the model; SPEC §12 owns the
-  behavior. This re-tiered this document: the new **Tier 2** (access
-  control & fleet model) sequences *before* the key-rotation/ops items,
-  and the old Tiers 2–4 have shifted to Tiers 3–5.
+- **The eval harness (Tier 1) has landed.** The retrieval pipeline is
+  now measured on a committed golden set (`tests/eval/`): hit@k / MRR /
+  nDCG are reported and a CI gate pins a floor on them (a regression
+  below the bar fails the suite). The ~10 config knobs are now
+  *measured* dials, not vibes (current: hit@5 = 1.0, MRR = 0.75,
+  nDCG@5 = 0.8155).
+- **Access control (Tier 2) has landed.** The full fleet / trust-level /
+  registration model (ADRs 0011-0012, SPEC 12) is implemented end to
+  end: domain (TrustLevel / Agent / Fleet / Visibility), the `Store`
+  seam (fleet / agent methods + visibility-aware reads), the v2 key
+  model (org / agent / admin; `user` keys retired), the `AccessService`
+  (register / activate / trust-level / home-fleet / revoke / org-key
+  rotation), the REST surface (`POST /v1/agents` + the admin endpoints),
+  the MCP surface (`hive_register` + write-scope + visibility), and the
+  reduced `hivemind-keys` CLI.
+- **What's next:** Tier 3 (productionize - the ops runbook, forward
+  migration, usage counters) is the next workstream. It is no longer
+  blocked: Tier 2 (access control) has landed, so the key-rotation story
+  (3.1) can now be written against the settled key model.
 
 ## The keystone: build the measurement instrument first
 
@@ -41,9 +47,9 @@ next step, because it does three things at once:
 
 ---
 
-## Tier 1 — validate the core (do these first)
+## Tier 1 — validate the core  *(shipped)*
 
-### 1.1 Retrieval eval harness + golden set
+### 1.1 Retrieval eval harness + golden set  *(shipped: `tests/eval/`, `retrieval/eval.py`)*
 - **What:** a fixed, realistic entry set (seeded deterministically on
   top of the existing `tests/fakes.py`) + a **golden query set** (each
   query → expected top-k / expected #1), run through
@@ -59,7 +65,7 @@ next step, because it does three things at once:
 - **Feeds:** Tier 3 (BM25, prefix-length tuning) and the two
   retrieval-quality triggers in the Tier 5 table below.
 
-### 1.2 End-to-end dogfood with a real agent + real embedder
+### 1.2 End-to-end dogfood with a real agent + real embedder  *(open)*
 - **What:** wire a real agent (pi / Claude) to `hivemind-mcp` over a
   live Postgres + a real OpenAI-compatible embedder, and run a
   realistic loop (write → search back → feedback → supersede).
@@ -75,7 +81,7 @@ next step, because it does three things at once:
   surface is the same seven `hive_*` tools; only the credential kind
   changes.
 
-## Tier 2 — access control & fleet model (ADRs 0011–0012, SPEC §12)
+## Tier 2 — access control & fleet model (ADRs 0011–0012, SPEC §12)  *(shipped)*
 
 The committed access-control capability: fleets, trust levels, and the
 registration / key model. This is a new workstream (a capability we
@@ -83,7 +89,7 @@ committed to — *not* a §10 trigger), and it sequences **before** the
 key-rotation / ops items in Tier 3. It is independent of Tier 1 (the
 eval harness) — the two tracks run in parallel.
 
-### 2.1 Domain + store: fleets, agents, trust levels
+### 2.1 Domain + store: fleets, agents, trust levels  *(shipped)*
 - **What:** `fleets` + `agents` schema; entries gain a fleet reference
   and scope values `self` / `fleet` (plus read-only legacy `org`);
   visibility filtering in search/list/get (trust level + home fleet;
@@ -96,7 +102,7 @@ eval harness) — the two tracks run in parallel.
 - **Deliverables:** store changes behind the `Store` port (new ports
   where needed), migration, hermetic unit tests at the seams.
 
-### 2.2 Registration + admin surface
+### 2.2 Registration + admin surface  *(shipped)*
 - **What:** `hive_register` (the seventh MCP verb; org-key only) +
   `POST /v1/agents` (REST; org key **or** admin key — the seam a
   future human-facing frontend plugs into). The admin endpoint set:
@@ -114,7 +120,7 @@ eval harness) — the two tracks run in parallel.
   error semantics (pending name → idempotent no-op; taken-by-active
   name → "choose a new name").
 
-### 2.3 Runners + credential migration
+### 2.3 Runners + credential migration  *(shipped: reduced keys CLI; runner key-kinds updated)*
 - **What:** `hivemind-mcp-pg` / `hivemind-mcp-http` present **agent
   keys** (ADR 0012; the ADR 0009/0010 mechanisms are unchanged —
   verified provenance, immediate revocation on the hostable runner);
@@ -190,13 +196,13 @@ so the later decision is data-driven. Two kinds:
 
 ## If you do one thing
 
-Build **§1.1, the retrieval eval harness.** It is still the keystone:
-it de-risks v1's core, it is a CI gate against regressions, and it is
-the same instrument that tells you when the Tier 5 triggers fire. The
-**Tier 2 access-control track is parallel and independent of it** —
-but within the ops work it comes *first*: Tier 3.1 (the key-rotation
-runbook) is blocked by Tier 2, because a rotation story must describe
-the key model, not the one it's about to replace.
+The eval harness (1.1) and access control (Tier 2) are both shipped. The
+next keystone is **Tier 3, productionize** — starting with **3.1, the ops
+runbook** (deployment, backups, health, and the key issuance / rotation
+story, now writable against the settled ADR 0012 key model). It is the
+gating item: 3.2 (forward migration) and 3.3 (usage counters) build on a
+stable, operable deployment, and the §10 trigger instrumentation (3.3)
+pairs with the §1.1 harness to make the Tier 5 decisions data-driven.
 
 ## How to use this document
 
