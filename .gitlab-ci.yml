@@ -77,7 +77,10 @@ test:
     # The live-extractor integration test (tests/integration/test_extractor_live.py)
     # SKIPs by design: HIVEMIND_EXTRACTOR_ENDPOINT is unset (ADR 0016
     # optional extractor). The hermetic + Postgres-backed suite must be green.
-    - uv run pytest tests/unit tests/integration -q
+    # The FULL suite (matches the repo's `make test` gate): the hermetic
+    # unit tests, the Postgres-backed integration suite, and the retrieval
+    # eval harness (tests/eval — the golden-set quality gate, SPEC §11).
+    - uv run pytest -q
 
 build:
   stage: build
@@ -121,6 +124,10 @@ deploy:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   script:
     - IMAGE="$K8S_IMAGE:$CI_COMMIT_SHORT_SHA"
+    # 0) Ensure the namespace exists (a fresh cluster has none — the
+    #    kustomize tree in step 3 would create it, but steps 1-2 need it
+    #    already; idempotent on redeploys).
+    - kubectl apply -f deploy/kubernetes/namespace.yaml
     # 1) Create/refresh the app secret from the masked GitLab variables.
     #    CI is the single source of truth for these three values; the
     #    bootstrap-owned `hivemind-keys` secret is a DELIBERATELY DIFFERENT
@@ -164,6 +171,13 @@ deploy:
                     - sh
                     - -c
                     - |
+                      set -e
+                      # A FRESH database has no schema yet (the Deployments'
+                      # initContainers only start later, in step 3): run the
+                      # idempotent migration (ADR 0013) first so the
+                      # credentials table exists; on an existing DB this is
+                      # a cheap no-op re-apply.
+                      hivemind-migrate
                       echo "ADMIN_KEY=\$(hivemind-keys issue-admin)"
                       echo "ORG_KEY=\$(hivemind-keys rotate-org)"
                   envFrom:
