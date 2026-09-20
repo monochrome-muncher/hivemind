@@ -70,6 +70,9 @@ def make_embedder(
     api_key: str = "sk-test",
     model_name: str = "fake-model",
     dim: int = 4,
+    retries: int = 2,
+    backoff: float = 0.5,
+    sleep=None,
 ) -> OpenAICompatEmbedder:
     return OpenAICompatEmbedder(
         client=env.client(),
@@ -77,7 +80,140 @@ def make_embedder(
         api_key=api_key,
         model_name=model_name,
         dim=dim,
+        retries=retries,
+        backoff=backoff,
+        sleep=sleep,
     )
+
+
+class TestRetries:
+    """Bounded retries on transient failures (ADR 0014): timeouts,
+    connection/network errors, ``429`` and 5xx responses are retried with
+    exponential backoff; deterministic 4xx and client-side validation
+    failures fail fast (no retry)."""
+
+    @staticmethod
+    def _ok() -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"data": [{"object": "embedding", "index": 0, "embedding": OK_VECTOR}]},
+        )
+
+    @staticmethod
+    def _scripted_handler(env: MockEnv, outcomes: list[object]) -> None:
+        """Serve ``outcomes`` in order (last repeats); a non-``Response``
+        outcome is raised as the transport error/exception."""
+        def handler(request: httpx.Request) -> httpx.Response:
+            # The current request is already appended by ``MockEnv`` before
+            # the handler runs, so the call index is ``len(requests) - 1``.
+            outcome = outcomes[min(len(env.requests) - 1, len(outcomes) - 1)]
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome  # httpx.Response
+
+        env.handler = handler
+
+    async def test_retries_transient_5xx_then_succeeds(self) -> None:
+        env = MockEnv()
+        self._scripted_handler(env, [httpx.Response(500, text="boom"), httpx.Response(503), self._ok()])
+        embedder = make_embedder(env)
+        assert await embedder.embed_text("x") == OK_VECTOR
+        assert len(env.requests) == 3  # two failures, one success
+
+    async def test_retries_429_then_succeeds(self) -> None:
+        env = MockEnv()
+        self._scripted_handler(env, [httpx.Response(429, text="slow down"), self._ok()])
+        embedder = make_embedder(env)
+        assert await embedder.embed_text("x") == OK_VECTOR
+        assert len(env.requests) == 2
+
+    async def test_retries_connection_error_then_succeeds(self) -> None:
+        env = MockEnv()
+        self._scripted_handler(env, [httpx.ConnectError("connection refused"), self._ok()])
+        embedder = make_embedder(env)
+        assert await embedder.embed_text("x") == OK_VECTOR
+        assert len(env.requests) == 2
+
+    async def test_retries_timeout_then_succeeds(self) -> None:
+        env = MockEnv()
+        self._scripted_handler(env, [httpx.ReadTimeout("read timed out"), self._ok()])
+        embedder = make_embedder(env)
+        assert await embedder.embed_text("x") == OK_VECTOR
+        assert len(env.requests) == 2
+
+    async def test_exhausted_budget_raises_with_status(self) -> None:
+        env = MockEnv()
+        self._scripted_handler(env, [httpx.Response(500, text="boom")])  # 500 forever
+        embedder = make_embedder(env, retries=2)
+        with pytest.raises(EmbeddingError) as exc_info:
+            await embedder.embed_text("x")
+        assert exc_info.value.status == 500
+        assert len(env.requests) == 3  # initial attempt + 2 retries
+
+    async def test_default_budget_is_three_attempts(self) -> None:
+        """Default ``retries=2``: three 5xx in a row exhaust the budget
+        before the 4th (which would have succeeded)."""
+        env = MockEnv()
+        self._scripted_handler(env, [httpx.Response(500), httpx.Response(500), httpx.Response(500), self._ok()])
+        embedder = make_embedder(env)  # default retries=2
+        with pytest.raises(EmbeddingError):
+            await embedder.embed_text("x")
+        assert len(env.requests) == 3  # the 4th (ok) attempt never happens
+
+    async def test_non_transient_4xx_fails_fast(self) -> None:
+        env = MockEnv()
+        self._scripted_handler(env, [httpx.Response(401, text="bad key")])
+        embedder = make_embedder(env)
+        with pytest.raises(EmbeddingError) as exc_info:
+            await embedder.embed_text("x")
+        assert exc_info.value.status == 401
+        assert len(env.requests) == 1  # no retry
+
+    async def test_validation_failure_fails_fast_without_retry(self) -> None:
+        env = MockEnv()  # 4-dim answer, ask for 2 dims -> validation failure
+        embedder = make_embedder(env, dim=2)
+        with pytest.raises(EmbeddingError) as exc_info:
+            await embedder.embed_text("x")
+        assert exc_info.value.status is None  # client-side validation, not HTTP
+        assert len(env.requests) == 1  # not retried
+
+    async def test_backoff_doubles_per_retry(self) -> None:
+        sleeps: list[float] = []
+
+        async def record(delay: float) -> None:
+            sleeps.append(delay)
+
+        env = MockEnv()
+        self._scripted_handler(env, [httpx.Response(500), httpx.Response(502), self._ok()])
+        embedder = make_embedder(env, retries=2, backoff=0.5, sleep=record)
+        await embedder.embed_text("x")
+        assert sleeps == [0.5, 1.0]  # base * 2**retry_index
+
+    async def test_zero_retries_is_a_single_attempt(self) -> None:
+        sleeps: list[float] = []
+
+        async def record(delay: float) -> None:
+            sleeps.append(delay)
+
+        env = MockEnv()
+        self._scripted_handler(env, [httpx.Response(500, text="boom")])
+        embedder = make_embedder(env, retries=0, sleep=record)
+        with pytest.raises(EmbeddingError):
+            await embedder.embed_text("x")
+        assert len(env.requests) == 1
+        assert sleeps == []  # no attempt -> no backoff sleep
+
+    async def test_from_settings_wires_the_retries_knob(self) -> None:
+        settings = Settings(
+            embedding_endpoint="http://e.test/v1",
+            embedding_dim=8,
+            embedding_retries=4,
+        )
+        embedder = OpenAICompatEmbedder.from_settings(settings)
+        try:
+            assert embedder.retries == 4
+        finally:
+            await embedder.aclose()
 
 
 class TestEmbedText:

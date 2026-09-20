@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-3-small"
     embedding_dim: int = 1536
     embedding_prefix_chars: int = 2048
+    # Retry budget for transient embedder failures (timeouts, connection
+    # errors, 429, 5xx) — ADR 0014; 0 disables retrying.
+    embedding_retries: int = 2
 
     # retrieval knobs (mirror SearchConfig defaults)
     rrf_k: int = 60
