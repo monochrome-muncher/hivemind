@@ -1,0 +1,198 @@
+# Hivemind CI/CD (Kubernetes + GitLab).
+#
+# Stages: test -> build -> deploy
+#   test  : hermetic unit suite + Postgres-backed integration suite
+#           (pgvector service container; a DB probe fails LOUDLY so a
+#           skip-and-pass cannot masquerade as green)
+#   build : docker build + push to the GitLab container registry
+#   deploy: kubectl apply via the pre-configured GitLab Kubernetes agent
+#
+# Required CI/CD variables (see DEPLOY.md):
+#   K8S_IMAGE                       registry image prefix, e.g.
+#                                   registry.gitlab.com/<group>/<project>/hivemind
+#   K8S_SECRET_DATABASE_URL (m)     Postgres DSN
+#   K8S_SECRET_EMBEDDING_API_KEY (m)  embedding credential (may be EMPTY)
+#   K8S_SECRET_EXTRACTOR_API_KEY (m)  extractor credential (may be EMPTY = off)
+
+workflow:
+  # test + build on MRs and the default branch; deploy only on the
+  # (protected) default branch.
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+stages:
+  - test
+  - build
+  - deploy
+
+test:
+  stage: test
+  image:
+    name: python:3.14  # the repo pins requires-python >= 3.14
+  services:
+    - pgvector/pgvector:pg16
+  variables:
+    # The service DB user IS a superuser so the probe can CREATE EXTENSION.
+    POSTGRES_USER: hivemind
+    POSTGRES_PASSWORD: hivemind
+    POSTGRES_DB: hivemind
+    # A FRESH CI database provisions at the configured dim (512 keeps the
+    # test vectors fast; the dev-machine 512 pool is irrelevant to CI).
+    HIVEMIND_DATABASE_URL: postgresql://hivemind:hivemind@postgres:5432/hivemind
+    HIVEMIND_EMBEDDING_DIM: "512"
+  script:
+    - pip install uv
+    - uv sync
+    # --- DB readiness probe (REQUIRED) -------------------------------------
+    # The integration suite SKIPs when the DB is unreachable, so a broken
+    # service container would silently skip-and-pass. This probe waits up to
+    # ~60s for the DSN, creates the vector extension as the superuser, and
+    # FAILS the job if anything is wrong — a skipping suite must never
+    # masquerade as green.
+    - |
+      uv run python - <<'PYEOF'
+      import asyncio, os
+      import asyncpg
+
+      dsn = os.environ["HIVEMIND_DATABASE_URL"]
+
+      async def wait_for_db() -> None:
+          last = None
+          for _ in range(60):
+              try:
+                  conn = await asyncpg.connect(dsn, timeout=5)
+                  await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
+                  await conn.execute("SELECT 1")
+                  await conn.close()
+                  print("DB probe OK (vector extension ready)")
+                  return
+              except Exception as exc:
+                  last = exc
+                  await asyncio.sleep(1)
+          raise SystemExit(f"DB probe FAILED after 60s: {last}")
+
+      asyncio.run(wait_for_db())
+      PYEOF
+    # The live-extractor integration test (tests/integration/test_extractor_live.py)
+    # SKIPs by design: HIVEMIND_EXTRACTOR_ENDPOINT is unset (ADR 0016
+    # optional extractor). The hermetic + Postgres-backed suite must be green.
+    - uv run pytest tests/unit tests/integration -q
+
+build:
+  stage: build
+  image:
+    name: docker:27
+    entrypoint: [""]
+  services:
+    - docker:27
+  variables:
+    # Standard GitLab docker-in-docker (dind) wiring. CAVEAT: a k8s runner
+    # needs a dind-capable service (or privileged pods for /dev/shm); if the
+    # org's runner cannot run dind, use the commented-out kaniko build below.
+    DOCKER_TLS_CERTDIR: ""
+  before_script:
+    # docker:27: log into the GitLab container registry (CI_REGISTRY_* is
+    # provided by GitLab for the project's registry).
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+  script:
+    - docker build -t "$K8S_IMAGE:$CI_COMMIT_SHORT_SHA" .
+    - docker push "$K8S_IMAGE:$CI_COMMIT_SHORT_SHA"
+  # --- Alternative: kaniko build (if the k8s runner has no dind) -----------
+  # build-kaniko:
+  #   stage: build
+  #   image:
+  #     name: registry.gitlab.com/gitlab-org/images/kaniko/executor
+  #   script:
+  #     - /kaniko/executor --context="DIR:$(pwd)" --dockerfile=Dockerfile
+  #         --destination="$K8S_IMAGE:$CI_COMMIT_SHORT_SHA"
+  #     # registry auth: the kaniko executor picks up CI_REGISTRY /
+  #     # CI_REGISTRY_USER / CI_REGISTRY_PASSWORD (GitLab built-ins).
+
+deploy:
+  stage: deploy
+  environment:
+    name: production
+  image:
+    name: bitnami/kubectl:latest  # any kubectl image works; the org's
+                                   # standard kubectl image is fine too
+  rules:
+    # Deploy only on the (protected) default branch — never from MRs.
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  script:
+    - IMAGE="$K8S_IMAGE:$CI_COMMIT_SHORT_SHA"
+    # 1) Create/refresh the app secret from the masked GitLab variables.
+    #    CI is the single source of truth for these three values; the
+    #    bootstrap-owned `hivemind-keys` secret is a DELIBERATELY DIFFERENT
+    #    secret so this never wipes the generated keys.
+    - kubectl -n hivemind create secret hivemind-secrets \
+        --from-literal=HIVEMIND_DATABASE_URL="$K8S_SECRET_DATABASE_URL" \
+        --from-literal=HIVEMIND_EMBEDDING_API_KEY="$K8S_SECRET_EMBEDDING_API_KEY" \
+        --from-literal=HIVEMIND_EXTRACTOR_API_KEY="$K8S_SECRET_EXTRACTOR_API_KEY" \
+        --dry-run=client -o yaml | kubectl -n hivemind apply -f -
+    # 2) FIRST-RUN KEY BOOTSTRAP (idempotent). On a FRESH database no admin
+    #    / org keys exist yet; `hivemind-keys issue-admin` / `rotate-org`
+    #    prints each raw key ONCE to stdout. We run them in a one-off Job in
+    #    the app image, read the keys from the Job log, and store them in
+    #    the `hivemind-keys` secret. On every subsequent deploy the secret
+    #    exists and this is skipped. The raw keys live ONLY in the k8s
+    #    Secret — GitLab stays key-free by design (the Job-log copy is
+    #    ephemeral; DEPLOY.md says: fetch keys from the Secret, not the log).
+    - |
+      if kubectl -n hivemind get secret hivemind-keys >/dev/null 2>&1; then
+        echo "hivemind-keys secret exists — skipping key bootstrap"
+      else
+        kubectl -n hivemind delete job hivemind-keys-bootstrap --ignore-not-found=true
+        # The heredoc is UNQUOTED on purpose (so $IMAGE expands), but the
+        # $(hivemind-keys ...) substitutions are ESCAPED so they run in the
+        # Job pod, not in this CI shell.
+        kubectl -n hivemind apply -f - <<EOF
+        apiVersion: batch/v1
+        kind: Job
+        metadata:
+          name: hivemind-keys-bootstrap
+          namespace: hivemind
+        spec:
+          backoffLimit: 2
+          template:
+            spec:
+              restartPolicy: Never
+              containers:
+                - name: keys
+                  image: $IMAGE
+                  command:
+                    - sh
+                    - -c
+                    - |
+                      echo "ADMIN_KEY=\$(hivemind-keys issue-admin)"
+                      echo "ORG_KEY=\$(hivemind-keys rotate-org)"
+                  envFrom:
+                    - secretRef:
+                        name: hivemind-secrets
+        EOF
+        kubectl -n hivemind wait --for=condition=complete job/hivemind-keys-bootstrap --timeout=120s
+        ADMIN_KEY=$(kubectl -n hivemind logs job/hivemind-keys-bootstrap | grep '^ADMIN_KEY=' | cut -d= -f2)
+        ORG_KEY=$(kubectl -n hivemind logs job/hivemind-keys-bootstrap | grep '^ORG_KEY=' | cut -d= -f2)
+        kubectl -n hivemind create secret hivemind-keys \
+          --from-literal=ADMIN_KEY="$ADMIN_KEY" \
+          --from-literal=ORG_KEY="$ORG_KEY" \
+          --dry-run=client -o yaml | kubectl -n hivemind apply -f -
+        kubectl -n hivemind delete job hivemind-keys-bootstrap
+      fi
+    # 3) Apply the app manifests: the placeholder image `hivemind:0.0.0` in
+    #    deploy/kubernetes/ is the ONLY sed target (kustomize is built into
+    #    kubectl — no extra binary needed).
+    - kubectl kustomize build deploy/kubernetes \
+        | sed "s|hivemind:0.0.0|$IMAGE|g" \
+        | kubectl -n hivemind apply -f -
+    # 4) Wait for both rollouts (each pod's initContainer runs the
+    #    idempotent migration first — a dim mismatch (ADR 0015) blocks the
+    #    rollout LOUDLY here, never a silent runtime no-op).
+    - kubectl -n hivemind rollout status deployment/hivemind-api --timeout=300s
+    - kubectl -n hivemind rollout status deployment/hivemind-mcp --timeout=300s
+    # KUBECTL AUTH: the GitLab Kubernetes agent (pre-configured per org)
+    # provides the kubectl credentials for this job — no kubeconfig wiring
+    # here. The agent's ServiceAccount needs at least: namespaces (get,
+    # within hivemind), secrets (get/create/patch), jobs
+    # (create/get/delete), pods (get/list/log), deployments
+    # (get/patch/apply). Full RBAC YAML lives in DEPLOY.md (§7).
