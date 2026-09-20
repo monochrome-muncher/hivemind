@@ -164,6 +164,7 @@ def build_router(app: HivemindApp) -> APIRouter:
         credential: require,
         kind: Annotated[Kind | None, Query()] = None,
         tags: Annotated[list[str] | None, Query()] = None,
+        entities: Annotated[list[str] | None, Query()] = None,
         scope: Annotated[str | None, Query()] = None,
         author: Annotated[str | None, Query()] = None,
         agent: Annotated[str | None, Query()] = None,
@@ -175,10 +176,16 @@ def build_router(app: HivemindApp) -> APIRouter:
         limit: Annotated[int | None, Query(ge=1)] = None,
         offset: Annotated[int | None, Query(ge=0)] = 0,
     ) -> list[EntryOut]:
-        """List/filter entries without a query (SPEC.md §5.1, §5.3)."""
+        """List/filter entries without a query (SPEC.md §5.1, §5.3).
+
+        ``entities`` (ADR 0016, SPEC §13) filters by machine-extracted
+        entity names: AND-semantics, case-insensitive (the store layer
+        matches on lower-cased names).
+        """
         filters = EntryFilters(
             kind=kind,
             tags=tuple(tags or ()),
+            entities=tuple(entities or ()),
             scope=scope,
             author=author,
             agent=agent,
@@ -204,6 +211,7 @@ def build_router(app: HivemindApp) -> APIRouter:
         filters = EntryFilters(
             kind=request.kind,
             tags=tuple(request.tags),
+            entities=tuple(request.entities),
             scope=request.scope,
             author=request.author,
             agent=request.agent,

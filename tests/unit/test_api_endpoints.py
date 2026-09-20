@@ -18,7 +18,7 @@ from hivemind.api.deps import HivemindApp, create_app
 from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
-from hivemind.domain.entry import EntryDraft
+from hivemind.domain.entry import EntityKind, EntryDraft, ExtractedEntity, Kind
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from tests.fakes import make_clock, make_embedder, make_search_config
@@ -913,3 +913,144 @@ class TestMetricsEndpoint:
             denied = await client.get("/v1/metrics", headers={"X-API-Key": "key-alice"})
             assert denied.status_code == 403
             assert denied.json()["error"]["code"] == "forbidden"
+
+
+# --------------------------------------------------------------------------- #
+# Entity facets (ADR 0016, SPEC §13) ------------------------------------------ #
+
+
+async def _seed_entity_entries(app: HivemindApp) -> dict[str, str]:
+    """Seed two entries carrying machine-extracted entity facets (ADR 0016)."""
+    a = await app.store.create_entry(
+        EntryDraft(
+            kind=Kind.FACT,
+            summary="Postgres connection pool exhausted",
+            author="alice",
+            agent="a1",
+        ),
+        entities=(
+            ExtractedEntity(name="Postgres", kind=EntityKind.SYSTEM),
+            ExtractedEntity(name="auth-service", kind=EntityKind.SERVICE),
+        ),
+        entities_model="test-extractor",
+    )
+    b = await app.store.create_entry(
+        EntryDraft(
+            kind=Kind.FACT,
+            summary="Kubernetes autoscaler misconfigured",
+            author="alice",
+            agent="a1",
+        ),
+        entities=(ExtractedEntity(name="Kubernetes", kind=EntityKind.SYSTEM),),
+        entities_model="test-extractor",
+    )
+    return {"a": a.id, "b": b.id}
+
+
+class TestEntitiesSurface:
+    """Entity facets (ADR 0016, SPEC §13): machine-extracted entities
+    are filterable by name (AND-semantics, case-insensitive) and exposed
+    on full-entry reads; compact hits stay slim; writes are machine-only
+    (an agent declares facets via tags, never via a write request)."""
+
+    async def test_list_filters_by_entities_and_case_insensitively(self) -> None:
+        app = make_hivemind_app()
+        ids = await _seed_entity_entries(app)
+        client = make_client(app)
+        async with client:
+            # Filter names are case-insensitive against the stored names.
+            resp = await client.get(
+                "/v1/entries",
+                params=[("entities", "POSTGRES")],
+                headers={"X-API-Key": "key-alice"},
+            )
+            assert [e["id"] for e in resp.json()] == [ids["a"]]
+            # AND-semantics: every listed name must be on the entry.
+            both = await client.get(
+                "/v1/entries",
+                params=[("entities", "postgres"), ("entities", "auth-service")],
+                headers={"X-API-Key": "key-alice"},
+            )
+            assert [e["id"] for e in both.json()] == [ids["a"]]
+            missing = await client.get(
+                "/v1/entries",
+                params=[("entities", "postgres"), ("entities", "kubernetes")],
+                headers={"X-API-Key": "key-alice"},
+            )
+            assert missing.json() == []
+
+    async def test_search_filters_by_entities(self) -> None:
+        app = make_hivemind_app()
+        ids = await _seed_entity_entries(app)
+        client = make_client(app)
+        async with client:
+            resp = await client.post(
+                "/v1/search",
+                json={"query": "postgres pool", "entities": ["postgres"]},
+                headers={"X-API-Key": "key-alice"},
+            )
+            assert [h["entry_id"] for h in resp.json()] == [ids["a"]]
+            # AND-semantics: no entry carries both names.
+            none = await client.post(
+                "/v1/search",
+                json={"query": "pool", "entities": ["postgres", "kubernetes"]},
+                headers={"X-API-Key": "key-alice"},
+            )
+            assert none.json() == []
+
+    async def test_get_entry_exposes_entities_and_provenance(self) -> None:
+        app = make_hivemind_app()
+        ids = await _seed_entity_entries(app)
+        client = make_client(app)
+        async with client:
+            resp = await client.get(f"/v1/entries/{ids['a']}", headers={"X-API-Key": "key-alice"})
+        entry = resp.json()
+        assert entry["entities"] == [
+            {"name": "Postgres", "kind": "system"},
+            {"name": "auth-service", "kind": "service"},
+        ]
+        assert entry["entities_model"] == "test-extractor"
+
+    async def test_get_entry_without_extraction_defaults_to_empty(self) -> None:
+        client = make_client(make_hivemind_app())
+        async with client:
+            created = await post_entry(client, "key-alice", "a plain entry")
+            resp = await client.get(
+                f"/v1/entries/{created['id']}", headers={"X-API-Key": "key-alice"}
+            )
+        entry = resp.json()
+        assert entry["entities"] == []
+        assert entry["entities_model"] is None
+
+    async def test_search_hits_do_not_carry_entities(self) -> None:
+        """Progressive disclosure (SPEC §6.1): compact hits stay slim."""
+        app = make_hivemind_app()
+        await _seed_entity_entries(app)
+        client = make_client(app)
+        async with client:
+            resp = await client.post(
+                "/v1/search", json={"query": "postgres pool"}, headers={"X-API-Key": "key-alice"}
+            )
+        hits = resp.json()
+        assert len(hits) >= 1
+        for hit in hits:
+            assert "entities" not in hit
+            assert "entities_model" not in hit
+
+    async def test_write_requests_have_no_entities_field(self) -> None:
+        """Machine-only (ADR 0016): a write request carrying ``entities``
+        is not a facet channel — the machine is the single writer (the
+        extra field is ignored; tags remain the agent's channel)."""
+        client = make_client(make_hivemind_app())
+        async with client:
+            resp = await client.post(
+                "/v1/entries",
+                json={
+                    "kind": "fact",
+                    "summary": "no facets",
+                    "entities": [{"name": "redis", "kind": "system"}],
+                },
+                headers={"X-API-Key": "key-alice"},
+            )
+        assert resp.status_code == 201
+        assert resp.json()["entities"] == []

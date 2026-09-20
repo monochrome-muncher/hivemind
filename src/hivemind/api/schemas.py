@@ -14,7 +14,7 @@ from typing import Any
 from pydantic import BaseModel, field_validator
 
 from hivemind.domain.access import Agent, Fleet
-from hivemind.domain.entry import Entry, Kind, SourceType
+from hivemind.domain.entry import EntityKind, Entry, Kind, SourceType
 from hivemind.domain.feedback import Verdict
 from hivemind.services.search import Hit
 
@@ -73,6 +73,18 @@ class SourceOut(BaseModel):
     ref: str
 
 
+class EntityOut(BaseModel):
+    """A machine-extracted entity facet (ADR 0016, SPEC §13).
+
+    ``name`` is open vocabulary (the extractor's output); ``kind`` is the
+    closed six-value ``EntityKind`` vocabulary (display-only in v1 —
+    filters match on names, not kinds).
+    """
+
+    name: str
+    kind: EntityKind
+
+
 class EntryOut(BaseModel):
     """A full entry (SPEC.md §4.1). Embeddings are internal and are
     never serialized across the wire."""
@@ -94,6 +106,13 @@ class EntryOut(BaseModel):
     state: str
     superseded_by: str | None = None
     withdrawn_reason: str | None = None
+    # Machine-extracted entity facets (ADR 0016, SPEC §13): set once at
+    # write time, never mutated (ADR 0001). ``entities_model`` records
+    # which extractor model produced them (provenance, symmetric with
+    # the internal ``embedding_model``); both are absent when extraction
+    # was off or failed (best-effort, SPEC §13.4).
+    entities: list[EntityOut] = []
+    entities_model: str | None = None
     # The supersession chain (SPEC.md §5.1 ``?history=true``): optional,
     # populated only when the caller asks for it.
     history: dict[str, list[EntryOut]] | None = None
@@ -119,6 +138,8 @@ class EntryOut(BaseModel):
             state=entry.state.value,
             superseded_by=entry.superseded_by,
             withdrawn_reason=entry.withdrawn_reason,
+            entities=[EntityOut(name=e.name, kind=e.kind) for e in entry.entities],
+            entities_model=entry.entities_model,
         )
 
 
@@ -159,6 +180,10 @@ class SearchRequest(BaseModel):
     query: str
     kind: Kind | None = None
     tags: list[str] = []
+    # ADR 0016 / SPEC §13: filter by machine-extracted entity names
+    # (AND-semantics, case-insensitive — the store layer matches them;
+    # kinds are display-only, not filterable in v1).
+    entities: list[str] = []
     scope: str | None = None
     author: str | None = None
     agent: str | None = None
