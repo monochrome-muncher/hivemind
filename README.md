@@ -101,7 +101,7 @@ same pool while its writes carry that agent's *verified* provenance
      "mcpServers": {
        "hivemind": {
          "command": "uv",
-         "args": ["run", "--directory", "/home/chris/Documents/hivemind", "hivemind-mcp-pg"],
+         "args": ["run", "--directory", "/path/to/hivemind", "hivemind-mcp-pg"],
          "env": {
            "HIVEMIND_DATABASE_URL": "postgresql://hivemind:hivemind@localhost:5432/hivemind",
            "HIVEMIND_EMBEDDING_ENDPOINT": "http://localhost:8001/v1",
