@@ -1,0 +1,15 @@
+# OPT-IN kustomization — NOT part of the default build.
+#
+# Apply only when external reachability is needed (the two Services in the
+# parent tree are ClusterIP by design):
+#
+#   kubectl kustomize build deploy/kubernetes/optional | kubectl apply -f -
+#
+# Prerequisites (see DEPLOY.md): the org's nginx-ingress class is installed
+# and a cert-manager issuer named `hivemind-issuer` (see optional/ingress.yaml)
+# exists in the cluster.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: hivemind
+resources:
+  - ingress.yaml

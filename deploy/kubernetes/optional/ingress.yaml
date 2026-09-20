@@ -1,0 +1,75 @@
+# Opt-in external reachability: one nginx Ingress + a cert-manager
+# Certificate. Apply via:
+#   kubectl kustomize build deploy/kubernetes/optional | kubectl apply -f -
+#
+# Replace the placeholder host (hivemind.example.org) with the org's real
+# hostname before applying, and point the issuer at the org's existing
+# cert-manager issuer (a ClusterIssuer if the name does not resolve to a
+# namespace-scoped Issuer — the org's cert-manager issuer MUST exist).
+#
+# WHY the nginx annotations exist (streamable-HTTP / SSE gotcha):
+#   The MCP endpoint (hivemind-mcp) is a LONG-LIVED SSE stream (streamable
+#   HTTP, ADR 0010). nginx's DEFAULT proxy-read-timeout is 60s — after a
+#   60s idle gap in the stream nginx closes the connection and the MCP
+#   session dies mid-conversation. This is the classic nginx-ingress
+#   SSE pitfall. The four annotations below keep the stream alive and stop
+#   buffering (buffered chunks would stall the event delivery clients rely
+#   on). They are set at the Ingress level so the /mcp path is guaranteed
+#   covered; the / (REST API) path is a plain request/response service, so
+#   the annotations are harmless there (generous timeouts, no buffering).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hivemind
+  labels:
+    app.kubernetes.io/name: hivemind
+    app.kubernetes.io/component: ingress
+  annotations:
+    # --- SSE / long-poll tuning (see the comment block above) ---------------
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - hivemind.example.org
+      secretName: hivemind-tls
+  rules:
+    - host: hivemind.example.org
+      http:
+        paths:
+          # Streamable-HTTP MCP (long-lived SSE — needs the annotations above).
+          - path: /mcp
+            pathType: Prefix
+            backend:
+              service:
+                name: hivemind-mcp
+                port:
+                  number: 8088
+          # REST API (SPEC §5.1) — plain request/response; the generous
+          # read timeout above is harmless.
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: hivemind-api
+                port:
+                  number: 8000
+---
+# cert-manager Certificate: the Ingress's tls.secretName (hivemind-tls) is
+# minted by the org's cert-manager from this spec.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: hivemind-cert
+spec:
+  secretName: hivemind-tls
+  issuerRef:
+    # The org's cert-manager issuer must exist (ADR: cluster-level
+    # cert-manager is assumed; a namespace-scoped Issuer is fine too).
+    name: hivemind-issuer
+    kind: Issuer
+  dnsNames:
+    - hivemind.example.org
