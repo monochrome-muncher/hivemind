@@ -229,7 +229,7 @@ Both `hivemind-mcp-pg` and `hivemind-mcp-http` read/write the same pool with the
 
 - No human-facing UI (agent-only; a read-only web search is a later extension)
 - No passive capture of transcripts/tool events (explicit writes only, ADR 0004)
-- No knowledge graph, no entity extraction, no auto-contradiction detection
+- No knowledge graph, no auto-contradiction detection (the **facet slice** of entity extraction became a commitment in §13 — ADR 0016; *graph-expanded* retrieval stays a non-goal)
 - No curation/verification workflow, no PII pipeline (trust levels are §12, not a non-goal — ADR 0011)
 - No multi-tenant SaaS (single-org; self/fleet scoping is §12, ADR 0011)
 - No binary/artifact storage (references only)
@@ -244,7 +244,7 @@ Both `hivemind-mcp-pg` and `hivemind-mcp-http` read/write the same pool with the
 | **Private staging + publish** — write to a personal scratch, *promote* it to the fleet | Analysts want to try analyses before sharing. *Partially satisfied: the `self` scope (ADR 0011) is the personal scratch; what remains is promotion — a curation story (see Curation workflow)* |
 | **Namespaces / channels** — multi-fleet membership, per-fleet promotion, cross-fleet writes | The flat pool grows too noisy. *Partially satisfied: fleets + one home fleet per agent (ADR 0011) cover single-fleet needs; multi-fleet membership is the remaining extension* |
 | **Binary artifacts** — S3-backed artifact store behind `sources` | Analysis references outgrow file/URL references |
-| **Knowledge graph** — entity extraction + graph-expanded retrieval | Cross-entry entity linking pays off in retrieval quality |
+| **Knowledge graph** — graph-expanded retrieval over a canonical entity registry | Cross-entry entity linking pays off in retrieval quality. *Partially pre-staged: the entity-extraction **facet** slice is shipped by ADR 0016 / SPEC §13 (a pre-staged §10 extension on scale ambition — the trigger has *not* fired); the graph half of this row (entity registry + multi-hop expansion) remains trigger-held* |
 | **LLM-assisted contradiction detection** — flag likely conflicts for human review | Explicit supersession can't keep up with contradictory writes |
 | **Curation workflow** — verify/promote/retire roles | An org wants a "librarian" function |
 | **Human read-only UI** — browse/search the pool in a browser | Analysts want to see the pool without an agent |
@@ -307,3 +307,37 @@ This section supersedes the flat-pool commitment of §1 and the "no trust tiers"
 | `POST /v1/admin/org-key/rotate` | Rotate the org key — the cluster-wide kill switch |
 
 The single admin key gates this surface; admin-issued entries use the reserved name `admin` (ADR 0012).
+
+## 13. Entity extraction (v3 — ADR 0016)
+
+This section supersedes the "no entity extraction" non-goal of §9 **for the facet slice only**. ADR 0016 owns the extractor; this section is the spec commitment; the ADR owns the *why*. The knowledge-graph half of the §10 row (entity registry + graph-expanded retrieval) stays trigger-held — facets are not a graph. This is a **pre-staged** §10 extension: the §10 trigger ("cross-entry entity linking pays off in retrieval quality") has *not* fired; the facet slice is shipped on scale ambition (300+ agents / multiple fleets) and is measured with the §1.1 harness.
+
+### 13.1 What is extracted
+
+* **At write time**, server-side, over the same text the embedder sees: `summary` + a bounded body prefix (`EMBEDDING_PREFIX_CHARS`).
+* A fixed-prompt LLM call (`EXTRACTOR_MODEL` — a deploy-time decision, ADR 0016; e.g. a Qwen3-27B-class chat model on a *separate service* from the embeddings server).
+* **All-or-nothing, schema-validated output:** `entities` is a list of `{name, kind}` where `name` is open vocabulary (trimmed, non-empty, ≤ 128 chars) and `kind` is a **closed** vocabulary (`person | organization | system | service | artifact | concept`); ≤ 10 entities per entry, deduped. Any malformed output fails the call — no partial salvage.
+
+### 13.2 Storage and immutability
+
+* `entries.entities jsonb` + `entries.entities_model text` — symmetric with the `embedding` / `embedding_model` pair (ADR 0005): one machine writer, immutable after write (ADR 0001), provenance via `entities_model`.
+* **No backfill in v1:** pre-existing entries keep `entities: []`; an operator-run backfill is a named maintenance procedure (the ADR 0005 re-embedding-migration pattern — the one sanctioned in-place exception to ADR 0001, for machine metadata only), not an online feature.
+
+### 13.3 Query surface
+
+* `EntryFilters.entities` — **AND-semantics over names, case-insensitive** (mirrors `tags`); exposed on REST `GET /v1/search` + `GET /v1/entries` and `hive_search` / `hive_list`.
+* `kind` is stored + displayed only (not filterable in v1); entries expose an `entities` field in responses (MCP + REST).
+
+### 13.4 Posture: optional + best-effort
+
+* **Optional:** `EXTRACTOR_ENDPOINT` unset ⇒ extraction is off (entries land with `entities: []`, zero LLM cost) — the same dev-mode stance as "no authenticator".
+* **Best-effort inline:** an extraction failure (timeout, retry exhaustion, schema mismatch) never blocks the write — the entry lands with `entities: []` and no `entities_model`. Entry-level write semantics are unchanged (ADR 0014); only the enrichment is lost.
+* **Bounded retries** on transient failures (ADR 0014 pattern; `EXTRACTOR_RETRIES` default 2; `0` disables).
+* **Machine-only:** agents declare facets via `tags` (the existing channel); `entities` is a pure machine signal. Agent-supplied `entities` is a later extension (it would need a source flag).
+
+### 13.5 Explicitly out of scope
+
+* Graph expansion / multi-hop retrieval (stays a §10 / Tier 5 trigger; ADR 0006's rejection stands).
+* A canonical entity registry / alias resolution (the next step after facets).
+* Agent-supplied `entities` (needs a source flag; a later extension).
+* Auto-contradiction detection (stays a §10 trigger).
