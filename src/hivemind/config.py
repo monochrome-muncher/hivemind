@@ -45,9 +45,16 @@ class SearchConfig:
 
 
 class Settings(BaseSettings):
-    """Environment-driven service settings (HIVEMIND_* env vars)."""
+    """Environment-driven service settings (HIVEMIND_* env vars).
 
-    model_config = SettingsConfigDict(env_prefix="HIVEMIND_", extra="ignore")
+    A local ``.env`` file is honored when present (the local-dev
+    quickstart: ``cp .env.example .env``, DEPLOY.md §2); real
+    environment variables always win over ``.env`` values, and a
+    missing file is silently ignored, so Kubernetes / CI (where the
+    values come from env / Secrets) are unaffected.
+    """
+
+    model_config = SettingsConfigDict(env_prefix="HIVEMIND_", extra="ignore", env_file=".env")
 
     database_url: str = "postgresql://hivemind:hivemind@localhost:5432/hivemind"
     embedding_endpoint: str = "http://localhost:8001/v1"
