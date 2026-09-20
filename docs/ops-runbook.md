@@ -12,6 +12,10 @@ pgvector) + the hostable streamable-HTTP MCP runner (+ an embedding
 provider, ADR 0005). There is no orchestrator, no sharding, and no
 multi-tenant isolation.
 
+> **Kubernetes deployment?** This runbook is the *single-node*
+> story. The production story (Kubernetes + GitLab CI/CD — image build,
+> manifests, key bootstrap, key rotation) lives in [DEPLOY.md](../DEPLOY.md).
+
 ### Services (`docker-compose.yaml`)
 
 | Service | Image / build | Purpose |

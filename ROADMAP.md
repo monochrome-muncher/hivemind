@@ -152,7 +152,7 @@ kinds). Tier 3.1 (the key-rotation runbook) is **blocked by Tier 2** —
 you can't write a rotation story for a key model that's about to
 change.
 
-## Tier 3 — productionize (former Tier 2)  *(shipped: 3.1 + 3.2 + 3.4; 3.3 shipped earlier)*
+## Tier 3 — productionize (former Tier 2)  *(fully shipped: 3.1–3.4)*
 
 ### 3.1 Ops runbook  *(shipped: `docs/ops-runbook.md`)*
 Deployment, **backups** (single-node Postgres, ADR 0007),
