@@ -182,7 +182,10 @@ trust-level distribution, pending-agent count, revoked-key count.)*
   where FTS ranks under (a new ADR on the decision).
 - **4.2 Embedding prefix length.** The 512-token default (SPEC §11.5)
   is "tune during implementation against real long-form entries" — do
-  that tuning with the §1.1 harness on real data.
+  that tuning with the §1.1 harness on real data. (The embedding
+  *dimension* itself is a separate deploy-time decision: the default is
+  now 1024, ADR 0015 — the dim tuning, if it lands, happens in the same
+  harness work.)
 
 ## Tier 5 — explicitly held: the §10 extensions (former Tier 4)
 

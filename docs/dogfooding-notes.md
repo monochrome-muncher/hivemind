@@ -55,7 +55,7 @@ does), with the agent's L2 key in the `Authorization` header.
 | 5 | **Docker build caching masked a code fix.** `docker compose build` + `up -d` reused a cached layer, so the container kept serving stale code until a `--no-cache` rebuild. | Ops | Noted: use `docker compose build --no-cache mcp-http` (or verify the running code) after source changes. |
 | 6 | **The pi MCP gateway caches the bearer token.** After a key rotation / re-provision, the in-session `mcp` tool still sent the old token (401) while a direct curl with the new key worked (200). | Ops | Noted: restart the gateway (or re-install the MCP server) after rotating the key; the gateway's own `connect` re-auth path is a separate (pi-side) concern. |
 | 7 | **REST and MCP use different auth headers.** REST = `X-API-Key`; MCP streamable-HTTP = `Authorization: Bearer`. An agent driving both surfaces must know both. | Low | Noted: both are documented per-surface; unifying is a wire-protocol decision (not made). |
-| 8 | **The integration suite wipes the dev pool.** Running `make test` (integration) re-migrates the shared local Postgres, so dogfood identities/entries disappear and the agent key must be re-provisioned. Also: bare `uv run pytest` (no Makefile env) assumes the 1536-dim default, while the Makefile exports `HIVEMIND_EMBEDDING_DIM=512` — a dim-mismatch footgun for anyone running the suite outside `make`. | Ops | Noted as a follow-up: a clear "dim mismatch" error (or auto-reset) for the integration suite; document `HIVEMIND_EMBEDDING_DIM` on the `make test` path. |
+| 8 | **The integration suite wipes the dev pool.** Running `make test` (integration) re-migrates the shared local Postgres, so dogfood identities/entries disappear and the agent key must be re-provisioned. Also: bare `uv run pytest` (no Makefile env) *used to* assume the 1536-dim default while the Makefile exports `HIVEMIND_EMBEDDING_DIM=512` — a dim-mismatch footgun for anyone running the suite outside `make`. | Ops | **Fixed (ADR 0015):** the code default dim is now 1024 (never 1536), and `migrate` / `hivemind-migrate` / the integration suite now **fail loudly** at migrate time with an actionable error when the pool's dim differs from the configured dim (both dims named + both remediations: reset the pool, or point `HIVEMIND_EMBEDDING_DIM` at the pool's dim) — the confusing `DataError` footgun is gone. The dev Makefile keeps exporting 512 for fast local vLLM embedding. |
 
 ## What the run did *not* cover
 
@@ -70,5 +70,7 @@ The core write → search → feedback → supersede loop is **sound on a real
 embedder**, and the access model (ADRs 0011–0012) is exactly as specified —
 the one real defect (the forced `"org"` scope default) was a wiring bug that
 only a real end-to-end run could surface, and it is now fixed and covered at
-every seam. The remaining items are ops polish (build cache, token cache,
-pool reset, dim footgun), not product defects.
+every seam. The dim footgun (friction #8) was closed by ADR 0015 (the
+default dim is now 1024, and a pool/dim mismatch fails loudly at migrate
+time with an actionable error); the remaining items are ops polish (build
+cache, token cache, pool reset), not product defects.

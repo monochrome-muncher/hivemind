@@ -36,7 +36,7 @@ make mcp-http       # start the hostable MCP runner as a detached service (:8088
 |---|---|
 | `HIVEMIND_DATABASE_URL` | Postgres DSN (default `postgresql://hivemind:hivemind@localhost:5432/hivemind`) |
 | `HIVEMIND_EMBEDDING_ENDPOINT` / `_API_KEY` / `_MODEL` | the embedding provider (ADR 0005) |
-| `HIVEMIND_EMBEDDING_DIM` | the embedding dimension (a deploy-time decision — see §6) |
+| `HIVEMIND_EMBEDDING_DIM` | the embedding dimension (a deploy-time decision, default **1024** — ADR 0015; the dev Makefile exports 512 for fast local vLLM embedding — see §6) |
 | `HIVEMIND_EMBEDDING_RETRIES` | retry budget for transient embedding failures (timeouts, connection errors, `429`, 5xx) — default 2; set `0` to disable (ADR 0014) |
 | `HIVEMIND_HOST` / `HIVEMIND_PORT` | the mcp-http bind host/port (ADR 0010) |
 
@@ -155,15 +155,25 @@ hash is stored (a leaked database never leaks usable keys, SPEC §8.1).
 4. Verify: `GET /v1/health`, `GET /v1/metrics`, and the
    `schema_migrations` version.
 
-## 6. Embedding dimension (deploy-time decision, ADR 0005)
+## 6. Embedding dimension (deploy-time decision, ADR 0005 + ADR 0015)
 
 The embedding dimension is baked into the `vector(:dim)` column at
 migration time (ADR 0005). It is **not** an online setting: changing it
 requires a fresh pool (a re-embed of every entry), not an in-place
-change. Choose the dimension to match the embedding provider (ADR 0005:
-self-hosted) at deploy time; the ROADMAP §4.2 tuning (prefix length /
-dimension) uses the §1.1 eval harness to pick the value before it is
-pinned.
+change. The **default dim is 1024** (ADR 0015 — we never assume 1536;
+that is one provider's native dim), and the dev Makefile pins **512**
+for fast local vLLM embedding. Choose the dimension to match the
+embedding provider (ADR 0005: self-hosted) at deploy time; the
+ROADMAP §4.2 tuning (prefix length / dimension) uses the §1.1 eval
+harness to pick the value before it is pinned.
+
+**A dim mismatch is loud, never silent (ADR 0015):** `hivemind-migrate`
+(checks `current_embedding_dim` before applying anything) and the
+integration suite fail at **migrate time** with an actionable error when
+the pool's dim differs from the configured dim — naming both dims and
+offering both fixes (reset the pool, or point `HIVEMIND_EMBEDDING_DIM`
+at the pool's dim). You can no longer get a silent no-op followed by a
+confusing `DataError` on the first vector write.
 
 ### 512 → 1024 switch (the production scenario)
 
@@ -174,9 +184,11 @@ the switch is a pool change, not a model change:
    entries land at the old dim.
 2. **Back up** the data (see §3) — the old-dim pool is your source of
    truth until the new one is verified.
-3. **Set the dim** — `HIVEMIND_EMBEDDING_DIM=1024` (Makefile: `export
-   HIVEMIND_EMBEDDING_DIM ?= 512`, override per deploy) + the matching
-   `HIVEMIND_EMBEDDING_MODEL` / endpoint.
+3. **Set the dim** — `HIVEMIND_EMBEDDING_DIM=1024` (the code default is
+   now 1024, ADR 0015; the dev Makefile: `export HIVEMIND_EMBEDDING_DIM ?= 512`,
+   override per deploy) + the matching `HIVEMIND_EMBEDDING_MODEL` /
+   endpoint. A wrong value is a loud error at `hivemind-migrate` time
+   (ADR 0015), so it can't slip through silently.
 4. **Reset the pool** — `make pg-reset` (dev) / recreate the vector
    column (prod), then `make migrate` — the `vector(:dim)` column is
    recreated at the new width (forward migration, ADR 0013).

@@ -170,7 +170,8 @@ A fresh, important, well-remembered entry beats a slightly-more-similar but stal
 
 - Generated **at write time**, server-side, from `summary` + a bounded prefix of `body` (default: first ~512 tokens of body).
 - Produced by an **OpenAI-compatible embeddings endpoint the org configures at deploy** (`EMBEDDING_ENDPOINT`, `EMBEDDING_API_KEY`, `EMBEDDING_MODEL`). A self-hosted vLLM/Ollama endpoint satisfies "data must not leave the org."
-- The store records `embedding_model` + dimension per entry. The vector column has a **fixed dimension at deploy time** (`EMBEDDING_DIM`, default 1536).
+- The store records `embedding_model` + dimension per entry. The vector column has a **fixed dimension at deploy time** (`EMBEDDING_DIM`, default 1024 — ADR 0015).
+- **A dim mismatch is a loud failure, never a silent assumption:** if the pool's `vector(:dim)` column differs from the configured dim, `migrate` fails with an actionable error (reset the pool, or set `EMBEDDING_DIM` to the pool's dim) — ADR 0015. The dim is a deploy-time decision (ADR 0005); it is never changed in place.
 - **Changing the embedding model or dimension is an operator-run re-embedding migration** (re-embed all active entries, swap the column). This is a named maintenance procedure, not an online feature.
 - **Transient embedder failures are retried** (ADR 0014) — timeouts, connection errors, `429`, and 5xx are retried with a bounded exponential backoff (`EMBEDDING_RETRIES`, default 2 retries; `0` disables). Deterministic failures (other 4xx, dimension mismatch) fail fast, and a write still fails after the full budget — a write either lands fully (vector + entry) or fails.
 

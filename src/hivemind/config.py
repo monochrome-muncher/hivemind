@@ -53,7 +53,12 @@ class Settings(BaseSettings):
     embedding_endpoint: str = "http://localhost:8001/v1"
     embedding_api_key: str = ""
     embedding_model: str = "text-embedding-3-small"
-    embedding_dim: int = 1536
+    # The default when HIVEMIND_EMBEDDING_DIM is unset (ADR 0015). We never
+    # assume a 1536-dim default — that is one provider's native dim; 1024
+    # is the deploy-time default both OpenAI-compatible endpoints (the
+    # ``dimensions`` parameter) and self-hosted Matryoshka servers (vLLM)
+    # can serve. The dev Makefile pins 512 for fast local vLLM embedding.
+    embedding_dim: int = 1024
     embedding_prefix_chars: int = 2048
     # Retry budget for transient embedder failures (timeouts, connection
     # errors, 429, 5xx) — ADR 0014; 0 disables retrying.
