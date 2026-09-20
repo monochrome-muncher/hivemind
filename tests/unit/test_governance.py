@@ -17,7 +17,7 @@ from hivemind.services.governance import (
     PermissionDenied,
     WriteService,
 )
-from tests.fakes import make_clock, make_embedder
+from tests.fakes import FakeExtractor, make_clock, make_embedder
 
 
 def make_draft(summary: str, **kwargs) -> EntryDraft:
@@ -56,6 +56,58 @@ class TestWriteService:
         assert reloaded_old.superseded_by == new.id
         assert reloaded_new is not None
         assert reloaded_new.state.value == "active"
+
+
+class TestWriteServiceExtraction:
+    """Best-effort entity extraction on the write path (ADR 0016, SPEC §13):
+    facets land on the entry when the extractor succeeds; an extraction
+    failure (or an absent extractor) never blocks the write — the entry
+    lands without facets, zero write-failure impact."""
+
+    async def test_write_stores_extracted_facets_when_extractor_present(self) -> None:
+        store = MemoryStore(make_clock())
+        service = WriteService(store, make_embedder(), FakeExtractor())
+
+        entry = await service.write(make_draft("Auth uses JWT"))
+        assert entry.entities  # deterministic fake extracts salient tokens
+        assert entry.entities_model == "fake-extractor"
+        reloaded = await store.get_entry(entry.id)
+        assert reloaded is not None
+        assert reloaded.entities == entry.entities
+        assert reloaded.entities_model == "fake-extractor"
+
+    async def test_extraction_failure_never_blocks_the_write(self) -> None:
+        """A failing extractor must not fail the write: the entry lands
+        with the embedding, empty facets, and no ``entities_model``
+        (ADR 0016: best-effort enrichment only)."""
+        store = MemoryStore(make_clock())
+        service = WriteService(store, make_embedder(), FakeExtractor(fail=True))
+
+        entry = await service.write(make_draft("Auth uses JWT"))  # must not raise
+        assert entry.embedding is not None  # the embedding still landed
+        assert entry.entities == ()
+        assert entry.entities_model is None
+
+    async def test_write_without_extractor_lands_without_facets(self) -> None:
+        """Extraction off: the entry lands with empty facets and no
+        provenance, zero LLM cost (the extractor defaults to ``None``)."""
+        store = MemoryStore(make_clock())
+        service = WriteService(store, make_embedder())  # extractor defaults to None
+
+        entry = await service.write(make_draft("Auth uses JWT"))
+        assert entry.entities == ()
+        assert entry.entities_model is None
+
+    async def test_empty_extraction_result_is_a_success(self) -> None:
+        """A successful extraction with zero facets still records the
+        extractor's provenance (``entities_model``) — the model ran and
+        found nothing, which is different from it never running."""
+        store = MemoryStore(make_clock())
+        service = WriteService(store, make_embedder(), FakeExtractor(entities=()))
+
+        entry = await service.write(make_draft("a lone fact"))
+        assert entry.entities == ()
+        assert entry.entities_model == "fake-extractor"
 
 
 class TestGovernanceService:

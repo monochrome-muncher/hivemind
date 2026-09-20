@@ -16,7 +16,7 @@ from fastapi import FastAPI
 
 from hivemind.api.deps import HivemindApp, create_app
 from hivemind.config import SearchConfig, Settings
-from hivemind.ports import Authenticator, Embedder, Store
+from hivemind.ports import Authenticator, Embedder, Extractor, Store
 from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService, WriteService
 from hivemind.services.metrics import MetricsService
@@ -29,6 +29,7 @@ def create_app_for_config(
     store: Store | None = None,
     embedder: Embedder | None = None,
     authenticator: Authenticator | None = None,
+    extractor: Extractor | None = None,
     search_config: SearchConfig | None = None,
 ) -> HivemindApp:
     """Build a HivemindApp from settings, with optional fake overrides.
@@ -37,17 +38,23 @@ def create_app_for_config(
     must never depend on the pgstore or embeddings lanes); production
     leaves them unset, and the real implementations are built lazily
     from settings (SPEC.md §8.2, ADR 0007).
+
+    The ``extractor`` override follows the same pattern (ADR 0016):
+    an explicit fake is used when given; otherwise the extractor is
+    built from settings — which is ``None`` (extraction off, zero
+    LLM-extraction cost) when the extractor endpoint is unset.
     """
     store = store if store is not None else _build_store(settings)
     embedder = embedder if embedder is not None else _build_embedder(settings)
     authenticator = authenticator if authenticator is not None else _build_authenticator(settings)
+    extractor = extractor if extractor is not None else _build_extractor(settings)
     search_config = search_config if search_config is not None else settings.search_config()
     return HivemindApp(
         store=store,
         embedder=embedder,
         authenticator=authenticator,
         search_config=search_config,
-        write_service=WriteService(store, embedder),
+        write_service=WriteService(store, embedder, extractor),
         # The quality-formula weights are config (SPEC.md §6.4): the
         # governance service reports the same multiplier search rescoring uses.
         governance_service=GovernanceService(store, search_config),
@@ -63,6 +70,7 @@ def create_app_from_settings(
     store: Store | None = None,
     embedder: Embedder | None = None,
     authenticator: Authenticator | None = None,
+    extractor: Extractor | None = None,
     search_config: SearchConfig | None = None,
 ) -> FastAPI:
     """Build the FastAPI app from settings (for tests and tooling)."""
@@ -72,6 +80,7 @@ def create_app_from_settings(
             store=store,
             embedder=embedder,
             authenticator=authenticator,
+            extractor=extractor,
             search_config=search_config,
         )
     )
@@ -128,3 +137,16 @@ def _build_authenticator(settings: Settings) -> Authenticator:
             "hivemind.store does not expose build_authenticator(settings) -> Authenticator"
         )
     return cast(Authenticator, builder(settings))
+
+
+def _build_extractor(settings: Settings) -> Extractor | None:
+    """Build the production Extractor (the extractor lane, ADR 0016, SPEC §13) —
+    or ``None`` when the extractor endpoint is unset (extraction off:
+    zero LLM-extraction cost, ADR 0016's optional stance)."""
+    module = _lazy_module("hivemind.extractor", "pass an explicit extractor")
+    builder = getattr(module, "build_extractor", None)
+    if builder is None:
+        raise RuntimeError(
+            "hivemind.extractor does not expose build_extractor(settings) -> Extractor"
+        )
+    return cast("Extractor | None", builder(settings))

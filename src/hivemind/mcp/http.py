@@ -140,10 +140,13 @@ def build_http_app(
     middleware) that serves an unlimited number of agents, each with its
     own verified provenance (ADR 0010).
     """
+    from hivemind.extractor import build_extractor
+
     search_config = settings.search_config()
+    extractor = build_extractor(settings)  # optional (ADR 0016): None when the endpoint is unset
     template = McpHivemind(
         store=store,
-        write_service=WriteService(store, embedder),
+        write_service=WriteService(store, embedder, extractor),
         search_service=SearchService(store, embedder, search_config),
         governance_service=GovernanceService(store, search_config),
         access_service=AccessService(store, authenticator),
