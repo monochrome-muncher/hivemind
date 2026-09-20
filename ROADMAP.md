@@ -186,6 +186,21 @@ trust-level distribution, pending-agent count, revoked-key count.)*
   *dimension* itself is a separate deploy-time decision: the default is
   now 1024, ADR 0015 — the dim tuning, if it lands, happens in the same
   harness work.)
+- **4.3 Entity-extraction facets (pre-staged §10 extension — ADR 0016, SPEC §13).**
+  *This is not a §11 open item: it is the knowledge-graph §10 extension,
+  pre-staged on scale ambition (300+ agents / multiple fleets) — the
+  §10 trigger ("cross-entry entity linking pays off in retrieval
+  quality") has NOT fired; the facet slice is what is being built, and
+  it is measurable with the §1.1 harness. Graph-expanded retrieval and
+  the canonical entity registry stay trigger-held under Tier 5.* A
+  write-time, **optional + best-effort** LLM extractor (fixed prompt,
+  all-or-nothing schema-validated `{name, kind}` output; closed kind
+  vocabulary; `entities jsonb` on the entry, symmetric with the
+  embedding pair; name facet is AND + case-insensitive; `kind` is
+  display-only). A new `Extractor` port sits beside the `Embedder`
+  port (no Pydantic AI — the repo's existing Pydantic v2 + httpx seam
+  pattern). Dev/test endpoint: `http://localhost:8080/v1`
+  (`qwen3.8-27b`, API key `dummy`).
 
 ## Tier 5 — explicitly held: the §10 extensions (former Tier 4)
 
@@ -212,7 +227,7 @@ so the later decision is data-driven. Two kinds:
 
 | §10 extension | Trigger (spec wording) | Measure to watch | Instrument |
 |---|---|---|---|
-| Knowledge graph | "entity linking pays off in retrieval" | hit@k gap on entity-linked queries vs. plain hybrid | §1.1 harness |
+| Knowledge graph | "entity linking pays off in retrieval" | hit@k gap on entity-linked queries vs. plain hybrid *(the facet slice is pre-staged and shipped by ADR 0016 / SPEC §13 — see Tier 4.3; only the graph half of this row remains held)* | §1.1 harness |
 | Per-agent retrieval tuning | "static decay stops beating per-agent profiles" | per-agent MRR/AUC vs. static model | §1.1 harness |
 | Passive capture | "agents forget to write" | high-value agent turns with no write; "should have remembered X" reports / wk | §3.3 counters |
 | Private staging | "try before sharing" | fraction of `self`-scoped entries later promoted to the fleet *(the `self` scope is now the staging space — ADR 0011; promotion is the curation story)* | §3.3 counters |

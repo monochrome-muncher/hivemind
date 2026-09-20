@@ -162,6 +162,24 @@ _Avoid_: result, snippet, match
 The token economy of retrieval: scan many compact hits first, open the full entry only when needed.
 _Avoid_: lazy loading, pagination
 
+### Entities (ADR 0016)
+
+**Extracted entity**:
+A machine-derived `{name, kind}` facet of an entry, produced by the write-time LLM extractor (SPEC §13). `name` is open vocabulary; `kind` is a closed vocabulary (`person | organization | system | service | artifact | concept`). Set once at write time, never mutated (ADR 0001).
+_Avoid_: tag (that is an agent-declared facet, not a machine-derived one), domain entity (that is a programming class in `domain/`)
+
+**Entity facet**:
+The per-entry entity list as a filterable retrieval facet (AND over names, case-insensitive). A precision instrument, not a graph node — no cross-entry linking in v1.
+_Avoid_: knowledge graph (that is the held §10 extension), entity registry (a later, canonical step)
+
+**Extractor**:
+An OpenAI-compatible chat model configured at deploy time (a sibling of the embedder port): a fixed prompt + structured JSON output, validated against the entity schema. Optional (unset ⇒ off) and best-effort (a failure never blocks the write — ADR 0016).
+_Avoid_: LLM agent (there is no tool-calling or multi-turn; one fixed prompt, one structured response), Pydantic AI (a different shape of problem)
+
+**Entity kind**:
+The closed type vocabulary of an extracted entity (`person | organization | system | service | artifact | concept`) — a closed set over open names. Stored + displayed; not filterable in v1.
+_Avoid_: entity type taxonomy (it is a fixed six-value set, not a growing taxonomy)
+
 ### Evaluation (ROADMAP §1.1)
 
 **Golden set**:
