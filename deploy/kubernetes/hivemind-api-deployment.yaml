@@ -1,0 +1,78 @@
+# REST API surface (SPEC §5.1) — the `hivemind-api` console script.
+#
+# Image contract (shipped by the generic Dockerfile lane):
+#   * entrypoint /app/entrypoint.sh:  exec hivemind-"${HIVMIND_RUNNER:-mcp-http}" "$@"
+#   * the pod sets HIVEMIND_RUNNER=api and passes args via the pod `args:` field
+#   * the placeholder image `hivemind:0.0.0` is the single sed target the CI
+#     deploy job replaces with the real registry image ($K8S_IMAGE:$CI_COMMIT_SHORT_SHA)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hivemind-api
+  labels:
+    app.kubernetes.io/name: hivemind
+    app.kubernetes.io/component: api
+spec:
+  # Single-node decision (ADR 0007): one API process + one Postgres node is
+  # the v1 shape; scale out only when its recorded trigger fires.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hivemind
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hivemind
+        app.kubernetes.io/component: api
+    spec:
+      # Idempotent schema migration (ADR 0013) runs before every pod start.
+      # A dim mismatch (ADR 0015) fails LOUDLY in this init container by
+      # design — the pod never starts, which is the desired posture: a
+      # misconfigured dim is never a silent runtime no-op.
+      initContainers:
+        - name: migrate
+          image: hivemind:0.0.0
+          envFrom:
+            - configMapRef:
+                name: hivemind-config
+            - secretRef:
+                name: hivemind-secrets
+          env:
+            - name: HIVEMIND_RUNNER
+              value: "migrate"
+      containers:
+        - name: app
+          image: hivemind:0.0.0
+          envFrom:
+            - configMapRef:
+                name: hivemind-config
+            - secretRef:
+                name: hivemind-secrets
+          env:
+            # The entrypoint execs `hivemind-api` (REST, SPEC §5.1).
+            - name: HIVEMIND_RUNNER
+              value: "api"
+            - name: HIVEMIND_HOST
+              value: "0.0.0.0"
+            - name: HIVEMIND_PORT
+              value: "8000"
+          ports:
+            - name: http
+              containerPort: 8000
+          # Liveness/readiness: GET /v1/health is a STATIC 200 (no DB check —
+          # SPEC §5.1 liveness, public by design). A deeper readiness probe
+          # would need a DB-ping endpoint, which is out of scope for v1; the
+          # migrate init container already guarantees the schema before start.
+          livenessProbe:
+            httpGet:
+              path: /v1/health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /v1/health
+              port: 8000
+            initialDelaySeconds: 3
+            periodSeconds: 5

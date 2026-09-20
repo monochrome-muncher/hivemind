@@ -1,0 +1,18 @@
+# Cluster-internal exposure of the REST API (spec §5.1). External reachability
+# is the opt-in optional/ kustomization (nginx Ingress), not this Service.
+apiVersion: v1
+kind: Service
+metadata:
+  name: hivemind-api
+  labels:
+    app.kubernetes.io/name: hivemind
+    app.kubernetes.io/component: api
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: hivemind
+    app.kubernetes.io/component: api
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000

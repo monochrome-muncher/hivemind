@@ -1,0 +1,99 @@
+# Hostable streamable-HTTP MCP runner (ADR 0010) — the `hivemind-mcp-http`
+# console script: ONE long-lived process serving an unlimited number of
+# agents, each authenticating per request with its own agent-scoped key.
+#
+# Image contract (shipped by the generic Dockerfile lane):
+#   * entrypoint /app/entrypoint.sh:  exec hivemind-"${HIVEMIND_RUNNER:-mcp-http}" "$@"
+#   * the pod sets HIVEMIND_RUNNER=mcp-http and passes args via the pod `args:` field
+#   * the placeholder image `hivemind:0.0.0` is the single sed target the CI
+#     deploy job replaces with $K8S_IMAGE:$CI_COMMIT_SHORT_SHA
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hivemind-mcp
+  labels:
+    app.kubernetes.io/name: hivemind
+    app.kubernetes.io/component: mcp
+spec:
+  # Single-node decision (ADR 0007) — one runner process (see hivemind-api).
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hivemind
+      app.kubernetes.io/component: mcp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hivemind
+        app.kubernetes.io/component: mcp
+    spec:
+      # Idempotent schema migration (ADR 0013) before every pod start; a dim
+      # mismatch (ADR 0015) makes this init container fail loudly — the pod
+      # never starts (desired posture).
+      initContainers:
+        - name: migrate
+          image: hivemind:0.0.0
+          envFrom:
+            - configMapRef:
+                name: hivemind-config
+            - secretRef:
+                name: hivemind-secrets
+          env:
+            - name: HIVEMIND_RUNNER
+              value: "migrate"
+      containers:
+        - name: app
+          image: hivemind:0.0.0
+          envFrom:
+            - configMapRef:
+                name: hivemind-config
+            - secretRef:
+                name: hivemind-secrets
+          env:
+            # The entrypoint execs `hivemind-mcp-http` (ADR 0010). The host-
+            # port mapping in compose uses 8088; keep the same convention.
+            - name: HIVEMIND_RUNNER
+              value: "mcp-http"
+            - name: HIVEMIND_HOST
+              value: "0.0.0.0"
+            - name: HIVEMIND_PORT
+              value: "8088"
+          ports:
+            - name: http
+              containerPort: 8088
+          # Readiness/liveness mirror the docker-compose healthcheck EXACTLY
+          # (see docker-compose.yaml): an UNAUTHENTICATED GET /mcp answers
+          # HTTP 401 when the whole stack (uvicorn + the auth middleware) is
+          # up and serving; a connection refusal or any other code means the
+          # process is not ready yet. So: 401 == healthy (by design),
+          # 200/other == not ready.
+          livenessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - |
+                  import urllib.request, urllib.error, sys
+                  try:
+                      urllib.request.urlopen('http://127.0.0.1:8088/mcp', timeout=3)
+                  except urllib.error.HTTPError as e:
+                      sys.exit(0 if e.code == 401 else 1)
+                  except Exception:
+                      sys.exit(1)
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - |
+                  import urllib.request, urllib.error, sys
+                  try:
+                      urllib.request.urlopen('http://127.0.0.1:8088/mcp', timeout=3)
+                  except urllib.error.HTTPError as e:
+                      sys.exit(0 if e.code == 401 else 1)
+                  except Exception:
+                      sys.exit(1)
+            initialDelaySeconds: 3
+            periodSeconds: 5
