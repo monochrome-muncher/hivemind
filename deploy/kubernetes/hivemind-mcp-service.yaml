@@ -1,0 +1,19 @@
+# Cluster-internal exposure of the hostable streamable-HTTP MCP runner
+# (ADR 0010). Agents connect in-cluster via this Service; external reachability
+# is the opt-in optional/ kustomization (nginx Ingress with SSE tuning).
+apiVersion: v1
+kind: Service
+metadata:
+  name: hivemind-mcp
+  labels:
+    app.kubernetes.io/name: hivemind
+    app.kubernetes.io/component: mcp
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: hivemind
+    app.kubernetes.io/component: mcp
+  ports:
+    - name: http
+      port: 8088
+      targetPort: 8088

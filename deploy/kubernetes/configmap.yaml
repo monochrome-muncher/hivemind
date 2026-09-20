@@ -1,0 +1,48 @@
+# Non-secret configuration baseline (HIVEMIND_* keys, see src/hivemind/config.py).
+#
+# Only the values you actually change in production need overriding here —
+# every key falls back to the code default in Settings when omitted. The
+# three Secret-backed values (DSN, embedding API key, extractor API key)
+# live in the `hivemind-secrets` Secret, NOT here (see secret-template.yaml).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hivemind-config
+data:
+  # --- embeddings (ADR 0005: deploy-time decision) ---------------------------
+  # Placeholder endpoint: point this at the in-cluster vLLM (or any
+  # OpenAI-compatible) embedding Service. The vLLM compose service exposes
+  # OpenAI-compatible /v1/embeddings on :8000 inside its network.
+  HIVEMIND_EMBEDDING_ENDPOINT: "http://vllm:8000/v1"
+  # The model name recorded per entry (provenance, ADR 0005).
+  HIVEMIND_EMBEDDING_MODEL: "Qwen/Qwen3-Embedding-0.6B"
+  # ADR 0015 code default: 1024. Must match the pool's dim — a mismatch
+  # makes the migrate initContainer fail LOUDLY (the pod never starts),
+  # which is the desired posture.
+  HIVEMIND_EMBEDDING_DIM: "1024"
+  # Bounded body prefix for embedding + extraction (SPEC §7).
+  HIVEMIND_EMBEDDING_PREFIX_CHARS: "2048"
+  # Retry budget for transient embedder failures (ADR 0014); 0 disables.
+  HIVEMIND_EMBEDDING_RETRIES: "2"
+  # --- entity extraction (ADR 0016: optional + best-effort) ------------------
+  # EMPTY endpoint = extraction OFF (zero LLM cost; entries land with empty
+  # `entities`). To enable: set the endpoint + model here, and set the API
+  # key via the masked GitLab variable K8S_SECRET_EXTRACTOR_API_KEY
+  # (rendered into the hivemind-secrets Secret by CI).
+  HIVEMIND_EXTRACTOR_ENDPOINT: ""
+  HIVEMIND_EXTRACTOR_MODEL: ""
+  # Chat-call timeout (seconds) + retry budget (ADR 0014 pattern).
+  HIVEMIND_EXTRACTOR_TIMEOUT: "30.0"
+  HIVEMIND_EXTRACTOR_RETRIES: "2"
+  # --- retrieval knobs (mirror SearchConfig defaults, SPEC §6.2/§6.4) --------
+  HIVEMIND_RRF_K: "60"
+  HIVEMIND_WEIGHT_KEYWORD: "0.5"
+  HIVEMIND_WEIGHT_VECTOR: "0.5"
+  HIVEMIND_CANDIDATE_TOP_K: "20"
+  HIVEMIND_DEFAULT_LIMIT: "10"
+  HIVEMIND_HALF_LIFE_DAYS: "30.0"
+  HIVEMIND_QUALITY_HELPFUL_WEIGHT: "0.05"
+  HIVEMIND_QUALITY_STALE_WEIGHT: "0.10"
+  HIVEMIND_QUALITY_WRONG_WEIGHT: "0.25"
+  HIVEMIND_QUALITY_MIN: "0.5"
+  HIVEMIND_QUALITY_MAX: "1.2"
