@@ -84,9 +84,13 @@ async def seed(
 
 async def _seed_matrix(store: MemoryStore) -> None:
     """The six-entry matrix the visibility tests assert against."""
-    await seed(store, "weekly cohort churn", author="alice", agent="alice", scope="fleet", fleet_id=FL_A)
+    await seed(
+        store, "weekly cohort churn", author="alice", agent="alice", scope="fleet", fleet_id=FL_A
+    )
     await seed(store, "cohort retention", author="bob", agent="bob", scope="fleet", fleet_id=FL_A)
-    await seed(store, "ml feature store", author="carol", agent="carol", scope="fleet", fleet_id=FL_B)
+    await seed(
+        store, "ml feature store", author="carol", agent="carol", scope="fleet", fleet_id=FL_B
+    )
     await seed(store, "bob private note", author="bob", agent="bob", scope="self")
     await seed(store, "org-wide launch", author="dave", agent="dave", scope="org")
     await seed(store, "alice private note", author="alice", agent="alice", scope="self")
@@ -171,9 +175,7 @@ async def test_activate_agent_sets_level_and_fleet(store: MemoryStore) -> None:
 async def test_activate_agent_unknown_raises(store: MemoryStore) -> None:
     fa = await store.create_fleet("data-eng")
     with pytest.raises(KeyError):
-        await store.activate_agent(
-            "ghost", trust_level=TrustLevel.LURKER, home_fleet_id=fa.id
-        )
+        await store.activate_agent("ghost", trust_level=TrustLevel.LURKER, home_fleet_id=fa.id)
 
 
 async def test_set_agent_trust_level_demotes(store: MemoryStore) -> None:

@@ -344,9 +344,7 @@ def build_router(app: HivemindApp) -> APIRouter:
         entries (they stay in the fleet they were written into).
         """
         if payload.trust_level is None and payload.home_fleet_id is None:
-            raise api_error(
-                422, "update_required", "supply trust_level and/or home_fleet_id"
-            )
+            raise api_error(422, "update_required", "supply trust_level and/or home_fleet_id")
         try:
             agent: Agent | None = None
             if payload.trust_level is not None:

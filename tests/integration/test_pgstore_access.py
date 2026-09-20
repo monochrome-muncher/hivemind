@@ -36,9 +36,7 @@ def _dsn() -> str:
 async def _truncate_access(dsn: str) -> None:
     conn = await asyncpg.connect(dsn)
     try:
-        await conn.execute(
-            "TRUNCATE fleets, agents, entries, feedbacks, credentials"
-        )
+        await conn.execute("TRUNCATE fleets, agents, entries, feedbacks, credentials")
     finally:
         await conn.close()
 
@@ -135,9 +133,7 @@ async def test_activate_agent_sets_level_and_fleet(pg) -> None:
 async def test_activate_unknown_agent_raises(pg) -> None:
     fa = await pg.create_fleet("data-eng")
     with pytest.raises(KeyError):
-        await pg.activate_agent(
-            "ghost", trust_level=TrustLevel.LURKER, home_fleet_id=fa.id
-        )
+        await pg.activate_agent("ghost", trust_level=TrustLevel.LURKER, home_fleet_id=fa.id)
 
 
 async def test_demote_and_move_fleet(pg) -> None:
@@ -199,9 +195,7 @@ async def test_search_visibility_in_postgres(pg) -> None:
 
     lurker = Visibility(level=TrustLevel.LURKER, name="alice", home_fleet_id=fa.id)
     priv = Visibility(level=TrustLevel.PRIVILEGED, name="alice", home_fleet_id=fa.id)
-    lurker_hits = await pg.search_keyword(
-        "cohort", EntryFilters(), 10, visibility=lurker
-    )
+    lurker_hits = await pg.search_keyword("cohort", EntryFilters(), 10, visibility=lurker)
     priv_hits = await pg.search_keyword("cohort", EntryFilters(), 10, visibility=priv)
     # A privileged reader sees a superset (all fleets) of a lurker's (home fleet).
     assert set(lurker_hits) <= set(priv_hits)

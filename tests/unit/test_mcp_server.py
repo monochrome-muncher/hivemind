@@ -13,6 +13,7 @@ import json
 
 import pytest
 
+from hivemind.domain.access import TrustLevel
 from hivemind.mcp.app import McpHivemind, hive_write
 from hivemind.mcp.server import build_server
 from hivemind.memstore import MemoryStore
@@ -90,3 +91,75 @@ async def test_registered_get_tool_returns_error_for_unknown_id(
 
     missing = await server.call_tool("hive_get", {"entry_id": "no-such-id"})
     assert json.loads(missing.content[0].text)["error"]["code"] == "not_found"
+
+
+# --- registered-wrapper defaults (ROADMAP 1.2 dogfood findings) -------------
+# The registered tool wrapper (``server.py``) generates the MCP input
+# schema; a forced default there bypasses the app-layer fix. These tests
+# call the *registered* tool the way a real MCP client would.
+
+
+async def _l2_app() -> tuple[McpHivemind, str]:
+    """An L2 (contributor) agent with a home fleet, wired into a server."""
+    clock = make_clock()
+    store = MemoryStore(clock)
+    embedder = make_embedder()
+    config = make_search_config()
+    fleet = await store.create_fleet("eng")
+    await store.register_agent("carol")
+    await store.activate_agent("carol", trust_level=TrustLevel.CONTRIBUTOR, home_fleet_id=fleet.id)
+    cred = Credential(
+        user_id="carol",
+        agent_id="carol",
+        agent_name="carol",
+        access_controlled=True,
+        trust_level=TrustLevel.CONTRIBUTOR,
+        home_fleet_id=fleet.id,
+    )
+    app = McpHivemind(
+        store=store,
+        write_service=WriteService(store, embedder),
+        search_service=SearchService(store, embedder, config, now_fn=clock),
+        governance_service=GovernanceService(store),
+        access_service=AccessService(store),
+        search_config=config,
+        credential=cred,
+    )
+    return app, fleet.id
+
+
+async def test_registered_write_omitted_scope_defaults_to_max_permitted() -> None:
+    """The *registered* hive_write wrapper must not force scope='org'
+    (ADR 0011: an omitted scope defaults to the highest scope the trust
+    level permits — a forced 'org' default rejected every L2/L1 write;
+    found in the ROADMAP 1.2 dogfood)."""
+    app, fleet_id = await _l2_app()
+    server = build_server(app)
+    # Omit 'scope' entirely: the wrapper must not inject its own default.
+    result = await server.call_tool(
+        "hive_write", {"kind": "fact", "summary": "omitted scope via mcp"}
+    )
+    assert result.is_error is False
+    payload = json.loads(result.content[0].text)
+    assert payload["scope"] == "fleet"
+    assert payload["fleet_id"] == fleet_id
+
+
+async def test_registered_get_empty_entry_id_is_invalid_input() -> None:
+    """An empty entry_id is a caller error, not 'unknown entry: ' (dogfood)."""
+    app, _ = await _l2_app()
+    server = build_server(app)
+    result = await server.call_tool("hive_get", {"entry_id": ""})
+    payload = json.loads(result.content[0].text)
+    assert payload["error"]["code"] == "invalid_input"
+    assert "entry_id" in payload["error"]["message"]
+
+
+async def test_registered_feedback_empty_entry_id_is_invalid_input() -> None:
+    """Same guard on the registered hive_feedback tool."""
+    app, _ = await _l2_app()
+    server = build_server(app)
+    result = await server.call_tool("hive_feedback", {"entry_id": "", "verdict": "helpful"})
+    payload = json.loads(result.content[0].text)
+    assert payload["error"]["code"] == "invalid_input"
+    assert "entry_id" in payload["error"]["message"]

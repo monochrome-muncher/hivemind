@@ -102,18 +102,14 @@ class AccessService:
         self._require_admin(credential)
         return await self._store.create_fleet(name)
 
-    async def set_trust_level(
-        self, name: str, level: TrustLevel, credential: Credential
-    ) -> Agent:
+    async def set_trust_level(self, name: str, level: TrustLevel, credential: Credential) -> Agent:
         """Promote/demote an agent's trust level (admin-gated, ADR 0011).
         Demotion to level 0 is *dormant* (key still valid, no access) —
         distinct from revocation (ADR 0012)."""
         self._require_admin(credential)
         return await self._store.set_agent_trust_level(name, level)
 
-    async def set_home_fleet(
-        self, name: str, fleet_id: str, credential: Credential
-    ) -> Agent:
+    async def set_home_fleet(self, name: str, fleet_id: str, credential: Credential) -> Agent:
         """Re-parent an agent to a new home fleet (admin-gated, ADR 0011).
         The agent's earlier ``fleet``-scoped entries stay in the fleet
         they were written into (never re-parented)."""
@@ -205,8 +201,6 @@ def resolve_write_scope(
         # the entry lands in the home fleet. Legacy (v1) and admins have no
         # home-fleet binding (flat pool / bypass).
         if credential.home_fleet_id is None:
-            raise PermissionDenied(
-                "agent has no home fleet; cannot write scope 'fleet' (ADR 0011)"
-            )
+            raise PermissionDenied("agent has no home fleet; cannot write scope 'fleet' (ADR 0011)")
         fleet_id = credential.home_fleet_id
     return WriteResolution(scope=scope, fleet_id=fleet_id)

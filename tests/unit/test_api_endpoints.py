@@ -53,6 +53,10 @@ class FakeAuthenticator:
         self._keys[self._org_key] = Credential(user_id="org", is_org=True, access_controlled=True)
         return self._org_key
 
+    def add_key(self, raw_key: str, credential: Credential) -> None:
+        """Test helper: register a credential under a raw key directly."""
+        self._keys[raw_key] = credential
+
     async def issue_admin_key(self) -> str:
         raw_key = "hm_admin_new"
         self._keys[raw_key] = Credential(user_id="admin", is_admin=True)
@@ -808,15 +812,68 @@ class TestAccessEndpoints:
     async def test_rotate_org_key_admin_only(self) -> None:
         client = make_client(make_hivemind_app())
         async with client:
-            denied = await client.post(
-                "/v1/admin/org-key/rotate", headers={"X-API-Key": "key-org"}
-            )
+            denied = await client.post("/v1/admin/org-key/rotate", headers={"X-API-Key": "key-org"})
             assert denied.status_code == 403
-            ok = await client.post(
-                "/v1/admin/org-key/rotate", headers={"X-API-Key": "key-admin"}
-            )
+            ok = await client.post("/v1/admin/org-key/rotate", headers={"X-API-Key": "key-admin"})
         assert ok.status_code == 200
         assert ok.json()["key"]  # a new raw org key is returned once
+
+    # --- write-scope resolution (ADR 0011): an omitted scope defaults to
+    # --- the highest scope the trust level permits, not a forced 'org' --
+
+    async def _provision_l2_agent(self, app: HivemindApp, name: str = "carol") -> tuple[str, str]:
+        """Provision an L2 (contributor) agent + fleet + key (ADRs 0011-0012)."""
+        fleet = await app.store.create_fleet("eng")
+        await app.store.register_agent(name)
+        await app.store.activate_agent(
+            name, trust_level=TrustLevel.CONTRIBUTOR, home_fleet_id=fleet.id
+        )
+        key = f"key-{name}"
+        app.authenticator.add_key(
+            key,
+            Credential(
+                user_id=name,
+                agent_id=name,
+                agent_name=name,
+                access_controlled=True,
+                trust_level=TrustLevel.CONTRIBUTOR,
+                home_fleet_id=fleet.id,
+            ),
+        )
+        return key, fleet.id
+
+    async def test_create_entry_l2_omitted_scope_defaults_to_fleet(self) -> None:
+        """ADR 0011: an omitted scope defaults to the highest scope the
+        trust level permits (L2 -> fleet). The REST schema must not force
+        'org' — that rejected every L2/L1 write (dogfood finding 1)."""
+        app = make_hivemind_app()
+        key, fleet_id = await self._provision_l2_agent(app)
+        client = make_client(app)
+        async with client:
+            entry = await post_entry(client, key, "omitted scope probe")
+            assert entry["scope"] == "fleet"
+            assert entry["fleet_id"] == fleet_id
+
+    async def test_create_entry_l2_explicit_org_scope_rejected(self) -> None:
+        """An *explicit* out-of-permission scope is still rejected (403)."""
+        app = make_hivemind_app()
+        key, _ = await self._provision_l2_agent(app)
+        client = make_client(app)
+        async with client:
+            resp = await client.post(
+                "/v1/entries",
+                json={"kind": "fact", "summary": "org probe", "scope": "org"},
+                headers={"X-API-Key": key},
+            )
+        assert resp.status_code == 403
+        assert resp.json()["error"]["code"] == "forbidden"
+
+    async def test_create_entry_legacy_omitted_scope_stays_org(self) -> None:
+        """Legacy (v1) credentials keep the flat pool: omitted scope -> org."""
+        client = make_client(make_hivemind_app())
+        async with client:
+            entry = await post_entry(client, "key-alice", "legacy probe")
+            assert entry["scope"] == "org"
 
 
 class TestMetricsEndpoint:
@@ -828,7 +885,9 @@ class TestMetricsEndpoint:
         store = app.store
         f1 = await store.create_fleet("data-eng")
         await store.create_entry(
-            EntryDraft(kind="fact", summary="s1", author="alice", agent="a1", scope="fleet", fleet_id=f1.id),
+            EntryDraft(
+                kind="fact", summary="s1", author="alice", agent="a1", scope="fleet", fleet_id=f1.id
+            ),
             [0.1, 0.1, 0.1, 0.1],
         )
         await store.create_entry(

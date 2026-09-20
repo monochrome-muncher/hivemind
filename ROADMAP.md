@@ -70,21 +70,31 @@ instead of guesses.
 - **Feeds:** Tier 3 (BM25, prefix-length tuning) and the two
   retrieval-quality triggers in the Tier 5 table below.
 
-### 1.2 End-to-end dogfood with a real agent + real embedder  *(open)*
+### 1.2 End-to-end dogfood with a real agent + real embedder  *(shipped)*
 - **What:** wire a real agent (pi / Claude) to `hivemind-mcp` over a
   live Postgres + a real OpenAI-compatible embedder, and run a
   realistic loop (write → search back → feedback → supersede).
 - **Why:** the unit / integration suite runs on `FakeEmbedder`. This
   validates the two seams only exercised with fakes: (a) the real
-  1536-dim `OpenAICompatEmbedder`, and (b) whether the MCP tool
-  descriptions are good enough for an LLM to use well.
-- **Deliverable:** a short dogfooding-notes doc capturing friction
+  embedder (here the local 512-dim vLLM `Qwen3-Embedding-0.6B`), and
+  (b) whether the MCP tool descriptions are good enough for an LLM to
+  use well.
+- **Deliverable:** `docs/dogfooding-notes.md` capturing friction
   (tool-description gaps, error-code clarity, whether agents actually
   reach for feedback / supersession).
 - **Note:** once Tier 2 lands, the dogfooding agent will present an
   **agent key** (ADR 0012) — not the old per-user sub-key. The MCP
   surface is the same seven `hive_*` tools; only the credential kind
   changes.
+- **Result (2026-09-20):** the full loop ran clean on a real embedder
+  (Postgres 512-dim + vLLM). It caught one real defect: `hive_write`
+ 's forced `scope="org"` default (in the registered MCP wrapper and the
+  REST schema) rejected every L2/L1 "unthinked" write, bypassing
+  ADR 0011's omitted-scope rule — now fixed at all three seams (app,
+  registered wrapper, REST) and locked by tests. Empty-`entry_id`
+  guards and `fleet_id` in entry reads were added in the same change.
+  Ops friction (build-cache / token-cache / pool-reset / dim footgun)
+  is logged in the notes doc.
 
 ## Tier 2 — access control & fleet model (ADRs 0011–0012, SPEC §12)  *(shipped)*
 

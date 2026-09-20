@@ -164,3 +164,25 @@ change. Choose the dimension to match the embedding provider (ADR 0005:
 self-hosted) at deploy time; the ROADMAP §4.2 tuning (prefix length /
 dimension) uses the §1.1 eval harness to pick the value before it is
 pinned.
+
+### 512 → 1024 switch (the production scenario)
+
+The Qwen3-Embedding-0.6B model serves both dimensions (Matryoshka), so
+the switch is a pool change, not a model change:
+
+1. **Stop writes** — drain the `mcp-http` / API replicas so no new
+   entries land at the old dim.
+2. **Back up** the data (see §3) — the old-dim pool is your source of
+   truth until the new one is verified.
+3. **Set the dim** — `HIVEMIND_EMBEDDING_DIM=1024` (Makefile: `export
+   HIVEMIND_EMBEDDING_DIM ?= 512`, override per deploy) + the matching
+   `HIVEMIND_EMBEDDING_MODEL` / endpoint.
+4. **Reset the pool** — `make pg-reset` (dev) / recreate the vector
+   column (prod), then `make migrate` — the `vector(:dim)` column is
+   recreated at the new width (forward migration, ADR 0013).
+5. **Re-embed** — re-import the prior entries through the write path
+   (entries embed at write time, ADR 0005; a stored 512-dim vector
+   cannot be re-used in a 1024-dim pool).
+6. **Restart the services** and verify: `GET /v1/health`, then run the
+   §1.1 eval harness (golden set) at the new dim before declaring the
+   switch a success.

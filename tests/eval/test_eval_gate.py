@@ -89,9 +89,7 @@ class TestRetrievalEvalGate:
 
     async def test_mrr_clears_the_bar(self) -> None:
         _per_query, report = await _run_eval()
-        assert report["mrr"] >= MIN_MRR, (
-            f"MRR regressed: {report['mrr']:.3f} < {MIN_MRR}"
-        )
+        assert report["mrr"] >= MIN_MRR, f"MRR regressed: {report['mrr']:.3f} < {MIN_MRR}"
 
     async def test_ndcg_clears_the_bar(self) -> None:
         _per_query, report = await _run_eval()

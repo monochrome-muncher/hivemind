@@ -29,7 +29,10 @@ class TestCreateEntryRequest:
         assert req.tags == []
         assert req.occurred_at is None
         assert req.importance == 3
-        assert req.scope == "org"
+        # ADR 0011: an omitted scope is *unspecified* (None), so the route
+        # resolves it to the highest scope the trust level permits. The old
+        # default ("org") rejected every L2/L1 write (dogfood finding 1).
+        assert req.scope is None
         assert req.supersedes == []
         assert req.agent is None
 
