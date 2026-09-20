@@ -35,6 +35,7 @@ from hivemind.domain.entry import (
     EntryDraft,
     EntryFilters,
     EntryState,
+    ExtractedEntity,
     embeddable_text,
     new_entry_id,
 )
@@ -83,6 +84,8 @@ class MemoryStore:
         draft: EntryDraft,
         embedding: list[float] | None = None,
         embedding_model: str | None = None,
+        entities: tuple[ExtractedEntity, ...] = (),
+        entities_model: str | None = None,
     ) -> Entry:
         """Insert a new entry, flipping any ``draft.supersedes`` targets to
         the ``superseded`` state (SPEC.md §4.1, §7).
@@ -108,6 +111,8 @@ class MemoryStore:
             fleet_id=draft.fleet_id,
             embedding=tuple(embedding) if embedding is not None else None,
             embedding_model=embedding_model,
+            entities=tuple(entities),  # ADR 0016: machine-extracted facets
+            entities_model=entities_model,
         )
         with self._lock:
             self._entries[entry.id] = entry
@@ -387,6 +392,8 @@ def _with_state(
         state=state,
         superseded_by=superseded_by or entry.superseded_by,
         withdrawn_reason=withdrawn_reason or entry.withdrawn_reason,
+        entities=entry.entities,  # ADR 0016
+        entities_model=entry.entities_model,
     )
 
 
@@ -412,6 +419,8 @@ def _copy(entry: Entry) -> Entry:
         state=entry.state,
         superseded_by=entry.superseded_by,
         withdrawn_reason=entry.withdrawn_reason,
+        entities=tuple(entry.entities),  # ADR 0016
+        entities_model=entry.entities_model,
     )
 
 

@@ -9,10 +9,12 @@ from hivemind.domain.access import (
     entry_is_visible,
 )
 from hivemind.domain.entry import (
+    EntityKind,
     Entry,
     EntryDraft,
     EntryFilters,
     EntryState,
+    ExtractedEntity,
     Kind,
     Source,
     SourceType,
@@ -28,10 +30,12 @@ from hivemind.domain.feedback import (
 __all__ = [
     "Agent",
     "AgentStatus",
+    "EntityKind",
     "Entry",
     "EntryDraft",
     "EntryFilters",
     "EntryState",
+    "ExtractedEntity",
     "Feedback",
     "FeedbackCounts",
     "Fleet",

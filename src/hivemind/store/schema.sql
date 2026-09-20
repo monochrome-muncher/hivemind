@@ -120,3 +120,13 @@ ALTER TABLE entries ADD COLUMN IF NOT EXISTS fleet_id uuid;
 CREATE INDEX IF NOT EXISTS entries_fleet_idx ON entries (fleet_id);
 CREATE INDEX IF NOT EXISTS entries_author_idx ON entries (author);
 CREATE INDEX IF NOT EXISTS agents_fleet_idx ON agents (home_fleet_id);
+
+-- Entity-extraction facets (ADR 0016, SPEC §13): machine-extracted
+-- {name, kind} facets stored as JSONB (display), with the lower-cased
+-- names on a separate text[] column for the AND, case-insensitive
+-- filter (the `tags text[]` + GIN pattern) and the extractor model on
+-- `entities_model` (provenance, symmetric with `embedding_model`).
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS entities jsonb NOT NULL DEFAULT '[]';
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS entity_names text[] NOT NULL DEFAULT '{}';
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS entities_model text;
+CREATE INDEX IF NOT EXISTS entries_entity_names_gin_idx ON entries USING GIN (entity_names);

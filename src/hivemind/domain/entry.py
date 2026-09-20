@@ -22,6 +22,10 @@ def new_entry_id() -> str:
 # SPEC.md §4.1: the summary is a short blurb (≤ ~280 chars), not a body.
 _SUMMARY_MAX_CHARS = 280
 
+# ADR 0016 / SPEC §13: a machine-extracted entity name is a bounded
+# display string (the extractor validates before it is stored).
+_ENTITY_NAME_MAX_CHARS = 128
+
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
@@ -43,6 +47,21 @@ class EntryState(StrEnum):
     WITHDRAWN = "withdrawn"
 
 
+class EntityKind(StrEnum):
+    """The closed type vocabulary of an extracted entity (ADR 0016, SPEC §13).
+
+    A fixed six-value set over *open* names: the extractor may only pick
+    from these kinds; the names themselves are open vocabulary.
+    """
+
+    PERSON = "person"
+    ORGANIZATION = "organization"
+    SYSTEM = "system"
+    SERVICE = "service"
+    ARTIFACT = "artifact"
+    CONCEPT = "concept"
+
+
 class SourceType(StrEnum):
     """What a source reference points at."""
 
@@ -58,6 +77,29 @@ class Source:
 
     type: SourceType
     ref: str
+
+
+@dataclass(frozen=True, slots=True)
+class ExtractedEntity:
+    """A machine-extracted entity facet of an entry (ADR 0016, SPEC §13).
+
+    ``name`` is open vocabulary (trimmed, non-empty, bounded); ``kind``
+    is the closed ``EntityKind`` vocabulary. Set once at write time by
+    the extractor, never mutated (ADR 0001).
+    """
+
+    name: str
+    kind: EntityKind
+
+    def __post_init__(self) -> None:
+        name = self.name.strip()
+        if not name:
+            raise ValueError("entity name must be non-empty")
+        if len(name) > _ENTITY_NAME_MAX_CHARS:
+            raise ValueError(
+                f"entity name must be at most {_ENTITY_NAME_MAX_CHARS} characters (got {len(name)})"
+            )
+        object.__setattr__(self, "name", name)
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,6 +175,10 @@ class Entry:
     state: EntryState = EntryState.ACTIVE
     superseded_by: str | None = None
     withdrawn_reason: str | None = None
+    # Machine-extracted entity facets (ADR 0016, SPEC §13): set once at
+    # write time by the extractor, never mutated (ADR 0001).
+    entities: tuple[ExtractedEntity, ...] = ()
+    entities_model: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,12 +186,17 @@ class EntryFilters:
     """Filter set shared by search and list (SPEC.md §5.3).
 
     ``tags`` is AND-semantics: an entry must carry every listed tag.
+    ``entities`` (ADR 0016, SPEC §13) is AND-semantics over extracted
+    entity *names*, matched case-insensitively: an entry must have an
+    extracted entity whose lower-cased name equals each lower-cased
+    filter name.
     ``include_inactive`` surfaces superseded/withdrawn entries; by
     default only ``active`` entries are visible (SPEC.md §6.3).
     """
 
     kind: Kind | None = None
     tags: tuple[str, ...] = ()
+    entities: tuple[str, ...] = ()
     scope: str | None = None
     fleet_id: str | None = None
     author: str | None = None
@@ -179,7 +230,13 @@ class EntryFilters:
         if self.created_to is not None and entry.created_at > self.created_to:
             return False
         entry_tags = set(entry.tags)
-        return not any(tag not in entry_tags for tag in self.tags)
+        if any(tag not in entry_tags for tag in self.tags):
+            return False
+        if self.entities:
+            have = {e.name.lower() for e in entry.entities}
+            if any(name.lower() not in have for name in self.entities):
+                return False
+        return True
 
 
 def embeddable_text(
@@ -196,10 +253,12 @@ def embeddable_text(
 
 
 __all__ = [
+    "EntityKind",
     "Entry",
     "EntryDraft",
     "EntryFilters",
     "EntryState",
+    "ExtractedEntity",
     "Kind",
     "Source",
     "SourceType",

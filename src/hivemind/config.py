@@ -64,6 +64,18 @@ class Settings(BaseSettings):
     # errors, 429, 5xx) — ADR 0014; 0 disables retrying.
     embedding_retries: int = 2
 
+    # Entity-extraction extractor (ADR 0016, SPEC §13): an OpenAI-compatible
+    # *chat* endpoint, usually a different model/service than the embedding
+    # one. An empty endpoint disables extraction (the optional + best-effort
+    # stance): entries land with empty `entities`, zero LLM-extraction cost.
+    extractor_endpoint: str = ""
+    extractor_api_key: str = ""
+    extractor_model: str = ""
+    extractor_timeout: float = 30.0
+    # Retry budget for transient extractor failures (ADR 0014 pattern);
+    # 0 disables retrying. A failure never blocks the write (best-effort).
+    extractor_retries: int = 2
+
     # retrieval knobs (mirror SearchConfig defaults)
     rrf_k: int = 60
     weight_keyword: float = 0.5

@@ -7,6 +7,9 @@ These are the only boundaries the rest of the system depends on:
   is storage-agnostic.
 * ``Embedder`` — turns text into a fixed-dimension vector. Implemented
   by an OpenAI-compatible client; faked in unit tests.
+* ``Extractor`` — extracts entity facets from entry text (ADR 0016,
+  SPEC §13). Implemented by an OpenAI-compatible chat client; faked in
+  unit tests; optional (absent ⇒ extraction off).
 * ``Authenticator`` — maps an API key to a credential. Implemented by
   a Postgres-backed credential table in production; faked in tests.
 
@@ -31,6 +34,7 @@ from hivemind.domain.entry import (
     Entry,
     EntryDraft,
     EntryFilters,
+    ExtractedEntity,
     embeddable_text,
 )
 from hivemind.domain.feedback import Feedback, FeedbackCounts
@@ -45,6 +49,8 @@ class Store(Protocol):
         draft: EntryDraft,
         embedding: list[float] | None = None,
         embedding_model: str | None = None,
+        entities: tuple[ExtractedEntity, ...] = (),
+        entities_model: str | None = None,
     ) -> Entry:
         """Insert a new entry and flip any ``draft.supersedes`` targets
         to the ``superseded`` state (SPEC.md §4.1). Returns the stored
@@ -52,6 +58,10 @@ class Store(Protocol):
 
         ``embedding_model`` (SPEC.md §7) records which model produced
         ``embedding`` so the vector's provenance is traceable per entry.
+
+        ``entities`` / ``entities_model`` (ADR 0016, SPEC §13) record the
+        machine-extracted entity facets and the extractor model that
+        produced them (provenance, symmetric with ``embedding_model``).
         """
         ...
 
@@ -196,6 +206,29 @@ class Embedder(Protocol):
 
     def entry_embeddable_text(self, draft: EntryDraft) -> str:
         """The exact text an entry is embedded from."""
+        ...
+
+
+@runtime_checkable
+class Extractor(Protocol):
+    """Entity extractor (ADR 0016, SPEC §13): entry text in, schema-
+    validated facets out.
+
+    A sibling of ``Embedder`` — the extractor model is a deploy-time
+    decision, configured separately from the embedding model (ADR 0005
+    stance). The port is *optional* (no endpoint ⇒ extraction off) and
+    *best-effort* (a failure never blocks the write).
+    """
+
+    @property
+    def model_name(self) -> str:
+        """The extractor model identifier (recorded per entry, ADR 0016)."""
+        ...
+
+    async def extract_entry(self, draft: EntryDraft) -> tuple[ExtractedEntity, ...]:
+        """Extract entity facets from the text an entry is written from
+        (the summary + bounded body prefix, the same text the embedder
+        sees — SPEC §13.1)."""
         ...
 
 
