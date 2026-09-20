@@ -1,27 +1,36 @@
-# Hivemind app image for the hostable streamable-HTTP MCP runner (ADR 0010).
+# Hivemind app image — ONE generic image for ALL console entrypoints.
 #
-# Installs the `hivemind` package (which pulls its runtime deps: FastAPI +
-# uvicorn, asyncpg + pgvector, the mcp SDK, httpx) and exposes the six
-# `hive_*` tools via the `hivemind-mcp-http` console script. All
-# configuration (DSN, embedder endpoint, host, port) is supplied by the
-# compose service (see docker-compose.yaml) via HIVEMIND_* env vars.
+# The entrypoint script (entrypoint.sh) selects the runner via the
+# HIVEMIND_RUNNER env var (api | mcp-http | migrate | keys) and execs
+# the matching console script, forwarding any extra args. All
+# configuration (DSN, embedder endpoint, host, port, retrieval knobs)
+# is supplied at runtime via HIVEMIND_* env vars — see .env.example
+# and DEPLOY.md for the full surface.
+#
+#   HIVEMIND_RUNNER=api        REST surface (hivemind-api)
+#   HIVEMIND_RUNNER=mcp-http   hostable multi-agent MCP runner (ADR 0010)
+#   HIVEMIND_RUNNER=migrate    idempotent schema migration (ADR 0013)
+#   HIVEMIND_RUNNER=keys       key-management CLI (SPEC §8.1, ADR 0012)
+#
+# Default (unset): mcp-http — the existing docker-compose service
+# (which sets no HIVEMIND_RUNNER) keeps working unchanged.
 FROM python:3.14-slim
 
 WORKDIR /app
 
 # Copy the package metadata + lockfile first so the install layer stays
-# cached across source tweaks, then the source tree.
+# cached across source tweaks, then the source tree + entrypoint.
 COPY pyproject.toml README.md uv.lock ./
 COPY src ./src
+COPY entrypoint.sh /app/entrypoint.sh
 
-# Build + install the package (runtime deps only; dev deps stay in the host
-# venv). The build backend (uv_build) is pulled into pip's isolated build
-# environment automatically.
+# Build + install the package (runtime deps only; dev deps stay in the
+# host venv). The build backend (uv_build) is pulled into pip's
+# isolated build environment automatically.
 RUN pip install --no-cache-dir .
 
-# The container always binds 0.0.0.0:8088; the HOST port is chosen by the
-# compose port mapping (docker-compose.yaml, default 8088).
-ENV HIVEMIND_HOST=0.0.0.0 \
-    HIVEMIND_PORT=8088
+# The container binds 0.0.0.0; the bind port comes from the deployment
+# (HIVEMIND_PORT), not the image.
+ENV HIVEMIND_HOST=0.0.0.0
 
-ENTRYPOINT ["hivemind-mcp-http"]
+ENTRYPOINT ["/app/entrypoint.sh"]
