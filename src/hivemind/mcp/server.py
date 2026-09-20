@@ -29,6 +29,7 @@ from typing import Any
 from mcp.server.mcpserver import MCPServer
 
 from hivemind.config import Settings
+from hivemind.extractor import build_extractor
 from hivemind.mcp.app import (
     McpHivemind,
     hive_feedback,
@@ -265,7 +266,8 @@ def main() -> None:
     settings = Settings()
     store = MemoryStore()
     embedder = LocalEmbedder(dimension=settings.embedding_dim)
-    write_service = WriteService(store, embedder)
+    extractor = build_extractor(settings)  # optional (ADR 0016): None when the endpoint is unset
+    write_service = WriteService(store, embedder, extractor)
     search_config = settings.search_config()
     search_service = SearchService(store, embedder, search_config)
     governance_service = GovernanceService(store, search_config)
@@ -316,6 +318,7 @@ def main_pg() -> None:
     table. The store/embedder/authenticator pools are torn down on exit.
     """
     from hivemind.embeddings import build_embedder
+    from hivemind.extractor import build_extractor
     from hivemind.store import build_authenticator, build_store
 
     settings = Settings()
@@ -326,6 +329,7 @@ def main_pg() -> None:
     store = build_store(settings)
     embedder = build_embedder(settings)
     authenticator = build_authenticator(settings)
+    extractor = build_extractor(settings)  # optional (ADR 0016): None when the endpoint is unset
 
     async def _run() -> None:
         credential = await authenticator.verify(raw_key)
@@ -334,7 +338,7 @@ def main_pg() -> None:
         search_config = settings.search_config()
         app = McpHivemind(
             store=store,
-            write_service=WriteService(store, embedder),
+            write_service=WriteService(store, embedder, extractor),
             search_service=SearchService(store, embedder, search_config),
             governance_service=GovernanceService(store, search_config),
             access_service=AccessService(store, authenticator),
@@ -349,6 +353,7 @@ def main_pg() -> None:
                 getattr(store, "close", None),
                 getattr(embedder, "aclose", None),
                 getattr(authenticator, "close", None),
+                getattr(extractor, "aclose", None),  # the extractor's HTTP client (when enabled)
             ):
                 if closer is not None:
                     await closer()

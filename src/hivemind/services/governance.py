@@ -12,9 +12,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from hivemind.config import SearchConfig
-from hivemind.domain.entry import Entry, EntryDraft
+from hivemind.domain.entry import Entry, EntryDraft, ExtractedEntity
 from hivemind.domain.feedback import Feedback, Verdict
-from hivemind.ports import Credential, Embedder, Store
+from hivemind.ports import Credential, Embedder, Extractor, Store
 from hivemind.retrieval.scoring import feedback_quality
 
 
@@ -30,24 +30,55 @@ class WriteService:
     """Creates entries: embeds the entry text, persists it, and applies
     any explicit supersessions (SPEC.md §4.1, §7).
 
+    Entity extraction is an optional, best-effort enrichment (ADR 0016,
+    SPEC §13): pass an ``Extractor`` to extract entity facets at write
+    time; an extraction failure never blocks the write — the entry
+    lands without facets. Absent (``None``), extraction is off, zero
+    LLM cost (the same dev-mode stance as "no authenticator").
+
     The caller is responsible for having authenticated the request and
     for filling ``draft.author``/``draft.agent`` (the resolved agent
     identity, per SPEC.md §8.1) before calling ``write``.
     """
 
-    def __init__(self, store: Store, embedder: Embedder) -> None:
+    def __init__(
+        self,
+        store: Store,
+        embedder: Embedder,
+        extractor: Extractor | None = None,
+    ) -> None:
         self._store = store
         self._embedder = embedder
+        self._extractor = extractor
 
     async def write(self, draft: EntryDraft) -> Entry:
         """Embed-then-persist a fully-resolved entry draft.
 
         The embedding model name is recorded per entry (SPEC.md §7) so
-        the vector's provenance is traceable.
+        the vector's provenance is traceable. When an extractor is set,
+        entity facets are extracted over the same text and recorded on
+        the entry (``entities`` / ``entities_model``, ADR 0016) —
+        best-effort: an extraction failure never blocks the write, the
+        entry simply lands without facets.
         """
         embedding = await self._embedder.embed_entry(draft)
+        entities: tuple[ExtractedEntity, ...] = ()
+        entities_model: str | None = None
+        if self._extractor is not None:
+            try:
+                entities = await self._extractor.extract_entry(draft)
+                entities_model = self._extractor.model_name
+            except Exception:
+                # Best-effort enrichment (ADR 0016, SPEC §13.4): an
+                # extraction failure never blocks the write — the entry
+                # lands without facets, zero write-failure impact.
+                entities, entities_model = (), None
         return await self._store.create_entry(
-            draft, embedding, embedding_model=self._embedder.model_name
+            draft,
+            embedding,
+            embedding_model=self._embedder.model_name,
+            entities=entities,
+            entities_model=entities_model,
         )
 
 
