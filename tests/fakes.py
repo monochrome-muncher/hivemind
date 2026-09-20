@@ -9,14 +9,24 @@ deterministic.
 from __future__ import annotations
 
 import hashlib
+import re
 from datetime import UTC, datetime, timedelta
 
 from hivemind.config import SearchConfig
-from hivemind.domain.entry import EntryDraft, embeddable_text
+from hivemind.domain.entry import (
+    EntityKind,
+    EntryDraft,
+    ExtractedEntity,
+    embeddable_text,
+)
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential, entry_embeddable_text
 
 FIXED_NOW = datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC)
+
+# A "salient" token for the FakeExtractor's default mode: a word of at
+# least 4 characters (regex \w{4,} — deterministic, no punctuation).
+_SALIENT_TOKEN_RE = re.compile(r"\w{4,}")
 
 
 class FixedClock:
@@ -73,6 +83,57 @@ class FakeEmbedder:
 
     def entry_embeddable_text(self, draft: EntryDraft) -> str:
         return embeddable_text(draft.summary, draft.body)
+
+
+class FakeExtractor:
+    """Deterministic Extractor fake (ADR 0016): no live LLM needed.
+
+    Two deterministic modes:
+    * ``entities=None`` (default): "extract" the first three distinct
+      salient tokens (length ≥ 4) of the entry's embeddable text, each
+      with a stable hash-picked kind — enough semantics to test the
+      write path end-to-end without a real extractor.
+    * ``entities=(...)``: a scripted fixed result (e.g. to assert the
+      exact stored facets).
+
+    ``fail=True`` makes every call raise — for the WriteService
+    best-effort path (an extraction failure must not block the write).
+    """
+
+    def __init__(
+        self,
+        *,
+        entities: tuple[ExtractedEntity, ...] | None = None,
+        fail: bool = False,
+    ) -> None:
+        self._scripted = entities
+        self._fail = fail
+
+    @property
+    def model_name(self) -> str:
+        return "fake-extractor"
+
+    def _default_entities(self, draft: EntryDraft) -> tuple[ExtractedEntity, ...]:
+        text = entry_embeddable_text(draft).lower()
+        seen: set[str] = set()
+        out: list[ExtractedEntity] = []
+        for token in _SALIENT_TOKEN_RE.findall(text):
+            if token in seen:
+                continue
+            seen.add(token)
+            digest = hashlib.sha256(token.encode()).digest()
+            kind = list(EntityKind)[digest[0] % len(list(EntityKind))]
+            out.append(ExtractedEntity(name=token, kind=kind))
+            if len(out) == 3:
+                break
+        return tuple(out)
+
+    async def extract_entry(self, draft: EntryDraft) -> tuple[ExtractedEntity, ...]:
+        if self._fail:
+            raise RuntimeError("fake extractor failure (scripted)")
+        if self._scripted is not None:
+            return self._scripted
+        return self._default_entities(draft)
 
 
 def make_clock(start: datetime | None = None) -> FixedClock:

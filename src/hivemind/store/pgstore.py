@@ -33,10 +33,12 @@ from hivemind.domain.access import (
     Visibility,
 )
 from hivemind.domain.entry import (
+    EntityKind,
     Entry,
     EntryDraft,
     EntryFilters,
     EntryState,
+    ExtractedEntity,
     Kind,
     Source,
     SourceType,
@@ -50,18 +52,21 @@ INSERT_ENTRY = """
 INSERT INTO entries (
     id, kind, summary, body, payload, sources, tags,
     occurred_at, author, agent, importance, scope, fleet_id,
-    embedding, embedding_model
+    embedding, embedding_model,
+    entities, entity_names, entities_model
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+    $16, $17, $18
 )
 """
-# 15 explicit columns/values; ``created_at`` falls back to the schema's
+# 18 explicit columns/values; ``created_at`` falls back to the schema's
 # ``now()`` default, so it is not in the value list.
 
 _ENTRY_COLUMNS = """
     id, kind, summary, body, payload, sources, tags, occurred_at,
     created_at, author, agent, importance, scope, fleet_id, embedding,
-    embedding_model, state, superseded_by, withdrawn_reason
+    embedding_model, state, superseded_by, withdrawn_reason,
+    entities, entity_names, entities_model
 """
 
 SELECT_ENTRY = "SELECT " + _ENTRY_COLUMNS + " FROM entries WHERE id = $1"
@@ -158,6 +163,11 @@ def _filter_conditions(
         add("kind = ?", filters.kind.value)
     if filters.tags:
         add("tags @> ?", list(filters.tags))
+    if filters.entities:
+        # AND-semantics over lower-cased names (ADR 0016, SPEC §13):
+        # the filter names are case-insensitive; ``entity_names`` holds
+        # the lower-cased names, symmetric with the ``tags`` pattern.
+        add("entity_names @> ?", [name.lower() for name in filters.entities])
     if filters.scope is not None:
         add("scope = ?", filters.scope)
     if filters.fleet_id is not None:
@@ -262,6 +272,8 @@ class PgStore:
         draft: EntryDraft,
         embedding: list[float] | None = None,
         embedding_model: str | None = None,
+        entities: tuple[ExtractedEntity, ...] = (),
+        entities_model: str | None = None,
     ) -> Entry:
         """Insert a new entry and flip any ``draft.supersedes`` targets
         to the ``superseded`` state (SPEC.md §4.1).
@@ -270,6 +282,8 @@ class PgStore:
         (m4): a crash between them must not leave a new entry whose
         supersession targets were never flipped. ``embedding_model``
         (SPEC.md §7) records which model produced ``embedding``.
+        ``entities`` / ``entities_model`` (ADR 0016, SPEC §13) record
+        the machine-extracted facets + the extractor that produced them.
         """
         entry_id = str(uuid.uuid4())
         occurred_at = draft.resolved_occurred_at()
@@ -294,6 +308,9 @@ class PgStore:
                     draft.fleet_id,
                     embedding,
                     embedding_model,  # SPEC.md §7: model that produced the vector
+                    json.dumps(_encode_entities(entities)),  # jsonb (ADR 0016)
+                    [e.name.lower() for e in entities],  # lower-cased names: the filter column
+                    entities_model,  # ADR 0016: extractor model (provenance)
                 )
                 if draft.supersedes:
                     targets = _valid_uuids(draft.supersedes)
@@ -600,6 +617,13 @@ def _encode_sources(sources: tuple[Source, ...]) -> list[dict[str, str]]:
     return [{"type": source.type.value, "ref": source.ref} for source in sources]
 
 
+def _encode_entities(entities: tuple[ExtractedEntity, ...]) -> list[dict[str, str]]:
+    """``entities`` is a jsonb column: a JSON list of {name, kind} facets
+    (ADR 0016). The lower-cased names are stored separately on
+    ``entity_names`` (the filter column, symmetric with ``tags``)."""
+    return [{"name": e.name, "kind": e.kind.value} for e in entities]
+
+
 def _decode_sources(raw: Any) -> tuple[Source, ...]:
     """Decode the jsonb ``sources`` column back into ``Source`` objects.
 
@@ -625,6 +649,21 @@ def _embedding_to_tuple(embedding: Any) -> tuple[float, ...] | None:
     return tuple(float(x) for x in values)
 
 
+def _decode_entities(raw: Any) -> tuple[ExtractedEntity, ...]:
+    """Decode the jsonb ``entities`` column back into domain facets.
+
+    asyncpg may deliver ``jsonb`` natively (a list of {name, kind}
+    dicts) or as raw JSON text, depending on the codec — mirror the
+    dual-decode of ``_decode_sources``.
+    """
+    if not raw:
+        return ()
+    items = raw if isinstance(raw, list) else json.loads(raw)
+    return tuple(
+        ExtractedEntity(name=item["name"], kind=EntityKind(item["kind"])) for item in items
+    )
+
+
 def _row_to_entry(row: asyncpg.Record) -> Entry:
     payload = row["payload"]  # jsonb: native dict (or None)
     return Entry(
@@ -647,6 +686,8 @@ def _row_to_entry(row: asyncpg.Record) -> Entry:
         state=EntryState(row["state"]),
         superseded_by=str(row["superseded_by"]) if row["superseded_by"] else None,
         withdrawn_reason=row["withdrawn_reason"],
+        entities=_decode_entities(row["entities"]),  # ADR 0016
+        entities_model=row["entities_model"],
     )
 
 

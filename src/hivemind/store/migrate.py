@@ -39,7 +39,7 @@ _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 # ``schema_migrations`` after each successful migrate, so an operator can
 # tell whether a live pool is up to date. **Bump this on every schema.sql
 # change** (each schema generation gets a new version).
-SCHEMA_VERSION = "5"
+SCHEMA_VERSION = "6"
 
 
 def _schema_sql(dim: int) -> str:
