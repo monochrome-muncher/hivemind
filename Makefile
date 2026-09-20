@@ -7,6 +7,10 @@ PG_DSN ?= postgresql://hivemind:hivemind@localhost:5432/hivemind
 export HIVEMIND_DATABASE_URL ?= $(PG_DSN)
 export HIVEMIND_EMBEDDING_ENDPOINT ?= http://localhost:8001/v1
 export HIVEMIND_EMBEDDING_MODEL ?= Qwen/Qwen3-Embedding-0.6B
+# Dev dim: 512 (fast local vLLM embedding, ADR 0005 self-hosted path).
+# The *code* default is 1024 (ADR 0015 — we never assume 1536); a pool
+# provisioned at a different dim is a loud, actionable error at
+# `hivemind-migrate` time (ADR 0015), never a silent no-op.
 export HIVEMIND_EMBEDDING_DIM ?= 512
 # Per-agent credential for the Postgres-backed MCP runner (ADR 0009). Leave
 # empty unless overriding; an agent's MCP config sets its own key.

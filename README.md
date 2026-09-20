@@ -44,7 +44,7 @@ make mcp-http-dev   # run the same runner as a local process instead of Docker (
 Configuration is via `HIVEMIND_*` environment variables (see `src/hivemind/config.py`):
 `HIVEMIND_DATABASE_URL` (default `postgresql://hivemind:hivemind@localhost:5432/hivemind`),
 `HIVEMIND_EMBEDDING_ENDPOINT` / `HIVEMIND_EMBEDDING_API_KEY` / `HIVEMIND_EMBEDDING_MODEL` /
-`HIVEMIND_EMBEDDING_DIM` (the deploy-time embedding decision, ADR 0005), and the retrieval knobs
+`HIVEMIND_EMBEDDING_DIM` (the deploy-time embedding decision, ADR 0005; default **1024** — ADR 0015; the dev Makefile pins 512 for fast local vLLM embedding), and the retrieval knobs
 (`HIVEMIND_RRF_K`, `HIVEMIND_WEIGHT_KEYWORD`, `HIVEMIND_WEIGHT_VECTOR`, `HIVEMIND_HALF_LIFE_DAYS`, ...).
 
 **Fully local embeddings (ADR 0005).** The `vllm` compose service runs

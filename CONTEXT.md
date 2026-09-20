@@ -46,6 +46,10 @@ _Avoid_: bot, worker, client, user
 The model that produced an entry's vector; recorded on the entry so vector provenance is traceable (SPEC §7, ADR 0005).
 _Avoid_: embedding service, vector store
 
+**Embedding dimension**:
+The fixed length of an entry's vector — a deploy-time decision baked into the pool's `vector(:dim)` column at migration time (SPEC §7, ADR 0005). The default is 1024 (ADR 0015); the dev Makefile pins 512 for fast local vLLM embedding. A mismatch between the pool's dim and the configured dim is a loud error at migrate time, never a silent assumption (ADR 0015).
+_Avoid_: vector width, embedding size, dim (as a bare noun)
+
 **Provenance**:
 The origin trail of an entry: author, agent, occurrence time, creation time, and source references.
 _Avoid_: audit, lineage

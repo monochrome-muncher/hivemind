@@ -15,7 +15,12 @@ import asyncpg
 import pytest
 
 from hivemind.config import Settings
-from hivemind.store.migrate import SCHEMA_VERSION, current_schema_version, migrate
+from hivemind.store.migrate import (
+    SCHEMA_VERSION,
+    current_embedding_dim,
+    current_schema_version,
+    migrate,
+)
 
 
 def _dsn() -> str:
@@ -71,3 +76,37 @@ async def test_current_schema_version_is_none_when_unmigrated() -> None:
     # (an un-migrated / pre-ADR-0013 pool).
     await _drop_schema_migrations(dsn)
     assert await current_schema_version(dsn) is None
+
+
+async def test_migrate_fails_loudly_on_dim_mismatch() -> None:
+    """ADR 0015: a pool provisioned at a different dim is a deployment
+    error. ``migrate`` must fail *at migrate time* with the actionable
+    message (both dims named + both remediations), not silently no-op
+    and fail later with a confusing ``DataError`` on the first write.
+    """
+    dsn = _dsn()
+    try:
+        probe = await asyncpg.connect(dsn, timeout=5)
+    except Exception as exc:  # connection refused / timeout / auth
+        pytest.skip(f"Postgres unreachable at {dsn}: {exc}")
+    await probe.close()
+
+    pool_dim = await current_embedding_dim(dsn)
+    if pool_dim is None:
+        pytest.skip("pool has never been migrated — no dim to compare")
+
+    # A dim guaranteed to differ from the pool's (the guard must fire).
+    other_dim = 1024 if pool_dim != 1024 else 512
+    with pytest.raises(RuntimeError) as excinfo:
+        await migrate(dsn, other_dim)
+    message = str(excinfo.value)
+    # Both dims are named…
+    assert f"{pool_dim}-dim" in message
+    assert str(other_dim) in message
+    # …and both remediations are offered.
+    assert "HIVEMIND_EMBEDDING_DIM" in message
+    assert "pg-reset" in message
+
+    # The guard fired *before* applying anything: the pool's dim is
+    # unchanged (no partial state from a failed migrate).
+    assert await current_embedding_dim(dsn) == pool_dim
