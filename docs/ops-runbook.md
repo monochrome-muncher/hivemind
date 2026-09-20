@@ -37,6 +37,7 @@ make mcp-http       # start the hostable MCP runner as a detached service (:8088
 | `HIVEMIND_DATABASE_URL` | Postgres DSN (default `postgresql://hivemind:hivemind@localhost:5432/hivemind`) |
 | `HIVEMIND_EMBEDDING_ENDPOINT` / `_API_KEY` / `_MODEL` | the embedding provider (ADR 0005) |
 | `HIVEMIND_EMBEDDING_DIM` | the embedding dimension (a deploy-time decision — see §6) |
+| `HIVEMIND_EMBEDDING_RETRIES` | retry budget for transient embedding failures (timeouts, connection errors, `429`, 5xx) — default 2; set `0` to disable (ADR 0014) |
 | `HIVEMIND_HOST` / `HIVEMIND_PORT` | the mcp-http bind host/port (ADR 0010) |
 
 > **Embedding dimension is a deploy-time decision** (ADR 0005): the
@@ -98,11 +99,16 @@ make migrate
 | Usage / counters | `GET /v1/metrics` (admin-gated) — entries / fleets / agents counters (ROADMAP §3.3) |
 | Schema drift | `schema_migrations.version` (ADR 0013) — the applied schema generation |
 | Postgres health | the `postgres` service healthcheck (`pg_isready`); `docker compose ps` |
+| Embedder health | writes failing with `EmbeddingError` after the retry budget (ADR 0014) — check the embedding endpoint (`HIVEMIND_EMBEDDING_ENDPOINT`) and the provider process |
 | MCP runner | `docker compose ps mcp-http` (ADR 0010); the streamable-HTTP endpoint `:8088` |
 
 Watch for: the Postgres healthcheck failing, the `mcp-http` container
-restarting, and the `schema_migrations` version lagging the deployed
-`SCHEMA_VERSION` (drift → run `make migrate`).
+restarting, the `schema_migrations` version lagging the deployed
+`SCHEMA_VERSION` (drift → run `make migrate`), and writes failing with
+`EmbeddingError` after the retry budget (ADR 0014) — a dead embedder
+fails writes once its `HIVEMIND_EMBEDDING_RETRIES` budget is
+exhausted; a transient blip is retried automatically and needs no
+action.
 
 ## 4. Key issuance + rotation (ADR 0012)
 

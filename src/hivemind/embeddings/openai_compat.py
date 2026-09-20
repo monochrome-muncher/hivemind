@@ -21,16 +21,28 @@ an ``EmbeddingError`` — the dimension is a deploy-time contract.
 
 Embedding model and dimension are recorded per entry (ADR 0005); the
 dimension is a deploy-time decision and validated on every response.
+
+Transient failures — timeouts, connection/network errors, ``429`` and
+5xx responses — are retried within a bounded budget (exponential
+backoff; ADR 0014). Deterministic failures (other 4xx, client-side
+validation) fail fast.
 """
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
 
 from hivemind.config import Settings
 from hivemind.domain.entry import EntryDraft, embeddable_text
+
+
+async def _default_sleep(delay: float) -> None:
+    """The production backoff sleep (injectable in tests)."""
+    await asyncio.sleep(delay)
 
 
 class EmbeddingError(Exception):
@@ -58,6 +70,9 @@ class OpenAICompatEmbedder:
         dim: int,
         *,
         timeout: float = 10.0,
+        retries: int = 2,
+        backoff: float = 0.5,
+        sleep: Callable[[float], Awaitable[None]] | None = None,
     ) -> None:
         """Create an embedder.
 
@@ -77,6 +92,14 @@ class OpenAICompatEmbedder:
                 field and validated on every response.
             timeout: The request timeout used only when the embedder
                 builds its own client.
+            retries: The number of retries (after the first attempt)
+                allowed for transient failures — timeouts, connection
+                errors, ``429`` and 5xx (ADR 0014). ``0`` disables
+                retrying; the default is 2 (up to 3 attempts).
+            backoff: The base backoff in seconds; retry *i* sleeps
+                ``backoff * 2**i`` (0.5s, 1s, ...).
+            sleep: The backoff sleep callable; defaults to
+                ``asyncio.sleep`` (tests inject a recorder).
         """
         self._owns_client = client is None
         if client is None:
@@ -86,6 +109,9 @@ class OpenAICompatEmbedder:
         self._api_key = api_key
         self._model_name = model_name
         self._dim = dim
+        self._retries = retries
+        self._backoff = backoff
+        self._sleep = sleep if sleep is not None else _default_sleep
 
     @classmethod
     def from_settings(cls, settings: Settings) -> OpenAICompatEmbedder:
@@ -96,7 +122,13 @@ class OpenAICompatEmbedder:
             api_key=settings.embedding_api_key,
             model_name=settings.embedding_model,
             dim=settings.embedding_dim,
+            retries=settings.embedding_retries,
         )
+
+    @property
+    def retries(self) -> int:
+        """The retry budget for transient failures (ADR 0014)."""
+        return self._retries
 
     @property
     def dimension(self) -> int:
@@ -137,7 +169,14 @@ class OpenAICompatEmbedder:
             await self._client.aclose()
 
     async def _embed(self, text: str) -> list[float]:
-        """POST one text to the endpoint and return its vector."""
+        """POST one text to the endpoint and return its vector.
+
+        Transient failures — timeouts, connection/network errors,
+        ``429`` and 5xx responses — are retried up to ``retries``
+        times with exponential backoff (ADR 0014). Deterministic
+        failures — other 4xx responses, client-side validation
+        (dimension mismatch) — fail fast with ``EmbeddingError``.
+        """
         headers: dict[str, str] = {}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
@@ -148,24 +187,42 @@ class OpenAICompatEmbedder:
             # providers truncate to this length; see the module docstring.
             "dimensions": self._dim,
         }
-        try:
-            response = await self._client.post(
-                f"{self._base_url}/embeddings",
-                json=payload,
-                headers=headers,
-            )
-        except httpx.HTTPError as exc:
-            raise EmbeddingError(f"embeddings request failed: {exc}") from exc
-
-        if response.is_error:
-            raise EmbeddingError(
-                f"embeddings endpoint returned {response.status_code}",
-                status=response.status_code,
-            )
-        vector = self._parse_response(response)
-        if len(vector) != self._dim:
-            raise EmbeddingError(f"expected {self._dim} dims, got {len(vector)}")
-        return vector
+        last: EmbeddingError | None = None
+        for attempt in range(self._retries + 1):
+            try:
+                response = await self._client.post(
+                    f"{self._base_url}/embeddings",
+                    json=payload,
+                    headers=headers,
+                )
+            except httpx.TimeoutException as exc:
+                last = EmbeddingError(f"embeddings request timed out: {exc}")
+            except httpx.NetworkError as exc:
+                last = EmbeddingError(f"embeddings request failed: {exc}")
+            except httpx.HTTPError as exc:
+                raise EmbeddingError(f"embeddings request failed: {exc}") from exc
+            else:
+                if response.status_code >= 500 or response.status_code == 429:
+                    last = EmbeddingError(
+                        f"embeddings endpoint returned {response.status_code}",
+                        status=response.status_code,
+                    )
+                elif response.is_error:
+                    raise EmbeddingError(
+                        f"embeddings endpoint returned {response.status_code}",
+                        status=response.status_code,
+                    )
+                else:
+                    vector = self._parse_response(response)
+                    if len(vector) != self._dim:
+                        raise EmbeddingError(
+                            f"expected {self._dim} dims, got {len(vector)}"
+                        )
+                    return vector
+            if attempt < self._retries:
+                await self._sleep(self._backoff * (2**attempt))
+        assert last is not None  # only reachable when the budget is exhausted
+        raise last
 
     def _parse_response(self, response: httpx.Response) -> list[float]:
         """Extract ``data[0].embedding`` from an OpenAI-shaped response."""
