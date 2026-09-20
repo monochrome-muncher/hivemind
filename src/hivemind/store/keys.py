@@ -21,6 +21,7 @@ Usage:
     hivemind-keys issue-agent --name alice
     hivemind-keys rotate-org
     hivemind-keys revoke --name alice
+    hivemind-keys revoke-admin --key hm_xxx   (or --hash <sha256 from list>)
     hivemind-keys list
 """
 
@@ -29,6 +30,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import secrets
+import sys
 
 import asyncpg
 
@@ -44,6 +46,7 @@ _ISSUE_ORG = "INSERT INTO credentials (key_hash, kind, user_id) VALUES ($1, 'org
 _DELETE_ORG = "DELETE FROM credentials WHERE kind = 'org'"
 _LIST = "SELECT key_hash, kind, user_id, agent_name FROM credentials ORDER BY created_at"
 _REVOKE_AGENT = "DELETE FROM credentials WHERE kind = 'agent' AND agent_name = $1"
+_REVOKE_ADMIN = "DELETE FROM credentials WHERE kind = 'admin' AND key_hash = $1"
 
 
 def _raw_key() -> str:
@@ -110,6 +113,30 @@ async def _revoke(dsn: str, name: str) -> None:
         await conn.close()
 
 
+async def _revoke_admin(
+    dsn: str, *, raw_key: str | None = None, stored_hash: str | None = None
+) -> bool:
+    """Revoke a specific admin key — the second half of admin-key rotation.
+
+    Targets the admin row by either the raw secret (SHA-256 hashed
+    first, SPEC §8.1) or the stored SHA-256 hex that ``hivemind-keys
+    list`` prints. Returns ``True`` if an admin row was deleted, or
+    ``False`` if nothing matched (the CLI then exits non-zero so the
+    no-op is loud from a script — DEPLOY.md §5)."""
+    if stored_hash is not None:
+        target = stored_hash
+    elif raw_key is not None:
+        target = key_hash(raw_key)  # the guard above proves it is set
+    else:
+        raise ValueError("either raw_key or stored_hash must be provided")
+    conn = await asyncpg.connect(dsn)
+    try:
+        status = await conn.execute(_REVOKE_ADMIN, target)
+    finally:
+        await conn.close()
+    return str(status) == "DELETE 1"
+
+
 def main() -> None:
     """Console entry point (``hivemind-keys``)."""
     parser = argparse.ArgumentParser(description="Hivemind key management (ADR 0012)")
@@ -124,6 +151,17 @@ def main() -> None:
 
     sub.add_parser("list", help="list credential hashes (never raw keys)")
 
+    revoke_admin = sub.add_parser(
+        "revoke-admin",
+        help="revoke a specific admin key (rotation: issue a new one, then revoke the old)",
+    )
+    revoke_admin.add_argument(
+        "--key", help="the raw admin secret to revoke (hashed before matching)"
+    )
+    revoke_admin.add_argument(
+        "--hash", dest="stored_hash", help="the stored SHA-256 hex from `hivemind-keys list`"
+    )
+
     revoke = sub.add_parser("revoke", help="revoke an agent's key (name stays reserved)")
     revoke.add_argument("--name", required=True)
 
@@ -137,6 +175,18 @@ def main() -> None:
         print(asyncio.run(_rotate_org(dsn)))
     elif args.cmd == "list":
         asyncio.run(_list(dsn))
+    elif args.cmd == "revoke-admin":
+        if (args.key is None) == (args.stored_hash is None):
+            parser.error("exactly one of --key / --hash is required")
+        revoked = asyncio.run(_revoke_admin(dsn, raw_key=args.key, stored_hash=args.stored_hash))
+        if revoked:
+            print("revoked the admin key (issue a replacement via `hivemind-keys issue-admin`)")
+        else:
+            print(
+                "no admin key matches that identifier (check `hivemind-keys list`)",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
     elif args.cmd == "revoke":
         asyncio.run(_revoke(dsn, args.name))
         print(f"revoked the key for agent {args.name} (name stays reserved)")
