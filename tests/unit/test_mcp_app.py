@@ -13,6 +13,7 @@ import pytest
 from hivemind.domain.access import TrustLevel
 from hivemind.mcp.app import (
     ERR_AGENT_UNRESOLVED,
+    ERR_INVALID_INPUT,
     ERR_PERMISSION_DENIED,
     McpHivemind,
     hive_feedback,
@@ -128,6 +129,60 @@ async def test_hive_write_accepts_structured_fields(app: McpHivemind) -> None:
     assert result["sources"] == [{"type": "url", "ref": "https://example.com/slice"}]
 
 
+# --- write-scope resolution (ADR 0011): an omitted scope defaults to the
+# --- highest scope the trust level permits, not a forced 'org' ---------- #
+
+
+async def _l2_agent(store: MemoryStore, clock, name: str = "carol") -> tuple[Credential, str]:
+    """A v2 L2 (contributor) agent with a home fleet (ADRs 0011-0012)."""
+    fleet = await store.create_fleet("eng")
+    await store.register_agent(name)
+    await store.activate_agent(name, trust_level=TrustLevel.CONTRIBUTOR, home_fleet_id=fleet.id)
+    cred = Credential(
+        user_id=name,
+        agent_id=name,
+        agent_name=name,
+        access_controlled=True,
+        trust_level=TrustLevel.CONTRIBUTOR,
+        home_fleet_id=fleet.id,
+    )
+    return cred, fleet.id
+
+
+async def test_hive_write_omitted_scope_defaults_to_max_permitted() -> None:
+    """ADR 0011: an omitted scope defaults to the highest scope the trust
+    level permits (L2 -> fleet). The tool must not force 'org' — that
+    rejected every L2/L1 write (dogfood finding 1)."""
+    clock = make_clock()
+    store = MemoryStore(clock)
+    cred, fleet_id = await _l2_agent(store, clock)
+    app = build_app(store, cred, clock)
+    result = await hive_write(app, kind="fact", summary="omitted scope probe")
+    assert "error" not in result, result
+    assert result["scope"] == "fleet"
+    assert result["fleet_id"] == fleet_id
+
+
+async def test_hive_write_l2_explicit_org_scope_denied() -> None:
+    """An *explicit* out-of-permission scope is still rejected (ADR 0011)."""
+    clock = make_clock()
+    store = MemoryStore(clock)
+    cred, _ = await _l2_agent(store, clock)
+    app = build_app(store, cred, clock)
+    result = await hive_write(app, kind="fact", summary="org probe", scope="org")
+    assert result["error"]["code"] == ERR_PERMISSION_DENIED
+
+
+async def test_hive_write_legacy_omitted_scope_stays_org() -> None:
+    """Legacy (v1) credentials keep the flat pool: omitted scope -> org."""
+    clock = make_clock()
+    store = MemoryStore(clock)
+    app = build_app(store, ALICE, clock)
+    result = await hive_write(app, kind="fact", summary="legacy probe")
+    assert "error" not in result
+    assert result["scope"] == "org"
+
+
 # --------------------------------------------------------------------------- #
 # hive_search
 # --------------------------------------------------------------------------- #
@@ -176,6 +231,20 @@ async def test_hive_get_returns_full_entry(app: McpHivemind) -> None:
 async def test_hive_get_unknown_entry_returns_error(app: McpHivemind) -> None:
     result = await hive_get(app, "no-such-id")
     assert result.get("error", {}).get("code") == "not_found"
+
+
+async def test_hive_get_empty_entry_id_is_invalid_input(app: McpHivemind) -> None:
+    """An empty id is a caller error, not 'unknown entry: ' (dogfood note)."""
+    result = await hive_get(app, entry_id="")
+    assert result["error"]["code"] == ERR_INVALID_INPUT
+    assert "entry_id" in result["error"]["message"]
+
+
+async def test_hive_feedback_empty_entry_id_is_invalid_input(app: McpHivemind) -> None:
+    """Same guard on hive_feedback: an empty id is invalid_input, not not_found."""
+    result = await hive_feedback(app, entry_id="", verdict="helpful")
+    assert result["error"]["code"] == ERR_INVALID_INPUT
+    assert "entry_id" in result["error"]["message"]
 
 
 async def test_hive_get_include_history_surfaces_successor(

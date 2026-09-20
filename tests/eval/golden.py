@@ -17,13 +17,37 @@ from __future__ import annotations
 
 # (kind, summary, tags) — a fixed, deterministic corpus (distinct topics).
 GOLDEN_CORPUS: list[tuple[str, str, list[str]]] = [
-    ("fact", "PostgreSQL connection pooling with PgBouncer in transaction mode", ["postgres", "database"]),
-    ("fact", "API rate limiting: token bucket allows 100 requests per minute per client", ["api", "rate-limit"]),
-    ("decision", "Use Reciprocal Rank Fusion to merge the keyword and vector search streams", ["search", "retrieval"]),
-    ("fact", "JWT auth: access token 15 minutes, refresh token 7 days, rotated on use", ["auth", "security"]),
-    ("insight", "A 1536-dim embedding outperforms 512 for semantic search recall", ["embeddings", "search"]),
+    (
+        "fact",
+        "PostgreSQL connection pooling with PgBouncer in transaction mode",
+        ["postgres", "database"],
+    ),
+    (
+        "fact",
+        "API rate limiting: token bucket allows 100 requests per minute per client",
+        ["api", "rate-limit"],
+    ),
+    (
+        "decision",
+        "Use Reciprocal Rank Fusion to merge the keyword and vector search streams",
+        ["search", "retrieval"],
+    ),
+    (
+        "fact",
+        "JWT auth: access token 15 minutes, refresh token 7 days, rotated on use",
+        ["auth", "security"],
+    ),
+    (
+        "insight",
+        "A 1536-dim embedding outperforms 512 for semantic search recall",
+        ["embeddings", "search"],
+    ),
     ("fact", "Deploy config: staging canaries 10% then 100% after 30 minutes", ["deploy", "ops"]),
-    ("insight", "Recency decay: entries lose retrieval weight on a 30-day half-life", ["retrieval", "decay"]),
+    (
+        "insight",
+        "Recency decay: entries lose retrieval weight on a 30-day half-life",
+        ["retrieval", "decay"],
+    ),
     ("fact", "MCP tools: hive_search returns compact hits without bodies", ["mcp", "tools"]),
 ]
 

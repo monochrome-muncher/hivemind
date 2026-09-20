@@ -52,7 +52,10 @@ class CreateEntryRequest(BaseModel):
     tags: list[str] = []
     occurred_at: datetime | None = None
     importance: int = 3
-    scope: str = "org"
+    # ADR 0011: an omitted scope defaults to the highest scope the caller's
+    # trust level permits (L1 -> self; L2/L3 -> fleet; legacy/admin -> org);
+    # an explicit out-of-permission scope is rejected (403).
+    scope: str | None = None
     supersedes: list[str] = []
     agent: str | None = None
 
@@ -87,6 +90,7 @@ class EntryOut(BaseModel):
     agent: str
     importance: int
     scope: str
+    fleet_id: str | None = None
     state: str
     superseded_by: str | None = None
     withdrawn_reason: str | None = None
@@ -111,6 +115,7 @@ class EntryOut(BaseModel):
             agent=entry.agent,
             importance=entry.importance,
             scope=entry.scope,
+            fleet_id=entry.fleet_id,
             state=entry.state.value,
             superseded_by=entry.superseded_by,
             withdrawn_reason=entry.withdrawn_reason,

@@ -124,9 +124,7 @@ class FakeAuthenticator:
         """Issue an agent key bound to ``agent_name``; return the raw key once."""
         raw = f"hm_agent_{agent_name}"
         self._issued_agent_keys[agent_name] = raw
-        self._by_key[raw] = Credential(
-            user_id=agent_name, agent_name=agent_name
-        )
+        self._by_key[raw] = Credential(user_id=agent_name, agent_name=agent_name)
         return raw
 
     async def revoke_agent_key(self, agent_name: str) -> None:
@@ -135,7 +133,9 @@ class FakeAuthenticator:
             self._by_key.pop(raw, None)
 
     async def rotate_org_key(self) -> str:
-        self._by_key.pop("hm_org" if self._rotations == 0 else f"hm_org_{self._rotations - 1}", None)
+        self._by_key.pop(
+            "hm_org" if self._rotations == 0 else f"hm_org_{self._rotations - 1}", None
+        )
         self._rotations += 1
         new_key = f"hm_org_{self._rotations}"
         self._by_key[new_key] = Credential(user_id="org", is_org=True)

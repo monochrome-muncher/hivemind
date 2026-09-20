@@ -71,7 +71,10 @@ def ndcg_at_k(ranked_ids: Sequence[str], relevant: Mapping[str, int], k: int) ->
         return 0.0
     ideal_grades = sorted((grade for grade in relevant.values() if grade > 0), reverse=True)
     ideal = min(len(ideal_grades), k)
-    ideal_dcg = sum(grade / math.log2(position + 1) for position, grade in enumerate(ideal_grades[:ideal], start=1))
+    ideal_dcg = sum(
+        grade / math.log2(position + 1)
+        for position, grade in enumerate(ideal_grades[:ideal], start=1)
+    )
     if ideal_dcg == 0.0:
         return 0.0
     return dcg_at_k(ranked_ids, relevant, k) / ideal_dcg

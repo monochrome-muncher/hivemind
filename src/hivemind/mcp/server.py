@@ -57,7 +57,11 @@ _INSTRUCTIONS = (
 _DESC_WRITE = (
     "Write a distilled entry (fact|insight|decision) into the shared pool. "
     "Provenance falls back to the acting credential when author/agent are "
-    "omitted. Optional 'supersedes' names entries this one replaces."
+    "omitted. Omit 'scope' to land at the highest scope your trust level "
+    "permits (self/fleet; an explicit out-of-permission scope is rejected — "
+    "ADR 0011). 'summary' (keep it under ~280 chars) is the embedded text; "
+    "'body' holds long-form content. Optional 'supersedes' names entries this "
+    "one replaces."
 )
 _DESC_SEARCH = (
     "Hybrid (keyword + vector) search over the pool. Returns compact hits "
@@ -136,7 +140,7 @@ def build_server(
         tags: list[str] | None = None,
         occurred_at: str | None = None,
         importance: int = 3,
-        scope: str = "org",
+        scope: str | None = None,
         supersedes: list[str] | None = None,
         author: str | None = None,
         agent: str | None = None,

@@ -215,9 +215,7 @@ class OpenAICompatEmbedder:
                 else:
                     vector = self._parse_response(response)
                     if len(vector) != self._dim:
-                        raise EmbeddingError(
-                            f"expected {self._dim} dims, got {len(vector)}"
-                        )
+                        raise EmbeddingError(f"expected {self._dim} dims, got {len(vector)}")
                     return vector
             if attempt < self._retries:
                 await self._sleep(self._backoff * (2**attempt))

@@ -182,9 +182,7 @@ def _filter_conditions(
     return clauses, params
 
 
-def _visibility_clause(
-    visibility: Visibility | None, params: list[Any]
-) -> str | None:
+def _visibility_clause(visibility: Visibility | None, params: list[Any]) -> str | None:
     """The SQL fragment restricting results to entries visible to
     ``visibility`` (ADR 0011). Appends its parameters to ``params`` and
     returns the clause (or ``None`` for no restriction).
@@ -209,11 +207,7 @@ def _visibility_clause(
     name_p = _p(visibility.name)
     if visibility.level == TrustLevel.PRIVILEGED:
         # L3: read-broad — every fleet's ``fleet`` entries are visible.
-        return (
-            "(scope = 'org' "
-            f"OR (scope = 'self' AND author = {name_p}) "
-            "OR scope = 'fleet')"
-        )
+        return f"(scope = 'org' OR (scope = 'self' AND author = {name_p}) OR scope = 'fleet')"
     # L1/L2: own + home fleet (+ legacy org). Fleet entries are visible
     # only if they are the reader's own or in the reader's home fleet.
     home_p = _p(visibility.home_fleet_id)

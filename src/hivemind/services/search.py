@@ -98,9 +98,7 @@ class SearchService:
 
         # 1. Dual-stream retrieval (restricted to the caller's visibility,
         # ADR 0011 when ``visibility`` is supplied).
-        keyword_ids = await self._store.search_keyword(
-            query, filters, top_k, visibility=visibility
-        )
+        keyword_ids = await self._store.search_keyword(query, filters, top_k, visibility=visibility)
         query_vector = await self._embedder.embed_text(query)
         vector_ids = await self._store.search_vector(
             query_vector, filters, top_k, visibility=visibility

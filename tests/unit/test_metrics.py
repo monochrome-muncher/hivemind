@@ -113,9 +113,13 @@ class TestMetricsService:
         # contributor (level 2), one active privileged (level 3).
         await store.register_agent("lurker")  # stays pending, level 0
         await store.register_agent("contrib")
-        await store.activate_agent("contrib", trust_level=TrustLevel.CONTRIBUTOR, home_fleet_id=fleet.id)
+        await store.activate_agent(
+            "contrib", trust_level=TrustLevel.CONTRIBUTOR, home_fleet_id=fleet.id
+        )
         await store.register_agent("priv")
-        await store.activate_agent("priv", trust_level=TrustLevel.PRIVILEGED, home_fleet_id=fleet.id)
+        await store.activate_agent(
+            "priv", trust_level=TrustLevel.PRIVILEGED, home_fleet_id=fleet.id
+        )
         service = MetricsService(store)
         report = await service.usage_report()
         agents = report["agents"]
@@ -123,7 +127,12 @@ class TestMetricsService:
         assert agents["pending"] == 1
         assert agents["active"] == 2
         # Trust-level distribution (the §12 counter, ADR 0011).
-        assert agents["by_trust_level"] == {"untrusted": 1, "lurker": 0, "contributor": 1, "privileged": 1}
+        assert agents["by_trust_level"] == {
+            "untrusted": 1,
+            "lurker": 0,
+            "contributor": 1,
+            "privileged": 1,
+        }
 
     async def test_usage_report_shape(self) -> None:
         clock = make_clock()

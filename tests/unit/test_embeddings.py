@@ -103,6 +103,7 @@ class TestRetries:
     def _scripted_handler(env: MockEnv, outcomes: list[object]) -> None:
         """Serve ``outcomes`` in order (last repeats); a non-``Response``
         outcome is raised as the transport error/exception."""
+
         def handler(request: httpx.Request) -> httpx.Response:
             # The current request is already appended by ``MockEnv`` before
             # the handler runs, so the call index is ``len(requests) - 1``.
@@ -115,7 +116,9 @@ class TestRetries:
 
     async def test_retries_transient_5xx_then_succeeds(self) -> None:
         env = MockEnv()
-        self._scripted_handler(env, [httpx.Response(500, text="boom"), httpx.Response(503), self._ok()])
+        self._scripted_handler(
+            env, [httpx.Response(500, text="boom"), httpx.Response(503), self._ok()]
+        )
         embedder = make_embedder(env)
         assert await embedder.embed_text("x") == OK_VECTOR
         assert len(env.requests) == 3  # two failures, one success
@@ -154,7 +157,9 @@ class TestRetries:
         """Default ``retries=2``: three 5xx in a row exhaust the budget
         before the 4th (which would have succeeded)."""
         env = MockEnv()
-        self._scripted_handler(env, [httpx.Response(500), httpx.Response(500), httpx.Response(500), self._ok()])
+        self._scripted_handler(
+            env, [httpx.Response(500), httpx.Response(500), httpx.Response(500), self._ok()]
+        )
         embedder = make_embedder(env)  # default retries=2
         with pytest.raises(EmbeddingError):
             await embedder.embed_text("x")

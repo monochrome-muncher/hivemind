@@ -88,6 +88,7 @@ def _entry_dict(entry: Entry) -> dict[str, object]:
         "tags": list(entry.tags),
         "importance": entry.importance,
         "scope": entry.scope,
+        "fleet_id": entry.fleet_id,
         "state": entry.state.value,
         "superseded_by": entry.superseded_by,
         "withdrawn_reason": entry.withdrawn_reason,
@@ -207,7 +208,7 @@ async def hive_write(
     tags: list[str] | None = None,
     occurred_at: str | None = None,
     importance: int = 3,
-    scope: str = "org",
+    scope: str | None = None,
     supersedes: list[str] | None = None,
     author: str | None = None,
     agent: str | None = None,
@@ -220,6 +221,11 @@ async def hive_write(
     credential when ``author``/``agent`` are omitted (SPEC §8.1); a
     plain user key must self-report the agent instance (no fabricated
     ``unknown`` identity — the write is rejected instead).
+
+    ``scope``: omit it and the entry lands at the highest scope the
+    caller's trust level permits (L1 -> self; L2/L3 -> fleet; legacy
+    and admin -> org) — ADR 0011. An explicit out-of-permission scope
+    is rejected.
     """
     cred = app.credential
     resolved_agent = agent or cred.agent_id
@@ -317,6 +323,8 @@ async def hive_get(
     ``successors`` (newer versions) and ``superseded`` (older versions it
     replaced) — the supersession chain (SPEC §5.1 ``?history``).
     """
+    if not entry_id or not entry_id.strip():
+        return _error(ERR_INVALID_INPUT, "entry_id is required (pass a hit's id)")
     entry = await app.store.get_entry(entry_id)
     if entry is None:
         return _error(ERR_NOT_FOUND, f"unknown entry: {entry_id}")
@@ -403,6 +411,8 @@ async def hive_feedback(
     The acting credential supplies the reporter identity; a plain user key
     self-reports the agent instance via ``agent`` (SPEC §8.1).
     """
+    if not entry_id or not entry_id.strip():
+        return _error(ERR_INVALID_INPUT, "entry_id is required (pass a hit's id)")
     try:
         parsed_verdict = Verdict(verdict)
     except ValueError:
