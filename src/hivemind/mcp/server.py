@@ -67,7 +67,9 @@ _DESC_WRITE = (
 _DESC_SEARCH = (
     "Hybrid (keyword + vector) search over the pool. Returns compact hits "
     "with no bodies; open a hit with hive_get. Superseded/withdrawn entries "
-    "are hidden unless include_inactive."
+    "are hidden unless include_inactive. Optional 'entities' filters by "
+    "machine-extracted entity names (AND-semantics, case-insensitive; kinds "
+    "are display-only — ADR 0016)."
 )
 _DESC_GET = (
     "Fetch a full entry including its body. include_history adds the "
@@ -75,8 +77,9 @@ _DESC_GET = (
 )
 _DESC_LIST = (
     "List / filter entries without a query (filter only, paginated). "
-    "Supports kind, tags, scope, author, agent, memory-date and ingest-date "
-    "ranges."
+    "Supports kind, tags, machine-extracted entity names ('entities': "
+    "AND-semantics, case-insensitive — ADR 0016), scope, author, agent, "
+    "memory-date and ingest-date ranges."
 )
 _DESC_WITHDRAW = (
     "Withdraw an entry (retract without replacing). Only the author or an admin may withdraw."
@@ -169,6 +172,7 @@ def build_server(
         offset: int | None = None,
         kind: str | None = None,
         tags: list[str] | None = None,
+        entities: list[str] | None = None,
         scope: str | None = None,
         author: str | None = None,
         agent: str | None = None,
@@ -185,6 +189,7 @@ def build_server(
             offset=offset,
             kind=kind,
             tags=tags,
+            entities=entities,
             scope=scope,
             author=author,
             agent=agent,
@@ -206,6 +211,7 @@ def build_server(
     async def _hive_list(
         kind: str | None = None,
         tags: list[str] | None = None,
+        entities: list[str] | None = None,
         scope: str | None = None,
         author: str | None = None,
         agent: str | None = None,
@@ -221,6 +227,7 @@ def build_server(
             resolve_app(),
             kind=kind,
             tags=tags,
+            entities=entities,
             scope=scope,
             author=author,
             agent=agent,

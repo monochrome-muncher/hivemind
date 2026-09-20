@@ -75,7 +75,12 @@ class McpHivemind:
 
 
 def _entry_dict(entry: Entry) -> dict[str, object]:
-    """A full entry as a JSON-serializable dict (body included)."""
+    """A full entry as a JSON-serializable dict (body included).
+
+    Carries the machine-extracted entity facets (ADR 0016, SPEC §13):
+    ``entities`` (name + kind, display-only in v1) and ``entities_model``
+    (the extractor provenance; null when extraction was off or failed).
+    """
     return {
         "id": entry.id,
         "kind": entry.kind.value,
@@ -92,6 +97,8 @@ def _entry_dict(entry: Entry) -> dict[str, object]:
         "state": entry.state.value,
         "superseded_by": entry.superseded_by,
         "withdrawn_reason": entry.withdrawn_reason,
+        "entities": [{"name": e.name, "kind": e.kind.value} for e in entry.entities],
+        "entities_model": entry.entities_model,
         "occurred_at": entry.occurred_at.isoformat(),
         "created_at": entry.created_at.isoformat(),
     }
@@ -159,6 +166,7 @@ def _build_filters(
     *,
     kind: str | None,
     tags: list[str] | None,
+    entities: list[str] | None,
     scope: str | None,
     author: str | None,
     agent: str | None,
@@ -168,10 +176,16 @@ def _build_filters(
     created_to: str | None,
     include_inactive: bool,
 ) -> EntryFilters:
-    """Parse the shared filter parameters into an ``EntryFilters`` (SPEC §5.3)."""
+    """Parse the shared filter parameters into an ``EntryFilters`` (SPEC §5.3).
+
+    ``entities`` (ADR 0016, SPEC §13) filters by machine-extracted entity
+    names: AND-semantics, case-insensitive (the store layer matches on
+    lower-cased names; kinds are display-only, not filterable in v1).
+    """
     return EntryFilters(
         kind=_parse_kind(kind),
         tags=tuple(tags or ()),
+        entities=tuple(entities or ()),
         scope=scope,
         author=author,
         agent=agent,
@@ -276,6 +290,7 @@ async def hive_search(
     offset: int | None = None,
     kind: str | None = None,
     tags: list[str] | None = None,
+    entities: list[str] | None = None,
     scope: str | None = None,
     author: str | None = None,
     agent: str | None = None,
@@ -290,11 +305,15 @@ async def hive_search(
     Superseded / withdrawn entries are hidden unless ``include_inactive``
     (SPEC §6.3). Open an interesting hit with ``hive_get``. ``limit``/
     ``offset`` paginate the result (SPEC §5.3).
+
+    ``entities`` (ADR 0016, SPEC §13) filters by machine-extracted
+    entity names: AND-semantics, case-insensitive; kinds are display-only.
     """
     try:
         filters = _build_filters(
             kind=kind,
             tags=tags,
+            entities=entities,
             scope=scope,
             author=author,
             agent=agent,
@@ -340,6 +359,7 @@ async def hive_list(
     app: McpHivemind,
     kind: str | None = None,
     tags: list[str] | None = None,
+    entities: list[str] | None = None,
     scope: str | None = None,
     author: str | None = None,
     agent: str | None = None,
@@ -351,11 +371,16 @@ async def hive_list(
     limit: int | None = None,
     offset: int = 0,
 ) -> dict[str, object]:
-    """List / filter entries without a query (filter only, paginated)."""
+    """List / filter entries without a query (filter only, paginated).
+
+    ``entities`` (ADR 0016, SPEC §13) filters by machine-extracted entity
+    names: AND-semantics, case-insensitive; kinds are display-only.
+    """
     try:
         filters = _build_filters(
             kind=kind,
             tags=tags,
+            entities=entities,
             scope=scope,
             author=author,
             agent=agent,
