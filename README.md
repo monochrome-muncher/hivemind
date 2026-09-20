@@ -47,6 +47,13 @@ Configuration is via `HIVEMIND_*` environment variables (see `src/hivemind/confi
 `HIVEMIND_EMBEDDING_DIM` (the deploy-time embedding decision, ADR 0005; default **1024** — ADR 0015; the dev Makefile pins 512 for fast local vLLM embedding), and the retrieval knobs
 (`HIVEMIND_RRF_K`, `HIVEMIND_WEIGHT_KEYWORD`, `HIVEMIND_WEIGHT_VECTOR`, `HIVEMIND_HALF_LIFE_DAYS`, ...).
 
+The optional **entity-extraction extractor** (ADR 0016, SPEC §13) is configured via
+`HIVEMIND_EXTRACTOR_ENDPOINT` / `HIVEMIND_EXTRACTOR_MODEL` / `HIVEMIND_EXTRACTOR_API_KEY`:
+**unset = extraction off** (entries land with empty `entities`, zero LLM cost), and
+extraction is **best-effort** — a failure never blocks a write. Entries expose the
+extracted facets (`entities` + `entities_model`), and the read surfaces filter by them
+(`entities` query param: AND-semantics, case-insensitive).
+
 **Fully local embeddings (ADR 0005).** The `vllm` compose service runs
 `Qwen/Qwen3-Embedding-0.6B` on a CPU vLLM image (`make vllm`, port 8001 —
 the `HIVEMIND_EMBEDDING_ENDPOINT` default is `http://localhost:8001/v1`).
