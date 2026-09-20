@@ -38,6 +38,8 @@ make mcp-http       # start the hostable MCP runner as a detached service (:8088
 | `HIVEMIND_EMBEDDING_ENDPOINT` / `_API_KEY` / `_MODEL` | the embedding provider (ADR 0005) |
 | `HIVEMIND_EMBEDDING_DIM` | the embedding dimension (a deploy-time decision, default **1024** — ADR 0015; the dev Makefile exports 512 for fast local vLLM embedding — see §6) |
 | `HIVEMIND_EMBEDDING_RETRIES` | retry budget for transient embedding failures (timeouts, connection errors, `429`, 5xx) — default 2; set `0` to disable (ADR 0014) |
+| `HIVEMIND_EXTRACTOR_ENDPOINT` / `_MODEL` / `_API_KEY` | the entity-extraction extractor (ADR 0016, SPEC §13): **optional + best-effort** — unset = extraction off (entries land with empty `entities`, zero LLM cost); an extraction failure **never** blocks a write (the entry lands without facets). Dev/test: `http://localhost:8080/v1` (`qwen3.8-27b`, key `dummy`) |
+| `HIVEMIND_EXTRACTOR_RETRIES` / `_TIMEOUT` | retry budget + call timeout for transient extractor failures (ADR 0014 pattern) — default 2 retries / 30 s; deterministic 4xx + schema-validation failures fail fast, no retry |
 | `HIVEMIND_HOST` / `HIVEMIND_PORT` | the mcp-http bind host/port (ADR 0010) |
 
 > **Embedding dimension is a deploy-time decision** (ADR 0005): the
@@ -100,6 +102,7 @@ make migrate
 | Schema drift | `schema_migrations.version` (ADR 0013) — the applied schema generation |
 | Postgres health | the `postgres` service healthcheck (`pg_isready`); `docker compose ps` |
 | Embedder health | writes failing with `EmbeddingError` after the retry budget (ADR 0014) — check the embedding endpoint (`HIVEMIND_EMBEDDING_ENDPOINT`) and the provider process |
+| Extractor health | entries landing with **empty `entities`** while extraction is expected (ADR 0016) — check `HIVEMIND_EXTRACTOR_ENDPOINT` / model reachability; note this is *by design* silent (best-effort: the write never fails over extraction), so watch for the symptom, not an error. All-or-nothing validation: if the model wraps its JSON in a code fence (or any schema violation — >10 entities, bad kind, name >128 chars) the whole extraction fails and the entry lands without facets — monitor facet coverage in the dogfood |
 | MCP runner | `docker compose ps mcp-http` (ADR 0010); the streamable-HTTP endpoint `:8088` |
 
 Watch for: the Postgres healthcheck failing, the `mcp-http` container
@@ -108,7 +111,9 @@ restarting, the `schema_migrations` version lagging the deployed
 `EmbeddingError` after the retry budget (ADR 0014) — a dead embedder
 fails writes once its `HIVEMIND_EMBEDDING_RETRIES` budget is
 exhausted; a transient blip is retried automatically and needs no
-action.
+action. (The extractor, ADR 0016, is deliberately the opposite: its
+failures are best-effort and never block a write — the observable
+symptom is an entry with empty `entities`, not a failed write.)
 
 ## 4. Key issuance + rotation (ADR 0012)
 

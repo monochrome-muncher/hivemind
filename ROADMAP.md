@@ -186,12 +186,12 @@ trust-level distribution, pending-agent count, revoked-key count.)*
   *dimension* itself is a separate deploy-time decision: the default is
   now 1024, ADR 0015 — the dim tuning, if it lands, happens in the same
   harness work.)
-- **4.3 Entity-extraction facets (pre-staged §10 extension — ADR 0016, SPEC §13).**
+- **4.3 Entity-extraction facets (pre-staged §10 extension — ADR 0016, SPEC §13).** *(shipped: `src/hivemind/extractor.py` + the `WriteService` best-effort hook + the REST/MCP read surface, SPEC §13)*
   *This is not a §11 open item: it is the knowledge-graph §10 extension,
   pre-staged on scale ambition (300+ agents / multiple fleets) — the
   §10 trigger ("cross-entry entity linking pays off in retrieval
-  quality") has NOT fired; the facet slice is what is being built, and
-  it is measurable with the §1.1 harness. Graph-expanded retrieval and
+  quality") has NOT fired; the facet slice is what was built, and it
+  is measurable with the §1.1 harness. Graph-expanded retrieval and
   the canonical entity registry stay trigger-held under Tier 5.* A
   write-time, **optional + best-effort** LLM extractor (fixed prompt,
   all-or-nothing schema-validated `{name, kind}` output; closed kind

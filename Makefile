@@ -12,6 +12,16 @@ export HIVEMIND_EMBEDDING_MODEL ?= Qwen/Qwen3-Embedding-0.6B
 # provisioned at a different dim is a loud, actionable error at
 # `hivemind-migrate` time (ADR 0015), never a silent no-op.
 export HIVEMIND_EMBEDDING_DIM ?= 512
+# Entity-extraction extractor (ADR 0016, SPEC §13): OFF by default — an
+# empty endpoint means extraction is off and entries land with empty
+# `entities` (zero LLM-extraction cost, the "no authenticator = dev
+# mode" stance). Extraction is optional + best-effort: a failure never
+# blocks a write. Enable per target, e.g.
+#   make api HIVEMIND_EXTRACTOR_ENDPOINT=http://localhost:8080/v1 \
+#            HIVEMIND_EXTRACTOR_MODEL=qwen3.8-27b HIVEMIND_EXTRACTOR_API_KEY=dummy
+export HIVEMIND_EXTRACTOR_ENDPOINT ?=
+export HIVEMIND_EXTRACTOR_MODEL ?=
+export HIVEMIND_EXTRACTOR_API_KEY ?=
 # Per-agent credential for the Postgres-backed MCP runner (ADR 0009). Leave
 # empty unless overriding; an agent's MCP config sets its own key.
 export HIVEMIND_MCP_KEY ?=
