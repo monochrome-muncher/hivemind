@@ -28,10 +28,10 @@
   rotation), the REST surface (`POST /v1/agents` + the admin endpoints),
   the MCP surface (`hive_register` + write-scope + visibility), and the
   reduced `hivemind-keys` CLI.
-- **What's next:** Tier 3 (productionize) is largely shipped: the ops
-  runbook (3.1, `docs/ops-runbook.md`), the forward-migration path
-  (3.2, ADR 0013 + `schema_migrations` tracking), and the usage counters
-  (3.3, `MetricsService` + `GET /v1/metrics`). The next workstream is
+- **What's next:** Tier 3 (productionize) is fully shipped, including
+  the Kubernetes + GitLab CI/CD deployment story (3.4: `DEPLOY.md`,
+  `deploy/kubernetes/`, `.gitlab-ci.yml`, the first-run key bootstrap,
+  and the `.env` quickstart). The next workstream is
   **Tier 4** (close the SPEC §11 open items: the BM25-vs-FTS decision and
   the embedding-prefix tuning, both now measurable with the §1.1 eval
   harness) — or a production Tier 4 decision that the eval numbers
@@ -152,7 +152,7 @@ kinds). Tier 3.1 (the key-rotation runbook) is **blocked by Tier 2** —
 you can't write a rotation story for a key model that's about to
 change.
 
-## Tier 3 — productionize (former Tier 2)  *(shipped: 3.1 + 3.2; 3.3 shipped earlier)*
+## Tier 3 — productionize (former Tier 2)  *(shipped: 3.1 + 3.2 + 3.4; 3.3 shipped earlier)*
 
 ### 3.1 Ops runbook  *(shipped: `docs/ops-runbook.md`)*
 Deployment, **backups** (single-node Postgres, ADR 0007),
@@ -174,6 +174,20 @@ makes the **usage-based** SPEC §10 triggers (below) measurable rather
 than guesswork. Cheap, high-signal; pair with §1.1 (which covers the
 retrieval-quality triggers). *(Add the §12 counters: writes per fleet,
 trust-level distribution, pending-agent count, revoked-key count.)*
+
+### 3.4 Kubernetes + GitLab CI/CD deployment story  *(shipped: `DEPLOY.md`, `deploy/kubernetes/`, `.gitlab-ci.yml`, `.env.example`)*
+A production deployment story: **one generic image** (runner selected by
+`HIVEMIND_RUNNER` — api / mcp-http / migrate / keys), a plain-YAML
+**kustomize** manifest tree (two 1-replica Deployments — ADR 0007 — with a
+migrate initContainer; optional nginx + cert-manager Ingress with SSE
+tuning), a **GitLab pipeline** (test on pgvector → docker build/push →
+deploy via the pre-configured GitLab Kubernetes agent, with an idempotent
+**first-run key bootstrap** that lands the admin/org keys in the k8s
+Secret), a local-dev **`.env` quickstart** (`.env.example` + `env_file`
+support), and `hivemind-keys revoke-admin` (admin-key rotation is now
+CLI-native). ADR 0007's single-node decision is unchanged by k8s
+hosting (1 replica, no HA); the single-node ops story stays in
+`docs/ops-runbook.md` (one source of truth per concern).
 
 ## Tier 4 — close the spec's open items (SPEC §11) (former Tier 3)
 

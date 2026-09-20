@@ -41,6 +41,10 @@ make mcp-http-down  # stop the mcp-http Docker service
 make mcp-http-dev   # run the same runner as a local process instead of Docker (HIVEMIND_HOST/HIVEMIND_PORT)
 ```
 
+Local config is a copy of the template — `cp .env.example .env` — and edit
+(`.env` is git-ignored; real environment variables always win over `.env` values, so
+the file only ever supplies local defaults):
+
 Configuration is via `HIVEMIND_*` environment variables (see `src/hivemind/config.py`):
 `HIVEMIND_DATABASE_URL` (default `postgresql://hivemind:hivemind@localhost:5432/hivemind`),
 `HIVEMIND_EMBEDDING_ENDPOINT` / `HIVEMIND_EMBEDDING_API_KEY` / `HIVEMIND_EMBEDDING_MODEL` /
@@ -168,6 +172,18 @@ against the `credentials` table, so `hivemind-keys revoke --name <agent>` takes 
 immediately (no restart). Use `hivemind-mcp-pg` (per-agent) for a few
 agents on one box; use `hivemind-mcp-http` (hostable) when many agents
 share one machine or when you want immediate revocation.
+
+## Production deployment
+
+The production story is **Kubernetes + GitLab CI/CD** (one generic image,
+kustomize manifests, a test→build→deploy pipeline with a first-run key
+bootstrap): see **[DEPLOY.md](DEPLOY.md)** for the prerequisites, the
+operator checklist, the key-rotation reference, and the manual steps.
+In short: a Postgres with pgvector, an OpenAI-compatible embedding
+endpoint (vLLM or similar), and — optionally — a chat endpoint for
+entity extraction (ADR 0016; off by default) are all the deployer
+provides; everything else (migrations, image build, secret rendering,
+first-run key generation, rollouts) is automated by the pipeline.
 
 ## Status
 
