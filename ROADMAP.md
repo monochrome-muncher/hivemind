@@ -175,19 +175,21 @@ than guesswork. Cheap, high-signal; pair with §1.1 (which covers the
 retrieval-quality triggers). *(Add the §12 counters: writes per fleet,
 trust-level distribution, pending-agent count, revoked-key count.)*
 
-### 3.4 Kubernetes + GitLab CI/CD deployment story  *(shipped: `DEPLOY.md`, `deploy/kubernetes/`, `.gitlab-ci.yml`, `.env.example`)*
+### 3.4 Kubernetes + GitLab CI/CD deployment story  *(shipped: `DEPLOY.md`, `deploy/kubernetes/`, `.gitlab-ci.yml`, `config/` env-profile quickstart)*
 A production deployment story: **one generic image** (runner selected by
-`HIVEMIND_RUNNER` — api / mcp-http / migrate / keys), a plain-YAML
-**kustomize** manifest tree (two 1-replica Deployments — ADR 0007 — with a
-migrate initContainer; optional nginx + cert-manager Ingress with SSE
-tuning), a **GitLab pipeline** (test on pgvector → docker build/push →
-deploy via the pre-configured GitLab Kubernetes agent, with an idempotent
-**first-run key bootstrap** that lands the admin/org keys in the k8s
-Secret), a local-dev **`.env` quickstart** (`.env.example` + `env_file`
-support), and `hivemind-keys revoke-admin` (admin-key rotation is now
-CLI-native). ADR 0007's single-node decision is unchanged by k8s
-hosting (1 replica, no HA); the single-node ops story stays in
-`docs/ops-runbook.md` (one source of truth per concern).
+`HIVEMIND_RUNNER` — api / mcp-http / migrate / keys; the entrypoint owns
+the idempotent migration pre-step — ADR 0018), a plain-YAML
+**kustomize** manifest tree (two 1-replica Deployments — ADR 0007 — with
+unauthenticated probe endpoints — ADR 0019; optional nginx + cert-manager
+Ingress with SSE tuning), a **GitLab pipeline** (test on pgvector →
+docker build/push → deploy via the pre-configured GitLab Kubernetes
+agent, with an idempotent **first-run key bootstrap** that lands the
+admin/org keys in the k8s Secret), environment-profile files
+(`config/.env.example` + `ENVIRONMENT` selection — ADR 0017), and
+`hivemind-keys revoke-admin` (admin-key rotation is now CLI-native).
+ADR 0007's single-node decision is unchanged by k8s hosting (1 replica,
+no HA); the single-node ops story stays in `docs/ops-runbook.md`
+(one source of truth per concern).
 
 ## Tier 4 — close the spec's open items (SPEC §11) (former Tier 3)
 

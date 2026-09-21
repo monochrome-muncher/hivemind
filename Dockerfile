@@ -4,7 +4,7 @@
 # HIVEMIND_RUNNER env var (api | mcp-http | migrate | keys) and execs
 # the matching console script, forwarding any extra args. All
 # configuration (DSN, embedder endpoint, host, port, retrieval knobs)
-# is supplied at runtime via HIVEMIND_* env vars — see .env.example
+# is supplied at runtime via HIVEMIND_* env vars — see config/.env.example
 # and DEPLOY.md for the full surface.
 #
 #   HIVEMIND_RUNNER=api        REST surface (hivemind-api)
