@@ -101,7 +101,7 @@ make migrate
 
 | Signal | How |
 |---|---|
-| Liveness / readiness | `GET /v1/health` (public) — `{"status":"ok"}` |
+| Liveness / readiness | Unauthenticated probe endpoints (ADR 0019), all public: `GET /v1/liveness` (shallow — 200 whenever the process answers), `GET /v1/health` (static 200, public by design — SPEC §5.1), `GET /mcp/liveness` (shallow), `GET /mcp/health` (deep — 200 only when the Postgres pool answers, else 503) |
 | Usage / counters | `GET /v1/metrics` (admin-gated) — entries / fleets / agents counters (ROADMAP §3.3) |
 | Schema drift | `schema_migrations.version` (ADR 0013) — the applied schema generation |
 | Postgres health | the `postgres` service healthcheck (`pg_isready`); `docker compose ps` |
