@@ -34,7 +34,7 @@ import sys
 
 import asyncpg
 
-from hivemind.config import Settings
+from hivemind.config import load_settings
 from hivemind.store.auth import key_hash
 
 _ISSUE_ADMIN = "INSERT INTO credentials (key_hash, kind, user_id) VALUES ($1, 'admin', $2)"
@@ -166,7 +166,7 @@ def main() -> None:
     revoke.add_argument("--name", required=True)
 
     args = parser.parse_args()
-    dsn = Settings().database_url
+    dsn = load_settings().database_url
     if args.cmd == "issue-admin":
         print(asyncio.run(_issue_admin(dsn)))
     elif args.cmd == "issue-agent":

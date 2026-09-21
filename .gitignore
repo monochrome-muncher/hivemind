@@ -13,7 +13,13 @@ venv/
 .pytest_cache/
 
 # Local data
+# Environment profile files (ADR 0017): the tracked master template is
+# config/.env.example; the per-environment copies are operator data.
 .env
+.env.local
+.env.production
+.env.staging
+.env.test
 *.db
 *.sqlite3
 

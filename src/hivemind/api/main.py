@@ -15,7 +15,7 @@ import uvicorn
 from fastapi import FastAPI
 
 from hivemind.api.deps import HivemindApp, create_app
-from hivemind.config import SearchConfig, Settings
+from hivemind.config import SearchConfig, Settings, load_settings
 from hivemind.ports import Authenticator, Embedder, Extractor, Store
 from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService, WriteService
@@ -88,7 +88,7 @@ def create_app_from_settings(
 
 def run() -> None:
     """Console entry point (``hivemind-api``): serve the REST surface."""
-    settings = Settings()
+    settings = load_settings()
     fastapi_app = create_app_from_settings(settings)
     uvicorn.run(
         fastapi_app,

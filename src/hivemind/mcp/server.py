@@ -28,7 +28,7 @@ from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 
-from hivemind.config import Settings
+from hivemind.config import load_settings
 from hivemind.extractor import build_extractor
 from hivemind.mcp.app import (
     McpHivemind,
@@ -270,7 +270,7 @@ def build_server(
 
 def main() -> None:
     """Build a self-contained dev stdio server and run the transport."""
-    settings = Settings()
+    settings = load_settings()
     store = MemoryStore()
     embedder = LocalEmbedder(dimension=settings.embedding_dim)
     extractor = build_extractor(settings)  # optional (ADR 0016): None when the endpoint is unset
@@ -328,7 +328,7 @@ def main_pg() -> None:
     from hivemind.extractor import build_extractor
     from hivemind.store import build_authenticator, build_store
 
-    settings = Settings()
+    settings = load_settings()
     raw_key = os.environ.get("HIVEMIND_MCP_KEY", "").strip()
     if not raw_key:
         raise SystemExit(_mcp_key_missing_hint())

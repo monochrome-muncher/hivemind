@@ -207,3 +207,9 @@ _Avoid_: DB version, migration cursor, schema fingerprint
 **Usage counters**:
 The minimal operational metrics surface (`GET /v1/metrics`, admin-gated): entries / fleets / agents counters (trust-level distribution, writes per fleet, pending-agent count) that make the SPEC §10 usage-based triggers measurable rather than guesswork (ROADMAP §3.3).
 _Avoid_: analytics, telemetry (that is the broader §10 story), dashboards (a UI is a non-goal, SPEC §9)
+
+### Configuration (ADR 0017)
+
+**Environment profile**:
+The per-environment dotenv file selected by the `ENVIRONMENT` env var (`production` → `.env.production`, `staging` → `.env.staging`, `test` → `.env.test`, anything else / unset → `.env.local` — ADR 0017). Real env vars always win over file values; a missing file is silently ignored (the Kubernetes / CI posture: values come from env / Secrets, no file present).
+_Avoid_: env file, dotenv (the bare `.env` is retired), environment config (that is the env vars themselves)

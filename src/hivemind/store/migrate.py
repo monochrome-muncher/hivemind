@@ -31,7 +31,7 @@ from pathlib import Path
 
 import asyncpg
 
-from hivemind.config import Settings
+from hivemind.config import load_settings
 
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
@@ -233,7 +233,7 @@ async def current_schema_version(dsn: str) -> str | None:
 
 def main() -> None:
     """Console entry point (``hivemind-migrate``): migrate from settings."""
-    settings = Settings()
+    settings = load_settings()
     try:
         asyncio.run(migrate(settings.database_url, settings.embedding_dim))
     except RuntimeError as exc:
