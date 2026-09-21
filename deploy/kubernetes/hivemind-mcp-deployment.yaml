@@ -27,20 +27,12 @@ spec:
         app.kubernetes.io/name: hivemind
         app.kubernetes.io/component: mcp
     spec:
-      # Idempotent schema migration (ADR 0013) before every pod start; a dim
-      # mismatch (ADR 0015) makes this init container fail loudly — the pod
-      # never starts (desired posture).
-      initContainers:
-        - name: migrate
-          image: hivemind:0.0.0
-          envFrom:
-            - configMapRef:
-                name: hivemind-config
-            - secretRef:
-                name: hivemind-secrets
-          env:
-            - name: HIVEMIND_RUNNER
-              value: "migrate"
+      # The image entrypoint runs the idempotent schema migration (ADR 0013)
+      # before starting the runner (ADR 0018 — no init container: single
+      # source of truth). A dim mismatch (ADR 0015) or an unreachable DB
+      # fails the first entrypoint step LOUDLY: the pod never serves
+      # (crash-loops until the DB is up — the desired posture; no retry in
+      # the entrypoint, the pod restart policy owns recovery).
       containers:
         - name: app
           image: hivemind:0.0.0
@@ -61,39 +53,21 @@ spec:
           ports:
             - name: http
               containerPort: 8088
-          # Readiness/liveness mirror the docker-compose healthcheck EXACTLY
-          # (see docker-compose.yaml): an UNAUTHENTICATED GET /mcp answers
-          # HTTP 401 when the whole stack (uvicorn + the auth middleware) is
-          # up and serving; a connection refusal or any other code means the
-          # process is not ready yet. So: 401 == healthy (by design),
-          # 200/other == not ready.
+          # Unauthenticated probe endpoints (ADR 0019): /mcp/liveness is
+          # shallow (200 = the process answers); /mcp/health is deep (200
+          # only when the DB pool answers, else 503 — a transient DB
+          # outage marks the pod NotReady without restarting it). Probes
+          # carry no credential: these paths are served outside the auth
+          # middleware.
           livenessProbe:
-            exec:
-              command:
-                - python
-                - -c
-                - |
-                  import urllib.request, urllib.error, sys
-                  try:
-                      urllib.request.urlopen('http://127.0.0.1:8088/mcp', timeout=3)
-                  except urllib.error.HTTPError as e:
-                      sys.exit(0 if e.code == 401 else 1)
-                  except Exception:
-                      sys.exit(1)
+            httpGet:
+              path: /mcp/liveness
+              port: 8088
             initialDelaySeconds: 5
             periodSeconds: 10
           readinessProbe:
-            exec:
-              command:
-                - python
-                - -c
-                - |
-                  import urllib.request, urllib.error, sys
-                  try:
-                      urllib.request.urlopen('http://127.0.0.1:8088/mcp', timeout=3)
-                  except urllib.error.HTTPError as e:
-                      sys.exit(0 if e.code == 401 else 1)
-                  except Exception:
-                      sys.exit(1)
+            httpGet:
+              path: /mcp/health
+              port: 8088
             initialDelaySeconds: 3
             periodSeconds: 5

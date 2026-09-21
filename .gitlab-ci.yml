@@ -173,8 +173,8 @@ deploy:
                     - |
                       set -e
                       # A FRESH database has no schema yet (the Deployments'
-                      # initContainers only start later, in step 3): run the
-                      # idempotent migration (ADR 0013) first so the
+                      # entrypoints only run it in step 4, after this Job):
+                      # run the idempotent migration (ADR 0013) first so the
                       # credentials table exists; on an existing DB this is
                       # a cheap no-op re-apply.
                       hivemind-migrate
@@ -199,9 +199,9 @@ deploy:
     - kubectl kustomize build deploy/kubernetes \
         | sed "s|hivemind:0.0.0|$IMAGE|g" \
         | kubectl -n hivemind apply -f -
-    # 4) Wait for both rollouts (each pod's initContainer runs the
-    #    idempotent migration first — a dim mismatch (ADR 0015) blocks the
-    #    rollout LOUDLY here, never a silent runtime no-op).
+    # 4) Wait for both rollouts (each pod's entrypoint runs the
+    #    idempotent migration first (ADR 0018) — a dim mismatch (ADR 0015)
+    #    blocks the rollout LOUDLY here, never a silent runtime no-op).
     - kubectl -n hivemind rollout status deployment/hivemind-api --timeout=300s
     - kubectl -n hivemind rollout status deployment/hivemind-mcp --timeout=300s
     # KUBECTL AUTH: the GitLab Kubernetes agent (pre-configured per org)
