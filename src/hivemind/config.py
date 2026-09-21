@@ -12,6 +12,7 @@ tuning retrieval is a config change, not a code change.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -47,14 +48,16 @@ class SearchConfig:
 class Settings(BaseSettings):
     """Environment-driven service settings (HIVEMIND_* env vars).
 
-    A local ``.env`` file is honored when present (the local-dev
-    quickstart: ``cp .env.example .env``, DEPLOY.md §2); real
-    environment variables always win over ``.env`` values, and a
+    The class default reads the ``.local`` profile file (``.env.local``)
+    when present — the fallback profile (ADR 0017); ``load_settings()``
+    selects the active profile from the ``ENVIRONMENT`` env var instead.
+    Real environment variables always win over file values, and a
     missing file is silently ignored, so Kubernetes / CI (where the
-    values come from env / Secrets) are unaffected.
+    values come from env / Secrets and no profile file exists) are
+    unaffected.
     """
 
-    model_config = SettingsConfigDict(env_prefix="HIVEMIND_", extra="ignore", env_file=".env")
+    model_config = SettingsConfigDict(env_prefix="HIVEMIND_", extra="ignore", env_file=".env.local")
 
     database_url: str = "postgresql://hivemind:hivemind@localhost:5432/hivemind"
     embedding_endpoint: str = "http://localhost:8001/v1"
@@ -110,3 +113,43 @@ class Settings(BaseSettings):
             quality_min=self.quality_min,
             quality_max=self.quality_max,
         )
+
+
+# Environment profile files (ADR 0017): the ``ENVIRONMENT`` env var
+# selects which per-environment dotenv file ``load_settings`` reads.
+# Real env vars always win over file values, and a missing file is
+# silently ignored — so Kubernetes / CI (no profile file present)
+# is unaffected.
+_ENV_FILES = {
+    "production": ".env.production",
+    "staging": ".env.staging",
+    "test": ".env.test",
+}
+_DEFAULT_ENV_FILE = ".env.local"
+
+
+def env_file_for(environment: str | None) -> str:
+    """The profile file for an ``ENVIRONMENT`` value (ADR 0017).
+
+    ``production`` / ``staging`` / ``test`` map to their profile file;
+    anything else (including unset / empty) maps to the ``.local``
+    fallback. Case- and whitespace-insensitive.
+    """
+    key = (environment or "").strip().lower()
+    return _ENV_FILES.get(key, _DEFAULT_ENV_FILE)
+
+
+def load_settings() -> Settings:
+    """Build ``Settings`` for the active environment profile (ADR 0017).
+
+    Reads the ``ENVIRONMENT`` env var at call time and loads the
+    matching profile file: ``production`` → ``.env.production``,
+    ``staging`` → ``.env.staging``, ``test`` → ``.env.test``, anything
+    else (or unset) → ``.env.local``. Real ``HIVEMIND_*`` env vars
+    always win over file values; a missing file is silently ignored
+    (the Kubernetes / CI posture: values come from env / Secrets).
+    """
+    # pydantic-settings' per-instance dotenv override (`_env_file`) is a
+    # documented init parameter (runtime-verified) but missing from its
+    # mypy stubs — a targeted ignore, not a type hole.
+    return Settings(_env_file=env_file_for(os.environ.get("ENVIRONMENT")))  # type: ignore[call-arg]

@@ -30,7 +30,7 @@ from contextvars import ContextVar
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from hivemind.config import Settings
+from hivemind.config import Settings, load_settings
 from hivemind.mcp.app import McpHivemind
 from hivemind.mcp.server import build_server
 from hivemind.ports import Authenticator, Credential, Embedder, Store
@@ -175,7 +175,7 @@ def main_http() -> None:
     from hivemind.embeddings import build_embedder
     from hivemind.store import build_authenticator, build_store
 
-    settings = Settings()
+    settings = load_settings()
     store = build_store(settings)
     embedder = build_embedder(settings)
     authenticator = build_authenticator(settings)
