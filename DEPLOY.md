@@ -49,10 +49,12 @@ is the single source of truth for secrets).
 
 The 5-step operator flow:
 
-1. **Local dev** — `cp .env.example .env` (the app reads `.env` via
-   pydantic-settings `env_file`; see the `.env.example` file for every
-   `HIVEMIND_*` knob). Production ignores `.env` — values come from the
-   ConfigMap + Secret.
+1. **Local dev** — `cp config/.env.example .env.local` (the master
+   template is `config/.env.example`; the profile files — `.env.local`,
+   `.env.staging`, `.env.production`, `.env.test` — are selected by the
+   `ENVIRONMENT` env var (ADR 0017), and real environment variables always
+   win over file values). Production/k8s never reads a profile file —
+   values come from the ConfigMap + Secret.
 2. **Set the three masked GitLab variables** (`K8S_SECRET_DATABASE_URL`,
    `K8S_SECRET_EMBEDDING_API_KEY`, `K8S_SECRET_EXTRACTOR_API_KEY`) + the
    `K8S_IMAGE` variable (GitLab → Settings → CI/CD → Variables).
@@ -98,8 +100,9 @@ The 5-step operator flow:
 
 **What is automatic** (never do these by hand):
 
-- Schema migration — the `migrate` **initContainer** on every pod start
-  (idempotent, ADR 0013; a dim mismatch fails LOUDLY, ADR 0015).
+- Schema migration — the **entrypoint's** idempotent `hivemind-migrate`
+  pre-step on every pod start (ADR 0018 — single source of truth;
+  idempotent, ADR 0013; a dim mismatch fails LOUDLY, ADR 0015).
 - Image build + push (build stage).
 - Rendering of `hivemind-secrets` from the `K8S_SECRET_*` variables
   (deploy job, every deploy).
@@ -193,12 +196,12 @@ failure undiagnosable).
 
 ## 5. Upgrades
 
-- Deploys are **forward-only + idempotent** (ADR 0013); the migrate
-  initContainer runs on every pod start — a normal deploy is just a new
-  image tag.
+- Deploys are **forward-only + idempotent** (ADR 0013); the image
+  entrypoint runs the idempotent migration on every pod start (ADR 0018)
+  — a normal deploy is just a new image tag.
 - A **dim mismatch is a LOUD failure at pod startup** (ADR 0015): the
-  initContainer's `hivemind-migrate` exits non-zero naming both dims and
-  both fixes — the pod never starts, never a silent no-op.
+  entrypoint's `hivemind-migrate` step exits non-zero naming both dims
+  and both fixes — the pod never starts, never a silent no-op.
 - Changing the embedding **model/dim** is an operator migration (new
   pool or re-embedding — ADR 0005), never a config flip.
 - If `schema_migrations` lags the deployed `SCHEMA_VERSION` (e.g. pods
@@ -211,6 +214,18 @@ failure undiagnosable).
     --env-from=secret/hivemind-secrets
   ```
 
+### Probe endpoints (ADR 0019)
+
+Four **unauthenticated** orchestrator endpoints (served outside the
+auth middleware — k8s probes carry no credential):
+
+| Endpoint | Depth | Semantics |
+|---|---|---|
+| `GET /mcp/liveness` (mcp runner) | shallow | 200 whenever the process answers |
+| `GET /mcp/health` (mcp runner) | deep | 200 only when the Postgres pool answers; else 503 (a transient DB outage marks the pod NotReady without restarting it) |
+| `GET /v1/liveness` (REST API) | shallow | 200 whenever the process answers |
+| `GET /v1/health` (REST API) | static | unchanged — static 200, public by design (SPEC §5.1); the REST surface intentionally has no deep DB probe in v1 |
+
 ---
 
 ## 6. Troubleshooting
@@ -218,7 +233,7 @@ failure undiagnosable).
 | Symptom | Cause | Fix |
 |---|---|---|
 | 401 on every agent call | wrong/stale org key (e.g. after a rotation that wasn't distributed) | re-fetch `ORG_KEY` from the `hivemind-keys` Secret; §4.1 |
-| `migrate` initContainer CrashLooping | dim mismatch (ADR 0015) — the log names both dims + both fixes | `make pg-reset` equivalent (fresh pool) or set `HIVEMIND_EMBEDDING_DIM` to the pool's dim |
+| app container CrashLooping on the entrypoint's migrate pre-step | dim mismatch (ADR 0015) — the log names both dims + both fixes | `make pg-reset` equivalent (fresh pool) or set `HIVEMIND_EMBEDDING_DIM` to the pool's dim |
 | MCP session drops after ~60s | nginx default `proxy-read-timeout` killing the SSE stream (classic pitfall) | apply the opt-in Ingress with the SSE annotations (`deploy/kubernetes/optional/ingress.yaml`) |
 | entries have empty `entities` | extractor off (empty endpoint — by design) OR extractor dead (best-effort, ADR 0016) | check `HIVEMIND_EXTRACTOR_ENDPOINT` + `K8S_SECRET_EXTRACTOR_API_KEY`; §4.6 |
 | writes failing with `EmbeddingError` | embedder dead (ADR 0014 retry budget exhausted) | §4.5 |

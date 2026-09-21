@@ -26,21 +26,12 @@ spec:
         app.kubernetes.io/name: hivemind
         app.kubernetes.io/component: api
     spec:
-      # Idempotent schema migration (ADR 0013) runs before every pod start.
-      # A dim mismatch (ADR 0015) fails LOUDLY in this init container by
-      # design — the pod never starts, which is the desired posture: a
-      # misconfigured dim is never a silent runtime no-op.
-      initContainers:
-        - name: migrate
-          image: hivemind:0.0.0
-          envFrom:
-            - configMapRef:
-                name: hivemind-config
-            - secretRef:
-                name: hivemind-secrets
-          env:
-            - name: HIVEMIND_RUNNER
-              value: "migrate"
+      # The image entrypoint runs the idempotent schema migration (ADR 0013)
+      # before starting the runner (`hivemind-api`) (ADR 0018 — no init
+      # container: single source of truth). A dim mismatch (ADR 0015) or an
+      # unreachable DB fails the first entrypoint step LOUDLY: the pod never
+      # serves (crash-loops until the DB is up — the desired posture; no
+      # retry in the entrypoint, the pod restart policy owns recovery).
       containers:
         - name: app
           image: hivemind:0.0.0
@@ -60,16 +51,19 @@ spec:
           ports:
             - name: http
               containerPort: 8000
-          # Liveness/readiness: GET /v1/health is a STATIC 200 (no DB check —
-          # SPEC §5.1 liveness, public by design). A deeper readiness probe
-          # would need a DB-ping endpoint, which is out of scope for v1; the
-          # migrate init container already guarantees the schema before start.
+          # Unauthenticated probe endpoints (ADR 0019): /v1/liveness is
+          # shallow (200 = the process answers). Probes carry no credential:
+          # these paths are served outside the auth middleware.
           livenessProbe:
             httpGet:
-              path: /v1/health
+              path: /v1/liveness
               port: 8000
             initialDelaySeconds: 5
             periodSeconds: 10
+          # Readiness: /v1/health is a STATIC 200 (public by design, SPEC
+          # §5.1 — the REST surface has no deep DB-probe endpoint in v1: a
+          # DB outage shows as request errors, not NotReady). The deep DB
+          # probe lives on the MCP runner (/mcp/health, ADR 0019).
           readinessProbe:
             httpGet:
               path: /v1/health
