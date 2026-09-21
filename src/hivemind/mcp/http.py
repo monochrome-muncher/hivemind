@@ -124,6 +124,76 @@ class BearerAuthMiddleware:
             _current_credential.reset(token)
 
 
+# The unauthenticated orchestrator probe paths (ADR 0019). Served by the
+# ``ProbeRouter`` BELOW the (outermost) layer — i.e. OUTSIDE the auth
+# middleware — because k8s/compose probes carry no API key.
+_PROBE_LIVENESS = "/mcp/liveness"
+_PROBE_HEALTH = "/mcp/health"
+
+
+class ProbeRouter:
+    """Unauthenticated orchestrator probe endpoints (ADR 0019).
+
+    Wraps the (auth-wrapped) MCP app and answers two GET paths BEFORE
+    the auth middleware ever sees them:
+
+    * ``GET /mcp/liveness`` — shallow: 200 ``{"status": "ok"}`` whenever
+      the process answers (no dependency checks).
+    * ``GET /mcp/health`` — deep: 200 only when ``store.health_check()``
+      answers (the Postgres pool is up); 503 ``{"status": "unhealthy",
+      "detail": "database unreachable"}`` otherwise.
+
+    Everything else (the ``/mcp`` MCP transport surface, non-GET
+    methods, non-HTTP scopes like ``lifespan``) is delegated untouched
+    so the MCP app's session management and the auth middleware are
+    unaffected.
+    """
+
+    def __init__(self, app: ASGIApp, store: Store) -> None:
+        self._app = app
+        self._store = store
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if (
+            scope.get("type") == "http"
+            and scope.get("method") == "GET"
+            and scope.get("path") in (_PROBE_LIVENESS, _PROBE_HEALTH)
+        ):
+            await self._serve_probe(scope["path"], send)
+            return
+        await self._app(scope, receive, send)
+
+    async def _serve_probe(self, path: str, send: Send) -> None:
+        if path == _PROBE_LIVENESS:
+            await _send_json(send, 200, {"status": "ok"})
+            return
+        healthy = await self._store.health_check()
+        if healthy:
+            await _send_json(send, 200, {"status": "ok"})
+        else:
+            await _send_json(
+                send,
+                503,
+                {"status": "unhealthy", "detail": "database unreachable"},
+            )
+
+
+async def _send_json(send: Send, status: int, payload: dict[str, str]) -> None:
+    """A minimal ASGI JSON response (the probe endpoints are fire-and-forget)."""
+    body = json.dumps(payload).encode()
+    await send(
+        {
+            "type": "http.response.start",
+            "status": status,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode()),
+            ],
+        }
+    )
+    await send({"type": "http.response.body", "body": body})
+
+
 def build_http_app(
     settings: Settings,
     store: Store,
@@ -156,7 +226,10 @@ def build_http_app(
     server = build_server(template, credential_provider=make_credential_provider())
     host = os.environ.get("HIVEMIND_HOST", "0.0.0.0")
     mcp_app = server.streamable_http_app(stateless_http=True, host=host)
-    return BearerAuthMiddleware(mcp_app, authenticator)
+    # Outermost layer: the unauthenticated probe router (ADR 0019) wraps
+    # the auth-wrapped MCP app, so the k8s/compose probes are answered
+    # without any API key while the MCP surface stays fully protected.
+    return ProbeRouter(BearerAuthMiddleware(mcp_app, authenticator), store)
 
 
 def main_http() -> None:

@@ -181,6 +181,13 @@ class Store(Protocol):
         """Batched feedback counts for a set of entries."""
         ...
 
+    async def health_check(self) -> bool:
+        """Deep liveness probe (ADR 0019): True when the pool is up and
+        answering, False when it is unreachable. Used by the
+        unauthenticated probe endpoints — it must never raise.
+        """
+        ...
+
 
 @runtime_checkable
 class Embedder(Protocol):

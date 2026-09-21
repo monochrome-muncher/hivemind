@@ -254,6 +254,10 @@ class MemoryStore:
                 eid: _count_for(self._feedback, eid) for eid in entry_ids if eid in self._entries
             }
 
+    async def health_check(self) -> bool:
+        """In-memory pool: always healthy (ADR 0019)."""
+        return True
+
     # -- fleets (ADR 0011) --------------------------------------------------
 
     async def create_fleet(self, name: str) -> Fleet:
