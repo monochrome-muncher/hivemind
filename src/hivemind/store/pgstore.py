@@ -608,6 +608,22 @@ class PgStore:
         assert row is not None
         return _row_to_agent(row)
 
+    # -- orchestrator probes (ADR 0019) ---------------------------------------
+
+    async def health_check(self) -> bool:
+        """Deep liveness probe (ADR 0019): True when the pool is up and
+        answering a ``SELECT 1``, False when it is unreachable or has
+        dropped the connection. The probe must never raise — the 503
+        from the probe endpoint is the orchestrator-facing signal.
+        """
+        try:
+            pool = await self._ensure_pool()
+            async with pool.acquire() as conn:
+                await conn.fetchval("SELECT 1")
+            return True
+        except Exception:
+            return False
+
 
 # --- mappers --------------------------------------------------------------------
 

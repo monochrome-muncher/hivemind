@@ -123,6 +123,13 @@ class TestHealth:
         assert resp.status_code == 200
         assert resp.json() == {"status": "ok"}
 
+    async def test_liveness_is_public_and_shallow(self) -> None:
+        client = make_client(make_hivemind_app())
+        async with client:
+            resp = await client.get("/v1/liveness")
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "ok"}
+
 
 class TestAuth:
     async def test_missing_key_is_401(self) -> None:

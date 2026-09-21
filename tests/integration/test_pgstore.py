@@ -377,3 +377,22 @@ async def test_create_entry_records_embedding_model(pg) -> None:
     reloaded = await store.get_entry(entry.id)
     assert reloaded is not None
     assert reloaded.embedding_model == "test-model"
+
+
+# --- orchestrator probes (ADR 0019) -------------------------------------------
+
+
+async def test_health_check_is_true_against_a_live_pool(pg) -> None:
+    store, _auth, _dim = pg
+    assert await store.health_check() is True
+
+
+async def test_health_check_is_false_on_an_unreachable_pool() -> None:
+    """Hermetic (no DB needed): a store pointed at a dead DSN reports
+    unhealthy instead of raising — the 503 path of the probe endpoint
+    (ADR 0019)."""
+    store = PgStore("postgresql://hivemind:hivemind@localhost:59999/hivemind")
+    try:
+        assert await store.health_check() is False
+    finally:
+        await store.close()

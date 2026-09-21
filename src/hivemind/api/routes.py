@@ -70,6 +70,15 @@ def build_router(app: HivemindApp) -> APIRouter:
         """Liveness/readiness (public, no auth — SPEC.md §5.1)."""
         return HealthOut(status="ok")
 
+    @router.get("/liveness", response_model=HealthOut)
+    async def liveness() -> HealthOut:
+        """Shallow unauthenticated liveness probe (ADR 0019): 200 = the
+        process answers. Public by design — k8s liveness probes carry
+        no credential. (``/v1/health`` stays the static public 200 it
+        is today; the REST surface has no deep DB-probe endpoint in v1.)
+        """
+        return HealthOut(status="ok")
+
     @router.get("/metrics", response_model=MetricsOut)
     async def metrics(credential: require) -> MetricsOut:
         """Usage counters (ROADMAP §3.3, Tier 3). Admin-gated: the report
