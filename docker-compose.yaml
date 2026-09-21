@@ -96,19 +96,19 @@ services:
       vllm:
         condition: service_started
     healthcheck:
-      # A 401 from the auth middleware means the whole stack (uvicorn +
-      # the middleware) is up and serving; connection-refused means
-      # uvicorn has not bound yet. 8088 is the container port (fixed),
-      # so this works regardless of the host port mapping.
+      # The unauthenticated deep-probe endpoint (ADR 0019): 200 = uvicorn
+      # is up AND the DB pool answers; 503 = up but the DB is
+      # unreachable (degraded); connection-refused = uvicorn has not
+      # bound yet. 8088 is the container port (fixed), so this works
+      # regardless of the host port mapping.
       test:
         - CMD-SHELL
         - |
           python -c "
-          import urllib.request, urllib.error, sys
+          import urllib.request, sys
           try:
-              urllib.request.urlopen('http://127.0.0.1:8088/mcp', timeout=3)
-          except urllib.error.HTTPError as e:
-              sys.exit(0 if e.code == 401 else 1)
+              r = urllib.request.urlopen('http://127.0.0.1:8088/mcp/health', timeout=3)
+              sys.exit(0 if r.status == 200 else 1)
           except Exception:
               sys.exit(1)
           "
