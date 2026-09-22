@@ -342,6 +342,12 @@ class EntriesMetrics(BaseModel):
     # ROADMAP §4.5: is anyone actually setting ``importance``, or is
     # every entry riding the default?
     by_importance_source: dict[str, int] = {}
+    # ROADMAP §4.5's follow-on question: are agents using the three kinds
+    # consistently? Author -> that author's kind counts. Keyed by the
+    # registered agent roster, so an author who has written nothing is
+    # present with an empty mapping; zero kind counts are omitted, like
+    # ``by_scope`` / ``by_kind``.
+    by_author_kind: dict[str, dict[str, int]] = {}
 
 
 class FleetsMetrics(BaseModel):

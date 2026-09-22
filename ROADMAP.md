@@ -415,7 +415,15 @@ are §11 items — each says so.)*
   caller-supplied and a provenance field for it would be a constant.
   The question this was meant to unblock — "are agents using the three
   kinds consistently?" — is answered instead by a **per-author `kind`
-  distribution**, which is NOT built here.
+  distribution**, now *shipped* as `by_author_kind` on `GET /v1/metrics`
+  (`EntriesMetrics.by_author_kind`). It is keyed by the registered agent
+  roster rather than by a `DISTINCT` over `entries.author`, so an agent
+  who has written nothing is representable and the query count stays
+  bounded by the roster instead of by the pool. Building it surfaced a
+  latent defect it depended on: `EntryFilters.matches` compares `kind` by
+  identity, so a draft carrying the raw string `"fact"` was invisible to
+  a `kind=` filter — silently under-counting the existing `by_kind` too
+  (fixed in `EntryDraft.__post_init__`).
 - **4.6 The *form* of the recency term is mismatched to RRF's range.**
   *(**direction (a) is RESOLVED and SHIPPED — ADR 0022**: the recency
   factor is floored, `SearchConfig.recency_floor = 0.8` by default, and
