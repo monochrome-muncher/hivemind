@@ -21,11 +21,13 @@ import pytest
 
 from hivemind.config import Settings
 from hivemind.domain.entry import (
+    DEFAULT_PREFIX_TOKENS,
     EntityKind,
     EntryDraft,
     ExtractedEntity,
     Kind,
 )
+from hivemind.embeddings.openai_compat import OpenAICompatEmbedder
 from hivemind.extractor import (
     ExtractorError,
     OpenAICompatExtractor,
@@ -108,7 +110,7 @@ def make_extractor(
     base_url: str = BASE_URL,
     api_key: str = "sk-test",
     model_name: str = "qwen3.8-27b",
-    prefix_chars: int = 2048,
+    prefix_tokens: int = DEFAULT_PREFIX_TOKENS,
     retries: int = 2,
     backoff: float = 0.5,
     sleep=None,
@@ -118,11 +120,77 @@ def make_extractor(
         base_url=base_url,
         api_key=api_key,
         model_name=model_name,
-        prefix_chars=prefix_chars,
+        prefix_tokens=prefix_tokens,
         retries=retries,
         backoff=backoff,
         sleep=sleep,
     )
+
+
+class TestEmbedderExtractorLockstep:
+    """ADR 0016 / SPEC §13.1: extraction and embedding read the **same**
+    bounded text, from the one ``embedding_prefix_tokens`` budget.
+
+    This invariant was silently broken before ADR 0021: the extractor
+    honoured the setting, the embedder ignored it (it called the domain
+    helper with no bound argument), so the two diverged the moment anyone
+    moved the knob off its default. Nothing pinned it. This does.
+
+    The assertion is made on what actually went over the wire, for both
+    components built from **one** ``Settings`` object — so a call site
+    that drops the bound again fails here.
+    """
+
+    @staticmethod
+    def _draft() -> EntryDraft:
+        return EntryDraft(
+            kind=Kind.INSIGHT,
+            summary="pool exhausted",
+            author="alice",
+            agent="claude-code",
+            body="one two three four\n\nfive six seven eight nine ten",
+        )
+
+    async def test_both_read_identical_text_from_one_settings_object(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sent: dict[str, str] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            body = json.loads(request.content)
+            if request.url.path.endswith("/embeddings"):
+                sent["embedder"] = body["input"]
+                return httpx.Response(200, json={"data": [{"embedding": [0.1, 0.2, 0.3, 0.4]}]})
+            sent["extractor"] = body["messages"][1]["content"]
+            return httpx.Response(200, json={"choices": [{"message": {"content": "[]"}}]})
+
+        shared = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        # Both factories build their own client; hand them this one so the
+        # production wiring (``from_settings`` / ``build_extractor``) is what
+        # is under test, not a hand-assembled pair.
+        monkeypatch.setattr(httpx, "AsyncClient", lambda *args, **kwargs: shared)
+
+        settings = Settings(
+            embedding_endpoint="http://embed.test/v1",
+            embedding_dim=4,
+            embedding_prefix_tokens=6,
+            extractor_endpoint=BASE_URL,
+            extractor_model="qwen3.8-27b",
+        )
+        embedder = OpenAICompatEmbedder.from_settings(settings)
+        extractor = build_extractor(settings)
+        assert extractor is not None
+
+        draft = self._draft()
+        await embedder.embed_entry(draft)
+        await extractor.extract_entry(draft)
+        await shared.aclose()
+
+        assert sent["embedder"] == sent["extractor"]
+        # ...and the shared text is really the configured 6-word bound, so
+        # a regression where BOTH sides ignore the setting cannot pass by
+        # agreeing on the unbounded text.
+        assert sent["embedder"] == "pool exhausted\none two three four\n\nfive six"
 
 
 class TestBuildExtractor:
@@ -174,13 +242,14 @@ class TestExtractEntry:
 
     async def test_user_message_is_the_bounded_embeddable_text(self) -> None:
         """SPEC §13.1: the extractor sees the same text the embedder does
-        (summary + bounded body prefix via ``embedding_prefix_chars``)."""
+        (summary + bounded body prefix via ``embedding_prefix_tokens`` —
+        whitespace-delimited words, ADR 0021)."""
         env = MockEnv()
-        extractor = make_extractor(env, prefix_chars=8)
-        draft = make_draft("pool exhausted", body="x" * 50)
+        extractor = make_extractor(env, prefix_tokens=3)
+        draft = make_draft("pool exhausted", body="one two three four five six")
         await extractor.extract_entry(draft)
         user_message = env.last_body["messages"][1]["content"]
-        assert user_message == "pool exhausted\nxxxxxxxx"  # 8-char prefix bound
+        assert user_message == "pool exhausted\none two three"  # 3-word prefix bound
 
     async def test_auth_header_present_when_key_configured(self) -> None:
         env = MockEnv()

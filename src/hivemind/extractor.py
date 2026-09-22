@@ -16,7 +16,7 @@ The request shape follows the OpenAI chat-completions API:
     -> {"choices": [{"message": {"content": "[{...}, ...]"}}]}
 
 The user message is the *same bounded text the embedder sees* (the
-summary plus a bounded body prefix, ``embedding_prefix_chars`` — SPEC
+summary plus a bounded body prefix, ``embedding_prefix_tokens`` — SPEC
 §13.1), so extraction and embedding stay in lockstep.
 
 The model output is validated **all-or-nothing** (SPEC §13.1): the
@@ -46,7 +46,13 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from hivemind.config import Settings
-from hivemind.domain.entry import EntityKind, EntryDraft, ExtractedEntity, embeddable_text
+from hivemind.domain.entry import (
+    DEFAULT_PREFIX_TOKENS,
+    EntityKind,
+    EntryDraft,
+    ExtractedEntity,
+    embeddable_text,
+)
 
 if TYPE_CHECKING:
     from hivemind.ports import Extractor
@@ -110,7 +116,7 @@ class OpenAICompatExtractor:
         api_key: str,
         model_name: str,
         *,
-        prefix_chars: int = 2048,
+        prefix_tokens: int = DEFAULT_PREFIX_TOKENS,
         timeout: float = 30.0,
         retries: int = 2,
         backoff: float = 0.5,
@@ -129,9 +135,10 @@ class OpenAICompatExtractor:
                 string means no auth header is sent.
             model_name: The chat model identifier (recorded per entry
                 as ``entities_model``, ADR 0016).
-            prefix_chars: The bounded body prefix the extraction text is
-                cut at (SPEC §13.1: the same bound the embedder uses,
-                ``embedding_prefix_chars``).
+            prefix_tokens: The bounded body prefix the extraction text
+                is cut at, in whitespace-delimited words (SPEC §13.1:
+                the same bound the embedder uses,
+                ``embedding_prefix_tokens`` — ADR 0021).
             timeout: The request timeout used only when the extractor
                 builds its own client.
             retries: The number of retries (after the first attempt)
@@ -150,7 +157,7 @@ class OpenAICompatExtractor:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._model_name = model_name
-        self._prefix_chars = prefix_chars
+        self._prefix_tokens = prefix_tokens
         self._retries = retries
         self._backoff = backoff
         self._sleep = sleep if sleep is not None else _default_sleep
@@ -163,7 +170,7 @@ class OpenAICompatExtractor:
             base_url=settings.extractor_endpoint,
             api_key=settings.extractor_api_key,
             model_name=settings.extractor_model,
-            prefix_chars=settings.embedding_prefix_chars,
+            prefix_tokens=settings.embedding_prefix_tokens,
             timeout=settings.extractor_timeout,
             retries=settings.extractor_retries,
         )
@@ -187,7 +194,7 @@ class OpenAICompatExtractor:
         """Extract entity facets from the text an entry is written from
         (SPEC §13.1: the summary + bounded body prefix — the same text
         the embedder sees)."""
-        text = embeddable_text(draft.summary, draft.body, self._prefix_chars)
+        text = embeddable_text(draft.summary, draft.body, self._prefix_tokens)
         return await self._extract(text)
 
     async def aclose(self) -> None:

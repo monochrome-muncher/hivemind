@@ -171,7 +171,8 @@ A fresh, important, well-remembered entry beats a slightly-more-similar but stal
 
 ## 7. Embedding strategy (ADR 0005)
 
-- Generated **at write time**, server-side, from `summary` + a bounded prefix of `body` (default: first ~512 tokens of body).
+- Generated **at write time**, server-side, from `summary` (whole) + a bounded prefix of `body`.
+- **The body prefix is bounded in *prefix tokens* — whitespace-delimited words, not a model tokenizer's tokens** (`EMBEDDING_PREFIX_TOKENS`, default **2000** — ADR 0021). The cut is made at a word boundary and the body's own spacing (newlines, blank lines, indentation) is preserved up to it. ~2000 words is ~2600 model tokens, far under the endpoints' limits: the bound controls **dilution and cost**, not a model limit. The extractor reads this exact same text (§13.1) — one budget, both consumers.
 - Produced by an **OpenAI-compatible embeddings endpoint the org configures at deploy** (`EMBEDDING_ENDPOINT`, `EMBEDDING_API_KEY`, `EMBEDDING_MODEL`). A self-hosted vLLM/Ollama endpoint satisfies "data must not leave the org."
 - The store records `embedding_model` + dimension per entry. The vector column has a **fixed dimension at deploy time** (`EMBEDDING_DIM`, default 1024 — ADR 0015).
 - **A dim mismatch is a loud failure, never a silent assumption:** if the pool's `vector(:dim)` column differs from the configured dim, `migrate` fails with an actionable error (reset the pool, or set `EMBEDDING_DIM` to the pool's dim) — ADR 0015. The dim is a deploy-time decision (ADR 0005); it is never changed in place.
@@ -276,7 +277,7 @@ change behavior.
 2. **Exact FTS config** — resolved: **Postgres FTS** (`to_tsvector`); no true-BM25 extension in v1 (a BM25 extension is a drop-in upgrade, §6.2).
 3. **Pagination style** — resolved: **offset** (v1); cursor is a later extension.
 4. **`hive_list` default order** — resolved: **most-recent-first** (`created_at DESC, id DESC`), confirmed in the first implementation.
-5. **Embedding prefix length** — resolved: a bounded **~2048-char body prefix (≈ 512 tokens)** default; tune against real long-form entries in the §10 validation work (ROADMAP Tier 3).
+5. **Embedding prefix length** — resolved: a bounded **2000-prefix-token body prefix** default (`EMBEDDING_PREFIX_TOKENS`; a prefix token is a whitespace-delimited word, *not* a model tokenizer's token — ADR 0021). This supersedes the original ~2048-char (≈ 512-token) answer, which was both the wrong unit (chars per token varies 2–3x between prose and code) and, on the embedding side, an inert knob. The *unit and size* question is closed; **what** goes into the embedded text, and whether to chunk at all, stay open (ROADMAP §4.2).
 
 ## 12. Fleets, trust levels, and registration (v2 — ADRs 0011–0012)
 
@@ -329,7 +330,7 @@ This section supersedes the "no entity extraction" non-goal of §9 **for the fac
 
 ### 13.1 What is extracted
 
-* **At write time**, server-side, over the same text the embedder sees: `summary` + a bounded body prefix (`EMBEDDING_PREFIX_CHARS`).
+* **At write time**, server-side, over the same text the embedder sees: `summary` + a bounded body prefix (`EMBEDDING_PREFIX_TOKENS` — whitespace-delimited words, ADR 0021). One budget feeds both consumers, so raising it raises the extractor's LLM input per write in step (§7).
 * A fixed-prompt LLM call (`EXTRACTOR_MODEL` — a deploy-time decision, ADR 0016; e.g. a Qwen3-27B-class chat model on a *separate service* from the embeddings server).
 * **All-or-nothing, schema-validated output:** `entities` is a list of `{name, kind}` where `name` is open vocabulary (trimmed, non-empty, ≤ 128 chars) and `kind` is a **closed** vocabulary (`person | organization | system | service | artifact | concept`); ≤ 10 entities per entry, deduped. Any malformed output fails the call — no partial salvage.
 

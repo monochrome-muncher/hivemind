@@ -19,6 +19,7 @@ import pytest
 
 from hivemind.config import Settings
 from hivemind.domain.entry import (
+    DEFAULT_PREFIX_TOKENS,
     EntryDraft,
     Kind,
     Source,
@@ -70,6 +71,7 @@ def make_embedder(
     api_key: str = "sk-test",
     model_name: str = "fake-model",
     dim: int = 4,
+    prefix_tokens: int = DEFAULT_PREFIX_TOKENS,
     retries: int = 2,
     backoff: float = 0.5,
     sleep=None,
@@ -80,6 +82,7 @@ def make_embedder(
         api_key=api_key,
         model_name=model_name,
         dim=dim,
+        prefix_tokens=prefix_tokens,
         retries=retries,
         backoff=backoff,
         sleep=sleep,
@@ -276,7 +279,9 @@ class TestEmbedEntry:
             summary="cohort churn write-up",
             author="alice",
             agent="agent-1",
-            body="x" * 3000,  # longer than the 2048-char prefix
+            # 3000 whitespace-delimited words — longer than the default
+            # 2000-word prefix budget (ADR 0021).
+            body=" ".join(f"w{i}" for i in range(3000)),
         )
 
     async def test_sends_the_truncated_embeddable_text(self) -> None:
@@ -291,6 +296,60 @@ class TestEmbedEntry:
         assert len(expected) < len(draft.body or "")
         # The port method agrees with what was actually sent.
         assert embedder.entry_embeddable_text(draft) == expected
+
+
+class TestPrefixTokenBudget:
+    """ADR 0021: the body budget is ``prefix_tokens`` whitespace-delimited
+    words, threaded from ``Settings.embedding_prefix_tokens``.
+
+    Before ADR 0021 the embedder ignored the setting entirely (it called
+    the domain helper with no bound argument), so the knob moved entity
+    extraction and did nothing at all to embedding. These tests pin that
+    the knob reaches the wire.
+    """
+
+    @staticmethod
+    def _draft(body: str) -> EntryDraft:
+        return EntryDraft(
+            kind=Kind.INSIGHT,
+            summary="pool exhausted",
+            author="alice",
+            agent="agent-1",
+            body=body,
+        )
+
+    async def test_configured_budget_bounds_the_embedded_text(self) -> None:
+        env = MockEnv()
+        embedder = make_embedder(env, prefix_tokens=3)
+        await embedder.embed_entry(self._draft("one two three four five six"))
+        assert env.last_body["input"] == "pool exhausted\none two three"
+
+    async def test_budget_counts_words_not_characters(self) -> None:
+        """One very long word is ONE prefix token: a char budget would have
+        cut it, a word budget does not."""
+        env = MockEnv()
+        embedder = make_embedder(env, prefix_tokens=1)
+        await embedder.embed_entry(self._draft("x" * 5000))
+        assert env.last_body["input"] == "pool exhausted\n" + "x" * 5000
+
+    async def test_body_spacing_survives_the_cut(self) -> None:
+        """The cut preserves the body's own whitespace up to the cut point
+        (newlines and paragraph breaks are not collapsed)."""
+        env = MockEnv()
+        embedder = make_embedder(env, prefix_tokens=4)
+        await embedder.embed_entry(self._draft("alpha beta\n\ngamma   delta epsilon"))
+        assert env.last_body["input"] == "pool exhausted\nalpha beta\n\ngamma   delta"
+
+    def test_from_settings_threads_the_configured_budget(self) -> None:
+        """``from_settings`` must pass the setting through — the bug ADR
+        0021 fixes was exactly this call site omitting it."""
+        embedder = OpenAICompatEmbedder.from_settings(
+            Settings(embedding_endpoint=BASE_URL, embedding_prefix_tokens=2)
+        )
+        assert (
+            embedder.entry_embeddable_text(self._draft("one two three"))
+            == "pool exhausted\none two"
+        )
 
 
 class TestDimensionsField:
