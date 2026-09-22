@@ -25,8 +25,8 @@ A dated, checkable observation about the world (e.g., "the churn model uses week
 _Avoid_: claim, datum
 
 **Insight**:
-A long-form analysis or finding: a short summary plus a long body, optionally referencing artifacts.
-_Avoid_: report, deep-dive (in prose)
+An agent's interpretation or conclusion drawn from evidence, as distinct from the evidence itself. Written by the agent that reached it; the server never derives one.
+_Avoid_: report, deep-dive (in prose); long-form entry (any kind may have a long body); reflection, synthesis (a conclusion the *system* drew across entries is not in v1)
 
 **Decision**:
 A choice the organization (or a part of it) made, with its rationale.
