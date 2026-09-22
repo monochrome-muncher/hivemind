@@ -3,7 +3,10 @@
 # Stages: test -> build -> deploy
 #   test  : hermetic unit suite + Postgres-backed integration suite
 #           (pgvector service container; a DB probe fails LOUDLY so a
-#           skip-and-pass cannot masquerade as green)
+#           skip-and-pass cannot masquerade as green), plus the two
+#           migration gates (ADR 0020): the generated schema.sql
+#           reference is current, and the previous releases still work
+#           against HEAD's schema (expand-and-contract).
 #   build : docker build + push to the GitLab container registry
 #   deploy: kubectl apply via the pre-configured GitLab Kubernetes agent
 #
@@ -81,6 +84,50 @@ test:
     # unit tests, the Postgres-backed integration suite, and the retrieval
     # eval harness (tests/eval — the golden-set quality gate, SPEC §11).
     - uv run pytest -q
+
+# --- ADR 0020 migration gates ---------------------------------------------
+# The migration-file checksum guard is a plain unit test
+# (tests/unit/test_migration_chain.py) and runs in `test` above. These two
+# need a live pool, so they get their own job.
+migrations:
+  stage: test
+  image:
+    name: python:3.14
+  services:
+    - pgvector/pgvector:pg16
+  variables:
+    POSTGRES_USER: hivemind
+    POSTGRES_PASSWORD: hivemind
+    POSTGRES_DB: hivemind
+    HIVEMIND_DATABASE_URL: postgresql://hivemind:hivemind@postgres:5432/hivemind
+    # 1024, NOT the 512 the `test` job uses: the committed schema.sql
+    # reference bakes the dim into `vector(<dim>)`, so it has to be
+    # regenerated at the code default (ADR 0015) or the diff below
+    # fails for a reason that has nothing to do with the schema.
+    HIVEMIND_EMBEDDING_DIM: "1024"
+    # The backward-compat gate checks out previous releases into git
+    # worktrees, so the default shallow clone is not enough.
+    GIT_DEPTH: "0"
+    COMPAT_RELEASES: "3"
+  script:
+    - apt-get update -qq && apt-get install -y -qq postgresql-client
+    - pip install uv
+    - uv sync
+    # 1. The generated schema.sql reference must be current. It is a
+    #    review aid, never applied (ADR 0020) — but a stale one is a
+    #    misleading review aid, so regenerate and diff.
+    - uv run hivemind-migrate
+    - scripts/dump-schema-reference.sh "$HIVEMIND_DATABASE_URL"
+    - |
+      if ! git diff --exit-code -- src/hivemind/store/schema.sql; then
+        echo "schema.sql is STALE. Run 'make schema-ref' and commit the result."
+        exit 1
+      fi
+    # 2. Expand-and-contract: the previous releases' store tests must
+    #    pass against HEAD's schema. This tests the property directly
+    #    rather than grepping migrations for DROP COLUMN / ALTER /
+    #    RENAME, which in correct expand-and-contract are routine.
+    - scripts/check-backward-compat.sh "$HIVEMIND_DATABASE_URL" "$COMPAT_RELEASES"
 
 build:
   stage: build

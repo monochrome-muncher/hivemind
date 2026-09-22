@@ -31,9 +31,8 @@
 - **What's next:** Tier 3.1–3.4 are shipped, including the Kubernetes +
   GitLab CI/CD deployment story (3.4). **§3.2 has been superseded by
   §3.5** (ADR 0020: an ordered, rollback-capable migration chain under a
-  Postgres advisory lock) — its docs are committed and its code is the
-  immediate next change, because §4.5 is the first schema change that
-  would ride it. After that, **Tier 4** (the SPEC §11 open items: the
+  Postgres advisory lock), which is now **shipped end to end**. The next
+  workstream is **Tier 4** (the SPEC §11 open items: the
   BM25-vs-FTS decision and the embedding-prefix tuning, both measurable
   with the §1.1 eval harness, plus the 4.4/4.5 measurement items).
 
@@ -47,11 +46,11 @@ retrieval-quality triggers in SPEC §10 (knowledge graph, per-agent
 tuning), turning those future extensions from "vibes" into
 data-driven decisions.
 
-With the keystone shipped, the sequence is **§3.5** (the migration chain
-— it gates every later schema change) and then **Tier 4** (the BM25-vs-FTS
-decision, the embedding-prefix tuning, and the two measurement items
-4.4/4.5) — all of which are now measurable with the §1.1 harness instead
-of guesses.
+With the keystone shipped and §3.5 (the migration chain) in place, the
+next workstream is **Tier 4** (the BM25-vs-FTS decision, the
+embedding-prefix tuning, and the two measurement items 4.4/4.5) — all of
+which are now measurable with the §1.1 harness instead of guesses. §4.5
+is the first schema change to ride the new chain.
 
 ## Tier 1 — validate the core  *(shipped)*
 
@@ -195,7 +194,7 @@ ADR 0007's single-node decision is unchanged by k8s hosting (1 replica,
 no HA); the single-node ops story stays in `docs/ops-runbook.md`
 (one source of truth per concern).
 
-### 3.5 Versioned migrations with rollback  *(ADR 0020, SPEC §8.6 — docs shipped, code next)*
+### 3.5 Versioned migrations with rollback  *(shipped: ADR 0020, SPEC §8.6, `src/hivemind/store/migrations/`)*
 Replaces §3.2. An ordered migration chain (`src/hivemind/store/migrations/`,
 yoyo-migrations) with a `.rollback.sql` per step, applied under a
 **Postgres advisory lock** so many replicas may start at once and exactly
