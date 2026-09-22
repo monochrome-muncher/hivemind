@@ -311,14 +311,14 @@ are §11 items — each says so.)*
   not a tie-break, it is the sort key.
 
   **Resolved: no change to `scoring.py`.** Gating is rejected on the
-  numbers. The residual finding — that the *form* of §6.4's recency term
-  (multiplicative, unbounded) is mismatched to RRF's range — is a bigger
-  change than §4.4 proposed (bounding it hard enough to matter is
-  equivalent to removing it; the alternative is the additive form the
-  prior art moved to). It is not landing on 10 synthetic queries scored
-  by a 4-dimension hash embedder. A future change needs its own ADR and
-  its own measurement against **real queries on an aged pool** — which is
-  also the first thing to run once there is production usage.
+  numbers — that conclusion stands and is not reopened here. The
+  residual finding, that the *form* of §6.4's recency term is mismatched
+  to RRF's range independent of gating, is carried forward as its own
+  tracked item: **§4.6**.
+
+  *(The table above is a point-in-time measurement, not a pinned gate —
+  it reflects the repo as of commit `f65a4e0` and can drift if the eval
+  fixture or scoring config changes without a re-run.)*
 - **4.5 Record how `importance` was chosen.** *(shipped: `importance_source`
   — `entries.importance_source text NOT NULL DEFAULT 'default'`, migration
   `0002.importance-source`, SPEC §4.1)* `importance` is writer-declared
@@ -334,6 +334,34 @@ are §11 items — each says so.)*
   The question this was meant to unblock — "are agents using the three
   kinds consistently?" — is answered instead by a **per-author `kind`
   distribution**, which is NOT built here.
+- **4.6 The *form* of the recency term is mismatched to RRF's range.**
+  *(residual finding, carried forward from §4.4 — not gating, which is
+  rejected and stays rejected there; needs its own ADR)* §4.4 measured
+  and rejected *gating* the recency term. Underneath that result sits a
+  separate, arithmetic mismatch that gating would not have fixed either
+  way: with the SPEC §6.2 defaults the fused RRF score spans at most
+  **2.6230x** across a candidate list, while `entry_score`'s
+  `0.5 ** (age_days / half_life_days)` (SPEC §6.4) spans **2x per
+  30-day half-life** — so **~41.7 days** of age difference (**11.7
+  days** when both candidates appear in both retrieval streams)
+  outranks any match-quality difference, however large. This is
+  arithmetic on the two formulas, not a property of the §4.4 fixture —
+  it holds for any candidate list, synthetic or real, at the §6.2
+  defaults.
+
+  Two directions were identified, neither measured yet: **(a)** bound
+  the term hard enough that it can no longer dominate the fused range —
+  which, at that tightness, is close to removing it — or **(b)** move
+  to the additive form the prior art (§4.4) used, so recency competes
+  on the same scale as the fused score instead of multiplying it.
+  Landing either is a SPEC §6.4 redesign, not a scoring tweak, and gets
+  its own ADR, not a quiet edit of `scoring.py`.
+
+  **Trigger:** the first real corpus with meaningful age spread — i.e.,
+  run the §1.1 harness against real queries on an aged pool once there
+  is production usage. Not before: 10 synthetic queries scored by a
+  4-dimension hash embedder is exactly the wrong evidence to land a
+  scoring redesign on (the same reasoning §4.4 closed on).
 
 ## Tier 5 — explicitly held: the §10 extensions (former Tier 4)
 

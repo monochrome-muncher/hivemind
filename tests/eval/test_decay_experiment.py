@@ -121,6 +121,12 @@ async def _rank(
     half_life_days: float,
 ) -> list[str]:
     """The ranked entry ids for one query under one half-life."""
+    # candidate_top_k=20 here vs. the fake's default of 10 (used by the
+    # §1.1 gate, tests/fakes.py) — so this fixture's blindness check runs
+    # under a slightly different config than the gate. Harmless: the
+    # recency factor is applied per-candidate and cancels out of the
+    # blindness comparison (DECAY_ON vs. DECAY_OFF) regardless of how many
+    # candidates are in the pool.
     service = SearchService(
         store,
         make_embedder(),
@@ -256,12 +262,27 @@ class TestDecayExperiment:
             "conclusion (time sense is the wrong gating axis) needs rechecking"
         )
 
-    async def test_gated_variant_is_exactly_the_per_slice_mix(self) -> None:
-        """C is A on temporal queries and B on the rest — by construction.
+    async def test_measure_all_is_deterministic_across_variants(self) -> None:
+        """This is a determinism check, not a §4.4 finding.
 
-        Asserting it keeps the reported C numbers honest: C adds no
-        retrieval signal of its own, it only picks which of A and B to use
-        per query, using an oracle label no production code has.
+        C is *defined* as A on temporal queries and B on the rest
+        (``VARIANTS["C_gated"]``), and ``run_variant`` buckets each query's
+        metrics into its labelled slice — so
+        ``measured["C_gated"]["temporal"] == measured["A_always_on"]["temporal"]``
+        is true by construction, for any pipeline, correct or not; it is
+        NOT evidence about retrieval quality (that's
+        ``test_gating_does_not_fix_the_old_exact_failure`` and the MRR
+        comparisons above).
+
+        What this test actually exercises: ``measure_all`` reseeds a fresh
+        store per variant (fresh ``FixedClock``, fresh writes) and the hash
+        embedder + retrieval pipeline have no randomness, so two
+        independently-seeded runs of the *same effective config* (A's
+        temporal-query runs vs. C's temporal-query runs) must reproduce
+        bit-identical aggregate metrics. A prior version of this test's
+        docstring called the equality itself the finding; it was the
+        wiring, not the finding, that was worth asserting — this version
+        says so.
         """
         measured = await measure_all()
         assert measured["C_gated"]["temporal"] == measured["A_always_on"]["temporal"]
@@ -294,9 +315,11 @@ class TestDecayExperiment:
             else:
                 assert ranked and ranked[0] == relevant_id
 
-    async def test_report_table_is_emitted(self) -> None:
-        """Print the measured table and assert it is complete — every
-        variant x slice cell present, with the expected query counts."""
+    async def test_report_table_covers_every_variant_and_slice_with_expected_counts(self) -> None:
+        """Print the measured table and assert its *shape* is complete —
+        every variant x slice cell present, with the fixture's expected
+        query counts per slice. This checks fixture shape, not measured
+        retrieval behavior (the MRR/hit@k assertions above do that)."""
         measured = await measure_all()
         table = render_table(measured)
         print("\n" + table)
