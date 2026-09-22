@@ -49,7 +49,7 @@ make mcp-http       # start the hostable MCP runner as a detached service (:8088
 > **Embedding dimension is a deploy-time decision** (ADR 0005): the
 > `vector(:dim)` column is created at migration time. Changing the
 > dimension requires a fresh pool (`make pg-reset`), not an online
-> change (ADR 0013).
+> change (ADR 0005).
 
 ## 2. Backups (single-node Postgres)
 
@@ -88,14 +88,14 @@ make pg-reset
 docker compose up -d postgres
 # restore the logical dump
 docker compose exec -i postgres pg_restore -U hivemind -d hivemind --clean --if-exists < backup-20260601-0400.pgdump
-# re-apply any schema not already in the dump (idempotent; ADR 0013)
+# apply any migrations not already in the dump (ADR 0020)
 make migrate
 ```
 
 > **Drift check:** after a restore, confirm the pool is on the expected
-> schema generation (ADR 0013): `uv run python -c "import asyncio, asyncpg; from hivemind.store.migrate import current_schema_version; ..."`
-> or read `schema_migrations` directly. If it lags, run `make migrate`
-> (idempotent).
+> migration (ADR 0020): `uv run python -c "import asyncio; from hivemind.store.migrate import current_schema_version; ..."`
+> or read `_yoyo_migration` directly. If it lags, run `make migrate`
+> (safe to re-run; an up-to-date pool is a no-op).
 
 ## 3. Monitoring / health
 
@@ -103,15 +103,15 @@ make migrate
 |---|---|
 | Liveness / readiness | Unauthenticated probe endpoints (ADR 0019), all public: `GET /v1/liveness` (shallow — 200 whenever the process answers), `GET /v1/health` (static 200, public by design — SPEC §5.1), `GET /mcp/liveness` (shallow), `GET /mcp/health` (deep — 200 only when the Postgres pool answers, else 503) |
 | Usage / counters | `GET /v1/metrics` (admin-gated) — entries / fleets / agents counters (ROADMAP §3.3) |
-| Schema drift | `schema_migrations.version` (ADR 0013) — the applied schema generation |
+| Schema drift | the latest id in `_yoyo_migration` (ADR 0020) — the applied migration |
 | Postgres health | the `postgres` service healthcheck (`pg_isready`); `docker compose ps` |
 | Embedder health | writes failing with `EmbeddingError` after the retry budget (ADR 0014) — check the embedding endpoint (`HIVEMIND_EMBEDDING_ENDPOINT`) and the provider process |
 | Extractor health | entries landing with **empty `entities`** while extraction is expected (ADR 0016) — check `HIVEMIND_EXTRACTOR_ENDPOINT` / model reachability; note this is *by design* silent (best-effort: the write never fails over extraction), so watch for the symptom, not an error. All-or-nothing validation: if the model wraps its JSON in a code fence (or any schema violation — >10 entities, bad kind, name >128 chars) the whole extraction fails and the entry lands without facets — monitor facet coverage in the dogfood |
 | MCP runner | `docker compose ps mcp-http` (ADR 0010); the streamable-HTTP endpoint `:8088` |
 
 Watch for: the Postgres healthcheck failing, the `mcp-http` container
-restarting, the `schema_migrations` version lagging the deployed
-`SCHEMA_VERSION` (drift → run `make migrate`), and writes failing with
+restarting, the pool's applied migration lagging the deployed chain
+(drift → run `make migrate`), and writes failing with
 `EmbeddingError` after the retry budget (ADR 0014) — a dead embedder
 fails writes once its `HIVEMIND_EMBEDDING_RETRIES` budget is
 exhausted; a transient blip is retried automatically and needs no
@@ -158,11 +158,11 @@ hash is stored (a leaked database never leaks usable keys, SPEC §8.1).
 
 1. Stop the services: `make mcp-http-down`, `make pg-down`.
 2. Restore Postgres (see §2): wipe the volume, start fresh, `pg_restore`
-   the latest logical dump, `make migrate` (idempotent catch-up, ADR
-   0013).
+   the latest logical dump, `make migrate` (applies any outstanding
+   migrations, ADR 0020).
 3. Bring the services back up: `make pg`, `make mcp-http`.
-4. Verify: `GET /v1/health`, `GET /v1/metrics`, and the
-   `schema_migrations` version.
+4. Verify: `GET /v1/health`, `GET /v1/metrics`, and the applied
+   migration (`_yoyo_migration`).
 
 ## 6. Embedding dimension (deploy-time decision, ADR 0005 + ADR 0015)
 
@@ -200,7 +200,7 @@ the switch is a pool change, not a model change:
    (ADR 0015), so it can't slip through silently.
 4. **Reset the pool** — `make pg-reset` (dev) / recreate the vector
    column (prod), then `make migrate` — the `vector(:dim)` column is
-   recreated at the new width (forward migration, ADR 0013).
+   recreated at the new width (a pool reset, not a migration — ADR 0005).
 5. **Re-embed** — re-import the prior entries through the write path
    (entries embed at write time, ADR 0005; a stored 512-dim vector
    cannot be re-used in a 1024-dim pool).

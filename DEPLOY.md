@@ -100,9 +100,10 @@ The 5-step operator flow:
 
 **What is automatic** (never do these by hand):
 
-- Schema migration — the **entrypoint's** idempotent `hivemind-migrate`
-  pre-step on every pod start (ADR 0018 — single source of truth;
-  idempotent, ADR 0013; a dim mismatch fails LOUDLY, ADR 0015).
+- Schema migration — the **entrypoint's** `hivemind-migrate` pre-step on
+  every pod start (ADR 0018 — single source of truth; advisory-locked so
+  concurrent replicas are safe, ADR 0020; a dim mismatch fails LOUDLY,
+  ADR 0015).
 - Image build + push (build stage).
 - Rendering of `hivemind-secrets` from the `K8S_SECRET_*` variables
   (deploy job, every deploy).
@@ -196,16 +197,36 @@ failure undiagnosable).
 
 ## 5. Upgrades
 
-- Deploys are **forward-only + idempotent** (ADR 0013); the image
-  entrypoint runs the idempotent migration on every pod start (ADR 0018)
-  — a normal deploy is just a new image tag.
+- A normal deploy is just a new image tag: the entrypoint applies any
+  outstanding migrations on every pod start (ADR 0018, ADR 0020), under
+  a Postgres advisory lock, so many replicas may start at once and
+  exactly one migrates. An image whose migration chain is **older** than
+  the pool applies nothing and never rolls the schema back.
+- **Deploy every runner project together whenever a migration lands.**
+  The runners are separate deployments (and, under GitLab AutoDevOps,
+  separate projects) sharing one pool, so a migration from one runs
+  against the other's still-deployed code. Releases that only change
+  config need not be synchronised. Schema changes follow
+  **expand-and-contract** (SPEC §8.6): additive within a release, and a
+  removal split across two.
+- **Derived images add layers only — never an `ENTRYPOINT`.** An
+  air-gapped high-side image built `FROM` this one (e.g. to install
+  custom CA certificates) inherits the migrations and the entrypoint.
+  Setting its own `ENTRYPOINT` or `CMD` **silently skips the migration
+  pre-step** — the same trap as the key-bootstrap Job below, but with no
+  error until the first query hits a missing object.
 - A **dim mismatch is a LOUD failure at pod startup** (ADR 0015): the
   entrypoint's `hivemind-migrate` step exits non-zero naming both dims
-  and both fixes — the pod never starts, never a silent no-op.
+  and both fixes — the pod never starts, never a silent no-op. The check
+  runs *before* the advisory lock is taken.
 - Changing the embedding **model/dim** is an operator migration (new
   pool or re-embedding — ADR 0005), never a config flip.
-- If `schema_migrations` lags the deployed `SCHEMA_VERSION` (e.g. pods
-  were added before a migration ran), run the migration one-off:
+- To **roll back** an incremental schema change, use the migration's
+  `.rollback.sql` (ADR 0020). Rollbacks are defined for structural
+  changes only; reversing a populated column drop or a backfill is a
+  restore from backup (`docs/ops-runbook.md`).
+- If the pool lags the deployed chain (e.g. pods were added before a
+  migration ran), run the migration one-off:
 
   ```bash
   kubectl -n hivemind run hivemind-migrate --rm -i --restart=Never \

@@ -1,5 +1,10 @@
 # Forward-migration path: idempotent re-apply + schema_migrations tracking
 
+> **Status: superseded by [ADR 0020](0020-versioned-migrations-with-rollback-and-an-advisory-lock.md).**
+> The idempotent `schema.sql` re-apply, the `schema_migrations` table,
+> and the reserved `migrations/` directory below are all retired. The
+> text is kept verbatim for the audit trail — do not follow it.
+
 `make migrate` re-applies the single `schema.sql` (every DDL statement
 guarded with `IF NOT EXISTS` / `OR REPLACE`). That is already an
 idempotent **catch-up**: running it on an existing deployment creates any
