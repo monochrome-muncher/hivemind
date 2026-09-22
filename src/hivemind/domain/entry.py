@@ -141,6 +141,11 @@ class EntryDraft:
     def __post_init__(self) -> None:
         if not 1 <= self.importance <= 5:
             raise ValueError(f"importance must be 1..5, got {self.importance}")
+        if self.importance_source is ImportanceSource.DEFAULT and self.importance != 3:
+            raise ValueError(
+                "importance_source=default requires the default importance (3), "
+                f"got importance={self.importance}"
+            )
         if not self.summary.strip():
             raise ValueError("summary must be non-empty")
         if len(self.summary) > _SUMMARY_MAX_CHARS:
@@ -214,9 +219,9 @@ class EntryFilters:
     entities: tuple[str, ...] = ()
     # Internal-only: used solely by MetricsService (via count_entries) for
     # the by_importance_source counter (ROADMAP §4.5). Deliberately NOT
-    # reachable from REST or MCP, and SPEC §5.3 documents only the public
-    # filters — do not wire this to a query-surface seam without updating
-    # SPEC §5.3 first.
+    # reachable from REST or MCP — unlike every other field on this
+    # dataclass, which SPEC §5.3 documents as a public filter — do not
+    # wire this to a query-surface seam without updating SPEC §5.3 first.
     importance_source: ImportanceSource | None = None
     scope: str | None = None
     fleet_id: str | None = None

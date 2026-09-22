@@ -62,7 +62,8 @@ _DESC_WRITE = (
     "permits (self/fleet; an explicit out-of-permission scope is rejected — "
     "ADR 0011). 'summary' (keep it under ~280 chars) is the embedded text; "
     "'body' holds long-form content. Optional 'supersedes' names entries this "
-    "one replaces."
+    "one replaces. Optional 'importance' (1-5, default 3) feeds retrieval "
+    "ranking — set it when this entry matters more or less than the default."
 )
 _DESC_SEARCH = (
     "Hybrid (keyword + vector) search over the pool. Returns compact hits "

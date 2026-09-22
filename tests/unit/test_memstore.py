@@ -290,6 +290,22 @@ def test_summary_over_280_chars_is_rejected() -> None:
         draft("x" * 281)
 
 
+def test_default_importance_source_requires_default_importance() -> None:
+    """A draft can't claim ``importance_source=default`` while also
+    supplying a non-default ``importance`` — that combination is a lie
+    about provenance (ROADMAP §4.5): ``default`` means "the caller didn't
+    set it", so it must carry the actual default value (3)."""
+    with pytest.raises(ValueError, match="importance_source=default"):
+        EntryDraft(
+            kind=Kind.FACT,
+            summary="claims default provenance but isn't",
+            author="alice",
+            agent="claude-code",
+            importance=5,
+            importance_source=ImportanceSource.DEFAULT,
+        )
+
+
 def test_entry_draft_importance_source_defaults_to_default() -> None:
     """ROADMAP §4.5: an ``EntryDraft`` that doesn't set ``importance_source``
     rides the ``default`` value (mirrors ``importance``'s own default)."""

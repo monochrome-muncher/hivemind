@@ -131,7 +131,7 @@ A typical agent prompt contract: *"recall before you analyze; write what you lea
 
 ### 5.3 Filters (search *and* list)
 
-`kind`, `tags`, `scope`, `author`, `agent`, `occurred_from`/`occurred_to` (**memory-date** range), `created_from`/`created_to`, `state` (default `active` only; `include_inactive=true` to include `superseded`/`withdrawn`), `limit`/`offset`.
+`kind`, `tags`, `entities` (extracted entity names, AND-semantics, case-insensitive; ADR 0016, §13), `scope`, `author`, `agent`, `occurred_from`/`occurred_to` (**memory-date** range), `created_from`/`created_to`, `state` (default `active` only; `include_inactive=true` to include `superseded`/`withdrawn`), `limit`/`offset`.
 
 ## 6. Retrieval
 

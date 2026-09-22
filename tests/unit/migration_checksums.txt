@@ -1,7 +1,12 @@
-# sha256 of every shipped migration (ADR 0020). A shipped migration is
-# FROZEN: yoyo tracks migrations by id, not content, so editing one
-# changes what a fresh pool gets while existing pools keep the old
-# shape. Add a line here in the same commit that adds a migration;
-# never update a line to match an edit.
+# sha256 of every shipped migration AND its .rollback.sql (ADR 0020). A
+# shipped migration — and its rollback — is FROZEN: yoyo tracks migrations
+# by id, not content, so editing one changes what a fresh pool gets while
+# existing pools keep the old shape; a rollback is executable DDL that
+# ships in the image, so the same divergence applies to it. Add a line
+# here in the same commit that adds a migration or a rollback; never
+# update a line to match an edit.
 fbe796e87493f9012a27c30a1ab9e93a72eed84add093df0223d65a7b169c829  0001.initial-schema.py
 82d8f507a9c903989aa4c08b51fe361f25d8164e549d7b941190bd8aa9778ded  0002.importance-source.sql
+2b2c1e8e19b10bd6d996706b895b2de1f0a0a89f5ea4ffca976d26d0ee49e00f  0002.importance-source.rollback.sql
+b567d403ea436c84b6c3f434aa00102492a60733357129c2781487cd99de0cef  0003.importance-source-check.sql
+8ee403dc4690b7234a5d0a2c68aa352c1a8f341a6a2ee7437e68988815a122f7  0003.importance-source-check.rollback.sql
