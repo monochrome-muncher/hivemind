@@ -155,7 +155,10 @@ async def test_rollback_refuses_to_drop_the_initial_schema() -> None:
 
     Rolling back `0001` drops every entry in the pool, so `rollback`
     refuses and names the two real remediations instead — even when the
-    requested count would also take later (legal) migrations with it.
+    requested count would also take later (legal) migrations with it
+    (`count=2` from HEAD), and equally when `0001` is already the head
+    in its own right (`count=1` after `0002` has already been rolled
+    back) — both are the same refusal, exercised from both approaches.
     """
     dsn, dim = _dsn(), Settings().embedding_dim
     await _require_postgres(dsn)
@@ -170,6 +173,20 @@ async def test_rollback_refuses_to_drop_the_initial_schema() -> None:
 
     # The refusal left the pool intact.
     assert await current_schema_version(dsn) == HEAD
+
+    # Now put 0001 in as the head for real (a legal rollback of 0002),
+    # and confirm count=1 refuses it exactly the same way.
+    rolled = await rollback(dsn, dim, count=1)
+    assert rolled == ["0002.importance-source"]
+    assert await current_schema_version(dsn) == "0001.initial-schema"
+
+    with pytest.raises(RuntimeError) as excinfo:
+        await rollback(dsn, dim, count=1)
+    message = str(excinfo.value)
+    assert "0001.initial-schema" in message
+    assert "pg-reset" in message or "backup" in message
+
+    assert await current_schema_version(dsn) == "0001.initial-schema"
 
 
 async def test_migrate_fails_loudly_on_dim_mismatch() -> None:

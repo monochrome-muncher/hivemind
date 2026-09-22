@@ -212,6 +212,11 @@ class EntryFilters:
     kind: Kind | None = None
     tags: tuple[str, ...] = ()
     entities: tuple[str, ...] = ()
+    # Internal-only: used solely by MetricsService (via count_entries) for
+    # the by_importance_source counter (ROADMAP §4.5). Deliberately NOT
+    # reachable from REST or MCP, and SPEC §5.3 documents only the public
+    # filters — do not wire this to a query-surface seam without updating
+    # SPEC §5.3 first.
     importance_source: ImportanceSource | None = None
     scope: str | None = None
     fleet_id: str | None = None
