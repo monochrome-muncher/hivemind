@@ -27,6 +27,7 @@ from hivemind.domain.entry import (
     EntryDraft,
     EntryFilters,
     EntryState,
+    ImportanceSource,
     Kind,
 )
 from hivemind.domain.feedback import Feedback, Verdict
@@ -377,6 +378,31 @@ async def test_create_entry_records_embedding_model(pg) -> None:
     reloaded = await store.get_entry(entry.id)
     assert reloaded is not None
     assert reloaded.embedding_model == "test-model"
+
+
+async def test_create_entry_records_importance_source(pg) -> None:
+    """ROADMAP §4.5: ``importance_source`` round-trips through Postgres."""
+    store, _, dim = pg
+    defaulted = await store.create_entry(draft("Rode the default"), make_vec(dim, 2))
+    assert defaulted.importance_source is ImportanceSource.DEFAULT
+    reloaded_default = await store.get_entry(defaulted.id)
+    assert reloaded_default is not None
+    assert reloaded_default.importance_source is ImportanceSource.DEFAULT
+
+    caller_draft = EntryDraft(
+        kind=Kind.FACT,
+        summary="Caller set it",
+        author="alice",
+        agent="claude-code",
+        importance=5,
+        importance_source=ImportanceSource.CALLER,
+    )
+    supplied = await store.create_entry(caller_draft, make_vec(dim, 3))
+    assert supplied.importance == 5
+    assert supplied.importance_source is ImportanceSource.CALLER
+    reloaded_caller = await store.get_entry(supplied.id)
+    assert reloaded_caller is not None
+    assert reloaded_caller.importance_source is ImportanceSource.CALLER
 
 
 # --- orchestrator probes (ADR 0019) -------------------------------------------

@@ -227,6 +227,24 @@ class TestCreateEntry:
             )
         assert resp.status_code == 422
 
+    async def test_omitted_importance_defaults_and_is_marked_default(self) -> None:
+        """ROADMAP §4.5: an omitted ``importance`` resolves to 3 with
+        ``importance_source=default``."""
+        client = make_client(make_hivemind_app())
+        async with client:
+            created = await post_entry(client, "key-alice", "rode the default")
+        assert created["importance"] == 3
+        assert created["importance_source"] == "default"
+
+    async def test_supplied_importance_is_marked_caller(self) -> None:
+        """ROADMAP §4.5: a caller-supplied ``importance`` is marked
+        ``importance_source=caller``, even when it equals the default."""
+        client = make_client(make_hivemind_app())
+        async with client:
+            created = await post_entry(client, "key-alice", "caller set it", importance=3)
+        assert created["importance"] == 3
+        assert created["importance_source"] == "caller"
+
     async def test_invalid_importance_is_422(self) -> None:
         client = make_client(make_hivemind_app())
         async with client:

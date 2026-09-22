@@ -130,6 +130,26 @@ async def test_hive_write_accepts_structured_fields(app: McpHivemind) -> None:
     assert result["sources"] == [{"type": "url", "ref": "https://example.com/slice"}]
 
 
+async def test_hive_write_omitted_importance_defaults_and_is_marked_default(
+    app: McpHivemind,
+) -> None:
+    """ROADMAP §4.5: an omitted ``importance`` resolves to 3 with
+    ``importance_source=default``."""
+    result = await hive_write(app, kind="fact", summary="rode the default")
+    assert "error" not in result
+    assert result["importance"] == 3
+    assert result["importance_source"] == "default"
+
+
+async def test_hive_write_supplied_importance_is_marked_caller(app: McpHivemind) -> None:
+    """ROADMAP §4.5: a caller-supplied ``importance`` is marked
+    ``importance_source=caller``, even when it equals the default."""
+    result = await hive_write(app, kind="fact", summary="caller set it", importance=3)
+    assert "error" not in result
+    assert result["importance"] == 3
+    assert result["importance_source"] == "caller"
+
+
 # --- write-scope resolution (ADR 0011): an omitted scope defaults to the
 # --- highest scope the trust level permits, not a forced 'org' ---------- #
 

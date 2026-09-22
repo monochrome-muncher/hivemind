@@ -39,6 +39,7 @@ from hivemind.domain.entry import (
     EntryFilters,
     EntryState,
     ExtractedEntity,
+    ImportanceSource,
     Kind,
     Source,
     SourceType,
@@ -51,20 +52,20 @@ from hivemind.store.pool import make_pool
 INSERT_ENTRY = """
 INSERT INTO entries (
     id, kind, summary, body, payload, sources, tags,
-    occurred_at, author, agent, importance, scope, fleet_id,
+    occurred_at, author, agent, importance, importance_source, scope, fleet_id,
     embedding, embedding_model,
     entities, entity_names, entities_model
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    $16, $17, $18
+    $16, $17, $18, $19
 )
 """
-# 18 explicit columns/values; ``created_at`` falls back to the schema's
+# 19 explicit columns/values; ``created_at`` falls back to the schema's
 # ``now()`` default, so it is not in the value list.
 
 _ENTRY_COLUMNS = """
     id, kind, summary, body, payload, sources, tags, occurred_at,
-    created_at, author, agent, importance, scope, fleet_id, embedding,
+    created_at, author, agent, importance, importance_source, scope, fleet_id, embedding,
     embedding_model, state, superseded_by, withdrawn_reason,
     entities, entity_names, entities_model
 """
@@ -161,6 +162,8 @@ def _filter_conditions(
         clauses.append("state = 'active'")
     if filters.kind is not None:
         add("kind = ?", filters.kind.value)
+    if filters.importance_source is not None:
+        add("importance_source = ?", filters.importance_source.value)
     if filters.tags:
         add("tags @> ?", list(filters.tags))
     if filters.entities:
@@ -304,6 +307,7 @@ class PgStore:
                     draft.author,
                     draft.agent,
                     draft.importance,
+                    draft.importance_source.value,
                     draft.scope,
                     draft.fleet_id,
                     embedding,
@@ -695,6 +699,7 @@ def _row_to_entry(row: asyncpg.Record) -> Entry:
         sources=_decode_sources(row["sources"]),
         tags=tuple(row["tags"]) if row["tags"] else (),
         importance=row["importance"],
+        importance_source=ImportanceSource(row["importance_source"]),
         scope=row["scope"],
         fleet_id=str(row["fleet_id"]) if row["fleet_id"] else None,
         embedding=_embedding_to_tuple(row["embedding"]),

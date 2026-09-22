@@ -91,6 +91,7 @@ CREATE TABLE public.entries (
     entities jsonb DEFAULT '[]'::jsonb NOT NULL,
     entity_names text[] DEFAULT '{}'::text[] NOT NULL,
     entities_model text,
+    importance_source text DEFAULT 'default'::text NOT NULL,
     CONSTRAINT entries_importance_check CHECK (((importance >= 1) AND (importance <= 5))),
     CONSTRAINT entries_kind_check CHECK ((kind = ANY (ARRAY['fact'::text, 'insight'::text, 'decision'::text]))),
     CONSTRAINT entries_state_check CHECK ((state = ANY (ARRAY['active'::text, 'superseded'::text, 'withdrawn'::text])))

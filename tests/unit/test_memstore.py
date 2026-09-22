@@ -15,6 +15,7 @@ from hivemind.domain.entry import (
     EntryDraft,
     EntryFilters,
     EntryState,
+    ImportanceSource,
     Kind,
 )
 from hivemind.domain.feedback import Feedback, Verdict
@@ -287,3 +288,38 @@ def test_summary_over_280_chars_is_rejected() -> None:
     """SPEC.md §4.1: summary is a short blurb (~280 chars, not a body)."""
     with pytest.raises(ValueError, match="280"):
         draft("x" * 281)
+
+
+def test_entry_draft_importance_source_defaults_to_default() -> None:
+    """ROADMAP §4.5: an ``EntryDraft`` that doesn't set ``importance_source``
+    rides the ``default`` value (mirrors ``importance``'s own default)."""
+    assert draft("unset").importance_source is ImportanceSource.DEFAULT
+
+
+async def test_create_entry_defaults_importance_source(store: MemoryStore) -> None:
+    """ROADMAP §4.5: a draft with no explicit provenance stores/reads back
+    as ``default``."""
+    entry = await store.create_entry(draft("rode the default"))
+    assert entry.importance_source is ImportanceSource.DEFAULT
+    reloaded = await store.get_entry(entry.id)
+    assert reloaded is not None
+    assert reloaded.importance_source is ImportanceSource.DEFAULT
+
+
+async def test_create_entry_records_caller_importance_source(store: MemoryStore) -> None:
+    """ROADMAP §4.5: a draft that explicitly marks ``caller`` provenance
+    stores/reads back as ``caller``."""
+    caller_draft = EntryDraft(
+        kind=Kind.FACT,
+        summary="caller set it",
+        author="alice",
+        agent="claude-code",
+        importance=5,
+        importance_source=ImportanceSource.CALLER,
+    )
+    entry = await store.create_entry(caller_draft)
+    assert entry.importance == 5
+    assert entry.importance_source is ImportanceSource.CALLER
+    reloaded = await store.get_entry(entry.id)
+    assert reloaded is not None
+    assert reloaded.importance_source is ImportanceSource.CALLER

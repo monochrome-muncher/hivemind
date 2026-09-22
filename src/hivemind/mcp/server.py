@@ -143,7 +143,7 @@ def build_server(
         sources: list[dict[str, str]] | None = None,
         tags: list[str] | None = None,
         occurred_at: str | None = None,
-        importance: int = 3,
+        importance: int | None = None,
         scope: str | None = None,
         supersedes: list[str] | None = None,
         author: str | None = None,

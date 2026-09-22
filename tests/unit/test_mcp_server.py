@@ -80,6 +80,38 @@ async def test_registered_write_tool_roundtrip(app: McpHivemind) -> None:
     assert stored.summary == "hello via mcp"
 
 
+async def test_registered_write_tool_omitted_importance_is_marked_default(
+    app: McpHivemind,
+) -> None:
+    """ROADMAP §4.5: the *registered* wrapper (not just the plain
+    ``hive_write`` function) must resolve an omitted ``importance`` to
+    the default with ``importance_source=default`` — the exact seam
+    where the ROADMAP §1.2 dogfood defect (a default re-declared and
+    forced in the wrapper) previously slipped through."""
+    server = build_server(app)
+    result = await server.call_tool(
+        "hive_write", {"kind": "fact", "summary": "omitted importance via mcp"}
+    )
+    assert result.is_error is False
+    payload = json.loads(result.content[0].text)
+    assert payload["importance"] == 3
+    assert payload["importance_source"] == "default"
+
+
+async def test_registered_write_tool_supplied_importance_is_marked_caller(
+    app: McpHivemind,
+) -> None:
+    server = build_server(app)
+    result = await server.call_tool(
+        "hive_write",
+        {"kind": "fact", "summary": "supplied importance via mcp", "importance": 4},
+    )
+    assert result.is_error is False
+    payload = json.loads(result.content[0].text)
+    assert payload["importance"] == 4
+    assert payload["importance_source"] == "caller"
+
+
 async def test_registered_get_tool_returns_error_for_unknown_id(
     app: McpHivemind,
 ) -> None:

@@ -267,15 +267,21 @@ are §11 items — each says so.)*
   *(Prior art: an external system measured this exact regression and
   moved to a gated, additive recency term; that is a hypothesis to test
   here, not a result to copy.)*
-- **4.5 Record how `kind` and `importance` were chosen.** Both are
-  writer-declared (SPEC §4.1) and neither records whether the value was
-  supplied deliberately or fell out of a default. With a heterogeneous
-  fleet, that makes "are agents using the three kinds consistently?" an
-  unanswerable question — which is the question that would decide
-  whether auto-classification is ever worth its cost. Add provenance at
-  write time (caller-supplied vs. defaulted), surface it in the §3.3
-  counters, and *then* decide. Additive columns, so it is the first real
-  exercise of the §3.5 migration chain.
+- **4.5 Record how `importance` was chosen.** *(shipped: `importance_source`
+  — `entries.importance_source text NOT NULL DEFAULT 'default'`, migration
+  `0002.importance-source`, SPEC §4.1)* `importance` is writer-declared
+  (SPEC §4.1) and previously recorded nothing about whether the value was
+  supplied deliberately or fell out of a default — a dead ranking input
+  (SPEC §6.4) is indistinguishable from a used one. Provenance is now
+  recorded at write time (`caller` vs. `default`) at every write seam
+  (REST + MCP) and surfaced in the §3.3 counters
+  (`EntriesMetrics.by_importance_source`). **`kind` needs no such
+  provenance**: it is a required parameter at every seam (`EntryDraft.kind`,
+  `CreateEntryRequest.kind`, `hive_write(kind: str)`), so it is always
+  caller-supplied and a provenance field for it would be a constant.
+  The question this was meant to unblock — "are agents using the three
+  kinds consistently?" — is answered instead by a **per-author `kind`
+  distribution**, which is NOT built here.
 
 ## Tier 5 — explicitly held: the §10 extensions (former Tier 4)
 
