@@ -49,7 +49,7 @@ Environment: the service reads `HIVEMIND_*` env vars (see `src/hivemind/config.p
 - `src/hivemind/api/` — the FastAPI surface (REST §5.1): schemas, deps (auth), routes, main.
 - `src/hivemind/mcp/` — the MCP server (seven verbs, §5.2): app, server (stdio dev + per-agent `hivemind-mcp-pg` runners), http (hostable streamable-HTTP runner, ADR 0010), local embedder.
 - `tests/unit/` — hermetic unit tests (fakes from `tests/fakes.py`; no Postgres, no network).
-- `tests/eval/` — the retrieval eval harness (ROADMAP §1.1): a committed golden set + a CI gate pinning a floor on hit@k / MRR / nDCG, so retrieval regressions are measured, not vibes.
+- `tests/eval/` — the retrieval eval harness (ROADMAP §1.1): a committed golden set + a CI gate pinning a floor on hit@k / MRR / nDCG, so retrieval regressions are measured, not vibes. `temporal.py` + `test_decay_experiment.py` are a second, **age-varied** fixture (the golden set seeds every entry at one timestamp, so it is blind to the SPEC §6.4 recency term); they report, they pin nothing — the ROADMAP §4.4 measurement, not a gate.
 - `tests/integration/` — Postgres-backed Store tests; they SKIP cleanly when the DB is unreachable.
 
 ## Rules

@@ -32,9 +32,11 @@
   GitLab CI/CD deployment story (3.4). **§3.2 has been superseded by
   §3.5** (ADR 0020: an ordered, rollback-capable migration chain under a
   Postgres advisory lock), which is now **shipped end to end**. The next
-  workstream is **Tier 4** (the SPEC §11 open items: the
-  BM25-vs-FTS decision and the embedding-prefix tuning, both measurable
-  with the §1.1 eval harness, plus the 4.4/4.5 measurement items).
+  workstream is **Tier 4**, whose two measurement items are now closed —
+  §4.5 shipped `importance_source`, and §4.4 measured the recency term
+  and **rejected** gating it (no code change; numbers in §4.4) — leaving
+  the two SPEC §11 open items: the BM25-vs-FTS decision and the
+  embedding-prefix tuning, both measurable with the §1.1 eval harness.
 
 ## The keystone is shipped: measure, then Tier 4
 
@@ -50,7 +52,11 @@ With the keystone shipped and §3.5 (the migration chain) in place, the
 next workstream is **Tier 4** (the BM25-vs-FTS decision, the
 embedding-prefix tuning, and the two measurement items 4.4/4.5) — all of
 which are now measurable with the §1.1 harness instead of guesses. §4.5
-is the first schema change to ride the new chain.
+is the first schema change to ride the new chain. §4.4 is the first item
+the harness closed *against* a proposed change: it needed a second,
+age-varied fixture beside the golden set (the golden set's entries all
+share one timestamp, so it is blind to decay), and the numbers rejected
+the gate it was written to justify.
 
 ## Tier 1 — validate the core  *(shipped)*
 
@@ -255,18 +261,64 @@ are §11 items — each says so.)*
   port (no Pydantic AI — the repo's existing Pydantic v2 + httpx seam
   pattern). Dev/test endpoint: `http://localhost:8080/v1`
   (`qwen3.8-27b`, API key `dummy`).
-- **4.4 Gate the recency term to temporal queries.** `entry_score`
-  (`retrieval/scoring.py`) multiplies every hit by
+- **4.4 Gate the recency term to temporal queries.** *(measured —
+  **gating rejected, no code change**; fixture + runner:
+  `tests/eval/temporal.py`, `tests/eval/test_decay_experiment.py`)*
+  `entry_score` (`retrieval/scoring.py`) multiplies every hit by
   `0.5 ** (age_days / half_life_days)` — **unconditionally**, on every
   query. An always-on recency term is a known way to depress recall on
   non-temporal queries: an old, exactly-right entry loses to a recent,
   vaguely-related one even when the query carries no time sense at all.
-  Measure it with the §1.1 harness (the golden set already has
-  non-temporal queries), and gate or floor the term only if the numbers
-  say so. A change here is a SPEC §6.4 change, so it lands with an ADR.
   *(Prior art: an external system measured this exact regression and
   moved to a gated, additive recency term; that is a hypothesis to test
   here, not a result to copy.)*
+
+  **The golden set could not answer this.** Every §1.1 golden entry is
+  seeded with no `occurred_at`, so all eight share one timestamp, the
+  recency factor is identical for every candidate and cancels out of the
+  ranking. Measuring decay needed a second, age-varied fixture
+  (`tests/eval/temporal.py`: 16 entries aged 2–500 days, 10 queries each
+  labelled temporal / non-temporal). The pinned §1.1 gate is untouched.
+
+  **Measured** (k=5; variants realised through `SearchConfig.half_life_days`
+  only, so the fused RRF score is identical across all three and every
+  difference is attributable to the recency factor):
+
+  | variant | non-temporal hit@5 / MRR / nDCG@5 | temporal hit@5 / MRR / nDCG@5 | all |
+  |---|---|---|---|
+  | **A** always-on (today) | 0.333 / 0.208 / 0.238 | 0.750 / 0.625 / 0.658 | 0.500 / 0.375 / 0.406 |
+  | **B** off | 1.000 / 0.917 / 0.938 | 1.000 / 0.708 / 0.783 | 1.000 / 0.833 / 0.876 |
+  | **C** gated (oracle label) | 1.000 / 0.917 / 0.938 | 0.750 / 0.625 / 0.658 | 0.900 / 0.800 / 0.826 |
+
+  The hypothesis is **confirmed** (A's non-temporal MRR 0.208 vs. 0.917
+  without the term) but the **proposed fix is refuted**: C loses to B on
+  every aggregate (all-query MRR 0.800 vs. 0.833, hit@5 0.900 vs. 1.000),
+  and C's numbers are an *oracle* ceiling — they use the fixture's
+  hand-written label, not a classifier the service has. Sliced by
+  competition pattern instead of by query time sense: on "old entry
+  matches almost verbatim, recent entry shares a phrase" A scores
+  **0.000** hit@5 and B **1.000**, for the temporal and the non-temporal
+  query alike — so time sense is not the axis that predicts where the
+  term helps, and gating on it only narrows where the failure shows up.
+
+  **Root cause, and it is not fixture-dependent.** With the SPEC §6.2
+  defaults (`rrf_k=60`, `w=0.5/0.5`, `candidate_top_k=20`) the fused
+  score spans at most 2.62x across a candidate list (1.31x when both
+  candidates appear in both streams). The recency factor spans 2x *per
+  half-life*. So an entry ~42 days older than a competitor is outranked
+  by it no matter how much better it matches — 12 days when both are in
+  both streams. Multiplicative decay against RRF's compressed range is
+  not a tie-break, it is the sort key.
+
+  **Resolved: no change to `scoring.py`.** Gating is rejected on the
+  numbers. The residual finding — that the *form* of §6.4's recency term
+  (multiplicative, unbounded) is mismatched to RRF's range — is a bigger
+  change than §4.4 proposed (bounding it hard enough to matter is
+  equivalent to removing it; the alternative is the additive form the
+  prior art moved to). It is not landing on 10 synthetic queries scored
+  by a 4-dimension hash embedder. A future change needs its own ADR and
+  its own measurement against **real queries on an aged pool** — which is
+  also the first thing to run once there is production usage.
 - **4.5 Record how `importance` was chosen.** *(shipped: `importance_source`
   — `entries.importance_source text NOT NULL DEFAULT 'default'`, migration
   `0002.importance-source`, SPEC §4.1)* `importance` is writer-declared

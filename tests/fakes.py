@@ -148,8 +148,25 @@ def make_store(clock: FixedClock | None = None) -> MemoryStore:
     return MemoryStore(clock or make_clock())
 
 
-def make_search_config() -> SearchConfig:
-    return SearchConfig(candidate_top_k=10, default_limit=5, half_life_days=30.0)
+def make_search_config(
+    *,
+    candidate_top_k: int = 10,
+    default_limit: int = 5,
+    half_life_days: float = 30.0,
+) -> SearchConfig:
+    """A ``SearchConfig`` with test-sized defaults.
+
+    The knobs a test is likely to vary are keyword parameters: the eval
+    harness sweeps ``half_life_days`` to turn the SPEC §6.4 recency term
+    on (the 30-day default) and effectively off (a half-life so long that
+    every candidate's decay factor rounds to 1.0) without any production
+    code change.
+    """
+    return SearchConfig(
+        candidate_top_k=candidate_top_k,
+        default_limit=default_limit,
+        half_life_days=half_life_days,
+    )
 
 
 def make_entry_clocks(n: int) -> list[FixedClock]:
