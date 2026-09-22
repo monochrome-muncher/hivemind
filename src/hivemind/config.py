@@ -30,11 +30,22 @@ class SearchConfig:
     candidate_top_k: int = 20
     default_limit: int = 10
     half_life_days: float = 30.0
+    # ROADMAP §4.6 direction (a): a lower bound on the SPEC §6.4 recency
+    # factor, so the one unbounded factor in `entry_score`'s product can
+    # no longer dominate RRF's compressed fused range. ``None`` (the
+    # default) = no floor = exactly SPEC §6.4 as shipped. Changing this
+    # default is a §6.4 redesign and needs its own ADR; it is config so
+    # the choice can be *measured* first (tests/eval/).
+    recency_floor: float | None = None
     quality_helpful_weight: float = 0.05
     quality_stale_weight: float = 0.10
     quality_wrong_weight: float = 0.25
     quality_min: float = 0.5
     quality_max: float = 1.2
+
+    def __post_init__(self) -> None:
+        if self.recency_floor is not None and not 0.0 < self.recency_floor <= 1.0:
+            raise ValueError(f"recency_floor must be in (0, 1] or None, got {self.recency_floor}")
 
     def quality_kwargs(self) -> dict[str, float]:
         """Keyword args for ``retrieval.scoring.feedback_quality``."""
@@ -98,6 +109,9 @@ class Settings(BaseSettings):
     candidate_top_k: int = 20
     default_limit: int = 10
     half_life_days: float = 30.0
+    # ROADMAP §4.6 direction (a); unset = no floor = today's SPEC §6.4
+    # behaviour. See SearchConfig.recency_floor.
+    recency_floor: float | None = None
     quality_helpful_weight: float = 0.05
     quality_stale_weight: float = 0.10
     quality_wrong_weight: float = 0.25
@@ -112,6 +126,7 @@ class Settings(BaseSettings):
             candidate_top_k=self.candidate_top_k,
             default_limit=self.default_limit,
             half_life_days=self.half_life_days,
+            recency_floor=self.recency_floor,
             quality_helpful_weight=self.quality_helpful_weight,
             quality_stale_weight=self.quality_stale_weight,
             quality_wrong_weight=self.quality_wrong_weight,

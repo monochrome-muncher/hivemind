@@ -52,6 +52,8 @@ def entry_score(
     quality: float,
     now: datetime,
     half_life_days: float,
+    *,
+    recency_floor: float | None = None,
 ) -> float:
     """Decay-aware final score for one entry (SPEC.md §6.4).
 
@@ -64,6 +66,21 @@ def entry_score(
     "memory date"), not its ingest time, so a backdated entry decays
     from when the observation happened. Future occurrence times are
     clamped to age zero.
+
+    ``recency_floor`` (ROADMAP §4.6, direction (a) — **default off**,
+    i.e. exactly SPEC §6.4) bounds the one factor in the product that
+    is unbounded below. With a floor ``f`` in ``(0, 1]``:
+
+        recency = max(f, 0.5 ** (age_days / half_life_days))
+
+    so the recency factor spans at most ``1/f`` across any candidate
+    list instead of ``2 ** (age spread / half_life)``. Once ``1/f`` is
+    narrower than the fused RRF range (``2(k+20)/(k+1)`` = 2.62x at the
+    §6.2 defaults, i.e. ``f > 0.381``), match quality becomes the sort
+    key and recency the tie-break — the SPEC §6.4 intent. ``None``
+    means no floor and is bit-for-bit today's behaviour; the value is
+    validated by ``SearchConfig``, not here (this stays a pure
+    function of the numbers it is handed).
     """
     age_days = (now - occurred_at).total_seconds() / 86_400.0
     if age_days < 0:
@@ -72,4 +89,6 @@ def entry_score(
     # Half-life decay: 0.5 ** (age / half_life). Computed via exp/log so
     # the result is a plain float (no complex-number branch).
     recency = math.exp(math.log(0.5) * (age_days / half_life_days))
+    if recency_floor is not None and recency_floor > recency:
+        recency = recency_floor
     return fused * importance_factor * recency * quality

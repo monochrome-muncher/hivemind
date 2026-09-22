@@ -154,15 +154,17 @@ def make_search_config(
     default_limit: int = 5,
     half_life_days: float = 30.0,
     rrf_k: int = 60,
+    recency_floor: float | None = None,
 ) -> SearchConfig:
     """A ``SearchConfig`` with test-sized defaults.
 
     The knobs a test is likely to vary are keyword parameters: the eval
     harness sweeps ``half_life_days`` to turn the SPEC §6.4 recency term
     on (the 30-day default) and effectively off (a half-life so long that
-    every candidate's decay factor rounds to 1.0), and ``rrf_k`` to widen
-    or compress the fused RRF range (ROADMAP §4.6) — both without any
-    production code change. ``rrf_k``'s default here mirrors
+    every candidate's decay factor rounds to 1.0), ``rrf_k`` to widen
+    or compress the fused RRF range (ROADMAP §4.6), and ``recency_floor``
+    to bound the recency factor from below (ROADMAP §4.6 direction (a);
+    ``None`` = off = the shipped default). ``rrf_k``'s default here mirrors
     ``SearchConfig``'s own, which this file must never silently diverge
     from (``test_make_search_config_mirrors_the_production_rrf_k``).
     """
@@ -171,6 +173,7 @@ def make_search_config(
         default_limit=default_limit,
         half_life_days=half_life_days,
         rrf_k=rrf_k,
+        recency_floor=recency_floor,
     )
 
 
