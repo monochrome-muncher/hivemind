@@ -196,12 +196,20 @@ _Avoid_: quality threshold, search-quality SLA, retrieval budget
 
 ### Operations (Tier 3)
 
-**Forward migration**:
-How a schema change lands on a live pool without a rewrite: the idempotent `schema.sql` re-apply (the DDL forward path) + the occasional ordered, idempotent data-migration script (a backfill DDL can't express) — ADR 0013.
-_Avoid_: schema upgrade, DB release, data patch (that is the data-migration script alone)
+**Migration**:
+One ordered, versioned step in the schema chain (`src/hivemind/store/migrations/`), applied by `hivemind-migrate` and recorded once in `_yoyo_migration` — ADR 0020. The chain is the schema's source of truth; `schema.sql` is a generated reference.
+_Avoid_: schema upgrade, DB release, data patch, forward migration (the chain runs in both directions)
+
+**Rollback**:
+Reversing an applied migration via its `.rollback.sql` companion (ADR 0020). Defined only for structural changes; reversing a populated column drop or a backfill is a **restore**, not a rollback.
+_Avoid_: down migration, revert, undo (a restore from backup is a restore)
+
+**Expand-and-contract**:
+The rule that a schema change is additive within a release, and a removal takes two: release N stops using the column, release N+1 drops it (ADR 0020). Required because the runners are independently released against one pool.
+_Avoid_: backward compatibility (broader), parallel change, two-phase migration
 
 **Schema version**:
-The applied schema generation, recorded in the `schema_migrations` table after each successful migrate (ADR 0013); reading it tells you whether a live pool is up to date (drift check).
+The latest applied migration id, read from `_yoyo_migration` (ADR 0020) and reported on the ops surface; reading it tells you whether a live pool is up to date (drift check).
 _Avoid_: DB version, migration cursor, schema fingerprint
 
 **Usage counters**:

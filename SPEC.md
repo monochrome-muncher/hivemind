@@ -225,6 +225,18 @@ The MCP stdio surface ships **two runners**:
 
 Both `hivemind-mcp-pg` and `hivemind-mcp-http` read/write the same pool with the same verified provenance; choose the per-agent runner for a small dev setup, the hostable runner when many agents share one machine.
 
+### 8.6 Schema migrations (ADR 0020)
+
+The schema is an **ordered chain of versioned migrations** under `src/hivemind/store/migrations/`, applied by `hivemind-migrate` (yoyo-migrations). The chain is the source of truth; `schema.sql` is a CI-generated, non-authoritative reference that is never applied and never hand-edited.
+
+* **Forward.** `migrate` applies every migration not yet recorded in `_yoyo_migration`, in order. It is safe to run on every process start — an up-to-date pool is a no-op — and the image entrypoint does exactly that (ADR 0018). An image whose chain is *older* than the pool applies nothing; it never rolls the schema back.
+* **Backward.** Each migration ships a `.rollback.sql` companion, so an incremental change can be reversed without restoring the pool. **A rollback that would destroy data is not written**: reversing a populated column drop or a backfill is a restore from backup, not a migration (ADR 0001 — nothing is hard-deleted).
+* **Concurrency.** `migrate` holds a **Postgres advisory lock** for the duration. The lock is session-scoped, so a pod killed mid-migration releases it by dying — many replicas may start simultaneously and exactly one migrates.
+* **Version marker.** `current_schema_version` is the latest applied migration id, read from `_yoyo_migration` and reported on the ops surface (§3.3 counters). There is no separate `schema_migrations` table.
+* **Online-safe DDL.** New index migrations use `CREATE INDEX CONCURRENTLY` with yoyo's `-- transactional: false` directive, so an index build does not lock a table while a sibling replica serves.
+* **Expand-and-contract.** Within a release, schema changes are **additive only** (new columns nullable or defaulted, new tables, new indexes). A removal takes two releases: release N stops reading and writing the column, release N+1 drops it. This is a requirement, not a preference — the runners are deployed as independently released units against one pool, so a migration always runs against some still-deployed older code.
+* **Dimension guard.** The ADR 0015 dim-mismatch check runs **before** the lock is taken, so a pool provisioned at a different embedding dimension (§7, ADR 0005) still fails loudly before any DDL.
+
 ## 9. Non-goals (v1) — the explicit list
 
 - No human-facing UI (agent-only; a read-only web search is a later extension)

@@ -152,7 +152,7 @@ kinds). Tier 3.1 (the key-rotation runbook) is **blocked by Tier 2** —
 you can't write a rotation story for a key model that's about to
 change.
 
-## Tier 3 — productionize (former Tier 2)  *(fully shipped: 3.1–3.4)*
+## Tier 3 — productionize (former Tier 2)  *(3.1–3.4 shipped; 3.2 superseded by 3.5)*
 
 ### 3.1 Ops runbook  *(shipped: `docs/ops-runbook.md`)*
 Deployment, **backups** (single-node Postgres, ADR 0007),
@@ -160,12 +160,15 @@ monitoring / health, and a **key issuance + rotation** story — now
 *defined* by ADR 0012 (the admin surface + org-key rotation define
 "who issues keys and how they rotate"). **Blocked by Tier 2.**
 
-### 3.2 Forward-migration path  *(shipped: ADR 0013 + `schema_migrations` tracking)*
+### 3.2 Forward-migration path  *(shipped, then **superseded by §3.5** — ADR 0013 → ADR 0020)*
 `make migrate` is an idempotent full re-apply of the schema. There is
 no zero-downtime **forward** schema-evolution story for a system with
 live data — define how a new column / index lands without rewriting the
 whole pool. *(Note: the Tier 2 schema change (fleets / agents /
 entry-fleet refs) is the first real test of this story.)*
+*(Superseded: the idempotent re-apply cannot express a change to an
+existing object, shipped no backward direction, and assumed a
+single replica. See §3.5.)*
 
 ### 3.3 Usage counters (trigger instrumentation)  *(shipped: `MetricsService` + `GET /v1/metrics`)*
 A minimal metrics surface — writes, feedbacks, supersessions, distinct
@@ -190,6 +193,37 @@ admin/org keys in the k8s Secret), environment-profile files
 ADR 0007's single-node decision is unchanged by k8s hosting (1 replica,
 no HA); the single-node ops story stays in `docs/ops-runbook.md`
 (one source of truth per concern).
+
+### 3.5 Versioned migrations with rollback  *(ADR 0020, SPEC §8.6 — docs shipped, code next)*
+Replaces §3.2. An ordered migration chain (`src/hivemind/store/migrations/`,
+yoyo-migrations) with a `.rollback.sql` per step, applied under a
+**Postgres advisory lock** so many replicas may start at once and exactly
+one migrates. Driven by three facts §3.2 could not absorb: the declarative
+re-apply is blind to changes on existing objects (seven `CHECK`
+constraints are frozen; `api_keys.kind` has already drifted), the
+`migrations/` directory ADR 0013 reserved was never built, and the
+deployment target is now GitLab AutoDevOps — one runner type per project,
+so `hivemind-api` and `hivemind-mcp-http` become independently released
+projects at 2–3 replicas each against one pool.
+
+Work items:
+- `0001.initial-schema` (current `schema.sql`, dim-parameterised) + the
+  chain; `migrate.py` keeps its public surface, swaps its body.
+- Retire `schema_migrations`; `current_schema_version()` reads
+  `_yoyo_migration` (ops surface unchanged).
+- `schema.sql` becomes a CI-generated reference, never applied.
+- `startupProbe` on both Deployments (the migration runs before the
+  server listens; liveness would otherwise kill a slow index build).
+- CI: migration-file checksum immutability, generated-`schema.sql`
+  currency, and the **previous three releases' tests against a
+  HEAD-migrated pool** (enforces expand-and-contract by testing the
+  property, not by grepping for DDL verbs).
+- Deps: `yoyo-migrations` + `psycopg` (startup path only; `asyncpg`
+  stays the sole request-path driver).
+
+*Not in scope here:* the replica bump itself (`replicas: 1` → 2–3) is a
+separate change — it drags in rollout strategy and **SSE connection
+draining on `hivemind-mcp-http`**, which is currently unexamined.
 
 ## Tier 4 — close the spec's open items (SPEC §11) (former Tier 3)
 
