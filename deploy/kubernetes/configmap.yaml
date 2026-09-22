@@ -4,6 +4,12 @@
 # every key falls back to the code default in Settings when omitted. The
 # three Secret-backed values (DSN, embedding API key, extractor API key)
 # live in the `hivemind-secrets` Secret, NOT here (see secret-template.yaml).
+#
+# HIVEMIND_RUNNER/HOST/PORT are set on the Deployments themselves, not
+# here — they are deliberately NOT Settings fields (see
+# `_ALLOWED_EXTRA_ENV_VARS` in config.py). Any other HIVEMIND_* variable
+# that isn't a Settings field fails startup loudly (ADR 0024) rather than
+# being silently ignored, so a typo here surfaces immediately.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -47,6 +53,8 @@ data:
   # inside RRF's 2.62x fused range, which is what keeps match quality the
   # sort key. A BAND, NOT A SLIDER: 0.9 measured worse than turning decay
   # off, 1.0 *is* off, and below 0.381 it does nothing. Do not tune it up.
+  # To revert to the pre-ADR-0022 unbounded behaviour, set this to "" or
+  # "none" (ADR 0023) instead of a negligible number.
   HIVEMIND_RECENCY_FLOOR: "0.8"
   HIVEMIND_QUALITY_HELPFUL_WEIGHT: "0.05"
   HIVEMIND_QUALITY_STALE_WEIGHT: "0.10"
