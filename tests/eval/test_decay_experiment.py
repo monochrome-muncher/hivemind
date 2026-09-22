@@ -32,6 +32,10 @@ actually explains the first.
 This module does not modify ``tests/eval/golden.py`` or the pinned §1.1
 gate; those keep running unchanged beside it.
 
+The seeding and ranking machinery is shared with the §4.6 ``rrf_k``
+sweep (``tests/eval/temporal_runner.py``), so the two experiments cannot
+drift apart on how the fixture is loaded or scored.
+
 Run ``uv run pytest tests/eval/test_decay_experiment.py -s`` to print the
 measured tables (reproduced in
 ``.superpowers/sdd/tier4-provenance-and-decay/task-2-report.md``).
@@ -39,32 +43,25 @@ measured tables (reproduced in
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from datetime import timedelta
-from typing import Any
-
 from hivemind.domain.entry import EntryDraft, Kind
 from hivemind.memstore import MemoryStore
-from hivemind.retrieval.eval import aggregate_report, evaluate_query
 from hivemind.services.governance import WriteService
-from hivemind.services.search import SearchService
 from tests.eval.golden import golden_corpus, golden_queries
-from tests.eval.temporal import TEMPORAL_K, LabelledQuery, temporal_corpus, temporal_queries
-from tests.fakes import FIXED_NOW, FixedClock, make_clock, make_embedder, make_search_config
-
-K = TEMPORAL_K
-
-# The two half-lives the experiment sweeps. DECAY_OFF is large enough that
-# the recency factor is *exactly* 1.0 for the oldest entry in the corpus,
-# so variant B is "no recency term" rather than "a very long half-life" —
-# see ``test_decay_off_is_exactly_neutral``. It matters: at 1e9 the factor
-# still varies in the 7th decimal, which is enough to break ties in the
-# fused score and quietly reorder results.
-DECAY_ON = 30.0
-DECAY_OFF = 1.0e20
-
-# A variant is a rule mapping a query to the half-life it is scored under.
-HalfLifeRule = Callable[[LabelledQuery], float]
+from tests.eval.temporal import temporal_corpus, temporal_queries
+from tests.eval.temporal_runner import (
+    DECAY_OFF,
+    DECAY_ON,
+    SLICES,
+    HalfLifeRule,
+    K,
+    SliceReports,
+    aggregate_slices,
+    measure_slices,
+    ranked_ids,
+    render_table,
+    seed_temporal_corpus,
+)
+from tests.fakes import make_clock, make_embedder
 
 VARIANTS: dict[str, HalfLifeRule] = {
     "A_always_on": lambda _q: DECAY_ON,
@@ -72,109 +69,10 @@ VARIANTS: dict[str, HalfLifeRule] = {
     "C_gated": lambda q: DECAY_ON if q.temporal else DECAY_OFF,
 }
 
-# The slices reported, in report order: the §4.4 axis first, then the
-# competition-pattern diagnostic, then the whole set.
-SLICES = ("non_temporal", "temporal", "old_exact", "currency_pair", "timeless", "all")
 
-QueryMetrics = dict[str, Any]
-
-
-def _slices_of(labelled: LabelledQuery) -> tuple[str, ...]:
-    """Which report slices a query belongs to (a query is in three)."""
-    return ("temporal" if labelled.temporal else "non_temporal", labelled.pattern, "all")
-
-
-async def _seed() -> tuple[MemoryStore, list[str], FixedClock]:
-    """Seed the age-varied corpus; return the store, entry ids and the "now".
-
-    The store's clock advances one second per write, so ``created_at``
-    order equals corpus order and the store's overlap tie-break is
-    deterministic (entry ids are uuid4, so leaving ties to the id would not
-    be). The search clock stays pinned at ``FIXED_NOW``; entry ages come
-    from the explicit ``occurred_at`` each draft carries.
-    """
-    store_clock = make_clock()
-    now_clock = make_clock()
-    store = MemoryStore(store_clock)
-    write_service = WriteService(store, make_embedder())
-
-    entry_ids: list[str] = []
-    for aged in temporal_corpus():
-        draft = EntryDraft(
-            kind=Kind(aged.kind),
-            summary=aged.summary,
-            author="eval",
-            agent="eval-agent",
-            tags=aged.tags,
-            occurred_at=FIXED_NOW - timedelta(days=aged.age_days),
-        )
-        entry = await write_service.write(draft)
-        entry_ids.append(entry.id)
-        store_clock.advance_days(1.0 / 86_400.0)
-    return store, entry_ids, now_clock
-
-
-async def _rank(
-    store: MemoryStore,
-    now_clock: FixedClock,
-    query: str,
-    half_life_days: float,
-) -> list[str]:
-    """The ranked entry ids for one query under one half-life."""
-    # candidate_top_k=20 here vs. the fake's default of 10 (used by the
-    # §1.1 gate, tests/fakes.py) — so this fixture's blindness check runs
-    # under a slightly different config than the gate. Harmless: the
-    # recency factor is applied per-candidate and cancels out of the
-    # blindness comparison (DECAY_ON vs. DECAY_OFF) regardless of how many
-    # candidates are in the pool.
-    service = SearchService(
-        store,
-        make_embedder(),
-        make_search_config(candidate_top_k=20, default_limit=K, half_life_days=half_life_days),
-        now_fn=now_clock,
-    )
-    hits = await service.search(query, limit=K)
-    return [hit.entry_id for hit in hits]
-
-
-async def run_variant(rule: HalfLifeRule) -> dict[str, dict[str, QueryMetrics]]:
-    """Run every labelled query under one variant, bucketed into the slices."""
-    store, entry_ids, now_clock = await _seed()
-    slices: dict[str, dict[str, QueryMetrics]] = {name: {} for name in SLICES}
-    for labelled in temporal_queries():
-        ranked = await _rank(store, now_clock, labelled.query, rule(labelled))
-        relevant = {entry_ids[i]: 1 for i in labelled.relevant}
-        metrics = evaluate_query(ranked, relevant, K)
-        for slice_name in _slices_of(labelled):
-            slices[slice_name][labelled.query] = metrics
-    return slices
-
-
-async def measure_all() -> dict[str, dict[str, dict[str, float]]]:
+async def measure_all() -> dict[str, SliceReports]:
     """``{variant: {slice: aggregate_report}}`` for all three variants."""
-    out: dict[str, dict[str, dict[str, float]]] = {}
-    for name, rule in VARIANTS.items():
-        slices = await run_variant(rule)
-        out[name] = {
-            slice_name: aggregate_report(per_query, K) for slice_name, per_query in slices.items()
-        }
-    return out
-
-
-def render_table(measured: dict[str, dict[str, dict[str, float]]]) -> str:
-    """The measured numbers as a Markdown table (pasted into the report)."""
-    lines = [
-        f"| variant | slice | queries | hit@{K} | MRR | nDCG@{K} |",
-        "|---|---|---|---|---|---|",
-    ]
-    for variant, slices in measured.items():
-        for slice_name in SLICES:
-            report = slices[slice_name]
-            lines.append(
-                f"| {variant} | {slice_name} | {int(report['queries'])} | "
-                f"{report['hit_at_k']:.3f} | {report['mrr']:.3f} | {report[f'ndcg_at_{K}']:.3f} |"
-            )
-    return "\n".join(lines)
+    return {name: aggregate_slices(await measure_slices(rule)) for name, rule in VARIANTS.items()}
 
 
 class TestDecayExperiment:
@@ -204,7 +102,7 @@ class TestDecayExperiment:
                 )
             )
         for query, _relevant in golden_queries():
-            assert await _rank(store, clock, query, DECAY_ON) == await _rank(
+            assert await ranked_ids(store, clock, query, DECAY_ON) == await ranked_ids(
                 store, clock, query, DECAY_OFF
             ), f"golden query '{query}' is decay-sensitive — the golden set is no longer blind"
 
@@ -215,12 +113,12 @@ class TestDecayExperiment:
         blind to §6.4 as the golden set is and every number below would be
         meaningless. This asserts it is not.
         """
-        store, _entry_ids, now_clock = await _seed()
+        store, _entry_ids, now_clock = await seed_temporal_corpus()
         differing = [
             labelled.query
             for labelled in temporal_queries()
-            if await _rank(store, now_clock, labelled.query, DECAY_ON)
-            != await _rank(store, now_clock, labelled.query, DECAY_OFF)
+            if await ranked_ids(store, now_clock, labelled.query, DECAY_ON)
+            != await ranked_ids(store, now_clock, labelled.query, DECAY_OFF)
         ]
         assert differing, "decay changed no ranking — the fixture cannot measure §4.4"
 
@@ -266,7 +164,7 @@ class TestDecayExperiment:
         """This is a determinism check, not a §4.4 finding.
 
         C is *defined* as A on temporal queries and B on the rest
-        (``VARIANTS["C_gated"]``), and ``run_variant`` buckets each query's
+        (``VARIANTS["C_gated"]``), and ``measure_slices`` buckets each query's
         metrics into its labelled slice — so
         ``measured["C_gated"]["temporal"] == measured["A_always_on"]["temporal"]``
         is true by construction, for any pipeline, correct or not; it is
@@ -298,14 +196,14 @@ class TestDecayExperiment:
         temporal one, so it stays buried: gating on the query's time sense
         does not address the mechanism, it only narrows where it shows up.
         """
-        store, entry_ids, now_clock = await _seed()
+        store, entry_ids, now_clock = await seed_temporal_corpus()
         old_exact = [q for q in temporal_queries() if q.pattern == "old_exact"]
         assert {case.temporal for case in old_exact} == {True, False}, (
             "the old_exact pattern must be crossed with both query kinds"
         )
 
         for case in old_exact:
-            ranked = await _rank(store, now_clock, case.query, VARIANTS["C_gated"](case))
+            ranked = await ranked_ids(store, now_clock, case.query, VARIANTS["C_gated"](case))
             relevant_id = entry_ids[case.relevant[0]]
             if case.temporal:
                 assert relevant_id not in ranked, (
@@ -321,7 +219,7 @@ class TestDecayExperiment:
         query counts per slice. This checks fixture shape, not measured
         retrieval behavior (the MRR/hit@k assertions above do that)."""
         measured = await measure_all()
-        table = render_table(measured)
+        table = render_table(measured, "variant")
         print("\n" + table)
         for variant in VARIANTS:
             for slice_name in SLICES:
