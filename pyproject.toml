@@ -10,9 +10,11 @@ dependencies = [
     "httpx>=0.28.1",
     "mcp>=2.2.0",
     "pgvector>=0.5.0",
+    "psycopg[binary]>=3.2.0",
     "pydantic>=2.13.5",
     "pydantic-settings>=2.15.0",
     "uvicorn[standard]>=0.52.4",
+    "yoyo-migrations>=9.0.0",
 ]
 
 [project.scripts]
@@ -57,9 +59,17 @@ mypy_path = "src"
 packages = ["hivemind"]
 explicit_package_bases = true
 
-# asyncpg and pgvector ship no py.typed markers; silence the missing-stub
-# import errors for these two third-party packages (the rest of the codebase
-# stays fully type-checked).
+# asyncpg, pgvector and yoyo ship no py.typed markers; silence the
+# missing-stub import errors for these third-party packages (the rest of the
+# codebase stays fully type-checked).
 [[tool.mypy.overrides]]
-module = ["asyncpg.*", "pgvector.*"]
+module = ["asyncpg.*", "pgvector.*", "yoyo.*"]
 ignore_missing_imports = true
+
+# The migration chain is data, not library code: each file is exec'd by yoyo
+# with `step` injected, they are never imported by the package, and applied
+# migrations are frozen (CI pins their hashes) so they cannot be refactored
+# to satisfy a checker.
+[[tool.mypy.overrides]]
+module = ["hivemind.store.migrations.*"]
+ignore_errors = true

@@ -106,6 +106,15 @@ when the connection drops. A dead pod releases its lock by dying, so a
 stale lock is structurally impossible. It needs no table, no new
 dependency, and no runbook entry.
 
+**Measured.** Eight migrators racing a cold pool, three rounds each:
+unlocked, **7 of 8 fail every round**; locked, **0 of 8 fail**. The
+first casualty is not the `DROP TRIGGER` / `CREATE TRIGGER` pair one
+would expect but the very first statement —
+`CREATE EXTENSION IF NOT EXISTS vector` raises `UniqueViolation` on
+`pg_extension_name_index`, because `IF NOT EXISTS` is a check, not an
+atomic operation. Under ADR 0018 that exits the entrypoint before the
+runner ever execs, i.e. a `CrashLoopBackOff` on rollout.
+
 ## Consequences
 
 - **Expand-and-contract is mandatory.** Two independently released

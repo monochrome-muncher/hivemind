@@ -17,7 +17,12 @@ from __future__ import annotations
 import inspect
 
 from hivemind.config import Settings
-from hivemind.store.migrate import dim_mismatch_message, migrate
+from hivemind.store.migrate import (
+    MIGRATION_LOCK_KEY,
+    _yoyo_dsn,
+    dim_mismatch_message,
+    migrate,
+)
 
 
 class TestDimMismatchMessage:
@@ -65,3 +70,46 @@ class TestDimDefaults:
         # A bare ``hivemind-migrate`` / fixture call must not bake 1536.
         params = inspect.signature(migrate).parameters
         assert params["dim"].default == 1024
+
+
+class TestYoyoDsn:
+    """The service speaks asyncpg's ``postgresql://`` everywhere; yoyo
+    picks its driver from the scheme, and psycopg3 is
+    ``postgresql+psycopg://`` (ADR 0020). The rewrite is pure string
+    surgery — the credentials, host, port, database and query string all
+    have to survive it untouched."""
+
+    def test_postgresql_scheme_is_rewritten_to_psycopg(self) -> None:
+        assert _yoyo_dsn("postgresql://u:p@host:5432/db") == (
+            "postgresql+psycopg://u:p@host:5432/db"
+        )
+
+    def test_postgres_alias_is_rewritten_too(self) -> None:
+        assert _yoyo_dsn("postgres://u:p@host:5432/db") == ("postgresql+psycopg://u:p@host:5432/db")
+
+    def test_everything_after_the_scheme_survives(self) -> None:
+        dsn = "postgresql://user:p%40ss@db.internal:6432/hivemind?sslmode=require"
+        assert _yoyo_dsn(dsn) == (
+            "postgresql+psycopg://user:p%40ss@db.internal:6432/hivemind?sslmode=require"
+        )
+
+    def test_an_explicit_driver_is_left_alone(self) -> None:
+        # Already driver-qualified: rewriting would corrupt it.
+        dsn = "postgresql+psycopg://u:p@host/db"
+        assert _yoyo_dsn(dsn) == dsn
+
+
+class TestMigrationLockKey:
+    """ADR 0020: the advisory-lock key is arbitrary but FIXED — every
+    process migrating a pool must take the same one, so it can never
+    become a config knob."""
+
+    def test_key_is_a_stable_signed_bigint(self) -> None:
+        # Must fit in a signed int64 (Postgres advisory-lock keys are
+        # bigint) and never change.
+        assert MIGRATION_LOCK_KEY == 0x484956454D494E44
+        assert 0 < MIGRATION_LOCK_KEY < 2**63
+
+    def test_key_is_ascii_hivemind(self) -> None:
+        # Self-identifying in pg_locks: the key reads as "HIVEMIND".
+        assert MIGRATION_LOCK_KEY.to_bytes(8, "big") == b"HIVEMIND"
