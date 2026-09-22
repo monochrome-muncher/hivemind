@@ -339,3 +339,46 @@ async def test_create_entry_records_caller_importance_source(store: MemoryStore)
     reloaded = await store.get_entry(entry.id)
     assert reloaded is not None
     assert reloaded.importance_source is ImportanceSource.CALLER
+
+
+class TestEntryDraftNormalisesEnums:
+    """``Kind`` and ``ImportanceSource`` are ``StrEnum``s, so a raw string
+    compares EQUAL to the member but is not IDENTICAL to it.
+
+    ``EntryFilters.matches`` compares both by identity, and the MCP
+    serialiser reads ``entry.kind.value`` — so an un-normalised
+    string-kind draft is silently invisible to a ``kind=`` filter (it
+    under-counts ``by_kind``) and crashes the serialiser. The store
+    adapters coerce on read; the draft closes the write side.
+    """
+
+    def test_string_kind_becomes_the_enum_member(self) -> None:
+        draft = EntryDraft(kind="fact", summary="s", author="a", agent="b")  # type: ignore[arg-type]
+        assert draft.kind is Kind.FACT
+        assert draft.kind.value == "fact"  # the MCP serialiser's access
+
+    def test_string_importance_source_becomes_the_enum_member(self) -> None:
+        draft = EntryDraft(
+            kind=Kind.FACT,
+            summary="s",
+            author="a",
+            agent="b",
+            importance=5,
+            importance_source="caller",  # type: ignore[arg-type]
+        )
+        assert draft.importance_source is ImportanceSource.CALLER
+
+    def test_an_unknown_kind_is_rejected_at_construction(self) -> None:
+        with pytest.raises(ValueError):
+            EntryDraft(kind="nonsense", summary="s", author="a", agent="b")  # type: ignore[arg-type]
+
+    async def test_a_string_kind_draft_is_countable_by_kind(self) -> None:
+        """The regression this closes: before normalisation this count
+        was 0, so ``MetricsService``'s ``by_kind`` under-reported every
+        entry written through a string-kind draft."""
+        store = MemoryStore(make_clock())
+        await store.create_entry(
+            EntryDraft(kind="fact", summary="s", author="alice", agent="a1"),  # type: ignore[arg-type]
+            [0.1, 0.1, 0.1, 0.1],
+        )
+        assert await store.count_entries(EntryFilters(kind=Kind.FACT, include_inactive=True)) == 1
