@@ -134,7 +134,11 @@ runner ever execs, i.e. a `CrashLoopBackOff` on rollout.
   property directly. A grep for `DROP COLUMN` / `ALTER` / `RENAME` was
   rejected: in correct expand-and-contract those verbs are routine (they
   *are* the contract phase), so such a check fires on correct work and
-  trains reviewers to dismiss it.
+  trains reviewers to dismiss it. The checksum pin covers each
+  migration's `.rollback.sql` too, not just the forward file: a
+  rollback is executable DDL that ships in the same image, so an edit
+  to it post-release is the identical fresh-vs-upgraded divergence bug
+  under a different name.
 - **Migrations ship inside the image.** `uv_build` includes everything
   under the module root, so `src/hivemind/store/migrations/` rides the
   wheel with no packaging configuration (the same way `schema.sql`

@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 from hivemind.config import SearchConfig
-from hivemind.domain.entry import EntryDraft, EntryFilters, Kind
+from hivemind.domain.entry import EntryDraft, EntryFilters, ImportanceSource, Kind
 from hivemind.domain.feedback import Verdict
 from hivemind.memstore import MemoryStore
 from hivemind.services.search import SearchService
@@ -104,6 +104,7 @@ class TestSupersessionInvariant:
             store,
             "Auth service uses JWT with 15-minute token expiry",
             importance=5,  # high raw score
+            importance_source=ImportanceSource.CALLER,
             occurred_at=T0,
         )
         clock.advance_days(1)
@@ -111,6 +112,7 @@ class TestSupersessionInvariant:
             store,
             "Auth service uses JWT with 30-minute token expiry",
             importance=1,  # low raw score (decayed by occurred_at)
+            importance_source=ImportanceSource.CALLER,
             occurred_at=T0 - timedelta(days=60),
             supersedes=(old.id,),
         )
@@ -155,7 +157,13 @@ class TestDecayAndQuality:
     async def test_wrong_feedback_sinks_an_entry(self, embedder, search_config) -> None:
         """SPEC.md §4.2/§6.4: an entry reported `wrong` drops in rank."""
         store = MemoryStore(make_clock())
-        target = await create(store, "churn uses daily cohorts", occurred_at=T0, importance=5)
+        target = await create(
+            store,
+            "churn uses daily cohorts",
+            occurred_at=T0,
+            importance=5,
+            importance_source=ImportanceSource.CALLER,
+        )
         anchor = await create(store, "other churn note", occurred_at=T0, importance=3)
         service = make_service(store, embedder, search_config)
 

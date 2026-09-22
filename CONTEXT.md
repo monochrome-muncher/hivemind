@@ -32,10 +32,6 @@ _Avoid_: report, deep-dive (in prose); long-form entry (any kind may have a long
 A choice the organization (or a part of it) made, with its rationale.
 _Avoid_: ruling, resolution
 
-**Importance source**:
-Whether an entry's `importance` was supplied by the writer (`caller`) or left at the default (`default`). Server-derived, not client-settable.
-_Avoid_: importance provenance (the field is `importance_source`)
-
 ### Provenance
 
 **Author**:
@@ -49,6 +45,10 @@ _Avoid_: bot, worker, client, user
 **Embedding model**:
 The model that produced an entry's vector; recorded on the entry so vector provenance is traceable (SPEC §7, ADR 0005).
 _Avoid_: embedding service, vector store
+
+**Importance source**:
+Whether an entry's `importance` was supplied by the writer (`caller`) or left at the default (`default`). Server-derived, not client-settable — the exactly analogous field to embedding model, one level up (which model produced the vector, vs. whether the writer set the importance).
+_Avoid_: using "importance provenance" as another name for the field — it's `importance_source`; describing the field as a provenance signal in ordinary prose is fine.
 
 **Embedding dimension**:
 The fixed length of an entry's vector — a deploy-time decision baked into the pool's `vector(:dim)` column at migration time (SPEC §7, ADR 0005). The default is 1024 (ADR 0015); the dev Makefile pins 512 for fast local vLLM embedding. A mismatch between the pool's dim and the configured dim is a loud error at migrate time, never a silent assumption (ADR 0015).

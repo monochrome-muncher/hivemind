@@ -28,7 +28,7 @@ from hivemind.store.migrate import (
     rollback,
 )
 
-HEAD = "0002.importance-source"
+HEAD = "0003.importance-source-check"
 
 
 def _dsn() -> str:
@@ -67,8 +67,8 @@ async def test_migrate_applies_the_chain_and_reports_its_head() -> None:
 
     conn = await asyncpg.connect(dsn)
     try:
-        # One row per migration in the chain (0001 + 0002 — ADR 0020).
-        assert await conn.fetchval("SELECT count(*) FROM _yoyo_migration") == 2
+        # One row per migration in the chain (0001 + 0002 + 0003 — ADR 0020).
+        assert await conn.fetchval("SELECT count(*) FROM _yoyo_migration") == 3
     finally:
         await conn.close()
 
@@ -93,7 +93,7 @@ async def test_concurrent_migrators_are_serialised_by_the_advisory_lock() -> Non
     conn = await asyncpg.connect(dsn)
     try:
         # Each migration applied exactly once, not once per migrator.
-        assert await conn.fetchval("SELECT count(*) FROM _yoyo_migration") == 2
+        assert await conn.fetchval("SELECT count(*) FROM _yoyo_migration") == 3
         assert await conn.fetchval("SELECT to_regclass('entries') IS NOT NULL")
     finally:
         await conn.close()
@@ -128,24 +128,30 @@ async def test_current_schema_version_is_none_when_unmigrated() -> None:
 
 async def test_rollback_removes_the_latest_migration() -> None:
     """ADR 0020: a structural migration (not `0001`) ships a real
-    rollback. Rolling back `0002` drops the additive
-    ``importance_source`` column and leaves `0001` in place."""
+    rollback. Rolling back `0003` drops the named CHECK constraint it
+    added and leaves `0001` + `0002` (and the `importance_source`
+    column itself) in place."""
     dsn, dim = _dsn(), Settings().embedding_dim
     await _require_postgres(dsn)
     await _reset_chain(dsn)
     await migrate(dsn, dim)
 
     rolled = await rollback(dsn, dim, count=1)
-    assert rolled == ["0002.importance-source"]
-    assert await current_schema_version(dsn) == "0001.initial-schema"
+    assert rolled == ["0003.importance-source-check"]
+    assert await current_schema_version(dsn) == "0002.importance-source"
 
     conn = await asyncpg.connect(dsn)
     try:
+        constraint = await conn.fetchval(
+            "SELECT 1 FROM pg_constraint WHERE conname = 'entries_importance_source_check'"
+        )
+        assert constraint is None
+        # The column itself is untouched — only 0002's rollback drops it.
         column = await conn.fetchval(
             "SELECT 1 FROM information_schema.columns "
             "WHERE table_name = 'entries' AND column_name = 'importance_source'"
         )
-        assert column is None
+        assert column is not None
     finally:
         await conn.close()
 
@@ -156,9 +162,10 @@ async def test_rollback_refuses_to_drop_the_initial_schema() -> None:
     Rolling back `0001` drops every entry in the pool, so `rollback`
     refuses and names the two real remediations instead — even when the
     requested count would also take later (legal) migrations with it
-    (`count=2` from HEAD), and equally when `0001` is already the head
-    in its own right (`count=1` after `0002` has already been rolled
-    back) — both are the same refusal, exercised from both approaches.
+    (`count=3` from HEAD, taking `0003` and `0002` with it), and equally
+    when `0001` is already the head in its own right (`count=1` after
+    `0003` and `0002` have already been rolled back) — both are the
+    same refusal, exercised from both approaches.
     """
     dsn, dim = _dsn(), Settings().embedding_dim
     await _require_postgres(dsn)
@@ -166,7 +173,7 @@ async def test_rollback_refuses_to_drop_the_initial_schema() -> None:
     await migrate(dsn, dim)
 
     with pytest.raises(RuntimeError) as excinfo:
-        await rollback(dsn, dim, count=2)
+        await rollback(dsn, dim, count=3)
     message = str(excinfo.value)
     assert "0001.initial-schema" in message
     assert "pg-reset" in message or "backup" in message
@@ -174,10 +181,10 @@ async def test_rollback_refuses_to_drop_the_initial_schema() -> None:
     # The refusal left the pool intact.
     assert await current_schema_version(dsn) == HEAD
 
-    # Now put 0001 in as the head for real (a legal rollback of 0002),
-    # and confirm count=1 refuses it exactly the same way.
-    rolled = await rollback(dsn, dim, count=1)
-    assert rolled == ["0002.importance-source"]
+    # Now put 0001 in as the head for real (a legal rollback of 0003 then
+    # 0002), and confirm count=1 refuses it exactly the same way.
+    rolled = await rollback(dsn, dim, count=2)
+    assert rolled == ["0003.importance-source-check", "0002.importance-source"]
     assert await current_schema_version(dsn) == "0001.initial-schema"
 
     with pytest.raises(RuntimeError) as excinfo:

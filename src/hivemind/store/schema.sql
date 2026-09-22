@@ -93,6 +93,7 @@ CREATE TABLE public.entries (
     entities_model text,
     importance_source text DEFAULT 'default'::text NOT NULL,
     CONSTRAINT entries_importance_check CHECK (((importance >= 1) AND (importance <= 5))),
+    CONSTRAINT entries_importance_source_check CHECK ((importance_source = ANY (ARRAY['caller'::text, 'default'::text]))),
     CONSTRAINT entries_kind_check CHECK ((kind = ANY (ARRAY['fact'::text, 'insight'::text, 'decision'::text]))),
     CONSTRAINT entries_state_check CHECK ((state = ANY (ARRAY['active'::text, 'superseded'::text, 'withdrawn'::text])))
 );
