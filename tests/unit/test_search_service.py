@@ -221,10 +221,10 @@ class TestRecencyFloorConfig:
     ) -> None:
         """``HIVEMIND_RECENCY_FLOOR`` is the operator's knob (ADR 0022).
 
-        Its settable range there is ``(0, 1]``; there is deliberately no
-        env spelling for "no floor" (the unbounded form is the defect
-        ADR 0022 fixes), so a bad value is a loud startup failure rather
-        than a silent fall back to it.
+        Its settable range there is ``(0, 1]`` for a real value; ``none``
+        and empty string are the explicit "no floor" spellings (ADR
+        0023), so an unrecognized bad value (like a stray typo) is still
+        a loud startup failure rather than a silent fall back to it.
         """
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("HIVEMIND_RECENCY_FLOOR", "0.5")
@@ -232,6 +232,28 @@ class TestRecencyFloorConfig:
         monkeypatch.setenv("HIVEMIND_RECENCY_FLOOR", "null")
         with pytest.raises(ValidationError):
             Settings()
+
+    @pytest.mark.parametrize("spelling", ["", "none", "None", "NONE", "  none  "])
+    def test_an_operator_can_spell_no_floor(
+        self, spelling: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ADR 0023: empty string and the case-insensitive literal "none"
+        both resolve to ``None`` — the pre-ADR-0022 unbounded form — so
+        reverting the floor no longer needs a ``1e-9`` approximation."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("HIVEMIND_RECENCY_FLOOR", spelling)
+        settings = Settings()
+        assert settings.recency_floor is None
+        assert settings.search_config().recency_floor is None
+
+    def test_no_floor_spelling_matches_programmatic_none(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The env spelling and constructing ``SearchConfig(recency_floor=None)``
+        directly must agree — same value, two ways of reaching it."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("HIVEMIND_RECENCY_FLOOR", "none")
+        assert Settings().search_config() == SearchConfig(recency_floor=None)
 
     @pytest.mark.parametrize("bad", [0.0, -0.1, 1.5])
     def test_a_floor_outside_the_unit_interval_is_a_configuration_error(self, bad: float) -> None:

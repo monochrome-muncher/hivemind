@@ -45,6 +45,19 @@ make mcp-http       # start the hostable MCP runner as a detached service (:8088
 | `HIVEMIND_EXTRACTOR_ENDPOINT` / `_MODEL` / `_API_KEY` | the entity-extraction extractor (ADR 0016, SPEC §13): **optional + best-effort** — unset = extraction off (entries land with empty `entities`, zero LLM cost); an extraction failure **never** blocks a write (the entry lands without facets). Dev/test: `http://localhost:8080/v1` (`qwen3.8-27b`, key `dummy`) |
 | `HIVEMIND_EXTRACTOR_RETRIES` / `_TIMEOUT` | retry budget + call timeout for transient extractor failures (ADR 0014 pattern) — default 2 retries / 30 s; deterministic 4xx + schema-validation failures fail fast, no retry |
 | `HIVEMIND_HOST` / `HIVEMIND_PORT` | the mcp-http bind host/port (ADR 0010) |
+| `HIVEMIND_RECENCY_FLOOR` | lower bound on the SPEC §6.4 recency factor, `(0, 1]`, default 0.8 (ADR 0022) — set it to an empty value or `none` (case-insensitive) to revert to the pre-ADR-0022 unbounded behaviour (ADR 0023), not a negligible number |
+
+> **An unrecognized `HIVEMIND_*` variable now fails startup loudly**
+> (ADR 0024): `load_settings()` rejects any `HIVEMIND_*` name that is
+> neither a `Settings` field nor on the small exemption list in
+> `src/hivemind/config.py` (`_ALLOWED_EXTRA_ENV_VARS` — currently
+> `HIVEMIND_RUNNER`/`HOST`/`PORT`/`MCP_KEY`/`MCP_HTTP_PORT`, all read
+> directly from `os.environ` outside `Settings`). If a pod fails at
+> startup with `Unknown HIVEMIND_* environment variable(s)`, the error
+> names the offending variable(s) and, where the name is close to a real
+> one, suggests it — this is what a stale or renamed variable (e.g. the
+> ADR 0021 `_PREFIX_CHARS` → `_PREFIX_TOKENS` rename) looks like now,
+> instead of silently doing nothing.
 
 > **Embedding dimension is a deploy-time decision** (ADR 0005): the
 > `vector(:dim)` column is created at migration time. Changing the

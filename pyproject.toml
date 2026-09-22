@@ -13,6 +13,7 @@ dependencies = [
     "psycopg[binary]>=3.2.0",
     "pydantic>=2.13.5",
     "pydantic-settings>=2.15.0",
+    "python-dotenv>=1.2.3",
     "uvicorn[standard]>=0.52.4",
     "yoyo-migrations>=9.0.0",
 ]
