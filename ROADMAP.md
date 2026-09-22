@@ -42,8 +42,12 @@
   **§4.2 is rescoped** — its "how much, in what unit" half is settled
   by ADR 0021 (a 2000-whitespace-word budget, and the knob now actually
   reaches the embedder), leaving "what goes into the embedded text"
-  open and chunking explicitly out of scope. The live measurement item
-  is **§4.6**, starting with the free `rrf_k` knob.
+  open and chunking explicitly out of scope. **§4.6**'s cheap half is
+  now measured too: sweeping `rrf_k` with decay on does **not** recover
+  what the recency term buries (`old_exact` stays at 0.000 hit@5 at
+  every `k`), and the whole `rrf_k` lever is bounded at ~5.3 half-lives
+  of age — so no default was changed and the §6.4 redesign is still the
+  open work, held behind a real aged corpus.
 
 ## The keystone is shipped: measure, then Tier 4
 
@@ -406,7 +410,9 @@ are §11 items — each says so.)*
   distribution**, which is NOT built here.
 - **4.6 The *form* of the recency term is mismatched to RRF's range.**
   *(residual finding, carried forward from §4.4 — not gating, which is
-  rejected and stays rejected there; needs its own ADR)* §4.4 measured
+  rejected and stays rejected there. The cheap half is now **measured**:
+  the `rrf_k` sweep below, which came back negative and changed no
+  default. The remaining redesign still needs its own ADR.)* §4.4 measured
   and rejected *gating* the recency term. Underneath that result sits a
   separate, arithmetic mismatch that gating would not have fixed either
   way: with the SPEC §6.2 defaults the fused RRF score spans at most
@@ -475,16 +481,68 @@ are §11 items — each says so.)*
   finding and would only add a knob on top of an already-mismatched
   form.
 
-  **Trigger:** for (a)/(b), unchanged — the first real corpus with
-  meaningful age spread, i.e. run the §1.1 harness against real queries
-  on an aged pool once there is production usage. Not before: 10
-  synthetic queries scored by a 4-dimension hash embedder is exactly
-  the wrong evidence to land a scoring redesign on (the same reasoning
-  §4.4 closed on). The `rrf_k` sweep is explicitly **not** held behind
-  that trigger, because its arithmetic (the table above) is
-  fixture-independent and changing it costs nothing to undo — but see
-  the measured table below for what the synthetic fixture can and
-  cannot establish about it.
+  **`rrf_k` MEASURED — and the answer is no.** *(fixture +
+  runner: `tests/eval/temporal.py`, `tests/eval/temporal_runner.py`,
+  `tests/eval/test_rrf_k_experiment.py`; `SearchConfig.rrf_k` is
+  **unchanged** at 60 and the §1.1 gate is untouched)* The sweep runs
+  `rrf_k` over {60, 20, 10, 5} with **decay ON** (§4.4's variant A) —
+  everything else held fixed and shared with the §4.4 experiment:
+
+  | `rrf_k` | non-temporal hit@5 / MRR / nDCG@5 | temporal | `old_exact` | all |
+  |---|---|---|---|---|
+  | **60** (today) | 0.333 / 0.208 / 0.238 | 0.750 / 0.625 / 0.658 | **0.000 / 0.000 / 0.000** | 0.500 / 0.375 / 0.406 |
+  | **20** | 0.500 / 0.242 / 0.303 | 0.750 / 0.625 / 0.658 | **0.000 / 0.000 / 0.000** | 0.600 / 0.395 / 0.445 |
+  | **10** | 0.500 / 0.264 / 0.322 | 0.750 / 0.625 / 0.658 | **0.000 / 0.000 / 0.000** | 0.600 / 0.408 / 0.456 |
+  | **5** | 0.500 / 0.292 / 0.344 | 0.750 / 0.625 / 0.658 | **0.000 / 0.000 / 0.000** | 0.600 / 0.425 / 0.469 |
+  | *(60, decay off — §4.4's B, for reference)* | 1.000 / 0.917 / 0.938 | 1.000 / 0.708 / 0.783 | *1.000 / 1.000 / 1.000* | 1.000 / 0.833 / 0.876 |
+
+  **The question was: does lowering `rrf_k` recover the recall the
+  unconditional recency term destroys, without a change to
+  `scoring.py`? It does not.** The `old_exact` slice — the pattern
+  §4.4 identified as the real failure mode — stays at **0.000 hit@5 at
+  every `k`**, while decay-off answers both of those queries perfectly.
+  The relevant entries never enter the top 5 at any `k` in the sweep.
+
+  **And that is arithmetic, not a fixture artifact.** `2(k+20)/(k+1)`
+  is bounded above by **40x** (its limit as `k` -> 0), so the *entire*
+  `rrf_k` lever — from today's 60 all the way down to a degenerate `k`
+  nobody would ship — is worth at most **log2(40) = 5.3 half-lives**,
+  ~160 days at the 30-day default. The `old_exact` entries are 420 and
+  380 days old: **14 and 12.7 half-lives**. No value of `rrf_k` closes
+  a gap that size, for this corpus or any other. **`rrf_k` is not a
+  cheap substitute for fixing the form of the term** — this is the
+  single most useful thing the sweep establishes, and it is the reason
+  §4.6 still needs (a) or (b).
+
+  **What `rrf_k` *does* buy here** (so the verdict is not overstated):
+  all-query MRR rises monotonically as `k` falls (0.375 -> 0.395 ->
+  0.408 -> 0.425) and non-temporal hit@5 improves 0.333 -> 0.500 at
+  `k`<=20. The gain is entirely on the non-temporal / timeless side;
+  the `temporal` and `currency_pair` slices are **bit-identical across
+  the whole sweep**, so nothing is being traded away for it on this
+  fixture.
+
+  **Verdict on `k=10` as a default: NOT SUPPORTED by this evidence —
+  and the evidence is too weak to support any new default.** The
+  direction is mildly favourable and the sweep shows no downside here,
+  but the differences are a handful of rank positions over 10
+  hand-written queries scored by a **4-dimension hash embedder**
+  (`tests/fakes.FakeEmbedder`) — which is exactly the evidence §4.4
+  refused to land a change on, and the numbers do not separate `k=10`
+  from `k=5` or `k=20` in any case. What the fixture *can* establish
+  (the bound above) argues the opposite of the hypothesis that
+  motivated the sweep. **`SearchConfig.rrf_k` stays at 60**; changing
+  it is a decision on real-corpus evidence, not a consequence of this
+  table.
+
+  **Trigger:** for (a)/(b) and for any `rrf_k` default change,
+  unchanged — the first real corpus with meaningful age spread, i.e.
+  run the §1.1 harness against real queries on an aged pool once there
+  is production usage. Not before: 10 synthetic queries scored by a
+  4-dimension hash embedder is exactly the wrong evidence to land a
+  scoring change on (the same reasoning §4.4 closed on). What *is*
+  settled without that trigger is the bound: `rrf_k` cannot substitute
+  for (a) or (b), so the cheap knob is now measured and out of the way.
 
 ## Tier 5 — explicitly held: the §10 extensions (former Tier 4)
 
