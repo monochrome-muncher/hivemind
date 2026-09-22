@@ -1,4 +1,11 @@
-"""The §4.4 experiment: should the SPEC §6.4 recency term stay unconditional?
+"""The §4.4 and §4.6-(a) experiments on the age-varied fixture.
+
+Two questions, one fixture. **§4.4:** should the SPEC §6.4 recency term
+stay unconditional, or be *gated* on the query's time sense? (Measured,
+rejected — variants A/B/C below.) **§4.6 direction (a):** should the
+recency factor be *floored*, so the one unbounded factor in
+``entry_score``'s product can no longer dominate RRF's compressed fused
+range? (Variant D, the floor sweep at the bottom of this module.)
 
 Seam under test: the same one the §1.1 gate uses — ``SearchService`` over a
 ``MemoryStore``, measured with ``hivemind.retrieval.eval`` — but on the
@@ -6,9 +13,9 @@ age-varied fixture (``tests/eval/temporal.py``) instead of the golden set,
 because the golden set seeds every entry at one timestamp and therefore
 cannot measure decay at all.
 
-Three variants, all realised through ``SearchConfig.half_life_days`` alone
-— no production code change, which is the point of running the experiment
-*before* deciding:
+The §4.4 variants are realised through ``SearchConfig.half_life_days``
+alone — no production code change, which is the point of running the
+experiment *before* deciding:
 
 * **A. always-on** — today's behaviour, a 30-day half-life on every query.
 * **B. off** — a half-life so long that ``0.5 ** (age / half_life)`` is
@@ -19,10 +26,19 @@ Three variants, all realised through ``SearchConfig.half_life_days`` alone
   ``temporal`` label, not a classifier. Its numbers are the ceiling a
   perfect query-intent classifier could reach, not what a keyword-list
   heuristic would deliver.
+* **D. floored** — A's half-life, with ``SearchConfig.recency_floor``
+  bounding the recency factor below (``max(floor, 0.5 ** (age/hl))``).
+  A and B are its two limits: ``floor -> 0`` is A, ``floor = 1`` is B.
+  Unlike A/B/C this needed a knob at the ``entry_score`` seam, but the
+  knob's default is ``None`` = off, so the shipped pipeline is A.
 
-The fused RRF score is identical across all three variants (same store,
-same streams, same fusion), so every difference between them is
-attributable to the recency factor and nothing else.
+The fused RRF score is identical across every variant (same store, same
+streams, same fusion), so every difference between them is attributable
+to the recency factor and nothing else. That is the asymmetry that makes
+this sweep more trustworthy than the ``rrf_k`` one: A, B and D are a
+*bounded rebalance of the same scores from the same embedder*, and the
+arithmetic (below) predicts the direction and roughly where the
+transition sits before a single query is run.
 
 Reported two ways: by the **query's time sense** (temporal vs
 non-temporal — the axis §4.4 proposes gating on) and by the **corpus
@@ -37,11 +53,14 @@ sweep (``tests/eval/temporal_runner.py``), so the two experiments cannot
 drift apart on how the fixture is loaded or scored.
 
 Run ``uv run pytest tests/eval/test_decay_experiment.py -s`` to print the
-measured tables (reproduced in
-``.superpowers/sdd/tier4-provenance-and-decay/task-2-report.md``).
+measured tables: the §4.4 A/B/C table (reproduced in ROADMAP §4.4 and in
+``.superpowers/sdd/tier4-provenance-and-decay/task-2-report.md``) and the
+§4.6-(a) floor table (reproduced in ROADMAP §4.6).
 """
 
 from __future__ import annotations
+
+import pytest
 
 from hivemind.domain.entry import EntryDraft, Kind
 from hivemind.memstore import MemoryStore
@@ -51,6 +70,7 @@ from tests.eval.temporal import temporal_corpus, temporal_queries
 from tests.eval.temporal_runner import (
     DECAY_OFF,
     DECAY_ON,
+    FUSED_RANGE_AT_DEFAULT_K,
     SLICES,
     HalfLifeRule,
     K,
@@ -61,7 +81,7 @@ from tests.eval.temporal_runner import (
     render_table,
     seed_temporal_corpus,
 )
-from tests.fakes import make_clock, make_embedder
+from tests.fakes import make_clock, make_embedder, make_search_config
 
 VARIANTS: dict[str, HalfLifeRule] = {
     "A_always_on": lambda _q: DECAY_ON,
@@ -69,10 +89,31 @@ VARIANTS: dict[str, HalfLifeRule] = {
     "C_gated": lambda q: DECAY_ON if q.temporal else DECAY_OFF,
 }
 
+# The §4.6-(a) floor sweep, decay held ON. 0.2 sits below the threshold
+# the arithmetic predicts, 0.381 is the threshold itself, and 0.9 is
+# deliberately past the useful band — a floor that high is nearly "decay
+# off" again, and the table shows it behaving like it.
+FLOORS = (0.2, 0.381, 0.5, 0.7, 0.8, 0.9)
+
+# The floor above which the recency range (1/floor) is narrower than the
+# fused RRF range, i.e. where match quality — not age — becomes the sort
+# key. Arithmetic on the two formulas, not a property of this fixture.
+QUALITY_DOMINATES_ABOVE = 1.0 / FUSED_RANGE_AT_DEFAULT_K
+
 
 async def measure_all() -> dict[str, SliceReports]:
     """``{variant: {slice: aggregate_report}}`` for all three variants."""
     return {name: aggregate_slices(await measure_slices(rule)) for name, rule in VARIANTS.items()}
+
+
+async def measure_floors() -> dict[str, SliceReports]:
+    """``{"D_floor=0.8": {slice: aggregate_report}, ...}``, decay held ON."""
+    return {
+        f"D_floor={floor}": aggregate_slices(
+            await measure_slices(VARIANTS["A_always_on"], recency_floor=floor)
+        )
+        for floor in FLOORS
+    }
 
 
 class TestDecayExperiment:
@@ -225,6 +266,175 @@ class TestDecayExperiment:
             for slice_name in SLICES:
                 assert f"| {variant} | {slice_name} |" in table
         counts = {name: measured["A_always_on"][name]["queries"] for name in SLICES}
+        assert counts == {
+            "non_temporal": 6.0,
+            "temporal": 4.0,
+            "old_exact": 2.0,
+            "currency_pair": 3.0,
+            "timeless": 5.0,
+            "all": 10.0,
+        }
+
+
+class TestRecencyFloorSweep:
+    """ROADMAP §4.6 direction (a) — bound the unbounded factor, then decide.
+
+    The §4.6 ``rrf_k`` sweep failed because widening the *fused* range is
+    capped at 40x (~5.3 half-lives) against entries 12.7 to 14 half-lives
+    old. Flooring attacks the other side of the same mismatch and has no
+    such cap: the recency range collapses to ``1/floor`` outright.
+    """
+
+    def test_the_floor_is_off_by_default_so_variant_a_is_what_ships(self) -> None:
+        """The whole sweep is a measurement, not a change: the row labelled
+        "today" must really be today."""
+        assert make_search_config().recency_floor is None
+
+    def test_the_arithmetic_predicts_where_match_quality_takes_over(self) -> None:
+        """Fixture-independent, and stated *before* the numbers below.
+
+        A floor ``f`` bounds the recency factor's range at ``1/f``. Match
+        quality can only outrank age once that is narrower than the fused
+        RRF range (2.6230x at the §6.2 defaults), i.e. ``f > 0.381``. That
+        is a lower bound on where the effect can begin, not a promise about
+        where it completes: two candidates that both appear in *both*
+        streams span far less than the best-vs-worst 2.62x, so the floor
+        that actually flips those needs to be higher.
+        """
+        assert pytest.approx(2.6230, abs=1e-4) == FUSED_RANGE_AT_DEFAULT_K
+        assert pytest.approx(0.381, abs=1e-3) == QUALITY_DOMINATES_ABOVE
+        assert min(FLOORS) < QUALITY_DOMINATES_ABOVE < max(FLOORS), (
+            "the sweep must straddle the predicted threshold or it cannot test the prediction"
+        )
+
+    async def test_an_unset_floor_reproduces_variant_a_exactly(self) -> None:
+        """The seam is behaviour-preserving at the eval level too, not just
+        in the unit test: ``recency_floor=None`` must reproduce today's
+        numbers bit for bit, or every comparison below is against a moved
+        baseline."""
+        unfloored = aggregate_slices(
+            await measure_slices(VARIANTS["A_always_on"], recency_floor=None)
+        )
+        assert unfloored == (await measure_all())["A_always_on"]
+
+    async def test_the_floor_is_reached_at_all_by_this_harness(self) -> None:
+        """A knob that changes no ranking would make the whole table a
+        constant — the bug ADR 0021 found on the prefix knob."""
+        store, _entry_ids, now_clock = await seed_temporal_corpus()
+        differing = [
+            labelled.query
+            for labelled in temporal_queries()
+            if await ranked_ids(store, now_clock, labelled.query, DECAY_ON)
+            != await ranked_ids(store, now_clock, labelled.query, DECAY_ON, recency_floor=0.8)
+        ]
+        assert differing, "the floor changed no ranking — the sweep cannot measure §4.6-(a)"
+
+    async def test_a_floor_below_the_predicted_threshold_does_not_recover_old_exact(
+        self,
+    ) -> None:
+        """The prediction's negative half, which is what makes it a
+        prediction: at 0.2 and at 0.381 itself the ``old_exact`` MRR stays
+        at 0.100 — the entry surfaces at rank 5 at best, not at rank 1."""
+        measured = await measure_floors()
+        for floor in (0.2, 0.381):
+            assert measured[f"D_floor={floor}"]["old_exact"]["mrr"] < 0.2, (
+                f"floor {floor} is below the predicted threshold "
+                f"{QUALITY_DOMINATES_ABOVE:.3f} but recovered old_exact anyway; "
+                "the §4.6 arithmetic needs rechecking"
+            )
+
+    async def test_a_floor_recovers_the_old_exact_cases_always_on_scores_zero(self) -> None:
+        """**Half one of the discriminating question.**
+
+        Always-on scores 0.000 hit@5 on ``old_exact`` (§4.4) and no value of
+        ``rrf_k`` moved it (§4.6). A floor at or above 0.5 takes it to 1.000
+        hit@5, and at 0.8 to a perfect 1.000 MRR — the relevant entry is
+        rank 1 for both queries.
+        """
+        measured = await measure_floors()
+        always_on = (await measure_all())["A_always_on"]["old_exact"]
+        assert always_on["hit_at_k"] == 0.0
+        for floor in (0.5, 0.7, 0.8):
+            assert measured[f"D_floor={floor}"]["old_exact"]["hit_at_k"] == 1.0
+        assert measured["D_floor=0.8"]["old_exact"]["mrr"] == 1.0
+
+    async def test_the_same_floors_keep_the_currency_pairs_decay_off_loses(self) -> None:
+        """**Half two of the discriminating question.**
+
+        Turning decay off wins ``old_exact`` but pays for it on
+        ``currency_pair``, where the stale entry has the higher lexical
+        overlap and recency is the only signal: B drops to 0.611 MRR from
+        A's 0.833. A floored variant keeps 0.778 there — it still decays,
+        it just cannot decay *without limit*.
+        """
+        measured = await measure_floors()
+        off = (await measure_all())["B_off"]["currency_pair"]["mrr"]
+        assert off == pytest.approx(0.611, abs=1e-3)
+        for floor in (0.5, 0.7, 0.8):
+            assert measured[f"D_floor={floor}"]["currency_pair"]["mrr"] > off
+
+    async def test_a_floor_beats_both_extremes_on_their_own_weak_slice(self) -> None:
+        """**The finding that decides §4.6-(a).**
+
+        The bar this experiment was written to test: a variant that beats
+        *both* extremes on the slice each of them is weak at — A's 0.000
+        ``old_exact`` and B's 0.611 ``currency_pair`` MRR. Neither the §4.4
+        gate nor any ``rrf_k`` cleared it. Floors in the 0.5 to 0.8 band do, and 0.8 is
+        the best of them: ``old_exact`` MRR 1.000 (= B, vs A's 0.000) with
+        ``currency_pair`` MRR 0.778 (> B's 0.611).
+        """
+        measured = await measure_floors()
+        baseline = await measure_all()
+        winners = [
+            label
+            for label, slices in measured.items()
+            if slices["old_exact"]["mrr"] > baseline["A_always_on"]["old_exact"]["mrr"]
+            and slices["currency_pair"]["mrr"] > baseline["B_off"]["currency_pair"]["mrr"]
+        ]
+        assert winners, (
+            "no floor beat both extremes on their own weak slice — the §4.6-(a) "
+            "verdict in the ROADMAP needs rewriting"
+        )
+        assert "D_floor=0.8" in winners
+        best = max(winners, key=lambda label: measured[label]["old_exact"]["mrr"])
+        assert best == "D_floor=0.8"
+        assert measured["D_floor=0.8"]["old_exact"]["mrr"] == 1.0
+        assert measured["D_floor=0.8"]["currency_pair"]["mrr"] == pytest.approx(0.778, abs=1e-3)
+
+    async def test_too_high_a_floor_gives_back_what_decay_off_gives_back(self) -> None:
+        """The floor is **not** monotonically better, which is the reason to
+        report a value rather than a direction.
+
+        At 0.9 the recency range is 1.11x — narrower than the fused spread
+        of almost any pair — so the variant is nearly B again, and it pays
+        B's price: ``currency_pair`` MRR falls to 0.583, *below* decay-off's
+        0.611 and well below A's 0.833. A floor is a band, not a slider.
+        """
+        measured = await measure_floors()
+        baseline = await measure_all()
+        high = measured["D_floor=0.9"]["currency_pair"]["mrr"]
+        assert high < baseline["B_off"]["currency_pair"]["mrr"]
+        assert high < measured["D_floor=0.8"]["currency_pair"]["mrr"]
+
+    async def test_no_floor_loses_hit_at_k_against_either_extreme(self) -> None:
+        """A sanity bound on the recommendation: whatever the floor costs,
+        it is not recall. Every floor from 0.5 up answers all ten queries
+        inside the top 5 — matching decay-off and doubling always-on."""
+        measured = await measure_floors()
+        for floor in (0.5, 0.7, 0.8, 0.9):
+            assert measured[f"D_floor={floor}"]["all"]["hit_at_k"] == 1.0
+
+    async def test_floor_report_table_covers_every_floor_and_slice(self) -> None:
+        """Print the measured table and assert its shape is complete — every
+        floor x slice cell present, with the fixture's expected query counts.
+        Shape only; the findings are asserted above."""
+        measured = await measure_floors()
+        table = render_table(measured, "recency_floor")
+        print("\n" + table)
+        for floor in FLOORS:
+            for slice_name in SLICES:
+                assert f"| D_floor={floor} | {slice_name} |" in table
+        counts = {name: measured["D_floor=0.8"][name]["queries"] for name in SLICES}
         assert counts == {
             "non_temporal": 6.0,
             "temporal": 4.0,

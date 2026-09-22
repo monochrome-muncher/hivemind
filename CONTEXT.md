@@ -174,6 +174,10 @@ _Avoid_: result, snippet, match
 The token economy of retrieval: scan many compact hits first, open the full entry only when needed.
 _Avoid_: lazy loading, pagination
 
+**Recency floor**:
+The optional lower bound on the SPEC §6.4 recency factor (`max(floor, 0.5 ** (age/half_life))`), which caps that factor's range at `1/floor` instead of leaving it unbounded. A `SearchConfig` value in `(0, 1]`; unset (the default) means no floor.
+_Avoid_: decay cutoff (nothing is excluded), minimum score (it bounds one factor, not the final score), recency cap (it is a lower bound, not an upper one)
+
 ### Entities (ADR 0016)
 
 **Extracted entity**:

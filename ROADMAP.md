@@ -42,12 +42,16 @@
   **§4.2 is rescoped** — its "how much, in what unit" half is settled
   by ADR 0021 (a 2000-whitespace-word budget, and the knob now actually
   reaches the embedder), leaving "what goes into the embedded text"
-  open and chunking explicitly out of scope. **§4.6**'s cheap half is
-  now measured too: sweeping `rrf_k` with decay on does **not** recover
-  what the recency term buries (`old_exact` stays at 0.000 hit@5 at
-  every `k`), and the whole `rrf_k` lever is bounded at ~5.3 half-lives
-  of age — so no default was changed and the §6.4 redesign is still the
-  open work, held behind a real aged corpus.
+  open and chunking explicitly out of scope. **§4.6** is now measured
+  on both cheap levers: sweeping `rrf_k` with decay on does **not**
+  recover what the recency term buries (`old_exact` stays at 0.000
+  hit@5 at every `k`), because the whole `rrf_k` lever is bounded at
+  ~5.3 half-lives of age — but **flooring the recency factor does**. A
+  floor of 0.8 takes `old_exact` from 0.000 to 1.000 MRR while holding
+  `currency_pair` at 0.778, above decay-off's 0.611: the first variant
+  to beat both extremes on the slice each is weak at. The floor is
+  shipped as a **default-off** `SearchConfig` knob; changing the
+  default is a SPEC §6.4 decision with its own ADR.
 
 ## The keystone is shipped: measure, then Tier 4
 
@@ -410,9 +414,13 @@ are §11 items — each says so.)*
   distribution**, which is NOT built here.
 - **4.6 The *form* of the recency term is mismatched to RRF's range.**
   *(residual finding, carried forward from §4.4 — not gating, which is
-  rejected and stays rejected there. The cheap half is now **measured**:
-  the `rrf_k` sweep below, which came back negative and changed no
-  default. The remaining redesign still needs its own ADR.)* §4.4 measured
+  rejected and stays rejected there. Both cheap halves are now
+  **measured**: the `rrf_k` sweep, which came back negative and changed
+  no default, and **(a) the recency floor, which came back positive** —
+  a floor at 0.8 is the first variant to beat *both* always-on and
+  decay-off on the slice each is weak at. The floor's seam is shipped
+  **default-off**; flipping the default is a SPEC §6.4 change and still
+  needs its own ADR.)* §4.4 measured
   and rejected *gating* the recency term. Underneath that result sits a
   separate, arithmetic mismatch that gating would not have fixed either
   way: with the SPEC §6.2 defaults the fused RRF score spans at most
@@ -535,14 +543,106 @@ are §11 items — each says so.)*
   it is a decision on real-corpus evidence, not a consequence of this
   table.
 
-  **Trigger:** for (a)/(b) and for any `rrf_k` default change,
+  **(a) THE FLOOR, MEASURED — and this one clears the bar.** *(seam
+  shipped **default-off**: `entry_score(..., recency_floor=...)` +
+  `SearchConfig.recency_floor: float | None = None`, validated to
+  `(0, 1]`, threaded through `SearchService`. The **default is
+  unchanged** — `None` is bit-for-bit today's behaviour, asserted at
+  both the pure-function and the eval seam. Sweep:
+  `tests/eval/test_decay_experiment.py::TestRecencyFloorSweep`; the
+  §1.1 gate and `tests/eval/golden.py` are untouched.)*
+
+  Where `rrf_k` widens the *fused* range against an unbounded recency
+  factor, a floor **bounds the unbounded factor itself**:
+  `recency = max(floor, 0.5 ** (age/half_life))`, so the recency range
+  collapses from `2 ** (age spread / half_life)` to exactly `1/floor`.
+  That has no analogue of the 40x cap. The threshold is derivable from
+  the pipeline's own constants *in advance*: match quality outranks age
+  once `1/floor` is narrower than the fused range, i.e.
+  **`floor > 1/2.6230 = 0.381`** at `rrf_k=60`.
+
+  Measured at `rrf_k=60`, decay ON, k=5 (A and B repeated from §4.4 as
+  the two limits of the same family — `floor -> 0` is A, `floor = 1`
+  is B):
+
+  | variant | non-temporal hit@5 / MRR / nDCG@5 | temporal | `old_exact` | `currency_pair` | `timeless` | all |
+  |---|---|---|---|---|---|---|
+  | **A** always-on (today) | 0.333 / 0.208 / 0.238 | 0.750 / 0.625 / 0.658 | **0.000 / 0.000 / 0.000** | 1.000 / **0.833** / 0.877 | 0.400 / 0.250 / 0.286 | 0.500 / 0.375 / 0.406 |
+  | **B** decay off | 1.000 / 0.917 / 0.938 | 1.000 / 0.708 / 0.783 | 1.000 / 1.000 / 1.000 | 1.000 / **0.611** / 0.710 | 1.000 / 0.900 / 0.926 | 1.000 / 0.833 / 0.876 |
+  | **D** floor 0.2 | 0.500 / 0.242 / 0.303 | 0.750 / 0.625 / 0.658 | 0.500 / 0.100 / 0.193 | 1.000 / 0.833 / 0.877 | 0.400 / 0.250 / 0.286 | 0.600 / 0.395 / 0.445 |
+  | **D** floor 0.381 | 0.500 / 0.242 / 0.303 | 0.750 / 0.625 / 0.658 | 0.500 / 0.100 / 0.193 | 1.000 / 0.833 / 0.877 | 0.400 / 0.250 / 0.286 | 0.600 / 0.395 / 0.445 |
+  | **D** floor 0.5 | 1.000 / 0.556 / 0.665 | 1.000 / 0.708 / 0.783 | 1.000 / 0.500 / 0.631 | 1.000 / 0.778 / 0.833 | 1.000 / 0.567 / 0.672 | 1.000 / 0.617 / 0.712 |
+  | **D** floor 0.7 | 1.000 / 0.556 / 0.665 | 1.000 / 0.833 / 0.875 | 1.000 / 0.750 / 0.815 | 1.000 / 0.778 / 0.833 | 1.000 / 0.567 / 0.672 | 1.000 / 0.667 / 0.749 |
+  | **D** floor **0.8** | 1.000 / 0.653 / 0.738 | 1.000 / 0.833 / 0.875 | **1.000 / 1.000 / 1.000** | 1.000 / **0.778** / 0.833 | 1.000 / 0.583 / 0.686 | 1.000 / 0.725 / 0.793 |
+  | **D** floor 0.9 | 1.000 / 0.833 / 0.877 | 1.000 / 0.688 / 0.765 | 1.000 / 1.000 / 1.000 | 1.000 / **0.583** / 0.687 | 1.000 / 0.800 / 0.852 | 1.000 / 0.775 / 0.832 |
+
+  **The discriminating question — does a floor recover the `old_exact`
+  cases A scores 0.000 on, *while keeping* the `currency_pair` cases B
+  loses? Yes, and 0.8 is the value.** At floor 0.8 `old_exact` goes
+  0.000 -> **1.000** MRR (the relevant entry is rank 1 for both
+  queries, matching B exactly) while `currency_pair` holds at
+  **0.778** — above B's 0.611, below A's 0.833. Floors 0.5 and 0.7
+  clear the same bar less completely (`old_exact` MRR 0.500 / 0.750,
+  same 0.778 on currency pairs). **This is the first variant anything
+  in §4.4 or §4.6 has produced that beats *both* extremes on the slice
+  each is weak at** — gating (C) did not, and no `rrf_k` did.
+
+  **A floor is a band, not a slider.** At 0.9 the recency range is
+  1.11x — narrower than the fused spread of almost any pair — so the
+  variant is nearly B again and pays B's price: `currency_pair` MRR
+  drops to 0.583, *below* decay-off's 0.611. Push the floor to 1.0 and
+  it **is** B. That non-monotonicity is why this reports a value, not
+  a direction.
+
+  **The arithmetic predicted this before the queries ran, and the
+  measurement confirms the prediction's shape.** Below the derived
+  0.381 threshold (floors 0.2 and 0.381) `old_exact` MRR stays at
+  0.100 — the entry surfaces at rank 5 at best. The recovery begins
+  just above it and completes by 0.8. The threshold is a *lower bound*
+  on where the effect can start, not where it finishes: two candidates
+  that both appear in **both** streams span far less than the
+  best-vs-worst 2.62x, so flipping those needs a tighter floor. 0.381
+  predicts the onset; 0.8 is where the fixture says it is done.
+
+  **Why this evidence is stronger than the `rrf_k` table** (it is the
+  same 10 hand-written queries over 16 entries scored by the same
+  4-dimension hash embedder, and that has not changed): A, B and D
+  differ **only** by a bounded rebalance of the *same* fused scores
+  from the *same* embedder — no stream is re-ranked, no candidate set
+  moves, the fused values are bit-identical — and the direction and
+  approximate threshold were derived from the two formulas *before*
+  the sweep. What the fixture still **cannot** establish: that 0.8 is
+  the optimum on a real corpus (the band 0.5–0.8 is barely separated
+  here, and `timeless`/`non_temporal` MRR keeps rising past 0.8 while
+  `currency_pair` falls, so the optimum is a *trade*, not a peak the
+  4-dim embedder can locate); that real queries distribute over these
+  competition patterns the way this fixture does; or that a real
+  embedder's vector stream would place the same candidates in the same
+  streams at all. It establishes **a mechanism that works and the
+  sign of its effect**, not a tuned constant.
+
+  **Verdict: the evidence supports shipping a floor, and `0.8` is the
+  value it points at — but the default stays `None` in this change.**
+  The seam is landed and behaviour-preserving; flipping the default is
+  a SPEC §6.4 change and gets its own ADR, decided on these numbers by
+  a human, not inferred from them here. If that ADR is written, note
+  that it closes **(a)** and therefore **rules out (b)**: per this
+  section, (a) and (b) are competing forms of the same fix and must
+  not be stacked.
+
+  **Trigger:** for **(b)** and for any `rrf_k` default change,
   unchanged — the first real corpus with meaningful age spread, i.e.
   run the §1.1 harness against real queries on an aged pool once there
   is production usage. Not before: 10 synthetic queries scored by a
   4-dimension hash embedder is exactly the wrong evidence to land a
   scoring change on (the same reasoning §4.4 closed on). What *is*
   settled without that trigger is the bound: `rrf_k` cannot substitute
-  for (a) or (b), so the cheap knob is now measured and out of the way.
+  for (a) or (b), so the cheap knob is now measured and out of the
+  way. **(a)'s trigger is discharged differently:** its mechanism is
+  now measured and its seam shipped default-off, so what remains is a
+  *decision on the default value*, and the real corpus is what should
+  pick the number within the 0.5–0.8 band rather than what unblocks
+  the idea.
 
 ## Tier 5 — explicitly held: the §10 extensions (former Tier 4)
 

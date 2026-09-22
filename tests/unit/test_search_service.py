@@ -7,7 +7,10 @@ so no implementation detail leaks in.
 
 from __future__ import annotations
 
+from dataclasses import fields
 from datetime import timedelta
+
+import pytest
 
 from hivemind.config import SearchConfig
 from hivemind.domain.entry import EntryDraft, EntryFilters, ImportanceSource, Kind
@@ -185,6 +188,87 @@ def _feedback(entry_id: str, user: str):
         agent="agent-x",
         verdict=Verdict.WRONG,
     )
+
+
+class TestRecencyFloorConfig:
+    """ROADMAP §4.6 direction (a): the floor is config, reaches the score,
+    and is **off** by default.
+    """
+
+    def test_the_shipped_default_is_no_floor(self) -> None:
+        """Landing the seam must not change what the service ships."""
+        assert SearchConfig().recency_floor is None
+
+    @pytest.mark.parametrize("bad", [0.0, -0.1, 1.5])
+    def test_a_floor_outside_the_unit_interval_is_a_configuration_error(self, bad: float) -> None:
+        """A floor of 0 is "no floor" spelled misleadingly and a floor above
+        1 would *boost* aged entries — both are configuration mistakes, and
+        they fail at construction rather than silently skewing rankings."""
+        with pytest.raises(ValueError, match="recency_floor"):
+            SearchConfig(recency_floor=bad)
+
+    def test_one_is_allowed_and_means_no_decay_at_all(self) -> None:
+        assert SearchConfig(recency_floor=1.0).recency_floor == 1.0
+
+    async def test_the_floor_reaches_the_score_through_the_service(
+        self, embedder, search_config
+    ) -> None:
+        """The threading test: a knob that never reaches the scorer would
+        make every §4.6 measurement a constant (the bug ADR 0021 found on
+        the prefix knob). An entry 300 days old is ten half-lives down, so
+        a 0.8 floor must raise its score by orders of magnitude.
+        """
+        store = MemoryStore(make_clock())
+        old = await create(store, "weekly cohorts", occurred_at=T0 - timedelta(days=300))
+        unfloored = await make_service(store, embedder, search_config).search("weekly cohorts")
+        floored = await make_service(
+            store, embedder, SearchConfig(**{**vars_of(search_config), "recency_floor": 0.8})
+        ).search("weekly cohorts")
+        assert [h.entry_id for h in unfloored] == [old.id] == [h.entry_id for h in floored]
+        assert floored[0].score > unfloored[0].score * 100
+
+    async def test_a_tight_enough_floor_flips_an_old_exact_match_back_on_top(
+        self, embedder, search_config
+    ) -> None:
+        """What the floor is *for*, and the honest bound on it.
+
+        With the unbounded term, 300 days of age outranks any match-quality
+        difference, so the fresh loose match wins. Raising the floor closes
+        the gap monotonically, and a floor tight enough to make `1/floor`
+        narrower than *this pair's* fused range flips it back. Note what
+        that range is here: both entries appear in **both** streams at
+        adjacent ranks, so the fused spread is ~1.02x (not the 2.62x
+        best-vs-worst ceiling) — which is exactly why 0.8 is not enough and
+        1.0 is. The eval fixture measures the interesting middle.
+        """
+        store = MemoryStore(make_clock())
+        old_exact = await create(
+            store, "weekly cohorts churn analysis", occurred_at=T0 - timedelta(days=300)
+        )
+        fresh_loose = await create(store, "weekly rollup", occurred_at=T0)
+        query = "weekly cohorts churn analysis"
+
+        async def ratio(floor: float | None) -> float:
+            config = SearchConfig(**{**vars_of(search_config), "recency_floor": floor})
+            scores = {
+                h.entry_id: h.score
+                for h in await make_service(store, embedder, config).search(query)
+            }
+            return scores[old_exact.id] / scores[fresh_loose.id]
+
+        async def winner(floor: float | None) -> str:
+            config = SearchConfig(**{**vars_of(search_config), "recency_floor": floor})
+            return (await make_service(store, embedder, config).search(query))[0].entry_id
+
+        assert await winner(None) == fresh_loose.id
+        assert await winner(1.0) == old_exact.id
+        ratios = [await ratio(f) for f in (None, 0.2, 0.5, 0.8, 1.0)]
+        assert ratios == sorted(ratios), f"a higher floor must never hurt the older entry: {ratios}"
+
+
+def vars_of(config: SearchConfig) -> dict:
+    """``SearchConfig`` is slotted, so ``vars()`` does not work on it."""
+    return {f.name: getattr(config, f.name) for f in fields(config)}
 
 
 class TestPagination:

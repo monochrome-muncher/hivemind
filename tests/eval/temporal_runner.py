@@ -5,17 +5,23 @@ labelled queries). This module is the *machinery* the experiments over it
 share: seed the corpus into a ``MemoryStore``, rank one query under one
 ``SearchConfig``, bucket each query's metrics into the report slices.
 
-Two experiments use it and must not drift apart:
+Two experiment modules use it, over three sweeps, and must not drift
+apart:
 
 * ``test_decay_experiment.py`` — ROADMAP §4.4, sweeps
   ``SearchConfig.half_life_days`` (is the recency term worth gating?).
 * ``test_rrf_k_experiment.py`` — ROADMAP §4.6, sweeps
   ``SearchConfig.rrf_k`` with decay left ON (does widening the fused
   range recover what the always-on recency term buries?).
+* ``test_decay_experiment.py`` again — ROADMAP §4.6 direction (a),
+  sweeps ``SearchConfig.recency_floor`` with the 30-day half-life left
+  ON (does *bounding* the recency factor recover it instead?).
 
-Both sweeps are realised through ``SearchConfig`` alone — no production
-code change — which is the point of running them *before* deciding
-anything.
+Every sweep is realised through ``SearchConfig`` alone — no behaviour
+change to production code, which is the point of running them *before*
+deciding anything. ``recency_floor`` needed a new (default-off) knob at
+the ``entry_score`` seam; its default is ``None``, so the shipped
+pipeline is untouched.
 """
 
 from __future__ import annotations
@@ -50,6 +56,13 @@ DECAY_OFF = 1.0e20
 # every comparison below varies one knob with the pool size held fixed.
 DEFAULT_RRF_K = 60
 CANDIDATE_TOP_K = 20
+
+# The fused RRF range at the defaults above: ``2(k + candidates)/(k + 1)``
+# (derived and asserted against ``rrf_fuse`` itself in
+# ``test_rrf_k_experiment.fused_range``). A recency floor ``f`` bounds the
+# recency factor's range at ``1/f``, so match quality can outrank age only
+# once ``1/f < FUSED_RANGE_AT_DEFAULT_K``, i.e. ``f > 0.381``.
+FUSED_RANGE_AT_DEFAULT_K = 2 * (DEFAULT_RRF_K + CANDIDATE_TOP_K) / (DEFAULT_RRF_K + 1)
 
 # A variant is a rule mapping a query to the half-life it is scored under.
 HalfLifeRule = Callable[[LabelledQuery], float]
@@ -104,6 +117,7 @@ async def ranked_ids(
     half_life_days: float,
     *,
     rrf_k: int = DEFAULT_RRF_K,
+    recency_floor: float | None = None,
 ) -> list[str]:
     """The ranked entry ids for one query under one search config."""
     service = SearchService(
@@ -114,6 +128,7 @@ async def ranked_ids(
             default_limit=K,
             half_life_days=half_life_days,
             rrf_k=rrf_k,
+            recency_floor=recency_floor,
         ),
         now_fn=now_clock,
     )
@@ -125,13 +140,19 @@ async def measure_slices(
     half_life: HalfLifeRule,
     *,
     rrf_k: int = DEFAULT_RRF_K,
+    recency_floor: float | None = None,
 ) -> dict[str, dict[str, QueryMetrics]]:
     """Run every labelled query under one config, bucketed into the slices."""
     store, entry_ids, now_clock = await seed_temporal_corpus()
     slices: dict[str, dict[str, QueryMetrics]] = {name: {} for name in SLICES}
     for labelled in temporal_queries():
         ranked = await ranked_ids(
-            store, now_clock, labelled.query, half_life(labelled), rrf_k=rrf_k
+            store,
+            now_clock,
+            labelled.query,
+            half_life(labelled),
+            rrf_k=rrf_k,
+            recency_floor=recency_floor,
         )
         relevant = {entry_ids[i]: 1 for i in labelled.relevant}
         metrics = evaluate_query(ranked, relevant, K)

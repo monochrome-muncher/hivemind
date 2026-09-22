@@ -136,6 +136,7 @@ class SearchService:
                 quality,
                 now,
                 self._config.half_life_days,
+                recency_floor=self._config.recency_floor,
             )
             entry_scores[entry.id] = score
             scored.append(entry)
