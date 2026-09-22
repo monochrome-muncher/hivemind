@@ -60,8 +60,11 @@ measured tables: the §4.4 A/B/C table (reproduced in ROADMAP §4.4 and in
 
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
+from hivemind.config import SearchConfig
 from hivemind.domain.entry import EntryDraft, Kind
 from hivemind.memstore import MemoryStore
 from hivemind.services.governance import WriteService
@@ -283,12 +286,24 @@ class TestRecencyFloorSweep:
     capped at 40x (~5.3 half-lives) against entries 12.7 to 14 half-lives
     old. Flooring attacks the other side of the same mismatch and has no
     such cap: the recency range collapses to ``1/floor`` outright.
+
+    The sweep decided the question: **ADR 0022 shipped the floor at
+    0.8.** Variant A (an unfloored term) is therefore the *pre-ADR-0022*
+    baseline this table was measured against, not "today" — which is why
+    the harness keeps floor-off as an explicit argument rather than a
+    default it inherits from ``SearchConfig``.
     """
 
-    def test_the_floor_is_off_by_default_so_variant_a_is_what_ships(self) -> None:
-        """The whole sweep is a measurement, not a change: the row labelled
-        "today" must really be today."""
-        assert make_search_config().recency_floor is None
+    def test_the_sweeps_baseline_is_floor_off_explicitly_not_by_default(self) -> None:
+        """The shipped default is now the *floored* term (ADR 0022), so
+        every row of this table would silently move if the harness took
+        its baseline from ``SearchConfig``. It does not: variant A is
+        ``recency_floor=None``, passed explicitly."""
+        assert make_search_config().recency_floor == SearchConfig().recency_floor == 0.8
+        for func in (measure_slices, ranked_ids):
+            assert inspect.signature(func).parameters["recency_floor"].default is None, (
+                f"{func.__name__} must default to an UNFLOORED baseline, not the shipped floor"
+            )
 
     def test_the_arithmetic_predicts_where_match_quality_takes_over(self) -> None:
         """Fixture-independent, and stated *before* the numbers below.

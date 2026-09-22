@@ -4,16 +4,22 @@ Formulas (SPEC.md §6.4, §4.2):
 
     final = fused
           * (0.5 + 0.1 * importance)
-          * 0.5 ** (age_days / half_life_days)
+          * max(recency_floor, 0.5 ** (age_days / half_life_days))
           * quality
 
     quality = clamp(1.0 + 0.05*h - 0.10*s - 0.25*w, 0.5, 1.2)
+
+The floor is ADR 0022 (shipped at 0.8, in ``SearchConfig``). The pure
+function keeps ``recency_floor=None`` as its own default — "the numbers
+I was handed", the pre-ADR-0022 unbounded form — so the tests below can
+drive both sides of the same formula.
 """
 
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from hivemind.config import SearchConfig
 from hivemind.retrieval.scoring import entry_score, feedback_quality
 
 NOW = datetime(2026, 6, 1, tzinfo=UTC)
@@ -51,15 +57,43 @@ class TestEntryScore:
 
 
 class TestRecencyFloor:
-    """ROADMAP §4.6 direction (a): the optional lower bound on the recency
-    factor. It is **off by default** — these tests pin that the seam exists
-    without changing what the service ships.
+    """ADR 0022: the lower bound on the recency factor.
+
+    The service ships it at **0.8** (``SearchConfig.recency_floor``,
+    pinned in ``test_search_service``); ``entry_score``'s own default
+    stays ``None`` — the pre-ADR-0022 unbounded form — because the pure
+    function is a function of the numbers it is handed and the value is
+    a configuration decision. These tests pin the arithmetic of both.
     """
 
+    def test_the_shipped_floor_keeps_recency_inside_rrfs_fused_range(self) -> None:
+        """ADR 0022's condition, as arithmetic on the shipped config.
+
+        A floor ``f`` bounds the recency factor's whole range at ``1/f``.
+        Match quality can only be the sort key (and recency the
+        tie-break — SPEC §6.4's stated intent) while that is narrower
+        than the range the fused RRF score spans, ``2(k + candidates) /
+        (k + 1)``. At the shipped values that is 1.25x against 2.6230x.
+        Fixture-independent: it holds for any corpus and any age spread,
+        and it fails if the floor is lowered or ``rrf_k`` raised out of
+        agreement.
+        """
+        config = SearchConfig()
+        floor = config.recency_floor
+        assert floor is not None, "ADR 0022 ships a floor; None is the pre-0022 form"
+        newest = entry_score(1.0, 3, NOW, 1.0, NOW, 30.0, recency_floor=floor)
+        oldest = entry_score(
+            1.0, 3, NOW - timedelta(days=100_000), 1.0, NOW, 30.0, recency_floor=floor
+        )
+        fused_range = 2 * (config.rrf_k + config.candidate_top_k) / (config.rrf_k + 1)
+        assert newest / oldest == pytest.approx(1.25)
+        assert newest / oldest < fused_range
+
     @pytest.mark.parametrize("age_days", [0.0, 1.0, 30.0, 90.0, 420.0, 500.0])
-    def test_unset_floor_is_bit_for_bit_todays_behaviour(self, age_days: float) -> None:
-        """The default path must be *identical*, not merely close: an
-        `approx` here would hide a rounding change in the hot loop."""
+    def test_unset_floor_is_bit_for_bit_the_pre_adr_0022_term(self, age_days: float) -> None:
+        """Passing no floor must be *identical* to the unbounded form, not
+        merely close: an `approx` here would hide a rounding change in the
+        hot loop. This is what every §4.4/§4.6 measurement is against."""
         occurred = NOW - timedelta(days=age_days)
         explicit_none = entry_score(1.0, 3, occurred, 1.0, NOW, 30.0, recency_floor=None)
         assert entry_score(1.0, 3, occurred, 1.0, NOW, 30.0) == explicit_none

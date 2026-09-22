@@ -154,7 +154,7 @@ def make_search_config(
     default_limit: int = 5,
     half_life_days: float = 30.0,
     rrf_k: int = 60,
-    recency_floor: float | None = None,
+    recency_floor: float | None = 0.8,
 ) -> SearchConfig:
     """A ``SearchConfig`` with test-sized defaults.
 
@@ -163,10 +163,12 @@ def make_search_config(
     on (the 30-day default) and effectively off (a half-life so long that
     every candidate's decay factor rounds to 1.0), ``rrf_k`` to widen
     or compress the fused RRF range (ROADMAP §4.6), and ``recency_floor``
-    to bound the recency factor from below (ROADMAP §4.6 direction (a);
-    ``None`` = off = the shipped default). ``rrf_k``'s default here mirrors
-    ``SearchConfig``'s own, which this file must never silently diverge
-    from (``test_make_search_config_mirrors_the_production_rrf_k``).
+    to bound the recency factor from below (ADR 0022; ``None`` = off =
+    the pre-ADR-0022 unbounded form). ``rrf_k``'s and ``recency_floor``'s
+    defaults here mirror ``SearchConfig``'s own, which this file must
+    never silently diverge from
+    (``test_make_search_config_mirrors_the_production_rrf_k``,
+    ``test_the_sweeps_baseline_is_floor_off_explicitly_not_by_default``).
     """
     return SearchConfig(
         candidate_top_k=candidate_top_k,

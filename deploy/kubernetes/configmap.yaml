@@ -42,6 +42,12 @@ data:
   HIVEMIND_CANDIDATE_TOP_K: "20"
   HIVEMIND_DEFAULT_LIMIT: "10"
   HIVEMIND_HALF_LIFE_DAYS: "30.0"
+  # Lower bound on the recency factor (ADR 0022): max(floor, 0.5 ** (age /
+  # half_life)), so the factor's whole range is 1/floor = 1.25x at 0.8 —
+  # inside RRF's 2.62x fused range, which is what keeps match quality the
+  # sort key. A BAND, NOT A SLIDER: 0.9 measured worse than turning decay
+  # off, 1.0 *is* off, and below 0.381 it does nothing. Do not tune it up.
+  HIVEMIND_RECENCY_FLOOR: "0.8"
   HIVEMIND_QUALITY_HELPFUL_WEIGHT: "0.05"
   HIVEMIND_QUALITY_STALE_WEIGHT: "0.10"
   HIVEMIND_QUALITY_WRONG_WEIGHT: "0.25"

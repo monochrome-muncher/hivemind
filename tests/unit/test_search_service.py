@@ -9,10 +9,12 @@ from __future__ import annotations
 
 from dataclasses import fields
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
-from hivemind.config import SearchConfig
+from hivemind.config import SearchConfig, Settings
 from hivemind.domain.entry import EntryDraft, EntryFilters, ImportanceSource, Kind
 from hivemind.domain.feedback import Verdict
 from hivemind.memstore import MemoryStore
@@ -191,13 +193,45 @@ def _feedback(entry_id: str, user: str):
 
 
 class TestRecencyFloorConfig:
-    """ROADMAP §4.6 direction (a): the floor is config, reaches the score,
-    and is **off** by default.
+    """ADR 0022 / SPEC §6.4: the floor is config, reaches the score, and
+    ships **on** at 0.8.
     """
 
-    def test_the_shipped_default_is_no_floor(self) -> None:
-        """Landing the seam must not change what the service ships."""
-        assert SearchConfig().recency_floor is None
+    def test_the_shipped_default_is_the_adr_0022_floor(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The value ADR 0022 decided, pinned where it is actually read.
+
+        It lives in two places — the ``SearchConfig`` the services take
+        and the ``Settings`` the runners build one from — and a drift
+        between them would mean the deployed service does not score the
+        way the spec says. 0.8 is not a slider: per ADR 0022 the floor is
+        a *band*, and 0.9 measured *worse* than switching decay off.
+
+        Hermetic like ``test_config_env_file``: no inherited env var, no
+        profile file (``Settings`` reads ``.env.local`` when present).
+        """
+        monkeypatch.delenv("HIVEMIND_RECENCY_FLOOR", raising=False)
+        monkeypatch.chdir(tmp_path)
+        assert SearchConfig().recency_floor == 0.8
+        assert Settings().search_config().recency_floor == 0.8
+
+    def test_an_operator_tunes_the_floor_through_the_environment(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``HIVEMIND_RECENCY_FLOOR`` is the operator's knob (ADR 0022).
+
+        Its settable range there is ``(0, 1]``; there is deliberately no
+        env spelling for "no floor" (the unbounded form is the defect
+        ADR 0022 fixes), so a bad value is a loud startup failure rather
+        than a silent fall back to it.
+        """
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("HIVEMIND_RECENCY_FLOOR", "0.5")
+        assert Settings().search_config().recency_floor == 0.5
+        monkeypatch.setenv("HIVEMIND_RECENCY_FLOOR", "null")
+        with pytest.raises(ValidationError):
+            Settings()
 
     @pytest.mark.parametrize("bad", [0.0, -0.1, 1.5])
     def test_a_floor_outside_the_unit_interval_is_a_configuration_error(self, bad: float) -> None:
@@ -214,16 +248,18 @@ class TestRecencyFloorConfig:
         self, embedder, search_config
     ) -> None:
         """The threading test: a knob that never reaches the scorer would
-        make every §4.6 measurement a constant (the bug ADR 0021 found on
-        the prefix knob). An entry 300 days old is ten half-lives down, so
-        a 0.8 floor must raise its score by orders of magnitude.
+        make every §4.6 measurement a constant, and would mean ADR 0022
+        shipped a no-op (the bug ADR 0021 found on the prefix knob). An
+        entry 300 days old is ten half-lives down, so the shipped 0.8
+        floor must raise its score by orders of magnitude over the
+        pre-ADR-0022 unbounded term.
         """
         store = MemoryStore(make_clock())
         old = await create(store, "weekly cohorts", occurred_at=T0 - timedelta(days=300))
-        unfloored = await make_service(store, embedder, search_config).search("weekly cohorts")
-        floored = await make_service(
-            store, embedder, SearchConfig(**{**vars_of(search_config), "recency_floor": 0.8})
+        unfloored = await make_service(
+            store, embedder, SearchConfig(**{**vars_of(search_config), "recency_floor": None})
         ).search("weekly cohorts")
+        floored = await make_service(store, embedder, search_config).search("weekly cohorts")
         assert [h.entry_id for h in unfloored] == [old.id] == [h.entry_id for h in floored]
         assert floored[0].score > unfloored[0].score * 100
 
