@@ -1,132 +1,158 @@
--- Hivemind schema (idempotent). Applied by hivemind.store.migrate.migrate().
--- `:dim` is substituted with the deploy-time embedding dimension (ADR 0005).
+-- GENERATED FILE — DO NOT EDIT, AND DO NOT APPLY.
 --
--- One organization, one pool (ADR 0002): a single `entries` table with a
--- `scope` tag is the v1 seam for future narrowing.
-
-CREATE EXTENSION IF NOT EXISTS vector;
-CREATE EXTENSION IF NOT EXISTS btree_gin;
-
--- Forward-migration tracking (ADR 0013): records the applied schema
--- generation (a small upsert after each successful migrate), so an
--- operator — or the health / metrics surface — can tell whether a live
--- pool is up to date.
-CREATE TABLE IF NOT EXISTS schema_migrations (
-    version    text PRIMARY KEY,
-    applied_at timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS entries (
-    id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    kind          text NOT NULL CHECK (kind IN ('fact', 'insight', 'decision')),
-    summary       text NOT NULL,
-    body          text,
-    payload       jsonb,
-    sources       jsonb NOT NULL DEFAULT '[]',
-    tags          text[] NOT NULL DEFAULT '{}',
-    occurred_at   timestamptz NOT NULL,
-    created_at    timestamptz NOT NULL DEFAULT now(),
-    author        text NOT NULL,
-    agent         text NOT NULL,
-    importance    int  NOT NULL DEFAULT 3 CHECK (importance BETWEEN 1 AND 5),
-    scope         text NOT NULL DEFAULT 'org',
-    embedding     vector(:dim),
-    embedding_model text,
-    state         text NOT NULL DEFAULT 'active'
-                  CHECK (state IN ('active', 'superseded', 'withdrawn')),
-    superseded_by uuid,
-    withdrawn_reason text
-);
-
--- Full-text search (SPEC §6.2 keyword stream).
+-- A readable snapshot of the schema the migration chain produces
+-- (ADR 0020). The source of truth is src/hivemind/store/migrations/;
+-- this file exists only so the whole storage model can be read and
+-- diffed in one place. Regenerate with:
 --
--- `to_tsvector` is a STABLE (not IMMUTABLE) function, so it cannot back a
--- STORED generated column. The canonical Postgres pattern is a regular
--- tsvector column maintained by a trigger (setweight 'A' on the summary
--- for a stronger rank than 'B' on the body). Re-migrations rebuild the
--- trigger idempotently.
-ALTER TABLE entries ADD COLUMN IF NOT EXISTS search_tsv tsvector;
-CREATE INDEX IF NOT EXISTS entries_search_tsv_idx ON entries USING GIN (search_tsv);
+--     make schema-ref
+--
+-- yoyo's own bookkeeping tables (_yoyo_migration, _yoyo_log,
+-- _yoyo_version, yoyo_lock) are excluded: they are the migration
+-- mechanism, not the domain schema.
 
-CREATE OR REPLACE FUNCTION entries_search_tsv_update() RETURNS trigger
-LANGUAGE plpgsql AS $$
-BEGIN
-    NEW.search_tsv :=
-        setweight(to_tsvector('english', coalesce(NEW.summary, '')), 'A') ||
-        setweight(to_tsvector('english', coalesce(NEW.body, '')), 'B');
-    RETURN NEW;
-END;
-$$;
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET idle_in_transaction_session_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
+SET check_function_bodies = false;
+SET xmloption = content;
+SET client_min_messages = warning;
+SET row_security = off;
 
-DROP TRIGGER IF EXISTS entries_search_tsv_trigger ON entries;
-CREATE TRIGGER entries_search_tsv_trigger
-    BEFORE INSERT OR UPDATE OF summary, body ON entries
-    FOR EACH ROW EXECUTE FUNCTION entries_search_tsv_update();
+CREATE EXTENSION IF NOT EXISTS btree_gin WITH SCHEMA public;
 
-CREATE INDEX IF NOT EXISTS entries_tags_gin_idx   ON entries USING GIN (tags);
-CREATE INDEX IF NOT EXISTS entries_kind_idx       ON entries (kind);
-CREATE INDEX IF NOT EXISTS entries_state_idx      ON entries (state);
-CREATE INDEX IF NOT EXISTS entries_occurred_idx   ON entries (occurred_at);
+COMMENT ON EXTENSION btree_gin IS 'support for indexing common datatypes in GIN';
 
--- Feedback (SPEC §4.2): one row per (entry, user, agent), upserted.
-CREATE TABLE IF NOT EXISTS feedbacks (
-    entry_id   uuid NOT NULL REFERENCES entries (id) ON DELETE CASCADE,
-    "user"     text NOT NULL,
-    agent      text NOT NULL,
-    verdict    text NOT NULL CHECK (verdict IN ('helpful', 'stale', 'wrong')),
-    note       text,
-    updated_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (entry_id, "user", agent)
+CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
+
+COMMENT ON EXTENSION vector IS 'vector data type and ivfflat and hnsw access methods';
+
+CREATE FUNCTION public.entries_search_tsv_update() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+    BEGIN
+        NEW.search_tsv :=
+            setweight(to_tsvector('english', coalesce(NEW.summary, '')), 'A') ||
+            setweight(to_tsvector('english', coalesce(NEW.body, '')), 'B');
+        RETURN NEW;
+    END;
+    $$;
+
+SET default_tablespace = '';
+
+SET default_table_access_method = heap;
+
+CREATE TABLE public.agents (
+    name text NOT NULL,
+    status text DEFAULT 'pending'::text NOT NULL,
+    trust_level integer DEFAULT 0 NOT NULL,
+    home_fleet_id uuid,
+    owner_alias text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    activated_at timestamp with time zone,
+    CONSTRAINT agents_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'active'::text]))),
+    CONSTRAINT agents_trust_level_check CHECK (((trust_level >= 0) AND (trust_level <= 3)))
 );
 
--- Credentials (ADR 0008): key_hash is the sha256 of the raw API key.
--- The v2 access model (ADR 0012) reinterprets `kind` (org/agent/admin) and
--- adds `agent_name` (the registered agent an agent-key binds to; the
--- agent's trust level + home fleet live on the `agents` row, ADR 0011).
-CREATE TABLE IF NOT EXISTS credentials (
-    key_hash   text PRIMARY KEY,
-    kind       text NOT NULL CHECK (kind IN ('org', 'user', 'agent', 'admin')),
-    user_id    text NOT NULL,
-    agent_id   text,
+CREATE TABLE public.credentials (
+    key_hash text NOT NULL,
+    kind text NOT NULL,
+    user_id text NOT NULL,
+    agent_id text,
     agent_name text,
-    created_at timestamptz NOT NULL DEFAULT now()
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT credentials_kind_check CHECK ((kind = ANY (ARRAY['org'::text, 'user'::text, 'agent'::text, 'admin'::text])))
 );
 
--- Access control (ADRs 0011-0012): fleets + registered agents, and the
--- entry's fleet reference (an entry is fixed to the fleet it was written
--- into, ADR 0011; re-parenting an agent never moves existing entries).
-CREATE TABLE IF NOT EXISTS fleets (
-    id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    name       text NOT NULL UNIQUE,
-    created_at timestamptz NOT NULL DEFAULT now()
+CREATE TABLE public.entries (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    kind text NOT NULL,
+    summary text NOT NULL,
+    body text,
+    payload jsonb,
+    sources jsonb DEFAULT '[]'::jsonb NOT NULL,
+    tags text[] DEFAULT '{}'::text[] NOT NULL,
+    occurred_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    author text NOT NULL,
+    agent text NOT NULL,
+    importance integer DEFAULT 3 NOT NULL,
+    scope text DEFAULT 'org'::text NOT NULL,
+    embedding public.vector(1024),
+    embedding_model text,
+    state text DEFAULT 'active'::text NOT NULL,
+    superseded_by uuid,
+    withdrawn_reason text,
+    search_tsv tsvector,
+    fleet_id uuid,
+    entities jsonb DEFAULT '[]'::jsonb NOT NULL,
+    entity_names text[] DEFAULT '{}'::text[] NOT NULL,
+    entities_model text,
+    CONSTRAINT entries_importance_check CHECK (((importance >= 1) AND (importance <= 5))),
+    CONSTRAINT entries_kind_check CHECK ((kind = ANY (ARRAY['fact'::text, 'insight'::text, 'decision'::text]))),
+    CONSTRAINT entries_state_check CHECK ((state = ANY (ARRAY['active'::text, 'superseded'::text, 'withdrawn'::text])))
 );
 
-CREATE TABLE IF NOT EXISTS agents (
-    name           text PRIMARY KEY,
-    status         text NOT NULL DEFAULT 'pending'
-                   CHECK (status IN ('pending', 'active')),
-    trust_level    int  NOT NULL DEFAULT 0
-                   CHECK (trust_level BETWEEN 0 AND 3),
-    home_fleet_id  uuid REFERENCES fleets (id),
-    owner_alias    text,
-    created_at     timestamptz NOT NULL DEFAULT now(),
-    activated_at   timestamptz
+CREATE TABLE public.feedbacks (
+    entry_id uuid NOT NULL,
+    "user" text NOT NULL,
+    agent text NOT NULL,
+    verdict text NOT NULL,
+    note text,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT feedbacks_verdict_check CHECK ((verdict = ANY (ARRAY['helpful'::text, 'stale'::text, 'wrong'::text])))
 );
 
--- New column on an existing `entries` table (idempotent; a fresh DB already
--- has it via the CREATE above only if re-created, so ADD COLUMN IF NOT
--- EXISTS is the portable path).
-ALTER TABLE entries ADD COLUMN IF NOT EXISTS fleet_id uuid;
-CREATE INDEX IF NOT EXISTS entries_fleet_idx ON entries (fleet_id);
-CREATE INDEX IF NOT EXISTS entries_author_idx ON entries (author);
-CREATE INDEX IF NOT EXISTS agents_fleet_idx ON agents (home_fleet_id);
+CREATE TABLE public.fleets (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    name text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
 
--- Entity-extraction facets (ADR 0016, SPEC §13): machine-extracted
--- {name, kind} facets stored as JSONB (display), with the lower-cased
--- names on a separate text[] column for the AND, case-insensitive
--- filter (the `tags text[]` + GIN pattern) and the extractor model on
--- `entities_model` (provenance, symmetric with `embedding_model`).
-ALTER TABLE entries ADD COLUMN IF NOT EXISTS entities jsonb NOT NULL DEFAULT '[]';
-ALTER TABLE entries ADD COLUMN IF NOT EXISTS entity_names text[] NOT NULL DEFAULT '{}';
-ALTER TABLE entries ADD COLUMN IF NOT EXISTS entities_model text;
-CREATE INDEX IF NOT EXISTS entries_entity_names_gin_idx ON entries USING GIN (entity_names);
+ALTER TABLE ONLY public.agents
+    ADD CONSTRAINT agents_pkey PRIMARY KEY (name);
+
+ALTER TABLE ONLY public.credentials
+    ADD CONSTRAINT credentials_pkey PRIMARY KEY (key_hash);
+
+ALTER TABLE ONLY public.entries
+    ADD CONSTRAINT entries_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY public.feedbacks
+    ADD CONSTRAINT feedbacks_pkey PRIMARY KEY (entry_id, "user", agent);
+
+ALTER TABLE ONLY public.fleets
+    ADD CONSTRAINT fleets_name_key UNIQUE (name);
+
+ALTER TABLE ONLY public.fleets
+    ADD CONSTRAINT fleets_pkey PRIMARY KEY (id);
+
+CREATE INDEX agents_fleet_idx ON public.agents USING btree (home_fleet_id);
+
+CREATE INDEX entries_author_idx ON public.entries USING btree (author);
+
+CREATE INDEX entries_entity_names_gin_idx ON public.entries USING gin (entity_names);
+
+CREATE INDEX entries_fleet_idx ON public.entries USING btree (fleet_id);
+
+CREATE INDEX entries_kind_idx ON public.entries USING btree (kind);
+
+CREATE INDEX entries_occurred_idx ON public.entries USING btree (occurred_at);
+
+CREATE INDEX entries_search_tsv_idx ON public.entries USING gin (search_tsv);
+
+CREATE INDEX entries_state_idx ON public.entries USING btree (state);
+
+CREATE INDEX entries_tags_gin_idx ON public.entries USING gin (tags);
+
+CREATE TRIGGER entries_search_tsv_trigger BEFORE INSERT OR UPDATE OF summary, body ON public.entries FOR EACH ROW EXECUTE FUNCTION public.entries_search_tsv_update();
+
+ALTER TABLE ONLY public.agents
+    ADD CONSTRAINT agents_home_fleet_id_fkey FOREIGN KEY (home_fleet_id) REFERENCES public.fleets(id);
+
+ALTER TABLE ONLY public.feedbacks
+    ADD CONSTRAINT feedbacks_entry_id_fkey FOREIGN KEY (entry_id) REFERENCES public.entries(id) ON DELETE CASCADE;
+

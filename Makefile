@@ -57,8 +57,16 @@ pg-reset: ## Stop Postgres and wipe its data volume
 	docker compose down -v
 
 .PHONY: migrate
-migrate: ## Apply database migrations (provisions the embedding column at $(HIVEMIND_EMBEDDING_DIM); changing the dim needs `make pg-reset` first)
+migrate: ## Apply outstanding migrations (ADR 0020; provisions the embedding column at $(HIVEMIND_EMBEDDING_DIM) — changing the dim needs `make pg-reset` first)
 	uv run hivemind-migrate
+
+.PHONY: rollback
+rollback: ## Roll back the most recent migration (ADR 0020; refuses 0001 — that direction is `make pg-reset` or a restore)
+	uv run hivemind-migrate --rollback $(or $(N),1)
+
+.PHONY: schema-ref
+schema-ref: ## Regenerate the schema.sql reference from the migrated pool (ADR 0020; generated, never applied)
+	scripts/dump-schema-reference.sh
 
 .PHONY: api
 api: ## Run the REST API on :8000

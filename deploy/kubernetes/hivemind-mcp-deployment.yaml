@@ -59,6 +59,17 @@ spec:
           # outage marks the pod NotReady without restarting it). Probes
           # carry no credential: these paths are served outside the auth
           # middleware.
+          # Startup gate (ADR 0020): the entrypoint applies the migration
+          # chain BEFORE the server listens, so k8s must not kill a pod
+          # that is still migrating. Liveness/readiness are suspended
+          # until this succeeds; 30 x 5s = up to 150s for a slow index
+          # build on a large pool, then a normal restart.
+          startupProbe:
+            httpGet:
+              path: /mcp/liveness
+              port: 8088
+            periodSeconds: 5
+            failureThreshold: 30
           livenessProbe:
             httpGet:
               path: /mcp/liveness

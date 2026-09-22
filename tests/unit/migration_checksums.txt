@@ -1,0 +1,6 @@
+# sha256 of every shipped migration (ADR 0020). A shipped migration is
+# FROZEN: yoyo tracks migrations by id, not content, so editing one
+# changes what a fresh pool gets while existing pools keep the old
+# shape. Add a line here in the same commit that adds a migration;
+# never update a line to match an edit.
+fbe796e87493f9012a27c30a1ab9e93a72eed84add093df0223d65a7b169c829  0001.initial-schema.py
