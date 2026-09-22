@@ -1,26 +1,31 @@
-"""Migration runner: apply the idempotent schema (ADR 0007).
+"""Migration runner: apply the ordered migration chain (ADR 0020).
 
-``migrate`` is idempotent — every DDL statement is guarded
-(``IF NOT EXISTS`` / ``OR REPLACE`` / ``DROP ... IF EXISTS``) — so it is
-safe to run on every service start and on every developer machine. The
-embedding dimension is a deploy-time decision (ADR 0005) baked into the
-``vector(:dim)`` column; a dimension change is an operator migration,
-not an online feature (see SPEC.md §7).
+The schema is a chain of ordered migrations under ``migrations/``,
+applied by `yoyo <https://ollycope.com/software/yoyo/>`_. ``migrate``
+applies every migration not yet recorded in yoyo's ``_yoyo_migration``
+table, so it is safe to run on every process start — an up-to-date pool
+is a no-op — and the image entrypoint does exactly that (ADR 0018).
 
-The schema is a single ``schema.sql`` file (the source of truth) that
-contains several top-level statements, including a dollar-quoted
-plpgsql trigger function. ``migrate`` splits that file into individual
-statements (respecting ``;`` inside ``$$`` blocks and comments) and
-executes them one by one, because asyncpg cannot run a multi-statement
-batch in a single ``execute`` call.
+**Concurrency (ADR 0020).** ``migrate`` holds a Postgres *advisory*
+lock for the whole run, so many replicas may start at once and exactly
+one migrates. The lock is session-scoped: Postgres releases it when the
+connection drops, so a pod killed mid-migration (OOM, eviction, a
+liveness probe) releases it by dying. yoyo's own ``backend.lock()`` is
+deliberately NOT used — it is a table row deleted in a ``finally``, with
+no TTL and no stale detection, so a killed pod wedges every later pod
+until a human runs ``yoyo break-lock``.
 
-The dim-mismatch guard (ADR 0015): a pool provisioned at a *different*
-embedding dimension than the configured one is a deployment error, not
-an in-place change (ADR 0005). ``migrate`` checks the existing
-column's dimension (``current_embedding_dim``) before applying any
-statement and fails loudly with an actionable message — never a silent
-no-op that later surfaces as a confusing ``DataError`` on the first
-vector write.
+**Rollback.** ``rollback`` reverses the most recently applied
+migration(s) via their ``.rollback.sql`` companions. Rollbacks are
+written for *structural* changes only: reversing a populated column drop
+or a backfill is a restore from backup (``docs/ops-runbook.md``), never
+a migration. ``0001.initial-schema`` has no rollback at all — reversing
+it would drop every entry in the pool.
+
+**The dim guard (ADR 0015)** runs *before* the lock is taken: a pool
+provisioned at a different embedding dimension than the configured one
+is a deployment error (ADR 0005), and failing before any DDL beats the
+confusing ``DataError`` the first vector write would otherwise produce.
 """
 
 from __future__ import annotations
@@ -32,132 +37,124 @@ from pathlib import Path
 import asyncpg
 
 from hivemind.config import load_settings
+from hivemind.store import migration_context
 
-_SCHEMA_PATH = Path(__file__).with_name("schema.sql")
+_MIGRATIONS_DIR = Path(__file__).with_name("migrations")
 
-# The applied schema generation (ADR 0013): a small marker recorded in
-# ``schema_migrations`` after each successful migrate, so an operator can
-# tell whether a live pool is up to date. **Bump this on every schema.sql
-# change** (each schema generation gets a new version).
-SCHEMA_VERSION = "6"
-
-
-def _schema_sql(dim: int) -> str:
-    """Load schema.sql with the embedding dimension substituted in."""
-    return _SCHEMA_PATH.read_text().replace(":dim", str(dim))
+# The advisory-lock key (ADR 0020). Arbitrary but FIXED: every process
+# that migrates this pool must take the same key. The value is ASCII
+# "HIVEMIND" read as a big-endian int64 (fits in a signed bigint), which
+# makes it self-identifying in `pg_locks`.
+MIGRATION_LOCK_KEY = 0x484956454D494E44
 
 
-def _split_statements(sql: str) -> list[str]:
-    """Split a DDL script into top-level statements.
+def _yoyo_dsn(dsn: str) -> str:
+    """Rewrite an asyncpg DSN to the psycopg3 form yoyo expects.
 
-    A ``;`` ends a statement unless it appears inside a ``$$``
-    dollar-quoted block (the plpgsql trigger body) or inside a comment.
+    The service speaks ``postgresql://`` (asyncpg) everywhere; yoyo
+    selects its driver from the scheme, and ``postgresql+psycopg://``
+    is the psycopg3 backend. Anything already carrying an explicit
+    ``+driver`` is left alone.
     """
-    parts: list[str] = []
-    buf: list[str] = []
-    in_dollar = False
-    in_line_comment = False
-    in_block_comment = False
-    i = 0
-    n = len(sql)
-    while i < n:
-        c = sql[i]
-        nxt = sql[i + 1] if i + 1 < n else ""
-        if in_line_comment:
-            buf.append(c)
-            if c == "\n":
-                in_line_comment = False
-            i += 1
-            continue
-        if in_block_comment:
-            buf.append(c)
-            if c == "*" and nxt == "/":
-                buf.append(nxt)
-                in_block_comment = False
-                i += 2
-                continue
-            i += 1
-            continue
-        if in_dollar:
-            buf.append(c)
-            if c == "$" and nxt == "$":
-                buf.append(nxt)
-                in_dollar = False
-                i += 2
-                continue
-            i += 1
-            continue
-        # normal mode
-        if c == "-" and nxt == "-":
-            in_line_comment = True
-            buf.append(c)
-            i += 1
-            continue
-        if c == "/" and nxt == "*":
-            in_block_comment = True
-            buf.append(c)
-            i += 1
-            continue
-        if c == "$" and nxt == "$":
-            in_dollar = True
-            buf.append(c)
-            i += 1
-            continue
-        if c == ";":
-            stmt = "".join(buf).strip()
-            if stmt:
-                parts.append(stmt)
-            buf = []
-            i += 1
-            continue
-        buf.append(c)
-        i += 1
-    tail = "".join(buf).strip()
-    if tail:
-        parts.append(tail)
-    return parts
+    for prefix in ("postgresql://", "postgres://"):
+        if dsn.startswith(prefix):
+            return "postgresql+psycopg://" + dsn[len(prefix) :]
+    return dsn
 
 
-async def migrate(dsn: str, dim: int = 1024) -> None:
-    """Apply the idempotent schema to the database at ``dsn``.
+def _apply_chain(dsn: str, dim: int) -> None:
+    """Apply every outstanding migration (synchronous; yoyo is sync).
 
-    Each top-level statement is executed individually, so the migration
-    is safe to re-run and the plpgsql trigger function (a dollar-quoted
-    block containing ``;``) is handled correctly. After the schema is
-    applied, the schema generation (``SCHEMA_VERSION``, ADR 0013) is
-    recorded in ``schema_migrations`` (a single upsert), so a live pool
-    can be checked for drift.
-
-    Raises:
-        RuntimeError: when the pool's existing ``entries.embedding``
-            column is at a *different* dimension than ``dim`` (ADR 0015).
-            The message names both dims and both remediations (reset the
-            pool, or point ``HIVEMIND_EMBEDDING_DIM`` at the pool's dim).
-            Failing here — before any schema statement — beats the
-            confusing ``DataError`` (``expected 512 dimensions, not
-            1024``) the first vector write would otherwise produce.
+    Called inside ``asyncio.to_thread`` while the caller holds the
+    advisory lock. ``backend.lock()`` is intentionally not used — see
+    the module docstring.
     """
+    from yoyo import get_backend, read_migrations
+
+    migration_context.embedding_dim = dim
+    backend = get_backend(_yoyo_dsn(dsn))
+    migrations = read_migrations(str(_MIGRATIONS_DIR))
+    backend.apply_migrations(backend.to_apply(migrations))
+
+
+def _rollback_chain(dsn: str, dim: int, count: int) -> list[str]:
+    """Roll back the ``count`` most recently applied migrations.
+
+    Returns the ids rolled back, most recent first. A migration with no
+    ``.rollback.sql`` has no rollback steps, so yoyo unmarks it without
+    running DDL — which is why ``0001`` must never be rolled back for
+    real (the module docstring says so, and ``rollback`` refuses it).
+    """
+    from yoyo import get_backend, read_migrations
+
+    migration_context.embedding_dim = dim
+    backend = get_backend(_yoyo_dsn(dsn))
+    migrations = read_migrations(str(_MIGRATIONS_DIR))
+    applied = list(backend.to_rollback(migrations))[:count]
+    if any(m.id.startswith("0001.") for m in applied):
+        raise RuntimeError(
+            "refusing to roll back 0001.initial-schema: it would drop every "
+            "entry in the pool (ADR 0020 — a rollback that destroys data is "
+            "not written). Reset the pool (`make pg-reset`) or restore from "
+            "backup instead (docs/ops-runbook.md)."
+        )
+    ids = [m.id for m in applied]
+    if ids:
+        backend.rollback_migrations(applied)
+    return ids
+
+
+async def _with_migration_lock(dsn: str, dim: int, work: str, count: int = 0) -> list[str]:
+    """Run a chain operation under the advisory lock, after the dim guard."""
     conn = await asyncpg.connect(dsn)
     try:
-        # The dim-mismatch guard (ADR 0015): check the existing column's
-        # dimension before applying anything, so a mismatched pool fails
-        # loudly at migrate time with an actionable message.
+        # ADR 0015: check the pool's provisioned dim BEFORE taking the
+        # lock or applying anything, so a mismatched pool fails loudly
+        # with an actionable message and leaves no partial state.
         actual = await _existing_embedding_dim(conn)
         if actual is not None:
             msg = dim_mismatch_message(actual, dim)
             if msg is not None:
                 raise RuntimeError(msg)
-        for statement in _split_statements(_schema_sql(dim)):
-            await conn.execute(statement)
-        # Record the applied schema generation (ADR 0013 forward-migration
-        # tracking): a single upsert, so re-running migrate is idempotent.
-        await conn.execute(
-            "INSERT INTO schema_migrations (version) VALUES ($1) "
-            "ON CONFLICT (version) DO UPDATE SET applied_at = now()",
-            SCHEMA_VERSION,
-        )
+        await conn.execute("SELECT pg_advisory_lock($1)", MIGRATION_LOCK_KEY)
+        try:
+            if work == "apply":
+                await asyncio.to_thread(_apply_chain, dsn, dim)
+                return []
+            return await asyncio.to_thread(_rollback_chain, dsn, dim, count)
+        finally:
+            # Best-effort explicit unlock; closing the connection below
+            # releases it regardless (that is the point of an advisory
+            # lock — a dead session cannot hold one).
+            await conn.execute("SELECT pg_advisory_unlock($1)", MIGRATION_LOCK_KEY)
     finally:
         await conn.close()
+
+
+async def migrate(dsn: str, dim: int = 1024) -> None:
+    """Apply every outstanding migration to the database at ``dsn``.
+
+    Safe to re-run: an up-to-date pool applies nothing. Safe to run
+    concurrently: the advisory lock serialises replicas.
+
+    Raises:
+        RuntimeError: when the pool's existing ``entries.embedding``
+            column is at a *different* dimension than ``dim`` (ADR 0015).
+            The message names both dims and both remediations.
+    """
+    await _with_migration_lock(dsn, dim, "apply")
+
+
+async def rollback(dsn: str, dim: int = 1024, count: int = 1) -> list[str]:
+    """Roll back the ``count`` most recently applied migrations.
+
+    Returns the migration ids rolled back, most recent first. Refuses to
+    roll back ``0001.initial-schema`` (ADR 0020: a rollback that would
+    destroy data is not written).
+    """
+    if count < 1:
+        raise ValueError(f"count must be at least 1, got {count}")
+    return await _with_migration_lock(dsn, dim, "rollback", count)
 
 
 def dim_mismatch_message(actual_dim: int, configured_dim: int) -> str | None:
@@ -214,31 +211,49 @@ async def current_embedding_dim(dsn: str) -> int | None:
 
 
 async def current_schema_version(dsn: str) -> str | None:
-    """The applied schema generation (ADR 0013), or ``None`` if the pool
-    has never been migrated (the ``schema_migrations`` table is absent
-    or empty). Used by the ops / health surface to check for drift.
+    """The most recently applied migration id (ADR 0020), or ``None`` if
+    the pool has never been migrated (``_yoyo_migration`` absent/empty).
+
+    Used by the ops / health surface to check for drift. The table is
+    yoyo's; there is no separate ``schema_migrations`` marker.
     """
     conn = await asyncpg.connect(dsn)
     try:
         try:
             row = await conn.fetchrow(
-                "SELECT version FROM schema_migrations ORDER BY applied_at DESC LIMIT 1"
+                "SELECT migration_id FROM _yoyo_migration "
+                "ORDER BY applied_at_utc DESC, migration_id DESC LIMIT 1"
             )
         except asyncpg.exceptions.UndefinedTableError:
-            return None  # pre-ADR-0013 pool (no schema_migrations table)
-        return row["version"] if row is not None else None
+            return None  # never-migrated pool
+        return row["migration_id"] if row is not None else None
     finally:
         await conn.close()
 
 
 def main() -> None:
-    """Console entry point (``hivemind-migrate``): migrate from settings."""
+    """Console entry point (``hivemind-migrate``): migrate from settings.
+
+    ``hivemind-migrate`` applies the chain. ``hivemind-migrate --rollback
+    [N]`` reverses the N most recent migrations (default 1) — an
+    explicit flag, never the default, because a rollback is a deliberate
+    operator act.
+    """
     settings = load_settings()
+    argv = sys.argv[1:]
     try:
+        if argv and argv[0] == "--rollback":
+            count = int(argv[1]) if len(argv) > 1 else 1
+            rolled = asyncio.run(rollback(settings.database_url, settings.embedding_dim, count))
+            for migration_id in rolled:
+                print(f"rolled back {migration_id}")
+            if not rolled:
+                print("nothing to roll back")
+            return
         asyncio.run(migrate(settings.database_url, settings.embedding_dim))
-    except RuntimeError as exc:
-        # A dim mismatch (ADR 0015) is a deployment error, not a crash —
-        # print the actionable message and exit non-zero instead of a
-        # traceback.
+    except (RuntimeError, ValueError) as exc:
+        # A dim mismatch (ADR 0015) or a refused rollback (ADR 0020) is a
+        # deployment error, not a crash — print the actionable message
+        # and exit non-zero instead of a traceback.
         print(f"migrate error: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
