@@ -151,6 +151,18 @@ class EntryDraft:
     supersedes: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        # Normalise the enum fields to their members. ``Kind`` and
+        # ``ImportanceSource`` are ``StrEnum``s, so a caller passing the
+        # raw string ("fact") produces a draft that compares EQUAL to the
+        # member but is not IDENTICAL to it — and ``EntryFilters.matches``
+        # compares enums by identity, as does anything reading
+        # ``entry.kind.value``. Left un-normalised, a string-kind entry is
+        # silently invisible to a ``kind=`` filter (it under-counts
+        # ``by_kind``) and crashes the MCP serialiser with AttributeError.
+        # The store adapters all coerce on read; this closes the write
+        # side, so the domain is self-consistent whatever a caller passes.
+        object.__setattr__(self, "kind", Kind(self.kind))
+        object.__setattr__(self, "importance_source", ImportanceSource(self.importance_source))
         if not 1 <= self.importance <= 5:
             raise ValueError(f"importance must be 1..5, got {self.importance}")
         if self.importance_source is ImportanceSource.DEFAULT and self.importance != 3:
