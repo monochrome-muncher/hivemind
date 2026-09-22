@@ -26,6 +26,7 @@ from hivemind.domain.entry import (
     Entry,
     EntryDraft,
     EntryFilters,
+    ImportanceSource,
     Kind,
     Source,
     SourceType,
@@ -80,6 +81,8 @@ def _entry_dict(entry: Entry) -> dict[str, object]:
     Carries the machine-extracted entity facets (ADR 0016, SPEC §13):
     ``entities`` (name + kind, display-only in v1) and ``entities_model``
     (the extractor provenance; null when extraction was off or failed).
+    Also carries ``importance_source`` (ROADMAP §4.5): whether the
+    writer supplied ``importance`` or it fell out of the default.
     """
     return {
         "id": entry.id,
@@ -92,6 +95,7 @@ def _entry_dict(entry: Entry) -> dict[str, object]:
         "sources": [{"type": s.type.value, "ref": s.ref} for s in entry.sources],
         "tags": list(entry.tags),
         "importance": entry.importance,
+        "importance_source": entry.importance_source.value,
         "scope": entry.scope,
         "fleet_id": entry.fleet_id,
         "state": entry.state.value,
@@ -221,7 +225,7 @@ async def hive_write(
     sources: list[dict[str, str]] | None = None,
     tags: list[str] | None = None,
     occurred_at: str | None = None,
-    importance: int = 3,
+    importance: int | None = None,
     scope: str | None = None,
     supersedes: list[str] | None = None,
     author: str | None = None,
@@ -235,6 +239,11 @@ async def hive_write(
     credential when ``author``/``agent`` are omitted (SPEC §8.1); a
     plain user key must self-report the agent instance (no fabricated
     ``unknown`` identity — the write is rejected instead).
+
+    ``importance``: omit it and the entry lands at the default (3) with
+    ``importance_source=default``; supply it and the value is kept with
+    ``importance_source=caller`` (ROADMAP §4.5) — the 1..5 range is
+    still enforced.
 
     ``scope``: omit it and the entry lands at the highest scope the
     caller's trust level permits (L1 -> self; L2/L3 -> fleet; legacy
@@ -257,6 +266,16 @@ async def hive_write(
         # is the agent's registered name (verified server-side, ADR 0012).
         resolution = resolve_write_scope(cred, scope)
         resolved_author = author or (cred.agent_name or cred.user_id)
+        # ROADMAP §4.5: an omitted importance resolves to the default
+        # (3) with provenance `default`; a supplied value keeps its
+        # provenance `caller` (the 1..5 range is still enforced by
+        # ``EntryDraft.__post_init__``).
+        if importance is None:
+            resolved_importance = 3
+            importance_source = ImportanceSource.DEFAULT
+        else:
+            resolved_importance = importance
+            importance_source = ImportanceSource.CALLER
         draft = EntryDraft(
             kind=parsed_kind,
             summary=summary,
@@ -267,7 +286,8 @@ async def hive_write(
             sources=parsed_sources,
             tags=tuple(tags or ()),
             occurred_at=_parse_dt(occurred_at, "occurred_at"),
-            importance=importance,
+            importance=resolved_importance,
+            importance_source=importance_source,
             scope=resolution.scope,
             fleet_id=resolution.fleet_id,
             supersedes=tuple(supersedes or ()),

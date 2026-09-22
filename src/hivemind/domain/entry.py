@@ -47,6 +47,19 @@ class EntryState(StrEnum):
     WITHDRAWN = "withdrawn"
 
 
+class ImportanceSource(StrEnum):
+    """How an entry's ``importance`` was set (ROADMAP §4.5).
+
+    ``importance`` feeds retrieval scoring (SPEC §6.4); a field nobody
+    sets is a dead ranking input. Recorded server-side so an operator
+    can tell whether agents are actually setting it or every entry
+    rides the default — never client-settable itself.
+    """
+
+    CALLER = "caller"
+    DEFAULT = "default"
+
+
 class EntityKind(StrEnum):
     """The closed type vocabulary of an extracted entity (ADR 0016, SPEC §13).
 
@@ -120,6 +133,7 @@ class EntryDraft:
     tags: tuple[str, ...] = ()
     occurred_at: datetime | None = None
     importance: int = 3
+    importance_source: ImportanceSource = ImportanceSource.DEFAULT
     scope: str = "org"
     fleet_id: str | None = None
     supersedes: tuple[str, ...] = ()
@@ -168,6 +182,7 @@ class Entry:
     sources: tuple[Source, ...] = ()
     tags: tuple[str, ...] = ()
     importance: int = 3
+    importance_source: ImportanceSource = ImportanceSource.DEFAULT
     scope: str = "org"
     fleet_id: str | None = None
     embedding: tuple[float, ...] | None = None
@@ -197,6 +212,7 @@ class EntryFilters:
     kind: Kind | None = None
     tags: tuple[str, ...] = ()
     entities: tuple[str, ...] = ()
+    importance_source: ImportanceSource | None = None
     scope: str | None = None
     fleet_id: str | None = None
     author: str | None = None
@@ -212,6 +228,11 @@ class EntryFilters:
         if not self.include_inactive and entry.state is not EntryState.ACTIVE:
             return False
         if self.kind is not None and entry.kind is not self.kind:
+            return False
+        if (
+            self.importance_source is not None
+            and entry.importance_source is not self.importance_source
+        ):
             return False
         if self.scope is not None and entry.scope != self.scope:
             return False
@@ -259,6 +280,7 @@ __all__ = [
     "EntryFilters",
     "EntryState",
     "ExtractedEntity",
+    "ImportanceSource",
     "Kind",
     "Source",
     "SourceType",

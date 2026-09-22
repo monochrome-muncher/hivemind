@@ -14,7 +14,7 @@ from typing import Any
 from pydantic import BaseModel, field_validator
 
 from hivemind.domain.access import Agent, Fleet
-from hivemind.domain.entry import EntityKind, Entry, Kind, SourceType
+from hivemind.domain.entry import EntityKind, Entry, ImportanceSource, Kind, SourceType
 from hivemind.domain.feedback import Verdict
 from hivemind.services.search import Hit
 
@@ -51,7 +51,11 @@ class CreateEntryRequest(BaseModel):
     sources: list[SourceModel] = []
     tags: list[str] = []
     occurred_at: datetime | None = None
-    importance: int = 3
+    # Omitted -> the default (3) with ``importance_source=default``;
+    # supplied -> that value with ``importance_source=caller``
+    # (ROADMAP §4.5). The validated 1..5 range still applies when supplied
+    # (``EntryDraft.__post_init__``).
+    importance: int | None = None
     # ADR 0011: an omitted scope defaults to the highest scope the caller's
     # trust level permits (L1 -> self; L2/L3 -> fleet; legacy/admin -> org);
     # an explicit out-of-permission scope is rejected (403).
@@ -101,6 +105,9 @@ class EntryOut(BaseModel):
     author: str
     agent: str
     importance: int
+    # Server-derived, not client-settable (ROADMAP §4.5): whether the
+    # writer supplied ``importance`` or it fell out of the default.
+    importance_source: ImportanceSource
     scope: str
     fleet_id: str | None = None
     state: str
@@ -133,6 +140,7 @@ class EntryOut(BaseModel):
             author=entry.author,
             agent=entry.agent,
             importance=entry.importance,
+            importance_source=entry.importance_source,
             scope=entry.scope,
             fleet_id=entry.fleet_id,
             state=entry.state.value,
@@ -331,6 +339,9 @@ class EntriesMetrics(BaseModel):
     inactive: int
     by_scope: dict[str, int] = {}
     by_kind: dict[str, int] = {}
+    # ROADMAP §4.5: is anyone actually setting ``importance``, or is
+    # every entry riding the default?
+    by_importance_source: dict[str, int] = {}
 
 
 class FleetsMetrics(BaseModel):

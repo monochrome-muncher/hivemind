@@ -10,7 +10,7 @@ usage-based triggers measurable (pair with the §1.1 eval harness).
 from __future__ import annotations
 
 from hivemind.domain.access import TrustLevel
-from hivemind.domain.entry import EntryDraft, EntryFilters, Kind
+from hivemind.domain.entry import EntryDraft, EntryFilters, ImportanceSource, Kind
 from hivemind.memstore import MemoryStore
 from hivemind.services.metrics import MetricsService
 from tests.fakes import make_clock
@@ -28,6 +28,7 @@ async def _seed_entry(store: MemoryStore, **kw) -> str:
         agent=kw.get("agent", "agent-1"),
         scope=kw.get("scope", "org"),
         fleet_id=kw.get("fleet_id"),
+        importance_source=kw.get("importance_source", ImportanceSource.DEFAULT),
     )
     entry = await store.create_entry(draft, [0.1, 0.1, 0.1, 0.1])
     return entry.id
@@ -62,6 +63,19 @@ class TestCountEntries:
         assert await store.count_entries(EntryFilters(kind=Kind.INSIGHT)) == 2
         assert await store.count_entries(EntryFilters(kind=Kind.FACT)) == 1
 
+    async def test_counts_by_importance_source(self) -> None:
+        clock = make_clock()
+        store = _make_store(clock)
+        await _seed_entry(store, importance_source=ImportanceSource.DEFAULT)
+        await _seed_entry(store, importance_source=ImportanceSource.CALLER)
+        await _seed_entry(store, importance_source=ImportanceSource.CALLER)
+        assert (
+            await store.count_entries(EntryFilters(importance_source=ImportanceSource.CALLER)) == 2
+        )
+        assert (
+            await store.count_entries(EntryFilters(importance_source=ImportanceSource.DEFAULT)) == 1
+        )
+
     async def test_default_counts_active_only(self) -> None:
         clock = make_clock()
         store = _make_store(clock)
@@ -90,6 +104,19 @@ class TestMetricsService:
         assert entries["inactive"] == 0
         assert entries["by_scope"] == {"org": 1, "fleet": 1, "self": 1}
         assert entries["by_kind"] == {"fact": 1, "insight": 1, "decision": 1}
+        # All three entries above rode the default (no explicit
+        # importance_source), so `caller` is omitted (ROADMAP §4.5).
+        assert entries["by_importance_source"] == {"default": 3}
+
+    async def test_entries_report_by_importance_source(self) -> None:
+        clock = make_clock()
+        store = _make_store(clock)
+        await _seed_entry(store, importance_source=ImportanceSource.DEFAULT)
+        await _seed_entry(store, importance_source=ImportanceSource.CALLER)
+        await _seed_entry(store, importance_source=ImportanceSource.CALLER)
+        service = MetricsService(store)
+        report = await service.usage_report()
+        assert report["entries"]["by_importance_source"] == {"default": 1, "caller": 2}
 
     async def test_fleets_report_writes_per_fleet(self) -> None:
         clock = make_clock()

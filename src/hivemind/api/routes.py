@@ -44,7 +44,7 @@ from hivemind.api.schemas import (
     WithdrawRequest,
 )
 from hivemind.domain.access import Agent, TrustLevel
-from hivemind.domain.entry import EntryDraft, EntryFilters, Kind, Source
+from hivemind.domain.entry import EntryDraft, EntryFilters, ImportanceSource, Kind, Source
 from hivemind.embeddings import EmbeddingError
 from hivemind.ports import Credential
 from hivemind.services.access import resolve_write_scope
@@ -117,6 +117,15 @@ def build_router(app: HivemindApp) -> APIRouter:
             # side, never self-reported — ADR 0012).
             author = credential.agent_name or credential.user_id
             resolution = resolve_write_scope(credential, payload.scope)
+            # ROADMAP §4.5: an omitted importance resolves to the default
+            # (3) with provenance `default`; a supplied value keeps its
+            # provenance `caller` (the 1..5 range is still enforced below).
+            if payload.importance is None:
+                importance = 3
+                importance_source = ImportanceSource.DEFAULT
+            else:
+                importance = payload.importance
+                importance_source = ImportanceSource.CALLER
             # Draft validation (SPEC.md §4.1) runs here: a malformed draft
             # (e.g. out-of-range importance) is a 422, not a 500.
             draft = EntryDraft(
@@ -129,7 +138,8 @@ def build_router(app: HivemindApp) -> APIRouter:
                 sources=tuple(Source(type=s.type, ref=s.ref) for s in payload.sources),
                 tags=tuple(payload.tags),
                 occurred_at=payload.occurred_at,
-                importance=payload.importance,
+                importance=importance,
+                importance_source=importance_source,
                 scope=resolution.scope,
                 fleet_id=resolution.fleet_id,
                 supersedes=tuple(payload.supersedes),

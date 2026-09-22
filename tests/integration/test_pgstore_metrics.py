@@ -15,7 +15,7 @@ import pytest
 
 from hivemind.config import Settings
 from hivemind.domain.access import Visibility
-from hivemind.domain.entry import EntryDraft, EntryFilters, Kind
+from hivemind.domain.entry import EntryDraft, EntryFilters, ImportanceSource, Kind
 from hivemind.store import PgStore
 from hivemind.store.migrate import migrate
 
@@ -63,6 +63,7 @@ async def _seed(
     scope: str = "org",
     kind: Kind = Kind.FACT,
     fleet_id: str | None = None,
+    importance_source: ImportanceSource = ImportanceSource.DEFAULT,
 ) -> None:
     draft = EntryDraft(
         kind=kind,
@@ -71,6 +72,7 @@ async def _seed(
         agent="alice",
         scope=scope,
         fleet_id=fleet_id,
+        importance_source=importance_source,
     )
     await store.create_entry(draft, VEC, embedding_model="fake")
 
@@ -91,6 +93,14 @@ async def test_count_entries_by_kind(pg: PgStore) -> None:
     await _seed(pg, "s3", kind=Kind.INSIGHT)
     assert await pg.count_entries(EntryFilters(kind=Kind.INSIGHT)) == 2
     assert await pg.count_entries(EntryFilters(kind=Kind.FACT)) == 1
+
+
+async def test_count_entries_by_importance_source(pg: PgStore) -> None:
+    await _seed(pg, "s1", importance_source=ImportanceSource.DEFAULT)
+    await _seed(pg, "s2", importance_source=ImportanceSource.CALLER)
+    await _seed(pg, "s3", importance_source=ImportanceSource.CALLER)
+    assert await pg.count_entries(EntryFilters(importance_source=ImportanceSource.CALLER)) == 2
+    assert await pg.count_entries(EntryFilters(importance_source=ImportanceSource.DEFAULT)) == 1
 
 
 async def test_count_entries_by_fleet(pg: PgStore) -> None:

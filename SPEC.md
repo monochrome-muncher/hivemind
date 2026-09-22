@@ -53,6 +53,7 @@ One entry entity; a `kind` enum carries the distinction. There are no other read
 | `author` | agent name | The agent's registered name, server-filled from the agent key (never self-reported; ADR 0012) |
 | `agent` | agent instance id | Framework/instance identifier (retired from writes in v2 — ADR 0012; kept in the schema for existing data) |
 | `importance` | 1–5 (int) | Writer-declared; feeds retrieval scoring |
+| `importance_source` | `caller` \| `default` | **Server-derived, not client-settable** (ROADMAP §4.5): `caller` when the writer supplied `importance`, `default` when it fell out of the default (3) |
 | `scope` | `self` \| `fleet` \| `org` (legacy) | The entry's audience: the author agent only, the home fleet it was written into (fixed at write time), or the legacy org-wide value (read-only); an omitted scope resolves to the highest value the writer's trust level permits (§12, ADR 0011) |
 | `embedding` | vector(dim) | Generated at write time (§7) |
 | `state` | `active` \| `superseded` \| `withdrawn` | Default `active` |

@@ -28,7 +28,10 @@ class TestCreateEntryRequest:
         assert req.sources == []
         assert req.tags == []
         assert req.occurred_at is None
-        assert req.importance == 3
+        # ROADMAP §4.5: an omitted importance is *unspecified* (None) at
+        # the schema level; the route resolves it to 3 with
+        # importance_source=default (the schema no longer hard-codes 3).
+        assert req.importance is None
         # ADR 0011: an omitted scope is *unspecified* (None), so the route
         # resolves it to the highest scope the trust level permits. The old
         # default ("org") rejected every L2/L1 write (dogfood finding 1).

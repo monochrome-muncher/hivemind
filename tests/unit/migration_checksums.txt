@@ -4,3 +4,4 @@
 # shape. Add a line here in the same commit that adds a migration;
 # never update a line to match an edit.
 fbe796e87493f9012a27c30a1ab9e93a72eed84add093df0223d65a7b169c829  0001.initial-schema.py
+82d8f507a9c903989aa4c08b51fe361f25d8164e549d7b941190bd8aa9778ded  0002.importance-source.sql

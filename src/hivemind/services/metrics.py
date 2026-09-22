@@ -7,8 +7,8 @@ than guesswork. It is deliberately minimal — a handful of ``COUNT``
 queries (``count_entries``) + the fleet/agent listings — no new
 instrumentation logs, no extra schema.
 
-Counters (the §12 set from ROADMAP §3.3):
-- entries: total, active, by_scope, by_kind, inactive.
+Counters (the §12 set from ROADMAP §3.3, plus the §4.5 provenance counter):
+- entries: total, active, by_scope, by_kind, by_importance_source, inactive.
 - fleets: total + per-fleet writes (``entries.fleet_id``).
 - agents: total, pending, active, trust-level distribution.
 """
@@ -18,12 +18,13 @@ from __future__ import annotations
 from typing import Any
 
 from hivemind.domain.access import AgentStatus, TrustLevel
-from hivemind.domain.entry import EntryFilters, Kind
+from hivemind.domain.entry import EntryFilters, ImportanceSource, Kind
 from hivemind.ports import Store
 
 # The canonical scopes / kinds (the "distinct tags in use" signal).
 _SCOPES = ("org", "fleet", "self")
 _KINDS = (Kind.FACT, Kind.INSIGHT, Kind.DECISION)
+_IMPORTANCE_SOURCES = (ImportanceSource.CALLER, ImportanceSource.DEFAULT)
 _TRUST_LEVELS = (
     TrustLevel.UNTRUSTED,
     TrustLevel.LURKER,
@@ -47,7 +48,9 @@ class MetricsService:
         }
 
     async def _entries_report(self) -> dict[str, Any]:
-        """Entry counters: total / active / inactive + by_scope + by_kind."""
+        """Entry counters: total / active / inactive + by_scope + by_kind +
+        by_importance_source (ROADMAP §4.5: is anyone actually setting
+        ``importance``, or is every entry riding the default?)."""
         store = self._store
         total = await store.count_entries(EntryFilters(include_inactive=True))
         active = await store.count_entries(EntryFilters())
@@ -61,12 +64,20 @@ class MetricsService:
             count = await store.count_entries(EntryFilters(kind=kind, include_inactive=True))
             if count:
                 by_kind[kind.value] = count
+        by_importance_source: dict[str, int] = {}
+        for source in _IMPORTANCE_SOURCES:
+            count = await store.count_entries(
+                EntryFilters(importance_source=source, include_inactive=True)
+            )
+            if count:
+                by_importance_source[source.value] = count
         return {
             "total": total,
             "active": active,
             "inactive": total - active,
             "by_scope": by_scope,
             "by_kind": by_kind,
+            "by_importance_source": by_importance_source,
         }
 
     async def _fleets_report(self) -> dict[str, Any]:

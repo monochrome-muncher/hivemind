@@ -32,6 +32,10 @@ _Avoid_: report, deep-dive (in prose); long-form entry (any kind may have a long
 A choice the organization (or a part of it) made, with its rationale.
 _Avoid_: ruling, resolution
 
+**Importance source**:
+Whether an entry's `importance` was supplied by the writer (`caller`) or left at the default (`default`). Server-derived, not client-settable.
+_Avoid_: importance provenance (the field is `importance_source`)
+
 ### Provenance
 
 **Author**:

@@ -28,7 +28,7 @@ from hivemind.store.migrate import (
     rollback,
 )
 
-HEAD = "0001.initial-schema"
+HEAD = "0002.importance-source"
 
 
 def _dsn() -> str:
@@ -67,7 +67,8 @@ async def test_migrate_applies_the_chain_and_reports_its_head() -> None:
 
     conn = await asyncpg.connect(dsn)
     try:
-        assert await conn.fetchval("SELECT count(*) FROM _yoyo_migration") == 1
+        # One row per migration in the chain (0001 + 0002 — ADR 0020).
+        assert await conn.fetchval("SELECT count(*) FROM _yoyo_migration") == 2
     finally:
         await conn.close()
 
@@ -91,8 +92,8 @@ async def test_concurrent_migrators_are_serialised_by_the_advisory_lock() -> Non
     assert await current_schema_version(dsn) == HEAD
     conn = await asyncpg.connect(dsn)
     try:
-        # Applied exactly once, not once per migrator.
-        assert await conn.fetchval("SELECT count(*) FROM _yoyo_migration") == 1
+        # Each migration applied exactly once, not once per migrator.
+        assert await conn.fetchval("SELECT count(*) FROM _yoyo_migration") == 2
         assert await conn.fetchval("SELECT to_regclass('entries') IS NOT NULL")
     finally:
         await conn.close()
@@ -125,11 +126,36 @@ async def test_current_schema_version_is_none_when_unmigrated() -> None:
     assert await current_schema_version(dsn) is None
 
 
+async def test_rollback_removes_the_latest_migration() -> None:
+    """ADR 0020: a structural migration (not `0001`) ships a real
+    rollback. Rolling back `0002` drops the additive
+    ``importance_source`` column and leaves `0001` in place."""
+    dsn, dim = _dsn(), Settings().embedding_dim
+    await _require_postgres(dsn)
+    await _reset_chain(dsn)
+    await migrate(dsn, dim)
+
+    rolled = await rollback(dsn, dim, count=1)
+    assert rolled == ["0002.importance-source"]
+    assert await current_schema_version(dsn) == "0001.initial-schema"
+
+    conn = await asyncpg.connect(dsn)
+    try:
+        column = await conn.fetchval(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = 'entries' AND column_name = 'importance_source'"
+        )
+        assert column is None
+    finally:
+        await conn.close()
+
+
 async def test_rollback_refuses_to_drop_the_initial_schema() -> None:
     """ADR 0020: a rollback that would destroy data is not written.
 
     Rolling back `0001` drops every entry in the pool, so `rollback`
-    refuses and names the two real remediations instead.
+    refuses and names the two real remediations instead — even when the
+    requested count would also take later (legal) migrations with it.
     """
     dsn, dim = _dsn(), Settings().embedding_dim
     await _require_postgres(dsn)
@@ -137,7 +163,7 @@ async def test_rollback_refuses_to_drop_the_initial_schema() -> None:
     await migrate(dsn, dim)
 
     with pytest.raises(RuntimeError) as excinfo:
-        await rollback(dsn, dim, count=1)
+        await rollback(dsn, dim, count=2)
     message = str(excinfo.value)
     assert "0001.initial-schema" in message
     assert "pg-reset" in message or "backup" in message
