@@ -235,6 +235,72 @@ failure undiagnosable).
     --env-from=secret/hivemind-secrets
   ```
 
+### Graceful shutdown (`terminationGracePeriodSeconds`)
+
+Both Deployments set **`terminationGracePeriodSeconds: 150`** plus a
+**5-second `preStop` sleep**. With more than one replica a rolling
+deploy terminates pods routinely, so these are ordinary-path settings,
+not edge-case insurance.
+
+- **What the grace period actually governs.** uvicorn handles SIGTERM
+  itself — stop accepting, drain the in-flight requests, *then* run the
+  lifespan shutdown. Nothing sets uvicorn's
+  `timeout_graceful_shutdown`, so its own wait is **unbounded**:
+  `terminationGracePeriodSeconds` is the only real deadline, and when
+  it expires the container is SIGKILLed with whatever is still in
+  flight.
+- **Where 150 comes from.** The slowest single request is a write
+  (`hive_write` / `POST /v1/entries`): `WriteService.write` embeds and
+  **then** extracts, in sequence, each with its own bounded retry
+  budget (ADR 0014).
+
+  | leg | attempts | timeout | backoff | worst case |
+  |---|---|---|---|---|
+  | embedder | 1 + `HIVEMIND_EMBEDDING_RETRIES` (2) = 3 | 10s (not configurable) | 0.5s + 1.0s | 31.5s |
+  | extractor | 1 + `HIVEMIND_EXTRACTOR_RETRIES` (2) = 3 | `HIVEMIND_EXTRACTOR_TIMEOUT` (30s) | 0.5s + 1.0s | 91.5s |
+  | **worst-case write path** | | | | **123.0s** |
+
+  Plus the 5s `preStop` sleep and two pooled Postgres round-trips (auth
+  verify + INSERT), rounded up to **150s** for margin — httpx applies
+  its timeout **per I/O phase** (connect / read / write), so a single
+  attempt can overshoot it. Reads (`hive_search`, `GET /v1/entries`)
+  embed the query only and never extract, so they finish well inside
+  the embedder's 31.5s.
+- **If you raise a retry budget, raise this.** Each leg costs
+  `(retries + 1) x timeout + 0.5 x (2^retries - 1)` seconds; sum the two
+  legs, add the 5s `preStop`, then round up. Worked example: setting
+  `HIVEMIND_EXTRACTOR_RETRIES=4` makes the extractor leg
+  `5 x 30 + 0.5 x 15 = 157.5s` and the write path `189s`, so the grace
+  period needs to go to **~240s** in *both*
+  `deploy/kubernetes/*-deployment.yaml`. The same applies to
+  `HIVEMIND_EXTRACTOR_TIMEOUT` and `HIVEMIND_EMBEDDING_RETRIES`. Leaving
+  it stale is not a crash — it is a SIGKILL that drops a write the
+  caller was told nothing about.
+- **Why `preStop` as well.** On pod deletion the kubelet's SIGTERM and
+  the EndpointSlice removal happen **concurrently**, so for as long as
+  that removal takes to reach kube-proxy — and the nginx ingress
+  controller, which routes straight to pod IPs, bypassing the Service —
+  a terminating pod can still be handed **new** requests, which it would
+  refuse because uvicorn has already closed its listener. The sleep lets
+  deregistration win the race; the process serves normally throughout.
+  It is `/bin/sleep` from the image's `python:3.14-slim` base, not the
+  native `sleep` lifecycle handler (GA only in k8s 1.30+), so it works
+  on older clusters.
+- **What this deliberately does NOT do.** The MCP transport is
+  **stateless** streamable-HTTP (ADR 0010, SPEC §8.5: one request = one
+  self-contained exchange; the server holds no session registry), so a
+  terminating pod's blast radius is at most **one in-flight tool call**,
+  never a client session. There is no session-draining step and none is
+  needed. The `PgStore` pool is likewise not closed on a shutdown path —
+  it dies with the process, *after* uvicorn has drained — so an
+  in-flight request can never outlive its own connection pool. Nothing
+  is left half-written either: entries are immutable (ADR 0001), so a
+  severed write simply does not land.
+- **Dev compose gets a smaller version of the same setting.** The
+  `mcp-http` compose service sets `stop_grace_period: 35s` (compose's
+  default is 10s — shorter than a *single* embedder attempt). It runs
+  with extraction off, so its worst case is the embedder leg alone.
+
 ### Probe endpoints (ADR 0019)
 
 Four **unauthenticated** orchestrator endpoints (served outside the
@@ -258,6 +324,7 @@ auth middleware — k8s probes carry no credential):
 | MCP session drops after ~60s | nginx default `proxy-read-timeout` killing the SSE stream (classic pitfall) | apply the opt-in Ingress with the SSE annotations (`deploy/kubernetes/optional/ingress.yaml`) |
 | entries have empty `entities` | extractor off (empty endpoint — by design) OR extractor dead (best-effort, ADR 0016) | check `HIVEMIND_EXTRACTOR_ENDPOINT` + `K8S_SECRET_EXTRACTOR_API_KEY`; §4.6 |
 | writes failing with `EmbeddingError` | embedder dead (ADR 0014 retry budget exhausted) | §4.5 |
+| a write dropped mid-flight during a deploy (client sees a reset, no entry lands) | `terminationGracePeriodSeconds` no longer covers the retry budgets — the pod was SIGKILLed while still draining | recompute the sum in §5 and raise it in both Deployments |
 | `hivemind-secrets` missing values | CI variable changed but no redeploy yet | re-run the pipeline (the deploy job re-renders the Secret every deploy) |
 
 **Two-Secret ownership rule (do not cross the boundary):** CI owns

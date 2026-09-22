@@ -32,6 +32,40 @@ spec:
       # unreachable DB fails the first entrypoint step LOUDLY: the pod never
       # serves (crash-loops until the DB is up — the desired posture; no
       # retry in the entrypoint, the pod restart policy owns recovery).
+
+      # Graceful shutdown on rolling deploys. With more than one replica a
+      # rolling deploy terminates pods routinely, so this is ordinary
+      # traffic, not an edge case. The REST surface is plain
+      # request/response (SPEC §5.1) — no server-side session state — so
+      # a terminating pod's blast radius is at most the requests already
+      # in flight on it. Two separate concerns, one here and one below:
+      #
+      # 1. terminationGracePeriodSeconds — the SIGTERM -> SIGKILL budget.
+      #    uvicorn handles SIGTERM itself (stop accepting, drain the
+      #    in-flight requests, THEN run the lifespan shutdown), and
+      #    nothing sets uvicorn's `timeout_graceful_shutdown`, so its own
+      #    wait is unbounded: THIS number is the only real deadline.
+      #    It must therefore cover the slowest single request, which is a
+      #    write (`hive_write` / `POST /v1/entries`): `WriteService.write`
+      #    embeds and then extracts, in sequence, each with its own
+      #    bounded retry budget (ADR 0014).
+      #
+      #      embedder   3 attempts x 10s + 0.5s + 1.0s backoff =  31.5s
+      #      extractor  3 attempts x 30s + 0.5s + 1.0s backoff =  91.5s
+      #      ------------------------------------------------- -------
+      #      worst-case write path                               123.0s
+      #
+      #    Plus the 5s preStop sleep below and two pooled Postgres
+      #    round-trips (auth verify + INSERT), rounded up to 150s for
+      #    margin — httpx applies its timeout PER I/O phase (connect /
+      #    read / write), so a single attempt can exceed it. 150s is also
+      #    the budget the startupProbe already gets.
+      #
+      #    RAISE THIS if HIVEMIND_EXTRACTOR_RETRIES or
+      #    HIVEMIND_EXTRACTOR_TIMEOUT (or HIVEMIND_EMBEDDING_RETRIES) go
+      #    up — DEPLOY.md §5 carries the arithmetic and the recipe.
+      terminationGracePeriodSeconds: 150
+
       containers:
         - name: app
           image: hivemind:0.0.0
@@ -48,6 +82,23 @@ spec:
               value: "0.0.0.0"
             - name: HIVEMIND_PORT
               value: "8000"
+          # 2. preStop — the endpoint-deregistration race. On pod deletion
+          #    the kubelet's SIGTERM and the EndpointSlice removal happen
+          #    CONCURRENTLY, so for as long as that removal takes to reach
+          #    kube-proxy (and the nginx ingress controller, which routes
+          #    straight to pod IPs, bypassing the Service) a terminating
+          #    pod can still be handed NEW requests — which it would
+          #    refuse, because uvicorn has already closed its listener.
+          #    Sleeping lets deregistration win the race: the process
+          #    keeps serving normally throughout, it just is not asked to
+          #    exit yet. The sleep runs INSIDE the grace period above.
+          #    `sleep` is /bin/sleep from the python:3.14-slim base —
+          #    deliberately NOT the native `sleep` lifecycle handler
+          #    (GA only in k8s 1.30+), so this works on older clusters.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
           ports:
             - name: http
               containerPort: 8000
