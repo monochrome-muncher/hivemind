@@ -17,7 +17,10 @@ not as a trigger that fired.
 
 * **Facets, not a graph.** A fixed-prompt LLM extractor runs **at
   write time** over the same text the embedder sees (`summary` + the
-  bounded body prefix, `HIVEMIND_EMBEDDING_PREFIX_CHARS`). Its output
+  bounded body prefix, `HIVEMIND_EMBEDDING_PREFIX_CHARS` — renamed to
+  `HIVEMIND_EMBEDDING_PREFIX_TOKENS` and re-based on whitespace words by
+  [ADR 0021](0021-embedded-text-budget-in-whitespace-words-not-model-tokens.md),
+  which also fixed the embedder call site that ignored it). Its output
   is validated **all-or-nothing** against a fixed schema:
   `entities: [{name, kind}]` where `name` is open vocabulary
   (trimmed, non-empty, ≤ 128 chars), `kind` is a **closed** vocabulary

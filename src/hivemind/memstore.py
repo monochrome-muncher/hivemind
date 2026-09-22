@@ -205,6 +205,10 @@ class MemoryStore:
             for entry in self._entries.values():
                 if not filters.matches(entry) or not self._visible(entry, visibility):
                     continue
+                # The keyword haystack is the same bounded text the entry
+                # is embedded from (default prefix-token budget, ADR 0021):
+                # the reference store has no Settings, and the two streams
+                # should see the same text.
                 haystack = _tokens(embeddable_text(entry.summary, entry.body)) | {
                     tag.lower() for tag in entry.tags
                 }

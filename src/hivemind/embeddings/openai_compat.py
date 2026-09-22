@@ -37,7 +37,7 @@ from typing import Any
 import httpx
 
 from hivemind.config import Settings
-from hivemind.domain.entry import EntryDraft, embeddable_text
+from hivemind.domain.entry import DEFAULT_PREFIX_TOKENS, EntryDraft, embeddable_text
 
 
 async def _default_sleep(delay: float) -> None:
@@ -69,6 +69,7 @@ class OpenAICompatEmbedder:
         model_name: str,
         dim: int,
         *,
+        prefix_tokens: int = DEFAULT_PREFIX_TOKENS,
         timeout: float = 10.0,
         retries: int = 2,
         backoff: float = 0.5,
@@ -90,6 +91,10 @@ class OpenAICompatEmbedder:
             dim: The fixed vector dimension (deploy-time decision,
                 ADR 0005); requested via the OpenAI ``dimensions``
                 field and validated on every response.
+            prefix_tokens: The bounded body prefix the embedded text
+                is cut at, in whitespace-delimited words (SPEC §7, ADR
+                0021: ``embedding_prefix_tokens``). The extractor reads
+                the same bounded text (ADR 0016, SPEC §13.1).
             timeout: The request timeout used only when the embedder
                 builds its own client.
             retries: The number of retries (after the first attempt)
@@ -109,6 +114,7 @@ class OpenAICompatEmbedder:
         self._api_key = api_key
         self._model_name = model_name
         self._dim = dim
+        self._prefix_tokens = prefix_tokens
         self._retries = retries
         self._backoff = backoff
         self._sleep = sleep if sleep is not None else _default_sleep
@@ -122,6 +128,7 @@ class OpenAICompatEmbedder:
             api_key=settings.embedding_api_key,
             model_name=settings.embedding_model,
             dim=settings.embedding_dim,
+            prefix_tokens=settings.embedding_prefix_tokens,
             retries=settings.embedding_retries,
         )
 
@@ -147,8 +154,9 @@ class OpenAICompatEmbedder:
 
     def entry_embeddable_text(self, draft: EntryDraft) -> str:
         """The exact text an entry is embedded from (SPEC.md §7): the
-        summary plus a bounded prefix of the body."""
-        return embeddable_text(draft.summary, draft.body)
+        summary plus a bounded prefix of the body (``prefix_tokens``
+        whitespace-delimited words — ADR 0021)."""
+        return embeddable_text(draft.summary, draft.body, self._prefix_tokens)
 
     async def embed_text(self, text: str) -> list[float]:
         """Embed a query or a standalone text into a fixed-dim vector."""

@@ -20,8 +20,9 @@ data:
   # makes the entrypoint's idempotent migration (ADR 0018) fail LOUDLY
   # (the pod never serves), which is the desired posture.
   HIVEMIND_EMBEDDING_DIM: "1024"
-  # Bounded body prefix for embedding + extraction (SPEC §7).
-  HIVEMIND_EMBEDDING_PREFIX_CHARS: "2048"
+  # Bounded body prefix for embedding + extraction (SPEC §7), counted in
+  # whitespace-delimited words, not model tokens (ADR 0021).
+  HIVEMIND_EMBEDDING_PREFIX_TOKENS: "2000"
   # Retry budget for transient embedder failures (ADR 0014); 0 disables.
   HIVEMIND_EMBEDDING_RETRIES: "2"
   # --- entity extraction (ADR 0016: optional + best-effort) ------------------

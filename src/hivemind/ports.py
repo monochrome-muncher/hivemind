@@ -341,5 +341,12 @@ class Credential:
 
 
 def entry_embeddable_text(draft: EntryDraft) -> str:
-    """The text an entry is embedded from (SPEC.md §7)."""
+    """The text an entry is embedded from (SPEC.md §7), at the default
+    prefix-token budget (ADR 0021).
+
+    For a configured budget, use the embedder's own
+    ``entry_embeddable_text`` — this helper exists for the
+    dependency-free embedders (dev/local, test fakes) that carry no
+    ``Settings``.
+    """
     return embeddable_text(draft.summary, draft.body)

@@ -7,6 +7,7 @@ string so the domain stays storage-agnostic.
 
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -25,6 +26,17 @@ _SUMMARY_MAX_CHARS = 280
 # ADR 0016 / SPEC §13: a machine-extracted entity name is a bounded
 # display string (the extractor validates before it is stored).
 _ENTITY_NAME_MAX_CHARS = 128
+
+# ADR 0021: the embedded-text body budget, counted in whitespace-delimited
+# words ("prefix tokens" — never a model tokenizer's tokens). ~2000 words
+# is ~2600 model tokens, well under every endpoint limit in use: the bound
+# exists to control dilution and cost, not to respect a model limit. One
+# source of truth for the default, shared by ``Settings``, the embedder and
+# the extractor (which reads the same text — ADR 0016, SPEC §13.1).
+DEFAULT_PREFIX_TOKENS = 2000
+
+# A "prefix token" is one run of non-whitespace characters (ADR 0021).
+_WORD_RE = re.compile(r"\S+")
 
 
 def _utcnow() -> datetime:
@@ -270,20 +282,50 @@ class EntryFilters:
         return True
 
 
+def _body_prefix(body: str, prefix_tokens: int) -> str:
+    """The first ``prefix_tokens`` whitespace-delimited words of ``body``,
+    with the original spacing between them preserved (ADR 0021).
+
+    The cut is made at the *end offset* of the last word inside the budget
+    and the text before it is returned verbatim, so newlines, blank lines
+    and indentation survive intact — a long-form ``insight`` keeps its
+    paragraph structure. Re-joining the words on single spaces would count
+    the same budget but destroy that structure.
+
+    A body inside the budget is returned unchanged (byte for byte,
+    including any trailing whitespace).
+    """
+    if prefix_tokens < 0:
+        raise ValueError(f"prefix_tokens must be non-negative, got {prefix_tokens}")
+    cut = 0
+    for words, match in enumerate(_WORD_RE.finditer(body), start=1):
+        if words > prefix_tokens:
+            return body[:cut]
+        cut = match.end()
+    return body
+
+
 def embeddable_text(
     summary: str,
     body: str | None,
-    prefix_chars: int = 2048,
+    prefix_tokens: int = DEFAULT_PREFIX_TOKENS,
 ) -> str:
-    """The text an entry is embedded from (SPEC.md §7): the summary plus a
-    bounded prefix of the body (~512 tokens ≈ 2048 chars in v1)."""
+    """The text an entry is embedded from (SPEC.md §7): the summary whole,
+    plus a bounded prefix of the body.
+
+    The bound is counted in **prefix tokens** — whitespace-delimited
+    words, *not* a model tokenizer's tokens (ADR 0021). The same text is
+    what the extractor reads (ADR 0016, SPEC §13.1), so the two stay in
+    lockstep by construction.
+    """
     text = summary
     if body:
-        text = f"{text}\n{body[:prefix_chars]}"
+        text = f"{text}\n{_body_prefix(body, prefix_tokens)}"
     return text
 
 
 __all__ = [
+    "DEFAULT_PREFIX_TOKENS",
     "EntityKind",
     "Entry",
     "EntryDraft",

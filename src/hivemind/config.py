@@ -17,6 +17,8 @@ from dataclasses import dataclass
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from hivemind.domain.entry import DEFAULT_PREFIX_TOKENS
+
 
 @dataclass(frozen=True, slots=True)
 class SearchConfig:
@@ -69,7 +71,10 @@ class Settings(BaseSettings):
     # ``dimensions`` parameter) and self-hosted Matryoshka servers (vLLM)
     # can serve. The dev Makefile pins 512 for fast local vLLM embedding.
     embedding_dim: int = 1024
-    embedding_prefix_chars: int = 2048
+    # ADR 0021: the embedded-text body budget, in whitespace-delimited
+    # words ("prefix tokens"), NOT a model tokenizer's tokens. Shared
+    # with the extractor, which reads the same text (ADR 0016, SPEC §13.1).
+    embedding_prefix_tokens: int = DEFAULT_PREFIX_TOKENS
     # Retry budget for transient embedder failures (timeouts, connection
     # errors, 429, 5xx) — ADR 0014; 0 disables retrying.
     embedding_retries: int = 2
