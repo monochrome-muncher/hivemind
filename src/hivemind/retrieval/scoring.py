@@ -59,7 +59,7 @@ def entry_score(
 
     final = fused
           * (0.5 + 0.1 * importance)
-          * 0.5 ** (age_days / half_life_days)
+          * max(recency_floor, 0.5 ** (age_days / half_life_days))
           * quality
 
     ``age_days`` is derived from the entry's *occurrence* time (the
@@ -67,20 +67,18 @@ def entry_score(
     from when the observation happened. Future occurrence times are
     clamped to age zero.
 
-    ``recency_floor`` (ROADMAP §4.6, direction (a) — **default off**,
-    i.e. exactly SPEC §6.4) bounds the one factor in the product that
-    is unbounded below. With a floor ``f`` in ``(0, 1]``:
-
-        recency = max(f, 0.5 ** (age_days / half_life_days))
-
-    so the recency factor spans at most ``1/f`` across any candidate
-    list instead of ``2 ** (age spread / half_life)``. Once ``1/f`` is
-    narrower than the fused RRF range (``2(k+20)/(k+1)`` = 2.62x at the
-    §6.2 defaults, i.e. ``f > 0.381``), match quality becomes the sort
-    key and recency the tie-break — the SPEC §6.4 intent. ``None``
-    means no floor and is bit-for-bit today's behaviour; the value is
-    validated by ``SearchConfig``, not here (this stays a pure
-    function of the numbers it is handed).
+    ``recency_floor`` (ADR 0022) bounds the one factor in the product
+    that is unbounded below. With a floor ``f`` in ``(0, 1]`` the
+    recency factor spans at most ``1/f`` across any candidate list
+    instead of ``2 ** (age spread / half_life)``. Once ``1/f`` is
+    narrower than the fused RRF range (``2(k+20)/(k+1)`` = 2.6230x at
+    the §6.2 defaults, i.e. ``f > 0.381``), match quality is the sort
+    key and recency the tie-break — SPEC §6.4's stated intent. The
+    service ships ``f = 0.8`` (``SearchConfig.recency_floor``); this
+    parameter keeps ``None`` — the pre-ADR-0022 unbounded form — as its
+    own default, because the value is a configuration decision and this
+    stays a pure function of the numbers it is handed. ``SearchConfig``
+    validates it; this function does not.
     """
     age_days = (now - occurred_at).total_seconds() / 86_400.0
     if age_days < 0:

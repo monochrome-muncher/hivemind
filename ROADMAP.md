@@ -49,9 +49,13 @@
   ~5.3 half-lives of age — but **flooring the recency factor does**. A
   floor of 0.8 takes `old_exact` from 0.000 to 1.000 MRR while holding
   `currency_pair` at 0.778, above decay-off's 0.611: the first variant
-  to beat both extremes on the slice each is weak at. The floor is
-  shipped as a **default-off** `SearchConfig` knob; changing the
-  default is a SPEC §6.4 decision with its own ADR.
+  to beat both extremes on the slice each is weak at. **ADR 0022 then
+  flipped that floor on by default** (`recency_floor = 0.8`, SPEC §6.4
+  amended), which **closes §4.6 direction (a)** and therefore rules out
+  (b); per-kind half-lives stays held. The §1.1 gate numbers are
+  unchanged by it (the golden set is single-timestamp, so a lower bound
+  on a recency factor of 1.0 is a no-op) and its thresholds were not
+  re-pinned.
 
 ## The keystone is shipped: measure, then Tier 4
 
@@ -413,14 +417,16 @@ are §11 items — each says so.)*
   kinds consistently?" — is answered instead by a **per-author `kind`
   distribution**, which is NOT built here.
 - **4.6 The *form* of the recency term is mismatched to RRF's range.**
-  *(residual finding, carried forward from §4.4 — not gating, which is
-  rejected and stays rejected there. Both cheap halves are now
-  **measured**: the `rrf_k` sweep, which came back negative and changed
-  no default, and **(a) the recency floor, which came back positive** —
-  a floor at 0.8 is the first variant to beat *both* always-on and
-  decay-off on the slice each is weak at. The floor's seam is shipped
-  **default-off**; flipping the default is a SPEC §6.4 change and still
-  needs its own ADR.)* §4.4 measured
+  *(**direction (a) is RESOLVED and SHIPPED — ADR 0022**: the recency
+  factor is floored, `SearchConfig.recency_floor = 0.8` by default, and
+  SPEC §6.4 now carries the floored formula. That **rules out direction
+  (b)**, the additive form — per this section the two are competing
+  answers to the same defect and must not be stacked; reopening (b)
+  means *replacing* the floor under a new ADR. **Per-kind half-lives
+  stays HELD**: orthogonal, not a fix for this finding. The `rrf_k`
+  sweep came back negative and changed no default. What remains open
+  here is the *value* 0.8, not the form — see the re-measure trigger at
+  the end of this item.)* §4.4 measured
   and rejected *gating* the recency term. Underneath that result sits a
   separate, arithmetic mismatch that gating would not have fixed either
   way: with the SPEC §6.2 defaults the fused RRF score spans at most
@@ -621,14 +627,33 @@ are §11 items — each says so.)*
   streams at all. It establishes **a mechanism that works and the
   sign of its effect**, not a tuned constant.
 
-  **Verdict: the evidence supports shipping a floor, and `0.8` is the
-  value it points at — but the default stays `None` in this change.**
-  The seam is landed and behaviour-preserving; flipping the default is
-  a SPEC §6.4 change and gets its own ADR, decided on these numbers by
-  a human, not inferred from them here. If that ADR is written, note
-  that it closes **(a)** and therefore **rules out (b)**: per this
-  section, (a) and (b) are competing forms of the same fix and must
-  not be stacked.
+  **Verdict: SHIPPED — ADR 0022 flipped the default to `0.8`.** The
+  seam landed behaviour-preserving in `b61db0f`; the decision to turn
+  it on was taken on these numbers by a human and is recorded in
+  **[ADR 0022](docs/adr/0022-recency-floor-so-match-quality-is-the-sort-key.md)**,
+  which amends SPEC §6.4. Three things that ADR insists on and this
+  table should not be read without: the floor is a **band, not a
+  slider** (operators must not tune it up — 0.9 measures *worse* than
+  decay-off on `currency_pair`); it is **not free** (`currency_pair`
+  MRR 0.833 → 0.778, traded for `old_exact` 0.000 → 1.000); and on the
+  all-query aggregate decay-off still wins on this fixture (0.833 vs.
+  0.725) — the floor is chosen to keep the currency slice, not to win
+  that average. Landing (a) **rules out (b)**: per this section, (a)
+  and (b) are competing forms of the same fix and must not be stacked.
+
+  **Still open in (a): the value, not the form.** 0.8 comes from 16
+  synthetic entries and 10 queries scored by a 4-dimension hash
+  embedder. The *arithmetic* (`1/floor` against the 2.6230x fused
+  range) is fixture-independent; the constant is not. **Re-measure
+  trigger:** the first real corpus with meaningful age spread — run the
+  §1.1 harness against real queries on an aged production pool and
+  sweep the 0.5–0.9 band. Expect to move the value, not the form.
+
+  The §1.1 gate was **not** re-pinned for this: every golden entry is
+  seeded without `occurred_at`, so all eight share one timestamp, every
+  recency factor is 1.0 and a lower bound on 1.0 is a no-op. The gate's
+  report is bit-identical with and without the floor, asserted in
+  `test_eval_gate.py::...::test_the_shipped_recency_floor_cannot_move_this_gate`.
 
   **Trigger:** for **(b)** and for any `rrf_k` default change,
   unchanged — the first real corpus with meaningful age spread, i.e.
@@ -638,11 +663,12 @@ are §11 items — each says so.)*
   scoring change on (the same reasoning §4.4 closed on). What *is*
   settled without that trigger is the bound: `rrf_k` cannot substitute
   for (a) or (b), so the cheap knob is now measured and out of the
-  way. **(a)'s trigger is discharged differently:** its mechanism is
-  now measured and its seam shipped default-off, so what remains is a
-  *decision on the default value*, and the real corpus is what should
-  pick the number within the 0.5–0.8 band rather than what unblocks
-  the idea.
+  way. **(a) is closed (ADR 0022)**, so its trigger no longer gates
+  anything: the floor is on at 0.8 and the real corpus is what should
+  *re-check* that number within the 0.5–0.9 band, not what unblocks the
+  idea. Note that (b) is now ruled out by (a) having landed — its
+  trigger firing means reconsidering the floor itself, under a new ADR,
+  not adding an additive term on top of it.
 
 ## Tier 5 — explicitly held: the §10 extensions (former Tier 4)
 

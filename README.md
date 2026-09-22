@@ -52,7 +52,7 @@ Configuration is via `HIVEMIND_*` environment variables (see `src/hivemind/confi
 `HIVEMIND_DATABASE_URL` (default `postgresql://hivemind:hivemind@localhost:5432/hivemind`),
 `HIVEMIND_EMBEDDING_ENDPOINT` / `HIVEMIND_EMBEDDING_API_KEY` / `HIVEMIND_EMBEDDING_MODEL` /
 `HIVEMIND_EMBEDDING_DIM` (the deploy-time embedding decision, ADR 0005; default **1024** — ADR 0015; the dev Makefile pins 512 for fast local vLLM embedding), and the retrieval knobs
-(`HIVEMIND_RRF_K`, `HIVEMIND_WEIGHT_KEYWORD`, `HIVEMIND_WEIGHT_VECTOR`, `HIVEMIND_HALF_LIFE_DAYS`, ...).
+(`HIVEMIND_RRF_K`, `HIVEMIND_WEIGHT_KEYWORD`, `HIVEMIND_WEIGHT_VECTOR`, `HIVEMIND_HALF_LIFE_DAYS`, `HIVEMIND_RECENCY_FLOOR` — ADR 0022, SPEC §6.4, ...).
 
 The optional **entity-extraction extractor** (ADR 0016, SPEC §13) is configured via
 `HIVEMIND_EXTRACTOR_ENDPOINT` / `HIVEMIND_EXTRACTOR_MODEL` / `HIVEMIND_EXTRACTOR_API_KEY`:

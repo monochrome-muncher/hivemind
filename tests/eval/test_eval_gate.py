@@ -16,6 +16,7 @@ broken golden query cannot hide behind an average.
 
 from __future__ import annotations
 
+from hivemind.config import SearchConfig
 from hivemind.domain.entry import EntryDraft, Kind
 from hivemind.memstore import MemoryStore
 from hivemind.retrieval.eval import aggregate_report, evaluate_query
@@ -23,6 +24,9 @@ from hivemind.services.governance import WriteService
 from hivemind.services.search import SearchService
 from tests.eval.golden import golden_corpus, golden_queries
 from tests.fakes import make_clock, make_embedder, make_search_config
+
+# What the service ships (ADR 0022). The gate runs the shipped pipeline.
+_SHIPPED_FLOOR = SearchConfig().recency_floor
 
 # The pinned gate (ROADMAP §1.1: "a CI gate pinning a few golden queries so
 # future retrieval changes are measured, not vibes"). These thresholds
@@ -44,9 +48,17 @@ def _seed_corpus(clock) -> tuple[MemoryStore, WriteService]:
     return store, write_service
 
 
-async def _run_eval(golden_k: int = K) -> tuple[dict[str, dict], dict[str, float]]:
+async def _run_eval(
+    golden_k: int = K, *, recency_floor: float | None = _SHIPPED_FLOOR
+) -> tuple[dict[str, dict], dict[str, float]]:
     """Run the golden query set through SearchService; return the
-    per-query metrics + the aggregate report."""
+    per-query metrics + the aggregate report.
+
+    ``recency_floor`` defaults to whatever the service ships (ADR 0022),
+    so the gate always measures the shipped pipeline; it is a parameter
+    only so ``test_the_shipped_recency_floor_cannot_move_this_gate`` can
+    run the same corpus without it.
+    """
     clock = make_clock()
     store, write_service = _seed_corpus(clock)
 
@@ -64,7 +76,9 @@ async def _run_eval(golden_k: int = K) -> tuple[dict[str, dict], dict[str, float
         entry_ids.append(entry.id)
 
     embedder = make_embedder()
-    search_service = SearchService(store, embedder, make_search_config(), now_fn=clock)
+    search_service = SearchService(
+        store, embedder, make_search_config(recency_floor=recency_floor), now_fn=clock
+    )
 
     # Run each golden query; measure against its expected-relevant entries.
     per_query: dict[str, dict] = {}
@@ -111,3 +125,22 @@ class TestRetrievalEvalGate:
         _per_query, report = await _run_eval()
         assert set(report) >= {"hit_at_k", "mrr", f"ndcg_at_{K}", "queries"}
         assert report["queries"] == 8  # the golden set size
+
+    async def test_the_shipped_recency_floor_cannot_move_this_gate(self) -> None:
+        """ADR 0022 flipped ``recency_floor`` on by default. The pinned
+        thresholds above were NOT re-pinned to accommodate it, and they
+        did not need to be: every golden entry is seeded without an
+        ``occurred_at``, so all eight share one timestamp, every
+        candidate's recency factor is 1.0, and a *lower* bound on a
+        factor that is already 1.0 changes nothing.
+
+        The equality is asserted rather than argued — if the golden
+        corpus ever gains age spread, this test fails and says that the
+        gate's numbers are no longer floor-independent, instead of the
+        thresholds quietly absorbing a scoring change.
+        """
+        floored_per_query, floored = await _run_eval()
+        unfloored_per_query, unfloored = await _run_eval(recency_floor=None)
+        assert _SHIPPED_FLOOR == 0.8
+        assert floored == unfloored
+        assert floored_per_query == unfloored_per_query

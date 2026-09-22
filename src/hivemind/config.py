@@ -30,13 +30,15 @@ class SearchConfig:
     candidate_top_k: int = 20
     default_limit: int = 10
     half_life_days: float = 30.0
-    # ROADMAP §4.6 direction (a): a lower bound on the SPEC §6.4 recency
-    # factor, so the one unbounded factor in `entry_score`'s product can
-    # no longer dominate RRF's compressed fused range. ``None`` (the
-    # default) = no floor = exactly SPEC §6.4 as shipped. Changing this
-    # default is a §6.4 redesign and needs its own ADR; it is config so
-    # the choice can be *measured* first (tests/eval/).
-    recency_floor: float | None = None
+    # ADR 0022 / SPEC §6.4: a lower bound on the recency factor, so the
+    # one unbounded factor in `entry_score`'s product can no longer
+    # dominate RRF's compressed fused range (2.6230x at `rrf_k=60`).
+    # 0.8 bounds the recency range at 1/0.8 = 1.25x, which is inside it:
+    # match quality is the sort key, recency the tie-break. **This is a
+    # band, not a slider** — at 0.9 the term is nearly off and scores
+    # *worse* than switching it off, at 1.0 it is off. Do not tune it up
+    # (ADR 0022). ``None`` = no floor = the pre-ADR-0022 unbounded form.
+    recency_floor: float | None = 0.8
     quality_helpful_weight: float = 0.05
     quality_stale_weight: float = 0.10
     quality_wrong_weight: float = 0.25
@@ -109,9 +111,13 @@ class Settings(BaseSettings):
     candidate_top_k: int = 20
     default_limit: int = 10
     half_life_days: float = 30.0
-    # ROADMAP §4.6 direction (a); unset = no floor = today's SPEC §6.4
-    # behaviour. See SearchConfig.recency_floor.
-    recency_floor: float | None = None
+    # ADR 0022. See SearchConfig.recency_floor — a band, not a slider;
+    # raising it toward 1.0 removes the recency term. From the
+    # environment the settable range is (0, 1]: there is no spelling for
+    # "no floor" (the unbounded form is the defect ADR 0022 fixes), and
+    # a negligible floor (1e-9 = 30 half-lives of range) is its
+    # practical equivalent if an operator ever needs it back.
+    recency_floor: float | None = 0.8
     quality_helpful_weight: float = 0.05
     quality_stale_weight: float = 0.10
     quality_wrong_weight: float = 0.25
