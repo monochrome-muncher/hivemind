@@ -81,6 +81,15 @@ services:
   mcp-http:
     build: .
     image: hivemind-mcp-http
+    # Compose SIGKILLs 10s after `docker compose down/restart/stop`, which
+    # is shorter than a SINGLE embedder attempt (10s timeout) — so a dev
+    # write in flight is severed rather than drained. This service runs
+    # with extraction OFF (no HIVEMIND_EXTRACTOR_ENDPOINT below, ADR
+    # 0016), so its worst-case request is the embedder leg alone:
+    # 3 attempts x 10s + 0.5s + 1.0s backoff = 31.5s (ADR 0014). 35s
+    # covers it. The k8s deployments budget the full embed+extract path
+    # instead — see deploy/kubernetes/*-deployment.yaml and DEPLOY.md §5.
+    stop_grace_period: 35s
     environment:
       HIVEMIND_HOST: "0.0.0.0"
       HIVEMIND_PORT: "8088"
