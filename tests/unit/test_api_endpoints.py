@@ -920,6 +920,7 @@ class TestMetricsEndpoint:
             [0.1, 0.1, 0.1, 0.1],
         )
         await store.register_agent("pending-agent")
+        await store.register_agent("alice")
         client = make_client(app)
         async with client:
             resp = await client.get("/v1/metrics", headers={"X-API-Key": "key-admin"})
@@ -927,10 +928,14 @@ class TestMetricsEndpoint:
         data = resp.json()
         assert data["entries"]["total"] == 2
         assert data["entries"]["by_scope"] == {"fleet": 1, "org": 1}
+        # ROADMAP §4.5's follow-on reaches the admin surface: one row per
+        # registered agent, zero counts omitted. `bob` wrote the other
+        # entry but is not registered, so it shows in `by_kind` only.
+        assert data["entries"]["by_author_kind"] == {"alice": {"fact": 1}, "pending-agent": {}}
         assert data["fleets"]["total"] == 1
         assert data["fleets"]["writes_by_fleet"] == {"data-eng": 1}
-        assert data["agents"]["total"] == 1
-        assert data["agents"]["pending"] == 1
+        assert data["agents"]["total"] == 2
+        assert data["agents"]["pending"] == 2
 
     async def test_metrics_requires_admin_key(self) -> None:
         client = make_client(make_hivemind_app())

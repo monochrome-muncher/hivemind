@@ -118,6 +118,65 @@ class TestMetricsService:
         report = await service.usage_report()
         assert report["entries"]["by_importance_source"] == {"default": 1, "caller": 2}
 
+    async def test_entries_report_by_author_kind(self) -> None:
+        """ROADMAP §4.5's follow-on: are agents using the three kinds
+        consistently? One row per registered agent, zero counts omitted."""
+        clock = make_clock()
+        store = _make_store(clock)
+        await store.register_agent("alice")
+        await store.register_agent("bob")
+        await _seed_entry(store, author="alice", kind="fact")
+        await _seed_entry(store, author="alice", kind="fact")
+        await _seed_entry(store, author="alice", kind="decision")
+        await _seed_entry(store, author="bob", kind="insight")
+        service = MetricsService(store)
+        report = await service.usage_report()
+        assert report["entries"]["by_author_kind"] == {
+            # `insight` is omitted for alice and `fact`/`decision` for bob:
+            # zero counts are dropped, exactly like by_scope / by_kind.
+            "alice": {"fact": 2, "decision": 1},
+            "bob": {"insight": 1},
+        }
+
+    async def test_entries_report_keeps_authors_with_no_entries(self) -> None:
+        """The breakdown is keyed by the registered agent roster, not by a
+        DISTINCT over `entries.author` — so "registered but never written"
+        is a visible state (an empty mapping), not an absent one. That is
+        the whole point of asking whether agents use the kinds at all."""
+        clock = make_clock()
+        store = _make_store(clock)
+        await store.register_agent("silent")
+        service = MetricsService(store)
+        report = await service.usage_report()
+        assert report["entries"]["by_author_kind"] == {"silent": {}}
+
+    async def test_entries_report_ignores_unregistered_authors(self) -> None:
+        """An entry whose author is not on the roster is still counted in
+        the totals and in `by_kind`, but has no row of its own: the roster
+        is what bounds the query count (SPEC §8.2 scale target ~50 agents
+        x 3 kinds), and `author` is server-verified from the agent key
+        anyway (ADR 0012), so this is a legacy/edge row, not a norm."""
+        clock = make_clock()
+        store = _make_store(clock)
+        await _seed_entry(store, author="ghost", kind="fact")
+        service = MetricsService(store)
+        report = await service.usage_report()
+        assert report["entries"]["by_kind"] == {"fact": 1}
+        assert report["entries"]["by_author_kind"] == {}
+
+    async def test_entries_report_by_author_kind_counts_inactive_entries(self) -> None:
+        """Consistent with every other entries counter: the question is
+        what an author *wrote*, which a later supersession does not undo."""
+        clock = make_clock()
+        store = _make_store(clock)
+        await store.register_agent("alice")
+        entry_id = await _seed_entry(store, author="alice", kind="fact")
+        await store.withdraw_entry(entry_id, "no longer relevant", "alice")
+        service = MetricsService(store)
+        report = await service.usage_report()
+        assert report["entries"]["active"] == 0
+        assert report["entries"]["by_author_kind"] == {"alice": {"fact": 1}}
+
     async def test_fleets_report_writes_per_fleet(self) -> None:
         clock = make_clock()
         store = _make_store(clock)
