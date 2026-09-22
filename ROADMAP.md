@@ -34,9 +34,16 @@
   Postgres advisory lock), which is now **shipped end to end**. The next
   workstream is **Tier 4**, whose two measurement items are now closed —
   §4.5 shipped `importance_source`, and §4.4 measured the recency term
-  and **rejected** gating it (no code change; numbers in §4.4) — leaving
-  the two SPEC §11 open items: the BM25-vs-FTS decision and the
-  embedding-prefix tuning, both measurable with the §1.1 eval harness.
+  and **rejected** gating it (no code change; numbers in §4.4). The two
+  SPEC §11 open items are now resolved as far as they can be without
+  production data: **§4.1 (BM25 vs. FTS) is DEFERRED** with its reasons
+  written down (it is a deployment-topology change, and RRF fuses
+  *ranks*, so most of BM25's advantage never reaches the result), and
+  **§4.2 is rescoped** — its "how much, in what unit" half is settled
+  by ADR 0021 (a 2000-whitespace-word budget, and the knob now actually
+  reaches the embedder), leaving "what goes into the embedded text"
+  open and chunking explicitly out of scope. The live measurement item
+  is **§4.6**, starting with the free `rrf_k` knob.
 
 ## The keystone is shipped: measure, then Tier 4
 
@@ -49,14 +56,17 @@ tuning), turning those future extensions from "vibes" into
 data-driven decisions.
 
 With the keystone shipped and §3.5 (the migration chain) in place, the
-next workstream is **Tier 4** (the BM25-vs-FTS decision, the
-embedding-prefix tuning, and the two measurement items 4.4/4.5) — all of
-which are now measurable with the §1.1 harness instead of guesses. §4.5
-is the first schema change to ride the new chain. §4.4 is the first item
-the harness closed *against* a proposed change: it needed a second,
-age-varied fixture beside the golden set (the golden set's entries all
-share one timestamp, so it is blind to decay), and the numbers rejected
-the gate it was written to justify.
+next workstream is **Tier 4** — all of it measurable with the §1.1
+harness instead of guesses. §4.5 is the first schema change to ride the
+new chain. §4.4 is the first item the harness closed *against* a
+proposed change: it needed a second, age-varied fixture beside the
+golden set (the golden set's entries all share one timestamp, so it is
+blind to decay), and the numbers rejected the gate it was written to
+justify. §4.1 is the first item closed *without* running the harness at
+all — the analysis (a custom Postgres image; RRF fusing ranks, not
+scores) says what the experiment could pay for before it is worth
+running, so it is **deferred with its reasons recorded** rather than
+left as an open invitation to re-derive them.
 
 ## Tier 1 — validate the core  *(shipped)*
 
@@ -237,15 +247,75 @@ draining on `hivemind-mcp-http`**, which is currently unexamined.
 that live here because they share the §1.1 harness, not because they
 are §11 items — each says so.)*
 
-- **4.1 BM25 vs. Postgres FTS.** The store currently uses Postgres
-  FTS (`to_tsvector`). Decide on BM25 once the §1.1 harness shows
-  where FTS ranks under (a new ADR on the decision).
-- **4.2 Embedding prefix length.** The 512-token default (SPEC §11.5)
-  is "tune during implementation against real long-form entries" — do
-  that tuning with the §1.1 harness on real data. (The embedding
-  *dimension* itself is a separate deploy-time decision: the default is
-  now 1024, ADR 0015 — the dim tuning, if it lands, happens in the same
-  harness work.)
+- **4.1 BM25 vs. Postgres FTS.** *(**DEFERRED** — the analysis below is
+  the reason; do not re-derive it. Deferred, not dismissed: the thing
+  BM25 would buy is real and named at the end.)* The store uses Postgres
+  FTS (`to_tsvector` + `ts_rank`). Two findings moved this off the
+  "measure it next" list:
+
+  **1. It is a deployment-topology change, not a query change.**
+  Postgres has no native BM25. Getting it means an *extension* —
+  ParadeDB `pg_search` or VectorChord-BM25 — and neither ships in the
+  stock `pgvector/pgvector:pg16` image this deployment runs (ADR 0007,
+  `docker-compose.yaml`, `.gitlab-ci.yml`, the k8s manifests). Adopting
+  one means building and maintaining a custom Postgres image and
+  mirroring it into the air-gapped network the org deploys into. That
+  is a different class of decision from "tune a ranker", and it has to
+  be priced as one.
+
+  **2. RRF consumes ranks, not scores — so most of BM25's advantage is
+  discarded at the fusion seam.** `retrieval/rrf.py` computes
+  `w / (k + rank)`; the keyword stream's *scores* never reach the fused
+  result. BM25's headline advantages — calibrated magnitudes, IDF
+  weighting, document-length normalisation — survive fusion **only**
+  insofar as they change the **top-20 ordering** (`candidate_top_k`)
+  that `ts_rank` already produces. The upside is bounded by "does BM25
+  order the first 20 keyword hits better", not by "is BM25 a better
+  scorer", and the honest version of this experiment measures exactly
+  that.
+
+  **What BM25 would actually buy, and why this is deferred rather than
+  closed:** `ts_rank` has **no IDF at all** — it weights a rare,
+  discriminating term the same as a common one. On an org-wide pool
+  where nearly every entry says "service", "deploy" or "agent", that is
+  a real ranking defect, and it is the one BM25 fixes. Revisit when
+  keyword-stream misses are an observed retrieval problem on a real
+  corpus (not a synthetic one), and price the custom image in the same
+  decision. Note the coupling recorded in §4.6: `rrf_k` controls how
+  much the *weaker* ranker's mistakes cost, and `ts_rank` is the weaker
+  ranker.
+- **4.2 What goes into the embedded text.** *(rescoped — this item was
+  one knob standing in for three separable questions)*
+
+  **(a) WHAT is embedded — still open.** Today: `summary` + a bounded
+  `body` prefix (SPEC §7). Not included: `tags`, `kind`, the extracted
+  entity names (ADR 0016). Whether adding any of them helps or just
+  adds noise to one shared vector is unmeasured, and it is the part of
+  this item that still needs the §1.1 harness on real long-form
+  entries.
+
+  **(b) HOW MUCH, and in what unit — settled by ADR 0021.** The budget
+  is **2000 whitespace-delimited words** (`EMBEDDING_PREFIX_TOKENS`),
+  replacing the 2048-character bound. The unit question is closed; the
+  *value* stays tunable as ordinary config.
+
+  **Why this could not have been measured before:** the knob was
+  **inert on the embedding side**. `OpenAICompatEmbedder` never took a
+  prefix parameter and always used the function default, so
+  `HIVEMIND_EMBEDDING_PREFIX_CHARS` moved entity extraction and changed
+  the embedding not at all. Any sweep of it would have measured a
+  constant. ADR 0021 fixed that and pinned the ADR 0016 lockstep with a
+  test; *this* is what makes the (a) experiment runnable at all.
+
+  **(c) CHUNKING — explicitly out of scope for this item.** SPEC §4.1
+  commits to **one embedding per entry**. Chunking means several
+  vectors per entry plus a retrieval change (which chunk's score
+  represents the entry, how duplicates collapse before fusion, what a
+  `hit` even points at). That is a different decision with its own ADR,
+  not a tuning pass — do not fold it in here.
+
+  (The embedding *dimension* is a separate deploy-time decision: the
+  default is 1024, ADR 0015.)
 - **4.3 Entity-extraction facets (pre-staged §10 extension — ADR 0016, SPEC §13).** *(shipped: `src/hivemind/extractor.py` + the `WriteService` best-effort hook + the REST/MCP read surface, SPEC §13)*
   *This is not a §11 open item: it is the knowledge-graph §10 extension,
   pre-staged on scale ambition (300+ agents / multiple fleets) — the
@@ -349,19 +419,72 @@ are §11 items — each says so.)*
   it holds for any candidate list, synthetic or real, at the §6.2
   defaults.
 
-  Two directions were identified, neither measured yet: **(a)** bound
-  the term hard enough that it can no longer dominate the fused range —
-  which, at that tightness, is close to removing it — or **(b)** move
-  to the additive form the prior art (§4.4) used, so recency competes
-  on the same scale as the fused score instead of multiplying it.
-  Landing either is a SPEC §6.4 redesign, not a scoring tweak, and gets
-  its own ADR, not a quiet edit of `scoring.py`.
+  **Measure `rrf_k` FIRST — ahead of the floor and the additive form.**
+  The mismatch has *two* sides, and everything above only ever looked at
+  the recency side. `rrf_k=60` is the side doing the **compressing**.
+  With the SPEC §6.2 defaults, the fused score of the best possible
+  candidate (rank 1 in **both** streams, `w=0.5/0.5`) is `1/(k+1)` and
+  the worst retained candidate (rank 20 in **one** stream,
+  `candidate_top_k=20`) is `0.5/(k+20)`, so the whole fused range is
 
-  **Trigger:** the first real corpus with meaningful age spread — i.e.,
-  run the §1.1 harness against real queries on an aged pool once there
-  is production usage. Not before: 10 synthetic queries scored by a
-  4-dimension hash embedder is exactly the wrong evidence to land a
-  scoring redesign on (the same reasoning §4.4 closed on).
+      2(k + 20) / (k + 1)
+
+  | `rrf_k` | fused range | = half-lives of age | = days at a 30-day half-life |
+  |---|---|---|---|
+  | 60 (today) | 2.62x | 1.39 | **41.7** |
+  | 20 | 3.81x | 1.93 | 57.9 |
+  | 10 | 5.45x | 2.45 | 73.4 |
+  | 5 | 8.33x | 3.06 | 91.8 |
+
+  Lowering `k` widens the fused range, and every doubling of that range
+  buys exactly one more half-life before age outranks match quality.
+  It is a **pure `SearchConfig` value**: no SPEC change, no ADR, no new
+  code, reversible in one line — where (a) and (b) are both §6.4
+  redesigns. Measuring the free knob before the expensive ones is the
+  order this item is now written in; the measurement itself is §4.6's
+  table below.
+
+  **The coupling, which nobody had noted:** a *lower* `k` does not
+  only help. RRF's `w/(k+rank)` gets steeper as `k` shrinks, so a low
+  `k` **amplifies whichever stream orders badly** — it puts more of the
+  fused score on that stream's top one or two positions. Per §4.1,
+  `ts_rank` is the weaker ranker (no IDF at all: a rare discriminating
+  term is weighted like a common one). So `rrf_k` and the BM25 question
+  are **coupled**: the case for a low `k` is strongest when both
+  streams order well, and lowering `k` raises the price of
+  `ts_rank`'s mistakes. A `k` chosen on today's keyword stream should
+  be re-checked if §4.1 ever lands.
+
+  Two further directions were identified, neither measured yet:
+  **(a)** bound the term hard enough that it can no longer dominate the
+  fused range — which, at that tightness, is close to removing it — or
+  **(b)** move to the additive form the prior art (§4.4) used, so
+  recency competes on the same scale as the fused score instead of
+  multiplying it. Landing either is a SPEC §6.4 redesign, not a scoring
+  tweak, and gets its own ADR, not a quiet edit of `scoring.py`.
+
+  **These are NOT a sequence — do not work them in order.** `rrf_k` is
+  a config change and comes first because it is free and reversible.
+  **(a) and (b) are competing forms of the same fix: pick one, never
+  both** — a floored multiplicative term and an additive term are two
+  answers to "stop recency being the sort key", and stacking them just
+  makes the term untunable. *Per-kind half-lives* (a `fact` and a
+  `decision` decaying at different rates) is a third, **orthogonal**
+  idea — it changes which entries decay, not how decay competes with
+  match quality — and it **stays held**: it is not a fix for this
+  finding and would only add a knob on top of an already-mismatched
+  form.
+
+  **Trigger:** for (a)/(b), unchanged — the first real corpus with
+  meaningful age spread, i.e. run the §1.1 harness against real queries
+  on an aged pool once there is production usage. Not before: 10
+  synthetic queries scored by a 4-dimension hash embedder is exactly
+  the wrong evidence to land a scoring redesign on (the same reasoning
+  §4.4 closed on). The `rrf_k` sweep is explicitly **not** held behind
+  that trigger, because its arithmetic (the table above) is
+  fixture-independent and changing it costs nothing to undo — but see
+  the measured table below for what the synthetic fixture can and
+  cannot establish about it.
 
 ## Tier 5 — explicitly held: the §10 extensions (former Tier 4)
 
