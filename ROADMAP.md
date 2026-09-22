@@ -28,14 +28,14 @@
   rotation), the REST surface (`POST /v1/agents` + the admin endpoints),
   the MCP surface (`hive_register` + write-scope + visibility), and the
   reduced `hivemind-keys` CLI.
-- **What's next:** Tier 3 (productionize) is fully shipped, including
-  the Kubernetes + GitLab CI/CD deployment story (3.4: `DEPLOY.md`,
-  `deploy/kubernetes/`, `.gitlab-ci.yml`, the first-run key bootstrap,
-  and the `.env` quickstart). The next workstream is
-  **Tier 4** (close the SPEC §11 open items: the BM25-vs-FTS decision and
-  the embedding-prefix tuning, both now measurable with the §1.1 eval
-  harness) — or a production Tier 4 decision that the eval numbers
-  justify.
+- **What's next:** Tier 3.1–3.4 are shipped, including the Kubernetes +
+  GitLab CI/CD deployment story (3.4). **§3.2 has been superseded by
+  §3.5** (ADR 0020: an ordered, rollback-capable migration chain under a
+  Postgres advisory lock) — its docs are committed and its code is the
+  immediate next change, because §4.5 is the first schema change that
+  would ride it. After that, **Tier 4** (the SPEC §11 open items: the
+  BM25-vs-FTS decision and the embedding-prefix tuning, both measurable
+  with the §1.1 eval harness, plus the 4.4/4.5 measurement items).
 
 ## The keystone is shipped: measure, then Tier 4
 
@@ -47,10 +47,11 @@ retrieval-quality triggers in SPEC §10 (knowledge graph, per-agent
 tuning), turning those future extensions from "vibes" into
 data-driven decisions.
 
-With the keystone shipped, the next workstream is **Tier 4** (close the
-SPEC §11 open items: the BM25-vs-FTS decision + the embedding-prefix
-tuning) — both decisions are now measurable with the §1.1 harness
-instead of guesses.
+With the keystone shipped, the sequence is **§3.5** (the migration chain
+— it gates every later schema change) and then **Tier 4** (the BM25-vs-FTS
+decision, the embedding-prefix tuning, and the two measurement items
+4.4/4.5) — all of which are now measurable with the §1.1 harness instead
+of guesses.
 
 ## Tier 1 — validate the core  *(shipped)*
 
@@ -227,6 +228,10 @@ draining on `hivemind-mcp-http`**, which is currently unexamined.
 
 ## Tier 4 — close the spec's open items (SPEC §11) (former Tier 3)
 
+*(4.1–4.2 are the §11 open items. 4.3–4.5 are measurement commitments
+that live here because they share the §1.1 harness, not because they
+are §11 items — each says so.)*
+
 - **4.1 BM25 vs. Postgres FTS.** The store currently uses Postgres
   FTS (`to_tsvector`). Decide on BM25 once the §1.1 harness shows
   where FTS ranks under (a new ADR on the decision).
@@ -251,6 +256,27 @@ draining on `hivemind-mcp-http`**, which is currently unexamined.
   port (no Pydantic AI — the repo's existing Pydantic v2 + httpx seam
   pattern). Dev/test endpoint: `http://localhost:8080/v1`
   (`qwen3.8-27b`, API key `dummy`).
+- **4.4 Gate the recency term to temporal queries.** `entry_score`
+  (`retrieval/scoring.py`) multiplies every hit by
+  `0.5 ** (age_days / half_life_days)` — **unconditionally**, on every
+  query. An always-on recency term is a known way to depress recall on
+  non-temporal queries: an old, exactly-right entry loses to a recent,
+  vaguely-related one even when the query carries no time sense at all.
+  Measure it with the §1.1 harness (the golden set already has
+  non-temporal queries), and gate or floor the term only if the numbers
+  say so. A change here is a SPEC §6.4 change, so it lands with an ADR.
+  *(Prior art: an external system measured this exact regression and
+  moved to a gated, additive recency term; that is a hypothesis to test
+  here, not a result to copy.)*
+- **4.5 Record how `kind` and `importance` were chosen.** Both are
+  writer-declared (SPEC §4.1) and neither records whether the value was
+  supplied deliberately or fell out of a default. With a heterogeneous
+  fleet, that makes "are agents using the three kinds consistently?" an
+  unanswerable question — which is the question that would decide
+  whether auto-classification is ever worth its cost. Add provenance at
+  write time (caller-supplied vs. defaulted), surface it in the §3.3
+  counters, and *then* decide. Additive columns, so it is the first real
+  exercise of the §3.5 migration chain.
 
 ## Tier 5 — explicitly held: the §10 extensions (former Tier 4)
 
