@@ -23,6 +23,7 @@ import secrets
 import asyncpg
 
 from hivemind.domain.access import TrustLevel
+from hivemind.domain.audit import key_fingerprint
 from hivemind.ports import Credential
 from hivemind.store.pool import make_pool
 
@@ -90,28 +91,37 @@ class PgAuthenticator:
             (ADRs 0011-0012).
           * ``user``  → legacy v1 (the agent self-reports its instance ID,
             SPEC.md §8.1).
+
+        Every credential carries ``key_id`` — the key's non-secret
+        fingerprint (first 12 hex chars of the stored hash), which is
+        what the audit log records for admin actions (ADR 0027).
         """
+        stored_hash = key_hash(key)
+        key_id = key_fingerprint(stored_hash)
         pool = await self._ensure_pool()
         async with pool.acquire() as conn:
-            row = await conn.fetchrow(_SELECT_CREDENTIAL, key_hash(key))
+            row = await conn.fetchrow(_SELECT_CREDENTIAL, stored_hash)
         if row is None:
             return None
         kind = row["kind"]
         if kind == "admin":
-            return Credential(user_id=row["user_id"], agent_id=row["agent_id"], is_admin=True)
+            return Credential(
+                user_id=row["user_id"], agent_id=row["agent_id"], is_admin=True, key_id=key_id
+            )
         if kind == "org":
             return Credential(
                 user_id=row["user_id"],
                 agent_id=row["agent_id"],
                 is_org=True,
                 access_controlled=True,
+                key_id=key_id,
             )
         if kind == "agent":
             agent_name = row["agent_name"]
             if agent_name is None:
                 # Legacy agent key (no registered name): v1 behavior (the
                 # agent self-reports its instance ID, SPEC.md §8.1).
-                return Credential(user_id=row["user_id"], agent_id=row["agent_id"])
+                return Credential(user_id=row["user_id"], agent_id=row["agent_id"], key_id=key_id)
             # Resolve the agent's privilege (trust level + home fleet) from
             # the ``agents`` table (ADRs 0011-0012).
             pool = await self._ensure_pool()
@@ -125,6 +135,7 @@ class PgAuthenticator:
                     agent_name=agent_name,
                     access_controlled=True,
                     trust_level=TrustLevel.UNTRUSTED,
+                    key_id=key_id,
                 )
             return Credential(
                 user_id=agent_name,
@@ -135,9 +146,10 @@ class PgAuthenticator:
                 home_fleet_id=(
                     str(agent_row["home_fleet_id"]) if agent_row["home_fleet_id"] else None
                 ),
+                key_id=key_id,
             )
         # kind == "user" (legacy v1): the agent self-reports its instance ID.
-        return Credential(user_id=row["user_id"], agent_id=row["agent_id"])
+        return Credential(user_id=row["user_id"], agent_id=row["agent_id"], key_id=key_id)
 
     # -- key management (ADR 0012) ------------------------------------------
 

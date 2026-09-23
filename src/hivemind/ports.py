@@ -30,6 +30,7 @@ from hivemind.domain.access import (
     TrustLevel,
     Visibility,
 )
+from hivemind.domain.audit import AuditEvent, AuditFilters, AuditRecord
 from hivemind.domain.entry import (
     Entry,
     EntryDraft,
@@ -169,6 +170,19 @@ class Store(Protocol):
         into (never re-parented). ``KeyError`` if unknown."""
         ...
 
+    # -- audit log (ADR 0027, SPEC §12.5) ------------------------------------
+
+    async def record_audit(self, event: AuditEvent) -> AuditRecord:
+        """Append one admin-action row to the audit log (insert-only;
+        the store assigns ``id`` + ``occurred_at``). Failures propagate —
+        an audit write is never swallowed (ADR 0027)."""
+        ...
+
+    async def list_audit(self, filters: AuditFilters, limit: int) -> list[AuditRecord]:
+        """Audit-log rows matching ``filters``, newest first, at most
+        ``limit`` of them."""
+        ...
+
     async def record_feedback(self, feedback: Feedback) -> None:
         """Upsert a feedback verdict (one row per entry+user+agent)."""
         ...
@@ -285,6 +299,11 @@ class Credential:
     * ``trust_level`` / ``home_fleet_id`` — the agent's privilege (ADR 0011);
       ``agent_name`` is the agent's registered name (it becomes the entry's
       ``author``; verified server-side, never self-reported, ADR 0012).
+    * ``key_id`` — the presenting key's **non-secret fingerprint** (the
+      first 12 hex chars of its stored SHA-256 hash, as ``hivemind-keys
+      list`` shows it), so the audit log can tell admin keys apart
+      (ADR 0027). ``None`` where no stored key backs the credential
+      (dev mode, test fakes).
     """
 
     user_id: str
@@ -296,6 +315,17 @@ class Credential:
     trust_level: TrustLevel = TrustLevel.UNTRUSTED
     home_fleet_id: str | None = None
     agent_name: str | None = None
+    key_id: str | None = None  # ADR 0027: key fingerprint, never the key
+
+    def audit_actor(self) -> str:
+        """The audit-log ``actor`` for an admin-surface action (ADR 0027):
+        ``admin:<key fingerprint>``, falling back to ``user_id`` when no
+        fingerprint is known (dev mode). Every admin key shares
+        ``user_id = "admin"``, so the fingerprint is what distinguishes
+        them."""
+        if self.key_id is None:
+            return self.user_id
+        return f"admin:{self.key_id}"
 
     def visibility(self) -> Visibility:
         """The reader's ``Visibility`` derived from this credential (ADR

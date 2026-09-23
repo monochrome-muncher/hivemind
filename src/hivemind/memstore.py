@@ -30,6 +30,7 @@ from hivemind.domain.access import (
     Visibility,
     entry_is_visible,
 )
+from hivemind.domain.audit import AuditEvent, AuditFilters, AuditRecord
 from hivemind.domain.entry import (
     Entry,
     EntryDraft,
@@ -76,6 +77,7 @@ class MemoryStore:
         self._feedback: dict[tuple[str, str, str], Feedback] = {}
         self._fleets: dict[str, Fleet] = {}
         self._agents: dict[str, Agent] = {}
+        self._audit: list[AuditRecord] = []  # append-only (ADR 0027)
 
     # -- write path -------------------------------------------------------
 
@@ -358,6 +360,35 @@ class MemoryStore:
             updated = replace(agent, home_fleet_id=fleet_id)
             self._agents[name] = updated
             return updated
+
+    # -- audit log (ADR 0027) -------------------------------------------------
+
+    async def record_audit(self, event: AuditEvent) -> AuditRecord:
+        """Append one audit row (insert-only; ADR 0027)."""
+        with self._lock:
+            record = AuditRecord(
+                id=str(uuid.uuid4()),
+                occurred_at=self._clock(),
+                actor_kind=event.actor_kind,
+                actor=event.actor,
+                action=event.action,
+                target=event.target,
+                detail=dict(event.detail),
+            )
+            self._audit.append(record)
+            return record
+
+    async def list_audit(self, filters: AuditFilters, limit: int) -> list[AuditRecord]:
+        """Matching audit rows, newest first (insertion order breaks
+        ``occurred_at`` ties, so a fixed test clock still reads newest
+        first)."""
+        with self._lock:
+            indexed = sorted(
+                enumerate(self._audit),
+                key=lambda pair: (pair[1].occurred_at, pair[0]),
+                reverse=True,
+            )
+            return [r for _, r in indexed if filters.matches(r)][:limit]
 
 
 def _count_for(feedback: dict[tuple[str, str, str], Feedback], entry_id: str) -> FeedbackCounts:

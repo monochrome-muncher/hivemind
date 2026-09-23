@@ -32,6 +32,13 @@ from hivemind.domain.access import (
     TrustLevel,
     Visibility,
 )
+from hivemind.domain.audit import (
+    ActorKind,
+    AuditAction,
+    AuditEvent,
+    AuditFilters,
+    AuditRecord,
+)
 from hivemind.domain.entry import (
     EntityKind,
     Entry,
@@ -172,6 +179,14 @@ SELECT
 FROM feedbacks
 WHERE entry_id = ANY($1)
 GROUP BY entry_id
+"""
+
+# Audit log (ADR 0027): insert-only; the table has no UPDATE/DELETE path.
+_AUDIT_COLUMNS = "id, occurred_at, actor_kind, actor, action, target, detail"
+INSERT_AUDIT = f"""
+INSERT INTO audit_log (actor_kind, actor, action, target, detail)
+VALUES ($1, $2, $3, $4, $5::jsonb)
+RETURNING {_AUDIT_COLUMNS}
 """
 
 
@@ -665,6 +680,48 @@ class PgStore:
         assert row is not None
         return _row_to_agent(row)
 
+    # -- audit log (ADR 0027) -------------------------------------------------
+
+    async def record_audit(self, event: AuditEvent) -> AuditRecord:
+        """Append one audit row (insert-only). Failures propagate — an
+        audit write is never swallowed (ADR 0027)."""
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                INSERT_AUDIT,
+                event.actor_kind.value,
+                event.actor,
+                event.action.value,
+                event.target,
+                json.dumps(dict(event.detail)),
+            )
+        assert row is not None
+        return _row_to_audit(row)
+
+    async def list_audit(self, filters: AuditFilters, limit: int) -> list[AuditRecord]:
+        """Matching audit rows, newest first, at most ``limit``."""
+        conditions: list[str] = []
+        params: list[Any] = []
+        if filters.actor is not None:
+            params.append(filters.actor)
+            conditions.append(f"actor = ${len(params)}")
+        if filters.action is not None:
+            params.append(filters.action.value)
+            conditions.append(f"action = ${len(params)}")
+        if filters.since is not None:
+            params.append(filters.since)
+            conditions.append(f"occurred_at >= ${len(params)}")
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        params.append(limit)
+        sql = (
+            f"SELECT {_AUDIT_COLUMNS} FROM audit_log {where} "
+            f"ORDER BY occurred_at DESC, id DESC LIMIT ${len(params)}"
+        )
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(sql, *params)
+        return [_row_to_audit(r) for r in rows]
+
     # -- orchestrator probes (ADR 0019) ---------------------------------------
 
     async def health_check(self) -> bool:
@@ -780,4 +837,19 @@ def _row_to_agent(row: asyncpg.Record) -> Agent:
         owner_alias=row["owner_alias"],
         created_at=row["created_at"],
         activated_at=row["activated_at"],
+    )
+
+
+def _row_to_audit(row: asyncpg.Record) -> AuditRecord:
+    """Map an ``audit_log`` row to the domain ``AuditRecord`` (ADR 0027).
+    ``detail`` is jsonb: native dict or raw JSON text, per the codec."""
+    detail = row["detail"]
+    return AuditRecord(
+        id=str(row["id"]),
+        occurred_at=row["occurred_at"],
+        actor_kind=ActorKind(row["actor_kind"]),
+        actor=row["actor"],
+        action=AuditAction(row["action"]),
+        target=row["target"],
+        detail=detail if isinstance(detail, dict) else json.loads(detail),
     )
