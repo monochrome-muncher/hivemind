@@ -225,8 +225,8 @@ deploy:
                       # credentials table exists; on an existing DB this is
                       # a cheap no-op re-apply.
                       hivemind-migrate
-                      echo "ADMIN_KEY=\$(hivemind-keys issue-admin)"
-                      echo "ORG_KEY=\$(hivemind-keys rotate-org)"
+                      echo "ADMIN_KEY=\$(hivemind-keys --actor ci-bootstrap issue-admin)"
+                      echo "ORG_KEY=\$(hivemind-keys --actor ci-bootstrap rotate-org)"
                   envFrom:
                     - secretRef:
                         name: hivemind-secrets
