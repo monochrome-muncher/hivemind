@@ -134,11 +134,15 @@ These changes arrive on two write paths that know different things:
 * **Raw SQL bypasses the log.** A hand-run `DELETE FROM credentials`
   (the pre-`revoke-admin` fallback in DEPLOY.md §4.2) is not audited.
   The runbook steers operators to the CLI instead.
-* **Rollback drops the table** (`0005.audit-log.rollback.sql`). Like
-  `0002`'s rollback, which drops a column, this is legal under ADR 0020:
-  the table holds nothing that existed before `0005`. It does discard
-  every audit row written since, so the rollback file says to dump the
-  table first if that history matters.
+* **Rollback drops the table only while it is empty**
+  (`0005.audit-log.rollback.sql`). Unlike `0002`'s column drop, this
+  table's rows are the whole point: an audit log that one
+  `hivemind-migrate --rollback 1` can erase is one anyone with deploy
+  access can erase without a trace, and ADR 0020 does not write a
+  rollback that destroys data. So on a fresh deployment it reverses
+  cleanly; once a row exists it raises and leaves the table (and yoyo's
+  head) untouched. Removing a populated audit log is a deliberate
+  manual act — `pg_dump --table=audit_log`, then drop it by hand.
 * **The log grows without bound.** There is no retention policy. At the
   rate admin actions happen, that is not a problem this ADR needs to
   solve. A retention job would be a new decision.
