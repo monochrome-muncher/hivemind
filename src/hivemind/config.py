@@ -191,6 +191,7 @@ class Settings(BaseSettings):
 # is unaffected.
 _ENV_FILES = {
     "production": ".env.production",
+    "prod": ".env.production",
     "staging": ".env.staging",
     "test": ".env.test",
 }
