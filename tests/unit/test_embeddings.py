@@ -168,6 +168,31 @@ class TestRetries:
             await embedder.embed_text("x")
         assert len(env.requests) == 3  # the 4th (ok) attempt never happens
 
+    async def test_a_retry_is_logged_as_a_warning(self, caplog) -> None:
+        """Every transient failure was previously invisible — retried
+        silently, with no record of the attempt. One WARNING per retry
+        makes a flaky/dying embedder observable in logs instead of only
+        as latency."""
+        env = MockEnv()
+        self._scripted_handler(env, [httpx.Response(500, text="boom"), self._ok()])
+        embedder = make_embedder(env)
+        with caplog.at_level("WARNING"):
+            await embedder.embed_text("x")
+        assert any(r.levelname == "WARNING" and "retrying" in r.message for r in caplog.records)
+
+    async def test_exhausted_budget_is_logged_as_an_error(self, caplog) -> None:
+        """The final give-up (unlike the extractor's, this one also
+        raises and fails the write — SPEC §7: embeddings are NOT
+        best-effort) is still worth a log line: an operator grepping
+        logs should not have to correlate a raised 5xx with a write
+        failure by timestamp alone."""
+        env = MockEnv()
+        self._scripted_handler(env, [httpx.Response(500, text="boom")])  # 500 forever
+        embedder = make_embedder(env, retries=1)
+        with caplog.at_level("WARNING"), pytest.raises(EmbeddingError):
+            await embedder.embed_text("x")
+        assert any(r.levelname == "ERROR" and "giving up" in r.message for r in caplog.records)
+
     async def test_non_transient_4xx_fails_fast(self) -> None:
         env = MockEnv()
         self._scripted_handler(env, [httpx.Response(401, text="bad key")])
@@ -220,6 +245,30 @@ class TestRetries:
         embedder = OpenAICompatEmbedder.from_settings(settings)
         try:
             assert embedder.retries == 4
+        finally:
+            await embedder.aclose()
+
+    async def test_from_settings_wires_the_timeout_knob(self, monkeypatch) -> None:
+        """``from_settings`` must pass ``embedding_timeout`` through to the
+        client it builds — before this it was never passed at all, so
+        every deployment silently ran the 10.0s code default regardless
+        of the setting's value."""
+        captured: dict[str, object] = {}
+        real_client = httpx.AsyncClient
+
+        def spy(*args: object, **kwargs: object) -> httpx.AsyncClient:
+            captured.update(kwargs)
+            return real_client(*args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr("hivemind.embeddings.openai_compat.httpx.AsyncClient", spy)
+        settings = Settings(
+            embedding_endpoint="http://e.test/v1",
+            embedding_dim=8,
+            embedding_timeout=45.0,
+        )
+        embedder = OpenAICompatEmbedder.from_settings(settings)
+        try:
+            assert captured["timeout"] == 45.0
         finally:
             await embedder.aclose()
 

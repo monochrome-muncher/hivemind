@@ -13,6 +13,7 @@ tuning retrieval is a config change, not a code change.
 from __future__ import annotations
 
 import difflib
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -79,6 +80,10 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="HIVEMIND_", extra="ignore", env_file=".env.local")
 
     database_url: str = "postgresql://hivemind:hivemind@localhost:5432/hivemind"
+    # The root logger level each runner configures at startup (see
+    # ``configure_logging`` below) — one of Python's standard names
+    # (DEBUG/INFO/WARNING/ERROR/CRITICAL, case-insensitive).
+    log_level: str = "INFO"
     # asyncpg pool sizing for the Postgres store (``make_pool`` in
     # store/pool.py already defaults to these exact values; these fields
     # just make that existing constant operator-reachable, per pod, for
@@ -88,6 +93,14 @@ class Settings(BaseSettings):
     embedding_endpoint: str = "http://localhost:8001/v1"
     embedding_api_key: str = ""
     embedding_model: str = "text-embedding-3-small"
+    # The request timeout used only when the embedder builds its own
+    # client (mirrors extractor_timeout below). Not reachable before
+    # this: `OpenAICompatEmbedder.from_settings` never passed a value,
+    # so every deployment silently ran the code default regardless of
+    # this setting's existence. It also feeds fixed arithmetic written
+    # into the k8s manifests' `terminationGracePeriodSeconds` comment
+    # (`deploy/kubernetes/*.yaml`, DEPLOY.md §5) — raise both together.
+    embedding_timeout: float = 10.0
     # The default when HIVEMIND_EMBEDDING_DIM is unset (ADR 0015). We never
     # assume a 1536-dim default — that is one provider's native dim; 1024
     # is the deploy-time default both OpenAI-compatible endpoints (the
@@ -297,3 +310,27 @@ def load_settings() -> Settings:
     # documented init parameter (runtime-verified) but missing from its
     # mypy stubs — a targeted ignore, not a type hole.
     return Settings(_env_file=env_file)  # type: ignore[call-arg]
+
+
+def configure_logging(level: str = "INFO") -> None:
+    """Configure the root logger once, at process startup.
+
+    Every runner (``api/main.py``, ``mcp/http.py``, ``mcp/server.py``)
+    calls this before doing anything else. Without it, Python's root
+    logger has no handler and falls back to ``logging.lastResort`` —
+    WARNING and above still reach stderr, but INFO (retries, the
+    startup line) does not, and there is no consistent format across
+    runners. An invalid ``level`` name is a configuration error, not a
+    silent fallback to WARNING: it fails loudly here instead of
+    surfacing later as "why do I see no logs at all".
+    """
+    numeric_level = logging.getLevelName(level.upper())
+    if not isinstance(numeric_level, int):
+        raise ValueError(
+            f"invalid HIVEMIND_LOG_LEVEL {level!r}; expected one of "
+            "DEBUG, INFO, WARNING, ERROR, CRITICAL"
+        )
+    logging.basicConfig(
+        level=numeric_level,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )

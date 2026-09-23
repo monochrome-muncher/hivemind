@@ -31,6 +31,7 @@ validation) fail fast.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -38,6 +39,8 @@ import httpx
 
 from hivemind.config import Settings
 from hivemind.domain.entry import DEFAULT_PREFIX_TOKENS, EntryDraft, embeddable_text
+
+logger = logging.getLogger(__name__)
 
 
 async def _default_sleep(delay: float) -> None:
@@ -129,6 +132,7 @@ class OpenAICompatEmbedder:
             model_name=settings.embedding_model,
             dim=settings.embedding_dim,
             prefix_tokens=settings.embedding_prefix_tokens,
+            timeout=settings.embedding_timeout,
             retries=settings.embedding_retries,
         )
 
@@ -226,8 +230,19 @@ class OpenAICompatEmbedder:
                         raise EmbeddingError(f"expected {self._dim} dims, got {len(vector)}")
                     return vector
             if attempt < self._retries:
+                logger.warning(
+                    "embedding request failed (attempt %d/%d), retrying: %s",
+                    attempt + 1,
+                    self._retries + 1,
+                    last,
+                )
                 await self._sleep(self._backoff * (2**attempt))
         assert last is not None  # only reachable when the budget is exhausted
+        logger.error(
+            "embedding request failed after %d attempt(s), giving up: %s",
+            self._retries + 1,
+            last,
+        )
         raise last
 
     def _parse_response(self, response: httpx.Response) -> list[float]:

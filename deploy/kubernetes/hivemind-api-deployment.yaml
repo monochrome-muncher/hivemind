@@ -64,7 +64,8 @@ spec:
       #    embeds and then extracts, in sequence, each with its own
       #    bounded retry budget (ADR 0014).
       #
-      #      embedder   3 attempts x 10s + 0.5s + 1.0s backoff =  31.5s
+      #      embedder   3 attempts x 10s (HIVEMIND_EMBEDDING_TIMEOUT's
+      #                 default) + 0.5s + 1.0s backoff =            31.5s
       #      extractor  3 attempts x 30s + 0.5s + 1.0s backoff =  91.5s
       #      ------------------------------------------------- -------
       #      worst-case write path                               123.0s
@@ -75,9 +76,9 @@ spec:
       #    read / write), so a single attempt can exceed it. 150s is also
       #    the budget the startupProbe already gets.
       #
-      #    RAISE THIS if HIVEMIND_EXTRACTOR_RETRIES or
-      #    HIVEMIND_EXTRACTOR_TIMEOUT (or HIVEMIND_EMBEDDING_RETRIES) go
-      #    up — DEPLOY.md §5 carries the arithmetic and the recipe.
+      #    RAISE THIS if HIVEMIND_EXTRACTOR_RETRIES, HIVEMIND_EXTRACTOR_TIMEOUT,
+      #    HIVEMIND_EMBEDDING_RETRIES or HIVEMIND_EMBEDDING_TIMEOUT go up —
+      #    DEPLOY.md §5 carries the arithmetic and the recipe.
       terminationGracePeriodSeconds: 150
 
       containers:

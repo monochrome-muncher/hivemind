@@ -8,6 +8,7 @@ via ``create_app_for_config``).
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any, cast
 
@@ -15,12 +16,14 @@ import uvicorn
 from fastapi import FastAPI
 
 from hivemind.api.deps import HivemindApp, create_app
-from hivemind.config import SearchConfig, Settings, load_settings
+from hivemind.config import SearchConfig, Settings, configure_logging, load_settings
 from hivemind.ports import Authenticator, Embedder, Extractor, Store
 from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService, WriteService
 from hivemind.services.metrics import MetricsService
 from hivemind.services.search import SearchService
+
+logger = logging.getLogger(__name__)
 
 
 def create_app_for_config(
@@ -89,6 +92,15 @@ def create_app_from_settings(
 def run() -> None:
     """Console entry point (``hivemind-api``): serve the REST surface."""
     settings = load_settings()
+    configure_logging(settings.log_level)
+    logger.info(
+        "starting hivemind-api: embedding_endpoint=%s embedding_dim=%d "
+        "extraction=%s pool_max_size=%d",
+        settings.embedding_endpoint,
+        settings.embedding_dim,
+        "on" if settings.extractor_endpoint else "off",
+        settings.pool_max_size,
+    )
     fastapi_app = create_app_from_settings(settings)
     uvicorn.run(
         fastapi_app,

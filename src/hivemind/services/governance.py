@@ -8,6 +8,7 @@ and both resolve the caller's identity before calling them.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -16,6 +17,8 @@ from hivemind.domain.entry import Entry, EntryDraft, ExtractedEntity
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.ports import Credential, Embedder, Extractor, Store
 from hivemind.retrieval.scoring import feedback_quality
+
+logger = logging.getLogger(__name__)
 
 
 class PermissionDenied(Exception):
@@ -71,7 +74,19 @@ class WriteService:
             except Exception:
                 # Best-effort enrichment (ADR 0016, SPEC §13.4): an
                 # extraction failure never blocks the write — the entry
-                # lands without facets, zero write-failure impact.
+                # lands without facets, zero write-failure impact. This
+                # is the ONLY record of what failed — the extractor's own
+                # exception is logged here, not just swallowed, so a
+                # dead/misconfigured extractor endpoint shows up as log
+                # lines instead of only as a slow drift in facet coverage
+                # (the symptom docs/ops-runbook.md previously said to
+                # watch for in place of an actual error).
+                logger.warning(
+                    "entity extraction failed for a write by %s/%s — entry lands without facets",
+                    draft.author,
+                    draft.agent,
+                    exc_info=True,
+                )
                 entities, entities_model = (), None
         return await self._store.create_entry(
             draft,

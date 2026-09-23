@@ -88,6 +88,26 @@ class TestWriteServiceExtraction:
         assert entry.entities == ()
         assert entry.entities_model is None
 
+    async def test_extraction_failure_is_logged_not_only_swallowed(self, caplog) -> None:
+        """Before this, a failing extractor left no record anywhere —
+        the only symptom was an entry with empty facets (the very thing
+        docs/ops-runbook.md told operators to watch for in place of an
+        actual error). The failure must now be visible in the logs, with
+        the acting author/agent for triage, and without the exception
+        swallowing so quietly that ``caplog`` doesn't even see it."""
+        store = MemoryStore(make_clock())
+        service = WriteService(store, make_embedder(), FakeExtractor(fail=True))
+
+        with caplog.at_level("WARNING"):
+            await service.write(make_draft("Auth uses JWT", author="alice", agent="agent-1"))
+
+        assert len(caplog.records) == 1
+        record = caplog.records[0]
+        assert record.levelname == "WARNING"
+        assert "alice" in record.message
+        assert "agent-1" in record.message
+        assert record.exc_info is not None  # the extractor's own exception is attached
+
     async def test_write_without_extractor_lands_without_facets(self) -> None:
         """Extraction off: the entry lands with empty facets and no
         provenance, zero LLM cost (the extractor defaults to ``None``)."""

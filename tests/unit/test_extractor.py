@@ -423,6 +423,28 @@ class TestRetries:
         assert exc_info.value.status == 500
         assert len(env.requests) == 3  # initial attempt + 2 retries
 
+    async def test_a_retry_is_logged_as_a_warning(self, caplog) -> None:
+        env = MockEnv()
+        env.script([httpx.Response(500, text="boom"), _chat_response("[]")])
+        extractor = make_extractor(env)
+        with caplog.at_level("WARNING"):
+            await extractor.extract_entry(make_draft())
+        assert any(r.levelname == "WARNING" and "retrying" in r.message for r in caplog.records)
+
+    async def test_exhausted_budget_is_logged_as_a_warning_not_an_error(self, caplog) -> None:
+        """Unlike the embedder's, this give-up is a WARNING, not an
+        ERROR: extraction is best-effort by design (ADR 0016) — the
+        exception still propagates so ``WriteService`` can log+swallow
+        it, but a healthy fleet with the extractor merely unreachable
+        should not fill an ERROR-level alert channel."""
+        env = MockEnv()
+        env.script([httpx.Response(500, text="boom")])  # 500 forever
+        extractor = make_extractor(env, retries=1)
+        with caplog.at_level("WARNING"), pytest.raises(ExtractorError):
+            await extractor.extract_entry(make_draft())
+        assert any(r.levelname == "WARNING" and "giving up" in r.message for r in caplog.records)
+        assert not any(r.levelname == "ERROR" for r in caplog.records)
+
     async def test_zero_retries_is_a_single_attempt(self) -> None:
         env = MockEnv()
         env.script([httpx.Response(500, text="boom")])

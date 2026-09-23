@@ -24,19 +24,22 @@ pool, served over ``uvicorn``.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from collections.abc import Callable
 from contextvars import ContextVar
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from hivemind.config import Settings, load_settings
+from hivemind.config import Settings, configure_logging, load_settings
 from hivemind.mcp.app import McpHivemind
 from hivemind.mcp.server import build_server
 from hivemind.ports import Authenticator, Credential, Embedder, Store
 from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService, WriteService
 from hivemind.services.search import SearchService
+
+logger = logging.getLogger(__name__)
 
 # The acting credential for the *current* request. Set by the auth
 # middleware, read by ``build_server``'s ``credential_provider`` on each
@@ -249,6 +252,15 @@ def main_http() -> None:
     from hivemind.store import build_authenticator, build_store
 
     settings = load_settings()
+    configure_logging(settings.log_level)
+    logger.info(
+        "starting hivemind-mcp-http: embedding_endpoint=%s embedding_dim=%d "
+        "extraction=%s pool_max_size=%d",
+        settings.embedding_endpoint,
+        settings.embedding_dim,
+        "on" if settings.extractor_endpoint else "off",
+        settings.pool_max_size,
+    )
     store = build_store(settings)
     embedder = build_embedder(settings)
     authenticator = build_authenticator(settings)
