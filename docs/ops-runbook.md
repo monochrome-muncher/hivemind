@@ -49,15 +49,18 @@ make mcp-http       # start the hostable MCP runner as a detached service (:8088
 | `HIVEMIND_POOL_MIN_SIZE` / `HIVEMIND_POOL_MAX_SIZE` | the asyncpg connection pool's min/max size, per process (default 1 / 10) — the operator knob for per-pod concurrency |
 
 > **Behind a transaction-mode PgBouncer (or any transaction-pooling
-> proxy):** Hivemind's asyncpg pool disables its client-side prepared-
+> proxy):** Hivemind's asyncpg pools disable their client-side prepared-
 > statement cache (`statement_cache_size=0`) unconditionally, because
 > that cache is unsafe once consecutive queries from one connection can
 > land on different physical Postgres connections between calls — the
 > documented asyncpg/transaction-mode incompatibility. `HIVEMIND_POOL_MAX_SIZE`
-> is the only per-pod concurrency knob; an org whose Postgres
-> `max_connections` is constrained should size it (times replica count,
-> plus PgBouncer's own pool) to stay under that ceiling rather than
-> relying on the default.
+> sizes **both** pools a pod holds: `PgStore`'s data-plane pool and
+> `PgAuthenticator`'s separate pool (auth is checked on every
+> authenticated request, on its own connection lane) — one pod's total
+> footprint is therefore up to `2 x pool_max_size`. An org whose
+> Postgres `max_connections` is constrained should size it (times 2,
+> times replica count, plus PgBouncer's own pool) to stay under that
+> ceiling rather than relying on the default.
 
 > **An unrecognized `HIVEMIND_*` variable now fails startup loudly**
 > (ADR 0024): `load_settings()` rejects any `HIVEMIND_*` name that is
