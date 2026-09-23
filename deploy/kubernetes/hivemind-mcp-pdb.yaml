@@ -1,0 +1,21 @@
+# PodDisruptionBudget for `hivemind-mcp` (ADR 0026) — same reasoning as
+# hivemind-api-pdb.yaml: the Deployment's maxUnavailable covers rollouts,
+# a PDB covers VOLUNTARY disruption (drains, evictions), and only the PDB
+# stops the eviction API taking the last pod.
+#
+# Losing a terminating pod costs at most ONE in-flight tool call: the
+# transport is stateless streamable-HTTP (ADR 0010, SPEC §8.5), so there
+# is no client session to break.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: hivemind-mcp
+  labels:
+    app.kubernetes.io/name: hivemind
+    app.kubernetes.io/component: mcp
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hivemind
+      app.kubernetes.io/component: mcp

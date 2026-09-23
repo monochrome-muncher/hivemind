@@ -13,9 +13,23 @@ metadata:
     app.kubernetes.io/name: hivemind
     app.kubernetes.io/component: api
 spec:
-  # Single-node decision (ADR 0007): one API process + one Postgres node is
-  # the v1 shape; scale out only when its recorded trigger fires.
-  replicas: 1
+  # Two replicas for AVAILABILITY, not throughput (ADR 0026, which
+  # supersedes ADR 0007's one-process clause). The app tier is I/O-bound
+  # — a request waits on the embedder, the extractor and Postgres — so a
+  # second replica adds no capacity to any of those; what it buys is a
+  # zero-downtime rolling deploy and a pod that survives a node drain.
+  # One Postgres node is UNCHANGED (ADR 0007 / ADR 0026).
+  replicas: 2
+  # Written down explicitly even though k8s' own 25% defaults round to
+  # the same numbers at replicas: 2 — at 3 or 4 they do not, so the
+  # guarantee would silently weaken if this count is ever raised.
+  # maxUnavailable: 0 = the new pod passes readiness BEFORE the old one
+  # is asked to leave (a handover, not a gap).
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: hivemind

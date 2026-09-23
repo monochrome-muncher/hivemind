@@ -1,4 +1,7 @@
-# Hivemind — Kubernetes kustomization (production shape, ADR 0007 single-node).
+# Hivemind — Kubernetes kustomization (production shape: two 2-replica
+# app-tier Deployments against ONE Postgres node — ADR 0026, which
+# supersedes ADR 0007's one-process and docker-compose clauses; the
+# single-Postgres-node clause is unchanged).
 #
 #   kubectl kustomize build deploy/kubernetes
 #
@@ -22,5 +25,7 @@ resources:
   - configmap.yaml
   - hivemind-api-deployment.yaml
   - hivemind-api-service.yaml
+  - hivemind-api-pdb.yaml
   - hivemind-mcp-deployment.yaml
   - hivemind-mcp-service.yaml
+  - hivemind-mcp-pdb.yaml

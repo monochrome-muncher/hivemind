@@ -1,6 +1,9 @@
 # Hostable streamable-HTTP MCP runner (ADR 0010) — the `hivemind-mcp-http`
-# console script: ONE long-lived process serving an unlimited number of
-# agents, each authenticating per request with its own agent-scoped key.
+# console script: long-lived processes each serving an unlimited number
+# of agents, every one authenticating per request with its own
+# agent-scoped key. ADR 0010's invariant is the SHARED pool (never a
+# process per agent), not a single process — this Deployment runs 2
+# interchangeable replicas of it for availability (ADR 0026).
 #
 # Image contract (shipped by the generic Dockerfile lane):
 #   * entrypoint /app/entrypoint.sh:  exec hivemind-"${HIVEMIND_RUNNER:-mcp-http}" "$@"
@@ -15,8 +18,22 @@ metadata:
     app.kubernetes.io/name: hivemind
     app.kubernetes.io/component: mcp
 spec:
-  # Single-node decision (ADR 0007) — one runner process (see hivemind-api).
-  replicas: 1
+  # Two replicas for AVAILABILITY, not throughput (ADR 0026, which
+  # supersedes ADR 0007's one-process clause; see hivemind-api for the
+  # same reasoning). Safe here because the transport is STATELESS
+  # streamable-HTTP (ADR 0010, SPEC §8.5) and the credential is resolved
+  # per request, so either replica answers any request identically.
+  # "One process, many agents" (ADR 0010) becomes "one shared pool per
+  # process, many agents" — no process is ever per-agent.
+  # One Postgres node is UNCHANGED (ADR 0007 / ADR 0026).
+  replicas: 2
+  # Explicit for the same reason as on hivemind-api: the 25% defaults
+  # coincide at replicas: 2 and diverge above it.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: hivemind
