@@ -45,9 +45,15 @@ def build_store(settings: Settings) -> Store:
 
     Returns a ``PgStore`` whose pool opens on first use; the builder
     itself is synchronous, so it is safe to call from the API's
-    synchronous ``_build_store`` (SPEC.md §8.2).
+    synchronous ``_build_store`` (SPEC.md §8.2). ``settings.pool_min_size``
+    / ``pool_max_size`` reach ``make_pool`` from here, so every caller of
+    this factory (REST, both MCP runners) gets the configured pool size.
     """
-    return PgStore(settings.database_url)
+    return PgStore(
+        settings.database_url,
+        pool_min_size=settings.pool_min_size,
+        pool_max_size=settings.pool_max_size,
+    )
 
 
 def build_authenticator(settings: Settings) -> Authenticator:

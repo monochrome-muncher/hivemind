@@ -249,17 +249,24 @@ class PgStore:
     """A ``Store`` backed by PostgreSQL + pgvector (ADR 0007).
 
     Construct with a DSN (the pool opens lazily on first use) and
-    ``close()`` on process shutdown.
+    ``close()`` on process shutdown. ``pool_min_size`` / ``pool_max_size``
+    (default 1 / 10, matching ``make_pool``'s own defaults) are the
+    operator knobs for per-pod concurrency (``Settings.pool_min_size`` /
+    ``pool_max_size``).
     """
 
-    def __init__(self, dsn: str) -> None:
+    def __init__(self, dsn: str, *, pool_min_size: int = 1, pool_max_size: int = 10) -> None:
         self._dsn = dsn
+        self._pool_min_size = pool_min_size
+        self._pool_max_size = pool_max_size
         self._pool: asyncpg.Pool | None = None
 
     async def _ensure_pool(self) -> asyncpg.Pool:
         """Lazily open (and cache) the connection pool."""
         if self._pool is None:
-            self._pool = await make_pool(self._dsn)
+            self._pool = await make_pool(
+                self._dsn, min_size=self._pool_min_size, max_size=self._pool_max_size
+            )
         return self._pool
 
     async def close(self) -> None:

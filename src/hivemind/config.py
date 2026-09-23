@@ -79,6 +79,12 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="HIVEMIND_", extra="ignore", env_file=".env.local")
 
     database_url: str = "postgresql://hivemind:hivemind@localhost:5432/hivemind"
+    # asyncpg pool sizing for the Postgres store (``make_pool`` in
+    # store/pool.py already defaults to these exact values; these fields
+    # just make that existing constant operator-reachable, per pod, for
+    # tuning concurrency against a `max_connections`-constrained org).
+    pool_min_size: int = 1
+    pool_max_size: int = 10
     embedding_endpoint: str = "http://localhost:8001/v1"
     embedding_api_key: str = ""
     embedding_model: str = "text-embedding-3-small"

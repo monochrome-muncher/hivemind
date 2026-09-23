@@ -118,6 +118,23 @@ def test_a_known_settings_field_env_var_is_never_rejected(
     assert settings.quality_min == 0.3
 
 
+def test_pool_max_size_env_var_is_accepted_and_reaches_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The new ADR-0024-covered fields (``pool_min_size``/``pool_max_size``,
+    the multi-replica-readiness pool-size knobs) are real ``Settings``
+    fields, so their ``HIVEMIND_*`` spellings must load, not be rejected
+    as unknown."""
+    _clear_hivemind_env(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(
+        "HIVEMIND_DATABASE_URL", "postgresql://hivemind:hivemind@localhost:5432/hivemind"
+    )
+    monkeypatch.setenv("HIVEMIND_POOL_MAX_SIZE", "20")
+    settings = load_settings()
+    assert settings.pool_max_size == 20
+
+
 def test_unknown_variable_in_the_profile_file_is_also_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
