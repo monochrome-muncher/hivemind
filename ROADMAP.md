@@ -31,7 +31,10 @@
 - **What's next:** Tier 3.1–3.4 are shipped, including the Kubernetes +
   GitLab CI/CD deployment story (3.4). **§3.2 has been superseded by
   §3.5** (ADR 0020: an ordered, rollback-capable migration chain under a
-  Postgres advisory lock), which is now **shipped end to end**. The next
+  Postgres advisory lock), which is now **shipped end to end**. **§3.7**
+  is shipped too: 2 app-tier replicas per runner with an explicit
+  rollout strategy and a PDB each, for **availability only** — ADR 0026,
+  which supersedes ADR 0007. The next
   workstream is **Tier 4**, whose two measurement items are now closed —
   §4.5 shipped `importance_source`, and §4.4 measured the recency term
   and **rejected** gating it (no code change; numbers in §4.4). The two
@@ -180,7 +183,7 @@ kinds). Tier 3.1 (the key-rotation runbook) is **blocked by Tier 2** —
 you can't write a rotation story for a key model that's about to
 change.
 
-## Tier 3 — productionize (former Tier 2)  *(3.1, 3.3–3.6 shipped; 3.2 superseded by 3.5)*
+## Tier 3 — productionize (former Tier 2)  *(3.1, 3.3–3.7 shipped; 3.2 superseded by 3.5)*
 
 ### 3.1 Ops runbook  *(shipped: `docs/ops-runbook.md`)*
 Deployment, **backups** (single-node Postgres, ADR 0007),
@@ -210,7 +213,8 @@ trust-level distribution, pending-agent count, revoked-key count.)*
 A production deployment story: **one generic image** (runner selected by
 `HIVEMIND_RUNNER` — api / mcp-http / migrate / keys; the entrypoint owns
 the idempotent migration pre-step — ADR 0018), a plain-YAML
-**kustomize** manifest tree (two 1-replica Deployments — ADR 0007 — with
+**kustomize** manifest tree (two Deployments — 1 replica each as
+shipped here; **now 2 each, ADR 0026 / §3.7** — with
 unauthenticated probe endpoints — ADR 0019; optional nginx + cert-manager
 Ingress with SSE tuning), a **GitLab pipeline** (test on pgvector →
 docker build/push → deploy via the pre-configured GitLab Kubernetes
@@ -218,9 +222,10 @@ agent, with an idempotent **first-run key bootstrap** that lands the
 admin/org keys in the k8s Secret), environment-profile files
 (`config/.env.example` + `ENVIRONMENT` selection — ADR 0017), and
 `hivemind-keys revoke-admin` (admin-key rotation is now CLI-native).
-ADR 0007's single-node decision is unchanged by k8s hosting (1 replica,
-no HA); the single-node ops story stays in `docs/ops-runbook.md`
-(one source of truth per concern).
+ADR 0007's single-**Postgres-node** decision is unchanged by k8s hosting;
+its *one-process* clause is not — **§3.7 / ADR 0026 supersedes it** with
+2 app-tier replicas per runner for availability. The single-node ops
+story stays in `docs/ops-runbook.md` (one source of truth per concern).
 
 ### 3.5 Versioned migrations with rollback  *(shipped: ADR 0020, SPEC §8.6, `src/hivemind/store/migrations/`)*
 Replaces §3.2. An ordered migration chain (`src/hivemind/store/migrations/`,
@@ -252,6 +257,10 @@ Work items:
 *Not in scope here:* the replica bump itself (`replicas: 1` → 2–3) is a
 separate change — it drags in rollout strategy and **SSE connection
 draining on `hivemind-mcp-http`**, which is currently unexamined.
+*(Done: **§3.7**, ADR 0026. The draining question resolved to nothing
+new — the transport is stateless streamable-HTTP, ADR 0010, and the
+`preStop` + `terminationGracePeriodSeconds` pair the manifests already
+carry was written for exactly this.)*
 
 ### 3.6 Vector index on `entries.embedding`  *(shipped: ADR 0025, migration `0004`, SPEC §6.2)*
 `search_vector` had no index: every vector query sequentially scanned the
@@ -292,6 +301,45 @@ index, and real embeddings cluster), and the re-measure trigger: the
 first real corpus at ≥30k entries, which is where Postgres starts
 choosing the index unprompted. The §1.1 gate runs against `MemoryStore`,
 has no index and no `<=>`, and was **not** re-pinned.
+
+### 3.7 Two app-tier replicas  *(shipped: ADR 0026, SPEC §8.2, `deploy/kubernetes/`)*
+The replica bump §3.5 deferred, and the supersession of ADR 0007 it
+forced. Both Deployments go to **`replicas: 2`** with an explicit
+`maxSurge: 1` / `maxUnavailable: 0` rollout and a **`minAvailable: 1`
+PodDisruptionBudget** each (`hivemind-api-pdb.yaml`,
+`hivemind-mcp-pdb.yaml`).
+
+**Availability only.** Two replicas buy a zero-downtime rolling deploy
+and a pod that survives a node drain — nothing else, and the ADR says
+so in its own text so it cannot later be cited for more. *Throughput* is
+rejected on the workload's shape: the app tier is I/O-bound (embedder,
+extractor, Postgres — see the 123s worst-case write arithmetic on both
+Deployments), so a second replica adds pressure to three shared
+bottlenecks and capacity to none. *AZ failure* is rejected because it
+cannot be cashed: one Postgres node means an AZ failure takes the
+database whatever the app tier does. *Three replicas* is rejected as
+protection against a second simultaneous failure that the
+availability-only framing does not ask for.
+
+The PDB is the load-bearing part: `maxUnavailable` on a Deployment
+governs **rollouts**, not voluntary disruption — `kubectl drain`
+consults the PDB and nothing else. The explicit strategy is written
+down because k8s' 25% defaults only coincide with it at `replicas: 2`.
+
+Nothing in the app tier had to change: the REST surface holds no
+session state, the MCP transport is stateless streamable-HTTP with
+per-request credentials (ADR 0010), concurrent startup is already
+serialised by ADR 0020's advisory lock, and ADR 0025's HNSW index had
+just removed the per-replica sequential-scan pressure this would
+otherwise have multiplied. The connection footprint doubles but is
+bounded and tunable (`HIVEMIND_POOL_MIN_SIZE`/`_MAX_SIZE` behind a
+transaction-mode PgBouncer — `docs/ops-runbook.md`).
+
+**Redis is still not bought.** Its §10 trigger reads "API replicas > 1,
+or …" and that clause is now literally satisfied — and it still buys
+nothing, because there is no distributed rate limiting, no fan-out and
+no distributed lock outside Postgres. That trigger row wants rewriting
+around the *rate-limit ceiling*, not the replica count.
 
 ## Tier 4 — close the spec's open items (SPEC §11) (former Tier 3)
 
@@ -732,14 +780,16 @@ so the later decision is data-driven. Two kinds:
 
 > **Scale ambition (updated).** The org's target has grown from the
 > ~50 agents in ADR 0007 to **300+ users/agents across multiple
-> fleets**. That still fits comfortably on one Postgres node + one API
-> process (a few writes/sec at peak, index-backed reads) — so the
-> *single-node decision* in ADR 0007 holds; what changes is the
+> fleets**. That still fits comfortably on one Postgres node + a small,
+> fixed app tier (a few writes/sec at peak, index-backed reads) — so the
+> *single-Postgres-node decision* in ADR 0007 holds; what changes is the
 > constant, not the decision. "Multiple fleets" is a logical partition
 > (`fleet_id` + trust-level visibility, ADR 0011), not a new
-> infrastructure. The infra question (Redis / multiple replicas) only
+> infrastructure. The infra question (Redis / scaling *for load*) only
 > opens when the **scale-out trigger** below fires — it is *not*
-> triggered by 300 agents or by multiple fleets.
+> triggered by 300 agents or by multiple fleets, and it is *not*
+> triggered by ADR 0026's replica count, which is an availability
+> decision that explicitly rejects throughput as a motive.
 
 | §10 extension | Trigger (spec wording) | Measure to watch | Instrument |
 |---|---|---|---|
@@ -753,7 +803,7 @@ so the later decision is data-driven. Two kinds:
 | Curation workflow | "org wants a 'librarian'" | feedback (helpful/stale/wrong) accumulating without action; stale/wrong entries still in top-k | §3.3 counters + §1.1 harness |
 | Human read-only UI | "analysts want to see the pool" | direct demand for human browsing (usage signal, not a metric) | qualitative |
 | Multi-tenant SaaS / OAuth | "more than one org; an org has an IdP" | count of distinct orgs / tenants requested (count > 1) | §3.3 counters |
-| Redis (cache / rate limits / queue) | "API scales to multiple replicas; org demands distributed rate limiting" | API replicas > 1, or distinct orgs > 1, or a cross-process per-agent rate-limit ceiling is needed *(in-process / Postgres-based rate limiting suffices at single-replica; a Redis queue for embedding is superseded by the Postgres-outbox design below)* | §3.3 counters + replica count |
+| Redis (cache / rate limits / queue) | "API scales to multiple replicas; org demands distributed rate limiting" | API replicas > 1, or distinct orgs > 1, or a cross-process per-agent rate-limit ceiling is needed *(the replica clause is now satisfied — 2 replicas per runner, ADR 0026 — and still buys nothing: there is no distributed rate limiting, no fan-out, and the only cross-process lock is in Postgres (ADR 0020). The live half of this trigger is the **rate-limit ceiling**, not the replica count; a Redis queue for embedding is superseded by the Postgres-outbox design below)* | §3.3 counters + replica count |
 | Async embedding pipeline | "embedding latency/throughput starts blocking writes" | p95 write latency; embedder failure/retry rate; backlog of unembedded entries *(the embedder already has a bounded retry budget for transient failures — ADR 0014, `HIVEMIND_EMBEDDING_RETRIES`, default 2 — so this trigger is about the **fallback** (persist without a vector + catch-up), not retries. Design: a Postgres **outbox** — insert entry with `embedding IS NULL` in the same transaction, then a `FOR UPDATE SKIP LOCKED` worker embeds + updates; a single source of truth, no second queue service. New ADR required: it changes write semantics — an entry is vector-searchable only after its vector lands)* | §3.3 counters + p95 write latency |
 
 ## If you do one thing
