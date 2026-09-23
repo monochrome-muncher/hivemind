@@ -26,6 +26,7 @@ from hivemind.api.schemas import (
     ActivateAgentRequest,
     AgentOut,
     AgentsMetrics,
+    AuditRecordOut,
     CreateEntryRequest,
     CreateFleetRequest,
     EntriesMetrics,
@@ -44,6 +45,7 @@ from hivemind.api.schemas import (
     WithdrawRequest,
 )
 from hivemind.domain.access import Agent, TrustLevel
+from hivemind.domain.audit import AuditAction, AuditFilters
 from hivemind.domain.entry import EntryDraft, EntryFilters, ImportanceSource, Kind, Source
 from hivemind.embeddings import EmbeddingError
 from hivemind.ports import Credential
@@ -52,6 +54,11 @@ from hivemind.services.chain import supersession_chain
 from hivemind.services.governance import PermissionDenied
 
 require = Annotated[Credential, Depends(require_credential)]
+
+# GET /v1/admin/audit-log page size (ADR 0027): a sensible default and a
+# hard ceiling, so one request can never drag the whole log over the wire.
+AUDIT_LOG_DEFAULT_LIMIT = 100
+AUDIT_LOG_MAX_LIMIT = 1000
 
 
 def _to_utc(value: datetime | None) -> datetime | None:
@@ -403,6 +410,25 @@ def build_router(app: HivemindApp) -> APIRouter:
             await app.access_service.revoke(name, credential)
         except PermissionDenied as exc:
             raise api_error(403, "forbidden", str(exc)) from exc
+
+    @router.get("/admin/audit-log", response_model=list[AuditRecordOut])
+    async def audit_log(
+        credential: require,
+        actor: Annotated[str | None, Query()] = None,
+        action: Annotated[AuditAction | None, Query()] = None,
+        since: Annotated[datetime | None, Query()] = None,
+        limit: Annotated[int, Query(ge=1, le=AUDIT_LOG_MAX_LIMIT)] = AUDIT_LOG_DEFAULT_LIMIT,
+    ) -> list[AuditRecordOut]:
+        """The audit log of admin-surface actions, newest first (admin-
+        gated, ADR 0027 — SPEC §12.5). Filters AND together: ``actor``
+        (exact), ``action`` (the audited vocabulary), ``since`` (inclusive;
+        a naive timestamp is UTC), ``limit`` (1..1000, default 100)."""
+        filters = AuditFilters(actor=actor, action=action, since=_to_utc(since))
+        try:
+            records = await app.access_service.list_audit(credential, filters, limit)
+        except PermissionDenied as exc:
+            raise api_error(403, "forbidden", str(exc)) from exc
+        return [AuditRecordOut.from_record(r) for r in records]
 
     @router.post("/admin/org-key/rotate", response_model=KeyIssuedOut)
     async def rotate_org_key(credential: require) -> KeyIssuedOut:

@@ -13,10 +13,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from hivemind.config import SearchConfig
+from hivemind.domain.audit import AuditAction
 from hivemind.domain.entry import Entry, EntryDraft, ExtractedEntity
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.ports import Credential, Embedder, Extractor, Store
 from hivemind.retrieval.scoring import feedback_quality
+from hivemind.services.audit import record_admin_action
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +136,19 @@ class GovernanceService:
                 f"entry {entry_id} is already {entry.state.value}; "
                 "only active entries can be withdrawn"
             )
-        return await self._store.withdraw_entry(entry_id, reason, by_user=credential.user_id)
+        withdrawn = await self._store.withdraw_entry(entry_id, reason, by_user=credential.user_id)
+        if credential.is_admin and entry.author != credential.user_id:
+            # Authorised by admin privilege, not authorship (SPEC §4.1):
+            # an admin action on someone else's entry — audited (ADR
+            # 0027). An author withdrawing their own entry is not.
+            await record_admin_action(
+                self._store,
+                credential,
+                AuditAction.ENTRY_WITHDRAW,
+                entry_id,
+                {"author": entry.author, "reason": reason},
+            )
+        return withdrawn
 
     async def record_feedback(
         self,

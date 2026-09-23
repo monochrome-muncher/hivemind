@@ -9,18 +9,29 @@ resolution (which scope a trust level may write, ADR 0011).
 The services are the only orchestrator; the HTTP and MCP layers are
 thin (validation + auth + error mapping only). All I/O happens through
 the ``Store`` and ``Authenticator`` ports.
+
+Every admin mutation is recorded in the audit log (ADR 0027) **after**
+it succeeds. The mutation and the audit write span two ports with no
+shared transaction, so they are not atomic: an audit-write failure is
+raised (never swallowed — the action happened and the caller must see
+that it went unaudited). The audit writer, ``_audit``, takes no key
+argument: a raw key cannot reach an audit column by construction.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from hivemind.domain.access import (
     Agent,
     Fleet,
     TrustLevel,
 )
+from hivemind.domain.audit import AuditAction, AuditFilters, AuditRecord
 from hivemind.ports import Authenticator, Credential, Store
+from hivemind.services.audit import record_admin_action
 from hivemind.services.governance import PermissionDenied
 
 
@@ -95,39 +106,69 @@ class AccessService:
             name, trust_level=trust_level, home_fleet_id=home_fleet_id
         )
         key = await self._require_authenticator().issue_agent_key(name)
+        await self._audit(
+            credential,
+            AuditAction.AGENT_ACTIVATE,
+            name,
+            {"trust_level": trust_level.value, "home_fleet_id": home_fleet_id},
+        )
         return agent, key
 
     async def create_fleet(self, name: str, credential: Credential) -> Fleet:
         """Create a named fleet (admin-gated, ADR 0012)."""
         self._require_admin(credential)
-        return await self._store.create_fleet(name)
+        fleet = await self._store.create_fleet(name)
+        await self._audit(credential, AuditAction.FLEET_CREATE, fleet.id, {"name": name})
+        return fleet
 
     async def set_trust_level(self, name: str, level: TrustLevel, credential: Credential) -> Agent:
         """Promote/demote an agent's trust level (admin-gated, ADR 0011).
         Demotion to level 0 is *dormant* (key still valid, no access) —
         distinct from revocation (ADR 0012)."""
         self._require_admin(credential)
-        return await self._store.set_agent_trust_level(name, level)
+        before = await self._store.get_agent(name)
+        agent = await self._store.set_agent_trust_level(name, level)
+        await self._audit(
+            credential,
+            AuditAction.AGENT_TRUST_LEVEL_SET,
+            name,
+            {
+                "from": before.trust_level.value if before is not None else None,
+                "to": level.value,
+            },
+        )
+        return agent
 
     async def set_home_fleet(self, name: str, fleet_id: str, credential: Credential) -> Agent:
         """Re-parent an agent to a new home fleet (admin-gated, ADR 0011).
         The agent's earlier ``fleet``-scoped entries stay in the fleet
         they were written into (never re-parented)."""
         self._require_admin(credential)
-        return await self._store.set_agent_home_fleet(name, fleet_id)
+        before = await self._store.get_agent(name)
+        agent = await self._store.set_agent_home_fleet(name, fleet_id)
+        await self._audit(
+            credential,
+            AuditAction.AGENT_HOME_FLEET_SET,
+            name,
+            {"from": before.home_fleet_id if before is not None else None, "to": fleet_id},
+        )
+        return agent
 
     async def revoke(self, name: str, credential: Credential) -> None:
         """Revoke an agent's key (admin-gated, ADR 0012). The agent record
         + name stay reserved (dormant); the key is dead."""
         self._require_admin(credential)
         await self._require_authenticator().revoke_agent_key(name)
+        await self._audit(credential, AuditAction.AGENT_REVOKE, name)
 
     async def rotate_org_key(self, credential: Credential) -> str:
         """Rotate the shared org key — the cluster kill switch (ADR 0012).
         All prior org keys stop working; the new key is returned once.
         Admin-gated."""
         self._require_admin(credential)
-        return await self._require_authenticator().rotate_org_key()
+        key = await self._require_authenticator().rotate_org_key()
+        await self._audit(credential, AuditAction.ORG_KEY_ROTATE, None)
+        return key
 
     # -- read (admin-gated listing) ------------------------------------------
 
@@ -138,6 +179,27 @@ class AccessService:
     async def list_fleets(self, credential: Credential) -> list[Fleet]:
         self._require_admin(credential)
         return await self._store.list_fleets()
+
+    async def list_audit(
+        self, credential: Credential, filters: AuditFilters, limit: int
+    ) -> list[AuditRecord]:
+        """The audit log, newest first (admin-gated, ADR 0027)."""
+        self._require_admin(credential)
+        return await self._store.list_audit(filters, limit)
+
+    # -- audit (ADR 0027) ------------------------------------------------------
+
+    async def _audit(
+        self,
+        credential: Credential,
+        action: AuditAction,
+        target: str | None,
+        detail: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Record an admin action that has already succeeded. Deliberately
+        takes no key: the raw key a key-producing action returns never
+        reaches this method, so it cannot reach an audit column."""
+        await record_admin_action(self._store, credential, action, target, detail)
 
     # -- permission gates (ADR 0012) -----------------------------------------
 
