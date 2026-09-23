@@ -260,7 +260,7 @@ not edge-case insurance.
 
   | leg | attempts | timeout | backoff | worst case |
   |---|---|---|---|---|
-  | embedder | 1 + `HIVEMIND_EMBEDDING_RETRIES` (2) = 3 | 10s (not configurable) | 0.5s + 1.0s | 31.5s |
+  | embedder | 1 + `HIVEMIND_EMBEDDING_RETRIES` (2) = 3 | `HIVEMIND_EMBEDDING_TIMEOUT` (10s) | 0.5s + 1.0s | 31.5s |
   | extractor | 1 + `HIVEMIND_EXTRACTOR_RETRIES` (2) = 3 | `HIVEMIND_EXTRACTOR_TIMEOUT` (30s) | 0.5s + 1.0s | 91.5s |
   | **worst-case write path** | | | | **123.0s** |
 
@@ -277,9 +277,9 @@ not edge-case insurance.
   `5 x 30 + 0.5 x 15 = 157.5s` and the write path `189s`, so the grace
   period needs to go to **~240s** in *both*
   `deploy/kubernetes/*-deployment.yaml`. The same applies to
-  `HIVEMIND_EXTRACTOR_TIMEOUT` and `HIVEMIND_EMBEDDING_RETRIES`. Leaving
-  it stale is not a crash — it is a SIGKILL that drops a write the
-  caller was told nothing about.
+  `HIVEMIND_EXTRACTOR_TIMEOUT`, `HIVEMIND_EMBEDDING_RETRIES` and
+  `HIVEMIND_EMBEDDING_TIMEOUT`. Leaving it stale is not a crash — it is
+  a SIGKILL that drops a write the caller was told nothing about.
 - **Why `preStop` as well.** On pod deletion the kubelet's SIGTERM and
   the EndpointSlice removal happen **concurrently**, so for as long as
   that removal takes to reach kube-proxy — and the nginx ingress

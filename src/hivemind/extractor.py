@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
@@ -53,6 +54,8 @@ from hivemind.domain.entry import (
     ExtractedEntity,
     embeddable_text,
 )
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from hivemind.ports import Extractor
@@ -248,8 +251,20 @@ class OpenAICompatExtractor:
                 else:
                     return self._parse_response(response)
             if attempt < self._retries:
+                logger.warning(
+                    "extraction request failed (attempt %d/%d), retrying: %s",
+                    attempt + 1,
+                    self._retries + 1,
+                    last,
+                )
                 await self._sleep(self._backoff * (2**attempt))
         assert last is not None  # only reachable when the budget is exhausted
+        logger.warning(
+            "extraction request failed after %d attempt(s), giving up (best-effort — "
+            "the write is not blocked): %s",
+            self._retries + 1,
+            last,
+        )
         raise last
 
     def _payload(self, text: str) -> dict[str, Any]:

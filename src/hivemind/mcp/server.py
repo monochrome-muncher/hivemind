@@ -21,6 +21,7 @@ started with ``await server.run_stdio_async()``.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from collections.abc import Callable
 from dataclasses import replace
@@ -28,7 +29,7 @@ from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 
-from hivemind.config import load_settings
+from hivemind.config import configure_logging, load_settings
 from hivemind.extractor import build_extractor
 from hivemind.mcp.app import (
     McpHivemind,
@@ -46,6 +47,8 @@ from hivemind.ports import Credential
 from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService, WriteService
 from hivemind.services.search import SearchService
+
+logger = logging.getLogger(__name__)
 
 # The agent prompt contract from SPEC §5.2, surfaced as server instructions.
 _INSTRUCTIONS = (
@@ -272,6 +275,7 @@ def build_server(
 def main() -> None:
     """Build a self-contained dev stdio server and run the transport."""
     settings = load_settings()
+    configure_logging(settings.log_level)
     store = MemoryStore()
     embedder = LocalEmbedder(dimension=settings.embedding_dim)
     extractor = build_extractor(settings)  # optional (ADR 0016): None when the endpoint is unset
@@ -330,10 +334,19 @@ def main_pg() -> None:
     from hivemind.store import build_authenticator, build_store
 
     settings = load_settings()
+    configure_logging(settings.log_level)
     raw_key = os.environ.get("HIVEMIND_MCP_KEY", "").strip()
     if not raw_key:
         raise SystemExit(_mcp_key_missing_hint())
 
+    logger.info(
+        "starting hivemind-mcp-pg: embedding_endpoint=%s embedding_dim=%d "
+        "extraction=%s pool_max_size=%d",
+        settings.embedding_endpoint,
+        settings.embedding_dim,
+        "on" if settings.extractor_endpoint else "off",
+        settings.pool_max_size,
+    )
     store = build_store(settings)
     embedder = build_embedder(settings)
     authenticator = build_authenticator(settings)
