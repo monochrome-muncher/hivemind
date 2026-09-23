@@ -149,7 +149,7 @@ _Avoid_: operator key, root key, superuser
 ### Surfaces
 
 **MCP runner**:
-The process that exposes Hivemind's seven `hive_*` tools to an agent. Three kinds: the dev runner (`hivemind-mcp`, in-memory, stdio), the per-agent Postgres-backed runner (`hivemind-mcp-pg`, ADR 0009, one process per agent), and the hostable streamable-HTTP runner (`hivemind-mcp-http`, ADR 0010, one shared process, many agents). All read/write the same pool; every write carries verified provenance.
+The process that exposes Hivemind's seven `hive_*` tools to an agent. Three kinds: the dev runner (`hivemind-mcp`, in-memory, stdio), the per-agent Postgres-backed runner (`hivemind-mcp-pg`, ADR 0009, one process per agent), and the hostable streamable-HTTP runner (`hivemind-mcp-http`, ADR 0010, one shared pool per process, many agents — never a process per agent; it runs as 2 replicas in production, ADR 0026). All read/write the same pool; every write carries verified provenance.
 _Avoid_: Hivemind client (implies a library client), agent connector
 
 **Agent key**:
@@ -219,6 +219,14 @@ The CI floor pinned on the retrieval metrics: an improvement passes, a regressio
 _Avoid_: quality threshold, search-quality SLA, retrieval budget
 
 ### Operations (Tier 3)
+
+**Instance**:
+One deployed Hivemind, serving exactly one organization over one Postgres node (ADR 0007, restated by ADR 0026). A second instance is a **second organization**: no data flows between instances.
+_Avoid_: tenant (multi-tenancy is a non-goal, SPEC §9), replica (that is a process of one instance), cluster, environment (that is the ADR 0017 profile)
+
+**Replica**:
+One interchangeable process of a runner's Deployment (`hivemind-api` or `hivemind-mcp-http`) — 2 of each in production, for availability (ADR 0026). All replicas of an instance share one pool and serve one organization, so a second replica is **not** a second instance and adds no organization.
+_Avoid_: instance (that is the whole deployment, and one organization), node (that is the machine), shard, read replica (there is no read/write split)
 
 **Migration**:
 One ordered, versioned step in the schema chain (`src/hivemind/store/migrations/`), applied by `hivemind-migrate` and recorded once in `_yoyo_migration` — ADR 0020. The chain is the schema's source of truth; `schema.sql` is a generated reference.

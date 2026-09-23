@@ -198,11 +198,13 @@ A fresh, important, well-remembered entry beats a slightly-more-similar but stal
 
 No OAuth/SSO; keys are issued by the org operator via the admin surface (§12.4). (An org with an IdP is a later story.) This table supersedes ADR 0008's key kinds (`user`/`agent`/`admin`) — ADR 0012. The agent key is now the credential the MCP runners verify (ADRs 0009–0010).
 
-### 8.2 Deployment (ADR 0007)
+### 8.2 Deployment (ADR 0026, superseding ADR 0007)
 
-One **self-hosted instance per organization**, one `docker compose` file: **Hivemind service + PostgreSQL 16 (pgvector)**. No Redis, no sharding, no queue.
+One **self-hosted instance per organization** — one instance = one organization — over **one PostgreSQL 16 (pgvector) node**. No Redis, no sharding, no queue, no read replicas.
 
-**Scale assumptions (spec target):** ~50 users/agents, ~500 sessions/day, ~10k entries/day, single Postgres node. The design does not commit to horizontal scale; when the assumptions stop holding, §10's extensions apply.
+**App tier: 2 replicas per runner** (`hivemind-api` and `hivemind-mcp-http`), rolled out `maxSurge: 1` / `maxUnavailable: 0` with a `minAvailable: 1` PodDisruptionBudget each. The replicas are interchangeable: they share the one pool, serve the one organization, hold no server-side session state (§5.1, §8.5), and resolve credentials per request. This buys **availability only** — a zero-downtime rolling deploy and surviving a node drain — not throughput (the app tier is I/O-bound on the embedder, the extractor and Postgres) and not AZ tolerance (there is one Postgres node). Production packaging is Kubernetes (`deploy/kubernetes/`); `docker compose` is the dev and single-node-ops shape.
+
+**Scale assumptions (spec target):** ~50 users/agents, ~500 sessions/day, ~10k entries/day, single Postgres node. The design does not commit to horizontal *storage* scale; when the assumptions stop holding, §10's extensions apply.
 
 ### 8.3 The kill switch (ADR 0003)
 
@@ -219,9 +221,9 @@ The MCP stdio surface ships **two runners**:
 
 ### 8.5 The hostable streamable-HTTP runner (ADR 0010)
 
-`hivemind-mcp-http` is the **hostable, multi-agent** form of the Postgres-backed runner (ADR 0009): a **single** long-lived streamable-HTTP process serving an **unlimited** number of agents, each authenticating **per request** with its own agent key (ADR 0012).
+`hivemind-mcp-http` is the **hostable, multi-agent** form of the Postgres-backed runner (ADR 0009): a long-lived streamable-HTTP process serving an **unlimited** number of agents over one shared pool, each authenticating **per request** with its own agent key (ADR 0012).
 
-* **One process, one pool, per-request auth.** One `hivemind-mcp-http` process owns one `PgStore` + one embedder + one `Authenticator` pool (the same DSN / embedder / credentials the REST API uses). Each request presents its own key; a thin ASGI middleware verifies it against the `credentials` table (ADR 0012) and re-binds the shared, *stateless* services to that credential on every tool dispatch. One process = many agents.
+* **One shared pool per process, per-request auth.** A `hivemind-mcp-http` process owns one `PgStore` + one embedder + one `Authenticator` pool (the same DSN / embedder / credentials the REST API uses), shared by every agent it serves — never a process per agent. Each request presents its own key; a thin ASGI middleware verifies it against the `credentials` table (ADR 0012) and re-binds the shared, *stateless* services to that credential on every tool dispatch. The invariant is the shared pool, not the process count: production runs 2 interchangeable replicas of this runner for availability (§8.2, ADR 0026), and because the transport is stateless and the credential is per-request, either replica answers any request identically.
 * **Immediate revocation.** Because the credential is resolved **per request** (not once at process start, as in `hivemind-mcp-pg`), admin revocation (`POST /v1/admin/agents/{name}/revoke`) takes effect on the very next request — no restart required.
 * **Per-request transport: stateless streamable-HTTP.** The server runs the SDK's stateless streamable-HTTP transport (one request = one self-contained exchange). The pool is stateless with respect to sessions, so this is a natural fit.
 * **Deployment shape: a detached compose service.** `make mcp-http` ships the runner as a detached docker-compose service (one container built from the repo's Dockerfile), published on host port 8088 by default (override with `HIVEMIND_MCP_HTTP_PORT`). The container reads/writes the shared pool and embeds via the local vLLM on the compose network, so pool + embedder + runner come up with a single `docker compose up -d` (ADR 0007).
@@ -232,7 +234,7 @@ The MCP stdio surface ships **two runners**:
 |---|---|---|---|---|
 | `hivemind-mcp` (dev, ADR 0009) | in-memory | in-memory (ephemeral) | hard-coded `dev` | n/a |
 | `hivemind-mcp-pg` (per-agent, ADR 0009) | one per agent | shared Postgres | agent key (`HIVEMIND_MCP_KEY`, ADR 0012), verified at start | next restart |
-| `hivemind-mcp-http` (hostable, ADR 0010) | one shared | shared Postgres | agent key (ADR 0012), verified per request | immediate |
+| `hivemind-mcp-http` (hostable, ADR 0010) | shared (2 replicas, §8.2) | shared Postgres | agent key (ADR 0012), verified per request | immediate |
 
 Both `hivemind-mcp-pg` and `hivemind-mcp-http` read/write the same pool with the same verified provenance; choose the per-agent runner for a small dev setup, the hostable runner when many agents share one machine.
 
