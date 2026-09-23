@@ -184,12 +184,20 @@ def make_entry_clocks(n: int) -> list[FixedClock]:
     return [FixedClock(FIXED_NOW) for _ in range(n)]
 
 
+def fake_key_id(raw_key: str) -> str:
+    """The fingerprint a real ``PgAuthenticator`` would put on the
+    credential for ``raw_key`` (ADR 0027): the first 12 hex chars of its
+    SHA-256 hash."""
+    return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()[:12]
+
+
 class FakeAuthenticator:
     """An in-memory ``Authenticator`` fake for unit tests (TDD at the seam).
 
     Implements the full ``Authenticator`` port (verify + key management,
     ADR 0012). ``verify`` returns pre-registered credentials; key
     management is in-memory. The org + admin keys are pre-registered.
+    Admin credentials carry ``key_id`` like the real adapter (ADR 0027).
     """
 
     def __init__(
@@ -200,7 +208,7 @@ class FakeAuthenticator:
     ) -> None:
         self._by_key: dict[str, Credential] = {
             org_key: Credential(user_id="org", is_org=True),
-            admin_key: Credential(user_id="admin", is_admin=True),
+            admin_key: Credential(user_id="admin", is_admin=True, key_id=fake_key_id(admin_key)),
         }
         self._issued_agent_keys: dict[str, str] = {}
         self._rotations = 0
@@ -231,7 +239,7 @@ class FakeAuthenticator:
 
     async def issue_admin_key(self) -> str:
         raw = f"hm_admin_{len(self._by_key)}"
-        self._by_key[raw] = Credential(user_id="admin", is_admin=True)
+        self._by_key[raw] = Credential(user_id="admin", is_admin=True, key_id=fake_key_id(raw))
         return raw
 
 

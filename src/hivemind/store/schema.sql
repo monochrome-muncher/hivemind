@@ -57,6 +57,18 @@ CREATE TABLE public.agents (
     CONSTRAINT agents_trust_level_check CHECK (((trust_level >= 0) AND (trust_level <= 3)))
 );
 
+CREATE TABLE public.audit_log (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    occurred_at timestamp with time zone DEFAULT now() NOT NULL,
+    actor_kind text NOT NULL,
+    actor text NOT NULL,
+    action text NOT NULL,
+    target text,
+    detail jsonb DEFAULT '{}'::jsonb NOT NULL,
+    CONSTRAINT audit_log_action_check CHECK ((action = ANY (ARRAY['agent.activate'::text, 'agent.trust_level_set'::text, 'agent.home_fleet_set'::text, 'agent.revoke'::text, 'fleet.create'::text, 'org_key.rotate'::text, 'entry.withdraw'::text, 'admin_key.issue'::text, 'admin_key.revoke'::text, 'agent_key.issue'::text]))),
+    CONSTRAINT audit_log_actor_kind_check CHECK ((actor_kind = ANY (ARRAY['admin_key'::text, 'cli'::text])))
+);
+
 CREATE TABLE public.credentials (
     key_hash text NOT NULL,
     kind text NOT NULL,
@@ -117,6 +129,9 @@ CREATE TABLE public.fleets (
 ALTER TABLE ONLY public.agents
     ADD CONSTRAINT agents_pkey PRIMARY KEY (name);
 
+ALTER TABLE ONLY public.audit_log
+    ADD CONSTRAINT audit_log_pkey PRIMARY KEY (id);
+
 ALTER TABLE ONLY public.credentials
     ADD CONSTRAINT credentials_pkey PRIMARY KEY (key_hash);
 
@@ -133,6 +148,10 @@ ALTER TABLE ONLY public.fleets
     ADD CONSTRAINT fleets_pkey PRIMARY KEY (id);
 
 CREATE INDEX agents_fleet_idx ON public.agents USING btree (home_fleet_id);
+
+CREATE INDEX audit_log_actor_idx ON public.audit_log USING btree (actor);
+
+CREATE INDEX audit_log_occurred_at_idx ON public.audit_log USING btree (occurred_at);
 
 CREATE INDEX entries_author_idx ON public.entries USING btree (author);
 

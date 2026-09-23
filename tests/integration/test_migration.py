@@ -28,7 +28,7 @@ from hivemind.store.migrate import (
     rollback,
 )
 
-HEAD = "0004.hnsw-vector-index"
+HEAD = "0005.audit-log"
 
 # Every applied migration id, oldest first. Kept explicit rather than read
 # off the filesystem: the point of these assertions is that the runner
@@ -38,6 +38,7 @@ CHAIN = [
     "0001.initial-schema",
     "0002.importance-source",
     "0003.importance-source-check",
+    "0004.hnsw-vector-index",
     HEAD,
 ]
 
@@ -150,7 +151,8 @@ async def test_rollback_removes_the_latest_migration() -> None:
     """ADR 0020: a structural migration (not `0001`) ships a real
     rollback, and rolling one back undoes exactly what it did.
 
-    Peeled one at a time from the head: `0004` drops the HNSW vector
+    Peeled one at a time from the head: `0005` drops the audit log
+    (ADR 0027) and nothing else; `0004` drops the HNSW vector
     index (ADR 0025) and leaves the `embedding` column alone; `0003`
     then drops the named CHECK constraint it added and leaves `0001` +
     `0002` (and the `importance_source` column itself) in place.
@@ -159,6 +161,18 @@ async def test_rollback_removes_the_latest_migration() -> None:
     await _require_postgres(dsn)
     await _reset_chain(dsn)
     await migrate(dsn, dim)
+
+    rolled = await rollback(dsn, dim, count=1)
+    assert rolled == ["0005.audit-log"]
+    assert await current_schema_version(dsn) == "0004.hnsw-vector-index"
+
+    conn = await asyncpg.connect(dsn)
+    try:
+        assert await conn.fetchval("SELECT to_regclass('audit_log')") is None
+        # The rest of the schema is untouched.
+        assert await conn.fetchval("SELECT to_regclass('entries_embedding_hnsw_idx')") is not None
+    finally:
+        await conn.close()
 
     rolled = await rollback(dsn, dim, count=1)
     assert rolled == ["0004.hnsw-vector-index"]
