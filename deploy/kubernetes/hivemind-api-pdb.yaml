@@ -1,0 +1,25 @@
+# PodDisruptionBudget for `hivemind-api` (ADR 0026).
+#
+# This — not the Deployment's maxUnavailable — is what makes a node drain
+# survivable. `strategy.rollingUpdate.maxUnavailable` governs ROLLOUTS
+# only; `kubectl drain` / the eviction API consult the PDB and nothing
+# else, so without one the eviction of the last surviving pod of a
+# 2-replica Deployment is permitted.
+#
+# minAvailable: 1 at replicas: 2 — draining a second node that hosts an
+# `hivemind-api` pod blocks until the first drain's replacement is Ready
+# elsewhere. That is the intent: a whole-cluster drain becomes a
+# sequenced operation rather than a simultaneous one.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: hivemind-api
+  labels:
+    app.kubernetes.io/name: hivemind
+    app.kubernetes.io/component: api
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hivemind
+      app.kubernetes.io/component: api

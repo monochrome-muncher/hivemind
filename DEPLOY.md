@@ -1,16 +1,20 @@
 # Hivemind — Production Deployment (Kubernetes + GitLab CI/CD)
 
 Single source of truth for **deploying Hivemind to a Kubernetes cluster**
-via GitLab CI/CD (ADR 0007 single-node shape: one API process, one MCP
-runner, one Postgres node). The single-node **docker** ops story lives in
+via GitLab CI/CD (ADR 0026: **2 replicas** of the API and 2 of the MCP
+runner — for availability, not throughput — against **one** Postgres
+node, which ADR 0007 decided and ADR 0026 leaves unchanged). The
+single-node **docker** ops story lives in
 [docs/ops-runbook.md](docs/ops-runbook.md) — this file is the k8s story
 and the two do not overlap.
 
 Layout:
 
 - [`deploy/kubernetes/`](deploy/kubernetes/) — the kustomize tree
-  (namespace, ConfigMap, two 1-replica Deployments, two ClusterIP
-  Services; `secret-template.yaml` documents the CI-rendered Secret;
+  (namespace, ConfigMap, two 2-replica Deployments with a
+  `maxSurge: 1` / `maxUnavailable: 0` rollout, two ClusterIP Services,
+  two `minAvailable: 1` PodDisruptionBudgets — ADR 0026;
+  `secret-template.yaml` documents the CI-rendered Secret;
   `optional/` is the opt-in nginx Ingress + cert-manager Certificate)
 - [`.gitlab-ci.yml`](.gitlab-ci.yml) — the pipeline (test → build → deploy)
 
