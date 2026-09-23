@@ -147,6 +147,27 @@ action. (The extractor, ADR 0016, is deliberately the opposite: its
 failures are best-effort and never block a write — the observable
 symptom is an entry with empty `entities`, not a failed write.)
 
+> **A crashed `CREATE INDEX CONCURRENTLY` leaves an INVALID index**
+> (ADR 0025, migration `0004`). This is inherent to `CONCURRENTLY` — if
+> the build is interrupted (pod killed, connection dropped mid-build),
+> Postgres leaves the index catalogued but unusable, and the migration's
+> `IF NOT EXISTS` means a plain re-run of `make migrate` will silently
+> skip it rather than repair it. Check for one:
+>
+> ```sql
+> SELECT indexrelid::regclass, indisvalid
+> FROM pg_index WHERE indexrelid = 'entries_embedding_hnsw_idx'::regclass;
+> ```
+>
+> If `indisvalid` is `false`, either rebuild it in place
+> (`REINDEX INDEX CONCURRENTLY entries_embedding_hnsw_idx;` — takes no
+> write lock on `entries`, safe under live traffic) or drop and let the
+> next `make migrate` recreate it (`DROP INDEX CONCURRENTLY IF EXISTS
+> entries_embedding_hnsw_idx;` then re-run). Until repaired, vector
+> search silently falls back to the sequential scan (Postgres won't plan
+> around an invalid index) — slower, but never wrong: recall stays exact
+> in the meantime.
+
 ## 4. Key issuance + rotation (ADR 0012)
 
 The key model is **three kinds** (ADR 0012): one shared **org key**,
