@@ -174,6 +174,14 @@ _Avoid_: result, snippet, match
 The token economy of retrieval: scan many compact hits first, open the full entry only when needed.
 _Avoid_: lazy loading, pagination
 
+**Vector index**:
+The HNSW index on `entries.embedding` (`vector_cosine_ops`, `m = 16`, `ef_construction = 64`) that serves the vector stream (migration `0004`, ADR 0025).
+_Avoid_: embedding index, ANN index (the structure is named), pgvector index (the extension is not the index)
+
+**Approximate search**:
+The property that the vector stream is not guaranteed to return the true top-k by cosine distance, because a vector index is traversed rather than every row scanned (ADR 0025). Applies to the vector stream only; the keyword stream and the RRF fusion are exact.
+_Avoid_: fuzzy search (that is edit-distance matching), lossy search, inexact search
+
 **Recency floor**:
 The lower bound on the SPEC §6.4 recency factor (`max(floor, 0.5 ** (age/half_life))`), which caps that factor's range at `1/floor` instead of leaving it unbounded. A `SearchConfig` value in `(0, 1]`, default 0.8 (ADR 0022); `None` means no floor.
 _Avoid_: decay cutoff (nothing is excluded), minimum score (it bounds one factor, not the final score), recency cap (it is a lower bound, not an upper one)

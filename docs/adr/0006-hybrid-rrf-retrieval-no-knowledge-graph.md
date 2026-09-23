@@ -5,6 +5,11 @@
 > `recency_floor` (default 0.8). The shape below — RRF fusion, then
 > re-score by importance × recency × feedback quality — is unchanged.
 
+> **Amended by [ADR 0025](0025-hnsw-vector-index-approximate-nearest-neighbours.md):**
+> the dense stream is served by an HNSW index, so it returns
+> **approximate** nearest neighbours rather than the exact top-k. The
+> fusion shape below is unchanged.
+
 v1 search runs BM25 (Postgres FTS) and dense (pgvector) in parallel, fuses the two ranked lists with Reciprocal Rank Fusion (weights configurable, default 0.5/0.5), then re-scores by importance × recency (decay from occurrence time) × feedback quality. No knowledge graph in v1.
 
 Considered options: vector-only search; graph-expanded retrieval (Zep/Caura style, entity extraction + multi-hop expansion). Rejected for v1: graph extraction is a heavy, quality-sensitive layer whose payoff (cross-entry entity linking) is a documented extension, not a v1 requirement. RRF + decay-aware re-scoring is the pattern the field converged on (agentmemory, pgmemai, Caura) and is a small, well-understood implementation; the fusion weights and decay parameters are config knobs, so tuning is cheap.

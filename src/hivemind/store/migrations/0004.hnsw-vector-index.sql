@@ -1,0 +1,34 @@
+-- transactional: false
+--
+-- The vector stream (SPEC §6.2) had no index: `search_vector` orders by
+-- `embedding <=> $n`, and with nothing to use, Postgres sequentially
+-- scans every row and computes an exact distance for each. At the
+-- ADR 0015 default of 1024 dimensions that is ~4KB of vector per row,
+-- and the cost grows without bound with the pool — multiplied by every
+-- concurrent replica reading the one Postgres node of ADR 0007.
+--
+-- An HNSW index over the same operator class the query already uses
+-- (`vector_cosine_ops` <-> `<=>`). `CONCURRENTLY` (hence
+-- `-- transactional: false`, ADR 0020 §6) so the build takes no write
+-- lock on `entries` while sibling replicas serve traffic; it is also
+-- why `IF NOT EXISTS` matters here, since a cancelled concurrent build
+-- leaves an INVALID index behind that a plain re-run would collide with
+-- (reindex or drop it — docs/ops-runbook.md).
+--
+-- Build parameters are pgvector's defaults (m = 16, ef_construction = 64),
+-- stated explicitly rather than inherited: there is no corpus to tune
+-- them against yet, and an unstated default is indistinguishable from a
+-- considered one. The query-time settings (`hnsw.iterative_scan`,
+-- `hnsw.ef_search`) are session GUCs, not schema, and live with the
+-- query in `PgStore.search_vector` — not here.
+--
+-- **This changes retrieval behaviour, not just its speed.** HNSW is an
+-- APPROXIMATE nearest-neighbour index: the vector stream is no longer
+-- guaranteed to return the true top-k by cosine distance. See ADR 0025.
+--
+-- Additive-only (ADR 0020 expand-and-contract): an index is invisible to
+-- a not-yet-upgraded sibling project, which keeps reading and writing
+-- `entries` unchanged.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS entries_embedding_hnsw_idx
+    ON entries USING hnsw (embedding vector_cosine_ops)
+    WITH (m = 16, ef_construction = 64);

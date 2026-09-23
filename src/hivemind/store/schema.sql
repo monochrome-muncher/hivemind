@@ -136,6 +136,8 @@ CREATE INDEX agents_fleet_idx ON public.agents USING btree (home_fleet_id);
 
 CREATE INDEX entries_author_idx ON public.entries USING btree (author);
 
+CREATE INDEX entries_embedding_hnsw_idx ON public.entries USING hnsw (embedding public.vector_cosine_ops) WITH (m='16', ef_construction='64');
+
 CREATE INDEX entries_entity_names_gin_idx ON public.entries USING gin (entity_names);
 
 CREATE INDEX entries_fleet_idx ON public.entries USING btree (fleet_id);

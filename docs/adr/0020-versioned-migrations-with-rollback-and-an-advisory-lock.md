@@ -3,6 +3,15 @@
 **Supersedes ADR 0013** (forward-migration path: idempotent re-apply +
 `schema_migrations` tracking).
 
+> **Amended by [ADR 0025](0025-hnsw-vector-index-approximate-nearest-neighbours.md):**
+> the advisory lock is the same lock, but it is now acquired by *polling*
+> `pg_try_advisory_lock` rather than by blocking inside
+> `pg_advisory_lock`. A blocking waiter holds a virtual xid for the whole
+> wait, which decision 6's `CREATE INDEX CONCURRENTLY` then waits on
+> forever — an undetectable deadlock, since the lock holder is idle and
+> never enters Postgres's wait graph. Decisions 3 and 6 below are
+> otherwise unchanged.
+
 ADR 0013 made the DDL forward path an idempotent re-apply of a single
 `schema.sql` (every statement guarded with `IF NOT EXISTS` /
 `OR REPLACE`), plus a `schema_migrations` version marker and a

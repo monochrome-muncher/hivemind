@@ -1,0 +1,11 @@
+-- Legal rollback (ADR 0020): an index carries no information that is not
+-- already in the table, so dropping it destroys nothing — it only
+-- returns the vector stream to the exact sequential scan that preceded
+-- 0004 (slower, and exact again).
+--
+-- `CONCURRENTLY` for the same reason the forward direction uses it: the
+-- drop otherwise takes an ACCESS EXCLUSIVE lock on `entries`. The
+-- forward file's `-- transactional: false` directive governs both
+-- directions (yoyo reads directives from the migration, not the
+-- rollback), which is what makes this legal here.
+DROP INDEX CONCURRENTLY IF EXISTS entries_embedding_hnsw_idx;

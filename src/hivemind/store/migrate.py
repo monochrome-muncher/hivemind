@@ -15,6 +15,12 @@ deliberately NOT used — it is a table row deleted in a ``finally``, with
 no TTL and no stale detection, so a killed pod wedges every later pod
 until a human runs ``yoyo break-lock``.
 
+The lock is acquired by **polling** ``pg_try_advisory_lock``, not by
+blocking inside ``pg_advisory_lock`` — a blocking waiter deadlocks
+against ``CREATE INDEX CONCURRENTLY`` in a way Postgres cannot detect.
+See ``_acquire_migration_lock``; this matters from migration ``0004``
+(ADR 0025) onward.
+
 **Rollback.** ``rollback`` reverses the most recently applied
 migration(s) via their ``.rollback.sql`` companions. Rollbacks are
 written for *structural* changes only: reversing a populated column drop
@@ -46,6 +52,11 @@ _MIGRATIONS_DIR = Path(__file__).with_name("migrations")
 # "HIVEMIND" read as a big-endian int64 (fits in a signed bigint), which
 # makes it self-identifying in `pg_locks`.
 MIGRATION_LOCK_KEY = 0x484956454D494E44
+
+# How long a migrator sleeps between attempts at the lock. Small enough
+# that a fast migration is not held up noticeably, large enough that six
+# replicas polling do not busy-spin against the pool.
+_LOCK_POLL_SECONDS = 0.25
 
 
 def _yoyo_dsn(dsn: str) -> str:
@@ -104,6 +115,41 @@ def _rollback_chain(dsn: str, dim: int, count: int) -> list[str]:
     return ids
 
 
+async def _acquire_migration_lock(conn: asyncpg.Connection) -> None:
+    """Take the migration advisory lock by **polling**, never by blocking
+    inside ``pg_advisory_lock``.
+
+    This is not a style choice — a blocking wait deadlocks against
+    ``CREATE INDEX CONCURRENTLY`` (ADR 0020 §6, first used by migration
+    ``0004``), and the deadlock is invisible to Postgres:
+
+    * the winning migrator holds the lock on *this* asyncpg connection
+      and then runs the chain on a **separate** psycopg connection
+      (``_apply_chain`` in a worker thread);
+    * ``CREATE INDEX CONCURRENTLY`` waits for every transaction older
+      than itself to finish, and a sibling parked inside
+      ``SELECT pg_advisory_lock(...)`` is exactly that — one long-running
+      statement, holding a virtual xid for as long as it waits;
+    * that sibling is waiting on the lock the winner holds, so it never
+      finishes, so the index build never finishes, so the lock is never
+      released.
+
+    Postgres's deadlock detector cannot break it: the lock *holder* is
+    idle, not waiting, so the cycle is closed only through application
+    logic and never appears in the wait graph. Measured: six migrators
+    racing a cold pool hang indefinitely at ``deadlock_timeout = 1s``.
+
+    Polling makes each waiter's transaction short, so the index build's
+    wait set drains instead of stalling. The lock itself is unchanged —
+    still session-scoped, so a pod killed mid-migration still releases it
+    by dying, which is the property ADR 0020 chose it for. The wait is
+    still unbounded, exactly as the blocking form was: the orchestrator's
+    ``startupProbe`` is the timeout, not a number invented here.
+    """
+    while not await conn.fetchval("SELECT pg_try_advisory_lock($1)", MIGRATION_LOCK_KEY):
+        await asyncio.sleep(_LOCK_POLL_SECONDS)
+
+
 async def _with_migration_lock(dsn: str, dim: int, work: str, count: int = 0) -> list[str]:
     """Run a chain operation under the advisory lock, after the dim guard."""
     conn = await asyncpg.connect(dsn)
@@ -116,7 +162,7 @@ async def _with_migration_lock(dsn: str, dim: int, work: str, count: int = 0) ->
             msg = dim_mismatch_message(actual, dim)
             if msg is not None:
                 raise RuntimeError(msg)
-        await conn.execute("SELECT pg_advisory_lock($1)", MIGRATION_LOCK_KEY)
+        await _acquire_migration_lock(conn)
         try:
             if work == "apply":
                 await asyncio.to_thread(_apply_chain, dsn, dim)

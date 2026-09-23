@@ -152,6 +152,13 @@ query ─┬─> keyword list  (Postgres FTS / BM25-style rank) ──┐
 
 Keyword ranking is Postgres FTS in v1 (a true-BM25 extension such as `pg_search`/Zombi is a drop-in upgrade, not a v1 dependency). Weights `w_kw`/`w_vec`, `k`, top-k, and the rescore factors are all **config values**, so fusion tuning is a config change, not a code change.
 
+**The vector stream is approximate, not exact (ADR 0025).** It is served by an HNSW index on `entries.embedding` (`vector_cosine_ops`, matching the `<=>` operator; `m = 16`, `ef_construction = 64` — migration `0004`). HNSW is an *approximate* nearest-neighbour structure: the stream is **not guaranteed** to be the true top-k by cosine distance, and a true near neighbour can be missed entirely. This is a deliberate behaviour change from the exact sequential scan that preceded it, taken because that scan reads ~4KB per row and grows without bound with the pool — ADR 0025 carries the measured recall cost and the re-measure trigger. The keyword stream is unaffected, and RRF means a vector miss is survivable when the keyword stream also finds the entry.
+
+Two **session-level** settings apply per vector query (`SET LOCAL`, in the same transaction as the search — not on the connection, which a transaction-mode PgBouncer would discard):
+
+- `hnsw.iterative_scan = strict_order` — every query here is filtered (at minimum `state = 'active'`, plus the §12 visibility matrix), and without iterative scan HNSW filters *after* fetching `ef_search` candidates, so a narrow-visibility reader can get back far fewer than `candidate_top_k` rows. `strict_order` and not `relaxed_order` because RRF fuses on **ranks**, not scores: relaxed ordering perturbs exactly the quantity fusion consumes.
+- `hnsw.ef_search = 40` — pgvector's default, unchanged. It is **not** the lever for recall (ADR 0025 measured that raising it plateaus below parity).
+
 ### 6.3 Supersession ranking invariant
 
 When a result set contains both an entry and its supersession, **the successor always ranks above the predecessor** — a hard boost applied after scoring, before pagination. Superseded/withdrawn entries are **hidden by default**; they surface only with `include_inactive`. A stale row may appear in history, never as the top answer to a live query.

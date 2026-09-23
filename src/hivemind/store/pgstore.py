@@ -108,6 +108,43 @@ WITHDRAW = (
     "WHERE id = $1 AND state = 'active' RETURNING " + _ENTRY_COLUMNS
 )
 
+# --- Vector-search session settings (ADR 0025) --------------------------------
+
+VECTOR_SEARCH_SETTINGS = """
+SET LOCAL hnsw.iterative_scan = strict_order;
+SET LOCAL hnsw.ef_search = 40;
+"""
+"""The query-time GUCs the HNSW index (migration ``0004``) is read under.
+
+``SET LOCAL``, inside the same transaction as the search, rather than a
+pool ``init`` callback: the org runs a **transaction-mode PgBouncer**
+(see ``store/pool.py``), where one pooled client connection is mapped to
+whichever server connection is free *per transaction*, and
+``server_reset_query`` (``DISCARD ALL``) wipes session state between
+them. A session-level ``SET`` at connection-open time would therefore
+land on an arbitrary server backend and be discarded before the search
+ever runs — silently, leaving the defaults in force. A ``SET LOCAL``
+travels with its transaction, so it reaches the backend that executes
+the query, and it unsets at commit, so it never leaks into the other
+queries sharing the pooled connection.
+
+``hnsw.iterative_scan = strict_order`` (pgvector >= 0.8): without it,
+HNSW fetches ``ef_search`` candidates and applies the ``WHERE`` clause
+*afterwards*. Every real query here is filtered — at minimum
+``state = 'active'``, plus the ADR 0011 visibility matrix — so a
+narrow-visibility reader could get far fewer than ``candidate_top_k``
+rows out of the vector stream, starving RRF's second list. Iterative
+scan keeps resuming the search until the limit is satisfied (bounded by
+``hnsw.max_scan_tuples``). ``strict_order`` and not ``relaxed_order``
+because RRF fuses on **ranks, not scores** (``retrieval/rrf.py``):
+relaxed_order returns results slightly out of distance order, which
+perturbs exactly the quantity fusion consumes.
+
+``hnsw.ef_search = 40`` is pgvector's own default, set explicitly so the
+value the vector stream runs under is stated rather than inherited.
+There is no corpus to tune it against yet (ADR 0025).
+"""
+
 UPSERT_FEEDBACK = """
 INSERT INTO feedbacks (entry_id, "user", agent, verdict, note, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6)
@@ -460,7 +497,15 @@ class PgStore:
         """Ranked entry IDs by cosine distance to ``embedding``
         (SPEC.md §6.2 vector stream; the pgvector ``<=>`` operator).
         When ``visibility`` is supplied, only visible entries are
-        candidates (ADR 0011)."""
+        candidates (ADR 0011).
+
+        Served by the HNSW index ``entries_embedding_hnsw_idx``
+        (migration ``0004``), so this is **approximate** nearest-neighbour
+        search: the returned ids are not guaranteed to be the true top-``limit``
+        by cosine distance (ADR 0025). ``VECTOR_SEARCH_SETTINGS`` is applied
+        with ``SET LOCAL`` in the same transaction — see its docstring for
+        why the settings live here and not on the pool's connection ``init``.
+        """
         clauses, params = _filter_conditions(filters, visibility)
         clauses.append("embedding IS NOT NULL")
         vec_idx = len(params) + 1
@@ -472,7 +517,8 @@ class PgStore:
             + f" LIMIT ${vec_idx + 1}"
         )
         pool = await self._ensure_pool()
-        async with pool.acquire() as conn:
+        async with pool.acquire() as conn, conn.transaction():
+            await conn.execute(VECTOR_SEARCH_SETTINGS)
             rows = await conn.fetch(sql, *params, embedding, limit)
         return [str(r["id"]) for r in rows]
 

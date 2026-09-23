@@ -28,7 +28,18 @@ from hivemind.store.migrate import (
     rollback,
 )
 
-HEAD = "0003.importance-source-check"
+HEAD = "0004.hnsw-vector-index"
+
+# Every applied migration id, oldest first. Kept explicit rather than read
+# off the filesystem: the point of these assertions is that the runner
+# applied exactly what shipped, and deriving the expectation from the same
+# directory yoyo reads would assert that against itself.
+CHAIN = [
+    "0001.initial-schema",
+    "0002.importance-source",
+    "0003.importance-source-check",
+    HEAD,
+]
 
 
 def _dsn() -> str:
@@ -67,8 +78,8 @@ async def test_migrate_applies_the_chain_and_reports_its_head() -> None:
 
     conn = await asyncpg.connect(dsn)
     try:
-        # One row per migration in the chain (0001 + 0002 + 0003 — ADR 0020).
-        assert await conn.fetchval("SELECT count(*) FROM _yoyo_migration") == 3
+        # One row per migration in the chain (ADR 0020).
+        assert await conn.fetchval("SELECT count(*) FROM _yoyo_migration") == len(CHAIN)
     finally:
         await conn.close()
 
@@ -80,6 +91,15 @@ async def test_concurrent_migrators_are_serialised_by_the_advisory_lock() -> Non
     statement (`CREATE EXTENSION IF NOT EXISTS vector`) raises
     `UniqueViolation` for the losers, which under ADR 0018 exits the
     entrypoint before the runner execs.
+
+    Since `0004` (ADR 0025) this also covers the interaction that lock
+    has with `CREATE INDEX CONCURRENTLY`: a migrator that *blocks* inside
+    `pg_advisory_lock` holds a virtual xid for the whole wait, which the
+    winner's concurrent index build waits on forever — an undetectable
+    deadlock, because the lock holder is idle and never enters the wait
+    graph. `migrate` polls `pg_try_advisory_lock` instead, and this test
+    is what says so: before that change it hung here indefinitely rather
+    than failing.
     """
     dsn, dim = _dsn(), Settings().embedding_dim
     await _require_postgres(dsn)
@@ -93,7 +113,7 @@ async def test_concurrent_migrators_are_serialised_by_the_advisory_lock() -> Non
     conn = await asyncpg.connect(dsn)
     try:
         # Each migration applied exactly once, not once per migrator.
-        assert await conn.fetchval("SELECT count(*) FROM _yoyo_migration") == 3
+        assert await conn.fetchval("SELECT count(*) FROM _yoyo_migration") == len(CHAIN)
         assert await conn.fetchval("SELECT to_regclass('entries') IS NOT NULL")
     finally:
         await conn.close()
@@ -128,13 +148,35 @@ async def test_current_schema_version_is_none_when_unmigrated() -> None:
 
 async def test_rollback_removes_the_latest_migration() -> None:
     """ADR 0020: a structural migration (not `0001`) ships a real
-    rollback. Rolling back `0003` drops the named CHECK constraint it
-    added and leaves `0001` + `0002` (and the `importance_source`
-    column itself) in place."""
+    rollback, and rolling one back undoes exactly what it did.
+
+    Peeled one at a time from the head: `0004` drops the HNSW vector
+    index (ADR 0025) and leaves the `embedding` column alone; `0003`
+    then drops the named CHECK constraint it added and leaves `0001` +
+    `0002` (and the `importance_source` column itself) in place.
+    """
     dsn, dim = _dsn(), Settings().embedding_dim
     await _require_postgres(dsn)
     await _reset_chain(dsn)
     await migrate(dsn, dim)
+
+    rolled = await rollback(dsn, dim, count=1)
+    assert rolled == ["0004.hnsw-vector-index"]
+    assert await current_schema_version(dsn) == "0003.importance-source-check"
+
+    conn = await asyncpg.connect(dsn)
+    try:
+        index = await conn.fetchval("SELECT to_regclass('entries_embedding_hnsw_idx')")
+        assert index is None
+        # The indexed column is untouched — an index holds nothing the
+        # table does not, which is what makes this rollback legal.
+        column = await conn.fetchval(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = 'entries' AND column_name = 'embedding'"
+        )
+        assert column is not None
+    finally:
+        await conn.close()
 
     rolled = await rollback(dsn, dim, count=1)
     assert rolled == ["0003.importance-source-check"]
@@ -162,10 +204,10 @@ async def test_rollback_refuses_to_drop_the_initial_schema() -> None:
     Rolling back `0001` drops every entry in the pool, so `rollback`
     refuses and names the two real remediations instead — even when the
     requested count would also take later (legal) migrations with it
-    (`count=3` from HEAD, taking `0003` and `0002` with it), and equally
-    when `0001` is already the head in its own right (`count=1` after
-    `0003` and `0002` have already been rolled back) — both are the
-    same refusal, exercised from both approaches.
+    (the whole chain from HEAD, taking every later migration with it),
+    and equally when `0001` is already the head in its own right
+    (`count=1` after the rest have already been rolled back) — both are
+    the same refusal, exercised from both approaches.
     """
     dsn, dim = _dsn(), Settings().embedding_dim
     await _require_postgres(dsn)
@@ -173,7 +215,7 @@ async def test_rollback_refuses_to_drop_the_initial_schema() -> None:
     await migrate(dsn, dim)
 
     with pytest.raises(RuntimeError) as excinfo:
-        await rollback(dsn, dim, count=3)
+        await rollback(dsn, dim, count=len(CHAIN))
     message = str(excinfo.value)
     assert "0001.initial-schema" in message
     assert "pg-reset" in message or "backup" in message
@@ -181,10 +223,10 @@ async def test_rollback_refuses_to_drop_the_initial_schema() -> None:
     # The refusal left the pool intact.
     assert await current_schema_version(dsn) == HEAD
 
-    # Now put 0001 in as the head for real (a legal rollback of 0003 then
-    # 0002), and confirm count=1 refuses it exactly the same way.
-    rolled = await rollback(dsn, dim, count=2)
-    assert rolled == ["0003.importance-source-check", "0002.importance-source"]
+    # Now put 0001 in as the head for real (a legal rollback of everything
+    # above it), and confirm count=1 refuses it exactly the same way.
+    rolled = await rollback(dsn, dim, count=len(CHAIN) - 1)
+    assert rolled == list(reversed(CHAIN[1:]))
     assert await current_schema_version(dsn) == "0001.initial-schema"
 
     with pytest.raises(RuntimeError) as excinfo:
