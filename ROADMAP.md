@@ -180,7 +180,7 @@ kinds). Tier 3.1 (the key-rotation runbook) is **blocked by Tier 2** —
 you can't write a rotation story for a key model that's about to
 change.
 
-## Tier 3 — productionize (former Tier 2)  *(3.1–3.4 shipped; 3.2 superseded by 3.5)*
+## Tier 3 — productionize (former Tier 2)  *(3.1, 3.3–3.6 shipped; 3.2 superseded by 3.5)*
 
 ### 3.1 Ops runbook  *(shipped: `docs/ops-runbook.md`)*
 Deployment, **backups** (single-node Postgres, ADR 0007),
@@ -252,6 +252,46 @@ Work items:
 *Not in scope here:* the replica bump itself (`replicas: 1` → 2–3) is a
 separate change — it drags in rollout strategy and **SSE connection
 draining on `hivemind-mcp-http`**, which is currently unexamined.
+
+### 3.6 Vector index on `entries.embedding`  *(shipped: ADR 0025, migration `0004`, SPEC §6.2)*
+`search_vector` had no index: every vector query sequentially scanned the
+whole table, computing a true cosine distance against a ~4KB embedding
+per row (1024 dims — ADR 0015). Append-only entries (ADR 0001) mean that
+scan only ever grows, and the replica topology §3.5 already assumes
+multiplies it into concurrent full-table scans against one Postgres node
+(ADR 0007). Shipped as an **HNSW** index (`vector_cosine_ops`, matching
+the `<=>` operator; `m = 16`, `ef_construction = 64` — pgvector's
+defaults, unchanged) built `CONCURRENTLY` under ADR 0020's
+`-- transactional: false`, with `hnsw.iterative_scan = strict_order` and
+`hnsw.ef_search = 40` applied per query via `SET LOCAL`. HNSW over
+IVFFlat because IVFFlat trains on the rows and so cannot be built inside
+a migration against the empty pool `0001` provisions; `strict_order`
+because RRF fuses **ranks, not scores**.
+
+Landing it surfaced a defect in ADR 0020 itself: `0004` is the first
+migration to use decision 6 (`CREATE INDEX CONCURRENTLY`), and a
+concurrent index build **deadlocks** against decision 3's
+`pg_advisory_lock` — a sibling blocked inside `pg_advisory_lock` holds a
+virtual xid for the whole wait, which the winner's build waits on
+forever, and Postgres cannot detect it because the lock holder is idle.
+`migrate` now polls `pg_try_advisory_lock` instead; same lock, same
+session scope, short transactions.
+`test_concurrent_migrators_are_serialised_by_the_advisory_lock` hung
+indefinitely before the fix.
+
+**This is exact → approximate, and it is not free.** The measurement
+(`tests/integration/test_vector_index_recall.py`, the §1.1 golden set on
+real Postgres) did **not** confirm parity: hit@5 / MRR / nDCG@5 are
+1.000 exact against 0.625 / 0.563 / 0.579 at 2k distractors and
+0.375 / 0.313 / 0.329 at 20k. Sweeping `ef_search` to 800 plateaus below
+parity, so the loss is graph *reachability*, not candidate budget — the
+knob was deliberately not tuned. ADR 0025 records the numbers, the
+caveat (a uniform high-dimensional hash embedder with the relevant
+entries as isolated outliers is close to the worst case for a graph
+index, and real embeddings cluster), and the re-measure trigger: the
+first real corpus at ≥30k entries, which is where Postgres starts
+choosing the index unprompted. The §1.1 gate runs against `MemoryStore`,
+has no index and no `<=>`, and was **not** re-pinned.
 
 ## Tier 4 — close the spec's open items (SPEC §11) (former Tier 3)
 
