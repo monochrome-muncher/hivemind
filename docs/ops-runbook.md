@@ -46,6 +46,18 @@ make mcp-http       # start the hostable MCP runner as a detached service (:8088
 | `HIVEMIND_EXTRACTOR_RETRIES` / `_TIMEOUT` | retry budget + call timeout for transient extractor failures (ADR 0014 pattern) — default 2 retries / 30 s; deterministic 4xx + schema-validation failures fail fast, no retry |
 | `HIVEMIND_HOST` / `HIVEMIND_PORT` | the mcp-http bind host/port (ADR 0010) |
 | `HIVEMIND_RECENCY_FLOOR` | lower bound on the SPEC §6.4 recency factor, `(0, 1]`, default 0.8 (ADR 0022) — set it to an empty value or `none` (case-insensitive) to revert to the pre-ADR-0022 unbounded behaviour (ADR 0023), not a negligible number |
+| `HIVEMIND_POOL_MIN_SIZE` / `HIVEMIND_POOL_MAX_SIZE` | the asyncpg connection pool's min/max size, per process (default 1 / 10) — the operator knob for per-pod concurrency |
+
+> **Behind a transaction-mode PgBouncer (or any transaction-pooling
+> proxy):** Hivemind's asyncpg pool disables its client-side prepared-
+> statement cache (`statement_cache_size=0`) unconditionally, because
+> that cache is unsafe once consecutive queries from one connection can
+> land on different physical Postgres connections between calls — the
+> documented asyncpg/transaction-mode incompatibility. `HIVEMIND_POOL_MAX_SIZE`
+> is the only per-pod concurrency knob; an org whose Postgres
+> `max_connections` is constrained should size it (times replica count,
+> plus PgBouncer's own pool) to stay under that ceiling rather than
+> relying on the default.
 
 > **An unrecognized `HIVEMIND_*` variable now fails startup loudly**
 > (ADR 0024): `load_settings()` rejects any `HIVEMIND_*` name that is
