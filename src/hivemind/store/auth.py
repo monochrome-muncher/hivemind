@@ -58,13 +58,17 @@ def key_hash(key: str) -> str:
 class PgAuthenticator:
     """An ``Authenticator`` backed by the store lane's ``credentials`` table."""
 
-    def __init__(self, dsn: str) -> None:
+    def __init__(self, dsn: str, *, pool_min_size: int = 1, pool_max_size: int = 10) -> None:
         self._dsn = dsn
+        self._pool_min_size = pool_min_size
+        self._pool_max_size = pool_max_size
         self._pool: asyncpg.Pool | None = None
 
     async def _ensure_pool(self) -> asyncpg.Pool:
         if self._pool is None:
-            self._pool = await make_pool(self._dsn)
+            self._pool = await make_pool(
+                self._dsn, min_size=self._pool_min_size, max_size=self._pool_max_size
+            )
         return self._pool
 
     async def close(self) -> None:

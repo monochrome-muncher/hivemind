@@ -57,5 +57,17 @@ def build_store(settings: Settings) -> Store:
 
 
 def build_authenticator(settings: Settings) -> Authenticator:
-    """Build an ``Authenticator`` from ``settings`` (ADR 0008)."""
-    return PgAuthenticator(settings.database_url)
+    """Build an ``Authenticator`` from ``settings`` (ADR 0008).
+
+    ``PgAuthenticator`` runs its own pool (auth is checked on every
+    authenticated request, on a separate connection lane from
+    ``PgStore``'s), so it shares ``settings.pool_min_size`` /
+    ``pool_max_size`` rather than falling back to ``make_pool``'s bare
+    defaults — a pod's total Postgres connection footprint is the sum
+    of both pools, and only one of them was previously tunable.
+    """
+    return PgAuthenticator(
+        settings.database_url,
+        pool_min_size=settings.pool_min_size,
+        pool_max_size=settings.pool_max_size,
+    )
