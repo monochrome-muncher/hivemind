@@ -123,6 +123,14 @@ Rotate **one credential at a time** (no double-rotation — verify each
 rotation before starting the next; two simultaneous rotations make a
 failure undiagnosable).
 
+Every `hivemind-keys` rotation below is recorded in the audit log
+(ADR 0027, SPEC §12.5) under the name you pass as `--actor` (before the
+subcommand; default: the OS user — `root` in the image, so pass it):
+`hivemind-keys --actor <you> rotate-org`. The value is unverified, which
+is why those rows are marked `actor_kind = cli`. Check what happened with
+`GET /v1/admin/audit-log` (admin key; `docs/ops-runbook.md` §4). The
+first-run bootstrap Job records itself as `ci-bootstrap`.
+
 | Credential | Rotate via | When |
 |---|---|---|
 | Org key | `hivemind-keys rotate-org` | suspected org-key leak; periodic hardening |

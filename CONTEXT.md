@@ -146,6 +146,13 @@ _Avoid_: shared key, membership key, cluster key
 The single credential gating the admin surface: agent/fleet listing, activation, promote/demote, revoke, fleet creation, org-key rotation (ADR 0012).
 _Avoid_: operator key, root key, superuser
 
+**Audit log**:
+The append-only record of admin-surface actions (agent activation, trust-level and home-fleet changes, revocation, key issuance, org-key rotation, an admin's withdrawal of another agent's entry) — distinct from an entry's provenance and its supersession chain, neither of which this term describes.
+
+**Key fingerprint**:
+The first 12 hex characters of a key's stored SHA-256 hash — what `hivemind-keys list` shows and what the audit log records to identify a key (ADR 0027). Non-secret: it names a key without being usable as one.
+_Avoid_: key id, key prefix (it is a prefix of the hash, never of the key)
+
 ### Surfaces
 
 **MCP runner**:

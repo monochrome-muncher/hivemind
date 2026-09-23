@@ -114,6 +114,7 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | `POST /v1/admin/agents/{name}/revoke` | Kill the agent's key (admin key; the name stays reserved — ADR 0012) |
 | `POST /v1/admin/org-key/rotate` | Rotate the shared org key — the cluster-wide kill switch (admin key) |
 | `GET /v1/metrics` | Usage counters: entries / fleets / agents (trust-level distribution, writes per fleet, pending count) — operational data (admin key; ROADMAP §3.3) |
+| `GET /v1/admin/audit-log` | The audit log of admin-surface actions, newest first; filters `actor`, `action`, `since`, `limit` (admin key; §12.5, ADR 0027) |
 
 ### 5.2 MCP tools (the agent's mental model — seven verbs)
 
@@ -332,6 +333,33 @@ This section supersedes the flat-pool commitment of §1 and the "no trust tiers"
 | `POST /v1/admin/org-key/rotate` | Rotate the org key — the cluster-wide kill switch |
 
 The single admin key gates this surface; admin-issued entries use the reserved name `admin` (ADR 0012).
+
+### 12.5 Audit log
+
+Every admin-surface action is recorded in an append-only **audit log** (ADR 0027) — distinct from an entry's provenance and its supersession chain.
+
+**What is recorded.** One row per successful action, with `occurred_at`, `actor_kind`, `actor`, `action`, `target` and a `detail` object:
+
+| `action` | Recorded by | `target` | `detail` |
+|---|---|---|---|
+| `agent.activate` | `POST /v1/admin/agents/{name}/activate` | agent name | `{trust_level, home_fleet_id}` |
+| `agent.trust_level_set` | `PATCH /v1/admin/agents/{name}` | agent name | `{from, to}` |
+| `agent.home_fleet_set` | `PATCH /v1/admin/agents/{name}` | agent name | `{from, to}` |
+| `agent.revoke` | `POST /v1/admin/agents/{name}/revoke`, `hivemind-keys revoke` | agent name | `{}` |
+| `fleet.create` | `POST /v1/admin/fleets` | fleet id | `{name}` |
+| `org_key.rotate` | `POST /v1/admin/org-key/rotate`, `hivemind-keys rotate-org` | — | `{}` |
+| `entry.withdraw` | `POST /v1/entries/{id}/withdraw` **only** when the admin key withdraws another agent's entry (§4.1) | entry id | `{author, reason}` |
+| `admin_key.issue` | `hivemind-keys issue-admin` | key fingerprint | `{}` |
+| `admin_key.revoke` | `hivemind-keys revoke-admin` (a successful revocation only) | key fingerprint | `{}` |
+| `agent_key.issue` | `hivemind-keys issue-agent` | agent name | `{}` |
+
+**Actors.** `actor_kind` is `admin_key` for the REST admin surface — `actor` is `admin:<fingerprint>` of the verified admin key — or `cli` for `hivemind-keys`, whose `actor` is the operator-supplied `--actor` (default: the OS user) and is **unverified**. A key **fingerprint** is the first 12 hex characters of the key's stored SHA-256 hash (what `hivemind-keys list` shows).
+
+**Never recorded.** No raw API key appears in any column. Registration (`POST /v1/agents`, `hive_register`) and read-only calls are not audited; nor is an author withdrawing their own entry.
+
+**Guarantees.** The CLI writes each row in the same transaction as its change. The REST surface writes the row **after** the change succeeds and not atomically with it: if the audit write fails the request fails (the change stands, unaudited), and a process crash between the two leaves the change unaudited.
+
+**Reading it.** `GET /v1/admin/audit-log` (admin key) returns rows newest first; `actor` (exact), `action` (one of the vocabulary above), `since` (inclusive timestamp; naive = UTC) and `limit` (1–1000, default 100) filter it. There is no MCP verb — like `GET /v1/metrics`, it is an operator concern.
 
 ## 13. Entity extraction (v3 — ADR 0016)
 

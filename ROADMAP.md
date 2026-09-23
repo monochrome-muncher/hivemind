@@ -34,7 +34,8 @@
   Postgres advisory lock), which is now **shipped end to end**. **§3.7**
   is shipped too: 2 app-tier replicas per runner with an explicit
   rollout strategy and a PDB each, for **availability only** — ADR 0026,
-  which supersedes ADR 0007. The next
+  which supersedes ADR 0007. **§3.8** is shipped as well: an append-only
+  audit log of admin-surface actions (ADR 0027, SPEC §12.5). The next
   workstream is **Tier 4**, whose two measurement items are now closed —
   §4.5 shipped `importance_source`, and §4.4 measured the recency term
   and **rejected** gating it (no code change; numbers in §4.4). The two
@@ -183,7 +184,7 @@ kinds). Tier 3.1 (the key-rotation runbook) is **blocked by Tier 2** —
 you can't write a rotation story for a key model that's about to
 change.
 
-## Tier 3 — productionize (former Tier 2)  *(3.1, 3.3–3.7 shipped; 3.2 superseded by 3.5)*
+## Tier 3 — productionize (former Tier 2)  *(3.1, 3.3–3.8 shipped; 3.2 superseded by 3.5)*
 
 ### 3.1 Ops runbook  *(shipped: `docs/ops-runbook.md`)*
 Deployment, **backups** (single-node Postgres, ADR 0007),
@@ -340,6 +341,31 @@ or …" and that clause is now literally satisfied — and it still buys
 nothing, because there is no distributed rate limiting, no fan-out and
 no distributed lock outside Postgres. That trigger row wants rewriting
 around the *rate-limit ceiling*, not the replica count.
+
+### 3.8 Audit log of admin actions  *(shipped: ADR 0027, SPEC §12.5, migration `0005`)*
+"Who promoted this agent, and when?" had no answer: the admin surface
+mutated agents, fleets and keys and left nothing behind. Migration
+`0005.audit-log` adds an insert-only `audit_log` table (no foreign
+keys — a revoked agent's history outlives its record), written from
+both admin write paths and read through `GET /v1/admin/audit-log`
+(admin key; no MCP verb, same reasoning as `/v1/metrics`).
+
+**Two actor kinds, because the two paths know different things.** The
+REST admin surface records `admin_key` rows whose actor is the verified
+admin key's **fingerprint** — which needed a fix first: every admin key
+carried `user_id = "admin"`, so `Credential` gained `key_id`. The
+`hivemind-keys` CLI records `cli` rows in the same transaction as its
+change, under an operator-typed `--actor` that is **unverified** (anyone
+with database access can type anything) — the kind says so.
+
+**Honest limits.** The REST path spans two ports with no shared
+transaction, so its row is written after the change and is **not**
+atomic with it: an audit-write failure fails the request (the change
+stands), and a crash in between leaves the change unaudited.
+Registration and the read-only listings are deliberately not audited.
+No raw key is ever recorded, on either path — enforced by construction
+and by a test that performs every key-producing action and searches
+every audit row for the keys.
 
 ## Tier 4 — close the spec's open items (SPEC §11) (former Tier 3)
 

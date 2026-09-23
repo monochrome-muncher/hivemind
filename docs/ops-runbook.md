@@ -203,6 +203,30 @@ hash is stored (a leaked database never leaks usable keys, SPEC §8.1).
 > immediately. Use it to cut the org off the cluster (e.g. a compromised
 > shared key).
 
+### Audit trail of key and admin actions (ADR 0027)
+
+Every mutating `hivemind-keys` command (`issue-admin`, `revoke-admin`,
+`rotate-org`, `issue-agent`, `revoke` — not `list`) and every admin REST
+action writes a row to the audit log (SPEC §12.5). Read it with the
+admin key:
+
+```sh
+curl -s -H "X-API-Key: $ADMIN_KEY" \
+  "https://hivemind.example/v1/admin/audit-log?action=org_key.rotate&limit=20"
+```
+
+- **Name yourself on the CLI.** Pass `--actor` before the subcommand —
+  `uv run hivemind-keys --actor alice.ops rotate-org`. It defaults to the
+  OS user, which inside a container is usually `root` and says nothing.
+  The value is **unverified** (anyone with database access can type
+  anything); CLI rows are marked `actor_kind = cli` for that reason.
+- **Admin keys appear by fingerprint**, the 12 hex characters
+  `hivemind-keys list` shows. REST rows read `admin:<fingerprint>`, so
+  after an admin-key rotation you can tell the old key's actions from
+  the new one's. No raw key is ever written to the log.
+- **Raw SQL bypasses it.** A hand-run `DELETE FROM credentials …` is not
+  audited; prefer the CLI even for break-glass work.
+
 ## 5. Disaster recovery (full)
 
 1. Stop the services: `make mcp-http-down`, `make pg-down`.
