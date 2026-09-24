@@ -76,8 +76,9 @@ The 5-step operator flow:
    Distribution: **admin key** → operators (admin surface + key
    management); **org key** → the registration surface (`hive_register`
    / `POST /v1/agents`); **agent keys** are issued per agent, either via
-   `hivemind-keys issue-agent --name <agent>` or the admin REST surface
-   `POST /v1/admin/agents/{name}/activate` (returns the key **once**).
+   `hivemind-keys issue-agent --name <agent>`, the admin REST surface
+   `POST /v1/admin/agents/{name}/activate` (returns the key **once**), or
+   the **admin panel** (§8), which the same pipeline deploys.
 5. **(Optional)** external reachability — apply the opt-in Ingress:
 
    ```bash
@@ -402,3 +403,50 @@ subjects:
     name: hivemind-deployer
     namespace: hivemind
 ```
+
+## 8. Admin panel (`hivemind-admin`, ADR 0029)
+
+A browser front end for the admin surface: the pending-agent queue
+(grouped by owner alias), activation with the key shown once, agents,
+fleets, the audit log, and org-key rotation. Admin keys stay CLI-only.
+
+**What it needs.** One env var: `HIVEMIND_ADMIN_API_URL`, the base URL of
+the hivemind-api deployment (in-cluster: `http://hivemind-api:8000`). For
+an https URL behind an internal CA, also set `HIVEMIND_ADMIN_API_CA_BUNDLE`
+to a mounted PEM file. It holds **no DSN and no Secret**, never talks to
+Postgres, and the entrypoint skips the migration step for it.
+
+**Deploying it.** It is its own kustomization, so it works as a separate
+GitLab project on the same image:
+
+```bash
+kubectl kustomize build deploy/kubernetes/admin \
+  | sed "s|hivemind:0.0.0|$IMAGE|g" | kubectl -n hivemind apply -f -
+```
+
+The in-repo `.gitlab-ci.yml` deploy job runs exactly this as step 5. One
+replica, no PDB: it is stateless and only operators use it.
+
+**Reaching it.** It is an operator tool, so keep it off the public
+internet:
+
+```bash
+kubectl -n hivemind port-forward svc/hivemind-admin 8080:8080
+# then open http://localhost:8080 and sign in with the admin key
+```
+
+or route an **internal-only** ingress host to `hivemind-admin:8080`.
+The panel holds the admin key in the browser tab's `sessionStorage`
+(cleared on sign-out or when the tab closes), so serve it over TLS
+wherever it is not `localhost`.
+
+**Locally:** `make api` in one shell, `make admin` in another, then open
+`http://localhost:8080`.
+
+**What it forwards.** Only the admin endpoints, `GET /v1/metrics` and
+`GET /v1/health`. Anything else is a 404 from the panel itself. It
+forwards `X-API-Key`, `Content-Type` and `Accept` and nothing else, marks
+every forwarded response `Cache-Control: no-store`, and never logs a
+header or a body. `GET /healthz` is its own probe and does not call the
+API.
+
