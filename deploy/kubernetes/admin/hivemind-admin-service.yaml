@@ -1,0 +1,19 @@
+# Cluster-internal exposure of the admin panel. It is an operator tool:
+# reach it with `kubectl -n hivemind port-forward svc/hivemind-admin 8080`,
+# or put it behind an INTERNAL ingress (DEPLOY.md §8) — never a public one.
+apiVersion: v1
+kind: Service
+metadata:
+  name: hivemind-admin
+  labels:
+    app.kubernetes.io/name: hivemind
+    app.kubernetes.io/component: admin
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: hivemind
+    app.kubernetes.io/component: admin
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

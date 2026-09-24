@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Hivemind admin</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/admin.css">
+  <script type="module" src="/static/admin.js"></script>
+</head>
+<body>
+  <!-- Login: the admin key is kept in sessionStorage for this tab only (ADR 0029). -->
+  <main id="login" class="login" hidden>
+    <form id="login-form" class="login-card" autocomplete="off">
+      <div class="brand brand-lg"><span class="brand-mark" aria-hidden="true"></span>Hivemind <span class="brand-sub">admin</span></div>
+      <label for="login-key">Admin key</label>
+      <input id="login-key" type="password" spellcheck="false" autocomplete="off" required placeholder="hm_…">
+      <p id="login-error" class="form-error" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary btn-block">Sign in</button>
+      <p class="muted small">The key is held in this browser tab only and is cleared when you close it or sign out.</p>
+    </form>
+  </main>
+
+  <div id="shell" class="shell" hidden>
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark" aria-hidden="true"></span>Hivemind <span class="brand-sub">admin</span></div>
+      <nav class="nav" aria-label="Sections">
+        <a href="#/overview" data-view="overview">Overview <span id="nav-pending" class="pill pill-warn" hidden></span></a>
+        <a href="#/agents" data-view="agents">Agents</a>
+        <a href="#/fleets" data-view="fleets">Fleets</a>
+        <a href="#/audit" data-view="audit">Audit log</a>
+        <a href="#/keys" data-view="keys">Org key</a>
+      </nav>
+      <div class="sidebar-foot">
+        <span id="api-status" class="muted small"></span>
+        <button id="logout" type="button" class="btn btn-ghost btn-block">Sign out</button>
+      </div>
+    </aside>
+    <main class="content">
+      <div id="toast" class="toast" role="status" hidden></div>
+      <section id="view"></section>
+    </main>
+  </div>
+
+  <!-- One reusable modal; admin.js fills it. -->
+  <dialog id="modal" class="modal">
+    <form id="modal-form" method="dialog">
+      <h2 id="modal-title"></h2>
+      <div id="modal-body"></div>
+      <p id="modal-error" class="form-error" role="alert" hidden></p>
+      <div id="modal-actions" class="modal-actions"></div>
+    </form>
+  </dialog>
+</body>
+</html>

@@ -84,6 +84,14 @@ class Settings(BaseSettings):
     # ``configure_logging`` below) — one of Python's standard names
     # (DEBUG/INFO/WARNING/ERROR/CRITICAL, case-insensitive).
     log_level: str = "INFO"
+    # The admin panel runner (`hivemind-admin`, ADR 0029) — read only by
+    # that runner. `admin_api_url` is the base URL of the hivemind-api
+    # deployment it proxies to (e.g. `http://hivemind-api:8000`); empty
+    # is a startup error for that runner. `admin_api_ca_bundle` is a PEM
+    # file to verify an https API URL against (an internal CA); empty =
+    # the system trust store.
+    admin_api_url: str = ""
+    admin_api_ca_bundle: str = ""
     # asyncpg pool sizing for the Postgres store (``make_pool`` in
     # store/pool.py already defaults to these exact values; these fields
     # just make that existing constant operator-reachable, per pod, for
@@ -221,16 +229,22 @@ def env_file_for(environment: str | None) -> str:
 # ``Settings`` field is a mistake, not a third category.
 _ALLOWED_EXTRA_ENV_VARS: dict[str, str] = {
     # entrypoint.sh reads this directly (shell, never Settings) to choose
-    # which console script to exec — api / mcp-http / migrate / keys.
+    # which console script to exec — api / mcp-http / admin / migrate / keys.
     "HIVEMIND_RUNNER": "selects the runner in entrypoint.sh",
     # Listen address for the REST API and the MCP-HTTP runner. Set by the
     # Dockerfile's `ENV HIVEMIND_HOST=0.0.0.0` / the k8s ConfigMap, and
     # read via `os.environ` in api/main.py and mcp/http.py — a bind
     # concern for the process, not a retrieval/storage knob.
-    "HIVEMIND_HOST": "REST/MCP-HTTP bind host, read via os.environ in api/main.py and mcp/http.py",
+    "HIVEMIND_HOST": (
+        "REST/MCP-HTTP/admin bind host, read via os.environ in api/main.py, "
+        "mcp/http.py and admin/main.py"
+    ),
     # Listen port for the same two runners, set by the k8s Deployment env
     # and read via `os.environ` alongside HIVEMIND_HOST.
-    "HIVEMIND_PORT": "REST/MCP-HTTP bind port, read via os.environ in api/main.py and mcp/http.py",
+    "HIVEMIND_PORT": (
+        "REST/MCP-HTTP/admin bind port, read via os.environ in api/main.py, "
+        "mcp/http.py and admin/main.py"
+    ),
     # The per-agent credential for the stdio `hivemind-mcp-pg` runner
     # (ADR 0009), supplied by that agent's own operator config and read
     # via `os.environ` in mcp/server.py. Per-process identity, not a

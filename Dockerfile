@@ -1,7 +1,7 @@
 # Hivemind app image — ONE generic image for ALL console entrypoints.
 #
 # The entrypoint script (entrypoint.sh) selects the runner via the
-# HIVEMIND_RUNNER env var (api | mcp-http | migrate | keys) and execs
+# HIVEMIND_RUNNER env var (api | mcp-http | admin | migrate | keys) and execs
 # the matching console script, forwarding any extra args. All
 # configuration (DSN, embedder endpoint, host, port, retrieval knobs)
 # is supplied at runtime via HIVEMIND_* env vars — see config/.env.example
@@ -9,6 +9,7 @@
 #
 #   HIVEMIND_RUNNER=api        REST surface (hivemind-api)
 #   HIVEMIND_RUNNER=mcp-http   hostable multi-agent MCP runner (ADR 0010)
+#   HIVEMIND_RUNNER=admin      admin panel, proxies to hivemind-api (ADR 0029)
 #   HIVEMIND_RUNNER=migrate    idempotent schema migration (ADR 0013)
 #   HIVEMIND_RUNNER=keys       key-management CLI (SPEC §8.1, ADR 0012)
 #
