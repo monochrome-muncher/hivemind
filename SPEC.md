@@ -203,7 +203,7 @@ No OAuth/SSO; keys are issued by the org operator via the admin surface (§12.4)
 
 One **self-hosted instance per organization** — one instance = one organization — over **one PostgreSQL 16 (pgvector) node**. No Redis, no sharding, no queue, no read replicas.
 
-**App tier: 2 replicas per runner** (`hivemind-api` and `hivemind-mcp-http`), rolled out `maxSurge: 1` / `maxUnavailable: 0` with a `minAvailable: 1` PodDisruptionBudget each. The replicas are interchangeable: they share the one pool, serve the one organization, hold no server-side session state (§5.1, §8.5), and resolve credentials per request. This buys **availability only** — a zero-downtime rolling deploy and surviving a node drain — not throughput (the app tier is I/O-bound on the embedder, the extractor and Postgres) and not AZ tolerance (there is one Postgres node). Production packaging is Kubernetes (`deploy/kubernetes/`); `docker compose` is the dev and single-node-ops shape.
+**App tier: 2 replicas per runner** (`hivemind-api` and `hivemind-mcp-http`), rolled out `maxSurge: 1` / `maxUnavailable: 0` with a `minAvailable: 1` PodDisruptionBudget each. The replicas are interchangeable: they share the one pool, serve the one organization, hold no server-side session state (§5.1, §8.5), and resolve credentials per request. This buys **availability only** — a zero-downtime rolling deploy and surviving a node drain — not throughput (the app tier is I/O-bound on the embedder, the extractor and Postgres) and not AZ tolerance (there is one Postgres node). Production packaging is Kubernetes (`deploy/kubernetes/`); `docker compose` is the dev and single-node-ops shape. The **admin panel** (`hivemind-admin`, ADR 0029) is a separate, stateless, 1-replica runner in the same image: a static UI plus an allowlisted same-origin proxy to `hivemind-api`. It holds no database credential; the operator's admin key lives only in their browser tab.
 
 **Scale assumptions (spec target):** ~50 users/agents, ~500 sessions/day, ~10k entries/day, single Postgres node. The design does not commit to horizontal *storage* scale; when the assumptions stop holding, §10's extensions apply.
 
@@ -333,7 +333,7 @@ This section supersedes the flat-pool commitment of §1 and the "no trust tiers"
 | `POST /v1/admin/agents/{name}/revoke` | Kill the key, status → `revoked` (name stays reserved; re-activation issues a *new* key). On a pending agent: reject the registration |
 | `POST /v1/admin/org-key/rotate` | Rotate the org key — the cluster-wide kill switch |
 
-The single admin key gates this surface; admin-issued entries use the reserved name `admin` (ADR 0012).
+The single admin key gates this surface; admin-issued entries use the reserved name `admin` (ADR 0012). The admin panel (ADR 0029) is a browser front end over exactly this table plus the audit log; issuing and revoking admin keys stays with `hivemind-keys`.
 
 ### 12.5 Audit log
 

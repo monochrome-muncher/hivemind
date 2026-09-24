@@ -34,6 +34,7 @@ make test-unit      # unit tests only (no Postgres needed)
 make test           # full suite (integration tests skip cleanly if Postgres is down)
 make check          # mypy strict + ruff
 make api            # run the REST API (hivemind-api)
+make admin          # run the admin panel on :8080 against `make api` (hivemind-admin; ADR 0029)
 make mcp            # run the MCP dev server over stdio (hivemind-mcp; in-memory)
 make mcp-pg         # run the Postgres-backed MCP server over stdio (hivemind-mcp-pg; ADR 0009)
 make mcp-http       # run the hostable, multi-agent streamable-HTTP MCP server as a detached Docker service (host port 8088; ADR 0010)
@@ -186,7 +187,10 @@ In short: a Postgres with pgvector, an OpenAI-compatible embedding
 endpoint (vLLM or similar), and — optionally — a chat endpoint for
 entity extraction (ADR 0016; off by default) are all the deployer
 provides; everything else (migrations, image build, secret rendering,
-first-run key generation, rollouts) is automated by the pipeline.
+first-run key generation, rollouts) is automated by the pipeline. The **admin panel** (`hivemind-admin`, ADR 0029) is a separate, stateless
+runner from the same image that needs only `HIVEMIND_ADMIN_API_URL`; it
+gives operators the pending-agent queue, activation, fleets and the audit
+log in a browser (DEPLOY.md §8).
 
 ## Status
 

@@ -35,7 +35,8 @@
   is shipped too: 2 app-tier replicas per runner with an explicit
   rollout strategy and a PDB each, for **availability only** — ADR 0026,
   which supersedes ADR 0007. **§3.8** is shipped as well: an append-only
-  audit log of admin-surface actions (ADR 0027, SPEC §12.5). The next
+  audit log of admin-surface actions (ADR 0027, SPEC §12.5), and so is
+  **§3.9**, the admin panel (ADRs 0028–0029). The next
   workstream is **Tier 4**, whose two measurement items are now closed —
   §4.5 shipped `importance_source`, and §4.4 measured the recency term
   and **rejected** gating it (no code change; numbers in §4.4). The two
@@ -184,7 +185,7 @@ kinds). Tier 3.1 (the key-rotation runbook) is **blocked by Tier 2** —
 you can't write a rotation story for a key model that's about to
 change.
 
-## Tier 3 — productionize (former Tier 2)  *(3.1, 3.3–3.8 shipped; 3.2 superseded by 3.5)*
+## Tier 3 — productionize (former Tier 2)  *(3.1, 3.3–3.9 shipped; 3.2 superseded by 3.5)*
 
 ### 3.1 Ops runbook  *(shipped: `docs/ops-runbook.md`)*
 Deployment, **backups** (single-node Postgres, ADR 0007),
@@ -366,6 +367,29 @@ Registration and the read-only listings are deliberately not audited.
 No raw key is ever recorded, on either path — enforced by construction
 and by a test that performs every key-producing action and searches
 every audit row for the keys.
+
+### 3.9 Admin panel  *(shipped: ADRs 0028–0029, `hivemind-admin`, migration `0006`, DEPLOY.md §8)*
+A browser front end for the admin surface, deployed as its own runner
+(`HIVEMIND_RUNNER=admin`, same image) that needs only
+`HIVEMIND_ADMIN_API_URL`. Its landing view is the **pending-agent
+queue**, grouped by owner alias, with Activate (trust level + home fleet,
+a new fleet can be created inline, key shown once) and Reject. It also
+covers agents, fleets, the audit log (paged with a new `before` cursor)
+and org-key rotation. Admin keys stay CLI-only.
+
+**It needed a lifecycle fix first (ADR 0028).** Revocation used to leave
+an agent `active` with no key, so a panel would have shown every revoked
+agent as active, and `activate` on an active agent silently issued a
+second live key. Agents now have a `revoked` status; activation works
+only from `pending` or `revoked`; revoking a pending agent is how a
+registration is rejected. Migration `0006` backfills existing keyless
+active agents to `revoked`.
+
+**Honest limits.** The admin key sits in the tab's `sessionStorage` (the
+simplest option, chosen deliberately), so the panel's defence against a
+stolen key is its strict CSP, rendering API data only as text, and a
+proxy allowlist that keeps it from relaying to the data plane (ADR 0029).
+Keep it behind an internal ingress or `kubectl port-forward`.
 
 ## Tier 4 — close the spec's open items (SPEC §11) (former Tier 3)
 
