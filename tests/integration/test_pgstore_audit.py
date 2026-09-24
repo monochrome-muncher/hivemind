@@ -110,3 +110,15 @@ async def test_the_vocabulary_checks_reject_unknown_values(pg) -> None:
             )
     finally:
         await conn.close()
+
+
+async def test_before_pages_back_through_the_log(pg) -> None:
+    """ADR 0028: `before` is a row-id cursor over (occurred_at, id)."""
+    for n in range(5):
+        await pg.record_audit(AuditEvent(ActorKind.CLI, "chris", AuditAction.FLEET_CREATE, f"f{n}"))
+    first = await pg.list_audit(AuditFilters(), 2)
+    second = await pg.list_audit(AuditFilters(before=first[-1].id), 2)
+    rest = await pg.list_audit(AuditFilters(before=second[-1].id), 10)
+    assert [r.target for r in first + second + rest] == ["f4", "f3", "f2", "f1", "f0"]
+    unknown = AuditFilters(before="00000000-0000-0000-0000-000000000000")
+    assert await pg.list_audit(unknown, 10) == []

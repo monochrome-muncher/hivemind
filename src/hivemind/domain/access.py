@@ -60,11 +60,30 @@ class AgentStatus(StrEnum):
 
     ``pending`` = self-registered, awaiting admin activation (no
     data-plane access). ``active`` = admin-activated (an agent key is
-    issued; the agent holds a trust level + home fleet).
+    issued; the agent holds a trust level + home fleet). ``revoked`` =
+    its key was killed, or its registration rejected (ADR 0028); the
+    name stays reserved and re-activation issues a fresh key.
     """
 
     PENDING = "pending"
     ACTIVE = "active"
+    REVOKED = "revoked"
+
+
+# The lifecycle transitions (ADR 0028): the statuses each verb may start from.
+ACTIVATABLE = frozenset({AgentStatus.PENDING, AgentStatus.REVOKED})
+REVOCABLE = frozenset({AgentStatus.PENDING, AgentStatus.ACTIVE})
+
+
+class InvalidAgentStatus(Exception):
+    """A lifecycle verb was applied to an agent in a status it cannot
+    start from (ADR 0028) — e.g. ``activate`` on an ``active`` agent."""
+
+    def __init__(self, name: str, status: AgentStatus, verb: str) -> None:
+        super().__init__(f"cannot {verb} agent {name!r}: it is {status.value}")
+        self.name = name
+        self.status = status
+        self.verb = verb
 
 
 # The entry-scope values (SPEC §12.1): `self` (the writer only),

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import getpass
+import json
 import sys
 
 import asyncpg
@@ -29,6 +30,7 @@ from hivemind.store import PgAuthenticator, PgStore
 from hivemind.store import keys as keys_cli
 from hivemind.store.auth import key_hash
 from hivemind.store.keys import (
+    AgentKeyExists,
     _issue_admin,
     _issue_agent,
     _list,
@@ -148,7 +150,8 @@ async def test_the_audit_row_shares_the_mutations_transaction(
     monkeypatch.setattr(
         keys_cli,
         "_INSERT_AUDIT",
-        "INSERT INTO audit_log (actor_kind, actor, action, target) VALUES ($1 || 'x', $2, $3, $4)",
+        "INSERT INTO audit_log (actor_kind, actor, action, target, detail) "
+        "VALUES ($1 || 'x', $2, $3, $4, $5::jsonb)",
     )
     for command in (
         lambda: _issue_admin(dsn, actor="chris"),
@@ -224,3 +227,56 @@ async def test_no_raw_key_appears_in_any_audit_row_on_either_path(dsn: str) -> N
             assert raw.removeprefix("hm_") not in doc
     kinds = await _fetch(dsn, "SELECT actor_kind, count(*) AS n FROM audit_log GROUP BY 1")
     assert {r["actor_kind"]: r["n"] for r in kinds} == {"cli": 6, "admin_key": 5}
+
+
+# -- ADR 0028: the CLI keeps status and key in step --------------------------
+
+
+async def test_cli_revoke_sets_revoked_and_records_the_prior_status(dsn: str) -> None:
+    await _exec(dsn, "INSERT INTO agents (name, status, trust_level) VALUES ('alice', 'active', 2)")
+    await _issue_agent(dsn, "alice", actor="chris")
+    await _revoke(dsn, "alice", actor="ops")
+    [status] = await _fetch(dsn, "SELECT status FROM agents WHERE name = 'alice'")
+    assert status["status"] == "revoked"
+    assert await _fetch(dsn, "SELECT 1 FROM credentials WHERE agent_name = 'alice'") == []
+    revoke_row = (await _audit_rows(dsn))[-1]
+    assert revoke_row["action"] == "agent.revoke"
+    assert json.loads(revoke_row["detail"]) == {"from": "active"}
+
+
+async def test_cli_issue_agent_refuses_a_second_key(dsn: str) -> None:
+    await _issue_agent(dsn, "alice", actor="chris")
+    with pytest.raises(AgentKeyExists):
+        await _issue_agent(dsn, "alice", actor="chris")
+    assert len(await _fetch(dsn, "SELECT 1 FROM credentials WHERE agent_name = 'alice'")) == 1
+    assert len(await _audit_rows(dsn)) == 1  # the refusal recorded nothing
+
+
+async def test_cli_issue_agent_reactivates_a_revoked_agent(dsn: str) -> None:
+    await _exec(
+        dsn, "INSERT INTO agents (name, status, trust_level) VALUES ('alice', 'revoked', 1)"
+    )
+    await _issue_agent(dsn, "alice", actor="chris")
+    [status] = await _fetch(dsn, "SELECT status FROM agents WHERE name = 'alice'")
+    assert status["status"] == "active"
+
+
+async def test_app_reactivation_issues_a_fresh_key_and_the_old_one_stays_dead(
+    dsn: str,
+) -> None:
+    store, auth = PgStore(dsn), PgAuthenticator(dsn)
+    try:
+        admin = await auth.verify(await _issue_admin(dsn, actor="chris"))
+        assert admin is not None
+        service = AccessService(store, auth)
+        fleet = await service.create_fleet("data-eng", admin)
+        await store.register_agent("alice")
+        _, old = await service.activate("alice", TrustLevel.LURKER, fleet.id, admin)
+        await service.revoke("alice", admin)
+        _, new = await service.activate("alice", TrustLevel.LURKER, fleet.id, admin)
+        assert new != old
+        assert await auth.verify(old) is None
+        assert await auth.verify(new) is not None
+    finally:
+        await store.close()
+        await auth.close()

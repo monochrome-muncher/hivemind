@@ -29,6 +29,7 @@ from hivemind.domain.access import (
     Agent,
     AgentStatus,
     Fleet,
+    InvalidAgentStatus,
     TrustLevel,
     Visibility,
 )
@@ -95,9 +96,15 @@ INSERT_AGENT = (
 )
 BACKFILL_AGENT_ALIAS = "UPDATE agents SET owner_alias = $2 WHERE name = $1 AND owner_alias IS NULL"
 LIST_AGENTS = "SELECT * FROM agents ORDER BY name"
+# ADR 0028: the status guard lives in the WHERE, so check-and-flip is one
+# atomic statement (no second key from two racing activations).
 ACTIVATE_AGENT = (
     "UPDATE agents SET status = 'active', trust_level = $2, home_fleet_id = $3, "
-    "activated_at = now() WHERE name = $1 RETURNING *"
+    "activated_at = now() WHERE name = $1 AND status IN ('pending', 'revoked') RETURNING *"
+)
+REVOKE_AGENT = (
+    "UPDATE agents SET status = 'revoked' "
+    "WHERE name = $1 AND status IN ('pending', 'active') RETURNING *"
 )
 SET_AGENT_LEVEL = "UPDATE agents SET trust_level = $2 WHERE name = $1 RETURNING *"
 SET_AGENT_FLEET = "UPDATE agents SET home_fleet_id = $2 WHERE name = $1 RETURNING *"
@@ -640,17 +647,37 @@ class PgStore:
     async def activate_agent(
         self, name: str, *, trust_level: TrustLevel, home_fleet_id: str
     ) -> Agent:
-        """Activate a pending agent: set trust level + home fleet, flip to
-        ``active`` (ADR 0012). ``KeyError`` if unknown.
+        """Activate a pending or revoked agent: set trust level + home
+        fleet, flip to ``active`` (ADRs 0012, 0028). ``KeyError`` if
+        unknown; ``InvalidAgentStatus`` if already ``active``.
         """
         pool = await self._ensure_pool()
         async with pool.acquire() as conn:
-            existing = await conn.fetchrow(GET_AGENT, name)
-            if existing is None:
-                raise KeyError(f"unknown agent: {name}")
             row = await conn.fetchrow(ACTIVATE_AGENT, name, trust_level.value, home_fleet_id)
+            if row is None:
+                await self._raise_for_status(conn, name, "activate")
         assert row is not None
         return _row_to_agent(row)
+
+    async def revoke_agent(self, name: str) -> Agent:
+        """Flip a pending or active agent to ``revoked`` (ADR 0028).
+        ``KeyError`` if unknown; ``InvalidAgentStatus`` if already revoked.
+        """
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(REVOKE_AGENT, name)
+            if row is None:
+                await self._raise_for_status(conn, name, "revoke")
+        assert row is not None
+        return _row_to_agent(row)
+
+    @staticmethod
+    async def _raise_for_status(conn: asyncpg.Connection, name: str, verb: str) -> None:
+        """A guarded lifecycle UPDATE matched nothing: say why."""
+        existing = await conn.fetchrow(GET_AGENT, name)
+        if existing is None:
+            raise KeyError(f"unknown agent: {name}")
+        raise InvalidAgentStatus(name, AgentStatus(existing["status"]), verb)
 
     async def set_agent_trust_level(self, name: str, level: TrustLevel) -> Agent:
         """Promote/demote an agent's trust level (ADR 0011). ``KeyError``
@@ -711,6 +738,14 @@ class PgStore:
         if filters.since is not None:
             params.append(filters.since)
             conditions.append(f"occurred_at >= ${len(params)}")
+        if filters.before is not None:
+            # Row-value comparison against the cursor row (ADR 0028); an
+            # unknown id yields a NULL row, which compares to nothing.
+            params.append(filters.before)
+            conditions.append(
+                f"(occurred_at, id) < (SELECT occurred_at, id FROM audit_log "
+                f"WHERE id = ${len(params)}::uuid)"
+            )
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         params.append(limit)
         sql = (

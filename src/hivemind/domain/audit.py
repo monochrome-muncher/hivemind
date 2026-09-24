@@ -94,6 +94,10 @@ class AuditFilters:
     actor: str | None = None
     action: AuditAction | None = None
     since: datetime | None = None  # inclusive lower bound on occurred_at
+    # Paging cursor (ADR 0028): a row id; only rows strictly older than it
+    # (by occurred_at, then id) match. An unknown id matches nothing. It is
+    # positional, so the store applies it — ``matches`` does not.
+    before: str | None = None
 
     def matches(self, record: AuditRecord) -> bool:
         """Whether ``record`` passes every set filter."""

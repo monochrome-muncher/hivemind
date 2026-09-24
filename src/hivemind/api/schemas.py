@@ -390,6 +390,7 @@ class AgentsMetrics(BaseModel):
     total: int
     pending: int
     active: int
+    revoked: int = 0
     by_trust_level: dict[str, int] = {}
 
 

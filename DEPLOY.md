@@ -167,9 +167,12 @@ first-run bootstrap Job records itself as `ci-bootstrap`.
 
 ### 4.3 Agent keys
 
-- **How** — `hivemind-keys revoke --name <agent>` (the name **stays
-  reserved**; re-activation issues a NEW key — ADR 0012). Re-issue via
-  the admin surface `POST /v1/admin/agents/{name}/activate`.
+- **How** — `hivemind-keys revoke --name <agent>` (the agent becomes
+  `revoked` and the name **stays reserved**; re-activation issues a NEW
+  key — ADRs 0012, 0028). Re-issue via the admin surface
+  `POST /v1/admin/agents/{name}/activate` (or the admin panel). Activating
+  an agent that is still `active` is refused (409): one key per agent,
+  so revoke first.
 - **Blast radius** — only that agent's verbs (its writes/reads/feedback).
 - **Verify** — the agent's next request 401s with the old key and works
   with the new one.

@@ -23,9 +23,12 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 from hivemind.domain.access import (
+    ACTIVATABLE,
+    REVOCABLE,
     Agent,
     AgentStatus,
     Fleet,
+    InvalidAgentStatus,
     TrustLevel,
     Visibility,
     entry_is_visible,
@@ -320,12 +323,15 @@ class MemoryStore:
     async def activate_agent(
         self, name: str, *, trust_level: TrustLevel, home_fleet_id: str
     ) -> Agent:
-        """Activate a pending agent: set trust level + home fleet, flip to
-        ``active`` (ADR 0012). ``KeyError`` if unknown."""
+        """Activate a pending or revoked agent: set trust level + home
+        fleet, flip to ``active`` (ADRs 0012, 0028). ``KeyError`` if
+        unknown; ``InvalidAgentStatus`` if already ``active``."""
         with self._lock:
             agent = self._agents.get(name)
             if agent is None:
                 raise KeyError(f"unknown agent: {name}")
+            if agent.status not in ACTIVATABLE:
+                raise InvalidAgentStatus(name, agent.status, "activate")
             activated = replace(
                 agent,
                 status=AgentStatus.ACTIVE,
@@ -335,6 +341,19 @@ class MemoryStore:
             )
             self._agents[name] = activated
             return activated
+
+    async def revoke_agent(self, name: str) -> Agent:
+        """Flip a pending or active agent to ``revoked`` (ADR 0028).
+        ``KeyError`` if unknown; ``InvalidAgentStatus`` if already revoked."""
+        with self._lock:
+            agent = self._agents.get(name)
+            if agent is None:
+                raise KeyError(f"unknown agent: {name}")
+            if agent.status not in REVOCABLE:
+                raise InvalidAgentStatus(name, agent.status, "revoke")
+            revoked = replace(agent, status=AgentStatus.REVOKED)
+            self._agents[name] = revoked
+            return revoked
 
     async def set_agent_trust_level(self, name: str, level: TrustLevel) -> Agent:
         """Promote/demote an agent's trust level (ADR 0011). ``KeyError`` if
@@ -383,12 +402,20 @@ class MemoryStore:
         ``occurred_at`` ties, so a fixed test clock still reads newest
         first)."""
         with self._lock:
-            indexed = sorted(
-                enumerate(self._audit),
-                key=lambda pair: (pair[1].occurred_at, pair[0]),
-                reverse=True,
-            )
-            return [r for _, r in indexed if filters.matches(r)][:limit]
+            ordered = [
+                r
+                for _, r in sorted(
+                    enumerate(self._audit),
+                    key=lambda pair: (pair[1].occurred_at, pair[0]),
+                    reverse=True,
+                )
+            ]
+            if filters.before is not None:
+                ids = [r.id for r in ordered]
+                if filters.before not in ids:
+                    return []
+                ordered = ordered[ids.index(filters.before) + 1 :]
+            return [r for r in ordered if filters.matches(r)][:limit]
 
 
 def _count_for(feedback: dict[tuple[str, str, str], Feedback], entry_id: str) -> FeedbackCounts:
