@@ -18,6 +18,7 @@
 #
 #   HIVEMIND_RUNNER=api       REST surface (hivemind-api)
 #   HIVEMIND_RUNNER=mcp-http  hostable multi-agent MCP runner (ADR 0010)
+#   HIVEMIND_RUNNER=admin     admin panel UI + proxy to hivemind-api (ADR 0029)
 #   HIVEMIND_RUNNER=migrate   idempotent schema migration (ADR 0013)
 #   HIVEMIND_RUNNER=keys      key-management CLI (SPEC §8.1, ADR 0012)
 #
@@ -30,9 +31,12 @@ runner="${HIVEMIND_RUNNER:-mcp-http}"
 # The entrypoint-owned migration pre-step (ADR 0018): idempotent
 # (ADR 0013) and cheap on an up-to-date pool. Skipped when the runner
 # IS the migration itself (no double-migration; a bare `hivemind-migrate`
-# run is a single, explicit migration).
-if [ "$runner" != "migrate" ]; then
-  hivemind-migrate
-fi
+# run is a single, explicit migration), and for the admin panel, which
+# has no database access at all — it only talks to hivemind-api
+# (ADR 0029).
+case "$runner" in
+  migrate|admin) ;;
+  *) hivemind-migrate ;;
+esac
 
 exec "hivemind-${runner}" "$@"

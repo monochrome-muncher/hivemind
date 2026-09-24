@@ -25,6 +25,7 @@ hivemind-mcp-pg = "hivemind.mcp.server:main_pg"
 hivemind-mcp-http = "hivemind.mcp.http:main_http"
 hivemind-migrate = "hivemind.store.migrate:main"
 hivemind-keys = "hivemind.store.keys:main"
+hivemind-admin = "hivemind.admin.main:run"
 
 [build-system]
 requires = ["uv_build>=0.12.5,<0.13.0"]

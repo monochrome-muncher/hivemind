@@ -72,6 +72,10 @@ schema-ref: ## Regenerate the schema.sql reference from the migrated pool (ADR 0
 api: ## Run the REST API on :8000
 	uv run hivemind-api
 
+.PHONY: admin
+admin: ## Run the admin panel on :8080 against the local REST API (ADR 0029; start `make api` first)
+	HIVEMIND_ADMIN_API_URL=$${HIVEMIND_ADMIN_API_URL:-http://127.0.0.1:8000} HIVEMIND_PORT=8080 uv run hivemind-admin
+
 .PHONY: mcp
 mcp: ## Run the MCP server over stdio (wire into your agent's MCP config)
 	uv run hivemind-mcp

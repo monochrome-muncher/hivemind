@@ -1,0 +1,73 @@
+# Admin panel (ADR 0029) — the `hivemind-admin` console script: a static
+# UI plus an allowlisted same-origin proxy to hivemind-api.
+#
+# Same image as api / mcp-http (HIVEMIND_RUNNER selects the runner; the
+# placeholder `hivemind:0.0.0` is the CI sed target). The entrypoint
+# SKIPS the migration pre-step for this runner: it has no database.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hivemind-admin
+  labels:
+    app.kubernetes.io/name: hivemind
+    app.kubernetes.io/component: admin
+spec:
+  # One replica, no PDB (ADR 0029): the panel is stateless and used by
+  # operators only, so a few seconds of unavailability during a rollout
+  # or a node drain costs nothing. Raise it freely — there is no shared
+  # state (the admin key lives in each operator's browser tab).
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hivemind
+      app.kubernetes.io/component: admin
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hivemind
+        app.kubernetes.io/component: admin
+    spec:
+      containers:
+        - name: app
+          image: hivemind:0.0.0
+          # Deliberately no envFrom: the shared ConfigMap/Secret carry the
+          # DSN and embedder credentials, which this runner must not hold.
+          env:
+            - name: HIVEMIND_RUNNER
+              value: "admin"
+            - name: HIVEMIND_HOST
+              value: "0.0.0.0"
+            - name: HIVEMIND_PORT
+              value: "8080"
+            # The ONE required setting: where hivemind-api answers.
+            - name: HIVEMIND_ADMIN_API_URL
+              value: "http://hivemind-api:8000"
+            # For an https API URL signed by an internal CA, mount the CA
+            # bundle and point at it (empty = the system trust store):
+            # - name: HIVEMIND_ADMIN_API_CA_BUNDLE
+            #   value: "/etc/hivemind/ca.pem"
+            - name: HIVEMIND_LOG_LEVEL
+              value: "INFO"
+          ports:
+            - name: http
+              containerPort: 8080
+          # /healthz is the panel's own probe: it answers without calling
+          # hivemind-api, so an API outage never restarts this pod.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 192Mi

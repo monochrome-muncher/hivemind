@@ -251,6 +251,12 @@ deploy:
     #    blocks the rollout LOUDLY here, never a silent runtime no-op).
     - kubectl -n hivemind rollout status deployment/hivemind-api --timeout=300s
     - kubectl -n hivemind rollout status deployment/hivemind-mcp --timeout=300s
+    # 5) The admin panel (ADR 0029) — its own kustomization so it can also
+    #    live in its own project; same image, no Secret, no migration.
+    - kubectl kustomize build deploy/kubernetes/admin \
+        | sed "s|hivemind:0.0.0|$IMAGE|g" \
+        | kubectl -n hivemind apply -f -
+    - kubectl -n hivemind rollout status deployment/hivemind-admin --timeout=120s
     # KUBECTL AUTH: the GitLab Kubernetes agent (pre-configured per org)
     # provides the kubectl credentials for this job — no kubeconfig wiring
     # here. The agent's ServiceAccount needs at least: namespaces (get,

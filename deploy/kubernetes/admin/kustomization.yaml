@@ -1,0 +1,15 @@
+# The admin panel (`hivemind-admin`, ADR 0029) — its OWN kustomization,
+# so it deploys standalone (its own GitLab project, or a separate apply):
+#
+#   kubectl kustomize build deploy/kubernetes/admin | kubectl apply -f -
+#
+# It needs exactly one thing from the rest of the cluster: a reachable
+# hivemind-api, named by HIVEMIND_ADMIN_API_URL in the Deployment. It
+# mounts no Secret and holds no DSN — it never talks to Postgres, and the
+# admin key is typed into the browser by the operator, never configured.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: hivemind
+resources:
+  - hivemind-admin-deployment.yaml
+  - hivemind-admin-service.yaml
