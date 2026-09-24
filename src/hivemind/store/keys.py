@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import getpass
+import json
 import os
 import secrets
 import sys
@@ -57,7 +58,19 @@ _DELETE_ORG = "DELETE FROM credentials WHERE kind = 'org'"
 _LIST = "SELECT key_hash, kind, user_id, agent_name FROM credentials ORDER BY created_at"
 _REVOKE_AGENT = "DELETE FROM credentials WHERE kind = 'agent' AND agent_name = $1"
 _REVOKE_ADMIN = "DELETE FROM credentials WHERE kind = 'admin' AND key_hash = $1"
-_INSERT_AUDIT = "INSERT INTO audit_log (actor_kind, actor, action, target) VALUES ($1, $2, $3, $4)"
+_INSERT_AUDIT = (
+    "INSERT INTO audit_log (actor_kind, actor, action, target, detail) "
+    "VALUES ($1, $2, $3, $4, $5::jsonb)"
+)
+_HAS_AGENT_KEY = "SELECT 1 FROM credentials WHERE kind = 'agent' AND agent_name = $1"
+_AGENT_STATUS_FOR_UPDATE = "SELECT status FROM agents WHERE name = $1 FOR UPDATE"
+_REACTIVATE_REVOKED = "UPDATE agents SET status = 'active' WHERE name = $1 AND status = 'revoked'"
+_SET_REVOKED = "UPDATE agents SET status = 'revoked' WHERE name = $1"
+
+
+class AgentKeyExists(Exception):
+    """``issue-agent`` refused: the agent already holds a key (ADR 0028 —
+    one key per agent; revoke first to replace it)."""
 
 
 def _raw_key() -> str:
@@ -80,13 +93,24 @@ def default_actor() -> str:
 
 
 async def _audit(
-    conn: asyncpg.Connection, actor: str, action: AuditAction, target: str | None
+    conn: asyncpg.Connection,
+    actor: str,
+    action: AuditAction,
+    target: str | None,
+    detail: dict[str, str] | None = None,
 ) -> None:
     """Append a ``cli`` audit row on ``conn`` — called inside the same
     transaction as the mutation, so the two commit or roll back together
     (ADR 0027). Deliberately takes no key: ``target`` is an agent name or
     a key *fingerprint*, so a raw key cannot reach an audit column."""
-    await conn.execute(_INSERT_AUDIT, ActorKind.CLI.value, actor, action.value, target)
+    await conn.execute(
+        _INSERT_AUDIT,
+        ActorKind.CLI.value,
+        actor,
+        action.value,
+        target,
+        json.dumps(detail or {}),
+    )
 
 
 async def _issue_admin(dsn: str, *, actor: str | None = None) -> str:
@@ -111,12 +135,20 @@ async def _issue_admin(dsn: str, *, actor: str | None = None) -> str:
 
 async def _issue_agent(dsn: str, name: str, *, actor: str | None = None) -> str:
     """Issue an agent key bound to the registered agent name (ADR 0012).
-    Audited as ``agent_key.issue`` with the agent name as target."""
+    Audited as ``agent_key.issue`` with the agent name as target.
+
+    Refuses (``AgentKeyExists``) when the agent already holds a key —
+    one key per agent (ADR 0028). A ``revoked`` agent flips back to
+    ``active``, so status and key never disagree after a CLI run."""
     raw_key = _raw_key()
     conn = await asyncpg.connect(dsn)
     try:
         async with conn.transaction():
+            await conn.execute(_AGENT_STATUS_FOR_UPDATE, name)
+            if await conn.fetchval(_HAS_AGENT_KEY, name) is not None:
+                raise AgentKeyExists(name)
             await conn.execute(_ISSUE_AGENT, key_hash(raw_key), name)
+            await conn.execute(_REACTIVATE_REVOKED, name)
             await _audit(conn, actor or default_actor(), AuditAction.AGENT_KEY_ISSUE, name)
     finally:
         await conn.close()
@@ -154,13 +186,18 @@ async def _list(dsn: str) -> None:
 
 
 async def _revoke(dsn: str, name: str, *, actor: str | None = None) -> None:
-    """Retire an agent's key (the name stays reserved, ADR 0012).
-    Audited as ``agent.revoke`` with the agent name as target."""
+    """Retire an agent's key and set it ``revoked`` (the name stays
+    reserved, ADRs 0012, 0028). Audited as ``agent.revoke`` with the
+    agent name as target and the prior status as ``detail.from`` (when
+    the agent has a record)."""
     conn = await asyncpg.connect(dsn)
     try:
         async with conn.transaction():
+            prior = await conn.fetchval(_AGENT_STATUS_FOR_UPDATE, name)
             await conn.execute(_REVOKE_AGENT, name)
-            await _audit(conn, actor or default_actor(), AuditAction.AGENT_REVOKE, name)
+            await conn.execute(_SET_REVOKED, name)
+            detail = {"from": prior} if prior is not None else None
+            await _audit(conn, actor or default_actor(), AuditAction.AGENT_REVOKE, name, detail)
     finally:
         await conn.close()
 
@@ -250,7 +287,15 @@ def main() -> None:
     if args.cmd == "issue-admin":
         print(asyncio.run(_issue_admin(dsn, actor=actor)))
     elif args.cmd == "issue-agent":
-        print(asyncio.run(_issue_agent(dsn, args.name, actor=actor)))
+        try:
+            print(asyncio.run(_issue_agent(dsn, args.name, actor=actor)))
+        except AgentKeyExists:
+            print(
+                f"agent {args.name} already holds a key; revoke it first "
+                "(`hivemind-keys revoke --name ...`) to issue a replacement",
+                file=sys.stderr,
+            )
+            raise SystemExit(1) from None
     elif args.cmd == "rotate-org":
         print(asyncio.run(_rotate_org(dsn, actor=actor)))
     elif args.cmd == "list":

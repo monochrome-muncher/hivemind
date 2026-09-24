@@ -130,6 +130,14 @@ _Avoid_: role, permission, clearance
 An agent that has registered (unique name + owner alias) but not been activated: trust level `untrusted`, no data-plane access. Activation by the admin issues its agent key (ADR 0012).
 _Avoid_: registered agent (ambiguous with active), queued agent, provisional agent
 
+**Revoked agent**:
+An agent whose agent key an admin has killed. Its record and name stay reserved (names are durable), it has no data-plane access, and re-activating it issues a fresh key. Distinct from an agent demoted to `untrusted`, which still holds a valid key.
+_Avoid_: deleted agent, disabled agent, dormant agent (dormant is the demoted-to-`untrusted` state)
+
+**Activation**:
+The admin act that turns a pending (or revoked) agent into an active one: it sets the trust level and home fleet and issues the agent key, returned once. An already-active agent cannot be activated again.
+_Avoid_: approval, key issuance (a key is its output, not its name)
+
 **Registration**:
 An agent's first contact with Hivemind: a unique agent name plus the owner's alias, creating a pending record (ADR 0012). Names are durable — revocation does not release a name.
 _Avoid_: signup, onboarding, enrollment
@@ -162,6 +170,10 @@ _Avoid_: Hivemind client (implies a library client), agent connector
 **Agent key**:
 The admin-issued credential bound to one registered agent (ADR 0012, supersedes the ADR 0008 sub-key). Carries the agent's trust level and home fleet; it is what the MCP runners present so their writes carry verified provenance. One key per agent, returned once at activation.
 _Avoid_: sub-key (the ADR 0008 term), token, API key (that is the generic REST term; say "agent key")
+
+**Admin panel**:
+The browser front end for the admin surface, run as its own runner (`hivemind-admin`) that talks only to `hivemind-api`. You log in by presenting an admin key. Its landing view is the pending-agent queue. It covers everything the admin surface does except issuing or revoking admin keys, which stays with the `hivemind-keys` CLI.
+_Avoid_: dashboard, console, admin UI (fine informally; the term is admin panel)
 
 **Per-request credential**:
 The acting identity a hostable `hivemind-mcp-http` process resolves **per HTTP request**: the request presents an agent key (ADR 0012), a thin ASGI middleware verifies it against the `credentials` table (ADR 0012), and the shared, stateless services are re-bound to that credential on every tool dispatch. Because it is resolved per request, revocation is immediate (ADR 0010).

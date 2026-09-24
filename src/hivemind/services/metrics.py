@@ -125,10 +125,11 @@ class MetricsService:
         return {"total": len(fleets), "writes_by_fleet": writes_by_fleet}
 
     def _agents_report(self, agents: Sequence[Agent]) -> dict[str, Any]:
-        """Agent counters: total / pending / active + trust-level
+        """Agent counters: total / pending / active / revoked + trust-level
         distribution (the §12 counters, ROADMAP §3.3)."""
         pending = sum(1 for agent in agents if agent.status is AgentStatus.PENDING)
         active = sum(1 for agent in agents if agent.status is AgentStatus.ACTIVE)
+        revoked = sum(1 for agent in agents if agent.status is AgentStatus.REVOKED)
         by_trust_level: dict[str, int] = {}
         for level in _TRUST_LEVELS:
             count = sum(1 for agent in agents if agent.trust_level is level)
@@ -137,5 +138,6 @@ class MetricsService:
             "total": len(agents),
             "pending": pending,
             "active": active,
+            "revoked": revoked,
             "by_trust_level": by_trust_level,
         }

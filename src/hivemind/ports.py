@@ -154,8 +154,17 @@ class Store(Protocol):
     async def activate_agent(
         self, name: str, *, trust_level: TrustLevel, home_fleet_id: str
     ) -> Agent:
-        """Activate a pending agent: set its trust level + home fleet and
-        flip it to ``active`` (ADR 0012). ``KeyError`` if unknown."""
+        """Activate a pending or revoked agent: set its trust level + home
+        fleet and flip it to ``active`` (ADRs 0012, 0028). ``KeyError`` if
+        unknown; ``InvalidAgentStatus`` if it is already ``active`` (the
+        status check and the update are one atomic step)."""
+        ...
+
+    async def revoke_agent(self, name: str) -> Agent:
+        """Flip a pending or active agent to ``revoked`` (ADR 0028). The
+        credential is the ``Authenticator``'s; this only moves the status.
+        ``KeyError`` if unknown; ``InvalidAgentStatus`` if already
+        ``revoked``."""
         ...
 
     async def set_agent_trust_level(self, name: str, level: TrustLevel) -> Agent:

@@ -17,6 +17,7 @@ import pytest
 from hivemind.config import Settings
 from hivemind.domain.access import (
     AgentStatus,
+    InvalidAgentStatus,
     TrustLevel,
     Visibility,
 )
@@ -134,6 +135,26 @@ async def test_activate_unknown_agent_raises(pg) -> None:
     fa = await pg.create_fleet("data-eng")
     with pytest.raises(KeyError):
         await pg.activate_agent("ghost", trust_level=TrustLevel.LURKER, home_fleet_id=fa.id)
+
+
+async def test_lifecycle_guards_in_postgres(pg) -> None:
+    """ADR 0028: the status guard is in the UPDATE itself."""
+    fa = await pg.create_fleet("data-eng")
+    await pg.register_agent("alice")
+    await pg.activate_agent("alice", trust_level=TrustLevel.LURKER, home_fleet_id=fa.id)
+    with pytest.raises(InvalidAgentStatus):
+        await pg.activate_agent("alice", trust_level=TrustLevel.LURKER, home_fleet_id=fa.id)
+    revoked = await pg.revoke_agent("alice")
+    assert revoked.status is AgentStatus.REVOKED
+    with pytest.raises(InvalidAgentStatus):
+        await pg.revoke_agent("alice")
+    with pytest.raises(KeyError):
+        await pg.revoke_agent("ghost")
+    again = await pg.activate_agent("alice", trust_level=TrustLevel.PRIVILEGED, home_fleet_id=fa.id)
+    assert again.status is AgentStatus.ACTIVE
+    assert again.trust_level is TrustLevel.PRIVILEGED
+    await pg.register_agent("bob")
+    assert (await pg.revoke_agent("bob")).status is AgentStatus.REVOKED
 
 
 async def test_demote_and_move_fleet(pg) -> None:

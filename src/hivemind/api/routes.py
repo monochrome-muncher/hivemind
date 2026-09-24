@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
@@ -44,7 +45,7 @@ from hivemind.api.schemas import (
     UpdateAgentRequest,
     WithdrawRequest,
 )
-from hivemind.domain.access import Agent, TrustLevel
+from hivemind.domain.access import Agent, InvalidAgentStatus, TrustLevel
 from hivemind.domain.audit import AuditAction, AuditFilters
 from hivemind.domain.entry import EntryDraft, EntryFilters, ImportanceSource, Kind, Source
 from hivemind.embeddings import EmbeddingError
@@ -366,6 +367,8 @@ def build_router(app: HivemindApp) -> APIRouter:
             raise api_error(403, "forbidden", str(exc)) from exc
         except KeyError as exc:
             raise api_error(404, "not_found", str(exc)) from exc
+        except InvalidAgentStatus as exc:
+            raise api_error(409, "invalid_status", str(exc)) from exc
         return KeyIssuedOut(key=key)
 
     @router.patch("/admin/agents/{name}", response_model=AgentOut)
@@ -403,13 +406,19 @@ def build_router(app: HivemindApp) -> APIRouter:
 
     @router.post("/admin/agents/{name}/revoke")
     async def revoke_agent(name: str, credential: require) -> None:
-        """Revoke an agent's key (admin-gated, ADR 0012 — SPEC §5.1
-        ``POST /v1/admin/agents/{name}/revoke``). The agent record +
-        name stay reserved (dormant); the key is dead."""
+        """Revoke an agent (admin-gated, ADRs 0012, 0028 — SPEC §5.1
+        ``POST /v1/admin/agents/{name}/revoke``): the key is dead and the
+        status is ``revoked``; on a pending agent this rejects the
+        registration. The record + name stay reserved. 404 for an
+        unknown name, 409 if already revoked."""
         try:
             await app.access_service.revoke(name, credential)
         except PermissionDenied as exc:
             raise api_error(403, "forbidden", str(exc)) from exc
+        except KeyError as exc:
+            raise api_error(404, "not_found", str(exc)) from exc
+        except InvalidAgentStatus as exc:
+            raise api_error(409, "invalid_status", str(exc)) from exc
 
     @router.get("/admin/audit-log", response_model=list[AuditRecordOut])
     async def audit_log(
@@ -417,13 +426,21 @@ def build_router(app: HivemindApp) -> APIRouter:
         actor: Annotated[str | None, Query()] = None,
         action: Annotated[AuditAction | None, Query()] = None,
         since: Annotated[datetime | None, Query()] = None,
+        before: Annotated[UUID | None, Query()] = None,
         limit: Annotated[int, Query(ge=1, le=AUDIT_LOG_MAX_LIMIT)] = AUDIT_LOG_DEFAULT_LIMIT,
     ) -> list[AuditRecordOut]:
         """The audit log of admin-surface actions, newest first (admin-
         gated, ADR 0027 — SPEC §12.5). Filters AND together: ``actor``
         (exact), ``action`` (the audited vocabulary), ``since`` (inclusive;
-        a naive timestamp is UTC), ``limit`` (1..1000, default 100)."""
-        filters = AuditFilters(actor=actor, action=action, since=_to_utc(since))
+        a naive timestamp is UTC), ``before`` (a row id: only strictly
+        older rows, for paging back — ADR 0028), ``limit`` (1..1000,
+        default 100)."""
+        filters = AuditFilters(
+            actor=actor,
+            action=action,
+            since=_to_utc(since),
+            before=str(before) if before is not None else None,
+        )
         try:
             records = await app.access_service.list_audit(credential, filters, limit)
         except PermissionDenied as exc:

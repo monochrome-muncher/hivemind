@@ -28,7 +28,7 @@ from hivemind.store.migrate import (
     rollback,
 )
 
-HEAD = "0005.audit-log"
+HEAD = "0006.agent-revoked-status"
 
 # Every applied migration id, oldest first. Kept explicit rather than read
 # off the filesystem: the point of these assertions is that the runner
@@ -39,6 +39,7 @@ CHAIN = [
     "0002.importance-source",
     "0003.importance-source-check",
     "0004.hnsw-vector-index",
+    "0005.audit-log",
     HEAD,
 ]
 
@@ -151,7 +152,8 @@ async def test_rollback_removes_the_latest_migration() -> None:
     """ADR 0020: a structural migration (not `0001`) ships a real
     rollback, and rolling one back undoes exactly what it did.
 
-    Peeled one at a time from the head: `0005` drops the audit log
+    Peeled one at a time from the head: `0006` narrows the agent status
+    CHECK back (ADR 0028); `0005` drops the (empty) audit log
     (ADR 0027) and nothing else; `0004` drops the HNSW vector
     index (ADR 0025) and leaves the `embedding` column alone; `0003`
     then drops the named CHECK constraint it added and leaves `0001` +
@@ -161,6 +163,10 @@ async def test_rollback_removes_the_latest_migration() -> None:
     await _require_postgres(dsn)
     await _reset_chain(dsn)
     await migrate(dsn, dim)
+
+    rolled = await rollback(dsn, dim, count=1)
+    assert rolled == ["0006.agent-revoked-status"]
+    assert await current_schema_version(dsn) == "0005.audit-log"
 
     rolled = await rollback(dsn, dim, count=1)
     assert rolled == ["0005.audit-log"]
@@ -279,5 +285,59 @@ async def test_migrate_fails_loudly_on_dim_mismatch() -> None:
     conn = await asyncpg.connect(dsn)
     try:
         assert await conn.fetchval("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'") == 0
+    finally:
+        await conn.close()
+
+
+async def test_0006_backfills_revoked_and_rolls_back_without_loss() -> None:
+    """ADR 0028: an `active` agent with no agent credential is a pre-0006
+    revocation, so 0006 marks it `revoked`; an active agent that holds a
+    key stays `active`. The rollback maps `revoked` back to the pre-0006
+    shape (`active`, no key) and destroys no row."""
+    dsn, dim = _dsn(), Settings().embedding_dim
+    await _require_postgres(dsn)
+    await _reset_chain(dsn)
+    await migrate(dsn, dim)
+    await rollback(dsn, dim, count=1)
+    assert await current_schema_version(dsn) == "0005.audit-log"
+
+    conn = await asyncpg.connect(dsn)
+    try:
+        await conn.execute(
+            "INSERT INTO agents (name, status, trust_level) VALUES "
+            "('keyed', 'active', 2), ('keyless', 'active', 2), ('waiting', 'pending', 0)"
+        )
+        await conn.execute(
+            "INSERT INTO credentials (key_hash, kind, user_id, agent_id, agent_name) "
+            "VALUES ('h-keyed', 'agent', 'keyed', 'keyed', 'keyed')"
+        )
+    finally:
+        await conn.close()
+
+    await migrate(dsn, dim)
+    statuses = "SELECT name, status FROM agents ORDER BY name"
+    conn = await asyncpg.connect(dsn)
+    try:
+        assert [tuple(r) for r in await conn.fetch(statuses)] == [
+            ("keyed", "active"),
+            ("keyless", "revoked"),
+            ("waiting", "pending"),
+        ]
+        await conn.execute("UPDATE agents SET status = 'revoked' WHERE name = 'waiting'")
+    finally:
+        await conn.close()
+
+    await rollback(dsn, dim, count=1)
+    conn = await asyncpg.connect(dsn)
+    try:
+        assert [tuple(r) for r in await conn.fetch(statuses)] == [
+            ("keyed", "active"),
+            ("keyless", "active"),
+            ("waiting", "active"),
+        ]
+        with pytest.raises(asyncpg.CheckViolationError):
+            await conn.execute("UPDATE agents SET status = 'revoked' WHERE name = 'keyed'")
+        await conn.execute("DELETE FROM credentials")
+        await conn.execute("DELETE FROM agents")
     finally:
         await conn.close()

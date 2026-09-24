@@ -25,8 +25,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from hivemind.domain.access import (
+    REVOCABLE,
     Agent,
+    AgentStatus,
     Fleet,
+    InvalidAgentStatus,
     TrustLevel,
 )
 from hivemind.domain.audit import AuditAction, AuditFilters, AuditRecord
@@ -84,8 +87,10 @@ class AccessService:
         else:
             self._require_org_or_admin(credential)
         existing = await self._store.get_agent(name)
-        if existing is not None and existing.status.value == "active":
-            raise ValueError("agent name already active (name is reserved; pick a new one)")
+        if existing is not None and existing.status is not AgentStatus.PENDING:
+            raise ValueError(
+                f"agent name already {existing.status.value} (name is reserved; pick a new one)"
+            )
         return await self._store.register_agent(name, owner_alias)
 
     # -- admin-gated operations (ADR 0012) ----------------------------------
@@ -97,10 +102,13 @@ class AccessService:
         home_fleet_id: str,
         credential: Credential,
     ) -> tuple[Agent, str]:
-        """Activate a pending agent: set trust level + home fleet and flip
-        it to ``active``; issue its key **once** (returned here, never
-        stored again — ADR 0012). Admin-gated. Returns (agent, raw_key).
-        """
+        """Activate a pending or revoked agent: set trust level + home
+        fleet and flip it to ``active``; issue its key **once** (returned
+        here, never stored again — ADR 0012). Admin-gated. Returns (agent,
+        raw_key). ``InvalidAgentStatus`` if it is already ``active``
+        (ADR 0028: one key per agent). The status flips first and the key
+        is issued last, so a failure in between leaves the agent active
+        with no key — less privileged, never more."""
         self._require_admin(credential)
         agent = await self._store.activate_agent(
             name, trust_level=trust_level, home_fleet_id=home_fleet_id
@@ -155,11 +163,21 @@ class AccessService:
         return agent
 
     async def revoke(self, name: str, credential: Credential) -> None:
-        """Revoke an agent's key (admin-gated, ADR 0012). The agent record
-        + name stay reserved (dormant); the key is dead."""
+        """Revoke an agent (admin-gated, ADRs 0012, 0028): kill its key and
+        set it ``revoked``. On a ``pending`` agent this rejects the
+        registration. The record + name stay reserved. ``KeyError`` if
+        unknown; ``InvalidAgentStatus`` if already ``revoked``. The key is
+        deleted first, so a failure before the status flip leaves the
+        agent keyless — less privileged, never more."""
         self._require_admin(credential)
+        before = await self._store.get_agent(name)
+        if before is None:
+            raise KeyError(f"unknown agent: {name}")
+        if before.status not in REVOCABLE:
+            raise InvalidAgentStatus(name, before.status, "revoke")
         await self._require_authenticator().revoke_agent_key(name)
-        await self._audit(credential, AuditAction.AGENT_REVOKE, name)
+        await self._store.revoke_agent(name)
+        await self._audit(credential, AuditAction.AGENT_REVOKE, name, {"from": before.status.value})
 
     async def rotate_org_key(self, credential: Credential) -> str:
         """Rotate the shared org key — the cluster kill switch (ADR 0012).

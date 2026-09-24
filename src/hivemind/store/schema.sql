@@ -53,7 +53,7 @@ CREATE TABLE public.agents (
     owner_alias text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     activated_at timestamp with time zone,
-    CONSTRAINT agents_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'active'::text]))),
+    CONSTRAINT agents_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'active'::text, 'revoked'::text]))),
     CONSTRAINT agents_trust_level_check CHECK (((trust_level >= 0) AND (trust_level <= 3)))
 );
 

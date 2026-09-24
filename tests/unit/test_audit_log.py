@@ -125,7 +125,7 @@ async def test_revoke_writes_one_row() -> None:
     [row] = await _rows(store)
     assert row.action is AuditAction.AGENT_REVOKE
     assert row.target == "alice"
-    assert row.detail == {}
+    assert row.detail == {"from": "pending"}
 
 
 async def test_rotate_org_key_writes_one_row_with_no_target() -> None:

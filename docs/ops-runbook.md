@@ -195,7 +195,7 @@ hash is stored (a leaked database never leaks usable keys, SPEC §8.1).
 | Action | Command / endpoint | Effect |
 |---|---|---|
 | Rotate the org key (cluster kill switch) | `hivemind-keys rotate-org` / `POST /v1/admin/org-key/rotate` | all prior org keys stop working on the next request |
-| Revoke an agent key | `hivemind-keys revoke --name alice` / `POST /v1/admin/agents/alice/revoke` | the agent's key is dead; the **name stays reserved** (ADR 0012) |
+| Revoke an agent key | `hivemind-keys revoke --name alice` / `POST /v1/admin/agents/alice/revoke` | the agent's key is dead and its status is `revoked`; the **name stays reserved**; on a `pending` agent this rejects the registration (ADRs 0012, 0028) |
 | Demote an agent | `PATCH /v1/admin/agents/{name}` (trust level → 0) | the agent is *dormant* (key still valid, no access) — distinct from revocation |
 
 > **The org-key rotation is the cluster-wide kill switch** (ADR 0012):
