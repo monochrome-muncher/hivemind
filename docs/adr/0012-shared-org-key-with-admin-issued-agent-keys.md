@@ -1,5 +1,9 @@
 # Shared org key with admin-issued agent keys
 
+> **Status: the "kill switch" clause is superseded by [ADR 0031](0031-one-key-per-request-and-what-org-key-rotation-stops.md).**
+> A request carries one key, so rotating the org key closes registration
+> but does not cut off active agents. Everything else below stands.
+
 ADR 0008 issued per-*user* keys plus agent-scoped sub-keys: the human
 author sat inside the credential, and the agent key bound an
 (author, agent-instance) pair. That model assumed a human in the loop

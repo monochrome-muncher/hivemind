@@ -287,7 +287,7 @@ class Authenticator(Protocol):
         ...
 
     async def rotate_org_key(self) -> str:
-        """Rotate the shared org key (the cluster kill switch, ADR 0012);
+        """Rotate the shared org key (closes registration, ADR 0031);
         returns the new raw secret once."""
         ...
 

@@ -147,7 +147,7 @@ The human name or address (username or email) an agent self-reports at registrat
 _Avoid_: author (that is the entry's verified writer), user, account
 
 **Org key**:
-The single credential shared by the whole cluster (ADR 0012). It gates registration + health only — all data-plane privilege comes from the agent key. Rotating it is the cluster-wide kill switch.
+The single credential shared by the whole cluster (ADR 0012). It gates registration only — all data-plane privilege comes from the agent key, and a request carries one key, never both. Rotating it closes registration to every prior copy; active agents keep working (ADR 0031).
 _Avoid_: shared key, membership key, cluster key
 
 **Admin key**:

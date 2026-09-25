@@ -4,7 +4,7 @@ These exercise the ``hivemind-keys`` CLI's async SQL functions against
 the live dev Postgres (the CLI's seam — ``main()`` is a thin argparse
 wrapper over them). They cover the rotation story DEPLOY.md §5
 documents: admin-key rotation (issue a new key, distribute it, then
-``revoke-admin`` the old one) and the ``rotate-org`` kill switch.
+``revoke-admin`` the old one) and ``rotate-org`` (which closes registration, ADR 0031).
 
 Hermetic-by-construction (mirroring ``test_pgstore_access.py``): skip
 cleanly when Postgres is unreachable; ``credentials`` is truncated

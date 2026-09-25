@@ -159,7 +159,7 @@ eval harness) — the two tracks run in parallel.
   (**returns the generated agent key once** — the only moment a key is
   ever shown), `PATCH /v1/admin/agents/{name}`,
   `POST /v1/admin/agents/{name}/revoke`, and
-  `POST /v1/admin/org-key/rotate` (the cluster-wide kill switch).
+  `POST /v1/admin/org-key/rotate` (closes registration — ADR 0031).
   `hivemind-keys` is reduced to admin-key issuance + org-key rotation
   (ADR 0012).
 - **Why:** registration is the front door of the model; activation is

@@ -8,7 +8,7 @@ in the ``credentials`` table (a leaked database never leaks usable keys
 The v2 key model (ADR 0012) reduces the keys to three:
 
 * **org key** — one shared key; gates registration + health only.
-  Rotated via ``rotate-org`` (the cluster kill switch).
+  Rotated via ``rotate-org`` (closes registration to every prior copy, ADR 0031).
 * **agent key** — one per registered agent, issued under its registered
   name; the agent's trust level + home fleet ride on the key (ADR 0011).
 * **admin key** — full access (fleet/level management, org-key rotation).
@@ -156,7 +156,7 @@ async def _issue_agent(dsn: str, name: str, *, actor: str | None = None) -> str:
 
 
 async def _rotate_org(dsn: str, *, actor: str | None = None) -> str:
-    """Rotate the shared org key (the cluster kill switch, ADR 0012).
+    """Rotate the shared org key (closes registration, ADR 0031).
     Audited as ``org_key.rotate`` (no target)."""
     raw_key = _raw_key()
     conn = await asyncpg.connect(dsn)
@@ -263,7 +263,10 @@ def main() -> None:
     issue_agent = sub.add_parser("issue-agent", help="issue an agent key for a registered agent")
     issue_agent.add_argument("--name", required=True)
 
-    sub.add_parser("rotate-org", help="rotate the shared org key (cluster kill switch)")
+    sub.add_parser(
+        "rotate-org",
+        help="rotate the shared org key (closes registration; active agents unaffected)",
+    )
 
     sub.add_parser("list", help="list credential hashes (never raw keys)")
 

@@ -112,7 +112,7 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | `POST /v1/admin/agents/{name}/activate` | Set trust level (default `lurker`) + home fleet; **returns the generated agent key once** (admin key; §12.3). Only from `pending` or `revoked`; `active` → 409 (ADR 0028) |
 | `PATCH /v1/admin/agents/{name}` | Change trust level / home fleet — demotion to `untrusted` = dormant (admin key) |
 | `POST /v1/admin/agents/{name}/revoke` | Kill the agent's key and set it `revoked`; on a `pending` agent this rejects the registration (admin key; the name stays reserved — ADRs 0012, 0028) |
-| `POST /v1/admin/org-key/rotate` | Rotate the shared org key — the cluster-wide kill switch (admin key) |
+| `POST /v1/admin/org-key/rotate` | Rotate the shared org key: closes registration to every prior org key; active agents are unaffected (admin key; ADR 0031) |
 | `GET /v1/metrics` | Usage counters: entries / fleets / agents (trust-level distribution, writes per fleet, pending count) — operational data (admin key; ROADMAP §3.3) |
 | `GET /v1/admin/audit-log` | The audit log of admin-surface actions, newest first; filters `actor`, `action`, `since`, `before`, `limit` (admin key; §12.5, ADRs 0027, 0028) |
 
@@ -193,7 +193,7 @@ A fresh, important, well-remembered entry beats a slightly-more-similar but stal
 
 | Credential | Binds | Effect |
 |---|---|---|
-| **org key** | the whole cluster (shared) | Gates registration + health only; rotation is the cluster-wide kill switch (ADR 0012) |
+| **org key** | the whole cluster (shared) | Gates registration only; rotating it closes registration to every prior copy, and active agents keep working (ADRs 0012, 0031) |
 | **agent key** | one registered agent | Carries the agent's trust level + home fleet; `author` is server-filled with the agent's registered name (§12, ADR 0012) |
 | **admin key** | the operator | The admin surface: activate / promote / demote / revoke, fleets, org-key rotation (§12.4) |
 
@@ -319,7 +319,7 @@ This section supersedes the flat-pool commitment of §1 and the "no trust tiers"
 
 1. **Registration** — an agent (or a human on its behalf, via `POST /v1/agents` — the seam a future human-facing frontend plugs into) registers a **unique agent name** plus the **owner's alias** (a username or email the admin uses to reach the owner). `hive_register` (MCP, org key only) or `POST /v1/agents` (REST; org key or admin key). This creates a **pending** agent at trust level 0 — no data-plane access. *Name already pending → idempotent no-op ("registered — awaiting admin activation"); name already active or revoked → "name already registered — choose a new name."*
 2. **Activation** — the admin activates via `POST /v1/admin/agents/{name}/activate`, setting the trust level (default `lurker`) and the home fleet (required; fleets are created first). The service generates the agent key and returns it **once** — the only moment a key is ever shown. The admin delivers the key **out-of-band** (chat/DM/email, using the owner alias); the service has **no notification channel**.
-3. **Live traffic** — an active agent presents the org key + its agent key on every request; per-agent / per-request verification (ADRs 0009–0010) applies unchanged. **Demotion** (to `untrusted`) and **revocation** are distinct verbs: demotion keeps the key valid but the agent can do nothing; revocation kills the key, sets the agent `revoked`, and the **name stays reserved** (ADR 0012). A revoked agent can be re-activated, which issues a fresh key (ADR 0028).
+3. **Live traffic** — an active agent presents **only its agent key** on every request (one key per request, ADR 0031); per-agent / per-request verification (ADRs 0009–0010) applies unchanged. **Demotion** (to `untrusted`) and **revocation** are distinct verbs: demotion keeps the key valid but the agent can do nothing; revocation kills the key, sets the agent `revoked`, and the **name stays reserved** (ADR 0012). A revoked agent can be re-activated, which issues a fresh key (ADR 0028).
 4. **Lifecycle** (ADR 0028) — `pending → active` (activate), `pending → revoked` (revoke: a rejected registration), `active → revoked` (revoke), `revoked → active` (activate, fresh key). Any other transition is **409**; activation never issues a second key to an agent that already holds one.
 
 ### 12.4 Admin surface
@@ -331,7 +331,7 @@ This section supersedes the flat-pool commitment of §1 and the "no trust tiers"
 | `POST /v1/admin/agents/{name}/activate` | Set level + home fleet; **returns the agent key once** (§12.3) |
 | `PATCH /v1/admin/agents/{name}` | Change level / home fleet (demotion to `untrusted` = dormant) |
 | `POST /v1/admin/agents/{name}/revoke` | Kill the key, status → `revoked` (name stays reserved; re-activation issues a *new* key). On a pending agent: reject the registration |
-| `POST /v1/admin/org-key/rotate` | Rotate the org key — the cluster-wide kill switch |
+| `POST /v1/admin/org-key/rotate` | Rotate the org key — closes registration to every prior copy (ADR 0031) |
 
 The single admin key gates this surface; admin-issued entries use the reserved name `admin` (ADR 0012). The admin panel (ADR 0029) is a browser front end over exactly this table plus the audit log; issuing and revoking admin keys stays with `hivemind-keys`.
 
