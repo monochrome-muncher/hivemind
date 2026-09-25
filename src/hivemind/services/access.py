@@ -30,6 +30,7 @@ from hivemind.domain.access import (
     AgentStatus,
     Fleet,
     InvalidAgentStatus,
+    Standing,
     TrustLevel,
 )
 from hivemind.domain.audit import AuditAction, AuditFilters, AuditRecord
@@ -206,6 +207,43 @@ class AccessService:
         self._require_admin(credential)
         return await self._store.list_audit(filters, limit)
 
+    # -- the caller's own standing (ADR 0030) -------------------------------
+
+    async def whoami(self, credential: Credential) -> Standing:
+        """What the calling key is and may do (``hive_whoami``, ADR 0030).
+
+        Any valid key may ask. Derived from the same rules the data plane
+        enforces (``Credential.max_write_scope`` / ``resolve_write_scope``
+        for writes, ``entry_is_visible`` for reads), so the answer cannot
+        drift from what a write or a search would actually allow."""
+        if credential.is_admin:
+            key_kind = "admin"
+        elif credential.is_org:
+            key_kind = "org"
+        elif not credential.access_controlled:
+            key_kind = "legacy"
+        else:
+            key_kind = "agent"
+
+        agent = None
+        if key_kind == "agent" and credential.agent_name is not None:
+            agent = await self._store.get_agent(credential.agent_name)
+        fleet_name = None
+        if credential.home_fleet_id is not None:
+            fleet = await self._store.get_fleet(credential.home_fleet_id)
+            fleet_name = fleet.name if fleet is not None else None
+
+        return Standing(
+            key_kind=key_kind,
+            name=credential.agent_name or credential.user_id,
+            status=agent.status if agent is not None else None,
+            trust_level=credential.trust_level,
+            home_fleet_id=credential.home_fleet_id,
+            home_fleet_name=fleet_name,
+            can_read=_readable(key_kind, credential),
+            can_write_scopes=_writable_scopes(key_kind, credential),
+        )
+
     # -- audit (ADR 0027) ------------------------------------------------------
 
     async def _audit(
@@ -248,6 +286,29 @@ class WriteResolution:
 
 # Scope ranks: a writer may not write a scope higher than its level allows.
 _SCOPE_RANK = {"self": 1, "fleet": 2, "org": 3}
+
+
+def _readable(key_kind: str, credential: Credential) -> tuple[str, ...]:
+    """``can_read`` for ``whoami`` (ADR 0030) — mirrors ``entry_is_visible``."""
+    if key_kind in ("admin", "legacy"):
+        return ("everything",)
+    if key_kind == "org" or credential.trust_level is TrustLevel.UNTRUSTED:
+        return ()
+    fleets = "all_fleets" if credential.trust_level is TrustLevel.PRIVILEGED else "home_fleet"
+    return ("own", fleets, "org")
+
+
+def _writable_scopes(key_kind: str, credential: Credential) -> tuple[str, ...]:
+    """``can_write_scopes`` for ``whoami`` (ADR 0030) — every scope up to
+    ``max_write_scope``, minus ``fleet`` for an agent with no home fleet
+    (``resolve_write_scope`` would reject it)."""
+    if key_kind == "org" or not credential.can_write():
+        return ()
+    max_rank = _SCOPE_RANK[credential.max_write_scope()]
+    scopes = tuple(scope for scope, rank in _SCOPE_RANK.items() if rank <= max_rank)
+    if key_kind == "agent" and credential.home_fleet_id is None:
+        scopes = tuple(scope for scope in scopes if scope != "fleet")
+    return scopes
 
 
 def resolve_write_scope(

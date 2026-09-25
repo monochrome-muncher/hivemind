@@ -32,6 +32,7 @@ EXPECTED_TOOLS = [
     "hive_withdraw",
     "hive_feedback",
     "hive_register",
+    "hive_whoami",
 ]
 
 

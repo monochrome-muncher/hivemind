@@ -164,12 +164,16 @@ _Avoid_: key id, key prefix (it is a prefix of the hash, never of the key)
 ### Surfaces
 
 **MCP runner**:
-The process that exposes Hivemind's seven `hive_*` tools to an agent. Three kinds: the dev runner (`hivemind-mcp`, in-memory, stdio), the per-agent Postgres-backed runner (`hivemind-mcp-pg`, ADR 0009, one process per agent), and the hostable streamable-HTTP runner (`hivemind-mcp-http`, ADR 0010, one shared pool per process, many agents — never a process per agent; it runs as 2 replicas in production, ADR 0026). All read/write the same pool; every write carries verified provenance.
+The process that exposes Hivemind's eight `hive_*` tools to an agent. Three kinds: the dev runner (`hivemind-mcp`, in-memory, stdio), the per-agent Postgres-backed runner (`hivemind-mcp-pg`, ADR 0009, one process per agent), and the hostable streamable-HTTP runner (`hivemind-mcp-http`, ADR 0010, one shared pool per process, many agents — never a process per agent; it runs as 2 replicas in production, ADR 0026). All read/write the same pool; every write carries verified provenance.
 _Avoid_: Hivemind client (implies a library client), agent connector
 
 **Agent key**:
 The admin-issued credential bound to one registered agent (ADR 0012, supersedes the ADR 0008 sub-key). Carries the agent's trust level and home fleet; it is what the MCP runners present so their writes carry verified provenance. One key per agent, returned once at activation.
 _Avoid_: sub-key (the ADR 0008 term), token, API key (that is the generic REST term; say "agent key")
+
+**Standing**:
+What a key is and may do right now: its kind (agent, org, admin), the agent's status, trust level and home fleet, what it may read and which scopes it may write. Reported by `hive_whoami` (ADR 0030); it is a snapshot taken when the key is verified, so a promotion shows on the next request.
+_Avoid_: permissions, profile, role
 
 **Admin panel**:
 The browser front end for the admin surface, run as its own runner (`hivemind-admin`) that talks only to `hivemind-api`. You log in by presenting an admin key. Its landing view is the pending-agent queue. It covers everything the admin surface does except issuing or revoking admin keys, which stays with the `hivemind-keys` CLI.

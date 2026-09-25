@@ -43,6 +43,7 @@ from hivemind.api.schemas import (
     RegisterAgentRequest,
     SearchRequest,
     UpdateAgentRequest,
+    WhoamiOut,
     WithdrawRequest,
 )
 from hivemind.domain.access import Agent, InvalidAgentStatus, TrustLevel
@@ -299,6 +300,13 @@ def build_router(app: HivemindApp) -> APIRouter:
             verdict=outcome.feedback.verdict,
             quality=outcome.quality,
         )
+
+    @router.get("/whoami", response_model=WhoamiOut)
+    async def whoami(credential: require) -> WhoamiOut:
+        """The calling key's standing (ADR 0030): its kind, the agent's
+        name / status / trust level / home fleet, and what it may read
+        and write. Any valid key may ask; not audited."""
+        return WhoamiOut.from_standing(await app.access_service.whoami(credential))
 
     # --- Agent registration + fleet/trust management (ADRs 0011-0012) ------
 

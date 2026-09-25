@@ -13,7 +13,7 @@ from typing import Any
 
 from pydantic import BaseModel, field_validator
 
-from hivemind.domain.access import Agent, Fleet
+from hivemind.domain.access import Agent, Fleet, Standing
 from hivemind.domain.audit import AuditRecord
 from hivemind.domain.entry import EntityKind, Entry, ImportanceSource, Kind, SourceType
 from hivemind.domain.feedback import Verdict
@@ -319,6 +319,24 @@ class FleetOut(BaseModel):
     @classmethod
     def from_fleet(cls, fleet: Fleet) -> FleetOut:
         return cls(id=fleet.id, name=fleet.name, created_at=fleet.created_at.isoformat())
+
+
+class WhoamiOut(BaseModel):
+    """The calling key's standing (``GET /v1/whoami``, ADR 0030)."""
+
+    key_kind: str
+    name: str
+    status: str | None
+    trust_level: int
+    trust_level_name: str
+    home_fleet_id: str | None
+    home_fleet_name: str | None
+    can_read: list[str]
+    can_write_scopes: list[str]
+
+    @classmethod
+    def from_standing(cls, standing: Standing) -> WhoamiOut:
+        return cls.model_validate(standing.as_dict())
 
 
 class KeyIssuedOut(BaseModel):
