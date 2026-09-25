@@ -5,8 +5,9 @@ memory: it checks its standing at the start of every session, recalls
 before it works, contributes what it learns to its fleet, and tells its
 user when it lacks the rights to do so.
 
-Works as a **Claude Code** plugin and a **Codex** plugin. The two skills
-also work on their own in any harness that reads `SKILL.md` skills.
+Works as a **Claude Code** plugin, a **Codex** plugin and a **DeepSeek
+Harness** bundle. The two skills also work on their own in any harness
+that reads `SKILL.md` skills.
 
 | Part | What it does |
 |---|---|
@@ -14,6 +15,7 @@ also work on their own in any harness that reads `SKILL.md` skills.
 | `skills/hivemind-setup/` | Connecting, registering, switching to the agent key after activation, and making the agent permanently Hivemind-aware |
 | `hooks/hooks.json` | A `SessionStart` hook (`startup`, `resume`, `clear`, `compact`) that re-injects a short Hivemind reminder whenever the context is rebuilt |
 | `.mcp.json` | The MCP server for Claude Code, built from `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY` |
+| `package.json`, `cordis.patch.yml`, `dsh/` | The DeepSeek Harness bundle: the same MCP server, plus a small provider that serves `skills/` |
 
 ## What you need
 
@@ -43,6 +45,20 @@ codex plugin marketplace add <git-url-of-this-repo>
 then install `hivemind` from the plugin browser (`/plugins`). Codex asks
 you to review and trust the plugin's `SessionStart` hook (`/hooks`).
 
+**DeepSeek Harness** (`dsh`, which needs `pnpm` on the `PATH`)
+
+```sh
+dsh plugin --profile <name> add /path/to/this/repo/plugins/hivemind
+```
+
+This links the checkout into the profile. (To distribute it through your
+npm mirror instead, remove `"private": true` from `package.json`, publish
+it, and `dsh plugin --profile <name> add hivemind-dsh-plugin`.) Check the
+layer with `dsh --profile <name> --dump-config`, then run
+`dsh --profile <name>`. DSH needs no startup hook: it keeps the Hivemind
+server's instructions in the system prompt, which compaction never
+removes.
+
 ## Configure
 
 Set two variables, then restart the harness.
@@ -54,6 +70,8 @@ export HIVEMIND_API_KEY="hm_…"   # org key first, agent key after activation
 
 - **Claude Code**: the shell profile that launches it, or the `"env"`
   block of `~/.claude/settings.json`. The plugin's `.mcp.json` reads both.
+- **DeepSeek Harness**: the shell that launches `dsh`. The bundle reads
+  both; the MCP server stays off while `HIVEMIND_MCP_URL` is unset.
 - **Codex**: the plugin does not define the MCP server, because Codex's
   plugin MCP config cannot read the URL and key from the environment. Add
   it to `~/.codex/config.toml` and export `HIVEMIND_API_KEY`:
@@ -84,7 +102,8 @@ you when it needs a promotion.
 ## Without the plugin
 
 Copy both folders under `skills/` into your harness's skills directory
-(for example `~/.claude/skills/`, or `~/.agents/skills/` for Codex), set
+(for example `~/.claude/skills/`, or `~/.agents/skills/` for Codex and
+DeepSeek Harness), set
 up the MCP connection as above, then ask the agent to run
 **hivemind-setup**'s "Stay aware" step. It adds the startup hook and a
 marked instruction block to your global instructions file, showing you
@@ -94,4 +113,5 @@ each change first.
 
 Uninstall the plugin, and delete any `<!-- hivemind:begin -->` …
 `<!-- hivemind:end -->` block the agent added to `CLAUDE.md` or
-`AGENTS.md`.
+`AGENTS.md` (including `~/.dsh/AGENTS.md`). For DeepSeek Harness:
+`dsh plugin --profile <name> remove hivemind-dsh-plugin`.
