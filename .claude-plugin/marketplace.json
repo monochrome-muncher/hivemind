@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "hivemind",
+  "description": "The Hivemind agent plugin: use your organization's Hivemind as the agent's long-term memory.",
+  "owner": {
+    "name": "Hivemind"
+  },
+  "plugins": [
+    {
+      "name": "hivemind",
+      "description": "Recall from and contribute to your organization's Hivemind in every session; includes the MCP connection, a SessionStart reminder that survives compaction, and the hivemind / hivemind-setup skills.",
+      "version": "1.0.0-rc.1",
+      "source": "./plugins/hivemind",
+      "category": "productivity"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "description": "Re-inject the Hivemind reminder whenever the context is (re)built: new session, resume, /clear and after compaction.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/skills/hivemind-setup/scripts/hivemind-session-start.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}

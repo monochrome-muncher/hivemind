@@ -1,0 +1,9 @@
+{
+  "name": "hivemind",
+  "version": "1.0.0-rc.1",
+  "description": "Use your organization's Hivemind as the agent's long-term memory: recall before you work, contribute what you learn to your fleet, and stay aware of it across sessions and compaction.",
+  "author": {
+    "name": "Hivemind"
+  },
+  "keywords": ["memory", "knowledge", "mcp", "hivemind"]
+}
