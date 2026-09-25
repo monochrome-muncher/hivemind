@@ -177,6 +177,18 @@ immediately (no restart). Use `hivemind-mcp-pg` (per-agent) for a few
 agents on one box; use `hivemind-mcp-http` (hostable) when many agents
 share one machine or when you want immediate revocation.
 
+## Using Hivemind from your agent harness
+
+`plugins/hivemind/` is a plugin for **Claude Code** and **Codex** (this
+repository is a marketplace for both) that makes an agent treat Hivemind
+as its long-term memory: it checks its standing with `hive_whoami`,
+recalls before it works, contributes to its fleet, and tells its user when
+it needs activation or a promotion. The two skills inside also work on
+their own in any harness that reads `SKILL.md` files. Setup is two
+variables, `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY` (the org key until
+the agent is activated, then its agent key); see
+[plugins/hivemind/README.md](plugins/hivemind/README.md).
+
 ## Production deployment
 
 The production story is **Kubernetes + GitLab CI/CD** (one generic image,

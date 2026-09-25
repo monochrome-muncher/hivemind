@@ -185,7 +185,7 @@ kinds). Tier 3.1 (the key-rotation runbook) is **blocked by Tier 2** —
 you can't write a rotation story for a key model that's about to
 change.
 
-## Tier 3 — productionize (former Tier 2)  *(3.1, 3.3–3.9 shipped; 3.2 superseded by 3.5)*
+## Tier 3 — productionize (former Tier 2)  *(3.1, 3.3–3.10 shipped; 3.2 superseded by 3.5)*
 
 ### 3.1 Ops runbook  *(shipped: `docs/ops-runbook.md`)*
 Deployment, **backups** (single-node Postgres, ADR 0007),
@@ -390,6 +390,27 @@ simplest option, chosen deliberately), so the panel's defence against a
 stolen key is its strict CSP, rendering API data only as text, and a
 proxy allowlist that keeps it from relaying to the data plane (ADR 0029).
 Keep it behind an internal ingress or `kubectl port-forward`.
+
+### 3.10 Agent plugin and skills  *(shipped: ADRs 0030–0031, `plugins/hivemind/`)*
+Agents in other harnesses had the MCP tools but no guidance on using
+them, and no way to find out what they were allowed to do. The plugin
+(Claude Code and Codex; also usable as plain skills) makes Hivemind the
+agent's long-term memory: `hive_whoami` first in every session, recall
+before work, frequent but disciplined contributions to the fleet, a
+never-write list (the agent's own credentials, unverified guesses, raw
+dumps; security findings are allowed and tagged), and local memory only
+as scratch space or fallback. A `SessionStart` hook re-injects the
+reminder after compaction, and `hivemind-setup` walks through connecting,
+self-registration, switching to the agent key, and adding a hook plus an
+instruction block when the plugin is not installed, asking before every
+change.
+
+**It needed two server changes first.** `hive_whoami` (ADR 0030), because
+an agent could not otherwise tell "I may not write" or "I may not read"
+from an empty result. And ADR 0031, because the docs claimed agents send
+the org key plus their agent key and that org-key rotation stops every
+agent; the code has always taken one key, and rotation only closes
+registration.
 
 ## Tier 4 — close the spec's open items (SPEC §11) (former Tier 3)
 
