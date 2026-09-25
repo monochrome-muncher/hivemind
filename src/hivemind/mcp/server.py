@@ -38,6 +38,7 @@ from hivemind.mcp.app import (
     hive_list,
     hive_register,
     hive_search,
+    hive_whoami,
     hive_withdraw,
     hive_write,
 )
@@ -101,12 +102,22 @@ _DESC_REGISTER = (
 )
 
 
+_DESC_WHOAMI = (
+    "Who am I to Hivemind? Returns this key's kind (agent/org/admin), the "
+    "agent's name, status (pending/active/revoked), trust level and home "
+    "fleet, and what it may read (can_read) and which scopes it may write "
+    "(can_write_scopes). Call it at the start of every session: an empty "
+    "can_write_scopes means you cannot write yet; an empty can_read means "
+    "searches will come back empty however much is stored (ADR 0030)."
+)
+
+
 def build_server(
     app: McpHivemind,
     *,
     credential_provider: Callable[[], Credential | None] | None = None,
 ) -> MCPServer:
-    """Build an ``MCPServer`` exposing exactly the six Hivemind tools.
+    """Build an ``MCPServer`` exposing exactly the eight Hivemind tools.
 
     Each registered tool is a closure over ``app`` so the LLM only ever
     sees the LLM-facing arguments; the acting identity and services are
@@ -268,6 +279,10 @@ def build_server(
         return await hive_feedback(
             resolve_app(), entry_id=entry_id, verdict=verdict, note=note, agent=agent
         )
+
+    @server.tool(name="hive_whoami", description=_DESC_WHOAMI)
+    async def _hive_whoami() -> dict[str, Any]:
+        return await hive_whoami(resolve_app())
 
     return server
 

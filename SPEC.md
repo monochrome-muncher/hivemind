@@ -105,6 +105,7 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | `POST /v1/entries/{id}/withdraw` | Withdraw own entry (or any, with admin credential) |
 | `POST /v1/entries/{id}/feedback` | Report `helpful`/`stale`/`wrong` (+note) |
 | `GET /v1/health` | Liveness/readiness |
+| `GET /v1/whoami` | The calling key's standing: kind (`agent`/`org`/`admin`/`legacy`), agent name, status, trust level, home fleet, `can_read`, `can_write_scopes` (any valid key; not audited — ADR 0030) |
 | `POST /v1/agents` | Register an agent (org key or admin key; `{name, owner_alias?}`) → pending agent (§12, ADR 0012) |
 | `GET /v1/admin/agents` | List agents: status, trust level, home fleet, owner alias (admin key) |
 | `GET /v1/admin/fleets` | List fleets (admin key) |
@@ -116,7 +117,7 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | `GET /v1/metrics` | Usage counters: entries / fleets / agents (trust-level distribution, writes per fleet, pending count) — operational data (admin key; ROADMAP §3.3) |
 | `GET /v1/admin/audit-log` | The audit log of admin-surface actions, newest first; filters `actor`, `action`, `since`, `before`, `limit` (admin key; §12.5, ADRs 0027, 0028) |
 
-### 5.2 MCP tools (the agent's mental model — seven verbs)
+### 5.2 MCP tools (the agent's mental model — eight verbs)
 
 | Tool | Maps to |
 |---|---|
@@ -127,8 +128,9 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | `hive_withdraw` | `POST /v1/entries/{id}/withdraw` |
 | `hive_feedback` | `POST /v1/entries/{id}/feedback` |
 | `hive_register` | `POST /v1/agents` (org key only — the agent's first contact with Hivemind; §12.3) |
+| `hive_whoami` | `GET /v1/whoami` (any valid key — the key's kind, the agent's status, trust level and home fleet, and what it may read and write; ADR 0030) |
 
-A typical agent prompt contract: *"recall before you analyze; write what you learn; supersede, don't duplicate; report when something you relied on proved wrong."*
+A typical agent prompt contract: *"check where you stand (`hive_whoami`); recall before you analyze; write what you learn; supersede, don't duplicate; report when something you relied on proved wrong."* The agent plugin and skills in `plugins/hivemind/` spell this contract out for agent harnesses.
 
 ### 5.3 Filters (search *and* list)
 
@@ -215,10 +217,10 @@ Turning Hivemind off for a session is a **client-side act**: the agent's Hivemin
 
 The MCP stdio surface ships **two runners**:
 
-* **`hivemind-mcp`** — the **dev** path: in-memory store + local hash embedder + a hard-coded `dev` credential. Zero network, ephemeral, single identity; for exercising the seven `hive_*` tools with no dependencies.
+* **`hivemind-mcp`** — the **dev** path: in-memory store + local hash embedder + a hard-coded `dev` credential. Zero network, ephemeral, single identity; for exercising the eight `hive_*` tools with no dependencies.
 * **`hivemind-mcp-pg`** — the **production** path: a DSN-backed `PgStore` + the operator-configured OpenAI-compatible embedder (ADR 0005), with the acting credential resolved by verifying `HIVEMIND_MCP_KEY` against the Postgres `credentials` table (ADR 0012).
 
-**Unified multi-agent pool:** several agents each run their own `hivemind-mcp-pg` process with a distinct `HIVEMIND_MCP_KEY` (an **agent key**, ADR 0012). All of them read/write the **same** Postgres pool over a **unified** MCP interface (the identical seven `hive_*` tools) while every write carries that agent's *verified* provenance (its registered name, server-filled from the key). Revoking an agent's key revokes its access immediately. The dev runner (`hivemind-mcp`) is unchanged.
+**Unified multi-agent pool:** several agents each run their own `hivemind-mcp-pg` process with a distinct `HIVEMIND_MCP_KEY` (an **agent key**, ADR 0012). All of them read/write the **same** Postgres pool over a **unified** MCP interface (the identical eight `hive_*` tools) while every write carries that agent's *verified* provenance (its registered name, server-filled from the key). Revoking an agent's key revokes its access immediately. The dev runner (`hivemind-mcp`) is unchanged.
 
 ### 8.5 The hostable streamable-HTTP runner (ADR 0010)
 

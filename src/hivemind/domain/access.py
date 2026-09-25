@@ -128,6 +128,42 @@ class Agent:
 
 
 @dataclass(frozen=True, slots=True)
+class Standing:
+    """What the calling key is and may do (``hive_whoami``, ADR 0030).
+
+    Plain data: the agent skill, not the API, turns it into advice.
+    ``key_kind`` is ``agent``, ``org``, ``admin`` or ``legacy`` (a v1 /
+    dev-mode credential with no access control). ``can_read`` uses the
+    vocabulary ``own``, ``home_fleet``, ``all_fleets``, ``org`` (the
+    legacy scope) and ``everything``; ``can_write_scopes`` lists the
+    scopes a write may use, narrowest first.
+    """
+
+    key_kind: str
+    name: str
+    status: AgentStatus | None
+    trust_level: TrustLevel
+    home_fleet_id: str | None
+    home_fleet_name: str | None
+    can_read: tuple[str, ...]
+    can_write_scopes: tuple[str, ...]
+
+    def as_dict(self) -> dict[str, object]:
+        """The JSON shape both surfaces return (REST and MCP, ADR 0030)."""
+        return {
+            "key_kind": self.key_kind,
+            "name": self.name,
+            "status": self.status.value if self.status is not None else None,
+            "trust_level": self.trust_level.value,
+            "trust_level_name": self.trust_level.name.lower(),
+            "home_fleet_id": self.home_fleet_id,
+            "home_fleet_name": self.home_fleet_name,
+            "can_read": list(self.can_read),
+            "can_write_scopes": list(self.can_write_scopes),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class Visibility:
     """The read-side view of a caller: what that caller may see.
 
@@ -197,6 +233,8 @@ __all__ = [
     "Agent",
     "AgentStatus",
     "Fleet",
+    "InvalidAgentStatus",
+    "Standing",
     "TrustLevel",
     "Visibility",
     "entry_is_visible",
