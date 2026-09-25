@@ -194,14 +194,15 @@ hash is stored (a leaked database never leaks usable keys, SPEC §8.1).
 
 | Action | Command / endpoint | Effect |
 |---|---|---|
-| Rotate the org key (cluster kill switch) | `hivemind-keys rotate-org` / `POST /v1/admin/org-key/rotate` | all prior org keys stop working on the next request |
+| Rotate the org key (close registration) | `hivemind-keys rotate-org` / `POST /v1/admin/org-key/rotate` | all prior org keys stop working on the next request; active agents are unaffected |
 | Revoke an agent key | `hivemind-keys revoke --name alice` / `POST /v1/admin/agents/alice/revoke` | the agent's key is dead and its status is `revoked`; the **name stays reserved**; on a `pending` agent this rejects the registration (ADRs 0012, 0028) |
 | Demote an agent | `PATCH /v1/admin/agents/{name}` (trust level → 0) | the agent is *dormant* (key still valid, no access) — distinct from revocation |
 
-> **The org-key rotation is the cluster-wide kill switch** (ADR 0012):
-> rotating it invalidates every org-key request (registration, health)
-> immediately. Use it to cut the org off the cluster (e.g. a compromised
-> shared key).
+> **Rotating the org key closes registration** (ADR 0031): every prior
+> org key stops working immediately, so a leaked copy can no longer
+> register agents. It does **not** cut off active agents — they
+> authenticate with their own agent keys. To cut agents off, revoke
+> them (or demote them to `untrusted`).
 
 ### Audit trail of key and admin actions (ADR 0027)
 

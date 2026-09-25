@@ -143,14 +143,17 @@ first-run bootstrap Job records itself as `ci-bootstrap`.
 
 ### 4.1 Org key
 
-- **How** — `hivemind-keys rotate-org` (atomic delete + insert, the
-  cluster kill-switch, ADR 0012). The new raw key is printed **once**.
+- **How** — `hivemind-keys rotate-org` (atomic delete + insert; it
+  closes registration to every prior copy, ADR 0031). The new raw key is
+  printed **once**.
 - **Then** — store it: update the k8s Secret `hivemind-keys`
   (`kubectl -n hivemind patch secret hivemind-keys -p
   '{"stringData":{"ORG_KEY":"<new>"}}'`) — or delete the Secret and re-run
   the bootstrap (§2 step 4).
-- **Blast radius** — agents carrying the old org key fail at the **next
-  request** (401). No data impact.
+- **Blast radius** — only registration: anyone still holding the old
+  org key gets a 401 on their **next** registration attempt. Active agents
+  authenticate with their own agent keys and are **not** affected. No
+  data impact.
 - **Verify** — a registration call with the new org key succeeds; the old
   key now 401s.
 
@@ -335,7 +338,7 @@ auth middleware — k8s probes carry no credential):
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| 401 on every agent call | wrong/stale org key (e.g. after a rotation that wasn't distributed) | re-fetch `ORG_KEY` from the `hivemind-keys` Secret; §4.1 |
+| 401 on every agent call | an active agent: its agent key was revoked or mistyped. A not-yet-activated agent: a stale org key (after a rotation that wasn't distributed) | active: re-activate it for a new key (§4.3); pending: re-fetch `ORG_KEY` from the `hivemind-keys` Secret (§4.1) |
 | app container CrashLooping on the entrypoint's migrate pre-step | dim mismatch (ADR 0015) — the log names both dims + both fixes | `make pg-reset` equivalent (fresh pool) or set `HIVEMIND_EMBEDDING_DIM` to the pool's dim |
 | container fails immediately with `Unknown HIVEMIND_* environment variable(s)` | a typo'd or stale `HIVEMIND_*` var (ADR 0024) — e.g. a renamed knob (ADR 0021's `_PREFIX_CHARS` → `_PREFIX_TOKENS`) left set under its old name | fix/remove the named variable per the error's suggestion, or add it to `_ALLOWED_EXTRA_ENV_VARS` in `src/hivemind/config.py` if it's genuinely read outside `Settings` |
 | MCP session drops after ~60s | nginx default `proxy-read-timeout` killing the SSE stream (classic pitfall) | apply the opt-in Ingress with the SSE annotations (`deploy/kubernetes/optional/ingress.yaml`) |

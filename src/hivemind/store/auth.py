@@ -170,7 +170,7 @@ class PgAuthenticator:
             await conn.execute(_REVOKE_AGENT_KEY, agent_name)
 
     async def rotate_org_key(self) -> str:
-        """Rotate the shared org key (the cluster kill switch, ADR 0012);
+        """Rotate the shared org key (closes registration, ADR 0031);
         returns the new raw secret once. All prior org keys stop working."""
         pool = await self._ensure_pool()
         raw_key = _generate_key()

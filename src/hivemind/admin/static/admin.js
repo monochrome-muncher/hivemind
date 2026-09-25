@@ -653,7 +653,7 @@ async function viewKeys(root) {
     h("div", { class: "card card-danger" },
       h("div", { class: "card-head" }, h("h2", { text: "Rotate the org key" })),
       h("div", { class: "card-body" },
-        h("p", { class: "callout callout-danger", text: "This is the cluster-wide kill switch: every existing org key stops working immediately. Agent keys are not affected." }),
+        h("p", { class: "callout callout-danger", text: "Every existing org key stops working immediately, so nobody can register new agents with an old copy. Active agents are not affected: they use their own agent keys. To cut an agent off, revoke it." }),
         form)),
     h("div", { class: "card" },
       h("div", { class: "card-head" }, h("h2", { text: "Admin keys" })),

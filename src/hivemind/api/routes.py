@@ -449,7 +449,8 @@ def build_router(app: HivemindApp) -> APIRouter:
 
     @router.post("/admin/org-key/rotate", response_model=KeyIssuedOut)
     async def rotate_org_key(credential: require) -> KeyIssuedOut:
-        """Rotate the shared org key — the cluster kill switch (ADR 0012).
+        """Rotate the shared org key — closes registration to every
+        prior org key; active agents are unaffected (ADR 0031).
         All prior org keys stop working; the new key is returned once.
         """
         try:
