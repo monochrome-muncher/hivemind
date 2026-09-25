@@ -91,6 +91,32 @@ bearer_token_env_var = "HIVEMIND_API_KEY"
 
 Then export `HIVEMIND_API_KEY` in the shell profile that launches Codex.
 
+### DeepSeek Harness (dsh)
+
+- **With the hivemind bundle** (`dsh plugin --profile <name> add
+  <path-or-package>`): the bundle defines the MCP server from
+  `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY` and serves both skills. Only
+  set the variables, in the shell that launches `dsh`. The server stays
+  off while `HIVEMIND_MCP_URL` is unset.
+- **Without the bundle**: add this row to `~/.dsh/cordis.patch.yml` (all
+  profiles) or `~/.dsh/profiles/<name>/cordis.patch.yml`, merging into
+  the existing file:
+
+  ```yaml
+  - insert:
+      - id: hivemind-mcp
+        name: '@deepseek-ai/dsh-mcp-client'
+        config:
+          serverName: hivemind
+          transport: streamable-http
+          url: !!js process.env.HIVEMIND_MCP_URL
+          headers:
+            Authorization: !!js '`Bearer ${process.env.HIVEMIND_API_KEY}`'
+  ```
+
+  and copy both skill folders into `~/.agents/skills/` (DSH scans it; so
+  does Codex).
+
 ### Any other harness
 
 Configure an MCP server with transport "streamable HTTP", the URL above
@@ -150,14 +176,23 @@ that re-injects a reminder whenever the context is rebuilt, and an
 **If the hivemind plugin is installed, the hook is already in place**
 (Claude Code and Codex). Add only the instruction block.
 
+**DeepSeek Harness needs no hook.** It puts the Hivemind MCP server's
+instructions into the system prompt, which compaction never removes, and
+it keeps the global `~/.dsh/AGENTS.md` as a durable baseline. Add the
+instruction block to `~/.dsh/AGENTS.md` and you are done. (DSH's bridge
+for Claude Code hooks runs `SessionStart` only once, at session start,
+and its text does not survive compaction, so it is not the right tool
+here.)
+
 Show the user each change, ask, make it, then report it. Mark every block
 so it can be found and removed later.
 
 ### The instruction block
 
 Add this to the harness's always-loaded instructions:
-`~/.claude/CLAUDE.md` (Claude Code), `~/.codex/AGENTS.md` (Codex), or the
-system prompt / instructions file of other harnesses:
+`~/.claude/CLAUDE.md` (Claude Code), `~/.codex/AGENTS.md` (Codex),
+`~/.dsh/AGENTS.md` (DeepSeek Harness), or the system prompt / instructions
+file of other harnesses:
 
 ```markdown
 <!-- hivemind:begin -->

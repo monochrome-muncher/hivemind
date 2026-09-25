@@ -1,0 +1,24 @@
+# DeepSeek Harness bundle layer for Hivemind (see README.md, "DeepSeek Harness").
+#
+# 1. The Hivemind MCP server over Streamable HTTP. The URL and the key come
+#    from the environment, never from this file: HIVEMIND_MCP_URL and
+#    HIVEMIND_API_KEY (the org key until the agent is activated, then its
+#    agent key; one key per request). The row stays disabled until the URL
+#    is set, so an unconfigured install boots cleanly.
+#    Hivemind's MCP server instructions land in DSH's system prompt, which
+#    compaction never removes: that is what keeps the agent aware of
+#    Hivemind for the whole session.
+# 2. The bundle's own skills/ folder, served by dsh/hivemind-skills.js as a
+#    packaged skill provider (the pattern of DSH's own dsh-skill-badge).
+- insert:
+    - id: hivemind-mcp
+      name: '@deepseek-ai/dsh-mcp-client'
+      disabled: !!js "!process.env.HIVEMIND_MCP_URL"
+      config:
+        serverName: hivemind
+        transport: streamable-http
+        url: !!js process.env.HIVEMIND_MCP_URL
+        headers:
+          Authorization: !!js '`Bearer ${process.env.HIVEMIND_API_KEY ?? ""}`'
+    - id: hivemind-skills
+      name: ./dsh/hivemind-skills.js

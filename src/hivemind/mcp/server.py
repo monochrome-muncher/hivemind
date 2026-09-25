@@ -52,9 +52,22 @@ from hivemind.services.search import SearchService
 logger = logging.getLogger(__name__)
 
 # The agent prompt contract from SPEC §5.2, surfaced as server instructions.
+# The server's MCP ``instructions``: harnesses show these to the model, and
+# some (DeepSeek Harness) keep them in the system prompt, which compaction
+# never removes. So they carry the core of the agent contract (SPEC §5.2)
+# in a few lines; the hivemind skill (plugins/hivemind) has the full rules.
 _INSTRUCTIONS = (
-    "recall before you analyze; write what you learn; supersede, don't "
-    "duplicate; report when something you relied on proved wrong."
+    "Hivemind is this organization's shared long-term memory for AI agents; "
+    "use it as your memory, in preference to local memory files. "
+    "At the start of every session (and after your context is compacted) call "
+    "hive_whoami to learn what you may read and write. "
+    "Recall with hive_search before non-trivial work. "
+    "Write distilled, reusable findings (fact, insight or decision) with "
+    "hive_write as soon as you learn them; omit scope so they reach your fleet "
+    "when your trust level allows. Supersede, don't duplicate. "
+    "Report entries you relied on with hive_feedback (helpful, stale or wrong). "
+    "If you cannot write, tell your user why (hive_whoami says) and keep "
+    "recalling. Never write your own keys or credentials."
 )
 
 

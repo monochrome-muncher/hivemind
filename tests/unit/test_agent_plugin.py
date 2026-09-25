@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import tomllib
 from pathlib import Path
@@ -60,7 +61,9 @@ def test_manifests_agree_on_name_and_version() -> None:
     market = _json(ROOT / ".claude-plugin" / "marketplace.json")
     [entry] = market["plugins"]  # type: ignore[misc]
     assert claude["name"] == codex["name"] == entry["name"] == "hivemind"
-    assert claude["version"] == codex["version"] == entry["version"] == semver
+    dsh = _json(PLUGIN / "package.json")
+    assert claude["version"] == codex["version"] == entry["version"] == dsh["version"] == semver
+    assert dsh["name"] == "hivemind-dsh-plugin"
     [codex_entry] = _json(ROOT / ".agents" / "plugins" / "marketplace.json")["plugins"]  # type: ignore[misc]
     assert (ROOT / codex_entry["source"]["path"]).resolve() == PLUGIN
     assert (ROOT / entry["source"]).resolve() == PLUGIN
@@ -93,3 +96,49 @@ def test_skill_names_match_their_folders() -> None:
     for folder in (PLUGIN / "skills").iterdir():
         text = (folder / "SKILL.md").read_text()
         assert re.search(rf"^name: {re.escape(folder.name)}$", text, re.MULTILINE), folder
+
+
+def test_the_server_instructions_name_only_real_tools() -> None:
+    """The MCP ``instructions`` (shown by every harness, kept in DeepSeek
+    Harness's never-compacted system prompt) must not drift from the tools."""
+    from hivemind.mcp.server import _INSTRUCTIONS
+
+    named = set(re.findall(r"\bhive_[a-z]+\b", _INSTRUCTIONS))
+    assert "hive_whoami" in named
+    assert named <= set(EXPECTED_TOOLS)
+
+
+def test_the_dsh_bundle_patch_points_at_real_files_and_reads_keys_from_env() -> None:
+    manifest = _json(PLUGIN / "package.json")
+    patch_path = PLUGIN / manifest["dsh"]["bundle"]["patch"]  # type: ignore[index]
+    patch = patch_path.read_text()
+    for rel in re.findall(r"name: (\./\S+)", patch):
+        assert (PLUGIN / rel).is_file(), rel
+    assert "process.env.HIVEMIND_MCP_URL" in patch
+    assert "process.env.HIVEMIND_API_KEY" in patch
+    assert "hm_" not in patch  # no key ever lives in the bundle
+    for included in manifest["files"]:  # type: ignore[union-attr]
+        assert (PLUGIN / included).exists(), included
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_dsh_skill_provider_serves_both_skills_without_frontmatter() -> None:
+    """Run the real provider module against a stand-in ``ctx.skills``."""
+    script = """
+    const mod = await import(process.argv[1])
+    let provider
+    mod.apply({ skills: { registerProvider: (factory) => { provider = factory() } } })
+    const listed = await provider.list()
+    const body = (await provider.get(listed.find((c) => c.name === 'hivemind'))).content
+    console.log(JSON.stringify({ names: listed.map((c) => c.name).sort(), body: body.slice(0, 40) }))
+    """
+    module = (PLUGIN / "dsh" / "hivemind-skills.js").as_uri()
+    out = subprocess.run(
+        ["node", "--input-type=module", "-e", script, module],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    result = json.loads(out.stdout)
+    assert result["names"] == ["hivemind", "hivemind-setup"]
+    assert result["body"].lstrip().startswith("# Hivemind")

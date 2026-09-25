@@ -135,7 +135,8 @@ scope if it is personal. Local memory is fine for:
 ## 5. Staying aware
 
 Your context may be compacted or cleared. The hivemind plugin re-injects
-a reminder when that happens. If you do not see a "HIVEMIND:" reminder at
+a reminder when that happens (in DeepSeek Harness, the Hivemind server's
+instructions stay in the system prompt instead). If you do not see a "HIVEMIND:" reminder at
 the start of your context and you are not using the plugin, offer the
 user the **hivemind-setup** skill's "Stay aware" step, which adds a
 startup hook and an instruction block so you never forget Hivemind.
