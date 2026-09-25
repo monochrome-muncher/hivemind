@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "hivemind": {
+      "type": "http",
+      "url": "${HIVEMIND_MCP_URL}",
+      "headers": {
+        "Authorization": "Bearer ${HIVEMIND_API_KEY}"
+      }
+    }
+  }
+}
