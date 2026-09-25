@@ -394,7 +394,7 @@ Keep it behind an internal ingress or `kubectl port-forward`.
 ### 3.10 Agent plugin and skills  *(shipped: ADRs 0030–0031, `plugins/hivemind/`)*
 Agents in other harnesses had the MCP tools but no guidance on using
 them, and no way to find out what they were allowed to do. The plugin
-(Claude Code and Codex; also usable as plain skills) makes Hivemind the
+(Claude Code, Codex and DeepSeek Harness; also usable as plain skills) makes Hivemind the
 agent's long-term memory: `hive_whoami` first in every session, recall
 before work, frequent but disciplined contributions to the fleet, a
 never-write list (the agent's own credentials, unverified guesses, raw
