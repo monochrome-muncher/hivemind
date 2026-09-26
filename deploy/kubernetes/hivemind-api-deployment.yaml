@@ -80,6 +80,11 @@ spec:
       #    HIVEMIND_EMBEDDING_RETRIES or HIVEMIND_EMBEDDING_TIMEOUT go up —
       #    DEPLOY.md §5 carries the arithmetic and the recipe.
       terminationGracePeriodSeconds: 150
+      # No Kubernetes service-link variables: every Service named
+      # hivemind-* would otherwise inject HIVEMIND_*_SERVICE_HOST /
+      # _PORT variables into this pod (ADR 0032). Hivemind finds its
+      # peers by DNS name, never through these.
+      enableServiceLinks: false
 
       containers:
         - name: app

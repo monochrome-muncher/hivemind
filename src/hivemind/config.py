@@ -24,6 +24,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from hivemind.domain.entry import DEFAULT_PREFIX_TOKENS
 
+logger = logging.getLogger(__name__)
+
+# The HIVEMIND_STRICT_ENV spellings that mean "on" (ADR 0032).
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
 
 @dataclass(frozen=True, slots=True)
 class SearchConfig:
@@ -92,6 +97,12 @@ class Settings(BaseSettings):
     # the system trust store.
     admin_api_url: str = ""
     admin_api_ca_bundle: str = ""
+    # ADR 0032: unknown HIVEMIND_* variables are logged by default (a
+    # platform such as GitLab Auto DevOps, or Kubernetes service links,
+    # injects variables that share the prefix). True restores ADR 0024's
+    # hard failure — for CI and dev, where the environment is ours. Read
+    # by load_settings() BEFORE Settings is built.
+    strict_env: bool = False
     # asyncpg pool sizing for the Postgres store (``make_pool`` in
     # store/pool.py already defaults to these exact values; these fields
     # just make that existing constant operator-reachable, per pod, for
@@ -175,6 +186,17 @@ class Settings(BaseSettings):
             return None
         return value
 
+    @field_validator("strict_env", mode="before")
+    @classmethod
+    def _parse_strict_env(cls, value: object) -> object:
+        """Parse ``HIVEMIND_STRICT_ENV`` exactly as ``load_settings``'s
+        pre-check does (ADR 0032): the ``_TRUTHY`` spellings are true and
+        any other string (empty included) is false, so the two readings
+        can never disagree."""
+        if isinstance(value, str):
+            return value.strip().lower() in _TRUTHY
+        return value
+
     def search_config(self) -> SearchConfig:
         return SearchConfig(
             rrf_k=self.rrf_k,
@@ -225,8 +247,10 @@ def env_file_for(environment: str | None) -> str:
 # constructs ``Settings`` — and three of them (``RUNNER``, ``HOST``,
 # ``PORT``) are set on every pod, so ``extra="forbid"`` would crash-loop
 # every container. This is the one place that says "deliberately not a
-# setting" for each of them; a variable that is neither here nor a
-# ``Settings`` field is a mistake, not a third category.
+# setting" for each of them. A variable that is neither here nor a
+# ``Settings`` field is either a mistake or injected by the platform
+# (GitLab Auto DevOps, Kubernetes service links), so it is reported —
+# a warning by default, a failure with HIVEMIND_STRICT_ENV (ADR 0032).
 _ALLOWED_EXTRA_ENV_VARS: dict[str, str] = {
     # entrypoint.sh reads this directly (shell, never Settings) to choose
     # which console script to exec — api / mcp-http / admin / migrate / keys.
@@ -263,8 +287,27 @@ def _known_hivemind_env_vars() -> set[str]:
     return {f"{prefix}{name}".upper() for name in Settings.model_fields}
 
 
-def _reject_unknown_hivemind_env_vars(env_file: str) -> None:
-    """Fail loudly on a ``HIVEMIND_*`` variable ``Settings`` would ignore.
+def _strict_env(env_file: str) -> bool:
+    """Whether ``HIVEMIND_STRICT_ENV`` asks for a hard failure (ADR 0032).
+
+    Read by hand because it decides how the check before ``Settings`` is
+    built behaves. A real environment variable wins over the profile
+    file, as everywhere else (ADR 0017)."""
+    raw = os.environ.get("HIVEMIND_STRICT_ENV")
+    if raw is None:
+        file_path = Path(env_file)
+        if file_path.is_file():
+            raw = dotenv_values(file_path).get("HIVEMIND_STRICT_ENV")
+    return (raw or "").strip().lower() in _TRUTHY
+
+
+def _check_unknown_hivemind_env_vars(env_file: str) -> None:
+    """Report a ``HIVEMIND_*`` variable ``Settings`` would ignore.
+
+    ADR 0032: by default the report is one WARNING and startup continues,
+    because deployment platforms inject prefixed variables Hivemind does
+    not own. With ``HIVEMIND_STRICT_ENV=true`` it raises instead (ADR
+    0024's original behaviour).
 
     Checked against real process env vars AND the active profile file
     (ADR 0017) — a typo in either currently does nothing (the bug this
@@ -294,14 +337,17 @@ def _reject_unknown_hivemind_env_vars(env_file: str) -> None:
         candidates = difflib.get_close_matches(name.removeprefix("HIVEMIND_"), suffix_to_known, n=1)
         hint = f" — did you mean {suffix_to_known[candidates[0]]}?" if candidates else ""
         lines.append(f"  {name}{hint}")
-    raise RuntimeError(
+    message = (
         "Unknown HIVEMIND_* environment variable(s) — neither a Settings "
         "field nor on the exemption list in src/hivemind/config.py "
         "(_ALLOWED_EXTRA_ENV_VARS):\n"
         + "\n".join(lines)
-        + "\nFix the name, unset the variable, or (if it is genuinely read "
-        "outside Settings) add it to _ALLOWED_EXTRA_ENV_VARS with a reason."
+        + "\nIf one is a typo, fix the name. Variables injected by the platform "
+        "(e.g. GitLab Auto DevOps, Kubernetes service links) can be ignored."
     )
+    if _strict_env(env_file):
+        raise RuntimeError(message + "\n(Failing because HIVEMIND_STRICT_ENV is set.)")
+    logger.warning("%s", message)
 
 
 def load_settings() -> Settings:
@@ -314,13 +360,13 @@ def load_settings() -> Settings:
     always win over file values; a missing file is silently ignored
     (the Kubernetes / CI posture: values come from env / Secrets).
 
-    Before building ``Settings``, rejects any ``HIVEMIND_*`` variable
+    Before building ``Settings``, reports any ``HIVEMIND_*`` variable
     that is neither a ``Settings`` field nor on the ADR 0024 exemption
-    list — a typo'd or stale variable is a loud startup failure here,
-    never a silent no-op.
+    list: a WARNING by default, a startup failure with
+    ``HIVEMIND_STRICT_ENV=true`` (ADR 0032).
     """
     env_file = env_file_for(os.environ.get("ENVIRONMENT"))
-    _reject_unknown_hivemind_env_vars(env_file)
+    _check_unknown_hivemind_env_vars(env_file)
     # pydantic-settings' per-instance dotenv override (`_env_file`) is a
     # documented init parameter (runtime-verified) but missing from its
     # mypy stubs — a targeted ignore, not a type hole.
