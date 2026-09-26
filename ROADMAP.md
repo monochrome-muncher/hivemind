@@ -403,7 +403,15 @@ as scratch space or fallback. A `SessionStart` hook re-injects the
 reminder after compaction, and `hivemind-setup` walks through connecting,
 self-registration, switching to the agent key, and adding a hook plus an
 instruction block when the plugin is not installed, asking before every
-change.
+change. Since extended to **Hermes** (native plugin: `plugin.yaml` +
+`__init__.py`, serving the skills and adding a Hivemind system-prompt
+section that survives compaction) and **Pi** (package: the `pi` key in
+`package.json` + `extensions/hivemind.ts`, adding the same system-prompt
+section on `before_agent_start`) — in both, the reminder lives in the
+system prompt, the DeepSeek Harness shape, because the harness's own
+instruction there never leaves it; the MCP server stays harness config
+(`mcp_servers` in `~/.hermes/config.yaml`; the standard MCP config files
+pi-mcp-adapter reads for Pi), so the key never enters the install tree.
 
 **It needed two server changes first.** `hive_whoami` (ADR 0030), because
 an agent could not otherwise tell "I may not write" or "I may not read"
