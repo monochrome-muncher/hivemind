@@ -117,6 +117,56 @@ Then export `HIVEMIND_API_KEY` in the shell profile that launches Codex.
   and copy both skill folders into `~/.agents/skills/` (DSH scans it; so
   does Codex).
 
+### Hermes
+
+- **With the hivemind plugin** (`hermes plugins install <owner>/hivemind/plugins/hivemind`,
+  then `hermes plugins enable hivemind`): the plugin serves both skills
+  and adds a Hivemind section to the system prompt that compaction never
+  removes. Only set the MCP server and the variables (below).
+- **Without the plugin**: add this to `~/.hermes/config.yaml` (all
+  profiles) or the profile's own `config.yaml`, merging into the existing
+  file. `${VAR}` references are resolved from the environment at
+  connection time, so the key never lands in the file:
+
+  ```yaml
+  mcp_servers:
+    hivemind:
+      url: "${HIVEMIND_MCP_URL}"
+      headers:
+        Authorization: "Bearer ${HIVEMIND_API_KEY}"
+  ```
+
+  and copy both skill folders into `~/.hermes/skills/`. `~/.hermes/.env`
+  is read into the environment, so it is a fine home for the variables.
+
+### Pi
+
+Pi has no built-in MCP client; the MCP connection comes from the standard
+MCP config files that the **pi-mcp-adapter** extension
+(`pi install npm:pi-mcp-adapter`) reads. `${VAR}` references are expanded
+at connection time, so the key never lands in the file:
+
+- **User-global** (all projects): `~/.config/mcp/mcp.json` (or
+  `~/.agents/mcp.json`):
+
+  ```json
+  {
+    "mcpServers": {
+      "hivemind": {
+        "type": "http",
+        "url": "${HIVEMIND_MCP_URL}",
+        "headers": { "Authorization": "Bearer ${HIVEMIND_API_KEY}" }
+      }
+    }
+  }
+  ```
+
+- **Project**: the same file as `.mcp.json` at the repository root.
+
+The hivemind **Pi package** (`pi install /path/to/hivemind/plugins/hivemind`)
+provides the two skills and the system-prompt reminder; it does not
+configure the MCP server.
+
 ### Any other harness
 
 Configure an MCP server with transport "streamable HTTP", the URL above
@@ -184,6 +234,12 @@ for Claude Code hooks runs `SessionStart` only once, at session start,
 and its text does not survive compaction, so it is not the right tool
 here.)
 
+**Hermes and Pi need no hook.** The hivemind plugin (Hermes) and package
+(Pi) add a Hivemind section to the system prompt, which compaction never
+removes. Add the instruction block to `~/.hermes/SOUL.md` (the only
+global always-loaded instructions file in Hermes) or
+`~/.pi/agent/AGENTS.md` (Pi's user instructions) and you are done.
+
 Show the user each change, ask, make it, then report it. Mark every block
 so it can be found and removed later.
 
@@ -191,8 +247,9 @@ so it can be found and removed later.
 
 Add this to the harness's always-loaded instructions:
 `~/.claude/CLAUDE.md` (Claude Code), `~/.codex/AGENTS.md` (Codex),
-`~/.dsh/AGENTS.md` (DeepSeek Harness), or the system prompt / instructions
-file of other harnesses:
+`~/.dsh/AGENTS.md` (DeepSeek Harness), `~/.hermes/SOUL.md` (Hermes),
+`~/.pi/agent/AGENTS.md` (Pi), or the system prompt / instructions file of
+other harnesses:
 
 ```markdown
 <!-- hivemind:begin -->

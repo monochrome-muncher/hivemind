@@ -1,0 +1,16 @@
+# Hermes native plugin manifest (see README.md, "Hermes").
+#
+# A directory plugin for ~/.hermes/plugins/, installed with
+# `hermes plugins install <owner>/hivemind/plugins/hivemind`. It serves
+# the two skills in skills/ and adds a system-prompt section that keeps
+# the agent Hivemind-aware across sessions and compaction.
+#
+# The Hivemind MCP server is deliberately NOT part of this plugin: it is
+# the config-driven mcp_servers.hivemind entry in ~/.hermes/config.yaml
+# (the hivemind-setup skill walks through it), so the key never lands in
+# the install tree.
+name: hivemind
+version: 1.0.0-rc.4
+description: Use your organization's Hivemind as the agent's long-term memory: recall before you work, contribute what you learn to your fleet, and stay aware of it across sessions and compaction.
+author: Hivemind
+tags: [memory, knowledge, mcp, hivemind]
