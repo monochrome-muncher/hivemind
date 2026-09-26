@@ -1,6 +1,6 @@
 {
   "name": "hivemind-dsh-plugin",
-  "version": "1.0.0-rc.2",
+  "version": "1.0.0-rc.3",
   "description": "DeepSeek Harness bundle for Hivemind: the Hivemind MCP server plus the hivemind and hivemind-setup skills.",
   "private": true,
   "type": "module",
