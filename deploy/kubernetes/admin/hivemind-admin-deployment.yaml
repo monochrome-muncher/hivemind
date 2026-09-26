@@ -27,6 +27,11 @@ spec:
         app.kubernetes.io/name: hivemind
         app.kubernetes.io/component: admin
     spec:
+      # No Kubernetes service-link variables: every Service named
+      # hivemind-* would otherwise inject HIVEMIND_*_SERVICE_HOST /
+      # _PORT variables into this pod (ADR 0032). Hivemind finds its
+      # peers by DNS name, never through these.
+      enableServiceLinks: false
       containers:
         - name: app
           image: hivemind:0.0.0

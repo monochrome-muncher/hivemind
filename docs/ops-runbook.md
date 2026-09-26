@@ -62,17 +62,20 @@ make mcp-http       # start the hostable MCP runner as a detached service (:8088
 > times replica count, plus PgBouncer's own pool) to stay under that
 > ceiling rather than relying on the default.
 
-> **An unrecognized `HIVEMIND_*` variable now fails startup loudly**
-> (ADR 0024): `load_settings()` rejects any `HIVEMIND_*` name that is
-> neither a `Settings` field nor on the small exemption list in
+> **An unrecognized `HIVEMIND_*` variable is logged at startup**
+> (ADRs 0024, 0032): `load_settings()` reports any `HIVEMIND_*` name
+> that is neither a `Settings` field nor on the small exemption list in
 > `src/hivemind/config.py` (`_ALLOWED_EXTRA_ENV_VARS` — currently
 > `HIVEMIND_RUNNER`/`HOST`/`PORT`/`MCP_KEY`/`MCP_HTTP_PORT`, all read
-> directly from `os.environ` outside `Settings`). If a pod fails at
-> startup with `Unknown HIVEMIND_* environment variable(s)`, the error
-> names the offending variable(s) and, where the name is close to a real
-> one, suggests it — this is what a stale or renamed variable (e.g. the
-> ADR 0021 `_PREFIX_CHARS` → `_PREFIX_TOKENS` rename) looks like now,
-> instead of silently doing nothing.
+> directly from `os.environ` outside `Settings`). The WARNING names each
+> variable and, where the name is close to a real one, suggests it —
+> this is what a stale or renamed variable (e.g. the ADR 0021
+> `_PREFIX_CHARS` → `_PREFIX_TOKENS` rename) looks like. By default the
+> process still starts, because platforms such as GitLab Auto DevOps and
+> Kubernetes service links inject `HIVEMIND_*` variables of their own
+> (`HIVEMIND_API_SERVICE_HOST` and the like). Set
+> `HIVEMIND_STRICT_ENV=true` to make it a startup failure instead (the
+> dev Makefile does).
 
 > **Embedding dimension is a deploy-time decision** (ADR 0005): the
 > `vector(:dim)` column is created at migration time. Changing the
