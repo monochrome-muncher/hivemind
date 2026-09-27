@@ -9,7 +9,7 @@ raw config) across the wire.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -31,10 +31,18 @@ def _to_utc(value: datetime | None) -> datetime | None:
 
 
 class SourceModel(BaseModel):
-    """A provenance pointer (SPEC.md §4.1: sources)."""
+    """A provenance pointer (SPEC.md §4.1: sources). An empty ``ref`` is
+    a dead pointer, so both surfaces require a non-blank string."""
 
     type: SourceType
-    ref: str
+    ref: str = Field(min_length=1)
+
+    @field_validator("ref")
+    @classmethod
+    def _ref_must_not_be_blank(cls, ref: str) -> str:
+        if not ref.strip():
+            raise ValueError("source 'ref' must be a non-blank string")
+        return ref
 
 
 class CreateEntryRequest(BaseModel):
@@ -59,8 +67,10 @@ class CreateEntryRequest(BaseModel):
     importance: int | None = None
     # ADR 0011: an omitted scope defaults to the highest scope the caller's
     # trust level permits (L1 -> self; L2/L3 -> fleet; legacy/admin -> org);
-    # an explicit out-of-permission scope is rejected (403).
-    scope: str | None = None
+    # an explicit out-of-permission scope is rejected (403). A scope that is
+    # not one of the three vocabulary values is invalid input (422), not a
+    # permission error — a typo is not a trust-level problem.
+    scope: Literal["self", "fleet", "org"] | None = None
     supersedes: list[str] = []
     agent: str | None = None
 

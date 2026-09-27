@@ -73,6 +73,17 @@ async def _fetch(dsn: str, sql: str) -> list[asyncpg.Record]:
         await conn.close()
 
 
+async def _register_agent(dsn: str, name: str) -> None:
+    """Give a name an agent record: ``_issue_agent`` refuses unregistered
+    names (ADR 0012 — keys are bound to registered names), so every test
+    that issues an agent key registers the name first."""
+    # ``name`` is a test-controlled literal, not user input.
+    await _exec(
+        dsn,
+        f"INSERT INTO agents (name, status, trust_level) VALUES ('{name}', 'active', 2)",
+    )
+
+
 async def _audit_rows(dsn: str) -> list[asyncpg.Record]:
     return await _fetch(
         dsn,
@@ -101,6 +112,7 @@ async def test_issue_admin_records_the_fingerprint(dsn: str) -> None:
 
 
 async def test_issue_agent_records_the_agent_name(dsn: str) -> None:
+    await _register_agent(dsn, "alice")
     await _issue_agent(dsn, "alice", actor="john")
     [row] = await _audit_rows(dsn)
     assert (row["action"], row["target"]) == ("agent_key.issue", "alice")
@@ -113,6 +125,7 @@ async def test_rotate_org_records_no_target(dsn: str) -> None:
 
 
 async def test_revoke_records_the_agent_name(dsn: str) -> None:
+    await _register_agent(dsn, "alice")
     await _issue_agent(dsn, "alice", actor="john")
     await _revoke(dsn, "alice", actor="ops")
     rows = await _audit_rows(dsn)
@@ -147,6 +160,7 @@ async def test_the_audit_row_shares_the_mutations_transaction(
 ) -> None:
     """If the audit insert fails, the key issuance rolls back with it."""
     # `$1 || 'x'` turns 'cli' into 'clix', which the named CHECK rejects.
+    await _register_agent(dsn, "alice")
     monkeypatch.setattr(
         keys_cli,
         "_INSERT_AUDIT",
@@ -162,7 +176,6 @@ async def test_the_audit_row_shares_the_mutations_transaction(
             await command()
     assert await _fetch(dsn, "SELECT 1 FROM credentials") == []
     assert await _audit_rows(dsn) == []
-
 
 def test_actor_defaults_to_the_os_user(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     """Through ``main()`` — the real argparse surface, no ``--actor``."""
@@ -193,6 +206,7 @@ async def test_no_raw_key_appears_in_any_audit_row_on_either_path(dsn: str) -> N
     admin_key = await _issue_admin(dsn, actor="john")
     spare_admin = await _issue_admin(dsn, actor="john")
     raw_keys += [admin_key, spare_admin]
+    await _register_agent(dsn, "bob")
     raw_keys.append(await _issue_agent(dsn, "bob", actor="john"))
     raw_keys.append(await _rotate_org(dsn, actor="john"))
     assert await _revoke_admin(dsn, raw_key=spare_admin, actor="john") is True
@@ -245,6 +259,7 @@ async def test_cli_revoke_sets_revoked_and_records_the_prior_status(dsn: str) ->
 
 
 async def test_cli_issue_agent_refuses_a_second_key(dsn: str) -> None:
+    await _register_agent(dsn, "alice")
     await _issue_agent(dsn, "alice", actor="john")
     with pytest.raises(AgentKeyExists):
         await _issue_agent(dsn, "alice", actor="john")

@@ -194,6 +194,27 @@ async def test_hive_write_l2_explicit_org_scope_denied() -> None:
     assert result["error"]["code"] == ERR_PERMISSION_DENIED
 
 
+async def test_hive_write_scope_typo_is_invalid_input() -> None:
+    """A scope outside the self|fleet|org vocabulary is ``invalid_input``
+    (matching REST's 422), not a permission error."""
+    clock = make_clock()
+    store = MemoryStore(clock)
+    app = build_app(store, ALICE, clock)
+    result = await hive_write(app, kind="fact", summary="scope typo", scope="global")
+    assert result["error"]["code"] == ERR_INVALID_INPUT
+
+
+async def test_hive_write_blank_source_ref_is_invalid_input() -> None:
+    """A blank source ref is a dead pointer: non-blank required."""
+    clock = make_clock()
+    store = MemoryStore(clock)
+    app = build_app(store, ALICE, clock)
+    result = await hive_write(
+        app, kind="fact", summary="dead pointer", sources=[{"type": "url", "ref": "   "}]
+    )
+    assert result["error"]["code"] == ERR_INVALID_INPUT
+
+
 async def test_hive_write_legacy_omitted_scope_stays_org() -> None:
     """Legacy (v1) credentials keep the flat pool: omitted scope -> org."""
     clock = make_clock()

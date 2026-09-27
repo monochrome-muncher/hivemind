@@ -58,6 +58,22 @@ async def test_head_entry_has_no_successors() -> None:
     assert {e.id for e in superseded} == {a.id, b.id}
 
 
+async def test_a_corrupt_superseded_by_cycle_is_bounded_and_deduped() -> None:
+    """A corrupt chain (a -> b -> a) must not loop the forward walk and
+    must not return the same entry twice. A real chain can never do this
+    (supersession requires an active target, ADR 0034), so the guard is
+    for storage corruption, not for legal data."""
+    import dataclasses
+
+    store = make_store()
+    a = await store.create_entry(_draft("v1"))
+    b = await store.create_entry(_draft("v2", supersedes=(a.id,)))
+    # Corrupt: point b's superseded_by back at a.
+    store._entries[b.id] = dataclasses.replace(store._entries[b.id], superseded_by=a.id)
+    successors, _ = await supersession_chain(store, await store.get_entry(a.id))
+    assert [e.id for e in successors] == [b.id]
+
+
 async def test_tail_entry_has_no_superseded() -> None:
     store = make_store()
     a, b, c = await _build_chain(store)

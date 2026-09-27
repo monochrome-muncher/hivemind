@@ -19,7 +19,13 @@ import pytest
 from hivemind.config import Settings
 from hivemind.store import PgAuthenticator
 from hivemind.store.auth import key_hash
-from hivemind.store.keys import _issue_admin, _revoke_admin, _rotate_org
+from hivemind.store.keys import (
+    AgentNotRegistered,
+    _issue_admin,
+    _issue_agent,
+    _revoke_admin,
+    _rotate_org,
+)
 from hivemind.store.migrate import migrate
 
 
@@ -74,6 +80,15 @@ async def test_rotate_org_replaces_the_shared_key(pg) -> None:
     # rotate-org deletes the previous org row: the first key is dead now.
     assert await pg.verify(old_key) is None
     assert await pg.verify(old_key_2) is not None
+
+
+async def test_issue_agent_for_unregistered_name_refuses(pg) -> None:
+    """A key for an unregistered name would resolve to a non-identity
+    (ADR 0012): the CLI refuses loudly instead of minting a dangling
+    key that every read/write seam would later reject opaquely."""
+    dsn = _dsn()
+    with pytest.raises(AgentNotRegistered):
+        await _issue_agent(dsn, "never-registered-agent", actor="test")
 
 
 # --- revoke-admin (the admin-key rotation half, DEPLOY.md §5) ------------------

@@ -54,6 +54,7 @@ async def supersession_chain(
     """
     successors: list[Entry] = []
     cursor = entry
+    seen = {entry.id}
     for _ in range(max_hops):
         next_id = cursor.superseded_by
         if next_id is None:
@@ -61,7 +62,13 @@ async def supersession_chain(
         nxt = await store.get_entry(next_id)
         if nxt is None:
             break
+        if nxt.id in seen:
+            # A corrupt ``superseded_by`` cycle: stop rather than loop
+            # (the walk is bounded anyway, but dedup keeps the result
+            # sane — the reverse walk dedups the same way).
+            break
         successors.append(nxt)
+        seen.add(nxt.id)
         cursor = nxt
 
     # No reverse index in v1: build a ``superseded_by -> [entries]`` map

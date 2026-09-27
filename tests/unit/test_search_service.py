@@ -266,6 +266,18 @@ class TestRecencyFloorConfig:
     def test_one_is_allowed_and_means_no_decay_at_all(self) -> None:
         assert SearchConfig(recency_floor=1.0).recency_floor == 1.0
 
+    @pytest.mark.parametrize("bad", [0.0, -30.0])
+    def test_a_non_positive_half_life_is_a_configuration_error(self, bad: float) -> None:
+        """``half_life_days`` is a divisor in ``entry_score``: zero would
+        raise at the first search, negative would silently *invert* decay
+        (older = newer). Both are configuration mistakes, so they fail at
+        construction, the same class ADR 0024 exists to catch."""
+        with pytest.raises(ValueError, match="half_life_days"):
+            SearchConfig(half_life_days=bad)
+
+    def test_the_shipped_half_life_is_positive(self) -> None:
+        assert SearchConfig().half_life_days > 0
+
     async def test_the_floor_reaches_the_score_through_the_service(
         self, embedder, search_config
     ) -> None:

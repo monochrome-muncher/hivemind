@@ -972,6 +972,37 @@ class TestAccessEndpoints:
         assert resp.status_code == 403
         assert resp.json()["error"]["code"] == "forbidden"
 
+    async def test_create_entry_scope_typo_is_422_not_403(self) -> None:
+        """A scope outside the self|fleet|org vocabulary is invalid input
+        (422), not a permission error — a typo is not a trust-level
+        problem (MCP answers the same as ``invalid_input``)."""
+        app = make_hivemind_app()
+        client = make_client(app)
+        async with client:
+            resp = await client.post(
+                "/v1/entries",
+                json={"kind": "fact", "summary": "scope typo", "scope": "global"},
+                headers={"X-API-Key": "key-admin"},
+            )
+        assert resp.status_code == 422
+
+    async def test_create_entry_blank_source_ref_is_422(self) -> None:
+        """A blank source ref is a dead pointer: both surfaces require a
+        non-blank string (MCP already rejected it)."""
+        app = make_hivemind_app()
+        client = make_client(app)
+        async with client:
+            resp = await client.post(
+                "/v1/entries",
+                json={
+                    "kind": "fact",
+                    "summary": "dead pointer",
+                    "sources": [{"type": "url", "ref": "   "}],
+                },
+                headers={"X-API-Key": "key-admin"},
+            )
+        assert resp.status_code == 422
+
     async def test_create_entry_legacy_omitted_scope_stays_org(self) -> None:
         """Legacy (v1) credentials keep the flat pool: omitted scope -> org."""
         client = make_client(make_hivemind_app())

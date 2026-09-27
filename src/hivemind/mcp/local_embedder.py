@@ -13,14 +13,15 @@ from __future__ import annotations
 
 import hashlib
 
-from hivemind.domain.entry import EntryDraft, embeddable_text
+from hivemind.domain.entry import DEFAULT_PREFIX_TOKENS, EntryDraft, embeddable_text
 
 
 class LocalEmbedder:
     """Deterministic token-hash embedder (no I/O, no external model)."""
 
-    def __init__(self, dimension: int = 256) -> None:
+    def __init__(self, dimension: int = 256, prefix_tokens: int = DEFAULT_PREFIX_TOKENS) -> None:
         self._dimension = dimension
+        self._prefix_tokens = prefix_tokens
 
     @property
     def dimension(self) -> int:
@@ -48,4 +49,6 @@ class LocalEmbedder:
         return self._vector(self.entry_embeddable_text(draft))
 
     def entry_embeddable_text(self, draft: EntryDraft) -> str:
-        return embeddable_text(draft.summary, draft.body)
+        # Honor the configured prefix budget (ADR 0021): the dev pool
+        # embeds the same text a configured production pool would.
+        return embeddable_text(draft.summary, draft.body, self._prefix_tokens)

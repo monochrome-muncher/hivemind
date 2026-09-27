@@ -255,7 +255,7 @@ The schema is an **ordered chain of versioned migrations** under `src/hivemind/s
 
 ## 9. Non-goals (v1) — the explicit list
 
-- No human-facing UI (agent-only; a read-only web search is a later extension)
+- No human-facing UI (agent-only; the admin panel, ADR 0029, is the one exception — a browser front end over the admin REST surface, not a memory UI; a read-only web search is a later extension)
 - No passive capture of transcripts/tool events (explicit writes only, ADR 0004)
 - No knowledge graph, no auto-contradiction detection (the **facet slice** of entity extraction became a commitment in §13 — ADR 0016; *graph-expanded* retrieval stays a non-goal)
 - No curation/verification workflow, no PII pipeline (trust levels are §12, not a non-goal — ADR 0011)
@@ -300,7 +300,7 @@ This section supersedes the flat-pool commitment of §1 and the "no trust tiers"
 * A **fleet** is a named group of agents. The admin creates fleets (`POST /v1/admin/fleets`); **no fleet deletion in this increment** (ADR 0011).
 * Every active agent belongs to exactly **one home fleet** — admin-assigned, re-assignable at any time via `PATCH /v1/admin/agents/{name}`. One home fleet per agent in this increment; multi-fleet membership is a §10 extension.
 * An entry is written into exactly one scope: `self` (the author agent only) or `fleet` (the home fleet it was written into). **An entry's fleet membership is fixed at write time** — when an agent moves fleets, its earlier entries stay in the old fleet (ADR 0011).
-* Legacy `scope='org'` entries are **read-only**: no new write may use `org`; they remain readable at trust level 1+.
+* Legacy `scope='org'` entries are **read-only for agent keys**: an agent key may not write `org` (the sanctioned `org` writers are the admin key and legacy v1 keys, which have no trust-level bound); they remain readable at trust level 1+.
 * **Default scope**: an omitted scope resolves to the **highest value the writer's trust level permits** (`lurker` → `self`; `contributor`/`privileged` → `fleet`). An *explicit* out-of-permission scope (e.g. `fleet` at `lurker`) is a permission error naming the required level.
 
 ### 12.2 Trust levels (cumulative)
@@ -312,7 +312,7 @@ This section supersedes the flat-pool commitment of §1 and the "no trust tiers"
 | 2 | `contributor` | own + home fleet | own + home fleet |
 | 3 | `privileged` | own + home fleet + **every fleet** | own + home fleet only (read-broad, write-local) |
 
-* At level 0 (`untrusted`) — what pending and demoted agents sit at — all read verbs return **empty results** (the visibility filter hides everything); writes and feedback are explicit permission errors.
+* At level 0 (`untrusted`) — what pending and demoted agents sit at — all read verbs return **empty results** (the visibility filter hides everything); writes are explicit permission errors, and feedback/withdrawal answer **not found** (they follow readability, and at level 0 nothing is readable).
 * Reads beyond visibility behave **as if the entry does not exist** (no existence leaking).
 * `self`-scoped entries are private to their author **even at level 3** (that is what `self` is for).
 * **Feedback and withdrawal follow readability**: an agent may feedback entries it can read, and withdraw its own entries; the admin key may withdraw any entry (the §4.1 withdrawal rules now ride the trust matrix).

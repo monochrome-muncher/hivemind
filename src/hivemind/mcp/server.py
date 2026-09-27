@@ -315,7 +315,9 @@ def main() -> None:
     settings = load_settings()
     configure_logging(settings.log_level)
     store = MemoryStore()
-    embedder = LocalEmbedder(dimension=settings.embedding_dim)
+    embedder = LocalEmbedder(
+        dimension=settings.embedding_dim, prefix_tokens=settings.embedding_prefix_tokens
+    )
     extractor = build_extractor(settings)  # optional (ADR 0016): None when the endpoint is unset
     write_service = WriteService(store, embedder, extractor)
     search_config = settings.search_config()

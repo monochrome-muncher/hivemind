@@ -73,6 +73,13 @@ class AgentKeyExists(Exception):
     one key per agent; revoke first to replace it)."""
 
 
+class AgentNotRegistered(Exception):
+    """``issue-agent`` refused: the name has no agent record. A key for an
+    unregistered name would mint a credential that resolves to a
+    non-identity (ADR 0012: keys are bound to registered names), so the
+    CLI says so loudly instead of issuing a dangling key."""
+
+
 def _raw_key() -> str:
     """A fresh random 32-byte API key (the raw secret, printed once)."""
     return "hm_" + secrets.token_hex(32)
@@ -138,13 +145,17 @@ async def _issue_agent(dsn: str, name: str, *, actor: str | None = None) -> str:
     Audited as ``agent_key.issue`` with the agent name as target.
 
     Refuses (``AgentKeyExists``) when the agent already holds a key —
-    one key per agent (ADR 0028). A ``revoked`` agent flips back to
+    one key per agent (ADR 0028) — and (``AgentNotRegistered``) when the
+    name has no agent record, so a dangling key can never be minted.
+    A ``revoked`` agent flips back to
     ``active``, so status and key never disagree after a CLI run."""
     raw_key = _raw_key()
     conn = await asyncpg.connect(dsn)
     try:
         async with conn.transaction():
-            await conn.execute(_AGENT_STATUS_FOR_UPDATE, name)
+            status = await conn.fetchval(_AGENT_STATUS_FOR_UPDATE, name)
+            if status is None:
+                raise AgentNotRegistered(name)
             if await conn.fetchval(_HAS_AGENT_KEY, name) is not None:
                 raise AgentKeyExists(name)
             await conn.execute(_ISSUE_AGENT, key_hash(raw_key), name)
@@ -296,6 +307,14 @@ def main() -> None:
             print(
                 f"agent {args.name} already holds a key; revoke it first "
                 "(`hivemind-keys revoke --name ...`) to issue a replacement",
+                file=sys.stderr,
+            )
+            raise SystemExit(1) from None
+        except AgentNotRegistered:
+            print(
+                f"no agent registered as {args.name!r}; register it first "
+                "(POST /v1/agents, then activate it) — keys are bound to "
+                "registered names (ADR 0012)",
                 file=sys.stderr,
             )
             raise SystemExit(1) from None

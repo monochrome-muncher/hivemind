@@ -162,8 +162,8 @@ def _parse_sources(raw: list[dict[str, str]] | None) -> tuple[Source, ...]:
                 f"source type must be one of path|url|session|other, got {item.get('type')!r}"
             ) from exc
         ref = item.get("ref")
-        if not ref:
-            raise ValueError("source 'ref' must be a non-empty string")
+        if not ref or not ref.strip():
+            raise ValueError("source 'ref' must be a non-blank string")
         parsed.append(Source(type=source_type, ref=ref))
     return tuple(parsed)
 
@@ -266,9 +266,12 @@ async def hive_write(
     ``scope``: omit it and the entry lands at the highest scope the
     caller's trust level permits (L1 -> self; L2/L3 -> fleet; legacy
     and admin -> org) — ADR 0011. An explicit out-of-permission scope
-    is rejected.
+    is rejected; a scope that is not one of ``self|fleet|org`` is
+    ``invalid_input`` (a typo is not a trust-level problem).
     """
     cred = app.credential
+    if scope is not None and scope not in ("self", "fleet", "org"):
+        return _error(ERR_INVALID_INPUT, f"scope must be 'self', 'fleet' or 'org', got {scope!r}")
     resolved_agent = cred.agent_id or agent
     if resolved_agent is None:
         return _error(

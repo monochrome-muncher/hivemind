@@ -56,6 +56,11 @@ class SearchConfig:
     quality_max: float = 1.2
 
     def __post_init__(self) -> None:
+        if self.half_life_days <= 0:
+            # A zero/negative half life would divide by zero (or silently
+            # invert decay) inside ``entry_score`` — fail at config time,
+            # the same class of failure ADR 0024 exists to catch.
+            raise ValueError(f"half_life_days must be > 0, got {self.half_life_days}")
         if self.recency_floor is not None and not 0.0 < self.recency_floor <= 1.0:
             raise ValueError(f"recency_floor must be in (0, 1] or None, got {self.recency_floor}")
 
