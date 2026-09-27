@@ -226,6 +226,35 @@ def entry_is_visible(entry: Entry, v: Visibility) -> bool:
     return entry.fleet_id is not None and entry.fleet_id == v.home_fleet_id
 
 
+def may_supersede(
+    target: Entry, *, new_scope: str, new_fleet_id: str | None, writer: Visibility
+) -> bool:
+    """Whether ``writer`` may supersede ``target`` with an entry written at
+    ``new_scope`` into ``new_fleet_id`` (ADR 0033, SPEC §4.1).
+
+    Supersession stays a claim, within the audience the writer can
+    address: the writer must be able to read the target, and the successor
+    must reach at least everyone the predecessor reached, so a
+    supersession can never hide an entry behind a narrower one.
+
+      * admin -> anything.
+      * ``self`` target -> only the writer's own (visibility already
+        guarantees that); any successor scope reaches its one reader.
+      * ``fleet`` target -> only by a ``fleet`` successor written into
+        the same fleet.
+      * ``org`` (legacy) target -> admin only; agents cannot write ``org``.
+    """
+    if writer.is_admin:
+        return True
+    if not entry_is_visible(target, writer):
+        return False
+    if target.scope == SCOPE_SELF:
+        return True
+    if target.scope == SCOPE_FLEET:
+        return new_scope == SCOPE_FLEET and target.fleet_id == new_fleet_id
+    return False
+
+
 __all__ = [
     "SCOPE_FLEET",
     "SCOPE_ORG",
@@ -238,4 +267,5 @@ __all__ = [
     "TrustLevel",
     "Visibility",
     "entry_is_visible",
+    "may_supersede",
 ]

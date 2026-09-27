@@ -74,13 +74,18 @@ _INSTRUCTIONS = (
 # Tool descriptions (SPEC §5.2 / §5.3), registered as the tool docs.
 _DESC_WRITE = (
     "Write a distilled entry (fact|insight|decision) into the shared pool. "
-    "Provenance falls back to the acting credential when author/agent are "
-    "omitted. Omit 'scope' to land at the highest scope your trust level "
+    "The author is always your key's registered agent (provenance is never "
+    "self-reported). Omit 'scope' to land at the highest scope your trust level "
     "permits (self/fleet; an explicit out-of-permission scope is rejected — "
     "ADR 0011). 'summary' (keep it under ~280 chars) is the embedded text; "
     "'body' holds long-form content. Optional 'supersedes' names entries this "
-    "one replaces. Optional 'importance' (1-5, default 3) feeds retrieval "
-    "ranking — set it when this entry matters more or less than the default."
+    "one replaces: you may supersede entries you can read, and the new entry "
+    "must reach at least the same audience — a self entry replaces only your "
+    "own self entries, a fleet entry also replaces fleet entries in your home "
+    "fleet. Any other target rejects the whole write (supersede_denied); to "
+    "flag an entry you cannot replace, use hive_feedback instead. Optional "
+    "'importance' (1-5, default 3) feeds retrieval ranking — set it when this "
+    "entry matters more or less than the default."
 )
 _DESC_SEARCH = (
     "Hybrid (keyword + vector) search over the pool. Returns compact hits "
@@ -91,7 +96,9 @@ _DESC_SEARCH = (
 )
 _DESC_GET = (
     "Fetch a full entry including its body. include_history adds the "
-    "supersession chain (successors + superseded)."
+    "supersession chain (successors + superseded), limited to versions you may "
+    "read. An entry you may not read answers not_found, exactly like an "
+    "unknown id."
 )
 _DESC_LIST = (
     "List / filter entries without a query (filter only, paginated). "
@@ -100,11 +107,13 @@ _DESC_LIST = (
     "memory-date and ingest-date ranges."
 )
 _DESC_WITHDRAW = (
-    "Withdraw an entry (retract without replacing). Only the author or an admin may withdraw."
+    "Withdraw an entry (retract without replacing). Only the author or an "
+    "admin may withdraw; an entry you may not read answers not_found."
 )
 _DESC_FEEDBACK = (
-    "Report helpful|stale|wrong on an entry the caller relied on. "
-    "One row per (entry, user, agent); the latest verdict wins (SPEC §4.2)."
+    "Report helpful|stale|wrong on an entry the caller relied on (only "
+    "entries you may read; others answer not_found). One row per (entry, "
+    "user, agent); the latest verdict wins (SPEC §4.2)."
 )
 
 _DESC_REGISTER = (
@@ -174,7 +183,6 @@ def build_server(
         importance: int | None = None,
         scope: str | None = None,
         supersedes: list[str] | None = None,
-        author: str | None = None,
         agent: str | None = None,
     ) -> dict[str, Any]:
         return await hive_write(
@@ -189,7 +197,6 @@ def build_server(
             importance=importance,
             scope=scope,
             supersedes=supersedes,
-            author=author,
             agent=agent,
         )
 

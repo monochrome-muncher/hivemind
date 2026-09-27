@@ -52,8 +52,8 @@ from hivemind.domain.entry import EntryDraft, EntryFilters, ImportanceSource, Ki
 from hivemind.embeddings import EmbeddingError
 from hivemind.ports import Credential
 from hivemind.services.access import resolve_write_scope
-from hivemind.services.chain import supersession_chain
-from hivemind.services.governance import PermissionDenied
+from hivemind.services.chain import get_visible_entry, supersession_chain
+from hivemind.services.governance import PermissionDenied, SupersedeDenied
 
 require = Annotated[Credential, Depends(require_credential)]
 
@@ -153,7 +153,10 @@ def build_router(app: HivemindApp) -> APIRouter:
                 fleet_id=resolution.fleet_id,
                 supersedes=tuple(payload.supersedes),
             )
-            entry = await app.write_service.write(draft)
+            entry = await app.write_service.write(draft, writer=credential.visibility())
+        except SupersedeDenied as exc:
+            # ADR 0033: a supersession target out of the writer's reach.
+            raise api_error(403, "supersede_denied", str(exc)) from exc
         except PermissionDenied as exc:
             raise api_error(403, "forbidden", str(exc)) from exc
         except EmbeddingError as exc:
@@ -175,12 +178,17 @@ def build_router(app: HivemindApp) -> APIRouter:
         ``?history=true`` adds the supersession chain (successors +
         superseded) — the same bounded walk the MCP ``hive_get`` uses.
         """
-        entry = await app.store.get_entry(entry_id)
+        # ADR 0033: follows readability; an invisible entry is a 404 like
+        # an unknown one, and the chain leaves out invisible versions.
+        visibility = credential.visibility()
+        entry = await get_visible_entry(app.store, entry_id, visibility)
         if entry is None:
             raise api_error(404, "not_found", f"unknown entry: {entry_id}")
         out = EntryOut.from_entry(entry)
         if history:
-            successors, superseded = await supersession_chain(app.store, entry)
+            successors, superseded = await supersession_chain(
+                app.store, entry, visibility=visibility
+            )
             out.history = {
                 "successors": [EntryOut.from_entry(e) for e in successors],
                 "superseded": [EntryOut.from_entry(e) for e in superseded],

@@ -87,6 +87,10 @@ class AccessService:
             self._require_org(credential)
         else:
             self._require_org_or_admin(credential)
+        if name in RESERVED_AGENT_NAMES:
+            raise ValueError(
+                f"agent name {name!r} is reserved for a built-in identity (ADR 0033); pick another"
+            )
         existing = await self._store.get_agent(name)
         if existing is not None and existing.status is not AgentStatus.PENDING:
             raise ValueError(
@@ -286,6 +290,11 @@ class WriteResolution:
 
 # Scope ranks: a writer may not write a scope higher than its level allows.
 _SCOPE_RANK = {"self": 1, "fleet": 2, "org": 3}
+
+# ADR 0033: the identities built-in keys and runners write under (admin
+# keys, the org key, the dev runner, the mcp-http template credential).
+# An agent registered under one would read that identity's ``self`` entries.
+RESERVED_AGENT_NAMES = frozenset({"admin", "org", "dev", "shared"})
 
 
 def _readable(key_kind: str, credential: Credential) -> tuple[str, ...]:

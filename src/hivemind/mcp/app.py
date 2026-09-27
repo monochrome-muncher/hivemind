@@ -34,10 +34,11 @@ from hivemind.domain.entry import (
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.ports import Credential, Store
 from hivemind.services.access import AccessService, resolve_write_scope
-from hivemind.services.chain import supersession_chain
+from hivemind.services.chain import get_visible_entry, supersession_chain
 from hivemind.services.governance import (
     GovernanceService,
     PermissionDenied,
+    SupersedeDenied,
     WriteService,
 )
 from hivemind.services.search import Hit, SearchService
@@ -48,6 +49,7 @@ ERR_NOT_FOUND = "not_found"
 ERR_PERMISSION_DENIED = "permission_denied"
 ERR_NOT_ACTIVE = "not_active"
 ERR_AGENT_UNRESOLVED = "agent_unresolved"
+ERR_SUPERSEDE_DENIED = "supersede_denied"
 
 
 @dataclass(frozen=True, slots=True)
@@ -208,7 +210,7 @@ async def _supersession_chain(app: McpHivemind, entry: Entry) -> tuple[list[Entr
     §5.1 ``?history`` / §5.2 ``hive_get``) so REST and MCP walk the
     chain identically.
     """
-    return await supersession_chain(app.store, entry)
+    return await supersession_chain(app.store, entry, visibility=app.credential.visibility())
 
 
 # --------------------------------------------------------------------------- #
@@ -228,17 +230,21 @@ async def hive_write(
     importance: int | None = None,
     scope: str | None = None,
     supersedes: list[str] | None = None,
-    author: str | None = None,
     agent: str | None = None,
 ) -> dict[str, object]:
     """Write a distilled entry into the shared pool (SPEC §4.1, §5.2).
 
     ``kind`` is one of ``fact|insight|decision``; ``summary`` is required
     (it is the embedded text). ``occurred_at`` is the backdatable
-    "memory date" (ISO-8601). Provenance falls back to the acting
-    credential when ``author``/``agent`` are omitted (SPEC §8.1); a
-    plain user key must self-report the agent instance (no fabricated
-    ``unknown`` identity — the write is rejected instead).
+    "memory date" (ISO-8601). Provenance comes from the key, never from
+    the caller (ADRs 0012, 0033): ``author`` is the key's registered name
+    and, for an agent key, ``agent`` is the key's agent identity. Only a
+    legacy v1 key with no agent identity self-reports ``agent`` (no
+    fabricated ``unknown`` identity — the write is rejected instead).
+
+    ``supersedes``: every target must be readable by the caller, and the
+    new entry must reach at least the target's audience (ADR 0033); one
+    bad target rejects the whole write with ``supersede_denied``.
 
     ``importance``: omit it and the entry lands at the default (3) with
     ``importance_source=default``; supply it and the value is kept with
@@ -251,7 +257,7 @@ async def hive_write(
     is rejected.
     """
     cred = app.credential
-    resolved_agent = agent or cred.agent_id
+    resolved_agent = cred.agent_id or agent
     if resolved_agent is None:
         return _error(
             ERR_AGENT_UNRESOLVED,
@@ -265,7 +271,7 @@ async def hive_write(
         # out-of-permission scope is rejected, and the entry's ``author``
         # is the agent's registered name (verified server-side, ADR 0012).
         resolution = resolve_write_scope(cred, scope)
-        resolved_author = author or (cred.agent_name or cred.user_id)
+        resolved_author = cred.agent_name or cred.user_id
         # ROADMAP §4.5: an omitted importance resolves to the default
         # (3) with provenance `default`; a supplied value keeps its
         # provenance `caller` (the 1..5 range is still enforced by
@@ -297,7 +303,9 @@ async def hive_write(
     except ValueError as exc:
         return _error(ERR_INVALID_INPUT, str(exc))
     try:
-        entry = await app.write_service.write(draft)
+        entry = await app.write_service.write(draft, writer=cred.visibility())
+    except SupersedeDenied as exc:
+        return _error(ERR_SUPERSEDE_DENIED, str(exc))
     except ValueError as exc:
         return _error(ERR_INVALID_INPUT, str(exc))
     return _entry_dict(entry)
@@ -361,10 +369,14 @@ async def hive_get(
     With ``include_history`` the result additionally carries
     ``successors`` (newer versions) and ``superseded`` (older versions it
     replaced) — the supersession chain (SPEC §5.1 ``?history``).
+
+    Follows readability (ADR 0033): an entry the caller may not see is
+    ``not_found`` — the same answer as an unknown id — and the chain
+    leaves out versions the caller may not see.
     """
     if not entry_id or not entry_id.strip():
         return _error(ERR_INVALID_INPUT, "entry_id is required (pass a hit's id)")
-    entry = await app.store.get_entry(entry_id)
+    entry = await get_visible_entry(app.store, entry_id, app.credential.visibility())
     if entry is None:
         return _error(ERR_NOT_FOUND, f"unknown entry: {entry_id}")
     result = _entry_dict(entry)

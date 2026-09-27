@@ -55,7 +55,10 @@ How:
    keyword plus vector). Narrow it with `tags`, `kind`, `entities` or
    dates when you know them. Hits are compact and have no body.
 2. `hive_get` the promising hits to read the full entry (`include_history`
-   shows what it superseded).
+   shows what it superseded, limited to versions you may read). An id
+   that answers `not_found` may simply be outside what you may read, for
+   example an id someone pasted from another agent's private notes; it
+   does not mean the entry was deleted.
 3. Use what you found, and **say so** to the user when it shaped your
    answer ("Hivemind has a note from `<author>` that …").
 4. Give feedback with `hive_feedback`: `helpful` when an entry helped,
@@ -99,7 +102,17 @@ for the end of the session: write at the moment you learn it.
   preferences.
 - **Search first, then supersede.** If an entry already covers it and is
   now outdated or incomplete, write the corrected entry with
-  `supersedes: [<old id>]`. Do not write a near-duplicate.
+  `supersedes: [<old id>]`. Do not write a near-duplicate. A successor must
+  reach at least everyone the old entry reached, so:
+  - a `self` entry can supersede only your own `self` entries;
+  - a fleet entry can supersede your own `self` entries and fleet entries
+    in your home fleet, including other agents' entries there;
+  - anything else (another fleet's entries, other agents' private
+    entries) is refused as `supersede_denied`, and the whole write is
+    rejected. A **lurker** writes only `self`, so it cannot supersede fleet
+    entries: flag them with `hive_feedback` (`stale` or `wrong`, with a
+    `note` saying what is now true) and keep your corrected version in
+    `self`.
 - **Withdraw** (`hive_withdraw`) only your own entries that were wrong
   and have no replacement.
 
@@ -116,6 +129,9 @@ secret was found.
 - raw logs, transcripts or large code dumps (distil them, link the source);
 - guesses you have not verified. Say "unverified" in the summary if you
   must record a lead.
+
+The author of every entry is your own agent identity, taken from your key;
+there is no way to write under another name.
 
 **If a write fails with a permission error**, do not retry with another
 scope silently. Tell the user what you could not record and why (see the

@@ -209,6 +209,7 @@ class FakeAuthenticator:
         self._by_key: dict[str, Credential] = {
             org_key: Credential(user_id="org", is_org=True),
             admin_key: Credential(user_id="admin", is_admin=True, key_id=fake_key_id(admin_key)),
+            **(agent_credentials or {}),
         }
         self._issued_agent_keys: dict[str, str] = {}
         self._rotations = 0

@@ -11,6 +11,7 @@ is a forward link only).
 
 from __future__ import annotations
 
+from hivemind.domain.access import Visibility, entry_is_visible
 from hivemind.domain.entry import Entry, EntryFilters
 from hivemind.ports import Store
 
@@ -21,10 +22,21 @@ _MAX_SUPERSEDE_HOPS = 256
 _REVERSE_SCAN_PAGE = 200
 
 
+async def get_visible_entry(store: Store, entry_id: str, visibility: Visibility) -> Entry | None:
+    """The entry with ``entry_id`` if ``visibility`` may read it, else
+    ``None`` (ADR 0033). "Not visible" and "does not exist" are the same
+    answer, so an id reveals nothing, not even existence."""
+    entry = await store.get_entry(entry_id)
+    if entry is None or not entry_is_visible(entry, visibility):
+        return None
+    return entry
+
+
 async def supersession_chain(
     store: Store,
     entry: Entry,
     *,
+    visibility: Visibility | None = None,
     max_hops: int = _MAX_SUPERSEDE_HOPS,
     reverse_page: int = _REVERSE_SCAN_PAGE,
 ) -> tuple[list[Entry], list[Entry]]:
@@ -35,6 +47,10 @@ async def supersession_chain(
     entry replaced. Both walks are bounded (``max_hops``) so a corrupt
     chain cannot loop; the reverse walk uses a single bounded paginated
     scan (``reverse_page``) because the v1 stores have no reverse index.
+
+    With ``visibility``, versions that reader may not see are left out
+    (ADR 0033) — the walk still passes through them, it just never
+    returns them. ``None`` returns everything (internal callers only).
     """
     successors: list[Entry] = []
     cursor = entry
@@ -83,4 +99,7 @@ async def supersession_chain(
                 next_frontier.append(pred)
         frontier = next_frontier
 
+    if visibility is not None:
+        successors = [e for e in successors if entry_is_visible(e, visibility)]
+        superseded = [e for e in superseded if entry_is_visible(e, visibility)]
     return successors, superseded

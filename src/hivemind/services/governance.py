@@ -13,18 +13,35 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from hivemind.config import SearchConfig
+from hivemind.domain.access import Visibility, may_supersede
 from hivemind.domain.audit import AuditAction
 from hivemind.domain.entry import Entry, EntryDraft, ExtractedEntity
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.ports import Credential, Embedder, Extractor, Store
 from hivemind.retrieval.scoring import feedback_quality
 from hivemind.services.audit import record_admin_action
+from hivemind.services.chain import get_visible_entry
 
 logger = logging.getLogger(__name__)
 
 
 class PermissionDenied(Exception):
     """The caller may not perform this governance action."""
+
+
+class SupersedeDenied(PermissionDenied):
+    """A write named supersession targets outside the writer's reach
+    (ADR 0033). ``ids`` are those targets; the message deliberately says
+    "not found or not supersedable by you" for both cases."""
+
+    def __init__(self, ids: list[str]) -> None:
+        super().__init__(
+            "not found or not supersedable by you: "
+            + ", ".join(ids)
+            + " (you may supersede entries you can read, with a successor that reaches "
+            "at least the same audience — ADR 0033)"
+        )
+        self.ids = ids
 
 
 def _utcnow() -> datetime:
@@ -56,8 +73,14 @@ class WriteService:
         self._embedder = embedder
         self._extractor = extractor
 
-    async def write(self, draft: EntryDraft) -> Entry:
+    async def write(self, draft: EntryDraft, *, writer: Visibility | None = None) -> Entry:
         """Embed-then-persist a fully-resolved entry draft.
+
+        ``writer`` is the caller's visibility. When given, every
+        ``draft.supersedes`` target must pass ``may_supersede`` (ADR 0033)
+        or the whole write is rejected with ``SupersedeDenied`` before
+        anything is embedded or stored. Both surfaces pass it; ``None``
+        skips the check (internal callers and fixtures only).
 
         The embedding model name is recorded per entry (SPEC.md §7) so
         the vector's provenance is traceable. When an extractor is set,
@@ -66,6 +89,8 @@ class WriteService:
         best-effort: an extraction failure never blocks the write, the
         entry simply lands without facets.
         """
+        if writer is not None and draft.supersedes:
+            await self._check_supersedes(draft, writer)
         embedding = await self._embedder.embed_entry(draft)
         entities: tuple[ExtractedEntity, ...] = ()
         entities_model: str | None = None
@@ -98,6 +123,18 @@ class WriteService:
             entities_model=entities_model,
         )
 
+    async def _check_supersedes(self, draft: EntryDraft, writer: Visibility) -> None:
+        """Reject the write if any supersession target is out of reach."""
+        denied: list[str] = []
+        for target_id in dict.fromkeys(draft.supersedes):
+            target = await self._store.get_entry(target_id)
+            if target is None or not may_supersede(
+                target, new_scope=draft.scope, new_fleet_id=draft.fleet_id, writer=writer
+            ):
+                denied.append(target_id)
+        if denied:
+            raise SupersedeDenied(denied)
+
 
 @dataclass(frozen=True, slots=True)
 class FeedbackOutcome:
@@ -126,8 +163,8 @@ class GovernanceService:
     async def withdraw(
         self, credential: Credential, entry_id: str, reason: str | None = None
     ) -> Entry:
-        entry = await self._store.get_entry(entry_id)
-        if entry is None:
+        entry = await get_visible_entry(self._store, entry_id, credential.visibility())
+        if entry is None:  # unknown, or not visible to the caller (ADR 0033)
             raise LookupError(f"unknown entry: {entry_id}")
         if not (credential.is_admin or entry.author == credential.user_id):
             raise PermissionDenied("only the author or an admin may withdraw an entry")
@@ -170,8 +207,8 @@ class GovernanceService:
                 "the caller's agent identity must be resolved before "
                 "recording feedback (SPEC.md §8.1)"
             )
-        entry = await self._store.get_entry(entry_id)
-        if entry is None:
+        entry = await get_visible_entry(self._store, entry_id, credential.visibility())
+        if entry is None:  # feedback follows readability (SPEC §12.2, ADR 0033)
             raise LookupError(f"unknown entry: {entry_id}")
         feedback = Feedback(
             entry_id=entry_id,
