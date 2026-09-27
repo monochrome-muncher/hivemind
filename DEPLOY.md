@@ -221,6 +221,18 @@ first-run bootstrap Job records itself as `ci-bootstrap`.
   a Postgres advisory lock, so many replicas may start at once and
   exactly one migrates. An image whose migration chain is **older** than
   the pool applies nothing and never rolls the schema back.
+- **Does a release carry a migration?** Compare the chain between the two
+  tags: `git diff --stat v<old> v<new> -- src/hivemind/store/migrations/`.
+  No output means no schema change. Even when there is one, there is no
+  manual step: the entrypoint applies it. The current chain ends at
+  `0006` (added in 1.0.0-rc.1); 1.0.0-rc.4 → rc.5 adds
+  none.
+- **Agents pick up server-side changes on their own.** Tool descriptions,
+  the MCP server instructions and `hive_whoami` come from the server, so
+  upgrading the server updates what every agent sees. The agent plugin's
+  skills and hook update separately, per harness
+  (`plugins/hivemind/README.md`, "Updating", including a per-release list
+  of what changed for agents).
 - **Deploy every runner project together whenever a migration lands.**
   The runners are separate deployments (and, under GitLab AutoDevOps,
   separate projects) sharing one pool, so a migration from one runs

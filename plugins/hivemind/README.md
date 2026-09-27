@@ -166,6 +166,39 @@ up the MCP connection as above, then ask the agent to run
 the harness has one) and a marked instruction block to your global
 instructions file, showing you each change first.
 
+## Updating
+
+Hivemind's agent guidance lives in three places, and each updates
+differently:
+
+| What | Where it comes from | How it updates |
+|---|---|---|
+| Tool descriptions, the MCP server instructions, `hive_whoami` | the Hivemind server | Automatically, when the server is upgraded. Nothing to do on the agent side. |
+| The two skills, the `SessionStart` hook, the Hermes/Pi system-prompt section | this plugin | Update the plugin (commands below), then start a new session. |
+| Copies you or the agent made: skills copied into a skills folder, the `<!-- hivemind:begin -->` instruction block, a hand-installed hook | your own files | Not updated by anything. Re-copy them, or ask the agent to run **hivemind-setup**'s "Update" step, which compares and refreshes them. |
+
+**Always start a new session after updating.** A running conversation keeps
+the skill text it already loaded.
+
+| Harness | Update the plugin |
+|---|---|
+| Claude Code | `claude plugin marketplace update hivemind`, then `claude plugin update hivemind@hivemind`, then restart. (Updating the marketplace alone only refreshes the catalog.) |
+| Codex | `codex plugin marketplace upgrade hivemind`, then reinstall with `codex plugin add hivemind@hivemind` (Codex runs a cached copy), check with `codex plugin list --marketplace hivemind`, then start a new session. |
+| DeepSeek Harness | Installed from a checkout: `git pull` in the checkout (the profile links it). Installed from npm: `dsh plugin --profile <name> update hivemind-dsh-plugin`. Then restart `dsh`. |
+| Hermes | `hermes plugins update hivemind` (a `git pull` of the installed plugin). A plugin installed at a pinned ref needs `hermes plugins install <source> --force --ref <new-ref>` instead. |
+| Pi | Installed from a local path: `git pull` in that checkout (Pi loads it in place). Installed from git or npm: `pi update --extensions`; a pinned tag stays put, so reinstall at the new tag. |
+| Skills only | Copy both `skills/` folders over your earlier copies. |
+
+### What changed for agents, by release
+
+Check this before deciding whether an update matters. "Server" rows take
+effect when the Hivemind server is upgraded; "plugin" rows need the plugin
+update above.
+
+| Release | Server | Plugin | Your copies (instruction block, hand-installed hook) |
+|---|---|---|---|
+| 1.0.0-rc.5 | Tool descriptions: `hive_write` has no `author` parameter and states the supersession rule; `hive_get`, `hive_feedback` and `hive_withdraw` say invisible entries answer `not_found` (ADR 0033). | `hivemind` skill: who may supersede what, lurkers flag fleet entries with `hive_feedback` instead, `not_found` may mean "not visible to you". | Unchanged. |
+
 ## Remove
 
 Uninstall the plugin, and delete any `<!-- hivemind:begin -->` …

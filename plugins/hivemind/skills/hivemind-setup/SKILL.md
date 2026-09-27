@@ -1,11 +1,11 @@
 ---
 name: hivemind-setup
-description: Connect this agent to the organization's Hivemind, register it, switch to its agent key after activation, and make it permanently Hivemind-aware (a startup hook plus an instruction block that survive compaction). Use when the hive_* tools are missing or failing, when hive_whoami shows an org key or a pending agent, when the user has received an agent key, or when the user asks to set up Hivemind.
+description: Connect this agent to the organization's Hivemind, register it, switch to its agent key after activation, make it permanently Hivemind-aware (a startup hook plus an instruction block that survive compaction), and update the Hivemind plugin and your copies of its files. Use when the hive_* tools are missing or failing, when hive_whoami shows an org key or a pending agent, when the user has received an agent key, when the user asks to set up or update Hivemind.
 ---
 
 # Hivemind setup
 
-Four steps. Do only the ones that are missing: start by checking where
+Five steps. Do only the ones that are needed: start by checking where
 you stand.
 
 **Ground rules for every step:**
@@ -32,6 +32,7 @@ you stand.
 | `status: "pending"` | Wait for the admin; then 3. Switch to the agent key |
 | The user has just received an agent key | 3. Switch to the agent key |
 | Everything works | 4. Stay aware (if not done yet) |
+| The user asks to update Hivemind, or has just updated the plugin | 5. Update |
 
 ## 1. Connect
 
@@ -241,7 +242,8 @@ global always-loaded instructions file in Hermes) or
 `~/.pi/agent/AGENTS.md` (Pi's user instructions) and you are done.
 
 Show the user each change, ask, make it, then report it. Mark every block
-so it can be found and removed later.
+so it can be found and removed later. If a marked block is already there,
+replace it; never add a second one.
 
 ### The instruction block
 
@@ -298,3 +300,28 @@ instruction block is the only layer.
 Delete the text between `<!-- hivemind:begin -->` and
 `<!-- hivemind:end -->` (inclusive), and remove the `SessionStart` entry
 that runs `hivemind-session-start.sh`.
+
+## 5. Update
+
+Use when the user asks to update Hivemind, or after they updated the
+plugin. The server-side parts (tool descriptions, `hive_whoami`) update
+with the server; this step covers the plugin and the copies that nothing
+else updates.
+
+1. **Update the plugin** with the harness's own command, or tell the user
+   to (see the plugin README, "Updating"): `claude plugin update
+   hivemind@hivemind` after `claude plugin marketplace update hivemind`;
+   `codex plugin marketplace upgrade hivemind` then `codex plugin add
+   hivemind@hivemind`; `git pull` in a linked checkout (DeepSeek Harness,
+   Pi); `hermes plugins update hivemind`; `pi update --extensions`.
+2. **Refresh the instruction block.** Find the `<!-- hivemind:begin -->`
+   block in the harness's instructions file (step 4 lists them). If its
+   text differs from the block in step 4 of *this* skill, show the user
+   the difference and, with their approval, replace the whole block.
+3. **Refresh hand-installed copies.** If the skills were copied into a
+   skills folder rather than installed as a plugin, or the hook runs a
+   copied `hivemind-session-start.sh`, copy the new versions over them,
+   with approval.
+4. **Tell the user to start a new session**, since the current one keeps
+   the skill text it already loaded, and report exactly what you changed.
+
