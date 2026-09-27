@@ -231,6 +231,31 @@ curl -s -H "X-API-Key: $ADMIN_KEY" \
 - **Raw SQL bypasses it.** A hand-run `DELETE FROM credentials …` is not
   audited; prefer the CLI even for break-glass work.
 
+### Entries written with a self-reported author (before 1.0.0rc5)
+
+Before ADR 0033, MCP `hive_write` accepted an `author` argument, and the
+author decides who may read a `self` entry. An agent that passed another
+name wrote entries readable by the agent registered under that name, and
+unreadable by itself. From 1.0.0rc5 the author always comes from the key,
+but existing rows are not rewritten: the true writer cannot be recovered,
+because `agent` was self-reportable too. Review the suspects:
+
+```sql
+-- self entries whose author is not a registered agent, or differs from
+-- the agent column (an agent key normally writes author = agent = its name)
+SELECT e.id, e.author, e.agent, e.created_at, left(e.summary, 80) AS summary
+FROM entries e
+LEFT JOIN agents a ON a.name = e.author
+WHERE e.scope = 'self'
+  AND e.state = 'active'
+  AND (a.name IS NULL OR e.author <> e.agent)
+ORDER BY e.created_at;
+```
+
+For each row that should not be readable by its current author, withdraw
+it with the admin key (`POST /v1/entries/{id}/withdraw` with a `reason`);
+the withdrawal is recorded in the audit log.
+
 ## 5. Disaster recovery (full)
 
 1. Stop the services: `make mcp-http-down`, `make pg-down`.

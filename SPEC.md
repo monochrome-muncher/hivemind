@@ -62,7 +62,7 @@ One entry entity; a `kind` enum carries the distinction. There are no other read
 | `withdrawn_reason` | text (nullable) | Set on withdrawal |
 
 **Entries are immutable after creation (ADR 0001).** No field of an existing entry is ever edited. Corrections happen by:
-- **Supersession** — a new entry is written with `supersedes: [entry_ids]`; targets flip to `state=superseded`, `superseded_by` set. Any user may supersede any entry (a supersession is a *claim*, not an arbitration — the reader judges).
+- **Supersession** — a new entry is written with `supersedes: [entry_ids]`; targets flip to `state=superseded`, `superseded_by` set. A supersession is a *claim*, not an arbitration — the reader judges — made within the audience the writer can address: a writer may supersede only entries it can read, and the successor must reach at least everyone the predecessor reached (a `self` entry supersedes only the writer's own `self` entries; a `fleet` entry supersedes those plus `fleet` entries of the fleet it is written to; an admin supersedes anything). A write naming any other target is rejected as a whole (ADR 0033).
 - **Withdrawal** — an entry is marked `withdrawn` (retracted / no longer reliable). Any user may withdraw **their own** entries; **any** entry can be withdrawn by the org operator/admin. Nothing is ever hard-deleted in v1.
 
 **Derived validity (ADR 0001, no `valid_until` column):** an entry is "active as of T" iff `created_at ≤ T` and it has no supersession/withdrawal state transition before T. Read-side time-travel questions ("what did the org know in March?") are answered by `created_at`/`occurred_at` range filters + `state`.
@@ -316,6 +316,8 @@ This section supersedes the flat-pool commitment of §1 and the "no trust tiers"
 * Reads beyond visibility behave **as if the entry does not exist** (no existence leaking).
 * `self`-scoped entries are private to their author **even at level 3** (that is what `self` is for).
 * **Feedback and withdrawal follow readability**: an agent may feedback entries it can read, and withdraw its own entries; the admin key may withdraw any entry (the §4.1 withdrawal rules now ride the trust matrix).
+* **Every read by id follows readability** (ADR 0033): `hive_get` / `GET /v1/entries/{id}`, feedback and withdrawal answer **not found** for an entry the caller cannot see, and the supersession chain (`include_history` / `?history`) leaves such versions out.
+* **Provenance is never self-reported by an agent key** (ADRs 0012, 0033): on both surfaces `author` is the key's registered name and `agent` the key's agent identity.
 
 ### 12.3 Registration and activation
 

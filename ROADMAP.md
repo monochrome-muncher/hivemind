@@ -185,7 +185,7 @@ kinds). Tier 3.1 (the key-rotation runbook) is **blocked by Tier 2** —
 you can't write a rotation story for a key model that's about to
 change.
 
-## Tier 3 — productionize (former Tier 2)  *(3.1, 3.3–3.10 shipped; 3.2 superseded by 3.5)*
+## Tier 3 — productionize (former Tier 2)  *(3.1, 3.3–3.11 shipped; 3.2 superseded by 3.5)*
 
 ### 3.1 Ops runbook  *(shipped: `docs/ops-runbook.md`)*
 Deployment, **backups** (single-node Postgres, ADR 0007),
@@ -419,6 +419,18 @@ from an empty result. And ADR 0031, because the docs claimed agents send
 the org key plus their agent key and that org-key rotation stops every
 agent; the code has always taken one key, and rotation only closes
 registration.
+
+### 3.11 Server-enforced access on every entry path  *(shipped: ADR 0033)*
+A deployed contributor read another agent's `self` entry with `hive_get`.
+The audit behind the fix found the trust matrix applied only to search and
+list: reads by id, the supersession chain, feedback and supersession took
+any id from any key, and MCP writes trusted a caller-supplied `author`,
+which is what `self` visibility is decided on. All of them now follow
+readability (an invisible entry is "not found"), provenance comes from the
+key on both surfaces, a supersession must stay within the audience the
+writer can address, and built-in identity names cannot be registered.
+Existing rows with a spoofed author are listed in the ops runbook for
+review, not rewritten.
 
 ## Tier 4 — close the spec's open items (SPEC §11) (former Tier 3)
 
