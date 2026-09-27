@@ -197,6 +197,7 @@ update above.
 
 | Release | Server | Plugin | Your copies (instruction block, hand-installed hook) |
 |---|---|---|---|
+| 1.0.0 | `hive_write`: `supersedes` targets must be **active** — superseding an already-superseded or withdrawn entry is now `supersede_denied` (ADR 0034; re-target the current head). Typed errors everywhere: out-of-range `trust_level` → 422, unknown `home_fleet_id` → 404, a scope typo → 422/`invalid_input`, negative MCP `limit`/`offset` → `invalid_input`, blank `sources[].ref` refused on both surfaces. | `hivemind` skill: only the current head of a chain is supersedable; on a `supersede_denied` for a non-head target, fetch `?history` and re-target the current version. | Unchanged. |
 | 1.0.0-rc.6 | `hive_write` description: keep machine-local paths out of fleet entries (make them repo-relative, or put the local detail in a `self` entry). | `hivemind` skill: the local-paths rule — what counts as local, rewrite before dropping, still write the finding to the fleet, local specifics in a separate `self` note. | Unchanged. |
 | 1.0.0-rc.5 | Tool descriptions: `hive_write` has no `author` parameter and states the supersession rule; `hive_get`, `hive_feedback` and `hive_withdraw` say invisible entries answer `not_found` (ADR 0033). | `hivemind` skill: who may supersede what, lurkers flag fleet entries with `hive_feedback` instead, `not_found` may mean "not visible to you". | Unchanged. |
 
