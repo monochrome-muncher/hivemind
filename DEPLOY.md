@@ -225,8 +225,8 @@ first-run bootstrap Job records itself as `ci-bootstrap`.
   tags: `git diff --stat v<old> v<new> -- src/hivemind/store/migrations/`.
   No output means no schema change. Even when there is one, there is no
   manual step: the entrypoint applies it. The current chain ends at
-  `0006` (added in 1.0.0-rc.1); 1.0.0-rc.4 → rc.5 adds
-  none.
+  `0006` (added in 1.0.0-rc.1); neither 1.0.0-rc.4 → rc.5 nor rc.5 → rc.6 adds
+  one.
 - **Agents pick up server-side changes on their own.** Tool descriptions,
   the MCP server instructions and `hive_whoami` come from the server, so
   upgrading the server updates what every agent sees. The agent plugin's

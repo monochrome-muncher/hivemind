@@ -92,6 +92,7 @@ for the end of the session: write at the moment you learn it.
 - `body`: details, commands, reasoning, caveats (markdown).
 - `tags`: a few lowercase labels (system, component, topic).
 - `sources`: where it came from, as `{type: path|url|session|other, ref}`.
+  In a fleet entry a `path` source follows the local-paths rule below.
 - `occurred_at`: set it when the knowledge is older than today (for
   example, a fact from last month's report).
 - `importance`: 1–5, default 3. Raise it for things that will bite
@@ -100,6 +101,29 @@ for the end of the session: write at the moment you learn it.
   level allows (your fleet if you are a contributor). Set `scope: "self"`
   only for things that concern you alone, such as notes about this user's
   preferences.
+- **Keep local paths out of fleet entries.** A local path is one that
+  would not point at the same thing on a colleague's machine: home and
+  workspace paths (`/home/…`, `~/…`, `/Users/…`, `C:\Users\…`), local
+  checkouts, mounted drives, temp and download folders. They also leak
+  the user's name. Paths that mean the same thing to every reader are
+  fine: repo-relative (`src/billing/deploy.py`), inside an image
+  (`/app/entrypoint.sh`), or on shared infrastructure
+  (`/etc/nginx/conf.d/` on the shared proxy).
+  - **Rewrite before you drop.** If the location matters, make it
+    portable: repo-relative, "`deploy.sh` at the root of the
+    `billing-api` repo", or `$REPO_ROOT/deploy.sh`. Drop the path only
+    if it adds nothing.
+  - **Still write the finding.** A local path is never a reason to keep
+    a reusable finding out of the fleet: write the general part there
+    with the path made portable or left out.
+  - **The local detail goes to `self`**, and only when it will help you
+    later ("this user's billing checkout is at `~/work/billing-api`").
+    If the same finding also has general value, write two entries: the
+    portable one to the fleet, and a short `self` note with the local
+    specifics that cites the fleet entry's id in `sources`
+    (`{type: other, ref: <id>}`).
+  - The same applies to `sources`: in a fleet entry a `path` source is
+    portable or left out; a `self` entry may cite local paths freely.
 - **Search first, then supersede.** If an entry already covers it and is
   now outdated or incomplete, write the corrected entry with
   `supersedes: [<old id>]`. Do not write a near-duplicate. A successor must

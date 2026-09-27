@@ -197,6 +197,7 @@ update above.
 
 | Release | Server | Plugin | Your copies (instruction block, hand-installed hook) |
 |---|---|---|---|
+| 1.0.0-rc.6 | `hive_write` description: keep machine-local paths out of fleet entries (make them repo-relative, or put the local detail in a `self` entry). | `hivemind` skill: the local-paths rule — what counts as local, rewrite before dropping, still write the finding to the fleet, local specifics in a separate `self` note. | Unchanged. |
 | 1.0.0-rc.5 | Tool descriptions: `hive_write` has no `author` parameter and states the supersession rule; `hive_get`, `hive_feedback` and `hive_withdraw` say invisible entries answer `not_found` (ADR 0033). | `hivemind` skill: who may supersede what, lurkers flag fleet entries with `hive_feedback` instead, `not_found` may mean "not visible to you". | Unchanged. |
 
 ## Remove
