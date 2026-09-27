@@ -19,8 +19,9 @@ from hivemind.domain.access import (
     TrustLevel,
     Visibility,
     entry_is_visible,
+    may_supersede,
 )
-from hivemind.domain.entry import Entry, Kind, new_entry_id
+from hivemind.domain.entry import Entry, EntryState, Kind, new_entry_id
 
 NOW = datetime(2026, 6, 1, tzinfo=UTC)
 FL_A = "fleet-a"
@@ -46,6 +47,7 @@ def make_entry(
         created_at=NOW,
         scope=scope,
         fleet_id=fleet_id,
+        state=EntryState(state),
     )
 
 
@@ -174,6 +176,26 @@ class TestAdminBypass:
         for scope in ("self", "fleet", "org"):
             e = make_entry(scope=scope, author="bob", fleet_id=FL_B)
             assert entry_is_visible(e, vis(0, "root", is_admin=True)) is True
+
+
+class TestSupersedeState:
+    """A supersession target must be active (ADR 0034): an entry that is
+    already superseded or withdrawn is not supersedable by anyone —
+    ``superseded_by`` is single-valued, so a second claim would be
+    silently lost."""
+
+    @pytest.mark.parametrize("state", ["superseded", "withdrawn"])
+    def test_non_active_target_is_not_supersedable_by_anyone(self, state: str) -> None:
+        target = make_entry(scope="fleet", author="alice", fleet_id=FL_A, state=state)
+        # The state rule outranks the admin bypass.
+        admin = vis(3, "root", home=FL_A, is_admin=True)
+        assert may_supersede(target, new_scope="fleet", new_fleet_id=FL_A, writer=admin) is False
+        # And it outranks an in-reach writer.
+        assert may_supersede(target, new_scope="fleet", new_fleet_id=FL_A, writer=vis(2, "bob", home=FL_A)) is False
+
+    def test_active_target_still_supersedable(self) -> None:
+        target = make_entry(scope="fleet", author="alice", fleet_id=FL_A)
+        assert may_supersede(target, new_scope="fleet", new_fleet_id=FL_A, writer=vis(2, "bob", home=FL_A)) is True
 
 
 class TestVisibilityWrapper:

@@ -223,6 +223,33 @@ async def test_one_bad_target_rejects_the_whole_write() -> None:
     assert (await pool.store.get_entry(str(mine["id"]))).state.value == "active"  # type: ignore[union-attr]
 
 
+async def test_superseding_an_already_superseded_entry_is_denied() -> None:
+    """ADR 0034: only the current head is supersedable. A second claim on
+    the same target would be silently dropped (``superseded_by`` is
+    single-valued), so it is rejected with ``supersede_denied``."""
+    pool = Pool()
+    v1 = await _write(pool, ALICE, "original")
+    v2 = await _write(pool, BOB, "correction v2", supersedes=[str(v1["id"])])
+    bad = await hive_write(
+        pool.as_(ALICE), kind="fact", summary="correction v3", supersedes=[str(v1["id"])]
+    )
+    assert bad["error"]["code"] == "supersede_denied"  # type: ignore[index]
+    # The current head remains supersedable — re-target the correction.
+    v3 = await _write(pool, ALICE, "correction v3 on the head", supersedes=[str(v2["id"])])
+    head = await pool.store.get_entry(str(v2["id"]))
+    assert head is not None and head.state.value == "superseded" and head.superseded_by == v3["id"]
+
+
+async def test_superseding_a_withdrawn_entry_is_denied() -> None:
+    pool = Pool()
+    v1 = await _write(pool, ALICE, "retracted")
+    await hive_withdraw(pool.as_(ALICE), entry_id=str(v1["id"]), reason="no longer reliable")
+    bad = await hive_write(
+        pool.as_(ALICE), kind="fact", summary="correction", supersedes=[str(v1["id"])]
+    )
+    assert bad["error"]["code"] == "supersede_denied"  # type: ignore[index]
+
+
 async def test_admin_supersedes_anything() -> None:
     pool = Pool()
     theirs = await _write(pool, BOB, "bob private", scope="self")

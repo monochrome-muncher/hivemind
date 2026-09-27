@@ -31,15 +31,17 @@ class PermissionDenied(Exception):
 
 class SupersedeDenied(PermissionDenied):
     """A write named supersession targets outside the writer's reach
-    (ADR 0033). ``ids`` are those targets; the message deliberately says
-    "not found or not supersedable by you" for both cases."""
+    (ADR 0033) or at a target that is no longer active (ADR 0034).
+    ``ids`` are those targets; the message deliberately says
+    "not found or not supersedable by you" for all cases."""
 
     def __init__(self, ids: list[str]) -> None:
         super().__init__(
             "not found or not supersedable by you: "
             + ", ".join(ids)
-            + " (you may supersede entries you can read, with a successor that reaches "
-            "at least the same audience — ADR 0033)"
+            + " (you may supersede active entries you can read, with a successor that "
+            "reaches at least the same audience — ADR 0033; only the current head of a "
+            "chain is supersedable — ADR 0034)"
         )
         self.ids = ids
 

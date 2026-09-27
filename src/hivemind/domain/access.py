@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import IntEnum, StrEnum
 
-from hivemind.domain.entry import Entry
+from hivemind.domain.entry import Entry, EntryState
 
 
 class TrustLevel(IntEnum):
@@ -237,13 +237,18 @@ def may_supersede(
     must reach at least everyone the predecessor reached, so a
     supersession can never hide an entry behind a narrower one.
 
-      * admin -> anything.
+      * a non-active target (already superseded or withdrawn) -> no one
+        (ADR 0034): ``superseded_by`` is single-valued, so a second claim
+        on the same target would be silently lost; re-target the head.
+      * admin -> anything (that is active).
       * ``self`` target -> only the writer's own (visibility already
         guarantees that); any successor scope reaches its one reader.
       * ``fleet`` target -> only by a ``fleet`` successor written into
         the same fleet.
       * ``org`` (legacy) target -> admin only; agents cannot write ``org``.
     """
+    if target.state is not EntryState.ACTIVE:
+        return False
     if writer.is_admin:
         return True
     if not entry_is_visible(target, writer):

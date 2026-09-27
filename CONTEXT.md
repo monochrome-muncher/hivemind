@@ -69,7 +69,7 @@ _Avoid_: audit, lineage
 ### Lifecycle
 
 **Supersession**:
-The explicit replacement of one entry by a newer one; the superseded entry is retained and hidden by default. Supersession is a claim, not an arbitration — the reading agent decides. A writer may supersede only entries it can read, and a successor must reach at least everyone its predecessor reached: a private (`self`) entry replaces only the writer's own private entries, a fleet entry replaces fleet entries of the fleet it is written to (and the writer's own private ones).
+The explicit replacement of one entry by a newer one; the superseded entry is retained and hidden by default. Supersession is a claim, not an arbitration — the reading agent decides. A writer may supersede only **active** entries it can read, and a successor must reach at least everyone its predecessor reached: a private (`self`) entry replaces only the writer's own private entries, a fleet entry replaces fleet entries of the fleet it is written to (and the writer's own private ones). Only the current head of a chain is supersedable — an already-superseded or withdrawn entry is re-targeted via its successor (ADR 0034).
 _Avoid_: overwrite, update, invalidate (say "supersede"; never "update an entry" — entries are immutable)
 
 **Supersession chain**:
