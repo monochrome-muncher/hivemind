@@ -820,6 +820,85 @@ class TestAccessEndpoints:
         assert resp.status_code == 422
         assert resp.json()["error"]["code"] == "update_required"
 
+    @pytest.mark.parametrize("bad_level", [4, -1, 99])
+    async def test_activate_out_of_range_trust_level_is_422(self, bad_level: int) -> None:
+        """A typo'd trust level is a typed 422, not a 500 (TrustLevel(4)
+        used to raise an uncaught ValueError)."""
+        app = make_hivemind_app()
+        await app.store.register_agent("alice")
+        fleet = await app.store.create_fleet("data-eng")
+        client = make_client(app)
+        async with client:
+            resp = await client.post(
+                "/v1/admin/agents/alice/activate",
+                json={"trust_level": bad_level, "home_fleet_id": fleet.id},
+                headers={"X-API-Key": "key-admin"},
+            )
+        assert resp.status_code == 422
+        agent = await app.store.get_agent("alice")
+        assert agent is not None and agent.status.value == "pending"
+
+    async def test_activate_unknown_home_fleet_is_404(self) -> None:
+        """A fleet id that names no fleet is a typed 404, not a raw
+        foreign-key 500; the agent stays pending."""
+        app = make_hivemind_app()
+        await app.store.register_agent("alice")
+        client = make_client(app)
+        async with client:
+            resp = await client.post(
+                "/v1/admin/agents/alice/activate",
+                json={"trust_level": 2, "home_fleet_id": "00000000-0000-0000-0000-000000000000"},
+                headers={"X-API-Key": "key-admin"},
+            )
+        assert resp.status_code == 404
+        assert resp.json()["error"]["code"] == "not_found"
+        agent = await app.store.get_agent("alice")
+        assert agent is not None and agent.status.value == "pending"
+
+    @pytest.mark.parametrize("bad_level", [4, -1])
+    async def test_patch_out_of_range_trust_level_is_422(self, bad_level: int) -> None:
+        app = make_hivemind_app()
+        await app.store.register_agent("alice")
+        fleet = await app.store.create_fleet("data-eng")
+        await app.store.activate_agent(
+            "alice", trust_level=TrustLevel.CONTRIBUTOR, home_fleet_id=fleet.id
+        )
+        client = make_client(app)
+        async with client:
+            resp = await client.patch(
+                "/v1/admin/agents/alice",
+                json={"trust_level": bad_level},
+                headers={"X-API-Key": "key-admin"},
+            )
+        assert resp.status_code == 422
+        agent = await app.store.get_agent("alice")
+        assert agent is not None and agent.trust_level.value == 2
+
+    async def test_patch_two_fields_with_unknown_fleet_is_atomic(self) -> None:
+        """A two-field PATCH must not half-apply: a typo'd fleet id is a
+        404 and the trust level is left untouched."""
+        app = make_hivemind_app()
+        await app.store.register_agent("alice")
+        fleet = await app.store.create_fleet("data-eng")
+        await app.store.activate_agent(
+            "alice", trust_level=TrustLevel.CONTRIBUTOR, home_fleet_id=fleet.id
+        )
+        client = make_client(app)
+        async with client:
+            resp = await client.patch(
+                "/v1/admin/agents/alice",
+                json={
+                    "trust_level": 3,
+                    "home_fleet_id": "00000000-0000-0000-0000-000000000000",
+                },
+                headers={"X-API-Key": "key-admin"},
+            )
+        assert resp.status_code == 404
+        agent = await app.store.get_agent("alice")
+        assert agent is not None
+        assert agent.trust_level.value == 2  # unchanged
+        assert agent.home_fleet_id == fleet.id  # unchanged
+
     async def test_revoke_agent_admin_only(self) -> None:
         app = make_hivemind_app()
         await app.store.register_agent("alice")

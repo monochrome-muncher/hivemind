@@ -17,6 +17,7 @@ Hermetic-by-construction:
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import asyncpg
@@ -190,6 +191,56 @@ async def test_withdraw_unknown_entry_raises(pg) -> None:
     store, _, _ = pg
     with pytest.raises(KeyError):
         await store.withdraw_entry("nope", None, by_user="alice")
+
+
+async def test_concurrent_withdraw_raises_typed_error_not_assertion(pg) -> None:
+    """Two concurrent withdrawals of one active entry: exactly one wins;
+    the loser gets the port-contract ``ValueError`` (a 409 upstream),
+    never a raw ``AssertionError`` — the guarded UPDATE used to be
+    followed by a bare assert on its 0-row result."""
+    store, _, _ = pg
+    entry = await store.create_entry(draft("Race me"))
+    results = await asyncio.gather(
+        store.withdraw_entry(entry.id, "first", by_user="alice"),
+        store.withdraw_entry(entry.id, "second", by_user="bob"),
+        return_exceptions=True,
+    )
+    wins = [r for r in results if not isinstance(r, Exception)]
+    losses = [r for r in results if isinstance(r, Exception)]
+    assert len(wins) == 1 and len(losses) == 1
+    assert isinstance(losses[0], ValueError)
+    reloaded = await store.get_entry(entry.id)
+    assert reloaded is not None and reloaded.state is EntryState.WITHDRAWN
+
+
+async def test_concurrent_registration_of_same_name_is_idempotent(pg) -> None:
+    """Two concurrent registrations of a new name both return the same
+    pending record (SPEC §12.3 idempotent no-op) — the conflict-guarded
+    insert used to surface a raw ``UniqueViolation`` as a 500."""
+    store, _, _ = pg
+    a, b = await asyncio.gather(
+        store.register_agent("racer"), store.register_agent("racer")
+    )
+    assert a.name == b.name == "racer"
+    assert a.status.value == "pending" and b.status.value == "pending"
+    same = [a for a in await store.list_agents() if a.name == "racer"]
+    assert len(same) == 1
+
+
+async def test_concurrent_fleet_create_raises_typed_error(pg) -> None:
+    """Two concurrent creates of the same fleet name: one wins, the other
+    gets the port-contract ``ValueError`` (a 409 upstream) — not a raw
+    ``UniqueViolation``."""
+    store, _, _ = pg
+    results = await asyncio.gather(
+        store.create_fleet("race-fleet"),
+        store.create_fleet("race-fleet"),
+        return_exceptions=True,
+    )
+    wins = [r for r in results if not isinstance(r, Exception)]
+    losses = [r for r in results if isinstance(r, Exception)]
+    assert len(wins) == 1 and len(losses) == 1
+    assert isinstance(losses[0], ValueError)
 
 
 # --- feedback -------------------------------------------------------------------

@@ -236,6 +236,26 @@ async def test_hive_search_respects_kind_filter(app: McpHivemind) -> None:
     assert all(h["kind"] == "decision" for h in result["hits"])
 
 
+@pytest.mark.parametrize(
+    ("limit", "offset"), [(0, 0), (-1, 0), (None, -5), (5, -1)], ids=["zero", "neg-limit", "neg-offset", "both"]
+)
+async def test_hive_search_out_of_range_pagination_is_invalid_input(
+    app: McpHivemind, limit: int | None, offset: int | None
+) -> None:
+    """A negative limit/offset is a typed ``invalid_input`` on MCP —
+    matching REST's 422 — not a raw driver fault."""
+    await hive_write(app, kind="fact", summary="Weekly cohorts fact")
+    result = await hive_search(app, query="weekly cohorts", limit=limit, offset=offset)
+    assert result.get("error", {}).get("code") == "invalid_input"
+
+
+async def test_hive_search_in_range_pagination_still_works(app: McpHivemind) -> None:
+    await hive_write(app, kind="fact", summary="Weekly cohorts fact")
+    result = await hive_search(app, query="weekly cohorts", limit=1, offset=0)
+    assert "error" not in result
+    assert len(result["hits"]) == 1
+
+
 # --------------------------------------------------------------------------- #
 # hive_get
 # --------------------------------------------------------------------------- #
@@ -297,6 +317,20 @@ async def test_hive_list_filters_by_kind_and_tags(app: McpHivemind) -> None:
     assert "decision" not in {e["kind"] for e in result["entries"]}
     # The decision entry is still present in the pool, just filtered out.
     assert decision["id"] not in [e["id"] for e in result["entries"]]
+
+
+@pytest.mark.parametrize("limit", [0, -1], ids=["zero", "negative"])
+async def test_hive_list_out_of_range_limit_is_invalid_input(app: McpHivemind, limit: int) -> None:
+    """Same pagination bounds as hive_search (SPEC §5.3, REST parity)."""
+    await hive_write(app, kind="fact", summary="fact x")
+    result = await hive_list(app, limit=limit)
+    assert result.get("error", {}).get("code") == "invalid_input"
+
+
+async def test_hive_list_negative_offset_is_invalid_input(app: McpHivemind) -> None:
+    await hive_write(app, kind="fact", summary="fact x")
+    result = await hive_list(app, offset=-1)
+    assert result.get("error", {}).get("code") == "invalid_input"
 
 
 async def test_hive_list_is_paginated(app: McpHivemind) -> None:

@@ -85,14 +85,17 @@ SELECT_ENTRIES = "SELECT " + _ENTRY_COLUMNS + " FROM entries WHERE id = ANY($1)"
 # --- Fleet / agent access-control SQL (ADRs 0011-0012) ---------------------
 
 SELECT_FLEET_BY_NAME = "SELECT 1 FROM fleets WHERE name = $1"
-INSERT_FLEET = "INSERT INTO fleets (name) VALUES ($1) RETURNING id, name, created_at"
+INSERT_FLEET = (
+    "INSERT INTO fleets (name) VALUES ($1) "
+    "ON CONFLICT (name) DO NOTHING RETURNING id, name, created_at"
+)
 GET_FLEET = "SELECT id, name, created_at FROM fleets WHERE id = $1"
 LIST_FLEETS = "SELECT id, name, created_at FROM fleets ORDER BY created_at"
 
 GET_AGENT = "SELECT * FROM agents WHERE name = $1"
 INSERT_AGENT = (
     "INSERT INTO agents (name, owner_alias, status, trust_level) "
-    "VALUES ($1, $2, 'pending', 0) RETURNING *"
+    "VALUES ($1, $2, 'pending', 0) ON CONFLICT (name) DO NOTHING RETURNING *"
 )
 BACKFILL_AGENT_ALIAS = "UPDATE agents SET owner_alias = $2 WHERE name = $1 AND owner_alias IS NULL"
 LIST_AGENTS = "SELECT * FROM agents ORDER BY name"
@@ -387,7 +390,8 @@ class PgStore:
                     if targets:
                         await conn.execute(FLIP_SUPERSEDED, entry_id, targets)
             row = await conn.fetchrow(SELECT_ENTRY, entry_id)
-        assert row is not None
+        if row is None:
+            raise RuntimeError(f"entry {entry_id} vanished between insert and read")
         return _row_to_entry(row)
 
     # -- read path ---------------------------------------------------------------
@@ -474,7 +478,14 @@ class PgStore:
             if existing["state"] != "active":
                 raise ValueError(f"entry {entry_id} is {existing['state']}, not active")
             row = await conn.fetchrow(WITHDRAW, entry_id, reason)
-        assert row is not None
+            if row is None:
+                # Lost the race on the guarded UPDATE: a concurrent
+                # withdraw/supersede flipped the state between the
+                # pre-check and the update. Disambiguate by re-reading.
+                state = await conn.fetchrow(LOOKUP_STATE, entry_id)
+                if state is None:
+                    raise KeyError(f"unknown entry: {entry_id}")
+                raise ValueError(f"entry {entry_id} is {state['state']}, not active")
         return _row_to_entry(row)
 
     # -- search -------------------------------------------------------------------
@@ -589,14 +600,19 @@ class PgStore:
 
     async def create_fleet(self, name: str) -> Fleet:
         """Create a named fleet (ADR 0011). ``ValueError`` if the name
-        already exists."""
+        already exists — including the concurrent case: the insert is
+        conflict-guarded, so a racing duplicate is a typed error, not a
+        raw ``UniqueViolation``."""
         pool = await self._ensure_pool()
         async with pool.acquire() as conn:
             dup = await conn.fetchrow(SELECT_FLEET_BY_NAME, name)
             if dup is not None:
                 raise ValueError(f"fleet already exists: {name!r}")
             row = await conn.fetchrow(INSERT_FLEET, name)
-        assert row is not None
+            if row is None:
+                # A concurrent create won the race between the check and
+                # the conflict-guarded insert.
+                raise ValueError(f"fleet already exists: {name!r}")
         return _row_to_fleet(row)
 
     async def list_fleets(self) -> list[Fleet]:
@@ -618,18 +634,27 @@ class PgStore:
     async def register_agent(self, name: str, owner_alias: str | None = None) -> Agent:
         """Register (or re-register) an agent (ADR 0012). Idempotent: an
         existing record is returned (only ``owner_alias`` back-filled if it
-        was missing); a new record is ``pending`` (level 0, no fleet).
+        was missing); a new record is ``pending`` (level 0, no fleet). A
+        racing concurrent registration of the same name returns the same
+        pending record (the insert is conflict-guarded — no raw
+        ``UniqueViolation``, SPEC §12.3 idempotent no-op).
         """
         pool = await self._ensure_pool()
         async with pool.acquire() as conn:
             existing = await conn.fetchrow(GET_AGENT, name)
             if existing is None:
                 row = await conn.fetchrow(INSERT_AGENT, name, owner_alias)
+                if row is None:
+                    # A concurrent registration won the race between the
+                    # check and the conflict-guarded insert: return the
+                    # record it created.
+                    row = await conn.fetchrow(GET_AGENT, name)
             else:
                 if owner_alias is not None:
                     await conn.execute(BACKFILL_AGENT_ALIAS, name, owner_alias)
                 row = await conn.fetchrow(GET_AGENT, name)
-        assert row is not None
+        if row is None:
+            raise RuntimeError(f"agent {name!r} vanished between insert and read")
         return _row_to_agent(row)
 
     async def get_agent(self, name: str) -> Agent | None:
@@ -656,7 +681,8 @@ class PgStore:
             row = await conn.fetchrow(ACTIVATE_AGENT, name, trust_level.value, home_fleet_id)
             if row is None:
                 await self._raise_for_status(conn, name, "activate")
-        assert row is not None
+        if row is None:
+            raise RuntimeError(f"agent {name!r} vanished between flip and read")
         return _row_to_agent(row)
 
     async def revoke_agent(self, name: str) -> Agent:
@@ -668,7 +694,8 @@ class PgStore:
             row = await conn.fetchrow(REVOKE_AGENT, name)
             if row is None:
                 await self._raise_for_status(conn, name, "revoke")
-        assert row is not None
+        if row is None:
+            raise RuntimeError(f"agent {name!r} vanished between flip and read")
         return _row_to_agent(row)
 
     @staticmethod
@@ -690,7 +717,8 @@ class PgStore:
             if existing is None:
                 raise KeyError(f"unknown agent: {name}")
             row = await conn.fetchrow(SET_AGENT_LEVEL, name, level.value)
-        assert row is not None
+        if row is None:
+            raise RuntimeError(f"agent {name!r} vanished between check and update")
         return _row_to_agent(row)
 
     async def set_agent_home_fleet(self, name: str, fleet_id: str) -> Agent:
@@ -704,7 +732,8 @@ class PgStore:
             if existing is None:
                 raise KeyError(f"unknown agent: {name}")
             row = await conn.fetchrow(SET_AGENT_FLEET, name, fleet_id)
-        assert row is not None
+        if row is None:
+            raise RuntimeError(f"agent {name!r} vanished between check and update")
         return _row_to_agent(row)
 
     # -- audit log (ADR 0027) -------------------------------------------------
@@ -722,7 +751,8 @@ class PgStore:
                 event.target,
                 json.dumps(dict(event.detail)),
             )
-        assert row is not None
+        if row is None:
+            raise RuntimeError("audit row vanished between insert and read")
         return _row_to_audit(row)
 
     async def list_audit(self, filters: AuditFilters, limit: int) -> list[AuditRecord]:

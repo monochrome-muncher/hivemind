@@ -74,9 +74,10 @@ async def test_register_idempotent_for_pending() -> None:
 
 
 async def test_register_active_name_conflicts() -> None:
-    service, _, _ = make_service()
+    service, _, store = make_service()
     await service.register("alice", org_credential())
-    await service.activate("alice", TrustLevel.LURKER, "fleet-a", admin_credential())
+    await store.create_fleet("data-eng")  # ensure a fleet exists for the FK
+    await service.activate("alice", TrustLevel.LURKER, (await store.list_fleets())[0].id, admin_credential())
     with pytest.raises(ValueError):
         await service.register("alice", org_credential())
 

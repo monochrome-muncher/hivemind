@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from hivemind.domain.access import Agent, Fleet, Standing
 from hivemind.domain.audit import AuditRecord
@@ -264,18 +264,18 @@ class RegisterAgentRequest(BaseModel):
 class ActivateAgentRequest(BaseModel):
     """Activate a pending agent (ADR 0012): set its trust level + home
     fleet; the agent key is issued once. The trust level defaults to
-    `lurker` (1) (SPEC §5.1)."""
+    `lurker` (1) (SPEC §5.1). Out-of-range values are a 422, not a 500."""
 
-    trust_level: int = 1
+    trust_level: int = Field(default=1, ge=0, le=3)
     home_fleet_id: str
 
 
 class UpdateAgentRequest(BaseModel):
     """Change an agent's trust level and/or home fleet (the SPEC §5.1
     ``PATCH /v1/admin/agents/{name}`` body; ADR 0011). At least one
-    field must be supplied."""
+    field must be supplied. Out-of-range trust levels are a 422, not a 500."""
 
-    trust_level: int | None = None
+    trust_level: int | None = Field(default=None, ge=0, le=3)
     home_fleet_id: str | None = None
 
 

@@ -137,6 +137,10 @@ for the end of the session: write at the moment you learn it.
     entries: flag them with `hive_feedback` (`stale` or `wrong`, with a
     `note` saying what is now true) and keep your corrected version in
     `self`.
+  - Only the **current head** of a chain is supersedable: an entry that is
+    already superseded or withdrawn is refused as `supersede_denied` too.
+    If you get that on a target, fetch it with `?history` (or
+    `hive_get`), find the version that is current, and target that one.
 - **Withdraw** (`hive_withdraw`) only your own entries that were wrong
   and have no replacement.
 

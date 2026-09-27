@@ -168,6 +168,16 @@ def _parse_sources(raw: list[dict[str, str]] | None) -> tuple[Source, ...]:
     return tuple(parsed)
 
 
+def _check_pagination(limit: int | None, offset: int | None) -> None:
+    """Pagination bounds (SPEC §5.3): a negative ``limit``/``offset`` is a
+    typed ``invalid_input``, not a driver fault — the MCP surface matches
+    REST's 422 validation (``limit >= 1``, ``offset >= 0``)."""
+    if limit is not None and limit < 1:
+        raise ValueError("limit must be >= 1")
+    if offset is not None and offset < 0:
+        raise ValueError("offset must be >= 0")
+
+
 def _build_filters(
     *,
     kind: str | None,
@@ -242,9 +252,11 @@ async def hive_write(
     legacy v1 key with no agent identity self-reports ``agent`` (no
     fabricated ``unknown`` identity — the write is rejected instead).
 
-    ``supersedes``: every target must be readable by the caller, and the
-    new entry must reach at least the target's audience (ADR 0033); one
-    bad target rejects the whole write with ``supersede_denied``.
+    ``supersedes``: every target must be **active**, readable by the
+    caller, and reached by the new entry's audience (ADRs 0033, 0034); one
+    bad target rejects the whole write with ``supersede_denied``. Only the
+    current head of a chain is supersedable — if a target is already
+    superseded or withdrawn, re-target the version that supersedes it.
 
     ``importance``: omit it and the entry lands at the default (3) with
     ``importance_source=default``; supply it and the value is kept with
@@ -336,8 +348,12 @@ async def hive_search(
 
     ``entities`` (ADR 0016, SPEC §13) filters by machine-extracted
     entity names: AND-semantics, case-insensitive; kinds are display-only.
+
+    ``limit`` must be >= 1 and ``offset`` >= 0; out-of-range values are
+    ``invalid_input`` (matching REST's 422).
     """
     try:
+        _check_pagination(limit, offset)
         filters = _build_filters(
             kind=kind,
             tags=tags,
@@ -407,8 +423,12 @@ async def hive_list(
 
     ``entities`` (ADR 0016, SPEC §13) filters by machine-extracted entity
     names: AND-semantics, case-insensitive; kinds are display-only.
+
+    ``limit`` must be >= 1 and ``offset`` >= 0; out-of-range values are
+    ``invalid_input`` (matching REST's 422).
     """
     try:
+        _check_pagination(limit, offset)
         filters = _build_filters(
             kind=kind,
             tags=tags,

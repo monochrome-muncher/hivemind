@@ -100,6 +100,15 @@ class AccessService:
 
     # -- admin-gated operations (ADR 0012) ----------------------------------
 
+    async def _require_fleet(self, fleet_id: str) -> None:
+        """A home-fleet reference must name a real fleet (SPEC §12.1).
+
+        Resolved **before** any mutation so a typo'd fleet id is a typed
+        404, not a raw foreign-key fault mid-mutation (and so a PATCH
+        carrying both fields cannot half-apply)."""
+        if await self._store.get_fleet(fleet_id) is None:
+            raise KeyError(f"unknown fleet: {fleet_id}")
+
     async def activate(
         self,
         name: str,
@@ -115,6 +124,7 @@ class AccessService:
         is issued last, so a failure in between leaves the agent active
         with no key — less privileged, never more."""
         self._require_admin(credential)
+        await self._require_fleet(home_fleet_id)
         agent = await self._store.activate_agent(
             name, trust_level=trust_level, home_fleet_id=home_fleet_id
         )
@@ -157,6 +167,7 @@ class AccessService:
         The agent's earlier ``fleet``-scoped entries stay in the fleet
         they were written into (never re-parented)."""
         self._require_admin(credential)
+        await self._require_fleet(fleet_id)
         before = await self._store.get_agent(name)
         agent = await self._store.set_agent_home_fleet(name, fleet_id)
         await self._audit(
