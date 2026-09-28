@@ -206,10 +206,11 @@ Hivemind**, in this session or any later one. Leave it local.
 ## 5. Staying aware
 
 Your context may be compacted or cleared. The hivemind plugin re-injects
-a reminder when that happens; in DeepSeek Harness, Hermes and Pi the
-reminder stays in the system prompt instead (the Hivemind server's
-instructions in DeepSeek Harness, a system-prompt section in Hermes and
-Pi), which compaction never removes. If you do not see a "HIVEMIND:"
+a reminder when that happens; in DeepSeek Harness, Hermes, Pi, Oh My Pi
+and OpenCode the reminder stays in the system prompt instead (the Hivemind
+server's instructions in DeepSeek Harness, a system-prompt section in
+Hermes, Pi and Oh My Pi, a line added to every request in OpenCode), which
+compaction never removes. If you do not see a "HIVEMIND:"
 reminder at the start of your context and you are not using the plugin,
 offer the user the **hivemind-setup** skill's "Stay aware" step, which
 adds a startup hook and an instruction block so you never forget Hivemind.

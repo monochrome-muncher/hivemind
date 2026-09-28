@@ -48,13 +48,51 @@ function incognito(): boolean {
 	return ["1", "true", "yes", "on"].includes(value);
 }
 
+// The Hivemind MCP tools, whatever prefix the MCP bridge gives them
+// (pi-mcp-adapter in Pi, the built-in client in Oh My Pi).
+const HIVE_TOOL = /(^|[^a-z])hive_(whoami|search|get|list|write|feedback|withdraw|register)$/;
+
+// Is this tool call a Hivemind call? Pi exposes MCP tools under their own
+// (prefixed) names; Oh My Pi mounts them as routes that the model calls by
+// writing JSON to a path such as xd://mcp__hivemind_hive_whoami, so there
+// the call arrives as a `write` whose path names the Hivemind tool.
+function isHivemindCall(event: any): boolean {
+	if (HIVE_TOOL.test(String(event.toolName ?? ""))) return true;
+	const path = String(event.input?.path ?? "");
+	return path.startsWith("xd://") && HIVE_TOOL.test(path.slice("xd://".length));
+}
+
+function section(): string {
+	if (incognito()) return INCOGNITO;
+	const state = process.env.HIVEMIND_API_KEY ? CONFIGURED : NOT_CONFIGURED;
+	return `${CORE} ${state}`;
+}
+
 export default function hivemind(pi: ExtensionAPI) {
-	pi.on("before_agent_start", (event) => {
-		if (incognito()) {
-			event.systemPromptOptions.sections.hivemind = INCOGNITO;
+	// Pi hands the handler named prompt sections to fill in; Oh My Pi (a Pi
+	// fork) hands it the prompt as a string array and takes the new array
+	// back as the result. Support both shapes.
+	pi.on("before_agent_start", (event: any) => {
+		const text = section();
+		if (event.systemPromptOptions?.sections) {
+			event.systemPromptOptions.sections.hivemind = text;
 			return;
 		}
-		const state = process.env.HIVEMIND_API_KEY ? CONFIGURED : NOT_CONFIGURED;
-		event.systemPromptOptions.sections.hivemind = `${CORE} ${state}`;
+		if (Array.isArray(event.systemPrompt)) {
+			return { systemPrompt: [...event.systemPrompt, text] };
+		}
+	});
+
+	// Incognito sessions (ADR 0035) are enforced here, not just requested:
+	// a hive_* call is blocked before it reaches the Hivemind server.
+	pi.on("tool_call", (event: any) => {
+		if (incognito() && isHivemindCall(event)) {
+			return {
+				block: true,
+				reason:
+					"This is an incognito session: Hivemind is off. Do not retry; " +
+					"a new session without HIVEMIND_INCOGNITO turns it back on.",
+			};
+		}
 	});
 }

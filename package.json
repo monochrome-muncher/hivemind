@@ -1,17 +1,31 @@
 {
   "name": "hivemind-dsh-plugin",
-  "version": "1.1.4",
-  "description": "Hivemind for DeepSeek Harness, installable from this repository's Git URL: the Hivemind MCP server plus the hivemind and hivemind-setup skills. The bundle itself lives in plugins/hivemind.",
+  "version": "1.2.0",
+  "description": "Hivemind agent plugin, installable from this repository's Git URL in DeepSeek Harness, Pi and OpenCode: the Hivemind MCP server, the hivemind and hivemind-setup skills, and a stay-aware reminder. The plugin itself lives in plugins/hivemind.",
   "private": true,
   "type": "module",
+  "main": "./plugins/hivemind/opencode/hivemind.js",
+  "exports": {
+    "./server": "./plugins/hivemind/opencode/hivemind.js"
+  },
   "files": [
     "plugins/hivemind/cordis.patch.yml",
     "plugins/hivemind/dsh/",
-    "plugins/hivemind/skills/"
+    "plugins/hivemind/skills/",
+    "plugins/hivemind/extensions/",
+    "plugins/hivemind/opencode/"
   ],
   "dsh": {
     "bundle": {
       "patch": "./plugins/hivemind/cordis.patch.yml"
     }
+  },
+  "pi": {
+    "extensions": [
+      "./plugins/hivemind/extensions/hivemind.ts"
+    ],
+    "skills": [
+      "./plugins/hivemind/skills"
+    ]
   }
 }

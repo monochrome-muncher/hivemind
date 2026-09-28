@@ -1,10 +1,17 @@
 {
   "name": "hivemind-dsh-plugin",
-  "version": "1.1.4",
+  "version": "1.2.0",
   "description": "Hivemind bundles: the DeepSeek Harness bundle (the Hivemind MCP server plus the hivemind and hivemind-setup skills) and the Pi package (the two skills plus the system-prompt reminder extension).",
   "private": true,
   "type": "module",
-  "keywords": ["pi-package", "dsh", "hivemind", "memory", "mcp"],
+  "keywords": [
+    "pi-package",
+    "dsh",
+    "hivemind",
+    "memory",
+    "mcp",
+    "omp"
+  ],
   "files": [
     "cordis.patch.yml",
     "dsh/",
@@ -17,10 +24,19 @@
     }
   },
   "pi": {
-    "extensions": ["./extensions/hivemind.ts"],
-    "skills": ["./skills"]
+    "extensions": [
+      "./extensions/hivemind.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"
+  },
+  "omp": {
+    "extensions": [
+      "./extensions/hivemind.ts"
+    ]
   }
 }

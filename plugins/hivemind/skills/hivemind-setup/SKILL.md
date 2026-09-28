@@ -168,9 +168,73 @@ at connection time, so the key never lands in the file:
 
 - **Project**: the same file as `.mcp.json` at the repository root.
 
-The hivemind **Pi package** (`pi install /path/to/hivemind/plugins/hivemind`)
-provides the two skills and the system-prompt reminder; it does not
-configure the MCP server.
+The hivemind **Pi package** provides the two skills and the system-prompt
+reminder; it does not configure the MCP server. Install it from the
+Hivemind repository's Git URL (`pi install git:<git-server>/<owner>/hivemind`,
+or `pi install https://<git-server>/<owner>/hivemind`; append `@v<version>`
+to pin a release), or from a checkout
+(`pi install /path/to/hivemind/plugins/hivemind`).
+
+### Oh My Pi
+
+Oh My Pi (`omp`, a fork of Pi) has **built-in MCP**: add the server to
+`~/.omp/agent/mcp.json` (or `.omp/mcp.json` in a project). `${VAR}`
+references are expanded at startup, so the key never lands in the file:
+
+```json
+{
+  "mcpServers": {
+    "hivemind": {
+      "type": "http",
+      "url": "${HIVEMIND_MCP_URL}",
+      "headers": { "Authorization": "Bearer ${HIVEMIND_API_KEY}" }
+    }
+  }
+}
+```
+
+Install the hivemind plugin through Oh My Pi's marketplace support, which
+reads the Hivemind repository as a Claude Code marketplace:
+
+```sh
+omp plugin marketplace add <git-url-of-the-hivemind-repo>
+omp plugin install hivemind@hivemind
+```
+
+It provides the two skills and the system-prompt reminder. (A plain
+`omp install <git-url>` is not enough: Oh My Pi only finds a package's
+skills in a top-level `skills/` folder.) Export the two variables in the
+shell that launches `omp`.
+
+### OpenCode
+
+The hivemind **OpenCode plugin** does the whole setup itself: it registers
+the Hivemind MCP server from `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY`, adds
+the two skills, and puts the reminder into every model request. Add the
+Hivemind repository's Git URL to the `plugin` list in
+`~/.config/opencode/opencode.json` (all projects) or a project's
+`opencode.json`, then export the two variables and restart OpenCode:
+
+```json
+{ "plugin": ["git+https://<git-server>/<owner>/hivemind.git"] }
+```
+
+Or run `opencode plugin <git-url>`, which installs it and updates the
+config. Without the plugin, add the server by hand (the skills are found in
+`~/.claude/skills` or `~/.agents/skills` anyway):
+
+```json
+{
+  "mcp": {
+    "hivemind": {
+      "type": "remote",
+      "url": "{env:HIVEMIND_MCP_URL}",
+      "headers": { "Authorization": "Bearer {env:HIVEMIND_API_KEY}" },
+      "oauth": false
+    }
+  }
+}
+```
 
 ### Any other harness
 
@@ -245,6 +309,11 @@ removes. Add the instruction block to `~/.hermes/SOUL.md` (the only
 global always-loaded instructions file in Hermes) or
 `~/.pi/agent/AGENTS.md` (Pi's user instructions) and you are done.
 
+**Oh My Pi and OpenCode need no hook either.** The same Pi extension adds
+the section in Oh My Pi, and the OpenCode plugin adds the reminder to every
+model request. Add the instruction block to `~/.omp/agent/AGENTS.md` (Oh
+My Pi) or `~/.config/opencode/AGENTS.md` (OpenCode).
+
 Show the user each change, ask, make it, then report it. Mark every block
 so it can be found and removed later. If a marked block is already there,
 replace it; never add a second one.
@@ -254,8 +323,9 @@ replace it; never add a second one.
 Add this to the harness's always-loaded instructions:
 `~/.claude/CLAUDE.md` (Claude Code), `~/.codex/AGENTS.md` (Codex),
 `~/.dsh/AGENTS.md` (DeepSeek Harness), `~/.hermes/SOUL.md` (Hermes),
-`~/.pi/agent/AGENTS.md` (Pi), or the system prompt / instructions file of
-other harnesses:
+`~/.pi/agent/AGENTS.md` (Pi), `~/.omp/agent/AGENTS.md` (Oh My Pi),
+`~/.config/opencode/AGENTS.md` (OpenCode), or the system prompt /
+instructions file of other harnesses:
 
 ```markdown
 <!-- hivemind:begin -->
@@ -341,7 +411,7 @@ switch to their incognito text) and adds the harness's own switch so the
 Hivemind tools do not load at all:
 
 ```sh
-hivemind-incognito claude        # or: codex, dsh, hermes, pi
+hivemind-incognito claude        # or: codex, dsh, hermes, pi, omp, opencode
 ```
 
 The launcher is `bin/hivemind-incognito` in the hivemind plugin. Offer to
@@ -358,6 +428,8 @@ Per harness, what the launcher does and what it needs:
 | DeepSeek Harness | the bundle's server row switches itself off | nothing |
 | Hermes | `HIVEMIND_ENABLED=false` | `enabled: ${HIVEMIND_ENABLED}` in the hivemind entry of `~/.hermes/config.yaml`, and `HIVEMIND_ENABLED=true` in `~/.hermes/.env` for normal sessions (an unset variable makes Hermes warn) |
 | Pi | an exclusive MCP config without hivemind | `python3` |
+| Oh My Pi | unsets `HIVEMIND_MCP_URL`/`HIVEMIND_API_KEY`, so the server is never contacted (one "unavailable" warning); the extension also blocks any Hivemind call | the hivemind plugin |
+| OpenCode | the hivemind plugin skips the server; a hand-configured one is disabled via `OPENCODE_CONFIG_CONTENT` | nothing |
 
 Without the launcher, set `HIVEMIND_INCOGNITO=1` yourself and use the
 harness switch from the table. Switching incognito on mid-session only

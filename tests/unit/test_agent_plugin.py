@@ -130,7 +130,15 @@ def test_the_setup_skill_and_readme_cover_every_harness() -> None:
     """A new harness gets a Connect section in the setup skill and an
     install story in the README; neither may be forgotten."""
     readme = (PLUGIN / "README.md").read_text()
-    for harness in ("Claude Code", "Codex", "DeepSeek Harness", "Hermes", "Pi"):
+    for harness in (
+        "Claude Code",
+        "Codex",
+        "DeepSeek Harness",
+        "Hermes",
+        "Pi",
+        "Oh My Pi",
+        "OpenCode",
+    ):
         assert f"### {harness}" in SETUP, harness
         assert harness in readme, harness
 
@@ -443,3 +451,160 @@ def test_the_root_package_installs_the_dsh_bundle_from_a_git_url() -> None:
     for path in needed:
         assert path.exists(), path
         assert is_shipped(path), f"{path.relative_to(ROOT)} is missing from package.json files"
+
+
+# -- OpenCode, Oh My Pi and the shared extension (1.2.0) -----------------------
+
+OPENCODE_PLUGIN = PLUGIN / "opencode" / "hivemind.js"
+PI_EXTENSION = PLUGIN / "extensions" / "hivemind.ts"
+
+
+def _node(script: str, module: Path, **env_overrides: str) -> object:
+    env = {k: v for k, v in os.environ.items() if not k.startswith("HIVEMIND_")}
+    env.update(env_overrides)
+    out = subprocess.run(
+        ["node", "--input-type=module", "-e", script, module.as_uri()],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "hm_secret_value" not in out.stdout.replace("Bearer hm_secret_value", "")
+    return json.loads(out.stdout)
+
+
+_OPENCODE_SCRIPT = """
+const mod = await import(process.argv[1])
+const names = Object.keys(mod)
+const hooks = await mod.HivemindPlugin({})
+const cfg = JSON.parse(process.env.CFG ?? "{}")
+await hooks.config(cfg)
+const out = { system: [] }
+await hooks["experimental.chat.system.transform"]({ model: {} }, out)
+console.log(JSON.stringify({ names, types: names.map((n) => typeof mod[n]), cfg, system: out.system }))
+"""
+
+needs_node = pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+
+
+@needs_node
+def test_opencode_plugin_registers_the_server_and_skills() -> None:
+    r = _node(
+        _OPENCODE_SCRIPT,
+        OPENCODE_PLUGIN,
+        HIVEMIND_MCP_URL="https://hm.example/mcp",
+        HIVEMIND_API_KEY="hm_secret_value",
+    )
+    assert r["types"] == ["function"] * len(r["names"])  # OpenCode: every export is a plugin
+    server = r["cfg"]["mcp"]["hivemind"]
+    assert (server["type"], server["url"], server["enabled"]) == (
+        "remote",
+        "https://hm.example/mcp",
+        True,
+    )
+    assert server["headers"] == {"Authorization": "Bearer hm_secret_value"}
+    assert Path(r["cfg"]["skills"]["paths"][-1]).resolve() == (PLUGIN / "skills").resolve()
+    [reminder] = r["system"]
+    assert reminder.startswith(STAY_AWARE_CORE) and "Hivemind is configured" in reminder
+
+
+@needs_node
+def test_opencode_plugin_keeps_a_hand_configured_server() -> None:
+    mine = {"type": "remote", "url": "https://mine/mcp", "enabled": True}
+    r = _node(
+        _OPENCODE_SCRIPT,
+        OPENCODE_PLUGIN,
+        HIVEMIND_MCP_URL="https://x/mcp",
+        CFG=json.dumps({"mcp": {"hivemind": mine}}),
+    )
+    assert r["cfg"]["mcp"]["hivemind"] == mine
+
+
+@needs_node
+def test_opencode_plugin_goes_incognito() -> None:
+    fresh = _node(
+        _OPENCODE_SCRIPT, OPENCODE_PLUGIN, HIVEMIND_INCOGNITO="1", HIVEMIND_MCP_URL="https://x/mcp"
+    )
+    assert "hivemind" not in fresh["cfg"]["mcp"]
+    assert fresh["system"] == [INCOGNITO_TEXT]
+    manual = _node(
+        _OPENCODE_SCRIPT,
+        OPENCODE_PLUGIN,
+        HIVEMIND_INCOGNITO="true",
+        CFG=json.dumps({"mcp": {"hivemind": {"type": "remote", "url": "u", "enabled": True}}}),
+    )
+    assert manual["cfg"]["mcp"]["hivemind"]["enabled"] is False
+
+
+_EXTENSION_SCRIPT = """
+const mod = await import(process.argv[1])
+const handlers = {}
+mod.default({ on: (name, h) => { handlers[name] = h } })
+const omp = handlers.before_agent_start({ type: "before_agent_start", prompt: "hi", systemPrompt: ["base"] })
+const calls = JSON.parse(process.env.CALLS)
+console.log(JSON.stringify({ omp, blocked: calls.map((c) => handlers.tool_call(c) ?? null) }))
+"""
+_CALLS = [
+    {"toolName": "hivemind_hive_search", "input": {}},
+    {"toolName": "mcp__hivemind__hive_write", "input": {}},
+    {"toolName": "write", "input": {"path": "xd://mcp__hivemind_hive_whoami", "content": "{}"}},
+    {"toolName": "write", "input": {"path": "notes/hive_search.md"}},
+    {"toolName": "bash", "input": {"command": "ls"}},
+]
+
+
+@needs_node
+def test_the_extension_supports_the_oh_my_pi_prompt_shape() -> None:
+    r = _node(_EXTENSION_SCRIPT, PI_EXTENSION, CALLS=json.dumps(_CALLS))
+    base, section = r["omp"]["systemPrompt"]
+    assert base == "base" and section.startswith(STAY_AWARE_CORE)
+
+
+@needs_node
+def test_the_extension_blocks_hivemind_calls_only_in_incognito() -> None:
+    normal = _node(_EXTENSION_SCRIPT, PI_EXTENSION, CALLS=json.dumps(_CALLS))
+    assert normal["blocked"] == [None] * len(_CALLS)
+    incognito = _node(
+        _EXTENSION_SCRIPT, PI_EXTENSION, CALLS=json.dumps(_CALLS), HIVEMIND_INCOGNITO="1"
+    )
+    assert [bool(b and b.get("block")) for b in incognito["blocked"]] == [
+        True,
+        True,
+        True,
+        False,
+        False,
+    ]
+    assert incognito["omp"]["systemPrompt"][-1] == INCOGNITO_TEXT
+
+
+def test_launcher_keeps_oh_my_pi_from_contacting_the_server(tmp_path: Path) -> None:
+    env = _fake_harness(tmp_path, "omp")
+    script = tmp_path / "bin" / "omp"
+    script.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "URL=${HIVEMIND_MCP_URL:-unset}" "KEY=${HIVEMIND_API_KEY:-unset}"\n'
+    )
+    env.update(HIVEMIND_MCP_URL="https://hm.example/mcp", HIVEMIND_API_KEY="hm_x")
+    assert _launch(tmp_path, env, "omp") == ["URL=unset", "KEY=unset"]
+
+
+def test_launcher_disables_a_hand_configured_opencode_server(tmp_path: Path) -> None:
+    env = _fake_harness(tmp_path, "opencode")
+    script = tmp_path / "bin" / "opencode"
+    script.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$HIVEMIND_INCOGNITO" "$OPENCODE_CONFIG_CONTENT"\n'
+    )
+    lines = _launch(tmp_path, env, "opencode")
+    assert lines[0] == "1"
+    assert json.loads(lines[1]) == {"mcp": {"hivemind": {"enabled": False}}}
+
+
+def test_the_root_package_also_serves_pi_and_opencode() -> None:
+    root = _json(ROOT / "package.json")
+    shipped = [ROOT / f.rstrip("/") for f in root["files"]]  # type: ignore[union-attr]
+    server = ROOT / root["exports"]["./server"]  # type: ignore[index]
+    assert server == ROOT / root["main"] == OPENCODE_PLUGIN  # type: ignore[operator]
+    assert any(s in server.parents for s in shipped)
+    for rel in root["pi"]["extensions"] + root["pi"]["skills"]:  # type: ignore[index,operator]
+        assert (ROOT / rel).exists(), rel
+    assert "peerDependencies" not in root  # pnpm/npm would auto-install the Pi agent
+    assert _json(PLUGIN / "package.json")["omp"]["extensions"] == ["./extensions/hivemind.ts"]  # type: ignore[index]
