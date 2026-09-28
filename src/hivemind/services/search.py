@@ -49,6 +49,10 @@ class Hit:
     agent: str
     occurred_at: datetime
     score: float
+    # Where the entry is filed (ADR 0036): lets a privileged reader tell a
+    # foreign entry (fleet_id != its home fleet) from its own fleet's.
+    scope: str = "fleet"
+    fleet_id: str | None = None
 
 
 NowFn = Callable[[], datetime]
@@ -160,6 +164,8 @@ class SearchService:
             agent=entry.agent,
             occurred_at=entry.occurred_at,
             score=score,
+            scope=entry.scope,
+            fleet_id=entry.fleet_id,
         )
 
 

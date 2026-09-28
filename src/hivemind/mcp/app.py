@@ -121,6 +121,8 @@ def _hit_dict(hit: Hit) -> dict[str, object]:
         "agent": hit.agent,
         "occurred_at": hit.occurred_at.isoformat(),
         "score": hit.score,
+        "scope": hit.scope,
+        "fleet_id": hit.fleet_id,
     }
 
 

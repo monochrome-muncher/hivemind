@@ -177,6 +177,8 @@ class HitOut(BaseModel):
     agent: str
     occurred_at: datetime
     score: float
+    scope: str = "fleet"
+    fleet_id: str | None = None  # a foreign entry: != the reader's home fleet (ADR 0036)
 
     @classmethod
     def from_hit(cls, hit: Hit) -> HitOut:
@@ -190,6 +192,8 @@ class HitOut(BaseModel):
             agent=hit.agent,
             occurred_at=hit.occurred_at,
             score=hit.score,
+            scope=hit.scope,
+            fleet_id=hit.fleet_id,
         )
 
 
