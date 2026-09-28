@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -55,6 +56,8 @@ from hivemind.domain.entry import (
 )
 from hivemind.domain.feedback import Feedback
 from hivemind.store.pool import make_pool
+
+logger = logging.getLogger(__name__)
 
 # --- SQL ----------------------------------------------------------------------
 
@@ -326,6 +329,9 @@ class PgStore:
         # Serialises lazy creation: without it, every call arriving while the
         # first pool is still being built opened its own and orphaned it.
         self._pool_lock = asyncio.Lock()
+        # Last database-probe outcome, so failures are logged once per
+        # outage (with the cause) rather than on every probe (ADR 0037).
+        self._database_reachable: bool | None = None
 
     async def _ensure_pool(self) -> asyncpg.Pool:
         """Lazily open (and cache) the connection pool — exactly once, even
@@ -806,9 +812,17 @@ class PgStore:
             pool = await self._ensure_pool()
             async with pool.acquire() as conn:
                 await conn.fetchval("SELECT 1")
-            return True
-        except Exception:
+        except Exception as exc:
+            if self._database_reachable is not False:
+                # The cause, once per outage: the probe response itself
+                # never carries it (ADR 0037).
+                logger.warning("database health check failing: %s: %s", type(exc).__name__, exc)
+            self._database_reachable = False
             return False
+        if self._database_reachable is False:
+            logger.info("database health check passing again")
+        self._database_reachable = True
+        return True
 
 
 # --- mappers --------------------------------------------------------------------

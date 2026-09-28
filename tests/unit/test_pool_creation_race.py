@@ -50,3 +50,15 @@ async def test_concurrent_first_use_creates_one_pool(module, factory, monkeypatc
     assert all(p is created[0] for p in pools)
     await owner.close()
     assert created[0].closed
+
+
+async def test_the_database_check_logs_an_outage_once_with_its_cause(caplog) -> None:
+    """ADR 0037: the probe response never carries the cause, so the store
+    logs it — once per outage, not on every probe."""
+    store = pgstore_module.PgStore("postgresql://nobody@127.0.0.1:1/nothing")
+    with caplog.at_level("WARNING", logger="hivemind.store.pgstore"):
+        results = [await store.health_check() for _ in range(3)]
+    assert results == [False, False, False]
+    failures = [r for r in caplog.records if "health check failing" in r.getMessage()]
+    assert len(failures) == 1
+    assert "Error" in failures[0].getMessage()  # the exception class is named

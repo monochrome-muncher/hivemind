@@ -18,6 +18,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import pytest
+
 from hivemind.config import Settings
 from hivemind.mcp.http import ProbeRouter, build_http_app
 from hivemind.memstore import MemoryStore
@@ -88,22 +90,43 @@ async def test_liveness_is_shallow_and_unauthenticated() -> None:
     assert not inner.seen  # the probe never reaches the inner app
 
 
-async def test_health_is_deep_when_the_store_is_healthy() -> None:
+async def test_health_is_shallow_even_when_the_database_is_down() -> None:
+    """ADR 0037: readiness must not depend on the shared database — one
+    outage would otherwise pull every replica out of service at once."""
+    for store in (MemoryStore(), UnhealthyStore()):
+        inner = _RecordingApp()
+        sent = await _drive(_probe_router(store, inner), _http_scope("/mcp/health"))
+        assert _status_and_body(sent) == (200, {"status": "ok"})
+        assert not inner.seen
+
+
+async def test_the_database_probe_is_deep() -> None:
     inner = _RecordingApp()
-    sent = await _drive(_probe_router(MemoryStore(), inner), _http_scope("/mcp/health"))
-    status, body = _status_and_body(sent)
-    assert status == 200
-    assert body == {"status": "ok"}
+    up = await _drive(_probe_router(MemoryStore(), inner), _http_scope("/mcp/health/database"))
+    down = await _drive(_probe_router(UnhealthyStore(), inner), _http_scope("/mcp/health/database"))
+    assert _status_and_body(up) == (200, {"status": "ok", "database": "ok"})
+    assert _status_and_body(down) == (
+        503,
+        {"status": "unhealthy", "database": "unreachable", "detail": "see the pod log"},
+    )
     assert not inner.seen
 
 
-async def test_health_is_503_when_the_store_is_unhealthy() -> None:
-    inner = _RecordingApp()
-    sent = await _drive(_probe_router(UnhealthyStore(), inner), _http_scope("/mcp/health"))
-    status, body = _status_and_body(sent)
-    assert status == 503
-    assert body == {"status": "unhealthy", "detail": "database unreachable"}
-    assert not inner.seen
+async def test_the_database_probe_never_hangs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A check stuck on the pool (e.g. every connection held) answers 503
+    within the probe timeout instead of hanging the request."""
+    import asyncio
+
+    import hivemind.mcp.http as http_module
+
+    class HangingStore(MemoryStore):
+        async def health_check(self) -> bool:
+            await asyncio.sleep(60)
+            return True
+
+    monkeypatch.setattr(http_module, "_DATABASE_PROBE_TIMEOUT", 0.05)
+    sent = await _drive(_probe_router(HangingStore()), _http_scope("/mcp/health/database"))
+    assert _status_and_body(sent)[0] == 503
 
 
 async def test_non_probe_paths_are_delegated_to_the_inner_app() -> None:
@@ -155,6 +178,7 @@ async def test_build_http_app_health_reflects_the_store() -> None:
     inner_app = build_http_app(Settings(), UnhealthyStore(), make_embedder(), _make_authenticator())
     transport = httpx.ASGITransport(app=inner_app)
     async with httpx.AsyncClient(transport=transport, base_url="http://probe.test") as client:
-        health = await client.get("/mcp/health")
-        assert health.status_code == 503
-        assert health.json() == {"status": "unhealthy", "detail": "database unreachable"}
+        assert (await client.get("/mcp/health")).status_code == 200  # shallow
+        database = await client.get("/mcp/health/database")
+        assert database.status_code == 503
+        assert database.json()["database"] == "unreachable"

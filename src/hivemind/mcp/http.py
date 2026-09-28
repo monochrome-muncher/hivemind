@@ -23,6 +23,7 @@ pool, served over ``uvicorn``.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -132,19 +133,30 @@ class BearerAuthMiddleware:
 # middleware — because k8s/compose probes carry no API key.
 _PROBE_LIVENESS = "/mcp/liveness"
 _PROBE_HEALTH = "/mcp/health"
+_PROBE_DATABASE = "/mcp/health/database"
+# Bound on the deep database probe (ADR 0037): a check stuck on the pool
+# answers 503 in time instead of hanging the request.
+_DATABASE_PROBE_TIMEOUT = 5.0
 
 
 class ProbeRouter:
-    """Unauthenticated orchestrator probe endpoints (ADR 0019).
+    """Unauthenticated orchestrator probe endpoints (ADRs 0019, 0037).
 
-    Wraps the (auth-wrapped) MCP app and answers two GET paths BEFORE
+    Wraps the (auth-wrapped) MCP app and answers three GET paths BEFORE
     the auth middleware ever sees them:
 
     * ``GET /mcp/liveness`` — shallow: 200 ``{"status": "ok"}`` whenever
       the process answers (no dependency checks).
-    * ``GET /mcp/health`` — deep: 200 only when ``store.health_check()``
-      answers (the Postgres pool is up); 503 ``{"status": "unhealthy",
-      "detail": "database unreachable"}`` otherwise.
+    * ``GET /mcp/health`` — shallow too (ADR 0037): the readiness probe.
+      Readiness must not depend on the one shared database: an outage
+      would pull every replica out of service at once, turning a blip
+      into "Hivemind is gone" for every agent, with no replica left to
+      serve anything once the database is back.
+    * ``GET /mcp/health/database`` — deep, for people and monitoring:
+      200 ``{"status": "ok", "database": "ok"}`` when
+      ``store.health_check()`` answers within ``_DATABASE_PROBE_TIMEOUT``;
+      503 otherwise. The store logs why (the exception) — the response
+      never carries connection details.
 
     Everything else (the ``/mcp`` MCP transport surface, non-GET
     methods, non-HTTP scopes like ``lifespan``) is delegated untouched
@@ -160,24 +172,33 @@ class ProbeRouter:
         if (
             scope.get("type") == "http"
             and scope.get("method") == "GET"
-            and scope.get("path") in (_PROBE_LIVENESS, _PROBE_HEALTH)
+            and scope.get("path") in (_PROBE_LIVENESS, _PROBE_HEALTH, _PROBE_DATABASE)
         ):
             await self._serve_probe(scope["path"], send)
             return
         await self._app(scope, receive, send)
 
     async def _serve_probe(self, path: str, send: Send) -> None:
-        if path == _PROBE_LIVENESS:
+        if path in (_PROBE_LIVENESS, _PROBE_HEALTH):
             await _send_json(send, 200, {"status": "ok"})
             return
-        healthy = await self._store.health_check()
+        try:
+            healthy = await asyncio.wait_for(
+                self._store.health_check(), timeout=_DATABASE_PROBE_TIMEOUT
+            )
+        except TimeoutError:
+            logger.warning(
+                "database probe timed out after %.0fs (pool busy or connection hanging)",
+                _DATABASE_PROBE_TIMEOUT,
+            )
+            healthy = False
         if healthy:
-            await _send_json(send, 200, {"status": "ok"})
+            await _send_json(send, 200, {"status": "ok", "database": "ok"})
         else:
             await _send_json(
                 send,
                 503,
-                {"status": "unhealthy", "detail": "database unreachable"},
+                {"status": "unhealthy", "database": "unreachable", "detail": "see the pod log"},
             )
 
 
