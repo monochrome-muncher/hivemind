@@ -18,6 +18,7 @@ Design notes:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from datetime import UTC, datetime
@@ -322,13 +323,19 @@ class PgStore:
         self._pool_min_size = pool_min_size
         self._pool_max_size = pool_max_size
         self._pool: asyncpg.Pool | None = None
+        # Serialises lazy creation: without it, every call arriving while the
+        # first pool is still being built opened its own and orphaned it.
+        self._pool_lock = asyncio.Lock()
 
     async def _ensure_pool(self) -> asyncpg.Pool:
-        """Lazily open (and cache) the connection pool."""
+        """Lazily open (and cache) the connection pool — exactly once, even
+        when the first calls arrive concurrently."""
         if self._pool is None:
-            self._pool = await make_pool(
-                self._dsn, min_size=self._pool_min_size, max_size=self._pool_max_size
-            )
+            async with self._pool_lock:
+                if self._pool is None:
+                    self._pool = await make_pool(
+                        self._dsn, min_size=self._pool_min_size, max_size=self._pool_max_size
+                    )
         return self._pool
 
     async def close(self) -> None:

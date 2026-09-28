@@ -341,3 +341,31 @@ async def test_0006_backfills_revoked_and_rolls_back_without_loss() -> None:
         await conn.execute("DELETE FROM agents")
     finally:
         await conn.close()
+
+
+async def _backend_count(dsn: str) -> int:
+    conn = await asyncpg.connect(dsn)
+    try:
+        return int(
+            await conn.fetchval(
+                "SELECT count(*) FROM pg_stat_activity "
+                "WHERE backend_type = 'client backend' AND pid <> pg_backend_pid()"
+            )
+        )
+    finally:
+        await conn.close()
+
+
+async def test_migrate_and_rollback_leave_no_connection_open() -> None:
+    """yoyo's backend holds a psycopg connection and has no close(); the
+    runner must close it, or every migrate() call (each pod start, every
+    integration fixture) leaks one connection until the process exits."""
+    dsn, dim = _dsn(), Settings().embedding_dim
+    await _require_postgres(dsn)
+    await migrate(dsn, dim)
+    before = await _backend_count(dsn)
+    for _ in range(3):
+        await migrate(dsn, dim)
+    await rollback(dsn, dim, count=1)
+    await migrate(dsn, dim)
+    assert await _backend_count(dsn) == before

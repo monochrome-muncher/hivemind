@@ -84,8 +84,11 @@ def _apply_chain(dsn: str, dim: int) -> None:
 
     migration_context.embedding_dim = dim
     backend = get_backend(_yoyo_dsn(dsn))
-    migrations = read_migrations(str(_MIGRATIONS_DIR))
-    backend.apply_migrations(backend.to_apply(migrations))
+    try:
+        migrations = read_migrations(str(_MIGRATIONS_DIR))
+        backend.apply_migrations(backend.to_apply(migrations))
+    finally:
+        _close_backend(backend)
 
 
 def _rollback_chain(dsn: str, dim: int, count: int) -> list[str]:
@@ -100,19 +103,34 @@ def _rollback_chain(dsn: str, dim: int, count: int) -> list[str]:
 
     migration_context.embedding_dim = dim
     backend = get_backend(_yoyo_dsn(dsn))
-    migrations = read_migrations(str(_MIGRATIONS_DIR))
-    applied = list(backend.to_rollback(migrations))[:count]
-    if any(m.id.startswith("0001.") for m in applied):
-        raise RuntimeError(
-            "refusing to roll back 0001.initial-schema: it would drop every "
-            "entry in the pool (ADR 0020 — a rollback that destroys data is "
-            "not written). Reset the pool (`make pg-reset`) or restore from "
-            "backup instead (docs/ops-runbook.md)."
-        )
-    ids = [m.id for m in applied]
-    if ids:
-        backend.rollback_migrations(applied)
-    return ids
+    try:
+        migrations = read_migrations(str(_MIGRATIONS_DIR))
+        applied = list(backend.to_rollback(migrations))[:count]
+        if any(m.id.startswith("0001.") for m in applied):
+            raise RuntimeError(
+                "refusing to roll back 0001.initial-schema: it would drop every "
+                "entry in the pool (ADR 0020 — a rollback that destroys data is "
+                "not written). Reset the pool (`make pg-reset`) or restore from "
+                "backup instead (docs/ops-runbook.md)."
+            )
+        ids = [m.id for m in applied]
+        if ids:
+            backend.rollback_migrations(applied)
+        return ids
+    finally:
+        _close_backend(backend)
+
+
+def _close_backend(backend: object) -> None:
+    """Close the connection a yoyo backend opened in its constructor.
+
+    yoyo's ``DatabaseBackend`` has no ``close()``; without this each
+    migrate/rollback call leaks one connection for the life of the
+    process (harmless for the one-shot entrypoint, not for anything
+    long-lived — the integration suite exhausted ``max_connections``)."""
+    connection = getattr(backend, "connection", None)
+    if connection is not None:
+        connection.close()
 
 
 async def _acquire_migration_lock(conn: asyncpg.Connection) -> None:
