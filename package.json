@@ -1,0 +1,17 @@
+{
+  "name": "hivemind-dsh-plugin",
+  "version": "1.1.4",
+  "description": "Hivemind for DeepSeek Harness, installable from this repository's Git URL: the Hivemind MCP server plus the hivemind and hivemind-setup skills. The bundle itself lives in plugins/hivemind.",
+  "private": true,
+  "type": "module",
+  "files": [
+    "plugins/hivemind/cordis.patch.yml",
+    "plugins/hivemind/dsh/",
+    "plugins/hivemind/skills/"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./plugins/hivemind/cordis.patch.yml"
+    }
+  }
+}

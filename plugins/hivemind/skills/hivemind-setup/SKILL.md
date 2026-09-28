@@ -95,8 +95,11 @@ Then export `HIVEMIND_API_KEY` in the shell profile that launches Codex.
 
 ### DeepSeek Harness (dsh)
 
-- **With the hivemind bundle** (`dsh plugin --profile <name> add
-  <path-or-package>`): the bundle defines the MCP server from
+- **With the hivemind bundle**: the easiest install is the Hivemind
+  repository's Git URL, pasted into DeepSeek Harness's Plugins page (or
+  `dsh plugin --profile <name> add git+https://<git-server>/<owner>/hivemind.git`);
+  a local checkout also works (`dsh plugin --profile <name> add
+  <path>/plugins/hivemind`). The bundle defines the MCP server from
   `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY` and serves both skills. Only
   set the variables, in the shell that launches `dsh`. The server stays
   off while `HIVEMIND_MCP_URL` is unset.

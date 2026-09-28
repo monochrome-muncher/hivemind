@@ -50,6 +50,20 @@ you to review and trust the plugin's `SessionStart` hook (`/hooks`).
 
 **DeepSeek Harness** (`dsh`, which needs `pnpm` on the `PATH`)
 
+The simplest way: give DeepSeek Harness **this repository's Git URL**,
+from its Plugins page or by asking the agent to install it, or from the
+command line:
+
+```sh
+dsh plugin --profile <name> add git+https://<your-git-server>/<owner>/hivemind.git
+```
+
+The repository root carries a small `package.json` that points DSH at the
+bundle in `plugins/hivemind/`. Pin a release with `#v<version>` at the end
+of the URL.
+
+From a local checkout instead:
+
 ```sh
 dsh plugin --profile <name> add /path/to/this/repo/plugins/hivemind
 ```
@@ -234,6 +248,7 @@ update above.
 
 | Release | Server | Plugin | Your copies (instruction block, hand-installed hook) |
 |---|---|---|---|
+| 1.1.4 | Unchanged. | DeepSeek Harness can install the bundle from this repository's Git URL (Plugins page or `dsh plugin … add git+https://…`), via a root `package.json`. No change to skills, reminders or the launcher. | Unchanged. |
 | 1.1.3 | No change from 1.1.2 (a re-release so every file carries the version). | Unchanged (version bump only). | Unchanged. |
 | 1.1.2 | No agent-facing change. Server: `/mcp/health` is shallow (a database outage no longer takes the MCP pods out of service, which agents saw as Hivemind being off); the deep check is `/mcp/health/database` (ADR 0037). | Unchanged (version bump only). | Unchanged. |
 | 1.1.1 | No agent-facing change. Server fix: the store and authenticator no longer leak Postgres connections (a race when the first requests arrive concurrently opened extra pools; each migration run left a connection open). | Unchanged (version bump only). | Unchanged. |

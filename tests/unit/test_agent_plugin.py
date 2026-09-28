@@ -76,6 +76,8 @@ def test_manifests_agree_on_name_and_version() -> None:
     dsh = _json(PLUGIN / "package.json")
     assert claude["version"] == codex["version"] == entry["version"] == dsh["version"] == semver
     assert dsh["name"] == "hivemind-dsh-plugin"
+    root = _json(ROOT / "package.json")  # the DeepSeek Harness Git-URL install
+    assert (root["name"], root["version"]) == (dsh["name"], semver)
     assert _yaml_scalar(PLUGIN / "plugin.yaml", "name") == "hivemind"
     assert _yaml_scalar(PLUGIN / "plugin.yaml", "version") == semver
     [codex_entry] = _json(ROOT / ".agents" / "plugins" / "marketplace.json")["plugins"]  # type: ignore[misc]
@@ -415,3 +417,29 @@ def test_launcher_gives_pi_an_mcp_config_without_hivemind(tmp_path: Path) -> Non
     assert "MODE=exclusive" in lines
     config = json.loads(Path(lines[lines.index("--mcp-config") + 1]).read_text())
     assert set(config["mcpServers"]) == {"github"}
+
+
+def test_the_root_package_installs_the_dsh_bundle_from_a_git_url() -> None:
+    """DeepSeek Harness installs a Git URL as a package from the repository
+    root, so the root manifest points at the bundle's patch and ships
+    everything the patch loads: the skill provider it names, and the
+    skills the provider serves (it reads ../skills beside itself)."""
+    root = _json(ROOT / "package.json")
+    assert root["private"] is True
+    assert root["type"] == "module"  # the provider is an ES module
+    patch = ROOT / root["dsh"]["bundle"]["patch"]  # type: ignore[index]
+    assert patch.is_file()
+    shipped = [ROOT / f.rstrip("/") for f in root["files"]]  # type: ignore[union-attr]
+
+    def is_shipped(path: Path) -> bool:
+        return any(path == s or s in path.parents for s in shipped)
+
+    needed = [
+        patch,
+        PLUGIN / "skills" / "hivemind" / "SKILL.md",
+        PLUGIN / "skills" / "hivemind-setup" / "SKILL.md",
+    ]
+    needed += [patch.parent / rel for rel in re.findall(r"name: (\./\S+)", patch.read_text())]
+    for path in needed:
+        assert path.exists(), path
+        assert is_shipped(path), f"{path.relative_to(ROOT)} is missing from package.json files"
