@@ -258,7 +258,9 @@ async def test_hive_search_respects_kind_filter(app: McpHivemind) -> None:
 
 
 @pytest.mark.parametrize(
-    ("limit", "offset"), [(0, 0), (-1, 0), (None, -5), (5, -1)], ids=["zero", "neg-limit", "neg-offset", "both"]
+    ("limit", "offset"),
+    [(0, 0), (-1, 0), (None, -5), (5, -1)],
+    ids=["zero", "neg-limit", "neg-offset", "both"],
 )
 async def test_hive_search_out_of_range_pagination_is_invalid_input(
     app: McpHivemind, limit: int | None, offset: int | None

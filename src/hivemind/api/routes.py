@@ -402,9 +402,10 @@ def build_router(app: HivemindApp) -> APIRouter:
             # Resolve the fleet reference BEFORE any mutation, so a
             # two-field PATCH cannot half-apply: a typo'd fleet id is a
             # typed 404 and the trust level is left untouched.
-            if payload.home_fleet_id is not None and await app.store.get_fleet(
-                payload.home_fleet_id
-            ) is None:
+            if (
+                payload.home_fleet_id is not None
+                and await app.store.get_fleet(payload.home_fleet_id) is None
+            ):
                 raise KeyError(f"unknown fleet: {payload.home_fleet_id}")
             agent: Agent | None = None
             if payload.trust_level is not None:

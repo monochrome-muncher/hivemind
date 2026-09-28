@@ -77,7 +77,9 @@ async def test_register_active_name_conflicts() -> None:
     service, _, store = make_service()
     await service.register("alice", org_credential())
     await store.create_fleet("data-eng")  # ensure a fleet exists for the FK
-    await service.activate("alice", TrustLevel.LURKER, (await store.list_fleets())[0].id, admin_credential())
+    await service.activate(
+        "alice", TrustLevel.LURKER, (await store.list_fleets())[0].id, admin_credential()
+    )
     with pytest.raises(ValueError):
         await service.register("alice", org_credential())
 

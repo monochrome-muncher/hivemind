@@ -218,9 +218,7 @@ async def test_concurrent_registration_of_same_name_is_idempotent(pg) -> None:
     pending record (SPEC §12.3 idempotent no-op) — the conflict-guarded
     insert used to surface a raw ``UniqueViolation`` as a 500."""
     store, _, _ = pg
-    a, b = await asyncio.gather(
-        store.register_agent("racer"), store.register_agent("racer")
-    )
+    a, b = await asyncio.gather(store.register_agent("racer"), store.register_agent("racer"))
     assert a.name == b.name == "racer"
     assert a.status.value == "pending" and b.status.value == "pending"
     same = [a for a in await store.list_agents() if a.name == "racer"]

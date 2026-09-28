@@ -177,6 +177,7 @@ async def test_the_audit_row_shares_the_mutations_transaction(
     assert await _fetch(dsn, "SELECT 1 FROM credentials") == []
     assert await _audit_rows(dsn) == []
 
+
 def test_actor_defaults_to_the_os_user(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     """Through ``main()`` — the real argparse surface, no ``--actor``."""
     dsn = _dsn()

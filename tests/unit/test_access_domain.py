@@ -191,11 +191,21 @@ class TestSupersedeState:
         admin = vis(3, "root", home=FL_A, is_admin=True)
         assert may_supersede(target, new_scope="fleet", new_fleet_id=FL_A, writer=admin) is False
         # And it outranks an in-reach writer.
-        assert may_supersede(target, new_scope="fleet", new_fleet_id=FL_A, writer=vis(2, "bob", home=FL_A)) is False
+        assert (
+            may_supersede(
+                target, new_scope="fleet", new_fleet_id=FL_A, writer=vis(2, "bob", home=FL_A)
+            )
+            is False
+        )
 
     def test_active_target_still_supersedable(self) -> None:
         target = make_entry(scope="fleet", author="alice", fleet_id=FL_A)
-        assert may_supersede(target, new_scope="fleet", new_fleet_id=FL_A, writer=vis(2, "bob", home=FL_A)) is True
+        assert (
+            may_supersede(
+                target, new_scope="fleet", new_fleet_id=FL_A, writer=vis(2, "bob", home=FL_A)
+            )
+            is True
+        )
 
 
 class TestVisibilityWrapper:

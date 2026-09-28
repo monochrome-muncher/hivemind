@@ -26,7 +26,10 @@ def test_a_configured_prefix_budget_truncates_the_body() -> None:
     """Two body words past the 3-word budget are dropped; the summary
     stays whole (SPEC §7: the bound is on the body prefix only)."""
     embedder = LocalEmbedder(dimension=16, prefix_tokens=3)
-    assert embedder.entry_embeddable_text(_draft("one two three four five")) == "summary\none two three"
+    assert (
+        embedder.entry_embeddable_text(_draft("one two three four five"))
+        == "summary\none two three"
+    )
 
 
 def test_the_vector_reflects_the_truncation() -> None:
