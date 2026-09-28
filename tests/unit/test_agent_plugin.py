@@ -159,8 +159,9 @@ def test_the_dsh_bundle_patch_points_at_real_files_and_reads_keys_from_env() -> 
     patch = patch_path.read_text()
     for rel in re.findall(r"name: (\./\S+)", patch):
         assert (PLUGIN / rel).is_file(), rel
-    assert "process.env.HIVEMIND_MCP_URL" in patch
-    assert "process.env.HIVEMIND_API_KEY" in patch
+    # Read through the project-.env-proof resolver (see the 1.2.1 tests below).
+    assert "('HIVEMIND_MCP_URL')" in patch and "('HIVEMIND_API_KEY')" in patch
+    assert "process.env[n]" in patch
     assert "hm_" not in patch  # no key ever lives in the bundle
     for included in manifest["files"]:  # type: ignore[union-attr]
         assert (PLUGIN / included).exists(), included
@@ -358,7 +359,7 @@ def test_the_pi_section_goes_incognito(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_the_dsh_row_is_off_in_incognito_sessions() -> None:
     patch = (PLUGIN / "cordis.patch.yml").read_text()
-    assert "process.env.HIVEMIND_INCOGNITO" in patch
+    assert "('HIVEMIND_INCOGNITO')" in patch
 
 
 def _fake_harness(tmp_path: Path, name: str) -> dict[str, str]:
@@ -608,3 +609,105 @@ def test_the_root_package_also_serves_pi_and_opencode() -> None:
         assert (ROOT / rel).exists(), rel
     assert "peerDependencies" not in root  # pnpm/npm would auto-install the Pi agent
     assert _json(PLUGIN / "package.json")["omp"]["extensions"] == ["./extensions/hivemind.ts"]  # type: ignore[index]
+
+
+# -- DeepSeek Harness: where the key comes from (1.2.1) --------------------------
+
+_DSH_EVAL = """
+const exprs = JSON.parse(process.env.EXPRS)
+const home = process.env.TEST_DSH_HOME
+const path = process.getBuiltinModule('node:path')
+const ctx = { process, dshHomePath: (...s) => path.join(home, ...s) }
+// DSH's loader evaluates !!js exactly like this (vendor/loader/src/config/utils.ts).
+const evaluate = new Function('ctx', 'expr', 'with (ctx) { return eval(expr) }')
+console.log(JSON.stringify(Object.fromEntries(Object.entries(exprs).map(([k, e]) => [k, evaluate(ctx, e)]))))
+"""
+
+
+def _dsh_exprs() -> dict[str, str]:
+    patch = (PLUGIN / "cordis.patch.yml").read_text()
+    found = {
+        key: json.loads(value)
+        for key, value in re.findall(
+            r"^\s+(disabled|url|Authorization): !!js (\".*\")$", patch, re.MULTILINE
+        )
+    }
+    assert set(found) == {"disabled", "url", "Authorization"}
+    return found
+
+
+def _dsh_run(
+    tmp_path: Path, *, env: dict[str, str], home_env: str = "", project_env: str = ""
+) -> dict[str, object]:
+    home, project = tmp_path / "dshhome", tmp_path / "project"
+    home.mkdir(exist_ok=True)
+    project.mkdir(exist_ok=True)
+    (home / ".env").write_text(home_env)
+    (project / ".env").write_text(project_env)
+    base = {k: v for k, v in os.environ.items() if not k.startswith("HIVEMIND_")}
+    out = subprocess.run(
+        ["node", "-e", _DSH_EVAL],
+        env={**base, **env, "EXPRS": json.dumps(_dsh_exprs()), "TEST_DSH_HOME": str(home)},
+        cwd=project,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    result = json.loads(out.stdout)
+    result["stderr"] = out.stderr
+    return result
+
+
+def test_the_dsh_resolver_is_the_same_in_every_field() -> None:
+    found = [m for e in _dsh_exprs().values() for m in re.findall(r"\(\(n\) => \{.*?\}\)", e)]
+    assert len(found) == 4  # disabled (URL + incognito), url, Authorization
+    assert len(set(found)) == 1
+
+
+HOME_ENV = "HIVEMIND_MCP_URL=https://hivemind.example/mcp\nHIVEMIND_API_KEY=hm_home_key\n"
+
+
+@needs_node
+def test_dsh_reads_the_key_from_the_launch_environment_or_dsh_home(tmp_path: Path) -> None:
+    shell = _dsh_run(
+        tmp_path, env={"HIVEMIND_MCP_URL": "https://hm/mcp", "HIVEMIND_API_KEY": "hm_shell"}
+    )
+    assert (shell["disabled"], shell["url"], shell["Authorization"]) == (
+        False,
+        "https://hm/mcp",
+        "Bearer hm_shell",
+    )
+    # ~/.dsh/.env: DSH merges it into process.env at startup; emulate that.
+    home = _dsh_run(
+        tmp_path,
+        env={"HIVEMIND_MCP_URL": "https://hivemind.example/mcp", "HIVEMIND_API_KEY": "hm_home_key"},
+        home_env=HOME_ENV,
+    )
+    assert (home["url"], home["Authorization"]) == (
+        "https://hivemind.example/mcp",
+        "Bearer hm_home_key",
+    )
+    assert home["stderr"] == ""
+
+
+@needs_node
+def test_dsh_never_takes_hivemind_settings_from_a_project_env(tmp_path: Path) -> None:
+    """A project .env (DSH ranks it above ~/.dsh/.env) must not choose where
+    the key is sent. DSH has already merged it into process.env, which the
+    resolver then ignores in favour of ~/.dsh/.env alone."""
+    hostile = "HIVEMIND_MCP_URL=https://attacker.example/mcp\n"
+    merged = {"HIVEMIND_MCP_URL": "https://attacker.example/mcp", "HIVEMIND_API_KEY": "hm_home_key"}
+    with_home = _dsh_run(tmp_path, env=merged, home_env=HOME_ENV, project_env=hostile)
+    assert with_home["url"] == "https://hivemind.example/mcp"
+    assert with_home["Authorization"] == "Bearer hm_home_key"
+    assert "ignoring HIVEMIND_* settings" in str(with_home["stderr"])
+    assert "hm_home_key" not in str(with_home["stderr"])
+    without_home = _dsh_run(tmp_path, env=merged, project_env=hostile)
+    assert without_home["disabled"] is True
+    assert without_home.get("url") is None
+
+
+@needs_node
+def test_dsh_incognito_still_disables_the_row(tmp_path: Path) -> None:
+    r = _dsh_run(tmp_path, env={"HIVEMIND_MCP_URL": "https://hm/mcp", "HIVEMIND_INCOGNITO": "yes"})
+    assert r["disabled"] is True

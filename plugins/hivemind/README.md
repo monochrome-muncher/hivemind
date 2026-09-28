@@ -150,8 +150,21 @@ export HIVEMIND_API_KEY="hm_…"   # org key first, agent key after activation
   bearer_token_env_var = "HIVEMIND_API_KEY"
   ```
 
-- **DeepSeek Harness**: the shell that launches `dsh`. The bundle reads
-  both; the MCP server stays off while `HIVEMIND_MCP_URL` is unset.
+- **DeepSeek Harness**: put both lines in **`~/.dsh/.env`** (then
+  `chmod 600 ~/.dsh/.env`) and restart DSH. DSH loads that file at startup
+  however it is launched, the CLI and DSH Desktop alike; exporting them in
+  the shell that runs `dsh` also works. The MCP server stays off while
+  `HIVEMIND_MCP_URL` is unset. Two things to know:
+  - **Never put `HIVEMIND_*` in a project `.env`.** DSH also loads a `.env`
+    from the directory it starts in, ranked above `~/.dsh/.env`; a cloned
+    repository could use it to send your key elsewhere. The bundle
+    therefore ignores the environment whenever that file defines any
+    `HIVEMIND_*` name, uses `~/.dsh/.env` alone, and prints a warning.
+  - **The key is invisible to the agent's shell.** DSH removes every
+    variable whose name contains `KEY`, `TOKEN`, `SECRET` or `PASSWORD`
+    from the processes it starts, so `printenv HIVEMIND_API_KEY` is always
+    empty there even when Hivemind works. Check the connection with
+    `hive_whoami` instead.
 - **Hermes**: the shell that launches `hermes`, or `~/.hermes/.env`
   (read into the environment). The MCP server goes into
   `~/.hermes/config.yaml` with `${VAR}` references, so the key never
@@ -289,6 +302,7 @@ update above.
 
 | Release | Server | Plugin | Your copies (instruction block, hand-installed hook) |
 |---|---|---|---|
+| 1.2.1 | Unchanged. | **DeepSeek Harness security fix:** a `.env` in the directory DSH starts in (ranked above `~/.dsh/.env`) could set `HIVEMIND_MCP_URL` and receive the Hivemind key. The bundle now ignores the environment whenever that file defines any `HIVEMIND_*` name and uses `~/.dsh/.env` alone, with a warning. Docs and hivemind-setup: keep the key in `~/.dsh/.env`; in DSH the key is always hidden from the agent's shell, so check with `hive_whoami`. | Unchanged. |
 | 1.2.0 | Unchanged. | New harnesses: **Oh My Pi** (via the marketplace) and **OpenCode** (a plugin that registers the MCP server, adds the skills and puts the reminder in every request). Pi and OpenCode install from this repository's Git URL, like DeepSeek Harness. The Pi extension supports Oh My Pi and **blocks Hivemind tool calls in incognito sessions**; the launcher gains `omp` and `opencode`. The `hivemind` skill's "Staying aware" section lists the new harnesses. | Unchanged, but Oh My Pi and OpenCode users can add the instruction block to `~/.omp/agent/AGENTS.md` / `~/.config/opencode/AGENTS.md`. |
 | 1.1.4 | Unchanged. | DeepSeek Harness can install the bundle from this repository's Git URL (Plugins page or `dsh plugin … add git+https://…`), via a root `package.json`. No change to skills, reminders or the launcher. | Unchanged. |
 | 1.1.3 | No change from 1.1.2 (a re-release so every file carries the version). | Unchanged (version bump only). | Unchanged. |

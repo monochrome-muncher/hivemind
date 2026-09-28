@@ -1,12 +1,21 @@
 # DeepSeek Harness bundle layer for Hivemind (see README.md, "DeepSeek Harness").
 #
-# 1. The Hivemind MCP server over Streamable HTTP. The URL and the key come
-#    from the environment, never from this file: HIVEMIND_MCP_URL and
-#    HIVEMIND_API_KEY (the org key until the agent is activated, then its
-#    agent key; one key per request). The row stays disabled until the URL
-#    is set, so an unconfigured install boots cleanly, and while
-#    HIVEMIND_INCOGNITO is set: an incognito session (ADR 0035) never
-#    connects at all.
+# 1. The Hivemind MCP server over Streamable HTTP. The URL and the key are
+#    never in this file: HIVEMIND_MCP_URL and HIVEMIND_API_KEY (the org key
+#    until the agent is activated, then its agent key) come from the
+#    environment DSH was launched with, or from ~/.dsh/.env, which DSH loads
+#    at startup (the recommended place: it works however DSH is started).
+#    The row stays disabled until the URL is set, and in incognito sessions
+#    (HIVEMIND_INCOGNITO, ADR 0035), which never connect at all.
+#
+#    Never from a project .env. DSH also loads a .env from the directory it
+#    was started in, ranked above ~/.dsh/.env, so a cloned repository could
+#    otherwise set HIVEMIND_MCP_URL and receive the key. The resolver below
+#    therefore ignores the environment altogether whenever the start
+#    directory's .env defines any HIVEMIND_* name, reads ~/.dsh/.env only,
+#    and says so once on stderr. (The same resolver is repeated in each
+#    field: a !!js expression cannot share code. A test keeps them equal.)
+#
 #    Hivemind's MCP server instructions land in DSH's system prompt, which
 #    compaction never removes: that is what keeps the agent aware of
 #    Hivemind for the whole session.
@@ -15,12 +24,12 @@
 - insert:
     - id: hivemind-mcp
       name: '@deepseek-ai/dsh-mcp-client'
-      disabled: !!js "!process.env.HIVEMIND_MCP_URL || ['1', 'true', 'yes', 'on'].includes((process.env.HIVEMIND_INCOGNITO ?? '').trim().toLowerCase())"
+      disabled: !!js "!((n) => { const g = (m) => process.getBuiltinModule(m); const read = (f) => { try { return g('node:util').parseEnv(g('node:fs').readFileSync(f, 'utf8')) } catch { return {} } }; const home = read(dshHomePath('.env')); const project = read(g('node:path').resolve('.env')); const guarded = Object.keys(project).some((k) => k.toUpperCase().startsWith('HIVEMIND_')); if (guarded && !globalThis.__hivemindProjectEnvWarned) { globalThis.__hivemindProjectEnvWarned = true; process.stderr.write('hivemind: ignoring HIVEMIND_* settings in ' + g('node:path').resolve('.env') + ' (a project .env must not choose where the Hivemind key is sent); using ' + dshHomePath('.env') + ' only\\n') } return guarded ? home[n] : process.env[n] })('HIVEMIND_MCP_URL') || ['1', 'true', 'yes', 'on'].includes((((n) => { const g = (m) => process.getBuiltinModule(m); const read = (f) => { try { return g('node:util').parseEnv(g('node:fs').readFileSync(f, 'utf8')) } catch { return {} } }; const home = read(dshHomePath('.env')); const project = read(g('node:path').resolve('.env')); const guarded = Object.keys(project).some((k) => k.toUpperCase().startsWith('HIVEMIND_')); if (guarded && !globalThis.__hivemindProjectEnvWarned) { globalThis.__hivemindProjectEnvWarned = true; process.stderr.write('hivemind: ignoring HIVEMIND_* settings in ' + g('node:path').resolve('.env') + ' (a project .env must not choose where the Hivemind key is sent); using ' + dshHomePath('.env') + ' only\\n') } return guarded ? home[n] : process.env[n] })('HIVEMIND_INCOGNITO') ?? '').trim().toLowerCase())"
       config:
         serverName: hivemind
         transport: streamable-http
-        url: !!js process.env.HIVEMIND_MCP_URL
+        url: !!js "((n) => { const g = (m) => process.getBuiltinModule(m); const read = (f) => { try { return g('node:util').parseEnv(g('node:fs').readFileSync(f, 'utf8')) } catch { return {} } }; const home = read(dshHomePath('.env')); const project = read(g('node:path').resolve('.env')); const guarded = Object.keys(project).some((k) => k.toUpperCase().startsWith('HIVEMIND_')); if (guarded && !globalThis.__hivemindProjectEnvWarned) { globalThis.__hivemindProjectEnvWarned = true; process.stderr.write('hivemind: ignoring HIVEMIND_* settings in ' + g('node:path').resolve('.env') + ' (a project .env must not choose where the Hivemind key is sent); using ' + dshHomePath('.env') + ' only\\n') } return guarded ? home[n] : process.env[n] })('HIVEMIND_MCP_URL')"
         headers:
-          Authorization: !!js '`Bearer ${process.env.HIVEMIND_API_KEY ?? ""}`'
+          Authorization: !!js "'Bearer ' + (((n) => { const g = (m) => process.getBuiltinModule(m); const read = (f) => { try { return g('node:util').parseEnv(g('node:fs').readFileSync(f, 'utf8')) } catch { return {} } }; const home = read(dshHomePath('.env')); const project = read(g('node:path').resolve('.env')); const guarded = Object.keys(project).some((k) => k.toUpperCase().startsWith('HIVEMIND_')); if (guarded && !globalThis.__hivemindProjectEnvWarned) { globalThis.__hivemindProjectEnvWarned = true; process.stderr.write('hivemind: ignoring HIVEMIND_* settings in ' + g('node:path').resolve('.env') + ' (a project .env must not choose where the Hivemind key is sent); using ' + dshHomePath('.env') + ' only\\n') } return guarded ? home[n] : process.env[n] })('HIVEMIND_API_KEY') ?? '')"
     - id: hivemind-skills
       name: ./dsh/hivemind-skills.js

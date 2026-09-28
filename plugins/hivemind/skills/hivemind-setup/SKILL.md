@@ -24,6 +24,8 @@ you stand.
 1. Are the `hive_*` tools available? If yes, call `hive_whoami`.
 2. Is `HIVEMIND_API_KEY` set? Check with a command that does not print it,
    for example `test -n "$HIVEMIND_API_KEY" && echo set || echo unset`.
+   **Not in DeepSeek Harness:** there the key is always hidden from your
+   shell, so "unset" means nothing; rely on `hive_whoami` (step 1).
 
 | Situation | Go to |
 |---|---|
@@ -100,9 +102,26 @@ Then export `HIVEMIND_API_KEY` in the shell profile that launches Codex.
   `dsh plugin --profile <name> add git+https://<git-server>/<owner>/hivemind.git`);
   a local checkout also works (`dsh plugin --profile <name> add
   <path>/plugins/hivemind`). The bundle defines the MCP server from
-  `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY` and serves both skills. Only
-  set the variables, in the shell that launches `dsh`. The server stays
-  off while `HIVEMIND_MCP_URL` is unset.
+  `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY` and serves both skills. The
+  server stays off while `HIVEMIND_MCP_URL` is unset.
+- **Where the key goes: `~/.dsh/.env`**, which DSH loads at startup
+  however it is launched (CLI or Desktop). Show the user the change, and
+  with approval write:
+
+  ```sh
+  HIVEMIND_MCP_URL=https://hivemind.example.org/mcp
+  HIVEMIND_API_KEY=hm_…
+  ```
+
+  then `chmod 600 ~/.dsh/.env` and ask the user to restart DSH. Exporting
+  both in the shell that launches `dsh` also works. **Never** put them in
+  a project's `.env`: DSH loads that too, ranked higher, and a repository
+  could use it to redirect the key. The bundle ignores the environment when
+  it sees one there and uses `~/.dsh/.env` alone.
+- **You cannot see the key from your shell in DSH.** DSH strips variables
+  named like `*KEY*`/`*TOKEN*`/`*SECRET*`/`*PASSWORD*` from every process
+  it starts, so `printenv HIVEMIND_API_KEY` is always empty there. Judge
+  the connection by `hive_whoami`, not by the environment.
 - **Without the bundle**: add this row to `~/.dsh/cordis.patch.yml` (all
   profiles) or `~/.dsh/profiles/<name>/cordis.patch.yml`, merging into
   the existing file:
