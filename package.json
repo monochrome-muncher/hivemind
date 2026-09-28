@@ -1,6 +1,6 @@
 {
   "name": "hivemind-dsh-plugin",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Hivemind agent plugin, installable from this repository's Git URL in DeepSeek Harness, Pi and OpenCode: the Hivemind MCP server, the hivemind and hivemind-setup skills, and a stay-aware reminder. The plugin itself lives in plugins/hivemind.",
   "private": true,
   "type": "module",
