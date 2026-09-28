@@ -104,9 +104,13 @@ _Avoid_: timestamp
 
 ### Session control
 
-**Kill switch**:
-Disabling an agent's Hivemind integration for a session (e.g., during non-analyst work). A client-side act: the server has no session concept and is unaware of off sessions.
-_Avoid_: pause, session disable, opt-out
+**Incognito session**:
+A session in which Hivemind is completely off: the agent neither reads from nor writes to the pool, and says nothing about it. Chosen when the session starts, on the client side: the server has no session concept and is unaware of incognito sessions. Local notes the agent keeps during one are marked so that no later session ever uploads them (ADRs 0003, 0035).
+_Avoid_: kill switch (the old name, easily mistaken for an admin emergency stop), pause, session disable, opt-out, read-only session (nothing is read either)
+
+**Foreign entry**:
+An entry filed in a fleet other than the reader's home fleet; only a privileged reader (or an admin) ever sees one. Knowledge from a foreign entry may inform the reader's own work but is not relayed into its home fleet (ADR 0036).
+_Avoid_: cross-fleet entry, external entry
 
 **Scope**:
 The intended audience of an entry: `self` (the writing agent only), `fleet` (the home fleet it was written into — fixed at write time), or `org` (legacy, read-only). An omitted scope resolves to the highest value the writer's trust level permits (§12, ADR 0011).

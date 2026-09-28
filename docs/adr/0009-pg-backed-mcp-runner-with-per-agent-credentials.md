@@ -33,7 +33,7 @@ Considered options:
 Consequences: the MCP runner is one thin process per agent, all sharing
 the single Postgres node (ADR 0007) and the org's configured embedder
 (ADR 0005). Per-agent attribution is **server-verified** (ADR 0008),
-never self-reported. The kill switch is unchanged and stays client-side
+never self-reported. The kill switch (now called an incognito session, ADR 0035) is unchanged and stays client-side
 (ADR 0003). Revoking an agent's key revokes its pool access immediately
 (no per-agent learned state to clean up). The dev runner (``main``) is
 left untouched as the zero-dependency path.

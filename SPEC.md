@@ -88,7 +88,7 @@ Counts are per-entry (any reporter). Defaults: no feedback → `quality = 1.0`. 
 
 ### 4.3 What is *not* in the model (v1)
 
-No sessions on the server (the kill switch is client-side, ADR 0003). No knowledge graph, no binary blobs (artifacts are **referenced**, not stored), no user/role tables beyond credential mapping, no UI. *(v2 adds the `agents` + `fleets` registration tables — ADR 0012 — and self/fleet scoping — ADR 0011; still no user/role model and no UI.)*
+No sessions on the server (incognito sessions are client-side, ADRs 0003, 0035). No knowledge graph, no binary blobs (artifacts are **referenced**, not stored), no user/role tables beyond credential mapping, no UI. *(v2 adds the `agents` + `fleets` registration tables — ADR 0012 — and self/fleet scoping — ADR 0011; still no user/role model and no UI.)*
 
 ## 5. API surface
 
@@ -140,7 +140,7 @@ A typical agent prompt contract: *"check where you stand (`hive_whoami`); recall
 
 ### 6.1 Two-stage (progressive disclosure)
 
-`search` returns **compact hits** — `id, kind, summary, tags, author, agent, occurred_at, score` — **not** full bodies. The agent opens what it wants with `hive_get`. This is the token economy the design is built around: scan many, open few.
+`search` returns **compact hits** — `id, kind, summary, tags, author, agent, occurred_at, score, scope, fleet_id` — **not** full bodies. `scope` and `fleet_id` let a privileged reader recognise a **foreign entry** (filed outside its home fleet) without opening it (ADR 0036). The agent opens what it wants with `hive_get`. This is the token economy the design is built around: scan many, open few.
 
 ### 6.2 Hybrid pipeline
 
@@ -209,9 +209,9 @@ One **self-hosted instance per organization** — one instance = one organizatio
 
 **Scale assumptions (spec target):** ~50 users/agents, ~500 sessions/day, ~10k entries/day, single Postgres node. The design does not commit to horizontal *storage* scale; when the assumptions stop holding, §10's extensions apply.
 
-### 8.3 The kill switch (ADR 0003)
+### 8.3 Incognito sessions (ADRs 0003, 0035)
 
-Turning Hivemind off for a session is a **client-side act**: the agent's Hivemind integration (its MCP server entry / enabled flag) is disabled for that session, so the tools simply aren't available and the pool is untouched. **The server has no session registry and is unaware of off sessions.** The spec's only server-side commitment is that an absent client is indistinguishable from a quiet one.
+An **incognito session** turns Hivemind completely off for one session. It is a **client-side act**: the agent's Hivemind integration (its MCP server entry / enabled flag) is disabled for that session, so the tools simply aren't available and the pool is untouched. **The server has no session registry and is unaware of off sessions.** The spec's only server-side commitment is that an absent client is indistinguishable from a quiet one. The agent plugin implements it (ADR 0035): `HIVEMIND_INCOGNITO=1` switches every reminder to "Hivemind is off; don't use or mention it", the `hivemind-incognito <harness>` launcher adds each harness's own switch so the tools never load, and local notes kept during the session are marked `[hivemind: incognito, never upload]` so no later session uploads them.
 
 ### 8.4 MCP runners (ADR 0009)
 
@@ -315,6 +315,7 @@ This section supersedes the flat-pool commitment of §1 and the "no trust tiers"
 * At level 0 (`untrusted`) — what pending and demoted agents sit at — all read verbs return **empty results** (the visibility filter hides everything); writes are explicit permission errors, and feedback/withdrawal answer **not found** (they follow readability, and at level 0 nothing is readable).
 * Reads beyond visibility behave **as if the entry does not exist** (no existence leaking).
 * `self`-scoped entries are private to their author **even at level 3** (that is what `self` is for).
+* **Read-broad does not mean relay** (ADR 0036): a privileged agent uses what it reads in other fleets but does not restate it in its home fleet; it links a foreign entry by id and asks its user before bringing one home. This is agent guidance (the hivemind skill), not something the server can enforce.
 * **Feedback and withdrawal follow readability**: an agent may feedback entries it can read, and withdraw its own entries; the admin key may withdraw any entry (the §4.1 withdrawal rules now ride the trust matrix).
 * **Every read by id follows readability** (ADR 0033): `hive_get` / `GET /v1/entries/{id}`, feedback and withdrawal answer **not found** for an entry the caller cannot see, and the supersession chain (`include_history` / `?history`) leaves such versions out.
 * **Provenance is never self-reported by an agent key** (ADRs 0012, 0033): on both surfaces `author` is the key's registered name and `agent` the key's agent identity.

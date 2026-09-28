@@ -2,7 +2,7 @@
 
 Hivemind is a shared memory service for the AI agents of an organization: one Postgres-backed pool that every agent in the org reads and writes, so work done with one agent (analyst 1, agent 1, day one) is diggable work for every other agent (analyst 2, agent 2, days later).
 
-**v1 in one paragraph.** Agents write distilled, explicit **entries** — a `fact`, an `insight` (long-form analysis), or a `decision` — each carrying full provenance (author, agent, memory date, sources) and an optional `supersedes` link. Agents retrieve via **hybrid search** (keyword + vector, RRF-fused, decay-aware) with **progressive disclosure** (compact hits first, full entry on `get`). The pool is **append-only**: corrections are explicit **supersessions**, nothing is edited or silently deleted; entries can also be **withdrawn** (own, or any by the org operator). A **client-side kill switch** lets an agent's owner turn Hivemind off for a session (spitballing, non-analyist work) without the server ever knowing. One self-hosted instance per organization: one service + one Postgres (pgvector), docker-compose, no Redis. **Access is gated by the fleet/trust model** (SPEC §12, ADRs 0011–0012): each agent registers under a name, sits in one home fleet, and carries a trust level (0–3) that decides what it can read/write — `self` stays private even at the top level, and level 0 sees nothing (see Key properties + SPEC §12).
+**v1 in one paragraph.** Agents write distilled, explicit **entries** — a `fact`, an `insight` (long-form analysis), or a `decision` — each carrying full provenance (author, agent, memory date, sources) and an optional `supersedes` link. Agents retrieve via **hybrid search** (keyword + vector, RRF-fused, decay-aware) with **progressive disclosure** (compact hits first, full entry on `get`). The pool is **append-only**: corrections are explicit **supersessions**, nothing is edited or silently deleted; entries can also be **withdrawn** (own, or any by the org operator). An **incognito session** (client-side) lets an agent's owner turn Hivemind off for a session (spitballing, non-analyist work) without the server ever knowing. One self-hosted instance per organization: one service + one Postgres (pgvector), docker-compose, no Redis. **Access is gated by the fleet/trust model** (SPEC §12, ADRs 0011–0012): each agent registers under a name, sits in one home fleet, and carries a trust level (0–3) that decides what it can read/write — `self` stays private even at the top level, and level 0 sees nothing (see Key properties + SPEC §12).
 
 ## Key properties (v1)
 
@@ -16,8 +16,8 @@ Hivemind is a shared memory service for the AI agents of an organization: one Po
 ## Reading order
 
 1. [SPEC.md](SPEC.md) — the full v1 spec: domain model, API, retrieval, deployment, non-goals, and documented extensions
-2. [CONTEXT.md](CONTEXT.md) — the canonical glossary (what "entry", "supersession", "memory date", "kill switch", etc. mean)
-3. [docs/adr/](docs/adr/) — the decisions and their reasons (append-only entries, flat pool, client-side kill switch, explicit writes, fixed-dimension pgvector, RRF hybrid retrieval, single-Postgres deployment, credential model, fleets + trust levels, shared org key + agent keys, forward-migration tracking, bounded embedder retries)
+2. [CONTEXT.md](CONTEXT.md) — the canonical glossary (what "entry", "supersession", "memory date", "incognito session", etc. mean)
+3. [docs/adr/](docs/adr/) — the decisions and their reasons (append-only entries, flat pool, client-side incognito sessions (formerly "kill switch"), explicit writes, fixed-dimension pgvector, RRF hybrid retrieval, single-Postgres deployment, credential model, fleets + trust levels, shared org key + agent keys, forward-migration tracking, bounded embedder retries)
 4. [AGENTS.md](AGENTS.md) — how to work in this repo (for agents and humans)
 5. [ROADMAP.md](ROADMAP.md) — what to build next, in what order (the living plan)
 

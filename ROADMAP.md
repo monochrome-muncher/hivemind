@@ -185,7 +185,7 @@ kinds). Tier 3.1 (the key-rotation runbook) is **blocked by Tier 2** —
 you can't write a rotation story for a key model that's about to
 change.
 
-## Tier 3 — productionize (former Tier 2)  *(3.1, 3.3–3.11 shipped; 3.2 superseded by 3.5)*
+## Tier 3 — productionize (former Tier 2)  *(3.1, 3.3–3.12 shipped; 3.2 superseded by 3.5)*
 
 ### 3.1 Ops runbook  *(shipped: `docs/ops-runbook.md`)*
 Deployment, **backups** (single-node Postgres, ADR 0007),
@@ -431,6 +431,19 @@ key on both surfaces, a supersession must stay within the audience the
 writer can address, and built-in identity names cannot be registered.
 Existing rows with a spoofed author are listed in the ops runbook for
 review, not rewritten.
+
+### 3.12 Incognito sessions and foreign entries  *(shipped in 1.1.0: ADRs 0035–0036)*
+**Incognito sessions** implement ADR 0003's client-side off switch, renamed
+from "kill switch": one signal (`HIVEMIND_INCOGNITO`), a launcher that adds
+each harness's own switch so the tools never load, reminders that stop
+nagging, and local notes marked so no later session uploads them.
+**Foreign entries**: a privileged agent reads every fleet, and nothing on
+the server can stop it restating what it read in its home fleet. The skill
+now says use, don't relay (link by id, ask the user before bringing a
+finding home), and hits carry `scope`/`fleet_id` so a foreign entry is
+recognisable before it is opened. **Held:** a per-fleet "sensitive" flag,
+set by the admin, shown on hits and enforced on citations, if the
+conservative default proves too loose (ADR 0036).
 
 ## Tier 4 — close the spec's open items (SPEC §11) (former Tier 3)
 
