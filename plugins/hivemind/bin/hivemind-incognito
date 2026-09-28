@@ -1,0 +1,92 @@
+#!/bin/sh
+# hivemind-incognito — start an agent harness in an incognito session
+# (ADR 0035): Hivemind is completely off, and nothing is read or written.
+#
+#   hivemind-incognito <harness> [harness arguments...]
+#   e.g.  hivemind-incognito claude
+#         hivemind-incognito codex "fix the flaky test"
+#
+# Two layers, both client-side (the server never learns about the session):
+#   1. HIVEMIND_INCOGNITO=1 in the environment. The plugin's reminders
+#      (SessionStart hook, Hermes and Pi system-prompt sections) switch to
+#      the incognito text, and the DeepSeek Harness bundle skips the server.
+#   2. The harness's own switch that keeps the Hivemind MCP server from
+#      loading, so the tools are not even there. Where a harness has no
+#      such switch configured, this prints a note and the session relies on
+#      the agent honouring layer 1.
+set -eu
+
+if [ "$#" -lt 1 ]; then
+  echo "usage: hivemind-incognito <claude|codex|dsh|hermes|pi|other-command> [args...]" >&2
+  exit 2
+fi
+harness=$1
+shift
+export HIVEMIND_INCOGNITO=1
+note() { echo "hivemind-incognito: $*" >&2; }
+
+case "$(basename "$harness")" in
+  claude)
+    # Deny the server for this session only (--settings outranks user
+    # settings; the denylist also covers servers a plugin adds). Match by
+    # URL where known: a plugin server's registered name is prefixed.
+    denied='{"serverName":"hivemind"}'
+    if [ -n "${HIVEMIND_MCP_URL:-}" ]; then
+      denied="$denied,{\"serverUrl\":\"$HIVEMIND_MCP_URL\"}"
+    fi
+    exec "$harness" --settings "{\"deniedMcpServers\":[$denied]}" "$@"
+    ;;
+  codex)
+    # -c on a server that is not configured creates an invalid entry, so
+    # only add it when config.toml defines mcp_servers.hivemind.
+    config="${CODEX_HOME:-$HOME/.codex}/config.toml"
+    if [ -f "$config" ] && grep -q '^\[mcp_servers\.hivemind\]' "$config"; then
+      exec "$harness" -c 'mcp_servers.hivemind.enabled=false' "$@"
+    fi
+    note "no [mcp_servers.hivemind] in $config; starting without an override"
+    exec "$harness" "$@"
+    ;;
+  dsh)
+    # The hivemind bundle disables its own server row when
+    # HIVEMIND_INCOGNITO is set; nothing else to add.
+    exec "$harness" "$@"
+    ;;
+  hermes)
+    # Hermes interpolates ${VAR} into the server config before reading
+    # `enabled`, so a config with `enabled: ${HIVEMIND_ENABLED}` is off here.
+    export HIVEMIND_ENABLED=false
+    config="${HERMES_HOME:-$HOME/.hermes}/config.yaml"
+    if ! grep -q 'HIVEMIND_ENABLED' "$config" 2>/dev/null; then
+      note "$config does not gate the hivemind server on \${HIVEMIND_ENABLED}; the tools may still load (see the plugin README, Incognito sessions)"
+    fi
+    exec "$harness" "$@"
+    ;;
+  pi)
+    # pi-mcp-adapter loads exactly one MCP config in exclusive mode: build
+    # one from the global and project configs, minus the hivemind server.
+    if command -v python3 >/dev/null 2>&1; then
+      merged=$(mktemp "${TMPDIR:-/tmp}/hivemind-incognito-mcp.XXXXXX")
+      python3 - "$merged" <<'PY'
+import json, os, sys
+servers = {}
+for path in (os.path.expanduser("~/.config/mcp/mcp.json"), ".mcp.json"):
+    try:
+        with open(path) as fh:
+            servers.update(json.load(fh).get("mcpServers", {}))
+    except (OSError, ValueError):
+        pass
+servers.pop("hivemind", None)
+with open(sys.argv[1], "w") as fh:
+    json.dump({"mcpServers": servers}, fh)
+PY
+      export PI_MCP_CONFIG_MODE=exclusive
+      exec "$harness" --mcp-config "$merged" "$@"
+    fi
+    note "python3 not found; starting without removing the hivemind server"
+    exec "$harness" "$@"
+    ;;
+  *)
+    note "no built-in switch for '$harness'; HIVEMIND_INCOGNITO=1 is set, so the agent is told not to use Hivemind"
+    exec "$harness" "$@"
+    ;;
+esac

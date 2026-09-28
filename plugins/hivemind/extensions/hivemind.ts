@@ -38,8 +38,22 @@ const NOT_CONFIGURED =
 	"probably not connected. If the hive_* tools are missing or fail, " +
 	"tell the user once and offer to run the hivemind-setup skill.";
 
+// An incognito session (ADR 0035): the whole section is replaced by this
+// sentence, shared byte for byte with the hook and the Hermes plugin.
+const INCOGNITO =
+	"HIVEMIND: this is an incognito session, so Hivemind is completely off. Do not call any hive_* tool, and do not mention Hivemind or offer to set it up. You may keep local notes; start each one with [hivemind: incognito, never upload] so that no later session uploads it. If hive_* tools are loaded anyway, still do not use them, and tell the user once that the tools are loaded, so this session is incognito only by your own restraint.";
+
+function incognito(): boolean {
+	const value = (process.env.HIVEMIND_INCOGNITO ?? "").trim().toLowerCase();
+	return ["1", "true", "yes", "on"].includes(value);
+}
+
 export default function hivemind(pi: ExtensionAPI) {
 	pi.on("before_agent_start", (event) => {
+		if (incognito()) {
+			event.systemPromptOptions.sections.hivemind = INCOGNITO;
+			return;
+		}
 		const state = process.env.HIVEMIND_API_KEY ? CONFIGURED : NOT_CONFIGURED;
 		event.systemPromptOptions.sections.hivemind = `${CORE} ${state}`;
 	});

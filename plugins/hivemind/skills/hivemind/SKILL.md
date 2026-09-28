@@ -27,7 +27,7 @@ on it:
 
 | What `hive_whoami` shows | What it means | What you do |
 |---|---|---|
-| The tool is missing, or every call fails to connect | Hivemind is not connected | Tell the user once. Offer the **hivemind-setup** skill. Work normally meanwhile (see §6). |
+| The tool is missing, or every call fails to connect | Hivemind is not connected — or this is an incognito session (§7) | If incognito: say nothing. Otherwise tell the user once, offer the **hivemind-setup** skill, and work normally meanwhile (see §6). |
 | `key_kind: "org"` | You hold the shared org key: you can register, nothing else | Offer to register (hivemind-setup, "Register"). You cannot read or write yet. |
 | `key_kind: "agent"`, `status: "pending"` | Registered, waiting for an admin | Tell the user: *"Ask your Hivemind admin to activate agent `<name>` (it is in the admin panel's pending queue). You will get an agent key; put it in `HIVEMIND_API_KEY` and restart."* |
 | `key_kind: "agent"`, `trust_level: 0` | Active but demoted to `untrusted` | Searches return nothing, however much is stored, and writes fail. Tell the user to ask the admin to raise your trust level. |
@@ -61,7 +61,10 @@ How:
    does not mean the entry was deleted.
 3. Use what you found, and **say so** to the user when it shaped your
    answer ("Hivemind has a note from `<author>` that …").
-4. Give feedback with `hive_feedback`: `helpful` when an entry helped,
+4. If you are **privileged** (you read every fleet), check each hit's
+   `fleet_id` against your `home_fleet_id` from `hive_whoami`: a different
+   one is a **foreign entry**, and §3a applies.
+5. Give feedback with `hive_feedback`: `helpful` when an entry helped,
    `stale` when it is outdated, `wrong` when it proved incorrect (add a
    `note` saying why). This is how the pool learns which entries to trust.
 
@@ -165,6 +168,25 @@ there is no way to write under another name.
 scope silently. Tell the user what you could not record and why (see the
 table in §1), and keep going.
 
+## 3a. Foreign entries (privileged agents)
+
+Only a privileged agent (or an admin key) reads other fleets. Some fleets
+are sensitive and you cannot tell which, so treat everything from another
+fleet conservatively:
+
+- **Use, don't relay.** A foreign entry may inform your own work and your
+  answers to your user. Do not restate, summarise or copy it into a fleet
+  entry in your home fleet.
+- **Link instead of copy.** A home-fleet entry may cite the foreign
+  entry's id in `sources` (`{type: other, ref: <id>}`). Readers outside
+  that fleet get `not_found`, so the link leaks nothing.
+- **Ask before bringing it home.** If carrying a foreign finding into your
+  fleet looks genuinely valuable, ask your user first; they know whether
+  the source fleet is sensitive.
+- **Your own `self` notes are fine**: only you can read them.
+
+Nothing on the server enforces this: it depends on you.
+
 ## 4. Local memory
 
 Do not store lasting knowledge in your harness's own memory (memory files,
@@ -174,7 +196,12 @@ scope if it is personal. Local memory is fine for:
 - **scratch work within the current session**;
 - **a fallback when you cannot write to Hivemind** (not connected, level
   0, pending). When you fall back, tell the user, and when you can write
-  again, move those notes into Hivemind and delete the local copies.
+  again, move those notes into Hivemind and delete the local copies;
+- **notes in an incognito session** (§7). Start each one with
+  `[hivemind: incognito, never upload]`.
+
+**Never move a note marked `[hivemind: incognito, never upload]` into
+Hivemind**, in this session or any later one. Leave it local.
 
 ## 5. Staying aware
 
@@ -189,6 +216,31 @@ adds a startup hook and an instruction block so you never forget Hivemind.
 
 ## 6. When Hivemind is unavailable
 
-Keep helping the user. Do not block on Hivemind. Mention once that it is
-unavailable, keep scratch notes locally if they are worth recording, and
-contribute them once it is back.
+First check whether this is an incognito session (§7): if it is, say
+nothing about Hivemind. Otherwise keep helping the user and do not block
+on Hivemind. Mention once that it is unavailable, keep scratch notes
+locally if they are worth recording, and contribute them once it is back.
+
+## 7. Incognito sessions
+
+An incognito session has Hivemind completely off: you neither read from
+nor write to it. You are in one when a "HIVEMIND: this is an incognito
+session" reminder is in your context, when `HIVEMIND_INCOGNITO` is `1`
+(check with `printenv HIVEMIND_INCOGNITO` if the tools are missing and
+you are unsure), or when the user asks for one mid-session.
+
+- **Do not call any `hive_*` tool**, and do not mention Hivemind or offer
+  to set it up.
+- **Local notes are allowed**, each starting with
+  `[hivemind: incognito, never upload]`, so no later session moves them
+  into Hivemind (§4).
+- **If the `hive_*` tools are loaded anyway**, still do not use them, and
+  tell the user once that the tools are loaded, so the session is
+  incognito only by your restraint. A real incognito session starts with
+  `hivemind-incognito <harness>` (see hivemind-setup, "Incognito").
+- **If the user turns incognito on mid-session**, stop using Hivemind for
+  the rest of the session, mark any further local notes, and tell them
+  this relies on you obeying, and how to start a real one next time.
+- **If the user asks to turn Hivemind back on** in a session that was
+  started incognito, it cannot be done: the tools were never loaded. Tell
+  them a new session is needed.

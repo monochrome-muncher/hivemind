@@ -53,12 +53,33 @@ _NOT_CONFIGURED = (
     "tell the user once and offer to run the hivemind-setup skill."
 )
 
+# An incognito session (ADR 0035): the whole section is replaced by this
+# sentence, shared byte for byte with the hook and the Pi extension.
+_INCOGNITO = (
+    "HIVEMIND: this is an incognito session, so Hivemind is completely of"
+    "f. Do not call any hive_* tool, and do not mention Hivemind or offer"
+    " to set it up. You may keep local notes; start each one with [hivemi"
+    "nd: incognito, never upload] so that no later session uploads it. If"
+    " hive_* tools are loaded anyway, still do not use them, and tell the"
+    " user once that the tools are loaded, so this session is incognito o"
+    "nly by your own restraint."
+)
+
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def _incognito() -> bool:
+    return os.environ.get("HIVEMIND_INCOGNITO", "").strip().lower() in _TRUTHY
+
+
 # Hermes plugin skills are namespaced and not listed in the system
 # prompt's skill index; say exactly how to load them.
 _NAMESPACED_LOAD = 'In this harness the skill is namespaced: skill_view("hivemind:hivemind").'
 
 
 def _hivemind_section() -> str:
+    if _incognito():
+        return _INCOGNITO
     state = _CONFIGURED if os.environ.get("HIVEMIND_API_KEY") else _NOT_CONFIGURED
     return f"{_CORE} {_NAMESPACED_LOAD} {state}"
 

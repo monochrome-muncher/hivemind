@@ -4,7 +4,9 @@
 #    from the environment, never from this file: HIVEMIND_MCP_URL and
 #    HIVEMIND_API_KEY (the org key until the agent is activated, then its
 #    agent key; one key per request). The row stays disabled until the URL
-#    is set, so an unconfigured install boots cleanly.
+#    is set, so an unconfigured install boots cleanly, and while
+#    HIVEMIND_INCOGNITO is set: an incognito session (ADR 0035) never
+#    connects at all.
 #    Hivemind's MCP server instructions land in DSH's system prompt, which
 #    compaction never removes: that is what keeps the agent aware of
 #    Hivemind for the whole session.
@@ -13,7 +15,7 @@
 - insert:
     - id: hivemind-mcp
       name: '@deepseek-ai/dsh-mcp-client'
-      disabled: !!js "!process.env.HIVEMIND_MCP_URL"
+      disabled: !!js "!process.env.HIVEMIND_MCP_URL || ['1', 'true', 'yes', 'on'].includes((process.env.HIVEMIND_INCOGNITO ?? '').trim().toLowerCase())"
       config:
         serverName: hivemind
         transport: streamable-http

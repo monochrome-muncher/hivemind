@@ -18,6 +18,7 @@ also work on their own in any harness that reads `SKILL.md` skills.
 | `package.json`, `cordis.patch.yml`, `dsh/` | The DeepSeek Harness bundle: the same MCP server, plus a small provider that serves `skills/` |
 | `plugin.yaml`, `__init__.py` | The Hermes native plugin: serves `skills/` and adds a Hivemind section to the system prompt (the stay-aware layer; compaction never removes it) |
 | `extensions/hivemind.ts` | The Pi package extension: the same system-prompt section, added on `before_agent_start` |
+| `bin/hivemind-incognito` | Starts any supported harness in an **incognito session**: Hivemind completely off for that one session |
 
 ## What you need
 
@@ -166,6 +167,42 @@ up the MCP connection as above, then ask the agent to run
 the harness has one) and a marked instruction block to your global
 instructions file, showing you each change first.
 
+## Incognito sessions
+
+An incognito session has Hivemind **completely off**: the agent neither
+reads from nor writes to it, and the Hivemind server never learns the
+session happened (ADRs 0003, 0035). Start one with the launcher:
+
+```sh
+plugins/hivemind/bin/hivemind-incognito claude     # or: codex, dsh, hermes, pi
+```
+
+Put it on your `PATH` (e.g. `ln -s "$PWD/plugins/hivemind/bin/hivemind-incognito" ~/.local/bin/`)
+or add aliases such as `alias claude-incognito='hivemind-incognito claude'`.
+
+It does two things:
+
+1. Sets `HIVEMIND_INCOGNITO=1`, so the plugin's reminders switch to their
+   incognito text: don't use or mention Hivemind, and mark any local
+   notes `[hivemind: incognito, never upload]` so no later session
+   uploads them.
+2. Adds the harness's own switch, so the Hivemind tools do not load at all:
+
+| Harness | Switch | You need |
+|---|---|---|
+| Claude Code | `--settings '{"deniedMcpServers":[…]}'` for this session | nothing |
+| Codex | `-c mcp_servers.hivemind.enabled=false` | the `[mcp_servers.hivemind]` entry in `~/.codex/config.toml` |
+| DeepSeek Harness | the bundle's server row switches itself off | nothing |
+| Hermes | `HIVEMIND_ENABLED=false` | `enabled: ${HIVEMIND_ENABLED}` in the hivemind server entry in `~/.hermes/config.yaml`, plus `HIVEMIND_ENABLED=true` in `~/.hermes/.env` for normal sessions |
+| Pi | an exclusive MCP config: your global and project servers, minus hivemind | `python3` |
+
+Without the launcher, set `HIVEMIND_INCOGNITO=1` and apply the switch from
+the table yourself. Setting only the variable also works, but then the
+tools are still loaded and the session is incognito only because the
+agent obeys; the agent says so. Turning incognito on *during* a session
+works the same way (the tools stay loaded), and a session started
+incognito cannot turn Hivemind back on: start a new one.
+
 ## Updating
 
 Hivemind's agent guidance lives in three places, and each updates
@@ -197,6 +234,7 @@ update above.
 
 | Release | Server | Plugin | Your copies (instruction block, hand-installed hook) |
 |---|---|---|---|
+| 1.1.0 | Search hits (MCP `hive_search`, REST `POST /v1/search`) carry `scope` and `fleet_id`, so a foreign entry is recognisable without opening it (ADR 0036). | `hivemind` skill: foreign entries — use, don't relay; link instead of copy; ask before bringing them home (§3a); incognito sessions (§7) and the `[hivemind: incognito, never upload]` marker that later sessions never upload. The reminders (hook, Hermes, Pi) have an incognito variant; the DeepSeek Harness row switches off in incognito sessions; new `bin/hivemind-incognito` launcher; hivemind-setup gains step 6, Incognito. | **Changed:** the instruction block gains an incognito clause. Ask the agent to run hivemind-setup's "Update" step, or re-copy the block from step 4. A hand-installed hook should copy the new `hivemind-session-start.sh`. |
 | 1.0.0 | `hive_write`: `supersedes` targets must be **active** — superseding an already-superseded or withdrawn entry is now `supersede_denied` (ADR 0034; re-target the current head). Typed errors everywhere: out-of-range `trust_level` → 422, unknown `home_fleet_id` → 404, a scope typo → 422/`invalid_input`, negative MCP `limit`/`offset` → `invalid_input`, blank `sources[].ref` refused on both surfaces. | `hivemind` skill: only the current head of a chain is supersedable; on a `supersede_denied` for a non-head target, fetch `?history` and re-target the current version. | Unchanged. |
 | 1.0.0-rc.6 | `hive_write` description: keep machine-local paths out of fleet entries (make them repo-relative, or put the local detail in a `self` entry). | `hivemind` skill: the local-paths rule — what counts as local, rewrite before dropping, still write the finding to the fleet, local specifics in a separate `self` note. | Unchanged. |
 | 1.0.0-rc.5 | Tool descriptions: `hive_write` has no `author` parameter and states the supersession rule; `hive_get`, `hive_feedback` and `hive_withdraw` say invisible entries answer `not_found` (ADR 0033). | `hivemind` skill: who may supersede what, lurkers flag fleet entries with `hive_feedback` instead, `not_found` may mean "not visible to you". | Unchanged. |

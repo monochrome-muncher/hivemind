@@ -286,3 +286,132 @@ def test_the_readme_says_what_changed_for_agents_in_this_release() -> None:
     readme = (PLUGIN / "README.md").read_text()
     table = readme.split("### What changed for agents, by release", 1)[1]
     assert re.search(rf"^\| {re.escape(str(version))} \|", table, re.MULTILINE), version
+
+
+# -- incognito sessions (ADR 0035) ----------------------------------------------
+
+# The one sentence every harness's reminder layer shows in an incognito
+# session, byte for byte (hook, Hermes section, Pi section).
+INCOGNITO_TEXT = (
+    "HIVEMIND: this is an incognito session, so Hivemind is completely off. "
+    "Do not call any hive_* tool, and do not mention Hivemind or offer to set it up. "
+    "You may keep local notes; start each one with [hivemind: incognito, never upload] "
+    "so that no later session uploads it. If hive_* tools are loaded anyway, still do "
+    "not use them, and tell the user once that the tools are loaded, so this session "
+    "is incognito only by your own restraint."
+)
+LAUNCHER = PLUGIN / "bin" / "hivemind-incognito"
+
+
+@pytest.mark.parametrize("value", ["1", "true", "YES", "on"])
+def test_the_hook_goes_incognito(value: str) -> None:
+    env = {k: v for k, v in os.environ.items() if not k.startswith("HIVEMIND_")}
+    env.update(HIVEMIND_INCOGNITO=value, HIVEMIND_API_KEY="hm_secret_value")
+    out = subprocess.run(["sh", str(HOOK)], env=env, capture_output=True, text=True, check=True)
+    assert json.loads(out.stdout)["hookSpecificOutput"]["additionalContext"] == INCOGNITO_TEXT
+    assert "hm_secret_value" not in out.stdout
+
+
+def test_the_hook_ignores_a_false_incognito_value() -> None:
+    env = {k: v for k, v in os.environ.items() if not k.startswith("HIVEMIND_")}
+    env["HIVEMIND_INCOGNITO"] = "0"
+    out = subprocess.run(["sh", str(HOOK)], env=env, capture_output=True, text=True, check=True)
+    assert STAY_AWARE_CORE in out.stdout
+
+
+def test_the_hermes_section_goes_incognito(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HIVEMIND_INCOGNITO", "1")
+    assert _load_hermes_plugin()._hivemind_section() == INCOGNITO_TEXT
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_pi_section_goes_incognito(monkeypatch: pytest.MonkeyPatch) -> None:
+    script = """
+    const mod = await import(process.argv[1])
+    let handler
+    mod.default({ on: (name, h) => { if (name === 'before_agent_start') handler = h } })
+    const event = { systemPromptOptions: { sections: {} } }
+    handler(event)
+    console.log(JSON.stringify(event.systemPromptOptions.sections))
+    """
+    env = {k: v for k, v in os.environ.items() if not k.startswith("HIVEMIND_")}
+    env["HIVEMIND_INCOGNITO"] = "true"
+    out = subprocess.run(
+        ["node", "--input-type=module", "-e", script, str(PLUGIN / "extensions" / "hivemind.ts")],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert json.loads(out.stdout)["hivemind"] == INCOGNITO_TEXT
+
+
+def test_the_dsh_row_is_off_in_incognito_sessions() -> None:
+    patch = (PLUGIN / "cordis.patch.yml").read_text()
+    assert "process.env.HIVEMIND_INCOGNITO" in patch
+
+
+def _fake_harness(tmp_path: Path, name: str) -> dict[str, str]:
+    """A stand-in harness on PATH that prints its args and incognito env."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir(exist_ok=True)
+    script = bindir / name
+    script.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "INCOGNITO=$HIVEMIND_INCOGNITO" '
+        '"ENABLED=${HIVEMIND_ENABLED:-}" "MODE=${PI_MCP_CONFIG_MODE:-}" "$@"\n'
+    )
+    script.chmod(0o755)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("HIVEMIND_")}
+    env.update(
+        PATH=f"{bindir}:{env['PATH']}", HOME=str(tmp_path), CODEX_HOME=str(tmp_path / "codex")
+    )
+    return env
+
+
+def _launch(tmp_path: Path, env: dict[str, str], *args: str) -> list[str]:
+    out = subprocess.run(
+        ["sh", str(LAUNCHER), *args],
+        env=env,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return out.stdout.splitlines()
+
+
+def test_launcher_denies_the_server_in_claude_code(tmp_path: Path) -> None:
+    env = _fake_harness(tmp_path, "claude")
+    env["HIVEMIND_MCP_URL"] = "https://hm.example/mcp"
+    lines = _launch(tmp_path, env, "claude", "--resume")
+    assert lines[0] == "INCOGNITO=1"
+    settings = json.loads(lines[lines.index("--settings") + 1])
+    assert {"serverUrl": "https://hm.example/mcp"} in settings["deniedMcpServers"]
+    assert lines[-1] == "--resume"
+
+
+def test_launcher_disables_codex_only_when_configured(tmp_path: Path) -> None:
+    env = _fake_harness(tmp_path, "codex")
+    assert "-c" not in _launch(tmp_path, env, "codex")  # no config: no invalid override
+    (tmp_path / "codex").mkdir()
+    (tmp_path / "codex" / "config.toml").write_text('[mcp_servers.hivemind]\nurl = "x"\n')
+    lines = _launch(tmp_path, env, "codex", "task")
+    assert lines[lines.index("-c") + 1] == "mcp_servers.hivemind.enabled=false"
+
+
+def test_launcher_turns_hermes_off_through_its_config_variable(tmp_path: Path) -> None:
+    env = _fake_harness(tmp_path, "hermes")
+    assert "ENABLED=false" in _launch(tmp_path, env, "hermes")
+
+
+@pytest.mark.skipif(shutil.which("python3") is None, reason="python3 is not installed")
+def test_launcher_gives_pi_an_mcp_config_without_hivemind(tmp_path: Path) -> None:
+    env = _fake_harness(tmp_path, "pi")
+    (tmp_path / ".config" / "mcp").mkdir(parents=True)
+    (tmp_path / ".config" / "mcp" / "mcp.json").write_text(
+        json.dumps({"mcpServers": {"hivemind": {"url": "x"}, "github": {"url": "y"}}})
+    )
+    lines = _launch(tmp_path, env, "pi")
+    assert "MODE=exclusive" in lines
+    config = json.loads(Path(lines[lines.index("--mcp-config") + 1]).read_text())
+    assert set(config["mcpServers"]) == {"github"}

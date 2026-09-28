@@ -5,7 +5,7 @@ description: Connect this agent to the organization's Hivemind, register it, swi
 
 # Hivemind setup
 
-Five steps. Do only the ones that are needed: start by checking where
+Six steps. Do only the ones that are needed: start by checking where
 you stand.
 
 **Ground rules for every step:**
@@ -33,6 +33,7 @@ you stand.
 | The user has just received an agent key | 3. Switch to the agent key |
 | Everything works | 4. Stay aware (if not done yet) |
 | The user asks to update Hivemind, or has just updated the plugin | 5. Update |
+| The user wants a session without Hivemind ("incognito") | 6. Incognito |
 
 ## 1. Connect
 
@@ -261,7 +262,10 @@ Every session, and again after compaction: call hive_whoami first, then
 follow the hivemind skill. Recall with hive_search before non-trivial work,
 contribute reusable findings with hive_write as often as I have them, and
 prefer Hivemind over local memory files. If I cannot write, tell the user
-why and still recall. Never write my own keys or credentials.
+why and still recall. Never write my own keys or credentials. In an
+incognito session (HIVEMIND_INCOGNITO=1, or the user asks for one) I do not
+use or mention Hivemind, and I start local notes with
+[hivemind: incognito, never upload].
 <!-- hivemind:end -->
 ```
 
@@ -324,4 +328,36 @@ else updates.
    with approval.
 4. **Tell the user to start a new session**, since the current one keeps
    the skill text it already loaded, and report exactly what you changed.
+
+## 6. Incognito
+
+An **incognito session** has Hivemind completely off: nothing is read or
+written, and the server never learns about it (ADR 0035). Start one with
+the plugin's launcher, which sets `HIVEMIND_INCOGNITO=1` (the reminders
+switch to their incognito text) and adds the harness's own switch so the
+Hivemind tools do not load at all:
+
+```sh
+hivemind-incognito claude        # or: codex, dsh, hermes, pi
+```
+
+The launcher is `bin/hivemind-incognito` in the hivemind plugin. Offer to
+put it on the user's `PATH` (for example a symlink in `~/.local/bin`), or
+an alias such as `alias claude-incognito='hivemind-incognito claude'`,
+showing the change first.
+
+Per harness, what the launcher does and what it needs:
+
+| Harness | Switch | Needs |
+|---|---|---|
+| Claude Code | `--settings` with `deniedMcpServers` (the name `hivemind` and the `HIVEMIND_MCP_URL`) | nothing |
+| Codex | `-c mcp_servers.hivemind.enabled=false` | the server defined in `~/.codex/config.toml` (step 1) |
+| DeepSeek Harness | the bundle's server row switches itself off | nothing |
+| Hermes | `HIVEMIND_ENABLED=false` | `enabled: ${HIVEMIND_ENABLED}` in the hivemind entry of `~/.hermes/config.yaml`, and `HIVEMIND_ENABLED=true` in `~/.hermes/.env` for normal sessions (an unset variable makes Hermes warn) |
+| Pi | an exclusive MCP config without hivemind | `python3` |
+
+Without the launcher, set `HIVEMIND_INCOGNITO=1` yourself and use the
+harness switch from the table. Switching incognito on mid-session only
+works because the agent obeys it (the tools stay loaded); the hivemind
+skill, §7, covers that.
 
