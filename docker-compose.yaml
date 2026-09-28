@@ -105,10 +105,10 @@ services:
       vllm:
         condition: service_started
     healthcheck:
-      # The unauthenticated deep-probe endpoint (ADR 0019): 200 = uvicorn
-      # is up AND the DB pool answers; 503 = up but the DB is
-      # unreachable (degraded); connection-refused = uvicorn has not
-      # bound yet. 8088 is the container port (fixed), so this works
+      # The unauthenticated readiness endpoint (ADRs 0019, 0037): 200 =
+      # uvicorn is up (it deliberately does not check the database — the
+      # deep check is /mcp/health/database); connection-refused = uvicorn
+      # has not bound yet. 8088 is the container port (fixed), so this works
       # regardless of the host port mapping.
       test:
         - CMD-SHELL

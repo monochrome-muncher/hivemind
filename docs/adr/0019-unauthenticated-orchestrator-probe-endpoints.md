@@ -1,5 +1,9 @@
 # Unauthenticated orchestrator probe endpoints
 
+> **Status: the deep readiness is superseded by [ADR 0037](0037-readiness-is-shallow-the-database-probe-is-separate.md).**
+> `/mcp/health` is now shallow (the readiness probe); the deep database
+> check moved to `/mcp/health/database`. The rest of this ADR stands.
+
 The k8s deployment story (Tier 3.4) probed the `hivemind-mcp`
 Deployment with a hack: an `exec` probe that curled `/mcp` and
 treated a **401 from the auth middleware as "healthy"** (the compose

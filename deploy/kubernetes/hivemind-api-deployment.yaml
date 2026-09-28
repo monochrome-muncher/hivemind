@@ -145,7 +145,7 @@ spec:
           # Readiness: /v1/health is a STATIC 200 (public by design, SPEC
           # §5.1 — the REST surface has no deep DB-probe endpoint in v1: a
           # DB outage shows as request errors, not NotReady). The deep DB
-          # probe lives on the MCP runner (/mcp/health, ADR 0019).
+          # check lives on the MCP runner (/mcp/health/database, ADR 0037).
           readinessProbe:
             httpGet:
               path: /v1/health

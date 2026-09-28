@@ -132,7 +132,7 @@ make migrate
 
 | Signal | How |
 |---|---|
-| Liveness / readiness | Unauthenticated probe endpoints (ADR 0019), all public: `GET /v1/liveness` (shallow — 200 whenever the process answers), `GET /v1/health` (static 200, public by design — SPEC §5.1), `GET /mcp/liveness` (shallow), `GET /mcp/health` (deep — 200 only when the Postgres pool answers, else 503) |
+| Liveness / readiness | Unauthenticated probe endpoints (ADR 0019), all public: `GET /v1/liveness` (shallow — 200 whenever the process answers), `GET /v1/health` (static 200, public by design — SPEC §5.1), `GET /mcp/liveness` (shallow), `GET /mcp/health` (shallow, the readiness probe — ADR 0037), `GET /mcp/health/database` (deep — 200 only when the Postgres pool answers within 5 s, else 503; the pod log names the cause: `database health check failing: …`) |
 | Usage / counters | `GET /v1/metrics` (admin-gated) — entries / fleets / agents counters (ROADMAP §3.3) |
 | Schema drift | the latest id in `_yoyo_migration` (ADR 0020) — the applied migration |
 | Postgres health | the `postgres` service healthcheck (`pg_isready`); `docker compose ps` |

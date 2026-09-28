@@ -340,7 +340,8 @@ auth middleware — k8s probes carry no credential):
 | Endpoint | Depth | Semantics |
 |---|---|---|
 | `GET /mcp/liveness` (mcp runner) | shallow | 200 whenever the process answers |
-| `GET /mcp/health` (mcp runner) | deep | 200 only when the Postgres pool answers; else 503 (a transient DB outage marks the pod NotReady without restarting it) |
+| `GET /mcp/health` (mcp runner) | shallow | 200 whenever the process answers — the readiness probe. It does **not** check the database: all replicas share it, so a DB outage would pull every pod out of service at once (ADR 0037) |
+| `GET /mcp/health/database` (mcp runner) | deep | 200 when the Postgres pool answers within 5 s; else 503. For people and monitoring; no probe uses it. The pod log names the cause once per outage (`database health check failing: <exception>`) |
 | `GET /v1/liveness` (REST API) | shallow | 200 whenever the process answers |
 | `GET /v1/health` (REST API) | static | unchanged — static 200, public by design (SPEC §5.1); the REST surface intentionally has no deep DB probe in v1 |
 

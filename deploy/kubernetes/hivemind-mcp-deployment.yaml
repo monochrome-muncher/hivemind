@@ -130,12 +130,13 @@ spec:
           ports:
             - name: http
               containerPort: 8088
-          # Unauthenticated probe endpoints (ADR 0019): /mcp/liveness is
-          # shallow (200 = the process answers); /mcp/health is deep (200
-          # only when the DB pool answers, else 503 — a transient DB
-          # outage marks the pod NotReady without restarting it). Probes
-          # carry no credential: these paths are served outside the auth
-          # middleware.
+          # Unauthenticated probe endpoints (ADRs 0019, 0037): /mcp/liveness
+          # and /mcp/health are both shallow (200 = the process answers).
+          # Readiness deliberately does NOT check the database: every
+          # replica shares it, so a DB outage would pull them all out of
+          # service at once. The deep check is /mcp/health/database (for
+          # people and monitoring; no probe uses it). Probes carry no
+          # credential: these paths are served outside the auth middleware.
           # Startup gate (ADR 0020): the entrypoint applies the migration
           # chain BEFORE the server listens, so k8s must not kill a pod
           # that is still migrating. Liveness/readiness are suspended
