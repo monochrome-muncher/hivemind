@@ -32,11 +32,23 @@ def test_a_configured_prefix_budget_truncates_the_body() -> None:
     )
 
 
-def test_the_vector_reflects_the_truncation() -> None:
+async def test_the_vector_reflects_the_truncation() -> None:
     """The truncation changes what is embedded: with and without the
     budget the vectors differ (a knob that never reached the text would
-    make them identical)."""
+    make them identical). The control proves the comparison can fail:
+    the same budget over the same draft gives the same vector.
+
+    (Earlier this compared two un-awaited coroutines, which are always
+    unequal, so the assertion could never fail.)"""
     body = "alpha beta gamma delta epsilon"
     full = LocalEmbedder(dimension=32)
     bounded = LocalEmbedder(dimension=32, prefix_tokens=2)
-    assert full.embed_entry(_draft(body)) != bounded.embed_entry(_draft(body))
+    full_vec = await full.embed_entry(_draft(body))
+    bounded_vec = await bounded.embed_entry(_draft(body))
+    assert full_vec != bounded_vec
+    assert bounded_vec == await LocalEmbedder(dimension=32, prefix_tokens=2).embed_entry(
+        _draft(body)
+    )
+    # Truncating past the budget is invisible: extra words beyond it do not
+    # change the bounded vector.
+    assert bounded_vec == await bounded.embed_entry(_draft("alpha beta totally different"))
