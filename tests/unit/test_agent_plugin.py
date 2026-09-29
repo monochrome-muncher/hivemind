@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PLUGIN = ROOT / "plugins" / "hivemind"
 SKILL = (PLUGIN / "skills" / "hivemind" / "SKILL.md").read_text()
 SETUP = (PLUGIN / "skills" / "hivemind-setup" / "SKILL.md").read_text()
+SETUP_REFS = PLUGIN / "skills" / "hivemind-setup" / "references"
 HOOK = PLUGIN / "skills" / "hivemind-setup" / "scripts" / "hivemind-session-start.sh"
 
 # The one sentence every harness's stay-aware layer must carry, byte for
@@ -58,7 +59,7 @@ def test_the_whoami_fields_the_skills_rely_on_exist() -> None:
         can_read=(),
         can_write_scopes=(),
     ).as_dict()
-    for text in (SKILL, SETUP):
+    for text in (SKILL, SETUP, *(f.read_text() for f in SETUP_REFS.glob("*.md"))):
         # Field names only: `home_fleet` alone is a can_read *value*.
         for field in re.findall(r"`(key_kind|trust_level\w*|can_\w+|home_fleet_\w+)\b", text):
             assert field in fields, field
@@ -126,21 +127,57 @@ def test_skill_names_match_their_folders() -> None:
         assert re.search(rf"^name: {re.escape(folder.name)}$", text, re.MULTILINE), folder
 
 
+HARNESS_REFS = {
+    "Claude Code": "claude-code.md",
+    "Codex": "codex.md",
+    "DeepSeek Harness": "deepseek-harness.md",
+    "Hermes": "hermes.md",
+    "Pi": "pi.md",
+    "Oh My Pi": "oh-my-pi.md",
+    "OpenCode": "opencode.md",
+}
+
+
 def test_the_setup_skill_and_readme_cover_every_harness() -> None:
-    """A new harness gets a Connect section in the setup skill and an
-    install story in the README; neither may be forgotten."""
+    """A new harness gets its own reference file, routed from the setup
+    skill, and an install story in the README; none may be forgotten."""
     readme = (PLUGIN / "README.md").read_text()
-    for harness in (
-        "Claude Code",
-        "Codex",
-        "DeepSeek Harness",
-        "Hermes",
-        "Pi",
-        "Oh My Pi",
-        "OpenCode",
-    ):
-        assert f"### {harness}" in SETUP, harness
+    assert {f.name for f in SETUP_REFS.glob("*.md")} == set(HARNESS_REFS.values())
+    for harness, ref in HARNESS_REFS.items():
+        assert re.search(rf"^\| {re.escape(harness)}\b.*`references/{ref}` \|$", SETUP, re.M), (
+            harness
+        )
+        text = (SETUP_REFS / ref).read_text()
+        assert text.startswith(f"# Hivemind setup: {harness}\n"), ref
+        flat = " ".join(text.split())
+        assert f"Only for **{harness}**" in flat, ref
+        assert "Which harness am I in?" in flat, ref
+        for section in ("## Connect", "## Stay aware", "## Update", "## Incognito"):
+            assert section in text, (ref, section)
         assert harness in readme, harness
+
+
+def test_the_setup_skill_itself_is_harness_neutral() -> None:
+    """Agents followed another harness's instructions (a DeepSeek model in
+    OpenCode took the DeepSeek Harness steps). Harness specifics live only
+    in references/, and the skill says how to tell which harness you are in."""
+    for local in (
+        "~/.claude",
+        "~/.codex",
+        "~/.dsh",
+        "~/.hermes",
+        "~/.pi",
+        "~/.omp",
+        "opencode.json",
+    ):
+        assert local not in SETUP, local
+    flat = " ".join(SETUP.split())
+    assert "Never infer the harness from your model" in flat
+    assert "ask the user** which harness they are running" in flat
+    # Harness names appear only in the routing section, before step 0.
+    body = SETUP[SETUP.index("## 0. Where do I stand?") :]
+    for harness in ("Claude Code", "Codex", "DeepSeek", "Hermes", "Oh My Pi", "OpenCode"):
+        assert harness not in body, harness
 
 
 def test_the_server_instructions_name_only_real_tools() -> None:
@@ -447,6 +484,7 @@ def test_the_root_package_installs_the_dsh_bundle_from_a_git_url() -> None:
         patch,
         PLUGIN / "skills" / "hivemind" / "SKILL.md",
         PLUGIN / "skills" / "hivemind-setup" / "SKILL.md",
+        *SETUP_REFS.glob("*.md"),
     ]
     needed += [patch.parent / rel for rel in re.findall(r"name: (\./\S+)", patch.read_text())]
     for path in needed:

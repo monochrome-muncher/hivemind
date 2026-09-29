@@ -13,7 +13,7 @@ in any harness that reads `SKILL.md` skills.
 | Part | What it does |
 |---|---|
 | `skills/hivemind/` | The always-on rules: `hive_whoami` first, when to recall, when and how to write, what never to write, local memory as a fallback only |
-| `skills/hivemind-setup/` | Connecting, registering, switching to the agent key after activation, and making the agent permanently Hivemind-aware |
+| `skills/hivemind-setup/` | Connecting, registering, switching to the agent key after activation, and making the agent permanently Hivemind-aware. Harness-neutral itself: it first works out which harness it is in (never from the model), then reads only that harness's file in `references/` |
 | `hooks/hooks.json` | A `SessionStart` hook (`startup`, `resume`, `clear`, `compact`) that re-injects a short Hivemind reminder whenever the context is rebuilt (Claude Code, Codex) |
 | `.mcp.json` | The MCP server for Claude Code, built from `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY` |
 | `package.json`, `cordis.patch.yml`, `dsh/` | The DeepSeek Harness bundle: the same MCP server, plus a small provider that serves `skills/` |
@@ -302,6 +302,7 @@ update above.
 
 | Release | Server | Plugin | Your copies (instruction block, hand-installed hook) |
 |---|---|---|---|
+| 1.2.2 | Unchanged. | **hivemind-setup is harness-neutral.** Agents took another harness's steps (for example a DeepSeek model in OpenCode following the DeepSeek Harness instructions). The skill now starts with "Which harness am I in?": decide from the system prompt, the parent processes and environment markers, never from the model, and ask the user when unsure. Every harness-specific instruction (connect, where the key goes, stay aware, update, incognito) moved to one file per harness in `skills/hivemind-setup/references/`; the agent reads only its own. No change to the `hivemind` skill, the reminders or the launcher. | Unchanged. Skills copied by hand: copy the whole `hivemind-setup` folder, including `references/`. |
 | 1.2.1 | Unchanged. | **DeepSeek Harness security fix:** a `.env` in the directory DSH starts in (ranked above `~/.dsh/.env`) could set `HIVEMIND_MCP_URL` and receive the Hivemind key. The bundle now ignores the environment whenever that file defines any `HIVEMIND_*` name and uses `~/.dsh/.env` alone, with a warning. Docs and hivemind-setup: keep the key in `~/.dsh/.env`; in DSH the key is always hidden from the agent's shell, so check with `hive_whoami`. | Unchanged. |
 | 1.2.0 | Unchanged. | New harnesses: **Oh My Pi** (via the marketplace) and **OpenCode** (a plugin that registers the MCP server, adds the skills and puts the reminder in every request). Pi and OpenCode install from this repository's Git URL, like DeepSeek Harness. The Pi extension supports Oh My Pi and **blocks Hivemind tool calls in incognito sessions**; the launcher gains `omp` and `opencode`. The `hivemind` skill's "Staying aware" section lists the new harnesses. | Unchanged, but Oh My Pi and OpenCode users can add the instruction block to `~/.omp/agent/AGENTS.md` / `~/.config/opencode/AGENTS.md`. |
 | 1.1.4 | Unchanged. | DeepSeek Harness can install the bundle from this repository's Git URL (Plugins page or `dsh plugin … add git+https://…`), via a root `package.json`. No change to skills, reminders or the launcher. | Unchanged. |
