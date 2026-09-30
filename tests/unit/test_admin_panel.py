@@ -18,6 +18,7 @@ from hivemind.admin.app import CONTENT_SECURITY_POLICY, STATIC_DIR, create_admin
 from hivemind.api.deps import create_app
 from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
+from hivemind.domain.access import TrustLevel
 from hivemind.memstore import MemoryStore
 from tests.fakes import FakeAuthenticator, make_clock, make_embedder, make_search_config
 
@@ -93,6 +94,68 @@ async def test_a_refused_call_never_reaches_the_api() -> None:
     assert resp.status_code == 404
     assert resp.json()["error"]["code"] == "not_proxied"
     assert seen == []
+
+
+# -- the upstream URL is built from re-quoted segments (ADR 0040, ADMIN-1) ---------
+
+
+@pytest.mark.parametrize(
+    ("incoming", "upstream_raw_path"),
+    [
+        ("/v1/admin/agents/bob%23", b"/v1/admin/agents/bob%23"),
+        ("/v1/admin/agents/x%3Fy", b"/v1/admin/agents/x%3Fy"),
+        ("/v1/admin/agents/a%2541", b"/v1/admin/agents/a%2541"),
+        ("/v1/admin/agents/a%20b", b"/v1/admin/agents/a%20b"),
+        ("/v1/admin/agents/a.b", b"/v1/admin/agents/a.b"),
+    ],
+)
+async def test_a_name_with_reserved_url_characters_reaches_the_same_resource(
+    incoming: str, upstream_raw_path: bytes
+) -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={})
+
+    async with _panel(httpx.MockTransport(handler)) as panel:
+        resp = await panel.patch(incoming, json={"trust_level": 1}, headers=ADMIN)
+    assert resp.status_code == 200
+    [request] = seen
+    assert request.url.raw_path == upstream_raw_path
+    assert request.url.query == b""
+
+
+@pytest.mark.parametrize("segment", ["%2e%2e", "%2E%2E", "%2e", "."])
+async def test_dot_segments_are_refused_not_collapsed(segment: str) -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={})
+
+    async with _panel(httpx.MockTransport(handler)) as panel:
+        revoke = await panel.post(f"/v1/admin/agents/{segment}/revoke", headers=ADMIN)
+        patch = await panel.patch(f"/v1/admin/agents/{segment}", json={}, headers=ADMIN)
+    assert revoke.status_code == patch.status_code == 404
+    assert seen == []
+
+
+async def test_patching_bob_hash_through_the_panel_does_not_touch_bob() -> None:
+    """The reported bug: PATCH on ``bob%23`` mutated ``bob``."""
+    hivemind, api_app = _api()
+    fleet = await hivemind.store.create_fleet("f")
+    for name in ("bob", "bob#"):  # a legacy name: registration now refuses '#'
+        await hivemind.store.register_agent(name, None)
+        await hivemind.store.activate_agent(
+            name, trust_level=TrustLevel.LURKER, home_fleet_id=fleet.id
+        )
+    async with _panel(httpx.ASGITransport(app=api_app)) as panel:
+        resp = await panel.patch("/v1/admin/agents/bob%23", json={"trust_level": 3}, headers=ADMIN)
+    assert resp.status_code == 200
+    assert resp.json()["name"] == "bob#"
+    assert (await hivemind.store.get_agent("bob")).trust_level is TrustLevel.LURKER
+    assert (await hivemind.store.get_agent("bob#")).trust_level is TrustLevel.PRIVILEGED
 
 
 # -- what crosses the proxy ----------------------------------------------------

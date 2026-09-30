@@ -67,6 +67,8 @@ One entry entity; a `kind` enum carries the distinction. There are no other read
 
 **Derived validity (ADR 0001, no `valid_until` column):** an entry is "active as of T" iff `created_at ≤ T` and it has no supersession/withdrawal state transition before T. Read-side time-travel questions ("what did the org know in March?") are answered by `created_at`/`occurred_at` range filters + `state`.
 
+**Input bounds (ADR 0040).** Every surface enforces the same limits, before any embedder or store call, and answers a violation with **422** (REST `invalid_entry` / `invalid_input`) or `invalid_input` (MCP): no **U+0000** in any string (nested `payload` strings and keys included) — Postgres cannot store it; `body` ≤ 100 000 characters (a Postgres `tsvector` is capped at 1 MB); `tags` ≤ 32, each non-blank and ≤ 64 characters; `sources` ≤ 32, each `ref` ≤ 2048 characters; `payload` ≤ 64 KiB of plain JSON (no NaN/Infinity); `supersedes` ≤ 16 ids; feedback `note` and withdraw `reason` ≤ 2000 characters. The text sent to the embedder and extractor is additionally capped at 20 000 characters of body (a character ceiling beside ADR 0021's word budget, for bodies with no whitespace).
+
 ### 4.2 Feedback
 
 A lightweight, **dumb** outcome loop (no learned tuning in v1):
@@ -117,6 +119,8 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | `GET /v1/metrics` | Usage counters: entries / fleets / agents (trust-level distribution, writes per fleet, pending count) — operational data (admin key; ROADMAP §3.3) |
 | `GET /v1/admin/audit-log` | The audit log of admin-surface actions, newest first; filters `actor`, `action`, `since`, `before`, `limit` (admin key; §12.5, ADRs 0027, 0028) |
 
+**Request limits (ADR 0040).** A REST request body is capped at 2 MiB (`413 payload_too_large`, enforced by `Content-Length` and by counting streamed bytes, before the body is parsed). A `/v1` request with **no** `X-API-Key` header is refused `401` before its body is read; a present-but-unknown key is verified after the (bounded) body is parsed, so a malformed body with a bad key can still answer 422. A deployment's ingress should enforce its own, lower limit as well.
+
 ### 5.2 MCP tools (the agent's mental model — eight verbs)
 
 | Tool | Maps to |
@@ -135,6 +139,10 @@ A typical agent prompt contract: *"check where you stand (`hive_whoami`); recall
 ### 5.3 Filters (search *and* list)
 
 `kind`, `tags`, `entities` (extracted entity names, AND-semantics, case-insensitive; ADR 0016, §13), `scope`, `author`, `agent`, `occurred_from`/`occurred_to` (**memory-date** range), `created_from`/`created_to`, `state` (default `active` only; `include_inactive=true` to include `superseded`/`withdrawn`), `limit`/`offset`.
+
+**Bounds (ADR 0040).** `limit` is **1–100**, `offset` **0–10 000**, on `GET /v1/entries`, `POST /v1/search`, `hive_search` and `hive_list`; anything else is a 422 / `invalid_input` (the audit log keeps its own `limit` ≤ 1000, ADR 0027). `query` ≤ 2000 characters; a filter value ≤ 256 characters, ≤ 32 values per list; no U+0000 in any of them.
+
+**Search pagination ceiling.** A search ranks at most `2 × candidate_top_k` entries (each of the two streams contributes `candidate_top_k`, default 20, so ≤ 40 by default) and `offset`/`limit` page *within* that fused set: `offset ≥ 40` (default config) returns an empty page even when more entries match. Paging "until empty" therefore stops at the ceiling; narrow the query or the filters instead (`hive_list` has no such ceiling — it pages the store directly).
 
 ## 6. Retrieval
 
@@ -322,7 +330,7 @@ This section supersedes the flat-pool commitment of §1 and the "no trust tiers"
 
 ### 12.3 Registration and activation
 
-1. **Registration** — an agent (or a human on its behalf, via `POST /v1/agents` — the seam a future human-facing frontend plugs into) registers a **unique agent name** plus the **owner's alias** (a username or email the admin uses to reach the owner). `hive_register` (MCP, org key only) or `POST /v1/agents` (REST; org key or admin key). This creates a **pending** agent at trust level 0 — no data-plane access. *Name already pending → idempotent no-op ("registered — awaiting admin activation"); name already active or revoked → "name already registered — choose a new name."*
+1. **Registration** — an agent (or a human on its behalf, via `POST /v1/agents` — the seam a future human-facing frontend plugs into) registers a **unique agent name** plus the **owner's alias** (a username or email the admin uses to reach the owner). `hive_register` (MCP, org key only) or `POST /v1/agents` (REST; org key or admin key). This creates a **pending** agent at trust level 0 — no data-plane access. **The name is validated by `AccessService.register`, so both surfaces agree (ADR 0040):** 1–63 ASCII characters `[A-Za-z0-9][A-Za-z0-9._-]*`, taken as given (never normalised, so lookalikes are refused rather than mapped), and not a reserved name (`admin`, `org`, `dev`, `shared`) under a case-insensitive comparison; a violation is a 422 / `invalid_input`, distinct from the `name_conflict` of a taken name. Fleet names are free-form but non-blank, ≤ 128 characters, with no control or zero-width characters. *Name already pending → idempotent no-op ("registered — awaiting admin activation"); name already active or revoked → "name already registered — choose a new name."*
 2. **Activation** — the admin activates via `POST /v1/admin/agents/{name}/activate`, setting the trust level (default `lurker`) and the home fleet (required; fleets are created first). The service generates the agent key and returns it **once** — the only moment a key is ever shown. The admin delivers the key **out-of-band** (chat/DM/email, using the owner alias); the service has **no notification channel**.
 3. **Live traffic** — an active agent presents **only its agent key** on every request (one key per request, ADR 0031); per-agent / per-request verification (ADRs 0009–0010) applies unchanged. **Demotion** (to `untrusted`) and **revocation** are distinct verbs: demotion keeps the key valid but the agent can do nothing; revocation kills the key, sets the agent `revoked`, and the **name stays reserved** (ADR 0012). A revoked agent can be re-activated, which issues a fresh key (ADR 0028).
 4. **Lifecycle** (ADR 0028) — `pending → active` (activate), `pending → revoked` (revoke: a rejected registration), `active → revoked` (revoke), `revoked → active` (activate, fresh key). Any other transition is **409**; activation never issues a second key to an agent that already holds one.

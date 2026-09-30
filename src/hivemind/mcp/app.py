@@ -32,6 +32,7 @@ from hivemind.domain.entry import (
     SourceType,
 )
 from hivemind.domain.feedback import Feedback, Verdict
+from hivemind.domain.validation import InvalidInput, check_pagination
 from hivemind.ports import Credential, Store
 from hivemind.services.access import AccessService, resolve_write_scope
 from hivemind.services.chain import get_visible_entry, supersession_chain
@@ -171,13 +172,10 @@ def _parse_sources(raw: list[dict[str, str]] | None) -> tuple[Source, ...]:
 
 
 def _check_pagination(limit: int | None, offset: int | None) -> None:
-    """Pagination bounds (SPEC §5.3): a negative ``limit``/``offset`` is a
-    typed ``invalid_input``, not a driver fault — the MCP surface matches
-    REST's 422 validation (``limit >= 1``, ``offset >= 0``)."""
-    if limit is not None and limit < 1:
-        raise ValueError("limit must be >= 1")
-    if offset is not None and offset < 0:
-        raise ValueError("offset must be >= 0")
+    """Pagination bounds (SPEC §5.3): ``1 <= limit <= 100``, ``0 <= offset <=
+    10000`` — a typed ``invalid_input``, not a driver fault; the same rule
+    REST enforces (ADR 0040)."""
+    check_pagination(limit, offset)
 
 
 def _build_filters(
@@ -354,8 +352,10 @@ async def hive_search(
     ``entities`` (ADR 0016, SPEC §13) filters by machine-extracted
     entity names: AND-semantics, case-insensitive; kinds are display-only.
 
-    ``limit`` must be >= 1 and ``offset`` >= 0; out-of-range values are
-    ``invalid_input`` (matching REST's 422).
+    ``limit`` must be 1..100 and ``offset`` 0..10000; out-of-range values
+    are ``invalid_input`` (matching REST's 422). A search reaches at most
+    ``2 x candidate_top_k`` ranked hits (SPEC §5.3): paging past that
+    returns an empty page.
     """
     try:
         _check_pagination(limit, offset)
@@ -374,9 +374,12 @@ async def hive_search(
         )
     except ValueError as exc:
         return _error(ERR_INVALID_INPUT, str(exc))
-    hits = await app.search_service.search(
-        query, filters, limit, offset=offset, visibility=app.credential.visibility()
-    )
+    try:
+        hits = await app.search_service.search(
+            query, filters, limit, offset=offset, visibility=app.credential.visibility()
+        )
+    except InvalidInput as exc:
+        return _error(ERR_INVALID_INPUT, str(exc))
     return {"count": len(hits), "hits": [_hit_dict(h) for h in hits]}
 
 
@@ -429,8 +432,8 @@ async def hive_list(
     ``entities`` (ADR 0016, SPEC §13) filters by machine-extracted entity
     names: AND-semantics, case-insensitive; kinds are display-only.
 
-    ``limit`` must be >= 1 and ``offset`` >= 0; out-of-range values are
-    ``invalid_input`` (matching REST's 422).
+    ``limit`` must be 1..100 and ``offset`` 0..10000; out-of-range values
+    are ``invalid_input`` (matching REST's 422).
     """
     try:
         _check_pagination(limit, offset)
@@ -475,6 +478,8 @@ async def hive_withdraw(
         return _error(ERR_PERMISSION_DENIED, str(exc))
     except LookupError as exc:
         return _error(ERR_NOT_FOUND, str(exc))
+    except InvalidInput as exc:
+        return _error(ERR_INVALID_INPUT, str(exc))
     except ValueError as exc:
         return _error(ERR_NOT_ACTIVE, str(exc))
     return _entry_dict(entry)
@@ -505,6 +510,8 @@ async def hive_feedback(
         )
     except LookupError as exc:
         return _error(ERR_NOT_FOUND, str(exc))
+    except InvalidInput as exc:
+        return _error(ERR_INVALID_INPUT, str(exc))
     except ValueError as exc:
         return _error(ERR_AGENT_UNRESOLVED, str(exc))
     fb: Feedback = outcome.feedback
@@ -545,6 +552,8 @@ async def hive_register(
         )
     except PermissionDenied as exc:
         return _error(ERR_PERMISSION_DENIED, str(exc))
+    except InvalidInput as exc:  # a bad or reserved name is not a conflict (ADR 0040)
+        return _error(ERR_INVALID_INPUT, str(exc))
     except ValueError as exc:
         return _error("name_conflict", str(exc))
     return {

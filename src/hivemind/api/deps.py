@@ -15,8 +15,10 @@ from typing import cast
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from hivemind.api.guards import BodyTooLarge, PreAuthGuard
 from hivemind.api.schemas import ErrorBody
 from hivemind.config import SearchConfig
+from hivemind.domain.validation import MAX_REQUEST_BODY_BYTES, InvalidInput
 from hivemind.ports import Authenticator, Credential, Embedder, Store
 from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService, WriteService
@@ -91,6 +93,21 @@ def _handle_api_error(_request: Request, exc: Exception) -> JSONResponse:
     )
 
 
+def _handle_invalid_input(_request: Request, exc: Exception) -> JSONResponse:
+    """A rule-based input refusal (ADR 0040) -> 422 in the error envelope."""
+    return JSONResponse(
+        status_code=422,
+        content={"error": ErrorBody(code="invalid_input", message=str(exc)).model_dump()},
+    )
+
+
+def _handle_body_too_large(_request: Request, exc: Exception) -> JSONResponse:
+    return JSONResponse(
+        status_code=413,
+        content={"error": ErrorBody(code="payload_too_large", message=str(exc)).model_dump()},
+    )
+
+
 def create_app(app: HivemindApp) -> FastAPI:
     """Build the FastAPI app over a HivemindApp (SPEC.md §5)."""
     from hivemind.api.routes import build_router
@@ -98,5 +115,8 @@ def create_app(app: HivemindApp) -> FastAPI:
     fastapi_app = FastAPI(title="Hivemind")
     fastapi_app.state.hivemind = app
     fastapi_app.add_exception_handler(ApiError, _handle_api_error)
+    fastapi_app.add_exception_handler(InvalidInput, _handle_invalid_input)
+    fastapi_app.add_exception_handler(BodyTooLarge, _handle_body_too_large)
+    fastapi_app.add_middleware(PreAuthGuard, max_body_bytes=MAX_REQUEST_BODY_BYTES)
     fastapi_app.include_router(build_router(app))
     return fastapi_app
