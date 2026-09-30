@@ -12,6 +12,7 @@ Error codes: ``missing_api_key``/``unknown_api_key`` (401),
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
@@ -20,6 +21,7 @@ from fastapi import APIRouter, Depends, Path, Query
 from pydantic import AfterValidator
 
 from hivemind.api.deps import (
+    ApiError,
     HivemindApp,
     api_error,
     require_credential,
@@ -82,6 +84,16 @@ ActorQuery = Annotated[str | None, Query(max_length=MAX_IDENTITY_CHARS), AfterVa
 # hard ceiling, so one request can never drag the whole log over the wire.
 AUDIT_LOG_DEFAULT_LIMIT = 100
 AUDIT_LOG_MAX_LIMIT = 1000
+
+logger = logging.getLogger(__name__)
+
+
+def _embedding_unavailable(exc: EmbeddingError) -> ApiError:
+    """The embedding endpoint is a dependency (SPEC.md §7, ADR 0005): a
+    failure is a 502, not a bare 500. The body is a fixed message — the
+    detail is logged server-side, never returned to the caller (PC-1)."""
+    logger.warning("embedding unavailable: %s", exc)
+    return api_error(502, "embedding_unavailable", "the embedding service is unavailable")
 
 
 def _to_utc(value: datetime | None) -> datetime | None:
@@ -181,9 +193,7 @@ def build_router(app: HivemindApp) -> APIRouter:
         except PermissionDenied as exc:
             raise api_error(403, "forbidden", str(exc)) from exc
         except EmbeddingError as exc:
-            # The embedding endpoint is a dependency (SPEC.md §7, ADR 0005):
-            # a failure is a 502 (bad gateway), not a bare 500 (m7).
-            raise api_error(502, "embedding_unavailable", str(exc)) from exc
+            raise _embedding_unavailable(exc) from exc
         except ValueError as exc:
             raise api_error(422, "invalid_entry", str(exc)) from exc
         return EntryOut.from_entry(entry)
@@ -279,13 +289,16 @@ def build_router(app: HivemindApp) -> APIRouter:
             created_to=request.created_to,
             include_inactive=request.include_inactive,
         )
-        hits = await app.search_service.search(
-            request.query,
-            filters,
-            request.limit,
-            offset=request.offset,
-            visibility=credential.visibility(),
-        )
+        try:
+            hits = await app.search_service.search(
+                request.query,
+                filters,
+                request.limit,
+                offset=request.offset,
+                visibility=credential.visibility(),
+            )
+        except EmbeddingError as exc:
+            raise _embedding_unavailable(exc) from exc
         return [HitOut.from_hit(h) for h in hits]
 
     @router.post("/entries/{entry_id}/withdraw", response_model=EntryOut)
