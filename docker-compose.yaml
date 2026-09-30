@@ -83,7 +83,7 @@ services:
   # - The DSN + embedder point at the SIBLING services on the compose
   #   network (postgres:5432 / vllm:8000), not the host-published ports.
   # - Keys live in the Postgres `credentials` table, so any agent-scoped
-  #   key issued via `hivemind-keys issue` works from this service.
+  #   key issued via `hivemind-keys issue-agent --name <agent>` works from this service.
   mcp-http:
     build: .
     image: hivemind-mcp-http

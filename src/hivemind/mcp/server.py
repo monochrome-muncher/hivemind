@@ -124,12 +124,15 @@ _DESC_FEEDBACK = (
 
 _DESC_REGISTER = (
     "Register (or re-register) an agent (ADR 0012). Gated on the org key "
-    "(an admin key is rejected here); creates a 'pending' agent (level 0, no fleet). Re-registering a "
-    "pending name is idempotent; an active name is a conflict (the name stays "
-    "reserved — pick a new one, ADR 0012). The name must be 1-63 ASCII "
-    "characters — letters, digits, '.', '_' or '-', starting with a letter or "
-    "digit — and not a reserved name (admin, org, dev, shared; any case); a bad "
-    "or reserved name answers invalid_input (ADR 0040)."
+    "(an admin key is rejected here); creates a 'pending' agent (level 0, no "
+    "fleet). Registering the same name again with the same owner_alias is "
+    "safe: it returns the current status (already_registered, plus a message: "
+    "still pending / active, so ask your admin for the agent key / revoked). "
+    "A name that belongs to another owner is a name_conflict: pick a "
+    "different name (ADR 0039)."
+    " The name must be 1-63 ASCII characters — letters, digits, '.', '_' or '-', "
+    "starting with a letter or digit — and not a reserved name (admin, org, dev, "
+    "shared; any case); a bad or reserved name answers invalid_input (ADR 0040)."
 )
 
 
@@ -366,7 +369,7 @@ def _mcp_key_missing_hint() -> str:
     return (
         "HIVEMIND_MCP_KEY is required to run hivemind-mcp-pg. Issue an "
         "agent-scoped key, then set it in the agent's MCP config:\n"
-        "  uv run hivemind-keys issue --user <user> --agent <agent>\n"
+        "  uv run hivemind-keys issue-agent --name <agent>  (the agent must be registered and active)\n"
         '  {"command": "uv", "args": ["run", "--directory", "<repo>", "hivemind-mcp-pg"],\n'
         '   "env": {"HIVEMIND_MCP_KEY": "hm_..."}}'
     )
@@ -376,7 +379,7 @@ def _mcp_key_unknown_hint() -> str:
     """The error text when the key is set but is not a known credential."""
     return (
         "HIVEMIND_MCP_KEY is not a known credential. Issue it first, then retry:\n"
-        "  uv run hivemind-keys issue --user <user> --agent <agent>\n"
+        "  uv run hivemind-keys issue-agent --name <agent>  (the agent must be registered and active)\n"
         "  (list existing credential hashes: uv run hivemind-keys list)"
     )
 

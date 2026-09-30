@@ -309,12 +309,18 @@ class Authenticator(Protocol):
     """
 
     async def verify(self, key: str) -> Credential | None:
-        """Resolve a key to its credential, or ``None`` if unknown."""
+        """Resolve a key to its credential, or ``None`` if unknown.
+
+        An agent key resolves only while its agent is ``active`` (ADR 0039):
+        a key of a pending / revoked / missing agent, a pre-v2 ``user`` key
+        and a name-less agent key all give ``None``."""
         ...
 
     async def issue_agent_key(self, agent_name: str) -> str:
         """Issue an agent key bound to the registered agent name; return
-        the raw secret once (never stored)."""
+        the raw secret once (never stored). Raises ``KeyError`` if the agent
+        is unknown and ``InvalidAgentStatus`` unless it is ``active``
+        (ADR 0039); replaces any stale key row, so one live key per agent."""
         ...
 
     async def revoke_agent_key(self, agent_name: str) -> None:

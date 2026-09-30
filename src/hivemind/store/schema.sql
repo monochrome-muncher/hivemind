@@ -153,6 +153,10 @@ CREATE INDEX audit_log_actor_idx ON public.audit_log USING btree (actor);
 
 CREATE INDEX audit_log_occurred_at_idx ON public.audit_log USING btree (occurred_at);
 
+CREATE UNIQUE INDEX credentials_one_agent_key ON public.credentials USING btree (agent_name) WHERE ((kind = 'agent'::text) AND (agent_name IS NOT NULL));
+
+CREATE UNIQUE INDEX credentials_one_org_key ON public.credentials USING btree (kind) WHERE (kind = 'org'::text);
+
 CREATE INDEX entries_author_created_idx ON public.entries USING btree (author, created_at DESC, id DESC);
 
 CREATE INDEX entries_author_idx ON public.entries USING btree (author);
