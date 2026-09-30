@@ -34,6 +34,12 @@ from hivemind.domain.access import (
     TrustLevel,
 )
 from hivemind.domain.audit import AuditAction, AuditFilters, AuditRecord
+from hivemind.domain.validation import (
+    RESERVED_AGENT_NAMES,  # noqa: F401  (re-exported: ADR 0033 names, ADR 0040 rules)
+    validate_agent_name,
+    validate_fleet_name,
+    validate_owner_alias,
+)
 from hivemind.ports import Authenticator, Credential, Store
 from hivemind.services.audit import record_admin_action
 from hivemind.services.governance import PermissionDenied
@@ -87,10 +93,8 @@ class AccessService:
             self._require_org(credential)
         else:
             self._require_org_or_admin(credential)
-        if name in RESERVED_AGENT_NAMES:
-            raise ValueError(
-                f"agent name {name!r} is reserved for a built-in identity (ADR 0033); pick another"
-            )
+        validate_agent_name(name)  # ADR 0040: format + reserved names
+        validate_owner_alias(owner_alias)
         existing = await self._store.get_agent(name)
         if existing is not None and existing.status is not AgentStatus.PENDING:
             raise ValueError(
@@ -140,6 +144,7 @@ class AccessService:
     async def create_fleet(self, name: str, credential: Credential) -> Fleet:
         """Create a named fleet (admin-gated, ADR 0012)."""
         self._require_admin(credential)
+        validate_fleet_name(name)  # ADR 0040
         fleet = await self._store.create_fleet(name)
         await self._audit(credential, AuditAction.FLEET_CREATE, fleet.id, {"name": name})
         return fleet
@@ -301,11 +306,6 @@ class WriteResolution:
 
 # Scope ranks: a writer may not write a scope higher than its level allows.
 _SCOPE_RANK = {"self": 1, "fleet": 2, "org": 3}
-
-# ADR 0033: the identities built-in keys and runners write under (admin
-# keys, the org key, the dev runner, the mcp-http template credential).
-# An agent registered under one would read that identity's ``self`` entries.
-RESERVED_AGENT_NAMES = frozenset({"admin", "org", "dev", "shared"})
 
 
 def _readable(key_kind: str, credential: Credential) -> tuple[str, ...]:

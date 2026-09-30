@@ -14,6 +14,23 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
+from hivemind.domain.validation import (
+    MAX_BODY_CHARS,
+    MAX_FILTER_VALUE_CHARS,
+    MAX_ID_CHARS,
+    MAX_SOURCE_REF_CHARS,
+    MAX_SOURCES,
+    MAX_SUPERSEDES,
+    InvalidInput,
+    check_datetime,
+    check_filter_values,
+    check_id,
+    check_no_nul,
+    check_payload,
+    check_tags,
+    check_text,
+)
+
 
 def new_entry_id() -> str:
     """A fresh entry ID (uuid4, stored as a plain string in the domain)."""
@@ -37,6 +54,19 @@ DEFAULT_PREFIX_TOKENS = 2000
 
 # A "prefix token" is one run of non-whitespace characters (ADR 0021).
 _WORD_RE = re.compile(r"\S+")
+
+# ADR 0040 (amends ADR 0021): a character ceiling next to the word budget.
+# 2000 words is ~16k characters of prose, but a body with no whitespace
+# (base64, minified JSON, CJK) is "one word" of any length; this bounds
+# the text sent to the embedder and extractor whatever the script.
+EMBED_BODY_MAX_CHARS = 20_000
+# The ceiling scales with a raised word budget (HIVEMIND_EMBEDDING_PREFIX_TOKENS,
+# ADR 0021) so the knob is not silently capped: 10 characters per word.
+EMBED_CHARS_PER_PREFIX_TOKEN = 10
+
+
+def embed_body_char_ceiling(prefix_tokens: int) -> int:
+    return max(EMBED_BODY_MAX_CHARS, prefix_tokens * EMBED_CHARS_PER_PREFIX_TOKEN)
 
 
 def _utcnow() -> datetime:
@@ -180,6 +210,31 @@ class EntryDraft:
             raise ValueError("author must be non-empty")
         if not self.agent.strip():
             raise ValueError("agent must be non-empty")
+        self._validate_bounds()
+
+    def _validate_bounds(self) -> None:
+        """NUL + size bounds (ADR 0040): runs at construction, so every
+        surface rejects the same inputs before the embedder is called."""
+        check_no_nul(self.summary, "summary")
+        # author/agent can be a legacy registered name (unbounded before
+        # ADR 0040), so only what Postgres cannot store is refused here.
+        check_no_nul(self.author, "author")
+        check_no_nul(self.agent, "agent")
+        check_datetime(self.occurred_at, "occurred_at")
+        check_text(self.body, "body", MAX_BODY_CHARS)
+        check_tags(self.tags)
+        check_payload(self.payload)
+        if len(self.sources) > MAX_SOURCES:
+            raise InvalidInput(f"at most {MAX_SOURCES} sources (got {len(self.sources)})")
+        for source in self.sources:
+            check_text(source.ref, "source ref", MAX_SOURCE_REF_CHARS)
+        if len(self.supersedes) > MAX_SUPERSEDES:
+            raise InvalidInput(f"at most {MAX_SUPERSEDES} supersedes targets")
+        for target in self.supersedes:
+            check_id(target, "supersedes id")
+        check_text(self.scope, "scope", MAX_ID_CHARS)
+        if self.fleet_id is not None:
+            check_text(self.fleet_id, "fleet_id", MAX_ID_CHARS)
 
     def resolved_occurred_at(self) -> datetime:
         """The entry's memory date: the supplied value, or now."""
@@ -257,6 +312,29 @@ class EntryFilters:
     created_to: datetime | None = None
     include_inactive: bool = False
 
+    def validate(self) -> None:
+        """Bounds for filters built from **caller input** (ADR 0040): every
+        string reaches Postgres as a bind parameter, every timestamp must be
+        in range. Surfaces call this; filters the service builds itself from
+        stored rows (metrics, chain) are deliberately not validated, so a
+        legacy value can never make an internal query fail."""
+        check_filter_values(self.tags, "tags")
+        check_filter_values(self.entities, "entities")
+        for field, value in (
+            ("scope", self.scope),
+            ("fleet_id", self.fleet_id),
+            ("author", self.author),
+            ("agent", self.agent),
+        ):
+            check_text(value, field, MAX_FILTER_VALUE_CHARS)
+        for field, moment in (
+            ("occurred_from", self.occurred_from),
+            ("occurred_to", self.occurred_to),
+            ("created_from", self.created_from),
+            ("created_to", self.created_to),
+        ):
+            check_datetime(moment, field)
+
     def matches(self, entry: Entry) -> bool:
         """Pure filter evaluation — shared by every store adapter."""
         if not self.include_inactive and entry.state is not EntryState.ACTIVE:
@@ -332,7 +410,8 @@ def embeddable_text(
     """
     text = summary
     if body:
-        text = f"{text}\n{_body_prefix(body, prefix_tokens)}"
+        prefix = _body_prefix(body, prefix_tokens)[: embed_body_char_ceiling(prefix_tokens)]
+        text = f"{text}\n{prefix}"
     return text
 
 
