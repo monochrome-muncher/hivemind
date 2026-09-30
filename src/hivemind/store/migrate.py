@@ -28,15 +28,23 @@ or a backfill is a restore from backup (``docs/ops-runbook.md``), never
 a migration. ``0001.initial-schema`` has no rollback at all — reversing
 it would drop every entry in the pool.
 
-**The dim guard (ADR 0015)** runs *before* the lock is taken: a pool
-provisioned at a different embedding dimension than the configured one
-is a deployment error (ADR 0005), and failing before any DDL beats the
-confusing ``DataError`` the first vector write would otherwise produce.
+**The dim guard (ADR 0015)** runs *after* the lock is taken and before
+any DDL: a pool provisioned at a different embedding dimension than the
+configured one is a deployment error (ADR 0005), and failing before any
+DDL beats the confusing ``DataError`` the first vector write would
+otherwise produce. (Under the lock so that two replicas racing a cold
+pool at different dims cannot both pass it.) The same pre-flight checks
+pgvector >= 0.8 and ``dim <= 2000`` (the HNSW limit), and after the chain
+an INVALID ``entries_embedding_hnsw_idx`` (a crashed ``CONCURRENTLY``
+build, which ``IF NOT EXISTS`` would otherwise skip silently) fails the
+run with the runbook remedy.
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
+import re
 import sys
 from pathlib import Path
 
@@ -44,6 +52,14 @@ import asyncpg
 
 from hivemind.config import load_settings
 from hivemind.store import migration_context
+
+logger = logging.getLogger(__name__)
+
+# pgvector's `hnsw.iterative_scan` (used by every vector search) exists
+# from 0.8.0; HNSW cannot index more than 2000 dimensions.
+_MIN_PGVECTOR = (0, 8, 0)
+_MAX_HNSW_DIM = 2000
+_HNSW_INDEX = "entries_embedding_hnsw_idx"
 
 _MIGRATIONS_DIR = Path(__file__).with_name("migrations")
 
@@ -169,30 +185,79 @@ async def _acquire_migration_lock(conn: asyncpg.Connection) -> None:
 
 
 async def _with_migration_lock(dsn: str, dim: int, work: str, count: int = 0) -> list[str]:
-    """Run a chain operation under the advisory lock, after the dim guard."""
+    """Run a chain operation under the advisory lock, after the guards."""
     conn = await asyncpg.connect(dsn)
     try:
-        # ADR 0015: check the pool's provisioned dim BEFORE taking the
-        # lock or applying anything, so a mismatched pool fails loudly
-        # with an actionable message and leaves no partial state.
-        actual = await _existing_embedding_dim(conn)
-        if actual is not None:
-            msg = dim_mismatch_message(actual, dim)
-            if msg is not None:
-                raise RuntimeError(msg)
         await _acquire_migration_lock(conn)
         try:
+            # ADR 0015: check the pool's provisioned dim AFTER taking the
+            # lock (two replicas at different dims on a cold pool must not
+            # both pass) and BEFORE applying anything, so a mismatched
+            # pool fails loudly and leaves no partial state.
+            actual = await _existing_embedding_dim(conn)
+            if actual is not None:
+                msg = dim_mismatch_message(actual, dim)
+                if msg is not None:
+                    raise RuntimeError(msg)
             if work == "apply":
+                msg = pgvector_requirement_message(await _pgvector_version(conn), dim)
+                if msg is not None:
+                    raise RuntimeError(msg)
                 await asyncio.to_thread(_apply_chain, dsn, dim)
+                if not await _lock_still_held(conn):
+                    raise RuntimeError(_LOCK_LOST_MESSAGE)
+                await _require_valid_hnsw_index(dsn)
                 return []
             return await asyncio.to_thread(_rollback_chain, dsn, dim, count)
         finally:
-            # Best-effort explicit unlock; closing the connection below
-            # releases it regardless (that is the point of an advisory
-            # lock — a dead session cannot hold one).
-            await conn.execute("SELECT pg_advisory_unlock($1)", MIGRATION_LOCK_KEY)
+            await _release_lock(conn)
     finally:
-        await conn.close()
+        if not conn.is_closed():
+            try:
+                await conn.close()
+            except Exception:
+                conn.terminate()  # a broken session cannot close cleanly; drop it
+
+
+_LOCK_LOST_MESSAGE = (
+    "the migration lock connection was lost during the run, so the advisory lock "
+    "was released early and another replica may have run the chain concurrently. "
+    "Re-run `hivemind-migrate` to confirm the head."
+)
+
+
+async def _lock_still_held(conn: asyncpg.Connection) -> bool:
+    """Whether the lock connection is alive and still holds the lock.
+
+    Any failure to confirm it counts as lost: once the backend is gone,
+    asyncpg reports the dead session as one of several exception types
+    depending on timing (``InterfaceError``, ``ConnectionDoesNotExistError``,
+    ``AdminShutdownError`` — a ``PostgresError`` — or even
+    ``InternalClientError``), and none of them may escape as the
+    migration's result."""
+    try:
+        held = await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' "
+            "AND pid = pg_backend_pid() AND granted)"
+        )
+    except Exception:
+        return False
+    return bool(held)
+
+
+async def _release_lock(conn: asyncpg.Connection) -> None:
+    """Best-effort explicit unlock. Closing the connection releases the
+    lock regardless (a dead session cannot hold one); if the lock
+    connection itself dropped mid-run, the lock was already lost — say so
+    instead of letting an ``InterfaceError`` mask the migration's result."""
+    try:
+        await conn.execute("SELECT pg_advisory_unlock($1)", MIGRATION_LOCK_KEY)
+    except Exception:  # any dead-session shape (see _lock_still_held)
+        logger.warning(
+            "the migration lock connection was lost during the run; the advisory "
+            "lock was released early, so another replica may have run the chain "
+            "concurrently. Re-run `hivemind-migrate` to confirm the head."
+        )
 
 
 async def migrate(dsn: str, dim: int = 1024) -> None:
@@ -240,6 +305,82 @@ def dim_mismatch_message(actual_dim: int, configured_dim: int) -> str | None:
         f"in place. Either reset the pool (`make pg-reset` then `make migrate`) "
         f"or set HIVEMIND_EMBEDDING_DIM={actual_dim} to match the existing pool."
     )
+
+
+def pgvector_requirement_message(version: str | None, dim: int) -> str | None:
+    """The pgvector pre-flight error, or ``None`` when satisfied.
+
+    Requires pgvector >= 0.8 (``hnsw.iterative_scan``, SPEC §6.2 / ADR
+    0025: on older servers migrate passes but every search fails at first
+    use) and ``dim <= 2000`` (HNSW's limit: ``CREATE INDEX`` would fail
+    in migration ``0004`` with a raw Postgres error). An unparseable
+    version is not treated as a failure.
+    """
+    if dim > _MAX_HNSW_DIM:
+        return (
+            f"HIVEMIND_EMBEDDING_DIM={dim} exceeds the {_MAX_HNSW_DIM}-dimension limit of "
+            f"pgvector's HNSW index (ADR 0025, migration 0004). Choose an embedding "
+            f"model/dimension <= {_MAX_HNSW_DIM} (e.g. request a Matryoshka-truncated "
+            f"size from the endpoint) and set HIVEMIND_EMBEDDING_DIM accordingly."
+        )
+    if version is None:
+        return None
+    match = re.match(r"(\d+)\.(\d+)(?:\.(\d+))?", version)
+    if match is None:
+        return None
+    parsed = (int(match[1]), int(match[2]), int(match[3] or 0))
+    if parsed < _MIN_PGVECTOR:
+        return (
+            f"pgvector {version} is too old: Hivemind needs pgvector >= 0.8 "
+            f"(hnsw.iterative_scan, ADR 0025); without it every search fails. "
+            f"Upgrade the server's pgvector package/image, then run "
+            f"`ALTER EXTENSION vector UPDATE;` in this database and re-run migrate."
+        )
+    return None
+
+
+def invalid_index_message(is_valid: bool) -> str | None:
+    """The INVALID-HNSW-index error (a crashed ``CONCURRENTLY`` build),
+    or ``None`` when the index is valid."""
+    if is_valid:
+        return None
+    return (
+        f"index {_HNSW_INDEX} exists but is INVALID (a crashed CREATE INDEX "
+        f"CONCURRENTLY, ADR 0025): vector search silently falls back to a "
+        f"sequential scan. Repair it with `REINDEX INDEX CONCURRENTLY {_HNSW_INDEX};` "
+        f"(or `DROP INDEX CONCURRENTLY IF EXISTS {_HNSW_INDEX};` and re-run migrate) — "
+        f"see docs/ops-runbook.md."
+    )
+
+
+async def _pgvector_version(conn: asyncpg.Connection) -> str | None:
+    """The installed pgvector version, else the version the server would
+    install (``CREATE EXTENSION`` has not run yet on a cold pool)."""
+    version = await conn.fetchval("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
+    if version is None:
+        version = await conn.fetchval(
+            "SELECT default_version FROM pg_available_extensions WHERE name = 'vector'"
+        )
+    return str(version) if version is not None else None
+
+
+async def _require_valid_hnsw_index(dsn: str) -> None:
+    """After the chain: fail loudly if the HNSW index is INVALID. Runs on
+    its own connection, independent of the lock connection's health."""
+    conn = await asyncpg.connect(dsn)
+    try:
+        valid = await conn.fetchval(
+            "SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
+            "WHERE c.relname = $1",
+            _HNSW_INDEX,
+        )
+    finally:
+        await conn.close()
+    if valid is None:
+        return
+    msg = invalid_index_message(bool(valid))
+    if msg is not None:
+        raise RuntimeError(msg)
 
 
 async def _existing_embedding_dim(conn: asyncpg.Connection) -> int | None:
