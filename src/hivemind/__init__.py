@@ -6,4 +6,4 @@ One organization, one pool. Agents read and write distilled entries
 discoverable to every other agent in the organization.
 """
 
-__version__ = "1.2.3"
+__version__ = "2.0.0"
