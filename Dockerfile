@@ -22,7 +22,7 @@
 ARG PYTHON_IMAGE=python:3.14-slim@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d
 
 # --- build stage: install the LOCKED runtime dependencies (DEP-3) -------------
-# `uv sync --frozen` installs exactly what uv.lock records (hash-checked) and
+# `uv sync --locked` installs exactly what uv.lock records (hash-checked) and
 # fails if pyproject.toml and uv.lock disagree -- the image ships the same
 # dependency set CI tested, never whatever PyPI serves today. Dev deps stay out.
 FROM ${PYTHON_IMAGE} AS builder
@@ -34,9 +34,9 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
     UV_PYTHON_DOWNLOADS=never
 # Dependencies first (cached across source-only changes), then the project.
 COPY pyproject.toml README.md uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+RUN uv sync --locked --no-dev --no-install-project
 COPY src ./src
-RUN uv sync --frozen --no-dev --no-editable
+RUN uv sync --locked --no-dev --no-editable
 
 # --- runtime stage -------------------------------------------------------------
 FROM ${PYTHON_IMAGE}

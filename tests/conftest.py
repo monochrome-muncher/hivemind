@@ -51,7 +51,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     try:
         check_test_database(
             Settings().database_url,
-            allow_any=os.environ.get("HIVEMIND_TEST_ALLOW_ANY_DB") == "1",
+            allow_any=os.environ.get("HM_TEST_ALLOW_ANY_DB") == "1",
         )
     except UnsafeTestDatabase as exc:
         raise pytest.UsageError(str(exc)) from None

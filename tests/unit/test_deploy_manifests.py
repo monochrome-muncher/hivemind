@@ -172,7 +172,9 @@ def test_bootstrap_job_refuses_empty_keys(tmp_path: Path) -> None:
     assert "KEY=" not in proc.stdout
 
 
-def _bootstrap_with_fake_kubectl(tmp_path: Path, logs: str) -> subprocess.CompletedProcess[str]:
+def _bootstrap_with_fake_kubectl(
+    tmp_path: Path, logs: str, **extra_env: str
+) -> subprocess.CompletedProcess[str]:
     bindir = tmp_path / "bin"
     bindir.mkdir()
     calls = tmp_path / "calls"
@@ -183,7 +185,10 @@ def _bootstrap_with_fake_kubectl(tmp_path: Path, logs: str) -> subprocess.Comple
             #!/bin/sh
             echo "$*" >> {calls}
             case "$*" in
-              *"get secret hivemind-keys"*) exit 1 ;;
+              *"get secret hivemind-keys"*)
+                [ -n "$FAKE_API_ERROR" ] && {{ echo "Unable to connect to the server" >&2; exit 1; }}
+                [ -n "$FAKE_SECRET_EXISTS" ] && echo secret/hivemind-keys
+                exit 0 ;;
               *"get job"*jsonpath*) echo 1 ;;
               *" logs "*) printf '%s' '{logs}' ;;
               *"create secret"*) echo "kind: Secret" ;;
@@ -193,7 +198,12 @@ def _bootstrap_with_fake_kubectl(tmp_path: Path, logs: str) -> subprocess.Comple
         )
     )
     kubectl.chmod(0o755)
-    env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}", "IMAGE": "reg/hivemind:abc"}
+    env = {
+        **os.environ,
+        "PATH": f"{bindir}:{os.environ['PATH']}",
+        "IMAGE": "reg/hivemind:abc",
+        **extra_env,
+    }
     return subprocess.run(
         ["sh", str(ROOT / "scripts" / "ci-bootstrap-keys.sh")],
         cwd=ROOT,
@@ -210,6 +220,22 @@ def test_ci_bootstrap_stores_keys_and_never_echoes_them(tmp_path: Path) -> None:
     assert "a1" not in proc.stdout + proc.stderr
     calls = (tmp_path / "calls").read_text()
     assert "create secret generic hivemind-keys" in calls
+
+
+def test_ci_bootstrap_aborts_on_an_api_error_instead_of_assuming_absent(tmp_path: Path) -> None:
+    # A failed `get secret` must not look like "no keys yet": that would re-run
+    # issue-admin + rotate-org and overwrite a live Secret (ADR 0031).
+    proc = _bootstrap_with_fake_kubectl(tmp_path, "ADMIN_KEY=a1\nORG_KEY=o1\n", FAKE_API_ERROR="1")
+    assert proc.returncode != 0
+    calls = (tmp_path / "calls").read_text()
+    assert "apply" not in calls
+    assert "delete job" not in calls
+
+
+def test_ci_bootstrap_skips_when_the_secret_exists(tmp_path: Path) -> None:
+    proc = _bootstrap_with_fake_kubectl(tmp_path, "", FAKE_SECRET_EXISTS="1")
+    assert proc.returncode == 0
+    assert "apply" not in (tmp_path / "calls").read_text()
 
 
 def test_ci_bootstrap_refuses_to_store_empty_keys(tmp_path: Path) -> None:
@@ -254,9 +280,13 @@ def test_two_replica_deployments_spread_across_nodes(path: Path) -> None:
 
 
 def test_optional_tree_has_network_policies_and_body_limit() -> None:
-    kust = _load(K8S / "optional" / "kustomization.yaml")
-    assert "networkpolicy.yaml" in kust["resources"]
-    docs = list(yaml.safe_load_all((K8S / "optional" / "networkpolicy.yaml").read_text()))
+    # The policies are their own opt-in tree, NOT bundled with the Ingress.
+    assert "networkpolicy.yaml" not in _load(K8S / "optional" / "kustomization.yaml")["resources"]
+    kust = _load(K8S / "optional" / "networkpolicy" / "kustomization.yaml")
+    assert kust["resources"] == ["networkpolicy.yaml"]
+    docs = list(
+        yaml.safe_load_all((K8S / "optional" / "networkpolicy" / "networkpolicy.yaml").read_text())
+    )
     assert docs and all(d["kind"] == "NetworkPolicy" for d in docs)
     ingress = next(
         d
@@ -275,7 +305,8 @@ def test_runner_typo_is_gone() -> None:
 
 def test_dockerfile_installs_from_the_lock_and_drops_root() -> None:
     text = (ROOT / "Dockerfile").read_text()
-    assert "uv sync --frozen" in text and "--no-dev" in text
+    assert "uv sync --locked" in text and "--no-dev" in text
+    assert "--frozen" not in text  # --frozen would not notice pyproject/lock drift
     assert not re.search(r"pip install[^\n]*\s\.\s*$", text, re.M)  # the floating `pip install .`
     user = re.findall(r"^USER\s+(\S+)", text, re.M)
     assert user
@@ -351,3 +382,29 @@ def test_entrypoint_sigterm_during_migration_exits_promptly(tmp_path: Path) -> N
     assert rc == 143
     assert proc.stdout is not None
     assert "SHOULD-NOT-RUN" not in proc.stdout.read()
+
+
+def test_entrypoint_migrate_runner_passes_args_and_status(tmp_path: Path) -> None:
+    env = _entrypoint_env(tmp_path, 'echo "migrate $*"; exit 4', "echo SHOULD-NOT-RUN")
+    env["HIVEMIND_RUNNER"] = "migrate"
+    proc = subprocess.run(
+        ["sh", str(ROOT / "entrypoint.sh"), "--rollback", "1"],
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+    assert proc.returncode == 4
+    assert proc.stdout.split() == ["migrate", "--rollback", "1"]
+
+
+def test_entrypoint_migrate_runner_sigterm_exits_promptly(tmp_path: Path) -> None:
+    env = _entrypoint_env(tmp_path, "exec sleep 60", "echo SHOULD-NOT-RUN")
+    env["HIVEMIND_RUNNER"] = "migrate"
+    proc = subprocess.Popen(["sh", str(ROOT / "entrypoint.sh")], env=env, text=True)
+    time.sleep(1.0)
+    proc.send_signal(signal.SIGTERM)
+    try:
+        assert proc.wait(timeout=10) == 143
+    finally:
+        if proc.poll() is None:
+            proc.kill()

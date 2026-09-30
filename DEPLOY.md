@@ -86,7 +86,8 @@ The 5-step operator flow:
    deletes the Job (`ttlSecondsAfterFinished` removes it anyway). It runs
    with `backoffLimit: 0`: if it fails partway (e.g. after `issue-admin`),
    an unclaimed admin key may exist — list with `hivemind-keys list`, revoke
-   strays with `hivemind-keys --actor you revoke-admin --hash <sha>`, and
+   strays with `hivemind-keys --actor you revoke-admin --hash <fingerprint>`
+   (the 12-char fingerprint `list` prints is enough; it must be unique), and
    re-run the pipeline. Your cluster's log shipper may have captured the Job
    log: treat it as key-bearing, or rotate the keys (§4) afterwards.
 4. **Fetch the generated keys** and hand them out (the raw keys live
@@ -111,6 +112,12 @@ The 5-step operator flow:
 
    (after setting the real hostname + issuer in
    `deploy/kubernetes/optional/ingress.yaml`).
+6. **(Optional)** example NetworkPolicies — a separate tree,
+   `deploy/kubernetes/optional/networkpolicy/`. **Edit the namespace
+   selector first**: it allows ingress only from the namespace
+   `ingress-nginx`; with any other controller namespace the policies cut
+   external traffic off. Needs a CNI that enforces NetworkPolicy; apply with
+   `kubectl kustomize deploy/kubernetes/optional/networkpolicy | kubectl -n hivemind apply -f -`.
 
 ---
 
@@ -186,7 +193,8 @@ first-run bootstrap Job records itself as `ci-bootstrap`.
 - **How** — `hivemind-keys issue-admin` (prints the new key once) →
   distribute → `hivemind-keys --actor <you> revoke-admin --key <old raw
   key>` or `--hash <sha256 from hivemind-keys list>` (exactly one of the
-  two is required). Always use the CLI: it records the revocation in the
+  two is required; a unique >=12-hex fingerprint prefix is accepted).
+  Always use the CLI: it records the revocation in the
   audit log (ADR 0027), which raw SQL against `credentials` would bypass.
 - **Blast radius** — only the admin surface (fleet/level management,
   key rotation) loses the old key; data-plane verbs are unaffected.
@@ -268,7 +276,17 @@ first-run bootstrap Job records itself as `ci-bootstrap`.
   custom CA certificates) inherits the migrations and the entrypoint.
   Setting its own `ENTRYPOINT` or `CMD` **silently skips the migration
   pre-step** — the same trap as the key-bootstrap Job below, but with no
-  error until the first query hits a missing object.
+  error until the first query hits a missing object. The image runs as
+  UID 10001, so a layer that installs files system-wide must switch user
+  and back:
+
+  ```dockerfile
+  FROM <registry>/hivemind:<sha>
+  USER root
+  COPY corp-ca.crt /usr/local/share/ca-certificates/corp-ca.crt
+  RUN update-ca-certificates
+  USER 10001:10001
+  ```
 - A **dim mismatch is a LOUD failure at pod startup** (ADR 0015): the
   entrypoint's `hivemind-migrate` step exits non-zero naming both dims
   and both fixes — the pod never starts, never a silent no-op. The check
@@ -444,7 +462,7 @@ rules:
   - apiGroups: ["policy"]
     resources: ["poddisruptionbudgets"]
     verbs: ["get", "list", "watch", "create", "patch"]
-  # Only if you apply the optional/ tree (Ingress, example NetworkPolicies)
+  # Only if you apply the optional/ trees (Ingress, example NetworkPolicies)
   # with the same ServiceAccount:
   # - apiGroups: ["networking.k8s.io"]
   #   resources: ["ingresses", "networkpolicies"]

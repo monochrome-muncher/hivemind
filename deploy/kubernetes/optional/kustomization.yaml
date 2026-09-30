@@ -1,5 +1,5 @@
-# OPT-IN kustomization — NOT part of the default build (Ingress + example
-# NetworkPolicies).
+# OPT-IN kustomization — NOT part of the default build (Ingress only;
+# NetworkPolicies are a separate opt-in tree in ./networkpolicy).
 #
 # Apply only when external reachability is needed (the two Services in the
 # parent tree are ClusterIP by design):
@@ -14,7 +14,3 @@ kind: Kustomization
 namespace: hivemind
 resources:
   - ingress.yaml
-  # Example NetworkPolicies (restrict who may reach the pods). Needs a CNI
-  # that enforces NetworkPolicy; drop the line if yours does not, or edit the
-  # selectors first (see the header of networkpolicy.yaml).
-  - networkpolicy.yaml

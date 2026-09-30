@@ -18,7 +18,12 @@ JOB=hivemind-keys-bootstrap
 MANIFEST="${BOOTSTRAP_MANIFEST:-deploy/kubernetes/bootstrap/keys-job.yaml}"
 TIMEOUT="${BOOTSTRAP_TIMEOUT_SECONDS:-300}"
 
-if kubectl -n "$NS" get secret hivemind-keys >/dev/null 2>&1; then
+# Fail CLOSED: `--ignore-not-found` makes "absent" an empty success, while an
+# API/auth/network error aborts under `set -e`. (Treating every error as
+# "absent" would re-run issue-admin + rotate-org and overwrite a live Secret,
+# silently rotating the org key - ADR 0031.)
+existing=$(kubectl -n "$NS" get secret hivemind-keys -o name --ignore-not-found)
+if [ -n "$existing" ]; then
   echo "hivemind-keys secret exists - skipping key bootstrap"
   exit 0
 fi

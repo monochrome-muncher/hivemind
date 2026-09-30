@@ -101,10 +101,10 @@ plain Postgres backups — no Hivemind-specific tooling.
 
 ```sh
 # A full logical dump (consistent, small; the pool is single-node).
-docker compose exec -T postgres pg_dump -U hivemind -Fc --no-owner hivemind \
-  > backup-$(date +%Y%m%d-%H%M).pgdump
+f=backup-$(date +%Y%m%d-%H%M).pgdump
+docker compose exec -T postgres pg_dump -U hivemind -Fc hivemind > "$f"
 # Verify the dump is readable before trusting it:
-docker compose exec -T postgres pg_restore --list < backup-*.pgdump | head
+docker compose exec -T postgres pg_restore --list < "$f" | head
 ```
 
 Schedule this (e.g. nightly) and ship it off-host. A logical dump is
@@ -136,7 +136,7 @@ make pg-down
 make pg-reset
 docker compose up -d postgres
 # restore the logical dump
-docker compose exec -i postgres pg_restore -U hivemind -d hivemind --clean --if-exists < backup-20260601-0400.pgdump
+docker compose exec -i postgres pg_restore -U hivemind -d hivemind --clean --if-exists --no-owner < backup-20260601-0400.pgdump
 # apply any migrations not already in the dump (ADR 0020)
 make migrate
 ```

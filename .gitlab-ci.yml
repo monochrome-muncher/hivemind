@@ -36,7 +36,10 @@ test:
   image:
     name: python:3.14  # the repo pins requires-python >= 3.14
   services:
-    - pgvector/pgvector:0.8.1-pg16
+    # alias: GitLab otherwise derives the hostname from the image name
+    # (`pgvector-pgvector`), so `postgres` in the DSN would not resolve.
+    - name: pgvector/pgvector:0.8.1-pg16
+      alias: postgres
   variables:
     # The service DB user IS a superuser so the probe can CREATE EXTENSION.
     POSTGRES_USER: hivemind
@@ -48,6 +51,9 @@ test:
     HIVEMIND_EMBEDDING_DIM: "512"
   script:
     - pip install uv==0.12.21
+    # The image build uses `uv sync --locked`: fail here, early, when uv.lock
+    # is out of date with pyproject.toml.
+    - uv lock --check
     - uv sync
     # --- DB readiness probe (REQUIRED) -------------------------------------
     # The integration suite SKIPs when the DB is unreachable, so a broken
@@ -96,7 +102,10 @@ migrations:
   image:
     name: python:3.14
   services:
-    - pgvector/pgvector:0.8.1-pg16
+    # alias: GitLab otherwise derives the hostname from the image name
+    # (`pgvector-pgvector`), so `postgres` in the DSN would not resolve.
+    - name: pgvector/pgvector:0.8.1-pg16
+      alias: postgres
   variables:
     POSTGRES_USER: hivemind
     POSTGRES_PASSWORD: hivemind
@@ -142,6 +151,9 @@ build:
     # Standard GitLab docker-in-docker (dind) wiring. CAVEAT: a k8s runner
     # needs a dind-capable service (or privileged pods for /dev/shm); if the
     # org's runner cannot run dind, use the commented-out kaniko build below.
+    # Explicit dind wiring: plain-TCP daemon on the service host, no TLS
+    # (the documented GitLab setup for `DOCKER_TLS_CERTDIR: ""`).
+    DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
   before_script:
     # docker:27: log into the GitLab container registry (CI_REGISTRY_* is
