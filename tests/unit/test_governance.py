@@ -43,6 +43,37 @@ class TestWriteService:
         assert reloaded is not None
         assert reloaded.summary == "Auth uses JWT"
 
+    async def test_supersedes_targets_are_checked_in_one_lookup(self) -> None:
+        """SP-13: N ``supersedes`` targets cost one ``get_entries``, not N
+        ``get_entry`` round-trips; an unknown target is still denied."""
+        from hivemind.domain.access import TrustLevel, Visibility
+        from hivemind.services.governance import SupersedeDenied
+
+        store = MemoryStore(make_clock())
+        service = WriteService(store, make_embedder())
+        targets = [await service.write(make_draft(f"t{i}")) for i in range(5)]
+        calls = {"get_entry": 0, "get_entries": 0}
+        real_many = store.get_entries
+
+        async def get_entry(entry_id):
+            calls["get_entry"] += 1
+
+        async def get_entries(ids):
+            calls["get_entries"] += 1
+            return await real_many(ids)
+
+        store.get_entry = get_entry  # type: ignore[method-assign]
+        store.get_entries = get_entries  # type: ignore[method-assign]
+        writer = Visibility(level=TrustLevel.PRIVILEGED, name="alice", is_admin=True)
+        await service.write(
+            make_draft("merged", supersedes=tuple(t.id for t in targets)), writer=writer
+        )
+        assert calls == {"get_entry": 0, "get_entries": 1}
+
+        with pytest.raises(SupersedeDenied) as denied:
+            await service.write(make_draft("x", supersedes=("missing-id",)), writer=writer)
+        assert denied.value.ids == ["missing-id"]
+
     async def test_write_with_supersedes_flips_targets(self) -> None:
         store = MemoryStore(make_clock())
         service = WriteService(store, make_embedder())

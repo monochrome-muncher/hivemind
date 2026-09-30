@@ -36,6 +36,7 @@ from hivemind.domain.entry import (
     EntryDraft,
     EntryFilters,
     ExtractedEntity,
+    UsageCount,
     embeddable_text,
 )
 from hivemind.domain.feedback import Feedback, FeedbackCounts
@@ -70,6 +71,22 @@ class Store(Protocol):
 
     async def get_entries(self, entry_ids: list[str]) -> dict[str, Entry]:
         """Fetch full entries by ID (missing IDs are simply absent)."""
+        ...
+
+    async def list_predecessors(self, entry_ids: list[str]) -> list[Entry]:
+        """Every entry whose ``superseded_by`` is one of ``entry_ids`` —
+        the reverse link of the supersession chain (SPEC §5.1 ``?history``),
+        in any order. Unfiltered by state or visibility: the chain walk
+        passes through entries the reader cannot see and filters what it
+        returns (ADR 0033). Served by the partial ``superseded_by`` index
+        (migration 0008), so the cost follows the chain, not the pool."""
+        ...
+
+    async def usage_counts(self) -> list[UsageCount]:
+        """One row per distinct (scope, kind, importance_source, author,
+        fleet_id, active) combination present in the pool, with its entry
+        count — every state included (the ROADMAP §3.3 counters are folded
+        from these in ``MetricsService``, in a single grouped scan)."""
         ...
 
     async def withdraw_entry(self, entry_id: str, reason: str | None, by_user: str) -> Entry:

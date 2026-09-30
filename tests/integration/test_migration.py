@@ -28,7 +28,7 @@ from hivemind.store.migrate import (
     rollback,
 )
 
-HEAD = "0006.agent-revoked-status"
+HEAD = "0008.history-and-list-indexes"
 
 # Every applied migration id, oldest first. Kept explicit rather than read
 # off the filesystem: the point of these assertions is that the runner
@@ -40,6 +40,7 @@ CHAIN = [
     "0003.importance-source-check",
     "0004.hnsw-vector-index",
     "0005.audit-log",
+    "0006.agent-revoked-status",
     HEAD,
 ]
 
@@ -152,7 +153,8 @@ async def test_rollback_removes_the_latest_migration() -> None:
     """ADR 0020: a structural migration (not `0001`) ships a real
     rollback, and rolling one back undoes exactly what it did.
 
-    Peeled one at a time from the head: `0006` narrows the agent status
+    Peeled one at a time from the head: `0008` drops its two indexes
+    (PERF-1 / STORE-3) and nothing else; `0006` narrows the agent status
     CHECK back (ADR 0028); `0005` drops the (empty) audit log
     (ADR 0027) and nothing else; `0004` drops the HNSW vector
     index (ADR 0025) and leaves the `embedding` column alone; `0003`
@@ -163,6 +165,16 @@ async def test_rollback_removes_the_latest_migration() -> None:
     await _require_postgres(dsn)
     await _reset_chain(dsn)
     await migrate(dsn, dim)
+
+    rolled = await rollback(dsn, dim, count=1)
+    assert rolled == ["0008.history-and-list-indexes"]
+    assert await current_schema_version(dsn) == "0006.agent-revoked-status"
+    conn = await asyncpg.connect(dsn)
+    try:
+        for index in ("entries_superseded_by_idx", "entries_created_at_id_idx"):
+            assert await conn.fetchval("SELECT to_regclass($1)", index) is None
+    finally:
+        await conn.close()
 
     rolled = await rollback(dsn, dim, count=1)
     assert rolled == ["0006.agent-revoked-status"]
@@ -298,7 +310,7 @@ async def test_0006_backfills_revoked_and_rolls_back_without_loss() -> None:
     await _require_postgres(dsn)
     await _reset_chain(dsn)
     await migrate(dsn, dim)
-    await rollback(dsn, dim, count=1)
+    await rollback(dsn, dim, count=2)  # 0008 (indexes) then 0006
     assert await current_schema_version(dsn) == "0005.audit-log"
 
     conn = await asyncpg.connect(dsn)
@@ -327,7 +339,7 @@ async def test_0006_backfills_revoked_and_rolls_back_without_loss() -> None:
     finally:
         await conn.close()
 
-    await rollback(dsn, dim, count=1)
+    await rollback(dsn, dim, count=2)  # 0008 (indexes) then 0006
     conn = await asyncpg.connect(dsn)
     try:
         assert [tuple(r) for r in await conn.fetch(statuses)] == [

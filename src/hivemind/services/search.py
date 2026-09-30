@@ -15,7 +15,8 @@ and ``Embedder`` ports.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -56,6 +57,25 @@ class Hit:
 
 
 NowFn = Callable[[], datetime]
+
+
+async def _gather[A, B](first: Awaitable[A], second: Awaitable[B]) -> tuple[A, B]:
+    """Run two independent awaitables concurrently, returning both results.
+
+    Unlike a bare ``asyncio.gather`` (which leaves the sibling running when
+    one raises) or a ``TaskGroup`` (which wraps the error in an
+    ``ExceptionGroup``, breaking callers that catch e.g. ``EmbeddingError``),
+    the first failure propagates **unchanged** and the sibling is cancelled.
+    """
+    task_a = asyncio.ensure_future(first)
+    task_b = asyncio.ensure_future(second)
+    try:
+        return await asyncio.gather(task_a, task_b)
+    except BaseException:
+        for task in (task_a, task_b):
+            task.cancel()
+        await asyncio.gather(task_a, task_b, return_exceptions=True)
+        raise
 
 
 def _utcnow() -> datetime:
@@ -102,10 +122,11 @@ class SearchService:
 
         # 1. Dual-stream retrieval (restricted to the caller's visibility,
         # ADR 0011 when ``visibility`` is supplied).
-        keyword_ids = await self._store.search_keyword(query, filters, top_k, visibility=visibility)
-        query_vector = await self._embedder.embed_text(query)
-        vector_ids = await self._store.search_vector(
-            query_vector, filters, top_k, visibility=visibility
+        # The keyword stream needs no embedding, so it runs concurrently with
+        # the embed -> vector chain (PERF-4); the two chains are independent.
+        keyword_ids, vector_ids = await _gather(
+            self._store.search_keyword(query, filters, top_k, visibility=visibility),
+            self._vector_stream(query, filters, top_k, visibility),
         )
 
         # 2. RRF fusion (configurable weights, SPEC.md §6.2).
@@ -119,15 +140,21 @@ class SearchService:
 
         # 3. Fetch candidates + batched feedback counts.
         candidate_ids = list(fused)
-        entries = await self._store.get_entries(candidate_ids)
-        counts = await self._store.quality_counts(candidate_ids)
+        entries, counts = await _gather(
+            self._store.get_entries(candidate_ids),
+            self._store.quality_counts(candidate_ids),
+        )
         quality_kwargs = self._config.quality_kwargs()
 
         # 4. Decay-aware rescore (SPEC.md §6.4).
         now = self._now_fn()
         scored: list[Entry] = []
         entry_scores: dict[str, float] = {}
-        for entry in entries.values():
+        # Iterate in fused-rank order (keyword stream first, then vector), NOT
+        # in the store's row order: equal fused scores are the normal case and
+        # the stable sorts below keep this order, so ties resolve the same way
+        # whatever order ``get_entries`` returns rows in (SP-5).
+        for entry in (entries[eid] for eid in candidate_ids if eid in entries):
             if not filters.include_inactive and entry.state is not EntryState.ACTIVE:
                 continue
             entry_counts: FeedbackCounts = counts.get(entry.id, (0, 0, 0))
@@ -154,6 +181,16 @@ class SearchService:
             for entry in ordered[offset : offset + limit]
         ]
 
+    async def _vector_stream(
+        self,
+        query: str,
+        filters: EntryFilters,
+        top_k: int,
+        visibility: Visibility | None,
+    ) -> list[str]:
+        query_vector = await self._embedder.embed_text(query)
+        return await self._store.search_vector(query_vector, filters, top_k, visibility=visibility)
+
     def _to_hit(self, entry: Entry, score: float) -> Hit:
         return Hit(
             entry_id=entry.id,
@@ -179,7 +216,8 @@ def apply_supersession_invariant(
     Deterministic rule: group entries by their chain head (the newest
     entry in the chain); order groups by the head's score descending;
     within a group, entries are ordered by ``created_at`` descending
-    (newest first). Single-entry groups are unaffected.
+    (newest first). Ties keep the order of ``entries`` (stable sorts), so the caller
+    decides them — ``SearchService`` passes the fused-rank order (SP-5). Single-entry groups are unaffected.
     """
     # Map: entry_id -> successor_id (a superseded entry points at its successor).
     successor_of = {e.id: e.superseded_by for e in entries}

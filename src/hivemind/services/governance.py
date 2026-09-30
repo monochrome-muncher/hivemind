@@ -128,8 +128,11 @@ class WriteService:
     async def _check_supersedes(self, draft: EntryDraft, writer: Visibility) -> None:
         """Reject the write if any supersession target is out of reach."""
         denied: list[str] = []
-        for target_id in dict.fromkeys(draft.supersedes):
-            target = await self._store.get_entry(target_id)
+        target_ids = list(dict.fromkeys(draft.supersedes))
+        # One lookup for all targets, not N round-trips (SP-13).
+        targets = await self._store.get_entries(target_ids) if target_ids else {}
+        for target_id in target_ids:
+            target = targets.get(target_id)
             if target is None or not may_supersede(
                 target, new_scope=draft.scope, new_fleet_id=draft.fleet_id, writer=writer
             ):

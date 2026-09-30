@@ -226,6 +226,21 @@ class Entry:
 
 
 @dataclass(frozen=True, slots=True)
+class UsageCount:
+    """One grouped row of the usage counters (ROADMAP §3.3): how many
+    entries share this (scope, kind, importance_source, author, fleet_id)
+    and whether they are still ``active`` (any other state is inactive)."""
+
+    scope: str
+    kind: Kind
+    importance_source: ImportanceSource
+    author: str
+    fleet_id: str | None
+    active: bool
+    count: int
+
+
+@dataclass(frozen=True, slots=True)
 class EntryFilters:
     """Filter set shared by search and list (SPEC.md §5.3).
 

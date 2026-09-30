@@ -226,3 +226,33 @@ class TestMetricsService:
         service = MetricsService(store)
         report = await service.usage_report()
         assert set(report) == {"entries", "fleets", "agents"}
+
+    async def test_usage_report_reads_the_pool_in_one_grouped_query(self) -> None:
+        """PERF-2: the report used to issue 10 + 3 x agents + fleets COUNTs.
+        It now makes one ``usage_counts`` call and no ``count_entries``
+        calls, however many agents and fleets exist."""
+        clock = make_clock()
+        store = _make_store(clock)
+        for i in range(5):
+            await store.register_agent(f"agent-{i}")
+            await store.create_fleet(f"fleet-{i}")
+        await _seed_entry(store, author="agent-1", kind=Kind.INSIGHT)
+
+        calls = {"count_entries": 0, "usage_counts": 0}
+        real_usage = store.usage_counts
+
+        async def counting_count(*args, **kwargs):
+            calls["count_entries"] += 1
+            return 0
+
+        async def counting_usage():
+            calls["usage_counts"] += 1
+            return await real_usage()
+
+        store.count_entries = counting_count  # type: ignore[method-assign]
+        store.usage_counts = counting_usage  # type: ignore[method-assign]
+        report = await MetricsService(store).usage_report()
+
+        assert calls == {"count_entries": 0, "usage_counts": 1}
+        assert report["entries"]["by_author_kind"]["agent-1"] == {"insight": 1}
+        assert report["entries"]["total"] == 1
