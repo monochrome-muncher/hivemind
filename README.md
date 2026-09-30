@@ -171,11 +171,11 @@ Each agent's MCP config points at the **same** endpoint, with its own key:
 }
 ```
 
-The hostable runner is **per-request**: every request verifies its own key
-against the `credentials` table, so `hivemind-keys revoke --name <agent>` takes effect
-immediately (no restart). Use `hivemind-mcp-pg` (per-agent) for a few
+Both Postgres-backed runners re-verify the key on every call (ADR 0042), so
+`hivemind-keys revoke --name <agent>` or a trust demotion takes effect on the
+next call (no restart). Use `hivemind-mcp-pg` (per-agent, stdio) for a few
 agents on one box; use `hivemind-mcp-http` (hostable) when many agents
-share one machine or when you want immediate revocation.
+share one machine or one endpoint.
 
 ## Using Hivemind from your agent harness
 

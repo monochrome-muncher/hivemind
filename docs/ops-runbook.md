@@ -187,7 +187,8 @@ symptom is an entry with empty `entities`, not a failed write.)
 > entries_embedding_hnsw_idx;` then re-run). Until repaired, vector
 > search silently falls back to the sequential scan (Postgres won't plan
 > around an invalid index) — slower, but never wrong: recall stays exact
-> in the meantime.
+> in the meantime. Since this fix, `hivemind-migrate` itself fails with
+> this remedy when it finds the index invalid after the chain.
 
 ## 4. Key issuance + rotation (ADR 0012)
 

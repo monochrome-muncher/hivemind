@@ -18,11 +18,19 @@ loop is started.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import Any
 
+import pytest
+
+from hivemind.config import Settings
+from hivemind.domain.access import TrustLevel
+from hivemind.domain.entry import EntryFilters
 from hivemind.mcp.app import McpHivemind
 from hivemind.mcp.http import (
     BearerAuthMiddleware,
+    build_http_app,
+    build_transport_security,
     current_credential,
     make_credential_provider,
 )
@@ -202,3 +210,158 @@ async def test_credential_provider_is_the_context_var_getter() -> None:
     unset -> ``None``; set (as the middleware does) -> the set credential."""
     provider = make_credential_provider()
     assert provider() is None
+
+
+# --- ADR 0042: fail closed, WWW-Authenticate, no OAuth discovery ----------
+
+
+async def test_provider_returning_none_fails_closed() -> None:
+    """MCP-5 / AUTH-7a: a provider that yields no credential must NOT fall
+    back to the app's own (template) credential: every verb answers
+    ``unauthenticated`` and nothing is read or written."""
+    app = make_app(Credential(user_id="shared", agent_id="template"))
+    server = build_server(app, credential_provider=lambda: None)
+    for tool, args in (
+        ("hive_write", {"kind": "fact", "summary": "x"}),
+        ("hive_list", {}),
+        ("hive_whoami", {}),
+    ):
+        result = await server.call_tool(tool, args)
+        assert json.loads(result.content[0].text)["error"]["code"] == "unauthenticated", tool
+    assert await app.store.list_entries(EntryFilters()) == []
+
+
+async def test_async_provider_is_awaited_per_dispatch() -> None:
+    app = make_app(PLACEHOLDER)
+    calls: list[int] = []
+
+    async def provider() -> Credential | None:
+        calls.append(1)
+        return ALICE
+
+    server = build_server(app, credential_provider=provider)
+    await server.call_tool("hive_whoami", {})
+    await server.call_tool("hive_whoami", {})
+    assert len(calls) == 2
+
+
+async def test_401_carries_www_authenticate_bearer() -> None:
+    mw = BearerAuthMiddleware(_RecordingApp(), FakeAuthenticator({}))
+    sent: list[dict[str, Any]] = []
+
+    async def send(msg: dict[str, Any]) -> None:
+        sent.append(msg)
+
+    await mw(_scope([]), _noop_receive, send)
+    headers = dict(sent[0]["headers"])
+    assert sent[0]["status"] == 401
+    assert headers[b"www-authenticate"] == b'Bearer realm="hivemind"'
+
+
+async def test_oauth_discovery_paths_answer_404_without_touching_the_authenticator() -> None:
+    """ONB-8: there is no OAuth; clients probing ``/.well-known/oauth-*``
+    must see 404, not a 401 that starts an OAuth flow."""
+
+    class ExplodingAuth(FakeAuthenticator):
+        async def verify(self, key: str) -> Credential | None:
+            raise AssertionError("discovery must not reach the authenticator")
+
+    inner = _RecordingApp()
+    mw = BearerAuthMiddleware(inner, ExplodingAuth({}))
+    for path in (
+        "/.well-known/oauth-protected-resource",
+        "/.well-known/oauth-protected-resource/mcp",
+        "/.well-known/oauth-authorization-server",
+    ):
+        sent: list[dict[str, Any]] = []
+
+        async def send(msg: dict[str, Any], sent: list[dict[str, Any]] = sent) -> None:
+            sent.append(msg)
+
+        await mw({"type": "http", "path": path, "headers": []}, _noop_receive, send)
+        assert sent[0]["status"] == 404, path
+    assert not inner.called
+
+
+# --- MCP-9: transport security (DNS-rebinding) setting --------------------
+
+
+def test_transport_security_default_keeps_sdk_behaviour() -> None:
+    assert build_transport_security(Settings(), "0.0.0.0") is None
+
+
+def test_transport_security_hosts_and_origins_are_wired() -> None:
+    ts = build_transport_security(
+        Settings(
+            mcp_allowed_hosts="hive.example.com, hive:*",
+            mcp_allowed_origins="https://app.example.com",
+        ),
+        "0.0.0.0",
+    )
+    assert ts is not None
+    assert ts.enable_dns_rebinding_protection is True
+    assert ts.allowed_hosts == ["hive.example.com", "hive:*"]
+    assert ts.allowed_origins == ["https://app.example.com"]
+
+
+def test_transport_security_origins_without_hosts_is_an_error() -> None:
+    with pytest.raises(ValueError, match="ALLOWED_HOSTS"):
+        build_transport_security(Settings(mcp_allowed_origins="https://x"), "0.0.0.0")
+
+
+def test_built_app_rejects_a_foreign_host_when_hosts_are_set() -> None:
+    """End to end through ``build_http_app`` (lifespan running): a wrong
+    Host answers 421, the allowed Host gets past the transport check."""
+    from starlette.testclient import TestClient
+
+    app = build_http_app(
+        Settings(mcp_allowed_hosts="hive.example.com"),
+        MemoryStore(),
+        make_embedder(),
+        FakeAuthenticator({"k": ALICE}),
+    )
+    headers = {
+        "authorization": "Bearer k",
+        "content-type": "application/json",
+        "accept": "application/json, text/event-stream",
+    }
+    with TestClient(app) as client:
+        bad = client.post("/mcp", content=b"{}", headers={**headers, "host": "evil.example.com"})
+        good = client.post("/mcp", content=b"{}", headers={**headers, "host": "hive.example.com"})
+    assert bad.status_code == 421
+    assert good.status_code != 421
+
+
+# --- ADR 0042: the stdio runner re-verifies per call ----------------------
+
+
+async def test_reverified_credential_revocation_and_demotion_apply_next_call() -> None:
+    """MCP-1 / AUTH-7b: with a provider that re-verifies the key (as
+    ``main_pg`` wires it), revoking the key refuses the very next call and
+    a trust demotion changes what the next call may do."""
+    contributor = Credential(
+        user_id="alice",
+        agent_id="alice",
+        agent_name="alice",
+        access_controlled=True,
+        trust_level=TrustLevel.CONTRIBUTOR,
+        home_fleet_id="fleet-1",
+    )
+    keys: dict[str, Credential] = {"key-alice": contributor}
+    auth = FakeAuthenticator(keys)
+
+    async def reverify() -> Credential | None:
+        return await auth.verify("key-alice")
+
+    server = build_server(make_app(PLACEHOLDER), credential_provider=reverify)
+
+    ok = await server.call_tool("hive_write", {"kind": "fact", "summary": "one"})
+    assert "id" in json.loads(ok.content[0].text)
+
+    keys["key-alice"] = replace(contributor, trust_level=TrustLevel.UNTRUSTED)
+    denied = await server.call_tool("hive_write", {"kind": "fact", "summary": "two"})
+    assert "error" in json.loads(denied.content[0].text)
+
+    del keys["key-alice"]
+    gone = await server.call_tool("hive_whoami", {})
+    assert json.loads(gone.content[0].text)["error"]["code"] == "unauthenticated"
