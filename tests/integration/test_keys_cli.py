@@ -111,6 +111,41 @@ async def test_revoke_admin_by_stored_hash(pg) -> None:
     assert await pg.verify(raw_key) is None
 
 
+async def test_revoke_admin_by_fingerprint_prefix(pg) -> None:
+    # `hivemind-keys list` prints a 12-char fingerprint; that must be enough.
+    dsn = _dsn()
+    orphan = await _issue_admin(dsn)
+    keeper = await _issue_admin(dsn)
+    assert await _revoke_admin(dsn, stored_hash=key_hash(orphan)[:12]) is True
+    assert await pg.verify(orphan) is None
+    assert await pg.verify(keeper) is not None
+
+
+async def test_revoke_admin_refuses_short_or_non_hex_hash(pg) -> None:
+    dsn = _dsn()
+    raw = await _issue_admin(dsn)
+    for bad in ("abc", "zzzzzzzzzzzz", ""):
+        with pytest.raises(ValueError):
+            await _revoke_admin(dsn, stored_hash=bad)
+    assert await pg.verify(raw) is not None
+
+
+async def test_revoke_admin_refuses_an_ambiguous_prefix(pg) -> None:
+    dsn = _dsn()
+    conn = await asyncpg.connect(dsn)
+    try:
+        for suffix in ("a", "b"):  # two admin rows sharing a 12-char prefix
+            await conn.execute(
+                "INSERT INTO credentials (key_hash, kind, user_id) VALUES ($1, 'admin', 'admin')",
+                "0123456789ab" + suffix * 52,
+            )
+        with pytest.raises(ValueError, match="matches 2"):
+            await _revoke_admin(dsn, stored_hash="0123456789ab")
+        assert await conn.fetchval("SELECT count(*) FROM credentials") == 2
+    finally:
+        await conn.close()
+
+
 async def test_revoke_admin_of_unknown_key_is_a_loud_noop(pg) -> None:
     dsn = _dsn()
     surviving = await _issue_admin(dsn)

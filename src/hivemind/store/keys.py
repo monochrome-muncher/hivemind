@@ -58,6 +58,10 @@ _DELETE_ORG = "DELETE FROM credentials WHERE kind = 'org'"
 _LIST = "SELECT key_hash, kind, user_id, agent_name FROM credentials ORDER BY created_at"
 _REVOKE_AGENT = "DELETE FROM credentials WHERE kind = 'agent' AND agent_name = $1"
 _REVOKE_ADMIN = "DELETE FROM credentials WHERE kind = 'admin' AND key_hash = $1"
+_ADMIN_HASHES_BY_PREFIX = (
+    "SELECT key_hash FROM credentials WHERE kind = 'admin' AND starts_with(key_hash, $1)"
+)
+_MIN_HASH_PREFIX = 12  # the fingerprint `hivemind-keys list` prints
 _INSERT_AUDIT = (
     "INSERT INTO audit_log (actor_kind, actor, action, target, detail) "
     "VALUES ($1, $2, $3, $4, $5::jsonb)"
@@ -233,7 +237,12 @@ async def _revoke_admin(
     raw key is normalised to its hash first, so it never reaches the
     audit row). A no-op records nothing."""
     if stored_hash is not None:
-        target = stored_hash
+        target = stored_hash.strip().lower()
+        if len(target) < _MIN_HASH_PREFIX or any(c not in "0123456789abcdef" for c in target):
+            raise ValueError(
+                f"--hash must be hex, at least {_MIN_HASH_PREFIX} characters "
+                "(the fingerprint from `hivemind-keys list`, or the full SHA-256)"
+            )
     elif raw_key is not None:
         target = key_hash(raw_key)  # the guard above proves it is set
     else:
@@ -241,6 +250,14 @@ async def _revoke_admin(
     conn = await asyncpg.connect(dsn)
     try:
         async with conn.transaction():
+            if stored_hash is not None and len(target) < 64:
+                # A fingerprint prefix: it must identify exactly one admin key.
+                matches = [r["key_hash"] for r in await conn.fetch(_ADMIN_HASHES_BY_PREFIX, target)]
+                if len(matches) > 1:
+                    raise ValueError(f"hash prefix {target!r} matches {len(matches)} admin keys")
+                if not matches:
+                    return False
+                target = matches[0]
             status = await conn.execute(_REVOKE_ADMIN, target)
             revoked = str(status) == "DELETE 1"
             if revoked:
@@ -289,7 +306,9 @@ def main() -> None:
         "--key", help="the raw admin secret to revoke (hashed before matching)"
     )
     revoke_admin.add_argument(
-        "--hash", dest="stored_hash", help="the stored SHA-256 hex from `hivemind-keys list`"
+        "--hash",
+        dest="stored_hash",
+        help="the stored SHA-256 hex, or its unique fingerprint prefix (>= 12 hex) from `hivemind-keys list`",
     )
 
     revoke = sub.add_parser("revoke", help="revoke an agent's key (name stays reserved)")
@@ -325,9 +344,13 @@ def main() -> None:
     elif args.cmd == "revoke-admin":
         if (args.key is None) == (args.stored_hash is None):
             parser.error("exactly one of --key / --hash is required")
-        revoked = asyncio.run(
-            _revoke_admin(dsn, raw_key=args.key, stored_hash=args.stored_hash, actor=actor)
-        )
+        try:
+            revoked = asyncio.run(
+                _revoke_admin(dsn, raw_key=args.key, stored_hash=args.stored_hash, actor=actor)
+            )
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            raise SystemExit(1) from None
         if revoked:
             print("revoked the admin key (issue a replacement via `hivemind-keys issue-admin`)")
         else:

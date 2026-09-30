@@ -31,7 +31,7 @@ make pg             # start Postgres (pgvector) in docker on :5432
 make vllm           # start the local vLLM embedding server (CPU docker) on :8001
 make migrate        # apply idempotent DB migrations
 make test-unit      # unit tests only (no Postgres needed)
-make test           # full suite (integration tests skip cleanly if Postgres is down)
+make test           # full suite; WARNING: integration tests TRUNCATE/DROP the DB in HIVEMIND_DATABASE_URL (dev/test DBs only)
 make check          # mypy strict + ruff
 make api            # run the REST API (hivemind-api)
 make admin          # run the admin panel on :8080 against `make api` (hivemind-admin; ADR 0029)
