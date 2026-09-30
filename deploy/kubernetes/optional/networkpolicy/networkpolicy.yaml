@@ -1,0 +1,88 @@
+# OPT-IN example NetworkPolicies (DEP-12) — part of the `optional/`
+# kustomization, NOT the default build. They need a CNI that enforces
+# NetworkPolicy (Calico, Cilium, ...); on one that does not they are inert.
+#
+# What they do: once a pod is selected by ANY ingress policy, only the listed
+# sources may reach it. Probes from the kubelet (node-local) are allowed by
+# the mainstream CNIs; if yours blocks them, add an ipBlock for the node CIDR.
+#
+#   hivemind-api   <- the ingress controller + the admin panel
+#   hivemind-mcp   <- the ingress controller
+#   hivemind-admin <- the ingress controller only (operators normally use
+#                     `kubectl port-forward`, which is not subject to these)
+#
+# ADJUST before applying:
+#   * `ingress-nginx` below is the namespace of the org's ingress controller
+#     (matched by the automatic kubernetes.io/metadata.name label).
+#   * Clients that call the pods directly in-cluster need their own `from`.
+#
+# Egress is deliberately NOT restricted here: the pods must reach Postgres,
+# the embedding endpoint, the optional extractor and DNS, whose locations are
+# site-specific. A default-deny egress policy plus allow rules for exactly
+# those destinations is the stricter follow-up.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: hivemind-api
+  labels:
+    app.kubernetes.io/name: hivemind
+    app.kubernetes.io/component: api
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: hivemind
+      app.kubernetes.io/component: api
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: hivemind
+              app.kubernetes.io/component: admin
+      ports:
+        - port: 8000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: hivemind-mcp
+  labels:
+    app.kubernetes.io/name: hivemind
+    app.kubernetes.io/component: mcp
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: hivemind
+      app.kubernetes.io/component: mcp
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - port: 8088
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: hivemind-admin
+  labels:
+    app.kubernetes.io/name: hivemind
+    app.kubernetes.io/component: admin
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: hivemind
+      app.kubernetes.io/component: admin
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - port: 8080

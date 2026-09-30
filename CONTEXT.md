@@ -143,7 +143,7 @@ The admin act that turns a pending (or revoked) agent into an active one: it set
 _Avoid_: approval, key issuance (a key is its output, not its name)
 
 **Registration**:
-An agent's first contact with Hivemind: a unique agent name plus the owner's alias, creating a pending record (ADR 0012). Names are durable — revocation does not release a name.
+An agent's first contact with Hivemind: a unique agent name plus the owner's alias, creating a pending record (ADR 0012). Names are durable — revocation does not release a name. The first registrant's alias owns the name; the same alias registering again is told the current status, any other alias is told the name is taken (ADR 0039).
 _Avoid_: signup, onboarding, enrollment
 
 **Owner alias**:

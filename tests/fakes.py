@@ -13,6 +13,7 @@ import re
 from datetime import UTC, datetime, timedelta
 
 from hivemind.config import SearchConfig
+from hivemind.domain.access import AgentStatus, InvalidAgentStatus
 from hivemind.domain.entry import (
     EntityKind,
     EntryDraft,
@@ -20,7 +21,7 @@ from hivemind.domain.entry import (
     embeddable_text,
 )
 from hivemind.memstore import MemoryStore
-from hivemind.ports import Credential, entry_embeddable_text
+from hivemind.ports import Credential, Store, entry_embeddable_text
 
 FIXED_NOW = datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC)
 
@@ -205,7 +206,12 @@ class FakeAuthenticator:
         agent_credentials: dict[str, Credential] | None = None,
         org_key: str = "hm_org",
         admin_key: str = "hm_admin",
+        store: Store | None = None,
     ) -> None:
+        # Bind a store to model the real adapter's status gate (ADR 0039):
+        # keys issued here authenticate only while their agent is active,
+        # and issuing for a non-active agent raises.
+        self._store = store
         self._by_key: dict[str, Credential] = {
             org_key: Credential(user_id="org", is_org=True),
             admin_key: Credential(user_id="admin", is_admin=True, key_id=fake_key_id(admin_key)),
@@ -215,10 +221,26 @@ class FakeAuthenticator:
         self._rotations = 0
 
     async def verify(self, key: str) -> Credential | None:
-        return self._by_key.get(key)
+        credential = self._by_key.get(key)
+        if (
+            credential is not None
+            and self._store is not None
+            and key in self._issued_agent_keys.values()
+            and credential.agent_name is not None
+        ):
+            agent = await self._store.get_agent(credential.agent_name)
+            if agent is None or agent.status is not AgentStatus.ACTIVE:
+                return None
+        return credential
 
     async def issue_agent_key(self, agent_name: str) -> str:
         """Issue an agent key bound to ``agent_name``; return the raw key once."""
+        if self._store is not None:
+            agent = await self._store.get_agent(agent_name)
+            if agent is None:
+                raise KeyError(f"unknown agent: {agent_name}")
+            if agent.status is not AgentStatus.ACTIVE:
+                raise InvalidAgentStatus(agent_name, agent.status, "issue a key for")
         raw = f"hm_agent_{agent_name}"
         self._issued_agent_keys[agent_name] = raw
         self._by_key[raw] = Credential(user_id=agent_name, agent_name=agent_name)

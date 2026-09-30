@@ -35,6 +35,10 @@ data:
   HIVEMIND_EMBEDDING_PREFIX_TOKENS: "2000"
   # Retry budget for transient embedder failures (ADR 0014); 0 disables.
   HIVEMIND_EMBEDDING_RETRIES: "2"
+  # Overall per-call deadline (ADR 0041): UNSET = derived from the timeout and
+  # retries (the DEPLOY.md §5 worst case), so raising RETRIES/TIMEOUT just
+  # works. Set HIVEMIND_EMBEDDING_DEADLINE / HIVEMIND_EXTRACTOR_DEADLINE only
+  # to cap lower; a value below the per-attempt timeout fails startup.
   # --- entity extraction (ADR 0016: optional + best-effort) ------------------
   # EMPTY endpoint = extraction OFF (zero LLM cost; entries land with empty
   # `entities`). To enable: set the endpoint + model here, and set the API

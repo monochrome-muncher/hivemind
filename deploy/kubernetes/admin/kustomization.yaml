@@ -1,7 +1,7 @@
 # The admin panel (`hivemind-admin`, ADR 0029) — its OWN kustomization,
 # so it deploys standalone (its own GitLab project, or a separate apply):
 #
-#   kubectl kustomize build deploy/kubernetes/admin | kubectl apply -f -
+#   kubectl kustomize deploy/kubernetes/admin | kubectl apply -f -
 #
 # It needs exactly one thing from the rest of the cluster: a reachable
 # hivemind-api, named by HIVEMIND_ADMIN_API_URL in the Deployment. It

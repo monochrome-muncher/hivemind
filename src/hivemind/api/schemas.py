@@ -9,15 +9,24 @@ raw config) across the wire.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AfterValidator, BaseModel, Field, field_validator
 
 from hivemind.domain.access import Agent, Fleet, Standing
 from hivemind.domain.audit import AuditRecord
 from hivemind.domain.entry import EntityKind, Entry, ImportanceSource, Kind, SourceType
 from hivemind.domain.feedback import Verdict
+from hivemind.domain.validation import MAX_ID_CHARS, MAX_LIMIT, MAX_OFFSET, check_no_nul
 from hivemind.services.search import Hit
+
+
+def _no_nul(value: str) -> str:
+    return check_no_nul(value, "value")
+
+
+# A reference to a stored record (a fleet id): bounded, NUL-free (ADR 0040).
+RefStr = Annotated[str, Field(max_length=MAX_ID_CHARS), AfterValidator(_no_nul)]
 
 
 def _to_utc(value: datetime | None) -> datetime | None:
@@ -215,8 +224,10 @@ class SearchRequest(BaseModel):
     created_from: datetime | None = None
     created_to: datetime | None = None
     include_inactive: bool = False
-    limit: int | None = None
-    offset: int | None = None
+    # SPEC §5.3 / ADR 0040: 1..100 and 0..10000 (a search also reaches at
+    # most 2 x candidate_top_k ranked hits).
+    limit: int | None = Field(default=None, ge=1, le=MAX_LIMIT)
+    offset: int | None = Field(default=None, ge=0, le=MAX_OFFSET)
 
     @field_validator("occurred_from", "occurred_to", "created_from", "created_to")
     @classmethod
@@ -281,7 +292,7 @@ class ActivateAgentRequest(BaseModel):
     `lurker` (1) (SPEC §5.1). Out-of-range values are a 422, not a 500."""
 
     trust_level: int = Field(default=1, ge=0, le=3)
-    home_fleet_id: str
+    home_fleet_id: RefStr
 
 
 class UpdateAgentRequest(BaseModel):
@@ -290,7 +301,7 @@ class UpdateAgentRequest(BaseModel):
     field must be supplied. Out-of-range trust levels are a 422, not a 500."""
 
     trust_level: int | None = Field(default=None, ge=0, le=3)
-    home_fleet_id: str | None = None
+    home_fleet_id: RefStr | None = None
 
 
 class CreateFleetRequest(BaseModel):
@@ -321,6 +332,16 @@ class AgentOut(BaseModel):
             created_at=agent.created_at.isoformat() if agent.created_at else None,
             activated_at=agent.activated_at.isoformat() if agent.activated_at else None,
         )
+
+
+class RegisteredAgentOut(AgentOut):
+    """The answer to ``POST /v1/agents`` (ADR 0039): the agent record plus
+    whether this caller had already registered the name (same alias) and
+    what its status means for the caller (pending / active → ask the admin
+    for the key / revoked)."""
+
+    already_registered: bool
+    message: str
 
 
 class FleetOut(BaseModel):

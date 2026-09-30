@@ -1,7 +1,7 @@
 # REST API surface (SPEC §5.1) — the `hivemind-api` console script.
 #
 # Image contract (shipped by the generic Dockerfile lane):
-#   * entrypoint /app/entrypoint.sh:  exec hivemind-"${HIVMIND_RUNNER:-mcp-http}" "$@"
+#   * entrypoint /app/entrypoint.sh:  exec hivemind-"${HIVEMIND_RUNNER:-mcp-http}" "$@"
 #   * the pod sets HIVEMIND_RUNNER=api and passes args via the pod `args:` field
 #   * the placeholder image `hivemind:0.0.0` is the single sed target the CI
 #     deploy job replaces with the real registry image ($K8S_IMAGE:$CI_COMMIT_SHORT_SHA)
@@ -85,6 +85,27 @@ spec:
       # _PORT variables into this pod (ADR 0032). Hivemind finds its
       # peers by DNS name, never through these.
       enableServiceLinks: false
+      # Hardening (DEP-4): non-root numeric UID (matches the image's USER),
+      # RuntimeDefault seccomp, and no ServiceAccount token (no pod here talks
+      # to the Kubernetes API).
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      # Prefer different nodes for the 2 replicas (DEP-12): the PDB only
+      # covers voluntary drains; this is what survives losing a node.
+      # ScheduleAnyway = a preference, so a single-node cluster still works.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: hivemind
+              app.kubernetes.io/component: api
 
       containers:
         - name: app
@@ -119,6 +140,27 @@ spec:
             preStop:
               exec:
                 command: ["sleep", "5"]
+          # The app writes nothing to disk: read-only root, emptyDir /tmp.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          # Modest, MEASURE-and-adjust defaults (DEP-5). Requests give the pod a
+          # Burstable QoS class (BestEffort pods are evicted first, defeating the
+          # ADR 0026 availability goal) and let the scheduler place it; the
+          # memory limit bounds a runaway request. No CPU limit, so the pod is
+          # never throttled. Each pod holds up to 2 x HIVEMIND_POOL_MAX_SIZE
+          # Postgres connections (DEPLOY.md / ops runbook): size them together.
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
           ports:
             - name: http
               containerPort: 8000
@@ -152,3 +194,7 @@ spec:
               port: 8000
             initialDelaySeconds: 3
             periodSeconds: 5
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi

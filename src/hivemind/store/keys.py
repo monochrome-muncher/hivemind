@@ -25,7 +25,7 @@ admin keys appear by their 12-char fingerprint.
 
 Usage:
     hivemind-keys [--actor NAME] issue-admin
-    hivemind-keys issue-agent --name alice
+    hivemind-keys issue-agent --name alice [--trust-level N --home-fleet ID]
     hivemind-keys rotate-org
     hivemind-keys revoke --name alice
     hivemind-keys revoke-admin --key hm_xxx   (or --hash <sha256 from list>)
@@ -41,12 +41,14 @@ import json
 import os
 import secrets
 import sys
+import uuid
 
 import asyncpg
 
 from hivemind.config import load_settings
+from hivemind.domain.access import TrustLevel
 from hivemind.domain.audit import ActorKind, AuditAction, key_fingerprint
-from hivemind.store.auth import key_hash
+from hivemind.store.auth import DEAD_CREDENTIAL_PREDICATE, ORG_KEY_LOCK, key_hash
 
 _ISSUE_ADMIN = "INSERT INTO credentials (key_hash, kind, user_id) VALUES ($1, 'admin', $2)"
 _ISSUE_AGENT = (
@@ -55,22 +57,57 @@ _ISSUE_AGENT = (
 )
 _ISSUE_ORG = "INSERT INTO credentials (key_hash, kind, user_id) VALUES ($1, 'org', $2)"
 _DELETE_ORG = "DELETE FROM credentials WHERE kind = 'org'"
-_LIST = "SELECT key_hash, kind, user_id, agent_name FROM credentials ORDER BY created_at"
+_LIST = (
+    "SELECT c.key_hash, c.kind, c.user_id, c.agent_name, "
+    f"{DEAD_CREDENTIAL_PREDICATE} AS dead FROM credentials c ORDER BY c.created_at"
+)
+_FLEET_EXISTS = "SELECT 1 FROM fleets WHERE id = $1"
 _REVOKE_AGENT = "DELETE FROM credentials WHERE kind = 'agent' AND agent_name = $1"
 _REVOKE_ADMIN = "DELETE FROM credentials WHERE kind = 'admin' AND key_hash = $1"
+_ADMIN_HASHES_BY_PREFIX = (
+    "SELECT key_hash FROM credentials WHERE kind = 'admin' AND starts_with(key_hash, $1)"
+)
+_MIN_HASH_PREFIX = 12  # the fingerprint `hivemind-keys list` prints
 _INSERT_AUDIT = (
     "INSERT INTO audit_log (actor_kind, actor, action, target, detail) "
     "VALUES ($1, $2, $3, $4, $5::jsonb)"
 )
 _HAS_AGENT_KEY = "SELECT 1 FROM credentials WHERE kind = 'agent' AND agent_name = $1"
 _AGENT_STATUS_FOR_UPDATE = "SELECT status FROM agents WHERE name = $1 FOR UPDATE"
-_REACTIVATE_REVOKED = "UPDATE agents SET status = 'active' WHERE name = $1 AND status = 'revoked'"
+_ACTIVATE = (
+    "UPDATE agents SET status = 'active', trust_level = $2, home_fleet_id = $3, "
+    "activated_at = now() WHERE name = $1"
+)
+_DELETE_AGENT_KEYS = "DELETE FROM credentials WHERE kind = 'agent' AND agent_name = $1"
 _SET_REVOKED = "UPDATE agents SET status = 'revoked' WHERE name = $1"
 
 
 class AgentKeyExists(Exception):
     """``issue-agent`` refused: the agent already holds a key (ADR 0028 —
     one key per agent; revoke first to replace it)."""
+
+
+class AgentNeedsActivation(Exception):
+    """``issue-agent`` refused: the agent is ``pending`` or ``revoked``, so
+    a key needs an activation, and an activation needs an explicit trust
+    level and home fleet (the same act as ``POST .../activate``, ADR 0039)
+    — never a silent restore of a revoked agent's stale trust and fleet."""
+
+    def __init__(self, name: str, status: str) -> None:
+        super().__init__(f"agent {name!r} is {status}: pass --trust-level and --home-fleet")
+        self.name = name
+        self.status = status
+
+
+class ActivationFlagsNotApplicable(Exception):
+    """``issue-agent`` refused: ``--trust-level`` / ``--home-fleet`` were
+    given for an agent that is already ``active``. Changing an active
+    agent's level or fleet is the admin PATCH, not key issuance, so the
+    flags are rejected rather than silently ignored (ADR 0039)."""
+
+
+class UnknownFleet(Exception):
+    """``issue-agent`` refused: ``--home-fleet`` is not a known fleet id."""
 
 
 class AgentNotRegistered(Exception):
@@ -140,15 +177,25 @@ async def _issue_admin(dsn: str, *, actor: str | None = None) -> str:
     return raw_key
 
 
-async def _issue_agent(dsn: str, name: str, *, actor: str | None = None) -> str:
+async def _issue_agent(
+    dsn: str,
+    name: str,
+    *,
+    actor: str | None = None,
+    trust_level: TrustLevel | None = None,
+    home_fleet_id: str | None = None,
+) -> str:
     """Issue an agent key bound to the registered agent name (ADR 0012).
     Audited as ``agent_key.issue`` with the agent name as target.
 
-    Refuses (``AgentKeyExists``) when the agent already holds a key —
-    one key per agent (ADR 0028) — and (``AgentNotRegistered``) when the
-    name has no agent record, so a dangling key can never be minted.
-    A ``revoked`` agent flips back to
-    ``active``, so status and key never disagree after a CLI run."""
+    Consistent with REST activate (ADR 0039). Refuses
+    (``AgentNotRegistered``) when the name has no agent record. An
+    ``active`` agent that holds a key is refused (``AgentKeyExists`` — one
+    key per agent, ADR 0028); an ``active`` agent with no key just gets
+    one. A ``pending`` or ``revoked`` agent is refused
+    (``AgentNeedsActivation``) unless ``trust_level`` and ``home_fleet_id``
+    are both given, in which case it is activated with exactly those
+    values (never the stale ones) in the same transaction as the key."""
     raw_key = _raw_key()
     conn = await asyncpg.connect(dsn)
     try:
@@ -156,11 +203,26 @@ async def _issue_agent(dsn: str, name: str, *, actor: str | None = None) -> str:
             status = await conn.fetchval(_AGENT_STATUS_FOR_UPDATE, name)
             if status is None:
                 raise AgentNotRegistered(name)
-            if await conn.fetchval(_HAS_AGENT_KEY, name) is not None:
-                raise AgentKeyExists(name)
+            detail: dict[str, str] | None = None
+            if status == "active":
+                if trust_level is not None or home_fleet_id is not None:
+                    raise ActivationFlagsNotApplicable(name)
+                if await conn.fetchval(_HAS_AGENT_KEY, name) is not None:
+                    raise AgentKeyExists(name)
+            else:
+                if trust_level is None or home_fleet_id is None:
+                    raise AgentNeedsActivation(name, status)
+                if await conn.fetchval(_FLEET_EXISTS, home_fleet_id) is None:
+                    raise UnknownFleet(home_fleet_id)
+                await conn.execute(_DELETE_AGENT_KEYS, name)  # stale rows, if any
+                await conn.execute(_ACTIVATE, name, trust_level.value, home_fleet_id)
+                detail = {
+                    "from": status,
+                    "trust_level": str(trust_level.value),
+                    "home_fleet_id": home_fleet_id,
+                }
             await conn.execute(_ISSUE_AGENT, key_hash(raw_key), name)
-            await conn.execute(_REACTIVATE_REVOKED, name)
-            await _audit(conn, actor or default_actor(), AuditAction.AGENT_KEY_ISSUE, name)
+            await _audit(conn, actor or default_actor(), AuditAction.AGENT_KEY_ISSUE, name, detail)
     finally:
         await conn.close()
     return raw_key
@@ -173,6 +235,7 @@ async def _rotate_org(dsn: str, *, actor: str | None = None) -> str:
     conn = await asyncpg.connect(dsn)
     try:
         async with conn.transaction():
+            await conn.execute(ORG_KEY_LOCK)
             await conn.execute(_DELETE_ORG)
             await conn.execute(_ISSUE_ORG, key_hash(raw_key), "org")
             await _audit(conn, actor or default_actor(), AuditAction.ORG_KEY_ROTATE, None)
@@ -193,7 +256,8 @@ async def _list(dsn: str) -> None:
         return
     for row in rows:
         name = row["agent_name"] or row["user_id"] or "-"
-        print(f"{key_fingerprint(row['key_hash'])}…  {row['kind']:<6} {name}")
+        mark = "  [dead: never authenticates, ADR 0039]" if row["dead"] else ""
+        print(f"{key_fingerprint(row['key_hash'])}…  {row['kind']:<6} {name}{mark}")
 
 
 async def _revoke(dsn: str, name: str, *, actor: str | None = None) -> None:
@@ -233,7 +297,12 @@ async def _revoke_admin(
     raw key is normalised to its hash first, so it never reaches the
     audit row). A no-op records nothing."""
     if stored_hash is not None:
-        target = stored_hash
+        target = stored_hash.strip().lower()
+        if len(target) < _MIN_HASH_PREFIX or any(c not in "0123456789abcdef" for c in target):
+            raise ValueError(
+                f"--hash must be hex, at least {_MIN_HASH_PREFIX} characters "
+                "(the fingerprint from `hivemind-keys list`, or the full SHA-256)"
+            )
     elif raw_key is not None:
         target = key_hash(raw_key)  # the guard above proves it is set
     else:
@@ -241,6 +310,14 @@ async def _revoke_admin(
     conn = await asyncpg.connect(dsn)
     try:
         async with conn.transaction():
+            if stored_hash is not None and len(target) < 64:
+                # A fingerprint prefix: it must identify exactly one admin key.
+                matches = [r["key_hash"] for r in await conn.fetch(_ADMIN_HASHES_BY_PREFIX, target)]
+                if len(matches) > 1:
+                    raise ValueError(f"hash prefix {target!r} matches {len(matches)} admin keys")
+                if not matches:
+                    return False
+                target = matches[0]
             status = await conn.execute(_REVOKE_ADMIN, target)
             revoked = str(status) == "DELETE 1"
             if revoked:
@@ -273,6 +350,16 @@ def main() -> None:
 
     issue_agent = sub.add_parser("issue-agent", help="issue an agent key for a registered agent")
     issue_agent.add_argument("--name", required=True)
+    issue_agent.add_argument(
+        "--trust-level",
+        type=int,
+        choices=[level.value for level in TrustLevel],
+        help="required for a pending/revoked agent: activates it at this level (ADR 0039)",
+    )
+    issue_agent.add_argument(
+        "--home-fleet",
+        help="required for a pending/revoked agent: the home fleet id to activate it into",
+    )
 
     sub.add_parser(
         "rotate-org",
@@ -289,7 +376,9 @@ def main() -> None:
         "--key", help="the raw admin secret to revoke (hashed before matching)"
     )
     revoke_admin.add_argument(
-        "--hash", dest="stored_hash", help="the stored SHA-256 hex from `hivemind-keys list`"
+        "--hash",
+        dest="stored_hash",
+        help="the stored SHA-256 hex, or its unique fingerprint prefix (>= 12 hex) from `hivemind-keys list`",
     )
 
     revoke = sub.add_parser("revoke", help="revoke an agent's key (name stays reserved)")
@@ -298,11 +387,46 @@ def main() -> None:
     args = parser.parse_args()
     actor: str = args.actor if args.actor is not None else default_actor()
     dsn = load_settings().database_url
+    if args.cmd == "issue-agent" and args.home_fleet is not None:
+        try:
+            uuid.UUID(args.home_fleet)
+        except ValueError:
+            parser.error(f"--home-fleet {args.home_fleet!r} is not a fleet id (a UUID)")
     if args.cmd == "issue-admin":
         print(asyncio.run(_issue_admin(dsn, actor=actor)))
     elif args.cmd == "issue-agent":
         try:
-            print(asyncio.run(_issue_agent(dsn, args.name, actor=actor)))
+            print(
+                asyncio.run(
+                    _issue_agent(
+                        dsn,
+                        args.name,
+                        actor=actor,
+                        trust_level=(
+                            TrustLevel(args.trust_level) if args.trust_level is not None else None
+                        ),
+                        home_fleet_id=args.home_fleet,
+                    )
+                )
+            )
+        except AgentNeedsActivation as exc:
+            print(
+                f"{exc}; it is activated with exactly the level and fleet you give "
+                "(a revoked agent's old ones are not restored, ADR 0039)",
+                file=sys.stderr,
+            )
+            raise SystemExit(1) from None
+        except ActivationFlagsNotApplicable:
+            print(
+                f"agent {args.name} is already active: --trust-level / --home-fleet apply only "
+                "when activating a pending or revoked agent (change an active agent with "
+                "PATCH /v1/admin/agents/{name})",
+                file=sys.stderr,
+            )
+            raise SystemExit(1) from None
+        except UnknownFleet as exc:
+            print(f"no fleet with id {exc}; list them with GET /v1/admin/fleets", file=sys.stderr)
+            raise SystemExit(1) from None
         except AgentKeyExists:
             print(
                 f"agent {args.name} already holds a key; revoke it first "
@@ -325,9 +449,13 @@ def main() -> None:
     elif args.cmd == "revoke-admin":
         if (args.key is None) == (args.stored_hash is None):
             parser.error("exactly one of --key / --hash is required")
-        revoked = asyncio.run(
-            _revoke_admin(dsn, raw_key=args.key, stored_hash=args.stored_hash, actor=actor)
-        )
+        try:
+            revoked = asyncio.run(
+                _revoke_admin(dsn, raw_key=args.key, stored_hash=args.stored_hash, actor=actor)
+            )
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            raise SystemExit(1) from None
         if revoked:
             print("revoked the admin key (issue a replacement via `hivemind-keys issue-admin`)")
         else:

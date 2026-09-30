@@ -15,8 +15,10 @@ services:
       POSTGRES_DB: hivemind
       POSTGRES_USER: hivemind
       POSTGRES_PASSWORD: hivemind
+    # Loopback only (DEP-7): the default credentials below are a DEV
+    # convenience; never publish this port on a reachable interface.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - hivemind-pg-data:/var/lib/postgresql/data
     healthcheck:
@@ -60,8 +62,9 @@ services:
       # keeps the service from contending with other processes.
       - "--gpu-memory-utilization"
       - "0.3"
+    # Loopback only (DEP-7): vLLM has no authentication.
     ports:
-      - "8001:8000"
+      - "127.0.0.1:8001:8000"
     volumes:
       - hivemind-vllm-cache:/root/.cache/huggingface
 
@@ -71,13 +74,16 @@ services:
   # Built from this repo (Dockerfile); reads/writes the shared Postgres
   # pool and embeds via the local vLLM server (ADR 0005).
   #
-  # - The container binds 0.0.0.0:8088; the HOST port is 8088 by default
+  # - The container binds 0.0.0.0:8088 and the host port is published on all
+  #   interfaces (agents on other machines must reach it): put it behind a TLS
+  #   proxy / firewall; every request still needs an agent key (ADR 0008).
+  #   The HOST port is 8088 by default
   #   - override with HIVEMIND_MCP_HTTP_PORT (e.g.
   #   `HIVEMIND_MCP_HTTP_PORT=9000 make mcp-http`).
   # - The DSN + embedder point at the SIBLING services on the compose
   #   network (postgres:5432 / vllm:8000), not the host-published ports.
   # - Keys live in the Postgres `credentials` table, so any agent-scoped
-  #   key issued via `hivemind-keys issue` works from this service.
+  #   key issued via `hivemind-keys issue-agent --name <agent>` works from this service.
   mcp-http:
     build: .
     image: hivemind-mcp-http

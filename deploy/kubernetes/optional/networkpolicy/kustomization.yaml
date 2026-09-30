@@ -1,0 +1,12 @@
+# OPT-IN example NetworkPolicies (DEP-12) — a SEPARATE tree from the Ingress
+# so nobody gets them by accident. BEFORE applying, edit networkpolicy.yaml:
+# the allowed source namespace is `ingress-nginx`; if your ingress controller
+# lives elsewhere (or you use a different controller) the policies would cut
+# external traffic off. See DEPLOY.md §2 step 6.
+#
+#   kubectl kustomize deploy/kubernetes/optional/networkpolicy | kubectl -n hivemind apply -f -
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: hivemind
+resources:
+  - networkpolicy.yaml

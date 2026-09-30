@@ -14,9 +14,17 @@ Layout:
   (namespace, ConfigMap, two 2-replica Deployments with a
   `maxSurge: 1` / `maxUnavailable: 0` rollout, two ClusterIP Services,
   two `minAvailable: 1` PodDisruptionBudgets — ADR 0026;
-  `secret-template.yaml` documents the CI-rendered Secret;
+  `secret-template.yaml` documents the CI-rendered Secret; every pod runs
+  as non-root UID 10001 with a read-only root filesystem, dropped
+  capabilities, `RuntimeDefault` seccomp and no ServiceAccount token, and
+  the api/mcp Deployments carry modest resource requests/limits and prefer
+  different nodes (`topologySpreadConstraints`, `ScheduleAnyway`);
+  the image installs the dependency set locked in `uv.lock`;
   `optional/` is the opt-in nginx Ingress + cert-manager Certificate)
-- [`.gitlab-ci.yml`](.gitlab-ci.yml) — the pipeline (test → build → deploy)
+- [`.gitlab-ci.yml`](.gitlab-ci.yml) — the pipeline (test → build → deploy);
+  the first-run key bootstrap is
+  [`scripts/ci-bootstrap-keys.sh`](scripts/ci-bootstrap-keys.sh) +
+  [`deploy/kubernetes/bootstrap/keys-job.yaml`](deploy/kubernetes/bootstrap/keys-job.yaml)
 
 ---
 
@@ -34,12 +42,21 @@ What the **org provides** (the app itself needs nothing else):
 
 **Required GitLab CI/CD variables:**
 
-| Variable | Masked? | Meaning |
+| Variable | Masked? / Protected? | Meaning |
 |---|---|---|
-| `K8S_IMAGE` | no | Registry image prefix, e.g. `registry.gitlab.com/<group>/<project>/hivemind`. The pipeline builds/pushes `$K8S_IMAGE:$CI_COMMIT_SHORT_SHA` and the deploy job substitutes it for the `hivemind:0.0.0` placeholder in the manifests. |
-| `K8S_SECRET_DATABASE_URL` | **yes** | The Postgres DSN, e.g. `postgresql://hivemind:hivemind@pg.hivemind.svc:5432/hivemind`. |
-| `K8S_SECRET_EMBEDDING_API_KEY` | **yes** | The embedding credential. **May be empty** (self-hosted vLLM without auth). |
-| `K8S_SECRET_EXTRACTOR_API_KEY` | **yes** | The extractor credential. **May be empty** (extraction off, ADR 0016 — safe). |
+| `K8S_IMAGE` | no / no | Registry image prefix, e.g. `registry.gitlab.com/<group>/<project>/hivemind`. The pipeline builds/pushes `$K8S_IMAGE:$CI_COMMIT_SHORT_SHA` and the deploy job substitutes it for the `hivemind:0.0.0` placeholder in the manifests. |
+| `K8S_SECRET_DATABASE_URL` | **yes / yes** | The Postgres DSN, e.g. `postgresql://hivemind:hivemind@pg.hivemind.svc:5432/hivemind`. |
+| `K8S_SECRET_EMBEDDING_API_KEY` | **yes / yes** | The embedding credential. **May be empty** (self-hosted vLLM without auth). |
+| `K8S_SECRET_EXTRACTOR_API_KEY` | **yes / yes** | The extractor credential. **May be empty** (extraction off, ADR 0016 — safe). |
+
+**Mark all three `K8S_SECRET_*` variables _Protected_ as well as Masked,
+and protect the default branch and the `production` environment.** An
+unprotected variable is injected into every pipeline, including merge-request
+pipelines from unprotected branches — and an MR author controls
+`.gitlab-ci.yml` itself, so the `rules:` that keep `deploy` on the default
+branch are no barrier; masking is easy to evade. A protected variable is only
+exposed to protected branches/tags. (The empty-allowed variables still need
+to exist, empty, for the same reason.)
 
 All three `K8S_SECRET_*` values are rendered by the deploy job into the
 `hivemind-secrets` Secret (the in-tree
@@ -64,7 +81,15 @@ The 5-step operator flow:
    `K8S_IMAGE` variable (GitLab → Settings → CI/CD → Variables).
 3. **First `git push`** — the pipeline builds + deploys + **boots the
    keys automatically** (the deploy job's idempotent first-run bootstrap,
-   §2 of `.gitlab-ci.yml`).
+   `scripts/ci-bootstrap-keys.sh`). The one-shot Job prints each raw key
+   once to its own pod log; the script copies them into the Secret and
+   deletes the Job (`ttlSecondsAfterFinished` removes it anyway). It runs
+   with `backoffLimit: 0`: if it fails partway (e.g. after `issue-admin`),
+   an unclaimed admin key may exist — list with `hivemind-keys list`, revoke
+   strays with `hivemind-keys --actor you revoke-admin --hash <fingerprint>`
+   (the 12-char fingerprint `list` prints is enough; it must be unique), and
+   re-run the pipeline. Your cluster's log shipper may have captured the Job
+   log: treat it as key-bearing, or rotate the keys (§4) afterwards.
 4. **Fetch the generated keys** and hand them out (the raw keys live
    ONLY in the k8s Secret `hivemind-keys` — GitLab stays key-free):
 
@@ -76,17 +101,23 @@ The 5-step operator flow:
    Distribution: **admin key** → operators (admin surface + key
    management); **org key** → the registration surface (`hive_register`
    / `POST /v1/agents`); **agent keys** are issued per agent, either via
-   `hivemind-keys issue-agent --name <agent>`, the admin REST surface
+   `hivemind-keys issue-agent --name <agent>` (an active agent with no key; for a pending or revoked one add `--trust-level N --home-fleet <fleet-id>`, ADR 0039), the admin REST surface
    `POST /v1/admin/agents/{name}/activate` (returns the key **once**), or
    the **admin panel** (§8), which the same pipeline deploys.
 5. **(Optional)** external reachability — apply the opt-in Ingress:
 
    ```bash
-   kubectl kustomize build deploy/kubernetes/optional | kubectl -n hivemind apply -f -
+   kubectl kustomize deploy/kubernetes/optional | kubectl -n hivemind apply -f -
    ```
 
    (after setting the real hostname + issuer in
    `deploy/kubernetes/optional/ingress.yaml`).
+6. **(Optional)** example NetworkPolicies — a separate tree,
+   `deploy/kubernetes/optional/networkpolicy/`. **Edit the namespace
+   selector first**: it allows ingress only from the namespace
+   `ingress-nginx`; with any other controller namespace the policies cut
+   external traffic off. Needs a CNI that enforces NetworkPolicy; apply with
+   `kubectl kustomize deploy/kubernetes/optional/networkpolicy | kubectl -n hivemind apply -f -`.
 
 ---
 
@@ -126,7 +157,7 @@ failure undiagnosable).
 
 Every `hivemind-keys` rotation below is recorded in the audit log
 (ADR 0027, SPEC §12.5) under the name you pass as `--actor` (before the
-subcommand; default: the OS user — `root` in the image, so pass it):
+subcommand; default: the OS user — `hivemind` in the image, so pass it):
 `hivemind-keys --actor <you> rotate-org`. The value is unverified, which
 is why those rows are marked `actor_kind = cli`. Check what happened with
 `GET /v1/admin/audit-log` (admin key; `docs/ops-runbook.md` §4). The
@@ -160,11 +191,11 @@ first-run bootstrap Job records itself as `ci-bootstrap`.
 ### 4.2 Admin key
 
 - **How** — `hivemind-keys issue-admin` (prints the new key once) →
-  distribute → `hivemind-keys revoke-admin` (the CLI subcommand shipped
-  with this release; accepts the old raw key or its SHA-256 hash from
-  `hivemind-keys list`). Until it is available in your image, the
-  equivalent SQL is:
-  `DELETE FROM credentials WHERE kind='admin' AND key_hash='<sha256>';`
+  distribute → `hivemind-keys --actor <you> revoke-admin --key <old raw
+  key>` or `--hash <sha256 from hivemind-keys list>` (exactly one of the
+  two is required; a unique >=12-hex fingerprint prefix is accepted).
+  Always use the CLI: it records the revocation in the
+  audit log (ADR 0027), which raw SQL against `credentials` would bypass.
 - **Blast radius** — only the admin surface (fleet/level management,
   key rotation) loses the old key; data-plane verbs are unaffected.
 - **Verify** — admin call with the new key works; the old key 401s.
@@ -245,7 +276,17 @@ first-run bootstrap Job records itself as `ci-bootstrap`.
   custom CA certificates) inherits the migrations and the entrypoint.
   Setting its own `ENTRYPOINT` or `CMD` **silently skips the migration
   pre-step** — the same trap as the key-bootstrap Job below, but with no
-  error until the first query hits a missing object.
+  error until the first query hits a missing object. The image runs as
+  UID 10001, so a layer that installs files system-wide must switch user
+  and back:
+
+  ```dockerfile
+  FROM <registry>/hivemind:<sha>
+  USER root
+  COPY corp-ca.crt /usr/local/share/ca-certificates/corp-ca.crt
+  RUN update-ca-certificates
+  USER 10001:10001
+  ```
 - A **dim mismatch is a LOUD failure at pod startup** (ADR 0015): the
   entrypoint's `hivemind-migrate` step exits non-zero naming both dims
   and both fixes — the pod never starts, never a silent no-op. The check
@@ -262,9 +303,12 @@ first-run bootstrap Job records itself as `ci-bootstrap`.
   ```bash
   kubectl -n hivemind run hivemind-migrate --rm -i --restart=Never \
     --image=<registry>/hivemind:<sha> \
-    --env=HIVEMIND_RUNNER=migrate \
-    --env-from=secret/hivemind-secrets
+    --overrides='{"spec":{"containers":[{"name":"hivemind-migrate","image":"<registry>/hivemind:<sha>","env":[{"name":"HIVEMIND_RUNNER","value":"migrate"}],"envFrom":[{"secretRef":{"name":"hivemind-secrets"}},{"configMapRef":{"name":"hivemind-config"}}]}]}}'
   ```
+
+  (`kubectl run` has no `--env-from`; the ConfigMap is injected too so the
+  run sees the real `HIVEMIND_EMBEDDING_DIM`.) Simpler when the Deployments
+  are healthy: `kubectl -n hivemind exec deploy/hivemind-api -- hivemind-migrate`.
 
 ### Graceful shutdown (`terminationGracePeriodSeconds`)
 
@@ -297,6 +341,15 @@ not edge-case insurance.
   attempt can overshoot it. Reads (`hive_search`, `GET /v1/entries`)
   embed the query only and never extract, so they finish well inside
   the embedder's 31.5s.
+- **The overall deadline (ADR 0041).** Each leg also runs under
+  `HIVEMIND_EMBEDDING_DEADLINE` / `HIVEMIND_EXTRACTOR_DEADLINE`. Unset,
+  it is derived as the leg's worst case in the table above (so the
+  table and the grace period stay correct when you change a
+  timeout or retry budget); it only bites when httpx's per-phase timeout
+  lets a slow-drip response overshoot, or a provider's `Retry-After`
+  (capped at 10s) pushes a sleep past the backoff. Jitter only shortens
+  sleeps. Setting it lower shortens the worst case; below the matching
+  `_TIMEOUT` is a startup error.
 - **If you raise a retry budget, raise this.** Each leg costs
   `(retries + 1) x timeout + 0.5 x (2^retries - 1)` seconds; sum the two
   legs, add the 5s `preStop`, then round up. Worked example: setting
@@ -363,7 +416,7 @@ auth middleware — k8s probes carry no credential):
 **Two-Secret ownership rule (do not cross the boundary):** CI owns
 `hivemind-secrets` (the three `K8S_SECRET_*` values, re-rendered on
 every deploy); the first-run bootstrap owns `hivemind-keys` (the
-generated ADMIN_KEY / ORG_KEY). The bootstrap step in `.gitlab-ci.yml`
+generated ADMIN_KEY / ORG_KEY). The bootstrap step (`scripts/ci-bootstrap-keys.sh`)
 deliberately skips when `hivemind-keys` exists, so a secret re-render
 never wipes the generated keys.
 
@@ -372,9 +425,15 @@ never wipes the generated keys.
 ## 7. RBAC
 
 Minimal ServiceAccount + Role for the GitLab Kubernetes agent's deploy
-ServiceAccount (the permissions referenced by the comment in
-`.gitlab-ci.yml`). The org's k8s agent must run as this ServiceAccount
+ServiceAccount (the verbs `.gitlab-ci.yml` actually uses). The org's k8s agent must run as this ServiceAccount
 (SA token or mounted kubeconfig).
+
+**The namespace is created once by an operator** (`kubectl apply -f
+deploy/kubernetes/namespace.yaml`): `namespaces` are cluster-scoped, so a
+namespaced Role cannot grant them. The pipeline's own
+`kubectl apply -f namespace.yaml` is then a no-op that needs only `get` +
+`patch` on that one namespace, granted by the small ClusterRole below
+(`resourceNames` limits it to `hivemind`).
 
 ```yaml
 apiVersion: v1
@@ -389,21 +448,34 @@ metadata:
   name: hivemind-deployer
   namespace: hivemind
 rules:
+  # `apply` is not an RBAC verb: server-side/client-side apply needs
+  # get + create + patch. The rollout waits need list + watch.
   - apiGroups: [""]
-    resources: ["namespaces"]
-    verbs: ["get"]
+    resources: ["configmaps", "services"]
+    verbs: ["get", "list", "watch", "create", "patch"]
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["get", "create", "patch", "apply"]
-  - apiGroups: ["batch"]
-    resources: ["jobs"]
-    verbs: ["create", "get", "delete"]
+    verbs: ["get", "create", "patch"]
   - apiGroups: [""]
     resources: ["pods", "pods/log"]
-    verbs: ["get", "list"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: ["apps"]
     resources: ["deployments"]
-    verbs: ["get", "patch", "apply"]
+    verbs: ["get", "list", "watch", "create", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list", "watch", "create", "patch"]
+  # Only if you apply the optional/ trees (Ingress, example NetworkPolicies)
+  # with the same ServiceAccount:
+  # - apiGroups: ["networking.k8s.io"]
+  #   resources: ["ingresses", "networkpolicies"]
+  #   verbs: ["get", "list", "watch", "create", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -414,6 +486,29 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: hivemind-deployer
+subjects:
+  - kind: ServiceAccount
+    name: hivemind-deployer
+    namespace: hivemind
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hivemind-namespace-apply
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    resourceNames: ["hivemind"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hivemind-namespace-apply
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hivemind-namespace-apply
 subjects:
   - kind: ServiceAccount
     name: hivemind-deployer
@@ -436,7 +531,7 @@ Postgres, and the entrypoint skips the migration step for it.
 GitLab project on the same image:
 
 ```bash
-kubectl kustomize build deploy/kubernetes/admin \
+kubectl kustomize deploy/kubernetes/admin \
   | sed "s|hivemind:0.0.0|$IMAGE|g" | kubectl -n hivemind apply -f -
 ```
 

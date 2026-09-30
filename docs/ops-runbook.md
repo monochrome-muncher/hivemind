@@ -7,6 +7,16 @@
 
 ## 1. Deployment (single-node, docker-compose)
 
+> **`docker-compose.yaml` is a dev / single-host convenience, not a hardened
+> production recipe.** It ships default credentials (`hivemind`/`hivemind`),
+> binds Postgres (5432) and the unauthenticated vLLM server (8001) to
+> **127.0.0.1 only**, and publishes the MCP runner (8088) on all interfaces.
+> For anything real: change the Postgres password (and the DSN) before first
+> start, keep 5432/8001 off every reachable interface (Docker publishes
+> around `ufw`/`iptables INPUT` rules), and put 8088 behind a TLS-terminating
+> proxy. The Kubernetes path in [DEPLOY.md](../DEPLOY.md) is the production
+> story.
+
 Hivemind is a **single-node** deployment (ADR 0007): one Postgres (with
 pgvector) + the hostable streamable-HTTP MCP runner (+ an embedding
 provider, ADR 0005). There is no orchestrator, no sharding, and no
@@ -20,8 +30,8 @@ multi-tenant isolation.
 
 | Service | Image / build | Purpose |
 |---|---|---|
-| `postgres` | `pgvector/pgvector:pg16` | the single Postgres + pgvector pool (host port 5432) |
-| `vllm` | `vllm/vllm-openai-cpu` | local CPU embedding server (ADR 0005; `:8001`), fully-local path |
+| `postgres` | `pgvector/pgvector:pg16` | the single Postgres + pgvector pool (host port 5432, loopback only) |
+| `vllm` | `vllm/vllm-openai-cpu` | local CPU embedding server (ADR 0005; `:8001`, loopback only), fully-local path |
 | `mcp-http` | this repo (`Dockerfile`) | the hostable, multi-agent streamable-HTTP MCP runner (ADR 0010; host port 8088) |
 
 ### Bring up
@@ -42,6 +52,7 @@ make mcp-http       # start the hostable MCP runner as a detached service (:8088
 | `HIVEMIND_EMBEDDING_ENDPOINT` / `_API_KEY` / `_MODEL` | the embedding provider (ADR 0005) |
 | `HIVEMIND_EMBEDDING_DIM` | the embedding dimension (a deploy-time decision, default **1024** — ADR 0015; the dev Makefile exports 512 for fast local vLLM embedding — see §6) |
 | `HIVEMIND_EMBEDDING_RETRIES` | retry budget for transient embedding failures (timeouts, connection errors, `429`, 5xx) — default 2; set `0` to disable (ADR 0014) |
+| `HIVEMIND_EMBEDDING_DEADLINE` / `HIVEMIND_EXTRACTOR_DEADLINE` | overall per-call budget in seconds, retries and backoff included (ADR 0041). Unset (default) = derived: `(retries+1) x timeout + 0.5 x (2^retries - 1)`, i.e. the DEPLOY.md §5 worst case; set lower to cap a write's wait; must be >= the matching `_TIMEOUT` |
 | `HIVEMIND_EXTRACTOR_ENDPOINT` / `_MODEL` / `_API_KEY` | the entity-extraction extractor (ADR 0016, SPEC §13): **optional + best-effort** — unset = extraction off (entries land with empty `entities`, zero LLM cost); an extraction failure **never** blocks a write (the entry lands without facets). Dev/test: `http://localhost:8080/v1` (`qwen3.8-27b`, key `dummy`) |
 | `HIVEMIND_EXTRACTOR_RETRIES` / `_TIMEOUT` | retry budget + call timeout for transient extractor failures (ADR 0014 pattern) — default 2 retries / 30 s; deterministic 4xx + schema-validation failures fail fast, no retry |
 | `HIVEMIND_HOST` / `HIVEMIND_PORT` | the mcp-http bind host/port (ADR 0010) |
@@ -91,8 +102,10 @@ plain Postgres backups — no Hivemind-specific tooling.
 
 ```sh
 # A full logical dump (consistent, small; the pool is single-node).
-docker compose exec postgres pg_dump -U hivemind -Fc hivemind \
-  > backup-$(date +%Y%m%d-%H%M).pgdump
+f=backup-$(date +%Y%m%d-%H%M).pgdump
+docker compose exec -T postgres pg_dump -U hivemind -Fc hivemind > "$f"
+# Verify the dump is readable before trusting it:
+docker compose exec -T postgres pg_restore --list < "$f" | head
 ```
 
 Schedule this (e.g. nightly) and ship it off-host. A logical dump is
@@ -106,8 +119,14 @@ not crash-consistent while the server writes — pair it with the logical
 dump):
 
 ```sh
-docker run --rm -v hivemind-hivemind-pg-data:/data -v "$(pwd)":/out \
-  alpine tar -czf /out/pgdata.tar.gz -C /data .
+# --volumes-from reuses whatever volume the running container mounts, so the
+# name (which depends on the compose project / checkout directory) cannot be
+# wrong. A mistyped `-v <name>:/data` silently creates an EMPTY volume and
+# "backs up" nothing.
+docker run --rm --volumes-from "$(docker compose ps -q postgres)" -v "$(pwd)":/out \
+  alpine tar -czf /out/pgdata.tar.gz -C /var/lib/postgresql/data .
+# Sanity check: a real data directory is far larger than a few KB.
+ls -l pgdata.tar.gz
 ```
 
 ### Restore
@@ -118,7 +137,7 @@ make pg-down
 make pg-reset
 docker compose up -d postgres
 # restore the logical dump
-docker compose exec -i postgres pg_restore -U hivemind -d hivemind --clean --if-exists < backup-20260601-0400.pgdump
+docker compose exec -i postgres pg_restore -U hivemind -d hivemind --clean --if-exists --no-owner < backup-20260601-0400.pgdump
 # apply any migrations not already in the dump (ADR 0020)
 make migrate
 ```
@@ -187,6 +206,20 @@ uv run hivemind-keys issue-admin
 
 # Agent key (issued at activation; one per registered agent, ADR 0012).
 uv run hivemind-keys issue-agent --name alice
+# A pending or revoked agent needs an explicit level and fleet (it is
+# activated exactly as REST activate does; ADR 0039):
+uv run hivemind-keys issue-agent --name alice --trust-level 1 --home-fleet <fleet-id>
+
+# Dead credentials (ADR 0039): pre-v2 `user` keys, name-less agent keys, and
+# agent keys of agents that are missing, pending or revoked never
+# authenticate. `hivemind-keys list` marks them [dead] and `migrate` logs a
+# warning with their count. They are inert, but they would authenticate
+# again after a rollback to an older release, so delete them:
+#   SELECT c.key_hash, c.kind, c.user_id, c.agent_name FROM credentials c
+#    WHERE c.kind = 'user'
+#       OR (c.kind = 'agent' AND (c.agent_name IS NULL OR NOT EXISTS
+#            (SELECT 1 FROM agents a WHERE a.name = c.agent_name AND a.status = 'active')));
+#   -- review, then DELETE FROM credentials c WHERE <same predicate>;
 ```
 
 The admin REST surface does the same (`POST /v1/admin/agents/{name}/activate`

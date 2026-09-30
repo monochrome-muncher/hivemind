@@ -114,6 +114,8 @@ def make_extractor(
     retries: int = 2,
     backoff: float = 0.5,
     sleep=None,
+    jitter=None,
+    deadline: float = 45.0,
 ) -> OpenAICompatExtractor:
     return OpenAICompatExtractor(
         client=env.client(),
@@ -124,6 +126,8 @@ def make_extractor(
         retries=retries,
         backoff=backoff,
         sleep=sleep,
+        jitter=jitter,
+        deadline=deadline,
     )
 
 
@@ -461,7 +465,7 @@ class TestRetries:
 
         env = MockEnv()
         env.script([httpx.Response(503), httpx.Response(502), _chat_response("[]")])
-        extractor = make_extractor(env, retries=2, backoff=0.5, sleep=record)
+        extractor = make_extractor(env, retries=2, backoff=0.5, sleep=record, jitter=lambda: 1.0)
         await extractor.extract_entry(make_draft())
         assert sleeps == [0.5, 1.0]
 

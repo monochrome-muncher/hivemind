@@ -28,7 +28,7 @@ from hivemind.store.migrate import (
     rollback,
 )
 
-HEAD = "0006.agent-revoked-status"
+HEAD = "0007.credential-uniqueness"
 
 # Every applied migration id, oldest first. Kept explicit rather than read
 # off the filesystem: the point of these assertions is that the runner
@@ -40,6 +40,7 @@ CHAIN = [
     "0003.importance-source-check",
     "0004.hnsw-vector-index",
     "0005.audit-log",
+    "0006.agent-revoked-status",
     HEAD,
 ]
 
@@ -164,6 +165,10 @@ async def test_rollback_removes_the_latest_migration() -> None:
     await _require_postgres(dsn)
     await _reset_chain(dsn)
     await migrate(dsn, dim)
+
+    rolled = await rollback(dsn, dim, count=1)
+    assert rolled == ["0007.credential-uniqueness"]
+    assert await current_schema_version(dsn) == "0006.agent-revoked-status"
 
     rolled = await rollback(dsn, dim, count=1)
     assert rolled == ["0006.agent-revoked-status"]
@@ -304,7 +309,7 @@ async def test_0006_backfills_revoked_and_rolls_back_without_loss() -> None:
     await _require_postgres(dsn)
     await _reset_chain(dsn)
     await migrate(dsn, dim)
-    await rollback(dsn, dim, count=1)
+    await rollback(dsn, dim, count=2)
     assert await current_schema_version(dsn) == "0005.audit-log"
 
     conn = await asyncpg.connect(dsn)
@@ -320,7 +325,7 @@ async def test_0006_backfills_revoked_and_rolls_back_without_loss() -> None:
     finally:
         await conn.close()
 
-    await migrate(dsn, dim)
+    await migrate(dsn, dim)  # applies 0006 and 0007
     statuses = "SELECT name, status FROM agents ORDER BY name"
     conn = await asyncpg.connect(dsn)
     try:
@@ -333,7 +338,7 @@ async def test_0006_backfills_revoked_and_rolls_back_without_loss() -> None:
     finally:
         await conn.close()
 
-    await rollback(dsn, dim, count=1)
+    await rollback(dsn, dim, count=2)  # 0007 then 0006
     conn = await asyncpg.connect(dsn)
     try:
         assert [tuple(r) for r in await conn.fetch(statuses)] == [
@@ -347,6 +352,65 @@ async def test_0006_backfills_revoked_and_rolls_back_without_loss() -> None:
         await conn.execute("DELETE FROM agents")
     finally:
         await conn.close()
+
+
+async def test_0007_dedupes_keeping_the_newest_then_enforces_uniqueness() -> None:
+    """ADR 0039: duplicate live keys (the pre-0007 race) are resolved
+    deterministically before the unique indexes go on: per agent name and
+    for the org key the NEWEST row survives, older ones are deleted.
+    Legacy ``user`` / name-less rows are untouched. The rollback drops only
+    the indexes."""
+    dsn, dim = _dsn(), Settings().embedding_dim
+    await _require_postgres(dsn)
+    await _reset_chain(dsn)
+    await migrate(dsn, dim)
+    await rollback(dsn, dim, count=1)
+    assert await current_schema_version(dsn) == "0006.agent-revoked-status"
+
+    conn = await asyncpg.connect(dsn)
+    try:
+        await conn.execute(
+            "INSERT INTO credentials (key_hash, kind, user_id, agent_id, agent_name, created_at) "
+            "VALUES ('a-old', 'agent', 'bob', 'bob', 'bob', '2026-01-01'), "
+            "('a-new', 'agent', 'bob', 'bob', 'bob', '2026-02-01'), "
+            "('c-only', 'agent', 'carol', 'carol', 'carol', '2026-01-01'), "
+            "('tie-a', 'agent', 'dan', 'dan', 'dan', '2026-03-01'), "
+            "('tie-b', 'agent', 'dan', 'dan', 'dan', '2026-03-01')"
+        )
+        await conn.execute(
+            "INSERT INTO credentials (key_hash, kind, user_id, created_at) VALUES "
+            "('o-old', 'org', 'org', '2026-01-01'), ('o-new', 'org', 'org', '2026-02-01'), "
+            "('u1', 'user', 'legacy', '2026-01-01'), ('u2', 'user', 'legacy', '2026-01-02')"
+        )
+    finally:
+        await conn.close()
+
+    await migrate(dsn, dim)
+    conn = await asyncpg.connect(dsn)
+    try:
+        rows = await conn.fetch("SELECT key_hash FROM credentials ORDER BY key_hash")
+        assert [r["key_hash"] for r in rows] == ["a-new", "c-only", "o-new", "tie-b", "u1", "u2"]
+        with pytest.raises(asyncpg.UniqueViolationError):
+            await conn.execute(
+                "INSERT INTO credentials (key_hash, kind, user_id, agent_name) "
+                "VALUES ('x', 'agent', 'carol', 'carol')"
+            )
+        with pytest.raises(asyncpg.UniqueViolationError):
+            await conn.execute(
+                "INSERT INTO credentials (key_hash, kind, user_id) VALUES ('y', 'org', 'o')"
+            )
+    finally:
+        await conn.close()
+
+    await rollback(dsn, dim, count=1)
+    conn = await asyncpg.connect(dsn)
+    try:
+        assert await conn.fetchval("SELECT to_regclass('credentials_one_agent_key')") is None
+        assert await conn.fetchval("SELECT to_regclass('credentials_one_org_key')") is None
+        assert await conn.fetchval("SELECT count(*) FROM credentials") == 6
+    finally:
+        await conn.close()
+    await migrate(dsn, dim)
 
 
 async def _backend_count(dsn: str) -> int:

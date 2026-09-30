@@ -1,6 +1,6 @@
 # Opt-in external reachability: one nginx Ingress + a cert-manager
 # Certificate. Apply via:
-#   kubectl kustomize build deploy/kubernetes/optional | kubectl apply -f -
+#   kubectl kustomize deploy/kubernetes/optional | kubectl apply -f -
 #
 # Replace the placeholder host (hivemind.example.org) with the org's real
 # hostname before applying, and point the issuer at the org's existing
@@ -30,6 +30,10 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-buffering: "off"
     nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
+    # Cap request bodies at the ingress (DEP-12): a memory entry is text of a
+    # few KB, and the app has no body-size limit of its own. nginx's default
+    # is 1m; stated explicitly so it is a visible, tunable decision.
+    nginx.ingress.kubernetes.io/proxy-body-size: "1m"
 spec:
   ingressClassName: nginx
   tls:

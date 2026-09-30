@@ -721,6 +721,29 @@ class TestAccessEndpoints:
         assert agent["status"] == "pending"
         assert agent["trust_level"] == 0
 
+    async def test_reregister_reports_status_and_refuses_another_alias(self) -> None:
+        # ONB-1 / AUTH-6 (ADR 0039): same alias -> 200 + current status;
+        # another alias -> 409 name_conflict that reveals nothing.
+        client = make_client(make_hivemind_app())
+        headers = {"X-API-Key": "key-org"}
+        async with client:
+            first = await client.post(
+                "/v1/agents", json={"name": "alice", "owner_alias": "john"}, headers=headers
+            )
+            again = await client.post(
+                "/v1/agents", json={"name": "alice", "owner_alias": "john"}, headers=headers
+            )
+            squat = await client.post(
+                "/v1/agents", json={"name": "alice", "owner_alias": "mallory"}, headers=headers
+            )
+        assert first.status_code == 201 and first.json()["already_registered"] is False
+        assert again.status_code == 200
+        assert again.json()["status"] == "pending"
+        assert again.json()["already_registered"] is True
+        assert "pending" in again.json()["message"]
+        assert squat.status_code == 409
+        assert "name_conflict" in squat.text
+
     async def test_register_agent_with_agent_key_denied(self) -> None:
         # An agent key (not org/admin) may not register (ADR 0012).
         client = make_client(make_hivemind_app())
