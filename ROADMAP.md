@@ -28,6 +28,9 @@
   rotation), the REST surface (`POST /v1/agents` + the admin endpoints),
   the MCP surface (`hive_register` + write-scope + visibility), and the
   reduced `hivemind-keys` CLI.
+- **2.0.0 closed a full security, correctness and performance review**
+  (§3.13, ADRs 0039–0043): the findings are fixed, and the open
+  follow-ups it found are listed in §3.13.
 - **What's next:** Tier 3.1–3.4 are shipped, including the Kubernetes +
   GitLab CI/CD deployment story (3.4). **§3.2 has been superseded by
   §3.5** (ADR 0020: an ordered, rollback-capable migration chain under a
@@ -185,7 +188,7 @@ kinds). Tier 3.1 (the key-rotation runbook) is **blocked by Tier 2** —
 you can't write a rotation story for a key model that's about to
 change.
 
-## Tier 3 — productionize (former Tier 2)  *(3.1, 3.3–3.12 shipped; 3.2 superseded by 3.5)*
+## Tier 3 — productionize (former Tier 2)  *(3.1, 3.3–3.13 shipped; 3.2 superseded by 3.5)*
 
 ### 3.1 Ops runbook  *(shipped: `docs/ops-runbook.md`)*
 Deployment, **backups** (single-node Postgres, ADR 0007),
@@ -444,6 +447,56 @@ finding home), and hits carry `scope`/`fleet_id` so a foreign entry is
 recognisable before it is opened. **Held:** a per-fleet "sensitive" flag,
 set by the admin, shown on hits and enforced on citations, if the
 conservative default proves too loose (ADR 0036).
+
+### 3.13 Security, correctness and performance review  *(shipped in 2.0.0: ADRs 0039–0043, migrations `0007`–`0008`)*
+A full review of the server, the deployment and the agent plugin, with
+every finding reproduced before it was fixed and every fix checked by a
+second reviewer. What it changed: the key lifecycle is atomic and
+registrations are owned by their alias (ADR 0039); every surface applies
+the same input bounds and agent-name rule before any provider or store
+call (ADR 0040); provider calls have an overall deadline and embedder
+outages are a typed error, never a leaked key (ADR 0041); the MCP
+credential is re-verified per call and fails closed (ADR 0042); entries
+are framed as untrusted data (ADR 0043); supersession is atomic in the
+store; `payload` round-trips on Postgres; `?history` is an indexed walk;
+the GitLab deploy job works; and the image is locked and non-root.
+DEPLOY.md §5 lists the upgrade steps.
+
+**Open follow-ups** (found, deliberately not done; each needs a decision
+or its own trigger):
+- **Keyword-stream semantics differ by store.** Postgres
+  (`plainto_tsquery`) requires every query term; `MemoryStore` needs one,
+  so the unit suite does not reflect production recall. Pick one (likely
+  an OR / `websearch_to_tsquery` form on Postgres) in an ADR and align both.
+- **Degraded search while the embedder is down**: today a typed 502 /
+  `embedding_unavailable`; a keyword-only fallback needs an ADR.
+- **Rate limiting** (garbage-key amplification on `/mcp`, the 2 MiB body
+  parse for a present-but-unknown key): belongs at the ingress; the
+  optional Ingress has no `/v1/admin` allowlist and there is no
+  default-deny egress policy.
+- **Registration** is still unaudited and the owner alias unverified:
+  the admin confirms the requester out of band.
+- **Migrate through PgBouncer**: session advisory locks need a direct
+  (non-pooled) DSN for `hivemind-migrate`; document or add a separate
+  setting (ADR 0020 note).
+- A pool acquire timeout surfaces as 500, not 503.
+- The first-run key bootstrap prints the raw keys once in its Job log
+  (removing that needs a ServiceAccount with `secrets:create`).
+- Structural untrusted-content markers on returned entries (deferred in
+  ADR 0043); non-reserved case-variant names (`Bob` / `bob`) can coexist
+  (ADR 0040); zero-norm embeddings are not rejected.
+- Performance: search loads full rows it partly discards (a slim-row port
+  method); a query-embedding cache is unmeasured; very low-selectivity
+  list filters at ~1M rows can be slower with the global list index; the
+  HNSW stream can truncate under a narrow visibility filter (ADR 0025).
+- Contract step for a later release: narrow `credentials_kind_check` to
+  drop `user` once no deployment has such rows.
+- **Harnesses**: after Gemini CLI, GitHub Copilot CLI (its `sessionStart`
+  hook injects context), then Cursor (re-test `${env:}` in remote
+  headers first), then Kiro and Amp as reference-only; Qwen Code is a
+  Gemini CLI variant. Still unconfirmed: whether Claude Code's
+  `deniedMcpServers` matches the plugin-scoped server name, and Gemini
+  CLI's header env expansion and SessionStart context injection.
 
 ## Tier 4 — close the spec's open items (SPEC §11) (former Tier 3)
 

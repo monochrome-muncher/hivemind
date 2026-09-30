@@ -146,6 +146,10 @@ _Avoid_: approval, key issuance (a key is its output, not its name)
 An agent's first contact with Hivemind: a unique agent name plus the owner's alias, creating a pending record (ADR 0012). Names are durable — revocation does not release a name. The first registrant's alias owns the name; the same alias registering again is told the current status, any other alias is told the name is taken (ADR 0039).
 _Avoid_: signup, onboarding, enrollment
 
+**Agent name**:
+The unique, durable name chosen at registration and used as an agent's author: 1–63 ASCII letters, digits, `.`, `_` or `-`, starting with a letter or digit, and never a reserved identity (`admin`, `org`, `dev`, `shared`) in any case (ADR 0040).
+_Avoid_: username, handle, agent id (the agent id is part of the key's record)
+
 **Owner alias**:
 The human name or address (username or email) an agent self-reports at registration so the admin can deliver its agent key out-of-band (ADR 0012). A contact field on the agent record, not a per-entry provenance claim.
 _Avoid_: author (that is the entry's verified writer), user, account
@@ -164,6 +168,10 @@ The append-only record of admin-surface actions (agent activation, trust-level a
 **Key fingerprint**:
 The first 12 hex characters of a key's stored SHA-256 hash — what `hivemind-keys list` shows and what the audit log records to identify a key (ADR 0027). Non-secret: it names a key without being usable as one.
 _Avoid_: key id, key prefix (it is a prefix of the hash, never of the key)
+
+**Dead credential**:
+A stored key that no longer authenticates although its row remains: a pre-v2 `user` key, an agent key without a registered name, or the key of an agent that is not active (ADR 0039). `hivemind-keys list` marks it `[dead]`.
+_Avoid_: expired key (keys do not expire), revoked key (revocation deletes the key)
 
 ### Surfaces
 
@@ -274,6 +282,14 @@ _Avoid_: DB version, migration cursor, schema fingerprint
 **Usage counters**:
 The minimal operational metrics surface (`GET /v1/metrics`, admin-gated): entries / fleets / agents counters (trust-level distribution, writes per fleet, pending-agent count) that make the SPEC §10 usage-based triggers measurable rather than guesswork (ROADMAP §3.3).
 _Avoid_: analytics, telemetry (that is the broader §10 story), dashboards (a UI is a non-goal, SPEC §9)
+
+**Input bounds**:
+The limits every surface applies to a request before any provider or store call: field sizes, `limit` / `offset`, payload depth, the request-body size, and no NUL or lone-surrogate characters (ADR 0040).
+_Avoid_: rate limits (none exist in the app), quotas
+
+**Provider deadline**:
+The overall time one embedder or extractor call may take, retries and backoff included; unset, it is derived from that provider's timeout and retry settings (ADR 0041).
+_Avoid_: timeout (that bounds one attempt), retry budget
 
 ### Configuration (ADR 0017)
 
