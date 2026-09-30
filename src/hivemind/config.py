@@ -120,6 +120,19 @@ class Settings(BaseSettings):
     # tuning concurrency against a `max_connections`-constrained org).
     pool_min_size: int = 1
     pool_max_size: int = 10
+    # Bounds on Postgres calls from the app pools (never applied to
+    # `hivemind-migrate`, whose CREATE INDEX CONCURRENTLY must run
+    # unbounded). Seconds; 0 disables the command/acquire bound. The
+    # client-side command bound is the default guard (asyncpg cancels a
+    # call that overruns it). `pool_statement_timeout_ms` is an OPT-IN
+    # server-side bound sent as a startup parameter: a transaction-mode
+    # PgBouncer rejects unknown startup parameters by default and never
+    # applies them to its shared server connections, so it stays 0 (off)
+    # unless the pool connects to Postgres directly.
+    pool_command_timeout: float = 30.0
+    pool_statement_timeout_ms: int = 0
+    pool_acquire_timeout: float = 10.0
+    pool_connect_timeout: float = 10.0
     embedding_endpoint: str = "http://localhost:8001/v1"
     embedding_api_key: str = ""
     embedding_model: str = "text-embedding-3-small"

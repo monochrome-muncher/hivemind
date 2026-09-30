@@ -26,7 +26,7 @@ import asyncpg
 from hivemind.domain.access import TrustLevel
 from hivemind.domain.audit import key_fingerprint
 from hivemind.ports import Credential
-from hivemind.store.pool import make_pool
+from hivemind.store.pool import PoolTimeouts, make_pool
 
 _SELECT_CREDENTIAL = (
     "SELECT kind, user_id, agent_id, agent_name FROM credentials WHERE key_hash = $1"
@@ -60,10 +60,19 @@ def key_hash(key: str) -> str:
 class PgAuthenticator:
     """An ``Authenticator`` backed by the store lane's ``credentials`` table."""
 
-    def __init__(self, dsn: str, *, pool_min_size: int = 1, pool_max_size: int = 10) -> None:
+    def __init__(
+        self,
+        dsn: str,
+        *,
+        pool_min_size: int = 1,
+        pool_max_size: int = 10,
+        timeouts: PoolTimeouts | None = None,
+    ) -> None:
         self._dsn = dsn
         self._pool_min_size = pool_min_size
         self._pool_max_size = pool_max_size
+        self._timeouts = timeouts or PoolTimeouts()
+        self._acquire_timeout = self._timeouts.acquire
         self._pool: asyncpg.Pool | None = None
         # Serialises lazy creation: without it, every call arriving while the
         # first pool is still being built opened its own and orphaned it.
@@ -76,7 +85,12 @@ class PgAuthenticator:
             async with self._pool_lock:
                 if self._pool is None:
                     self._pool = await make_pool(
-                        self._dsn, min_size=self._pool_min_size, max_size=self._pool_max_size
+                        self._dsn,
+                        min_size=self._pool_min_size,
+                        max_size=self._pool_max_size,
+                        command_timeout=self._timeouts.command,
+                        statement_timeout_ms=self._timeouts.statement_ms,
+                        connect_timeout=self._timeouts.connect,
                     )
         return self._pool
 
@@ -107,7 +121,7 @@ class PgAuthenticator:
         stored_hash = key_hash(key)
         key_id = key_fingerprint(stored_hash)
         pool = await self._ensure_pool()
-        async with pool.acquire() as conn:
+        async with pool.acquire(timeout=self._acquire_timeout) as conn:
             row = await conn.fetchrow(_SELECT_CREDENTIAL, stored_hash)
         if row is None:
             return None
@@ -133,7 +147,7 @@ class PgAuthenticator:
             # Resolve the agent's privilege (trust level + home fleet) from
             # the ``agents`` table (ADRs 0011-0012).
             pool = await self._ensure_pool()
-            async with pool.acquire() as conn:
+            async with pool.acquire(timeout=self._acquire_timeout) as conn:
                 agent_row = await conn.fetchrow(_SELECT_AGENT, agent_name)
             if agent_row is None:
                 # No agents record (not activated): untrusted (level 0).
@@ -166,7 +180,7 @@ class PgAuthenticator:
         the raw secret once (never stored)."""
         pool = await self._ensure_pool()
         raw_key = _generate_key()
-        async with pool.acquire() as conn:
+        async with pool.acquire(timeout=self._acquire_timeout) as conn:
             await conn.execute(_ISSUE_AGENT_KEY, key_hash(raw_key), agent_name)
         return raw_key
 
@@ -174,7 +188,7 @@ class PgAuthenticator:
         """Retire the agent's key (the agent record + name stay reserved,
         ADR 0012: demotion != revocation, but a revoked key is dead)."""
         pool = await self._ensure_pool()
-        async with pool.acquire() as conn:
+        async with pool.acquire(timeout=self._acquire_timeout) as conn:
             await conn.execute(_REVOKE_AGENT_KEY, agent_name)
 
     async def rotate_org_key(self) -> str:
@@ -182,7 +196,7 @@ class PgAuthenticator:
         returns the new raw secret once. All prior org keys stop working."""
         pool = await self._ensure_pool()
         raw_key = _generate_key()
-        async with pool.acquire() as conn, conn.transaction():
+        async with pool.acquire(timeout=self._acquire_timeout) as conn, conn.transaction():
             await conn.execute(_DELETE_ORG_KEY)
             await conn.execute(_ISSUE_ORG_KEY, key_hash(raw_key), "org")
         return raw_key
@@ -191,6 +205,6 @@ class PgAuthenticator:
         """Issue an admin key; return the raw secret once."""
         pool = await self._ensure_pool()
         raw_key = _generate_key()
-        async with pool.acquire() as conn:
+        async with pool.acquire(timeout=self._acquire_timeout) as conn:
             await conn.execute(_ISSUE_ADMIN_KEY, key_hash(raw_key), "admin")
         return raw_key
