@@ -76,8 +76,8 @@ def test_manifests_agree_on_name_and_version() -> None:
     assert claude["name"] == codex["name"] == entry["name"] == "hivemind"
     dsh = _json(PLUGIN / "package.json")
     assert claude["version"] == codex["version"] == entry["version"] == dsh["version"] == semver
-    assert dsh["name"] == "hivemind-dsh-plugin"
-    root = _json(ROOT / "package.json")  # the DeepSeek Harness Git-URL install
+    assert dsh["name"] == "hivemind-agent-plugin"
+    root = _json(ROOT / "package.json")  # the Git-URL install (DeepSeek Harness, Pi, OpenCode)
     assert (root["name"], root["version"]) == (dsh["name"], semver)
     assert _yaml_scalar(PLUGIN / "plugin.yaml", "name") == "hivemind"
     assert _yaml_scalar(PLUGIN / "plugin.yaml", "version") == semver

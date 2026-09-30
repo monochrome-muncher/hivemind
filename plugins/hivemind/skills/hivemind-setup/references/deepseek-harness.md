@@ -68,7 +68,7 @@ with another harness's key.
 
 Installed from a checkout: `git pull` in the checkout (the profile links
 it). Installed from npm: `dsh plugin --profile <name> update
-hivemind-dsh-plugin`. Then restart `dsh`.
+hivemind-agent-plugin`. Then restart `dsh`.
 
 ## Incognito
 

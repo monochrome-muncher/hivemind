@@ -1,9 +1,18 @@
 {
-  "name": "hivemind-dsh-plugin",
+  "name": "hivemind-agent-plugin",
   "version": "2.0.0",
-  "description": "Hivemind agent plugin, installable from this repository's Git URL in DeepSeek Harness, Pi and OpenCode: the Hivemind MCP server, the hivemind and hivemind-setup skills, and a stay-aware reminder. The plugin itself lives in plugins/hivemind.",
+  "description": "Hivemind agent plugin for harnesses that install a package from this repository's Git URL (DeepSeek Harness, Pi and OpenCode): the Hivemind MCP server, the hivemind and hivemind-setup skills, and a stay-aware reminder. The plugin lives in plugins/hivemind; Claude Code, Codex, Oh My Pi and Hermes install it through their own manifests (see plugins/hivemind/README.md).",
   "private": true,
   "type": "module",
+  "keywords": [
+    "hivemind",
+    "memory",
+    "mcp",
+    "agent-skills",
+    "pi-package",
+    "dsh",
+    "opencode"
+  ],
   "main": "./plugins/hivemind/opencode/hivemind.js",
   "exports": {
     "./server": "./plugins/hivemind/opencode/hivemind.js"
