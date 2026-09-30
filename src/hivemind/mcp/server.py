@@ -126,7 +126,10 @@ _DESC_REGISTER = (
     "Register (or re-register) an agent (ADR 0012). Gated on the org key "
     "(an admin key is rejected here); creates a 'pending' agent (level 0, no fleet). Re-registering a "
     "pending name is idempotent; an active name is a conflict (the name stays "
-    "reserved — pick a new one, ADR 0012)."
+    "reserved — pick a new one, ADR 0012). The name must be 1-63 ASCII "
+    "characters — letters, digits, '.', '_' or '-', starting with a letter or "
+    "digit — and not a reserved name (admin, org, dev, shared; any case); a bad "
+    "or reserved name answers invalid_input (ADR 0040)."
 )
 
 

@@ -66,7 +66,7 @@ class PreAuthGuard:
         path: str = scope["path"]
         if (
             path.startswith("/v1/")
-            and path not in _PUBLIC_PATHS
+            and (path.rstrip("/") or "/") not in _PUBLIC_PATHS
             and scope["method"] != "OPTIONS"
             and b"x-api-key" not in headers
         ):

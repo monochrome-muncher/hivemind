@@ -201,7 +201,7 @@ def _build_filters(
     names: AND-semantics, case-insensitive (the store layer matches on
     lower-cased names; kinds are display-only, not filterable in v1).
     """
-    return EntryFilters(
+    filters = EntryFilters(
         kind=_parse_kind(kind),
         tags=tuple(tags or ()),
         entities=tuple(entities or ()),
@@ -214,6 +214,8 @@ def _build_filters(
         created_to=_parse_dt(created_to, "created_to"),
         include_inactive=include_inactive,
     )
+    filters.validate()  # ADR 0040: caller input, unlike service-built filters
+    return filters
 
 
 async def _supersession_chain(app: McpHivemind, entry: Entry) -> tuple[list[Entry], list[Entry]]:

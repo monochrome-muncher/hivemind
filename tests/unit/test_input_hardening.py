@@ -116,7 +116,7 @@ def test_a_draft_at_the_caps_is_accepted() -> None:
 )
 def test_a_filter_with_nul_is_refused(fields: dict[str, object]) -> None:
     with pytest.raises(InvalidInput):
-        EntryFilters(**fields)  # type: ignore[arg-type]
+        EntryFilters(**fields).validate()  # type: ignore[arg-type]
 
 
 def test_the_embedded_text_is_bounded_by_characters_too() -> None:

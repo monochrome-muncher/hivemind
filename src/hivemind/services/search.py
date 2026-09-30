@@ -101,6 +101,7 @@ class SearchService:
         check_query(query)
         check_pagination(limit, offset)
         filters = filters or EntryFilters()
+        filters.validate()
         limit = limit if limit is not None else self._config.default_limit
         offset = offset or 0
         top_k = self._config.candidate_top_k

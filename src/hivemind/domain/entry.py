@@ -18,11 +18,11 @@ from hivemind.domain.validation import (
     MAX_BODY_CHARS,
     MAX_FILTER_VALUE_CHARS,
     MAX_ID_CHARS,
-    MAX_IDENTITY_CHARS,
     MAX_SOURCE_REF_CHARS,
     MAX_SOURCES,
     MAX_SUPERSEDES,
     InvalidInput,
+    check_datetime,
     check_filter_values,
     check_id,
     check_no_nul,
@@ -60,6 +60,13 @@ _WORD_RE = re.compile(r"\S+")
 # (base64, minified JSON, CJK) is "one word" of any length; this bounds
 # the text sent to the embedder and extractor whatever the script.
 EMBED_BODY_MAX_CHARS = 20_000
+# The ceiling scales with a raised word budget (HIVEMIND_EMBEDDING_PREFIX_TOKENS,
+# ADR 0021) so the knob is not silently capped: 10 characters per word.
+EMBED_CHARS_PER_PREFIX_TOKEN = 10
+
+
+def embed_body_char_ceiling(prefix_tokens: int) -> int:
+    return max(EMBED_BODY_MAX_CHARS, prefix_tokens * EMBED_CHARS_PER_PREFIX_TOKEN)
 
 
 def _utcnow() -> datetime:
@@ -209,8 +216,11 @@ class EntryDraft:
         """NUL + size bounds (ADR 0040): runs at construction, so every
         surface rejects the same inputs before the embedder is called."""
         check_no_nul(self.summary, "summary")
-        check_text(self.author, "author", MAX_IDENTITY_CHARS)
-        check_text(self.agent, "agent", MAX_IDENTITY_CHARS)
+        # author/agent can be a legacy registered name (unbounded before
+        # ADR 0040), so only what Postgres cannot store is refused here.
+        check_no_nul(self.author, "author")
+        check_no_nul(self.agent, "agent")
+        check_datetime(self.occurred_at, "occurred_at")
         check_text(self.body, "body", MAX_BODY_CHARS)
         check_tags(self.tags)
         check_payload(self.payload)
@@ -302,8 +312,12 @@ class EntryFilters:
     created_to: datetime | None = None
     include_inactive: bool = False
 
-    def __post_init__(self) -> None:
-        # ADR 0040: a filter string reaches Postgres as a bind parameter.
+    def validate(self) -> None:
+        """Bounds for filters built from **caller input** (ADR 0040): every
+        string reaches Postgres as a bind parameter, every timestamp must be
+        in range. Surfaces call this; filters the service builds itself from
+        stored rows (metrics, chain) are deliberately not validated, so a
+        legacy value can never make an internal query fail."""
         check_filter_values(self.tags, "tags")
         check_filter_values(self.entities, "entities")
         for field, value in (
@@ -313,6 +327,13 @@ class EntryFilters:
             ("agent", self.agent),
         ):
             check_text(value, field, MAX_FILTER_VALUE_CHARS)
+        for field, moment in (
+            ("occurred_from", self.occurred_from),
+            ("occurred_to", self.occurred_to),
+            ("created_from", self.created_from),
+            ("created_to", self.created_to),
+        ):
+            check_datetime(moment, field)
 
     def matches(self, entry: Entry) -> bool:
         """Pure filter evaluation — shared by every store adapter."""
@@ -389,7 +410,7 @@ def embeddable_text(
     """
     text = summary
     if body:
-        prefix = _body_prefix(body, prefix_tokens)[:EMBED_BODY_MAX_CHARS]
+        prefix = _body_prefix(body, prefix_tokens)[: embed_body_char_ceiling(prefix_tokens)]
         text = f"{text}\n{prefix}"
     return text
 

@@ -74,7 +74,8 @@ def _no_nul(value: str | None) -> str | None:
 
 # A path name/id or query string that may name a stored record (legacy
 # names are not re-validated here, only bounded and NUL-free — ADR 0040).
-NameParam = Annotated[str, Path(max_length=MAX_IDENTITY_CHARS), AfterValidator(_no_nul)]
+# No length cap on a name: a legacy agent registered before ADR 0040 must stay manageable.
+NameParam = Annotated[str, Path(), AfterValidator(_no_nul)]
 ActorQuery = Annotated[str | None, Query(max_length=MAX_IDENTITY_CHARS), AfterValidator(_no_nul)]
 
 # GET /v1/admin/audit-log page size (ADR 0027): a sensible default and a
@@ -251,6 +252,7 @@ def build_router(app: HivemindApp) -> APIRouter:
             created_to=_to_utc(created_to),
             include_inactive=include_inactive,
         )
+        filters.validate()  # ADR 0040 (raises InvalidInput -> 422)
         effective_limit = limit if limit is not None else app.search_config.default_limit
         effective_offset = offset if offset is not None else 0
         entries = await app.store.list_entries(

@@ -16,6 +16,7 @@ import json
 import re
 import unicodedata
 from collections.abc import Iterable
+from datetime import UTC, datetime
 from typing import Any
 
 
@@ -37,6 +38,11 @@ MAX_TAG_CHARS = 64
 MAX_SOURCES = 32
 MAX_SOURCE_REF_CHARS = 2_048
 MAX_PAYLOAD_BYTES = 65_536
+MAX_PAYLOAD_DEPTH = 32
+# Sane bounds for caller-supplied timestamps (Postgres' own range is far
+# wider, but asyncpg overflows on offsets that push a value out of it).
+MIN_DATETIME = datetime(1900, 1, 1, tzinfo=UTC)
+MAX_DATETIME = datetime(2200, 1, 1, tzinfo=UTC)
 MAX_SUPERSEDES = 16
 MAX_ID_CHARS = 64
 MAX_IDENTITY_CHARS = 256  # author / agent / actor strings
@@ -63,9 +69,16 @@ RESERVED_AGENT_NAMES = frozenset({"admin", "org", "dev", "shared"})
 MAX_REQUEST_BODY_BYTES = 2 * 1024 * 1024
 
 
+_SURROGATE_RE = re.compile("[\ud800-\udfff]")
+
+
 def check_no_nul(value: str, field: str) -> str:
+    """Reject what Postgres cannot store in ``text``/``jsonb``: U+0000 and
+    lone surrogates (U+D800-U+DFFF, which cannot be encoded as UTF-8)."""
     if "\x00" in value:
         raise InvalidInput(f"{field} must not contain NUL (U+0000)")
+    if _SURROGATE_RE.search(value):
+        raise InvalidInput(f"{field} must not contain lone surrogate characters")
     return value
 
 
@@ -90,6 +103,19 @@ def check_pagination(limit: int | None, offset: int | None) -> None:
         raise InvalidInput(f"limit must be between 1 and {MAX_LIMIT}")
     if offset is not None and not 0 <= offset <= MAX_OFFSET:
         raise InvalidInput(f"offset must be between 0 and {MAX_OFFSET}")
+
+
+def check_datetime(value: datetime | None, field: str) -> None:
+    """A caller-supplied timestamp must fall in ``[1900, 2200)`` UTC (a
+    naive value is UTC); out-of-range values overflow asyncpg."""
+    if value is None:
+        return
+    try:
+        utc = value.astimezone(UTC) if value.tzinfo is not None else value.replace(tzinfo=UTC)
+    except (OverflowError, ValueError) as exc:
+        raise InvalidInput(f"{field} is out of range") from exc
+    if not MIN_DATETIME <= utc < MAX_DATETIME:
+        raise InvalidInput(f"{field} must be between the years 1900 and 2199")
 
 
 def check_id(value: str, field: str) -> str:
@@ -120,19 +146,23 @@ def check_payload(payload: dict[str, Any] | None) -> None:
     and at most ``MAX_PAYLOAD_BYTES`` of serialised JSON."""
     if payload is None:
         return
-    stack: list[Any] = [payload]
+    stack: list[tuple[Any, int]] = [(payload, 1)]
     while stack:
-        node = stack.pop()
+        node, depth = stack.pop()
         if isinstance(node, str):
             check_no_nul(node, "payload string")
-        elif isinstance(node, dict):
-            for key, val in node.items():
-                check_no_nul(str(key), "payload key")
-                stack.append(val)
-        elif isinstance(node, list | tuple):
-            stack.extend(node)
+        elif isinstance(node, dict | list | tuple):
+            if depth > MAX_PAYLOAD_DEPTH:
+                raise InvalidInput(f"payload must be nested at most {MAX_PAYLOAD_DEPTH} levels")
+            if isinstance(node, dict):
+                for key, val in node.items():
+                    check_no_nul(str(key), "payload key")
+                    stack.append((val, depth + 1))
+            else:
+                stack.extend((item, depth + 1) for item in node)
     try:
-        size = len(json.dumps(payload, allow_nan=False, ensure_ascii=False).encode())
+        compact = json.dumps(payload, allow_nan=False, ensure_ascii=False, separators=(",", ":"))
+        size = len(compact.encode())
     except ValueError as exc:  # NaN / Infinity
         raise InvalidInput("payload must be plain JSON (no NaN or Infinity)") from exc
     except (TypeError, RecursionError) as exc:
@@ -141,13 +171,24 @@ def check_payload(payload: dict[str, Any] | None) -> None:
         raise InvalidInput(f"payload must be at most {MAX_PAYLOAD_BYTES} bytes of JSON")
 
 
+# Invisible or display-deceiving format characters (Cf) banned in names:
+# zero-width space, bidi marks / overrides / isolates, word joiner and the
+# invisible operators, BOM, soft hyphen. ZWNJ (U+200C) and ZWJ (U+200D) are
+# deliberately allowed: Persian, Indic scripts and emoji sequences need them.
+_BANNED_FORMAT_CHARS = frozenset(
+    "\u00ad\u061c\u180e\u200b\u200e\u200f\u2060\u2061\u2062\u2063\u2064\ufeff"
+    + "".join(chr(c) for c in (*range(0x202A, 0x202F), *range(0x2066, 0x206A)))
+)
+
+
 def _has_hidden_chars(value: str) -> bool:
-    """Control (Cc), format / zero-width (Cf), surrogate, private-use or
-    unassigned characters; the line/paragraph separators too."""
-    return any(
-        unicodedata.category(ch)[0] == "C" or unicodedata.category(ch) in ("Zl", "Zp")
-        for ch in value
-    )
+    """Control (Cc), surrogate, private-use and line/paragraph-separator
+    characters, plus the invisible format characters above."""
+    for ch in value:
+        category = unicodedata.category(ch)
+        if category in ("Cc", "Cs", "Co", "Zl", "Zp") or ch in _BANNED_FORMAT_CHARS:
+            return True
+    return False
 
 
 def validate_agent_name(name: str) -> str:

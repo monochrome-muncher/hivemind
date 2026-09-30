@@ -7,6 +7,8 @@ Skips cleanly when Postgres is unreachable.
 
 from __future__ import annotations
 
+import json
+
 import asyncpg
 import httpx
 import pytest
@@ -139,3 +141,75 @@ async def test_the_largest_allowed_body_of_distinct_words_is_stored(
         headers=KEY,
     )
     assert over.status_code == 422
+
+
+async def _post(client: httpx.AsyncClient, url: str, obj: object) -> httpx.Response:
+    """POST JSON with ``ensure_ascii`` escapes, so a lone surrogate reaches
+    the server as ``\\ud800`` (httpx's own encoder refuses to send one)."""
+    return await client.post(
+        url,
+        content=json.dumps(obj).encode(),
+        headers={**KEY, "Content-Type": "application/json"},
+    )
+
+
+# -- verifier follow-ups: surrogates, datetime range, deep payloads ---------------
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"tags": ["a\ud800"]},
+        {"summary": "a\udfffb"},
+        {"payload": {"a": "\ud800"}},
+        {"sources": [{"type": "url", "ref": "\udc00"}]},
+    ],
+)
+async def test_lone_surrogates_in_an_entry_are_422(client: httpx.AsyncClient, fields: dict) -> None:
+    resp = await _post(client, "/v1/entries", {"kind": "fact", "summary": "s", **fields})
+    assert resp.status_code == 422, resp.text
+
+
+async def test_lone_surrogates_in_search_feedback_and_withdraw_are_422(
+    client: httpx.AsyncClient,
+) -> None:
+    made = await _post(client, "/v1/entries", {"kind": "fact", "summary": "s"})
+    entry_id = made.json()["id"]
+    search = await _post(client, "/v1/search", {"query": "a\ud800"})
+    tagged = await _post(client, "/v1/search", {"query": "q", "tags": ["\ud800"]})
+    feedback = await _post(
+        client, f"/v1/entries/{entry_id}/feedback", {"verdict": "helpful", "note": "\ud800"}
+    )
+    withdraw = await _post(client, f"/v1/entries/{entry_id}/withdraw", {"reason": "\udfff"})
+    assert search.status_code == tagged.status_code == 422
+    assert feedback.status_code == withdraw.status_code == 422
+
+
+@pytest.mark.parametrize("value", ["0001-01-01T00:00:00+23:00", "9999-12-31T23:59:59-23:00"])
+async def test_out_of_range_datetimes_are_422_not_500(
+    client: httpx.AsyncClient, value: str
+) -> None:
+    listing = await client.get("/v1/entries", params={"created_from": value}, headers=KEY)
+    search = await client.post(
+        "/v1/search", json={"query": "q", "occurred_from": value}, headers=KEY
+    )
+    write = await client.post(
+        "/v1/entries",
+        json={"kind": "fact", "summary": "s", "occurred_at": value},
+        headers=KEY,
+    )
+    assert listing.status_code == search.status_code == write.status_code == 422
+
+
+async def test_a_deeply_nested_payload_is_refused_and_does_not_poison_listing(
+    client: httpx.AsyncClient,
+) -> None:
+    node: dict = {"leaf": 1}
+    for _ in range(300):
+        node = {"n": node}
+    resp = await client.post(
+        "/v1/entries", json={"kind": "fact", "summary": "s", "payload": node}, headers=KEY
+    )
+    listing = await client.get("/v1/entries", headers=KEY)
+    assert resp.status_code == 422
+    assert listing.status_code == 200

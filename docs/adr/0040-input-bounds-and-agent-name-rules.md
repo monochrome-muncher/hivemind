@@ -93,7 +93,9 @@ so both surfaces share it): ASCII `[A-Za-z0-9][A-Za-z0-9._-]{0,62}`.
   the format, so a legacy agent stays manageable.
 
 Fleet names are free-form display text: non-blank, ≤ 128 characters, and no
-control (Cc), format/zero-width (Cf), separator (Zl/Zp) or NUL characters.
+control (Cc), separator (Zl/Zp), NUL or invisible/bidi format characters
+(zero-width space, word joiner, BOM, bidi marks/overrides/isolates); ZWNJ and ZWJ
+are allowed (Persian, Indic, emoji).
 `owner_alias` likewise (≤ 128).
 
 **Admin panel proxy** re-quotes each decoded path segment
@@ -102,10 +104,20 @@ control (Cc), format/zero-width (Cf), separator (Zl/Zp) or NUL characters.
 the allowlist matched it.
 
 **Amendment to ADR 0021** (not a contradiction of it): the embedded text
-also carries a character ceiling (`EMBED_BODY_MAX_CHARS = 20 000`) beside
+also carries a character ceiling (`max(20 000, 10 × prefix tokens)`, so a raised
+`HIVEMIND_EMBEDDING_PREFIX_TOKENS` is not silently capped) beside
 the 2000-word budget. The word budget stays the primary bound; the ceiling
 covers bodies with no whitespace (base64, minified JSON, CJK), which count
 as one "word" and previously reached the embedder whole.
+
+**Further bounds** (verifier follow-ups): lone surrogates are refused with NUL
+(Postgres cannot encode them); `payload` nesting is capped at 32 levels (deeper
+values stored but then broke response serialisation) and its size is measured as
+compact JSON; caller-supplied timestamps must fall in 1900–2199 UTC; filter
+validation (`EntryFilters.validate()`) runs at the surfaces on caller input only,
+never on filters the service builds from stored rows, and agent/author on a draft
+and `{name}` path parameters are not length-capped, so a legacy name stays
+manageable.
 
 **Documented, not changed:** a search ranks at most `2 × candidate_top_k`
 entries (SPEC §5.3), so paging past that returns an empty page.

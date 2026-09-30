@@ -1,5 +1,9 @@
 # The embedded-text budget is counted in whitespace words, not model tokens
 
+> **Amended by [ADR 0040](0040-input-bounds-and-agent-name-rules.md):**
+> the embedded text also carries a character ceiling, `max(20 000, 10 × prefix
+> tokens)`, beside the word budget below (for bodies with no whitespace).
+
 Every entry is embedded from `summary` + a bounded prefix of `body`
 (SPEC §7), and — since ADR 0016 — the entity extractor reads that
 *same* bounded text (SPEC §13.1). Until now the bound was **2048
