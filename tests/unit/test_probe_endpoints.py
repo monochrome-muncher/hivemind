@@ -182,3 +182,28 @@ async def test_build_http_app_health_reflects_the_store() -> None:
         database = await client.get("/mcp/health/database")
         assert database.status_code == 503
         assert database.json()["database"] == "unreachable"
+
+
+async def test_the_database_probe_is_cached_briefly(monkeypatch: pytest.MonkeyPatch) -> None:
+    """MCP-10: an unauthenticated GET flood costs one DB round-trip per
+    cache window, not one per request; after the window it re-checks."""
+    import hivemind.mcp.http as http_mod
+
+    calls = 0
+    now = [1000.0]
+
+    class CountingStore(MemoryStore):
+        async def health_check(self) -> bool:
+            nonlocal calls
+            calls += 1
+            return True
+
+    monkeypatch.setattr(http_mod.time, "monotonic", lambda: now[0])
+    router = _probe_router(CountingStore())
+    for _ in range(10):
+        status, _ = _status_and_body(await _drive(router, _http_scope("/mcp/health/database")))
+        assert status == 200
+    assert calls == 1
+    now[0] += http_mod._DATABASE_PROBE_CACHE_SECONDS + 0.1
+    await _drive(router, _http_scope("/mcp/health/database"))
+    assert calls == 2
