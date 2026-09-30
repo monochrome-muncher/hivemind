@@ -7,13 +7,16 @@ or slow a session down):
    under this plugin's namespace: ``skill_view("hivemind:hivemind")``.
    Plugin skills are read-only and opt-in explicit loads, so the
    system-prompt section below is what points the agent at them.
-2. A bounded system-prompt section that keeps the agent Hivemind-aware
-   across sessions and compaction: it renders once for a new session, is
-   frozen on compression, and is recovered from the persisted system
-   prompt after a process restart/resume. That is the same shape as the
-   DeepSeek Harness MCP instructions and the Claude Code/Codex
-   SessionStart hook — the reminder lives in the system prompt, which
-   compaction never rewrites.
+2. A bounded system-prompt section that is meant to keep the agent
+   Hivemind-aware across sessions and compaction. **Do not rely on it.**
+   Hermes exposes ``register_system_prompt_section`` but, as of the
+   upstream report NousResearch/hermes-agent#117432 (v0.21.3, closed
+   "not planned"), never renders registered sections, so on such a
+   version the model sees nothing from it. The code path stays so that a
+   Hermes that does render it gets the reminder for free, but the
+   supported always-on layer is the marked instruction block in the
+   profile's ``SOUL.md`` (hivemind-setup, references/hermes.md: required,
+   not optional). The plugin logs one line saying so.
 
 The Hivemind MCP server is configured separately (the
 ``mcp_servers.hivemind`` entry in ``~/.hermes/config.yaml``, walked
@@ -24,8 +27,11 @@ the connection state without ever printing the key.
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 PLUGIN_DIR = Path(__file__).resolve().parent
 SKILLS_DIR = PLUGIN_DIR / "skills"
@@ -96,6 +102,11 @@ def register(ctx) -> None:
     # to the skills alone (Hermes's own guidance: probe before using,
     # degrade gracefully).
     register_section = getattr(ctx, "register_system_prompt_section", None)
+    log.info(
+        "hivemind: the system-prompt section may not be rendered by this Hermes "
+        "(hermes-agent#117432); make sure the hivemind block is in SOUL.md "
+        "(hivemind-setup skill, references/hermes.md)"
+    )
     if register_section is not None:
         register_section(
             "hivemind",

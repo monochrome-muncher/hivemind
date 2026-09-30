@@ -1,0 +1,3 @@
+# Plugin text files are read by harnesses on every OS: keep LF so
+# frontmatter parsers and shell scripts never see CRLF.
+plugins/** text eol=lf

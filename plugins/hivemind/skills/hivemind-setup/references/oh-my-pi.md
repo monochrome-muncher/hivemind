@@ -34,8 +34,26 @@ It provides the two skills and the system-prompt reminder. (A plain
 `omp install <git-url>` is not enough: Oh My Pi only finds a package's
 skills in a top-level `skills/` folder.)
 
-**Where the key goes:** export both variables in the shell that launches
-`omp` (see "Shell profile" in the hivemind-setup skill).
+**Where the key goes:** a private key file (hivemind-setup, "Key file",
+`~/.config/hivemind/omp.env`, mode 600) loaded **only for Oh My Pi** with
+a function in the shell profile: `omp() { ( . ~/.config/hivemind/omp.env;
+command omp "$@" ); }`, so other harnesses on the machine keep their own
+agents. (Oh My Pi as the only harness: sourcing it from the profile is
+fine.) Never a key in a project `.omp/mcp.json`.
+
+**Identity:** name this agent `<user>-omp`, distinct from the agents of
+other harnesses.
+
+**Duplicate-server risk (UNCONFIRMED).** Oh My Pi's marketplace plugins
+can load a plugin's MCP servers too, and the hivemind plugin ships a
+`.mcp.json` with the same `${HIVEMIND_*}` references at its root. After
+installing, list the MCP servers (`/mcp` or the equivalent): if Hivemind
+appears twice (two connections, duplicate `hive_*` routes), keep one:
+delete the hand-written `hivemind` entry from `~/.omp/agent/mcp.json`, or
+tell the user not to add both. Also check the installed version: some
+`omp` releases (18.1.5 and later, reported) hide the skills of
+user-scope marketplace plugins unless `claude-plugins` is in
+`enabledProviders`; if the skills are missing, check that setting.
 
 Oh My Pi mounts MCP tools as routes (`xd://mcp__hivemind_hive_*`) rather
 than as named tools; they are listed in your system prompt.
@@ -55,5 +73,6 @@ than as named tools; they are listed in your system prompt.
 
 `hivemind-incognito omp` unsets `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY`,
 so the server is never contacted (Oh My Pi warns once that it is
-unavailable); the extension also blocks any Hivemind call. It needs the
-hivemind plugin.
+unavailable; twice if the server is registered twice, see above); the
+extension also blocks any Hivemind call, including the `xd://` routes
+with a trailing slash or a `?query`. It needs the hivemind plugin.

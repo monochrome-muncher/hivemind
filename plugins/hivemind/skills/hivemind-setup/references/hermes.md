@@ -9,8 +9,13 @@ in the hivemind-setup skill.
 - **With the hivemind plugin** (`hermes plugins install
   <owner>/hivemind/plugins/hivemind`, then `hermes plugins enable
   hivemind`): the plugin serves both skills (as `hivemind:hivemind` and
-  `hivemind:hivemind-setup`) and adds a Hivemind section to the system
-  prompt. The MCP server is still configured by hand (below).
+  `hivemind:hivemind-setup`; namespaced plugin skills are not in the
+  skill index) and registers a Hivemind system-prompt section. **Do not
+  rely on that section**: current Hermes releases never render
+  registered sections (upstream issue NousResearch/hermes-agent#117432,
+  closed "not planned"; UNCONFIRMED whether a later release fixed it).
+  The marked block in `SOUL.md` (Stay aware, below) is **required**. The
+  MCP server is still configured by hand (below).
 - **The MCP server**: add this to `~/.hermes/config.yaml` (all profiles)
   or the profile's own `config.yaml`, merging into the existing file.
   `${VAR}` references are resolved from the environment at connection
@@ -24,17 +29,33 @@ in the hivemind-setup skill.
         Authorization: "Bearer ${HIVEMIND_API_KEY}"
   ```
 
-- **Where the key goes:** `~/.hermes/.env` (read into the environment), or
-  the shell that launches `hermes`.
-- **Skills without the plugin:** copy both skill folders into
-  `~/.hermes/skills/`.
+- **Where the key goes:** Hermes's own env file, which is specific to
+  Hermes, so its agent identity stays separate from other harnesses:
+  `~/.hermes/.env` for the default profile, or
+  `~/.hermes/profiles/<name>/.env` for a named profile. Ask the user to
+  add the two variables there themselves (hivemind-setup, "Key file": the
+  same `read` command, appending `HIVEMIND_API_KEY=…` lines without
+  `export`), then `chmod 600` the file. Never a project-level file.
+- **Skills without the plugin, or so they appear in the skill index:**
+  copy both skill folders into `~/.hermes/skills/` (in addition to, or
+  instead of, the namespaced plugin skills).
+- After editing the MCP config or the env file, `/reload-mcp` reloads the
+  servers without a full restart; if `hive_whoami` still shows the old
+  key, restart Hermes.
+
+**Identity:** name this agent `<user>-hermes`, distinct from the agents of
+other harnesses.
 
 ## Stay aware
 
-- **No hook needed.** The hivemind plugin adds a Hivemind section to the
-  system prompt, which compaction never removes.
-- **Instruction block:** `~/.hermes/SOUL.md` (the only global
-  always-loaded instructions file in Hermes).
+- **The instruction block is required here**, not optional: put it in
+  `~/.hermes/SOUL.md` (the always-loaded file for the profile; the only
+  global always-loaded instructions file in Hermes) as part of Connect.
+  Verify it reached you: start a new session and quote the line in the
+  block that starts `Hivemind`; if you cannot, the file is not being
+  loaded, tell the user.
+- **No hook.** The plugin's system-prompt section is kept for Hermes
+  versions that render it, but do not claim it works.
 
 ## Update
 
@@ -46,5 +67,10 @@ plugin installed at a pinned ref needs `hermes plugins install <source>
 
 `hivemind-incognito hermes` sets `HIVEMIND_ENABLED=false`. It needs
 `enabled: ${HIVEMIND_ENABLED}` in the hivemind entry of
-`~/.hermes/config.yaml`, and `HIVEMIND_ENABLED=true` in `~/.hermes/.env`
-for normal sessions (an unset variable makes Hermes warn).
+`~/.hermes/config.yaml`, and `HIVEMIND_ENABLED=true` in the Hermes env
+file for normal sessions: **do not skip that line**: an unset variable
+keeps the literal text `${HIVEMIND_ENABLED}`, which Hermes treats as
+enabled, so the server would stay on in every session. The launcher leaves
+`HIVEMIND_API_KEY` in place (Hermes may still resolve it), so this
+session is incognito by the server being disabled, and the key is still in
+the environment.

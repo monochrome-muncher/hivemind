@@ -48,11 +48,14 @@ export const HivemindPlugin = async () => ({
       return;
     }
     const url = process.env.HIVEMIND_MCP_URL;
-    if (!cfg.mcp.hivemind && url) {
+    const key = process.env.HIVEMIND_API_KEY;
+    // No key: do not register the server. An empty `Bearer ` header would
+    // only produce a 401 loop; the reminder already says "not connected".
+    if (!cfg.mcp.hivemind && url && key) {
       cfg.mcp.hivemind = {
         type: "remote",
         url,
-        headers: { Authorization: `Bearer ${process.env.HIVEMIND_API_KEY ?? ""}` },
+        headers: { Authorization: `Bearer ${key}` },
         oauth: false,
         enabled: true,
       };

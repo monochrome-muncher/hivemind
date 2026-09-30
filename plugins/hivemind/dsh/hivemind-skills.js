@@ -16,10 +16,10 @@ const INVOCATION = { modelInvocable: true, userInvocable: true }
 
 /** Split a SKILL.md into its frontmatter fields and its body. */
 function parse(text) {
-  const match = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/.exec(text)
+  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(text)
   if (!match) return null
   const fields = {}
-  for (const line of match[1].split('\n')) {
+  for (const line of match[1].split(/\r?\n/)) {
     const at = line.indexOf(':')
     if (at > 0) fields[line.slice(0, at).trim()] = line.slice(at + 1).trim()
   }

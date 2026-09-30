@@ -18,7 +18,15 @@ Hivemind repository's Git URL to the `plugin` list in
 ```
 
 Or run `opencode plugin <git-url>`, which installs it and updates the
-config. Without the plugin, add the server by hand (the skills are found in
+config. **The plugin is the supported route**: it builds the `Authorization`
+header from the environment in its own code. With the key unset it does
+not register the server at all (no empty `Bearer ` header, no 401 loop),
+and the reminder says Hivemind is not connected. Installing a plugin from
+a `git+https` URL has open reports of Bun/npm conflicts, and the reminder
+uses OpenCode's `experimental.chat.system.transform` hook, which may be
+renamed in a release.
+
+Without the plugin, add the server by hand (the skills are found in
 `~/.claude/skills` or `~/.agents/skills` anyway):
 
 ```json
@@ -34,13 +42,34 @@ config. Without the plugin, add the server by hand (the skills are found in
 }
 ```
 
-**Where the key goes:** export both variables in the shell that launches
-`opencode` (see "Shell profile" in the hivemind-setup skill).
+A `{env:…}` reference in a **remote** server's `headers` is reported not
+to be interpolated in some OpenCode versions (the literal text
+`Bearer {env:HIVEMIND_API_KEY}` is sent and the server answers 401;
+UNCONFIRMED for current releases). If `hive_whoami` fails with 401 after
+the hand-config above, that is the likely cause: use the plugin, or
+write the literal key into the `headers` value of
+`~/.config/opencode/opencode.json` (user-private: `chmod 600` it; never
+in a project `opencode.json`).
+
+**Where the key goes:** a private key file (hivemind-setup, "Key file",
+`~/.config/hivemind/opencode.env`, mode 600) loaded **only for OpenCode**
+with a function in the shell profile: `opencode() { (
+. ~/.config/hivemind/opencode.env; command opencode "$@" ); }`, so other
+harnesses on the machine keep their own agents. (OpenCode as the only
+harness: sourcing it from the profile is fine.) The desktop app started
+from a dock or start menu does not read the profile: start it from that
+terminal.
+
+**Identity:** name this agent `<user>-opencode`, distinct from the agents
+of other harnesses.
 
 ## Stay aware
 
 - **No hook needed.** The plugin adds the reminder to every model request.
-- **Instruction block:** `~/.config/opencode/AGENTS.md`.
+- **Instruction block:** `~/.config/opencode/AGENTS.md`. OpenCode also
+  reads `~/.claude/CLAUDE.md` as a fallback, so a block written for Claude
+  Code may load twice; harmless, but do not add a second block to the
+  same file.
 
 ## Update
 
@@ -50,5 +79,6 @@ and change the tag to update; restart OpenCode.
 ## Incognito
 
 `hivemind-incognito opencode`: the hivemind plugin skips the server, and a
-hand-configured one is disabled via `OPENCODE_CONFIG_CONTENT`. Nothing
-else is needed.
+hand-configured one is disabled via `OPENCODE_CONFIG_CONTENT`. The
+launcher leaves `HIVEMIND_API_KEY` in the environment (the session is
+incognito because the server is off, not because the key is gone).
