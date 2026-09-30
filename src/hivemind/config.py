@@ -102,6 +102,12 @@ class Settings(BaseSettings):
     # the system trust store.
     admin_api_url: str = ""
     admin_api_ca_bundle: str = ""
+    # The MCP-HTTP runner's DNS-rebinding guard (ADR 0042): comma-separated
+    # Host header values (``name`` or ``name:*``) and browser Origins it
+    # accepts. Empty hosts = the MCP SDK default (guard only on a loopback
+    # bind), which keeps an ingress-fronted 0.0.0.0 deployment working.
+    mcp_allowed_hosts: str = ""
+    mcp_allowed_origins: str = ""
     # ADR 0032: unknown HIVEMIND_* variables are logged by default (a
     # platform such as GitLab Auto DevOps, or Kubernetes service links,
     # injects variables that share the prefix). True restores ADR 0024's

@@ -604,3 +604,16 @@ class TestHiveRegister:
         app = build_app(store, ORG, clock)
         result = await hive_register(app, "alice")
         assert result["error"]["code"] == "name_conflict"
+
+
+async def test_hive_feedback_without_agent_identity_is_agent_unresolved(
+    store: MemoryStore, clock
+) -> None:
+    """MCP-8: ``agent_unresolved`` means exactly "no agent identity"; a
+    bad verdict is ``invalid_verdict`` and other rejected input is
+    ``invalid_input``, never mislabelled."""
+    nameless = build_app(store, Credential(user_id="legacy"), clock)
+    result = await hive_feedback(nameless, entry_id="e1", verdict="helpful")
+    assert result["error"]["code"] == "agent_unresolved"  # type: ignore[index]
+    result = await hive_feedback(nameless, entry_id="e1", verdict="meh")
+    assert result["error"]["code"] == "invalid_verdict"  # type: ignore[index]

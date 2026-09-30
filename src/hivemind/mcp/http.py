@@ -27,9 +27,11 @@ import asyncio
 import json
 import logging
 import os
+import time
 from collections.abc import Callable
 from contextvars import ContextVar
 
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from hivemind.config import Settings, configure_logging, load_settings
@@ -93,6 +95,30 @@ async def _send_unauthorized(send: Send) -> None:
             "headers": [
                 (b"content-type", b"application/json"),
                 (b"content-length", str(len(body)).encode()),
+                # Tells a client this is a plain bearer-key API (ONB-8).
+                (b"www-authenticate", b'Bearer realm="hivemind"'),
+            ],
+        }
+    )
+    await send({"type": "http.response.body", "body": body})
+
+
+# Hivemind has no OAuth: MCP clients that get a 401 probe these discovery
+# documents and, on anything but a 404, start an OAuth flow and report
+# confusing "dynamic client registration" errors instead of "your key was
+# rejected". A plain 404 says "no OAuth here" (ONB-8, ADR 0042).
+_OAUTH_DISCOVERY_PREFIX = "/.well-known/oauth-"
+
+
+async def _send_not_found(send: Send) -> None:
+    body = json.dumps({"error": "not_found"}).encode()
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 404,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode()),
             ],
         }
     )
@@ -116,6 +142,9 @@ class BearerAuthMiddleware:
         if scope.get("type") != "http":
             await self._app(scope, receive, send)
             return
+        if str(scope.get("path", "")).startswith(_OAUTH_DISCOVERY_PREFIX):
+            await _send_not_found(send)
+            return
         key = _extract_key(scope)
         credential = await self._authenticator.verify(key) if key else None
         if credential is None:
@@ -137,6 +166,10 @@ _PROBE_DATABASE = "/mcp/health/database"
 # Bound on the deep database probe (ADR 0037): a check stuck on the pool
 # answers 503 in time instead of hanging the request.
 _DATABASE_PROBE_TIMEOUT = 5.0
+# The deep probe is unauthenticated (ADR 0019) and costs a pool round-trip,
+# so its answer is reused for this long: a flood of GETs costs one query
+# per window, not one per request (MCP-10).
+_DATABASE_PROBE_CACHE_SECONDS = 2.0
 
 
 class ProbeRouter:
@@ -167,6 +200,8 @@ class ProbeRouter:
     def __init__(self, app: ASGIApp, store: Store) -> None:
         self._app = app
         self._store = store
+        self._db_probe_lock = asyncio.Lock()
+        self._db_probe_result: tuple[float, bool] | None = None  # (monotonic time, healthy)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if (
@@ -178,20 +213,32 @@ class ProbeRouter:
             return
         await self._app(scope, receive, send)
 
+    async def _database_healthy(self) -> bool:
+        """The deep check, reused for ``_DATABASE_PROBE_CACHE_SECONDS`` and
+        single-flight, so this unauthenticated endpoint cannot be used to
+        amplify load onto the shared pool."""
+        async with self._db_probe_lock:
+            cached = self._db_probe_result
+            if cached is not None and time.monotonic() - cached[0] < _DATABASE_PROBE_CACHE_SECONDS:
+                return cached[1]
+            try:
+                healthy = await asyncio.wait_for(
+                    self._store.health_check(), timeout=_DATABASE_PROBE_TIMEOUT
+                )
+            except TimeoutError:
+                logger.warning(
+                    "database probe timed out after %.0fs (pool busy or connection hanging)",
+                    _DATABASE_PROBE_TIMEOUT,
+                )
+                healthy = False
+            self._db_probe_result = (time.monotonic(), healthy)
+            return healthy
+
     async def _serve_probe(self, path: str, send: Send) -> None:
         if path in (_PROBE_LIVENESS, _PROBE_HEALTH):
             await _send_json(send, 200, {"status": "ok"})
             return
-        try:
-            healthy = await asyncio.wait_for(
-                self._store.health_check(), timeout=_DATABASE_PROBE_TIMEOUT
-            )
-        except TimeoutError:
-            logger.warning(
-                "database probe timed out after %.0fs (pool busy or connection hanging)",
-                _DATABASE_PROBE_TIMEOUT,
-            )
-            healthy = False
+        healthy = await self._database_healthy()
         if healthy:
             await _send_json(send, 200, {"status": "ok", "database": "ok"})
         else:
@@ -216,6 +263,36 @@ async def _send_json(send: Send, status: int, payload: dict[str, str]) -> None:
         }
     )
     await send({"type": "http.response.body", "body": body})
+
+
+def _split_csv(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def build_transport_security(settings: Settings, host: str) -> TransportSecuritySettings | None:
+    """The MCP SDK's DNS-rebinding (Host/Origin) protection settings.
+
+    Unset ``HIVEMIND_MCP_ALLOWED_HOSTS`` keeps the SDK default, which
+    protects only a loopback bind and is OFF on ``0.0.0.0`` (so an ingress
+    in front, whose Host is the public name, keeps working — ADR 0042).
+    Set it (comma-separated Host header values, ``name`` or ``name:*``) to
+    turn the check on for any bind; ``HIVEMIND_MCP_ALLOWED_ORIGINS`` then
+    also admits those browser Origins (empty = non-browser clients only).
+    Origins without hosts is a configuration error.
+    """
+    hosts = _split_csv(settings.mcp_allowed_hosts)
+    origins = _split_csv(settings.mcp_allowed_origins)
+    if not hosts:
+        if origins:
+            raise ValueError(
+                "HIVEMIND_MCP_ALLOWED_ORIGINS needs HIVEMIND_MCP_ALLOWED_HOSTS too "
+                "(Host validation would otherwise stay off)"
+            )
+        return None
+    # A loopback bind still needs its own names, or local probes get a 421.
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True, allowed_hosts=hosts, allowed_origins=origins
+    )
 
 
 def build_http_app(
@@ -245,11 +322,18 @@ def build_http_app(
         governance_service=GovernanceService(store, search_config),
         access_service=AccessService(store, authenticator),
         search_config=search_config,
-        credential=Credential(user_id="shared", agent_id="hivemind-mcp-http"),
+        # Never used to act: the provider fails closed (ADR 0042). Should
+        # that ever regress, this is level 0 and access-controlled, not the
+        # legacy full-access identity.
+        credential=Credential(
+            user_id="shared", agent_id="hivemind-mcp-http", access_controlled=True
+        ),
     )
     server = build_server(template, credential_provider=make_credential_provider())
     host = os.environ.get("HIVEMIND_HOST", "0.0.0.0")
-    mcp_app = server.streamable_http_app(stateless_http=True, host=host)
+    mcp_app = server.streamable_http_app(
+        stateless_http=True, host=host, transport_security=build_transport_security(settings, host)
+    )
     # Outermost layer: the unauthenticated probe router (ADR 0019) wraps
     # the auth-wrapped MCP app, so the k8s/compose probes are answered
     # without any API key while the MCP surface stays fully protected.
