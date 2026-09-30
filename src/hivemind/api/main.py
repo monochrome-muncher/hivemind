@@ -16,7 +16,7 @@ import uvicorn
 from fastapi import FastAPI
 
 from hivemind.api.deps import HivemindApp, create_app
-from hivemind.config import SearchConfig, Settings, configure_logging, load_settings
+from hivemind.config import SearchConfig, Settings, configure_logging, load_settings, redact_url
 from hivemind.ports import Authenticator, Embedder, Extractor, Store
 from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService, WriteService
@@ -96,7 +96,7 @@ def run() -> None:
     logger.info(
         "starting hivemind-api: embedding_endpoint=%s embedding_dim=%d "
         "extraction=%s pool_max_size=%d",
-        settings.embedding_endpoint,
+        redact_url(settings.embedding_endpoint),
         settings.embedding_dim,
         "on" if settings.extractor_endpoint else "off",
         settings.pool_max_size,

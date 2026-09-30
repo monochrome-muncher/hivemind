@@ -44,3 +44,5 @@ bounded, exponential backoff:
   vector-searchable only after its vector lands) and is only justified
   if embedder outages become common enough that losing a write is
   unacceptable.
+
+*Amended by ADR 0041: jittered backoff, a capped `Retry-After`, a dropped keep-alive counted as transient, and an overall per-call deadline.*

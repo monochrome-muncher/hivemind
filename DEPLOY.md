@@ -341,6 +341,15 @@ not edge-case insurance.
   attempt can overshoot it. Reads (`hive_search`, `GET /v1/entries`)
   embed the query only and never extract, so they finish well inside
   the embedder's 31.5s.
+- **The overall deadline (ADR 0041).** Each leg also runs under
+  `HIVEMIND_EMBEDDING_DEADLINE` / `HIVEMIND_EXTRACTOR_DEADLINE`. Unset,
+  it is derived as the leg's worst case in the table above (so the
+  table and the grace period stay correct when you change a
+  timeout or retry budget); it only bites when httpx's per-phase timeout
+  lets a slow-drip response overshoot, or a provider's `Retry-After`
+  (capped at 10s) pushes a sleep past the backoff. Jitter only shortens
+  sleeps. Setting it lower shortens the worst case; below the matching
+  `_TIMEOUT` is a startup error.
 - **If you raise a retry budget, raise this.** Each leg costs
   `(retries + 1) x timeout + 0.5 x (2^retries - 1)` seconds; sum the two
   legs, add the 5s `preStop`, then round up. Worked example: setting
