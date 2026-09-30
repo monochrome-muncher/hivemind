@@ -23,6 +23,7 @@ import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 from starlette.applications import Starlette
@@ -112,6 +113,14 @@ def create_admin_app(
         path = request.path_params["path"]
         if not is_allowed(request.method, path):
             return _error(404, "not_proxied", "the admin panel does not forward this call")
+        # ADR 0040: ``path`` is percent-DECODED by Starlette. Re-quote every
+        # segment so a name holding ``?``, ``#``, ``%`` or ``/`` reaches the
+        # resource the allowlist matched, and refuse dot segments (which
+        # httpx would collapse onto a different route).
+        segments = path.split("/")
+        if any(segment in (".", "..") for segment in segments):
+            return _error(404, "not_proxied", "the admin panel does not forward this call")
+        upstream_path = "/v1/" + "/".join(quote(segment, safe="") for segment in segments)
         headers = {
             name: value
             for name in _FORWARDED_REQUEST_HEADERS
@@ -120,7 +129,7 @@ def create_admin_app(
         try:
             upstream = await client.request(
                 request.method,
-                f"/v1/{path}",
+                upstream_path,
                 params=str(request.query_params),
                 headers=headers,
                 content=await request.body(),

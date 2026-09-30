@@ -1,5 +1,9 @@
 # Reads by id, write provenance and supersession are enforced by the server
 
+> **Amended by [ADR 0040](0040-input-bounds-and-agent-name-rules.md):**
+> the reserved names are compared case-insensitively (`casefold()`), and agent
+> names must match a fixed ASCII format at registration.
+
 ## Context
 
 A deployed contributor fetched another agent's `self` entry with

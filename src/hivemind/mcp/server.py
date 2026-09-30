@@ -29,7 +29,7 @@ from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 
-from hivemind.config import configure_logging, load_settings
+from hivemind.config import configure_logging, load_settings, redact_url
 from hivemind.extractor import build_extractor
 from hivemind.mcp.app import (
     ERR_UNAUTHENTICATED,
@@ -130,6 +130,9 @@ _DESC_REGISTER = (
     "still pending / active, so ask your admin for the agent key / revoked). "
     "A name that belongs to another owner is a name_conflict: pick a "
     "different name (ADR 0039)."
+    " The name must be 1-63 ASCII characters — letters, digits, '.', '_' or '-', "
+    "starting with a letter or digit — and not a reserved name (admin, org, dev, "
+    "shared; any case); a bad or reserved name answers invalid_input (ADR 0040)."
 )
 
 
@@ -407,7 +410,7 @@ def main_pg() -> None:
     logger.info(
         "starting hivemind-mcp-pg: embedding_endpoint=%s embedding_dim=%d "
         "extraction=%s pool_max_size=%d",
-        settings.embedding_endpoint,
+        redact_url(settings.embedding_endpoint),
         settings.embedding_dim,
         "on" if settings.extractor_endpoint else "off",
         settings.pool_max_size,

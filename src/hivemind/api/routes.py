@@ -12,13 +12,16 @@ Error codes: ``missing_api_key``/``unknown_api_key`` (401),
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Path, Query, Response
+from pydantic import AfterValidator
 
 from hivemind.api.deps import (
+    ApiError,
     HivemindApp,
     api_error,
     require_credential,
@@ -50,6 +53,13 @@ from hivemind.api.schemas import (
 from hivemind.domain.access import Agent, InvalidAgentStatus, TrustLevel
 from hivemind.domain.audit import AuditAction, AuditFilters
 from hivemind.domain.entry import EntryDraft, EntryFilters, ImportanceSource, Kind, Source
+from hivemind.domain.validation import (
+    MAX_IDENTITY_CHARS,
+    MAX_LIMIT,
+    MAX_OFFSET,
+    InvalidInput,
+    check_no_nul,
+)
 from hivemind.embeddings import EmbeddingError
 from hivemind.ports import Credential
 from hivemind.services.access import resolve_write_scope
@@ -58,10 +68,33 @@ from hivemind.services.governance import PermissionDenied, SupersedeDenied
 
 require = Annotated[Credential, Depends(require_credential)]
 
+
+def _no_nul(value: str | None) -> str | None:
+    """A path/query string reaches Postgres as a bind parameter: no U+0000
+    (ADR 0040). A ``ValueError`` here is a FastAPI 422."""
+    return check_no_nul(value, "value") if value is not None else None
+
+
+# A path name/id or query string that may name a stored record (legacy
+# names are not re-validated here, only bounded and NUL-free — ADR 0040).
+# No length cap on a name: a legacy agent registered before ADR 0040 must stay manageable.
+NameParam = Annotated[str, Path(), AfterValidator(_no_nul)]
+ActorQuery = Annotated[str | None, Query(max_length=MAX_IDENTITY_CHARS), AfterValidator(_no_nul)]
+
 # GET /v1/admin/audit-log page size (ADR 0027): a sensible default and a
 # hard ceiling, so one request can never drag the whole log over the wire.
 AUDIT_LOG_DEFAULT_LIMIT = 100
 AUDIT_LOG_MAX_LIMIT = 1000
+
+logger = logging.getLogger(__name__)
+
+
+def _embedding_unavailable(exc: EmbeddingError) -> ApiError:
+    """The embedding endpoint is a dependency (SPEC.md §7, ADR 0005): a
+    failure is a 502, not a bare 500. The body is a fixed message — the
+    detail is logged server-side, never returned to the caller (PC-1)."""
+    logger.warning("embedding unavailable: %s", exc)
+    return api_error(502, "embedding_unavailable", "the embedding service is unavailable")
 
 
 def _to_utc(value: datetime | None) -> datetime | None:
@@ -161,9 +194,7 @@ def build_router(app: HivemindApp) -> APIRouter:
         except PermissionDenied as exc:
             raise api_error(403, "forbidden", str(exc)) from exc
         except EmbeddingError as exc:
-            # The embedding endpoint is a dependency (SPEC.md §7, ADR 0005):
-            # a failure is a 502 (bad gateway), not a bare 500 (m7).
-            raise api_error(502, "embedding_unavailable", str(exc)) from exc
+            raise _embedding_unavailable(exc) from exc
         except ValueError as exc:
             raise api_error(422, "invalid_entry", str(exc)) from exc
         return EntryOut.from_entry(entry)
@@ -210,8 +241,8 @@ def build_router(app: HivemindApp) -> APIRouter:
         created_from: Annotated[datetime | None, Query()] = None,
         created_to: Annotated[datetime | None, Query()] = None,
         include_inactive: bool = False,
-        limit: Annotated[int | None, Query(ge=1)] = None,
-        offset: Annotated[int | None, Query(ge=0)] = 0,
+        limit: Annotated[int | None, Query(ge=1, le=MAX_LIMIT)] = None,
+        offset: Annotated[int | None, Query(ge=0, le=MAX_OFFSET)] = 0,
     ) -> list[EntryOut]:
         """List/filter entries without a query (SPEC.md §5.1, §5.3).
 
@@ -232,6 +263,7 @@ def build_router(app: HivemindApp) -> APIRouter:
             created_to=_to_utc(created_to),
             include_inactive=include_inactive,
         )
+        filters.validate()  # ADR 0040 (raises InvalidInput -> 422)
         effective_limit = limit if limit is not None else app.search_config.default_limit
         effective_offset = offset if offset is not None else 0
         entries = await app.store.list_entries(
@@ -258,13 +290,16 @@ def build_router(app: HivemindApp) -> APIRouter:
             created_to=request.created_to,
             include_inactive=request.include_inactive,
         )
-        hits = await app.search_service.search(
-            request.query,
-            filters,
-            request.limit,
-            offset=request.offset,
-            visibility=credential.visibility(),
-        )
+        try:
+            hits = await app.search_service.search(
+                request.query,
+                filters,
+                request.limit,
+                offset=request.offset,
+                visibility=credential.visibility(),
+            )
+        except EmbeddingError as exc:
+            raise _embedding_unavailable(exc) from exc
         return [HitOut.from_hit(h) for h in hits]
 
     @router.post("/entries/{entry_id}/withdraw", response_model=EntryOut)
@@ -279,6 +314,8 @@ def build_router(app: HivemindApp) -> APIRouter:
             raise api_error(404, "not_found", f"unknown entry: {entry_id}") from None
         except PermissionDenied as exc:
             raise api_error(403, "forbidden", str(exc)) from exc
+        except InvalidInput as exc:
+            raise api_error(422, "invalid_input", str(exc)) from exc
         except ValueError as exc:
             raise api_error(409, "conflict", str(exc)) from exc
         return EntryOut.from_entry(entry)
@@ -300,6 +337,8 @@ def build_router(app: HivemindApp) -> APIRouter:
             )
         except LookupError:
             raise api_error(404, "not_found", f"unknown entry: {entry_id}") from None
+        except InvalidInput as exc:
+            raise api_error(422, "invalid_input", str(exc)) from exc
         except ValueError as exc:
             # The service raises ValueError when the caller's agent identity
             # is unresolved (a plain user key without a self-reported agent).
@@ -335,6 +374,8 @@ def build_router(app: HivemindApp) -> APIRouter:
             )
         except PermissionDenied as exc:
             raise api_error(403, "forbidden", str(exc)) from exc
+        except InvalidInput as exc:  # a bad or reserved name is not a conflict (ADR 0040)
+            raise api_error(422, "invalid_input", str(exc)) from exc
         except ValueError as exc:
             raise api_error(409, "name_conflict", str(exc)) from exc
         if registration.already_registered:
@@ -352,6 +393,8 @@ def build_router(app: HivemindApp) -> APIRouter:
             fleet = await app.access_service.create_fleet(payload.name, credential)
         except PermissionDenied as exc:
             raise api_error(403, "forbidden", str(exc)) from exc
+        except InvalidInput as exc:
+            raise api_error(422, "invalid_input", str(exc)) from exc
         except ValueError as exc:
             raise api_error(409, "fleet_exists", str(exc)) from exc
         return FleetOut.from_fleet(fleet)
@@ -376,7 +419,7 @@ def build_router(app: HivemindApp) -> APIRouter:
 
     @router.post("/admin/agents/{name}/activate", response_model=KeyIssuedOut)
     async def activate_agent(
-        name: str, payload: ActivateAgentRequest, credential: require
+        name: NameParam, payload: ActivateAgentRequest, credential: require
     ) -> KeyIssuedOut:
         """Activate a pending agent (admin-gated, ADR 0012): set trust
         level + home fleet, flip to ``active``, and issue the agent key
@@ -398,7 +441,9 @@ def build_router(app: HivemindApp) -> APIRouter:
         return KeyIssuedOut(key=key)
 
     @router.patch("/admin/agents/{name}", response_model=AgentOut)
-    async def update_agent(name: str, payload: UpdateAgentRequest, credential: require) -> AgentOut:
+    async def update_agent(
+        name: NameParam, payload: UpdateAgentRequest, credential: require
+    ) -> AgentOut:
         """Change an agent's trust level and/or home fleet (admin-gated,
         ADR 0011 — SPEC §5.1 ``PATCH /v1/admin/agents/{name}``).
         Demotion to ``untrusted`` (level 0) is *dormant* (key still
@@ -439,7 +484,7 @@ def build_router(app: HivemindApp) -> APIRouter:
         return AgentOut.from_agent(agent)
 
     @router.post("/admin/agents/{name}/revoke")
-    async def revoke_agent(name: str, credential: require) -> None:
+    async def revoke_agent(name: NameParam, credential: require) -> None:
         """Revoke an agent (admin-gated, ADRs 0012, 0028 — SPEC §5.1
         ``POST /v1/admin/agents/{name}/revoke``): the key is dead and the
         status is ``revoked``; on a pending agent this rejects the
@@ -457,7 +502,7 @@ def build_router(app: HivemindApp) -> APIRouter:
     @router.get("/admin/audit-log", response_model=list[AuditRecordOut])
     async def audit_log(
         credential: require,
-        actor: Annotated[str | None, Query()] = None,
+        actor: ActorQuery = None,
         action: Annotated[AuditAction | None, Query()] = None,
         since: Annotated[datetime | None, Query()] = None,
         before: Annotated[UUID | None, Query()] = None,

@@ -17,6 +17,7 @@ tests can call them directly with fakes.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -32,6 +33,8 @@ from hivemind.domain.entry import (
     SourceType,
 )
 from hivemind.domain.feedback import Feedback, Verdict
+from hivemind.domain.validation import InvalidInput, check_pagination
+from hivemind.embeddings import EmbeddingError
 from hivemind.ports import Credential, Store
 from hivemind.services.access import AccessService, resolve_write_scope
 from hivemind.services.chain import get_visible_entry, supersession_chain
@@ -44,12 +47,16 @@ from hivemind.services.governance import (
 from hivemind.services.search import Hit, SearchService
 
 # Error codes returned in the tool-result error envelope (SPEC §5).
+logger = logging.getLogger(__name__)
+
 ERR_INVALID_INPUT = "invalid_input"
 ERR_NOT_FOUND = "not_found"
 ERR_PERMISSION_DENIED = "permission_denied"
 ERR_NOT_ACTIVE = "not_active"
 ERR_AGENT_UNRESOLVED = "agent_unresolved"
 ERR_SUPERSEDE_DENIED = "supersede_denied"
+# The embedding provider is down/misconfigured: retry later (MCP-2, PC-2).
+ERR_EMBEDDING_UNAVAILABLE = "embedding_unavailable"
 ERR_UNAUTHENTICATED = "unauthenticated"  # ADR 0042: the key is gone / not resolvable
 ERR_INVALID_VERDICT = "invalid_verdict"
 ERR_NAME_CONFLICT = "name_conflict"
@@ -129,6 +136,12 @@ def _hit_dict(hit: Hit) -> dict[str, object]:
     }
 
 
+def _embedding_unavailable(exc: EmbeddingError) -> dict[str, object]:
+    """A fixed message; the (sanitized) detail is logged server-side."""
+    logger.warning("embedding unavailable: %s", exc)
+    return _error(ERR_EMBEDDING_UNAVAILABLE, "the embedding service is unavailable; retry later")
+
+
 def _error(code: str, message: str) -> dict[str, object]:
     return {"error": {"code": code, "message": message}}
 
@@ -174,13 +187,10 @@ def _parse_sources(raw: list[dict[str, str]] | None) -> tuple[Source, ...]:
 
 
 def _check_pagination(limit: int | None, offset: int | None) -> None:
-    """Pagination bounds (SPEC §5.3): a negative ``limit``/``offset`` is a
-    typed ``invalid_input``, not a driver fault — the MCP surface matches
-    REST's 422 validation (``limit >= 1``, ``offset >= 0``)."""
-    if limit is not None and limit < 1:
-        raise ValueError("limit must be >= 1")
-    if offset is not None and offset < 0:
-        raise ValueError("offset must be >= 0")
+    """Pagination bounds (SPEC §5.3): ``1 <= limit <= 100``, ``0 <= offset <=
+    10000`` — a typed ``invalid_input``, not a driver fault; the same rule
+    REST enforces (ADR 0040)."""
+    check_pagination(limit, offset)
 
 
 def _build_filters(
@@ -203,7 +213,7 @@ def _build_filters(
     names: AND-semantics, case-insensitive (the store layer matches on
     lower-cased names; kinds are display-only, not filterable in v1).
     """
-    return EntryFilters(
+    filters = EntryFilters(
         kind=_parse_kind(kind),
         tags=tuple(tags or ()),
         entities=tuple(entities or ()),
@@ -216,6 +226,8 @@ def _build_filters(
         created_to=_parse_dt(created_to, "created_to"),
         include_inactive=include_inactive,
     )
+    filters.validate()  # ADR 0040: caller input, unlike service-built filters
+    return filters
 
 
 async def _supersession_chain(app: McpHivemind, entry: Entry) -> tuple[list[Entry], list[Entry]]:
@@ -326,6 +338,8 @@ async def hive_write(
         entry = await app.write_service.write(draft, writer=cred.visibility())
     except SupersedeDenied as exc:
         return _error(ERR_SUPERSEDE_DENIED, str(exc))
+    except EmbeddingError as exc:
+        return _embedding_unavailable(exc)
     except ValueError as exc:
         return _error(ERR_INVALID_INPUT, str(exc))
     return _entry_dict(entry)
@@ -357,8 +371,10 @@ async def hive_search(
     ``entities`` (ADR 0016, SPEC §13) filters by machine-extracted
     entity names: AND-semantics, case-insensitive; kinds are display-only.
 
-    ``limit`` must be >= 1 and ``offset`` >= 0; out-of-range values are
-    ``invalid_input`` (matching REST's 422).
+    ``limit`` must be 1..100 and ``offset`` 0..10000; out-of-range values
+    are ``invalid_input`` (matching REST's 422). A search reaches at most
+    ``2 x candidate_top_k`` ranked hits (SPEC §5.3): paging past that
+    returns an empty page.
     """
     try:
         _check_pagination(limit, offset)
@@ -377,9 +393,14 @@ async def hive_search(
         )
     except ValueError as exc:
         return _error(ERR_INVALID_INPUT, str(exc))
-    hits = await app.search_service.search(
-        query, filters, limit, offset=offset, visibility=app.credential.visibility()
-    )
+    try:
+        hits = await app.search_service.search(
+            query, filters, limit, offset=offset, visibility=app.credential.visibility()
+        )
+    except InvalidInput as exc:
+        return _error(ERR_INVALID_INPUT, str(exc))
+    except EmbeddingError as exc:
+        return _embedding_unavailable(exc)
     return {"count": len(hits), "hits": [_hit_dict(h) for h in hits]}
 
 
@@ -432,8 +453,8 @@ async def hive_list(
     ``entities`` (ADR 0016, SPEC §13) filters by machine-extracted entity
     names: AND-semantics, case-insensitive; kinds are display-only.
 
-    ``limit`` must be >= 1 and ``offset`` >= 0; out-of-range values are
-    ``invalid_input`` (matching REST's 422).
+    ``limit`` must be 1..100 and ``offset`` 0..10000; out-of-range values
+    are ``invalid_input`` (matching REST's 422).
     """
     try:
         _check_pagination(limit, offset)
@@ -478,6 +499,8 @@ async def hive_withdraw(
         return _error(ERR_PERMISSION_DENIED, str(exc))
     except LookupError as exc:
         return _error(ERR_NOT_FOUND, str(exc))
+    except InvalidInput as exc:
+        return _error(ERR_INVALID_INPUT, str(exc))
     except ValueError as exc:
         return _error(ERR_NOT_ACTIVE, str(exc))
     return _entry_dict(entry)
@@ -556,6 +579,8 @@ async def hive_register(
         )
     except PermissionDenied as exc:
         return _error(ERR_PERMISSION_DENIED, str(exc))
+    except InvalidInput as exc:  # a bad or reserved name is not a conflict (ADR 0040)
+        return _error(ERR_INVALID_INPUT, str(exc))
     except ValueError as exc:
         return _error(ERR_NAME_CONFLICT, str(exc))
     agent = registration.agent
