@@ -17,9 +17,16 @@ import math
 from collections.abc import Mapping, Sequence
 
 
+def _unique(ranked_ids: Sequence[str]) -> list[str]:
+    """``ranked_ids`` with repeats dropped (first occurrence wins): a
+    document appears once in a ranking, so a duplicate must neither earn
+    its gain twice (nDCG > 1, EVAL-1) nor occupy a rank."""
+    return list(dict.fromkeys(ranked_ids))
+
+
 def _top_k(ranked_ids: Sequence[str], k: int) -> list[str]:
-    """The first ``k`` ranked ids (or fewer if the list is shorter)."""
-    return list(ranked_ids[: max(k, 0)])
+    """The first ``k`` distinct ranked ids (or fewer if the list is shorter)."""
+    return _unique(ranked_ids)[: max(k, 0)]
 
 
 def hit_at_k(ranked_ids: Sequence[str], relevant: Mapping[str, int], k: int) -> bool:
@@ -38,7 +45,7 @@ def reciprocal_rank(ranked_ids: Sequence[str], relevant: Mapping[str, int]) -> f
     is the per-query MRR summand (averaged over queries -> MRR).
     """
     relevant_ids = {eid for eid, grade in relevant.items() if grade > 0}
-    for rank, eid in enumerate(ranked_ids, start=1):
+    for rank, eid in enumerate(_unique(ranked_ids), start=1):
         if eid in relevant_ids:
             return 1.0 / rank
     return 0.0
@@ -102,7 +109,7 @@ def aggregate_report(per_query: Mapping[str, dict[str, float | bool]], k: int) -
     signals the eval runner + CI gate watch.
     """
     if not per_query:
-        return {"hit_at_k": 0.0, "mrr": 0.0, f"ndcg_at_{k}": 0.0}
+        return {"hit_at_k": 0.0, "mrr": 0.0, f"ndcg_at_{k}": 0.0, "queries": 0.0}
     n = len(per_query)
     hits = sum(1 for q in per_query.values() if q["hit_at_k"])
     mrr = sum(q["reciprocal_rank"] for q in per_query.values()) / n

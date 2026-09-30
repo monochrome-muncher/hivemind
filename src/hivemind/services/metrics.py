@@ -3,9 +3,9 @@
 A cheap, read-only metrics service over the ``Store`` seam: it computes a
 usage report (entries, fleets, agents) from the store so the SPEC §10
 *usage-based* triggers and the §12 counters become measurable rather
-than guesswork. It is deliberately minimal — a handful of ``COUNT``
-queries (``count_entries``) + the fleet/agent listings — no new
-instrumentation logs, no extra schema.
+than guesswork. It is deliberately minimal — one grouped scan
+(``usage_counts``) + the fleet/agent listings — no new instrumentation
+logs, no extra schema.
 
 Counters (the §12 set from ROADMAP §3.3, plus the §4.5 provenance counter
 and its follow-on per-author ``kind`` distribution):
@@ -17,11 +17,12 @@ and its follow-on per-author ``kind`` distribution):
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Sequence
 from typing import Any
 
-from hivemind.domain.access import Agent, AgentStatus, TrustLevel
-from hivemind.domain.entry import EntryFilters, ImportanceSource, Kind
+from hivemind.domain.access import Agent, AgentStatus, Fleet, TrustLevel
+from hivemind.domain.entry import ImportanceSource, Kind, UsageCount
 from hivemind.ports import Store
 
 # The canonical scopes / kinds (the "distinct tags in use" signal).
@@ -45,18 +46,26 @@ class MetricsService:
     async def usage_report(self) -> dict[str, dict[str, Any]]:
         """The full usage report (entries / fleets / agents).
 
-        The agent roster is read once and shared: it is both an agents
-        counter and the axis the entries report's per-author ``kind``
-        distribution is built over (ROADMAP §4.5).
+        The agent roster and the fleet list are read once and shared, and
+        every entry counter is folded from ONE grouped scan
+        (``Store.usage_counts``) — a handful of queries however large the
+        roster or the pool (PERF-2; it used to be 10 + 3 x agents + fleets
+        ``COUNT``s). The roster is both an agents counter and the axis the
+        entries report's per-author ``kind`` distribution is built over
+        (ROADMAP §4.5).
         """
         agents = await self._store.list_agents()
+        fleets = await self._store.list_fleets()
+        rows = await self._store.usage_counts()
         return {
-            "entries": await self._entries_report(agents),
-            "fleets": await self._fleets_report(),
+            "entries": self._entries_report(agents, rows),
+            "fleets": self._fleets_report(fleets, rows),
             "agents": self._agents_report(agents),
         }
 
-    async def _entries_report(self, agents: Sequence[Agent]) -> dict[str, Any]:
+    def _entries_report(
+        self, agents: Sequence[Agent], rows: Sequence[UsageCount]
+    ) -> dict[str, Any]:
         """Entry counters: total / active / inactive + by_scope + by_kind +
         by_importance_source (ROADMAP §4.5: is anyone actually setting
         ``importance``, or is every entry riding the default?) +
@@ -65,64 +74,53 @@ class MetricsService:
         them?).
 
         ``by_author_kind`` is keyed by the **registered agent roster**
-        (``Store.list_agents``), not by a DISTINCT over ``entries.author``:
+        (``Store.list_agents``), not by the authors present in ``rows``:
         an author who has written nothing is then representable (an empty
-        mapping) rather than absent, and the query count is bounded by the
-        roster instead of by the pool. ``Agent.name`` *is* the entry's
-        ``author`` (CONTEXT.md: server-verified, never self-reported), so
-        no new port method and no schema change are needed.
+        mapping) rather than absent, and an unregistered author is left
+        out. ``Agent.name`` *is* the entry's ``author`` (CONTEXT.md:
+        server-verified, never self-reported). Zero counts are omitted and
+        keys follow the canonical vocabulary order.
         """
-        store = self._store
-        total = await store.count_entries(EntryFilters(include_inactive=True))
-        active = await store.count_entries(EntryFilters())
-        by_scope: dict[str, int] = {}
-        for scope in _SCOPES:
-            count = await store.count_entries(EntryFilters(scope=scope, include_inactive=True))
-            if count:
-                by_scope[scope] = count
-        by_kind: dict[str, int] = {}
-        for kind in _KINDS:
-            count = await store.count_entries(EntryFilters(kind=kind, include_inactive=True))
-            if count:
-                by_kind[kind.value] = count
-        by_importance_source: dict[str, int] = {}
-        for source in _IMPORTANCE_SOURCES:
-            count = await store.count_entries(
-                EntryFilters(importance_source=source, include_inactive=True)
-            )
-            if count:
-                by_importance_source[source.value] = count
-        by_author_kind: dict[str, dict[str, int]] = {}
-        for agent in agents:
-            counts: dict[str, int] = {}
-            for kind in _KINDS:
-                count = await store.count_entries(
-                    EntryFilters(author=agent.name, kind=kind, include_inactive=True)
-                )
-                if count:
-                    counts[kind.value] = count
-            by_author_kind[agent.name] = counts
+        total = sum(r.count for r in rows)
+        active = sum(r.count for r in rows if r.active)
+        scope_n: Counter[str] = Counter()
+        kind_n: Counter[Kind] = Counter()
+        source_n: Counter[ImportanceSource] = Counter()
+        author_kind_n: Counter[tuple[str, Kind]] = Counter()
+        for r in rows:
+            scope_n[r.scope] += r.count
+            kind_n[r.kind] += r.count
+            source_n[r.importance_source] += r.count
+            author_kind_n[(r.author, r.kind)] += r.count
         return {
             "total": total,
             "active": active,
             "inactive": total - active,
-            "by_scope": by_scope,
-            "by_kind": by_kind,
-            "by_importance_source": by_importance_source,
-            "by_author_kind": by_author_kind,
+            "by_scope": {s: scope_n[s] for s in _SCOPES if scope_n[s]},
+            "by_kind": {k.value: kind_n[k] for k in _KINDS if kind_n[k]},
+            "by_importance_source": {
+                src.value: source_n[src] for src in _IMPORTANCE_SOURCES if source_n[src]
+            },
+            "by_author_kind": {
+                agent.name: {
+                    k.value: author_kind_n[(agent.name, k)]
+                    for k in _KINDS
+                    if author_kind_n[(agent.name, k)]
+                }
+                for agent in agents
+            },
         }
 
-    async def _fleets_report(self) -> dict[str, Any]:
+    def _fleets_report(self, fleets: Sequence[Fleet], rows: Sequence[UsageCount]) -> dict[str, Any]:
         """Fleet counters: total + writes per fleet (``entries.fleet_id``)."""
-        store = self._store
-        fleets = await store.list_fleets()
-        writes_by_fleet: dict[str, int] = {}
-        for fleet in fleets:
-            count = await store.count_entries(
-                EntryFilters(fleet_id=fleet.id, include_inactive=True)
-            )
-            writes_by_fleet[fleet.name] = count
-        return {"total": len(fleets), "writes_by_fleet": writes_by_fleet}
+        writes: Counter[str] = Counter()
+        for r in rows:
+            if r.fleet_id is not None:
+                writes[r.fleet_id] += r.count
+        return {
+            "total": len(fleets),
+            "writes_by_fleet": {fleet.name: writes[fleet.id] for fleet in fleets},
+        }
 
     def _agents_report(self, agents: Sequence[Agent]) -> dict[str, Any]:
         """Agent counters: total / pending / active / revoked + trust-level

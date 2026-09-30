@@ -35,7 +35,7 @@ def _draft(summary, **kw):
     return EntryDraft(
         kind=kw.pop("kind", Kind.FACT),
         summary=summary,
-        author="alice",
+        author=kw.pop("author", "alice"),
         agent="agent-1",
         **kw,
     )
@@ -88,3 +88,61 @@ async def test_unrelated_entry_has_empty_chain() -> None:
     successors, superseded = await supersession_chain(store, lone)
     assert successors == []
     assert superseded == []
+
+
+async def test_reverse_walk_asks_for_predecessors_not_the_pool() -> None:
+    """PERF-1/STORE-2: the reverse walk is one ``list_predecessors`` call
+    per hop (O(chain depth)), never a scan of ``list_entries`` over the
+    whole pool."""
+    store = make_store()
+    # A long chain plus unrelated bystanders the walk must never read.
+    prev = await store.create_entry(_draft("v0"))
+    for i in range(1, 6):
+        prev = await store.create_entry(_draft(f"v{i}", supersedes=(prev.id,)))
+    for i in range(20):
+        await store.create_entry(_draft(f"bystander {i}"))
+    head = await store.get_entry(prev.id)
+
+    calls = {"predecessors": 0}
+    real = store.list_predecessors
+
+    async def counting(ids):
+        calls["predecessors"] += 1
+        return await real(ids)
+
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("the chain walk must not scan the pool")
+
+    store.list_predecessors = counting  # type: ignore[method-assign]
+    store.list_entries = forbidden  # type: ignore[method-assign]
+    _, superseded = await supersession_chain(store, head)
+
+    assert len(superseded) == 5
+    # depth 5 + one final empty frontier probe
+    assert calls["predecessors"] <= 6
+
+
+async def test_hop_cap_bounds_the_reverse_walk() -> None:
+    store = make_store()
+    prev = await store.create_entry(_draft("v0"))
+    for i in range(1, 6):
+        prev = await store.create_entry(_draft(f"v{i}", supersedes=(prev.id,)))
+    head = await store.get_entry(prev.id)
+    _, superseded = await supersession_chain(store, head, max_hops=2)
+    assert len(superseded) == 2
+
+
+async def test_invisible_middle_version_stays_out_but_does_not_cut_the_walk() -> None:
+    """ADR 0033: the walk passes through a version the reader cannot see
+    (so older visible ones are still reached) but never returns it."""
+    from hivemind.domain.access import TrustLevel, Visibility
+
+    store = make_store()
+    a = await store.create_entry(_draft("v1", scope="org"))
+    b = await store.create_entry(_draft("v2", scope="self", author="bob", supersedes=(a.id,)))
+    c = await store.create_entry(_draft("v3", scope="self", author="bob", supersedes=(b.id,)))
+    reader = Visibility(level=TrustLevel.CONTRIBUTOR, name="alice")
+    _, superseded = await supersession_chain(store, await store.get_entry(c.id), visibility=reader)
+    assert [e.id for e in superseded] == [a.id]
+    everything = await supersession_chain(store, await store.get_entry(c.id))
+    assert {e.id for e in everything[1]} == {a.id, b.id}

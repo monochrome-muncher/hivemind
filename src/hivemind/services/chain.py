@@ -4,23 +4,22 @@ A deep module over the ``Store`` port: one small function
 (``supersession_chain``) that returns an entry's ``(successors,
 superseded)`` — the newer versions it was replaced by, and the older
 versions it replaced. Both walks are bounded so a corrupt chain cannot
-loop, and the reverse walk uses a single bounded paginated scan because
-the v1 stores carry no reverse index (SPEC.md §4.1: ``superseded_by``
-is a forward link only).
+loop, and the reverse walk asks the store for each frontier's
+predecessors (``Store.list_predecessors``, served by the partial
+``superseded_by`` index of migration 0008) — one query per hop, so the
+cost follows the chain, not the pool.
 """
 
 from __future__ import annotations
 
 from hivemind.domain.access import Visibility, entry_is_visible
-from hivemind.domain.entry import Entry, EntryFilters
+from hivemind.domain.entry import Entry
 from hivemind.domain.validation import MAX_ID_CHARS
 from hivemind.ports import Store
 
 # Bound on a single forward/reverse chain walk (SPEC.md §6.3: chains are
 # short in practice; this is a defensive cap against corrupt data).
 _MAX_SUPERSEDE_HOPS = 256
-# Page size for the bounded reverse scan.
-_REVERSE_SCAN_PAGE = 200
 
 
 async def get_visible_entry(store: Store, entry_id: str, visibility: Visibility) -> Entry | None:
@@ -41,15 +40,14 @@ async def supersession_chain(
     *,
     visibility: Visibility | None = None,
     max_hops: int = _MAX_SUPERSEDE_HOPS,
-    reverse_page: int = _REVERSE_SCAN_PAGE,
 ) -> tuple[list[Entry], list[Entry]]:
     """Return ``(successors, superseded)`` for an entry's chain.
 
     ``successors`` are the newer versions reachable by following
     ``superseded_by`` forward. ``superseded`` are the older versions this
     entry replaced. Both walks are bounded (``max_hops``) so a corrupt
-    chain cannot loop; the reverse walk uses a single bounded paginated
-    scan (``reverse_page``) because the v1 stores have no reverse index.
+    chain cannot loop; the reverse walk is one indexed
+    ``Store.list_predecessors`` call per hop.
 
     With ``visibility``, versions that reader may not see are left out
     (ADR 0033) — the walk still passes through them, it just never
@@ -74,40 +72,26 @@ async def supersession_chain(
         seen.add(nxt.id)
         cursor = nxt
 
-    # No reverse index in v1: build a ``superseded_by -> [entries]`` map
-    # with one bounded paginated scan over the inactive entries.
-    reverse: dict[str, list[Entry]] = {}
-    offset = 0
-    while True:
-        batch = await store.list_entries(
-            EntryFilters(include_inactive=True),
-            limit=reverse_page,
-            offset=offset,
-        )
-        if not batch:
-            break
-        for e in batch:
-            if e.superseded_by is not None:
-                reverse.setdefault(e.superseded_by, []).append(e)
-        if len(batch) < reverse_page:
-            break
-        offset += reverse_page
-
+    # Reverse walk, frontier by frontier: one indexed ``list_predecessors``
+    # call per hop (migration 0008's partial ``superseded_by`` index), so the
+    # cost follows the chain's depth, never the pool's size. Unfiltered on
+    # purpose: the walk passes through versions the reader cannot see.
     superseded: list[Entry] = []
     frontier = [entry]
     seen = {entry.id}
     for _ in range(max_hops):
         if not frontier:
             break
-        next_frontier: list[Entry] = []
-        for node in frontier:
-            for pred in reverse.get(node.id, ()):
-                if pred.id in seen:
-                    continue
-                superseded.append(pred)
-                seen.add(pred.id)
-                next_frontier.append(pred)
-        frontier = next_frontier
+        preds = await store.list_predecessors([node.id for node in frontier])
+        # Stable order regardless of the store's row order.
+        preds.sort(key=lambda e: (e.created_at, e.id), reverse=True)
+        frontier = []
+        for pred in preds:
+            if pred.id in seen:
+                continue
+            superseded.append(pred)
+            seen.add(pred.id)
+            frontier.append(pred)
 
     if visibility is not None:
         successors = [e for e in successors if entry_is_visible(e, visibility)]

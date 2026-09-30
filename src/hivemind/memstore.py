@@ -40,6 +40,9 @@ from hivemind.domain.entry import (
     EntryFilters,
     EntryState,
     ExtractedEntity,
+    ImportanceSource,
+    Kind,
+    UsageCount,
     embeddable_text,
     new_entry_id,
 )
@@ -175,6 +178,28 @@ class MemoryStore:
                 if entry is not None:
                     result[eid] = _copy(entry)
             return result
+
+    async def list_predecessors(self, entry_ids: list[str]) -> list[Entry]:
+        wanted = set(entry_ids)
+        with self._lock:
+            return [
+                _copy(entry) for entry in self._entries.values() if entry.superseded_by in wanted
+            ]
+
+    async def usage_counts(self) -> list[UsageCount]:
+        with self._lock:
+            groups: dict[tuple[str, Kind, ImportanceSource, str, str | None, bool], int] = {}
+            for e in self._entries.values():
+                key = (
+                    e.scope,
+                    e.kind,
+                    e.importance_source,
+                    e.author,
+                    e.fleet_id,
+                    e.state is EntryState.ACTIVE,
+                )
+                groups[key] = groups.get(key, 0) + 1
+            return [UsageCount(*key, count=n) for key, n in groups.items()]
 
     async def list_entries(
         self,

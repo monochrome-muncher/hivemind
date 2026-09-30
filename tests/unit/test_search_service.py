@@ -7,6 +7,7 @@ so no implementation detail leaks in.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import fields
 from datetime import timedelta
 from pathlib import Path
@@ -339,6 +340,151 @@ class TestRecencyFloorConfig:
 def vars_of(config: SearchConfig) -> dict:
     """``SearchConfig`` is slotted, so ``vars()`` does not work on it."""
     return {f.name: getattr(config, f.name) for f in fields(config)}
+
+
+class _ReversibleStore(MemoryStore):
+    """``get_entries`` in either row order — Postgres is free to pick
+    (``WHERE id = ANY($1)`` has no ORDER BY)."""
+
+    reverse = False
+
+    async def get_entries(self, entry_ids):
+        found = await super().get_entries(entry_ids)
+        return dict(reversed(list(found.items()))) if self.reverse else found
+
+
+class TestDeterministicTies:
+    """SP-5: equal fused scores are the normal case (rank r in the keyword
+    stream ties rank r in the vector stream), so the result order must not
+    depend on the store's row order."""
+
+    async def test_row_order_of_get_entries_does_not_change_the_result(
+        self, embedder, search_config
+    ) -> None:
+        store = _ReversibleStore(make_clock())
+        first = await create(store, "tie one", occurred_at=T0)
+        second = await create(store, "tie two", occurred_at=T0)
+
+        # Mirror-image streams: first is keyword #1 / vector #2, second the
+        # reverse, so with equal weights their fused scores are identical.
+        async def keyword(*args, **kwargs):
+            return [first.id, second.id]
+
+        async def vector(*args, **kwargs):
+            return [second.id, first.id]
+
+        store.search_keyword = keyword  # type: ignore[method-assign]
+        store.search_vector = vector  # type: ignore[method-assign]
+        service = make_service(store, embedder, search_config)
+        store.reverse = False
+        forward = [h.entry_id for h in await service.search("tie", limit=8)]
+        store.reverse = True
+        backward = [h.entry_id for h in await service.search("tie", limit=8)]
+        assert forward == backward == [first.id, second.id]
+
+    def test_the_invariant_keeps_input_order_for_equal_scores(self) -> None:
+        """Ties are decided by the caller's order (the fused-rank order the
+        service passes), never by anything the store controls."""
+        from dataclasses import replace
+
+        from hivemind.domain.entry import Entry
+        from hivemind.services.search import apply_supersession_invariant
+
+        first = Entry(
+            id="bbb", kind=Kind.FACT, summary="o", author="a", agent="a",
+            occurred_at=T0, created_at=T0,
+        )  # fmt: skip
+        second = replace(first, id="aaa")
+        third = replace(first, id="ccc")
+        scores = {"aaa": 1.0, "bbb": 1.0, "ccc": 1.0}
+        assert [e.id for e in apply_supersession_invariant([first, second, third], scores)] == [
+            "bbb",
+            "aaa",
+            "ccc",
+        ]
+
+
+class TestConcurrentIO:
+    """PERF-4: the keyword stream runs concurrently with the query
+    embedding (+ vector stream), and ``get_entries`` with
+    ``quality_counts``; each pair is proven by a rendezvous that can only
+    complete if both calls are in flight at once."""
+
+    async def test_keyword_search_overlaps_the_query_embedding(
+        self, embedder, search_config
+    ) -> None:
+        store = MemoryStore(make_clock())
+        await create(store, "alpha note")
+        embedding_started = asyncio.Event()
+        keyword_started = asyncio.Event()
+        real_embed, real_keyword = embedder.embed_text, store.search_keyword
+
+        async def embed(text):
+            embedding_started.set()
+            await keyword_started.wait()
+            return await real_embed(text)
+
+        async def keyword(*args, **kwargs):
+            keyword_started.set()
+            await embedding_started.wait()
+            return await real_keyword(*args, **kwargs)
+
+        embedder.embed_text = embed  # type: ignore[method-assign]
+        store.search_keyword = keyword  # type: ignore[method-assign]
+        hits = await asyncio.wait_for(
+            make_service(store, embedder, search_config).search("alpha note"), timeout=2
+        )
+        assert len(hits) == 1
+
+    async def test_entries_fetch_overlaps_the_quality_counts(self, embedder, search_config) -> None:
+        store = MemoryStore(make_clock())
+        await create(store, "beta note")
+        got, counted = asyncio.Event(), asyncio.Event()
+        real_get, real_counts = store.get_entries, store.quality_counts
+
+        async def get_entries(ids):
+            got.set()
+            await counted.wait()
+            return await real_get(ids)
+
+        async def counts(ids):
+            counted.set()
+            await got.wait()
+            return await real_counts(ids)
+
+        store.get_entries = get_entries  # type: ignore[method-assign]
+        store.quality_counts = counts  # type: ignore[method-assign]
+        hits = await asyncio.wait_for(
+            make_service(store, embedder, search_config).search("beta note"), timeout=2
+        )
+        assert len(hits) == 1
+
+    async def test_an_embedding_failure_propagates_unchanged_and_cancels_the_keyword_stream(
+        self, embedder, search_config
+    ) -> None:
+        from hivemind.embeddings.openai_compat import EmbeddingError
+
+        store = MemoryStore(make_clock())
+        await create(store, "gamma note")
+        cancelled = asyncio.Event()
+
+        async def boom(text):
+            await asyncio.sleep(0)
+            raise EmbeddingError("provider down")
+
+        async def slow_keyword(*args, **kwargs):
+            try:
+                await asyncio.sleep(10)
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+            return []
+
+        embedder.embed_text = boom  # type: ignore[method-assign]
+        store.search_keyword = slow_keyword  # type: ignore[method-assign]
+        with pytest.raises(EmbeddingError):
+            await make_service(store, embedder, search_config).search("gamma note")
+        assert cancelled.is_set()
 
 
 class TestPagination:

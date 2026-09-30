@@ -36,6 +36,10 @@ class PermissionDenied(Exception):
     """The caller may not perform this governance action."""
 
 
+# ``supersedes`` targets fetched per ``get_entries`` call (bounds memory).
+_SUPERSEDES_LOOKUP_CHUNK = 50
+
+
 class SupersedeDenied(PermissionDenied):
     """A write named supersession targets outside the writer's reach
     (ADR 0033) or at a target that is no longer active (ADR 0034).
@@ -153,12 +157,18 @@ class WriteService:
     async def _check_supersedes(self, draft: EntryDraft, writer: Visibility) -> None:
         """Reject the write if any supersession target is out of reach."""
         denied: list[str] = []
-        for target_id in dict.fromkeys(draft.supersedes):
-            target = await self._store.get_entry(target_id)
-            if target is None or not may_supersede(
-                target, new_scope=draft.scope, new_fleet_id=draft.fleet_id, writer=writer
-            ):
-                denied.append(target_id)
+        target_ids = list(dict.fromkeys(draft.supersedes))
+        # Batched lookups (SP-13), chunked so memory stays bounded however
+        # long the list is: each chunk is checked and dropped before the next.
+        for i in range(0, len(target_ids), _SUPERSEDES_LOOKUP_CHUNK):
+            chunk = target_ids[i : i + _SUPERSEDES_LOOKUP_CHUNK]
+            targets = await self._store.get_entries(chunk)
+            for target_id in chunk:
+                target = targets.get(target_id)
+                if target is None or not may_supersede(
+                    target, new_scope=draft.scope, new_fleet_id=draft.fleet_id, writer=writer
+                ):
+                    denied.append(target_id)
         if denied:
             raise SupersedeDenied(denied)
 

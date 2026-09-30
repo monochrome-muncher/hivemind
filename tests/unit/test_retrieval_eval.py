@@ -105,6 +105,25 @@ def test_aggregate_report_averages_over_queries() -> None:
     assert report["queries"] == 2
 
 
+def test_ndcg_never_exceeds_one_when_ranked_ids_repeat() -> None:
+    """EVAL-1: a duplicate id is one document, counted once (first
+    occurrence) — ``ndcg_at_k(['a','a'], {'a': 1}, 5)`` used to be 1.63."""
+    assert ndcg_at_k(["a", "a"], {"a": 1}, 5) == 1.0
+    assert ndcg_at_k(["a", "a", "b", "a"], {"a": 1, "b": 1}, 5) <= 1.0
+    assert dcg_at_k(["a", "a"], {"a": 1}, 5) == dcg_at_k(["a"], {"a": 1}, 5)
+
+
+def test_duplicates_do_not_shift_ranks() -> None:
+    assert reciprocal_rank(["x", "x", "a"], {"a": 1}) == 0.5
+    assert hit_at_k(["x", "x", "a"], {"a": 1}, 2) is True
+
+
+def test_aggregate_report_empty_has_the_same_keys_as_a_populated_one() -> None:
+    populated = aggregate_report({"q": evaluate_query(RANKED, RELEVANT, 5)}, 5)
+    assert set(aggregate_report({}, 5)) == set(populated)
+    assert aggregate_report({}, 5)["queries"] == 0.0
+
+
 def test_aggregate_report_empty_is_zero() -> None:
     report = aggregate_report({}, 5)
     assert report["hit_at_k"] == 0.0

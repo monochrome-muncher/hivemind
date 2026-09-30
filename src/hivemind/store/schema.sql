@@ -157,7 +157,11 @@ CREATE UNIQUE INDEX credentials_one_agent_key ON public.credentials USING btree 
 
 CREATE UNIQUE INDEX credentials_one_org_key ON public.credentials USING btree (kind) WHERE (kind = 'org'::text);
 
+CREATE INDEX entries_author_created_idx ON public.entries USING btree (author, created_at DESC, id DESC);
+
 CREATE INDEX entries_author_idx ON public.entries USING btree (author);
+
+CREATE INDEX entries_created_at_id_idx ON public.entries USING btree (created_at DESC, id DESC);
 
 CREATE INDEX entries_embedding_hnsw_idx ON public.entries USING hnsw (embedding public.vector_cosine_ops) WITH (m='16', ef_construction='64');
 
@@ -172,6 +176,8 @@ CREATE INDEX entries_occurred_idx ON public.entries USING btree (occurred_at);
 CREATE INDEX entries_search_tsv_idx ON public.entries USING gin (search_tsv);
 
 CREATE INDEX entries_state_idx ON public.entries USING btree (state);
+
+CREATE INDEX entries_superseded_by_idx ON public.entries USING btree (superseded_by) WHERE (superseded_by IS NOT NULL);
 
 CREATE INDEX entries_tags_gin_idx ON public.entries USING gin (tags);
 

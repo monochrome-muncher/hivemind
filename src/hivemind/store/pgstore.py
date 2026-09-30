@@ -53,6 +53,7 @@ from hivemind.domain.entry import (
     Kind,
     Source,
     SourceType,
+    UsageCount,
 )
 from hivemind.domain.feedback import Feedback
 from hivemind.ports import SupersedeConflict
@@ -86,6 +87,23 @@ _ENTRY_COLUMNS = """
 SELECT_ENTRY = "SELECT " + _ENTRY_COLUMNS + " FROM entries WHERE id = $1"
 
 SELECT_ENTRIES = "SELECT " + _ENTRY_COLUMNS + " FROM entries WHERE id = ANY($1)"
+
+# Reverse supersession link (PERF-1/STORE-2): served by the partial
+# ``entries_superseded_by_idx`` (migration 0008); the predicate below must
+# stay implied by the index's ``WHERE superseded_by IS NOT NULL``.
+SELECT_PREDECESSORS = (
+    "SELECT " + _ENTRY_COLUMNS + " FROM entries "
+    "WHERE superseded_by = ANY($1) AND superseded_by IS NOT NULL"
+)
+
+# The grouped usage counters (PERF-2): one scan instead of 10 + 3*agents +
+# fleets COUNTs.
+USAGE_COUNTS = """
+SELECT scope, kind, importance_source, author, fleet_id,
+       (state = 'active') AS active, count(*) AS n
+  FROM entries
+ GROUP BY scope, kind, importance_source, author, fleet_id, (state = 'active')
+"""
 
 # --- Fleet / agent access-control SQL (ADRs 0011-0012) ---------------------
 
@@ -461,6 +479,32 @@ class PgStore:
         async with pool.acquire(timeout=self._acquire_timeout) as conn:
             rows = await conn.fetch(SELECT_ENTRIES, ids)
         return {str(row["id"]): _row_to_entry(row) for row in rows}
+
+    async def list_predecessors(self, entry_ids: list[str]) -> list[Entry]:
+        ids = _valid_uuids(entry_ids)
+        if not ids:
+            return []
+        pool = await self._ensure_pool()
+        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+            rows = await conn.fetch(SELECT_PREDECESSORS, ids)
+        return [_row_to_entry(row) for row in rows]
+
+    async def usage_counts(self) -> list[UsageCount]:
+        pool = await self._ensure_pool()
+        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+            rows = await conn.fetch(USAGE_COUNTS)
+        return [
+            UsageCount(
+                scope=row["scope"],
+                kind=Kind(row["kind"]),
+                importance_source=ImportanceSource(row["importance_source"]),
+                author=row["author"],
+                fleet_id=str(row["fleet_id"]) if row["fleet_id"] is not None else None,
+                active=bool(row["active"]),
+                count=int(row["n"]),
+            )
+            for row in rows
+        ]
 
     async def list_entries(
         self,

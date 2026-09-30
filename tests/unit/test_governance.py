@@ -48,6 +48,77 @@ class TestWriteService:
         assert reloaded is not None
         assert reloaded.summary == "Auth uses JWT"
 
+    async def test_supersedes_targets_are_checked_in_one_lookup(self) -> None:
+        """SP-13: N ``supersedes`` targets cost one ``get_entries``, not N
+        ``get_entry`` round-trips; an unknown target is still denied."""
+        from hivemind.domain.access import TrustLevel, Visibility
+        from hivemind.services.governance import SupersedeDenied
+
+        store = MemoryStore(make_clock())
+        service = WriteService(store, make_embedder())
+        targets = [await service.write(make_draft(f"t{i}")) for i in range(5)]
+        calls = {"get_entry": 0, "get_entries": 0}
+        real_many = store.get_entries
+
+        async def get_entry(entry_id):
+            calls["get_entry"] += 1
+
+        async def get_entries(ids):
+            calls["get_entries"] += 1
+            return await real_many(ids)
+
+        store.get_entry = get_entry  # type: ignore[method-assign]
+        store.get_entries = get_entries  # type: ignore[method-assign]
+        writer = Visibility(level=TrustLevel.PRIVILEGED, name="alice", is_admin=True)
+        await service.write(
+            make_draft("merged", supersedes=tuple(t.id for t in targets)), writer=writer
+        )
+        assert calls == {"get_entry": 0, "get_entries": 1}
+
+        with pytest.raises(SupersedeDenied) as denied:
+            await service.write(make_draft("x", supersedes=("missing-id",)), writer=writer)
+        assert denied.value.ids == ["missing-id"]
+
+    async def test_a_huge_supersedes_list_is_looked_up_in_bounded_chunks(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Memory is bounded regardless of list length: no ``get_entries``
+        call ever carries more than the chunk size, and every id is checked.
+        ``EntryDraft`` caps ``supersedes`` (ADR 0040), so the chunk size is
+        shrunk here to exercise the chunking within that cap; the loop stays
+        as defence in depth should the cap ever be raised."""
+        from hivemind.domain.access import TrustLevel, Visibility
+        from hivemind.domain.validation import MAX_SUPERSEDES
+        from hivemind.services import governance
+        from hivemind.services.governance import SupersedeDenied
+
+        monkeypatch.setattr(governance, "_SUPERSEDES_LOOKUP_CHUNK", 4)
+        store = MemoryStore(make_clock())
+        service = WriteService(store, make_embedder())
+        sizes: list[int] = []
+        real_many = store.get_entries
+
+        async def get_entries(ids):
+            sizes.append(len(ids))
+            return await real_many(ids)
+
+        store.get_entries = get_entries  # type: ignore[method-assign]
+        writer = Visibility(level=TrustLevel.PRIVILEGED, name="alice", is_admin=True)
+        missing = tuple(f"missing-{i}" for i in range(MAX_SUPERSEDES))
+        with pytest.raises(SupersedeDenied) as denied:
+            await service.write(make_draft("x", supersedes=missing), writer=writer)
+        assert denied.value.ids == list(missing)
+        assert max(sizes) <= 4
+        assert sum(sizes) == MAX_SUPERSEDES
+
+    async def test_an_over_cap_supersedes_list_is_refused_before_any_lookup(self) -> None:
+        """The draft itself refuses more than MAX_SUPERSEDES targets, so no
+        caller can make the lookup load an unbounded list (ADR 0040)."""
+        from hivemind.domain.validation import MAX_SUPERSEDES, InvalidInput
+
+        with pytest.raises(InvalidInput):
+            make_draft("x", supersedes=tuple(f"id-{i}" for i in range(MAX_SUPERSEDES + 1)))
+
     async def test_write_with_supersedes_flips_targets(self) -> None:
         store = MemoryStore(make_clock())
         service = WriteService(store, make_embedder())
