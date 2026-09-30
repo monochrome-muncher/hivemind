@@ -74,7 +74,7 @@ dsh plugin --profile <name> add /path/to/this/repo/plugins/hivemind
 
 This links the checkout into the profile. (To distribute it through your
 npm mirror instead, remove `"private": true` from `package.json`, publish
-it, and `dsh plugin --profile <name> add hivemind-dsh-plugin`.) Check the
+it, and `dsh plugin --profile <name> add hivemind-agent-plugin`.) Check the
 layer with `dsh --profile <name> --dump-config`, then run
 `dsh --profile <name>`. DSH needs no startup hook: it keeps the Hivemind
 server's instructions in the system prompt, which compaction never
@@ -322,7 +322,7 @@ the skill text it already loaded.
 |---|---|
 | Claude Code | `claude plugin marketplace update hivemind`, then `claude plugin update hivemind@hivemind`, then restart. (Updating the marketplace alone only refreshes the catalog.) |
 | Codex | `codex plugin marketplace upgrade hivemind`, then reinstall with `codex plugin add hivemind@hivemind` (Codex runs a cached copy), check with `codex plugin list --marketplace hivemind`, then start a new session. |
-| DeepSeek Harness | Installed from a checkout: `git pull` in the checkout (the profile links it). Installed from npm: `dsh plugin --profile <name> update hivemind-dsh-plugin`. Then restart `dsh`. |
+| DeepSeek Harness | Installed from a checkout: `git pull` in the checkout (the profile links it). Installed from npm: `dsh plugin --profile <name> update hivemind-agent-plugin`. Then restart `dsh`. |
 | Hermes | `hermes plugins update hivemind` (a `git pull` of the installed plugin). A plugin installed at a pinned ref needs `hermes plugins install <source> --force --ref <new-ref>` instead. |
 | Pi | Installed from a local path: `git pull` in that checkout (Pi loads it in place). Installed from git or npm: `pi update --extensions`; a pinned tag stays put, so reinstall at the new tag. |
 | Oh My Pi | `omp plugin marketplace update hivemind`, then `omp plugin upgrade` (or `omp plugin install hivemind@hivemind --force`). |
@@ -357,7 +357,7 @@ Uninstall the plugin, and delete any `<!-- hivemind:begin -->` …
 `AGENTS.md` (including `~/.dsh/AGENTS.md`, `~/.hermes/SOUL.md` and
 `~/.pi/agent/AGENTS.md`, `~/.omp/agent/AGENTS.md`,
 `~/.config/opencode/AGENTS.md`). For DeepSeek Harness:
-`dsh plugin --profile <name> remove hivemind-dsh-plugin`. For Hermes:
+`dsh plugin --profile <name> remove hivemind-agent-plugin`. For Hermes:
 `hermes plugins remove hivemind`. For Pi: `pi remove <source>` (the
 source you installed it from). For Oh My Pi: `omp plugin uninstall
 hivemind`. For OpenCode: remove the entry from the `plugin` list.
