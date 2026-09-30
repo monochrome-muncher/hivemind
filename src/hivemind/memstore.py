@@ -300,15 +300,12 @@ class MemoryStore:
 
     async def register_agent(self, name: str, owner_alias: str | None = None) -> Agent:
         """Register (or re-register) an agent (ADR 0012). Idempotent: an
-        existing record is returned unchanged (only ``owner_alias`` is
-        back-filled if newly supplied); a new record is ``pending``.
+        existing record is returned unchanged (its ``owner_alias`` is never
+        overwritten, ADR 0039); a new record is ``pending``.
         """
         with self._lock:
             existing = self._agents.get(name)
             if existing is not None:
-                if owner_alias is not None and existing.owner_alias is None:
-                    existing = replace(existing, owner_alias=owner_alias)
-                    self._agents[name] = existing
                 return existing
             agent = Agent(
                 name=name,

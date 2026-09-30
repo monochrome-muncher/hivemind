@@ -286,8 +286,15 @@ async def test_rest_register_still_accepts_a_good_name_and_409s_a_taken_one() ->
         await app.store.activate_agent(
             "bob", trust_level=TrustLevel.PRIVILEGED, home_fleet_id=fleet.id
         )
-        taken = await client.post("/v1/agents", json={"name": "bob"}, headers=ORG_KEY)
+        # ADR 0039: a registration is owned by its alias — another owner's
+        # attempt on a taken name conflicts; the same owner is told its status.
+        taken = await client.post(
+            "/v1/agents", json={"name": "bob", "owner_alias": "mallory"}, headers=ORG_KEY
+        )
+        mine = await client.post("/v1/agents", json={"name": "bob"}, headers=ORG_KEY)
     assert taken.status_code == 409
+    assert mine.status_code == 200
+    assert mine.json()["already_registered"] is True
 
 
 async def test_rest_fleet_names_are_validated() -> None:
@@ -387,4 +394,9 @@ async def test_mcp_register_keeps_name_conflict_for_taken_names() -> None:
     assert (await hive_register(app, "bob"))["status"] == "pending"
     fleet = await store.create_fleet("f")
     await store.activate_agent("bob", trust_level=TrustLevel.PRIVILEGED, home_fleet_id=fleet.id)
-    assert (await hive_register(app, "bob"))["error"]["code"] == "name_conflict"  # type: ignore[index]
+    # ADR 0039: another owner conflicts; the same owner is told its status.
+    other = await hive_register(app, "bob", owner_alias="mallory")
+    assert other["error"]["code"] == "name_conflict"  # type: ignore[index]
+    mine = await hive_register(app, "bob")
+    assert mine["already_registered"] is True
+    assert mine["status"] == "active"

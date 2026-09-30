@@ -206,6 +206,20 @@ uv run hivemind-keys issue-admin
 
 # Agent key (issued at activation; one per registered agent, ADR 0012).
 uv run hivemind-keys issue-agent --name alice
+# A pending or revoked agent needs an explicit level and fleet (it is
+# activated exactly as REST activate does; ADR 0039):
+uv run hivemind-keys issue-agent --name alice --trust-level 1 --home-fleet <fleet-id>
+
+# Dead credentials (ADR 0039): pre-v2 `user` keys, name-less agent keys, and
+# agent keys of agents that are missing, pending or revoked never
+# authenticate. `hivemind-keys list` marks them [dead] and `migrate` logs a
+# warning with their count. They are inert, but they would authenticate
+# again after a rollback to an older release, so delete them:
+#   SELECT c.key_hash, c.kind, c.user_id, c.agent_name FROM credentials c
+#    WHERE c.kind = 'user'
+#       OR (c.kind = 'agent' AND (c.agent_name IS NULL OR NOT EXISTS
+#            (SELECT 1 FROM agents a WHERE a.name = c.agent_name AND a.status = 'active')));
+#   -- review, then DELETE FROM credentials c WHERE <same predicate>;
 ```
 
 The admin REST surface does the same (`POST /v1/admin/agents/{name}/activate`

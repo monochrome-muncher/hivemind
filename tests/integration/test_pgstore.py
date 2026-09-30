@@ -428,8 +428,11 @@ async def test_authenticator_resolves_key_to_credential(pg) -> None:
     conn = await asyncpg.connect(dsn)
     try:
         await conn.execute(
-            "INSERT INTO credentials (key_hash, kind, user_id, agent_id) "
-            "VALUES ($1, 'agent', 'alice', 'alice-cli-1')",
+            "INSERT INTO agents (name, status, trust_level) VALUES ('alice', 'active', 2)"
+        )
+        await conn.execute(
+            "INSERT INTO credentials (key_hash, kind, user_id, agent_id, agent_name) "
+            "VALUES ($1, 'agent', 'alice', 'alice-cli-1', 'alice')",
             key_hash("raw-secret"),
         )
     finally:

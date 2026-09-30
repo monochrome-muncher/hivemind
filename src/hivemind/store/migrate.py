@@ -272,6 +272,31 @@ async def migrate(dsn: str, dim: int = 1024) -> None:
             The message names both dims and both remediations.
     """
     await _with_migration_lock(dsn, dim, "apply")
+    await _warn_dead_credentials(dsn)
+
+
+async def _warn_dead_credentials(dsn: str) -> None:
+    """One-time startup WARNING counting credential rows that can no longer
+    authenticate (ADR 0039), so operators notice and delete them. Purely
+    informational: never raises."""
+    from hivemind.store.auth import COUNT_DEAD_CREDENTIALS
+
+    try:
+        conn = await asyncpg.connect(dsn)
+        try:
+            dead = int(await conn.fetchval(COUNT_DEAD_CREDENTIALS))
+        finally:
+            await conn.close()
+    except Exception:
+        return
+    if dead:
+        logger.warning(
+            "%d credential row(s) are dead (pre-v2 user keys, name-less agent keys, or keys "
+            "of agents that are not active) and will never authenticate (ADR 0039); they "
+            "would live again on a rollback to an older release. Delete them - see "
+            "docs/ops-runbook.md (dead credentials).",
+            dead,
+        )
 
 
 async def rollback(dsn: str, dim: int = 1024, count: int = 1) -> list[str]:

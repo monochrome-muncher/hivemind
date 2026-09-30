@@ -31,6 +31,7 @@ from hivemind.store import keys as keys_cli
 from hivemind.store.auth import key_hash
 from hivemind.store.keys import (
     AgentKeyExists,
+    AgentNeedsActivation,
     _issue_admin,
     _issue_agent,
     _list,
@@ -268,13 +269,20 @@ async def test_cli_issue_agent_refuses_a_second_key(dsn: str) -> None:
     assert len(await _audit_rows(dsn)) == 1  # the refusal recorded nothing
 
 
-async def test_cli_issue_agent_reactivates_a_revoked_agent(dsn: str) -> None:
+async def test_cli_issue_agent_reactivates_a_revoked_agent_only_with_explicit_level(
+    dsn: str,
+) -> None:
     await _exec(
-        dsn, "INSERT INTO agents (name, status, trust_level) VALUES ('alice', 'revoked', 1)"
+        dsn, "INSERT INTO agents (name, status, trust_level) VALUES ('alice', 'revoked', 3)"
     )
-    await _issue_agent(dsn, "alice", actor="john")
-    [status] = await _fetch(dsn, "SELECT status FROM agents WHERE name = 'alice'")
-    assert status["status"] == "active"
+    [fleet] = await _fetch(dsn, "INSERT INTO fleets (name) VALUES ('f') RETURNING id")
+    with pytest.raises(AgentNeedsActivation):  # ADR 0039: no silent restore of stale trust
+        await _issue_agent(dsn, "alice", actor="john")
+    await _issue_agent(
+        dsn, "alice", actor="john", trust_level=TrustLevel.LURKER, home_fleet_id=str(fleet["id"])
+    )
+    [row] = await _fetch(dsn, "SELECT status, trust_level FROM agents WHERE name = 'alice'")
+    assert (row["status"], row["trust_level"]) == ("active", 1)
 
 
 async def test_app_reactivation_issues_a_fresh_key_and_the_old_one_stays_dead(

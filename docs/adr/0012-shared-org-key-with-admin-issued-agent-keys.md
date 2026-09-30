@@ -3,6 +3,8 @@
 > **Status: the "kill switch" clause is superseded by [ADR 0031](0031-one-key-per-request-and-what-org-key-rotation-stops.md).**
 > A request carries one key, so rotating the org key closes registration
 > but does not cut off active agents. Everything else below stands.
+>
+> **Also superseded by [ADR 0039](0039-key-lifecycle-is-atomic-and-registration-is-owned.md):** the "legacy rows keep working" clause (pre-v2 `user` / name-less keys no longer verify) and step 2's idempotent no-op for any alias (re-registration is owned by the first alias).
 
 ADR 0008 issued per-*user* keys plus agent-scoped sub-keys: the human
 author sat inside the credential, and the agent key bound an

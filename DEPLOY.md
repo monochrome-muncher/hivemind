@@ -101,7 +101,7 @@ The 5-step operator flow:
    Distribution: **admin key** → operators (admin surface + key
    management); **org key** → the registration surface (`hive_register`
    / `POST /v1/agents`); **agent keys** are issued per agent, either via
-   `hivemind-keys issue-agent --name <agent>`, the admin REST surface
+   `hivemind-keys issue-agent --name <agent>` (an active agent with no key; for a pending or revoked one add `--trust-level N --home-fleet <fleet-id>`, ADR 0039), the admin REST surface
    `POST /v1/admin/agents/{name}/activate` (returns the key **once**), or
    the **admin panel** (§8), which the same pipeline deploys.
 5. **(Optional)** external reachability — apply the opt-in Ingress:

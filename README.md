@@ -92,7 +92,10 @@ same pool while its writes carry that agent's *verified* provenance
    ```bash
    make pg && make vllm && make migrate
    ```
-2. Issue one agent key per registered agent (one per agent, distinct — ADR 0012):
+2. Issue one agent key per registered agent (one per agent, distinct — ADR 0012).
+   A pending or revoked agent needs `--trust-level N --home-fleet <fleet-id>` too
+   (it is activated exactly as REST activate does, ADR 0039); an active agent
+   with no key needs only `--name`:
    ```bash
    uv run hivemind-keys issue-agent --name agent-a   # -> hm_...
    uv run hivemind-keys issue-agent --name agent-b   # -> hm_...
@@ -153,6 +156,7 @@ as a local process instead of Docker.
 
 ```bash
 make pg && make vllm && make migrate
+# (agents must be registered; pending ones also take --trust-level N --home-fleet ID, ADR 0039)
 uv run hivemind-keys issue-agent --name agent-a   # -> hm_...
 uv run hivemind-keys issue-agent --name agent-b   # -> hm_...
 make mcp-http    # start the detached Docker service (host port 8088)

@@ -44,6 +44,57 @@ from hivemind.ports import Authenticator, Credential, Store
 from hivemind.services.audit import record_admin_action
 from hivemind.services.governance import PermissionDenied
 
+_NAME_TAKEN = "agent name is already taken (names are never reused; pick another name)"
+
+
+class NameTaken(ValueError):
+    """The name belongs to another registration (ADR 0039). Deliberately
+    says nothing about that registration (its status, its owner)."""
+
+
+@dataclass(frozen=True, slots=True)
+class Registration:
+    """The answer to a registration (ADR 0039): the agent record, whether
+    the caller had already registered this name (same alias), and a
+    plain-language ``message`` saying what the status means for the caller."""
+
+    agent: Agent
+    already_registered: bool
+    message: str
+
+
+def _same_owner(stored: str | None, given: str | None) -> bool:
+    """Alias equality for re-registration: trimmed, case-insensitive, and a
+    missing alias equals only a missing alias."""
+
+    def norm(alias: str | None) -> str | None:
+        alias = alias.strip().casefold() if alias is not None else None
+        return alias or None
+
+    return norm(stored) == norm(given)
+
+
+def _status_message(status: AgentStatus, *, new: bool = False) -> str:
+    if status is AgentStatus.PENDING:
+        if new:
+            return (
+                "registered: pending admin activation. The agent key is issued once, "
+                "at activation, and delivered to you by your admin - not by this call."
+            )
+        return (
+            "already registered and still pending admin activation. Do not register again; "
+            "wait for your admin to activate it and hand you the agent key."
+        )
+    if status is AgentStatus.ACTIVE:
+        return (
+            "already registered and active: ask your admin for the agent key "
+            "(it is issued once, at activation). Registering again does nothing."
+        )
+    return (
+        "this registration was revoked (rejected) by an admin. The name stays reserved: "
+        "ask your admin, or register under a different name."
+    )
+
 
 class AccessService:
     """Registration + fleet + trust-level management (ADRs 0011-0012).
@@ -80,14 +131,21 @@ class AccessService:
         owner_alias: str | None = None,
         *,
         org_only: bool = False,
-    ) -> Agent:
-        """Register (or re-register) an agent (ADR 0012).
+    ) -> Registration:
+        """Register (or re-register) an agent (ADR 0012, refined by ADR 0039).
 
         Gated on the org or admin key (REST, SPEC §5.1); the MCP
         ``hive_register`` verb is **org-key only** (SPEC §5.2) — pass
-        ``org_only=True``. Idempotent: re-registering a pending name
-        returns the existing record; an *active* name is a conflict
-        (the name stays reserved — pick a new one, ADR 0012).
+        ``org_only=True``. A new name becomes a ``pending`` agent owned by
+        ``owner_alias``. Re-registering an existing name:
+
+        * by the **same** alias → idempotent: the current status comes
+          back (``already_registered``) with what to do next, so a session
+          that forgot it registered can tell pending / active / revoked;
+        * by a **different** (or missing) alias → ``NameTaken``, worded
+          identically for every status so nothing about the other agent
+          leaks. The first registrant's alias is never overwritten, so the
+          admin cannot deliver a key to a squatter's alias.
         """
         if org_only:
             self._require_org(credential)
@@ -96,11 +154,16 @@ class AccessService:
         validate_agent_name(name)  # ADR 0040: format + reserved names
         validate_owner_alias(owner_alias)
         existing = await self._store.get_agent(name)
-        if existing is not None and existing.status is not AgentStatus.PENDING:
-            raise ValueError(
-                f"agent name already {existing.status.value} (name is reserved; pick a new one)"
-            )
-        return await self._store.register_agent(name, owner_alias)
+        if existing is not None:
+            if not _same_owner(existing.owner_alias, owner_alias):
+                raise NameTaken(_NAME_TAKEN)
+            return Registration(existing, True, _status_message(existing.status))
+        agent = await self._store.register_agent(name, owner_alias)
+        # A concurrent registration may have won between the read and the
+        # insert: the record we got back is then the other registrant's.
+        if not _same_owner(agent.owner_alias, owner_alias):
+            raise NameTaken(_NAME_TAKEN)
+        return Registration(agent, False, _status_message(agent.status, new=True))
 
     # -- admin-gated operations (ADR 0012) ----------------------------------
 
@@ -124,9 +187,12 @@ class AccessService:
         fleet and flip it to ``active``; issue its key **once** (returned
         here, never stored again — ADR 0012). Admin-gated. Returns (agent,
         raw_key). ``InvalidAgentStatus`` if it is already ``active``
-        (ADR 0028: one key per agent). The status flips first and the key
-        is issued last, so a failure in between leaves the agent active
-        with no key — less privileged, never more."""
+        (ADR 0028: one key per agent). The status flips first (one guarded
+        UPDATE) and the key is issued last, under the agent row's lock and
+        only while the agent is still ``active`` (ADR 0039): a concurrent
+        revoke makes this raise ``InvalidAgentStatus`` and leaves no key,
+        and a failure in between leaves the agent active with no key —
+        less privileged, never more."""
         self._require_admin(credential)
         await self._require_fleet(home_fleet_id)
         agent = await self._store.activate_agent(
@@ -187,17 +253,19 @@ class AccessService:
         """Revoke an agent (admin-gated, ADRs 0012, 0028): kill its key and
         set it ``revoked``. On a ``pending`` agent this rejects the
         registration. The record + name stay reserved. ``KeyError`` if
-        unknown; ``InvalidAgentStatus`` if already ``revoked``. The key is
-        deleted first, so a failure before the status flip leaves the
-        agent keyless — less privileged, never more."""
+        unknown; ``InvalidAgentStatus`` if already ``revoked``. The status
+        flips first (a revoked agent's key no longer authenticates,
+        ADR 0039) and the key row is deleted under the agent row's lock,
+        which serialises this with a concurrent activation."""
         self._require_admin(credential)
         before = await self._store.get_agent(name)
         if before is None:
             raise KeyError(f"unknown agent: {name}")
         if before.status not in REVOCABLE:
             raise InvalidAgentStatus(name, before.status, "revoke")
-        await self._require_authenticator().revoke_agent_key(name)
+        authenticator = self._require_authenticator()
         await self._store.revoke_agent(name)
+        await authenticator.revoke_agent_key(name)
         await self._audit(credential, AuditAction.AGENT_REVOKE, name, {"from": before.status.value})
 
     async def rotate_org_key(self, credential: Credential) -> str:
