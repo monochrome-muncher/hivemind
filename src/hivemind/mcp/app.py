@@ -50,6 +50,9 @@ ERR_PERMISSION_DENIED = "permission_denied"
 ERR_NOT_ACTIVE = "not_active"
 ERR_AGENT_UNRESOLVED = "agent_unresolved"
 ERR_SUPERSEDE_DENIED = "supersede_denied"
+ERR_UNAUTHENTICATED = "unauthenticated"  # ADR 0042: the key is gone / not resolvable
+ERR_INVALID_VERDICT = "invalid_verdict"
+ERR_NAME_CONFLICT = "name_conflict"
 
 
 @dataclass(frozen=True, slots=True)
@@ -498,15 +501,21 @@ async def hive_feedback(
     try:
         parsed_verdict = Verdict(verdict)
     except ValueError:
-        return _error("invalid_verdict", f"verdict must be helpful|stale|wrong, got {verdict!r}")
+        return _error(ERR_INVALID_VERDICT, f"verdict must be helpful|stale|wrong, got {verdict!r}")
+    if not (app.credential.agent_id or agent):
+        # The one condition the service's ValueError stands for (SPEC §8.1).
+        return _error(
+            ERR_AGENT_UNRESOLVED,
+            "the caller's agent identity must be resolved before recording feedback",
+        )
     try:
         outcome = await app.governance_service.record_feedback(
             app.credential, entry_id, parsed_verdict, note, agent=agent
         )
     except LookupError as exc:
         return _error(ERR_NOT_FOUND, str(exc))
-    except ValueError as exc:
-        return _error(ERR_AGENT_UNRESOLVED, str(exc))
+    except ValueError as exc:  # any other rejected input is just that
+        return _error(ERR_INVALID_INPUT, str(exc))
     fb: Feedback = outcome.feedback
     return {
         "entry_id": entry_id,
@@ -548,7 +557,7 @@ async def hive_register(
     except PermissionDenied as exc:
         return _error(ERR_PERMISSION_DENIED, str(exc))
     except ValueError as exc:
-        return _error("name_conflict", str(exc))
+        return _error(ERR_NAME_CONFLICT, str(exc))
     agent = registration.agent
     return {
         "name": agent.name,

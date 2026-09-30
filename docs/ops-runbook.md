@@ -169,7 +169,8 @@ symptom is an entry with empty `entities`, not a failed write.)
 > entries_embedding_hnsw_idx;` then re-run). Until repaired, vector
 > search silently falls back to the sequential scan (Postgres won't plan
 > around an invalid index) — slower, but never wrong: recall stays exact
-> in the meantime.
+> in the meantime. Since this fix, `hivemind-migrate` itself fails with
+> this remedy when it finds the index invalid after the chain.
 
 ## 4. Key issuance + rotation (ADR 0012)
 
@@ -190,10 +191,16 @@ uv run hivemind-keys issue-agent --name alice
 # activated exactly as REST activate does; ADR 0039):
 uv run hivemind-keys issue-agent --name alice --trust-level 1 --home-fleet <fleet-id>
 
-# Pre-v2 `user` / name-less `agent` keys no longer authenticate (ADR 0039);
-# find and delete any leftovers:
-#   SELECT key_hash, kind, user_id FROM credentials
-#    WHERE kind = 'user' OR (kind = 'agent' AND agent_name IS NULL);
+# Dead credentials (ADR 0039): pre-v2 `user` keys, name-less agent keys, and
+# agent keys of agents that are missing, pending or revoked never
+# authenticate. `hivemind-keys list` marks them [dead] and `migrate` logs a
+# warning with their count. They are inert, but they would authenticate
+# again after a rollback to an older release, so delete them:
+#   SELECT c.key_hash, c.kind, c.user_id, c.agent_name FROM credentials c
+#    WHERE c.kind = 'user'
+#       OR (c.kind = 'agent' AND (c.agent_name IS NULL OR NOT EXISTS
+#            (SELECT 1 FROM agents a WHERE a.name = c.agent_name AND a.status = 'active')));
+#   -- review, then DELETE FROM credentials c WHERE <same predicate>;
 ```
 
 The admin REST surface does the same (`POST /v1/admin/agents/{name}/activate`

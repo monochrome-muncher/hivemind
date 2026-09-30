@@ -16,9 +16,17 @@
 -- (the partial indexes ignore them); the authenticator now rejects them
 -- (ADR 0039) and an operator may delete them with SQL.
 --
--- ADR 0020 expand-and-contract: adding a unique index is additive; an
--- older sibling pod that races two inserts now gets a unique violation
--- instead of silently creating a second live key.
+-- The indexes are deliberately NOT built CONCURRENTLY (ADR 0020 prefers
+-- it for big tables): `credentials` holds a handful of rows, and building
+-- them in the same transaction as the dedupe keeps "dedupe, then enforce"
+-- atomic - no window in which a duplicate can be inserted in between.
+--
+-- ADR 0020 expand-and-contract: adding a unique index is additive, but
+-- during a rolling deploy OLD pods lack the new guards (ADR 0039): their
+-- concurrent org-key rotations can hit the index (a 500 for the loser;
+-- serial rotations are fine), and their REST activate on an agent that
+-- already holds a key row 500s on the unique index. Admin-only,
+-- human-rate, rollout-window exposure.
 DELETE FROM credentials c
  USING credentials newer
  WHERE c.kind = 'agent'

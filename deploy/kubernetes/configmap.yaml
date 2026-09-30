@@ -13,6 +13,10 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
+  # --- MCP-HTTP Host/Origin guard (ADR 0042; default: SDK behaviour, off on 0.0.0.0) ---
+  # Uncomment with the public Host header your ingress forwards to enforce it.
+  # HIVEMIND_MCP_ALLOWED_HOSTS: "hivemind.example.com"
+  # HIVEMIND_MCP_ALLOWED_ORIGINS: ""
   name: hivemind-config
 data:
   # --- embeddings (ADR 0005: deploy-time decision) ---------------------------

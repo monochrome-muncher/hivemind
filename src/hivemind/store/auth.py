@@ -26,7 +26,7 @@ import asyncpg
 from hivemind.domain.access import AgentStatus, InvalidAgentStatus, TrustLevel
 from hivemind.domain.audit import key_fingerprint
 from hivemind.ports import Credential
-from hivemind.store.pool import make_pool
+from hivemind.store.pool import PoolTimeouts, make_pool
 
 # One query resolves the key AND the agent it binds (ADR 0039): an agent key
 # authenticates only while ``agents.status = 'active'``, so a key that
@@ -37,6 +37,15 @@ _SELECT_CREDENTIAL = (
     "FROM credentials c LEFT JOIN agents a ON a.name = c.agent_name "
     "WHERE c.key_hash = $1"
 )
+# Credential rows ``verify`` can never resolve (ADR 0039): pre-v2 ``user``
+# keys, name-less agent keys, and agent keys whose agent is missing,
+# pending or revoked. Inert today, but they would live again on a rollback
+# to a release that does not join ``agents``; operators delete them.
+DEAD_CREDENTIAL_PREDICATE = (
+    "(c.kind = 'user' OR (c.kind = 'agent' AND (c.agent_name IS NULL OR NOT EXISTS "
+    "(SELECT 1 FROM agents a WHERE a.name = c.agent_name AND a.status = 'active'))))"
+)
+COUNT_DEAD_CREDENTIALS = f"SELECT count(*) FROM credentials c WHERE {DEAD_CREDENTIAL_PREDICATE}"
 _LOCK_AGENT = "SELECT status FROM agents WHERE name = $1 FOR UPDATE"
 _DELETE_AGENT_KEYS = "DELETE FROM credentials WHERE kind = 'agent' AND agent_name = $1"
 # Serialises org-key rotation (API + CLI share the key): the second rotation
@@ -70,10 +79,19 @@ def key_hash(key: str) -> str:
 class PgAuthenticator:
     """An ``Authenticator`` backed by the store lane's ``credentials`` table."""
 
-    def __init__(self, dsn: str, *, pool_min_size: int = 1, pool_max_size: int = 10) -> None:
+    def __init__(
+        self,
+        dsn: str,
+        *,
+        pool_min_size: int = 1,
+        pool_max_size: int = 10,
+        timeouts: PoolTimeouts | None = None,
+    ) -> None:
         self._dsn = dsn
         self._pool_min_size = pool_min_size
         self._pool_max_size = pool_max_size
+        self._timeouts = timeouts or PoolTimeouts()
+        self._acquire_timeout = self._timeouts.acquire
         self._pool: asyncpg.Pool | None = None
         # Serialises lazy creation: without it, every call arriving while the
         # first pool is still being built opened its own and orphaned it.
@@ -86,7 +104,12 @@ class PgAuthenticator:
             async with self._pool_lock:
                 if self._pool is None:
                     self._pool = await make_pool(
-                        self._dsn, min_size=self._pool_min_size, max_size=self._pool_max_size
+                        self._dsn,
+                        min_size=self._pool_min_size,
+                        max_size=self._pool_max_size,
+                        command_timeout=self._timeouts.command,
+                        statement_timeout_ms=self._timeouts.statement_ms,
+                        connect_timeout=self._timeouts.connect,
                     )
         return self._pool
 
@@ -116,7 +139,7 @@ class PgAuthenticator:
         stored_hash = key_hash(key)
         key_id = key_fingerprint(stored_hash)
         pool = await self._ensure_pool()
-        async with pool.acquire() as conn:
+        async with pool.acquire(timeout=self._acquire_timeout) as conn:
             row = await conn.fetchrow(_SELECT_CREDENTIAL, stored_hash)
         if row is None:
             return None
@@ -164,7 +187,7 @@ class PgAuthenticator:
         did not finish deleting) is replaced: one live key per agent."""
         pool = await self._ensure_pool()
         raw_key = _generate_key()
-        async with pool.acquire() as conn, conn.transaction():
+        async with pool.acquire(timeout=self._acquire_timeout) as conn, conn.transaction():
             status = await conn.fetchval(_LOCK_AGENT, agent_name)
             if status is None:
                 raise KeyError(f"unknown agent: {agent_name}")
@@ -179,7 +202,7 @@ class PgAuthenticator:
         ADR 0012: demotion != revocation, but a revoked key is dead).
         Call it after the agent's status has flipped to ``revoked``."""
         pool = await self._ensure_pool()
-        async with pool.acquire() as conn, conn.transaction():
+        async with pool.acquire(timeout=self._acquire_timeout) as conn, conn.transaction():
             # Same row lock as issuance: the two are serialised (ADR 0039).
             # Delete only while the agent is still revoked: if a racing
             # activation re-activated it after the caller's status flip,
@@ -193,7 +216,7 @@ class PgAuthenticator:
         returns the new raw secret once. All prior org keys stop working."""
         pool = await self._ensure_pool()
         raw_key = _generate_key()
-        async with pool.acquire() as conn, conn.transaction():
+        async with pool.acquire(timeout=self._acquire_timeout) as conn, conn.transaction():
             await conn.execute(ORG_KEY_LOCK)
             await conn.execute(_DELETE_ORG_KEY)
             await conn.execute(_ISSUE_ORG_KEY, key_hash(raw_key), "org")
@@ -203,6 +226,6 @@ class PgAuthenticator:
         """Issue an admin key; return the raw secret once."""
         pool = await self._ensure_pool()
         raw_key = _generate_key()
-        async with pool.acquire() as conn:
+        async with pool.acquire(timeout=self._acquire_timeout) as conn:
             await conn.execute(_ISSUE_ADMIN_KEY, key_hash(raw_key), "admin")
         return raw_key

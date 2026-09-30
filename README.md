@@ -92,7 +92,10 @@ same pool while its writes carry that agent's *verified* provenance
    ```bash
    make pg && make vllm && make migrate
    ```
-2. Issue one agent key per registered agent (one per agent, distinct — ADR 0012):
+2. Issue one agent key per registered agent (one per agent, distinct — ADR 0012).
+   A pending or revoked agent needs `--trust-level N --home-fleet <fleet-id>` too
+   (it is activated exactly as REST activate does, ADR 0039); an active agent
+   with no key needs only `--name`:
    ```bash
    uv run hivemind-keys issue-agent --name agent-a   # -> hm_...
    uv run hivemind-keys issue-agent --name agent-b   # -> hm_...
@@ -153,6 +156,7 @@ as a local process instead of Docker.
 
 ```bash
 make pg && make vllm && make migrate
+# (agents must be registered; pending ones also take --trust-level N --home-fleet ID, ADR 0039)
 uv run hivemind-keys issue-agent --name agent-a   # -> hm_...
 uv run hivemind-keys issue-agent --name agent-b   # -> hm_...
 make mcp-http    # start the detached Docker service (host port 8088)
@@ -171,11 +175,11 @@ Each agent's MCP config points at the **same** endpoint, with its own key:
 }
 ```
 
-The hostable runner is **per-request**: every request verifies its own key
-against the `credentials` table, so `hivemind-keys revoke --name <agent>` takes effect
-immediately (no restart). Use `hivemind-mcp-pg` (per-agent) for a few
+Both Postgres-backed runners re-verify the key on every call (ADR 0042), so
+`hivemind-keys revoke --name <agent>` or a trust demotion takes effect on the
+next call (no restart). Use `hivemind-mcp-pg` (per-agent, stdio) for a few
 agents on one box; use `hivemind-mcp-http` (hostable) when many agents
-share one machine or when you want immediate revocation.
+share one machine or one endpoint.
 
 ## Using Hivemind from your agent harness
 

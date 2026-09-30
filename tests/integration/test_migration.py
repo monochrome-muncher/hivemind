@@ -135,7 +135,8 @@ async def test_migrate_releases_the_lock_for_the_next_caller() -> None:
     conn = await asyncpg.connect(dsn)
     try:
         held = await conn.fetchval(
-            "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'",
+            "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' "
+            "AND database = (SELECT oid FROM pg_database WHERE datname = current_database())",
         )
         assert held == 0, "advisory lock still held after migrate returned"
     finally:
@@ -265,8 +266,9 @@ async def test_rollback_refuses_to_drop_the_initial_schema() -> None:
 
 async def test_migrate_fails_loudly_on_dim_mismatch() -> None:
     """ADR 0015: a pool provisioned at a different dim is a deployment
-    error. The guard fires *before* the lock is taken and before any
-    DDL, so there is no partial state and no lock to leak.
+    error. The guard fires under the lock (so racing replicas cannot both
+    pass it) but before any DDL, so there is no partial state, and the
+    lock is released again when it fails.
     """
     dsn, dim = _dsn(), Settings().embedding_dim
     await _require_postgres(dsn)
@@ -285,11 +287,15 @@ async def test_migrate_fails_loudly_on_dim_mismatch() -> None:
     assert "HIVEMIND_EMBEDDING_DIM" in message
     assert "pg-reset" in message
 
-    # No partial state, and the lock was never taken.
+    # No partial state, and the lock is released after the failure.
     assert await current_embedding_dim(dsn) == pool_dim
     conn = await asyncpg.connect(dsn)
     try:
-        assert await conn.fetchval("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'") == 0
+        held = await conn.fetchval(
+            "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' "
+            "AND database = (SELECT oid FROM pg_database WHERE datname = current_database())"
+        )
+        assert held == 0
     finally:
         await conn.close()
 
@@ -413,7 +419,8 @@ async def _backend_count(dsn: str) -> int:
         return int(
             await conn.fetchval(
                 "SELECT count(*) FROM pg_stat_activity "
-                "WHERE backend_type = 'client backend' AND pid <> pg_backend_pid()"
+                "WHERE backend_type = 'client backend' AND pid <> pg_backend_pid() "
+                "AND datname = current_database()"
             )
         )
     finally:
@@ -433,3 +440,70 @@ async def test_migrate_and_rollback_leave_no_connection_open() -> None:
     await rollback(dsn, dim, count=1)
     await migrate(dsn, dim)
     assert await _backend_count(dsn) == before
+
+
+async def test_migrate_fails_loudly_on_an_invalid_hnsw_index() -> None:
+    """A crashed CREATE INDEX CONCURRENTLY leaves the index INVALID; the
+    migration's IF NOT EXISTS skips it, so migrate must detect it."""
+    dsn, dim = _dsn(), Settings().embedding_dim
+    await _require_postgres(dsn)
+    await _reset_chain(dsn)
+    await migrate(dsn, dim)
+
+    conn = await asyncpg.connect(dsn)
+    try:
+        await conn.execute(
+            "UPDATE pg_index SET indisvalid = false "
+            "WHERE indexrelid = 'entries_embedding_hnsw_idx'::regclass"
+        )
+    finally:
+        await conn.close()
+
+    with pytest.raises(RuntimeError, match=r"INVALID.*REINDEX INDEX CONCURRENTLY"):
+        await migrate(dsn, dim)
+
+    conn = await asyncpg.connect(dsn)
+    try:
+        await conn.execute("REINDEX INDEX CONCURRENTLY entries_embedding_hnsw_idx")
+    finally:
+        await conn.close()
+    await migrate(dsn, dim)  # repaired: clean again
+
+
+async def test_migrate_rejects_an_unindexable_dim_before_any_ddl() -> None:
+    dsn = _dsn()
+    await _require_postgres(dsn)
+    await _reset_chain(dsn)
+    with pytest.raises(RuntimeError, match="2000"):
+        await migrate(dsn, 3072)
+    assert await current_schema_version(dsn) is None
+
+
+async def test_lost_lock_connection_does_not_mask_the_migration_result(monkeypatch) -> None:
+    """If the lock connection dies mid-run the unlock must not raise an
+    InterfaceError over the real outcome."""
+    from hivemind.store import migrate as m
+
+    dsn, dim = _dsn(), Settings().embedding_dim
+    await _require_postgres(dsn)
+    await _reset_chain(dsn)
+
+    real_apply = m._apply_chain
+
+    def apply_then_kill_lock(dsn_: str, dim_: int) -> None:
+        real_apply(dsn_, dim_)
+        import psycopg
+
+        with psycopg.connect(dsn_, autocommit=True) as c:
+            c.execute(
+                "SELECT pg_terminate_backend(pid) FROM pg_locks WHERE locktype = 'advisory' "
+                "AND database = (SELECT oid FROM pg_database WHERE datname = current_database()) "
+                "AND pid <> pg_backend_pid()"
+            )
+
+    monkeypatch.setattr(m, "_apply_chain", apply_then_kill_lock)
+    with pytest.raises(RuntimeError, match="lock connection was lost"):
+        await migrate(dsn, dim)
+    monkeypatch.undo()
+    await migrate(dsn, dim)
+    assert await current_schema_version(dsn) == HEAD

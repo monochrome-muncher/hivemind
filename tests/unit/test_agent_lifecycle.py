@@ -32,7 +32,7 @@ ORG = Credential(user_id="org", is_org=True, access_controlled=True)
 
 async def _service() -> tuple[AccessService, FakeAuthenticator, str]:
     store = make_store()
-    auth = FakeAuthenticator()
+    auth = FakeAuthenticator(store=store)
     service = AccessService(store, auth)
     fleet = await service.create_fleet("data-eng", ADMIN)
     await service.register("alice", ORG, owner_alias="john")

@@ -41,13 +41,14 @@ import json
 import os
 import secrets
 import sys
+import uuid
 
 import asyncpg
 
 from hivemind.config import load_settings
 from hivemind.domain.access import TrustLevel
 from hivemind.domain.audit import ActorKind, AuditAction, key_fingerprint
-from hivemind.store.auth import ORG_KEY_LOCK, key_hash
+from hivemind.store.auth import DEAD_CREDENTIAL_PREDICATE, ORG_KEY_LOCK, key_hash
 
 _ISSUE_ADMIN = "INSERT INTO credentials (key_hash, kind, user_id) VALUES ($1, 'admin', $2)"
 _ISSUE_AGENT = (
@@ -56,7 +57,11 @@ _ISSUE_AGENT = (
 )
 _ISSUE_ORG = "INSERT INTO credentials (key_hash, kind, user_id) VALUES ($1, 'org', $2)"
 _DELETE_ORG = "DELETE FROM credentials WHERE kind = 'org'"
-_LIST = "SELECT key_hash, kind, user_id, agent_name FROM credentials ORDER BY created_at"
+_LIST = (
+    "SELECT c.key_hash, c.kind, c.user_id, c.agent_name, "
+    f"{DEAD_CREDENTIAL_PREDICATE} AS dead FROM credentials c ORDER BY c.created_at"
+)
+_FLEET_EXISTS = "SELECT 1 FROM fleets WHERE id = $1"
 _REVOKE_AGENT = "DELETE FROM credentials WHERE kind = 'agent' AND agent_name = $1"
 _REVOKE_ADMIN = "DELETE FROM credentials WHERE kind = 'admin' AND key_hash = $1"
 _INSERT_AUDIT = (
@@ -88,6 +93,17 @@ class AgentNeedsActivation(Exception):
         super().__init__(f"agent {name!r} is {status}: pass --trust-level and --home-fleet")
         self.name = name
         self.status = status
+
+
+class ActivationFlagsNotApplicable(Exception):
+    """``issue-agent`` refused: ``--trust-level`` / ``--home-fleet`` were
+    given for an agent that is already ``active``. Changing an active
+    agent's level or fleet is the admin PATCH, not key issuance, so the
+    flags are rejected rather than silently ignored (ADR 0039)."""
+
+
+class UnknownFleet(Exception):
+    """``issue-agent`` refused: ``--home-fleet`` is not a known fleet id."""
 
 
 class AgentNotRegistered(Exception):
@@ -185,11 +201,15 @@ async def _issue_agent(
                 raise AgentNotRegistered(name)
             detail: dict[str, str] | None = None
             if status == "active":
+                if trust_level is not None or home_fleet_id is not None:
+                    raise ActivationFlagsNotApplicable(name)
                 if await conn.fetchval(_HAS_AGENT_KEY, name) is not None:
                     raise AgentKeyExists(name)
             else:
                 if trust_level is None or home_fleet_id is None:
                     raise AgentNeedsActivation(name, status)
+                if await conn.fetchval(_FLEET_EXISTS, home_fleet_id) is None:
+                    raise UnknownFleet(home_fleet_id)
                 await conn.execute(_DELETE_AGENT_KEYS, name)  # stale rows, if any
                 await conn.execute(_ACTIVATE, name, trust_level.value, home_fleet_id)
                 detail = {
@@ -232,7 +252,8 @@ async def _list(dsn: str) -> None:
         return
     for row in rows:
         name = row["agent_name"] or row["user_id"] or "-"
-        print(f"{key_fingerprint(row['key_hash'])}…  {row['kind']:<6} {name}")
+        mark = "  [dead: never authenticates, ADR 0039]" if row["dead"] else ""
+        print(f"{key_fingerprint(row['key_hash'])}…  {row['kind']:<6} {name}{mark}")
 
 
 async def _revoke(dsn: str, name: str, *, actor: str | None = None) -> None:
@@ -347,6 +368,11 @@ def main() -> None:
     args = parser.parse_args()
     actor: str = args.actor if args.actor is not None else default_actor()
     dsn = load_settings().database_url
+    if args.cmd == "issue-agent" and args.home_fleet is not None:
+        try:
+            uuid.UUID(args.home_fleet)
+        except ValueError:
+            parser.error(f"--home-fleet {args.home_fleet!r} is not a fleet id (a UUID)")
     if args.cmd == "issue-admin":
         print(asyncio.run(_issue_admin(dsn, actor=actor)))
     elif args.cmd == "issue-agent":
@@ -370,6 +396,17 @@ def main() -> None:
                 "(a revoked agent's old ones are not restored, ADR 0039)",
                 file=sys.stderr,
             )
+            raise SystemExit(1) from None
+        except ActivationFlagsNotApplicable:
+            print(
+                f"agent {args.name} is already active: --trust-level / --home-fleet apply only "
+                "when activating a pending or revoked agent (change an active agent with "
+                "PATCH /v1/admin/agents/{name})",
+                file=sys.stderr,
+            )
+            raise SystemExit(1) from None
+        except UnknownFleet as exc:
+            print(f"no fleet with id {exc}; list them with GET /v1/admin/fleets", file=sys.stderr)
             raise SystemExit(1) from None
         except AgentKeyExists:
             print(

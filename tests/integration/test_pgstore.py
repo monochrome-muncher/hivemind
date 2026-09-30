@@ -32,7 +32,7 @@ from hivemind.domain.entry import (
     Kind,
 )
 from hivemind.domain.feedback import Feedback, Verdict
-from hivemind.ports import Credential
+from hivemind.ports import Credential, SupersedeConflict
 from hivemind.store import PgAuthenticator, PgStore
 from hivemind.store.auth import key_hash
 from hivemind.store.migrate import migrate
@@ -162,10 +162,53 @@ async def test_create_entry_with_supersedes_flips_targets(pg) -> None:
     assert reloaded_new.state is EntryState.ACTIVE
 
 
-async def test_supersede_unknown_target_is_ignored(pg) -> None:
+async def test_supersede_unknown_target_is_rejected(pg) -> None:
     store, _, _ = pg
-    entry = await store.create_entry(draft("Something", supersedes=("no-such-id",)))
-    assert entry.state is EntryState.ACTIVE
+    with pytest.raises(SupersedeConflict):
+        await store.create_entry(draft("Something", supersedes=("no-such-id",)))
+    assert await store.list_entries(EntryFilters(include_inactive=True)) == []
+
+
+async def test_concurrent_supersedes_of_one_head_exactly_one_wins(pg) -> None:
+    """ADR 0034 atomicity: N writers superseding one head -> one wins, the
+    rest roll back (no orphaned active successors)."""
+    store, _, _ = pg
+    head = await store.create_entry(draft("head"))
+    results = await asyncio.gather(
+        *(store.create_entry(draft(f"v{i}", supersedes=(head.id,))) for i in range(8)),
+        return_exceptions=True,
+    )
+    wins = [r for r in results if not isinstance(r, BaseException)]
+    assert len(wins) == 1
+    assert all(isinstance(r, SupersedeConflict) for r in results if r not in wins)
+    active = await store.list_entries(EntryFilters())
+    assert [e.id for e in active] == [wins[0].id]
+    reloaded = await store.get_entry(head.id)
+    assert reloaded is not None
+    assert reloaded.superseded_by == wins[0].id
+
+
+async def test_supersede_accepts_a_non_canonical_uuid_spelling(pg) -> None:
+    """Postgres accepts upper-case / hyphen-less UUIDs; the atomic flip's
+    "was every target flipped?" check must compare canonical forms, or a
+    valid supersession is falsely denied and rolled back."""
+    store, _, _ = pg
+    head = await store.create_entry(draft("head"))
+    spelled = head.id.upper().replace("-", "")
+    successor = await store.create_entry(draft("v2", supersedes=(spelled,)))
+    reloaded = await store.get_entry(head.id)
+    assert reloaded is not None
+    assert reloaded.state is EntryState.SUPERSEDED
+    assert reloaded.superseded_by == successor.id
+
+
+async def test_supersede_of_withdrawn_target_rolls_back_insert(pg) -> None:
+    store, _, _ = pg
+    head = await store.create_entry(draft("head"))
+    await store.withdraw_entry(head.id, None, by_user="alice")
+    with pytest.raises(SupersedeConflict):
+        await store.create_entry(draft("v2", supersedes=(head.id,)))
+    assert len(await store.list_entries(EntryFilters(include_inactive=True))) == 1
 
 
 async def test_withdraw_entry_sets_state_and_reason(pg) -> None:

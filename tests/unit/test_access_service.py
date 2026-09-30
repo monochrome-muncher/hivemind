@@ -49,7 +49,7 @@ def legacy_credential() -> Credential:
 
 def make_service() -> tuple[AccessService, FakeAuthenticator, object]:
     store = make_store()
-    auth = FakeAuthenticator()
+    auth = FakeAuthenticator(store=store)
     return AccessService(store, auth), auth, store
 
 
@@ -145,6 +145,28 @@ async def test_a_pending_name_is_never_taken_over_by_a_later_alias() -> None:
         await service.register("alice", org_credential(), owner_alias="john")
     stored = await store.get_agent("alice")
     assert stored is not None and stored.owner_alias == "mallory"
+
+
+async def test_issuing_a_key_for_a_non_active_agent_raises() -> None:
+    from hivemind.domain.access import InvalidAgentStatus
+
+    service, auth, _ = make_service()
+    await service.register("alice", org_credential())
+    with pytest.raises(InvalidAgentStatus):
+        await auth.issue_agent_key("alice")
+    with pytest.raises(KeyError):
+        await auth.issue_agent_key("nobody")
+
+
+async def test_a_revoked_agents_key_no_longer_verifies() -> None:
+    service, auth, store = make_service()
+    await service.register("alice", org_credential())
+    await store.create_fleet("f")
+    fleet = (await store.list_fleets())[0].id
+    _, key = await service.activate("alice", TrustLevel.LURKER, fleet, admin_credential())
+    assert await auth.verify(key) is not None
+    await store.revoke_agent("alice")  # status flipped, key row left behind
+    assert await auth.verify(key) is None
 
 
 async def test_register_with_agent_key_denied() -> None:

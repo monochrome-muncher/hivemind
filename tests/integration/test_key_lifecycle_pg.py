@@ -309,3 +309,98 @@ async def test_a_second_org_key_row_is_refused_by_the_schema(env) -> None:
     await _exec(dsn, insert, "o1")
     with pytest.raises(asyncpg.UniqueViolationError):
         await _exec(dsn, insert, "o2")
+
+
+# -- CLI surface (main()) -------------------------------------------------------------
+
+
+async def _cli(monkeypatch, *argv: str) -> None:
+    import sys
+
+    from hivemind.store import keys as keys_cli
+
+    monkeypatch.setattr(sys, "argv", ["hivemind-keys", "--actor", "t", *argv])
+    await asyncio.to_thread(keys_cli.main)
+
+
+async def test_cli_flags_on_an_active_agent_are_rejected_not_ignored(
+    env, monkeypatch, capsys
+) -> None:
+    dsn, store, auth = env
+    admin = await _admin(dsn, auth)
+    service = AccessService(store, auth)
+    fleet = await service.create_fleet("f", admin)
+    await store.register_agent("bob")
+    await store.activate_agent("bob", trust_level=TrustLevel.LURKER, home_fleet_id=fleet.id)
+    with pytest.raises(SystemExit) as exc:
+        await _cli(monkeypatch, "issue-agent", "--name", "bob", "--trust-level", "3")
+    assert exc.value.code == 1
+    assert "already active" in capsys.readouterr().err
+    assert await _fetch(dsn, "SELECT 1 FROM credentials WHERE agent_name = 'bob'") == []
+
+
+async def test_cli_bad_or_unknown_home_fleet_is_a_clean_error(env, monkeypatch, capsys) -> None:
+    _, store, _ = env
+    await store.register_agent("bob")
+    with pytest.raises(SystemExit) as exc:
+        await _cli(
+            monkeypatch,
+            "issue-agent",
+            "--name",
+            "bob",
+            "--trust-level",
+            "1",
+            "--home-fleet",
+            "not-a-uuid",
+        )
+    assert exc.value.code != 0
+    assert "not a fleet id" in capsys.readouterr().err
+    with pytest.raises(SystemExit) as exc:
+        await _cli(
+            monkeypatch,
+            "issue-agent",
+            "--name",
+            "bob",
+            "--trust-level",
+            "1",
+            "--home-fleet",
+            "00000000-0000-0000-0000-000000000000",
+        )
+    assert exc.value.code == 1
+    assert "no fleet with id" in capsys.readouterr().err
+    agent = await store.get_agent("bob")
+    assert agent is not None and agent.status.value == "pending"
+
+
+async def test_cli_activates_a_pending_agent_through_main(env, monkeypatch, capsys) -> None:
+    dsn, store, auth = env
+    admin = await _admin(dsn, auth)
+    fleet = await AccessService(store, auth).create_fleet("f", admin)
+    await store.register_agent("bob")
+    await _cli(
+        monkeypatch, "issue-agent", "--name", "bob", "--trust-level", "2", "--home-fleet", fleet.id
+    )
+    key = capsys.readouterr().out.strip()
+    credential = await auth.verify(key)
+    assert credential is not None and credential.trust_level is TrustLevel.CONTRIBUTOR
+
+
+async def test_cli_list_marks_dead_rows_and_migrate_warns(env, monkeypatch, capsys, caplog) -> None:
+    import logging
+
+    dsn, store, _ = env
+    await store.register_agent("pend")
+    await _exec(
+        dsn,
+        "INSERT INTO credentials (key_hash, kind, user_id, agent_id, agent_name) VALUES "
+        "('h-pend', 'agent', 'pend', 'pend', 'pend'), ('h-ghost', 'agent', 'g', 'g', 'g')",
+    )
+    await _exec(
+        dsn, "INSERT INTO credentials (key_hash, kind, user_id) VALUES ('h-user', 'user', 'u')"
+    )
+    await _cli(monkeypatch, "list")
+    out = capsys.readouterr().out
+    assert out.count("[dead") == 3
+    with caplog.at_level(logging.WARNING, logger="hivemind.store.migrate"):
+        await migrate(dsn, Settings().embedding_dim)
+    assert any("3 credential row(s) are dead" in r.getMessage() for r in caplog.records)

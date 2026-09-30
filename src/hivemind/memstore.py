@@ -48,6 +48,7 @@ from hivemind.domain.feedback import (
     FeedbackCounts,
     Verdict,
 )
+from hivemind.ports import SupersedeConflict
 
 
 def _utcnow() -> datetime:
@@ -121,16 +122,23 @@ class MemoryStore:
             entities_model=entities_model,
         )
         with self._lock:
+            # Explicit supersessions (SPEC.md §4.1), atomic (ADR 0034):
+            # every target must be active, or nothing is written.
+            wanted = list(dict.fromkeys(draft.supersedes))
+            denied = [
+                t
+                for t in wanted
+                if (e := self._entries.get(t)) is None or e.state is not EntryState.ACTIVE
+            ]
+            if denied:
+                raise SupersedeConflict(denied)
             self._entries[entry.id] = entry
-            # Explicit supersessions: flip the targets (SPEC.md §4.1).
-            for target_id in draft.supersedes:
-                target = self._entries.get(target_id)
-                if target is not None and target.state is EntryState.ACTIVE:
-                    self._entries[target_id] = _with_state(
-                        target,
-                        EntryState.SUPERSEDED,
-                        superseded_by=entry.id,
-                    )
+            for target_id in wanted:
+                self._entries[target_id] = _with_state(
+                    self._entries[target_id],
+                    EntryState.SUPERSEDED,
+                    superseded_by=entry.id,
+                )
         return entry
 
     async def withdraw_entry(self, entry_id: str, reason: str | None, by_user: str) -> Entry:

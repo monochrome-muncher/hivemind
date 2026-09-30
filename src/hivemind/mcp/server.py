@@ -23,7 +23,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from typing import Any
 
@@ -32,7 +32,9 @@ from mcp.server.mcpserver import MCPServer
 from hivemind.config import configure_logging, load_settings
 from hivemind.extractor import build_extractor
 from hivemind.mcp.app import (
+    ERR_UNAUTHENTICATED,
     McpHivemind,
+    _error,
     hive_feedback,
     hive_get,
     hive_list,
@@ -79,8 +81,9 @@ _DESC_WRITE = (
     "permits (self/fleet; an explicit out-of-permission scope is rejected — "
     "ADR 0011). Keep machine-local paths (home directories, local checkouts) "
     "out of fleet entries: make them repo-relative, or put the local detail "
-    "in a separate scope 'self' entry. 'summary' (keep it under ~280 chars) "
-    "is the embedded text; "
+    "in a separate scope 'self' entry. 'summary' (at most 280 chars; longer "
+    "is rejected) is the headline, embedded together with the start of "
+    "'body' (ADR 0021); "
     "'body' holds long-form content. Optional 'supersedes' names entries this "
     "one replaces: you may supersede entries you can read, and the new entry "
     "must reach at least the same audience — a self entry replaces only your "
@@ -120,12 +123,13 @@ _DESC_FEEDBACK = (
 )
 
 _DESC_REGISTER = (
-    "Register (or re-register) an agent (ADR 0012). Gated on the org key; "
-    "creates a 'pending' agent (level 0, no fleet). Registering the same name "
-    "again with the same owner_alias is safe: it returns the current status "
-    "(already_registered, plus a message: still pending / active, so ask your "
-    "admin for the agent key / revoked). A name that belongs to another owner "
-    "is a name_conflict: pick a different name (ADR 0039)."
+    "Register (or re-register) an agent (ADR 0012). Gated on the org key "
+    "(an admin key is rejected here); creates a 'pending' agent (level 0, no "
+    "fleet). Registering the same name again with the same owner_alias is "
+    "safe: it returns the current status (already_registered, plus a message: "
+    "still pending / active, so ask your admin for the agent key / revoked). "
+    "A name that belongs to another owner is a name_conflict: pick a "
+    "different name (ADR 0039)."
 )
 
 
@@ -142,7 +146,8 @@ _DESC_WHOAMI = (
 def build_server(
     app: McpHivemind,
     *,
-    credential_provider: Callable[[], Credential | None] | None = None,
+    credential_provider: Callable[[], Credential | Awaitable[Credential | None] | None]
+    | None = None,
 ) -> MCPServer:
     """Build an ``MCPServer`` exposing exactly the eight Hivemind tools.
 
@@ -153,10 +158,13 @@ def build_server(
     ``credential_provider`` (optional) turns this into a *shared,
     multi-agent* server: when provided, every tool dispatch resolves the
     acting credential by re-binding ``app``'s (stateless) services to
-    ``credential_provider()``. The stdio / dev path passes nothing, so
-    one process = one agent (the fixed ``app``). The streamable-HTTP path
-    (see ``hivemind.mcp.http``) passes a per-request provider, so one
-    process = many agents (ADR 0010).
+    ``credential_provider()`` (sync or async). A provider that yields
+    ``None`` **fails closed**: the call answers ``unauthenticated`` and
+    never falls back to ``app``'s own credential (ADR 0042). The dev stdio
+    path passes nothing, so one process = one agent (the fixed ``app``).
+    The streamable-HTTP path (see ``hivemind.mcp.http``) passes a
+    per-request provider (ADR 0010); the per-agent Postgres stdio runner
+    passes one that re-verifies its key on every call (ADR 0042).
     """
     server = MCPServer(
         name="hivemind",
@@ -164,17 +172,32 @@ def build_server(
         instructions=_INSTRUCTIONS,
     )
 
-    def resolve_app() -> McpHivemind:
+    async def resolve_app() -> McpHivemind | None:
         """The acting ``McpHivemind`` for this dispatch: the shared,
         stateless services, re-bound to the current credential when a
         provider is set (the identity varies per request; the services
-        do not)."""
+        do not). ``None`` when a provider is set but yields no credential
+        (fail closed, ADR 0042)."""
         if credential_provider is None:
             return app
-        credential = credential_provider()
-        if credential is None or credential == app.credential:
+        resolved = credential_provider()
+        credential = await resolved if isinstance(resolved, Awaitable) else resolved
+        if credential is None:
+            return None
+        if credential == app.credential:
             return app
         return replace(app, credential=credential)
+
+    async def dispatch(
+        verb: Callable[..., Awaitable[dict[str, object]]], **kwargs: Any
+    ) -> dict[str, object]:
+        acting = await resolve_app()
+        if acting is None:
+            return _error(
+                ERR_UNAUTHENTICATED,
+                "this key is no longer valid (revoked or unknown); ask your admin",
+            )
+        return await verb(acting, **kwargs)
 
     @server.tool(name="hive_write", description=_DESC_WRITE)
     async def _hive_write(
@@ -190,8 +213,8 @@ def build_server(
         supersedes: list[str] | None = None,
         agent: str | None = None,
     ) -> dict[str, Any]:
-        return await hive_write(
-            resolve_app(),
+        return await dispatch(
+            hive_write,
             kind=kind,
             summary=summary,
             body=body,
@@ -222,8 +245,8 @@ def build_server(
         created_to: str | None = None,
         include_inactive: bool = False,
     ) -> dict[str, Any]:
-        return await hive_search(
-            resolve_app(),
+        return await dispatch(
+            hive_search,
             query=query,
             limit=limit,
             offset=offset,
@@ -245,7 +268,7 @@ def build_server(
         entry_id: str,
         include_history: bool = False,
     ) -> dict[str, Any]:
-        return await hive_get(resolve_app(), entry_id=entry_id, include_history=include_history)
+        return await dispatch(hive_get, entry_id=entry_id, include_history=include_history)
 
     @server.tool(name="hive_list", description=_DESC_LIST)
     async def _hive_list(
@@ -263,8 +286,8 @@ def build_server(
         limit: int | None = None,
         offset: int = 0,
     ) -> dict[str, Any]:
-        return await hive_list(
-            resolve_app(),
+        return await dispatch(
+            hive_list,
             kind=kind,
             tags=tags,
             entities=entities,
@@ -285,14 +308,14 @@ def build_server(
         entry_id: str,
         reason: str | None = None,
     ) -> dict[str, Any]:
-        return await hive_withdraw(resolve_app(), entry_id=entry_id, reason=reason)
+        return await dispatch(hive_withdraw, entry_id=entry_id, reason=reason)
 
     @server.tool(name="hive_register", description=_DESC_REGISTER)
     async def _hive_register(
         name: str,
         owner_alias: str | None = None,
     ) -> dict[str, Any]:
-        return await hive_register(resolve_app(), name=name, owner_alias=owner_alias)
+        return await dispatch(hive_register, name=name, owner_alias=owner_alias)
 
     @server.tool(name="hive_feedback", description=_DESC_FEEDBACK)
     async def _hive_feedback(
@@ -301,13 +324,13 @@ def build_server(
         note: str | None = None,
         agent: str | None = None,
     ) -> dict[str, Any]:
-        return await hive_feedback(
-            resolve_app(), entry_id=entry_id, verdict=verdict, note=note, agent=agent
+        return await dispatch(
+            hive_feedback, entry_id=entry_id, verdict=verdict, note=note, agent=agent
         )
 
     @server.tool(name="hive_whoami", description=_DESC_WHOAMI)
     async def _hive_whoami() -> dict[str, Any]:
-        return await hive_whoami(resolve_app())
+        return await dispatch(hive_whoami)
 
     return server
 
@@ -343,7 +366,7 @@ def _mcp_key_missing_hint() -> str:
     return (
         "HIVEMIND_MCP_KEY is required to run hivemind-mcp-pg. Issue an "
         "agent-scoped key, then set it in the agent's MCP config:\n"
-        "  uv run hivemind-keys issue --user <user> --agent <agent>\n"
+        "  uv run hivemind-keys issue-agent --name <agent>  (the agent must be registered and active)\n"
         '  {"command": "uv", "args": ["run", "--directory", "<repo>", "hivemind-mcp-pg"],\n'
         '   "env": {"HIVEMIND_MCP_KEY": "hm_..."}}'
     )
@@ -353,7 +376,7 @@ def _mcp_key_unknown_hint() -> str:
     """The error text when the key is set but is not a known credential."""
     return (
         "HIVEMIND_MCP_KEY is not a known credential. Issue it first, then retry:\n"
-        "  uv run hivemind-keys issue --user <user> --agent <agent>\n"
+        "  uv run hivemind-keys issue-agent --name <agent>  (the agent must be registered and active)\n"
         "  (list existing credential hashes: uv run hivemind-keys list)"
     )
 
@@ -395,7 +418,7 @@ def main_pg() -> None:
     extractor = build_extractor(settings)  # optional (ADR 0016): None when the endpoint is unset
 
     async def _run() -> None:
-        credential = await authenticator.verify(raw_key)
+        credential = await authenticator.verify(raw_key)  # fail fast; re-verified per call below
         if credential is None:
             raise SystemExit(_mcp_key_unknown_hint())
         search_config = settings.search_config()
@@ -408,7 +431,14 @@ def main_pg() -> None:
             search_config=search_config,
             credential=credential,
         )
-        server = build_server(app)
+
+        async def current_credential() -> Credential | None:
+            # Re-verified on EVERY tool call (ADR 0042): a revoked key, a
+            # demotion or a re-homed fleet applies on the next call, not
+            # at the next restart. One indexed query via the Authenticator.
+            return await authenticator.verify(raw_key)
+
+        server = build_server(app, credential_provider=current_credential)
         try:
             await server.run_stdio_async()
         finally:

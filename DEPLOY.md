@@ -26,7 +26,7 @@ What the **org provides** (the app itself needs nothing else):
 
 | Prerequisite | Detail |
 |---|---|
-| Postgres 16+ with the `vector` extension (pgvector) | A dedicated database + user whose credentials allow `CREATE EXTENSION vector` (DB user is a superuser, or the extension is pre-installed). |
+| Postgres 16+ with the `vector` extension (pgvector **>= 0.8**) | A dedicated database + user whose credentials allow `CREATE EXTENSION vector` (DB user is a superuser, or the extension is pre-installed). pgvector 0.8+ is required (`hnsw.iterative_scan`, ADR 0025) and `HIVEMIND_EMBEDDING_DIM` must be **<= 2000** (HNSW's limit); `hivemind-migrate` fails with an actionable message otherwise. On an older pgvector upgrade the package/image, then `ALTER EXTENSION vector UPDATE;`. |
 | A vLLM (or any OpenAI-compatible) **embedding** endpoint reachable from the cluster | e.g. an in-cluster vLLM Service (`http://vllm:8000/v1`); any OpenAI-compatible endpoint works (ADR 0005). |
 | (Optional) an OpenAI-compatible **chat** endpoint for entity extraction | ADR 0016 — optional + best-effort. **Off by default**: an empty `HIVEMIND_EXTRACTOR_ENDPOINT` + empty key = zero LLM cost, entries land with empty `entities`. |
 | GitLab: the **Kubernetes agent pre-configured** | The deploy job just runs `kubectl` — no kubeconfig wiring in `.gitlab-ci.yml`. |
@@ -76,7 +76,7 @@ The 5-step operator flow:
    Distribution: **admin key** → operators (admin surface + key
    management); **org key** → the registration surface (`hive_register`
    / `POST /v1/agents`); **agent keys** are issued per agent, either via
-   `hivemind-keys issue-agent --name <agent>`, the admin REST surface
+   `hivemind-keys issue-agent --name <agent>` (an active agent with no key; for a pending or revoked one add `--trust-level N --home-fleet <fleet-id>`, ADR 0039), the admin REST surface
    `POST /v1/admin/agents/{name}/activate` (returns the key **once**), or
    the **admin panel** (§8), which the same pipeline deploys.
 5. **(Optional)** external reachability — apply the opt-in Ingress:

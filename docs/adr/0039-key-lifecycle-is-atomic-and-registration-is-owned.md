@@ -73,6 +73,27 @@ A review of the access plane found that the invariants ADRs 0028 and
 
 ## Consequences
 
+* **Rolling deploy (ADR 0020 window).** Old pods do not know the new
+  guards. While both run: concurrent org-key rotations on an old pod hit
+  the new unique index (measured: about 3 of 4 racers get a 500; serial
+  rotations are fine); an old pod's REST activate on an agent that already
+  holds a key row 500s every time (the agent is left active with the old
+  key); and new pods answer 401 for legacy, pending, revoked and
+  no-record keys that old pods still accept, so such clients flap until
+  the rollout finishes. All of it is admin-only, human-rate or limited to
+  the rollout window. Migration `0007` builds its indexes without
+  `CONCURRENTLY` (ADR 0020 prefers it): the table holds a handful of rows,
+  and building them in the dedupe's transaction keeps dedupe-then-enforce
+  atomic.
+* **Dead credential rows.** Legacy `user` rows, name-less agent rows and
+  keys of missing / pending / revoked agents are inert but remain in the
+  table and would authenticate again after a rollback to an older
+  release. `hivemind-keys list` marks them `[dead]`, `migrate` logs a
+  warning with their count, and the runbook gives the SQL to delete them.
+* `issue-agent` rejects `--trust-level` / `--home-fleet` for an already
+  active agent (changing those is the admin PATCH) and validates the
+  fleet id, instead of ignoring or crashing on them.
+
 * One query per agent request instead of two.
 * Existing pools lose any pre-v2 key on deploy (there is no migration
   path for them by design), and any duplicate agent or org key older
