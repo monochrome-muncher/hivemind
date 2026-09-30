@@ -18,6 +18,12 @@ from hivemind.domain.access import Visibility, may_supersede
 from hivemind.domain.audit import AuditAction
 from hivemind.domain.entry import Entry, EntryDraft, ExtractedEntity
 from hivemind.domain.feedback import Feedback, Verdict
+from hivemind.domain.validation import (
+    MAX_IDENTITY_CHARS,
+    MAX_NOTE_CHARS,
+    MAX_REASON_CHARS,
+    check_text,
+)
 from hivemind.ports import Credential, Embedder, Extractor, Store, SupersedeConflict
 from hivemind.retrieval.scoring import feedback_quality
 from hivemind.services.audit import record_admin_action
@@ -184,6 +190,7 @@ class GovernanceService:
     async def withdraw(
         self, credential: Credential, entry_id: str, reason: str | None = None
     ) -> Entry:
+        check_text(reason, "reason", MAX_REASON_CHARS)  # ADR 0040
         entry = await get_visible_entry(self._store, entry_id, credential.visibility())
         if entry is None:  # unknown, or not visible to the caller (ADR 0033)
             raise LookupError(f"unknown entry: {entry_id}")
@@ -222,6 +229,8 @@ class GovernanceService:
         wins. The agent identity is the acting sub-key's agent, or the
         ``agent`` self-reported by a plain user key (SPEC.md §8.1).
         """
+        check_text(note, "note", MAX_NOTE_CHARS)  # ADR 0040
+        check_text(agent, "agent", MAX_IDENTITY_CHARS)
         effective_agent = credential.agent_id or agent
         if effective_agent is None:
             raise ValueError(
