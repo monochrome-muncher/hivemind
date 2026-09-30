@@ -308,6 +308,18 @@ def _is_valid_uuid(value: str) -> bool:
     return True
 
 
+def _canonical_uuid(value: str) -> str | None:
+    """``value`` in Postgres's canonical ``uuid`` text form, or ``None``.
+
+    Both ``uuid.UUID`` and Postgres accept non-canonical spellings
+    (upper case, no hyphens, braces); comparisons against ids read back
+    from the database must use the canonical form."""
+    try:
+        return str(uuid.UUID(value))
+    except ValueError, TypeError:
+        return None
+
+
 def _valid_uuids(ids: list[str] | tuple[str, ...]) -> list[str]:
     """Keep only the IDs that parse as UUIDs (others simply don't exist)."""
     return [i for i in ids if _is_valid_uuid(i)]
@@ -410,7 +422,7 @@ class PgStore:
                         str(r["id"])
                         for r in await conn.fetch(FLIP_SUPERSEDED, entry_id, _valid_uuids(wanted))
                     }
-                    denied = [t for t in wanted if t.lower() not in flipped]
+                    denied = [t for t in wanted if _canonical_uuid(t) not in flipped]
                     if denied:
                         raise SupersedeConflict(denied)
             row = await conn.fetchrow(SELECT_ENTRY, entry_id)

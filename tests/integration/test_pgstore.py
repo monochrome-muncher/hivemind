@@ -188,6 +188,20 @@ async def test_concurrent_supersedes_of_one_head_exactly_one_wins(pg) -> None:
     assert reloaded.superseded_by == wins[0].id
 
 
+async def test_supersede_accepts_a_non_canonical_uuid_spelling(pg) -> None:
+    """Postgres accepts upper-case / hyphen-less UUIDs; the atomic flip's
+    "was every target flipped?" check must compare canonical forms, or a
+    valid supersession is falsely denied and rolled back."""
+    store, _, _ = pg
+    head = await store.create_entry(draft("head"))
+    spelled = head.id.upper().replace("-", "")
+    successor = await store.create_entry(draft("v2", supersedes=(spelled,)))
+    reloaded = await store.get_entry(head.id)
+    assert reloaded is not None
+    assert reloaded.state is EntryState.SUPERSEDED
+    assert reloaded.superseded_by == successor.id
+
+
 async def test_supersede_of_withdrawn_target_rolls_back_insert(pg) -> None:
     store, _, _ = pg
     head = await store.create_entry(draft("head"))
