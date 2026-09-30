@@ -75,6 +75,8 @@ def make_embedder(
     retries: int = 2,
     backoff: float = 0.5,
     sleep=None,
+    jitter=None,
+    deadline: float = 30.0,
 ) -> OpenAICompatEmbedder:
     return OpenAICompatEmbedder(
         client=env.client(),
@@ -86,6 +88,8 @@ def make_embedder(
         retries=retries,
         backoff=backoff,
         sleep=sleep,
+        jitter=jitter,
+        deadline=deadline,
     )
 
 
@@ -218,7 +222,7 @@ class TestRetries:
 
         env = MockEnv()
         self._scripted_handler(env, [httpx.Response(500), httpx.Response(502), self._ok()])
-        embedder = make_embedder(env, retries=2, backoff=0.5, sleep=record)
+        embedder = make_embedder(env, retries=2, backoff=0.5, sleep=record, jitter=lambda: 1.0)
         await embedder.embed_text("x")
         assert sleeps == [0.5, 1.0]  # base * 2**retry_index
 
