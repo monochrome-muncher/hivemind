@@ -153,6 +153,8 @@ CREATE INDEX audit_log_actor_idx ON public.audit_log USING btree (actor);
 
 CREATE INDEX audit_log_occurred_at_idx ON public.audit_log USING btree (occurred_at);
 
+CREATE INDEX entries_author_created_idx ON public.entries USING btree (author, created_at DESC, id DESC);
+
 CREATE INDEX entries_author_idx ON public.entries USING btree (author);
 
 CREATE INDEX entries_created_at_id_idx ON public.entries USING btree (created_at DESC, id DESC);

@@ -6,18 +6,23 @@ Seams under test: ``WriteService`` (embed-then-persist) and
 
 from __future__ import annotations
 
+import asyncio
+import time
+
 import pytest
 
-from hivemind.domain.entry import EntryDraft, Kind
+from hivemind.domain.access import TrustLevel, Visibility
+from hivemind.domain.entry import EntryDraft, EntryFilters, Kind
 from hivemind.domain.feedback import Verdict
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.governance import (
     GovernanceService,
     PermissionDenied,
+    SupersedeDenied,
     WriteService,
 )
-from tests.fakes import FakeExtractor, make_clock, make_embedder
+from tests.fakes import FakeEmbedder, FakeExtractor, make_clock, make_embedder
 
 
 def make_draft(summary: str, **kwargs) -> EntryDraft:
@@ -74,6 +79,30 @@ class TestWriteService:
             await service.write(make_draft("x", supersedes=("missing-id",)), writer=writer)
         assert denied.value.ids == ["missing-id"]
 
+    async def test_a_huge_supersedes_list_is_looked_up_in_bounded_chunks(self) -> None:
+        """Memory is bounded regardless of list length: no ``get_entries``
+        call ever carries more than the chunk size, and every id is checked."""
+        from hivemind.domain.access import TrustLevel, Visibility
+        from hivemind.services.governance import SupersedeDenied
+
+        store = MemoryStore(make_clock())
+        service = WriteService(store, make_embedder())
+        sizes: list[int] = []
+        real_many = store.get_entries
+
+        async def get_entries(ids):
+            sizes.append(len(ids))
+            return await real_many(ids)
+
+        store.get_entries = get_entries  # type: ignore[method-assign]
+        writer = Visibility(level=TrustLevel.PRIVILEGED, name="alice", is_admin=True)
+        missing = tuple(f"missing-{i}" for i in range(1000))
+        with pytest.raises(SupersedeDenied) as denied:
+            await service.write(make_draft("x", supersedes=missing), writer=writer)
+        assert denied.value.ids == list(missing)
+        assert max(sizes) <= 50
+        assert sum(sizes) == 1000
+
     async def test_write_with_supersedes_flips_targets(self) -> None:
         store = MemoryStore(make_clock())
         service = WriteService(store, make_embedder())
@@ -87,6 +116,94 @@ class TestWriteService:
         assert reloaded_old.superseded_by == new.id
         assert reloaded_new is not None
         assert reloaded_new.state.value == "active"
+
+
+class TestWriteServiceAtomicSupersede:
+    async def test_target_lost_after_precheck_maps_to_supersede_denied(self) -> None:
+        """ADR 0034: a target superseded while the embedder runs is rejected
+        by the store's atomic flip, surfaced as the same SupersedeDenied."""
+        store = MemoryStore(make_clock())
+        head = await store.create_entry(make_draft("head"))
+        writer = Visibility(level=TrustLevel.UNTRUSTED, name="root", is_admin=True)
+
+        class SlowEmbedder(FakeEmbedder):
+            async def embed_entry(self, draft):
+                await asyncio.sleep(0.05)
+                return await super().embed_entry(draft)
+
+        service = WriteService(store, SlowEmbedder())
+        results = await asyncio.gather(
+            *(
+                service.write(make_draft(f"v{i}", supersedes=(head.id,)), writer=writer)
+                for i in range(6)
+            ),
+            return_exceptions=True,
+        )
+        wins = [r for r in results if not isinstance(r, BaseException)]
+        assert len(wins) == 1
+        assert all(isinstance(r, SupersedeDenied) for r in results if r not in wins)
+        assert len(await store.list_entries(EntryFilters())) == 1
+
+
+class TestWriteServiceConcurrency:
+    """PERF-3: embedder and extractor run concurrently."""
+
+    async def test_embedder_and_extractor_overlap(self) -> None:
+        delay = 0.2
+
+        class SlowEmbedder(FakeEmbedder):
+            async def embed_entry(self, draft):
+                await asyncio.sleep(delay)
+                return await super().embed_entry(draft)
+
+        class SlowExtractor(FakeExtractor):
+            async def extract_entry(self, draft):
+                await asyncio.sleep(delay)
+                return await super().extract_entry(draft)
+
+        service = WriteService(MemoryStore(make_clock()), SlowEmbedder(), SlowExtractor())
+        start = time.perf_counter()
+        entry = await service.write(make_draft("Postgres connection pool exhausted"))
+        elapsed = time.perf_counter() - start
+        assert elapsed < delay * 1.8  # sequential would be >= 2 * delay
+        assert entry.entities and entry.entities_model == "fake-extractor"
+
+    async def test_extractor_failure_does_not_block_slow_embed(self) -> None:
+        class SlowEmbedder(FakeEmbedder):
+            async def embed_entry(self, draft):
+                await asyncio.sleep(0.05)
+                return await super().embed_entry(draft)
+
+        service = WriteService(MemoryStore(make_clock()), SlowEmbedder(), FakeExtractor(fail=True))
+        entry = await service.write(make_draft("still lands"))
+        assert entry.embedding is not None
+        assert entry.entities == ()
+        assert entry.entities_model is None
+
+    async def test_embedder_failure_fails_write_and_cancels_extractor(self) -> None:
+        cancelled = asyncio.Event()
+
+        class BoomEmbedder(FakeEmbedder):
+            async def embed_entry(self, draft):
+                await asyncio.sleep(0.01)
+                raise RuntimeError("embed down")
+
+        class HangingExtractor(FakeExtractor):
+            async def extract_entry(self, draft):
+                try:
+                    await asyncio.sleep(30)
+                except asyncio.CancelledError:
+                    cancelled.set()
+                    raise
+                return ()
+
+        store = MemoryStore(make_clock())
+        service = WriteService(store, BoomEmbedder(), HangingExtractor())
+        with pytest.raises(RuntimeError, match="embed down"):
+            await service.write(make_draft("x"))
+        await asyncio.sleep(0)
+        assert cancelled.is_set()
+        assert await store.list_entries(EntryFilters(include_inactive=True)) == []
 
 
 class TestWriteServiceExtraction:

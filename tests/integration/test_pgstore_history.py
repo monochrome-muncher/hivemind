@@ -90,10 +90,54 @@ async def test_list_predecessors_matches_the_reference_store(pg: PgStore) -> Non
     mem = MemoryStore()
     pg_ids = await _chain(pg)
     mem_ids = await _chain(mem)
-    # Same shape on both stores: the head's predecessors are exactly one.
-    assert len(await pg.list_predecessors([pg_ids[-1]])) == len(
-        await mem.list_predecessors([mem_ids[-1]])
+    for i in range(1, len(pg_ids)):
+        pg_preds = await pg.list_predecessors([pg_ids[i]])
+        mem_preds = await mem.list_predecessors([mem_ids[i]])
+        # Same contents (by position in the chain), not merely the same count.
+        assert [pg_ids.index(e.id) for e in pg_preds] == [mem_ids.index(e.id) for e in mem_preds]
+        assert [(e.summary, e.state, e.superseded_by is not None) for e in pg_preds] == [
+            (e.summary, e.state, e.superseded_by is not None) for e in mem_preds
+        ]
+    # A merge: two entries superseded by one successor come back together.
+    a = await pg.create_entry(_draft("ma"), VEC, embedding_model="fake")
+    b = await pg.create_entry(_draft("mb"), VEC, embedding_model="fake")
+    merged = await pg.create_entry(
+        _draft("merged", supersedes=(a.id, b.id)), VEC, embedding_model="fake"
     )
+    assert {e.id for e in await pg.list_predecessors([merged.id])} == {a.id, b.id}
+
+
+async def test_chain_walk_on_postgres_hides_an_invisible_middle_version(pg: PgStore) -> None:
+    """ADR 0033 on the real store: v1 (org, alice) <- v2 (self, bob) <- v3
+    (self, bob). alice must see v1 through the invisible v2 without ever
+    receiving v2; bob (the author) sees the whole chain; an admin sees all."""
+    from hivemind.domain.access import TrustLevel, Visibility
+    from hivemind.services.chain import supersession_chain
+
+    v1 = await pg.create_entry(_draft("v1", scope="org"), VEC, embedding_model="fake")
+    v2 = await pg.create_entry(
+        _draft("v2", scope="self", author="bob", supersedes=(v1.id,)), VEC, embedding_model="fake"
+    )
+    v3 = await pg.create_entry(
+        _draft("v3", scope="self", author="bob", supersedes=(v2.id,)), VEC, embedding_model="fake"
+    )
+    head = await pg.get_entry(v3.id)
+    assert head is not None
+
+    alice = Visibility(level=TrustLevel.CONTRIBUTOR, name="alice")
+    bob = Visibility(level=TrustLevel.CONTRIBUTOR, name="bob")
+    admin = Visibility(level=TrustLevel.PRIVILEGED, name="admin", is_admin=True)
+    _, as_alice = await supersession_chain(pg, head, visibility=alice)
+    _, as_bob = await supersession_chain(pg, head, visibility=bob)
+    _, as_admin = await supersession_chain(pg, head, visibility=admin)
+    assert [e.id for e in as_alice] == [v1.id]
+    assert {e.id for e in as_bob} == {v1.id, v2.id}
+    assert {e.id for e in as_admin} == {v1.id, v2.id}
+    # Forward direction: from v1, alice sees no successors (both are bob's self).
+    tail = await pg.get_entry(v1.id)
+    assert tail is not None
+    successors, _ = await supersession_chain(pg, tail, visibility=alice)
+    assert successors == []
 
 
 async def test_usage_counts_group_like_the_reference_store(pg: PgStore) -> None:
@@ -172,4 +216,30 @@ async def test_the_default_list_order_is_served_by_the_created_at_index(pg: PgSt
     finally:
         await conn.close()
     assert "entries_created_at_id_idx" in plan, plan
+    assert "Sort" not in plan, plan
+
+
+async def test_the_author_list_order_is_served_by_the_composite_index(pg: PgStore) -> None:
+    """An author whose entries are all OLD must not be answered by walking
+    the global created_at index (82 ms at 200k rows, measured): the
+    (author, created_at, id) index gives a range scan that stops at LIMIT."""
+    conn = await asyncpg.connect(_dsn())
+    try:
+        await conn.execute(
+            "INSERT INTO entries (kind, summary, occurred_at, created_at, author, agent) "
+            "SELECT 'fact', 's' || g, now(), now() - interval '1 day' - g * interval '1 second', "
+            "CASE WHEN g > 19700 THEN 'old-author' ELSE 'author-' || (g % 50) END, 'a' "
+            "FROM generate_series(1, 20000) g"
+        )
+        await conn.execute("ANALYZE entries")
+        plan = "\n".join(
+            r[0]
+            for r in await conn.fetch(
+                "EXPLAIN SELECT id FROM entries WHERE state = 'active' AND author = 'old-author' "
+                "ORDER BY created_at DESC, id DESC LIMIT 20"
+            )
+        )
+    finally:
+        await conn.close()
+    assert "entries_author_created_idx" in plan, plan
     assert "Sort" not in plan, plan

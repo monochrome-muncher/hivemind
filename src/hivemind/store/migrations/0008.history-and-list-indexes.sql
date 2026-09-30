@@ -1,6 +1,6 @@
 -- transactional: false
 --
--- Two missing indexes that made two read paths O(pool) (review findings
+-- Three missing indexes that made read paths O(pool) (review findings
 -- PERF-1 / STORE-2 / STORE-3).
 --
 -- 1. `entries_superseded_by_idx` — the reverse supersession link. The
@@ -18,6 +18,17 @@
 --    the ORDER BY exactly (same direction, same tie-break column), and is
 --    deliberately NOT partial on `state = 'active'` so the
 --    `include_inactive` listing uses it too.
+--
+-- 3. `entries_author_created_idx` — the same order, per author. Index (2) alone
+--    makes a selective filter WORSE when the matching rows are old: the
+--    planner trusts (2) to find LIMIT rows early and walks it (82 ms for an
+--    author whose 1.5k entries are the oldest of 200k, 227 ms vs 2.9 ms at
+--    1M in the verifier's run). With this index the same query is an index
+--    range scan that stops after LIMIT rows (0.075 ms). Cost: ~10 MB per
+--    200k rows and ~18% on a 20k-row bulk insert (397 -> 469 ms), noise next
+--    to the per-write embedder call. `entries_author_idx` is kept
+--    (expand-only, ADR 0020); it is now redundant for ordered lists but
+--    still serves unordered author filters and counts.
 --
 -- `CONCURRENTLY` (hence `-- transactional: false`, ADR 0020 §6 / ADR
 -- 0025) so the builds take no write lock on `entries` while sibling
@@ -38,3 +49,6 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS entries_superseded_by_idx
 
 CREATE INDEX CONCURRENTLY IF NOT EXISTS entries_created_at_id_idx
     ON entries (created_at DESC, id DESC);
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS entries_author_created_idx
+    ON entries (author, created_at DESC, id DESC);

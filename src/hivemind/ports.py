@@ -42,6 +42,17 @@ from hivemind.domain.entry import (
 from hivemind.domain.feedback import Feedback, FeedbackCounts
 
 
+class SupersedeConflict(Exception):
+    """A ``create_entry`` named supersession targets that are not (or no
+    longer) active at flip time (ADR 0034). Nothing was written. ``ids``
+    are the offending targets. The write service maps it to its
+    ``SupersedeDenied``."""
+
+    def __init__(self, ids: list[str]) -> None:
+        super().__init__("supersession targets not active: " + ", ".join(ids))
+        self.ids = ids
+
+
 @runtime_checkable
 class Store(Protocol):
     """Read/write access to the memory pool."""
@@ -64,6 +75,13 @@ class Store(Protocol):
         ``entities`` / ``entities_model`` (ADR 0016, SPEC §13) record the
         machine-extracted entity facets and the extractor model that
         produced them (provenance, symmetric with ``embedding_model``).
+
+        Atomic supersession (ADR 0034): every ``draft.supersedes`` target
+        must be an existing ``active`` entry at the moment of the flip,
+        checked and flipped atomically with the insert. If any target is
+        unknown or no longer active (e.g. a concurrent writer superseded
+        or withdrew it first) the whole write is rolled back and
+        ``SupersedeConflict`` is raised; nothing is inserted.
         """
         ...
 

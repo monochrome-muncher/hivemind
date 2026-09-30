@@ -8,6 +8,7 @@ and both resolve the caller's identity before calling them.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -17,7 +18,7 @@ from hivemind.domain.access import Visibility, may_supersede
 from hivemind.domain.audit import AuditAction
 from hivemind.domain.entry import Entry, EntryDraft, ExtractedEntity
 from hivemind.domain.feedback import Feedback, Verdict
-from hivemind.ports import Credential, Embedder, Extractor, Store
+from hivemind.ports import Credential, Embedder, Extractor, Store, SupersedeConflict
 from hivemind.retrieval.scoring import feedback_quality
 from hivemind.services.audit import record_admin_action
 from hivemind.services.chain import get_visible_entry
@@ -27,6 +28,10 @@ logger = logging.getLogger(__name__)
 
 class PermissionDenied(Exception):
     """The caller may not perform this governance action."""
+
+
+# ``supersedes`` targets fetched per ``get_entries`` call (bounds memory).
+_SUPERSEDES_LOOKUP_CHUNK = 50
 
 
 class SupersedeDenied(PermissionDenied):
@@ -93,50 +98,71 @@ class WriteService:
         """
         if writer is not None and draft.supersedes:
             await self._check_supersedes(draft, writer)
-        embedding = await self._embedder.embed_entry(draft)
+        # Embedder and (best-effort) extractor are independent network
+        # calls: run them concurrently. The embedder's failure propagates
+        # unchanged (the extractor is cancelled); the extractor's never
+        # fails the write. Cancelling the write cancels both.
+        extraction: asyncio.Task[tuple[ExtractedEntity, ...] | None] | None = None
         entities: tuple[ExtractedEntity, ...] = ()
         entities_model: str | None = None
         if self._extractor is not None:
-            try:
-                entities = await self._extractor.extract_entry(draft)
-                entities_model = self._extractor.model_name
-            except Exception:
-                # Best-effort enrichment (ADR 0016, SPEC §13.4): an
-                # extraction failure never blocks the write — the entry
-                # lands without facets, zero write-failure impact. This
-                # is the ONLY record of what failed — the extractor's own
-                # exception is logged here, not just swallowed, so a
-                # dead/misconfigured extractor endpoint shows up as log
-                # lines instead of only as a slow drift in facet coverage
-                # (the symptom docs/ops-runbook.md previously said to
-                # watch for in place of an actual error).
-                logger.warning(
-                    "entity extraction failed for a write by %s/%s — entry lands without facets",
-                    draft.author,
-                    draft.agent,
-                    exc_info=True,
-                )
-                entities, entities_model = (), None
-        return await self._store.create_entry(
-            draft,
-            embedding,
-            embedding_model=self._embedder.model_name,
-            entities=entities,
-            entities_model=entities_model,
-        )
+            extraction = asyncio.create_task(self._extract(draft, self._extractor))
+        try:
+            embedding = await self._embedder.embed_entry(draft)
+            if extraction is not None and (extracted := await extraction) is not None:
+                entities = extracted
+                entities_model = self._extractor.model_name if self._extractor else None
+        except BaseException:
+            if extraction is not None:
+                extraction.cancel()
+            raise
+        try:
+            return await self._store.create_entry(
+                draft,
+                embedding,
+                embedding_model=self._embedder.model_name,
+                entities=entities,
+                entities_model=entities_model,
+            )
+        except SupersedeConflict as exc:
+            # A target was superseded/withdrawn after the pre-check
+            # (ADR 0034): the store rolled the write back atomically.
+            raise SupersedeDenied(exc.ids) from exc
+
+    @staticmethod
+    async def _extract(
+        draft: EntryDraft, extractor: Extractor
+    ) -> tuple[ExtractedEntity, ...] | None:
+        """Best-effort extraction (ADR 0016, SPEC §13.4): ``None`` on any
+        failure, which is logged — the only record of what failed — so a
+        dead extractor endpoint shows up as log lines. Cancellation is not
+        swallowed (``CancelledError`` is a ``BaseException``)."""
+        try:
+            return await extractor.extract_entry(draft)
+        except Exception:
+            logger.warning(
+                "entity extraction failed for a write by %s/%s — entry lands without facets",
+                draft.author,
+                draft.agent,
+                exc_info=True,
+            )
+            return None
 
     async def _check_supersedes(self, draft: EntryDraft, writer: Visibility) -> None:
         """Reject the write if any supersession target is out of reach."""
         denied: list[str] = []
         target_ids = list(dict.fromkeys(draft.supersedes))
-        # One lookup for all targets, not N round-trips (SP-13).
-        targets = await self._store.get_entries(target_ids) if target_ids else {}
-        for target_id in target_ids:
-            target = targets.get(target_id)
-            if target is None or not may_supersede(
-                target, new_scope=draft.scope, new_fleet_id=draft.fleet_id, writer=writer
-            ):
-                denied.append(target_id)
+        # Batched lookups (SP-13), chunked so memory stays bounded however
+        # long the list is: each chunk is checked and dropped before the next.
+        for i in range(0, len(target_ids), _SUPERSEDES_LOOKUP_CHUNK):
+            chunk = target_ids[i : i + _SUPERSEDES_LOOKUP_CHUNK]
+            targets = await self._store.get_entries(chunk)
+            for target_id in chunk:
+                target = targets.get(target_id)
+                if target is None or not may_supersede(
+                    target, new_scope=draft.scope, new_fleet_id=draft.fleet_id, writer=writer
+                ):
+                    denied.append(target_id)
         if denied:
             raise SupersedeDenied(denied)
 
