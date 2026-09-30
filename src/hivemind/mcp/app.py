@@ -17,6 +17,7 @@ tests can call them directly with fakes.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -32,6 +33,7 @@ from hivemind.domain.entry import (
     SourceType,
 )
 from hivemind.domain.feedback import Feedback, Verdict
+from hivemind.embeddings import EmbeddingError
 from hivemind.ports import Credential, Store
 from hivemind.services.access import AccessService, resolve_write_scope
 from hivemind.services.chain import get_visible_entry, supersession_chain
@@ -44,12 +46,16 @@ from hivemind.services.governance import (
 from hivemind.services.search import Hit, SearchService
 
 # Error codes returned in the tool-result error envelope (SPEC §5).
+logger = logging.getLogger(__name__)
+
 ERR_INVALID_INPUT = "invalid_input"
 ERR_NOT_FOUND = "not_found"
 ERR_PERMISSION_DENIED = "permission_denied"
 ERR_NOT_ACTIVE = "not_active"
 ERR_AGENT_UNRESOLVED = "agent_unresolved"
 ERR_SUPERSEDE_DENIED = "supersede_denied"
+# The embedding provider is down/misconfigured: retry later (MCP-2, PC-2).
+ERR_EMBEDDING_UNAVAILABLE = "embedding_unavailable"
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +130,12 @@ def _hit_dict(hit: Hit) -> dict[str, object]:
         "scope": hit.scope,
         "fleet_id": hit.fleet_id,
     }
+
+
+def _embedding_unavailable(exc: EmbeddingError) -> dict[str, object]:
+    """A fixed message; the (sanitized) detail is logged server-side."""
+    logger.warning("embedding unavailable: %s", exc)
+    return _error(ERR_EMBEDDING_UNAVAILABLE, "the embedding service is unavailable; retry later")
 
 
 def _error(code: str, message: str) -> dict[str, object]:
@@ -323,6 +335,8 @@ async def hive_write(
         entry = await app.write_service.write(draft, writer=cred.visibility())
     except SupersedeDenied as exc:
         return _error(ERR_SUPERSEDE_DENIED, str(exc))
+    except EmbeddingError as exc:
+        return _embedding_unavailable(exc)
     except ValueError as exc:
         return _error(ERR_INVALID_INPUT, str(exc))
     return _entry_dict(entry)
@@ -374,9 +388,12 @@ async def hive_search(
         )
     except ValueError as exc:
         return _error(ERR_INVALID_INPUT, str(exc))
-    hits = await app.search_service.search(
-        query, filters, limit, offset=offset, visibility=app.credential.visibility()
-    )
+    try:
+        hits = await app.search_service.search(
+            query, filters, limit, offset=offset, visibility=app.credential.visibility()
+        )
+    except EmbeddingError as exc:
+        return _embedding_unavailable(exc)
     return {"count": len(hits), "hits": [_hit_dict(h) for h in hits]}
 
 

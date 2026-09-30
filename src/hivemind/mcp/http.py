@@ -32,7 +32,7 @@ from contextvars import ContextVar
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from hivemind.config import Settings, configure_logging, load_settings
+from hivemind.config import Settings, configure_logging, load_settings, redact_url
 from hivemind.mcp.app import McpHivemind
 from hivemind.mcp.server import build_server
 from hivemind.ports import Authenticator, Credential, Embedder, Store
@@ -277,7 +277,7 @@ def main_http() -> None:
     logger.info(
         "starting hivemind-mcp-http: embedding_endpoint=%s embedding_dim=%d "
         "extraction=%s pool_max_size=%d",
-        settings.embedding_endpoint,
+        redact_url(settings.embedding_endpoint),
         settings.embedding_dim,
         "on" if settings.extractor_endpoint else "off",
         settings.pool_max_size,

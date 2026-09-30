@@ -29,7 +29,7 @@ from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 
-from hivemind.config import configure_logging, load_settings
+from hivemind.config import configure_logging, load_settings, redact_url
 from hivemind.extractor import build_extractor
 from hivemind.mcp.app import (
     McpHivemind,
@@ -382,7 +382,7 @@ def main_pg() -> None:
     logger.info(
         "starting hivemind-mcp-pg: embedding_endpoint=%s embedding_dim=%d "
         "extraction=%s pool_max_size=%d",
-        settings.embedding_endpoint,
+        redact_url(settings.embedding_endpoint),
         settings.embedding_dim,
         "on" if settings.extractor_endpoint else "off",
         settings.pool_max_size,

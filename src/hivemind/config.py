@@ -14,15 +14,18 @@ from __future__ import annotations
 
 import difflib
 import logging
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from dotenv import dotenv_values
-from pydantic import field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from hivemind.domain.entry import DEFAULT_PREFIX_TOKENS
+from hivemind.providers import clean_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -56,11 +59,36 @@ class SearchConfig:
     quality_max: float = 1.2
 
     def __post_init__(self) -> None:
-        if self.half_life_days <= 0:
+        # Fail at config time (the class of failure ADR 0024 exists to
+        # catch): each of these would otherwise surface per request as a
+        # ZeroDivisionError, a Postgres "LIMIT must not be negative", an
+        # empty result or NaN scores.
+        if self.rrf_k <= 0:
+            raise ValueError(f"rrf_k must be > 0, got {self.rrf_k}")
+        if self.candidate_top_k < 1:
+            raise ValueError(f"candidate_top_k must be >= 1, got {self.candidate_top_k}")
+        if self.default_limit < 1:
+            raise ValueError(f"default_limit must be >= 1, got {self.default_limit}")
+        for name in (
+            "weight_keyword",
+            "weight_vector",
+            "quality_helpful_weight",
+            "quality_stale_weight",
+            "quality_wrong_weight",
+            "quality_min",
+            "quality_max",
+        ):
+            value = getattr(self, name)
+            if not math.isfinite(value) or value < 0:
+                raise ValueError(f"{name} must be a finite number >= 0, got {value}")
+        if self.quality_min > self.quality_max:
+            raise ValueError(
+                f"quality_min ({self.quality_min}) must be <= quality_max ({self.quality_max})"
+            )
+        if not math.isfinite(self.half_life_days) or self.half_life_days <= 0:
             # A zero/negative half life would divide by zero (or silently
-            # invert decay) inside ``entry_score`` — fail at config time,
-            # the same class of failure ADR 0024 exists to catch.
-            raise ValueError(f"half_life_days must be > 0, got {self.half_life_days}")
+            # invert decay) inside ``entry_score``; inf silently turns it off.
+            raise ValueError(f"half_life_days must be finite and > 0, got {self.half_life_days}")
         if self.recency_floor is not None and not 0.0 < self.recency_floor <= 1.0:
             raise ValueError(f"recency_floor must be in (0, 1] or None, got {self.recency_floor}")
 
@@ -87,9 +115,19 @@ class Settings(BaseSettings):
     unaffected.
     """
 
-    model_config = SettingsConfigDict(env_prefix="HIVEMIND_", extra="ignore", env_file=".env.local")
+    model_config = SettingsConfigDict(
+        env_prefix="HIVEMIND_",
+        extra="ignore",
+        env_file=".env.local",
+        # A validation error must never echo a value back (an API key).
+        hide_input_in_errors=True,
+    )
 
-    database_url: str = "postgresql://hivemind:hivemind@localhost:5432/hivemind"
+    # ``repr=False`` on every secret-bearing field: a stray ``%r`` of the
+    # settings object must not print a password or key.
+    database_url: str = Field(
+        default="postgresql://hivemind:hivemind@localhost:5432/hivemind", repr=False
+    )
     # The root logger level each runner configures at startup (see
     # ``configure_logging`` below) — one of Python's standard names
     # (DEBUG/INFO/WARNING/ERROR/CRITICAL, case-insensitive).
@@ -112,10 +150,10 @@ class Settings(BaseSettings):
     # store/pool.py already defaults to these exact values; these fields
     # just make that existing constant operator-reachable, per pod, for
     # tuning concurrency against a `max_connections`-constrained org).
-    pool_min_size: int = 1
-    pool_max_size: int = 10
+    pool_min_size: int = Field(default=1, ge=0)
+    pool_max_size: int = Field(default=10, ge=1)
     embedding_endpoint: str = "http://localhost:8001/v1"
-    embedding_api_key: str = ""
+    embedding_api_key: str = Field(default="", repr=False)
     embedding_model: str = "text-embedding-3-small"
     # The request timeout used only when the embedder builds its own
     # client (mirrors extractor_timeout below). Not reachable before
@@ -124,34 +162,42 @@ class Settings(BaseSettings):
     # this setting's existence. It also feeds fixed arithmetic written
     # into the k8s manifests' `terminationGracePeriodSeconds` comment
     # (`deploy/kubernetes/*.yaml`, DEPLOY.md §5) — raise both together.
-    embedding_timeout: float = 10.0
+    embedding_timeout: float = Field(default=10.0, gt=0, allow_inf_nan=False)
+    # The overall wall-clock budget for ONE embed call, retries and
+    # backoff included (httpx's timeout is per phase, not total). A write
+    # waits at most this long for its embedding.
+    embedding_deadline: float = Field(default=30.0, gt=0, allow_inf_nan=False)
     # The default when HIVEMIND_EMBEDDING_DIM is unset (ADR 0015). We never
     # assume a 1536-dim default — that is one provider's native dim; 1024
     # is the deploy-time default both OpenAI-compatible endpoints (the
     # ``dimensions`` parameter) and self-hosted Matryoshka servers (vLLM)
     # can serve. The dev Makefile pins 512 for fast local vLLM embedding.
-    embedding_dim: int = 1024
+    embedding_dim: int = Field(default=1024, ge=1, le=2000)  # pgvector HNSW cap
     # ADR 0021: the embedded-text body budget, in whitespace-delimited
     # words ("prefix tokens"), NOT a model tokenizer's tokens. Shared
     # with the extractor, which reads the same text (ADR 0016, SPEC §13.1).
-    embedding_prefix_tokens: int = DEFAULT_PREFIX_TOKENS
+    embedding_prefix_tokens: int = Field(default=DEFAULT_PREFIX_TOKENS, ge=1)
     # Retry budget for transient embedder failures (timeouts, connection
     # errors, 429, 5xx) — ADR 0014; 0 disables retrying.
-    embedding_retries: int = 2
+    embedding_retries: int = Field(default=2, ge=0)
 
     # Entity-extraction extractor (ADR 0016, SPEC §13): an OpenAI-compatible
     # *chat* endpoint, usually a different model/service than the embedding
     # one. An empty endpoint disables extraction (the optional + best-effort
     # stance): entries land with empty `entities`, zero LLM-extraction cost.
     extractor_endpoint: str = ""
-    extractor_api_key: str = ""
+    extractor_api_key: str = Field(default="", repr=False)
     extractor_model: str = ""
-    extractor_timeout: float = 30.0
+    extractor_timeout: float = Field(default=30.0, gt=0, allow_inf_nan=False)
+    # The overall wall-clock budget for ONE extraction, retries included.
+    extractor_deadline: float = Field(default=45.0, gt=0, allow_inf_nan=False)
     # Retry budget for transient extractor failures (ADR 0014 pattern);
     # 0 disables retrying. A failure never blocks the write (best-effort).
-    extractor_retries: int = 2
+    extractor_retries: int = Field(default=2, ge=0)
 
     # retrieval knobs (mirror SearchConfig defaults)
+    # (Value rules live on SearchConfig.__post_init__, run at load time by
+    # ``_check_consistency`` below.)
     rrf_k: int = 60
     weight_keyword: float = 0.5
     weight_vector: float = 0.5
@@ -172,6 +218,46 @@ class Settings(BaseSettings):
     quality_wrong_weight: float = 0.25
     quality_min: float = 0.5
     quality_max: float = 1.2
+
+    @field_validator("embedding_api_key", "extractor_api_key")
+    @classmethod
+    def _clean_api_key(cls, value: str) -> str:
+        """Strip whitespace (a k8s Secret / ``--from-file`` value usually
+        ends in a newline, which makes httpx refuse the header) and
+        reject control characters. Never echoes the value."""
+        return clean_api_key(value)
+
+    @model_validator(mode="after")
+    def _check_consistency(self) -> Settings:
+        """Cross-field checks, at startup with a clear message."""
+        if self.pool_min_size > self.pool_max_size:
+            raise ValueError(
+                f"pool_min_size ({self.pool_min_size}) must be <= "
+                f"pool_max_size ({self.pool_max_size})"
+            )
+        self.search_config()  # the retrieval knobs' rules live on SearchConfig
+        for name, endpoint, key in (
+            ("embedding", self.embedding_endpoint, self.embedding_api_key),
+            ("extractor", self.extractor_endpoint, self.extractor_api_key),
+        ):
+            if not endpoint:
+                continue
+            parts = urlsplit(endpoint)
+            if parts.scheme not in ("http", "https") or not parts.hostname:
+                raise ValueError(
+                    f"{name}_endpoint must be an http(s) URL with a host "
+                    f"(got {redact_url(endpoint)!r})"
+                )
+            if key and parts.scheme == "http" and not _is_loopback(parts.hostname):
+                logger.warning(
+                    "%s_endpoint %s is plain http and an API key is set: the key travels "
+                    "unencrypted; use https unless the network is trusted",
+                    name,
+                    redact_url(endpoint),
+                )
+        if self.extractor_endpoint and not self.extractor_model.strip():
+            raise ValueError("extractor_model must be set when extractor_endpoint is set")
+        return self
 
     @field_validator("recency_floor", mode="before")
     @classmethod
@@ -217,6 +303,22 @@ class Settings(BaseSettings):
             quality_min=self.quality_min,
             quality_max=self.quality_max,
         )
+
+
+def redact_url(url: str) -> str:
+    """``url`` with any ``user:password@`` userinfo removed, for logging."""
+    try:
+        parts = urlsplit(url)
+        if "@" not in parts.netloc:
+            return url
+        host = parts.netloc.rsplit("@", 1)[1]
+        return urlunsplit(parts._replace(netloc=host))
+    except ValueError:
+        return "<unparseable url>"
+
+
+def _is_loopback(host: str) -> bool:
+    return host == "localhost" or host.startswith("127.") or host in ("::1", "[::1]")
 
 
 # Environment profile files (ADR 0017): the ``ENVIRONMENT`` env var
@@ -400,3 +502,8 @@ def configure_logging(level: str = "INFO") -> None:
         level=numeric_level,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    # httpx logs every outbound request URL at INFO (userinfo included):
+    # noise per write/search and a credential leak for a URL with a
+    # password. Keep the libraries at WARNING whatever the root level.
+    for noisy in ("httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(max(numeric_level, logging.WARNING))

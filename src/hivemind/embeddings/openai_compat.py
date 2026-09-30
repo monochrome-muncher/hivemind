@@ -31,7 +31,7 @@ validation) fail fast.
 from __future__ import annotations
 
 import asyncio
-import logging
+import math
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -39,8 +39,7 @@ import httpx
 
 from hivemind.config import Settings
 from hivemind.domain.entry import DEFAULT_PREFIX_TOKENS, EntryDraft, embeddable_text
-
-logger = logging.getLogger(__name__)
+from hivemind.providers import clean_api_key, post_with_retries
 
 
 async def _default_sleep(delay: float) -> None:
@@ -77,6 +76,8 @@ class OpenAICompatEmbedder:
         retries: int = 2,
         backoff: float = 0.5,
         sleep: Callable[[float], Awaitable[None]] | None = None,
+        deadline: float = 30.0,
+        jitter: Callable[[], float] | None = None,
     ) -> None:
         """Create an embedder.
 
@@ -108,13 +109,19 @@ class OpenAICompatEmbedder:
                 ``backoff * 2**i`` (0.5s, 1s, ...).
             sleep: The backoff sleep callable; defaults to
                 ``asyncio.sleep`` (tests inject a recorder).
+            deadline: The overall wall-clock budget in seconds for one
+                embed call, retries and backoff included (PC-12).
+            jitter: Returns a value in [0, 1) scaling each backoff to
+                [0.5x, 1x] (tests pin it); defaults to ``random.random``.
         """
         self._owns_client = client is None
         if client is None:
             client = httpx.AsyncClient(timeout=timeout)
         self._client = client
         self._base_url = base_url.rstrip("/")
-        self._api_key = api_key
+        self._api_key = clean_api_key(api_key)
+        self._deadline = deadline
+        self._jitter = jitter
         self._model_name = model_name
         self._dim = dim
         self._prefix_tokens = prefix_tokens
@@ -129,6 +136,7 @@ class OpenAICompatEmbedder:
             client=None,
             base_url=settings.embedding_endpoint,
             api_key=settings.embedding_api_key,
+            deadline=settings.embedding_deadline,
             model_name=settings.embedding_model,
             dim=settings.embedding_dim,
             prefix_tokens=settings.embedding_prefix_tokens,
@@ -199,58 +207,47 @@ class OpenAICompatEmbedder:
             # providers truncate to this length; see the module docstring.
             "dimensions": self._dim,
         }
-        last: EmbeddingError | None = None
-        for attempt in range(self._retries + 1):
-            try:
-                response = await self._client.post(
-                    f"{self._base_url}/embeddings",
-                    json=payload,
-                    headers=headers,
-                )
-            except httpx.TimeoutException as exc:
-                last = EmbeddingError(f"embeddings request timed out: {exc}")
-            except httpx.NetworkError as exc:
-                last = EmbeddingError(f"embeddings request failed: {exc}")
-            except httpx.HTTPError as exc:
-                raise EmbeddingError(f"embeddings request failed: {exc}") from exc
-            else:
-                if response.status_code >= 500 or response.status_code == 429:
-                    last = EmbeddingError(
-                        f"embeddings endpoint returned {response.status_code}",
-                        status=response.status_code,
-                    )
-                elif response.is_error:
-                    raise EmbeddingError(
-                        f"embeddings endpoint returned {response.status_code}",
-                        status=response.status_code,
-                    )
-                else:
-                    vector = self._parse_response(response)
-                    if len(vector) != self._dim:
-                        raise EmbeddingError(f"expected {self._dim} dims, got {len(vector)}")
-                    return vector
-            if attempt < self._retries:
-                logger.warning(
-                    "embedding request failed (attempt %d/%d), retrying: %s",
-                    attempt + 1,
-                    self._retries + 1,
-                    last,
-                )
-                await self._sleep(self._backoff * (2**attempt))
-        assert last is not None  # only reachable when the budget is exhausted
-        logger.error(
-            "embedding request failed after %d attempt(s), giving up: %s",
-            self._retries + 1,
-            last,
+        response = await post_with_retries(
+            self._client,
+            f"{self._base_url}/embeddings",
+            payload=payload,
+            headers=headers,
+            retries=self._retries,
+            backoff=self._backoff,
+            sleep=self._sleep,
+            deadline=self._deadline,
+            label="embeddings request",
+            error=lambda message, status: EmbeddingError(message, status=status),
+            jitter=self._jitter,
         )
-        raise last
+        vector = self._parse_response(response)
+        if len(vector) != self._dim:
+            raise EmbeddingError(f"expected {self._dim} dims, got {len(vector)}")
+        return vector
 
     def _parse_response(self, response: httpx.Response) -> list[float]:
-        """Extract ``data[0].embedding`` from an OpenAI-shaped response."""
-        body: Any = response.json()
+        """Extract and validate ``data[0].embedding`` from an OpenAI-shaped
+        response: JSON, exactly one item (one input text), every value a
+        finite number (no bool / str / NaN / Inf)."""
         try:
-            raw: Any = body["data"][0]["embedding"]
-            values = [float(v) for v in raw]
-        except (KeyError, IndexError, TypeError, ValueError) as exc:
-            raise EmbeddingError("malformed embeddings response") from exc
+            body: Any = response.json()
+        except ValueError, RecursionError:
+            raise EmbeddingError("embeddings response is not JSON") from None
+        try:
+            data: Any = body["data"]
+            if not isinstance(data, list) or len(data) != 1:
+                raise EmbeddingError("embeddings response must hold exactly one item")
+            item = data[0]
+            if "index" in item and (item["index"] != 0 or isinstance(item["index"], bool)):
+                raise EmbeddingError("embeddings response item has an unexpected index")
+            raw: Any = item["embedding"]
+            if not isinstance(raw, list):
+                raise EmbeddingError("malformed embeddings response")
+        except KeyError, IndexError, TypeError:
+            raise EmbeddingError("malformed embeddings response") from None
+        values: list[float] = []
+        for v in raw:
+            if isinstance(v, bool) or not isinstance(v, int | float) or not math.isfinite(v):
+                raise EmbeddingError("embeddings response holds a non-finite or non-numeric value")
+            values.append(float(v))
         return values

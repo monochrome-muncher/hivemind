@@ -41,6 +41,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
+import unicodedata
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
@@ -54,6 +56,7 @@ from hivemind.domain.entry import (
     ExtractedEntity,
     embeddable_text,
 )
+from hivemind.providers import clean_api_key, post_with_retries
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +68,33 @@ if TYPE_CHECKING:
 # lives in the domain's ``EntityKind``; name bounds live in
 # ``ExtractedEntity`` — one source of truth per limit).
 _MAX_ENTITIES = 10
+
+# Bounds on untrusted model output (PC-11): a response larger than this
+# is refused before parsing; logs carry at most a short snippet of it.
+_MAX_CONTENT_CHARS = 64_000
+_SNIPPET_CHARS = 80
+
+_THINK_RE = re.compile(r"\A\s*<think>.*?</think>\s*", re.DOTALL)
+_FENCE_RE = re.compile(r"\A\s*```[A-Za-z0-9_-]*\s*\n(.*?)\n?\s*```\s*\Z", re.DOTALL)
+
+
+def _unwrap(content: str) -> str:
+    """Strip one leading ``<think>...</think>`` block and one markdown
+    code fence around the JSON (common from reasoning / chat models).
+    Nothing else is salvaged: the JSON itself is still validated
+    all-or-nothing (SPEC §13.1)."""
+    content = _THINK_RE.sub("", content, count=1)
+    fenced = _FENCE_RE.match(content)
+    return fenced.group(1) if fenced else content
+
+
+def _clean_name(name: str) -> str:
+    """Replace control / format characters (NUL, newlines, ...) with a
+    space and collapse whitespace: facet names are untrusted model
+    output, stored in Postgres and shown to other agents."""
+    kept = (" " if unicodedata.category(ch).startswith("C") else ch for ch in name)
+    return " ".join("".join(kept).split())
+
 
 # The fixed prompt (ADR 0016): one prompt, one structured response — no
 # agent framework, no multi-turn. It commits the model to the exact
@@ -124,6 +154,8 @@ class OpenAICompatExtractor:
         retries: int = 2,
         backoff: float = 0.5,
         sleep: Callable[[float], Awaitable[None]] | None = None,
+        deadline: float = 45.0,
+        jitter: Callable[[], float] | None = None,
     ) -> None:
         """Create an extractor.
 
@@ -152,13 +184,19 @@ class OpenAICompatExtractor:
                 ``backoff * 2**i`` (0.5s, 1s, ...).
             sleep: The backoff sleep callable; defaults to
                 ``asyncio.sleep`` (tests inject a recorder).
+            deadline: The overall wall-clock budget in seconds for one
+                extraction, retries and backoff included (PC-12).
+            jitter: Returns a value in [0, 1) scaling each backoff to
+                [0.5x, 1x] (tests pin it); defaults to ``random.random``.
         """
         self._owns_client = client is None
         if client is None:
             client = httpx.AsyncClient(timeout=timeout)
         self._client = client
         self._base_url = base_url.rstrip("/")
-        self._api_key = api_key
+        self._api_key = clean_api_key(api_key)
+        self._deadline = deadline
+        self._jitter = jitter
         self._model_name = model_name
         self._prefix_tokens = prefix_tokens
         self._retries = retries
@@ -172,6 +210,7 @@ class OpenAICompatExtractor:
             client=None,
             base_url=settings.extractor_endpoint,
             api_key=settings.extractor_api_key,
+            deadline=settings.extractor_deadline,
             model_name=settings.extractor_model,
             prefix_tokens=settings.embedding_prefix_tokens,
             timeout=settings.extractor_timeout,
@@ -223,49 +262,22 @@ class OpenAICompatExtractor:
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
         payload = self._payload(text)
-        last: ExtractorError | None = None
-        for attempt in range(self._retries + 1):
-            try:
-                response = await self._client.post(
-                    f"{self._base_url}/chat/completions",
-                    json=payload,
-                    headers=headers,
-                )
-            except httpx.TimeoutException as exc:
-                last = ExtractorError(f"extractor request timed out: {exc}")
-            except httpx.NetworkError as exc:
-                last = ExtractorError(f"extractor request failed: {exc}")
-            except httpx.HTTPError as exc:
-                raise ExtractorError(f"extractor request failed: {exc}") from exc
-            else:
-                if response.status_code >= 500 or response.status_code == 429:
-                    last = ExtractorError(
-                        f"extractor endpoint returned {response.status_code}",
-                        status=response.status_code,
-                    )
-                elif response.is_error:
-                    raise ExtractorError(
-                        f"extractor endpoint returned {response.status_code}",
-                        status=response.status_code,
-                    )
-                else:
-                    return self._parse_response(response)
-            if attempt < self._retries:
-                logger.warning(
-                    "extraction request failed (attempt %d/%d), retrying: %s",
-                    attempt + 1,
-                    self._retries + 1,
-                    last,
-                )
-                await self._sleep(self._backoff * (2**attempt))
-        assert last is not None  # only reachable when the budget is exhausted
-        logger.warning(
-            "extraction request failed after %d attempt(s), giving up (best-effort — "
-            "the write is not blocked): %s",
-            self._retries + 1,
-            last,
+        response = await post_with_retries(
+            self._client,
+            f"{self._base_url}/chat/completions",
+            payload=payload,
+            headers=headers,
+            retries=self._retries,
+            backoff=self._backoff,
+            sleep=self._sleep,
+            deadline=self._deadline,
+            label="extractor request",
+            error=lambda message, status: ExtractorError(message, status=status),
+            # Best-effort (ADR 0016): a failure never blocks the write.
+            give_up_level=logging.WARNING,
+            jitter=self._jitter,
         )
-        raise last
+        return self._parse_response(response)
 
     def _payload(self, text: str) -> dict[str, Any]:
         """The chat-completions body: a fixed system prompt + the entry's
@@ -290,20 +302,25 @@ class OpenAICompatExtractor:
         """
         try:
             body = response.json()
-        except (json.JSONDecodeError, ValueError) as exc:
-            raise ExtractorError("malformed chat response (not JSON)") from exc
+        except ValueError, RecursionError:
+            raise ExtractorError("malformed chat response (not JSON)") from None
         try:
             content: Any = body["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError) as exc:
-            raise ExtractorError("malformed chat response (missing content)") from exc
+        except KeyError, IndexError, TypeError:
+            raise ExtractorError("malformed chat response (missing content)") from None
         if not isinstance(content, str):
             raise ExtractorError("extractor returned a non-string response content")
+        if len(content) > _MAX_CONTENT_CHARS:
+            raise ExtractorError("extractor output is too large")
+        content = _unwrap(content)
         try:
             items = json.loads(content)
-        except json.JSONDecodeError as exc:
+        except ValueError, RecursionError:
+            # A short, repr-escaped snippet only: the model echoes
+            # entry-derived text, and a log line must not be forgeable.
             raise ExtractorError(
-                f"extractor output is not valid JSON (content: {content[:200]!r})"
-            ) from exc
+                f"extractor output is not valid JSON (content: {content[:_SNIPPET_CHARS]!r})"
+            ) from None
         return self._validate(items)
 
     def _validate(self, items: Any) -> tuple[ExtractedEntity, ...]:
@@ -323,7 +340,9 @@ class OpenAICompatExtractor:
             if not isinstance(item, dict):
                 raise ExtractorError('each entity must be an object with "name" and "kind" fields')
             name, kind = item.get("name"), item.get("kind")
-            if not isinstance(name, str) or not name.strip():
+            if isinstance(name, str):
+                name = _clean_name(name)
+            if not isinstance(name, str) or not name:
                 raise ExtractorError('each entity needs a non-empty string "name"')
             if not isinstance(kind, str):
                 raise ExtractorError('each entity needs a string "kind"')
@@ -333,7 +352,7 @@ class OpenAICompatExtractor:
                 # Unknown kind, or a name breaking the domain's bounds
                 # (≤ 128 chars after trimming) — malformed output.
                 raise ExtractorError(f"invalid entity from the extractor: {exc}") from exc
-            key = entity.name.lower()  # case-insensitive dedupe (SPEC §13.1)
+            key = unicodedata.normalize("NFKC", entity.name).casefold()  # case-insensitive dedupe
             if key not in seen:
                 seen.add(key)
                 out.append(entity)

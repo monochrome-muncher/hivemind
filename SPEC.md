@@ -187,7 +187,7 @@ A fresh, important, well-remembered entry beats a slightly-more-similar but stal
 - The store records `embedding_model` + dimension per entry. The vector column has a **fixed dimension at deploy time** (`EMBEDDING_DIM`, default 1024 — ADR 0015).
 - **A dim mismatch is a loud failure, never a silent assumption:** if the pool's `vector(:dim)` column differs from the configured dim, `migrate` fails with an actionable error (reset the pool, or set `EMBEDDING_DIM` to the pool's dim) — ADR 0015. The dim is a deploy-time decision (ADR 0005); it is never changed in place.
 - **Changing the embedding model or dimension is an operator-run re-embedding migration** (re-embed all active entries, swap the column). This is a named maintenance procedure, not an online feature.
-- **Transient embedder failures are retried** (ADR 0014) — timeouts, connection errors, `429`, and 5xx are retried with a bounded exponential backoff (`EMBEDDING_RETRIES`, default 2 retries; `0` disables). Deterministic failures (other 4xx, dimension mismatch) fail fast, and a write still fails after the full budget — a write either lands fully (vector + entry) or fails.
+- **Transient embedder failures are retried** (ADR 0014) — timeouts, connection errors, `429`, and 5xx are retried with a bounded exponential backoff (`EMBEDDING_RETRIES`, default 2 retries; `0` disables). A dropped keep-alive (`RemoteProtocolError`) is transient too; backoff is jittered and a capped `Retry-After` is honoured. Deterministic failures (other 4xx, a redirect, a non-JSON or malformed body, NaN/Inf/non-numeric values, a wrong count or dimension) fail fast, and a write still fails after the full budget — a write either lands fully (vector + entry) or fails. Each call also has an **overall deadline** (`EMBEDDING_DEADLINE`, default 30s, retries and backoff included). An embedder failure is a `502 embedding_unavailable` on REST (write **and** search) and an `embedding_unavailable` error on MCP (`hive_write`, `hive_search`); the caller gets a fixed message — provider detail (which can carry headers or URLs) is never returned, and is logged class-name-only. API keys are whitespace-stripped at load.
 
 ## 8. Identity, credentials, deployment
 
@@ -375,7 +375,7 @@ This section supersedes the "no entity extraction" non-goal of §9 **for the fac
 
 * **At write time**, server-side, over the same text the embedder sees: `summary` + a bounded body prefix (`EMBEDDING_PREFIX_TOKENS` — whitespace-delimited words, ADR 0021). One budget feeds both consumers, so raising it raises the extractor's LLM input per write in step (§7).
 * A fixed-prompt LLM call (`EXTRACTOR_MODEL` — a deploy-time decision, ADR 0016; e.g. a Qwen3-27B-class chat model on a *separate service* from the embeddings server).
-* **All-or-nothing, schema-validated output:** `entities` is a list of `{name, kind}` where `name` is open vocabulary (trimmed, non-empty, ≤ 128 chars) and `kind` is a **closed** vocabulary (`person | organization | system | service | artifact | concept`); ≤ 10 entities per entry, deduped. Any malformed output fails the call — no partial salvage.
+* **All-or-nothing, schema-validated output:** `entities` is a list of `{name, kind}` where `name` is open vocabulary (trimmed, non-empty, ≤ 128 chars) and `kind` is a **closed** vocabulary (`person | organization | system | service | artifact | concept`); ≤ 10 entities per entry, deduped. Any malformed output fails the call — no partial salvage; the only tolerated wrapping is one leading `<think>…</think>` block and one markdown code fence around the JSON. Control characters in names (NUL, newlines) are replaced by a space and whitespace collapsed before validation; dedupe is NFKC + casefold.
 
 ### 13.2 Storage and immutability
 
@@ -391,7 +391,7 @@ This section supersedes the "no entity extraction" non-goal of §9 **for the fac
 
 * **Optional:** `EXTRACTOR_ENDPOINT` unset ⇒ extraction is off (entries land with `entities: []`, zero LLM cost) — the same dev-mode stance as "no authenticator".
 * **Best-effort inline:** an extraction failure (timeout, retry exhaustion, schema mismatch) never blocks the write — the entry lands with `entities: []` and no `entities_model`. Entry-level write semantics are unchanged (ADR 0014); only the enrichment is lost.
-* **Bounded retries** on transient failures (ADR 0014 pattern; `EXTRACTOR_RETRIES` default 2; `0` disables).
+* **Bounded retries** on transient failures (ADR 0014 pattern; `EXTRACTOR_RETRIES` default 2; `0` disables) within an overall deadline (`EXTRACTOR_DEADLINE`, default 45s).
 * **Machine-only:** agents declare facets via `tags` (the existing channel); `entities` is a pure machine signal. Agent-supplied `entities` is a later extension (it would need a source flag).
 
 ### 13.5 Explicitly out of scope
