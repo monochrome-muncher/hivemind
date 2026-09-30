@@ -26,7 +26,7 @@ What the **org provides** (the app itself needs nothing else):
 
 | Prerequisite | Detail |
 |---|---|
-| Postgres 16+ with the `vector` extension (pgvector) | A dedicated database + user whose credentials allow `CREATE EXTENSION vector` (DB user is a superuser, or the extension is pre-installed). |
+| Postgres 16+ with the `vector` extension (pgvector **>= 0.8**) | A dedicated database + user whose credentials allow `CREATE EXTENSION vector` (DB user is a superuser, or the extension is pre-installed). pgvector 0.8+ is required (`hnsw.iterative_scan`, ADR 0025) and `HIVEMIND_EMBEDDING_DIM` must be **<= 2000** (HNSW's limit); `hivemind-migrate` fails with an actionable message otherwise. On an older pgvector upgrade the package/image, then `ALTER EXTENSION vector UPDATE;`. |
 | A vLLM (or any OpenAI-compatible) **embedding** endpoint reachable from the cluster | e.g. an in-cluster vLLM Service (`http://vllm:8000/v1`); any OpenAI-compatible endpoint works (ADR 0005). |
 | (Optional) an OpenAI-compatible **chat** endpoint for entity extraction | ADR 0016 — optional + best-effort. **Off by default**: an empty `HIVEMIND_EXTRACTOR_ENDPOINT` + empty key = zero LLM cost, entries land with empty `entities`. |
 | GitLab: the **Kubernetes agent pre-configured** | The deploy job just runs `kubectl` — no kubeconfig wiring in `.gitlab-ci.yml`. |
@@ -297,6 +297,15 @@ not edge-case insurance.
   attempt can overshoot it. Reads (`hive_search`, `GET /v1/entries`)
   embed the query only and never extract, so they finish well inside
   the embedder's 31.5s.
+- **The overall deadline (ADR 0041).** Each leg also runs under
+  `HIVEMIND_EMBEDDING_DEADLINE` / `HIVEMIND_EXTRACTOR_DEADLINE`. Unset,
+  it is derived as the leg's worst case in the table above (so the
+  table and the grace period stay correct when you change a
+  timeout or retry budget); it only bites when httpx's per-phase timeout
+  lets a slow-drip response overshoot, or a provider's `Retry-After`
+  (capped at 10s) pushes a sleep past the backoff. Jitter only shortens
+  sleeps. Setting it lower shortens the worst case; below the matching
+  `_TIMEOUT` is a startup error.
 - **If you raise a retry budget, raise this.** Each leg costs
   `(retries + 1) x timeout + 0.5 x (2^retries - 1)` seconds; sum the two
   legs, add the 5s `preStop`, then round up. Worked example: setting

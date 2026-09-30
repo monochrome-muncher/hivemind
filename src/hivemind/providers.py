@@ -42,9 +42,35 @@ def clean_api_key(key: str) -> str:
     The error never includes the key itself.
     """
     key = key.strip()
+    if not key.isascii():
+        # httpx encodes header values as ASCII; a non-ASCII character
+        # would raise UnicodeEncodeError (echoing the character).
+        raise ValueError("API key contains a non-ASCII character")
     if any(unicodedata.category(ch).startswith("C") for ch in key):
         raise ValueError("API key contains a control character")
     return key
+
+
+def clean_endpoint(url: str) -> str:
+    """Strip surrounding whitespace from an endpoint URL and reject any
+    inner whitespace / control character (a trailing newline from a
+    mounted Secret or ConfigMap otherwise surfaces as a raw InvalidURL).
+    The error never includes the URL (it may carry userinfo)."""
+    url = url.strip()
+    if any(ch.isspace() or unicodedata.category(ch).startswith("C") for ch in url):
+        raise ValueError("endpoint URL contains whitespace or a control character")
+    return url
+
+
+def default_deadline(timeout: float, retries: int, backoff: float = 0.5) -> float:
+    """The overall per-call budget when none is configured: every attempt
+    at its full per-phase timeout plus every (un-jittered) backoff sleep —
+    i.e. the documented worst case of ``*_TIMEOUT`` / ``*_RETRIES``
+    (DEPLOY.md §5). The deadline then only bites for a slow-drip response
+    (httpx's timeout is per phase, not total) or a long ``Retry-After``.
+    """
+    retries = max(0, retries)
+    return float((retries + 1) * timeout + backoff * (2**retries - 1))
 
 
 def _retry_after(response: httpx.Response) -> float | None:
@@ -124,9 +150,10 @@ async def _attempts[E: Exception](
         except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
             # Transient. Class name only: never the message (PC-1).
             last = error(f"{label} failed ({type(exc).__name__})", None)
-        except httpx.HTTPError as exc:
+        except (httpx.HTTPError, httpx.InvalidURL, UnicodeError) as exc:
             # A client-side / configuration failure (illegal header, bad
-            # URL, unsupported protocol): deterministic, fail fast.
+            # URL, unencodable header/body, unsupported protocol):
+            # deterministic, fail fast. Class name only (PC-1).
             raise error(f"{label} failed ({type(exc).__name__})", None) from None
         else:
             status = response.status_code

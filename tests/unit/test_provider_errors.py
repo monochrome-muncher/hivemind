@@ -254,7 +254,6 @@ class TestSettingsValidation:
             {"extractor_retries": -1},
             {"embedding_dim": 0},
             {"embedding_dim": 2001},
-            {"rrf_k": 0},
             {"rrf_k": -1},
             {"candidate_top_k": 0},
             {"default_limit": 0},
@@ -268,7 +267,10 @@ class TestSettingsValidation:
             {"embedding_timeout": 0},
             {"extractor_timeout": -1},
             {"embedding_deadline": 0},
-            {"embedding_prefix_tokens": 0},
+            {"embedding_prefix_tokens": -1},
+            {"embedding_deadline": 5, "embedding_timeout": 10},
+            {"extractor_deadline": 5},
+            {"embedding_endpoint": "http://h/v1\nx"},
             {"embedding_endpoint": "localhost:8001/v1"},
             {"extractor_endpoint": "http://x/v1", "extractor_model": ""},
         ],
@@ -283,6 +285,42 @@ class TestSettingsValidation:
 
     def test_defaults_are_valid(self) -> None:
         Settings()
+
+    def test_compat_values_stay_valid(self) -> None:
+        # 0 = summary only (domain/entry.py); 1/(0+rank) is valid RRF.
+        Settings(embedding_prefix_tokens=0, rrf_k=0)
+        SearchConfig(rrf_k=0)
+
+    def test_deadline_defaults_to_the_documented_worst_case(self) -> None:
+        from hivemind.providers import default_deadline
+
+        # DEPLOY.md §5: 3 x 10s + 0.5s + 1.0s; 3 x 30s + 0.5s + 1.0s
+        assert default_deadline(10.0, 2) == 31.5
+        assert default_deadline(30.0, 2) == 91.5
+        assert default_deadline(30.0, 0) == 30.0
+        # raising TIMEOUT / RETRIES needs no deadline change
+        s = Settings(extractor_timeout=60.0, extractor_retries=4)
+        assert s.extractor_deadline is None
+
+    def test_endpoint_whitespace_is_stripped(self) -> None:
+        assert Settings(embedding_endpoint="http://h/v1\n").embedding_endpoint == "http://h/v1"
+
+    def test_validation_errors_never_echo_the_value(self) -> None:
+        # a PRINTABLE secret: an assertion on a NUL would be vacuous
+        with pytest.raises(ValueError) as exc:
+            Settings(embedding_retries="sk-PRINTABLESECRET")  # type: ignore[arg-type]
+        assert "sk-PRINTABLESECRET" not in str(exc.value)
+        with pytest.raises(ValueError) as exc:
+            Settings(embedding_api_key="sk-PRINTABLESECRET\x00x")
+        assert "sk-PRINTABLESECRET" not in str(exc.value)
+        with pytest.raises(ValueError) as exc:
+            Settings(embedding_api_key="sk-PRINTABLE\u00e9")
+        assert "sk-PRINTABLE" not in str(exc.value)
+
+    def test_endpoint_errors_never_echo_userinfo(self) -> None:
+        with pytest.raises(ValueError) as exc:
+            Settings(embedding_endpoint="user:hunter2@host:8001/v1")
+        assert "hunter2" not in str(exc.value)
 
     def test_key_over_plain_http_to_remote_host_warns(self, caplog) -> None:
         with caplog.at_level(logging.WARNING):
@@ -300,13 +338,114 @@ class TestLogging:
         assert redact_url("https://bob:hunter2@emb.example/v1") == "https://emb.example/v1"
         assert redact_url("http://h/v1") == "http://h/v1"
 
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://bob:hunter2@emb.example/v1",
+            "user:hunter2@host:8001/v1",
+            "http://user:pa/ss@host/v1",
+            "http://user:hunter2@host:8001",
+        ],
+    )
+    def test_redact_url_hides_userinfo_robustly(self, url) -> None:
+        assert "hunter2" not in redact_url(url) and "user:" not in redact_url(url)
+        assert "ss@" not in redact_url(url)
+
+    def test_startup_lines_redact_the_endpoint(self, monkeypatch, caplog) -> None:
+        import hivemind.api.main as api_main
+        import hivemind.mcp.http as mcp_http
+        import hivemind.mcp.server as mcp_server
+        import hivemind.store as store_mod
+
+        settings = Settings(embedding_endpoint="https://bob:hunter2@emb.example/v1")
+
+        class Stop(Exception):
+            pass
+
+        def boom(*a, **k):
+            raise Stop
+
+        for mod in (api_main, mcp_http, mcp_server):
+            monkeypatch.setattr(mod, "load_settings", lambda: settings)
+            monkeypatch.setattr(mod, "configure_logging", lambda level: None)
+        monkeypatch.setattr(api_main, "create_app_from_settings", boom)
+        monkeypatch.setattr(store_mod, "build_store", boom)
+        monkeypatch.setenv("HIVEMIND_MCP_KEY", "hm_x")
+        caplog.set_level(logging.INFO)
+        for run in (api_main.run, mcp_http.main_http, mcp_server.main_pg):
+            with pytest.raises(Stop):
+                run()
+        assert "starting hivemind" in caplog.text
+        assert "hunter2" not in caplog.text
+
     def test_httpx_loggers_are_quieted(self) -> None:
         configure_logging("INFO")
         assert logging.getLogger("httpx").getEffectiveLevel() >= logging.WARNING
         assert logging.getLogger("httpcore").getEffectiveLevel() >= logging.WARNING
 
 
+class TestClientSideFailures:
+    async def test_non_ascii_key_is_rejected_at_construction(self) -> None:
+        with pytest.raises(ValueError) as exc:
+            _embedder(lambda r: _ok(), key="sk-\u00e9abc")
+        assert "sk-" not in str(exc.value)
+
+    @pytest.mark.parametrize(
+        "exc", [UnicodeEncodeError("ascii", "x", 0, 1, "bad"), httpx.InvalidURL("bad")]
+    )
+    async def test_encode_and_url_errors_map_to_the_typed_error(self, exc) -> None:
+        def handler(req: httpx.Request) -> httpx.Response:
+            raise exc
+
+        with pytest.raises(EmbeddingError):
+            await _embedder(handler).embed_text("x")
+
+    async def test_endpoint_with_trailing_newline_works(self) -> None:
+        seen: list[str] = []
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            seen.append(str(req.url))
+            return _ok()
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        e = OpenAICompatEmbedder(client, BASE + "\n", "k", "m", 3)
+        await e.embed_text("x")
+        assert seen == [BASE + "/embeddings"]
+
+
 class TestExtractorRobustness:
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "```json\n" + "\n" * 5000,
+            "```\n" + "\n" * 5000,
+            "```\n" + " \n" * 5000 + "x",
+            "<think>" + "\n" * 50_000,
+            "<think>" + "</think>" * 5000 + "\n" * 5000,
+            " \n" * 30_000,
+        ],
+    )
+    async def test_unwrapping_is_linear_time(self, content) -> None:
+        import time
+
+        start = time.perf_counter()
+        with pytest.raises(ExtractorError):
+            await _extractor(lambda r: _chat(content)).extract_entry(_draft())
+        assert time.perf_counter() - start < 0.5
+
+    async def test_dedupe_is_lower_of_the_collapsed_name(self) -> None:
+        # str.lower() is the store / filter key (ADR 0016); casefold would
+        # merge "Stra\u00dfe" and "STRASSE", which the filter never would.
+        body = json.dumps(
+            [{"name": "Stra\u00dfe", "kind": "system"}, {"name": "STRASSE", "kind": "system"}]
+        )
+        assert len(await _extractor(lambda r: _chat(body)).extract_entry(_draft())) == 2
+
+    async def test_format_characters_are_kept(self) -> None:
+        body = json.dumps([{"name": "a\u200db\u00adc", "kind": "system"}])
+        (e,) = await _extractor(lambda r: _chat(body)).extract_entry(_draft())
+        assert e.name == "a\u200db\u00adc"
+
     async def test_nul_and_control_chars_are_cleaned(self) -> None:
         body = json.dumps([{"name": "a\x00b\nIGNORE  \x07it", "kind": "system"}])
         (e,) = await _extractor(lambda r: _chat(body)).extract_entry(_draft())

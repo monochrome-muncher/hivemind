@@ -7,6 +7,7 @@ tested against the same expectations.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 
 import pytest
@@ -20,6 +21,7 @@ from hivemind.domain.entry import (
 )
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.memstore import MemoryStore
+from hivemind.ports import SupersedeConflict
 from tests.fakes import FIXED_NOW, make_clock
 
 UTC = FIXED_NOW.tzinfo
@@ -77,22 +79,41 @@ async def test_create_entry_with_supersedes_flips_targets(
     assert reloaded_new.state is EntryState.ACTIVE
 
 
-async def test_supersede_unknown_target_is_ignored(store: MemoryStore) -> None:
-    entry = await store.create_entry(draft("Something", supersedes=("no-such-id",)))
-    assert entry.state is EntryState.ACTIVE
+async def test_supersede_unknown_target_is_rejected_atomically(store: MemoryStore) -> None:
+    with pytest.raises(SupersedeConflict) as exc:
+        await store.create_entry(draft("Something", supersedes=("no-such-id",)))
+    assert exc.value.ids == ["no-such-id"]
+    assert await store.list_entries(EntryFilters(include_inactive=True)) == []
 
 
-async def test_supersede_of_superseded_entry_leaves_it_as_is(
+async def test_supersede_of_non_active_target_is_rejected_whole_write(
     store: MemoryStore,
 ) -> None:
     a = await store.create_entry(draft("v1"))
     b = await store.create_entry(draft("v2", supersedes=(a.id,)))
-    await store.create_entry(draft("v3", supersedes=(a.id, b.id)))
+    with pytest.raises(SupersedeConflict) as exc:
+        await store.create_entry(draft("v3", supersedes=(a.id, b.id)))
+    assert exc.value.ids == [a.id]
+    # nothing written, b untouched
     reloaded_b = await store.get_entry(b.id)
     assert reloaded_b is not None
-    # b was superseded by c; c's create flipped b (still active at that
-    # moment) — a had already been flipped by b.
-    assert reloaded_b.state is EntryState.SUPERSEDED
+    assert reloaded_b.state is EntryState.ACTIVE
+    assert len(await store.list_entries(EntryFilters(include_inactive=True))) == 2
+
+
+async def test_concurrent_supersedes_of_one_head_exactly_one_wins(
+    store: MemoryStore,
+) -> None:
+    head = await store.create_entry(draft("head"))
+    results = await asyncio.gather(
+        *(store.create_entry(draft(f"v{i}", supersedes=(head.id,))) for i in range(8)),
+        return_exceptions=True,
+    )
+    wins = [r for r in results if not isinstance(r, BaseException)]
+    assert len(wins) == 1
+    assert all(isinstance(r, SupersedeConflict) for r in results if r not in wins)
+    active = await store.list_entries(EntryFilters())
+    assert [e.id for e in active] == [wins[0].id]
 
 
 async def test_withdraw_entry_sets_state_and_reason(store: MemoryStore) -> None:

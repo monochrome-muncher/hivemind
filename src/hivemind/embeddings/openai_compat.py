@@ -39,7 +39,12 @@ import httpx
 
 from hivemind.config import Settings
 from hivemind.domain.entry import DEFAULT_PREFIX_TOKENS, EntryDraft, embeddable_text
-from hivemind.providers import clean_api_key, post_with_retries
+from hivemind.providers import (
+    clean_api_key,
+    clean_endpoint,
+    default_deadline,
+    post_with_retries,
+)
 
 
 async def _default_sleep(delay: float) -> None:
@@ -76,7 +81,7 @@ class OpenAICompatEmbedder:
         retries: int = 2,
         backoff: float = 0.5,
         sleep: Callable[[float], Awaitable[None]] | None = None,
-        deadline: float = 30.0,
+        deadline: float | None = None,
         jitter: Callable[[], float] | None = None,
     ) -> None:
         """Create an embedder.
@@ -110,7 +115,8 @@ class OpenAICompatEmbedder:
             sleep: The backoff sleep callable; defaults to
                 ``asyncio.sleep`` (tests inject a recorder).
             deadline: The overall wall-clock budget in seconds for one
-                embed call, retries and backoff included (PC-12).
+                embed call, retries and backoff included (ADR 0041).
+                ``None`` derives it from ``timeout`` and ``retries``.
             jitter: Returns a value in [0, 1) scaling each backoff to
                 [0.5x, 1x] (tests pin it); defaults to ``random.random``.
         """
@@ -118,9 +124,11 @@ class OpenAICompatEmbedder:
         if client is None:
             client = httpx.AsyncClient(timeout=timeout)
         self._client = client
-        self._base_url = base_url.rstrip("/")
+        self._base_url = clean_endpoint(base_url).rstrip("/")
         self._api_key = clean_api_key(api_key)
-        self._deadline = deadline
+        self._deadline = (
+            deadline if deadline is not None else default_deadline(timeout, retries, backoff)
+        )
         self._jitter = jitter
         self._model_name = model_name
         self._dim = dim

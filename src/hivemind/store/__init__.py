@@ -26,7 +26,7 @@ from hivemind.store.migrate import main as migrate_main
 # ``hivemind.store.migrate.migrate`` for direct importers.
 from hivemind.store.migrate import migrate as apply_migrations
 from hivemind.store.pgstore import PgStore
-from hivemind.store.pool import make_pool
+from hivemind.store.pool import PoolTimeouts, make_pool
 
 __all__ = [
     "PgAuthenticator",
@@ -38,6 +38,15 @@ __all__ = [
     "make_pool",
     "migrate_main",
 ]
+
+
+def _pool_timeouts(settings: Settings) -> PoolTimeouts:
+    return PoolTimeouts(
+        command=settings.pool_command_timeout or None,
+        statement_ms=settings.pool_statement_timeout_ms,
+        acquire=settings.pool_acquire_timeout or None,
+        connect=settings.pool_connect_timeout,
+    )
 
 
 def build_store(settings: Settings) -> Store:
@@ -53,6 +62,7 @@ def build_store(settings: Settings) -> Store:
         settings.database_url,
         pool_min_size=settings.pool_min_size,
         pool_max_size=settings.pool_max_size,
+        timeouts=_pool_timeouts(settings),
     )
 
 
@@ -70,4 +80,5 @@ def build_authenticator(settings: Settings) -> Authenticator:
         settings.database_url,
         pool_min_size=settings.pool_min_size,
         pool_max_size=settings.pool_max_size,
+        timeouts=_pool_timeouts(settings),
     )

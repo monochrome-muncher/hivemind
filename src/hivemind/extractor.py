@@ -56,7 +56,12 @@ from hivemind.domain.entry import (
     ExtractedEntity,
     embeddable_text,
 )
-from hivemind.providers import clean_api_key, post_with_retries
+from hivemind.providers import (
+    clean_api_key,
+    clean_endpoint,
+    default_deadline,
+    post_with_retries,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -74,25 +79,38 @@ _MAX_ENTITIES = 10
 _MAX_CONTENT_CHARS = 64_000
 _SNIPPET_CHARS = 80
 
-_THINK_RE = re.compile(r"\A\s*<think>.*?</think>\s*", re.DOTALL)
-_FENCE_RE = re.compile(r"\A\s*```[A-Za-z0-9_-]*\s*\n(.*?)\n?\s*```\s*\Z", re.DOTALL)
+_FENCE_OPEN_RE = re.compile(r"[A-Za-z0-9_-]*[ \t]*\r?\n")
 
 
 def _unwrap(content: str) -> str:
     """Strip one leading ``<think>...</think>`` block and one markdown
     code fence around the JSON (common from reasoning / chat models).
     Nothing else is salvaged: the JSON itself is still validated
-    all-or-nothing (SPEC §13.1)."""
-    content = _THINK_RE.sub("", content, count=1)
-    fenced = _FENCE_RE.match(content)
-    return fenced.group(1) if fenced else content
+    all-or-nothing (SPEC §13.1).
+
+    Plain string operations plus one anchored, unambiguous regex: model
+    output is untrusted, and a backtracking pattern here would block the
+    event loop on adversarial whitespace."""
+    text = content.lstrip()
+    if text.startswith("<think>"):
+        end = text.find("</think>")
+        if end != -1:
+            text = text[end + len("</think>") :]
+    text = text.strip()
+    if len(text) >= 6 and text.startswith("```") and text.endswith("```"):
+        inner = text[3:-3]
+        opening = _FENCE_OPEN_RE.match(inner)
+        if opening:
+            return inner[opening.end() :]
+    return text
 
 
 def _clean_name(name: str) -> str:
-    """Replace control / format characters (NUL, newlines, ...) with a
-    space and collapse whitespace: facet names are untrusted model
-    output, stored in Postgres and shown to other agents."""
-    kept = (" " if unicodedata.category(ch).startswith("C") else ch for ch in name)
+    """Replace C0/C1 control characters (NUL, newlines, ...) and lone
+    surrogates with a space and collapse whitespace: facet names are
+    untrusted model output, stored in Postgres and shown to other agents.
+    Format characters (ZWJ/ZWNJ, soft hyphen) are legitimate text and kept."""
+    kept = (" " if unicodedata.category(ch) in ("Cc", "Cs") else ch for ch in name)
     return " ".join("".join(kept).split())
 
 
@@ -154,7 +172,7 @@ class OpenAICompatExtractor:
         retries: int = 2,
         backoff: float = 0.5,
         sleep: Callable[[float], Awaitable[None]] | None = None,
-        deadline: float = 45.0,
+        deadline: float | None = None,
         jitter: Callable[[], float] | None = None,
     ) -> None:
         """Create an extractor.
@@ -185,7 +203,8 @@ class OpenAICompatExtractor:
             sleep: The backoff sleep callable; defaults to
                 ``asyncio.sleep`` (tests inject a recorder).
             deadline: The overall wall-clock budget in seconds for one
-                extraction, retries and backoff included (PC-12).
+                extraction, retries and backoff included (ADR 0041).
+                ``None`` derives it from ``timeout`` and ``retries``.
             jitter: Returns a value in [0, 1) scaling each backoff to
                 [0.5x, 1x] (tests pin it); defaults to ``random.random``.
         """
@@ -193,9 +212,11 @@ class OpenAICompatExtractor:
         if client is None:
             client = httpx.AsyncClient(timeout=timeout)
         self._client = client
-        self._base_url = base_url.rstrip("/")
+        self._base_url = clean_endpoint(base_url).rstrip("/")
         self._api_key = clean_api_key(api_key)
-        self._deadline = deadline
+        self._deadline = (
+            deadline if deadline is not None else default_deadline(timeout, retries, backoff)
+        )
         self._jitter = jitter
         self._model_name = model_name
         self._prefix_tokens = prefix_tokens
@@ -352,7 +373,7 @@ class OpenAICompatExtractor:
                 # Unknown kind, or a name breaking the domain's bounds
                 # (≤ 128 chars after trimming) — malformed output.
                 raise ExtractorError(f"invalid entity from the extractor: {exc}") from exc
-            key = unicodedata.normalize("NFKC", entity.name).casefold()  # case-insensitive dedupe
+            key = entity.name.lower()  # case-insensitive dedupe (SPEC §13.1, the store key)
             if key not in seen:
                 seen.add(key)
                 out.append(entity)
