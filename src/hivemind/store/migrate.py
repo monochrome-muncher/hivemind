@@ -204,22 +204,45 @@ async def _with_migration_lock(dsn: str, dim: int, work: str, count: int = 0) ->
                 if msg is not None:
                     raise RuntimeError(msg)
                 await asyncio.to_thread(_apply_chain, dsn, dim)
-                try:
-                    await _require_valid_hnsw_index(conn)
-                except (asyncpg.InterfaceError, asyncpg.PostgresConnectionError) as exc:
-                    raise RuntimeError(
-                        "the migration lock connection was lost during the run, so the "
-                        "advisory lock was released early and another replica may have "
-                        "run the chain concurrently. Re-run `hivemind-migrate` to confirm "
-                        "the head."
-                    ) from exc
+                if not await _lock_still_held(conn):
+                    raise RuntimeError(_LOCK_LOST_MESSAGE)
+                await _require_valid_hnsw_index(dsn)
                 return []
             return await asyncio.to_thread(_rollback_chain, dsn, dim, count)
         finally:
             await _release_lock(conn)
     finally:
         if not conn.is_closed():
-            await conn.close()
+            try:
+                await conn.close()
+            except Exception:
+                conn.terminate()  # a broken session cannot close cleanly; drop it
+
+
+_LOCK_LOST_MESSAGE = (
+    "the migration lock connection was lost during the run, so the advisory lock "
+    "was released early and another replica may have run the chain concurrently. "
+    "Re-run `hivemind-migrate` to confirm the head."
+)
+
+
+async def _lock_still_held(conn: asyncpg.Connection) -> bool:
+    """Whether the lock connection is alive and still holds the lock.
+
+    Any failure to confirm it counts as lost: once the backend is gone,
+    asyncpg reports the dead session as one of several exception types
+    depending on timing (``InterfaceError``, ``ConnectionDoesNotExistError``,
+    ``AdminShutdownError`` — a ``PostgresError`` — or even
+    ``InternalClientError``), and none of them may escape as the
+    migration's result."""
+    try:
+        held = await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' "
+            "AND pid = pg_backend_pid() AND granted)"
+        )
+    except Exception:
+        return False
+    return bool(held)
 
 
 async def _release_lock(conn: asyncpg.Connection) -> None:
@@ -229,7 +252,7 @@ async def _release_lock(conn: asyncpg.Connection) -> None:
     instead of letting an ``InterfaceError`` mask the migration's result."""
     try:
         await conn.execute("SELECT pg_advisory_unlock($1)", MIGRATION_LOCK_KEY)
-    except asyncpg.InterfaceError, asyncpg.PostgresConnectionError, OSError:
+    except Exception:  # any dead-session shape (see _lock_still_held)
         logger.warning(
             "the migration lock connection was lost during the run; the advisory "
             "lock was released early, so another replica may have run the chain "
@@ -341,13 +364,18 @@ async def _pgvector_version(conn: asyncpg.Connection) -> str | None:
     return str(version) if version is not None else None
 
 
-async def _require_valid_hnsw_index(conn: asyncpg.Connection) -> None:
-    """After the chain: fail loudly if the HNSW index is INVALID."""
-    valid = await conn.fetchval(
-        "SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
-        "WHERE c.relname = $1",
-        _HNSW_INDEX,
-    )
+async def _require_valid_hnsw_index(dsn: str) -> None:
+    """After the chain: fail loudly if the HNSW index is INVALID. Runs on
+    its own connection, independent of the lock connection's health."""
+    conn = await asyncpg.connect(dsn)
+    try:
+        valid = await conn.fetchval(
+            "SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
+            "WHERE c.relname = $1",
+            _HNSW_INDEX,
+        )
+    finally:
+        await conn.close()
     if valid is None:
         return
     msg = invalid_index_message(bool(valid))
