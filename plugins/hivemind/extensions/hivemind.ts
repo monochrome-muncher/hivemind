@@ -54,12 +54,28 @@ const HIVE_TOOL = /(^|[^a-z])hive_(whoami|search|get|list|write|feedback|withdra
 
 // Is this tool call a Hivemind call? Pi exposes MCP tools under their own
 // (prefixed) names; Oh My Pi mounts them as routes that the model calls by
-// writing JSON to a path such as xd://mcp__hivemind_hive_whoami, so there
-// the call arrives as a `write` whose path names the Hivemind tool.
+// writing JSON to a path such as xd://mcp__hivemind_hive_whoami (possibly
+// with a trailing slash or a ?query / #fragment), so there the call arrives
+// as a `write` whose path names the Hivemind tool. In pi-mcp-adapter's
+// default mode the tools sit behind ONE `mcp` proxy tool whose arguments
+// name the server and tool ({server: "hivemind"}, {tool:
+// "hivemind_hive_search"}), so for that tool the arguments are inspected.
+function mentionsHivemind(value: unknown, depth = 0): boolean {
+	if (typeof value === "string") return /hivemind/i.test(value) || HIVE_TOOL.test(value.trim());
+	if (depth > 3 || value === null || typeof value !== "object") return false;
+	return Object.values(value as Record<string, unknown>).some((v) =>
+		mentionsHivemind(v, depth + 1),
+	);
+}
+
 function isHivemindCall(event: any): boolean {
-	if (HIVE_TOOL.test(String(event.toolName ?? ""))) return true;
-	const path = String(event.input?.path ?? "");
-	return path.startsWith("xd://") && HIVE_TOOL.test(path.slice("xd://".length));
+	const name = String(event.toolName ?? "");
+	if (HIVE_TOOL.test(name)) return true;
+	if (name === "mcp" && mentionsHivemind(event.input)) return true;
+	const path = String(event.input?.path ?? "").trim();
+	if (!/^xd:\/\//i.test(path)) return false;
+	const route = path.slice("xd://".length).replace(/[?#].*$/, "").replace(/\/+$/, "");
+	return HIVE_TOOL.test(route);
 }
 
 function section(): string {

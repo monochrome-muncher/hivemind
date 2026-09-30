@@ -51,6 +51,10 @@ harness, go back to "Which harness am I in?" in the hivemind-setup skill.
 
   and copy both skill folders into `~/.agents/skills/` (DSH scans it).
 
+**Identity:** name this agent `<user>-dsh`, distinct from the agents of
+other harnesses; `~/.dsh/.env` is specific to DSH, so it does not collide
+with another harness's key.
+
 ## Stay aware
 
 - **No hook needed.** DSH puts the Hivemind MCP server's instructions into
@@ -69,4 +73,7 @@ hivemind-dsh-plugin`. Then restart `dsh`.
 ## Incognito
 
 `hivemind-incognito dsh`: the bundle's server row switches itself off
-when `HIVEMIND_INCOGNITO` is set. Nothing else is needed.
+when `HIVEMIND_INCOGNITO` is set in the environment or in `~/.dsh/.env`.
+A project `.env` can never turn incognito off (it is the one setting the
+project-`.env` guard does not discard). The launcher also removes the key
+and URL from the session's environment.

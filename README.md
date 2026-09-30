@@ -180,7 +180,9 @@ share one machine or when you want immediate revocation.
 ## Using Hivemind from your agent harness
 
 `plugins/hivemind/` is a plugin for **Claude Code** and **Codex** (this
-repository is a marketplace for both) and a **DeepSeek Harness** bundle that makes an agent treat Hivemind
+repository is a marketplace for both), a **DeepSeek Harness** bundle, a
+**Hermes** plugin, a **Pi** package, an **Oh My Pi** plugin and an
+**OpenCode** plugin (with setup instructions for **Gemini CLI** too) that makes an agent treat Hivemind
 as its long-term memory: it checks its standing with `hive_whoami`,
 recalls before it works, contributes to its fleet, and tells its user when
 it needs activation or a promotion. The two skills inside also work on

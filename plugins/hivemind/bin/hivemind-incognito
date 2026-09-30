@@ -13,7 +13,14 @@
 #   2. The harness's own switch that keeps the Hivemind MCP server from
 #      loading, so the tools are not even there. Where a harness has no
 #      such switch configured, this prints a note and the session relies on
-#      the agent honouring layer 1.
+#      the agent honouring layer 1 ("by restraint").
+#
+# Where the server is kept from loading (claude, codex, dsh, pi, omp) the
+# launcher also removes HIVEMIND_API_KEY and HIVEMIND_MCP_URL from the
+# child's environment, so an agent with a shell cannot read the key or call
+# the REST API with it. Where the session is incognito by restraint only
+# (hermes, opencode, other launchers) the variables are left in place: the
+# harness may still need them, and the README says so.
 set -eu
 
 if [ "$#" -lt 1 ]; then
@@ -24,38 +31,78 @@ harness=$1
 shift
 export HIVEMIND_INCOGNITO=1
 note() { echo "hivemind-incognito: $*" >&2; }
+# JSON-escape a string for embedding between double quotes.
+json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+home_dir=${HOME:-}
 
 case "$(basename "$harness")" in
   claude)
     # Deny the server for this session only (--settings outranks user
-    # settings; the denylist also covers servers a plugin adds). Match by
-    # URL where known: a plugin server's registered name is prefixed.
-    denied='{"serverName":"hivemind"}'
-    if [ -n "${HIVEMIND_MCP_URL:-}" ]; then
-      denied="$denied,{\"serverUrl\":\"$HIVEMIND_MCP_URL\"}"
+    # settings; the denylist also covers servers a plugin adds). A plugin's
+    # MCP server registers as "plugin:<plugin>:<server>" (Claude Code MCP
+    # docs), i.e. "plugin:hivemind:hivemind"; a hand-added one as
+    # "hivemind". Whether a serverName entry matches the scoped form is
+    # UNCONFIRMED in the docs, so both names and the URL are denied. The URL
+    # comes from the launching shell, else from the "env" block of
+    # ~/.claude/settings.json (where the setup skill may have put it).
+    url=${HIVEMIND_MCP_URL:-}
+    if [ -z "$url" ] && [ -n "$home_dir" ] && [ -f "$home_dir/.claude/settings.json" ] \
+      && command -v python3 >/dev/null 2>&1; then
+      url=$(python3 - "$home_dir/.claude/settings.json" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    with open(sys.argv[1]) as fh:
+        print(json.load(fh).get("env", {}).get("HIVEMIND_MCP_URL", "") or "")
+except (OSError, ValueError, AttributeError):
+    pass
+PY
+)
     fi
+    denied='{"serverName":"hivemind"},{"serverName":"plugin:hivemind:hivemind"}'
+    if [ -n "$url" ]; then
+      denied="$denied,{\"serverUrl\":\"$(json_escape "$url")\"}"
+    else
+      note "HIVEMIND_MCP_URL is not set in this shell or in ~/.claude/settings.json; denying the server by name only"
+    fi
+    # The server is denied, so the session needs neither value. (A key set
+    # in ~/.claude/settings.json "env" is applied by Claude Code itself and
+    # stays visible to the session's shell.)
+    unset HIVEMIND_API_KEY HIVEMIND_MCP_URL
     exec "$harness" --settings "{\"deniedMcpServers\":[$denied]}" "$@"
     ;;
   codex)
     # -c on a server that is not configured creates an invalid entry, so
-    # only add it when config.toml defines mcp_servers.hivemind.
-    config="${CODEX_HOME:-$HOME/.codex}/config.toml"
-    if [ -f "$config" ] && grep -q '^\[mcp_servers\.hivemind\]' "$config"; then
+    # only add it when a config.toml defines mcp_servers.hivemind: the user
+    # one, or the project's .codex/config.toml. Both the table form and
+    # dotted keys count; spaces inside the brackets are allowed.
+    found=0
+    codex_home=${CODEX_HOME:-}
+    if [ -z "$codex_home" ] && [ -n "$home_dir" ]; then codex_home="$home_dir/.codex"; fi
+    for config in "${codex_home:+$codex_home/config.toml}" ".codex/config.toml"; do
+      [ -n "$config" ] && [ -f "$config" ] || continue
+      if grep -Eq '^[[:space:]]*(\[[[:space:]]*mcp_servers\.hivemind[[:space:]]*\]|mcp_servers\.hivemind[[:space:].=])' "$config"; then
+        found=1
+      fi
+    done
+    if [ "$found" = 1 ]; then
+      unset HIVEMIND_API_KEY
       exec "$harness" -c 'mcp_servers.hivemind.enabled=false' "$@"
     fi
-    note "no [mcp_servers.hivemind] in $config; starting without an override"
+    note "no mcp_servers.hivemind in ~/.codex/config.toml or .codex/config.toml; starting without an override"
     exec "$harness" "$@"
     ;;
   dsh)
     # The hivemind bundle disables its own server row when
-    # HIVEMIND_INCOGNITO is set; nothing else to add.
+    # HIVEMIND_INCOGNITO is set (from the environment or ~/.dsh/.env, never
+    # turned off by a project .env); the key is not needed either.
+    unset HIVEMIND_API_KEY HIVEMIND_MCP_URL
     exec "$harness" "$@"
     ;;
   hermes)
     # Hermes interpolates ${VAR} into the server config before reading
     # `enabled`, so a config with `enabled: ${HIVEMIND_ENABLED}` is off here.
     export HIVEMIND_ENABLED=false
-    config="${HERMES_HOME:-$HOME/.hermes}/config.yaml"
+    config="${HERMES_HOME:-${home_dir:-.}/.hermes}/config.yaml"
     if ! grep -q 'HIVEMIND_ENABLED' "$config" 2>/dev/null; then
       note "$config does not gate the hivemind server on \${HIVEMIND_ENABLED}; the tools may still load (see the plugin README, Incognito sessions)"
     fi
@@ -81,12 +128,22 @@ case "$(basename "$harness")" in
   pi)
     # pi-mcp-adapter loads exactly one MCP config in exclusive mode: build
     # one from the global and project configs, minus the hivemind server.
+    # The merged file can hold other servers' literal tokens, so it is
+    # private and removed when Pi exits (no exec, so the trap can run).
     if command -v python3 >/dev/null 2>&1; then
-      merged=$(mktemp "${TMPDIR:-/tmp}/hivemind-incognito-mcp.XXXXXX")
-      python3 - "$merged" <<'PY'
+      umask 077
+      merged=$(mktemp "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/hivemind-incognito-mcp.XXXXXX")
+      trap 'rm -f "$merged"' EXIT
+      trap 'exit 130' INT
+      trap 'exit 143' TERM HUP
+      python3 - "$merged" "$home_dir" <<'PY'
 import json, os, sys
 servers = {}
-for path in (os.path.expanduser("~/.config/mcp/mcp.json"), ".mcp.json"):
+home = sys.argv[2]
+paths = [".mcp.json"]
+if home:
+    paths.insert(0, os.path.join(home, ".config", "mcp", "mcp.json"))
+for path in paths:
     try:
         with open(path) as fh:
             servers.update(json.load(fh).get("mcpServers", {}))
@@ -97,13 +154,16 @@ with open(sys.argv[1], "w") as fh:
     json.dump({"mcpServers": servers}, fh)
 PY
       export PI_MCP_CONFIG_MODE=exclusive
-      exec "$harness" --mcp-config "$merged" "$@"
+      unset HIVEMIND_API_KEY HIVEMIND_MCP_URL
+      rc=0
+      "$harness" --mcp-config "$merged" "$@" || rc=$?
+      exit "$rc"
     fi
     note "python3 not found; starting without removing the hivemind server"
     exec "$harness" "$@"
     ;;
   *)
-    note "no built-in switch for '$harness'; HIVEMIND_INCOGNITO=1 is set, so the agent is told not to use Hivemind"
+    note "no built-in switch for '$harness'; HIVEMIND_INCOGNITO=1 is set, so the agent is told not to use Hivemind (incognito by restraint: the key and URL stay in its environment)"
     exec "$harness" "$@"
     ;;
 esac

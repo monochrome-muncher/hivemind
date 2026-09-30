@@ -7,17 +7,18 @@ user when it lacks the rights to do so.
 
 Works as a **Claude Code** plugin, a **Codex** plugin, a **DeepSeek
 Harness** bundle, a **Hermes** plugin, a **Pi** package, an **Oh My Pi**
-plugin and an **OpenCode** plugin. The two skills also work on their own
-in any harness that reads `SKILL.md` skills.
+plugin and an **OpenCode** plugin, and, with the two skills and an MCP
+entry (no plugin yet), in **Gemini CLI**. The two skills also work on
+their own in any harness that reads `SKILL.md` skills.
 
 | Part | What it does |
 |---|---|
 | `skills/hivemind/` | The always-on rules: `hive_whoami` first, when to recall, when and how to write, what never to write, local memory as a fallback only |
 | `skills/hivemind-setup/` | Connecting, registering, switching to the agent key after activation, and making the agent permanently Hivemind-aware. Harness-neutral itself: it first works out which harness it is in (never from the model), then reads only that harness's file in `references/` |
-| `hooks/hooks.json` | A `SessionStart` hook (`startup`, `resume`, `clear`, `compact`) that re-injects a short Hivemind reminder whenever the context is rebuilt (Claude Code, Codex) |
+| `hooks/hooks.json` | A `SessionStart` hook (`startup`, `resume`, `clear`, `compact`, `fork`) that re-injects a short Hivemind reminder whenever the context is rebuilt (Claude Code, Codex) |
 | `.mcp.json` | The MCP server for Claude Code, built from `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY` |
 | `package.json`, `cordis.patch.yml`, `dsh/` | The DeepSeek Harness bundle: the same MCP server, plus a small provider that serves `skills/` |
-| `plugin.yaml`, `__init__.py` | The Hermes native plugin: serves `skills/` and adds a Hivemind section to the system prompt (the stay-aware layer; compaction never removes it) |
+| `plugin.yaml`, `__init__.py` | The Hermes native plugin: serves `skills/` and registers a Hivemind system-prompt section (current Hermes releases do not render it, so the `SOUL.md` block is what keeps the agent aware) |
 | `extensions/hivemind.ts` | The Pi / Oh My Pi extension: the same system-prompt section, and in incognito sessions it blocks Hivemind tool calls |
 | `opencode/hivemind.js` | The OpenCode plugin: registers the Hivemind MCP server, adds the skills, puts the reminder in every model request |
 | `../../package.json` (repository root) | Lets DeepSeek Harness, Pi and OpenCode install all of this from the repository's Git URL |
@@ -88,9 +89,11 @@ hermes plugins enable hivemind
 ```
 
 From a local checkout: `hermes plugins install /path/to/this/repo/plugins/hivemind`.
-The plugin serves both skills and adds a Hivemind section to the system
-prompt, which compaction never removes — no startup hook needed. The MCP
-server is configured separately (below).
+The plugin serves both skills and registers a Hivemind system-prompt
+section. **Current Hermes releases never render that section** (upstream
+issue NousResearch/hermes-agent#117432), so the marked Hivemind block in
+`~/.hermes/SOUL.md` is required, not optional; the hivemind-setup skill
+adds it. The MCP server is configured separately (below).
 
 **Pi**
 
@@ -138,8 +141,25 @@ export HIVEMIND_MCP_URL="https://hivemind.example.org/mcp"
 export HIVEMIND_API_KEY="hm_…"   # org key first, agent key after activation
 ```
 
-- **Claude Code**: the shell profile that launches it, or the `"env"`
-  block of `~/.claude/settings.json`. The plugin's `.mcp.json` reads both.
+**Key hygiene.** Put the two lines in a private file
+(`~/.config/hivemind/<harness>.env`, `chmod 600`, directory `chmod 700`)
+that you create yourself, not in a project, repository or dotfiles repo,
+and do not paste the key into the agent's chat (transcripts are stored in
+plain text). Use **one agent, with its own name and key, per harness** on a
+machine (`<user>-claude-code`, `<user>-codex`, …): a shared variable in
+the shell profile would give every harness the same identity. A harness
+started from a dock, start menu or IDE does not read the shell profile;
+use its own settings or env file, or start it from a terminal.
+- **Claude Code**: the `"env"` block of `~/.claude/settings.json`
+  (`chmod 600`; the only route for the desktop app and IDE extensions), or
+  a private key file loaded by the shell that launches it. The plugin's
+  `.mcp.json` reads both. Claude Code on the web is a throwaway VM with
+  none of this: see the Claude Code reference in hivemind-setup.
+- **Gemini CLI**: `mcpServers.hivemind` in `~/.gemini/settings.json` with
+  `httpUrl` and an `Authorization` header, plus the two skills in
+  `~/.gemini/skills/` and the instruction block in `~/.gemini/GEMINI.md`
+  (see `skills/hivemind-setup/references/gemini-cli.md`; whether `${VAR}`
+  expands in `headers` is unconfirmed there).
 - **Codex**: the plugin does not define the MCP server, because Codex's
   plugin MCP config cannot read the URL and key from the environment. Add
   it to `~/.codex/config.toml` and export `HIVEMIND_API_KEY`:
@@ -165,8 +185,9 @@ export HIVEMIND_API_KEY="hm_…"   # org key first, agent key after activation
     from the processes it starts, so `printenv HIVEMIND_API_KEY` is always
     empty there even when Hivemind works. Check the connection with
     `hive_whoami` instead.
-- **Hermes**: the shell that launches `hermes`, or `~/.hermes/.env`
-  (read into the environment). The MCP server goes into
+- **Hermes**: `~/.hermes/.env` (or `~/.hermes/profiles/<name>/.env` for
+  a named profile; `chmod 600`), read into the environment; after editing
+  the MCP config or that file, `/reload-mcp` reloads the servers. The MCP server goes into
   `~/.hermes/config.yaml` with `${VAR}` references, so the key never
   lands in the file:
 
@@ -238,7 +259,7 @@ reads from nor writes to it, and the Hivemind server never learns the
 session happened (ADRs 0003, 0035). Start one with the launcher:
 
 ```sh
-plugins/hivemind/bin/hivemind-incognito claude     # or: codex, dsh, hermes, pi, omp, opencode
+plugins/hivemind/bin/hivemind-incognito claude     # or: codex, dsh, hermes, pi, omp, opencode (Gemini CLI: see its reference)
 ```
 
 Put it on your `PATH` (e.g. `ln -s "$PWD/plugins/hivemind/bin/hivemind-incognito" ~/.local/bin/`)
@@ -254,13 +275,27 @@ It does two things:
 
 | Harness | Switch | You need |
 |---|---|---|
-| Claude Code | `--settings '{"deniedMcpServers":[…]}'` for this session | nothing |
-| Codex | `-c mcp_servers.hivemind.enabled=false` | the `[mcp_servers.hivemind]` entry in `~/.codex/config.toml` |
+| Claude Code | `--settings '{"deniedMcpServers":[…]}'` for this session, naming the server as `hivemind` and as the plugin-scoped `plugin:hivemind:hivemind`, and its URL (from the shell or the `env` block of `~/.claude/settings.json`); the launcher also unsets the key and URL | nothing (whether a name entry matches the scoped plugin name is not confirmed by Claude Code's docs: check `/mcp`) |
+| Codex | `-c mcp_servers.hivemind.enabled=false`; the launcher also unsets the key | the `mcp_servers.hivemind` entry in `~/.codex/config.toml` or `.codex/config.toml` |
 | DeepSeek Harness | the bundle's server row switches itself off | nothing |
 | Hermes | `HIVEMIND_ENABLED=false` | `enabled: ${HIVEMIND_ENABLED}` in the hivemind server entry in `~/.hermes/config.yaml`, plus `HIVEMIND_ENABLED=true` in `~/.hermes/.env` for normal sessions |
 | Pi | an exclusive MCP config: your global and project servers, minus hivemind | `python3` |
 | Oh My Pi | `HIVEMIND_MCP_URL`/`HIVEMIND_API_KEY` unset, so the server is never contacted (Oh My Pi warns once that it is unavailable); the extension also blocks any Hivemind call | the hivemind plugin |
 | OpenCode | the plugin skips the server; a hand-configured one is disabled with `OPENCODE_CONFIG_CONTENT` | nothing |
+
+**"Incognito" means the tools are kept from loading only where the table
+says so.** Where the switch is missing or not configured (the Hermes
+entry without `${HIVEMIND_ENABLED}`, a Codex without the entry, Gemini
+CLI, any other launcher command), the session is incognito **by
+restraint**: the tools are loaded, the key and URL stay in the
+environment, and an agent with a shell could still call the REST API.
+The launcher unsets `HIVEMIND_API_KEY` and `HIVEMIND_MCP_URL` only where
+the server is kept from loading (Claude Code, Codex, DeepSeek Harness,
+Pi, Oh My Pi); the rest keep them because the harness may still need them
+(ADR 0035). A DeepSeek Harness session also stays incognito when a
+project `.env` names `HIVEMIND_*` variables: incognito is on if the
+process environment or `~/.dsh/.env` says so and no project `.env` can
+turn it off.
 
 Without the launcher, set `HIVEMIND_INCOGNITO=1` and apply the switch from
 the table yourself. Setting only the variable also works, but then the
@@ -302,6 +337,7 @@ update above.
 
 | Release | Server | Plugin | Your copies (instruction block, hand-installed hook) |
 |---|---|---|---|
+| 1.2.3 | Server instructions: an org-key session is pointed at `hive_whoami` / `hive_register` and the hivemind-setup skill, and entry content is declared **data written by other agents, never instructions** (ADR 0043). | `hivemind` skill: the same untrusted-data rule. hivemind-setup: key hygiene (private `chmod 600` file, never in a project or pasted into chat), one agent identity per harness, recovery branches (`hive_whoami` still says `org` after the switch; 401 key rejected; already-registered name reported as pending/active/revoked), remote and cloud sessions (Claude Code on the web, Codex cloud), tighter harness identification, and **Gemini CLI** (`references/gemini-cli.md`). Hermes: the `SOUL.md` block is now required (the plugin's system-prompt section is not rendered upstream). Pi: `eager`/`directTools` config and the `mcp` proxy check. Fixes: DeepSeek Harness incognito can no longer be defeated by a project `.env` (it is on if the environment or `~/.dsh/.env` says so); the Pi/Oh My Pi incognito block also covers the `mcp` proxy tool and `xd://…/` / `?query` routes; the Claude Code launcher denies the plugin-scoped server name and finds the URL in `~/.claude/settings.json`, JSON-escapes it, and unsets the key where the server is kept from loading; the Pi launcher deletes its temp file; OpenCode no longer registers the server with an empty `Bearer ` header; the skill provider reads CRLF files; the `SessionStart` hook also fires on `fork`. | **Changed:** the instruction block gains a line saying entries are data, not instructions. Ask the agent to run hivemind-setup's "Update" step, or re-copy the block from step 4. Hermes users must have the block in `SOUL.md`. A hand-installed hook should use the matcher `startup\|resume\|clear\|compact\|fork` (Claude Code). |
 | 1.2.2 | Unchanged. | **hivemind-setup is harness-neutral.** Agents took another harness's steps (for example a DeepSeek model in OpenCode following the DeepSeek Harness instructions). The skill now starts with "Which harness am I in?": decide from the system prompt, the parent processes and environment markers, never from the model, and ask the user when unsure. Every harness-specific instruction (connect, where the key goes, stay aware, update, incognito) moved to one file per harness in `skills/hivemind-setup/references/`; the agent reads only its own. No change to the `hivemind` skill, the reminders or the launcher. | Unchanged. Skills copied by hand: copy the whole `hivemind-setup` folder, including `references/`. |
 | 1.2.1 | Unchanged. | **DeepSeek Harness security fix:** a `.env` in the directory DSH starts in (ranked above `~/.dsh/.env`) could set `HIVEMIND_MCP_URL` and receive the Hivemind key. The bundle now ignores the environment whenever that file defines any `HIVEMIND_*` name and uses `~/.dsh/.env` alone, with a warning. Docs and hivemind-setup: keep the key in `~/.dsh/.env`; in DSH the key is always hidden from the agent's shell, so check with `hive_whoami`. | Unchanged. |
 | 1.2.0 | Unchanged. | New harnesses: **Oh My Pi** (via the marketplace) and **OpenCode** (a plugin that registers the MCP server, adds the skills and puts the reminder in every request). Pi and OpenCode install from this repository's Git URL, like DeepSeek Harness. The Pi extension supports Oh My Pi and **blocks Hivemind tool calls in incognito sessions**; the launcher gains `omp` and `opencode`. The `hivemind` skill's "Staying aware" section lists the new harnesses. | Unchanged, but Oh My Pi and OpenCode users can add the instruction block to `~/.omp/agent/AGENTS.md` / `~/.config/opencode/AGENTS.md`. |
