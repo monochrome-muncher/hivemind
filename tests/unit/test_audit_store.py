@@ -106,7 +106,7 @@ class _FakePool:
     async def _acquire(self):  # type: ignore[no-untyped-def]
         yield self._conn
 
-    def acquire(self):  # type: ignore[no-untyped-def]
+    def acquire(self, **_kw):  # type: ignore[no-untyped-def]
         return self._acquire()
 
 
