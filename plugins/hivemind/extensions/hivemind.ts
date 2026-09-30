@@ -59,19 +59,35 @@ const HIVE_TOOL = /(^|[^a-z])hive_(whoami|search|get|list|write|feedback|withdra
 // as a `write` whose path names the Hivemind tool. In pi-mcp-adapter's
 // default mode the tools sit behind ONE `mcp` proxy tool whose arguments
 // name the server and tool ({server: "hivemind"}, {tool:
-// "hivemind_hive_search"}), so for that tool the arguments are inspected.
-function mentionsHivemind(value: unknown, depth = 0): boolean {
-	if (typeof value === "string") return /hivemind/i.test(value) || HIVE_TOOL.test(value.trim());
-	if (depth > 3 || value === null || typeof value !== "object") return false;
-	return Object.values(value as Record<string, unknown>).some((v) =>
-		mentionsHivemind(v, depth + 1),
-	);
+// "hivemind_hive_search"}), so for that tool the ROUTING fields are
+// inspected. Never `args`: a search for "hivemind" on another server, or a
+// file that mentions it, is not a Hivemind call.
+const ROUTING_FIELDS = ["server", "connect", "instructions", "tool", "describe"];
+
+function isHivemindRoute(value: unknown): boolean {
+	if (typeof value !== "string") return false;
+	const v = value.trim();
+	return /^hivemind$/i.test(v) || /^hivemind[_-]/i.test(v) || HIVE_TOOL.test(v);
+}
+
+// pi-mcp-adapter's other surfaces: the per-server `mcp__<server>` wrapper
+// namespace, and `mcpScript`, whose `code` calls tools as `tools.<name>(…)`.
+// The script scan is best effort (code can build a name at run time); the
+// launcher's exclusive config, which drops the server, is the real control.
+const SCRIPT_CALL =
+	/tools\s*(\.|\[\s*["'`])hivemind|\bhive_(whoami|search|get|list|write|feedback|withdraw|register)\b/i;
+
+function isProxyCallToHivemind(name: string, input: any): boolean {
+	if (name === "mcp") return ROUTING_FIELDS.some((f) => isHivemindRoute(input?.[f]));
+	if (/^mcp__hivemind(_|$)/i.test(name)) return true;
+	if (name === "mcpScript") return SCRIPT_CALL.test(String(input?.code ?? ""));
+	return false;
 }
 
 function isHivemindCall(event: any): boolean {
 	const name = String(event.toolName ?? "");
 	if (HIVE_TOOL.test(name)) return true;
-	if (name === "mcp" && mentionsHivemind(event.input)) return true;
+	if (isProxyCallToHivemind(name, event.input)) return true;
 	const path = String(event.input?.path ?? "").trim();
 	if (!/^xd:\/\//i.test(path)) return false;
 	const route = path.slice("xd://".length).replace(/[?#].*$/, "").replace(/\/+$/, "");

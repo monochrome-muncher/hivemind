@@ -130,9 +130,23 @@ PY
     # one from the global and project configs, minus the hivemind server.
     # The merged file can hold other servers' literal tokens, so it is
     # private and removed when Pi exits (no exec, so the trap can run).
+    # mktemp creates the file 0600 by itself (no umask change, which would
+    # leak into the harness). The directory is the first writable one of
+    # $XDG_RUNTIME_DIR, $TMPDIR, /tmp: a stale XDG_RUNTIME_DIR must not stop
+    # Pi from starting.
+    merged=
     if command -v python3 >/dev/null 2>&1; then
-      umask 077
-      merged=$(mktemp "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/hivemind-incognito-mcp.XXXXXX")
+      for d in "${XDG_RUNTIME_DIR:-}" "${TMPDIR:-}" /tmp; do
+        if [ -n "$d" ] && [ -d "$d" ] && [ -w "$d" ]; then
+          merged=$(mktemp "$d/hivemind-incognito-mcp.XXXXXX" 2>/dev/null) || merged=
+          [ -n "$merged" ] && break
+        fi
+      done
+    fi
+    if [ -n "$merged" ]; then
+      if [ -z "$home_dir" ]; then
+        note "HOME is not set; the global ~/.config/mcp/mcp.json is skipped (only the project .mcp.json is kept)"
+      fi
       trap 'rm -f "$merged"' EXIT
       trap 'exit 130' INT
       trap 'exit 143' TERM HUP
@@ -159,7 +173,7 @@ PY
       "$harness" --mcp-config "$merged" "$@" || rc=$?
       exit "$rc"
     fi
-    note "python3 not found; starting without removing the hivemind server"
+    note "python3 or a writable temp directory not found; starting without removing the hivemind server"
     exec "$harness" "$@"
     ;;
   *)

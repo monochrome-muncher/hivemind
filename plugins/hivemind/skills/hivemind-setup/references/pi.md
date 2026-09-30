@@ -82,5 +82,10 @@ stays put, so reinstall at the new tag.
 global and project servers, minus hivemind (the merged file is private and
 deleted when Pi exits), and without `HIVEMIND_API_KEY` /
 `HIVEMIND_MCP_URL` in its environment. It needs `python3`. The package's
-extension additionally blocks Hivemind calls, including the adapter's
-`mcp` proxy tool when it names the Hivemind server or one of its tools.
+extension additionally blocks Hivemind calls: the adapter's `mcp` proxy
+tool when its routing fields (`server`, `connect`, `instructions`, `tool`,
+`describe`) name the Hivemind server or one of its tools (never its
+`args`), the `mcp__hivemind…` wrapper tools, and `mcpScript` code that
+calls `tools.hivemind_…` or a `hive_*` name. The `mcpScript` check is best
+effort (code can build a tool name at run time); the exclusive config that
+drops the server is the real control.

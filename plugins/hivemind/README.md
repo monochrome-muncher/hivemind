@@ -279,7 +279,7 @@ It does two things:
 | Codex | `-c mcp_servers.hivemind.enabled=false`; the launcher also unsets the key | the `mcp_servers.hivemind` entry in `~/.codex/config.toml` or `.codex/config.toml` |
 | DeepSeek Harness | the bundle's server row switches itself off | nothing |
 | Hermes | `HIVEMIND_ENABLED=false` | `enabled: ${HIVEMIND_ENABLED}` in the hivemind server entry in `~/.hermes/config.yaml`, plus `HIVEMIND_ENABLED=true` in `~/.hermes/.env` for normal sessions |
-| Pi | an exclusive MCP config: your global and project servers, minus hivemind | `python3` |
+| Pi | an exclusive MCP config: your global and project servers, minus hivemind (the extension also blocks the `mcp` proxy, `mcp__hivemind…` and `mcpScript` calls that name Hivemind; the `mcpScript` scan is best effort) | `python3` |
 | Oh My Pi | `HIVEMIND_MCP_URL`/`HIVEMIND_API_KEY` unset, so the server is never contacted (Oh My Pi warns once that it is unavailable); the extension also blocks any Hivemind call | the hivemind plugin |
 | OpenCode | the plugin skips the server; a hand-configured one is disabled with `OPENCODE_CONFIG_CONTENT` | nothing |
 

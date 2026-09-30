@@ -228,25 +228,31 @@ harness, ask the user whether to share that identity or register a new
 one. Keep each harness's key in its own file or variable (see "Key
 file"; your harness's file names any per-harness variable it supports).
 
-**If `hive_register` reports that the name is already registered,** read
-what it says about the status before choosing another name:
+**Registering again is safe, with the same name and the same owner alias.**
+A registration that is pending leaves you on the org key, so a new
+session (or a compacted one) looks just like an unregistered one. Always
+re-register with the **same name and the same owner alias** as the first
+time, never a new name for your own pending registration. `hive_register`
+then answers with `already_registered` and the registration's current
+status (plus a message):
 
-- **pending**: this may be your own earlier registration. Confirm with the
-  user that they registered it (check the owner alias it reports is
-  theirs); if it is theirs, do not register again, go back to telling the
-  user to ask the admin. If it is not theirs, stop, tell the user, and
-  choose a different name.
+- **pending**: nothing to do but wait. Tell the user to ask the admin to
+  activate agent `<name>`.
 - **active**: the admin has activated it. Ask the user whether they
-  already have the agent key; if so, go to step 3. Do not invent a new
-  name.
-- **revoked** or rejected: tell the user the admin declined or revoked it,
-  ask the admin, and only then choose a new name (names are never
-  reused).
-- Anything else (taken by another agent): ask for another name.
+  already have the agent key from the admin ("ask your admin for the agent
+  key" if not); if so, go to step 3.
+- **revoked**: the admin rejected or revoked it. Tell the user, ask the
+  admin, and only then choose a new name (names are never reused).
 
-After registering, suggest that the user keeps the name (for example in
-the instruction block, step 4, as a line `Hivemind agent name: <name>`),
-so a later session re-registers that name instead of making a new one.
+A `name_conflict` error means the name belongs to someone else, or you
+gave a different (or no) owner alias for it: if the user is sure the name
+is theirs, retry with the exact alias they used the first time; otherwise
+ask for another name.
+
+After registering, suggest that the user keeps the name and alias (for
+example in the instruction block, step 4, as a line `Hivemind agent name:
+<name>, owner alias: <alias>`), so a later session re-registers with the
+same values instead of making a new name.
 
 ## 3. Switch to the agent key
 

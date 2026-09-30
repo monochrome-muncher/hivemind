@@ -984,7 +984,9 @@ def test_the_setup_skill_has_the_recovery_branches() -> None:
     for name in ("claude-code", "codex"):
         assert "## Remote and cloud sessions" in (SETUP_REFS / f"{name}.md").read_text(), name
     # Generic wording that stays right however hive_register answers (ONB-1).
-    assert "If `hive_register` reports that the name is already registered" in flat
+    assert "same name and the same owner alias" in flat
+    assert "`already_registered`" in flat and "`name_conflict`" in flat
+    assert "check the owner alias it reports" not in flat
 
 
 def test_the_gemini_reference_is_complete_and_honest_about_unknowns() -> None:
@@ -1007,3 +1009,60 @@ def test_the_launcher_and_readme_admit_incognito_by_restraint() -> None:
     readme = " ".join((PLUGIN / "README.md").read_text().split())
     assert "incognito **by restraint**" in readme
     assert "plugin:hivemind:hivemind" in readme
+
+
+def test_the_pi_launcher_does_not_leak_a_umask_or_die_on_a_stale_xdg_dir(tmp_path: Path) -> None:
+    """The temp file is 0600 from mktemp (no umask change for the harness), and
+    an unusable XDG_RUNTIME_DIR falls through to TMPDIR."""
+    env = _fake_harness(tmp_path, "pi")
+    (tmp_path / "bin" / "pi").write_text('#!/bin/sh\numask\nls "$2" >/dev/null && echo CONFIG_OK\n')
+    (tmp_path / "tmp").mkdir()
+    env.update(XDG_RUNTIME_DIR=str(tmp_path / "gone"), TMPDIR=str(tmp_path / "tmp"))
+    lines = _launch(tmp_path, env, "pi")
+    assert lines[-1] == "CONFIG_OK"
+    assert lines[0] != "0077"  # the harness keeps the caller's umask
+    env.pop("HOME")
+    out = subprocess.run(
+        ["sh", str(LAUNCHER), "pi"], env=env, cwd=tmp_path, capture_output=True, text=True
+    )
+    assert out.returncode == 0 and "HOME is not set" in out.stderr
+
+
+_CALLS_NEGATIVE = [
+    {"toolName": "mcp", "input": {"tool": "github_search_code", "args": {"q": "hivemind"}}},
+    {
+        "toolName": "mcp",
+        "input": {"tool": "fs_read", "args": {"path": "/home/u/hivemind/README.md"}},
+    },
+    {
+        "toolName": "mcp",
+        "input": {"tool": "gh_create_issue", "args": {"title": "Fix Hivemind plugin"}},
+    },
+    {
+        "toolName": "mcpScript",
+        "input": {"code": "return await tools.github_search({q: 'hivemind'})"},
+    },
+]
+_CALLS_SURFACES = [
+    {"toolName": "mcp__hivemind", "input": {"tool": "hive_search"}},
+    {"toolName": "mcp", "input": {"server": "hivemind"}},
+    {"toolName": "mcp", "input": {"describe": "hivemind_hive_get"}},
+    {"toolName": "mcp", "input": {"tool": "hive_whoami"}},
+    {
+        "toolName": "mcpScript",
+        "input": {"code": "return await tools.hivemind_hive_search({query: 'x'})"},
+    },
+    {"toolName": "mcpScript", "input": {"code": "await tools['hivemind_hive_write']({})"}},
+]
+
+
+@needs_node
+def test_the_extension_inspects_routing_fields_only_and_covers_the_other_surfaces() -> None:
+    incognito = _node(
+        _EXTENSION_SCRIPT,
+        PI_EXTENSION,
+        CALLS=json.dumps(_CALLS_NEGATIVE + _CALLS_SURFACES),
+        HIVEMIND_INCOGNITO="1",
+    )
+    blocked = [bool(b and b.get("block")) for b in incognito["blocked"]]
+    assert blocked == [False] * len(_CALLS_NEGATIVE) + [True] * len(_CALLS_SURFACES)
