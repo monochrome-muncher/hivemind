@@ -117,6 +117,17 @@ async def test_register_agent_pending_and_idempotent(pg) -> None:
     assert len(await pg.list_agents()) == 1
 
 
+async def test_register_agent_never_overwrites_an_existing_owner_alias(pg) -> None:
+    # ADR 0039: the first registrant's alias is final (no back-fill either).
+    await pg.register_agent("alice", owner_alias="john")
+    await pg.register_agent("alice", owner_alias="mallory")
+    await pg.register_agent("bob")
+    await pg.register_agent("bob", owner_alias="mallory")
+    alice, bob = await pg.get_agent("alice"), await pg.get_agent("bob")
+    assert alice is not None and alice.owner_alias == "john"
+    assert bob is not None and bob.owner_alias is None
+
+
 async def test_activate_agent_sets_level_and_fleet(pg) -> None:
     fa = await pg.create_fleet("data-eng")
     await pg.register_agent("alice")

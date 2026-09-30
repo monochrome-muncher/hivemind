@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 
 from hivemind.api.deps import (
     HivemindApp,
@@ -41,6 +41,7 @@ from hivemind.api.schemas import (
     KeyIssuedOut,
     MetricsOut,
     RegisterAgentRequest,
+    RegisteredAgentOut,
     SearchRequest,
     UpdateAgentRequest,
     WhoamiOut,
@@ -318,22 +319,31 @@ def build_router(app: HivemindApp) -> APIRouter:
 
     # --- Agent registration + fleet/trust management (ADRs 0011-0012) ------
 
-    @router.post("/agents", response_model=AgentOut, status_code=201)
-    async def register_agent(payload: RegisterAgentRequest, credential: require) -> AgentOut:
-        """Register (or re-register) an agent (ADR 0012). Gated on the org
-        or admin key; creates a ``pending`` agent (level 0, no fleet).
-        Re-registering a pending name is idempotent; an active name is a
-        conflict (the name stays reserved — pick a new one, ADR 0012).
+    @router.post("/agents", response_model=RegisteredAgentOut, status_code=201)
+    async def register_agent(
+        payload: RegisterAgentRequest, credential: require, response: Response
+    ) -> RegisteredAgentOut:
+        """Register (or re-register) an agent (ADR 0012, ADR 0039). Gated on
+        the org or admin key; creates a ``pending`` agent (level 0, no
+        fleet) → 201. The same name by the same ``owner_alias`` answers 200
+        with the current status and what to do next; a name owned by
+        another alias is a 409 ``name_conflict`` that says nothing more.
         """
         try:
-            agent = await app.access_service.register(
+            registration = await app.access_service.register(
                 payload.name, credential, owner_alias=payload.owner_alias
             )
         except PermissionDenied as exc:
             raise api_error(403, "forbidden", str(exc)) from exc
         except ValueError as exc:
             raise api_error(409, "name_conflict", str(exc)) from exc
-        return AgentOut.from_agent(agent)
+        if registration.already_registered:
+            response.status_code = 200
+        return RegisteredAgentOut(
+            **AgentOut.from_agent(registration.agent).model_dump(),
+            already_registered=registration.already_registered,
+            message=registration.message,
+        )
 
     @router.post("/admin/fleets", response_model=FleetOut, status_code=201)
     async def create_fleet(payload: CreateFleetRequest, credential: require) -> FleetOut:

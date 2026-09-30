@@ -120,10 +120,12 @@ _DESC_FEEDBACK = (
 )
 
 _DESC_REGISTER = (
-    "Register (or re-register) an agent (ADR 0012). Gated on the org or admin "
-    "key; creates a 'pending' agent (level 0, no fleet). Re-registering a "
-    "pending name is idempotent; an active name is a conflict (the name stays "
-    "reserved — pick a new one, ADR 0012)."
+    "Register (or re-register) an agent (ADR 0012). Gated on the org key; "
+    "creates a 'pending' agent (level 0, no fleet). Registering the same name "
+    "again with the same owner_alias is safe: it returns the current status "
+    "(already_registered, plus a message: still pending / active, so ask your "
+    "admin for the agent key / revoked). A name that belongs to another owner "
+    "is a name_conflict: pick a different name (ADR 0039)."
 )
 
 

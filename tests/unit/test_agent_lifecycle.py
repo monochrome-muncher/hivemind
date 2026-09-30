@@ -54,9 +54,12 @@ async def test_revoke_from_pending_rejects_the_registration() -> None:
     await service.revoke("alice", ADMIN)
     agents = {a.name: a for a in await service.list_agents(ADMIN)}
     assert agents["alice"].status is AgentStatus.REVOKED
-    # The name stays reserved: re-registering it is a conflict.
-    with pytest.raises(ValueError, match="revoked"):
+    # The name stays reserved: another alias re-registering it is a conflict
+    # (and learns nothing about it); the owner learns it was revoked.
+    with pytest.raises(ValueError, match="taken"):
         await service.register("alice", ORG)
+    again = await service.register("alice", ORG, owner_alias="john")
+    assert again.agent.status is AgentStatus.REVOKED and "revoked" in again.message
 
 
 async def test_revoke_kills_the_key_and_reactivation_issues_a_fresh_one() -> None:

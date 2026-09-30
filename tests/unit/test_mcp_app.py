@@ -595,12 +595,35 @@ class TestHiveRegister:
         result = await hive_register(app, "alice")
         assert result["error"]["code"] == ERR_PERMISSION_DENIED
 
-    async def test_register_active_name_conflicts(self) -> None:
+    async def _active_alice(self):
         clock = make_clock()
         store = MemoryStore(clock)
-        await store.register_agent("alice")
+        await store.register_agent("alice", "john")
         fleet = await store.create_fleet("data-eng")
         await store.activate_agent("alice", trust_level=TrustLevel.LURKER, home_fleet_id=fleet.id)
-        app = build_app(store, ORG, clock)
-        result = await hive_register(app, "alice")
+        return build_app(store, ORG, clock)
+
+    async def test_register_active_name_of_another_alias_conflicts(self) -> None:
+        app = await self._active_alice()
+        result = await hive_register(app, "alice", owner_alias="mallory")
         assert result["error"]["code"] == "name_conflict"
+        assert "active" not in result["error"]["message"]
+
+    async def test_reregister_own_active_name_reports_the_status(self) -> None:
+        # ONB-1: the agent learns it is active (-> ask the admin for the key)
+        # instead of a bare name_conflict it would misread as "taken".
+        app = await self._active_alice()
+        result = await hive_register(app, "alice", owner_alias="john")
+        assert result["status"] == "active"
+        assert result["already_registered"] is True
+        assert "ask your admin for the agent key" in result["message"]
+
+    async def test_reregister_own_pending_name_reports_pending(self) -> None:
+        clock = make_clock()
+        app = build_app(MemoryStore(clock), ORG, clock)
+        first = await hive_register(app, "alice", owner_alias="john")
+        assert (first["status"], first["already_registered"]) == ("pending", False)
+        again = await hive_register(app, "alice", owner_alias="john")
+        assert (again["status"], again["already_registered"]) == ("pending", True)
+        squat = await hive_register(app, "alice", owner_alias="mallory")
+        assert squat["error"]["code"] == "name_conflict"

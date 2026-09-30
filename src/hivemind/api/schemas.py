@@ -323,6 +323,16 @@ class AgentOut(BaseModel):
         )
 
 
+class RegisteredAgentOut(AgentOut):
+    """The answer to ``POST /v1/agents`` (ADR 0039): the agent record plus
+    whether this caller had already registered the name (same alias) and
+    what its status means for the caller (pending / active → ask the admin
+    for the key / revoked)."""
+
+    already_registered: bool
+    message: str
+
+
 class FleetOut(BaseModel):
     """A fleet (ADR 0011)."""
 

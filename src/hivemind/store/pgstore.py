@@ -101,7 +101,6 @@ INSERT_AGENT = (
     "INSERT INTO agents (name, owner_alias, status, trust_level) "
     "VALUES ($1, $2, 'pending', 0) ON CONFLICT (name) DO NOTHING RETURNING *"
 )
-BACKFILL_AGENT_ALIAS = "UPDATE agents SET owner_alias = $2 WHERE name = $1 AND owner_alias IS NULL"
 LIST_AGENTS = "SELECT * FROM agents ORDER BY name"
 # ADR 0028: the status guard lives in the WHERE, so check-and-flip is one
 # atomic statement (no second key from two racing activations).
@@ -646,8 +645,8 @@ class PgStore:
 
     async def register_agent(self, name: str, owner_alias: str | None = None) -> Agent:
         """Register (or re-register) an agent (ADR 0012). Idempotent: an
-        existing record is returned (only ``owner_alias`` back-filled if it
-        was missing); a new record is ``pending`` (level 0, no fleet). A
+        existing record is returned unchanged (its ``owner_alias`` is never
+        overwritten, ADR 0039); a new record is ``pending`` (level 0, no fleet). A
         racing concurrent registration of the same name returns the same
         pending record (the insert is conflict-guarded — no raw
         ``UniqueViolation``, SPEC §12.3 idempotent no-op).
@@ -663,9 +662,7 @@ class PgStore:
                     # record it created.
                     row = await conn.fetchrow(GET_AGENT, name)
             else:
-                if owner_alias is not None:
-                    await conn.execute(BACKFILL_AGENT_ALIAS, name, owner_alias)
-                row = await conn.fetchrow(GET_AGENT, name)
+                row = existing
         if row is None:
             raise RuntimeError(f"agent {name!r} vanished between insert and read")
         return _row_to_agent(row)

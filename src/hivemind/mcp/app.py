@@ -534,24 +534,29 @@ async def hive_register(
     Gated on the **org key only** (SPEC §5.2: the MCP verb is the agent's
     first contact with Hivemind; the REST surface also accepts an admin
     key for human-driven registration). Creates a ``pending`` agent
-    (level 0, no fleet). Re-registering a pending name is idempotent;
-    an *active* name is a conflict (the name stays reserved — pick a new
-    one, ADR 0012). The agent is dormant until an admin activates it
-    (sets its trust level + home fleet and issues its key).
+    (level 0, no fleet). Registering a name again with the **same**
+    ``owner_alias`` answers with its current status (``already_registered``
+    plus a ``message``: pending / active → ask the admin for the key /
+    revoked); a name owned by another alias is a ``name_conflict`` that
+    says nothing more (ADR 0039). The agent is dormant until an admin
+    activates it (sets its trust level + home fleet and issues its key).
     """
     try:
-        agent = await app.access_service.register(
+        registration = await app.access_service.register(
             name, app.credential, owner_alias=owner_alias, org_only=True
         )
     except PermissionDenied as exc:
         return _error(ERR_PERMISSION_DENIED, str(exc))
     except ValueError as exc:
         return _error("name_conflict", str(exc))
+    agent = registration.agent
     return {
         "name": agent.name,
         "status": agent.status.value,
         "trust_level": agent.trust_level.value,
         "home_fleet_id": agent.home_fleet_id,
+        "already_registered": registration.already_registered,
+        "message": registration.message,
     }
 
 

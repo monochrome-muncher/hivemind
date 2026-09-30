@@ -14,6 +14,7 @@ from hivemind.domain.access import AgentStatus, TrustLevel
 from hivemind.ports import Credential
 from hivemind.services.access import (
     AccessService,
+    NameTaken,
     PermissionDenied,
     resolve_write_scope,
 )
@@ -57,7 +58,9 @@ def make_service() -> tuple[AccessService, FakeAuthenticator, object]:
 
 async def test_register_with_org_key_creates_pending() -> None:
     service, _, store = make_service()
-    agent = await service.register("alice", org_credential())
+    registration = await service.register("alice", org_credential())
+    agent = registration.agent
+    assert registration.already_registered is False
     assert agent.status is AgentStatus.PENDING
     assert agent.trust_level is TrustLevel.UNTRUSTED
     # The agent is persisted (pending, level 0, no fleet).
@@ -67,21 +70,81 @@ async def test_register_with_org_key_creates_pending() -> None:
 
 async def test_register_idempotent_for_pending() -> None:
     service, _, _ = make_service()
-    first = await service.register("alice", org_credential())
-    again = await service.register("alice", org_credential())
+    first = (await service.register("alice", org_credential())).agent
+    registration = await service.register("alice", org_credential())
+    again = registration.agent
     assert again.name == first.name
     assert again.status is AgentStatus.PENDING
+    assert registration.already_registered is True
 
 
-async def test_register_active_name_conflicts() -> None:
-    service, _, store = make_service()
-    await service.register("alice", org_credential())
-    await store.create_fleet("data-eng")  # ensure a fleet exists for the FK
+async def _activate_alice(service, store) -> None:
+    await store.create_fleet("data-eng")
     await service.activate(
         "alice", TrustLevel.LURKER, (await store.list_fleets())[0].id, admin_credential()
     )
-    with pytest.raises(ValueError):
-        await service.register("alice", org_credential())
+
+
+# ONB-1 / AUTH-6 / ONB-3 (ADR 0039): re-registering answers with the current
+# status for the SAME alias, and never reveals or shares a name with another.
+
+
+async def test_reregister_same_alias_says_it_is_still_pending() -> None:
+    service, _, _ = make_service()
+    await service.register("alice", org_credential(), owner_alias="john")
+    again = await service.register("alice", org_credential(), owner_alias="John ")
+    assert again.already_registered is True
+    assert again.agent.status is AgentStatus.PENDING
+    assert "pending" in again.message and "do not register again" in again.message.lower()
+
+
+async def test_reregister_active_same_alias_points_at_the_admin_for_the_key() -> None:
+    service, _, store = make_service()
+    await service.register("alice", org_credential(), owner_alias="john")
+    await _activate_alice(service, store)
+    again = await service.register("alice", org_credential(), owner_alias="john")
+    assert again.agent.status is AgentStatus.ACTIVE
+    assert again.already_registered is True
+    assert "ask your admin for the agent key" in again.message
+
+
+async def test_reregister_revoked_same_alias_says_revoked() -> None:
+    service, _, _ = make_service()
+    await service.register("alice", org_credential(), owner_alias="john")
+    await service.revoke("alice", admin_credential())
+    again = await service.register("alice", org_credential(), owner_alias="john")
+    assert again.agent.status is AgentStatus.REVOKED
+    assert "revoked" in again.message
+
+
+@pytest.mark.parametrize("status", ["pending", "active", "revoked"])
+@pytest.mark.parametrize("other_alias", ["mallory", None])
+async def test_reregister_with_another_alias_is_a_bare_name_taken(status, other_alias) -> None:
+    service, _, store = make_service()
+    await service.register("alice", org_credential(), owner_alias="john")
+    if status == "active":
+        await _activate_alice(service, store)
+    elif status == "revoked":
+        await service.revoke("alice", admin_credential())
+    with pytest.raises(NameTaken) as excinfo:
+        await service.register("alice", org_credential(), owner_alias=other_alias)
+    # Nothing about the other agent (its status, its alias) leaks.
+    text = str(excinfo.value).lower()
+    assert "john" not in text
+    for word in ("pending", "active", "revoked"):
+        assert word not in text
+    stored = await store.get_agent("alice")
+    assert stored is not None and stored.owner_alias == "john"
+
+
+async def test_a_pending_name_is_never_taken_over_by_a_later_alias() -> None:
+    """AUTH-6: the first registrant keeps the record; the later one is told so."""
+    service, _, store = make_service()
+    await service.register("alice", org_credential(), owner_alias="mallory")
+    with pytest.raises(NameTaken):
+        await service.register("alice", org_credential(), owner_alias="john")
+    stored = await store.get_agent("alice")
+    assert stored is not None and stored.owner_alias == "mallory"
 
 
 async def test_register_with_agent_key_denied() -> None:
@@ -93,7 +156,7 @@ async def test_register_with_agent_key_denied() -> None:
 async def test_register_org_only_allows_org_key() -> None:
     # The MCP hive_register gate (SPEC §5.2): org key only.
     service, _, _ = make_service()
-    agent = await service.register("alice", org_credential(), org_only=True)
+    agent = (await service.register("alice", org_credential(), org_only=True)).agent
     assert agent.status is AgentStatus.PENDING
 
 

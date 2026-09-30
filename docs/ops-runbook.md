@@ -186,6 +186,14 @@ uv run hivemind-keys issue-admin
 
 # Agent key (issued at activation; one per registered agent, ADR 0012).
 uv run hivemind-keys issue-agent --name alice
+# A pending or revoked agent needs an explicit level and fleet (it is
+# activated exactly as REST activate does; ADR 0039):
+uv run hivemind-keys issue-agent --name alice --trust-level 1 --home-fleet <fleet-id>
+
+# Pre-v2 `user` / name-less `agent` keys no longer authenticate (ADR 0039);
+# find and delete any leftovers:
+#   SELECT key_hash, kind, user_id FROM credentials
+#    WHERE kind = 'user' OR (kind = 'agent' AND agent_name IS NULL);
 ```
 
 The admin REST surface does the same (`POST /v1/admin/agents/{name}/activate`
