@@ -32,6 +32,16 @@ spec:
       # _PORT variables into this pod (ADR 0032). Hivemind finds its
       # peers by DNS name, never through these.
       enableServiceLinks: false
+      # Hardening (DEP-4): non-root numeric UID (matches the image's USER),
+      # RuntimeDefault seccomp, and no ServiceAccount token (no pod here talks
+      # to the Kubernetes API).
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: app
           image: hivemind:0.0.0
@@ -53,6 +63,15 @@ spec:
             #   value: "/etc/hivemind/ca.pem"
             - name: HIVEMIND_LOG_LEVEL
               value: "INFO"
+          # The app writes nothing to disk: read-only root, emptyDir /tmp.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           ports:
             - name: http
               containerPort: 8080
@@ -76,3 +95,7 @@ spec:
               memory: 64Mi
             limits:
               memory: 192Mi
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi

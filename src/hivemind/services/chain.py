@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from hivemind.domain.access import Visibility, entry_is_visible
 from hivemind.domain.entry import Entry
+from hivemind.domain.validation import MAX_ID_CHARS
 from hivemind.ports import Store
 
 # Bound on a single forward/reverse chain walk (SPEC.md §6.3: chains are
@@ -25,6 +26,8 @@ async def get_visible_entry(store: Store, entry_id: str, visibility: Visibility)
     """The entry with ``entry_id`` if ``visibility`` may read it, else
     ``None`` (ADR 0033). "Not visible" and "does not exist" are the same
     answer, so an id reveals nothing, not even existence."""
+    if "\x00" in entry_id or len(entry_id) > MAX_ID_CHARS:
+        return None  # cannot name an entry (and Postgres cannot hold a NUL)
     entry = await store.get_entry(entry_id)
     if entry is None or not entry_is_visible(entry, visibility):
         return None

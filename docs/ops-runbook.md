@@ -7,6 +7,16 @@
 
 ## 1. Deployment (single-node, docker-compose)
 
+> **`docker-compose.yaml` is a dev / single-host convenience, not a hardened
+> production recipe.** It ships default credentials (`hivemind`/`hivemind`),
+> binds Postgres (5432) and the unauthenticated vLLM server (8001) to
+> **127.0.0.1 only**, and publishes the MCP runner (8088) on all interfaces.
+> For anything real: change the Postgres password (and the DSN) before first
+> start, keep 5432/8001 off every reachable interface (Docker publishes
+> around `ufw`/`iptables INPUT` rules), and put 8088 behind a TLS-terminating
+> proxy. The Kubernetes path in [DEPLOY.md](../DEPLOY.md) is the production
+> story.
+
 Hivemind is a **single-node** deployment (ADR 0007): one Postgres (with
 pgvector) + the hostable streamable-HTTP MCP runner (+ an embedding
 provider, ADR 0005). There is no orchestrator, no sharding, and no
@@ -20,8 +30,8 @@ multi-tenant isolation.
 
 | Service | Image / build | Purpose |
 |---|---|---|
-| `postgres` | `pgvector/pgvector:pg16` | the single Postgres + pgvector pool (host port 5432) |
-| `vllm` | `vllm/vllm-openai-cpu` | local CPU embedding server (ADR 0005; `:8001`), fully-local path |
+| `postgres` | `pgvector/pgvector:pg16` | the single Postgres + pgvector pool (host port 5432, loopback only) |
+| `vllm` | `vllm/vllm-openai-cpu` | local CPU embedding server (ADR 0005; `:8001`, loopback only), fully-local path |
 | `mcp-http` | this repo (`Dockerfile`) | the hostable, multi-agent streamable-HTTP MCP runner (ADR 0010; host port 8088) |
 
 ### Bring up
@@ -92,8 +102,10 @@ plain Postgres backups — no Hivemind-specific tooling.
 
 ```sh
 # A full logical dump (consistent, small; the pool is single-node).
-docker compose exec postgres pg_dump -U hivemind -Fc hivemind \
-  > backup-$(date +%Y%m%d-%H%M).pgdump
+f=backup-$(date +%Y%m%d-%H%M).pgdump
+docker compose exec -T postgres pg_dump -U hivemind -Fc hivemind > "$f"
+# Verify the dump is readable before trusting it:
+docker compose exec -T postgres pg_restore --list < "$f" | head
 ```
 
 Schedule this (e.g. nightly) and ship it off-host. A logical dump is
@@ -107,8 +119,14 @@ not crash-consistent while the server writes — pair it with the logical
 dump):
 
 ```sh
-docker run --rm -v hivemind-hivemind-pg-data:/data -v "$(pwd)":/out \
-  alpine tar -czf /out/pgdata.tar.gz -C /data .
+# --volumes-from reuses whatever volume the running container mounts, so the
+# name (which depends on the compose project / checkout directory) cannot be
+# wrong. A mistyped `-v <name>:/data` silently creates an EMPTY volume and
+# "backs up" nothing.
+docker run --rm --volumes-from "$(docker compose ps -q postgres)" -v "$(pwd)":/out \
+  alpine tar -czf /out/pgdata.tar.gz -C /var/lib/postgresql/data .
+# Sanity check: a real data directory is far larger than a few KB.
+ls -l pgdata.tar.gz
 ```
 
 ### Restore
@@ -119,7 +137,7 @@ make pg-down
 make pg-reset
 docker compose up -d postgres
 # restore the logical dump
-docker compose exec -i postgres pg_restore -U hivemind -d hivemind --clean --if-exists < backup-20260601-0400.pgdump
+docker compose exec -i postgres pg_restore -U hivemind -d hivemind --clean --if-exists --no-owner < backup-20260601-0400.pgdump
 # apply any migrations not already in the dump (ADR 0020)
 make migrate
 ```

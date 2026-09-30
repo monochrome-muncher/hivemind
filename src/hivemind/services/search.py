@@ -29,6 +29,7 @@ from hivemind.domain.entry import (
     Kind,
 )
 from hivemind.domain.feedback import FeedbackCounts
+from hivemind.domain.validation import check_pagination, check_query
 from hivemind.ports import Embedder, Store
 from hivemind.retrieval.rrf import rrf_fuse
 from hivemind.retrieval.scoring import entry_score, feedback_quality
@@ -115,7 +116,12 @@ class SearchService:
         Superseded/withdrawn entries are excluded unless
         ``filters.include_inactive`` is set.
         """
+        # ADR 0040: reject NUL / oversize / out-of-range input BEFORE any
+        # embedder or store call (one rule set for REST and MCP).
+        check_query(query)
+        check_pagination(limit, offset)
         filters = filters or EntryFilters()
+        filters.validate()
         limit = limit if limit is not None else self._config.default_limit
         offset = offset or 0
         top_k = self._config.candidate_top_k

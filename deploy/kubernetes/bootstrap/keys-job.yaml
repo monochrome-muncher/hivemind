@@ -1,0 +1,89 @@
+# FIRST-RUN KEY BOOTSTRAP Job (DEP-1, DEP-9) — applied by
+# scripts/ci-bootstrap-keys.sh from the GitLab deploy job, ONLY while the
+# `hivemind-keys` Secret does not exist. Deliberately NOT part of any
+# kustomization: it is a one-shot, and the placeholder image
+# `hivemind:0.0.0` is substituted by the script, like the Deployments.
+#
+# On a FRESH database no admin / org keys exist. This Job migrates the
+# schema (idempotent, ADR 0013), issues the first admin key, rotates the org
+# key, and prints each raw key ONCE to its own log as `ADMIN_KEY=...` /
+# `ORG_KEY=...`; the CI script reads the log, stores the values in the
+# `hivemind-keys` Secret and deletes the Job.
+#
+#   * envFrom carries BOTH hivemind-secrets (DSN) and hivemind-config, so
+#     `hivemind-migrate` provisions a fresh pool at the operator's
+#     HIVEMIND_EMBEDDING_DIM, not the code default (ADR 0015).
+#   * backoffLimit: 0 — a retry would run `issue-admin` again and leave an
+#     orphan admin credential nobody holds (and `rotate-org` again would
+#     invalidate the org key a previous attempt already printed). A failed
+#     Job is therefore left for the operator: check `hivemind-keys list`,
+#     revoke strays with `hivemind-keys revoke-admin --hash <sha>`, re-run.
+#   * ttlSecondsAfterFinished — the raw keys sit in this pod's log; the
+#     cluster deletes the Job (and its log) shortly after it finishes even if
+#     the CI job died before cleaning up. A cluster log shipper may still
+#     have copied it: treat the log pipeline as key-bearing, or rotate
+#     (DEPLOY.md §4) after bootstrap.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hivemind-keys-bootstrap
+  labels:
+    app.kubernetes.io/name: hivemind
+    app.kubernetes.io/component: keys-bootstrap
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hivemind
+        app.kubernetes.io/component: keys-bootstrap
+    spec:
+      restartPolicy: Never
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: keys
+          image: hivemind:0.0.0
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          envFrom:
+            - configMapRef:
+                name: hivemind-config
+            - secretRef:
+                name: hivemind-secrets
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              # A FRESH database has no schema yet (the Deployments'
+              # entrypoints only migrate after this Job): create it first so
+              # the credentials table exists; a cheap no-op on an existing DB.
+              hivemind-migrate
+              # Assign first, print after: `echo "K=$(cmd)"` would swallow a
+              # failing CLI under `set -e` and publish an empty key.
+              admin_key=$(hivemind-keys --actor ci-bootstrap issue-admin)
+              org_key=$(hivemind-keys --actor ci-bootstrap rotate-org)
+              if [ -z "$admin_key" ] || [ -z "$org_key" ]; then
+                echo "hivemind-keys printed an empty key; refusing to continue" >&2
+                exit 1
+              fi
+              echo "ADMIN_KEY=$admin_key"
+              echo "ORG_KEY=$org_key"
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi
