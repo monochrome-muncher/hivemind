@@ -55,6 +55,7 @@ from hivemind.domain.entry import (
     SourceType,
 )
 from hivemind.domain.feedback import Feedback
+from hivemind.ports import SupersedeConflict
 from hivemind.store.pool import make_pool
 
 logger = logging.getLogger(__name__)
@@ -120,6 +121,7 @@ FLIP_SUPERSEDED = """
 UPDATE entries
 SET state = 'superseded', superseded_by = $1
 WHERE id = ANY($2) AND state = 'active'
+RETURNING id
 """
 
 LOOKUP_STATE = "SELECT state FROM entries WHERE id = $1"
@@ -306,6 +308,18 @@ def _is_valid_uuid(value: str) -> bool:
     return True
 
 
+def _canonical_uuid(value: str) -> str | None:
+    """``value`` in Postgres's canonical ``uuid`` text form, or ``None``.
+
+    Both ``uuid.UUID`` and Postgres accept non-canonical spellings
+    (upper case, no hyphens, braces); comparisons against ids read back
+    from the database must use the canonical form."""
+    try:
+        return str(uuid.UUID(value))
+    except ValueError, TypeError:
+        return None
+
+
 def _valid_uuids(ids: list[str] | tuple[str, ...]) -> list[str]:
     """Keep only the IDs that parse as UUIDs (others simply don't exist)."""
     return [i for i in ids if _is_valid_uuid(i)]
@@ -399,9 +413,18 @@ class PgStore:
                     entities_model,  # ADR 0016: extractor model (provenance)
                 )
                 if draft.supersedes:
-                    targets = _valid_uuids(draft.supersedes)
-                    if targets:
-                        await conn.execute(FLIP_SUPERSEDED, entry_id, targets)
+                    # ADR 0034, atomic: the guarded UPDATE row-locks the
+                    # targets; any target it did not flip (unknown,
+                    # non-UUID, or no longer active) aborts the whole
+                    # transaction, insert included.
+                    wanted = list(dict.fromkeys(draft.supersedes))
+                    flipped = {
+                        str(r["id"])
+                        for r in await conn.fetch(FLIP_SUPERSEDED, entry_id, _valid_uuids(wanted))
+                    }
+                    denied = [t for t in wanted if _canonical_uuid(t) not in flipped]
+                    if denied:
+                        raise SupersedeConflict(denied)
             row = await conn.fetchrow(SELECT_ENTRY, entry_id)
         if row is None:
             raise RuntimeError(f"entry {entry_id} vanished between insert and read")
