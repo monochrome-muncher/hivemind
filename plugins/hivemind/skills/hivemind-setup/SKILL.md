@@ -207,7 +207,10 @@ Only with the **org key** (`hive_whoami` says `key_kind: "org"`).
 1. **Ask the user** for:
    - the agent name: unique in the organization and permanent (names are
      never released, even after revocation). Suggest something like
-     `<user>-<harness>-<purpose>`, e.g. `john-claude-code-infra`;
+     `<user>-<harness>-<purpose>`, e.g. `john-claude-code-infra`. It must be
+     1-63 ASCII characters (letters, digits, `.`, `_`, `-`), start with a
+     letter or digit, and not be a reserved name (`admin`, `org`, `dev`,
+     `shared`, in any case);
    - the owner alias: the user's username or email, so the admin can send
      them the key.
 2. Call `hive_register` with `name` and `owner_alias`.
@@ -247,7 +250,8 @@ status (plus a message):
 A `name_conflict` error means the name belongs to someone else, or you
 gave a different (or no) owner alias for it: if the user is sure the name
 is theirs, retry with the exact alias they used the first time; otherwise
-ask for another name.
+ask for another name. An `invalid_input` error means the name breaks the
+rule in step 1 (or the alias is malformed): pick a conforming name.
 
 After registering, suggest that the user keeps the name and alias (for
 example in the instruction block, step 4, as a line `Hivemind agent name:
