@@ -125,12 +125,20 @@ them in its system prompt.
 `~/.config/opencode/opencode.json` (or run `opencode plugin <git-url>`):
 
 ```json
-{ "plugin": ["git+https://<your-git-server>/<owner>/hivemind.git"] }
+{ "plugin": ["git+https://<your-git-server>/<owner>/hivemind.git#v<version>"] }
 ```
+
+Pin a release tag as shown: OpenCode caches a Git plugin on first use and
+never refreshes an unpinned entry, so changing the tag is how you update.
 
 The plugin registers the Hivemind MCP server from the two variables below,
 adds both skills and puts the reminder into every model request, so there
 is nothing else to configure.
+
+**Gemini CLI** — no plugin yet: copy both `skills/` folders into
+`~/.gemini/skills/`, and add the MCP server and the instruction block as
+described in `skills/hivemind-setup/references/gemini-cli.md` (or ask the
+agent to run the hivemind-setup skill).
 
 ## Configure
 
@@ -322,11 +330,12 @@ the skill text it already loaded.
 |---|---|
 | Claude Code | `claude plugin marketplace update hivemind`, then `claude plugin update hivemind@hivemind`, then restart. (Updating the marketplace alone only refreshes the catalog.) |
 | Codex | `codex plugin marketplace upgrade hivemind`, then reinstall with `codex plugin add hivemind@hivemind` (Codex runs a cached copy), check with `codex plugin list --marketplace hivemind`, then start a new session. |
-| DeepSeek Harness | Installed from a checkout: `git pull` in the checkout (the profile links it). Installed from npm: `dsh plugin --profile <name> update hivemind-agent-plugin`. Then restart `dsh`. |
+| DeepSeek Harness | Installed from the Git URL or npm: `dsh plugin --profile <name> update hivemind-agent-plugin`; a Git URL pinned with `#v<version>` stays put, so run `add` again with the new tag. Installed from a checkout: `git pull` in the checkout (the profile links it). Then restart `dsh`. Installed before 2.0.1, the package is named `hivemind-dsh-plugin`: remove it under that name and add the plugin again. |
 | Hermes | `hermes plugins update hivemind` (a `git pull` of the installed plugin). A plugin installed at a pinned ref needs `hermes plugins install <source> --force --ref <new-ref>` instead. |
 | Pi | Installed from a local path: `git pull` in that checkout (Pi loads it in place). Installed from git or npm: `pi update --extensions`; a pinned tag stays put, so reinstall at the new tag. |
 | Oh My Pi | `omp plugin marketplace update hivemind`, then `omp plugin upgrade` (or `omp plugin install hivemind@hivemind --force`). |
-| OpenCode | Pin a release in the `plugin` entry (`git+https://…/hivemind.git#v<version>`) and change the tag to update; restart OpenCode. |
+| OpenCode | Change the tag in the `plugin` entry (`git+https://…/hivemind.git#v<version>`) to the new release, then restart OpenCode. An unpinned entry never updates: pin it, or delete OpenCode's cached copy under `~/.cache/opencode/` and restart. |
+| Gemini CLI | Copy both `skills/` folders over `~/.gemini/skills/` and refresh the instruction block in `~/.gemini/GEMINI.md` (hivemind-setup's "Update" step does both). |
 | Skills only | Copy both `skills/` folders over your earlier copies. |
 
 ### What changed for agents, by release
@@ -357,8 +366,14 @@ Uninstall the plugin, and delete any `<!-- hivemind:begin -->` …
 `<!-- hivemind:end -->` block the agent added to `CLAUDE.md` or
 `AGENTS.md` (including `~/.dsh/AGENTS.md`, `~/.hermes/SOUL.md` and
 `~/.pi/agent/AGENTS.md`, `~/.omp/agent/AGENTS.md`,
-`~/.config/opencode/AGENTS.md`). For DeepSeek Harness:
-`dsh plugin --profile <name> remove hivemind-agent-plugin`. For Hermes:
+`~/.config/opencode/AGENTS.md`, `~/.gemini/GEMINI.md`). For Claude Code:
+`claude plugin uninstall hivemind@hivemind`. For Codex:
+`codex plugin remove hivemind@hivemind`. For DeepSeek Harness:
+`dsh plugin --profile <name> remove hivemind-agent-plugin`
+(`hivemind-dsh-plugin` if installed before 2.0.1). For Hermes:
 `hermes plugins remove hivemind`. For Pi: `pi remove <source>` (the
 source you installed it from). For Oh My Pi: `omp plugin uninstall
-hivemind`. For OpenCode: remove the entry from the `plugin` list.
+hivemind@hivemind`. For OpenCode: remove the entry from the `plugin`
+list. For Gemini CLI: delete the two skill folders from
+`~/.gemini/skills/` and `mcpServers.hivemind` from
+`~/.gemini/settings.json`.

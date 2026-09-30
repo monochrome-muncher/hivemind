@@ -14,8 +14,11 @@ Hivemind repository's Git URL to the `plugin` list in
 `opencode.json`, then export the two variables and restart OpenCode:
 
 ```json
-{ "plugin": ["git+https://<git-server>/<owner>/hivemind.git"] }
+{ "plugin": ["git+https://<git-server>/<owner>/hivemind.git#v<version>"] }
 ```
+
+Pin a release tag as shown: OpenCode caches a Git plugin on first use and
+never refreshes an unpinned entry, so changing the tag is how it updates.
 
 Or run `opencode plugin <git-url>`, which installs it and updates the
 config. **The plugin is the supported route**: it builds the `Authorization`
@@ -73,8 +76,10 @@ of other harnesses.
 
 ## Update
 
-Pin a release in the `plugin` entry (`git+https://…/hivemind.git#v<version>`)
-and change the tag to update; restart OpenCode.
+Change the tag in the `plugin` entry (`git+https://…/hivemind.git#v<version>`)
+to the new release, then restart OpenCode. An unpinned entry never
+updates: pin it, or delete OpenCode's cached copy under `~/.cache/opencode/`
+and restart.
 
 ## Incognito
 

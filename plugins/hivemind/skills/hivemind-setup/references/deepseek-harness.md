@@ -66,9 +66,13 @@ with another harness's key.
 
 ## Update
 
-Installed from a checkout: `git pull` in the checkout (the profile links
-it). Installed from npm: `dsh plugin --profile <name> update
-hivemind-agent-plugin`. Then restart `dsh`.
+Installed from the Git URL or npm: `dsh plugin --profile <name> update
+hivemind-agent-plugin`; a Git URL pinned with `#v<version>` stays put, so
+run `add` again with the new tag. Installed from a checkout: `git pull` in
+the checkout (the profile links it). Then restart `dsh`. Installed before
+2.0.1, the package is named `hivemind-dsh-plugin`: remove it under that
+name (`dsh plugin --profile <name> remove hivemind-dsh-plugin`) and add
+the plugin again.
 
 ## Incognito
 
