@@ -256,8 +256,8 @@ first-run bootstrap Job records itself as `ci-bootstrap`.
   tags: `git diff --stat v<old> v<new> -- src/hivemind/store/migrations/`.
   No output means no schema change. Even when there is one, there is no
   manual step: the entrypoint applies it. The current chain ends at
-  `0006` (added in 1.0.0-rc.1); neither 1.0.0-rc.4 → rc.5 nor rc.5 → rc.6 adds
-  one.
+  `0008`: 2.0.0 adds `0007` (credential uniqueness, ADR 0039) and `0008`
+  (history and list indexes); `0006` came in 1.0.0-rc.1.
 - **Agents pick up server-side changes on their own.** Tool descriptions,
   the MCP server instructions and `hive_whoami` come from the server, so
   upgrading the server updates what every agent sees. The agent plugin's
@@ -290,7 +290,8 @@ first-run bootstrap Job records itself as `ci-bootstrap`.
 - A **dim mismatch is a LOUD failure at pod startup** (ADR 0015): the
   entrypoint's `hivemind-migrate` step exits non-zero naming both dims
   and both fixes — the pod never starts, never a silent no-op. The check
-  runs *before* the advisory lock is taken.
+  runs right after the advisory lock is taken and before any DDL, so two
+  replicas configured with different dims cannot both pass on a fresh pool.
 - Changing the embedding **model/dim** is an operator migration (new
   pool or re-embedding — ADR 0005), never a config flip.
 - To **roll back** an incremental schema change, use the migration's
@@ -309,6 +310,61 @@ first-run bootstrap Job records itself as `ci-bootstrap`.
   (`kubectl run` has no `--env-from`; the ConfigMap is injected too so the
   run sees the real `HIVEMIND_EMBEDDING_DIM`.) Simpler when the Deployments
   are healthy: `kubectl -n hivemind exec deploy/hivemind-api -- hivemind-migrate`.
+
+### Upgrading from 1.2.x to 2.0.0
+
+2.0.0 is the security, correctness and performance review release (ADRs
+0039–0043, migrations `0007`–`0008`). The entrypoint still migrates on its
+own, but several changes need an operator's attention. Do these **before**
+the first 2.0.0 pod starts, in this order:
+
+1. **Find credentials that stop working** (ADR 0039). Pre-v2 `user` keys,
+   agent keys without a registered name, and keys of pending or revoked
+   agents no longer authenticate; `0007` also deletes all but the newest
+   key of any agent that holds several, and all but the newest org key.
+   Run the "Dead credentials" SQL in `docs/ops-runbook.md` §4 first and
+   re-issue anything a live client still uses. After the upgrade,
+   `hivemind-keys list` marks such rows `[dead]` and `hivemind-migrate`
+   logs their count.
+2. **Postgres**: pgvector **0.8+** and `HIVEMIND_EMBEDDING_DIM` **≤ 2000**
+   (§1); `hivemind-migrate` now refuses anything else before any DDL.
+3. **Configuration** is validated at startup: a value 1.2.x tolerated
+   (negative retries, a non-http endpoint, an API key with control or
+   non-ASCII characters, an explicit provider deadline below its timeout,
+   …) now stops the pod with a message naming the variable. New optional
+   variables: `HIVEMIND_POOL_*_TIMEOUT*` (app-pool bounds; the server-side
+   statement timeout stays off unless you connect to Postgres directly),
+   `HIVEMIND_EMBEDDING_DEADLINE` / `HIVEMIND_EXTRACTOR_DEADLINE` (ADR 0041)
+   and `HIVEMIND_MCP_ALLOWED_HOSTS` / `_ORIGINS` (ADR 0042); see
+   `config/.env.example`. App-pool queries longer than
+   `HIVEMIND_POOL_COMMAND_TIMEOUT` (30 s) now fail.
+4. **Kubernetes / GitLab** (only if you deploy with this repository's
+   pipeline): mark the `K8S_SECRET_*` CI variables **Protected**, apply the
+   updated deployer RBAC and create the namespace once (both §7). The image
+   now runs as UID 10001 with a read-only root filesystem (`/tmp` is an
+   `emptyDir`); derived images must switch user around system-wide
+   installs (above). The optional NetworkPolicies moved to
+   `deploy/kubernetes/optional/networkpolicy/`.
+5. **Ingress**: keep request bodies at or below 2 MiB (the API answers 413
+   above that) and expect the MCP 401 to carry `WWW-Authenticate`.
+6. **Key CLI**: `hivemind-keys issue-agent` for a pending or revoked agent
+   now needs `--trust-level` and `--home-fleet` (it activates the agent);
+   `revoke-admin --hash` accepts the 12-character fingerprint that `list`
+   prints.
+7. **Clients**: the REST/MCP contract tightened (ADR 0040: `limit` ≤ 100,
+   `offset` ≤ 10 000, field size caps, agent-name rule; ADR 0039:
+   re-registering answers 200 with the current status; new MCP error codes
+   `unauthenticated` and `embedding_unavailable`). Agents using the plugin
+   pick this up from the server; update the plugin to 2.0.0 for the
+   matching skill text (`plugins/hivemind/README.md`, "What changed for
+   agents").
+
+Rolling back to 1.2.x after `0007`/`0008` ran is safe for the schema (both
+only add indexes, and an older image never rolls the chain back), but the
+duplicate keys `0007` deleted stay deleted, the 1.2.x pods accept the dead
+credentials again, and an old pod's concurrent org-key rotations or
+re-activation of an agent that still holds a key row can hit the new unique
+indexes (ADR 0039).
 
 ### Graceful shutdown (`terminationGracePeriodSeconds`)
 
