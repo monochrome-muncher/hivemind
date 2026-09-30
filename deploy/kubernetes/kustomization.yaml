@@ -3,7 +3,7 @@
 # supersedes ADR 0007's one-process and docker-compose clauses; the
 # single-Postgres-node clause is unchanged).
 #
-#   kubectl kustomize build deploy/kubernetes
+#   kubectl kustomize deploy/kubernetes
 #
 # Two deliberate exclusions (see DEPLOY.md):
 #   * secret-template.yaml ships in-tree for documentation but is NOT listed
@@ -13,7 +13,7 @@
 #   * optional/ is a SEPARATE opt-in kustomization (nginx Ingress +
 #     cert-manager Certificate) — build/apply it only when external
 #     reachability is needed:
-#       kubectl kustomize build deploy/kubernetes/optional | kubectl apply -f -
+#       kubectl kustomize deploy/kubernetes/optional | kubectl apply -f -
 #
 # The `hivemind-keys` Secret (ADMIN_KEY / ORG_KEY) is created by the CI
 # first-run key bootstrap, also outside this tree.

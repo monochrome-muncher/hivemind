@@ -34,9 +34,22 @@ runner="${HIVEMIND_RUNNER:-mcp-http}"
 # run is a single, explicit migration), and for the admin panel, which
 # has no database access at all — it only talks to hivemind-api
 # (ADR 0029).
+#
+# DEP-14: this shell is PID 1, and PID 1 ignores SIGTERM unless a handler
+# is installed, so a foreground `hivemind-migrate` would keep running
+# (e.g. waiting on the ADR 0020 advisory lock while a sibling builds the
+# HNSW index) until the grace period's SIGKILL. Run it in the background
+# and `wait`, so the trap can forward the signal and exit 143 promptly.
+# The final `exec` below is unchanged: the runner becomes PID 1 itself.
 case "$runner" in
   migrate|admin) ;;
-  *) hivemind-migrate ;;
+  *)
+    hivemind-migrate &
+    migrate_pid=$!
+    trap 'kill -TERM "$migrate_pid" 2>/dev/null || true; wait "$migrate_pid" 2>/dev/null || true; exit 143' TERM INT
+    wait "$migrate_pid"   # `set -e`: a failed migration aborts with its status
+    trap - TERM INT
+    ;;
 esac
 
 exec "hivemind-${runner}" "$@"

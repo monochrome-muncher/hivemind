@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
+from hivemind.config import Settings
+from tests.db_guard import UnsafeTestDatabase, check_test_database
 from tests.fakes import (
     FIXED_NOW,
     FakeEmbedder,
@@ -38,3 +42,16 @@ def embedder() -> FakeEmbedder:
 @pytest.fixture
 def search_config():
     return make_search_config()
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """STORE-9: integration tests wipe the DB in HIVEMIND_DATABASE_URL; vet its name first."""
+    if not any("integration" in item.nodeid.split("/") for item in items):
+        return
+    try:
+        check_test_database(
+            Settings().database_url,
+            allow_any=os.environ.get("HIVEMIND_TEST_ALLOW_ANY_DB") == "1",
+        )
+    except UnsafeTestDatabase as exc:
+        raise pytest.UsageError(str(exc)) from None

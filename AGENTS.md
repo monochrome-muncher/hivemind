@@ -25,7 +25,7 @@ The dev environment is `uv`-managed (Python 3.14); Postgres (with pgvector) runs
 | Regenerate the `schema.sql` reference (generated, never applied) | `make schema-ref` |
 | Check expand-and-contract against previous releases (ADR 0020) | `scripts/check-backward-compat.sh` |
 | Run unit tests (no Postgres needed) | `make test-unit` (or `uv run pytest tests/unit`) |
-| Run the full suite (unit + integration; integration skips if Postgres is down) | `make test` (or `uv run pytest`) |
+| Run the full suite (unit + integration; integration skips if Postgres is down) | `make test` (or `uv run pytest`) — **DESTRUCTIVE: the integration tests `TRUNCATE` `entries`/`credentials` and `DROP SCHEMA` in the database named by `HIVEMIND_DATABASE_URL`** (the same variable `make api`/`make migrate` use). Never export a real DSN here. `tests/conftest.py` refuses names that do not look like dev/test databases (`hivemind`, `hivemind_*`, `*_test`, ...) unless `HIVEMIND_TEST_ALLOW_ANY_DB=1`; `scripts/check-backward-compat.sh` is equally destructive |
 | Type-check (strict) + lint + format check | `make check` (mypy + ruff) |
 | Auto-format + auto-fix | `make format` |
 | Run the REST API | `make api` (or `uv run hivemind-api`) |
