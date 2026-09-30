@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from hivemind.store.pool import make_pool
+from hivemind.config import Settings
+from hivemind.store.pool import PoolTimeouts, make_pool
 
 
 async def test_init_registers_a_jsonb_codec_that_decodes_but_does_not_reencode() -> None:
@@ -45,3 +46,20 @@ async def test_no_statement_timeout_means_no_server_settings() -> None:
     with patch("hivemind.store.pool.asyncpg.create_pool", new=AsyncMock()) as create_pool:
         await make_pool("postgresql://example/db", statement_timeout_ms=0)
     assert "server_settings" not in create_pool.call_args.kwargs
+
+
+async def test_defaults_send_no_startup_parameters() -> None:
+    """The org runs Postgres behind a transaction-mode PgBouncer, which by
+    default REJECTS unknown startup parameters (``unsupported startup
+    parameter: statement_timeout``) and, even when told to ignore one,
+    never applies it to the shared server connections. So the server-side
+    bound is opt-in: by default nothing but the client-side
+    ``command_timeout`` bounds a call, and the startup packet is plain."""
+    with patch("hivemind.store.pool.asyncpg.create_pool", new=AsyncMock()) as create_pool:
+        await make_pool("postgresql://example/db")
+    kwargs = create_pool.call_args.kwargs
+    assert "server_settings" not in kwargs
+    assert kwargs["command_timeout"] == 30.0
+
+    assert PoolTimeouts().statement_ms == 0
+    assert Settings(_env_file=None).pool_statement_timeout_ms == 0  # type: ignore[call-arg]

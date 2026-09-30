@@ -13,13 +13,16 @@ registers a decoder (``json.loads``) and a *pass-through* encoder:
 an encoding codec would double-encode. The codec is client-side, hence
 safe behind a transaction-mode PgBouncer.
 
-**Timeouts.** ``command_timeout`` bounds every client-side call and
-``statement_timeout`` (a server setting sent in the startup packet) bounds
-server-side runtime. Only app pools get them: ``migrate`` opens its own
-connections, so ``CREATE INDEX CONCURRENTLY`` is never cut short. NOTE:
-PgBouncer rejects unknown startup parameters unless listed in its
-``ignore_startup_parameters``; set ``HIVEMIND_POOL_STATEMENT_TIMEOUT_MS=0``
-behind a pooler that does not allow ``statement_timeout`` (DEPLOY.md).
+**Timeouts.** ``command_timeout`` bounds every client-side call (asyncpg
+sends a cancel request when a call overruns it, which a PgBouncer
+forwards); it is the default guard. ``statement_timeout`` (a server
+setting sent in the startup packet) is an opt-in extra bound for pools
+that connect to Postgres directly: a transaction-mode PgBouncer rejects
+unknown startup parameters by default (``unsupported startup parameter``)
+and, even when told to ignore one, never applies it to its shared server
+connections — so it is off (0) unless configured. Only app pools get
+these bounds: ``migrate`` opens its own connections, so ``CREATE INDEX
+CONCURRENTLY`` is never cut short.
 """
 
 from __future__ import annotations
@@ -42,7 +45,7 @@ class PoolTimeouts:
     """
 
     command: float | None = 30.0
-    statement_ms: int = 30_000
+    statement_ms: int = 0
     acquire: float | None = 10.0
     connect: float = 10.0
 
@@ -53,7 +56,7 @@ async def make_pool(
     max_size: int = 10,
     *,
     command_timeout: float | None = 30.0,
-    statement_timeout_ms: int = 30_000,
+    statement_timeout_ms: int = 0,
     connect_timeout: float = 10.0,
 ) -> asyncpg.Pool:
     """Build an asyncpg pool whose connections speak the pgvector codec.
