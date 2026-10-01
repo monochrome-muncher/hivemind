@@ -103,10 +103,14 @@ pi install /path/to/this/repo/plugins/hivemind           # from a checkout
 ```
 
 The package provides the two skills and a system-prompt section that keeps
-the agent Hivemind-aware across sessions and compaction. Pi has no built-in
-MCP client: the `hive_*` tools come from the standard MCP config files that
-the [pi-mcp-adapter](https://www.npmjs.com/package/pi-mcp-adapter)
-extension reads (`pi install npm:pi-mcp-adapter`), configured below.
+the agent Hivemind-aware across sessions and compaction. On **Pi 0.99 and
+later** it also registers the Hivemind MCP server with Pi's built-in MCP
+client, from the two variables below, so there is nothing else to
+configure. On older Pi, or with
+[pi-mcp-adapter](https://www.npmjs.com/package/pi-mcp-adapter) installed
+(it replaces the built-in client), the `hive_*` tools come from the
+adapter's MCP config files, configured below; the package then registers
+nothing.
 
 **Oh My Pi** (`omp`) — through its marketplace support (a plain
 `omp install <git-url>` would miss the skills):
@@ -122,7 +126,8 @@ separately (below). Oh My Pi mounts MCP tools as routes
 them in its system prompt.
 
 **OpenCode** — add this repository's Git URL to the `plugin` list in
-`~/.config/opencode/opencode.json` (or run `opencode plugin <git-url>`):
+`~/.config/opencode/opencode.json` (or run `opencode plugin -g <git-url>`;
+without `-g` it only installs into the current project):
 
 ```json
 { "plugin": ["git+https://<your-git-server>/<owner>/hivemind.git#v<version>"] }
@@ -166,8 +171,8 @@ use its own settings or env file, or start it from a terminal.
 - **Gemini CLI**: `mcpServers.hivemind` in `~/.gemini/settings.json` with
   `httpUrl` and an `Authorization` header, plus the two skills in
   `~/.gemini/skills/` and the instruction block in `~/.gemini/GEMINI.md`
-  (see `skills/hivemind-setup/references/gemini-cli.md`; whether `${VAR}`
-  expands in `headers` is unconfirmed there).
+  (see `skills/hivemind-setup/references/gemini-cli.md`). Gemini CLI
+  turns off every MCP server in a folder the user has not trusted.
 - **Codex**: the plugin does not define the MCP server, because Codex's
   plugin MCP config cannot read the URL and key from the environment. Add
   it to `~/.codex/config.toml` and export `HIVEMIND_API_KEY`:
@@ -207,9 +212,11 @@ use its own settings or env file, or start it from a terminal.
         Authorization: "Bearer ${HIVEMIND_API_KEY}"
   ```
 
-- **Pi**: the shell that launches `pi`. The MCP server goes into
-  `~/.config/mcp/mcp.json` (all projects) or a project's `.mcp.json`,
-  read by pi-mcp-adapter, with the same `${VAR}` references:
+- **Pi**: the shell that launches `pi`. On Pi 0.99 and later the package
+  registers the server itself. With pi-mcp-adapter (older Pi), the MCP
+  server goes into `~/.config/mcp/mcp.json` (all projects) or a project's
+  `.mcp.json`, with the same `${VAR}` references (`lifecycle` and
+  `directTools` make the tools load at startup under their own names):
 
   ```json
   {
@@ -217,7 +224,9 @@ use its own settings or env file, or start it from a terminal.
       "hivemind": {
         "type": "http",
         "url": "${HIVEMIND_MCP_URL}",
-        "headers": { "Authorization": "Bearer ${HIVEMIND_API_KEY}" }
+        "headers": { "Authorization": "Bearer ${HIVEMIND_API_KEY}" },
+        "lifecycle": "eager",
+        "directTools": true
       }
     }
   }
@@ -287,7 +296,7 @@ It does two things:
 | Codex | `-c mcp_servers.hivemind.enabled=false`; the launcher also unsets the key | the `mcp_servers.hivemind` entry in `~/.codex/config.toml` or `.codex/config.toml` |
 | DeepSeek Harness | the bundle's server row switches itself off | nothing |
 | Hermes | `HIVEMIND_ENABLED=false` | `enabled: ${HIVEMIND_ENABLED}` in the hivemind server entry in `~/.hermes/config.yaml`, and **no** `HIVEMIND_ENABLED` in `~/.hermes/.env` (Hermes loads it over the environment, so it would override the launcher); for normal sessions leave it unset or export `HIVEMIND_ENABLED=true` in the shell profile |
-| Pi | an exclusive MCP config: your global and project servers, minus hivemind (the extension also blocks the `mcp` proxy, `mcp__hivemind…` and `mcpScript` calls that name Hivemind; the `mcpScript` scan is best effort) | `python3` |
+| Pi | Pi 0.99+ built-in MCP: the package registers no server, and the key and URL are unset. With pi-mcp-adapter: an exclusive MCP config, your global and project servers minus hivemind. Either way the extension also blocks `mcp__hivemind…` calls (codemode scripts included), the adapter's `mcp` proxy and `mcpScript` calls that name Hivemind (the `mcpScript` scan is best effort) | the hivemind package; `python3` with the adapter |
 | Oh My Pi | `HIVEMIND_MCP_URL`/`HIVEMIND_API_KEY` unset, so the server is never contacted (Oh My Pi warns once that it is unavailable); the extension also blocks any Hivemind call | the hivemind plugin |
 | OpenCode | the plugin skips the server; a hand-configured one is disabled with `OPENCODE_CONFIG_CONTENT` | nothing |
 

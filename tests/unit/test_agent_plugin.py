@@ -57,6 +57,15 @@ def test_the_always_on_skill_stays_small() -> None:
     assert len(SKILL.encode()) <= 10_000, len(SKILL.encode())
 
 
+def test_the_skill_lists_every_tool_where_it_names_them() -> None:
+    """The "The tools are ..." sentence is the agent's inventory; a new
+    tool mentioned only deep in the text (hive_pin, hive_pinned) was missing
+    from it."""
+    flat = " ".join(SKILL.split())
+    sentence = flat[flat.index("The tools are ") :].split(". ", 1)[0]
+    assert set(re.findall(r"\bhive_[a-z]+\b", sentence)) == set(EXPECTED_TOOLS)
+
+
 def test_the_whoami_fields_the_skills_rely_on_exist() -> None:
     fields = Standing(
         key_kind="agent",
@@ -572,6 +581,10 @@ def test_launcher_warns_when_the_hermes_env_file_would_override_it(tmp_path: Pat
 @pytest.mark.skipif(shutil.which("python3") is None, reason="python3 is not installed")
 def test_launcher_gives_pi_an_mcp_config_without_hivemind(tmp_path: Path) -> None:
     env = _fake_harness(tmp_path, "pi")
+    (tmp_path / ".pi" / "agent").mkdir(parents=True)
+    (tmp_path / ".pi" / "agent" / "settings.json").write_text(
+        json.dumps({"packages": ["npm:pi-mcp-adapter"]})
+    )
     (tmp_path / ".config" / "mcp").mkdir(parents=True)
     (tmp_path / ".config" / "mcp" / "mcp.json").write_text(
         json.dumps({"mcpServers": {"hivemind": {"url": "x"}, "github": {"url": "y"}}})
@@ -592,6 +605,22 @@ def test_launcher_gives_pi_an_mcp_config_without_hivemind(tmp_path: Path) -> Non
     config = json.loads(lines[-1])
     assert set(config["mcpServers"]) == {"github"}
     assert list((tmp_path / "tmp").iterdir()) == []  # temp file removed
+
+
+@pytest.mark.skipif(shutil.which("python3") is None, reason="python3 is not installed")
+def test_launcher_starts_a_built_in_mcp_pi_without_the_adapter_flag(tmp_path: Path) -> None:
+    """Pi 0.99+ without pi-mcp-adapter refuses --mcp-config ("Unknown
+    option"): there the launcher only unsets the key and URL, so the
+    package's extension registers no server."""
+    env = _fake_harness(tmp_path, "pi")
+    script = tmp_path / "bin" / "pi"
+    script.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "KEY=${HIVEMIND_API_KEY:-unset}" '
+        '"URL=${HIVEMIND_MCP_URL:-unset}" "INCOGNITO=$HIVEMIND_INCOGNITO" "$@"\n'
+    )
+    env.update(HIVEMIND_API_KEY="hm_x", HIVEMIND_MCP_URL="https://hm.example/mcp")
+    lines = _launch(tmp_path, env, "pi", "-p", "hi")
+    assert lines == ["KEY=unset", "URL=unset", "INCOGNITO=1", "-p", "hi"]
 
 
 def test_the_root_package_installs_the_dsh_bundle_from_a_git_url() -> None:
@@ -724,6 +753,9 @@ _CALLS = [
     {"toolName": "mcp", "input": {"tool": "github_list_issues"}},
     {"toolName": "write", "input": {"path": "xd://mcp__hivemind_hive_write/"}},
     {"toolName": "write", "input": {"path": "xd://mcp__hivemind_hive_search?x=1#f"}},
+    # The ADR 0058 tools, under Pi's built-in MCP names.
+    {"toolName": "mcp__hivemind__hive_pinned", "input": {}},
+    {"toolName": "mcp__other__hive_pin", "input": {}},
 ]
 
 
@@ -752,8 +784,44 @@ def test_the_extension_blocks_hivemind_calls_only_in_incognito() -> None:
         False,
         True,
         True,
+        True,
+        True,
     ]
     assert incognito["omp"]["systemPrompt"][-1] == INCOGNITO_TEXT
+
+
+_REGISTER_SCRIPT = """
+const mod = await import(process.argv[1])
+const registered = []
+const api = { on: () => {} }
+if (process.env.HAS_API) api.registerMcpServer = (name, config) => registered.push({ name, config })
+mod.default(api)
+console.log(JSON.stringify({ registered }))
+"""
+
+
+@needs_node
+def test_the_extension_registers_the_server_with_pi_built_in_mcp(tmp_path: Path) -> None:
+    """Pi 0.99+: the package registers the server; not in incognito, not
+    without a key, not when the pi-mcp-adapter config defines it, and not
+    in a Pi (or Oh My Pi) without registerMcpServer."""
+    env = {
+        "HAS_API": "1",
+        "HIVEMIND_MCP_URL": "https://hm.example/mcp",
+        "HIVEMIND_API_KEY": "hm_x",
+        "HOME": str(tmp_path),
+    }
+    r = _node(_REGISTER_SCRIPT, PI_EXTENSION, **env)
+    [server] = r["registered"]  # type: ignore[index]
+    assert server["name"] == "hivemind"
+    assert server["config"]["url"] == "https://hm.example/mcp"
+    assert server["config"]["headers"] == {"Authorization": "Bearer hm_x"}
+    assert server["config"]["exposure"] == "direct"
+    for override in ({"HIVEMIND_INCOGNITO": "1"}, {"HAS_API": ""}, {"HIVEMIND_API_KEY": ""}):
+        assert _node(_REGISTER_SCRIPT, PI_EXTENSION, **{**env, **override}) == {"registered": []}
+    (tmp_path / ".config" / "mcp").mkdir(parents=True)
+    (tmp_path / ".config" / "mcp" / "mcp.json").write_text('{"mcpServers": {"hivemind": {}}}')
+    assert _node(_REGISTER_SCRIPT, PI_EXTENSION, **env) == {"registered": []}
 
 
 def test_launcher_keeps_oh_my_pi_from_contacting_the_server(tmp_path: Path) -> None:
@@ -1044,6 +1112,10 @@ def test_the_pi_launcher_does_not_leak_a_umask_or_die_on_a_stale_xdg_dir(tmp_pat
     """The temp file is 0600 from mktemp (no umask change for the harness), and
     an unusable XDG_RUNTIME_DIR falls through to TMPDIR."""
     env = _fake_harness(tmp_path, "pi")
+    (tmp_path / ".pi" / "agent").mkdir(parents=True)  # the adapter route
+    (tmp_path / ".pi" / "agent" / "settings.json").write_text(
+        '{"packages": ["npm:pi-mcp-adapter"]}'
+    )
     (tmp_path / "bin" / "pi").write_text('#!/bin/sh\numask\nls "$2" >/dev/null && echo CONFIG_OK\n')
     (tmp_path / "tmp").mkdir()
     env.update(XDG_RUNTIME_DIR=str(tmp_path / "gone"), TMPDIR=str(tmp_path / "tmp"))

@@ -132,6 +132,17 @@ PY
     exec "$harness" "$@"
     ;;
   pi)
+    # Pi 0.99+ without pi-mcp-adapter: the built-in MCP client gets the
+    # server from the hivemind extension, which registers nothing in an
+    # incognito session; a hand-written mcp.json entry that reads
+    # ${HIVEMIND_MCP_URL} has no URL once it is unset, and the extension
+    # blocks any Hivemind call that still gets through. The adapter's
+    # --mcp-config flag would make such a Pi refuse to start.
+    pi_settings="${PI_CODING_AGENT_DIR:-${home_dir:-.}/.pi/agent}/settings.json"
+    if ! grep -qs 'pi-mcp-adapter' "$pi_settings" .pi/settings.json; then
+      unset HIVEMIND_API_KEY HIVEMIND_MCP_URL
+      exec "$harness" "$@"
+    fi
     # pi-mcp-adapter loads exactly one MCP config in exclusive mode: build
     # one from the global and project configs, minus the hivemind server.
     # The merged file can hold other servers' literal tokens, so it is
