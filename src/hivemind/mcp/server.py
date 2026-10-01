@@ -32,7 +32,9 @@ from mcp.server.mcpserver import MCPServer
 from hivemind.config import configure_logging, load_settings, redact_url
 from hivemind.extractor import build_extractor
 from hivemind.mcp.app import (
+    ERR_STORE_UNAVAILABLE,
     ERR_UNAUTHENTICATED,
+    STORE_UNAVAILABLE_MESSAGE,
     McpHivemind,
     _error,
     hive_feedback,
@@ -200,13 +202,19 @@ def build_server(
     async def dispatch(
         verb: Callable[..., Awaitable[dict[str, object]]], **kwargs: Any
     ) -> dict[str, object]:
-        acting = await resolve_app()
-        if acting is None:
-            return _error(
-                ERR_UNAUTHENTICATED,
-                "this key is no longer valid (revoked or unknown); ask your admin",
-            )
-        return await verb(acting, **kwargs)
+        try:
+            acting = await resolve_app()
+            if acting is None:
+                return _error(
+                    ERR_UNAUTHENTICATED,
+                    "this key is no longer valid (revoked or unknown); ask your admin",
+                )
+            return await verb(acting, **kwargs)
+        except TimeoutError:
+            # A pool acquire or statement timed out: the database is busy,
+            # not the call wrong (ROADMAP 3.13; the REST surface answers 503).
+            logger.warning("store call timed out during an MCP tool call")
+            return _error(ERR_STORE_UNAVAILABLE, STORE_UNAVAILABLE_MESSAGE)
 
     @server.tool(name="hive_write", description=_DESC_WRITE)
     async def _hive_write(

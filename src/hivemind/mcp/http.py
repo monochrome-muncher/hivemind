@@ -103,6 +103,27 @@ async def _send_unauthorized(send: Send) -> None:
     await send({"type": "http.response.body", "body": body})
 
 
+async def _send_store_unavailable(send: Send) -> None:
+    """503 + Retry-After when verifying the key timed out on the store (the
+    pool is saturated or the database unreachable): the key may be fine,
+    so a 401 would send the client down the wrong path (ROADMAP 3.13)."""
+    body = json.dumps(
+        {"error": "store_unavailable", "detail": "the database is busy; retry shortly"}
+    ).encode()
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 503,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode()),
+                (b"retry-after", b"2"),
+            ],
+        }
+    )
+    await send({"type": "http.response.body", "body": body})
+
+
 # Hivemind has no OAuth: MCP clients that get a 401 probe these discovery
 # documents and, on anything but a 404, start an OAuth flow and report
 # confusing "dynamic client registration" errors instead of "your key was
@@ -146,7 +167,12 @@ class BearerAuthMiddleware:
             await _send_not_found(send)
             return
         key = _extract_key(scope)
-        credential = await self._authenticator.verify(key) if key else None
+        try:
+            credential = await self._authenticator.verify(key) if key else None
+        except TimeoutError:
+            logger.warning("key verification timed out on the store; answering 503")
+            await _send_store_unavailable(send)
+            return
         if credential is None:
             await _send_unauthorized(send)
             return

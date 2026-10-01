@@ -365,3 +365,48 @@ async def test_reverified_credential_revocation_and_demotion_apply_next_call() -
     del keys["key-alice"]
     gone = await server.call_tool("hive_whoami", {})
     assert json.loads(gone.content[0].text)["error"]["code"] == "unauthenticated"
+
+
+# --- ROADMAP 3.13: a store timeout is 503 / store_unavailable, not 500 ----
+
+
+async def test_key_verification_timeout_answers_503_with_retry_after() -> None:
+    class SlowAuth(FakeAuthenticator):
+        async def verify(self, key: str) -> Credential | None:
+            raise TimeoutError
+
+    inner = _RecordingApp()
+    mw = BearerAuthMiddleware(inner, SlowAuth({}))
+    sent: list[dict[str, Any]] = []
+
+    async def send(msg: dict[str, Any]) -> None:
+        sent.append(msg)
+
+    await mw(_scope([(b"authorization", b"Bearer key-alice")]), _noop_receive, send)
+    assert not inner.called
+    assert sent[0]["status"] == 503
+    assert dict(sent[0]["headers"])[b"retry-after"] == b"2"
+    assert json.loads(sent[1]["body"])["error"] == "store_unavailable"
+
+
+async def test_a_store_timeout_inside_a_tool_is_store_unavailable() -> None:
+    app = make_app(ALICE)
+
+    async def timed_out(*_args: Any, **_kwargs: Any) -> Any:
+        raise TimeoutError
+
+    app.store.list_entries = timed_out  # type: ignore[method-assign]
+    server = build_server(app)
+    result = await server.call_tool("hive_list", {})
+    error = json.loads(result.content[0].text)["error"]
+    assert error["code"] == "store_unavailable"
+    assert "retry" in error["message"]
+
+
+async def test_a_provider_timeout_while_resolving_the_key_is_store_unavailable() -> None:
+    async def provider() -> Credential | None:
+        raise TimeoutError
+
+    server = build_server(make_app(PLACEHOLDER), credential_provider=provider)
+    result = await server.call_tool("hive_whoami", {})
+    assert json.loads(result.content[0].text)["error"]["code"] == "store_unavailable"

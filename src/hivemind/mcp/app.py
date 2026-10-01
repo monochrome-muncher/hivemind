@@ -60,6 +60,8 @@ ERR_EMBEDDING_UNAVAILABLE = "embedding_unavailable"
 ERR_UNAUTHENTICATED = "unauthenticated"  # ADR 0042: the key is gone / not resolvable
 ERR_INVALID_VERDICT = "invalid_verdict"
 ERR_NAME_CONFLICT = "name_conflict"
+ERR_STORE_UNAVAILABLE = "store_unavailable"  # a store call timed out: retry shortly
+STORE_UNAVAILABLE_MESSAGE = "the database is busy or unreachable; retry shortly"
 
 
 @dataclass(frozen=True, slots=True)

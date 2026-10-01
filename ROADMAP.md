@@ -480,7 +480,6 @@ or its own trigger):
 - **Registration**: audited since ADR 0046 (`agent.register`), but the
   owner alias is still unverified: the admin confirms the requester out
   of band.
-- A pool acquire timeout surfaces as 500, not 503.
 - Structural untrusted-content markers on returned entries (deferred in
   ADR 0043); zero-norm embeddings are not rejected. (Case-variant agent
   names are refused since ADR 0045; collisions registered before it stay.)
