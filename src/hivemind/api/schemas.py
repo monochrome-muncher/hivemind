@@ -17,7 +17,13 @@ from hivemind.domain.access import Agent, Fleet, Standing
 from hivemind.domain.audit import AuditRecord
 from hivemind.domain.entry import EntityKind, Entry, ImportanceSource, Kind, SourceType
 from hivemind.domain.feedback import FeedbackCounts, FeedbackSummary, Verdict
-from hivemind.domain.validation import MAX_ID_CHARS, MAX_LIMIT, MAX_OFFSET, check_no_nul
+from hivemind.domain.validation import (
+    MAX_FEEDBACK_IDS,
+    MAX_ID_CHARS,
+    MAX_LIMIT,
+    MAX_OFFSET,
+    check_no_nul,
+)
 from hivemind.services.governance import RelatedEntry
 from hivemind.services.search import Hit
 
@@ -329,6 +335,15 @@ class FeedbackRequest(BaseModel):
     note: str | None = None
     # A plain user key self-reports the agent instance (SPEC.md §8.1);
     # ignored for agent sub-keys (the credential's agent wins).
+    agent: str | None = None
+
+
+class BatchFeedbackRequest(BaseModel):
+    """One verdict on several entries at once (ADR 0053)."""
+
+    entry_ids: list[str] = Field(min_length=1, max_length=MAX_FEEDBACK_IDS)
+    verdict: Verdict
+    note: str | None = None
     agent: str | None = None
 
 

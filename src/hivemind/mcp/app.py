@@ -580,17 +580,26 @@ async def hive_withdraw(
 
 async def hive_feedback(
     app: McpHivemind,
-    entry_id: str,
-    verdict: str,
+    entry_id: str = "",
+    verdict: str = "",
     note: str | None = None,
     agent: str | None = None,
+    entry_ids: list[str] | None = None,
 ) -> dict[str, object]:
     """Report ``helpful|stale|wrong`` on an entry the caller relied on.
 
     One row per (entry, user, agent); the latest verdict wins (SPEC §4.2).
     The acting credential supplies the reporter identity; a plain user key
     self-reports the agent instance via ``agent`` (SPEC §8.1).
+
+    ``entry_ids`` instead of ``entry_id`` gives one verdict and note to up
+    to 16 entries at once (ADR 0053): all must be readable, or nothing is
+    recorded.
     """
+    if entry_ids is not None:
+        if entry_id:
+            return _error(ERR_INVALID_INPUT, "pass entry_id or entry_ids, not both")
+        return await _hive_feedback_many(app, entry_ids, verdict, note, agent)
     if not entry_id or not entry_id.strip():
         return _error(ERR_INVALID_INPUT, "entry_id is required (pass a hit's id)")
     try:
@@ -625,6 +634,37 @@ async def hive_feedback(
             "note": fb.note,
             "updated_at": fb.updated_at.isoformat() if fb.updated_at else None,
         },
+    }
+
+
+async def _hive_feedback_many(
+    app: McpHivemind,
+    entry_ids: list[str],
+    verdict: str,
+    note: str | None,
+    agent: str | None,
+) -> dict[str, object]:
+    try:
+        parsed_verdict = Verdict(verdict)
+    except ValueError:
+        return _error(ERR_INVALID_VERDICT, f"verdict must be helpful|stale|wrong, got {verdict!r}")
+    if not (app.credential.agent_id or agent):
+        return _error(
+            ERR_AGENT_UNRESOLVED,
+            "the caller's agent identity must be resolved before recording feedback",
+        )
+    try:
+        outcomes = await app.governance_service.record_feedback_many(
+            app.credential, entry_ids, parsed_verdict, note, agent=agent
+        )
+    except LookupError as exc:
+        return _error(ERR_NOT_FOUND, str(exc))
+    except ValueError as exc:
+        return _error(ERR_INVALID_INPUT, str(exc))
+    return {
+        "verdict": parsed_verdict.value,
+        "note": note,
+        "results": [{"entry_id": o.feedback.entry_id, "quality": o.quality} for o in outcomes],
     }
 
 
