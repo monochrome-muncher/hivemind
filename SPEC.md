@@ -1,6 +1,6 @@
 # Hivemind — v1 Specification
 
-Status: **final v1** (implemented) · Scope: one organization, self-hosted, agent-facing only
+Status: **implemented** (the v1 core in §1–§11, extended by §12 fleets and trust levels and §13 entity extraction) · Scope: one organization, self-hosted, agent-facing only
 
 ## 1. What Hivemind is
 
@@ -55,7 +55,10 @@ One entry entity; a `kind` enum carries the distinction. There are no other read
 | `importance` | 1–5 (int) | Writer-declared; feeds retrieval scoring |
 | `importance_source` | `caller` \| `default` | **Server-derived, not client-settable** (ROADMAP §4.5): `caller` when the writer supplied `importance`, `default` when it fell out of the default (3). Rows written before migration `0002` are backfilled to `default` regardless of how `importance` was actually set — their true provenance predates the column and is unrecoverable, so `by_importance_source` under-reports `caller` for that pre-migration cohort |
 | `scope` | `self` \| `fleet` \| `org` (legacy) | The entry's audience: the author agent only, the home fleet it was written into (fixed at write time), or the legacy org-wide value (read-only); an omitted scope resolves to the highest value the writer's trust level permits (§12, ADR 0011) |
+| `fleet_id` | fleet id (nullable) | The fleet a `fleet` entry was written into, fixed at write time (§12.1) |
 | `embedding` | vector(dim) | Generated at write time (§7) |
+| `embedding_model` | text | The model that produced `embedding` (§7) |
+| `entities` / `entities_model` | `{name, kind}`[] / text | Machine-extracted entity facets and the model that produced them; empty when extraction is off (§13) |
 | `state` | `active` \| `superseded` \| `withdrawn` | Default `active` |
 | `supersedes` | entry id[] (optional) | **Write-side input** (the stored inverse is `superseded_by`): ids of active entries this entry supersedes; targets flip to `superseded` |
 | `see_also` | entry id[] (optional, ≤ 5) | **Write-side input**: entries the writer can read that this one relates to without replacing them, stored as links beside the entry (ADR 0057). Reads by id return `see_also` and `linked_from` (the active entries that link to it), limited to what the reader may read |
@@ -97,7 +100,7 @@ No sessions on the server (incognito sessions are client-side, ADRs 0003, 0035).
 
 ## 5. API surface
 
-REST is the canonical interface; the **MCP server is the primary agent-facing wrapper** over it (ADR: MCP + REST). No client touches Postgres directly, ever.
+REST is the canonical interface; the **MCP server is the primary agent-facing wrapper** over it. No client touches Postgres directly, ever.
 
 ### 5.1 REST (v1)
 
@@ -113,7 +116,8 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | `PUT /v1/entries/{id}/pin` / `DELETE /v1/entries/{id}/pin` | Pin an active fleet entry to its fleet's briefing, or unpin it: a privileged agent of that fleet or the admin key; at most 10 pins per fleet (ADR 0058) |
 | `GET /v1/pins` | A fleet's pinned entries, newest pin first, each as its newest readable version (`id`, `pinned_id`); the caller's home fleet unless `?fleet_id=` (ADR 0058) |
 | `POST /v1/feedback` | One verdict (+note) on up to 16 entries at once, `{entry_ids, verdict, note?}`; all must be readable or nothing is recorded (ADR 0053) |
-| `GET /v1/health` | Liveness/readiness |
+| `GET /v1/health` | Static health answer (no database check) |
+| `GET /v1/liveness` | Unauthenticated orchestrator liveness probe (ADR 0019) |
 | `GET /v1/whoami` | The calling key's standing: kind (`agent`/`org`/`admin`/`legacy`), agent name, status, trust level, home fleet, `can_read`, `can_write_scopes` (any valid key; not audited — ADR 0030) |
 | `POST /v1/agents` | Register an agent (org key or admin key; `{name, owner_alias?}`) → pending agent, 201 (§12, ADR 0012); the same name + alias again → 200 with the current status; another alias → 409 (§12.3, ADR 0039) |
 | `GET /v1/admin/agents` | List agents: status, trust level, home fleet, owner alias (admin key) |
@@ -160,7 +164,7 @@ A typical agent prompt contract: *"check where you stand (`hive_whoami`); recall
 
 ### 6.1 Two-stage (progressive disclosure)
 
-`search` returns **compact hits** — `id, kind, summary, tags, author, agent, occurred_at, score, scope, fleet_id, feedback` — **not** full bodies. `feedback` is the entry's helpful/stale/wrong counts (ADR 0051), so a reader sees an entry was reported stale or wrong before it opens it. `scope` and `fleet_id` let a privileged reader recognise a **foreign entry** (filed outside its home fleet) without opening it (ADR 0036). The agent opens what it wants with `hive_get`, several at once with `entry_ids` (ADR 0055). This is the token economy the design is built around: scan many, open few.
+`search` returns **compact hits** — `entry_id, kind, summary, tags, author, agent, occurred_at, score, scope, fleet_id, feedback` — **not** full bodies. `feedback` is the entry's helpful/stale/wrong counts (ADR 0051), so a reader sees an entry was reported stale or wrong before it opens it. `scope` and `fleet_id` let a privileged reader recognise a **foreign entry** (filed outside its home fleet) without opening it (ADR 0036). The agent opens what it wants with `hive_get`, several at once with `entry_ids` (ADR 0055). This is the token economy the design is built around: scan many, open few.
 
 ### 6.2 Hybrid pipeline
 
@@ -237,10 +241,10 @@ An **incognito session** turns Hivemind completely off for one session. It is a 
 
 The MCP stdio surface ships **two runners**:
 
-* **`hivemind-mcp`** — the **dev** path: in-memory store + local hash embedder + a hard-coded `dev` credential. Zero network, ephemeral, single identity; for exercising the eight `hive_*` tools with no dependencies.
+* **`hivemind-mcp`** — the **dev** path: in-memory store + local hash embedder + a hard-coded `dev` credential. Zero network, ephemeral, single identity; for exercising the ten `hive_*` tools with no dependencies.
 * **`hivemind-mcp-pg`** — the **production** path: a DSN-backed `PgStore` + the operator-configured OpenAI-compatible embedder (ADR 0005), with the acting credential resolved by verifying `HIVEMIND_MCP_KEY` against the Postgres `credentials` table (ADR 0012).
 
-**Unified multi-agent pool:** several agents each run their own `hivemind-mcp-pg` process with a distinct `HIVEMIND_MCP_KEY` (an **agent key**, ADR 0012). All of them read/write the **same** Postgres pool over a **unified** MCP interface (the identical eight `hive_*` tools) while every write carries that agent's *verified* provenance (its registered name, server-filled from the key). The key is **re-verified on every tool call** (ADR 0042, superseding ADR 0010's "verified once at start" consequence): revoking an agent's key, demoting its trust level or re-homing it applies to its very next call, no restart; a call made with a revoked key answers `unauthenticated`. The dev runner (`hivemind-mcp`) keeps its fixed `dev` identity and is the only path without a per-call credential.
+**Unified multi-agent pool:** several agents each run their own `hivemind-mcp-pg` process with a distinct `HIVEMIND_MCP_KEY` (an **agent key**, ADR 0012). All of them read/write the **same** Postgres pool over a **unified** MCP interface (the identical ten `hive_*` tools) while every write carries that agent's *verified* provenance (its registered name, server-filled from the key). The key is **re-verified on every tool call** (ADR 0042, superseding ADR 0010's "verified once at start" consequence): revoking an agent's key, demoting its trust level or re-homing it applies to its very next call, no restart; a call made with a revoked key answers `unauthenticated`. The dev runner (`hivemind-mcp`) keeps its fixed `dev` identity and is the only path without a per-call credential.
 
 ### 8.5 The hostable streamable-HTTP runner (ADR 0010)
 
@@ -250,7 +254,7 @@ The MCP stdio surface ships **two runners**:
 * **Immediate revocation.** Because the credential is resolved **per request** (as `hivemind-mcp-pg` now does per tool call, ADR 0042), admin revocation (`POST /v1/admin/agents/{name}/revoke`) takes effect on the very next request — no restart required.
 * **Fails closed; no OAuth; Host checks (ADR 0042).** A dispatch with no resolvable credential answers `unauthenticated` and never falls back to a template identity. A 401 carries `WWW-Authenticate: Bearer realm="hivemind"`, and `/.well-known/oauth-*` answers 404 (there is no OAuth, so clients must not start a discovery flow). `HIVEMIND_MCP_ALLOWED_HOSTS` (comma-separated Host values, `name` or `name:*`) and `HIVEMIND_MCP_ALLOWED_ORIGINS` enable the MCP SDK's DNS-rebinding check; unset keeps the SDK default (check on only for a loopback bind), so an ingress-fronted `0.0.0.0` deployment is unchanged. The unauthenticated `/mcp/health/database` answer is cached for ~2 s so it cannot amplify load onto the pool.
 * **Per-request transport: stateless streamable-HTTP.** The server runs the SDK's stateless streamable-HTTP transport (one request = one self-contained exchange). The pool is stateless with respect to sessions, so this is a natural fit.
-* **Deployment shape: a detached compose service.** `make mcp-http` ships the runner as a detached docker-compose service (one container built from the repo's Dockerfile), published on host port 8088 by default (override with `HIVEMIND_MCP_HTTP_PORT`). The container reads/writes the shared pool and embeds via the local vLLM on the compose network, so pool + embedder + runner come up with a single `docker compose up -d` (ADR 0007).
+* **Deployment shape: a detached compose service.** `make mcp-http` ships the runner as a detached docker-compose service (one container built from the repo's Dockerfile), published on host port 8088 by default (override with `HIVEMIND_MCP_HTTP_PORT`). The container reads/writes the shared pool and embeds via the local vLLM on the compose network, so pool + embedder + runner come up with a single `docker compose up -d`. This is the dev shape; production runs the runner on Kubernetes (§8.2).
 
 **MCP runners, at a glance** (three runners, one pool):
 
@@ -272,7 +276,7 @@ The schema is an **ordered chain of versioned migrations** under `src/hivemind/s
 * **Version marker.** `current_schema_version` is the latest applied migration id, read from `_yoyo_migration` and reported on the ops surface (§3.3 counters). There is no separate `schema_migrations` table.
 * **Online-safe DDL.** New index migrations use `CREATE INDEX CONCURRENTLY` with yoyo's `-- transactional: false` directive, so an index build does not lock a table while a sibling replica serves.
 * **Expand-and-contract.** Within a release, schema changes are **additive only** (new columns nullable or defaulted, new tables, new indexes). A removal takes two releases: release N stops reading and writing the column, release N+1 drops it. This is a requirement, not a preference — the runners are deployed as independently released units against one pool, so a migration always runs against some still-deployed older code.
-* **Dimension guard.** The ADR 0015 dim-mismatch check runs **before** the lock is taken, so a pool provisioned at a different embedding dimension (§7, ADR 0005) still fails loudly before any DDL.
+* **Pre-flight checks.** Once the lock is held and before any DDL, `migrate` checks the ADR 0015 dimension (a pool provisioned at a different embedding dimension than configured fails loudly; taking the lock first means two replicas at different dims on a cold pool cannot both pass), refuses pgvector < 0.8 and a dimension above 2000 (the HNSW limit), and after the chain fails on an INVALID HNSW index.
 
 ## 9. Non-goals (v1) — the explicit list
 
@@ -283,7 +287,7 @@ The schema is an **ordered chain of versioned migrations** under `src/hivemind/s
 - No multi-tenant SaaS (single-org; self/fleet scoping is §12, ADR 0011)
 - No binary/artifact storage (references only)
 - No OAuth/SSO, no per-agent learned retrieval tuning
-- No HA, sharding, or Redis-backed scale-out
+- No sharding, read replicas, or Redis-backed scale-out (two app-tier replicas per runner exist for availability only, §8.2)
 
 ## 10. Documented extensions (out of v1 scope, by design)
 
@@ -407,7 +411,7 @@ This section supersedes the "no entity extraction" non-goal of §9 **for the fac
 
 ### 13.3 Query surface
 
-* `EntryFilters.entities` — **AND-semantics over names, case-insensitive** (mirrors `tags`); exposed on REST `GET /v1/search` + `GET /v1/entries` and `hive_search` / `hive_list`.
+* `EntryFilters.entities` — **AND-semantics over names, case-insensitive** (mirrors `tags`); exposed on REST `POST /v1/search` + `GET /v1/entries` and `hive_search` / `hive_list`.
 * `kind` is stored + displayed only (not filterable in v1); entries expose an `entities` field in responses (MCP + REST).
 
 ### 13.4 Posture: optional + best-effort

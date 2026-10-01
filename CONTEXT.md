@@ -92,6 +92,10 @@ _Avoid_: rating, review
 A pointer from a new entry to an existing one it relates to without replacing it, set at write time and shown on both entries when they are read.
 _Avoid_: reference (sources are references), relation, edge
 
+**Related entries**:
+The up to three active entries nearest to a new entry, returned with its write so the writer can supersede, link or leave them. A hint, never a verdict: nothing is merged or superseded automatically.
+_Avoid_: duplicates, conflicts, contradictions (the server judges none of these)
+
 **Pinned entry**:
 A fleet entry a privileged agent of that fleet (or an admin) pinned into the fleet's briefing, which every agent of the fleet reads at the start of a session. Context, never an order.
 _Avoid_: keystone, rule, mandatory entry
@@ -188,7 +192,7 @@ _Avoid_: expired key (keys do not expire), revoked key (revocation deletes the k
 ### Surfaces
 
 **MCP runner**:
-The process that exposes Hivemind's eight `hive_*` tools to an agent. Three kinds: the dev runner (`hivemind-mcp`, in-memory, stdio), the per-agent Postgres-backed runner (`hivemind-mcp-pg`, ADR 0009, one process per agent), and the hostable streamable-HTTP runner (`hivemind-mcp-http`, ADR 0010, one shared pool per process, many agents — never a process per agent; it runs as 2 replicas in production, ADR 0026). All read/write the same pool; every write carries verified provenance.
+The process that exposes Hivemind's ten `hive_*` tools to an agent. Three kinds: the dev runner (`hivemind-mcp`, in-memory, stdio), the per-agent Postgres-backed runner (`hivemind-mcp-pg`, ADR 0009, one process per agent), and the hostable streamable-HTTP runner (`hivemind-mcp-http`, ADR 0010, one shared pool per process, many agents — never a process per agent; it runs as 2 replicas in production, ADR 0026). All read/write the same pool; every write carries verified provenance.
 _Avoid_: Hivemind client (implies a library client), agent connector
 
 **Agent key**:
@@ -220,6 +224,10 @@ _Avoid_: result, snippet, match
 **Progressive disclosure**:
 The token economy of retrieval: scan many compact hits first, open the full entry only when needed.
 _Avoid_: lazy loading, pagination
+
+**Degraded search**:
+A search answered from the keyword stream alone because the embedder is unavailable, and flagged as such in the response.
+_Avoid_: partial results, fallback mode
 
 **Vector index**:
 The HNSW index on `entries.embedding` (`vector_cosine_ops`, `m = 16`, `ef_construction = 64`) that serves the vector stream (migration `0004`, ADR 0025).
