@@ -102,7 +102,7 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 
 | Method & path | Purpose |
 |---|---|
-| `POST /v1/entries` | Create an entry (body = §4.1 fields; `supersedes` optional) |
+| `POST /v1/entries` | Create an entry (body = §4.1 fields; `supersedes` optional). The response adds `related`: up to 3 active entries the writer can read that are nearest to the new one, with their cosine `similarity` (ADR 0052) |
 | `GET /v1/entries/{id}` | Full entry (body included), with its `feedback`: verdict counts and the newest reports with their notes (§4.2, ADR 0051). `?history=true` adds the supersession chain: at most 100 versions (one list page), successors first, then predecessors newest first |
 | `GET /v1/entries` | List/filter **without** a query (filter only; paginated) |
 | `POST /v1/search` | Hybrid search (§6) with filters |
@@ -287,7 +287,7 @@ The schema is an **ordered chain of versioned migrations** under `src/hivemind/s
 | **Namespaces / channels** — multi-fleet membership, per-fleet promotion, cross-fleet writes | The flat pool grows too noisy. *Partially satisfied: fleets + one home fleet per agent (ADR 0011) cover single-fleet needs; multi-fleet membership is the remaining extension* |
 | **Binary artifacts** — S3-backed artifact store behind `sources` | Analysis references outgrow file/URL references |
 | **Knowledge graph** — graph-expanded retrieval over a canonical entity registry | Cross-entry entity linking pays off in retrieval quality. *Partially pre-staged: the entity-extraction **facet** slice is shipped by ADR 0016 / SPEC §13 (a pre-staged §10 extension on scale ambition — the trigger has *not* fired); the graph half of this row (entity registry + multi-hop expansion) remains trigger-held* |
-| **LLM-assisted contradiction detection** — at write time, surface entries above a similarity floor that the new entry may conflict with, as a *claim for the writer to judge* (never an automatic resolution — ADR 0001: a supersession is a claim, not an arbitration) | Explicit supersession can't keep up with contradictory writes. **Measurable trigger:** the first observed incident of a contradicting entry landing without a supersession, **or** pool size > 10k entries — whichever comes first. Until then the similarity floor cannot be tuned (there is no corpus to tune it against), and an untuned floor is the failure mode to avoid |
+| **LLM-assisted contradiction detection** — at write time, surface entries above a similarity floor that the new entry may conflict with, as a *claim for the writer to judge* (never an automatic resolution — ADR 0001: a supersession is a claim, not an arbitration) | Explicit supersession can't keep up with contradictory writes. **Measurable trigger:** the first observed incident of a contradicting entry landing without a supersession, **or** pool size > 10k entries — whichever comes first. Until then the similarity floor cannot be tuned (there is no corpus to tune it against), and an untuned floor is the failure mode to avoid. *(Not to be confused with ADR 0052: every write already reports its 3 nearest entries with their similarity, with no floor and no verdict.)* |
 | **Curation workflow** — verify/promote/retire roles | An org wants a "librarian" function |
 | **Human read-only UI** — browse/search the pool in a browser | Analysts want to see the pool without an agent |
 | **Multi-tenant SaaS / OAuth** | More than one org wants it; an org has an IdP |

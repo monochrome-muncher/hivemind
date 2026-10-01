@@ -719,6 +719,35 @@ class PgStore:
             rows = await conn.fetch(sql, *params, embedding, limit)
         return [str(r["id"]) for r in rows]
 
+    async def similar_entries(
+        self,
+        embedding: list[float],
+        limit: int,
+        *,
+        exclude_id: str,
+        visibility: Visibility | None = None,
+    ) -> list[tuple[str, float]]:
+        """The active entries nearest to ``embedding`` with their cosine
+        similarity (ADR 0052). The same index, filters and ``SET LOCAL``
+        settings as ``search_vector``, so it is approximate too (ADR 0025)."""
+        clauses, params = _filter_conditions(EntryFilters(), visibility)
+        clauses.append("embedding IS NOT NULL")
+        if _is_valid_uuid(exclude_id):
+            params.append(exclude_id)
+            clauses.append(f"id <> ${len(params)}")
+        vec_idx = len(params) + 1
+        sql = (
+            f"SELECT id, 1 - (embedding <=> ${vec_idx}) AS similarity FROM entries WHERE "
+            + " AND ".join(clauses)
+            + f" ORDER BY embedding <=> ${vec_idx}"
+            + f" LIMIT ${vec_idx + 1}"
+        )
+        pool = await self._ensure_pool()
+        async with pool.acquire(timeout=self._acquire_timeout) as conn, conn.transaction():
+            await conn.execute(VECTOR_SEARCH_SETTINGS)
+            rows = await conn.fetch(sql, *params, embedding, limit)
+        return [(str(r["id"]), float(r["similarity"])) for r in rows]
+
     # -- feedback -----------------------------------------------------------------
 
     async def record_feedback(self, feedback: Feedback) -> None:

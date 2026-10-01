@@ -47,6 +47,7 @@ from hivemind.api.schemas import (
     MetricsOut,
     RegisterAgentRequest,
     RegisteredAgentOut,
+    RelatedOut,
     SearchRequest,
     UpdateAgentRequest,
     WhoamiOut,
@@ -195,7 +196,9 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
                 fleet_id=resolution.fleet_id,
                 supersedes=tuple(payload.supersedes),
             )
-            entry = await app.write_service.write(draft, writer=credential.visibility())
+            written = await app.write_service.write_and_relate(
+                draft, writer=credential.visibility()
+            )
         except SupersedeDenied as exc:
             # ADR 0033: a supersession target out of the writer's reach.
             raise api_error(403, "supersede_denied", str(exc)) from exc
@@ -205,7 +208,9 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
             raise _embedding_unavailable(exc) from exc
         except ValueError as exc:
             raise api_error(422, "invalid_entry", str(exc)) from exc
-        return EntryOut.from_entry(entry)
+        out = EntryOut.from_entry(written.entry)
+        out.related = [RelatedOut.from_related(r) for r in written.related]
+        return out
 
     @router.get("/entries/{entry_id}", response_model=EntryOut)
     async def get_entry(

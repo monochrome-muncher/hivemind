@@ -61,6 +61,26 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+# How many related entries a write reports (ADR 0052).
+RELATED_ON_WRITE_LIMIT = 3
+
+
+@dataclass(frozen=True, slots=True)
+class RelatedEntry:
+    """An existing entry near a new one, with their cosine similarity."""
+
+    entry: Entry
+    similarity: float
+
+
+@dataclass(frozen=True, slots=True)
+class WriteResult:
+    """A stored entry plus the nearest entries its writer can read (ADR 0052)."""
+
+    entry: Entry
+    related: tuple[RelatedEntry, ...] = ()
+
+
 class WriteService:
     """Creates entries: embeds the entry text, persists it, and applies
     any explicit supersessions (SPEC.md §4.1, §7).
@@ -87,7 +107,48 @@ class WriteService:
         self._extractor = extractor
 
     async def write(self, draft: EntryDraft, *, writer: Visibility | None = None) -> Entry:
-        """Embed-then-persist a fully-resolved entry draft.
+        """Embed-then-persist a fully-resolved entry draft (see ``_write``)."""
+        entry, _ = await self._write(draft, writer=writer)
+        return entry
+
+    async def write_and_relate(
+        self, draft: EntryDraft, *, writer: Visibility | None = None
+    ) -> WriteResult:
+        """``write``, then the nearest active entries the writer can read
+        (ADR 0052), so it can tell when it has duplicated or should have
+        superseded one.
+
+        The lookup reuses the embedding the write already computed. It is
+        best-effort: the entry is stored by then, so a failed lookup is
+        logged and the result carries no related entries rather than an
+        error.
+        """
+        entry, embedding = await self._write(draft, writer=writer)
+        try:
+            related = await self._related(entry.id, embedding, writer)
+        except Exception:
+            logger.warning("related-entry lookup failed after a write", exc_info=True)
+            related = ()
+        return WriteResult(entry, related)
+
+    async def _related(
+        self, entry_id: str, embedding: list[float], writer: Visibility | None
+    ) -> tuple[RelatedEntry, ...]:
+        pairs = await self._store.similar_entries(
+            embedding, RELATED_ON_WRITE_LIMIT, exclude_id=entry_id, visibility=writer
+        )
+        if not pairs:
+            return ()
+        entries = await self._store.get_entries([eid for eid, _ in pairs])
+        return tuple(
+            RelatedEntry(entries[eid], similarity) for eid, similarity in pairs if eid in entries
+        )
+
+    async def _write(
+        self, draft: EntryDraft, *, writer: Visibility | None = None
+    ) -> tuple[Entry, list[float]]:
+        """Embed-then-persist a fully-resolved entry draft; returns the
+        stored entry and the embedding it was stored with.
 
         ``writer`` is the caller's visibility. When given, every
         ``draft.supersedes`` target must pass ``may_supersede`` (ADR 0033)
@@ -123,7 +184,7 @@ class WriteService:
                 extraction.cancel()
             raise
         try:
-            return await self._store.create_entry(
+            entry = await self._store.create_entry(
                 draft,
                 embedding,
                 embedding_model=self._embedder.model_name,
@@ -134,6 +195,7 @@ class WriteService:
             # A target was superseded/withdrawn after the pre-check
             # (ADR 0034): the store rolled the write back atomically.
             raise SupersedeDenied(exc.ids) from exc
+        return entry, embedding
 
     @staticmethod
     async def _extract(
