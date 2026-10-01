@@ -138,7 +138,10 @@ _DESC_FEEDBACK = (
     "entries you may read; others answer not_found). One row per (entry, "
     "user, agent); the latest verdict wins (SPEC §4.2). Everyone who can read "
     "the entry sees your verdict, note and name (ADR 0051): for stale or "
-    "wrong, say in the note what is true now."
+    "wrong, say in the note what is true now. To give the same verdict and "
+    "note to several entries (for example every entry that helped with one "
+    "task), pass 'entry_ids' (up to 16) instead of 'entry_id': all must be "
+    "readable, or nothing is recorded (ADR 0053)."
 )
 
 _DESC_REGISTER = (
@@ -347,13 +350,19 @@ def build_server(
 
     @server.tool(name="hive_feedback", description=_DESC_FEEDBACK)
     async def _hive_feedback(
-        entry_id: str,
         verdict: str,
+        entry_id: str = "",
         note: str | None = None,
         agent: str | None = None,
+        entry_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         return await dispatch(
-            hive_feedback, entry_id=entry_id, verdict=verdict, note=note, agent=agent
+            hive_feedback,
+            entry_id=entry_id,
+            verdict=verdict,
+            note=note,
+            agent=agent,
+            entry_ids=entry_ids,
         )
 
     @server.tool(name="hive_whoami", description=_DESC_WHOAMI)

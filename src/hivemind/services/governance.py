@@ -19,9 +19,11 @@ from hivemind.domain.audit import AuditAction
 from hivemind.domain.entry import Entry, EntryDraft, ExtractedEntity
 from hivemind.domain.feedback import FEEDBACK_RECENT_LIMIT, Feedback, FeedbackSummary, Verdict
 from hivemind.domain.validation import (
+    MAX_FEEDBACK_IDS,
     MAX_IDENTITY_CHARS,
     MAX_NOTE_CHARS,
     MAX_REASON_CHARS,
+    InvalidInput,
     check_text,
 )
 from hivemind.ports import Credential, Embedder, Extractor, Store, SupersedeConflict
@@ -325,6 +327,36 @@ class GovernanceService:
             feedback=feedback,
             quality=await self.quality(entry_id),
         )
+
+    async def record_feedback_many(
+        self,
+        credential: Credential,
+        entry_ids: list[str],
+        verdict: Verdict,
+        note: str | None = None,
+        agent: str | None = None,
+    ) -> list[FeedbackOutcome]:
+        """One verdict (and note) on several entries at once (ADR 0053).
+
+        All or nothing on readability: every id must name an entry the
+        caller may read, or nothing is recorded and ``LookupError`` names
+        the ids that failed. Repeated ids count once. Each entry then gets
+        its own row, exactly as ``record_feedback`` would write it.
+        """
+        ids = list(dict.fromkeys(entry_ids))
+        if not ids:
+            raise InvalidInput("entry_ids must name at least one entry")
+        if len(ids) > MAX_FEEDBACK_IDS:
+            raise InvalidInput(f"entry_ids may name at most {MAX_FEEDBACK_IDS} entries")
+        visibility = credential.visibility()
+        missing = [
+            eid for eid in ids if await get_visible_entry(self._store, eid, visibility) is None
+        ]
+        if missing:  # feedback follows readability (SPEC §12.2, ADR 0033)
+            raise LookupError(f"unknown entries: {', '.join(missing)}")
+        return [
+            await self.record_feedback(credential, eid, verdict, note, agent=agent) for eid in ids
+        ]
 
     async def feedback_summary(self, entry_id: str) -> FeedbackSummary:
         """What a reader of an entry sees of its feedback (ADR 0051): the
