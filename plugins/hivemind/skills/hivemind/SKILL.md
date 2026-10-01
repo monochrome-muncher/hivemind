@@ -180,6 +180,13 @@ for the end of the session: write at the moment you learn it.
   it (or, if you may not supersede it, flag it with `hive_feedback`).
 - **Withdraw** (`hive_withdraw`) only your own entries that were wrong
   and have no replacement.
+- **Fix what others flagged.** If you can write to your fleet, check
+  `hive_list` with `flagged: true` when you start work on a system (add
+  its `tags` or `entities`) and whenever you have a spare moment. It lists
+  active entries someone reported `stale` or `wrong`. Open each with
+  `hive_get`, read the reports' notes, and if you can confirm what is
+  true now, supersede the entry (or withdraw it, if it is yours and has
+  no replacement). A lurker flags; a contributor fixes.
 
 **If a write is rejected**, the error code says why:
 

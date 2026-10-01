@@ -367,6 +367,31 @@ async def test_list_feedback_newest_first_with_notes(pg) -> None:
     assert await store.list_feedback("not-a-uuid", 10) == []
 
 
+async def test_flagged_filter_keeps_stale_or_wrong_entries(pg) -> None:
+    """ADR 0054: ``flagged`` keeps entries with a stale or wrong report, on
+    list, count and both search streams."""
+    store, _, dim = pg
+    stale = await store.create_entry(draft("billing stale fact"), make_vec(dim, 0))
+    wrong = await store.create_entry(draft("billing wrong fact"), make_vec(dim, 0))
+    helpful = await store.create_entry(draft("billing helpful fact"), make_vec(dim, 0))
+    await store.create_entry(draft("billing untouched fact"), make_vec(dim, 0))
+    for entry, verdict in ((stale, Verdict.STALE), (wrong, Verdict.WRONG)):
+        for reporter in ("a", "b"):  # two reports must not duplicate a row
+            await store.record_feedback(
+                Feedback(entry_id=entry.id, user=reporter, agent=reporter, verdict=verdict)
+            )
+    await store.record_feedback(
+        Feedback(entry_id=helpful.id, user="a", agent="a", verdict=Verdict.HELPFUL)
+    )
+    flagged = EntryFilters(flagged=True)
+    expected = {stale.id, wrong.id}
+    listed = await store.list_entries(flagged, limit=10)
+    assert sorted(e.id for e in listed) == sorted(expected)
+    assert await store.count_entries(flagged) == 2
+    assert set(await store.search_keyword("billing", flagged, 10)) == expected
+    assert set(await store.search_vector(make_vec(dim, 0), flagged, 10)) == expected
+
+
 async def test_quality_counts_is_batched(pg) -> None:
     store, _, _ = pg
     a = await store.create_entry(draft("fact a"))

@@ -327,6 +327,14 @@ def _filter_conditions(
     if filters.created_to is not None:
         add("created_at <= ?", filters.created_to)
 
+    if filters.flagged:
+        # ADR 0054: at least one stale or wrong report. The feedbacks primary
+        # key (entry_id, "user", agent) serves the per-entry probe.
+        clauses.append(
+            "EXISTS (SELECT 1 FROM feedbacks f WHERE f.entry_id = entries.id"
+            " AND f.verdict IN ('stale', 'wrong'))"
+        )
+
     vis_clause = _visibility_clause(visibility, params)
     if vis_clause is not None:
         clauses.append(vis_clause)

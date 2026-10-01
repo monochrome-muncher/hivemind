@@ -130,7 +130,9 @@ _DESC_LIST = (
     "List / filter entries without a query (filter only, paginated). "
     "Supports kind, tags, machine-extracted entity names ('entities': "
     "AND-semantics, case-insensitive — ADR 0016), scope, author, agent, "
-    "memory-date and ingest-date ranges."
+    "memory-date and ingest-date ranges. 'flagged': only entries reported "
+    "stale or wrong at least once (ADR 0054) — the ones waiting for someone "
+    "to supersede or withdraw them; open one with hive_get to read the reports."
 )
 _DESC_WITHDRAW = (
     "Withdraw an entry (retract without replacing). Only the author or an "
@@ -278,6 +280,7 @@ def build_server(
         created_from: str | None = None,
         created_to: str | None = None,
         include_inactive: bool = False,
+        flagged: bool = False,
     ) -> dict[str, Any]:
         return await dispatch(
             hive_search,
@@ -295,6 +298,7 @@ def build_server(
             created_from=created_from,
             created_to=created_to,
             include_inactive=include_inactive,
+            flagged=flagged,
         )
 
     @server.tool(name="hive_get", description=_DESC_GET)
@@ -320,6 +324,7 @@ def build_server(
         created_from: str | None = None,
         created_to: str | None = None,
         include_inactive: bool = False,
+        flagged: bool = False,
         limit: int | None = None,
         offset: int = 0,
     ) -> dict[str, Any]:
@@ -336,6 +341,7 @@ def build_server(
             created_from=created_from,
             created_to=created_to,
             include_inactive=include_inactive,
+            flagged=flagged,
             limit=limit,
             offset=offset,
         )
