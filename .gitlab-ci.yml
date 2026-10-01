@@ -210,6 +210,7 @@ deploy:
         --from-literal=HIVEMIND_DATABASE_URL="$K8S_SECRET_DATABASE_URL" \
         --from-literal=HIVEMIND_EMBEDDING_API_KEY="$K8S_SECRET_EMBEDDING_API_KEY" \
         --from-literal=HIVEMIND_EXTRACTOR_API_KEY="$K8S_SECRET_EXTRACTOR_API_KEY" \
+        --from-literal=HIVEMIND_MIGRATE_DATABASE_URL="${K8S_SECRET_MIGRATE_DATABASE_URL:-}" \
         --dry-run=client -o yaml)
       printf '%s\n' "$secret_yaml" | kubectl -n hivemind apply -f -
     # 2) FIRST-RUN KEY BOOTSTRAP (idempotent; scripts/ci-bootstrap-keys.sh +

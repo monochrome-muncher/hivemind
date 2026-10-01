@@ -479,9 +479,6 @@ or its own trigger):
 - **Registration**: audited since ADR 0046 (`agent.register`), but the
   owner alias is still unverified: the admin confirms the requester out
   of band.
-- **Migrate through PgBouncer**: session advisory locks need a direct
-  (non-pooled) DSN for `hivemind-migrate`; document or add a separate
-  setting (ADR 0020 note).
 - A pool acquire timeout surfaces as 500, not 503.
 - Structural untrusted-content markers on returned entries (deferred in
   ADR 0043); non-reserved case-variant names (`Bob` / `bob`) can coexist
