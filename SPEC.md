@@ -104,6 +104,7 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 |---|---|
 | `POST /v1/entries` | Create an entry (body = §4.1 fields; `supersedes` optional). The response adds `related`: up to 3 active entries the writer can read that are nearest to the new one, with their cosine `similarity` (ADR 0052) |
 | `GET /v1/entries/{id}` | Full entry (body included), with its `feedback`: verdict counts and the newest reports with their notes (§4.2, ADR 0051). `?history=true` adds the supersession chain: at most 100 versions (one list page), successors first, then predecessors newest first |
+| `POST /v1/entries/get` | Read up to 10 entries by id in one call, `{entry_ids}` → `{entries, not_found}`; each entry as `GET /v1/entries/{id}` returns it, without `history` (ADR 0055) |
 | `GET /v1/entries` | List/filter **without** a query (filter only; paginated) |
 | `POST /v1/search` | Hybrid search (§6) with filters |
 | `POST /v1/entries/{id}/withdraw` | Withdraw own entry (or any, with admin credential) |
@@ -133,7 +134,7 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 |---|---|
 | `hive_write` | `POST /v1/entries` |
 | `hive_search` | `POST /v1/search` |
-| `hive_get` | `GET /v1/entries/{id}` |
+| `hive_get` | `GET /v1/entries/{id}`; with `entry_ids` instead of `entry_id`, `POST /v1/entries/get` (ADR 0055) |
 | `hive_list` | `GET /v1/entries` |
 | `hive_withdraw` | `POST /v1/entries/{id}/withdraw` |
 | `hive_feedback` | `POST /v1/entries/{id}/feedback`; with `entry_ids` instead of `entry_id`, `POST /v1/feedback` (ADR 0053) |
@@ -154,7 +155,7 @@ A typical agent prompt contract: *"check where you stand (`hive_whoami`); recall
 
 ### 6.1 Two-stage (progressive disclosure)
 
-`search` returns **compact hits** — `id, kind, summary, tags, author, agent, occurred_at, score, scope, fleet_id, feedback` — **not** full bodies. `feedback` is the entry's helpful/stale/wrong counts (ADR 0051), so a reader sees an entry was reported stale or wrong before it opens it. `scope` and `fleet_id` let a privileged reader recognise a **foreign entry** (filed outside its home fleet) without opening it (ADR 0036). The agent opens what it wants with `hive_get`. This is the token economy the design is built around: scan many, open few.
+`search` returns **compact hits** — `id, kind, summary, tags, author, agent, occurred_at, score, scope, fleet_id, feedback` — **not** full bodies. `feedback` is the entry's helpful/stale/wrong counts (ADR 0051), so a reader sees an entry was reported stale or wrong before it opens it. `scope` and `fleet_id` let a privileged reader recognise a **foreign entry** (filed outside its home fleet) without opening it (ADR 0036). The agent opens what it wants with `hive_get`, several at once with `entry_ids` (ADR 0055). This is the token economy the design is built around: scan many, open few.
 
 ### 6.2 Hybrid pipeline
 

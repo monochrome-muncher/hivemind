@@ -25,6 +25,7 @@ import asyncpg
 import pytest
 
 from hivemind.config import Settings
+from hivemind.domain.access import TrustLevel, Visibility
 from hivemind.domain.entry import (
     EntryDraft,
     EntryFilters,
@@ -34,6 +35,7 @@ from hivemind.domain.entry import (
 )
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.ports import Credential, SupersedeConflict
+from hivemind.services.chain import get_visible_entries
 from hivemind.store import PgAuthenticator, PgStore
 from hivemind.store.auth import key_hash
 from hivemind.store.migrate import migrate
@@ -685,3 +687,16 @@ async def test_health_check_is_false_on_an_unreachable_pool() -> None:
         assert await store.health_check() is False
     finally:
         await store.close()
+
+
+async def test_get_visible_entries_keys_by_the_id_as_asked(pg) -> None:
+    """ADR 0055: a batch read finds an entry whatever the case of its uuid,
+    and an id that is not a uuid is simply absent."""
+    store, _, _ = pg
+    entry = await store.create_entry(draft("A fact"))
+    upper = entry.id.upper()
+    found = await get_visible_entries(
+        store, [upper, "nope"], Visibility(TrustLevel.PRIVILEGED, "admin", is_admin=True)
+    )
+    assert list(found) == [upper]
+    assert found[upper].id == entry.id

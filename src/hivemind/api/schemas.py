@@ -19,6 +19,7 @@ from hivemind.domain.entry import EntityKind, Entry, ImportanceSource, Kind, Sou
 from hivemind.domain.feedback import FeedbackCounts, FeedbackSummary, Verdict
 from hivemind.domain.validation import (
     MAX_FEEDBACK_IDS,
+    MAX_GET_IDS,
     MAX_ID_CHARS,
     MAX_LIMIT,
     MAX_OFFSET,
@@ -251,6 +252,20 @@ class EntryOut(BaseModel):
             entities=[EntityOut(name=e.name, kind=e.kind) for e in entry.entities],
             entities_model=entry.entities_model,
         )
+
+
+class GetEntriesRequest(BaseModel):
+    """Read several entries by id at once (ADR 0055)."""
+
+    entry_ids: list[str] = Field(min_length=1, max_length=MAX_GET_IDS)
+
+
+class EntriesOut(BaseModel):
+    """The readable entries, in the order asked, and the ids that name
+    nothing the caller may read (ADR 0055)."""
+
+    entries: list[EntryOut]
+    not_found: list[str]
 
 
 class HitOut(BaseModel):

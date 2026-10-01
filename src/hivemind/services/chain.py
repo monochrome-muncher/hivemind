@@ -43,6 +43,26 @@ async def get_visible_entry(store: Store, entry_id: str, visibility: Visibility)
     return entry
 
 
+async def get_visible_entries(
+    store: Store, entry_ids: list[str], visibility: Visibility
+) -> dict[str, Entry]:
+    """``get_visible_entry`` for several ids in one store read (ADR 0055):
+    the readable entries by id. An id that names nothing readable is simply
+    absent, the same answer for "invisible" and "does not exist"."""
+    ids = [eid for eid in entry_ids if "\x00" not in eid and len(eid) <= MAX_ID_CHARS]
+    if not ids:
+        return {}
+    found = await store.get_entries(ids)
+    result: dict[str, Entry] = {}
+    for eid in ids:
+        # Postgres answers with canonical (lower-case) uuids; key the result
+        # by the id as asked, so a caller's spelling still finds its entry.
+        entry = found.get(eid) or found.get(eid.lower())
+        if entry is not None and entry_is_visible(entry, visibility):
+            result[eid] = entry
+    return result
+
+
 async def supersession_chain(
     store: Store,
     entry: Entry,

@@ -121,7 +121,10 @@ _DESC_GET = (
     "supersession chain (successors + superseded), limited to versions you may "
     "read. An entry you may not read answers not_found, exactly like an "
     "unknown id. 'feedback' has the helpful/stale/wrong counts and the newest "
-    "reports with their notes, which often say what is true now (ADR 0051)."
+    "reports with their notes, which often say what is true now (ADR 0051). "
+    "To open several hits at once, pass 'entry_ids' (up to 10) instead of "
+    "'entry_id': the reply has 'entries' in the order asked and 'not_found' "
+    "for ids you may not read (ADR 0055)."
 )
 _DESC_LIST = (
     "List / filter entries without a query (filter only, paginated). "
@@ -300,10 +303,13 @@ def build_server(
 
     @server.tool(name="hive_get", description=_DESC_GET)
     async def _hive_get(
-        entry_id: str,
+        entry_id: str = "",
         include_history: bool = False,
+        entry_ids: list[str] | None = None,
     ) -> dict[str, Any]:
-        return await dispatch(hive_get, entry_id=entry_id, include_history=include_history)
+        return await dispatch(
+            hive_get, entry_id=entry_id, include_history=include_history, entry_ids=entry_ids
+        )
 
     @server.tool(name="hive_list", description=_DESC_LIST)
     async def _hive_list(
