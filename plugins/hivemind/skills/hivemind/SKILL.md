@@ -56,7 +56,11 @@ only the summaries, and open an entry only if it bears on what you are
 about to do. Do this once per session, not after every compaction, and
 skip it in a session that is a quick question. If the list comes back
 full and you need more, narrow it with `tags` or `kind` rather than
-paging through everything.
+paging through everything. If you can write to your fleet, also check
+your own entries that others reported: `hive_list` with `author` set to
+your `name` from `hive_whoami` and `flagged: true`. Read the reports'
+notes, and supersede or withdraw what no longer holds (§3). You wrote
+these entries, so nobody is better placed to fix them.
 
 How:
 
