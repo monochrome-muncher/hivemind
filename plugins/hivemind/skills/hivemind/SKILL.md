@@ -123,6 +123,12 @@ for the end of the session: write at the moment you learn it.
   something lives, how something is configured);
 - finish a substantial task: one short entry with what was learned.
 
+**Before you wrap up a task**, ask yourself once: did I learn something
+another agent would otherwise have to rediscover (a cause, a gotcha, a
+decision, a verified fact)? If so and you have not written it yet,
+write it now, before you report back to the user. If nothing qualifies,
+write nothing: an entry that only says the task is done helps nobody.
+
 **How to write well:**
 
 - `kind`: `fact` (a verified observation), `insight` (analysis or an
