@@ -210,7 +210,8 @@ async def test_no_raw_key_appears_in_any_audit_row_on_either_path(dsn: str) -> N
     raw_keys += [admin_key, spare_admin]
     await _register_agent(dsn, "bob")
     raw_keys.append(await _issue_agent(dsn, "bob", actor="john"))
-    raw_keys.append(await _rotate_org(dsn, actor="john"))
+    org_key = await _rotate_org(dsn, actor="john")
+    raw_keys.append(org_key)
     assert await _revoke_admin(dsn, raw_key=spare_admin, actor="john") is True
     await _revoke(dsn, "bob", actor="john")
 
@@ -222,6 +223,9 @@ async def test_no_raw_key_appears_in_any_audit_row_on_either_path(dsn: str) -> N
         assert admin is not None and admin.key_id == key_hash(admin_key)[:12]
         service = AccessService(store, auth)
         await store.register_agent("alice")
+        org = await auth.verify(org_key)
+        assert org is not None and org.is_org
+        await service.register("carol", org, owner_alias="carol@example.com")  # ADR 0046
         fleet = await service.create_fleet("data-eng", admin)
         _agent, agent_key = await service.activate("alice", TrustLevel.CONTRIBUTOR, fleet.id, admin)
         raw_keys.append(agent_key)
@@ -233,7 +237,7 @@ async def test_no_raw_key_appears_in_any_audit_row_on_either_path(dsn: str) -> N
         await auth.close()
 
     rows = await _fetch(dsn, "SELECT row_to_json(a)::text AS doc FROM audit_log a")
-    assert len(rows) == 11  # 6 CLI rows + 5 app rows
+    assert len(rows) == 12  # 6 CLI rows + 5 admin-key rows + 1 registration
     docs = [r["doc"] for r in rows]
     for raw in raw_keys:
         assert raw.startswith("hm_")
@@ -242,7 +246,13 @@ async def test_no_raw_key_appears_in_any_audit_row_on_either_path(dsn: str) -> N
             # Nor the secret part without its prefix.
             assert raw.removeprefix("hm_") not in doc
     kinds = await _fetch(dsn, "SELECT actor_kind, count(*) AS n FROM audit_log GROUP BY 1")
-    assert {r["actor_kind"]: r["n"] for r in kinds} == {"cli": 6, "admin_key": 5}
+    assert {r["actor_kind"]: r["n"] for r in kinds} == {"cli": 6, "admin_key": 5, "org_key": 1}
+    [register] = await _fetch(
+        dsn, "SELECT actor, target, detail FROM audit_log WHERE action = 'agent.register'"
+    )
+    assert register["actor"] == f"org:{key_hash(org_key)[:12]}"
+    assert register["target"] == "carol"
+    assert json.loads(register["detail"]) == {"owner_alias": "carol@example.com"}
 
 
 # -- ADR 0028: the CLI keeps status and key in step --------------------------

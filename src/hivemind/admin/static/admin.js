@@ -16,7 +16,7 @@ const LEVELS = [
   { value: 3, name: "privileged", hint: "+ read across all fleets" },
 ];
 const AUDIT_ACTIONS = [
-  "agent.activate", "agent.trust_level_set", "agent.home_fleet_set", "agent.revoke",
+  "agent.register", "agent.activate", "agent.trust_level_set", "agent.home_fleet_set", "agent.revoke",
   "fleet.create", "org_key.rotate", "entry.withdraw",
   "admin_key.issue", "admin_key.revoke", "agent_key.issue",
 ];
@@ -586,11 +586,18 @@ async function viewAudit(root) {
     if (r.action === "agent.home_fleet_set") { d.from = fleetName(d.from); d.to = fleetName(d.to); }
     return Object.keys(d).length ? JSON.stringify(d) : "";
   };
+  const actorBadge = (kind) => {
+    if (kind === "cli") {
+      return h("span", { class: "badge badge-muted", title: "hivemind-keys CLI: the actor name is typed by the operator and not verified", text: "cli · unverified" });
+    }
+    if (kind === "org_key") {
+      return h("span", { class: "badge badge-muted", title: "a registration with the shared org key: the fingerprint names the key, not who used it", text: "org key" });
+    }
+    return h("span", { class: "badge badge-level", title: "a verified admin key, recorded by fingerprint", text: "admin key" });
+  };
   const row = (r) => h("tr", {},
     h("td", { class: "nowrap", title: r.occurred_at, text: fmtTime(r.occurred_at) }),
-    h("td", { class: "nowrap" }, r.actor_kind === "cli"
-      ? h("span", { class: "badge badge-muted", title: "hivemind-keys CLI: the actor name is typed by the operator and not verified", text: "cli · unverified" })
-      : h("span", { class: "badge badge-level", title: "a verified admin key, recorded by fingerprint", text: "admin key" })),
+    h("td", { class: "nowrap" }, actorBadge(r.actor_kind)),
     h("td", {}, h("code", { text: r.actor })),
     h("td", { text: r.action }),
     target(r),

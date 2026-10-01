@@ -359,6 +359,7 @@ Every admin-surface action is recorded in an append-only **audit log** (ADR 0027
 
 | `action` | Recorded by | `target` | `detail` |
 |---|---|---|---|
+| `agent.register` | `POST /v1/agents`, `hive_register` — a **new** registration only (ADR 0046) | agent name | `{owner_alias}` when one was given (the registrant's unverified claim) |
 | `agent.activate` | `POST /v1/admin/agents/{name}/activate` | agent name | `{trust_level, home_fleet_id}` |
 | `agent.trust_level_set` | `PATCH /v1/admin/agents/{name}` | agent name | `{from, to}` |
 | `agent.home_fleet_set` | `PATCH /v1/admin/agents/{name}` | agent name | `{from, to}` |
@@ -370,9 +371,9 @@ Every admin-surface action is recorded in an append-only **audit log** (ADR 0027
 | `admin_key.revoke` | `hivemind-keys revoke-admin` (a successful revocation only) | key fingerprint | `{}` |
 | `agent_key.issue` | `hivemind-keys issue-agent` | agent name | `{}`, or `{"from", "trust_level", "home_fleet_id"}` when it activated a pending/revoked agent (ADR 0039) |
 
-**Actors.** `actor_kind` is `admin_key` for the REST admin surface — `actor` is `admin:<fingerprint>` of the verified admin key — or `cli` for `hivemind-keys`, whose `actor` is the operator-supplied `--actor` (default: the OS user) and is **unverified**. A key **fingerprint** is the first 12 hex characters of the key's stored SHA-256 hash (what `hivemind-keys list` shows).
+**Actors.** `actor_kind` is `admin_key` for the REST admin surface — `actor` is `admin:<fingerprint>` of the verified admin key — `org_key` for a registration made with the org key — `actor` is `org:<fingerprint>`, which identifies the key, not who used it (ADR 0046) — or `cli` for `hivemind-keys`, whose `actor` is the operator-supplied `--actor` (default: the OS user) and is **unverified**. A key **fingerprint** is the first 12 hex characters of the key's stored SHA-256 hash (what `hivemind-keys list` shows).
 
-**Never recorded.** No raw API key appears in any column. Registration (`POST /v1/agents`, `hive_register`) and read-only calls are not audited; nor is an author withdrawing their own entry.
+**Never recorded.** No raw API key appears in any column. Read-only calls, re-registrations (`already_registered`) and refused registrations are not audited; nor is an author withdrawing their own entry.
 
 **Guarantees.** The CLI writes each row in the same transaction as its change. The REST surface writes the row **after** the change succeeds and not atomically with it: if the audit write fails the request fails (the change stands, unaudited), and a process crash between the two leaves the change unaudited.
 
