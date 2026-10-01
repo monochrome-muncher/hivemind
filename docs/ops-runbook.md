@@ -49,6 +49,7 @@ make mcp-http       # start the hostable MCP runner as a detached service (:8088
 | Var | Meaning |
 |---|---|
 | `HIVEMIND_DATABASE_URL` | Postgres DSN (default `postgresql://hivemind:hivemind@localhost:5432/hivemind`) |
+| `HIVEMIND_MIGRATE_DATABASE_URL` | optional direct (non-pooled) Postgres DSN used only by `hivemind-migrate`; set it when `HIVEMIND_DATABASE_URL` goes through a transaction-mode PgBouncer (see the note below). Empty = migrate through `HIVEMIND_DATABASE_URL` |
 | `HIVEMIND_EMBEDDING_ENDPOINT` / `_API_KEY` / `_MODEL` | the embedding provider (ADR 0005) |
 | `HIVEMIND_EMBEDDING_DIM` | the embedding dimension (a deploy-time decision, default **1024** — ADR 0015; the dev Makefile exports 512 for fast local vLLM embedding — see §6) |
 | `HIVEMIND_EMBEDDING_RETRIES` | retry budget for transient embedding failures (timeouts, connection errors, `429`, 5xx) — default 2; set `0` to disable (ADR 0014) |
@@ -72,6 +73,15 @@ make mcp-http       # start the hostable MCP runner as a detached service (:8088
 > Postgres `max_connections` is constrained should size it (times 2,
 > times replica count, plus PgBouncer's own pool) to stay under that
 > ceiling rather than relying on the default.
+>
+> **Migrations need a direct connection.** `hivemind-migrate` (run by every
+> pod's entrypoint, ADR 0018) serialises replicas with a *session* advisory
+> lock (ADR 0020), which a transaction-mode pooler cannot hold: the lock
+> would be taken on one server connection and checked on another. Set
+> `HIVEMIND_MIGRATE_DATABASE_URL` to a DSN that reaches Postgres directly
+> (on Kubernetes: the optional `K8S_SECRET_MIGRATE_DATABASE_URL` CI
+> variable); `hivemind-migrate` then uses it and the app keeps using
+> `HIVEMIND_DATABASE_URL`. Unset, migrations use `HIVEMIND_DATABASE_URL`.
 
 > **An unrecognized `HIVEMIND_*` variable is logged at startup**
 > (ADRs 0024, 0032): `load_settings()` reports any `HIVEMIND_*` name

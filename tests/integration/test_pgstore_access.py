@@ -11,6 +11,8 @@ in-memory reference store.
 
 from __future__ import annotations
 
+import asyncio
+
 import asyncpg
 import pytest
 
@@ -24,6 +26,7 @@ from hivemind.domain.access import (
 from hivemind.domain.entry import EntryDraft, EntryFilters, Kind
 from hivemind.store import PgStore
 from hivemind.store.migrate import migrate
+from hivemind.store.pgstore import AGENT_NAME_LOCK
 
 VEC_DIM = Settings().embedding_dim
 VEC = [0.01] * VEC_DIM  # a fixed-dimension vector (spike not needed here)
@@ -126,6 +129,46 @@ async def test_register_agent_never_overwrites_an_existing_owner_alias(pg) -> No
     alice, bob = await pg.get_agent("alice"), await pg.get_agent("bob")
     assert alice is not None and alice.owner_alias == "john"
     assert bob is not None and bob.owner_alias is None
+
+
+async def test_register_agent_returns_the_holder_of_a_case_variant(pg) -> None:
+    # ADR 0045: no second agent that differs only in case.
+    await pg.register_agent("alice", owner_alias="john")
+    holder = await pg.register_agent("Alice", owner_alias="mallory")
+    assert holder.name == "alice" and holder.owner_alias == "john"
+    assert [a.name for a in await pg.list_agents()] == ["alice"]
+
+
+async def test_case_variant_registrations_are_serialised(pg) -> None:
+    # A registration of `bob` that is still uncommitted must hold off one of
+    # `Bob`, or both would pass the folded check (ADR 0045).
+    pool = await pg._ensure_pool()
+    async with pool.acquire() as conn:
+        tx = conn.transaction()
+        await tx.start()
+        await conn.execute(AGENT_NAME_LOCK, "bob")
+        await conn.execute(
+            "INSERT INTO agents (name, status, trust_level) VALUES ('bob', 'pending', 0)"
+        )
+        racing = asyncio.create_task(pg.register_agent("Bob"))
+        await asyncio.sleep(0.3)
+        assert not racing.done()  # blocked on the folded-name lock
+        await tx.commit()
+    holder = await asyncio.wait_for(racing, 5)
+    assert holder.name == "bob"
+    assert [a.name for a in await pg.list_agents()] == ["bob"]
+
+
+async def test_legacy_case_variants_still_resolve_exactly(pg) -> None:
+    # Names that already coexist (registered before ADR 0045) stay usable.
+    pool = await pg._ensure_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO agents (name, status, trust_level) VALUES ('carol', 'pending', 0), "
+            "('Carol', 'pending', 0)"
+        )
+    assert (await pg.register_agent("Carol")).name == "Carol"
+    assert (await pg.register_agent("carol")).name == "carol"
 
 
 async def test_activate_agent_sets_level_and_fleet(pg) -> None:

@@ -179,7 +179,9 @@ class Store(Protocol):
     async def register_agent(self, name: str, owner_alias: str | None = None) -> Agent:
         """Register (or re-register) an agent. Idempotent: an existing
         record is returned unchanged; a new record is ``pending`` (level 0,
-        no fleet) — ADR 0012."""
+        no fleet) — ADR 0012. When ``name`` differs only in case from an
+        existing agent's name, nothing is created and **that** agent is
+        returned (its ``name`` differs from the one asked for; ADR 0045)."""
         ...
 
     async def get_agent(self, name: str) -> Agent | None: ...

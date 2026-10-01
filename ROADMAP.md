@@ -473,19 +473,18 @@ or its own trigger):
 - **Degraded search while the embedder is down**: today a typed 502 /
   `embedding_unavailable`; a keyword-only fallback needs an ADR.
 - **Rate limiting** (garbage-key amplification on `/mcp`, the 2 MiB body
-  parse for a present-but-unknown key): belongs at the ingress; the
-  optional Ingress has no `/v1/admin` allowlist and there is no
-  default-deny egress policy.
+  parse for a present-but-unknown key): handled at the ingress since the
+  optional Ingress gained per-IP limits, a `/v1/admin` source allowlist
+  (deny by default) and an opt-in default-deny egress policy
+  (`optional/networkpolicy/egress/`). The app itself still has no limiter.
 - **Registration** is still unaudited and the owner alias unverified:
   the admin confirms the requester out of band.
-- **Migrate through PgBouncer**: session advisory locks need a direct
-  (non-pooled) DSN for `hivemind-migrate`; document or add a separate
-  setting (ADR 0020 note).
 - A pool acquire timeout surfaces as 500, not 503.
 - Structural untrusted-content markers on returned entries (deferred in
-  ADR 0043); non-reserved case-variant names (`Bob` / `bob`) can coexist
-  (ADR 0040). (Zero vectors and out-of-range values from the embedder
-  are now rejected; rows stored earlier are not re-checked.)
+  ADR 0043). (Case-variant agent names are refused since ADR 0045;
+  collisions registered before it stay. Zero vectors and out-of-range
+  values from the embedder are now rejected; rows stored earlier are not
+  re-checked.)
 - Performance: search loads full rows it partly discards (reads no longer
   fetch the embedding vector; bodies are still loaded, so a slim-row port
   method remains open); a query-embedding cache is unmeasured; very low-selectivity

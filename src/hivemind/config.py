@@ -128,6 +128,12 @@ class Settings(BaseSettings):
     database_url: str = Field(
         default="postgresql://hivemind:hivemind@localhost:5432/hivemind", repr=False
     )
+    # An optional DIRECT (non-pooled) DSN for `hivemind-migrate` only. The
+    # migration lock is a session advisory lock (ADR 0020), which a
+    # transaction-mode PgBouncer cannot hold, so a deployment whose
+    # `database_url` points at such a pooler sets this to Postgres itself.
+    # Empty = migrate through `database_url`.
+    migrate_database_url: str = Field(default="", repr=False)
     # The root logger level each runner configures at startup (see
     # ``configure_logging`` below) — one of Python's standard names
     # (DEBUG/INFO/WARNING/ERROR/CRITICAL, case-insensitive).
@@ -257,6 +263,12 @@ class Settings(BaseSettings):
         surfaces as a raw InvalidURL at the first request); reject inner
         whitespace. Never echoes the value (it may carry userinfo)."""
         return clean_endpoint(value)
+
+    @property
+    def migration_dsn(self) -> str:
+        """The DSN ``hivemind-migrate`` uses: ``migrate_database_url`` when
+        set, else ``database_url`` (ROADMAP 3.13)."""
+        return self.migrate_database_url.strip() or self.database_url
 
     @model_validator(mode="after")
     def _check_consistency(self) -> Settings:

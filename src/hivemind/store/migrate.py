@@ -462,7 +462,10 @@ async def current_schema_version(dsn: str) -> str | None:
 
 
 def main() -> None:
-    """Console entry point (``hivemind-migrate``): migrate from settings.
+    """Console entry point (``hivemind-migrate``): migrate from settings,
+    over ``HIVEMIND_MIGRATE_DATABASE_URL`` when it is set (a direct DSN
+    that can hold the session advisory lock behind a transaction-mode
+    pooler), else ``HIVEMIND_DATABASE_URL``.
 
     ``hivemind-migrate`` applies the chain. ``hivemind-migrate --rollback
     [N]`` reverses the N most recent migrations (default 1) — an
@@ -474,13 +477,13 @@ def main() -> None:
     try:
         if argv and argv[0] == "--rollback":
             count = int(argv[1]) if len(argv) > 1 else 1
-            rolled = asyncio.run(rollback(settings.database_url, settings.embedding_dim, count))
+            rolled = asyncio.run(rollback(settings.migration_dsn, settings.embedding_dim, count))
             for migration_id in rolled:
                 print(f"rolled back {migration_id}")
             if not rolled:
                 print("nothing to roll back")
             return
-        asyncio.run(migrate(settings.database_url, settings.embedding_dim))
+        asyncio.run(migrate(settings.migration_dsn, settings.embedding_dim))
     except (RuntimeError, ValueError) as exc:
         # A dim mismatch (ADR 0015) or a refused rollback (ADR 0020) is a
         # deployment error, not a crash — print the actionable message
