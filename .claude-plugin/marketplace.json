@@ -9,7 +9,7 @@
     {
       "name": "hivemind",
       "description": "Recall from and contribute to your organization's Hivemind in every session; includes the MCP connection, a SessionStart reminder that survives compaction, and the hivemind / hivemind-setup skills.",
-      "version": "2.1.0",
+      "version": "2.2.0",
       "source": "./plugins/hivemind",
       "category": "productivity"
     }
