@@ -1,14 +1,16 @@
 #!/bin/sh
-# First-run key bootstrap for the GitLab deploy job (DEP-1, DEP-9).
+# First-run key bootstrap for the GitLab deploy job (DEP-1, DEP-9, ADR 0044).
 #
 # Idempotent: does nothing when the `hivemind-keys` Secret already exists.
-# Otherwise runs deploy/kubernetes/bootstrap/keys-job.yaml (the image placeholder
-# replaced by $IMAGE) in the cluster, reads the two raw keys the Job prints
-# ONCE, and stores them in the `hivemind-keys` Secret. The raw keys are never
-# echoed by this script; they live only in the Job's pod log (deleted with the
-# Job) and then in the Secret. See DEPLOY.md §2/§4.
+# Otherwise applies the Job's RBAC (deploy/kubernetes/bootstrap/rbac.yaml) and
+# runs deploy/kubernetes/bootstrap/keys-job.yaml (the image placeholder
+# replaced by $IMAGE). The Job writes the raw admin and org keys straight into
+# the `hivemind-keys` Secret; no key ever passes through a log, this script or
+# GitLab. The RBAC objects are removed again when the Job has finished. See
+# DEPLOY.md §2/§4.
 #
-# Needs: kubectl (pointing at the cluster), IMAGE=<registry image:tag>.
+# Needs: kubectl (pointing at the cluster, allowed to manage Roles and
+# Secrets in the namespace), IMAGE=<registry image:tag>.
 # The Secret `hivemind-secrets` and ConfigMap `hivemind-config` must already exist.
 set -eu
 
@@ -16,19 +18,26 @@ set -eu
 NS="${NAMESPACE:-hivemind}"
 JOB=hivemind-keys-bootstrap
 MANIFEST="${BOOTSTRAP_MANIFEST:-deploy/kubernetes/bootstrap/keys-job.yaml}"
+RBAC="${BOOTSTRAP_RBAC:-deploy/kubernetes/bootstrap/rbac.yaml}"
 TIMEOUT="${BOOTSTRAP_TIMEOUT_SECONDS:-300}"
 
 # Fail CLOSED: `--ignore-not-found` makes "absent" an empty success, while an
 # API/auth/network error aborts under `set -e`. (Treating every error as
-# "absent" would re-run issue-admin + rotate-org and overwrite a live Secret,
-# silently rotating the org key - ADR 0031.)
+# "absent" would start the bootstrap against a live Secret; the Job's own
+# check and the create would still refuse, but nothing should get that far.)
 existing=$(kubectl -n "$NS" get secret hivemind-keys -o name --ignore-not-found)
 if [ -n "$existing" ]; then
   echo "hivemind-keys secret exists - skipping key bootstrap"
   exit 0
 fi
 
+remove_rbac() {
+  sed "s|namespace: hivemind\$|namespace: $NS|" "$RBAC" \
+    | kubectl -n "$NS" delete --ignore-not-found=true -f - >/dev/null || true
+}
+
 kubectl -n "$NS" delete job "$JOB" --ignore-not-found=true
+sed "s|namespace: hivemind\$|namespace: $NS|" "$RBAC" | kubectl -n "$NS" apply -f -
 # `sed` is only the image substitution; its output is piped into apply (a
 # here-document inside YAML cannot keep its terminator at column 0 - DEP-1).
 sed "s|hivemind:0.0.0|$IMAGE|g" "$MANIFEST" | kubectl -n "$NS" apply -f -
@@ -43,30 +52,26 @@ while :; do
     break
   fi
   if [ "${bad:-0}" -ge 1 ]; then
-    echo "key bootstrap Job FAILED. Its log may hold a raw key, so it is not printed:" >&2
-    echo "  kubectl -n $NS logs job/$JOB   (inspect by hand; see DEPLOY.md §2)" >&2
+    # The Job never prints a key (ADR 0044), so its log is safe to show.
+    echo "key bootstrap Job FAILED; its log:" >&2
+    kubectl -n "$NS" logs "job/$JOB" >&2 || true
+    remove_rbac
     exit 1
   fi
   if [ "$waited" -ge "$TIMEOUT" ]; then
     echo "key bootstrap Job did not finish within ${TIMEOUT}s" >&2
+    remove_rbac
     exit 1
   fi
   sleep 3
   waited=$((waited + 3))
 done
 
-logs=$(kubectl -n "$NS" logs "job/$JOB")
-admin_key=$(printf '%s\n' "$logs" | sed -n 's/^ADMIN_KEY=//p')
-org_key=$(printf '%s\n' "$logs" | sed -n 's/^ORG_KEY=//p')
-if [ -z "$admin_key" ] || [ -z "$org_key" ]; then
-  echo "could not read both keys from the bootstrap Job log; not creating hivemind-keys" >&2
+remove_rbac
+kubectl -n "$NS" delete job "$JOB" --ignore-not-found=true
+created=$(kubectl -n "$NS" get secret hivemind-keys -o name --ignore-not-found)
+if [ -z "$created" ]; then
+  echo "key bootstrap Job succeeded but the hivemind-keys Secret is missing" >&2
   exit 1
 fi
-
-manifest=$(kubectl -n "$NS" create secret generic hivemind-keys \
-  --from-literal=ADMIN_KEY="$admin_key" \
-  --from-literal=ORG_KEY="$org_key" \
-  --dry-run=client -o yaml)
-printf '%s\n' "$manifest" | kubectl -n "$NS" apply -f -
-kubectl -n "$NS" delete job "$JOB"
 echo "hivemind-keys secret created"

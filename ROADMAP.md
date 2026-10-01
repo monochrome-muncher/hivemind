@@ -460,7 +460,9 @@ credential is re-verified per call and fails closed (ADR 0042); entries
 are framed as untrusted data (ADR 0043); supersession is atomic in the
 store; `payload` round-trips on Postgres; `?history` is an indexed walk;
 the GitLab deploy job works; and the image is locked and non-root.
-DEPLOY.md §5 lists the upgrade steps.
+DEPLOY.md §5 lists the upgrade steps. Since then, the first-run key
+bootstrap writes the `hivemind-keys` Secret itself and prints no key
+(ADR 0044).
 
 **Open follow-ups** (found, deliberately not done; each needs a decision
 or its own trigger):
@@ -480,8 +482,6 @@ or its own trigger):
   (non-pooled) DSN for `hivemind-migrate`; document or add a separate
   setting (ADR 0020 note).
 - A pool acquire timeout surfaces as 500, not 503.
-- The first-run key bootstrap prints the raw keys once in its Job log
-  (removing that needs a ServiceAccount with `secrets:create`).
 - Structural untrusted-content markers on returned entries (deferred in
   ADR 0043); non-reserved case-variant names (`Bob` / `bob`) can coexist
   (ADR 0040); zero-norm embeddings are not rejected.

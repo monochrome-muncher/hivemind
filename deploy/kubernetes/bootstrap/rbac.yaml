@@ -1,0 +1,55 @@
+# RBAC for the first-run key bootstrap Job (ADR 0044) — applied and removed
+# again by scripts/ci-bootstrap-keys.sh around the Job, ONLY while the
+# `hivemind-keys` Secret does not exist. Deliberately NOT part of any
+# kustomization, like keys-job.yaml.
+#
+# The Job writes the raw admin and org keys straight into the Secret instead
+# of printing them, so it needs exactly this:
+#   * create Secrets in the namespace (Kubernetes cannot narrow `create` by
+#     name; the Job only ever creates `hivemind-keys`),
+#   * get `hivemind-keys` (the idempotency check) and delete it (the cleanup
+#     when the database commit fails after the Secret was created).
+# The deploy identity needs the same Secret permissions to create this Role
+# (Kubernetes RBAC escalation check); it already creates `hivemind-secrets`.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hivemind-keys-bootstrap
+  labels:
+    app.kubernetes.io/name: hivemind
+    app.kubernetes.io/component: keys-bootstrap
+# Only the Job's pod (which opts in) mounts a token.
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: hivemind-keys-bootstrap
+  labels:
+    app.kubernetes.io/name: hivemind
+    app.kubernetes.io/component: keys-bootstrap
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["hivemind-keys"]
+    verbs: ["get", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: hivemind-keys-bootstrap
+  labels:
+    app.kubernetes.io/name: hivemind
+    app.kubernetes.io/component: keys-bootstrap
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: hivemind-keys-bootstrap
+subjects:
+  - kind: ServiceAccount
+    name: hivemind-keys-bootstrap
+    # Rewritten by scripts/ci-bootstrap-keys.sh when NAMESPACE is not hivemind.
+    namespace: hivemind
