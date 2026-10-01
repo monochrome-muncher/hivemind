@@ -164,6 +164,20 @@ class Store(Protocol):
         """
         ...
 
+    async def similar_entries(
+        self,
+        embedding: list[float],
+        limit: int,
+        *,
+        exclude_id: str,
+        visibility: Visibility | None = None,
+    ) -> list[tuple[str, float]]:
+        """The active entries nearest to ``embedding``, as ``(id,
+        similarity)`` pairs (cosine similarity, highest first), leaving out
+        ``exclude_id`` (ADR 0052). Restricted to ``visibility`` when given.
+        Approximate on Postgres, like ``search_vector`` (ADR 0025)."""
+        ...
+
     # -- fleets (ADR 0011) ----------------------------------------------------
 
     async def create_fleet(self, name: str) -> Fleet:
