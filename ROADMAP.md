@@ -947,7 +947,7 @@ so the later decision is data-driven. Two kinds:
 |---|---|---|---|
 | Knowledge graph | "entity linking pays off in retrieval" | hit@k gap on entity-linked queries vs. plain hybrid *(the facet slice is pre-staged and shipped by ADR 0016 / SPEC §13 — see Tier 4.3; only the graph half of this row remains held)* | §1.1 harness |
 | Per-agent retrieval tuning | "static decay stops beating per-agent profiles" | per-agent MRR/AUC vs. static model | §1.1 harness |
-| Passive capture | "agents forget to write" | high-value agent turns with no write; "should have remembered X" reports / wk | §3.3 counters |
+| Passive capture | "agents forget to write" | high-value agent turns with no write; "should have remembered X" reports / wk; the empty-search rate per fleet *(counted since ADR 0056: `hivemind_searches_empty_total` / `hivemind_searches_total`)* | §3.3 counters |
 | Private staging | "try before sharing" | fraction of `self`-scoped entries later promoted to the fleet *(the `self` scope is now the staging space — ADR 0011; promotion is the curation story)* | §3.3 counters |
 | Namespaces / channels | "flat pool too noisy" | result precision on scope-unspecified queries; count of distinct fleets in use *(partially satisfied by ADR 0011: single-fleet needs are covered; multi-fleet membership is the remaining extension)* | §3.3 counters |
 | Binary artifacts | "analyses outgrow file/URL refs" | count of `sources` with `type=file` or payload > threshold | §3.3 counters |

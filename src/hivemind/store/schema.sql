@@ -126,6 +126,14 @@ CREATE TABLE public.fleets (
     created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
+CREATE TABLE public.search_counts (
+    fleet_id text NOT NULL,
+    searches bigint DEFAULT 0 NOT NULL,
+    empty bigint DEFAULT 0 NOT NULL,
+    CONSTRAINT search_counts_empty_check CHECK (((empty >= 0) AND (empty <= searches))),
+    CONSTRAINT search_counts_searches_check CHECK ((searches >= 0))
+);
+
 ALTER TABLE ONLY public.agents
     ADD CONSTRAINT agents_pkey PRIMARY KEY (name);
 
@@ -146,6 +154,9 @@ ALTER TABLE ONLY public.fleets
 
 ALTER TABLE ONLY public.fleets
     ADD CONSTRAINT fleets_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY public.search_counts
+    ADD CONSTRAINT search_counts_pkey PRIMARY KEY (fleet_id);
 
 CREATE INDEX agents_fleet_idx ON public.agents USING btree (home_fleet_id);
 

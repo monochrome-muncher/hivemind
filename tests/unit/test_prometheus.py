@@ -122,6 +122,7 @@ async def test_usage_report_is_cached_and_a_failure_keeps_the_last_snapshot() ->
             },
             "fleets": {"total": 0, "writes_by_fleet": {}},
             "agents": {"pending": 0, "active": 0, "revoked": 0, "by_trust_level": {}},
+            "searches": {"total": 0, "empty": 0, "by_fleet": {}},
         }
 
     metrics = PrometheusMetrics(report, ttl=30.0, clock=lambda: now[0])

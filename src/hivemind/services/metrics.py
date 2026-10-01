@@ -13,6 +13,8 @@ and its follow-on per-author ``kind`` distribution):
   by_author_kind, inactive.
 - fleets: total + per-fleet writes (``entries.fleet_id``).
 - agents: total, pending, active, trust-level distribution.
+- searches (ADR 0056): first-page searches and how many found nothing,
+  in total and per home fleet of the searching agent.
 """
 
 from __future__ import annotations
@@ -22,7 +24,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from hivemind.domain.access import Agent, AgentStatus, Fleet, TrustLevel
-from hivemind.domain.entry import ImportanceSource, Kind, UsageCount
+from hivemind.domain.entry import ImportanceSource, Kind, SearchCount, UsageCount
 from hivemind.ports import Store
 
 # The canonical scopes / kinds (the "distinct tags in use" signal).
@@ -57,10 +59,12 @@ class MetricsService:
         agents = await self._store.list_agents()
         fleets = await self._store.list_fleets()
         rows = await self._store.usage_counts()
+        searches = await self._store.search_counts()
         return {
             "entries": self._entries_report(agents, rows),
             "fleets": self._fleets_report(fleets, rows),
             "agents": self._agents_report(agents),
+            "searches": self._searches_report(fleets, searches),
         }
 
     def _entries_report(
@@ -120,6 +124,23 @@ class MetricsService:
         return {
             "total": len(fleets),
             "writes_by_fleet": {fleet.name: writes[fleet.id] for fleet in fleets},
+        }
+
+    def _searches_report(
+        self, fleets: Sequence[Fleet], rows: Sequence[SearchCount]
+    ) -> dict[str, Any]:
+        """Search counters (ADR 0056): first-page searches and the ones that
+        found nothing, in total and per fleet name. Searches from callers
+        without a home fleet count in the totals only."""
+        by_id = {r.fleet_id: r for r in rows}
+        return {
+            "total": sum(r.searches for r in rows),
+            "empty": sum(r.empty for r in rows),
+            "by_fleet": {
+                fleet.name: {"total": row.searches, "empty": row.empty}
+                for fleet in fleets
+                if (row := by_id.get(fleet.id)) is not None
+            },
         }
 
     def _agents_report(self, agents: Sequence[Agent]) -> dict[str, Any]:

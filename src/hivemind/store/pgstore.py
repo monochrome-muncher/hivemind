@@ -52,6 +52,7 @@ from hivemind.domain.entry import (
     ExtractedEntity,
     ImportanceSource,
     Kind,
+    SearchCount,
     Source,
     SourceType,
     UsageCount,
@@ -111,6 +112,16 @@ SELECT scope, kind, importance_source, author, fleet_id,
   FROM entries
  GROUP BY scope, kind, importance_source, author, fleet_id, (state = 'active')
 """
+
+# One row per home fleet ('' = none), bumped once per first-page search
+# (ADR 0056). Counts only: no query text, no agent name.
+RECORD_SEARCH = """
+INSERT INTO search_counts (fleet_id, searches, empty) VALUES ($1, 1, $2)
+ON CONFLICT (fleet_id) DO UPDATE
+   SET searches = search_counts.searches + 1,
+       empty = search_counts.empty + EXCLUDED.empty
+"""
+SEARCH_COUNTS = "SELECT fleet_id, searches, empty FROM search_counts"
 
 # --- Fleet / agent access-control SQL (ADRs 0011-0012) ---------------------
 
@@ -568,6 +579,24 @@ class PgStore:
                 fleet_id=str(row["fleet_id"]) if row["fleet_id"] is not None else None,
                 active=bool(row["active"]),
                 count=int(row["n"]),
+            )
+            for row in rows
+        ]
+
+    async def record_search(self, fleet_id: str | None, *, empty: bool) -> None:
+        pool = await self._ensure_pool()
+        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+            await conn.execute(RECORD_SEARCH, fleet_id or "", int(empty))
+
+    async def search_counts(self) -> list[SearchCount]:
+        pool = await self._ensure_pool()
+        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+            rows = await conn.fetch(SEARCH_COUNTS)
+        return [
+            SearchCount(
+                fleet_id=row["fleet_id"] or None,
+                searches=int(row["searches"]),
+                empty=int(row["empty"]),
             )
             for row in rows
         ]
