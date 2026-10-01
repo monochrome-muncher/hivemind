@@ -49,6 +49,14 @@ def test_every_mcp_tool_is_in_the_skill_and_no_other() -> None:
     assert mentioned == set(EXPECTED_TOOLS)
 
 
+def test_the_always_on_skill_stays_small() -> None:
+    """The hivemind skill is loaded in every session and again after each
+    compaction, so every byte costs on every load. It says when and why;
+    parameters and limits belong in the tool descriptions, which every
+    session gets from the server anyway."""
+    assert len(SKILL.encode()) <= 10_000, len(SKILL.encode())
+
+
 def test_the_whoami_fields_the_skills_rely_on_exist() -> None:
     fields = Standing(
         key_kind="agent",
