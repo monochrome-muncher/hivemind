@@ -109,7 +109,7 @@ class TestKeyNeverLeaks:
             await _extractor(_leaky).extract_entry(_draft())
         assert KEY not in str(exc.value) and KEY not in caplog.text
 
-    async def test_rest_502_body_is_generic_on_write_and_search(self, caplog) -> None:
+    async def test_rest_write_502_is_generic_and_search_degrades(self, caplog) -> None:
         app = create_app_for_config(
             Settings(),
             store=MemoryStore(make_clock()),
@@ -120,26 +120,30 @@ class TestKeyNeverLeaks:
         caplog.set_level(logging.DEBUG)
         async with make_client(app) as client:
             headers = {"X-API-Key": "key-alice-user"}
-            for path, body in (
-                ("/v1/search", {"query": "q"}),
-                ("/v1/entries", {"kind": "fact", "summary": "s", "agent": "a"}),
-            ):
-                r = await client.post(path, json=body, headers=headers)
-                assert r.status_code == 502, r.text
-                assert r.json()["error"]["code"] == "embedding_unavailable"
-                assert KEY not in r.text
+            r = await client.post(
+                "/v1/entries", json={"kind": "fact", "summary": "s", "agent": "a"}, headers=headers
+            )
+            assert r.status_code == 502, r.text
+            assert r.json()["error"]["code"] == "embedding_unavailable"
+            assert KEY not in r.text
+            # ADR 0048: search falls back to keyword-only instead of a 502.
+            r = await client.post("/v1/search", json={"query": "q"}, headers=headers)
+            assert r.status_code == 200, r.text
+            assert r.headers["X-Hivemind-Degraded"] == "keyword-only"
+            assert KEY not in r.text
 
-    async def test_mcp_search_and_write_return_a_typed_error(self) -> None:
+    async def test_mcp_write_errors_and_search_degrades(self) -> None:
         clock = make_clock()
         app = build_app(MemoryStore(clock), ALICE, clock)
         app.search_service._embedder = _LeakyEmbedder()  # type: ignore[attr-defined]
         app.write_service._embedder = _LeakyEmbedder()  # type: ignore[attr-defined]
-        for result in (
-            await hive_search(app, query="q"),
-            await hive_write(app, kind="fact", summary="s"),
-        ):
-            assert result["error"]["code"] == "embedding_unavailable", result
-            assert KEY not in json.dumps(result)
+        written = await hive_write(app, kind="fact", summary="s")
+        assert written["error"]["code"] == "embedding_unavailable", written  # type: ignore[index]
+        assert KEY not in json.dumps(written)
+        # ADR 0048: search falls back to keyword-only instead of an error.
+        found = await hive_search(app, query="q")
+        assert found["degraded"] == "keyword_only", found
+        assert KEY not in json.dumps(found)
 
 
 class TestResponseValidation:

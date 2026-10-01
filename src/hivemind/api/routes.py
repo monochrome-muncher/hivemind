@@ -86,6 +86,11 @@ ActorQuery = Annotated[str | None, Query(max_length=MAX_IDENTITY_CHARS), AfterVa
 AUDIT_LOG_DEFAULT_LIMIT = 100
 AUDIT_LOG_MAX_LIMIT = 1000
 
+# ADR 0048: a search answered by the keyword stream alone because the
+# embedding service failed says so in this response header.
+DEGRADED_HEADER = "X-Hivemind-Degraded"
+DEGRADED_KEYWORD_ONLY = "keyword-only"
+
 logger = logging.getLogger(__name__)
 
 
@@ -275,8 +280,15 @@ def build_router(app: HivemindApp) -> APIRouter:
         return [EntryOut.from_entry(e) for e in entries]
 
     @router.post("/search", response_model=list[HitOut])
-    async def search(request: SearchRequest, credential: require) -> list[HitOut]:
-        """Hybrid search with filters; compact hits, no bodies (SPEC.md §6)."""
+    async def search(
+        request: SearchRequest, credential: require, response: Response
+    ) -> list[HitOut]:
+        """Hybrid search with filters; compact hits, no bodies (SPEC.md §6).
+
+        When the embedding service is down the hits come from the keyword
+        stream alone and the response carries ``X-Hivemind-Degraded:
+        keyword-only`` (ADR 0048); the body keeps its shape.
+        """
         filters = EntryFilters(
             kind=request.kind,
             tags=tuple(request.tags),
@@ -290,17 +302,16 @@ def build_router(app: HivemindApp) -> APIRouter:
             created_to=request.created_to,
             include_inactive=request.include_inactive,
         )
-        try:
-            hits = await app.search_service.search(
-                request.query,
-                filters,
-                request.limit,
-                offset=request.offset,
-                visibility=credential.visibility(),
-            )
-        except EmbeddingError as exc:
-            raise _embedding_unavailable(exc) from exc
-        return [HitOut.from_hit(h) for h in hits]
+        result = await app.search_service.search_result(
+            request.query,
+            filters,
+            request.limit,
+            offset=request.offset,
+            visibility=credential.visibility(),
+        )
+        if result.degraded:
+            response.headers[DEGRADED_HEADER] = DEGRADED_KEYWORD_ONLY
+        return [HitOut.from_hit(h) for h in result.hits]
 
     @router.post("/entries/{entry_id}/withdraw", response_model=EntryOut)
     async def withdraw(entry_id: str, request: WithdrawRequest, credential: require) -> EntryOut:

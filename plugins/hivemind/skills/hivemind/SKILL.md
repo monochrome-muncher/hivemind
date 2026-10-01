@@ -172,7 +172,9 @@ for the end of the session: write at the moment you learn it.
   below.
 - `embedding_unavailable`: Hivemind is up but cannot index entries right
   now. Do not retry in a loop: keep the note locally (§4) and write it
-  once a later call succeeds. Searches fail the same way meanwhile (§6).
+  once a later call succeeds. Searches still work meanwhile, but return
+  keyword matches only and say `degraded: keyword_only`: an empty or
+  thin result then does not show that nothing was recorded.
 
 **Security findings are allowed.** In security work (red/blue team,
 audits, incident response) you may record credentials, keys or secrets
