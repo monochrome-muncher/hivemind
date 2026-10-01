@@ -70,11 +70,11 @@ spec:
                 port:
                   number: 8000
 ---
-# The admin REST surface (/v1/admin/*) is for operators, who reach it through
-# the admin panel (ADR 0029: internal ingress or port-forward) or
-# `kubectl port-forward`, never from the internet. This second Ingress for the
-# same host takes the /v1/admin prefix away from the one above (nginx picks
-# the longest matching prefix) and admits only the listed source ranges.
+# The admin REST surface (/v1/admin/*, plus the admin-only /v1/metrics) is
+# for operators, who reach it through the admin panel (ADR 0029: internal
+# ingress or port-forward) or `kubectl port-forward`, never from the
+# internet. This second Ingress for the same host takes those paths away
+# from the one above (nginx picks the longest matching prefix) and admits only the listed source ranges.
 # The default, 127.0.0.1/32, admits nobody from outside, so every external
 # request answers 403. To allow an operator network, put its CIDRs here
 # (comma-separated). It also takes /metrics, the unauthenticated Prometheus
@@ -113,6 +113,13 @@ spec:
                 port:
                   number: 8000
           - path: /metrics
+            pathType: Exact
+            backend:
+              service:
+                name: hivemind-api
+                port:
+                  number: 8000
+          - path: /v1/metrics
             pathType: Exact
             backend:
               service:
