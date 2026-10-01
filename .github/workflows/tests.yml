@@ -1,0 +1,87 @@
+name: Tests
+
+# Lint, type-check and the full pytest suite (unit + Postgres integration)
+# on every pull request and every push to main. The Docker workflow only
+# proves the image builds; this one proves the code works.
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Same uv as the Dockerfile. Python is pinned to a stable release: an old
+  # uv once resolved "3.14" to a release candidate that breaks pydantic.
+  UV_VERSION: "0.12.21"
+  PYTHON_VERSION: "3.14.7"
+  UV_PYTHON: "3.14.7"
+  UV_PYTHON_PREFERENCE: only-managed
+
+jobs:
+  check:
+    name: Lint + type-check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv and Python
+        run: |
+          pip install --no-cache-dir "uv==${UV_VERSION}"
+          uv python install "${PYTHON_VERSION}"
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: make check
+        run: make check
+
+  test:
+    name: Unit + Postgres tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # Same image family as docker-compose.yaml (`make pg`), pinned.
+        image: pgvector/pgvector:0.8.6-pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
+        env:
+          POSTGRES_DB: hivemind
+          POSTGRES_USER: hivemind
+          POSTGRES_PASSWORD: hivemind
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hivemind"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+    env:
+      # A throwaway service database; the integration tests TRUNCATE it.
+      HIVEMIND_DATABASE_URL: postgresql://hivemind:hivemind@localhost:5432/hivemind
+      HIVEMIND_EMBEDDING_DIM: "512"
+      # Fail, don't skip, if the Postgres tests cannot reach the service.
+      HM_TEST_REQUIRE_PG: "1"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv and Python
+        run: |
+          pip install --no-cache-dir "uv==${UV_VERSION}"
+          uv python install "${PYTHON_VERSION}"
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Apply migrations
+        run: uv run hivemind-migrate
+
+      - name: Run the test suite
+        run: uv run pytest -rs
