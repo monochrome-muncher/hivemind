@@ -1,31 +1,10 @@
 """OpenAI-compatible embedder: the real ``Embedder`` port implementation.
 
-Wraps an OpenAI-compatible ``/embeddings`` HTTP endpoint (OpenAI,
-self-hosted vLLM, Ollama — ADR 0005) with ``httpx``. The client is
-injected so unit tests run against ``httpx.MockTransport`` with no
-network; when no client is given, one is built and owned by the
-embedder (close it via ``aclose``).
-
-The request shape follows the OpenAI embeddings API:
-
-    POST {base_url}/embeddings
-    {"model": "<model>", "input": "<text>", "dimensions": <dim>}
-    -> {"data": [{"embedding": [f, ...]}], ...}
-
-The ``dimensions`` field asks the endpoint to produce the deploy-time
-dimension (ADR 0005): Matryoshka-capable providers (OpenAI
-text-embedding-3-*, vLLM embedding servers) truncate to exactly that
-length, and the response length is validated on every call. Endpoints
-that cannot honor the dimension reject the request, which surfaces as
-an ``EmbeddingError`` — the dimension is a deploy-time contract.
-
-Embedding model and dimension are recorded per entry (ADR 0005); the
-dimension is a deploy-time decision and validated on every response.
-
-Transient failures — timeouts, connection/network errors, ``429`` and
-5xx responses — are retried within a bounded budget (exponential
-backoff; ADR 0014). Deterministic failures (other 4xx, client-side
-validation) fail fast.
+Requests send ``dimensions`` = the deploy-time dim (ADR 0005), which
+Matryoshka-capable providers truncate to; every response length is
+validated, and an endpoint that cannot honour it fails as
+``EmbeddingError``. Transient failures (timeouts, connection errors,
+429, 5xx) are retried with backoff (ADR 0014); others fail fast.
 """
 
 from __future__ import annotations
@@ -56,9 +35,7 @@ async def _default_sleep(delay: float) -> None:
 class EmbeddingError(Exception):
     """The embeddings endpoint could not produce a vector.
 
-    ``status`` carries the HTTP status code when the failure was an
-    HTTP error; it is ``None`` for validation failures (dimension
-    mismatch, malformed body) that happen after a successful exchange.
+    ``status`` is the HTTP status, or ``None`` for validation failures.
     """
 
     def __init__(self, message: str, status: int | None = None) -> None:
@@ -88,38 +65,22 @@ class OpenAICompatEmbedder:
         """Create an embedder.
 
         Args:
-            client: An injected ``httpx.AsyncClient`` (tests use a
-                MockTransport transport). When ``None``, a client is
-                built from ``base_url`` semantics and owned by the
-                embedder (closed by ``aclose``).
-            base_url: The endpoint base (e.g. ``http://host:8001/v1``);
-                requests go to ``{base_url}/embeddings``.
-            api_key: The ``Authorization: Bearer`` credential; an empty
-                string means no auth header is sent.
-            model_name: The embedding model identifier (recorded per
-                entry, ADR 0005).
-            dim: The fixed vector dimension (deploy-time decision,
-                ADR 0005); requested via the OpenAI ``dimensions``
-                field and validated on every response.
-            prefix_tokens: The bounded body prefix the embedded text
-                is cut at, in whitespace-delimited words (SPEC §7, ADR
-                0021: ``embedding_prefix_tokens``). The extractor reads
-                the same bounded text (ADR 0016, SPEC §13.1).
-            timeout: The request timeout used only when the embedder
-                builds its own client.
-            retries: The number of retries (after the first attempt)
-                allowed for transient failures — timeouts, connection
-                errors, ``429`` and 5xx (ADR 0014). ``0`` disables
-                retrying; the default is 2 (up to 3 attempts).
-            backoff: The base backoff in seconds; retry *i* sleeps
-                ``backoff * 2**i`` (0.5s, 1s, ...).
-            sleep: The backoff sleep callable; defaults to
-                ``asyncio.sleep`` (tests inject a recorder).
-            deadline: The overall wall-clock budget in seconds for one
-                embed call, retries and backoff included (ADR 0041).
-                ``None`` derives it from ``timeout`` and ``retries``.
-            jitter: Returns a value in [0, 1) scaling each backoff to
-                [0.5x, 1x] (tests pin it); defaults to ``random.random``.
+            client: An injected ``httpx.AsyncClient``; ``None`` builds
+                one owned by the embedder (closed by ``aclose``).
+            base_url: Requests go to ``{base_url}/embeddings``.
+            api_key: Bearer credential; empty sends no auth header.
+            model_name: Recorded per entry (ADR 0005).
+            dim: The fixed vector dimension (ADR 0005).
+            prefix_tokens: Body prefix bound in words (SPEC §7, ADR 0021).
+            timeout: Used only when building the client.
+            retries: Retries after the first attempt for transient
+                failures; ``0`` disables.
+            backoff: Base backoff; retry *i* sleeps ``backoff * 2**i``.
+            sleep: Backoff sleep (tests inject a recorder).
+            deadline: Wall-clock budget for one embed call, retries
+                included (ADR 0041); ``None`` derives it.
+            jitter: Returns [0, 1), scaling each backoff to [0.5x, 1x];
+                defaults to ``random.random``.
         """
         self._owns_client = client is None
         if client is None:
@@ -174,9 +135,7 @@ class OpenAICompatEmbedder:
         return self._base_url
 
     def entry_embeddable_text(self, draft: EntryDraft) -> str:
-        """The exact text an entry is embedded from (SPEC.md §7): the
-        summary plus a bounded prefix of the body (``prefix_tokens``
-        whitespace-delimited words — ADR 0021)."""
+        """The exact text an entry is embedded from (SPEC.md §7, ADR 0021)."""
         return embeddable_text(draft.summary, draft.body, self._prefix_tokens)
 
     async def embed_text(self, text: str) -> list[float]:
@@ -188,32 +147,20 @@ class OpenAICompatEmbedder:
         return await self._embed(self.entry_embeddable_text(draft))
 
     async def aclose(self) -> None:
-        """Close the HTTP client, but only if this embedder built it.
-
-        A caller-injected client stays open and is the caller's to
-        close. Safe to call multiple times.
-        """
+        """Close the HTTP client if this embedder built it; idempotent."""
         if self._owns_client:
             self._owns_client = False
             await self._client.aclose()
 
     async def _embed(self, text: str) -> list[float]:
-        """POST one text to the endpoint and return its vector.
-
-        Transient failures — timeouts, connection/network errors,
-        ``429`` and 5xx responses — are retried up to ``retries``
-        times with exponential backoff (ADR 0014). Deterministic
-        failures — other 4xx responses, client-side validation
-        (dimension mismatch) — fail fast with ``EmbeddingError``.
-        """
+        """POST one text and return its vector (retry policy: see the
+        module docstring)."""
         headers: dict[str, str] = {}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
         payload: dict[str, Any] = {
             "model": self._model_name,
             "input": text,
-            # The deploy-time dimension (ADR 0005): Matryoshka-capable
-            # providers truncate to this length; see the module docstring.
             "dimensions": self._dim,
         }
         response = await post_with_retries(
@@ -259,11 +206,9 @@ class OpenAICompatEmbedder:
             if isinstance(v, bool) or not isinstance(v, int | float) or not math.isfinite(v):
                 raise EmbeddingError("embeddings response holds a non-finite or non-numeric value")
             values.append(float(v))
-        # pgvector stores float32 (ROADMAP 3.13): a value beyond its range
-        # is rejected by Postgres (a DataError mid-write), and a vector whose
-        # values all round to zero has no direction, so every cosine
-        # distance to it is NaN and it ranks arbitrarily. Both are the
-        # provider's fault and deterministic, so they fail fast here.
+        # pgvector stores float32 (ROADMAP 3.13): an out-of-range value
+        # fails the write in Postgres, and an all-zero vector has NaN cosine
+        # distances. Both are deterministic provider faults: fail fast.
         as_stored = array("f", values)
         if any(math.isinf(v) for v in as_stored):
             raise EmbeddingError("embeddings response holds a value outside the float32 range")

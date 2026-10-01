@@ -1,9 +1,7 @@
-# Admin panel (ADR 0029) — the `hivemind-admin` console script: a static
-# UI plus an allowlisted same-origin proxy to hivemind-api.
-#
-# Same image as api / mcp-http (HIVEMIND_RUNNER selects the runner; the
-# placeholder `hivemind:0.0.0` is the CI sed target). The entrypoint
-# SKIPS the migration pre-step for this runner: it has no database.
+# Admin panel (ADR 0029): the `hivemind-admin` console script, a static UI
+# plus an allowlisted same-origin proxy to hivemind-api. Same image
+# (`hivemind:0.0.0` is the CI sed target); the entrypoint skips the
+# migration for this runner, which has no database.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -12,10 +10,8 @@ metadata:
     app.kubernetes.io/name: hivemind
     app.kubernetes.io/component: admin
 spec:
-  # One replica, no PDB (ADR 0029): the panel is stateless and used by
-  # operators only, so a few seconds of unavailability during a rollout
-  # or a node drain costs nothing. Raise it freely — there is no shared
-  # state (the admin key lives in each operator's browser tab).
+  # One replica, no PDB (ADR 0029): operator-only and stateless (the admin
+  # key lives in the browser tab), so brief gaps cost nothing. Raise freely.
   replicas: 1
   selector:
     matchLabels:
@@ -27,14 +23,11 @@ spec:
         app.kubernetes.io/name: hivemind
         app.kubernetes.io/component: admin
     spec:
-      # No Kubernetes service-link variables: every Service named
-      # hivemind-* would otherwise inject HIVEMIND_*_SERVICE_HOST /
-      # _PORT variables into this pod (ADR 0032). Hivemind finds its
-      # peers by DNS name, never through these.
+      # No service-link variables: hivemind-* Services would otherwise inject
+      # HIVEMIND_*_SERVICE_HOST / _PORT into the env (ADR 0032).
       enableServiceLinks: false
-      # Hardening (DEP-4): non-root numeric UID (matches the image's USER),
-      # RuntimeDefault seccomp, and no ServiceAccount token (no pod here talks
-      # to the Kubernetes API).
+      # Hardening (DEP-4): non-root UID matching the image's USER,
+      # RuntimeDefault seccomp, no ServiceAccount token.
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true

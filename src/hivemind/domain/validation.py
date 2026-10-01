@@ -1,13 +1,9 @@
 """Input bounds and text rules shared by every surface (ADR 0040).
 
-One validator set, used by the domain (``EntryDraft`` / ``EntryFilters``),
-the services (search, governance, access) and, for the numeric bounds,
-the REST schemas — so REST and MCP reject the same inputs for the same
-reasons, **before** any embedder or store call. Pure: no I/O.
-
-Why these exist: Postgres ``text`` cannot hold U+0000 (asyncpg raises, the
-client saw a bare 500), a ``tsvector`` tops out at 1 MB, and nothing else
-bounded field sizes, ``limit`` or ``offset``.
+One validator set for the domain, services and REST schemas, so REST and
+MCP reject the same inputs **before** any embedder or store call. Needed
+because Postgres ``text`` cannot hold U+0000 and a ``tsvector`` tops out
+at 1 MB.
 """
 
 from __future__ import annotations

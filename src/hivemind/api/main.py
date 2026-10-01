@@ -1,9 +1,7 @@
 """Production entry point: build the app from settings and serve it.
 
-The pgstore and embeddings lanes are imported lazily (inside the
-factory functions) so this module stays importable before those lanes
-exist; the unit suite never triggers those imports (it injects fakes
-via ``create_app_for_config``).
+The store and embeddings modules are imported lazily, so the unit suite
+(which injects fakes via ``create_app_for_config``) never imports them.
 """
 
 from __future__ import annotations
@@ -37,15 +35,9 @@ def create_app_for_config(
 ) -> HivemindApp:
     """Build a HivemindApp from settings, with optional fake overrides.
 
-    Tests pass fakes for store/embedder/authenticator (the unit suite
-    must never depend on the pgstore or embeddings lanes); production
-    leaves them unset, and the real implementations are built lazily
-    from settings (SPEC.md §8.2, ADR 0007).
-
-    The ``extractor`` override follows the same pattern (ADR 0016):
-    an explicit fake is used when given; otherwise the extractor is
-    built from settings — which is ``None`` (extraction off, zero
-    LLM-extraction cost) when the extractor endpoint is unset.
+    Tests pass fakes; anything left unset is built from settings
+    (SPEC.md §8.2, ADR 0007). The built extractor is ``None`` when its
+    endpoint is unset (ADR 0016).
     """
     store = store if store is not None else _build_store(settings)
     embedder = embedder if embedder is not None else _build_embedder(settings)
@@ -58,8 +50,6 @@ def create_app_for_config(
         authenticator=authenticator,
         search_config=search_config,
         write_service=WriteService(store, embedder, extractor),
-        # The quality-formula weights are config (SPEC.md §6.4): the
-        # governance service reports the same multiplier search rescoring uses.
         governance_service=GovernanceService(store, search_config),
         search_service=SearchService(store, embedder, search_config),
         access_service=AccessService(store, authenticator),

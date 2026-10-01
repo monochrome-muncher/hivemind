@@ -1,18 +1,15 @@
 """Shared plumbing for the outbound provider clients (embedder, extractor).
 
-One place for what both OpenAI-compatible clients must do identically
-(ADR 0014 pattern, PC-1/PC-3/PC-5/PC-12 of the provider review):
+What both OpenAI-compatible clients must do identically (ADR 0014,
+PC-1/PC-3/PC-5/PC-12):
 
-* **Never leak secrets through errors.** ``httpx`` exception messages can
-  carry the ``Authorization`` header (an API key with a trailing newline
-  raises ``Illegal header value b'Bearer <key>\\n'``) or a URL with
-  userinfo. A transport failure is therefore reported by exception
-  *class name only*; the raw message is never interpolated.
-* **Retry transient failures** — timeouts, network errors, a dropped
-  keep-alive (``RemoteProtocolError``), ``429`` and 5xx — with
-  exponential backoff + jitter, honouring a capped ``Retry-After``.
-  Every other 4xx, redirects and client-side config errors fail fast.
-* **An overall deadline** per call, retries included.
+* **Never leak secrets through errors.** httpx messages can carry the
+  ``Authorization`` header or a URL with userinfo, so failures are
+  reported by exception *class name only*.
+* **Retry transient failures** (timeouts, network errors, a dropped
+  keep-alive, 429, 5xx) with jittered backoff, honouring a capped
+  ``Retry-After``; other 4xx, redirects and config errors fail fast.
+* **An overall deadline** per call, retries included (ADR 0041).
 """
 
 from __future__ import annotations
@@ -63,11 +60,9 @@ def clean_endpoint(url: str) -> str:
 
 
 def default_deadline(timeout: float, retries: int, backoff: float = 0.5) -> float:
-    """The overall per-call budget when none is configured: every attempt
-    at its full per-phase timeout plus every (un-jittered) backoff sleep —
-    i.e. the documented worst case of ``*_TIMEOUT`` / ``*_RETRIES``
-    (DEPLOY.md §5). The deadline then only bites for a slow-drip response
-    (httpx's timeout is per phase, not total) or a long ``Retry-After``.
+    """The per-call budget when none is configured: every attempt at full
+    timeout plus every un-jittered backoff (the DEPLOY.md §5 worst case).
+    It then bites only on a slow-drip response or a long ``Retry-After``.
     """
     retries = max(0, retries)
     return float((retries + 1) * timeout + backoff * (2**retries - 1))
@@ -151,9 +146,7 @@ async def _attempts[E: Exception](
             # Transient. Class name only: never the message (PC-1).
             last = error(f"{label} failed ({type(exc).__name__})", None)
         except (httpx.HTTPError, httpx.InvalidURL, UnicodeError) as exc:
-            # A client-side / configuration failure (illegal header, bad
-            # URL, unencodable header/body, unsupported protocol):
-            # deterministic, fail fast. Class name only (PC-1).
+            # Client-side / configuration failure: fail fast, class name only.
             raise error(f"{label} failed ({type(exc).__name__})", None) from None
         else:
             status = response.status_code

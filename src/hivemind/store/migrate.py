@@ -1,43 +1,24 @@
 """Migration runner: apply the ordered migration chain (ADR 0020).
 
-The schema is a chain of ordered migrations under ``migrations/``,
-applied by `yoyo <https://ollycope.com/software/yoyo/>`_. ``migrate``
-applies every migration not yet recorded in yoyo's ``_yoyo_migration``
-table, so it is safe to run on every process start — an up-to-date pool
-is a no-op — and the image entrypoint does exactly that (ADR 0018).
+``migrate`` applies, via yoyo, every migration under ``migrations/`` not
+yet recorded in ``_yoyo_migration``; an up-to-date pool is a no-op, so
+the entrypoint runs it on every start (ADR 0018).
 
-**Concurrency (ADR 0020).** ``migrate`` holds a Postgres *advisory*
-lock for the whole run, so many replicas may start at once and exactly
-one migrates. The lock is session-scoped: Postgres releases it when the
-connection drops, so a pod killed mid-migration (OOM, eviction, a
-liveness probe) releases it by dying. yoyo's own ``backend.lock()`` is
-deliberately NOT used — it is a table row deleted in a ``finally``, with
-no TTL and no stale detection, so a killed pod wedges every later pod
-until a human runs ``yoyo break-lock``.
+**Concurrency.** A session-scoped Postgres advisory lock is held for the
+whole run, so exactly one replica migrates and a pod killed mid-run
+releases it by dying. yoyo's ``backend.lock()`` is NOT used: it is a
+table row with no stale detection, so a killed pod would wedge every
+later one. The lock is taken by polling (see ``_acquire_migration_lock``).
 
-The lock is acquired by **polling** ``pg_try_advisory_lock``, not by
-blocking inside ``pg_advisory_lock`` — a blocking waiter deadlocks
-against ``CREATE INDEX CONCURRENTLY`` in a way Postgres cannot detect.
-See ``_acquire_migration_lock``; this matters from migration ``0004``
-(ADR 0025) onward.
+**Rollback** reverses the latest migration(s) via ``.rollback.sql``
+files, written for structural changes only; data loss is a restore from
+backup (``docs/ops-runbook.md``). ``0001.initial-schema`` is never
+rolled back.
 
-**Rollback.** ``rollback`` reverses the most recently applied
-migration(s) via their ``.rollback.sql`` companions. Rollbacks are
-written for *structural* changes only: reversing a populated column drop
-or a backfill is a restore from backup (``docs/ops-runbook.md``), never
-a migration. ``0001.initial-schema`` has no rollback at all — reversing
-it would drop every entry in the pool.
-
-**The dim guard (ADR 0015)** runs *after* the lock is taken and before
-any DDL: a pool provisioned at a different embedding dimension than the
-configured one is a deployment error (ADR 0005), and failing before any
-DDL beats the confusing ``DataError`` the first vector write would
-otherwise produce. (Under the lock so that two replicas racing a cold
-pool at different dims cannot both pass it.) The same pre-flight checks
-pgvector >= 0.8 and ``dim <= 2000`` (the HNSW limit), and after the chain
-an INVALID ``entries_embedding_hnsw_idx`` (a crashed ``CONCURRENTLY``
-build, which ``IF NOT EXISTS`` would otherwise skip silently) fails the
-run with the runbook remedy.
+**Pre-flight**, under the lock and before any DDL: the dim guard (ADR
+0015, so two replicas at different dims cannot both pass), pgvector >=
+0.8 and ``dim <= 2000``. After the chain, an INVALID HNSW index (a
+crashed ``CONCURRENTLY`` build) fails the run.
 """
 
 from __future__ import annotations
@@ -63,25 +44,17 @@ _HNSW_INDEX = "entries_embedding_hnsw_idx"
 
 _MIGRATIONS_DIR = Path(__file__).with_name("migrations")
 
-# The advisory-lock key (ADR 0020). Arbitrary but FIXED: every process
-# that migrates this pool must take the same key. The value is ASCII
-# "HIVEMIND" read as a big-endian int64 (fits in a signed bigint), which
-# makes it self-identifying in `pg_locks`.
+# The advisory-lock key (ADR 0020): arbitrary but FIXED. ASCII "HIVEMIND"
+# as a big-endian int64, so it is recognisable in `pg_locks`.
 MIGRATION_LOCK_KEY = 0x484956454D494E44
 
-# How long a migrator sleeps between attempts at the lock. Small enough
-# that a fast migration is not held up noticeably, large enough that six
-# replicas polling do not busy-spin against the pool.
+# Poll interval for the lock: short delay, no busy-spin.
 _LOCK_POLL_SECONDS = 0.25
 
 
 def _yoyo_dsn(dsn: str) -> str:
-    """Rewrite an asyncpg DSN to the psycopg3 form yoyo expects.
-
-    The service speaks ``postgresql://`` (asyncpg) everywhere; yoyo
-    selects its driver from the scheme, and ``postgresql+psycopg://``
-    is the psycopg3 backend. Anything already carrying an explicit
-    ``+driver`` is left alone.
+    """Rewrite an asyncpg DSN to yoyo's psycopg3 scheme
+    (``postgresql+psycopg://``); an explicit ``+driver`` is left alone.
     """
     for prefix in ("postgresql://", "postgres://"):
         if dsn.startswith(prefix):
@@ -90,11 +63,8 @@ def _yoyo_dsn(dsn: str) -> str:
 
 
 def _apply_chain(dsn: str, dim: int) -> None:
-    """Apply every outstanding migration (synchronous; yoyo is sync).
-
-    Called inside ``asyncio.to_thread`` while the caller holds the
-    advisory lock. ``backend.lock()`` is intentionally not used — see
-    the module docstring.
+    """Apply every outstanding migration (sync; run in a thread while the
+    caller holds the advisory lock).
     """
     from yoyo import get_backend, read_migrations
 
@@ -110,10 +80,9 @@ def _apply_chain(dsn: str, dim: int) -> None:
 def _rollback_chain(dsn: str, dim: int, count: int) -> list[str]:
     """Roll back the ``count`` most recently applied migrations.
 
-    Returns the ids rolled back, most recent first. A migration with no
-    ``.rollback.sql`` has no rollback steps, so yoyo unmarks it without
-    running DDL — which is why ``0001`` must never be rolled back for
-    real (the module docstring says so, and ``rollback`` refuses it).
+    Returns the ids rolled back, most recent first. yoyo would unmark a
+    migration with no ``.rollback.sql`` without running DDL, hence the
+    explicit ``0001`` refusal.
     """
     from yoyo import get_backend, read_migrations
 
@@ -140,10 +109,8 @@ def _rollback_chain(dsn: str, dim: int, count: int) -> list[str]:
 def _close_backend(backend: object) -> None:
     """Close the connection a yoyo backend opened in its constructor.
 
-    yoyo's ``DatabaseBackend`` has no ``close()``; without this each
-    migrate/rollback call leaks one connection for the life of the
-    process (harmless for the one-shot entrypoint, not for anything
-    long-lived — the integration suite exhausted ``max_connections``)."""
+    yoyo's ``DatabaseBackend`` has no ``close()``, so each call would
+    otherwise leak a connection for the life of the process."""
     connection = getattr(backend, "connection", None)
     if connection is not None:
         connection.close()
@@ -153,32 +120,15 @@ async def _acquire_migration_lock(conn: asyncpg.Connection) -> None:
     """Take the migration advisory lock by **polling**, never by blocking
     inside ``pg_advisory_lock``.
 
-    This is not a style choice — a blocking wait deadlocks against
-    ``CREATE INDEX CONCURRENTLY`` (ADR 0020 §6, first used by migration
-    ``0004``), and the deadlock is invisible to Postgres:
+    A blocking wait deadlocks against ``CREATE INDEX CONCURRENTLY`` (ADR
+    0020 §6) invisibly to Postgres: the winner holds the lock on this
+    connection and runs the chain on a separate one; the index build
+    waits for every older transaction, including a sibling parked in
+    ``pg_advisory_lock``, which in turn waits on the winner. The holder
+    is idle, so the cycle never shows in the wait graph.
 
-    * the winning migrator holds the lock on *this* asyncpg connection
-      and then runs the chain on a **separate** psycopg connection
-      (``_apply_chain`` in a worker thread);
-    * ``CREATE INDEX CONCURRENTLY`` waits for every transaction older
-      than itself to finish, and a sibling parked inside
-      ``SELECT pg_advisory_lock(...)`` is exactly that — one long-running
-      statement, holding a virtual xid for as long as it waits;
-    * that sibling is waiting on the lock the winner holds, so it never
-      finishes, so the index build never finishes, so the lock is never
-      released.
-
-    Postgres's deadlock detector cannot break it: the lock *holder* is
-    idle, not waiting, so the cycle is closed only through application
-    logic and never appears in the wait graph. Measured: six migrators
-    racing a cold pool hang indefinitely at ``deadlock_timeout = 1s``.
-
-    Polling makes each waiter's transaction short, so the index build's
-    wait set drains instead of stalling. The lock itself is unchanged —
-    still session-scoped, so a pod killed mid-migration still releases it
-    by dying, which is the property ADR 0020 chose it for. The wait is
-    still unbounded, exactly as the blocking form was: the orchestrator's
-    ``startupProbe`` is the timeout, not a number invented here.
+    Polling keeps each waiter's transaction short. The wait stays
+    unbounded; the orchestrator's ``startupProbe`` is the timeout.
     """
     while not await conn.fetchval("SELECT pg_try_advisory_lock($1)", MIGRATION_LOCK_KEY):
         await asyncio.sleep(_LOCK_POLL_SECONDS)
@@ -190,10 +140,7 @@ async def _with_migration_lock(dsn: str, dim: int, work: str, count: int = 0) ->
     try:
         await _acquire_migration_lock(conn)
         try:
-            # ADR 0015: check the pool's provisioned dim AFTER taking the
-            # lock (two replicas at different dims on a cold pool must not
-            # both pass) and BEFORE applying anything, so a mismatched
-            # pool fails loudly and leaves no partial state.
+            # Dim guard (ADR 0015): after the lock, before any DDL.
             actual = await _existing_embedding_dim(conn)
             if actual is not None:
                 msg = dim_mismatch_message(actual, dim)
@@ -229,12 +176,8 @@ _LOCK_LOST_MESSAGE = (
 async def _lock_still_held(conn: asyncpg.Connection) -> bool:
     """Whether the lock connection is alive and still holds the lock.
 
-    Any failure to confirm it counts as lost: once the backend is gone,
-    asyncpg reports the dead session as one of several exception types
-    depending on timing (``InterfaceError``, ``ConnectionDoesNotExistError``,
-    ``AdminShutdownError`` — a ``PostgresError`` — or even
-    ``InternalClientError``), and none of them may escape as the
-    migration's result."""
+    Any failure counts as lost: asyncpg reports a dead session as one of
+    several exception types depending on timing."""
     try:
         held = await conn.fetchval(
             "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' "
@@ -246,10 +189,9 @@ async def _lock_still_held(conn: asyncpg.Connection) -> bool:
 
 
 async def _release_lock(conn: asyncpg.Connection) -> None:
-    """Best-effort explicit unlock. Closing the connection releases the
-    lock regardless (a dead session cannot hold one); if the lock
-    connection itself dropped mid-run, the lock was already lost — say so
-    instead of letting an ``InterfaceError`` mask the migration's result."""
+    """Best-effort unlock (closing the connection releases it anyway). A
+    dead connection means the lock was already lost: warn rather than
+    mask the migration's result."""
     try:
         await conn.execute("SELECT pg_advisory_unlock($1)", MIGRATION_LOCK_KEY)
     except Exception:  # any dead-session shape (see _lock_still_held)
@@ -261,15 +203,11 @@ async def _release_lock(conn: asyncpg.Connection) -> None:
 
 
 async def migrate(dsn: str, dim: int = 1024) -> None:
-    """Apply every outstanding migration to the database at ``dsn``.
-
-    Safe to re-run: an up-to-date pool applies nothing. Safe to run
-    concurrently: the advisory lock serialises replicas.
+    """Apply every outstanding migration; idempotent and safe to run
+    concurrently.
 
     Raises:
-        RuntimeError: when the pool's existing ``entries.embedding``
-            column is at a *different* dimension than ``dim`` (ADR 0015).
-            The message names both dims and both remediations.
+        RuntimeError: on a pre-flight failure, e.g. a dim mismatch (ADR 0015).
     """
     await _with_migration_lock(dsn, dim, "apply")
     await _warn_dead_credentials(dsn)
@@ -312,14 +250,9 @@ async def rollback(dsn: str, dim: int = 1024, count: int = 1) -> list[str]:
 
 
 def dim_mismatch_message(actual_dim: int, configured_dim: int) -> str | None:
-    """The dim-mismatch error (ADR 0015), or ``None`` when the pool's dim
-    matches the configured dim.
-
-    The message names *both* dims and offers *both* remediations —
-    reset the pool (fresh migrate) or point ``HIVEMIND_EMBEDDING_DIM``
-    at the existing pool — so the operator never has to guess which pool
-    is "the" one. A dim change is a pool reset, never in-place
-    (ADR 0005).
+    """The dim-mismatch error (ADR 0015) naming both dims and both
+    remedies, or ``None`` when they match. A dim change is a pool reset,
+    never in place (ADR 0005).
     """
     if actual_dim == configured_dim:
         return None
@@ -335,11 +268,9 @@ def dim_mismatch_message(actual_dim: int, configured_dim: int) -> str | None:
 def pgvector_requirement_message(version: str | None, dim: int) -> str | None:
     """The pgvector pre-flight error, or ``None`` when satisfied.
 
-    Requires pgvector >= 0.8 (``hnsw.iterative_scan``, SPEC §6.2 / ADR
-    0025: on older servers migrate passes but every search fails at first
-    use) and ``dim <= 2000`` (HNSW's limit: ``CREATE INDEX`` would fail
-    in migration ``0004`` with a raw Postgres error). An unparseable
-    version is not treated as a failure.
+    Requires pgvector >= 0.8 (``hnsw.iterative_scan``, ADR 0025; older
+    servers migrate fine but fail every search) and ``dim <= 2000``
+    (HNSW's limit). An unparseable version passes.
     """
     if dim > _MAX_HNSW_DIM:
         return (
@@ -409,12 +340,8 @@ async def _require_valid_hnsw_index(dsn: str) -> None:
 
 
 async def _existing_embedding_dim(conn: asyncpg.Connection) -> int | None:
-    """The dim of the existing ``entries.embedding`` column, or ``None``
-    when the pool has never been migrated (no ``entries`` table yet).
-
-    pgvector stores the dimension as the column's typmod
-    (``vector(512)`` → ``atttypmod == 512``), so this reads
-    ``pg_attribute`` — which works on an empty pool (no rows needed).
+    """The ``entries.embedding`` dim from its typmod (works on an empty
+    pool), or ``None`` when the pool has never been migrated.
     """
     try:
         row = await conn.fetchrow(
@@ -427,12 +354,7 @@ async def _existing_embedding_dim(conn: asyncpg.Connection) -> int | None:
 
 
 async def current_embedding_dim(dsn: str) -> int | None:
-    """The dim of the pool's existing ``entries.embedding`` column, or
-    ``None`` for a never-migrated pool (no such column yet).
-
-    Used by the dim-mismatch guard (ADR 0015) and by ops tooling that
-    wants to report a pool's provisioned dimension.
-    """
+    """The pool's provisioned embedding dim, or ``None`` if never migrated."""
     conn = await asyncpg.connect(dsn)
     try:
         return await _existing_embedding_dim(conn)
@@ -441,11 +363,8 @@ async def current_embedding_dim(dsn: str) -> int | None:
 
 
 async def current_schema_version(dsn: str) -> str | None:
-    """The most recently applied migration id (ADR 0020), or ``None`` if
-    the pool has never been migrated (``_yoyo_migration`` absent/empty).
-
-    Used by the ops / health surface to check for drift. The table is
-    yoyo's; there is no separate ``schema_migrations`` marker.
+    """The most recently applied migration id from yoyo's table (ADR
+    0020), or ``None`` if the pool has never been migrated.
     """
     conn = await asyncpg.connect(dsn)
     try:
@@ -462,15 +381,9 @@ async def current_schema_version(dsn: str) -> str | None:
 
 
 def main() -> None:
-    """Console entry point (``hivemind-migrate``): migrate from settings,
-    over ``HIVEMIND_MIGRATE_DATABASE_URL`` when it is set (a direct DSN
-    that can hold the session advisory lock behind a transaction-mode
-    pooler), else ``HIVEMIND_DATABASE_URL``.
-
-    ``hivemind-migrate`` applies the chain. ``hivemind-migrate --rollback
-    [N]`` reverses the N most recent migrations (default 1) — an
-    explicit flag, never the default, because a rollback is a deliberate
-    operator act.
+    """Console entry point: ``hivemind-migrate`` applies the chain;
+    ``--rollback [N]`` reverses the N latest (default 1). Uses
+    ``Settings.migration_dsn``.
     """
     settings = load_settings()
     argv = sys.argv[1:]
@@ -485,8 +398,6 @@ def main() -> None:
             return
         asyncio.run(migrate(settings.migration_dsn, settings.embedding_dim))
     except (RuntimeError, ValueError) as exc:
-        # A dim mismatch (ADR 0015) or a refused rollback (ADR 0020) is a
-        # deployment error, not a crash — print the actionable message
-        # and exit non-zero instead of a traceback.
+        # A deployment error, not a crash: message, no traceback.
         print(f"migrate error: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc

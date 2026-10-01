@@ -1,19 +1,9 @@
 """The Postgres adapter for the ``Store`` port (asyncpg + pgvector).
 
 Mirrors ``hivemind.memstore.MemoryStore`` behavior-for-behavior
-(SPEC.md §4, §6): append-only entries with explicit supersession,
-keyword (tsvector) and vector (cosine) search streams, filter
-evaluation, and per-(entry, user, agent) feedback upserts.
-
-Design notes:
-- The connection pool is **lazily opened on first use** and closed via
-  ``close()``: the API layer's synchronous builders hand a ready adapter
-  to a running event loop without forcing an async pool at import time
-  (SPEC.md §8.2, ADR 0007: one Postgres node per org, one pool per
-  process at v1 scale).
-- SQL lives in named constants; one method per ``Store`` op.
-- Row<->``Entry`` mappers are pure functions at the bottom of the
-  module (no I/O), keeping the async methods thin.
+(SPEC.md §4, §6). The pool opens lazily on first use, so synchronous
+builders can hand the adapter to a running loop (ADR 0007). SQL lives in
+named constants; row mappers are pure functions at the bottom.
 """
 
 from __future__ import annotations
@@ -77,13 +67,11 @@ INSERT INTO entries (
     $16, $17, $18, $19
 )
 """
-# 19 explicit columns/values; ``created_at`` falls back to the schema's
-# ``now()`` default, so it is not in the value list.
+# ``created_at`` takes the schema's ``now()`` default.
 
-# Every column an ``Entry`` is read from, except ``embedding``: no reader
-# uses the stored vector (search ranks it in SQL), and fetching it cost
-# ~4 KB on the wire plus a float-by-float decode per row — more than half
-# of a 100-row list page's time. Entries read back carry ``embedding=None``.
+# Every ``Entry`` column except ``embedding``: no reader needs the stored
+# vector, and fetching it was over half a 100-row list page's time.
+# Entries read back carry ``embedding=None``.
 _ENTRY_COLUMNS = """
     id, kind, summary, body, payload, sources, tags, occurred_at,
     created_at, author, agent, importance, importance_source, scope, fleet_id,
@@ -206,12 +194,8 @@ WITHDRAW = (
 MAX_KEYWORD_TERMS = 16
 """The most distinct query terms the keyword stream matches on (ADR 0049).
 
-``ts_rank`` scores every matching row once per query term, and under the
-any-term rule a single common term matches most of the pool. Without a
-cap, a 2 000-character query of common words costs seconds of Postgres
-CPU per search; with it, the worst case is a fixed multiple of a
-one-term query. Terms past the cap are ignored by the keyword stream
-(the vector stream still sees the whole query)."""
+Caps ``ts_rank`` cost: a long any-term query of common words would
+otherwise cost seconds of CPU. The vector stream still sees the whole query."""
 
 ANY_TERM_TSQUERY = (
     "(SELECT coalesce(string_agg(term, ' | ' ORDER BY first), '')::tsquery"
@@ -223,15 +207,11 @@ ANY_TERM_TSQUERY = (
 """The keyword stream's tsquery: any query term matches (ADR 0047), on
 at most ``MAX_KEYWORD_TERMS`` distinct terms (ADR 0049).
 
-``plainto_tsquery`` still does all the parsing, so the caller's text is
-never read as tsquery syntax (no operator injection). Its output joins
-quoted lexemes with ``' & '``. Splitting on that separator gives one
-quoted lexeme per element, because the ``english`` parser never produces
-a lexeme containing a space. The first ``MAX_KEYWORD_TERMS`` distinct
-lexemes, in query order, are re-joined with ``' | '``, which turns
-"every term" into "any term". A query of only stop words gives an empty
-tsquery, which matches nothing, as before. The scalar subquery runs once
-per statement, not once per row.
+``plainto_tsquery`` does the parsing, so caller text is never read as
+tsquery syntax (no operator injection). Its ``' & '``-joined lexemes
+(never containing a space) are split, deduplicated in query order, and
+re-joined with ``' | '``. A stop-words-only query matches nothing. The
+scalar subquery runs once per statement.
 """
 
 # --- Vector-search session settings (ADR 0025) --------------------------------
@@ -242,33 +222,17 @@ SET LOCAL hnsw.ef_search = 40;
 """
 """The query-time GUCs the HNSW index (migration ``0004``) is read under.
 
-``SET LOCAL``, inside the same transaction as the search, rather than a
-pool ``init`` callback: the org runs a **transaction-mode PgBouncer**
-(see ``store/pool.py``), where one pooled client connection is mapped to
-whichever server connection is free *per transaction*, and
-``server_reset_query`` (``DISCARD ALL``) wipes session state between
-them. A session-level ``SET`` at connection-open time would therefore
-land on an arbitrary server backend and be discarded before the search
-ever runs — silently, leaving the defaults in force. A ``SET LOCAL``
-travels with its transaction, so it reaches the backend that executes
-the query, and it unsets at commit, so it never leaks into the other
-queries sharing the pooled connection.
+``SET LOCAL`` in the search's transaction, not a pool ``init`` callback:
+behind a transaction-mode PgBouncer (``store/pool.py``) a session ``SET``
+lands on an arbitrary backend and is discarded before the search runs.
+``SET LOCAL`` travels with the transaction and unsets at commit.
 
-``hnsw.iterative_scan = strict_order`` (pgvector >= 0.8): without it,
-HNSW fetches ``ef_search`` candidates and applies the ``WHERE`` clause
-*afterwards*. Every real query here is filtered — at minimum
-``state = 'active'``, plus the ADR 0011 visibility matrix — so a
-narrow-visibility reader could get far fewer than ``candidate_top_k``
-rows out of the vector stream, starving RRF's second list. Iterative
-scan keeps resuming the search until the limit is satisfied (bounded by
-``hnsw.max_scan_tuples``). ``strict_order`` and not ``relaxed_order``
-because RRF fuses on **ranks, not scores** (``retrieval/rrf.py``):
-relaxed_order returns results slightly out of distance order, which
-perturbs exactly the quantity fusion consumes.
-
-``hnsw.ef_search = 40`` is pgvector's own default, set explicitly so the
-value the vector stream runs under is stated rather than inherited.
-There is no corpus to tune it against yet (ADR 0025).
+``iterative_scan`` (pgvector >= 0.8) keeps scanning until the filtered
+``LIMIT`` is met; without it HNSW filters ``ef_search`` candidates
+afterwards and a narrow-visibility reader can starve RRF's vector list.
+``strict_order`` because RRF fuses on ranks (``retrieval/rrf.py``), which
+``relaxed_order`` would perturb. ``ef_search = 40`` is pgvector's default,
+stated explicitly; untuned for now (ADR 0025).
 """
 
 UPSERT_FEEDBACK = """
@@ -320,15 +284,11 @@ RETURNING {_AUDIT_COLUMNS}
 def _filter_conditions(
     filters: EntryFilters, visibility: Visibility | None = None
 ) -> tuple[list[str], list[Any]]:
-    """Translate an ``EntryFilters`` (and an optional ``Visibility``, ADR
-    0011) into WHERE-fragments + parameters.
+    """Translate ``EntryFilters`` (+ optional ``Visibility``, ADR 0011)
+    into WHERE-fragments and parameters.
 
-    Mirrors ``EntryFilters.matches`` exactly (SPEC.md §5.3): by default
-    only active entries are visible; ``include_inactive`` lifts the state
-    restriction. Tags use AND-semantics (``tags @> $n``). When
-    ``visibility`` is supplied, an extra clause restricts the result to
-    entries visible to that reader (the trust-level matrix, ADR 0011);
-    ``None`` keeps the v1 flat-pool behavior.
+    Mirrors ``EntryFilters.matches`` exactly (SPEC.md §5.3). ``visibility``
+    ``None`` keeps the v1 flat pool.
     """
     clauses: list[str] = []
     params: list[Any] = []
@@ -346,9 +306,7 @@ def _filter_conditions(
     if filters.tags:
         add("tags @> ?", list(filters.tags))
     if filters.entities:
-        # AND-semantics over lower-cased names (ADR 0016, SPEC §13):
-        # the filter names are case-insensitive; ``entity_names`` holds
-        # the lower-cased names, symmetric with the ``tags`` pattern.
+        # Case-insensitive AND over ``entity_names`` (ADR 0016, SPEC §13).
         add("entity_names @> ?", [name.lower() for name in filters.entities])
     if filters.scope is not None:
         add("scope = ?", filters.scope)
@@ -383,17 +341,10 @@ def _filter_conditions(
 
 
 def _visibility_clause(visibility: Visibility | None, params: list[Any]) -> str | None:
-    """The SQL fragment restricting results to entries visible to
-    ``visibility`` (ADR 0011). Appends its parameters to ``params`` and
-    returns the clause (or ``None`` for no restriction).
+    """The visibility clause for ``visibility`` (ADR 0011), or ``None``
+    for no restriction; appends its parameters to ``params``.
 
-    Mirrors ``domain.access.entry_is_visible``:
-      * ``None`` / admin  -> no clause (see everything / v1 flat pool).
-      * level 0 (untrusted) -> ``FALSE`` (see nothing).
-      * level 1/2 (lurker/contributor) -> ``org`` OR own ``self`` OR
-        (own ``fleet`` within the home fleet).
-      * level 3 (privileged) -> ``org`` OR own ``self`` OR any ``fleet``
-        (read-broad, write-local).
+    Mirrors ``domain.access.entry_is_visible``.
     """
     if visibility is None or visibility.is_admin:
         return None
@@ -406,10 +357,9 @@ def _visibility_clause(visibility: Visibility | None, params: list[Any]) -> str 
 
     name_p = _p(visibility.name)
     if visibility.level == TrustLevel.PRIVILEGED:
-        # L3: read-broad — every fleet's ``fleet`` entries are visible.
+        # L3 reads every fleet's entries.
         return f"(scope = 'org' OR (scope = 'self' AND author = {name_p}) OR scope = 'fleet')"
-    # L1/L2: own + home fleet (+ legacy org). Fleet entries are visible
-    # only if they are the reader's own or in the reader's home fleet.
+    # L1/L2: fleet entries only if own or in the home fleet.
     home_p = _p(visibility.home_fleet_id)
     return (
         "(scope = 'org' "
@@ -447,11 +397,8 @@ def _valid_uuids(ids: list[str] | tuple[str, ...]) -> list[str]:
 class PgStore:
     """A ``Store`` backed by PostgreSQL + pgvector (ADR 0007).
 
-    Construct with a DSN (the pool opens lazily on first use) and
-    ``close()`` on process shutdown. ``pool_min_size`` / ``pool_max_size``
-    (default 1 / 10, matching ``make_pool``'s own defaults) are the
-    operator knobs for per-pod concurrency (``Settings.pool_min_size`` /
-    ``pool_max_size``).
+    The pool opens lazily on first use; ``close()`` on shutdown. Pool
+    sizes come from ``Settings.pool_min_size`` / ``pool_max_size``.
     """
 
     def __init__(
@@ -468,8 +415,7 @@ class PgStore:
         self._timeouts = timeouts or PoolTimeouts()
         self._acquire_timeout = self._timeouts.acquire
         self._pool: asyncpg.Pool | None = None
-        # Serialises lazy creation: without it, every call arriving while the
-        # first pool is still being built opened its own and orphaned it.
+        # Serialises lazy creation so concurrent first calls share one pool.
         self._pool_lock = asyncio.Lock()
         # Last database-probe outcome, so failures are logged once per
         # outage (with the cause) rather than on every probe (ADR 0037).
@@ -508,14 +454,8 @@ class PgStore:
         entities_model: str | None = None,
     ) -> Entry:
         """Insert a new entry and flip any ``draft.supersedes`` targets
-        to the ``superseded`` state (SPEC.md §4.1).
-
-        The insert and the supersession flip run in a single transaction
-        (m4): a crash between them must not leave a new entry whose
-        supersession targets were never flipped. ``embedding_model``
-        (SPEC.md §7) records which model produced ``embedding``.
-        ``entities`` / ``entities_model`` (ADR 0016, SPEC §13) record
-        the machine-extracted facets + the extractor that produced them.
+        to ``superseded`` (SPEC.md §4.1), in one transaction so a crash
+        cannot leave targets unflipped.
         """
         entry_id = str(uuid.uuid4())
         occurred_at = draft.resolved_occurred_at()
@@ -549,10 +489,8 @@ class PgStore:
             if draft.see_also:
                 await conn.execute(INSERT_LINKS, entry_id, _valid_uuids(list(draft.see_also)))
             if draft.supersedes:
-                # ADR 0034, atomic: the guarded UPDATE row-locks the
-                # targets; any target it did not flip (unknown,
-                # non-UUID, or no longer active) aborts the whole
-                # transaction, insert included.
+                # ADR 0034: any target the guarded UPDATE did not flip
+                # aborts the whole transaction, insert included.
                 wanted = list(dict.fromkeys(draft.supersedes))
                 flipped = {
                     str(r["id"])
@@ -704,10 +642,8 @@ class PgStore:
     async def count_entries(
         self, filters: EntryFilters, *, visibility: Visibility | None = None
     ) -> int:
-        """Count entries matching ``filters`` (the minimal usage-counters
-        surface, ROADMAP §3.3) — a cheap ``COUNT`` in Postgres, not a
-        full fetch. ``visibility`` behaves like ``list_entries``
-        (ADR 0011); ``None`` keeps the v1 flat-pool count."""
+        """Count entries matching ``filters`` with a SQL ``COUNT``;
+        ``visibility`` as in ``list_entries``."""
         clauses, params = _filter_conditions(filters, visibility)
         where = " AND ".join(clauses) if clauses else "TRUE"
         sql = "SELECT count(*) AS n FROM entries WHERE " + where
@@ -719,11 +655,8 @@ class PgStore:
     async def withdraw_entry(self, entry_id: str, reason: str | None, by_user: str) -> Entry:
         """Flip an entry to ``withdrawn`` (SPEC.md §4.1).
 
-        Raises ``KeyError`` if the entry does not exist and
-        ``ValueError`` if it is not active (the port contract).
-        ``by_user`` is the API-layer audit of who withdrew it; v1
-        persists the reason only (SPEC.md §4.1 lists ``withdrawn_reason``,
-        not a ``withdrawn_by`` column).
+        ``KeyError`` if unknown, ``ValueError`` if not active. Only the
+        reason is persisted (there is no ``withdrawn_by`` column).
         """
         if not _is_valid_uuid(entry_id):
             raise KeyError(f"unknown entry: {entry_id}")
@@ -736,9 +669,7 @@ class PgStore:
                 raise ValueError(f"entry {entry_id} is {existing['state']}, not active")
             row = await conn.fetchrow(WITHDRAW, entry_id, reason)
             if row is None:
-                # Lost the race on the guarded UPDATE: a concurrent
-                # withdraw/supersede flipped the state between the
-                # pre-check and the update. Disambiguate by re-reading.
+                # A concurrent flip won the guarded UPDATE: re-read to say why.
                 state = await conn.fetchrow(LOOKUP_STATE, entry_id)
                 if state is None:
                     raise KeyError(f"unknown entry: {entry_id}")
@@ -755,14 +686,8 @@ class PgStore:
         *,
         visibility: Visibility | None = None,
     ) -> list[str]:
-        """Ranked entry IDs by ``ts_rank`` over the maintained tsvector
-        (SPEC.md §6.2 keyword stream). An entry matches when it contains
-        **any** query term (ADR 0047), the same rule as ``MemoryStore``;
-        ``ts_rank`` puts entries matching more terms first. Only the first
-        ``MAX_KEYWORD_TERMS`` distinct terms count (ADR 0049). See
-        ``ANY_TERM_TSQUERY`` for how the query is built without operator
-        injection. When ``visibility`` is supplied, only visible entries
-        are candidates (ADR 0011)."""
+        """Ranked entry IDs by ``ts_rank`` (SPEC.md §6.2 keyword stream).
+        Any query term matches (ADR 0047); see ``ANY_TERM_TSQUERY``."""
         clauses, params = _filter_conditions(filters, visibility)
         query_idx = len(params) + 1
         tsquery = ANY_TERM_TSQUERY.format(param=f"${query_idx}")
@@ -789,17 +714,10 @@ class PgStore:
         *,
         visibility: Visibility | None = None,
     ) -> list[str]:
-        """Ranked entry IDs by cosine distance to ``embedding``
-        (SPEC.md §6.2 vector stream; the pgvector ``<=>`` operator).
-        When ``visibility`` is supplied, only visible entries are
-        candidates (ADR 0011).
+        """Ranked entry IDs by cosine distance (SPEC.md §6.2 vector stream).
 
-        Served by the HNSW index ``entries_embedding_hnsw_idx``
-        (migration ``0004``), so this is **approximate** nearest-neighbour
-        search: the returned ids are not guaranteed to be the true top-``limit``
-        by cosine distance (ADR 0025). ``VECTOR_SEARCH_SETTINGS`` is applied
-        with ``SET LOCAL`` in the same transaction — see its docstring for
-        why the settings live here and not on the pool's connection ``init``.
+        Approximate: served by the HNSW index (ADR 0025), under
+        ``VECTOR_SEARCH_SETTINGS`` applied in the same transaction.
         """
         clauses, params = _filter_conditions(filters, visibility)
         clauses.append("embedding IS NOT NULL")
@@ -871,11 +789,7 @@ class PgStore:
         return (row["helpful"], row["stale"], row["wrong"]) if row else (0, 0, 0)
 
     async def quality_counts(self, entry_ids: list[str]) -> dict[str, tuple[int, int, int]]:
-        """Batched feedback counts for a set of entries.
-
-        Mirrors the reference store: every requested ID is present, with
-        zero counts for entries that have no feedback rows yet.
-        """
+        """Batched feedback counts; every valid requested ID is present."""
         ids = _valid_uuids(entry_ids)
         if not ids:
             return {}
@@ -911,9 +825,7 @@ class PgStore:
 
     async def create_fleet(self, name: str) -> Fleet:
         """Create a named fleet (ADR 0011). ``ValueError`` if the name
-        already exists — including the concurrent case: the insert is
-        conflict-guarded, so a racing duplicate is a typed error, not a
-        raw ``UniqueViolation``."""
+        exists, including a racing duplicate (conflict-guarded insert)."""
         pool = await self._ensure_pool()
         async with pool.acquire(timeout=self._acquire_timeout) as conn:
             dup = await conn.fetchrow(SELECT_FLEET_BY_NAME, name)
@@ -921,8 +833,7 @@ class PgStore:
                 raise ValueError(f"fleet already exists: {name!r}")
             row = await conn.fetchrow(INSERT_FLEET, name)
             if row is None:
-                # A concurrent create won the race between the check and
-                # the conflict-guarded insert.
+                # A concurrent create won the race.
                 raise ValueError(f"fleet already exists: {name!r}")
         return _row_to_fleet(row)
 
@@ -943,14 +854,12 @@ class PgStore:
     # -- agent registration / activation (ADR 0012) ----------------------------
 
     async def register_agent(self, name: str, owner_alias: str | None = None) -> Agent:
-        """Register (or re-register) an agent (ADR 0012). Idempotent: an
-        existing record is returned unchanged (its ``owner_alias`` is never
-        overwritten, ADR 0039); a new record is ``pending`` (level 0, no fleet). A
-        racing concurrent registration of the same name returns the same
-        pending record (the insert is conflict-guarded — no raw
-        ``UniqueViolation``, SPEC §12.3 idempotent no-op). A name that only
-        differs in case from an existing agent's is not inserted: that
-        agent comes back instead (ADR 0045), under a per-folded-name lock.
+        """Register an agent idempotently (ADR 0012, SPEC §12.3).
+
+        An existing record comes back unchanged (``owner_alias`` never
+        overwritten, ADR 0039), including a racing duplicate or a
+        case-only variant (ADR 0045, under a per-folded-name lock); a new
+        one is ``pending`` (level 0, no fleet).
         """
         pool = await self._ensure_pool()
         async with pool.acquire(timeout=self._acquire_timeout) as conn:
@@ -962,8 +871,7 @@ class PgStore:
                     if row is None:
                         row = await conn.fetchrow(INSERT_AGENT, name, owner_alias)
                     if row is None:
-                        # A concurrent registration of this exact name won
-                        # the conflict-guarded insert: return its record.
+                        # A concurrent registration won: return its record.
                         row = await conn.fetchrow(GET_AGENT, name)
         if row is None:
             raise RuntimeError(f"agent {name!r} vanished between insert and read")
@@ -1102,10 +1010,8 @@ class PgStore:
     # -- orchestrator probes (ADR 0019) ---------------------------------------
 
     async def health_check(self) -> bool:
-        """Deep liveness probe (ADR 0019): True when the pool is up and
-        answering a ``SELECT 1``, False when it is unreachable or has
-        dropped the connection. The probe must never raise — the 503
-        from the probe endpoint is the orchestrator-facing signal.
+        """Deep probe (ADR 0019): whether ``SELECT 1`` succeeds. Never
+        raises; the endpoint's 503 is the signal.
         """
         try:
             pool = await self._ensure_pool()
@@ -1133,9 +1039,8 @@ def _encode_sources(sources: tuple[Source, ...]) -> list[dict[str, str]]:
 
 
 def _encode_entities(entities: tuple[ExtractedEntity, ...]) -> list[dict[str, str]]:
-    """``entities`` is a jsonb column: a JSON list of {name, kind} facets
-    (ADR 0016). The lower-cased names are stored separately on
-    ``entity_names`` (the filter column, symmetric with ``tags``)."""
+    """``entities`` is a jsonb list of {name, kind} (ADR 0016); the
+    lower-cased names go separately on ``entity_names``."""
     return [{"name": e.name, "kind": e.kind.value} for e in entities]
 
 
@@ -1161,12 +1066,7 @@ def _decode_sources(raw: Any) -> tuple[Source, ...]:
 
 
 def _decode_entities(raw: Any) -> tuple[ExtractedEntity, ...]:
-    """Decode the jsonb ``entities`` column back into domain facets.
-
-    asyncpg may deliver ``jsonb`` natively (a list of {name, kind}
-    dicts) or as raw JSON text, depending on the codec — mirror the
-    dual-decode of ``_decode_sources``.
-    """
+    """Decode the jsonb ``entities`` column (native or JSON text)."""
     if not raw:
         return ()
     items = raw if isinstance(raw, list) else json.loads(raw)

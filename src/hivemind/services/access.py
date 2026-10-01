@@ -1,21 +1,12 @@
 """Access-control service (ADRs 0011-0012, SPEC §12).
 
-The deep module of the access plane: one small interface (register /
-activate / fleet / level / revoke) over a deep interior — permission
-gating (which key may do what, ADR 0012), agent registration +
-activation (the key is issued **once**, ADR 0012), and write-scope
-resolution (which scope a trust level may write, ADR 0011).
+Permission gating (ADR 0012), registration and activation (the key is
+issued **once**), and write-scope resolution (ADR 0011).
 
-The services are the only orchestrator; the HTTP and MCP layers are
-thin (validation + auth + error mapping only). All I/O happens through
-the ``Store`` and ``Authenticator`` ports.
-
-Every admin mutation is recorded in the audit log (ADR 0027) **after**
-it succeeds. The mutation and the audit write span two ports with no
-shared transaction, so they are not atomic: an audit-write failure is
-raised (never swallowed — the action happened and the caller must see
-that it went unaudited). The audit writer, ``_audit``, takes no key
-argument: a raw key cannot reach an audit column by construction.
+Every admin mutation is audited **after** it succeeds (ADR 0027). The
+two writes share no transaction, so an audit failure is raised, never
+swallowed: the caller must see the action went unaudited. ``_audit``
+takes no key argument, so a raw key cannot reach an audit column.
 """
 
 from __future__ import annotations
@@ -99,11 +90,8 @@ def _status_message(status: AgentStatus, *, new: bool = False) -> str:
 class AccessService:
     """Registration + fleet + trust-level management (ADRs 0011-0012).
 
-    Every method takes the caller's ``credential`` and enforces the
-    permission gate (ADR 0012): registration is gated on the org or
-    admin key (a low-privilege bootstrap act); activation, fleet
-    creation, level changes, revocation, and org-key rotation require
-    the admin key (elevated acts).
+    Every method enforces the permission gate (ADR 0012): registration
+    needs the org or admin key; everything else needs the admin key.
     """
 
     def __init__(self, store: Store, authenticator: Authenticator | None = None) -> None:
@@ -111,11 +99,7 @@ class AccessService:
         self._authenticator = authenticator
 
     def _require_authenticator(self) -> Authenticator:
-        """Key-management ops (activate / revoke / rotate) need the
-        authenticator; store-only ops (register / fleet / level) do not.
-        In dev (in-memory) mode there is no authenticator, so key
-        management is unavailable (a production concern, ADR 0012).
-        """
+        """The authenticator for key management (absent in dev mode)."""
         if self._authenticator is None:
             raise PermissionDenied(
                 "key management requires an authenticator (not configured in dev mode)"
@@ -134,18 +118,12 @@ class AccessService:
     ) -> Registration:
         """Register (or re-register) an agent (ADR 0012, refined by ADR 0039).
 
-        Gated on the org or admin key (REST, SPEC §5.1); the MCP
-        ``hive_register`` verb is **org-key only** (SPEC §5.2) — pass
-        ``org_only=True``. A new name becomes a ``pending`` agent owned by
-        ``owner_alias``. Re-registering an existing name:
-
-        * by the **same** alias → idempotent: the current status comes
-          back (``already_registered``) with what to do next, so a session
-          that forgot it registered can tell pending / active / revoked;
-        * by a **different** (or missing) alias → ``NameTaken``, worded
-          identically for every status so nothing about the other agent
-          leaks. The first registrant's alias is never overwritten, so the
-          admin cannot deliver a key to a squatter's alias.
+        Org or admin key (REST, SPEC §5.1); ``org_only=True`` for MCP
+        ``hive_register`` (SPEC §5.2). A new name becomes ``pending``.
+        Re-registering by the same alias returns the current status; by a
+        different alias raises ``NameTaken``, worded identically for every
+        status so nothing leaks. The first alias is never overwritten, so
+        a key cannot be delivered to a squatter.
         """
         if org_only:
             self._require_org(credential)
@@ -159,17 +137,12 @@ class AccessService:
                 raise NameTaken(_NAME_TAKEN)
             return Registration(existing, True, _status_message(existing.status))
         agent = await self._store.register_agent(name, owner_alias)
-        # A concurrent registration may have won between the read and the
-        # insert: the record we got back is then the other registrant's.
-        # A different ``name`` means the name is a case variant of an
-        # existing agent's (``Bob`` / ``bob``), which is refused whoever
-        # owns it (ADR 0045): two agents must not differ only in case.
+        # A racing registrant may have won, or ``name`` is a case variant of
+        # an existing agent's, refused whoever owns it (ADR 0045).
         if agent.name != name or not _same_owner(agent.owner_alias, owner_alias):
             raise NameTaken(_NAME_TAKEN)
-        # ADR 0046: a new registration is audited (who registered which
-        # name for which owner), so an admin can trace a pending agent
-        # before activating it. The alias is the registrant's claim, not a
-        # verified identity. Re-registrations and refusals are not rows.
+        # Only new registrations are audited (ADR 0046); the alias is the
+        # registrant's claim, not a verified identity.
         await self._audit(
             credential,
             AuditAction.AGENT_REGISTER,
@@ -181,11 +154,8 @@ class AccessService:
     # -- admin-gated operations (ADR 0012) ----------------------------------
 
     async def _require_fleet(self, fleet_id: str) -> None:
-        """A home-fleet reference must name a real fleet (SPEC §12.1).
-
-        Resolved **before** any mutation so a typo'd fleet id is a typed
-        404, not a raw foreign-key fault mid-mutation (and so a PATCH
-        carrying both fields cannot half-apply)."""
+        """A home-fleet reference must name a real fleet (SPEC §12.1);
+        checked before any mutation so a typo is a typed 404."""
         if await self._store.get_fleet(fleet_id) is None:
             raise KeyError(f"unknown fleet: {fleet_id}")
 
@@ -196,16 +166,11 @@ class AccessService:
         home_fleet_id: str,
         credential: Credential,
     ) -> tuple[Agent, str]:
-        """Activate a pending or revoked agent: set trust level + home
-        fleet and flip it to ``active``; issue its key **once** (returned
-        here, never stored again — ADR 0012). Admin-gated. Returns (agent,
-        raw_key). ``InvalidAgentStatus`` if it is already ``active``
-        (ADR 0028: one key per agent). The status flips first (one guarded
-        UPDATE) and the key is issued last, under the agent row's lock and
-        only while the agent is still ``active`` (ADR 0039): a concurrent
-        revoke makes this raise ``InvalidAgentStatus`` and leaves no key,
-        and a failure in between leaves the agent active with no key —
-        less privileged, never more."""
+        """Activate a pending or revoked agent and issue its key **once**;
+        returns (agent, raw_key). ``InvalidAgentStatus`` if already active
+        (ADR 0028). The status flips first and the key is issued last,
+        only while still ``active`` (ADR 0039), so a race or failure
+        leaves the agent less privileged, never more."""
         self._require_admin(credential)
         await self._require_fleet(home_fleet_id)
         agent = await self._store.activate_agent(
@@ -263,13 +228,10 @@ class AccessService:
         return agent
 
     async def revoke(self, name: str, credential: Credential) -> None:
-        """Revoke an agent (admin-gated, ADRs 0012, 0028): kill its key and
-        set it ``revoked``. On a ``pending`` agent this rejects the
-        registration. The record + name stay reserved. ``KeyError`` if
-        unknown; ``InvalidAgentStatus`` if already ``revoked``. The status
-        flips first (a revoked agent's key no longer authenticates,
-        ADR 0039) and the key row is deleted under the agent row's lock,
-        which serialises this with a concurrent activation."""
+        """Revoke an agent (ADRs 0012, 0028): status first (its key stops
+        authenticating, ADR 0039), then delete the key row. On a pending
+        agent this rejects the registration; the name stays reserved.
+        ``KeyError`` if unknown; ``InvalidAgentStatus`` if already revoked."""
         self._require_admin(credential)
         before = await self._store.get_agent(name)
         if before is None:
@@ -282,10 +244,8 @@ class AccessService:
         await self._audit(credential, AuditAction.AGENT_REVOKE, name, {"from": before.status.value})
 
     async def rotate_org_key(self, credential: Credential) -> str:
-        """Rotate the shared org key — closes registration to every
-        prior org key; active agents are unaffected (ADR 0031).
-        All prior org keys stop working; the new key is returned once.
-        Admin-gated."""
+        """Rotate the shared org key (ADR 0031): every prior org key stops
+        working, active agents are unaffected; the new key is returned once."""
         self._require_admin(credential)
         key = await self._require_authenticator().rotate_org_key()
         await self._audit(credential, AuditAction.ORG_KEY_ROTATE, None)
@@ -313,10 +273,8 @@ class AccessService:
     async def whoami(self, credential: Credential) -> Standing:
         """What the calling key is and may do (``hive_whoami``, ADR 0030).
 
-        Any valid key may ask. Derived from the same rules the data plane
-        enforces (``Credential.max_write_scope`` / ``resolve_write_scope``
-        for writes, ``entry_is_visible`` for reads), so the answer cannot
-        drift from what a write or a search would actually allow."""
+        Any valid key may ask. Derived from the rules the data plane
+        enforces, so the answer cannot drift from actual behaviour."""
         if credential.is_admin:
             key_kind = "admin"
         elif credential.is_org:
@@ -354,9 +312,7 @@ class AccessService:
         target: str | None,
         detail: Mapping[str, Any] | None = None,
     ) -> None:
-        """Record an admin action that has already succeeded. Deliberately
-        takes no key: the raw key a key-producing action returns never
-        reaches this method, so it cannot reach an audit column."""
+        """Record a succeeded admin action. Takes no key on purpose."""
         await record_admin_action(self._store, credential, action, target, detail)
 
     # -- permission gates (ADR 0012) -----------------------------------------
@@ -417,14 +373,9 @@ def resolve_write_scope(
 ) -> WriteResolution:
     """Resolve + validate the write scope for this credential (ADR 0011).
 
-    * If ``requested_scope`` is omitted, it defaults to the highest scope
-      the trust level permits (L1 → ``self``; L2/L3 → ``fleet``).
-    * An explicit scope may not exceed the level's maximum (L1 may not
-      write ``fleet``; level 0 may not write at all).
-    * ``fleet`` scope requires a home fleet (the agent's entries land in
-      its home fleet, ADR 0011).
-
-    Raises ``PermissionDenied`` on any out-of-permission scope.
+    Omitted → the level's maximum (L1 ``self``, L2/L3 ``fleet``). An
+    explicit scope may not exceed it; level 0 may not write; ``fleet``
+    needs a home fleet. ``PermissionDenied`` otherwise.
     """
     if not credential.can_write():
         raise PermissionDenied("level 0 (untrusted) agents may not write (ADR 0011)")
@@ -440,9 +391,7 @@ def resolve_write_scope(
             )
     fleet_id: str | None = None
     if scope == "fleet" and credential.access_controlled and not credential.is_admin:
-        # v2 fleet scope is bound to the agent's home fleet (ADR 0011):
-        # the entry lands in the home fleet. Legacy (v1) and admins have no
-        # home-fleet binding (flat pool / bypass).
+        # The entry lands in the home fleet; legacy and admin are unbound.
         if credential.home_fleet_id is None:
             raise PermissionDenied("agent has no home fleet; cannot write scope 'fleet' (ADR 0011)")
         fleet_id = credential.home_fleet_id

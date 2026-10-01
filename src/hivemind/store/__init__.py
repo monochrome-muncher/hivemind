@@ -1,15 +1,8 @@
 """The Postgres store lane (ADR 0007: single Postgres, docker-compose).
 
-Implements the ``Store`` and ``Authenticator`` ports on PostgreSQL +
-pgvector, plus the idempotent migration runner and the key-issuance
-CLI. Everything above the ports (services, retrieval, API, MCP) is
-storage-agnostic (SPEC.md §4, §5).
-
-The two factory functions (``build_store``, ``build_authenticator``)
-are the seam the API layer's lazy builders import (SPEC.md §8.2): they
-construct a ready adapter from ``Settings`` in a single synchronous
-call (the pool opens lazily on first use, so no async work happens at
-build time).
+The ``Store`` and ``Authenticator`` ports on PostgreSQL + pgvector, the
+migration runner and the key CLI. ``build_store`` / ``build_authenticator``
+are the synchronous factories the runners import (SPEC.md §8.2).
 """
 
 from __future__ import annotations
@@ -19,11 +12,8 @@ from hivemind.ports import Authenticator, Store
 from hivemind.store.auth import PgAuthenticator, key_hash
 from hivemind.store.migrate import main as migrate_main
 
-# Re-export the async migration runner under a non-colliding name: binding
-# the name ``migrate`` on the package would shadow the ``migrate`` submodule
-# (a classic ``__init__``/submodule name clash), breaking attribute access to
-# ``hivemind.store.migrate``. The function still lives at
-# ``hivemind.store.migrate.migrate`` for direct importers.
+# Re-exported under another name: ``migrate`` on the package would shadow
+# the ``migrate`` submodule.
 from hivemind.store.migrate import migrate as apply_migrations
 from hivemind.store.pgstore import PgStore
 from hivemind.store.pool import PoolTimeouts, make_pool
@@ -52,11 +42,7 @@ def _pool_timeouts(settings: Settings) -> PoolTimeouts:
 def build_store(settings: Settings) -> Store:
     """Build a ``Store`` from ``settings`` (the API's lazy builder seam).
 
-    Returns a ``PgStore`` whose pool opens on first use; the builder
-    itself is synchronous, so it is safe to call from the API's
-    synchronous ``_build_store`` (SPEC.md §8.2). ``settings.pool_min_size``
-    / ``pool_max_size`` reach ``make_pool`` from here, so every caller of
-    this factory (REST, both MCP runners) gets the configured pool size.
+    Synchronous; the ``PgStore`` pool opens on first use (SPEC.md §8.2).
     """
     return PgStore(
         settings.database_url,
@@ -69,12 +55,8 @@ def build_store(settings: Settings) -> Store:
 def build_authenticator(settings: Settings) -> Authenticator:
     """Build an ``Authenticator`` from ``settings`` (ADR 0008).
 
-    ``PgAuthenticator`` runs its own pool (auth is checked on every
-    authenticated request, on a separate connection lane from
-    ``PgStore``'s), so it shares ``settings.pool_min_size`` /
-    ``pool_max_size`` rather than falling back to ``make_pool``'s bare
-    defaults — a pod's total Postgres connection footprint is the sum
-    of both pools, and only one of them was previously tunable.
+    It runs its own pool, sized like the store's: a pod's Postgres
+    connections are the sum of both.
     """
     return PgAuthenticator(
         settings.database_url,

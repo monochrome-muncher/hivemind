@@ -1,21 +1,10 @@
 """The stdio MCP server exposing the Hivemind tools (SPEC §5.2).
 
-``build_server`` wires the plain tool functions from ``app.py`` into
-an ``MCPServer`` (mcp 2.x) as closures bound to a single ``McpHivemind``
-app instance. ``main`` builds a self-contained dev server (in-memory
-store + local embedder, per the v1 dev path) and runs the stdio
-transport. ``main_pg`` (console: ``hivemind-mcp-pg``) builds the
-production runner: a DSN-backed ``PgStore`` + OpenAI-compatible embedder
-plus a per-agent credential resolved from ``HIVEMIND_MCP_KEY`` (ADR 0009),
-so multiple agents share one pool over a unified MCP interface.
-``main_http`` (console: ``hivemind-mcp-http``, see ``hivemind.mcp.http``)
-is the hostable form: one long-lived streamable-HTTP process serving an
-unlimited number of agents, each authenticating *per request* (ADR 0010).
-
-The installed ``mcp`` package is v2.x: the server class is
-``MCPServer`` (not ``FastMCP``), tools are registered with
-``@server.tool(...)`` / ``server.add_tool``, and the stdio transport is
-started with ``await server.run_stdio_async()``.
+``build_server`` binds the ``app.py`` tool functions into an mcp 2.x
+``MCPServer`` (not ``FastMCP``). ``main`` is the in-memory dev server;
+``main_pg`` (``hivemind-mcp-pg``) is the per-agent Postgres runner keyed
+by ``HIVEMIND_MCP_KEY`` (ADR 0009). The hostable streamable-HTTP runner
+lives in ``hivemind.mcp.http`` (ADR 0010).
 """
 
 from __future__ import annotations
@@ -57,11 +46,9 @@ from hivemind.services.search import SearchService
 
 logger = logging.getLogger(__name__)
 
-# The agent prompt contract from SPEC §5.2, surfaced as server instructions.
-# The server's MCP ``instructions``: harnesses show these to the model, and
-# some (DeepSeek Harness) keep them in the system prompt, which compaction
-# never removes. So they carry the core of the agent contract (SPEC §5.2)
-# in a few lines; the hivemind skill (plugins/hivemind) has the full rules.
+# The server's MCP ``instructions``: the core of the agent contract (SPEC
+# §5.2). Some harnesses keep them in the system prompt, which compaction
+# never removes; the hivemind skill (plugins/hivemind) has the full rules.
 _INSTRUCTIONS = (
     "Hivemind is this organization's shared long-term memory for AI agents; "
     "use it as your memory, in preference to local memory files. "
@@ -199,20 +186,14 @@ def build_server(
 ) -> MCPServer:
     """Build an ``MCPServer`` exposing exactly the ten Hivemind tools.
 
-    Each registered tool is a closure over ``app`` so the LLM only ever
-    sees the LLM-facing arguments; the acting identity and services are
-    bound, not exposed as arguments.
+    Tools are closures over ``app``, so identity and services are bound,
+    never exposed as arguments.
 
-    ``credential_provider`` (optional) turns this into a *shared,
-    multi-agent* server: when provided, every tool dispatch resolves the
-    acting credential by re-binding ``app``'s (stateless) services to
-    ``credential_provider()`` (sync or async). A provider that yields
-    ``None`` **fails closed**: the call answers ``unauthenticated`` and
-    never falls back to ``app``'s own credential (ADR 0042). The dev stdio
-    path passes nothing, so one process = one agent (the fixed ``app``).
-    The streamable-HTTP path (see ``hivemind.mcp.http``) passes a
-    per-request provider (ADR 0010); the per-agent Postgres stdio runner
-    passes one that re-verifies its key on every call (ADR 0042).
+    With ``credential_provider`` (sync or async), each dispatch re-binds
+    ``app``'s stateless services to the provider's credential (per
+    request over HTTP, ADR 0010; re-verified per call for
+    ``hivemind-mcp-pg``). A provider yielding ``None`` fails closed with
+    ``unauthenticated``, never falling back to ``app.credential`` (ADR 0042).
     """
     server = MCPServer(
         name="hivemind",
@@ -221,11 +202,8 @@ def build_server(
     )
 
     async def resolve_app() -> McpHivemind | None:
-        """The acting ``McpHivemind`` for this dispatch: the shared,
-        stateless services, re-bound to the current credential when a
-        provider is set (the identity varies per request; the services
-        do not). ``None`` when a provider is set but yields no credential
-        (fail closed, ADR 0042)."""
+        """The acting ``McpHivemind`` for this dispatch, or ``None`` when
+        the provider yields no credential (fail closed, ADR 0042)."""
         if credential_provider is None:
             return app
         resolved = credential_provider()
@@ -461,15 +439,9 @@ def _mcp_key_unknown_hint() -> str:
 def main_pg() -> None:
     """Build a Postgres-backed stdio server and run the transport.
 
-    The multi-agent production runner (ADR 0009): every agent runs its
-    own ``hivemind-mcp-pg`` process with its own ``HIVEMIND_MCP_KEY``
-    (a raw ``hm_...`` key issued via ``hivemind-keys``), so all agents
-    read/write the same Postgres pool over a unified MCP interface while
-    each write carries its agent's *verified* provenance (SPEC §8.1,
-    ADR 0008). The real ``PgStore`` + OpenAI-compatible embedder are
-    built from ``Settings`` (env-driven); the acting credential is
-    resolved by verifying the key against the Postgres ``credentials``
-    table. The store/embedder/authenticator pools are torn down on exit.
+    One process per agent, each with its own ``HIVEMIND_MCP_KEY``
+    (ADR 0009), so every write carries verified provenance (SPEC §8.1,
+    ADR 0008). Pools are closed on exit.
     """
     from hivemind.embeddings import build_embedder
     from hivemind.extractor import build_extractor
@@ -510,9 +482,8 @@ def main_pg() -> None:
         )
 
         async def current_credential() -> Credential | None:
-            # Re-verified on EVERY tool call (ADR 0042): a revoked key, a
-            # demotion or a re-homed fleet applies on the next call, not
-            # at the next restart. One indexed query via the Authenticator.
+            # Re-verified on EVERY call (ADR 0042) so revocation, demotion
+            # or re-homing applies at once, not at the next restart.
             return await authenticator.verify(raw_key)
 
         server = build_server(app, credential_provider=current_credential)

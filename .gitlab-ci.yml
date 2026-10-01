@@ -1,12 +1,9 @@
 # Hivemind CI/CD (Kubernetes + GitLab).
 #
 # Stages: test -> build -> deploy
-#   test  : hermetic unit suite + Postgres-backed integration suite
-#           (pgvector service container; a DB probe fails LOUDLY so a
-#           skip-and-pass cannot masquerade as green), plus the two
-#           migration gates (ADR 0020): the generated schema.sql
-#           reference is current, and the previous releases still work
-#           against HEAD's schema (expand-and-contract).
+#   test  : the full suite against a pgvector service container, plus the
+#           ADR 0020 migration gates (schema.sql current; previous
+#           releases still pass against HEAD's schema)
 #   build : docker build + push to the GitLab container registry
 #   deploy: kubectl apply via the pre-configured GitLab Kubernetes agent
 #
@@ -45,8 +42,7 @@ test:
     POSTGRES_USER: hivemind
     POSTGRES_PASSWORD: hivemind
     POSTGRES_DB: hivemind
-    # A FRESH CI database provisions at the configured dim (512 keeps the
-    # test vectors fast; the dev-machine 512 pool is irrelevant to CI).
+    # 512 keeps the test vectors fast on the fresh CI database.
     HIVEMIND_DATABASE_URL: postgresql://hivemind:hivemind@postgres:5432/hivemind
     HIVEMIND_EMBEDDING_DIM: "512"
   script:
@@ -56,11 +52,8 @@ test:
     - uv lock --check
     - uv sync
     # --- DB readiness probe (REQUIRED) -------------------------------------
-    # The integration suite SKIPs when the DB is unreachable, so a broken
-    # service container would silently skip-and-pass. This probe waits up to
-    # ~60s for the DSN, creates the vector extension as the superuser, and
-    # FAILS the job if anything is wrong — a skipping suite must never
-    # masquerade as green.
+    # The integration suite SKIPs when the DB is unreachable, so this probe
+    # FAILS the job instead: a skipping suite must never pass as green.
     - |
       uv run python - <<'PYEOF'
       import asyncio, os
@@ -85,25 +78,19 @@ test:
 
       asyncio.run(wait_for_db())
       PYEOF
-    # The live-extractor integration test (tests/integration/test_extractor_live.py)
-    # SKIPs by design: HIVEMIND_EXTRACTOR_ENDPOINT is unset (ADR 0016
-    # optional extractor). The hermetic + Postgres-backed suite must be green.
-    # The FULL suite (matches the repo's `make test` gate): the hermetic
-    # unit tests, the Postgres-backed integration suite, and the retrieval
-    # eval harness (tests/eval — the golden-set quality gate, SPEC §11).
+    # The full suite, as `make test`: unit, integration and the tests/eval
+    # quality gate (SPEC §11). The live-extractor test skips by design
+    # (no HIVEMIND_EXTRACTOR_ENDPOINT, ADR 0016).
     - uv run pytest -q
 
 # --- ADR 0020 migration gates ---------------------------------------------
-# The migration-file checksum guard is a plain unit test
-# (tests/unit/test_migration_chain.py) and runs in `test` above. These two
-# need a live pool, so they get their own job.
+# These need a live pool (the checksum guard is a unit test in `test`).
 migrations:
   stage: test
   image:
     name: python:3.14
   services:
-    # alias: GitLab otherwise derives the hostname from the image name
-    # (`pgvector-pgvector`), so `postgres` in the DSN would not resolve.
+    # alias: see the `test` job.
     - name: pgvector/pgvector:0.8.1-pg16
       alias: postgres
   variables:
@@ -111,22 +98,18 @@ migrations:
     POSTGRES_PASSWORD: hivemind
     POSTGRES_DB: hivemind
     HIVEMIND_DATABASE_URL: postgresql://hivemind:hivemind@postgres:5432/hivemind
-    # 1024, NOT the 512 the `test` job uses: the committed schema.sql
-    # reference bakes the dim into `vector(<dim>)`, so it has to be
-    # regenerated at the code default (ADR 0015) or the diff below
-    # fails for a reason that has nothing to do with the schema.
+    # 1024, not 512: schema.sql bakes in `vector(<dim>)` at the code
+    # default (ADR 0015), or the diff below fails spuriously.
     HIVEMIND_EMBEDDING_DIM: "1024"
-    # The backward-compat gate checks out previous releases into git
-    # worktrees, so the default shallow clone is not enough.
+    # The backward-compat gate checks out previous releases: full clone.
     GIT_DEPTH: "0"
     COMPAT_RELEASES: "3"
   script:
     - apt-get update -qq && apt-get install -y -qq postgresql-client
     - pip install uv==0.12.21
     - uv sync
-    # 1. The generated schema.sql reference must be current. It is a
-    #    review aid, never applied (ADR 0020) — but a stale one is a
-    #    misleading review aid, so regenerate and diff.
+    # 1. The generated schema.sql (a review aid, never applied; ADR 0020)
+    #    must be current.
     - uv run hivemind-migrate
     - scripts/dump-schema-reference.sh "$HIVEMIND_DATABASE_URL"
     - |
@@ -134,10 +117,8 @@ migrations:
         echo "schema.sql is STALE. Run 'make schema-ref' and commit the result."
         exit 1
       fi
-    # 2. Expand-and-contract: the previous releases' store tests must
-    #    pass against HEAD's schema. This tests the property directly
-    #    rather than grepping migrations for DROP COLUMN / ALTER /
-    #    RENAME, which in correct expand-and-contract are routine.
+    # 2. Expand-and-contract, tested directly: the previous releases'
+    #    store tests must pass against HEAD's schema.
     - scripts/check-backward-compat.sh "$HIVEMIND_DATABASE_URL" "$COMPAT_RELEASES"
 
 build:
@@ -148,18 +129,12 @@ build:
   services:
     - docker:27.3.1-dind
   variables:
-    # Standard GitLab docker-in-docker (dind) wiring. CAVEAT: a k8s runner
-    # needs a dind-capable service (or privileged pods for /dev/shm); if the
-    # org's runner cannot run dind, use the commented-out kaniko build below.
-    # Explicit dind wiring: plain-TCP daemon on the service host, no TLS
-    # (the documented GitLab setup for `DOCKER_TLS_CERTDIR: ""`).
+    # Standard GitLab dind wiring (plain TCP, no TLS). A k8s runner needs a
+    # dind-capable service; otherwise use the kaniko build below.
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
   before_script:
-    # docker:27: log into the GitLab container registry (CI_REGISTRY_* is
-    # provided by GitLab for the project's registry).
-    # --password-stdin keeps the token out of argv (visible to other
-    # processes on a shared runner).
+    # --password-stdin keeps the token out of argv on a shared runner.
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
   script:
     - docker build -t "$K8S_IMAGE:$CI_COMMIT_SHORT_SHA" .
@@ -179,14 +154,12 @@ deploy:
   stage: deploy
   environment:
     name: production
-  # One deploy at a time (DEP-11b): two fast pushes must not race on the
-  # bootstrap Job / Secret, and an older pipeline finishing later must not
-  # `apply` its older image over the newer one.
+  # One deploy at a time (DEP-11b): no racing on the bootstrap Job / Secret,
+  # and no older pipeline applying its image over a newer one.
   resource_group: production
   image:
-    # kubectl + a POSIX/bash shell + sed. Any image with those works (the
-    # org's standard kubectl image is fine); pin a version, never a floating tag.
-    # The entrypoint is cleared so the GitLab runner can start a shell.
+    # Any pinned image with kubectl, a shell and sed; entrypoint cleared
+    # so the runner can start a shell.
     name: alpine/k8s:1.31.0
     entrypoint: [""]
   rules:
@@ -194,17 +167,12 @@ deploy:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   script:
     - export IMAGE="$K8S_IMAGE:$CI_COMMIT_SHORT_SHA"
-    # 0) The namespace and the ConfigMap. The namespace is created ONCE by
-    #    an operator (DEPLOY.md §7); applying it here is a no-op that only
-    #    needs get/patch on that one namespace. The ConfigMap must exist
-    #    before the key-bootstrap Job (step 2), which reads the embedding dim
-    #    from it (applied again, unchanged, by the kustomize tree in step 3).
+    # 0) Namespace (created once by an operator, DEPLOY.md §7; a no-op here)
+    #    and the ConfigMap, which the bootstrap Job (step 2) reads.
     - kubectl apply -f deploy/kubernetes/namespace.yaml
     - kubectl -n hivemind apply -f deploy/kubernetes/configmap.yaml
-    # 1) Create/refresh the app secret from the masked+protected GitLab
-    #    variables. CI is the single source of truth for these three values;
-    #    the bootstrap-owned `hivemind-keys` secret is a DELIBERATELY
-    #    DIFFERENT secret so this never wipes the generated keys.
+    # 1) The app secret from the GitLab variables (CI is their source of
+    #    truth). Deliberately NOT `hivemind-keys`, so the keys survive.
     - |
       secret_yaml=$(kubectl -n hivemind create secret generic hivemind-secrets \
         --from-literal=HIVEMIND_DATABASE_URL="$K8S_SECRET_DATABASE_URL" \
@@ -213,29 +181,21 @@ deploy:
         --from-literal=HIVEMIND_MIGRATE_DATABASE_URL="${K8S_SECRET_MIGRATE_DATABASE_URL:-}" \
         --dry-run=client -o yaml)
       printf '%s\n' "$secret_yaml" | kubectl -n hivemind apply -f -
-    # 2) FIRST-RUN KEY BOOTSTRAP (idempotent; scripts/ci-bootstrap-keys.sh +
-    #    deploy/kubernetes/bootstrap/{rbac,keys-job}.yaml, ADR 0044). On a
-    #    FRESH database no admin / org keys exist yet; a one-off Job in the
-    #    app image writes them straight into the `hivemind-keys` secret under
-    #    its own narrow ServiceAccount, printing neither.
-    #    On every later deploy the secret exists and this is skipped. The raw
-    #    keys live ONLY in the k8s Secret — GitLab stays key-free by design.
+    # 2) First-run key bootstrap (idempotent, ADR 0044): a one-off Job writes
+    #    the admin and org keys into the `hivemind-keys` secret, printing
+    #    neither; skipped once it exists. GitLab stays key-free.
     - sh scripts/ci-bootstrap-keys.sh
-    # 3) Apply the app manifests: the placeholder image `hivemind:0.0.0` in
-    #    deploy/kubernetes/ is the ONLY sed target (kustomize is built into
-    #    kubectl — no extra binary needed).
+    # 3) The app manifests; the placeholder `hivemind:0.0.0` is the ONLY
+    #    sed target.
     - kubectl kustomize deploy/kubernetes | sed "s|hivemind:0.0.0|$IMAGE|g" | kubectl -n hivemind apply -f -
-    # 4) Wait for both rollouts (each pod's entrypoint runs the
-    #    idempotent migration first (ADR 0018) — a dim mismatch (ADR 0015)
-    #    blocks the rollout LOUDLY here, never a silent runtime no-op).
+    # 4) Wait for both rollouts; pods migrate first (ADR 0018), so a dim
+    #    mismatch (ADR 0015) blocks the rollout here.
     - kubectl -n hivemind rollout status deployment/hivemind-api --timeout=300s
     - kubectl -n hivemind rollout status deployment/hivemind-mcp --timeout=300s
     # 5) The admin panel (ADR 0029) — its own kustomization so it can also
     #    live in its own project; same image, no Secret, no migration.
     - kubectl kustomize deploy/kubernetes/admin | sed "s|hivemind:0.0.0|$IMAGE|g" | kubectl -n hivemind apply -f -
     - kubectl -n hivemind rollout status deployment/hivemind-admin --timeout=120s
-    # KUBECTL AUTH: the GitLab Kubernetes agent (pre-configured per org)
-    # provides the kubectl credentials for this job — no kubeconfig wiring
-    # here. The agent's ServiceAccount needs the verbs in DEPLOY.md §7.
-    # The K8S_SECRET_* variables MUST be Protected (DEPLOY.md §1), so they
-    # are only injected into pipelines on protected branches.
+    # kubectl credentials come from the GitLab Kubernetes agent; its
+    # ServiceAccount needs the verbs in DEPLOY.md §7. K8S_SECRET_* MUST be
+    # Protected (DEPLOY.md §1).

@@ -1,10 +1,9 @@
-# REST API surface (SPEC §5.1) — the `hivemind-api` console script.
+# REST API surface (SPEC §5.1): the `hivemind-api` console script.
 #
-# Image contract (shipped by the generic Dockerfile lane):
-#   * entrypoint /app/entrypoint.sh:  exec hivemind-"${HIVEMIND_RUNNER:-mcp-http}" "$@"
-#   * the pod sets HIVEMIND_RUNNER=api and passes args via the pod `args:` field
-#   * the placeholder image `hivemind:0.0.0` is the single sed target the CI
-#     deploy job replaces with the real registry image ($K8S_IMAGE:$CI_COMMIT_SHORT_SHA)
+# Image contract (Dockerfile): entrypoint /app/entrypoint.sh runs
+# hivemind-"${HIVEMIND_RUNNER:-mcp-http}" "$@"; this pod sets
+# HIVEMIND_RUNNER=api. `hivemind:0.0.0` is the single sed target the CI
+# deploy job replaces with $K8S_IMAGE:$CI_COMMIT_SHORT_SHA.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -13,18 +12,12 @@ metadata:
     app.kubernetes.io/name: hivemind
     app.kubernetes.io/component: api
 spec:
-  # Two replicas for AVAILABILITY, not throughput (ADR 0026, which
-  # supersedes ADR 0007's one-process clause). The app tier is I/O-bound
-  # — a request waits on the embedder, the extractor and Postgres — so a
-  # second replica adds no capacity to any of those; what it buys is a
-  # zero-downtime rolling deploy and a pod that survives a node drain.
-  # One Postgres node is UNCHANGED (ADR 0007 / ADR 0026).
+  # Two replicas for AVAILABILITY, not throughput (ADR 0026): the tier is
+  # I/O-bound, so a second replica buys zero-downtime deploys and node-drain
+  # survival, not capacity. Still one Postgres node (ADR 0007 / ADR 0026).
   replicas: 2
-  # Written down explicitly even though k8s' own 25% defaults round to
-  # the same numbers at replicas: 2 — at 3 or 4 they do not, so the
-  # guarantee would silently weaken if this count is ever raised.
-  # maxUnavailable: 0 = the new pod passes readiness BEFORE the old one
-  # is asked to leave (a handover, not a gap).
+  # Explicit because k8s' 25% defaults match only at replicas: 2.
+  # maxUnavailable: 0 = the new pod is Ready BEFORE the old one leaves.
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -40,36 +33,24 @@ spec:
         app.kubernetes.io/name: hivemind
         app.kubernetes.io/component: api
       # Prometheus scrape target (ADR 0050): GET /metrics on the app port,
-      # for a Prometheus that discovers pods by these annotations. Scrape
-      # each pod directly; the public Ingress never serves /metrics.
+      # scraped per pod; the public Ingress never serves /metrics.
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "8000"
         prometheus.io/path: /metrics
     spec:
-      # The image entrypoint runs the idempotent schema migration (ADR 0013)
-      # before starting the runner (`hivemind-api`) (ADR 0018 — no init
-      # container: single source of truth). A dim mismatch (ADR 0015) or an
-      # unreachable DB fails the first entrypoint step LOUDLY: the pod never
-      # serves (crash-loops until the DB is up — the desired posture; no
-      # retry in the entrypoint, the pod restart policy owns recovery).
+      # The entrypoint runs the idempotent migration (ADR 0013) before the
+      # runner (ADR 0018: no init container). A dim mismatch (ADR 0015) or an
+      # unreachable DB fails it LOUDLY and the pod crash-loops; the restart
+      # policy owns recovery.
 
-      # Graceful shutdown on rolling deploys. With more than one replica a
-      # rolling deploy terminates pods routinely, so this is ordinary
-      # traffic, not an edge case. The REST surface is plain
-      # request/response (SPEC §5.1) — no server-side session state — so
-      # a terminating pod's blast radius is at most the requests already
-      # in flight on it. Two separate concerns, one here and one below:
+      # Graceful shutdown (rolling deploys terminate pods routinely; REST
+      # holds no session state, so only in-flight requests are at risk).
       #
-      # 1. terminationGracePeriodSeconds — the SIGTERM -> SIGKILL budget.
-      #    uvicorn handles SIGTERM itself (stop accepting, drain the
-      #    in-flight requests, THEN run the lifespan shutdown), and
-      #    nothing sets uvicorn's `timeout_graceful_shutdown`, so its own
-      #    wait is unbounded: THIS number is the only real deadline.
-      #    It must therefore cover the slowest single request, which is a
-      #    write (`hive_write` / `POST /v1/entries`): `WriteService.write`
-      #    embeds and then extracts, in sequence, each with its own
-      #    bounded retry budget (ADR 0014).
+      # 1. terminationGracePeriodSeconds: uvicorn drains in-flight requests
+      #    on SIGTERM with no deadline of its own, so THIS is the only real
+      #    deadline. It must cover the slowest request, a write, which embeds
+      #    then extracts, each with bounded retries (ADR 0014):
       #
       #      embedder   3 attempts x 10s (HIVEMIND_EMBEDDING_TIMEOUT's
       #                 default) + 0.5s + 1.0s backoff =            31.5s
@@ -77,24 +58,19 @@ spec:
       #      ------------------------------------------------- -------
       #      worst-case write path                               123.0s
       #
-      #    Plus the 5s preStop sleep below and two pooled Postgres
-      #    round-trips (auth verify + INSERT), rounded up to 150s for
-      #    margin — httpx applies its timeout PER I/O phase (connect /
-      #    read / write), so a single attempt can exceed it. 150s is also
-      #    the budget the startupProbe already gets.
+      #    Plus the 5s preStop sleep and two Postgres round-trips, rounded
+      #    up to 150s (httpx times out PER I/O phase, so one attempt can run
+      #    longer). Matches the startupProbe budget.
       #
       #    RAISE THIS if HIVEMIND_EXTRACTOR_RETRIES, HIVEMIND_EXTRACTOR_TIMEOUT,
-      #    HIVEMIND_EMBEDDING_RETRIES or HIVEMIND_EMBEDDING_TIMEOUT go up —
-      #    DEPLOY.md §5 carries the arithmetic and the recipe.
+      #    HIVEMIND_EMBEDDING_RETRIES or HIVEMIND_EMBEDDING_TIMEOUT go up
+      #    (DEPLOY.md §5).
       terminationGracePeriodSeconds: 150
-      # No Kubernetes service-link variables: every Service named
-      # hivemind-* would otherwise inject HIVEMIND_*_SERVICE_HOST /
-      # _PORT variables into this pod (ADR 0032). Hivemind finds its
-      # peers by DNS name, never through these.
+      # No service-link variables: hivemind-* Services would otherwise inject
+      # HIVEMIND_*_SERVICE_HOST / _PORT into the env (ADR 0032).
       enableServiceLinks: false
-      # Hardening (DEP-4): non-root numeric UID (matches the image's USER),
-      # RuntimeDefault seccomp, and no ServiceAccount token (no pod here talks
-      # to the Kubernetes API).
+      # Hardening (DEP-4): non-root UID matching the image's USER,
+      # RuntimeDefault seccomp, no ServiceAccount token.
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
@@ -102,9 +78,8 @@ spec:
         runAsGroup: 10001
         seccompProfile:
           type: RuntimeDefault
-      # Prefer different nodes for the 2 replicas (DEP-12): the PDB only
-      # covers voluntary drains; this is what survives losing a node.
-      # ScheduleAnyway = a preference, so a single-node cluster still works.
+      # Prefer different nodes (DEP-12): the PDB covers only voluntary
+      # drains. ScheduleAnyway keeps single-node clusters working.
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname
@@ -130,19 +105,11 @@ spec:
               value: "0.0.0.0"
             - name: HIVEMIND_PORT
               value: "8000"
-          # 2. preStop — the endpoint-deregistration race. On pod deletion
-          #    the kubelet's SIGTERM and the EndpointSlice removal happen
-          #    CONCURRENTLY, so for as long as that removal takes to reach
-          #    kube-proxy (and the nginx ingress controller, which routes
-          #    straight to pod IPs, bypassing the Service) a terminating
-          #    pod can still be handed NEW requests — which it would
-          #    refuse, because uvicorn has already closed its listener.
-          #    Sleeping lets deregistration win the race: the process
-          #    keeps serving normally throughout, it just is not asked to
-          #    exit yet. The sleep runs INSIDE the grace period above.
-          #    `sleep` is /bin/sleep from the python:3.14-slim base —
-          #    deliberately NOT the native `sleep` lifecycle handler
-          #    (GA only in k8s 1.30+), so this works on older clusters.
+          # 2. preStop: SIGTERM and EndpointSlice removal happen concurrently,
+          #    so kube-proxy and the nginx ingress (which routes to pod IPs)
+          #    may still send NEW requests after uvicorn closed its listener.
+          #    The sleep (inside the grace period) lets deregistration win.
+          #    /bin/sleep, not the native `sleep` handler (k8s 1.30+ only).
           lifecycle:
             preStop:
               exec:
@@ -156,12 +123,10 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
-          # Modest, MEASURE-and-adjust defaults (DEP-5). Requests give the pod a
-          # Burstable QoS class (BestEffort pods are evicted first, defeating the
-          # ADR 0026 availability goal) and let the scheduler place it; the
-          # memory limit bounds a runaway request. No CPU limit, so the pod is
-          # never throttled. Each pod holds up to 2 x HIVEMIND_POOL_MAX_SIZE
-          # Postgres connections (DEPLOY.md / ops runbook): size them together.
+          # MEASURE-and-adjust defaults (DEP-5). Requests give Burstable QoS
+          # (BestEffort is evicted first); the memory limit bounds a runaway
+          # request; no CPU limit, so no throttling. Each pod holds up to
+          # 2 x HIVEMIND_POOL_MAX_SIZE Postgres connections: size together.
           resources:
             requests:
               cpu: 100m
@@ -171,14 +136,9 @@ spec:
           ports:
             - name: http
               containerPort: 8000
-          # Unauthenticated probe endpoints (ADR 0019): /v1/liveness is
-          # shallow (200 = the process answers). Probes carry no credential:
-          # these paths are served outside the auth middleware.
-          # Startup gate (ADR 0020): the entrypoint applies the migration
-          # chain BEFORE the server listens, so k8s must not kill a pod
-          # that is still migrating. Liveness/readiness are suspended
-          # until this succeeds; 30 x 5s = up to 150s for a slow index
-          # build on a large pool, then a normal restart.
+          # Probe endpoints are unauthenticated (ADR 0019); /v1/liveness is
+          # shallow. Startup gate (ADR 0020): the entrypoint migrates BEFORE
+          # listening, so 30 x 5s = up to 150s before a restart.
           startupProbe:
             httpGet:
               path: /v1/liveness
@@ -191,10 +151,9 @@ spec:
               port: 8000
             initialDelaySeconds: 5
             periodSeconds: 10
-          # Readiness: /v1/health is a STATIC 200 (public by design, SPEC
-          # §5.1 — the REST surface has no deep DB-probe endpoint in v1: a
-          # DB outage shows as request errors, not NotReady). The deep DB
-          # check lives on the MCP runner (/mcp/health/database, ADR 0037).
+          # Readiness: /v1/health is a STATIC 200 (SPEC §5.1); a DB outage
+          # shows as request errors, not NotReady. The deep DB check is on
+          # the MCP runner (/mcp/health/database, ADR 0037).
           readinessProbe:
             httpGet:
               path: /v1/health

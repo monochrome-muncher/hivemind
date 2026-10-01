@@ -1,16 +1,8 @@
 """Search service — the retrieval pipeline (SPEC.md §6).
 
-This is the deep module of the read path: one small interface
-(``search``) over a deep interior — dual-stream retrieval (keyword +
-vector), RRF fusion (configurable weights), decay-aware rescoring
-(similarity x importance x recency x feedback quality), and the
-supersession ranking invariant (a successor always outranks the
-entry it superseded; superseded/withdrawn entries hidden unless
-``include_inactive``).
-
-Everything here is orchestration: the pure math lives in
-``hivemind.retrieval``, and all I/O happens through the ``Store``
-and ``Embedder`` ports.
+Keyword + vector streams, RRF fusion, decay-aware rescoring and the
+supersession ranking invariant. Orchestration only: the math lives in
+``hivemind.retrieval``.
 """
 
 from __future__ import annotations
@@ -39,11 +31,8 @@ from hivemind.retrieval.scoring import entry_score, feedback_quality
 
 @dataclass(frozen=True, slots=True)
 class Hit:
-    """A compact search hit (SPEC.md §6.1: progressive disclosure).
-
-    Deliberately carries no ``body``: agents scan compact hits and
-    open the interesting ones via the get endpoint.
-    """
+    """A compact search hit, no ``body`` (SPEC.md §6.1: progressive
+    disclosure)."""
 
     entry_id: str
     kind: Kind
@@ -53,23 +42,17 @@ class Hit:
     agent: str
     occurred_at: datetime
     score: float
-    # Where the entry is filed (ADR 0036): lets a privileged reader tell a
-    # foreign entry (fleet_id != its home fleet) from its own fleet's.
+    # Lets a privileged reader spot a foreign fleet's entry (ADR 0036).
     scope: str = "fleet"
     fleet_id: str | None = None
-    # (helpful, stale, wrong) over every reporter (ADR 0051): lets a reader
-    # see an entry was reported stale or wrong before relying on it.
+    # (helpful, stale, wrong) over every reporter (ADR 0051).
     feedback: FeedbackCounts = (0, 0, 0)
 
 
 @dataclass(frozen=True, slots=True)
 class SearchResult:
-    """A page of hits plus how it was produced.
-
-    ``degraded`` is true when the embedding service failed and the page
-    came from the keyword stream alone (ADR 0048): still ranked, but
-    without semantic matches.
-    """
+    """A page of hits; ``degraded`` when the embedder failed and the page
+    is keyword-only (ADR 0048)."""
 
     hits: list[Hit]
     degraded: bool = False
@@ -81,12 +64,9 @@ logger = logging.getLogger(__name__)
 
 
 async def _gather[A, B](first: Awaitable[A], second: Awaitable[B]) -> tuple[A, B]:
-    """Run two independent awaitables concurrently, returning both results.
-
-    Unlike a bare ``asyncio.gather`` (which leaves the sibling running when
-    one raises) or a ``TaskGroup`` (which wraps the error in an
-    ``ExceptionGroup``, breaking callers that catch e.g. ``EmbeddingError``),
-    the first failure propagates **unchanged** and the sibling is cancelled.
+    """Run two awaitables concurrently. The first failure propagates
+    unchanged (no ``ExceptionGroup``, unlike ``TaskGroup``) and the sibling
+    is cancelled (unlike a bare ``gather``).
     """
     task_a = asyncio.ensure_future(first)
     task_b = asyncio.ensure_future(second)
@@ -143,23 +123,13 @@ class SearchService:
     ) -> SearchResult:
         """Run a hybrid query and return compact hits, best first.
 
-        Pipeline: keyword + vector streams (each ``candidate_top_k``)
-        -> RRF fusion -> decay-aware rescore -> supersession invariant
-        -> pagination (``offset`` then ``limit``; SPEC.md §5.3).
-        Superseded/withdrawn entries are excluded unless
-        ``filters.include_inactive`` is set.
-
-        If the embedding service fails, the vector stream is empty and the
-        result is marked ``degraded`` (ADR 0048): the caller still gets
-        the keyword stream's hits rather than an error.
-
-        A first-page search by a caller (``visibility`` supplied) is
-        counted per home fleet, and whether it found nothing (ADR 0056).
+        If the embedder fails the result is keyword-only and ``degraded``
+        (ADR 0048), not an error. A caller's first-page search is counted
+        per home fleet (ADR 0056).
         """
         result = await self._ranked(query, filters, limit, offset, visibility)
         if visibility is not None and not offset:
-            # A keyword-only answer (ADR 0048) that found nothing says more
-            # about the embedder than about the pool: not counted as empty.
+            # An empty degraded answer reflects the embedder, not the pool.
             empty = not result.hits and not result.degraded
             await self._count_search(visibility, empty=empty)
         return result
@@ -180,8 +150,7 @@ class SearchService:
         visibility: Visibility | None,
     ) -> SearchResult:
         """The search itself (``search_result`` without the counting)."""
-        # ADR 0040: reject NUL / oversize / out-of-range input BEFORE any
-        # embedder or store call (one rule set for REST and MCP).
+        # Validate before any embedder or store call (ADR 0040).
         check_query(query)
         check_pagination(limit, offset)
         filters = filters or EntryFilters()
@@ -190,11 +159,8 @@ class SearchService:
         offset = offset or 0
         top_k = self._config.candidate_top_k
 
-        # 1. Dual-stream retrieval (restricted to the caller's visibility,
-        # ADR 0011 when ``visibility`` is supplied).
-        # The keyword stream needs no embedding, so it runs concurrently with
-        # the embed -> vector chain (PERF-4); the two chains are independent.
-        # ``vector_ids`` is None when the embedder failed (ADR 0048).
+        # 1. Both streams concurrently (PERF-4); ``vector_ids`` is None when
+        # the embedder failed (ADR 0048).
         keyword_ids, vector_ids = await _gather(
             self._store.search_keyword(query, filters, top_k, visibility=visibility),
             self._vector_stream(query, filters, top_k, visibility),
@@ -223,10 +189,8 @@ class SearchService:
         scored: list[Entry] = []
         entry_scores: dict[str, float] = {}
         entry_feedback: dict[str, FeedbackCounts] = {}
-        # Iterate in fused-rank order (keyword stream first, then vector), NOT
-        # in the store's row order: equal fused scores are the normal case and
-        # the stable sorts below keep this order, so ties resolve the same way
-        # whatever order ``get_entries`` returns rows in (SP-5).
+        # Fused-rank order, not row order: ties are common and the stable
+        # sorts below keep this order (SP-5).
         for entry in (entries[eid] for eid in candidate_ids if eid in entries):
             if not filters.include_inactive and entry.state is not EntryState.ACTIVE:
                 continue
@@ -263,14 +227,12 @@ class SearchService:
         top_k: int,
         visibility: Visibility | None,
     ) -> list[str] | None:
-        """The vector stream, or None when the embedding service failed
-        (ADR 0048). Only an ``EmbeddingError`` is absorbed: a store
-        failure still propagates."""
+        """The vector stream, or None on an ``EmbeddingError`` (ADR 0048);
+        store failures propagate."""
         try:
             query_vector = await self._embedder.embed_text(query)
         except EmbeddingError as exc:
-            # The detail is already sanitized (providers.py). Log it here as
-            # the 502 path did, since the caller no longer sees an error.
+            # Already sanitized (providers.py); the caller sees no error.
             logger.warning("embedding unavailable, searching by keyword only: %s", exc)
             return None
         return await self._store.search_vector(query_vector, filters, top_k, visibility=visibility)
@@ -298,18 +260,14 @@ def apply_supersession_invariant(
     """Enforce: within a supersession chain, the newest entry outranks all
     predecessors (SPEC.md §6.3).
 
-    Deterministic rule: group entries by their chain head (the newest
-    entry in the chain); order groups by the head's score descending;
-    within a group, entries are ordered by ``created_at`` descending
-    (newest first). Ties keep the order of ``entries`` (stable sorts), so the caller
-    decides them — ``SearchService`` passes the fused-rank order (SP-5). Single-entry groups are unaffected.
+    Group by chain head, order groups by their best score, and within a
+    group newest ``created_at`` first. Ties keep the order of ``entries``
+    (stable sorts; SP-5).
     """
-    # Map: entry_id -> successor_id (a superseded entry points at its successor).
     successor_of = {e.id: e.superseded_by for e in entries}
     id_set = set(successor_of)
 
-    # Chain head = follow superseded_by until the link leaves the candidate set
-    # or the entry is not superseded.
+    # Follow superseded_by until the link leaves the candidate set.
     def chain_head(entry: Entry) -> str:
         head = entry
         guard = 0

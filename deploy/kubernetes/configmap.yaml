@@ -1,15 +1,13 @@
 # Non-secret configuration baseline (HIVEMIND_* keys, see src/hivemind/config.py).
 #
-# Only the values you actually change in production need overriding here —
-# every key falls back to the code default in Settings when omitted. The
-# three Secret-backed values (DSN, embedding API key, extractor API key)
-# live in the `hivemind-secrets` Secret, NOT here (see secret-template.yaml).
+# An omitted key falls back to the Settings default. The DSN and the
+# embedding / extractor API keys live in the `hivemind-secrets` Secret, NOT
+# here (see secret-template.yaml).
 #
-# HIVEMIND_RUNNER/HOST/PORT are set on the Deployments themselves, not
-# here — they are deliberately NOT Settings fields (see
-# `_ALLOWED_EXTRA_ENV_VARS` in config.py). Any other HIVEMIND_* variable
-# that isn't a Settings field fails startup loudly (ADR 0024) rather than
-# being silently ignored, so a typo here surfaces immediately.
+# HIVEMIND_RUNNER/HOST/PORT are set on the Deployments; they are not
+# Settings fields (`_ALLOWED_EXTRA_ENV_VARS` in config.py). Any other
+# unknown HIVEMIND_* variable fails startup loudly (ADR 0024), so typos
+# surface immediately.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -20,15 +18,13 @@ metadata:
   name: hivemind-config
 data:
   # --- embeddings (ADR 0005: deploy-time decision) ---------------------------
-  # Placeholder endpoint: point this at the in-cluster vLLM (or any
-  # OpenAI-compatible) embedding Service. The vLLM compose service exposes
-  # OpenAI-compatible /v1/embeddings on :8000 inside its network.
+  # Placeholder: point at the in-cluster vLLM (or any OpenAI-compatible)
+  # embedding Service.
   HIVEMIND_EMBEDDING_ENDPOINT: "http://vllm:8000/v1"
   # The model name recorded per entry (provenance, ADR 0005).
   HIVEMIND_EMBEDDING_MODEL: "Qwen/Qwen3-Embedding-0.6B"
-  # ADR 0015 code default: 1024. Must match the pool's dim — a mismatch
-  # makes the entrypoint's idempotent migration (ADR 0018) fail LOUDLY
-  # (the pod never serves), which is the desired posture.
+  # Code default 1024 (ADR 0015). Must match the pool's dim, or the
+  # entrypoint migration (ADR 0018) fails LOUDLY and the pod never serves.
   HIVEMIND_EMBEDDING_DIM: "1024"
   # Bounded body prefix for embedding + extraction (SPEC §7), counted in
   # whitespace-delimited words, not model tokens (ADR 0021).
@@ -40,10 +36,9 @@ data:
   # works. Set HIVEMIND_EMBEDDING_DEADLINE / HIVEMIND_EXTRACTOR_DEADLINE only
   # to cap lower; a value below the per-attempt timeout fails startup.
   # --- entity extraction (ADR 0016: optional + best-effort) ------------------
-  # EMPTY endpoint = extraction OFF (zero LLM cost; entries land with empty
-  # `entities`). To enable: set the endpoint + model here, and set the API
-  # key via the masked GitLab variable K8S_SECRET_EXTRACTOR_API_KEY
-  # (rendered into the hivemind-secrets Secret by CI).
+  # EMPTY endpoint = extraction OFF (no LLM cost; empty `entities`). To
+  # enable, set endpoint + model here and the key via the GitLab variable
+  # K8S_SECRET_EXTRACTOR_API_KEY (CI renders it into hivemind-secrets).
   HIVEMIND_EXTRACTOR_ENDPOINT: ""
   HIVEMIND_EXTRACTOR_MODEL: ""
   # Chat-call timeout (seconds) + retry budget (ADR 0014 pattern).
@@ -56,13 +51,11 @@ data:
   HIVEMIND_CANDIDATE_TOP_K: "20"
   HIVEMIND_DEFAULT_LIMIT: "10"
   HIVEMIND_HALF_LIFE_DAYS: "30.0"
-  # Lower bound on the recency factor (ADR 0022): max(floor, 0.5 ** (age /
-  # half_life)), so the factor's whole range is 1/floor = 1.25x at 0.8 —
-  # inside RRF's 2.62x fused range, which is what keeps match quality the
-  # sort key. A BAND, NOT A SLIDER: 0.9 measured worse than turning decay
-  # off, 1.0 *is* off, and below 0.381 it does nothing. Do not tune it up.
-  # To revert to the pre-ADR-0022 unbounded behaviour, set this to "" or
-  # "none" (ADR 0023) instead of a negligible number.
+  # Recency factor floor (ADR 0022): max(floor, 0.5 ** (age / half_life)),
+  # a 1.25x range at 0.8, inside RRF's 2.62x fused range so match quality
+  # stays the sort key. A BAND, NOT A SLIDER: 0.9 measured worse than no
+  # decay, 1.0 *is* off, below 0.381 it does nothing. "" or "none" = the
+  # unbounded pre-ADR-0022 behaviour (ADR 0023).
   HIVEMIND_RECENCY_FLOOR: "0.8"
   HIVEMIND_QUALITY_HELPFUL_WEIGHT: "0.05"
   HIVEMIND_QUALITY_STALE_WEIGHT: "0.10"

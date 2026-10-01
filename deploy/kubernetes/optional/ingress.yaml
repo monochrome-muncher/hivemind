@@ -2,21 +2,14 @@
 # Certificate. Apply via:
 #   kubectl kustomize deploy/kubernetes/optional | kubectl apply -f -
 #
-# Replace the placeholder host (hivemind.example.org) with the org's real
-# hostname before applying, and point the issuer at the org's existing
-# cert-manager issuer (a ClusterIssuer if the name does not resolve to a
-# namespace-scoped Issuer — the org's cert-manager issuer MUST exist).
+# Before applying, replace the placeholder host (hivemind.example.org) and
+# point the issuer at the org's existing cert-manager issuer (it MUST exist;
+# a ClusterIssuer if the name is not a namespace-scoped Issuer).
 #
-# WHY the nginx annotations exist (streamable-HTTP / SSE gotcha):
-#   The MCP endpoint (hivemind-mcp) is a LONG-LIVED SSE stream (streamable
-#   HTTP, ADR 0010). nginx's DEFAULT proxy-read-timeout is 60s — after a
-#   60s idle gap in the stream nginx closes the connection and the MCP
-#   session dies mid-conversation. This is the classic nginx-ingress
-#   SSE pitfall. The four annotations below keep the stream alive and stop
-#   buffering (buffered chunks would stall the event delivery clients rely
-#   on). They are set at the Ingress level so the /mcp path is guaranteed
-#   covered; the / (REST API) path is a plain request/response service, so
-#   the annotations are harmless there (generous timeouts, no buffering).
+# WHY the SSE annotations: /mcp is a long-lived SSE stream (ADR 0010), and
+# nginx's default 60s proxy-read-timeout kills it after a 60s idle gap;
+# buffering would stall event delivery. Set Ingress-wide so /mcp is
+# covered; harmless for the plain request/response REST path.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -25,20 +18,18 @@ metadata:
     app.kubernetes.io/name: hivemind
     app.kubernetes.io/component: ingress
   annotations:
-    # --- SSE / long-poll tuning (see the comment block above) ---------------
+    # --- SSE / long-poll tuning (see above) ---------------------------------
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-buffering: "off"
     nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
-    # Cap request bodies at the ingress (DEP-12): a memory entry is text of a
-    # few KB, and the app has no body-size limit of its own. nginx's default
-    # is 1m; stated explicitly so it is a visible, tunable decision.
+    # Cap request bodies at the ingress (DEP-12): an entry is a few KB of
+    # text. 1m is nginx's default, stated so it is visible and tunable.
     nginx.ingress.kubernetes.io/proxy-body-size: "1m"
-    # Per-client-IP rate limits (ROADMAP 3.13): an unknown key still costs a
-    # credential lookup (and on /mcp a session setup), so a flood of garbage
-    # keys is cut off here, before it reaches the app or Postgres. Requests
-    # over the limit get 503 from nginx. Raise them if many agents share one
-    # egress IP (a NAT): `limit-connections` counts open MCP streams too.
+    # Per-client-IP rate limits (ROADMAP 3.13): unknown keys still cost a
+    # credential lookup, so floods stop here (nginx answers 503). Raise them
+    # if many agents share one egress IP; `limit-connections` counts open
+    # MCP streams too.
     nginx.ingress.kubernetes.io/limit-rps: "20"
     nginx.ingress.kubernetes.io/limit-burst-multiplier: "5"
     nginx.ingress.kubernetes.io/limit-connections: "100"
@@ -52,7 +43,7 @@ spec:
     - host: hivemind.example.org
       http:
         paths:
-          # Streamable-HTTP MCP (long-lived SSE — needs the annotations above).
+          # Streamable-HTTP MCP (long-lived SSE: needs the annotations above).
           - path: /mcp
             pathType: Prefix
             backend:
@@ -60,8 +51,7 @@ spec:
                 name: hivemind-mcp
                 port:
                   number: 8088
-          # REST API (SPEC §5.1) — plain request/response; the generous
-          # read timeout above is harmless.
+          # REST API (SPEC §5.1).
           - path: /
             pathType: Prefix
             backend:
@@ -70,19 +60,15 @@ spec:
                 port:
                   number: 8000
 ---
-# The admin REST surface (/v1/admin/*, plus the admin-only /v1/metrics) is
-# for operators, who reach it through the admin panel (ADR 0029: internal
-# ingress or port-forward) or `kubectl port-forward`, never from the
-# internet. This second Ingress for the same host takes those paths away
-# from the one above (nginx picks the longest matching prefix) and admits only the listed source ranges.
-# The default, 127.0.0.1/32, admits nobody from outside, so every external
-# request answers 403. To allow an operator network, put its CIDRs here
-# (comma-separated). It also takes /metrics, the unauthenticated Prometheus
-# scrape target (ADR 0050): Prometheus scrapes the pods directly, so from
-# outside it is denied like the admin surface. Both annotation spellings
-# are set on purpose: older controllers know only `whitelist-`, newer ones
-# prefer `allowlist-`, and a controller that ignored the one it does not
-# know would fail open.
+# The admin surface (/v1/admin/*, admin-only /v1/metrics) is for operators
+# via the admin panel (ADR 0029) or `kubectl port-forward`, never the
+# internet. This Ingress takes those paths (nginx picks the longest prefix)
+# plus /metrics, the unauthenticated Prometheus target (ADR 0050, scraped
+# per pod), and admits only the listed source ranges. The default
+# 127.0.0.1/32 admits nobody, so external requests get 403; add operator
+# CIDRs comma-separated. Both spellings on purpose: older controllers know
+# only `whitelist-`, newer prefer `allowlist-`, and ignoring one would fail
+# open.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -136,8 +122,7 @@ metadata:
 spec:
   secretName: hivemind-tls
   issuerRef:
-    # The org's cert-manager issuer must exist (ADR: cluster-level
-    # cert-manager is assumed; a namespace-scoped Issuer is fine too).
+    # The org's cert-manager issuer must exist (namespace-scoped is fine).
     name: hivemind-issuer
     kind: Issuer
   dnsNames:
