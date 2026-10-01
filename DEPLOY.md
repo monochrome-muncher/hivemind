@@ -275,8 +275,10 @@ first-run bootstrap Job records itself as `ci-bootstrap`.
   tags: `git diff --stat v<old> v<new> -- src/hivemind/store/migrations/`.
   No output means no schema change. Even when there is one, there is no
   manual step: the entrypoint applies it. The current chain ends at
-  `0008`: 2.0.0 adds `0007` (credential uniqueness, ADR 0039) and `0008`
-  (history and list indexes); `0006` came in 1.0.0-rc.1.
+  `0012`: 2.3.0 adds `0010` (search counters, ADR 0056), `0011` (see-also
+  links, ADR 0057) and `0012` (pins, ADR 0058); 2.1.0 adds `0009`
+  (registration audit, ADR 0046); 2.0.0 adds `0007` (credential
+  uniqueness, ADR 0039) and `0008` (history and list indexes).
 - **Agents pick up server-side changes on their own.** Tool descriptions,
   the MCP server instructions and `hive_whoami` come from the server, so
   upgrading the server updates what every agent sees. The agent plugin's
