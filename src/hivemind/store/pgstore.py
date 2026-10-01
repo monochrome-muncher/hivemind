@@ -161,6 +161,20 @@ WITHDRAW = (
     "WHERE id = $1 AND state = 'active' RETURNING " + _ENTRY_COLUMNS
 )
 
+# --- Keyword-stream query (ADR 0047) ------------------------------------------
+
+ANY_TERM_TSQUERY = "replace(plainto_tsquery('english', {param})::text, ' & ', ' | ')::tsquery"
+"""The keyword stream's tsquery: any query term matches (ADR 0047).
+
+``plainto_tsquery`` still does all the parsing, so the caller's text is
+never read as tsquery syntax (no operator injection). Its output joins
+quoted lexemes with ``&``. Swapping each ``' & '`` separator for ``' | '``
+turns "every term" into "any term". The swap cannot reach inside a
+lexeme, because the ``english`` parser never produces one containing a
+space. A query of only stop words gives an empty tsquery, which matches
+nothing, as before.
+"""
+
 # --- Vector-search session settings (ADR 0025) --------------------------------
 
 VECTOR_SEARCH_SETTINGS = """
@@ -609,18 +623,22 @@ class PgStore:
         visibility: Visibility | None = None,
     ) -> list[str]:
         """Ranked entry IDs by ``ts_rank`` over the maintained tsvector
-        (SPEC.md §6.2 keyword stream). ``plainto_tsquery`` tokenizes the
-        query safely (no operator injection). When ``visibility`` is
-        supplied, only visible entries are candidates (ADR 0011)."""
+        (SPEC.md §6.2 keyword stream). An entry matches when it contains
+        **any** query term (ADR 0047), the same rule as ``MemoryStore``;
+        ``ts_rank`` puts entries matching more terms first. See
+        ``ANY_TERM_TSQUERY`` for how the query is built without operator
+        injection. When ``visibility`` is supplied, only visible entries
+        are candidates (ADR 0011)."""
         clauses, params = _filter_conditions(filters, visibility)
         query_idx = len(params) + 1
-        clauses.append(f"search_tsv @@ plainto_tsquery('english', ${query_idx})")
+        tsquery = ANY_TERM_TSQUERY.format(param=f"${query_idx}")
+        clauses.append(f"search_tsv @@ {tsquery}")
         params.append(query)
         where = " AND ".join(clauses) if clauses else "TRUE"
         sql = (
             "SELECT id FROM entries WHERE "
             + where
-            + f" ORDER BY ts_rank(search_tsv, plainto_tsquery('english', ${query_idx})) DESC,"
+            + f" ORDER BY ts_rank(search_tsv, {tsquery}) DESC,"
             + " created_at DESC, id DESC"
             + f" LIMIT ${query_idx + 1}"
         )
