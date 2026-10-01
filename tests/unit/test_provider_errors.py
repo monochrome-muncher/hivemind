@@ -164,6 +164,35 @@ class TestResponseValidation:
         with pytest.raises(EmbeddingError):
             await _embedder(lambda req: response).embed_text("x")
 
+    @pytest.mark.parametrize(
+        ("vector", "reason"),
+        [
+            ([0.0, 0.0, 0.0], "zero vector"),
+            ([0, -0.0, 0], "zero vector"),
+            ([1e-46, 0.0, -1e-46], "zero vector"),  # rounds to zero in float32
+            ([1e39, 0.1, 0.1], "float32 range"),  # pgvector would refuse it
+        ],
+    )
+    async def test_vectors_pgvector_cannot_use_fail_fast(self, vector, reason) -> None:
+        """ROADMAP 3.13: a zero vector makes every cosine distance NaN and
+        an out-of-range value is a DataError in Postgres; neither is retried."""
+        calls: list[int] = []
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            calls.append(1)
+            return _ok(vector)
+
+        with pytest.raises(EmbeddingError, match=reason):
+            await _embedder(handler).embed_text("x")
+        assert len(calls) == 1
+
+    async def test_a_tiny_but_nonzero_vector_is_kept(self) -> None:
+        assert await _embedder(lambda req: _ok((1e-40, 0.0, 0.0))).embed_text("x") == [
+            1e-40,
+            0.0,
+            0.0,
+        ]
+
     async def test_redirect_is_not_retried(self) -> None:
         calls: list[int] = []
 
