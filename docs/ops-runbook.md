@@ -46,6 +46,9 @@ make mcp-http       # start the hostable MCP runner as a detached service (:8088
 
 ### Configuration (env vars, `src/hivemind/config.py`)
 
+The most-used variables are below. [`config/.env.example`](../config/.env.example)
+lists every one with its default, and `src/hivemind/config.py` is the source.
+
 | Var | Meaning |
 |---|---|
 | `HIVEMIND_DATABASE_URL` | Postgres DSN (default `postgresql://hivemind:hivemind@localhost:5432/hivemind`) |
