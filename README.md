@@ -144,7 +144,7 @@ single-node operation.
 | [docs/adr/](docs/adr/README.md) | Why each decision was made, with an index |
 | [ROADMAP.md](ROADMAP.md) | What is open and what is planned |
 | [DEPLOY.md](DEPLOY.md), [docs/ops-runbook.md](docs/ops-runbook.md) | Running it |
-| [plugins/hivemind/](plugins/hivemind/README.md) | Connecting agent harnesses, and what changed for agents in each release |
+| [plugins/hivemind/](plugins/hivemind/README.md) | Connecting agent harnesses; [CHANGELOG](plugins/hivemind/CHANGELOG.md) for what changed for agents in each release |
 | [AGENTS.md](AGENTS.md) | Working on this repository: commands, architecture, rules |
 
 ## Developing

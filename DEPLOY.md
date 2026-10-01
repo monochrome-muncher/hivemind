@@ -283,8 +283,8 @@ first-run bootstrap Job records itself as `ci-bootstrap`.
   the MCP server instructions and `hive_whoami` come from the server, so
   upgrading the server updates what every agent sees. The agent plugin's
   skills and hook update separately, per harness
-  (`plugins/hivemind/README.md`, "Updating", including a per-release list
-  of what changed for agents).
+  (`plugins/hivemind/README.md`, "Updating"; what changed for agents in
+  each release is in `plugins/hivemind/CHANGELOG.md`).
 - **Deploy every runner project together whenever a migration lands.**
   The runners are separate deployments (and, under GitLab AutoDevOps,
   separate projects) sharing one pool, so a migration from one runs
