@@ -86,7 +86,7 @@ def draft(
 async def _truncate(dsn: str) -> None:
     conn = await asyncpg.connect(dsn)
     try:
-        await conn.execute("TRUNCATE credentials, feedbacks, entries")
+        await conn.execute("TRUNCATE credentials, feedbacks, entries, entry_links")
     finally:
         await conn.close()
 
@@ -700,3 +700,18 @@ async def test_get_visible_entries_keys_by_the_id_as_asked(pg) -> None:
     )
     assert list(found) == [upper]
     assert found[upper].id == entry.id
+
+
+async def test_entry_links_both_ways_and_unknown_targets_dropped(pg) -> None:
+    """ADR 0057: links land with the entry; an id naming no entry is
+    dropped by the insert's join; incoming links come newest first."""
+    store, _, _ = pg
+    target = await store.create_entry(draft("Target"))
+    first = await store.create_entry(
+        replace(draft("First"), see_also=(target.id, "00000000-0000-0000-0000-000000000000"))
+    )
+    second = await store.create_entry(replace(draft("Second"), see_also=(target.id,)))
+    assert await store.entry_links(first.id, 10) == ([target.id], [])
+    assert await store.entry_links(target.id, 10) == ([], [second.id, first.id])
+    assert await store.entry_links(target.id, 1) == ([], [second.id])
+    assert await store.entry_links("not-a-uuid", 10) == ([], [])

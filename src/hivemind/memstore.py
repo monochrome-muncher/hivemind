@@ -88,6 +88,7 @@ class MemoryStore:
         self._fleets: dict[str, Fleet] = {}
         self._agents: dict[str, Agent] = {}
         self._audit: list[AuditRecord] = []  # append-only (ADR 0027)
+        self._links: dict[tuple[str, str], None] = {}  # (from, to), insertion-ordered (ADR 0057)
 
     # -- write path -------------------------------------------------------
 
@@ -145,7 +146,16 @@ class MemoryStore:
                     EntryState.SUPERSEDED,
                     superseded_by=entry.id,
                 )
+            for target_id in draft.see_also:
+                if target_id in self._entries and target_id != entry.id:
+                    self._links[(entry.id, target_id)] = None
         return entry
+
+    async def entry_links(self, entry_id: str, limit: int) -> tuple[list[str], list[str]]:
+        with self._lock:
+            outgoing = [to for (frm, to) in self._links if frm == entry_id]
+            incoming = [frm for (frm, to) in reversed(self._links) if to == entry_id]
+        return outgoing, incoming[:limit]
 
     async def withdraw_entry(self, entry_id: str, reason: str | None, by_user: str) -> Entry:
         with self._lock:

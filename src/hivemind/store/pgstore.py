@@ -112,6 +112,19 @@ SELECT scope, kind, importance_source, author, fleet_id,
  GROUP BY scope, kind, importance_source, author, fleet_id, (state = 'active')
 """
 
+# "See also" links (ADR 0057). The insert skips ids that name no entry
+# (the join), and the reads are oldest link first.
+INSERT_LINKS = """
+INSERT INTO entry_links (from_id, to_id)
+SELECT $1, e.id FROM entries e WHERE e.id = ANY($2::uuid[]) AND e.id <> $1
+ON CONFLICT DO NOTHING
+"""
+SELECT_LINKS_OUT = "SELECT to_id FROM entry_links WHERE from_id = $1 ORDER BY created_at, to_id"
+SELECT_LINKS_IN = """
+SELECT from_id FROM entry_links WHERE to_id = $1
+ ORDER BY created_at DESC, from_id LIMIT $2
+"""
+
 # --- Fleet / agent access-control SQL (ADRs 0011-0012) ---------------------
 
 SELECT_FLEET_BY_NAME = "SELECT 1 FROM fleets WHERE name = $1"
@@ -506,6 +519,8 @@ class PgStore:
                 [e.name.lower() for e in entities],  # lower-cased names: the filter column
                 entities_model,  # ADR 0016: extractor model (provenance)
             )
+            if draft.see_also:
+                await conn.execute(INSERT_LINKS, entry_id, _valid_uuids(list(draft.see_also)))
             if draft.supersedes:
                 # ADR 0034, atomic: the guarded UPDATE row-locks the
                 # targets; any target it did not flip (unknown,
@@ -554,6 +569,15 @@ class PgStore:
         async with pool.acquire(timeout=self._acquire_timeout) as conn:
             rows = await conn.fetch(SELECT_PREDECESSORS, ids)
         return [_row_to_entry(row) for row in rows]
+
+    async def entry_links(self, entry_id: str, limit: int) -> tuple[list[str], list[str]]:
+        if not _is_valid_uuid(entry_id):
+            return [], []
+        pool = await self._ensure_pool()
+        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+            outgoing = await conn.fetch(SELECT_LINKS_OUT, entry_id)
+            incoming = await conn.fetch(SELECT_LINKS_IN, entry_id, limit)
+        return [str(r["to_id"]) for r in outgoing], [str(r["from_id"]) for r in incoming]
 
     async def usage_counts(self) -> list[UsageCount]:
         pool = await self._ensure_pool()

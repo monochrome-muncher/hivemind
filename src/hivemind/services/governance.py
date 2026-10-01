@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 
 from hivemind.config import SearchConfig
@@ -29,7 +29,7 @@ from hivemind.domain.validation import (
 from hivemind.ports import Credential, Embedder, Extractor, Store, SupersedeConflict
 from hivemind.retrieval.scoring import feedback_quality
 from hivemind.services.audit import record_admin_action
-from hivemind.services.chain import get_visible_entry
+from hivemind.services.chain import get_visible_entries, get_visible_entry
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +167,8 @@ class WriteService:
         """
         if writer is not None and draft.supersedes:
             await self._check_supersedes(draft, writer)
+        if writer is not None and draft.see_also:
+            draft = await self._resolve_see_also(draft, writer)
         # Embedder and (best-effort) extractor are independent network
         # calls: run them concurrently. The embedder's failure propagates
         # unchanged (the extractor is cancelled); the extractor's never
@@ -217,6 +219,17 @@ class WriteService:
                 exc_info=True,
             )
             return None
+
+    async def _resolve_see_also(self, draft: EntryDraft, writer: Visibility) -> EntryDraft:
+        """Every "see also" target must be an entry the writer can read
+        (ADR 0057), or the whole write is rejected as invalid input. The
+        stored links use the targets' own ids, whatever the spelling."""
+        wanted = list(dict.fromkeys(draft.see_also))
+        found = await get_visible_entries(self._store, wanted, writer)
+        missing = [t for t in wanted if t not in found]
+        if missing:
+            raise InvalidInput(f"unknown see_also entries: {', '.join(missing)}")
+        return replace(draft, see_also=tuple(dict.fromkeys(found[t].id for t in wanted)))
 
     async def _check_supersedes(self, draft: EntryDraft, writer: Visibility) -> None:
         """Reject the write if any supersession target is out of reach."""

@@ -78,7 +78,9 @@ How:
    corrected version (§3). An id
    that answers `not_found` may simply be outside what you may read, for
    example an id someone pasted from another agent's private notes; it
-   does not mean the entry was deleted.
+   does not mean the entry was deleted. Each entry's `see_also` lists the
+   entries it links to and `linked_from` the newer ones that link to it;
+   open those that bear on your task.
 3. Use what you found, and **say so** to the user when it shaped your
    answer ("Hivemind has a note from `<author>` that …").
 4. If you are **privileged** (you read every fleet), check each hit's
@@ -159,8 +161,7 @@ for the end of the session: write at the moment you learn it.
     later ("this user's billing checkout is at `~/work/billing-api`").
     If the same finding also has general value, write two entries: the
     portable one to the fleet, and a short `self` note with the local
-    specifics that cites the fleet entry's id in `sources`
-    (`{type: other, ref: <id>}`).
+    specifics that names the fleet entry's id in `see_also`.
   - The same applies to `sources`: in a fleet entry a `path` source is
     portable or left out; a `self` entry may cite local paths freely.
 - **Search first, then supersede.** If an entry already covers it and is
@@ -187,6 +188,11 @@ for the end of the session: write at the moment you learn it.
   says the same thing, withdraw your new entry. If yours corrects or
   extends one, withdraw yours and write it again with `supersedes` naming
   it (or, if you may not supersede it, flag it with `hive_feedback`).
+- **Link related entries with `see_also`.** When your entry builds on,
+  explains or depends on entries you can read without replacing them,
+  pass up to 5 of their ids as `see_also`. Readers of those entries then
+  find yours under `linked_from`, which search alone would not show
+  them. Use `supersedes`, not `see_also`, when yours replaces one.
 - **Withdraw** (`hive_withdraw`) only your own entries that were wrong
   and have no replacement.
 - **Fix what others flagged.** If you can write to your fleet, check
