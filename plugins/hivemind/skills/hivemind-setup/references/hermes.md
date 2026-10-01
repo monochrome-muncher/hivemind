@@ -67,10 +67,12 @@ plugin installed at a pinned ref needs `hermes plugins install <source>
 
 `hivemind-incognito hermes` sets `HIVEMIND_ENABLED=false`. It needs
 `enabled: ${HIVEMIND_ENABLED}` in the hivemind entry of
-`~/.hermes/config.yaml`, and `HIVEMIND_ENABLED=true` in the Hermes env
-file for normal sessions: **do not skip that line**: an unset variable
-keeps the literal text `${HIVEMIND_ENABLED}`, which Hermes treats as
-enabled, so the server would stay on in every session. The launcher leaves
-`HIVEMIND_API_KEY` in place (Hermes may still resolve it), so this
-session is incognito by the server being disabled, and the key is still in
-the environment.
+`~/.hermes/config.yaml`. **Never put `HIVEMIND_ENABLED` in the Hermes env
+file** (`~/.hermes/.env` or a profile's `.env`): Hermes loads that file
+over the environment, so a value there overrides the launcher and the
+server stays on in incognito sessions. For normal sessions leave it unset
+(Hermes then keeps the server on, logging a warning about the unexpanded
+`${HIVEMIND_ENABLED}`), or export `HIVEMIND_ENABLED=true` in the shell
+profile to silence it. The launcher leaves `HIVEMIND_API_KEY` in place
+(Hermes may still resolve it), so this session is incognito by the server
+being disabled, and the key is still in the environment.

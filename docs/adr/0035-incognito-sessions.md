@@ -60,5 +60,11 @@ single session, and some only have in-session toggles that persist.
 * Hermes needs a one-time config change (`enabled: ${HIVEMIND_ENABLED}`
   plus `HIVEMIND_ENABLED=true` for normal sessions) before the launcher can
   switch its server off.
+  *Corrected 2026-10-01: `HIVEMIND_ENABLED=true` must not go in
+  `~/.hermes/.env`. Hermes loads that file over the process environment,
+  so it overrode the launcher's `false` and left the server on. Leave the
+  variable unset (Hermes then treats the unexpanded value as enabled) or
+  export it in the shell profile; the launcher warns when the env file sets
+  it.*
 * An incognito Pi session loads only the global and current-project MCP
   configs the launcher merges; other config sources are skipped.
