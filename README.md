@@ -1,217 +1,161 @@
-# hivemind
+# Hivemind
 
-Hivemind is a shared memory service for the AI agents of an organization: one Postgres-backed pool that every agent in the org reads and writes, so work done with one agent (analyst 1, agent 1, day one) is diggable work for every other agent (analyst 2, agent 2, days later).
+Hivemind is a shared long-term memory for the AI agents in one
+organization. Agents write down what they learn, and every other agent
+can find it later.
 
-**v1 in one paragraph.** Agents write distilled, explicit **entries** — a `fact`, an `insight` (long-form analysis), or a `decision` — each carrying full provenance (author, agent, memory date, sources) and an optional `supersedes` link. Agents retrieve via **hybrid search** (keyword + vector, RRF-fused, decay-aware) with **progressive disclosure** (compact hits first, full entry on `get`). The pool is **append-only**: corrections are explicit **supersessions**, nothing is edited or silently deleted; entries can also be **withdrawn** (own, or any by the org operator). An **incognito session** (client-side) lets an agent's owner turn Hivemind off for a session (spitballing, non-analyist work) without the server ever knowing. One self-hosted instance per organization: one service + one Postgres (pgvector), docker-compose, no Redis. **Access is gated by the fleet/trust model** (SPEC §12, ADRs 0011–0012): each agent registers under a name, sits in one home fleet, and carries a trust level (0–3) that decides what it can read/write — `self` stays private even at the top level, and level 0 sees nothing (see Key properties + SPEC §12).
+> Analyst 1 works with agent 1 and records a finding. Days later,
+> analyst 2 asks agent 2 a related question. Agent 2 finds that finding
+> instead of redoing the work.
 
-## Key properties (v1)
+It is a small self-hosted service: one API, one Postgres database with
+pgvector, and an embedding endpoint you choose. There is no Redis and no
+SaaS, and nothing leaves your network unless your embedding provider is
+outside it.
 
-- **Explicit writes only** — the agent decides what matters; no passive transcript capture
-- **Fleets + trust levels** (ADR 0011) — entries carry a `scope` (`self` / `fleet` / `org`) + a fleet reference; visibility is the trust-level matrix (L3 reads broad, writes local; `self` stays private even at L3; level 0 reads nothing). One home fleet per agent; legacy `org` scope is read-only for L≥1
-- **Append-only, supersession-based** — entries are immutable; a successor always outranks what it superseded
-- **Hybrid retrieval** — keyword (Postgres FTS) + pgvector dense, fused (RRF), re-scored by importance × recency × feedback quality (a true-BM25 extension is a drop-in upgrade, not a v1 dependency — SPEC §6.2)
-- **Dumb outcome feedback** — `helpful` / `stale` / `wrong` per entry nudges retrieval ranking; no learned tuning
-- **Agent-facing API** — REST (canonical) + MCP tools (`hive_write`, `hive_search`, `hive_get`, `hive_list`, `hive_withdraw`, `hive_feedback`, `hive_pin`, `hive_pinned`, `hive_register`, `hive_whoami`); no direct DB access, no human UI in v1
+## How it works
 
-## Reading order
+- **Entries.** An agent writes a `fact`, an `insight` (long-form
+  analysis) or a `decision`. Each one has a short summary and records who
+  wrote it, when the thing happened, and where it came from. Agents write
+  on purpose; Hivemind never captures transcripts.
+- **Search.** Keyword and vector search are combined, then ranked by
+  importance, age and feedback. Results come back as short hits, and the
+  agent opens only the entries it needs.
+- **Nothing is edited.** An entry that turns out wrong is *superseded* by
+  a new one, which always ranks above it, or *withdrawn*. The history
+  stays.
+- **Feedback.** Agents mark entries `helpful`, `stale` or `wrong`. That
+  nudges ranking, and other agents see the counts and notes.
+- **Fleets and trust levels.** Each agent belongs to one home fleet and
+  has a trust level from 0 to 3, which decides what it can read and
+  write. An agent's `self` entries stay private to it. New agents
+  register themselves and wait for an admin to activate them.
+- **Sharing helpers.** A write returns the nearest existing entries, so
+  the agent can supersede or link them instead of duplicating them.
+  Privileged agents can pin a short briefing for their fleet, and
+  entries reported stale or wrong can be listed so someone fixes them.
+- **Incognito sessions.** A user can switch Hivemind off for one session.
+  This happens in the agent's harness, and the server never knows.
 
-1. [SPEC.md](SPEC.md) — the full v1 spec: domain model, API, retrieval, deployment, non-goals, and documented extensions
-2. [CONTEXT.md](CONTEXT.md) — the canonical glossary (what "entry", "supersession", "memory date", "incognito session", etc. mean)
-3. [docs/adr/](docs/adr/) — the decisions and their reasons (append-only entries, flat pool, client-side incognito sessions (formerly "kill switch"), explicit writes, fixed-dimension pgvector, RRF hybrid retrieval, single-Postgres deployment, credential model, fleets + trust levels, shared org key + agent keys, forward-migration tracking, bounded embedder retries)
-4. [AGENTS.md](AGENTS.md) — how to work in this repo (for agents and humans)
-5. [ROADMAP.md](ROADMAP.md) — what to build next, in what order (the living plan)
+Agents use ten MCP tools (`hive_whoami`, `hive_search`, `hive_get`,
+`hive_list`, `hive_write`, `hive_feedback`, `hive_withdraw`,
+`hive_pinned`, `hive_pin`, `hive_register`) or the REST API behind them.
+The full behaviour is in [SPEC.md](SPEC.md).
+
+## Connect your agent
+
+[`plugins/hivemind/`](plugins/hivemind/README.md) teaches an agent to
+use Hivemind as its memory. With it, the agent checks its standing at
+the start of each session, searches before it works, writes what it
+learns, and tells you when it needs to be activated or promoted. It
+works with **Claude Code, Codex, DeepSeek Harness, Hermes, Pi, Oh My Pi
+and OpenCode**, and there are setup instructions for **Gemini CLI**. Its
+two skills also work in any harness that reads `SKILL.md` files.
+
+Setup takes two values: `HIVEMIND_MCP_URL`, your MCP endpoint ending in
+`/mcp`, and `HIVEMIND_API_KEY`. That key is the org key until an admin
+activates the agent, and the agent's own key after that. In Claude Code:
+
+```text
+/plugin marketplace add <git-url-of-this-repo>
+/plugin install hivemind@hivemind
+```
+
+The [plugin README](plugins/hivemind/README.md) covers every harness,
+key hygiene, incognito sessions and updates.
+
+## Run it locally
+
+You need `uv`, Docker and `make`. The dev environment uses Python 3.14.
+
+```bash
+cp config/.env.example .env.local   # optional local settings (the Makefile and real env vars win)
+make install                        # create .venv
+make pg                             # Postgres + pgvector on :5432
+make vllm                           # local CPU embedding server on :8001 (Qwen3-Embedding-0.6B, 512 dims)
+make migrate                        # apply the database migrations
+make api                            # REST API on :8000
+```
+
+Then create keys and an agent with the `hivemind-keys` CLI (it talks to
+the database directly):
+
+```bash
+uv run hivemind-keys issue-admin      # admin key, for the admin surface and panel
+uv run hivemind-keys rotate-org       # org key, which agents use to register
+# an agent registers itself with the org key (hive_register or POST /v1/agents);
+# create a fleet (admin panel or POST /v1/admin/fleets), then activate the agent:
+uv run hivemind-keys issue-agent --name agent-a --trust-level 2 --home-fleet <fleet-id>
+```
+
+You can also activate agents from the admin panel: `make admin` serves it
+on :8080. To serve agents over MCP, pick one runner:
+
+| Runner | Use it for | Start |
+|---|---|---|
+| `hivemind-mcp-http` | Many agents on one endpoint. Each request carries its own agent key. | `make mcp-http` (Docker, port 8088) |
+| `hivemind-mcp-pg` | One stdio process per agent, keyed by `HIVEMIND_MCP_KEY`. | `make mcp-pg` |
+| `hivemind-mcp` | Trying the tools with an in-memory store and no keys. | `make mcp` |
+
+Both Postgres-backed runners re-check the key on every call, so revoking
+or demoting an agent takes effect at once. An agent connects to the HTTP
+runner like this:
+
+```jsonc
+{ "mcpServers": { "hivemind": {
+    "url": "http://localhost:8088/mcp",
+    "headers": { "Authorization": "Bearer hm_…" } } } }
+```
+
+## Configuration
+
+Everything is set with `HIVEMIND_*` environment variables.
+[`config/.env.example`](config/.env.example) lists them with their
+defaults, and `ENVIRONMENT` picks the profile file (`.env.local` by
+default). These are the ones you will set first:
+
+| Variable | What it is |
+|---|---|
+| `HIVEMIND_DATABASE_URL` | Postgres DSN (default: the local dev database) |
+| `HIVEMIND_EMBEDDING_ENDPOINT`, `_MODEL`, `_API_KEY` | Any OpenAI-compatible embeddings endpoint |
+| `HIVEMIND_EMBEDDING_DIM` | Vector size, fixed when the database is first migrated (default 1024; the dev Makefile uses 512) |
+| `HIVEMIND_EXTRACTOR_ENDPOINT`, `_MODEL`, `_API_KEY` | Optional chat model that tags entries with entity names. Unset means off. |
+
+An unknown `HIVEMIND_*` variable logs a warning at startup.
+`HIVEMIND_STRICT_ENV=true` turns that warning into an error.
+
+## Deploy to production
+
+Production runs on Kubernetes from one image, deployed by GitLab CI/CD.
+You provide Postgres with pgvector and an embedding endpoint. The pipeline runs migrations, builds the image, creates the
+first keys and rolls out two replicas of the API and of the MCP runner.
+See **[DEPLOY.md](DEPLOY.md)** for the checklist, upgrades, key rotation
+and the admin panel, and [docs/ops-runbook.md](docs/ops-runbook.md) for
+backups, monitoring (including a Prometheus `/metrics` endpoint) and
+single-node operation.
+
+## Documentation
+
+| Document | Read it for |
+|---|---|
+| [SPEC.md](SPEC.md) | What the system does: data model, API, retrieval, access model |
+| [CONTEXT.md](CONTEXT.md) | What the words mean (entry, supersession, fleet, …) |
+| [docs/adr/](docs/adr/README.md) | Why each decision was made, with an index |
+| [ROADMAP.md](ROADMAP.md) | What is open and what is planned |
+| [DEPLOY.md](DEPLOY.md), [docs/ops-runbook.md](docs/ops-runbook.md) | Running it |
+| [plugins/hivemind/](plugins/hivemind/README.md) | Connecting agent harnesses, and what changed for agents in each release |
+| [AGENTS.md](AGENTS.md) | Working on this repository: commands, architecture, rules |
 
 ## Developing
 
-The dev environment is `uv`-managed (Python 3.14); Postgres (with pgvector) runs in docker.
-
 ```bash
-make install        # uv sync (creates .venv)
-make pg             # start Postgres (pgvector) in docker on :5432
-make vllm           # start the local vLLM embedding server (CPU docker) on :8001
-make migrate        # apply idempotent DB migrations
-make test-unit      # unit tests only (no Postgres needed)
-make test           # full suite; WARNING: integration tests TRUNCATE/DROP the DB in HIVEMIND_DATABASE_URL (dev/test DBs only)
-make check          # mypy strict + ruff
-make api            # run the REST API (hivemind-api)
-make admin          # run the admin panel on :8080 against `make api` (hivemind-admin; ADR 0029)
-make mcp            # run the MCP dev server over stdio (hivemind-mcp; in-memory)
-make mcp-pg         # run the Postgres-backed MCP server over stdio (hivemind-mcp-pg; ADR 0009)
-make mcp-http       # run the hostable, multi-agent streamable-HTTP MCP server as a detached Docker service (host port 8088; ADR 0010)
-make mcp-http-down  # stop the mcp-http Docker service
-make mcp-http-dev   # run the same runner as a local process instead of Docker (HIVEMIND_HOST/HIVEMIND_PORT)
+make test-unit   # hermetic unit tests, no database needed
+make test        # everything; integration tests TRUNCATE and DROP in HIVEMIND_DATABASE_URL, so use dev databases only
+make check       # mypy (strict) + ruff
+make format      # auto-format and fix
 ```
 
-Local config is a copy of the template —
-`cp config/.env.example .env.local` — and edit. The `ENVIRONMENT` env
-var selects the profile file (`.env.staging` / `.env.production` /
-`.env.test`, or `.env.local` by default — ADR 0017); real environment
-variables always win over file values, so the file only ever supplies
-local defaults.
-
-Configuration is via `HIVEMIND_*` environment variables (see `src/hivemind/config.py`):
-`HIVEMIND_DATABASE_URL` (default `postgresql://hivemind:hivemind@localhost:5432/hivemind`),
-`HIVEMIND_EMBEDDING_ENDPOINT` / `HIVEMIND_EMBEDDING_API_KEY` / `HIVEMIND_EMBEDDING_MODEL` /
-`HIVEMIND_EMBEDDING_DIM` (the deploy-time embedding decision, ADR 0005; default **1024** — ADR 0015; the dev Makefile pins 512 for fast local vLLM embedding), and the retrieval knobs
-(`HIVEMIND_RRF_K`, `HIVEMIND_WEIGHT_KEYWORD`, `HIVEMIND_WEIGHT_VECTOR`, `HIVEMIND_HALF_LIFE_DAYS`, `HIVEMIND_RECENCY_FLOOR` — ADR 0022, SPEC §6.4, ...).
-
-The optional **entity-extraction extractor** (ADR 0016, SPEC §13) is configured via
-`HIVEMIND_EXTRACTOR_ENDPOINT` / `HIVEMIND_EXTRACTOR_MODEL` / `HIVEMIND_EXTRACTOR_API_KEY`:
-**unset = extraction off** (entries land with empty `entities`, zero LLM cost), and
-extraction is **best-effort** — a failure never blocks a write. Entries expose the
-extracted facets (`entities` + `entities_model`), and the read surfaces filter by them
-(`entities` query param: AND-semantics, case-insensitive).
-
-**Fully local embeddings (ADR 0005).** The `vllm` compose service runs
-`Qwen/Qwen3-Embedding-0.6B` on a CPU vLLM image (`make vllm`, port 8001 —
-the `HIVEMIND_EMBEDDING_ENDPOINT` default is `http://localhost:8001/v1`).
-Point the API at it with 512-dim (Matryoshka) output:
-
-```bash
-make vllm
-HIVEMIND_EMBEDDING_MODEL=Qwen/Qwen3-Embedding-0.6B \
-HIVEMIND_EMBEDDING_DIM=512 \
-make api
-```
-
-The API's OpenAI-compatible embedder sends the configured dimension on
-every request; a provider that cannot honor it fails the request (the
-dimension is a deploy-time contract).
-
-## Multi-agent: one pool over a unified MCP interface (ADR 0009)
-
-Several agents on the same machine share **one** Postgres pool over a
-**unified** MCP interface (the same eight `hive_*` tools) — not by calling
-REST directly, but each running its own Postgres-backed MCP runner
-(`hivemind-mcp-pg`) under its own verified credential. Each runner talks
-to the same `PgStore` + the same embedder, so every agent reads/writes the
-same pool while its writes carry that agent's *verified* provenance
-(author + agent instance, server-filled from the key — ADR 0008).
-
-1. Start the pool + embedder (no REST API needed for the MCP path):
-   ```bash
-   make pg && make vllm && make migrate
-   ```
-2. Issue one agent key per registered agent (one per agent, distinct — ADR 0012).
-   A pending or revoked agent needs `--trust-level N --home-fleet <fleet-id>` too
-   (it is activated exactly as REST activate does, ADR 0039); an active agent
-   with no key needs only `--name`:
-   ```bash
-   uv run hivemind-keys issue-agent --name agent-a   # -> hm_...
-   uv run hivemind-keys issue-agent --name agent-b   # -> hm_...
-   uv run hivemind-keys issue-agent --name agent-c   # -> hm_...
-   ```
-   (The agent key carries the agent's trust level + home fleet — the `author` on its writes is the registered name, server-filled from the key — ADR 0012.)
-3. Point each agent's MCP config at the same runner, each with its own key:
-   ```jsonc
-   {
-     "mcpServers": {
-       "hivemind": {
-         "command": "uv",
-         "args": ["run", "--directory", "/path/to/hivemind", "hivemind-mcp-pg"],
-         "env": {
-           "HIVEMIND_DATABASE_URL": "postgresql://hivemind:hivemind@localhost:5432/hivemind",
-           "HIVEMIND_EMBEDDING_ENDPOINT": "http://localhost:8001/v1",
-           "HIVEMIND_EMBEDDING_MODEL": "Qwen/Qwen3-Embedding-0.6B",
-           "HIVEMIND_EMBEDDING_DIM": "512",
-           "HIVEMIND_MCP_KEY": "hm_…_a_key..."   // agent-b / agent-c use their own keys
-         }
-       }
-     }
-   }
-   ```
-
-All three agents now read/write the **same** pool. A write by agent-b is
-attributed to `author=agent-b` (the registered name, verified from the key,
-not self-reported — ADR 0012). Revoking an agent's key (`hivemind-keys revoke --name agent-b`) cuts it
-off immediately. The REST API (`make api`) remains available in parallel
-for non-MCP clients; it is **not** required by the MCP runners.
-
-Architecture in one line: `domain` (pure data) → `ports` (the seams) → `services` (orchestration) →
-adapters (`memstore`, `store` (Postgres), `embeddings`, `api`, `mcp`). Tests live at the seams:
-hermetic unit tests (`tests/unit`, fakes in `tests/fakes.py`) and Postgres-backed integration tests
-(`tests/integration`, skip cleanly when the DB is unreachable). See [AGENTS.md](AGENTS.md) for the
-full architecture map and the quality bar.
-
-## Multi-agent: hostable streamable-HTTP (one process, many agents; ADR 0010)
-
-The per-agent runner above (`hivemind-mcp-pg`) is the right shape for a
-small dev machine: one process per agent. When **many** agents share one
-machine, run the **hostable** runner instead: a single long-lived
-`hivemind-mcp-http` process serving an unlimited number of agents over
-streamable-HTTP, each authenticating **per request** with its own
-agent-scoped key (ADR 0012: the agent key, issued at activation). One `PgStore` + one embedder + one
-`Authenticator` pool (the same DSN / embedder / credentials the REST API
-uses); every write carries that agent's *verified* provenance, and a
-revoked key is cut off on the very next request (no restart — the
-per-request credential model of ADR 0010, vs. the per-process model of
-ADR 0009).
-
-`make mcp-http` ships it as a **detached docker-compose service**: one
-container (built from this repo's Dockerfile) that reads/writes the
-shared pool and embeds via the local vLLM, published on **host port 8088
-by default** (override with `HIVEMIND_MCP_HTTP_PORT=9000 make mcp-http`).
-`make mcp-http-down` stops it; `make mcp-http-dev` runs the same runner
-as a local process instead of Docker.
-
-```bash
-make pg && make vllm && make migrate
-# (agents must be registered; pending ones also take --trust-level N --home-fleet ID, ADR 0039)
-uv run hivemind-keys issue-agent --name agent-a   # -> hm_...
-uv run hivemind-keys issue-agent --name agent-b   # -> hm_...
-make mcp-http    # start the detached Docker service (host port 8088)
-```
-
-Each agent's MCP config points at the **same** endpoint, with its own key:
-
-```jsonc
-{
-  "mcpServers": {
-    "hivemind": {
-      "url": "http://localhost:8088/mcp",
-      "headers": { "Authorization": "Bearer hm_…_key" }   // each agent: its own key
-    }
-  }
-}
-```
-
-Both Postgres-backed runners re-verify the key on every call (ADR 0042), so
-`hivemind-keys revoke --name <agent>` or a trust demotion takes effect on the
-next call (no restart). Use `hivemind-mcp-pg` (per-agent, stdio) for a few
-agents on one box; use `hivemind-mcp-http` (hostable) when many agents
-share one machine or one endpoint.
-
-## Using Hivemind from your agent harness
-
-`plugins/hivemind/` is a plugin for **Claude Code** and **Codex** (this
-repository is a marketplace for both), a **DeepSeek Harness** bundle, a
-**Hermes** plugin, a **Pi** package, an **Oh My Pi** plugin and an
-**OpenCode** plugin (with setup instructions for **Gemini CLI** too) that makes an agent treat Hivemind
-as its long-term memory: it checks its standing with `hive_whoami`,
-recalls before it works, contributes to its fleet, and tells its user when
-it needs activation or a promotion. The two skills inside also work on
-their own in any harness that reads `SKILL.md` files. Setup is two
-variables, `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY` (the org key until
-the agent is activated, then its agent key); see
-[plugins/hivemind/README.md](plugins/hivemind/README.md).
-
-## Production deployment
-
-The production story is **Kubernetes + GitLab CI/CD** (one generic image,
-kustomize manifests, a test→build→deploy pipeline with a first-run key
-bootstrap): see **[DEPLOY.md](DEPLOY.md)** for the prerequisites, the
-operator checklist, the key-rotation reference, and the manual steps.
-In short: a Postgres with pgvector, an OpenAI-compatible embedding
-endpoint (vLLM or similar), and — optionally — a chat endpoint for
-entity extraction (ADR 0016; off by default) are all the deployer
-provides; everything else (migrations, image build, secret rendering,
-first-run key generation, rollouts) is automated by the pipeline. The **admin panel** (`hivemind-admin`, ADR 0029) is a separate, stateless
-runner from the same image that needs only `HIVEMIND_ADMIN_API_URL`; it
-gives operators the pending-agent queue, activation, fleets and the audit
-log in a browser (DEPLOY.md §8).
-
-## Status
-
-v1 + the access-control increment are implemented: domain model, ports, retrieval math (RRF + decay-aware scoring + feedback quality + retrieval-quality metrics), services, in-memory reference store, Postgres store (asyncpg + pgvector), OpenAI-compatible embedder, the FastAPI REST surface, and the MCP server (ten verbs). The access-control & fleet model (ADRs 0011–0012, SPEC §12) is implemented end to end (domain, the `Store` seam, the v2 key model, `AccessService`, the REST + MCP surfaces, the reduced `hivemind-keys` CLI). The retrieval eval harness (`tests/eval/`) reports hit@k / MRR / nDCG on a committed golden set with a CI gate pinning a floor on them. The minimal usage-counters surface (`MetricsService` + `GET /v1/metrics`) is in place, and the schema is an ordered, rollback-capable migration chain applied under a Postgres advisory lock (ADR 0020, SPEC §8.6); migrations `0002`/`0003` ride that chain to record `importance_source` (`caller` vs. `default`, surfaced in the §3.3 counters) and close its vocabulary with a named CHECK constraint (ROADMAP §4.5). The ops story lives in `docs/ops-runbook.md`. Entity extraction (ADR 0016, SPEC §13 — an optional, best-effort write-time facet) is implemented end to end: the `Extractor` port + `OpenAICompatExtractor` (ADR 0014 retry pattern, schema-validated `{name, kind}` facets), a best-effort `WriteService` hook (an extraction failure never blocks a write), and the read surfaces (REST + MCP `entities` filter) — **unset `HIVEMIND_EXTRACTOR_ENDPOINT` = off** (zero LLM cost). The production deployment story (Kubernetes + GitLab CI/CD — `DEPLOY.md` + `deploy/kubernetes/` + `.gitlab-ci.yml` + the `config/` env-profile quickstart (ADR 0017) + `hivemind-keys revoke-admin`) is in place; the single-node ops story stays in `docs/ops-runbook.md`. 2.0.0 is a security, correctness and performance review release: an atomic key lifecycle and owned registrations (ADR 0039), shared input bounds and agent-name rules (ADR 0040), provider-call deadlines and typed embedder errors (ADR 0041), a per-call re-verified MCP credential (ADR 0042), entries framed as untrusted data (ADR 0043), atomic supersession, a hardened non-root image, and indexed history walks (migrations `0007`–`0008`); DEPLOY.md §5 lists the upgrade steps. The unit suite is hermetic; the integration suite runs against dockerized Postgres and skips when it is down.
-
-**What's next:** see [ROADMAP.md](ROADMAP.md) — Tier 4 (close the SPEC §11 open items: the BM25-vs-FTS decision + embedding-prefix tuning, now measurable with the eval harness) is the next workstream; the §10 extensions stay held until their triggers fire.
+The code is layered: `domain` (pure data), `ports` (interfaces),
+`services` (logic), then the adapters (`store`, `embeddings`, `api`,
+`mcp`). [AGENTS.md](AGENTS.md) has the full map and the quality bar.
