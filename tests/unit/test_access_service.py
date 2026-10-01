@@ -147,6 +147,29 @@ async def test_a_pending_name_is_never_taken_over_by_a_later_alias() -> None:
     assert stored is not None and stored.owner_alias == "mallory"
 
 
+@pytest.mark.parametrize("alias", ["john", "mallory", None])
+async def test_a_case_variant_of_a_registered_name_is_taken(alias) -> None:
+    """ADR 0045: `Alice` / `alice` cannot both exist, whoever asks (even
+    the owner: two agents must not differ only in case)."""
+    service, _, store = make_service()
+    await service.register("alice", org_credential(), owner_alias="john")
+    for variant in ("Alice", "ALICE", "aLiCe"):
+        with pytest.raises(NameTaken) as excinfo:
+            await service.register(variant, org_credential(), owner_alias=alias)
+        assert "john" not in str(excinfo.value).lower()
+        assert await store.get_agent(variant) is None
+    assert [a.name for a in await store.list_agents()] == ["alice"]
+
+
+async def test_the_exact_name_still_reregisters_after_a_variant_was_refused() -> None:
+    service, _, _ = make_service()
+    await service.register("Alice", org_credential(), owner_alias="john")
+    with pytest.raises(NameTaken):
+        await service.register("alice", org_credential(), owner_alias="john")
+    again = await service.register("Alice", org_credential(), owner_alias="john")
+    assert again.already_registered and again.agent.name == "Alice"
+
+
 async def test_issuing_a_key_for_a_non_active_agent_raises() -> None:
     from hivemind.domain.access import InvalidAgentStatus
 

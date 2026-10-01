@@ -161,7 +161,10 @@ class AccessService:
         agent = await self._store.register_agent(name, owner_alias)
         # A concurrent registration may have won between the read and the
         # insert: the record we got back is then the other registrant's.
-        if not _same_owner(agent.owner_alias, owner_alias):
+        # A different ``name`` means the name is a case variant of an
+        # existing agent's (``Bob`` / ``bob``), which is refused whoever
+        # owns it (ADR 0045): two agents must not differ only in case.
+        if agent.name != name or not _same_owner(agent.owner_alias, owner_alias):
             raise NameTaken(_NAME_TAKEN)
         # ADR 0046: a new registration is audited (who registered which
         # name for which owner), so an admin can trace a pending agent
