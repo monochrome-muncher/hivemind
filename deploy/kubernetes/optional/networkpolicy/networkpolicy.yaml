@@ -6,7 +6,7 @@
 # sources may reach it. Probes from the kubelet (node-local) are allowed by
 # the mainstream CNIs; if yours blocks them, add an ipBlock for the node CIDR.
 #
-#   hivemind-api   <- the ingress controller + the admin panel
+#   hivemind-api   <- the ingress controller + the admin panel + Prometheus
 #   hivemind-mcp   <- the ingress controller
 #   hivemind-admin <- the ingress controller only (operators normally use
 #                     `kubectl port-forward`, which is not subject to these)
@@ -14,6 +14,8 @@
 # ADJUST before applying:
 #   * `ingress-nginx` below is the namespace of the org's ingress controller
 #     (matched by the automatic kubernetes.io/metadata.name label).
+#   * `monitoring` below is the namespace of the org's Prometheus, which
+#     scrapes hivemind-api's GET /metrics directly (ADR 0050).
 #   * Clients that call the pods directly in-cluster need their own `from`.
 #
 # Egress is NOT restricted here: the pods must reach Postgres,
@@ -43,6 +45,13 @@ spec:
             matchLabels:
               app.kubernetes.io/name: hivemind
               app.kubernetes.io/component: admin
+      ports:
+        - port: 8000
+    # Prometheus (ADR 0050). EDIT the namespace to where yours runs.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
       ports:
         - port: 8000
 ---

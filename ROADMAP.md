@@ -206,7 +206,7 @@ entry-fleet refs) is the first real test of this story.)*
 existing object, shipped no backward direction, and assumed a
 single replica. See §3.5.)*
 
-### 3.3 Usage counters (trigger instrumentation)  *(shipped: `MetricsService` + `GET /v1/metrics`)*
+### 3.3 Usage counters (trigger instrumentation)  *(shipped: `MetricsService` + `GET /v1/metrics`; Prometheus `GET /metrics` since ADR 0050)*
 A minimal metrics surface — writes, feedbacks, supersessions, distinct
 `scope` tags in use, `sources` by type, per-agent query counts. This
 makes the **usage-based** SPEC §10 triggers (below) measurable rather

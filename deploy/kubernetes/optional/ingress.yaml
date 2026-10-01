@@ -77,9 +77,12 @@ spec:
 # the longest matching prefix) and admits only the listed source ranges.
 # The default, 127.0.0.1/32, admits nobody from outside, so every external
 # request answers 403. To allow an operator network, put its CIDRs here
-# (comma-separated). Both annotation spellings are set on purpose: older
-# controllers know only `whitelist-`, newer ones prefer `allowlist-`, and a
-# controller that ignored the one it does not know would fail open.
+# (comma-separated). It also takes /metrics, the unauthenticated Prometheus
+# scrape target (ADR 0050): Prometheus scrapes the pods directly, so from
+# outside it is denied like the admin surface. Both annotation spellings
+# are set on purpose: older controllers know only `whitelist-`, newer ones
+# prefer `allowlist-`, and a controller that ignored the one it does not
+# know would fail open.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -104,6 +107,13 @@ spec:
         paths:
           - path: /v1/admin
             pathType: Prefix
+            backend:
+              service:
+                name: hivemind-api
+                port:
+                  number: 8000
+          - path: /metrics
+            pathType: Exact
             backend:
               service:
                 name: hivemind-api

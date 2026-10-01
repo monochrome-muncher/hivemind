@@ -117,6 +117,7 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | `POST /v1/admin/agents/{name}/revoke` | Kill the agent's key and set it `revoked`; on a `pending` agent this rejects the registration (admin key; the name stays reserved — ADRs 0012, 0028) |
 | `POST /v1/admin/org-key/rotate` | Rotate the shared org key: closes registration to every prior org key; active agents are unaffected (admin key; ADR 0031) |
 | `GET /v1/metrics` | Usage counters: entries / fleets / agents (trust-level distribution, writes per fleet, pending count) — operational data (admin key; ROADMAP §3.3) |
+| `GET /metrics` | Prometheus scrape target: the usage counters as gauges (cached 30 s), per-route request counts and latencies, degraded searches. No key; never on the public ingress (ADR 0050) |
 | `GET /v1/admin/audit-log` | The audit log of admin-surface actions, newest first; filters `actor`, `action`, `since`, `before`, `limit` (admin key; §12.5, ADRs 0027, 0028) |
 
 **Request limits (ADR 0040).** A REST request body is capped at 2 MiB (`413 payload_too_large`, enforced by `Content-Length` and by counting streamed bytes, before the body is parsed). A `/v1` request with **no** `X-API-Key` header is refused `401` before its body is read; a present-but-unknown key is verified after the (bounded) body is parsed, so a malformed body with a bad key can still answer 422. A deployment's ingress should enforce its own, lower limit as well.

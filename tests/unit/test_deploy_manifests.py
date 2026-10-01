@@ -362,10 +362,14 @@ def test_admin_api_is_denied_on_the_public_ingress_by_default() -> None:
     for spelling in ("allowlist", "whitelist"):
         assert notes[f"nginx.ingress.kubernetes.io/{spelling}-source-range"] == "127.0.0.1/32"
     (rule,) = admin["spec"]["rules"]
-    (path,) = rule["http"]["paths"]
-    assert (path["path"], path["pathType"]) == ("/v1/admin", "Prefix")
-    assert path["backend"]["service"]["name"] == "hivemind-api"
-    # Same host, so nginx's longest-prefix match routes /v1/admin here.
+    paths = rule["http"]["paths"]
+    # The admin prefix, and the unauthenticated Prometheus target (ADR 0050).
+    assert {(p["path"], p["pathType"]) for p in paths} == {
+        ("/v1/admin", "Prefix"),
+        ("/metrics", "Exact"),
+    }
+    assert {p["backend"]["service"]["name"] for p in paths} == {"hivemind-api"}
+    # Same host, so nginx prefers these paths over the public Ingress's /.
     assert rule["host"] == ingresses["hivemind"]["spec"]["rules"][0]["host"]
     assert admin["spec"]["tls"] == ingresses["hivemind"]["spec"]["tls"]
 
@@ -507,3 +511,13 @@ def test_entrypoint_migrate_runner_sigterm_exits_promptly(tmp_path: Path) -> Non
     finally:
         if proc.poll() is None:
             proc.kill()
+
+
+def test_api_pods_are_annotated_for_prometheus() -> None:
+    """ADR 0050: Prometheus finds the /metrics target by pod annotations."""
+    deployment = _load(K8S / "hivemind-api-deployment.yaml")
+    notes = deployment["spec"]["template"]["metadata"]["annotations"]
+    assert notes["prometheus.io/scrape"] == "true"
+    assert notes["prometheus.io/path"] == "/metrics"
+    port = deployment["spec"]["template"]["spec"]["containers"][0]["ports"][0]["containerPort"]
+    assert notes["prometheus.io/port"] == str(port)
