@@ -27,6 +27,7 @@ Usage:
     hivemind-keys [--actor NAME] issue-admin
     hivemind-keys issue-agent --name alice [--trust-level N --home-fleet ID]
     hivemind-keys rotate-org
+    hivemind-keys bootstrap-secret [--secret hivemind-keys]   (in-cluster, ADR 0044)
     hivemind-keys revoke --name alice
     hivemind-keys revoke-admin --key hm_xxx   (or --hash <sha256 from list>)
     hivemind-keys list
@@ -36,12 +37,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import getpass
 import json
 import os
 import secrets
 import sys
 import uuid
+from typing import Protocol
 
 import asyncpg
 
@@ -161,20 +164,21 @@ async def _issue_admin(dsn: str, *, actor: str | None = None) -> str:
     """Issue an admin key; return the raw secret (printed once). Audited
     as ``admin_key.issue`` with the new key's fingerprint as target."""
     raw_key = _raw_key()
-    stored_hash = key_hash(raw_key)
     conn = await asyncpg.connect(dsn)
     try:
         async with conn.transaction():
-            await conn.execute(_ISSUE_ADMIN, stored_hash, "admin")
-            await _audit(
-                conn,
-                actor or default_actor(),
-                AuditAction.ADMIN_KEY_ISSUE,
-                key_fingerprint(stored_hash),
-            )
+            await _insert_admin(conn, raw_key, actor or default_actor())
     finally:
         await conn.close()
     return raw_key
+
+
+async def _insert_admin(conn: asyncpg.Connection, raw_key: str, actor: str) -> None:
+    """Store ``raw_key`` as an admin key and audit it, on ``conn``'s open
+    transaction."""
+    stored_hash = key_hash(raw_key)
+    await conn.execute(_ISSUE_ADMIN, stored_hash, "admin")
+    await _audit(conn, actor, AuditAction.ADMIN_KEY_ISSUE, key_fingerprint(stored_hash))
 
 
 async def _issue_agent(
@@ -235,13 +239,74 @@ async def _rotate_org(dsn: str, *, actor: str | None = None) -> str:
     conn = await asyncpg.connect(dsn)
     try:
         async with conn.transaction():
-            await conn.execute(ORG_KEY_LOCK)
-            await conn.execute(_DELETE_ORG)
-            await conn.execute(_ISSUE_ORG, key_hash(raw_key), "org")
-            await _audit(conn, actor or default_actor(), AuditAction.ORG_KEY_ROTATE, None)
+            await _replace_org(conn, raw_key, actor or default_actor())
     finally:
         await conn.close()
     return raw_key
+
+
+async def _replace_org(conn: asyncpg.Connection, raw_key: str, actor: str) -> None:
+    """Make ``raw_key`` the only org key and audit it, on ``conn``'s open
+    transaction."""
+    await conn.execute(ORG_KEY_LOCK)
+    await conn.execute(_DELETE_ORG)
+    await conn.execute(_ISSUE_ORG, key_hash(raw_key), "org")
+    await _audit(conn, actor, AuditAction.ORG_KEY_ROTATE, None)
+
+
+class SecretWriter(Protocol):
+    """The slice of the Kubernetes API the bootstrap needs (ADR 0044);
+    ``kube_secret.KubeSecrets`` in a cluster, a fake in tests."""
+
+    def exists(self, name: str) -> bool: ...
+
+    def create(self, name: str, string_data: dict[str, str], labels: dict[str, str]) -> None: ...
+
+    def delete(self, name: str) -> None: ...
+
+
+async def _bootstrap_secret(
+    dsn: str, secrets_api: SecretWriter, name: str, *, actor: str | None = None
+) -> bool:
+    """First-run key bootstrap (ADR 0044): issue an admin key and rotate the
+    org key, and store both raw keys in the Kubernetes Secret ``name``.
+
+    Returns ``False`` without touching anything when the Secret already
+    exists. The keys are never printed. The Secret is created **inside**
+    the database transaction, before the commit: if the create fails, the
+    keys are rolled back, so a failed run leaves no orphan admin key and no
+    rotated org key, and can simply be re-run. If the commit itself fails
+    after the Secret was created, the Secret is deleted again (best effort)
+    so it never holds keys the database does not."""
+    if await asyncio.to_thread(secrets_api.exists, name):
+        return False
+    who = actor or default_actor()
+    admin_key, org_key = _raw_key(), _raw_key()
+    conn = await asyncpg.connect(dsn)
+    try:
+        tx = conn.transaction()
+        await tx.start()
+        try:
+            await _insert_admin(conn, admin_key, who)
+            await _replace_org(conn, org_key, who)
+            await asyncio.to_thread(
+                secrets_api.create,
+                name,
+                {"ADMIN_KEY": admin_key, "ORG_KEY": org_key},
+                {"app.kubernetes.io/name": "hivemind", "app.kubernetes.io/component": "keys"},
+            )
+        except BaseException:
+            await tx.rollback()
+            raise
+        try:
+            await tx.commit()
+        except BaseException:
+            with contextlib.suppress(Exception):
+                await asyncio.to_thread(secrets_api.delete, name)
+            raise
+    finally:
+        await conn.close()
+    return True
 
 
 async def _list(dsn: str) -> None:
@@ -366,6 +431,15 @@ def main() -> None:
         help="rotate the shared org key (closes registration; active agents unaffected)",
     )
 
+    bootstrap = sub.add_parser(
+        "bootstrap-secret",
+        help=(
+            "first-run bootstrap inside the cluster: issue an admin key + rotate the org key "
+            "straight into a Kubernetes Secret, printing neither (no-op if it exists; ADR 0044)"
+        ),
+    )
+    bootstrap.add_argument("--secret", default="hivemind-keys", help="the Secret to create")
+
     sub.add_parser("list", help="list credential hashes (never raw keys)")
 
     revoke_admin = sub.add_parser(
@@ -444,6 +518,20 @@ def main() -> None:
             raise SystemExit(1) from None
     elif args.cmd == "rotate-org":
         print(asyncio.run(_rotate_org(dsn, actor=actor)))
+    elif args.cmd == "bootstrap-secret":
+        from hivemind.store.kube_secret import KubeApiError, KubeSecrets
+
+        try:
+            created = asyncio.run(
+                _bootstrap_secret(dsn, KubeSecrets.in_cluster(), args.secret, actor=actor)
+            )
+        except KubeApiError as exc:
+            print(f"{exc}; no key was issued", file=sys.stderr)
+            raise SystemExit(1) from None
+        if created:
+            print(f"issued the admin and org keys into Secret {args.secret} (not printed)")
+        else:
+            print(f"Secret {args.secret} already exists; nothing issued")
     elif args.cmd == "list":
         asyncio.run(_list(dsn))
     elif args.cmd == "revoke-admin":

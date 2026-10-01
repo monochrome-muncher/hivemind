@@ -125,12 +125,36 @@ def _job_script() -> str:
 def test_bootstrap_job_shape() -> None:
     job = _load(K8S / "bootstrap" / "keys-job.yaml")
     assert job["kind"] == "Job"
-    assert job["spec"]["backoffLimit"] == 0  # a retry would orphan admin keys
+    assert job["spec"]["backoffLimit"] == 0  # a failure surfaces in CI, never silently retried
     assert "ttlSecondsAfterFinished" in job["spec"]
     container = _pod_spec(job)["containers"][0]
     refs = {(next(iter(e)), next(iter(e.values()))["name"]) for e in container["envFrom"]}
     assert ("secretRef", "hivemind-secrets") in refs
     assert ("configMapRef", "hivemind-config") in refs  # the embedding dim lives there
+
+
+def test_bootstrap_job_runs_as_its_own_narrow_service_account() -> None:
+    # ADR 0044: the Job is the only workload that mounts a token, and its
+    # Role can create Secrets and get / delete hivemind-keys - nothing else.
+    pod = _pod_spec(_load(K8S / "bootstrap" / "keys-job.yaml"))
+    assert pod["serviceAccountName"] == "hivemind-keys-bootstrap"
+    assert pod["automountServiceAccountToken"] is True
+    docs = {d["kind"]: d for d in yaml.safe_load_all((K8S / "bootstrap" / "rbac.yaml").read_text())}
+    assert set(docs) == {"ServiceAccount", "Role", "RoleBinding"}
+    assert docs["ServiceAccount"]["automountServiceAccountToken"] is False
+    rules = docs["Role"]["rules"]
+    assert all(r["apiGroups"] == [""] and r["resources"] == ["secrets"] for r in rules)
+    granted = {(v, tuple(r.get("resourceNames", []))) for r in rules for v in r["verbs"]}
+    assert granted == {
+        ("create", ()),
+        ("get", ("hivemind-keys",)),
+        ("delete", ("hivemind-keys",)),
+    }
+    binding = docs["RoleBinding"]
+    assert binding["roleRef"]["name"] == docs["Role"]["metadata"]["name"]
+    assert binding["subjects"] == [
+        {"kind": "ServiceAccount", "name": "hivemind-keys-bootstrap", "namespace": "hivemind"}
+    ]
 
 
 def test_bootstrap_job_script_is_valid_shell() -> None:
@@ -150,34 +174,33 @@ def _run_job_script(tmp_path: Path, keys_stub: str) -> subprocess.CompletedProce
     )
 
 
-def test_bootstrap_job_happy_path(tmp_path: Path) -> None:
-    proc = _run_job_script(
-        tmp_path, 'case "$3" in issue-admin) echo adm;; rotate-org) echo org;; esac'
-    )
+def test_bootstrap_job_writes_the_secret_and_prints_no_key(tmp_path: Path) -> None:
+    calls = tmp_path / "keys-calls"
+    proc = _run_job_script(tmp_path, f'echo "$*" >> {calls}; echo "issued (not printed)"')
     assert proc.returncode == 0, proc.stderr
-    assert "ADMIN_KEY=adm" in proc.stdout
-    assert "ORG_KEY=org" in proc.stdout
+    assert calls.read_text().split() == [
+        "--actor",
+        "ci-bootstrap",
+        "bootstrap-secret",
+        "--secret",
+        "hivemind-keys",
+    ]
+    # The old Job echoed ADMIN_KEY= / ORG_KEY= for the CI script to scrape.
+    assert "KEY=" not in _job_script()
 
 
 def test_bootstrap_job_fails_when_the_cli_fails(tmp_path: Path) -> None:
-    # DEP-9b: `echo "K=$(false)"` under set -e used to swallow the failure.
     proc = _run_job_script(tmp_path, "exit 1")
     assert proc.returncode != 0
-    assert "ADMIN_KEY=" not in proc.stdout
-
-
-def test_bootstrap_job_refuses_empty_keys(tmp_path: Path) -> None:
-    proc = _run_job_script(tmp_path, "exit 0")  # succeeds but prints nothing
-    assert proc.returncode != 0
-    assert "KEY=" not in proc.stdout
 
 
 def _bootstrap_with_fake_kubectl(
-    tmp_path: Path, logs: str, **extra_env: str
+    tmp_path: Path, **extra_env: str
 ) -> subprocess.CompletedProcess[str]:
     bindir = tmp_path / "bin"
     bindir.mkdir()
     calls = tmp_path / "calls"
+    created = tmp_path / "created"
     kubectl = bindir / "kubectl"
     kubectl.write_text(
         textwrap.dedent(
@@ -188,10 +211,14 @@ def _bootstrap_with_fake_kubectl(
               *"get secret hivemind-keys"*)
                 [ -n "$FAKE_API_ERROR" ] && {{ echo "Unable to connect to the server" >&2; exit 1; }}
                 [ -n "$FAKE_SECRET_EXISTS" ] && echo secret/hivemind-keys
+                [ -f {created} ] && echo secret/hivemind-keys
                 exit 0 ;;
-              *"get job"*jsonpath*) echo 1 ;;
-              *" logs "*) printf '%s' '{logs}' ;;
-              *"create secret"*) echo "kind: Secret" ;;
+              *"get job"*succeeded*)
+                [ -n "$FAKE_JOB_FAILS" ] && exit 0
+                [ -z "$FAKE_NO_SECRET" ] && touch {created}
+                echo 1 ;;
+              *"get job"*failed*) [ -n "$FAKE_JOB_FAILS" ] && echo 1 ;;
+              *" logs "*) echo "Kubernetes API create secret failed: HTTP 403" ;;
             esac
             exit 0
             """
@@ -214,18 +241,35 @@ def _bootstrap_with_fake_kubectl(
     )
 
 
-def test_ci_bootstrap_stores_keys_and_never_echoes_them(tmp_path: Path) -> None:
-    proc = _bootstrap_with_fake_kubectl(tmp_path, "ADMIN_KEY=a1\nORG_KEY=o1\n")
+def test_ci_bootstrap_runs_the_job_and_removes_its_rbac(tmp_path: Path) -> None:
+    proc = _bootstrap_with_fake_kubectl(tmp_path)
     assert proc.returncode == 0, proc.stderr
-    assert "a1" not in proc.stdout + proc.stderr
+    calls = (tmp_path / "calls").read_text().splitlines()
+    applies = [i for i, c in enumerate(calls) if c.endswith("apply -f -")]
+    deletes = [i for i, c in enumerate(calls) if "delete --ignore-not-found=true -f -" in c]
+    assert len(applies) == 2  # the RBAC, then the Job
+    assert deletes and deletes[-1] > applies[-1]  # RBAC removed after the Job
+    # The script never reads keys and never creates the Secret itself.
+    assert not any(" logs " in c or "create secret" in c for c in calls)
+    assert "hivemind-keys secret created" in proc.stdout
+
+
+def test_ci_bootstrap_shows_the_log_and_removes_rbac_when_the_job_fails(tmp_path: Path) -> None:
+    proc = _bootstrap_with_fake_kubectl(tmp_path, FAKE_JOB_FAILS="1")
+    assert proc.returncode != 0
+    assert "HTTP 403" in proc.stderr  # the log holds no key (ADR 0044), so it is shown
     calls = (tmp_path / "calls").read_text()
-    assert "create secret generic hivemind-keys" in calls
+    assert "delete --ignore-not-found=true -f -" in calls
+
+
+def test_ci_bootstrap_fails_when_the_job_left_no_secret(tmp_path: Path) -> None:
+    proc = _bootstrap_with_fake_kubectl(tmp_path, FAKE_NO_SECRET="1")
+    assert proc.returncode != 0
+    assert "missing" in proc.stderr
 
 
 def test_ci_bootstrap_aborts_on_an_api_error_instead_of_assuming_absent(tmp_path: Path) -> None:
-    # A failed `get secret` must not look like "no keys yet": that would re-run
-    # issue-admin + rotate-org and overwrite a live Secret (ADR 0031).
-    proc = _bootstrap_with_fake_kubectl(tmp_path, "ADMIN_KEY=a1\nORG_KEY=o1\n", FAKE_API_ERROR="1")
+    proc = _bootstrap_with_fake_kubectl(tmp_path, FAKE_API_ERROR="1")
     assert proc.returncode != 0
     calls = (tmp_path / "calls").read_text()
     assert "apply" not in calls
@@ -233,15 +277,17 @@ def test_ci_bootstrap_aborts_on_an_api_error_instead_of_assuming_absent(tmp_path
 
 
 def test_ci_bootstrap_skips_when_the_secret_exists(tmp_path: Path) -> None:
-    proc = _bootstrap_with_fake_kubectl(tmp_path, "", FAKE_SECRET_EXISTS="1")
+    proc = _bootstrap_with_fake_kubectl(tmp_path, FAKE_SECRET_EXISTS="1")
     assert proc.returncode == 0
     assert "apply" not in (tmp_path / "calls").read_text()
 
 
-def test_ci_bootstrap_refuses_to_store_empty_keys(tmp_path: Path) -> None:
-    proc = _bootstrap_with_fake_kubectl(tmp_path, "ADMIN_KEY=\nORG_KEY=o1\n")
-    assert proc.returncode != 0
-    assert "create secret generic hivemind-keys" not in (tmp_path / "calls").read_text()
+def test_ci_bootstrap_rewrites_the_rolebinding_namespace() -> None:
+    rbac = (K8S / "bootstrap" / "rbac.yaml").read_text()
+    script = (ROOT / "scripts" / "ci-bootstrap-keys.sh").read_text()
+    # The script's sed must hit exactly the RoleBinding subject's namespace line.
+    assert rbac.count("namespace: hivemind\n") == 1
+    assert "s|namespace: hivemind\\$|namespace: $NS|" in script
 
 
 # --- DEP-4 / DEP-5 / DEP-12: workload hardening ------------------------------------
@@ -250,7 +296,8 @@ def test_ci_bootstrap_refuses_to_store_empty_keys(tmp_path: Path) -> None:
 @pytest.mark.parametrize("path", WORKLOADS, ids=lambda p: p.name)
 def test_workloads_are_hardened(path: Path) -> None:
     pod = _pod_spec(_load(path))
-    assert pod["automountServiceAccountToken"] is False
+    # The bootstrap Job alone mounts its own narrow token (ADR 0044).
+    assert pod["automountServiceAccountToken"] is (path.name == "keys-job.yaml")
     psc = pod["securityContext"]
     assert psc["runAsNonRoot"] is True
     assert isinstance(psc["runAsUser"], int) and psc["runAsUser"] > 0

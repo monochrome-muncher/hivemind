@@ -213,9 +213,10 @@ deploy:
         --dry-run=client -o yaml)
       printf '%s\n' "$secret_yaml" | kubectl -n hivemind apply -f -
     # 2) FIRST-RUN KEY BOOTSTRAP (idempotent; scripts/ci-bootstrap-keys.sh +
-    #    deploy/kubernetes/bootstrap/keys-job.yaml). On a FRESH database no
-    #    admin / org keys exist yet; a one-off Job in the app image prints
-    #    them once, and the script stores them in the `hivemind-keys` secret.
+    #    deploy/kubernetes/bootstrap/{rbac,keys-job}.yaml, ADR 0044). On a
+    #    FRESH database no admin / org keys exist yet; a one-off Job in the
+    #    app image writes them straight into the `hivemind-keys` secret under
+    #    its own narrow ServiceAccount, printing neither.
     #    On every later deploy the secret exists and this is skipped. The raw
     #    keys live ONLY in the k8s Secret — GitLab stays key-free by design.
     - sh scripts/ci-bootstrap-keys.sh

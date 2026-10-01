@@ -24,7 +24,8 @@ Layout:
 - [`.gitlab-ci.yml`](.gitlab-ci.yml) — the pipeline (test → build → deploy);
   the first-run key bootstrap is
   [`scripts/ci-bootstrap-keys.sh`](scripts/ci-bootstrap-keys.sh) +
-  [`deploy/kubernetes/bootstrap/keys-job.yaml`](deploy/kubernetes/bootstrap/keys-job.yaml)
+  [`deploy/kubernetes/bootstrap/keys-job.yaml`](deploy/kubernetes/bootstrap/keys-job.yaml) +
+  [`deploy/kubernetes/bootstrap/rbac.yaml`](deploy/kubernetes/bootstrap/rbac.yaml) (ADR 0044)
 
 ---
 
@@ -81,15 +82,18 @@ The 5-step operator flow:
    `K8S_IMAGE` variable (GitLab → Settings → CI/CD → Variables).
 3. **First `git push`** — the pipeline builds + deploys + **boots the
    keys automatically** (the deploy job's idempotent first-run bootstrap,
-   `scripts/ci-bootstrap-keys.sh`). The one-shot Job prints each raw key
-   once to its own pod log; the script copies them into the Secret and
-   deletes the Job (`ttlSecondsAfterFinished` removes it anyway). It runs
-   with `backoffLimit: 0`: if it fails partway (e.g. after `issue-admin`),
-   an unclaimed admin key may exist — list with `hivemind-keys list`, revoke
-   strays with `hivemind-keys --actor you revoke-admin --hash <fingerprint>`
-   (the 12-char fingerprint `list` prints is enough; it must be unique), and
-   re-run the pipeline. Your cluster's log shipper may have captured the Job
-   log: treat it as key-bearing, or rotate the keys (§4) afterwards.
+   `scripts/ci-bootstrap-keys.sh`, ADR 0044). A one-shot Job, under its own
+   ServiceAccount (`deploy/kubernetes/bootstrap/rbac.yaml`: create Secrets,
+   get/delete `hivemind-keys`), runs `hivemind-keys bootstrap-secret`, which
+   issues the admin key, rotates the org key and writes both straight into
+   the `hivemind-keys` Secret. No key is printed, so the Job log and your
+   log shipper never hold one. The keys are committed only after the Secret
+   was created, so a failed run leaves nothing behind: fix the cause (the
+   script prints the Job log) and re-run the pipeline. The script deletes
+   the Job and the RBAC objects when it is done; the deploy identity needs
+   permission to create that Role and RoleBinding. If you bootstrapped
+   before ADR 0044, the old Job printed the keys: treat your log store as
+   key-bearing, or rotate both keys (§4).
 4. **Fetch the generated keys** and hand them out (the raw keys live
    ONLY in the k8s Secret `hivemind-keys` — GitLab stays key-free):
 
