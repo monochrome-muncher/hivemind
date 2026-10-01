@@ -479,7 +479,6 @@ or its own trigger):
   (`optional/networkpolicy/egress/`). The app itself still has no limiter.
 - **Registration** is still unaudited and the owner alias unverified:
   the admin confirms the requester out of band.
-- A pool acquire timeout surfaces as 500, not 503.
 - Structural untrusted-content markers on returned entries (deferred in
   ADR 0043); zero-norm embeddings are not rejected. (Case-variant agent
   names are refused since ADR 0045; collisions registered before it stay.)

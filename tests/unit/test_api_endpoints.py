@@ -689,6 +689,36 @@ class TestEmbeddingFailure:
         assert resp.json()["error"]["code"] == "embedding_unavailable"
 
 
+class TestStoreTimeout:
+    """ROADMAP 3.13: a pool acquire / statement timeout is 503
+    ``store_unavailable`` with Retry-After, not a bare 500."""
+
+    async def test_a_store_timeout_is_503_with_retry_after(self) -> None:
+        app = make_hivemind_app()
+
+        async def timed_out(*_args: object, **_kwargs: object) -> object:
+            raise TimeoutError
+
+        app.store.list_entries = timed_out  # type: ignore[method-assign]
+        async with make_client(app) as client:
+            resp = await client.get("/v1/entries", headers={"X-API-Key": "key-alice"})
+        assert resp.status_code == 503
+        assert resp.headers["Retry-After"] == "2"
+        assert resp.json()["error"]["code"] == "store_unavailable"
+
+    async def test_a_key_check_timeout_is_503_not_401(self) -> None:
+        app = make_hivemind_app()
+
+        async def timed_out(_key: str) -> object:
+            raise TimeoutError
+
+        app.authenticator.verify = timed_out  # type: ignore[method-assign]
+        async with make_client(app) as client:
+            resp = await client.get("/v1/entries", headers={"X-API-Key": "key-alice"})
+        assert resp.status_code == 503
+        assert resp.json()["error"]["code"] == "store_unavailable"
+
+
 class TestNaiveDatetimeNormalization:
     async def test_naive_occurred_at_normalized_to_utc(self) -> None:
         from hivemind.api.schemas import CreateEntryRequest
