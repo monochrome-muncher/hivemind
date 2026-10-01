@@ -1,5 +1,7 @@
 # One key per request; rotating the org key closes registration, nothing more
 
+> **Refined by [ADR 0039](0039-key-lifecycle-is-atomic-and-registration-is-owned.md):** one live org key is enforced by a unique index. The decision below stands.
+
 Supersedes the "kill switch" clause of ADR 0012.
 
 ## Context

@@ -1,5 +1,7 @@
 # Reject unknown `HIVEMIND_*` environment variables
 
+> **Status: the "fail at startup" clause is superseded by [ADR 0032](0032-unknown-hivemind-env-vars-warn-by-default.md).** An unknown `HIVEMIND_*` variable is a warning by default; `HIVEMIND_STRICT_ENV=true` restores the failure.
+
 `Settings` (`src/hivemind/config.py`) has always used
 `model_config = SettingsConfigDict(env_prefix="HIVEMIND_", extra="ignore", ...)`.
 `extra="ignore"` means a `HIVEMIND_*` variable that doesn't match a

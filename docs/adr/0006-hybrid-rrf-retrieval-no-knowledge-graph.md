@@ -10,6 +10,11 @@
 > **approximate** nearest neighbours rather than the exact top-k. The
 > fusion shape below is unchanged.
 
+> **Amended by [ADR 0047](0047-keyword-stream-matches-any-term.md), [ADR 0049](0049-keyword-stream-matches-at-most-16-terms.md) and [ADR 0048](0048-search-falls-back-to-keywords-when-the-embedder-is-down.md):**
+> the keyword stream (Postgres FTS `ts_rank`; true BM25 is deferred, ROADMAP §4.1)
+> matches any query term, at most 16 on Postgres, and a search runs on it
+> alone when the embedder is down.
+
 v1 search runs BM25 (Postgres FTS) and dense (pgvector) in parallel, fuses the two ranked lists with Reciprocal Rank Fusion (weights configurable, default 0.5/0.5), then re-scores by importance × recency (decay from occurrence time) × feedback quality. No knowledge graph in v1.
 
 Considered options: vector-only search; graph-expanded retrieval (Zep/Caura style, entity extraction + multi-hop expansion). Rejected for v1: graph extraction is a heavy, quality-sensitive layer whose payoff (cross-entry entity linking) is a documented extension, not a v1 requirement. RRF + decay-aware re-scoring is the pattern the field converged on (agentmemory, pgmemai, Caura) and is a small, well-understood implementation; the fusion weights and decay parameters are config knobs, so tuning is cheap.

@@ -1,5 +1,7 @@
 # Entrypoint-owned idempotent migration (replaces the k8s initContainer)
 
+> **Note:** the migration the entrypoint runs is now [ADR 0020](0020-versioned-migrations-with-rollback-and-an-advisory-lock.md)'s versioned chain under an advisory lock, not ADR 0013's idempotent re-apply. Entrypoint ownership stands (ADR 0020, decision 7).
+
 The k8s deployment story (Tier 3.4) ran the idempotent schema
 migration (ADR 0013) as a `migrate` **initContainer** on every pod
 start. That worked, but it pinned the *deployment* to a specific

@@ -1,5 +1,7 @@
 # An append-only audit log of admin actions, with two actor kinds
 
+> **Amended by [ADR 0028](0028-revoked-agent-status-and-an-activation-guard.md)** (a `before` cursor on the audit log; `agent.revoke` records `from`) **and [ADR 0046](0046-registrations-are-audited.md)** (new registrations are audited as `agent.register`, actor kind `org_key`).
+
 ## Context
 
 The admin surface (SPEC §12.4) changes who can do what. It activates

@@ -12,6 +12,12 @@
 > never enters Postgres's wait graph. Decisions 3 and 6 below are
 > otherwise unchanged.
 
+> **Note (2.0.0 review):** the ADR 0015 dim guard now runs *after* the lock
+> is taken, so two replicas at different dims on a cold pool cannot both pass
+> it, and the same pre-flight refuses pgvector < 0.8 and a dim above 2000
+> (the HNSW limit). The "before the lock" consequence below is out of date
+> (`src/hivemind/store/migrate.py`).
+
 ADR 0013 made the DDL forward path an idempotent re-apply of a single
 `schema.sql` (every statement guarded with `IF NOT EXISTS` /
 `OR REPLACE`), plus a `schema_migrations` version marker and a

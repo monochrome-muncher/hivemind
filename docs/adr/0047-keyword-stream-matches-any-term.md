@@ -1,5 +1,7 @@
 # The keyword stream matches any query term
 
+> **Amended by [ADR 0049](0049-keyword-stream-matches-at-most-16-terms.md):** on Postgres only the first 16 distinct query terms count, and the cost measurement below is corrected there.
+
 Settles the keyword-stream semantics left open in ROADMAP §3.13.
 
 ## Context
