@@ -163,7 +163,7 @@ query ─┬─> keyword list  (Postgres FTS / BM25-style rank) ──┐
                      decay-aware rescore (§6.4)  ──>  final order  ──>  compact hits
 ```
 
-Keyword ranking is Postgres FTS in v1 (a true-BM25 extension such as `pg_search`/Zombi is a drop-in upgrade, not a v1 dependency). Weights `w_kw`/`w_vec`, `k`, top-k, and the rescore factors are all **config values**, so fusion tuning is a config change, not a code change.
+An entry is in the keyword list when it contains **any** query term; entries matching more terms rank higher (ADR 0047). Keyword ranking is Postgres FTS in v1 (a true-BM25 extension such as `pg_search`/Zombi is a drop-in upgrade, not a v1 dependency). Weights `w_kw`/`w_vec`, `k`, top-k, and the rescore factors are all **config values**, so fusion tuning is a config change, not a code change.
 
 **The vector stream is approximate, not exact (ADR 0025).** It is served by an HNSW index on `entries.embedding` (`vector_cosine_ops`, matching the `<=>` operator; `m = 16`, `ef_construction = 64` — migration `0004`). HNSW is an *approximate* nearest-neighbour structure: the stream is **not guaranteed** to be the true top-k by cosine distance, and a true near neighbour can be missed entirely. This is a deliberate behaviour change from the exact sequential scan that preceded it, taken because that scan reads ~4KB per row and grows without bound with the pool — ADR 0025 carries the measured recall cost and the re-measure trigger. The keyword stream is unaffected, and RRF means a vector miss is survivable when the keyword stream also finds the entry.
 

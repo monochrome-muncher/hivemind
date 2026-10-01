@@ -366,6 +366,56 @@ async def test_keyword_search_ranks_by_relevance(pg) -> None:
     assert results[0] == jwt.id  # the only entry with both tokens ranks first
 
 
+async def test_keyword_search_matches_any_term(pg) -> None:
+    """ADR 0047: an entry matching one query term is found; an entry
+    matching more terms ranks above it."""
+    store, _, _ = pg
+    one = await store.create_entry(draft("Rotate the signing key every quarter"))
+    both = await store.create_entry(draft("Rotate the JWT signing key"))
+    none = await store.create_entry(draft("Cookies are HTTP only"))
+
+    results = await store.search_keyword("jwt rotate", EntryFilters(), limit=10)
+    assert results == [both.id, one.id]
+    assert none.id not in results
+
+
+async def test_keyword_search_of_only_stop_words_matches_nothing(pg) -> None:
+    store, _, _ = pg
+    await store.create_entry(draft("The state of the art"))
+    assert await store.search_keyword("the of and", EntryFilters(), limit=10) == []
+
+
+@pytest.mark.parametrize(
+    "query",
+    ["jwt & !cookie", "jwt | (cookie", "jwt:* <-> cookie", "' & '", "it's o'neil", "a\\b"],
+)
+async def test_keyword_search_never_reads_tsquery_syntax(pg, query: str) -> None:
+    """The query is parsed by ``plainto_tsquery`` before the any-term
+    rewrite, so operator characters are plain text, never syntax."""
+    store, _, _ = pg
+    jwt = await store.create_entry(draft("JWT tokens expire"))
+    results = await store.search_keyword(query, EntryFilters(), limit=10)
+    assert results in ([], [jwt.id])
+
+
+async def test_keyword_stream_finds_every_golden_entry(pg) -> None:
+    """ADR 0047's recall measurement, kept as a gate: on the golden set
+    (``tests/eval/golden.py``) the keyword stream alone puts the relevant
+    entry in its top 5 for every query. The old every-term rule found 1
+    of 8, because natural-language queries carry words the entry lacks."""
+    from tests.eval.golden import golden_corpus, golden_queries
+
+    store, _, _ = pg
+    ids = []
+    for kind, summary, tags in golden_corpus():
+        entry = await store.create_entry(draft(summary, kind=Kind(kind), tags=tuple(tags)))
+        ids.append(entry.id)
+
+    for query, relevant in golden_queries():
+        results = await store.search_keyword(query, EntryFilters(), limit=5)
+        assert {ids[i] for i in relevant} & set(results), query
+
+
 async def test_keyword_search_respects_filters(pg) -> None:
     store, _, _ = pg
     decision = await store.create_entry(

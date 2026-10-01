@@ -466,10 +466,6 @@ bootstrap writes the `hivemind-keys` Secret itself and prints no key
 
 **Open follow-ups** (found, deliberately not done; each needs a decision
 or its own trigger):
-- **Keyword-stream semantics differ by store.** Postgres
-  (`plainto_tsquery`) requires every query term; `MemoryStore` needs one,
-  so the unit suite does not reflect production recall. Pick one (likely
-  an OR / `websearch_to_tsquery` form on Postgres) in an ADR and align both.
 - **Degraded search while the embedder is down**: today a typed 502 /
   `embedding_unavailable`; a keyword-only fallback needs an ADR.
 - **Rate limiting** (garbage-key amplification on `/mcp`, the 2 MiB body
