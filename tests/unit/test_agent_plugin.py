@@ -376,15 +376,15 @@ def test_the_pi_extension_adds_the_stay_aware_section() -> None:
     assert "configured" in text  # the test sets the key
 
 
-def test_the_readme_says_what_changed_for_agents_in_this_release() -> None:
-    """Every version bump adds a row to the plugin README's per-release
+def test_the_changelog_says_what_changed_for_agents_in_this_release() -> None:
+    """Every version bump adds a row to the plugin CHANGELOG's per-release
     table, so users can tell whether an update matters (and whether their
     own copies — the instruction block, a hand-installed hook — need a
-    refresh)."""
+    refresh). The README links it."""
     version = _json(PLUGIN / ".claude-plugin" / "plugin.json")["version"]
-    readme = (PLUGIN / "README.md").read_text()
-    table = readme.split("### What changed for agents, by release", 1)[1]
-    assert re.search(rf"^\| {re.escape(str(version))} \|", table, re.MULTILINE), version
+    changelog = (PLUGIN / "CHANGELOG.md").read_text()
+    assert re.search(rf"^\| {re.escape(str(version))} \|", changelog, re.MULTILINE), version
+    assert "(CHANGELOG.md)" in (PLUGIN / "README.md").read_text()
 
 
 # -- incognito sessions (ADR 0035) ----------------------------------------------
