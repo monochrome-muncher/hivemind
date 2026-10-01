@@ -16,7 +16,8 @@ it as your memory, not as an optional tool:
   is private to you, so you rarely need local memory files at all.
 
 The tools are `hive_whoami`, `hive_search`, `hive_get`, `hive_list`,
-`hive_write`, `hive_feedback`, `hive_withdraw` and `hive_register`. Your
+`hive_pinned`, `hive_write`, `hive_feedback`, `hive_withdraw`, `hive_pin`
+and `hive_register`. Your
 harness may show them with a prefix (for example `mcp__…__hive_search`).
 
 ## 1. First action every session: `hive_whoami`
@@ -192,8 +193,9 @@ write nothing: an entry that only says the task is done helps nobody.
     `self`.
   - Only the **current head** of a chain is supersedable: an entry that is
     already superseded or withdrawn is refused as `supersede_denied` too.
-    If you get that on a target, fetch it with `?history` (or
-    `hive_get`), find the version that is current, and target that one.
+    If you get that on a target, fetch it with `hive_get` and
+    `include_history`, find the version that is current, and target that
+    one.
 - **Check `related` in the write's reply.** It lists up to three
   existing entries you can read that are nearest to the one you just
   wrote, with a `similarity` (1.0 is identical). They are only the

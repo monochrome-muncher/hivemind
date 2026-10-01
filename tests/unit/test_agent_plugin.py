@@ -49,6 +49,15 @@ def test_every_mcp_tool_is_in_the_skill_and_no_other() -> None:
     assert mentioned == set(EXPECTED_TOOLS)
 
 
+def test_the_skill_lists_every_tool_where_it_names_them() -> None:
+    """The "The tools are ..." sentence is the agent's inventory; a new
+    tool mentioned only deep in the text (hive_pin, hive_pinned) was missing
+    from it."""
+    flat = " ".join(SKILL.split())
+    sentence = flat[flat.index("The tools are ") :].split(". ", 1)[0]
+    assert set(re.findall(r"\bhive_[a-z]+\b", sentence)) == set(EXPECTED_TOOLS)
+
+
 def test_the_whoami_fields_the_skills_rely_on_exist() -> None:
     fields = Standing(
         key_kind="agent",

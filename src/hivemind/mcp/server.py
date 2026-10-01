@@ -1,6 +1,6 @@
-"""The stdio MCP server exposing the six Hivemind tools (SPEC §5.2).
+"""The stdio MCP server exposing the Hivemind tools (SPEC §5.2).
 
-``build_server`` wires the six plain tool functions from ``app.py`` into
+``build_server`` wires the plain tool functions from ``app.py`` into
 an ``MCPServer`` (mcp 2.x) as closures bound to a single ``McpHivemind``
 app instance. ``main`` builds a self-contained dev server (in-memory
 store + local embedder, per the v1 dev path) and runs the stdio
@@ -200,7 +200,7 @@ def build_server(
     credential_provider: Callable[[], Credential | Awaitable[Credential | None] | None]
     | None = None,
 ) -> MCPServer:
-    """Build an ``MCPServer`` exposing exactly the eight Hivemind tools.
+    """Build an ``MCPServer`` exposing exactly the ten Hivemind tools.
 
     Each registered tool is a closure over ``app`` so the LLM only ever
     sees the LLM-facing arguments; the acting identity and services are
