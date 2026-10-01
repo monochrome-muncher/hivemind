@@ -101,7 +101,7 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | Method & path | Purpose |
 |---|---|
 | `POST /v1/entries` | Create an entry (body = §4.1 fields; `supersedes` optional) |
-| `GET /v1/entries/{id}` | Full entry (body included). `?history=true` adds the supersession chain |
+| `GET /v1/entries/{id}` | Full entry (body included). `?history=true` adds the supersession chain: at most 100 versions (one list page), successors first, then predecessors newest first |
 | `GET /v1/entries` | List/filter **without** a query (filter only; paginated) |
 | `POST /v1/search` | Hybrid search (§6) with filters |
 | `POST /v1/entries/{id}/withdraw` | Withdraw own entry (or any, with admin credential) |

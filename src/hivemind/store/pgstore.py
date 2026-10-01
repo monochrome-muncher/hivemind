@@ -22,6 +22,7 @@ import asyncio
 import json
 import logging
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -77,12 +78,18 @@ INSERT INTO entries (
 # 19 explicit columns/values; ``created_at`` falls back to the schema's
 # ``now()`` default, so it is not in the value list.
 
+# Every column an ``Entry`` is read from, except ``embedding``: no reader
+# uses the stored vector (search ranks it in SQL), and fetching it cost
+# ~4 KB on the wire plus a float-by-float decode per row — more than half
+# of a 100-row list page's time. Entries read back carry ``embedding=None``.
 _ENTRY_COLUMNS = """
     id, kind, summary, body, payload, sources, tags, occurred_at,
-    created_at, author, agent, importance, importance_source, scope, fleet_id, embedding,
+    created_at, author, agent, importance, importance_source, scope, fleet_id,
     embedding_model, state, superseded_by, withdrawn_reason,
     entities, entity_names, entities_model
 """
+
+INSERT_ENTRY_RETURNING = INSERT_ENTRY.rstrip() + " RETURNING " + _ENTRY_COLUMNS
 
 SELECT_ENTRY = "SELECT " + _ENTRY_COLUMNS + " FROM entries WHERE id = $1"
 
@@ -419,47 +426,51 @@ class PgStore:
         occurred_at = draft.resolved_occurred_at()
 
         pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn:
-            async with conn.transaction():
-                await conn.execute(
-                    INSERT_ENTRY,
-                    entry_id,
-                    draft.kind.value,
-                    draft.summary,
-                    draft.body,
-                    json.dumps(draft.payload) if draft.payload is not None else None,  # jsonb
-                    json.dumps(_encode_sources(draft.sources)),  # jsonb
-                    list(draft.tags),
-                    occurred_at,
-                    draft.author,
-                    draft.agent,
-                    draft.importance,
-                    draft.importance_source.value,
-                    draft.scope,
-                    draft.fleet_id,
-                    embedding,
-                    embedding_model,  # SPEC.md §7: model that produced the vector
-                    json.dumps(_encode_entities(entities)),  # jsonb (ADR 0016)
-                    [e.name.lower() for e in entities],  # lower-cased names: the filter column
-                    entities_model,  # ADR 0016: extractor model (provenance)
-                )
-                if draft.supersedes:
-                    # ADR 0034, atomic: the guarded UPDATE row-locks the
-                    # targets; any target it did not flip (unknown,
-                    # non-UUID, or no longer active) aborts the whole
-                    # transaction, insert included.
-                    wanted = list(dict.fromkeys(draft.supersedes))
-                    flipped = {
-                        str(r["id"])
-                        for r in await conn.fetch(FLIP_SUPERSEDED, entry_id, _valid_uuids(wanted))
-                    }
-                    denied = [t for t in wanted if _canonical_uuid(t) not in flipped]
-                    if denied:
-                        raise SupersedeConflict(denied)
-            row = await conn.fetchrow(SELECT_ENTRY, entry_id)
+        async with pool.acquire(timeout=self._acquire_timeout) as conn, conn.transaction():
+            # RETURNING, not a re-read: the supersession flip below
+            # never touches the new row, so this is its final state.
+            row = await conn.fetchrow(
+                INSERT_ENTRY_RETURNING,
+                entry_id,
+                draft.kind.value,
+                draft.summary,
+                draft.body,
+                json.dumps(draft.payload) if draft.payload is not None else None,  # jsonb
+                json.dumps(_encode_sources(draft.sources)),  # jsonb
+                list(draft.tags),
+                occurred_at,
+                draft.author,
+                draft.agent,
+                draft.importance,
+                draft.importance_source.value,
+                draft.scope,
+                draft.fleet_id,
+                embedding,
+                embedding_model,  # SPEC.md §7: model that produced the vector
+                json.dumps(_encode_entities(entities)),  # jsonb (ADR 0016)
+                [e.name.lower() for e in entities],  # lower-cased names: the filter column
+                entities_model,  # ADR 0016: extractor model (provenance)
+            )
+            if draft.supersedes:
+                # ADR 0034, atomic: the guarded UPDATE row-locks the
+                # targets; any target it did not flip (unknown,
+                # non-UUID, or no longer active) aborts the whole
+                # transaction, insert included.
+                wanted = list(dict.fromkeys(draft.supersedes))
+                flipped = {
+                    str(r["id"])
+                    for r in await conn.fetch(FLIP_SUPERSEDED, entry_id, _valid_uuids(wanted))
+                }
+                denied = [t for t in wanted if _canonical_uuid(t) not in flipped]
+                if denied:
+                    raise SupersedeConflict(denied)
         if row is None:
-            raise RuntimeError(f"entry {entry_id} vanished between insert and read")
-        return _row_to_entry(row)
+            raise RuntimeError(f"insert of entry {entry_id} returned no row")
+        entry = _row_to_entry(row)
+        if embedding is None:
+            return entry
+        # The writer gets its vector back; later reads do not fetch it.
+        return replace(entry, embedding=tuple(float(x) for x in embedding))
 
     # -- read path ---------------------------------------------------------------
 
@@ -930,19 +941,6 @@ def _decode_sources(raw: Any) -> tuple[Source, ...]:
     return tuple(Source(type=SourceType(item["type"]), ref=item["ref"]) for item in items)
 
 
-def _embedding_to_tuple(embedding: Any) -> tuple[float, ...] | None:
-    """Normalize a stored embedding back into a float tuple.
-
-    ``register_vector`` decodes the ``vector`` column into a
-    ``pgvector.Vector``; the plain-list branch keeps the mapper robust
-    if the codec returns a list instead.
-    """
-    if embedding is None:
-        return None
-    values = embedding.to_list() if hasattr(embedding, "to_list") else list(embedding)
-    return tuple(float(x) for x in values)
-
-
 def _decode_entities(raw: Any) -> tuple[ExtractedEntity, ...]:
     """Decode the jsonb ``entities`` column back into domain facets.
 
@@ -976,7 +974,6 @@ def _row_to_entry(row: asyncpg.Record) -> Entry:
         importance_source=ImportanceSource(row["importance_source"]),
         scope=row["scope"],
         fleet_id=str(row["fleet_id"]) if row["fleet_id"] else None,
-        embedding=_embedding_to_tuple(row["embedding"]),
         embedding_model=row["embedding_model"],
         state=EntryState(row["state"]),
         superseded_by=str(row["superseded_by"]) if row["superseded_by"] else None,

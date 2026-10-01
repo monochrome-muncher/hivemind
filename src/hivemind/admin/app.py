@@ -35,6 +35,8 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from hivemind.domain.validation import MAX_REQUEST_BODY_BYTES
+
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -59,6 +61,8 @@ _ALLOWED: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
 
 # Request headers passed through to the API; nothing else crosses.
 _FORWARDED_REQUEST_HEADERS = ("x-api-key", "content-type", "accept")
+# The one allowlisted call the API answers without a key (SPEC §5.1).
+_PUBLIC_PATHS = frozenset({"health"})
 
 CONTENT_SECURITY_POLICY = (
     "default-src 'none'; script-src 'self'; style-src 'self'; "
@@ -121,6 +125,16 @@ def create_admin_app(
         if any(segment in (".", "..") for segment in segments):
             return _error(404, "not_proxied", "the admin panel does not forward this call")
         upstream_path = "/v1/" + "/".join(quote(segment, safe="") for segment in segments)
+        # The API's own pre-auth guard (ADR 0040), applied here too: the
+        # panel would otherwise buffer any body, with no key at all, before
+        # the API got the chance to refuse it.
+        if path not in _PUBLIC_PATHS and "x-api-key" not in request.headers:
+            return _error(401, "missing_api_key", "the X-API-Key header is required")
+        body = await _read_body(request, MAX_REQUEST_BODY_BYTES)
+        if body is None:
+            return _error(
+                413, "payload_too_large", f"request body exceeds {MAX_REQUEST_BODY_BYTES} bytes"
+            )
         headers = {
             name: value
             for name in _FORWARDED_REQUEST_HEADERS
@@ -132,7 +146,7 @@ def create_admin_app(
                 upstream_path,
                 params=str(request.query_params),
                 headers=headers,
-                content=await request.body(),
+                content=body,
             )
         except httpx.HTTPError as exc:
             # The exception type only: its message can echo the request.
@@ -164,6 +178,22 @@ def create_admin_app(
         middleware=[Middleware(SecurityHeaders)],
         lifespan=lifespan,
     )
+
+
+async def _read_body(request: Request, limit: int) -> bytes | None:
+    """The request body, or ``None`` once it exceeds ``limit`` bytes (by
+    ``Content-Length`` up front, then by counting the streamed chunks)."""
+    declared = request.headers.get("content-length")
+    if declared is not None and declared.isdigit() and int(declared) > limit:
+        return None
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > limit:
+            return None
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 class SecurityHeaders:

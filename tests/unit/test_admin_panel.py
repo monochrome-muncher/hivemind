@@ -272,3 +272,50 @@ def test_the_runner_refuses_to_start_without_an_api_url(monkeypatch) -> None:
     monkeypatch.setattr(main, "uvicorn", None)  # would crash if reached
     with pytest.raises(SystemExit, match="HIVEMIND_ADMIN_API_URL"):
         main.run()
+
+
+# -- the pre-auth guard (ADR 0040), as on the API --------------------------------
+
+
+async def test_a_keyless_call_is_refused_before_its_body_is_read() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={})
+
+    async with _panel(httpx.MockTransport(handler)) as panel:
+        resp = await panel.post("/v1/admin/fleets", content=b"x" * 4096)
+        health = await panel.get("/v1/health")
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == "missing_api_key"
+    # The public probe still needs no key.
+    assert health.status_code == 200
+    assert [r.url.path for r in seen] == ["/v1/health"]
+
+
+@pytest.mark.parametrize("chunked", [False, True])
+async def test_an_oversized_body_is_refused_and_never_forwarded(chunked: bool) -> None:
+    from hivemind.domain.validation import MAX_REQUEST_BODY_BYTES
+
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(201, json={})
+
+    big = b"x" * (MAX_REQUEST_BODY_BYTES + 1)
+
+    async def stream():
+        for i in range(0, len(big), 65536):
+            yield big[i : i + 65536]
+
+    async with _panel(httpx.MockTransport(handler)) as panel:
+        resp = await panel.post(
+            "/v1/admin/fleets", content=stream() if chunked else big, headers=ADMIN
+        )
+        ok = await panel.post("/v1/admin/fleets", json={"name": "f"}, headers=ADMIN)
+    assert resp.status_code == 413
+    assert resp.json()["error"]["code"] == "payload_too_large"
+    assert ok.status_code == 201
+    assert len(seen) == 1
