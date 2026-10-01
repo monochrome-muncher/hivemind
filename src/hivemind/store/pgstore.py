@@ -163,16 +163,35 @@ WITHDRAW = (
 
 # --- Keyword-stream query (ADR 0047) ------------------------------------------
 
-ANY_TERM_TSQUERY = "replace(plainto_tsquery('english', {param})::text, ' & ', ' | ')::tsquery"
-"""The keyword stream's tsquery: any query term matches (ADR 0047).
+MAX_KEYWORD_TERMS = 16
+"""The most distinct query terms the keyword stream matches on (ADR 0049).
+
+``ts_rank`` scores every matching row once per query term, and under the
+any-term rule a single common term matches most of the pool. Without a
+cap, a 2 000-character query of common words costs seconds of Postgres
+CPU per search; with it, the worst case is a fixed multiple of a
+one-term query. Terms past the cap are ignored by the keyword stream
+(the vector stream still sees the whole query)."""
+
+ANY_TERM_TSQUERY = (
+    "(SELECT coalesce(string_agg(term, ' | ' ORDER BY first), '')::tsquery"
+    " FROM (SELECT term, min(pos) AS first"
+    " FROM unnest(string_to_array(plainto_tsquery('english', {param})::text, ' & '))"
+    " WITH ORDINALITY AS t(term, pos)"
+    f" GROUP BY term ORDER BY first LIMIT {MAX_KEYWORD_TERMS}) AS terms)"
+)
+"""The keyword stream's tsquery: any query term matches (ADR 0047), on
+at most ``MAX_KEYWORD_TERMS`` distinct terms (ADR 0049).
 
 ``plainto_tsquery`` still does all the parsing, so the caller's text is
 never read as tsquery syntax (no operator injection). Its output joins
-quoted lexemes with ``&``. Swapping each ``' & '`` separator for ``' | '``
-turns "every term" into "any term". The swap cannot reach inside a
-lexeme, because the ``english`` parser never produces one containing a
-space. A query of only stop words gives an empty tsquery, which matches
-nothing, as before.
+quoted lexemes with ``' & '``. Splitting on that separator gives one
+quoted lexeme per element, because the ``english`` parser never produces
+a lexeme containing a space. The first ``MAX_KEYWORD_TERMS`` distinct
+lexemes, in query order, are re-joined with ``' | '``, which turns
+"every term" into "any term". A query of only stop words gives an empty
+tsquery, which matches nothing, as before. The scalar subquery runs once
+per statement, not once per row.
 """
 
 # --- Vector-search session settings (ADR 0025) --------------------------------
@@ -625,7 +644,8 @@ class PgStore:
         """Ranked entry IDs by ``ts_rank`` over the maintained tsvector
         (SPEC.md §6.2 keyword stream). An entry matches when it contains
         **any** query term (ADR 0047), the same rule as ``MemoryStore``;
-        ``ts_rank`` puts entries matching more terms first. See
+        ``ts_rank`` puts entries matching more terms first. Only the first
+        ``MAX_KEYWORD_TERMS`` distinct terms count (ADR 0049). See
         ``ANY_TERM_TSQUERY`` for how the query is built without operator
         injection. When ``visibility`` is supplied, only visible entries
         are candidates (ADR 0011)."""
