@@ -541,6 +541,26 @@ def test_launcher_turns_hermes_off_through_its_config_variable(tmp_path: Path) -
     assert "ENABLED=false" in _launch(tmp_path, env, "hermes")
 
 
+def test_launcher_warns_when_the_hermes_env_file_would_override_it(tmp_path: Path) -> None:
+    """Hermes loads ~/.hermes/.env over the environment, so a
+    HIVEMIND_ENABLED there beats the launcher's false; the docs must not
+    tell users to put it there."""
+    env = _fake_harness(tmp_path, "hermes")
+    (tmp_path / ".hermes").mkdir()
+    (tmp_path / ".hermes" / ".env").write_text("HIVEMIND_ENABLED=true\n")
+    out = subprocess.run(
+        ["sh", str(LAUNCHER), "hermes"], env=env, cwd=tmp_path, capture_output=True, text=True
+    )
+    assert "sets HIVEMIND_ENABLED, which overrides this launcher" in out.stderr
+    for text in (
+        (SETUP_REFS / "hermes.md").read_text(),
+        (PLUGIN / "README.md").read_text(),
+    ):
+        flat = " ".join(text.split())
+        assert "HIVEMIND_ENABLED=true` in the Hermes env" not in flat
+        assert "HIVEMIND_ENABLED=true` in `~/.hermes/.env`" not in flat
+
+
 @pytest.mark.skipif(shutil.which("python3") is None, reason="python3 is not installed")
 def test_launcher_gives_pi_an_mcp_config_without_hivemind(tmp_path: Path) -> None:
     env = _fake_harness(tmp_path, "pi")

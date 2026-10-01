@@ -106,6 +106,12 @@ PY
     if ! grep -q 'HIVEMIND_ENABLED' "$config" 2>/dev/null; then
       note "$config does not gate the hivemind server on \${HIVEMIND_ENABLED}; the tools may still load (see the plugin README, Incognito sessions)"
     fi
+    # Hermes loads its .env over the environment, so a HIVEMIND_ENABLED
+    # there would override the `false` above.
+    envfile="${HERMES_HOME:-${home_dir:-.}/.hermes}/.env"
+    if grep -Eq '^[[:space:]]*(export[[:space:]]+)?HIVEMIND_ENABLED[[:space:]]*=' "$envfile" 2>/dev/null; then
+      note "$envfile sets HIVEMIND_ENABLED, which overrides this launcher: remove that line, or the tools will load (see the plugin README, Incognito sessions)"
+    fi
     exec "$harness" "$@"
     ;;
   omp)
