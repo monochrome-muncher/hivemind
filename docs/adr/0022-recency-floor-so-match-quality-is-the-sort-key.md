@@ -1,5 +1,7 @@
 # A floor under the recency factor, so match quality is the sort key
 
+> **Amended by [ADR 0023](0023-recency-floor-gets-a-spelling-for-no-floor.md):** `HIVEMIND_RECENCY_FLOOR` set to an empty value or `none` turns the floor off.
+
 **Amends SPEC §6.4** (the decay-aware rescore). ADR 0006's hybrid shape —
 RRF fusion, then re-score by importance × recency × feedback quality — is
 unchanged; what changes is that the recency factor is now **bounded

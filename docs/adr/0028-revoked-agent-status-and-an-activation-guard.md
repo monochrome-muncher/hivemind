@@ -1,6 +1,6 @@
-> **Note:** the CLI clause (`issue-agent` restoring a revoked agent) is refined by [ADR 0039](0039-key-lifecycle-is-atomic-and-registration-is-owned.md): it now needs an explicit `--trust-level` and `--home-fleet`. Everything else stands.
-
 # A `revoked` agent status, and activation only from `pending` or `revoked`
+
+> **Note:** the CLI clause (`issue-agent` restoring a revoked agent) is refined by [ADR 0039](0039-key-lifecycle-is-atomic-and-registration-is-owned.md): it now needs an explicit `--trust-level` and `--home-fleet`. Everything else stands.
 
 ## Context
 

@@ -1,5 +1,7 @@
 # Hostable, multi-agent streamable-HTTP MCP runner with per-request credentials (ADR 0010)
 
+> **Amended by [ADR 0042](0042-mcp-credential-is-reverified-per-call-and-fails-closed.md):** a dispatch with no credential fails closed, and the per-agent runner now re-verifies its key per call too, so the "verified once at start" cost below no longer applies to `hivemind-mcp-pg`. **And by [ADR 0026](0026-two-app-tier-replicas-for-availability.md):** production runs two replicas of this runner.
+
 ADR 0009 ships a *per-agent* Postgres-backed MCP runner (`hivemind-mcp-pg`):
 one thin process per agent, each bound to a single verified credential, all
 sharing one Postgres pool. That is the right shape for a dev machine, but
