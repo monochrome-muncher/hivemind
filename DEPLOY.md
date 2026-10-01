@@ -116,13 +116,27 @@ The 5-step operator flow:
    ```
 
    (after setting the real hostname + issuer in
-   `deploy/kubernetes/optional/ingress.yaml`).
+   `deploy/kubernetes/optional/ingress.yaml`). The tree has a second
+   Ingress, `hivemind-admin-api`, that keeps the admin REST surface
+   (`/v1/admin/*`) off the internet: it answers 403 to every source outside
+   its `allowlist-source-range` (default `127.0.0.1/32`, nobody). Operators
+   use the admin panel (§8) or `kubectl port-forward`; to admit an operator
+   network, put its CIDRs in both source-range annotations. The main
+   Ingress rate-limits each client IP (20 req/s with a burst of 5x, 100 open
+   connections; nginx answers 503 above that); raise the limits if many
+   agents share one egress IP.
 6. **(Optional)** example NetworkPolicies — a separate tree,
    `deploy/kubernetes/optional/networkpolicy/`. **Edit the namespace
    selector first**: it allows ingress only from the namespace
    `ingress-nginx`; with any other controller namespace the policies cut
    external traffic off. Needs a CNI that enforces NetworkPolicy; apply with
    `kubectl kustomize deploy/kubernetes/optional/networkpolicy | kubectl -n hivemind apply -f -`.
+   The stricter **default-deny egress** policy is its own tree,
+   `deploy/kubernetes/optional/networkpolicy/egress/`: it lets the api, mcp
+   and admin pods reach only DNS, Postgres, the embedding/extractor
+   endpoints and (for the panel) `hivemind-api`. Replace its placeholder
+   `192.0.2.x` addresses with yours first; unedited, it fails closed and the
+   pods cannot reach Postgres.
 
 ---
 

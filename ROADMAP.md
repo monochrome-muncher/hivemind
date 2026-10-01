@@ -473,9 +473,10 @@ or its own trigger):
 - **Degraded search while the embedder is down**: today a typed 502 /
   `embedding_unavailable`; a keyword-only fallback needs an ADR.
 - **Rate limiting** (garbage-key amplification on `/mcp`, the 2 MiB body
-  parse for a present-but-unknown key): belongs at the ingress; the
-  optional Ingress has no `/v1/admin` allowlist and there is no
-  default-deny egress policy.
+  parse for a present-but-unknown key): handled at the ingress since the
+  optional Ingress gained per-IP limits, a `/v1/admin` source allowlist
+  (deny by default) and an opt-in default-deny egress policy
+  (`optional/networkpolicy/egress/`). The app itself still has no limiter.
 - **Registration** is still unaudited and the owner alias unverified:
   the admin confirms the requester out of band.
 - A pool acquire timeout surfaces as 500, not 503.

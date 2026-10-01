@@ -343,6 +343,58 @@ def test_optional_tree_has_network_policies_and_body_limit() -> None:
     assert "nginx.ingress.kubernetes.io/proxy-body-size" in ingress["metadata"]["annotations"]
 
 
+def _optional_ingresses() -> dict[str, dict[str, Any]]:
+    docs = yaml.safe_load_all((K8S / "optional" / "ingress.yaml").read_text())
+    return {d["metadata"]["name"]: d for d in docs if d["kind"] == "Ingress"}
+
+
+def test_public_ingress_is_rate_limited() -> None:
+    notes = _optional_ingresses()["hivemind"]["metadata"]["annotations"]
+    for key in ("limit-rps", "limit-burst-multiplier", "limit-connections"):
+        assert int(notes[f"nginx.ingress.kubernetes.io/{key}"]) > 0
+
+
+def test_admin_api_is_denied_on_the_public_ingress_by_default() -> None:
+    ingresses = _optional_ingresses()
+    admin = ingresses["hivemind-admin-api"]
+    notes = admin["metadata"]["annotations"]
+    # Both spellings, so a controller that knows only one cannot fail open.
+    for spelling in ("allowlist", "whitelist"):
+        assert notes[f"nginx.ingress.kubernetes.io/{spelling}-source-range"] == "127.0.0.1/32"
+    (rule,) = admin["spec"]["rules"]
+    (path,) = rule["http"]["paths"]
+    assert (path["path"], path["pathType"]) == ("/v1/admin", "Prefix")
+    assert path["backend"]["service"]["name"] == "hivemind-api"
+    # Same host, so nginx's longest-prefix match routes /v1/admin here.
+    assert rule["host"] == ingresses["hivemind"]["spec"]["rules"][0]["host"]
+    assert admin["spec"]["tls"] == ingresses["hivemind"]["spec"]["tls"]
+
+
+def test_egress_policy_is_its_own_opt_in_tree_and_fails_closed() -> None:
+    netpol = K8S / "optional" / "networkpolicy"
+    assert _load(netpol / "kustomization.yaml")["resources"] == ["networkpolicy.yaml"]
+    assert _load(netpol / "egress" / "kustomization.yaml")["resources"] == ["egress.yaml"]
+    (policy,) = yaml.safe_load_all((netpol / "egress" / "egress.yaml").read_text())
+    assert policy["spec"]["policyTypes"] == ["Egress"]
+    selected = {
+        tuple(e["values"])
+        for e in policy["spec"]["podSelector"]["matchExpressions"]
+        if e["key"] == "app.kubernetes.io/component"
+    }
+    assert selected == {("api", "mcp", "admin")}
+    ports = {p["port"] for rule in policy["spec"]["egress"] for p in rule["ports"]}
+    assert {53, 5432, 443, 8000} <= ports
+    # Placeholder addresses come from the documentation range: unedited, the
+    # policy reaches nothing outside the cluster (fails closed, not open).
+    cidrs = [
+        peer["ipBlock"]["cidr"]
+        for rule in policy["spec"]["egress"]
+        for peer in rule["to"]
+        if "ipBlock" in peer
+    ]
+    assert cidrs and all(c.startswith("192.0.2.") for c in cidrs)
+
+
 def test_runner_typo_is_gone() -> None:
     assert "HIVMIND" not in (K8S / "hivemind-api-deployment.yaml").read_text()
 

@@ -34,6 +34,14 @@ metadata:
     # few KB, and the app has no body-size limit of its own. nginx's default
     # is 1m; stated explicitly so it is a visible, tunable decision.
     nginx.ingress.kubernetes.io/proxy-body-size: "1m"
+    # Per-client-IP rate limits (ROADMAP 3.13): an unknown key still costs a
+    # credential lookup (and on /mcp a session setup), so a flood of garbage
+    # keys is cut off here, before it reaches the app or Postgres. Requests
+    # over the limit get 503 from nginx. Raise them if many agents share one
+    # egress IP (a NAT): `limit-connections` counts open MCP streams too.
+    nginx.ingress.kubernetes.io/limit-rps: "20"
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: "5"
+    nginx.ingress.kubernetes.io/limit-connections: "100"
 spec:
   ingressClassName: nginx
   tls:
@@ -55,6 +63,46 @@ spec:
           # REST API (SPEC §5.1) — plain request/response; the generous
           # read timeout above is harmless.
           - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: hivemind-api
+                port:
+                  number: 8000
+---
+# The admin REST surface (/v1/admin/*) is for operators, who reach it through
+# the admin panel (ADR 0029: internal ingress or port-forward) or
+# `kubectl port-forward`, never from the internet. This second Ingress for the
+# same host takes the /v1/admin prefix away from the one above (nginx picks
+# the longest matching prefix) and admits only the listed source ranges.
+# The default, 127.0.0.1/32, admits nobody from outside, so every external
+# request answers 403. To allow an operator network, put its CIDRs here
+# (comma-separated). Both annotation spellings are set on purpose: older
+# controllers know only `whitelist-`, newer ones prefer `allowlist-`, and a
+# controller that ignored the one it does not know would fail open.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hivemind-admin-api
+  labels:
+    app.kubernetes.io/name: hivemind
+    app.kubernetes.io/component: ingress
+  annotations:
+    nginx.ingress.kubernetes.io/allowlist-source-range: "127.0.0.1/32"
+    nginx.ingress.kubernetes.io/whitelist-source-range: "127.0.0.1/32"
+    nginx.ingress.kubernetes.io/proxy-body-size: "1m"
+    nginx.ingress.kubernetes.io/limit-rps: "5"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - hivemind.example.org
+      secretName: hivemind-tls
+  rules:
+    - host: hivemind.example.org
+      http:
+        paths:
+          - path: /v1/admin
             pathType: Prefix
             backend:
               service:

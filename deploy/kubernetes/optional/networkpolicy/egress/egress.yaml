@@ -1,0 +1,72 @@
+# OPT-IN default-deny egress for hivemind-api, hivemind-mcp and
+# hivemind-admin (ROADMAP 3.13). Needs a CNI that enforces NetworkPolicy
+# egress (Calico, Cilium, ...). Once applied, these pods can reach ONLY:
+#
+#   * cluster DNS (kube-dns / CoreDNS in kube-system, port 53),
+#   * Postgres                       -> EDIT the ipBlock (and port),
+#   * the embedding endpoint and the optional extractor -> EDIT the ipBlock
+#     (and port); for an in-cluster model server use a namespaceSelector /
+#     podSelector instead,
+#   * hivemind-api, from the admin panel only (its same-origin proxy).
+#
+# Every `192.0.2.x` address is a placeholder from the documentation range
+# (RFC 5737): it matches nothing, so an unedited policy fails CLOSED (the
+# pods cannot reach Postgres and stay unready) rather than open.
+# NetworkPolicy matches IPs, not hostnames: a provider behind changing
+# addresses (a SaaS API) needs its published ranges or an egress proxy.
+# The key-bootstrap Job is deliberately not selected.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: hivemind-default-deny-egress
+  labels:
+    app.kubernetes.io/name: hivemind
+    app.kubernetes.io/component: egress
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: ["hivemind"]
+      - key: app.kubernetes.io/component
+        operator: In
+        values: ["api", "mcp", "admin"]
+  policyTypes: [Egress]
+  egress:
+    # Cluster DNS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Postgres (EDIT: your database address or CIDR, and its port).
+    - to:
+        - ipBlock:
+            cidr: 192.0.2.10/32
+      ports:
+        - port: 5432
+          protocol: TCP
+    # Embedding endpoint + optional extractor (EDIT: their addresses and ports).
+    - to:
+        - ipBlock:
+            cidr: 192.0.2.20/32
+      ports:
+        - port: 443
+          protocol: TCP
+    # The admin panel's proxy -> hivemind-api (harmless for the other pods:
+    # the api and mcp runners never call hivemind-api).
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: hivemind
+              app.kubernetes.io/component: api
+      ports:
+        - port: 8000
+          protocol: TCP
