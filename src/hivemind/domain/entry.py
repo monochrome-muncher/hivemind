@@ -269,6 +269,8 @@ class Entry:
     importance_source: ImportanceSource = ImportanceSource.DEFAULT
     scope: str = "org"
     fleet_id: str | None = None
+    # Set on the entry ``create_entry`` returns; ``PgStore`` reads leave it
+    # ``None`` (nothing reads a stored vector back; search ranks it in SQL).
     embedding: tuple[float, ...] | None = None
     embedding_model: str | None = None
     state: EntryState = EntryState.ACTIVE

@@ -18,6 +18,7 @@ Hermetic-by-construction:
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import asyncpg
@@ -147,6 +148,19 @@ async def test_create_entry_assigns_id_and_created_at(pg) -> None:
     assert reloaded is not None
     assert reloaded.id == entry.id
     assert reloaded.summary == "Auth service uses JWT"
+    assert reloaded == replace(entry, embedding=None)  # RETURNING matches a re-read
+
+
+async def test_reads_do_not_fetch_the_stored_vector(pg) -> None:
+    """No reader uses the stored embedding (search ranks it in SQL), so
+    reads leave it out — and the vector stream still ranks by it."""
+    store, _, dim = pg
+    entry = await store.create_entry(draft("vector stays in Postgres"), make_vec(dim, 3))
+    assert (await store.get_entry(entry.id)).embedding is None
+    assert all(e.embedding is None for e in (await store.get_entries([entry.id])).values())
+    listed = await store.list_entries(EntryFilters())
+    assert listed and all(e.embedding is None for e in listed)
+    assert await store.search_vector(make_vec(dim, 3), EntryFilters(), 5) == [entry.id]
 
 
 async def test_create_entry_with_supersedes_flips_targets(pg) -> None:
