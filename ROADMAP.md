@@ -485,8 +485,9 @@ or its own trigger):
 - Structural untrusted-content markers on returned entries (deferred in
   ADR 0043); non-reserved case-variant names (`Bob` / `bob`) can coexist
   (ADR 0040); zero-norm embeddings are not rejected.
-- Performance: search loads full rows it partly discards (a slim-row port
-  method); a query-embedding cache is unmeasured; very low-selectivity
+- Performance: search loads full rows it partly discards (reads no longer
+  fetch the embedding vector; bodies are still loaded, so a slim-row port
+  method remains open); a query-embedding cache is unmeasured; very low-selectivity
   list filters at ~1M rows can be slower with the global list index; the
   HNSW stream can truncate under a narrow visibility filter (ADR 0025).
 - Contract step for a later release: narrow `credentials_kind_check` to
