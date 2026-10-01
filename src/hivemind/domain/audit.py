@@ -6,11 +6,14 @@ Pure data — no I/O. An ``AuditEvent`` is what a writer hands the
 there is no update or delete, and ``target`` is a bare string (no
 foreign key), so a revoked agent's history outlives its record.
 
-Two actor kinds (ADR 0027):
+Three actor kinds (ADR 0027, ADR 0046):
 
 * ``admin_key`` — the app admin surface (``AccessService`` /
   ``GovernanceService``). The actor is ``admin:<key fingerprint>``, a
   server-verified identity.
+* ``org_key`` — a registration made with the shared org key (ADR 0046).
+  The actor is ``org:<key fingerprint>``: verified as *an* org-key holder,
+  which identifies no person (every agent shares that key).
 * ``cli`` — the ``hivemind-keys`` bootstrap / break-glass CLI. The
   actor is the operator-supplied ``--actor`` (default: the OS user) and
   is **unverified** — anyone with database access can type anything.
@@ -33,13 +36,15 @@ class ActorKind(StrEnum):
     """Who performed an audited action, and how far to trust the name."""
 
     ADMIN_KEY = "admin_key"  # the app admin surface: a verified admin key
+    ORG_KEY = "org_key"  # a registration with the shared org key (ADR 0046)
     CLI = "cli"  # the hivemind-keys CLI: an unverified, operator-typed name
 
 
 class AuditAction(StrEnum):
     """The audited action vocabulary (the ``audit_log_action_check``
-    constraint, migration ``0005``)."""
+    constraint, migrations ``0005`` and ``0009``)."""
 
+    AGENT_REGISTER = "agent.register"  # ADR 0046
     AGENT_ACTIVATE = "agent.activate"
     AGENT_TRUST_LEVEL_SET = "agent.trust_level_set"
     AGENT_HOME_FLEET_SET = "agent.home_fleet_set"

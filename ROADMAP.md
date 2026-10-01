@@ -476,8 +476,9 @@ or its own trigger):
   parse for a present-but-unknown key): belongs at the ingress; the
   optional Ingress has no `/v1/admin` allowlist and there is no
   default-deny egress policy.
-- **Registration** is still unaudited and the owner alias unverified:
-  the admin confirms the requester out of band.
+- **Registration**: audited since ADR 0046 (`agent.register`), but the
+  owner alias is still unverified: the admin confirms the requester out
+  of band.
 - **Migrate through PgBouncer**: session advisory locks need a direct
   (non-pooled) DSN for `hivemind-migrate`; document or add a separate
   setting (ADR 0020 note).

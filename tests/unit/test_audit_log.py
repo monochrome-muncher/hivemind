@@ -152,16 +152,42 @@ async def test_a_failed_mutation_writes_nothing() -> None:
     assert await _rows(store) == []
 
 
-async def test_register_and_reads_are_not_audited() -> None:
-    """Deliberately out of scope (ADR 0027): self-service registration
-    grants no privilege (activation does, and is audited), and the
-    listings are read-only."""
+async def test_a_new_registration_writes_one_row() -> None:
+    """ADR 0046 (amends ADR 0027): a new registration is audited with the
+    org key's fingerprint and the claimed owner alias."""
+    service, store, _, _, _ = await _setup()
+    org = Credential(user_id="org", is_org=True, access_controlled=True, key_id="0rgf1ngerpr1")
+    await service.register("bob", org, owner_alias="bob@example.com")
+    [row] = await _rows(store)
+    assert row.actor_kind is ActorKind.ORG_KEY
+    assert row.actor == "org:0rgf1ngerpr1"
+    assert row.action is AuditAction.AGENT_REGISTER
+    assert row.target == "bob"
+    assert row.detail == {"owner_alias": "bob@example.com"}
+
+
+async def test_an_admin_registration_is_an_admin_key_row() -> None:
+    service, store, _, admin, _ = await _setup()
+    await service.register("bob", admin)
+    [row] = await _rows(store)
+    assert (row.actor_kind, row.actor, row.detail) == (ActorKind.ADMIN_KEY, ADMIN_ACTOR, {})
+
+
+async def test_reregistrations_refusals_and_reads_are_not_audited() -> None:
+    """Re-registering (an idempotent answer), a refused name and the
+    read-only listings change nothing, so they write no row."""
+    from hivemind.services.access import NameTaken
+
     service, store, _, admin, _ = await _setup()
     org = Credential(user_id="org", is_org=True, access_controlled=True)
-    await service.register("bob", org)
+    await service.register("bob", org, owner_alias="bob")
+    before = await _rows(store)
+    await service.register("bob", org, owner_alias="bob")
+    with pytest.raises(NameTaken):
+        await service.register("bob", org, owner_alias="mallory")
     await service.list_agents(admin)
     await service.list_fleets(admin)
-    assert await _rows(store) == []
+    assert await _rows(store) == before
 
 
 async def test_actor_falls_back_to_user_id_without_a_fingerprint() -> None:

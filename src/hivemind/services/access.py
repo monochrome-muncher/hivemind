@@ -163,6 +163,16 @@ class AccessService:
         # insert: the record we got back is then the other registrant's.
         if not _same_owner(agent.owner_alias, owner_alias):
             raise NameTaken(_NAME_TAKEN)
+        # ADR 0046: a new registration is audited (who registered which
+        # name for which owner), so an admin can trace a pending agent
+        # before activating it. The alias is the registrant's claim, not a
+        # verified identity. Re-registrations and refusals are not rows.
+        await self._audit(
+            credential,
+            AuditAction.AGENT_REGISTER,
+            name,
+            {"owner_alias": owner_alias} if owner_alias is not None else None,
+        )
         return Registration(agent, False, _status_message(agent.status, new=True))
 
     # -- admin-gated operations (ADR 0012) ----------------------------------

@@ -372,10 +372,11 @@ class Credential:
         ``admin:<key fingerprint>``, falling back to ``user_id`` when no
         fingerprint is known (dev mode). Every admin key shares
         ``user_id = "admin"``, so the fingerprint is what distinguishes
-        them."""
+        them. An org-key caller (a registration, ADR 0046) is
+        ``org:<key fingerprint>``."""
         if self.key_id is None:
             return self.user_id
-        return f"admin:{self.key_id}"
+        return f"{'org' if self.is_org else 'admin'}:{self.key_id}"
 
     def visibility(self) -> Visibility:
         """The reader's ``Visibility`` derived from this credential (ADR

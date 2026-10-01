@@ -22,14 +22,15 @@ async def record_admin_action(
     target: str | None,
     detail: Mapping[str, Any] | None = None,
 ) -> AuditRecord:
-    """Append an ``admin_key`` audit row for an action ``credential`` has
-    just performed. The actor is the admin key's fingerprint
+    """Append an audit row for an action ``credential`` has just
+    performed: ``org_key`` for the org key (registration, ADR 0046),
+    ``admin_key`` otherwise. The actor is the key's fingerprint
     (``Credential.audit_actor``). Called **after** the action succeeds
     and not atomic with it (two ports, no shared transaction); a failure
     here propagates — it is never swallowed (ADR 0027)."""
     return await store.record_audit(
         AuditEvent(
-            actor_kind=ActorKind.ADMIN_KEY,
+            actor_kind=ActorKind.ORG_KEY if credential.is_org else ActorKind.ADMIN_KEY,
             actor=credential.audit_actor(),
             action=action,
             target=target,
