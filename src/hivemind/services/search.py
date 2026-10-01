@@ -16,6 +16,7 @@ and ``Embedder`` ports.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -30,6 +31,7 @@ from hivemind.domain.entry import (
 )
 from hivemind.domain.feedback import FeedbackCounts
 from hivemind.domain.validation import check_pagination, check_query
+from hivemind.embeddings import EmbeddingError
 from hivemind.ports import Embedder, Store
 from hivemind.retrieval.rrf import rrf_fuse
 from hivemind.retrieval.scoring import entry_score, feedback_quality
@@ -57,7 +59,22 @@ class Hit:
     fleet_id: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class SearchResult:
+    """A page of hits plus how it was produced.
+
+    ``degraded`` is true when the embedding service failed and the page
+    came from the keyword stream alone (ADR 0048): still ranked, but
+    without semantic matches.
+    """
+
+    hits: list[Hit]
+    degraded: bool = False
+
+
 NowFn = Callable[[], datetime]
+
+logger = logging.getLogger(__name__)
 
 
 async def _gather[A, B](first: Awaitable[A], second: Awaitable[B]) -> tuple[A, B]:
@@ -108,6 +125,19 @@ class SearchService:
         *,
         visibility: Visibility | None = None,
     ) -> list[Hit]:
+        """``search_result`` without the degraded flag: the hits only."""
+        result = await self.search_result(query, filters, limit, offset, visibility=visibility)
+        return result.hits
+
+    async def search_result(
+        self,
+        query: str,
+        filters: EntryFilters | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        *,
+        visibility: Visibility | None = None,
+    ) -> SearchResult:
         """Run a hybrid query and return compact hits, best first.
 
         Pipeline: keyword + vector streams (each ``candidate_top_k``)
@@ -115,6 +145,10 @@ class SearchService:
         -> pagination (``offset`` then ``limit``; SPEC.md §5.3).
         Superseded/withdrawn entries are excluded unless
         ``filters.include_inactive`` is set.
+
+        If the embedding service fails, the vector stream is empty and the
+        result is marked ``degraded`` (ADR 0048): the caller still gets
+        the keyword stream's hits rather than an error.
         """
         # ADR 0040: reject NUL / oversize / out-of-range input BEFORE any
         # embedder or store call (one rule set for REST and MCP).
@@ -130,19 +164,21 @@ class SearchService:
         # ADR 0011 when ``visibility`` is supplied).
         # The keyword stream needs no embedding, so it runs concurrently with
         # the embed -> vector chain (PERF-4); the two chains are independent.
+        # ``vector_ids`` is None when the embedder failed (ADR 0048).
         keyword_ids, vector_ids = await _gather(
             self._store.search_keyword(query, filters, top_k, visibility=visibility),
             self._vector_stream(query, filters, top_k, visibility),
         )
 
         # 2. RRF fusion (configurable weights, SPEC.md §6.2).
+        degraded = vector_ids is None
         fused = rrf_fuse(
-            [keyword_ids, vector_ids],
+            [keyword_ids, vector_ids or []],
             k=self._config.rrf_k,
             weights=[self._config.weight_keyword, self._config.weight_vector],
         )
         if not fused:
-            return []
+            return SearchResult([], degraded)
 
         # 3. Fetch candidates + batched feedback counts.
         candidate_ids = list(fused)
@@ -182,10 +218,11 @@ class SearchService:
         ordered = apply_supersession_invariant(scored, entry_scores)
 
         # 6. Pagination (SPEC.md §5.3: limit/offset on search and list).
-        return [
+        hits = [
             self._to_hit(entry, entry_scores[entry.id])
             for entry in ordered[offset : offset + limit]
         ]
+        return SearchResult(hits, degraded)
 
     async def _vector_stream(
         self,
@@ -193,8 +230,17 @@ class SearchService:
         filters: EntryFilters,
         top_k: int,
         visibility: Visibility | None,
-    ) -> list[str]:
-        query_vector = await self._embedder.embed_text(query)
+    ) -> list[str] | None:
+        """The vector stream, or None when the embedding service failed
+        (ADR 0048). Only an ``EmbeddingError`` is absorbed: a store
+        failure still propagates."""
+        try:
+            query_vector = await self._embedder.embed_text(query)
+        except EmbeddingError as exc:
+            # The detail is already sanitized (providers.py). Log it here as
+            # the 502 path did, since the caller no longer sees an error.
+            logger.warning("embedding unavailable, searching by keyword only: %s", exc)
+            return None
         return await self._store.search_vector(query_vector, filters, top_k, visibility=visibility)
 
     def _to_hit(self, entry: Entry, score: float) -> Hit:

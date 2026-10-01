@@ -57,6 +57,12 @@ ERR_AGENT_UNRESOLVED = "agent_unresolved"
 ERR_SUPERSEDE_DENIED = "supersede_denied"
 # The embedding provider is down/misconfigured: retry later (MCP-2, PC-2).
 ERR_EMBEDDING_UNAVAILABLE = "embedding_unavailable"
+# ADR 0048: hive_search falls back to keyword-only hits when the embedder fails.
+DEGRADED_KEYWORD_ONLY = "keyword_only"
+DEGRADED_NOTE = (
+    "the embedding service is unavailable; these hits are keyword matches only, "
+    "so related entries that share no words with the query may be missing"
+)
 ERR_UNAUTHENTICATED = "unauthenticated"  # ADR 0042: the key is gone / not resolvable
 ERR_INVALID_VERDICT = "invalid_verdict"
 ERR_NAME_CONFLICT = "name_conflict"
@@ -370,6 +376,10 @@ async def hive_search(
     (SPEC §6.3). Open an interesting hit with ``hive_get``. ``limit``/
     ``offset`` paginate the result (SPEC §5.3).
 
+    If the embedding service is down the hits come from the keyword
+    stream alone and the result carries ``degraded: "keyword_only"`` and
+    a ``note`` (ADR 0048), instead of an ``embedding_unavailable`` error.
+
     ``entities`` (ADR 0016, SPEC §13) filters by machine-extracted
     entity names: AND-semantics, case-insensitive; kinds are display-only.
 
@@ -396,14 +406,21 @@ async def hive_search(
     except ValueError as exc:
         return _error(ERR_INVALID_INPUT, str(exc))
     try:
-        hits = await app.search_service.search(
+        result = await app.search_service.search_result(
             query, filters, limit, offset=offset, visibility=app.credential.visibility()
         )
     except InvalidInput as exc:
         return _error(ERR_INVALID_INPUT, str(exc))
-    except EmbeddingError as exc:
-        return _embedding_unavailable(exc)
-    return {"count": len(hits), "hits": [_hit_dict(h) for h in hits]}
+    response: dict[str, object] = {
+        "count": len(result.hits),
+        "hits": [_hit_dict(h) for h in result.hits],
+    }
+    if result.degraded:
+        # ADR 0048: the embedding service is down; these hits are keyword
+        # matches only, so a miss here is weaker evidence than usual.
+        response["degraded"] = DEGRADED_KEYWORD_ONLY
+        response["note"] = DEGRADED_NOTE
+    return response
 
 
 async def hive_get(

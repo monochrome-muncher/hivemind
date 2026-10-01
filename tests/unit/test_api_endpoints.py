@@ -689,6 +689,36 @@ class TestEmbeddingFailure:
         assert resp.json()["error"]["code"] == "embedding_unavailable"
 
 
+class TestSearchWhileEmbedderDown:
+    """ADR 0048: search falls back to the keyword stream and flags it in a
+    header; the body keeps its shape."""
+
+    async def test_keyword_hits_with_a_degraded_header(self) -> None:
+        from hivemind.embeddings import EmbeddingError
+
+        app = make_hivemind_app()
+        client = make_client(app)
+        async with client:
+            match = await post_entry(client, "key-alice", "gamma rollout note", agent="a")
+            await post_entry(client, "key-alice", "unrelated churn model", agent="a")
+
+            healthy = await client.post(
+                "/v1/search", json={"query": "gamma rollout"}, headers={"X-API-Key": "key-alice"}
+            )
+            assert "X-Hivemind-Degraded" not in healthy.headers
+
+            async def boom(text):
+                raise EmbeddingError("embedding endpoint is down")
+
+            app.search_service._embedder.embed_text = boom  # type: ignore[attr-defined]
+            resp = await client.post(
+                "/v1/search", json={"query": "gamma rollout"}, headers={"X-API-Key": "key-alice"}
+            )
+        assert resp.status_code == 200, resp.text
+        assert resp.headers["X-Hivemind-Degraded"] == "keyword-only"
+        assert [h["entry_id"] for h in resp.json()] == [match["id"]]
+
+
 class TestStoreTimeout:
     """ROADMAP 3.13: a pool acquire / statement timeout is 503
     ``store_unavailable`` with Retry-After, not a bare 500."""

@@ -106,7 +106,8 @@ _DESC_SEARCH = (
     "with no bodies; open a hit with hive_get. Superseded/withdrawn entries "
     "are hidden unless include_inactive. Optional 'entities' filters by "
     "machine-extracted entity names (AND-semantics, case-insensitive; kinds "
-    "are display-only — ADR 0016)."
+    "are display-only — ADR 0016). If the embedding service is down, the "
+    "hits are keyword matches only and the reply has degraded: keyword_only."
 )
 _DESC_GET = (
     "Fetch a full entry including its body. include_history adds the "

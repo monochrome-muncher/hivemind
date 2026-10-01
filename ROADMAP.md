@@ -466,8 +466,6 @@ bootstrap writes the `hivemind-keys` Secret itself and prints no key
 
 **Open follow-ups** (found, deliberately not done; each needs a decision
 or its own trigger):
-- **Degraded search while the embedder is down**: today a typed 502 /
-  `embedding_unavailable`; a keyword-only fallback needs an ADR.
 - **Rate limiting** (garbage-key amplification on `/mcp`, the 2 MiB body
   parse for a present-but-unknown key): handled at the ingress since the
   optional Ingress gained per-IP limits, a `/v1/admin` source allowlist

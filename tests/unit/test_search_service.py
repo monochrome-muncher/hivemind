@@ -459,18 +459,16 @@ class TestConcurrentIO:
         )
         assert len(hits) == 1
 
-    async def test_an_embedding_failure_propagates_unchanged_and_cancels_the_keyword_stream(
+    async def test_a_store_failure_in_the_vector_stream_propagates_and_cancels_the_keyword_stream(
         self, embedder, search_config
     ) -> None:
-        from hivemind.embeddings.openai_compat import EmbeddingError
-
         store = MemoryStore(make_clock())
         await create(store, "gamma note")
         cancelled = asyncio.Event()
 
-        async def boom(text):
+        async def boom(*args, **kwargs):
             await asyncio.sleep(0)
-            raise EmbeddingError("provider down")
+            raise TimeoutError
 
         async def slow_keyword(*args, **kwargs):
             try:
@@ -480,11 +478,56 @@ class TestConcurrentIO:
                 raise
             return []
 
-        embedder.embed_text = boom  # type: ignore[method-assign]
+        store.search_vector = boom  # type: ignore[method-assign]
         store.search_keyword = slow_keyword  # type: ignore[method-assign]
-        with pytest.raises(EmbeddingError):
+        with pytest.raises(TimeoutError):
             await make_service(store, embedder, search_config).search("gamma note")
         assert cancelled.is_set()
+
+
+class TestEmbedderDown:
+    """ADR 0048: when the embedding service fails, search answers from the
+    keyword stream alone and says so, instead of failing."""
+
+    @staticmethod
+    def _break(embedder) -> None:
+        from hivemind.embeddings.openai_compat import EmbeddingError
+
+        async def boom(text):
+            raise EmbeddingError("provider down")
+
+        embedder.embed_text = boom  # type: ignore[method-assign]
+
+    async def test_keyword_hits_are_returned_and_marked_degraded(
+        self, embedder, search_config, caplog
+    ) -> None:
+        store = MemoryStore(make_clock())
+        match = await create(store, "gamma rollout note")
+        await create(store, "unrelated churn model")
+        self._break(embedder)
+        service = make_service(store, embedder, search_config)
+
+        with caplog.at_level("WARNING"):
+            result = await service.search_result("gamma rollout")
+        assert result.degraded is True
+        assert [h.entry_id for h in result.hits] == [match.id]
+        assert "searching by keyword only" in caplog.text
+        assert [h.entry_id for h in await service.search("gamma rollout")] == [match.id]
+
+    async def test_no_keyword_match_is_an_empty_degraded_page(
+        self, embedder, search_config
+    ) -> None:
+        store = MemoryStore(make_clock())
+        await create(store, "gamma rollout note")
+        self._break(embedder)
+        result = await make_service(store, embedder, search_config).search_result("zebra")
+        assert result.hits == [] and result.degraded is True
+
+    async def test_a_healthy_search_is_not_degraded(self, embedder, search_config) -> None:
+        store = MemoryStore(make_clock())
+        await create(store, "gamma rollout note")
+        result = await make_service(store, embedder, search_config).search_result("gamma")
+        assert result.degraded is False and len(result.hits) == 1
 
 
 class TestPagination:
