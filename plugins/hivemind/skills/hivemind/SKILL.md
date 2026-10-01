@@ -49,6 +49,15 @@ Search Hivemind:
 - when you hit an error, a surprising behaviour or an unfamiliar system;
 - before writing, to find an entry to supersede instead of duplicating it.
 
+**Catch up once per session.** Right after `hive_whoami`, if you can read
+(`can_read` is not empty), skim what was recorded lately:
+`hive_list` with `created_from` set to 7 days ago and `limit: 10`. Read
+only the summaries, and open an entry only if it bears on what you are
+about to do. Do this once per session, not after every compaction, and
+skip it in a session that is a quick question. If the list comes back
+full and you need more, narrow it with `tags` or `kind` rather than
+paging through everything.
+
 How:
 
 1. `hive_search` with a short natural-language query (it is hybrid:
