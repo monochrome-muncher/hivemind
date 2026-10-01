@@ -236,6 +236,7 @@ def _build_filters(
     created_from: str | None,
     created_to: str | None,
     include_inactive: bool,
+    flagged: bool = False,
 ) -> EntryFilters:
     """Parse the shared filter parameters into an ``EntryFilters`` (SPEC §5.3).
 
@@ -255,6 +256,7 @@ def _build_filters(
         created_from=_parse_dt(created_from, "created_from"),
         created_to=_parse_dt(created_to, "created_to"),
         include_inactive=include_inactive,
+        flagged=flagged,
     )
     filters.validate()  # ADR 0040: caller input, unlike service-built filters
     return filters
@@ -391,6 +393,7 @@ async def hive_search(
     created_from: str | None = None,
     created_to: str | None = None,
     include_inactive: bool = False,
+    flagged: bool = False,
 ) -> dict[str, object]:
     """Hybrid search over the pool; returns compact hits (no bodies).
 
@@ -424,6 +427,7 @@ async def hive_search(
             created_from=created_from,
             created_to=created_to,
             include_inactive=include_inactive,
+            flagged=flagged,
         )
     except ValueError as exc:
         return _error(ERR_INVALID_INPUT, str(exc))
@@ -490,6 +494,7 @@ async def hive_list(
     created_from: str | None = None,
     created_to: str | None = None,
     include_inactive: bool = False,
+    flagged: bool = False,
     limit: int | None = None,
     offset: int = 0,
 ) -> dict[str, object]:
@@ -497,6 +502,9 @@ async def hive_list(
 
     ``entities`` (ADR 0016, SPEC §13) filters by machine-extracted entity
     names: AND-semantics, case-insensitive; kinds are display-only.
+
+    ``flagged`` keeps only entries reported stale or wrong at least once
+    (ADR 0054): the queue of entries waiting to be superseded.
 
     ``limit`` must be 1..100 and ``offset`` 0..10000; out-of-range values
     are ``invalid_input`` (matching REST's 422).
@@ -515,6 +523,7 @@ async def hive_list(
             created_from=created_from,
             created_to=created_to,
             include_inactive=include_inactive,
+            flagged=flagged,
         )
     except ValueError as exc:
         return _error(ERR_INVALID_INPUT, str(exc))

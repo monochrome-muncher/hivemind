@@ -216,7 +216,7 @@ class MemoryStore:
             matches = [
                 _copy(entry)
                 for entry in self._entries.values()
-                if filters.matches(_copy(entry)) and self._visible(entry, visibility)
+                if self._matches(entry, filters) and self._visible(entry, visibility)
             ]
             # Most-recent-first (SPEC.md §11.4), tie-broken by id DESC to
             # match PgStore's `ORDER BY created_at DESC, id DESC` exactly.
@@ -232,7 +232,7 @@ class MemoryStore:
             return sum(
                 1
                 for entry in self._entries.values()
-                if filters.matches(_copy(entry)) and self._visible(entry, visibility)
+                if self._matches(entry, filters) and self._visible(entry, visibility)
             )
 
     async def search_keyword(
@@ -244,7 +244,7 @@ class MemoryStore:
         with self._lock:
             rows: list[tuple[float, datetime, str]] = []
             for entry in self._entries.values():
-                if not filters.matches(entry) or not self._visible(entry, visibility):
+                if not self._matches(entry, filters) or not self._visible(entry, visibility):
                     continue
                 # The keyword haystack is the same bounded text the entry
                 # is embedded from (default prefix-token budget, ADR 0021):
@@ -271,7 +271,7 @@ class MemoryStore:
         with self._lock:
             rows: list[tuple[float, datetime, str]] = []
             for entry in self._entries.values():
-                if not filters.matches(entry) or not self._visible(entry, visibility):
+                if not self._matches(entry, filters) or not self._visible(entry, visibility):
                     continue
                 if entry.embedding is None:
                     continue
@@ -281,6 +281,17 @@ class MemoryStore:
                 rows.append((sim, entry.created_at, entry.id))
             rows.sort(key=lambda r: (-r[0], r[1], r[2]))
             return [eid for _, _, eid in rows[:limit]]
+
+    def _matches(self, entry: Entry, filters: EntryFilters) -> bool:
+        """``filters.matches`` plus the one filter it cannot evaluate:
+        ``flagged`` (ADR 0054), which reads this store's feedback rows.
+        Callers hold the lock."""
+        if not filters.matches(_copy(entry)):
+            return False
+        if filters.flagged:
+            _, stale, wrong = _count_for(self._feedback, entry.id)
+            return stale + wrong > 0
+        return True
 
     def _visible(self, entry: Entry, visibility: Visibility | None) -> bool:
         """Whether ``entry`` passes the optional visibility filter.

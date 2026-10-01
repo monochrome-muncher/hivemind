@@ -328,6 +328,10 @@ class EntryFilters:
     created_from: datetime | None = None
     created_to: datetime | None = None
     include_inactive: bool = False
+    # Only entries with at least one ``stale`` or ``wrong`` feedback report
+    # (ADR 0054). Feedback is not part of an ``Entry``, so ``matches`` cannot
+    # evaluate this: each store adapter applies it beside ``matches``.
+    flagged: bool = False
 
     def validate(self) -> None:
         """Bounds for filters built from **caller input** (ADR 0040): every
