@@ -20,8 +20,10 @@ Hivemind repository's Git URL to the `plugin` list in
 Pin a release tag as shown: OpenCode caches a Git plugin on first use and
 never refreshes an unpinned entry, so changing the tag is how it updates.
 
-Or run `opencode plugin <git-url>`, which installs it and updates the
-config. **The plugin is the supported route**: it builds the `Authorization`
+Or run `opencode plugin -g <git-url>`, which installs it and updates the
+global config (without `-g` it writes the current project's
+`.opencode/opencode.json`, so Hivemind would load only in that project).
+**The plugin is the supported route**: it builds the `Authorization`
 header from the environment in its own code. With the key unset it does
 not register the server at all (no empty `Bearer ` header, no 401 loop),
 and the reminder says Hivemind is not connected. Installing a plugin from
@@ -45,14 +47,8 @@ Without the plugin, add the server by hand (the skills are found in
 }
 ```
 
-A `{env:…}` reference in a **remote** server's `headers` is reported not
-to be interpolated in some OpenCode versions (the literal text
-`Bearer {env:HIVEMIND_API_KEY}` is sent and the server answers 401;
-UNCONFIRMED for current releases). If `hive_whoami` fails with 401 after
-the hand-config above, that is the likely cause: use the plugin, or
-write the literal key into the `headers` value of
-`~/.config/opencode/opencode.json` (user-private: `chmod 600` it; never
-in a project `opencode.json`).
+OpenCode expands `{env:…}` in a remote server's `headers` (checked with
+OpenCode 1.18), so the key never needs to be written into the file.
 
 **Where the key goes:** a private key file (hivemind-setup, "Key file",
 `~/.config/hivemind/opencode.env`, mode 600) loaded **only for OpenCode**

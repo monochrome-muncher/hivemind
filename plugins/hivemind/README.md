@@ -122,7 +122,8 @@ separately (below). Oh My Pi mounts MCP tools as routes
 them in its system prompt.
 
 **OpenCode** — add this repository's Git URL to the `plugin` list in
-`~/.config/opencode/opencode.json` (or run `opencode plugin <git-url>`):
+`~/.config/opencode/opencode.json` (or run `opencode plugin -g <git-url>`;
+without `-g` it only installs into the current project):
 
 ```json
 { "plugin": ["git+https://<your-git-server>/<owner>/hivemind.git#v<version>"] }
