@@ -39,6 +39,13 @@ spec:
       labels:
         app.kubernetes.io/name: hivemind
         app.kubernetes.io/component: api
+      # Prometheus scrape target (ADR 0050): GET /metrics on the app port,
+      # for a Prometheus that discovers pods by these annotations. Scrape
+      # each pod directly; the public Ingress never serves /metrics.
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: /metrics
     spec:
       # The image entrypoint runs the idempotent schema migration (ADR 0013)
       # before starting the runner (`hivemind-api`) (ADR 0018 — no init

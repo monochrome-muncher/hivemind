@@ -283,6 +283,10 @@ _Avoid_: DB version, migration cursor, schema fingerprint
 The minimal operational metrics surface (`GET /v1/metrics`, admin-gated): entries / fleets / agents counters (trust-level distribution, writes per fleet, pending-agent count) that make the SPEC §10 usage-based triggers measurable rather than guesswork (ROADMAP §3.3).
 _Avoid_: analytics, telemetry (that is the broader §10 story), dashboards (a UI is a non-goal, SPEC §9)
 
+**Scrape target**:
+The REST runner's unauthenticated `GET /metrics` in the Prometheus text format: the usage counters as gauges plus per-process request metrics (ADR 0050). Kept off the public ingress.
+_Avoid_: metrics endpoint (ambiguous with `GET /v1/metrics`)
+
 **Input bounds**:
 The limits every surface applies to a request before any provider or store call: field sizes, `limit` / `offset`, payload depth, the request-body size, and no NUL or lone-surrogate characters (ADR 0040).
 _Avoid_: rate limits (none exist in the app), quotas

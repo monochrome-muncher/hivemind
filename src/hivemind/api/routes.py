@@ -26,6 +26,7 @@ from hivemind.api.deps import (
     api_error,
     require_credential,
 )
+from hivemind.api.prometheus import PrometheusMetrics
 from hivemind.api.schemas import (
     ActivateAgentRequest,
     AgentOut,
@@ -109,8 +110,9 @@ def _to_utc(value: datetime | None) -> datetime | None:
     return value
 
 
-def build_router(app: HivemindApp) -> APIRouter:
-    """Build the /v1 router (SPEC.md §5.1)."""
+def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) -> APIRouter:
+    """Build the /v1 router (SPEC.md §5.1). ``prometheus`` counts degraded
+    searches for ``GET /metrics`` (ADR 0050)."""
     router = APIRouter(prefix="/v1")
 
     @router.get("/health", response_model=HealthOut)
@@ -311,6 +313,8 @@ def build_router(app: HivemindApp) -> APIRouter:
         )
         if result.degraded:
             response.headers[DEGRADED_HEADER] = DEGRADED_KEYWORD_ONLY
+            if prometheus is not None:
+                prometheus.degraded_searches.inc()
         return [HitOut.from_hit(h) for h in result.hits]
 
     @router.post("/entries/{entry_id}/withdraw", response_model=EntryOut)

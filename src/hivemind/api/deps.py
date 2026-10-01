@@ -148,15 +148,22 @@ def _handle_store_timeout(_request: Request, _exc: Exception) -> JSONResponse:
 
 def create_app(app: HivemindApp) -> FastAPI:
     """Build the FastAPI app over a HivemindApp (SPEC.md §5)."""
+    from hivemind.api.prometheus import PrometheusMetrics, RequestMetrics
     from hivemind.api.routes import build_router
 
+    # ADR 0050: the Prometheus scrape target and per-process request metrics.
+    prometheus = PrometheusMetrics(app.metrics_service.usage_report)
     fastapi_app = FastAPI(title="Hivemind")
     fastapi_app.state.hivemind = app
+    fastapi_app.state.prometheus = prometheus
     fastapi_app.add_exception_handler(ApiError, _handle_api_error)
     fastapi_app.add_exception_handler(InvalidInput, _handle_invalid_input)
     fastapi_app.add_exception_handler(BodyTooLarge, _handle_body_too_large)
     fastapi_app.add_exception_handler(RequestValidationError, _handle_request_validation)
     fastapi_app.add_exception_handler(TimeoutError, _handle_store_timeout)
     fastapi_app.add_middleware(PreAuthGuard, max_body_bytes=MAX_REQUEST_BODY_BYTES)
-    fastapi_app.include_router(build_router(app))
+    # Added last, so outermost: the guards' 401 / 413 answers are counted too.
+    fastapi_app.add_middleware(RequestMetrics, metrics=prometheus)
+    fastapi_app.include_router(build_router(app, prometheus))
+    fastapi_app.include_router(prometheus.router())
     return fastapi_app
