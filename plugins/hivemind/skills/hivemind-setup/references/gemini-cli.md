@@ -32,19 +32,19 @@ existing file:
 }
 ```
 
-**The key in `headers` (UNCONFIRMED).** Google documents `$VAR` /
-`${VAR}` expansion for the server's `env` block; it does **not** say it
-applies to `headers`. Try the `${HIVEMIND_API_KEY}` form first and check
-`/mcp` (after restarting): if Hivemind shows as disconnected or
-unauthorized (a literal `${HIVEMIND_API_KEY}` would be sent and answered
-with 401), the reference is not expanded, and the fallback is a literal
-`"Authorization": "Bearer hm_…"` value typed **by the user** into
-`~/.gemini/settings.json`, which must then be `chmod 600` (and never a
-project settings file, and not in a dotfiles repository). `gemini mcp add
---transport http --header "Authorization: Bearer …" hivemind <url>` does
-the same and also stores the literal key.
+`${HIVEMIND_API_KEY}` in `headers` is expanded from the environment
+(checked with Gemini CLI 0.62), so the key never lands in the file. Do not
+use `gemini mcp add --header "Authorization: Bearer …"`: it stores the
+literal key.
 
-**Where the key goes (for the `${…}` form):** a private key file
+**Trusted folders only.** Gemini CLI turns off **every** MCP server,
+including the user-level ones in `~/.gemini/settings.json`, in a folder
+the user has not trusted (`gemini mcp list` then shows `hivemind` as
+Disabled, with a warning that the folder is untrusted). If the tools are
+missing, check that first; the user trusts a folder when Gemini CLI asks,
+or with `/permissions trust`.
+
+**Where the key goes:** a private key file
 (hivemind-setup, "Key file", `~/.config/hivemind/gemini.env`, mode 600)
 loaded **only for Gemini CLI** with a function in the shell profile:
 `gemini() { ( . ~/.config/hivemind/gemini.env; command gemini "$@" ); }`.
@@ -54,7 +54,7 @@ servers; your own shell tool may still see `HIVEMIND_API_KEY`, so never
 print it.
 
 **Skills:** copy both skill folders into `~/.gemini/skills/` (or
-`~/.agents/skills/`, which Gemini CLI also scans; reported, UNCONFIRMED).
+`~/.agents/skills/`, which Gemini CLI also scans).
 
 Verify with `/mcp` (shows each server's status) or `gemini mcp list`,
 then call `hive_whoami`.

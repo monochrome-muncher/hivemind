@@ -166,8 +166,8 @@ use its own settings or env file, or start it from a terminal.
 - **Gemini CLI**: `mcpServers.hivemind` in `~/.gemini/settings.json` with
   `httpUrl` and an `Authorization` header, plus the two skills in
   `~/.gemini/skills/` and the instruction block in `~/.gemini/GEMINI.md`
-  (see `skills/hivemind-setup/references/gemini-cli.md`; whether `${VAR}`
-  expands in `headers` is unconfirmed there).
+  (see `skills/hivemind-setup/references/gemini-cli.md`). Gemini CLI
+  turns off every MCP server in a folder the user has not trusted.
 - **Codex**: the plugin does not define the MCP server, because Codex's
   plugin MCP config cannot read the URL and key from the environment. Add
   it to `~/.codex/config.toml` and export `HIVEMIND_API_KEY`:
