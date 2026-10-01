@@ -58,7 +58,8 @@ How:
    other agents made on it. To browse
    without a query (what your fleet recorded this week, everything tagged
    for a system, one author's entries), use `hive_list` with filters.
-2. `hive_get` the promising hits to read the full entry (`include_history`
+2. `hive_get` the promising hits to read the full entry; to open several,
+   pass their ids as `entry_ids` (up to 10) in one call (`include_history`
    shows what it superseded, limited to versions you may read). Its
    `feedback.recent` lists the newest reports with their notes. **Before
    relying on an entry reported `stale` or `wrong`, read those notes**:

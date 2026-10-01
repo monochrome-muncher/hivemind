@@ -12,6 +12,7 @@ Error codes: ``missing_api_key``/``unknown_api_key`` (401),
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 from typing import Annotated
@@ -35,12 +36,14 @@ from hivemind.api.schemas import (
     CreateEntryRequest,
     CreateFleetRequest,
     EntriesMetrics,
+    EntriesOut,
     EntryOut,
     FeedbackOut,
     FeedbackRequest,
     FeedbackSummaryOut,
     FleetOut,
     FleetsMetrics,
+    GetEntriesRequest,
     HealthOut,
     HitOut,
     KeyIssuedOut,
@@ -65,7 +68,7 @@ from hivemind.domain.validation import (
 from hivemind.embeddings import EmbeddingError
 from hivemind.ports import Credential
 from hivemind.services.access import resolve_write_scope
-from hivemind.services.chain import get_visible_entry, supersession_chain
+from hivemind.services.chain import get_visible_entries, get_visible_entry, supersession_chain
 from hivemind.services.governance import PermissionDenied, SupersedeDenied
 
 require = Annotated[Credential, Depends(require_credential)]
@@ -239,6 +242,25 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
                 "superseded": [EntryOut.from_entry(e) for e in superseded],
             }
         return out
+
+    @router.post("/entries/get", response_model=EntriesOut)
+    async def get_entries(request: GetEntriesRequest, credential: require) -> EntriesOut:
+        """Read up to 10 entries by id in one call (ADR 0055), each with
+        its feedback like ``GET /v1/entries/{id}``. Ids that name nothing
+        the caller may read are listed in ``not_found`` (ADR 0033: the same
+        answer for "invisible" and "does not exist")."""
+        ids = list(dict.fromkeys(request.entry_ids))
+        found = await get_visible_entries(app.store, ids, credential.visibility())
+        entries = [found[eid] for eid in ids if eid in found]
+        summaries = await asyncio.gather(
+            *(app.governance_service.feedback_summary(e.id) for e in entries)
+        )
+        outs = []
+        for entry, summary in zip(entries, summaries, strict=True):
+            out = EntryOut.from_entry(entry)
+            out.feedback = FeedbackSummaryOut.from_summary(summary)
+            outs.append(out)
+        return EntriesOut(entries=outs, not_found=[eid for eid in ids if eid not in found])
 
     @router.get("/entries", response_model=list[EntryOut])
     async def list_entries(

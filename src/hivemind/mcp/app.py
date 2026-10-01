@@ -17,6 +17,7 @@ tests can call them directly with fakes.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -33,11 +34,11 @@ from hivemind.domain.entry import (
     SourceType,
 )
 from hivemind.domain.feedback import Feedback, FeedbackCounts, FeedbackSummary, Verdict
-from hivemind.domain.validation import InvalidInput, check_pagination
+from hivemind.domain.validation import MAX_GET_IDS, InvalidInput, check_pagination
 from hivemind.embeddings import EmbeddingError
 from hivemind.ports import Credential, Store
 from hivemind.services.access import AccessService, resolve_write_scope
-from hivemind.services.chain import get_visible_entry, supersession_chain
+from hivemind.services.chain import get_visible_entries, get_visible_entry, supersession_chain
 from hivemind.services.governance import (
     GovernanceService,
     PermissionDenied,
@@ -447,8 +448,9 @@ async def hive_search(
 
 async def hive_get(
     app: McpHivemind,
-    entry_id: str,
+    entry_id: str = "",
     include_history: bool = False,
+    entry_ids: list[str] | None = None,
 ) -> dict[str, object]:
     """Fetch a full entry (body included).
 
@@ -462,7 +464,17 @@ async def hive_get(
     Follows readability (ADR 0033): an entry the caller may not see is
     ``not_found`` — the same answer as an unknown id — and the chain
     leaves out versions the caller may not see.
+
+    ``entry_ids`` instead of ``entry_id`` reads up to 10 entries in one
+    call (ADR 0055): ``entries`` in the order asked (repeats once), and
+    ``not_found`` for ids that name nothing the caller may read.
     """
+    if entry_ids is not None:
+        if entry_id or include_history:
+            return _error(
+                ERR_INVALID_INPUT, "entry_ids cannot be combined with entry_id or include_history"
+            )
+        return await _hive_get_many(app, entry_ids)
     if not entry_id or not entry_id.strip():
         return _error(ERR_INVALID_INPUT, "entry_id is required (pass a hit's id)")
     entry = await get_visible_entry(app.store, entry_id, app.credential.visibility())
@@ -475,6 +487,26 @@ async def hive_get(
         result["successors"] = [_entry_dict(s) for s in successors]
         result["superseded"] = [_entry_dict(s) for s in superseded]
     return result
+
+
+async def _hive_get_many(app: McpHivemind, entry_ids: list[str]) -> dict[str, object]:
+    ids = list(dict.fromkeys(entry_ids))
+    if not ids:
+        return _error(ERR_INVALID_INPUT, "entry_ids must name at least one entry")
+    if len(ids) > MAX_GET_IDS:
+        return _error(ERR_INVALID_INPUT, f"entry_ids may name at most {MAX_GET_IDS} entries")
+    found = await get_visible_entries(app.store, ids, app.credential.visibility())
+    entries = [found[eid] for eid in ids if eid in found]
+    summaries = await asyncio.gather(
+        *(app.governance_service.feedback_summary(e.id) for e in entries)
+    )
+    return {
+        "entries": [
+            {**_entry_dict(e), "feedback": _feedback_dict(s)}
+            for e, s in zip(entries, summaries, strict=True)
+        ],
+        "not_found": [eid for eid in ids if eid not in found],
+    }
 
 
 async def hive_list(
