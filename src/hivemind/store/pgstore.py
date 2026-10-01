@@ -123,6 +123,12 @@ GET_FLEET = "SELECT id, name, created_at FROM fleets WHERE id = $1"
 LIST_FLEETS = "SELECT id, name, created_at FROM fleets ORDER BY created_at"
 
 GET_AGENT = "SELECT * FROM agents WHERE name = $1"
+# Agent names are ASCII (ADR 0040), so lower() is their case fold. The oldest
+# holder wins when legacy case variants already coexist (ADR 0045).
+GET_AGENT_FOLDED = "SELECT * FROM agents WHERE lower(name) = lower($1) ORDER BY created_at LIMIT 1"
+# Serialises registrations of one case-folded name, so two concurrent
+# registrations of `Bob` and `bob` cannot both pass the folded check.
+AGENT_NAME_LOCK = "SELECT pg_advisory_xact_lock(hashtext('hivemind:agent-name:' || lower($1)))"
 INSERT_AGENT = (
     "INSERT INTO agents (name, owner_alias, status, trust_level) "
     "VALUES ($1, $2, 'pending', 0) ON CONFLICT (name) DO NOTHING RETURNING *"
@@ -741,20 +747,23 @@ class PgStore:
         overwritten, ADR 0039); a new record is ``pending`` (level 0, no fleet). A
         racing concurrent registration of the same name returns the same
         pending record (the insert is conflict-guarded — no raw
-        ``UniqueViolation``, SPEC §12.3 idempotent no-op).
+        ``UniqueViolation``, SPEC §12.3 idempotent no-op). A name that only
+        differs in case from an existing agent's is not inserted: that
+        agent comes back instead (ADR 0045), under a per-folded-name lock.
         """
         pool = await self._ensure_pool()
         async with pool.acquire(timeout=self._acquire_timeout) as conn:
-            existing = await conn.fetchrow(GET_AGENT, name)
-            if existing is None:
-                row = await conn.fetchrow(INSERT_AGENT, name, owner_alias)
-                if row is None:
-                    # A concurrent registration won the race between the
-                    # check and the conflict-guarded insert: return the
-                    # record it created.
-                    row = await conn.fetchrow(GET_AGENT, name)
-            else:
-                row = existing
+            row = await conn.fetchrow(GET_AGENT, name)
+            if row is None:
+                async with conn.transaction():
+                    await conn.execute(AGENT_NAME_LOCK, name)
+                    row = await conn.fetchrow(GET_AGENT_FOLDED, name)
+                    if row is None:
+                        row = await conn.fetchrow(INSERT_AGENT, name, owner_alias)
+                    if row is None:
+                        # A concurrent registration of this exact name won
+                        # the conflict-guarded insert: return its record.
+                        row = await conn.fetchrow(GET_AGENT, name)
         if row is None:
             raise RuntimeError(f"agent {name!r} vanished between insert and read")
         return _row_to_agent(row)

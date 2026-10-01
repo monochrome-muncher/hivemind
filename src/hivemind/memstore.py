@@ -326,12 +326,18 @@ class MemoryStore:
     async def register_agent(self, name: str, owner_alias: str | None = None) -> Agent:
         """Register (or re-register) an agent (ADR 0012). Idempotent: an
         existing record is returned unchanged (its ``owner_alias`` is never
-        overwritten, ADR 0039); a new record is ``pending``.
+        overwritten, ADR 0039); a new record is ``pending``. A name that
+        only differs in case from an existing agent's returns that agent
+        (ADR 0045).
         """
         with self._lock:
             existing = self._agents.get(name)
             if existing is not None:
                 return existing
+            # Insertion order is registration order: the oldest holder wins.
+            for agent in self._agents.values():
+                if agent.name.lower() == name.lower():
+                    return agent
             agent = Agent(
                 name=name,
                 status=AgentStatus.PENDING,

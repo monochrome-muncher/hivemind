@@ -483,8 +483,8 @@ or its own trigger):
   setting (ADR 0020 note).
 - A pool acquire timeout surfaces as 500, not 503.
 - Structural untrusted-content markers on returned entries (deferred in
-  ADR 0043); non-reserved case-variant names (`Bob` / `bob`) can coexist
-  (ADR 0040); zero-norm embeddings are not rejected.
+  ADR 0043); zero-norm embeddings are not rejected. (Case-variant agent
+  names are refused since ADR 0045; collisions registered before it stay.)
 - Performance: search loads full rows it partly discards (reads no longer
   fetch the embedding vector; bodies are still loaded, so a slim-row port
   method remains open); a query-embedding cache is unmeasured; very low-selectivity
