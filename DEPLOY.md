@@ -49,6 +49,7 @@ What the **org provides** (the app itself needs nothing else):
 | `K8S_SECRET_DATABASE_URL` | **yes / yes** | The Postgres DSN, e.g. `postgresql://hivemind:hivemind@pg.hivemind.svc:5432/hivemind`. |
 | `K8S_SECRET_EMBEDDING_API_KEY` | **yes / yes** | The embedding credential. **May be empty** (self-hosted vLLM without auth). |
 | `K8S_SECRET_EXTRACTOR_API_KEY` | **yes / yes** | The extractor credential. **May be empty** (extraction off, ADR 0016 — safe). |
+| `K8S_SECRET_MIGRATE_DATABASE_URL` | **yes / yes** (optional) | A direct Postgres DSN for `hivemind-migrate` only, needed when `K8S_SECRET_DATABASE_URL` points at a transaction-mode PgBouncer (the migration's session advisory lock cannot live there; `docs/ops-runbook.md`). Unset = migrate through `K8S_SECRET_DATABASE_URL`. |
 
 **Mark all three `K8S_SECRET_*` variables _Protected_ as well as Masked,
 and protect the default branch and the `production` environment.** An
