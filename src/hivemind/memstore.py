@@ -282,6 +282,27 @@ class MemoryStore:
             rows.sort(key=lambda r: (-r[0], r[1], r[2]))
             return [eid for _, _, eid in rows[:limit]]
 
+    async def similar_entries(
+        self,
+        embedding: list[float],
+        limit: int,
+        *,
+        exclude_id: str,
+        visibility: Visibility | None = None,
+    ) -> list[tuple[str, float]]:
+        active = EntryFilters()
+        with self._lock:
+            rows: list[tuple[float, datetime, str]] = []
+            for entry in self._entries.values():
+                if entry.id == exclude_id or entry.embedding is None:
+                    continue
+                if not active.matches(entry) or not self._visible(entry, visibility):
+                    continue
+                sim = cosine_similarity(embedding, list(entry.embedding))
+                rows.append((sim, entry.created_at, entry.id))
+            rows.sort(key=lambda r: (-r[0], r[1], r[2]))
+            return [(eid, sim) for sim, _, eid in rows[:limit]]
+
     def _visible(self, entry: Entry, visibility: Visibility | None) -> bool:
         """Whether ``entry`` passes the optional visibility filter.
 

@@ -100,7 +100,11 @@ _DESC_WRITE = (
     "fleet. Any other target rejects the whole write (supersede_denied); to "
     "flag an entry you cannot replace, use hive_feedback instead. Optional "
     "'importance' (1-5, default 3) feeds retrieval ranking — set it when this "
-    "entry matters more or less than the default."
+    "entry matters more or less than the default. The reply's 'related' lists "
+    "up to 3 existing entries you can read that are nearest to the new one, "
+    "with their similarity (ADR 0052): if one already says the same thing, "
+    "withdraw your new entry; if yours corrects or extends one, withdraw yours "
+    "and write it again with 'supersedes' naming it."
 )
 _DESC_SEARCH = (
     "Hybrid (keyword + vector) search over the pool. Returns compact hits "
