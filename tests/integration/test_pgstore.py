@@ -88,7 +88,9 @@ def draft(
 async def _truncate(dsn: str) -> None:
     conn = await asyncpg.connect(dsn)
     try:
-        await conn.execute("TRUNCATE credentials, feedbacks, entries, search_counts, entry_links")
+        await conn.execute(
+            "TRUNCATE credentials, feedbacks, entries, search_counts, entry_links, pins"
+        )
     finally:
         await conn.close()
 
@@ -729,3 +731,22 @@ async def test_entry_links_both_ways_and_unknown_targets_dropped(pg) -> None:
     assert await store.entry_links(target.id, 10) == ([], [second.id, first.id])
     assert await store.entry_links(target.id, 1) == ([], [second.id])
     assert await store.entry_links("not-a-uuid", 10) == ([], [])
+
+
+async def test_pins_are_capped_idempotent_and_newest_first(pg) -> None:
+    """ADR 0058: the per-fleet cap holds under concurrent pinners, a repeat
+    pin returns the existing row, and unpin says whether it removed one."""
+    store, _, _ = pg
+    entries = [await store.create_entry(draft(f"Pin {i}")) for i in range(4)]
+    pins = await asyncio.gather(*(store.pin_entry("fleet-x", e.id, "lead", 3) for e in entries))
+    assert sum(p is not None for p in pins) == 3
+    kept = [p for p in pins if p is not None]
+    again = await store.pin_entry("fleet-x", kept[0].entry_id, "someone-else", 3)
+    assert again == kept[0]
+    listed = await store.list_pins("fleet-x")
+    assert len(listed) == 3
+    assert [p.pinned_at for p in listed] == sorted((p.pinned_at for p in listed), reverse=True)
+    assert await store.unpin_entry("fleet-x", kept[0].entry_id) is True
+    assert await store.unpin_entry("fleet-x", kept[0].entry_id) is False
+    assert await store.list_pins("fleet-y") == []
+    assert await store.pin_entry("fleet-x", "not-a-uuid", "lead", 3) is None

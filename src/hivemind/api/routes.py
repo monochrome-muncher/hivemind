@@ -49,10 +49,14 @@ from hivemind.api.schemas import (
     HitOut,
     KeyIssuedOut,
     MetricsOut,
+    PinnedOut,
+    PinOut,
+    PinsOut,
     RegisterAgentRequest,
     RegisteredAgentOut,
     RelatedOut,
     SearchRequest,
+    UnpinOut,
     UpdateAgentRequest,
     WhoamiOut,
     WithdrawRequest,
@@ -383,6 +387,53 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         except ValueError as exc:
             raise api_error(409, "conflict", str(exc)) from exc
         return EntryOut.from_entry(entry)
+
+    @router.put("/entries/{entry_id}/pin", response_model=PinOut)
+    async def pin(entry_id: str, credential: require) -> PinOut:
+        """Pin an active fleet entry to its fleet's briefing (ADR 0058): a
+        privileged agent of that fleet or an admin. Idempotent.
+
+        404 unknown entry, 403 not allowed, 409 inactive, 422 not a fleet
+        entry or the fleet already has 10 pins.
+        """
+        try:
+            pin = await app.governance_service.pin(credential, entry_id)
+        except LookupError:
+            raise api_error(404, "not_found", f"unknown entry: {entry_id}") from None
+        except PermissionDenied as exc:
+            raise api_error(403, "forbidden", str(exc)) from exc
+        except InvalidInput as exc:
+            raise api_error(422, "invalid_input", str(exc)) from exc
+        except ValueError as exc:
+            raise api_error(409, "conflict", str(exc)) from exc
+        return PinOut.from_pin(pin)
+
+    @router.delete("/entries/{entry_id}/pin", response_model=UnpinOut)
+    async def unpin(entry_id: str, credential: require) -> UnpinOut:
+        """Unpin an entry (ADR 0058); ``removed`` says whether it was pinned."""
+        try:
+            removed = await app.governance_service.unpin(credential, entry_id)
+        except LookupError:
+            raise api_error(404, "not_found", f"unknown entry: {entry_id}") from None
+        except PermissionDenied as exc:
+            raise api_error(403, "forbidden", str(exc)) from exc
+        except InvalidInput as exc:
+            raise api_error(422, "invalid_input", str(exc)) from exc
+        return UnpinOut(entry_id=entry_id, removed=removed)
+
+    @router.get("/pins", response_model=PinsOut)
+    async def pins(credential: require, fleet_id: Annotated[str | None, Query()] = None) -> PinsOut:
+        """A fleet's pinned entries, newest pin first (ADR 0058): the
+        caller's home fleet unless ``fleet_id`` names another. Entries the
+        caller may not read are left out."""
+        try:
+            pinned = await app.governance_service.pinned(credential, fleet_id)
+        except InvalidInput as exc:
+            raise api_error(422, "invalid_input", str(exc)) from exc
+        return PinsOut(
+            fleet_id=fleet_id or credential.home_fleet_id,
+            pins=[PinnedOut.from_pinned(p) for p in pinned],
+        )
 
     @router.post("/feedback", response_model=list[FeedbackOut])
     async def batch_feedback(

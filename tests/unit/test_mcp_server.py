@@ -31,6 +31,8 @@ EXPECTED_TOOLS = [
     "hive_list",
     "hive_withdraw",
     "hive_feedback",
+    "hive_pin",
+    "hive_pinned",
     "hive_register",
     "hive_whoami",
 ]

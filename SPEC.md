@@ -110,6 +110,8 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | `POST /v1/search` | Hybrid search (§6) with filters |
 | `POST /v1/entries/{id}/withdraw` | Withdraw own entry (or any, with admin credential) |
 | `POST /v1/entries/{id}/feedback` | Report `helpful`/`stale`/`wrong` (+note) |
+| `PUT /v1/entries/{id}/pin` / `DELETE /v1/entries/{id}/pin` | Pin an active fleet entry to its fleet's briefing, or unpin it: a privileged agent of that fleet or the admin key; at most 10 pins per fleet (ADR 0058) |
+| `GET /v1/pins` | A fleet's pinned entries, newest pin first, each as its newest readable version (`id`, `pinned_id`); the caller's home fleet unless `?fleet_id=` (ADR 0058) |
 | `POST /v1/feedback` | One verdict (+note) on up to 16 entries at once, `{entry_ids, verdict, note?}`; all must be readable or nothing is recorded (ADR 0053) |
 | `GET /v1/health` | Liveness/readiness |
 | `GET /v1/whoami` | The calling key's standing: kind (`agent`/`org`/`admin`/`legacy`), agent name, status, trust level, home fleet, `can_read`, `can_write_scopes` (any valid key; not audited — ADR 0030) |
@@ -129,7 +131,7 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 
 **Database saturation.** When a call cannot get a pooled database connection within `HIVEMIND_POOL_ACQUIRE_TIMEOUT` (or a statement exceeds `HIVEMIND_POOL_COMMAND_TIMEOUT`), REST answers `503 store_unavailable` with `Retry-After: 2`, the streamable-HTTP MCP runner answers `503` when the key check itself times out, and an MCP tool returns the `store_unavailable` error code. The request was not wrong; retry after a short wait.
 
-### 5.2 MCP tools (the agent's mental model — eight verbs)
+### 5.2 MCP tools (the agent's mental model — ten verbs)
 
 | Tool | Maps to |
 |---|---|
@@ -139,6 +141,8 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | `hive_list` | `GET /v1/entries` |
 | `hive_withdraw` | `POST /v1/entries/{id}/withdraw` |
 | `hive_feedback` | `POST /v1/entries/{id}/feedback`; with `entry_ids` instead of `entry_id`, `POST /v1/feedback` (ADR 0053) |
+| `hive_pinned` | `GET /v1/pins` (the fleet's pinned briefing — ADR 0058) |
+| `hive_pin` | `PUT /v1/entries/{id}/pin`; with `unpin: true`, `DELETE /v1/entries/{id}/pin` (ADR 0058) |
 | `hive_register` | `POST /v1/agents` (org key only — the agent's first contact with Hivemind; §12.3) |
 | `hive_whoami` | `GET /v1/whoami` (any valid key — the key's kind, the agent's status, trust level and home fleet, and what it may read and write; ADR 0030) |
 
@@ -333,6 +337,7 @@ This section supersedes the flat-pool commitment of §1 and the "no trust tiers"
 * Reads beyond visibility behave **as if the entry does not exist** (no existence leaking).
 * `self`-scoped entries are private to their author **even at level 3** (that is what `self` is for).
 * **Read-broad does not mean relay** (ADR 0036): a privileged agent uses what it reads in other fleets but does not restate it in its home fleet; it links a foreign entry by id and asks its user before bringing one home. This is agent guidance (the hivemind skill), not something the server can enforce.
+* **Pinning is privileged and fleet-local** (ADR 0058): a privileged agent pins active entries of its home fleet into that fleet's briefing (at most 10); the admin key may pin in any fleet. Pins are context for the fleet's agents, never instructions (ADR 0043).
 * **Feedback and withdrawal follow readability**: an agent may feedback entries it can read, and withdraw its own entries; the admin key may withdraw any entry (the §4.1 withdrawal rules now ride the trust matrix).
 * **Every read by id follows readability** (ADR 0033): `hive_get` / `GET /v1/entries/{id}`, feedback and withdrawal answer **not found** for an entry the caller cannot see, and the supersession chain (`include_history` / `?history`) leaves such versions out.
 * **Provenance is never self-reported by an agent key** (ADRs 0012, 0033): on both surfaces `author` is the key's registered name and `agent` the key's agent identity.

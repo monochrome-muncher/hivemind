@@ -41,6 +41,7 @@ from hivemind.domain.entry import (
     embeddable_text,
 )
 from hivemind.domain.feedback import Feedback, FeedbackCounts
+from hivemind.domain.pin import Pin
 
 
 class SupersedeConflict(Exception):
@@ -111,6 +112,23 @@ class Store(Protocol):
         to (oldest link first), and the ids of at most ``limit`` entries
         that link to it (newest link first). Unfiltered by state or
         visibility (the caller filters)."""
+        ...
+
+    async def pin_entry(
+        self, fleet_id: str, entry_id: str, pinned_by: str, limit: int
+    ) -> Pin | None:
+        """Pin ``entry_id`` to ``fleet_id`` (ADR 0058) and return the pin;
+        pinning it again returns the existing pin unchanged. ``None`` when
+        the fleet already holds ``limit`` pins (checked atomically with the
+        insert). The caller has checked the entry and the permission."""
+        ...
+
+    async def unpin_entry(self, fleet_id: str, entry_id: str) -> bool:
+        """Remove a pin; whether there was one."""
+        ...
+
+    async def list_pins(self, fleet_id: str) -> list[Pin]:
+        """A fleet's pins, newest first (ADR 0058)."""
         ...
 
     async def usage_counts(self) -> list[UsageCount]:

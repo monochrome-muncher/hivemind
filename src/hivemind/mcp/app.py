@@ -650,6 +650,60 @@ async def hive_withdraw(
     return _entry_dict(entry)
 
 
+async def hive_pin(app: McpHivemind, entry_id: str, unpin: bool = False) -> dict[str, object]:
+    """Pin an active fleet entry to its fleet's briefing, or ``unpin`` it
+    (ADR 0058). A privileged agent of the entry's fleet or an admin may; a
+    fleet holds at most 10 pins. An entry the caller may not read is
+    ``not_found``."""
+    try:
+        if unpin:
+            removed = await app.governance_service.unpin(app.credential, entry_id)
+            return {"entry_id": entry_id, "pinned": False, "removed": removed}
+        pin = await app.governance_service.pin(app.credential, entry_id)
+    except PermissionDenied as exc:
+        return _error(ERR_PERMISSION_DENIED, str(exc))
+    except LookupError as exc:
+        return _error(ERR_NOT_FOUND, str(exc))
+    except InvalidInput as exc:
+        return _error(ERR_INVALID_INPUT, str(exc))
+    except ValueError as exc:
+        return _error(ERR_NOT_ACTIVE, str(exc))
+    return {
+        "entry_id": pin.entry_id,
+        "pinned": True,
+        "fleet_id": pin.fleet_id,
+        "pinned_by": pin.pinned_by,
+        "pinned_at": pin.pinned_at.isoformat(),
+    }
+
+
+async def hive_pinned(app: McpHivemind, fleet_id: str | None = None) -> dict[str, object]:
+    """A fleet's pinned entries, newest pin first (ADR 0058): your home
+    fleet's unless ``fleet_id`` names another you may read. Each pin shows
+    the current version of the pinned entry; ``pinned_id`` is the version
+    that was pinned."""
+    try:
+        pinned = await app.governance_service.pinned(app.credential, fleet_id)
+    except InvalidInput as exc:
+        return _error(ERR_INVALID_INPUT, str(exc))
+    return {
+        "fleet_id": fleet_id or app.credential.home_fleet_id,
+        "pins": [
+            {
+                "id": p.entry.id,
+                "pinned_id": p.pin.entry_id,
+                "kind": p.entry.kind.value,
+                "summary": p.entry.summary,
+                "author": p.entry.author,
+                "state": p.entry.state.value,
+                "pinned_by": p.pin.pinned_by,
+                "pinned_at": p.pin.pinned_at.isoformat(),
+            }
+            for p in pinned
+        ],
+    }
+
+
 async def hive_feedback(
     app: McpHivemind,
     entry_id: str = "",

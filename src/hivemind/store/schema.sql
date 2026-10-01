@@ -133,6 +133,13 @@ CREATE TABLE public.fleets (
     created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
+CREATE TABLE public.pins (
+    fleet_id text NOT NULL,
+    entry_id uuid NOT NULL,
+    pinned_by text NOT NULL,
+    pinned_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
 CREATE TABLE public.search_counts (
     fleet_id text NOT NULL,
     searches bigint DEFAULT 0 NOT NULL,
@@ -164,6 +171,9 @@ ALTER TABLE ONLY public.fleets
 
 ALTER TABLE ONLY public.fleets
     ADD CONSTRAINT fleets_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY public.pins
+    ADD CONSTRAINT pins_pkey PRIMARY KEY (fleet_id, entry_id);
 
 ALTER TABLE ONLY public.search_counts
     ADD CONSTRAINT search_counts_pkey PRIMARY KEY (fleet_id);

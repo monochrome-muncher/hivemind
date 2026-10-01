@@ -1,7 +1,8 @@
 """The Hivemind MCP server package (SPEC §5.2).
 
-Exposes the six plain tool functions (``hive_write``, ``hive_search``,
-``hive_get``, ``hive_list``, ``hive_withdraw``, ``hive_feedback``), the
+Exposes the plain tool functions (``hive_write``, ``hive_search``,
+``hive_get``, ``hive_list``, ``hive_withdraw``, ``hive_feedback``,
+``hive_pin``, ``hive_pinned``), the
 ``McpHivemind`` app object, and ``build_server`` / ``main`` for the
 stdio transport.
 """
@@ -13,6 +14,8 @@ from hivemind.mcp.app import (
     hive_feedback,
     hive_get,
     hive_list,
+    hive_pin,
+    hive_pinned,
     hive_search,
     hive_withdraw,
     hive_write,
@@ -25,6 +28,8 @@ __all__ = [
     "hive_feedback",
     "hive_get",
     "hive_list",
+    "hive_pin",
+    "hive_pinned",
     "hive_search",
     "hive_withdraw",
     "hive_write",
