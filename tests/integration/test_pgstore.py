@@ -328,6 +328,43 @@ async def test_feedback_upsert_same_reporter_overrides(pg) -> None:
     assert await store.feedback_counts(entry.id) == (0, 0, 1)
 
 
+async def test_list_feedback_newest_first_with_notes(pg) -> None:
+    """ADR 0051: an entry's feedback rows come back newest first (ties on
+    the reporter), notes included, at most ``limit`` of them."""
+    store, _, _ = pg
+    entry = await store.create_entry(draft("A fact"))
+    other = await store.create_entry(draft("Another fact"))
+    t0 = datetime(2026, 9, 1, tzinfo=UTC)
+    for user, at, note in (
+        ("b", t0, "old b"),
+        ("a", t0, "old a"),
+        ("c", t0 + timedelta(seconds=1), "newest"),
+    ):
+        await store.record_feedback(
+            Feedback(
+                entry_id=entry.id,
+                user=user,
+                agent=user,
+                verdict=Verdict.STALE,
+                note=note,
+                updated_at=at,
+            )
+        )
+    await store.record_feedback(
+        Feedback(entry_id=other.id, user="d", agent="d", verdict=Verdict.WRONG, updated_at=t0)
+    )
+    rows = await store.list_feedback(entry.id, 10)
+    assert [(r.user, r.note, r.verdict) for r in rows] == [
+        ("c", "newest", Verdict.STALE),
+        ("a", "old a", Verdict.STALE),
+        ("b", "old b", Verdict.STALE),
+    ]
+    assert rows[0].entry_id == entry.id
+    assert rows[0].updated_at == t0 + timedelta(seconds=1)
+    assert [r.user for r in await store.list_feedback(entry.id, 1)] == ["c"]
+    assert await store.list_feedback("not-a-uuid", 10) == []
+
+
 async def test_quality_counts_is_batched(pg) -> None:
     store, _, _ = pg
     a = await store.create_entry(draft("fact a"))

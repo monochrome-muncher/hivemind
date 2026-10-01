@@ -56,7 +56,7 @@ from hivemind.domain.entry import (
     SourceType,
     UsageCount,
 )
-from hivemind.domain.feedback import Feedback
+from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.ports import SupersedeConflict
 from hivemind.store.pool import PoolTimeouts, make_pool
 
@@ -247,6 +247,14 @@ SELECT
     COUNT(*) FILTER (WHERE verdict = 'wrong') AS wrong
 FROM feedbacks
 WHERE entry_id = $1
+"""
+
+LIST_FEEDBACK = """
+SELECT entry_id, "user", agent, verdict, note, updated_at
+FROM feedbacks
+WHERE entry_id = $1
+ORDER BY updated_at DESC, "user", agent
+LIMIT $2
 """
 
 BATCH_FEEDBACK = """
@@ -743,6 +751,26 @@ class PgStore:
         for r in rows:
             counts[str(r["entry_id"])] = (r["helpful"], r["stale"], r["wrong"])
         return counts
+
+    async def list_feedback(self, entry_id: str, limit: int) -> list[Feedback]:
+        """An entry's newest feedback rows (ADR 0051). The primary key
+        ``(entry_id, "user", agent)`` narrows the scan to one entry's rows."""
+        if not _is_valid_uuid(entry_id):
+            return []
+        pool = await self._ensure_pool()
+        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+            rows = await conn.fetch(LIST_FEEDBACK, entry_id, limit)
+        return [
+            Feedback(
+                entry_id=str(r["entry_id"]),
+                user=r["user"],
+                agent=r["agent"],
+                verdict=Verdict(r["verdict"]),
+                note=r["note"],
+                updated_at=r["updated_at"],
+            )
+            for r in rows
+        ]
 
     # -- fleets (ADR 0011) ------------------------------------------------------
 

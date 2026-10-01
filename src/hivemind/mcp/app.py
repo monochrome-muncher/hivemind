@@ -32,7 +32,7 @@ from hivemind.domain.entry import (
     Source,
     SourceType,
 )
-from hivemind.domain.feedback import Feedback, Verdict
+from hivemind.domain.feedback import Feedback, FeedbackCounts, FeedbackSummary, Verdict
 from hivemind.domain.validation import InvalidInput, check_pagination
 from hivemind.embeddings import EmbeddingError
 from hivemind.ports import Credential, Store
@@ -141,6 +141,28 @@ def _hit_dict(hit: Hit) -> dict[str, object]:
         "score": hit.score,
         "scope": hit.scope,
         "fleet_id": hit.fleet_id,
+        "feedback": _counts_dict(hit.feedback),
+    }
+
+
+def _counts_dict(counts: FeedbackCounts) -> dict[str, int]:
+    helpful, stale, wrong = counts
+    return {"helpful": helpful, "stale": stale, "wrong": wrong}
+
+
+def _feedback_dict(summary: FeedbackSummary) -> dict[str, object]:
+    """An entry's feedback as a reader sees it (ADR 0051)."""
+    return {
+        **_counts_dict((summary.helpful, summary.stale, summary.wrong)),
+        "recent": [
+            {
+                "verdict": fb.verdict.value,
+                "note": fb.note,
+                "reporter": fb.user,
+                "updated_at": fb.updated_at.isoformat() if fb.updated_at else None,
+            }
+            for fb in summary.recent
+        ],
     }
 
 
@@ -434,6 +456,9 @@ async def hive_get(
     ``successors`` (newer versions) and ``superseded`` (older versions it
     replaced) — the supersession chain (SPEC §5.1 ``?history``).
 
+    ``feedback`` carries the entry's verdict counts and its newest
+    feedback rows, notes included (ADR 0051).
+
     Follows readability (ADR 0033): an entry the caller may not see is
     ``not_found`` — the same answer as an unknown id — and the chain
     leaves out versions the caller may not see.
@@ -444,6 +469,7 @@ async def hive_get(
     if entry is None:
         return _error(ERR_NOT_FOUND, f"unknown entry: {entry_id}")
     result = _entry_dict(entry)
+    result["feedback"] = _feedback_dict(await app.governance_service.feedback_summary(entry.id))
     if include_history:
         successors, superseded = await _supersession_chain(app, entry)
         result["successors"] = [_entry_dict(s) for s in successors]

@@ -88,6 +88,8 @@ quality = clamp( 1.0 + 0.05·(helpful) − 0.10·(stale) − 0.25·(wrong), 0.5,
 
 Counts are per-entry (any reporter). Defaults: no feedback → `quality = 1.0`. The formula is a config value, not a constant in code.
 
+**Feedback is readable by the entry's audience (ADR 0051).** Search hits carry the verdict counts (`feedback: {helpful, stale, wrong}`); a read by id (`GET /v1/entries/{id}`, `hive_get`) carries the counts plus the 5 newest reports, newest first, each `{verdict, note, reporter, updated_at}` (`reporter` is the reporter's registered agent name). Feedback is returned only through a read of the entry, so it reaches exactly the readers of the entry (ADR 0033). Notes are data written by other agents, like entries (ADR 0043).
+
 ### 4.3 What is *not* in the model (v1)
 
 No sessions on the server (incognito sessions are client-side, ADRs 0003, 0035). No knowledge graph, no binary blobs (artifacts are **referenced**, not stored), no user/role tables beyond credential mapping, no UI. *(v2 adds the `agents` + `fleets` registration tables — ADR 0012 — and self/fleet scoping — ADR 0011; still no user/role model and no UI.)*
@@ -101,7 +103,7 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | Method & path | Purpose |
 |---|---|
 | `POST /v1/entries` | Create an entry (body = §4.1 fields; `supersedes` optional) |
-| `GET /v1/entries/{id}` | Full entry (body included). `?history=true` adds the supersession chain: at most 100 versions (one list page), successors first, then predecessors newest first |
+| `GET /v1/entries/{id}` | Full entry (body included), with its `feedback`: verdict counts and the newest reports with their notes (§4.2, ADR 0051). `?history=true` adds the supersession chain: at most 100 versions (one list page), successors first, then predecessors newest first |
 | `GET /v1/entries` | List/filter **without** a query (filter only; paginated) |
 | `POST /v1/search` | Hybrid search (§6) with filters |
 | `POST /v1/entries/{id}/withdraw` | Withdraw own entry (or any, with admin credential) |
@@ -151,7 +153,7 @@ A typical agent prompt contract: *"check where you stand (`hive_whoami`); recall
 
 ### 6.1 Two-stage (progressive disclosure)
 
-`search` returns **compact hits** — `id, kind, summary, tags, author, agent, occurred_at, score, scope, fleet_id` — **not** full bodies. `scope` and `fleet_id` let a privileged reader recognise a **foreign entry** (filed outside its home fleet) without opening it (ADR 0036). The agent opens what it wants with `hive_get`. This is the token economy the design is built around: scan many, open few.
+`search` returns **compact hits** — `id, kind, summary, tags, author, agent, occurred_at, score, scope, fleet_id, feedback` — **not** full bodies. `feedback` is the entry's helpful/stale/wrong counts (ADR 0051), so a reader sees an entry was reported stale or wrong before it opens it. `scope` and `fleet_id` let a privileged reader recognise a **foreign entry** (filed outside its home fleet) without opening it (ADR 0036). The agent opens what it wants with `hive_get`. This is the token economy the design is built around: scan many, open few.
 
 ### 6.2 Hybrid pipeline
 

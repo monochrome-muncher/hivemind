@@ -36,3 +36,20 @@ class Feedback:
     verdict: Verdict
     note: str | None = None
     updated_at: datetime | None = None
+
+
+# How many of an entry's feedback rows a read returns (ADR 0051): the
+# newest ones. Each note is at most 2000 characters (ADR 0040), so this
+# bounds what one ``get`` adds to an agent's context.
+FEEDBACK_RECENT_LIMIT = 5
+
+
+@dataclass(frozen=True, slots=True)
+class FeedbackSummary:
+    """What a reader sees of an entry's feedback (ADR 0051): the verdict
+    counts over every reporter, plus the newest rows with their notes."""
+
+    helpful: int
+    stale: int
+    wrong: int
+    recent: tuple[Feedback, ...] = ()

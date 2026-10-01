@@ -57,6 +57,9 @@ class Hit:
     # foreign entry (fleet_id != its home fleet) from its own fleet's.
     scope: str = "fleet"
     fleet_id: str | None = None
+    # (helpful, stale, wrong) over every reporter (ADR 0051): lets a reader
+    # see an entry was reported stale or wrong before relying on it.
+    feedback: FeedbackCounts = (0, 0, 0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -192,6 +195,7 @@ class SearchService:
         now = self._now_fn()
         scored: list[Entry] = []
         entry_scores: dict[str, float] = {}
+        entry_feedback: dict[str, FeedbackCounts] = {}
         # Iterate in fused-rank order (keyword stream first, then vector), NOT
         # in the store's row order: equal fused scores are the normal case and
         # the stable sorts below keep this order, so ties resolve the same way
@@ -200,6 +204,7 @@ class SearchService:
             if not filters.include_inactive and entry.state is not EntryState.ACTIVE:
                 continue
             entry_counts: FeedbackCounts = counts.get(entry.id, (0, 0, 0))
+            entry_feedback[entry.id] = entry_counts
             helpful, stale, wrong = entry_counts
             quality = feedback_quality(helpful, stale, wrong, **quality_kwargs)
             score = entry_score(
@@ -219,7 +224,7 @@ class SearchService:
 
         # 6. Pagination (SPEC.md §5.3: limit/offset on search and list).
         hits = [
-            self._to_hit(entry, entry_scores[entry.id])
+            self._to_hit(entry, entry_scores[entry.id], entry_feedback[entry.id])
             for entry in ordered[offset : offset + limit]
         ]
         return SearchResult(hits, degraded)
@@ -243,7 +248,7 @@ class SearchService:
             return None
         return await self._store.search_vector(query_vector, filters, top_k, visibility=visibility)
 
-    def _to_hit(self, entry: Entry, score: float) -> Hit:
+    def _to_hit(self, entry: Entry, score: float, feedback: FeedbackCounts) -> Hit:
         return Hit(
             entry_id=entry.id,
             kind=entry.kind,
@@ -255,6 +260,7 @@ class SearchService:
             score=score,
             scope=entry.scope,
             fleet_id=entry.fleet_id,
+            feedback=feedback,
         )
 
 
