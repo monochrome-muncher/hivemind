@@ -8,18 +8,27 @@ loop, and the reverse walk asks the store for each frontier's
 predecessors (``Store.list_predecessors``, served by the partial
 ``superseded_by`` index of migration 0008) — one query per hop, so the
 cost follows the chain, not the pool.
+
+The walk also has a version budget (``_MAX_HISTORY_VERSIONS``, one list
+page): every write may supersede up to ``MAX_SUPERSEDES`` entries, so
+without it an agent could build a legal tree of thousands of
+predecessors (each with a 100 000-character body) and make every
+``?history`` call load all of them.
 """
 
 from __future__ import annotations
 
 from hivemind.domain.access import Visibility, entry_is_visible
 from hivemind.domain.entry import Entry
-from hivemind.domain.validation import MAX_ID_CHARS
+from hivemind.domain.validation import MAX_ID_CHARS, MAX_LIMIT, MAX_SUPERSEDES
 from hivemind.ports import Store
 
 # Bound on a single forward/reverse chain walk (SPEC.md §6.3: chains are
 # short in practice; this is a defensive cap against corrupt data).
 _MAX_SUPERSEDE_HOPS = 256
+# Bound on the versions one walk loads, both directions together, visible
+# or not: never more than one list page (``limit`` <= MAX_LIMIT).
+_MAX_HISTORY_VERSIONS = MAX_LIMIT
 
 
 async def get_visible_entry(store: Store, entry_id: str, visibility: Visibility) -> Entry | None:
@@ -40,6 +49,7 @@ async def supersession_chain(
     *,
     visibility: Visibility | None = None,
     max_hops: int = _MAX_SUPERSEDE_HOPS,
+    max_versions: int = _MAX_HISTORY_VERSIONS,
 ) -> tuple[list[Entry], list[Entry]]:
     """Return ``(successors, superseded)`` for an entry's chain.
 
@@ -49,6 +59,10 @@ async def supersession_chain(
     chain cannot loop; the reverse walk is one indexed
     ``Store.list_predecessors`` call per hop.
 
+    At most ``max_versions`` versions are loaded in all: successors first
+    (the newest version matters most), then predecessors breadth-first,
+    newest first. A chain longer than that comes back truncated.
+
     With ``visibility``, versions that reader may not see are left out
     (ADR 0033) — the walk still passes through them, it just never
     returns them. ``None`` returns everything (internal callers only).
@@ -56,7 +70,7 @@ async def supersession_chain(
     successors: list[Entry] = []
     cursor = entry
     seen = {entry.id}
-    for _ in range(max_hops):
+    for _ in range(min(max_hops, max_versions)):
         next_id = cursor.superseded_by
         if next_id is None:
             break
@@ -76,22 +90,34 @@ async def supersession_chain(
     # call per hop (migration 0008's partial ``superseded_by`` index), so the
     # cost follows the chain's depth, never the pool's size. Unfiltered on
     # purpose: the walk passes through versions the reader cannot see.
+    # Each version has at most MAX_SUPERSEDES predecessors (one write set
+    # their ``superseded_by``), so asking for ``budget // MAX_SUPERSEDES``
+    # nodes at a time, and stopping once a hop has loaded the budget, never
+    # loads much more than the budget.
     superseded: list[Entry] = []
     frontier = [entry]
     seen = {entry.id}
+    budget = max_versions - len(successors)
     for _ in range(max_hops):
-        if not frontier:
+        if not frontier or budget <= 0:
             break
-        preds = await store.list_predecessors([node.id for node in frontier])
+        preds: list[Entry] = []
+        while frontier and len(preds) < budget:
+            batch_size = max(1, (budget - len(preds)) // MAX_SUPERSEDES)
+            batch, frontier = frontier[:batch_size], frontier[batch_size:]
+            preds.extend(await store.list_predecessors([node.id for node in batch]))
         # Stable order regardless of the store's row order.
         preds.sort(key=lambda e: (e.created_at, e.id), reverse=True)
         frontier = []
         for pred in preds:
             if pred.id in seen:
                 continue
+            if budget <= 0:
+                break
             superseded.append(pred)
             seen.add(pred.id)
             frontier.append(pred)
+            budget -= 1
 
     if visibility is not None:
         successors = [e for e in successors if entry_is_visible(e, visibility)]

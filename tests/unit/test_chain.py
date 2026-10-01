@@ -146,3 +146,74 @@ async def test_invisible_middle_version_stays_out_but_does_not_cut_the_walk() ->
     assert [e.id for e in superseded] == [a.id]
     everything = await supersession_chain(store, await store.get_entry(c.id))
     assert {e.id for e in everything[1]} == {a.id, b.id}
+
+
+async def _build_tree(store, *, fan_out: int, depth: int):
+    """A legal supersession tree: every version supersedes ``fan_out``
+    older ones (each write may name up to MAX_SUPERSEDES targets), built
+    bottom-up so every target is still active when it is superseded."""
+    level = [await store.create_entry(_draft(f"leaf {i}")) for i in range(fan_out**depth)]
+    for d in range(depth):
+        level = [
+            await store.create_entry(
+                _draft(
+                    f"level {d} node {i}",
+                    supersedes=tuple(e.id for e in level[i * fan_out : (i + 1) * fan_out]),
+                )
+            )
+            for i in range(len(level) // fan_out)
+        ]
+    (head,) = level
+    return await store.get_entry(head.id)
+
+
+async def test_a_wide_tree_loads_at_most_one_page_of_versions() -> None:
+    """A writer may supersede 16 entries per write, so a few hundred writes
+    build a legal tree whose full history would be thousands of entries.
+    One history call loads at most MAX_LIMIT versions, however wide the
+    tree, and asks the store for little more than that."""
+    from hivemind.domain.validation import MAX_LIMIT, MAX_SUPERSEDES
+
+    store = make_store()
+    head = await _build_tree(store, fan_out=MAX_SUPERSEDES, depth=2)  # 16 + 256 predecessors
+    loaded = {"rows": 0}
+    real = store.list_predecessors
+
+    async def counting(ids):
+        rows = await real(ids)
+        loaded["rows"] += len(rows)
+        return rows
+
+    store.list_predecessors = counting  # type: ignore[method-assign]
+    successors, superseded = await supersession_chain(store, head)
+
+    assert successors == []
+    assert len(superseded) == MAX_LIMIT
+    assert len({e.id for e in superseded}) == MAX_LIMIT
+    # The 16 direct predecessors come first (breadth-first, newest first).
+    direct = await real([head.id])
+    assert {e.id for e in superseded[:MAX_SUPERSEDES]} == {e.id for e in direct}
+    assert loaded["rows"] <= MAX_LIMIT + MAX_SUPERSEDES
+
+
+async def test_the_version_budget_spans_both_directions() -> None:
+    """Successors count against the same budget, and are taken first."""
+    store = make_store()
+    prev = await store.create_entry(_draft("v0"))
+    entries = [prev]
+    for i in range(1, 9):
+        prev = await store.create_entry(_draft(f"v{i}", supersedes=(prev.id,)))
+        entries.append(prev)
+    middle = await store.get_entry(entries[4].id)
+    successors, superseded = await supersession_chain(store, middle, max_versions=6)
+    assert [e.id for e in successors] == [e.id for e in entries[5:]]
+    assert [e.id for e in superseded] == [entries[3].id, entries[2].id]
+
+
+async def test_a_short_chain_is_unchanged_by_the_budget() -> None:
+    store = make_store()
+    head = await _build_tree(store, fan_out=3, depth=2)  # 3 + 9 predecessors
+    _, bounded = await supersession_chain(store, head)
+    _, unbounded = await supersession_chain(store, head, max_versions=10_000)
+    assert [e.id for e in bounded] == [e.id for e in unbounded]
+    assert len(bounded) == 12
