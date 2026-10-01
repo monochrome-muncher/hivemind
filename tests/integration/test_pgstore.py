@@ -379,6 +379,27 @@ async def test_keyword_search_matches_any_term(pg) -> None:
     assert none.id not in results
 
 
+async def test_keyword_search_matches_only_the_first_distinct_terms(pg) -> None:
+    """ADR 0049: the keyword stream matches on the first
+    ``MAX_KEYWORD_TERMS`` distinct query terms; later ones are ignored,
+    and a repeated term takes one slot, not one per repetition."""
+    from hivemind.store.pgstore import MAX_KEYWORD_TERMS
+
+    store, _, _ = pg
+    terms = [f"term{i:02d}" for i in range(MAX_KEYWORD_TERMS + 1)]
+    first = await store.create_entry(draft(f"Notes on {terms[0]}"))
+    last_cap = await store.create_entry(draft(f"Notes on {terms[MAX_KEYWORD_TERMS - 1]}"))
+    past_cap = await store.create_entry(draft(f"Notes on {terms[MAX_KEYWORD_TERMS]}"))
+
+    results = await store.search_keyword(" ".join(terms), EntryFilters(), limit=10)
+    assert set(results) == {first.id, last_cap.id}
+    assert past_cap.id not in results
+
+    repeated = " ".join([terms[0]] * (MAX_KEYWORD_TERMS * 2) + [terms[MAX_KEYWORD_TERMS]])
+    results = await store.search_keyword(repeated, EntryFilters(), limit=10)
+    assert set(results) == {first.id, past_cap.id}
+
+
 async def test_keyword_search_of_only_stop_words_matches_nothing(pg) -> None:
     store, _, _ = pg
     await store.create_entry(draft("The state of the art"))
