@@ -9,6 +9,7 @@ or unknown key yields 401 with the standard error envelope.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import cast
 
@@ -25,6 +26,8 @@ from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService, WriteService
 from hivemind.services.metrics import MetricsService
 from hivemind.services.search import SearchService
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +124,28 @@ def _handle_body_too_large(_request: Request, exc: Exception) -> JSONResponse:
     )
 
 
+# A pool acquire (or a statement) that times out means the database is
+# saturated or unreachable for now, not that the request was wrong: 503 with
+# a short Retry-After so clients back off and retry (ROADMAP 3.13). The
+# provider calls never surface a bare TimeoutError (they raise typed errors,
+# ADR 0041), so on this surface a TimeoutError is the store's.
+STORE_RETRY_AFTER_SECONDS = 2
+
+
+def _handle_store_timeout(_request: Request, _exc: Exception) -> JSONResponse:
+    logger.warning("store call timed out (pool acquire or statement); answering 503")
+    return JSONResponse(
+        status_code=503,
+        headers={"Retry-After": str(STORE_RETRY_AFTER_SECONDS)},
+        content={
+            "error": ErrorBody(
+                code="store_unavailable",
+                message="the database is busy or unreachable; retry shortly",
+            ).model_dump()
+        },
+    )
+
+
 def create_app(app: HivemindApp) -> FastAPI:
     """Build the FastAPI app over a HivemindApp (SPEC.md §5)."""
     from hivemind.api.routes import build_router
@@ -131,6 +156,7 @@ def create_app(app: HivemindApp) -> FastAPI:
     fastapi_app.add_exception_handler(InvalidInput, _handle_invalid_input)
     fastapi_app.add_exception_handler(BodyTooLarge, _handle_body_too_large)
     fastapi_app.add_exception_handler(RequestValidationError, _handle_request_validation)
+    fastapi_app.add_exception_handler(TimeoutError, _handle_store_timeout)
     fastapi_app.add_middleware(PreAuthGuard, max_body_bytes=MAX_REQUEST_BODY_BYTES)
     fastapi_app.include_router(build_router(app))
     return fastapi_app

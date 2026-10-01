@@ -121,6 +121,8 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 
 **Request limits (ADR 0040).** A REST request body is capped at 2 MiB (`413 payload_too_large`, enforced by `Content-Length` and by counting streamed bytes, before the body is parsed). A `/v1` request with **no** `X-API-Key` header is refused `401` before its body is read; a present-but-unknown key is verified after the (bounded) body is parsed, so a malformed body with a bad key can still answer 422. A deployment's ingress should enforce its own, lower limit as well.
 
+**Database saturation.** When a call cannot get a pooled database connection within `HIVEMIND_POOL_ACQUIRE_TIMEOUT` (or a statement exceeds `HIVEMIND_POOL_COMMAND_TIMEOUT`), REST answers `503 store_unavailable` with `Retry-After: 2`, the streamable-HTTP MCP runner answers `503` when the key check itself times out, and an MCP tool returns the `store_unavailable` error code. The request was not wrong; retry after a short wait.
+
 ### 5.2 MCP tools (the agent's mental model — eight verbs)
 
 | Tool | Maps to |
