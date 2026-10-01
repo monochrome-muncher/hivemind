@@ -1,20 +1,14 @@
 #!/bin/sh
 # Hivemind image entrypoint (Kubernetes + docker-compose).
 #
-# ADR 0018: before starting the runner, the entrypoint runs the
-# idempotent schema migration (ADR 0013). Migration is owned HERE
-# (single source of truth) instead of a k8s initContainer: a dim
-# mismatch (ADR 0015) or an unreachable database fails the FIRST
-# step loudly — the pod never serves (crash-loop until the DB is up
-# — the desired posture). There is NO retry in the entrypoint: the
-# pod restart policy (k8s) / depends_on healthcheck (compose) owns
-# recovery.
+# Runs the idempotent migration (ADR 0013) before the runner; owned here,
+# not in an initContainer (ADR 0018). A dim mismatch (ADR 0015) or an
+# unreachable DB fails LOUDLY and the pod never serves. No retry here: the
+# restart policy (k8s) / depends_on healthcheck (compose) owns recovery.
 #
-# Selects the runner via HIVEMIND_RUNNER and execs the matching
-# console script, forwarding extra arguments (e.g. `hivemind-keys
-# issue-admin`). The container inherits the HIVEMIND_* env vars from
-# the deployment (k8s ConfigMap/Secret, or the compose service) — see
-# config/.env.example for the full surface.
+# Then execs the runner named by HIVEMIND_RUNNER, forwarding extra args
+# (e.g. `hivemind-keys issue-admin`). Config: HIVEMIND_* env vars
+# (config/.env.example).
 #
 #   HIVEMIND_RUNNER=api       REST surface (hivemind-api)
 #   HIVEMIND_RUNNER=mcp-http  hostable multi-agent MCP runner (ADR 0010)
@@ -22,26 +16,20 @@
 #   HIVEMIND_RUNNER=migrate   idempotent schema migration (ADR 0013)
 #   HIVEMIND_RUNNER=keys      key-management CLI (SPEC §8.1, ADR 0012)
 #
-# Default: mcp-http — so the existing docker-compose service (which
-# sets no HIVEMIND_RUNNER) keeps working unchanged.
+# Default: mcp-http (the compose service sets no HIVEMIND_RUNNER).
 set -eu
 
 runner="${HIVEMIND_RUNNER:-mcp-http}"
 
-# The entrypoint-owned migration pre-step (ADR 0018): idempotent
-# (ADR 0013) and cheap on an up-to-date pool. Skipped when the runner
-# IS the migration itself (no double-migration; a bare `hivemind-migrate`
-# run is a single, explicit migration), and for the admin panel, which
-# has no database access at all — it only talks to hivemind-api
-# (ADR 0029).
+# The migration pre-step (ADR 0018), cheap on an up-to-date pool. Skipped
+# when the runner IS the migration, and for the admin panel, which has no
+# database (ADR 0029).
 #
-# DEP-14: this shell is PID 1, and PID 1 ignores SIGTERM unless a handler
-# is installed, so a foreground `hivemind-migrate` would keep running
-# (e.g. waiting on the ADR 0020 advisory lock while a sibling builds the
-# HNSW index) until the grace period's SIGKILL. Run it in the background
-# and `wait`, so the trap can forward the signal and exit 143 promptly.
-# The final `exec` below is unchanged: the runner becomes PID 1 itself.
-# Run `hivemind-migrate [args]` as a child that SIGTERM/SIGINT can interrupt.
+# DEP-14: this shell is PID 1, which ignores SIGTERM without a handler, so
+# a foreground `hivemind-migrate` (e.g. waiting on the ADR 0020 advisory
+# lock) would run until SIGKILL. Run it in the background and `wait`, so
+# the trap forwards the signal and exits 143. The runner is `exec`ed and
+# becomes PID 1 itself.
 run_migrate() {
   hivemind-migrate "$@" &
   migrate_pid=$!
@@ -52,8 +40,7 @@ run_migrate() {
 
 case "$runner" in
   migrate)
-    # A one-off `HIVEMIND_RUNNER=migrate` run (DEPLOY.md) would otherwise
-    # `exec` python as PID 1, which ignores SIGTERM: same treatment, no exec.
+    # Not exec'd: python as PID 1 would ignore SIGTERM (see above).
     run_migrate "$@"
     exit 0
     ;;

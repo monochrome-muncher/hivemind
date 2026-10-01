@@ -1,18 +1,8 @@
 """The Postgres-backed ``Authenticator`` (ADR 0008 credential model).
 
-Resolves a raw API key to a ``Credential`` via the ``credentials``
-table: the key is stored only as a SHA-256 hash (the raw key is never
-persisted), and the row's ``kind`` decides the credential's shape
-(SPEC.md §8.1):
-
-- ``admin``  → ``Credential(is_admin=True)``: may withdraw any entry.
-- ``agent``  → the key binds an agent instance (``agent_id`` set), so
-  attribution is server-verified, not self-reported.
-- ``user``   → retired (ADR 0012); since ADR 0039 a leftover row no
-  longer verifies.
-
-Like ``PgStore``, the pool opens lazily on first use and closes via
-``close()`` (SPEC.md §8.2, ADR 0007).
+Keys are stored only as SHA-256 hashes (SPEC.md §8.1); see ``verify``
+for how a row's ``kind`` maps to a ``Credential``. Like ``PgStore``, the
+pool opens lazily (ADR 0007).
 """
 
 from __future__ import annotations
@@ -28,19 +18,16 @@ from hivemind.domain.audit import key_fingerprint
 from hivemind.ports import Credential
 from hivemind.store.pool import PoolTimeouts, make_pool
 
-# One query resolves the key AND the agent it binds (ADR 0039): an agent key
-# authenticates only while ``agents.status = 'active'``, so a key that
-# outlives its agent's revocation (or never had an activation) is dead.
+# Key and agent in one query: an agent key authenticates only while its
+# agent is active (ADR 0039).
 _SELECT_CREDENTIAL = (
     "SELECT c.kind, c.user_id, c.agent_id, c.agent_name, "
     "a.status AS agent_status, a.trust_level, a.home_fleet_id "
     "FROM credentials c LEFT JOIN agents a ON a.name = c.agent_name "
     "WHERE c.key_hash = $1"
 )
-# Credential rows ``verify`` can never resolve (ADR 0039): pre-v2 ``user``
-# keys, name-less agent keys, and agent keys whose agent is missing,
-# pending or revoked. Inert today, but they would live again on a rollback
-# to a release that does not join ``agents``; operators delete them.
+# Rows ``verify`` can never resolve (ADR 0039). Inert, but they would live
+# again on a rollback to a release that does not join ``agents``.
 DEAD_CREDENTIAL_PREDICATE = (
     "(c.kind = 'user' OR (c.kind = 'agent' AND (c.agent_name IS NULL OR NOT EXISTS "
     "(SELECT 1 FROM agents a WHERE a.name = c.agent_name AND a.status = 'active'))))"
@@ -52,9 +39,7 @@ _DELETE_AGENT_KEYS = "DELETE FROM credentials WHERE kind = 'agent' AND agent_nam
 # waits, then deletes the first's row. The unique index is the backstop.
 ORG_KEY_LOCK = "SELECT pg_advisory_xact_lock(hashtext('hivemind:org-key'))"
 
-# Key-management (ADR 0012): raw keys are random 32-byte secrets printed
-# ONCE at issuance; only their SHA-256 hash is stored (a leaked database
-# never leaks usable keys — SPEC.md §8.1).
+# Key management (ADR 0012).
 _ISSUE_AGENT_KEY = (
     "INSERT INTO credentials (key_hash, kind, user_id, agent_id, agent_name) "
     "VALUES ($1, 'agent', $2, $2, $2)"
@@ -93,8 +78,7 @@ class PgAuthenticator:
         self._timeouts = timeouts or PoolTimeouts()
         self._acquire_timeout = self._timeouts.acquire
         self._pool: asyncpg.Pool | None = None
-        # Serialises lazy creation: without it, every call arriving while the
-        # first pool is still being built opened its own and orphaned it.
+        # Serialises lazy creation so concurrent first calls share one pool.
         self._pool_lock = asyncio.Lock()
 
     async def _ensure_pool(self) -> asyncpg.Pool:
@@ -122,19 +106,11 @@ class PgAuthenticator:
     async def verify(self, key: str) -> Credential | None:
         """Resolve a key to its credential, or ``None`` if unknown.
 
-        The row's ``kind`` decides the credential's shape (ADR 0012):
-          * ``admin`` → admin credential (full access).
-          * ``org``   → the shared org key (gates registration + health
-            only; all data-plane privilege comes from the agent key).
-          * ``agent`` → an agent credential: the agent's registered name
-            (``agent_name``) becomes the entry's ``author``; its trust
-            level + home fleet are resolved from the ``agents`` table
-            (ADRs 0011-0012).
-          * ``user``  → retired: ``None`` (ADR 0039).
-
-        Every credential carries ``key_id`` — the key's non-secret
-        fingerprint (first 12 hex chars of the stored hash), which is
-        what the audit log records for admin actions (ADR 0027).
+        By ``kind`` (ADR 0012): ``admin`` → full access; ``org`` →
+        registration + health only; ``agent`` → name, trust level and home
+        fleet from ``agents`` (ADR 0011), only while active; ``user`` →
+        retired, ``None`` (ADR 0039). ``key_id`` is the key fingerprint
+        for the audit log (ADR 0027).
         """
         stored_hash = key_hash(key)
         key_id = key_fingerprint(stored_hash)
@@ -177,14 +153,11 @@ class PgAuthenticator:
     # -- key management (ADR 0012) ------------------------------------------
 
     async def issue_agent_key(self, agent_name: str) -> str:
-        """Issue an agent key bound to the registered agent name; return
-        the raw secret once (never stored).
+        """Issue an agent key; return the raw secret once.
 
-        Runs under the agent row's lock and only for an ``active`` agent
-        (``InvalidAgentStatus`` otherwise, ``KeyError`` if unknown), so a
-        racing revoke can never leave a revoked agent holding a key
-        (ADR 0039). Any stale key row (a revoke that flipped the status but
-        did not finish deleting) is replaced: one live key per agent."""
+        Under the agent row's lock and only while ``active``, so a racing
+        revoke cannot leave a revoked agent with a key (ADR 0039). Any
+        stale key row is replaced: one live key per agent."""
         pool = await self._ensure_pool()
         raw_key = _generate_key()
         async with pool.acquire(timeout=self._acquire_timeout) as conn, conn.transaction():
@@ -198,15 +171,12 @@ class PgAuthenticator:
         return raw_key
 
     async def revoke_agent_key(self, agent_name: str) -> None:
-        """Retire the agent's key (the agent record + name stay reserved,
-        ADR 0012: demotion != revocation, but a revoked key is dead).
-        Call it after the agent's status has flipped to ``revoked``."""
+        """Retire the agent's key; call after the status flipped to
+        ``revoked`` (the name stays reserved, ADR 0012)."""
         pool = await self._ensure_pool()
         async with pool.acquire(timeout=self._acquire_timeout) as conn, conn.transaction():
-            # Same row lock as issuance: the two are serialised (ADR 0039).
-            # Delete only while the agent is still revoked: if a racing
-            # activation re-activated it after the caller's status flip,
-            # the order was revoke-then-activate and the fresh key is valid.
+            # Same row lock as issuance (ADR 0039). If a racing activation
+            # re-activated the agent, its fresh key is valid: keep it.
             status = await conn.fetchval(_LOCK_AGENT, agent_name)
             if status is None or status == "revoked":
                 await conn.execute(_REVOKE_AGENT_KEY, agent_name)

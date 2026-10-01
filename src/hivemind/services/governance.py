@@ -1,9 +1,7 @@
 """Write and governance services (SPEC.md §4.1, §5, §8).
 
-Thin orchestration over the Store port: embed-then-persist on write,
-authorization checks on withdrawal, feedback upsert. No HTTP or MCP
-concerns here — the API and MCP layers both consume these services
-and both resolve the caller's identity before calling them.
+Embed-then-persist on write, authorization on withdrawal, feedback and
+pins. Callers (REST and MCP) resolve the caller's identity first.
 """
 
 from __future__ import annotations
@@ -90,18 +88,9 @@ class WriteResult:
 
 
 class WriteService:
-    """Creates entries: embeds the entry text, persists it, and applies
-    any explicit supersessions (SPEC.md §4.1, §7).
-
-    Entity extraction is an optional, best-effort enrichment (ADR 0016,
-    SPEC §13): pass an ``Extractor`` to extract entity facets at write
-    time; an extraction failure never blocks the write — the entry
-    lands without facets. Absent (``None``), extraction is off, zero
-    LLM cost (the same dev-mode stance as "no authenticator").
-
-    The caller is responsible for having authenticated the request and
-    for filling ``draft.author``/``draft.agent`` (the resolved agent
-    identity, per SPEC.md §8.1) before calling ``write``.
+    """Creates entries: embed, persist, apply supersessions (SPEC.md §4.1,
+    §7). An optional ``Extractor`` adds entity facets, best-effort (ADR
+    0016). The caller fills ``draft.author``/``draft.agent`` (SPEC.md §8.1).
     """
 
     def __init__(
@@ -123,13 +112,8 @@ class WriteService:
         self, draft: EntryDraft, *, writer: Visibility | None = None
     ) -> WriteResult:
         """``write``, then the nearest active entries the writer can read
-        (ADR 0052), so it can tell when it has duplicated or should have
-        superseded one.
-
-        The lookup reuses the embedding the write already computed. It is
-        best-effort: the entry is stored by then, so a failed lookup is
-        logged and the result carries no related entries rather than an
-        error.
+        (ADR 0052), reusing the embedding. Best-effort: the entry is
+        already stored, so a failed lookup is logged, not raised.
         """
         entry, embedding = await self._write(draft, writer=writer)
         try:
@@ -158,27 +142,17 @@ class WriteService:
         """Embed-then-persist a fully-resolved entry draft; returns the
         stored entry and the embedding it was stored with.
 
-        ``writer`` is the caller's visibility. When given, every
-        ``draft.supersedes`` target must pass ``may_supersede`` (ADR 0033)
-        or the whole write is rejected with ``SupersedeDenied`` before
-        anything is embedded or stored. Both surfaces pass it; ``None``
-        skips the check (internal callers and fixtures only).
-
-        The embedding model name is recorded per entry (SPEC.md §7) so
-        the vector's provenance is traceable. When an extractor is set,
-        entity facets are extracted over the same text and recorded on
-        the entry (``entities`` / ``entities_model``, ADR 0016) —
-        best-effort: an extraction failure never blocks the write, the
-        entry simply lands without facets.
+        With ``writer`` (both surfaces pass it), every supersession target
+        must pass ``may_supersede`` (ADR 0033) or ``SupersedeDenied`` is
+        raised before anything is embedded. ``None`` skips the check
+        (internal callers and fixtures only).
         """
         if writer is not None and draft.supersedes:
             await self._check_supersedes(draft, writer)
         if writer is not None and draft.see_also:
             draft = await self._resolve_see_also(draft, writer)
-        # Embedder and (best-effort) extractor are independent network
-        # calls: run them concurrently. The embedder's failure propagates
-        # unchanged (the extractor is cancelled); the extractor's never
-        # fails the write. Cancelling the write cancels both.
+        # Embed and extract concurrently. An embedder failure propagates
+        # (cancelling extraction); an extractor failure never fails the write.
         extraction: asyncio.Task[tuple[ExtractedEntity, ...] | None] | None = None
         entities: tuple[ExtractedEntity, ...] = ()
         entities_model: str | None = None
@@ -211,10 +185,8 @@ class WriteService:
     async def _extract(
         draft: EntryDraft, extractor: Extractor
     ) -> tuple[ExtractedEntity, ...] | None:
-        """Best-effort extraction (ADR 0016, SPEC §13.4): ``None`` on any
-        failure, which is logged — the only record of what failed — so a
-        dead extractor endpoint shows up as log lines. Cancellation is not
-        swallowed (``CancelledError`` is a ``BaseException``)."""
+        """Best-effort extraction (SPEC §13.4): ``None`` on any failure,
+        logged since the log is the only record. Cancellation propagates."""
         try:
             return await extractor.extract_entry(draft)
         except Exception:
@@ -241,8 +213,7 @@ class WriteService:
         """Reject the write if any supersession target is out of reach."""
         denied: list[str] = []
         target_ids = list(dict.fromkeys(draft.supersedes))
-        # Batched lookups (SP-13), chunked so memory stays bounded however
-        # long the list is: each chunk is checked and dropped before the next.
+        # Batched lookups (SP-13), chunked to bound memory.
         for i in range(0, len(target_ids), _SUPERSEDES_LOOKUP_CHUNK):
             chunk = target_ids[i : i + _SUPERSEDES_LOOKUP_CHUNK]
             targets = await self._store.get_entries(chunk)
@@ -270,10 +241,8 @@ class GovernanceService:
     withdraw their own entries, an admin may withdraw any; feedback is
     open to any authenticated caller who used the entry.
 
-    ``config`` supplies the quality-formula weights (SPEC.md §6.4:
-    “the formula is a config value, not a constant in code”); a default
-    ``SearchConfig`` (the v1 defaults) is used when omitted, so the
-    service's reported quality always matches what search uses.
+    ``config`` supplies the quality-formula weights (SPEC.md §6.4), so
+    the reported quality matches what search uses.
     """
 
     def __init__(self, store: Store, config: SearchConfig | None = None) -> None:
@@ -296,9 +265,7 @@ class GovernanceService:
             )
         withdrawn = await self._store.withdraw_entry(entry_id, reason, by_user=credential.user_id)
         if credential.is_admin and entry.author != credential.user_id:
-            # Authorised by admin privilege, not authorship (SPEC §4.1):
-            # an admin action on someone else's entry — audited (ADR
-            # 0027). An author withdrawing their own entry is not.
+            # An admin withdrawing someone else's entry is audited (ADR 0027).
             await record_admin_action(
                 self._store,
                 credential,
@@ -357,10 +324,8 @@ class GovernanceService:
     ) -> list[FeedbackOutcome]:
         """One verdict (and note) on several entries at once (ADR 0053).
 
-        All or nothing on readability: every id must name an entry the
-        caller may read, or nothing is recorded and ``LookupError`` names
-        the ids that failed. Repeated ids count once. Each entry then gets
-        its own row, exactly as ``record_feedback`` would write it.
+        All or nothing: if any id is unreadable, nothing is recorded and
+        ``LookupError`` names them. Repeated ids count once.
         """
         ids = list(dict.fromkeys(entry_ids))
         if not ids:
@@ -381,10 +346,8 @@ class GovernanceService:
         """What a reader of an entry sees of its feedback (ADR 0051): the
         verdict counts plus the newest rows, notes included.
 
-        The caller must already have read the entry under its own
-        visibility (``get_visible_entry``): feedback is shown to exactly
-        the audience that can read the entry, so this does no check of
-        its own.
+        No visibility check here: the caller must already have read the
+        entry with ``get_visible_entry``.
         """
         (helpful, stale, wrong), recent = await asyncio.gather(
             self._store.feedback_counts(entry_id),
@@ -393,11 +356,7 @@ class GovernanceService:
         return FeedbackSummary(helpful, stale, wrong, tuple(recent))
 
     async def quality(self, entry_id: str) -> float:
-        """The current quality multiplier for an entry's retrieval score.
-
-        Uses the configured weights (SPEC.md §6.4) so the multiplier
-        reported here always matches the one search rescoring applies.
-        """
+        """An entry's current quality multiplier (SPEC.md §6.4)."""
         helpful, stale, wrong = await self._store.feedback_counts(entry_id)
         cfg = self._config
         return feedback_quality(
@@ -445,10 +404,9 @@ class GovernanceService:
         """A fleet's pinned entries as ``credential`` sees them, newest pin
         first (the caller's home fleet unless ``fleet_id`` names another).
 
-        A pin follows supersession to the current version, so superseding
-        a pinned entry keeps the briefing current; a withdrawn one is shown
-        withdrawn until someone unpins it. Entries the caller may not read
-        are left out, so another fleet's pins are empty to a contributor.
+        A pin follows supersession to the current version; a withdrawn
+        entry shows as withdrawn until unpinned. Unreadable entries are
+        left out.
         """
         fleet = fleet_id or credential.home_fleet_id
         if fleet is None:

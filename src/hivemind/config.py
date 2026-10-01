@@ -43,14 +43,9 @@ class SearchConfig:
     candidate_top_k: int = 20
     default_limit: int = 10
     half_life_days: float = 30.0
-    # ADR 0022 / SPEC §6.4: a lower bound on the recency factor, so the
-    # one unbounded factor in `entry_score`'s product can no longer
-    # dominate RRF's compressed fused range (2.6230x at `rrf_k=60`).
-    # 0.8 bounds the recency range at 1/0.8 = 1.25x, which is inside it:
-    # match quality is the sort key, recency the tie-break. **This is a
-    # band, not a slider** — at 0.9 the term is nearly off and scores
-    # *worse* than switching it off, at 1.0 it is off. Do not tune it up
-    # (ADR 0022). ``None`` = no floor = the pre-ADR-0022 unbounded form.
+    # Lower bound on the recency factor so it cannot dominate RRF's fused
+    # range (ADR 0022, SPEC §6.4). A band, not a slider: 0.9 scores worse
+    # than off, 1.0 is off. Do not tune it up. ``None`` = no floor.
     recency_floor: float | None = 0.8
     quality_helpful_weight: float = 0.05
     quality_stale_weight: float = 0.10
@@ -59,10 +54,8 @@ class SearchConfig:
     quality_max: float = 1.2
 
     def __post_init__(self) -> None:
-        # Fail at config time (the class of failure ADR 0024 exists to
-        # catch): each of these would otherwise surface per request as a
-        # ZeroDivisionError, a Postgres "LIMIT must not be negative", an
-        # empty result or NaN scores.
+        # Fail at config time (ADR 0024), not per request as a
+        # ZeroDivisionError, a negative LIMIT, empty results or NaN scores.
         if self.rrf_k < 0:
             raise ValueError(f"rrf_k must be >= 0, got {self.rrf_k}")
         if self.candidate_top_k < 1:
@@ -106,13 +99,9 @@ class SearchConfig:
 class Settings(BaseSettings):
     """Environment-driven service settings (HIVEMIND_* env vars).
 
-    The class default reads the ``.local`` profile file (``.env.local``)
-    when present — the fallback profile (ADR 0017); ``load_settings()``
-    selects the active profile from the ``ENVIRONMENT`` env var instead.
-    Real environment variables always win over file values, and a
-    missing file is silently ignored, so Kubernetes / CI (where the
-    values come from env / Secrets and no profile file exists) are
-    unaffected.
+    The class default reads ``.env.local`` (the fallback profile, ADR
+    0017); ``load_settings()`` picks the profile from ``ENVIRONMENT``.
+    Real env vars win over file values and a missing file is ignored.
     """
 
     model_config = SettingsConfigDict(
@@ -128,50 +117,36 @@ class Settings(BaseSettings):
     database_url: str = Field(
         default="postgresql://hivemind:hivemind@localhost:5432/hivemind", repr=False
     )
-    # An optional DIRECT (non-pooled) DSN for `hivemind-migrate` only. The
-    # migration lock is a session advisory lock (ADR 0020), which a
-    # transaction-mode PgBouncer cannot hold, so a deployment whose
-    # `database_url` points at such a pooler sets this to Postgres itself.
-    # Empty = migrate through `database_url`.
+    # Optional DIRECT (non-pooled) DSN for `hivemind-migrate` only: its
+    # session advisory lock (ADR 0020) cannot be held through a
+    # transaction-mode PgBouncer. Empty = migrate through `database_url`.
     migrate_database_url: str = Field(default="", repr=False)
-    # The root logger level each runner configures at startup (see
-    # ``configure_logging`` below) — one of Python's standard names
-    # (DEBUG/INFO/WARNING/ERROR/CRITICAL, case-insensitive).
+    # Root logger level (DEBUG/INFO/WARNING/ERROR/CRITICAL, case-insensitive).
     log_level: str = "INFO"
-    # The admin panel runner (`hivemind-admin`, ADR 0029) — read only by
-    # that runner. `admin_api_url` is the base URL of the hivemind-api
-    # deployment it proxies to (e.g. `http://hivemind-api:8000`); empty
-    # is a startup error for that runner. `admin_api_ca_bundle` is a PEM
-    # file to verify an https API URL against (an internal CA); empty =
-    # the system trust store.
+    # Read only by `hivemind-admin` (ADR 0029). `admin_api_url`: base URL
+    # of the hivemind-api it proxies to (e.g. `http://hivemind-api:8000`);
+    # empty is a startup error for that runner. `admin_api_ca_bundle`: PEM
+    # file to verify an https API URL against; empty = system trust store.
     admin_api_url: str = ""
     admin_api_ca_bundle: str = ""
-    # The MCP-HTTP runner's DNS-rebinding guard (ADR 0042): comma-separated
-    # Host header values (``name`` or ``name:*``) and browser Origins it
-    # accepts. Empty hosts = the MCP SDK default (guard only on a loopback
-    # bind), which keeps an ingress-fronted 0.0.0.0 deployment working.
+    # MCP-HTTP DNS-rebinding guard (ADR 0042): comma-separated accepted
+    # Host values (``name`` or ``name:*``) and browser Origins. Empty hosts
+    # = the MCP SDK default (guard only on a loopback bind), which keeps an
+    # ingress-fronted 0.0.0.0 deployment working.
     mcp_allowed_hosts: str = ""
     mcp_allowed_origins: str = ""
-    # ADR 0032: unknown HIVEMIND_* variables are logged by default (a
-    # platform such as GitLab Auto DevOps, or Kubernetes service links,
-    # injects variables that share the prefix). True restores ADR 0024's
-    # hard failure — for CI and dev, where the environment is ours. Read
-    # by load_settings() BEFORE Settings is built.
+    # Unknown HIVEMIND_* variables are logged by default, since platforms
+    # inject prefixed variables; True makes them a startup failure (ADR
+    # 0032, for CI and dev). Read by load_settings() BEFORE Settings is built.
     strict_env: bool = False
-    # asyncpg pool sizing for the Postgres store (``make_pool`` in
-    # store/pool.py already defaults to these exact values; these fields
-    # just make that existing constant operator-reachable, per pod, for
-    # tuning concurrency against a `max_connections`-constrained org).
+    # asyncpg pool size, per pod (same defaults as ``make_pool``).
     pool_min_size: int = Field(default=1, ge=0)
     pool_max_size: int = Field(default=10, ge=1)
-    # Bounds on Postgres calls from the app pools (never applied to
-    # `hivemind-migrate`, whose CREATE INDEX CONCURRENTLY must run
-    # unbounded). Seconds; 0 disables the command/acquire bound. The
-    # client-side command bound is the default guard (asyncpg cancels a
-    # call that overruns it). `pool_statement_timeout_ms` is an OPT-IN
-    # server-side bound sent as a startup parameter: a transaction-mode
-    # PgBouncer rejects unknown startup parameters by default and never
-    # applies them to its shared server connections, so it stays 0 (off)
+    # Bounds on Postgres calls from the app pools (never `hivemind-migrate`,
+    # whose CREATE INDEX CONCURRENTLY must run unbounded). Seconds; 0
+    # disables the command/acquire bound. `pool_statement_timeout_ms` is an
+    # OPT-IN server-side bound sent as a startup parameter; a
+    # transaction-mode PgBouncer rejects or ignores it, so leave it 0 (off)
     # unless the pool connects to Postgres directly.
     pool_command_timeout: float = Field(default=30.0, ge=0, allow_inf_nan=False)
     pool_statement_timeout_ms: int = Field(default=0, ge=0)
@@ -180,40 +155,29 @@ class Settings(BaseSettings):
     embedding_endpoint: str = "http://localhost:8001/v1"
     embedding_api_key: str = Field(default="", repr=False)
     embedding_model: str = "text-embedding-3-small"
-    # The request timeout used only when the embedder builds its own
-    # client (mirrors extractor_timeout below). Not reachable before
-    # this: `OpenAICompatEmbedder.from_settings` never passed a value,
-    # so every deployment silently ran the code default regardless of
-    # this setting's existence. It also feeds fixed arithmetic written
-    # into the k8s manifests' `terminationGracePeriodSeconds` comment
-    # (`deploy/kubernetes/*.yaml`, DEPLOY.md §5) — raise both together.
+    # Per-request timeout (seconds) when the embedder builds its own client.
+    # Feeds the k8s `terminationGracePeriodSeconds` arithmetic
+    # (`deploy/kubernetes/*.yaml`, DEPLOY.md §5): raise both together.
     embedding_timeout: float = Field(default=10.0, gt=0, allow_inf_nan=False)
-    # The overall wall-clock budget for ONE embed call, retries and
-    # backoff included (httpx's timeout is per phase, not total; ADR
-    # 0041). Unset = derived from the timeout and retries above
-    # (``providers.default_deadline``: every attempt at full timeout plus
-    # the backoff sleeps — the DEPLOY.md §5 worst case), so the documented
-    # TIMEOUT/RETRIES recipes keep working. An explicit value below the
-    # per-attempt timeout is a startup error.
+    # Wall-clock budget for ONE embed call, retries and backoff included
+    # (httpx's timeout is per phase; ADR 0041). Unset = every attempt at
+    # full timeout plus backoff (``providers.default_deadline``, the
+    # DEPLOY.md §5 worst case). A value below the timeout is a startup error.
     embedding_deadline: float | None = Field(default=None, gt=0, allow_inf_nan=False)
-    # The default when HIVEMIND_EMBEDDING_DIM is unset (ADR 0015). We never
-    # assume a 1536-dim default — that is one provider's native dim; 1024
-    # is the deploy-time default both OpenAI-compatible endpoints (the
-    # ``dimensions`` parameter) and self-hosted Matryoshka servers (vLLM)
-    # can serve. The dev Makefile pins 512 for fast local vLLM embedding.
+    # Default when HIVEMIND_EMBEDDING_DIM is unset (ADR 0015): 1024, which
+    # OpenAI-compatible endpoints (``dimensions``) and Matryoshka servers
+    # can both serve, not one provider's native 1536. The dev Makefile pins 512.
     embedding_dim: int = Field(default=1024, ge=1, le=2000)  # pgvector HNSW cap
-    # ADR 0021: the embedded-text body budget, in whitespace-delimited
-    # words ("prefix tokens"), NOT a model tokenizer's tokens. Shared
-    # with the extractor, which reads the same text (ADR 0016, SPEC §13.1).
+    # Embedded-text body budget in whitespace-delimited words, NOT
+    # tokenizer tokens (ADR 0021); shared with the extractor (SPEC §13.1).
     embedding_prefix_tokens: int = Field(default=DEFAULT_PREFIX_TOKENS, ge=0)  # 0 = summary only
     # Retry budget for transient embedder failures (timeouts, connection
     # errors, 429, 5xx) — ADR 0014; 0 disables retrying.
     embedding_retries: int = Field(default=2, ge=0)
 
-    # Entity-extraction extractor (ADR 0016, SPEC §13): an OpenAI-compatible
-    # *chat* endpoint, usually a different model/service than the embedding
-    # one. An empty endpoint disables extraction (the optional + best-effort
-    # stance): entries land with empty `entities`, zero LLM-extraction cost.
+    # Entity extractor (ADR 0016, SPEC §13): an OpenAI-compatible *chat*
+    # endpoint. Empty disables extraction: entries land with empty
+    # `entities` and no LLM cost.
     extractor_endpoint: str = ""
     extractor_api_key: str = Field(default="", repr=False)
     extractor_model: str = ""
@@ -224,23 +188,16 @@ class Settings(BaseSettings):
     # 0 disables retrying. A failure never blocks the write (best-effort).
     extractor_retries: int = Field(default=2, ge=0)
 
-    # retrieval knobs (mirror SearchConfig defaults)
-    # (Value rules live on SearchConfig.__post_init__, run at load time by
-    # ``_check_consistency`` below.)
+    # Retrieval knobs, mirroring SearchConfig (whose __post_init__ holds
+    # the value rules, run at load time by ``_check_consistency``).
     rrf_k: int = 60
     weight_keyword: float = 0.5
     weight_vector: float = 0.5
     candidate_top_k: int = 20
     default_limit: int = 10
     half_life_days: float = 30.0
-    # ADR 0022. See SearchConfig.recency_floor — a band, not a slider;
-    # raising it toward 1.0 removes the recency term. From the
-    # environment a real value is validated to (0, 1] (see
-    # ``_parse_recency_floor`` below); ADR 0023 gives an explicit
-    # spelling for "no floor" (empty string or "none", case-insensitive)
-    # that resolves to ``None``, the pre-ADR-0022 unbounded form —
-    # closing the gap ADR 0022 originally left (an operator reverting
-    # the floor had to approximate it with a negligible value).
+    # See SearchConfig.recency_floor (ADR 0022). In (0, 1]; empty or "none"
+    # (case-insensitive) means no floor (ADR 0023).
     recency_floor: float | None = 0.8
     quality_helpful_weight: float = 0.05
     quality_stale_weight: float = 0.10
@@ -313,16 +270,10 @@ class Settings(BaseSettings):
     @field_validator("recency_floor", mode="before")
     @classmethod
     def _parse_recency_floor(cls, value: object) -> object:
-        """Accept an explicit "no floor" spelling from the environment.
+        """Map empty / "none" (case-insensitive) to ``None``, no floor (ADR 0023).
 
-        ``None`` is a real, load-bearing value (the pre-ADR-0022
-        unbounded recency term, ADR 0023), but every env var arrives as
-        a string, and no string used to decode to it — an operator
-        reverting the floor had to approximate with a negligible value
-        like ``1e-9``. Empty string and the case-insensitive literal
-        "none" both resolve to ``None`` here; anything else (including
-        out-of-range numbers) is left for pydantic's normal float
-        parsing and ``SearchConfig.__post_init__``'s (0, 1] check.
+        Anything else is left to pydantic's float parsing and
+        ``SearchConfig.__post_init__``'s (0, 1] check.
         """
         if isinstance(value, str) and value.strip().lower() in ("", "none"):
             return None
@@ -387,11 +338,7 @@ def _is_loopback(host: str) -> bool:
     return host == "localhost" or host.startswith("127.") or host in ("::1", "[::1]")
 
 
-# Environment profile files (ADR 0017): the ``ENVIRONMENT`` env var
-# selects which per-environment dotenv file ``load_settings`` reads.
-# Real env vars always win over file values, and a missing file is
-# silently ignored — so Kubernetes / CI (no profile file present)
-# is unaffected.
+# Environment profile files (ADR 0017), selected by ``ENVIRONMENT``.
 _ENV_FILES = {
     "production": ".env.production",
     "prod": ".env.production",
@@ -412,44 +359,24 @@ def env_file_for(environment: str | None) -> str:
     return _ENV_FILES.get(key, _DEFAULT_ENV_FILE)
 
 
-# ADR 0024 (unknown-``HIVEMIND_*``-variable rejection). ``Settings`` keeps
-# ``extra="ignore"``, so a stale or typo'd ``HIVEMIND_*`` variable does
-# nothing — silently. A naive ``extra="forbid"`` on the model would be
-# worse: these five variables are deliberately NOT ``Settings`` fields —
-# they are read straight out of ``os.environ`` by code that never
-# constructs ``Settings`` — and three of them (``RUNNER``, ``HOST``,
-# ``PORT``) are set on every pod, so ``extra="forbid"`` would crash-loop
-# every container. This is the one place that says "deliberately not a
-# setting" for each of them. A variable that is neither here nor a
-# ``Settings`` field is either a mistake or injected by the platform
-# (GitLab Auto DevOps, Kubernetes service links), so it is reported —
-# a warning by default, a failure with HIVEMIND_STRICT_ENV (ADR 0032).
+# ``HIVEMIND_*`` variables that are deliberately NOT ``Settings`` fields
+# (read from ``os.environ`` or by non-Python code) and so must not be
+# reported as unknown (ADR 0024). ``extra="forbid"`` on the model is not
+# an option: RUNNER, HOST and PORT are set on every pod. Anything neither
+# here nor a field is reported: a warning, or a failure with
+# HIVEMIND_STRICT_ENV (ADR 0032).
 _ALLOWED_EXTRA_ENV_VARS: dict[str, str] = {
-    # entrypoint.sh reads this directly (shell, never Settings) to choose
-    # which console script to exec — api / mcp-http / admin / migrate / keys.
     "HIVEMIND_RUNNER": "selects the runner in entrypoint.sh",
-    # Listen address for the REST API and the MCP-HTTP runner. Set by the
-    # Dockerfile's `ENV HIVEMIND_HOST=0.0.0.0` / the k8s ConfigMap, and
-    # read via `os.environ` in api/main.py and mcp/http.py — a bind
-    # concern for the process, not a retrieval/storage knob.
     "HIVEMIND_HOST": (
         "REST/MCP-HTTP/admin bind host, read via os.environ in api/main.py, "
         "mcp/http.py and admin/main.py"
     ),
-    # Listen port for the same two runners, set by the k8s Deployment env
-    # and read via `os.environ` alongside HIVEMIND_HOST.
     "HIVEMIND_PORT": (
         "REST/MCP-HTTP/admin bind port, read via os.environ in api/main.py, "
         "mcp/http.py and admin/main.py"
     ),
-    # The per-agent credential for the stdio `hivemind-mcp-pg` runner
-    # (ADR 0009), supplied by that agent's own operator config and read
-    # via `os.environ` in mcp/server.py. Per-process identity, not a
-    # service-wide knob, so it is deliberately outside Settings.
+    # Per-process identity (ADR 0009), so deliberately outside Settings.
     "HIVEMIND_MCP_KEY": "per-agent hivemind-mcp-pg credential, read via os.environ in mcp/server.py",
-    # docker-compose's own host-port mapping for the mcp-http service
-    # (`${HIVEMIND_MCP_HTTP_PORT:-8088}:8088`). Consumed entirely by
-    # compose's variable substitution; the application never reads it.
     "HIVEMIND_MCP_HTTP_PORT": "docker-compose host-port mapping for mcp-http; the app never reads it",
 }
 
@@ -477,18 +404,11 @@ def _strict_env(env_file: str) -> bool:
 def _check_unknown_hivemind_env_vars(env_file: str) -> None:
     """Report a ``HIVEMIND_*`` variable ``Settings`` would ignore.
 
-    ADR 0032: by default the report is one WARNING and startup continues,
-    because deployment platforms inject prefixed variables Hivemind does
-    not own. With ``HIVEMIND_STRICT_ENV=true`` it raises instead (ADR
-    0024's original behaviour).
-
-    Checked against real process env vars AND the active profile file
-    (ADR 0017) — a typo in either currently does nothing (the bug this
-    guards against). Runs in ``load_settings()``, the real deployment
-    entry point, not on the ``Settings`` model: tests and dev code
-    construct ``Settings(...)`` directly with explicit kwargs, and a
-    model-level ``extra="forbid"`` would also reject the allowlisted
-    operational variables every pod sets (see ``_ALLOWED_EXTRA_ENV_VARS``).
+    One WARNING by default, since platforms inject prefixed variables
+    (ADR 0032); raises with ``HIVEMIND_STRICT_ENV=true`` (ADR 0024).
+    Checks both process env vars and the active profile file. Runs in
+    ``load_settings()`` rather than on the model so tests constructing
+    ``Settings(...)`` directly are unaffected.
     """
     known = _known_hivemind_env_vars() | _ALLOWED_EXTRA_ENV_VARS.keys()
     present = {name for name in os.environ if name.startswith("HIVEMIND_")}
@@ -500,10 +420,8 @@ def _check_unknown_hivemind_env_vars(env_file: str) -> None:
     unknown = sorted(present - known)
     if not unknown:
         return
-    # Match on the part after "HIVEMIND_": every name shares that prefix,
-    # which otherwise dominates the similarity ratio and produces
-    # confident-looking nonsense suggestions (e.g. HIVEMIND_NONSENSE ~
-    # HIVEMIND_RUNNER, ratio 0.75, purely from the shared prefix).
+    # Match on the part after "HIVEMIND_": the shared prefix would
+    # otherwise dominate the similarity ratio and suggest nonsense.
     suffix_to_known = {name.removeprefix("HIVEMIND_"): name for name in known}
     lines = []
     for name in unknown:
@@ -526,37 +444,22 @@ def _check_unknown_hivemind_env_vars(env_file: str) -> None:
 def load_settings() -> Settings:
     """Build ``Settings`` for the active environment profile (ADR 0017).
 
-    Reads the ``ENVIRONMENT`` env var at call time and loads the
-    matching profile file: ``production`` → ``.env.production``,
-    ``staging`` → ``.env.staging``, ``test`` → ``.env.test``, anything
-    else (or unset) → ``.env.local``. Real ``HIVEMIND_*`` env vars
-    always win over file values; a missing file is silently ignored
-    (the Kubernetes / CI posture: values come from env / Secrets).
-
-    Before building ``Settings``, reports any ``HIVEMIND_*`` variable
-    that is neither a ``Settings`` field nor on the ADR 0024 exemption
-    list: a WARNING by default, a startup failure with
-    ``HIVEMIND_STRICT_ENV=true`` (ADR 0032).
+    The profile file comes from ``env_file_for(ENVIRONMENT)``; real env
+    vars win over it and a missing file is ignored. Unknown
+    ``HIVEMIND_*`` variables are reported first (ADR 0024, ADR 0032).
     """
     env_file = env_file_for(os.environ.get("ENVIRONMENT"))
     _check_unknown_hivemind_env_vars(env_file)
-    # pydantic-settings' per-instance dotenv override (`_env_file`) is a
-    # documented init parameter (runtime-verified) but missing from its
-    # mypy stubs — a targeted ignore, not a type hole.
+    # `_env_file` is a documented init parameter missing from the mypy stubs.
     return Settings(_env_file=env_file)  # type: ignore[call-arg]
 
 
 def configure_logging(level: str = "INFO") -> None:
     """Configure the root logger once, at process startup.
 
-    Every runner (``api/main.py``, ``mcp/http.py``, ``mcp/server.py``)
-    calls this before doing anything else. Without it, Python's root
-    logger has no handler and falls back to ``logging.lastResort`` —
-    WARNING and above still reach stderr, but INFO (retries, the
-    startup line) does not, and there is no consistent format across
-    runners. An invalid ``level`` name is a configuration error, not a
-    silent fallback to WARNING: it fails loudly here instead of
-    surfacing later as "why do I see no logs at all".
+    Every runner calls this first; without a handler INFO lines are lost
+    and formats differ. An invalid ``level`` name raises rather than
+    silently falling back to WARNING.
     """
     numeric_level = logging.getLevelName(level.upper())
     if not isinstance(numeric_level, int):

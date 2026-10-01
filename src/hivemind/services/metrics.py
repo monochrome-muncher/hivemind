@@ -1,14 +1,9 @@
 """The minimal usage-counters surface (ROADMAP §3.3, Tier 3).
 
-A cheap, read-only metrics service over the ``Store`` seam: it computes a
-usage report (entries, fleets, agents) from the store so the SPEC §10
-*usage-based* triggers and the §12 counters become measurable rather
-than guesswork. It is deliberately minimal — one grouped scan
-(``usage_counts``) + the fleet/agent listings — no new instrumentation
-logs, no extra schema.
+A read-only usage report that makes the SPEC §10 usage-based triggers
+measurable, from one grouped scan plus the fleet/agent listings.
 
-Counters (the §12 set from ROADMAP §3.3, plus the §4.5 provenance counter
-and its follow-on per-author ``kind`` distribution):
+Counters (ROADMAP §3.3 and §4.5):
 - entries: total, active, by_scope, by_kind, by_importance_source,
   by_author_kind, inactive.
 - fleets: total + per-fleet writes (``entries.fleet_id``).
@@ -48,13 +43,8 @@ class MetricsService:
     async def usage_report(self) -> dict[str, dict[str, Any]]:
         """The full usage report (entries / fleets / agents).
 
-        The agent roster and the fleet list are read once and shared, and
-        every entry counter is folded from ONE grouped scan
-        (``Store.usage_counts``) — a handful of queries however large the
-        roster or the pool (PERF-2; it used to be 10 + 3 x agents + fleets
-        ``COUNT``s). The roster is both an agents counter and the axis the
-        entries report's per-author ``kind`` distribution is built over
-        (ROADMAP §4.5).
+        A fixed handful of queries however large the pool: every entry
+        counter is folded from one grouped scan (PERF-2).
         """
         agents = await self._store.list_agents()
         fleets = await self._store.list_fleets()
@@ -70,20 +60,11 @@ class MetricsService:
     def _entries_report(
         self, agents: Sequence[Agent], rows: Sequence[UsageCount]
     ) -> dict[str, Any]:
-        """Entry counters: total / active / inactive + by_scope + by_kind +
-        by_importance_source (ROADMAP §4.5: is anyone actually setting
-        ``importance``, or is every entry riding the default?) +
-        by_author_kind (§4.5's follow-on: are agents using the three kinds
-        consistently, or does each author mean something different by
-        them?).
+        """Entry counters (ROADMAP §3.3, §4.5).
 
-        ``by_author_kind`` is keyed by the **registered agent roster**
-        (``Store.list_agents``), not by the authors present in ``rows``:
-        an author who has written nothing is then representable (an empty
-        mapping) rather than absent, and an unregistered author is left
-        out. ``Agent.name`` *is* the entry's ``author`` (CONTEXT.md:
-        server-verified, never self-reported). Zero counts are omitted and
-        keys follow the canonical vocabulary order.
+        ``by_author_kind`` is keyed by the registered agent roster, so an
+        author with no entries maps to {} and an unregistered author is
+        left out. Zero counts are omitted; keys follow vocabulary order.
         """
         total = sum(r.count for r in rows)
         active = sum(r.count for r in rows if r.active)

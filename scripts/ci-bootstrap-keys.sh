@@ -1,13 +1,10 @@
 #!/bin/sh
 # First-run key bootstrap for the GitLab deploy job (DEP-1, DEP-9, ADR 0044).
 #
-# Idempotent: does nothing when the `hivemind-keys` Secret already exists.
-# Otherwise applies the Job's RBAC (deploy/kubernetes/bootstrap/rbac.yaml) and
-# runs deploy/kubernetes/bootstrap/keys-job.yaml (the image placeholder
-# replaced by $IMAGE). The Job writes the raw admin and org keys straight into
-# the `hivemind-keys` Secret; no key ever passes through a log, this script or
-# GitLab. The RBAC objects are removed again when the Job has finished. See
-# DEPLOY.md §2/§4.
+# Idempotent: a no-op when the `hivemind-keys` Secret exists. Otherwise
+# applies bootstrap/rbac.yaml, runs bootstrap/keys-job.yaml with $IMAGE, and
+# removes the RBAC afterwards. The Job writes the keys straight into the
+# Secret; no key passes through a log, this script or GitLab. DEPLOY.md §2/§4.
 #
 # Needs: kubectl (pointing at the cluster, allowed to manage Roles and
 # Secrets in the namespace), IMAGE=<registry image:tag>.
@@ -21,10 +18,9 @@ MANIFEST="${BOOTSTRAP_MANIFEST:-deploy/kubernetes/bootstrap/keys-job.yaml}"
 RBAC="${BOOTSTRAP_RBAC:-deploy/kubernetes/bootstrap/rbac.yaml}"
 TIMEOUT="${BOOTSTRAP_TIMEOUT_SECONDS:-300}"
 
-# Fail CLOSED: `--ignore-not-found` makes "absent" an empty success, while an
-# API/auth/network error aborts under `set -e`. (Treating every error as
-# "absent" would start the bootstrap against a live Secret; the Job's own
-# check and the create would still refuse, but nothing should get that far.)
+# Fail CLOSED: `--ignore-not-found` makes "absent" an empty success, while
+# any API/auth/network error aborts under `set -e` instead of passing as
+# "absent".
 existing=$(kubectl -n "$NS" get secret hivemind-keys -o name --ignore-not-found)
 if [ -n "$existing" ]; then
   echo "hivemind-keys secret exists - skipping key bootstrap"

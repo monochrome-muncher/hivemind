@@ -41,28 +41,22 @@ def new_entry_id() -> str:
 # SPEC.md §4.1: the summary is a short blurb (≤ ~280 chars), not a body.
 _SUMMARY_MAX_CHARS = 280
 
-# ADR 0016 / SPEC §13: a machine-extracted entity name is a bounded
-# display string (the extractor validates before it is stored).
+# ADR 0016 / SPEC §13: extracted entity names are bounded display strings.
 _ENTITY_NAME_MAX_CHARS = 128
 
-# ADR 0021: the embedded-text body budget, counted in whitespace-delimited
-# words ("prefix tokens" — never a model tokenizer's tokens). ~2000 words
-# is ~2600 model tokens, well under every endpoint limit in use: the bound
-# exists to control dilution and cost, not to respect a model limit. One
-# source of truth for the default, shared by ``Settings``, the embedder and
-# the extractor (which reads the same text — ADR 0016, SPEC §13.1).
+# Embedded-text body budget in whitespace-delimited words, never tokenizer
+# tokens (ADR 0021). It bounds dilution and cost, not a model limit. The
+# single default for ``Settings``, the embedder and the extractor.
 DEFAULT_PREFIX_TOKENS = 2000
 
 # A "prefix token" is one run of non-whitespace characters (ADR 0021).
 _WORD_RE = re.compile(r"\S+")
 
-# ADR 0040 (amends ADR 0021): a character ceiling next to the word budget.
-# 2000 words is ~16k characters of prose, but a body with no whitespace
-# (base64, minified JSON, CJK) is "one word" of any length; this bounds
-# the text sent to the embedder and extractor whatever the script.
+# Character ceiling beside the word budget (ADR 0040): a body with no
+# whitespace (base64, minified JSON, CJK) is "one word" of any length.
 EMBED_BODY_MAX_CHARS = 20_000
-# The ceiling scales with a raised word budget (HIVEMIND_EMBEDDING_PREFIX_TOKENS,
-# ADR 0021) so the knob is not silently capped: 10 characters per word.
+# The ceiling scales with a raised word budget so the knob is not
+# silently capped.
 EMBED_CHARS_PER_PREFIX_TOKEN = 10
 
 
@@ -91,24 +85,16 @@ class EntryState(StrEnum):
 
 
 class ImportanceSource(StrEnum):
-    """How an entry's ``importance`` was set (ROADMAP §4.5).
-
-    ``importance`` feeds retrieval scoring (SPEC §6.4); a field nobody
-    sets is a dead ranking input. Recorded server-side so an operator
-    can tell whether agents are actually setting it or every entry
-    rides the default — never client-settable itself.
-    """
+    """How an entry's ``importance`` was set (ROADMAP §4.5), recorded
+    server-side so operators can see whether agents set it at all."""
 
     CALLER = "caller"
     DEFAULT = "default"
 
 
 class EntityKind(StrEnum):
-    """The closed type vocabulary of an extracted entity (ADR 0016, SPEC §13).
-
-    A fixed six-value set over *open* names: the extractor may only pick
-    from these kinds; the names themselves are open vocabulary.
-    """
+    """The closed kind vocabulary of an extracted entity (ADR 0016, SPEC
+    §13); names are open vocabulary."""
 
     PERSON = "person"
     ORGANIZATION = "organization"
@@ -137,12 +123,8 @@ class Source:
 
 @dataclass(frozen=True, slots=True)
 class ExtractedEntity:
-    """A machine-extracted entity facet of an entry (ADR 0016, SPEC §13).
-
-    ``name`` is open vocabulary (trimmed, non-empty, bounded); ``kind``
-    is the closed ``EntityKind`` vocabulary. Set once at write time by
-    the extractor, never mutated (ADR 0001).
-    """
+    """A machine-extracted entity facet (ADR 0016, SPEC §13); ``name`` is
+    trimmed, non-empty and bounded."""
 
     name: str
     kind: EntityKind
@@ -185,16 +167,8 @@ class EntryDraft:
     see_also: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        # Normalise the enum fields to their members. ``Kind`` and
-        # ``ImportanceSource`` are ``StrEnum``s, so a caller passing the
-        # raw string ("fact") produces a draft that compares EQUAL to the
-        # member but is not IDENTICAL to it — and ``EntryFilters.matches``
-        # compares enums by identity, as does anything reading
-        # ``entry.kind.value``. Left un-normalised, a string-kind entry is
-        # silently invisible to a ``kind=`` filter (it under-counts
-        # ``by_kind``) and crashes the MCP serialiser with AttributeError.
-        # The store adapters all coerce on read; this closes the write
-        # side, so the domain is self-consistent whatever a caller passes.
+        # Normalise raw strings ("fact") to enum members: ``matches``
+        # compares by identity and serialisers read ``.value``.
         object.__setattr__(self, "kind", Kind(self.kind))
         object.__setattr__(self, "importance_source", ImportanceSource(self.importance_source))
         if not 1 <= self.importance <= 5:
@@ -257,9 +231,7 @@ class EntryDraft:
 class Entry:
     """A stored unit of memory (SPEC.md §4.1).
 
-    Immutable by design (ADR 0001): corrections happen only via
-    supersession (a new entry) or withdrawal (a state flip), never by
-    editing an existing entry's fields.
+    Immutable (ADR 0001): corrected only by supersession or withdrawal.
     """
 
     id: str
@@ -284,8 +256,7 @@ class Entry:
     state: EntryState = EntryState.ACTIVE
     superseded_by: str | None = None
     withdrawn_reason: str | None = None
-    # Machine-extracted entity facets (ADR 0016, SPEC §13): set once at
-    # write time by the extractor, never mutated (ADR 0001).
+    # Extracted at write time (ADR 0016, SPEC §13).
     entities: tuple[ExtractedEntity, ...] = ()
     entities_model: str | None = None
 
@@ -321,23 +292,15 @@ class SearchCount:
 class EntryFilters:
     """Filter set shared by search and list (SPEC.md §5.3).
 
-    ``tags`` is AND-semantics: an entry must carry every listed tag.
-    ``entities`` (ADR 0016, SPEC §13) is AND-semantics over extracted
-    entity *names*, matched case-insensitively: an entry must have an
-    extracted entity whose lower-cased name equals each lower-cased
-    filter name.
-    ``include_inactive`` surfaces superseded/withdrawn entries; by
-    default only ``active`` entries are visible (SPEC.md §6.3).
+    ``tags`` and ``entities`` (names, case-insensitive; ADR 0016) are AND.
+    Only ``active`` entries match unless ``include_inactive`` (SPEC.md §6.3).
     """
 
     kind: Kind | None = None
     tags: tuple[str, ...] = ()
     entities: tuple[str, ...] = ()
-    # Internal-only: used solely by MetricsService (via count_entries) for
-    # the by_importance_source counter (ROADMAP §4.5). Deliberately NOT
-    # reachable from REST or MCP — unlike every other field on this
-    # dataclass, which SPEC §5.3 documents as a public filter — do not
-    # wire this to a query-surface seam without updating SPEC §5.3 first.
+    # Internal-only (MetricsService, ROADMAP §4.5): not a public SPEC §5.3
+    # filter. Do not expose it on REST or MCP without updating SPEC §5.3.
     importance_source: ImportanceSource | None = None
     scope: str | None = None
     fleet_id: str | None = None
@@ -348,17 +311,14 @@ class EntryFilters:
     created_from: datetime | None = None
     created_to: datetime | None = None
     include_inactive: bool = False
-    # Only entries with at least one ``stale`` or ``wrong`` feedback report
-    # (ADR 0054). Feedback is not part of an ``Entry``, so ``matches`` cannot
-    # evaluate this: each store adapter applies it beside ``matches``.
+    # At least one stale/wrong report (ADR 0054). Not evaluated by
+    # ``matches`` (feedback is not on ``Entry``); each store applies it.
     flagged: bool = False
 
     def validate(self) -> None:
-        """Bounds for filters built from **caller input** (ADR 0040): every
-        string reaches Postgres as a bind parameter, every timestamp must be
-        in range. Surfaces call this; filters the service builds itself from
-        stored rows (metrics, chain) are deliberately not validated, so a
-        legacy value can never make an internal query fail."""
+        """Bounds for filters built from **caller input** (ADR 0040).
+        Service-built filters skip this, so a legacy stored value can never
+        make an internal query fail."""
         check_filter_values(self.tags, "tags")
         check_filter_values(self.entities, "entities")
         for field, value in (
@@ -417,14 +377,8 @@ def _body_prefix(body: str, prefix_tokens: int) -> str:
     """The first ``prefix_tokens`` whitespace-delimited words of ``body``,
     with the original spacing between them preserved (ADR 0021).
 
-    The cut is made at the *end offset* of the last word inside the budget
-    and the text before it is returned verbatim, so newlines, blank lines
-    and indentation survive intact — a long-form ``insight`` keeps its
-    paragraph structure. Re-joining the words on single spaces would count
-    the same budget but destroy that structure.
-
-    A body inside the budget is returned unchanged (byte for byte,
-    including any trailing whitespace).
+    Cut at the end of the last word in budget, so paragraph structure
+    survives. A body within budget is returned unchanged.
     """
     if prefix_tokens < 0:
         raise ValueError(f"prefix_tokens must be non-negative, got {prefix_tokens}")
@@ -444,10 +398,8 @@ def embeddable_text(
     """The text an entry is embedded from (SPEC.md §7): the summary whole,
     plus a bounded prefix of the body.
 
-    The bound is counted in **prefix tokens** — whitespace-delimited
-    words, *not* a model tokenizer's tokens (ADR 0021). The same text is
-    what the extractor reads (ADR 0016, SPEC §13.1), so the two stay in
-    lockstep by construction.
+    The bound is in whitespace-delimited words (ADR 0021). The extractor
+    reads the same text (SPEC §13.1).
     """
     text = summary
     if body:

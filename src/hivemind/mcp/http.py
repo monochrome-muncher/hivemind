@@ -1,24 +1,10 @@
 """The hostable, multi-agent streamable-HTTP MCP runner (ADR 0010).
 
-One long-lived process serves an *unlimited* number of agents over a
-single streamable-HTTP endpoint. Each agent authenticates **per
-request** with its own agent-scoped key (ADR 0008); all agents share one
-Postgres pool and one embedder. Every write carries that agent's
-*verified* provenance (never self-reported).
-
-The seam: the acting credential is resolved per request by an ASGI
-auth middleware (:class:`BearerAuthMiddleware`) that verifies the
-request's API key against the ``Authenticator`` port (the Postgres
-``credentials`` table) and stashes the resolved ``Credential`` in a
-per-task context var. ``build_server`` (``server.py``) re-binds the
-shared, *stateless* services to that credential on every tool dispatch,
-so one process = many agents. Contrast the per-agent stdio runner
-(``main_pg``, ADR 0009): here the credential is per *request*, so
-revocation is immediate (no restart required).
-
-``main_http`` (console: ``hivemind-mcp-http``) is the entry point: one
-``PgStore`` + one OpenAI-compatible embedder + one ``Authenticator``
-pool, served over ``uvicorn``.
+One process serves any number of agents, each authenticating **per
+request** with its own key (ADR 0008) over shared pools.
+:class:`BearerAuthMiddleware` verifies the key and stashes the
+``Credential`` in a context var; ``build_server`` re-binds the stateless
+services to it on every dispatch, so revocation is immediate.
 """
 
 from __future__ import annotations
@@ -44,10 +30,8 @@ from hivemind.services.search import SearchService
 
 logger = logging.getLogger(__name__)
 
-# The acting credential for the *current* request. Set by the auth
-# middleware, read by ``build_server``'s ``credential_provider`` on each
-# tool dispatch. Per-task: an ASGI request is one asyncio task, so the
-# value is visible to the tool dispatch within that request.
+# The acting credential for the current request (one ASGI request = one
+# task), set by the auth middleware and read on each tool dispatch.
 _current_credential: ContextVar[Credential | None] = ContextVar(
     "hivemind_mcp_credential", default=None
 )
@@ -59,11 +43,7 @@ def current_credential() -> Credential | None:
 
 
 def make_credential_provider() -> Callable[[], Credential | None]:
-    """A zero-arg callable for ``build_server``'s ``credential_provider``.
-
-    It reads the per-request credential set by :class:`BearerAuthMiddleware`,
-    so each tool dispatch acts as the key that authenticated that request.
-    """
+    """``build_server``'s ``credential_provider``: the request's credential."""
     return _current_credential.get
 
 
@@ -104,9 +84,8 @@ async def _send_unauthorized(send: Send) -> None:
 
 
 async def _send_store_unavailable(send: Send) -> None:
-    """503 + Retry-After when verifying the key timed out on the store (the
-    pool is saturated or the database unreachable): the key may be fine,
-    so a 401 would send the client down the wrong path (ROADMAP 3.13)."""
+    """503 + Retry-After when key verification timed out on the store: the
+    key may be fine, so a 401 would mislead (ROADMAP 3.13)."""
     body = json.dumps(
         {"error": "store_unavailable", "detail": "the database is busy; retry shortly"}
     ).encode()
@@ -124,10 +103,8 @@ async def _send_store_unavailable(send: Send) -> None:
     await send({"type": "http.response.body", "body": body})
 
 
-# Hivemind has no OAuth: MCP clients that get a 401 probe these discovery
-# documents and, on anything but a 404, start an OAuth flow and report
-# confusing "dynamic client registration" errors instead of "your key was
-# rejected". A plain 404 says "no OAuth here" (ONB-8, ADR 0042).
+# No OAuth here: MCP clients probe these after a 401, and anything but a
+# 404 starts a confusing OAuth flow (ONB-8, ADR 0042).
 _OAUTH_DISCOVERY_PREFIX = "/.well-known/oauth-"
 
 
@@ -147,12 +124,8 @@ async def _send_not_found(send: Send) -> None:
 
 
 class BearerAuthMiddleware:
-    """A thin ASGI auth middleware: verify the request's API key against
-    the ``Authenticator`` port; on success stash the credential in the
-    per-task context var and dispatch, on failure send a 401.
-
-    Non-HTTP scopes (e.g. ``lifespan``) pass straight through so the
-    transport's session management is unaffected.
+    """Verify the request's API key; stash the credential and dispatch,
+    or send a 401. Non-HTTP scopes (``lifespan``) pass straight through.
     """
 
     def __init__(self, app: ASGIApp, authenticator: Authenticator) -> None:
@@ -183,44 +156,29 @@ class BearerAuthMiddleware:
             _current_credential.reset(token)
 
 
-# The unauthenticated orchestrator probe paths (ADR 0019). Served by the
-# ``ProbeRouter`` BELOW the (outermost) layer — i.e. OUTSIDE the auth
-# middleware — because k8s/compose probes carry no API key.
+# Unauthenticated probe paths (ADR 0019), served outside the auth
+# middleware because orchestrator probes carry no API key.
 _PROBE_LIVENESS = "/mcp/liveness"
 _PROBE_HEALTH = "/mcp/health"
 _PROBE_DATABASE = "/mcp/health/database"
-# Bound on the deep database probe (ADR 0037): a check stuck on the pool
-# answers 503 in time instead of hanging the request.
+# A deep probe stuck on the pool answers 503 in time (ADR 0037).
 _DATABASE_PROBE_TIMEOUT = 5.0
-# The deep probe is unauthenticated (ADR 0019) and costs a pool round-trip,
-# so its answer is reused for this long: a flood of GETs costs one query
-# per window, not one per request (MCP-10).
+# The deep probe's answer is reused this long, so a flood of
+# unauthenticated GETs costs one query per window (MCP-10).
 _DATABASE_PROBE_CACHE_SECONDS = 2.0
 
 
 class ProbeRouter:
     """Unauthenticated orchestrator probe endpoints (ADRs 0019, 0037).
 
-    Wraps the (auth-wrapped) MCP app and answers three GET paths BEFORE
-    the auth middleware ever sees them:
+    Answers three GET paths before the auth middleware; everything else
+    is delegated untouched:
 
-    * ``GET /mcp/liveness`` — shallow: 200 ``{"status": "ok"}`` whenever
-      the process answers (no dependency checks).
-    * ``GET /mcp/health`` — shallow too (ADR 0037): the readiness probe.
-      Readiness must not depend on the one shared database: an outage
-      would pull every replica out of service at once, turning a blip
-      into "Hivemind is gone" for every agent, with no replica left to
-      serve anything once the database is back.
-    * ``GET /mcp/health/database`` — deep, for people and monitoring:
-      200 ``{"status": "ok", "database": "ok"}`` when
-      ``store.health_check()`` answers within ``_DATABASE_PROBE_TIMEOUT``;
-      503 otherwise. The store logs why (the exception) — the response
-      never carries connection details.
-
-    Everything else (the ``/mcp`` MCP transport surface, non-GET
-    methods, non-HTTP scopes like ``lifespan``) is delegated untouched
-    so the MCP app's session management and the auth middleware are
-    unaffected.
+    * ``/mcp/liveness`` — shallow, 200 whenever the process answers.
+    * ``/mcp/health`` — the readiness probe, also shallow (ADR 0037): a
+      database outage must not pull every replica out at once.
+    * ``/mcp/health/database`` — deep, for people and monitoring: 200 or
+      503; the cause is logged, never returned.
     """
 
     def __init__(self, app: ASGIApp, store: Store) -> None:
@@ -298,13 +256,9 @@ def _split_csv(value: str) -> list[str]:
 def build_transport_security(settings: Settings, host: str) -> TransportSecuritySettings | None:
     """The MCP SDK's DNS-rebinding (Host/Origin) protection settings.
 
-    Unset ``HIVEMIND_MCP_ALLOWED_HOSTS`` keeps the SDK default, which
-    protects only a loopback bind and is OFF on ``0.0.0.0`` (so an ingress
-    in front, whose Host is the public name, keeps working — ADR 0042).
-    Set it (comma-separated Host header values, ``name`` or ``name:*``) to
-    turn the check on for any bind; ``HIVEMIND_MCP_ALLOWED_ORIGINS`` then
-    also admits those browser Origins (empty = non-browser clients only).
-    Origins without hosts is a configuration error.
+    ``None`` (the SDK default: loopback binds only) when no hosts are set
+    (ADR 0042); see ``Settings.mcp_allowed_hosts``. Origins without hosts
+    is a configuration error.
     """
     hosts = _split_csv(settings.mcp_allowed_hosts)
     origins = _split_csv(settings.mcp_allowed_origins)
@@ -327,16 +281,8 @@ def build_http_app(
     embedder: Embedder,
     authenticator: Authenticator,
 ) -> ASGIApp:
-    """One shared pool, many agents: build the streamable-HTTP ASGI app.
-
-    The ``store`` / ``embedder`` / services are *shared and stateless*
-    across all requests; the acting credential is resolved per request by
-    :class:`BearerAuthMiddleware` (the ``Authenticator`` port) and
-    re-bound to the services on every tool dispatch. The result is a
-    single ASGI app (the MCP ``streamable_http_app`` wrapped in the auth
-    middleware) that serves an unlimited number of agents, each with its
-    own verified provenance (ADR 0010).
-    """
+    """Build the streamable-HTTP ASGI app: shared stateless services,
+    credential per request (ADR 0010)."""
     from hivemind.extractor import build_extractor
 
     search_config = settings.search_config()
@@ -360,23 +306,12 @@ def build_http_app(
     mcp_app = server.streamable_http_app(
         stateless_http=True, host=host, transport_security=build_transport_security(settings, host)
     )
-    # Outermost layer: the unauthenticated probe router (ADR 0019) wraps
-    # the auth-wrapped MCP app, so the k8s/compose probes are answered
-    # without any API key while the MCP surface stays fully protected.
+    # Probes outermost (ADR 0019): answered without a key, MCP stays protected.
     return ProbeRouter(BearerAuthMiddleware(mcp_app, authenticator), store)
 
 
 def main_http() -> None:
-    """Console entry point (``hivemind-mcp-http``): one hostable
-    streamable-HTTP process.
-
-    One long-lived process serves an unlimited number of agents over a
-    single endpoint, with one ``PgStore`` + one embedder + one
-    ``Authenticator`` pool (ADR 0010). Each agent authenticates per
-    request with its own agent-scoped key (ADR 0008); all agents share one
-    Postgres pool, and each write carries that agent's verified
-    provenance (never self-reported).
-    """
+    """Console entry point (``hivemind-mcp-http``, ADR 0010)."""
     import uvicorn
 
     from hivemind.embeddings import build_embedder

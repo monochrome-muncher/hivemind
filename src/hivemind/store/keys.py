@@ -1,27 +1,15 @@
 """Issue, rotate, and revoke API keys for the credential model (ADRs 0008, 0012).
 
-Console entry point (``hivemind-keys``). Raw keys are random 32-byte
-secrets printed **once** at issuance; only their SHA-256 hash is stored
-in the ``credentials`` table (a leaked database never leaks usable keys
-— SPEC.md §8.1).
+Console entry point (``hivemind-keys``). Raw keys are printed **once**;
+only their SHA-256 hash is stored (SPEC.md §8.1). Three kinds (ADR
+0012): the shared **org** key (registration + health only; ``rotate-org``
+closes registration to prior copies, ADR 0031), one **agent** key per
+registered agent, and **admin** keys.
 
-The v2 key model (ADR 0012) reduces the keys to three:
-
-* **org key** — one shared key; gates registration + health only.
-  Rotated via ``rotate-org`` (closes registration to every prior copy, ADR 0031).
-* **agent key** — one per registered agent, issued under its registered
-  name; the agent's trust level + home fleet ride on the key (ADR 0011).
-* **admin key** — full access (fleet/level management, org-key rotation).
-
-``user`` keys are retired: agents are first-class and register under a
-name; their key is issued at activation.
-
-Every mutating command (all but ``list``) appends a ``cli`` row to the
-audit log in the same transaction as the change (ADR 0027). The row's
-actor is ``--actor`` (default: the OS user) and is **unverified** —
-anyone with database access can type any name — which is why its
-``actor_kind`` is ``cli``, never ``admin_key``. No raw key is recorded:
-admin keys appear by their 12-char fingerprint.
+Every mutating command audits a ``cli`` row in the same transaction
+(ADR 0027). Its actor (``--actor``, default the OS user) is
+**unverified**, hence ``actor_kind`` ``cli``. Keys appear only by
+fingerprint.
 
 Usage:
     hivemind-keys [--actor NAME] issue-admin
@@ -91,10 +79,9 @@ class AgentKeyExists(Exception):
 
 
 class AgentNeedsActivation(Exception):
-    """``issue-agent`` refused: the agent is ``pending`` or ``revoked``, so
-    a key needs an activation, and an activation needs an explicit trust
-    level and home fleet (the same act as ``POST .../activate``, ADR 0039)
-    — never a silent restore of a revoked agent's stale trust and fleet."""
+    """``issue-agent`` refused: a ``pending`` or ``revoked`` agent needs an
+    activation with an explicit trust level and home fleet (ADR 0039),
+    never a silent restore of stale values."""
 
     def __init__(self, name: str, status: str) -> None:
         super().__init__(f"agent {name!r} is {status}: pass --trust-level and --home-fleet")
@@ -103,10 +90,8 @@ class AgentNeedsActivation(Exception):
 
 
 class ActivationFlagsNotApplicable(Exception):
-    """``issue-agent`` refused: ``--trust-level`` / ``--home-fleet`` were
-    given for an agent that is already ``active``. Changing an active
-    agent's level or fleet is the admin PATCH, not key issuance, so the
-    flags are rejected rather than silently ignored (ADR 0039)."""
+    """``issue-agent`` refused: activation flags given for an ``active``
+    agent (changing those is the admin PATCH; ADR 0039)."""
 
 
 class UnknownFleet(Exception):
@@ -114,10 +99,8 @@ class UnknownFleet(Exception):
 
 
 class AgentNotRegistered(Exception):
-    """``issue-agent`` refused: the name has no agent record. A key for an
-    unregistered name would mint a credential that resolves to a
-    non-identity (ADR 0012: keys are bound to registered names), so the
-    CLI says so loudly instead of issuing a dangling key."""
+    """``issue-agent`` refused: the name has no agent record (keys are
+    bound to registered names, ADR 0012)."""
 
 
 def _raw_key() -> str:
@@ -126,13 +109,9 @@ def _raw_key() -> str:
 
 
 def default_actor() -> str:
-    """The ``--actor`` default: the OS user running the CLI (ADR 0027).
-    Unverified — it is only as honest as whoever runs the command.
-
-    A container running under an arbitrary uid with no passwd entry and
-    no ``USER``/``LOGNAME`` makes ``getpass.getuser`` raise; the CLI must
-    still work there (it is the break-glass tool), so fall back to the
-    numeric uid rather than fail."""
+    """The ``--actor`` default: the OS user (ADR 0027), unverified. Falls
+    back to the numeric uid when there is no passwd entry, since this
+    break-glass tool must still work in such containers."""
     try:
         return getpass.getuser()
     except OSError, KeyError:
@@ -146,10 +125,8 @@ async def _audit(
     target: str | None,
     detail: dict[str, str] | None = None,
 ) -> None:
-    """Append a ``cli`` audit row on ``conn`` — called inside the same
-    transaction as the mutation, so the two commit or roll back together
-    (ADR 0027). Deliberately takes no key: ``target`` is an agent name or
-    a key *fingerprint*, so a raw key cannot reach an audit column."""
+    """Append a ``cli`` audit row in the mutation's transaction (ADR
+    0027). Takes no key: ``target`` is a name or a key fingerprint."""
     await conn.execute(
         _INSERT_AUDIT,
         ActorKind.CLI.value,
@@ -192,14 +169,10 @@ async def _issue_agent(
     """Issue an agent key bound to the registered agent name (ADR 0012).
     Audited as ``agent_key.issue`` with the agent name as target.
 
-    Consistent with REST activate (ADR 0039). Refuses
-    (``AgentNotRegistered``) when the name has no agent record. An
-    ``active`` agent that holds a key is refused (``AgentKeyExists`` — one
-    key per agent, ADR 0028); an ``active`` agent with no key just gets
-    one. A ``pending`` or ``revoked`` agent is refused
-    (``AgentNeedsActivation``) unless ``trust_level`` and ``home_fleet_id``
-    are both given, in which case it is activated with exactly those
-    values (never the stale ones) in the same transaction as the key."""
+    Consistent with REST activate (ADR 0039): an active agent with no key
+    gets one; one that has a key is refused (ADR 0028). A pending or
+    revoked agent needs ``trust_level`` and ``home_fleet_id`` and is
+    activated with them in the same transaction."""
     raw_key = _raw_key()
     conn = await asyncpg.connect(dsn)
     try:
@@ -271,13 +244,10 @@ async def _bootstrap_secret(
     """First-run key bootstrap (ADR 0044): issue an admin key and rotate the
     org key, and store both raw keys in the Kubernetes Secret ``name``.
 
-    Returns ``False`` without touching anything when the Secret already
-    exists. The keys are never printed. The Secret is created **inside**
-    the database transaction, before the commit: if the create fails, the
-    keys are rolled back, so a failed run leaves no orphan admin key and no
-    rotated org key, and can simply be re-run. If the commit itself fails
-    after the Secret was created, the Secret is deleted again (best effort)
-    so it never holds keys the database does not."""
+    Returns ``False`` if the Secret exists. The keys are never printed.
+    The Secret is created inside the transaction, so a failed create
+    rolls the keys back and the run can be repeated; a failed commit
+    deletes the Secret again (best effort)."""
     if await asyncio.to_thread(secrets_api.exists, name):
         return False
     who = actor or default_actor()
@@ -326,10 +296,8 @@ async def _list(dsn: str) -> None:
 
 
 async def _revoke(dsn: str, name: str, *, actor: str | None = None) -> None:
-    """Retire an agent's key and set it ``revoked`` (the name stays
-    reserved, ADRs 0012, 0028). Audited as ``agent.revoke`` with the
-    agent name as target and the prior status as ``detail.from`` (when
-    the agent has a record)."""
+    """Retire an agent's key and set it ``revoked``; the name stays
+    reserved (ADRs 0012, 0028)."""
     conn = await asyncpg.connect(dsn)
     try:
         async with conn.transaction():
@@ -351,16 +319,9 @@ async def _revoke_admin(
 ) -> bool:
     """Revoke a specific admin key — the second half of admin-key rotation.
 
-    Targets the admin row by either the raw secret (SHA-256 hashed
-    first, SPEC §8.1) or the stored SHA-256 hex that ``hivemind-keys
-    list`` prints. Returns ``True`` if an admin row was deleted, or
-    ``False`` if nothing matched (the CLI then exits non-zero so the
-    no-op is loud from a script — DEPLOY.md §5).
-
-    A successful revocation is audited as ``admin_key.revoke`` with the
-    key's **fingerprint** as target — whichever form identified it (a
-    raw key is normalised to its hash first, so it never reaches the
-    audit row). A no-op records nothing."""
+    Targets the row by raw secret or by the stored hash (or its listed
+    fingerprint prefix). Returns whether a row was deleted; the CLI exits
+    non-zero on a no-op (DEPLOY.md §5). Only a deletion is audited."""
     if stored_hash is not None:
         target = stored_hash.strip().lower()
         if len(target) < _MIN_HASH_PREFIX or any(c not in "0123456789abcdef" for c in target):

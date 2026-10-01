@@ -1,9 +1,6 @@
 """In-memory Store implementation (SPEC.md §4).
 
-A faithful, dependency-free reference implementation of the ``Store``
-port: used by the unit/integration suite (without a live database)
-and by local dev mode. Postgres-specific adapters live elsewhere and
-implement the same port.
+The dependency-free reference ``Store``, for tests and local dev mode.
 
 Determinism notes (for test stability):
 * Keyword scoring: number of *distinct* query tokens present in the
@@ -105,11 +102,7 @@ class MemoryStore:
         entities_model: str | None = None,
     ) -> Entry:
         """Insert a new entry, flipping any ``draft.supersedes`` targets to
-        the ``superseded`` state (SPEC.md §4.1, §7).
-
-        ``embedding`` / ``embedding_model`` are recorded on the entry so
-        the model that produced the vector is traceable (SPEC.md §7).
-        """
+        ``superseded`` (SPEC.md §4.1, §7)."""
         now = self._clock()
         entry = Entry(
             id=new_entry_id(),
@@ -273,8 +266,7 @@ class MemoryStore:
     async def count_entries(
         self, filters: EntryFilters, *, visibility: Visibility | None = None
     ) -> int:
-        """Count entries matching ``filters`` (the minimal usage-counters
-        surface, ROADMAP §3.3) — a cheap count, not a full fetch."""
+        """Count entries matching ``filters`` (ROADMAP §3.3)."""
         with self._lock:
             return sum(
                 1
@@ -293,10 +285,8 @@ class MemoryStore:
             for entry in self._entries.values():
                 if not self._matches(entry, filters) or not self._visible(entry, visibility):
                     continue
-                # The keyword haystack is the same bounded text the entry
-                # is embedded from (default prefix-token budget, ADR 0021):
-                # the reference store has no Settings, and the two streams
-                # should see the same text.
+                # Same text the vector stream sees, at the default budget
+                # (ADR 0021; this store has no Settings).
                 haystack = _tokens(embeddable_text(entry.summary, entry.body)) | {
                     tag.lower() for tag in entry.tags
                 }
@@ -362,11 +352,7 @@ class MemoryStore:
             return [(eid, sim) for sim, _, eid in rows[:limit]]
 
     def _visible(self, entry: Entry, visibility: Visibility | None) -> bool:
-        """Whether ``entry`` passes the optional visibility filter.
-
-        ``visibility is None`` → v1 flat-pool behavior (no filter);
-        otherwise apply the trust-level matrix (ADR 0011).
-        """
+        """Whether ``entry`` passes the optional visibility filter (ADR 0011)."""
         return visibility is None or entry_is_visible(entry, visibility)
 
     async def feedback_counts(self, entry_id: str) -> FeedbackCounts:
@@ -415,12 +401,7 @@ class MemoryStore:
     # -- agent registration / activation (ADR 0012) --------------------------
 
     async def register_agent(self, name: str, owner_alias: str | None = None) -> Agent:
-        """Register (or re-register) an agent (ADR 0012). Idempotent: an
-        existing record is returned unchanged (its ``owner_alias`` is never
-        overwritten, ADR 0039); a new record is ``pending``. A name that
-        only differs in case from an existing agent's returns that agent
-        (ADR 0045).
-        """
+        """Register an agent idempotently (see ``Store.register_agent``)."""
         with self._lock:
             existing = self._agents.get(name)
             if existing is not None:

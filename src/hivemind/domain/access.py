@@ -1,9 +1,6 @@
 """Access-control domain model (SPEC.md §12, ADRs 0011-0012).
 
-Pure data + the visibility predicate — no I/O. This is the storage-
-agnostic core of the fleet/trust model: every store adapter (in-memory,
-Postgres) and both surfaces (REST, MCP) share this single definition of
-"what can this reader see?".
+Pure data and the one visibility predicate every store and surface shares.
 
 The trust ladder (SPEC §12.2, ADR 0011) is cumulative:
 
@@ -58,11 +55,9 @@ _TRUST_LEVEL_LABELS = {
 class AgentStatus(StrEnum):
     """Lifecycle of a registered agent (ADR 0012).
 
-    ``pending`` = self-registered, awaiting admin activation (no
-    data-plane access). ``active`` = admin-activated (an agent key is
-    issued; the agent holds a trust level + home fleet). ``revoked`` =
-    its key was killed, or its registration rejected (ADR 0028); the
-    name stays reserved and re-activation issues a fresh key.
+    ``pending``: awaiting activation, no data access. ``active``: has a
+    key, trust level and home fleet. ``revoked``: key killed or
+    registration rejected (ADR 0028); the name stays reserved.
     """
 
     PENDING = "pending"
@@ -95,11 +90,8 @@ SCOPE_ORG = "org"  # legacy v1 value: grandfathered read-only (ADR 0011).
 
 @dataclass(frozen=True, slots=True)
 class Fleet:
-    """A named group of agents that share ``fleet``-scoped entries
-    (ADR 0011). Created by the admin; no deletion in this increment.
-
-    ``id`` is a stable identifier (a new entry's ``fleet_id`` references
-    it, so re-parenting an agent never touches existing entries).
+    """A named group of agents sharing ``fleet``-scoped entries (ADR
+    0011). Admin-created; no deletion yet. Entries reference the stable ``id``.
     """
 
     id: str
@@ -111,11 +103,9 @@ class Fleet:
 class Agent:
     """A registered agent's record (ADR 0012) — the admin's row per agent.
 
-    ``name`` is the agent's unique registered name (it becomes the
-    entry's ``author`` for its writes; verified server-side, never
-    self-reported). ``owner_alias`` is the *human* owner's name/alias
-    (a username or email the admin uses to reach the owner out-of-band —
-    it is stored on the agent record, **not** stamped on entries).
+    ``name`` is unique and becomes the ``author`` of its writes.
+    ``owner_alias`` is the human owner's contact for the admin, kept on
+    this record only, **not** on entries.
     """
 
     name: str
@@ -185,12 +175,8 @@ class Visibility:
 def entry_is_visible(entry: Entry, v: Visibility) -> bool:
     """The visibility predicate (SPEC §12.2, ADR 0011).
 
-    Pure and total: given an entry (its ``scope``, ``fleet_id``, and
-    ``author``) and a reader's ``Visibility``, returns whether the entry
-    is visible. This is the single source of truth every store adapter
-    must implement (in-memory in Python, Postgres in SQL).
-
-    Rules:
+    The single source of truth every store adapter must implement
+    (``PgStore`` in SQL). Rules:
       * admin  -> everything.
       * level 0 (untrusted) -> nothing.
       * ``self``  -> only the entry's own author (private even at L3).
@@ -206,23 +192,16 @@ def entry_is_visible(entry: Entry, v: Visibility) -> bool:
 
     scope = entry.scope
     if scope == SCOPE_SELF:
-        # Private to the author (even at level 3) — that is what `self` is for.
         return entry.author == v.name
 
     if scope == SCOPE_ORG:
-        # Legacy org-wide value: readable at any level >= 1 (untrusted is
-        # already returned False above).
         return True
 
-    # scope == SCOPE_FLEET
+    # scope == SCOPE_FLEET. Own entries stay visible after a fleet move.
     if entry.author == v.name:
-        # My own fleet-scoped entries are always visible (they stay in the
-        # fleet they were written into, even if I've since moved fleets).
         return True
     if v.level == TrustLevel.PRIVILEGED:
-        # Level 3 reads across **all** fleets (read-broad, write-local).
         return True
-    # Lurker/contributor: visible only within my home fleet.
     return entry.fleet_id is not None and entry.fleet_id == v.home_fleet_id
 
 
@@ -232,14 +211,12 @@ def may_supersede(
     """Whether ``writer`` may supersede ``target`` with an entry written at
     ``new_scope`` into ``new_fleet_id`` (ADR 0033, SPEC §4.1).
 
-    Supersession stays a claim, within the audience the writer can
-    address: the writer must be able to read the target, and the successor
-    must reach at least everyone the predecessor reached, so a
-    supersession can never hide an entry behind a narrower one.
+    The writer must read the target, and the successor must reach at
+    least the predecessor's audience, so a supersession never hides an
+    entry behind a narrower one.
 
-      * a non-active target (already superseded or withdrawn) -> no one
-        (ADR 0034): ``superseded_by`` is single-valued, so a second claim
-        on the same target would be silently lost; re-target the head.
+      * a non-active target -> no one (ADR 0034): ``superseded_by`` is
+        single-valued, so a second claim would be lost.
       * admin -> anything (that is active).
       * ``self`` target -> only the writer's own (visibility already
         guarantees that); any successor scope reaches its one reader.

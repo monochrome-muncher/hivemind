@@ -91,14 +91,13 @@ def _no_nul(value: str | None) -> str | None:
     return check_no_nul(value, "value") if value is not None else None
 
 
-# A path name/id or query string that may name a stored record (legacy
-# names are not re-validated here, only bounded and NUL-free — ADR 0040).
-# No length cap on a name: a legacy agent registered before ADR 0040 must stay manageable.
+# Strings that may name a stored record are NUL-checked, not re-validated
+# (ADR 0040). No length cap on a path name, so a legacy agent registered
+# before ADR 0040 stays manageable.
 NameParam = Annotated[str, Path(), AfterValidator(_no_nul)]
 ActorQuery = Annotated[str | None, Query(max_length=MAX_IDENTITY_CHARS), AfterValidator(_no_nul)]
 
-# GET /v1/admin/audit-log page size (ADR 0027): a sensible default and a
-# hard ceiling, so one request can never drag the whole log over the wire.
+# GET /v1/admin/audit-log page size (ADR 0027): default and hard ceiling.
 AUDIT_LOG_DEFAULT_LIMIT = 100
 AUDIT_LOG_MAX_LIMIT = 1000
 
@@ -111,9 +110,8 @@ logger = logging.getLogger(__name__)
 
 
 def _embedding_unavailable(exc: EmbeddingError) -> ApiError:
-    """The embedding endpoint is a dependency (SPEC.md §7, ADR 0005): a
-    failure is a 502, not a bare 500. The body is a fixed message — the
-    detail is logged server-side, never returned to the caller (PC-1)."""
+    """An embedding failure is a 502 (SPEC.md §7, ADR 0005) with a fixed
+    message; the detail is logged, never returned (PC-1)."""
     logger.warning("embedding unavailable: %s", exc)
     return api_error(502, "embedding_unavailable", "the embedding service is unavailable")
 
@@ -175,24 +173,18 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
                 "agent identity is required: use an agent sub-key or pass 'agent'",
             )
         try:
-            # The write scope is resolved from the credential (ADR 0011-0012):
-            # the default is the highest scope the trust level permits, an
-            # out-of-permission scope is rejected (403), and the entry's
-            # ``author`` is the agent's registered name (verified server-
-            # side, never self-reported — ADR 0012).
+            # Scope and author come from the credential (ADRs 0011-0012);
+            # an out-of-permission scope is a 403.
             author = credential.agent_name or credential.user_id
             resolution = resolve_write_scope(credential, payload.scope)
-            # ROADMAP §4.5: an omitted importance resolves to the default
-            # (3) with provenance `default`; a supplied value keeps its
-            # provenance `caller` (the 1..5 range is still enforced below).
+            # Importance provenance (ROADMAP §4.5); the range is checked below.
             if payload.importance is None:
                 importance = 3
                 importance_source = ImportanceSource.DEFAULT
             else:
                 importance = payload.importance
                 importance_source = ImportanceSource.CALLER
-            # Draft validation (SPEC.md §4.1) runs here: a malformed draft
-            # (e.g. out-of-range importance) is a 422, not a 500.
+            # Draft validation (SPEC.md §4.1): a malformed draft is a 422.
             draft = EntryDraft(
                 kind=payload.kind,
                 summary=payload.summary,
@@ -483,8 +475,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         except InvalidInput as exc:
             raise api_error(422, "invalid_input", str(exc)) from exc
         except ValueError as exc:
-            # The service raises ValueError when the caller's agent identity
-            # is unresolved (a plain user key without a self-reported agent).
+            # ValueError: the caller's agent identity is unresolved.
             raise api_error(422, "agent_identity_required", str(exc)) from exc
         return FeedbackOut(
             entry_id=outcome.feedback.entry_id,
@@ -597,9 +588,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         if payload.trust_level is None and payload.home_fleet_id is None:
             raise api_error(422, "update_required", "supply trust_level and/or home_fleet_id")
         try:
-            # Resolve the fleet reference BEFORE any mutation, so a
-            # two-field PATCH cannot half-apply: a typo'd fleet id is a
-            # typed 404 and the trust level is left untouched.
+            # Resolve the fleet BEFORE any mutation so a PATCH cannot half-apply.
             if (
                 payload.home_fleet_id is not None
                 and await app.store.get_fleet(payload.home_fleet_id) is None

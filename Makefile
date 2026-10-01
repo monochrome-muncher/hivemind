@@ -1,25 +1,20 @@
 # Hivemind dev workflow. All commands are thin wrappers around uv + docker compose.
 .DEFAULT_GOAL := help
 PG_DSN ?= postgresql://hivemind:hivemind@localhost:5432/hivemind
-# Local vLLM dev embedding endpoint (make vllm; ADR 0005 self-hosted path).
-# Override on a target to point at a different embeddings endpoint, e.g.
-# `make api HIVEMIND_EMBEDDING_ENDPOINT=https://api.openai.com/v1`.
+# Local vLLM embedding endpoint (make vllm; ADR 0005). Override per target,
+# e.g. `make api HIVEMIND_EMBEDDING_ENDPOINT=https://api.openai.com/v1`.
 export HIVEMIND_DATABASE_URL ?= $(PG_DSN)
 export HIVEMIND_EMBEDDING_ENDPOINT ?= http://localhost:8001/v1
 export HIVEMIND_EMBEDDING_MODEL ?= Qwen/Qwen3-Embedding-0.6B
-# Dev dim: 512 (fast local vLLM embedding, ADR 0005 self-hosted path).
-# The *code* default is 1024 (ADR 0015 — we never assume 1536); a pool
-# provisioned at a different dim is a loud, actionable error at
-# `hivemind-migrate` time (ADR 0015), never a silent no-op.
+# Dev dim 512 (fast local vLLM). The code default is 1024 (ADR 0015); a
+# pool provisioned at another dim fails loudly at `hivemind-migrate`.
 export HIVEMIND_EMBEDDING_DIM ?= 512
 # Locally the environment is entirely ours, so a typo'd HIVEMIND_* variable
 # fails startup instead of only warning (ADR 0032).
 export HIVEMIND_STRICT_ENV ?= true
-# Entity-extraction extractor (ADR 0016, SPEC §13): OFF by default — an
-# empty endpoint means extraction is off and entries land with empty
-# `entities` (zero LLM-extraction cost, the "no authenticator = dev
-# mode" stance). Extraction is optional + best-effort: a failure never
-# blocks a write. Enable per target, e.g.
+# Entity extraction (ADR 0016, SPEC §13): empty endpoint = OFF (empty
+# `entities`, no LLM cost). Best-effort: a failure never blocks a write.
+# Enable per target, e.g.
 #   make api HIVEMIND_EXTRACTOR_ENDPOINT=http://localhost:8080/v1 \
 #            HIVEMIND_EXTRACTOR_MODEL=qwen3.8-27b HIVEMIND_EXTRACTOR_API_KEY=dummy
 export HIVEMIND_EXTRACTOR_ENDPOINT ?=
@@ -31,8 +26,7 @@ export HIVEMIND_MCP_KEY ?=
 # Host/port for the hostable streamable-HTTP MCP runner (ADR 0010).
 export HIVEMIND_HOST ?= 127.0.0.1
 export HIVEMIND_PORT ?= 8000
-# Host port for the mcp-http docker service (default/fallback 8088). The
-# container always binds 8088 - only the host mapping changes.
+# Host port for the mcp-http docker service; the container always binds 8088.
 export HIVEMIND_MCP_HTTP_PORT ?= 8088
 
 .PHONY: help

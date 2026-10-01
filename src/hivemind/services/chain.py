@@ -1,19 +1,10 @@
 """The supersession-chain walk (SPEC.md §5.1 ``?history``, §5.2 ``hive_get``).
 
-A deep module over the ``Store`` port: one small function
-(``supersession_chain``) that returns an entry's ``(successors,
-superseded)`` — the newer versions it was replaced by, and the older
-versions it replaced. Both walks are bounded so a corrupt chain cannot
-loop, and the reverse walk asks the store for each frontier's
-predecessors (``Store.list_predecessors``, served by the partial
-``superseded_by`` index of migration 0008) — one query per hop, so the
-cost follows the chain, not the pool.
-
-The walk also has a version budget (``_MAX_HISTORY_VERSIONS``, one list
-page): every write may supersede up to ``MAX_SUPERSEDES`` entries, so
-without it an agent could build a legal tree of thousands of
-predecessors (each with a 100 000-character body) and make every
-``?history`` call load all of them.
+Also the visibility-checked reads by id (ADR 0033) and "see also" links.
+The walk has a version budget (``_MAX_HISTORY_VERSIONS``): since a write
+may supersede up to ``MAX_SUPERSEDES`` entries, an agent could otherwise
+build a legal tree of thousands of large predecessors for every
+``?history`` call to load.
 """
 
 from __future__ import annotations
@@ -104,19 +95,13 @@ async def supersession_chain(
 ) -> tuple[list[Entry], list[Entry]]:
     """Return ``(successors, superseded)`` for an entry's chain.
 
-    ``successors`` are the newer versions reachable by following
-    ``superseded_by`` forward. ``superseded`` are the older versions this
-    entry replaced. Both walks are bounded (``max_hops``) so a corrupt
-    chain cannot loop; the reverse walk is one indexed
-    ``Store.list_predecessors`` call per hop.
+    ``successors`` are the newer versions, ``superseded`` the older ones.
+    Both walks are bounded by ``max_hops``. At most ``max_versions`` are
+    loaded in all, successors first, then predecessors breadth-first; a
+    longer chain comes back truncated.
 
-    At most ``max_versions`` versions are loaded in all: successors first
-    (the newest version matters most), then predecessors breadth-first,
-    newest first. A chain longer than that comes back truncated.
-
-    With ``visibility``, versions that reader may not see are left out
-    (ADR 0033) — the walk still passes through them, it just never
-    returns them. ``None`` returns everything (internal callers only).
+    With ``visibility``, unreadable versions are walked through but not
+    returned (ADR 0033); ``None`` returns everything (internal callers only).
     """
     successors: list[Entry] = []
     cursor = entry
@@ -129,22 +114,16 @@ async def supersession_chain(
         if nxt is None:
             break
         if nxt.id in seen:
-            # A corrupt ``superseded_by`` cycle: stop rather than loop
-            # (the walk is bounded anyway, but dedup keeps the result
-            # sane — the reverse walk dedups the same way).
+            # A corrupt cycle: stop (the reverse walk dedups the same way).
             break
         successors.append(nxt)
         seen.add(nxt.id)
         cursor = nxt
 
     # Reverse walk, frontier by frontier: one indexed ``list_predecessors``
-    # call per hop (migration 0008's partial ``superseded_by`` index), so the
-    # cost follows the chain's depth, never the pool's size. Unfiltered on
-    # purpose: the walk passes through versions the reader cannot see.
-    # Each version has at most MAX_SUPERSEDES predecessors (one write set
-    # their ``superseded_by``), so asking for ``budget // MAX_SUPERSEDES``
-    # nodes at a time, and stopping once a hop has loaded the budget, never
-    # loads much more than the budget.
+    # call per hop (migration 0008), so cost follows the chain, not the
+    # pool. A version has at most MAX_SUPERSEDES predecessors, so batches
+    # of ``budget // MAX_SUPERSEDES`` never load much more than the budget.
     superseded: list[Entry] = []
     frontier = [entry]
     seen = {entry.id}

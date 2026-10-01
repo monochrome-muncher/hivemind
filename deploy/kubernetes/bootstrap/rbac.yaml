@@ -1,16 +1,13 @@
-# RBAC for the first-run key bootstrap Job (ADR 0044) — applied and removed
-# again by scripts/ci-bootstrap-keys.sh around the Job, ONLY while the
-# `hivemind-keys` Secret does not exist. Deliberately NOT part of any
-# kustomization, like keys-job.yaml.
+# RBAC for the first-run key bootstrap Job (ADR 0044), applied and removed
+# by scripts/ci-bootstrap-keys.sh around the Job; not in any kustomization.
 #
-# The Job writes the raw admin and org keys straight into the Secret instead
-# of printing them, so it needs exactly this:
-#   * create Secrets in the namespace (Kubernetes cannot narrow `create` by
-#     name; the Job only ever creates `hivemind-keys`),
-#   * get `hivemind-keys` (the idempotency check) and delete it (the cleanup
-#     when the database commit fails after the Secret was created).
+# The Job writes the keys into the Secret, so it needs exactly:
+#   * create Secrets (`create` cannot be narrowed by name; the Job only
+#     creates `hivemind-keys`),
+#   * get `hivemind-keys` (idempotency) and delete it (cleanup when the DB
+#     commit fails after the Secret was created).
 # The deploy identity needs the same Secret permissions to create this Role
-# (Kubernetes RBAC escalation check); it already creates `hivemind-secrets`.
+# (RBAC escalation check); it already creates `hivemind-secrets`.
 apiVersion: v1
 kind: ServiceAccount
 metadata:

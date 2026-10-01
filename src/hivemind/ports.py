@@ -1,19 +1,12 @@
 """Port definitions — the seams the TDD suite tests at.
 
-These are the only boundaries the rest of the system depends on:
+* ``Store`` — data access (``MemoryStore`` for dev/tests, ``PgStore``).
+* ``Embedder`` — text to a fixed-dimension vector.
+* ``Extractor`` — entity facets from entry text (ADR 0016, SPEC §13);
+  optional (absent ⇒ extraction off).
+* ``Authenticator`` — API key to credential, plus key management.
 
-* ``Store`` — data access. Implemented by ``MemoryStore`` (dev/tests)
-  and the Postgres adapter (production). Everything above the store
-  is storage-agnostic.
-* ``Embedder`` — turns text into a fixed-dimension vector. Implemented
-  by an OpenAI-compatible client; faked in unit tests.
-* ``Extractor`` — extracts entity facets from entry text (ADR 0016,
-  SPEC §13). Implemented by an OpenAI-compatible chat client; faked in
-  unit tests; optional (absent ⇒ extraction off).
-* ``Authenticator`` — maps an API key to a credential. Implemented by
-  a Postgres-backed credential table in production; faked in tests.
-
-Tests live at these seams and nowhere inside them (TDD skill).
+Tests live at these seams and nowhere inside them.
 """
 
 from __future__ import annotations
@@ -68,27 +61,14 @@ class Store(Protocol):
         entities_model: str | None = None,
     ) -> Entry:
         """Insert a new entry and flip any ``draft.supersedes`` targets
-        to the ``superseded`` state (SPEC.md §4.1). Returns the stored
-        Entry (with server-assigned ``id``/``created_at``).
+        to ``superseded`` (SPEC.md §4.1); return the stored Entry.
 
-        ``embedding_model`` (SPEC.md §7) records which model produced
-        ``embedding`` so the vector's provenance is traceable per entry.
-
-        ``entities`` / ``entities_model`` (ADR 0016, SPEC §13) record the
-        machine-extracted entity facets and the extractor model that
-        produced them (provenance, symmetric with ``embedding_model``).
-
-        Atomic supersession (ADR 0034): every ``draft.supersedes`` target
-        must be an existing ``active`` entry at the moment of the flip,
-        checked and flipped atomically with the insert. If any target is
-        unknown or no longer active (e.g. a concurrent writer superseded
-        or withdrew it first) the whole write is rolled back and
-        ``SupersedeConflict`` is raised; nothing is inserted.
-
-        ``draft.see_also`` (ADR 0057) is stored as links from the new
-        entry, in the same transaction. The caller has already checked
-        that the writer may read every target; ids that name no entry are
-        dropped.
+        ``embedding_model`` / ``entities_model`` record provenance
+        (SPEC.md §7, ADR 0016). Supersession is atomic (ADR 0034): if any
+        target is unknown or no longer active, nothing is written and
+        ``SupersedeConflict`` is raised. ``draft.see_also`` links (ADR
+        0057) go in the same transaction; the caller has checked read
+        access, and ids naming no entry are dropped.
         """
         ...
 
@@ -99,12 +79,9 @@ class Store(Protocol):
         ...
 
     async def list_predecessors(self, entry_ids: list[str]) -> list[Entry]:
-        """Every entry whose ``superseded_by`` is one of ``entry_ids`` —
-        the reverse link of the supersession chain (SPEC §5.1 ``?history``),
-        in any order. Unfiltered by state or visibility: the chain walk
-        passes through entries the reader cannot see and filters what it
-        returns (ADR 0033). Served by the partial ``superseded_by`` index
-        (migration 0008), so the cost follows the chain, not the pool."""
+        """Every entry whose ``superseded_by`` is one of ``entry_ids``, in
+        any order (SPEC §5.1 ``?history``). Unfiltered by state or
+        visibility: the chain walk filters what it returns (ADR 0033)."""
         ...
 
     async def entry_links(self, entry_id: str, limit: int) -> tuple[list[str], list[str]]:
@@ -132,10 +109,9 @@ class Store(Protocol):
         ...
 
     async def usage_counts(self) -> list[UsageCount]:
-        """One row per distinct (scope, kind, importance_source, author,
-        fleet_id, active) combination present in the pool, with its entry
-        count — every state included (the ROADMAP §3.3 counters are folded
-        from these in ``MetricsService``, in a single grouped scan)."""
+        """Entry counts per (scope, kind, importance_source, author,
+        fleet_id, active), every state included; ``MetricsService`` folds
+        them into the ROADMAP §3.3 counters."""
         ...
 
     async def record_search(self, fleet_id: str | None, *, empty: bool) -> None:
@@ -150,11 +126,9 @@ class Store(Protocol):
         ...
 
     async def withdraw_entry(self, entry_id: str, reason: str | None, by_user: str) -> Entry:
-        """Flip an entry to ``withdrawn`` (SPEC.md §4.1). Only active
-        entries can be withdrawn; ``by_user`` is the API-layer audit of
-        who withdrew it (v1 persists the reason, not the withdrawer —
-        SPEC.md §4.1 lists ``withdrawn_reason`` only). Raises
-        ``KeyError`` if unknown, ``ValueError`` if not active.
+        """Flip an active entry to ``withdrawn`` (SPEC.md §4.1). Only the
+        reason is persisted, not ``by_user``. ``KeyError`` if unknown,
+        ``ValueError`` if not active.
         """
         ...
 
@@ -166,29 +140,22 @@ class Store(Protocol):
         *,
         visibility: Visibility | None = None,
     ) -> list[Entry]:
-        """List / filter entries (SPEC §5.1). When ``visibility`` is
-        supplied, only entries visible to that reader are returned
-        (ADR 0011); ``None`` keeps the v1 flat-pool behavior."""
+        """List / filter entries (SPEC §5.1), restricted to what
+        ``visibility`` may read (ADR 0011); ``None`` = the v1 flat pool."""
         ...
 
     async def count_entries(
         self, filters: EntryFilters, *, visibility: Visibility | None = None
     ) -> int:
-        """Count entries matching ``filters`` (SPEC §5.3; the minimal
-        usage-counters surface, ROADMAP §3.3). A cheap ``COUNT`` in
-        Postgres, not a full ``list_entries`` fetch. ``visibility``
-        behaves like ``list_entries`` (ADR 0011); ``None`` keeps the
-        flat-pool count."""
+        """Count entries matching ``filters`` (SPEC §5.3) without fetching
+        them; ``visibility`` as in ``list_entries``."""
         ...
 
     async def search_keyword(
         self, query: str, filters: EntryFilters, limit: int, *, visibility: Visibility | None = None
     ) -> list[str]:
-        """Ranked entry IDs by keyword relevance (descending).
-
-        When ``visibility`` is supplied, only entries visible to that
-        reader are candidates (ADR 0011); ``None`` keeps the v1 behavior.
-        """
+        """Ranked entry IDs by keyword relevance (descending);
+        ``visibility`` as in ``list_entries``."""
         ...
 
     async def search_vector(
@@ -199,11 +166,8 @@ class Store(Protocol):
         *,
         visibility: Visibility | None = None,
     ) -> list[str]:
-        """Ranked entry IDs by embedding similarity (descending).
-
-        When ``visibility`` is supplied, only entries visible to that
-        reader are candidates (ADR 0011); ``None`` keeps the v1 behavior.
-        """
+        """Ranked entry IDs by embedding similarity (descending);
+        ``visibility`` as in ``list_entries``."""
         ...
 
     async def similar_entries(
@@ -233,11 +197,10 @@ class Store(Protocol):
     # -- agent registration / activation (ADR 0012) ----------------------------
 
     async def register_agent(self, name: str, owner_alias: str | None = None) -> Agent:
-        """Register (or re-register) an agent. Idempotent: an existing
-        record is returned unchanged; a new record is ``pending`` (level 0,
-        no fleet) — ADR 0012. When ``name`` differs only in case from an
-        existing agent's name, nothing is created and **that** agent is
-        returned (its ``name`` differs from the one asked for; ADR 0045)."""
+        """Register an agent idempotently (ADR 0012): an existing record
+        comes back unchanged, a new one is ``pending`` (level 0, no fleet).
+        A case-only variant of an existing name returns **that** agent
+        (ADR 0045)."""
         ...
 
     async def get_agent(self, name: str) -> Agent | None: ...
@@ -247,10 +210,9 @@ class Store(Protocol):
     async def activate_agent(
         self, name: str, *, trust_level: TrustLevel, home_fleet_id: str
     ) -> Agent:
-        """Activate a pending or revoked agent: set its trust level + home
-        fleet and flip it to ``active`` (ADRs 0012, 0028). ``KeyError`` if
-        unknown; ``InvalidAgentStatus`` if it is already ``active`` (the
-        status check and the update are one atomic step)."""
+        """Atomically flip a pending or revoked agent to ``active`` with a
+        trust level and home fleet (ADRs 0012, 0028). ``KeyError`` if
+        unknown; ``InvalidAgentStatus`` if already ``active``."""
         ...
 
     async def revoke_agent(self, name: str) -> Agent:
@@ -275,8 +237,7 @@ class Store(Protocol):
     # -- audit log (ADR 0027, SPEC §12.5) ------------------------------------
 
     async def record_audit(self, event: AuditEvent) -> AuditRecord:
-        """Append one admin-action row to the audit log (insert-only;
-        the store assigns ``id`` + ``occurred_at``). Failures propagate —
+        """Append one admin-action row (insert-only). Failures propagate:
         an audit write is never swallowed (ADR 0027)."""
         ...
 
@@ -304,9 +265,8 @@ class Store(Protocol):
         ...
 
     async def health_check(self) -> bool:
-        """Deep liveness probe (ADR 0019): True when the pool is up and
-        answering, False when it is unreachable. Used by the
-        unauthenticated probe endpoints — it must never raise.
+        """Deep probe (ADR 0019): whether the database answers. Must
+        never raise (unauthenticated probe endpoints call it).
         """
         ...
 
@@ -340,13 +300,9 @@ class Embedder(Protocol):
 
 @runtime_checkable
 class Extractor(Protocol):
-    """Entity extractor (ADR 0016, SPEC §13): entry text in, schema-
-    validated facets out.
-
-    A sibling of ``Embedder`` — the extractor model is a deploy-time
-    decision, configured separately from the embedding model (ADR 0005
-    stance). The port is *optional* (no endpoint ⇒ extraction off) and
-    *best-effort* (a failure never blocks the write).
+    """Entity extractor (ADR 0016, SPEC §13): entry text in, validated
+    facets out. Optional (no endpoint ⇒ off) and best-effort (a failure
+    never blocks the write).
     """
 
     @property
@@ -365,11 +321,8 @@ class Extractor(Protocol):
 class Authenticator(Protocol):
     """Credential check + key management (SPEC.md §8, ADR 0012).
 
-    ``verify`` maps a raw key to a ``Credential``. The key-management
-    methods (``issue_agent_key`` / ``revoke_agent_key`` / ``rotate_org_key``
-    / ``issue_admin_key``) create and retire credentials; each raw key is
-    printed **once** at issuance and only its hash is stored (a leaked
-    database never leaks usable keys — SPEC.md §8.1).
+    Each raw key is returned **once** at issuance and only its hash is
+    stored, so a leaked database leaks no usable keys (SPEC.md §8.1).
     """
 
     async def verify(self, key: str) -> Credential | None:
@@ -406,18 +359,14 @@ class Credential:
     """A verified caller: who acts, under which agent, with which rights.
 
     ``user_id`` / ``agent_id`` are the v1 identity (SPEC.md §8.1).
-    The v2 access model (ADRs 0011-0012) layers on:
+    v2 (ADRs 0011-0012) adds:
 
-    * ``is_org`` — the shared org key (gates registration + health only;
-      all data-plane privilege comes from the agent key, ADR 0012).
-    * ``trust_level`` / ``home_fleet_id`` — the agent's privilege (ADR 0011);
-      ``agent_name`` is the agent's registered name (it becomes the entry's
-      ``author``; verified server-side, never self-reported, ADR 0012).
-    * ``key_id`` — the presenting key's **non-secret fingerprint** (the
-      first 12 hex chars of its stored SHA-256 hash, as ``hivemind-keys
-      list`` shows it), so the audit log can tell admin keys apart
-      (ADR 0027). ``None`` where no stored key backs the credential
-      (dev mode, test fakes).
+    * ``is_org`` — the shared org key (registration + health only).
+    * ``trust_level`` / ``home_fleet_id`` — the agent's privilege;
+      ``agent_name`` is its server-verified name (the entry ``author``).
+    * ``key_id`` — the key's non-secret fingerprint (first 12 hex chars
+      of its stored hash, as ``hivemind-keys list`` shows), for the audit
+      log (ADR 0027); ``None`` with no stored key (dev mode, fakes).
     """
 
     user_id: str
@@ -432,12 +381,9 @@ class Credential:
     key_id: str | None = None  # ADR 0027: key fingerprint, never the key
 
     def audit_actor(self) -> str:
-        """The audit-log ``actor`` for an admin-surface action (ADR 0027):
-        ``admin:<key fingerprint>``, falling back to ``user_id`` when no
-        fingerprint is known (dev mode). Every admin key shares
-        ``user_id = "admin"``, so the fingerprint is what distinguishes
-        them. An org-key caller (a registration, ADR 0046) is
-        ``org:<key fingerprint>``."""
+        """The audit-log ``actor`` (ADR 0027): ``admin:<fingerprint>``
+        (all admin keys share ``user_id = "admin"``), ``org:<fingerprint>``
+        for an org-key caller (ADR 0046), else ``user_id``."""
         if self.key_id is None:
             return self.user_id
         return f"{'org' if self.is_org else 'admin'}:{self.key_id}"
@@ -486,12 +432,8 @@ class Credential:
 
 
 def entry_embeddable_text(draft: EntryDraft) -> str:
-    """The text an entry is embedded from (SPEC.md §7), at the default
-    prefix-token budget (ADR 0021).
-
-    For a configured budget, use the embedder's own
-    ``entry_embeddable_text`` — this helper exists for the
-    dependency-free embedders (dev/local, test fakes) that carry no
-    ``Settings``.
+    """The text an entry is embedded from (SPEC.md §7) at the default
+    budget (ADR 0021), for embedders without ``Settings``; otherwise use
+    the embedder's own ``entry_embeddable_text``.
     """
     return embeddable_text(draft.summary, draft.body)

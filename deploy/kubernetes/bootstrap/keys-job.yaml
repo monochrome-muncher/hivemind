@@ -1,28 +1,22 @@
-# FIRST-RUN KEY BOOTSTRAP Job (DEP-1, DEP-9) — applied by
-# scripts/ci-bootstrap-keys.sh from the GitLab deploy job, ONLY while the
-# `hivemind-keys` Secret does not exist. Deliberately NOT part of any
-# kustomization: it is a one-shot, and the placeholder image
-# `hivemind:0.0.0` is substituted by the script, like the Deployments.
+# FIRST-RUN KEY BOOTSTRAP Job (DEP-1, DEP-9), applied by
+# scripts/ci-bootstrap-keys.sh ONLY while the `hivemind-keys` Secret does
+# not exist. Not in any kustomization (one-shot); the script substitutes
+# the `hivemind:0.0.0` placeholder.
 #
-# On a FRESH database no admin / org keys exist. This Job migrates the
-# schema (idempotent, ADR 0013), then `hivemind-keys bootstrap-secret`
-# issues the first admin key, rotates the org key and writes both raw keys
-# straight into the `hivemind-keys` Secret through the Kubernetes API
-# (ADR 0044). NO KEY IS EVER PRINTED: the pod log holds only status lines,
-# so a cluster log shipper never captures a key.
+# It migrates (idempotent, ADR 0013), then `hivemind-keys bootstrap-secret`
+# issues the first admin key, rotates the org key and writes both into the
+# `hivemind-keys` Secret via the Kubernetes API (ADR 0044). NO KEY IS EVER
+# PRINTED, so log shippers never capture one.
 #
-#   * envFrom carries BOTH hivemind-secrets (DSN) and hivemind-config, so
-#     `hivemind-migrate` provisions a fresh pool at the operator's
+#   * envFrom includes hivemind-config so a fresh pool gets the operator's
 #     HIVEMIND_EMBEDDING_DIM, not the code default (ADR 0015).
-#   * serviceAccountName: the Job's own ServiceAccount (rbac.yaml), the only
-#     workload that mounts a token. Its Role can create Secrets and get /
-#     delete `hivemind-keys`, nothing else; the CI script removes the RBAC
-#     objects again once the Job has finished.
-#   * The keys are issued in one database transaction that commits only
-#     after the Secret was created, so a failed run leaves nothing behind
-#     and can be re-run. backoffLimit stays 0 so a failure surfaces in CI.
-#   * ttlSecondsAfterFinished — the cluster deletes the Job shortly after it
-#     finishes even if the CI job died before cleaning up.
+#   * Its own ServiceAccount (rbac.yaml), the only workload with a token:
+#     create Secrets, get / delete `hivemind-keys`, nothing else. The CI
+#     script removes the RBAC objects afterwards.
+#   * The key transaction commits only after the Secret exists, so a failed
+#     run leaves nothing and can be re-run. backoffLimit 0 surfaces failures
+#     in CI.
+#   * ttlSecondsAfterFinished cleans up even if the CI job died.
 apiVersion: batch/v1
 kind: Job
 metadata:

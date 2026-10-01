@@ -1,10 +1,7 @@
 """FastAPI wiring for the Hivemind REST surface (SPEC.md §5, §8.1).
 
-``HivemindApp`` bundles the ports and services a FastAPI app needs;
-``create_app`` turns that bundle into a FastAPI app with the auth
-dependency wired up. The auth dependency reads the ``X-API-Key``
-header and verifies it against the ``Authenticator`` port; a missing
-or unknown key yields 401 with the standard error envelope.
+``HivemindApp`` bundles the ports and services; ``create_app`` turns it
+into a FastAPI app with the ``X-API-Key`` auth dependency wired up.
 """
 
 from __future__ import annotations

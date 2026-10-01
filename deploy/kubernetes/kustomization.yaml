@@ -1,22 +1,16 @@
-# Hivemind — Kubernetes kustomization (production shape: two 2-replica
-# app-tier Deployments against ONE Postgres node — ADR 0026, which
-# supersedes ADR 0007's one-process and docker-compose clauses; the
-# single-Postgres-node clause is unchanged).
+# Hivemind production shape: two 2-replica app Deployments against ONE
+# Postgres node (ADR 0026).
 #
 #   kubectl kustomize deploy/kubernetes
 #
-# Two deliberate exclusions (see DEPLOY.md):
-#   * secret-template.yaml ships in-tree for documentation but is NOT listed
-#     below: the real `hivemind-secrets` Secret is rendered by the CI deploy
-#     job from the masked GitLab variables K8S_SECRET_* (single source of
-#     truth = CI, never this tree).
-#   * optional/ is a SEPARATE opt-in kustomization (nginx Ingress +
-#     cert-manager Certificate) — build/apply it only when external
-#     reachability is needed:
+# Deliberately excluded (DEPLOY.md):
+#   * secret-template.yaml (docs only): CI renders `hivemind-secrets` from
+#     the K8S_SECRET_* GitLab variables, the single source of truth.
+#   * optional/: a separate opt-in kustomization (Ingress + Certificate):
 #       kubectl kustomize deploy/kubernetes/optional | kubectl apply -f -
 #
-# The `hivemind-keys` Secret (ADMIN_KEY / ORG_KEY) is created by the CI
-# first-run key bootstrap, also outside this tree.
+# The `hivemind-keys` Secret (ADMIN_KEY / ORG_KEY) comes from the CI
+# first-run key bootstrap.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: hivemind

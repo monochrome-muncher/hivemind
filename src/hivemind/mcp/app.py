@@ -1,18 +1,11 @@
 """MCP tool adapters for Hivemind (SPEC §5.2).
 
-The six plain tool functions (``hive_write``, ``hive_search``,
-``hive_get``, ``hive_list``, ``hive_withdraw``, ``hive_feedback``) are
-the agent-facing verbs. Each is a thin, typed adapter over the services
-layer: it parses its arguments into the domain (``EntryDraft``,
-``EntryFilters``, ``Verdict``), calls the matching service, and maps the
-result to a JSON-serializable dict. Errors are surfaced as a small
-``{"error": {"code": ..., "message": ...}}`` envelope rather than
-raised, so a failed call degrades to a readable tool result instead of
-an MCP transport error.
-
-The functions take ``McpHivemind`` as their first argument so the
-MCP server can bind them into closures (see ``server.py``) while unit
-tests can call them directly with fakes.
+Each ``hive_*`` function is a thin adapter over the services layer:
+parse arguments into the domain, call the service, return a JSON-ready
+dict. Errors come back as an ``{"error": {"code", "message"}}`` envelope,
+not raised, so a failed call is a readable tool result. The functions
+take ``McpHivemind`` first so ``server.py`` can bind them and tests can
+call them with fakes.
 """
 
 from __future__ import annotations
@@ -54,9 +47,9 @@ from hivemind.services.governance import (
 )
 from hivemind.services.search import Hit, SearchService
 
-# Error codes returned in the tool-result error envelope (SPEC §5).
 logger = logging.getLogger(__name__)
 
+# Error codes returned in the tool-result error envelope (SPEC §5).
 ERR_INVALID_INPUT = "invalid_input"
 ERR_NOT_FOUND = "not_found"
 ERR_PERMISSION_DENIED = "permission_denied"
@@ -80,13 +73,9 @@ STORE_UNAVAILABLE_MESSAGE = "the database is busy or unreachable; retry shortly"
 
 @dataclass(frozen=True, slots=True)
 class McpHivemind:
-    """The object the tool functions operate on.
-
-    Holds the services, the store (for ``hive_get`` / ``hive_list`` / the
-    access-plane verbs, which the services do not expose), the acting
-    ``credential`` (the agent identity all writes / governance act as,
-    per SPEC §8.1 / ADR 0008), and the ``access_service`` (the
-    registration / fleet / trust verbs, ADRs 0011-0012).
+    """The object the tool functions operate on: the services, the store
+    (for reads the services do not expose), and the acting ``credential``
+    (SPEC §8.1, ADR 0008).
     """
 
     store: Store
@@ -105,13 +94,7 @@ class McpHivemind:
 
 def _entry_dict(entry: Entry) -> dict[str, object]:
     """A full entry as a JSON-serializable dict (body included).
-
-    Carries the machine-extracted entity facets (ADR 0016, SPEC §13):
-    ``entities`` (name + kind, display-only in v1) and ``entities_model``
-    (the extractor provenance; null when extraction was off or failed).
-    Also carries ``importance_source`` (ROADMAP §4.5): whether the
-    writer supplied ``importance`` or it fell out of the default.
-    """
+    ``entities_model`` is null when extraction was off or failed."""
     return {
         "id": entry.id,
         "kind": entry.kind.value,
@@ -259,9 +242,7 @@ def _parse_sources(raw: list[dict[str, str]] | None) -> tuple[Source, ...]:
 
 
 def _check_pagination(limit: int | None, offset: int | None) -> None:
-    """Pagination bounds (SPEC §5.3): ``1 <= limit <= 100``, ``0 <= offset <=
-    10000`` — a typed ``invalid_input``, not a driver fault; the same rule
-    REST enforces (ADR 0040)."""
+    """Pagination bounds (SPEC §5.3), the same rule as REST (ADR 0040)."""
     check_pagination(limit, offset)
 
 
@@ -280,12 +261,7 @@ def _build_filters(
     include_inactive: bool,
     flagged: bool = False,
 ) -> EntryFilters:
-    """Parse the shared filter parameters into an ``EntryFilters`` (SPEC §5.3).
-
-    ``entities`` (ADR 0016, SPEC §13) filters by machine-extracted entity
-    names: AND-semantics, case-insensitive (the store layer matches on
-    lower-cased names; kinds are display-only, not filterable in v1).
-    """
+    """Parse the shared filter parameters into an ``EntryFilters`` (SPEC §5.3)."""
     filters = EntryFilters(
         kind=_parse_kind(kind),
         tags=tuple(tags or ()),
@@ -305,12 +281,7 @@ def _build_filters(
 
 
 async def _supersession_chain(app: McpHivemind, entry: Entry) -> tuple[list[Entry], list[Entry]]:
-    """Return ``(successors, superseded)`` for an entry's supersession chain.
-
-    Delegates to the shared ``supersession_chain`` service (SPEC.md
-    §5.1 ``?history`` / §5.2 ``hive_get``) so REST and MCP walk the
-    chain identically.
-    """
+    """``(successors, superseded)`` via the service REST also uses."""
     return await supersession_chain(app.store, entry, visibility=app.credential.visibility())
 
 
@@ -377,16 +348,10 @@ async def hive_write(
     try:
         parsed_kind = Kind(kind)
         parsed_sources = _parse_sources(sources)
-        # The write-scope is resolved from the credential (ADRs 0011-0012):
-        # the default is the highest scope the trust level permits, an
-        # out-of-permission scope is rejected, and the entry's ``author``
-        # is the agent's registered name (verified server-side, ADR 0012).
+        # Scope and author come from the credential (ADRs 0011-0012).
         resolution = resolve_write_scope(cred, scope)
         resolved_author = cred.agent_name or cred.user_id
-        # ROADMAP §4.5: an omitted importance resolves to the default
-        # (3) with provenance `default`; a supplied value keeps its
-        # provenance `caller` (the 1..5 range is still enforced by
-        # ``EntryDraft.__post_init__``).
+        # Importance provenance (ROADMAP §4.5); the range check is in EntryDraft.
         if importance is None:
             resolved_importance = 3
             importance_source = ImportanceSource.DEFAULT

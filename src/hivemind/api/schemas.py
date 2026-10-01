@@ -1,9 +1,7 @@
 """Pydantic schemas for the Hivemind REST surface (SPEC.md §5.1).
 
-Request/response models are plain and small: they mirror the domain
-entities (Entry, EntryDraft, EntryFilters, Feedback) and the service
-results (Hit) without leaking implementation details (embeddings,
-raw config) across the wire.
+They mirror the domain and service results without leaking internals
+(embeddings, raw config) across the wire.
 """
 
 from __future__ import annotations
@@ -79,16 +77,11 @@ class CreateEntryRequest(BaseModel):
     sources: list[SourceModel] = []
     tags: list[str] = []
     occurred_at: datetime | None = None
-    # Omitted -> the default (3) with ``importance_source=default``;
-    # supplied -> that value with ``importance_source=caller``
-    # (ROADMAP §4.5). The validated 1..5 range still applies when supplied
-    # (``EntryDraft.__post_init__``).
+    # Omitted -> 3 with ``importance_source=default``; supplied (1..5) ->
+    # ``caller`` (ROADMAP §4.5).
     importance: int | None = None
-    # ADR 0011: an omitted scope defaults to the highest scope the caller's
-    # trust level permits (L1 -> self; L2/L3 -> fleet; legacy/admin -> org);
-    # an explicit out-of-permission scope is rejected (403). A scope that is
-    # not one of the three vocabulary values is invalid input (422), not a
-    # permission error — a typo is not a trust-level problem.
+    # Omitted -> the highest scope the trust level permits (ADR 0011); out
+    # of permission -> 403; not a vocabulary value -> 422.
     scope: Literal["self", "fleet", "org"] | None = None
     supersedes: list[str] = []
     agent: str | None = None
@@ -229,23 +222,18 @@ class EntryOut(BaseModel):
     author: str
     agent: str
     importance: int
-    # Server-derived, not client-settable (ROADMAP §4.5): whether the
-    # writer supplied ``importance`` or it fell out of the default.
+    # Server-derived (ROADMAP §4.5).
     importance_source: ImportanceSource
     scope: str
     fleet_id: str | None = None
     state: str
     superseded_by: str | None = None
     withdrawn_reason: str | None = None
-    # Machine-extracted entity facets (ADR 0016, SPEC §13): set once at
-    # write time, never mutated (ADR 0001). ``entities_model`` records
-    # which extractor model produced them (provenance, symmetric with
-    # the internal ``embedding_model``); both are absent when extraction
-    # was off or failed (best-effort, SPEC §13.4).
+    # Extracted at write time (ADR 0016, SPEC §13); empty when extraction
+    # was off or failed (SPEC §13.4).
     entities: list[EntityOut] = []
     entities_model: str | None = None
-    # The supersession chain (SPEC.md §5.1 ``?history=true``): optional,
-    # populated only when the caller asks for it.
+    # Only with ``?history=true`` (SPEC.md §5.1).
     history: dict[str, list[EntryOut]] | None = None
     # The entry's feedback (ADR 0051): set by ``GET /v1/entries/{id}`` only.
     feedback: FeedbackSummaryOut | None = None
@@ -345,9 +333,7 @@ class SearchRequest(BaseModel):
     query: str
     kind: Kind | None = None
     tags: list[str] = []
-    # ADR 0016 / SPEC §13: filter by machine-extracted entity names
-    # (AND-semantics, case-insensitive — the store layer matches them;
-    # kinds are display-only, not filterable in v1).
+    # Extracted entity names: AND, case-insensitive (ADR 0016, SPEC §13).
     entities: list[str] = []
     scope: str | None = None
     author: str | None = None
@@ -621,14 +607,10 @@ class EntriesMetrics(BaseModel):
     inactive: int
     by_scope: dict[str, int] = {}
     by_kind: dict[str, int] = {}
-    # ROADMAP §4.5: is anyone actually setting ``importance``, or is
-    # every entry riding the default?
+    # ROADMAP §4.5.
     by_importance_source: dict[str, int] = {}
-    # ROADMAP §4.5's follow-on question: are agents using the three kinds
-    # consistently? Author -> that author's kind counts. Keyed by the
-    # registered agent roster, so an author who has written nothing is
-    # present with an empty mapping; zero kind counts are omitted, like
-    # ``by_scope`` / ``by_kind``.
+    # Author -> kind counts (ROADMAP §4.5), keyed by the agent roster, so
+    # an author with no entries maps to {}; zero counts are omitted.
     by_author_kind: dict[str, dict[str, int]] = {}
 
 
