@@ -306,6 +306,18 @@ class UsageCount:
 
 
 @dataclass(frozen=True, slots=True)
+class SearchCount:
+    """Searches made from one home fleet (ADR 0056): how many first-page
+    searches its agents ran and how many of them found nothing.
+    ``fleet_id`` is ``None`` for callers without a home fleet (admin keys,
+    fleetless agents)."""
+
+    fleet_id: str | None
+    searches: int
+    empty: int
+
+
+@dataclass(frozen=True, slots=True)
 class EntryFilters:
     """Filter set shared by search and list (SPEC.md §5.3).
 

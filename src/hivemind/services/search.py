@@ -152,7 +152,34 @@ class SearchService:
         If the embedding service fails, the vector stream is empty and the
         result is marked ``degraded`` (ADR 0048): the caller still gets
         the keyword stream's hits rather than an error.
+
+        A first-page search by a caller (``visibility`` supplied) is
+        counted per home fleet, and whether it found nothing (ADR 0056).
         """
+        result = await self._ranked(query, filters, limit, offset, visibility)
+        if visibility is not None and not offset:
+            # A keyword-only answer (ADR 0048) that found nothing says more
+            # about the embedder than about the pool: not counted as empty.
+            empty = not result.hits and not result.degraded
+            await self._count_search(visibility, empty=empty)
+        return result
+
+    async def _count_search(self, visibility: Visibility, *, empty: bool) -> None:
+        """Best-effort (ADR 0056): a failed count never fails the search."""
+        try:
+            await self._store.record_search(visibility.home_fleet_id, empty=empty)
+        except Exception as exc:
+            logger.warning("search count not recorded: %s", type(exc).__name__)
+
+    async def _ranked(
+        self,
+        query: str,
+        filters: EntryFilters | None,
+        limit: int | None,
+        offset: int | None,
+        visibility: Visibility | None,
+    ) -> SearchResult:
+        """The search itself (``search_result`` without the counting)."""
         # ADR 0040: reject NUL / oversize / out-of-range input BEFORE any
         # embedder or store call (one rule set for REST and MCP).
         check_query(query)

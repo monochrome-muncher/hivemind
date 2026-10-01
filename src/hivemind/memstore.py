@@ -42,6 +42,7 @@ from hivemind.domain.entry import (
     ExtractedEntity,
     ImportanceSource,
     Kind,
+    SearchCount,
     UsageCount,
     embeddable_text,
     new_entry_id,
@@ -88,6 +89,7 @@ class MemoryStore:
         self._fleets: dict[str, Fleet] = {}
         self._agents: dict[str, Agent] = {}
         self._audit: list[AuditRecord] = []  # append-only (ADR 0027)
+        self._searches: dict[str | None, tuple[int, int]] = {}  # ADR 0056
         self._links: dict[tuple[str, str], None] = {}  # (from, to), insertion-ordered (ADR 0057)
 
     # -- write path -------------------------------------------------------
@@ -213,6 +215,15 @@ class MemoryStore:
                 )
                 groups[key] = groups.get(key, 0) + 1
             return [UsageCount(*key, count=n) for key, n in groups.items()]
+
+    async def record_search(self, fleet_id: str | None, *, empty: bool) -> None:
+        with self._lock:
+            searches, misses = self._searches.get(fleet_id, (0, 0))
+            self._searches[fleet_id] = (searches + 1, misses + int(empty))
+
+    async def search_counts(self) -> list[SearchCount]:
+        with self._lock:
+            return [SearchCount(f, s, e) for f, (s, e) in self._searches.items()]
 
     async def list_entries(
         self,

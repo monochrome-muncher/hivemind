@@ -17,6 +17,9 @@ Three groups of series:
   never the raw path, so the label set stays bounded).
 * **Degraded searches** (ADR 0048): searches answered by the keyword
   stream alone because the embedder failed.
+* **Search counters** (ADR 0056): first-page searches and the ones that
+  found nothing, per fleet, read from the pool with the usage report, so
+  they cover every runner (MCP included). Aggregate them with ``max``.
 
 A failed usage refresh keeps the last snapshot and sets
 ``hivemind_usage_report_success`` to 0; the scrape itself still answers.
@@ -32,7 +35,7 @@ from typing import Any
 
 from fastapi import APIRouter, Response
 from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Counter, Histogram
-from prometheus_client.core import GaugeMetricFamily
+from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
 from prometheus_client.exposition import generate_latest
 from prometheus_client.registry import Collector
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -53,7 +56,7 @@ class _UsageCollector(Collector):
     def __init__(self, owner: PrometheusMetrics) -> None:
         self._owner = owner
 
-    def collect(self) -> Iterator[GaugeMetricFamily]:
+    def collect(self) -> Iterator[GaugeMetricFamily | CounterMetricFamily]:
         ok = GaugeMetricFamily(
             "hivemind_usage_report_success",
             "1 if the last usage-report refresh succeeded, else 0",
@@ -72,7 +75,7 @@ def _gauge(name: str, doc: str, labels: list[str], values: Mapping[Any, Any]) ->
     return family
 
 
-def _usage_families(report: UsageReport) -> Iterator[GaugeMetricFamily]:
+def _usage_families(report: UsageReport) -> Iterator[GaugeMetricFamily | CounterMetricFamily]:
     entries, fleets, agents = report["entries"], report["fleets"], report["agents"]
     yield _gauge(
         "hivemind_entries",
@@ -122,6 +125,22 @@ def _usage_families(report: UsageReport) -> Iterator[GaugeMetricFamily]:
         ["trust_level"],
         agents["by_trust_level"],
     )
+    by_fleet = report["searches"]["by_fleet"]
+    searches = CounterMetricFamily(
+        "hivemind_searches",
+        "First-page searches by agents of each fleet, all runners (ADR 0056)",
+        labels=["fleet"],
+    )
+    empty = CounterMetricFamily(
+        "hivemind_searches_empty",
+        "First-page searches by agents of each fleet that found nothing (ADR 0056)",
+        labels=["fleet"],
+    )
+    for fleet, counts in by_fleet.items():
+        searches.add_metric([fleet], float(counts["total"]))
+        empty.add_metric([fleet], float(counts["empty"]))
+    yield searches
+    yield empty
 
 
 class PrometheusMetrics:

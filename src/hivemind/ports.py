@@ -36,6 +36,7 @@ from hivemind.domain.entry import (
     EntryDraft,
     EntryFilters,
     ExtractedEntity,
+    SearchCount,
     UsageCount,
     embeddable_text,
 )
@@ -117,6 +118,17 @@ class Store(Protocol):
         fleet_id, active) combination present in the pool, with its entry
         count — every state included (the ROADMAP §3.3 counters are folded
         from these in ``MetricsService``, in a single grouped scan)."""
+        ...
+
+    async def record_search(self, fleet_id: str | None, *, empty: bool) -> None:
+        """Count one first-page search made from ``fleet_id`` (``None``: no
+        home fleet), and whether it found nothing (ADR 0056). Counts only:
+        no query text, no agent name."""
+        ...
+
+    async def search_counts(self) -> list[SearchCount]:
+        """The search counters recorded so far, one row per home fleet
+        (ADR 0056), in any order."""
         ...
 
     async def withdraw_entry(self, entry_id: str, reason: str | None, by_user: str) -> Entry:
