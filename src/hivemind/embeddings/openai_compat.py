@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+from array import array
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -258,4 +259,14 @@ class OpenAICompatEmbedder:
             if isinstance(v, bool) or not isinstance(v, int | float) or not math.isfinite(v):
                 raise EmbeddingError("embeddings response holds a non-finite or non-numeric value")
             values.append(float(v))
+        # pgvector stores float32 (ROADMAP 3.13): a value beyond its range
+        # is rejected by Postgres (a DataError mid-write), and a vector whose
+        # values all round to zero has no direction, so every cosine
+        # distance to it is NaN and it ranks arbitrarily. Both are the
+        # provider's fault and deterministic, so they fail fast here.
+        as_stored = array("f", values)
+        if any(math.isinf(v) for v in as_stored):
+            raise EmbeddingError("embeddings response holds a value outside the float32 range")
+        if not any(as_stored):
+            raise EmbeddingError("embeddings response is a zero vector")
         return values

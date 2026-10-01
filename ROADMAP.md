@@ -481,8 +481,10 @@ or its own trigger):
   owner alias is still unverified: the admin confirms the requester out
   of band.
 - Structural untrusted-content markers on returned entries (deferred in
-  ADR 0043); zero-norm embeddings are not rejected. (Case-variant agent
-  names are refused since ADR 0045; collisions registered before it stay.)
+  ADR 0043). (Case-variant agent names are refused since ADR 0045;
+  collisions registered before it stay. Zero vectors and out-of-range
+  values from the embedder are now rejected; rows stored earlier are not
+  re-checked.)
 - Performance: search loads full rows it partly discards (reads no longer
   fetch the embedding vector; bodies are still loaded, so a slim-row port
   method remains open); a query-embedding cache is unmeasured; very low-selectivity
