@@ -26,6 +26,7 @@ from hivemind.domain.validation import (
     MAX_OFFSET,
     check_no_nul,
 )
+from hivemind.services.chain import EntryLinks
 from hivemind.services.governance import RelatedEntry
 from hivemind.services.search import Hit
 
@@ -91,6 +92,8 @@ class CreateEntryRequest(BaseModel):
     scope: Literal["self", "fleet", "org"] | None = None
     supersedes: list[str] = []
     agent: str | None = None
+    # "See also" links (ADR 0057): up to 5 entries the writer can read.
+    see_also: list[str] = []
 
     @field_validator("occurred_at")
     @classmethod
@@ -188,6 +191,28 @@ class RelatedOut(BaseModel):
         )
 
 
+class LinkOut(BaseModel):
+    """A linked entry on a read (ADR 0057): compact, with its state."""
+
+    id: str
+    kind: Kind
+    summary: str
+    author: str
+    state: EntryState
+    fleet_id: str | None = None
+
+    @classmethod
+    def from_entry(cls, entry: Entry) -> LinkOut:
+        return cls(
+            id=entry.id,
+            kind=entry.kind,
+            summary=entry.summary,
+            author=entry.author,
+            state=entry.state,
+            fleet_id=entry.fleet_id,
+        )
+
+
 class EntryOut(BaseModel):
     """A full entry (SPEC.md §4.1). Embeddings are internal and are
     never serialized across the wire."""
@@ -227,6 +252,14 @@ class EntryOut(BaseModel):
     # The nearest existing entries the writer can read (ADR 0052): set by
     # ``POST /v1/entries`` only.
     related: list[RelatedOut] | None = None
+    # "See also" links both ways, limited to what the reader may see
+    # (ADR 0057): set by the reads by id only.
+    see_also: list[LinkOut] | None = None
+    linked_from: list[LinkOut] | None = None
+
+    def set_links(self, links: EntryLinks) -> None:
+        self.see_also = [LinkOut.from_entry(e) for e in links.see_also]
+        self.linked_from = [LinkOut.from_entry(e) for e in links.linked_from]
 
     @classmethod
     def from_entry(cls, entry: Entry) -> EntryOut:

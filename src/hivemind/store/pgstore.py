@@ -52,6 +52,7 @@ from hivemind.domain.entry import (
     ExtractedEntity,
     ImportanceSource,
     Kind,
+    SearchCount,
     Source,
     SourceType,
     UsageCount,
@@ -111,6 +112,29 @@ SELECT scope, kind, importance_source, author, fleet_id,
        (state = 'active') AS active, count(*) AS n
   FROM entries
  GROUP BY scope, kind, importance_source, author, fleet_id, (state = 'active')
+"""
+
+# One row per home fleet ('' = none), bumped once per first-page search
+# (ADR 0056). Counts only: no query text, no agent name.
+RECORD_SEARCH = """
+INSERT INTO search_counts (fleet_id, searches, empty) VALUES ($1, 1, $2)
+ON CONFLICT (fleet_id) DO UPDATE
+   SET searches = search_counts.searches + 1,
+       empty = search_counts.empty + EXCLUDED.empty
+"""
+SEARCH_COUNTS = "SELECT fleet_id, searches, empty FROM search_counts"
+
+# "See also" links (ADR 0057). The insert skips ids that name no entry
+# (the join), and the reads are oldest link first.
+INSERT_LINKS = """
+INSERT INTO entry_links (from_id, to_id)
+SELECT $1, e.id FROM entries e WHERE e.id = ANY($2::uuid[]) AND e.id <> $1
+ON CONFLICT DO NOTHING
+"""
+SELECT_LINKS_OUT = "SELECT to_id FROM entry_links WHERE from_id = $1 ORDER BY created_at, to_id"
+SELECT_LINKS_IN = """
+SELECT from_id FROM entry_links WHERE to_id = $1
+ ORDER BY created_at DESC, from_id LIMIT $2
 """
 
 # Pinned entries (ADR 0058). The per-fleet advisory lock serialises
@@ -522,6 +546,8 @@ class PgStore:
                 [e.name.lower() for e in entities],  # lower-cased names: the filter column
                 entities_model,  # ADR 0016: extractor model (provenance)
             )
+            if draft.see_also:
+                await conn.execute(INSERT_LINKS, entry_id, _valid_uuids(list(draft.see_also)))
             if draft.supersedes:
                 # ADR 0034, atomic: the guarded UPDATE row-locks the
                 # targets; any target it did not flip (unknown,
@@ -571,6 +597,15 @@ class PgStore:
             rows = await conn.fetch(SELECT_PREDECESSORS, ids)
         return [_row_to_entry(row) for row in rows]
 
+    async def entry_links(self, entry_id: str, limit: int) -> tuple[list[str], list[str]]:
+        if not _is_valid_uuid(entry_id):
+            return [], []
+        pool = await self._ensure_pool()
+        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+            outgoing = await conn.fetch(SELECT_LINKS_OUT, entry_id)
+            incoming = await conn.fetch(SELECT_LINKS_IN, entry_id, limit)
+        return [str(r["to_id"]) for r in outgoing], [str(r["from_id"]) for r in incoming]
+
     async def pin_entry(
         self, fleet_id: str, entry_id: str, pinned_by: str, limit: int
     ) -> Pin | None:
@@ -613,6 +648,24 @@ class PgStore:
                 fleet_id=str(row["fleet_id"]) if row["fleet_id"] is not None else None,
                 active=bool(row["active"]),
                 count=int(row["n"]),
+            )
+            for row in rows
+        ]
+
+    async def record_search(self, fleet_id: str | None, *, empty: bool) -> None:
+        pool = await self._ensure_pool()
+        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+            await conn.execute(RECORD_SEARCH, fleet_id or "", int(empty))
+
+    async def search_counts(self) -> list[SearchCount]:
+        pool = await self._ensure_pool()
+        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+            rows = await conn.fetch(SEARCH_COUNTS)
+        return [
+            SearchCount(
+                fleet_id=row["fleet_id"] or None,
+                searches=int(row["searches"]),
+                empty=int(row["empty"]),
             )
             for row in rows
         ]

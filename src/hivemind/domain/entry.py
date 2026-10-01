@@ -18,6 +18,7 @@ from hivemind.domain.validation import (
     MAX_BODY_CHARS,
     MAX_FILTER_VALUE_CHARS,
     MAX_ID_CHARS,
+    MAX_SEE_ALSO,
     MAX_SOURCE_REF_CHARS,
     MAX_SOURCES,
     MAX_SUPERSEDES,
@@ -179,6 +180,9 @@ class EntryDraft:
     scope: str = "org"
     fleet_id: str | None = None
     supersedes: tuple[str, ...] = ()
+    # "See also" links to other entries (ADR 0057): stored beside the
+    # entry, not on it, and readable from both ends.
+    see_also: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         # Normalise the enum fields to their members. ``Kind`` and
@@ -232,6 +236,10 @@ class EntryDraft:
             raise InvalidInput(f"at most {MAX_SUPERSEDES} supersedes targets")
         for target in self.supersedes:
             check_id(target, "supersedes id")
+        if len(self.see_also) > MAX_SEE_ALSO:
+            raise InvalidInput(f"at most {MAX_SEE_ALSO} see_also entries")
+        for target in self.see_also:
+            check_id(target, "see_also id")
         check_text(self.scope, "scope", MAX_ID_CHARS)
         if self.fleet_id is not None:
             check_text(self.fleet_id, "fleet_id", MAX_ID_CHARS)
@@ -295,6 +303,18 @@ class UsageCount:
     fleet_id: str | None
     active: bool
     count: int
+
+
+@dataclass(frozen=True, slots=True)
+class SearchCount:
+    """Searches made from one home fleet (ADR 0056): how many first-page
+    searches its agents ran and how many of them found nothing.
+    ``fleet_id`` is ``None`` for callers without a home fleet (admin keys,
+    fleetless agents)."""
+
+    fleet_id: str | None
+    searches: int
+    empty: int
 
 
 @dataclass(frozen=True, slots=True)

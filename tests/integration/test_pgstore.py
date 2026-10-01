@@ -18,6 +18,7 @@ Hermetic-by-construction:
 from __future__ import annotations
 
 import asyncio
+import uuid
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
@@ -32,6 +33,7 @@ from hivemind.domain.entry import (
     EntryState,
     ImportanceSource,
     Kind,
+    SearchCount,
 )
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.ports import Credential, SupersedeConflict
@@ -86,7 +88,9 @@ def draft(
 async def _truncate(dsn: str) -> None:
     conn = await asyncpg.connect(dsn)
     try:
-        await conn.execute("TRUNCATE credentials, feedbacks, entries, pins")
+        await conn.execute(
+            "TRUNCATE credentials, feedbacks, entries, search_counts, entry_links, pins"
+        )
     finally:
         await conn.close()
 
@@ -700,6 +704,33 @@ async def test_get_visible_entries_keys_by_the_id_as_asked(pg) -> None:
     )
     assert list(found) == [upper]
     assert found[upper].id == entry.id
+
+
+async def test_search_counts_add_up_per_home_fleet(pg) -> None:
+    """ADR 0056: one counter row per home fleet; no fleet is its own row."""
+    store, _, _ = pg
+    fleet = await store.create_fleet(f"search-{uuid.uuid4().hex[:8]}")
+    await store.record_search(fleet.id, empty=True)
+    await store.record_search(fleet.id, empty=False)
+    await store.record_search(None, empty=True)
+    counts = {c.fleet_id: c for c in await store.search_counts()}
+    assert counts[fleet.id] == SearchCount(fleet.id, searches=2, empty=1)
+    assert counts[None] == SearchCount(None, searches=1, empty=1)
+
+
+async def test_entry_links_both_ways_and_unknown_targets_dropped(pg) -> None:
+    """ADR 0057: links land with the entry; an id naming no entry is
+    dropped by the insert's join; incoming links come newest first."""
+    store, _, _ = pg
+    target = await store.create_entry(draft("Target"))
+    first = await store.create_entry(
+        replace(draft("First"), see_also=(target.id, "00000000-0000-0000-0000-000000000000"))
+    )
+    second = await store.create_entry(replace(draft("Second"), see_also=(target.id,)))
+    assert await store.entry_links(first.id, 10) == ([target.id], [])
+    assert await store.entry_links(target.id, 10) == ([], [second.id, first.id])
+    assert await store.entry_links(target.id, 1) == ([], [second.id])
+    assert await store.entry_links("not-a-uuid", 10) == ([], [])
 
 
 async def test_pins_are_capped_idempotent_and_newest_first(pg) -> None:

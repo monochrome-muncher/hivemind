@@ -110,6 +110,13 @@ CREATE TABLE public.entries (
     CONSTRAINT entries_state_check CHECK ((state = ANY (ARRAY['active'::text, 'superseded'::text, 'withdrawn'::text])))
 );
 
+CREATE TABLE public.entry_links (
+    from_id uuid NOT NULL,
+    to_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT entry_links_not_self_check CHECK ((from_id <> to_id))
+);
+
 CREATE TABLE public.feedbacks (
     entry_id uuid NOT NULL,
     "user" text NOT NULL,
@@ -133,6 +140,14 @@ CREATE TABLE public.pins (
     pinned_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
+CREATE TABLE public.search_counts (
+    fleet_id text NOT NULL,
+    searches bigint DEFAULT 0 NOT NULL,
+    empty bigint DEFAULT 0 NOT NULL,
+    CONSTRAINT search_counts_empty_check CHECK (((empty >= 0) AND (empty <= searches))),
+    CONSTRAINT search_counts_searches_check CHECK ((searches >= 0))
+);
+
 ALTER TABLE ONLY public.agents
     ADD CONSTRAINT agents_pkey PRIMARY KEY (name);
 
@@ -145,6 +160,9 @@ ALTER TABLE ONLY public.credentials
 ALTER TABLE ONLY public.entries
     ADD CONSTRAINT entries_pkey PRIMARY KEY (id);
 
+ALTER TABLE ONLY public.entry_links
+    ADD CONSTRAINT entry_links_pkey PRIMARY KEY (from_id, to_id);
+
 ALTER TABLE ONLY public.feedbacks
     ADD CONSTRAINT feedbacks_pkey PRIMARY KEY (entry_id, "user", agent);
 
@@ -156,6 +174,9 @@ ALTER TABLE ONLY public.fleets
 
 ALTER TABLE ONLY public.pins
     ADD CONSTRAINT pins_pkey PRIMARY KEY (fleet_id, entry_id);
+
+ALTER TABLE ONLY public.search_counts
+    ADD CONSTRAINT search_counts_pkey PRIMARY KEY (fleet_id);
 
 CREATE INDEX agents_fleet_idx ON public.agents USING btree (home_fleet_id);
 
@@ -190,6 +211,8 @@ CREATE INDEX entries_state_idx ON public.entries USING btree (state);
 CREATE INDEX entries_superseded_by_idx ON public.entries USING btree (superseded_by) WHERE (superseded_by IS NOT NULL);
 
 CREATE INDEX entries_tags_gin_idx ON public.entries USING gin (tags);
+
+CREATE INDEX entry_links_to_idx ON public.entry_links USING btree (to_id);
 
 CREATE TRIGGER entries_search_tsv_trigger BEFORE INSERT OR UPDATE OF summary, body ON public.entries FOR EACH ROW EXECUTE FUNCTION public.entries_search_tsv_update();
 

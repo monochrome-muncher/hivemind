@@ -74,7 +74,12 @@ from hivemind.domain.validation import (
 from hivemind.embeddings import EmbeddingError
 from hivemind.ports import Credential
 from hivemind.services.access import resolve_write_scope
-from hivemind.services.chain import get_visible_entries, get_visible_entry, supersession_chain
+from hivemind.services.chain import (
+    entry_links,
+    get_visible_entries,
+    get_visible_entry,
+    supersession_chain,
+)
 from hivemind.services.governance import PermissionDenied, SupersedeDenied
 
 require = Annotated[Credential, Depends(require_credential)]
@@ -203,6 +208,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
                 scope=resolution.scope,
                 fleet_id=resolution.fleet_id,
                 supersedes=tuple(payload.supersedes),
+                see_also=tuple(payload.see_also),
             )
             written = await app.write_service.write_and_relate(
                 draft, writer=credential.visibility()
@@ -239,10 +245,13 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         entry = await get_visible_entry(app.store, entry_id, visibility)
         if entry is None:
             raise api_error(404, "not_found", f"unknown entry: {entry_id}")
-        out = EntryOut.from_entry(entry)
-        out.feedback = FeedbackSummaryOut.from_summary(
-            await app.governance_service.feedback_summary(entry.id)
+        summary, links = await asyncio.gather(
+            app.governance_service.feedback_summary(entry.id),
+            entry_links(app.store, entry.id, visibility),
         )
+        out = EntryOut.from_entry(entry)
+        out.feedback = FeedbackSummaryOut.from_summary(summary)
+        out.set_links(links)
         if history:
             successors, superseded = await supersession_chain(
                 app.store, entry, visibility=visibility
@@ -260,15 +269,18 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         the caller may read are listed in ``not_found`` (ADR 0033: the same
         answer for "invisible" and "does not exist")."""
         ids = list(dict.fromkeys(request.entry_ids))
-        found = await get_visible_entries(app.store, ids, credential.visibility())
+        visibility = credential.visibility()
+        found = await get_visible_entries(app.store, ids, visibility)
         entries = [found[eid] for eid in ids if eid in found]
-        summaries = await asyncio.gather(
-            *(app.governance_service.feedback_summary(e.id) for e in entries)
+        summaries, links = await asyncio.gather(
+            asyncio.gather(*(app.governance_service.feedback_summary(e.id) for e in entries)),
+            asyncio.gather(*(entry_links(app.store, e.id, visibility) for e in entries)),
         )
         outs = []
-        for entry, summary in zip(entries, summaries, strict=True):
+        for entry, summary, entry_link in zip(entries, summaries, links, strict=True):
             out = EntryOut.from_entry(entry)
             out.feedback = FeedbackSummaryOut.from_summary(summary)
+            out.set_links(entry_link)
             outs.append(out)
         return EntriesOut(entries=outs, not_found=[eid for eid in ids if eid not in found])
 

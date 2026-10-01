@@ -58,6 +58,7 @@ One entry entity; a `kind` enum carries the distinction. There are no other read
 | `embedding` | vector(dim) | Generated at write time (§7) |
 | `state` | `active` \| `superseded` \| `withdrawn` | Default `active` |
 | `supersedes` | entry id[] (optional) | **Write-side input** (the stored inverse is `superseded_by`): ids of active entries this entry supersedes; targets flip to `superseded` |
+| `see_also` | entry id[] (optional, ≤ 5) | **Write-side input**: entries the writer can read that this one relates to without replacing them, stored as links beside the entry (ADR 0057). Reads by id return `see_also` and `linked_from` (the active entries that link to it), limited to what the reader may read |
 | `superseded_by` | entry id (nullable) | Set when superseded |
 | `withdrawn_reason` | text (nullable) | Set on withdrawal |
 
@@ -102,8 +103,8 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 
 | Method & path | Purpose |
 |---|---|
-| `POST /v1/entries` | Create an entry (body = §4.1 fields; `supersedes` optional). The response adds `related`: up to 3 active entries the writer can read that are nearest to the new one, with their cosine `similarity` (ADR 0052) |
-| `GET /v1/entries/{id}` | Full entry (body included), with its `feedback`: verdict counts and the newest reports with their notes (§4.2, ADR 0051). `?history=true` adds the supersession chain: at most 100 versions (one list page), successors first, then predecessors newest first |
+| `POST /v1/entries` | Create an entry (body = §4.1 fields; `supersedes` and `see_also` optional). The response adds `related`: up to 3 active entries the writer can read that are nearest to the new one, with their cosine `similarity` (ADR 0052) |
+| `GET /v1/entries/{id}` | Full entry (body included), with its `feedback`: verdict counts and the newest reports with their notes (§4.2, ADR 0051), and its links: `see_also` and `linked_from` (at most 20, newest first), limited to what the reader may read (ADR 0057). `?history=true` adds the supersession chain: at most 100 versions (one list page), successors first, then predecessors newest first |
 | `POST /v1/entries/get` | Read up to 10 entries by id in one call, `{entry_ids}` → `{entries, not_found}`; each entry as `GET /v1/entries/{id}` returns it, without `history` (ADR 0055) |
 | `GET /v1/entries` | List/filter **without** a query (filter only; paginated) |
 | `POST /v1/search` | Hybrid search (§6) with filters |
@@ -122,8 +123,8 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | `PATCH /v1/admin/agents/{name}` | Change trust level / home fleet — demotion to `untrusted` = dormant (admin key) |
 | `POST /v1/admin/agents/{name}/revoke` | Kill the agent's key and set it `revoked`; on a `pending` agent this rejects the registration (admin key; the name stays reserved — ADRs 0012, 0028) |
 | `POST /v1/admin/org-key/rotate` | Rotate the shared org key: closes registration to every prior org key; active agents are unaffected (admin key; ADR 0031) |
-| `GET /v1/metrics` | Usage counters: entries / fleets / agents (trust-level distribution, writes per fleet, pending count) — operational data (admin key; ROADMAP §3.3) |
-| `GET /metrics` | Prometheus scrape target: the usage counters as gauges (cached 30 s), per-route request counts and latencies, degraded searches. No key; never on the public ingress (ADR 0050) |
+| `GET /v1/metrics` | Usage counters: entries / fleets / agents (trust-level distribution, writes per fleet, pending count) and searches (first-page searches and the ones that found nothing, per fleet; ADR 0056) — operational data (admin key; ROADMAP §3.3) |
+| `GET /metrics` | Prometheus scrape target: the usage counters as gauges (cached 30 s), the search counters of every runner (ADR 0056), per-route request counts and latencies, degraded searches. No key; never on the public ingress (ADR 0050) |
 | `GET /v1/admin/audit-log` | The audit log of admin-surface actions, newest first; filters `actor`, `action`, `since`, `before`, `limit` (admin key; §12.5, ADRs 0027, 0028) |
 
 **Request limits (ADR 0040).** A REST request body is capped at 2 MiB (`413 payload_too_large`, enforced by `Content-Length` and by counting streamed bytes, before the body is parsed). A `/v1` request with **no** `X-API-Key` header is refused `401` before its body is read; a present-but-unknown key is verified after the (bounded) body is parsed, so a malformed body with a bad key can still answer 422. A deployment's ingress should enforce its own, lower limit as well.

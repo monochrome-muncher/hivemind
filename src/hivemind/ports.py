@@ -36,6 +36,7 @@ from hivemind.domain.entry import (
     EntryDraft,
     EntryFilters,
     ExtractedEntity,
+    SearchCount,
     UsageCount,
     embeddable_text,
 )
@@ -83,6 +84,11 @@ class Store(Protocol):
         unknown or no longer active (e.g. a concurrent writer superseded
         or withdrew it first) the whole write is rolled back and
         ``SupersedeConflict`` is raised; nothing is inserted.
+
+        ``draft.see_also`` (ADR 0057) is stored as links from the new
+        entry, in the same transaction. The caller has already checked
+        that the writer may read every target; ids that name no entry are
+        dropped.
         """
         ...
 
@@ -99,6 +105,13 @@ class Store(Protocol):
         passes through entries the reader cannot see and filters what it
         returns (ADR 0033). Served by the partial ``superseded_by`` index
         (migration 0008), so the cost follows the chain, not the pool."""
+        ...
+
+    async def entry_links(self, entry_id: str, limit: int) -> tuple[list[str], list[str]]:
+        """The "see also" links of one entry (ADR 0057): the ids it links
+        to (oldest link first), and the ids of at most ``limit`` entries
+        that link to it (newest link first). Unfiltered by state or
+        visibility (the caller filters)."""
         ...
 
     async def pin_entry(
@@ -123,6 +136,17 @@ class Store(Protocol):
         fleet_id, active) combination present in the pool, with its entry
         count — every state included (the ROADMAP §3.3 counters are folded
         from these in ``MetricsService``, in a single grouped scan)."""
+        ...
+
+    async def record_search(self, fleet_id: str | None, *, empty: bool) -> None:
+        """Count one first-page search made from ``fleet_id`` (``None``: no
+        home fleet), and whether it found nothing (ADR 0056). Counts only:
+        no query text, no agent name."""
+        ...
+
+    async def search_counts(self) -> list[SearchCount]:
+        """The search counters recorded so far, one row per home fleet
+        (ADR 0056), in any order."""
         ...
 
     async def withdraw_entry(self, entry_id: str, reason: str | None, by_user: str) -> Entry:
