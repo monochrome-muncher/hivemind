@@ -104,7 +104,9 @@ _DESC_WRITE = (
     "up to 3 existing entries you can read that are nearest to the new one, "
     "with their similarity (ADR 0052): if one already says the same thing, "
     "withdraw your new entry; if yours corrects or extends one, withdraw yours "
-    "and write it again with 'supersedes' naming it."
+    "and write it again with 'supersedes' naming it. Optional 'see_also' "
+    "(up to 5 ids of entries you can read) links this entry to related ones "
+    "it does not replace; hive_get shows the links on both ends (ADR 0057)."
 )
 _DESC_SEARCH = (
     "Hybrid (keyword + vector) search over the pool. Returns compact hits "
@@ -122,6 +124,8 @@ _DESC_GET = (
     "read. An entry you may not read answers not_found, exactly like an "
     "unknown id. 'feedback' has the helpful/stale/wrong counts and the newest "
     "reports with their notes, which often say what is true now (ADR 0051). "
+    "'see_also' lists entries this one links to and 'linked_from' the active "
+    "entries that link to it, limited to what you may read (ADR 0057). "
     "To open several hits at once, pass 'entry_ids' (up to 10) instead of "
     "'entry_id': the reply has 'entries' in the order asked and 'not_found' "
     "for ids you may not read (ADR 0055)."
@@ -248,6 +252,7 @@ def build_server(
         scope: str | None = None,
         supersedes: list[str] | None = None,
         agent: str | None = None,
+        see_also: list[str] | None = None,
     ) -> dict[str, Any]:
         return await dispatch(
             hive_write,
@@ -262,6 +267,7 @@ def build_server(
             scope=scope,
             supersedes=supersedes,
             agent=agent,
+            see_also=see_also,
         )
 
     @server.tool(name="hive_search", description=_DESC_SEARCH)

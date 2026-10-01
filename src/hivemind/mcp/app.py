@@ -38,7 +38,13 @@ from hivemind.domain.validation import MAX_GET_IDS, InvalidInput, check_paginati
 from hivemind.embeddings import EmbeddingError
 from hivemind.ports import Credential, Store
 from hivemind.services.access import AccessService, resolve_write_scope
-from hivemind.services.chain import get_visible_entries, get_visible_entry, supersession_chain
+from hivemind.services.chain import (
+    EntryLinks,
+    entry_links,
+    get_visible_entries,
+    get_visible_entry,
+    supersession_chain,
+)
 from hivemind.services.governance import (
     GovernanceService,
     PermissionDenied,
@@ -159,6 +165,25 @@ def _related_dict(related: RelatedEntry) -> dict[str, object]:
         "fleet_id": entry.fleet_id,
         "occurred_at": entry.occurred_at.isoformat(),
         "similarity": round(related.similarity, 3),
+    }
+
+
+def _link_dict(entry: Entry) -> dict[str, object]:
+    """A linked entry on a read (ADR 0057): compact, with its state."""
+    return {
+        "id": entry.id,
+        "kind": entry.kind.value,
+        "summary": entry.summary,
+        "author": entry.author,
+        "state": entry.state.value,
+        "fleet_id": entry.fleet_id,
+    }
+
+
+def _links_dict(links: EntryLinks) -> dict[str, object]:
+    return {
+        "see_also": [_link_dict(e) for e in links.see_also],
+        "linked_from": [_link_dict(e) for e in links.linked_from],
     }
 
 
@@ -307,6 +332,7 @@ async def hive_write(
     scope: str | None = None,
     supersedes: list[str] | None = None,
     agent: str | None = None,
+    see_also: list[str] | None = None,
 ) -> dict[str, object]:
     """Write a distilled entry into the shared pool (SPEC §4.1, §5.2).
 
@@ -323,6 +349,10 @@ async def hive_write(
     bad target rejects the whole write with ``supersede_denied``. Only the
     current head of a chain is supersedable — if a target is already
     superseded or withdrawn, re-target the version that supersedes it.
+
+    ``see_also``: up to 5 ids of entries the caller can read, stored as
+    links (ADR 0057) that ``hive_get`` shows on both ends. An id the
+    caller cannot read rejects the write as ``invalid_input``.
 
     ``importance``: omit it and the entry lands at the default (3) with
     ``importance_source=default``; supply it and the value is kept with
@@ -378,6 +408,7 @@ async def hive_write(
             scope=resolution.scope,
             fleet_id=resolution.fleet_id,
             supersedes=tuple(supersedes or ()),
+            see_also=tuple(see_also or ()),
         )
     except PermissionDenied as exc:
         return _error(ERR_PERMISSION_DENIED, str(exc))
@@ -481,7 +512,9 @@ async def hive_get(
     replaced) — the supersession chain (SPEC §5.1 ``?history``).
 
     ``feedback`` carries the entry's verdict counts and its newest
-    feedback rows, notes included (ADR 0051).
+    feedback rows, notes included (ADR 0051). ``see_also`` lists the
+    entries it links to and ``linked_from`` the active entries that link
+    to it, both limited to what the caller may read (ADR 0057).
 
     Follows readability (ADR 0033): an entry the caller may not see is
     ``not_found`` — the same answer as an unknown id — and the chain
@@ -502,8 +535,13 @@ async def hive_get(
     entry = await get_visible_entry(app.store, entry_id, app.credential.visibility())
     if entry is None:
         return _error(ERR_NOT_FOUND, f"unknown entry: {entry_id}")
+    summary, links = await asyncio.gather(
+        app.governance_service.feedback_summary(entry.id),
+        entry_links(app.store, entry.id, app.credential.visibility()),
+    )
     result = _entry_dict(entry)
-    result["feedback"] = _feedback_dict(await app.governance_service.feedback_summary(entry.id))
+    result["feedback"] = _feedback_dict(summary)
+    result.update(_links_dict(links))
     if include_history:
         successors, superseded = await _supersession_chain(app, entry)
         result["successors"] = [_entry_dict(s) for s in successors]
@@ -519,13 +557,15 @@ async def _hive_get_many(app: McpHivemind, entry_ids: list[str]) -> dict[str, ob
         return _error(ERR_INVALID_INPUT, f"entry_ids may name at most {MAX_GET_IDS} entries")
     found = await get_visible_entries(app.store, ids, app.credential.visibility())
     entries = [found[eid] for eid in ids if eid in found]
-    summaries = await asyncio.gather(
-        *(app.governance_service.feedback_summary(e.id) for e in entries)
+    visibility = app.credential.visibility()
+    summaries, links = await asyncio.gather(
+        asyncio.gather(*(app.governance_service.feedback_summary(e.id) for e in entries)),
+        asyncio.gather(*(entry_links(app.store, e.id, visibility) for e in entries)),
     )
     return {
         "entries": [
-            {**_entry_dict(e), "feedback": _feedback_dict(s)}
-            for e, s in zip(entries, summaries, strict=True)
+            {**_entry_dict(e), "feedback": _feedback_dict(s), **_links_dict(lk)}
+            for e, s, lk in zip(entries, summaries, links, strict=True)
         ],
         "not_found": [eid for eid in ids if eid not in found],
     }

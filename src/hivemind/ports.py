@@ -83,6 +83,11 @@ class Store(Protocol):
         unknown or no longer active (e.g. a concurrent writer superseded
         or withdrew it first) the whole write is rolled back and
         ``SupersedeConflict`` is raised; nothing is inserted.
+
+        ``draft.see_also`` (ADR 0057) is stored as links from the new
+        entry, in the same transaction. The caller has already checked
+        that the writer may read every target; ids that name no entry are
+        dropped.
         """
         ...
 
@@ -99,6 +104,13 @@ class Store(Protocol):
         passes through entries the reader cannot see and filters what it
         returns (ADR 0033). Served by the partial ``superseded_by`` index
         (migration 0008), so the cost follows the chain, not the pool."""
+        ...
+
+    async def entry_links(self, entry_id: str, limit: int) -> tuple[list[str], list[str]]:
+        """The "see also" links of one entry (ADR 0057): the ids it links
+        to (oldest link first), and the ids of at most ``limit`` entries
+        that link to it (newest link first). Unfiltered by state or
+        visibility (the caller filters)."""
         ...
 
     async def usage_counts(self) -> list[UsageCount]:

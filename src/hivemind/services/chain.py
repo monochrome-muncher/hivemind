@@ -18,8 +18,10 @@ predecessors (each with a 100 000-character body) and make every
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from hivemind.domain.access import Visibility, entry_is_visible
-from hivemind.domain.entry import Entry
+from hivemind.domain.entry import Entry, EntryState
 from hivemind.domain.validation import MAX_ID_CHARS, MAX_LIMIT, MAX_SUPERSEDES
 from hivemind.ports import Store
 
@@ -29,6 +31,9 @@ _MAX_SUPERSEDE_HOPS = 256
 # Bound on the versions one walk loads, both directions together, visible
 # or not: never more than one list page (``limit`` <= MAX_LIMIT).
 _MAX_HISTORY_VERSIONS = MAX_LIMIT
+# Incoming "see also" links shown on one read (ADR 0057): a popular entry
+# can be linked from many, and the newest links matter most.
+MAX_LINKED_FROM = 20
 
 
 async def get_visible_entry(store: Store, entry_id: str, visibility: Visibility) -> Entry | None:
@@ -61,6 +66,32 @@ async def get_visible_entries(
         if entry is not None and entry_is_visible(entry, visibility):
             result[eid] = entry
     return result
+
+
+@dataclass(frozen=True, slots=True)
+class EntryLinks:
+    """An entry's "see also" links as one reader sees them (ADR 0057)."""
+
+    see_also: tuple[Entry, ...] = ()
+    linked_from: tuple[Entry, ...] = ()
+
+
+async def entry_links(store: Store, entry_id: str, visibility: Visibility) -> EntryLinks:
+    """The entries ``entry_id`` links to and the active entries that link
+    to it, limited to what ``visibility`` may read (ADR 0057). A linked
+    entry the reader may not see is left out, as if the link did not
+    exist; ``linked_from`` holds at most ``MAX_LINKED_FROM``, newest link
+    first."""
+    outgoing, incoming = await store.entry_links(entry_id, MAX_LINKED_FROM)
+    if not outgoing and not incoming:
+        return EntryLinks()
+    found = await get_visible_entries(store, list(dict.fromkeys(outgoing + incoming)), visibility)
+    return EntryLinks(
+        see_also=tuple(found[i] for i in outgoing if i in found),
+        linked_from=tuple(
+            found[i] for i in incoming if i in found and found[i].state is EntryState.ACTIVE
+        ),
+    )
 
 
 async def supersession_chain(

@@ -58,6 +58,7 @@ One entry entity; a `kind` enum carries the distinction. There are no other read
 | `embedding` | vector(dim) | Generated at write time (§7) |
 | `state` | `active` \| `superseded` \| `withdrawn` | Default `active` |
 | `supersedes` | entry id[] (optional) | **Write-side input** (the stored inverse is `superseded_by`): ids of active entries this entry supersedes; targets flip to `superseded` |
+| `see_also` | entry id[] (optional, ≤ 5) | **Write-side input**: entries the writer can read that this one relates to without replacing them, stored as links beside the entry (ADR 0057). Reads by id return `see_also` and `linked_from` (the active entries that link to it), limited to what the reader may read |
 | `superseded_by` | entry id (nullable) | Set when superseded |
 | `withdrawn_reason` | text (nullable) | Set on withdrawal |
 
@@ -102,8 +103,8 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 
 | Method & path | Purpose |
 |---|---|
-| `POST /v1/entries` | Create an entry (body = §4.1 fields; `supersedes` optional). The response adds `related`: up to 3 active entries the writer can read that are nearest to the new one, with their cosine `similarity` (ADR 0052) |
-| `GET /v1/entries/{id}` | Full entry (body included), with its `feedback`: verdict counts and the newest reports with their notes (§4.2, ADR 0051). `?history=true` adds the supersession chain: at most 100 versions (one list page), successors first, then predecessors newest first |
+| `POST /v1/entries` | Create an entry (body = §4.1 fields; `supersedes` and `see_also` optional). The response adds `related`: up to 3 active entries the writer can read that are nearest to the new one, with their cosine `similarity` (ADR 0052) |
+| `GET /v1/entries/{id}` | Full entry (body included), with its `feedback`: verdict counts and the newest reports with their notes (§4.2, ADR 0051), and its links: `see_also` and `linked_from` (at most 20, newest first), limited to what the reader may read (ADR 0057). `?history=true` adds the supersession chain: at most 100 versions (one list page), successors first, then predecessors newest first |
 | `POST /v1/entries/get` | Read up to 10 entries by id in one call, `{entry_ids}` → `{entries, not_found}`; each entry as `GET /v1/entries/{id}` returns it, without `history` (ADR 0055) |
 | `GET /v1/entries` | List/filter **without** a query (filter only; paginated) |
 | `POST /v1/search` | Hybrid search (§6) with filters |
