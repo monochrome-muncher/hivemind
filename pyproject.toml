@@ -1,6 +1,6 @@
 [project]
 name = "hivemind"
-version = "2.2.0"
+version = "2.3.0"
 description = "Hivemind — a shared memory service for an organization's AI agents, backed by PostgreSQL + pgvector"
 readme = "README.md"
 requires-python = ">=3.14"
