@@ -49,6 +49,14 @@ def test_every_mcp_tool_is_in_the_skill_and_no_other() -> None:
     assert mentioned == set(EXPECTED_TOOLS)
 
 
+def test_the_always_on_skill_stays_small() -> None:
+    """The hivemind skill is loaded in every session and again after each
+    compaction, so every byte costs on every load. It says when and why;
+    parameters and limits belong in the tool descriptions, which every
+    session gets from the server anyway."""
+    assert len(SKILL.encode()) <= 10_000, len(SKILL.encode())
+
+
 def test_the_skill_lists_every_tool_where_it_names_them() -> None:
     """The "The tools are ..." sentence is the agent's inventory; a new
     tool mentioned only deep in the text (hive_pin, hive_pinned) was missing
