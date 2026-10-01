@@ -144,7 +144,7 @@ A typical agent prompt contract: *"check where you stand (`hive_whoami`); recall
 
 ### 5.3 Filters (search *and* list)
 
-`kind`, `tags`, `entities` (extracted entity names, AND-semantics, case-insensitive; ADR 0016, §13), `scope`, `author`, `agent`, `occurred_from`/`occurred_to` (**memory-date** range), `created_from`/`created_to`, `state` (default `active` only; `include_inactive=true` to include `superseded`/`withdrawn`), `limit`/`offset`.
+`kind`, `tags`, `entities` (extracted entity names, AND-semantics, case-insensitive; ADR 0016, §13), `scope`, `author`, `agent`, `occurred_from`/`occurred_to` (**memory-date** range), `created_from`/`created_to`, `state` (default `active` only; `include_inactive=true` to include `superseded`/`withdrawn`), `flagged` (only entries with at least one `stale` or `wrong` report — with the default state filter, the entries waiting to be superseded; ADR 0054), `limit`/`offset`.
 
 **Bounds (ADR 0040).** `limit` is **1–100**, `offset` **0–10 000**, on `GET /v1/entries`, `POST /v1/search`, `hive_search` and `hive_list`; anything else is a 422 / `invalid_input` (the audit log keeps its own `limit` ≤ 1000, ADR 0027). `query` ≤ 2000 characters; a filter value ≤ 256 characters, ≤ 32 values per list; no U+0000 in any of them.
 

@@ -260,6 +260,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         created_from: Annotated[datetime | None, Query()] = None,
         created_to: Annotated[datetime | None, Query()] = None,
         include_inactive: bool = False,
+        flagged: bool = False,
         limit: Annotated[int | None, Query(ge=1, le=MAX_LIMIT)] = None,
         offset: Annotated[int | None, Query(ge=0, le=MAX_OFFSET)] = 0,
     ) -> list[EntryOut]:
@@ -281,6 +282,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
             created_from=_to_utc(created_from),
             created_to=_to_utc(created_to),
             include_inactive=include_inactive,
+            flagged=flagged,
         )
         filters.validate()  # ADR 0040 (raises InvalidInput -> 422)
         effective_limit = limit if limit is not None else app.search_config.default_limit
@@ -315,6 +317,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
             created_from=request.created_from,
             created_to=request.created_to,
             include_inactive=request.include_inactive,
+            flagged=request.flagged,
         )
         result = await app.search_service.search_result(
             request.query,
