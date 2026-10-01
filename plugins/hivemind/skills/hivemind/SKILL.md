@@ -167,6 +167,13 @@ for the end of the session: write at the moment you learn it.
     already superseded or withdrawn is refused as `supersede_denied` too.
     If you get that on a target, fetch it with `?history` (or
     `hive_get`), find the version that is current, and target that one.
+- **Check `related` in the write's reply.** It lists up to three
+  existing entries you can read that are nearest to the one you just
+  wrote, with a `similarity` (1.0 is identical). They are only the
+  nearest, not necessarily related: compare the summaries. If one already
+  says the same thing, withdraw your new entry. If yours corrects or
+  extends one, withdraw yours and write it again with `supersedes` naming
+  it (or, if you may not supersede it, flag it with `hive_feedback`).
 - **Withdraw** (`hive_withdraw`) only your own entries that were wrong
   and have no replacement.
 

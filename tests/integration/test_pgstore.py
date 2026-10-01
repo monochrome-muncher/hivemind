@@ -487,6 +487,27 @@ async def test_keyword_search_respects_filters(pg) -> None:
     assert fact.id not in results
 
 
+async def test_similar_entries_returns_nearest_active_with_similarity(pg) -> None:
+    """ADR 0052: nearest active entries with their cosine similarity,
+    leaving out the excluded id and inactive entries."""
+    store, _, dim = pg
+    same = await store.create_entry(draft("Auth uses JWT"), make_vec(dim, 0))
+    far = await store.create_entry(draft("Cookies"), make_vec(dim, 3))
+    old = await store.create_entry(draft("Auth used sessions"), make_vec(dim, 0))
+    await store.create_entry(draft("Auth uses JWT now", supersedes=(old.id,)), make_vec(dim, 1))
+    new = await store.create_entry(draft("Auth uses JWT tokens"), make_vec(dim, 0))
+
+    pairs = await store.similar_entries(make_vec(dim, 0), 10, exclude_id=new.id)
+    ids = [eid for eid, _ in pairs]
+    assert new.id not in ids
+    assert old.id not in ids  # superseded
+    assert ids[0] == same.id
+    assert pairs[0][1] == pytest.approx(1.0, abs=1e-4)
+    assert far.id in ids
+    assert pairs[ids.index(far.id)][1] < pairs[0][1]
+    assert len(await store.similar_entries(make_vec(dim, 0), 1, exclude_id=new.id)) == 1
+
+
 async def test_vector_search_ranks_by_cosine_similarity(pg) -> None:
     store, _, dim = pg
     close = await store.create_entry(draft("Auth uses JWT"), make_vec(dim, 0))
