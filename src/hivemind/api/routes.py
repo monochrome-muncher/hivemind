@@ -33,6 +33,7 @@ from hivemind.api.schemas import (
     AgentOut,
     AgentsMetrics,
     AuditRecordOut,
+    BatchFeedbackRequest,
     CreateEntryRequest,
     CreateFleetRequest,
     EntriesMetrics,
@@ -367,6 +368,34 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         except ValueError as exc:
             raise api_error(409, "conflict", str(exc)) from exc
         return EntryOut.from_entry(entry)
+
+    @router.post("/feedback", response_model=list[FeedbackOut])
+    async def batch_feedback(
+        request: BatchFeedbackRequest, credential: require
+    ) -> list[FeedbackOut]:
+        """One verdict (and note) on up to 16 entries at once (ADR 0053).
+
+        All or nothing: an id the caller may not read is a 404 naming it,
+        and nothing is recorded.
+        """
+        try:
+            outcomes = await app.governance_service.record_feedback_many(
+                credential,
+                request.entry_ids,
+                request.verdict,
+                request.note,
+                agent=request.agent,
+            )
+        except LookupError as exc:
+            raise api_error(404, "not_found", str(exc)) from None
+        except InvalidInput as exc:
+            raise api_error(422, "invalid_input", str(exc)) from exc
+        except ValueError as exc:
+            raise api_error(422, "agent_identity_required", str(exc)) from exc
+        return [
+            FeedbackOut(entry_id=o.feedback.entry_id, verdict=o.feedback.verdict, quality=o.quality)
+            for o in outcomes
+        ]
 
     @router.post("/entries/{entry_id}/feedback", response_model=FeedbackOut)
     async def feedback(entry_id: str, request: FeedbackRequest, credential: require) -> FeedbackOut:

@@ -44,6 +44,7 @@ MAX_PAYLOAD_DEPTH = 32
 MIN_DATETIME = datetime(1900, 1, 1, tzinfo=UTC)
 MAX_DATETIME = datetime(2200, 1, 1, tzinfo=UTC)
 MAX_SUPERSEDES = 16
+MAX_FEEDBACK_IDS = 16  # entries one batch feedback call may name (ADR 0053)
 MAX_GET_IDS = 10  # entries one batch read may name (ADR 0055)
 MAX_ID_CHARS = 64
 MAX_IDENTITY_CHARS = 256  # author / agent / actor strings

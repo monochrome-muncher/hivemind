@@ -67,7 +67,7 @@ One entry entity; a `kind` enum carries the distinction. There are no other read
 
 **Derived validity (ADR 0001, no `valid_until` column):** an entry is "active as of T" iff `created_at ≤ T` and it has no supersession/withdrawal state transition before T. Read-side time-travel questions ("what did the org know in March?") are answered by `created_at`/`occurred_at` range filters + `state`.
 
-**Input bounds (ADR 0040).** Every surface enforces the same limits, before any embedder or store call, and answers a violation with **422** (REST `invalid_entry` / `invalid_input`) or `invalid_input` (MCP): no **U+0000** or lone surrogate in any string (nested `payload` strings and keys included) — Postgres cannot store them; caller-supplied timestamps within years 1900–2199; `body` ≤ 100 000 characters (a Postgres `tsvector` is capped at 1 MB); `tags` ≤ 32, each non-blank and ≤ 64 characters; `sources` ≤ 32, each `ref` ≤ 2048 characters; `payload` ≤ 64 KiB of compact JSON, nested ≤ 32 levels (no NaN/Infinity); `supersedes` ≤ 16 ids; feedback `note` and withdraw `reason` ≤ 2000 characters. The text sent to the embedder and extractor is additionally capped at `max(20 000, 10 × prefix tokens)` characters of body (a character ceiling beside ADR 0021's word budget, for bodies with no whitespace).
+**Input bounds (ADR 0040).** Every surface enforces the same limits, before any embedder or store call, and answers a violation with **422** (REST `invalid_entry` / `invalid_input`) or `invalid_input` (MCP): no **U+0000** or lone surrogate in any string (nested `payload` strings and keys included) — Postgres cannot store them; caller-supplied timestamps within years 1900–2199; `body` ≤ 100 000 characters (a Postgres `tsvector` is capped at 1 MB); `tags` ≤ 32, each non-blank and ≤ 64 characters; `sources` ≤ 32, each `ref` ≤ 2048 characters; `payload` ≤ 64 KiB of compact JSON, nested ≤ 32 levels (no NaN/Infinity); `supersedes` ≤ 16 ids; batch feedback `entry_ids` ≤ 16 (ADR 0053); feedback `note` and withdraw `reason` ≤ 2000 characters. The text sent to the embedder and extractor is additionally capped at `max(20 000, 10 × prefix tokens)` characters of body (a character ceiling beside ADR 0021's word budget, for bodies with no whitespace).
 
 ### 4.2 Feedback
 
@@ -109,6 +109,7 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | `POST /v1/search` | Hybrid search (§6) with filters |
 | `POST /v1/entries/{id}/withdraw` | Withdraw own entry (or any, with admin credential) |
 | `POST /v1/entries/{id}/feedback` | Report `helpful`/`stale`/`wrong` (+note) |
+| `POST /v1/feedback` | One verdict (+note) on up to 16 entries at once, `{entry_ids, verdict, note?}`; all must be readable or nothing is recorded (ADR 0053) |
 | `GET /v1/health` | Liveness/readiness |
 | `GET /v1/whoami` | The calling key's standing: kind (`agent`/`org`/`admin`/`legacy`), agent name, status, trust level, home fleet, `can_read`, `can_write_scopes` (any valid key; not audited — ADR 0030) |
 | `POST /v1/agents` | Register an agent (org key or admin key; `{name, owner_alias?}`) → pending agent, 201 (§12, ADR 0012); the same name + alias again → 200 with the current status; another alias → 409 (§12.3, ADR 0039) |
@@ -136,7 +137,7 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | `hive_get` | `GET /v1/entries/{id}`; with `entry_ids` instead of `entry_id`, `POST /v1/entries/get` (ADR 0055) |
 | `hive_list` | `GET /v1/entries` |
 | `hive_withdraw` | `POST /v1/entries/{id}/withdraw` |
-| `hive_feedback` | `POST /v1/entries/{id}/feedback` |
+| `hive_feedback` | `POST /v1/entries/{id}/feedback`; with `entry_ids` instead of `entry_id`, `POST /v1/feedback` (ADR 0053) |
 | `hive_register` | `POST /v1/agents` (org key only — the agent's first contact with Hivemind; §12.3) |
 | `hive_whoami` | `GET /v1/whoami` (any valid key — the key's kind, the agent's status, trust level and home fleet, and what it may read and write; ADR 0030) |
 
