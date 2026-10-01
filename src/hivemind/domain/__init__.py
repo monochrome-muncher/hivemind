@@ -31,12 +31,15 @@ from hivemind.domain.entry import (
     new_entry_id,
 )
 from hivemind.domain.feedback import (
+    FEEDBACK_RECENT_LIMIT,
     Feedback,
     FeedbackCounts,
+    FeedbackSummary,
     Verdict,
 )
 
 __all__ = [
+    "FEEDBACK_RECENT_LIMIT",
     "ActorKind",
     "Agent",
     "AgentStatus",
@@ -52,6 +55,7 @@ __all__ = [
     "ExtractedEntity",
     "Feedback",
     "FeedbackCounts",
+    "FeedbackSummary",
     "Fleet",
     "ImportanceSource",
     "Kind",

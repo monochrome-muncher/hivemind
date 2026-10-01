@@ -53,6 +53,9 @@ from hivemind.domain.feedback import (
 )
 from hivemind.ports import SupersedeConflict
 
+# Sort key for a feedback row that has no timestamp (fixtures only).
+_EPOCH = datetime.min.replace(tzinfo=UTC)
+
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
@@ -296,6 +299,15 @@ class MemoryStore:
             return {
                 eid: _count_for(self._feedback, eid) for eid in entry_ids if eid in self._entries
             }
+
+    async def list_feedback(self, entry_id: str, limit: int) -> list[Feedback]:
+        with self._lock:
+            rows = [fb for fb in self._feedback.values() if fb.entry_id == entry_id]
+        # Newest first; ties (same timestamp) break on the reporter, as on
+        # Postgres, so the order is deterministic.
+        rows.sort(key=lambda fb: (fb.user, fb.agent))
+        rows.sort(key=lambda fb: fb.updated_at or _EPOCH, reverse=True)
+        return rows[:limit]
 
     async def health_check(self) -> bool:
         """In-memory pool: always healthy (ADR 0019)."""

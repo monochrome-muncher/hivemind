@@ -17,7 +17,7 @@ from hivemind.config import SearchConfig
 from hivemind.domain.access import Visibility, may_supersede
 from hivemind.domain.audit import AuditAction
 from hivemind.domain.entry import Entry, EntryDraft, ExtractedEntity
-from hivemind.domain.feedback import Feedback, Verdict
+from hivemind.domain.feedback import FEEDBACK_RECENT_LIMIT, Feedback, FeedbackSummary, Verdict
 from hivemind.domain.validation import (
     MAX_IDENTITY_CHARS,
     MAX_NOTE_CHARS,
@@ -263,6 +263,21 @@ class GovernanceService:
             feedback=feedback,
             quality=await self.quality(entry_id),
         )
+
+    async def feedback_summary(self, entry_id: str) -> FeedbackSummary:
+        """What a reader of an entry sees of its feedback (ADR 0051): the
+        verdict counts plus the newest rows, notes included.
+
+        The caller must already have read the entry under its own
+        visibility (``get_visible_entry``): feedback is shown to exactly
+        the audience that can read the entry, so this does no check of
+        its own.
+        """
+        (helpful, stale, wrong), recent = await asyncio.gather(
+            self._store.feedback_counts(entry_id),
+            self._store.list_feedback(entry_id, FEEDBACK_RECENT_LIMIT),
+        )
+        return FeedbackSummary(helpful, stale, wrong, tuple(recent))
 
     async def quality(self, entry_id: str) -> float:
         """The current quality multiplier for an entry's retrieval score.

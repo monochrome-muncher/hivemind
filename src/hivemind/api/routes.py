@@ -38,6 +38,7 @@ from hivemind.api.schemas import (
     EntryOut,
     FeedbackOut,
     FeedbackRequest,
+    FeedbackSummaryOut,
     FleetOut,
     FleetsMetrics,
     HealthOut,
@@ -216,6 +217,8 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
 
         ``?history=true`` adds the supersession chain (successors +
         superseded) — the same bounded walk the MCP ``hive_get`` uses.
+        ``feedback`` carries the verdict counts and the newest reports,
+        notes included (ADR 0051).
         """
         # ADR 0033: follows readability; an invisible entry is a 404 like
         # an unknown one, and the chain leaves out invisible versions.
@@ -224,6 +227,9 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         if entry is None:
             raise api_error(404, "not_found", f"unknown entry: {entry_id}")
         out = EntryOut.from_entry(entry)
+        out.feedback = FeedbackSummaryOut.from_summary(
+            await app.governance_service.feedback_summary(entry.id)
+        )
         if history:
             successors, superseded = await supersession_chain(
                 app.store, entry, visibility=visibility

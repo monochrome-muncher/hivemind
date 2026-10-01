@@ -16,7 +16,7 @@ from pydantic import AfterValidator, BaseModel, Field, field_validator
 from hivemind.domain.access import Agent, Fleet, Standing
 from hivemind.domain.audit import AuditRecord
 from hivemind.domain.entry import EntityKind, Entry, ImportanceSource, Kind, SourceType
-from hivemind.domain.feedback import Verdict
+from hivemind.domain.feedback import FeedbackCounts, FeedbackSummary, Verdict
 from hivemind.domain.validation import MAX_ID_CHARS, MAX_LIMIT, MAX_OFFSET, check_no_nul
 from hivemind.services.search import Hit
 
@@ -109,6 +109,49 @@ class EntityOut(BaseModel):
     kind: EntityKind
 
 
+class FeedbackCountsOut(BaseModel):
+    """Verdict counts over every reporter (SPEC.md §4.2, ADR 0051)."""
+
+    helpful: int = 0
+    stale: int = 0
+    wrong: int = 0
+
+    @classmethod
+    def from_counts(cls, counts: FeedbackCounts) -> FeedbackCountsOut:
+        helpful, stale, wrong = counts
+        return cls(helpful=helpful, stale=stale, wrong=wrong)
+
+
+class FeedbackReportOut(BaseModel):
+    """One reporter's latest verdict on an entry, as readers see it."""
+
+    verdict: Verdict
+    note: str | None = None
+    reporter: str
+    updated_at: datetime | None = None
+
+
+class FeedbackSummaryOut(FeedbackCountsOut):
+    """An entry's feedback on ``GET /v1/entries/{id}`` (ADR 0051): the
+    counts plus the newest reports, notes included."""
+
+    recent: list[FeedbackReportOut] = []
+
+    @classmethod
+    def from_summary(cls, summary: FeedbackSummary) -> FeedbackSummaryOut:
+        return cls(
+            helpful=summary.helpful,
+            stale=summary.stale,
+            wrong=summary.wrong,
+            recent=[
+                FeedbackReportOut(
+                    verdict=fb.verdict, note=fb.note, reporter=fb.user, updated_at=fb.updated_at
+                )
+                for fb in summary.recent
+            ],
+        )
+
+
 class EntryOut(BaseModel):
     """A full entry (SPEC.md §4.1). Embeddings are internal and are
     never serialized across the wire."""
@@ -143,6 +186,8 @@ class EntryOut(BaseModel):
     # The supersession chain (SPEC.md §5.1 ``?history=true``): optional,
     # populated only when the caller asks for it.
     history: dict[str, list[EntryOut]] | None = None
+    # The entry's feedback (ADR 0051): set by ``GET /v1/entries/{id}`` only.
+    feedback: FeedbackSummaryOut | None = None
 
     @classmethod
     def from_entry(cls, entry: Entry) -> EntryOut:
@@ -188,6 +233,7 @@ class HitOut(BaseModel):
     score: float
     scope: str = "fleet"
     fleet_id: str | None = None  # a foreign entry: != the reader's home fleet (ADR 0036)
+    feedback: FeedbackCountsOut = FeedbackCountsOut()  # ADR 0051
 
     @classmethod
     def from_hit(cls, hit: Hit) -> HitOut:
@@ -203,6 +249,7 @@ class HitOut(BaseModel):
             score=hit.score,
             scope=hit.scope,
             fleet_id=hit.fleet_id,
+            feedback=FeedbackCountsOut.from_counts(hit.feedback),
         )
 
 

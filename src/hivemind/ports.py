@@ -241,6 +241,12 @@ class Store(Protocol):
         """Batched feedback counts for a set of entries."""
         ...
 
+    async def list_feedback(self, entry_id: str, limit: int) -> list[Feedback]:
+        """An entry's feedback rows, newest first (``updated_at`` DESC, then
+        reporter), at most ``limit`` of them (ADR 0051). No visibility
+        check: the caller has already established the entry is readable."""
+        ...
+
     async def health_check(self) -> bool:
         """Deep liveness probe (ADR 0019): True when the pool is up and
         answering, False when it is unreachable. Used by the
