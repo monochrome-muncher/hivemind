@@ -1,503 +1,185 @@
-# ROADMAP.md — Hivemind (what to build next, in what order)
+# ROADMAP.md — Hivemind (what is open, what is held)
 
-> **What this document is:** the working plan for the *next* increment. It is
-> **not** the spec (SPEC.md owns behavior) and **not** the decision log
-> (docs/adr/ owns reasons). It links to both and exists only to sequence
-> the work. Revisit after Tier 1 lands — the eval numbers will likely
-> re-rank Tiers 2–5.
+> **What this document is:** the working plan. It is **not** the spec
+> (SPEC.md owns behavior) and **not** the decision log (docs/adr/ owns
+> reasons). It sequences work and records what was deliberately left
+> open. Section numbers are stable because code and ADRs cite them.
 
 ## Where we are
 
-- **v1 is code-complete and review-gated.** Every lane (domain / ports /
-  retrieval / services / memstore, Postgres + pgvector store,
-  embeddings, REST API, MCP server) is implemented, integrated on
-  `main`, and green (mypy strict + ruff clean; full suite green
-  including the live-Postgres integration tests).
-- **The eval harness (Tier 1) has landed.** The retrieval pipeline is
-  now measured on a committed golden set (`tests/eval/`): hit@k / MRR /
-  nDCG are reported and a CI gate pins a floor on them (a regression
-  below the bar fails the suite). The ~10 config knobs are now
-  *measured* dials, not vibes (current: hit@5 = 1.0, MRR = 0.75,
-  nDCG@5 = 0.8155).
-- **Access control (Tier 2) has landed.** The full fleet / trust-level /
-  registration model (ADRs 0011-0012, SPEC 12) is implemented end to
-  end: domain (TrustLevel / Agent / Fleet / Visibility), the `Store`
-  seam (fleet / agent methods + visibility-aware reads), the v2 key
-  model (org / agent / admin; `user` keys retired), the `AccessService`
-  (register / activate / trust-level / home-fleet / revoke / org-key
-  rotation), the REST surface (`POST /v1/agents` + the admin endpoints),
-  the MCP surface (`hive_register` + write-scope + visibility), and the
-  reduced `hivemind-keys` CLI.
-- **2.0.0 closed a full security, correctness and performance review**
-  (§3.13, ADRs 0039–0043): the findings are fixed, and the open
-  follow-ups it found are listed in §3.13.
-- **What's next:** Tier 3.1–3.4 are shipped, including the Kubernetes +
-  GitLab CI/CD deployment story (3.4). **§3.2 has been superseded by
-  §3.5** (ADR 0020: an ordered, rollback-capable migration chain under a
-  Postgres advisory lock), which is now **shipped end to end**. **§3.7**
-  is shipped too: 2 app-tier replicas per runner with an explicit
-  rollout strategy and a PDB each, for **availability only** — ADR 0026,
-  which supersedes ADR 0007. **§3.8** is shipped as well: an append-only
-  audit log of admin-surface actions (ADR 0027, SPEC §12.5), and so is
-  **§3.9**, the admin panel (ADRs 0028–0029). The next
-  workstream is **Tier 4**, whose two measurement items are now closed —
-  §4.5 shipped `importance_source`, and §4.4 measured the recency term
-  and **rejected** gating it (no code change; numbers in §4.4). The two
-  SPEC §11 open items are now resolved as far as they can be without
-  production data: **§4.1 (BM25 vs. FTS) is DEFERRED** with its reasons
-  written down (it is a deployment-topology change, and RRF fuses
-  *ranks*, so most of BM25's advantage never reaches the result), and
-  **§4.2 is rescoped** — its "how much, in what unit" half is settled
-  by ADR 0021 (a 2000-whitespace-word budget, and the knob now actually
-  reaches the embedder), leaving "what goes into the embedded text"
-  open and chunking explicitly out of scope. **§4.6** is now measured
-  on both cheap levers: sweeping `rrf_k` with decay on does **not**
-  recover what the recency term buries (`old_exact` stays at 0.000
-  hit@5 at every `k`), because the whole `rrf_k` lever is bounded at
-  ~5.3 half-lives of age — but **flooring the recency factor does**. A
-  floor of 0.8 takes `old_exact` from 0.000 to 1.000 MRR while holding
-  `currency_pair` at 0.778, above decay-off's 0.611: the first variant
-  to beat both extremes on the slice each is weak at. **ADR 0022 then
-  flipped that floor on by default** (`recency_floor = 0.8`, SPEC §6.4
-  amended), which **closes §4.6 direction (a)** and therefore rules out
-  (b); per-kind half-lives stays held. The §1.1 gate numbers are
-  unchanged by it (the golden set is single-timestamp, so a lower bound
-  on a recency factor of 1.0 is a no-op) and its thresholds were not
-  re-pinned.
+Tiers 1–3 are shipped: the retrieval eval harness, the fleet and trust
+model, and the production work (deployment, migrations, vector index,
+replicas, audit log, admin panel, agent plugin, the 2.0.0 security
+review, and the 2.1.0–2.3.0 retrieval and knowledge-sharing features).
+Tier 4's measurement items are closed or deferred with their reasons.
+The SPEC §10 extensions (Tier 5) stay held until their triggers fire.
 
-## The keystone is shipped: measure, then Tier 4
+## What is open
 
-The retrieval **eval harness** (§1.1) — the single highest-leverage next
-step — has **landed**: it de-risks v1's core (rankings are now measured,
-not vibes), it is a reproducible CI gate against retrieval regressions,
-and it is the same instrument that lets you *measure* the two
-retrieval-quality triggers in SPEC §10 (knowledge graph, per-agent
-tuning), turning those future extensions from "vibes" into
-data-driven decisions.
-
-With the keystone shipped and §3.5 (the migration chain) in place, the
-next workstream is **Tier 4** — all of it measurable with the §1.1
-harness instead of guesses. §4.5 is the first schema change to ride the
-new chain. §4.4 is the first item the harness closed *against* a
-proposed change: it needed a second, age-varied fixture beside the
-golden set (the golden set's entries all share one timestamp, so it is
-blind to decay), and the numbers rejected the gate it was written to
-justify. §4.1 is the first item closed *without* running the harness at
-all — the analysis (a custom Postgres image; RRF fusing ranks, not
-scores) says what the experiment could pay for before it is worth
-running, so it is **deferred with its reasons recorded** rather than
-left as an open invitation to re-derive them.
+- **§3.13 follow-ups**: rate limiting in the app (today only at the
+  ingress), unverified owner aliases, structural markers on returned
+  entries, the remaining performance items, a contract step for
+  `credentials_kind_check`, and the next harnesses.
+- **§4.2 (a)**: what goes into the embedded text (tags, kind, entity
+  names), to be measured with the eval harness on real long-form entries.
+- **Re-measure triggers** on the first real corpus: the recency floor's
+  value (§4.6), the HNSW recall cost (§3.6, ADR 0025), and any `rrf_k`
+  change.
+- **Parked ideas**: a `question` entry kind (wait for the empty-search
+  counters of ADR 0056 to show demand) and per-kind half-lives (held,
+  §4.6). The legacy `pi-mcp-adapter` route in the Pi plugin is to be
+  dropped once Pi's built-in MCP (0.99+) is the norm.
+- **4.1 BM25** stays deferred; revisit only on observed keyword misses.
 
 ## Tier 1 — validate the core  *(shipped)*
 
 ### 1.1 Retrieval eval harness + golden set  *(shipped: `tests/eval/`, `retrieval/eval.py`)*
-- **What:** a fixed, realistic entry set (seeded deterministically on
-  top of the existing `tests/fakes.py`) + a **golden query set** (each
-  query → expected top-k / expected #1), run through
-  `SearchService.search` and reporting **hit@k, MRR, nDCG**.
-- **Why:** ~10 knobs in `src/hivemind/config.py` — `rrf_k`,
-  `weight_keyword` / `weight_vector`, `candidate_top_k`, `default_limit`,
-  `half_life_days`, and the five `quality_*` weights — are all "SPEC
-  default" and have never been calibrated. This turns them from
-  guesses into measurable, tunable dials.
-- **Deliverables:** a small eval runner (e.g. `tests/eval/`) + a
-  committed golden set + a CI gate pinning a few golden queries so
-  future retrieval changes are measured, not vibes.
-- **Feeds:** Tier 3 (BM25, prefix-length tuning) and the two
-  retrieval-quality triggers in the Tier 5 table below.
+A deterministic entry set and a golden query set, run through
+`SearchService.search`, reporting hit@k, MRR and nDCG, with a CI gate
+that pins a floor on them (at landing: hit@5 = 1.0, MRR = 0.75,
+nDCG@5 = 0.8155). It turns the config knobs (`rrf_k`, the stream
+weights, `candidate_top_k`, `half_life_days`, the `quality_*` weights)
+into measured dials, and it is the instrument for the retrieval-quality
+triggers in Tier 5.
 
 ### 1.2 End-to-end dogfood with a real agent + real embedder  *(shipped)*
-- **What:** wire a real agent (pi / Claude) to `hivemind-mcp` over a
-  live Postgres + a real OpenAI-compatible embedder, and run a
-  realistic loop (write → search back → feedback → supersede).
-- **Why:** the unit / integration suite runs on `FakeEmbedder`. This
-  validates the two seams only exercised with fakes: (a) the real
-  embedder (here the local 512-dim vLLM `Qwen3-Embedding-0.6B`), and
-  (b) whether the MCP tool descriptions are good enough for an LLM to
-  use well.
-- **Deliverable:** `docs/dogfooding-notes.md` capturing friction
-  (tool-description gaps, error-code clarity, whether agents actually
-  reach for feedback / supersession).
-- **Note:** once Tier 2 lands, the dogfooding agent will present an
-  **agent key** (ADR 0012) — not the old per-user sub-key. The MCP
-  surface is the same seven `hive_*` tools; only the credential kind
-  changes.
-- **Result (2026-09-20):** the full loop ran clean on a real embedder
-  (Postgres 512-dim + vLLM). It caught one real defect: `hive_write`
- 's forced `scope="org"` default (in the registered MCP wrapper and the
-  REST schema) rejected every L2/L1 "unthinked" write, bypassing
-  ADR 0011's omitted-scope rule — now fixed at all three seams (app,
-  registered wrapper, REST) and locked by tests. Empty-`entry_id`
-  guards and `fleet_id` in entry reads were added in the same change.
-  Ops friction (build-cache / token-cache / pool-reset / dim footgun)
-  is logged in the notes doc.
+A real agent ran the full loop (write, search, feedback, supersede) over
+live Postgres and the local 512-dim vLLM embedder on 2026-09-20. It
+caught one real defect, a forced `scope="org"` default that rejected
+every L1/L2 write with an omitted scope, fixed at all three seams.
+Friction is logged in `docs/dogfooding-notes.md`.
 
 ## Tier 2 — access control & fleet model (ADRs 0011–0012, SPEC §12)  *(shipped)*
 
-The committed access-control capability: fleets, trust levels, and the
-registration / key model. This is a new workstream (a capability we
-committed to — *not* a §10 trigger), and it sequences **before** the
-key-rotation / ops items in Tier 3. It is independent of Tier 1 (the
-eval harness) — the two tracks run in parallel.
-
 ### 2.1 Domain + store: fleets, agents, trust levels  *(shipped)*
-- **What:** `fleets` + `agents` schema; entries gain a fleet reference
-  and scope values `self` / `fleet` (plus read-only legacy `org`);
-  visibility filtering in search/list/get (trust level + home fleet;
-  level 0 → everything empty; reads beyond visibility behave as if the
-  entry does not exist); omitted-scope resolution (highest scope the
-  writer's level permits; an explicit out-of-permission scope is a
-  permission error); L0 semantics (reads empty, writes/feedback
-  denied).
-- **Why:** the entire §12 model — the store is the seam (ADR 0011).
-- **Deliverables:** store changes behind the `Store` port (new ports
-  where needed), migration, hermetic unit tests at the seams.
+`fleets` and `agents` tables, entry scopes `self` / `fleet` (legacy `org`
+read-only), visibility-aware reads, omitted-scope resolution.
 
 ### 2.2 Registration + admin surface  *(shipped)*
-- **What:** `hive_register` (the seventh MCP verb; org-key only) +
-  `POST /v1/agents` (REST; org key **or** admin key — the seam a
-  future human-facing frontend plugs into). The admin endpoint set:
-  `GET /v1/admin/agents` / `GET /v1/admin/fleets`,
-  `POST /v1/admin/fleets`, `POST /v1/admin/agents/{name}/activate`
-  (**returns the generated agent key once** — the only moment a key is
-  ever shown), `PATCH /v1/admin/agents/{name}`,
-  `POST /v1/admin/agents/{name}/revoke`, and
-  `POST /v1/admin/org-key/rotate` (closes registration — ADR 0031).
-  `hivemind-keys` is reduced to admin-key issuance + org-key rotation
-  (ADR 0012).
-- **Why:** registration is the front door of the model; activation is
-  the one moment a key is ever shown (ADR 0012).
-- **Deliverables:** REST + MCP surface, the admin endpoint set, and the
-  error semantics (pending name → idempotent no-op; taken-by-active
-  name → "choose a new name").
+`hive_register` / `POST /v1/agents` and the admin endpoint set; the agent
+key is shown once, at activation.
 
-### 2.3 Runners + credential migration  *(shipped: reduced keys CLI; runner key-kinds updated)*
-- **What:** `hivemind-mcp-pg` / `hivemind-mcp-http` present **agent
-  keys** (ADR 0012; the ADR 0009/0010 mechanisms are unchanged —
-  verified provenance, immediate revocation on the hostable runner);
-  migration of the legacy `user` / `agent`-kind credentials to agent
-  keys under registered names (a named migration step); the dev runner
-  is untouched.
-- **Why:** per-agent revocation and verified provenance must keep
-  working under the new key kinds (ADRs 0009–0010).
-- **Deliverables:** migration script + `hivemind-keys` CLI notes.
+### 2.3 Runners + credential migration  *(shipped)*
+The MCP runners present agent keys; `hivemind-keys` is reduced to admin
+keys, agent-key issue and org-key rotation.
 
-**Sequencing rule:** 2.1 blocks 2.2 and 2.3 (the admin surface needs
-the `agents` / `fleets` tables; the runners need the new credential
-kinds). Tier 3.1 (the key-rotation runbook) is **blocked by Tier 2** —
-you can't write a rotation story for a key model that's about to
-change.
-
-## Tier 3 — productionize (former Tier 2)  *(3.1, 3.3–3.13 shipped; 3.2 superseded by 3.5)*
+## Tier 3 — productionize  *(shipped; 3.2 superseded by 3.5)*
 
 ### 3.1 Ops runbook  *(shipped: `docs/ops-runbook.md`)*
-Deployment, **backups** (single-node Postgres, ADR 0007),
-monitoring / health, and a **key issuance + rotation** story — now
-*defined* by ADR 0012 (the admin surface + org-key rotation define
-"who issues keys and how they rotate"). **Blocked by Tier 2.**
+Deployment, backups, monitoring and key rotation for a single node.
 
-### 3.2 Forward-migration path  *(shipped, then **superseded by §3.5** — ADR 0013 → ADR 0020)*
-`make migrate` is an idempotent full re-apply of the schema. There is
-no zero-downtime **forward** schema-evolution story for a system with
-live data — define how a new column / index lands without rewriting the
-whole pool. *(Note: the Tier 2 schema change (fleets / agents /
-entry-fleet refs) is the first real test of this story.)*
-*(Superseded: the idempotent re-apply cannot express a change to an
-existing object, shipped no backward direction, and assumed a
-single replica. See §3.5.)*
+### 3.2 Forward-migration path  *(superseded by §3.5: ADR 0013 → ADR 0020)*
+An idempotent re-apply of the schema, which could not change existing
+objects, had no backward direction and assumed one replica.
 
-### 3.3 Usage counters (trigger instrumentation)  *(shipped: `MetricsService` + `GET /v1/metrics`; Prometheus `GET /metrics` since ADR 0050)*
-A minimal metrics surface — writes, feedbacks, supersessions, distinct
-`scope` tags in use, `sources` by type, per-agent query counts. This
-makes the **usage-based** SPEC §10 triggers (below) measurable rather
-than guesswork. Cheap, high-signal; pair with §1.1 (which covers the
-retrieval-quality triggers). *(Add the §12 counters: writes per fleet,
-trust-level distribution, pending-agent count, revoked-key count.)*
+### 3.3 Usage counters (trigger instrumentation)  *(shipped: `MetricsService` + `GET /v1/metrics`; Prometheus `GET /metrics`, ADR 0050)*
+Entries, fleets, agents (trust distribution, writes per fleet, pending
+count), importance source and per-author kind distribution, and searches
+and empty searches per fleet (ADR 0056). They make the usage-based Tier 5
+triggers measurable.
 
-### 3.4 Kubernetes + GitLab CI/CD deployment story  *(shipped: `DEPLOY.md`, `deploy/kubernetes/`, `.gitlab-ci.yml`, `config/` env-profile quickstart)*
-A production deployment story: **one generic image** (runner selected by
-`HIVEMIND_RUNNER` — api / mcp-http / migrate / keys; the entrypoint owns
-the idempotent migration pre-step — ADR 0018), a plain-YAML
-**kustomize** manifest tree (two Deployments — 1 replica each as
-shipped here; **now 2 each, ADR 0026 / §3.7** — with
-unauthenticated probe endpoints — ADR 0019; optional nginx + cert-manager
-Ingress with SSE tuning), a **GitLab pipeline** (test on pgvector →
-docker build/push → deploy via the pre-configured GitLab Kubernetes
-agent, with an idempotent **first-run key bootstrap** that lands the
-admin/org keys in the k8s Secret), environment-profile files
-(`config/.env.example` + `ENVIRONMENT` selection — ADR 0017), and
-`hivemind-keys revoke-admin` (admin-key rotation is now CLI-native).
-ADR 0007's single-**Postgres-node** decision is unchanged by k8s hosting;
-its *one-process* clause is not — **§3.7 / ADR 0026 supersedes it** with
-2 app-tier replicas per runner for availability. The single-node ops
-story stays in `docs/ops-runbook.md` (one source of truth per concern).
+### 3.4 Kubernetes + GitLab CI/CD deployment story  *(shipped: `DEPLOY.md`, `deploy/kubernetes/`, `.gitlab-ci.yml`, `config/`)*
+One image with the runner chosen by `HIVEMIND_RUNNER` and the
+entrypoint owning migration (ADR 0018), kustomize manifests with probe
+endpoints (ADR 0019), a GitLab pipeline with a first-run key bootstrap
+(ADR 0044), environment profiles (ADR 0017) and `revoke-admin`.
 
-### 3.5 Versioned migrations with rollback  *(shipped: ADR 0020, SPEC §8.6, `src/hivemind/store/migrations/`)*
-Replaces §3.2. An ordered migration chain (`src/hivemind/store/migrations/`,
-yoyo-migrations) with a `.rollback.sql` per step, applied under a
-**Postgres advisory lock** so many replicas may start at once and exactly
-one migrates. Driven by three facts §3.2 could not absorb: the declarative
-re-apply is blind to changes on existing objects (seven `CHECK`
-constraints are frozen; `api_keys.kind` has already drifted), the
-`migrations/` directory ADR 0013 reserved was never built, and the
-deployment target is now GitLab AutoDevOps — one runner type per project,
-so `hivemind-api` and `hivemind-mcp-http` become independently released
-projects at 2–3 replicas each against one pool.
+### 3.5 Versioned migrations with rollback  *(shipped: ADR 0020, SPEC §8.6)*
+An ordered yoyo chain with a `.rollback.sql` per step under a Postgres
+advisory lock, a generated `schema.sql`, `startupProbe`s, and CI gates for
+checksum immutability, reference currency and expand-and-contract against
+previous releases.
 
-Work items:
-- `0001.initial-schema` (current `schema.sql`, dim-parameterised) + the
-  chain; `migrate.py` keeps its public surface, swaps its body.
-- Retire `schema_migrations`; `current_schema_version()` reads
-  `_yoyo_migration` (ops surface unchanged).
-- `schema.sql` becomes a CI-generated reference, never applied.
-- `startupProbe` on both Deployments (the migration runs before the
-  server listens; liveness would otherwise kill a slow index build).
-- CI: migration-file checksum immutability, generated-`schema.sql`
-  currency, and the **previous three releases' tests against a
-  HEAD-migrated pool** (enforces expand-and-contract by testing the
-  property, not by grepping for DDL verbs).
-- Deps: `yoyo-migrations` + `psycopg` (startup path only; `asyncpg`
-  stays the sole request-path driver).
+### 3.6 Vector index on `entries.embedding`  *(shipped: ADR 0025, migration `0004`)*
+HNSW (`vector_cosine_ops`, `m = 16`, `ef_construction = 64`) built
+`CONCURRENTLY`, with `iterative_scan = strict_order` and `ef_search = 40`
+set per query. It is approximate: the Postgres measurement gave hit@5
+1.000 exact vs. 0.625 at 2k distractors and 0.375 at 20k, and raising
+`ef_search` plateaus below parity, so nothing was tuned to hide it.
+Re-measure on the first real corpus of ≥30k entries. Landing it exposed a
+deadlock between `CONCURRENTLY` and a blocking advisory lock; `migrate`
+now polls `pg_try_advisory_lock`.
 
-*Not in scope here:* the replica bump itself (`replicas: 1` → 2–3) is a
-separate change — it drags in rollout strategy and **SSE connection
-draining on `hivemind-mcp-http`**, which is currently unexamined.
-*(Done: **§3.7**, ADR 0026. The draining question resolved to nothing
-new — the transport is stateless streamable-HTTP, ADR 0010, and the
-`preStop` + `terminationGracePeriodSeconds` pair the manifests already
-carry was written for exactly this.)*
-
-### 3.6 Vector index on `entries.embedding`  *(shipped: ADR 0025, migration `0004`, SPEC §6.2)*
-`search_vector` had no index: every vector query sequentially scanned the
-whole table, computing a true cosine distance against a ~4KB embedding
-per row (1024 dims — ADR 0015). Append-only entries (ADR 0001) mean that
-scan only ever grows, and the replica topology §3.5 already assumes
-multiplies it into concurrent full-table scans against one Postgres node
-(ADR 0007). Shipped as an **HNSW** index (`vector_cosine_ops`, matching
-the `<=>` operator; `m = 16`, `ef_construction = 64` — pgvector's
-defaults, unchanged) built `CONCURRENTLY` under ADR 0020's
-`-- transactional: false`, with `hnsw.iterative_scan = strict_order` and
-`hnsw.ef_search = 40` applied per query via `SET LOCAL`. HNSW over
-IVFFlat because IVFFlat trains on the rows and so cannot be built inside
-a migration against the empty pool `0001` provisions; `strict_order`
-because RRF fuses **ranks, not scores**.
-
-Landing it surfaced a defect in ADR 0020 itself: `0004` is the first
-migration to use decision 6 (`CREATE INDEX CONCURRENTLY`), and a
-concurrent index build **deadlocks** against decision 3's
-`pg_advisory_lock` — a sibling blocked inside `pg_advisory_lock` holds a
-virtual xid for the whole wait, which the winner's build waits on
-forever, and Postgres cannot detect it because the lock holder is idle.
-`migrate` now polls `pg_try_advisory_lock` instead; same lock, same
-session scope, short transactions.
-`test_concurrent_migrators_are_serialised_by_the_advisory_lock` hung
-indefinitely before the fix.
-
-**This is exact → approximate, and it is not free.** The measurement
-(`tests/integration/test_vector_index_recall.py`, the §1.1 golden set on
-real Postgres) did **not** confirm parity: hit@5 / MRR / nDCG@5 are
-1.000 exact against 0.625 / 0.563 / 0.579 at 2k distractors and
-0.375 / 0.313 / 0.329 at 20k. Sweeping `ef_search` to 800 plateaus below
-parity, so the loss is graph *reachability*, not candidate budget — the
-knob was deliberately not tuned. ADR 0025 records the numbers, the
-caveat (a uniform high-dimensional hash embedder with the relevant
-entries as isolated outliers is close to the worst case for a graph
-index, and real embeddings cluster), and the re-measure trigger: the
-first real corpus at ≥30k entries, which is where Postgres starts
-choosing the index unprompted. The §1.1 gate runs against `MemoryStore`,
-has no index and no `<=>`, and was **not** re-pinned.
-
-### 3.7 Two app-tier replicas  *(shipped: ADR 0026, SPEC §8.2, `deploy/kubernetes/`)*
-The replica bump §3.5 deferred, and the supersession of ADR 0007 it
-forced. Both Deployments go to **`replicas: 2`** with an explicit
-`maxSurge: 1` / `maxUnavailable: 0` rollout and a **`minAvailable: 1`
-PodDisruptionBudget** each (`hivemind-api-pdb.yaml`,
-`hivemind-mcp-pdb.yaml`).
-
-**Availability only.** Two replicas buy a zero-downtime rolling deploy
-and a pod that survives a node drain — nothing else, and the ADR says
-so in its own text so it cannot later be cited for more. *Throughput* is
-rejected on the workload's shape: the app tier is I/O-bound (embedder,
-extractor, Postgres — see the 123s worst-case write arithmetic on both
-Deployments), so a second replica adds pressure to three shared
-bottlenecks and capacity to none. *AZ failure* is rejected because it
-cannot be cashed: one Postgres node means an AZ failure takes the
-database whatever the app tier does. *Three replicas* is rejected as
-protection against a second simultaneous failure that the
-availability-only framing does not ask for.
-
-The PDB is the load-bearing part: `maxUnavailable` on a Deployment
-governs **rollouts**, not voluntary disruption — `kubectl drain`
-consults the PDB and nothing else. The explicit strategy is written
-down because k8s' 25% defaults only coincide with it at `replicas: 2`.
-
-Nothing in the app tier had to change: the REST surface holds no
-session state, the MCP transport is stateless streamable-HTTP with
-per-request credentials (ADR 0010), concurrent startup is already
-serialised by ADR 0020's advisory lock, and ADR 0025's HNSW index had
-just removed the per-replica sequential-scan pressure this would
-otherwise have multiplied. The connection footprint doubles but is
-bounded and tunable (`HIVEMIND_POOL_MIN_SIZE`/`_MAX_SIZE` behind a
-transaction-mode PgBouncer — `docs/ops-runbook.md`).
-
-**Redis is still not bought.** Its §10 trigger reads "API replicas > 1,
-or …" and that clause is now literally satisfied — and it still buys
-nothing, because there is no distributed rate limiting, no fan-out and
-no distributed lock outside Postgres. That trigger row wants rewriting
-around the *rate-limit ceiling*, not the replica count.
+### 3.7 Two app-tier replicas  *(shipped: ADR 0026, supersedes ADR 0007)*
+Two replicas per runner with `maxSurge: 1` / `maxUnavailable: 0` and a
+`minAvailable: 1` PodDisruptionBudget, for availability only (rolling
+deploys and node drains), not throughput or AZ tolerance. One Postgres
+node, no Redis.
 
 ### 3.8 Audit log of admin actions  *(shipped: ADR 0027, SPEC §12.5, migration `0005`)*
-"Who promoted this agent, and when?" had no answer: the admin surface
-mutated agents, fleets and keys and left nothing behind. Migration
-`0005.audit-log` adds an insert-only `audit_log` table (no foreign
-keys — a revoked agent's history outlives its record), written from
-both admin write paths and read through `GET /v1/admin/audit-log`
-(admin key; no MCP verb, same reasoning as `/v1/metrics`).
+An insert-only audit log written by the REST admin surface (actor: the
+admin key's fingerprint) and the CLI (an unverified `--actor`), read at
+`GET /v1/admin/audit-log`. Registrations are audited since ADR 0046.
 
-**Two actor kinds, because the two paths know different things.** The
-REST admin surface records `admin_key` rows whose actor is the verified
-admin key's **fingerprint** — which needed a fix first: every admin key
-carried `user_id = "admin"`, so `Credential` gained `key_id`. The
-`hivemind-keys` CLI records `cli` rows in the same transaction as its
-change, under an operator-typed `--actor` that is **unverified** (anyone
-with database access can type anything) — the kind says so.
-
-**Honest limits.** The REST path spans two ports with no shared
-transaction, so its row is written after the change and is **not**
-atomic with it: an audit-write failure fails the request (the change
-stands), and a crash in between leaves the change unaudited.
-Registration and the read-only listings are deliberately not audited.
-No raw key is ever recorded, on either path — enforced by construction
-and by a test that performs every key-producing action and searches
-every audit row for the keys.
-
-### 3.9 Admin panel  *(shipped: ADRs 0028–0029, `hivemind-admin`, migration `0006`, DEPLOY.md §8)*
-A browser front end for the admin surface, deployed as its own runner
-(`HIVEMIND_RUNNER=admin`, same image) that needs only
-`HIVEMIND_ADMIN_API_URL`. Its landing view is the **pending-agent
-queue**, grouped by owner alias, with Activate (trust level + home fleet,
-a new fleet can be created inline, key shown once) and Reject. It also
-covers agents, fleets, the audit log (paged with a new `before` cursor)
-and org-key rotation. Admin keys stay CLI-only.
-
-**It needed a lifecycle fix first (ADR 0028).** Revocation used to leave
-an agent `active` with no key, so a panel would have shown every revoked
-agent as active, and `activate` on an active agent silently issued a
-second live key. Agents now have a `revoked` status; activation works
-only from `pending` or `revoked`; revoking a pending agent is how a
-registration is rejected. Migration `0006` backfills existing keyless
-active agents to `revoked`.
-
-**Honest limits.** The admin key sits in the tab's `sessionStorage` (the
-simplest option, chosen deliberately), so the panel's defence against a
-stolen key is its strict CSP, rendering API data only as text, and a
-proxy allowlist that keeps it from relaying to the data plane (ADR 0029).
-Keep it behind an internal ingress or `kubectl port-forward`.
+### 3.9 Admin panel  *(shipped: ADRs 0028–0029, migration `0006`, DEPLOY.md §8)*
+A browser front end for the admin surface, with a pending-agent queue.
+It needed the `revoked` agent status first (ADR 0028). The admin key
+lives in the tab's `sessionStorage` behind a strict CSP; keep the panel
+on an internal ingress.
 
 ### 3.10 Agent plugin and skills  *(shipped: ADRs 0030–0031, `plugins/hivemind/`)*
-Agents in other harnesses had the MCP tools but no guidance on using
-them, and no way to find out what they were allowed to do. The plugin
-(Claude Code, Codex, DeepSeek Harness, Hermes, Pi, Oh My Pi and OpenCode; also usable as plain skills) makes Hivemind the
-agent's long-term memory: `hive_whoami` first in every session, recall
-before work, frequent but disciplined contributions to the fleet, a
-never-write list (the agent's own credentials, unverified guesses, raw
-dumps; security findings are allowed and tagged), and local memory only
-as scratch space or fallback. A `SessionStart` hook re-injects the
-reminder after compaction, and `hivemind-setup` walks through connecting,
-self-registration, switching to the agent key, and adding a hook plus an
-instruction block when the plugin is not installed, asking before every
-change. Since extended to **Hermes** (native plugin: `plugin.yaml` +
-`__init__.py`, serving the skills and adding a Hivemind system-prompt
-section that survives compaction) and **Pi** (package: the `pi` key in
-`package.json` + `extensions/hivemind.ts`, adding the same system-prompt
-section on `before_agent_start`) — in both, the reminder lives in the
-system prompt, the DeepSeek Harness shape, because the harness's own
-instruction there never leaves it; the MCP server stays harness config
-(`mcp_servers` in `~/.hermes/config.yaml`; the standard MCP config files
-pi-mcp-adapter reads for Pi), so the key never enters the install tree.
-
-**It needed two server changes first.** `hive_whoami` (ADR 0030), because
-an agent could not otherwise tell "I may not write" or "I may not read"
-from an empty result. And ADR 0031, because the docs claimed agents send
-the org key plus their agent key and that org-key rotation stops every
-agent; the code has always taken one key, and rotation only closes
-registration.
+The plugin and skills that make Hivemind an agent's long-term memory, now
+for Claude Code, Codex, DeepSeek Harness, Hermes, Pi, Oh My Pi and
+OpenCode, with setup notes for Gemini CLI. It needed `hive_whoami`
+(ADR 0030) and the one-key-per-request correction (ADR 0031).
 
 ### 3.11 Server-enforced access on every entry path  *(shipped: ADR 0033)*
-A deployed contributor read another agent's `self` entry with `hive_get`.
-The audit behind the fix found the trust matrix applied only to search and
-list: reads by id, the supersession chain, feedback and supersession took
-any id from any key, and MCP writes trusted a caller-supplied `author`,
-which is what `self` visibility is decided on. All of them now follow
-readability (an invisible entry is "not found"), provenance comes from the
-key on both surfaces, a supersession must stay within the audience the
-writer can address, and built-in identity names cannot be registered.
-Existing rows with a spoofed author are listed in the ops runbook for
-review, not rewritten.
+Reads by id, the supersession chain, feedback and supersession follow
+readability; provenance comes from the key on both surfaces.
 
 ### 3.12 Incognito sessions and foreign entries  *(shipped in 1.1.0: ADRs 0035–0036)*
-**Incognito sessions** implement ADR 0003's client-side off switch, renamed
-from "kill switch": one signal (`HIVEMIND_INCOGNITO`), a launcher that adds
-each harness's own switch so the tools never load, reminders that stop
-nagging, and local notes marked so no later session uploads them.
-**Foreign entries**: a privileged agent reads every fleet, and nothing on
-the server can stop it restating what it read in its home fleet. The skill
-now says use, don't relay (link by id, ask the user before bringing a
-finding home), and hits carry `scope`/`fleet_id` so a foreign entry is
-recognisable before it is opened. **Held:** a per-fleet "sensitive" flag,
-set by the admin, shown on hits and enforced on citations, if the
+A client-side off switch with marked local notes, and "use, don't relay"
+for privileged agents. **Held:** a per-fleet "sensitive" flag, if the
 conservative default proves too loose (ADR 0036).
 
 ### 3.13 Security, correctness and performance review  *(shipped in 2.0.0: ADRs 0039–0043, migrations `0007`–`0008`)*
-A full review of the server, the deployment and the agent plugin, with
-every finding reproduced before it was fixed and every fix checked by a
-second reviewer. What it changed: the key lifecycle is atomic and
-registrations are owned by their alias (ADR 0039); every surface applies
-the same input bounds and agent-name rule before any provider or store
-call (ADR 0040); provider calls have an overall deadline and embedder
-outages are a typed error, never a leaked key (ADR 0041); the MCP
-credential is re-verified per call and fails closed (ADR 0042); entries
-are framed as untrusted data (ADR 0043); supersession is atomic in the
-store; `payload` round-trips on Postgres; `?history` is an indexed walk;
-the GitLab deploy job works; and the image is locked and non-root.
-DEPLOY.md §5 lists the upgrade steps. Since then, the first-run key
-bootstrap writes the `hivemind-keys` Secret itself and prints no key
-(ADR 0044).
+An atomic key lifecycle (ADR 0039), shared input bounds (ADR 0040),
+provider deadlines (ADR 0041), a per-call MCP credential (ADR 0042),
+entries as untrusted data (ADR 0043), atomic supersession, indexed
+history walks and a locked, non-root image. Later fixes: the key
+bootstrap writes the Secret itself (ADR 0044), case-variant names are
+refused (ADR 0045), registrations are audited (ADR 0046), and zero or
+out-of-range vectors are rejected.
 
 **Open follow-ups** (found, deliberately not done; each needs a decision
 or its own trigger):
 - **Rate limiting** (garbage-key amplification on `/mcp`, the 2 MiB body
-  parse for a present-but-unknown key): handled at the ingress since the
-  optional Ingress gained per-IP limits, a `/v1/admin` source allowlist
-  (deny by default) and an opt-in default-deny egress policy
-  (`optional/networkpolicy/egress/`). The app itself still has no limiter.
-- **Registration**: audited since ADR 0046 (`agent.register`), but the
-  owner alias is still unverified: the admin confirms the requester out
-  of band.
+  parse for a present-but-unknown key): handled at the ingress, which has
+  per-IP limits, a `/v1/admin` source allowlist (deny by default) and an
+  opt-in default-deny egress policy (`optional/networkpolicy/egress/`).
+  The app itself has no limiter.
+- **Registration**: the owner alias is unverified; the admin confirms the
+  requester out of band.
 - Structural untrusted-content markers on returned entries (deferred in
-  ADR 0043). (Case-variant agent names are refused since ADR 0045;
-  collisions registered before it stay. Zero vectors and out-of-range
-  values from the embedder are now rejected; rows stored earlier are not
-  re-checked.)
-- Performance: search loads full rows it partly discards (reads no longer
-  fetch the embedding vector; bodies are still loaded, so a slim-row port
-  method remains open); a query-embedding cache is unmeasured; very low-selectivity
-  list filters at ~1M rows can be slower with the global list index; the
-  HNSW stream can truncate under a narrow visibility filter (ADR 0025).
+  ADR 0043). Case-variant names registered before ADR 0045 stay, and
+  vectors stored before the zero/range checks are not re-checked.
+- Performance: search still loads full bodies it partly discards (a
+  slim-row port method is open); a query-embedding cache is unmeasured;
+  very low-selectivity list filters at ~1M rows can be slower with the
+  global list index; the HNSW stream can truncate under a narrow
+  visibility filter (ADR 0025).
 - Contract step for a later release: narrow `credentials_kind_check` to
   drop `user` once no deployment has such rows.
-- **Harnesses**: after Gemini CLI, GitHub Copilot CLI (its `sessionStart`
-  hook injects context), then Cursor (re-test `${env:}` in remote
-  headers first), then Kiro and Amp as reference-only; Qwen Code is a
-  Gemini CLI variant. Still unconfirmed: whether Claude Code's
-  `deniedMcpServers` matches the plugin-scoped server name, and Gemini
-  CLI's header env expansion and SessionStart context injection.
+- **Harnesses**: next GitHub Copilot CLI (its `sessionStart` hook injects
+  context), then Cursor (re-test `${env:}` in remote headers first), then
+  Kiro and Amp as reference-only; Qwen Code is a Gemini CLI variant.
+  Still unconfirmed: whether Claude Code's `deniedMcpServers` matches the
+  plugin-scoped server name, Gemini CLI's SessionStart context injection,
+  and whether DeepSeek Harness keeps the server instructions after
+  compaction.
 
-## Tier 4 — close the spec's open items (SPEC §11) (former Tier 3)
+### 3.14 Retrieval and knowledge sharing  *(shipped in 2.1.0–2.3.0: ADRs 0047–0058, migrations `0010`–`0012`)*
+The keyword stream matches any term (ADR 0047), at most 16 on Postgres
+(ADR 0049), and search falls back to it when the embedder is down
+(ADR 0048). A Prometheus scrape endpoint (ADR 0050). Feedback is readable
+(ADR 0051); writes return the nearest entries (ADR 0052); batch feedback
+and batch reads (ADRs 0053, 0055); a `flagged` filter (ADR 0054);
+empty-search counters (ADR 0056); see-also links (ADR 0057); a pinned
+fleet briefing (ADR 0058).
 
-*(4.1–4.2 are the §11 open items. 4.3–4.5 are measurement commitments
-that live here because they share the §1.1 harness, not because they
-are §11 items — each says so.)*
+## Tier 4 — close the spec's open items (SPEC §11)
+
+*(4.1–4.2 are the §11 open items. 4.3–4.6 share the §1.1 harness.)*
 
 - **4.1 BM25 vs. Postgres FTS.** *(**DEFERRED** — the analysis below is
   the reason; do not re-derive it. Deferred, not dismissed: the thing
@@ -568,357 +250,39 @@ are §11 items — each says so.)*
 
   (The embedding *dimension* is a separate deploy-time decision: the
   default is 1024, ADR 0015.)
-- **4.3 Entity-extraction facets (pre-staged §10 extension — ADR 0016, SPEC §13).** *(shipped: `src/hivemind/extractor.py` + the `WriteService` best-effort hook + the REST/MCP read surface, SPEC §13)*
-  *This is not a §11 open item: it is the knowledge-graph §10 extension,
-  pre-staged on scale ambition (300+ agents / multiple fleets) — the
-  §10 trigger ("cross-entry entity linking pays off in retrieval
-  quality") has NOT fired; the facet slice is what was built, and it
-  is measurable with the §1.1 harness. Graph-expanded retrieval and
-  the canonical entity registry stay trigger-held under Tier 5.* A
-  write-time, **optional + best-effort** LLM extractor (fixed prompt,
-  all-or-nothing schema-validated `{name, kind}` output; closed kind
-  vocabulary; `entities jsonb` on the entry, symmetric with the
-  embedding pair; name facet is AND + case-insensitive; `kind` is
-  display-only). A new `Extractor` port sits beside the `Embedder`
-  port (no Pydantic AI — the repo's existing Pydantic v2 + httpx seam
-  pattern). Dev/test endpoint: `http://localhost:8080/v1`
-  (`qwen3.8-27b`, API key `dummy`).
-- **4.4 Gate the recency term to temporal queries.** *(measured —
-  **gating rejected, no code change**; fixture + runner:
-  `tests/eval/temporal.py`, `tests/eval/test_decay_experiment.py`)*
-  `entry_score` (`retrieval/scoring.py`) multiplies every hit by
-  `0.5 ** (age_days / half_life_days)` — **unconditionally**, on every
-  query. An always-on recency term is a known way to depress recall on
-  non-temporal queries: an old, exactly-right entry loses to a recent,
-  vaguely-related one even when the query carries no time sense at all.
-  *(Prior art: an external system measured this exact regression and
-  moved to a gated, additive recency term; that is a hypothesis to test
-  here, not a result to copy.)*
+- **4.3 Entity-extraction facets** *(shipped: ADR 0016, SPEC §13)*. A
+  pre-staged §10 extension, not a §11 item: the knowledge-graph trigger
+  has not fired. An optional, best-effort write-time extractor with
+  schema-validated `{name, kind}` facets and an AND, case-insensitive
+  name filter. The graph half stays held in Tier 5.
+- **4.4 Gate the recency term to temporal queries.** *(measured: gating
+  rejected, no code change.)* The always-on recency term did depress
+  non-temporal recall (MRR 0.208 with it vs. 0.917 without), but an
+  oracle-gated variant still lost to decay-off on every aggregate. The
+  root cause is arithmetic: at the §6.2 defaults the fused RRF score
+  spans at most 2.62x while recency halves every 30 days, so age became
+  the sort key. Carried forward as §4.6. Tables and method:
+  [docs/retrieval-experiments.md](docs/retrieval-experiments.md#44-gate-the-recency-term-to-temporal-queries).
+- **4.5 Record how `importance` was chosen.** *(shipped: migrations
+  `0002`/`0003`, SPEC §4.1)* `importance_source` (`caller` / `default`) at
+  every write seam, surfaced as `by_importance_source`. `kind` needs no
+  such field (it is always required); kind consistency is answered by
+  `by_author_kind` on `GET /v1/metrics`.
+- **4.6 The form of the recency term is mismatched to RRF's range.**
+  *(direction (a) shipped: ADR 0022.)* Sweeping `rrf_k` cannot fix it:
+  the whole lever is worth at most ~5.3 half-lives, and `rrf_k` stays 60.
+  A floor on the recency factor can: at 0.8 the `old_exact` slice goes
+  from 0.000 to 1.000 MRR while `currency_pair` holds at 0.778 (decay-off
+  0.611). The floor is a band, not a slider (0.9 measures worse than
+  decay-off). Shipping (a) rules out (b), the additive form; reopening (b)
+  means replacing the floor under a new ADR. Per-kind half-lives stay
+  held. **Still open:** the value 0.8, from a synthetic fixture.
+  **Re-measure trigger:** the first real corpus with meaningful age
+  spread; sweep 0.5–0.9 and expect to move the value, not the form.
+  Tables and method:
+  [docs/retrieval-experiments.md](docs/retrieval-experiments.md#46-the-form-of-the-recency-term-is-mismatched-to-rrfs-range).
 
-  **The golden set could not answer this.** Every §1.1 golden entry is
-  seeded with no `occurred_at`, so all eight share one timestamp, the
-  recency factor is identical for every candidate and cancels out of the
-  ranking. Measuring decay needed a second, age-varied fixture
-  (`tests/eval/temporal.py`: 16 entries aged 2–500 days, 10 queries each
-  labelled temporal / non-temporal). The pinned §1.1 gate is untouched.
-
-  **Measured** (k=5; variants realised through `SearchConfig.half_life_days`
-  only, so the fused RRF score is identical across all three and every
-  difference is attributable to the recency factor):
-
-  | variant | non-temporal hit@5 / MRR / nDCG@5 | temporal hit@5 / MRR / nDCG@5 | all |
-  |---|---|---|---|
-  | **A** always-on (today) | 0.333 / 0.208 / 0.238 | 0.750 / 0.625 / 0.658 | 0.500 / 0.375 / 0.406 |
-  | **B** off | 1.000 / 0.917 / 0.938 | 1.000 / 0.708 / 0.783 | 1.000 / 0.833 / 0.876 |
-  | **C** gated (oracle label) | 1.000 / 0.917 / 0.938 | 0.750 / 0.625 / 0.658 | 0.900 / 0.800 / 0.826 |
-
-  The hypothesis is **confirmed** (A's non-temporal MRR 0.208 vs. 0.917
-  without the term) but the **proposed fix is refuted**: C loses to B on
-  every aggregate (all-query MRR 0.800 vs. 0.833, hit@5 0.900 vs. 1.000),
-  and C's numbers are an *oracle* ceiling — they use the fixture's
-  hand-written label, not a classifier the service has. Sliced by
-  competition pattern instead of by query time sense: on "old entry
-  matches almost verbatim, recent entry shares a phrase" A scores
-  **0.000** hit@5 and B **1.000**, for the temporal and the non-temporal
-  query alike — so time sense is not the axis that predicts where the
-  term helps, and gating on it only narrows where the failure shows up.
-
-  **Root cause, and it is not fixture-dependent.** With the SPEC §6.2
-  defaults (`rrf_k=60`, `w=0.5/0.5`, `candidate_top_k=20`) the fused
-  score spans at most 2.62x across a candidate list (1.31x when both
-  candidates appear in both streams). The recency factor spans 2x *per
-  half-life*. So an entry ~42 days older than a competitor is outranked
-  by it no matter how much better it matches — 12 days when both are in
-  both streams. Multiplicative decay against RRF's compressed range is
-  not a tie-break, it is the sort key.
-
-  **Resolved: no change to `scoring.py`.** Gating is rejected on the
-  numbers — that conclusion stands and is not reopened here. The
-  residual finding, that the *form* of §6.4's recency term is mismatched
-  to RRF's range independent of gating, is carried forward as its own
-  tracked item: **§4.6**.
-
-  *(The table above is a point-in-time measurement, not a pinned gate —
-  it reflects the repo as of commit `f65a4e0` and can drift if the eval
-  fixture or scoring config changes without a re-run.)*
-- **4.5 Record how `importance` was chosen.** *(shipped: `importance_source`
-  — `entries.importance_source text NOT NULL DEFAULT 'default'`, migration
-  `0002.importance-source`, SPEC §4.1)* `importance` is writer-declared
-  (SPEC §4.1) and previously recorded nothing about whether the value was
-  supplied deliberately or fell out of a default — a dead ranking input
-  (SPEC §6.4) is indistinguishable from a used one. Provenance is now
-  recorded at write time (`caller` vs. `default`) at every write seam
-  (REST + MCP) and surfaced in the §3.3 counters
-  (`EntriesMetrics.by_importance_source`). **`kind` needs no such
-  provenance**: it is a required parameter at every seam (`EntryDraft.kind`,
-  `CreateEntryRequest.kind`, `hive_write(kind: str)`), so it is always
-  caller-supplied and a provenance field for it would be a constant.
-  The question this was meant to unblock — "are agents using the three
-  kinds consistently?" — is answered instead by a **per-author `kind`
-  distribution**, now *shipped* as `by_author_kind` on `GET /v1/metrics`
-  (`EntriesMetrics.by_author_kind`). It is keyed by the registered agent
-  roster rather than by a `DISTINCT` over `entries.author`, so an agent
-  who has written nothing is representable and the query count stays
-  bounded by the roster instead of by the pool. Building it surfaced a
-  latent defect it depended on: `EntryFilters.matches` compares `kind` by
-  identity, so a draft carrying the raw string `"fact"` was invisible to
-  a `kind=` filter — silently under-counting the existing `by_kind` too
-  (fixed in `EntryDraft.__post_init__`).
-- **4.6 The *form* of the recency term is mismatched to RRF's range.**
-  *(**direction (a) is RESOLVED and SHIPPED — ADR 0022**: the recency
-  factor is floored, `SearchConfig.recency_floor = 0.8` by default, and
-  SPEC §6.4 now carries the floored formula. That **rules out direction
-  (b)**, the additive form — per this section the two are competing
-  answers to the same defect and must not be stacked; reopening (b)
-  means *replacing* the floor under a new ADR. **Per-kind half-lives
-  stays HELD**: orthogonal, not a fix for this finding. The `rrf_k`
-  sweep came back negative and changed no default. What remains open
-  here is the *value* 0.8, not the form — see the re-measure trigger at
-  the end of this item.)* §4.4 measured
-  and rejected *gating* the recency term. Underneath that result sits a
-  separate, arithmetic mismatch that gating would not have fixed either
-  way: with the SPEC §6.2 defaults the fused RRF score spans at most
-  **2.6230x** across a candidate list, while `entry_score`'s
-  `0.5 ** (age_days / half_life_days)` (SPEC §6.4) spans **2x per
-  30-day half-life** — so **~41.7 days** of age difference (**11.7
-  days** when both candidates appear in both retrieval streams)
-  outranks any match-quality difference, however large. This is
-  arithmetic on the two formulas, not a property of the §4.4 fixture —
-  it holds for any candidate list, synthetic or real, at the §6.2
-  defaults.
-
-  **Measure `rrf_k` FIRST — ahead of the floor and the additive form.**
-  The mismatch has *two* sides, and everything above only ever looked at
-  the recency side. `rrf_k=60` is the side doing the **compressing**.
-  With the SPEC §6.2 defaults, the fused score of the best possible
-  candidate (rank 1 in **both** streams, `w=0.5/0.5`) is `1/(k+1)` and
-  the worst retained candidate (rank 20 in **one** stream,
-  `candidate_top_k=20`) is `0.5/(k+20)`, so the whole fused range is
-
-      2(k + 20) / (k + 1)
-
-  | `rrf_k` | fused range | = half-lives of age | = days at a 30-day half-life |
-  |---|---|---|---|
-  | 60 (today) | 2.62x | 1.39 | **41.7** |
-  | 20 | 3.81x | 1.93 | 57.9 |
-  | 10 | 5.45x | 2.45 | 73.4 |
-  | 5 | 8.33x | 3.06 | 91.8 |
-
-  Lowering `k` widens the fused range, and every doubling of that range
-  buys exactly one more half-life before age outranks match quality.
-  It is a **pure `SearchConfig` value**: no SPEC change, no ADR, no new
-  code, reversible in one line — where (a) and (b) are both §6.4
-  redesigns. Measuring the free knob before the expensive ones is the
-  order this item is now written in; the measurement itself is §4.6's
-  table below.
-
-  **The coupling, which nobody had noted:** a *lower* `k` does not
-  only help. RRF's `w/(k+rank)` gets steeper as `k` shrinks, so a low
-  `k` **amplifies whichever stream orders badly** — it puts more of the
-  fused score on that stream's top one or two positions. Per §4.1,
-  `ts_rank` is the weaker ranker (no IDF at all: a rare discriminating
-  term is weighted like a common one). So `rrf_k` and the BM25 question
-  are **coupled**: the case for a low `k` is strongest when both
-  streams order well, and lowering `k` raises the price of
-  `ts_rank`'s mistakes. A `k` chosen on today's keyword stream should
-  be re-checked if §4.1 ever lands.
-
-  Two further directions were identified, neither measured yet:
-  **(a)** bound the term hard enough that it can no longer dominate the
-  fused range — which, at that tightness, is close to removing it — or
-  **(b)** move to the additive form the prior art (§4.4) used, so
-  recency competes on the same scale as the fused score instead of
-  multiplying it. Landing either is a SPEC §6.4 redesign, not a scoring
-  tweak, and gets its own ADR, not a quiet edit of `scoring.py`.
-
-  **These are NOT a sequence — do not work them in order.** `rrf_k` is
-  a config change and comes first because it is free and reversible.
-  **(a) and (b) are competing forms of the same fix: pick one, never
-  both** — a floored multiplicative term and an additive term are two
-  answers to "stop recency being the sort key", and stacking them just
-  makes the term untunable. *Per-kind half-lives* (a `fact` and a
-  `decision` decaying at different rates) is a third, **orthogonal**
-  idea — it changes which entries decay, not how decay competes with
-  match quality — and it **stays held**: it is not a fix for this
-  finding and would only add a knob on top of an already-mismatched
-  form.
-
-  **`rrf_k` MEASURED — and the answer is no.** *(fixture +
-  runner: `tests/eval/temporal.py`, `tests/eval/temporal_runner.py`,
-  `tests/eval/test_rrf_k_experiment.py`; `SearchConfig.rrf_k` is
-  **unchanged** at 60 and the §1.1 gate is untouched)* The sweep runs
-  `rrf_k` over {60, 20, 10, 5} with **decay ON** (§4.4's variant A) —
-  everything else held fixed and shared with the §4.4 experiment:
-
-  | `rrf_k` | non-temporal hit@5 / MRR / nDCG@5 | temporal | `old_exact` | all |
-  |---|---|---|---|---|
-  | **60** (today) | 0.333 / 0.208 / 0.238 | 0.750 / 0.625 / 0.658 | **0.000 / 0.000 / 0.000** | 0.500 / 0.375 / 0.406 |
-  | **20** | 0.500 / 0.242 / 0.303 | 0.750 / 0.625 / 0.658 | **0.000 / 0.000 / 0.000** | 0.600 / 0.395 / 0.445 |
-  | **10** | 0.500 / 0.264 / 0.322 | 0.750 / 0.625 / 0.658 | **0.000 / 0.000 / 0.000** | 0.600 / 0.408 / 0.456 |
-  | **5** | 0.500 / 0.292 / 0.344 | 0.750 / 0.625 / 0.658 | **0.000 / 0.000 / 0.000** | 0.600 / 0.425 / 0.469 |
-  | *(60, decay off — §4.4's B, for reference)* | 1.000 / 0.917 / 0.938 | 1.000 / 0.708 / 0.783 | *1.000 / 1.000 / 1.000* | 1.000 / 0.833 / 0.876 |
-
-  **The question was: does lowering `rrf_k` recover the recall the
-  unconditional recency term destroys, without a change to
-  `scoring.py`? It does not.** The `old_exact` slice — the pattern
-  §4.4 identified as the real failure mode — stays at **0.000 hit@5 at
-  every `k`**, while decay-off answers both of those queries perfectly.
-  The relevant entries never enter the top 5 at any `k` in the sweep.
-
-  **And that is arithmetic, not a fixture artifact.** `2(k+20)/(k+1)`
-  is bounded above by **40x** (its limit as `k` -> 0), so the *entire*
-  `rrf_k` lever — from today's 60 all the way down to a degenerate `k`
-  nobody would ship — is worth at most **log2(40) = 5.3 half-lives**,
-  ~160 days at the 30-day default. The `old_exact` entries are 420 and
-  380 days old: **14 and 12.7 half-lives**. No value of `rrf_k` closes
-  a gap that size, for this corpus or any other. **`rrf_k` is not a
-  cheap substitute for fixing the form of the term** — this is the
-  single most useful thing the sweep establishes, and it is the reason
-  §4.6 still needs (a) or (b).
-
-  **What `rrf_k` *does* buy here** (so the verdict is not overstated):
-  all-query MRR rises monotonically as `k` falls (0.375 -> 0.395 ->
-  0.408 -> 0.425) and non-temporal hit@5 improves 0.333 -> 0.500 at
-  `k`<=20. The gain is entirely on the non-temporal / timeless side;
-  the `temporal` and `currency_pair` slices are **bit-identical across
-  the whole sweep**, so nothing is being traded away for it on this
-  fixture.
-
-  **Verdict on `k=10` as a default: NOT SUPPORTED by this evidence —
-  and the evidence is too weak to support any new default.** The
-  direction is mildly favourable and the sweep shows no downside here,
-  but the differences are a handful of rank positions over 10
-  hand-written queries scored by a **4-dimension hash embedder**
-  (`tests/fakes.FakeEmbedder`) — which is exactly the evidence §4.4
-  refused to land a change on, and the numbers do not separate `k=10`
-  from `k=5` or `k=20` in any case. What the fixture *can* establish
-  (the bound above) argues the opposite of the hypothesis that
-  motivated the sweep. **`SearchConfig.rrf_k` stays at 60**; changing
-  it is a decision on real-corpus evidence, not a consequence of this
-  table.
-
-  **(a) THE FLOOR, MEASURED — and this one clears the bar.** *(seam
-  shipped **default-off**: `entry_score(..., recency_floor=...)` +
-  `SearchConfig.recency_floor: float | None = None`, validated to
-  `(0, 1]`, threaded through `SearchService`. The **default is
-  unchanged** — `None` is bit-for-bit today's behaviour, asserted at
-  both the pure-function and the eval seam. Sweep:
-  `tests/eval/test_decay_experiment.py::TestRecencyFloorSweep`; the
-  §1.1 gate and `tests/eval/golden.py` are untouched.)*
-
-  Where `rrf_k` widens the *fused* range against an unbounded recency
-  factor, a floor **bounds the unbounded factor itself**:
-  `recency = max(floor, 0.5 ** (age/half_life))`, so the recency range
-  collapses from `2 ** (age spread / half_life)` to exactly `1/floor`.
-  That has no analogue of the 40x cap. The threshold is derivable from
-  the pipeline's own constants *in advance*: match quality outranks age
-  once `1/floor` is narrower than the fused range, i.e.
-  **`floor > 1/2.6230 = 0.381`** at `rrf_k=60`.
-
-  Measured at `rrf_k=60`, decay ON, k=5 (A and B repeated from §4.4 as
-  the two limits of the same family — `floor -> 0` is A, `floor = 1`
-  is B):
-
-  | variant | non-temporal hit@5 / MRR / nDCG@5 | temporal | `old_exact` | `currency_pair` | `timeless` | all |
-  |---|---|---|---|---|---|---|
-  | **A** always-on (today) | 0.333 / 0.208 / 0.238 | 0.750 / 0.625 / 0.658 | **0.000 / 0.000 / 0.000** | 1.000 / **0.833** / 0.877 | 0.400 / 0.250 / 0.286 | 0.500 / 0.375 / 0.406 |
-  | **B** decay off | 1.000 / 0.917 / 0.938 | 1.000 / 0.708 / 0.783 | 1.000 / 1.000 / 1.000 | 1.000 / **0.611** / 0.710 | 1.000 / 0.900 / 0.926 | 1.000 / 0.833 / 0.876 |
-  | **D** floor 0.2 | 0.500 / 0.242 / 0.303 | 0.750 / 0.625 / 0.658 | 0.500 / 0.100 / 0.193 | 1.000 / 0.833 / 0.877 | 0.400 / 0.250 / 0.286 | 0.600 / 0.395 / 0.445 |
-  | **D** floor 0.381 | 0.500 / 0.242 / 0.303 | 0.750 / 0.625 / 0.658 | 0.500 / 0.100 / 0.193 | 1.000 / 0.833 / 0.877 | 0.400 / 0.250 / 0.286 | 0.600 / 0.395 / 0.445 |
-  | **D** floor 0.5 | 1.000 / 0.556 / 0.665 | 1.000 / 0.708 / 0.783 | 1.000 / 0.500 / 0.631 | 1.000 / 0.778 / 0.833 | 1.000 / 0.567 / 0.672 | 1.000 / 0.617 / 0.712 |
-  | **D** floor 0.7 | 1.000 / 0.556 / 0.665 | 1.000 / 0.833 / 0.875 | 1.000 / 0.750 / 0.815 | 1.000 / 0.778 / 0.833 | 1.000 / 0.567 / 0.672 | 1.000 / 0.667 / 0.749 |
-  | **D** floor **0.8** | 1.000 / 0.653 / 0.738 | 1.000 / 0.833 / 0.875 | **1.000 / 1.000 / 1.000** | 1.000 / **0.778** / 0.833 | 1.000 / 0.583 / 0.686 | 1.000 / 0.725 / 0.793 |
-  | **D** floor 0.9 | 1.000 / 0.833 / 0.877 | 1.000 / 0.688 / 0.765 | 1.000 / 1.000 / 1.000 | 1.000 / **0.583** / 0.687 | 1.000 / 0.800 / 0.852 | 1.000 / 0.775 / 0.832 |
-
-  **The discriminating question — does a floor recover the `old_exact`
-  cases A scores 0.000 on, *while keeping* the `currency_pair` cases B
-  loses? Yes, and 0.8 is the value.** At floor 0.8 `old_exact` goes
-  0.000 -> **1.000** MRR (the relevant entry is rank 1 for both
-  queries, matching B exactly) while `currency_pair` holds at
-  **0.778** — above B's 0.611, below A's 0.833. Floors 0.5 and 0.7
-  clear the same bar less completely (`old_exact` MRR 0.500 / 0.750,
-  same 0.778 on currency pairs). **This is the first variant anything
-  in §4.4 or §4.6 has produced that beats *both* extremes on the slice
-  each is weak at** — gating (C) did not, and no `rrf_k` did.
-
-  **A floor is a band, not a slider.** At 0.9 the recency range is
-  1.11x — narrower than the fused spread of almost any pair — so the
-  variant is nearly B again and pays B's price: `currency_pair` MRR
-  drops to 0.583, *below* decay-off's 0.611. Push the floor to 1.0 and
-  it **is** B. That non-monotonicity is why this reports a value, not
-  a direction.
-
-  **The arithmetic predicted this before the queries ran, and the
-  measurement confirms the prediction's shape.** Below the derived
-  0.381 threshold (floors 0.2 and 0.381) `old_exact` MRR stays at
-  0.100 — the entry surfaces at rank 5 at best. The recovery begins
-  just above it and completes by 0.8. The threshold is a *lower bound*
-  on where the effect can start, not where it finishes: two candidates
-  that both appear in **both** streams span far less than the
-  best-vs-worst 2.62x, so flipping those needs a tighter floor. 0.381
-  predicts the onset; 0.8 is where the fixture says it is done.
-
-  **Why this evidence is stronger than the `rrf_k` table** (it is the
-  same 10 hand-written queries over 16 entries scored by the same
-  4-dimension hash embedder, and that has not changed): A, B and D
-  differ **only** by a bounded rebalance of the *same* fused scores
-  from the *same* embedder — no stream is re-ranked, no candidate set
-  moves, the fused values are bit-identical — and the direction and
-  approximate threshold were derived from the two formulas *before*
-  the sweep. What the fixture still **cannot** establish: that 0.8 is
-  the optimum on a real corpus (the band 0.5–0.8 is barely separated
-  here, and `timeless`/`non_temporal` MRR keeps rising past 0.8 while
-  `currency_pair` falls, so the optimum is a *trade*, not a peak the
-  4-dim embedder can locate); that real queries distribute over these
-  competition patterns the way this fixture does; or that a real
-  embedder's vector stream would place the same candidates in the same
-  streams at all. It establishes **a mechanism that works and the
-  sign of its effect**, not a tuned constant.
-
-  **Verdict: SHIPPED — ADR 0022 flipped the default to `0.8`.** The
-  seam landed behaviour-preserving in `b61db0f`; the decision to turn
-  it on was taken on these numbers by a human and is recorded in
-  **[ADR 0022](docs/adr/0022-recency-floor-so-match-quality-is-the-sort-key.md)**,
-  which amends SPEC §6.4. Three things that ADR insists on and this
-  table should not be read without: the floor is a **band, not a
-  slider** (operators must not tune it up — 0.9 measures *worse* than
-  decay-off on `currency_pair`); it is **not free** (`currency_pair`
-  MRR 0.833 → 0.778, traded for `old_exact` 0.000 → 1.000); and on the
-  all-query aggregate decay-off still wins on this fixture (0.833 vs.
-  0.725) — the floor is chosen to keep the currency slice, not to win
-  that average. Landing (a) **rules out (b)**: per this section, (a)
-  and (b) are competing forms of the same fix and must not be stacked.
-
-  **Still open in (a): the value, not the form.** 0.8 comes from 16
-  synthetic entries and 10 queries scored by a 4-dimension hash
-  embedder. The *arithmetic* (`1/floor` against the 2.6230x fused
-  range) is fixture-independent; the constant is not. **Re-measure
-  trigger:** the first real corpus with meaningful age spread — run the
-  §1.1 harness against real queries on an aged production pool and
-  sweep the 0.5–0.9 band. Expect to move the value, not the form.
-
-  The §1.1 gate was **not** re-pinned for this: every golden entry is
-  seeded without `occurred_at`, so all eight share one timestamp, every
-  recency factor is 1.0 and a lower bound on 1.0 is a no-op. The gate's
-  report is bit-identical with and without the floor, asserted in
-  `test_eval_gate.py::...::test_the_shipped_recency_floor_cannot_move_this_gate`.
-
-  **Trigger:** for **(b)** and for any `rrf_k` default change,
-  unchanged — the first real corpus with meaningful age spread, i.e.
-  run the §1.1 harness against real queries on an aged pool once there
-  is production usage. Not before: 10 synthetic queries scored by a
-  4-dimension hash embedder is exactly the wrong evidence to land a
-  scoring change on (the same reasoning §4.4 closed on). What *is*
-  settled without that trigger is the bound: `rrf_k` cannot substitute
-  for (a) or (b), so the cheap knob is now measured and out of the
-  way. **(a) is closed (ADR 0022)**, so its trigger no longer gates
-  anything: the floor is on at 0.8 and the real corpus is what should
-  *re-check* that number within the 0.5–0.9 band, not what unblocks the
-  idea. Note that (b) is now ruled out by (a) having landed — its
-  trigger firing means reconsidering the floor itself, under a new ADR,
-  not adding an additive term on top of it.
-
-## Tier 5 — explicitly held: the §10 extensions (former Tier 4)
+## Tier 5 — explicitly held: the §10 extensions
 
 **Do not build any SPEC §10 extension yet** (passive capture, private
 staging, namespaces, binary artifacts, knowledge graph, contradiction
@@ -958,25 +322,10 @@ so the later decision is data-driven. Two kinds:
 | Redis (cache / rate limits / queue) | "API scales to multiple replicas; org demands distributed rate limiting" | API replicas > 1, or distinct orgs > 1, or a cross-process per-agent rate-limit ceiling is needed *(the replica clause is now satisfied — 2 replicas per runner, ADR 0026 — and still buys nothing: there is no distributed rate limiting, no fan-out, and the only cross-process lock is in Postgres (ADR 0020). The live half of this trigger is the **rate-limit ceiling**, not the replica count; a Redis queue for embedding is superseded by the Postgres-outbox design below)* | §3.3 counters + replica count |
 | Async embedding pipeline | "embedding latency/throughput starts blocking writes" | p95 write latency; embedder failure/retry rate; backlog of unembedded entries *(the embedder already has a bounded retry budget for transient failures — ADR 0014, `HIVEMIND_EMBEDDING_RETRIES`, default 2 — so this trigger is about the **fallback** (persist without a vector + catch-up), not retries. Design: a Postgres **outbox** — insert entry with `embedding IS NULL` in the same transaction, then a `FOR UPDATE SKIP LOCKED` worker embeds + updates; a single source of truth, no second queue service. New ADR required: it changes write semantics — an entry is vector-searchable only after its vector lands)* | §3.3 counters + p95 write latency |
 
-## If you do one thing
-
-Tier 1 (the eval harness), Tier 2 (access control), and Tier 3
-(productionize) are all shipped. The next keystone is **Tier 4 — close
-the SPEC §11 open items**, starting with **4.1, the BM25-vs-FTS
-decision**: run the §1.1 harness (and a BM25 variant) over the golden
-set, see where the Postgres-FTS keyword stream ranks under, and adopt
-BM25 with a new ADR only if the numbers say so. **4.2** (the
-embedding-prefix tuning) uses the same harness on real long-form
-entries. Tier 5 (the §10 extensions) stays held until its triggers fire
-— the §1.1 harness + §3.3 counters are the instruments that will tell
-you when.
-
 ## How to use this document
 
-- This is a **living plan**, not a spec. When a Tier item is built, it
-  produces real ADRs (e.g. "adopt BM25") — this doc just sequences the
-  work.
-- It links to SPEC.md / CONTEXT.md / docs/adr/ for behavior and
+- This is a living plan, not a spec. When an item is built it produces
+  ADRs and SPEC changes; this document records that it shipped, in a line
+  or two, and what it left open.
+- It links to SPEC.md, CONTEXT.md and docs/adr/ for behavior and
   rationale; it does not restate them.
-- Revisit after §1.1 lands — the eval numbers will likely re-rank
-  Tiers 3–5.
