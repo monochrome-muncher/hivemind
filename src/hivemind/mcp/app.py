@@ -42,6 +42,7 @@ from hivemind.services.chain import get_visible_entries, get_visible_entry, supe
 from hivemind.services.governance import (
     GovernanceService,
     PermissionDenied,
+    RelatedEntry,
     SupersedeDenied,
     WriteService,
 )
@@ -143,6 +144,21 @@ def _hit_dict(hit: Hit) -> dict[str, object]:
         "scope": hit.scope,
         "fleet_id": hit.fleet_id,
         "feedback": _counts_dict(hit.feedback),
+    }
+
+
+def _related_dict(related: RelatedEntry) -> dict[str, object]:
+    """A nearby existing entry in a write's reply (ADR 0052): compact, like a hit."""
+    entry = related.entry
+    return {
+        "id": entry.id,
+        "kind": entry.kind.value,
+        "summary": entry.summary,
+        "author": entry.author,
+        "scope": entry.scope,
+        "fleet_id": entry.fleet_id,
+        "occurred_at": entry.occurred_at.isoformat(),
+        "similarity": round(related.similarity, 3),
     }
 
 
@@ -366,14 +382,16 @@ async def hive_write(
     except ValueError as exc:
         return _error(ERR_INVALID_INPUT, str(exc))
     try:
-        entry = await app.write_service.write(draft, writer=cred.visibility())
+        written = await app.write_service.write_and_relate(draft, writer=cred.visibility())
     except SupersedeDenied as exc:
         return _error(ERR_SUPERSEDE_DENIED, str(exc))
     except EmbeddingError as exc:
         return _embedding_unavailable(exc)
     except ValueError as exc:
         return _error(ERR_INVALID_INPUT, str(exc))
-    return _entry_dict(entry)
+    result = _entry_dict(written.entry)
+    result["related"] = [_related_dict(r) for r in written.related]
+    return result
 
 
 async def hive_search(

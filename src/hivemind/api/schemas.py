@@ -24,6 +24,7 @@ from hivemind.domain.validation import (
     MAX_OFFSET,
     check_no_nul,
 )
+from hivemind.services.governance import RelatedEntry
 from hivemind.services.search import Hit
 
 
@@ -158,6 +159,33 @@ class FeedbackSummaryOut(FeedbackCountsOut):
         )
 
 
+class RelatedOut(BaseModel):
+    """A nearby existing entry in a write's response (ADR 0052)."""
+
+    id: str
+    kind: Kind
+    summary: str
+    author: str
+    scope: str
+    fleet_id: str | None = None
+    occurred_at: datetime
+    similarity: float
+
+    @classmethod
+    def from_related(cls, related: RelatedEntry) -> RelatedOut:
+        entry = related.entry
+        return cls(
+            id=entry.id,
+            kind=entry.kind,
+            summary=entry.summary,
+            author=entry.author,
+            scope=entry.scope,
+            fleet_id=entry.fleet_id,
+            occurred_at=entry.occurred_at,
+            similarity=round(related.similarity, 3),
+        )
+
+
 class EntryOut(BaseModel):
     """A full entry (SPEC.md §4.1). Embeddings are internal and are
     never serialized across the wire."""
@@ -194,6 +222,9 @@ class EntryOut(BaseModel):
     history: dict[str, list[EntryOut]] | None = None
     # The entry's feedback (ADR 0051): set by ``GET /v1/entries/{id}`` only.
     feedback: FeedbackSummaryOut | None = None
+    # The nearest existing entries the writer can read (ADR 0052): set by
+    # ``POST /v1/entries`` only.
+    related: list[RelatedOut] | None = None
 
     @classmethod
     def from_entry(cls, entry: Entry) -> EntryOut:
