@@ -16,10 +16,11 @@
 #     (matched by the automatic kubernetes.io/metadata.name label).
 #   * Clients that call the pods directly in-cluster need their own `from`.
 #
-# Egress is deliberately NOT restricted here: the pods must reach Postgres,
+# Egress is NOT restricted here: the pods must reach Postgres,
 # the embedding endpoint, the optional extractor and DNS, whose locations are
-# site-specific. A default-deny egress policy plus allow rules for exactly
-# those destinations is the stricter follow-up.
+# site-specific. The stricter default-deny egress policy, with allow rules
+# for exactly those destinations, is the separate opt-in tree ./egress
+# (edit its placeholder addresses first).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

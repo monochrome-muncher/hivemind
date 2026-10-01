@@ -1,0 +1,12 @@
+# OPT-IN default-deny EGRESS for the Hivemind workloads (ROADMAP 3.13) — its
+# own tree, separate from the ingress policies one level up, because it
+# cannot work unedited: the Postgres and provider addresses are
+# site-specific. Edit egress.yaml first (every `192.0.2.x` is a placeholder
+# from the documentation range and matches nothing), then:
+#
+#   kubectl kustomize deploy/kubernetes/optional/networkpolicy/egress | kubectl -n hivemind apply -f -
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: hivemind
+resources:
+  - egress.yaml
