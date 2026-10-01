@@ -57,6 +57,7 @@ from hivemind.domain.entry import (
     UsageCount,
 )
 from hivemind.domain.feedback import Feedback, Verdict
+from hivemind.domain.pin import Pin
 from hivemind.ports import SupersedeConflict
 from hivemind.store.pool import PoolTimeouts, make_pool
 
@@ -110,6 +111,21 @@ SELECT scope, kind, importance_source, author, fleet_id,
        (state = 'active') AS active, count(*) AS n
   FROM entries
  GROUP BY scope, kind, importance_source, author, fleet_id, (state = 'active')
+"""
+
+# Pinned entries (ADR 0058). The per-fleet advisory lock serialises
+# pinners of one fleet, so the count check and the insert are atomic.
+LOCK_FLEET_PINS = "SELECT pg_advisory_xact_lock(hashtextextended('hivemind.pins:' || $1, 0))"
+SELECT_PIN = "SELECT fleet_id, entry_id, pinned_by, pinned_at FROM pins WHERE fleet_id = $1 AND entry_id = $2"
+COUNT_PINS = "SELECT count(*) FROM pins WHERE fleet_id = $1"
+INSERT_PIN = """
+INSERT INTO pins (fleet_id, entry_id, pinned_by) VALUES ($1, $2, $3)
+RETURNING fleet_id, entry_id, pinned_by, pinned_at
+"""
+DELETE_PIN = "DELETE FROM pins WHERE fleet_id = $1 AND entry_id = $2"
+LIST_PINS = """
+SELECT fleet_id, entry_id, pinned_by, pinned_at FROM pins WHERE fleet_id = $1
+ ORDER BY pinned_at DESC, entry_id
 """
 
 # --- Fleet / agent access-control SQL (ADRs 0011-0012) ---------------------
@@ -554,6 +570,35 @@ class PgStore:
         async with pool.acquire(timeout=self._acquire_timeout) as conn:
             rows = await conn.fetch(SELECT_PREDECESSORS, ids)
         return [_row_to_entry(row) for row in rows]
+
+    async def pin_entry(
+        self, fleet_id: str, entry_id: str, pinned_by: str, limit: int
+    ) -> Pin | None:
+        if not _is_valid_uuid(entry_id):
+            return None
+        pool = await self._ensure_pool()
+        async with pool.acquire(timeout=self._acquire_timeout) as conn, conn.transaction():
+            await conn.execute(LOCK_FLEET_PINS, fleet_id)
+            row = await conn.fetchrow(SELECT_PIN, fleet_id, entry_id)
+            if row is None:
+                if await conn.fetchval(COUNT_PINS, fleet_id) >= limit:
+                    return None
+                row = await conn.fetchrow(INSERT_PIN, fleet_id, entry_id, pinned_by)
+        return _row_to_pin(row)
+
+    async def unpin_entry(self, fleet_id: str, entry_id: str) -> bool:
+        if not _is_valid_uuid(entry_id):
+            return False
+        pool = await self._ensure_pool()
+        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+            status = await conn.execute(DELETE_PIN, fleet_id, entry_id)
+        return bool(status.endswith(" 1"))
+
+    async def list_pins(self, fleet_id: str) -> list[Pin]:
+        pool = await self._ensure_pool()
+        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+            rows = await conn.fetch(LIST_PINS, fleet_id)
+        return [_row_to_pin(row) for row in rows]
 
     async def usage_counts(self) -> list[UsageCount]:
         pool = await self._ensure_pool()
@@ -1039,6 +1084,15 @@ def _encode_entities(entities: tuple[ExtractedEntity, ...]) -> list[dict[str, st
     (ADR 0016). The lower-cased names are stored separately on
     ``entity_names`` (the filter column, symmetric with ``tags``)."""
     return [{"name": e.name, "kind": e.kind.value} for e in entities]
+
+
+def _row_to_pin(row: asyncpg.Record) -> Pin:
+    return Pin(
+        fleet_id=row["fleet_id"],
+        entry_id=str(row["entry_id"]),
+        pinned_by=row["pinned_by"],
+        pinned_at=row["pinned_at"],
+    )
 
 
 def _decode_sources(raw: Any) -> tuple[Source, ...]:

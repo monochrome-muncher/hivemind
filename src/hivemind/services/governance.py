@@ -14,14 +14,17 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from hivemind.config import SearchConfig
-from hivemind.domain.access import Visibility, may_supersede
+from hivemind.domain.access import TrustLevel, Visibility, may_supersede
 from hivemind.domain.audit import AuditAction
-from hivemind.domain.entry import Entry, EntryDraft, ExtractedEntity
+from hivemind.domain.entry import Entry, EntryDraft, EntryState, ExtractedEntity
 from hivemind.domain.feedback import FEEDBACK_RECENT_LIMIT, Feedback, FeedbackSummary, Verdict
+from hivemind.domain.pin import Pin, PinnedEntry
 from hivemind.domain.validation import (
     MAX_FEEDBACK_IDS,
+    MAX_ID_CHARS,
     MAX_IDENTITY_CHARS,
     MAX_NOTE_CHARS,
+    MAX_PINS_PER_FLEET,
     MAX_REASON_CHARS,
     InvalidInput,
     check_text,
@@ -29,7 +32,7 @@ from hivemind.domain.validation import (
 from hivemind.ports import Credential, Embedder, Extractor, Store, SupersedeConflict
 from hivemind.retrieval.scoring import feedback_quality
 from hivemind.services.audit import record_admin_action
-from hivemind.services.chain import get_visible_entry
+from hivemind.services.chain import get_visible_entries, get_visible_entry
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +40,9 @@ logger = logging.getLogger(__name__)
 class PermissionDenied(Exception):
     """The caller may not perform this governance action."""
 
+
+# How far a pin follows supersession to the current version (ADR 0058).
+_PIN_FOLLOW_HOPS = 16
 
 # ``supersedes`` targets fetched per ``get_entries`` call (bounds memory).
 _SUPERSEDES_LOOKUP_CHUNK = 50
@@ -391,3 +397,88 @@ class GovernanceService:
             min_quality=cfg.quality_min,
             max_quality=cfg.quality_max,
         )
+
+    # -- pinned entries (ADR 0058) -------------------------------------------
+
+    async def pin(self, credential: Credential, entry_id: str) -> Pin:
+        """Pin an active fleet entry to its own fleet. A privileged agent of
+        that fleet or an admin may; a fleet holds at most
+        ``MAX_PINS_PER_FLEET`` pins. Pinning a pinned entry is a no-op."""
+        entry, fleet_id = await self._pinnable(credential, entry_id)
+        if entry.state is not EntryState.ACTIVE:
+            raise ValueError(
+                f"entry {entry_id} is {entry.state.value}; only active entries can be pinned"
+            )
+        pin = await self._store.pin_entry(
+            fleet_id,
+            entry.id,
+            credential.agent_name or credential.user_id,
+            MAX_PINS_PER_FLEET,
+        )
+        if pin is None:
+            raise InvalidInput(
+                f"the fleet already has {MAX_PINS_PER_FLEET} pinned entries: unpin one first"
+            )
+        return pin
+
+    async def unpin(self, credential: Credential, entry_id: str) -> bool:
+        """Remove an entry's pin (any state); whether it was pinned."""
+        entry, fleet_id = await self._pinnable(credential, entry_id)
+        return await self._store.unpin_entry(fleet_id, entry.id)
+
+    async def pinned(
+        self, credential: Credential, fleet_id: str | None = None
+    ) -> list[PinnedEntry]:
+        """A fleet's pinned entries as ``credential`` sees them, newest pin
+        first (the caller's home fleet unless ``fleet_id`` names another).
+
+        A pin follows supersession to the current version, so superseding
+        a pinned entry keeps the briefing current; a withdrawn one is shown
+        withdrawn until someone unpins it. Entries the caller may not read
+        are left out, so another fleet's pins are empty to a contributor.
+        """
+        fleet = fleet_id or credential.home_fleet_id
+        if fleet is None:
+            return []
+        check_text(fleet, "fleet_id", MAX_ID_CHARS)
+        pins = await self._store.list_pins(fleet)
+        if not pins:
+            return []
+        visibility = credential.visibility()
+        found = await get_visible_entries(self._store, [p.entry_id for p in pins], visibility)
+        result: list[PinnedEntry] = []
+        for pin in pins:
+            entry = found.get(pin.entry_id)
+            if entry is None:
+                continue
+            result.append(PinnedEntry(pin, await self._current(entry, visibility)))
+        return result
+
+    async def _current(self, entry: Entry, visibility: Visibility) -> Entry:
+        """The newest version of ``entry`` the reader may see (bounded walk)."""
+        for _ in range(_PIN_FOLLOW_HOPS):
+            if entry.state is not EntryState.SUPERSEDED or entry.superseded_by is None:
+                break
+            successor = await get_visible_entry(self._store, entry.superseded_by, visibility)
+            if successor is None:
+                break
+            entry = successor
+        return entry
+
+    async def _pinnable(self, credential: Credential, entry_id: str) -> tuple[Entry, str]:
+        """The entry to pin or unpin and its fleet, if ``credential`` may
+        (ADR 0058)."""
+        entry = await get_visible_entry(self._store, entry_id, credential.visibility())
+        if entry is None:  # unknown, or not visible to the caller (ADR 0033)
+            raise LookupError(f"unknown entry: {entry_id}")
+        if entry.scope != "fleet" or entry.fleet_id is None:
+            raise InvalidInput("only fleet entries can be pinned, to their own fleet")
+        privileged_member = (
+            credential.trust_level is TrustLevel.PRIVILEGED
+            and credential.home_fleet_id == entry.fleet_id
+        )
+        if not (credential.is_admin or privileged_member):
+            raise PermissionDenied(
+                "only a privileged agent of the entry's fleet or an admin may pin or unpin"
+            )
+        return entry, entry.fleet_id

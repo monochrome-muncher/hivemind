@@ -15,8 +15,9 @@ from pydantic import AfterValidator, BaseModel, Field, field_validator
 
 from hivemind.domain.access import Agent, Fleet, Standing
 from hivemind.domain.audit import AuditRecord
-from hivemind.domain.entry import EntityKind, Entry, ImportanceSource, Kind, SourceType
+from hivemind.domain.entry import EntityKind, Entry, EntryState, ImportanceSource, Kind, SourceType
 from hivemind.domain.feedback import FeedbackCounts, FeedbackSummary, Verdict
+from hivemind.domain.pin import Pin, PinnedEntry
 from hivemind.domain.validation import (
     MAX_FEEDBACK_IDS,
     MAX_GET_IDS,
@@ -360,6 +361,65 @@ class BatchFeedbackRequest(BaseModel):
     verdict: Verdict
     note: str | None = None
     agent: str | None = None
+
+
+class PinOut(BaseModel):
+    """A pin (ADR 0058): which entry is pinned to which fleet, by whom."""
+
+    entry_id: str
+    fleet_id: str
+    pinned_by: str
+    pinned_at: datetime
+
+    @classmethod
+    def from_pin(cls, pin: Pin) -> PinOut:
+        return cls(
+            entry_id=pin.entry_id,
+            fleet_id=pin.fleet_id,
+            pinned_by=pin.pinned_by,
+            pinned_at=pin.pinned_at,
+        )
+
+
+class UnpinOut(BaseModel):
+    """The answer to an unpin (ADR 0058): whether the entry was pinned."""
+
+    entry_id: str
+    removed: bool
+
+
+class PinnedOut(BaseModel):
+    """One pinned entry as the reader sees it (ADR 0058): ``id`` is the
+    current version, ``pinned_id`` the version that was pinned."""
+
+    id: str
+    pinned_id: str
+    kind: Kind
+    summary: str
+    author: str
+    state: EntryState
+    pinned_by: str
+    pinned_at: datetime
+
+    @classmethod
+    def from_pinned(cls, pinned: PinnedEntry) -> PinnedOut:
+        return cls(
+            id=pinned.entry.id,
+            pinned_id=pinned.pin.entry_id,
+            kind=pinned.entry.kind,
+            summary=pinned.entry.summary,
+            author=pinned.entry.author,
+            state=pinned.entry.state,
+            pinned_by=pinned.pin.pinned_by,
+            pinned_at=pinned.pin.pinned_at,
+        )
+
+
+class PinsOut(BaseModel):
+    """A fleet's pinned entries, newest pin first (ADR 0058)."""
+
+    fleet_id: str | None
+    pins: list[PinnedOut]
 
 
 class FeedbackOut(BaseModel):

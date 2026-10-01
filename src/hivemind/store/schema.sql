@@ -126,6 +126,13 @@ CREATE TABLE public.fleets (
     created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
+CREATE TABLE public.pins (
+    fleet_id text NOT NULL,
+    entry_id uuid NOT NULL,
+    pinned_by text NOT NULL,
+    pinned_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
 ALTER TABLE ONLY public.agents
     ADD CONSTRAINT agents_pkey PRIMARY KEY (name);
 
@@ -146,6 +153,9 @@ ALTER TABLE ONLY public.fleets
 
 ALTER TABLE ONLY public.fleets
     ADD CONSTRAINT fleets_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY public.pins
+    ADD CONSTRAINT pins_pkey PRIMARY KEY (fleet_id, entry_id);
 
 CREATE INDEX agents_fleet_idx ON public.agents USING btree (home_fleet_id);
 

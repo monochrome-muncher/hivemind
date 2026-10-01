@@ -51,6 +51,7 @@ from hivemind.domain.feedback import (
     FeedbackCounts,
     Verdict,
 )
+from hivemind.domain.pin import Pin
 from hivemind.ports import SupersedeConflict
 
 # Sort key for a feedback row that has no timestamp (fixtures only).
@@ -88,6 +89,7 @@ class MemoryStore:
         self._fleets: dict[str, Fleet] = {}
         self._agents: dict[str, Agent] = {}
         self._audit: list[AuditRecord] = []  # append-only (ADR 0027)
+        self._pins: dict[tuple[str, str], Pin] = {}  # (fleet, entry), ADR 0058
 
     # -- write path -------------------------------------------------------
 
@@ -188,6 +190,30 @@ class MemoryStore:
             return [
                 _copy(entry) for entry in self._entries.values() if entry.superseded_by in wanted
             ]
+
+    async def pin_entry(
+        self, fleet_id: str, entry_id: str, pinned_by: str, limit: int
+    ) -> Pin | None:
+        with self._lock:
+            existing = self._pins.get((fleet_id, entry_id))
+            if existing is not None:
+                return existing
+            if sum(1 for f, _ in self._pins if f == fleet_id) >= limit:
+                return None
+            pin = Pin(fleet_id, entry_id, pinned_by, self._clock())
+            self._pins[(fleet_id, entry_id)] = pin
+            return pin
+
+    async def unpin_entry(self, fleet_id: str, entry_id: str) -> bool:
+        with self._lock:
+            return self._pins.pop((fleet_id, entry_id), None) is not None
+
+    async def list_pins(self, fleet_id: str) -> list[Pin]:
+        with self._lock:
+            pins = [p for (f, _), p in self._pins.items() if f == fleet_id]
+        # Newest first; insertion order breaks ties (the clock may not move).
+        order = {id(p): i for i, p in enumerate(pins)}
+        return sorted(pins, key=lambda p: (p.pinned_at, order[id(p)]), reverse=True)
 
     async def usage_counts(self) -> list[UsageCount]:
         with self._lock:

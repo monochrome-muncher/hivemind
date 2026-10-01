@@ -88,6 +88,10 @@ _Avoid_: score (in specs, "score" always means the retrieval score; "quality" is
 A reporting agent's verdict that an entry it relied on was `helpful`, `stale`, or `wrong`, with an optional note. Aggregated into an entry's quality, and readable by everyone who can read the entry.
 _Avoid_: rating, review
 
+**Pinned entry**:
+A fleet entry a privileged agent of that fleet (or an admin) pinned into the fleet's briefing, which every agent of the fleet reads at the start of a session. Context, never an order.
+_Avoid_: keystone, rule, mandatory entry
+
 **Flagged entry**:
 An entry with at least one `stale` or `wrong` feedback report. While it is active, it is waiting for someone to supersede or withdraw it.
 _Avoid_: disputed, reported (as a state)
