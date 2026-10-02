@@ -344,7 +344,7 @@ How strong it is depends on the harness:
 
 | Harness | With the launcher |
 |---|---|
-| Claude Code, DeepSeek Harness, Pi, Oh My Pi, OpenCode | The Hivemind tools do not load at all. Nothing to set up (Pi with pi-mcp-adapter needs `python3`). |
+| Claude Code, DeepSeek Harness, Pi, Oh My Pi, OpenCode | The Hivemind tools do not load at all. Nothing to set up (Pi with pi-mcp-adapter needs `python3`, and leaves the project's own MCP servers out). |
 | Codex | The tools do not load, as long as the server is in `~/.codex/config.toml` (as [Per harness](#per-harness) describes). |
 | Hermes | The tools do not load once you add `enabled: ${HIVEMIND_ENABLED}` to the hivemind entry in `~/.hermes/config.yaml`. Never set `HIVEMIND_ENABLED` in `~/.hermes/.env`, because that file overrides the launcher. |
 | Gemini CLI, any other harness | Incognito **by restraint**: the tools stay loaded and the agent is told not to use them. |

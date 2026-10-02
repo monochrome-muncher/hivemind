@@ -608,6 +608,87 @@ def test_launcher_gives_pi_an_mcp_config_without_hivemind(tmp_path: Path) -> Non
     assert list((tmp_path / "tmp").iterdir()) == []  # temp file removed
 
 
+def _adapter_pi(tmp_path: Path) -> dict[str, str]:
+    """A fake Pi with pi-mcp-adapter installed that prints the merged config."""
+    env = _fake_harness(tmp_path, "pi")
+    (tmp_path / ".pi" / "agent").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".pi" / "agent" / "settings.json").write_text(
+        json.dumps({"packages": ["npm:pi-mcp-adapter"]})
+    )
+    (tmp_path / "bin" / "pi").write_text('#!/bin/sh\ncat "$2"; echo\n')
+    return env
+
+
+def _write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+
+
+@pytest.mark.skipif(shutil.which("python3") is None, reason="python3 is not installed")
+@pytest.mark.parametrize("text", ["[1, 2]", "null", '"x"', '{"mcpServers": [1]}', "{not json"])
+def test_launcher_starts_pi_despite_a_malformed_mcp_config(tmp_path: Path, text: str) -> None:
+    """A config whose root (or mcpServers) is not an object used to raise
+    AttributeError and, under set -eu, stop Pi from starting. Such a file
+    is skipped; the other files still count."""
+    env = _adapter_pi(tmp_path)
+    _write(tmp_path / ".config" / "mcp" / "mcp.json", text)
+    _write(
+        tmp_path / ".agents" / "mcp.json",
+        json.dumps({"mcpServers": {"github": {"url": "y"}, "x": 1}}),
+    )
+    config = json.loads(_launch(tmp_path, env, "pi")[-1])
+    assert config == {"mcpServers": {"github": {"url": "y"}}}
+
+
+@pytest.mark.skipif(shutil.which("python3") is None, reason="python3 is not installed")
+def test_launcher_merges_the_adapter_5_global_configs_but_no_project_servers(
+    tmp_path: Path,
+) -> None:
+    """pi-mcp-adapter 5 also reads ~/.agents/mcp/mcp.json, Pi's own
+    ~/.pi/agent/mcp.json (translated) and ~/.pi/agent/mcp-adapter.json.
+    Project servers stay out: the adapter runs the exclusive config's
+    servers without the approval it asks for project servers."""
+    env = _adapter_pi(tmp_path)
+    _write(
+        tmp_path / ".agents" / "mcp" / "mcp.json", json.dumps({"mcpServers": {"a": {"url": "a"}}})
+    )
+    _write(
+        tmp_path / ".pi" / "agent" / "mcp.json",
+        json.dumps(
+            {
+                "mcpServers": {
+                    "hivemind": {"url": "h"},
+                    "off": {"url": "o", "enabled": False},
+                    "hidden": {"url": "h2", "exposure": "hidden"},
+                    "named": {"type": "http", "url": "n", "exposure": "direct", "timeout": 5},
+                    "old": {"type": "sse", "url": "s"},
+                }
+            }
+        ),
+    )
+    _write(
+        tmp_path / ".pi" / "agent" / "mcp-adapter.json",
+        json.dumps({"mcpServers": {"a": {"url": "a2"}}}),
+    )
+    _write(tmp_path / ".mcp.json", json.dumps({"mcpServers": {"evil": {"command": "sh"}}}))
+    _write(tmp_path / ".pi" / "mcp.json", json.dumps({"mcpServers": {"evil2": {"command": "sh"}}}))
+    out = subprocess.run(
+        ["sh", str(LAUNCHER), "pi"],
+        env=env,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert json.loads(out.stdout.splitlines()[-1])["mcpServers"] == {
+        "a": {"url": "a2"},  # mcp-adapter.json wins over ~/.agents
+        "off": {"url": "o", "disabled": True},
+        "hidden": {"url": "h2", "disabled": True},
+        "named": {"url": "n", "directTools": True, "requestTimeoutMs": 5000},
+    }
+    assert "this project's MCP servers are not loaded" in out.stderr
+
+
 @pytest.mark.skipif(shutil.which("python3") is None, reason="python3 is not installed")
 def test_launcher_starts_a_built_in_mcp_pi_without_the_adapter_flag(tmp_path: Path) -> None:
     """Pi 0.99+ without pi-mcp-adapter refuses --mcp-config ("Unknown
@@ -823,6 +904,44 @@ def test_the_extension_registers_the_server_with_pi_built_in_mcp(tmp_path: Path)
     (tmp_path / ".config" / "mcp").mkdir(parents=True)
     (tmp_path / ".config" / "mcp" / "mcp.json").write_text('{"mcpServers": {"hivemind": {}}}')
     assert _node(_REGISTER_SCRIPT, PI_EXTENSION, **env) == {"registered": []}
+
+
+@needs_node
+@pytest.mark.parametrize(
+    "rel", [".agents/mcp/mcp.json", ".pi/agent/mcp.json", ".pi/agent/mcp-adapter.json"]
+)
+def test_the_extension_leaves_a_configured_server_alone(tmp_path: Path, rel: str) -> None:
+    """pi-mcp-adapter 5 also reads these files (Pi's own mcp.json among
+    them): a hivemind entry there wins, so nothing is registered."""
+    env = {
+        "HAS_API": "1",
+        "HIVEMIND_MCP_URL": "u",
+        "HIVEMIND_API_KEY": "hm_x",
+        "HOME": str(tmp_path),
+    }
+    (tmp_path / rel).parent.mkdir(parents=True)
+    (tmp_path / rel).write_text('{"mcpServers": {"hivemind": {"url": "x"}}}')
+    assert _node(_REGISTER_SCRIPT, PI_EXTENSION, **env) == {"registered": []}
+
+
+@needs_node
+def test_the_extension_sends_no_exposure_to_pi_mcp_adapter(tmp_path: Path) -> None:
+    """pi-mcp-adapter 5 connects registered servers behind its proxy and
+    warns at every start about an `exposure` it ignores (checked live with
+    adapter 5.0.0 on Pi 1.0.0)."""
+    env = {
+        "HAS_API": "1",
+        "HIVEMIND_MCP_URL": "u",
+        "HIVEMIND_API_KEY": "hm_x",
+        "HOME": str(tmp_path),
+    }
+    (tmp_path / ".pi" / "agent").mkdir(parents=True)
+    (tmp_path / ".pi" / "agent" / "settings.json").write_text(
+        '{"packages": ["npm:pi-mcp-adapter"]}'
+    )
+    [server] = _node(_REGISTER_SCRIPT, PI_EXTENSION, **env)["registered"]  # type: ignore[index]
+    assert "exposure" not in server["config"]
+    assert server["config"]["url"] == "u"
 
 
 def test_launcher_keeps_oh_my_pi_from_contacting_the_server(tmp_path: Path) -> None:

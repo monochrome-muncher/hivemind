@@ -68,8 +68,11 @@ itself names no harness-specific paths, and a test enforces this.
   process environment, which matters for incognito.
 - **Pi** supports two MCP routes for now: the built-in client (Pi 0.99+),
   where the extension registers the server unless an adapter config
-  already defines `hivemind`, and the older pi-mcp-adapter. The adapter
-  route can be dropped later.
+  already defines `hivemind`, and the older pi-mcp-adapter. pi-mcp-adapter
+  5 also connects servers that extensions register (behind its `mcp`
+  proxy, ignoring `exposure`), so the extension sends no `exposure` when
+  the adapter is installed. Checked live with Pi 1.0.0 and pi-mcp-adapter
+  5.0.0. The adapter route can be dropped later.
 - **Oh My Pi** mounts MCP tools as routes (`xd://mcp__hivemind_hive_*`)
   rather than as named tools; the agent finds them in its system prompt.
   A plain `omp install <git-url>` misses the skills, so it installs
@@ -96,7 +99,7 @@ does two things:
 | Codex | `-c mcp_servers.hivemind.enabled=false`; the launcher also unsets the key | the `mcp_servers.hivemind` entry in `~/.codex/config.toml` or `.codex/config.toml` |
 | DeepSeek Harness | the bundle's server row switches itself off | nothing |
 | Hermes | `HIVEMIND_ENABLED=false` | `enabled: ${HIVEMIND_ENABLED}` in the hivemind server entry in `~/.hermes/config.yaml`, and **no** `HIVEMIND_ENABLED` in `~/.hermes/.env` (Hermes loads it over the environment, so it would override the launcher); for normal sessions leave it unset or export `HIVEMIND_ENABLED=true` in the shell profile |
-| Pi | Pi 0.99+ built-in MCP: the package registers no server, and the key and URL are unset. With pi-mcp-adapter: an exclusive MCP config, your global and project servers minus hivemind. Either way the extension also blocks `mcp__hivemind…` calls (codemode scripts included), the adapter's `mcp` proxy and `mcpScript` calls that name Hivemind (the `mcpScript` scan is best effort) | the hivemind package; `python3` with the adapter |
+| Pi | Pi 0.99+ built-in MCP: the package registers no server, and the key and URL are unset. With pi-mcp-adapter: an exclusive MCP config, the servers of your global MCP config files minus hivemind (project servers are left out: the adapter would start them without its approval prompt). Either way the extension also blocks `mcp__hivemind…` calls (codemode scripts included), the adapter's `mcp` proxy and `mcpScript` calls that name Hivemind (the `mcpScript` scan is best effort) | the hivemind package; `python3` with the adapter |
 | Oh My Pi | `HIVEMIND_MCP_URL`/`HIVEMIND_API_KEY` unset, so the server is never contacted (Oh My Pi warns once that it is unavailable); the extension also blocks any Hivemind call | the hivemind plugin |
 | OpenCode | the plugin skips the server; a hand-configured one is disabled with `OPENCODE_CONFIG_CONTENT` | nothing |
 

@@ -138,14 +138,20 @@ PY
     # ${HIVEMIND_MCP_URL} has no URL once it is unset, and the extension
     # blocks any Hivemind call that still gets through. The adapter's
     # --mcp-config flag would make such a Pi refuse to start.
-    pi_settings="${PI_CODING_AGENT_DIR:-${home_dir:-.}/.pi/agent}/settings.json"
-    if ! grep -qs 'pi-mcp-adapter' "$pi_settings" .pi/settings.json; then
+    pi_agent_dir=${PI_CODING_AGENT_DIR:-${home_dir:-.}/.pi/agent}
+    if ! grep -qs 'pi-mcp-adapter' "$pi_agent_dir/settings.json" .pi/settings.json; then
       unset HIVEMIND_API_KEY HIVEMIND_MCP_URL
       exec "$harness" "$@"
     fi
     # pi-mcp-adapter loads exactly one MCP config in exclusive mode: build
-    # one from the global and project configs, minus the hivemind server.
-    # The merged file can hold other servers' literal tokens, so it is
+    # one from the user's global configs, minus the hivemind server. The
+    # adapter treats that file as the user's own, so project servers
+    # (.mcp.json, .pi/) are left out: copied in, they would start without
+    # the approval the adapter asks for them (checked with adapter 5.0.0).
+    # Pi's own mcp.json (adapter 5 reads it) is translated the way the
+    # adapter does for the settings that decide whether a server runs.
+    # A file that is not valid JSON or not an object is skipped, never
+    # fatal. The merged file can hold other servers' literal tokens, so it is
     # private and removed when Pi exits (no exec, so the trap can run).
     # mktemp creates the file 0600 by itself (no umask change, which would
     # leak into the harness). The directory is the first writable one of
@@ -162,26 +168,60 @@ PY
     fi
     if [ -n "$merged" ]; then
       if [ -z "$home_dir" ]; then
-        note "HOME is not set; the global ~/.config/mcp/mcp.json is skipped (only the project .mcp.json is kept)"
+        note "HOME is not set; the MCP configs in your home directory are skipped"
+      fi
+      if [ -f .mcp.json ] || [ -f .pi/mcp.json ] || [ -f .pi/mcp-adapter.json ]; then
+        note "this project's MCP servers are not loaded in an incognito session"
       fi
       trap 'rm -f "$merged"' EXIT
       trap 'exit 130' INT
       trap 'exit 143' TERM HUP
-      python3 - "$merged" "$home_dir" <<'PY'
+      python3 - "$merged" "$home_dir" "${PI_CODING_AGENT_DIR:-${home_dir:+$home_dir/.pi/agent}}" <<'PY' \
+        || { note "could not merge your MCP configs; starting with no MCP servers"; echo '{"mcpServers": {}}' >"$merged"; }
 import json, os, sys
-servers = {}
-home = sys.argv[2]
-paths = [".mcp.json"]
+merged, home, agent_dir = sys.argv[1:4]
+
+def pi_entry(entry):
+    # Pi's mcp.json entry in the adapter's terms (as pi-mcp-adapter 5 maps it).
+    if entry.get("type") == "sse":
+        return None
+    out = {k: v for k, v in entry.items() if k not in ("type", "exposure", "toolExposure", "enabled", "timeout")}
+    exposure = entry.get("exposure")
+    if entry.get("enabled") is False or exposure == "hidden":
+        out["disabled"] = True
+    elif exposure == "direct":
+        out["directTools"] = True
+    elif exposure == "deferred":
+        out["directTools"] = "search"
+    timeout = entry.get("timeout")
+    if isinstance(timeout, (int, float)) and not isinstance(timeout, bool):
+        out["requestTimeoutMs"] = timeout * 1000
+    return out
+
+# The adapter's global sources, lowest precedence first.
+sources = []
+if agent_dir:
+    sources = [(os.path.join(agent_dir, "mcp.json"), True), (os.path.join(agent_dir, "mcp-adapter.json"), False)]
 if home:
-    paths.insert(0, os.path.join(home, ".config", "mcp", "mcp.json"))
-for path in paths:
+    sources[:0] = [(os.path.join(home, *p), False) for p in
+                   ((".config", "mcp", "mcp.json"), (".agents", "mcp.json"), (".agents", "mcp", "mcp.json"))]
+servers = {}
+for path, pi_format in sources:
     try:
         with open(path) as fh:
-            servers.update(json.load(fh).get("mcpServers", {}))
+            config = json.load(fh)
     except (OSError, ValueError):
-        pass
+        continue
+    found = config.get("mcpServers", config.get("mcp-servers")) if isinstance(config, dict) else None
+    if not isinstance(found, dict):
+        continue
+    for name, entry in found.items():
+        if isinstance(entry, dict):
+            entry = pi_entry(entry) if pi_format else entry
+            if entry is not None:
+                servers[name] = entry
 servers.pop("hivemind", None)
-with open(sys.argv[1], "w") as fh:
+with open(merged, "w") as fh:
     json.dump({"mcpServers": servers}, fh)
 PY
       export PI_MCP_CONFIG_MODE=exclusive
