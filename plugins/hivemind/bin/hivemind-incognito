@@ -39,10 +39,10 @@ case "$(basename "$harness")" in
   claude)
     # Deny the server for this session only (--settings outranks user
     # settings; the denylist also covers servers a plugin adds). A plugin's
-    # MCP server registers as "plugin:<plugin>:<server>" (Claude Code MCP
-    # docs), i.e. "plugin:hivemind:hivemind"; a hand-added one as
-    # "hivemind". Whether a serverName entry matches the scoped form is
-    # UNCONFIRMED in the docs, so both names and the URL are denied. The URL
+    # MCP server registers as "plugin:hivemind:hivemind", a hand-added one
+    # as "hivemind". Denying the scoped name, or the URL, keeps the plugin's
+    # server from loading (checked with Claude Code 2.1.287); "hivemind"
+    # alone does not cover it. Both names and the URL are denied. The URL
     # comes from the launching shell, else from the "env" block of
     # ~/.claude/settings.json (where the setup skill may have put it).
     url=${HIVEMIND_MCP_URL:-}
