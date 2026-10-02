@@ -14,12 +14,9 @@ import uvicorn
 from fastapi import FastAPI
 
 from hivemind.api.deps import HivemindApp, create_app
-from hivemind.config import SearchConfig, Settings, configure_logging, load_settings, redact_url
+from hivemind.config import SearchConfig, Settings, configure_logging, load_settings
 from hivemind.ports import Authenticator, Embedder, Extractor, Store
-from hivemind.services.access import AccessService
-from hivemind.services.governance import GovernanceService, WriteService
-from hivemind.services.metrics import MetricsService
-from hivemind.services.search import SearchService
+from hivemind.services.wiring import build_services, log_startup
 
 logger = logging.getLogger(__name__)
 
@@ -44,16 +41,19 @@ def create_app_for_config(
     authenticator = authenticator if authenticator is not None else _build_authenticator(settings)
     extractor = extractor if extractor is not None else _build_extractor(settings)
     search_config = search_config if search_config is not None else settings.search_config()
+    services = build_services(
+        store, embedder, search_config, extractor=extractor, authenticator=authenticator
+    )
     return HivemindApp(
         store=store,
         embedder=embedder,
         authenticator=authenticator,
         search_config=search_config,
-        write_service=WriteService(store, embedder, extractor),
-        governance_service=GovernanceService(store, search_config),
-        search_service=SearchService(store, embedder, search_config),
-        access_service=AccessService(store, authenticator),
-        metrics_service=MetricsService(store),
+        write_service=services.write_service,
+        governance_service=services.governance_service,
+        search_service=services.search_service,
+        access_service=services.access_service,
+        metrics_service=services.metrics_service,
     )
 
 
@@ -83,14 +83,7 @@ def run() -> None:
     """Console entry point (``hivemind-api``): serve the REST surface."""
     settings = load_settings()
     configure_logging(settings.log_level)
-    logger.info(
-        "starting hivemind-api: embedding_endpoint=%s embedding_dim=%d "
-        "extraction=%s pool_max_size=%d",
-        redact_url(settings.embedding_endpoint),
-        settings.embedding_dim,
-        "on" if settings.extractor_endpoint else "off",
-        settings.pool_max_size,
-    )
+    log_startup(logger, "hivemind-api", settings)
     fastapi_app = create_app_from_settings(settings)
     uvicorn.run(
         fastapi_app,

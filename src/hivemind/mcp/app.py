@@ -42,6 +42,7 @@ from hivemind.services.chain import (
 from hivemind.services.errors import PermissionDenied, SupersedeDenied
 from hivemind.services.governance import GovernanceService, RelatedEntry, WriteService
 from hivemind.services.search import Hit, SearchService
+from hivemind.services.wiring import Services
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,19 @@ class McpHivemind:
     access_service: AccessService
     search_config: SearchConfig
     credential: Credential
+
+    @classmethod
+    def from_services(cls, store: Store, services: Services, credential: Credential) -> McpHivemind:
+        """Bind the shared services (``build_services``) to ``credential``."""
+        return cls(
+            store=store,
+            write_service=services.write_service,
+            search_service=services.search_service,
+            governance_service=services.governance_service,
+            access_service=services.access_service,
+            search_config=services.search_config,
+            credential=credential,
+        )
 
 
 # --------------------------------------------------------------------------- #

@@ -12,6 +12,8 @@ import asyncio
 import json
 import logging
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
@@ -463,6 +465,22 @@ class PgStore:
                     )
         return self._pool
 
+    @asynccontextmanager
+    async def _connection(self) -> AsyncIterator[asyncpg.Connection]:
+        """A pooled connection, acquired under the acquire timeout: a
+        saturated pool raises ``TimeoutError`` (a 503 / ``store_unavailable``
+        upstream) instead of waiting forever."""
+        pool = await self._ensure_pool()
+        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+            yield conn
+
+    @asynccontextmanager
+    async def _transaction(self) -> AsyncIterator[asyncpg.Connection]:
+        """``_connection`` inside one transaction: committed when the block
+        exits normally, rolled back when it raises."""
+        async with self._connection() as conn, conn.transaction():
+            yield conn
+
     async def close(self) -> None:
         """Tear down the pool (process-exit cleanup)."""
         if self._pool is not None:
@@ -486,8 +504,7 @@ class PgStore:
         entry_id = str(uuid.uuid4())
         occurred_at = draft.resolved_occurred_at()
 
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn, conn.transaction():
+        async with self._transaction() as conn:
             # RETURNING, not a re-read: the supersession flip below
             # never touches the new row, so this is its final state.
             row = await conn.fetchrow(
@@ -538,8 +555,7 @@ class PgStore:
     async def get_entry(self, entry_id: str) -> Entry | None:
         if not _is_valid_uuid(entry_id):
             return None
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+        async with self._connection() as conn:
             row = await conn.fetchrow(SELECT_ENTRY, entry_id)
         return _row_to_entry(row) if row is not None else None
 
@@ -547,8 +563,7 @@ class PgStore:
         ids = _valid_uuids(entry_ids)
         if not ids:
             return {}
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+        async with self._connection() as conn:
             rows = await conn.fetch(SELECT_ENTRIES, ids)
         return {str(row["id"]): _row_to_entry(row) for row in rows}
 
@@ -556,16 +571,14 @@ class PgStore:
         ids = _valid_uuids(entry_ids)
         if not ids:
             return []
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+        async with self._connection() as conn:
             rows = await conn.fetch(SELECT_PREDECESSORS, ids)
         return [_row_to_entry(row) for row in rows]
 
     async def entry_links(self, entry_id: str, limit: int) -> tuple[list[str], list[str]]:
         if not _is_valid_uuid(entry_id):
             return [], []
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+        async with self._connection() as conn:
             outgoing = await conn.fetch(SELECT_LINKS_OUT, entry_id)
             incoming = await conn.fetch(SELECT_LINKS_IN, entry_id, limit)
         return [str(r["to_id"]) for r in outgoing], [str(r["from_id"]) for r in incoming]
@@ -577,8 +590,7 @@ class PgStore:
         ids = list(dict.fromkeys(c for c in canonical.values() if c is not None))
         links: dict[str, tuple[list[str], list[str]]] = {c: ([], []) for c in ids}
         if ids:
-            pool = await self._ensure_pool()
-            async with pool.acquire(timeout=self._acquire_timeout) as conn:
+            async with self._connection() as conn:
                 outgoing = await conn.fetch(SELECT_LINKS_OUT_MANY, ids)
                 incoming = await conn.fetch(SELECT_LINKS_IN_MANY, ids, limit)
             for r in outgoing:
@@ -592,8 +604,7 @@ class PgStore:
     ) -> Pin | None:
         if not _is_valid_uuid(entry_id):
             return None
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn, conn.transaction():
+        async with self._transaction() as conn:
             await conn.execute(LOCK_FLEET_PINS, fleet_id)
             row = await conn.fetchrow(SELECT_PIN, fleet_id, entry_id)
             if row is None:
@@ -605,20 +616,17 @@ class PgStore:
     async def unpin_entry(self, fleet_id: str, entry_id: str) -> bool:
         if not _is_valid_uuid(entry_id):
             return False
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+        async with self._connection() as conn:
             status = await conn.execute(DELETE_PIN, fleet_id, entry_id)
         return bool(status.endswith(" 1"))
 
     async def list_pins(self, fleet_id: str) -> list[Pin]:
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+        async with self._connection() as conn:
             rows = await conn.fetch(LIST_PINS, fleet_id)
         return [_row_to_pin(row) for row in rows]
 
     async def usage_counts(self) -> list[UsageCount]:
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+        async with self._connection() as conn:
             rows = await conn.fetch(USAGE_COUNTS)
         return [
             UsageCount(
@@ -634,13 +642,11 @@ class PgStore:
         ]
 
     async def record_search(self, fleet_id: str | None, *, empty: bool) -> None:
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+        async with self._connection() as conn:
             await conn.execute(RECORD_SEARCH, fleet_id or "", int(empty))
 
     async def search_counts(self) -> list[SearchCount]:
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+        async with self._connection() as conn:
             rows = await conn.fetch(SEARCH_COUNTS)
         return [
             SearchCount(
@@ -677,8 +683,7 @@ class PgStore:
             + " OFFSET $"
             + str(len(params) + 2)
         )
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+        async with self._connection() as conn:
             rows = await conn.fetch(sql, *params, limit, offset)
         return [_row_to_entry(row) for row in rows]
 
@@ -690,8 +695,7 @@ class PgStore:
         clauses, params = _filter_conditions(filters, visibility)
         where = " AND ".join(clauses) if clauses else "TRUE"
         sql = "SELECT count(*) AS n FROM entries WHERE " + where
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+        async with self._connection() as conn:
             row = await conn.fetchrow(sql, *params)
         return int(row["n"]) if row is not None else 0
 
@@ -703,8 +707,7 @@ class PgStore:
         """
         if not _is_valid_uuid(entry_id):
             raise KeyError(f"unknown entry: {entry_id}")
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+        async with self._connection() as conn:
             existing = await conn.fetchrow(LOOKUP_STATE, entry_id)
             if existing is None:
                 raise KeyError(f"unknown entry: {entry_id}")
@@ -744,8 +747,7 @@ class PgStore:
             + " created_at DESC, id DESC"
             + f" LIMIT ${query_idx + 1}"
         )
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+        async with self._connection() as conn:
             rows = await conn.fetch(sql, *params, limit)
         return [str(r["id"]) for r in rows]
 
@@ -772,8 +774,7 @@ class PgStore:
             + f" ORDER BY embedding <=> ${vec_idx}"
             + f" LIMIT ${vec_idx + 1}"
         )
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn, conn.transaction():
+        async with self._transaction() as conn:
             await conn.execute(VECTOR_SEARCH_SETTINGS)
             rows = await conn.fetch(sql, *params, embedding, limit)
         return [str(r["id"]) for r in rows]
@@ -801,8 +802,7 @@ class PgStore:
             + f" ORDER BY embedding <=> ${vec_idx}"
             + f" LIMIT ${vec_idx + 1}"
         )
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn, conn.transaction():
+        async with self._transaction() as conn:
             await conn.execute(VECTOR_SEARCH_SETTINGS)
             rows = await conn.fetch(sql, *params, embedding, limit)
         return [(str(r["id"]), float(r["similarity"])) for r in rows]
@@ -811,8 +811,7 @@ class PgStore:
 
     async def record_feedback(self, feedback: Feedback) -> None:
         """Upsert a feedback verdict (one row per entry+user+agent)."""
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+        async with self._connection() as conn:
             await conn.execute(
                 UPSERT_FEEDBACK,
                 feedback.entry_id,
@@ -826,8 +825,7 @@ class PgStore:
     async def feedback_counts(self, entry_id: str) -> tuple[int, int, int]:
         if not _is_valid_uuid(entry_id):
             return (0, 0, 0)
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+        async with self._connection() as conn:
             row = await conn.fetchrow(COUNT_FEEDBACK, entry_id)
         return (row["helpful"], row["stale"], row["wrong"]) if row else (0, 0, 0)
 
@@ -836,8 +834,7 @@ class PgStore:
         ids = _valid_uuids(entry_ids)
         if not ids:
             return {}
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+        async with self._connection() as conn:
             rows = await conn.fetch(BATCH_FEEDBACK, ids)
         counts = dict.fromkeys(ids, (0, 0, 0))
         for r in rows:
@@ -849,8 +846,7 @@ class PgStore:
         ``(entry_id, "user", agent)`` narrows the scan to one entry's rows."""
         if not _is_valid_uuid(entry_id):
             return []
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+        async with self._connection() as conn:
             rows = await conn.fetch(LIST_FEEDBACK, entry_id, limit)
         return [_row_to_feedback(r) for r in rows]
 
@@ -861,8 +857,7 @@ class PgStore:
         ids = list(dict.fromkeys(c for c in canonical.values() if c is not None))
         rows_by_id: dict[str, list[Feedback]] = {c: [] for c in ids}
         if ids:
-            pool = await self._ensure_pool()
-            async with pool.acquire(timeout=self._acquire_timeout) as conn:
+            async with self._connection() as conn:
                 rows = await conn.fetch(LIST_FEEDBACK_MANY, ids, limit)
             for r in rows:
                 rows_by_id[str(r["entry_id"])].append(_row_to_feedback(r))
@@ -873,8 +868,7 @@ class PgStore:
     async def create_fleet(self, name: str) -> Fleet:
         """Create a named fleet (ADR 0011). ``ValueError`` if the name
         exists, including a racing duplicate (conflict-guarded insert)."""
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+        async with self._connection() as conn:
             dup = await conn.fetchrow(SELECT_FLEET_BY_NAME, name)
             if dup is not None:
                 raise ValueError(f"fleet already exists: {name!r}")
@@ -885,16 +879,14 @@ class PgStore:
         return _row_to_fleet(row)
 
     async def list_fleets(self) -> list[Fleet]:
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+        async with self._connection() as conn:
             rows = await conn.fetch(LIST_FLEETS)
         return [_row_to_fleet(r) for r in rows]
 
     async def get_fleet(self, fleet_id: str) -> Fleet | None:
         if not _is_valid_uuid(fleet_id):
             return None
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+        async with self._connection() as conn:
             row = await conn.fetchrow(GET_FLEET, fleet_id)
         return _row_to_fleet(row) if row is not None else None
 
@@ -908,8 +900,7 @@ class PgStore:
         case-only variant (ADR 0045, under a per-folded-name lock); a new
         one is ``pending`` (level 0, no fleet).
         """
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+        async with self._connection() as conn:
             row = await conn.fetchrow(GET_AGENT, name)
             if row is None:
                 async with conn.transaction():
@@ -925,14 +916,12 @@ class PgStore:
         return _row_to_agent(row)
 
     async def get_agent(self, name: str) -> Agent | None:
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+        async with self._connection() as conn:
             row = await conn.fetchrow(GET_AGENT, name)
         return _row_to_agent(row) if row is not None else None
 
     async def list_agents(self) -> list[Agent]:
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+        async with self._connection() as conn:
             rows = await conn.fetch(LIST_AGENTS)
         return [_row_to_agent(r) for r in rows]
 
@@ -943,8 +932,7 @@ class PgStore:
         fleet, flip to ``active`` (ADRs 0012, 0028). ``KeyError`` if
         unknown; ``InvalidAgentStatus`` if already ``active``.
         """
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+        async with self._connection() as conn:
             row = await conn.fetchrow(ACTIVATE_AGENT, name, trust_level.value, home_fleet_id)
             if row is None:
                 await self._raise_for_status(conn, name, "activate")
@@ -956,8 +944,7 @@ class PgStore:
         """Flip a pending or active agent to ``revoked`` (ADR 0028).
         ``KeyError`` if unknown; ``InvalidAgentStatus`` if already revoked.
         """
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+        async with self._connection() as conn:
             row = await conn.fetchrow(REVOKE_AGENT, name)
             if row is None:
                 await self._raise_for_status(conn, name, "revoke")
@@ -978,8 +965,7 @@ class PgStore:
         if unknown. Demotion to level 0 is *dormant* (still active, no
         access) — distinct from revocation (ADR 0012).
         """
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+        async with self._connection() as conn:
             existing = await conn.fetchrow(GET_AGENT, name)
             if existing is None:
                 raise KeyError(f"unknown agent: {name}")
@@ -993,8 +979,7 @@ class PgStore:
         earlier ``fleet``-scoped entries stay in the fleet they were written
         into (never re-parented). ``KeyError`` if unknown.
         """
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+        async with self._connection() as conn:
             existing = await conn.fetchrow(GET_AGENT, name)
             if existing is None:
                 raise KeyError(f"unknown agent: {name}")
@@ -1008,8 +993,7 @@ class PgStore:
     async def record_audit(self, event: AuditEvent) -> AuditRecord:
         """Append one audit row (insert-only). Failures propagate — an
         audit write is never swallowed (ADR 0027)."""
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+        async with self._connection() as conn:
             row = await conn.fetchrow(
                 INSERT_AUDIT,
                 event.actor_kind.value,
@@ -1049,8 +1033,7 @@ class PgStore:
             f"SELECT {_AUDIT_COLUMNS} FROM audit_log {where} "
             f"ORDER BY occurred_at DESC, id DESC LIMIT ${len(params)}"
         )
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn:
+        async with self._connection() as conn:
             rows = await conn.fetch(sql, *params)
         return [_row_to_audit(r) for r in rows]
 
@@ -1061,8 +1044,7 @@ class PgStore:
         raises; the endpoint's 503 is the signal.
         """
         try:
-            pool = await self._ensure_pool()
-            async with pool.acquire(timeout=self._acquire_timeout) as conn:
+            async with self._connection() as conn:
                 await conn.fetchval("SELECT 1")
         except Exception as exc:
             if self._database_reachable is not False:
