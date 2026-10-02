@@ -2,7 +2,7 @@
 
 Check this before deciding whether an update matters. "Server" rows take
 effect when the Hivemind server is upgraded; "plugin" rows need the plugin
-update ([README, Updating](README.md#updating)).
+update ([README, Update](README.md#update)).
 
 | Release | Server | Plugin | Your copies (instruction block, hand-installed hook) |
 |---|---|---|---|
