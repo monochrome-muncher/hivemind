@@ -2,10 +2,12 @@
 
 The threshold depends on the embedding model, so it is measured with the
 model a deployment runs, not with the 4-dimension hash embedder the other
-evals use. This module seeds the golden corpus and the age-varied corpus
-(``golden.py``, ``temporal.py``: 24 entries, 18 answerable queries) plus a
-set of off-topic queries that no entry answers, then reports, for a sweep
-of thresholds:
+evals use. A ``Fixture`` is a pool of entries, queries they answer, and
+off-topic queries none of them answers. ``scenarios()`` gives the
+multi-domain set (``domains.py``: five kinds of work, 80 entries), each
+domain alone as one fleet's pool would be, and all of them together, plus
+the golden and age-varied corpora (``golden.py``, ``temporal.py``). For
+each, and a sweep of thresholds, it reports:
 
 * how many answerable queries keep their relevant entry in the vector
   stream, and the search's hit@5;
@@ -33,6 +35,7 @@ from hivemind.ports import Embedder, Store
 from hivemind.retrieval.eval import hit_at_k
 from hivemind.services.governance import WriteService
 from hivemind.services.search import SearchService
+from tests.eval.domains import CROSS_DOMAIN, DOMAINS, Domain
 from tests.eval.golden import golden_corpus, golden_queries
 from tests.eval.temporal import temporal_corpus, temporal_queries
 from tests.fakes import FIXED_NOW, make_clock, make_search_config
@@ -42,7 +45,7 @@ SWEEP = tuple(round(0.05 * i, 2) for i in range(0, 19))  # 0.00 .. 0.90
 # Kept below the lowest relevant similarity (see ``suggest``).
 MARGIN = 0.05
 
-# Queries no entry of either corpus answers. Most share the corpora's
+# Queries no entry of the golden or age-varied corpus answers. Most share the corpora's
 # domain (ops, auth, data, deploys) so they are hard negatives, written
 # the way agents search: a few content words.
 OFF_TOPIC_QUERIES: tuple[str, ...] = (
@@ -61,6 +64,67 @@ OFF_TOPIC_QUERIES: tuple[str, ...] = (
 )
 
 
+Entry = tuple[str, str, tuple[str, ...], str | None]  # kind, summary, tags, body
+
+
+@dataclass(frozen=True, slots=True)
+class Fixture:
+    """A pool to measure on: entries, queries with the indices of the
+    entries that answer them, and queries no entry answers."""
+
+    name: str
+    entries: tuple[Entry, ...]
+    answerable: tuple[tuple[str, tuple[int, ...]], ...]
+    off_topic: tuple[str, ...]
+
+
+def golden_fixture() -> Fixture:
+    """The golden and age-varied corpora with ``OFF_TOPIC_QUERIES``."""
+    entries: list[Entry] = [(k, s, tuple(t), None) for k, s, t in golden_corpus()]
+    entries += [(e.kind, e.summary, e.tags, None) for e in temporal_corpus()]
+    offset = len(golden_corpus())
+    answerable = [(q, tuple(rel)) for q, rel in golden_queries()]
+    answerable += [(q.query, tuple(offset + i for i in q.relevant)) for q in temporal_queries()]
+    return Fixture("golden + age-varied", tuple(entries), tuple(answerable), OFF_TOPIC_QUERIES)
+
+
+def domain_fixture(domain: Domain) -> Fixture:
+    """One domain's pool alone, as one fleet's would be. Off-topic: the
+    domain's unanswered queries, then every other domain's queries (answered
+    elsewhere, not here)."""
+    others = [d for d in DOMAINS if d is not domain]
+    answerable = list(domain.answerable)
+    answerable += [(q, (i,)) for q, name, i in CROSS_DOMAIN if name == domain.name]
+    off_topic = list(domain.unanswered)
+    for other in others:
+        off_topic += [q for q, _ in other.answerable] + list(other.unanswered)
+    off_topic += [q for q, name, _ in CROSS_DOMAIN if name != domain.name]
+    return Fixture(domain.name, domain.entries, tuple(answerable), tuple(off_topic))
+
+
+def combined_fixture() -> Fixture:
+    """Every domain in one pool, as an org-wide reader sees it."""
+    entries: list[Entry] = []
+    answerable: list[tuple[str, tuple[int, ...]]] = []
+    offsets = {}
+    for domain in DOMAINS:
+        offsets[domain.name] = len(entries)
+        answerable += [(q, tuple(len(entries) + i for i in rel)) for q, rel in domain.answerable]
+        entries += domain.entries
+    answerable += [(q, (offsets[name] + i,)) for q, name, i in CROSS_DOMAIN]
+    off_topic = tuple(q for d in DOMAINS for q in d.unanswered)
+    return Fixture("all domains together", tuple(entries), tuple(answerable), off_topic)
+
+
+def scenarios() -> list[Fixture]:
+    """What ``make measure-threshold`` runs."""
+    return [
+        combined_fixture(),
+        *(domain_fixture(d) for d in DOMAINS),
+        golden_fixture(),
+    ]
+
+
 @dataclass(frozen=True, slots=True)
 class Row:
     """One threshold of the sweep."""
@@ -75,6 +139,7 @@ class Row:
 @dataclass(frozen=True, slots=True)
 class Measurement:
     model: str
+    fixture: str
     answerable: int
     off_topic: int
     relevant_similarities: list[float]  # per answerable query, its best relevant entry
@@ -94,36 +159,44 @@ def suggest(relevant_similarities: list[float], margin: float = MARGIN) -> float
     return max(0.0, math.floor((lowest - margin) * 20 + 1e-9) / 20)
 
 
-async def _seed(embedder: Embedder, store: Store) -> dict[str, list[float]]:
-    """Write both corpora; return each entry's id -> stored vector, in seed order."""
+async def _seed(
+    embedder: Embedder, store: Store, entries: tuple[Entry, ...]
+) -> list[tuple[str, list[float]]]:
+    """Write the entries; return (id, stored vector) in fixture order."""
     writer = WriteService(store, embedder)
-    stored = {}
-    corpus = [(kind, summary, list(tags)) for kind, summary, tags in golden_corpus()]
-    corpus += [(e.kind, e.summary, list(e.tags)) for e in temporal_corpus()]
-    for kind, summary, tags in corpus:
-        draft = EntryDraft(kind=Kind(kind), summary=summary, tags=tags, author="eval", agent="eval")
-        stored[(await writer.write(draft)).id] = await embedder.embed_entry(draft)
+    stored = []
+    for kind, summary, tags, body in entries:
+        draft = EntryDraft(
+            kind=Kind(kind),
+            summary=summary,
+            tags=list(tags),
+            body=body,
+            author="eval",
+            agent="eval",
+        )
+        stored.append(((await writer.write(draft)).id, await embedder.embed_entry(draft)))
     return stored
 
 
-def _answerable(ids: list[str]) -> list[tuple[str, set[str]]]:
-    offset = len(golden_corpus())
-    queries = [(q, {ids[i] for i in rel}) for q, rel in golden_queries()]
-    queries += [(q.query, {ids[offset + i] for i in q.relevant}) for q in temporal_queries()]
-    return queries
-
-
 async def measure(
-    embedder: Embedder, sweep: tuple[float, ...] = SWEEP, *, store: Store | None = None
+    embedder: Embedder,
+    fixture: Fixture | None = None,
+    sweep: tuple[float, ...] = SWEEP,
+    *,
+    store: Store | None = None,
 ) -> Measurement:
-    """Run the sweep with ``embedder``; see the module docstring.
+    """Run the sweep on ``fixture`` (the golden one by default) with
+    ``embedder``; see the module docstring.
 
     ``store`` must be empty; a ``MemoryStore`` by default. A scratch
     ``PgStore`` gives Postgres's keyword matching (never a real pool: the
     corpus is written into it)."""
+    fixture = fixture or golden_fixture()
     store = store or MemoryStore(make_clock())
-    stored = await _seed(embedder, store)
-    answerable = _answerable(list(stored))
+    seeded = await _seed(embedder, store, fixture.entries)
+    ids = [eid for eid, _ in seeded]
+    stored = dict(seeded)
+    answerable = [(q, {ids[i] for i in rel}) for q, rel in fixture.answerable]
 
     async def similarities(query: str) -> dict[str, float]:
         vector = await embedder.embed_text(query)
@@ -133,7 +206,7 @@ async def measure(
     for query, relevant in answerable:
         sims = await similarities(query)
         relevant_sims.append(max(sims[eid] for eid in relevant))
-    off_sims = [max((await similarities(query)).values()) for query in OFF_TOPIC_QUERIES]
+    off_sims = [max((await similarities(query)).values()) for query in fixture.off_topic]
 
     rows = []
     base = make_search_config(candidate_top_k=20, default_limit=K)
@@ -145,7 +218,7 @@ async def measure(
             ranked = [h.entry_id for h in await service.search(query, limit=K)]
             hits += hit_at_k(ranked, dict.fromkeys(relevant, 1), K)
         search_empty = 0
-        for query in OFF_TOPIC_QUERIES:
+        for query in fixture.off_topic:
             search_empty += not await service.search(query, limit=K)
         rows.append(
             Row(
@@ -158,8 +231,9 @@ async def measure(
         )
     return Measurement(
         model=embedder.model_name,
+        fixture=fixture.name,
         answerable=len(answerable),
-        off_topic=len(OFF_TOPIC_QUERIES),
+        off_topic=len(fixture.off_topic),
         relevant_similarities=relevant_sims,
         off_topic_similarities=off_sims,
         rows=rows,
@@ -169,6 +243,8 @@ async def measure(
 def report(m: Measurement) -> str:
     """The measurement as Markdown, ready for docs/retrieval-experiments.md."""
     lines = [
+        f"### {m.fixture}",
+        "",
         f"Model: `{m.model}`. {m.answerable} answerable queries, {m.off_topic} off-topic.",
         "",
         "Lowest similarity of an answerable query to its relevant entry: "
@@ -201,7 +277,9 @@ async def _main() -> None:
 
     settings = load_settings()
     try:
-        print(report(await measure(build_embedder(settings))))
+        embedder = build_embedder(settings)
+        for fixture in scenarios():
+            print(report(await measure(embedder, fixture)), end="\n\n")
     except EmbeddingError as exc:
         where = endpoint_label(settings.embedding_endpoint)
         raise SystemExit(f"embedder at {where} unavailable ({exc}); start it (make vllm)") from None

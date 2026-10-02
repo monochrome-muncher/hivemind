@@ -336,45 +336,68 @@ and on its dimension: one model puts related text at 0.8 and unrelated
 text at 0.4, another at 0.6 and 0.1. The hash embedder the other
 experiments use cannot stand in for a real model here.
 
-**Measured: 0.60 for the Qwen3-Embedding family at 1024 dimensions.**
+**Measured: 0.45 for the Qwen3-Embedding family at 1024 dimensions.**
 *(2026-10-02; `tests/eval/threshold.py` on a scratch Postgres pool, so
-the "search empty" column uses Postgres keyword matching. Models run
+the "search empty" figures use Postgres keyword matching. Models run
 through llama.cpp with last-token pooling, truncated to 1024 dimensions
 and re-normalised as a `dimensions` request does: 8B as the Q8_0 GGUF,
 4B and 0.6B as f16. Embedded as the service does, with no query
-instruction.)*
+instruction. Figures weight 8B 70%, 4B 20%, 0.6B 10%.)*
 
-| model | weakest answer | strongest off-topic | suggested |
-|---|---|---|---|
-| Qwen3-Embedding-8B | 0.655 | 0.617 | 0.60 |
-| Qwen3-Embedding-4B | 0.665 | 0.623 | 0.60 |
-| Qwen3-Embedding-0.6B | 0.732 | 0.679 | 0.65 |
+The multi-domain set (`tests/eval/domains.py`) has five kinds of agent
+work: data analysis, software engineering, system administration,
+journalism and social science, and finance analysis. Each has 16 entries
+(most with a body), 12 paraphrased queries its entries answer and 6
+in-domain queries none answers; 6 more queries ask one domain's question
+of another's entry. Each domain is measured alone, as one fleet's pool,
+where every other domain's queries are off-topic, and all together, as an
+org-wide reader sees the pool.
 
-All three separate the answerable from the off-topic queries, with a
-narrow gap: the off-topic queries are mostly from the same domain. The
-aggregate below weights 8B 70%, 4B 20% and 0.6B 10%; per-model
-suggestions weighted the same way give 0.605.
+| pool | weakest answer (8B / 4B / 0.6B) | strongest off-topic (8B / 4B / 0.6B) |
+|---|---|---|
+| all domains together | 0.49 / 0.47 / 0.41 | 0.75 / 0.77 / 0.74 |
+| data analysis | 0.72 / 0.70 / 0.68 | 0.75 / 0.77 / 0.74 |
+| software engineering | 0.62 / 0.60 / 0.60 | 0.64 / 0.61 / 0.65 |
+| system administration | 0.49 / 0.47 / 0.41 | 0.72 / 0.71 / 0.73 |
+| journalism and social science | 0.66 / 0.62 / 0.51 | 0.66 / 0.69 / 0.68 |
+| finance analysis | 0.57 / 0.57 / 0.45 | 0.67 / 0.63 / 0.67 |
+| golden + age-varied | 0.65 / 0.66 / 0.73 | 0.62 / 0.62 / 0.68 |
 
-| threshold | answers kept in vector stream | hit@5 | off-topic: vector stream empty | off-topic: search empty |
-|---|---|---|---|---|
-| 0.45 | 100% | 1.000 | 3% | 3% |
-| 0.50 | 100% | 1.000 | 33% | 33% |
-| 0.55 | 100% | 1.000 | 40% | 37% |
-| **0.60** | **100%** | **1.000** | **72%** | **58%** |
-| 0.65 | 100% | 1.000 | 98% | 73% |
-| 0.70 | 95% | 1.000 | 100% | 75% |
-| 0.80 | 94% | 1.000 | 100% | 75% |
-| 0.90 | 51% | 1.000 | 100% | 75% |
+**No value separates answers from off-topic queries** once queries are
+paraphrased and the pool is varied. The weakest answers are vague
+questions ("what should wake someone up at night" for the paging policy,
+0.49 on 8B). The strongest off-topic queries are near misses that land
+on a related entry ("minimum sample size rule for launching an A/B test"
+on the A/B variance-reduction entry, 0.75), which an agent may well want
+to see. The golden set alone suggested 0.60; on this set 0.60 drops 7% of
+answers overall and 22% in the system administration pool.
 
-At 0.60 every answer stays in the vector stream and seven in twelve
-off-topic searches come back empty. The other off-topic queries that
-pass the vector side are still caught by the keyword stream sharing a
-word ("rotation", "size", "locking" matching "lock"), which no threshold changes.
-hit@5 stays at 1.000 throughout because the keyword stream carries the
-answers the vector stream drops; on queries that share no word with
-their answer it would not. 0.65 empties more but leaves 8B a margin of
-0.005 over its weakest answer. These are 18 synthetic queries: treat
-0.60 as the starting value and tune it with the counters below.
+| threshold | answers kept (all together) | answers kept (worst pool alone) | hit@5 (worst pool) | off-topic search empty (all together) | off-topic search empty (pools alone) |
+|---|---|---|---|---|---|
+| 0.45 | 100% | 99% (sysadmin) | 0.992 | 1% | 15–27% |
+| 0.50 | 98% | 92% (sysadmin) | 0.923 | 5% | 30–54% |
+| 0.55 | 98% | 92% (sysadmin) | 0.923 | 9% | 46–67% |
+| 0.60 | 93% | 78% (sysadmin) | 0.908 | 13% | 50–74% |
+
+In a pool alone, what the threshold empties is mostly the other domains'
+queries, not the near misses inside the domain:
+
+| pool alone | own unanswered queries, vector stream empty at 0.45 / 0.50 / 0.55 | other domains' queries, vector stream empty at 0.45 / 0.50 / 0.55 |
+|---|---|---|
+| data analysis | 0% / 7% / 35% | 23% / 48% / 72% |
+| software engineering | 0% / 37% / 50% | 26% / 57% / 86% |
+| system administration | 0% / 10% / 25% | 23% / 50% / 85% |
+| journalism and social science | 2% / 20% / 67% | 32% / 66% / 84% |
+| finance analysis | 20% / 43% / 85% | 34% / 63% / 90% |
+
+So 0.45 is the starting value: it loses almost no answers and empties a
+quarter to a third of searches for another kind of work. 0.50 empties
+about half of those but loses the vaguest answers (8% in the system
+administration pool). When the pool is the whole organisation's, few
+off-topic searches come back empty at any value that keeps the answers,
+because the keyword stream finds a shared word and the near misses are
+genuinely near. These are 126 synthetic queries over 104 entries: tune
+from there with the counters below.
 
 **How to measure.** Point the `HIVEMIND_EMBEDDING_*` settings at the
 embedder the deployment uses, with the deployment's dimension, and run:
@@ -382,11 +405,11 @@ embedder the deployment uses, with the deployment's dimension, and run:
     make vllm   # or use the production endpoint
     make measure-threshold HIVEMIND_EMBEDDING_DIM=1024
 
-The tool embeds the golden and age-varied corpora (24 entries) the way
-writes do, then runs 18 queries each answered by one of them and 12
-off-topic queries answered by none (mostly in the same domain, so they
-are hard cases). Nothing touches Postgres. For each threshold from 0 to
-0.9 it reports:
+The tool embeds each scenario's entries the way writes do (the
+multi-domain set together and per domain, and the golden and age-varied
+corpora), then runs its answerable and off-topic queries. Nothing touches
+Postgres unless a scratch `PgStore` is passed to `measure`. For each
+scenario and each threshold from 0 to 0.9 it reports:
 
 | column | meaning |
 |---|---|

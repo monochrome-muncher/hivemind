@@ -34,15 +34,16 @@ age-varied sets (`tests/eval/`).
    (related entries on write, ADR 0052) is not affected.
 
 3. **Measured per deployment.** `tests/eval/threshold.py`
-   (`make measure-threshold`) embeds the golden and age-varied corpora with
-   the configured embedder, adds off-topic queries no entry answers, and
-   reports for a sweep of thresholds how many answers stay in the vector
+   (`make measure-threshold`) embeds a multi-domain set (`domains.py`,
+   each domain alone and all together) and the golden and age-varied
+   corpora with the configured embedder, adds off-topic queries no entry
+   answers, and reports for a sweep of thresholds how many answers stay in the vector
    stream, hit@5, and how many off-topic searches come back empty. It
    suggests the highest 0.05 step at least 0.05 below the weakest answer,
    since a missed answer costs an agent more than an unrelated hit.
    `docs/retrieval-experiments.md` describes how to read it. Measured
-   for Qwen3-Embedding 8B, 4B and 0.6B at 1024 dimensions, it suggests
-   0.60; the default stays off.
+   for Qwen3-Embedding 8B, 4B and 0.6B at 1024 dimensions over five
+   domains of agent work, it suggests 0.45; the default stays off.
 
 ## Consequences
 
@@ -54,6 +55,10 @@ age-varied sets (`tests/eval/`).
   keyword stream then carries them only if they share a word with the
   query. Changing the embedding model or its dimension means measuring
   again.
-- The synthetic sets are small (24 entries, 18 answerable and 12
-  off-topic queries); a value measured on them is a starting point, to be
-  checked against the empty-search counter and agents' feedback.
+- No value cleanly separates answers from off-topic queries on varied
+  data: vague questions score as low as near misses score high. The
+  threshold mostly empties searches for another kind of work than the
+  pool holds, so it helps a fleet's own pool more than an org-wide one.
+- The sets are synthetic (104 entries, 84 answerable and 42 off-topic
+  queries); a value measured on them is a starting point, to be checked
+  against the empty-search counter and agents' feedback.
