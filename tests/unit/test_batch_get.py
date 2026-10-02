@@ -8,6 +8,8 @@ from hivemind.api.deps import create_app
 from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
+from hivemind.domain.entry import Entry
+from hivemind.domain.feedback import Feedback, FeedbackCounts
 from hivemind.domain.validation import MAX_GET_IDS
 from hivemind.mcp.app import McpHivemind, hive_feedback, hive_get, hive_write
 from hivemind.memstore import MemoryStore
@@ -129,3 +131,67 @@ async def test_rest_bounds() -> None:
             "/v1/entries/get", json={"entry_ids": [f"i{n}" for n in range(MAX_GET_IDS + 1)]}
         )
     assert (empty.status_code, many.status_code) == (422, 422)
+
+
+class _CountingStore(MemoryStore):
+    """Counts the store reads a batch read makes (ADR 0059)."""
+
+    calls = 0
+
+    async def get_entries(self, entry_ids: list[str]) -> dict[str, Entry]:
+        self.calls += 1
+        return await super().get_entries(entry_ids)
+
+    async def quality_counts(self, entry_ids: list[str]) -> dict[str, FeedbackCounts]:
+        self.calls += 1
+        return await super().quality_counts(entry_ids)
+
+    async def list_feedback_many(
+        self, entry_ids: list[str], limit: int
+    ) -> dict[str, list[Feedback]]:
+        self.calls += 1
+        return await super().list_feedback_many(entry_ids, limit)
+
+    async def entry_links_many(
+        self, entry_ids: list[str], limit: int
+    ) -> dict[str, tuple[list[str], list[str]]]:
+        self.calls += 1
+        return await super().entry_links_many(entry_ids, limit)
+
+
+async def test_a_batch_read_costs_the_same_store_reads_for_one_or_ten_entries() -> None:
+    """ADR 0059: a batch read must not fan out one read per entry, or a
+    single call holds a pod's whole connection pool."""
+    store = _CountingStore(make_clock())
+    target = await _write(store, READER, "the target")
+    ids = [
+        str(
+            (
+                await hive_write(
+                    _surface(store, READER),
+                    kind="fact",
+                    summary=f"fact {i}",
+                    body="b",
+                    see_also=[target],
+                )
+            )["id"]
+        )
+        for i in range(MAX_GET_IDS - 1)
+    ]
+    for eid in ids:
+        await hive_feedback(_surface(store, READER), eid, verdict="helpful", note="ok")
+
+    costs = []
+    for batch in ([ids[0]], [target, *ids]):
+        store.calls = 0
+        result = await hive_get(_surface(store, READER), entry_ids=batch)
+        assert len(result["entries"]) == len(batch)  # type: ignore[arg-type]
+        costs.append(store.calls)
+    assert costs[0] == costs[1]
+
+    # The batched answer matches the single reads, links and feedback included.
+    entries = {e["id"]: e for e in result["entries"]}  # type: ignore[union-attr]
+    for eid in (target, ids[0]):
+        single = await hive_get(_surface(store, READER), eid)
+        for key in ("feedback", "see_also", "linked_from"):
+            assert entries[eid][key] == single[key], (eid, key)

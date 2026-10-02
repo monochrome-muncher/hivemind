@@ -355,6 +355,18 @@ class GovernanceService:
         )
         return FeedbackSummary(helpful, stale, wrong, tuple(recent))
 
+    async def feedback_summaries(self, entry_ids: list[str]) -> dict[str, FeedbackSummary]:
+        """``feedback_summary`` for several entries, two store reads in all
+        however many there are (ADR 0059). Same caveat: no visibility check."""
+        counts, recent = await asyncio.gather(
+            self._store.quality_counts(entry_ids),
+            self._store.list_feedback_many(entry_ids, FEEDBACK_RECENT_LIMIT),
+        )
+        return {
+            eid: FeedbackSummary(*counts.get(eid, (0, 0, 0)), tuple(recent.get(eid, ())))
+            for eid in entry_ids
+        }
+
     async def quality(self, entry_id: str) -> float:
         """An entry's current quality multiplier (SPEC.md §6.4)."""
         helpful, stale, wrong = await self._store.feedback_counts(entry_id)

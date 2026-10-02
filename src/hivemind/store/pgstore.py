@@ -124,6 +124,20 @@ SELECT_LINKS_IN = """
 SELECT from_id FROM entry_links WHERE to_id = $1
  ORDER BY created_at DESC, from_id LIMIT $2
 """
+# The same reads for several entries at once (ADR 0059): one statement
+# each, the incoming side still at most $2 links per entry.
+SELECT_LINKS_OUT_MANY = """
+SELECT from_id, to_id FROM entry_links WHERE from_id = ANY($1::uuid[])
+ ORDER BY from_id, created_at, to_id
+"""
+SELECT_LINKS_IN_MANY = """
+SELECT t.id AS to_id, l.from_id
+  FROM unnest($1::uuid[]) AS t(id)
+ CROSS JOIN LATERAL (
+       SELECT from_id, created_at FROM entry_links WHERE to_id = t.id
+        ORDER BY created_at DESC, from_id LIMIT $2) AS l
+ ORDER BY t.id, l.created_at DESC, l.from_id
+"""
 
 # Pinned entries (ADR 0058). The per-fleet advisory lock serialises
 # pinners of one fleet, so the count check and the insert are atomic.
@@ -259,6 +273,18 @@ FROM feedbacks
 WHERE entry_id = $1
 ORDER BY updated_at DESC, "user", agent
 LIMIT $2
+"""
+
+# The newest $2 rows of each entry in $1 (ADR 0059), in LIST_FEEDBACK order.
+LIST_FEEDBACK_MANY = """
+SELECT entry_id, "user", agent, verdict, note, updated_at FROM (
+    SELECT f.*, row_number() OVER (
+               PARTITION BY entry_id ORDER BY updated_at DESC, "user", agent) AS rn
+      FROM feedbacks f
+     WHERE entry_id = ANY($1::uuid[])
+) AS ranked
+WHERE rn <= $2
+ORDER BY entry_id, updated_at DESC, "user", agent
 """
 
 BATCH_FEEDBACK = """
@@ -544,6 +570,23 @@ class PgStore:
             incoming = await conn.fetch(SELECT_LINKS_IN, entry_id, limit)
         return [str(r["to_id"]) for r in outgoing], [str(r["from_id"]) for r in incoming]
 
+    async def entry_links_many(
+        self, entry_ids: list[str], limit: int
+    ) -> dict[str, tuple[list[str], list[str]]]:
+        canonical = {eid: _canonical_uuid(eid) for eid in entry_ids}
+        ids = list(dict.fromkeys(c for c in canonical.values() if c is not None))
+        links: dict[str, tuple[list[str], list[str]]] = {c: ([], []) for c in ids}
+        if ids:
+            pool = await self._ensure_pool()
+            async with pool.acquire(timeout=self._acquire_timeout) as conn:
+                outgoing = await conn.fetch(SELECT_LINKS_OUT_MANY, ids)
+                incoming = await conn.fetch(SELECT_LINKS_IN_MANY, ids, limit)
+            for r in outgoing:
+                links[str(r["from_id"])][0].append(str(r["to_id"]))
+            for r in incoming:
+                links[str(r["to_id"])][1].append(str(r["from_id"]))
+        return {eid: links[c] if c is not None else ([], []) for eid, c in canonical.items()}
+
     async def pin_entry(
         self, fleet_id: str, entry_id: str, pinned_by: str, limit: int
     ) -> Pin | None:
@@ -809,17 +852,21 @@ class PgStore:
         pool = await self._ensure_pool()
         async with pool.acquire(timeout=self._acquire_timeout) as conn:
             rows = await conn.fetch(LIST_FEEDBACK, entry_id, limit)
-        return [
-            Feedback(
-                entry_id=str(r["entry_id"]),
-                user=r["user"],
-                agent=r["agent"],
-                verdict=Verdict(r["verdict"]),
-                note=r["note"],
-                updated_at=r["updated_at"],
-            )
-            for r in rows
-        ]
+        return [_row_to_feedback(r) for r in rows]
+
+    async def list_feedback_many(
+        self, entry_ids: list[str], limit: int
+    ) -> dict[str, list[Feedback]]:
+        canonical = {eid: _canonical_uuid(eid) for eid in entry_ids}
+        ids = list(dict.fromkeys(c for c in canonical.values() if c is not None))
+        rows_by_id: dict[str, list[Feedback]] = {c: [] for c in ids}
+        if ids:
+            pool = await self._ensure_pool()
+            async with pool.acquire(timeout=self._acquire_timeout) as conn:
+                rows = await conn.fetch(LIST_FEEDBACK_MANY, ids, limit)
+            for r in rows:
+                rows_by_id[str(r["entry_id"])].append(_row_to_feedback(r))
+        return {eid: rows_by_id[c] if c is not None else [] for eid, c in canonical.items()}
 
     # -- fleets (ADR 0011) ------------------------------------------------------
 
@@ -1042,6 +1089,17 @@ def _encode_entities(entities: tuple[ExtractedEntity, ...]) -> list[dict[str, st
     """``entities`` is a jsonb list of {name, kind} (ADR 0016); the
     lower-cased names go separately on ``entity_names``."""
     return [{"name": e.name, "kind": e.kind.value} for e in entities]
+
+
+def _row_to_feedback(row: asyncpg.Record) -> Feedback:
+    return Feedback(
+        entry_id=str(row["entry_id"]),
+        user=row["user"],
+        agent=row["agent"],
+        verdict=Verdict(row["verdict"]),
+        note=row["note"],
+        updated_at=row["updated_at"],
+    )
 
 
 def _row_to_pin(row: asyncpg.Record) -> Pin:

@@ -369,6 +369,12 @@ async def test_list_feedback_newest_first_with_notes(pg) -> None:
     assert rows[0].updated_at == t0 + timedelta(seconds=1)
     assert [r.user for r in await store.list_feedback(entry.id, 1)] == ["c"]
     assert await store.list_feedback("not-a-uuid", 10) == []
+    # ADR 0059: the batched read answers the same, per requested id.
+    many = await store.list_feedback_many([entry.id, other.id, "not-a-uuid"], 2)
+    assert list(many) == [entry.id, other.id, "not-a-uuid"]
+    assert many[entry.id] == (await store.list_feedback(entry.id, 10))[:2]
+    assert [r.user for r in many[other.id]] == ["d"]
+    assert many["not-a-uuid"] == []
 
 
 async def test_flagged_filter_keeps_stale_or_wrong_entries(pg) -> None:
@@ -731,6 +737,14 @@ async def test_entry_links_both_ways_and_unknown_targets_dropped(pg) -> None:
     assert await store.entry_links(target.id, 10) == ([], [second.id, first.id])
     assert await store.entry_links(target.id, 1) == ([], [second.id])
     assert await store.entry_links("not-a-uuid", 10) == ([], [])
+    # ADR 0059: the batched read answers the same, per requested id.
+    many = await store.entry_links_many([target.id, first.id, second.id, "not-a-uuid"], 1)
+    assert many == {
+        target.id: ([], [second.id]),
+        first.id: ([target.id], []),
+        second.id: ([target.id], []),
+        "not-a-uuid": ([], []),
+    }
 
 
 async def test_pins_are_capped_idempotent_and_newest_first(pg) -> None:

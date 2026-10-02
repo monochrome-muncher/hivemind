@@ -75,6 +75,7 @@ from hivemind.embeddings import EmbeddingError
 from hivemind.ports import Credential
 from hivemind.services.access import resolve_write_scope
 from hivemind.services.chain import (
+    entries_links,
     entry_links,
     get_visible_entries,
     get_visible_entry,
@@ -264,15 +265,17 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         visibility = credential.visibility()
         found = await get_visible_entries(app.store, ids, visibility)
         entries = [found[eid] for eid in ids if eid in found]
+        # A fixed number of store reads for the whole batch (ADR 0059).
+        entry_ids = [e.id for e in entries]
         summaries, links = await asyncio.gather(
-            asyncio.gather(*(app.governance_service.feedback_summary(e.id) for e in entries)),
-            asyncio.gather(*(entry_links(app.store, e.id, visibility) for e in entries)),
+            app.governance_service.feedback_summaries(entry_ids),
+            entries_links(app.store, entry_ids, visibility),
         )
         outs = []
-        for entry, summary, entry_link in zip(entries, summaries, links, strict=True):
+        for entry in entries:
             out = EntryOut.from_entry(entry)
-            out.feedback = FeedbackSummaryOut.from_summary(summary)
-            out.set_links(entry_link)
+            out.feedback = FeedbackSummaryOut.from_summary(summaries[entry.id])
+            out.set_links(links[entry.id])
             outs.append(out)
         return EntriesOut(entries=outs, not_found=[eid for eid in ids if eid not in found])
 

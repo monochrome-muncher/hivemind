@@ -91,6 +91,14 @@ class Store(Protocol):
         visibility (the caller filters)."""
         ...
 
+    async def entry_links_many(
+        self, entry_ids: list[str], limit: int
+    ) -> dict[str, tuple[list[str], list[str]]]:
+        """``entry_links`` for several entries in one read (ADR 0059),
+        keyed by every requested id; an id with no links (or naming no
+        entry) maps to ``([], [])``."""
+        ...
+
     async def pin_entry(
         self, fleet_id: str, entry_id: str, pinned_by: str, limit: int
     ) -> Pin | None:
@@ -262,6 +270,13 @@ class Store(Protocol):
         """An entry's feedback rows, newest first (``updated_at`` DESC, then
         reporter), at most ``limit`` of them (ADR 0051). No visibility
         check: the caller has already established the entry is readable."""
+        ...
+
+    async def list_feedback_many(
+        self, entry_ids: list[str], limit: int
+    ) -> dict[str, list[Feedback]]:
+        """``list_feedback`` for several entries in one read (ADR 0059),
+        keyed by every requested id (``[]`` when it has no feedback)."""
         ...
 
     async def health_check(self) -> bool:

@@ -64,7 +64,8 @@ is unused.
 | [0052](0052-writes-report-the-nearest-entries.md) | Writes report the nearest existing entries | Accepted |
 | [0053](0053-feedback-on-several-entries-at-once.md) | Feedback on several entries at once | Accepted |
 | [0054](0054-a-flagged-filter-for-entries-reported-stale-or-wrong.md) | A `flagged` filter for entries reported stale or wrong | Accepted |
-| [0055](0055-read-several-entries-in-one-call.md) | Read several entries in one call | Accepted |
+| [0055](0055-read-several-entries-in-one-call.md) | Read several entries in one call | Amended by 0059 |
 | [0056](0056-count-searches-that-find-nothing.md) | Count searches that find nothing | Accepted |
 | [0057](0057-see-also-links-between-entries.md) | "See also" links between entries | Accepted |
 | [0058](0058-pinned-fleet-briefing.md) | A pinned briefing per fleet | Accepted |
+| [0059](0059-batch-reads-use-a-fixed-number-of-store-reads.md) | Batch reads use a fixed number of store reads | Accepted |
