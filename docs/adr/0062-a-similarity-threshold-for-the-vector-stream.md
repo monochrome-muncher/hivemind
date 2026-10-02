@@ -59,6 +59,6 @@ age-varied sets (`tests/eval/`).
   data: vague questions score as low as near misses score high. The
   threshold mostly empties searches for another kind of work than the
   pool holds, so it helps a fleet's own pool more than an org-wide one.
-- The sets are synthetic (104 entries, 84 answerable and 42 off-topic
+- The sets are synthetic (184 entries, 114 answerable and 42 off-topic
   queries); a value measured on them is a starting point, to be checked
   against the empty-search counter and agents' feedback.

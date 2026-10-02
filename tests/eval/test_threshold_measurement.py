@@ -50,8 +50,8 @@ def test_every_scenario_is_well_formed() -> None:
         assert all(0 <= i < len(fixture.entries) for _, rel in fixture.answerable for i in rel)
     combined = fixtures[0]
     assert (len(combined.entries), len(combined.answerable), len(combined.off_topic)) == (
-        80,
-        66,
+        160,
+        96,
         30,
     )
 
@@ -61,5 +61,5 @@ async def test_a_domain_alone_counts_other_domains_queries_as_off_topic() -> Non
     from tests.eval.threshold import domain_fixture
 
     m = await measure(make_embedder(), domain_fixture(DOMAINS[4]), sweep=(0.0, 0.5))
-    # 12 own queries + 1 cross-domain one; 6 unanswered + 4 domains x 18 + 5 cross.
-    assert (m.answerable, m.off_topic) == (13, 6 + 4 * 18 + 5)
+    # 18 own queries + 1 cross-domain one; 6 unanswered + 4 domains x 24 + 5 cross.
+    assert (m.answerable, m.off_topic) == (19, 6 + 4 * 24 + 5)

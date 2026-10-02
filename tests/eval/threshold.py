@@ -4,7 +4,7 @@ The threshold depends on the embedding model, so it is measured with the
 model a deployment runs, not with the 4-dimension hash embedder the other
 evals use. A ``Fixture`` is a pool of entries, queries they answer, and
 off-topic queries none of them answers. ``scenarios()`` gives the
-multi-domain set (``domains.py``: five kinds of work, 80 entries), each
+multi-domain set (``domains.py``: five kinds of work, 160 entries), each
 domain alone as one fleet's pool would be, and all of them together, plus
 the golden and age-varied corpora (``golden.py``, ``temporal.py``). For
 each, and a sweep of thresholds, it reports:
