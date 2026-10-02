@@ -366,3 +366,15 @@ async def test_endpoint_lists_newest_first_with_filters() -> None:
     assert future.json() == []
     assert bad_action.status_code == 422
     assert bad_limit.status_code == 422
+
+
+async def test_since_out_of_range_after_its_offset_is_a_422() -> None:
+    """``0001-01-01T00:00+14:00`` is year 0 in UTC: asyncpg cannot encode
+    it, so it must be refused as input, not reach the store."""
+    headers = {"X-API-Key": ADMIN_KEY}
+    async with _client(_app()) as client:
+        resp = await client.get(
+            "/v1/admin/audit-log", params={"since": "0001-01-01T00:00:00+14:00"}, headers=headers
+        )
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "invalid_input"
