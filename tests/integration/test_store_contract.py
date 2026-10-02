@@ -176,6 +176,26 @@ async def test_unknown_and_malformed_ids_read_as_absent(adapter: Adapter) -> Non
     assert list(found) == [entry.id]
 
 
+@pytest.mark.parametrize("spelling", ["{%s}", "urn:uuid:%s", "-----%s"])
+async def test_uuid_spellings_postgres_rejects_read_as_absent(
+    adapter: Adapter, spelling: str
+) -> None:
+    """``uuid.UUID`` parses these, asyncpg's codec does not: an id-taking
+    call must answer "no such entry", never raise a ``DataError`` (a 500)."""
+    entry = await write(adapter, "present")
+    odd = spelling % entry.id
+    store = adapter.store
+    assert await store.get_entry(odd) is None
+    assert await store.get_entries([odd]) == {}
+    assert await store.list_predecessors([odd]) == []
+    assert await store.entry_links(odd, 5) == ([], [])
+    assert await store.feedback_counts(odd) == (0, 0, 0)
+    assert await store.list_feedback(odd, 5) == []
+    assert await store.get_fleet(odd) is None
+    with pytest.raises(KeyError):
+        await store.withdraw_entry(odd, None, by_user="alice")
+
+
 # -- supersession (ADR 0034) --------------------------------------------------------
 
 

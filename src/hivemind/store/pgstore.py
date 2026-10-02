@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -396,11 +397,19 @@ def _visibility_clause(visibility: Visibility | None, params: list[Any]) -> str 
     )
 
 
+# What asyncpg's ``uuid`` codec accepts: 32 hex digits, hyphens anywhere,
+# at most 36 characters. ``uuid.UUID`` is laxer (braces, ``urn:uuid:``,
+# any number of hyphens), and asyncpg answers those with a ``DataError``.
+_UUID_TEXT_RE = re.compile(r"[0-9A-Fa-f-]{32,36}")
+
+
 def _is_valid_uuid(value: str) -> bool:
-    """Whether ``value`` parses as a UUID (the ``id`` column is a pg ``uuid``)."""
+    """Whether ``value`` is a UUID spelling the ``uuid`` columns accept."""
+    if not isinstance(value, str) or not _UUID_TEXT_RE.fullmatch(value):
+        return False
     try:
         uuid.UUID(value)
-    except ValueError, TypeError:
+    except ValueError:
         return False
     return True
 
