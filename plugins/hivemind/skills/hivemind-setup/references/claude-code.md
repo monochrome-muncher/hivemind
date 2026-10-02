@@ -141,7 +141,6 @@ naming the server (`hivemind` and the scoped plugin name
 shell or from the `env` block of `~/.claude/settings.json`, so the
 Hivemind tools never load, and it removes `HIVEMIND_API_KEY` and
 `HIVEMIND_MCP_URL` from the session's environment. If the launcher says it
-could not find the URL it denies by name only; whether a `serverName`
-entry matches the scoped plugin name is not confirmed by Claude Code's
-docs, so check `/mcp` in the new session. A key set in the `env` block of
+could not find the URL it denies by name only, which still covers the
+plugin's server (the scoped name matches). A key set in the `env` block of
 `~/.claude/settings.json` stays visible to the session's shell.
