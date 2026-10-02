@@ -263,7 +263,9 @@ class Store(Protocol):
         ...
 
     async def quality_counts(self, entry_ids: list[str]) -> dict[str, FeedbackCounts]:
-        """Batched feedback counts for a set of entries."""
+        """Batched feedback counts for a set of entries: every requested id
+        that is a well-formed UUID is a key, ``(0, 0, 0)`` when it has no
+        feedback or names no entry; malformed ids are left out."""
         ...
 
     async def list_feedback(self, entry_id: str, limit: int) -> list[Feedback]:

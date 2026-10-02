@@ -445,11 +445,9 @@ async def test_feedback_upserts_per_reporter_and_lists_newest_first(adapter: Ada
     assert counts == {entry.id: (0, 1, 1), other.id: (0, 0, 0)}
 
 
-async def test_quality_counts_leave_out_ids_naming_no_entry(
-    adapter: Adapter, request: pytest.FixtureRequest
-) -> None:
-    diverges_on("pg", "PgStore reports (0, 0, 0) for any well-formed id")(request)
-    assert await adapter.store.quality_counts([NO_SUCH_ID]) == {}
+async def test_quality_counts_cover_every_well_formed_id(adapter: Adapter) -> None:
+    counts = await adapter.store.quality_counts([NO_SUCH_ID, "not-a-uuid"])
+    assert counts == {NO_SUCH_ID: (0, 0, 0)}
 
 
 # -- counters (ROADMAP §3.3, ADR 0056) --------------------------------------------------
