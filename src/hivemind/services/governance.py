@@ -387,12 +387,16 @@ class GovernanceService:
     async def pin(self, credential: Credential, entry_id: str) -> Pin:
         """Pin an active fleet entry to its own fleet. A privileged agent of
         that fleet or an admin may; a fleet holds at most
-        ``MAX_PINS_PER_FLEET`` pins. Pinning a pinned entry is a no-op."""
+        ``MAX_PINS_PER_FLEET`` pins. Pinning a pinned entry is a no-op, and
+        so is pinning the version an earlier pin already shows."""
         entry, fleet_id = await self._pinnable(credential, entry_id)
         if entry.state is not EntryState.ACTIVE:
             raise ValueError(
                 f"entry {entry_id} is {entry.state.value}; only active entries can be pinned"
             )
+        shown = await self._pins_shown_as(fleet_id, entry, credential.visibility())
+        if shown:
+            return shown[0]
         pin = await self._store.pin_entry(
             fleet_id,
             entry.id,
@@ -406,9 +410,14 @@ class GovernanceService:
         return pin
 
     async def unpin(self, credential: Credential, entry_id: str) -> bool:
-        """Remove an entry's pin (any state); whether it was pinned."""
+        """Remove an entry's pin (any state); whether it was pinned. The
+        version a pin shows unpins it too, since that is the id readers
+        see once the pinned entry is superseded."""
         entry, fleet_id = await self._pinnable(credential, entry_id)
-        return await self._store.unpin_entry(fleet_id, entry.id)
+        removed = await self._store.unpin_entry(fleet_id, entry.id)
+        for pin in await self._pins_shown_as(fleet_id, entry, credential.visibility()):
+            removed = await self._store.unpin_entry(fleet_id, pin.entry_id) or removed
+        return removed
 
     async def pinned(
         self, credential: Credential, fleet_id: str | None = None
@@ -418,7 +427,7 @@ class GovernanceService:
 
         A pin follows supersession to the current version; a withdrawn
         entry shows as withdrawn until unpinned. Unreadable entries are
-        left out.
+        left out, and a version two pins lead to is shown once (newest pin).
         """
         fleet = fleet_id or credential.home_fleet_id
         if fleet is None:
@@ -430,12 +439,32 @@ class GovernanceService:
         visibility = credential.visibility()
         found = await get_visible_entries(self._store, [p.entry_id for p in pins], visibility)
         result: list[PinnedEntry] = []
+        shown: set[str] = set()
         for pin in pins:
             entry = found.get(pin.entry_id)
             if entry is None:
                 continue
-            result.append(PinnedEntry(pin, await self._current(entry, visibility)))
+            current = await self._current(entry, visibility)
+            if current.id not in shown:
+                shown.add(current.id)
+                result.append(PinnedEntry(pin, current))
         return result
+
+    async def _pins_shown_as(
+        self, fleet_id: str, entry: Entry, visibility: Visibility
+    ) -> list[Pin]:
+        """The fleet's pins of other versions that now show as ``entry``
+        (pins follow supersession), newest first."""
+        pins = [p for p in await self._store.list_pins(fleet_id) if p.entry_id != entry.id]
+        if not pins:
+            return []
+        found = await get_visible_entries(self._store, [p.entry_id for p in pins], visibility)
+        return [
+            pin
+            for pin in pins
+            if (pinned := found.get(pin.entry_id)) is not None
+            and (await self._current(pinned, visibility)).id == entry.id
+        ]
 
     async def _current(self, entry: Entry, visibility: Visibility) -> Entry:
         """The newest version of ``entry`` the reader may see (bounded walk)."""

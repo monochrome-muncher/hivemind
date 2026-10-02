@@ -146,6 +146,38 @@ async def test_a_pin_follows_supersession_and_shows_withdrawal() -> None:
     assert states[gone] == "withdrawn"
 
 
+async def test_the_version_a_pin_shows_unpins_it_and_does_not_pin_twice() -> None:
+    """Readers see the newest version's id once a pinned entry is
+    superseded, so that id must work for unpinning, and pinning it again
+    must not add a second pin that shows the same entry twice."""
+    store = MemoryStore(make_clock())
+    lead = _surface(store, LEAD)
+    old = await _write(store, LEAD, "use runner pool A")
+    await hive_pin(lead, old)
+    new = await _write(store, DEV, "use runner pool B", supersedes=[old])
+
+    again = await hive_pin(lead, new)
+    assert again["entry_id"] == old  # the existing pin, unchanged
+    assert _pinned_ids(await hive_pinned(lead)) == [new]
+
+    assert (await hive_pin(lead, new, unpin=True))["removed"] is True
+    assert (await hive_pinned(lead))["pins"] == []
+    assert (await hive_pin(lead, new, unpin=True))["removed"] is False
+
+
+async def test_two_pins_that_lead_to_one_version_show_it_once() -> None:
+    store = MemoryStore(make_clock())
+    lead = _surface(store, LEAD)
+    a = await _write(store, LEAD, "rule A")
+    b = await _write(store, LEAD, "rule B")
+    await hive_pin(lead, a)
+    await hive_pin(lead, b)
+    merged = await _write(store, LEAD, "rules A and B", supersedes=[a, b])
+    assert _pinned_ids(await hive_pinned(lead)) == [merged]
+    assert (await hive_pin(lead, merged, unpin=True))["removed"] is True
+    assert (await hive_pinned(lead))["pins"] == []
+
+
 async def test_another_fleets_pins_are_empty_to_a_contributor() -> None:
     store = MemoryStore(make_clock())
     entry = await _write(store, LEAD, "fleet-a only")
