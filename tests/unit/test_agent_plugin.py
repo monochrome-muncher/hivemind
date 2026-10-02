@@ -572,6 +572,7 @@ def test_launcher_warns_when_the_hermes_env_file_would_override_it(tmp_path: Pat
     for text in (
         (SETUP_REFS / "hermes.md").read_text(),
         (PLUGIN / "README.md").read_text(),
+        (PLUGIN / "DEVELOPING.md").read_text(),
     ):
         flat = " ".join(text.split())
         assert "HIVEMIND_ENABLED=true` in the Hermes env" not in flat
@@ -1104,8 +1105,11 @@ def test_the_pi_reference_does_not_call_lazy_tools_missing() -> None:
 
 def test_the_launcher_and_readme_admit_incognito_by_restraint() -> None:
     readme = " ".join((PLUGIN / "README.md").read_text().split())
-    assert "incognito **by restraint**" in readme
-    assert "plugin:hivemind:hivemind" in readme
+    developing = " ".join((PLUGIN / "DEVELOPING.md").read_text().split())
+    assert "incognito **by restraint**" in readme.lower()
+    assert "incognito **by restraint**" in developing
+    assert "plugin:hivemind:hivemind" in developing
+    assert "(DEVELOPING.md)" in readme
 
 
 def test_the_pi_launcher_does_not_leak_a_umask_or_die_on_a_stale_xdg_dir(tmp_path: Path) -> None:
