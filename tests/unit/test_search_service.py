@@ -81,18 +81,22 @@ class TestDualStreamFusion:
     async def test_embedded_match_outranks_keyword_only_match(
         self, embedder, search_config
     ) -> None:
-        """An entry that matches the query *semantically* (vector stream)
-        and by keyword beats an entry that only shares keywords via a
-        long unrelated body (SPEC.md §6.2 fusion)."""
+        """An entry that matches the query in both streams beats an entry
+        found by keyword alone (no embedding, e.g. written while the
+        embedder was down), even when the keyword stream ranks the
+        keyword-only entry first (SPEC.md §6.2 fusion)."""
         clock = make_clock()
         store = MemoryStore(clock)
         both = await create(store, "JWT token expiry")
         clock.advance_days(1)
-        await create(
-            store,
-            "JWT token expiry",
-            body="zzz qqq unrelated filler words that dilute the embedding",
+        keyword_only = EntryDraft(
+            kind=Kind.INSIGHT,
+            summary="JWT token expiry",
+            author="alice",
+            agent="agent-1",
+            body="zzz qqq unrelated filler words",
         )
+        await store.create_entry(keyword_only, None)
         service = make_service(store, embedder, search_config)
         hits = await service.search("JWT token expiry")
         assert hits[0].entry_id == both.id

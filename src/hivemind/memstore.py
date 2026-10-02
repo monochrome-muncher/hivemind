@@ -299,7 +299,9 @@ class MemoryStore:
                 if overlap == 0:
                     continue
                 rows.append((float(overlap), entry.created_at, entry.id))
-            rows.sort(key=lambda r: (-r[0], r[1], r[2]))
+            # Ties newest first, as PgStore's ``created_at DESC, id DESC``.
+            rows.sort(key=lambda r: (r[1], r[2]), reverse=True)
+            rows.sort(key=lambda r: -r[0])
             return [eid for _, _, eid in rows[:limit]]
 
     async def search_vector(
