@@ -440,7 +440,7 @@ class MemoryStore:
 
     async def list_agents(self) -> list[Agent]:
         with self._lock:
-            return list(self._agents.values())
+            return sorted(self._agents.values(), key=lambda a: a.name)
 
     async def activate_agent(
         self, name: str, *, trust_level: TrustLevel, home_fleet_id: str
