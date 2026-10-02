@@ -334,8 +334,47 @@ thresholded.
 **Why it is measured per deployment.** Similarities depend on the model
 and on its dimension: one model puts related text at 0.8 and unrelated
 text at 0.4, another at 0.6 and 0.1. The hash embedder the other
-experiments use cannot stand in for a real model here, and no value has
-been measured with the default model (`Qwen/Qwen3-Embedding-0.6B`) yet.
+experiments use cannot stand in for a real model here.
+
+**Measured: 0.60 for the Qwen3-Embedding family at 1024 dimensions.**
+*(2026-10-02; `tests/eval/threshold.py` on a scratch Postgres pool, so
+the "search empty" column uses Postgres keyword matching. Models run
+through llama.cpp with last-token pooling, truncated to 1024 dimensions
+and re-normalised as a `dimensions` request does: 8B as the Q8_0 GGUF,
+4B and 0.6B as f16. Embedded as the service does, with no query
+instruction.)*
+
+| model | weakest answer | strongest off-topic | suggested |
+|---|---|---|---|
+| Qwen3-Embedding-8B | 0.655 | 0.617 | 0.60 |
+| Qwen3-Embedding-4B | 0.665 | 0.623 | 0.60 |
+| Qwen3-Embedding-0.6B | 0.732 | 0.679 | 0.65 |
+
+All three separate the answerable from the off-topic queries, with a
+narrow gap: the off-topic queries are mostly from the same domain. The
+aggregate below weights 8B 70%, 4B 20% and 0.6B 10%; per-model
+suggestions weighted the same way give 0.605.
+
+| threshold | answers kept in vector stream | hit@5 | off-topic: vector stream empty | off-topic: search empty |
+|---|---|---|---|---|
+| 0.45 | 100% | 1.000 | 3% | 3% |
+| 0.50 | 100% | 1.000 | 33% | 33% |
+| 0.55 | 100% | 1.000 | 40% | 37% |
+| **0.60** | **100%** | **1.000** | **72%** | **58%** |
+| 0.65 | 100% | 1.000 | 98% | 73% |
+| 0.70 | 95% | 1.000 | 100% | 75% |
+| 0.80 | 94% | 1.000 | 100% | 75% |
+| 0.90 | 51% | 1.000 | 100% | 75% |
+
+At 0.60 every answer stays in the vector stream and seven in twelve
+off-topic searches come back empty. The other off-topic queries that
+pass the vector side are still caught by the keyword stream sharing a
+word ("rotation", "size", "locking" matching "lock"), which no threshold changes.
+hit@5 stays at 1.000 throughout because the keyword stream carries the
+answers the vector stream drops; on queries that share no word with
+their answer it would not. 0.65 empties more but leaves 8B a margin of
+0.005 over its weakest answer. These are 18 synthetic queries: treat
+0.60 as the starting value and tune it with the counters below.
 
 **How to measure.** Point the `HIVEMIND_EMBEDDING_*` settings at the
 embedder the deployment uses, with the deployment's dimension, and run:

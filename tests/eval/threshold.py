@@ -10,9 +10,10 @@ of thresholds:
 * how many answerable queries keep their relevant entry in the vector
   stream, and the search's hit@5;
 * how many off-topic queries get an empty vector stream, and an empty
-  search (the keyword stream still runs; ``MemoryStore`` matches any
-  shared word, stop words included, so Postgres comes back empty at least
-  as often).
+  search (the keyword stream still runs). The default ``MemoryStore``
+  matches any shared word, stop words included, so Postgres comes back
+  empty at least as often; ``measure(..., store=PgStore(...))`` on a
+  scratch pool gives Postgres's own keyword matching.
 
 Run it against the deployment's embedder (the ``HIVEMIND_EMBEDDING_*``
 settings, e.g. ``make vllm`` locally): ``make measure-threshold``.
@@ -28,7 +29,7 @@ from dataclasses import dataclass, replace
 
 from hivemind.domain.entry import EntryDraft, Kind
 from hivemind.memstore import MemoryStore, cosine_similarity
-from hivemind.ports import Embedder
+from hivemind.ports import Embedder, Store
 from hivemind.retrieval.eval import hit_at_k
 from hivemind.services.governance import WriteService
 from hivemind.services.search import SearchService
@@ -68,7 +69,7 @@ class Row:
     answers_kept: int  # answerable queries whose relevant entry stays in the vector stream
     hit_at_k: float  # mean hit@K of the answerable queries, through SearchService
     vector_empty: int  # off-topic queries with an empty vector stream
-    search_empty: int  # off-topic queries with an empty search (MemoryStore keywords)
+    search_empty: int  # off-topic queries with an empty search
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,16 +94,16 @@ def suggest(relevant_similarities: list[float], margin: float = MARGIN) -> float
     return max(0.0, math.floor((lowest - margin) * 20 + 1e-9) / 20)
 
 
-async def _seed(embedder: Embedder) -> tuple[MemoryStore, list[str]]:
-    store = MemoryStore(make_clock())
+async def _seed(embedder: Embedder, store: Store) -> dict[str, list[float]]:
+    """Write both corpora; return each entry's id -> stored vector, in seed order."""
     writer = WriteService(store, embedder)
-    ids = []
+    stored = {}
     corpus = [(kind, summary, list(tags)) for kind, summary, tags in golden_corpus()]
     corpus += [(e.kind, e.summary, list(e.tags)) for e in temporal_corpus()]
     for kind, summary, tags in corpus:
         draft = EntryDraft(kind=Kind(kind), summary=summary, tags=tags, author="eval", agent="eval")
-        ids.append((await writer.write(draft)).id)
-    return store, ids
+        stored[(await writer.write(draft)).id] = await embedder.embed_entry(draft)
+    return stored
 
 
 def _answerable(ids: list[str]) -> list[tuple[str, set[str]]]:
@@ -112,15 +113,17 @@ def _answerable(ids: list[str]) -> list[tuple[str, set[str]]]:
     return queries
 
 
-async def measure(embedder: Embedder, sweep: tuple[float, ...] = SWEEP) -> Measurement:
-    """Run the sweep with ``embedder``; see the module docstring."""
-    store, ids = await _seed(embedder)
-    stored = {}
-    for eid in ids:
-        entry = await store.get_entry(eid)
-        assert entry is not None and entry.embedding is not None
-        stored[eid] = list(entry.embedding)
-    answerable = _answerable(ids)
+async def measure(
+    embedder: Embedder, sweep: tuple[float, ...] = SWEEP, *, store: Store | None = None
+) -> Measurement:
+    """Run the sweep with ``embedder``; see the module docstring.
+
+    ``store`` must be empty; a ``MemoryStore`` by default. A scratch
+    ``PgStore`` gives Postgres's keyword matching (never a real pool: the
+    corpus is written into it)."""
+    store = store or MemoryStore(make_clock())
+    stored = await _seed(embedder, store)
+    answerable = _answerable(list(stored))
 
     async def similarities(query: str) -> dict[str, float]:
         vector = await embedder.embed_text(query)

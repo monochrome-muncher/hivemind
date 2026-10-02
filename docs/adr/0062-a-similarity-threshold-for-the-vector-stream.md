@@ -40,7 +40,9 @@ age-varied sets (`tests/eval/`).
    stream, hit@5, and how many off-topic searches come back empty. It
    suggests the highest 0.05 step at least 0.05 below the weakest answer,
    since a missed answer costs an agent more than an unrelated hit.
-   `docs/retrieval-experiments.md` describes how to read it.
+   `docs/retrieval-experiments.md` describes how to read it. Measured
+   for Qwen3-Embedding 8B, 4B and 0.6B at 1024 dimensions, it suggests
+   0.60; the default stays off.
 
 ## Consequences
 
