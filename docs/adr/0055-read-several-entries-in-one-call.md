@@ -1,5 +1,9 @@
 # Read several entries in one call
 
+> **Status: §5 is amended by [ADR 0059](0059-batch-reads-use-a-fixed-number-of-store-reads.md):**
+> the feedback and links of a batch are read in a fixed number of store
+> reads, not one per entry.
+
 ## Context
 
 Retrieval is two-stage (SPEC §6.1): search returns compact hits, and the

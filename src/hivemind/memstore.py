@@ -154,6 +154,11 @@ class MemoryStore:
             incoming = [frm for (frm, to) in reversed(self._links) if to == entry_id]
         return outgoing, incoming[:limit]
 
+    async def entry_links_many(
+        self, entry_ids: list[str], limit: int
+    ) -> dict[str, tuple[list[str], list[str]]]:
+        return {eid: await self.entry_links(eid, limit) for eid in entry_ids}
+
     async def withdraw_entry(self, entry_id: str, reason: str | None, by_user: str) -> Entry:
         with self._lock:
             entry = self._entries.get(entry_id)
@@ -373,6 +378,11 @@ class MemoryStore:
         rows.sort(key=lambda fb: (fb.user, fb.agent))
         rows.sort(key=lambda fb: fb.updated_at or _EPOCH, reverse=True)
         return rows[:limit]
+
+    async def list_feedback_many(
+        self, entry_ids: list[str], limit: int
+    ) -> dict[str, list[Feedback]]:
+        return {eid: await self.list_feedback(eid, limit) for eid in entry_ids}
 
     async def health_check(self) -> bool:
         """In-memory pool: always healthy (ADR 0019)."""

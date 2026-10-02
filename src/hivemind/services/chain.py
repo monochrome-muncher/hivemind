@@ -85,6 +85,27 @@ async def entry_links(store: Store, entry_id: str, visibility: Visibility) -> En
     )
 
 
+async def entries_links(
+    store: Store, entry_ids: list[str], visibility: Visibility
+) -> dict[str, EntryLinks]:
+    """``entry_links`` for several entries, two store reads in all however
+    many there are (ADR 0059), keyed by ``entry_ids``."""
+    if not entry_ids:
+        return {}
+    raw = await store.entry_links_many(entry_ids, MAX_LINKED_FROM)
+    linked = list(dict.fromkeys(i for out, inc in raw.values() for i in out + inc))
+    found = await get_visible_entries(store, linked, visibility) if linked else {}
+    return {
+        eid: EntryLinks(
+            see_also=tuple(found[i] for i in outgoing if i in found),
+            linked_from=tuple(
+                found[i] for i in incoming if i in found and found[i].state is EntryState.ACTIVE
+            ),
+        )
+        for eid, (outgoing, incoming) in raw.items()
+    }
+
+
 async def supersession_chain(
     store: Store,
     entry: Entry,

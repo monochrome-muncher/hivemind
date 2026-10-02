@@ -33,6 +33,7 @@ from hivemind.ports import Credential, Store
 from hivemind.services.access import AccessService, resolve_write_scope
 from hivemind.services.chain import (
     EntryLinks,
+    entries_links,
     entry_links,
     get_visible_entries,
     get_visible_entry,
@@ -523,14 +524,20 @@ async def _hive_get_many(app: McpHivemind, entry_ids: list[str]) -> dict[str, ob
     found = await get_visible_entries(app.store, ids, app.credential.visibility())
     entries = [found[eid] for eid in ids if eid in found]
     visibility = app.credential.visibility()
+    # A fixed number of store reads for the whole batch (ADR 0059).
+    entry_ids = [e.id for e in entries]
     summaries, links = await asyncio.gather(
-        asyncio.gather(*(app.governance_service.feedback_summary(e.id) for e in entries)),
-        asyncio.gather(*(entry_links(app.store, e.id, visibility) for e in entries)),
+        app.governance_service.feedback_summaries(entry_ids),
+        entries_links(app.store, entry_ids, visibility),
     )
     return {
         "entries": [
-            {**_entry_dict(e), "feedback": _feedback_dict(s), **_links_dict(lk)}
-            for e, s, lk in zip(entries, summaries, links, strict=True)
+            {
+                **_entry_dict(e),
+                "feedback": _feedback_dict(summaries[e.id]),
+                **_links_dict(links[e.id]),
+            }
+            for e in entries
         ],
         "not_found": [eid for eid in ids if eid not in found],
     }
