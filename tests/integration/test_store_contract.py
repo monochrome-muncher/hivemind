@@ -332,10 +332,7 @@ async def test_similar_entries_exclude_the_entry_and_inactive_ones(adapter: Adap
     assert -1.0 <= pairs[0][1] <= 1.0
 
 
-async def test_keyword_ties_break_newest_first(
-    adapter: Adapter, request: pytest.FixtureRequest
-) -> None:
-    diverges_on("memory", "MemoryStore breaks keyword ties oldest first")(request)
+async def test_keyword_ties_break_newest_first(adapter: Adapter) -> None:
     first = await write(adapter, "shared word alpha")
     second = await write(adapter, "shared word alpha")
     assert await adapter.store.search_keyword("alpha", EntryFilters(), 10) == [
