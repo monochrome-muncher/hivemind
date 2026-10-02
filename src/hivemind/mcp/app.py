@@ -256,11 +256,6 @@ def _parse_sources(raw: list[dict[str, str]] | None) -> tuple[Source, ...]:
     return tuple(parsed)
 
 
-def _check_pagination(limit: int | None, offset: int | None) -> None:
-    """Pagination bounds (SPEC §5.3), the same rule as REST (ADR 0040)."""
-    check_pagination(limit, offset)
-
-
 def _build_filters(
     *,
     kind: str | None,
@@ -293,11 +288,6 @@ def _build_filters(
     )
     filters.validate()  # ADR 0040: caller input, unlike service-built filters
     return filters
-
-
-async def _supersession_chain(app: McpHivemind, entry: Entry) -> tuple[list[Entry], list[Entry]]:
-    """``(successors, superseded)`` via the service REST also uses."""
-    return await supersession_chain(app.store, entry, visibility=app.credential.visibility())
 
 
 # --------------------------------------------------------------------------- #
@@ -444,7 +434,7 @@ async def hive_search(
     returns an empty page.
     """
     try:
-        _check_pagination(limit, offset)
+        check_pagination(limit, offset)  # SPEC §5.3, the same rule as REST (ADR 0040)
         filters = _build_filters(
             kind=kind,
             tags=tags,
@@ -523,7 +513,9 @@ async def hive_get(
     result["feedback"] = _feedback_dict(summary)
     result.update(_links_dict(links))
     if include_history:
-        successors, superseded = await _supersession_chain(app, entry)
+        successors, superseded = await supersession_chain(
+            app.store, entry, visibility=app.credential.visibility()
+        )
         result["successors"] = [_entry_dict(s) for s in successors]
         result["superseded"] = [_entry_dict(s) for s in superseded]
     return result
@@ -586,7 +578,7 @@ async def hive_list(
     are ``invalid_input`` (matching REST's 422).
     """
     try:
-        _check_pagination(limit, offset)
+        check_pagination(limit, offset)  # SPEC §5.3, the same rule as REST (ADR 0040)
         filters = _build_filters(
             kind=kind,
             tags=tags,
