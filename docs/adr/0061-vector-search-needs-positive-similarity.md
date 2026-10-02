@@ -1,5 +1,8 @@
 # Vector search needs a positive similarity
 
+> **Status: amended by [ADR 0062](0062-a-similarity-threshold-for-the-vector-stream.md):**
+> an operator can raise the floor of 0 with `HIVEMIND_VECTOR_MIN_SIMILARITY`.
+
 ## Context
 
 The two `Store` adapters disagreed on the vector stream. `MemoryStore`, which

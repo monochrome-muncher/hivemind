@@ -241,6 +241,10 @@ _Avoid_: fuzzy search (that is edit-distance matching), lossy search, inexact se
 The lower bound on the SPEC §6.4 recency factor (`max(floor, 0.5 ** (age/half_life))`), which caps that factor's range at `1/floor` instead of leaving it unbounded. A `SearchConfig` value in `(0, 1]`, default 0.8 (ADR 0022); `None` means no floor.
 _Avoid_: decay cutoff (nothing is excluded), minimum score (it bounds one factor, not the final score), recency cap (it is a lower bound, not an upper one)
 
+**Similarity threshold**:
+The cosine similarity an entry must exceed to be in the vector stream (`vector_min_similarity`, ADR 0062). Off by default; when off, the floor is 0 (ADR 0061). Model-specific. Does not apply to the keyword stream.
+_Avoid_: relevance threshold, minimum score (the final score is not thresholded), recency floor (that bounds the recency factor)
+
 ### Entities (ADR 0016)
 
 **Extracted entity**:

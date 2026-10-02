@@ -101,6 +101,10 @@ test: ## Run the full test suite (unit + integration; integration needs `make pg
 test-unit: ## Run unit tests only (no Postgres needed)
 	uv run pytest tests/unit
 
+.PHONY: measure-threshold
+measure-threshold: ## Measure a search similarity threshold with the configured embedder (ADR 0062; e.g. after `make vllm`; set HIVEMIND_EMBEDDING_DIM to the deployment's)
+	uv run python -m tests.eval.threshold
+
 .PHONY: check
 check: ## Type-check + lint (mypy strict + ruff)
 	uv run mypy

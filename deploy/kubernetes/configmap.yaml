@@ -57,6 +57,9 @@ data:
   # decay, 1.0 *is* off, below 0.381 it does nothing. "" or "none" = the
   # unbounded pre-ADR-0022 behaviour (ADR 0023).
   HIVEMIND_RECENCY_FLOOR: "0.8"
+  # Search similarity threshold (ADR 0062), off when unset. Model-specific:
+  # measure with `make measure-threshold` before setting it.
+  # HIVEMIND_VECTOR_MIN_SIMILARITY: ""
   HIVEMIND_QUALITY_HELPFUL_WEIGHT: "0.05"
   HIVEMIND_QUALITY_STALE_WEIGHT: "0.10"
   HIVEMIND_QUALITY_WRONG_WEIGHT: "0.25"

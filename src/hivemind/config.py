@@ -47,6 +47,10 @@ class SearchConfig:
     # range (ADR 0022, SPEC §6.4). A band, not a slider: 0.9 scores worse
     # than off, 1.0 is off. Do not tune it up. ``None`` = no floor.
     recency_floor: float | None = 0.8
+    # The vector stream keeps only entries whose cosine similarity to the
+    # query is above this (ADR 0062). Model-specific, so off by default:
+    # ``None`` keeps ADR 0061's floor of 0. In [0, 1).
+    vector_min_similarity: float | None = None
     quality_helpful_weight: float = 0.05
     quality_stale_weight: float = 0.10
     quality_wrong_weight: float = 0.25
@@ -84,6 +88,10 @@ class SearchConfig:
             raise ValueError(f"half_life_days must be finite and > 0, got {self.half_life_days}")
         if self.recency_floor is not None and not 0.0 < self.recency_floor <= 1.0:
             raise ValueError(f"recency_floor must be in (0, 1] or None, got {self.recency_floor}")
+        threshold = self.vector_min_similarity
+        if threshold is not None and not (math.isfinite(threshold) and 0.0 <= threshold < 1.0):
+            # 1 or more would empty every vector list.
+            raise ValueError(f"vector_min_similarity must be in [0, 1) or None, got {threshold}")
 
     def quality_kwargs(self) -> dict[str, float]:
         """Keyword args for ``retrieval.scoring.feedback_quality``."""
@@ -199,6 +207,9 @@ class Settings(BaseSettings):
     # See SearchConfig.recency_floor (ADR 0022). In (0, 1]; empty or "none"
     # (case-insensitive) means no floor (ADR 0023).
     recency_floor: float | None = 0.8
+    # See SearchConfig.vector_min_similarity (ADR 0062). Unset, empty or
+    # "none" (case-insensitive) means off.
+    vector_min_similarity: float | None = None
     quality_helpful_weight: float = 0.05
     quality_stale_weight: float = 0.10
     quality_wrong_weight: float = 0.25
@@ -267,13 +278,14 @@ class Settings(BaseSettings):
             raise ValueError("extractor_model must be set when extractor_endpoint is set")
         return self
 
-    @field_validator("recency_floor", mode="before")
+    @field_validator("recency_floor", "vector_min_similarity", mode="before")
     @classmethod
     def _parse_recency_floor(cls, value: object) -> object:
-        """Map empty / "none" (case-insensitive) to ``None``, no floor (ADR 0023).
+        """Map empty / "none" (case-insensitive) to ``None``: no floor (ADR
+        0023), no similarity threshold (ADR 0062).
 
-        Anything else is left to pydantic's float parsing and
-        ``SearchConfig.__post_init__``'s (0, 1] check.
+        Anything else is left to pydantic's float parsing and the range
+        checks in ``SearchConfig.__post_init__``.
         """
         if isinstance(value, str) and value.strip().lower() in ("", "none"):
             return None
@@ -299,6 +311,7 @@ class Settings(BaseSettings):
             default_limit=self.default_limit,
             half_life_days=self.half_life_days,
             recency_floor=self.recency_floor,
+            vector_min_similarity=self.vector_min_similarity,
             quality_helpful_weight=self.quality_helpful_weight,
             quality_stale_weight=self.quality_stale_weight,
             quality_wrong_weight=self.quality_wrong_weight,
