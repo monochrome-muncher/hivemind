@@ -63,7 +63,7 @@ from hivemind.api.schemas import (
 )
 from hivemind.domain.access import Agent, InvalidAgentStatus, TrustLevel
 from hivemind.domain.audit import AuditAction, AuditFilters
-from hivemind.domain.entry import EntryDraft, EntryFilters, ImportanceSource, Kind, Source
+from hivemind.domain.entry import EntryFilters, Kind, Source
 from hivemind.domain.validation import (
     MAX_IDENTITY_CHARS,
     MAX_LIMIT,
@@ -81,6 +81,7 @@ from hivemind.services.chain import (
     get_visible_entry,
     supersession_chain,
 )
+from hivemind.services.drafts import entry_draft
 from hivemind.services.governance import PermissionDenied, SupersedeDenied
 
 require = Annotated[Credential, Depends(require_credential)]
@@ -176,32 +177,22 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         try:
             # Scope and author come from the credential (ADRs 0011-0012);
             # an out-of-permission scope is a 403.
-            author = credential.agent_name or credential.user_id
             resolution = resolve_write_scope(credential, payload.scope)
-            # Importance provenance (ROADMAP §4.5); the range is checked below.
-            if payload.importance is None:
-                importance = 3
-                importance_source = ImportanceSource.DEFAULT
-            else:
-                importance = payload.importance
-                importance_source = ImportanceSource.CALLER
             # Draft validation (SPEC.md §4.1): a malformed draft is a 422.
-            draft = EntryDraft(
+            draft = entry_draft(
+                credential,
+                resolution,
+                agent=agent,
                 kind=payload.kind,
                 summary=payload.summary,
-                author=author,
-                agent=agent,
                 body=payload.body,
                 payload=payload.payload,
                 sources=tuple(Source(type=s.type, ref=s.ref) for s in payload.sources),
-                tags=tuple(payload.tags),
+                tags=payload.tags,
                 occurred_at=payload.occurred_at,
-                importance=importance,
-                importance_source=importance_source,
-                scope=resolution.scope,
-                fleet_id=resolution.fleet_id,
-                supersedes=tuple(payload.supersedes),
-                see_also=tuple(payload.see_also),
+                importance=payload.importance,
+                supersedes=payload.supersedes,
+                see_also=payload.see_also,
             )
             written = await app.write_service.write_and_relate(
                 draft, writer=credential.visibility()
