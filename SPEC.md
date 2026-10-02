@@ -113,7 +113,7 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | `POST /v1/search` | Hybrid search (§6) with filters |
 | `POST /v1/entries/{id}/withdraw` | Withdraw own entry (or any, with admin credential) |
 | `POST /v1/entries/{id}/feedback` | Report `helpful`/`stale`/`wrong` (+note) |
-| `PUT /v1/entries/{id}/pin` / `DELETE /v1/entries/{id}/pin` | Pin an active fleet entry to its fleet's briefing, or unpin it: a privileged agent of that fleet or the admin key; at most 10 pins per fleet (ADR 0058) |
+| `PUT /v1/entries/{id}/pin` / `DELETE /v1/entries/{id}/pin` | Pin an active fleet entry to its fleet's briefing, or unpin it: a privileged agent of that fleet or the admin key; at most 10 pins per fleet; once the pinned entry is superseded, the version the pin shows names the same pin (ADR 0058) |
 | `GET /v1/pins` | A fleet's pinned entries, newest pin first, each as its newest readable version (`id`, `pinned_id`); the caller's home fleet unless `?fleet_id=` (ADR 0058) |
 | `POST /v1/feedback` | One verdict (+note) on up to 16 entries at once, `{entry_ids, verdict, note?}`; all must be readable or nothing is recorded (ADR 0053) |
 | `GET /v1/health` | Static health answer (no database check) |
