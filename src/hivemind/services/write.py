@@ -27,6 +27,11 @@ _SUPERSEDES_LOOKUP_CHUNK = 50
 RELATED_ON_WRITE_LIMIT = 3
 
 
+def _id_key(entry_id: str) -> str:
+    """An entry id with case and hyphens folded away (uuid spellings)."""
+    return entry_id.replace("-", "").lower()
+
+
 @dataclass(frozen=True, slots=True)
 class RelatedEntry:
     """An existing entry near a new one, with their cosine similarity."""
@@ -172,9 +177,11 @@ class WriteService:
         # Batched lookups (SP-13), chunked to bound memory.
         for i in range(0, len(target_ids), _SUPERSEDES_LOOKUP_CHUNK):
             chunk = target_ids[i : i + _SUPERSEDES_LOOKUP_CHUNK]
-            targets = await self._store.get_entries(chunk)
+            # Postgres answers with canonical ids (lower case, hyphens):
+            # match a target however the caller spelled it.
+            targets = {_id_key(e.id): e for e in (await self._store.get_entries(chunk)).values()}
             for target_id in chunk:
-                target = targets.get(target_id)
+                target = targets.get(_id_key(target_id))
                 if target is None or not may_supersede(
                     target, new_scope=draft.scope, new_fleet_id=draft.fleet_id, writer=writer
                 ):
