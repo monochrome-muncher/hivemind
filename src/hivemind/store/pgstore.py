@@ -772,13 +772,17 @@ class PgStore:
 
         Approximate: served by the HNSW index (ADR 0025), under
         ``VECTOR_SEARCH_SETTINGS`` applied in the same transaction.
+        Entries with no positive similarity (distance >= 1) are left out
+        (ADR 0061). They sort last, so dropping them from the top
+        ``limit`` rows equals dropping them first, and the index scan is
+        the same as without the cut-off.
         """
         clauses, params = _filter_conditions(filters, visibility)
         clauses.append("embedding IS NOT NULL")
         vec_idx = len(params) + 1
         where = " AND ".join(clauses) if clauses else "TRUE"
         sql = (
-            "SELECT id FROM entries WHERE "
+            f"SELECT id, embedding <=> ${vec_idx} AS distance FROM entries WHERE "
             + where
             + f" ORDER BY embedding <=> ${vec_idx}"
             + f" LIMIT ${vec_idx + 1}"
@@ -786,7 +790,7 @@ class PgStore:
         async with self._transaction() as conn:
             await conn.execute(VECTOR_SEARCH_SETTINGS)
             rows = await conn.fetch(sql, *params, embedding, limit)
-        return [str(r["id"]) for r in rows]
+        return [str(r["id"]) for r in rows if r["distance"] < 1.0]
 
     async def similar_entries(
         self,
