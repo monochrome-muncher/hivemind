@@ -174,8 +174,9 @@ class Store(Protocol):
         *,
         visibility: Visibility | None = None,
     ) -> list[str]:
-        """Ranked entry IDs by embedding similarity (descending);
-        ``visibility`` as in ``list_entries``."""
+        """Ranked entry IDs by embedding similarity (descending), leaving
+        out entries with cosine similarity <= 0 (ADR 0061); ``visibility``
+        as in ``list_entries``."""
         ...
 
     async def similar_entries(

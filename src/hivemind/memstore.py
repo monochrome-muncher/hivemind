@@ -322,7 +322,7 @@ class MemoryStore:
                 if entry.embedding is None:
                     continue
                 sim = cosine_similarity(vector, list(entry.embedding))
-                if sim <= 0.0:
+                if sim <= 0.0:  # no positive similarity (ADR 0061)
                     continue
                 rows.append((sim, entry.created_at, entry.id))
             rows.sort(key=lambda r: (-r[0], r[1], r[2]))

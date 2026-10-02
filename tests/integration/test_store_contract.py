@@ -341,15 +341,18 @@ async def test_keyword_ties_break_newest_first(adapter: Adapter) -> None:
     ]
 
 
-async def test_vector_search_keeps_dissimilar_entries(
-    adapter: Adapter, request: pytest.FixtureRequest
+async def test_vector_search_leaves_out_entries_with_no_positive_similarity(
+    adapter: Adapter,
 ) -> None:
-    diverges_on("memory", "MemoryStore drops entries with cosine similarity <= 0")(request)
+    near = await adapter.store.create_entry(draft("near"), adapter.vec(5), "test-model")
     opposite = [0.0] * adapter.dim
     opposite[5] = -1.0
-    entry = await adapter.store.create_entry(draft("opposite"), opposite, "test-model")
+    await adapter.store.create_entry(draft("opposite"), opposite, "test-model")
+    orthogonal = [0.0] * adapter.dim
+    orthogonal[6] = 1.0
+    await adapter.store.create_entry(draft("orthogonal"), orthogonal, "test-model")
     assert await adapter.store.search_vector(adapter.vec(5, base=0.0), EntryFilters(), 10) == [
-        entry.id
+        near.id
     ]
 
 
