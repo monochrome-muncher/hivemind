@@ -767,13 +767,14 @@ class PgStore:
         limit: int,
         *,
         visibility: Visibility | None = None,
+        min_similarity: float = 0.0,
     ) -> list[str]:
         """Ranked entry IDs by cosine distance (SPEC.md §6.2 vector stream).
 
         Approximate: served by the HNSW index (ADR 0025), under
         ``VECTOR_SEARCH_SETTINGS`` applied in the same transaction.
-        Entries with no positive similarity (distance >= 1) are left out
-        (ADR 0061). They sort last, so dropping them from the top
+        Entries with similarity <= ``min_similarity`` are left out (ADRs
+        0061, 0062). They sort last, so dropping them from the top
         ``limit`` rows equals dropping them first, and the index scan is
         the same as without the cut-off.
         """
@@ -790,7 +791,7 @@ class PgStore:
         async with self._transaction() as conn:
             await conn.execute(VECTOR_SEARCH_SETTINGS)
             rows = await conn.fetch(sql, *params, embedding, limit)
-        return [str(r["id"]) for r in rows if r["distance"] < 1.0]
+        return [str(r["id"]) for r in rows if 1.0 - r["distance"] > min_similarity]
 
     async def similar_entries(
         self,

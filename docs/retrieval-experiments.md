@@ -321,3 +321,52 @@ anything: the floor is on at 0.8 and the real corpus is what should
 idea. Note that (b) is now ruled out by (a) having landed — its
 trigger firing means reconsidering the floor itself, under a new ADR,
 not adding an additive term on top of it.
+
+## Similarity threshold
+
+*(ADR 0062; tool: `tests/eval/threshold.py`, `make measure-threshold`)*
+`HIVEMIND_VECTOR_MIN_SIMILARITY` is off by default. When set, the vector
+stream keeps only entries whose cosine similarity to the query is above
+it, so a search with nothing relevant can come back empty and shows up
+in the empty-search counter (ADR 0056). The keyword stream is not
+thresholded.
+
+**Why it is measured per deployment.** Similarities depend on the model
+and on its dimension: one model puts related text at 0.8 and unrelated
+text at 0.4, another at 0.6 and 0.1. The hash embedder the other
+experiments use cannot stand in for a real model here, and no value has
+been measured with the default model (`Qwen/Qwen3-Embedding-0.6B`) yet.
+
+**How to measure.** Point the `HIVEMIND_EMBEDDING_*` settings at the
+embedder the deployment uses, with the deployment's dimension, and run:
+
+    make vllm   # or use the production endpoint
+    make measure-threshold HIVEMIND_EMBEDDING_DIM=1024
+
+The tool embeds the golden and age-varied corpora (24 entries) the way
+writes do, then runs 18 queries each answered by one of them and 12
+off-topic queries answered by none (mostly in the same domain, so they
+are hard cases). Nothing touches Postgres. For each threshold from 0 to
+0.9 it reports:
+
+| column | meaning |
+|---|---|
+| answers kept in vector stream | answerable queries whose answer is still above the threshold |
+| hit@5 | answerable queries with their answer in the top 5, through the full pipeline |
+| off-topic: vector stream empty | off-topic queries the threshold leaves with no vector match |
+| off-topic: search empty | off-topic queries with no hit at all. Keyword matching here is `MemoryStore`'s, which counts any shared word, stop words included, so Postgres comes back empty at least as often |
+
+It also prints the lowest similarity of an answer and the highest of an
+off-topic query, and a suggested value: the highest 0.05 step at least
+0.05 below the weakest answer, so every answer stays in the vector
+stream. A missed answer costs an agent more than an unrelated hit.
+
+**How to tune it later.** The synthetic sets are small, so the
+suggestion is a starting point. Once it is set, watch two things: the
+share of empty searches per fleet (`hivemind_searches_empty` against
+`hivemind_searches` on `/metrics`) and `stale`/`wrong` feedback or
+agents reporting that a search missed something it should have found.
+Few empty searches and unrelated hits mean the value can go up by 0.05;
+agents missing entries they wrote means it is too high. Measure again
+after changing the embedding model or dimension; leaving the setting
+unset restores the old behaviour at once.

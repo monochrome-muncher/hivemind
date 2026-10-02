@@ -235,7 +235,13 @@ class SearchService:
             # Already sanitized (providers.py); the caller sees no error.
             logger.warning("embedding unavailable, searching by keyword only: %s", exc)
             return None
-        return await self._store.search_vector(query_vector, filters, top_k, visibility=visibility)
+        return await self._store.search_vector(
+            query_vector,
+            filters,
+            top_k,
+            visibility=visibility,
+            min_similarity=self._config.vector_min_similarity or 0.0,
+        )
 
     def _to_hit(self, entry: Entry, score: float, feedback: FeedbackCounts) -> Hit:
         return Hit(

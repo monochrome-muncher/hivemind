@@ -70,4 +70,5 @@ is unused.
 | [0058](0058-pinned-fleet-briefing.md) | A pinned briefing per fleet | Accepted |
 | [0059](0059-batch-reads-use-a-fixed-number-of-store-reads.md) | Batch reads use a fixed number of store reads | Accepted |
 | [0060](0060-the-admin-key-writes-self-or-org-entries.md) | The admin key writes `self` or `org` entries | Accepted |
-| [0061](0061-vector-search-needs-positive-similarity.md) | Vector search needs a positive similarity | Accepted |
+| [0061](0061-vector-search-needs-positive-similarity.md) | Vector search needs a positive similarity | Amended by 0062 |
+| [0062](0062-a-similarity-threshold-for-the-vector-stream.md) | A similarity threshold for the vector stream | Accepted |

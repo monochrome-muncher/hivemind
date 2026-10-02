@@ -356,6 +356,24 @@ async def test_vector_search_leaves_out_entries_with_no_positive_similarity(
     ]
 
 
+async def test_vector_search_leaves_out_entries_at_or_below_min_similarity(
+    adapter: Adapter,
+) -> None:
+    """The search similarity threshold (ADR 0062): ``min_similarity``
+    raises ADR 0061's floor of 0, the same way on both adapters."""
+    close = [0.0] * adapter.dim
+    close[5], close[6] = 0.8, 0.6  # similarity 0.8 to the probe
+    loose = [0.0] * adapter.dim
+    loose[5], loose[6] = 0.3, 0.9539392  # similarity 0.3
+    near = await adapter.store.create_entry(draft("close"), close, "test-model")
+    far = await adapter.store.create_entry(draft("loose"), loose, "test-model")
+    probe = adapter.vec(5, base=0.0)
+    search = adapter.store.search_vector
+    assert await search(probe, EntryFilters(), 10, min_similarity=0.0) == [near.id, far.id]
+    assert await search(probe, EntryFilters(), 10, min_similarity=0.5) == [near.id]
+    assert await search(probe, EntryFilters(), 10, min_similarity=0.9) == []
+
+
 # -- withdraw ------------------------------------------------------------------------
 
 
