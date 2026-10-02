@@ -370,9 +370,8 @@ class MemoryStore:
 
     async def quality_counts(self, entry_ids: list[str]) -> dict[str, FeedbackCounts]:
         with self._lock:
-            return {
-                eid: _count_for(self._feedback, eid) for eid in entry_ids if eid in self._entries
-            }
+            # Every well-formed id, known or not, as on PgStore.
+            return {eid: _count_for(self._feedback, eid) for eid in entry_ids if _is_uuid(eid)}
 
     async def list_feedback(self, entry_id: str, limit: int) -> list[Feedback]:
         with self._lock:
@@ -538,6 +537,14 @@ class MemoryStore:
                     return []
                 ordered = ordered[ids.index(filters.before) + 1 :]
             return [r for r in ordered if filters.matches(r)][:limit]
+
+
+def _is_uuid(value: str) -> bool:
+    try:
+        uuid.UUID(value)
+    except ValueError:
+        return False
+    return True
 
 
 def _count_for(feedback: dict[tuple[str, str, str], Feedback], entry_id: str) -> FeedbackCounts:
