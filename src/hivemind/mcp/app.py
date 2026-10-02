@@ -39,13 +39,8 @@ from hivemind.services.chain import (
     get_visible_entry,
     supersession_chain,
 )
-from hivemind.services.governance import (
-    GovernanceService,
-    PermissionDenied,
-    RelatedEntry,
-    SupersedeDenied,
-    WriteService,
-)
+from hivemind.services.errors import PermissionDenied, SupersedeDenied
+from hivemind.services.governance import GovernanceService, RelatedEntry, WriteService
 from hivemind.services.search import Hit, SearchService
 
 logger = logging.getLogger(__name__)

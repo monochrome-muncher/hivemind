@@ -33,7 +33,7 @@ from hivemind.domain.validation import (
 )
 from hivemind.ports import Authenticator, Credential, Store
 from hivemind.services.audit import record_admin_action
-from hivemind.services.governance import PermissionDenied
+from hivemind.services.errors import PermissionDenied
 
 _NAME_TAKEN = "agent name is already taken (names are never reused; pick another name)"
 
