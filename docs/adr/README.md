@@ -43,7 +43,7 @@ is unused.
 | [0030](0030-hive-whoami-lets-an-agent-see-its-own-standing.md) | `hive_whoami`: an agent can read its own standing | Accepted |
 | [0031](0031-one-key-per-request-and-what-org-key-rotation-stops.md) | One key per request; rotating the org key closes registration, nothing more | Refined by 0039 |
 | [0032](0032-unknown-hivemind-env-vars-warn-by-default.md) | Unknown `HIVEMIND_*` variables warn by default; failing is opt-in | Accepted |
-| [0033](0033-server-enforced-reads-provenance-and-supersession-scope.md) | Reads by id, write provenance and supersession are enforced by the server | Amended by 0040 |
+| [0033](0033-server-enforced-reads-provenance-and-supersession-scope.md) | Reads by id, write provenance and supersession are enforced by the server | Amended by 0040, 0060 |
 | [0034](0034-supersession-targets-must-be-active.md) | A supersession target must be active | Accepted |
 | [0035](0035-incognito-sessions.md) | Incognito sessions: one signal, the harness's own off switch, and marked local notes | Accepted |
 | [0036](0036-foreign-entries-use-dont-relay.md) | Foreign entries: use, don't relay — an agent rule, not a server rule | Accepted |
@@ -69,3 +69,4 @@ is unused.
 | [0057](0057-see-also-links-between-entries.md) | "See also" links between entries | Accepted |
 | [0058](0058-pinned-fleet-briefing.md) | A pinned briefing per fleet | Accepted |
 | [0059](0059-batch-reads-use-a-fixed-number-of-store-reads.md) | Batch reads use a fixed number of store reads | Accepted |
+| [0060](0060-the-admin-key-writes-self-or-org-entries.md) | The admin key writes `self` or `org` entries | Accepted |

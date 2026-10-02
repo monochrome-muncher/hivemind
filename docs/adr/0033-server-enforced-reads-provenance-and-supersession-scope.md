@@ -3,6 +3,10 @@
 > **Amended by [ADR 0040](0040-input-bounds-and-agent-name-rules.md):**
 > the reserved names are compared case-insensitively (`casefold()`), and agent
 > names must match a fixed ASCII format at registration.
+>
+> **Amended by [ADR 0060](0060-the-admin-key-writes-self-or-org-entries.md):**
+> the admin key writes only `self` or `org`, and an admin successor must be
+> `org` unless it replaces the admin's own `self` note.
 
 ## Context
 
