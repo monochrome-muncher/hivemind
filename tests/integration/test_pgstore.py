@@ -24,6 +24,7 @@ from datetime import UTC, datetime, timedelta
 
 import asyncpg
 import pytest
+from tests.fakes import FakeEmbedder
 
 from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel, Visibility
@@ -38,6 +39,7 @@ from hivemind.domain.entry import (
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.ports import Credential, SupersedeConflict
 from hivemind.services.chain import get_visible_entries
+from hivemind.services.write import WriteService
 from hivemind.store import PgAuthenticator, PgStore
 from hivemind.store.auth import key_hash
 from hivemind.store.migrate import migrate
@@ -219,6 +221,21 @@ async def test_supersede_accepts_a_non_canonical_uuid_spelling(pg) -> None:
     reloaded = await store.get_entry(head.id)
     assert reloaded is not None
     assert reloaded.state is EntryState.SUPERSEDED
+    assert reloaded.superseded_by == successor.id
+
+
+async def test_write_service_supersedes_by_a_non_canonical_uuid_spelling(pg) -> None:
+    """The write path's reach check must find a target spelled upper-case
+    or without hyphens, as the store's own flip does (Postgres answers with
+    the canonical id)."""
+    store, _, dim = pg
+    service = WriteService(store, FakeEmbedder(dimension=dim))
+    admin = Visibility(TrustLevel.PRIVILEGED, "admin", is_admin=True)
+    head = await store.create_entry(draft("head"))
+    spelled = head.id.upper().replace("-", "")
+    successor = await service.write(draft("v2", supersedes=(spelled,)), writer=admin)
+    reloaded = await store.get_entry(head.id)
+    assert reloaded is not None
     assert reloaded.superseded_by == successor.id
 
 
