@@ -217,7 +217,8 @@ def may_supersede(
 
       * a non-active target -> no one (ADR 0034): ``superseded_by`` is
         single-valued, so a second claim would be lost.
-      * admin -> anything (that is active).
+      * admin -> anything active, with an ``org`` successor (ADR 0060),
+        except its own ``self`` entries, which any successor reaches.
       * ``self`` target -> only the writer's own (visibility already
         guarantees that); any successor scope reaches its one reader.
       * ``fleet`` target -> only by a ``fleet`` successor written into
@@ -227,7 +228,8 @@ def may_supersede(
     if target.state is not EntryState.ACTIVE:
         return False
     if writer.is_admin:
-        return True
+        own_note = target.scope == SCOPE_SELF and target.author == writer.name
+        return own_note or new_scope == SCOPE_ORG
     if not entry_is_visible(target, writer):
         return False
     if target.scope == SCOPE_SELF:

@@ -318,6 +318,14 @@ def test_resolve_l3_cannot_write_org() -> None:
         resolve_write_scope(agent_credential(TrustLevel.PRIVILEGED), requested_scope="org")
 
 
+def test_resolve_admin_writes_self_or_org_but_not_fleet() -> None:
+    # The admin key has no fleet, so a fleet entry would reach none (ADR 0060).
+    assert resolve_write_scope(admin_credential()).scope == "org"
+    assert resolve_write_scope(admin_credential(), requested_scope="self").scope == "self"
+    with pytest.raises(PermissionDenied):
+        resolve_write_scope(admin_credential(), requested_scope="fleet")
+
+
 def test_resolve_untrusted_cannot_write() -> None:
     with pytest.raises(PermissionDenied):
         resolve_write_scope(agent_credential(TrustLevel.UNTRUSTED))

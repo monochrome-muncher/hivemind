@@ -208,6 +208,32 @@ class TestSupersedeState:
         )
 
 
+class TestAdminSupersession:
+    """ADR 0060: an admin supersedes anything active, but the successor
+    must reach the target's readers, so it is ``org`` unless the target is
+    the admin's own ``self`` note."""
+
+    ADMIN = vis(3, "admin", is_admin=True)
+
+    @pytest.mark.parametrize(
+        "target",
+        [
+            make_entry(scope="fleet", author="alice", fleet_id=FL_A),
+            make_entry(scope="org", author="alice"),
+            make_entry(scope="self", author="alice"),
+        ],
+    )
+    def test_another_authors_entry_needs_an_org_successor(self, target: Entry) -> None:
+        assert may_supersede(target, new_scope="org", new_fleet_id=None, writer=self.ADMIN)
+        for scope in ("self", "fleet"):
+            assert not may_supersede(target, new_scope=scope, new_fleet_id=None, writer=self.ADMIN)
+
+    def test_its_own_self_note_takes_any_successor(self) -> None:
+        note = make_entry(scope="self", author="admin")
+        for scope in ("self", "org"):
+            assert may_supersede(note, new_scope=scope, new_fleet_id=None, writer=self.ADMIN)
+
+
 class TestVisibilityWrapper:
     def test_wrapper_delegates(self) -> None:
         v = vis(1, "alice", home=FL_A)

@@ -111,7 +111,7 @@ async def test_admin_and_legacy_keys() -> None:
     admin = await service.whoami(ADMIN)
     legacy = await service.whoami(Credential(user_id="dev", agent_id="hivemind-mcp"))
     assert (admin.key_kind, admin.can_read) == ("admin", ("everything",))
-    assert admin.can_write_scopes == ("self", "fleet", "org")
+    assert admin.can_write_scopes == ("self", "org")  # no fleet of its own (ADR 0060)
     assert (legacy.key_kind, legacy.can_read) == ("legacy", ("everything",))
 
 
