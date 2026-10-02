@@ -41,7 +41,9 @@ Without the package, add the server to `~/.pi/agent/mcp.json` yourself
 Pi's built-in MCP client). The connection comes from the standard MCP
 config files that **pi-mcp-adapter** (`pi install npm:pi-mcp-adapter`)
 reads, and the package registers nothing when one of them defines
-`hivemind`. `${VAR}` references are expanded at connection time, so the
+`hivemind`. (Without such an entry, pi-mcp-adapter 5 and later connect
+the package's server themselves, behind the adapter's `mcp` proxy tool.)
+`${VAR}` references are expanded at connection time, so the
 key never lands in the file:
 
 - **User-global** (all projects): `~/.config/mcp/mcp.json` (or
@@ -75,7 +77,9 @@ key never lands in the file:
 
 On Pi 0.99 and later the adapter is no longer needed: to switch, remove
 it (`pi remove npm:pi-mcp-adapter`) and the `hivemind` entry from its
-config, then restart.
+config. pi-mcp-adapter 5 turned Pi's built-in MCP off when it was
+installed (`"-builtin:mcp"` in `~/.pi/agent/settings.json`), so turn it
+back on under Built-in in `pi config`, then restart.
 
 **Do not conclude the tools are missing just because they are not
 listed.** Before sending the user to "Connect", try calling `hive_whoami`
@@ -113,9 +117,11 @@ from the session's environment. With the built-in MCP client the package
 then registers no server (it also skips registering whenever
 `HIVEMIND_INCOGNITO` is set). With pi-mcp-adapter installed (the launcher
 looks for it in Pi's `settings.json`), it starts Pi with an exclusive MCP
-config instead: the user's global and project servers, minus hivemind
-(the merged file is private and deleted when Pi exits; this needs
-`python3`). Either way the package's extension also blocks Hivemind
+config instead: the servers from the user's global MCP config files
+(Pi's own `mcp.json` included), minus hivemind. Project servers
+(`.mcp.json`, `.pi/`) are left out, because the adapter would run them
+without asking for approval. The merged file is private and deleted when
+Pi exits; this needs `python3`. Either way the package's extension also blocks Hivemind
 calls: `mcp__hivemind…` tools (including calls made from `codemode`
 scripts), the adapter's `mcp` proxy tool when its routing fields
 (`server`, `connect`, `instructions`, `tool`, `describe`) name the

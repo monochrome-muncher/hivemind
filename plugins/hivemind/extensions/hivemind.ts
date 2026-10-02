@@ -20,7 +20,10 @@
  *   built-in client): the server comes from the adapter's config
  *   (~/.config/mcp/mcp.json, ~/.agents/mcp.json or a project .mcp.json).
  *   When one of those defines "hivemind", nothing is registered, so the
- *   adapter route keeps working unchanged.
+ *   adapter route keeps working unchanged. pi-mcp-adapter 5 connects a
+ *   registered server itself, behind its `mcp` proxy tool; it reports
+ *   `exposure` as an ignored setting at every start, so none is sent when
+ *   the adapter is installed.
  * Oh My Pi has no registerMcpServer (it configures MCP itself), so nothing
  * is registered there either.
  */
@@ -113,23 +116,55 @@ function section(): string {
 	return `${CORE} ${state}`;
 }
 
-// pi-mcp-adapter's config files. A "hivemind" entry in one of them means
-// the user set Hivemind up the pre-0.99 way: leave it to the adapter.
-function adapterConfiguresHivemind(): boolean {
-	const paths = [".mcp.json"];
+function piAgentDir(): string | undefined {
+	if (process.env.PI_CODING_AGENT_DIR) return process.env.PI_CODING_AGENT_DIR;
 	try {
-		const home = homedir();
-		paths.push(join(home, ".config", "mcp", "mcp.json"), join(home, ".agents", "mcp.json"));
+		return join(homedir(), ".pi", "agent");
 	} catch {
-		// No home directory: only the project file is checked.
+		return undefined;
 	}
+}
+
+function readJson(path: string): any {
+	try {
+		return JSON.parse(readFileSync(path, "utf8"));
+	} catch {
+		return undefined;
+	}
+}
+
+// Is pi-mcp-adapter installed? The same test as the incognito launcher's:
+// Pi's settings name it.
+function adapterInstalled(): boolean {
+	const dir = piAgentDir();
+	const paths = [join(".pi", "settings.json"), ...(dir ? [join(dir, "settings.json")] : [])];
 	return paths.some((path) => {
 		try {
-			return Boolean(JSON.parse(readFileSync(path, "utf8"))?.mcpServers?.hivemind);
+			return readFileSync(path, "utf8").includes("pi-mcp-adapter");
 		} catch {
 			return false;
 		}
 	});
+}
+
+// The MCP config files pi-mcp-adapter 5 reads (Pi's own mcp.json among
+// them). A "hivemind" entry in one of them means the user configured the
+// server by hand, the pre-0.99 way: leave it to that entry.
+function configuresHivemind(): boolean {
+	const paths = [".mcp.json", join(".pi", "mcp.json"), join(".pi", "mcp-adapter.json")];
+	const dir = piAgentDir();
+	if (dir) paths.push(join(dir, "mcp.json"), join(dir, "mcp-adapter.json"));
+	try {
+		const home = homedir();
+		paths.push(
+			join(home, ".config", "mcp", "mcp.json"),
+			join(home, ".agents", "mcp.json"),
+			join(home, ".agents", "mcp", "mcp.json"),
+		);
+	} catch {
+		// No home directory: only the other files are checked.
+	}
+	return paths.some((path) => Boolean(readJson(path)?.mcpServers?.hivemind));
 }
 
 // Pi 0.99+: register the Hivemind server with the built-in MCP client.
@@ -140,12 +175,12 @@ function registerServer(pi: any): void {
 	if (typeof pi.registerMcpServer !== "function" || incognito()) return;
 	const url = process.env.HIVEMIND_MCP_URL;
 	const key = process.env.HIVEMIND_API_KEY;
-	if (!url || !key || adapterConfiguresHivemind()) return;
+	if (!url || !key || configuresHivemind()) return;
 	try {
 		pi.registerMcpServer("hivemind", {
 			url,
 			headers: { Authorization: `Bearer ${key}` },
-			exposure: "direct",
+			...(adapterInstalled() ? {} : { exposure: "direct" }),
 			description: "Your organization's shared long-term memory (the hive_* tools)",
 		});
 	} catch {
