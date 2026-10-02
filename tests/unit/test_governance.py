@@ -89,10 +89,10 @@ class TestWriteService:
         as defence in depth should the cap ever be raised."""
         from hivemind.domain.access import TrustLevel, Visibility
         from hivemind.domain.validation import MAX_SUPERSEDES
-        from hivemind.services import governance
+        from hivemind.services import write
         from hivemind.services.governance import SupersedeDenied
 
-        monkeypatch.setattr(governance, "_SUPERSEDES_LOOKUP_CHUNK", 4)
+        monkeypatch.setattr(write, "_SUPERSEDES_LOOKUP_CHUNK", 4)
         store = MemoryStore(make_clock())
         service = WriteService(store, make_embedder())
         sizes: list[int] = []
