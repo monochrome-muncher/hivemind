@@ -20,13 +20,11 @@ from contextvars import ContextVar
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from hivemind.config import Settings, configure_logging, load_settings, redact_url
+from hivemind.config import Settings, configure_logging, load_settings
 from hivemind.mcp.app import McpHivemind
 from hivemind.mcp.server import build_server
 from hivemind.ports import Authenticator, Credential, Embedder, Store
-from hivemind.services.access import AccessService
-from hivemind.services.governance import GovernanceService, WriteService
-from hivemind.services.search import SearchService
+from hivemind.services.wiring import build_services, log_startup
 
 logger = logging.getLogger(__name__)
 
@@ -287,13 +285,12 @@ def build_http_app(
 
     search_config = settings.search_config()
     extractor = build_extractor(settings)  # optional (ADR 0016): None when the endpoint is unset
-    template = McpHivemind(
-        store=store,
-        write_service=WriteService(store, embedder, extractor),
-        search_service=SearchService(store, embedder, search_config),
-        governance_service=GovernanceService(store, search_config),
-        access_service=AccessService(store, authenticator),
-        search_config=search_config,
+    services = build_services(
+        store, embedder, search_config, extractor=extractor, authenticator=authenticator
+    )
+    template = McpHivemind.from_services(
+        store,
+        services,
         # Never used to act: the provider fails closed (ADR 0042). Should
         # that ever regress, this is level 0 and access-controlled, not the
         # legacy full-access identity.
@@ -319,14 +316,7 @@ def main_http() -> None:
 
     settings = load_settings()
     configure_logging(settings.log_level)
-    logger.info(
-        "starting hivemind-mcp-http: embedding_endpoint=%s embedding_dim=%d "
-        "extraction=%s pool_max_size=%d",
-        redact_url(settings.embedding_endpoint),
-        settings.embedding_dim,
-        "on" if settings.extractor_endpoint else "off",
-        settings.pool_max_size,
-    )
+    log_startup(logger, "hivemind-mcp-http", settings)
     store = build_store(settings)
     embedder = build_embedder(settings)
     authenticator = build_authenticator(settings)

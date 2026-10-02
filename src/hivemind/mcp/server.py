@@ -18,7 +18,7 @@ from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 
-from hivemind.config import configure_logging, load_settings, redact_url
+from hivemind.config import configure_logging, load_settings
 from hivemind.extractor import build_extractor
 from hivemind.mcp.app import (
     ERR_STORE_UNAVAILABLE,
@@ -40,9 +40,7 @@ from hivemind.mcp.app import (
 from hivemind.mcp.local_embedder import LocalEmbedder
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
-from hivemind.services.access import AccessService
-from hivemind.services.governance import GovernanceService, WriteService
-from hivemind.services.search import SearchService
+from hivemind.services.wiring import build_services, log_startup
 
 logger = logging.getLogger(__name__)
 
@@ -399,18 +397,9 @@ def main() -> None:
         dimension=settings.embedding_dim, prefix_tokens=settings.embedding_prefix_tokens
     )
     extractor = build_extractor(settings)  # optional (ADR 0016): None when the endpoint is unset
-    write_service = WriteService(store, embedder, extractor)
-    search_config = settings.search_config()
-    search_service = SearchService(store, embedder, search_config)
-    governance_service = GovernanceService(store, search_config)
-    app = McpHivemind(
-        store=store,
-        write_service=write_service,
-        search_service=search_service,
-        governance_service=governance_service,
-        access_service=AccessService(store),
-        search_config=search_config,
-        credential=Credential(user_id="dev", agent_id="hivemind-mcp"),
+    services = build_services(store, embedder, settings.search_config(), extractor=extractor)
+    app = McpHivemind.from_services(
+        store, services, credential=Credential(user_id="dev", agent_id="hivemind-mcp")
     )
     server = build_server(app)
     asyncio.run(server.run_stdio_async())
@@ -453,14 +442,7 @@ def main_pg() -> None:
     if not raw_key:
         raise SystemExit(_mcp_key_missing_hint())
 
-    logger.info(
-        "starting hivemind-mcp-pg: embedding_endpoint=%s embedding_dim=%d "
-        "extraction=%s pool_max_size=%d",
-        redact_url(settings.embedding_endpoint),
-        settings.embedding_dim,
-        "on" if settings.extractor_endpoint else "off",
-        settings.pool_max_size,
-    )
+    log_startup(logger, "hivemind-mcp-pg", settings)
     store = build_store(settings)
     embedder = build_embedder(settings)
     authenticator = build_authenticator(settings)
@@ -470,16 +452,14 @@ def main_pg() -> None:
         credential = await authenticator.verify(raw_key)  # fail fast; re-verified per call below
         if credential is None:
             raise SystemExit(_mcp_key_unknown_hint())
-        search_config = settings.search_config()
-        app = McpHivemind(
-            store=store,
-            write_service=WriteService(store, embedder, extractor),
-            search_service=SearchService(store, embedder, search_config),
-            governance_service=GovernanceService(store, search_config),
-            access_service=AccessService(store, authenticator),
-            search_config=search_config,
-            credential=credential,
+        services = build_services(
+            store,
+            embedder,
+            settings.search_config(),
+            extractor=extractor,
+            authenticator=authenticator,
         )
+        app = McpHivemind.from_services(store, services, credential=credential)
 
         async def current_credential() -> Credential | None:
             # Re-verified on EVERY call (ADR 0042) so revocation, demotion
