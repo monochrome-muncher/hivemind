@@ -81,7 +81,7 @@ from hivemind.services.chain import (
     get_visible_entry,
     supersession_chain,
 )
-from hivemind.services.governance import PermissionDenied, SupersedeDenied
+from hivemind.services.errors import PermissionDenied, SupersedeDenied
 
 require = Annotated[Credential, Depends(require_credential)]
 

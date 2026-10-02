@@ -264,18 +264,17 @@ def apply_supersession_invariant(
     group newest ``created_at`` first. Ties keep the order of ``entries``
     (stable sorts; SP-5).
     """
-    successor_of = {e.id: e.superseded_by for e in entries}
-    id_set = set(successor_of)
+    # The candidates by id (the first one, should an id repeat).
+    by_id: dict[str, Entry] = {}
+    for entry in entries:
+        by_id.setdefault(entry.id, entry)
 
     # Follow superseded_by until the link leaves the candidate set.
     def chain_head(entry: Entry) -> str:
         head = entry
         guard = 0
-        while head.superseded_by in id_set:
-            head = next(
-                (e for e in entries if e.id == head.superseded_by),
-                head,
-            )
+        while head.superseded_by in by_id:
+            head = by_id[head.superseded_by]
             guard += 1
             if guard > 1000:  # defensive: chains are short in practice
                 break
