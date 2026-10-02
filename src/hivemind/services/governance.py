@@ -31,12 +31,13 @@ from hivemind.ports import Credential, Embedder, Extractor, Store, SupersedeConf
 from hivemind.retrieval.scoring import feedback_quality
 from hivemind.services.audit import record_admin_action
 from hivemind.services.chain import get_visible_entries, get_visible_entry
+from hivemind.services.errors import AgentIdentityRequired, EntryNotActive, EntryNotFound
+
+# Defined in ``services.errors``; re-exported because callers import them from here.
+from hivemind.services.errors import PermissionDenied as PermissionDenied
+from hivemind.services.errors import SupersedeDenied as SupersedeDenied
 
 logger = logging.getLogger(__name__)
-
-
-class PermissionDenied(Exception):
-    """The caller may not perform this governance action."""
 
 
 # How far a pin follows supersession to the current version (ADR 0058).
@@ -44,23 +45,6 @@ _PIN_FOLLOW_HOPS = 16
 
 # ``supersedes`` targets fetched per ``get_entries`` call (bounds memory).
 _SUPERSEDES_LOOKUP_CHUNK = 50
-
-
-class SupersedeDenied(PermissionDenied):
-    """A write named supersession targets outside the writer's reach
-    (ADR 0033) or at a target that is no longer active (ADR 0034).
-    ``ids`` are those targets; the message deliberately says
-    "not found or not supersedable by you" for all cases."""
-
-    def __init__(self, ids: list[str]) -> None:
-        super().__init__(
-            "not found or not supersedable by you: "
-            + ", ".join(ids)
-            + " (you may supersede active entries you can read, with a successor that "
-            "reaches at least the same audience — ADR 0033; only the current head of a "
-            "chain is supersedable — ADR 0034)"
-        )
-        self.ids = ids
 
 
 def _utcnow() -> datetime:
@@ -255,11 +239,11 @@ class GovernanceService:
         check_text(reason, "reason", MAX_REASON_CHARS)  # ADR 0040
         entry = await get_visible_entry(self._store, entry_id, credential.visibility())
         if entry is None:  # unknown, or not visible to the caller (ADR 0033)
-            raise LookupError(f"unknown entry: {entry_id}")
+            raise EntryNotFound(f"unknown entry: {entry_id}")
         if not (credential.is_admin or entry.author == credential.user_id):
             raise PermissionDenied("only the author or an admin may withdraw an entry")
         if entry.state.value != "active":
-            raise ValueError(
+            raise EntryNotActive(
                 f"entry {entry_id} is already {entry.state.value}; "
                 "only active entries can be withdrawn"
             )
@@ -293,13 +277,13 @@ class GovernanceService:
         check_text(agent, "agent", MAX_IDENTITY_CHARS)
         effective_agent = credential.agent_id or agent
         if effective_agent is None:
-            raise ValueError(
+            raise AgentIdentityRequired(
                 "the caller's agent identity must be resolved before "
                 "recording feedback (SPEC.md §8.1)"
             )
         entry = await get_visible_entry(self._store, entry_id, credential.visibility())
         if entry is None:  # feedback follows readability (SPEC §12.2, ADR 0033)
-            raise LookupError(f"unknown entry: {entry_id}")
+            raise EntryNotFound(f"unknown entry: {entry_id}")
         feedback = Feedback(
             entry_id=entry_id,
             user=credential.user_id,
@@ -337,7 +321,7 @@ class GovernanceService:
             eid for eid in ids if await get_visible_entry(self._store, eid, visibility) is None
         ]
         if missing:  # feedback follows readability (SPEC §12.2, ADR 0033)
-            raise LookupError(f"unknown entries: {', '.join(missing)}")
+            raise EntryNotFound(f"unknown entries: {', '.join(missing)}")
         return [
             await self.record_feedback(credential, eid, verdict, note, agent=agent) for eid in ids
         ]
@@ -391,7 +375,7 @@ class GovernanceService:
         so is pinning the version an earlier pin already shows."""
         entry, fleet_id = await self._pinnable(credential, entry_id)
         if entry.state is not EntryState.ACTIVE:
-            raise ValueError(
+            raise EntryNotActive(
                 f"entry {entry_id} is {entry.state.value}; only active entries can be pinned"
             )
         shown = await self._pins_shown_as(fleet_id, entry, credential.visibility())
@@ -482,7 +466,7 @@ class GovernanceService:
         (ADR 0058)."""
         entry = await get_visible_entry(self._store, entry_id, credential.visibility())
         if entry is None:  # unknown, or not visible to the caller (ADR 0033)
-            raise LookupError(f"unknown entry: {entry_id}")
+            raise EntryNotFound(f"unknown entry: {entry_id}")
         if entry.scope != "fleet" or entry.fleet_id is None:
             raise InvalidInput("only fleet entries can be pinned, to their own fleet")
         privileged_member = (
