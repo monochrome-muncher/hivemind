@@ -19,9 +19,7 @@ from typing import Any
 from hivemind.config import SearchConfig
 from hivemind.domain.entry import (
     Entry,
-    EntryDraft,
     EntryFilters,
-    ImportanceSource,
     Kind,
     Source,
     SourceType,
@@ -39,6 +37,7 @@ from hivemind.services.chain import (
     get_visible_entry,
     supersession_chain,
 )
+from hivemind.services.drafts import entry_draft
 from hivemind.services.errors import PermissionDenied, SupersedeDenied
 from hivemind.services.governance import GovernanceService, RelatedEntry, WriteService
 from hivemind.services.search import Hit, SearchService
@@ -350,30 +349,20 @@ async def hive_write(
         parsed_sources = _parse_sources(sources)
         # Scope and author come from the credential (ADRs 0011-0012).
         resolution = resolve_write_scope(cred, scope)
-        resolved_author = cred.agent_name or cred.user_id
-        # Importance provenance (ROADMAP §4.5); the range check is in EntryDraft.
-        if importance is None:
-            resolved_importance = 3
-            importance_source = ImportanceSource.DEFAULT
-        else:
-            resolved_importance = importance
-            importance_source = ImportanceSource.CALLER
-        draft = EntryDraft(
+        draft = entry_draft(
+            cred,
+            resolution,
+            agent=resolved_agent,
             kind=parsed_kind,
             summary=summary,
-            author=resolved_author,
-            agent=resolved_agent,
             body=body,
             payload=payload,
             sources=parsed_sources,
-            tags=tuple(tags or ()),
+            tags=tags or (),
             occurred_at=_parse_dt(occurred_at, "occurred_at"),
-            importance=resolved_importance,
-            importance_source=importance_source,
-            scope=resolution.scope,
-            fleet_id=resolution.fleet_id,
-            supersedes=tuple(supersedes or ()),
-            see_also=tuple(see_also or ()),
+            importance=importance,
+            supersedes=supersedes or (),
+            see_also=see_also or (),
         )
     except PermissionDenied as exc:
         return _error(ERR_PERMISSION_DENIED, str(exc))
