@@ -283,7 +283,7 @@ first-run bootstrap Job records itself as `ci-bootstrap`.
   the MCP server instructions and `hive_whoami` come from the server, so
   upgrading the server updates what every agent sees. The agent plugin's
   skills and hook update separately, per harness
-  (`plugins/hivemind/README.md`, "Updating"; what changed for agents in
+  (`plugins/hivemind/README.md`, "Update"; what changed for agents in
   each release is in `plugins/hivemind/CHANGELOG.md`).
 - **Deploy every runner project together whenever a migration lands.**
   The runners are separate deployments (and, under GitLab AutoDevOps,
@@ -377,8 +377,7 @@ the first 2.0.0 pod starts, in this order:
    re-registering answers 200 with the current status; new MCP error codes
    `unauthenticated` and `embedding_unavailable`). Agents using the plugin
    pick this up from the server; update the plugin to 2.0.0 for the
-   matching skill text (`plugins/hivemind/README.md`, "What changed for
-   agents").
+   matching skill text (`plugins/hivemind/CHANGELOG.md`).
 
 Rolling back to 1.2.x after `0007`/`0008` ran is safe for the schema (both
 only add indexes, and an older image never rolls the chain back), but the
