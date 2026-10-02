@@ -520,8 +520,7 @@ async def test_agent_lifecycle(adapter: Adapter) -> None:
     assert await store.get_agent("ghost") is None
 
 
-async def test_agents_list_by_name(adapter: Adapter, request: pytest.FixtureRequest) -> None:
-    diverges_on("memory", "MemoryStore lists agents in registration order")(request)
+async def test_agents_list_by_name(adapter: Adapter) -> None:
     for name in ("zed", "amy"):
         await adapter.store.register_agent(name)
     assert [a.name for a in await adapter.store.list_agents()] == ["amy", "zed"]
