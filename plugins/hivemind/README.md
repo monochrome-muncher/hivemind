@@ -26,7 +26,7 @@ and tells you when it needs more rights.
 - [Update](#update)
 - [Remove](#remove)
 - [Incognito sessions](#incognito-sessions)
-- [What is in the plugin](#what-is-in-the-plugin)
+- [For maintainers](#for-maintainers)
 - [CHANGELOG.md](CHANGELOG.md): what changed for agents in each release
 
 ## Before you start
@@ -74,9 +74,7 @@ dsh plugin --profile <name> add git+https://<your-git-server>/<owner>/hivemind.g
 
 Add `#v<version>` to the URL to pin a release. From a local checkout,
 use `dsh plugin --profile <name> add /path/to/this/repo/plugins/hivemind`
-instead, which links the checkout into the profile. To install from your
-npm mirror, remove `"private": true` from `package.json`, publish it, and
-add `hivemind-agent-plugin`.
+instead, which links the checkout into the profile.
 
 Check the result with `dsh --profile <name> --dump-config`.
 
@@ -87,10 +85,8 @@ hermes plugins install <owner>/hivemind/plugins/hivemind   # or /path/to/this/re
 hermes plugins enable hivemind
 ```
 
-Current Hermes releases do not show the plugin's system-prompt section
-(upstream issue NousResearch/hermes-agent#117432). The marked Hivemind
-block in `~/.hermes/SOUL.md` is therefore required, and the setup skill
-adds it.
+On Hermes, the marked Hivemind block in `~/.hermes/SOUL.md` is required
+to keep the agent aware of Hivemind. The setup skill adds it.
 
 ### Pi
 
@@ -114,9 +110,6 @@ miss the skills.
 omp plugin marketplace add <git-url-of-this-repo>
 omp plugin install hivemind@hivemind
 ```
-
-Oh My Pi mounts MCP tools as routes (`xd://mcp__hivemind_hive_*`) rather
-than as named tools. The agent finds them in its system prompt.
 
 ### OpenCode
 
@@ -335,60 +328,36 @@ want to delete your key file and any MCP entry you added by hand.
 
 ## Incognito sessions
 
-An incognito session has Hivemind **completely off**. The agent neither
+An incognito session has Hivemind **completely off**: the agent neither
 reads from nor writes to it, and the server never learns the session
-happened (ADRs 0003, 0035). Start one with the launcher:
+happened. Start one with the launcher instead of the harness's usual
+command:
 
 ```sh
-plugins/hivemind/bin/hivemind-incognito claude     # or: codex, dsh, hermes, pi, omp, opencode (Gemini CLI: see its reference)
+plugins/hivemind/bin/hivemind-incognito claude     # or: codex, dsh, hermes, pi, omp, opencode
 ```
 
 Put it on your `PATH` (`ln -s "$PWD/plugins/hivemind/bin/hivemind-incognito" ~/.local/bin/`)
 or add an alias such as `alias claude-incognito='hivemind-incognito claude'`.
 
-The launcher sets `HIVEMIND_INCOGNITO=1`, so the reminders tell the agent
-not to use or mention Hivemind and to mark local notes
-`[hivemind: incognito, never upload]`. It also adds the harness's own
-switch, so the Hivemind tools do not load at all:
+How strong it is depends on the harness:
 
-| Harness | Switch | You need |
-|---|---|---|
-| Claude Code | `--settings '{"deniedMcpServers":[…]}'` for this session, naming the server as `hivemind` and as the plugin-scoped `plugin:hivemind:hivemind`, and its URL (from the shell or the `env` block of `~/.claude/settings.json`); the launcher also unsets the key and URL | nothing |
-| Codex | `-c mcp_servers.hivemind.enabled=false`; the launcher also unsets the key | the `mcp_servers.hivemind` entry in `~/.codex/config.toml` or `.codex/config.toml` |
-| DeepSeek Harness | the bundle's server row switches itself off | nothing |
-| Hermes | `HIVEMIND_ENABLED=false` | `enabled: ${HIVEMIND_ENABLED}` in the hivemind server entry in `~/.hermes/config.yaml`, and **no** `HIVEMIND_ENABLED` in `~/.hermes/.env` (Hermes loads it over the environment, so it would override the launcher); for normal sessions leave it unset or export `HIVEMIND_ENABLED=true` in the shell profile |
-| Pi | Pi 0.99+ built-in MCP: the package registers no server, and the key and URL are unset. With pi-mcp-adapter: an exclusive MCP config, your global and project servers minus hivemind. Either way the extension also blocks `mcp__hivemind…` calls (codemode scripts included), the adapter's `mcp` proxy and `mcpScript` calls that name Hivemind (the `mcpScript` scan is best effort) | the hivemind package; `python3` with the adapter |
-| Oh My Pi | `HIVEMIND_MCP_URL`/`HIVEMIND_API_KEY` unset, so the server is never contacted (Oh My Pi warns once that it is unavailable); the extension also blocks any Hivemind call | the hivemind plugin |
-| OpenCode | the plugin skips the server; a hand-configured one is disabled with `OPENCODE_CONFIG_CONTENT` | nothing |
-
-**The tools are kept from loading only where the table says so.** Where
-the switch is missing or not configured (the Hermes entry without
-`${HIVEMIND_ENABLED}`, a Codex without the entry, Gemini CLI, any other
-command), the session is incognito **by restraint**: the tools are
-loaded, the key and URL stay in the environment, and an agent with a
-shell could still call the REST API. The launcher unsets the key and URL
-only where the server is kept from loading (Claude Code, Codex, DeepSeek
-Harness, Pi, Oh My Pi), because the other harnesses may still need them
-(ADR 0035). A DeepSeek Harness session stays incognito even when a
-project `.env` names `HIVEMIND_*` variables.
-
-Without the launcher, set `HIVEMIND_INCOGNITO=1` and apply the switch
-yourself. Setting only the variable gives you incognito by restraint, and
-the agent says so. The same holds when you turn incognito on during a
-session. A session started incognito cannot turn Hivemind back on: start
-a new one.
-
-## What is in the plugin
-
-| Part | What it does |
+| Harness | With the launcher |
 |---|---|
-| `skills/hivemind/` | The always-on rules: `hive_whoami` first, when to search, when and how to write, what never to write, local memory only as a fallback |
-| `skills/hivemind-setup/` | The guided setup above. It works out its harness first (never from the model), then reads only that harness's file in `references/` |
-| `hooks/hooks.json` | A `SessionStart` hook (`startup`, `resume`, `clear`, `compact`, `fork`) that re-injects a short reminder whenever the context is rebuilt (Claude Code, Codex) |
-| `.mcp.json` | The MCP server for Claude Code, built from `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY` |
-| `package.json`, `cordis.patch.yml`, `dsh/` | The DeepSeek Harness bundle: the MCP server and a small provider that serves `skills/`. DSH needs no hook, because it keeps the server's instructions in the system prompt |
-| `plugin.yaml`, `__init__.py` | The Hermes plugin: serves `skills/` and registers a system-prompt section (not yet shown by Hermes, so the `SOUL.md` block does the job) |
-| `extensions/hivemind.ts` | The Pi and Oh My Pi extension: the system-prompt section, the MCP server on Pi 0.99+, and blocking Hivemind calls in incognito sessions |
-| `opencode/hivemind.js` | The OpenCode plugin: registers the MCP server, adds the skills, and puts the reminder in every model request |
-| `../../package.json` (repository root) | Lets DeepSeek Harness, Pi and OpenCode install all of this from the repository's Git URL |
-| `bin/hivemind-incognito` | Starts any supported harness in an [incognito session](#incognito-sessions) |
+| Claude Code, DeepSeek Harness, Pi, Oh My Pi, OpenCode | The Hivemind tools do not load at all. Nothing to set up (Pi with pi-mcp-adapter needs `python3`). |
+| Codex | The tools do not load, as long as the server is in `~/.codex/config.toml` (as [Per harness](#per-harness) describes). |
+| Hermes | The tools do not load once you add `enabled: ${HIVEMIND_ENABLED}` to the hivemind entry in `~/.hermes/config.yaml`. Never set `HIVEMIND_ENABLED` in `~/.hermes/.env`, because that file overrides the launcher. |
+| Gemini CLI, any other harness | Incognito **by restraint**: the tools stay loaded and the agent is told not to use them. |
+
+Without the launcher you can set `HIVEMIND_INCOGNITO=1` yourself, or ask
+the agent mid-session to stop using Hivemind. Both are incognito by
+restraint too, and the agent says so. A session started incognito cannot
+turn Hivemind back on: start a new one. The details of each switch are in
+[DEVELOPING.md](DEVELOPING.md#incognito).
+
+## For maintainers
+
+[DEVELOPING.md](DEVELOPING.md) describes how the plugin is built: what
+each file does, how each harness gets the MCP server, the skills and the
+reminder, how incognito works in each harness, and the tests and release
+steps that keep it all in sync.
