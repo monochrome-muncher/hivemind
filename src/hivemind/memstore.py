@@ -143,7 +143,9 @@ class MemoryStore:
                     EntryState.SUPERSEDED,
                     superseded_by=entry.id,
                 )
-            for target_id in draft.see_also:
+            # One write's links in id order, as PgStore reads them back
+            # (same ``created_at``, then ``to_id``).
+            for target_id in sorted(draft.see_also):
                 if target_id in self._entries and target_id != entry.id:
                     self._links[(entry.id, target_id)] = None
         return entry

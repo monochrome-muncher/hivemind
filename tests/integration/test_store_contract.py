@@ -386,10 +386,7 @@ async def test_links_read_from_both_ends(adapter: Adapter) -> None:
     assert list(many) == [a.id, c.id, NO_SUCH_ID]
 
 
-async def test_links_of_one_write_read_in_id_order(
-    adapter: Adapter, request: pytest.FixtureRequest
-) -> None:
-    diverges_on("memory", "MemoryStore keeps one write's links in see_also order")(request)
+async def test_links_of_one_write_read_in_id_order(adapter: Adapter) -> None:
     a = await write(adapter, "a")
     b = await write(adapter, "b")
     c = await write(adapter, "c", see_also=(max(a.id, b.id), min(a.id, b.id)))
