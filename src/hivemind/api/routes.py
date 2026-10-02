@@ -640,10 +640,18 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         a naive timestamp is UTC), ``before`` (a row id: only strictly
         older rows, for paging back — ADR 0028), ``limit`` (1..1000,
         default 100)."""
+        since = _to_utc(since)
+        if since is not None:
+            try:
+                # An offset that moves the value outside year 1..9999 cannot
+                # be sent to Postgres (asyncpg answers a DataError: a 500).
+                since.astimezone(UTC)
+            except OverflowError:
+                raise InvalidInput("since is out of range") from None
         filters = AuditFilters(
             actor=actor,
             action=action,
-            since=_to_utc(since),
+            since=since,
             before=str(before) if before is not None else None,
         )
         try:
