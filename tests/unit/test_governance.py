@@ -421,7 +421,7 @@ async def test_feedback_accepts_self_reported_agent() -> None:
 
     store = MemoryStore(make_clock())
     governance = GovernanceService(store)
-    entry = await store.create_entry(make_draft("a fact"))
+    entry = await store.create_entry(make_draft("a fact", author="carol"))  # not alice's (ADR 0065)
 
     # A plain user key (no agent_id) + a self-reported agent succeeds.
     await governance.record_feedback(

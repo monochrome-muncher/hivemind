@@ -715,6 +715,8 @@ async def hive_feedback(
         )
     except EntryNotFound as exc:
         return _error(ERR_NOT_FOUND, str(exc))
+    except PermissionDenied as exc:  # ADR 0065: the caller's own entry
+        return _error(ERR_PERMISSION_DENIED, str(exc))
     except InvalidInput as exc:
         return _error(ERR_INVALID_INPUT, str(exc))
     except AgentIdentityRequired as exc:  # unreachable past the pre-check above
@@ -758,6 +760,8 @@ async def _hive_feedback_many(
         )
     except EntryNotFound as exc:
         return _error(ERR_NOT_FOUND, str(exc))
+    except PermissionDenied as exc:  # ADR 0065: the caller's own entry
+        return _error(ERR_PERMISSION_DENIED, str(exc))
     except InvalidInput as exc:
         return _error(ERR_INVALID_INPUT, str(exc))
     except AgentIdentityRequired as exc:  # unreachable past the pre-check above

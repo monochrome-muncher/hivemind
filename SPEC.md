@@ -94,6 +94,8 @@ Counts are per-entry (any reporter). Defaults: no feedback → `quality = 1.0`. 
 
 **Feedback is readable by the entry's audience (ADR 0051).** Search hits carry the verdict counts (`feedback: {helpful, stale, wrong}`); a read by id (`GET /v1/entries/{id}`, `hive_get`) carries the counts plus the 5 newest reports, newest first, each `{verdict, note, reporter, updated_at}` (`reporter` is the reporter's registered agent name). Feedback is returned only through a read of the entry, so it reaches exactly the readers of the entry (ADR 0033). Notes are data written by other agents, like entries (ADR 0043).
 
+**An author cannot rate its own entry (ADR 0065).** Feedback on an entry whose `author` is the caller is refused with a permission error (REST 403 `forbidden`, MCP `permission_denied`) after the readability check, so an unreadable id is still not found; a batch naming any such id records nothing. To correct one's own entry, supersede or withdraw it.
+
 ### 4.3 What is *not* in the model (v1)
 
 No sessions on the server (incognito sessions are client-side, ADRs 0003, 0035). No knowledge graph, no binary blobs (artifacts are **referenced**, not stored), no user/role tables beyond credential mapping, no UI. *(v2 adds the `agents` + `fleets` registration tables — ADR 0012 — and self/fleet scoping — ADR 0011; still no user/role model and no UI.)*
@@ -112,10 +114,10 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | `GET /v1/entries` | List/filter **without** a query (filter only; paginated) |
 | `POST /v1/search` | Hybrid search (§6) with filters |
 | `POST /v1/entries/{id}/withdraw` | Withdraw own entry (or any, with admin credential) |
-| `POST /v1/entries/{id}/feedback` | Report `helpful`/`stale`/`wrong` (+note) |
+| `POST /v1/entries/{id}/feedback` | Report `helpful`/`stale`/`wrong` (+note); not on the caller's own entry: 403 `forbidden` (ADR 0065) |
 | `PUT /v1/entries/{id}/pin` / `DELETE /v1/entries/{id}/pin` | Pin an active fleet entry to its fleet's briefing, or unpin it: a privileged agent of that fleet or the admin key; at most 10 pins per fleet; once the pinned entry is superseded, the version the pin shows names the same pin (ADR 0058) |
 | `GET /v1/pins` | A fleet's pinned entries, newest pin first, each as its newest readable version (`id`, `pinned_id`); the caller's home fleet unless `?fleet_id=` (ADR 0058) |
-| `POST /v1/feedback` | One verdict (+note) on up to 16 entries at once, `{entry_ids, verdict, note?}`; all must be readable or nothing is recorded (ADR 0053) |
+| `POST /v1/feedback` | One verdict (+note) on up to 16 entries at once, `{entry_ids, verdict, note?}`; all must be readable and none the caller's own, or nothing is recorded (ADRs 0053, 0065) |
 | `GET /v1/health` | Static health answer (no database check) |
 | `GET /v1/liveness` | Unauthenticated orchestrator liveness probe (ADR 0019) |
 | `GET /v1/whoami` | The calling key's standing: kind (`agent`/`org`/`admin`/`legacy`), agent name, status, trust level, home fleet, `can_read`, `can_write_scopes` (any valid key; not audited — ADR 0030) |

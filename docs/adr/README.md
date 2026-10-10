@@ -62,7 +62,7 @@ is unused.
 | [0050](0050-prometheus-scrape-endpoint.md) | The REST runner serves a Prometheus scrape endpoint | Accepted |
 | [0051](0051-feedback-is-readable.md) | Feedback is readable by the entry's audience | Accepted |
 | [0052](0052-writes-report-the-nearest-entries.md) | Writes report the nearest existing entries | Accepted |
-| [0053](0053-feedback-on-several-entries-at-once.md) | Feedback on several entries at once | Accepted |
+| [0053](0053-feedback-on-several-entries-at-once.md) | Feedback on several entries at once | Amended by 0065 |
 | [0054](0054-a-flagged-filter-for-entries-reported-stale-or-wrong.md) | A `flagged` filter for entries reported stale or wrong | Accepted |
 | [0055](0055-read-several-entries-in-one-call.md) | Read several entries in one call | Amended by 0059 |
 | [0056](0056-count-searches-that-find-nothing.md) | Count searches that find nothing | Accepted |
@@ -72,3 +72,4 @@ is unused.
 | [0060](0060-the-admin-key-writes-self-or-org-entries.md) | The admin key writes `self` or `org` entries | Accepted |
 | [0061](0061-vector-search-needs-positive-similarity.md) | Vector search needs a positive similarity | Amended by 0062 |
 | [0062](0062-a-similarity-threshold-for-the-vector-stream.md) | A similarity threshold for the vector stream | Accepted |
+| [0065](0065-an-author-cannot-rate-its-own-entry.md) | An author cannot rate its own entry | Accepted |

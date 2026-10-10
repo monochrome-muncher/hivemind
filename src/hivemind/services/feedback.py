@@ -20,7 +20,14 @@ from hivemind.domain.validation import (
 from hivemind.ports import Credential, Store
 from hivemind.retrieval.scoring import feedback_quality
 from hivemind.services.chain import get_visible_entry
-from hivemind.services.errors import AgentIdentityRequired, EntryNotFound
+from hivemind.services.errors import AgentIdentityRequired, EntryNotFound, PermissionDenied
+
+
+def _own_entry_message(ids: list[str]) -> str:
+    return (
+        f"you cannot rate your own entry ({', '.join(ids)}); "
+        "supersede or withdraw it instead (ADR 0065)"
+    )
 
 
 def _utcnow() -> datetime:
@@ -72,6 +79,8 @@ class FeedbackService:
         entry = await get_visible_entry(self._store, entry_id, credential.visibility())
         if entry is None:  # feedback follows readability (SPEC §12.2, ADR 0033)
             raise EntryNotFound(f"unknown entry: {entry_id}")
+        if entry.author == credential.user_id:  # ADR 0065
+            raise PermissionDenied(_own_entry_message([entry_id]))
         feedback = Feedback(
             entry_id=entry_id,
             user=credential.user_id,
@@ -96,8 +105,9 @@ class FeedbackService:
     ) -> list[FeedbackOutcome]:
         """One verdict (and note) on several entries at once (ADR 0053).
 
-        All or nothing: if any id is unreadable, nothing is recorded and
-        ``LookupError`` names them. Repeated ids count once.
+        All or nothing: if any id is unreadable (``EntryNotFound``) or the
+        caller's own entry (``PermissionDenied``, ADR 0065), nothing is
+        recorded and the error names them. Repeated ids count once.
         """
         ids = list(dict.fromkeys(entry_ids))
         if not ids:
@@ -105,11 +115,13 @@ class FeedbackService:
         if len(ids) > MAX_FEEDBACK_IDS:
             raise InvalidInput(f"entry_ids may name at most {MAX_FEEDBACK_IDS} entries")
         visibility = credential.visibility()
-        missing = [
-            eid for eid in ids if await get_visible_entry(self._store, eid, visibility) is None
-        ]
+        found = {eid: await get_visible_entry(self._store, eid, visibility) for eid in ids}
+        missing = [eid for eid, entry in found.items() if entry is None]
         if missing:  # feedback follows readability (SPEC §12.2, ADR 0033)
             raise EntryNotFound(f"unknown entries: {', '.join(missing)}")
+        own = [eid for eid, entry in found.items() if entry and entry.author == credential.user_id]
+        if own:  # ADR 0065: after readability, so an unreadable id stays not_found
+            raise PermissionDenied(_own_entry_message(own))
         return [
             await self.record_feedback(credential, eid, verdict, note, agent=agent) for eid in ids
         ]

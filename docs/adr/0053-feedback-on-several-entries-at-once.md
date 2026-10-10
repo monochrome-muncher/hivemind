@@ -1,5 +1,8 @@
 # Feedback on several entries at once
 
+> Amended by [ADR 0065](0065-an-author-cannot-rate-its-own-entry.md) (a batch
+> naming the caller's own entry is refused).
+
 ## Context
 
 The skill asks agents to report every entry they relied on (SPEC §5.2).
