@@ -1,11 +1,15 @@
 """The failures the services raise, by meaning.
 
 Each surface maps these to its own answer (REST: a status and an error
-code; MCP: an error code). The specific classes subclass the builtin a
-surface already catches (``LookupError``, ``ValueError``), so an
-``except`` written against the builtin still matches; new code should
-raise and catch the specific class. ``InvalidInput`` (a rule-based input
-refusal, ADR 0040) lives with the bounds in ``domain.validation``.
+code; MCP: an error code), and catches these specific classes only. An
+exception outside them is a bug: it surfaces as a REST 500 or an MCP
+tool error, never as a friendly one. The specific classes subclass the
+builtin they replace (``LookupError``, ``ValueError``), so an ``except``
+written against the builtin still matches; new code should raise and
+catch the specific class. Raised below the services, so defined with the
+domain: ``InvalidInput`` (a rule-based input refusal, ADR 0040) in
+``domain.validation``, and ``UnknownAgent``, ``UnknownFleet``,
+``FleetExists`` and ``InvalidAgentStatus`` in ``domain.access``.
 """
 
 from __future__ import annotations
@@ -46,3 +50,9 @@ class AgentIdentityRequired(ValueError):
     """The caller's agent identity is unresolved: a legacy key that did not
     self-report ``agent`` (SPEC §8.1). 422 ``agent_identity_required`` /
     ``agent_unresolved``."""
+
+
+class NameTaken(ValueError):
+    """The name belongs to another registration (ADR 0039). Deliberately
+    says nothing about that registration (its status, its owner).
+    409 ``name_conflict``."""

@@ -24,7 +24,14 @@ import asyncpg
 import pytest
 
 from hivemind.config import Settings
-from hivemind.domain.access import AgentStatus, InvalidAgentStatus, TrustLevel, Visibility
+from hivemind.domain.access import (
+    AgentStatus,
+    FleetExists,
+    InvalidAgentStatus,
+    TrustLevel,
+    UnknownAgent,
+    Visibility,
+)
 from hivemind.domain.audit import ActorKind, AuditAction, AuditEvent, AuditFilters
 from hivemind.domain.entry import Entry, EntryDraft, EntryFilters, EntryState, Kind
 from hivemind.domain.feedback import Feedback, Verdict
@@ -490,7 +497,7 @@ async def test_usage_counts_group_every_state(adapter: Adapter) -> None:
 
 async def test_fleets(adapter: Adapter) -> None:
     fleet = await adapter.store.create_fleet("blue")
-    with pytest.raises(ValueError):
+    with pytest.raises(FleetExists, match="fleet already exists: 'blue'"):
         await adapter.store.create_fleet("blue")
     assert await adapter.store.get_fleet(fleet.id) == fleet
     assert await adapter.store.get_fleet(NO_SUCH_ID) is None
@@ -528,7 +535,7 @@ async def test_agent_lifecycle(adapter: Adapter) -> None:
         store.set_agent_home_fleet("ghost", fleet.id),
         store.activate_agent("ghost", trust_level=TrustLevel.LURKER, home_fleet_id=fleet.id),
     ):
-        with pytest.raises(KeyError):
+        with pytest.raises(UnknownAgent, match="unknown agent: ghost"):
             await call
     assert await store.get_agent("ghost") is None
 

@@ -70,6 +70,18 @@ ACTIVATABLE = frozenset({AgentStatus.PENDING, AgentStatus.REVOKED})
 REVOCABLE = frozenset({AgentStatus.PENDING, AgentStatus.ACTIVE})
 
 
+class UnknownAgent(KeyError):
+    """No agent has this name (404 ``not_found``). A ``KeyError``, so ``str(exc)`` is quoted."""
+
+
+class UnknownFleet(KeyError):
+    """No fleet has this id (404 ``not_found``). A ``KeyError``, so ``str(exc)`` is quoted."""
+
+
+class FleetExists(ValueError):
+    """A fleet with this name already exists (409 ``fleet_exists``)."""
+
+
 class InvalidAgentStatus(Exception):
     """A lifecycle verb was applied to an agent in a status it cannot
     start from (ADR 0028) — e.g. ``activate`` on an ``active`` agent."""
@@ -246,9 +258,12 @@ __all__ = [
     "Agent",
     "AgentStatus",
     "Fleet",
+    "FleetExists",
     "InvalidAgentStatus",
     "Standing",
     "TrustLevel",
+    "UnknownAgent",
+    "UnknownFleet",
     "Visibility",
     "entry_is_visible",
     "may_supersede",

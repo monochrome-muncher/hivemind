@@ -14,6 +14,7 @@ from typing import Any
 
 import httpx
 import pytest
+from fastapi import FastAPI
 
 from hivemind.api.deps import create_app
 from hivemind.api.main import create_app_for_config
@@ -58,6 +59,8 @@ class World:
     fleet_entry: str  # an active fleet entry written by dev
     org_entry: str  # an active org entry written by the legacy key
     withdrawn: str  # a withdrawn fleet entry written by dev
+    fleet_id: str  # the id of the existing fleet "alpha"
+    app: FastAPI  # the REST app, for the services it holds
 
     def mcp(self, key: str) -> McpHivemind:
         embedder, config = make_embedder(), make_search_config()
@@ -83,9 +86,8 @@ async def world() -> World:
         authenticator=authenticator,
         search_config=make_search_config(),
     )
-    client = httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=create_app(app)), base_url="http://t"
-    )
+    fastapi_app = create_app(app)
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=fastapi_app), base_url="http://t")
 
     async def post(key: str, **body: Any) -> str:
         resp = await client.post(
@@ -102,7 +104,10 @@ async def world() -> World:
     )
     assert resp.status_code == 200, resp.text
     await store.register_agent("taken", "first-owner")
-    return World(client, store, authenticator, fleet_entry, org_entry, withdrawn)
+    fleet = await store.create_fleet("alpha")
+    return World(
+        client, store, authenticator, fleet_entry, org_entry, withdrawn, fleet.id, fastapi_app
+    )
 
 
 def _err(resp: httpx.Response) -> tuple[int, str, str]:
@@ -325,6 +330,83 @@ CASES: list[tuple[str, Rest, tuple[int, str, str], Mcp, tuple[str, str]]] = [
         None,
         None,
     ),
+    (
+        "create a fleet that exists",
+        lambda w: w.client.post("/v1/admin/fleets", json={"name": "alpha"}, headers=_h("hm_admin")),
+        (409, "fleet_exists", "fleet already exists: 'alpha'"),
+        None,
+        None,
+    ),
+    (
+        "revoke an unknown agent",
+        lambda w: w.client.post("/v1/admin/agents/ghost/revoke", headers=_h("hm_admin")),
+        (404, "not_found", "'unknown agent: ghost'"),
+        None,
+        None,
+    ),
+    (
+        "update an unknown agent in an existing fleet",
+        lambda w: w.client.patch(
+            "/v1/admin/agents/ghost", json={"home_fleet_id": w.fleet_id}, headers=_h("hm_admin")
+        ),
+        (404, "not_found", "'unknown agent: ghost'"),
+        None,
+        None,
+    ),
+    (
+        "change the trust level of an unknown agent",
+        lambda w: w.client.patch(
+            "/v1/admin/agents/ghost", json={"trust_level": 2}, headers=_h("hm_admin")
+        ),
+        (404, "not_found", "'unknown agent: ghost'"),
+        None,
+        None,
+    ),
+    (
+        "update an agent into an unknown fleet",
+        lambda w: w.client.patch(
+            "/v1/admin/agents/taken", json={"home_fleet_id": NO_SUCH}, headers=_h("hm_admin")
+        ),
+        (404, "not_found", f"'unknown fleet: {NO_SUCH}'"),
+        None,
+        None,
+    ),
+    (
+        "activate an unknown agent in an existing fleet",
+        lambda w: w.client.post(
+            "/v1/admin/agents/ghost/activate",
+            json={"trust_level": 2, "home_fleet_id": w.fleet_id},
+            headers=_h("hm_admin"),
+        ),
+        (404, "not_found", "'unknown agent: ghost'"),
+        None,
+        None,
+    ),
+    (
+        "register a reserved name",
+        lambda w: w.client.post("/v1/agents", json={"name": "admin"}, headers=_h("hm_org")),
+        (
+            422,
+            "invalid_input",
+            "agent name 'admin' is reserved for a built-in identity (ADR 0033); pick another",
+        ),
+        lambda w: mcp.hive_register(w.mcp("hm_org"), "admin"),
+        (
+            "invalid_input",
+            "agent name 'admin' is reserved for a built-in identity (ADR 0033); pick another",
+        ),
+    ),
+    (
+        "feedback with an oversized note",
+        lambda w: w.client.post(
+            f"/v1/entries/{w.fleet_entry}/feedback",
+            json={"verdict": "helpful", "note": "x" * 2001},
+            headers=_h("k-lead"),
+        ),
+        None,  # the REST schema may reject it before the service: not this test's subject
+        lambda w: mcp.hive_feedback(w.mcp("k-lead"), w.fleet_entry, "helpful", note="x" * 2001),
+        ("invalid_input", "note must be at most 2000 characters (got 2001)"),
+    ),
 ]
 
 
@@ -358,3 +440,202 @@ def test_typed_errors_still_match_the_builtins_surfaces_catch() -> None:
     # The old import path names the very same classes.
     assert governance.PermissionDenied is errors.PermissionDenied
     assert governance.SupersedeDenied is errors.SupersedeDenied
+    # NameTaken moved here; the old import path names the same class.
+    from hivemind.domain import access as domain_access
+    from hivemind.services import access as services_access
+
+    assert issubclass(errors.NameTaken, ValueError)
+    assert services_access.NameTaken is errors.NameTaken
+    assert issubclass(domain_access.UnknownAgent, KeyError)
+    assert issubclass(domain_access.UnknownFleet, KeyError)
+    assert issubclass(domain_access.FleetExists, ValueError)
+    # KeyError keeps the quoted str() the REST 404 messages rely on.
+    assert str(domain_access.UnknownFleet("unknown fleet: X")) == "'unknown fleet: X'"
+
+
+# (REST call, MCP call, the service object's attribute path, the method it raises from).
+# Each call reaches the service method only after every pre-check has passed.
+UNEXPECTED: list[tuple[str, Rest, Mcp | None, str, str]] = [
+    (
+        "withdraw",
+        lambda w: w.client.post(
+            f"/v1/entries/{w.fleet_entry}/withdraw", json={}, headers=_h("k-dev")
+        ),
+        lambda w: mcp.hive_withdraw(w.mcp("k-dev"), w.fleet_entry),
+        "governance_service",
+        "withdraw",
+    ),
+    (
+        "pin",
+        lambda w: w.client.put(f"/v1/entries/{w.fleet_entry}/pin", headers=_h("k-lead")),
+        lambda w: mcp.hive_pin(w.mcp("k-lead"), w.fleet_entry),
+        "governance_service",
+        "pin",
+    ),
+    (
+        "unpin",
+        lambda w: w.client.delete(f"/v1/entries/{w.fleet_entry}/pin", headers=_h("k-lead")),
+        lambda w: mcp.hive_pin(w.mcp("k-lead"), w.fleet_entry, unpin=True),
+        "governance_service",
+        "unpin",
+    ),
+    (
+        "feedback",
+        lambda w: w.client.post(
+            f"/v1/entries/{w.fleet_entry}/feedback",
+            json={"verdict": "helpful"},
+            headers=_h("k-dev"),
+        ),
+        lambda w: mcp.hive_feedback(w.mcp("k-dev"), w.fleet_entry, "helpful"),
+        "governance_service",
+        "record_feedback",
+    ),
+    (
+        "batch feedback",
+        lambda w: w.client.post(
+            "/v1/feedback",
+            json={"entry_ids": [w.fleet_entry], "verdict": "helpful"},
+            headers=_h("k-dev"),
+        ),
+        lambda w: mcp.hive_feedback(w.mcp("k-dev"), verdict="helpful", entry_ids=[w.fleet_entry]),
+        "governance_service",
+        "record_feedback_many",
+    ),
+    (
+        "write",
+        lambda w: w.client.post(
+            "/v1/entries", json={"kind": "fact", "summary": "s"}, headers=_h("k-dev")
+        ),
+        lambda w: mcp.hive_write(w.mcp("k-dev"), "fact", "s"),
+        "write_service",
+        "write_and_relate",
+    ),
+    (
+        "register",
+        lambda w: w.client.post("/v1/agents", json={"name": "fresh"}, headers=_h("hm_org")),
+        lambda w: mcp.hive_register(w.mcp("hm_org"), "fresh"),
+        "access_service",
+        "register",
+    ),
+    (
+        "create fleet",
+        lambda w: w.client.post("/v1/admin/fleets", json={"name": "beta"}, headers=_h("hm_admin")),
+        None,
+        "access_service",
+        "create_fleet",
+    ),
+    (
+        "activate",
+        lambda w: w.client.post(
+            "/v1/admin/agents/taken/activate",
+            json={"trust_level": 2, "home_fleet_id": w.fleet_id},
+            headers=_h("hm_admin"),
+        ),
+        None,
+        "access_service",
+        "activate",
+    ),
+    (
+        "update home fleet",
+        lambda w: w.client.patch(
+            "/v1/admin/agents/taken", json={"home_fleet_id": w.fleet_id}, headers=_h("hm_admin")
+        ),
+        None,
+        "access_service",
+        "set_home_fleet",
+    ),
+    (
+        "update trust level",
+        lambda w: w.client.patch(
+            "/v1/admin/agents/taken", json={"trust_level": 2}, headers=_h("hm_admin")
+        ),
+        None,
+        "access_service",
+        "set_trust_level",
+    ),
+    (
+        "revoke",
+        lambda w: w.client.post("/v1/admin/agents/taken/revoke", headers=_h("hm_admin")),
+        None,
+        "access_service",
+        "revoke",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "exc", [ValueError("boom"), LookupError("boom"), KeyError("boom")], ids=str
+)
+@pytest.mark.parametrize(
+    ("rest", "tool", "service", "method"),
+    [pytest.param(*case[1:], id=case[0]) for case in UNEXPECTED],
+)
+async def test_an_unexpected_builtin_error_is_never_disguised_as_a_friendly_one(
+    world: World,
+    monkeypatch: pytest.MonkeyPatch,
+    rest: Rest,
+    tool: Mcp | None,
+    service: str,
+    method: str,
+    exc: Exception,
+) -> None:
+    """The policy: surfaces catch the typed errors only. A bare builtin from a
+    service is a bug, so REST answers 500 and the MCP tool raises."""
+
+    async def boom(*_args: Any, **_kwargs: Any) -> None:
+        raise exc
+
+    # Patch the service class: the REST app and World.mcp() each hold their own instance.
+    monkeypatch.setattr(type(getattr(world.app.state.hivemind, service)), method, boom)
+    # raise_app_exceptions=False turns the unhandled error into the 500 a server sends.
+    world.client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=world.app, raise_app_exceptions=False),
+        base_url="http://t",
+    )
+    assert (await rest(world)).status_code == 500
+    if tool is not None:
+        with pytest.raises(type(exc), match="boom"):
+            await tool(world)
+
+
+_RACE_NOT_ACTIVE = "entry {id} is withdrawn, not active"
+
+
+async def test_a_store_race_on_withdraw_becomes_the_typed_errors(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The store can still refuse after the service's pre-checks (a concurrent
+    withdraw): its KeyError / ValueError become EntryNotFound / EntryNotActive,
+    messages preserved."""
+    from hivemind.services.errors import EntryNotActive, EntryNotFound
+
+    service = GovernanceService(world.store, make_search_config())
+    credential = world.authenticator._by_key["k-dev"]
+    text = _RACE_NOT_ACTIVE.format(id=world.fleet_entry)
+
+    async def not_active(*_a: Any, **_k: Any) -> None:
+        raise ValueError(text)
+
+    monkeypatch.setattr(world.store, "withdraw_entry", not_active)
+    with pytest.raises(EntryNotActive) as active:
+        await service.withdraw(credential, world.fleet_entry)
+    assert str(active.value) == text
+
+    async def unknown(*_a: Any, **_k: Any) -> None:
+        raise KeyError("unknown entry: gone")
+
+    monkeypatch.setattr(world.store, "withdraw_entry", unknown)
+    with pytest.raises(EntryNotFound) as missing:
+        await service.withdraw(credential, world.fleet_entry)
+    assert str(missing.value) == str(KeyError("unknown entry: gone"))
+
+    # Wire results of the ValueError race: REST 409 conflict, MCP not_active.
+    monkeypatch.setattr(world.store, "withdraw_entry", not_active)
+    resp = await world.client.post(
+        f"/v1/entries/{world.fleet_entry}/withdraw", json={}, headers=_h("k-dev")
+    )
+    assert _err(resp) == (409, "conflict", text)
+    assert _mcp_err(await mcp.hive_withdraw(world.mcp("k-dev"), world.fleet_entry)) == (
+        "not_active",
+        text,
+    )

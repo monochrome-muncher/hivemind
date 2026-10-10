@@ -62,7 +62,14 @@ class GovernanceService:
                 f"entry {entry_id} is already {entry.state.value}; "
                 "only active entries can be withdrawn"
             )
-        withdrawn = await self._store.withdraw_entry(entry_id, reason, by_user=credential.user_id)
+        try:
+            withdrawn = await self._store.withdraw_entry(
+                entry_id, reason, by_user=credential.user_id
+            )
+        except KeyError as exc:  # the store's "unknown entry"
+            raise EntryNotFound(str(exc)) from exc
+        except ValueError as exc:  # the store's "not active": a concurrent withdraw won the race
+            raise EntryNotActive(str(exc)) from exc
         if credential.is_admin and entry.author != credential.user_id:
             # An admin withdrawing someone else's entry is audited (ADR 0027).
             await record_admin_action(
