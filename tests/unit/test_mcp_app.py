@@ -407,7 +407,7 @@ async def test_hive_withdraw_unknown_entry_returns_error(app: McpHivemind) -> No
 
 
 async def test_hive_feedback_records_verdict(app: McpHivemind) -> None:
-    entry = await hive_write(app, kind="fact", summary="a fact")
+    entry = await hive_write(build_app(app.store, BOB, make_clock()), kind="fact", summary="a fact")
     result = await hive_feedback(app, entry["id"], verdict="helpful", note="useful")
     assert "error" not in result
     assert result["verdict"] == "helpful"
@@ -458,7 +458,7 @@ async def test_hive_feedback_user_key_self_reports_agent(app: McpHivemind) -> No
     clock = make_clock()
     store = app.store
     user_key_app = build_app(store, Credential(user_id="alice"), clock)
-    entry = await hive_write(user_key_app, kind="fact", summary="a fact", agent="claude-code")
+    entry = await hive_write(build_app(store, BOB, clock), kind="fact", summary="a fact")
     result = await hive_feedback(user_key_app, entry["id"], verdict="helpful", agent="claude-code")
     assert "error" not in result
     assert result["feedback"]["agent"] == "claude-code"

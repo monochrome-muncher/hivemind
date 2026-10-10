@@ -32,6 +32,7 @@ def _agent(name: str, fleet: str) -> Credential:
 
 
 READER = _agent("reader", "fleet-a")
+WRITER = _agent("writer", "fleet-a")
 OUTSIDER = _agent("outsider", "fleet-b")
 
 
@@ -55,8 +56,8 @@ async def _write(store: MemoryStore, credential: Credential, summary: str) -> st
 
 async def test_mcp_reads_several_entries_in_the_order_asked() -> None:
     store = MemoryStore(make_clock())
-    a = await _write(store, READER, "first fact")
-    b = await _write(store, READER, "second fact")
+    a = await _write(store, WRITER, "first fact")
+    b = await _write(store, WRITER, "second fact")
     await hive_feedback(_surface(store, READER), b, verdict="stale", note="moved")
     result = await hive_get(_surface(store, READER), entry_ids=[b, a, b])
     entries = result["entries"]

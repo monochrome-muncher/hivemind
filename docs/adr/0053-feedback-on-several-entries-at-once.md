@@ -4,6 +4,9 @@
 > one call are upserted in one transaction (all or none) with a fixed number
 > of store reads, so the "not one transaction" consequence below no longer
 > holds.
+>
+> Amended by [ADR 0065](0065-an-author-cannot-rate-its-own-entry.md) (a batch
+> naming the caller's own entry is refused).
 
 ## Context
 

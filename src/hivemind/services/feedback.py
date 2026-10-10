@@ -20,7 +20,14 @@ from hivemind.domain.validation import (
 from hivemind.ports import Credential, Store
 from hivemind.retrieval.scoring import feedback_quality
 from hivemind.services.chain import get_visible_entries, get_visible_entry
-from hivemind.services.errors import AgentIdentityRequired, EntryNotFound
+from hivemind.services.errors import AgentIdentityRequired, EntryNotFound, PermissionDenied
+
+
+def _own_entry_message(ids: list[str]) -> str:
+    return (
+        f"you cannot rate your own entry ({', '.join(ids)}); "
+        "supersede or withdraw it instead (ADR 0065)"
+    )
 
 
 def _utcnow() -> datetime:
@@ -88,6 +95,8 @@ class FeedbackService:
         entry = await get_visible_entry(self._store, entry_id, credential.visibility())
         if entry is None:  # feedback follows readability (SPEC §12.2, ADR 0033)
             raise EntryNotFound(f"unknown entry: {entry_id}")
+        if entry.author == credential.user_id:  # ADR 0065
+            raise PermissionDenied(_own_entry_message([entry_id]))
         feedback = Feedback(
             entry_id=entry.id,  # the canonical id, not the caller's spelling
             user=credential.user_id,
@@ -112,10 +121,11 @@ class FeedbackService:
     ) -> list[FeedbackOutcome]:
         """One verdict (and note) on several entries at once (ADR 0053).
 
-        All or nothing: if any id is unreadable, nothing is recorded and
-        ``EntryNotFound`` names them. Spellings of one entry count once.
-        A fixed number of store calls however many ids: one read, one
-        transactional upsert, one count read.
+        All or nothing: if any id is unreadable (``EntryNotFound``) or the
+        caller's own entry (``PermissionDenied``, ADR 0065), nothing is
+        recorded and the error names them. Spellings of one entry count
+        once. A fixed number of store calls however many ids: one read,
+        one transactional upsert, one count read.
         """
         check_text(note, "note", MAX_NOTE_CHARS)  # ADR 0040
         check_text(agent, "agent", MAX_IDENTITY_CHARS)
@@ -134,6 +144,9 @@ class FeedbackService:
         missing = [eid for eid in ids if eid not in found]
         if missing:  # feedback follows readability (SPEC §12.2, ADR 0033)
             raise EntryNotFound(f"unknown entries: {', '.join(missing)}")
+        own = [eid for eid in ids if found[eid].author == credential.user_id]
+        if own:  # ADR 0065: after readability, so an unreadable id stays not_found
+            raise PermissionDenied(_own_entry_message(own))
         canonical = list(dict.fromkeys(found[eid].id for eid in ids))
         now = _utcnow()
         rows = [
