@@ -133,7 +133,8 @@ _DESC_LIST = (
     "AND-semantics, case-insensitive), scope, author, agent, "
     "memory-date and ingest-date ranges. 'flagged': only entries reported "
     "stale or wrong at least once, the ones waiting for someone "
-    "to supersede or withdraw them; open one with hive_get to read the reports."
+    "to supersede or withdraw them; open one with hive_get to read the reports. "
+    "Items are compact (no body): open with hive_get, or pass include_body: true."
 )
 _DESC_WITHDRAW = (
     "Withdraw an entry (retract without replacing). Only the author or an "
@@ -338,6 +339,7 @@ def build_server(
         flagged: bool = False,
         limit: int | None = None,
         offset: int = 0,
+        include_body: bool = False,
     ) -> dict[str, Any]:
         return await dispatch(
             hive_list,
@@ -355,6 +357,7 @@ def build_server(
             flagged=flagged,
             limit=limit,
             offset=offset,
+            include_body=include_body,
         )
 
     @server.tool(name="hive_withdraw", description=_DESC_WITHDRAW)

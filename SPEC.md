@@ -145,7 +145,7 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | `hive_write` | `POST /v1/entries` |
 | `hive_search` | `POST /v1/search` |
 | `hive_get` | `GET /v1/entries/{id}`; with `entry_ids` instead of `entry_id`, `POST /v1/entries/get` (ADR 0055) |
-| `hive_list` | `GET /v1/entries` |
+| `hive_list` | `GET /v1/entries`; items are compact (no body, payload or sources) unless `include_body: true` |
 | `hive_withdraw` | `POST /v1/entries/{id}/withdraw` |
 | `hive_feedback` | `POST /v1/entries/{id}/feedback`; with `entry_ids` instead of `entry_id`, `POST /v1/feedback` (ADR 0053) |
 | `hive_pinned` | `GET /v1/pins` (the fleet's pinned briefing — ADR 0058) |
