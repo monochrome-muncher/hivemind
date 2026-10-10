@@ -467,6 +467,53 @@ async def test_feedback_upserts_per_reporter_and_lists_newest_first(adapter: Ada
     assert counts == {entry.id: (0, 1, 1), other.id: (0, 0, 0)}
 
 
+async def test_a_revoked_reporters_feedback_does_not_count_until_reactivated(
+    adapter: Adapter,
+) -> None:
+    """ADR 0067: rows stay, but are left out of every read while revoked."""
+    store = adapter.store
+    fleet = await store.create_fleet("blue")
+    entry = await write(adapter, "rated")
+    await store.register_agent("Scout")
+    await store.record_feedback(Feedback(entry.id, "Scout", "Scout", Verdict.STALE, "old", T0))
+    await store.record_feedback(Feedback(entry.id, "admin", "admin", Verdict.HELPFUL, None, T0))
+    await store.record_feedback(Feedback(entry.id, "nobody", "nobody", Verdict.WRONG, None, T0))
+
+    async def seen() -> tuple[object, ...]:
+        flagged = await store.list_entries(EntryFilters(flagged=True))
+        return (
+            await store.feedback_counts(entry.id),
+            (await store.quality_counts([entry.id]))[entry.id],
+            sorted(r.user for r in await store.list_feedback(entry.id, 10)),
+            sorted(r.user for r in (await store.list_feedback_many([entry.id], 10))[entry.id]),
+            [e.id for e in flagged],
+        )
+
+    everyone = (
+        (1, 1, 1),
+        (1, 1, 1),
+        ["Scout", "admin", "nobody"],
+        ["Scout", "admin", "nobody"],
+        [entry.id],
+    )
+    assert await seen() == everyone  # a pending agent still counts
+    await store.activate_agent("Scout", trust_level=TrustLevel.LURKER, home_fleet_id=fleet.id)
+    await store.revoke_agent("Scout")
+    # No agent record (admin, dev users, "nobody") keeps counting; "nobody" is wrong.
+    assert await seen() == (
+        (1, 0, 1),
+        (1, 0, 1),
+        ["admin", "nobody"],
+        ["admin", "nobody"],
+        [entry.id],
+    )
+    await store.record_feedback(Feedback(entry.id, "nobody", "nobody", Verdict.HELPFUL, None, T0))
+    assert (await seen())[4] == []
+    await store.record_feedback(Feedback(entry.id, "nobody", "nobody", Verdict.WRONG, None, T0))
+    await store.activate_agent("Scout", trust_level=TrustLevel.LURKER, home_fleet_id=fleet.id)
+    assert await seen() == everyone
+
+
 async def test_quality_counts_cover_every_well_formed_id(adapter: Adapter) -> None:
     counts = await adapter.store.quality_counts([NO_SUCH_ID, "not-a-uuid"])
     assert counts == {NO_SUCH_ID: (0, 0, 0)}

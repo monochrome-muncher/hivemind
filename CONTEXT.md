@@ -151,7 +151,7 @@ An agent that has registered (unique name + owner alias) but not been activated:
 _Avoid_: registered agent (ambiguous with active), queued agent, provisional agent
 
 **Revoked agent**:
-An agent whose agent key an admin has killed. Its record and name stay reserved (names are durable), it has no data-plane access, and re-activating it issues a fresh key. Distinct from an agent demoted to `untrusted`, which still holds a valid key.
+An agent whose agent key an admin has killed. Its record and name stay reserved (names are durable), it has no data-plane access, and re-activating it issues a fresh key. Its feedback no longer counts while it is revoked. Distinct from an agent demoted to `untrusted`, which still holds a valid key.
 _Avoid_: deleted agent, disabled agent, dormant agent (dormant is the demoted-to-`untrusted` state)
 
 **Activation**:

@@ -338,7 +338,7 @@ class MemoryStore:
         if not filters.matches(_copy(entry)):
             return False
         if filters.flagged:
-            _, stale, wrong = _count_for(self._feedback, entry.id)
+            _, stale, wrong = _count_for(self._live_feedback(), entry.id)
             return stale + wrong > 0
         return True
 
@@ -367,18 +367,27 @@ class MemoryStore:
         """Whether ``entry`` passes the optional visibility filter (ADR 0011)."""
         return visibility is None or entry_is_visible(entry, visibility)
 
+    def _live_feedback(self) -> dict[tuple[str, str, str], Feedback]:
+        """The feedback rows whose reporter is not a revoked agent (ADR 0067).
+        Callers hold the lock."""
+        revoked = {n for n, a in self._agents.items() if a.status is AgentStatus.REVOKED}
+        if not revoked:
+            return self._feedback
+        return {k: fb for k, fb in self._feedback.items() if fb.user not in revoked}
+
     async def feedback_counts(self, entry_id: str) -> FeedbackCounts:
         with self._lock:
-            return _count_for(self._feedback, entry_id)
+            return _count_for(self._live_feedback(), entry_id)
 
     async def quality_counts(self, entry_ids: list[str]) -> dict[str, FeedbackCounts]:
         with self._lock:
             # Every well-formed id, known or not, as on PgStore.
-            return {eid: _count_for(self._feedback, eid) for eid in entry_ids if _is_uuid(eid)}
+            live = self._live_feedback()
+            return {eid: _count_for(live, eid) for eid in entry_ids if _is_uuid(eid)}
 
     async def list_feedback(self, entry_id: str, limit: int) -> list[Feedback]:
         with self._lock:
-            rows = [fb for fb in self._feedback.values() if fb.entry_id == entry_id]
+            rows = [fb for fb in self._live_feedback().values() if fb.entry_id == entry_id]
         # Newest first; ties (same timestamp) break on the reporter, as on
         # Postgres, so the order is deterministic.
         rows.sort(key=lambda fb: (fb.user, fb.agent))
