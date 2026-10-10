@@ -29,6 +29,10 @@ The SPEC §10 extensions (Tier 5) stay held until their triggers fire.
   counters of ADR 0056 to show demand) and per-kind half-lives (held,
   §4.6). The legacy `pi-mcp-adapter` route in the Pi plugin is to be
   dropped once Pi's built-in MCP (0.99+) is the norm.
+- **The hive-mind study** ([docs/proposals/2026-10-10-hive-mind-ideas.md](docs/proposals/2026-10-10-hive-mind-ideas.md)):
+  ideas for distillation, ranking evidence and sharing without
+  converging, with each item's status. Its unbuilt items are candidates,
+  not commitments.
 - **4.1 BM25** stays deferred; revisit only on observed keyword misses.
 
 ## Tier 1 — validate the core  *(shipped)*
