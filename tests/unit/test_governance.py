@@ -382,7 +382,7 @@ class TestGovernanceService:
                 entry.id,
                 Verdict.WRONG,
             )
-        # 1.0 - 3*0.25 = 0.25 -> clamped to 0.5
+        # 1 - 3/(3+2) = 0.4 -> clamped to 0.5
         assert await governance.quality(entry.id) == pytest.approx(0.5)
 
 
@@ -405,13 +405,13 @@ async def test_feedback_quality_uses_configured_weights() -> None:
     await governance.record_feedback(
         Credential(user_id="u1", agent_id="a1"), entry.id, Verdict.WRONG
     )
-    # custom: 1.0 - 0.9 = 0.1 (above quality_min=0.0, so no clamping)
-    assert await governance.quality(entry.id) == pytest.approx(0.1)
+    # custom: 1 - 0.9/(1+2) = 0.7 (above quality_min=0.0, so no clamping)
+    assert await governance.quality(entry.id) == pytest.approx(0.7)
 
     # The default-config service reports a different value for the same
-    # feedback (1.0 - 0.25 = 0.75), proving the weights come from config.
+    # feedback (1 - 1.0/3 = 0.6667), proving the weights come from config.
     default_gov = GovernanceService(store)
-    assert await default_gov.quality(entry.id) == pytest.approx(0.75)
+    assert await default_gov.quality(entry.id) == pytest.approx(2 / 3)
 
 
 async def test_feedback_accepts_self_reported_agent() -> None:

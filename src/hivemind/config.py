@@ -51,9 +51,13 @@ class SearchConfig:
     # query is above this (ADR 0062). Model-specific, so off by default:
     # ``None`` keeps ADR 0061's floor of 0. In [0, 1).
     vector_min_similarity: float | None = None
-    quality_helpful_weight: float = 0.05
-    quality_stale_weight: float = 0.10
-    quality_wrong_weight: float = 0.25
+    # Consensus-share feedback quality (ADR 0063): each weight is where
+    # quality heads when every report gives that verdict; the prior counts
+    # imaginary neutral reports (> 0).
+    quality_helpful_weight: float = 0.2
+    quality_stale_weight: float = 0.4
+    quality_wrong_weight: float = 1.0
+    quality_prior: float = 2.0
     quality_min: float = 0.5
     quality_max: float = 1.2
 
@@ -78,6 +82,8 @@ class SearchConfig:
             value = getattr(self, name)
             if not math.isfinite(value) or value < 0:
                 raise ValueError(f"{name} must be a finite number >= 0, got {value}")
+        if not math.isfinite(self.quality_prior) or self.quality_prior <= 0:
+            raise ValueError(f"quality_prior must be a finite number > 0, got {self.quality_prior}")
         if self.quality_min > self.quality_max:
             raise ValueError(
                 f"quality_min ({self.quality_min}) must be <= quality_max ({self.quality_max})"
@@ -99,6 +105,7 @@ class SearchConfig:
             "helpful_weight": self.quality_helpful_weight,
             "stale_weight": self.quality_stale_weight,
             "wrong_weight": self.quality_wrong_weight,
+            "prior": self.quality_prior,
             "min_quality": self.quality_min,
             "max_quality": self.quality_max,
         }
@@ -210,9 +217,11 @@ class Settings(BaseSettings):
     # See SearchConfig.vector_min_similarity (ADR 0062). Unset, empty or
     # "none" (case-insensitive) means off.
     vector_min_similarity: float | None = None
-    quality_helpful_weight: float = 0.05
-    quality_stale_weight: float = 0.10
-    quality_wrong_weight: float = 0.25
+    # See SearchConfig (ADR 0063).
+    quality_helpful_weight: float = 0.2
+    quality_stale_weight: float = 0.4
+    quality_wrong_weight: float = 1.0
+    quality_prior: float = 2.0
     quality_min: float = 0.5
     quality_max: float = 1.2
 
@@ -315,6 +324,7 @@ class Settings(BaseSettings):
             quality_helpful_weight=self.quality_helpful_weight,
             quality_stale_weight=self.quality_stale_weight,
             quality_wrong_weight=self.quality_wrong_weight,
+            quality_prior=self.quality_prior,
             quality_min=self.quality_min,
             quality_max=self.quality_max,
         )
