@@ -130,6 +130,17 @@ def test_a_known_settings_field_env_var_is_never_rejected(
     assert settings.quality_min == 0.3
 
 
+def test_social_max_env_var_reaches_the_search_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR 0070: ``HIVEMIND_SOCIAL_MAX`` is a known field and defaults to 1.2."""
+    _clear_hivemind_env(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    assert load_settings().search_config().social_max == 1.2
+    monkeypatch.setenv("HIVEMIND_SOCIAL_MAX", "1.5")
+    assert load_settings().search_config().social_max == 1.5
+
+
 def test_pool_max_size_env_var_is_accepted_and_reaches_settings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

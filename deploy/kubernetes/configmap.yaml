@@ -66,6 +66,7 @@ data:
   HIVEMIND_QUALITY_PRIOR: "2"
   HIVEMIND_QUALITY_MIN: "0.5"
   HIVEMIND_QUALITY_MAX: "1.2"
+  HIVEMIND_SOCIAL_MAX: "1.2"
   # Seconds the usage report (/v1/metrics, /metrics) reuses its grouped
   # scan of the entries (ADR 0069); entry counts can be that old. 0 = off.
   HIVEMIND_METRICS_ENTRY_COUNTS_TTL: "300"

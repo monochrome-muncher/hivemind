@@ -1,5 +1,7 @@
 # Feedback quality by consensus share
 
+> **Amended by [ADR 0070](0070-one-capped-budget-for-social-signals.md):** the score uses `min(social_max, quality)` (default 1.2, equal to `quality_max`). `quality` itself, and what feedback reports, are unchanged.
+
 ## Context
 
 Feedback feeds a `quality` multiplier on an entry's retrieval score
