@@ -59,7 +59,7 @@ is unused.
 | [0047](0047-keyword-stream-matches-any-term.md) | The keyword stream matches any query term | Amended by 0049 |
 | [0048](0048-search-falls-back-to-keywords-when-the-embedder-is-down.md) | Search falls back to keywords when the embedder is down | Accepted |
 | [0049](0049-keyword-stream-matches-at-most-16-terms.md) | The keyword stream matches at most 16 distinct query terms | Accepted |
-| [0050](0050-prometheus-scrape-endpoint.md) | The REST runner serves a Prometheus scrape endpoint | Accepted |
+| [0050](0050-prometheus-scrape-endpoint.md) | The REST runner serves a Prometheus scrape endpoint | Amended by 0069 |
 | [0051](0051-feedback-is-readable.md) | Feedback is readable by the entry's audience | Amended by 0064 |
 | [0052](0052-writes-report-the-nearest-entries.md) | Writes report the nearest existing entries | Accepted |
 | [0053](0053-feedback-on-several-entries-at-once.md) | Feedback on several entries at once | Amended by 0065 |
@@ -78,3 +78,4 @@ is unused.
 | [0066](0066-the-admin-key-has-one-feedback-vote.md) | The admin key has one feedback vote per entry | Accepted |
 | [0067](0067-a-revoked-agents-feedback-no-longer-counts.md) | A revoked agent's feedback no longer counts | Accepted |
 | [0068](0068-rater-flag-confirmation-metric.md) | Count the flags a later supersession confirmed | Accepted |
+| [0069](0069-cache-the-entry-scan-behind-the-usage-report.md) | Cache the entry scan behind the usage report | Accepted |

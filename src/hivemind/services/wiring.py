@@ -15,7 +15,7 @@ from hivemind.config import SearchConfig, Settings, redact_url
 from hivemind.ports import Authenticator, Embedder, Extractor, Store
 from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService, WriteService
-from hivemind.services.metrics import MetricsService
+from hivemind.services.metrics import DEFAULT_ENTRY_COUNTS_TTL, MetricsService
 from hivemind.services.search import SearchService
 
 
@@ -39,17 +39,19 @@ def build_services(
     *,
     extractor: Extractor | None = None,
     authenticator: Authenticator | None = None,
+    metrics_entry_counts_ttl: float = DEFAULT_ENTRY_COUNTS_TTL,
 ) -> Services:
     """Wire the services. ``extractor`` is optional (ADR 0016: ``None`` is
     extraction off); without ``authenticator`` key management is refused
-    (the in-memory dev runner)."""
+    (the in-memory dev runner). ``metrics_entry_counts_ttl`` is
+    ``Settings.metrics_entry_counts_ttl`` (ADR 0069)."""
     return Services(
         search_config=search_config,
         write_service=WriteService(store, embedder, extractor),
         search_service=SearchService(store, embedder, search_config),
         governance_service=GovernanceService(store, search_config),
         access_service=AccessService(store, authenticator),
-        metrics_service=MetricsService(store),
+        metrics_service=MetricsService(store, entry_counts_ttl=metrics_entry_counts_ttl),
     )
 
 

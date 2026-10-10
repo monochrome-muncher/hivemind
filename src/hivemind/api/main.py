@@ -42,7 +42,12 @@ def create_app_for_config(
     extractor = extractor if extractor is not None else _build_extractor(settings)
     search_config = search_config if search_config is not None else settings.search_config()
     services = build_services(
-        store, embedder, search_config, extractor=extractor, authenticator=authenticator
+        store,
+        embedder,
+        search_config,
+        extractor=extractor,
+        authenticator=authenticator,
+        metrics_entry_counts_ttl=settings.metrics_entry_counts_ttl,
     )
     return HivemindApp(
         store=store,

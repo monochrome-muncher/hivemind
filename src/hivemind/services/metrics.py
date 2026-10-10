@@ -3,6 +3,12 @@
 A read-only usage report that makes the SPEC §10 usage-based triggers
 measurable, from one grouped scan plus the fleet/agent listings.
 
+The grouped scan of ``entries`` is the one expensive read, so the service
+caches its rows for ``entry_counts_ttl`` seconds (single-flight), shared by
+``GET /v1/metrics`` and the Prometheus gauges: the entry and per-fleet
+write counts can lag by up to the TTL. The agent, fleet, search and flag
+counts are smaller reads and run on every call.
+
 Counters (ROADMAP §3.3 and §4.5):
 - entries: total, active, by_scope, by_kind, by_importance_source,
   by_author_kind, inactive.
@@ -17,8 +23,10 @@ Counters (ROADMAP §3.3 and §4.5):
 
 from __future__ import annotations
 
+import asyncio
+import time
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from hivemind.domain.access import Agent, AgentStatus, Fleet, TrustLevel
@@ -30,6 +38,9 @@ from hivemind.ports import Store
 _SCOPES = ("org", "fleet", "self")
 _KINDS = (Kind.FACT, Kind.INSIGHT, Kind.DECISION)
 _IMPORTANCE_SOURCES = (ImportanceSource.CALLER, ImportanceSource.DEFAULT)
+# Default lifetime (seconds) of the cached entry scan; the
+# ``HIVEMIND_METRICS_ENTRY_COUNTS_TTL`` setting overrides it.
+DEFAULT_ENTRY_COUNTS_TTL = 300.0
 _TRUST_LEVELS = (
     TrustLevel.UNTRUSTED,
     TrustLevel.LURKER,
@@ -39,20 +50,48 @@ _TRUST_LEVELS = (
 
 
 class MetricsService:
-    """Compute the usage report from the ``Store`` (ROADMAP §3.3)."""
+    """Compute the usage report from the ``Store`` (ROADMAP §3.3).
 
-    def __init__(self, store: Store) -> None:
+    ``entry_counts_ttl`` is how long the grouped entry scan is reused, in
+    seconds; 0 scans on every report. A failed scan is never cached.
+    """
+
+    def __init__(
+        self,
+        store: Store,
+        *,
+        entry_counts_ttl: float = DEFAULT_ENTRY_COUNTS_TTL,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         self._store = store
+        self._ttl = entry_counts_ttl
+        self._clock = clock
+        self._lock = asyncio.Lock()
+        self._rows: Sequence[UsageCount] = ()
+        self._rows_at: float | None = None
+
+    async def _usage_rows(self) -> Sequence[UsageCount]:
+        """The grouped entry scan, reused within the TTL. One scan at a
+        time; concurrent callers wait and reuse its result. A store error
+        propagates and leaves the previous rows' age untouched."""
+        async with self._lock:
+            now = self._clock()
+            if self._rows_at is not None and now - self._rows_at < self._ttl:
+                return self._rows
+            self._rows = await self._store.usage_counts()
+            self._rows_at = now
+            return self._rows
 
     async def usage_report(self) -> dict[str, dict[str, Any]]:
         """The full usage report (entries / fleets / agents).
 
         A fixed handful of queries however large the pool: every entry
-        counter is folded from one grouped scan (PERF-2).
+        counter is folded from one grouped scan (PERF-2), cached for the
+        TTL (see the module docstring).
         """
         agents = await self._store.list_agents()
         fleets = await self._store.list_fleets()
-        rows = await self._store.usage_counts()
+        rows = await self._usage_rows()
         searches = await self._store.search_counts()
         flags = await self._store.flag_counts()
         return {
