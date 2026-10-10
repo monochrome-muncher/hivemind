@@ -1,5 +1,10 @@
 # Feedback on several entries at once
 
+> **Status note.** Since the batch-feedback transaction change, the rows of
+> one call are upserted in one transaction (all or none) with a fixed number
+> of store reads, so the "not one transaction" consequence below no longer
+> holds.
+
 ## Context
 
 The skill asks agents to report every entry they relied on (SPEC §5.2).

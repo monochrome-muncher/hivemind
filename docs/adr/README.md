@@ -69,7 +69,8 @@ is unused.
 | [0057](0057-see-also-links-between-entries.md) | "See also" links between entries | Accepted |
 | [0058](0058-pinned-fleet-briefing.md) | A pinned briefing per fleet | Accepted |
 | [0059](0059-batch-reads-use-a-fixed-number-of-store-reads.md) | Batch reads use a fixed number of store reads | Accepted |
-| [0060](0060-the-admin-key-writes-self-or-org-entries.md) | The admin key writes `self` or `org` entries | Accepted |
+| [0060](0060-the-admin-key-writes-self-or-org-entries.md) | The admin key writes `self` or `org` entries | Amended by 0066 |
 | [0061](0061-vector-search-needs-positive-similarity.md) | Vector search needs a positive similarity | Amended by 0062 |
 | [0062](0062-a-similarity-threshold-for-the-vector-stream.md) | A similarity threshold for the vector stream | Accepted |
 | [0063](0063-feedback-quality-by-consensus-share.md) | Feedback quality by consensus share | Accepted |
+| [0066](0066-the-admin-key-has-one-feedback-vote.md) | The admin key has one feedback vote per entry | Accepted |
