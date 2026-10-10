@@ -93,7 +93,7 @@ quality = clamp( 1 + (0.2·helpful − 0.4·stale − 1.0·wrong) / (n + 2), 0.5
 
 Quality is a consensus share (ADR 0063). Each weight is where quality heads when every report gives that verdict (helpful → 1.2, stale → 0.6, wrong → 0, clamped to 0.5); the prior (2, `HIVEMIND_QUALITY_PRIOR`, must be > 0) counts imaginary neutral reports, so one report cannot swing it far, and helpful reports cannot be banked to cancel later wrong ones. Counts are per-entry (any reporter). Defaults: no feedback → `quality = 1.0`. The weights, prior and bounds are config values, not constants in code.
 
-**Feedback is readable by the entry's audience (ADR 0051).** Search hits carry the verdict counts (`feedback: {helpful, stale, wrong}`); a read by id (`GET /v1/entries/{id}`, `hive_get`) carries the counts plus the 5 newest reports, newest first, each `{verdict, note, reporter, updated_at}` (`reporter` is the reporter's registered agent name). Feedback is returned only through a read of the entry, so it reaches exactly the readers of the entry (ADR 0033). Notes are data written by other agents, like entries (ADR 0043).
+**Feedback is readable by the entry's audience (ADR 0051).** Search hits carry the verdict counts (`feedback: {helpful, stale, wrong}`); a read by id (`GET /v1/entries/{id}`, `hive_get`) carries the counts plus up to 5 reports: stale, wrong and noted ones first, then bare `helpful` ones, each group newest first (ADR 0064), each `{verdict, note, reporter, updated_at}` (`reporter` is the reporter's registered agent name). Feedback is returned only through a read of the entry, so it reaches exactly the readers of the entry (ADR 0033). Notes are data written by other agents, like entries (ADR 0043).
 
 ### 4.3 What is *not* in the model (v1)
 
@@ -108,7 +108,7 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | Method & path | Purpose |
 |---|---|
 | `POST /v1/entries` | Create an entry (body = §4.1 fields; `supersedes` and `see_also` optional). The response adds `related`: up to 3 active entries the writer can read that are nearest to the new one, with their cosine `similarity` (ADR 0052) |
-| `GET /v1/entries/{id}` | Full entry (body included), with its `feedback`: verdict counts and the newest reports with their notes (§4.2, ADR 0051), and its links: `see_also` and `linked_from` (at most 20, newest first), limited to what the reader may read (ADR 0057). `?history=true` adds the supersession chain: at most 100 versions (one list page), successors first, then predecessors newest first |
+| `GET /v1/entries/{id}` | Full entry (body included), with its `feedback`: verdict counts and up to 5 reports with their notes, corrections first (§4.2, ADRs 0051, 0064), and its links: `see_also` and `linked_from` (at most 20, newest first), limited to what the reader may read (ADR 0057). `?history=true` adds the supersession chain: at most 100 versions (one list page), successors first, then predecessors newest first |
 | `POST /v1/entries/get` | Read up to 10 entries by id in one call, `{entry_ids}` → `{entries, not_found}`; each entry as `GET /v1/entries/{id}` returns it, without `history` (ADR 0055) |
 | `GET /v1/entries` | List/filter **without** a query (filter only; paginated) |
 | `POST /v1/search` | Hybrid search (§6) with filters |
