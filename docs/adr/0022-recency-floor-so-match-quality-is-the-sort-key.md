@@ -1,5 +1,7 @@
 # A floor under the recency factor, so match quality is the sort key
 
+> **Amended by [ADR 0070](0070-one-capped-budget-for-social-signals.md):** the floor is unchanged; the study's finding that past about 9.7 days every entry looks equally old is now a stated policy, and the upward social factor is capped so it cannot outweigh recency (invariant I1).
+
 > **Amended by [ADR 0023](0023-recency-floor-gets-a-spelling-for-no-floor.md):** `HIVEMIND_RECENCY_FLOOR` set to an empty value or `none` turns the floor off.
 
 **Amends SPEC §6.4** (the decay-aware rescore). ADR 0006's hybrid shape —

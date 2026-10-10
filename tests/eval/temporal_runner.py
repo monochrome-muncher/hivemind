@@ -80,13 +80,17 @@ def slices_of(labelled: LabelledQuery) -> tuple[str, ...]:
     return ("temporal" if labelled.temporal else "non_temporal", labelled.pattern, "all")
 
 
-async def seed_temporal_corpus() -> tuple[MemoryStore, list[str], FixedClock]:
+async def seed_temporal_corpus(
+    age_overrides: dict[int, float] | None = None,
+) -> tuple[MemoryStore, list[str], FixedClock]:
     """Seed the age-varied corpus; return the store, entry ids and the "now".
 
     The store's clock advances one second per write, so ``created_at``
     order equals corpus order and the store's overlap tie-break is
     deterministic (entry ids are uuid4, so leaving ties to the id would not
-    be). The search clock stays pinned at ``FIXED_NOW``; entry ages come
+    be). ``age_overrides`` maps a corpus index to a replacement age in days
+    (the aged-currency slice uses it; ``None`` is the fixture as written).
+    The search clock stays pinned at ``FIXED_NOW``; entry ages come
     from the explicit ``occurred_at`` each draft carries.
     """
     store_clock = make_clock()
@@ -95,14 +99,15 @@ async def seed_temporal_corpus() -> tuple[MemoryStore, list[str], FixedClock]:
     write_service = WriteService(store, make_embedder())
 
     entry_ids: list[str] = []
-    for aged in temporal_corpus():
+    overrides = age_overrides or {}
+    for index, aged in enumerate(temporal_corpus()):
         draft = EntryDraft(
             kind=Kind(aged.kind),
             summary=aged.summary,
             author="eval",
             agent="eval-agent",
             tags=aged.tags,
-            occurred_at=FIXED_NOW - timedelta(days=aged.age_days),
+            occurred_at=FIXED_NOW - timedelta(days=overrides.get(index, aged.age_days)),
         )
         entry = await write_service.write(draft)
         entry_ids.append(entry.id)
@@ -141,9 +146,10 @@ async def measure_slices(
     *,
     rrf_k: int = DEFAULT_RRF_K,
     recency_floor: float | None = None,
+    age_overrides: dict[int, float] | None = None,
 ) -> dict[str, dict[str, QueryMetrics]]:
     """Run every labelled query under one config, bucketed into the slices."""
-    store, entry_ids, now_clock = await seed_temporal_corpus()
+    store, entry_ids, now_clock = await seed_temporal_corpus(age_overrides)
     slices: dict[str, dict[str, QueryMetrics]] = {name: {} for name in SLICES}
     for labelled in temporal_queries():
         ranked = await ranked_ids(
