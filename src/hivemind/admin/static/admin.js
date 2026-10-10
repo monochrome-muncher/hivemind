@@ -492,7 +492,9 @@ async function viewOverview(root) {
 }
 
 async function viewAgents(root) {
-  await loadAgentsAndFleets();
+  const [, metrics] = await Promise.all([loadAgentsAndFleets(), api("GET", "metrics").catch(() => null)]);
+  // ADR 0068: stale/wrong reports and how many a later supersession confirmed.
+  const flagged = (metrics && metrics.feedback && metrics.feedback.by_agent) || {};
   const refresh = () => route();
   const search = h("input", { type: "search", placeholder: "Filter by name, owner or fleet…" });
   const statusFilter = h("select", {}, ["all", "pending", "active", "revoked"].map((s) => h("option", { value: s, text: s === "all" ? "All statuses" : s })));
@@ -503,13 +505,14 @@ async function viewAgents(root) {
       (statusFilter.value === "all" || a.status === statusFilter.value) &&
       (!q || [a.name, a.owner_alias || "", fleetName(a.home_fleet_id)].some((v) => v.toLowerCase().includes(q))));
     holder.replaceChildren(table(
-      ["Agent", "Status", "Trust level", "Home fleet", "Owner", "Activated", ""],
+      ["Agent", "Status", "Trust level", "Home fleet", "Owner", "Flags confirmed", "Activated", ""],
       shown.map((a) => h("tr", {},
         h("td", {}, h("strong", { text: a.name })),
         h("td", {}, statusBadge(a.status)),
         h("td", {}, a.status === "pending" ? h("span", { class: "muted", text: "—" }) : levelBadge(a.trust_level)),
         h("td", { text: fleetName(a.home_fleet_id) }),
         h("td", { text: a.owner_alias || "—" }),
+        h("td", { title: "Stale or wrong reports later confirmed by a supersession", text: flagged[a.name] ? `${flagged[a.name].confirmed} of ${flagged[a.name].flags}` : "—" }),
         h("td", { title: fmtTime(a.activated_at), text: a.activated_at ? fmtAgo(a.activated_at) : "—" }),
         agentActions(a, refresh))),
       state.agents.length ? "No agents match the filter." : "No agents have registered yet."));

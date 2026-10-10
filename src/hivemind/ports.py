@@ -33,7 +33,7 @@ from hivemind.domain.entry import (
     UsageCount,
     embeddable_text,
 )
-from hivemind.domain.feedback import Feedback, FeedbackCounts
+from hivemind.domain.feedback import Feedback, FeedbackCounts, FlagCount
 from hivemind.domain.pin import Pin
 
 
@@ -120,6 +120,14 @@ class Store(Protocol):
         """Entry counts per (scope, kind, importance_source, author,
         fleet_id, active), every state included; ``MetricsService`` folds
         them into the ROADMAP §3.3 counters."""
+        ...
+
+    async def flag_counts(self) -> list[FlagCount]:
+        """Per reporter (the ``"user"`` column), the ``stale``/``wrong`` rows
+        written while their entry was still current, and how many of those
+        entries were superseded after the row (ADR 0068). Rows on entries
+        already superseded when written, and revoked reporters (ADR 0067),
+        are left out; a reporter with no flags has no row; any order."""
         ...
 
     async def record_search(self, fleet_id: str | None, *, empty: bool) -> None:

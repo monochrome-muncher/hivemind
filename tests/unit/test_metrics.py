@@ -9,8 +9,11 @@ usage-based triggers measurable (pair with the §1.1 eval harness).
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from hivemind.domain.access import TrustLevel
 from hivemind.domain.entry import EntryDraft, EntryFilters, ImportanceSource, Kind
+from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.memstore import MemoryStore
 from hivemind.services.metrics import MetricsService
 from tests.fakes import make_clock
@@ -225,7 +228,8 @@ class TestMetricsService:
         store = _make_store(clock)
         service = MetricsService(store)
         report = await service.usage_report()
-        assert set(report) == {"entries", "fleets", "agents", "searches"}
+        assert set(report) == {"entries", "fleets", "agents", "searches", "feedback"}
+        assert report["feedback"] == {"flags": 0, "confirmed": 0, "by_agent": {}}
 
     async def test_usage_report_reads_the_pool_in_one_grouped_query(self) -> None:
         """PERF-2: the report used to issue 10 + 3 x agents + fleets COUNTs.
@@ -256,3 +260,32 @@ class TestMetricsService:
         assert calls == {"count_entries": 0, "usage_counts": 1}
         assert report["entries"]["by_author_kind"]["agent-1"] == {"insight": 1}
         assert report["entries"]["total"] == 1
+
+
+class TestFeedbackReport:
+    """ADR 0068: flags and the ones a later supersession confirmed."""
+
+    async def test_by_agent_follows_the_roster_and_totals_include_the_rest(self) -> None:
+        store = _make_store(make_clock())
+        for name in ("scout", "quiet"):
+            await store.register_agent(name)
+        old = await store.get_entry(await _seed_entry(store, summary="old"))
+        assert old is not None
+        spare = await store.get_entry(await _seed_entry(store, summary="spare"))
+        assert spare is not None
+        draft = EntryDraft(
+            kind=Kind.FACT, summary="new", author="alice", agent="a", supersedes=(old.id,)
+        )
+        new = await store.create_entry(draft, [0.1, 0.1, 0.1, 0.1])
+        before = new.created_at - timedelta(seconds=1)
+        for user, entry_id in (("scout", old.id), ("admin", old.id), ("scout", spare.id)):
+            await store.record_feedback(Feedback(entry_id, user, user, Verdict.STALE, None, before))
+        await store.record_feedback(
+            Feedback(old.id, "quiet", "quiet", Verdict.HELPFUL, None, before)
+        )
+        report = await MetricsService(store).usage_report()
+        assert report["feedback"] == {
+            "flags": 3,
+            "confirmed": 2,
+            "by_agent": {"scout": {"flags": 2, "confirmed": 1}},
+        }
