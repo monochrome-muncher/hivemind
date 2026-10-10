@@ -845,6 +845,28 @@ class PgStore:
                 feedback.updated_at or datetime.now(UTC),
             )
 
+    async def record_feedback_many(self, feedbacks: list[Feedback]) -> None:
+        """Upsert several feedback rows in one transaction: all land or
+        none do."""
+        if not feedbacks:
+            return
+        now = datetime.now(UTC)
+        async with self._transaction() as conn:
+            await conn.executemany(
+                UPSERT_FEEDBACK,
+                [
+                    (
+                        f.entry_id,
+                        f.user,
+                        f.agent,
+                        f.verdict.value,
+                        f.note,
+                        f.updated_at or now,
+                    )
+                    for f in feedbacks
+                ],
+            )
+
     async def feedback_counts(self, entry_id: str) -> tuple[int, int, int]:
         if not _is_valid_uuid(entry_id):
             return (0, 0, 0)

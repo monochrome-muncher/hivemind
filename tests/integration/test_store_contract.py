@@ -616,3 +616,27 @@ async def test_audit_log_is_newest_first_and_filters(adapter: Adapter) -> None:
     older = await store.list_audit(AuditFilters(before=third.id), 10)
     assert [r.id for r in older] == [second.id, first.id]
     assert len(await store.list_audit(AuditFilters(), 1)) == 1
+
+
+async def test_record_feedback_many_upserts_each_row_in_one_call(adapter: Adapter) -> None:
+    first = await write(adapter, "first")
+    second = await write(adapter, "second")
+    store = adapter.store
+    await store.record_feedback(Feedback(first.id, "u1", "a", Verdict.HELPFUL, None, T0))
+    await store.record_feedback_many(
+        [
+            Feedback(first.id, "u1", "a", Verdict.WRONG, "changed", T0 + timedelta(minutes=1)),
+            Feedback(second.id, "u1", "a", Verdict.STALE, None, T0),
+        ]
+    )
+    assert await store.feedback_counts(first.id) == (0, 0, 1)
+    assert await store.feedback_counts(second.id) == (0, 1, 0)
+    assert [(r.verdict, r.note) for r in await store.list_feedback(first.id, 10)] == [
+        (Verdict.WRONG, "changed")
+    ]
+
+
+async def test_record_feedback_many_of_nothing_is_a_no_op(adapter: Adapter) -> None:
+    entry = await write(adapter, "untouched")
+    await adapter.store.record_feedback_many([])
+    assert await adapter.store.feedback_counts(entry.id) == (0, 0, 0)
