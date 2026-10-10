@@ -261,6 +261,11 @@ class Store(Protocol):
         """Upsert a feedback verdict (one row per entry+user+agent)."""
         ...
 
+    async def record_feedback_many(self, feedbacks: list[Feedback]) -> None:
+        """Upsert several feedback rows in one transaction: all land or
+        none do. An empty list is a no-op."""
+        ...
+
     async def feedback_counts(self, entry_id: str) -> FeedbackCounts:
         """(helpful, stale, wrong) counts for one entry."""
         ...

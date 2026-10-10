@@ -9,7 +9,7 @@ from hivemind.api.deps import create_app
 from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
-from hivemind.mcp.app import McpHivemind, hive_get, hive_search, hive_write
+from hivemind.mcp.app import McpHivemind, hive_feedback, hive_get, hive_search, hive_write
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
@@ -99,3 +99,66 @@ async def test_rest_refuses_an_admin_fleet_write() -> None:
         ok = await client.post("/v1/entries", json={"kind": "fact", "summary": "s", "agent": "ops"})
     assert resp.status_code == 403
     assert (ok.status_code, ok.json()["scope"]) == (201, "org")
+
+
+# ADR 0066: the admin key has one feedback vote per entry.
+AGENT = Credential(
+    user_id="ops-agent",
+    agent_id="ops-agent",
+    agent_name="ops-agent",
+    access_controlled=True,
+    trust_level=TrustLevel.CONTRIBUTOR,
+    home_fleet_id="fleet-a",
+)
+
+
+async def test_the_admin_key_has_one_feedback_vote_whatever_agent_it_reports() -> None:
+    store = MemoryStore(make_clock())
+    entry = await hive_write(_surface(store, ADMIN), kind="fact", summary="s", agent="ops")
+    admin = _surface(store, ADMIN)
+    for label in ("a", "b", "c"):
+        result = await hive_feedback(admin, str(entry["id"]), "helpful", agent=label)
+        assert result["feedback"]["agent"] == "admin"  # type: ignore[index]
+    assert await store.feedback_counts(str(entry["id"])) == (1, 0, 0)
+    rows = await store.list_feedback(str(entry["id"]), 10)
+    assert [(r.user, r.agent) for r in rows] == [("admin", "admin")]
+
+
+async def test_the_admin_key_needs_no_agent_to_give_feedback() -> None:
+    store = MemoryStore(make_clock())
+    entry = await hive_write(_surface(store, ADMIN), kind="fact", summary="s", agent="ops")
+    result = await hive_feedback(_surface(store, ADMIN), str(entry["id"]), "stale")
+    assert result["feedback"]["agent"] == "admin"  # type: ignore[index]
+    many = await hive_feedback(
+        _surface(store, ADMIN), verdict="wrong", entry_ids=[str(entry["id"])]
+    )
+    assert "error" not in many
+    assert await store.feedback_counts(str(entry["id"])) == (0, 0, 1)  # latest verdict wins
+
+    app = create_app_for_config(
+        Settings(),
+        store=store,
+        embedder=make_embedder(),
+        authenticator=FakeAuthenticator(agent_credentials={"k": ADMIN}),
+        search_config=make_search_config(),
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(app)),
+        base_url="http://t",
+        headers={"X-API-Key": "k"},
+    ) as client:
+        one = await client.post(f"/v1/entries/{entry['id']}/feedback", json={"verdict": "helpful"})
+        batch = await client.post(
+            "/v1/feedback", json={"entry_ids": [entry["id"]], "verdict": "helpful", "agent": "x"}
+        )
+    assert (one.status_code, batch.status_code) == (200, 200)
+    assert await store.feedback_counts(str(entry["id"])) == (1, 0, 0)
+
+
+async def test_an_agent_key_keeps_its_own_feedback_identity() -> None:
+    store = MemoryStore(make_clock())
+    entry = await hive_write(_surface(store, AGENT), kind="fact", summary="s")
+    await hive_feedback(_surface(store, AGENT), str(entry["id"]), "helpful", agent="other")
+    await hive_feedback(_surface(store, ADMIN), str(entry["id"]), "helpful")
+    rows = await store.list_feedback(str(entry["id"]), 10)
+    assert sorted(r.agent for r in rows) == ["admin", "ops-agent"]

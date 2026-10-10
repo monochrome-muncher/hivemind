@@ -80,7 +80,7 @@ A lightweight, **dumb** outcome loop (no learned tuning in v1):
 | Field | Notes |
 |---|---|
 | `entry_id` | Which entry the reporter relied on |
-| `reporter` (user, agent) | Who reported; one feedback row per (entry, user, agent) — **upsert semantics**, latest wins |
+| `reporter` (user, agent) | Who reported; one feedback row per (entry, user, agent) — **upsert semantics**, latest wins. An agent key reports as its agent; the admin key always as `admin`, whatever `agent` it passes, so it has one vote per entry (ADR 0066) |
 | `verdict` | `helpful` \| `stale` \| `wrong` |
 | `note` | optional free text |
 
@@ -221,7 +221,7 @@ A fresh, important, well-remembered entry beats a slightly-more-similar but stal
 |---|---|---|
 | **org key** | the whole cluster (shared) | Gates registration only; rotating it closes registration to every prior copy, and active agents keep working (ADRs 0012, 0031) |
 | **agent key** | one registered agent | Carries the agent's trust level + home fleet; `author` is server-filled with the agent's registered name (§12, ADR 0012) |
-| **admin key** | the operator | The admin surface: activate / promote / demote / revoke, fleets, org-key rotation (§12.4) |
+| **admin key** | the operator | The admin surface: activate / promote / demote / revoke, fleets, org-key rotation (§12.4). Its entries have author `admin` (ADR 0060) and its feedback is reported as `admin` (ADR 0066) |
 
 No OAuth/SSO; keys are issued by the org operator via the admin surface (§12.4). (An org with an IdP is a later story.) This table supersedes ADR 0008's key kinds (`user`/`agent`/`admin`) — ADR 0012. The agent key is now the credential the MCP runners verify (ADRs 0009–0010).
 

@@ -46,6 +46,7 @@ from hivemind.services.errors import (
     PermissionDenied,
     SupersedeDenied,
 )
+from hivemind.services.feedback import reporter_agent
 from hivemind.services.governance import GovernanceService, RelatedEntry, WriteService
 from hivemind.services.search import Hit, SearchService
 from hivemind.services.wiring import Services
@@ -703,7 +704,7 @@ async def hive_feedback(
         parsed_verdict = Verdict(verdict)
     except ValueError:
         return _error(ERR_INVALID_VERDICT, f"verdict must be helpful|stale|wrong, got {verdict!r}")
-    if not (app.credential.agent_id or agent):
+    if reporter_agent(app.credential, agent) is None:
         # The service's AgentIdentityRequired condition (SPEC §8.1), checked up front.
         return _error(
             ERR_AGENT_UNRESOLVED,
@@ -747,7 +748,7 @@ async def _hive_feedback_many(
         parsed_verdict = Verdict(verdict)
     except ValueError:
         return _error(ERR_INVALID_VERDICT, f"verdict must be helpful|stale|wrong, got {verdict!r}")
-    if not (app.credential.agent_id or agent):
+    if reporter_agent(app.credential, agent) is None:
         return _error(
             ERR_AGENT_UNRESOLVED,
             "the caller's agent identity must be resolved before recording feedback",
