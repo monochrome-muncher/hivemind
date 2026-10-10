@@ -10,12 +10,14 @@ from __future__ import annotations
 import math
 from datetime import datetime
 
-# Weights for the feedback quality formula (SPEC.md §4.2). Defaults are
-# config-overridable at the service layer; the pure function takes them
-# explicitly so it has no hidden state.
-HELPFUL_WEIGHT = 0.05
-STALE_WEIGHT = 0.10
-WRONG_WEIGHT = 0.25
+# Constants for the feedback quality formula (SPEC.md §4.2, ADR 0063).
+# Defaults are config-overridable at the service layer; the pure function
+# takes them explicitly so it has no hidden state. Each weight is where
+# quality heads when every report gives that verdict (before the prior).
+HELPFUL_WEIGHT = 0.2
+STALE_WEIGHT = 0.4
+WRONG_WEIGHT = 1.0
+QUALITY_PRIOR = 2.0
 QUALITY_MIN = 0.5
 QUALITY_MAX = 1.2
 
@@ -32,16 +34,29 @@ def feedback_quality(
     helpful_weight: float = HELPFUL_WEIGHT,
     stale_weight: float = STALE_WEIGHT,
     wrong_weight: float = WRONG_WEIGHT,
+    prior: float = QUALITY_PRIOR,
     min_quality: float = QUALITY_MIN,
     max_quality: float = QUALITY_MAX,
 ) -> float:
     """Bounded quality multiplier derived from an entry's feedback.
 
-    No feedback -> 1.0 (neutral). The result is clamped to
-    [min_quality, max_quality] so a single entry with extreme feedback
-    cannot vanish or dominate.
+    Consensus share (ADR 0063), with ``n = helpful + stale + wrong``::
+
+        quality = clamp(1 + (wh*h - ws*s - ww*w) / (n + prior), min, max)
+
+    Each weight is where quality heads when every report gives that
+    verdict (helpful 1.2, stale 0.6, wrong 0 with the defaults, the
+    last clamped to ``min_quality``). ``prior`` counts imaginary neutral
+    reports, so one report cannot swing the result far and more reports
+    move it toward the weight of the majority verdict. The sum is a
+    share, not a running total, so helpful reports cannot be banked to
+    cancel later wrong ones. No feedback -> exactly 1.0 (neutral). The
+    result is clamped to [min_quality, max_quality].
     """
-    score = 1.0 + helpful * helpful_weight - stale * stale_weight - wrong * wrong_weight
+    n = helpful + stale + wrong
+    score = 1.0 + (helpful * helpful_weight - stale * stale_weight - wrong * wrong_weight) / (
+        n + prior
+    )
     return max(min_quality, min(max_quality, score))
 
 

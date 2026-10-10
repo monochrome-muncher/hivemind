@@ -72,5 +72,6 @@ is unused.
 | [0060](0060-the-admin-key-writes-self-or-org-entries.md) | The admin key writes `self` or `org` entries | Amended by 0066 |
 | [0061](0061-vector-search-needs-positive-similarity.md) | Vector search needs a positive similarity | Amended by 0062 |
 | [0062](0062-a-similarity-threshold-for-the-vector-stream.md) | A similarity threshold for the vector stream | Accepted |
+| [0063](0063-feedback-quality-by-consensus-share.md) | Feedback quality by consensus share | Accepted |
 | [0064](0064-corrections-stay-visible-in-recent-feedback.md) | Corrections stay visible in an entry's recent feedback | Accepted |
 | [0066](0066-the-admin-key-has-one-feedback-vote.md) | The admin key has one feedback vote per entry | Accepted |
