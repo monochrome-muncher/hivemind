@@ -28,7 +28,7 @@ from hivemind.store.migrate import (
     rollback,
 )
 
-HEAD = "0012.pins"
+HEAD = "0013.see-also-and-agent-indexes"
 
 # Every applied migration id, oldest first. Kept explicit rather than read
 # off the filesystem: the point of these assertions is that the runner
@@ -46,6 +46,7 @@ CHAIN = [
     "0009.audit-register",
     "0010.search-counts",
     "0011.entry-links",
+    "0012.pins",
     HEAD,
 ]
 
@@ -88,6 +89,12 @@ async def test_migrate_applies_the_chain_and_reports_its_head() -> None:
     try:
         # One row per migration in the chain (ADR 0020).
         assert await conn.fetchval("SELECT count(*) FROM _yoyo_migration") == len(CHAIN)
+        # 0013: the two new indexes exist and valid; the superseded one is gone.
+        for index in ("entry_links_to_created_idx", "entries_agent_created_idx"):
+            assert await conn.fetchval(
+                "SELECT indisvalid FROM pg_index WHERE indexrelid = to_regclass($1)", index
+            )
+        assert await conn.fetchval("SELECT to_regclass('entry_links_to_idx')") is None
     finally:
         await conn.close()
 
@@ -159,7 +166,8 @@ async def test_rollback_removes_the_latest_migration() -> None:
     """ADR 0020: a structural migration (not `0001`) ships a real
     rollback, and rolling one back undoes exactly what it did.
 
-    Peeled one at a time from the head: `0012` drops the pins (ADR 0058);
+    Peeled one at a time from the head: `0013` swaps the "see also" index
+    back and drops the agent list index; `0012` drops the pins (ADR 0058);
     `0011` drops the "see also" links
     (ADR 0057); `0010` drops the search counters
     (ADR 0056); `0009` deletes the registration
@@ -176,6 +184,17 @@ async def test_rollback_removes_the_latest_migration() -> None:
     await _require_postgres(dsn)
     await _reset_chain(dsn)
     await migrate(dsn, dim)
+
+    rolled = await rollback(dsn, dim, count=1)
+    assert rolled == [HEAD]
+    assert await current_schema_version(dsn) == "0012.pins"
+    conn = await asyncpg.connect(dsn)
+    try:
+        assert await conn.fetchval("SELECT to_regclass('entry_links_to_idx')") is not None
+        for index in ("entry_links_to_created_idx", "entries_agent_created_idx"):
+            assert await conn.fetchval("SELECT to_regclass($1)", index) is None
+    finally:
+        await conn.close()
 
     rolled = await rollback(dsn, dim, count=1)
     assert rolled == ["0012.pins"]
@@ -410,7 +429,7 @@ async def test_0006_backfills_revoked_and_rolls_back_without_loss() -> None:
     await _require_postgres(dsn)
     await _reset_chain(dsn)
     await migrate(dsn, dim)
-    await rollback(dsn, dim, count=7)  # 0012 down to 0006
+    await rollback(dsn, dim, count=8)  # 0013 down to 0006
     assert await current_schema_version(dsn) == "0005.audit-log"
 
     conn = await asyncpg.connect(dsn)
@@ -426,7 +445,7 @@ async def test_0006_backfills_revoked_and_rolls_back_without_loss() -> None:
     finally:
         await conn.close()
 
-    await migrate(dsn, dim)  # applies 0006 to 0012
+    await migrate(dsn, dim)  # applies 0006 to 0013
     statuses = "SELECT name, status FROM agents ORDER BY name"
     conn = await asyncpg.connect(dsn)
     try:
@@ -439,7 +458,7 @@ async def test_0006_backfills_revoked_and_rolls_back_without_loss() -> None:
     finally:
         await conn.close()
 
-    await rollback(dsn, dim, count=7)  # 0012, 0011, 0010, 0009, 0008, 0007, then 0006
+    await rollback(dsn, dim, count=8)  # 0013, 0012, 0011, 0010, 0009, 0008, 0007, then 0006
     conn = await asyncpg.connect(dsn)
     try:
         assert [tuple(r) for r in await conn.fetch(statuses)] == [
@@ -465,7 +484,7 @@ async def test_0007_dedupes_keeping_the_newest_then_enforces_uniqueness() -> Non
     await _require_postgres(dsn)
     await _reset_chain(dsn)
     await migrate(dsn, dim)
-    await rollback(dsn, dim, count=6)  # 0012, 0011, 0010, 0009, 0008 (indexes) then 0007
+    await rollback(dsn, dim, count=7)  # 0013, 0012, 0011, 0010, 0009, 0008 (indexes) then 0007
     assert await current_schema_version(dsn) == "0006.agent-revoked-status"
 
     conn = await asyncpg.connect(dsn)
@@ -503,7 +522,7 @@ async def test_0007_dedupes_keeping_the_newest_then_enforces_uniqueness() -> Non
     finally:
         await conn.close()
 
-    await rollback(dsn, dim, count=6)  # 0012, 0011, 0010, 0009, 0008 (indexes) then 0007
+    await rollback(dsn, dim, count=7)  # 0013, 0012, 0011, 0010, 0009, 0008 (indexes) then 0007
     conn = await asyncpg.connect(dsn)
     try:
         assert await conn.fetchval("SELECT to_regclass('credentials_one_agent_key')") is None

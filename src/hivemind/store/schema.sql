@@ -188,6 +188,8 @@ CREATE UNIQUE INDEX credentials_one_agent_key ON public.credentials USING btree 
 
 CREATE UNIQUE INDEX credentials_one_org_key ON public.credentials USING btree (kind) WHERE (kind = 'org'::text);
 
+CREATE INDEX entries_agent_created_idx ON public.entries USING btree (agent, created_at DESC, id DESC);
+
 CREATE INDEX entries_author_created_idx ON public.entries USING btree (author, created_at DESC, id DESC);
 
 CREATE INDEX entries_author_idx ON public.entries USING btree (author);
@@ -212,7 +214,7 @@ CREATE INDEX entries_superseded_by_idx ON public.entries USING btree (superseded
 
 CREATE INDEX entries_tags_gin_idx ON public.entries USING gin (tags);
 
-CREATE INDEX entry_links_to_idx ON public.entry_links USING btree (to_id);
+CREATE INDEX entry_links_to_created_idx ON public.entry_links USING btree (to_id, created_at DESC, from_id);
 
 CREATE TRIGGER entries_search_tsv_trigger BEFORE INSERT OR UPDATE OF summary, body ON public.entries FOR EACH ROW EXECUTE FUNCTION public.entries_search_tsv_update();
 
