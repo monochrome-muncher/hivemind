@@ -447,7 +447,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         """One verdict (and note) on up to 16 entries at once (ADR 0053).
 
         All or nothing: an id the caller may not read is a 404 naming it,
-        and nothing is recorded.
+        and one of the caller's own is a 403 (ADR 0065); nothing is recorded.
         """
         try:
             outcomes = await app.governance_service.record_feedback_many(
@@ -459,6 +459,8 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
             )
         except EntryNotFound as exc:
             raise api_error(404, "not_found", str(exc)) from None
+        except PermissionDenied as exc:  # ADR 0065: the caller's own entry
+            raise api_error(403, "forbidden", str(exc)) from exc
         except InvalidInput as exc:
             raise api_error(422, "invalid_input", str(exc)) from exc
         except AgentIdentityRequired as exc:
@@ -485,6 +487,8 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
             )
         except EntryNotFound:
             raise api_error(404, "not_found", f"unknown entry: {entry_id}") from None
+        except PermissionDenied as exc:  # ADR 0065: the caller's own entry
+            raise api_error(403, "forbidden", str(exc)) from exc
         except InvalidInput as exc:
             raise api_error(422, "invalid_input", str(exc)) from exc
         except AgentIdentityRequired as exc:

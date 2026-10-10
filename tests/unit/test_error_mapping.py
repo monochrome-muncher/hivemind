@@ -214,6 +214,48 @@ CASES: list[tuple[str, Rest, tuple[int, str, str], Mcp, tuple[str, str]]] = [
         ("not_found", f"unknown entries: {NO_SUCH}"),
     ),
     (
+        "feedback on the caller's own entry",
+        lambda w: w.client.post(
+            f"/v1/entries/{w.fleet_entry}/feedback",
+            json={"verdict": "helpful"},
+            headers=_h("k-dev"),
+        ),
+        (
+            403,
+            "forbidden",
+            "you cannot rate your own entry ({fleet_entry}); "
+            "supersede or withdraw it instead (ADR 0065)",
+        ),
+        lambda w: mcp.hive_feedback(w.mcp("k-dev"), w.fleet_entry, "helpful"),
+        (
+            "permission_denied",
+            "you cannot rate your own entry ({fleet_entry}); "
+            "supersede or withdraw it instead (ADR 0065)",
+        ),
+    ),
+    (
+        "batch feedback naming the caller's own entry",
+        lambda w: w.client.post(
+            "/v1/feedback",
+            json={"entry_ids": [w.org_entry, w.fleet_entry], "verdict": "helpful"},
+            headers=_h("k-dev"),
+        ),
+        (
+            403,
+            "forbidden",
+            "you cannot rate your own entry ({fleet_entry}); "
+            "supersede or withdraw it instead (ADR 0065)",
+        ),
+        lambda w: mcp.hive_feedback(
+            w.mcp("k-dev"), verdict="helpful", entry_ids=[w.org_entry, w.fleet_entry]
+        ),
+        (
+            "permission_denied",
+            "you cannot rate your own entry ({fleet_entry}); "
+            "supersede or withdraw it instead (ADR 0065)",
+        ),
+    ),
+    (
         "pin an org entry",
         lambda w: w.client.put(f"/v1/entries/{w.org_entry}/pin", headers=_h("k-lead")),
         (422, "invalid_input", "only fleet entries can be pinned, to their own fleet"),

@@ -114,7 +114,8 @@ AGENT = Credential(
 
 async def test_the_admin_key_has_one_feedback_vote_whatever_agent_it_reports() -> None:
     store = MemoryStore(make_clock())
-    entry = await hive_write(_surface(store, ADMIN), kind="fact", summary="s", agent="ops")
+    # Another agent's entry: nobody rates its own (ADR 0065).
+    entry = await hive_write(_surface(store, AGENT), kind="fact", summary="s")
     admin = _surface(store, ADMIN)
     for label in ("a", "b", "c"):
         result = await hive_feedback(admin, str(entry["id"]), "helpful", agent=label)
@@ -126,7 +127,8 @@ async def test_the_admin_key_has_one_feedback_vote_whatever_agent_it_reports() -
 
 async def test_the_admin_key_needs_no_agent_to_give_feedback() -> None:
     store = MemoryStore(make_clock())
-    entry = await hive_write(_surface(store, ADMIN), kind="fact", summary="s", agent="ops")
+    # Another agent's entry: nobody rates its own (ADR 0065).
+    entry = await hive_write(_surface(store, AGENT), kind="fact", summary="s")
     result = await hive_feedback(_surface(store, ADMIN), str(entry["id"]), "stale")
     assert result["feedback"]["agent"] == "admin"  # type: ignore[index]
     many = await hive_feedback(
@@ -157,8 +159,7 @@ async def test_the_admin_key_needs_no_agent_to_give_feedback() -> None:
 
 async def test_an_agent_key_keeps_its_own_feedback_identity() -> None:
     store = MemoryStore(make_clock())
-    entry = await hive_write(_surface(store, AGENT), kind="fact", summary="s")
+    entry = await hive_write(_surface(store, ADMIN), kind="fact", summary="s", agent="ops")
     await hive_feedback(_surface(store, AGENT), str(entry["id"]), "helpful", agent="other")
-    await hive_feedback(_surface(store, ADMIN), str(entry["id"]), "helpful")
     rows = await store.list_feedback(str(entry["id"]), 10)
-    assert sorted(r.agent for r in rows) == ["admin", "ops-agent"]
+    assert [r.agent for r in rows] == ["ops-agent"]

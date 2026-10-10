@@ -625,7 +625,7 @@ class TestFeedbackAgentResolution:
     async def test_user_key_self_reports_agent(self) -> None:
         client = make_client(make_hivemind_app())
         async with client:
-            e = await post_entry(client, "key-alice", "a fact")
+            e = await post_entry(client, "key-bob", "a fact")  # not alice's own (ADR 0065)
             resp = await client.post(
                 f"/v1/entries/{e['id']}/feedback",
                 json={"verdict": "helpful", "agent": "claude-code"},

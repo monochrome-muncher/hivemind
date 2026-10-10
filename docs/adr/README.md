@@ -62,7 +62,7 @@ is unused.
 | [0050](0050-prometheus-scrape-endpoint.md) | The REST runner serves a Prometheus scrape endpoint | Accepted |
 | [0051](0051-feedback-is-readable.md) | Feedback is readable by the entry's audience | Amended by 0064 |
 | [0052](0052-writes-report-the-nearest-entries.md) | Writes report the nearest existing entries | Accepted |
-| [0053](0053-feedback-on-several-entries-at-once.md) | Feedback on several entries at once | Accepted |
+| [0053](0053-feedback-on-several-entries-at-once.md) | Feedback on several entries at once | Amended by 0065 |
 | [0054](0054-a-flagged-filter-for-entries-reported-stale-or-wrong.md) | A `flagged` filter for entries reported stale or wrong | Accepted |
 | [0055](0055-read-several-entries-in-one-call.md) | Read several entries in one call | Amended by 0059 |
 | [0056](0056-count-searches-that-find-nothing.md) | Count searches that find nothing | Accepted |
@@ -74,5 +74,6 @@ is unused.
 | [0062](0062-a-similarity-threshold-for-the-vector-stream.md) | A similarity threshold for the vector stream | Accepted |
 | [0063](0063-feedback-quality-by-consensus-share.md) | Feedback quality by consensus share | Accepted |
 | [0064](0064-corrections-stay-visible-in-recent-feedback.md) | Corrections stay visible in an entry's recent feedback | Accepted |
+| [0065](0065-an-author-cannot-rate-its-own-entry.md) | An author cannot rate its own entry | Accepted |
 | [0066](0066-the-admin-key-has-one-feedback-vote.md) | The admin key has one feedback vote per entry | Accepted |
 | [0067](0067-a-revoked-agents-feedback-no-longer-counts.md) | A revoked agent's feedback no longer counts | Accepted |
