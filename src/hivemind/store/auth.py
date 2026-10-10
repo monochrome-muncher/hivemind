@@ -13,7 +13,7 @@ import secrets
 
 import asyncpg
 
-from hivemind.domain.access import AgentStatus, InvalidAgentStatus, TrustLevel
+from hivemind.domain.access import AgentStatus, InvalidAgentStatus, TrustLevel, UnknownAgent
 from hivemind.domain.audit import key_fingerprint
 from hivemind.ports import Credential
 from hivemind.store.pool import PoolTimeouts, make_pool
@@ -163,7 +163,7 @@ class PgAuthenticator:
         async with pool.acquire(timeout=self._acquire_timeout) as conn, conn.transaction():
             status = await conn.fetchval(_LOCK_AGENT, agent_name)
             if status is None:
-                raise KeyError(f"unknown agent: {agent_name}")
+                raise UnknownAgent(f"unknown agent: {agent_name}")
             if status != "active":
                 raise InvalidAgentStatus(agent_name, AgentStatus(status), "issue a key for")
             await conn.execute(_DELETE_AGENT_KEYS, agent_name)

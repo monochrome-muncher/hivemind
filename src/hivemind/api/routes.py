@@ -61,7 +61,14 @@ from hivemind.api.schemas import (
     WhoamiOut,
     WithdrawRequest,
 )
-from hivemind.domain.access import Agent, InvalidAgentStatus, TrustLevel
+from hivemind.domain.access import (
+    Agent,
+    FleetExists,
+    InvalidAgentStatus,
+    TrustLevel,
+    UnknownAgent,
+    UnknownFleet,
+)
 from hivemind.domain.audit import AuditAction, AuditFilters
 from hivemind.domain.entry import EntryFilters, Kind, Source
 from hivemind.domain.validation import (
@@ -82,7 +89,14 @@ from hivemind.services.chain import (
     supersession_chain,
 )
 from hivemind.services.drafts import entry_draft
-from hivemind.services.errors import PermissionDenied, SupersedeDenied
+from hivemind.services.errors import (
+    AgentIdentityRequired,
+    EntryNotActive,
+    EntryNotFound,
+    NameTaken,
+    PermissionDenied,
+    SupersedeDenied,
+)
 
 require = Annotated[Credential, Depends(require_credential)]
 
@@ -175,6 +189,8 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
                 "agent identity is required: use an agent sub-key or pass 'agent'",
             )
         try:
+            # Pure parsing, no service or store I/O: a ValueError here is the
+            # malformed draft (domain/entry.py raises plain ValueError and InvalidInput).
             # Scope and author come from the credential (ADRs 0011-0012);
             # an out-of-permission scope is a 403.
             resolution = resolve_write_scope(credential, payload.scope)
@@ -194,17 +210,20 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
                 supersedes=payload.supersedes,
                 see_also=payload.see_also,
             )
+        except PermissionDenied as exc:
+            raise api_error(403, "forbidden", str(exc)) from exc
+        except ValueError as exc:
+            raise api_error(422, "invalid_entry", str(exc)) from exc
+        try:
             written = await app.write_service.write_and_relate(
                 draft, writer=credential.visibility()
             )
         except SupersedeDenied as exc:
             # ADR 0033: a supersession target out of the writer's reach.
             raise api_error(403, "supersede_denied", str(exc)) from exc
-        except PermissionDenied as exc:
-            raise api_error(403, "forbidden", str(exc)) from exc
         except EmbeddingError as exc:
             raise _embedding_unavailable(exc) from exc
-        except ValueError as exc:
+        except InvalidInput as exc:  # e.g. an unknown see_also entry
             raise api_error(422, "invalid_entry", str(exc)) from exc
         out = EntryOut.from_entry(written.entry)
         out.related = [RelatedOut.from_related(r) for r in written.related]
@@ -364,13 +383,13 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         """
         try:
             entry = await app.governance_service.withdraw(credential, entry_id, request.reason)
-        except LookupError:
+        except EntryNotFound:
             raise api_error(404, "not_found", f"unknown entry: {entry_id}") from None
         except PermissionDenied as exc:
             raise api_error(403, "forbidden", str(exc)) from exc
         except InvalidInput as exc:
             raise api_error(422, "invalid_input", str(exc)) from exc
-        except ValueError as exc:
+        except EntryNotActive as exc:
             raise api_error(409, "conflict", str(exc)) from exc
         return EntryOut.from_entry(entry)
 
@@ -384,13 +403,13 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         """
         try:
             pin = await app.governance_service.pin(credential, entry_id)
-        except LookupError:
+        except EntryNotFound:
             raise api_error(404, "not_found", f"unknown entry: {entry_id}") from None
         except PermissionDenied as exc:
             raise api_error(403, "forbidden", str(exc)) from exc
         except InvalidInput as exc:
             raise api_error(422, "invalid_input", str(exc)) from exc
-        except ValueError as exc:
+        except EntryNotActive as exc:
             raise api_error(409, "conflict", str(exc)) from exc
         return PinOut.from_pin(pin)
 
@@ -399,7 +418,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         """Unpin an entry (ADR 0058); ``removed`` says whether it was pinned."""
         try:
             removed = await app.governance_service.unpin(credential, entry_id)
-        except LookupError:
+        except EntryNotFound:
             raise api_error(404, "not_found", f"unknown entry: {entry_id}") from None
         except PermissionDenied as exc:
             raise api_error(403, "forbidden", str(exc)) from exc
@@ -438,11 +457,11 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
                 request.note,
                 agent=request.agent,
             )
-        except LookupError as exc:
+        except EntryNotFound as exc:
             raise api_error(404, "not_found", str(exc)) from None
         except InvalidInput as exc:
             raise api_error(422, "invalid_input", str(exc)) from exc
-        except ValueError as exc:
+        except AgentIdentityRequired as exc:
             raise api_error(422, "agent_identity_required", str(exc)) from exc
         return [
             FeedbackOut(entry_id=o.feedback.entry_id, verdict=o.feedback.verdict, quality=o.quality)
@@ -464,12 +483,11 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
                 request.note,
                 agent=request.agent,
             )
-        except LookupError:
+        except EntryNotFound:
             raise api_error(404, "not_found", f"unknown entry: {entry_id}") from None
         except InvalidInput as exc:
             raise api_error(422, "invalid_input", str(exc)) from exc
-        except ValueError as exc:
-            # ValueError: the caller's agent identity is unresolved.
+        except AgentIdentityRequired as exc:
             raise api_error(422, "agent_identity_required", str(exc)) from exc
         return FeedbackOut(
             entry_id=outcome.feedback.entry_id,
@@ -504,7 +522,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
             raise api_error(403, "forbidden", str(exc)) from exc
         except InvalidInput as exc:  # a bad or reserved name is not a conflict (ADR 0040)
             raise api_error(422, "invalid_input", str(exc)) from exc
-        except ValueError as exc:
+        except NameTaken as exc:
             raise api_error(409, "name_conflict", str(exc)) from exc
         if registration.already_registered:
             response.status_code = 200
@@ -523,7 +541,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
             raise api_error(403, "forbidden", str(exc)) from exc
         except InvalidInput as exc:
             raise api_error(422, "invalid_input", str(exc)) from exc
-        except ValueError as exc:
+        except FleetExists as exc:
             raise api_error(409, "fleet_exists", str(exc)) from exc
         return FleetOut.from_fleet(fleet)
 
@@ -562,7 +580,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
             )
         except PermissionDenied as exc:
             raise api_error(403, "forbidden", str(exc)) from exc
-        except KeyError as exc:
+        except (UnknownAgent, UnknownFleet) as exc:
             raise api_error(404, "not_found", str(exc)) from exc
         except InvalidAgentStatus as exc:
             raise api_error(409, "invalid_status", str(exc)) from exc
@@ -587,7 +605,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
                 payload.home_fleet_id is not None
                 and await app.store.get_fleet(payload.home_fleet_id) is None
             ):
-                raise KeyError(f"unknown fleet: {payload.home_fleet_id}")
+                raise UnknownFleet(f"unknown fleet: {payload.home_fleet_id}")
             agent: Agent | None = None
             if payload.trust_level is not None:
                 agent = await app.access_service.set_trust_level(
@@ -602,10 +620,10 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
                 # (404 for an unknown name, SPEC §5.1).
                 agent = await app.store.get_agent(name)
                 if agent is None:
-                    raise KeyError(f"unknown agent: {name}")
+                    raise UnknownAgent(f"unknown agent: {name}")
         except PermissionDenied as exc:
             raise api_error(403, "forbidden", str(exc)) from exc
-        except KeyError as exc:
+        except (UnknownAgent, UnknownFleet) as exc:
             raise api_error(404, "not_found", str(exc)) from exc
         return AgentOut.from_agent(agent)
 
@@ -620,7 +638,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
             await app.access_service.revoke(name, credential)
         except PermissionDenied as exc:
             raise api_error(403, "forbidden", str(exc)) from exc
-        except KeyError as exc:
+        except UnknownAgent as exc:
             raise api_error(404, "not_found", str(exc)) from exc
         except InvalidAgentStatus as exc:
             raise api_error(409, "invalid_status", str(exc)) from exc

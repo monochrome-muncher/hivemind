@@ -25,8 +25,10 @@ from hivemind.domain.access import (
     Agent,
     AgentStatus,
     Fleet,
+    FleetExists,
     InvalidAgentStatus,
     TrustLevel,
+    UnknownAgent,
     Visibility,
 )
 from hivemind.domain.audit import (
@@ -880,16 +882,16 @@ class PgStore:
     # -- fleets (ADR 0011) ------------------------------------------------------
 
     async def create_fleet(self, name: str) -> Fleet:
-        """Create a named fleet (ADR 0011). ``ValueError`` if the name
+        """Create a named fleet (ADR 0011). ``FleetExists`` if the name
         exists, including a racing duplicate (conflict-guarded insert)."""
         async with self._connection() as conn:
             dup = await conn.fetchrow(SELECT_FLEET_BY_NAME, name)
             if dup is not None:
-                raise ValueError(f"fleet already exists: {name!r}")
+                raise FleetExists(f"fleet already exists: {name!r}")
             row = await conn.fetchrow(INSERT_FLEET, name)
             if row is None:
                 # A concurrent create won the race.
-                raise ValueError(f"fleet already exists: {name!r}")
+                raise FleetExists(f"fleet already exists: {name!r}")
         return _row_to_fleet(row)
 
     async def list_fleets(self) -> list[Fleet]:
@@ -943,7 +945,7 @@ class PgStore:
         self, name: str, *, trust_level: TrustLevel, home_fleet_id: str
     ) -> Agent:
         """Activate a pending or revoked agent: set trust level + home
-        fleet, flip to ``active`` (ADRs 0012, 0028). ``KeyError`` if
+        fleet, flip to ``active`` (ADRs 0012, 0028). ``UnknownAgent`` if
         unknown; ``InvalidAgentStatus`` if already ``active``.
         """
         async with self._connection() as conn:
@@ -956,7 +958,7 @@ class PgStore:
 
     async def revoke_agent(self, name: str) -> Agent:
         """Flip a pending or active agent to ``revoked`` (ADR 0028).
-        ``KeyError`` if unknown; ``InvalidAgentStatus`` if already revoked.
+        ``UnknownAgent`` if unknown; ``InvalidAgentStatus`` if already revoked.
         """
         async with self._connection() as conn:
             row = await conn.fetchrow(REVOKE_AGENT, name)
@@ -971,18 +973,18 @@ class PgStore:
         """A guarded lifecycle UPDATE matched nothing: say why."""
         existing = await conn.fetchrow(GET_AGENT, name)
         if existing is None:
-            raise KeyError(f"unknown agent: {name}")
+            raise UnknownAgent(f"unknown agent: {name}")
         raise InvalidAgentStatus(name, AgentStatus(existing["status"]), verb)
 
     async def set_agent_trust_level(self, name: str, level: TrustLevel) -> Agent:
-        """Promote/demote an agent's trust level (ADR 0011). ``KeyError``
+        """Promote/demote an agent's trust level (ADR 0011). ``UnknownAgent``
         if unknown. Demotion to level 0 is *dormant* (still active, no
         access) — distinct from revocation (ADR 0012).
         """
         async with self._connection() as conn:
             existing = await conn.fetchrow(GET_AGENT, name)
             if existing is None:
-                raise KeyError(f"unknown agent: {name}")
+                raise UnknownAgent(f"unknown agent: {name}")
             row = await conn.fetchrow(SET_AGENT_LEVEL, name, level.value)
         if row is None:
             raise RuntimeError(f"agent {name!r} vanished between check and update")
@@ -991,12 +993,12 @@ class PgStore:
     async def set_agent_home_fleet(self, name: str, fleet_id: str) -> Agent:
         """Re-parent an agent to a new home fleet (ADR 0011). The agent's
         earlier ``fleet``-scoped entries stay in the fleet they were written
-        into (never re-parented). ``KeyError`` if unknown.
+        into (never re-parented). ``UnknownAgent`` if unknown.
         """
         async with self._connection() as conn:
             existing = await conn.fetchrow(GET_AGENT, name)
             if existing is None:
-                raise KeyError(f"unknown agent: {name}")
+                raise UnknownAgent(f"unknown agent: {name}")
             row = await conn.fetchrow(SET_AGENT_FLEET, name, fleet_id)
         if row is None:
             raise RuntimeError(f"agent {name!r} vanished between check and update")

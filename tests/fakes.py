@@ -13,7 +13,7 @@ import re
 from datetime import UTC, datetime, timedelta
 
 from hivemind.config import SearchConfig
-from hivemind.domain.access import AgentStatus, InvalidAgentStatus
+from hivemind.domain.access import AgentStatus, InvalidAgentStatus, UnknownAgent
 from hivemind.domain.entry import (
     EntityKind,
     EntryDraft,
@@ -238,7 +238,7 @@ class FakeAuthenticator:
         if self._store is not None:
             agent = await self._store.get_agent(agent_name)
             if agent is None:
-                raise KeyError(f"unknown agent: {agent_name}")
+                raise UnknownAgent(f"unknown agent: {agent_name}")
             if agent.status is not AgentStatus.ACTIVE:
                 raise InvalidAgentStatus(agent_name, agent.status, "issue a key for")
         raw = f"hm_agent_{agent_name}"

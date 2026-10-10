@@ -23,6 +23,8 @@ from hivemind.domain.access import (
     InvalidAgentStatus,
     Standing,
     TrustLevel,
+    UnknownAgent,
+    UnknownFleet,
 )
 from hivemind.domain.audit import AuditAction, AuditFilters, AuditRecord
 from hivemind.domain.validation import (
@@ -33,14 +35,10 @@ from hivemind.domain.validation import (
 )
 from hivemind.ports import Authenticator, Credential, Store
 from hivemind.services.audit import record_admin_action
+from hivemind.services.errors import NameTaken as NameTaken  # re-exported: defined in errors
 from hivemind.services.errors import PermissionDenied
 
 _NAME_TAKEN = "agent name is already taken (names are never reused; pick another name)"
-
-
-class NameTaken(ValueError):
-    """The name belongs to another registration (ADR 0039). Deliberately
-    says nothing about that registration (its status, its owner)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,7 +155,7 @@ class AccessService:
         """A home-fleet reference must name a real fleet (SPEC §12.1);
         checked before any mutation so a typo is a typed 404."""
         if await self._store.get_fleet(fleet_id) is None:
-            raise KeyError(f"unknown fleet: {fleet_id}")
+            raise UnknownFleet(f"unknown fleet: {fleet_id}")
 
     async def activate(
         self,
@@ -231,11 +229,11 @@ class AccessService:
         """Revoke an agent (ADRs 0012, 0028): status first (its key stops
         authenticating, ADR 0039), then delete the key row. On a pending
         agent this rejects the registration; the name stays reserved.
-        ``KeyError`` if unknown; ``InvalidAgentStatus`` if already revoked."""
+        ``UnknownAgent`` if unknown; ``InvalidAgentStatus`` if already revoked."""
         self._require_admin(credential)
         before = await self._store.get_agent(name)
         if before is None:
-            raise KeyError(f"unknown agent: {name}")
+            raise UnknownAgent(f"unknown agent: {name}")
         if before.status not in REVOCABLE:
             raise InvalidAgentStatus(name, before.status, "revoke")
         authenticator = self._require_authenticator()

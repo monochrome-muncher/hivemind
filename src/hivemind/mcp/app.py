@@ -38,7 +38,14 @@ from hivemind.services.chain import (
     supersession_chain,
 )
 from hivemind.services.drafts import entry_draft
-from hivemind.services.errors import PermissionDenied, SupersedeDenied
+from hivemind.services.errors import (
+    AgentIdentityRequired,
+    EntryNotActive,
+    EntryNotFound,
+    NameTaken,
+    PermissionDenied,
+    SupersedeDenied,
+)
 from hivemind.services.governance import GovernanceService, RelatedEntry, WriteService
 from hivemind.services.search import Hit, SearchService
 from hivemind.services.wiring import Services
@@ -345,6 +352,8 @@ async def hive_write(
             "agent identity is required: use an agent sub-key or pass 'agent'",
         )
     try:
+        # Pure parsing, no service or store I/O: a ValueError here is the
+        # malformed input (Kind(), sources, dates, draft validation).
         parsed_kind = Kind(kind)
         parsed_sources = _parse_sources(sources)
         # Scope and author come from the credential (ADRs 0011-0012).
@@ -374,7 +383,7 @@ async def hive_write(
         return _error(ERR_SUPERSEDE_DENIED, str(exc))
     except EmbeddingError as exc:
         return _embedding_unavailable(exc)
-    except ValueError as exc:
+    except InvalidInput as exc:  # e.g. an unknown see_also entry
         return _error(ERR_INVALID_INPUT, str(exc))
     result = _entry_dict(written.entry)
     result["related"] = [_related_dict(r) for r in written.related]
@@ -603,11 +612,11 @@ async def hive_withdraw(
         entry = await app.governance_service.withdraw(app.credential, entry_id, reason)
     except PermissionDenied as exc:
         return _error(ERR_PERMISSION_DENIED, str(exc))
-    except LookupError as exc:
+    except EntryNotFound as exc:
         return _error(ERR_NOT_FOUND, str(exc))
     except InvalidInput as exc:
         return _error(ERR_INVALID_INPUT, str(exc))
-    except ValueError as exc:
+    except EntryNotActive as exc:
         return _error(ERR_NOT_ACTIVE, str(exc))
     return _entry_dict(entry)
 
@@ -624,11 +633,11 @@ async def hive_pin(app: McpHivemind, entry_id: str, unpin: bool = False) -> dict
         pin = await app.governance_service.pin(app.credential, entry_id)
     except PermissionDenied as exc:
         return _error(ERR_PERMISSION_DENIED, str(exc))
-    except LookupError as exc:
+    except EntryNotFound as exc:
         return _error(ERR_NOT_FOUND, str(exc))
     except InvalidInput as exc:
         return _error(ERR_INVALID_INPUT, str(exc))
-    except ValueError as exc:
+    except EntryNotActive as exc:
         return _error(ERR_NOT_ACTIVE, str(exc))
     return {
         "entry_id": pin.entry_id,
@@ -695,7 +704,7 @@ async def hive_feedback(
     except ValueError:
         return _error(ERR_INVALID_VERDICT, f"verdict must be helpful|stale|wrong, got {verdict!r}")
     if not (app.credential.agent_id or agent):
-        # The one condition the service's ValueError stands for (SPEC §8.1).
+        # The service's AgentIdentityRequired condition (SPEC §8.1), checked up front.
         return _error(
             ERR_AGENT_UNRESOLVED,
             "the caller's agent identity must be resolved before recording feedback",
@@ -704,10 +713,12 @@ async def hive_feedback(
         outcome = await app.governance_service.record_feedback(
             app.credential, entry_id, parsed_verdict, note, agent=agent
         )
-    except LookupError as exc:
+    except EntryNotFound as exc:
         return _error(ERR_NOT_FOUND, str(exc))
-    except ValueError as exc:  # any other rejected input is just that
+    except InvalidInput as exc:
         return _error(ERR_INVALID_INPUT, str(exc))
+    except AgentIdentityRequired as exc:  # unreachable past the pre-check above
+        return _error(ERR_AGENT_UNRESOLVED, str(exc))
     fb: Feedback = outcome.feedback
     return {
         "entry_id": entry_id,
@@ -745,10 +756,12 @@ async def _hive_feedback_many(
         outcomes = await app.governance_service.record_feedback_many(
             app.credential, entry_ids, parsed_verdict, note, agent=agent
         )
-    except LookupError as exc:
+    except EntryNotFound as exc:
         return _error(ERR_NOT_FOUND, str(exc))
-    except ValueError as exc:
+    except InvalidInput as exc:
         return _error(ERR_INVALID_INPUT, str(exc))
+    except AgentIdentityRequired as exc:  # unreachable past the pre-check above
+        return _error(ERR_AGENT_UNRESOLVED, str(exc))
     return {
         "verdict": parsed_verdict.value,
         "note": note,
@@ -781,7 +794,7 @@ async def hive_register(
         return _error(ERR_PERMISSION_DENIED, str(exc))
     except InvalidInput as exc:  # a bad or reserved name is not a conflict (ADR 0040)
         return _error(ERR_INVALID_INPUT, str(exc))
-    except ValueError as exc:
+    except NameTaken as exc:
         return _error(ERR_NAME_CONFLICT, str(exc))
     agent = registration.agent
     return {

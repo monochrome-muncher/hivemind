@@ -18,9 +18,9 @@ from typing import Any
 
 class InvalidInput(ValueError):
     """An input the service refuses by rule (422 on REST, ``invalid_input``
-    on MCP). A ``ValueError`` so existing ``except ValueError`` seams keep
-    mapping it; surfaces catch it *first* where ``ValueError`` means
-    something else (a conflict, a status)."""
+    on MCP). A ``ValueError`` so a parse-block ``except ValueError`` (pure
+    parsing, no service call) still maps it; around a service call surfaces
+    catch ``InvalidInput`` itself, never the builtin."""
 
 
 # -- pagination (SPEC §5.3) ---------------------------------------------------

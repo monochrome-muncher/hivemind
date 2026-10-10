@@ -198,7 +198,7 @@ class Store(Protocol):
     # -- fleets (ADR 0011) ----------------------------------------------------
 
     async def create_fleet(self, name: str) -> Fleet:
-        """Create a named fleet. ``ValueError`` if the name already exists."""
+        """Create a named fleet. ``FleetExists`` if the name already exists."""
         ...
 
     async def list_fleets(self) -> list[Fleet]: ...
@@ -222,27 +222,27 @@ class Store(Protocol):
         self, name: str, *, trust_level: TrustLevel, home_fleet_id: str
     ) -> Agent:
         """Atomically flip a pending or revoked agent to ``active`` with a
-        trust level and home fleet (ADRs 0012, 0028). ``KeyError`` if
+        trust level and home fleet (ADRs 0012, 0028). ``UnknownAgent`` if
         unknown; ``InvalidAgentStatus`` if already ``active``."""
         ...
 
     async def revoke_agent(self, name: str) -> Agent:
         """Flip a pending or active agent to ``revoked`` (ADR 0028). The
         credential is the ``Authenticator``'s; this only moves the status.
-        ``KeyError`` if unknown; ``InvalidAgentStatus`` if already
+        ``UnknownAgent`` if unknown; ``InvalidAgentStatus`` if already
         ``revoked``."""
         ...
 
     async def set_agent_trust_level(self, name: str, level: TrustLevel) -> Agent:
         """Promote/demote an agent's trust level (ADR 0011). Demotion to
         level 0 is *dormant* (key still valid, no access) — distinct from
-        revocation (ADR 0012). ``KeyError`` if unknown."""
+        revocation (ADR 0012). ``UnknownAgent`` if unknown."""
         ...
 
     async def set_agent_home_fleet(self, name: str, fleet_id: str) -> Agent:
         """Re-parent an agent to a new home fleet (ADR 0011). The agent's
         earlier ``fleet``-scoped entries stay in the fleet they were written
-        into (never re-parented). ``KeyError`` if unknown."""
+        into (never re-parented). ``UnknownAgent`` if unknown."""
         ...
 
     # -- audit log (ADR 0027, SPEC §12.5) ------------------------------------
@@ -355,7 +355,7 @@ class Authenticator(Protocol):
 
     async def issue_agent_key(self, agent_name: str) -> str:
         """Issue an agent key bound to the registered agent name; return
-        the raw secret once (never stored). Raises ``KeyError`` if the agent
+        the raw secret once (never stored). Raises ``UnknownAgent`` if the agent
         is unknown and ``InvalidAgentStatus`` unless it is ``active``
         (ADR 0039); replaces any stale key row, so one live key per agent."""
         ...

@@ -25,8 +25,10 @@ from hivemind.domain.access import (
     Agent,
     AgentStatus,
     Fleet,
+    FleetExists,
     InvalidAgentStatus,
     TrustLevel,
+    UnknownAgent,
     Visibility,
     entry_is_visible,
 )
@@ -395,11 +397,11 @@ class MemoryStore:
     # -- fleets (ADR 0011) --------------------------------------------------
 
     async def create_fleet(self, name: str) -> Fleet:
-        """Create a named fleet (ADR 0011). ``ValueError`` if the name exists."""
+        """Create a named fleet (ADR 0011). ``FleetExists`` if the name exists."""
         with self._lock:
             for existing in self._fleets.values():
                 if existing.name == name:
-                    raise ValueError(f"fleet already exists: {name!r}")
+                    raise FleetExists(f"fleet already exists: {name!r}")
             fleet = Fleet(id=str(uuid.uuid4()), name=name, created_at=self._clock())
             self._fleets[fleet.id] = fleet
             return fleet
@@ -446,12 +448,12 @@ class MemoryStore:
         self, name: str, *, trust_level: TrustLevel, home_fleet_id: str
     ) -> Agent:
         """Activate a pending or revoked agent: set trust level + home
-        fleet, flip to ``active`` (ADRs 0012, 0028). ``KeyError`` if
+        fleet, flip to ``active`` (ADRs 0012, 0028). ``UnknownAgent`` if
         unknown; ``InvalidAgentStatus`` if already ``active``."""
         with self._lock:
             agent = self._agents.get(name)
             if agent is None:
-                raise KeyError(f"unknown agent: {name}")
+                raise UnknownAgent(f"unknown agent: {name}")
             if agent.status not in ACTIVATABLE:
                 raise InvalidAgentStatus(name, agent.status, "activate")
             activated = replace(
@@ -466,11 +468,11 @@ class MemoryStore:
 
     async def revoke_agent(self, name: str) -> Agent:
         """Flip a pending or active agent to ``revoked`` (ADR 0028).
-        ``KeyError`` if unknown; ``InvalidAgentStatus`` if already revoked."""
+        ``UnknownAgent`` if unknown; ``InvalidAgentStatus`` if already revoked."""
         with self._lock:
             agent = self._agents.get(name)
             if agent is None:
-                raise KeyError(f"unknown agent: {name}")
+                raise UnknownAgent(f"unknown agent: {name}")
             if agent.status not in REVOCABLE:
                 raise InvalidAgentStatus(name, agent.status, "revoke")
             revoked = replace(agent, status=AgentStatus.REVOKED)
@@ -478,13 +480,13 @@ class MemoryStore:
             return revoked
 
     async def set_agent_trust_level(self, name: str, level: TrustLevel) -> Agent:
-        """Promote/demote an agent's trust level (ADR 0011). ``KeyError`` if
+        """Promote/demote an agent's trust level (ADR 0011). ``UnknownAgent`` if
         unknown. Demotion to level 0 is *dormant* (still active, no access).
         """
         with self._lock:
             agent = self._agents.get(name)
             if agent is None:
-                raise KeyError(f"unknown agent: {name}")
+                raise UnknownAgent(f"unknown agent: {name}")
             updated = replace(agent, trust_level=level)
             self._agents[name] = updated
             return updated
@@ -492,12 +494,12 @@ class MemoryStore:
     async def set_agent_home_fleet(self, name: str, fleet_id: str) -> Agent:
         """Re-parent an agent to a new home fleet (ADR 0011). The agent's
         earlier ``fleet``-scoped entries stay in the fleet they were written
-        into (never re-parented). ``KeyError`` if unknown.
+        into (never re-parented). ``UnknownAgent`` if unknown.
         """
         with self._lock:
             agent = self._agents.get(name)
             if agent is None:
-                raise KeyError(f"unknown agent: {name}")
+                raise UnknownAgent(f"unknown agent: {name}")
             updated = replace(agent, home_fleet_id=fleet_id)
             self._agents[name] = updated
             return updated
