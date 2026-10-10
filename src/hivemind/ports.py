@@ -277,8 +277,10 @@ class Store(Protocol):
         ...
 
     async def list_feedback(self, entry_id: str, limit: int) -> list[Feedback]:
-        """An entry's feedback rows, newest first (``updated_at`` DESC, then
-        reporter), at most ``limit`` of them (ADR 0051). No visibility
+        """An entry's feedback rows, at most ``limit`` of them (ADR 0051): the
+        informative ones first (verdict stale or wrong, or a non-empty note),
+        then the bare ``helpful`` ones (ADR 0064); within each group newest
+        first (``updated_at`` DESC), then reporter. No visibility
         check: the caller has already established the entry is readable."""
         ...
 
@@ -286,7 +288,8 @@ class Store(Protocol):
         self, entry_ids: list[str], limit: int
     ) -> dict[str, list[Feedback]]:
         """``list_feedback`` for several entries in one read (ADR 0059),
-        keyed by every requested id (``[]`` when it has no feedback)."""
+        keyed by every requested id (``[]`` when it has no feedback), each in
+        ``list_feedback`` order."""
         ...
 
     async def health_check(self) -> bool:

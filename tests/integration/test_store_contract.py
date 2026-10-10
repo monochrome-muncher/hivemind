@@ -467,6 +467,39 @@ async def test_feedback_upserts_per_reporter_and_lists_newest_first(adapter: Ada
     assert counts == {entry.id: (0, 1, 1), other.id: (0, 0, 0)}
 
 
+async def test_feedback_lists_informative_reports_before_bare_helpful_ones(
+    adapter: Adapter,
+) -> None:
+    """ADR 0064: a correction older than five bare helpful reports stays in
+    the capped list, first; each group is newest first."""
+    entry = await write(adapter, "corrected")
+    other = await write(adapter, "other")
+    store = adapter.store
+    await store.record_feedback(Feedback(entry.id, "old", "a", Verdict.STALE, "now node 22", T0))
+    await store.record_feedback(
+        Feedback(entry.id, "noted", "a", Verdict.HELPFUL, "worked", T0 + timedelta(minutes=1))
+    )
+    await store.record_feedback(
+        Feedback(entry.id, "empty", "a", Verdict.HELPFUL, "", T0 + timedelta(minutes=2))
+    )
+    for i in range(5):
+        await store.record_feedback(
+            Feedback(
+                entry.id, f"bare{i}", "a", Verdict.HELPFUL, None, T0 + timedelta(minutes=10 + i)
+            )
+        )
+    await store.record_feedback(
+        Feedback(other.id, "b", "a", Verdict.HELPFUL, None, T0 + timedelta(minutes=1))
+    )
+    await store.record_feedback(Feedback(other.id, "w", "a", Verdict.WRONG, None, T0))
+    expected = ["noted", "old", "bare4", "bare3", "bare2"]
+    assert [r.user for r in await store.list_feedback(entry.id, 5)] == expected
+    many = await store.list_feedback_many([entry.id, other.id], 5)
+    assert [r.user for r in many[entry.id]] == expected
+    assert [r.user for r in many[other.id]] == ["w", "b"]
+    assert await store.feedback_counts(entry.id) == (7, 1, 0)
+
+
 async def test_quality_counts_cover_every_well_formed_id(adapter: Adapter) -> None:
     counts = await adapter.store.quality_counts([NO_SUCH_ID, "not-a-uuid"])
     assert counts == {NO_SUCH_ID: (0, 0, 0)}

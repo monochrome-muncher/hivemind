@@ -1,5 +1,9 @@
 # Feedback is readable by the entry's audience
 
+> **Status: amended by [ADR 0064](0064-corrections-stay-visible-in-recent-feedback.md):**
+> point 2's "newest first" is now informative reports first, then bare
+> `helpful` ones, each group newest first.
+
 ## Context
 
 Feedback (SPEC §4.2) was write-only. A reporter's verdict and `note` were
