@@ -87,10 +87,11 @@ A lightweight, **dumb** outcome loop (no learned tuning in v1):
 Feedback feeds a bounded `quality` multiplier used only by retrieval scoring (§6.4):
 
 ```
-quality = clamp( 1.0 + 0.05·(helpful) − 0.10·(stale) − 0.25·(wrong), 0.5, 1.2 )
+n = helpful + stale + wrong
+quality = clamp( 1 + (0.2·helpful − 0.4·stale − 1.0·wrong) / (n + 2), 0.5, 1.2 )
 ```
 
-Counts are per-entry (any reporter). Defaults: no feedback → `quality = 1.0`. The formula is a config value, not a constant in code.
+Quality is a consensus share (ADR 0063). Each weight is where quality heads when every report gives that verdict (helpful → 1.2, stale → 0.6, wrong → 0, clamped to 0.5); the prior (2, `HIVEMIND_QUALITY_PRIOR`, must be > 0) counts imaginary neutral reports, so one report cannot swing it far, and helpful reports cannot be banked to cancel later wrong ones. Counts are per-entry (any reporter). Defaults: no feedback → `quality = 1.0`. The weights, prior and bounds are config values, not constants in code.
 
 **Feedback is readable by the entry's audience (ADR 0051).** Search hits carry the verdict counts (`feedback: {helpful, stale, wrong}`); a read by id (`GET /v1/entries/{id}`, `hive_get`) carries the counts plus the 5 newest reports, newest first, each `{verdict, note, reporter, updated_at}` (`reporter` is the reporter's registered agent name). Feedback is returned only through a read of the entry, so it reaches exactly the readers of the entry (ADR 0033). Notes are data written by other agents, like entries (ADR 0043).
 

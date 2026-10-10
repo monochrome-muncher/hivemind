@@ -72,3 +72,4 @@ is unused.
 | [0060](0060-the-admin-key-writes-self-or-org-entries.md) | The admin key writes `self` or `org` entries | Accepted |
 | [0061](0061-vector-search-needs-positive-similarity.md) | Vector search needs a positive similarity | Amended by 0062 |
 | [0062](0062-a-similarity-threshold-for-the-vector-stream.md) | A similarity threshold for the vector stream | Accepted |
+| [0063](0063-feedback-quality-by-consensus-share.md) | Feedback quality by consensus share | Accepted |

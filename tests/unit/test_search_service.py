@@ -178,7 +178,7 @@ class TestDecayAndQuality:
         service = make_service(store, embedder, search_config)
 
         before = [h.entry_id for h in await service.search("churn")]
-        # Two independent 'wrong' reports: quality = 1.0 - 0.5 = 0.5.
+        # Two independent 'wrong' reports: quality = 1 - 2/(2+2) = 0.5.
         for user in ("u1", "u2"):
             await store.record_feedback(_feedback(target.id, user))
         after = [h.entry_id for h in await service.search("churn")]

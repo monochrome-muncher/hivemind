@@ -464,8 +464,8 @@ class TestFeedback:
         body = resp.json()
         assert body["entry_id"] == entry["id"]
         assert body["verdict"] == "helpful"
-        # quality = 1.0 + 0.05 (one helpful verdict; SPEC.md §4.2)
-        assert body["quality"] == pytest.approx(1.05)
+        # quality = 1 + 0.2/(1+2) (one helpful verdict; SPEC.md §4.2)
+        assert body["quality"] == pytest.approx(1.0 + 0.2 / 3)
 
     async def test_feedback_unknown_entry_is_404(self) -> None:
         client = make_client(make_hivemind_app())

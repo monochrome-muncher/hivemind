@@ -142,14 +142,4 @@ class FeedbackService:
     async def quality(self, entry_id: str) -> float:
         """An entry's current quality multiplier (SPEC.md §6.4)."""
         helpful, stale, wrong = await self._store.feedback_counts(entry_id)
-        cfg = self._config
-        return feedback_quality(
-            helpful,
-            stale,
-            wrong,
-            helpful_weight=cfg.quality_helpful_weight,
-            stale_weight=cfg.quality_stale_weight,
-            wrong_weight=cfg.quality_wrong_weight,
-            min_quality=cfg.quality_min,
-            max_quality=cfg.quality_max,
-        )
+        return feedback_quality(helpful, stale, wrong, **self._config.quality_kwargs())

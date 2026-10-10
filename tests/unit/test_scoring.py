@@ -7,7 +7,8 @@ Formulas (SPEC.md §6.4, §4.2):
           * max(recency_floor, 0.5 ** (age_days / half_life_days))
           * quality
 
-    quality = clamp(1.0 + 0.05*h - 0.10*s - 0.25*w, 0.5, 1.2)
+    n = h + s + w
+    quality = clamp(1 + (0.2*h - 0.4*s - 1.0*w) / (n + 2), 0.5, 1.2)   # ADR 0063
 
 The floor is ADR 0022 (shipped at 0.8, in ``SearchConfig``). The pure
 function keeps ``recency_floor=None`` as its own default — "the numbers
@@ -142,18 +143,41 @@ class TestRecencyFloor:
 
 class TestFeedbackQuality:
     def test_no_feedback_is_neutral(self):
-        assert feedback_quality(helpful=0, stale=0, wrong=0) == pytest.approx(1.0)
+        assert feedback_quality(helpful=0, stale=0, wrong=0) == 1.0
 
-    def test_mixed_verdicts(self):
-        # 1.0 + 0.05*2 - 0.10*1 - 0.25*1 = 0.75
-        assert feedback_quality(helpful=2, stale=1, wrong=1) == pytest.approx(0.75)
+    @pytest.mark.parametrize(
+        ("helpful", "stale", "wrong", "expected"),
+        [
+            (1, 0, 0, 1.0667),
+            (4, 0, 0, 1.1333),
+            (20, 0, 0, 1.1818),
+            (0, 1, 0, 0.8667),
+            (0, 0, 1, 0.6667),
+            (0, 0, 2, 0.5),
+            (5, 0, 1, 1.0),
+            (10, 0, 1, 1.0769),
+            (20, 0, 3, 1.04),
+        ],
+    )
+    def test_consensus_share_values(self, helpful, stale, wrong, expected):
+        got = feedback_quality(helpful=helpful, stale=stale, wrong=wrong)
+        assert got == pytest.approx(expected, abs=1e-4)
 
-    def test_many_helpful_clamps_to_max(self):
-        assert feedback_quality(helpful=20, stale=0, wrong=0) == pytest.approx(1.2)
+    def test_helpful_reports_cannot_be_banked_against_wrong_ones(self):
+        # The old formula clamped after summing, so 20 helpful + 3 wrong
+        # was the 1.2 maximum. Now the wrong reports show.
+        mixed = feedback_quality(helpful=20, stale=0, wrong=3)
+        assert mixed < feedback_quality(helpful=20, stale=0, wrong=0)
+        assert mixed < 1.2
 
-    def test_many_wrong_clamps_to_min(self):
-        assert feedback_quality(helpful=0, stale=0, wrong=3) == pytest.approx(0.5)
+    def test_weights_are_per_verdict_end_points(self):
+        assert feedback_quality(helpful=1000, stale=0, wrong=0) == pytest.approx(1.2, abs=1e-2)
+        assert feedback_quality(helpful=0, stale=1000, wrong=0) == pytest.approx(0.6, abs=1e-2)
 
-    def test_stale_uses_its_own_weight(self):
-        # 1.0 - 0.10*2 = 0.8
-        assert feedback_quality(helpful=0, stale=2, wrong=0) == pytest.approx(0.8)
+    def test_prior_is_configurable(self):
+        # 1 - 1.0 / (1 + 1) = 0.5
+        assert feedback_quality(0, 0, 1, prior=1.0) == pytest.approx(0.5)
+
+    def test_clamps_to_configured_bounds(self):
+        assert feedback_quality(0, 0, 5, min_quality=0.7) == pytest.approx(0.7)
+        assert feedback_quality(50, 0, 0, max_quality=1.1) == pytest.approx(1.1)
