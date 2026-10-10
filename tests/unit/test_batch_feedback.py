@@ -4,16 +4,19 @@ nothing recorded, on both surfaces."""
 from __future__ import annotations
 
 import httpx
+import pytest
 
 from hivemind.api.deps import create_app
 from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
+from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.domain.validation import MAX_FEEDBACK_IDS
 from hivemind.mcp.app import McpHivemind, hive_feedback, hive_write
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
+from hivemind.services.feedback import FeedbackService
 from hivemind.services.governance import GovernanceService, WriteService
 from hivemind.services.search import SearchService
 from tests.fakes import FakeAuthenticator, make_clock, make_embedder, make_search_config
@@ -162,3 +165,57 @@ async def test_rest_batch_feedback_bounds() -> None:
         )
     assert empty.status_code == 422
     assert many.status_code == 422
+
+
+class _CountingStore(MemoryStore):
+    """Counts every Store call a batch makes; can fail the batch upsert."""
+
+    def __init__(self) -> None:
+        super().__init__(make_clock())
+        self.calls = 0
+        self.fail_upsert = False
+
+    def __getattribute__(self, name: str) -> object:
+        attr = super().__getattribute__(name)
+        if name in {"get_entry", "get_entries", "record_feedback", "quality_counts"}:
+            object.__setattr__(self, "calls", super().__getattribute__("calls") + 1)
+        return attr
+
+    async def record_feedback_many(self, feedbacks: list[Feedback]) -> None:
+        self.calls += 1
+        if self.fail_upsert:
+            raise RuntimeError("store down")
+        await super().record_feedback_many(feedbacks)
+
+
+async def test_one_entry_spelled_two_ways_is_recorded_once_under_its_canonical_id() -> None:
+    store = MemoryStore(make_clock())
+    (eid,) = await _entries(store, WRITER, 1)
+    service = FeedbackService(store)
+    outcomes = await service.record_feedback_many(
+        READER, [eid.upper(), eid], Verdict.HELPFUL, agent="reader"
+    )
+    assert [o.feedback.entry_id for o in outcomes] == [eid]
+    assert await store.feedback_counts(eid) == (1, 0, 0)
+    assert len(await store.list_feedback(eid, 10)) == 1
+
+
+async def test_a_batch_makes_the_same_store_calls_for_one_id_as_for_sixteen() -> None:
+    counts = []
+    for n in (1, MAX_FEEDBACK_IDS):
+        store = _CountingStore()
+        ids = await _entries(store, WRITER, n)
+        store.calls = 0
+        await FeedbackService(store).record_feedback_many(READER, ids, Verdict.HELPFUL)
+        counts.append(store.calls)
+    assert counts[0] == counts[1]
+
+
+async def test_a_store_failure_in_the_batch_records_nothing() -> None:
+    store = _CountingStore()
+    ids = await _entries(store, WRITER, 3)
+    store.fail_upsert = True
+    with pytest.raises(RuntimeError):
+        await FeedbackService(store).record_feedback_many(READER, ids, Verdict.HELPFUL)
+    for eid in ids:
+        assert await store.feedback_counts(eid) == (0, 0, 0)

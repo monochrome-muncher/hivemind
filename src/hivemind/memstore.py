@@ -182,6 +182,11 @@ class MemoryStore:
         with self._lock:
             self._feedback[(feedback.entry_id, feedback.user, feedback.agent)] = feedback
 
+    async def record_feedback_many(self, feedbacks: list[Feedback]) -> None:
+        with self._lock:
+            for feedback in feedbacks:
+                self._feedback[(feedback.entry_id, feedback.user, feedback.agent)] = feedback
+
     # -- read path --------------------------------------------------------
 
     async def get_entry(self, entry_id: str) -> Entry | None:
