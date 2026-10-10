@@ -379,10 +379,12 @@ class MemoryStore:
     async def list_feedback(self, entry_id: str, limit: int) -> list[Feedback]:
         with self._lock:
             rows = [fb for fb in self._feedback.values() if fb.entry_id == entry_id]
-        # Newest first; ties (same timestamp) break on the reporter, as on
-        # Postgres, so the order is deterministic.
+        # Informative rows (stale, wrong, or with a note) before bare helpful
+        # ones (ADR 0064), each group newest first; ties (same timestamp)
+        # break on the reporter, as on Postgres, so the order is deterministic.
         rows.sort(key=lambda fb: (fb.user, fb.agent))
         rows.sort(key=lambda fb: fb.updated_at or _EPOCH, reverse=True)
+        rows.sort(key=lambda fb: fb.verdict is Verdict.HELPFUL and not fb.note)
         return rows[:limit]
 
     async def list_feedback_many(

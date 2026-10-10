@@ -276,20 +276,22 @@ LIST_FEEDBACK = """
 SELECT entry_id, "user", agent, verdict, note, updated_at
 FROM feedbacks
 WHERE entry_id = $1
-ORDER BY updated_at DESC, "user", agent
+ORDER BY (verdict = 'helpful' AND COALESCE(note, '') = ''), updated_at DESC, "user", agent
 LIMIT $2
 """
 
-# The newest $2 rows of each entry in $1 (ADR 0059), in LIST_FEEDBACK order.
+# The first $2 rows of each entry in $1 (ADR 0059), in LIST_FEEDBACK order
+# (informative rows before bare helpful ones, ADR 0064).
 LIST_FEEDBACK_MANY = """
 SELECT entry_id, "user", agent, verdict, note, updated_at FROM (
     SELECT f.*, row_number() OVER (
-               PARTITION BY entry_id ORDER BY updated_at DESC, "user", agent) AS rn
+               PARTITION BY entry_id
+               ORDER BY (verdict = 'helpful' AND COALESCE(note, '') = ''), updated_at DESC, "user", agent) AS rn
       FROM feedbacks f
      WHERE entry_id = ANY($1::uuid[])
 ) AS ranked
 WHERE rn <= $2
-ORDER BY entry_id, updated_at DESC, "user", agent
+ORDER BY entry_id, (verdict = 'helpful' AND COALESCE(note, '') = ''), updated_at DESC, "user", agent
 """
 
 BATCH_FEEDBACK = """

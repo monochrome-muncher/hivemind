@@ -171,6 +171,24 @@ async def test_get_returns_the_newest_reports_only_but_counts_all() -> None:
     assert reporters == [f"agent-{i}" for i in reversed(range(2, total))]
 
 
+async def test_get_keeps_a_correction_after_five_later_helpful_reports() -> None:
+    """ADR 0064: bare helpful reports do not push a stale note out of `recent`."""
+    store = MemoryStore(make_clock())
+    entry_id = await _flagged_entry(store)
+    for i in range(FEEDBACK_RECENT_LIMIT):
+        await hive_feedback(
+            _surface(store, _agent(f"fan-{i}", "fleet-a", TrustLevel.LURKER)),
+            entry_id,
+            verdict="helpful",
+        )
+    result = await hive_get(_surface(store, WRITER), entry_id)
+    feedback = result["feedback"]
+    assert feedback["helpful"] == FEEDBACK_RECENT_LIMIT  # type: ignore[index]
+    recent = feedback["recent"]  # type: ignore[index]
+    assert len(recent) == FEEDBACK_RECENT_LIMIT
+    assert (recent[0]["verdict"], recent[0]["note"]) == ("stale", "billing moved to node 22")
+
+
 async def test_a_reporters_latest_verdict_replaces_its_earlier_one() -> None:
     store = MemoryStore(make_clock())
     entry_id = await _flagged_entry(store)
