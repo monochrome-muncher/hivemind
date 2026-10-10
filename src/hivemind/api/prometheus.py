@@ -8,10 +8,14 @@ Ingress (deny by default), never to the public one.
 Three groups of series:
 
 * **Usage gauges** from ``MetricsService.usage_report`` (the same counts
-  ``GET /v1/metrics`` returns). The report is one grouped scan of the
-  pool, so it is cached for ``USAGE_TTL_SECONDS`` and refreshed by at
-  most one scrape at a time. Every replica reports the same pool, so
-  aggregate them with ``max``, not ``sum``.
+  ``GET /v1/metrics`` returns). The whole report is cached here for
+  ``USAGE_TTL_SECONDS`` and refreshed by at most one scrape at a time.
+  Its expensive part, the grouped scan of the entries, is cached again
+  inside ``MetricsService`` for ``HIVEMIND_METRICS_ENTRY_COUNTS_TTL``
+  (default 300 s), so the entry gauges can lag by up to that long; the
+  agent, fleet and search gauges are as fresh as this layer's TTL. Every
+  replica reports the same pool, so aggregate them with ``max``, not
+  ``sum``.
 * **HTTP request metrics** of this process: a counter and a latency
   histogram per method and route *template* (``/v1/entries/{entry_id}``,
   never the raw path, so the label set stays bounded).

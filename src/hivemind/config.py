@@ -203,6 +203,11 @@ class Settings(BaseSettings):
     # 0 disables retrying. A failure never blocks the write (best-effort).
     extractor_retries: int = Field(default=2, ge=0)
 
+    # How long (seconds) MetricsService reuses the grouped scan of the
+    # entries behind /v1/metrics and /metrics (ADR 0069); 0 scans on every
+    # report. The entry counts can lag by up to this long.
+    metrics_entry_counts_ttl: float = Field(default=300.0, ge=0, allow_inf_nan=False)
+
     # Retrieval knobs, mirroring SearchConfig (whose __post_init__ holds
     # the value rules, run at load time by ``_check_consistency``).
     rrf_k: int = 60

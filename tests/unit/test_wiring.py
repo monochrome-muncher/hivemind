@@ -91,3 +91,15 @@ def test_log_startup_line_is_unchanged_and_redacted(caplog: pytest.LogCaptureFix
         f"embedding_dim={settings.embedding_dim} extraction=off "
         f"pool_max_size={settings.pool_max_size}"
     )
+
+
+async def test_metrics_entry_counts_ttl_reaches_the_metrics_service() -> None:
+    store = make_store()
+    services = build_services(
+        store, make_embedder(), make_search_config(), metrics_entry_counts_ttl=0
+    )
+    assert (await services.metrics_service.usage_report())["entries"]["total"] == 0
+    await services.write_service.write(
+        EntryDraft(kind=Kind.FACT, summary="written after the first report", author="a", agent="a")
+    )
+    assert (await services.metrics_service.usage_report())["entries"]["total"] == 1

@@ -1,5 +1,8 @@
 # The REST runner serves a Prometheus scrape endpoint
 
+> **Status: amended by [ADR 0069](0069-cache-the-entry-scan-behind-the-usage-report.md):**
+> the grouped entry scan is also cached inside `MetricsService`, so the entry gauges can lag by more than 30 s.
+
 Adds to ROADMAP §3.3 (usage counters). `GET /v1/metrics` is unchanged.
 
 ## Context

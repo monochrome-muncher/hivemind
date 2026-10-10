@@ -62,6 +62,7 @@ lists every one with its default, and `src/hivemind/config.py` is the source.
 | `HIVEMIND_HOST` / `HIVEMIND_PORT` | the mcp-http bind host/port (ADR 0010) |
 | `HIVEMIND_RECENCY_FLOOR` | lower bound on the SPEC §6.4 recency factor, `(0, 1]`, default 0.8 (ADR 0022) — set it to an empty value or `none` (case-insensitive) to revert to the pre-ADR-0022 unbounded behaviour (ADR 0023), not a negligible number |
 | `HIVEMIND_VECTOR_MIN_SIMILARITY` | the search similarity threshold (ADR 0062), `[0, 1)`, off by default (unset, empty or `none`). When set, the vector stream keeps only entries above it, so a search with nothing relevant can come back empty. Depends on the embedding model and dimension: measure it with `make measure-threshold` ([retrieval experiments](retrieval-experiments.md#similarity-threshold)) and re-measure after changing either |
+| `HIVEMIND_METRICS_ENTRY_COUNTS_TTL` | seconds the usage report reuses its one grouped scan of `entries` (ADR 0069), default 300, `0` = scan on every report. Shared by `GET /v1/metrics` and `GET /metrics`, so the entry counts (and writes per fleet) can be up to this old; agents, fleets and searches are read on every report |
 | `HIVEMIND_POOL_MIN_SIZE` / `HIVEMIND_POOL_MAX_SIZE` | the asyncpg connection pool's min/max size, per process (default 1 / 10) — the operator knob for per-pod concurrency |
 
 > **Behind a transaction-mode PgBouncer (or any transaction-pooling
