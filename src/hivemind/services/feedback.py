@@ -19,7 +19,7 @@ from hivemind.domain.validation import (
 )
 from hivemind.ports import Credential, Store
 from hivemind.retrieval.scoring import feedback_quality
-from hivemind.services.chain import get_visible_entry
+from hivemind.services.chain import get_visible_entries, get_visible_entry
 from hivemind.services.errors import AgentIdentityRequired, EntryNotFound, PermissionDenied
 
 
@@ -32,6 +32,21 @@ def _own_entry_message(ids: list[str]) -> str:
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+ADMIN_REPORTER = "admin"  # the reserved name ADR 0060 gives the admin key's entries
+
+
+def reporter_agent(credential: Credential, agent: str | None) -> str | None:
+    """The agent a feedback row is filed under (SPEC.md §4.2, ADR 0066).
+
+    The admin key is always ``admin``, whatever it self-reports; an agent
+    sub-key's credential agent wins; otherwise the self-reported ``agent``
+    (``None`` when there is none, which the caller must refuse).
+    """
+    if credential.is_admin:
+        return ADMIN_REPORTER
+    return credential.agent_id or agent
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,12 +80,13 @@ class FeedbackService:
         """Upsert the caller's verdict for an entry (SPEC.md §4.2).
 
         One row per (entry, user, agent): the reporter's latest verdict
-        wins. The agent identity is the acting sub-key's agent, or the
-        ``agent`` self-reported by a plain user key (SPEC.md §8.1).
+        wins. The agent identity is ``admin`` for the admin key (ADR 0066),
+        the acting sub-key's agent, or the ``agent`` self-reported by a
+        plain user key (SPEC.md §8.1).
         """
         check_text(note, "note", MAX_NOTE_CHARS)  # ADR 0040
         check_text(agent, "agent", MAX_IDENTITY_CHARS)
-        effective_agent = credential.agent_id or agent
+        effective_agent = reporter_agent(credential, agent)
         if effective_agent is None:
             raise AgentIdentityRequired(
                 "the caller's agent identity must be resolved before "
@@ -82,7 +98,7 @@ class FeedbackService:
         if entry.author == credential.user_id:  # ADR 0065
             raise PermissionDenied(_own_entry_message([entry_id]))
         feedback = Feedback(
-            entry_id=entry_id,
+            entry_id=entry.id,  # the canonical id, not the caller's spelling
             user=credential.user_id,
             agent=effective_agent,
             verdict=verdict,
@@ -92,7 +108,7 @@ class FeedbackService:
         await self._store.record_feedback(feedback)
         return FeedbackOutcome(
             feedback=feedback,
-            quality=await self.quality(entry_id),
+            quality=await self.quality(entry.id),
         )
 
     async def record_feedback_many(
@@ -107,24 +123,52 @@ class FeedbackService:
 
         All or nothing: if any id is unreadable (``EntryNotFound``) or the
         caller's own entry (``PermissionDenied``, ADR 0065), nothing is
-        recorded and the error names them. Repeated ids count once.
+        recorded and the error names them. Spellings of one entry count
+        once. A fixed number of store calls however many ids: one read,
+        one transactional upsert, one count read.
         """
+        check_text(note, "note", MAX_NOTE_CHARS)  # ADR 0040
+        check_text(agent, "agent", MAX_IDENTITY_CHARS)
+        effective_agent = reporter_agent(credential, agent)
+        if effective_agent is None:
+            raise AgentIdentityRequired(
+                "the caller's agent identity must be resolved before "
+                "recording feedback (SPEC.md §8.1)"
+            )
         ids = list(dict.fromkeys(entry_ids))
         if not ids:
             raise InvalidInput("entry_ids must name at least one entry")
         if len(ids) > MAX_FEEDBACK_IDS:
             raise InvalidInput(f"entry_ids may name at most {MAX_FEEDBACK_IDS} entries")
-        visibility = credential.visibility()
-        found = {eid: await get_visible_entry(self._store, eid, visibility) for eid in ids}
-        missing = [eid for eid, entry in found.items() if entry is None]
+        found = await get_visible_entries(self._store, ids, credential.visibility())
+        missing = [eid for eid in ids if eid not in found]
         if missing:  # feedback follows readability (SPEC §12.2, ADR 0033)
             raise EntryNotFound(f"unknown entries: {', '.join(missing)}")
-        own = [eid for eid, entry in found.items() if entry and entry.author == credential.user_id]
+        own = [eid for eid in ids if found[eid].author == credential.user_id]
         if own:  # ADR 0065: after readability, so an unreadable id stays not_found
             raise PermissionDenied(_own_entry_message(own))
-        return [
-            await self.record_feedback(credential, eid, verdict, note, agent=agent) for eid in ids
+        canonical = list(dict.fromkeys(found[eid].id for eid in ids))
+        now = _utcnow()
+        rows = [
+            Feedback(
+                entry_id=eid,
+                user=credential.user_id,
+                agent=effective_agent,
+                verdict=verdict,
+                note=note,
+                updated_at=now,
+            )
+            for eid in canonical
         ]
+        await self._store.record_feedback_many(rows)
+        counts = await self._store.quality_counts(canonical)
+        kwargs = self._config.quality_kwargs()
+        outcomes = []
+        for row in rows:
+            helpful, stale, wrong = counts.get(row.entry_id, (0, 0, 0))
+            quality = feedback_quality(helpful, stale, wrong, **kwargs)
+            outcomes.append(FeedbackOutcome(feedback=row, quality=quality))
+        return outcomes
 
     async def feedback_summary(self, entry_id: str) -> FeedbackSummary:
         """What a reader of an entry sees of its feedback (ADR 0051): the
@@ -154,14 +198,4 @@ class FeedbackService:
     async def quality(self, entry_id: str) -> float:
         """An entry's current quality multiplier (SPEC.md §6.4)."""
         helpful, stale, wrong = await self._store.feedback_counts(entry_id)
-        cfg = self._config
-        return feedback_quality(
-            helpful,
-            stale,
-            wrong,
-            helpful_weight=cfg.quality_helpful_weight,
-            stale_weight=cfg.quality_stale_weight,
-            wrong_weight=cfg.quality_wrong_weight,
-            min_quality=cfg.quality_min,
-            max_quality=cfg.quality_max,
-        )
+        return feedback_quality(helpful, stale, wrong, **self._config.quality_kwargs())
