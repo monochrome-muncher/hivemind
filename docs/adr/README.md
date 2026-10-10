@@ -60,7 +60,7 @@ is unused.
 | [0048](0048-search-falls-back-to-keywords-when-the-embedder-is-down.md) | Search falls back to keywords when the embedder is down | Accepted |
 | [0049](0049-keyword-stream-matches-at-most-16-terms.md) | The keyword stream matches at most 16 distinct query terms | Accepted |
 | [0050](0050-prometheus-scrape-endpoint.md) | The REST runner serves a Prometheus scrape endpoint | Accepted |
-| [0051](0051-feedback-is-readable.md) | Feedback is readable by the entry's audience | Accepted |
+| [0051](0051-feedback-is-readable.md) | Feedback is readable by the entry's audience | Amended by 0064 |
 | [0052](0052-writes-report-the-nearest-entries.md) | Writes report the nearest existing entries | Accepted |
 | [0053](0053-feedback-on-several-entries-at-once.md) | Feedback on several entries at once | Accepted |
 | [0054](0054-a-flagged-filter-for-entries-reported-stale-or-wrong.md) | A `flagged` filter for entries reported stale or wrong | Accepted |
@@ -72,5 +72,6 @@ is unused.
 | [0060](0060-the-admin-key-writes-self-or-org-entries.md) | The admin key writes `self` or `org` entries | Amended by 0066 |
 | [0061](0061-vector-search-needs-positive-similarity.md) | Vector search needs a positive similarity | Amended by 0062 |
 | [0062](0062-a-similarity-threshold-for-the-vector-stream.md) | A similarity threshold for the vector stream | Accepted |
+| [0064](0064-corrections-stay-visible-in-recent-feedback.md) | Corrections stay visible in an entry's recent feedback | Accepted |
 | [0066](0066-the-admin-key-has-one-feedback-vote.md) | The admin key has one feedback vote per entry | Accepted |
 | [0067](0067-a-revoked-agents-feedback-no-longer-counts.md) | A revoked agent's feedback no longer counts | Accepted |
