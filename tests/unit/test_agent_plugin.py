@@ -64,7 +64,8 @@ def test_the_skill_carries_the_distillation_loop() -> None:
     flat = " ".join(SKILL.split())
     for rule in (
         "before an irreversible step",
-        "Write when reality differed from what Hivemind told you",
+        "Write what another agent could reuse, above all when reality differed",
+        "from what Hivemind told you",
         "Write only the delta",
         "Search with your draft summary first",
         "tags filter, they are not searched",
