@@ -101,7 +101,9 @@ _DESC_SEARCH = (
     "are display-only). If the embedding service is down, the "
     "hits are keyword matches only and the reply has degraded: keyword_only. "
     "Each hit's 'feedback' counts the helpful/stale/wrong reports on it: open "
-    "a hit reported stale or wrong with hive_get to read why."
+    "a hit reported stale or wrong with hive_get to read why. 'last_confirmed_at', "
+    "when present, is when someone other than the author used the entry and "
+    "said what they checked, with no stale/wrong flag since."
 )
 _DESC_GET = (
     "Fetch a full entry including its body. include_history adds the "

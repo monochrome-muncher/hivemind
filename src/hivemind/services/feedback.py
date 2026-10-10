@@ -9,7 +9,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from hivemind.config import SearchConfig
-from hivemind.domain.feedback import FEEDBACK_RECENT_LIMIT, Feedback, FeedbackSummary, Verdict
+from hivemind.domain.feedback import (
+    FEEDBACK_RECENT_LIMIT,
+    NO_SIGNALS,
+    Feedback,
+    FeedbackSummary,
+    Verdict,
+)
 from hivemind.domain.validation import (
     MAX_FEEDBACK_IDS,
     MAX_IDENTITY_CHARS,
@@ -177,21 +183,26 @@ class FeedbackService:
         No visibility check here: the caller must already have read the
         entry with ``get_visible_entry``.
         """
-        (helpful, stale, wrong), recent = await asyncio.gather(
-            self._store.feedback_counts(entry_id),
+        signals, recent = await asyncio.gather(
+            self._store.feedback_signals([entry_id]),
             self._store.list_feedback(entry_id, FEEDBACK_RECENT_LIMIT),
         )
-        return FeedbackSummary(helpful, stale, wrong, tuple(recent))
+        s = signals.get(entry_id, NO_SIGNALS)
+        return FeedbackSummary(s.helpful, s.stale, s.wrong, tuple(recent), s.last_confirmed_at)
 
     async def feedback_summaries(self, entry_ids: list[str]) -> dict[str, FeedbackSummary]:
         """``feedback_summary`` for several entries, two store reads in all
         however many there are (ADR 0059). Same caveat: no visibility check."""
-        counts, recent = await asyncio.gather(
-            self._store.quality_counts(entry_ids),
+        signals, recent = await asyncio.gather(
+            self._store.feedback_signals(entry_ids),
             self._store.list_feedback_many(entry_ids, FEEDBACK_RECENT_LIMIT),
         )
         return {
-            eid: FeedbackSummary(*counts.get(eid, (0, 0, 0)), tuple(recent.get(eid, ())))
+            eid: FeedbackSummary(
+                *(s := signals.get(eid, NO_SIGNALS)).counts,
+                tuple(recent.get(eid, ())),
+                s.last_confirmed_at,
+            )
             for eid in entry_ids
         }
 

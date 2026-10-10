@@ -34,6 +34,7 @@ from hivemind.domain.feedback import (
     FEEDBACK_RECENT_LIMIT,
     Feedback,
     FeedbackCounts,
+    FeedbackSignals,
     FeedbackSummary,
     Verdict,
 )
@@ -55,6 +56,7 @@ __all__ = [
     "ExtractedEntity",
     "Feedback",
     "FeedbackCounts",
+    "FeedbackSignals",
     "FeedbackSummary",
     "Fleet",
     "ImportanceSource",
