@@ -59,8 +59,10 @@ def test_the_always_on_skill_stays_small() -> None:
 
 def test_the_skill_carries_the_distillation_loop() -> None:
     """The skill's core is one loop: recall, test, report what you tested,
-    write only the delta, distill fragments, settle conflicts. These are its
-    load-bearing rules; a trim that drops one changes what agents do."""
+    write only the delta, distill fragments, settle conflicts. Open-ended work
+    starts from the agent's own candidates, and rivals stay active until a
+    test decides, so sharing does not collapse the fleet onto one view. These
+    are its load-bearing rules; a trim that drops one changes what agents do."""
     flat = " ".join(SKILL.split())
     for rule in (
         "before an irreversible step",
@@ -74,6 +76,9 @@ def test_the_skill_carries_the_distillation_loop() -> None:
         "**Distill.**",
         "Conflict: A vs B",
         "`score` is findability, not truth",
+        "note your own candidates before reading hits",
+        "supersede only on evidence",
+        "tagged `alternative`",
     ):
         assert rule in flat, rule
 
