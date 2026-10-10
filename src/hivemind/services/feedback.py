@@ -27,6 +27,21 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+ADMIN_REPORTER = "admin"  # the reserved name ADR 0060 gives the admin key's entries
+
+
+def reporter_agent(credential: Credential, agent: str | None) -> str | None:
+    """The agent a feedback row is filed under (SPEC.md §4.2, ADR 0066).
+
+    The admin key is always ``admin``, whatever it self-reports; an agent
+    sub-key's credential agent wins; otherwise the self-reported ``agent``
+    (``None`` when there is none, which the caller must refuse).
+    """
+    if credential.is_admin:
+        return ADMIN_REPORTER
+    return credential.agent_id or agent
+
+
 @dataclass(frozen=True, slots=True)
 class FeedbackOutcome:
     """Result of a feedback upsert: the stored row + the entry's new
@@ -58,12 +73,13 @@ class FeedbackService:
         """Upsert the caller's verdict for an entry (SPEC.md §4.2).
 
         One row per (entry, user, agent): the reporter's latest verdict
-        wins. The agent identity is the acting sub-key's agent, or the
-        ``agent`` self-reported by a plain user key (SPEC.md §8.1).
+        wins. The agent identity is ``admin`` for the admin key (ADR 0066),
+        the acting sub-key's agent, or the ``agent`` self-reported by a
+        plain user key (SPEC.md §8.1).
         """
         check_text(note, "note", MAX_NOTE_CHARS)  # ADR 0040
         check_text(agent, "agent", MAX_IDENTITY_CHARS)
-        effective_agent = credential.agent_id or agent
+        effective_agent = reporter_agent(credential, agent)
         if effective_agent is None:
             raise AgentIdentityRequired(
                 "the caller's agent identity must be resolved before "

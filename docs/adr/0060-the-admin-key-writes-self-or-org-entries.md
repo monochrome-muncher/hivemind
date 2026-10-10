@@ -2,6 +2,9 @@
 
 > Amends [ADR 0033](0033-server-enforced-reads-provenance-and-supersession-scope.md)
 > (an admin supersedes anything).
+>
+> Amended by [ADR 0066](0066-the-admin-key-has-one-feedback-vote.md): the admin
+> key's feedback is reported as `admin`, whatever `agent` it passes.
 
 ## Context
 
