@@ -342,6 +342,32 @@ async def test_hive_list_filters_by_kind_and_tags(app: McpHivemind) -> None:
     assert decision["id"] not in [e["id"] for e in result["entries"]]
 
 
+_COMPACT_LIST_FIELDS = {
+    "id", "kind", "summary", "tags", "author", "agent", "occurred_at",
+    "created_at", "scope", "fleet_id", "state", "superseded_by",
+}  # fmt: skip
+
+
+async def test_hive_list_items_are_compact_by_default(app: McpHivemind) -> None:
+    await hive_write(app, kind="fact", summary="s", body="a long body", tags=["x"])
+    result = await hive_list(app)
+    assert result["count"] == 1
+    item = result["entries"][0]
+    assert set(item) == _COMPACT_LIST_FIELDS
+    for field in ("body", "payload", "sources"):
+        assert field not in item
+
+
+async def test_hive_list_include_body_returns_full_entries(app: McpHivemind) -> None:
+    written = await hive_write(app, kind="fact", summary="s", body="a long body")
+    result = await hive_list(app, include_body=True)
+    assert result["count"] == 1
+    got = await hive_get(app, entry_id=written["id"])
+    assert all(result["entries"][0][k] == v for k, v in got.items() if k in result["entries"][0])
+    assert {"body", "payload", "sources", "importance"} <= set(result["entries"][0])
+    assert result["entries"][0]["body"] == "a long body"
+
+
 @pytest.mark.parametrize("limit", [0, -1], ids=["zero", "negative"])
 async def test_hive_list_out_of_range_limit_is_invalid_input(app: McpHivemind, limit: int) -> None:
     """Same pagination bounds as hive_search (SPEC §5.3, REST parity)."""

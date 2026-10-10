@@ -241,6 +241,27 @@ def test_entry_content_is_declared_untrusted_data_everywhere() -> None:
     assert (ROOT / "docs" / "adr" / "0043-entries-are-untrusted-data.md").is_file()
 
 
+# Measured 17,336 bytes once the distillation-loop skill (9,438) and the
+# compact hive_list description landed; the margin leaves room for a small
+# fix, not for a new section.
+ALWAYS_ON_BUDGET = 18_000
+
+
+def test_all_always_on_text_shares_one_byte_budget() -> None:
+    """Every session loads the skill, the server instructions, every tool
+    description and the stay-aware reminder, so they share one budget:
+    moving a rule from the skill into a tool description saves nothing, and
+    guidance cannot creep in through whichever text has no cap of its own."""
+    from hivemind.mcp import server
+
+    descriptions = [v for k, v in vars(server).items() if k.startswith("_DESC_")]
+    assert len(descriptions) == len(EXPECTED_TOOLS)
+    total = sum(
+        len(text.encode()) for text in (SKILL, server._INSTRUCTIONS, STAY_AWARE_CORE, *descriptions)
+    )
+    assert total <= ALWAYS_ON_BUDGET, total
+
+
 def test_the_dsh_bundle_patch_points_at_real_files_and_reads_keys_from_env() -> None:
     manifest = _json(PLUGIN / "package.json")
     patch_path = PLUGIN / manifest["dsh"]["bundle"]["patch"]  # type: ignore[index]
