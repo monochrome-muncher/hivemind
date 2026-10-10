@@ -79,3 +79,4 @@ is unused.
 | [0067](0067-a-revoked-agents-feedback-no-longer-counts.md) | A revoked agent's feedback no longer counts | Accepted |
 | [0068](0068-rater-flag-confirmation-metric.md) | Count the flags a later supersession confirmed | Accepted |
 | [0069](0069-cache-the-entry-scan-behind-the-usage-report.md) | Cache the entry scan behind the usage report | Accepted |
+| [0070](0070-one-capped-budget-for-social-signals.md) | One capped budget for social signals | Accepted |

@@ -20,6 +20,8 @@ WRONG_WEIGHT = 1.0
 QUALITY_PRIOR = 2.0
 QUALITY_MIN = 0.5
 QUALITY_MAX = 1.2
+# Ceiling on the combined upward effect of all social signals (ADR 0070).
+SOCIAL_MAX = 1.2
 
 # Importance factor: 0.5 + 0.1 * importance (importance in 1..5 -> 0.6..1.0).
 _IMPORTANCE_BASE = 0.5
@@ -69,13 +71,14 @@ def entry_score(
     half_life_days: float,
     *,
     recency_floor: float | None = None,
+    social_max: float | None = None,
 ) -> float:
     """Decay-aware final score for one entry (SPEC.md §6.4).
 
     final = fused
           * (0.5 + 0.1 * importance)
           * max(recency_floor, 0.5 ** (age_days / half_life_days))
-          * quality
+          * min(social_max, quality)
 
     ``age_days`` is derived from the entry's *occurrence* time (the
     "memory date"), not its ingest time, so a backdated entry decays
@@ -94,6 +97,13 @@ def entry_score(
     own default, because the value is a configuration decision and this
     stays a pure function of the numbers it is handed. ``SearchConfig``
     validates it; this function does not.
+
+    ``social_max`` (ADR 0070) caps the upward effect of the social
+    signals, today only feedback ``quality``: ``social = min(social_max,
+    quality)``. Penalties (``quality < 1``) pass through unchanged, and
+    ``None`` means no cap. The service ships ``1.2``
+    (``SearchConfig.social_max``), equal to the default ``quality_max``,
+    so the cap changes no ranking at the shipped defaults.
     """
     age_days = (now - occurred_at).total_seconds() / 86_400.0
     if age_days < 0:
@@ -104,4 +114,5 @@ def entry_score(
     recency = math.exp(math.log(0.5) * (age_days / half_life_days))
     if recency_floor is not None and recency_floor > recency:
         recency = recency_floor
-    return fused * importance_factor * recency * quality
+    social = quality if social_max is None else min(social_max, quality)
+    return fused * importance_factor * recency * social

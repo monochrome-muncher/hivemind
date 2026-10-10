@@ -201,12 +201,14 @@ When a result set contains both an entry and its supersession, **the successor a
 final = fused
       × (0.5 + 0.1·importance)                            # 1..5  →  0.6..1.0
       × max(recency_floor, 0.5 ** (age_days / half_life)) # age from occurred_at; half_life 30d, floor 0.8
-      × quality                                           # §4.2, 0.5..1.2
+      × min(social_max, quality)                          # §4.2, quality 0.5..1.2; social_max 1.2
 ```
 
 A fresh, important, well-remembered entry beats a slightly-more-similar but stale one. All three factors are config-tunable; the `0.5 **`/exponents are defaults, not schema.
 
 **The recency factor is bounded below by `recency_floor` (default 0.8 — ADR 0022).** Without it the term is unbounded below, so it spans more than the fused RRF score's whole range (`2(k+20)/(k+1)` = 2.6230x at the §6.2 defaults) after ~42 days and recency becomes the *sort key* rather than the tie-break this section intends. A floor `f` caps the recency factor's range at `1/f` — 1.25x at 0.8, inside the fused range. `recency_floor` is a **band, not a slider**: it must stay above `1/2.6230 = 0.381` to have any effect, and raising it toward 1.0 progressively removes the recency term (at 1.0 it is gone, and at 0.9 it measured *worse* than removing it outright — ADR 0022). The environment-settable range is `(0, 1]`; the pre-ADR-0022 unbounded form is reachable from the environment too — set `HIVEMIND_RECENCY_FLOOR` to an empty value or to `none` (case-insensitive) to get it, rather than approximating it with a negligible floor (ADR 0023).
+
+**Social signals share one capped budget (`social_max`, default 1.2 — ADR 0070).** The last factor is `min(social_max, quality)`: the cap bounds only the upside, so a penalty (`quality < 1`) passes through unchanged and an unrated entry stays at exactly 1.0. `social_max` is finite and `>= 1` (`HIVEMIND_SOCIAL_MAX`); at the default it equals the top of `quality`, so ranking is the same as without it. It exists so later social signals (a confirmation date, for example) share this ceiling instead of each adding their own. Because past about 9.7 days every entry carries the floor's 0.8, the best an old entry can reach is 0.8 × 1.2 = 0.96, below a new unrated entry's recency under about 1.7 days. Ranking inputs are numbers and dates only: no author, agent label, pin, link count or rater record reaches the score.
 
 ## 7. Embedding strategy (ADR 0005)
 

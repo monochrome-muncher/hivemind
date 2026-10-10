@@ -60,6 +60,9 @@ class SearchConfig:
     quality_prior: float = 2.0
     quality_min: float = 0.5
     quality_max: float = 1.2
+    # Ceiling on the upward effect of all social signals together (ADR
+    # 0070). Finite and >= 1: below 1 it would penalise unrated entries.
+    social_max: float = 1.2
 
     def __post_init__(self) -> None:
         # Fail at config time (ADR 0024), not per request as a
@@ -88,6 +91,8 @@ class SearchConfig:
             raise ValueError(
                 f"quality_min ({self.quality_min}) must be <= quality_max ({self.quality_max})"
             )
+        if not math.isfinite(self.social_max) or self.social_max < 1.0:
+            raise ValueError(f"social_max must be a finite number >= 1, got {self.social_max}")
         if not math.isfinite(self.half_life_days) or self.half_life_days <= 0:
             # A zero/negative half life would divide by zero (or silently
             # invert decay) inside ``entry_score``; inf silently turns it off.
@@ -229,6 +234,8 @@ class Settings(BaseSettings):
     quality_prior: float = 2.0
     quality_min: float = 0.5
     quality_max: float = 1.2
+    # See SearchConfig.social_max (ADR 0070).
+    social_max: float = 1.2
 
     @field_validator("embedding_api_key", "extractor_api_key")
     @classmethod
@@ -332,6 +339,7 @@ class Settings(BaseSettings):
             quality_prior=self.quality_prior,
             quality_min=self.quality_min,
             quality_max=self.quality_max,
+            social_max=self.social_max,
         )
 
 
