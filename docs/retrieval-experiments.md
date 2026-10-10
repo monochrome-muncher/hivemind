@@ -322,6 +322,50 @@ idea. Note that (b) is now ruled out by (a) having landed — its
 trigger firing means reconsidering the floor itself, under a new ADR,
 not adding an additive term on top of it.
 
+## Social signals: baselines for the capped budget (ADR 0070)
+
+ADR 0070 puts the upward effect of all social signals under one cap
+(`social_max`, 1.2) and adds invariants every ranking change must pass.
+Nothing here is a gate; the numbers pin today's direction and arithmetic
+so a later change flips an outcome on purpose. No embeddings are used.
+
+**Scenarios S1-S4** (`tests/eval/social.py`, `test_social_scenarios.py`),
+shipped config, importance 3, equal match unless stated. Scores are
+shown with the recency floor (0.8, shared by the S1-S3 candidates)
+divided out, so they read as importance × social factor.
+
+| id | candidates | today | winner | meant to flip with |
+|---|---|---|---|---|
+| S1 | 400-day entry, 3 helpful vs unlinked 20-day correction, no feedback | 0.896 vs 0.800 | old entry | version grouping / supersession |
+| S2 | two-year-old fact, 1 helpful re-checked yesterday vs never checked | 0.853 vs 0.800 | re-checked | confirmation date as the recency clock |
+| S3 | four-year-old entry, 4 helpful + 1 fresh stale vs unrated, same age | 0.846 vs 0.800 | flagged entry | reserve "helpful evaporation" |
+| S4 | importance 5, 16th in both streams vs importance 3, 1st in both | 0.013158 vs 0.013115 (fused × importance factor) | loose match | narrowed importance |
+
+S2 is barely separated: a recheck yesterday is worth the same 1.067 as
+one made two years ago. S4's fused scores are `Σ 0.5 / (60 + rank)` over
+the two streams.
+
+**Aged currency pairs** (`tests/eval/test_aged_currency.py`). The fixture's
+currency pairs (entries 4/5, 6/7, 8/9) have the older member at 300-400
+days and the newer at 5-12 days. Here the newer member is moved to 30,
+60 and 120 days and the older keeps its age, so both are past the 9.7-day
+point and carry the same recency factor. The slice is the 3 currency-pair
+queries, newer member relevant, k = 5.
+
+| newer member | config | hit@5 | MRR |
+|---|---|---|---|
+| 5-12 days (as written) | shipped | 1.000 | 0.778 |
+| 5-12 days (as written) | decay off | 1.000 | 0.611 |
+| 30, 60 or 120 days | shipped | 1.000 | 0.583 |
+| 30, 60 or 120 days | decay off | 1.000 | 0.611 |
+
+The three aged rows are identical because the floor makes recency flat
+past 9.7 days. With the newer member that old, recency no longer helps
+it, and the shipped config is slightly behind decay off: the floor still
+lifts the fresh, unrelated entries over both members. The currency pairs
+are the case a confirmation date restarting the recency clock should
+improve.
+
 ## Similarity threshold
 
 *(ADR 0062; tool: `tests/eval/threshold.py`, `make measure-threshold`)*

@@ -136,6 +136,25 @@ def _entry_dict(entry: Entry) -> dict[str, object]:
     }
 
 
+def _list_item_dict(entry: Entry) -> dict[str, object]:
+    """A compact ``hive_list`` item (no body, payload or sources; open it with
+    ``hive_get``). No feedback counts: listing does not load them."""
+    return {
+        "id": entry.id,
+        "kind": entry.kind.value,
+        "summary": entry.summary,
+        "tags": list(entry.tags),
+        "author": entry.author,
+        "agent": entry.agent,
+        "occurred_at": entry.occurred_at.isoformat(),
+        "created_at": entry.created_at.isoformat(),
+        "scope": entry.scope,
+        "fleet_id": entry.fleet_id,
+        "state": entry.state.value,
+        "superseded_by": entry.superseded_by,
+    }
+
+
 def _hit_dict(hit: Hit) -> dict[str, object]:
     """A compact search hit (no body — progressive disclosure, SPEC §6.1)."""
     out: dict[str, object] = {
@@ -565,6 +584,7 @@ async def hive_list(
     flagged: bool = False,
     limit: int | None = None,
     offset: int = 0,
+    include_body: bool = False,
 ) -> dict[str, object]:
     """List / filter entries without a query (filter only, paginated).
 
@@ -573,6 +593,8 @@ async def hive_list(
 
     ``flagged`` keeps only entries reported stale or wrong at least once
     (ADR 0054): the queue of entries waiting to be superseded.
+
+    Items are compact (no body); ``include_body`` returns full entries.
 
     ``limit`` must be 1..100 and ``offset`` 0..10000; out-of-range values
     are ``invalid_input`` (matching REST's 422).
@@ -602,7 +624,8 @@ async def hive_list(
         offset=offset,
         visibility=app.credential.visibility(),
     )
-    return {"count": len(entries), "entries": [_entry_dict(e) for e in entries]}
+    to_dict = _entry_dict if include_body else _list_item_dict
+    return {"count": len(entries), "entries": [to_dict(e) for e in entries]}
 
 
 async def hive_withdraw(

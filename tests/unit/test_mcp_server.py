@@ -256,3 +256,18 @@ async def test_registered_tool_schema_exposes_entities_param() -> None:
     for name in ("hive_search", "hive_list"):
         props = tools[name].input_schema.get("properties", {})
         assert "entities" in props, f"{name} schema is missing the 'entities' param"
+
+
+async def test_registered_list_tool_exposes_include_body_param() -> None:
+    server = build_server(make_app())
+    tools = {t.name: t for t in await server.list_tools()}
+    assert "include_body" in tools["hive_list"].input_schema.get("properties", {})
+
+
+async def test_registered_list_tool_is_compact_unless_include_body() -> None:
+    app = await _app_with_entity_entry()
+    server = build_server(app)
+    compact = await server.call_tool("hive_list", {})
+    assert "body" not in json.loads(compact.content[0].text)["entries"][0]
+    full = await server.call_tool("hive_list", {"include_body": True})
+    assert "body" in json.loads(full.content[0].text)["entries"][0]
