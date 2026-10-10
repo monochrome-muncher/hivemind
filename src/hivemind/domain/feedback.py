@@ -26,6 +26,38 @@ class Verdict(StrEnum):
 FeedbackCounts = tuple[int, int, int]
 
 
+def last_confirmed(
+    newest_noted_helpful_at: datetime | None, newest_flag_at: datetime | None
+) -> datetime | None:
+    """An entry's "last confirmed" date (SPEC.md §4.2): the newest
+    ``helpful`` row that carries a note, provided it is strictly newer than
+    every ``stale`` or ``wrong`` row; ``None`` otherwise (a tie is no
+    confirmation). Dates only: how many confirmed never matters."""
+    if newest_noted_helpful_at is None:
+        return None
+    if newest_flag_at is not None and newest_noted_helpful_at <= newest_flag_at:
+        return None
+    return newest_noted_helpful_at
+
+
+@dataclass(frozen=True, slots=True)
+class FeedbackSignals:
+    """What the feedback on one entry says: the verdict counts over every
+    reporter and the "last confirmed" date (see ``last_confirmed``)."""
+
+    helpful: int
+    stale: int
+    wrong: int
+    last_confirmed_at: datetime | None = None
+
+    @property
+    def counts(self) -> FeedbackCounts:
+        return (self.helpful, self.stale, self.wrong)
+
+
+NO_SIGNALS = FeedbackSignals(0, 0, 0)
+
+
 @dataclass(frozen=True, slots=True)
 class Feedback:
     """One verdict about an entry, reported by a user+agent pair."""
@@ -67,3 +99,4 @@ class FeedbackSummary:
     stale: int
     wrong: int
     recent: tuple[Feedback, ...] = ()
+    last_confirmed_at: datetime | None = None

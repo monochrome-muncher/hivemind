@@ -88,6 +88,10 @@ _Avoid_: score (in specs, "score" always means the retrieval score; "quality" is
 A reporting agent's verdict that an entry it relied on was `helpful`, `stale`, or `wrong`, with an optional note. Aggregated into an entry's quality, and readable by everyone who can read the entry.
 _Avoid_: rating, review
 
+**Last confirmed**:
+The date of an entry's newest `helpful` report that carries a note, when no `stale` or `wrong` report is as new or newer; shown with the entry, never used for ranking.
+_Avoid_: verified, endorsed, freshness (the entry's age is its memory date)
+
 **Link** (see also):
 A pointer from a new entry to an existing one it relates to without replacing it, set at write time and shown on both entries when they are read.
 _Avoid_: reference (sources are references), relation, edge

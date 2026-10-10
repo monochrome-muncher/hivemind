@@ -157,7 +157,7 @@ def _list_item_dict(entry: Entry) -> dict[str, object]:
 
 def _hit_dict(hit: Hit) -> dict[str, object]:
     """A compact search hit (no body — progressive disclosure, SPEC §6.1)."""
-    return {
+    out: dict[str, object] = {
         "id": hit.entry_id,
         "kind": hit.kind.value,
         "summary": hit.summary,
@@ -170,6 +170,9 @@ def _hit_dict(hit: Hit) -> dict[str, object]:
         "fleet_id": hit.fleet_id,
         "feedback": _counts_dict(hit.feedback),
     }
+    if hit.last_confirmed_at is not None:  # omitted when there is none (SPEC §4.2)
+        out["last_confirmed_at"] = hit.last_confirmed_at.isoformat()
+    return out
 
 
 def _related_dict(related: RelatedEntry) -> dict[str, object]:
@@ -213,7 +216,7 @@ def _counts_dict(counts: FeedbackCounts) -> dict[str, int]:
 
 def _feedback_dict(summary: FeedbackSummary) -> dict[str, object]:
     """An entry's feedback as a reader sees it (ADR 0051)."""
-    return {
+    out: dict[str, object] = {
         **_counts_dict((summary.helpful, summary.stale, summary.wrong)),
         "recent": [
             {
@@ -225,6 +228,9 @@ def _feedback_dict(summary: FeedbackSummary) -> dict[str, object]:
             for fb in summary.recent
         ],
     }
+    if summary.last_confirmed_at is not None:  # omitted when there is none (SPEC §4.2)
+        out["last_confirmed_at"] = summary.last_confirmed_at.isoformat()
+    return out
 
 
 def _embedding_unavailable(exc: EmbeddingError) -> dict[str, object]:

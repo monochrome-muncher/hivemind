@@ -21,7 +21,7 @@ from hivemind.domain.entry import (
     EntryState,
     Kind,
 )
-from hivemind.domain.feedback import FeedbackCounts
+from hivemind.domain.feedback import NO_SIGNALS, FeedbackCounts, FeedbackSignals
 from hivemind.domain.validation import check_pagination, check_query
 from hivemind.embeddings import EmbeddingError
 from hivemind.ports import Embedder, Store
@@ -47,6 +47,9 @@ class Hit:
     fleet_id: str | None = None
     # (helpful, stale, wrong) over every reporter (ADR 0051).
     feedback: FeedbackCounts = (0, 0, 0)
+    # When someone other than the author last used the entry and said what
+    # they checked, with no flag since (SPEC §4.2); display only.
+    last_confirmed_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,11 +179,11 @@ class SearchService:
         if not fused:
             return SearchResult([], degraded)
 
-        # 3. Fetch candidates + batched feedback counts.
+        # 3. Fetch candidates + batched feedback signals.
         candidate_ids = list(fused)
-        entries, counts = await _gather(
+        entries, signals = await _gather(
             self._store.get_entries(candidate_ids),
-            self._store.quality_counts(candidate_ids),
+            self._store.feedback_signals(candidate_ids),
         )
         quality_kwargs = self._config.quality_kwargs()
 
@@ -188,15 +191,15 @@ class SearchService:
         now = self._now_fn()
         scored: list[Entry] = []
         entry_scores: dict[str, float] = {}
-        entry_feedback: dict[str, FeedbackCounts] = {}
+        entry_feedback: dict[str, FeedbackSignals] = {}
         # Fused-rank order, not row order: ties are common and the stable
         # sorts below keep this order (SP-5).
         for entry in (entries[eid] for eid in candidate_ids if eid in entries):
             if not filters.include_inactive and entry.state is not EntryState.ACTIVE:
                 continue
-            entry_counts: FeedbackCounts = counts.get(entry.id, (0, 0, 0))
-            entry_feedback[entry.id] = entry_counts
-            helpful, stale, wrong = entry_counts
+            entry_signals = signals.get(entry.id, NO_SIGNALS)
+            entry_feedback[entry.id] = entry_signals
+            helpful, stale, wrong = entry_signals.counts
             quality = feedback_quality(helpful, stale, wrong, **quality_kwargs)
             score = entry_score(
                 fused[entry.id],
@@ -244,7 +247,7 @@ class SearchService:
             min_similarity=self._config.vector_min_similarity or 0.0,
         )
 
-    def _to_hit(self, entry: Entry, score: float, feedback: FeedbackCounts) -> Hit:
+    def _to_hit(self, entry: Entry, score: float, signals: FeedbackSignals) -> Hit:
         return Hit(
             entry_id=entry.id,
             kind=entry.kind,
@@ -256,7 +259,8 @@ class SearchService:
             score=score,
             scope=entry.scope,
             fleet_id=entry.fleet_id,
-            feedback=feedback,
+            feedback=signals.counts,
+            last_confirmed_at=signals.last_confirmed_at,
         )
 
 

@@ -113,7 +113,9 @@ _DESC_SEARCH = (
     "fleet_id differs from your home_fleet_id is foreign (privileged agents "
     "read every fleet): use it, but don't relay it into home-fleet entries; "
     "cite its id in sources, ask your user before bringing the finding home, "
-    "and keep feedback notes on it about the entry only."
+    "and keep feedback notes on it about the entry only. 'last_confirmed_at', "
+    "when present, is when someone other than the author used the entry and "
+    "said what they checked, with no stale/wrong flag since."
 )
 _DESC_GET = (
     "Fetch a full entry including its body. include_history adds the "

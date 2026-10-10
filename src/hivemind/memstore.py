@@ -49,8 +49,10 @@ from hivemind.domain.entry import (
 from hivemind.domain.feedback import (
     Feedback,
     FeedbackCounts,
+    FeedbackSignals,
     FlagCount,
     Verdict,
+    last_confirmed,
 )
 from hivemind.domain.pin import Pin
 from hivemind.ports import SupersedeConflict
@@ -415,6 +417,11 @@ class MemoryStore:
             live = self._live_feedback()
             return {eid: _count_for(live, eid) for eid in entry_ids if _is_uuid(eid)}
 
+    async def feedback_signals(self, entry_ids: list[str]) -> dict[str, FeedbackSignals]:
+        with self._lock:
+            live = self._live_feedback()
+            return {eid: _signals_for(live, eid) for eid in entry_ids if _is_uuid(eid)}
+
     async def list_feedback(self, entry_id: str, limit: int) -> list[Feedback]:
         with self._lock:
             rows = [fb for fb in self._live_feedback().values() if fb.entry_id == entry_id]
@@ -603,6 +610,26 @@ def _count_for(feedback: dict[tuple[str, str, str], Feedback], entry_id: str) ->
         elif fb.verdict is Verdict.WRONG:
             wrong += 1
     return (helpful, stale, wrong)
+
+
+def _signals_for(feedback: dict[tuple[str, str, str], Feedback], entry_id: str) -> FeedbackSignals:
+    helpful, stale, wrong = _count_for(feedback, entry_id)
+    noted: list[datetime] = []
+    flags: list[datetime] = []
+    for fb in feedback.values():
+        if fb.entry_id != entry_id:
+            continue
+        if fb.verdict is Verdict.HELPFUL:
+            if fb.note and fb.note.strip() and fb.updated_at is not None:
+                noted.append(fb.updated_at)
+        else:
+            flags.append(fb.updated_at or _EPOCH)
+    return FeedbackSignals(
+        helpful,
+        stale,
+        wrong,
+        last_confirmed(max(noted, default=None), max(flags, default=None)),
+    )
 
 
 def _with_state(
