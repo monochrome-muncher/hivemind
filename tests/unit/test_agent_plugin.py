@@ -57,6 +57,41 @@ def test_the_always_on_skill_stays_small() -> None:
     assert len(SKILL.encode()) <= 10_000, len(SKILL.encode())
 
 
+def test_the_skill_carries_the_distillation_loop() -> None:
+    """The skill's core is one loop: recall, test, report what you tested,
+    write only the delta, distill fragments, settle conflicts. These are its
+    load-bearing rules; a trim that drops one changes what agents do."""
+    flat = " ".join(SKILL.split())
+    for rule in (
+        "before an irreversible step",
+        "Write what another agent could reuse, above all when reality differed",
+        "from what Hivemind told you",
+        "Write only the delta",
+        "Search with your draft summary first",
+        "tags filter, they are not searched",
+        "verified:",
+        "Reading and agreeing is no test",
+        "**Distill.**",
+        "Conflict: A vs B",
+        "`score` is findability, not truth",
+    ):
+        assert rule in flat, rule
+
+
+def test_rules_moved_out_of_the_skill_live_in_the_tool_descriptions() -> None:
+    """Rules the skill hands to the tool descriptions, which every session
+    loads too (including harnesses without the skill)."""
+    from hivemind.mcp import server
+
+    assert "home_fleet_id is foreign" in server._DESC_SEARCH
+    assert "ask your user before bringing the finding home" in server._DESC_SEARCH
+    assert "a thin result proves nothing" in server._DESC_SEARCH
+    assert "don't retry in a loop" in server._DESC_WRITE
+    assert "5 = outage" in server._DESC_WRITE
+    assert "verified:" in server._DESC_FEEDBACK
+    assert "at most 10 pins" in server._DESC_PIN
+
+
 def test_the_skill_lists_every_tool_where_it_names_them() -> None:
     """The "The tools are ..." sentence is the agent's inventory; a new
     tool mentioned only deep in the text (hive_pin, hive_pinned) was missing
