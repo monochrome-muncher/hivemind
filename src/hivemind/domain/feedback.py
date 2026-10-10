@@ -38,6 +38,20 @@ class Feedback:
     updated_at: datetime | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class FlagCount:
+    """One reporter's flags and how many were later confirmed (ADR 0068).
+
+    A flag is a ``stale`` or ``wrong`` row on an entry that was still
+    current when the row was written; it is confirmed when the entry was
+    superseded after the row. ``user`` is the registered reporter name.
+    """
+
+    user: str
+    flags: int
+    confirmed: int
+
+
 # How many of an entry's feedback rows a read returns (ADR 0051): the
 # newest ones. Each note is at most 2000 characters (ADR 0040), so this
 # bounds what one ``get`` adds to an agent's context.

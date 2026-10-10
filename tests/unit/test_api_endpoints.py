@@ -1129,6 +1129,7 @@ class TestMetricsEndpoint:
         assert data["fleets"]["writes_by_fleet"] == {"data-eng": 1}
         assert data["agents"]["total"] == 2
         assert data["agents"]["pending"] == 2
+        assert data["feedback"] == {"flags": 0, "confirmed": 0, "by_agent": {}}
 
     async def test_metrics_requires_admin_key(self) -> None:
         client = make_client(make_hivemind_app())

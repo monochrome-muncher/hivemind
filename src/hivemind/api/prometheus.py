@@ -20,6 +20,10 @@ Three groups of series:
 * **Search counters** (ADR 0056): first-page searches and the ones that
   found nothing, per fleet, read from the pool with the usage report, so
   they cover every runner (MCP included). Aggregate them with ``max``.
+* **Flag confirmation** (ADR 0068): `hivemind_feedback_flags` and
+  `hivemind_feedback_flags_confirmed` per registered agent, the
+  stale/wrong reports and the ones a later supersession confirmed. An
+  observation, never a ranking input; agents with no flags have no series.
 
 A failed usage refresh keeps the last snapshot and sets
 ``hivemind_usage_report_success`` to 0; the scrape itself still answers.
@@ -141,6 +145,19 @@ def _usage_families(report: UsageReport) -> Iterator[GaugeMetricFamily | Counter
         empty.add_metric([fleet], float(counts["empty"]))
     yield searches
     yield empty
+    by_agent = report["feedback"]["by_agent"]
+    yield _gauge(
+        "hivemind_feedback_flags",
+        "Stale or wrong reports per registered agent, made while the entry was current (ADR 0068)",
+        ["agent"],
+        {a: c["flags"] for a, c in by_agent.items()},
+    )
+    yield _gauge(
+        "hivemind_feedback_flags_confirmed",
+        "Of those flags, the ones whose entry was superseded afterwards (ADR 0068)",
+        ["agent"],
+        {a: c["confirmed"] for a, c in by_agent.items()},
+    )
 
 
 class PrometheusMetrics:

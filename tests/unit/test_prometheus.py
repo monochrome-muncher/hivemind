@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from prometheus_client.parser import text_string_to_metric_families
 
 from hivemind.api.prometheus import PrometheusMetrics
 from hivemind.domain.entry import EntryDraft
+from hivemind.domain.feedback import Feedback, Verdict
 from tests.unit.test_api_endpoints import make_client, make_hivemind_app, post_entry
 
 
@@ -54,6 +57,31 @@ async def test_metrics_reports_the_usage_counters_as_gauges() -> None:
     assert got[("hivemind_fleet_entries", (("fleet", "data-eng"),))] == 1
     assert got[("hivemind_agents", (("status", "pending"),))] == 1
     assert got[("hivemind_agents_by_trust_level", (("trust_level", "untrusted"),))] == 1
+
+
+async def test_flag_confirmation_gauges_are_labelled_by_registered_agent() -> None:
+    app = make_hivemind_app()
+    store = app.store
+    await store.register_agent("alice")
+    old = await store.create_entry(
+        EntryDraft(kind="fact", summary="old", author="bob", agent="b", scope="org"),
+        [0.1, 0.1, 0.1, 0.1],
+    )
+    new = await store.create_entry(
+        EntryDraft(
+            kind="fact", summary="new", author="bob", agent="b", scope="org", supersedes=(old.id,)
+        ),
+        [0.1, 0.1, 0.1, 0.1],
+    )
+    at = new.created_at - timedelta(seconds=1)
+    await store.record_feedback(Feedback(old.id, "alice", "alice", Verdict.WRONG, None, at))
+    await store.record_feedback(Feedback(old.id, "admin", "admin", Verdict.WRONG, None, at))
+    client = make_client(app)
+    async with client:
+        got = samples((await client.get("/metrics")).text)
+    assert got[("hivemind_feedback_flags", (("agent", "alice"),))] == 1
+    assert got[("hivemind_feedback_flags_confirmed", (("agent", "alice"),))] == 1
+    assert not any(k[0].startswith("hivemind_feedback") and ("agent", "admin") in k[1] for k in got)
 
 
 async def test_requests_are_counted_by_route_template_and_status() -> None:
@@ -123,6 +151,7 @@ async def test_usage_report_is_cached_and_a_failure_keeps_the_last_snapshot() ->
             "fleets": {"total": 0, "writes_by_fleet": {}},
             "agents": {"pending": 0, "active": 0, "revoked": 0, "by_trust_level": {}},
             "searches": {"total": 0, "empty": 0, "by_fleet": {}},
+            "feedback": {"flags": 0, "confirmed": 0, "by_agent": {}},
         }
 
     metrics = PrometheusMetrics(report, ttl=30.0, clock=lambda: now[0])

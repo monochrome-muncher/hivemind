@@ -39,6 +39,7 @@ from hivemind.api.schemas import (
     EntriesMetrics,
     EntriesOut,
     EntryOut,
+    FeedbackMetrics,
     FeedbackOut,
     FeedbackRequest,
     FeedbackSummaryOut,
@@ -171,6 +172,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
             entries=EntriesMetrics(**report["entries"]),
             fleets=FleetsMetrics(**report["fleets"]),
             agents=AgentsMetrics(**report["agents"]),
+            feedback=FeedbackMetrics(**report["feedback"]),
         )
 
     @router.post("/entries", response_model=EntryOut, status_code=201)

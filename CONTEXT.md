@@ -100,6 +100,10 @@ _Avoid_: duplicates, conflicts, contradictions (the server judges none of these)
 A fleet entry a privileged agent of that fleet (or an admin) pinned into the fleet's briefing, which every agent of the fleet reads at the start of a session. Context, never an order.
 _Avoid_: keystone, rule, mandatory entry
 
+**Flag** (confirmed):
+A `stale` or `wrong` report made while its entry was current. It is confirmed when a supersession of the entry follows it; a withdrawal never confirms. Counted per agent, never used for ranking.
+_Avoid_: strike, accuracy score
+
 **Flagged entry**:
 An entry with at least one `stale` or `wrong` feedback report. While it is active, it is waiting for someone to supersede or withdraw it.
 _Avoid_: disputed, reported (as a state)

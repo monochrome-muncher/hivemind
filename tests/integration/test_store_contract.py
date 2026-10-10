@@ -564,6 +564,49 @@ async def test_search_counters_accumulate_per_fleet(adapter: Adapter) -> None:
     assert counts == {fleet: (2, 1), None: (1, 0)}
 
 
+async def test_flag_counts_confirm_flags_a_later_supersession_proved_right(
+    adapter: Adapter,
+) -> None:
+    """ADR 0068. Row times are set around the successor's ``created_at``,
+    which both adapters assign themselves."""
+    store = adapter.store
+    fleet = await store.create_fleet("blue")
+    await store.register_agent("Scout")
+    await store.register_agent("Ghost")
+    flagged = await write(adapter, "flagged then superseded")
+    never = await write(adapter, "flagged, never superseded")
+    already = await write(adapter, "superseded before it was flagged")
+    ok = await write(adapter, "only rated helpful")
+    successor = await write(adapter, "v2", supersedes=(flagged.id,))
+    await write(adapter, "v2 of already", supersedes=(already.id,))
+    after = (await store.get_entry(successor.id)).created_at + timedelta(minutes=1)  # type: ignore[union-attr]
+    before = after - timedelta(minutes=2)
+
+    def row(entry: Entry, user: str, verdict: Verdict, at: datetime) -> Feedback:
+        return Feedback(entry.id, user, user, verdict, None, at)
+
+    await store.record_feedback(row(flagged, "Scout", Verdict.STALE, before))  # confirmed
+    await store.record_feedback(row(never, "Scout", Verdict.WRONG, before))  # flag only
+    await store.record_feedback(row(already, "Scout", Verdict.WRONG, after))  # excluded
+    await store.record_feedback(row(ok, "Scout", Verdict.HELPFUL, before))  # ignored
+    await store.record_feedback(row(flagged, "admin", Verdict.WRONG, before))  # no agent record
+    await store.record_feedback(row(flagged, "Ghost", Verdict.WRONG, before))
+    await store.activate_agent("Ghost", trust_level=TrustLevel.LURKER, home_fleet_id=fleet.id)
+    await store.revoke_agent("Ghost")  # revoked reporter: left out
+
+    async def counts() -> dict[str, tuple[int, int]]:
+        return {c.user: (c.flags, c.confirmed) for c in await store.flag_counts()}
+
+    assert await counts() == {"Scout": (2, 1), "admin": (1, 1)}
+    # A re-rate moves updated_at: the confirmed flag, rewritten after the
+    # supersession, no longer predicted anything; the unsuperseded one still counts.
+    await store.record_feedback(row(flagged, "Scout", Verdict.STALE, after))
+    assert await counts() == {"Scout": (1, 0), "admin": (1, 1)}
+    # Re-activating the revoked reporter brings its flag back.
+    await store.activate_agent("Ghost", trust_level=TrustLevel.LURKER, home_fleet_id=fleet.id)
+    assert (await counts())["Ghost"] == (1, 1)
+
+
 async def test_usage_counts_group_every_state(adapter: Adapter) -> None:
     old = await write(adapter, "v1", author="bob")
     await write(adapter, "v2", author="bob", supersedes=(old.id,))
