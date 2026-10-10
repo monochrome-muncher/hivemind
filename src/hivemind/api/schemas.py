@@ -632,9 +632,22 @@ class AgentsMetrics(BaseModel):
     by_trust_level: dict[str, int] = {}
 
 
+class FeedbackMetrics(BaseModel):
+    """Flag counters (ADR 0068): ``stale``/``wrong`` reports made while the
+    entry was current, and how many were later confirmed by a supersession.
+    The totals include every non-revoked reporter (the admin key too);
+    ``by_agent`` is keyed by the registered roster and omits agents with no
+    flags. Observation only: never an input to ranking."""
+
+    flags: int = 0
+    confirmed: int = 0
+    by_agent: dict[str, dict[str, int]] = {}
+
+
 class MetricsOut(BaseModel):
     """The minimal usage-counters report (ROADMAP §3.3, admin-gated)."""
 
     entries: EntriesMetrics
     fleets: FleetsMetrics
     agents: AgentsMetrics
+    feedback: FeedbackMetrics = FeedbackMetrics()

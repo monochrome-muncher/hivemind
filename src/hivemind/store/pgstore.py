@@ -52,7 +52,7 @@ from hivemind.domain.entry import (
     SourceType,
     UsageCount,
 )
-from hivemind.domain.feedback import Feedback, Verdict
+from hivemind.domain.feedback import Feedback, FlagCount, Verdict
 from hivemind.domain.pin import Pin
 from hivemind.ports import SupersedeConflict
 from hivemind.store.pool import PoolTimeouts, make_pool
@@ -310,6 +310,23 @@ SELECT
 FROM feedbacks f
 WHERE entry_id = ANY($1) AND {_REPORTER_NOT_REVOKED}
 GROUP BY entry_id
+"""
+
+# ADR 0068: per reporter, the stale/wrong rows written while the entry was
+# still current, and the ones whose entry was superseded after the row.
+# Entries carry no superseded_at, so the successor's created_at stands in.
+# Both joins are primary-key probes.
+FLAG_COUNTS = f"""
+SELECT f."user" AS reporter,
+       COUNT(*) AS flags,
+       COUNT(*) FILTER (WHERE s.id IS NOT NULL) AS confirmed
+FROM feedbacks f
+JOIN entries e ON e.id = f.entry_id
+LEFT JOIN entries s ON s.id = e.superseded_by AND e.state = 'superseded'
+WHERE f.verdict IN ('stale', 'wrong')
+  AND (s.id IS NULL OR s.created_at > f.updated_at)
+  AND {_REPORTER_NOT_REVOKED}
+GROUP BY f."user"
 """
 
 # Audit log (ADR 0027): insert-only; the table has no UPDATE/DELETE path.
@@ -657,6 +674,16 @@ class PgStore:
                 fleet_id=str(row["fleet_id"]) if row["fleet_id"] is not None else None,
                 active=bool(row["active"]),
                 count=int(row["n"]),
+            )
+            for row in rows
+        ]
+
+    async def flag_counts(self) -> list[FlagCount]:
+        async with self._connection() as conn:
+            rows = await conn.fetch(FLAG_COUNTS)
+        return [
+            FlagCount(
+                user=row["reporter"], flags=int(row["flags"]), confirmed=int(row["confirmed"])
             )
             for row in rows
         ]

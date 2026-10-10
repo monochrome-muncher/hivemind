@@ -75,7 +75,8 @@ objects, had no backward direction and assumed one replica.
 ### 3.3 Usage counters (trigger instrumentation)  *(shipped: `MetricsService` + `GET /v1/metrics`; Prometheus `GET /metrics`, ADR 0050)*
 Entries, fleets, agents (trust distribution, writes per fleet, pending
 count), importance source and per-author kind distribution, and searches
-and empty searches per fleet (ADR 0056). They make the usage-based Tier 5
+and empty searches per fleet (ADR 0056), and per-agent stale/wrong flags later
+confirmed by a supersession (ADR 0068). They make the usage-based Tier 5
 triggers measurable.
 
 ### 3.4 Kubernetes + GitLab CI/CD deployment story  *(shipped: `DEPLOY.md`, `deploy/kubernetes/`, `.gitlab-ci.yml`, `config/`)*

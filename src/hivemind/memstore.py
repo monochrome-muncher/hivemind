@@ -49,6 +49,7 @@ from hivemind.domain.entry import (
 from hivemind.domain.feedback import (
     Feedback,
     FeedbackCounts,
+    FlagCount,
     Verdict,
 )
 from hivemind.domain.pin import Pin
@@ -248,6 +249,30 @@ class MemoryStore:
                 )
                 groups[key] = groups.get(key, 0) + 1
             return [UsageCount(*key, count=n) for key, n in groups.items()]
+
+    async def flag_counts(self) -> list[FlagCount]:
+        with self._lock:
+            now = self._clock()
+            flags: dict[str, int] = {}
+            confirmed: dict[str, int] = {}
+            for fb in self._live_feedback().values():
+                if fb.verdict is Verdict.HELPFUL:
+                    continue
+                entry = self._entries.get(fb.entry_id)
+                if entry is None:
+                    continue
+                at = fb.updated_at or now
+                successor = (
+                    self._entries.get(entry.superseded_by)
+                    if entry.state is EntryState.SUPERSEDED and entry.superseded_by
+                    else None
+                )
+                if successor is not None and successor.created_at <= at:
+                    continue  # already superseded when written: predicted nothing
+                flags[fb.user] = flags.get(fb.user, 0) + 1
+                if successor is not None:
+                    confirmed[fb.user] = confirmed.get(fb.user, 0) + 1
+            return [FlagCount(u, n, confirmed.get(u, 0)) for u, n in flags.items()]
 
     async def record_search(self, fleet_id: str | None, *, empty: bool) -> None:
         with self._lock:

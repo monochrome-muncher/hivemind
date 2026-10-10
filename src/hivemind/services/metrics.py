@@ -6,8 +6,8 @@ measurable, from one grouped scan plus the fleet/agent listings.
 The grouped scan of ``entries`` is the one expensive read, so the service
 caches its rows for ``entry_counts_ttl`` seconds (single-flight), shared by
 ``GET /v1/metrics`` and the Prometheus gauges: the entry and per-fleet
-write counts can lag by up to the TTL. The agent, fleet and search
-listings are small tables and are read on every call.
+write counts can lag by up to the TTL. The agent, fleet, search and flag
+counts are smaller reads and run on every call.
 
 Counters (ROADMAP §3.3 and §4.5):
 - entries: total, active, by_scope, by_kind, by_importance_source,
@@ -16,6 +16,9 @@ Counters (ROADMAP §3.3 and §4.5):
 - agents: total, pending, active, trust-level distribution.
 - searches (ADR 0056): first-page searches and how many found nothing,
   in total and per home fleet of the searching agent.
+- feedback (ADR 0068): stale/wrong flags and how many were later confirmed
+  by a supersession, in total and per registered reporter. Observation
+  only: nothing here feeds ranking, scoring or quality.
 """
 
 from __future__ import annotations
@@ -28,6 +31,7 @@ from typing import Any
 
 from hivemind.domain.access import Agent, AgentStatus, Fleet, TrustLevel
 from hivemind.domain.entry import ImportanceSource, Kind, SearchCount, UsageCount
+from hivemind.domain.feedback import FlagCount
 from hivemind.ports import Store
 
 # The canonical scopes / kinds (the "distinct tags in use" signal).
@@ -89,11 +93,13 @@ class MetricsService:
         fleets = await self._store.list_fleets()
         rows = await self._usage_rows()
         searches = await self._store.search_counts()
+        flags = await self._store.flag_counts()
         return {
             "entries": self._entries_report(agents, rows),
             "fleets": self._fleets_report(fleets, rows),
             "agents": self._agents_report(agents),
             "searches": self._searches_report(fleets, searches),
+            "feedback": self._feedback_report(agents, flags),
         }
 
     def _entries_report(
@@ -160,6 +166,24 @@ class MetricsService:
                 fleet.name: {"total": row.searches, "empty": row.empty}
                 for fleet in fleets
                 if (row := by_id.get(fleet.id)) is not None
+            },
+        }
+
+    def _feedback_report(
+        self, agents: Sequence[Agent], rows: Sequence[FlagCount]
+    ) -> dict[str, Any]:
+        """Flag counters (ADR 0068). The totals cover every reporter that
+        is not revoked, the admin key (``admin``) included; ``by_agent`` is
+        keyed by the registered roster only, so its labels stay bounded,
+        and leaves out agents with no flags."""
+        by_user = {r.user: r for r in rows}
+        return {
+            "flags": sum(r.flags for r in rows),
+            "confirmed": sum(r.confirmed for r in rows),
+            "by_agent": {
+                agent.name: {"flags": row.flags, "confirmed": row.confirmed}
+                for agent in agents
+                if (row := by_user.get(agent.name)) is not None
             },
         }
 
