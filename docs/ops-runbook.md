@@ -185,14 +185,15 @@ failures are best-effort and never block a write — the observable
 symptom is an entry with empty `entities`, not a failed write.)
 
 > **A crashed `CREATE INDEX CONCURRENTLY` leaves an INVALID index**
-> (ADR 0025, migrations `0004` and `0008`). This is inherent to
+> (ADR 0025, migrations `0004`, `0008` and `0013`). This is inherent to
 > `CONCURRENTLY` — if the build is interrupted (pod killed, connection
 > dropped mid-build), Postgres leaves the index catalogued but unusable,
 > and the migration's `IF NOT EXISTS` means a plain re-run of
 > `make migrate` will silently skip it rather than repair it. It applies
 > to every index the chain builds concurrently:
 > `entries_embedding_hnsw_idx` (0004), `entries_superseded_by_idx`,
-> `entries_created_at_id_idx` and `entries_author_created_idx` (0008). Check for any:
+> `entries_created_at_id_idx` and `entries_author_created_idx` (0008),
+> `entry_links_to_created_idx` and `entries_agent_created_idx` (0013). Check for any:
 >
 > ```sql
 > SELECT indexrelid::regclass, indisvalid
