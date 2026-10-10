@@ -1,5 +1,5 @@
 {
-  "description": "Re-inject the Hivemind reminder whenever the context is (re)built: new session, resume, /clear and after compaction.",
+  "description": "Re-inject the Hivemind reminder whenever the context is (re)built (new session, resume, /clear, after compaction), and remind once per substantial session to write and rate before stopping.",
   "hooks": {
     "SessionStart": [
       {
@@ -8,6 +8,16 @@
           {
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/skills/hivemind-setup/scripts/hivemind-session-start.sh\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/skills/hivemind-setup/scripts/hivemind-stop.sh\""
           }
         ]
       }

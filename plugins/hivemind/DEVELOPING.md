@@ -19,7 +19,8 @@ to install or use it, read [README.md](README.md) instead.
 | `skills/hivemind/` | The always-on rules: `hive_whoami` first, when to search, when and how to write, what never to write, local memory only as a fallback |
 | `skills/hivemind-setup/` | The guided setup. Harness-neutral itself: it works out its harness first (never from the model), then reads only that harness's file in `references/` |
 | `skills/hivemind-setup/scripts/hivemind-session-start.sh` | The reminder text the startup hook prints, including its incognito variant |
-| `hooks/hooks.json` | A `SessionStart` hook (`startup`, `resume`, `clear`, `compact`, `fork`) that re-injects the reminder whenever the context is rebuilt (Claude Code, Codex) |
+| `hooks/hooks.json` | A `SessionStart` hook (`startup`, `resume`, `clear`, `compact`, `fork`) that re-injects the reminder whenever the context is rebuilt (Claude Code, Codex), and a `Stop` hook (Claude Code) |
+| `skills/hivemind-setup/scripts/hivemind-stop.sh` | The `Stop` hook ([below](#the-stop-hook-and-the-post-compaction-line)) |
 | `.mcp.json` | The MCP server for Claude Code, built from `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY` |
 | `package.json`, `cordis.patch.yml`, `dsh/` | The DeepSeek Harness bundle: the MCP server row, and a small provider (`dsh/hivemind-skills.js`) that serves `skills/` |
 | `plugin.yaml`, `__init__.py` | The Hermes plugin: serves `skills/` and registers a system-prompt section |
@@ -81,6 +82,34 @@ itself names no harness-specific paths, and a test enforces this.
   unpinned entry, so users pin a release tag.
 - **Gemini CLI** has no plugin yet and turns off every MCP server in a
   folder the user has not trusted.
+
+## The Stop hook and the post-compaction line
+
+Two nudges that get knowledge written before it is lost (Claude Code only
+in this release; the OpenCode, Pi and Hermes equivalents are follow-ups).
+
+- **Post-compaction line.** When the `SessionStart` source is `compact`
+  (read from the hook's stdin JSON), `hivemind-session-start.sh` appends
+  one sentence asking the agent to write what it learned before the
+  compaction and rate the entries its work tested. Other sources and the
+  incognito text are unchanged. It is not part of `STAY_AWARE_CORE`, so
+  the always-on byte budget does not count it.
+- **Stop hook.** `hivemind-stop.sh` blocks a stop once per session with a
+  two-sentence reason (`{"decision":"block","reason":...}` on stdout,
+  exit 0, as the Claude Code hooks reference documents; input fields
+  `session_id`, `transcript_path`, `stop_hook_active`). It exits 0 with no
+  output, so the stop goes through, unless all of these hold:
+  1. not incognito (same test as the session-start script);
+  2. `HIVEMIND_API_KEY` is set (same test as the session-start script);
+  3. `stop_hook_active` is not true;
+  4. no marker for this `session_id` in `${TMPDIR:-/tmp}/hivemind-stop-reminder/`
+     (written only when it blocks, so it never fires twice);
+  5. the transcript (grep only, no jq, python or node) has no `hive_write`
+     or `hive_feedback` tool call and at least 20 tool uses
+     (`HIVEMIND_STOP_MIN_TOOLS` overrides the 20).
+
+  Any error, missing file or unparsable input fails open. Tests:
+  `tests/unit/test_stop_hook.py`.
 
 ## Incognito
 
