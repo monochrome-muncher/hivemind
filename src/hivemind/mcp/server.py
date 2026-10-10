@@ -97,6 +97,8 @@ _DESC_WRITE = (
     "and write it again with 'supersedes' naming it. Optional 'see_also' "
     "(up to 5 ids of entries you can read) links this entry to related ones "
     "it does not replace; hive_get shows the links on both ends. "
+    "'check': true stores nothing and returns related and warnings only; "
+    "heed the reply's warnings. "
     "On embedding_unavailable, don't retry in a loop: keep the note and write "
     "it later."
 )
@@ -259,6 +261,7 @@ def build_server(
         supersedes: list[str] | None = None,
         agent: str | None = None,
         see_also: list[str] | None = None,
+        check: bool = False,
     ) -> dict[str, Any]:
         return await dispatch(
             hive_write,
@@ -274,6 +277,7 @@ def build_server(
             supersedes=supersedes,
             agent=agent,
             see_also=see_also,
+            check=check,
         )
 
     @server.tool(name="hive_search", description=_DESC_SEARCH)

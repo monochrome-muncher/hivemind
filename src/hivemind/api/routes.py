@@ -19,6 +19,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query, Response
+from fastapi.responses import JSONResponse
 from pydantic import AfterValidator
 
 from hivemind.api.deps import (
@@ -34,6 +35,7 @@ from hivemind.api.schemas import (
     AgentsMetrics,
     AuditRecordOut,
     BatchFeedbackRequest,
+    CheckOut,
     CreateEntryRequest,
     CreateFleetRequest,
     EntriesMetrics,
@@ -59,6 +61,7 @@ from hivemind.api.schemas import (
     SearchRequest,
     UnpinOut,
     UpdateAgentRequest,
+    WarningOut,
     WhoamiOut,
     WithdrawRequest,
 )
@@ -175,9 +178,21 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
             feedback=FeedbackMetrics(**report["feedback"]),
         )
 
-    @router.post("/entries", response_model=EntryOut, status_code=201)
-    async def create_entry(payload: CreateEntryRequest, credential: require) -> EntryOut:
+    @router.post(
+        "/entries",
+        response_model=EntryOut,
+        status_code=201,
+        responses={200: {"model": CheckOut, "description": "?check=true: nothing stored"}},
+    )
+    async def create_entry(
+        payload: CreateEntryRequest,
+        credential: require,
+        check: bool = False,
+    ) -> EntryOut | JSONResponse:
         """Create an entry (SPEC.md §4.1, §8.1).
+
+        ``?check=true`` runs every validation and reports ``related`` and
+        ``warnings`` as 200 ``{"checked": true, ...}``, storing nothing.
 
         ``author`` is stamped from the credential; ``agent`` comes
         from the agent sub-key, or the self-reported value for plain
@@ -217,6 +232,14 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         except ValueError as exc:
             raise api_error(422, "invalid_entry", str(exc)) from exc
         try:
+            if check:
+                checked = await app.write_service.check(draft, writer=credential.visibility())
+                return JSONResponse(
+                    CheckOut(
+                        related=[RelatedOut.from_related(r) for r in checked.related],
+                        warnings=[WarningOut.from_warning(w) for w in checked.warnings],
+                    ).model_dump(mode="json")
+                )
             written = await app.write_service.write_and_relate(
                 draft, writer=credential.visibility()
             )
@@ -229,6 +252,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
             raise api_error(422, "invalid_entry", str(exc)) from exc
         out = EntryOut.from_entry(written.entry)
         out.related = [RelatedOut.from_related(r) for r in written.related]
+        out.warnings = [WarningOut.from_warning(w) for w in written.warnings]
         return out
 
     @router.get("/entries/{entry_id}", response_model=EntryOut)

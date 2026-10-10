@@ -339,6 +339,14 @@ async def test_similar_entries_exclude_the_entry_and_inactive_ones(adapter: Adap
     assert -1.0 <= pairs[0][1] <= 1.0
 
 
+async def test_similar_entries_without_an_excluded_id_returns_every_active_match(
+    adapter: Adapter,
+) -> None:
+    first = await write(adapter, "first", hot=3)
+    pairs = await adapter.store.similar_entries(adapter.vec(3), 5)
+    assert [eid for eid, _ in pairs] == [first.id]
+
+
 async def test_keyword_ties_break_newest_first(adapter: Adapter) -> None:
     first = await write(adapter, "shared word alpha")
     second = await write(adapter, "shared word alpha")
