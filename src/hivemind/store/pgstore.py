@@ -254,6 +254,13 @@ afterwards and a narrow-visibility reader can starve RRF's vector list.
 stated explicitly; untuned for now (ADR 0025).
 """
 
+# ADR 0067: a revoked agent's reports are left out of every feedback read
+# (the rows stay, so re-activation brings them back). ``agents.name`` is
+# unique, so this is an index probe; a reporter with no agent record counts.
+_REPORTER_NOT_REVOKED = (
+    "NOT EXISTS (SELECT 1 FROM agents a WHERE a.name = f.\"user\" AND a.status = 'revoked')"
+)
+
 UPSERT_FEEDBACK = """
 INSERT INTO feedbacks (entry_id, "user", agent, verdict, note, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6)
@@ -263,45 +270,45 @@ SET verdict = EXCLUDED.verdict,
     updated_at = EXCLUDED.updated_at
 """
 
-COUNT_FEEDBACK = """
+COUNT_FEEDBACK = f"""
 SELECT
     COUNT(*) FILTER (WHERE verdict = 'helpful') AS helpful,
     COUNT(*) FILTER (WHERE verdict = 'stale') AS stale,
     COUNT(*) FILTER (WHERE verdict = 'wrong') AS wrong
-FROM feedbacks
-WHERE entry_id = $1
+FROM feedbacks f
+WHERE entry_id = $1 AND {_REPORTER_NOT_REVOKED}
 """
 
-LIST_FEEDBACK = """
+LIST_FEEDBACK = f"""
 SELECT entry_id, "user", agent, verdict, note, updated_at
-FROM feedbacks
-WHERE entry_id = $1
+FROM feedbacks f
+WHERE entry_id = $1 AND {_REPORTER_NOT_REVOKED}
 ORDER BY (verdict = 'helpful' AND COALESCE(note, '') = ''), updated_at DESC, "user", agent
 LIMIT $2
 """
 
 # The first $2 rows of each entry in $1 (ADR 0059), in LIST_FEEDBACK order
 # (informative rows before bare helpful ones, ADR 0064).
-LIST_FEEDBACK_MANY = """
+LIST_FEEDBACK_MANY = f"""
 SELECT entry_id, "user", agent, verdict, note, updated_at FROM (
     SELECT f.*, row_number() OVER (
                PARTITION BY entry_id
                ORDER BY (verdict = 'helpful' AND COALESCE(note, '') = ''), updated_at DESC, "user", agent) AS rn
       FROM feedbacks f
-     WHERE entry_id = ANY($1::uuid[])
+     WHERE entry_id = ANY($1::uuid[]) AND {_REPORTER_NOT_REVOKED}
 ) AS ranked
 WHERE rn <= $2
 ORDER BY entry_id, (verdict = 'helpful' AND COALESCE(note, '') = ''), updated_at DESC, "user", agent
 """
 
-BATCH_FEEDBACK = """
+BATCH_FEEDBACK = f"""
 SELECT
     entry_id,
     COUNT(*) FILTER (WHERE verdict = 'helpful') AS helpful,
     COUNT(*) FILTER (WHERE verdict = 'stale') AS stale,
     COUNT(*) FILTER (WHERE verdict = 'wrong') AS wrong
-FROM feedbacks
-WHERE entry_id = ANY($1)
+FROM feedbacks f
+WHERE entry_id = ANY($1) AND {_REPORTER_NOT_REVOKED}
 GROUP BY entry_id
 """
 
@@ -363,7 +370,7 @@ def _filter_conditions(
         # key (entry_id, "user", agent) serves the per-entry probe.
         clauses.append(
             "EXISTS (SELECT 1 FROM feedbacks f WHERE f.entry_id = entries.id"
-            " AND f.verdict IN ('stale', 'wrong'))"
+            " AND f.verdict IN ('stale', 'wrong') AND " + _REPORTER_NOT_REVOKED + ")"
         )
 
     vis_clause = _visibility_clause(visibility, params)
