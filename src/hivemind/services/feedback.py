@@ -119,7 +119,7 @@ class FeedbackService:
         """
         check_text(note, "note", MAX_NOTE_CHARS)  # ADR 0040
         check_text(agent, "agent", MAX_IDENTITY_CHARS)
-        effective_agent = credential.agent_id or agent
+        effective_agent = reporter_agent(credential, agent)
         if effective_agent is None:
             raise AgentIdentityRequired(
                 "the caller's agent identity must be resolved before "
