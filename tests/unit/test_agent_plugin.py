@@ -1271,11 +1271,13 @@ def test_the_setup_skill_has_the_recovery_branches() -> None:
     assert "check the owner alias it reports" not in flat
 
 
-def test_the_gemini_reference_is_complete_and_honest_about_unknowns() -> None:
+def test_the_gemini_reference_is_complete() -> None:
     text = (SETUP_REFS / "gemini-cli.md").read_text()
     assert "~/.gemini/settings.json" in text and "httpUrl" in text
     assert "~/.gemini/GEMINI.md" in text and "SessionStart" in text
-    assert "UNCONFIRMED" in text  # unknowns are marked, not asserted
+    # Both hooks were checked with Gemini CLI 0.63, so neither is hedged.
+    assert "scripts/hivemind-stop.sh" in text and '"AfterAgent"' in text
+    assert "UNCONFIRMED" not in text
     assert "hm_" not in text.replace("hm_…", "")
 
 
