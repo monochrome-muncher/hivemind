@@ -140,6 +140,7 @@ def test_manifests_agree_on_name_and_version() -> None:
     assert dsh["name"] == "hivemind-agent-plugin"
     root = _json(ROOT / "package.json")  # the Git-URL install (DeepSeek Harness, Pi, OpenCode)
     assert (root["name"], root["version"]) == (dsh["name"], semver)
+    assert _json(ROOT / "gemini-extension.json")["version"] == semver
     assert _yaml_scalar(PLUGIN / "plugin.yaml", "name") == "hivemind"
     assert _yaml_scalar(PLUGIN / "plugin.yaml", "version") == semver
     [codex_entry] = _json(ROOT / ".agents" / "plugins" / "marketplace.json")["plugins"]  # type: ignore[misc]
@@ -1029,14 +1030,46 @@ def test_the_extension_sends_no_exposure_to_pi_mcp_adapter(tmp_path: Path) -> No
     assert server["config"]["url"] == "u"
 
 
-def test_launcher_keeps_oh_my_pi_from_contacting_the_server(tmp_path: Path) -> None:
-    env = _fake_harness(tmp_path, "omp")
-    script = tmp_path / "bin" / "omp"
+@pytest.mark.parametrize("harness", ["omp", "gemini"])
+def test_launcher_keeps_oh_my_pi_and_gemini_from_contacting_the_server(
+    tmp_path: Path, harness: str
+) -> None:
+    """Both expand ${HIVEMIND_*} in the plugin's or extension's server at
+    startup, so without the variables the server is never contacted."""
+    env = _fake_harness(tmp_path, harness)
+    script = tmp_path / "bin" / harness
     script.write_text(
         '#!/bin/sh\nprintf "%s\\n" "URL=${HIVEMIND_MCP_URL:-unset}" "KEY=${HIVEMIND_API_KEY:-unset}"\n'
     )
     env.update(HIVEMIND_MCP_URL="https://hm.example/mcp", HIVEMIND_API_KEY="hm_x")
-    assert _launch(tmp_path, env, "omp") == ["URL=unset", "KEY=unset"]
+    assert _launch(tmp_path, env, harness) == ["URL=unset", "KEY=unset"]
+
+
+def test_the_gemini_extension_serves_the_plugin() -> None:
+    """`gemini extensions install <git-url>` reads gemini-extension.json,
+    skills/ and hooks/hooks.json at the repository root (checked with
+    Gemini CLI 0.63); skills/ is a link to the plugin's own folder."""
+    ext = _json(ROOT / "gemini-extension.json")
+    assert ext["name"] == "hivemind"
+    assert ext["mcpServers"] == {
+        "hivemind": {
+            "httpUrl": "${HIVEMIND_MCP_URL}",
+            "headers": {"Authorization": "Bearer ${HIVEMIND_API_KEY}"},
+        }
+    }
+    assert (ROOT / "skills").is_symlink()
+    assert (ROOT / "skills").resolve() == (PLUGIN / "skills").resolve()
+    hooks = _json(ROOT / "hooks" / "hooks.json")["hooks"]
+    assert set(hooks) == {"SessionStart", "AfterAgent"}
+    for event, script in (
+        ("SessionStart", HOOK),
+        ("AfterAgent", HOOK.with_name("hivemind-stop.sh")),
+    ):
+        [group] = hooks[event]
+        [hook] = group["hooks"]
+        prefix = "sh ${extensionPath}/"
+        assert hook["command"].startswith(prefix)
+        assert (ROOT / hook["command"].removeprefix(prefix)).resolve() == script.resolve()
 
 
 def test_launcher_disables_a_hand_configured_opencode_server(tmp_path: Path) -> None:

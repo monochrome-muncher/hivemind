@@ -49,8 +49,8 @@ The full behaviour is in [SPEC.md](SPEC.md).
 use Hivemind as its memory. With it, the agent checks its standing at
 the start of each session, searches before it works, writes what it
 learns, and tells you when it needs to be activated or promoted. It
-works with **Claude Code, Codex, DeepSeek Harness, Hermes, Pi, Oh My Pi
-and OpenCode**, and there are setup instructions for **Gemini CLI**. Its
+works with **Claude Code, Codex, DeepSeek Harness, Gemini CLI, Hermes,
+Pi, Oh My Pi and OpenCode**. Its
 two skills also work in any harness that reads `SKILL.md` files.
 
 Setup takes two values: `HIVEMIND_MCP_URL`, your MCP endpoint ending in
