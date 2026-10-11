@@ -284,6 +284,11 @@ curl -s -H "X-API-Key: $ADMIN_KEY" \
   `hivemind-keys list` shows. REST rows read `admin:<fingerprint>`, so
   after an admin-key rotation you can tell the old key's actions from
   the new one's. No raw key is ever written to the log.
+- **Pins are audited too** (ADR 0076, migration `0014`): `entry.pin` and
+  `entry.unpin` rows, with `actor_kind = agent_key` and the agent's name
+  when a privileged agent pinned, `admin:<fingerprint>` for the admin key.
+  Rolling the image back past `0014` without `make rollback` breaks the audit
+  view on those rows (the rollback deletes them).
 - **Raw SQL bypasses it.** A hand-run `DELETE FROM credentials …` is not
   audited; prefer the CLI even for break-glass work.
 

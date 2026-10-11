@@ -11,6 +11,7 @@ Tests live at these seams and nowhere inside them.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
@@ -34,7 +35,7 @@ from hivemind.domain.entry import (
     embeddable_text,
 )
 from hivemind.domain.feedback import Feedback, FeedbackCounts, FeedbackSignals, FlagCount
-from hivemind.domain.pin import Pin
+from hivemind.domain.pin import Pin, PinWrite
 
 
 class SupersedeConflict(Exception):
@@ -110,12 +111,21 @@ class Store(Protocol):
         ...
 
     async def pin_entry(
-        self, fleet_id: str, entry_id: str, pinned_by: str, limit: int
-    ) -> Pin | None:
-        """Pin ``entry_id`` to ``fleet_id`` (ADR 0058) and return the pin;
-        pinning it again returns the existing pin unchanged. ``None`` when
-        the fleet already holds ``limit`` pins (checked atomically with the
-        insert). The caller has checked the entry and the permission."""
+        self,
+        fleet_id: str,
+        entry_id: str,
+        pinned_by: str,
+        limit: int,
+        replaces: Sequence[str] = (),
+    ) -> PinWrite | None:
+        """Pin ``entry_id`` to ``fleet_id`` (ADR 0058, 0076) with a fresh
+        ``pinned_at`` / ``pinned_by``: a new row, or the existing one
+        refreshed (a re-pin acknowledges a change since pinned). Pins named
+        in ``replaces`` (older versions it now shows) are removed in the
+        same step and reported in ``PinWrite.replaced``. ``None`` when the
+        fleet would hold more than ``limit`` pins (checked atomically; a
+        move or refresh never grows the count). The caller has checked the
+        entry and the permission."""
         ...
 
     async def unpin_entry(self, fleet_id: str, entry_id: str) -> bool:
@@ -204,12 +214,12 @@ class Store(Protocol):
         embedding: list[float],
         limit: int,
         *,
-        exclude_id: str,
+        exclude_id: str | None = None,
         visibility: Visibility | None = None,
     ) -> list[tuple[str, float]]:
         """The active entries nearest to ``embedding``, as ``(id,
         similarity)`` pairs (cosine similarity, highest first), leaving out
-        ``exclude_id`` (ADR 0052). Restricted to ``visibility`` when given.
+        ``exclude_id`` when given (ADR 0052; check mode has no entry yet). Restricted to ``visibility`` when given.
         Approximate on Postgres, like ``search_vector`` (ADR 0025)."""
         ...
 
@@ -449,7 +459,10 @@ class Credential:
     def audit_actor(self) -> str:
         """The audit-log ``actor`` (ADR 0027): ``admin:<fingerprint>``
         (all admin keys share ``user_id = "admin"``), ``org:<fingerprint>``
-        for an org-key caller (ADR 0046), else ``user_id``."""
+        for an org-key caller (ADR 0046), else the agent's name (a
+        privileged agent's pin, ADR 0076)."""
+        if not (self.is_org or self.is_admin):
+            return self.agent_name or self.user_id
         if self.key_id is None:
             return self.user_id
         return f"{'org' if self.is_org else 'admin'}:{self.key_id}"

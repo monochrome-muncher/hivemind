@@ -69,6 +69,17 @@ One entry entity; a `kind` enum carries the distinction. There are no other read
 - **Supersession** — a new entry is written with `supersedes: [entry_ids]`; targets flip to `state=superseded`, `superseded_by` set. A supersession is a *claim*, not an arbitration — the reader judges — made within the audience the writer can address, and only at **active** targets: a writer may supersede only entries it can read, and the successor must reach at least everyone the predecessor reached (a `self` entry supersedes only the writer's own `self` entries; a `fleet` entry supersedes those plus `fleet` entries of the fleet it is written to; an admin supersedes any active entry with an `org` successor, or its own `self` notes with either — ADR 0060). A write naming a target it cannot read, a target the successor does not reach far enough to address, or a target that is no longer active (already superseded or withdrawn — re-target the current head) is rejected as a whole (ADRs 0033, 0034, 0060).
 - **Withdrawal** — an entry is marked `withdrawn` (retracted / no longer reliable). Any user may withdraw **their own** entries; **any** entry can be withdrawn by the org operator/admin. Nothing is ever hard-deleted in v1.
 
+**Check mode and write warnings.** `hive_write` with `check: true` (REST `POST /v1/entries?check=true`) runs everything a write validates (input bounds, scope resolution, the `supersedes` permission check, `see_also` resolution) and embeds the draft, then returns `related` and `warnings` and stores nothing: no entry, no supersession, no extractor call. It raises the same errors the real write would. A write's reply carries `warnings` too, a list of `{code, message}`; they are advisory and never block a write:
+
+| Code | When |
+|---|---|
+| `local_path` | an `org` or `fleet` entry whose `summary` or `body` contains a local path (`/home/<name>`, `/Users/<name>`, `~/<name>`, `C:\Users\<name>` also as `C:/Users/<name>` or JSON-escaped; the POSIX roots are case-sensitive, the drive letter and `Users` are not; URLs, repo-relative paths and API routes such as `/users/42` do not match) |
+| `foreign_link` | a `fleet` entry whose `see_also` target is a `fleet` entry of another fleet (a `supersedes` target of another fleet is already refused) |
+| `backdated_successor` | a `supersedes` target has a later `occurred_at` than the new entry |
+| `fresh_consolidation` | the entry supersedes two or more entries and its `occurred_at` is more than one day after the newest superseded one; the message asks for the newest observation unless the writer observed or re-checked it today |
+| `no_primary_source` | an `org` or `fleet` `insight` or `decision` whose `sources` are all links to Hivemind entries (a bare entry id, `entry:<id>` or an `.../entries/<id>` URL), or are empty while it has `supersedes` or `see_also` links; an entry with no sources and no links is not flagged |
+| `sources_dropped` | a `supersedes` target has `sources` and the new entry carries none of them |
+
 **Derived validity (ADR 0001, no `valid_until` column):** an entry is "active as of T" iff `created_at ≤ T` and it has no supersession/withdrawal state transition before T. Read-side time-travel questions ("what did the org know in March?") are answered by `created_at`/`occurred_at` range filters + `state`.
 
 **Input bounds (ADR 0040).** Every surface enforces the same limits, before any embedder or store call, and answers a violation with **422** (REST `invalid_entry` / `invalid_input`) or `invalid_input` (MCP): no **U+0000** or lone surrogate in any string (nested `payload` strings and keys included) — Postgres cannot store them; caller-supplied timestamps within years 1900–2199; `body` ≤ 100 000 characters (a Postgres `tsvector` is capped at 1 MB); `tags` ≤ 32, each non-blank and ≤ 64 characters; `sources` ≤ 32, each `ref` ≤ 2048 characters; `payload` ≤ 64 KiB of compact JSON, nested ≤ 32 levels (no NaN/Infinity); `supersedes` ≤ 16 ids; batch feedback `entry_ids` ≤ 16 (ADR 0053); feedback `note` and withdraw `reason` ≤ 2000 characters. The text sent to the embedder and extractor is additionally capped at `max(20 000, 10 × prefix tokens)` characters of body (a character ceiling beside ADR 0021's word budget, for bodies with no whitespace).
@@ -111,7 +122,7 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 
 | Method & path | Purpose |
 |---|---|
-| `POST /v1/entries` | Create an entry (body = §4.1 fields; `supersedes` and `see_also` optional). The response adds `related`: up to 3 active entries the writer can read that are nearest to the new one, with their cosine `similarity` (ADR 0052) |
+| `POST /v1/entries` | Create an entry (body = §4.1 fields; `supersedes` and `see_also` optional). The response adds `related`: up to 3 active entries the writer can read that are nearest to the new one, with their cosine `similarity`, `tags`, feedback counts (`feedback`: `helpful`/`stale`/`wrong`) and `same_author` (the writer also wrote it) (ADR 0052), and `warnings` (below). With `?check=true` it stores nothing and answers **200** `{"checked": true, "related": [...], "warnings": [...]}` |
 | `GET /v1/entries/{id}` | Full entry (body included), with its `feedback`: verdict counts and up to 5 reports with their notes, corrections first (§4.2, ADRs 0051, 0064), and its links: `see_also` and `linked_from` (at most 20, newest first), limited to what the reader may read (ADR 0057). `?history=true` adds the supersession chain: at most 100 versions (one list page), successors first, then predecessors newest first |
 | `POST /v1/entries/get` | Read up to 10 entries by id in one call, `{entry_ids}` → `{entries, not_found}`; each entry as `GET /v1/entries/{id}` returns it, without `history` (ADR 0055) |
 | `GET /v1/entries` | List/filter **without** a query (filter only; paginated) |
@@ -119,7 +130,7 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | `POST /v1/entries/{id}/withdraw` | Withdraw own entry (or any, with admin credential) |
 | `POST /v1/entries/{id}/feedback` | Report `helpful`/`stale`/`wrong` (+note); not on the caller's own entry: 403 `forbidden` (ADR 0065) |
 | `PUT /v1/entries/{id}/pin` / `DELETE /v1/entries/{id}/pin` | Pin an active fleet entry to its fleet's briefing, or unpin it: a privileged agent of that fleet or the admin key; at most 10 pins per fleet; once the pinned entry is superseded, the version the pin shows names the same pin (ADR 0058) |
-| `GET /v1/pins` | A fleet's pinned entries, newest pin first, each as its newest readable version (`id`, `pinned_id`); the caller's home fleet unless `?fleet_id=` (ADR 0058) |
+| `GET /v1/pins` | A fleet's pinned entries, newest pin first, each as its newest readable version (`id`, `pinned_id`) with `changed_since_pin` and `change_reason` (`superseded`, or `flagged` by a `stale`/`wrong` verdict after the pin; ADR 0076); the caller's home fleet unless `?fleet_id=` (ADR 0058) |
 | `POST /v1/feedback` | One verdict (+note) on up to 16 entries at once, `{entry_ids, verdict, note?}`; all must be readable and none the caller's own, or nothing is recorded (ADRs 0053, 0065) |
 | `GET /v1/health` | Static health answer (no database check) |
 | `GET /v1/liveness` | Unauthenticated orchestrator liveness probe (ADR 0019) |
@@ -350,7 +361,7 @@ This section supersedes the flat-pool commitment of §1 and the "no trust tiers"
 * Reads beyond visibility behave **as if the entry does not exist** (no existence leaking).
 * `self`-scoped entries are private to their author **even at level 3** (that is what `self` is for).
 * **Read-broad does not mean relay** (ADR 0036): a privileged agent uses what it reads in other fleets but does not restate it in its home fleet; it links a foreign entry by id and asks its user before bringing one home. This is agent guidance (the hivemind skill), not something the server can enforce.
-* **Pinning is privileged and fleet-local** (ADR 0058): a privileged agent pins active entries of its home fleet into that fleet's briefing (at most 10); the admin key may pin in any fleet. Pins are context for the fleet's agents, never instructions (ADR 0043).
+* **Pinning is privileged and fleet-local** (ADR 0058): a privileged agent pins active entries of its home fleet into that fleet's briefing (at most 10); the admin key may pin in any fleet. Pins are context for the fleet's agents, never instructions (ADR 0043). Pin and unpin are audited (§12.5); pinning again refreshes `pinned_at` / `pinned_by` (and moves the pin onto the version an older pin now shows), which clears the flag; a pinned entry reports whether it **changed since pinned** (ADR 0076).
 * **Feedback and withdrawal follow readability**: an agent may feedback entries it can read, and withdraw its own entries; the admin key may withdraw any entry (the §4.1 withdrawal rules now ride the trust matrix).
 * **Every read by id follows readability** (ADR 0033): `hive_get` / `GET /v1/entries/{id}`, feedback and withdrawal answer **not found** for an entry the caller cannot see, and the supersession chain (`include_history` / `?history`) leaves such versions out.
 * **Provenance is never self-reported by an agent key** (ADRs 0012, 0033): on both surfaces `author` is the key's registered name and `agent` the key's agent identity.
@@ -377,7 +388,7 @@ The single admin key gates this surface; admin-issued entries use the reserved n
 
 ### 12.5 Audit log
 
-Every admin-surface action is recorded in an append-only **audit log** (ADR 0027) — distinct from an entry's provenance and its supersession chain.
+Every admin-surface action, and every agent pin or unpin (ADR 0076), is recorded in an append-only **audit log** (ADR 0027) — distinct from an entry's provenance and its supersession chain.
 
 **What is recorded.** One row per successful action, with `occurred_at`, `actor_kind`, `actor`, `action`, `target` and a `detail` object:
 
@@ -393,9 +404,11 @@ Every admin-surface action is recorded in an append-only **audit log** (ADR 0027
 | `entry.withdraw` | `POST /v1/entries/{id}/withdraw` **only** when the admin key withdraws another agent's entry (§4.1) | entry id | `{author, reason}` |
 | `admin_key.issue` | `hivemind-keys issue-admin` | key fingerprint | `{}` |
 | `admin_key.revoke` | `hivemind-keys revoke-admin` (a successful revocation only) | key fingerprint | `{}` |
+| `entry.pin` | `PUT /v1/entries/{id}/pin`, `hive_pin` — every stored pin, a re-pin included (ADR 0076) | entry id | `{fleet_id}`, plus `from` (the replaced pin id, or a list) when a re-pin moved older pins |
+| `entry.unpin` | `DELETE /v1/entries/{id}/pin`, `hive_pin` with `unpin` — a pin actually removed (ADR 0076) | entry id | `{fleet_id, pin_ids}` (the removed pins) |
 | `agent_key.issue` | `hivemind-keys issue-agent` | agent name | `{}`, or `{"from", "trust_level", "home_fleet_id"}` when it activated a pending/revoked agent (ADR 0039) |
 
-**Actors.** `actor_kind` is `admin_key` for the REST admin surface — `actor` is `admin:<fingerprint>` of the verified admin key — `org_key` for a registration made with the org key — `actor` is `org:<fingerprint>`, which identifies the key, not who used it (ADR 0046) — or `cli` for `hivemind-keys`, whose `actor` is the operator-supplied `--actor` (default: the OS user) and is **unverified**. A key **fingerprint** is the first 12 hex characters of the key's stored SHA-256 hash (what `hivemind-keys list` shows).
+**Actors.** `actor_kind` is `admin_key` for the REST admin surface — `actor` is `admin:<fingerprint>` of the verified admin key — `agent_key` for a privileged agent's pin or unpin — `actor` is the verified agent name (ADR 0076) — `org_key` for a registration made with the org key — `actor` is `org:<fingerprint>`, which identifies the key, not who used it (ADR 0046) — or `cli` for `hivemind-keys`, whose `actor` is the operator-supplied `--actor` (default: the OS user) and is **unverified**. A key **fingerprint** is the first 12 hex characters of the key's stored SHA-256 hash (what `hivemind-keys list` shows).
 
 **Never recorded.** No raw API key appears in any column. Read-only calls, re-registrations (`already_registered`) and refused registrations are not audited; nor is an author withdrawing their own entry.
 

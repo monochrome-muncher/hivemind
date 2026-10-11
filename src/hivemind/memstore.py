@@ -15,7 +15,7 @@ from __future__ import annotations
 import math
 import threading
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 
@@ -56,7 +56,7 @@ from hivemind.domain.feedback import (
     last_confirmed,
     truncate_note,
 )
-from hivemind.domain.pin import Pin
+from hivemind.domain.pin import Pin, PinWrite
 from hivemind.ports import SupersedeConflict
 
 # Sort key for a feedback row that has no timestamp (fixtures only).
@@ -230,17 +230,32 @@ class MemoryStore:
             ]
 
     async def pin_entry(
-        self, fleet_id: str, entry_id: str, pinned_by: str, limit: int
-    ) -> Pin | None:
+        self,
+        fleet_id: str,
+        entry_id: str,
+        pinned_by: str,
+        limit: int,
+        replaces: Sequence[str] = (),
+    ) -> PinWrite | None:
         with self._lock:
             existing = self._pins.get((fleet_id, entry_id))
-            if existing is not None:
-                return existing
-            if sum(1 for f, _ in self._pins if f == fleet_id) >= limit:
+            replaced = [
+                old
+                for old in dict.fromkeys(replaces)
+                if old != entry_id and self._pins.pop((fleet_id, old), None) is not None
+            ]
+            if (
+                existing is None
+                and not replaced
+                and sum(1 for f, _ in self._pins if f == fleet_id) >= limit
+            ):
                 return None
+            # Re-inserting moves the pin to the end: insertion order breaks
+            # ``list_pins`` ties, as ``entry_id`` does on Postgres.
+            self._pins.pop((fleet_id, entry_id), None)
             pin = Pin(fleet_id, entry_id, pinned_by, self._clock())
             self._pins[(fleet_id, entry_id)] = pin
-            return pin
+            return PinWrite(pin, existing is None, tuple(replaced))
 
     async def unpin_entry(self, fleet_id: str, entry_id: str) -> bool:
         with self._lock:
@@ -395,14 +410,14 @@ class MemoryStore:
         embedding: list[float],
         limit: int,
         *,
-        exclude_id: str,
+        exclude_id: str | None = None,
         visibility: Visibility | None = None,
     ) -> list[tuple[str, float]]:
         active = EntryFilters()
         with self._lock:
             rows: list[tuple[float, datetime, str]] = []
             for entry in self._entries.values():
-                if entry.id == exclude_id or entry.embedding is None:
+                if (exclude_id is not None and entry.id == exclude_id) or entry.embedding is None:
                     continue
                 if not active.matches(entry) or not self._visible(entry, visibility):
                     continue

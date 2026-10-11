@@ -50,6 +50,7 @@ from hivemind.services.feedback import reporter_agent
 from hivemind.services.governance import GovernanceService, RelatedEntry, WriteService
 from hivemind.services.search import Hit, SearchService
 from hivemind.services.wiring import Services
+from hivemind.services.write_warnings import WriteWarning
 
 logger = logging.getLogger(__name__)
 
@@ -193,7 +194,8 @@ def _hit_dict(hit: Hit) -> dict[str, object]:
 
 
 def _related_dict(related: RelatedEntry) -> dict[str, object]:
-    """A nearby existing entry in a write's reply (ADR 0052): compact, like a hit."""
+    """A nearby existing entry in a write's reply (ADR 0052): compact, like a hit,
+    with its tags, feedback counts and whether the writer wrote it."""
     entry = related.entry
     return {
         "id": entry.id,
@@ -204,7 +206,14 @@ def _related_dict(related: RelatedEntry) -> dict[str, object]:
         "fleet_id": entry.fleet_id,
         "occurred_at": entry.occurred_at.isoformat(),
         "similarity": round(related.similarity, 3),
+        "tags": list(entry.tags),
+        "feedback": _counts_dict(related.feedback),
+        "same_author": related.same_author,
     }
+
+
+def _warning_dict(warning: WriteWarning) -> dict[str, str]:
+    return {"code": warning.code, "message": warning.message}
 
 
 def _link_dict(entry: Entry) -> dict[str, object]:
@@ -353,6 +362,7 @@ async def hive_write(
     supersedes: list[str] | None = None,
     agent: str | None = None,
     see_also: list[str] | None = None,
+    check: bool = False,
 ) -> dict[str, object]:
     """Write a distilled entry into the shared pool (SPEC §4.1, §5.2).
 
@@ -378,6 +388,11 @@ async def hive_write(
     ``importance_source=default``; supply it and the value is kept with
     ``importance_source=caller`` (ROADMAP §4.5) — the 1..5 range is
     still enforced.
+
+    ``check``: run every validation a write runs and report ``related``
+    and ``warnings`` as ``{"checked": true, ...}``, storing nothing.
+    A write's reply carries ``warnings`` too: advisory ``{code, message}``
+    notes, never blocking.
 
     ``scope``: omit it and the entry lands at the highest scope the
     caller's trust level permits (L1 -> self; L2/L3 -> fleet; legacy
@@ -421,6 +436,13 @@ async def hive_write(
     except ValueError as exc:
         return _error(ERR_INVALID_INPUT, str(exc))
     try:
+        if check:
+            checked = await app.write_service.check(draft, writer=cred.visibility())
+            return {
+                "checked": True,
+                "related": [_related_dict(r) for r in checked.related],
+                "warnings": [_warning_dict(w) for w in checked.warnings],
+            }
         written = await app.write_service.write_and_relate(draft, writer=cred.visibility())
     except SupersedeDenied as exc:
         return _error(ERR_SUPERSEDE_DENIED, str(exc))
@@ -430,6 +452,7 @@ async def hive_write(
         return _error(ERR_INVALID_INPUT, str(exc))
     result = _entry_dict(written.entry)
     result["related"] = [_related_dict(r) for r in written.related]
+    result["warnings"] = [_warning_dict(w) for w in written.warnings]
     return result
 
 
@@ -699,7 +722,10 @@ async def hive_pinned(app: McpHivemind, fleet_id: str | None = None) -> dict[str
     """A fleet's pinned entries, newest pin first (ADR 0058): your home
     fleet's unless ``fleet_id`` names another you may read. Each pin shows
     the current version of the pinned entry; ``pinned_id`` is the version
-    that was pinned. Either id unpins it."""
+    that was pinned. Either id unpins it. ``changed_since_pin`` is true (with
+    ``change_reason`` ``superseded`` or ``flagged``, else null) when the entry
+    was superseded or flagged stale or wrong after the pin; pinning again
+    acknowledges the change (ADR 0076)."""
     try:
         pinned = await app.governance_service.pinned(app.credential, fleet_id)
     except InvalidInput as exc:
@@ -716,6 +742,8 @@ async def hive_pinned(app: McpHivemind, fleet_id: str | None = None) -> dict[str
                 "state": p.entry.state.value,
                 "pinned_by": p.pin.pinned_by,
                 "pinned_at": p.pin.pinned_at.isoformat(),
+                "changed_since_pin": p.changed_since_pin,
+                "change_reason": p.change_reason,
             }
             for p in pinned
         ],

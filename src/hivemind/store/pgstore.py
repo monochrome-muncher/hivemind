@@ -13,7 +13,7 @@ import json
 import logging
 import re
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -61,7 +61,7 @@ from hivemind.domain.feedback import (
     last_confirmed,
     truncate_note,
 )
-from hivemind.domain.pin import Pin
+from hivemind.domain.pin import Pin, PinWrite
 from hivemind.ports import SupersedeConflict
 from hivemind.store.pool import PoolTimeouts, make_pool
 
@@ -168,7 +168,8 @@ SELECT_PIN = "SELECT fleet_id, entry_id, pinned_by, pinned_at FROM pins WHERE fl
 COUNT_PINS = "SELECT count(*) FROM pins WHERE fleet_id = $1"
 INSERT_PIN = """
 INSERT INTO pins (fleet_id, entry_id, pinned_by) VALUES ($1, $2, $3)
-RETURNING fleet_id, entry_id, pinned_by, pinned_at
+ON CONFLICT (fleet_id, entry_id) DO UPDATE SET pinned_by = EXCLUDED.pinned_by, pinned_at = now()
+RETURNING fleet_id, entry_id, pinned_by, pinned_at, (xmax = 0) AS created
 """
 DELETE_PIN = "DELETE FROM pins WHERE fleet_id = $1 AND entry_id = $2"
 LIST_PINS = """
@@ -708,18 +709,35 @@ class PgStore:
         return {eid: links[c] if c is not None else ([], []) for eid, c in canonical.items()}
 
     async def pin_entry(
-        self, fleet_id: str, entry_id: str, pinned_by: str, limit: int
-    ) -> Pin | None:
+        self,
+        fleet_id: str,
+        entry_id: str,
+        pinned_by: str,
+        limit: int,
+        replaces: Sequence[str] = (),
+    ) -> PinWrite | None:
         if not _is_valid_uuid(entry_id):
             return None
         async with self._transaction() as conn:
             await conn.execute(LOCK_FLEET_PINS, fleet_id)
-            row = await conn.fetchrow(SELECT_PIN, fleet_id, entry_id)
-            if row is None:
-                if await conn.fetchval(COUNT_PINS, fleet_id) >= limit:
-                    return None
-                row = await conn.fetchrow(INSERT_PIN, fleet_id, entry_id, pinned_by)
-        return _row_to_pin(row)
+            existing = await conn.fetchrow(SELECT_PIN, fleet_id, entry_id)
+            replaced = [
+                old
+                for old in dict.fromkeys(replaces)
+                if old != entry_id
+                and _is_valid_uuid(old)
+                and (await conn.execute(DELETE_PIN, fleet_id, old)).endswith(" 1")
+            ]
+            if (
+                existing is None
+                and not replaced
+                and await conn.fetchval(COUNT_PINS, fleet_id) >= limit
+            ):
+                return None
+            row = await conn.fetchrow(INSERT_PIN, fleet_id, entry_id, pinned_by)
+        if row is None:
+            raise RuntimeError("pin row vanished between insert and read")
+        return PinWrite(_row_to_pin(row), bool(row["created"]), tuple(replaced))
 
     async def unpin_entry(self, fleet_id: str, entry_id: str) -> bool:
         if not _is_valid_uuid(entry_id):
@@ -907,7 +925,7 @@ class PgStore:
         embedding: list[float],
         limit: int,
         *,
-        exclude_id: str,
+        exclude_id: str | None = None,
         visibility: Visibility | None = None,
     ) -> list[tuple[str, float]]:
         """The active entries nearest to ``embedding`` with their cosine
@@ -915,7 +933,7 @@ class PgStore:
         settings as ``search_vector``, so it is approximate too (ADR 0025)."""
         clauses, params = _filter_conditions(EntryFilters(), visibility)
         clauses.append("embedding IS NOT NULL")
-        if _is_valid_uuid(exclude_id):
+        if exclude_id is not None and _is_valid_uuid(exclude_id):
             params.append(exclude_id)
             clauses.append(f"id <> ${len(params)}")
         vec_idx = len(params) + 1

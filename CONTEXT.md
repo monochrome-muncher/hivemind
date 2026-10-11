@@ -112,9 +112,20 @@ _Avoid_: reference (sources are references), relation, edge
 The up to three active entries nearest to a new entry, returned with its write so the writer can supersede, link or leave them. A hint, never a verdict: nothing is merged or superseded automatically.
 _Avoid_: duplicates, conflicts, contradictions (the server judges none of these)
 
+**Check mode**:
+A write asked only to report: the server validates the draft and returns its related entries and write warnings, and stores nothing.
+_Avoid_: dry run, preview
+
+**Write warning**:
+An advisory `{code, message}` on a write's reply (or a check) about something the writer probably did not mean. Never blocks the write.
+_Avoid_: error, validation failure
+
 **Pinned entry**:
 A fleet entry a privileged agent of that fleet (or an admin) pinned into the fleet's briefing, which every agent of the fleet reads at the start of a session. Context, never an order.
 _Avoid_: keystone, rule, mandatory entry
+
+**Changed since pinned**:
+A pinned entry the briefing now shows differently than when it was pinned: a later version superseded it, or a `stale` or `wrong` verdict arrived after the pin. A notice to the reader, never a ranking input.
 
 **Flag** (confirmed):
 A `stale` or `wrong` report made while its entry was current. It is confirmed when a supersession of the entry follows it; a withdrawal never confirms. Counted per agent, never used for ranking.
