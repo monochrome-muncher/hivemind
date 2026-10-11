@@ -1,5 +1,7 @@
 # A recency profile per kind
 
+> **Amended by [ADR 0073](0073-a-recency-hint-on-search.md):** decision 4 ("no decay" is not offered) stands for the setting. Per search, a caller can opt out of age with the explicit `ignore_age` hint, only when `HIVEMIND_RECENCY_HINT` is on; that search gives up I1 on request.
+
 Amends [ADR 0022](0022-recency-floor-so-match-quality-is-the-sort-key.md) and SPEC §6.4. Extends invariant I1 of [ADR 0070](0070-one-capped-budget-for-social-signals.md) per kind.
 
 ## Context

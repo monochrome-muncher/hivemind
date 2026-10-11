@@ -31,8 +31,10 @@ from dataclasses import replace
 from datetime import timedelta
 from typing import Any
 
+from hivemind.config import PREFER_RECENT_FLOOR
 from hivemind.domain.entry import EntryDraft, Kind
 from hivemind.domain.feedback import Feedback, Verdict
+from hivemind.domain.recency import RecencyHint
 from hivemind.memstore import MemoryStore
 from hivemind.retrieval.eval import aggregate_report, evaluate_query
 from hivemind.services.governance import WriteService
@@ -68,6 +70,8 @@ FUSED_RANGE_AT_DEFAULT_K = 2 * (DEFAULT_RRF_K + CANDIDATE_TOP_K) / (DEFAULT_RRF_
 
 # A variant is a rule mapping a query to the half-life it is scored under.
 HalfLifeRule = Callable[[LabelledQuery], float]
+# ... or, for the recency hint (ADR 0073), to the hint the query carries.
+HintRule = Callable[[LabelledQuery], RecencyHint]
 
 # The slices reported, in report order: the §4.4 axis first, then the
 # competition-pattern diagnostic, then the whole set.
@@ -143,8 +147,15 @@ async def ranked_ids(
     recency_floor: float | None = None,
     recency_from_confirmation: bool = False,
     recency_by_kind: tuple[tuple[Kind, float], ...] | None = None,
+    recency: RecencyHint = RecencyHint.DEFAULT,
+    prefer_recent_floor: float | None = PREFER_RECENT_FLOOR,
 ) -> list[str]:
-    """The ranked entry ids for one query under one search config."""
+    """The ranked entry ids for one query under one search config.
+
+    A non-default ``recency`` hint turns ``recency_hint_enabled`` on for
+    this config (ADR 0073); ``prefer_recent_floor`` is the floor
+    ``prefer_recent`` scores under (``None`` = no floor).
+    """
     config = replace(
         make_search_config(
             candidate_top_k=CANDIDATE_TOP_K,
@@ -155,9 +166,11 @@ async def ranked_ids(
         ),
         recency_from_confirmation=recency_from_confirmation,
         recency_by_kind=recency_by_kind,
+        recency_hint_enabled=recency is not RecencyHint.DEFAULT,
+        prefer_recent_floor=prefer_recent_floor,
     )
     service = SearchService(store, make_embedder(), config, now_fn=now_clock)
-    hits = await service.search(query, limit=K)
+    hits = await service.search(query, limit=K, recency=recency)
     return [hit.entry_id for hit in hits]
 
 
@@ -170,8 +183,14 @@ async def measure_slices(
     confirmations: dict[int, float] | None = None,
     recency_from_confirmation: bool = False,
     recency_by_kind: tuple[tuple[Kind, float], ...] | None = None,
+    hint: HintRule | None = None,
+    prefer_recent_floor: float | None = PREFER_RECENT_FLOOR,
 ) -> dict[str, dict[str, QueryMetrics]]:
-    """Run every labelled query under one config, bucketed into the slices."""
+    """Run every labelled query under one config, bucketed into the slices.
+
+    ``hint`` maps a query to the recency hint it carries (ADR 0073); the
+    default is no hint, the shipped scoring.
+    """
     store, entry_ids, now_clock = await seed_temporal_corpus(age_overrides, confirmations)
     slices: dict[str, dict[str, QueryMetrics]] = {name: {} for name in SLICES}
     for labelled in temporal_queries():
@@ -184,6 +203,8 @@ async def measure_slices(
             recency_floor=recency_floor,
             recency_from_confirmation=recency_from_confirmation,
             recency_by_kind=recency_by_kind,
+            recency=hint(labelled) if hint else RecencyHint.DEFAULT,
+            prefer_recent_floor=prefer_recent_floor,
         )
         relevant = {entry_ids[i]: 1 for i in labelled.relevant}
         metrics = evaluate_query(ranked, relevant, K)

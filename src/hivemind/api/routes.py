@@ -72,6 +72,7 @@ from hivemind.domain.access import (
 )
 from hivemind.domain.audit import AuditAction, AuditFilters
 from hivemind.domain.entry import EntryFilters, Kind, Source
+from hivemind.domain.recency import RecencyHint
 from hivemind.domain.validation import (
     MAX_IDENTITY_CHARS,
     MAX_LIMIT,
@@ -122,6 +123,9 @@ AUDIT_LOG_MAX_LIMIT = 1000
 # embedding service failed says so in this response header.
 DEGRADED_HEADER = "X-Hivemind-Degraded"
 DEGRADED_KEYWORD_ONLY = "keyword-only"
+
+# ADR 0073: a search scored under a non-default recency hint says which one.
+RECENCY_HEADER = "X-Hivemind-Recency"
 
 logger = logging.getLogger(__name__)
 
@@ -348,7 +352,9 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
 
         When the embedding service is down the hits come from the keyword
         stream alone and the response carries ``X-Hivemind-Degraded:
-        keyword-only`` (ADR 0048); the body keeps its shape.
+        keyword-only`` (ADR 0048); the body keeps its shape. ``recency``
+        (ADR 0073) is applied only when the server turned the hint on, and
+        then the response carries ``X-Hivemind-Recency`` with the hint used.
         """
         filters = EntryFilters(
             kind=request.kind,
@@ -370,7 +376,10 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
             request.limit,
             offset=request.offset,
             visibility=credential.visibility(),
+            recency=request.recency or RecencyHint.DEFAULT,
         )
+        if result.recency is not RecencyHint.DEFAULT:
+            response.headers[RECENCY_HEADER] = result.recency.value
         if result.degraded:
             response.headers[DEGRADED_HEADER] = DEGRADED_KEYWORD_ONLY
             if prometheus is not None:

@@ -249,9 +249,13 @@ _Avoid_: fuzzy search (that is edit-distance matching), lossy search, inexact se
 The lower bound on the SPEC §6.4 recency factor (`max(floor, 0.5 ** (age/half_life))`), which caps that factor's range at `1/floor` instead of leaving it unbounded. A `SearchConfig` value in `(0, 1]`, default 0.8 (ADR 0022); `None` means no floor.
 _Avoid_: decay cutoff (nothing is excluded), minimum score (it bounds one factor, not the final score), recency cap (it is a lower bound, not an upper one)
 
+**Recency hint**:
+The per-search value (`default`, `prefer_recent`, `ignore_age`) a caller sends to say how age should weigh in that search; a deployment turns it on (ADR 0073), and off it is ignored.
+_Avoid_: recency filter (nothing is excluded), recency boost (it can also drop age), time sense (that is the query's property, the hint is what the agent says about it)
+
 **Recency profile**:
 The half-life, in days, an entry of one kind ages by when a deployment sets one per kind (ADR 0072); a kind without one keeps the shared half-life, and the recency floor is the same for every kind.
-_Avoid_: decay class, per-kind floor (the floor is shared), no decay (a long half-life, never none)
+_Avoid_: decay class, per-kind floor (the floor is shared), no decay (not offered as a setting; only per search via the explicit `ignore_age` hint, ADR 0073)
 
 **Social cap**:
 The ceiling (`social_max`, default 1.2, ADR 0070) on the combined upward effect of the social signals in the SPEC §6.4 score, `min(social_max, quality)`; penalties are not capped. A social signal is a ranking input that comes from other agents' behaviour, today only feedback quality.

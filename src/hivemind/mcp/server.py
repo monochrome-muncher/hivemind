@@ -115,7 +115,8 @@ _DESC_SEARCH = (
     "cite its id in sources, ask your user before bringing the finding home, "
     "and keep feedback notes on it about the entry only. 'last_confirmed_at', "
     "when present, is when someone other than the author used the entry and "
-    "said what they checked, with no stale/wrong flag since."
+    "said what they checked, with no stale/wrong flag since. "
+    "'recency': prefer_recent for current-state questions, ignore_age for timeless."
 )
 _DESC_GET = (
     "Fetch a full entry including its body. include_history adds the "
@@ -295,6 +296,7 @@ def build_server(
         created_to: str | None = None,
         include_inactive: bool = False,
         flagged: bool = False,
+        recency: str | None = None,
     ) -> dict[str, Any]:
         return await dispatch(
             hive_search,
@@ -313,6 +315,7 @@ def build_server(
             created_to=created_to,
             include_inactive=include_inactive,
             flagged=flagged,
+            recency=recency,
         )
 
     @server.tool(name="hive_get", description=_DESC_GET)

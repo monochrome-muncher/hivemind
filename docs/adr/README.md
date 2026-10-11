@@ -82,3 +82,4 @@ is unused.
 | [0070](0070-one-capped-budget-for-social-signals.md) | One capped budget for social signals | Accepted |
 | [0071](0071-a-confirmation-can-restart-the-recency-clock.md) | A confirmation can restart the recency clock | Accepted (off by default) |
 | [0072](0072-recency-profile-per-kind.md) | A recency profile per kind | Accepted (off by default) |
+| [0073](0073-a-recency-hint-on-search.md) | A recency hint on search | Accepted (off by default) |
