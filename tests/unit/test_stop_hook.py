@@ -327,3 +327,108 @@ def test_the_section_after_a_compaction_asks_once_to_write() -> None:
     assert line not in str(before) and line not in str(later)
     incognito = _pi([["compact", None], ["prompt", None]], HIVEMIND_INCOGNITO="1")
     assert line not in str(incognito["prompt"][0])
+
+
+# -- OpenCode: the same two nudges from the plugin ---------------------------------
+
+OPENCODE_PLUGIN = PLUGIN / "opencode" / "hivemind.js"
+
+_OPENCODE_SCRIPT = """
+const mod = await import(process.argv[1])
+const sent = []
+const parents = JSON.parse(process.env.PARENTS ?? "{}")
+const client = { session: {
+  get: async ({ path }) => ({ data: { id: path.id, parentID: parents[path.id] } }),
+  promptAsync: async (req) => { sent.push(req) },
+} }
+const hooks = await mod.HivemindPlugin({ client })
+const out = { sent, system: [] }
+for (const [kind, arg] of JSON.parse(process.env.STEPS)) {
+  if (kind === "message") await hooks["chat.message"](arg, { message: {}, parts: [] })
+  if (kind === "call") await hooks["tool.execute.after"](arg, { title: "", output: "", metadata: {} })
+  if (kind === "event") await hooks.event({ event: arg })
+  if (kind === "system") {
+    const o = { system: [] }
+    await hooks["experimental.chat.system.transform"](arg, o)
+    out.system.push(o.system[0])
+  }
+}
+console.log(JSON.stringify(out))
+"""
+
+
+def _opencode(steps: list[object], **env: str) -> dict[str, list[object]]:
+    base = {k: v for k, v in os.environ.items() if not k.startswith("HIVEMIND_")}
+    out = subprocess.run(
+        ["node", "--input-type=module", "-e", _OPENCODE_SCRIPT, OPENCODE_PLUGIN.as_uri()],
+        env={**base, "HIVEMIND_API_KEY": "hm_key", "STEPS": json.dumps(steps), **env},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    result: dict[str, list[object]] = json.loads(out.stdout)
+    return result
+
+
+def _oc_calls(n: int, tool: str = "bash", sid: str = "s1") -> list[object]:
+    return [["call", {"tool": tool, "sessionID": sid, "callID": f"c{i}"}] for i in range(n)]
+
+
+def _idle(sid: str = "s1") -> list[object]:
+    return ["event", {"type": "session.idle", "properties": {"sessionID": sid}}]
+
+
+def test_the_opencode_plugin_shares_the_hook_texts() -> None:
+    assert STOP_TEXT and COMPACT_LINE
+    text = OPENCODE_PLUGIN.read_text()
+    assert f'"{json.loads(STOP_TEXT.group(1))["reason"]}"' in text
+    assert f'"{COMPACT_LINE.group(1)}"' in text
+
+
+@needs_node
+def test_opencode_prompts_a_long_idle_session_once_with_its_own_model() -> None:
+    reason = json.loads(STOP_TEXT.group(1))["reason"]  # type: ignore[union-attr]
+    model = {"providerID": "p", "modelID": "m"}
+    r = _opencode(
+        [
+            ["message", {"sessionID": "s1", "agent": "build", "model": model}],
+            *_oc_calls(20),
+            _idle(),
+            _idle(),
+        ]
+    )
+    [sent] = r["sent"]
+    assert sent == {
+        "path": {"id": "s1"},
+        "body": {"agent": "build", "model": model, "parts": [{"type": "text", "text": reason}]},
+    }
+
+
+@needs_node
+@pytest.mark.parametrize("tool", ["hivemind_hive_write", "hivemind_hive_feedback"])
+def test_an_opencode_session_that_wrote_or_rated_is_not_prompted(tool: str) -> None:
+    assert _opencode([*_oc_calls(25), *_oc_calls(1, tool), _idle()])["sent"] == []
+
+
+@needs_node
+def test_opencode_leaves_short_subagent_incognito_and_unconfigured_sessions_alone() -> None:
+    assert _opencode([*_oc_calls(19, "hivemind_hive_search"), _idle()])["sent"] == []
+    long = [*_oc_calls(25, sid="child"), _idle("child")]
+    assert _opencode(long, PARENTS=json.dumps({"child": "s1"}))["sent"] == []
+    assert _opencode([*_oc_calls(25), _idle()], HIVEMIND_INCOGNITO="1")["sent"] == []
+    assert _opencode([*_oc_calls(25), _idle()], HIVEMIND_API_KEY="")["sent"] == []
+    # Sessions are counted apart.
+    split = [*_oc_calls(10, sid="a"), *_oc_calls(10, sid="b"), _idle("a"), _idle("b")]
+    assert _opencode(split)["sent"] == []
+
+
+@needs_node
+def test_the_opencode_reminder_after_a_compaction_asks_once_to_write() -> None:
+    line = COMPACT_LINE.group(1)  # type: ignore[union-attr]
+    compacted = ["event", {"type": "session.compacted", "properties": {"sessionID": "s1"}}]
+    system = ["system", {"sessionID": "s1", "model": {}}]
+    other = ["system", {"sessionID": "s2", "model": {}}]
+    r = _opencode([system, compacted, other, system, system])
+    before, elsewhere, after, later = r["system"]
+    assert isinstance(after, str) and after.endswith(line)
+    assert all(line not in str(s) for s in (before, elsewhere, later))

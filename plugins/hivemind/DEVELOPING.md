@@ -87,8 +87,8 @@ itself names no harness-specific paths, and a test enforces this.
 
 Two nudges that get knowledge written before it is lost: in Claude Code
 and Codex from `hooks/hooks.json`, in Pi and Oh My Pi from the extension
-(below). OpenCode, Hermes, Gemini CLI and DeepSeek Harness do not have
-them. The script counts both
+and the OpenCode plugin (below). Hermes, Gemini CLI and DeepSeek Harness
+do not have them. The script counts both
 transcript formats: Claude Code's `"type": "tool_use"` records and Codex's
 `function_call`, `custom_tool_call` and `local_shell_call` items (checked
 with Codex 0.162.1 against a mock model: it blocks once, Codex continues
@@ -134,6 +134,20 @@ runs plugin hooks only after the user trusts them in `/hooks`.
   next prompt, and a `hive_write` (Pi `mcp__hivemind__hive_write`, Oh My
   Pi `xd://mcp__hivemind_hivemind_hive_write`) keeps it quiet. The
   compaction sentence is tested only in `tests/unit/test_stop_hook.py`.
+- **OpenCode.** OpenCode has no hook that can hold a stop, so the plugin
+  (`opencode/hivemind.js`) counts each session's calls in
+  `tool.execute.after` (MCP tools are named `hivemind_hive_write`) and, on
+  the `session.idle` event of a long top-level session that wrote
+  nothing, sends the reminder once with `client.session.promptAsync`,
+  using the agent and model of the session's last message (from
+  `chat.message`). A subagent's session (one with a `parentID`) is left
+  alone. After `session.compacted`, the next
+  `experimental.chat.system.transform` for that session adds the
+  post-compaction sentence once. Checked live with OpenCode 1.19.0
+  (`opencode serve`, which the TUI also uses) against a mock model: three
+  shell calls get the reminder as the next prompt, and a
+  `hivemind_hive_write` keeps it quiet. `opencode run` exits at the first
+  idle, so the reminder never runs there.
 
 ## Incognito
 
