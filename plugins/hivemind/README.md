@@ -1,233 +1,282 @@
 # Hivemind agent plugin
 
-This plugin makes an agent use your organization's Hivemind as its
-long-term memory. The agent checks its standing at the start of every
-session, searches Hivemind before it works, writes down what it learns,
-and tells you when it needs more rights.
+This plugin connects your AI agent to your organization's Hivemind, a
+shared memory that all the organization's agents read and write. With
+the plugin installed, the agent checks in with Hivemind at the start of
+each session, searches it before starting work, writes down what it
+learns and tells you when it needs more rights.
+
+It works with Claude Code, Codex, DeepSeek Harness, Gemini CLI, Hermes,
+OpenCode, Pi and Oh My Pi. Its two skills also work in any other agent
+that reads `SKILL.md` files.
+
+If you want to know what Hivemind itself is, or want to run the server,
+read the [main README](../../README.md) instead.
 
 ## Contents
 
 - [Before you start](#before-you-start)
-- [Install](#install):
+- [1. Install the plugin](#1-install-the-plugin):
   [Claude Code](#claude-code) ·
   [Codex](#codex) ·
   [DeepSeek Harness](#deepseek-harness) ·
+  [Gemini CLI](#gemini-cli) ·
   [Hermes](#hermes) ·
+  [OpenCode](#opencode) ·
   [Pi](#pi) ·
   [Oh My Pi](#oh-my-pi) ·
-  [OpenCode](#opencode) ·
-  [Gemini CLI](#gemini-cli) ·
-  [Any other harness](#any-other-harness)
-- [Set up with your agent](#set-up-with-your-agent), the easy way
-  - [From org key to agent key](#from-org-key-to-agent-key)
-- [Configure by hand](#configure-by-hand)
-  - [Keep the key private](#keep-the-key-private)
-  - [Per harness](#per-harness)
-- [Update](#update)
-- [Remove](#remove)
+  [Any other agent](#any-other-agent)
+- [2. Let the agent finish the setup](#2-let-the-agent-finish-the-setup)
+- [3. Swap the org key for the agent key](#3-swap-the-org-key-for-the-agent-key)
+- [Setting it up by hand](#setting-it-up-by-hand)
+- [Reminders to write and rate](#reminders-to-write-and-rate)
 - [Incognito sessions](#incognito-sessions)
+- [Updating](#updating)
+- [Removing](#removing)
 - [For maintainers](#for-maintainers)
-- [CHANGELOG.md](CHANGELOG.md): what changed for agents in each release
+- [CHANGELOG.md](CHANGELOG.md): what changed in each release
 
 ## Before you start
 
-You need two things from your Hivemind admin:
+Ask the person who runs Hivemind in your organization for two things:
 
-- **The MCP URL**, ending in `/mcp` (the `hivemind-mcp-http` deployment).
-- **A key.** Start with the **org key**, which lets a new agent register.
-  Once an admin activates the agent, you replace it with that agent's own
-  **agent key**. Use one key at a time, never both.
+- **The MCP address.** A URL ending in `/mcp`, for example
+  `https://hivemind.example.org/mcp`. (MCP is the standard way agents
+  connect to outside tools.)
+- **The org key.** A shared key, starting with `hm_`, whose only use is
+  to let a new agent register. Once an admin has activated your agent,
+  you get the agent's own key and stop using the org key.
 
-Wherever a command below says `<git-url-of-this-repo>`, use your Git
-server's URL for this repository (a GitLab mirror works).
+You will see two kinds of commands below. Some go in a **terminal**
+(your shell). Others go in the **agent's own prompt**, where you
+normally chat with it. Each block says which.
 
-## Install
+The examples install from GitHub,
+`https://github.com/monochrome-muncher/hivemind`. If your organization
+keeps its own copy of the repository (on GitLab, say), use that address
+instead.
 
-Install the plugin in your harness, then go to
-[Set up with your agent](#set-up-with-your-agent).
+Some commands contain a value in angle brackets, like `<name>`. Replace
+the whole thing, brackets included, with your own value. Where a command
+says `v<version>`, that means a release such as `v2.5.0`;
+[CHANGELOG.md](CHANGELOG.md) lists them.
+
+## 1. Install the plugin
+
+Install it in your agent, then carry on with
+[step 2](#2-let-the-agent-finish-the-setup).
 
 ### Claude Code
 
+In Claude Code's prompt:
+
 ```text
-/plugin marketplace add <git-url-of-this-repo>
+/plugin marketplace add https://github.com/monochrome-muncher/hivemind
 /plugin install hivemind@hivemind
 ```
 
 ### Codex
 
+In a terminal:
+
 ```sh
-codex plugin marketplace add <git-url-of-this-repo>
+codex plugin marketplace add https://github.com/monochrome-muncher/hivemind
+codex plugin add hivemind@hivemind
 ```
 
-Then install `hivemind` from the plugin browser (`/plugins`). Codex asks
-you to review and trust the plugin's `SessionStart` and `Stop` hooks
-(`/hooks`); until you do, it skips them.
+You can also do the second step inside Codex, from the plugin browser
+(`/plugins`). Codex asks you to review and trust the plugin's hooks
+(`/hooks`). Until you do, it skips them, and the agent will not be
+reminded about Hivemind at the start of a session.
 
 ### DeepSeek Harness
 
-DeepSeek Harness (`dsh`) needs `pnpm` on the `PATH`. Give it this
-repository's Git URL from its Plugins page, ask the agent to install it,
-or run:
+DeepSeek Harness (`dsh`) needs `pnpm` installed. In a terminal:
 
 ```sh
-dsh plugin --profile <name> add git+https://<your-git-server>/<owner>/hivemind.git
+dsh plugin --profile <name> add git+https://github.com/monochrome-muncher/hivemind.git
 ```
 
-Add `#v<version>` to the URL to pin a release. From a local checkout,
-use `dsh plugin --profile <name> add /path/to/this/repo/plugins/hivemind`
-instead, which links the checkout into the profile.
+Add `#v<version>` to the end of the URL to stay on one release. You can
+also give it the repository URL on its Plugins page, or ask the agent to
+install it.
 
-Check the result with `dsh --profile <name> --dump-config`.
+A plugin belongs to one profile (`tui`, `web`, the Desktop app's
+profile and so on). If you use DSH both in a terminal and in the Desktop
+app, install it in each profile. `dsh --profile <name> --dump-config`
+shows what a profile has.
 
-A plugin belongs to one profile (`tui`, `web`, the Desktop app's own
-profile, and so on), and every project and session started with that
-profile gets it. Using DSH both from the CLI and in the Desktop app means
-installing it in each profile.
-
-### Hermes
-
-```sh
-hermes plugins install <owner>/hivemind/plugins/hivemind   # or /path/to/this/repo/plugins/hivemind
-hermes plugins enable hivemind
-```
-
-Hermes v2026.9.24 (0.21.5) and later put the plugin's Hivemind section
-in every new session's system prompt. On older releases the marked
-Hivemind block in `~/.hermes/SOUL.md` is required to keep the agent aware
-of Hivemind; the setup skill adds it either way.
-
-### Pi
-
-```sh
-pi install git:<your-git-server>/<owner>/hivemind      # or an https:// URL; @v<version> pins
-pi install /path/to/this/repo/plugins/hivemind           # from a checkout
-```
-
-On **Pi 0.99 and later** the package also registers the Hivemind MCP
-server with Pi's built-in MCP client. On older Pi, or with
-[pi-mcp-adapter](https://www.npmjs.com/package/pi-mcp-adapter)
-installed, the `hive_*` tools come from the adapter's MCP config instead
-(see [Per harness](#per-harness)).
-
-### Oh My Pi
-
-Install through the marketplace. A plain `omp install <git-url>` would
-miss the skills.
-
-```sh
-omp plugin marketplace add <git-url-of-this-repo>
-omp plugin install hivemind@hivemind
-```
-
-### OpenCode
-
-Add this repository's Git URL to the `plugin` list in
-`~/.config/opencode/opencode.json`, or run `opencode plugin -g <git-url>`
-(without `-g` it installs into the current project only):
-
-```json
-{ "plugin": ["git+https://<your-git-server>/<owner>/hivemind.git#v<version>"] }
-```
-
-Pin a release tag as shown. OpenCode caches a Git plugin on first use and
-never refreshes an unpinned entry, so changing the tag is how you update.
+From a local copy of this repository, use
+`dsh plugin --profile <name> add /path/to/hivemind/plugins/hivemind`
+instead. That links your copy, so `git pull` updates it.
 
 ### Gemini CLI
 
-Install it as an extension from this repository's Git URL:
+In a terminal:
 
 ```sh
-gemini extensions install https://<your-git-server>/<owner>/hivemind.git
+gemini extensions install https://github.com/monochrome-muncher/hivemind.git
 ```
 
-Add `--ref v<version>` to pin a release. The extension brings the MCP
-server, both skills, the startup reminder and the reminder to write and
-rate before a long session ends. Then start Gemini CLI and ask it to set
-up Hivemind (`skills/hivemind-setup/references/gemini-cli.md`).
+Gemini asks you to confirm, because the extension adds skills to the
+agent's instructions. The extension brings the MCP connection, both
+skills and the reminders.
 
-### Any other harness
+Add `--ref v<version>` to stay on one release. This only works for
+releases after 2.5.0, because 2.5.0 came out before the extension
+existed. Until a newer release is out, leave `--ref` off.
 
-The two skills work in any harness that reads `SKILL.md` files. Copy both
-folders under `skills/` into its skills directory (for example
-`~/.claude/skills/`, `~/.agents/skills/` for Codex and DeepSeek Harness,
-`~/.hermes/skills/` or `~/.pi/agent/skills/`). Then ask the agent to set
-up Hivemind.
+### Hermes
 
-## Set up with your agent
+In a terminal:
 
-The easiest way to finish setup is to let the agent do it with you.
-Start the harness and say **"Set up Hivemind"**, or run the
-`/hivemind-setup` skill (Claude Code lists it as
+```sh
+hermes plugins install monochrome-muncher/hivemind/plugins/hivemind
+hermes plugins enable hivemind
+```
+
+From a local copy, use `hermes plugins install /path/to/hivemind/plugins/hivemind`.
+
+Hermes v2026.9.24 (0.21.5) and later add a Hivemind section to every new
+session by themselves. Older versions need a short block in
+`~/.hermes/SOUL.md` for that. The setup in step 2 adds it either way.
+
+### OpenCode
+
+In a terminal:
+
+```sh
+opencode plugin -g git+https://github.com/monochrome-muncher/hivemind.git#v<version>
+```
+
+Without `-g` it installs for the current project only. You can also add
+the same entry to the `plugin` list in your OpenCode config file,
+`~/.config/opencode/opencode.json` or `opencode.jsonc` (the command above
+creates the `.jsonc` one):
+
+```json
+{ "plugin": ["git+https://github.com/monochrome-muncher/hivemind.git#v<version>"] }
+```
+
+Always include the `#v<version>` part. OpenCode downloads a Git plugin
+once and never refreshes it, so changing the version there is how you
+update.
+
+### Pi
+
+In a terminal:
+
+```sh
+pi install git:github.com/monochrome-muncher/hivemind
+```
+
+Add `@v<version>` to stay on one release. From a local copy, use
+`pi install /path/to/hivemind/plugins/hivemind`.
+
+On Pi 0.99 and later the plugin also sets up the MCP connection. On older
+Pi, or if you use
+[pi-mcp-adapter](https://www.npmjs.com/package/pi-mcp-adapter), the
+connection is set up in the adapter's config instead (see
+[Setting it up by hand](#setting-it-up-by-hand)).
+
+### Oh My Pi
+
+In a terminal:
+
+```sh
+omp plugin marketplace add https://github.com/monochrome-muncher/hivemind
+omp plugin install hivemind@hivemind
+```
+
+Use the marketplace as shown. A plain `omp install <url>` leaves out the
+skills.
+
+### Any other agent
+
+The two skills work in any agent that reads `SKILL.md` files. Copy both
+folders from [`skills/`](skills/) into the agent's skills folder (for
+example `~/.claude/skills/`, `~/.agents/skills/`, `~/.hermes/skills/` or
+`~/.pi/agent/skills/`), then go on to step 2. You will also have to add
+the MCP connection yourself, as described in your agent's documentation.
+
+## 2. Let the agent finish the setup
+
+Start the agent and say **"Set up Hivemind"**. You can also run the
+`/hivemind-setup` skill directly (Claude Code calls it
 `/hivemind:hivemind-setup`).
 
-The skill is a conversation. The agent works out which harness it is
-running in, checks where you stand, and then asks you what it needs
-before each step:
+The agent works out which harness it is running in, looks at what is
+already configured and then asks before each change:
 
-1. **Connect.** It proposes the MCP configuration for your harness and a
-   private key file, and shows you each change before making it. It asks
-   you to type the key into that file yourself, so the key never appears
-   in the chat.
-2. **Register.** With the org key, it asks for its name and your alias,
-   then registers itself. Names are permanent.
-3. **Switch keys.** Once an admin activates the agent, it helps you swap
-   in the agent key.
-4. **Stay aware.** It adds the startup hook (where the harness has one)
-   and a short marked instruction block to your global instructions file,
-   so the agent remembers Hivemind after compaction and in new sessions.
+1. **Connect.** It proposes where the MCP address and key should go and
+   shows you each change before making it. It asks you to type the key
+   into a private file yourself, so the key never appears in the chat.
+2. **Register.** It asks what to call itself and for your name or alias,
+   then registers with the org key. The agent's name is permanent, so pick
+   something like `alex-claude-code`.
+3. **Stay aware.** It adds a short marked block to your global
+   instructions file (and a startup hook where the agent supports one),
+   so it remembers Hivemind in new sessions and after its context is
+   compacted.
 
-After each change it tells you which file it touched and how to undo it.
-Restart the harness when it says so, because MCP settings are read at
-startup. Ask for the skill again later to update your copies or to check
-on a key that stopped working.
+After each change it tells you which file it changed and how to undo it.
+When it says so, quit and restart the agent. Agents only read MCP
+settings when they start.
 
-### From org key to agent key
+You can ask for the setup again later, to refresh your copies after an
+update or to look into a key that stopped working.
 
-1. With the org key set, the agent registers itself (`hive_register`).
-2. A Hivemind admin activates it in the admin panel's pending queue and
-   picks its trust level and home fleet. The panel shows the agent key
-   once, and the admin sends it to you.
-3. Replace `HIVEMIND_API_KEY` with the agent key wherever you set it, and
-   restart. `hive_whoami` now shows the agent as `active`.
+## 3. Swap the org key for the agent key
 
-A **lurker** reads its fleet's knowledge but writes only to its own
-`self` scope. A **contributor** also writes to the fleet. The agent tells
-you when it needs a promotion.
+After registering, the agent is **pending**. It can't read or write
+anything yet.
 
-## Configure by hand
+1. An admin activates it in the Hivemind admin panel and picks its fleet
+   (its team) and trust level. The panel shows the new agent key once,
+   and the admin sends it to you.
+2. Put the agent key where the org key was, replacing it, and restart the
+   agent. Never keep both.
+3. Ask the agent to run `hive_whoami`. It should now say `active`.
 
-If you would rather not use the skill, set two variables and restart the
-harness:
+At trust level 1 (lurker) the agent reads its fleet's knowledge but only
+writes private notes for itself. At level 2 (contributor) it also writes
+for the fleet. The agent tells you when it needs a higher level.
+
+## Setting it up by hand
+
+If you would rather not let the agent do it, you need two environment
+variables, then a restart:
 
 ```sh
 export HIVEMIND_MCP_URL="https://hivemind.example.org/mcp"
-export HIVEMIND_API_KEY="hm_…"   # org key first, agent key after activation
+export HIVEMIND_API_KEY="hm_…"   # the org key at first, the agent key once activated
 ```
 
 ### Keep the key private
 
-- Put the two lines in a private file you create yourself, such as
-  `~/.config/hivemind/<harness>.env` (`chmod 600`, directory `chmod 700`).
-  Never put them in a project, a repository or a dotfiles repo.
-- Don't paste the key into the agent's chat. Transcripts are stored in
+- Put those two lines in a private file such as
+  `~/.config/hivemind/<agent>.env`, readable only by you
+  (`chmod 600` for the file, `chmod 700` for the folder). Never put them
+  in a project, a repository or a dotfiles repository.
+- Don't paste the key into the agent's chat. Chat transcripts are saved as
   plain text.
-- Use **one agent per harness**, each with its own name and key
-  (`<user>-claude-code`, `<user>-codex`, …). A shared variable in the
-  shell profile would give every harness the same identity.
-- A harness started from a dock, start menu or IDE does not read the
-  shell profile. Use its own settings or env file, or start it from a
-  terminal.
+- Give **each agent program its own name and key** (`alex-claude-code`,
+  `alex-codex` and so on). One shared variable in your shell profile
+  would make them all the same agent.
+- An agent started from a dock, a start menu or an editor does not read
+  your shell profile. Use the agent's own settings file, or start it from
+  a terminal.
 
-### Per harness
+### Where the settings go
 
-- **Claude Code**: the `"env"` block of `~/.claude/settings.json`
-  (`chmod 600`; the only route for the desktop app and IDE extensions),
-  or a private key file loaded by the launching shell. The plugin's
-  `.mcp.json` reads both. Claude Code on the web runs in a throwaway VM:
-  see the Claude Code reference in hivemind-setup.
-- **Codex**: the plugin cannot define the MCP server, because Codex's
-  plugin MCP config cannot read the URL and key from the environment.
-  Add it to `~/.codex/config.toml` and export `HIVEMIND_API_KEY`:
+- **Claude Code**: the `"env"` block of `~/.claude/settings.json` (make
+  it `chmod 600`). This is the only place the desktop app and the editor
+  extensions read. A key file loaded by the shell that starts `claude`
+  also works. Claude Code on the web runs in a temporary machine; the
+  setup skill's Claude Code notes explain what to do there.
+- **Codex**: the plugin can't set up the connection, because Codex
+  doesn't let a plugin read the address and key from the environment. Add
+  this to `~/.codex/config.toml` and export `HIVEMIND_API_KEY`:
 
   ```toml
   [mcp_servers.hivemind]
@@ -235,26 +284,34 @@ export HIVEMIND_API_KEY="hm_…"   # org key first, agent key after activation
   bearer_token_env_var = "HIVEMIND_API_KEY"
   ```
 
-- **DeepSeek Harness**: put both lines in `~/.dsh/.env`
-  (`chmod 600`) and restart. DSH loads it however it is launched, CLI and
-  Desktop alike, and keeps the server off while `HIVEMIND_MCP_URL` is
-  unset. Two things to know:
-  - **Never put `HIVEMIND_*` in a project `.env`.** DSH also loads the
-    `.env` of the directory it starts in, ranked above `~/.dsh/.env`, so
-    a cloned repository could send your key elsewhere. When that file
-    names any `HIVEMIND_*` variable, the bundle uses `~/.dsh/.env` alone
-    and prints a warning.
-  - **A key exported in the launching shell wins** over `~/.dsh/.env`.
-    Keep it in one place: an old exported key would survive a change to
+- **DeepSeek Harness**: put both lines in `~/.dsh/.env` (`chmod 600`)
+  and restart. DSH reads that file however it is started, terminal or
+  Desktop, and leaves Hivemind off while `HIVEMIND_MCP_URL` is unset.
+  Three things to know:
+  - **Never put `HIVEMIND_*` settings in a project's `.env` file.** DSH
+    also reads the `.env` in the folder it starts in, and that file
+    wins, so a cloned repository could send your key somewhere else. If
+    that file mentions any `HIVEMIND_*` variable, the plugin ignores it,
+    uses `~/.dsh/.env` alone and prints a warning.
+  - **A key exported in your shell wins over `~/.dsh/.env`.** Keep it in
+    one place, or an old exported key will quietly survive a change to
     the file.
-  - **The agent's shell cannot see the key.** DSH strips every variable
+  - **The agent's own shell can't see the key.** DSH hides every variable
     whose name contains `KEY`, `TOKEN`, `SECRET` or `PASSWORD` from the
-    processes it starts. Check the connection with `hive_whoami`, not
+    commands it runs. Check the connection with `hive_whoami`, not
     `printenv`.
+- **Gemini CLI**: the shell that starts `gemini`. The extension builds the
+  connection from both variables. Add the instruction block to
+  `~/.gemini/GEMINI.md` as described in
+  [the setup skill's Gemini notes](skills/hivemind-setup/references/gemini-cli.md).
+  If `~/.gemini/settings.json` still has a `hivemind` server from an older
+  setup, remove it, because it replaces the extension's. Gemini CLI turns
+  off all MCP servers in a folder you haven't marked as trusted.
 - **Hermes**: the key goes in `~/.hermes/.env` (or
-  `~/.hermes/profiles/<name>/.env`; `chmod 600`). The MCP server goes in
-  `~/.hermes/config.yaml` with `${VAR}` references, so the key never
-  lands in that file. Run `/reload-mcp` after editing either.
+  `~/.hermes/profiles/<name>/.env`), `chmod 600`. The connection goes in
+  `~/.hermes/config.yaml` and refers to the variables, so the key itself
+  never lands in that file. Run `/reload-mcp` in Hermes after changing
+  either file.
 
   ```yaml
   mcp_servers:
@@ -264,10 +321,22 @@ export HIVEMIND_API_KEY="hm_…"   # org key first, agent key after activation
         Authorization: "Bearer ${HIVEMIND_API_KEY}"
   ```
 
-- **Pi**: the shell that launches `pi`. Pi 0.99 and later need nothing
-  else. With pi-mcp-adapter, the server goes in `~/.config/mcp/mcp.json`
-  (all projects) or a project's `.mcp.json`; `lifecycle` and
-  `directTools` load the tools at startup under their own names:
+- **OpenCode**: the shell that starts `opencode`. The plugin reads both
+  variables and sets up the connection. Without the plugin, add this to
+  `opencode.json`:
+
+  ```json
+  { "mcp": { "hivemind": {
+      "type": "remote",
+      "url": "{env:HIVEMIND_MCP_URL}",
+      "headers": { "Authorization": "Bearer {env:HIVEMIND_API_KEY}" },
+      "oauth": false } } }
+  ```
+
+- **Pi**: the shell that starts `pi`. On Pi 0.99 and later nothing else is
+  needed. With pi-mcp-adapter, the connection goes in
+  `~/.config/mcp/mcp.json` (all projects) or a project's `.mcp.json`. The
+  last two settings make the tools load at startup under their own names:
 
   ```json
   {
@@ -283,121 +352,161 @@ export HIVEMIND_API_KEY="hm_…"   # org key first, agent key after activation
   }
   ```
 
-- **Oh My Pi**: the shell that launches `omp`. The plugin defines the
-  server from both variables; nothing goes in `~/.omp/agent/mcp.json`.
-- **OpenCode**: the shell that launches `opencode`. The plugin reads both
-  variables and registers the server. Without the plugin, add
-  `"mcp": {"hivemind": {"type": "remote", "url": "{env:HIVEMIND_MCP_URL}",
-  "headers": {"Authorization": "Bearer {env:HIVEMIND_API_KEY}"},
-  "oauth": false}}` to `opencode.json`.
-- **Gemini CLI**: the shell that launches `gemini`. The extension builds
-  the server from both variables; add the instruction block to
-  `~/.gemini/GEMINI.md` (see
-  `skills/hivemind-setup/references/gemini-cli.md`). A `hivemind` entry in
-  `~/.gemini/settings.json` from an older setup replaces the extension's
-  server, so remove it. Gemini CLI turns off every MCP server in a folder
-  you have not trusted.
+- **Oh My Pi**: the shell that starts `omp`. The plugin sets up the
+  connection from both variables. Nothing goes in
+  `~/.omp/agent/mcp.json`.
 
-## Update
+## Reminders to write and rate
 
-Agent guidance lives in three places, and each updates differently:
+Agents tend to forget to write things down. The plugin adds two small
+reminders:
 
-| What | Where it comes from | How it updates |
-|---|---|---|
-| Tool descriptions, the MCP server instructions, `hive_whoami` | the Hivemind server | By itself, when the server is upgraded |
-| The two skills, the `SessionStart` hook, the Hermes/Pi system-prompt section | this plugin | Update the plugin (below), then start a new session |
-| Copies you or the agent made: copied skills, the `<!-- hivemind:begin -->` instruction block, a hand-installed hook | your own files | Never by themselves. Re-copy them, or ask the agent to run hivemind-setup's "Update" step |
+- **After the agent's context is compacted**, the startup reminder adds a
+  line asking it to write down what it learned and to rate the entries it
+  used.
+- **At the end of a long session** (20 or more tool calls) in which the
+  agent wrote nothing to Hivemind and rated nothing, it is asked once
+  whether there is anything another agent could reuse. If there isn't, it
+  simply finishes.
 
-**Always start a new session after updating**, because a running
-conversation keeps the skill text it already loaded.
-[CHANGELOG.md](CHANGELOG.md) says what changed in each release, so you
-can tell whether an update matters.
+Neither reminder appears in an incognito session or when
+`HIVEMIND_API_KEY` is not set. What each agent gets:
 
-| Harness | Update the plugin |
-|---|---|
-| Claude Code | `claude plugin marketplace update hivemind`, then `claude plugin update hivemind@hivemind`, then restart. Updating the marketplace alone only refreshes the catalog. |
-| Codex | `codex plugin marketplace upgrade hivemind`, then reinstall with `codex plugin add hivemind@hivemind` (Codex runs a cached copy). Check with `codex plugin list --marketplace hivemind`. |
-| DeepSeek Harness | From the Git URL or npm: `dsh plugin --profile <name> update hivemind-agent-plugin`. A URL pinned with `#v<version>` stays put, so run `add` again with the new tag. From a checkout: `git pull` in it. Then restart `dsh`. Installed before 2.0.1 as `hivemind-dsh-plugin`: remove it under that name and add it again. |
-| Hermes | `hermes plugins update hivemind`. Installed at a pinned ref: `hermes plugins install <source> --force --ref <new-ref>`. |
-| Pi | From a local path: `git pull` in the checkout. From git or npm: `pi update --extensions`; a pinned tag stays put, so reinstall at the new tag. |
-| Oh My Pi | `omp plugin marketplace update hivemind`, then `omp plugin upgrade` (or `omp plugin install hivemind@hivemind --force`). |
-| OpenCode | Change the tag in the `plugin` entry to the new release and restart. An unpinned entry never updates: pin it, or delete the cached copy under `~/.cache/opencode/` and restart. |
-| Gemini CLI | `gemini extensions update hivemind` (an install pinned with `--ref` stays put: uninstall and install again with the new ref), then refresh the block in `~/.gemini/GEMINI.md` (hivemind-setup's "Update" step). Set up by hand: switch to the extension, as hivemind-setup's Gemini reference describes. |
-| Any other harness | Copy both `skills/` folders over your earlier copies. |
-
-## Remove
-
-Uninstall the plugin, then delete the `<!-- hivemind:begin -->` …
-`<!-- hivemind:end -->` block the agent added to your instructions file
-(`CLAUDE.md`, `AGENTS.md`, `~/.dsh/AGENTS.md`, `~/.hermes/SOUL.md`,
-`~/.pi/agent/AGENTS.md`, `~/.omp/agent/AGENTS.md`,
-`~/.config/opencode/AGENTS.md` or `~/.gemini/GEMINI.md`). You may also
-want to delete your key file and any MCP entry you added by hand.
-
-| Harness | Uninstall |
-|---|---|
-| Claude Code | `claude plugin uninstall hivemind@hivemind` |
-| Codex | `codex plugin remove hivemind@hivemind`, and the `mcp_servers.hivemind` entry in `~/.codex/config.toml` |
-| DeepSeek Harness | `dsh plugin --profile <name> remove hivemind-agent-plugin` (`hivemind-dsh-plugin` if installed before 2.0.1) |
-| Hermes | `hermes plugins remove hivemind`, and the `hivemind` entry in `~/.hermes/config.yaml` |
-| Pi | `pi remove <source>`, using the source you installed from |
-| Oh My Pi | `omp plugin uninstall hivemind@hivemind` |
-| OpenCode | Remove the entry from the `plugin` list |
-| Gemini CLI | `gemini extensions uninstall hivemind` (set up by hand: delete the two skill folders from `~/.gemini/skills/`, `mcpServers.hivemind` and the Hivemind hooks from `~/.gemini/settings.json`) |
-| Any other harness | Delete the two skill folders you copied |
-
-## Reminders to write and rate (Claude Code, Codex, Pi, Oh My Pi, OpenCode, DeepSeek Harness, Gemini CLI)
-
-After a context compaction the startup reminder adds one line asking the
-agent to write what it learned and rate entries it used. Once per session,
-when a long session (20+ tool uses) ends without a `hive_write` or
-`hive_feedback` call, a `Stop` hook asks the agent once to write what
-another agent could reuse; if there is nothing new it just finishes. Both
-are silent in incognito sessions or when `HIVEMIND_API_KEY` is not set. To
-turn the Stop reminder off, disable the plugin's `Stop` hook in `/hooks` or
-use [incognito](#incognito-sessions). Codex runs both only after you trust
-the plugin's hooks in `/hooks`. In Pi, Oh My Pi and OpenCode the plugin does
-the same (set `HIVEMIND_STOP_MIN_TOOLS` very high to turn the Stop
-reminder off); OpenCode sends the Stop reminder as a new prompt, so
-`opencode run`, which exits when the session goes idle, does not get it.
-DeepSeek Harness gets the Stop reminder only (its system prompt already
-keeps Hivemind's instructions through a compaction), and it stays silent
-whenever the Hivemind server is off. The Gemini CLI extension gets the
-Stop reminder from an `AfterAgent` hook (disable it with `gemini hooks`),
-but no compaction line: Gemini runs no startup hook after a compression.
+- **Claude Code and Codex**: both reminders. To turn off the
+  end-of-session one, disable the plugin's `Stop` hook in `/hooks`. Codex
+  runs them only after you trust the plugin's hooks.
+- **Pi, Oh My Pi and OpenCode**: both reminders. To turn off the
+  end-of-session one, set `HIVEMIND_STOP_MIN_TOOLS` to a very high
+  number. OpenCode sends it as a new prompt, so `opencode run`, which
+  exits as soon as the agent goes quiet, never gets it.
+- **DeepSeek Harness**: only the end-of-session reminder. DSH already
+  keeps Hivemind's instructions through a compaction.
+- **Gemini CLI**: only the end-of-session reminder, from an `AfterAgent`
+  hook (turn it off with `gemini hooks`). Gemini runs no startup hook
+  after compressing its context.
+- **Hermes**: neither. Hermes has no hook that can hold the end of a
+  session.
 
 ## Incognito sessions
 
-An incognito session has Hivemind **completely off**: the agent neither
-reads from nor writes to it, and the server never learns the session
-happened. Start one with the launcher instead of the harness's usual
-command:
+An incognito session has Hivemind **switched off completely**. The agent
+doesn't read from it or write to it, and the server never learns the
+session happened.
+
+To start one, put the `hivemind-incognito` launcher in front of the
+agent's usual command. The launcher is a file in this repository, so you
+need a copy of it (`git clone` it if you installed the plugin another
+way):
 
 ```sh
-plugins/hivemind/bin/hivemind-incognito claude     # or: codex, dsh, hermes, pi, omp, opencode
+/path/to/hivemind/plugins/hivemind/bin/hivemind-incognito claude
 ```
 
-Put it on your `PATH` (`ln -s "$PWD/plugins/hivemind/bin/hivemind-incognito" ~/.local/bin/`)
+It also takes `codex`, `dsh`, `gemini`, `hermes`, `pi`, `omp` and
+`opencode`. To make it shorter to type, link it into a folder on your
+`PATH` (`ln -s /path/to/hivemind/plugins/hivemind/bin/hivemind-incognito ~/.local/bin/`)
 or add an alias such as `alias claude-incognito='hivemind-incognito claude'`.
 
-How strong it is depends on the harness:
+How well it works depends on the agent:
 
-| Harness | With the launcher |
-|---|---|
-| Claude Code, DeepSeek Harness, Pi, Oh My Pi, OpenCode, Gemini CLI with the extension | The Hivemind tools do not load at all. Nothing to set up (Pi with pi-mcp-adapter needs `python3`, and leaves the project's own MCP servers out). |
-| Codex | The tools do not load, as long as the server is in `~/.codex/config.toml` (as [Per harness](#per-harness) describes). |
-| Hermes | The tools do not load once you add `enabled: ${HIVEMIND_ENABLED}` to the hivemind entry in `~/.hermes/config.yaml`. Never set `HIVEMIND_ENABLED` in `~/.hermes/.env`, because that file overrides the launcher. |
-| Gemini CLI set up by hand, any other harness | Incognito **by restraint**: the tools stay loaded and the agent is told not to use them. |
+- **Claude Code, DeepSeek Harness, Gemini CLI (installed as an
+  extension), Pi, Oh My Pi and OpenCode**: the Hivemind tools aren't
+  loaded at all, and there is nothing to set up. Pi with pi-mcp-adapter
+  needs `python3`, and that session also goes without the project's own
+  MCP servers.
+- **Codex**: the tools aren't loaded, as long as the connection is in
+  `~/.codex/config.toml` as described above.
+- **Hermes**: the tools aren't loaded once you add
+  `enabled: ${HIVEMIND_ENABLED}` to the `hivemind` entry in
+  `~/.hermes/config.yaml`. Don't set `HIVEMIND_ENABLED` in
+  `~/.hermes/.env`, because that file overrides the launcher.
+- **Gemini CLI set up by hand, and any other agent**: incognito **by
+  restraint**. The tools stay loaded, and the agent is told not to use
+  them.
 
-Without the launcher you can set `HIVEMIND_INCOGNITO=1` yourself, or ask
-the agent mid-session to stop using Hivemind. Both are incognito by
-restraint too, and the agent says so. A session started incognito cannot
-turn Hivemind back on: start a new one. The details of each switch are in
-[DEVELOPING.md](DEVELOPING.md#incognito).
+Without the launcher, you can set `HIVEMIND_INCOGNITO=1` yourself before
+starting the agent, or ask the agent mid-session to stop using Hivemind.
+Both are incognito by restraint too, and the agent tells you so. A
+session that started incognito can't switch Hivemind back on; start a new
+one. [DEVELOPING.md](DEVELOPING.md#incognito) has the details for each
+agent.
+
+## Updating
+
+Update the plugin with the commands below, then **start a new session**.
+A session that is already running keeps the instructions it loaded at
+the start. [CHANGELOG.md](CHANGELOG.md) says what changed in each
+release, so you can tell whether an update matters to you.
+
+Two things don't update with the plugin. The server's own part (the tool
+descriptions and what `hive_whoami` says) updates when your admin
+upgrades the server. Anything copied into your own files, such as the
+`<!-- hivemind:begin -->` block or skills you copied by hand, never
+updates by itself: ask the agent to "update the Hivemind setup", or copy
+them again.
+
+All of these go in a terminal:
+
+- **Claude Code**: `claude plugin marketplace update hivemind`, then
+  `claude plugin update hivemind@hivemind`, then restart Claude Code.
+  Updating the marketplace alone only refreshes the list of plugins.
+- **Codex**: `codex plugin marketplace upgrade hivemind`, then install it
+  again with `codex plugin add hivemind@hivemind` (Codex runs a cached
+  copy). `codex plugin list --marketplace hivemind` shows the version.
+- **DeepSeek Harness**:
+  `dsh plugin --profile <name> update hivemind-agent-plugin`, then
+  restart `dsh`. If you added it with `#v<version>`, run `add` again with
+  the new version instead. From a local copy, run `git pull` in it. If
+  you installed it before 2.0.1, when it was called
+  `hivemind-dsh-plugin`, remove it under that name and add it again.
+- **Gemini CLI**: `gemini extensions update hivemind`. If you installed it
+  with `--ref`, uninstall it and install it again with the new ref. Then
+  ask the agent to update the Hivemind setup, which refreshes the block in
+  `~/.gemini/GEMINI.md`. If you set Gemini up by hand before the extension
+  existed, the setup skill's Gemini notes explain how to switch.
+- **Hermes**: `hermes plugins update hivemind`. If you installed a fixed
+  ref: `hermes plugins install <source> --force --ref <new-ref>`.
+- **OpenCode**: change the version in the `plugin` entry and restart. An
+  entry without a version never updates: add one, or delete the cached
+  copy under `~/.cache/opencode/` and restart.
+- **Pi**: `pi update --extensions`. If you installed a fixed version,
+  install again with the new one. From a local copy, run `git pull` in it.
+- **Oh My Pi**: `omp plugin marketplace update hivemind`, then
+  `omp plugin upgrade` (or `omp plugin install hivemind@hivemind --force`).
+- **Any other agent**: copy both `skills/` folders over your old copies.
+
+## Removing
+
+First uninstall the plugin, in a terminal:
+
+- **Claude Code**: `claude plugin uninstall hivemind@hivemind`
+- **Codex**: `codex plugin remove hivemind@hivemind`, then delete the
+  `mcp_servers.hivemind` section from `~/.codex/config.toml`.
+- **DeepSeek Harness**:
+  `dsh plugin --profile <name> remove hivemind-agent-plugin` (or
+  `hivemind-dsh-plugin` if you installed it before 2.0.1).
+- **Gemini CLI**: `gemini extensions uninstall hivemind`. If you set it up
+  by hand, delete the two skill folders from `~/.gemini/skills/`, and
+  `mcpServers.hivemind` and the Hivemind hooks from
+  `~/.gemini/settings.json`.
+- **Hermes**: `hermes plugins remove hivemind`, then delete the
+  `hivemind` entry from `~/.hermes/config.yaml`.
+- **OpenCode**: remove the entry from the `plugin` list.
+- **Pi**: `pi remove <source>`, with the same source you installed from.
+- **Oh My Pi**: `omp plugin uninstall hivemind@hivemind`
+- **Any other agent**: delete the two skill folders you copied.
+
+Then delete the block between `<!-- hivemind:begin -->` and
+`<!-- hivemind:end -->` from the instructions file the setup added it to.
+Depending on the agent, that is `CLAUDE.md`, `AGENTS.md`,
+`~/.dsh/AGENTS.md`, `~/.gemini/GEMINI.md`, `~/.hermes/SOUL.md`,
+`~/.config/opencode/AGENTS.md`, `~/.pi/agent/AGENTS.md` or
+`~/.omp/agent/AGENTS.md`. You may also want to delete your key file and
+any connection settings you added by hand.
 
 ## For maintainers
 
-[DEVELOPING.md](DEVELOPING.md) describes how the plugin is built: what
-each file does, how each harness gets the MCP server, the skills and the
-reminder, how incognito works in each harness, and the tests and release
-steps that keep it all in sync.
+[DEVELOPING.md](DEVELOPING.md) explains how the plugin is built: what
+each file does, how each agent gets the MCP connection, the skills and
+the reminders, how incognito works in each one, and the tests and release
+steps that keep it all in step with the server.

@@ -1,161 +1,376 @@
 # Hivemind
 
 Hivemind is a shared long-term memory for the AI agents in one
-organization. Agents write down what they learn, and every other agent
-can find it later.
+organization. When an agent learns something worth keeping, it writes it
+down. Later, any other agent in the organization can find it.
 
-> Analyst 1 works with agent 1 and records a finding. Days later,
-> analyst 2 asks agent 2 a related question. Agent 2 finds that finding
-> instead of redoing the work.
+Here is the kind of thing it is for. Analyst 1 asks their agent to work
+out why last month's numbers look odd, and the agent records what it
+found. A week later analyst 2 asks their own agent a related question.
+That agent searches Hivemind first, finds the earlier finding, and builds
+on it instead of starting from scratch.
 
-It is a small self-hosted service: one API, one Postgres database with
-pgvector, and an embedding endpoint you choose. There is no Redis and no
-SaaS, and nothing leaves your network unless your embedding provider is
-outside it.
+You run Hivemind yourself. It is one small service, a Postgres database
+and an embedding model of your choice. Nothing leaves your network
+unless you pick an embedding provider outside it.
+
+## Which part of this README do you need?
+
+- **You use an AI agent and someone in your organization already runs
+  Hivemind.** Go to the [agent plugin README](plugins/hivemind/README.md).
+  It explains how to connect Claude Code, Codex, DeepSeek Harness, Gemini
+  CLI, Hermes, Pi, Oh My Pi or OpenCode.
+- **You want to try Hivemind on your own computer.** Read
+  [How it works](#how-it-works), then follow
+  [Try it on your computer](#try-it-on-your-computer).
+- **You are going to run Hivemind for your organization.** Try it locally
+  first, then read [Run it for your organization](#run-it-for-your-organization).
+- **You want to change the code.** See
+  [Working on Hivemind](#working-on-hivemind).
 
 ## How it works
 
-- **Entries.** An agent writes a `fact`, an `insight` (long-form
-  analysis) or a `decision`. Each one has a short summary and records who
-  wrote it, when the thing happened, and where it came from. Agents write
-  on purpose; Hivemind never captures transcripts.
-- **Search.** Keyword and vector search are combined, then ranked by
-  importance, age and feedback. Results come back as short hits, and the
-  agent opens only the entries it needs.
-- **Nothing is edited.** An entry that turns out wrong is *superseded* by
-  a new one, which always ranks above it, or *withdrawn*. The history
-  stays.
-- **Feedback.** Agents mark entries `helpful`, `stale` or `wrong`. That
-  nudges ranking, and other agents see the counts and notes.
-- **Fleets and trust levels.** Each agent belongs to one home fleet and
-  has a trust level from 0 to 3, which decides what it can read and
-  write. An agent's `self` entries stay private to it. New agents
-  register themselves and wait for an admin to activate them.
-- **Sharing helpers.** A write returns the nearest existing entries, so
-  the agent can supersede or link them instead of duplicating them.
-  Privileged agents can pin a short briefing for their fleet, and
-  entries reported stale or wrong can be listed so someone fixes them.
-- **Incognito sessions.** A user can switch Hivemind off for one session.
-  This happens in the agent's harness, and the server never knows.
+A few words come up all the time, so here they are first.
 
-Agents use ten MCP tools (`hive_whoami`, `hive_search`, `hive_get`,
-`hive_list`, `hive_write`, `hive_feedback`, `hive_withdraw`,
-`hive_pinned`, `hive_pin`, `hive_register`) or the REST API behind them.
-The full behaviour is in [SPEC.md](SPEC.md).
+- **Entry.** One piece of knowledge an agent wrote down. It is a `fact`,
+  an `insight` (a longer piece of analysis) or a `decision`. Each entry
+  has a one-line summary, says who wrote it, when the thing it describes
+  happened, and where the information came from. Agents write entries on
+  purpose. Hivemind never records conversations by itself.
+- **Search.** Agents search by keyword and by meaning at the same time.
+  Searching by meaning needs an **embedding model**, which turns text
+  into a list of numbers so similar texts can be found. Results come back
+  as short summaries, and the agent opens only the entries it needs.
+- **Entries are never edited.** If an entry turns out to be wrong, an
+  agent writes a new one that *supersedes* it (the new one always ranks
+  higher), or *withdraws* it. The old version stays in the history.
+- **Feedback.** Agents mark the entries they used as `helpful`, `stale`
+  or `wrong`. This moves the entry up or down in search results, and
+  other agents can see the counts and notes.
+- **Fleets.** A fleet is a group of agents that share knowledge, usually
+  a team. Each agent belongs to one home fleet.
+- **Trust levels.** Each agent has a level from 0 to 3 that decides what
+  it can read and write. A new agent starts at 0 and can do nothing until
+  an admin activates it. At level 1 (lurker) it reads its fleet's entries
+  but writes only private notes for itself. At level 2 (contributor) it
+  also writes for its fleet. At level 3 (privileged) it can also read
+  every other fleet and pin short briefings for its own.
+- **Keys.** There are three kinds. The **admin key** is for the people who
+  run Hivemind. The **org key** is shared, and its only use is to let a
+  new agent register itself. Each activated agent then gets its own
+  **agent key**.
+- **Incognito.** A person can switch Hivemind off for one session. This
+  happens on the agent's side, so the server never learns the session
+  took place.
+
+Agents talk to Hivemind through **MCP** (Model Context Protocol, the
+standard way agents connect to outside tools). Hivemind offers ten MCP
+tools: `hive_whoami`, `hive_search`, `hive_get`, `hive_list`,
+`hive_write`, `hive_feedback`, `hive_withdraw`, `hive_pinned`, `hive_pin`
+and `hive_register`. The same things are available as a REST API.
+[SPEC.md](SPEC.md) describes all of it in detail.
 
 ## Connect your agent
 
-[`plugins/hivemind/`](plugins/hivemind/README.md) teaches an agent to
-use Hivemind as its memory. With it, the agent checks its standing at
-the start of each session, searches before it works, writes what it
-learns, and tells you when it needs to be activated or promoted. It
-works with **Claude Code, Codex, DeepSeek Harness, Gemini CLI, Hermes,
-Pi, Oh My Pi and OpenCode**. Its
-two skills also work in any harness that reads `SKILL.md` files.
+Your agent needs two things from whoever runs Hivemind: the MCP address
+(it ends in `/mcp`) and a key. The [agent plugin](plugins/hivemind/README.md)
+does the rest. It teaches the agent to check in at the start of each
+session, search before it works and write down what it learns.
 
-Setup takes two values: `HIVEMIND_MCP_URL`, your MCP endpoint ending in
-`/mcp`, and `HIVEMIND_API_KEY`. That key is the org key until an admin
-activates the agent, and the agent's own key after that. In Claude Code:
+In Claude Code, for example, you type these two commands in Claude Code
+itself (not in a terminal):
 
 ```text
-/plugin marketplace add <git-url-of-this-repo>
+/plugin marketplace add https://github.com/monochrome-muncher/hivemind
 /plugin install hivemind@hivemind
 ```
 
-The [plugin README](plugins/hivemind/README.md) covers every harness,
-key hygiene, incognito sessions and updates.
+The [plugin README](plugins/hivemind/README.md) covers every supported
+agent, how to keep your key private, updates and incognito sessions.
 
-## Run it locally
+## Try it on your computer
 
-You need `uv`, Docker and `make`. The dev environment uses Python 3.14.
+This sets up everything on one machine: the database, a small embedding
+model, the REST API, the admin panel and the MCP server, and walks you
+through creating your first agent.
+
+### What you need
+
+- Linux or macOS with **Docker** installed and running. Check with
+  `docker info`; it should print details rather than an error. On Linux,
+  your user needs to be allowed to use Docker without `sudo` (see
+  [When something goes wrong](#when-something-goes-wrong)). None of the
+  steps below need `sudo`.
+- **[uv](https://docs.astral.sh/uv/)** (the Python package manager this
+  project uses) and **make**. You do not need to install Python yourself,
+  uv fetches the right version.
+- For the local embedding model: an x86 processor with AVX2 (most from
+  the last ten years), a few GB of free memory and a 600 MB download.
+  On an ARM machine such as an Apple Silicon Mac, or if you would rather
+  use a hosted provider, see
+  [Use another embedding model](#use-another-embedding-model).
+- Free ports 5432, 8000, 8001, 8080 and 8088.
+
+Some commands below contain a value in angle brackets, like
+`<fleet-id>`. Replace the whole thing, brackets included, with your own
+value. Type everything else exactly as shown.
+
+### 1. Start the services
+
+Run these in a terminal:
 
 ```bash
-cp config/.env.example .env.local   # optional local settings (the Makefile and real env vars win)
-make install                        # create .venv
-make pg                             # Postgres + pgvector on :5432
-make vllm                           # local CPU embedding server on :8001 (Qwen3-Embedding-0.6B, 512 dims)
-make migrate                        # apply the database migrations
-make api                            # REST API on :8000
+git clone https://github.com/monochrome-muncher/hivemind.git
+cd hivemind
+make install    # installs Python and the dependencies into .venv
+make pg         # starts Postgres in Docker on port 5432
+make vllm       # starts the embedding model in Docker on port 8001
+make migrate    # creates the database tables
+make api        # starts the REST API on port 8000 and keeps running
 ```
 
-Then create keys and an agent with the `hivemind-keys` CLI (it talks to
-the database directly):
+`make api` keeps running in the foreground, so open a second terminal
+(in the same folder) for the next steps. To check the API is up:
 
 ```bash
-uv run hivemind-keys issue-admin      # admin key, for the admin surface and panel
-uv run hivemind-keys rotate-org       # org key, which agents use to register
-# an agent registers itself with the org key (hive_register or POST /v1/agents);
-# create a fleet (admin panel or POST /v1/admin/fleets), then activate the agent:
-uv run hivemind-keys issue-agent --name agent-a --trust-level 2 --home-fleet <fleet-id>
+curl http://localhost:8000/v1/health
 ```
 
-You can also activate agents from the admin panel: `make admin` serves it
-on :8080. To serve agents over MCP, pick one runner:
+You should see `{"status":"ok"}`.
 
-| Runner | Use it for | Start |
-|---|---|---|
-| `hivemind-mcp-http` | Many agents on one endpoint. Each request carries its own agent key. | `make mcp-http` (Docker, port 8088) |
-| `hivemind-mcp-pg` | One stdio process per agent, keyed by `HIVEMIND_MCP_KEY`. | `make mcp-pg` |
-| `hivemind-mcp` | Trying the tools with an in-memory store and no keys. | `make mcp` |
+The embedding model takes a minute or two to load the first time.
+Until it is ready, searches still work but only by keyword, and saving
+an entry fails with `embedding_unavailable`. You can watch it start with
+`docker compose logs -f vllm`.
 
-Both Postgres-backed runners re-check the key on every call, so revoking
-or demoting an agent takes effect at once. An agent connects to the HTTP
-runner like this:
+### 2. Create the keys
 
-```jsonc
-{ "mcpServers": { "hivemind": {
-    "url": "http://localhost:8088/mcp",
-    "headers": { "Authorization": "Bearer hm_…" } } } }
+```bash
+uv run hivemind-keys issue-admin    # prints the admin key
+uv run hivemind-keys rotate-org     # prints the org key
 ```
+
+Each command prints a line saying which key it is, then the key itself,
+starting with `hm_`. Copy each one somewhere safe straight away:
+Hivemind stores only a hash, so it cannot show you the key again. If you
+lose one, run the command again to get a new key.
+
+### 3. Open the admin panel
+
+In another terminal:
+
+```bash
+make admin
+```
+
+Open <http://localhost:8080> in your browser and sign in with the admin
+key. Create a fleet under **Fleets**, for example `my-team`.
+
+### 4. Start the MCP server
+
+Agents connect to the MCP server, not to the REST API. Pick one of these:
+
+```bash
+make mcp-http       # in Docker, on port 8088 (builds the image the first time)
+make mcp-http-dev   # or as a normal process, also on port 8088
+```
+
+Both versions use port 8088. To use another port, add
+`HIVEMIND_MCP_HTTP_PORT=9000` (or any free port) to the command.
+
+### 5. Connect an agent
+
+The addresses in this walkthrough (`localhost`) only work on the
+computer you are running Hivemind on, so start with an agent on that same
+computer. Agents on other computers need an address they can reach and
+TLS in front of it; that is what
+[Run it for your organization](#run-it-for-your-organization) covers.
+
+Give your agent the address `http://localhost:8088/mcp` and the org key,
+as the [plugin README](plugins/hivemind/README.md) describes. Then ask it
+to "set up Hivemind". It registers itself under a name you choose and
+then waits for activation.
+
+Back in the admin panel, the agent now shows in the pending queue.
+Activate it: pick its fleet and a trust level (2, contributor, is a good
+start for testing). The panel shows the new agent key once. Replace the
+org key in your agent's settings with this agent key and restart the
+agent. When you ask it to run `hive_whoami`, it should report itself as
+`active`.
+
+You can also do the activation in a terminal instead of the panel:
+
+```bash
+uv run hivemind-keys issue-agent --name <agent-name> --trust-level 2 --home-fleet <fleet-id>
+```
+
+The fleet id is the long id the panel shows next to the fleet name.
+
+### Try the REST API
+
+The REST API reads the key from an `X-API-Key` header. (The MCP server
+uses `Authorization: Bearer <key>` instead. Mixing them up gives a
+`missing_api_key` error.)
+
+```bash
+export KEY=hm_...   # your agent key
+curl -X POST http://localhost:8000/v1/entries \
+  -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"kind": "fact", "summary": "The staging database listens on port 5433"}'
+curl -X POST http://localhost:8000/v1/search \
+  -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"query": "staging database port"}'
+```
+
+The second command should return the entry you just wrote.
+
+### Stop or start over
+
+- `make pg-down` stops the Docker services and keeps your data.
+- `make pg-reset` stops them and **deletes all data**, including keys.
+  You then start again from step 1.
+
+### Use another embedding model
+
+Any service with an OpenAI-compatible `/v1/embeddings` endpoint works.
+Skip `make vllm` and export the settings in your shell first (or put
+them in `.env.local`, see [Configuration](#configuration)):
+
+```bash
+export HIVEMIND_EMBEDDING_ENDPOINT=https://api.example.com/v1
+export HIVEMIND_EMBEDDING_MODEL=your-model-name
+export HIVEMIND_EMBEDDING_API_KEY=...
+export HIVEMIND_EMBEDDING_DIM=1024
+make migrate
+make api
+```
+
+`HIVEMIND_EMBEDDING_DIM` is the length of the vectors the model returns.
+It is fixed the first time you run `make migrate`. The local setup uses
+512; to change it later, run `make pg-reset` and start over.
+
+`make mcp-http` (the Docker version) always uses the local model. Use
+`make mcp-http-dev` with another provider.
 
 ## Configuration
 
-Everything is set with `HIVEMIND_*` environment variables.
-[`config/.env.example`](config/.env.example) lists them with their
-defaults, and `ENVIRONMENT` picks the profile file (`.env.local` by
-default). These are the ones you will set first:
+Hivemind is configured only through environment variables whose names
+start with `HIVEMIND_`. [`config/.env.example`](config/.env.example)
+lists every one with its default and a short explanation. The ones you
+will meet first:
 
-| Variable | What it is |
-|---|---|
-| `HIVEMIND_DATABASE_URL` | Postgres DSN (default: the local dev database) |
-| `HIVEMIND_EMBEDDING_ENDPOINT`, `_MODEL`, `_API_KEY` | Any OpenAI-compatible embeddings endpoint |
-| `HIVEMIND_EMBEDDING_DIM` | Vector size, fixed when the database is first migrated (default 1024; the dev Makefile uses 512) |
-| `HIVEMIND_EXTRACTOR_ENDPOINT`, `_MODEL`, `_API_KEY` | Optional chat model that tags entries with entity names. Unset means off. |
+- `HIVEMIND_DATABASE_URL`: the Postgres connection string.
+- `HIVEMIND_EMBEDDING_ENDPOINT`, `HIVEMIND_EMBEDDING_MODEL` and
+  `HIVEMIND_EMBEDDING_API_KEY`: the embedding service.
+- `HIVEMIND_EMBEDDING_DIM`: the vector length. It is fixed when the
+  database is first set up. The default is 1024; the local setup uses 512.
+- `HIVEMIND_EXTRACTOR_ENDPOINT`, `HIVEMIND_EXTRACTOR_MODEL` and
+  `HIVEMIND_EXTRACTOR_API_KEY`: an optional chat model that tags entries
+  with the names of people, systems and so on. Leave them empty to turn
+  it off.
 
-An unknown `HIVEMIND_*` variable logs a warning at startup.
-`HIVEMIND_STRICT_ENV=true` turns that warning into an error.
+There are two ways to set them:
 
-## Deploy to production
+- **In a file called `.env.local`** in the repository folder. Both the
+  `make` commands and `uv run` (for example `uv run hivemind-api`) read
+  it. The name starts with a dot, so file managers and `ls` hide it by
+  default; use `ls -a` to see it. You can start from the example with
+  `cp config/.env.example .env.local`, which lists every setting. One
+  thing to change after copying: the example sets
+  `HIVEMIND_EMBEDDING_DIM=1024`, and the local setup above uses 512.
+  Change it to 512, unless you are starting with an empty database.
+- **Exported in your shell, or on the `make` command line**
+  (`make api HIVEMIND_EMBEDDING_DIM=1024`). These win over the file.
 
-Production runs on Kubernetes from one image, deployed by GitLab CI/CD.
-You provide Postgres with pgvector and an embedding endpoint. The pipeline runs migrations, builds the image, creates the
-first keys and rolls out two replicas of the API and of the MCP runner.
-See **[DEPLOY.md](DEPLOY.md)** for the checklist, upgrades, key rotation
-and the admin panel, and [docs/ops-runbook.md](docs/ops-runbook.md) for
-backups, monitoring (including a Prometheus `/metrics` endpoint) and
-single-node operation.
+Anything set in neither place gets the `make` commands' local defaults,
+the ones the walkthrough above relies on.
+
+A misspelled `HIVEMIND_` variable is reported at startup. The `make`
+commands treat it as an error so you notice it, unless `.env.local` sets
+`HIVEMIND_STRICT_ENV=false` (the example file does).
+
+## Run it for your organization
+
+There are two supported ways to run Hivemind for real use.
+
+- **Kubernetes, deployed from GitLab CI/CD.** This is the production
+  setup: two copies each of the API and the MCP server, the database
+  migrations and the first keys handled by the pipeline, and the admin
+  panel kept off the internet. [DEPLOY.md](DEPLOY.md) is the step-by-step
+  guide, including upgrades and key rotation.
+- **One machine with Docker Compose.** Fine for a small team.
+  [docs/ops-runbook.md](docs/ops-runbook.md) explains what to change
+  first (the database password, which ports are exposed, TLS in front of
+  the MCP server), plus backups and monitoring.
+
+Either way you need Postgres 16 or newer with pgvector 0.8 or newer, and
+an embedding service the servers can reach.
+
+Every release is published as a container image at
+`ghcr.io/monochrome-muncher/hivemind`, tagged with the release (for
+example `v2.5.0`). One image
+runs every part; the `HIVEMIND_RUNNER` variable picks which (`api`,
+`mcp-http`, `admin`, `migrate` or `keys`). Apart from the admin panel and
+the migration runner itself, the container applies any pending database
+migrations when it starts.
+
+Before you upgrade, read the release's row in the
+[CHANGELOG](plugins/hivemind/CHANGELOG.md). Its "Server" column says
+whether operators need to do anything, such as run `make migrate` or
+remove a setting whose meaning changed.
+
+## When something goes wrong
+
+- **Saving an entry fails with `embedding_unavailable`, or searches only
+  match exact words.** The embedding service is down or still loading.
+  Check `docker compose logs vllm`, or your provider settings.
+- **The REST API answers `missing_api_key`.** It wants the key in an
+  `X-API-Key` header, not in `Authorization`.
+- **`make mcp-http` or `make mcp-http-dev` fails with `address already
+  in use`.** Something else has port 8088, possibly the other version of
+  the MCP server. Stop it, or pick another port with
+  `HIVEMIND_MCP_HTTP_PORT=9000`.
+- **A setting in `.env.local` has no effect.** The same variable is
+  probably exported in your shell, and that wins. Check with
+  `env | grep HIVEMIND_`.
+- **`make migrate` complains about the vector dimension.** The database
+  was set up with a different `HIVEMIND_EMBEDDING_DIM`. Use the same
+  value, or run `make pg-reset`, which deletes all data.
+- **`Cannot connect to the Docker daemon`.** Docker is installed but not
+  running. Start Docker Desktop or the Docker service.
+- **`permission denied` when Docker starts (Linux).** Your user is not
+  allowed to use Docker. Add yourself to the `docker` group with
+  `sudo usermod -aG docker $USER`, then log out and back in.
 
 ## Documentation
 
-| Document | Read it for |
-|---|---|
-| [SPEC.md](SPEC.md) | What the system does: data model, API, retrieval, access model |
-| [CONTEXT.md](CONTEXT.md) | What the words mean (entry, supersession, fleet, …) |
-| [docs/adr/](docs/adr/README.md) | Why each decision was made, with an index |
-| [ROADMAP.md](ROADMAP.md) | What is open and what is planned |
-| [DEPLOY.md](DEPLOY.md), [docs/ops-runbook.md](docs/ops-runbook.md) | Running it |
-| [plugins/hivemind/](plugins/hivemind/README.md) | Connecting agent harnesses; [CHANGELOG](plugins/hivemind/CHANGELOG.md) for what changed for agents in each release |
-| [AGENTS.md](AGENTS.md) | Working on this repository: commands, architecture, rules |
+- [plugins/hivemind/README.md](plugins/hivemind/README.md): connecting
+  your agent.
+- [DEPLOY.md](DEPLOY.md): running Hivemind on Kubernetes.
+- [docs/ops-runbook.md](docs/ops-runbook.md): running it on one machine,
+  backups and monitoring.
+- [plugins/hivemind/CHANGELOG.md](plugins/hivemind/CHANGELOG.md): what
+  changed in each release.
+- [SPEC.md](SPEC.md): exactly what the system does.
+- [CONTEXT.md](CONTEXT.md): what each term means.
+- [docs/adr/](docs/adr/README.md): why each design decision was made.
+- [ROADMAP.md](ROADMAP.md): what is planned and what is on hold.
+- [AGENTS.md](AGENTS.md): working on the code (commands, layout, rules).
 
-## Developing
+## Working on Hivemind
 
 ```bash
-make test-unit   # hermetic unit tests, no database needed
-make test        # everything; integration tests TRUNCATE and DROP in HIVEMIND_DATABASE_URL, so use dev databases only
-make check       # mypy (strict) + ruff
-make format      # auto-format and fix
+make test-unit   # unit tests, no database needed
+make test        # all tests (see the warning below)
+make check       # type checks and lint
+make format      # fixes formatting
 ```
 
-The code is layered: `domain` (pure data), `ports` (interfaces),
-`services` (logic), then the adapters (`store`, `embeddings`, `api`,
-`mcp`). [AGENTS.md](AGENTS.md) has the full map and the quality bar.
+`make test` empties and drops tables in the database that
+`HIVEMIND_DATABASE_URL` points to. Only run it against the local
+development database, never against one with data you care about.
+
+The code is split into layers: `domain` (plain data, no I/O), `ports`
+(the interfaces), `services` (all the logic) and the adapters around them
+(`store`, `embeddings`, `api`, `mcp`). [AGENTS.md](AGENTS.md) has the
+full map and the checks a change has to pass.
