@@ -406,6 +406,8 @@ class SearchRequest(BaseModel):
     include_inactive: bool = False
     # Only entries reported stale or wrong at least once (ADR 0054).
     flagged: bool = False
+    # Opt-in diversity re-order of the ranked results (ADR 0078).
+    explore: bool = False
     # SPEC §5.3 / ADR 0040: 1..100 and 0..10000 (a search also reaches at
     # most 2 x candidate_top_k ranked hits).
     limit: int | None = Field(default=None, ge=1, le=MAX_LIMIT)

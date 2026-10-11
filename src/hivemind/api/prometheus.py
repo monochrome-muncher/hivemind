@@ -22,7 +22,7 @@ Three groups of series:
 * **Degraded searches** (ADR 0048): searches answered by the keyword
   stream alone because the embedder failed.
 * **Search counters** (ADR 0056): first-page searches and the ones that
-  found nothing, per fleet, read from the pool with the usage report, so
+  found nothing or were explore searches (ADR 0078), per fleet, read from the pool with the usage report, so
   they cover every runner (MCP included). Aggregate them with ``max``.
 * **Flag confirmation** (ADR 0068): `hivemind_feedback_flags` and
   `hivemind_feedback_flags_confirmed` per registered agent, the
@@ -150,11 +150,18 @@ def _usage_families(report: UsageReport) -> Iterator[GaugeMetricFamily | Counter
         "First-page searches by agents of each fleet that found nothing (ADR 0056)",
         labels=["fleet"],
     )
+    explored = CounterMetricFamily(
+        "hivemind_searches_explore",
+        "First-page explore searches by agents of each fleet (ADR 0078)",
+        labels=["fleet"],
+    )
     for fleet, counts in by_fleet.items():
         searches.add_metric([fleet], float(counts["total"]))
         empty.add_metric([fleet], float(counts["empty"]))
+        explored.add_metric([fleet], float(counts["explore"]))
     yield searches
     yield empty
+    yield explored
     by_agent = report["feedback"]["by_agent"]
     yield _gauge(
         "hivemind_feedback_flags",

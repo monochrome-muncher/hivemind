@@ -396,6 +396,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
             request.limit,
             offset=request.offset,
             visibility=credential.visibility(),
+            explore=request.explore,
         )
         if result.degraded:
             response.headers[DEGRADED_HEADER] = DEGRADED_KEYWORD_ONLY

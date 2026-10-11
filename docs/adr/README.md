@@ -83,3 +83,4 @@ is unused.
 | [0075](0075-fleet-health-metrics.md) | Fleet health metrics: admin-only and observation-only | Accepted |
 | [0076](0076-pin-integrity.md) | Pin integrity: audited pins and "changed since pinned" | Accepted (amends 0058) |
 | [0077](0077-write-check-mode-and-warnings.md) | Writes can be checked first, and answer with advisory warnings | Accepted |
+| [0078](0078-explore-search.md) | Opt-in explore search: MMR re-ordering for diversity | Accepted |

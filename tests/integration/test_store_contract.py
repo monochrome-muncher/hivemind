@@ -223,6 +223,30 @@ async def test_uuid_spellings_postgres_rejects_read_as_absent(
 # -- supersession (ADR 0034) --------------------------------------------------------
 
 
+async def test_pairwise_similarity_reads_stored_vectors(adapter: Adapter) -> None:
+    """ADR 0074: cosine between stored vectors, each unordered pair once under
+    sorted string keys; entries with no vector, unknown and malformed ids
+    drop out; no embedder involved."""
+    same = await write(adapter, "pool is 20", hot=3)
+    near = await adapter.store.create_entry(
+        draft("pool raised to 90"), adapter.vec(3, base=0.02), "test-model"
+    )
+    far = await write(adapter, "unrelated", hot=7)
+    bare = await adapter.store.create_entry(draft("no vector"), None, None)
+    ids = [far.id, same.id, near.id, bare.id, NO_SUCH_ID, "not-a-uuid", same.id]
+    got = await adapter.store.pairwise_similarity(ids)
+
+    def key(a: Entry, b: Entry) -> tuple[str, str]:
+        x, y = sorted((a.id, b.id))
+        return (x, y)
+
+    assert set(got) == {key(same, near), key(same, far), key(near, far)}
+    assert got[key(same, near)] == pytest.approx(0.9796, abs=1e-3)
+    assert got[key(same, near)] > got[key(same, far)]
+    assert await adapter.store.pairwise_similarity([same.id]) == {}
+    assert await adapter.store.pairwise_similarity([]) == {}
+
+
 async def test_supersede_flips_the_target(adapter: Adapter) -> None:
     old = await write(adapter, "v1")
     new = await write(adapter, "v2", supersedes=(old.id,))
@@ -828,6 +852,20 @@ async def test_search_counters_accumulate_per_fleet(adapter: Adapter) -> None:
     await adapter.store.record_search(None, empty=False)
     counts = {c.fleet_id: (c.searches, c.empty) for c in await adapter.store.search_counts()}
     assert counts == {fleet: (2, 1), None: (1, 0)}
+
+
+async def test_explore_searches_are_counted_beside_the_others(adapter: Adapter) -> None:
+    """ADR 0078: ``explore`` is one more counter on the same per-fleet row; an
+    explore search is also a search, and omitting it counts as not explore."""
+    fleet = str(uuid.uuid4())
+    await adapter.store.record_search(fleet, empty=False, explore=True)
+    await adapter.store.record_search(fleet, empty=True, explore=True)
+    await adapter.store.record_search(fleet, empty=False)
+    await adapter.store.record_search(None, empty=False)
+    counts = {
+        c.fleet_id: (c.searches, c.empty, c.explore) for c in await adapter.store.search_counts()
+    }
+    assert counts == {fleet: (3, 1, 2), None: (1, 0, 0)}
 
 
 async def test_flag_counts_confirm_flags_a_later_supersession_proved_right(

@@ -32,6 +32,7 @@ from hivemind.domain.feedback import (
 from hivemind.domain.validation import check_pagination, check_query
 from hivemind.embeddings import EmbeddingError
 from hivemind.ports import Embedder, Store
+from hivemind.retrieval.mmr import mmr_order
 from hivemind.retrieval.rrf import rrf_fuse
 from hivemind.retrieval.scoring import entry_score, feedback_quality
 
@@ -126,9 +127,12 @@ class SearchService:
         offset: int | None = None,
         *,
         visibility: Visibility | None = None,
+        explore: bool = False,
     ) -> list[Hit]:
         """``search_result`` without the degraded flag: the hits only."""
-        result = await self.search_result(query, filters, limit, offset, visibility=visibility)
+        result = await self.search_result(
+            query, filters, limit, offset, visibility=visibility, explore=explore
+        )
         return result.hits
 
     async def search_result(
@@ -139,24 +143,29 @@ class SearchService:
         offset: int | None = None,
         *,
         visibility: Visibility | None = None,
+        explore: bool = False,
     ) -> SearchResult:
         """Run a hybrid query and return compact hits, best first.
 
         If the embedder fails the result is keyword-only and ``degraded``
         (ADR 0048), not an error. A caller's first-page search is counted
-        per home fleet (ADR 0056).
+        per home fleet (ADR 0056). ``explore`` re-orders the ranked
+        candidates for diversity (ADR 0078) and is counted too; off, the
+        ranking is untouched.
         """
-        result = await self._ranked(query, filters, limit, offset, visibility)
+        result = await self._ranked(query, filters, limit, offset, visibility, explore)
         if visibility is not None and not offset:
             # An empty degraded answer reflects the embedder, not the pool.
             empty = not result.hits and not result.degraded
-            await self._count_search(visibility, empty=empty)
+            await self._count_search(visibility, empty=empty, explore=explore)
         return result
 
-    async def _count_search(self, visibility: Visibility, *, empty: bool) -> None:
+    async def _count_search(
+        self, visibility: Visibility, *, empty: bool, explore: bool = False
+    ) -> None:
         """Best-effort (ADR 0056): a failed count never fails the search."""
         try:
-            await self._store.record_search(visibility.home_fleet_id, empty=empty)
+            await self._store.record_search(visibility.home_fleet_id, empty=empty, explore=explore)
         except Exception as exc:
             logger.warning("search count not recorded: %s", type(exc).__name__)
 
@@ -167,6 +176,7 @@ class SearchService:
         limit: int | None,
         offset: int | None,
         visibility: Visibility | None,
+        explore: bool = False,
     ) -> SearchResult:
         """The search itself (``search_result`` without the counting)."""
         # Validate before any embedder or store call (ADR 0040).
@@ -235,6 +245,10 @@ class SearchService:
         # 5. Supersession ranking invariant (SPEC.md §6.3).
         ordered = apply_supersession_invariant(scored, entry_scores)
 
+        # 5b. Opt-in diversity re-order (ADR 0078); never on the default path.
+        if explore and len(ordered) > 1:
+            ordered = await self._explore_order(ordered, entry_scores)
+
         # 6. Pagination (SPEC.md §5.3: limit/offset on search and list).
         hits = [
             self._to_hit(
@@ -246,6 +260,20 @@ class SearchService:
             for entry in ordered[offset : offset + limit]
         ]
         return SearchResult(hits, degraded)
+
+    async def _explore_order(self, ordered: list[Entry], scores: dict[str, float]) -> list[Entry]:
+        """``ordered`` re-ordered by MMR over the stored vectors (ADR 0078).
+
+        Runs after the gathered reads (ADR 0059), so a search never has more
+        than two store calls in flight. Best-effort: a failed similarity read
+        keeps the normal order.
+        """
+        try:
+            similarity = await self._store.pairwise_similarity([e.id for e in ordered])
+        except Exception:
+            logger.warning("explore: similarity read failed, normal order kept", exc_info=True)
+            return ordered
+        return explore_reorder(ordered, scores, similarity, self._config.explore_lambda)
 
     async def _vector_stream(
         self,
@@ -293,6 +321,64 @@ class SearchService:
         )
 
 
+def chain_heads(entries: list[Entry]) -> dict[str, str]:
+    """The chain head of each candidate id: follow ``superseded_by`` until
+    the link leaves the candidate set."""
+    # The candidates by id (the first one, should an id repeat).
+    by_id: dict[str, Entry] = {}
+    for entry in entries:
+        by_id.setdefault(entry.id, entry)
+
+    def chain_head(entry: Entry) -> str:
+        head = entry
+        guard = 0
+        while head.superseded_by in by_id:
+            head = by_id[head.superseded_by]
+            guard += 1
+            if guard > 1000:  # defensive: chains are short in practice
+                break
+        return head.id
+
+    return {entry.id: chain_head(entry) for entry in entries}
+
+
+def explore_reorder(
+    ordered: list[Entry],
+    scores: dict[str, float],
+    similarity: dict[tuple[str, str], float],
+    lam: float,
+) -> list[Entry]:
+    """Re-order the output of ``apply_supersession_invariant`` by MMR for
+    diversity (ADR 0078). Only the order changes: nothing is dropped or
+    re-scored.
+
+    Relevance is the best score in the entry's chain (the key the invariant
+    ranks chains by), so ``lam == 1`` reproduces ``ordered``. After MMR each
+    chain's members are put back newest first into the slots the chain
+    holds, so the supersession invariant still holds (SPEC §6.3).
+    """
+    heads = chain_heads(ordered)
+    best: dict[str, float] = {}
+    for entry in ordered:
+        head = heads[entry.id]
+        best[head] = max(best.get(head, scores[entry.id]), scores[entry.id])
+    relevance = {e.id: best[heads[e.id]] for e in ordered}
+    by_id = {e.id: e for e in ordered}
+    picked = [by_id[i] for i in mmr_order([e.id for e in ordered], relevance, similarity, lam)]
+    # Per chain: its slots in MMR order, refilled newest first.
+    slots: dict[str, list[int]] = {}
+    for position, entry in enumerate(picked):
+        slots.setdefault(heads[entry.id], []).append(position)
+    result = list(picked)
+    for head, positions in slots.items():
+        members = sorted(
+            (e for e in picked if heads[e.id] == head), key=lambda e: e.created_at, reverse=True
+        )
+        for position, member in zip(positions, members, strict=True):
+            result[position] = member
+    return result
+
+
 def apply_supersession_invariant(
     entries: list[Entry],
     scores: dict[str, float],
@@ -304,25 +390,10 @@ def apply_supersession_invariant(
     group newest ``created_at`` first. Ties keep the order of ``entries``
     (stable sorts; SP-5).
     """
-    # The candidates by id (the first one, should an id repeat).
-    by_id: dict[str, Entry] = {}
-    for entry in entries:
-        by_id.setdefault(entry.id, entry)
-
-    # Follow superseded_by until the link leaves the candidate set.
-    def chain_head(entry: Entry) -> str:
-        head = entry
-        guard = 0
-        while head.superseded_by in by_id:
-            head = by_id[head.superseded_by]
-            guard += 1
-            if guard > 1000:  # defensive: chains are short in practice
-                break
-        return head.id
-
+    heads = chain_heads(entries)
     groups: dict[str, list[Entry]] = {}
     for entry in entries:
-        groups.setdefault(chain_head(entry), []).append(entry)
+        groups.setdefault(heads[entry.id], []).append(entry)
 
     scored_groups: list[_ScoredGroup] = []
     for members in groups.values():

@@ -286,6 +286,8 @@ class SearchCount:
     fleet_id: str | None
     searches: int
     empty: int
+    # How many of ``searches`` were opt-in explore searches (ADR 0078).
+    explore: int = 0
 
 
 @dataclass(frozen=True, slots=True)

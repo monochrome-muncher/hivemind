@@ -738,7 +738,7 @@ async def test_search_counts_add_up_per_home_fleet(pg) -> None:
     await store.record_search(fleet.id, empty=False)
     await store.record_search(None, empty=True)
     counts = {c.fleet_id: c for c in await store.search_counts()}
-    assert counts[fleet.id] == SearchCount(fleet.id, searches=2, empty=1)
+    assert counts[fleet.id] == SearchCount(fleet.id, searches=2, empty=1, explore=0)
     assert counts[None] == SearchCount(None, searches=1, empty=1)
 
 

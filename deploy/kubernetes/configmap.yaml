@@ -67,6 +67,9 @@ data:
   HIVEMIND_QUALITY_MIN: "0.5"
   HIVEMIND_QUALITY_MAX: "1.2"
   HIVEMIND_SOCIAL_MAX: "1.2"
+  # Relevance weight of an opt-in explore search's MMR re-ordering (ADR
+  # 0078), in (0, 1]; 1 = relevance order. Searches without explore ignore it.
+  HIVEMIND_EXPLORE_LAMBDA: "0.7"
   # Seconds the usage report (/v1/metrics, /metrics) reuses its grouped
   # scan of the entries (ADR 0069); entry counts can be that old. 0 = off.
   HIVEMIND_METRICS_ENTRY_COUNTS_TTL: "300"

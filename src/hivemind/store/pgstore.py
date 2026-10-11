@@ -110,6 +110,13 @@ SELECT_ENTRY = "SELECT " + _ENTRY_COLUMNS + " FROM entries WHERE id = $1"
 
 SELECT_ENTRIES = "SELECT " + _ENTRY_COLUMNS + " FROM entries WHERE id = ANY($1)"
 
+PAIRWISE_SIMILARITY = (
+    "SELECT a.id AS a, b.id AS b, 1 - (a.embedding <=> b.embedding) AS similarity "
+    "FROM entries a JOIN entries b ON a.id < b.id "
+    "WHERE a.id = ANY($1) AND b.id = ANY($1) "
+    "AND a.embedding IS NOT NULL AND b.embedding IS NOT NULL"
+)
+
 # Reverse supersession link (PERF-1/STORE-2): served by the partial
 # ``entries_superseded_by_idx`` (migration 0008); the predicate below must
 # stay implied by the index's ``WHERE superseded_by IS NOT NULL``.
@@ -130,12 +137,13 @@ SELECT scope, kind, importance_source, author, fleet_id,
 # One row per home fleet ('' = none), bumped once per first-page search
 # (ADR 0056). Counts only: no query text, no agent name.
 RECORD_SEARCH = """
-INSERT INTO search_counts (fleet_id, searches, empty) VALUES ($1, 1, $2)
+INSERT INTO search_counts (fleet_id, searches, empty, explore) VALUES ($1, 1, $2, $3)
 ON CONFLICT (fleet_id) DO UPDATE
    SET searches = search_counts.searches + 1,
-       empty = search_counts.empty + EXCLUDED.empty
+       empty = search_counts.empty + EXCLUDED.empty,
+       explore = search_counts.explore + EXCLUDED.explore
 """
-SEARCH_COUNTS = "SELECT fleet_id, searches, empty FROM search_counts"
+SEARCH_COUNTS = "SELECT fleet_id, searches, empty, explore FROM search_counts"
 
 # "See also" links (ADR 0057). The insert skips ids that name no entry
 # (the join), and the reads are oldest link first.
@@ -898,6 +906,18 @@ class PgStore:
             rows = await conn.fetch(SELECT_ENTRIES, ids)
         return {str(row["id"]): _row_to_entry(row) for row in rows}
 
+    async def pairwise_similarity(self, entry_ids: list[str]) -> dict[tuple[str, str], float]:
+        ids = _valid_uuids(list(dict.fromkeys(entry_ids)))
+        if len(ids) < 2:
+            return {}
+        async with self._connection() as conn:
+            rows = await conn.fetch(PAIRWISE_SIMILARITY, ids)
+        out: dict[tuple[str, str], float] = {}
+        for row in rows:
+            a, b = sorted((str(row["a"]), str(row["b"])))
+            out[(a, b)] = float(row["similarity"])
+        return out
+
     async def list_predecessors(self, entry_ids: list[str]) -> list[Entry]:
         ids = _valid_uuids(entry_ids)
         if not ids:
@@ -1079,9 +1099,11 @@ class PgStore:
             ),
         )
 
-    async def record_search(self, fleet_id: str | None, *, empty: bool) -> None:
+    async def record_search(
+        self, fleet_id: str | None, *, empty: bool, explore: bool = False
+    ) -> None:
         async with self._connection() as conn:
-            await conn.execute(RECORD_SEARCH, fleet_id or "", int(empty))
+            await conn.execute(RECORD_SEARCH, fleet_id or "", int(empty), int(explore))
 
     async def search_counts(self) -> list[SearchCount]:
         async with self._connection() as conn:
@@ -1091,6 +1113,7 @@ class PgStore:
                 fleet_id=row["fleet_id"] or None,
                 searches=int(row["searches"]),
                 empty=int(row["empty"]),
+                explore=int(row["explore"]),
             )
             for row in rows
         ]

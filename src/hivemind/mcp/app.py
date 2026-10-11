@@ -469,6 +469,7 @@ async def hive_search(
     created_to: str | None = None,
     include_inactive: bool = False,
     flagged: bool = False,
+    explore: bool = False,
 ) -> dict[str, object]:
     """Hybrid search over the pool; returns compact hits (no bodies).
 
@@ -480,6 +481,9 @@ async def hive_search(
     stream alone and the result carries ``degraded: "keyword_only"`` and
     a ``note`` (ADR 0048), instead of an ``embedding_unavailable`` error.
 
+    ``explore`` (ADR 0078) re-orders the hits for diversity: near-copies of a
+    higher hit sink. Nothing is hidden.
+
     ``entities`` (ADR 0016, SPEC §13) filters by machine-extracted
     entity names: AND-semantics, case-insensitive; kinds are display-only.
 
@@ -490,6 +494,8 @@ async def hive_search(
     """
     try:
         check_pagination(limit, offset)  # SPEC §5.3, the same rule as REST (ADR 0040)
+        if not isinstance(explore, bool):
+            raise ValueError(f"explore must be a boolean, got {explore!r}")
         filters = _build_filters(
             kind=kind,
             tags=tags,
@@ -508,7 +514,12 @@ async def hive_search(
         return _error(ERR_INVALID_INPUT, str(exc))
     try:
         result = await app.search_service.search_result(
-            query, filters, limit, offset=offset, visibility=app.credential.visibility()
+            query,
+            filters,
+            limit,
+            offset=offset,
+            visibility=app.credential.visibility(),
+            explore=explore,
         )
     except InvalidInput as exc:
         return _error(ERR_INVALID_INPUT, str(exc))

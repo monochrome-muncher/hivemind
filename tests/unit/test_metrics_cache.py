@@ -150,4 +150,4 @@ async def test_agents_fleets_and_searches_are_read_on_every_report() -> None:
     assert first["agents"]["total"] == 0
     assert second["agents"]["total"] == 1
     assert second["fleets"]["total"] == 1
-    assert second["searches"]["by_fleet"] == {"ml": {"total": 1, "empty": 1}}
+    assert second["searches"]["by_fleet"] == {"ml": {"total": 1, "empty": 1, "explore": 0}}

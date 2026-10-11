@@ -63,6 +63,10 @@ class SearchConfig:
     # Ceiling on the upward effect of all social signals together (ADR
     # 0070). Finite and >= 1: below 1 it would penalise unrated entries.
     social_max: float = 1.2
+    # Weight of relevance against novelty in an ``explore`` search's MMR
+    # re-ordering (ADR 0078): 1 is plain relevance order, lower pushes
+    # near-copies of a higher hit down. In (0, 1].
+    explore_lambda: float = 0.7
 
     def __post_init__(self) -> None:
         # Fail at config time (ADR 0024), not per request as a
@@ -99,6 +103,8 @@ class SearchConfig:
             raise ValueError(f"half_life_days must be finite and > 0, got {self.half_life_days}")
         if self.recency_floor is not None and not 0.0 < self.recency_floor <= 1.0:
             raise ValueError(f"recency_floor must be in (0, 1] or None, got {self.recency_floor}")
+        if not (math.isfinite(self.explore_lambda) and 0.0 < self.explore_lambda <= 1.0):
+            raise ValueError(f"explore_lambda must be in (0, 1], got {self.explore_lambda}")
         threshold = self.vector_min_similarity
         if threshold is not None and not (math.isfinite(threshold) and 0.0 <= threshold < 1.0):
             # 1 or more would empty every vector list.
@@ -236,6 +242,8 @@ class Settings(BaseSettings):
     quality_max: float = 1.2
     # See SearchConfig.social_max (ADR 0070).
     social_max: float = 1.2
+    # See SearchConfig.explore_lambda (ADR 0078).
+    explore_lambda: float = 0.7
 
     @field_validator("embedding_api_key", "extractor_api_key")
     @classmethod
@@ -340,6 +348,7 @@ class Settings(BaseSettings):
             quality_min=self.quality_min,
             quality_max=self.quality_max,
             social_max=self.social_max,
+            explore_lambda=self.explore_lambda,
         )
 
 
