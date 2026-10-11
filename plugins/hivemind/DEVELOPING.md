@@ -22,7 +22,7 @@ to install or use it, read [README.md](README.md) instead.
 | `hooks/hooks.json` | A `SessionStart` hook (`startup`, `resume`, `clear`, `compact`, `fork`) that re-injects the reminder whenever the context is rebuilt (Claude Code, Codex), and a `Stop` hook (Claude Code, Codex) |
 | `skills/hivemind-setup/scripts/hivemind-stop.sh` | The `Stop` hook ([below](#the-stop-hook-and-the-post-compaction-line)) |
 | `.mcp.json` | The MCP server for Claude Code, built from `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY` |
-| `package.json`, `cordis.patch.yml`, `dsh/` | The DeepSeek Harness bundle: the MCP server row, and a small provider (`dsh/hivemind-skills.js`) that serves `skills/` |
+| `package.json`, `cordis.patch.yml`, `dsh/` | The DeepSeek Harness bundle: the MCP server row, a small provider (`dsh/hivemind-skills.js`) that serves `skills/`, and the Stop reminder (`dsh/hivemind-reminders.js`) |
 | `plugin.yaml`, `__init__.py` | The Hermes plugin: serves `skills/` and registers a system-prompt section |
 | `extensions/hivemind.ts` | The Pi and Oh My Pi extension: the system-prompt section, the MCP server on Pi 0.99+, and blocking Hivemind calls in incognito sessions |
 | `opencode/hivemind.js` | The OpenCode plugin: registers the MCP server, adds the skills, and puts the reminder in every model request |
@@ -87,8 +87,9 @@ itself names no harness-specific paths, and a test enforces this.
 
 Two nudges that get knowledge written before it is lost: in Claude Code
 and Codex from `hooks/hooks.json`, in Pi and Oh My Pi from the extension
-and the OpenCode plugin (below). Hermes, Gemini CLI and DeepSeek Harness
-do not have them. The script counts both
+and the OpenCode plugin, in DeepSeek Harness the Stop reminder from
+`dsh/hivemind-reminders.js` (below). Hermes and Gemini CLI do not have
+them. The script counts both
 transcript formats: Claude Code's `"type": "tool_use"` records and Codex's
 `function_call`, `custom_tool_call` and `local_shell_call` items (checked
 with Codex 0.162.1 against a mock model: it blocks once, Codex continues
@@ -148,6 +149,21 @@ runs plugin hooks only after the user trusts them in `/hooks`.
   shell calls get the reminder as the next prompt, and a
   `hivemind_hive_write` keeps it quiet. `opencode run` exits at the first
   idle, so the reminder never runs there.
+- **DeepSeek Harness.** The bundle's `dsh/hivemind-reminders.js` counts
+  the main agent's calls in `tools/post-execute` and, in
+  `agent/turn-stopping` of a long turn that wrote nothing, steers the agent
+  once with the reminder as a user message (as DSH's own Claude Code hooks
+  bridge does with a `Stop` block). It stays silent while
+  `mcp__hivemind__hive_write` is not visible to the agent, which covers
+  incognito and an unset URL (the server row is off then); agents
+  announced by `subagent/start` are neither counted nor reminded. No
+  post-compaction sentence: DSH keeps the server's instructions in the
+  system prompt, and compaction is a session event, not a plugin hook.
+  DSH's Claude Code hooks bridge cannot run `hivemind-stop.sh` instead:
+  it passes an empty `transcript_path`. Checked live with DSH 0.2.0-rc.2
+  and 0.2.1-alpha.2 (`dsh headless`) against a mock model: three shell
+  calls get the reminder once, and a `hive_write`, incognito or a
+  subagent's calls keep it quiet.
 
 ## Incognito
 
