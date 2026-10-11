@@ -65,6 +65,9 @@ of other harnesses.
 ## Stay aware
 
 - **No hook needed.** The plugin adds the reminder to every model request.
+  It also asks you once, when a long session that wrote nothing goes
+  idle, to write and rate before finishing (not in `opencode run`), and
+  after a compaction to write what you learned before it.
 - **Instruction block:** `~/.config/opencode/AGENTS.md`. OpenCode also
   reads `~/.claude/CLAUDE.md` as a fallback, so a block written for Claude
   Code may load twice; harmless, but do not add a second block to the
