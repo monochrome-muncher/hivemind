@@ -10,10 +10,16 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-# A source ref that only names another entry (a bare id, optionally
-# ``entry:``-prefixed): not an external source. ``sources`` has no entry
-# type (ADR 0057), so this is how a cited entry is recognised.
-ENTRY_ID_REF = r"^\s*(entry:)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\s*$"
+# A source ref that only names another entry (a bare id with or without
+# hyphens, ``entry:<id>``, or an API URL ``.../entries/<id>``): not an
+# external source. ``sources`` has no entry type (ADR 0057), so this is how a
+# cited entry is recognised. One pattern for the ``no_primary_source`` write
+# warning and the grounding metric, valid in Python and Postgres regexes
+# (both match it case-insensitively).
+ENTRY_ID_REF = (
+    r"^\s*(entry:|.*/entries/)?"
+    r"[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}/?\s*$"
+)
 _ENTRY_ID_REF = re.compile(ENTRY_ID_REF, re.IGNORECASE)
 
 

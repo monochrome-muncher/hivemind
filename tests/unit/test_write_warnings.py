@@ -10,6 +10,8 @@ from hivemind.api.deps import create_app
 from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
+from hivemind.domain.entry import Source, SourceType
+from hivemind.domain.health import is_entry_ref
 from hivemind.mcp.app import McpHivemind, hive_write
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
@@ -253,3 +255,19 @@ async def test_no_primary_source_misses() -> None:
     assert await codes() == []  # no sources, no links: not a synthesis
     assert await codes(kind="fact", sources=[link]) == []
     assert await codes(sources=[link], scope="self") == []
+
+
+@pytest.mark.parametrize(
+    "ref",
+    [
+        "0f8fad5b-d9cb-469f-a165-70867728950e",
+        "0f8fad5bd9cb469fa16570867728950e",
+        "https://hivemind.example.com/v1/entries/0f8fad5b-d9cb-469f-a165-70867728950e",
+    ],
+)
+def test_entry_link_matches_the_grounding_metric(ref: str) -> None:
+    """The warning and the fleet health grounding share (ADR 0075) use one
+    pattern, so a source the warning calls an entry link never counts as
+    grounded."""
+    source = Source(type=SourceType.OTHER, ref=ref)
+    assert is_entry_link(source) and is_entry_ref(ref)

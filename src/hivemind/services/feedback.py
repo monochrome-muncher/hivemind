@@ -64,6 +64,17 @@ class FeedbackOutcome:
     quality: float
 
 
+def _clean_note(note: str | None) -> str | None:
+    """``note`` without surrounding whitespace; ``None`` when nothing is
+    left. Stored this way, a whitespace-only note (a no-break space, say)
+    can never count as a note: Postgres's ``\\S`` and Python's
+    ``str.strip`` disagree on some characters, and the store adapters must
+    agree on what "noted" means (SPEC §4.2)."""
+    if note is None:
+        return None
+    return note.strip() or None
+
+
 class FeedbackService:
     """Feedback is open to any authenticated caller who can read the
     entry (SPEC.md §8.1, §12.2). ``config`` supplies the quality-formula
@@ -91,6 +102,7 @@ class FeedbackService:
         plain user key (SPEC.md §8.1).
         """
         check_text(note, "note", MAX_NOTE_CHARS)  # ADR 0040
+        note = _clean_note(note)
         check_text(agent, "agent", MAX_IDENTITY_CHARS)
         effective_agent = reporter_agent(credential, agent)
         if effective_agent is None:
@@ -134,6 +146,7 @@ class FeedbackService:
         one transactional upsert, one count read.
         """
         check_text(note, "note", MAX_NOTE_CHARS)  # ADR 0040
+        note = _clean_note(note)
         check_text(agent, "agent", MAX_IDENTITY_CHARS)
         effective_agent = reporter_agent(credential, agent)
         if effective_agent is None:
