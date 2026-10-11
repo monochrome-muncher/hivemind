@@ -98,11 +98,15 @@ class WriteService:
         """Check mode: everything ``write_and_relate`` validates (supersede
         permission, see-also resolution) and reports (``related``, warnings),
         but nothing is stored and the extractor does not run. Raises what a
-        real write would raise before it stores.
+        real write would raise before it stores. The entries the draft
+        supersedes are left out of ``related``, as a real write leaves them
+        out once they are superseded.
         """
-        draft, warnings = await self._prepare(draft, writer)
+        draft, warnings, superseded = await self._prepare(draft, writer)
         embedding = await self._embedder.embed_entry(draft)
-        related = await self._related_best_effort(draft, None, embedding, writer)
+        related = await self._related_best_effort(
+            draft, None, embedding, writer, skip=frozenset(e.id for e in superseded)
+        )
         return CheckResult(related, warnings)
 
     async def _related_best_effort(
@@ -111,9 +115,10 @@ class WriteService:
         entry_id: str | None,
         embedding: list[float],
         writer: Visibility | None,
+        skip: frozenset[str] = frozenset(),
     ) -> tuple[RelatedEntry, ...]:
         try:
-            return await self._related(draft, entry_id, embedding, writer)
+            return await self._related(draft, entry_id, embedding, writer, skip)
         except Exception:
             logger.warning("related-entry lookup failed", exc_info=True)
             return ()
@@ -124,10 +129,14 @@ class WriteService:
         entry_id: str | None,
         embedding: list[float],
         writer: Visibility | None,
+        skip: frozenset[str] = frozenset(),
     ) -> tuple[RelatedEntry, ...]:
+        # ``skip`` (ids the caller will not want back) widens the lookup by
+        # its size, so the list still holds up to RELATED_ON_WRITE_LIMIT.
         pairs = await self._store.similar_entries(
-            embedding, RELATED_ON_WRITE_LIMIT, exclude_id=entry_id, visibility=writer
+            embedding, RELATED_ON_WRITE_LIMIT + len(skip), exclude_id=entry_id, visibility=writer
         )
+        pairs = [(eid, sim) for eid, sim in pairs if eid not in skip][:RELATED_ON_WRITE_LIMIT]
         if not pairs:
             return ()
         ids = [eid for eid, _ in pairs]
@@ -151,16 +160,17 @@ class WriteService:
 
     async def _prepare(
         self, draft: EntryDraft, writer: Visibility | None
-    ) -> tuple[EntryDraft, tuple[WriteWarning, ...]]:
+    ) -> tuple[EntryDraft, tuple[WriteWarning, ...], list[Entry]]:
         """The checks a write makes before it embeds (supersede permission,
-        see-also resolution) and the warnings the loaded targets allow."""
+        see-also resolution), the warnings the loaded targets allow, and the
+        supersession targets."""
         superseded: list[Entry] = []
         linked: list[Entry] = []
         if writer is not None and draft.supersedes:
             superseded = await self._check_supersedes(draft, writer)
         if writer is not None and draft.see_also:
             draft, linked = await self._resolve_see_also(draft, writer)
-        return draft, write_warnings(draft, superseded, linked)
+        return draft, write_warnings(draft, superseded, linked), superseded
 
     async def _write(
         self, draft: EntryDraft, *, writer: Visibility | None = None
@@ -173,7 +183,7 @@ class WriteService:
         raised before anything is embedded. ``None`` skips the check
         (internal callers and fixtures only).
         """
-        draft, warnings = await self._prepare(draft, writer)
+        draft, warnings, _ = await self._prepare(draft, writer)
         # Embed and extract concurrently. An embedder failure propagates
         # (cancelling extraction); an extractor failure never fails the write.
         extraction: asyncio.Task[tuple[ExtractedEntity, ...] | None] | None = None

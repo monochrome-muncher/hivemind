@@ -86,6 +86,23 @@ async def test_check_stores_nothing_and_reports_related_and_warnings() -> None:
     assert await _count(store) == 1
 
 
+async def test_check_leaves_out_the_entries_it_supersedes_like_a_write() -> None:
+    """A real write's ``related`` cannot hold its supersession targets (they
+    are superseded by then); a check must not hold them either, or it tells
+    the writer to withdraw over the entry it is replacing."""
+    store = MemoryStore(make_clock())
+    surface = _surface(store, WRITER)
+    old = await hive_write(surface, kind="fact", summary="billing runs on node 20")
+    other = await hive_write(surface, kind="fact", summary="billing runs on node 18 in staging")
+    args = {"kind": "fact", "summary": "billing runs on node 22", "supersedes": [old["id"]]}
+    checked = await hive_write(surface, check=True, **args)  # type: ignore[arg-type]
+    real = await hive_write(surface, **args)  # type: ignore[arg-type]
+    checked_ids = [r["id"] for r in checked["related"]]  # type: ignore[index, union-attr]
+    assert old["id"] not in checked_ids
+    assert other["id"] in checked_ids
+    assert checked_ids == [r["id"] for r in real["related"]]  # type: ignore[index, union-attr]
+
+
 async def test_check_raises_what_a_write_would() -> None:
     store = MemoryStore(make_clock())
     surface = _surface(store, WRITER)
