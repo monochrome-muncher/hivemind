@@ -601,7 +601,10 @@ subjects:
 
 A browser front end for the admin surface: the pending-agent queue
 (grouped by owner alias), activation with the key shown once, agents,
-fleets, the audit log, and org-key rotation. Admin keys stay CLI-only.
+fleets, the audit log, and org-key rotation. It also shows daily activity,
+stats per fleet, agent and owner alias, the fleet health metrics, and a
+browser for the memories with search and withdrawal (ADR 0080).
+Admin keys stay CLI-only.
 
 **What it needs.** One env var: `HIVEMIND_ADMIN_API_URL`, the base URL of
 the hivemind-api deployment (in-cluster: `http://hivemind-api:8000`). For
@@ -636,7 +639,9 @@ wherever it is not `localhost`.
 **Locally:** `make api` in one shell, `make admin` in another, then open
 `http://localhost:8080`.
 
-**What it forwards.** Only the admin endpoints, `GET /v1/metrics` and
+**What it forwards.** Only the admin endpoints (the memory browser uses
+the admin-only `/v1/admin/entries`, `/v1/admin/search` and
+`/v1/admin/activity`, never the data plane), `GET /v1/metrics` and
 `GET /v1/health`. Anything else is a 404 from the panel itself. It
 forwards `X-API-Key`, `Content-Type` and `Accept` and nothing else, marks
 every forwarded response `Cache-Control: no-store`, and never logs a

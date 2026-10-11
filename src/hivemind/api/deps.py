@@ -20,6 +20,7 @@ from hivemind.config import SearchConfig
 from hivemind.domain.validation import MAX_REQUEST_BODY_BYTES, InvalidInput
 from hivemind.ports import Authenticator, Credential, Embedder, Store
 from hivemind.services.access import AccessService
+from hivemind.services.activity import ActivityService
 from hivemind.services.governance import GovernanceService, WriteService
 from hivemind.services.metrics import MetricsService
 from hivemind.services.search import SearchService
@@ -40,6 +41,7 @@ class HivemindApp:
     search_service: SearchService
     access_service: AccessService
     metrics_service: MetricsService
+    activity_service: ActivityService
 
 
 class ApiError(Exception):

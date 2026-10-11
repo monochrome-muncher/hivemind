@@ -31,6 +31,8 @@ from hivemind.api.deps import (
 from hivemind.api.prometheus import PrometheusMetrics
 from hivemind.api.schemas import (
     ActivateAgentRequest,
+    ActivityOut,
+    AdminSearchRequest,
     AgentOut,
     AgentsMetrics,
     AuditRecordOut,
@@ -123,6 +125,11 @@ ActorQuery = Annotated[str | None, Query(max_length=MAX_IDENTITY_CHARS), AfterVa
 AUDIT_LOG_DEFAULT_LIMIT = 100
 AUDIT_LOG_MAX_LIMIT = 1000
 
+# GET /v1/admin/entries default page size (ADR 0080); the ceiling is MAX_LIMIT.
+ADMIN_ENTRIES_DEFAULT_LIMIT = 50
+MIN_ACTIVITY_DAYS = 1
+MAX_ACTIVITY_DAYS = 365
+
 # ADR 0048: a search answered by the keyword stream alone because the
 # embedding service failed says so in this response header.
 DEGRADED_HEADER = "X-Hivemind-Degraded"
@@ -166,6 +173,93 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         is today; the REST surface has no deep DB-probe endpoint in v1.)
         """
         return HealthOut(status="ok")
+
+    async def _entry_detail(entry_id: str, credential: Credential, *, history: bool) -> EntryOut:
+        """The full entry with its feedback and links, and (``history``) the
+        supersession chain: shared by ``GET /v1/entries/{id}`` and the admin
+        read (ADR 0080)."""
+        # ADR 0033: follows readability; an invisible entry is a 404 like
+        # an unknown one, and the chain leaves out invisible versions.
+        visibility = credential.visibility()
+        entry = await get_visible_entry(app.store, entry_id, visibility)
+        if entry is None:
+            raise api_error(404, "not_found", f"unknown entry: {entry_id}")
+        summary, links = await asyncio.gather(
+            app.governance_service.feedback_summary(entry.id),
+            entry_links(app.store, entry.id, visibility),
+        )
+        out = EntryOut.from_entry(entry)
+        out.feedback = FeedbackSummaryOut.from_summary(summary)
+        out.set_links(links)
+        if history:
+            successors, superseded = await supersession_chain(
+                app.store, entry, visibility=visibility
+            )
+            out.history = {
+                "successors": [EntryOut.from_entry(e) for e in successors],
+                "superseded": [EntryOut.from_entry(e) for e in superseded],
+            }
+        return out
+
+    async def _search(
+        request: SearchRequest,
+        credential: Credential,
+        response: Response,
+        *,
+        fleet_id: str | None = None,
+        count: bool = True,
+    ) -> list[HitOut]:
+        """The search behind ``POST /v1/search`` and the admin search;
+        ``count=False`` keeps the latter out of the search counters."""
+        filters = EntryFilters(
+            kind=request.kind,
+            tags=tuple(request.tags),
+            entities=tuple(request.entities),
+            scope=request.scope,
+            fleet_id=fleet_id,
+            author=request.author,
+            agent=request.agent,
+            occurred_from=request.occurred_from,
+            occurred_to=request.occurred_to,
+            created_from=request.created_from,
+            created_to=request.created_to,
+            include_inactive=request.include_inactive,
+            flagged=request.flagged,
+        )
+        result = await app.search_service.search_result(
+            request.query,
+            filters,
+            request.limit,
+            offset=request.offset,
+            visibility=credential.visibility(),
+            explore=request.explore,
+            recency=request.recency or RecencyHint.DEFAULT,
+            count=count,
+        )
+        if result.recency is not RecencyHint.DEFAULT:
+            response.headers[RECENCY_HEADER] = result.recency.value
+        if result.degraded:
+            response.headers[DEGRADED_HEADER] = DEGRADED_KEYWORD_ONLY
+            if prometheus is not None:
+                prometheus.degraded_searches.inc()
+        return [HitOut.from_hit(h) for h in result.hits]
+
+    async def _withdraw(
+        entry_id: str, request: WithdrawRequest, credential: Credential
+    ) -> EntryOut:
+        """Withdraw through the governance service (audited there as
+        ``entry.withdraw``) and map its typed errors."""
+        try:
+            entry = await app.governance_service.withdraw(credential, entry_id, request.reason)
+        except EntryNotFound:
+            raise api_error(404, "not_found", f"unknown entry: {entry_id}") from None
+        except PermissionDenied as exc:
+            raise api_error(403, "forbidden", str(exc)) from exc
+        except InvalidInput as exc:
+            raise api_error(422, "invalid_input", str(exc)) from exc
+        except EntryNotActive as exc:
+            raise api_error(409, "conflict", str(exc)) from exc
+        return EntryOut.from_entry(entry)
 
     @router.get("/metrics", response_model=MetricsOut)
     async def metrics(credential: require) -> MetricsOut:
@@ -274,28 +368,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         ``feedback`` carries the verdict counts and the newest reports,
         notes included (ADR 0051).
         """
-        # ADR 0033: follows readability; an invisible entry is a 404 like
-        # an unknown one, and the chain leaves out invisible versions.
-        visibility = credential.visibility()
-        entry = await get_visible_entry(app.store, entry_id, visibility)
-        if entry is None:
-            raise api_error(404, "not_found", f"unknown entry: {entry_id}")
-        summary, links = await asyncio.gather(
-            app.governance_service.feedback_summary(entry.id),
-            entry_links(app.store, entry.id, visibility),
-        )
-        out = EntryOut.from_entry(entry)
-        out.feedback = FeedbackSummaryOut.from_summary(summary)
-        out.set_links(links)
-        if history:
-            successors, superseded = await supersession_chain(
-                app.store, entry, visibility=visibility
-            )
-            out.history = {
-                "successors": [EntryOut.from_entry(e) for e in successors],
-                "superseded": [EntryOut.from_entry(e) for e in superseded],
-            }
-        return out
+        return await _entry_detail(entry_id, credential, history=history)
 
     @router.post("/entries/get", response_model=EntriesOut)
     async def get_entries(request: GetEntriesRequest, credential: require) -> EntriesOut:
@@ -382,36 +455,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         (ADR 0073) is applied only when the server turned the hint on, and
         then the response carries ``X-Hivemind-Recency`` with the hint used.
         """
-        filters = EntryFilters(
-            kind=request.kind,
-            tags=tuple(request.tags),
-            entities=tuple(request.entities),
-            scope=request.scope,
-            author=request.author,
-            agent=request.agent,
-            occurred_from=request.occurred_from,
-            occurred_to=request.occurred_to,
-            created_from=request.created_from,
-            created_to=request.created_to,
-            include_inactive=request.include_inactive,
-            flagged=request.flagged,
-        )
-        result = await app.search_service.search_result(
-            request.query,
-            filters,
-            request.limit,
-            offset=request.offset,
-            visibility=credential.visibility(),
-            explore=request.explore,
-            recency=request.recency or RecencyHint.DEFAULT,
-        )
-        if result.recency is not RecencyHint.DEFAULT:
-            response.headers[RECENCY_HEADER] = result.recency.value
-        if result.degraded:
-            response.headers[DEGRADED_HEADER] = DEGRADED_KEYWORD_ONLY
-            if prometheus is not None:
-                prometheus.degraded_searches.inc()
-        return [HitOut.from_hit(h) for h in result.hits]
+        return await _search(request, credential, response)
 
     @router.post("/entries/{entry_id}/withdraw", response_model=EntryOut)
     async def withdraw(entry_id: str, request: WithdrawRequest, credential: require) -> EntryOut:
@@ -419,17 +463,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
 
         404 unknown entry, 403 non-author, 409 already inactive.
         """
-        try:
-            entry = await app.governance_service.withdraw(credential, entry_id, request.reason)
-        except EntryNotFound:
-            raise api_error(404, "not_found", f"unknown entry: {entry_id}") from None
-        except PermissionDenied as exc:
-            raise api_error(403, "forbidden", str(exc)) from exc
-        except InvalidInput as exc:
-            raise api_error(422, "invalid_input", str(exc)) from exc
-        except EntryNotActive as exc:
-            raise api_error(409, "conflict", str(exc)) from exc
-        return EntryOut.from_entry(entry)
+        return await _withdraw(entry_id, request, credential)
 
     @router.put("/entries/{entry_id}/pin", response_model=PinOut)
     async def pin(entry_id: str, credential: require) -> PinOut:
@@ -573,6 +607,95 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
             already_registered=registration.already_registered,
             message=registration.message,
         )
+
+    # --- Admin console reads (ADR 0080): admin key only ------------------
+
+    def _require_admin(credential: Credential, what: str) -> None:
+        if not credential.is_admin:
+            raise api_error(403, "forbidden", f"{what} requires an admin key")
+
+    @router.get("/admin/entries", response_model=list[EntryOut])
+    async def admin_list_entries(
+        credential: require,
+        kind: Annotated[Kind | None, Query()] = None,
+        tags: Annotated[list[str] | None, Query()] = None,
+        entities: Annotated[list[str] | None, Query()] = None,
+        scope: Annotated[str | None, Query()] = None,
+        fleet_id: Annotated[str | None, Query()] = None,
+        author: Annotated[str | None, Query()] = None,
+        agent: Annotated[str | None, Query()] = None,
+        occurred_from: Annotated[datetime | None, Query()] = None,
+        occurred_to: Annotated[datetime | None, Query()] = None,
+        created_from: Annotated[datetime | None, Query()] = None,
+        created_to: Annotated[datetime | None, Query()] = None,
+        include_inactive: bool = False,
+        flagged: bool = False,
+        limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = ADMIN_ENTRIES_DEFAULT_LIMIT,
+        offset: Annotated[int | None, Query(ge=0, le=MAX_OFFSET)] = 0,
+    ) -> list[EntryOut]:
+        """List/filter entries as the admin sees them (ADR 0080): every
+        scope of every fleet, newest first, with the ``GET /v1/entries``
+        filters plus ``fleet_id``."""
+        _require_admin(credential, "the admin entry list")
+        filters = EntryFilters(
+            kind=kind,
+            tags=tuple(tags or ()),
+            entities=tuple(entities or ()),
+            scope=scope,
+            fleet_id=fleet_id,
+            author=author,
+            agent=agent,
+            occurred_from=_to_utc(occurred_from),
+            occurred_to=_to_utc(occurred_to),
+            created_from=_to_utc(created_from),
+            created_to=_to_utc(created_to),
+            include_inactive=include_inactive,
+            flagged=flagged,
+        )
+        filters.validate()  # ADR 0040 (raises InvalidInput -> 422)
+        entries = await app.store.list_entries(
+            filters,
+            limit=limit,
+            offset=offset if offset is not None else 0,
+            visibility=credential.visibility(),
+        )
+        return [EntryOut.from_entry(e) for e in entries]
+
+    @router.get("/admin/entries/{entry_id}", response_model=EntryOut)
+    async def admin_get_entry(entry_id: str, credential: require) -> EntryOut:
+        """One entry with its feedback, links and history always filled
+        (ADR 0080): ``GET /v1/entries/{id}?history=true`` for the admin."""
+        _require_admin(credential, "the admin entry read")
+        return await _entry_detail(entry_id, credential, history=True)
+
+    @router.post("/admin/search", response_model=list[HitOut])
+    async def admin_search(
+        request: AdminSearchRequest, credential: require, response: Response
+    ) -> list[HitOut]:
+        """``POST /v1/search`` for the admin, with a ``fleet_id`` filter
+        (ADR 0080). Not counted in the search counters (ADR 0056); a
+        degraded answer still counts for ``GET /metrics``."""
+        _require_admin(credential, "the admin search")
+        return await _search(request, credential, response, fleet_id=request.fleet_id, count=False)
+
+    @router.post("/admin/entries/{entry_id}/withdraw", response_model=EntryOut)
+    async def admin_withdraw(
+        entry_id: str, request: WithdrawRequest, credential: require
+    ) -> EntryOut:
+        """Withdraw an entry as the admin (ADR 0080): the same call as
+        ``POST /v1/entries/{id}/withdraw``, audited as ``entry.withdraw``."""
+        _require_admin(credential, "the admin withdraw")
+        return await _withdraw(entry_id, request, credential)
+
+    @router.get("/admin/activity", response_model=ActivityOut)
+    async def admin_activity(
+        credential: require,
+        days: Annotated[int, Query(ge=MIN_ACTIVITY_DAYS, le=MAX_ACTIVITY_DAYS)] = 30,
+    ) -> ActivityOut:
+        """Who wrote and who reported, per agent, fleet and UTC day over
+        the last ``days`` days (ADR 0080). Observation only."""
+        _require_admin(credential, "the activity view")
+        return ActivityOut(**await app.activity_service.report(days))
 
     @router.post("/admin/fleets", response_model=FleetOut, status_code=201)
     async def create_fleet(payload: CreateFleetRequest, credential: require) -> FleetOut:

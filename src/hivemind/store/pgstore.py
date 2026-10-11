@@ -32,6 +32,13 @@ from hivemind.domain.access import (
     UnknownAgent,
     Visibility,
 )
+from hivemind.domain.activity import (
+    Activity,
+    AuthorActivity,
+    DayActivity,
+    ReceivedFeedback,
+    ReporterActivity,
+)
 from hivemind.domain.audit import (
     ActorKind,
     AuditAction,
@@ -292,6 +299,48 @@ stated explicitly; untuned for now (ADR 0025).
 _REPORTER_NOT_REVOKED = (
     "NOT EXISTS (SELECT 1 FROM agents a WHERE a.name = f.\"user\" AND a.status = 'revoked')"
 )
+
+# The admin activity view (ADR 0080): plain grouped scans, one per figure.
+# ``$1`` is the window start. Revoked reporters are left out (ADR 0067).
+ACTIVITY_AUTHORS = """
+SELECT author, fleet_id, count(*) AS entries,
+       count(*) FILTER (WHERE state = 'active') AS active,
+       count(*) FILTER (WHERE created_at >= $1) AS recent,
+       max(created_at) AS last_write_at
+  FROM entries GROUP BY author, fleet_id
+"""
+ACTIVITY_REPORTERS = f"""
+SELECT f."user" AS reporter, count(*) AS verdicts,
+       count(*) FILTER (WHERE f.updated_at >= $1) AS recent,
+       count(*) FILTER (WHERE f.verdict = 'helpful') AS helpful,
+       count(*) FILTER (WHERE f.verdict = 'stale') AS stale,
+       count(*) FILTER (WHERE f.verdict = 'wrong') AS wrong,
+       max(f.updated_at) AS last_at
+  FROM feedbacks f WHERE {_REPORTER_NOT_REVOKED}
+ GROUP BY f."user"
+"""
+ACTIVITY_RECEIVED = f"""
+SELECT e.author, count(*) FILTER (WHERE f.verdict = 'helpful') AS helpful,
+       count(*) FILTER (WHERE f.verdict = 'stale') AS stale,
+       count(*) FILTER (WHERE f.verdict = 'wrong') AS wrong
+  FROM feedbacks f JOIN entries e ON e.id = f.entry_id
+ WHERE {_REPORTER_NOT_REVOKED}
+ GROUP BY e.author
+"""
+ACTIVITY_DAYS = f"""
+SELECT day, sum(writes)::int AS writes, sum(helpful)::int AS helpful,
+       sum(stale)::int AS stale, sum(wrong)::int AS wrong
+  FROM (
+    SELECT (created_at AT TIME ZONE 'UTC')::date AS day, 1 AS writes,
+           0 AS helpful, 0 AS stale, 0 AS wrong
+      FROM entries WHERE created_at >= $1
+    UNION ALL
+    SELECT (f.updated_at AT TIME ZONE 'UTC')::date, 0,
+           (f.verdict = 'helpful')::int, (f.verdict = 'stale')::int, (f.verdict = 'wrong')::int
+      FROM feedbacks f WHERE f.updated_at >= $1 AND {_REPORTER_NOT_REVOKED}
+  ) t
+ GROUP BY day ORDER BY day
+"""
 
 # ``updated_at`` defaults to the database clock, like ``pinned_at`` and
 # ``created_at``, so feedback compares truthfully with them (ADR 0079).
@@ -676,7 +725,10 @@ def _filter_conditions(
     if filters.scope is not None:
         add("scope = ?", filters.scope)
     if filters.fleet_id is not None:
-        add("fleet_id = ?", filters.fleet_id)
+        if _is_valid_uuid(filters.fleet_id):
+            add("fleet_id = ?", filters.fleet_id)
+        else:
+            clauses.append("FALSE")  # no such fleet, so no entry (as MemoryStore)
     if filters.author is not None:
         add("author = ?", filters.author)
     if filters.agent is not None:
@@ -1081,6 +1133,63 @@ class PgStore:
             verdicts_30d=int(scalars["verdicts30"]),
             top3_label_verdicts_30d=int(scalars["top_verdict_labels"]),
             verdict_labels_30d=int(scalars["verdict_labels"]),
+        )
+
+    async def activity(self, since: datetime) -> Activity:
+        # One read-only REPEATABLE READ transaction, like ``fleet_health``:
+        # the four scans share a snapshot, so the figures agree.
+        async with (
+            self._connection() as conn,
+            conn.transaction(isolation="repeatable_read", readonly=True),
+        ):
+            await conn.execute("SET LOCAL jit = off")
+            authors = await conn.fetch(ACTIVITY_AUTHORS, since)
+            reporters = await conn.fetch(ACTIVITY_REPORTERS, since)
+            received = await conn.fetch(ACTIVITY_RECEIVED)
+            days = await conn.fetch(ACTIVITY_DAYS, since)
+        return Activity(
+            authors=tuple(
+                AuthorActivity(
+                    author=r["author"],
+                    fleet_id=str(r["fleet_id"]) if r["fleet_id"] is not None else None,
+                    entries=int(r["entries"]),
+                    active=int(r["active"]),
+                    recent=int(r["recent"]),
+                    last_write_at=r["last_write_at"],
+                )
+                for r in authors
+            ),
+            reporters=tuple(
+                ReporterActivity(
+                    reporter=r["reporter"],
+                    verdicts=int(r["verdicts"]),
+                    recent=int(r["recent"]),
+                    helpful=int(r["helpful"]),
+                    stale=int(r["stale"]),
+                    wrong=int(r["wrong"]),
+                    last_at=r["last_at"],
+                )
+                for r in reporters
+            ),
+            received=tuple(
+                ReceivedFeedback(
+                    author=r["author"],
+                    helpful=int(r["helpful"]),
+                    stale=int(r["stale"]),
+                    wrong=int(r["wrong"]),
+                )
+                for r in received
+            ),
+            days=tuple(
+                DayActivity(
+                    day=r["day"],
+                    writes=int(r["writes"]),
+                    helpful=int(r["helpful"]),
+                    stale=int(r["stale"]),
+                    wrong=int(r["wrong"]),
+                )
+                for r in days
+            ),
         )
 
     async def fleet_convergence(self, now: datetime) -> Convergence:

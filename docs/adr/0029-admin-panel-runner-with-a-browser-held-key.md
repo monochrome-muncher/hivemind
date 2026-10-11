@@ -1,5 +1,9 @@
 # The admin panel: a static UI and an allowlisted proxy, with the key held in the browser
 
+Status: Accepted; amended by [ADR 0080](0080-admin-memory-browser-and-activity.md),
+which adds a read-only memory browser and activity figures and five more
+admin paths to the proxy allowlist.
+
 ## Context
 
 The admin surface (SPEC §12.4) was reachable only through `curl` and

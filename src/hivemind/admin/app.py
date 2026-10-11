@@ -56,6 +56,13 @@ _ALLOWED: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
         ("POST", r"admin/agents/[^/]+/revoke"),
         ("PATCH", r"admin/agents/[^/]+"),
         ("POST", r"admin/org-key/rotate"),
+        # Browsing memories as the operator (admin-key only on the API side).
+        # Reads and one withdraw: never the data plane's own entry routes.
+        ("GET", r"admin/entries"),
+        ("GET", r"admin/entries/[^/]+"),
+        ("POST", r"admin/entries/[^/]+/withdraw"),
+        ("POST", r"admin/search"),
+        ("GET", r"admin/activity"),
     )
 )
 

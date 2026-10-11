@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
+from pathlib import Path
 
 import httpx
 import pytest
@@ -57,6 +58,11 @@ def _panel(transport: httpx.AsyncBaseTransport) -> httpx.AsyncClient:
         ("POST", "admin/agents/alice/revoke"),
         ("PATCH", "admin/agents/alice"),
         ("POST", "admin/org-key/rotate"),
+        ("GET", "admin/entries"),
+        ("GET", "admin/entries/abc123"),
+        ("POST", "admin/entries/abc123/withdraw"),
+        ("POST", "admin/search"),
+        ("GET", "admin/activity"),
     ],
 )
 def test_the_admin_surface_is_forwarded(method: str, path: str) -> None:
@@ -76,6 +82,15 @@ def test_the_admin_surface_is_forwarded(method: str, path: str) -> None:
         ("PATCH", "admin/agents/alice/extra"),
         ("GET", "admin/agents/../../entries"),
         ("GET", "admin/audit-logx"),
+        ("GET", "admin/entries/x/withdraw"),  # right path, wrong method
+        ("DELETE", "admin/entries/x"),
+        ("PATCH", "admin/entries/x"),
+        ("POST", "admin/entries"),
+        ("PUT", "admin/entries/x/withdraw"),
+        ("GET", "admin/search"),
+        ("POST", "admin/activity"),
+        ("GET", "admin/entries/x/extra"),
+        ("GET", "admin/entries/"),
     ],
 )
 def test_everything_else_is_refused(method: str, path: str) -> None:
@@ -257,12 +272,66 @@ def test_the_page_has_no_inline_script_or_style() -> None:
     assert "<style" not in html
 
 
-def test_the_script_never_writes_html() -> None:
-    js = (STATIC_DIR / "admin.js").read_text()
-    for sink in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval("):
-        assert sink not in js, sink
-    # Loaded from nowhere but the panel itself.
-    assert re.search(r"https?://", js) is None
+def _scripts() -> list[Path]:
+    scripts = sorted(STATIC_DIR.glob("*.js"))
+    assert scripts, "no panel script found"
+    return scripts
+
+
+def test_the_scripts_never_write_html() -> None:
+    for script in _scripts():
+        js = script.read_text()
+        for sink in (
+            "innerHTML",
+            "outerHTML",
+            "insertAdjacentHTML",
+            "document.write",
+            "DOMParser",
+            "createContextualFragment",
+            "srcdoc",
+            "eval(",
+            "new Function",
+        ):
+            assert sink not in js, f"{script.name}: {sink}"
+        # Loaded from nowhere but the panel itself (the SVG namespace is an
+        # identifier, not a fetch).
+        urls = re.findall(r"https?://[^\s\"'`]+", js)
+        assert set(urls) <= {"http://www.w3.org/2000/svg"}, script.name
+
+
+def test_the_scripts_load_only_sibling_modules() -> None:
+    names = {p.name for p in _scripts()}
+    for script in _scripts():
+        for target in re.findall(r"""from\s+["']([^"']+)["']""", script.read_text()):
+            assert target.startswith("./"), (script.name, target)
+            assert target[2:] in names, (script.name, target)
+    html = (STATIC_DIR / "index.html").read_text()
+    assert re.findall(r"<script[^>]*\bsrc=\"([^\"]+)\"", html) == ["/static/admin.js"]
+
+
+def test_every_api_path_the_scripts_call_is_on_the_allowlist() -> None:
+    """``api("GET", "admin/x")`` in the UI must be forwardable by the proxy."""
+    call = re.compile(r"""\bapi(?:Raw)?\(\s*["']([A-Z]+)["']\s*,\s*([`"'])(.+?)\2""")
+    seen: set[tuple[str, str]] = set()
+    for script in _scripts():
+        for method, _quote, path in call.findall(script.read_text()):
+            seen.add((method, re.sub(r"\$\{[^}]*\}", "x", path)))
+    assert ("POST", "admin/search") in seen  # the regex really finds calls
+    assert len(seen) >= 10
+    for method, path in sorted(seen):
+        assert is_allowed(method, path), (method, path)
+
+
+def test_the_scripts_never_build_a_link_from_entry_data() -> None:
+    """Entry text is data (ADR 0043): a link is an in-panel hash and nothing else."""
+    for script in _scripts():
+        js = script.read_text()
+        assert ".href =" not in js and 'setAttribute("href"' not in js, script.name
+        for href in re.findall(r"\bhref:\s*([^,}]+)", js):
+            assert "memoriesHref(" in href or re.match(r"""\s*(?:["'`]#|href\b|null)""", href), (
+                script.name,
+                href,
+            )
 
 
 def test_the_runner_refuses_to_start_without_an_api_url(monkeypatch) -> None:

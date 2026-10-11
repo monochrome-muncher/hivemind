@@ -25,6 +25,7 @@ from hivemind.domain.access import (
     TrustLevel,
     Visibility,
 )
+from hivemind.domain.activity import Activity
 from hivemind.domain.audit import AuditEvent, AuditFilters, AuditRecord
 from hivemind.domain.entry import (
     Entry,
@@ -158,6 +159,17 @@ class Store(Protocol):
         reporters are left out (ADR 0067); a flag is a standing
         ``stale``/``wrong`` row, its age its ``updated_at``. Observation
         only: no ranking input. Both adapters must agree."""
+        ...
+
+    async def activity(self, since: datetime) -> Activity:
+        """Who wrote and who reported what (ADR 0080), for the admin
+        activity view: per (author, fleet) entry counts, per reporter
+        verdict counts, the verdicts received per author, and per UTC day
+        the writes (``created_at``) and verdicts (``updated_at``) from
+        ``since`` on (days with no activity have no row). ``recent`` is
+        ``>= since``. Verdicts of revoked reporters are left out
+        (ADR 0067). Observation only: no ranking input. Both adapters
+        must agree."""
         ...
 
     async def fleet_convergence(self, now: datetime) -> Convergence:

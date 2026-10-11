@@ -18,7 +18,7 @@ import uuid
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from hivemind.domain.access import (
     ACTIVATABLE,
@@ -35,6 +35,13 @@ from hivemind.domain.access import (
     UnknownAgent,
     Visibility,
     entry_is_visible,
+)
+from hivemind.domain.activity import (
+    Activity,
+    AuthorActivity,
+    DayActivity,
+    ReceivedFeedback,
+    ReporterActivity,
 )
 from hivemind.domain.audit import AuditEvent, AuditFilters, AuditRecord
 from hivemind.domain.entry import (
@@ -340,6 +347,77 @@ class MemoryStore:
                 if successor is not None:
                     confirmed[fb.user] = confirmed.get(fb.user, 0) + 1
             return [FlagCount(u, n, confirmed.get(u, 0)) for u, n in flags.items()]
+
+    async def activity(self, since: datetime) -> Activity:
+        """The same aggregates as ``PgStore`` (ADR 0080), in plain loops."""
+        with self._lock:
+            live = list(self._live_feedback().values())
+            entries = list(self._entries.values())
+            by_group: dict[tuple[str, str | None], list[Entry]] = {}
+            for e in entries:
+                by_group.setdefault((e.author, e.fleet_id), []).append(e)
+            authors = tuple(
+                AuthorActivity(
+                    author=author,
+                    fleet_id=fleet_id,
+                    entries=len(rows),
+                    active=sum(e.state is EntryState.ACTIVE for e in rows),
+                    recent=sum(e.created_at >= since for e in rows),
+                    last_write_at=max(e.created_at for e in rows),
+                )
+                for (author, fleet_id), rows in by_group.items()
+            )
+            by_reporter: dict[str, list[Feedback]] = {}
+            for fb in live:
+                by_reporter.setdefault(fb.user, []).append(fb)
+            now = self._clock()
+            reporters = tuple(
+                ReporterActivity(
+                    reporter=user,
+                    verdicts=len(rows),
+                    recent=sum((fb.updated_at or now) >= since for fb in rows),
+                    helpful=sum(fb.verdict is Verdict.HELPFUL for fb in rows),
+                    stale=sum(fb.verdict is Verdict.STALE for fb in rows),
+                    wrong=sum(fb.verdict is Verdict.WRONG for fb in rows),
+                    last_at=max(fb.updated_at or now for fb in rows),
+                )
+                for user, rows in by_reporter.items()
+            )
+            author_of = {e.id: e.author for e in entries}
+            got: dict[str, Counter[Verdict]] = {}
+            for fb in live:
+                if fb.entry_id in author_of:
+                    got.setdefault(author_of[fb.entry_id], Counter())[fb.verdict] += 1
+            received = tuple(
+                ReceivedFeedback(
+                    author=author,
+                    helpful=c[Verdict.HELPFUL],
+                    stale=c[Verdict.STALE],
+                    wrong=c[Verdict.WRONG],
+                )
+                for author, c in got.items()
+            )
+            per_day: dict[date, Counter[str]] = {}
+            for e in entries:
+                if e.created_at >= since:
+                    per_day.setdefault(e.created_at.astimezone(UTC).date(), Counter())[
+                        "writes"
+                    ] += 1
+            for fb in live:
+                at = fb.updated_at or now
+                if at >= since:
+                    per_day.setdefault(at.astimezone(UTC).date(), Counter())[fb.verdict.value] += 1
+            days = tuple(
+                DayActivity(
+                    day=day,
+                    writes=c["writes"],
+                    helpful=c["helpful"],
+                    stale=c["stale"],
+                    wrong=c["wrong"],
+                )
+                for day, c in sorted(per_day.items())
+            )
+            return Activity(authors=authors, reporters=reporters, received=received, days=days)
 
     async def fleet_health(self, now: datetime) -> FleetHealth:
         """The same aggregates as ``PgStore`` (ADR 0075), in plain loops."""
