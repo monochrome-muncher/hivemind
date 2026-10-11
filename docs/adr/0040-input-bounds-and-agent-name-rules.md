@@ -1,5 +1,7 @@
 # Input bounds, NUL rejection and agent-name rules
 
+> **Status note:** amended by [ADR 0045](0045-agent-names-are-unique-ignoring-case.md): agent names are unique ignoring case; the format rule is unchanged.
+
 ## Context
 
 A review of the REST and MCP surfaces found the same gap everywhere: the

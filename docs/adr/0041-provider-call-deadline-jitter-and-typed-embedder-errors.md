@@ -1,5 +1,7 @@
 # Provider calls: an overall deadline, jittered backoff, and typed embedder errors
 
+> **Status note:** decision 4 amended by [ADR 0048](0048-search-falls-back-to-keywords-when-the-embedder-is-down.md): a failed query embedding no longer fails a search, which falls back to the keyword stream and is flagged degraded.
+
 ADR 0014 bounded the embedder's retries (and ADR 0016 copied the pattern
 for the extractor), but left four gaps that the provider review found
 (PC-1, PC-2/SP-7/MCP-2, PC-5, PC-12):

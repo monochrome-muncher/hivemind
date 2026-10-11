@@ -10,7 +10,10 @@
 Tiers 1–3 are shipped: the retrieval eval harness, the fleet and trust
 model, and the production work (deployment, migrations, vector index,
 replicas, audit log, admin panel, agent plugin, the 2.0.0 security
-review, and the 2.1.0–2.3.0 retrieval and knowledge-sharing features).
+review, the 2.1.0–2.3.0 retrieval and knowledge-sharing features, and
+the 2.4.0–2.5.0 search threshold and feedback work). The hive-mind study's
+ranking, evidence and fleet-health items are built on main, unreleased,
+with every new ranking feature off by default (§3.15).
 Tier 4's measurement items are closed or deferred with their reasons.
 The SPEC §10 extensions (Tier 5) stay held until their triggers fire.
 
@@ -24,10 +27,10 @@ The SPEC §10 extensions (Tier 5) stay held until their triggers fire.
   names), to be measured with the eval harness on real long-form entries.
 - **Re-measure triggers** on the first real corpus: the recency floor's
   value (§4.6), the HNSW recall cost (§3.6, ADR 0025), and any `rrf_k`
-  change.
+  change. The off-by-default ranking settings (§3.15) are turned on only
+  after their measurement passes with the deployment's embedder.
 - **Parked ideas**: a `question` entry kind (wait for the empty-search
-  counters of ADR 0056 to show demand) and per-kind half-lives (built
-  off by default, ADR 0072; awaiting the real-embedder measurement). The legacy `pi-mcp-adapter` route in the Pi plugin is to be
+  counters of ADR 0056 to show demand). The legacy `pi-mcp-adapter` route in the Pi plugin is to be
   dropped once Pi's built-in MCP (0.99+) is the norm.
 - **The hive-mind study** ([docs/proposals/2026-10-10-hive-mind-ideas.md](docs/proposals/2026-10-10-hive-mind-ideas.md)):
   ideas for distillation, ranking evidence and sharing without
@@ -181,6 +184,20 @@ The keyword stream matches any term (ADR 0047), at most 16 on Postgres
 and batch reads (ADRs 0053, 0055); a `flagged` filter (ADR 0054);
 empty-search counters (ADR 0056); see-also links (ADR 0057); a pinned
 fleet briefing (ADR 0058).
+
+### 3.15 Feedback, ranking evidence and fleet health  *(2.4.0–2.5.0: ADRs 0061–0069, migration `0013`; unreleased on main: ADRs 0070–0078, migrations `0014`–`0015`)*
+A similarity threshold for the vector stream (ADR 0062, off by default).
+Feedback quality by consensus share and its guards (ADRs 0063–0067) and
+the rater flag metric (ADR 0068). From the hive-mind study
+([docs/proposals/2026-10-10-hive-mind-ideas.md](docs/proposals/2026-10-10-hive-mind-ideas.md)):
+one capped budget for social signals (ADR 0070); evidence on hits
+(`last_confirmed_at`, `contested`, `correction`, `supersedes`); write check
+mode and advisory warnings (ADR 0077); pin integrity (ADR 0076); fleet
+health and convergence metrics, admin-only (ADR 0075); and, off by default
+until measured, the confirmation clock (ADR 0071), per-kind recency
+(ADR 0072), the recency hint (ADR 0073) and version grouping (ADR 0074).
+Explore search is opt-in per search (ADR 0078). Results are in
+[docs/retrieval-experiments.md](docs/retrieval-experiments.md).
 
 ## Tier 4 — close the spec's open items (SPEC §11)
 

@@ -275,12 +275,12 @@ first-run bootstrap Job records itself as `ci-bootstrap`.
   tags: `git diff --stat v<old> v<new> -- src/hivemind/store/migrations/`.
   No output means no schema change. Even when there is one, there is no
   manual step: the entrypoint applies it. The current chain ends at
-  `0015`: the next release adds `0015` (an `explore` column on the
-  search counters, ADR 0078; additive, an older pod keeps working and just
-  does not count explore searches) and `0014` (pin audit, ADR 0076; widens the
-  audit-log CHECKs; rolling the image back after it without
-  `make rollback` breaks the audit view on `entry.pin` rows); 2.5.0 adds `0013` (indexes for the see-also
-  and agent-filter reads); 2.3.0 adds `0010` (search counters, ADR 0056),
+  `0015`. The next release (after 2.5.0) adds `0014` (pin audit, ADR 0076;
+  widens the audit-log CHECKs; rolling the image back after it without
+  `make rollback` breaks the audit view on `entry.pin` rows) and `0015` (an
+  `explore` column on the search counters, ADR 0078; additive, an older pod
+  keeps working and just does not count explore searches); 2.5.0 adds
+  `0013` (indexes for the see-also and agent-filter reads); 2.3.0 adds `0010` (search counters, ADR 0056),
   `0011` (see-also links, ADR 0057) and `0012` (pins, ADR 0058);
   2.1.0 adds `0009`
   (registration audit, ADR 0046); 2.0.0 adds `0007` (credential
