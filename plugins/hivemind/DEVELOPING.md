@@ -85,8 +85,10 @@ itself names no harness-specific paths, and a test enforces this.
 
 ## The Stop hook and the post-compaction line
 
-Two nudges that get knowledge written before it is lost, for Claude Code
-and Codex, which load the same `hooks/hooks.json`. The script counts both
+Two nudges that get knowledge written before it is lost: in Claude Code
+and Codex from `hooks/hooks.json`, in Pi and Oh My Pi from the extension
+(below). OpenCode, Hermes, Gemini CLI and DeepSeek Harness do not have
+them. The script counts both
 transcript formats: Claude Code's `"type": "tool_use"` records and Codex's
 `function_call`, `custom_tool_call` and `local_shell_call` items (checked
 with Codex 0.162.1 against a mock model: it blocks once, Codex continues
@@ -116,6 +118,22 @@ runs plugin hooks only after the user trusts them in `/hooks`.
 
   Any error, missing file or unparsable input fails open. Tests:
   `tests/unit/test_stop_hook.py`.
+- **Pi and Oh My Pi.** The extension (`extensions/hivemind.ts`) gives the
+  same two nudges with the same texts, under the same conditions (not
+  incognito, a key set, `HIVEMIND_STOP_MIN_TOOLS`), counting the calls
+  the model made in `tool_execution_start` (a call a script made for it,
+  with a `parentToolCallId`, is not counted) and noting a `hive_write` or
+  `hive_feedback` by any route (named tool, the adapter's `mcp` proxy, a
+  script's code, an Oh My Pi `xd://` route). Once per session (reset on
+  `session_start`), Pi's `agent_before_settle` appends the reminder as a
+  visible `custom_message` and asks for one more model request; Oh My
+  Pi's `session_stop` returns the Claude Code-style block. After
+  `session_compact` the next system-prompt section carries the
+  post-compaction sentence once. Checked live with Pi 1.1.0 and Oh My Pi
+  18.9.1 against a mock model: three shell calls get the reminder as the
+  next prompt, and a `hive_write` (Pi `mcp__hivemind__hive_write`, Oh My
+  Pi `xd://mcp__hivemind_hivemind_hive_write`) keeps it quiet. The
+  compaction sentence is tested only in `tests/unit/test_stop_hook.py`.
 
 ## Incognito
 

@@ -61,7 +61,10 @@ than as named tools; they are listed in your system prompt.
 ## Stay aware
 
 - **No hook needed.** The plugin's extension adds a Hivemind section to
-  the system prompt, which compaction never removes.
+  the system prompt, which compaction never removes. It also asks you
+  once, at the end of a long session that wrote nothing, to write and
+  rate before finishing, and after a compaction to write what you learned
+  before it.
 - **Instruction block:** `~/.omp/agent/AGENTS.md`.
 
 ## Update

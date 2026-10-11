@@ -99,7 +99,9 @@ other harnesses.
 ## Stay aware
 
 - **No hook needed.** The Pi package adds a Hivemind section to the system
-  prompt, which compaction never removes.
+  prompt, which compaction never removes. It also asks you once, at the
+  end of a long session that wrote nothing, to write and rate before
+  finishing, and after a compaction to write what you learned before it.
 - **Instruction block:** `~/.pi/agent/AGENTS.md`.
 - **Skills without the package:** copy both skill folders into
   `~/.pi/agent/skills/`.

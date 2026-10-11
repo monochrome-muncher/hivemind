@@ -2,6 +2,8 @@
 
 import json
 import os
+import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -192,3 +194,136 @@ def test_only_the_compact_source_gets_the_post_compaction_line(tmp_path: Path) -
 def test_incognito_compact_stays_incognito(tmp_path: Path) -> None:
     text = _start(tmp_path, '{"source":"compact"}', HIVEMIND_INCOGNITO="1")
     assert "incognito" in text and "compacted" not in text
+
+
+# -- Pi and Oh My Pi: the same two nudges from the extension ----------------------
+
+PI_EXTENSION = PLUGIN / "extensions" / "hivemind.ts"
+STOP_TEXT = re.search(r"'(\{\"decision\":\"block\".*\})'", STOP.read_text())
+COMPACT_LINE = re.search(r'extra="( Context was just compacted:[^"]*)"', START.read_text())
+
+_PI_SCRIPT = """
+const mod = await import(process.argv[1])
+const h = {}
+mod.default({ on: (name, fn) => { h[name] = fn } })
+const out = {}
+for (const step of JSON.parse(process.env.STEPS)) {
+  const [kind, arg] = step
+  if (kind === "call") h.tool_execution_start({ type: "tool_execution_start", ...arg })
+  if (kind === "settle") (out.settle ??= []).push(h.agent_before_settle({ outcome: "completed", entries: [], ...arg }) ?? null)
+  if (kind === "stop") (out.stop ??= []).push(h.session_stop({ stop_hook_active: false, ...arg }) ?? null)
+  if (kind === "start") h.session_start({ reason: "new" })
+  if (kind === "compact") h.session_compact({})
+  if (kind === "prompt") (out.prompt ??= []).push(h.before_agent_start({ systemPrompt: ["base"] }).systemPrompt[1])
+}
+console.log(JSON.stringify(out))
+"""
+
+
+def _pi(steps: list[object], **env: str) -> dict[str, list[object]]:
+    base = {k: v for k, v in os.environ.items() if not k.startswith("HIVEMIND_")}
+    out = subprocess.run(
+        ["node", "--input-type=module", "-e", _PI_SCRIPT, PI_EXTENSION.as_uri()],
+        env={**base, "HIVEMIND_API_KEY": "hm_key", "STEPS": json.dumps(steps), **env},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    result: dict[str, list[object]] = json.loads(out.stdout)
+    return result
+
+
+def _calls(n: int, name: str = "bash", **args: object) -> list[object]:
+    return [["call", {"toolName": name, "args": args}] for _ in range(n)]
+
+
+needs_node = pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+
+
+def test_the_extension_shares_the_hook_texts() -> None:
+    assert STOP_TEXT and COMPACT_LINE
+    reason = json.loads(STOP_TEXT.group(1))["reason"]
+    text = PI_EXTENSION.read_text()
+    assert f'"{reason}"' in text
+    assert f'"{COMPACT_LINE.group(1)}"' in text
+
+
+@needs_node
+def test_pi_continues_a_long_session_once_with_the_reminder() -> None:
+    reason = json.loads(STOP_TEXT.group(1))["reason"]  # type: ignore[union-attr]
+    r = _pi([*_calls(20), ["settle", {}], ["settle", {}]])
+    first, second = r["settle"]
+    assert first == {
+        "entries": [
+            {
+                "type": "custom_message",
+                "customType": "hivemind-reminder",
+                "content": reason,
+                "display": True,
+            }
+        ],
+        "continue": True,
+    }
+    assert second is None
+
+
+@needs_node
+def test_oh_my_pi_blocks_a_long_session_once() -> None:
+    r = _pi([*_calls(20), ["stop", {}], ["stop", {}]])
+    first, second = r["stop"]
+    assert first["decision"] == "block"  # type: ignore[index]
+    assert second is None
+    assert _pi([*_calls(20), ["stop", {"stop_hook_active": True}]])["stop"] == [None]
+
+
+@needs_node
+@pytest.mark.parametrize(
+    "call",
+    [
+        {"toolName": "mcp__hivemind__hive_write", "args": {}},
+        {"toolName": "hivemind_hive_feedback", "args": {}},
+        {"toolName": "mcp", "args": {"tool": "hivemind_hive_write", "args": {}}},
+        {"toolName": "mcpScript", "args": {"code": "await tools.hivemind_hive_write({})"}},
+        {"toolName": "write", "args": {"path": "xd://mcp__hivemind_hive_feedback/"}},
+        {"toolName": "hive_write", "args": {}, "parentToolCallId": "c1"},
+    ],
+)
+def test_a_session_that_wrote_or_rated_is_not_reminded(call: dict[str, object]) -> None:
+    r = _pi([*_calls(25), ["call", call], ["settle", {}], ["stop", {}]])
+    assert r == {"settle": [None], "stop": [None]}
+
+
+@needs_node
+def test_reading_or_a_short_session_is_not_enough() -> None:
+    r = _pi([*_calls(19), *_calls(1, "mcp__hivemind__hive_search"), ["settle", {}]])
+    assert r["settle"][0] is not None  # a search is a call, not a contribution
+    assert _pi([*_calls(19), ["settle", {}]]) == {"settle": [None]}
+    # Calls a script made for the model are not counted as the model's.
+    nested = [["call", {"toolName": "bash", "args": {}, "parentToolCallId": "c"}]] * 30
+    assert _pi([*nested, ["settle", {}]]) == {"settle": [None]}
+
+
+@needs_node
+def test_the_pi_reminder_is_off_when_aborted_incognito_or_unconfigured() -> None:
+    steps = [*_calls(25), ["settle", {}]]
+    assert _pi([*_calls(25), ["settle", {"outcome": "aborted"}]]) == {"settle": [None]}
+    assert _pi(steps, HIVEMIND_INCOGNITO="1") == {"settle": [None]}
+    assert _pi(steps, HIVEMIND_API_KEY="") == {"settle": [None]}
+    assert _pi([*_calls(3), ["settle", {}]], HIVEMIND_STOP_MIN_TOOLS="3")["settle"][0] is not None
+
+
+@needs_node
+def test_a_new_session_can_be_reminded_again() -> None:
+    r = _pi([*_calls(20), ["settle", {}], ["start", None], *_calls(20), ["settle", {}]])
+    assert all(s is not None for s in r["settle"])
+
+
+@needs_node
+def test_the_section_after_a_compaction_asks_once_to_write() -> None:
+    line = COMPACT_LINE.group(1)  # type: ignore[union-attr]
+    r = _pi([["prompt", None], ["compact", None], ["prompt", None], ["prompt", None]])
+    before, after, later = r["prompt"]
+    assert isinstance(after, str) and after.endswith(line)
+    assert line not in str(before) and line not in str(later)
+    incognito = _pi([["compact", None], ["prompt", None]], HIVEMIND_INCOGNITO="1")
+    assert line not in str(incognito["prompt"][0])
