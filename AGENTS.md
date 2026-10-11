@@ -32,7 +32,7 @@ The dev environment is `uv`-managed (Python 3.14); Postgres (with pgvector) runs
 | Run the MCP server (stdio) | `make mcp` (or `uv run hivemind-mcp`) |
 | Run the Postgres-backed MCP runner (per-agent, stdio; ADR 0009) | `make mcp-pg` (or `uv run hivemind-mcp-pg`) |
 | Run the hostable streamable-HTTP MCP runner (detached docker service, host port 8088; ADR 0010) | `make mcp-http` (or `docker compose up -d mcp-http`) |
-| Stop the mcp-http docker service / run it as a local process | `make mcp-http-down` / `make mcp-http-dev` |
+| Stop the mcp-http docker service / run it as a local process (also on 8088) | `make mcp-http-down` / `make mcp-http-dev` |
 | Stop Postgres / wipe its data | `make pg-down` / `make pg-reset` |
 
 Environment: the service reads `HIVEMIND_*` env vars (see `src/hivemind/config.py`; `config/.env.example` documents them). A new variable must be a `Settings` field or be listed in `_ALLOWED_EXTRA_ENV_VARS`: unknown `HIVEMIND_*` names warn at startup and fail under `HIVEMIND_STRICT_ENV=true`, which the dev Makefile sets (ADRs 0024, 0032). The dev default is `HIVEMIND_DATABASE_URL=postgresql://hivemind:hivemind@localhost:5432/hivemind`. Embedding knobs: `HIVEMIND_EMBEDDING_ENDPOINT` / `_API_KEY` / `_MODEL` / `_DIM` (ADR 0005).
