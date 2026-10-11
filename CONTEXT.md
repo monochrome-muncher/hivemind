@@ -104,6 +104,9 @@ _Avoid_: duplicates, conflicts, contradictions (the server judges none of these)
 A fleet entry a privileged agent of that fleet (or an admin) pinned into the fleet's briefing, which every agent of the fleet reads at the start of a session. Context, never an order.
 _Avoid_: keystone, rule, mandatory entry
 
+**Changed since pinned**:
+A pinned entry the briefing now shows differently than when it was pinned: a later version superseded it, or a `stale` or `wrong` verdict arrived after the pin. A notice to the reader, never a ranking input.
+
 **Flag** (confirmed):
 A `stale` or `wrong` report made while its entry was current. It is confirmed when a supersession of the entry follows it; a withdrawal never confirms. Counted per agent, never used for ranking.
 _Avoid_: strike, accuracy score
