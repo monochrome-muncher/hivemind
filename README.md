@@ -97,7 +97,10 @@ through creating your first agent.
 ### What you need
 
 - Linux or macOS with **Docker** installed and running. Check with
-  `docker info`; it should print details rather than an error.
+  `docker info`; it should print details rather than an error. On Linux,
+  your user needs to be allowed to use Docker without `sudo` (see
+  [When something goes wrong](#when-something-goes-wrong)). None of the
+  steps below need `sudo`.
 - **[uv](https://docs.astral.sh/uv/)** (the Python package manager this
   project uses) and **make**. You do not need to install Python yourself,
   uv fetches the right version.
@@ -107,6 +110,10 @@ through creating your first agent.
   use a hosted provider, see
   [Use another embedding model](#use-another-embedding-model).
 - Free ports 5432, 8000, 8001, 8080 and 8088.
+
+Some commands below contain a value in angle brackets, like
+`<fleet-id>`. Replace the whole thing, brackets included, with your own
+value. Type everything else exactly as shown.
 
 ### 1. Start the services
 
@@ -172,6 +179,12 @@ Set `HIVEMIND_PORT=8088` for `make mcp-http-dev`. Without it, the MCP
 server tries to use port 8000, which the API already has.
 
 ### 5. Connect an agent
+
+The addresses in this walkthrough (`localhost`) only work on the
+computer you are running Hivemind on, so start with an agent on that same
+computer. Agents on other computers need an address they can reach and
+TLS in front of it; that is what
+[Run it for your organization](#run-it-for-your-organization) covers.
 
 Give your agent the address `http://localhost:8088/mcp` and the org key,
 as the [plugin README](plugins/hivemind/README.md) describes. Then ask it
@@ -246,12 +259,15 @@ start with `HIVEMIND_`. [`config/.env.example`](config/.env.example)
 lists every one with its default and a short explanation. The ones you
 will meet first:
 
-| Variable | What it sets |
-|---|---|
-| `HIVEMIND_DATABASE_URL` | The Postgres connection string |
-| `HIVEMIND_EMBEDDING_ENDPOINT`, `HIVEMIND_EMBEDDING_MODEL`, `HIVEMIND_EMBEDDING_API_KEY` | The embedding service |
-| `HIVEMIND_EMBEDDING_DIM` | The vector length; fixed when the database is first set up (default 1024, the local setup uses 512) |
-| `HIVEMIND_EXTRACTOR_ENDPOINT`, `HIVEMIND_EXTRACTOR_MODEL`, `HIVEMIND_EXTRACTOR_API_KEY` | An optional chat model that tags entries with the names of people, systems and so on. Leave empty to turn it off. |
+- `HIVEMIND_DATABASE_URL`: the Postgres connection string.
+- `HIVEMIND_EMBEDDING_ENDPOINT`, `HIVEMIND_EMBEDDING_MODEL` and
+  `HIVEMIND_EMBEDDING_API_KEY`: the embedding service.
+- `HIVEMIND_EMBEDDING_DIM`: the vector length. It is fixed when the
+  database is first set up. The default is 1024; the local setup uses 512.
+- `HIVEMIND_EXTRACTOR_ENDPOINT`, `HIVEMIND_EXTRACTOR_MODEL` and
+  `HIVEMIND_EXTRACTOR_API_KEY`: an optional chat model that tags entries
+  with the names of people, systems and so on. Leave them empty to turn
+  it off.
 
 There are two ways to set them:
 
@@ -300,28 +316,39 @@ remove a setting whose meaning changed.
 
 ## When something goes wrong
 
-| What you see | What it means |
-|---|---|
-| `embedding_unavailable` when saving, or searches that only match exact words | The embedding service is down or still loading. Check `docker compose logs vllm`, or your provider settings. |
-| `missing_api_key` from the REST API | The REST API wants the key in an `X-API-Key` header, not `Authorization`. |
-| `address already in use` from `make mcp-http-dev` | It defaults to port 8000, which `make api` uses. Run `HIVEMIND_PORT=8088 make mcp-http-dev`. |
-| A setting in `.env.local` has no effect | The `make` commands override it. Export the variable or put it on the `make` command line instead. |
-| `make migrate` complains about the vector dimension | The database was set up with a different `HIVEMIND_EMBEDDING_DIM`. Use the same value, or run `make pg-reset` (deletes all data). |
-| `Cannot connect to the Docker daemon` | Docker is installed but not running. Start Docker Desktop or the Docker service. |
+- **Saving an entry fails with `embedding_unavailable`, or searches only
+  match exact words.** The embedding service is down or still loading.
+  Check `docker compose logs vllm`, or your provider settings.
+- **The REST API answers `missing_api_key`.** It wants the key in an
+  `X-API-Key` header, not in `Authorization`.
+- **`make mcp-http-dev` fails with `address already in use`.** It uses
+  port 8000 unless told otherwise, and `make api` already has it. Run
+  `HIVEMIND_PORT=8088 make mcp-http-dev`.
+- **A setting in `.env.local` has no effect.** The `make` commands
+  override it. Export the variable, or put it on the `make` command line.
+- **`make migrate` complains about the vector dimension.** The database
+  was set up with a different `HIVEMIND_EMBEDDING_DIM`. Use the same
+  value, or run `make pg-reset`, which deletes all data.
+- **`Cannot connect to the Docker daemon`.** Docker is installed but not
+  running. Start Docker Desktop or the Docker service.
+- **`permission denied` when Docker starts (Linux).** Your user is not
+  allowed to use Docker. Add yourself to the `docker` group with
+  `sudo usermod -aG docker $USER`, then log out and back in.
 
 ## Documentation
 
-| Document | Read it for |
-|---|---|
-| [plugins/hivemind/README.md](plugins/hivemind/README.md) | Connecting your agent |
-| [DEPLOY.md](DEPLOY.md) | Running Hivemind on Kubernetes |
-| [docs/ops-runbook.md](docs/ops-runbook.md) | Running it on one machine, backups, monitoring |
-| [plugins/hivemind/CHANGELOG.md](plugins/hivemind/CHANGELOG.md) | What changed in each release |
-| [SPEC.md](SPEC.md) | Exactly what the system does |
-| [CONTEXT.md](CONTEXT.md) | What each term means |
-| [docs/adr/](docs/adr/README.md) | Why each design decision was made |
-| [ROADMAP.md](ROADMAP.md) | What is planned and what is on hold |
-| [AGENTS.md](AGENTS.md) | Working on the code: commands, layout, rules |
+- [plugins/hivemind/README.md](plugins/hivemind/README.md): connecting
+  your agent.
+- [DEPLOY.md](DEPLOY.md): running Hivemind on Kubernetes.
+- [docs/ops-runbook.md](docs/ops-runbook.md): running it on one machine,
+  backups and monitoring.
+- [plugins/hivemind/CHANGELOG.md](plugins/hivemind/CHANGELOG.md): what
+  changed in each release.
+- [SPEC.md](SPEC.md): exactly what the system does.
+- [CONTEXT.md](CONTEXT.md): what each term means.
+- [docs/adr/](docs/adr/README.md): why each design decision was made.
+- [ROADMAP.md](ROADMAP.md): what is planned and what is on hold.
+- [AGENTS.md](AGENTS.md): working on the code (commands, layout, rules).
 
 ## Working on Hivemind
 

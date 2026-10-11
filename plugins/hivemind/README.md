@@ -54,8 +54,12 @@ normally chat with it. Each block says which.
 The examples install from GitHub,
 `https://github.com/monochrome-muncher/hivemind`. If your organization
 keeps its own copy of the repository (on GitLab, say), use that address
-instead. Where a command says `v<version>`, put the release you want, such
-as `v2.5.0`; [CHANGELOG.md](CHANGELOG.md) lists them.
+instead.
+
+Some commands contain a value in angle brackets, like `<name>`. Replace
+the whole thing, brackets included, with your own value. Where a command
+says `v<version>`, that means a release such as `v2.5.0`;
+[CHANGELOG.md](CHANGELOG.md) lists them.
 
 ## 1. Install the plugin
 
@@ -366,16 +370,22 @@ reminders:
   simply finishes.
 
 Neither reminder appears in an incognito session or when
-`HIVEMIND_API_KEY` is not set. How they work differs a little between
-agents:
+`HIVEMIND_API_KEY` is not set. What each agent gets:
 
-| Agent | Notes |
-|---|---|
-| Claude Code, Codex | Both reminders. Turn off the end-of-session one by disabling the plugin's `Stop` hook in `/hooks`. Codex runs them only after you trust the plugin's hooks. |
-| Pi, Oh My Pi, OpenCode | Both reminders. Set `HIVEMIND_STOP_MIN_TOOLS` to a very high number to turn off the end-of-session one. OpenCode sends it as a new prompt, so `opencode run`, which exits as soon as the agent goes quiet, never gets it. |
-| DeepSeek Harness | Only the end-of-session reminder. DSH already keeps Hivemind's instructions through a compaction. |
-| Gemini CLI | Only the end-of-session reminder, from an `AfterAgent` hook (turn it off with `gemini hooks`). Gemini runs no startup hook after compressing its context. |
-| Hermes | Neither. Hermes has no hook that can hold the end of a session. |
+- **Claude Code and Codex**: both reminders. To turn off the
+  end-of-session one, disable the plugin's `Stop` hook in `/hooks`. Codex
+  runs them only after you trust the plugin's hooks.
+- **Pi, Oh My Pi and OpenCode**: both reminders. To turn off the
+  end-of-session one, set `HIVEMIND_STOP_MIN_TOOLS` to a very high
+  number. OpenCode sends it as a new prompt, so `opencode run`, which
+  exits as soon as the agent goes quiet, never gets it.
+- **DeepSeek Harness**: only the end-of-session reminder. DSH already
+  keeps Hivemind's instructions through a compaction.
+- **Gemini CLI**: only the end-of-session reminder, from an `AfterAgent`
+  hook (turn it off with `gemini hooks`). Gemini runs no startup hook
+  after compressing its context.
+- **Hermes**: neither. Hermes has no hook that can hold the end of a
+  session.
 
 ## Incognito sessions
 
@@ -383,9 +393,10 @@ An incognito session has Hivemind **switched off completely**. The agent
 doesn't read from it or write to it, and the server never learns the
 session happened.
 
-To start one, use the `hivemind-incognito` launcher in front of the
-agent's usual command. The launcher lives in a copy of this repository
-(`git clone` it if you installed the plugin another way):
+To start one, put the `hivemind-incognito` launcher in front of the
+agent's usual command. The launcher is a file in this repository, so you
+need a copy of it (`git clone` it if you installed the plugin another
+way):
 
 ```sh
 /path/to/hivemind/plugins/hivemind/bin/hivemind-incognito claude
@@ -398,12 +409,20 @@ or add an alias such as `alias claude-incognito='hivemind-incognito claude'`.
 
 How well it works depends on the agent:
 
-| Agent | With the launcher |
-|---|---|
-| Claude Code, DeepSeek Harness, Gemini CLI (installed as an extension), Pi, Oh My Pi, OpenCode | The Hivemind tools aren't loaded at all. Nothing to set up. (Pi with pi-mcp-adapter needs `python3`, and that session also goes without the project's own MCP servers.) |
-| Codex | The tools aren't loaded, as long as the connection is in `~/.codex/config.toml` as described above. |
-| Hermes | The tools aren't loaded once you add `enabled: ${HIVEMIND_ENABLED}` to the `hivemind` entry in `~/.hermes/config.yaml`. Don't set `HIVEMIND_ENABLED` in `~/.hermes/.env`: that file overrides the launcher. |
-| Gemini CLI set up by hand, any other agent | Incognito **by restraint**: the tools stay loaded, and the agent is told not to use them. |
+- **Claude Code, DeepSeek Harness, Gemini CLI (installed as an
+  extension), Pi, Oh My Pi and OpenCode**: the Hivemind tools aren't
+  loaded at all, and there is nothing to set up. Pi with pi-mcp-adapter
+  needs `python3`, and that session also goes without the project's own
+  MCP servers.
+- **Codex**: the tools aren't loaded, as long as the connection is in
+  `~/.codex/config.toml` as described above.
+- **Hermes**: the tools aren't loaded once you add
+  `enabled: ${HIVEMIND_ENABLED}` to the `hivemind` entry in
+  `~/.hermes/config.yaml`. Don't set `HIVEMIND_ENABLED` in
+  `~/.hermes/.env`, because that file overrides the launcher.
+- **Gemini CLI set up by hand, and any other agent**: incognito **by
+  restraint**. The tools stay loaded, and the agent is told not to use
+  them.
 
 Without the launcher, you can set `HIVEMIND_INCOGNITO=1` yourself before
 starting the agent, or ask the agent mid-session to stop using Hivemind.
@@ -414,47 +433,68 @@ agent.
 
 ## Updating
 
-Hivemind's guidance for agents comes from three places, and each one
-updates differently:
+Update the plugin with the commands below, then **start a new session**.
+A session that is already running keeps the instructions it loaded at
+the start. [CHANGELOG.md](CHANGELOG.md) says what changed in each
+release, so you can tell whether an update matters to you.
 
-| What | Comes from | How it updates |
-|---|---|---|
-| The tool descriptions, the server's instructions, `hive_whoami` | The Hivemind server | By itself, when the server is upgraded |
-| The two skills, the startup hook, the Hermes and Pi system-prompt section | This plugin | When you update the plugin (below) and start a new session |
-| Copies in your own files: copied skills, the `<!-- hivemind:begin -->` block, a hook you installed by hand | You | Never by themselves. Copy them again, or ask the agent to run the "Update" step of the setup |
+Two things don't update with the plugin. The server's own part (the tool
+descriptions and what `hive_whoami` says) updates when your admin
+upgrades the server. Anything copied into your own files, such as the
+`<!-- hivemind:begin -->` block or skills you copied by hand, never
+updates by itself: ask the agent to "update the Hivemind setup", or copy
+them again.
 
-**Start a new session after any update.** A session that is already
-running keeps the skill text it loaded at the start.
-[CHANGELOG.md](CHANGELOG.md) says what changed in each release, so you
-can tell whether an update matters to you.
+All of these go in a terminal:
 
-| Agent | How to update the plugin |
-|---|---|
-| Claude Code | In a terminal: `claude plugin marketplace update hivemind`, then `claude plugin update hivemind@hivemind`, then restart Claude Code. Updating the marketplace alone only refreshes the list of plugins. |
-| Codex | `codex plugin marketplace upgrade hivemind`, then install it again with `codex plugin add hivemind@hivemind` (Codex runs a cached copy). `codex plugin list --marketplace hivemind` shows the version. |
-| DeepSeek Harness | `dsh plugin --profile <name> update hivemind-agent-plugin`, then restart `dsh`. If you added it with `#v<version>`, run `add` again with the new version instead. From a local copy: `git pull` in it. If you installed it before 2.0.1 under the name `hivemind-dsh-plugin`, remove it under that name and add it again. |
-| Gemini CLI | `gemini extensions update hivemind`. If you installed it with `--ref`, uninstall it and install it again with the new ref. Then refresh the block in `~/.gemini/GEMINI.md` (the setup's "Update" step). Set up by hand before the extension existed? The setup skill's Gemini notes explain how to switch. |
-| Hermes | `hermes plugins update hivemind`. If you installed a fixed ref: `hermes plugins install <source> --force --ref <new-ref>`. |
-| OpenCode | Change the version in the `plugin` entry and restart. An entry without a version never updates: add one, or delete the cached copy under `~/.cache/opencode/` and restart. |
-| Pi | `pi update --extensions`. If you installed a fixed version, install again with the new one. From a local copy: `git pull` in it. |
-| Oh My Pi | `omp plugin marketplace update hivemind`, then `omp plugin upgrade` (or `omp plugin install hivemind@hivemind --force`). |
-| Any other agent | Copy both `skills/` folders over your old copies. |
+- **Claude Code**: `claude plugin marketplace update hivemind`, then
+  `claude plugin update hivemind@hivemind`, then restart Claude Code.
+  Updating the marketplace alone only refreshes the list of plugins.
+- **Codex**: `codex plugin marketplace upgrade hivemind`, then install it
+  again with `codex plugin add hivemind@hivemind` (Codex runs a cached
+  copy). `codex plugin list --marketplace hivemind` shows the version.
+- **DeepSeek Harness**:
+  `dsh plugin --profile <name> update hivemind-agent-plugin`, then
+  restart `dsh`. If you added it with `#v<version>`, run `add` again with
+  the new version instead. From a local copy, run `git pull` in it. If
+  you installed it before 2.0.1, when it was called
+  `hivemind-dsh-plugin`, remove it under that name and add it again.
+- **Gemini CLI**: `gemini extensions update hivemind`. If you installed it
+  with `--ref`, uninstall it and install it again with the new ref. Then
+  ask the agent to update the Hivemind setup, which refreshes the block in
+  `~/.gemini/GEMINI.md`. If you set Gemini up by hand before the extension
+  existed, the setup skill's Gemini notes explain how to switch.
+- **Hermes**: `hermes plugins update hivemind`. If you installed a fixed
+  ref: `hermes plugins install <source> --force --ref <new-ref>`.
+- **OpenCode**: change the version in the `plugin` entry and restart. An
+  entry without a version never updates: add one, or delete the cached
+  copy under `~/.cache/opencode/` and restart.
+- **Pi**: `pi update --extensions`. If you installed a fixed version,
+  install again with the new one. From a local copy, run `git pull` in it.
+- **Oh My Pi**: `omp plugin marketplace update hivemind`, then
+  `omp plugin upgrade` (or `omp plugin install hivemind@hivemind --force`).
+- **Any other agent**: copy both `skills/` folders over your old copies.
 
 ## Removing
 
-First uninstall the plugin:
+First uninstall the plugin, in a terminal:
 
-| Agent | How to uninstall |
-|---|---|
-| Claude Code | `claude plugin uninstall hivemind@hivemind` |
-| Codex | `codex plugin remove hivemind@hivemind`, then delete the `mcp_servers.hivemind` section from `~/.codex/config.toml` |
-| DeepSeek Harness | `dsh plugin --profile <name> remove hivemind-agent-plugin` (or `hivemind-dsh-plugin` if installed before 2.0.1) |
-| Gemini CLI | `gemini extensions uninstall hivemind`. Set up by hand: delete the two skill folders from `~/.gemini/skills/`, and `mcpServers.hivemind` and the Hivemind hooks from `~/.gemini/settings.json` |
-| Hermes | `hermes plugins remove hivemind`, then delete the `hivemind` entry from `~/.hermes/config.yaml` |
-| OpenCode | Remove the entry from the `plugin` list |
-| Pi | `pi remove <source>`, with the same source you installed from |
-| Oh My Pi | `omp plugin uninstall hivemind@hivemind` |
-| Any other agent | Delete the two skill folders you copied |
+- **Claude Code**: `claude plugin uninstall hivemind@hivemind`
+- **Codex**: `codex plugin remove hivemind@hivemind`, then delete the
+  `mcp_servers.hivemind` section from `~/.codex/config.toml`.
+- **DeepSeek Harness**:
+  `dsh plugin --profile <name> remove hivemind-agent-plugin` (or
+  `hivemind-dsh-plugin` if you installed it before 2.0.1).
+- **Gemini CLI**: `gemini extensions uninstall hivemind`. If you set it up
+  by hand, delete the two skill folders from `~/.gemini/skills/`, and
+  `mcpServers.hivemind` and the Hivemind hooks from
+  `~/.gemini/settings.json`.
+- **Hermes**: `hermes plugins remove hivemind`, then delete the
+  `hivemind` entry from `~/.hermes/config.yaml`.
+- **OpenCode**: remove the entry from the `plugin` list.
+- **Pi**: `pi remove <source>`, with the same source you installed from.
+- **Oh My Pi**: `omp plugin uninstall hivemind@hivemind`
+- **Any other agent**: delete the two skill folders you copied.
 
 Then delete the block between `<!-- hivemind:begin -->` and
 `<!-- hivemind:end -->` from the instructions file the setup added it to.
