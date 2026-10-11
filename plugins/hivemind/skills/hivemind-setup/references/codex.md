@@ -60,15 +60,18 @@ apply.)
 ## Stay aware
 
 - **Instruction block:** `~/.codex/AGENTS.md`.
-- **Startup hook:** the hivemind plugin already has it. **Version:**
-  Codex hooks are on by default from Codex 0.145 (reported; UNCONFIRMED
-  against OpenAI's docs); on an older Codex the hook does nothing unless
-  `config.toml` has `[features]` `codex_hooks = true`. Whether Codex
-  defines `${CLAUDE_PLUGIN_ROOT}` for plugin hooks is also UNCONFIRMED, and
-  a bare `codex` that resumes the previous thread is reported to skip
-  `SessionStart`. So check: at the start of a session you should see a
-  `HIVEMIND:` line; if you do not, the hook did not run, and the
-  instruction block is your only reminder. Without the plugin, put this in
+- **Startup and stop hooks:** the hivemind plugin has both (the stop
+  hook asks once, at the end of a long session that wrote nothing, to
+  write and rate before finishing). Codex runs a plugin's hooks only once
+  the user has **trusted them in `/hooks`** (until then they are listed as
+  untrusted and skipped, in `codex exec` too): tell the user to do that
+  after installing or updating the plugin. Checked with Codex 0.162.1,
+  which expands `${CLAUDE_PLUGIN_ROOT}` in plugin hooks; on a Codex older
+  than 0.145 hooks also need `[features]` `codex_hooks = true` in
+  `config.toml`. A bare `codex` that resumes the previous thread is
+  reported to skip `SessionStart`. So check: at the start of a session you
+  should see a `HIVEMIND:` line; if you do not, the hook did not run, and
+  the instruction block is your only reminder. Without the plugin, put this in
   `~/.codex/hooks.json`, with the absolute path of
   `scripts/hivemind-session-start.sh` from the hivemind-setup skill's
   folder:

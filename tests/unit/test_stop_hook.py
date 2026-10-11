@@ -1,4 +1,4 @@
-"""The Claude Code Stop hook and the post-compaction line (report §7 row 10)."""
+"""The Claude Code and Codex Stop hook and the post-compaction line (report §7 row 10)."""
 
 import json
 import os
@@ -67,6 +67,41 @@ def test_a_substantial_session_is_blocked_once_with_a_reason(tmp_path: Path) -> 
     assert (again.returncode, again.stdout) == (0, "")
     other = _stop(tmp_path, t, session_id="s2")
     assert json.loads(other.stdout)["decision"] == "block"
+
+
+def _codex_transcript(tmp_path: Path, calls: int, *mcp_names: str) -> Path:
+    """A Codex rollout as Codex 0.162 writes it: each call a compact
+    `response_item` of type `function_call` with its output in a separate
+    `function_call_output` item; an MCP call carries the server as
+    `namespace`."""
+    path = tmp_path / "rollout.jsonl"
+    items: list[dict[str, object]] = []
+    for i in range(calls):
+        items.append({"type": "function_call", "name": "exec_command", "call_id": f"c{i}"})
+        items.append({"type": "function_call_output", "call_id": f"c{i}", "output": "ok"})
+    for name in mcp_names:
+        items.append({"type": "function_call", "name": name, "namespace": "mcp__hivemind"})
+    lines = [
+        json.dumps({"type": "response_item", "payload": item}, separators=(",", ":"))
+        for item in items
+    ]
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
+def test_a_substantial_codex_session_is_blocked(tmp_path: Path) -> None:
+    out = _stop(tmp_path, _codex_transcript(tmp_path, 25))
+    assert json.loads(out.stdout)["decision"] == "block"
+
+
+def test_codex_call_outputs_are_not_counted_as_calls(tmp_path: Path) -> None:
+    out = _stop(tmp_path, _codex_transcript(tmp_path, 15))
+    assert (out.returncode, out.stdout) == (0, "")
+
+
+def test_a_codex_session_that_already_wrote_is_not_blocked(tmp_path: Path) -> None:
+    out = _stop(tmp_path, _codex_transcript(tmp_path, 25, "hive_write"))
+    assert (out.returncode, out.stdout) == (0, "")
 
 
 def test_a_short_session_is_not_blocked(tmp_path: Path) -> None:
