@@ -95,8 +95,7 @@ duplicated one):
 | Is wrong, and you may not supersede it | Flag it `wrong` naming the right id; keep yours in `self`. |
 | Covers the same system, another point | Write, with `see_also` to it. |
 
-You may supersede your own `self` entries and home-fleet entries, only
-the current head of a chain (on `supersede_denied`, `hive_get` with
+Supersede only the current head of a chain (on `supersede_denied`, `hive_get` with
 `include_history` and target the current version).
 
 A good entry:
