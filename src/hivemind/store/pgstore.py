@@ -52,7 +52,14 @@ from hivemind.domain.entry import (
     SourceType,
     UsageCount,
 )
-from hivemind.domain.feedback import Feedback, FlagCount, Verdict
+from hivemind.domain.feedback import (
+    NO_SIGNALS,
+    Feedback,
+    FeedbackSignals,
+    FlagCount,
+    Verdict,
+    last_confirmed,
+)
 from hivemind.domain.pin import Pin
 from hivemind.ports import SupersedeConflict
 from hivemind.store.pool import PoolTimeouts, make_pool
@@ -307,6 +314,23 @@ SELECT
     COUNT(*) FILTER (WHERE verdict = 'helpful') AS helpful,
     COUNT(*) FILTER (WHERE verdict = 'stale') AS stale,
     COUNT(*) FILTER (WHERE verdict = 'wrong') AS wrong
+FROM feedbacks f
+WHERE entry_id = ANY($1) AND {_REPORTER_NOT_REVOKED}
+GROUP BY entry_id
+"""
+
+# BATCH_FEEDBACK plus the two newest dates "last confirmed" is made of
+# (SPEC §4.2): the newest helpful row with a note, the newest flag.
+BATCH_FEEDBACK_SIGNALS = f"""
+SELECT
+    entry_id,
+    COUNT(*) FILTER (WHERE verdict = 'helpful') AS helpful,
+    COUNT(*) FILTER (WHERE verdict = 'stale') AS stale,
+    COUNT(*) FILTER (WHERE verdict = 'wrong') AS wrong,
+    MAX(updated_at) FILTER (
+        WHERE verdict = 'helpful' AND coalesce(note, '') ~ '\\S'
+    ) AS newest_noted_helpful_at,
+    MAX(updated_at) FILTER (WHERE verdict IN ('stale', 'wrong')) AS newest_flag_at
 FROM feedbacks f
 WHERE entry_id = ANY($1) AND {_REPORTER_NOT_REVOKED}
 GROUP BY entry_id
@@ -914,6 +938,24 @@ class PgStore:
         for r in rows:
             counts[str(r["entry_id"])] = (r["helpful"], r["stale"], r["wrong"])
         return counts
+
+    async def feedback_signals(self, entry_ids: list[str]) -> dict[str, FeedbackSignals]:
+        """Batched counts and last-confirmed dates; every valid requested ID
+        is present."""
+        ids = _valid_uuids(entry_ids)
+        if not ids:
+            return {}
+        async with self._connection() as conn:
+            rows = await conn.fetch(BATCH_FEEDBACK_SIGNALS, ids)
+        signals = dict.fromkeys(ids, NO_SIGNALS)
+        for r in rows:
+            signals[str(r["entry_id"])] = FeedbackSignals(
+                r["helpful"],
+                r["stale"],
+                r["wrong"],
+                last_confirmed(r["newest_noted_helpful_at"], r["newest_flag_at"]),
+            )
+        return signals
 
     async def list_feedback(self, entry_id: str, limit: int) -> list[Feedback]:
         """An entry's newest feedback rows (ADR 0051). The primary key

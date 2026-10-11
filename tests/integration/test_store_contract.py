@@ -34,7 +34,7 @@ from hivemind.domain.access import (
 )
 from hivemind.domain.audit import ActorKind, AuditAction, AuditEvent, AuditFilters
 from hivemind.domain.entry import Entry, EntryDraft, EntryFilters, EntryState, Kind
-from hivemind.domain.feedback import Feedback, Verdict
+from hivemind.domain.feedback import Feedback, FeedbackSignals, Verdict
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Store, SupersedeConflict
 from hivemind.store import PgStore
@@ -558,6 +558,96 @@ async def test_feedback_lists_informative_reports_before_bare_helpful_ones(
 async def test_quality_counts_cover_every_well_formed_id(adapter: Adapter) -> None:
     counts = await adapter.store.quality_counts([NO_SUCH_ID, "not-a-uuid"])
     assert counts == {NO_SUCH_ID: (0, 0, 0)}
+
+
+# -- last confirmed (SPEC §4.2) --------------------------------------------------------
+
+
+def _min(n: int) -> datetime:
+    return T0 + timedelta(minutes=n)
+
+
+async def _confirmed(adapter: Adapter, entry: Entry) -> datetime | None:
+    return (await adapter.store.feedback_signals([entry.id]))[entry.id].last_confirmed_at
+
+
+async def test_last_confirmed_needs_a_note(adapter: Adapter) -> None:
+    entry = await write(adapter, "checked")
+    store = adapter.store
+    await store.record_feedback(Feedback(entry.id, "u1", "a", Verdict.HELPFUL, None, _min(1)))
+    await store.record_feedback(Feedback(entry.id, "u2", "a", Verdict.HELPFUL, "  \n\t ", _min(2)))
+    await store.record_feedback(Feedback(entry.id, "u3", "a", Verdict.HELPFUL, "", _min(3)))
+    signals = (await store.feedback_signals([entry.id]))[entry.id]
+    assert signals == FeedbackSignals(3, 0, 0, None)
+    await store.record_feedback(Feedback(entry.id, "u4", "a", Verdict.HELPFUL, "ran it", _min(4)))
+    assert await _confirmed(adapter, entry) == _min(4)
+
+
+async def test_last_confirmed_is_cancelled_by_a_later_or_equal_flag_only(
+    adapter: Adapter,
+) -> None:
+    store = adapter.store
+    for verdict in (Verdict.STALE, Verdict.WRONG):
+        entry = await write(adapter, f"flagged {verdict.value}")
+        await store.record_feedback(
+            Feedback(entry.id, "ok", "a", Verdict.HELPFUL, "ran it", _min(5))
+        )
+        # An older flag does not cancel it.
+        await store.record_feedback(Feedback(entry.id, "old", "a", verdict, None, _min(4)))
+        assert await _confirmed(adapter, entry) == _min(5)
+        # A tie is no confirmation.
+        await store.record_feedback(Feedback(entry.id, "tie", "a", verdict, None, _min(5)))
+        assert await _confirmed(adapter, entry) is None
+        # A later flag cancels it.
+        await store.record_feedback(Feedback(entry.id, "tie", "a", verdict, None, _min(6)))
+        assert await _confirmed(adapter, entry) is None
+        # A newer noted helpful restores it.
+        await store.record_feedback(
+            Feedback(entry.id, "new", "a", Verdict.HELPFUL, "again", _min(7))
+        )
+        assert await _confirmed(adapter, entry) == _min(7)
+
+
+async def test_last_confirmed_is_the_newest_date_whatever_the_number_of_confirmations(
+    adapter: Adapter,
+) -> None:
+    entry = await write(adapter, "popular")
+    store = adapter.store
+    for i, minute in enumerate((3, 9, 1)):
+        await store.record_feedback(
+            Feedback(entry.id, f"u{i}", "a", Verdict.HELPFUL, f"checked {i}", _min(minute))
+        )
+    assert (await store.feedback_signals([entry.id]))[entry.id] == FeedbackSignals(3, 0, 0, _min(9))
+
+
+async def test_a_revoked_reporters_confirmation_and_flag_are_ignored(adapter: Adapter) -> None:
+    store = adapter.store
+    fleet = await store.create_fleet("blue")
+    entry = await write(adapter, "rated")
+    await store.register_agent("Scout")
+    await store.record_feedback(Feedback(entry.id, "ok", "a", Verdict.HELPFUL, "ran it", _min(1)))
+    await store.record_feedback(Feedback(entry.id, "Scout", "Scout", Verdict.STALE, "old", _min(2)))
+    assert await _confirmed(adapter, entry) is None
+    await store.activate_agent("Scout", trust_level=TrustLevel.LURKER, home_fleet_id=fleet.id)
+    await store.revoke_agent("Scout")
+    assert await _confirmed(adapter, entry) == _min(1)  # the revoked flag no longer cancels
+    await store.record_feedback(Feedback(entry.id, "Scout", "Scout", Verdict.HELPFUL, "x", _min(9)))
+    assert await _confirmed(adapter, entry) == _min(1)  # nor does its confirmation count
+    assert (await store.feedback_signals([entry.id]))[entry.id].counts == (1, 0, 0)
+
+
+async def test_feedback_signals_cover_every_well_formed_id(adapter: Adapter) -> None:
+    entry = await write(adapter, "rated")
+    await adapter.store.record_feedback(
+        Feedback(entry.id, "u", "a", Verdict.HELPFUL, "ok", _min(1))
+    )
+    signals = await adapter.store.feedback_signals([NO_SUCH_ID, "not-a-uuid", entry.id])
+    assert signals == {
+        NO_SUCH_ID: FeedbackSignals(0, 0, 0, None),
+        entry.id: FeedbackSignals(1, 0, 0, _min(1)),
+    }
+    assert signals[entry.id].counts == (await adapter.store.quality_counts([entry.id]))[entry.id]
+    assert await adapter.store.feedback_signals([]) == {}
 
 
 # -- counters (ROADMAP §3.3, ADR 0056) --------------------------------------------------

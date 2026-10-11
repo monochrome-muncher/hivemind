@@ -411,7 +411,7 @@ class TestDeterministicTies:
 class TestConcurrentIO:
     """PERF-4: the keyword stream runs concurrently with the query
     embedding (+ vector stream), and ``get_entries`` with
-    ``quality_counts``; each pair is proven by a rendezvous that can only
+    ``feedback_signals``; each pair is proven by a rendezvous that can only
     complete if both calls are in flight at once."""
 
     async def test_keyword_search_overlaps_the_query_embedding(
@@ -440,11 +440,13 @@ class TestConcurrentIO:
         )
         assert len(hits) == 1
 
-    async def test_entries_fetch_overlaps_the_quality_counts(self, embedder, search_config) -> None:
+    async def test_entries_fetch_overlaps_the_feedback_signals(
+        self, embedder, search_config
+    ) -> None:
         store = MemoryStore(make_clock())
         await create(store, "beta note")
         got, counted = asyncio.Event(), asyncio.Event()
-        real_get, real_counts = store.get_entries, store.quality_counts
+        real_get, real_counts = store.get_entries, store.feedback_signals
 
         async def get_entries(ids):
             got.set()
@@ -457,7 +459,7 @@ class TestConcurrentIO:
             return await real_counts(ids)
 
         store.get_entries = get_entries  # type: ignore[method-assign]
-        store.quality_counts = counts  # type: ignore[method-assign]
+        store.feedback_signals = counts  # type: ignore[method-assign]
         hits = await asyncio.wait_for(
             make_service(store, embedder, search_config).search("beta note"), timeout=2
         )

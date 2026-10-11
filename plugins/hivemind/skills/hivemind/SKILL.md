@@ -58,6 +58,9 @@ you, and before writing.
 - `score` is findability, not truth. Before a consequential step, check
   an old, unconfirmed or single-source entry against the system when
   that is cheap.
+- **Open-ended work** (design, several plausible causes, research): note
+  your own candidates before reading hits, then compare and say what
+  changed your mind.
 - `not_found` can mean "not visible to you", not "deleted".
 - Tell the user when an entry shaped your answer ("Hivemind has a note
   from `<author>` that …").
@@ -142,6 +145,9 @@ security work are allowed: tag `security-finding` and say where.
   one if you may, else flag it `wrong` naming the right id; if you
   can't tell, write a `fact` "Conflict: A vs B; check with …" with
   `see_also` to both.
+- Rivals stay active until a test decides: supersede only on evidence.
+  A plausible alternative you did not test gets its own entry, tagged
+  `alternative`, with `see_also` to the approach it competes with.
 - If you can write to the fleet, `hive_list` with `flagged: true` (plus
   the system's `tags`) when you start on a system: supersede what you can
   confirm is wrong. A lurker flags; a contributor fixes.
