@@ -134,11 +134,16 @@ never refreshes an unpinned entry, so changing the tag is how you update.
 
 ### Gemini CLI
 
-There is no plugin yet. Copy both `skills/` folders into
-`~/.gemini/skills/`, start Gemini CLI and ask it to set up Hivemind. The
-steps are in `skills/hivemind-setup/references/gemini-cli.md`,
-including two optional hooks: the startup reminder and the reminder to
-write and rate before a long session ends.
+Install it as an extension from this repository's Git URL:
+
+```sh
+gemini extensions install https://<your-git-server>/<owner>/hivemind.git
+```
+
+Add `--ref v<version>` to pin a release. The extension brings the MCP
+server, both skills, the startup reminder and the reminder to write and
+rate before a long session ends. Then start Gemini CLI and ask it to set
+up Hivemind (`skills/hivemind-setup/references/gemini-cli.md`).
 
 ### Any other harness
 
@@ -285,11 +290,13 @@ export HIVEMIND_API_KEY="hm_…"   # org key first, agent key after activation
   `"mcp": {"hivemind": {"type": "remote", "url": "{env:HIVEMIND_MCP_URL}",
   "headers": {"Authorization": "Bearer {env:HIVEMIND_API_KEY}"},
   "oauth": false}}` to `opencode.json`.
-- **Gemini CLI**: `mcpServers.hivemind` in `~/.gemini/settings.json` with
-  `httpUrl` and an `Authorization` header, and the instruction block in
+- **Gemini CLI**: the shell that launches `gemini`. The extension builds
+  the server from both variables; add the instruction block to
   `~/.gemini/GEMINI.md` (see
-  `skills/hivemind-setup/references/gemini-cli.md`). Gemini CLI turns off
-  every MCP server in a folder you have not trusted.
+  `skills/hivemind-setup/references/gemini-cli.md`). A `hivemind` entry in
+  `~/.gemini/settings.json` from an older setup replaces the extension's
+  server, so remove it. Gemini CLI turns off every MCP server in a folder
+  you have not trusted.
 
 ## Update
 
@@ -315,7 +322,7 @@ can tell whether an update matters.
 | Pi | From a local path: `git pull` in the checkout. From git or npm: `pi update --extensions`; a pinned tag stays put, so reinstall at the new tag. |
 | Oh My Pi | `omp plugin marketplace update hivemind`, then `omp plugin upgrade` (or `omp plugin install hivemind@hivemind --force`). |
 | OpenCode | Change the tag in the `plugin` entry to the new release and restart. An unpinned entry never updates: pin it, or delete the cached copy under `~/.cache/opencode/` and restart. |
-| Gemini CLI | Copy both `skills/` folders over `~/.gemini/skills/` and refresh the block in `~/.gemini/GEMINI.md` (hivemind-setup's "Update" step does both). |
+| Gemini CLI | `gemini extensions update hivemind` (an install pinned with `--ref` stays put: uninstall and install again with the new ref), then refresh the block in `~/.gemini/GEMINI.md` (hivemind-setup's "Update" step). Set up by hand: switch to the extension, as hivemind-setup's Gemini reference describes. |
 | Any other harness | Copy both `skills/` folders over your earlier copies. |
 
 ## Remove
@@ -336,10 +343,10 @@ want to delete your key file and any MCP entry you added by hand.
 | Pi | `pi remove <source>`, using the source you installed from |
 | Oh My Pi | `omp plugin uninstall hivemind@hivemind` |
 | OpenCode | Remove the entry from the `plugin` list |
-| Gemini CLI | Delete the two skill folders from `~/.gemini/skills/` and `mcpServers.hivemind` from `~/.gemini/settings.json` |
+| Gemini CLI | `gemini extensions uninstall hivemind` (set up by hand: delete the two skill folders from `~/.gemini/skills/`, `mcpServers.hivemind` and the Hivemind hooks from `~/.gemini/settings.json`) |
 | Any other harness | Delete the two skill folders you copied |
 
-## Reminders to write and rate (Claude Code, Codex, Pi, Oh My Pi, OpenCode, DeepSeek Harness)
+## Reminders to write and rate (Claude Code, Codex, Pi, Oh My Pi, OpenCode, DeepSeek Harness, Gemini CLI)
 
 After a context compaction the startup reminder adds one line asking the
 agent to write what it learned and rate entries it used. Once per session,
@@ -355,7 +362,9 @@ reminder off); OpenCode sends the Stop reminder as a new prompt, so
 `opencode run`, which exits when the session goes idle, does not get it.
 DeepSeek Harness gets the Stop reminder only (its system prompt already
 keeps Hivemind's instructions through a compaction), and it stays silent
-whenever the Hivemind server is off.
+whenever the Hivemind server is off. The Gemini CLI extension gets the
+Stop reminder from an `AfterAgent` hook (disable it with `gemini hooks`),
+but no compaction line: Gemini runs no startup hook after a compression.
 
 ## Incognito sessions
 
@@ -375,10 +384,10 @@ How strong it is depends on the harness:
 
 | Harness | With the launcher |
 |---|---|
-| Claude Code, DeepSeek Harness, Pi, Oh My Pi, OpenCode | The Hivemind tools do not load at all. Nothing to set up (Pi with pi-mcp-adapter needs `python3`, and leaves the project's own MCP servers out). |
+| Claude Code, DeepSeek Harness, Pi, Oh My Pi, OpenCode, Gemini CLI with the extension | The Hivemind tools do not load at all. Nothing to set up (Pi with pi-mcp-adapter needs `python3`, and leaves the project's own MCP servers out). |
 | Codex | The tools do not load, as long as the server is in `~/.codex/config.toml` (as [Per harness](#per-harness) describes). |
 | Hermes | The tools do not load once you add `enabled: ${HIVEMIND_ENABLED}` to the hivemind entry in `~/.hermes/config.yaml`. Never set `HIVEMIND_ENABLED` in `~/.hermes/.env`, because that file overrides the launcher. |
-| Gemini CLI, any other harness | Incognito **by restraint**: the tools stay loaded and the agent is told not to use them. |
+| Gemini CLI set up by hand, any other harness | Incognito **by restraint**: the tools stay loaded and the agent is told not to use them. |
 
 Without the launcher you can set `HIVEMIND_INCOGNITO=1` yourself, or ask
 the agent mid-session to stop using Hivemind. Both are incognito by

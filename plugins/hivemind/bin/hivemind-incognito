@@ -15,7 +15,8 @@
 #      such switch configured, this prints a note and the session relies on
 #      the agent honouring layer 1 ("by restraint").
 #
-# Where the server is kept from loading (claude, codex, dsh, pi, omp) the
+# Where the server is kept from loading (claude, codex, dsh, gemini with the
+# extension, pi, omp) the
 # launcher also removes HIVEMIND_API_KEY and HIVEMIND_MCP_URL from the
 # child's environment, so an agent with a shell cannot read the key or call
 # the REST API with it. Where the session is incognito by restraint only
@@ -24,7 +25,7 @@
 set -eu
 
 if [ "$#" -lt 1 ]; then
-  echo "usage: hivemind-incognito <claude|codex|dsh|hermes|pi|omp|opencode|other-command> [args...]" >&2
+  echo "usage: hivemind-incognito <claude|codex|dsh|gemini|hermes|pi|omp|opencode|other-command> [args...]" >&2
   exit 2
 fi
 harness=$1
@@ -96,6 +97,15 @@ PY
     # HIVEMIND_INCOGNITO is set (from the environment or ~/.dsh/.env, never
     # turned off by a project .env); the key is not needed either.
     unset HIVEMIND_API_KEY HIVEMIND_MCP_URL
+    exec "$harness" "$@"
+    ;;
+  gemini)
+    # The hivemind Gemini CLI extension resolves ${HIVEMIND_MCP_URL} and
+    # ${HIVEMIND_API_KEY} at startup: without them its server is never
+    # contacted (Gemini notes an MCP issue). A server added by hand in
+    # settings.json keeps its literal URL, so that setup stays incognito
+    # by restraint.
+    unset HIVEMIND_MCP_URL HIVEMIND_API_KEY
     exec "$harness" "$@"
     ;;
   hermes)

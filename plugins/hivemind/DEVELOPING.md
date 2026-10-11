@@ -28,7 +28,8 @@ to install or use it, read [README.md](README.md) instead.
 | `opencode/hivemind.js` | The OpenCode plugin: registers the MCP server, adds the skills, and puts the reminder in every model request |
 | `bin/hivemind-incognito` | The incognito launcher ([below](#incognito)) |
 | `CHANGELOG.md` | What changed for agents in each release |
-| `../../package.json` (repository root) | Same package name as `plugins/hivemind/package.json`. Lets DeepSeek Harness, Pi and OpenCode install the plugin from the repository's Git URL |
+| `../../package.json` (repository root) | Same package name as `plugins/hivemind/package.json`. Lets DeepSeek Harness, Pi and OpenCode install the plugin from the repository's Git URL (OpenCode loads `exports["./server"]`, else `main`) |
+| `../../gemini-extension.json`, `../../skills`, `../../hooks/hooks.json` (repository root) | The Gemini CLI extension, installed with `gemini extensions install <git-url>`: Gemini reads these three at the root of what it installs. `skills` is a link to `skills/` here; the hooks run the two scripts above as `SessionStart` and `AfterAgent` hooks |
 | `../../.claude-plugin/`, `../../.agents/plugins/` (repository root) | The marketplaces Claude Code, Codex and Oh My Pi install from |
 
 ## How each harness gets each piece
@@ -45,7 +46,7 @@ reminder that survives compaction and new sessions.
 | Pi | the extension registers it with Pi 0.99+ built-in MCP; with pi-mcp-adapter, the adapter's config | the package | the extension's system-prompt section |
 | Oh My Pi | the plugin's `.mcp.json` (server `hivemind:hivemind`; a hand `hivemind` entry in `~/.omp/agent/mcp.json` replaces it) | the plugin | the extension's system-prompt section |
 | OpenCode | `opencode/hivemind.js` (skipped if a hand-configured `hivemind` server exists or no key is set) | the plugin | added to every model request |
-| Gemini CLI | the user's `~/.gemini/settings.json` | copied by hand | the `GEMINI.md` instruction block, plus the `SessionStart` hook added by hand |
+| Gemini CLI | the extension's `gemini-extension.json` (a `hivemind` entry in `~/.gemini/settings.json` replaces it) | the extension | the `GEMINI.md` instruction block, plus the extension's `SessionStart` hook |
 
 Everything the setup skill tells an agent to do for one harness lives in
 that harness's file under `skills/hivemind-setup/references/`. The skill
@@ -90,8 +91,15 @@ itself names no harness-specific paths, and a test enforces this.
   through the marketplace.
 - **OpenCode** caches a Git plugin on first use and never refreshes an
   unpinned entry, so users pin a release tag.
-- **Gemini CLI** has no plugin yet and turns off every MCP server in a
-  folder the user has not trusted.
+- **Gemini CLI** installs an extension from a Git URL by cloning the whole
+  repository and reading `gemini-extension.json`, `skills/` and
+  `hooks/hooks.json` at its root (hence the root files; there is no
+  option for a subfolder). It expands `${HIVEMIND_*}` from the launching
+  environment in the server's URL and header, and `${extensionPath}` in
+  hook commands. It turns off every MCP server in a folder the user has
+  not trusted. Checked with Gemini CLI 0.63. On a Windows checkout
+  without symlink support the `skills` link is a plain file, so the
+  skills would have to be copied by hand.
 
 ## The Stop hook and the post-compaction line
 
@@ -99,8 +107,8 @@ Two nudges that get knowledge written before it is lost: in Claude Code
 and Codex from `hooks/hooks.json`, in Pi and Oh My Pi from the extension
 and the OpenCode plugin, in DeepSeek Harness the Stop reminder from
 `dsh/hivemind-reminders.js` (below). Gemini CLI gets the Stop reminder
-when the user adds `hivemind-stop.sh` as an `AfterAgent` hook by hand
-(hivemind-setup's Gemini reference). Hermes does not have them.
+from the extension's `AfterAgent` hook (`../../hooks/hooks.json`).
+Hermes does not have them.
 
 The script counts three transcript formats:
 
@@ -205,15 +213,16 @@ does two things:
 | Hermes | `HIVEMIND_ENABLED=false` | `enabled: ${HIVEMIND_ENABLED}` in the hivemind server entry in `~/.hermes/config.yaml`, and **no** `HIVEMIND_ENABLED` in `~/.hermes/.env` (Hermes loads it over the environment, so it would override the launcher); for normal sessions leave it unset or export `HIVEMIND_ENABLED=true` in the shell profile |
 | Pi | Pi 0.99+ built-in MCP: the package registers no server, and the key and URL are unset. With pi-mcp-adapter: an exclusive MCP config, the servers of your global MCP config files minus hivemind (project servers are left out: the adapter would start them without its approval prompt). Either way the extension also blocks `mcp__hivemind…` calls (codemode scripts included), the adapter's `mcp` proxy and `mcpScript` calls that name Hivemind (the `mcpScript` scan is best effort) | the hivemind package; `python3` with the adapter |
 | Oh My Pi | `HIVEMIND_MCP_URL`/`HIVEMIND_API_KEY` unset, so the server is never contacted (Oh My Pi warns once that it is unavailable); the extension also blocks any Hivemind call | the hivemind plugin |
+| Gemini CLI | `HIVEMIND_MCP_URL`/`HIVEMIND_API_KEY` unset, so the extension's server is never contacted (Gemini notes an MCP issue) | the hivemind extension, and no hand entry in `settings.json` |
 | OpenCode | the plugin skips the server; a hand-configured one is disabled with `OPENCODE_CONFIG_CONTENT` | nothing |
 
 Where the switch is missing or not configured (the Hermes entry without
-`${HIVEMIND_ENABLED}`, a Codex without the entry, Gemini CLI, any other
+`${HIVEMIND_ENABLED}`, a Codex without the entry, a hand-configured Gemini CLI, any other
 command), the session is incognito **by restraint**: the tools are
 loaded, the key and URL stay in the environment, and an agent with a
 shell could still call the REST API. The launcher unsets the key and URL
 only where the server is kept from loading (Claude Code, Codex, DeepSeek
-Harness, Pi, Oh My Pi), because the other harnesses may still need them
+Harness, Pi, Oh My Pi, Gemini CLI), because the other harnesses may still need them
 (ADR 0035). A DeepSeek Harness session also stays incognito when a
 project `.env` names `HIVEMIND_*` variables: incognito is on if the
 process environment or `~/.dsh/.env` says so, and no project `.env` can

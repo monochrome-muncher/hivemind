@@ -1,0 +1,31 @@
+{
+  "description": "Hivemind for Gemini CLI (gemini-extension.json): the startup reminder, and the once-per-session reminder to write and rate before a long session ends.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "hivemind",
+            "type": "command",
+            "command": "sh ${extensionPath}/plugins/hivemind/skills/hivemind-setup/scripts/hivemind-session-start.sh",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "AfterAgent": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "hivemind-stop",
+            "type": "command",
+            "command": "sh ${extensionPath}/plugins/hivemind/skills/hivemind-setup/scripts/hivemind-stop.sh",
+            "timeout": 5000
+          }
+        ]
+      }
+    ]
+  }
+}
