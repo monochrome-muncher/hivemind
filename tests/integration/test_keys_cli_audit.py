@@ -186,7 +186,10 @@ def test_actor_defaults_to_the_os_user(monkeypatch: pytest.MonkeyPatch, capsys) 
     try:
         monkeypatch.setattr(sys, "argv", ["hivemind-keys", "rotate-org"])
         keys_cli.main()
-        assert capsys.readouterr().out.startswith("hm_")
+        printed = capsys.readouterr()
+        # stdout is the bare key (scriptable); the label is on stderr.
+        assert printed.out.startswith("hm_") and len(printed.out.splitlines()) == 1
+        assert "New org key" in printed.err and "shown once" in printed.err
         [row] = asyncio.run(_audit_rows(dsn))
         assert row["actor"] == getpass.getuser()
         assert row["actor_kind"] == "cli"
