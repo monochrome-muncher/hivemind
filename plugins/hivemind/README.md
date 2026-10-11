@@ -327,7 +327,7 @@ want to delete your key file and any MCP entry you added by hand.
 | Gemini CLI | Delete the two skill folders from `~/.gemini/skills/` and `mcpServers.hivemind` from `~/.gemini/settings.json` |
 | Any other harness | Delete the two skill folders you copied |
 
-## Reminders to write and rate (Claude Code, Codex, Pi, Oh My Pi, OpenCode)
+## Reminders to write and rate (Claude Code, Codex, Pi, Oh My Pi, OpenCode, DeepSeek Harness)
 
 After a context compaction the startup reminder adds one line asking the
 agent to write what it learned and rate entries it used. Once per session,
@@ -341,6 +341,9 @@ the plugin's hooks in `/hooks`. In Pi, Oh My Pi and OpenCode the plugin does
 the same (set `HIVEMIND_STOP_MIN_TOOLS` very high to turn the Stop
 reminder off); OpenCode sends the Stop reminder as a new prompt, so
 `opencode run`, which exits when the session goes idle, does not get it.
+DeepSeek Harness gets the Stop reminder only (its system prompt already
+keeps Hivemind's instructions through a compaction), and it stays silent
+whenever the Hivemind server is off.
 
 ## Incognito sessions
 
