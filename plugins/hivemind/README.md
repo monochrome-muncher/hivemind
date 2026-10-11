@@ -327,7 +327,7 @@ want to delete your key file and any MCP entry you added by hand.
 | Gemini CLI | Delete the two skill folders from `~/.gemini/skills/` and `mcpServers.hivemind` from `~/.gemini/settings.json` |
 | Any other harness | Delete the two skill folders you copied |
 
-## Reminders to write and rate (Claude Code, Codex)
+## Reminders to write and rate (Claude Code, Codex, Pi, Oh My Pi)
 
 After a context compaction the startup reminder adds one line asking the
 agent to write what it learned and rate entries it used. Once per session,
@@ -337,7 +337,9 @@ another agent could reuse; if there is nothing new it just finishes. Both
 are silent in incognito sessions or when `HIVEMIND_API_KEY` is not set. To
 turn the Stop reminder off, disable the plugin's `Stop` hook in `/hooks` or
 use [incognito](#incognito-sessions). Codex runs both only after you trust
-the plugin's hooks in `/hooks`.
+the plugin's hooks in `/hooks`. In Pi and Oh My Pi the plugin's extension
+does the same (set `HIVEMIND_STOP_MIN_TOOLS` very high to turn the Stop
+reminder off).
 
 ## Incognito sessions
 

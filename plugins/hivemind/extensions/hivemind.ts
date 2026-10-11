@@ -26,6 +26,14 @@
  *   the adapter is installed.
  * Oh My Pi has no registerMcpServer (it configures MCP itself), so nothing
  * is registered there either.
+ *
+ * Two nudges, as the Claude Code/Codex hooks give (plugins/hivemind/
+ * DEVELOPING.md, "The Stop hook and the post-compaction line"): once per
+ * session, a long session (HIVEMIND_STOP_MIN_TOOLS tool calls, default 20)
+ * that has not called hive_write or hive_feedback is kept going for one
+ * more turn with a reminder to write and rate (Pi: agent_before_settle;
+ * Oh My Pi: session_stop), and after a compaction the next system-prompt
+ * section carries one extra sentence.
  */
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -57,6 +65,14 @@ const NOT_CONFIGURED =
 // sentence, shared byte for byte with the hook and the Hermes plugin.
 const INCOGNITO =
 	"HIVEMIND: this is an incognito session, so Hivemind is completely off. Do not call any hive_* tool, and do not mention Hivemind or offer to set it up. You may keep local notes; start each one with [hivemind: incognito, never upload] so that no later session uploads it. If hive_* tools are loaded anyway, still do not use them, and tell the user once that the tools are loaded, so this session is incognito only by your own restraint.";
+
+// Shared byte for byte with skills/hivemind-setup/scripts/hivemind-stop.sh
+// and hivemind-session-start.sh; tests/unit/test_agent_plugin.py checks it.
+const STOP_REMINDER =
+	"HIVEMIND: before finishing, write to Hivemind (hive_write) what another agent could reuse from this task, and rate the entries your work tested (hive_feedback). If nothing is new, write nothing and just finish.";
+
+const COMPACTED =
+	" Context was just compacted: before continuing, write now (hive_write) anything learned earlier that another agent could reuse, and rate the entries your work tested (hive_feedback).";
 
 function incognito(): boolean {
 	const value = (process.env.HIVEMIND_INCOGNITO ?? "").trim().toLowerCase();
@@ -110,10 +126,44 @@ function isHivemindCall(event: any): boolean {
 	return HIVE_TOOL.test(route);
 }
 
+// Does this call write or rate (hive_write, hive_feedback), by any of the
+// routes above? A script counts when its code names either tool.
+const CONTRIBUTION = /(^|[^a-z])hive_(write|feedback)$/;
+
+function isContribution(name: string, input: any): boolean {
+	if (CONTRIBUTION.test(name)) return true;
+	if (name === "mcp") {
+		return ROUTING_FIELDS.some((f) => typeof input?.[f] === "string" && CONTRIBUTION.test(input[f].trim()));
+	}
+	const code = input?.code;
+	if (typeof code === "string" && /(^|[^a-z])hive_(write|feedback)\b/.test(code)) return true;
+	const path = String(input?.path ?? "").trim();
+	if (!/^xd:\/\//i.test(path)) return false;
+	return CONTRIBUTION.test(path.slice("xd://".length).replace(/[?#].*$/, "").replace(/\/+$/, ""));
+}
+
+function stopThreshold(): number {
+	const value = process.env.HIVEMIND_STOP_MIN_TOOLS ?? "";
+	return /^[0-9]+$/.test(value) ? Number(value) : 20;
+}
+
+// Per-session state for the two nudges. Reset when a session starts (new,
+// resumed or forked), so a resumed session can be reminded once more.
+const session = { calls: 0, contributed: false, reminded: false, compacted: false };
+
+function remindBeforeStop(): boolean {
+	if (incognito() || !process.env.HIVEMIND_API_KEY) return false;
+	if (session.reminded || session.contributed || session.calls < stopThreshold()) return false;
+	session.reminded = true;
+	return true;
+}
+
 function section(): string {
 	if (incognito()) return INCOGNITO;
 	const state = process.env.HIVEMIND_API_KEY ? CONFIGURED : NOT_CONFIGURED;
-	return `${CORE} ${state}`;
+	const extra = session.compacted && process.env.HIVEMIND_API_KEY ? COMPACTED : "";
+	session.compacted = false;
+	return `${CORE} ${state}${extra}`;
 }
 
 function piAgentDir(): string | undefined {
@@ -204,6 +254,41 @@ export default function hivemind(pi: ExtensionAPI) {
 		if (Array.isArray(event.systemPrompt)) {
 			return { systemPrompt: [...event.systemPrompt, text] };
 		}
+	});
+
+	pi.on("session_start", () => {
+		Object.assign(session, { calls: 0, contributed: false, reminded: false, compacted: false });
+	});
+
+	pi.on("session_compact", () => {
+		session.compacted = true;
+	});
+
+	// Count the calls the model made (not the ones a script made for it),
+	// and note any write or rating, however it was routed.
+	pi.on("tool_execution_start", (event: any) => {
+		const name = String(event.toolName ?? "");
+		if (!event.parentToolCallId) session.calls += 1;
+		if (isContribution(name, event.args)) session.contributed = true;
+	});
+
+	// Pi: one more model request, with the reminder as a visible message.
+	pi.on("agent_before_settle", (event: any) => {
+		if (event.outcome !== "completed" || !remindBeforeStop()) return;
+		return {
+			entries: [
+				...(event.entries ?? []),
+				{ type: "custom_message", customType: "hivemind-reminder", content: STOP_REMINDER, display: true },
+			],
+			continue: true,
+		};
+	});
+
+	// Oh My Pi: the Claude Code-style block, which continues the session
+	// with the reason.
+	pi.on("session_stop", (event: any) => {
+		if (event.stop_hook_active || !remindBeforeStop()) return;
+		return { decision: "block", reason: STOP_REMINDER };
 	});
 
 	// Incognito sessions (ADR 0035) are enforced here, not just requested:
