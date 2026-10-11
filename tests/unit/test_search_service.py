@@ -8,6 +8,7 @@ so no implementation detail leaks in.
 from __future__ import annotations
 
 import asyncio
+import math
 from dataclasses import fields
 from datetime import timedelta
 from pathlib import Path
@@ -282,6 +283,25 @@ class TestRecencyFloorConfig:
 
     def test_the_shipped_half_life_is_positive(self) -> None:
         assert SearchConfig().half_life_days > 0
+
+    @pytest.mark.parametrize("bad", [0.0, -1.0, math.inf, -math.inf, math.nan])
+    def test_a_bad_per_kind_half_life_is_a_configuration_error(self, bad: float) -> None:
+        with pytest.raises(ValueError, match="recency_by_kind"):
+            SearchConfig(recency_by_kind=((Kind.INSIGHT, bad),))
+
+    def test_an_unknown_or_repeated_kind_is_a_configuration_error(self) -> None:
+        with pytest.raises(ValueError, match="unknown kind"):
+            SearchConfig(recency_by_kind=(("note", 10.0),))  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="twice"):
+            SearchConfig(recency_by_kind=((Kind.FACT, 10.0), (Kind.FACT, 20.0)))
+
+    def test_a_per_kind_profile_is_sorted_hashable_and_falls_back_to_the_half_life(self) -> None:
+        a = SearchConfig(recency_by_kind=((Kind.INSIGHT, 90.0), (Kind.DECISION, 180.0)))
+        b = SearchConfig(recency_by_kind=((Kind.DECISION, 180), (Kind.INSIGHT, 90)))
+        assert a == b and hash(a) == hash(b)
+        assert a.half_life_for(Kind.FACT) == 30.0
+        assert a.half_life_for(Kind.DECISION) == 180.0
+        assert SearchConfig(recency_by_kind=None) == SearchConfig()
 
     async def test_the_floor_reaches_the_score_through_the_service(
         self, embedder, search_config

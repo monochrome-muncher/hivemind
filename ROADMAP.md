@@ -26,8 +26,8 @@ The SPEC §10 extensions (Tier 5) stay held until their triggers fire.
   value (§4.6), the HNSW recall cost (§3.6, ADR 0025), and any `rrf_k`
   change.
 - **Parked ideas**: a `question` entry kind (wait for the empty-search
-  counters of ADR 0056 to show demand) and per-kind half-lives (held,
-  §4.6). The legacy `pi-mcp-adapter` route in the Pi plugin is to be
+  counters of ADR 0056 to show demand) and per-kind half-lives (built
+  off by default, ADR 0072; awaiting the real-embedder measurement). The legacy `pi-mcp-adapter` route in the Pi plugin is to be
   dropped once Pi's built-in MCP (0.99+) is the norm.
 - **The hive-mind study** ([docs/proposals/2026-10-10-hive-mind-ideas.md](docs/proposals/2026-10-10-hive-mind-ideas.md)):
   ideas for distillation, ranking evidence and sharing without
@@ -280,8 +280,8 @@ fleet briefing (ADR 0058).
   from 0.000 to 1.000 MRR while `currency_pair` holds at 0.778 (decay-off
   0.611). The floor is a band, not a slider (0.9 measures worse than
   decay-off). Shipping (a) rules out (b), the additive form; reopening (b)
-  means replacing the floor under a new ADR. Per-kind half-lives stay
-  held. **Still open:** the value 0.8, from a synthetic fixture.
+  means replacing the floor under a new ADR. Per-kind half-lives are built
+  off by default (ADR 0072). **Still open:** the value 0.8, from a synthetic fixture.
   **Re-measure trigger:** the first real corpus with meaningful age
   spread; sweep 0.5–0.9 and expect to move the value, not the form.
   Tables and method:

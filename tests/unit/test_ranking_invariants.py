@@ -17,6 +17,15 @@ moves a default, or adds a social signal outside the cap, fails here.
 
 I1 and I5 also run with ``recency_from_confirmation`` on (ADR 0071), where
 a confirmation can restart the recency clock for the upside only.
+
+With a recency profile per kind (ADR 0072) I1 holds per kind, with that
+kind's half-life ``h`` in place of 30: a new unrated entry younger than
+``h * log2(1 / (social_max * floor))`` is never outranked by an entry of
+the same kind older than ``h * log2(1 / floor)``. I3, I4 and I5 run with a
+profile on as well. "No decay" is not offered because it would break I1.
+I1 also holds across kinds: a new entry of kind A under A's bound (recency
+at least 0.96) is never outranked by an entry of any kind past its own
+kind's floor age (at most 0.8 x 1.2 = 0.96).
 """
 
 from __future__ import annotations
@@ -39,6 +48,14 @@ from tests.fakes import FIXED_NOW, make_clock, make_embedder
 
 CONFIG = SearchConfig()
 CONFIRMING = SearchConfig(recency_from_confirmation=True)
+PROFILES = {
+    "insight=180,decision=365": ((Kind.INSIGHT, 180.0), (Kind.DECISION, 365.0)),
+    "insight=90,decision=180": ((Kind.INSIGHT, 90.0), (Kind.DECISION, 180.0)),
+}
+PROFILED = SearchConfig(recency_by_kind=PROFILES["insight=180,decision=365"])
+PROFILED_CONFIRMING = replace(PROFILED, recency_from_confirmation=True)
+# Plausible half-lives for any kind, from a week to ten years.
+HALF_LIVES = (7.0, 30.0, 90.0, 180.0, 365.0, 1000.0, 3650.0)
 NOW = FIXED_NOW
 FRESH_DAYS = (0.0, 0.5, 1.0, 1.69)
 OLD_DAYS = (10.0, 11.0, 30.0, 400.0)
@@ -59,6 +76,7 @@ def shipped_score(
     importance: int = 3,
     config: SearchConfig = CONFIG,
     confirmed_ago_days: float | None = None,
+    kind: Kind = Kind.FACT,
 ) -> float:
     """The score SearchService computes, for one entry, through the pure functions.
 
@@ -77,7 +95,7 @@ def shipped_score(
         NOW - timedelta(days=age_days),
         quality,
         NOW,
-        config.half_life_days,
+        config.half_life_for(kind),
         recency_floor=config.recency_floor,
         social_max=config.social_max,
         confirmed_at=confirmed_at,
@@ -151,6 +169,132 @@ class TestI1FreshUnratedBeatsOldFavourite:
         assert by_id[old.id] / fused[old.id] <= by_id[new.id] / fused[new.id]
 
 
+class TestI1PerKind:
+    """I1 generalised (ADR 0072): each kind's own half-life, the same floor."""
+
+    def test_the_cap_times_the_floor_is_below_one(self) -> None:
+        """Needed for I1 to be satisfiable at all: an old entry at the cap must
+        be below a brand-new unrated one (recency 1.0)."""
+        assert CONFIG.recency_floor is not None
+        assert CONFIG.social_max * CONFIG.recency_floor < 1.0
+
+    @pytest.mark.parametrize("half_life", HALF_LIVES)
+    def test_the_two_ages_scale_with_the_half_life(self, half_life: float) -> None:
+        """The fresh bound h*log2(1/(cap*floor)) is below the floor age
+        h*log2(1/floor), and the shipped 30-day values are about 1.7 and 9.7 days."""
+        assert CONFIG.recency_floor is not None
+        fresh = _fresh_bound(half_life)
+        floor_age = _floor_age(half_life)
+        assert 0.0 < fresh < floor_age
+        assert 0.5 ** (fresh / half_life) == pytest.approx(CONFIG.social_max * CONFIG.recency_floor)
+        assert 0.5 ** (floor_age / half_life) == pytest.approx(CONFIG.recency_floor)
+        if half_life == 30.0:
+            assert 1.7 < fresh < 1.8 and 9.6 < floor_age < 9.7
+
+    @pytest.mark.parametrize("half_life", HALF_LIVES)
+    @pytest.mark.parametrize("counts", FEEDBACK_MIXES)
+    @pytest.mark.parametrize("confirming", [False, True], ids=["off", "confirmation-on"])
+    def test_a_new_unrated_entry_beats_an_old_one_of_the_same_kind(
+        self, half_life: float, counts: tuple[int, int, int], confirming: bool
+    ) -> None:
+        """For every kind of a profile that gives it ``half_life``, fresh
+        unrated >= old with any feedback, at equal fused score and importance."""
+        config = SearchConfig(
+            recency_by_kind=((Kind.INSIGHT, half_life),), recency_from_confirmation=confirming
+        )
+        bound = _fresh_bound(half_life)
+        for fresh_age in (0.0, 0.5 * bound, 0.999 * bound):
+            for old_age in (_floor_age(half_life) * m for m in (1.0, 1.1, 3.0, 50.0)):
+                for importance in (1, 3, 5):
+                    fresh = shipped_score(
+                        age_days=fresh_age,
+                        importance=importance,
+                        config=config,
+                        kind=Kind.INSIGHT,
+                    )
+                    old = shipped_score(
+                        age_days=old_age,
+                        counts=counts,
+                        importance=importance,
+                        config=config,
+                        confirmed_ago_days=1.0 / 1440.0,
+                        kind=Kind.INSIGHT,
+                    )
+                    assert fresh >= old
+
+    @pytest.mark.parametrize("profile", PROFILES)
+    @pytest.mark.parametrize("kind", list(Kind))
+    @pytest.mark.parametrize("counts", FEEDBACK_MIXES)
+    def test_every_kind_of_the_configured_profiles(
+        self, profile: str, kind: Kind, counts: tuple[int, int, int]
+    ) -> None:
+        config = replace(
+            SearchConfig(recency_by_kind=PROFILES[profile]), recency_from_confirmation=True
+        )
+        half_life = config.half_life_for(kind)
+        fresh = shipped_score(age_days=0.999 * _fresh_bound(half_life), config=config, kind=kind)
+        old = shipped_score(
+            age_days=_floor_age(half_life),
+            counts=counts,
+            config=config,
+            confirmed_ago_days=1.0 / 1440.0,
+            kind=kind,
+        )
+        assert fresh >= old
+
+    @pytest.mark.parametrize("profile", PROFILES)
+    @pytest.mark.parametrize("new_kind", list(Kind))
+    @pytest.mark.parametrize("old_kind", list(Kind))
+    @pytest.mark.parametrize("counts", FEEDBACK_MIXES)
+    def test_across_kinds(
+        self, profile: str, new_kind: Kind, old_kind: Kind, counts: tuple[int, int, int]
+    ) -> None:
+        """A new entry of kind A under A's bound beats any entry past its own
+        kind's floor age, whatever the two kinds are."""
+        config = replace(
+            SearchConfig(recency_by_kind=PROFILES[profile]), recency_from_confirmation=True
+        )
+        fresh = shipped_score(
+            age_days=0.999 * _fresh_bound(config.half_life_for(new_kind)),
+            config=config,
+            kind=new_kind,
+        )
+        old = shipped_score(
+            age_days=_floor_age(config.half_life_for(old_kind)),
+            counts=counts,
+            config=config,
+            confirmed_ago_days=1.0 / 1440.0,
+            kind=old_kind,
+        )
+        assert fresh >= old
+
+    async def test_service_ratio_of_an_old_favourite_stays_below_a_new_entry(self) -> None:
+        """Through SearchService with a profile on: two decisions, the old one
+        past its (365-day) floor age with 200 helpful reports."""
+        store = MemoryStore(make_clock())
+        old = await store.create_entry(
+            _draft("gamma rollout note", age_days=3000, kind=Kind.DECISION), [0.1] * 4
+        )
+        new = await store.create_entry(
+            _draft("gamma rollout note", age_days=1, kind=Kind.DECISION), [0.1] * 4
+        )
+        for i in range(200):
+            await store.record_feedback(
+                Feedback(
+                    old.id,
+                    f"rater-{i}",
+                    "a",
+                    Verdict.HELPFUL,
+                    note="re-checked",
+                    updated_at=NOW - timedelta(minutes=1),
+                )
+            )
+        hits = await _service(store, PROFILED_CONFIRMING).search("gamma rollout note", limit=10)
+        by_id = {h.entry_id: h.score for h in hits}
+        fused = await _fused_by_id(store, "gamma rollout note")
+        assert by_id[old.id] / fused[old.id] <= by_id[new.id] / fused[new.id]
+
+
 class TestI2NumbersAndDatesOnly:
     def test_entry_score_takes_only_the_allowlisted_inputs(self) -> None:
         """I2: a new parameter (an author, a count of links, a rater record)
@@ -167,6 +311,14 @@ class TestI2NumbersAndDatesOnly:
             "social_max",
             "confirmed_at",
         }
+
+    async def test_the_kind_reaches_the_score_only_as_a_half_life(self) -> None:
+        """I2 with a profile (ADR 0072): two kinds given the same half-life
+        score alike, so the kind is nothing but a number."""
+        same = SearchConfig(recency_by_kind=((Kind.FACT, 120.0), (Kind.DECISION, 120.0)))
+        facts = shipped_score(age_days=77.0, config=same, kind=Kind.FACT)
+        decisions = shipped_score(age_days=77.0, config=same, kind=Kind.DECISION)
+        assert facts == decisions
 
     async def test_authors_agents_pins_links_and_raters_do_not_change_scores(self) -> None:
         """I2: two pools identical except for author names, agent labels, pins,
@@ -344,6 +496,136 @@ class TestI5UpwardMultiplierIsCapped:
         assert SOCIAL_MAX == CONFIG.social_max == CONFIG.quality_max == scoring.QUALITY_MAX
 
 
+class TestProfileRespectsI3I4I5:
+    """I3, I4 and I5 with a recency profile on (ADR 0072)."""
+
+    async def test_i3_one_confirmation_and_five_gain_alike(self) -> None:
+        scores = [
+            await _confirmed_score(
+                recency_from_confirmation=True,
+                confirmations=[1.0] + [4.0] * (n - 1),
+                social_max=CONFIG.social_max,
+                base=PROFILED,
+                kind=Kind.DECISION,
+                entry_age_days=3000.0,
+            )
+            for n in (1, 5)
+        ]
+        assert scores[0] == scores[1]
+
+    @pytest.mark.parametrize("verdict", [Verdict.STALE, Verdict.WRONG])
+    async def test_i4_a_later_report_removes_the_gain(self, verdict: Verdict) -> None:
+        on, off = [
+            await _confirmed_score(
+                recency_from_confirmation=flag,
+                confirmations=[2.0],
+                flags=[(verdict, 1.0)],
+                base=PROFILED,
+                kind=Kind.INSIGHT,
+                entry_age_days=3000.0,
+            )
+            for flag in (True, False)
+        ]
+        assert on == off
+        kept = await _confirmed_score(
+            recency_from_confirmation=True,
+            confirmations=[1.0],
+            base=PROFILED,
+            kind=Kind.INSIGHT,
+            entry_age_days=3000.0,
+        )
+        plain = await _confirmed_score(
+            recency_from_confirmation=False,
+            confirmations=[1.0],
+            base=PROFILED,
+            kind=Kind.INSIGHT,
+            entry_age_days=3000.0,
+        )
+        assert kept > plain
+
+    @pytest.mark.parametrize("profile", PROFILES)
+    @pytest.mark.parametrize("kind", list(Kind))
+    @pytest.mark.parametrize("helpful", [0, 1, 5, 1000])
+    @pytest.mark.parametrize("age", [0.0, 3.0, 40.0, 400.0, 5000.0])
+    @pytest.mark.parametrize("confirmed_ago", [0.0, 1.0 / 1440.0, 1.0, 30.0])
+    def test_i5_the_multiplier_never_exceeds_social_max(
+        self, profile: str, kind: Kind, helpful: int, age: float, confirmed_ago: float
+    ) -> None:
+        if confirmed_ago > age:
+            pytest.skip("a confirmation older than the memory date adds nothing")
+        config = replace(
+            SearchConfig(recency_by_kind=PROFILES[profile]), recency_from_confirmation=True
+        )
+        score = shipped_score(
+            age_days=age,
+            counts=(helpful, 0, 0),
+            importance=5,
+            config=config,
+            confirmed_ago_days=confirmed_ago,
+            kind=kind,
+        )
+        assert config.recency_floor is not None
+        recency = max(config.recency_floor, 0.5 ** (age / config.half_life_for(kind)))
+        assert score / recency <= config.social_max * (1 + 1e-12)
+
+
+class TestUnsetIsToday:
+    def test_no_profile_is_one_curve_for_every_kind(self) -> None:
+        assert CONFIG.recency_by_kind is None
+        assert {CONFIG.half_life_for(k) for k in Kind} == {CONFIG.half_life_days}
+
+    def test_an_empty_profile_is_none(self) -> None:
+        assert SearchConfig(recency_by_kind=()).recency_by_kind is None
+        assert SearchConfig(recency_by_kind=()) == CONFIG
+
+    async def test_unset_scores_are_bit_identical_to_the_flat_half_life(self) -> None:
+        """Every kind, age, importance and feedback mix: the service's score
+        with no profile equals entry_score called with ``half_life_days``."""
+        for kind in Kind:
+            for age in (0.0, 1.0, 9.0, 45.0, 400.0, 5000.0):
+                for counts in FEEDBACK_MIXES:
+                    quality = feedback_quality(*counts, **CONFIG.quality_kwargs())
+                    flat = entry_score(
+                        0.0164,
+                        4,
+                        NOW - timedelta(days=age),
+                        quality,
+                        NOW,
+                        CONFIG.half_life_days,
+                        recency_floor=CONFIG.recency_floor,
+                        social_max=CONFIG.social_max,
+                    )
+                    assert flat == shipped_score(
+                        age_days=age, counts=counts, fused=0.0164, importance=4, kind=kind
+                    )
+
+    async def test_a_service_without_a_profile_ranks_kinds_by_age_alone(self) -> None:
+        store = MemoryStore(make_clock())
+        a = await store.create_entry(
+            _draft("zeta cutover", age_days=100, kind=Kind.DECISION), [0.1] * 4
+        )
+        b = await store.create_entry(_draft("zeta cutover", age_days=100), [0.1] * 4)
+        by_id = {h.entry_id: h.score for h in await _service(store).search("zeta cutover")}
+        fused = await _fused_by_id(store, "zeta cutover")
+        assert by_id[a.id] / fused[a.id] == pytest.approx(by_id[b.id] / fused[b.id])
+
+    async def test_with_a_profile_an_old_decision_can_outrank_a_same_age_fact(self) -> None:
+        """The point of ADR 0072, and its cost: at equal match an old decision
+        ages slower than a same-age fact (the floor still bounds the gap at 1/0.8)."""
+        store = MemoryStore(make_clock())
+        fact = await store.create_entry(
+            _draft("zeta cutover", age_days=20, kind=Kind.FACT), [0.1] * 4
+        )
+        decision = await store.create_entry(
+            _draft("zeta cutover", age_days=20, kind=Kind.DECISION), [0.1] * 4
+        )
+        hits = await _service(store, PROFILED).search("zeta cutover")
+        fused = await _fused_by_id(store, "zeta cutover")
+        ratio = {h.entry_id: h.score / fused[h.entry_id] for h in hits}
+        assert ratio[decision.id] > ratio[fact.id]
+        assert ratio[decision.id] / ratio[fact.id] <= 1 / 0.8 + 1e-12
+
+
 class TestBitIdentity:
     def test_the_cap_changes_no_score_at_the_shipped_defaults(self) -> None:
         """The capped form equals the uncapped form (bit for bit) at quality_max 1.2."""
@@ -371,9 +653,23 @@ class TestBitIdentity:
 # --- helpers -----------------------------------------------------------------
 
 
+def _fresh_bound(half_life: float) -> float:
+    """The age under which a new unrated entry beats any same-kind entry past
+    its floor age: where ``0.5 ** (age / h)`` equals ``social_max * floor``."""
+    assert CONFIG.recency_floor is not None
+    return half_life * math.log2(1.0 / (CONFIG.social_max * CONFIG.recency_floor))
+
+
+def _floor_age(half_life: float) -> float:
+    """The age from which the recency factor is the floor."""
+    assert CONFIG.recency_floor is not None
+    return half_life * math.log2(1.0 / CONFIG.recency_floor)
+
+
 def _draft(summary: str, *, age_days: float, **kwargs: object) -> EntryDraft:
+    kind = kwargs.pop("kind", Kind.INSIGHT)
     return EntryDraft(
-        kind=Kind.INSIGHT,
+        kind=kind,  # type: ignore[arg-type]
         summary=summary,
         author=str(kwargs.pop("author", "alice")),
         agent=str(kwargs.pop("agent", "agent-1")),
@@ -393,13 +689,15 @@ async def _confirmed_score(
     flags: list[tuple[Verdict, float]] | None = None,
     social_max: float = CONFIG.social_max,
     entry_age_days: float = 730.0,
+    base: SearchConfig = CONFIG,
+    kind: Kind = Kind.INSIGHT,
 ) -> float:
     """The search score of one two-year-old entry whose helpful-with-a-note
     reports are dated ``confirmations`` days ago and whose stale or wrong
     reports are dated ``flags`` days ago, by different users."""
     store = MemoryStore(make_clock())
     entry = await store.create_entry(
-        _draft("delta failover note", age_days=entry_age_days), [0.1] * 4
+        _draft("delta failover note", age_days=entry_age_days, kind=kind), [0.1] * 4
     )
 
     def when(days: float) -> datetime:
@@ -416,7 +714,7 @@ async def _confirmed_score(
             Feedback(entry.id, f"f-{i}", "a", verdict, note="seen", updated_at=when(ago))
         )
     config = replace(
-        CONFIG, recency_from_confirmation=recency_from_confirmation, social_max=social_max
+        base, recency_from_confirmation=recency_from_confirmation, social_max=social_max
     )
     hits = await _service(store, config).search("delta failover note", limit=5)
     assert [h.entry_id for h in hits] == [entry.id]

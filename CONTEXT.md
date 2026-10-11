@@ -249,6 +249,10 @@ _Avoid_: fuzzy search (that is edit-distance matching), lossy search, inexact se
 The lower bound on the SPEC §6.4 recency factor (`max(floor, 0.5 ** (age/half_life))`), which caps that factor's range at `1/floor` instead of leaving it unbounded. A `SearchConfig` value in `(0, 1]`, default 0.8 (ADR 0022); `None` means no floor.
 _Avoid_: decay cutoff (nothing is excluded), minimum score (it bounds one factor, not the final score), recency cap (it is a lower bound, not an upper one)
 
+**Recency profile**:
+The half-life, in days, an entry of one kind ages by when a deployment sets one per kind (ADR 0072); a kind without one keeps the shared half-life, and the recency floor is the same for every kind.
+_Avoid_: decay class, per-kind floor (the floor is shared), no decay (a long half-life, never none)
+
 **Social cap**:
 The ceiling (`social_max`, default 1.2, ADR 0070) on the combined upward effect of the social signals in the SPEC §6.4 score, `min(social_max, quality)`; penalties are not capped. A social signal is a ranking input that comes from other agents' behaviour, today only feedback quality.
 _Avoid_: quality cap (it bounds all social signals, not only feedback), score cap (the final score is not capped)

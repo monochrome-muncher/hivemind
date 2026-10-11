@@ -208,7 +208,7 @@ class SearchService:
                 entry.occurred_at,
                 quality,
                 now,
-                self._config.half_life_days,
+                self._config.half_life_for(entry.kind),
                 recency_floor=self._config.recency_floor,
                 social_max=self._config.social_max,
                 confirmed_at=(

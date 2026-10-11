@@ -1,7 +1,8 @@
-"""Measure "last confirmed restarts the recency clock" (ADR 0071) with a real embedder.
+"""Measure ranking changes that are off by default with a real embedder.
 
-The setting is off by default until this has been run with the embedders a
-deployment uses. For each domain fixture (``domains.py``: five kinds of
+Two settings are measured here: "last confirmed restarts the recency clock"
+(ADR 0071) and "a recency profile per kind" (ADR 0072). Each is off by
+default until this has been run with the embedders a deployment uses. For each domain fixture (``domains.py``: five kinds of
 work, 32 entries each) and for all of them pooled, it:
 
 * seeds the pool with entries aged 0 to 400 days (a golden-ratio spread,
@@ -26,6 +27,9 @@ queries within 0.02 (those three come from the embedding-free slices in
 
 Run it against the deployment's embedder (the ``HIVEMIND_EMBEDDING_*``
 settings, e.g. ``make vllm`` locally): ``make measure-confirmation``.
+``make measure-ranking`` is the same command. The temporal slices of
+ADR 0072 (aged currency, timeless) are measured by
+``tests/eval/test_kind_profile.py``.
 ``tests/eval/test_confirmation_measurement.py`` runs it on the hash
 embedder, which checks the machinery only; its numbers mean nothing.
 """
@@ -71,10 +75,18 @@ class Variant:
     overrides: Mapping[str, Any]
 
 
+# The recency profiles of ADR 0072 that are measured (days; facts keep the
+# shipped 30). The domain fixtures have about 45% facts, 30% insights and
+# 25% decisions, each aged 0 to 400 days.
+PROFILE_SLOW = ((Kind.INSIGHT, 180.0), (Kind.DECISION, 365.0))
+PROFILE_MEDIUM = ((Kind.INSIGHT, 90.0), (Kind.DECISION, 180.0))
+
 # The first variant is the baseline the others are compared with.
 VARIANTS: tuple[Variant, ...] = (
     Variant("confirmation off", {}),
     Variant("confirmation on", {"recency_from_confirmation": True}),
+    Variant("kind profile: insight=180, decision=365", {"recency_by_kind": PROFILE_SLOW}),
+    Variant("kind profile: insight=90, decision=180", {"recency_by_kind": PROFILE_MEDIUM}),
 )
 
 
