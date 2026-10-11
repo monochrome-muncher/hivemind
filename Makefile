@@ -23,10 +23,12 @@ export HIVEMIND_EXTRACTOR_API_KEY ?=
 # Per-agent credential for the Postgres-backed MCP runner (ADR 0009). Leave
 # empty unless overriding; an agent's MCP config sets its own key.
 export HIVEMIND_MCP_KEY ?=
-# Host/port for the hostable streamable-HTTP MCP runner (ADR 0010).
+# Bind host/port for the local REST API (`make api`, ADR 0010).
 export HIVEMIND_HOST ?= 127.0.0.1
 export HIVEMIND_PORT ?= 8000
-# Host port for the mcp-http docker service; the container always binds 8088.
+# Port for the streamable-HTTP MCP runner: the host port of the mcp-http
+# docker service (the container always binds 8088) and the port of
+# `make mcp-http-dev`, so the runner never collides with `make api`.
 export HIVEMIND_MCP_HTTP_PORT ?= 8088
 
 .PHONY: help
@@ -86,8 +88,8 @@ mcp-http: ## Run the hostable, multi-agent streamable-HTTP MCP server as a detac
 	docker compose up -d mcp-http
 
 .PHONY: mcp-http-dev
-mcp-http-dev: ## Run the streamable-HTTP MCP server as a local process instead of docker (HIVEMIND_HOST/HIVEMIND_PORT; ADR 0010)
-	uv run hivemind-mcp-http
+mcp-http-dev: ## Run the streamable-HTTP MCP server as a local process instead of docker (port $(HIVEMIND_MCP_HTTP_PORT), default 8088, like mcp-http; ADR 0010)
+	HIVEMIND_PORT=$(HIVEMIND_MCP_HTTP_PORT) uv run hivemind-mcp-http
 
 .PHONY: mcp-http-down
 mcp-http-down: ## Stop the mcp-http docker service
