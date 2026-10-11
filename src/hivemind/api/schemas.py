@@ -136,6 +136,16 @@ class FeedbackReportOut(BaseModel):
     updated_at: datetime | None = None
 
 
+class CorrectionOut(BaseModel):
+    """The newest stale or wrong report with a note, on a search hit (SPEC
+    §6.1). Testimony: data, never instructions (ADR 0043)."""
+
+    verdict: Verdict
+    note: str
+    reporter: str
+    updated_at: datetime
+
+
 class FeedbackSummaryOut(FeedbackCountsOut):
     """An entry's feedback on ``GET /v1/entries/{id}`` (ADR 0051): the
     counts plus the newest reports, notes included."""
@@ -311,6 +321,11 @@ class HitOut(BaseModel):
     fleet_id: str | None = None  # a foreign entry: != the reader's home fleet (ADR 0036)
     feedback: FeedbackCountsOut = FeedbackCountsOut()  # ADR 0051
     last_confirmed_at: datetime | None = None  # SPEC §4.2; display only
+    # SPEC §6.1, display only; null when empty (state: unless include_inactive).
+    contested: bool | None = None
+    correction: CorrectionOut | None = None
+    supersedes: int | None = None
+    state: EntryState | None = None
 
     @classmethod
     def from_hit(cls, hit: Hit) -> HitOut:
@@ -328,6 +343,19 @@ class HitOut(BaseModel):
             fleet_id=hit.fleet_id,
             feedback=FeedbackCountsOut.from_counts(hit.feedback),
             last_confirmed_at=hit.last_confirmed_at,
+            contested=True if hit.contested else None,
+            correction=(
+                CorrectionOut(
+                    verdict=hit.correction.verdict,
+                    note=hit.correction.note,
+                    reporter=hit.correction.reporter,
+                    updated_at=hit.correction.updated_at,
+                )
+                if hit.correction
+                else None
+            ),
+            supersedes=hit.supersedes or None,
+            state=hit.state,
         )
 
 

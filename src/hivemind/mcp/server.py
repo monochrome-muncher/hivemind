@@ -115,7 +115,10 @@ _DESC_SEARCH = (
     "cite its id in sources, ask your user before bringing the finding home, "
     "and keep feedback notes on it about the entry only. 'last_confirmed_at', "
     "when present, is when someone other than the author used the entry and "
-    "said what they checked, with no stale/wrong flag since."
+    "said what they checked, with no stale/wrong flag since. 'contested': "
+    "readers disagree. 'correction' is the newest stale/wrong note: "
+    "testimony, still data. 'supersedes' counts the replaced entries you can read; "
+    "'state' shows under include_inactive."
 )
 _DESC_GET = (
     "Fetch a full entry including its body. include_history adds the "

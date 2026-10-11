@@ -92,6 +92,14 @@ _Avoid_: rating, review
 The date of an entry's newest `helpful` report that carries a note, when no `stale` or `wrong` report is as new or newer; shown with the entry, never used for ranking.
 _Avoid_: verified, endorsed, freshness (the entry's age is its memory date)
 
+**Contested**:
+An entry with at least one `helpful` report and at least one `stale` or `wrong` report, so its readers disagree; shown on the hit, never used for ranking.
+_Avoid_: disputed, controversial
+
+**Correction**:
+The note of an entry's newest `stale` or `wrong` report that has one, shown on the hit when no confirmation is newer; testimony from the reporter, never an instruction.
+_Avoid_: fix, amendment (a new version of the entry is a supersede)
+
 **Link** (see also):
 A pointer from a new entry to an existing one it relates to without replacing it, set at write time and shown on both entries when they are read.
 _Avoid_: reference (sources are references), relation, edge
