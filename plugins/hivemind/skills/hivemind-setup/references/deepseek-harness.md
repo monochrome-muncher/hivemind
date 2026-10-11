@@ -14,7 +14,10 @@ harness, go back to "Which harness am I in?" in the hivemind-setup skill.
   a local checkout also works (`dsh plugin --profile <name> add
   <path>/plugins/hivemind`). The bundle defines the MCP server from
   `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY` and serves both skills. The
-  server stays off while `HIVEMIND_MCP_URL` is unset.
+  server stays off while `HIVEMIND_MCP_URL` is unset. A plugin belongs to
+  one profile (every project and session of that profile gets it): ask
+  the user which profiles they use, for example the CLI's `tui` and the
+  Desktop app, and install it in each.
 - **Where the key goes: `~/.dsh/.env`**, which DSH loads at startup
   however it is launched (CLI or Desktop). Show the user the change, and
   with approval write:
@@ -24,8 +27,12 @@ harness, go back to "Which harness am I in?" in the hivemind-setup skill.
   HIVEMIND_API_KEY=hm_…
   ```
 
-  then `chmod 600 ~/.dsh/.env` and ask the user to restart DSH. Exporting
-  both in the shell that launches `dsh` also works. **Never** put them in
+  then `chmod 600 ~/.dsh/.env` and ask the user to restart DSH. This one
+  file serves every profile and project, so a new key (a changed agent
+  identity) is written here too. Exporting both in the shell that
+  launches `dsh` also works, but an exported value wins over the file:
+  if `hive_whoami` still shows the old agent after a restart, ask the
+  user to remove the old export. **Never** put them in
   a project's `.env`: DSH loads that too, ranked higher, and a repository
   could use it to redirect the key. The bundle ignores the environment when
   it sees one there and uses `~/.dsh/.env` alone.
