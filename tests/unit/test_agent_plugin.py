@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import tomllib
 from pathlib import Path
+from types import MappingProxyType
 
 import pytest
 
@@ -144,6 +145,18 @@ def test_manifests_agree_on_name_and_version() -> None:
     [codex_entry] = _json(ROOT / ".agents" / "plugins" / "marketplace.json")["plugins"]  # type: ignore[misc]
     assert (ROOT / codex_entry["source"]["path"]).resolve() == PLUGIN
     assert (ROOT / entry["source"]).resolve() == PLUGIN
+
+
+def test_the_hermes_manifest_is_valid_yaml() -> None:
+    """Hermes parses plugin.yaml with a YAML loader and skips the whole
+    plugin when it fails; an unquoted ": " in the description did that
+    from 2.3.1 to 2.5.0."""
+    yaml = pytest.importorskip("yaml")
+    manifest = yaml.safe_load((PLUGIN / "plugin.yaml").read_text())
+    assert manifest["name"] == "hivemind"
+    assert (
+        manifest["description"] == _json(PLUGIN / ".claude-plugin" / "plugin.json")["description"]
+    )
 
 
 def _yaml_scalar(path: Path, key: str) -> str:
@@ -344,20 +357,26 @@ def test_the_dsh_skill_provider_serves_both_skills_without_frontmatter() -> None
 
 
 class _HermesCtx:
-    """Stand-in for Hermes' plugin ``ctx``: records what gets registered."""
+    """Stand-in for Hermes' plugin ``ctx``: records what gets registered.
+
+    Matches Hermes v2026.9.24 (0.21.5): ``register_skill(name, path,
+    description="")``, and a section callable gets a read-only session-info
+    mapping (``hermes_cli/plugins_dispatch.py``)."""
 
     def __init__(self) -> None:
         self.skills: dict[str, Path] = {}
+        self.descriptions: dict[str, str] = {}
         self.sections: dict[str, str] = {}
         self.section_kwargs: dict[str, dict[str, object]] = {}
 
-    def register_skill(self, name: str, skill_md: Path) -> None:
+    def register_skill(self, name: str, skill_md: Path, description: str = "") -> None:
         self.skills[name] = Path(skill_md)
+        self.descriptions[name] = description
 
     def register_system_prompt_section(
-        self, section_id: str, render, position: str | None = None, max_chars: int | None = None
+        self, section_id: str, render, *, position: str = "after_memory", max_chars: int = 4000
     ) -> None:
-        self.sections[section_id] = render()
+        self.sections[section_id] = render(MappingProxyType({"session_id": "s"}))
         self.section_kwargs[section_id] = {"position": position, "max_chars": max_chars}
 
 
@@ -378,6 +397,7 @@ def test_the_hermes_plugin_serves_both_skills_and_the_stay_aware_section() -> No
     assert set(ctx.skills) == {"hivemind", "hivemind-setup"}
     for name, skill_md in ctx.skills.items():
         assert skill_md.is_file() and skill_md.name == "SKILL.md", name
+        assert f"description: {ctx.descriptions[name]}\n" in skill_md.read_text()
     assert list(ctx.sections) == ["hivemind"]
     assert ctx.section_kwargs["hivemind"]["position"] == "after_memory"
     assert STAY_AWARE_CORE in ctx.sections["hivemind"]
@@ -1221,16 +1241,17 @@ def test_opencode_plugin_does_not_register_the_server_without_a_key() -> None:
     assert "not set" in r["system"][0]
 
 
-def test_the_hermes_reference_makes_the_soul_block_required() -> None:
-    """ONB-2: Hermes does not render register_system_prompt_section upstream,
-    so the always-loaded SOUL.md block is the stay-aware layer."""
+def test_the_hermes_reference_makes_the_soul_block_required_on_older_releases() -> None:
+    """ONB-2: Hermes before v2026.9.24 (0.21.5) does not render
+    register_system_prompt_section, so there the always-loaded SOUL.md
+    block is the stay-aware layer."""
     text = " ".join((SETUP_REFS / "hermes.md").read_text().split())
-    assert "hermes-agent#117432" in text
+    assert "hermes-agent#117432" in text and "0.21.5" in text
     assert "SOUL.md" in text and "required" in text
-    assert "Do not rely on" in text
+    assert "Do not rely on that section on an older Hermes" in text
     assert "/reload-mcp" in text and "profiles/<name>/.env" in text
     doc = _load_hermes_plugin().__doc__ or ""
-    assert "117432" in doc and "Do not rely on it" in doc
+    assert "117432" in doc and "0.21.5" in doc
 
 
 def test_every_reference_that_holds_a_key_says_chmod_600_and_never_a_project_file() -> None:

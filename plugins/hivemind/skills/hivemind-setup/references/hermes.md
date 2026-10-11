@@ -10,12 +10,15 @@ in the hivemind-setup skill.
   <owner>/hivemind/plugins/hivemind`, then `hermes plugins enable
   hivemind`): the plugin serves both skills (as `hivemind:hivemind` and
   `hivemind:hivemind-setup`; namespaced plugin skills are not in the
-  skill index) and registers a Hivemind system-prompt section. **Do not
-  rely on that section**: current Hermes releases never render
-  registered sections (upstream issue NousResearch/hermes-agent#117432,
-  closed "not planned"; UNCONFIRMED whether a later release fixed it).
-  The marked block in `SOUL.md` (Stay aware, below) is **required**. The
-  MCP server is still configured by hand (below).
+  skill index) and registers a Hivemind system-prompt section, which
+  Hermes v2026.9.24 (0.21.5) and later put in every new session's system
+  prompt. **Do not rely on that section on an older Hermes** (`hermes
+  --version`): 0.19 has no sections and 0.21.3 never rendered them
+  (upstream issue NousResearch/hermes-agent#117432), so there the marked
+  block in `SOUL.md` (Stay aware, below) is **required**. The hivemind
+  plugin from releases 2.3.1 to 2.5.0 does not load at all (its
+  `plugin.yaml` is not valid YAML): update it. The MCP server is still configured by hand
+  (below).
 - **The MCP server**: add this to `~/.hermes/config.yaml` (all profiles)
   or the profile's own `config.yaml`, merging into the existing file.
   `${VAR}` references are resolved from the environment at connection
@@ -48,14 +51,18 @@ other harnesses.
 
 ## Stay aware
 
-- **The instruction block is required here**, not optional: put it in
+- **The instruction block is required** on a Hermes older than
+  v2026.9.24 (0.21.5), and harmless on a newer one: put it in
   `~/.hermes/SOUL.md` (the always-loaded file for the profile; the only
   global always-loaded instructions file in Hermes) as part of Connect.
   Verify it reached you: start a new session and quote the line in the
   block that starts `Hivemind`; if you cannot, the file is not being
   loaded, tell the user.
-- **No hook.** The plugin's system-prompt section is kept for Hermes
-  versions that render it, but do not claim it works.
+- **No hook.** On Hermes 0.21.5 and later the plugin's section (under
+  `## Plugin Context: hivemind`) is the always-on reminder; check that it
+  is in your system prompt before relying on it. Hermes has no hook that
+  can hold a stop, so there is no write-and-rate reminder at the end of a
+  session.
 
 ## Update
 
