@@ -5,15 +5,23 @@ A pin follows supersession to the version readers now see.
 from __future__ import annotations
 
 from hivemind.domain.access import TrustLevel, Visibility
+from hivemind.domain.audit import AuditAction
 from hivemind.domain.entry import Entry, EntryState
-from hivemind.domain.pin import Pin, PinnedEntry
+from hivemind.domain.feedback import Feedback, Verdict
+from hivemind.domain.pin import ChangeReason, Pin, PinnedEntry
 from hivemind.domain.validation import MAX_ID_CHARS, MAX_PINS_PER_FLEET, InvalidInput, check_text
 from hivemind.ports import Credential, Store
+from hivemind.services.audit import record_admin_action
 from hivemind.services.chain import get_visible_entries, get_visible_entry
 from hivemind.services.errors import EntryNotActive, EntryNotFound, PermissionDenied
 
 # How far a pin follows supersession to the current version (ADR 0058).
 _PIN_FOLLOW_HOPS = 16
+
+# How many feedback rows per shown entry the flagged check reads (ADR 0076):
+# the newest informative ones, so a stale or wrong verdict after the pin is
+# among them unless dozens of newer notes bury it.
+_FLAG_CHECK_ROWS = 50
 
 
 class PinService:
@@ -26,37 +34,55 @@ class PinService:
     async def pin(self, credential: Credential, entry_id: str) -> Pin:
         """Pin an active fleet entry to its own fleet. A privileged agent of
         that fleet or an admin may; a fleet holds at most
-        ``MAX_PINS_PER_FLEET`` pins. Pinning a pinned entry is a no-op, and
-        so is pinning the version an earlier pin already shows."""
+        ``MAX_PINS_PER_FLEET`` pins. Pinning stamps a fresh ``pinned_at``
+        and ``pinned_by``, so re-pinning a pinned entry refreshes its pin,
+        and re-pinning the version an older pin now shows moves that pin to
+        it; either way the pin is no longer ``changed_since_pin`` (ADR 0076).
+        Every pin is audited, naming the pin it replaced."""
         entry, fleet_id = await self._pinnable(credential, entry_id)
         if entry.state is not EntryState.ACTIVE:
             raise EntryNotActive(
                 f"entry {entry_id} is {entry.state.value}; only active entries can be pinned"
             )
         shown = await self._pins_shown_as(fleet_id, entry, credential.visibility())
-        if shown:
-            return shown[0]
-        pin = await self._store.pin_entry(
+        written = await self._store.pin_entry(
             fleet_id,
             entry.id,
             credential.agent_name or credential.user_id,
             MAX_PINS_PER_FLEET,
+            [p.entry_id for p in shown],
         )
-        if pin is None:
+        if written is None:
             raise InvalidInput(
                 f"the fleet already has {MAX_PINS_PER_FLEET} pinned entries: unpin one first"
             )
-        return pin
+        detail: dict[str, object] = {"fleet_id": fleet_id}
+        if written.replaced:
+            detail["from"] = written.replaced[0] if len(written.replaced) == 1 else written.replaced
+        await record_admin_action(self._store, credential, AuditAction.ENTRY_PIN, entry.id, detail)
+        return written.pin
 
     async def unpin(self, credential: Credential, entry_id: str) -> bool:
         """Remove an entry's pin (any state); whether it was pinned. The
         version a pin shows unpins it too, since that is the id readers
-        see once the pinned entry is superseded."""
+        see once the pinned entry is superseded. An unpin that removed a pin
+        is audited once, with the removed pin ids (ADR 0076)."""
         entry, fleet_id = await self._pinnable(credential, entry_id)
-        removed = await self._store.unpin_entry(fleet_id, entry.id)
+        removed_ids: list[str] = []
+        if await self._store.unpin_entry(fleet_id, entry.id):
+            removed_ids.append(entry.id)
         for pin in await self._pins_shown_as(fleet_id, entry, credential.visibility()):
-            removed = await self._store.unpin_entry(fleet_id, pin.entry_id) or removed
-        return removed
+            if await self._store.unpin_entry(fleet_id, pin.entry_id):
+                removed_ids.append(pin.entry_id)
+        if removed_ids:
+            await record_admin_action(
+                self._store,
+                credential,
+                AuditAction.ENTRY_UNPIN,
+                entry.id,
+                {"fleet_id": fleet_id, "pin_ids": removed_ids},
+            )
+        return bool(removed_ids)
 
     async def pinned(
         self, credential: Credential, fleet_id: str | None = None
@@ -67,6 +93,7 @@ class PinService:
         A pin follows supersession to the current version; a withdrawn
         entry shows as withdrawn until unpinned. Unreadable entries are
         left out, and a version two pins lead to is shown once (newest pin).
+        Each carries why it changed since it was pinned, if it did (ADR 0076).
         """
         fleet = fleet_id or credential.home_fleet_id
         if fleet is None:
@@ -77,7 +104,7 @@ class PinService:
             return []
         visibility = credential.visibility()
         found = await get_visible_entries(self._store, [p.entry_id for p in pins], visibility)
-        result: list[PinnedEntry] = []
+        shown_pins: list[tuple[Pin, Entry]] = []
         shown: set[str] = set()
         for pin in pins:
             entry = found.get(pin.entry_id)
@@ -86,8 +113,15 @@ class PinService:
             current = await self._current(entry, visibility)
             if current.id not in shown:
                 shown.add(current.id)
-                result.append(PinnedEntry(pin, current))
-        return result
+                shown_pins.append((pin, current))
+        # One batched read of the shown entries' feedback, not one per pin.
+        feedback = await self._store.list_feedback_many(
+            [current.id for _, current in shown_pins], _FLAG_CHECK_ROWS
+        )
+        return [
+            PinnedEntry(pin, current, _change_reason(pin, current, feedback.get(current.id, [])))
+            for pin, current in shown_pins
+        ]
 
     async def _pins_shown_as(
         self, fleet_id: str, entry: Entry, visibility: Visibility
@@ -133,3 +167,19 @@ class PinService:
                 "only a privileged agent of the entry's fleet or an admin may pin or unpin"
             )
         return entry, entry.fleet_id
+
+
+def _change_reason(pin: Pin, current: Entry, feedback: list[Feedback]) -> ChangeReason | None:
+    """Why the briefing no longer shows what was pinned (ADR 0076):
+    ``superseded`` (a later version), else ``flagged`` (a stale or wrong
+    verdict newer than the pin), else ``None``."""
+    if current.id != pin.entry_id:
+        return "superseded"
+    if any(
+        fb.verdict is not Verdict.HELPFUL
+        and fb.updated_at is not None
+        and fb.updated_at > pin.pinned_at
+        for fb in feedback
+    ):
+        return "flagged"
+    return None

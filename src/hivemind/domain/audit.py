@@ -6,7 +6,7 @@ Pure data — no I/O. An ``AuditEvent`` is what a writer hands the
 there is no update or delete, and ``target`` is a bare string (no
 foreign key), so a revoked agent's history outlives its record.
 
-Three actor kinds (ADR 0027, ADR 0046):
+Four actor kinds (ADR 0027, ADR 0046, ADR 0076):
 
 * ``admin_key`` — the app admin surface (``AccessService`` /
   ``GovernanceService``). The actor is ``admin:<key fingerprint>``, a
@@ -14,6 +14,8 @@ Three actor kinds (ADR 0027, ADR 0046):
 * ``org_key`` — a registration made with the shared org key (ADR 0046).
   The actor is ``org:<key fingerprint>``: verified as *an* org-key holder,
   which identifies no person (every agent shares that key).
+* ``agent_key`` — a privileged agent acting inside its own fleet (a pin
+  or unpin, ADR 0076). The actor is the server-verified agent name.
 * ``cli`` — the ``hivemind-keys`` bootstrap / break-glass CLI. The
   actor is the operator-supplied ``--actor`` (default: the OS user) and
   is **unverified** — anyone with database access can type anything.
@@ -37,12 +39,13 @@ class ActorKind(StrEnum):
 
     ADMIN_KEY = "admin_key"  # the app admin surface: a verified admin key
     ORG_KEY = "org_key"  # a registration with the shared org key (ADR 0046)
+    AGENT_KEY = "agent_key"  # a privileged agent's own key: pin, unpin (ADR 0076)
     CLI = "cli"  # the hivemind-keys CLI: an unverified, operator-typed name
 
 
 class AuditAction(StrEnum):
     """The audited action vocabulary (the ``audit_log_action_check``
-    constraint, migrations ``0005`` and ``0009``)."""
+    constraint, migrations ``0005``, ``0009`` and ``0014``)."""
 
     AGENT_REGISTER = "agent.register"  # ADR 0046
     AGENT_ACTIVATE = "agent.activate"
@@ -55,6 +58,8 @@ class AuditAction(StrEnum):
     ADMIN_KEY_ISSUE = "admin_key.issue"
     ADMIN_KEY_REVOKE = "admin_key.revoke"
     AGENT_KEY_ISSUE = "agent_key.issue"
+    ENTRY_PIN = "entry.pin"  # ADR 0076
+    ENTRY_UNPIN = "entry.unpin"  # ADR 0076
 
 
 # The key fingerprint is the first 12 hex chars of the stored SHA-256

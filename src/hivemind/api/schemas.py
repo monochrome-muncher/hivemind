@@ -15,7 +15,7 @@ from hivemind.domain.access import Agent, Fleet, Standing
 from hivemind.domain.audit import AuditRecord
 from hivemind.domain.entry import EntityKind, Entry, EntryState, ImportanceSource, Kind, SourceType
 from hivemind.domain.feedback import FeedbackCounts, FeedbackSummary, Verdict
-from hivemind.domain.pin import Pin, PinnedEntry
+from hivemind.domain.pin import ChangeReason, Pin, PinnedEntry
 from hivemind.domain.recency import RecencyHint
 from hivemind.domain.validation import (
     MAX_FEEDBACK_IDS,
@@ -484,6 +484,9 @@ class PinnedOut(BaseModel):
     state: EntryState
     pinned_by: str
     pinned_at: datetime
+    # ADR 0076: ``change_reason`` is ``superseded`` or ``flagged`` when set.
+    changed_since_pin: bool
+    change_reason: ChangeReason | None
 
     @classmethod
     def from_pinned(cls, pinned: PinnedEntry) -> PinnedOut:
@@ -496,6 +499,8 @@ class PinnedOut(BaseModel):
             state=pinned.entry.state,
             pinned_by=pinned.pin.pinned_by,
             pinned_at=pinned.pin.pinned_at,
+            changed_since_pin=pinned.changed_since_pin,
+            change_reason=pinned.change_reason,
         )
 
 

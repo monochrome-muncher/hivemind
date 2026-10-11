@@ -130,7 +130,7 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | `POST /v1/entries/{id}/withdraw` | Withdraw own entry (or any, with admin credential) |
 | `POST /v1/entries/{id}/feedback` | Report `helpful`/`stale`/`wrong` (+note); not on the caller's own entry: 403 `forbidden` (ADR 0065) |
 | `PUT /v1/entries/{id}/pin` / `DELETE /v1/entries/{id}/pin` | Pin an active fleet entry to its fleet's briefing, or unpin it: a privileged agent of that fleet or the admin key; at most 10 pins per fleet; once the pinned entry is superseded, the version the pin shows names the same pin (ADR 0058) |
-| `GET /v1/pins` | A fleet's pinned entries, newest pin first, each as its newest readable version (`id`, `pinned_id`); the caller's home fleet unless `?fleet_id=` (ADR 0058) |
+| `GET /v1/pins` | A fleet's pinned entries, newest pin first, each as its newest readable version (`id`, `pinned_id`) with `changed_since_pin` and `change_reason` (`superseded`, or `flagged` by a `stale`/`wrong` verdict after the pin; ADR 0076); the caller's home fleet unless `?fleet_id=` (ADR 0058) |
 | `POST /v1/feedback` | One verdict (+note) on up to 16 entries at once, `{entry_ids, verdict, note?}`; all must be readable and none the caller's own, or nothing is recorded (ADRs 0053, 0065) |
 | `GET /v1/health` | Static health answer (no database check) |
 | `GET /v1/liveness` | Unauthenticated orchestrator liveness probe (ADR 0019) |
@@ -369,7 +369,7 @@ This section supersedes the flat-pool commitment of §1 and the "no trust tiers"
 * Reads beyond visibility behave **as if the entry does not exist** (no existence leaking).
 * `self`-scoped entries are private to their author **even at level 3** (that is what `self` is for).
 * **Read-broad does not mean relay** (ADR 0036): a privileged agent uses what it reads in other fleets but does not restate it in its home fleet; it links a foreign entry by id and asks its user before bringing one home. This is agent guidance (the hivemind skill), not something the server can enforce.
-* **Pinning is privileged and fleet-local** (ADR 0058): a privileged agent pins active entries of its home fleet into that fleet's briefing (at most 10); the admin key may pin in any fleet. Pins are context for the fleet's agents, never instructions (ADR 0043).
+* **Pinning is privileged and fleet-local** (ADR 0058): a privileged agent pins active entries of its home fleet into that fleet's briefing (at most 10); the admin key may pin in any fleet. Pins are context for the fleet's agents, never instructions (ADR 0043). Pin and unpin are audited (§12.5); pinning again refreshes `pinned_at` / `pinned_by` (and moves the pin onto the version an older pin now shows), which clears the flag; a pinned entry reports whether it **changed since pinned** (ADR 0076).
 * **Feedback and withdrawal follow readability**: an agent may feedback entries it can read, and withdraw its own entries; the admin key may withdraw any entry (the §4.1 withdrawal rules now ride the trust matrix).
 * **Every read by id follows readability** (ADR 0033): `hive_get` / `GET /v1/entries/{id}`, feedback and withdrawal answer **not found** for an entry the caller cannot see, and the supersession chain (`include_history` / `?history`) leaves such versions out.
 * **Provenance is never self-reported by an agent key** (ADRs 0012, 0033): on both surfaces `author` is the key's registered name and `agent` the key's agent identity.
@@ -396,7 +396,7 @@ The single admin key gates this surface; admin-issued entries use the reserved n
 
 ### 12.5 Audit log
 
-Every admin-surface action is recorded in an append-only **audit log** (ADR 0027) — distinct from an entry's provenance and its supersession chain.
+Every admin-surface action, and every agent pin or unpin (ADR 0076), is recorded in an append-only **audit log** (ADR 0027) — distinct from an entry's provenance and its supersession chain.
 
 **What is recorded.** One row per successful action, with `occurred_at`, `actor_kind`, `actor`, `action`, `target` and a `detail` object:
 
@@ -412,9 +412,11 @@ Every admin-surface action is recorded in an append-only **audit log** (ADR 0027
 | `entry.withdraw` | `POST /v1/entries/{id}/withdraw` **only** when the admin key withdraws another agent's entry (§4.1) | entry id | `{author, reason}` |
 | `admin_key.issue` | `hivemind-keys issue-admin` | key fingerprint | `{}` |
 | `admin_key.revoke` | `hivemind-keys revoke-admin` (a successful revocation only) | key fingerprint | `{}` |
+| `entry.pin` | `PUT /v1/entries/{id}/pin`, `hive_pin` — every stored pin, a re-pin included (ADR 0076) | entry id | `{fleet_id}`, plus `from` (the replaced pin id, or a list) when a re-pin moved older pins |
+| `entry.unpin` | `DELETE /v1/entries/{id}/pin`, `hive_pin` with `unpin` — a pin actually removed (ADR 0076) | entry id | `{fleet_id, pin_ids}` (the removed pins) |
 | `agent_key.issue` | `hivemind-keys issue-agent` | agent name | `{}`, or `{"from", "trust_level", "home_fleet_id"}` when it activated a pending/revoked agent (ADR 0039) |
 
-**Actors.** `actor_kind` is `admin_key` for the REST admin surface — `actor` is `admin:<fingerprint>` of the verified admin key — `org_key` for a registration made with the org key — `actor` is `org:<fingerprint>`, which identifies the key, not who used it (ADR 0046) — or `cli` for `hivemind-keys`, whose `actor` is the operator-supplied `--actor` (default: the OS user) and is **unverified**. A key **fingerprint** is the first 12 hex characters of the key's stored SHA-256 hash (what `hivemind-keys list` shows).
+**Actors.** `actor_kind` is `admin_key` for the REST admin surface — `actor` is `admin:<fingerprint>` of the verified admin key — `agent_key` for a privileged agent's pin or unpin — `actor` is the verified agent name (ADR 0076) — `org_key` for a registration made with the org key — `actor` is `org:<fingerprint>`, which identifies the key, not who used it (ADR 0046) — or `cli` for `hivemind-keys`, whose `actor` is the operator-supplied `--actor` (default: the OS user) and is **unverified**. A key **fingerprint** is the first 12 hex characters of the key's stored SHA-256 hash (what `hivemind-keys list` shows).
 
 **Never recorded.** No raw API key appears in any column. Read-only calls, re-registrations (`already_registered`) and refused registrations are not audited; nor is an author withdrawing their own entry.
 
