@@ -84,9 +84,10 @@ the repo or docs already say (cite them in `sources`). Before reporting
 a task done, ask once what you would have needed at the start; if
 nothing new, write nothing ("task done" helps nobody).
 
-**Search with your draft summary first** and act on the nearest entry
-(the same for `related` in the write reply; withdraw yours if it
-duplicated one):
+**Check your draft first** (`hive_write` with `check: true` stores
+nothing; a reply with an `id` was stored), fix what its `warnings` name
+and act on the nearest entry in `related` (withdraw yours if stored and
+it duplicated one):
 
 | The nearest entry | Do |
 |---|---|
