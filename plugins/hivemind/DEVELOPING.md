@@ -41,7 +41,7 @@ reminder that survives compaction and new sessions.
 | Claude Code | `.mcp.json` in the plugin | the plugin | `SessionStart` hook |
 | Codex | the user's `~/.codex/config.toml` (plugin MCP config cannot read the URL and key from the environment) | the plugin | `SessionStart` hook, which the user must trust in `/hooks` |
 | DeepSeek Harness | the bundle's row in `cordis.patch.yml` | `dsh/hivemind-skills.js` | none needed: DSH keeps the server's instructions in the system prompt |
-| Hermes | the user's `~/.hermes/config.yaml` | the plugin | the `SOUL.md` instruction block (the plugin's section is not rendered, see below) |
+| Hermes | the user's `~/.hermes/config.yaml` | the plugin | the plugin's system-prompt section (Hermes 0.21.5+), else the `SOUL.md` instruction block (see below) |
 | Pi | the extension registers it with Pi 0.99+ built-in MCP; with pi-mcp-adapter, the adapter's config | the package | the extension's system-prompt section |
 | Oh My Pi | the user's `~/.omp/agent/mcp.json` | the plugin | the extension's system-prompt section |
 | OpenCode | `opencode/hivemind.js` (skipped if a hand-configured `hivemind` server exists or no key is set) | the plugin | added to every model request |
@@ -62,11 +62,17 @@ itself names no harness-specific paths, and a test enforces this.
   when Hivemind works. To distribute the bundle through an npm mirror,
   remove `"private": true` from `package.json` and publish it as
   `hivemind-agent-plugin` (named `hivemind-dsh-plugin` before 2.0.1).
-- **Hermes** registers the plugin's system-prompt section but current
-  releases never render it (upstream issue
-  NousResearch/hermes-agent#117432, closed "not planned"). That is why the
-  `SOUL.md` block is required. Hermes also loads `~/.hermes/.env` over the
-  process environment, which matters for incognito.
+- **Hermes** renders a plugin's system-prompt section from v2026.9.24
+  (0.21.5): once per new session, calling the content callable with a
+  read-only session-info mapping, and skipping (with a warning) a section
+  that raises. 0.19 has no `register_system_prompt_section`, and 0.21.3
+  never rendered it (NousResearch/hermes-agent#117432), so the `SOUL.md`
+  block stays required there. Hermes parses `plugin.yaml` with a YAML
+  loader and skips the whole plugin when that fails (an unquoted `: ` in
+  the description did so from 2.3.1 to 2.5.0). Checked with v2026.9.24:
+  both skills register and the section renders. Hermes also loads
+  `~/.hermes/.env` over the process environment, which matters for
+  incognito.
 - **Pi** supports two MCP routes for now: the built-in client (Pi 0.99+),
   where the extension registers the server unless an adapter config
   already defines `hivemind`, and the older pi-mcp-adapter. pi-mcp-adapter

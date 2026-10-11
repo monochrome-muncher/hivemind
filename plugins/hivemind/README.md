@@ -85,8 +85,10 @@ hermes plugins install <owner>/hivemind/plugins/hivemind   # or /path/to/this/re
 hermes plugins enable hivemind
 ```
 
-On Hermes, the marked Hivemind block in `~/.hermes/SOUL.md` is required
-to keep the agent aware of Hivemind. The setup skill adds it.
+Hermes v2026.9.24 (0.21.5) and later put the plugin's Hivemind section
+in every new session's system prompt. On older releases the marked
+Hivemind block in `~/.hermes/SOUL.md` is required to keep the agent aware
+of Hivemind; the setup skill adds it either way.
 
 ### Pi
 
