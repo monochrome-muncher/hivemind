@@ -232,7 +232,9 @@ async def test_notes_are_stored_trimmed_and_a_blank_note_is_none() -> None:
     "last confirmed" date, no empty correction)."""
     store = MemoryStore(make_clock())
     entry = await hive_write(_surface(store, WRITER), kind="fact", summary="billing on node 20")
-    await hive_feedback(_surface(store, LURKER), entry["id"], verdict="helpful", note="\u00a0 \u0085")
+    await hive_feedback(
+        _surface(store, LURKER), entry["id"], verdict="helpful", note="\u00a0 \u0085"
+    )
     peer = _agent("peer", "fleet-a", TrustLevel.CONTRIBUTOR)
     await hive_feedback(_surface(store, peer), entry["id"], verdict="helpful", note=" ok ")
     rows = {fb.agent: fb.note for fb in await store.list_feedback(str(entry["id"]), 10)}
