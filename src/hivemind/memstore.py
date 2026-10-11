@@ -15,13 +15,17 @@ from __future__ import annotations
 import math
 import threading
 import uuid
+from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from hivemind.domain.access import (
     ACTIVATABLE,
     REVOCABLE,
+    SCOPE_FLEET,
+    SCOPE_ORG,
+    SCOPE_SELF,
     Agent,
     AgentStatus,
     Fleet,
@@ -56,11 +60,28 @@ from hivemind.domain.feedback import (
     last_confirmed,
     truncate_note,
 )
+from hivemind.domain.health import (
+    DISPERSION_CAP,
+    DISPERSION_MIN,
+    DISPERSION_TAGS,
+    ECHO_SAMPLE,
+    ECHO_THRESHOLD,
+    Convergence,
+    FleetHealth,
+    HealthCounts,
+    TagDispersion,
+    is_entry_ref,
+)
 from hivemind.domain.pin import Pin, PinWrite
 from hivemind.ports import SupersedeConflict
 
 # Sort key for a feedback row that has no timestamp (fixtures only).
 _EPOCH = datetime.min.replace(tzinfo=UTC)
+
+
+_DAYS_90 = timedelta(days=90)
+_DAYS_60 = timedelta(days=60)
+_DAYS_30 = timedelta(days=30)
 
 
 def _utcnow() -> datetime:
@@ -81,6 +102,16 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     if norm_a == 0.0 or norm_b == 0.0:
         return 0.0
     return dot / (norm_a * norm_b)
+
+
+def _mean_pairwise_cosine(entries: list[Entry]) -> float:
+    """Mean cosine over all pairs; the caller guarantees at least two."""
+    pairs = [
+        cosine_similarity(list(a.embedding or ()), list(b.embedding or ()))
+        for i, a in enumerate(entries)
+        for b in entries[i + 1 :]
+    ]
+    return sum(pairs) / len(pairs)
 
 
 class MemoryStore:
@@ -292,6 +323,190 @@ class MemoryStore:
                 if successor is not None:
                     confirmed[fb.user] = confirmed.get(fb.user, 0) + 1
             return [FlagCount(u, n, confirmed.get(u, 0)) for u, n in flags.items()]
+
+    async def fleet_health(self, now: datetime) -> FleetHealth:
+        """The same aggregates as ``PgStore`` (ADR 0075), in plain loops."""
+        with self._lock:
+            live = list(self._live_feedback().values())
+            revoked = {n for n, a in self._agents.items() if a.status is AgentStatus.REVOKED}
+            flagged = [fb for fb in live if fb.verdict is not Verdict.HELPFUL]
+            first_flag: dict[str, datetime] = {}
+            for fb in flagged:
+                at = fb.updated_at or now
+                if fb.entry_id not in first_flag or at < first_flag[fb.entry_id]:
+                    first_flag[fb.entry_id] = at
+            fresh = {fb.entry_id for fb in live if now - _DAYS_90 <= (fb.updated_at or now) <= now}
+            outgoing: Counter[str] = Counter(frm for frm, _ in self._links)
+            last_write: dict[str, datetime] = {}
+            for e in self._entries.values():
+                if e.author not in last_write or e.created_at > last_write[e.author]:
+                    last_write[e.author] = e.created_at
+            rows: dict[str | None, dict[str, int]] = {}
+            for e in self._entries.values():
+                if e.state is not EntryState.ACTIVE:
+                    continue
+                c = rows.setdefault(e.fleet_id, Counter())
+                if e.scope in (SCOPE_ORG, SCOPE_FLEET) and e.kind in (Kind.FACT, Kind.INSIGHT):
+                    c["sourceable"] += 1
+                    c["sourced"] += bool(e.sources)
+                if e.kind is Kind.INSIGHT:
+                    c["insights"] += 1
+                    c["synthesizing"] += outgoing[e.id] >= 2
+                flag_at = first_flag.get(e.id)
+                if flag_at is not None:
+                    c["backlog"] += flag_at < now - timedelta(days=14)
+                    c["orphaned"] += e.author in revoked or last_write[e.author] < now - timedelta(
+                        days=30
+                    )
+                c["floating"] += e.occurred_at < now - _DAYS_90 and e.id not in fresh
+                c["anomaly"] += "anomaly" in e.tags
+                c["open_question"] += "open-question" in e.tags
+                c["dead_end"] += "dead-end" in e.tags
+            since = now - _DAYS_90
+            recent = [e for e in self._entries.values() if since <= e.created_at <= now]
+            authors = Counter(e.author for e in recent)
+            verdicts = Counter(fb.user for fb in live if since <= (fb.updated_at or now) <= now)
+            latencies: list[float] = []
+            supersessions = 0
+            promoted: set[str] = set()
+            predecessors: dict[str, list[Entry]] = {}
+            for old in self._entries.values():
+                if old.superseded_by is not None:
+                    predecessors.setdefault(old.superseded_by, []).append(old)
+            for succ in recent:
+                for old in predecessors.get(succ.id, ()):
+                    supersessions += 1
+                    if old.scope == SCOPE_SELF and succ.scope == SCOPE_FLEET:
+                        promoted.add(succ.id)
+                    times = [
+                        fb.updated_at or now
+                        for fb in flagged
+                        if fb.entry_id == old.id and (fb.updated_at or now) < succ.created_at
+                    ]
+                    if old.state is EntryState.SUPERSEDED and times:
+                        latencies.append((succ.created_at - min(times)).total_seconds())
+            helpful = [fb for fb in live if fb.verdict is Verdict.HELPFUL]
+            since30 = now - _DAYS_30
+            written30 = [e for e in self._entries.values() if since30 <= e.created_at <= now]
+            synth = [
+                e
+                for e in written30
+                if e.scope in (SCOPE_ORG, SCOPE_FLEET) and e.kind in (Kind.INSIGHT, Kind.DECISION)
+            ]
+            labeled30 = [e for e in written30 if e.agent.strip()]
+            labels = Counter(e.agent for e in labeled30)
+            label_verdicts = Counter(
+                fb.agent
+                for fb in live
+                if since30 <= (fb.updated_at or now) <= now and fb.agent.strip()
+            )
+            by_entry: dict[str, set[Verdict]] = {}
+            for fb in live:
+                by_entry.setdefault(fb.entry_id, set()).add(fb.verdict)
+            active = [e for e in self._entries.values() if e.state is EntryState.ACTIVE]
+
+            def ages(match: Callable[[Entry], bool]) -> tuple[float, ...]:
+                return tuple((now - e.created_at).total_seconds() for e in active if match(e))
+
+            def contested(e: Entry) -> bool:
+                seen = by_entry.get(e.id, set())
+                return Verdict.HELPFUL in seen and len(seen) > 1
+
+            return FleetHealth(
+                by_fleet=tuple(
+                    HealthCounts(
+                        fleet_id=fleet_id,
+                        sourceable=c["sourceable"],
+                        sourced=c["sourced"],
+                        insights=c["insights"],
+                        synthesizing=c["synthesizing"],
+                        flagged_backlog_14d=c["backlog"],
+                        orphaned_flagged=c["orphaned"],
+                        floating_gap=c["floating"],
+                        gap_anomaly=c["anomaly"],
+                        gap_open_question=c["open_question"],
+                        gap_dead_end=c["dead_end"],
+                    )
+                    for fleet_id, c in rows.items()
+                ),
+                helpful=len(helpful),
+                helpful_with_note=sum(1 for fb in helpful if fb.note and fb.note.strip()),
+                correction_latencies=tuple(latencies),
+                writes_90d=len(recent),
+                top3_author_writes_90d=sum(n for _, n in authors.most_common(3)),
+                authors_90d=len(authors),
+                verdicts_90d=sum(verdicts.values()),
+                top3_reporter_verdicts_90d=sum(n for _, n in verdicts.most_common(3)),
+                reporters_90d=len(verdicts),
+                supersessions_90d=supersessions,
+                self_to_fleet_promotions_90d=len(promoted),
+                alternative_ages=ages(lambda e: "alternative" in e.tags),
+                conflict_ages=ages(lambda e: e.summary.startswith("Conflict:")),
+                contested_ages=ages(contested),
+                synthesis_writes_30d=len(synth),
+                grounded_30d=sum(
+                    1 for e in synth if any(not is_entry_ref(src.ref) for src in e.sources)
+                ),
+                writes_30d=len(labeled30),
+                top3_label_writes_30d=sum(n for _, n in labels.most_common(3)),
+                write_labels_30d=len(labels),
+                verdicts_30d=sum(label_verdicts.values()),
+                top3_label_verdicts_30d=sum(n for _, n in label_verdicts.most_common(3)),
+                verdict_labels_30d=len(label_verdicts),
+            )
+
+    async def fleet_convergence(self, now: datetime) -> Convergence:
+        """The same figures as ``PgStore`` (ADR 0075), with exact cosines."""
+        with self._lock:
+            window = [
+                e
+                for e in self._entries.values()
+                if e.embedding is not None and now - _DAYS_60 <= e.created_at <= now
+            ]
+            newest = sorted(window, key=lambda e: (e.created_at, e.id), reverse=True)
+            sampled = [e for e in newest if e.created_at >= now - _DAYS_30][:ECHO_SAMPLE]
+            hits = 0
+            for w in sampled:
+                assert w.embedding is not None
+                best = max(
+                    (
+                        cosine_similarity(list(w.embedding), list(e.embedding))
+                        for e in self._entries.values()
+                        if e.state is EntryState.ACTIVE
+                        and e.embedding is not None
+                        and (e.created_at, e.id) < (w.created_at, w.id)
+                    ),
+                    default=None,
+                )
+                hits += best is not None and best >= ECHO_THRESHOLD
+            by_tag: dict[str, list[Entry]] = {}
+            for e in newest:
+                if e.scope not in (SCOPE_ORG, SCOPE_FLEET):
+                    continue  # tags are read from org and fleet entries only
+                for tag in set(e.tags):
+                    by_tag.setdefault(tag, []).append(e)
+            busy: list[tuple[int, str, list[Entry], list[Entry]]] = []
+            for tag, entries in by_tag.items():
+                recent = [e for e in entries if e.created_at >= now - _DAYS_30][:DISPERSION_CAP]
+                before = [e for e in entries if e.created_at < now - _DAYS_30][:DISPERSION_CAP]
+                n_recent = sum(1 for e in entries if e.created_at >= now - _DAYS_30)
+                if min(n_recent, len(entries) - n_recent) >= DISPERSION_MIN:
+                    busy.append((-len(entries), tag, recent, before))
+            busy.sort(key=lambda b: b[:2])
+            return Convergence(
+                echo_sampled=len(sampled),
+                echo_hits=hits,
+                dispersion=tuple(
+                    TagDispersion(
+                        tag=tag,
+                        recent_entries=len(recent),
+                        before_entries=len(before),
+                        recent_cosine=_mean_pairwise_cosine(recent),
+                        before_cosine=_mean_pairwise_cosine(before),
+                    )
+                    for _, tag, recent, before in busy[:DISPERSION_TAGS]
+                ),
+            )
 
     async def record_search(self, fleet_id: str | None, *, empty: bool) -> None:
         with self._lock:

@@ -29,6 +29,12 @@ Three groups of series:
   stale/wrong reports and the ones a later supersession confirmed. An
   observation, never a ranking input; agents with no flags have no series.
 
+* **Fleet health** (ADR 0075): the `hivemind_health_*` gauges, admin-facing
+  observations of the pool (verdict notes, sources, correction speed,
+  orphaned flags, concentration, synthesis, gap tags) with a few per-fleet
+  series. Never a ranking input. Cached with the entry scan; a share with
+  no denominator has no series.
+
 A failed usage refresh keeps the last snapshot and sets
 ``hivemind_usage_report_success`` to 0; the scrape itself still answers.
 """
@@ -54,7 +60,7 @@ METRICS_PATH = "/metrics"
 USAGE_TTL_SECONDS = 30.0
 UNMATCHED_ROUTE = "unmatched"
 
-UsageReport = Mapping[str, Mapping[str, Any]]
+UsageReport = Mapping[str, Any]
 Clock = Callable[[], float]
 
 
@@ -162,6 +168,160 @@ def _usage_families(report: UsageReport) -> Iterator[GaugeMetricFamily | Counter
         ["agent"],
         {a: c["confirmed"] for a, c in by_agent.items()},
     )
+    status = report.get("health_status")
+    if status is not None:
+        yield _gauge(
+            "hivemind_health_success",
+            "1 if the last fleet health refresh succeeded, else 0 (the gauges below are then stale)",
+            [],
+            {"": 1.0 if status["ok"] else 0.0},
+        )
+    if (health := report.get("health")) is not None:
+        yield from _health_families(health)
+
+
+def _optional(name: str, doc: str, value: float | None) -> Iterator[GaugeMetricFamily]:
+    """A label-less gauge, absent while ``value`` is unknown."""
+    if value is not None:
+        yield _gauge(name, doc, [], {"": value})
+
+
+def _health_families(health: Mapping[str, Any]) -> Iterator[GaugeMetricFamily]:
+    """The fleet health gauges (ADR 0075)."""
+    p = "hivemind_health_"
+    yield from _optional(
+        p + "helpful_with_note_ratio",
+        "Share of current helpful verdicts that carry a note",
+        health["helpful_with_note_share"]["share"],
+    )
+    yield from _optional(
+        p + "sourced_ratio",
+        "Share of active org- and fleet-scope facts and insights with at least one source",
+        health["sourced_share"]["share"],
+    )
+    yield from _optional(
+        p + "correction_latency_p50_seconds",
+        "Median seconds from an entry's first stale/wrong verdict to its successor, last 90 days",
+        health["correction_latency_p50_seconds"],
+    )
+    for name, doc in (
+        ("flagged_backlog_14d", "Active entries flagged stale or wrong more than 14 days ago"),
+        (
+            "orphaned_flagged",
+            "Active flagged entries whose author is revoked or silent for 30 days",
+        ),
+        ("floating_gap", "Active entries older than 90 days with no feedback in 90 days"),
+        ("self_to_fleet_promotions", "Fleet entries superseding a self entry, last 90 days"),
+    ):
+        yield _gauge(p + name, doc, [], {"": health[name]})
+    yield from _optional(
+        p + "top3_author_write_ratio",
+        "Share of the last 90 days' writes made by the three busiest authors",
+        health["top3_author_write_share"]["share"],
+    )
+    yield from _optional(
+        p + "top3_reporter_verdict_ratio",
+        "Share of the last 90 days' verdicts given by the three busiest reporters",
+        health["top3_reporter_verdict_share"]["share"],
+    )
+    yield from _optional(
+        p + "synthesis_ratio",
+        "Share of active insights with at least two see-also links",
+        health["synthesis_rate"]["share"],
+    )
+    yield from _optional(
+        p + "supersessions_per_100_writes",
+        "Supersessions per 100 writes, last 90 days",
+        health["supersessions_per_100_writes"]["per_100"],
+    )
+    yield from _optional(
+        p + "echo_ratio",
+        "Share of the newest sampled writes (30 days) with an earlier entry at cosine >= 0.9",
+        health["echo_rate"]["share"],
+    )
+    yield from _optional(
+        p + "grounding_ratio",
+        "Share of new (30 days) fleet/org insights and decisions with a source that is not an entry",
+        health["grounding_share"]["share"],
+    )
+    yield from _optional(
+        p + "top3_agent_label_write_ratio",
+        "Share of the last 30 days' writes under the three busiest agent labels",
+        health["top3_agent_label_write_share"]["share"],
+    )
+    yield from _optional(
+        p + "top3_agent_label_verdict_ratio",
+        "Share of the last 30 days' verdicts under the three busiest agent labels",
+        health["top3_agent_label_verdict_share"]["share"],
+    )
+    rival = health["rival_lifetime"]
+    yield _gauge(
+        p + "rival_entries",
+        "Active alternative, Conflict: and contested entries",
+        ["kind"],
+        {k: v["count"] for k, v in rival.items()},
+    )
+    yield _gauge(
+        p + "rival_median_age_seconds",
+        "Median age of those entries (no series while there are none)",
+        ["kind"],
+        {
+            k: v["median_age_seconds"]
+            for k, v in rival.items()
+            if v["median_age_seconds"] is not None
+        },
+    )
+    # Tag strings are user data and /metrics has no key: only the mean change
+    # across the measured tags leaves the process (the tags are in the admin JSON).
+    dispersion = health["topic_dispersion"]
+    yield _gauge(
+        p + "topic_tags_measured",
+        "Busy tags with enough entries in both 30-day windows to measure dispersion",
+        [],
+        {"": len(dispersion)},
+    )
+    yield from _optional(
+        p + "topic_cosine_change",
+        "Mean change of the pairwise cosine across the measured tags, last 30 days against the 30 before",
+        sum(d["change"] for d in dispersion) / len(dispersion) if dispersion else None,
+    )
+    yield _gauge(
+        p + "gap_entries",
+        "Active entries tagged anomaly, open-question or dead-end",
+        ["tag"],
+        health["gap_tag_counts"],
+    )
+    by_fleet = health["by_fleet"]
+    sourced = GaugeMetricFamily(
+        p + "fleet_sourced_ratio", "Sourced share per fleet (entries' fleet_id)", labels=["fleet"]
+    )
+    for fleet, row in by_fleet.items():
+        if row["sourced_share"]["share"] is not None:
+            sourced.add_metric([fleet], float(row["sourced_share"]["share"]))
+    yield sourced
+    for name, doc in (
+        ("flagged_backlog_14d", "Active entries flagged stale or wrong more than 14 days ago"),
+        (
+            "orphaned_flagged",
+            "Active flagged entries whose author is revoked or silent for 30 days",
+        ),
+        ("floating_gap", "Active entries older than 90 days with no feedback in 90 days"),
+    ):
+        yield _gauge(
+            p + "fleet_" + name,
+            doc + ", per fleet",
+            ["fleet"],
+            {f: r[name] for f, r in by_fleet.items()},
+        )
+    gap = GaugeMetricFamily(
+        p + "fleet_gap_entries",
+        "Active gap-tagged entries per fleet and tag",
+        labels=["fleet", "tag"],
+    )
+    for fleet, row in by_fleet.items():
+        for tag, count in row["gap_tag_counts"].items():
+            gap.add_metric([fleet, tag], float(count))
+    yield gap
 
 
 class PrometheusMetrics:
