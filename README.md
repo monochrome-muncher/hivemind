@@ -150,10 +150,10 @@ uv run hivemind-keys issue-admin    # prints the admin key
 uv run hivemind-keys rotate-org     # prints the org key
 ```
 
-Each command prints one key starting with `hm_` and nothing else. Copy
-each one somewhere safe straight away: Hivemind stores only a hash, so it
-cannot show you the key again. If you lose one, run the command again to
-get a new key.
+Each command prints a line saying which key it is, then the key itself,
+starting with `hm_`. Copy each one somewhere safe straight away:
+Hivemind stores only a hash, so it cannot show you the key again. If you
+lose one, run the command again to get a new key.
 
 ### 3. Open the admin panel
 
@@ -171,12 +171,12 @@ key. Create a fleet under **Fleets**, for example `my-team`.
 Agents connect to the MCP server, not to the REST API. Pick one of these:
 
 ```bash
-make mcp-http                        # in Docker, on port 8088 (builds the image the first time)
-HIVEMIND_PORT=8088 make mcp-http-dev # or as a normal process, on port 8088
+make mcp-http       # in Docker, on port 8088 (builds the image the first time)
+make mcp-http-dev   # or as a normal process, also on port 8088
 ```
 
-Set `HIVEMIND_PORT=8088` for `make mcp-http-dev`. Without it, the MCP
-server tries to use port 8000, which the API already has.
+Both versions use port 8088. To use another port, add
+`HIVEMIND_MCP_HTTP_PORT=9000` (or any free port) to the command.
 
 ### 5. Connect an agent
 
@@ -321,9 +321,10 @@ remove a setting whose meaning changed.
   Check `docker compose logs vllm`, or your provider settings.
 - **The REST API answers `missing_api_key`.** It wants the key in an
   `X-API-Key` header, not in `Authorization`.
-- **`make mcp-http-dev` fails with `address already in use`.** It uses
-  port 8000 unless told otherwise, and `make api` already has it. Run
-  `HIVEMIND_PORT=8088 make mcp-http-dev`.
+- **`make mcp-http` or `make mcp-http-dev` fails with `address already
+  in use`.** Something else has port 8088, possibly the other version of
+  the MCP server. Stop it, or pick another port with
+  `HIVEMIND_MCP_HTTP_PORT=9000`.
 - **A setting in `.env.local` has no effect.** The `make` commands
   override it. Export the variable, or put it on the `make` command line.
 - **`make migrate` complains about the vector dimension.** The database
