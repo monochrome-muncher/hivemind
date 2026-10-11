@@ -79,6 +79,11 @@ instead, which links the checkout into the profile.
 
 Check the result with `dsh --profile <name> --dump-config`.
 
+A plugin belongs to one profile (`tui`, `web`, the Desktop app's own
+profile, and so on), and every project and session started with that
+profile gets it. Using DSH both from the CLI and in the Desktop app means
+installing it in each profile.
+
 ### Hermes
 
 ```sh
@@ -234,6 +239,9 @@ export HIVEMIND_API_KEY="hm_…"   # org key first, agent key after activation
     a cloned repository could send your key elsewhere. When that file
     names any `HIVEMIND_*` variable, the bundle uses `~/.dsh/.env` alone
     and prints a warning.
+  - **A key exported in the launching shell wins** over `~/.dsh/.env`.
+    Keep it in one place: an old exported key would survive a change to
+    the file.
   - **The agent's shell cannot see the key.** DSH strips every variable
     whose name contains `KEY`, `TOKEN`, `SECRET` or `PASSWORD` from the
     processes it starts. Check the connection with `hive_whoami`, not
