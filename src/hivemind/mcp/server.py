@@ -212,7 +212,10 @@ def compact_schema(schema: Any) -> Any:
         return [compact_schema(item) for item in schema]
     if not isinstance(schema, dict):
         return schema
-    out = {k: compact_schema(v) for k, v in schema.items() if k != "title"}
+    out = {k: compact_schema(v) for k, v in schema.items() if k not in ("title", "properties")}
+    if isinstance(schema.get("properties"), dict):
+        # Keys here are argument names, not keywords: an argument may be "title".
+        out["properties"] = {k: compact_schema(v) for k, v in schema["properties"].items()}
     variants = out.get("anyOf")
     if isinstance(variants, list) and {"type": "null"} in variants:
         rest = [v for v in variants if v != {"type": "null"}]

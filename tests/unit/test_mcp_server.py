@@ -305,6 +305,7 @@ def test_compact_schema_keeps_non_null_defaults_and_unions() -> None:
             "a": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": None, "title": "A"},
             "b": {"anyOf": [{"type": "string"}, {"type": "integer"}], "title": "B"},
             "c": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": "x"},
+            "title": {"type": "string", "title": "Title"},
         },
     }
     assert compact_schema(schema) == {
@@ -312,5 +313,6 @@ def test_compact_schema_keeps_non_null_defaults_and_unions() -> None:
             "a": {"type": "string"},
             "b": {"anyOf": [{"type": "string"}, {"type": "integer"}]},
             "c": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": "x"},
+            "title": {"type": "string"},  # an argument named "title" stays
         }
     }
