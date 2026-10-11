@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import re
 import uuid
 from collections.abc import AsyncIterator, Sequence
@@ -916,7 +917,9 @@ class PgStore:
         out: dict[tuple[str, str], float] = {}
         for row in rows:
             a, b = sorted((str(row["a"]), str(row["b"])))
-            out[(a, b)] = float(row["similarity"])
+            similarity = float(row["similarity"])
+            # pgvector gives NaN for a zero vector; MemoryStore says 0.0.
+            out[(a, b)] = similarity if math.isfinite(similarity) else 0.0
         return out
 
     async def list_predecessors(self, entry_ids: list[str]) -> list[Entry]:

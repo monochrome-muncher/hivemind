@@ -44,7 +44,7 @@ from hivemind.domain.entry import (
 )
 from hivemind.domain.feedback import Correction, Feedback, FeedbackSignals, Verdict, is_contested
 from hivemind.domain.health import HealthCounts
-from hivemind.memstore import MemoryStore
+from hivemind.memstore import MemoryStore, cosine_similarity
 from hivemind.ports import Store, SupersedeConflict
 from hivemind.store import PgStore
 from hivemind.store.migrate import migrate
@@ -218,7 +218,8 @@ async def test_pairwise_similarity_reads_stored_vectors(adapter: Adapter) -> Non
         return (x, y)
 
     assert set(got) == {key(same, near), key(same, far), key(near, far)}
-    assert got[key(same, near)] == pytest.approx(0.9796, abs=1e-3)
+    expected = cosine_similarity(adapter.vec(3), adapter.vec(3, base=0.02))  # any dim
+    assert got[key(same, near)] == pytest.approx(expected, abs=1e-3)
     assert got[key(same, near)] > got[key(same, far)]
     assert await adapter.store.pairwise_similarity([same.id]) == {}
     assert await adapter.store.pairwise_similarity([]) == {}
