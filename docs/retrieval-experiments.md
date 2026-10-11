@@ -342,7 +342,8 @@ divided out, so they read as importance × social factor.
 | S4 | importance 5, 16th in both streams vs importance 3, 1st in both | 0.013158 vs 0.013115 (fused × importance factor) | loose match | narrowed importance |
 
 S2 is barely separated: a recheck yesterday is worth the same 1.067 as
-one made two years ago. S4's fused scores are `Σ 0.5 / (60 + rank)` over
+one made two years ago (with the confirmation clock on it is 0.960 against
+0.800, see the next section). S4's fused scores are `Σ 0.5 / (60 + rank)` over
 the two streams.
 
 **Aged currency pairs** (`tests/eval/test_aged_currency.py`). The fixture's
@@ -365,6 +366,105 @@ it, and the shipped config is slightly behind decay off: the floor still
 lifts the fresh, unrelated entries over both members. The currency pairs
 are the case a confirmation date restarting the recency clock should
 improve.
+
+## A confirmation restarts the recency clock (ADR 0071)
+
+*(tools: `tests/eval/confirmation.py`, `make measure-confirmation`; the
+embedding-free slices in `test_social_scenarios.py` and
+`test_aged_currency.py`)* `HIVEMIND_RECENCY_FROM_CONFIRMATION` is off by
+default. With it on, the social factor is `min(social_max, quality ×
+r_conf / r_occ)`, where `r_conf` ages the entry from its "last confirmed"
+date. Everything below is the hash embedder or no embedder at all: it
+checks direction and arithmetic, and the real-embedder run decides.
+
+**S2** (two-year-old fact, 1 helpful, re-checked yesterday vs never
+checked, shipped config, floor divided out):
+
+| setting | re-checked | never checked | margin |
+|---|---|---|---|
+| off | 0.853 | 0.800 | 0.053 |
+| on | 0.960 | 0.800 | 0.160 |
+
+The gain is 1.0667 × 0.977 / 0.8 = 1.30, held at 1.2 by the cap, so 0.8 ×
+1.2 = 0.96. The winner is the same; the margin is three times as wide.
+
+**Aged currency pairs** (the 3 currency-pair queries, newer member relevant,
+k = 5), with a helpful-with-a-note report one day old on each newer member.
+The report lifts quality with the setting on or off, so compare the two
+settings on the same rows; the no-feedback rows are from the section above.
+
+| newer member | no feedback, shipped | confirmed, setting off | confirmed, setting on |
+|---|---|---|---|
+| 5-12 days (as written) | hit@5 1.000, MRR 0.778 | 1.000, 0.778 | 1.000, 0.833 |
+| 30, 60 or 120 days | 1.000, 0.583 | 1.000, 0.778 | 1.000, 0.833 |
+
+**Old-exact and the rest, with confirmations sprinkled on 20%** of the 16
+entries of the age-varied fixture, each dated a day ago, setting on against
+off over the same rows (MRR; hit@5 is 1.000 throughout). The 20% is the 3
+entries (18.75%) whose summary has the smallest SHA-256, chosen by a
+deterministic hash so it is independent of position and of any query:
+entries 3, 7 and 14.
+
+| slice | off | on | change |
+|---|---|---|---|
+| old_exact (2 queries) | 1.000 | 1.000 | 0.000 |
+| non_temporal (6) | 0.681 | 0.597 | -0.084 |
+| timeless (5) | 0.617 | 0.517 | -0.100 |
+| currency_pair (3) | 0.778 | 0.833 | +0.056 |
+| all (10) | 0.742 | 0.708 | -0.034 |
+
+Old-exact is within the 0.02 rule for this pick, but not robustly. The
+same comparison with every fifth entry confirmed, from offset 0 to 4 (4, 3,
+3, 3 and 3 entries), gives old_exact off to on of 0.750 to 0.750, 0.750 to
+0.750, 1.000 to 1.000, 1.000 to 0.500 and 0.667 to 0.333, and `all` falling
+by 0.013, 0.050, 0.083, 0.164 and 0.125. The cause is the intended
+mechanism and its risk: a confirmed recent distractor, or a confirmed
+older entry on the same topic, gains up to 1.25x on an old exact match that
+stays at the floor, in a 16-entry fixture where fused scores are close. On
+this fixture the pass rule is **not** met; it says nothing yet about the
+real embedders, whose match scores separate more, which is why the setting
+stays off.
+
+**The measurement entry point.** `make measure-confirmation` seeds each
+domain of `tests/eval/domains.py` and the pool of all five with entries aged
+0 to 400 days (a deterministic golden-ratio spread), sprinkles
+confirmations on the 20% with the smallest summary hash (helpful with a
+note, from a user who is not the author, 0.5 to 5 days old), and reports
+hit@5 and MRR per variant with the changes against the baseline. Variants
+are named sets of `SearchConfig` overrides, so later changes (per-kind
+recency, a search recency hint) are added to `VARIANTS`. Hash-embedder
+output, **machinery only, not evidence** (4 dimensions, the vector stream is
+close to noise):
+
+| fixture | hit@5 off | hit@5 on | MRR off | MRR on |
+|---|---|---|---|---|
+| all domains together | 0.458 | 0.365 | 0.244 | 0.208 |
+| data analysis | 0.632 | 0.632 | 0.366 | 0.306 |
+| software engineering | 0.684 | 0.632 | 0.486 | 0.467 |
+| system administration | 0.684 | 0.684 | 0.412 | 0.382 |
+| journalism and social science | 0.650 | 0.550 | 0.449 | 0.350 |
+| finance analysis | 0.684 | 0.632 | 0.375 | 0.365 |
+
+**Real embedders** (2026-10-11; Qwen3-Embedding 8B Q8_0, 4B and 0.6B f16 via
+llama.cpp, last-token pooling, dim 1024, MemoryStore keyword stream; weighted
+70% 8B / 20% 4B / 10% 0.6B):
+
+| fixture | hit@5 off | hit@5 on | MRR off | MRR on | MRR change |
+|---|---|---|---|---|---|
+| all domains together | 0.898 | 0.874 | 0.725 | 0.644 | -0.081 |
+| data analysis | 1.000 | 1.000 | 0.771 | 0.623 | -0.148 |
+| software engineering | 0.911 | 0.895 | 0.673 | 0.655 | -0.018 |
+| system administration | 0.937 | 0.931 | 0.726 | 0.528 | -0.198 |
+| journalism and social science | 0.900 | 0.850 | 0.720 | 0.542 | -0.178 |
+| finance analysis | 0.853 | 0.853 | 0.686 | 0.625 | -0.061 |
+
+Per model, pooled MRR off to on: 8B 0.737 to 0.650, 4B 0.706 to 0.639,
+0.6B 0.683 to 0.611. The pass rule is **not met** in any domain or pooled,
+on every model. Confirmations here fall on 20% of entries regardless of
+which query they answer, so a confirmed entry that is a close but wrong
+match gains up to 1.25x over the right one at the floor. Real confirmations
+probably correlate with usefulness, but nothing measured shows that yet, so
+the setting stays off and the default does not change.
 
 ## Similarity threshold
 

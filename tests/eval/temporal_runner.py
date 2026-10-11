@@ -27,10 +27,12 @@ pipeline is untouched.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import timedelta
 from typing import Any
 
 from hivemind.domain.entry import EntryDraft, Kind
+from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.memstore import MemoryStore
 from hivemind.retrieval.eval import aggregate_report, evaluate_query
 from hivemind.services.governance import WriteService
@@ -82,6 +84,7 @@ def slices_of(labelled: LabelledQuery) -> tuple[str, ...]:
 
 async def seed_temporal_corpus(
     age_overrides: dict[int, float] | None = None,
+    confirmations: dict[int, float] | None = None,
 ) -> tuple[MemoryStore, list[str], FixedClock]:
     """Seed the age-varied corpus; return the store, entry ids and the "now".
 
@@ -91,7 +94,11 @@ async def seed_temporal_corpus(
     be). ``age_overrides`` maps a corpus index to a replacement age in days
     (the aged-currency slice uses it; ``None`` is the fixture as written).
     The search clock stays pinned at ``FIXED_NOW``; entry ages come
-    from the explicit ``occurred_at`` each draft carries.
+    from the explicit ``occurred_at`` each draft carries. ``confirmations``
+    maps a corpus index to how many days ago a user other than the author
+    marked the entry helpful with a note, which gives it that "last
+    confirmed" date (SPEC §4.2); it only affects ranking under a config with
+    ``recency_from_confirmation`` on (ADR 0071).
     """
     store_clock = make_clock()
     now_clock = make_clock()
@@ -112,6 +119,17 @@ async def seed_temporal_corpus(
         entry = await write_service.write(draft)
         entry_ids.append(entry.id)
         store_clock.advance_days(1.0 / 86_400.0)
+    for index, days_ago in (confirmations or {}).items():
+        await store.record_feedback(
+            Feedback(
+                entry_ids[index],
+                "eval-confirmer",
+                "eval-confirmer-agent",
+                Verdict.HELPFUL,
+                note="re-checked against the live system",
+                updated_at=FIXED_NOW - timedelta(days=days_ago),
+            )
+        )
     return store, entry_ids, now_clock
 
 
@@ -123,11 +141,10 @@ async def ranked_ids(
     *,
     rrf_k: int = DEFAULT_RRF_K,
     recency_floor: float | None = None,
+    recency_from_confirmation: bool = False,
 ) -> list[str]:
     """The ranked entry ids for one query under one search config."""
-    service = SearchService(
-        store,
-        make_embedder(),
+    config = replace(
         make_search_config(
             candidate_top_k=CANDIDATE_TOP_K,
             default_limit=K,
@@ -135,8 +152,9 @@ async def ranked_ids(
             rrf_k=rrf_k,
             recency_floor=recency_floor,
         ),
-        now_fn=now_clock,
+        recency_from_confirmation=recency_from_confirmation,
     )
+    service = SearchService(store, make_embedder(), config, now_fn=now_clock)
     hits = await service.search(query, limit=K)
     return [hit.entry_id for hit in hits]
 
@@ -147,9 +165,11 @@ async def measure_slices(
     rrf_k: int = DEFAULT_RRF_K,
     recency_floor: float | None = None,
     age_overrides: dict[int, float] | None = None,
+    confirmations: dict[int, float] | None = None,
+    recency_from_confirmation: bool = False,
 ) -> dict[str, dict[str, QueryMetrics]]:
     """Run every labelled query under one config, bucketed into the slices."""
-    store, entry_ids, now_clock = await seed_temporal_corpus(age_overrides)
+    store, entry_ids, now_clock = await seed_temporal_corpus(age_overrides, confirmations)
     slices: dict[str, dict[str, QueryMetrics]] = {name: {} for name in SLICES}
     for labelled in temporal_queries():
         ranked = await ranked_ids(
@@ -159,6 +179,7 @@ async def measure_slices(
             half_life(labelled),
             rrf_k=rrf_k,
             recency_floor=recency_floor,
+            recency_from_confirmation=recency_from_confirmation,
         )
         relevant = {entry_ids[i]: 1 for i in labelled.relevant}
         metrics = evaluate_query(ranked, relevant, K)

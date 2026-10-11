@@ -8,19 +8,23 @@ moves a default, or adds a social signal outside the cap, fails here.
       importance, however much feedback the old one has.
 * I2  Ranking inputs are numbers and dates only: no author, agent label,
       pin, link or rater identity reaches the score.
+* I3  A confirmation's gain depends only on the newest confirmation date,
+      not on how many confirmations there were (ADR 0071).
+* I4  A later stale or wrong report cancels a confirmation's gain
+      (ADR 0071).
 * I5  The upward multiplier from all social signals never exceeds
       ``social_max``; penalties are not capped.
 
-I3 (a confirmation's gain depends only on the newest date) and I4 (a later
-stale or wrong report cancels a confirmation) belong to the confirmation
-date change that follows; they are added with it.
+I1 and I5 also run with ``recency_from_confirmation`` on (ADR 0071), where
+a confirmation can restart the recency clock for the upside only.
 """
 
 from __future__ import annotations
 
 import inspect
 import math
-from datetime import timedelta
+from dataclasses import replace
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -34,6 +38,7 @@ from hivemind.services.search import SearchService
 from tests.fakes import FIXED_NOW, make_clock, make_embedder
 
 CONFIG = SearchConfig()
+CONFIRMING = SearchConfig(recency_from_confirmation=True)
 NOW = FIXED_NOW
 FRESH_DAYS = (0.0, 0.5, 1.0, 1.69)
 OLD_DAYS = (10.0, 11.0, 30.0, 400.0)
@@ -53,9 +58,19 @@ def shipped_score(
     fused: float = 1.0,
     importance: int = 3,
     config: SearchConfig = CONFIG,
+    confirmed_ago_days: float | None = None,
 ) -> float:
-    """The score SearchService computes, for one entry, through the pure functions."""
+    """The score SearchService computes, for one entry, through the pure functions.
+
+    ``confirmed_ago_days`` is the entry's "last confirmed" date; like the
+    service it reaches the score only when ``config.recency_from_confirmation``.
+    """
     quality = feedback_quality(*counts, **config.quality_kwargs())
+    confirmed_at = (
+        NOW - timedelta(days=confirmed_ago_days)
+        if confirmed_ago_days is not None and config.recency_from_confirmation
+        else None
+    )
     return entry_score(
         fused,
         importance,
@@ -65,6 +80,7 @@ def shipped_score(
         config.half_life_days,
         recency_floor=config.recency_floor,
         social_max=config.social_max,
+        confirmed_at=confirmed_at,
     )
 
 
@@ -81,16 +97,31 @@ class TestI1FreshUnratedBeatsOldFavourite:
     @pytest.mark.parametrize("fresh_age", FRESH_DAYS)
     @pytest.mark.parametrize("old_age", OLD_DAYS)
     @pytest.mark.parametrize("counts", FEEDBACK_MIXES)
+    @pytest.mark.parametrize("config", [CONFIG, CONFIRMING], ids=["off", "confirmation-on"])
     def test_old_entry_never_outranks_a_fresh_unrated_one(
-        self, fresh_age: float, old_age: float, counts: tuple[int, int, int]
+        self, fresh_age: float, old_age: float, counts: tuple[int, int, int], config: SearchConfig
     ) -> None:
-        """I1: at equal fused score and importance, fresh unrated >= old, any feedback."""
+        """I1: at equal fused score and importance, fresh unrated >= old, any feedback.
+
+        With ``recency_from_confirmation`` on, the old entry is also confirmed
+        a minute ago (the best case for the gain): the cap still holds it at
+        0.8 x 1.2 = 0.96, below a fresh entry's recency.
+        """
         for importance in (1, 3, 5):
-            fresh = shipped_score(age_days=fresh_age, importance=importance)
-            old = shipped_score(age_days=old_age, counts=counts, importance=importance)
+            fresh = shipped_score(age_days=fresh_age, importance=importance, config=config)
+            old = shipped_score(
+                age_days=old_age,
+                counts=counts,
+                importance=importance,
+                config=config,
+                confirmed_ago_days=1.0 / 1440.0,
+            )
             assert fresh >= old
 
-    async def test_service_ratio_of_an_old_favourite_stays_below_a_new_entry(self) -> None:
+    @pytest.mark.parametrize("config", [CONFIG, CONFIRMING], ids=["off", "confirmation-on"])
+    async def test_service_ratio_of_an_old_favourite_stays_below_a_new_entry(
+        self, config: SearchConfig
+    ) -> None:
         """I1 through SearchService: with many helpful verdicts from other
         users, the old entry's score/fused ratio is at most the new one's.
 
@@ -102,9 +133,18 @@ class TestI1FreshUnratedBeatsOldFavourite:
         old = await store.create_entry(_draft("gamma rollout note", age_days=45), [0.1] * 4)
         new = await store.create_entry(_draft("gamma rollout note", age_days=1), [0.1] * 4)
         for i in range(200):
-            await store.record_feedback(Feedback(old.id, f"rater-{i}", "a", Verdict.HELPFUL))
+            await store.record_feedback(
+                Feedback(
+                    old.id,
+                    f"rater-{i}",
+                    "a",
+                    Verdict.HELPFUL,
+                    note="re-checked",
+                    updated_at=NOW - timedelta(minutes=1),
+                )
+            )
 
-        hits = await _service(store).search("gamma rollout note", limit=10)
+        hits = await _service(store, config).search("gamma rollout note", limit=10)
         by_id = {h.entry_id: h.score for h in hits}
         fused = await _fused_by_id(store, "gamma rollout note")
         assert set(by_id) == {old.id, new.id}
@@ -114,7 +154,8 @@ class TestI1FreshUnratedBeatsOldFavourite:
 class TestI2NumbersAndDatesOnly:
     def test_entry_score_takes_only_the_allowlisted_inputs(self) -> None:
         """I2: a new parameter (an author, a count of links, a rater record)
-        must be added to this allowlist on purpose, in review."""
+        must be added to this allowlist on purpose, in review. ``confirmed_at``
+        is a date: how many confirmations there were never reaches the score."""
         assert set(inspect.signature(entry_score).parameters) == {
             "fused",
             "importance",
@@ -124,6 +165,7 @@ class TestI2NumbersAndDatesOnly:
             "half_life_days",
             "recency_floor",
             "social_max",
+            "confirmed_at",
         }
 
     async def test_authors_agents_pins_links_and_raters_do_not_change_scores(self) -> None:
@@ -147,6 +189,91 @@ class TestI2NumbersAndDatesOnly:
         assert plain == dressed
 
 
+class TestI3GainDependsOnlyOnTheNewestDate:
+    def test_pure_gain_is_a_function_of_the_date(self) -> None:
+        """I3: with the same newest date and the same quality, the score is the
+        same whatever else is true; a newer date gives at least as much."""
+        args = (1.0, 3, NOW - timedelta(days=400), 1.0, NOW, 30.0)
+        kw = {"recency_floor": 0.8, "social_max": 3.0}
+        week = entry_score(*args, **kw, confirmed_at=NOW - timedelta(days=7))
+        day = entry_score(*args, **kw, confirmed_at=NOW - timedelta(days=1))
+        assert day > week > entry_score(*args, **kw)
+
+    async def test_one_confirmation_and_five_gain_alike_through_the_service(self) -> None:
+        """I3 through SearchService: one confirmation and five, same newest
+        date. Quality differs (1 vs 5 helpful), so the claim is about the
+        gain: the score with the setting on divided by the score with it off
+        is identical, under a cap high enough not to hide it."""
+        for ago in (1.0 / 1440.0, 1.0, 5.0, 8.0):
+            gains = []
+            for confirmations in (1, 5):
+                on = await _confirmed_score(
+                    recency_from_confirmation=True,
+                    confirmations=[ago] + [ago + 3.0] * (confirmations - 1),
+                    social_max=3.0,
+                )
+                off = await _confirmed_score(
+                    recency_from_confirmation=False,
+                    confirmations=[ago] + [ago + 3.0] * (confirmations - 1),
+                    social_max=3.0,
+                )
+                gains.append(on / off)
+            assert gains[0] == pytest.approx(gains[1])
+            assert gains[0] > 1.0
+
+    async def test_at_the_shipped_cap_the_number_of_recent_confirmations_is_invisible(
+        self,
+    ) -> None:
+        """I3: a recent confirmation puts a two-year-old entry at the cap, so
+        one and five confirmations score exactly the same."""
+        scores = [
+            await _confirmed_score(
+                recency_from_confirmation=True,
+                confirmations=[1.0] + [4.0] * (n - 1),
+                social_max=CONFIG.social_max,
+            )
+            for n in (1, 5)
+        ]
+        assert scores[0] == scores[1]
+
+
+class TestI4ALaterFlagCancelsTheGain:
+    @pytest.mark.parametrize("verdict", [Verdict.STALE, Verdict.WRONG])
+    async def test_a_later_report_removes_the_confirmation_gain(self, verdict: Verdict) -> None:
+        """I4 through SearchService: a stale or wrong report newer than the
+        confirmation leaves the setting on and off scoring the same."""
+        flagged_on = await _confirmed_score(
+            recency_from_confirmation=True,
+            confirmations=[2.0],
+            flags=[(verdict, 1.0)],
+        )
+        flagged_off = await _confirmed_score(
+            recency_from_confirmation=False,
+            confirmations=[2.0],
+            flags=[(verdict, 1.0)],
+        )
+        assert flagged_on == flagged_off
+
+    async def test_an_older_report_does_not_cancel_it(self) -> None:
+        """I4's converse: a flag older than the confirmation leaves the gain."""
+        on = await _confirmed_score(
+            recency_from_confirmation=True, confirmations=[1.0], flags=[(Verdict.STALE, 3.0)]
+        )
+        off = await _confirmed_score(
+            recency_from_confirmation=False, confirmations=[1.0], flags=[(Verdict.STALE, 3.0)]
+        )
+        assert on > off
+
+    async def test_a_tie_is_no_confirmation(self) -> None:
+        on = await _confirmed_score(
+            recency_from_confirmation=True, confirmations=[2.0], flags=[(Verdict.STALE, 2.0)]
+        )
+        off = await _confirmed_score(
+            recency_from_confirmation=False, confirmations=[2.0], flags=[(Verdict.STALE, 2.0)]
+        )
+        assert on == off
+
+
 class TestI5UpwardMultiplierIsCapped:
     @pytest.mark.parametrize("helpful", [0, 1, 2, 5, 20, 100, 1000])
     def test_social_factor_never_exceeds_social_max(self, helpful: int) -> None:
@@ -154,6 +281,39 @@ class TestI5UpwardMultiplierIsCapped:
         # recency is 1 at age 0, importance 5 gives 1.0, fused 1.0.
         score = shipped_score(age_days=0.0, counts=(helpful, 0, 0), importance=5)
         assert score <= CONFIG.social_max
+
+    @pytest.mark.parametrize("helpful", [0, 1, 5, 1000])
+    @pytest.mark.parametrize("age", [0.0, 3.0, 9.0, 10.0, 45.0, 400.0, 5000.0])
+    @pytest.mark.parametrize("confirmed_ago", [0.0, 1.0 / 1440.0, 1.0, 8.0, 30.0, 399.0])
+    @pytest.mark.parametrize("floor", [0.8, 0.5, None])
+    def test_confirmation_never_lifts_the_multiplier_past_social_max(
+        self, helpful: int, age: float, confirmed_ago: float, floor: float | None
+    ) -> None:
+        """I5 with the setting on: score / recency, the social multiplier, is
+        at most social_max however recent the confirmation (importance 5, fused 1)."""
+        if confirmed_ago > age:
+            pytest.skip("a confirmation older than the memory date adds nothing")
+        config = SearchConfig(recency_from_confirmation=True, recency_floor=floor)
+        score = shipped_score(
+            age_days=age,
+            counts=(helpful, 0, 0),
+            importance=5,
+            config=config,
+            confirmed_ago_days=confirmed_ago,
+        )
+        recency = max(floor or 0.0, 0.5 ** (age / config.half_life_days))
+        assert score / recency <= config.social_max * (1 + 1e-12)
+
+    def test_a_penalty_times_a_gain_can_stay_below_one(self) -> None:
+        """Intended: min caps only the upside, so quality 0.667 (one wrong) x gain 1.22 is 0.81."""
+        score = shipped_score(
+            age_days=730.0,
+            counts=(0, 0, 1),
+            importance=5,
+            config=CONFIRMING,
+            confirmed_ago_days=1.0,
+        )
+        assert score / 0.8 < 1.0
 
     def test_a_larger_quality_max_still_stops_at_social_max(self) -> None:
         """I5: quality_max 2.0 (helpful reports heading to 2.0) is capped at 1.2."""
@@ -222,8 +382,45 @@ def _draft(summary: str, *, age_days: float, **kwargs: object) -> EntryDraft:
     )
 
 
-def _service(store: MemoryStore) -> SearchService:
-    return SearchService(store, make_embedder(), CONFIG, now_fn=lambda: NOW)
+def _service(store: MemoryStore, config: SearchConfig = CONFIG) -> SearchService:
+    return SearchService(store, make_embedder(), config, now_fn=lambda: NOW)
+
+
+async def _confirmed_score(
+    *,
+    recency_from_confirmation: bool,
+    confirmations: list[float],
+    flags: list[tuple[Verdict, float]] | None = None,
+    social_max: float = CONFIG.social_max,
+    entry_age_days: float = 730.0,
+) -> float:
+    """The search score of one two-year-old entry whose helpful-with-a-note
+    reports are dated ``confirmations`` days ago and whose stale or wrong
+    reports are dated ``flags`` days ago, by different users."""
+    store = MemoryStore(make_clock())
+    entry = await store.create_entry(
+        _draft("delta failover note", age_days=entry_age_days), [0.1] * 4
+    )
+
+    def when(days: float) -> datetime:
+        return NOW - timedelta(days=days)
+
+    for i, ago in enumerate(confirmations):
+        await store.record_feedback(
+            Feedback(
+                entry.id, f"c-{i}", "a", Verdict.HELPFUL, note="re-checked", updated_at=when(ago)
+            )
+        )
+    for i, (verdict, ago) in enumerate(flags or []):
+        await store.record_feedback(
+            Feedback(entry.id, f"f-{i}", "a", verdict, note="seen", updated_at=when(ago))
+        )
+    config = replace(
+        CONFIG, recency_from_confirmation=recency_from_confirmation, social_max=social_max
+    )
+    hits = await _service(store, config).search("delta failover note", limit=5)
+    assert [h.entry_id for h in hits] == [entry.id]
+    return hits[0].score
 
 
 async def _fused_by_id(store: MemoryStore, query: str) -> dict[str, float]:

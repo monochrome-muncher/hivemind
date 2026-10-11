@@ -181,3 +181,65 @@ class TestFeedbackQuality:
     def test_clamps_to_configured_bounds(self):
         assert feedback_quality(0, 0, 5, min_quality=0.7) == pytest.approx(0.7)
         assert feedback_quality(50, 0, 0, max_quality=1.1) == pytest.approx(1.1)
+
+
+# --- confirmed_at (ADR 0071) --------------------------------------------------
+
+
+class TestConfirmedAt:
+    """``confirmed_at`` restarts the recency clock for the upside only."""
+
+    OCC = NOW - timedelta(days=730)
+
+    def _score(self, confirmed_at, quality=1.0, **kw) -> float:
+        return entry_score(
+            1.0, 5, self.OCC, quality, NOW, 30.0, recency_floor=0.8, confirmed_at=confirmed_at, **kw
+        )
+
+    def test_none_is_bit_identical(self) -> None:
+        for quality in (0.5, 1.0, 1.2):
+            for social_max in (None, 1.2):
+                a = entry_score(
+                    1.0, 3, self.OCC, quality, NOW, 30.0, recency_floor=0.8, social_max=social_max
+                )
+                b = entry_score(
+                    1.0,
+                    3,
+                    self.OCC,
+                    quality,
+                    NOW,
+                    30.0,
+                    recency_floor=0.8,
+                    social_max=social_max,
+                    confirmed_at=None,
+                )
+                assert a == b
+
+    def test_gain_is_r_conf_over_r_occ_before_the_cap(self) -> None:
+        confirmed = NOW - timedelta(days=1)
+        r_conf = 0.5 ** (1 / 30)
+        # final = r_occ * (r_conf / r_occ) = r_conf with importance factor 1.0.
+        assert self._score(confirmed) == pytest.approx(r_conf)
+
+    def test_gain_is_at_most_one_over_the_floor(self) -> None:
+        assert self._score(NOW) / self._score(None) == pytest.approx(1.25)
+
+    def test_the_cap_applies_to_quality_times_gain(self) -> None:
+        confirmed = NOW - timedelta(days=1)
+        assert self._score(confirmed, quality=1.2, social_max=1.2) == pytest.approx(0.8 * 1.2)
+
+    def test_a_confirmation_not_newer_than_the_memory_date_adds_nothing(self) -> None:
+        assert self._score(self.OCC) == self._score(None)
+        assert self._score(self.OCC - timedelta(days=5)) == self._score(None)
+
+    def test_a_future_confirmation_clamps_to_age_zero(self) -> None:
+        assert self._score(NOW + timedelta(days=9)) == self._score(NOW)
+
+    def test_a_confirmation_fades_into_the_floor(self) -> None:
+        assert self._score(NOW - timedelta(days=10)) == self._score(None)
+        assert self._score(NOW - timedelta(days=9)) > self._score(None)
+
+    def test_unbounded_form_guards_a_zero_recency(self) -> None:
+        old = NOW - timedelta(days=100_000)
+        score = entry_score(1.0, 5, old, 1.0, NOW, 30.0, confirmed_at=NOW - timedelta(days=1))
+        assert score == 0.0

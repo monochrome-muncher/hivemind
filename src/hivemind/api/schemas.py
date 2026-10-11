@@ -152,7 +152,7 @@ class FeedbackSummaryOut(FeedbackCountsOut):
     counts plus the newest reports, notes included."""
 
     recent: list[FeedbackReportOut] = []
-    last_confirmed_at: datetime | None = None  # SPEC §4.2; display only
+    last_confirmed_at: datetime | None = None  # SPEC §4.2 (ranks only with ADR 0071 on)
 
     @classmethod
     def from_summary(cls, summary: FeedbackSummary) -> FeedbackSummaryOut:
@@ -349,7 +349,7 @@ class HitOut(BaseModel):
     scope: str = "fleet"
     fleet_id: str | None = None  # a foreign entry: != the reader's home fleet (ADR 0036)
     feedback: FeedbackCountsOut = FeedbackCountsOut()  # ADR 0051
-    last_confirmed_at: datetime | None = None  # SPEC §4.2; display only
+    last_confirmed_at: datetime | None = None  # SPEC §4.2 (ranks only with ADR 0071 on)
     # SPEC §6.1, display only; null when empty (state: unless include_inactive).
     contested: bool | None = None
     correction: CorrectionOut | None = None

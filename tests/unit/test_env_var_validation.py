@@ -273,3 +273,14 @@ def test_a_real_env_var_overrides_strict_mode_in_the_profile_file(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HIVEMIND_STRICT_ENV", "false")
     load_settings()  # the environment wins (ADR 0017): warn only
+
+
+def test_recency_from_confirmation_env_var_reaches_the_search_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR 0071: ``HIVEMIND_RECENCY_FROM_CONFIRMATION`` is a known field, off by default."""
+    _clear_hivemind_env(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    assert load_settings().search_config().recency_from_confirmation is False
+    monkeypatch.setenv("HIVEMIND_RECENCY_FROM_CONFIRMATION", "true")
+    assert load_settings().search_config().recency_from_confirmation is True

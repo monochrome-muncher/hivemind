@@ -1,5 +1,7 @@
 # One capped budget for social signals
 
+> **Amended by [ADR 0071](0071-a-confirmation-can-restart-the-recency-clock.md):** the "last confirmed" date is the first signal to share this budget (the last factor is `min(social_max, quality × r_conf / r_occ)`, behind a setting that is off by default), and invariants I3 and I4 are now tested with it.
+
 Amends [ADR 0022](0022-recency-floor-so-match-quality-is-the-sort-key.md) and [ADR 0063](0063-feedback-quality-by-consensus-share.md).
 
 ## Context
