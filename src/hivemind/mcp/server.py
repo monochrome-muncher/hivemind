@@ -17,6 +17,7 @@ from dataclasses import replace
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
+from mcp.types import Tool as MCPTool
 
 from hivemind.config import configure_logging, load_settings
 from hivemind.extractor import build_extractor
@@ -199,6 +200,43 @@ _DESC_WHOAMI = (
 )
 
 
+def compact_schema(schema: Any) -> Any:
+    """A JSON schema without what pydantic adds for nothing: every
+    ``title`` (the property name again, or ``_hive_writeArguments``) and the
+    ``anyOf [T, null]`` / ``default: null`` of an optional argument, which
+    becomes plain ``T`` (it is not in ``required``, so it can be left out).
+    Clients load these schemas into every session's context; the server
+    still validates arguments with its own model, so a client that sends
+    ``null`` keeps working."""
+    if isinstance(schema, list):
+        return [compact_schema(item) for item in schema]
+    if not isinstance(schema, dict):
+        return schema
+    out = {k: compact_schema(v) for k, v in schema.items() if k != "title"}
+    variants = out.get("anyOf")
+    if isinstance(variants, list) and {"type": "null"} in variants:
+        rest = [v for v in variants if v != {"type": "null"}]
+        if len(rest) == 1 and out.get("default", ...) is None:
+            del out["anyOf"], out["default"]
+            out.update(rest[0])
+    return out
+
+
+class _CompactSchemaServer(MCPServer):
+    """``MCPServer`` whose ``tools/list`` answer carries compact schemas."""
+
+    async def list_tools(self) -> list[MCPTool]:
+        return [
+            tool.model_copy(
+                update={
+                    "input_schema": compact_schema(tool.input_schema),
+                    "output_schema": compact_schema(tool.output_schema),
+                }
+            )
+            for tool in await super().list_tools()
+        ]
+
+
 def build_server(
     app: McpHivemind,
     *,
@@ -216,7 +254,7 @@ def build_server(
     ``hivemind-mcp-pg``). A provider yielding ``None`` fails closed with
     ``unauthenticated``, never falling back to ``app.credential`` (ADR 0042).
     """
-    server = MCPServer(
+    server = _CompactSchemaServer(
         name="hivemind",
         description="Shared memory pool for an organization's AI agents.",
         instructions=_INSTRUCTIONS,
