@@ -131,7 +131,9 @@ never refreshes an unpinned entry, so changing the tag is how you update.
 
 There is no plugin yet. Copy both `skills/` folders into
 `~/.gemini/skills/`, start Gemini CLI and ask it to set up Hivemind. The
-steps are in `skills/hivemind-setup/references/gemini-cli.md`.
+steps are in `skills/hivemind-setup/references/gemini-cli.md`,
+including two optional hooks: the startup reminder and the reminder to
+write and rate before a long session ends.
 
 ### Any other harness
 

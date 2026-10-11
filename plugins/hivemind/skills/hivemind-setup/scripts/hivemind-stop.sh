@@ -1,12 +1,13 @@
 #!/bin/sh
-# Hivemind Stop hook (Claude Code, Codex): at most once per session, blocks the stop
-# once with a short reminder to write what another agent could reuse and to
-# rate the entries the work tested. Registered in hooks/hooks.json.
+# Hivemind Stop hook (Claude Code, Codex; Gemini CLI as an AfterAgent hook):
+# at most once per session, blocks the stop once with a short reminder to
+# write what another agent could reuse and to rate the entries the work
+# tested. Registered in hooks/hooks.json (Gemini CLI: by hand, hivemind-setup).
 #
 # It only nudges a substantial session (at least HIVEMIND_STOP_MIN_TOOLS tool
 # uses, default 20) that has not called hive_write or hive_feedback yet, and
 # it fails open: any error, missing file or unparsable input exits 0 with no
-# output. Plain POSIX sh, grep and sed: no jq, python or node. No network.
+# output. Plain POSIX sh, grep, sed and sort: no jq, python or node. No network.
 #
 # Stop input (stdin JSON): session_id, transcript_path, stop_hook_active.
 # Block output: {"decision":"block","reason":"..."} on stdout, exit 0.
@@ -45,6 +46,11 @@ case "$min" in ''|*[!0-9]*) min=20 ;; esac
 # "custom_tool_call" or "local_shell_call" (their outputs end in "_output").
 uses="$(grep -Eo '"type" *: *"(tool_use|function_call|custom_tool_call|local_shell_call)"' \
   "$transcript" 2>/dev/null | wc -l)" || exit 0
+# Gemini CLI rewrites a call's record as it progresses, so count each
+# functionResponse id once.
+gemini="$(grep -Eo '"functionResponse" *: *\{ *"id" *: *"[^"]*"' "$transcript" 2>/dev/null \
+  | sort -u | wc -l)" || exit 0
+uses=$((uses + gemini))
 [ "${uses:-0}" -ge "$min" ] 2>/dev/null || exit 0
 
 mkdir -p "$dir" 2>/dev/null && : > "$dir/$sid" 2>/dev/null || exit 0

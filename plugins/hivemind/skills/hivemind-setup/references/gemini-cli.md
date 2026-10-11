@@ -10,8 +10,8 @@ whether `${VAR}` expands inside an extension server's `headers` is not,
 and extensions run with a sanitized environment, so the key would have to
 go through the extension's own settings. Revisit when that is confirmed.)
 
-Facts below that Google's documentation does not state are marked
-UNCONFIRMED; check them with `/mcp` after a restart rather than assuming.
+Check facts that Google's documentation does not state with `/mcp`
+after a restart rather than assuming.
 
 ## Connect
 
@@ -33,7 +33,7 @@ existing file:
 ```
 
 `${HIVEMIND_API_KEY}` in `headers` is expanded from the environment
-(checked with Gemini CLI 0.62), so the key never lands in the file. Do not
+(checked with Gemini CLI 0.63), so the key never lands in the file. Do not
 use `gemini mcp add --header "Authorization: Bearer …"`: it stores the
 literal key.
 
@@ -66,15 +66,15 @@ agents of other harnesses.
 
 - **Instruction block (required here):** `~/.gemini/GEMINI.md`, which
   Gemini CLI sends to the model with every prompt. This is the durable
-  layer: there is no plugin, and no documented re-injection after the
+  layer: there is no plugin, and nothing re-injects the reminder after the
   context is compressed.
-- **Startup hook (optional, UNCONFIRMED):** Gemini CLI has a
-  `SessionStart` hook (sources startup, resume and clear). Whether its
-  output may add context the way Claude Code's `additionalContext` does is
-  not stated in the docs. If the user wants to try it, merge this into
-  `~/.gemini/settings.json`, with the absolute path of
-  `scripts/hivemind-session-start.sh` from the hivemind-setup skill's
-  folder, and check that a `HIVEMIND:` line appears at session start:
+- **Hooks (recommended):** a `SessionStart` hook puts the reminder in
+  front of the first prompt, and an `AfterAgent` hook asks once, at the
+  end of a long session that wrote nothing, to write and rate before
+  finishing (checked with Gemini CLI 0.63). Merge this into
+  `~/.gemini/settings.json`, with `/ABSOLUTE/PATH/scripts` replaced by the
+  full path of the hivemind-setup skill's `scripts/` folder (normally
+  `~/.gemini/skills/hivemind-setup/scripts`, written out):
 
   ```json
   {
@@ -83,7 +83,15 @@ agents of other harnesses.
         {
           "matcher": "*",
           "hooks": [
-            { "name": "hivemind", "type": "command", "command": "sh /ABSOLUTE/PATH/hivemind-session-start.sh", "timeout": 5000 }
+            { "name": "hivemind", "type": "command", "command": "sh /ABSOLUTE/PATH/scripts/hivemind-session-start.sh", "timeout": 5000 }
+          ]
+        }
+      ],
+      "AfterAgent": [
+        {
+          "matcher": "*",
+          "hooks": [
+            { "name": "hivemind-stop", "type": "command", "command": "sh /ABSOLUTE/PATH/scripts/hivemind-stop.sh", "timeout": 5000 }
           ]
         }
       ]
@@ -91,7 +99,9 @@ agents of other harnesses.
   }
   ```
 
-  If no such line appears, the hook adds nothing: rely on `GEMINI.md`.
+  Check that a `HIVEMIND:` line appears at the start of the next session.
+  There is no post-compaction reminder here: Gemini CLI's `SessionStart`
+  does not fire after a compression, so `GEMINI.md` carries that.
 
 ## Update
 

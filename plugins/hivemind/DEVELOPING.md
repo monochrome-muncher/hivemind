@@ -45,7 +45,7 @@ reminder that survives compaction and new sessions.
 | Pi | the extension registers it with Pi 0.99+ built-in MCP; with pi-mcp-adapter, the adapter's config | the package | the extension's system-prompt section |
 | Oh My Pi | the plugin's `.mcp.json` (server `hivemind:hivemind`; a hand `hivemind` entry in `~/.omp/agent/mcp.json` replaces it) | the plugin | the extension's system-prompt section |
 | OpenCode | `opencode/hivemind.js` (skipped if a hand-configured `hivemind` server exists or no key is set) | the plugin | added to every model request |
-| Gemini CLI | the user's `~/.gemini/settings.json` | copied by hand | the `GEMINI.md` instruction block |
+| Gemini CLI | the user's `~/.gemini/settings.json` | copied by hand | the `GEMINI.md` instruction block, plus the `SessionStart` hook added by hand |
 
 Everything the setup skill tells an agent to do for one harness lives in
 that harness's file under `skills/hivemind-setup/references/`. The skill
@@ -98,14 +98,25 @@ itself names no harness-specific paths, and a test enforces this.
 Two nudges that get knowledge written before it is lost: in Claude Code
 and Codex from `hooks/hooks.json`, in Pi and Oh My Pi from the extension
 and the OpenCode plugin, in DeepSeek Harness the Stop reminder from
-`dsh/hivemind-reminders.js` (below). Hermes and Gemini CLI do not have
-them. The script counts both
-transcript formats: Claude Code's `"type": "tool_use"` records and Codex's
-`function_call`, `custom_tool_call` and `local_shell_call` items (checked
-with Codex 0.162.1 against a mock model: it blocks once, Codex continues
-with the reason as the next prompt, and an MCP `hive_write`, recorded as
-`"name":"hive_write","namespace":"mcp__hivemind"`, keeps it quiet). Codex
-runs plugin hooks only after the user trusts them in `/hooks`.
+`dsh/hivemind-reminders.js` (below). Gemini CLI gets the Stop reminder
+when the user adds `hivemind-stop.sh` as an `AfterAgent` hook by hand
+(hivemind-setup's Gemini reference). Hermes does not have them.
+
+The script counts three transcript formats:
+
+- Claude Code's `"type": "tool_use"` records.
+- Codex's `function_call`, `custom_tool_call` and `local_shell_call`
+  items. Checked with Codex 0.162.1 against a mock model: it blocks once,
+  Codex continues with the reason as the next prompt, and an MCP
+  `hive_write`, recorded as `"name":"hive_write","namespace":"mcp__hivemind"`,
+  keeps it quiet. Codex runs plugin hooks only after the user trusts them
+  in `/hooks`.
+- The distinct `functionResponse` ids in Gemini CLI's JSONL chat log,
+  which rewrites a call's record as it progresses. Checked with Gemini CLI
+  0.63 against a mock model: `AfterAgent` takes the same `block` output
+  and sends the reason as the next prompt, and `mcp_hivemind_hive_write`
+  keeps it quiet. Gemini's `SessionStart` has no compaction source, so it
+  gets no post-compaction line.
 
 - **Post-compaction line.** When the `SessionStart` source is `compact`
   (read from the hook's stdin JSON), `hivemind-session-start.sh` appends

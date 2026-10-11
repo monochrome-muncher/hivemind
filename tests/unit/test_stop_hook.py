@@ -106,6 +106,37 @@ def test_a_codex_session_that_already_wrote_is_not_blocked(tmp_path: Path) -> No
     assert (out.returncode, out.stdout) == (0, "")
 
 
+def _gemini_transcript(tmp_path: Path, calls: int, *names: str) -> Path:
+    """A Gemini CLI 0.63 chat log: JSONL whose model message is written again
+    each time a call progresses, so every call (and its functionResponse id)
+    appears several times."""
+    path = tmp_path / "session.jsonl"
+
+    def call(i: int, name: str) -> dict[str, object]:
+        cid = f"{name}__{name}_17917305_{i}"
+        response = {"id": cid, "name": name, "response": {"output": "ok"}}
+        return {"id": cid, "name": name, "args": {}, "result": [{"functionResponse": response}]}
+
+    tool_calls = [call(i, "run_shell_command") for i in range(calls)]
+    tool_calls += [call(calls + i, n) for i, n in enumerate(names)]
+    record = {"id": "m1", "type": "gemini", "content": "", "toolCalls": tool_calls}
+    lines = [json.dumps({"sessionId": "s1", "kind": "main"})]
+    lines += [json.dumps(record, separators=(",", ":"))] * 3
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
+def test_a_substantial_gemini_session_is_blocked_counting_each_call_once(tmp_path: Path) -> None:
+    assert json.loads(_stop(tmp_path, _gemini_transcript(tmp_path, 20)).stdout)["decision"]
+    short = _stop(tmp_path, _gemini_transcript(tmp_path, 10), session_id="s2")
+    assert (short.returncode, short.stdout) == (0, "")
+
+
+def test_a_gemini_session_that_already_wrote_is_not_blocked(tmp_path: Path) -> None:
+    out = _stop(tmp_path, _gemini_transcript(tmp_path, 25, "mcp_hivemind_hive_write"))
+    assert (out.returncode, out.stdout) == (0, "")
+
+
 def test_a_short_session_is_not_blocked(tmp_path: Path) -> None:
     out = _stop(tmp_path, _transcript(tmp_path, 5))
     assert (out.returncode, out.stdout) == (0, "")
