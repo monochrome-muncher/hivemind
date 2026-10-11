@@ -2,7 +2,7 @@
 
 Seam under test: ``build_server`` (``src/hivemind/mcp/server.py``). The
 stdio transport itself is not exercised (it would block on stdin), so
-the seam is: ``build_server`` registers exactly the six tool names, and a
+the seam is: ``build_server`` registers exactly the ten tool names, and a
 registered tool, invoked through ``call_tool``, delegates to the plain
 functions in ``app.py`` and returns a well-formed result.
 """
@@ -16,7 +16,7 @@ import pytest
 from hivemind.domain.access import TrustLevel
 from hivemind.domain.entry import EntityKind, EntryDraft, ExtractedEntity, Kind
 from hivemind.mcp.app import McpHivemind, hive_write
-from hivemind.mcp.server import build_server
+from hivemind.mcp.server import build_server, compact_schema
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
@@ -271,3 +271,48 @@ async def test_registered_list_tool_is_compact_unless_include_body() -> None:
     assert "body" not in json.loads(compact.content[0].text)["entries"][0]
     full = await server.call_tool("hive_list", {"include_body": True})
     assert "body" in json.loads(full.content[0].text)["entries"][0]
+
+
+async def test_tool_schemas_are_compact(app: McpHivemind) -> None:
+    """Clients load every tool schema into each session's context, so the
+    advertised schemas carry no pydantic titles and no ``anyOf [T, null]``
+    for optional arguments (``compact_schema``)."""
+    tools = await build_server(app).list_tools()
+    text = json.dumps([[t.input_schema, t.output_schema] for t in tools])
+    assert '"title"' not in text
+    assert '{"type": "null"}' not in text
+    write = next(t for t in tools if t.name == "hive_write")
+    assert write.input_schema["required"] == ["kind", "summary"]
+    assert write.input_schema["properties"]["body"] == {"type": "string"}
+    assert write.input_schema["properties"]["check"] == {"default": False, "type": "boolean"}
+
+
+async def test_an_explicit_null_argument_is_still_accepted(app: McpHivemind) -> None:
+    """The compact schema drops ``null`` from optional arguments; the server
+    still validates with its own model, so a client sending ``null`` works."""
+    server = build_server(app)
+    result = await server.call_tool(
+        "hive_write", {"kind": "fact", "summary": "null body", "body": None, "tags": None}
+    )
+    assert result.is_error is False
+    assert json.loads(result.content[0].text)["summary"] == "null body"
+
+
+def test_compact_schema_keeps_non_null_defaults_and_unions() -> None:
+    schema = {
+        "title": "Args",
+        "properties": {
+            "a": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": None, "title": "A"},
+            "b": {"anyOf": [{"type": "string"}, {"type": "integer"}], "title": "B"},
+            "c": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": "x"},
+            "title": {"type": "string", "title": "Title"},
+        },
+    }
+    assert compact_schema(schema) == {
+        "properties": {
+            "a": {"type": "string"},
+            "b": {"anyOf": [{"type": "string"}, {"type": "integer"}]},
+            "c": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": "x"},
+            "title": {"type": "string"},  # an argument named "title" stays
+        }
+    }
