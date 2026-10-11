@@ -233,8 +233,8 @@ The second command should return the entry you just wrote.
 ### Use another embedding model
 
 Any service with an OpenAI-compatible `/v1/embeddings` endpoint works.
-Skip `make vllm` and give the settings on each `make` command, or export
-them in your shell first:
+Skip `make vllm` and export the settings in your shell first (or put
+them in `.env.local`, see [Configuration](#configuration)):
 
 ```bash
 export HIVEMIND_EMBEDDING_ENDPOINT=https://api.example.com/v1
@@ -271,18 +271,23 @@ will meet first:
 
 There are two ways to set them:
 
+- **In a file called `.env.local`** in the repository folder. Both the
+  `make` commands and `uv run` (for example `uv run hivemind-api`) read
+  it. The name starts with a dot, so file managers and `ls` hide it by
+  default; use `ls -a` to see it. You can start from the example with
+  `cp config/.env.example .env.local`, which lists every setting. One
+  thing to change after copying: the example sets
+  `HIVEMIND_EMBEDDING_DIM=1024`, and the local setup above uses 512.
+  Change it to 512, unless you are starting with an empty database.
 - **Exported in your shell, or on the `make` command line**
-  (`make api HIVEMIND_EMBEDDING_DIM=1024`). This always works.
-- **In a file called `.env.local`** in the repository folder. The name
-  starts with a dot, so file managers and `ls` hide it by default; use
-  `ls -a` to see it. Create it with `cp config/.env.example .env.local`.
-  The services read it when you start them with `uv run`, for example
-  `uv run hivemind-api`. **The `make` commands ignore it** for the
-  database, embedding and extractor settings, because the Makefile sets
-  its own local defaults for those, and those win over the file.
+  (`make api HIVEMIND_EMBEDDING_DIM=1024`). These win over the file.
+
+Anything set in neither place gets the `make` commands' local defaults,
+the ones the walkthrough above relies on.
 
 A misspelled `HIVEMIND_` variable is reported at startup. The `make`
-commands treat it as an error so you notice it.
+commands treat it as an error so you notice it, unless `.env.local` sets
+`HIVEMIND_STRICT_ENV=false` (the example file does).
 
 ## Run it for your organization
 
@@ -325,8 +330,9 @@ remove a setting whose meaning changed.
   in use`.** Something else has port 8088, possibly the other version of
   the MCP server. Stop it, or pick another port with
   `HIVEMIND_MCP_HTTP_PORT=9000`.
-- **A setting in `.env.local` has no effect.** The `make` commands
-  override it. Export the variable, or put it on the `make` command line.
+- **A setting in `.env.local` has no effect.** The same variable is
+  probably exported in your shell, and that wins. Check with
+  `env | grep HIVEMIND_`.
 - **`make migrate` complains about the vector dimension.** The database
   was set up with a different `HIVEMIND_EMBEDDING_DIM`. Use the same
   value, or run `make pg-reset`, which deletes all data.
