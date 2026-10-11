@@ -228,7 +228,15 @@ class TestMetricsService:
         store = _make_store(clock)
         service = MetricsService(store)
         report = await service.usage_report()
-        assert set(report) == {"entries", "fleets", "agents", "searches", "feedback"}
+        assert set(report) == {
+            "entries",
+            "fleets",
+            "agents",
+            "searches",
+            "feedback",
+            "health",
+            "health_status",
+        }
         assert report["feedback"] == {"flags": 0, "confirmed": 0, "by_agent": {}}
 
     async def test_usage_report_reads_the_pool_in_one_grouped_query(self) -> None:
