@@ -16,7 +16,7 @@ from hivemind.ports import Credential
 from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService, WriteService
 from hivemind.services.search import SearchService
-from hivemind.services.write_warnings import has_local_path
+from hivemind.services.write_warnings import has_local_path, is_entry_link
 from tests.fakes import FakeAuthenticator, make_clock, make_embedder, make_search_config
 
 
@@ -89,7 +89,8 @@ def _surface(store: MemoryStore, credential: Credential) -> McpHivemind:
 
 async def _write(store: MemoryStore, cred: Credential, **kw: object) -> dict[str, object]:
     kw.setdefault("summary", "billing runs on node 20")
-    return await hive_write(_surface(store, cred), kind="fact", **kw)  # type: ignore[arg-type]
+    kw.setdefault("kind", "fact")
+    return await hive_write(_surface(store, cred), **kw)  # type: ignore[arg-type]
 
 
 def _codes(result: dict[str, object]) -> list[str]:
@@ -196,3 +197,59 @@ async def test_rest_reports_warnings_on_a_write() -> None:
         )
     assert resp.status_code == 201
     assert [w["code"] for w in resp.json()["warnings"]] == ["local_path"]
+
+
+_ID = "0b6f2c1e-5d34-4a8e-9c1b-7e2a4f6d8b10"
+
+
+@pytest.mark.parametrize("ref", [_ID, f"entry:{_ID}", f"https://hm.example/v1/entries/{_ID}"])
+def test_entry_links_are_recognised(ref: str) -> None:
+    from hivemind.domain.entry import Source, SourceType
+
+    assert is_entry_link(Source(SourceType.OTHER, ref))
+
+
+@pytest.mark.parametrize("ref", ["src/app.py", "https://example.com/a", "session-123", "entry:abc"])
+def test_other_refs_are_not_entry_links(ref: str) -> None:
+    from hivemind.domain.entry import Source, SourceType
+
+    assert not is_entry_link(Source(SourceType.URL, ref))
+
+
+async def test_no_primary_source_on_a_synthesis_of_entries() -> None:
+    store = MemoryStore(make_clock())
+    base = await _write(store, A, summary="base")
+    link = {"type": "other", "ref": f"entry:{base['id']}"}
+    # entry-only sources, and empty sources with links, both warn
+    only_links = await _write(store, A, kind="insight", sources=[link])  # type: ignore[call-arg]
+    assert _codes(only_links) == ["no_primary_source"]
+    empty_linked = await hive_write(
+        _surface(store, A),
+        kind="decision",
+        summary="d",
+        see_also=[base["id"]],  # type: ignore[arg-type]
+    )
+    assert _codes(empty_linked) == ["no_primary_source"]
+    merged = await hive_write(
+        _surface(store, A),
+        kind="insight",
+        summary="m",
+        supersedes=[base["id"]],  # type: ignore[arg-type]
+    )
+    assert "no_primary_source" in _codes(merged)
+
+
+async def test_no_primary_source_misses() -> None:
+    store = MemoryStore(make_clock())
+    base = await _write(store, A, summary="base")
+    link = {"type": "other", "ref": f"entry:{base['id']}"}
+    real = {"type": "url", "ref": "https://example.com/doc"}
+
+    async def codes(**kw: object) -> list[str]:
+        args = {"kind": "insight", "summary": "s", **kw}
+        return _codes(await hive_write(_surface(store, A), **args))  # type: ignore[arg-type]
+
+    assert await codes(sources=[link, real]) == []  # one external source is enough
+    assert await codes() == []  # no sources, no links: not a synthesis
+    assert await codes(kind="fact", sources=[link]) == []
+    assert await codes(sources=[link], scope="self") == []

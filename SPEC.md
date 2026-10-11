@@ -77,6 +77,7 @@ One entry entity; a `kind` enum carries the distinction. There are no other read
 | `foreign_link` | a `fleet` entry whose `see_also` target is a `fleet` entry of another fleet (a `supersedes` target of another fleet is already refused) |
 | `backdated_successor` | a `supersedes` target has a later `occurred_at` than the new entry |
 | `fresh_consolidation` | the entry supersedes two or more entries and its `occurred_at` is more than one day after the newest superseded one; the message asks for the newest observation unless the writer observed or re-checked it today |
+| `no_primary_source` | an `org` or `fleet` `insight` or `decision` whose `sources` are all links to Hivemind entries (a bare entry id, `entry:<id>` or an `.../entries/<id>` URL), or are empty while it has `supersedes` or `see_also` links; an entry with no sources and no links is not flagged |
 | `sources_dropped` | a `supersedes` target has `sources` and the new entry carries none of them |
 
 **Derived validity (ADR 0001, no `valid_until` column):** an entry is "active as of T" iff `created_at ≤ T` and it has no supersession/withdrawal state transition before T. Read-side time-travel questions ("what did the org know in March?") are answered by `created_at`/`occurred_at` range filters + `state`.

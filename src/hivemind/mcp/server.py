@@ -97,8 +97,7 @@ _DESC_WRITE = (
     "and write it again with 'supersedes' naming it. Optional 'see_also' "
     "(up to 5 ids of entries you can read) links this entry to related ones "
     "it does not replace; hive_get shows the links on both ends. "
-    "'check': true stores nothing and returns related and warnings only; "
-    "heed the reply's warnings. "
+    "'check': true stores nothing, returns related and warnings. "
     "On embedding_unavailable, don't retry in a loop: keep the note and write "
     "it later."
 )

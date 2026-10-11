@@ -31,7 +31,7 @@ fleet's entry linked from a home-fleet one).
    batched read) and `same_author`.
 3. **Advisory warnings.** Writes and checks answer with `warnings`, a list
    of `{code, message}`. The codes are `local_path`, `foreign_link`,
-   `backdated_successor`, `fresh_consolidation` and `sources_dropped`
+   `backdated_successor`, `fresh_consolidation`, `sources_dropped` and `no_primary_source`
    (SPEC §4.1). A warning never blocks or changes a write. Nothing is
    refused, merged or superseded automatically (ADR 0001, 0052 §3).
    `local_path` matches `/home/<name>`, `/Users/<name>` and `~/<name>`
@@ -42,6 +42,12 @@ fleet's entry linked from a home-fleet one).
    refused (ADR 0033). `fresh_consolidation` asks the writer to date a
    restatement at the newest observation, and keeps today's date for an
    observation or re-check made today.
+   `no_primary_source` (study §8.2 row D, against syntheses of syntheses)
+   fires for an `org` or `fleet` `insight` or `decision` whose sources
+   all link to entries; an empty `sources` counts only when the entry
+   supersedes or links entries. Source types have no entry type, so an
+   entry link is recognised by its ref: a bare entry id, `entry:<id>` or
+   an `.../entries/<id>` URL.
 4. The warnings are computed from the supersede and see-also targets the
    write path already loads, so they add no store round trip.
 
@@ -52,4 +58,4 @@ fleet's entry linked from a home-fleet one).
 - 0052's "pre-write check verb" alternative is superseded by item 1. Its
   other decisions stand.
 - The always-on text grows by one sentence in `hive_write`'s description
-  and one clause in the skill, inside the shared byte budget.
+  and nothing in the skill, inside the shared byte budget.

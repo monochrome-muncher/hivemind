@@ -10,7 +10,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import timedelta
 
-from hivemind.domain.entry import Entry, EntryDraft
+from hivemind.domain.entry import Entry, EntryDraft, Source
 
 # Consolidating entries whose newest observation is older than this, under
 # a fresh ``occurred_at``, ranks the result as newer than its evidence.
@@ -34,6 +34,12 @@ _LOCAL_PATH = re.compile(
 )
 
 
+# A source that points at a Hivemind entry (there is no source type for it):
+# a bare entry id, ``entry:<id>``, or an API URL ``.../entries/<id>``.
+_UUID = r"[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}"
+_ENTRY_REF = re.compile(rf"^(?:entry:|.*/entries/)?{_UUID}/?$", re.IGNORECASE)
+
+
 @dataclass(frozen=True, slots=True)
 class WriteWarning:
     """An advisory note on a write: a stable ``code`` and a short action."""
@@ -45,6 +51,11 @@ class WriteWarning:
 def has_local_path(text: str) -> bool:
     """Whether ``text`` contains a machine-local path."""
     return _LOCAL_PATH.search(text) is not None
+
+
+def is_entry_link(source: Source) -> bool:
+    """Whether ``source`` points at another Hivemind entry, not the world."""
+    return _ENTRY_REF.match(source.ref.strip()) is not None
 
 
 def _ids(entries: Iterable[Entry]) -> str:
@@ -105,6 +116,22 @@ def write_warnings(
                 "occurred_at is more than a day after the newest superseded entry; if this "
                 "restates them without new evidence, set occurred_at to the newest "
                 "observation; keep today's date only if you observed or re-checked it today",
+            )
+        )
+
+    # A synthesis grounded only in other entries: sources that all link to
+    # entries, or none at all while it supersedes or links entries.
+    if (
+        draft.scope in ("org", "fleet")
+        and draft.kind.value in ("insight", "decision")
+        and all(is_entry_link(src) for src in draft.sources)
+        and (draft.sources or draft.supersedes or draft.see_also)
+    ):
+        found.append(
+            WriteWarning(
+                "no_primary_source",
+                "no source outside Hivemind entries; add the primary source "
+                "(file, URL, session) the evidence came from, or say in 'body' how it was observed",
             )
         )
 

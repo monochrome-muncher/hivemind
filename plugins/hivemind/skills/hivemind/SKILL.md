@@ -85,8 +85,8 @@ a task done, ask once what you would have needed at the start; if
 nothing new, write nothing ("task done" helps nobody).
 
 **Search with your draft summary first** and act on the nearest entry
-(the same for `related` in the write reply, or `check: true` to see
-it and `warnings` before storing; withdraw yours if it duplicated one):
+(the same for `related` in the write reply; withdraw yours if it
+duplicated one):
 
 | The nearest entry | Do |
 |---|---|
