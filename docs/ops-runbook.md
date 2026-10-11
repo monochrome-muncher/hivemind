@@ -103,7 +103,7 @@ lists every one with its default, and `src/hivemind/config.py` is the source.
 > Kubernetes service links inject `HIVEMIND_*` variables of their own
 > (`HIVEMIND_API_SERVICE_HOST` and the like). Set
 > `HIVEMIND_STRICT_ENV=true` to make it a startup failure instead (the
-> dev Makefile does).
+> dev Makefile does, unless the profile file sets it).
 
 > **Embedding dimension is a deploy-time decision** (ADR 0005): the
 > `vector(:dim)` column is created at migration time. Changing the
@@ -358,7 +358,7 @@ the switch is a pool change, not a model change:
 2. **Back up** the data (see §3) — the old-dim pool is your source of
    truth until the new one is verified.
 3. **Set the dim** — `HIVEMIND_EMBEDDING_DIM=1024` (the code default is
-   now 1024, ADR 0015; the dev Makefile: `export HIVEMIND_EMBEDDING_DIM ?= 512`,
+   now 1024, ADR 0015; the dev Makefile defaults to 512 unless the profile file sets it,
    override per deploy) + the matching `HIVEMIND_EMBEDDING_MODEL` /
    endpoint. A wrong value is a loud error at `hivemind-migrate` time
    (ADR 0015), so it can't slip through silently.

@@ -1,35 +1,47 @@
 # Hivemind dev workflow. All commands are thin wrappers around uv + docker compose.
 .DEFAULT_GOAL := help
 PG_DSN ?= postgresql://hivemind:hivemind@localhost:5432/hivemind
+# The dev defaults below fill in only what the environment profile file
+# (`.env.local`, or the file ENVIRONMENT selects; ADR 0017) leaves unset:
+# exporting a default would beat the file, since real env vars win over it.
+# A shell export or `make VAR=...` still wins over both.
+ENV_NAME := $(strip $(shell printf '%s' '$(ENVIRONMENT)' | tr '[:upper:]' '[:lower:]'))
+ENV_PROFILE := $(if $(filter production prod,$(ENV_NAME)),.env.production,$(if $(filter staging,$(ENV_NAME)),.env.staging,$(if $(filter test,$(ENV_NAME)),.env.test,.env.local)))
+PROFILE_VARS := $(shell sed -n -E 's/^[[:space:]]*(export[[:space:]]+)?(HIVEMIND_[A-Za-z0-9_]+)[[:space:]]*=.*/\2/p' $(ENV_PROFILE) 2>/dev/null)
+# $(call dev_default,NAME,VALUE): export NAME ?= VALUE unless the profile sets NAME.
+dev_default = $(if $(filter $(1),$(PROFILE_VARS)),,$(eval export $(1) ?= $(2)))
 # Local vLLM embedding endpoint (make vllm; ADR 0005). Override per target,
 # e.g. `make api HIVEMIND_EMBEDDING_ENDPOINT=https://api.openai.com/v1`.
-export HIVEMIND_DATABASE_URL ?= $(PG_DSN)
-export HIVEMIND_EMBEDDING_ENDPOINT ?= http://localhost:8001/v1
-export HIVEMIND_EMBEDDING_MODEL ?= Qwen/Qwen3-Embedding-0.6B
+$(call dev_default,HIVEMIND_DATABASE_URL,$(PG_DSN))
+$(call dev_default,HIVEMIND_EMBEDDING_ENDPOINT,http://localhost:8001/v1)
+$(call dev_default,HIVEMIND_EMBEDDING_MODEL,Qwen/Qwen3-Embedding-0.6B)
 # Dev dim 512 (fast local vLLM). The code default is 1024 (ADR 0015); a
 # pool provisioned at another dim fails loudly at `hivemind-migrate`.
-export HIVEMIND_EMBEDDING_DIM ?= 512
+$(call dev_default,HIVEMIND_EMBEDDING_DIM,512)
 # Locally the environment is entirely ours, so a typo'd HIVEMIND_* variable
 # fails startup instead of only warning (ADR 0032).
-export HIVEMIND_STRICT_ENV ?= true
+$(call dev_default,HIVEMIND_STRICT_ENV,true)
 # Entity extraction (ADR 0016, SPEC §13): empty endpoint = OFF (empty
 # `entities`, no LLM cost). Best-effort: a failure never blocks a write.
 # Enable per target, e.g.
 #   make api HIVEMIND_EXTRACTOR_ENDPOINT=http://localhost:8080/v1 \
 #            HIVEMIND_EXTRACTOR_MODEL=qwen3.8-27b HIVEMIND_EXTRACTOR_API_KEY=dummy
-export HIVEMIND_EXTRACTOR_ENDPOINT ?=
-export HIVEMIND_EXTRACTOR_MODEL ?=
-export HIVEMIND_EXTRACTOR_API_KEY ?=
+$(call dev_default,HIVEMIND_EXTRACTOR_ENDPOINT,)
+$(call dev_default,HIVEMIND_EXTRACTOR_MODEL,)
+$(call dev_default,HIVEMIND_EXTRACTOR_API_KEY,)
 # Per-agent credential for the Postgres-backed MCP runner (ADR 0009). Leave
 # empty unless overriding; an agent's MCP config sets its own key.
-export HIVEMIND_MCP_KEY ?=
+$(call dev_default,HIVEMIND_MCP_KEY,)
 # Bind host/port for the local REST API (`make api`, ADR 0010).
-export HIVEMIND_HOST ?= 127.0.0.1
-export HIVEMIND_PORT ?= 8000
+$(call dev_default,HIVEMIND_HOST,127.0.0.1)
+$(call dev_default,HIVEMIND_PORT,8000)
 # Port for the streamable-HTTP MCP runner: the host port of the mcp-http
 # docker service (the container always binds 8088) and the port of
 # `make mcp-http-dev`, so the runner never collides with `make api`.
-export HIVEMIND_MCP_HTTP_PORT ?= 8088
+# docker compose never reads the profile file, so the profile's value is
+# passed on here.
+HIVEMIND_MCP_HTTP_PORT ?= $(or $(shell sed -n -E 's/^[[:space:]]*(export[[:space:]]+)?HIVEMIND_MCP_HTTP_PORT[[:space:]]*=[[:space:]]*["'"'"']?([0-9]+).*/\2/p' $(ENV_PROFILE) 2>/dev/null | tail -n 1),8088)
+export HIVEMIND_MCP_HTTP_PORT
 
 .PHONY: help
 help: ## Show this help
