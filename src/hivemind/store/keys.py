@@ -419,6 +419,13 @@ def main() -> None:
     revoke = sub.add_parser("revoke", help="revoke an agent's key (name stays reserved)")
     revoke.add_argument("--name", required=True)
 
+    def print_key(kind: str, key: str) -> None:
+        # The bare key on stdout, so `KEY=$(hivemind-keys ...)` still works;
+        # what it is goes to stderr, for the person reading the terminal.
+        print(f"{kind} (shown once; only its hash is stored, so save it now):", file=sys.stderr)
+        sys.stderr.flush()
+        print(key)
+
     args = parser.parse_args()
     actor: str = args.actor if args.actor is not None else default_actor()
     dsn = load_settings().database_url
@@ -428,10 +435,11 @@ def main() -> None:
         except ValueError:
             parser.error(f"--home-fleet {args.home_fleet!r} is not a fleet id (a UUID)")
     if args.cmd == "issue-admin":
-        print(asyncio.run(_issue_admin(dsn, actor=actor)))
+        print_key("New admin key", asyncio.run(_issue_admin(dsn, actor=actor)))
     elif args.cmd == "issue-agent":
         try:
-            print(
+            print_key(
+                f"New agent key for {args.name}",
                 asyncio.run(
                     _issue_agent(
                         dsn,
@@ -442,7 +450,7 @@ def main() -> None:
                         ),
                         home_fleet_id=args.home_fleet,
                     )
-                )
+                ),
             )
         except AgentNeedsActivation as exc:
             print(
@@ -478,7 +486,10 @@ def main() -> None:
             )
             raise SystemExit(1) from None
     elif args.cmd == "rotate-org":
-        print(asyncio.run(_rotate_org(dsn, actor=actor)))
+        print_key(
+            "New org key (the previous one stops working)",
+            asyncio.run(_rotate_org(dsn, actor=actor)),
+        )
     elif args.cmd == "bootstrap-secret":
         from hivemind.store.kube_secret import KubeApiError, KubeSecrets
 
