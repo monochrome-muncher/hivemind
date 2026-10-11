@@ -80,3 +80,4 @@ is unused.
 | [0068](0068-rater-flag-confirmation-metric.md) | Count the flags a later supersession confirmed | Accepted |
 | [0069](0069-cache-the-entry-scan-behind-the-usage-report.md) | Cache the entry scan behind the usage report | Accepted |
 | [0070](0070-one-capped-budget-for-social-signals.md) | One capped budget for social signals | Accepted |
+| [0074](0074-group-unlinked-versions-at-read-time.md) | Group unlinked versions at read time | Accepted (off by default) |

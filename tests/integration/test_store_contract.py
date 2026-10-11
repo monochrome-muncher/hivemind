@@ -183,6 +183,30 @@ async def test_unknown_and_malformed_ids_read_as_absent(adapter: Adapter) -> Non
     assert list(found) == [entry.id]
 
 
+async def test_pairwise_similarity_reads_stored_vectors(adapter: Adapter) -> None:
+    """ADR 0074: cosine between stored vectors, each unordered pair once under
+    sorted string keys; entries with no vector, unknown and malformed ids
+    drop out; no embedder involved."""
+    same = await write(adapter, "pool is 20", hot=3)
+    near = await adapter.store.create_entry(
+        draft("pool raised to 90"), adapter.vec(3, base=0.02), "test-model"
+    )
+    far = await write(adapter, "unrelated", hot=7)
+    bare = await adapter.store.create_entry(draft("no vector"), None, None)
+    ids = [far.id, same.id, near.id, bare.id, NO_SUCH_ID, "not-a-uuid", same.id]
+    got = await adapter.store.pairwise_similarity(ids)
+
+    def key(a: Entry, b: Entry) -> tuple[str, str]:
+        x, y = sorted((a.id, b.id))
+        return (x, y)
+
+    assert set(got) == {key(same, near), key(same, far), key(near, far)}
+    assert got[key(same, near)] == pytest.approx(0.9796, abs=1e-3)
+    assert got[key(same, near)] > got[key(same, far)]
+    assert await adapter.store.pairwise_similarity([same.id]) == {}
+    assert await adapter.store.pairwise_similarity([]) == {}
+
+
 @pytest.mark.parametrize("spelling", ["{%s}", "urn:uuid:%s", "-----%s"])
 async def test_uuid_spellings_postgres_rejects_read_as_absent(
     adapter: Adapter, spelling: str

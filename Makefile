@@ -105,6 +105,10 @@ test-unit: ## Run unit tests only (no Postgres needed)
 measure-threshold: ## Measure a search similarity threshold with the configured embedder (ADR 0062; e.g. after `make vllm`; set HIVEMIND_EMBEDDING_DIM to the deployment's)
 	uv run python -m tests.eval.threshold
 
+.PHONY: measure-versions
+measure-versions: ## Measure the version-grouping cut-off with the configured embedder (ADR 0074; e.g. after `make vllm`; set HIVEMIND_EMBEDDING_DIM to the deployment's)
+	uv run python -m tests.eval.versions
+
 .PHONY: check
 check: ## Type-check + lint (mypy strict + ruff)
 	uv run mypy

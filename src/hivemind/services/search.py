@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -34,6 +34,15 @@ from hivemind.embeddings import EmbeddingError
 from hivemind.ports import Embedder, Store
 from hivemind.retrieval.rrf import rrf_fuse
 from hivemind.retrieval.scoring import entry_score, feedback_quality
+
+
+@dataclass(frozen=True, slots=True)
+class SimilarEntry:
+    """Another member of a hit's version group (ADR 0074): an id the caller
+    can already read, and when its memory happened."""
+
+    entry_id: str
+    occurred_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +75,10 @@ class Hit:
     correction: Correction | None = None
     supersedes: int = 0
     state: EntryState | None = None
+    # Unlinked near-copies of this entry among the same search's candidates,
+    # newest first (ADR 0074); empty unless version grouping is on and found
+    # some. Display only.
+    similar: tuple[SimilarEntry, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,8 +245,19 @@ class SearchService:
             entry_scores[entry.id] = score
             scored.append(entry)
 
-        # 5. Supersession ranking invariant (SPEC.md §6.3).
-        ordered = apply_supersession_invariant(scored, entry_scores)
+        # 5. Version groups (ADR 0074, off unless configured), then the
+        # supersession ranking invariant (SPEC.md §6.3). Run after the two
+        # concurrent reads above, never beside them (ADR 0059).
+        version_groups: list[list[Entry]] = []
+        threshold = self._config.version_group_min_similarity
+        if threshold is not None:
+            version_groups = await self._version_groups(
+                scored, entry_scores, entry_feedback, threshold
+            )
+        ordered = apply_supersession_invariant(
+            scored, entry_scores, version_groups=[[m.id for m in g] for g in version_groups]
+        )
+        similar = _similar_map(version_groups)
 
         # 6. Pagination (SPEC.md §5.3: limit/offset on search and list).
         hits = [
@@ -242,10 +266,37 @@ class SearchService:
                 entry_scores[entry.id],
                 entry_feedback[entry.id],
                 with_state=filters.include_inactive,
+                similar=similar.get(entry.id, ()),
             )
             for entry in ordered[offset : offset + limit]
         ]
         return SearchResult(hits, degraded)
+
+    async def _version_groups(
+        self,
+        scored: list[Entry],
+        scores: dict[str, float],
+        feedback: dict[str, FeedbackSignals],
+        threshold: float,
+    ) -> list[list[Entry]]:
+        """The version groups among the best candidates (ADR 0074), each
+        ordered for display. Best-effort: grouping is a display nicety, so a
+        failed read means no groups, never a failed search."""
+        ranked = sorted(
+            (e for e in scored if e.state is EntryState.ACTIVE),
+            key=lambda e: scores[e.id],
+            reverse=True,
+        )[:MAX_GROUPED_CANDIDATES]
+        if len(ranked) < 2:
+            return []
+        try:
+            similarity = await self._store.pairwise_similarity([e.id for e in ranked])
+        except Exception as exc:
+            # Logged with the traceback: a broken adapter would otherwise only
+            # show as grouping that never happens.
+            logger.warning("version grouping skipped: %s", type(exc).__name__, exc_info=True)
+            return []
+        return group_versions(ranked, similarity, threshold, feedback)
 
     async def _vector_stream(
         self,
@@ -271,7 +322,13 @@ class SearchService:
         )
 
     def _to_hit(
-        self, entry: Entry, score: float, signals: FeedbackSignals, *, with_state: bool = False
+        self,
+        entry: Entry,
+        score: float,
+        signals: FeedbackSignals,
+        *,
+        with_state: bool = False,
+        similar: tuple[SimilarEntry, ...] = (),
     ) -> Hit:
         return Hit(
             entry_id=entry.id,
@@ -290,12 +347,94 @@ class SearchService:
             correction=shown_correction(signals.correction, signals.last_confirmed_at),
             supersedes=signals.supersedes,
             state=entry.state if with_state else None,
+            similar=similar,
         )
+
+
+# Version grouping looks at no more than the two streams' default candidates.
+MAX_GROUPED_CANDIDATES = 40
+# A group of unlinked versions is a pair or a triple, never a cluster.
+MAX_GROUP_SIZE = 3
+
+
+def _group_key(entry: Entry) -> str | None:
+    """Who may be grouped with whom (ADR 0074): entries of one fleet, or
+    org-scoped entries. ``None``: with nobody."""
+    if entry.scope == "org":
+        return "org"
+    return f"fleet:{entry.fleet_id}" if entry.fleet_id else None
+
+
+def group_versions(
+    ranked: list[Entry],
+    similarity: Mapping[tuple[str, str], float],
+    threshold: float,
+    feedback: Mapping[str, FeedbackSignals],
+) -> list[list[Entry]]:
+    """Group unlinked near-copies among ``ranked`` (active candidates, best
+    score first), ADR 0074.
+
+    Walking down the ranking, the best ungrouped candidate is a group's
+    anchor; a later ungrouped candidate joins when its similarity to the
+    anchor is at least ``threshold``, the group has fewer than
+    ``MAX_GROUP_SIZE`` members and both belong to one fleet or are both
+    org-scoped. Only groups of two or more are returned, each ordered for
+    display: newest first by the later of ``occurred_at`` and
+    ``last_confirmed_at``, except that a member with a stale or wrong
+    report (contested included) never precedes an unflagged one. Pure: it
+    changes no score and hides nothing.
+    """
+
+    def newest(entry: Entry) -> datetime:
+        confirmed = feedback.get(entry.id, NO_SIGNALS).last_confirmed_at
+        return max(entry.occurred_at, confirmed) if confirmed else entry.occurred_at
+
+    def flagged(entry: Entry) -> bool:
+        _, stale, wrong = feedback.get(entry.id, NO_SIGNALS).counts
+        return stale + wrong > 0
+
+    taken: set[str] = set()
+    groups: list[list[Entry]] = []
+    for position, anchor in enumerate(ranked):
+        key = _group_key(anchor)
+        if anchor.id in taken or key is None:
+            continue
+        members = [anchor]
+        for other in ranked[position + 1 :]:
+            if len(members) >= MAX_GROUP_SIZE:
+                break
+            if other.id in taken or _group_key(other) != key:
+                continue
+            pair = (anchor.id, other.id) if anchor.id < other.id else (other.id, anchor.id)
+            if similarity.get(pair, -1.0) >= threshold:
+                members.append(other)
+        if len(members) < 2:
+            continue
+        taken.update(m.id for m in members)
+        members.sort(key=newest, reverse=True)
+        members.sort(key=flagged)  # stable: unflagged first, newest first within each
+        groups.append(members)
+    return groups
+
+
+def _similar_map(groups: list[list[Entry]]) -> dict[str, tuple[SimilarEntry, ...]]:
+    """For each grouped entry, its group's other members, newest first by
+    ``occurred_at``."""
+    out: dict[str, tuple[SimilarEntry, ...]] = {}
+    for group in groups:
+        for entry in group:
+            others = sorted(
+                (m for m in group if m.id != entry.id), key=lambda m: m.occurred_at, reverse=True
+            )
+            out[entry.id] = tuple(SimilarEntry(m.id, m.occurred_at) for m in others)
+    return out
 
 
 def apply_supersession_invariant(
     entries: list[Entry],
     scores: dict[str, float],
+    *,
+    version_groups: Sequence[Sequence[str]] = (),
 ) -> list[Entry]:
     """Enforce: within a supersession chain, the newest entry outranks all
     predecessors (SPEC.md §6.3).
@@ -303,6 +442,11 @@ def apply_supersession_invariant(
     Group by chain head, order groups by their best score, and within a
     group newest ``created_at`` first. Ties keep the order of ``entries``
     (stable sorts; SP-5).
+
+    ``version_groups`` (ADR 0074; ids, already in display order) add edges
+    between chains: the chains of one group are placed together, in the
+    group's order, at the position of the best-scoring member, each chain
+    keeping its own order. Every entry keeps a slot and no score changes.
     """
     # The candidates by id (the first one, should an id repeat).
     by_id: dict[str, Entry] = {}
@@ -323,10 +467,31 @@ def apply_supersession_invariant(
     groups: dict[str, list[Entry]] = {}
     for entry in entries:
         groups.setdefault(chain_head(entry), []).append(entry)
-
-    scored_groups: list[_ScoredGroup] = []
     for members in groups.values():
         members.sort(key=lambda e: e.created_at, reverse=True)
+
+    # Chains joined by a version group, keyed by the first-seen head.
+    merged: dict[str, list[str]] = {}
+    merged_into: dict[str, str] = {}
+    for version_group in version_groups:
+        heads = [
+            h
+            for h in dict.fromkeys(chain_head(by_id[i]) for i in version_group if i in by_id)
+            if h not in merged_into
+        ]
+        if len(heads) < 2:
+            continue
+        # Present at the earliest position any of its chains had.
+        first = next(h for h in groups if h in heads)
+        merged[first] = heads
+        merged_into.update(dict.fromkeys(heads, first))
+
+    scored_groups: list[_ScoredGroup] = []
+    for head, members in groups.items():
+        if head in merged_into and merged_into[head] != head:
+            continue  # emitted with the group's first chain
+        if head in merged:
+            members = [m for h in merged[head] for m in groups[h]]
         head_score = max(scores[m.id] for m in members)
         scored_groups.append(_ScoredGroup(key=head_score, members=members))
     scored_groups.sort(key=lambda g: g.key, reverse=True)

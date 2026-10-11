@@ -1,0 +1,36 @@
+# Group unlinked versions at read time
+
+Amends SPEC §6.3 (the supersession ranking invariant). Does not change [ADR 0001](0001-append-only-entries-with-explicit-supersession.md) or [ADR 0070](0070-one-capped-budget-for-social-signals.md).
+
+Status: Accepted. Ships **off**: nothing changes until an operator sets a cut-off measured with their embedder.
+
+## Context
+
+Supersession is a claim an agent has to make. When two agents write "pool is 20" and, months later, "pool raised to 90" and nobody supersedes, both stay active. Search ranks them by match, importance and recency; the older one can win on wording ("pool is 20" shares more words with "pool size"), and the reader sees two entries that look like unrelated facts. The recency floor (ADR 0022) narrows how much a newer version can gain, so the newer one is not reliably first. The study of 2026-10-10 (section 3.4) proposed showing such near-copies together.
+
+## Decision
+
+1. **Group near-copies at read time, and only show them.** When `SearchConfig.version_group_min_similarity` (tau, `HIVEMIND_VERSION_GROUP_MIN_SIMILARITY`, in (0, 1)) is set, search puts two or three active candidates that look like versions of one fact next to each other, newest first, and each hit names the others in `similar` (`[{id, occurred_at}]`, newest first; omitted over MCP and null over REST when empty). `similar` is a plain list by `occurred_at`; the display order of decision 3 can differ from it when a member was confirmed recently or flagged. Nothing is hidden, merged, linked or re-scored, and the stored entries are untouched: a group exists only in one search answer.
+
+2. **The rule.** After scoring and before the supersession invariant, the service takes the at most 40 best-scoring active candidates and reads their pairwise cosine. Walking down the ranking, the best ungrouped candidate is a group's anchor. A later candidate joins when its similarity to the anchor (not to another member) is at least tau, the group has fewer than 3 members, and the two share a fleet or are both org-scoped. A chain of near-copies a~b~c with a not near c therefore does not grow into one cluster.
+
+3. **Placement.** Groups feed the existing invariant as extra edges between chains: the group takes its best-scoring member's position, and its members follow each other. Members are ordered newest first by the later of `occurred_at` and `last_confirmed_at`, except that a member with a `stale` or `wrong` report (a contested one included) never precedes an unflagged one: a newer entry already reported wrong must not jump ahead of an older one nobody doubts. Every member keeps a slot, no score changes, and a supersession chain stays together in its own order. Only active entries group; an inactive hit shown under `include_inactive` is never part of a group.
+
+4. **Stored vectors, not new embeddings.** Similarity comes from the vectors already stored with the entries: `Store.pairwise_similarity` is one self-join over the candidates' `embedding` columns in Postgres (pgvector `<=>`) and the same arithmetic over stored embeddings in `MemoryStore`. It needs no embedder call, so it also works in keyword-only degraded mode (ADR 0048). An entry with no stored vector is simply never grouped. The read runs after the two concurrent reads (`get_entries`, `feedback_signals`), never beside them, so a search still holds at most two connections (ADR 0059), and only when tau is set. It is best-effort like the search counter (ADR 0056): a failure logs a warning with its traceback and the page is returned ungrouped. A bug in an adapter degrades the same way, so an operator who set tau and sees no `similar` should look for that warning.
+
+5. **The fleet rule.** Two entries group only when both are org-scoped or both belong to one fleet (`fleet_id`). An org-wide entry and a fleet entry say different things to different audiences; grouping them would suggest one replaces the other across an audience boundary, which supersession itself forbids (ADR 0033). Entries with neither a fleet nor org scope never group.
+
+6. **Visibility.** `similar` is computed over the candidates of this search only, which the visibility-filtered keyword and vector streams produced, so it names only entries the caller can already read. It cannot confirm that an unreadable entry exists.
+
+7. **Off is today's ranking, bit for bit.** With tau unset the store method is never called and the invariant receives no groups; a test compares a tau that groups nothing with off. Ranking scores never change (the I1-I5 invariants of ADR 0070 pass unchanged), and a property test checks that grouping never hides a candidate and never places a group above where its best member's score puts it. The REST hit gains a `similar` field that is null when off, like the other evidence fields.
+
+8. **A counts-only instrument is not built yet.** The study asks for unlinked version groups shown, per home fleet per day, as the first instrument for the held contradiction-detection trigger (SPEC §10). `search_counts` (ADR 0056) is a lifetime counter per fleet with no date, so a per-day count needs a new table or column, hence a migration, which this change does not add. It would be one row per (home fleet, day) with a count, written beside `record_search`, best-effort; `MetricsService` and the Prometheus gauges would read it. Until then the trigger has no number.
+
+9. **tau is measured, not guessed.** `make measure-versions` (`tests/eval/versions.py`) runs six version pairs and six same-system distractors per domain, in the five domains of the threshold study, across tau 0.70 to 0.95. Adopt a tau only where pooled false grouping is at most 5 percent and no domain is above 10 percent, the sysadmin domain passes, newer-member MRR rises, old-exact MRR falls at most 0.02 below baseline (grouping moves the newer member ahead, so it can only fall; the confirmation-clock rule uses the same tolerance) and pooled hit@5 does not fall. Results go in `docs/retrieval-experiments.md`. Measured 2026-10-11 on Qwen3-Embedding 8B/4B/0.6B: no tau passes on any model (same-system distractors sit as close as true versions), so grouping ships off with no recommended tau.
+
+## Consequences
+
+- An operator can leave it off forever; nothing else depends on it.
+- When on, a search for a fact with two unlinked versions shows them together and says which is newer, so the reader checks which holds and supersedes or flags the other. The old-exact query pays: the older entry sits behind the newer one when it used to be first, which is why old-exact MRR is part of the adoption rule.
+- Search costs one more store read, a self-join over at most 40 rows (780 pairs), when tau is set.
+- A near-copy that is a different fact (another setting of the same service) can be grouped when tau is too low; the false-grouping rate is what the measurement bounds. The harm is a misleading adjacency, not a lost or altered entry.

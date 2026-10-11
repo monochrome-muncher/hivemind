@@ -208,6 +208,20 @@ class MemoryStore:
                     result[eid] = _copy(entry)
             return result
 
+    async def pairwise_similarity(self, entry_ids: list[str]) -> dict[tuple[str, str], float]:
+        with self._lock:
+            vectors = {
+                eid: list(entry.embedding)
+                for eid in dict.fromkeys(entry_ids)
+                if (entry := self._entries.get(eid)) is not None and entry.embedding is not None
+            }
+        ids = sorted(vectors)
+        return {
+            (a, b): cosine_similarity(vectors[a], vectors[b])
+            for i, a in enumerate(ids)
+            for b in ids[i + 1 :]
+        }
+
     async def list_predecessors(self, entry_ids: list[str]) -> list[Entry]:
         wanted = set(entry_ids)
         with self._lock:

@@ -76,6 +76,10 @@ _Avoid_: overwrite, update, invalidate (say "supersede"; never "update an entry"
 The ordered set of versions reachable from an entry by following supersession links — its successors (what replaced it) and its superseded (what it replaced). The `?history` walk (SPEC §5.1).
 _Avoid_: version history, audit trail
 
+**Version group**:
+Two or three active entries that nobody linked by supersession but that read as versions of one fact, shown next to each other in a search answer, newest first, each naming the others (`similar`). It exists only in that answer; the entries are unchanged.
+_Avoid_: duplicate, cluster, merge
+
 **Withdrawal**:
 Marking an entry no longer valid without replacing it (retraction, or admin correction). Withdrawn entries are retained, never deleted.
 _Avoid_: delete, purge
