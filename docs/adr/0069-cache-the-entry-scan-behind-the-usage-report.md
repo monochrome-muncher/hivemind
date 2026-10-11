@@ -1,5 +1,7 @@
 # Cache the entry scan behind the usage report
 
+*Status: accepted; extended by [ADR 0075](0075-fleet-health-metrics.md), which caches the fleet health aggregates under the same TTL.*
+
 Amends [ADR 0050](0050-prometheus-scrape-endpoint.md).
 
 ## Context

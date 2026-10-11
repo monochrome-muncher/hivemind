@@ -19,20 +19,30 @@ Counters (ROADMAP §3.3 and §4.5):
 - feedback (ADR 0068): stale/wrong flags and how many were later confirmed
   by a supersession, in total and per registered reporter. Observation
   only: nothing here feeds ranking, scoring or quality.
+- health (ADR 0075): fleet health metrics for the admin, from
+  ``Store.fleet_health``, cached with the entry scan under the same TTL.
+  Observation only, like the feedback counters: nothing agent-facing and
+  nothing in search, ranking, scoring, quality or the briefing reads it.
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
+import statistics
 import time
 from collections import Counter
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
 from typing import Any
 
 from hivemind.domain.access import Agent, AgentStatus, Fleet, TrustLevel
 from hivemind.domain.entry import ImportanceSource, Kind, SearchCount, UsageCount
 from hivemind.domain.feedback import FlagCount
+from hivemind.domain.health import Convergence, FleetHealth, HealthCounts
 from hivemind.ports import Store
+
+logger = logging.getLogger(__name__)
 
 # The canonical scopes / kinds (the "distinct tags in use" signal).
 _SCOPES = ("org", "fleet", "self")
@@ -47,13 +57,45 @@ _TRUST_LEVELS = (
     TrustLevel.CONTRIBUTOR,
     TrustLevel.PRIVILEGED,
 )
+_HEALTH_FIELDS = (
+    "sourceable",
+    "sourced",
+    "insights",
+    "synthesizing",
+    "flagged_backlog_14d",
+    "orphaned_flagged",
+    "floating_gap",
+    "gap_anomaly",
+    "gap_open_question",
+    "gap_dead_end",
+)
+
+
+def _share(count: int, total: int) -> dict[str, Any]:
+    """``{count, total, share}``; the share is ``None`` when ``total`` is 0."""
+    return {"count": count, "total": total, "share": count / total if total else None}
+
+
+def _ages(ages: Sequence[float]) -> dict[str, Any]:
+    """Count and median age in seconds (``None`` while there are none)."""
+    return {"count": len(ages), "median_age_seconds": statistics.median(ages) if ages else None}
+
+
+def _gap_tags(counts: dict[str, int]) -> dict[str, int]:
+    return {
+        "anomaly": counts["gap_anomaly"],
+        "open-question": counts["gap_open_question"],
+        "dead-end": counts["gap_dead_end"],
+    }
 
 
 class MetricsService:
     """Compute the usage report from the ``Store`` (ROADMAP §3.3).
 
     ``entry_counts_ttl`` is how long the grouped entry scan is reused, in
-    seconds; 0 scans on every report. A failed scan is never cached.
+    seconds; 0 scans on every report. A failed scan is never cached. The
+    fleet health aggregates (ADR 0075) are read and cached with it.
+    ``wall_clock`` is "now" for their windows.
     """
 
     def __init__(
@@ -62,13 +104,22 @@ class MetricsService:
         *,
         entry_counts_ttl: float = DEFAULT_ENTRY_COUNTS_TTL,
         clock: Callable[[], float] = time.monotonic,
+        wall_clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._store = store
         self._ttl = entry_counts_ttl
         self._clock = clock
+        self._wall_clock = wall_clock
         self._lock = asyncio.Lock()
         self._rows: Sequence[UsageCount] = ()
         self._rows_at: float | None = None
+        # The fleet health aggregates are cached on their own (ADR 0075): a
+        # failure serves the last good values and is retried on the next
+        # report, and never fails the rest of the report.
+        self._health: FleetHealth | None = None
+        self._convergence: Convergence | None = None
+        self._health_at: float | None = None
+        self._health_ok = False
 
     async def _usage_rows(self) -> Sequence[UsageCount]:
         """The grouped entry scan, reused within the TTL. One scan at a
@@ -82,7 +133,33 @@ class MetricsService:
             self._rows_at = now
             return self._rows
 
-    async def usage_report(self) -> dict[str, dict[str, Any]]:
+    async def _health_snapshot(self) -> tuple[FleetHealth | None, Convergence | None, bool]:
+        """The fleet health aggregates, reused within the TTL, and whether
+        the last refresh succeeded. Each of the two store reads fails on its
+        own: its last good value is kept and the refresh is retried on the
+        next report."""
+        async with self._lock:
+            now = self._clock()
+            if self._health_at is not None and now - self._health_at < self._ttl:
+                return self._health, self._convergence, self._health_ok
+            wall = self._wall_clock()
+            ok = True
+            try:
+                self._health = await self._store.fleet_health(wall)
+            except Exception:  # health must not take the usage report down
+                logger.warning("fleet health aggregates failed", exc_info=True)
+                ok = False
+            try:
+                self._convergence = await self._store.fleet_convergence(wall)
+            except Exception:
+                logger.warning("fleet convergence figures failed", exc_info=True)
+                ok = False
+            self._health_ok = ok
+            if ok:
+                self._health_at = now
+            return self._health, self._convergence, ok
+
+    async def usage_report(self) -> dict[str, Any]:
         """The full usage report (entries / fleets / agents).
 
         A fixed handful of queries however large the pool: every entry
@@ -92,6 +169,7 @@ class MetricsService:
         agents = await self._store.list_agents()
         fleets = await self._store.list_fleets()
         rows = await self._usage_rows()
+        health, convergence, health_ok = await self._health_snapshot()
         searches = await self._store.search_counts()
         flags = await self._store.flag_counts()
         return {
@@ -100,6 +178,12 @@ class MetricsService:
             "agents": self._agents_report(agents),
             "searches": self._searches_report(fleets, searches),
             "feedback": self._feedback_report(agents, flags),
+            "health": (
+                self._health_report(fleets, health, convergence or Convergence())
+                if health is not None
+                else None
+            ),
+            "health_status": {"ok": health_ok},
         }
 
     def _entries_report(
@@ -185,6 +269,91 @@ class MetricsService:
                 for agent in agents
                 if (row := by_user.get(agent.name)) is not None
             },
+        }
+
+    def _health_report(
+        self, fleets: Sequence[Fleet], health: FleetHealth, convergence: Convergence
+    ) -> dict[str, Any]:
+        """Fleet health metrics (ADR 0075). A share is ``None`` while its
+        denominator is 0. ``by_fleet`` lists every fleet (zeros included);
+        entries with no fleet count in the fleet-wide numbers only."""
+        total = {field: sum(getattr(r, field) for r in health.by_fleet) for field in _HEALTH_FIELDS}
+        latencies = health.correction_latencies
+        by_id = {r.fleet_id: r for r in health.by_fleet}
+        return {
+            "helpful_with_note_share": _share(health.helpful_with_note, health.helpful),
+            "sourced_share": _share(total["sourced"], total["sourceable"]),
+            "correction_latency_p50_seconds": (statistics.median(latencies) if latencies else None),
+            "corrections_measured": len(latencies),
+            "flagged_backlog_14d": total["flagged_backlog_14d"],
+            "orphaned_flagged": total["orphaned_flagged"],
+            "floating_gap": total["floating_gap"],
+            "top3_author_write_share": {
+                **_share(health.top3_author_writes_90d, health.writes_90d),
+                "authors": health.authors_90d,
+            },
+            "top3_reporter_verdict_share": {
+                **_share(health.top3_reporter_verdicts_90d, health.verdicts_90d),
+                "reporters": health.reporters_90d,
+            },
+            "synthesis_rate": _share(total["synthesizing"], total["insights"]),
+            "self_to_fleet_promotions": health.self_to_fleet_promotions_90d,
+            "gap_tag_counts": _gap_tags(total),
+            "supersessions_per_100_writes": {
+                "supersessions": health.supersessions_90d,
+                "writes": health.writes_90d,
+                "per_100": (
+                    100 * health.supersessions_90d / health.writes_90d
+                    if health.writes_90d
+                    else None
+                ),
+            },
+            "echo_rate": _share(convergence.echo_hits, convergence.echo_sampled),
+            "topic_dispersion": [
+                {
+                    "tag": d.tag,
+                    "recent_entries": d.recent_entries,
+                    "before_entries": d.before_entries,
+                    "recent_cosine": d.recent_cosine,
+                    "before_cosine": d.before_cosine,
+                    "change": d.recent_cosine - d.before_cosine,
+                }
+                for d in convergence.dispersion
+            ],
+            "rival_lifetime": {
+                "alternative": _ages(health.alternative_ages),
+                "conflict": _ages(health.conflict_ages),
+                "contested": _ages(health.contested_ages),
+            },
+            "grounding_share": _share(health.grounded_30d, health.synthesis_writes_30d),
+            "top3_agent_label_write_share": {
+                **_share(health.top3_label_writes_30d, health.writes_30d),
+                "labels": health.write_labels_30d,
+            },
+            "top3_agent_label_verdict_share": {
+                **_share(health.top3_label_verdicts_30d, health.verdicts_30d),
+                "labels": health.verdict_labels_30d,
+            },
+            "by_fleet": {
+                fleet.name: self._fleet_health(by_id.get(fleet.id) or HealthCounts(fleet.id))
+                for fleet in fleets
+            },
+        }
+
+    @staticmethod
+    def _fleet_health(row: HealthCounts) -> dict[str, Any]:
+        return {
+            "sourced_share": _share(row.sourced, row.sourceable),
+            "flagged_backlog_14d": row.flagged_backlog_14d,
+            "orphaned_flagged": row.orphaned_flagged,
+            "floating_gap": row.floating_gap,
+            "gap_tag_counts": _gap_tags(
+                {
+                    "gap_anomaly": row.gap_anomaly,
+                    "gap_open_question": row.gap_open_question,
+                    "gap_dead_end": row.gap_dead_end,
+                }
+            ),
         }
 
     def _agents_report(self, agents: Sequence[Agent]) -> dict[str, Any]:

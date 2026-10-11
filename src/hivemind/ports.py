@@ -12,6 +12,7 @@ Tests live at these seams and nowhere inside them.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 from hivemind.domain.access import (
@@ -34,6 +35,7 @@ from hivemind.domain.entry import (
     embeddable_text,
 )
 from hivemind.domain.feedback import Feedback, FeedbackCounts, FeedbackSignals, FlagCount
+from hivemind.domain.health import Convergence, FleetHealth
 from hivemind.domain.pin import Pin
 
 
@@ -128,6 +130,22 @@ class Store(Protocol):
         entries were superseded after the row (ADR 0068). Rows on entries
         already superseded when written, and revoked reporters (ADR 0067),
         are left out; a reporter with no flags has no row; any order."""
+        ...
+
+    async def fleet_health(self, now: datetime) -> FleetHealth:
+        """The fleet health aggregates as of ``now`` (ADR 0075): counts the
+        service turns into the ``health`` report. Verdicts of revoked
+        reporters are left out (ADR 0067); a flag is a standing
+        ``stale``/``wrong`` row, its age its ``updated_at``. Observation
+        only: no ranking input. Both adapters must agree."""
+        ...
+
+    async def fleet_convergence(self, now: datetime) -> Convergence:
+        """The vector-backed convergence figures as of ``now`` (ADR 0075):
+        the echo rate over a bounded sample of the newest writes and the
+        dispersion of the busiest tags. Bounded work (``ECHO_SAMPLE``
+        nearest-neighbour lookups, ``DISPERSION_CAP`` entries per tag and
+        window); admin view over the whole pool; observation only."""
         ...
 
     async def record_search(self, fleet_id: str | None, *, empty: bool) -> None:

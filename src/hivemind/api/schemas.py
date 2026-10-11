@@ -648,6 +648,99 @@ class FeedbackMetrics(BaseModel):
     by_agent: dict[str, dict[str, int]] = {}
 
 
+class Share(BaseModel):
+    """``count`` of ``total`` and their ratio (``None`` while ``total`` is 0)."""
+
+    count: int = 0
+    total: int = 0
+    share: float | None = None
+
+
+class AuthorShare(Share):
+    authors: int = 0
+
+
+class ReporterShare(Share):
+    reporters: int = 0
+
+
+class SupersessionRate(BaseModel):
+    supersessions: int = 0
+    writes: int = 0
+    per_100: float | None = None
+
+
+class RivalAge(BaseModel):
+    count: int = 0
+    median_age_seconds: float | None = None
+
+
+class RivalLifetime(BaseModel):
+    """Active ``alternative`` entries, ``Conflict:`` entries and contested
+    entries (ADR 0075)."""
+
+    alternative: RivalAge = RivalAge()
+    conflict: RivalAge = RivalAge()
+    contested: RivalAge = RivalAge()
+
+
+class LabelShare(Share):
+    labels: int = 0
+
+
+class TopicDispersion(BaseModel):
+    """Mean pairwise cosine of a busy tag's entries, last 30 days against
+    the 30 before; a positive ``change`` means converging (ADR 0075)."""
+
+    tag: str
+    recent_entries: int
+    before_entries: int
+    recent_cosine: float
+    before_cosine: float
+    change: float
+
+
+class FleetHealthMetrics(BaseModel):
+    """The per-fleet part of the health report (ADR 0075), keyed by entries'
+    ``fleet_id``."""
+
+    sourced_share: Share = Share()
+    flagged_backlog_14d: int = 0
+    orphaned_flagged: int = 0
+    floating_gap: int = 0
+    gap_tag_counts: dict[str, int] = {}
+
+
+class HealthMetrics(BaseModel):
+    """Fleet health metrics (ADR 0075): admin-only and observation-only,
+    never read by search, ranking, scoring, quality or the briefing. The
+    windows (90 days for the concentration and supersession figures, 14 and
+    30 days for the backlog and orphan ages) are fixed by the ADR.
+    Author withdrawals within an hour of the write are not measured: the
+    schema records neither when nor by whom an author withdrew."""
+
+    helpful_with_note_share: Share = Share()
+    sourced_share: Share = Share()
+    correction_latency_p50_seconds: float | None = None
+    corrections_measured: int = 0
+    flagged_backlog_14d: int = 0
+    orphaned_flagged: int = 0
+    floating_gap: int = 0
+    top3_author_write_share: AuthorShare = AuthorShare()
+    top3_reporter_verdict_share: ReporterShare = ReporterShare()
+    synthesis_rate: Share = Share()
+    self_to_fleet_promotions: int = 0
+    gap_tag_counts: dict[str, int] = {}
+    supersessions_per_100_writes: SupersessionRate = SupersessionRate()
+    echo_rate: Share = Share()
+    topic_dispersion: list[TopicDispersion] = []
+    rival_lifetime: RivalLifetime = RivalLifetime()
+    grounding_share: Share = Share()
+    top3_agent_label_write_share: LabelShare = LabelShare()
+    top3_agent_label_verdict_share: LabelShare = LabelShare()
+    by_fleet: dict[str, FleetHealthMetrics] = {}
+
+
 class MetricsOut(BaseModel):
     """The minimal usage-counters report (ROADMAP §3.3, admin-gated)."""
 
@@ -655,3 +748,4 @@ class MetricsOut(BaseModel):
     fleets: FleetsMetrics
     agents: AgentsMetrics
     feedback: FeedbackMetrics = FeedbackMetrics()
+    health: HealthMetrics | None = None
