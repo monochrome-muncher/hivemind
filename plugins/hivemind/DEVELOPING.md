@@ -87,6 +87,10 @@ itself names no harness-specific paths, and a test enforces this.
 
 Two nudges that get knowledge written before it is lost (Claude Code only
 in this release; the OpenCode, Pi and Hermes equivalents are follow-ups).
+Codex loads the same `hooks/hooks.json`, so it runs the Stop hook too, but
+the script counts Claude Code transcript records (`"type": "tool_use"`),
+so it has only been tested with Claude Code and is not expected to fire in
+Codex.
 
 - **Post-compaction line.** When the `SessionStart` source is `compact`
   (read from the hook's stdin JSON), `hivemind-session-start.sh` appends

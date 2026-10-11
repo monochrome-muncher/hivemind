@@ -32,12 +32,12 @@ is unused.
 | [0019](0019-unauthenticated-orchestrator-probe-endpoints.md) | Unauthenticated orchestrator probe endpoints | Partly superseded by 0037 |
 | [0020](0020-versioned-migrations-with-rollback-and-an-advisory-lock.md) | Versioned migrations with rollback, guarded by a Postgres advisory lock | Amended by 0025; dim guard note |
 | [0021](0021-embedded-text-budget-in-whitespace-words-not-model-tokens.md) | The embedded-text budget is counted in whitespace words, not model tokens | Amended by 0040 |
-| [0022](0022-recency-floor-so-match-quality-is-the-sort-key.md) | A floor under the recency factor, so match quality is the sort key | Amended by 0023 |
+| [0022](0022-recency-floor-so-match-quality-is-the-sort-key.md) | A floor under the recency factor, so match quality is the sort key | Amended by 0023, 0070, 0071, 0072, 0073 |
 | [0023](0023-recency-floor-gets-a-spelling-for-no-floor.md) | `HIVEMIND_RECENCY_FLOOR` gets an explicit spelling for "no floor" | Accepted |
 | [0024](0024-reject-unknown-hivemind-env-vars.md) | Reject unknown `HIVEMIND_*` environment variables | Partly superseded by 0032 |
 | [0025](0025-hnsw-vector-index-approximate-nearest-neighbours.md) | An HNSW index on `entries.embedding`: approximate, not exact, nearest neighbours | Accepted |
 | [0026](0026-two-app-tier-replicas-for-availability.md) | Two app-tier replicas per runner, for availability — not throughput | Accepted |
-| [0027](0027-audit-log-of-admin-actions.md) | An append-only audit log of admin actions, with two actor kinds | Amended by 0028, 0046 |
+| [0027](0027-audit-log-of-admin-actions.md) | An append-only audit log of admin actions, with two actor kinds | Amended by 0028, 0046, 0076 |
 | [0028](0028-revoked-agent-status-and-an-activation-guard.md) | A `revoked` agent status, and activation only from `pending` or `revoked` | Refined by 0039 |
 | [0029](0029-admin-panel-runner-with-a-browser-held-key.md) | The admin panel: a static UI and an allowlisted proxy, with the key held in the browser | Accepted |
 | [0030](0030-hive-whoami-lets-an-agent-see-its-own-standing.md) | `hive_whoami`: an agent can read its own standing | Accepted |
@@ -49,8 +49,8 @@ is unused.
 | [0036](0036-foreign-entries-use-dont-relay.md) | Foreign entries: use, don't relay — an agent rule, not a server rule | Accepted |
 | [0037](0037-readiness-is-shallow-the-database-probe-is-separate.md) | Readiness is shallow; the database probe is a separate endpoint | Accepted |
 | [0039](0039-key-lifecycle-is-atomic-and-registration-is-owned.md) | Key lifecycle is atomic, keys are unique by schema, and a registration is owned by its alias | Accepted |
-| [0040](0040-input-bounds-and-agent-name-rules.md) | Input bounds, NUL rejection and agent-name rules | Accepted |
-| [0041](0041-provider-call-deadline-jitter-and-typed-embedder-errors.md) | Provider calls: an overall deadline, jittered backoff, and typed embedder errors | Accepted |
+| [0040](0040-input-bounds-and-agent-name-rules.md) | Input bounds, NUL rejection and agent-name rules | Amended by 0045 |
+| [0041](0041-provider-call-deadline-jitter-and-typed-embedder-errors.md) | Provider calls: an overall deadline, jittered backoff, and typed embedder errors | Amended by 0048 |
 | [0042](0042-mcp-credential-is-reverified-per-call-and-fails-closed.md) | The MCP credential is re-verified on every call and a missing one fails closed | Accepted |
 | [0043](0043-entries-are-untrusted-data.md) | Entries are untrusted data: framing in the instructions and the skill, not in the payload | Accepted |
 | [0044](0044-key-bootstrap-writes-the-secret-directly.md) | The first-run key bootstrap writes the Kubernetes Secret itself | Accepted |
@@ -67,24 +67,24 @@ is unused.
 | [0055](0055-read-several-entries-in-one-call.md) | Read several entries in one call | Amended by 0059 |
 | [0056](0056-count-searches-that-find-nothing.md) | Count searches that find nothing | Accepted |
 | [0057](0057-see-also-links-between-entries.md) | "See also" links between entries | Accepted |
-| [0058](0058-pinned-fleet-briefing.md) | A pinned briefing per fleet | Accepted |
+| [0058](0058-pinned-fleet-briefing.md) | A pinned briefing per fleet | Amended by 0076 |
 | [0059](0059-batch-reads-use-a-fixed-number-of-store-reads.md) | Batch reads use a fixed number of store reads | Accepted |
 | [0060](0060-the-admin-key-writes-self-or-org-entries.md) | The admin key writes `self` or `org` entries | Amended by 0066 |
 | [0061](0061-vector-search-needs-positive-similarity.md) | Vector search needs a positive similarity | Amended by 0062 |
 | [0062](0062-a-similarity-threshold-for-the-vector-stream.md) | A similarity threshold for the vector stream | Accepted |
-| [0063](0063-feedback-quality-by-consensus-share.md) | Feedback quality by consensus share | Accepted |
+| [0063](0063-feedback-quality-by-consensus-share.md) | Feedback quality by consensus share | Amended by 0070 |
 | [0064](0064-corrections-stay-visible-in-recent-feedback.md) | Corrections stay visible in an entry's recent feedback | Accepted |
 | [0065](0065-an-author-cannot-rate-its-own-entry.md) | An author cannot rate its own entry | Accepted |
 | [0066](0066-the-admin-key-has-one-feedback-vote.md) | The admin key has one feedback vote per entry | Accepted |
 | [0067](0067-a-revoked-agents-feedback-no-longer-counts.md) | A revoked agent's feedback no longer counts | Accepted |
 | [0068](0068-rater-flag-confirmation-metric.md) | Count the flags a later supersession confirmed | Accepted |
-| [0069](0069-cache-the-entry-scan-behind-the-usage-report.md) | Cache the entry scan behind the usage report | Accepted |
-| [0070](0070-one-capped-budget-for-social-signals.md) | One capped budget for social signals | Accepted |
+| [0069](0069-cache-the-entry-scan-behind-the-usage-report.md) | Cache the entry scan behind the usage report | Extended by 0075 |
+| [0070](0070-one-capped-budget-for-social-signals.md) | One capped budget for social signals | Amended by 0071, 0072, 0073 |
 | [0071](0071-a-confirmation-can-restart-the-recency-clock.md) | A confirmation can restart the recency clock | Accepted (off by default) |
-| [0072](0072-recency-profile-per-kind.md) | A recency profile per kind | Accepted (off by default) |
+| [0072](0072-recency-profile-per-kind.md) | A recency profile per kind | Accepted (off by default); amended by 0073 |
 | [0073](0073-a-recency-hint-on-search.md) | A recency hint on search | Accepted (off by default) |
 | [0074](0074-group-unlinked-versions-at-read-time.md) | Group unlinked versions at read time | Accepted (off by default) |
 | [0075](0075-fleet-health-metrics.md) | Fleet health metrics: admin-only and observation-only | Accepted |
-| [0076](0076-pin-integrity.md) | Pin integrity: audited pins and "changed since pinned" | Accepted (amends 0058) |
+| [0076](0076-pin-integrity.md) | Pin integrity: audited pins and "changed since pinned" | Accepted |
 | [0077](0077-write-check-mode-and-warnings.md) | Writes can be checked first, and answer with advisory warnings | Accepted |
 | [0078](0078-explore-search.md) | Opt-in explore search: MMR re-ordering for diversity | Accepted |

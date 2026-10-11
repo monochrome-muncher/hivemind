@@ -1,5 +1,7 @@
 # Bounded retries on the embedder call
 
+> **Status note:** amended by [ADR 0041](0041-provider-call-deadline-jitter-and-typed-embedder-errors.md): an overall deadline over all attempts, jittered backoff, and typed embedder errors.
+
 The write path is **inline**: `WriteService.write` embeds the entry and
 then inserts it (SPEC §7 — embeddings are generated at write time). The
 embedder call is an external HTTP dependency (OpenAI-compatible
