@@ -1,5 +1,7 @@
 # An append-only audit log of admin actions, with two actor kinds
 
+> **Status note:** amended by [ADR 0076](0076-pin-integrity.md): a fourth actor kind, `agent_key`, and the actions `entry.pin` / `entry.unpin`.
+
 > **Amended by [ADR 0028](0028-revoked-agent-status-and-an-activation-guard.md)** (a `before` cursor on the audit log; `agent.revoke` records `from`) **and [ADR 0046](0046-registrations-are-audited.md)** (new registrations are audited as `agent.register`, actor kind `org_key`).
 
 ## Context

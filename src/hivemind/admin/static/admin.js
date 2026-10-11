@@ -17,7 +17,7 @@ const LEVELS = [
 ];
 const AUDIT_ACTIONS = [
   "agent.register", "agent.activate", "agent.trust_level_set", "agent.home_fleet_set", "agent.revoke",
-  "fleet.create", "org_key.rotate", "entry.withdraw",
+  "fleet.create", "org_key.rotate", "entry.withdraw", "entry.pin", "entry.unpin",
   "admin_key.issue", "admin_key.revoke", "agent_key.issue",
 ];
 const AUDIT_PAGE = 50;
@@ -657,6 +657,9 @@ async function viewAudit(root) {
     }
     if (kind === "org_key") {
       return h("span", { class: "badge badge-muted", title: "a registration with the shared org key: the fingerprint names the key, not who used it", text: "org key" });
+    }
+    if (kind === "agent_key") {
+      return h("span", { class: "badge badge-level", title: "a privileged agent's own key, recorded by its verified name", text: "agent key" });
     }
     return h("span", { class: "badge badge-level", title: "a verified admin key, recorded by fingerprint", text: "admin key" });
   };

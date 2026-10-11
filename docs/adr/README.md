@@ -81,4 +81,5 @@ is unused.
 | [0069](0069-cache-the-entry-scan-behind-the-usage-report.md) | Cache the entry scan behind the usage report | Accepted |
 | [0070](0070-one-capped-budget-for-social-signals.md) | One capped budget for social signals | Accepted |
 | [0075](0075-fleet-health-metrics.md) | Fleet health metrics: admin-only and observation-only | Accepted |
+| [0076](0076-pin-integrity.md) | Pin integrity: audited pins and "changed since pinned" | Accepted (amends 0058) |
 | [0077](0077-write-check-mode-and-warnings.md) | Writes can be checked first, and answer with advisory warnings | Accepted |

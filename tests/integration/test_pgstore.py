@@ -39,6 +39,7 @@ from hivemind.domain.entry import (
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.ports import Credential, SupersedeConflict
 from hivemind.services.chain import get_visible_entries
+from hivemind.services.pins import PinService
 from hivemind.services.write import WriteService
 from hivemind.store import PgAuthenticator, PgStore
 from hivemind.store.auth import key_hash
@@ -764,20 +765,63 @@ async def test_entry_links_both_ways_and_unknown_targets_dropped(pg) -> None:
     }
 
 
-async def test_pins_are_capped_idempotent_and_newest_first(pg) -> None:
-    """ADR 0058: the per-fleet cap holds under concurrent pinners, a repeat
-    pin returns the existing row, and unpin says whether it removed one."""
+async def test_pins_are_capped_refreshed_and_newest_first(pg) -> None:
+    """ADR 0058, 0076: the per-fleet cap holds under concurrent pinners, a
+    repeat pin refreshes the row (creating nothing new), and unpin says
+    whether it removed one."""
     store, _, _ = pg
     entries = [await store.create_entry(draft(f"Pin {i}")) for i in range(4)]
-    pins = await asyncio.gather(*(store.pin_entry("fleet-x", e.id, "lead", 3) for e in entries))
-    assert sum(p is not None for p in pins) == 3
-    kept = [p for p in pins if p is not None]
-    again = await store.pin_entry("fleet-x", kept[0].entry_id, "someone-else", 3)
-    assert again == kept[0]
+    writes = await asyncio.gather(*(store.pin_entry("fleet-x", e.id, "lead", 3) for e in entries))
+    assert sum(w is not None for w in writes) == 3
+    kept = [w for w in writes if w is not None]
+    assert all(w.created for w in kept)
+    again = await store.pin_entry("fleet-x", kept[0].pin.entry_id, "someone-else", 3)
+    assert again is not None and not again.created and again.pin.pinned_by == "someone-else"
+    assert again.pin.pinned_at >= kept[0].pin.pinned_at
     listed = await store.list_pins("fleet-x")
-    assert len(listed) == 3
+    assert len(listed) == 3 and listed[0].entry_id == kept[0].pin.entry_id
     assert [p.pinned_at for p in listed] == sorted((p.pinned_at for p in listed), reverse=True)
-    assert await store.unpin_entry("fleet-x", kept[0].entry_id) is True
-    assert await store.unpin_entry("fleet-x", kept[0].entry_id) is False
+    assert await store.unpin_entry("fleet-x", kept[0].pin.entry_id) is True
+    assert await store.unpin_entry("fleet-x", kept[0].pin.entry_id) is False
     assert await store.list_pins("fleet-y") == []
     assert await store.pin_entry("fleet-x", "not-a-uuid", "lead", 3) is None
+
+
+async def test_pinned_listing_marks_superseded_and_flagged_pins(pg) -> None:
+    """ADR 0076 over Postgres: a pin whose entry was superseded, and a pin
+    whose entry got a stale verdict after the pin, report why they changed;
+    a verdict from before the pin, or a helpful one, does not."""
+    store, _, _ = pg
+    fleet = str(uuid.uuid4())
+    lead = Credential(
+        user_id="lead",
+        agent_name="lead",
+        access_controlled=True,
+        trust_level=TrustLevel.PRIVILEGED,
+        home_fleet_id=fleet,
+    )
+
+    def fleet_draft(summary: str, **kw) -> EntryDraft:
+        return replace(draft(summary, **kw), scope="fleet", fleet_id=fleet)
+
+    old = await store.create_entry(fleet_draft("pool A"))
+    flagged = await store.create_entry(fleet_draft("freeze Fridays"))
+    calm = await store.create_entry(fleet_draft("use the VPN"))
+    before = Feedback(calm.id, "ops", "ops", Verdict.WRONG, updated_at=datetime.now(UTC))
+    await store.record_feedback(before)  # older than the pin
+    service = PinService(store)
+    for entry in (old, flagged, calm):
+        await service.pin(lead, entry.id)
+    later = datetime.now(UTC)  # after the pins, before the re-pin below
+    await store.record_feedback(Feedback(flagged.id, "ops", "ops", Verdict.STALE, updated_at=later))
+    await store.record_feedback(Feedback(calm.id, "dev", "dev", Verdict.HELPFUL, updated_at=later))
+    new = await store.create_entry(fleet_draft("pool B", supersedes=(old.id,)))
+
+    by_pinned = {p.pin.entry_id: p for p in await service.pinned(lead)}
+    assert (by_pinned[old.id].entry.id, by_pinned[old.id].change_reason) == (new.id, "superseded")
+    assert by_pinned[flagged.id].change_reason == "flagged"
+    assert by_pinned[calm.id].change_reason is None
+
+    await asyncio.sleep(0.05)
+    await service.pin(lead, flagged.id)  # re-pinning acknowledges it
+    assert {p.pin.entry_id: p.change_reason for p in await service.pinned(lead)}[flagged.id] is None
