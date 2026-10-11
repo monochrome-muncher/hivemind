@@ -405,5 +405,5 @@ showing the change first.
 
 Without the launcher, set `HIVEMIND_INCOGNITO=1` yourself and use your
 harness's switch. Switching incognito on mid-session only works because
-the agent obeys it (the tools stay loaded); the hivemind skill, §7,
+the agent obeys it (the tools stay loaded); the hivemind skill, §6,
 covers that.

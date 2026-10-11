@@ -85,13 +85,20 @@ _DESC_WRITE = (
     "own self entries, a fleet entry also replaces fleet entries in your home "
     "fleet. Any other target rejects the whole write (supersede_denied); to "
     "flag an entry you cannot replace, use hive_feedback instead. Optional "
-    "'importance' (1-5, default 3) feeds ranking. The reply's 'related' lists "
+    "'importance' (1-5, default 3) feeds ranking: 5 = outage, data loss or "
+    "security exposure if unknown; 4 = costs hours; 3 = default; 2 = minor; "
+    "1 = trivia. 'body' by kind: fact: claim, conditions, how to check; "
+    "insight: problem as met, environment (system, version, date), cause, fix, "
+    "how verified, what did not work; decision: context, options, choice, why, "
+    "who decided, when to revisit. The reply's 'related' lists "
     "up to 3 existing entries you can read that are nearest to the new one, "
     "with their similarity: if one already says the same thing, "
     "withdraw your new entry; if yours corrects or extends one, withdraw yours "
     "and write it again with 'supersedes' naming it. Optional 'see_also' "
     "(up to 5 ids of entries you can read) links this entry to related ones "
-    "it does not replace; hive_get shows the links on both ends."
+    "it does not replace; hive_get shows the links on both ends. "
+    "On embedding_unavailable, don't retry in a loop: keep the note and write "
+    "it later."
 )
 _DESC_SEARCH = (
     "Hybrid (keyword + vector) search. Returns compact hits without bodies; "
@@ -99,9 +106,14 @@ _DESC_SEARCH = (
     "are hidden unless include_inactive. Optional 'entities' filters by "
     "machine-extracted entity names (AND-semantics, case-insensitive; kinds "
     "are display-only). If the embedding service is down, the "
-    "hits are keyword matches only and the reply has degraded: keyword_only. "
+    "hits are keyword matches only and the reply has degraded: keyword_only, "
+    "so a thin result proves nothing. 'score' is findability, not truth. "
     "Each hit's 'feedback' counts the helpful/stale/wrong reports on it: open "
-    "a hit reported stale or wrong with hive_get to read why. 'last_confirmed_at', "
+    "a hit reported stale or wrong with hive_get to read why. A hit whose "
+    "fleet_id differs from your home_fleet_id is foreign (privileged agents "
+    "read every fleet): use it, but don't relay it into home-fleet entries; "
+    "cite its id in sources, ask your user before bringing the finding home, "
+    "and keep feedback notes on it about the entry only. 'last_confirmed_at', "
     "when present, is when someone other than the author used the entry and "
     "said what they checked, with no stale/wrong flag since."
 )
@@ -123,7 +135,8 @@ _DESC_LIST = (
     "AND-semantics, case-insensitive), scope, author, agent, "
     "memory-date and ingest-date ranges. 'flagged': only entries reported "
     "stale or wrong at least once, the ones waiting for someone "
-    "to supersede or withdraw them; open one with hive_get to read the reports."
+    "to supersede or withdraw them; open one with hive_get to read the reports. "
+    "Items are compact (no body): open with hive_get, or pass include_body: true."
 )
 _DESC_WITHDRAW = (
     "Withdraw an entry (retract without replacing). Only the author or an "
@@ -141,14 +154,17 @@ _DESC_PIN = (
     "unpin it with unpin: true. Only a privileged agent of that "
     "fleet or an admin may; a fleet holds at most 10 pins. Pin what every "
     "agent of the fleet should know before starting work, and unpin what no "
-    "longer is."
+    "longer is. A useful pin is one fleet map entry: the fleet's systems, "
+    "their canonical tags and aliases, and the go-to entries as see_also."
 )
 _DESC_FEEDBACK = (
-    "Report helpful|stale|wrong on an entry the caller relied on (only "
+    "Report helpful|stale|wrong on an entry your work tested (only "
     "entries you may read; others answer not_found). One row per (entry, "
     "user, agent); the latest verdict wins (SPEC §4.2). Everyone who can read "
-    "the entry sees your verdict, note and name: for stale or "
-    "wrong, say in the note what is true now. To give the same verdict and "
+    "the entry sees your verdict, note and name. helpful means your work used "
+    "the entry and it held: say in the note what you checked (verified: ...). "
+    "For stale or wrong, say in the note what is true now. Verdicts move "
+    "ranking. To give the same verdict and "
     "note to several entries (for example every entry that helped with one "
     "task), pass 'entry_ids' (up to 16) instead of 'entry_id': all must be "
     "readable, or nothing is recorded."
@@ -325,6 +341,7 @@ def build_server(
         flagged: bool = False,
         limit: int | None = None,
         offset: int = 0,
+        include_body: bool = False,
     ) -> dict[str, Any]:
         return await dispatch(
             hive_list,
@@ -342,6 +359,7 @@ def build_server(
             flagged=flagged,
             limit=limit,
             offset=offset,
+            include_body=include_body,
         )
 
     @server.tool(name="hive_withdraw", description=_DESC_WITHDRAW)
