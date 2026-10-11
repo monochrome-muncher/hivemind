@@ -7,16 +7,14 @@ or slow a session down):
    under this plugin's namespace: ``skill_view("hivemind:hivemind")``.
    Plugin skills are read-only and opt-in explicit loads, so the
    system-prompt section below is what points the agent at them.
-2. A bounded system-prompt section that is meant to keep the agent
-   Hivemind-aware across sessions and compaction. **Do not rely on it.**
-   Hermes exposes ``register_system_prompt_section`` but, as of the
-   upstream report NousResearch/hermes-agent#117432 (v0.21.3, closed
-   "not planned"), never renders registered sections, so on such a
-   version the model sees nothing from it. The code path stays so that a
-   Hermes that does render it gets the reminder for free, but the
-   supported always-on layer is the marked instruction block in the
-   profile's ``SOUL.md`` (hivemind-setup, references/hermes.md: required,
-   not optional). The plugin logs one line saying so.
+2. A bounded system-prompt section that keeps the agent Hivemind-aware
+   across sessions and compaction. Hermes v2026.9.24 (0.21.5) renders it
+   into each new session's system prompt, calling the content callable
+   with a read-only session-info mapping. Older releases either lack
+   ``register_system_prompt_section`` (0.19) or never render it (0.21.3,
+   NousResearch/hermes-agent#117432), so the marked instruction block in
+   the profile's ``SOUL.md`` stays the supported layer there
+   (hivemind-setup, references/hermes.md).
 
 The Hivemind MCP server is configured separately (the
 ``mcp_servers.hivemind`` entry in ``~/.hermes/config.yaml``, walked
@@ -84,11 +82,25 @@ def _incognito() -> bool:
 _NAMESPACED_LOAD = 'In this harness the skill is namespaced: skill_view("hivemind:hivemind").'
 
 
-def _hivemind_section() -> str:
+def _hivemind_section(_session_info: object = None) -> str:
+    """The section text. Hermes 0.21.5 passes a session-info mapping, which
+    this text does not depend on; a callable that took no argument raised
+    there and was skipped."""
     if _incognito():
         return _INCOGNITO
     state = _CONFIGURED if os.environ.get("HIVEMIND_API_KEY") else _NOT_CONFIGURED
     return f"{_CORE} {_NAMESPACED_LOAD} {state}"
+
+
+def _description(skill_md: Path) -> str:
+    """The SKILL.md frontmatter description, which Hermes lists the skill
+    by (it is a single line in both skills)."""
+    for line in skill_md.read_text(encoding="utf-8").splitlines()[1:]:
+        if line == "---":
+            break
+        if line.startswith("description:"):
+            return line.partition(":")[2].strip()
+    return ""
 
 
 def register(ctx) -> None:
@@ -96,19 +108,19 @@ def register(ctx) -> None:
     for child in sorted(SKILLS_DIR.iterdir()):
         skill_md = child / "SKILL.md"
         if child.is_dir() and skill_md.is_file():
-            ctx.register_skill(child.name, skill_md)
+            ctx.register_skill(child.name, skill_md, _description(skill_md))
 
     # register_system_prompt_section is the documented stay-aware
     # mechanism; probe for it so an older Hermes that lacks it degrades
     # to the skills alone (Hermes's own guidance: probe before using,
     # degrade gracefully).
     register_section = getattr(ctx, "register_system_prompt_section", None)
-    log.info(
-        "hivemind: the system-prompt section may not be rendered by this Hermes "
-        "(hermes-agent#117432); make sure the hivemind block is in SOUL.md "
-        "(hivemind-setup skill, references/hermes.md)"
-    )
-    if register_section is not None:
+    if register_section is None:
+        log.info(
+            "hivemind: this Hermes has no system-prompt sections; make sure the "
+            "hivemind block is in SOUL.md (hivemind-setup skill, references/hermes.md)"
+        )
+    else:
         register_section(
             "hivemind",
             _hivemind_section,

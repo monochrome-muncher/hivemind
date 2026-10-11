@@ -22,7 +22,7 @@ to install or use it, read [README.md](README.md) instead.
 | `hooks/hooks.json` | A `SessionStart` hook (`startup`, `resume`, `clear`, `compact`, `fork`) that re-injects the reminder whenever the context is rebuilt (Claude Code, Codex), and a `Stop` hook (Claude Code, Codex) |
 | `skills/hivemind-setup/scripts/hivemind-stop.sh` | The `Stop` hook ([below](#the-stop-hook-and-the-post-compaction-line)) |
 | `.mcp.json` | The MCP server for Claude Code, built from `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY` |
-| `package.json`, `cordis.patch.yml`, `dsh/` | The DeepSeek Harness bundle: the MCP server row, and a small provider (`dsh/hivemind-skills.js`) that serves `skills/` |
+| `package.json`, `cordis.patch.yml`, `dsh/` | The DeepSeek Harness bundle: the MCP server row, a small provider (`dsh/hivemind-skills.js`) that serves `skills/`, and the Stop reminder (`dsh/hivemind-reminders.js`) |
 | `plugin.yaml`, `__init__.py` | The Hermes plugin: serves `skills/` and registers a system-prompt section |
 | `extensions/hivemind.ts` | The Pi and Oh My Pi extension: the system-prompt section, the MCP server on Pi 0.99+, and blocking Hivemind calls in incognito sessions |
 | `opencode/hivemind.js` | The OpenCode plugin: registers the MCP server, adds the skills, and puts the reminder in every model request |
@@ -41,9 +41,9 @@ reminder that survives compaction and new sessions.
 | Claude Code | `.mcp.json` in the plugin | the plugin | `SessionStart` hook |
 | Codex | the user's `~/.codex/config.toml` (plugin MCP config cannot read the URL and key from the environment) | the plugin | `SessionStart` hook, which the user must trust in `/hooks` |
 | DeepSeek Harness | the bundle's row in `cordis.patch.yml` | `dsh/hivemind-skills.js` | none needed: DSH keeps the server's instructions in the system prompt |
-| Hermes | the user's `~/.hermes/config.yaml` | the plugin | the `SOUL.md` instruction block (the plugin's section is not rendered, see below) |
+| Hermes | the user's `~/.hermes/config.yaml` | the plugin | the plugin's system-prompt section (Hermes 0.21.5+), else the `SOUL.md` instruction block (see below) |
 | Pi | the extension registers it with Pi 0.99+ built-in MCP; with pi-mcp-adapter, the adapter's config | the package | the extension's system-prompt section |
-| Oh My Pi | the user's `~/.omp/agent/mcp.json` | the plugin | the extension's system-prompt section |
+| Oh My Pi | the plugin's `.mcp.json` (server `hivemind:hivemind`; a hand `hivemind` entry in `~/.omp/agent/mcp.json` replaces it) | the plugin | the extension's system-prompt section |
 | OpenCode | `opencode/hivemind.js` (skipped if a hand-configured `hivemind` server exists or no key is set) | the plugin | added to every model request |
 | Gemini CLI | the user's `~/.gemini/settings.json` | copied by hand | the `GEMINI.md` instruction block, plus the `SessionStart` hook added by hand |
 
@@ -62,11 +62,17 @@ itself names no harness-specific paths, and a test enforces this.
   when Hivemind works. To distribute the bundle through an npm mirror,
   remove `"private": true` from `package.json` and publish it as
   `hivemind-agent-plugin` (named `hivemind-dsh-plugin` before 2.0.1).
-- **Hermes** registers the plugin's system-prompt section but current
-  releases never render it (upstream issue
-  NousResearch/hermes-agent#117432, closed "not planned"). That is why the
-  `SOUL.md` block is required. Hermes also loads `~/.hermes/.env` over the
-  process environment, which matters for incognito.
+- **Hermes** renders a plugin's system-prompt section from v2026.9.24
+  (0.21.5): once per new session, calling the content callable with a
+  read-only session-info mapping, and skipping (with a warning) a section
+  that raises. 0.19 has no `register_system_prompt_section`, and 0.21.3
+  never rendered it (NousResearch/hermes-agent#117432), so the `SOUL.md`
+  block stays required there. Hermes parses `plugin.yaml` with a YAML
+  loader and skips the whole plugin when that fails (an unquoted `: ` in
+  the description did so from 2.3.1 to 2.5.0). Checked with v2026.9.24:
+  both skills register and the section renders. Hermes also loads
+  `~/.hermes/.env` over the process environment, which matters for
+  incognito.
 - **Pi** supports two MCP routes for now: the built-in client (Pi 0.99+),
   where the extension registers the server unless an adapter config
   already defines `hivemind`, and the older pi-mcp-adapter. pi-mcp-adapter
@@ -74,8 +80,12 @@ itself names no harness-specific paths, and a test enforces this.
   proxy, ignoring `exposure`), so the extension sends no `exposure` when
   the adapter is installed. Checked live with Pi 1.0.0 and pi-mcp-adapter
   5.0.0. The adapter route can be dropped later.
-- **Oh My Pi** mounts MCP tools as routes (`xd://mcp__hivemind_hive_*`)
-  rather than as named tools; the agent finds them in its system prompt.
+- **Oh My Pi** loads the plugin's `.mcp.json` as the server
+  `hivemind:hivemind`, expanding `${VAR}` in the URL and the header, and
+  mounts MCP tools as routes (`xd://mcp__hivemind_hivemind_hive_*`, or
+  `xd://mcp__hivemind_hive_*` for a hand entry, which then replaces the
+  plugin's) rather than as named tools; the agent finds them in its system
+  prompt. Checked with Oh My Pi 18.9.1.
   A plain `omp install <git-url>` misses the skills, so it installs
   through the marketplace.
 - **OpenCode** caches a Git plugin on first use and never refreshes an
@@ -87,10 +97,10 @@ itself names no harness-specific paths, and a test enforces this.
 
 Two nudges that get knowledge written before it is lost: in Claude Code
 and Codex from `hooks/hooks.json`, in Pi and Oh My Pi from the extension
-and the OpenCode plugin (below). Gemini CLI gets the Stop reminder when
-the user adds `hivemind-stop.sh` as an `AfterAgent` hook by hand
-(hivemind-setup's Gemini reference). Hermes and DeepSeek Harness do not
-have them.
+and the OpenCode plugin, in DeepSeek Harness the Stop reminder from
+`dsh/hivemind-reminders.js` (below). Gemini CLI gets the Stop reminder
+when the user adds `hivemind-stop.sh` as an `AfterAgent` hook by hand
+(hivemind-setup's Gemini reference). Hermes does not have them.
 
 The script counts three transcript formats:
 
@@ -160,6 +170,21 @@ The script counts three transcript formats:
   shell calls get the reminder as the next prompt, and a
   `hivemind_hive_write` keeps it quiet. `opencode run` exits at the first
   idle, so the reminder never runs there.
+- **DeepSeek Harness.** The bundle's `dsh/hivemind-reminders.js` counts
+  the main agent's calls in `tools/post-execute` and, in
+  `agent/turn-stopping` of a long turn that wrote nothing, steers the agent
+  once with the reminder as a user message (as DSH's own Claude Code hooks
+  bridge does with a `Stop` block). It stays silent while
+  `mcp__hivemind__hive_write` is not visible to the agent, which covers
+  incognito and an unset URL (the server row is off then); agents
+  announced by `subagent/start` are neither counted nor reminded. No
+  post-compaction sentence: DSH keeps the server's instructions in the
+  system prompt, and compaction is a session event, not a plugin hook.
+  DSH's Claude Code hooks bridge cannot run `hivemind-stop.sh` instead:
+  it passes an empty `transcript_path`. Checked live with DSH 0.2.0-rc.2
+  and 0.2.1-alpha.2 (`dsh headless`) against a mock model: three shell
+  calls get the reminder once, and a `hive_write`, incognito or a
+  subagent's calls keep it quiet.
 
 ## Incognito
 

@@ -86,8 +86,10 @@ hermes plugins install <owner>/hivemind/plugins/hivemind   # or /path/to/this/re
 hermes plugins enable hivemind
 ```
 
-On Hermes, the marked Hivemind block in `~/.hermes/SOUL.md` is required
-to keep the agent aware of Hivemind. The setup skill adds it.
+Hermes v2026.9.24 (0.21.5) and later put the plugin's Hivemind section
+in every new session's system prompt. On older releases the marked
+Hivemind block in `~/.hermes/SOUL.md` is required to keep the agent aware
+of Hivemind; the setup skill adds it either way.
 
 ### Pi
 
@@ -268,8 +270,8 @@ export HIVEMIND_API_KEY="hm_…"   # org key first, agent key after activation
   }
   ```
 
-- **Oh My Pi**: the shell that launches `omp`. The server goes in
-  `~/.omp/agent/mcp.json`, with the same JSON as Pi above.
+- **Oh My Pi**: the shell that launches `omp`. The plugin defines the
+  server from both variables; nothing goes in `~/.omp/agent/mcp.json`.
 - **OpenCode**: the shell that launches `opencode`. The plugin reads both
   variables and registers the server. Without the plugin, add
   `"mcp": {"hivemind": {"type": "remote", "url": "{env:HIVEMIND_MCP_URL}",
@@ -329,7 +331,7 @@ want to delete your key file and any MCP entry you added by hand.
 | Gemini CLI | Delete the two skill folders from `~/.gemini/skills/` and `mcpServers.hivemind` from `~/.gemini/settings.json` |
 | Any other harness | Delete the two skill folders you copied |
 
-## Reminders to write and rate (Claude Code, Codex, Pi, Oh My Pi, OpenCode)
+## Reminders to write and rate (Claude Code, Codex, Pi, Oh My Pi, OpenCode, DeepSeek Harness)
 
 After a context compaction the startup reminder adds one line asking the
 agent to write what it learned and rate entries it used. Once per session,
@@ -343,6 +345,9 @@ the plugin's hooks in `/hooks`. In Pi, Oh My Pi and OpenCode the plugin does
 the same (set `HIVEMIND_STOP_MIN_TOOLS` very high to turn the Stop
 reminder off); OpenCode sends the Stop reminder as a new prompt, so
 `opencode run`, which exits when the session goes idle, does not get it.
+DeepSeek Harness gets the Stop reminder only (its system prompt already
+keeps Hivemind's instructions through a compaction), and it stays silent
+whenever the Hivemind server is off.
 
 ## Incognito sessions
 

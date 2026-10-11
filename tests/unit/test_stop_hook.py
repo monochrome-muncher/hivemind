@@ -463,3 +463,86 @@ def test_the_opencode_reminder_after_a_compaction_asks_once_to_write() -> None:
     before, elsewhere, after, later = r["system"]
     assert isinstance(after, str) and after.endswith(line)
     assert all(line not in str(s) for s in (before, elsewhere, later))
+
+
+# -- DeepSeek Harness: the Stop reminder from the bundle's own plugin ---------------
+
+DSH_PLUGIN = PLUGIN / "dsh" / "hivemind-reminders.js"
+
+_DSH_SCRIPT = """
+const mod = await import(process.argv[1])
+const handlers = {}
+const visible = new Set(JSON.parse(process.env.VISIBLE ?? '["mcp__hivemind__hive_write"]'))
+const ctx = {
+  on: (name, fn) => { handlers[name] = fn },
+  tools: { get: (name, agent) => (visible.has(name) && agent ? { name } : undefined) },
+}
+mod.apply(ctx)
+const steered = []
+const agents = {}
+const agent = (id) => (agents[id] ??= { id, steer: (m) => steered.push({ id, m }) })
+for (const [kind, arg] of JSON.parse(process.env.STEPS)) {
+  if (kind === "subagent") handlers["subagent/start"]({ id: arg })
+  if (kind === "call") {
+    const exec = { name: arg.name, agent: agent(arg.agent ?? "main"), arguments: {} }
+    const out = await handlers["tools/post-execute"](exec, {}, async () => "downstream")
+    if (out !== "downstream") throw new Error("post-execute must pass through")
+  }
+  if (kind === "stop") await handlers["agent/turn-stopping"]({ agent: agent(arg ?? "main"), turn: 1 })
+}
+console.log(JSON.stringify(steered))
+"""
+
+
+def _dsh(steps: list[object], **env: str) -> list[dict[str, object]]:
+    base = {k: v for k, v in os.environ.items() if not k.startswith("HIVEMIND_")}
+    out = subprocess.run(
+        ["node", "--input-type=module", "-e", _DSH_SCRIPT, DSH_PLUGIN.as_uri()],
+        env={**base, "STEPS": json.dumps(steps), **env},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    result: list[dict[str, object]] = json.loads(out.stdout)
+    return result
+
+
+def _dsh_calls(n: int, name: str = "bash", agent: str = "main") -> list[object]:
+    return [["call", {"name": name, "agent": agent}] for _ in range(n)]
+
+
+def test_the_dsh_bundle_loads_the_reminder_plugin_with_the_hook_text() -> None:
+    assert STOP_TEXT
+    assert f"'{json.loads(STOP_TEXT.group(1))['reason']}'" in DSH_PLUGIN.read_text()
+    patch = (PLUGIN / "cordis.patch.yml").read_text()
+    assert "name: ./dsh/hivemind-reminders.js" in patch
+
+
+@needs_node
+def test_dsh_steers_a_long_turn_once_with_a_user_message() -> None:
+    reason = json.loads(STOP_TEXT.group(1))["reason"]  # type: ignore[union-attr]
+    [steer] = _dsh([*_dsh_calls(20), ["stop", None], *_dsh_calls(3), ["stop", None]])
+    m = steer["m"]
+    assert isinstance(m, dict)
+    assert (m["role"], m["content"], m["source"]) == (
+        "user",
+        [{"type": "text", "text": reason}],
+        {"kind": "hivemind"},
+    )
+    assert m["id"]
+
+
+@needs_node
+@pytest.mark.parametrize("tool", ["mcp__hivemind__hive_write", "mcp__hivemind__hive_feedback"])
+def test_a_dsh_session_that_wrote_or_rated_is_not_steered(tool: str) -> None:
+    assert _dsh([*_dsh_calls(25), *_dsh_calls(1, tool), ["stop", None]]) == []
+
+
+@needs_node
+def test_dsh_leaves_short_subagent_and_disconnected_sessions_alone() -> None:
+    assert _dsh([*_dsh_calls(19, "mcp__hivemind__hive_search"), ["stop", None]]) == []
+    child = [["subagent", "kid"], *_dsh_calls(25, agent="kid"), ["stop", "kid"], ["stop", None]]
+    assert _dsh(child) == []
+    # Incognito or no URL: the server row is off, so hive_write is not visible.
+    assert _dsh([*_dsh_calls(25), ["stop", None]], VISIBLE="[]") == []
+    assert _dsh([*_dsh_calls(4), ["stop", None]], HIVEMIND_STOP_MIN_TOOLS="3") != []

@@ -24,6 +24,8 @@
 #    Hivemind for the whole session.
 # 2. The bundle's own skills/ folder, served by dsh/hivemind-skills.js as a
 #    packaged skill provider (the pattern of DSH's own dsh-skill-badge).
+# 3. dsh/hivemind-reminders.js: the once-per-session write-and-rate reminder
+#    (the Claude Code Stop hook's). Silent whenever the row above is off.
 - insert:
     - id: hivemind-mcp
       name: '@deepseek-ai/dsh-mcp-client'
@@ -36,3 +38,5 @@
           Authorization: !!js "'Bearer ' + (((n) => { const g = (m) => process.getBuiltinModule(m); const read = (f) => { try { return g('node:util').parseEnv(g('node:fs').readFileSync(f, 'utf8')) } catch { return {} } }; const home = read(dshHomePath('.env')); const project = read(g('node:path').resolve('.env')); const guarded = Object.keys(project).some((k) => k.toUpperCase().startsWith('HIVEMIND_')); if (guarded && !globalThis.__hivemindProjectEnvWarned) { globalThis.__hivemindProjectEnvWarned = true; process.stderr.write('hivemind: ignoring HIVEMIND_* settings in ' + g('node:path').resolve('.env') + ' (a project .env must not choose where the Hivemind key is sent); using ' + dshHomePath('.env') + ' only\\n') } const t = (v) => ['1', 'true', 'yes', 'on'].includes(String(v ?? '').trim().toLowerCase()); return n === 'HIVEMIND_INCOGNITO' ? ((t(process.env[n]) || t(home[n])) ? '1' : '') : guarded ? home[n] : process.env[n] })('HIVEMIND_API_KEY') ?? '')"
     - id: hivemind-skills
       name: ./dsh/hivemind-skills.js
+    - id: hivemind-reminders
+      name: ./dsh/hivemind-reminders.js

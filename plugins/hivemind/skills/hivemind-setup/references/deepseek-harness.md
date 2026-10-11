@@ -58,9 +58,12 @@ with another harness's key.
 ## Stay aware
 
 - **No hook needed.** DSH puts the Hivemind MCP server's instructions into
-  the system prompt, which compaction never removes. (DSH's bridge for
-  Claude Code hooks runs `SessionStart` only once, at session start, and
-  its text does not survive compaction, so it is not the right tool here.)
+  the system prompt, which compaction never removes. With the bundle, a
+  long turn that wrote nothing also gets one reminder to write and rate
+  before it ends (`HIVEMIND_STOP_MIN_TOOLS`, default 20 tool calls). Do not
+  wire the Claude Code plugin's hooks through DSH's hooks bridge: its
+  `SessionStart` text does not survive compaction, and its `Stop` hook
+  never fires there.
 - **Instruction block:** `~/.dsh/AGENTS.md`, which DSH keeps as a durable
   baseline.
 
