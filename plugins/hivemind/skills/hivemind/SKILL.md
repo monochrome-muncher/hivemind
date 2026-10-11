@@ -51,16 +51,16 @@ you, and before writing.
 
 - `hive_search` with a short query; add `tags`, `kind`, `entities` or
   dates when you know them.
-- `hive_get` the promising hits (several at once with `entry_ids`).
-  Before relying on one reported `stale` or `wrong`, read the notes in
-  its `feedback`: they often say what is true now. Open `see_also` and
-  `linked_from` entries that bear on the task.
+- `hive_get` the promising hits. Before relying on one reported `stale`
+  or `wrong`, read the notes in its `feedback`: they often say what is
+  true now. Open `see_also` and `linked_from` entries that bear on the
+  task.
 - `score` is findability, not truth. Before a consequential step, check
   an old, unconfirmed or single-source entry against the system when
   that is cheap.
 - **Open-ended work** (design, several plausible causes, research): note
-  your own candidates before reading hits, then compare and say what
-  changed your mind.
+  your own candidates before reading hits, then compare. Stuck or
+  brainstorming: search with `explore: true`.
 - `not_found` can mean "not visible to you", not "deleted".
 - Tell the user when an entry shaped your answer ("Hivemind has a note
   from `<author>` that …").

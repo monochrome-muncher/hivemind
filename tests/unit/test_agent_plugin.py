@@ -77,6 +77,7 @@ def test_the_skill_carries_the_distillation_loop() -> None:
         "Conflict: A vs B",
         "`score` is findability, not truth",
         "note your own candidates before reading hits",
+        "brainstorming: search with `explore: true`",
         "supersede only on evidence",
         "tagged `alternative`",
     ):
