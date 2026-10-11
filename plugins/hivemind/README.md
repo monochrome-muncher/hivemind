@@ -122,9 +122,8 @@ Gemini asks you to confirm, because the extension adds skills to the
 agent's instructions. The extension brings the MCP connection, both
 skills and the reminders.
 
-Add `--ref v<version>` to stay on one release. This only works for
-releases after 2.5.0, because 2.5.0 came out before the extension
-existed. Until a newer release is out, leave `--ref` off.
+Add `--ref v<version>` to stay on one release. This works from
+`v2.6.0` on; 2.5.0 and older came out before the extension existed.
 
 ### Hermes
 
