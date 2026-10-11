@@ -42,7 +42,7 @@ from hivemind.domain.entry import (
     Source,
     SourceType,
 )
-from hivemind.domain.feedback import Feedback, FeedbackSignals, Verdict
+from hivemind.domain.feedback import Correction, Feedback, FeedbackSignals, Verdict, is_contested
 from hivemind.domain.health import HealthCounts
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Store, SupersedeConflict
@@ -356,6 +356,14 @@ async def test_similar_entries_exclude_the_entry_and_inactive_ones(adapter: Adap
     assert -1.0 <= pairs[0][1] <= 1.0
 
 
+async def test_similar_entries_without_an_excluded_id_returns_every_active_match(
+    adapter: Adapter,
+) -> None:
+    first = await write(adapter, "first", hot=3)
+    pairs = await adapter.store.similar_entries(adapter.vec(3), 5)
+    assert [eid for eid, _ in pairs] == [first.id]
+
+
 async def test_keyword_ties_break_newest_first(adapter: Adapter) -> None:
     first = await write(adapter, "shared word alpha")
     second = await write(adapter, "shared word alpha")
@@ -657,6 +665,134 @@ async def test_feedback_signals_cover_every_well_formed_id(adapter: Adapter) -> 
     }
     assert signals[entry.id].counts == (await adapter.store.quality_counts([entry.id]))[entry.id]
     assert await adapter.store.feedback_signals([]) == {}
+
+
+# -- evidence on a hit: correction and supersedes (SPEC §6.1) -------------------------
+
+
+async def _correction(adapter: Adapter, entry: Entry) -> Correction | None:
+    return (await adapter.store.feedback_signals([entry.id]))[entry.id].correction
+
+
+async def test_correction_is_the_newest_flag_with_a_note(adapter: Adapter) -> None:
+    entry = await write(adapter, "disputed")
+    store = adapter.store
+    assert await _correction(adapter, entry) is None
+    await store.record_feedback(
+        Feedback(entry.id, "u1", "a1", Verdict.STALE, "moved to v2", _min(1))
+    )
+    await store.record_feedback(
+        Feedback(entry.id, "u2", "a2", Verdict.WRONG, "never true", _min(3))
+    )
+    await store.record_feedback(Feedback(entry.id, "u3", "a3", Verdict.HELPFUL, "fine", _min(5)))
+    assert await _correction(adapter, entry) == Correction(
+        Verdict.WRONG, "never true", "u2", _min(3)
+    )
+    # A reporter's latest verdict replaces theirs (upsert): u2 now says helpful.
+    await store.record_feedback(Feedback(entry.id, "u2", "a2", Verdict.HELPFUL, "ok", _min(6)))
+    assert await _correction(adapter, entry) == Correction(
+        Verdict.STALE, "moved to v2", "u1", _min(1)
+    )
+
+
+async def test_correction_ignores_bare_and_blank_flags(adapter: Adapter) -> None:
+    entry = await write(adapter, "disputed")
+    store = adapter.store
+    await store.record_feedback(Feedback(entry.id, "u1", "a", Verdict.STALE, "real note", _min(1)))
+    for i, note in enumerate((None, "", "  \n\t ")):
+        await store.record_feedback(
+            Feedback(entry.id, f"b{i}", "a", Verdict.WRONG, note, _min(5 + i))
+        )
+    assert await _correction(adapter, entry) == Correction(
+        Verdict.STALE, "real note", "u1", _min(1)
+    )
+
+
+async def test_correction_ignores_a_revoked_reporter(adapter: Adapter) -> None:
+    store = adapter.store
+    fleet = await store.create_fleet("blue")
+    entry = await write(adapter, "disputed")
+    await store.register_agent("Scout")
+    await store.record_feedback(Feedback(entry.id, "ok", "a", Verdict.STALE, "kept", _min(1)))
+    await store.record_feedback(
+        Feedback(entry.id, "Scout", "Scout", Verdict.WRONG, "gone", _min(2))
+    )
+    assert (await _correction(adapter, entry)) == Correction(
+        Verdict.WRONG, "gone", "Scout", _min(2)
+    )
+    await store.activate_agent("Scout", trust_level=TrustLevel.LURKER, home_fleet_id=fleet.id)
+    await store.revoke_agent("Scout")
+    assert (await _correction(adapter, entry)) == Correction(Verdict.STALE, "kept", "ok", _min(1))
+
+
+async def test_correction_note_is_cut_cleanly_at_160_characters(adapter: Adapter) -> None:
+    store = adapter.store
+    long = await write(adapter, "long")
+    await store.record_feedback(
+        Feedback(long.id, "u", "a", Verdict.STALE, "  " + "é" * 200 + "  ", _min(1))
+    )
+    cut = await _correction(adapter, long)
+    assert cut is not None and cut.note == "é" * 160 + "…"
+    exact = await write(adapter, "exact")
+    await store.record_feedback(Feedback(exact.id, "u", "a", Verdict.WRONG, "😀" * 160, _min(1)))
+    kept = await _correction(adapter, exact)
+    assert kept is not None and kept.note == "😀" * 160  # no ellipsis when it fits
+    # Surrounding space never counts and never ends up before the ellipsis.
+    spaced = await write(adapter, "spaced")
+    await store.record_feedback(
+        Feedback(spaced.id, "u", "a", Verdict.WRONG, "x" * 159 + " " + "y" * 40, _min(1))
+    )
+    trimmed = await _correction(adapter, spaced)
+    assert trimmed is not None and trimmed.note == "x" * 159 + "…"
+
+
+async def test_supersedes_counts_readable_predecessors_only(adapter: Adapter) -> None:
+    home, other = str(uuid.uuid4()), str(uuid.uuid4())
+    store = adapter.store
+    org = await write(adapter, "org v1", scope="org", author="w")
+    home_v1 = await write(adapter, "home v1", scope="fleet", fleet_id=home, author="w")
+    other_v1 = await write(adapter, "other v1", scope="fleet", fleet_id=other, author="w")
+    secret = await write(adapter, "secret v1", scope="self", author="w")
+    new = await write(
+        adapter,
+        "v2",
+        scope="org",
+        author="w",
+        supersedes=(org.id, home_v1.id, other_v1.id, secret.id),
+    )
+    lone = await write(adapter, "lonely")
+
+    async def counts(v: Visibility | None) -> dict[str, int]:
+        signals = await store.feedback_signals(
+            [new.id, lone.id], count_supersedes=True, visibility=v
+        )
+        return {eid: s.supersedes for eid, s in signals.items()}
+
+    assert await counts(None) == {new.id: 4, lone.id: 0}
+    assert await counts(Visibility(TrustLevel.PRIVILEGED, "x", is_admin=True)) == {
+        new.id: 4,
+        lone.id: 0,
+    }
+    assert await counts(_vis(TrustLevel.UNTRUSTED, fleet=home)) == {new.id: 0, lone.id: 0}
+    assert await counts(_vis(TrustLevel.CONTRIBUTOR, fleet=home)) == {new.id: 2, lone.id: 0}
+    assert await counts(_vis(TrustLevel.PRIVILEGED, fleet=home)) == {new.id: 3, lone.id: 0}
+    assert await counts(_vis(TrustLevel.LURKER, name="w", fleet=other)) == {new.id: 4, lone.id: 0}
+    # Not asked for: zero, whatever the chain.
+    plain = await store.feedback_signals([new.id])
+    assert plain[new.id].supersedes == 0
+
+
+async def test_contested_inputs_are_the_counts_after_exclusions(adapter: Adapter) -> None:
+    store = adapter.store
+    fleet = await store.create_fleet("blue")
+    entry = await write(adapter, "rated")
+    await store.register_agent("Scout")
+    await store.record_feedback(Feedback(entry.id, "ok", "a", Verdict.HELPFUL, None, _min(1)))
+    await store.record_feedback(Feedback(entry.id, "Scout", "Scout", Verdict.WRONG, None, _min(2)))
+    assert is_contested(*(await store.feedback_signals([entry.id]))[entry.id].counts)
+    await store.activate_agent("Scout", trust_level=TrustLevel.LURKER, home_fleet_id=fleet.id)
+    await store.revoke_agent("Scout")
+    assert not is_contested(*(await store.feedback_signals([entry.id]))[entry.id].counts)
 
 
 # -- counters (ROADMAP §3.3, ADR 0056) --------------------------------------------------

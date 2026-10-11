@@ -51,12 +51,14 @@ from hivemind.domain.entry import (
     new_entry_id,
 )
 from hivemind.domain.feedback import (
+    Correction,
     Feedback,
     FeedbackCounts,
     FeedbackSignals,
     FlagCount,
     Verdict,
     last_confirmed,
+    truncate_note,
 )
 from hivemind.domain.health import (
     DISPERSION_CAP,
@@ -594,14 +596,14 @@ class MemoryStore:
         embedding: list[float],
         limit: int,
         *,
-        exclude_id: str,
+        exclude_id: str | None = None,
         visibility: Visibility | None = None,
     ) -> list[tuple[str, float]]:
         active = EntryFilters()
         with self._lock:
             rows: list[tuple[float, datetime, str]] = []
             for entry in self._entries.values():
-                if entry.id == exclude_id or entry.embedding is None:
+                if (exclude_id is not None and entry.id == exclude_id) or entry.embedding is None:
                     continue
                 if not active.matches(entry) or not self._visible(entry, visibility):
                     continue
@@ -632,10 +634,23 @@ class MemoryStore:
             live = self._live_feedback()
             return {eid: _count_for(live, eid) for eid in entry_ids if _is_uuid(eid)}
 
-    async def feedback_signals(self, entry_ids: list[str]) -> dict[str, FeedbackSignals]:
+    async def feedback_signals(
+        self,
+        entry_ids: list[str],
+        *,
+        count_supersedes: bool = False,
+        visibility: Visibility | None = None,
+    ) -> dict[str, FeedbackSignals]:
         with self._lock:
             live = self._live_feedback()
-            return {eid: _signals_for(live, eid) for eid in entry_ids if _is_uuid(eid)}
+            out = {eid: _signals_for(live, eid) for eid in entry_ids if _is_uuid(eid)}
+            if count_supersedes:
+                counts: dict[str, int] = {}
+                for entry in self._entries.values():
+                    if entry.superseded_by in out and self._visible(entry, visibility):
+                        counts[entry.superseded_by] = counts.get(entry.superseded_by, 0) + 1
+                out = {eid: replace(s, supersedes=counts.get(eid, 0)) for eid, s in out.items()}
+            return out
 
     async def list_feedback(self, entry_id: str, limit: int) -> list[Feedback]:
         with self._lock:
@@ -831,6 +846,7 @@ def _signals_for(feedback: dict[tuple[str, str, str], Feedback], entry_id: str) 
     helpful, stale, wrong = _count_for(feedback, entry_id)
     noted: list[datetime] = []
     flags: list[datetime] = []
+    flagged_notes: list[Feedback] = []
     for fb in feedback.values():
         if fb.entry_id != entry_id:
             continue
@@ -839,11 +855,26 @@ def _signals_for(feedback: dict[tuple[str, str, str], Feedback], entry_id: str) 
                 noted.append(fb.updated_at)
         else:
             flags.append(fb.updated_at or _EPOCH)
+            if fb.note and fb.note.strip():
+                flagged_notes.append(fb)
+    correction = None
+    if flagged_notes:
+        # Newest first, then reporter and agent: Postgres's ORDER BY.
+        flagged_notes.sort(key=lambda fb: (fb.user, fb.agent))
+        flagged_notes.sort(key=lambda fb: fb.updated_at or _EPOCH, reverse=True)
+        newest = flagged_notes[0]
+        correction = Correction(
+            newest.verdict,
+            truncate_note(newest.note or ""),
+            newest.user,
+            newest.updated_at or _EPOCH,
+        )
     return FeedbackSignals(
         helpful,
         stale,
         wrong,
         last_confirmed(max(noted, default=None), max(flags, default=None)),
+        correction,
     )
 
 
