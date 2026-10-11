@@ -346,6 +346,10 @@ _Avoid_: DB version, migration cursor, schema fingerprint
 The minimal operational metrics surface (`GET /v1/metrics`, admin-gated): entries / fleets / agents counters (trust-level distribution, writes per fleet, pending-agent count) that make the SPEC §10 usage-based triggers measurable rather than guesswork (ROADMAP §3.3).
 _Avoid_: analytics, telemetry (that is the broader §10 story), dashboards (a UI is a non-goal, SPEC §9)
 
+**Fleet health metrics**:
+The `health` section of the usage report: observations of the pool (verdict notes, sources, correction speed, orphaned flags, concentration, synthesis) for the operator. Admin-only and never an input to search, ranking, scoring or the briefing (ADR 0075).
+_Avoid_: scorecard, KPIs, leaderboard (they invite agents to optimise the number)
+
 **Scrape target**:
 The REST runner's unauthenticated `GET /metrics` in the Prometheus text format: the usage counters as gauges plus per-process request metrics (ADR 0050). Kept off the public ingress.
 _Avoid_: metrics endpoint (ambiguous with `GET /v1/metrics`)

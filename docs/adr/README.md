@@ -83,5 +83,6 @@ is unused.
 | [0071](0071-a-confirmation-can-restart-the-recency-clock.md) | A confirmation can restart the recency clock | Accepted (off by default) |
 | [0072](0072-recency-profile-per-kind.md) | A recency profile per kind | Accepted (off by default) |
 | [0073](0073-a-recency-hint-on-search.md) | A recency hint on search | Accepted (off by default) |
+| [0075](0075-fleet-health-metrics.md) | Fleet health metrics: admin-only and observation-only | Accepted |
 | [0076](0076-pin-integrity.md) | Pin integrity: audited pins and "changed since pinned" | Accepted (amends 0058) |
 | [0077](0077-write-check-mode-and-warnings.md) | Writes can be checked first, and answer with advisory warnings | Accepted |

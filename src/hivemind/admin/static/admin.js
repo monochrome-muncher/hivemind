@@ -410,6 +410,62 @@ function stat(label, value, warn = false) {
     h("div", { class: "stat-label", text: label }), h("div", { class: "stat-value", text: value }));
 }
 
+const fmtPct = (share) => (share == null ? "—" : `${Math.round(share * 1000) / 10}%`);
+const fmtOf = (x) => (x && x.total ? `${fmtPct(x.share)} (${x.count} of ${x.total})` : "—");
+
+function fmtDuration(seconds) {
+  if (seconds == null) return "—";
+  if (seconds >= 86400) return `${Math.round(seconds / 864) / 100} days`;
+  if (seconds >= 3600) return `${Math.round(seconds / 36) / 100} hours`;
+  return `${Math.round(seconds / 60)} min`;
+}
+
+const fmtRival = (r) => (r.count ? `${r.count} · ${fmtDuration(r.median_age_seconds)}` : "0");
+
+function dispersionTable(rows) {
+  const cos = (x) => Math.round(x * 1000) / 1000;
+  return h("div", {},
+    h("div", { class: "card-body" }, h("p", { class: "muted small", text: "Topic dispersion: mean pairwise cosine of a busy tag's entries, last 30 days against the 30 before (newest 50 per window). A rise means writers are converging." })),
+    table(["Tag", "Last 30 days", "Before", "Change"], rows.map((d) => h("tr", {},
+      h("td", { text: d.tag }), h("td", { text: `${cos(d.recent_cosine)} · ${d.recent_entries} entries` }),
+      h("td", { text: `${cos(d.before_cosine)} · ${d.before_entries} entries` }),
+      h("td", { text: `${d.change > 0 ? "+" : ""}${cos(d.change)}` }))), "No tag has 5 entries in both windows yet."));
+}
+
+// ADR 0075: the fleet health metrics. Observation only for the operator; nothing
+// agent-facing reads them, so no target should be set for an agent.
+function healthCard(health) {
+  if (!health) return h("div");
+  const tags = health.gap_tag_counts;
+  const rows = [
+    ["Helpful verdicts with a note", fmtOf(health.helpful_with_note_share), "Up: verdicts carry evidence"],
+    ["Sourced active org/fleet facts and insights", fmtOf(health.sourced_share), "Up: traceable"],
+    ["Correction latency p50 (first flag to successor, 90 days)", `${fmtDuration(health.correction_latency_p50_seconds)} · ${health.corrections_measured} measured`, "Down: errors get fixed faster"],
+    ["Flagged more than 14 days ago, still active", health.flagged_backlog_14d, "Down"],
+    ["Flagged entries with no owner (author revoked or silent 30 days)", health.orphaned_flagged, "Down"],
+    ["Floating gap (older than 90 days, no feedback in 90 days)", health.floating_gap, "Down, or stable with growth"],
+    ["Top 3 authors' share of writes (90 days)", `${fmtOf(health.top3_author_write_share)} · ${health.top3_author_write_share.authors} authors`, "Not rising"],
+    ["Top 3 reporters' share of verdicts (90 days)", `${fmtOf(health.top3_reporter_verdict_share)} · ${health.top3_reporter_verdict_share.reporters} reporters`, "Not rising"],
+    ["Insights linking at least 2 entries", fmtOf(health.synthesis_rate), "Up: combining happens"],
+    ["Self entries promoted to the fleet (90 days)", health.self_to_fleet_promotions, "Up"],
+    ["Supersessions per 100 writes (90 days)", health.supersessions_per_100_writes.per_100 == null ? "—" : Math.round(health.supersessions_per_100_writes.per_100 * 10) / 10, "Up modestly"],
+    ["Echo rate: new writes (30 days, newest 200 sampled) with an earlier entry at cosine 0.9 or more", fmtOf(health.echo_rate), "Not rising"],
+    ["Grounding: new fleet/org insights and decisions with a source that is not an entry (30 days)", fmtOf(health.grounding_share), "Up"],
+    ["Top 3 agent labels' share of writes (30 days)", `${fmtOf(health.top3_agent_label_write_share)} · ${health.top3_agent_label_write_share.labels} labels`, "Not rising"],
+    ["Top 3 agent labels' share of verdicts (30 days)", `${fmtOf(health.top3_agent_label_verdict_share)} · ${health.top3_agent_label_verdict_share.labels} labels`, "Not rising"],
+    ["Open alternative entries (count · median age)", fmtRival(health.rival_lifetime.alternative), "Zero means early closure; a growing pile means nobody tests"],
+    ["Open “Conflict:” entries (count · median age)", fmtRival(health.rival_lifetime.conflict), "Shrinking as they are tested"],
+    ["Contested entries, helpful beside stale or wrong (count · median age)", fmtRival(health.rival_lifetime.contested), "Resolved over time"],
+    ["Gap tags (anomaly / open-question / dead-end)", `${tags.anomaly} / ${tags["open-question"]} / ${tags["dead-end"]}`, "Visible; read beside the empty-search rate"],
+  ];
+  return h("div", { class: "card" },
+    h("div", { class: "card-head" }, h("h2", { text: "Fleet health" })),
+    h("div", { class: "card-body" }, h("p", { class: "muted small", text: "For you only: observations of the pool, refreshed with the entry counts. Agents never see these numbers and nothing ranks by them." })),
+    table(["Metric", "Now", "Healthy direction"], rows.map(([label, value, hint]) => h("tr", {},
+      h("td", { text: label }), h("td", { text: value }), h("td", { class: "muted", text: hint }))), ""),
+    dispersionTable(health.topic_dispersion));
+}
+
 function bars(counts) {
   const entries = Object.entries(counts);
   const max = Math.max(1, ...entries.map(([, v]) => v));
@@ -484,6 +540,7 @@ async function viewOverview(root) {
       stat("Fleets", state.fleets.length),
       metrics ? stat("Active entries", metrics.entries.active) : null),
     pendingQueue(refresh),
+    healthCard(metrics && metrics.health),
     h("div", { class: "grid-2" },
       h("div", { class: "card" }, h("div", { class: "card-head" }, h("h2", { text: "Active agents by trust level" })),
         h("div", { class: "card-body" }, bars(activeByLevel))),
@@ -529,6 +586,7 @@ async function viewAgents(root) {
 async function viewFleets(root) {
   const [, metrics] = await Promise.all([loadAgentsAndFleets(), api("GET", "metrics").catch(() => null)]);
   const writes = (metrics && metrics.fleets.writes_by_fleet) || {};
+  const health = (metrics && metrics.health && metrics.health.by_fleet) || {};
   const name = h("input", { placeholder: "New fleet name", required: true });
   const create = h("button", { type: "submit", class: "btn btn-primary", text: "Create fleet" });
   const form = h("form", { class: "row" }, name, create);
@@ -550,11 +608,15 @@ async function viewFleets(root) {
     pageHead("Fleets", "Fleets partition the pool. They cannot be deleted."),
     h("div", { class: "card" }, h("div", { class: "card-body" }, form)),
     h("div", { class: "card" }, table(
-      ["Fleet", "Active agents", "Entries written", "Created", "Id"],
+      ["Fleet", "Active agents", "Entries written", "Sourced", "Flag backlog", "Orphaned flags", "Floating", "Created", "Id"],
       state.fleets.map((f) => h("tr", {},
         h("td", {}, h("strong", { text: f.name })),
         h("td", { text: state.agents.filter((a) => a.status === "active" && a.home_fleet_id === f.id).length }),
         h("td", { text: writes[f.name] ?? "—" }),
+        h("td", { title: "Active org/fleet facts and insights with a source (ADR 0075)", text: health[f.name] ? fmtOf(health[f.name].sourced_share) : "—" }),
+        h("td", { title: "Active entries flagged stale or wrong over 14 days ago", text: health[f.name] ? health[f.name].flagged_backlog_14d : "—" }),
+        h("td", { title: "Flagged entries whose author is revoked or silent for 30 days", text: health[f.name] ? health[f.name].orphaned_flagged : "—" }),
+        h("td", { title: "Older than 90 days with no feedback in 90 days", text: health[f.name] ? health[f.name].floating_gap : "—" }),
         h("td", { title: fmtTime(f.created_at), text: fmtAgo(f.created_at) }),
         h("td", {}, h("code", { text: f.id })))),
       "No fleets yet. Create one before activating agents.")));

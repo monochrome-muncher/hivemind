@@ -48,6 +48,7 @@ from hivemind.api.schemas import (
     FleetOut,
     FleetsMetrics,
     GetEntriesRequest,
+    HealthMetrics,
     HealthOut,
     HitOut,
     KeyIssuedOut,
@@ -180,6 +181,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
             fleets=FleetsMetrics(**report["fleets"]),
             agents=AgentsMetrics(**report["agents"]),
             feedback=FeedbackMetrics(**report["feedback"]),
+            health=HealthMetrics(**report["health"]) if report["health"] is not None else None,
         )
 
     @router.post(

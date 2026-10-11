@@ -80,7 +80,7 @@ objects, had no backward direction and assumed one replica.
 Entries, fleets, agents (trust distribution, writes per fleet, pending
 count), importance source and per-author kind distribution, and searches
 and empty searches per fleet (ADR 0056), and per-agent stale/wrong flags later
-confirmed by a supersession (ADR 0068). They make the usage-based Tier 5
+confirmed by a supersession (ADR 0068), and the admin-only fleet health metrics (ADR 0075). They make the usage-based Tier 5
 triggers measurable.
 
 ### 3.4 Kubernetes + GitLab CI/CD deployment story  *(shipped: `DEPLOY.md`, `deploy/kubernetes/`, `.gitlab-ci.yml`, `config/`)*
