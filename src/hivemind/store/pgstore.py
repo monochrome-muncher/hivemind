@@ -860,7 +860,7 @@ class PgStore:
         embedding: list[float],
         limit: int,
         *,
-        exclude_id: str,
+        exclude_id: str | None = None,
         visibility: Visibility | None = None,
     ) -> list[tuple[str, float]]:
         """The active entries nearest to ``embedding`` with their cosine
@@ -868,7 +868,7 @@ class PgStore:
         settings as ``search_vector``, so it is approximate too (ADR 0025)."""
         clauses, params = _filter_conditions(EntryFilters(), visibility)
         clauses.append("embedding IS NOT NULL")
-        if _is_valid_uuid(exclude_id):
+        if exclude_id is not None and _is_valid_uuid(exclude_id):
             params.append(exclude_id)
             clauses.append(f"id <> ${len(params)}")
         vec_idx = len(params) + 1

@@ -1,5 +1,8 @@
 # Writes report the nearest existing entries
 
+> **Status: amended by [ADR 0077](0077-write-check-mode-and-warnings.md):**
+> `check: true` replaces the rejected pre-write check verb, and `related` items carry tags, feedback counts and `same_author`.
+
 ## Context
 
 "Supersede, don't duplicate" (SPEC §5.2) depends entirely on the writer

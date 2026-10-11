@@ -379,14 +379,14 @@ class MemoryStore:
         embedding: list[float],
         limit: int,
         *,
-        exclude_id: str,
+        exclude_id: str | None = None,
         visibility: Visibility | None = None,
     ) -> list[tuple[str, float]]:
         active = EntryFilters()
         with self._lock:
             rows: list[tuple[float, datetime, str]] = []
             for entry in self._entries.values():
-                if entry.id == exclude_id or entry.embedding is None:
+                if (exclude_id is not None and entry.id == exclude_id) or entry.embedding is None:
                     continue
                 if not active.matches(entry) or not self._visible(entry, visibility):
                     continue

@@ -194,12 +194,12 @@ class Store(Protocol):
         embedding: list[float],
         limit: int,
         *,
-        exclude_id: str,
+        exclude_id: str | None = None,
         visibility: Visibility | None = None,
     ) -> list[tuple[str, float]]:
         """The active entries nearest to ``embedding``, as ``(id,
         similarity)`` pairs (cosine similarity, highest first), leaving out
-        ``exclude_id`` (ADR 0052). Restricted to ``visibility`` when given.
+        ``exclude_id`` when given (ADR 0052; check mode has no entry yet). Restricted to ``visibility`` when given.
         Approximate on Postgres, like ``search_vector`` (ADR 0025)."""
         ...
 
