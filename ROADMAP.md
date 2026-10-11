@@ -12,8 +12,8 @@ model, and the production work (deployment, migrations, vector index,
 replicas, audit log, admin panel, agent plugin, the 2.0.0 security
 review, the 2.1.0–2.3.0 retrieval and knowledge-sharing features, and
 the 2.4.0–2.5.0 search threshold and feedback work). The hive-mind study's
-ranking, evidence and fleet-health items are built on main, unreleased,
-with every new ranking feature off by default (§3.15).
+ranking, evidence and fleet-health items shipped in 2.6.0, with every new
+ranking feature off by default (§3.15).
 Tier 4's measurement items are closed or deferred with their reasons.
 The SPEC §10 extensions (Tier 5) stay held until their triggers fire.
 
@@ -185,7 +185,7 @@ and batch reads (ADRs 0053, 0055); a `flagged` filter (ADR 0054);
 empty-search counters (ADR 0056); see-also links (ADR 0057); a pinned
 fleet briefing (ADR 0058).
 
-### 3.15 Feedback, ranking evidence and fleet health  *(2.4.0–2.5.0: ADRs 0061–0069, migration `0013`; unreleased on main: ADRs 0070–0078, migrations `0014`–`0015`)*
+### 3.15 Feedback, ranking evidence and fleet health  *(2.4.0–2.5.0: ADRs 0061–0069, migration `0013`; 2.6.0: ADRs 0070–0078, migrations `0014`–`0015`)*
 A similarity threshold for the vector stream (ADR 0062, off by default).
 Feedback quality by consensus share and its guards (ADRs 0063–0067) and
 the rater flag metric (ADR 0068). From the hive-mind study
