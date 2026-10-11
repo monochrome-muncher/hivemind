@@ -718,7 +718,10 @@ async def hive_pinned(app: McpHivemind, fleet_id: str | None = None) -> dict[str
     """A fleet's pinned entries, newest pin first (ADR 0058): your home
     fleet's unless ``fleet_id`` names another you may read. Each pin shows
     the current version of the pinned entry; ``pinned_id`` is the version
-    that was pinned. Either id unpins it."""
+    that was pinned. Either id unpins it. ``changed_since_pin`` is true (with
+    ``change_reason`` ``superseded`` or ``flagged``, else null) when the entry
+    was superseded or flagged stale or wrong after the pin; pinning again
+    acknowledges the change (ADR 0076)."""
     try:
         pinned = await app.governance_service.pinned(app.credential, fleet_id)
     except InvalidInput as exc:
@@ -735,6 +738,8 @@ async def hive_pinned(app: McpHivemind, fleet_id: str | None = None) -> dict[str
                 "state": p.entry.state.value,
                 "pinned_by": p.pin.pinned_by,
                 "pinned_at": p.pin.pinned_at.isoformat(),
+                "changed_since_pin": p.changed_since_pin,
+                "change_reason": p.change_reason,
             }
             for p in pinned
         ],

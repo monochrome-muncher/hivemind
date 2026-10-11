@@ -1,5 +1,7 @@
 # A pinned briefing per fleet
 
+> **Status note:** amended by [ADR 0076](0076-pin-integrity.md): pins and unpins are audited, and a pinned entry shows `changed_since_pin`.
+
 ## Context
 
 Every agent that joins a fleet starts cold. The catch-up step (skill) shows
