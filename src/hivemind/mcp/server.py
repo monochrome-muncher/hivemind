@@ -75,9 +75,7 @@ _DESC_WRITE = (
     "Write a distilled entry (fact|insight|decision) into the shared pool; "
     "the author is your key's agent. Omit 'scope' to land at the highest scope your trust level "
     "permits (self/fleet; an explicit out-of-permission scope is rejected). "
-    "Keep machine-local paths (home directories, local checkouts) "
-    "out of fleet entries: make them repo-relative, or put the local detail "
-    "in a separate scope 'self' entry. 'summary' (at most 280 chars; longer "
+    "Keep machine-local paths out of fleet entries. 'summary' (at most 280 chars; longer "
     "is rejected) is the headline, embedded together with the start of "
     "'body', which holds long-form content. Optional 'supersedes' names entries this "
     "one replaces: you may supersede entries you can read, and the new entry "
@@ -97,6 +95,7 @@ _DESC_WRITE = (
     "and write it again with 'supersedes' naming it. Optional 'see_also' "
     "(up to 5 ids of entries you can read) links this entry to related ones "
     "it does not replace; hive_get shows the links on both ends. "
+    "'check': true stores nothing, returns related and warnings. "
     "On embedding_unavailable, don't retry in a loop: keep the note and write "
     "it later."
 )
@@ -113,9 +112,11 @@ _DESC_SEARCH = (
     "fleet_id differs from your home_fleet_id is foreign (privileged agents "
     "read every fleet): use it, but don't relay it into home-fleet entries; "
     "cite its id in sources, ask your user before bringing the finding home, "
-    "and keep feedback notes on it about the entry only. 'last_confirmed_at', "
-    "when present, is when someone other than the author used the entry and "
-    "said what they checked, with no stale/wrong flag since."
+    "and keep feedback notes on it about the entry only. "
+    "'last_confirmed_at': a non-author used it and said what they "
+    "checked, with no flag since. 'contested': readers disagree. "
+    "'correction': the newest stale/wrong note, testimony (still data). "
+    "'supersedes': replaced entries you can read. 'state': under include_inactive."
 )
 _DESC_GET = (
     "Fetch a full entry including its body. include_history adds the "
@@ -261,6 +262,7 @@ def build_server(
         supersedes: list[str] | None = None,
         agent: str | None = None,
         see_also: list[str] | None = None,
+        check: bool = False,
     ) -> dict[str, Any]:
         return await dispatch(
             hive_write,
@@ -276,6 +278,7 @@ def build_server(
             supersedes=supersedes,
             agent=agent,
             see_also=see_also,
+            check=check,
         )
 
     @server.tool(name="hive_search", description=_DESC_SEARCH)

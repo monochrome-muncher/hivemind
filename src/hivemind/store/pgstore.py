@@ -53,12 +53,13 @@ from hivemind.domain.entry import (
     UsageCount,
 )
 from hivemind.domain.feedback import (
-    NO_SIGNALS,
+    Correction,
     Feedback,
     FeedbackSignals,
     FlagCount,
     Verdict,
     last_confirmed,
+    truncate_note,
 )
 from hivemind.domain.pin import Pin
 from hivemind.ports import SupersedeConflict
@@ -322,18 +323,43 @@ GROUP BY entry_id
 # BATCH_FEEDBACK plus the two newest dates "last confirmed" is made of
 # (SPEC §4.2): the newest helpful row with a note, the newest flag.
 BATCH_FEEDBACK_SIGNALS = f"""
-SELECT
-    entry_id,
-    COUNT(*) FILTER (WHERE verdict = 'helpful') AS helpful,
-    COUNT(*) FILTER (WHERE verdict = 'stale') AS stale,
-    COUNT(*) FILTER (WHERE verdict = 'wrong') AS wrong,
-    MAX(updated_at) FILTER (
-        WHERE verdict = 'helpful' AND coalesce(note, '') ~ '\\S'
-    ) AS newest_noted_helpful_at,
-    MAX(updated_at) FILTER (WHERE verdict IN ('stale', 'wrong')) AS newest_flag_at
-FROM feedbacks f
-WHERE entry_id = ANY($1) AND {_REPORTER_NOT_REVOKED}
-GROUP BY entry_id
+SELECT g.*, corr.verdict AS corr_verdict, corr.note AS corr_note,
+       corr."user" AS corr_user, corr.updated_at AS corr_updated_at
+FROM (
+    SELECT
+        entry_id,
+        COUNT(*) FILTER (WHERE verdict = 'helpful') AS helpful,
+        COUNT(*) FILTER (WHERE verdict = 'stale') AS stale,
+        COUNT(*) FILTER (WHERE verdict = 'wrong') AS wrong,
+        MAX(updated_at) FILTER (
+            WHERE verdict = 'helpful' AND coalesce(note, '') ~ '\\S'
+        ) AS newest_noted_helpful_at,
+        MAX(updated_at) FILTER (WHERE verdict IN ('stale', 'wrong')) AS newest_flag_at
+    FROM feedbacks f
+    WHERE entry_id = ANY($1) AND {_REPORTER_NOT_REVOKED}
+    GROUP BY entry_id
+) g
+LEFT JOIN LATERAL (
+    SELECT f.verdict, f.note, f."user", f.updated_at
+      FROM feedbacks f
+     WHERE f.entry_id = g.entry_id
+       AND f.verdict IN ('stale', 'wrong')
+       AND coalesce(f.note, '') ~ '\\S'
+       AND {_REPORTER_NOT_REVOKED}
+     ORDER BY f.updated_at DESC, f."user", f.agent
+     LIMIT 1
+) corr ON true
+"""
+
+# Per entry in $1, how many entries it replaced (the reverse supersession
+# link, served by ``entries_superseded_by_idx``), counting only those the
+# reader may read: ``{vis}`` is the visibility clause, whose columns resolve
+# to ``entries`` here (ADR 0011, ADR 0033).
+COUNT_SUPERSEDES = """
+SELECT superseded_by AS entry_id, COUNT(*) AS n
+FROM entries
+WHERE superseded_by = ANY($1) AND superseded_by IS NOT NULL{vis}
+GROUP BY superseded_by
 """
 
 # ADR 0068: per reporter, the stale/wrong rows written while the entry was
@@ -860,7 +886,7 @@ class PgStore:
         embedding: list[float],
         limit: int,
         *,
-        exclude_id: str,
+        exclude_id: str | None = None,
         visibility: Visibility | None = None,
     ) -> list[tuple[str, float]]:
         """The active entries nearest to ``embedding`` with their cosine
@@ -868,7 +894,7 @@ class PgStore:
         settings as ``search_vector``, so it is approximate too (ADR 0025)."""
         clauses, params = _filter_conditions(EntryFilters(), visibility)
         clauses.append("embedding IS NOT NULL")
-        if _is_valid_uuid(exclude_id):
+        if exclude_id is not None and _is_valid_uuid(exclude_id):
             params.append(exclude_id)
             clauses.append(f"id <> ${len(params)}")
         vec_idx = len(params) + 1
@@ -939,21 +965,48 @@ class PgStore:
             counts[str(r["entry_id"])] = (r["helpful"], r["stale"], r["wrong"])
         return counts
 
-    async def feedback_signals(self, entry_ids: list[str]) -> dict[str, FeedbackSignals]:
-        """Batched counts and last-confirmed dates; every valid requested ID
+    async def feedback_signals(
+        self,
+        entry_ids: list[str],
+        *,
+        count_supersedes: bool = False,
+        visibility: Visibility | None = None,
+    ) -> dict[str, FeedbackSignals]:
+        """Batched counts, last-confirmed dates and corrections (one
+        statement), plus the visibility-aware ``supersedes`` counts (a second
+        statement on the same connection) when asked; every valid requested ID
         is present."""
         ids = _valid_uuids(entry_ids)
         if not ids:
             return {}
+        supersedes: dict[str, int] = {}
         async with self._connection() as conn:
             rows = await conn.fetch(BATCH_FEEDBACK_SIGNALS, ids)
-        signals = dict.fromkeys(ids, NO_SIGNALS)
+            if count_supersedes:
+                params: list[Any] = [ids]
+                vis = _visibility_clause(visibility, params)
+                sql = COUNT_SUPERSEDES.format(vis=f" AND {vis}" if vis else "")
+                supersedes = {str(r["entry_id"]): r["n"] for r in await conn.fetch(sql, *params)}
+        signals = {eid: FeedbackSignals(0, 0, 0, supersedes=supersedes.get(eid, 0)) for eid in ids}
         for r in rows:
-            signals[str(r["entry_id"])] = FeedbackSignals(
+            eid = str(r["entry_id"])
+            correction = (
+                Correction(
+                    Verdict(r["corr_verdict"]),
+                    truncate_note(r["corr_note"]),
+                    r["corr_user"],
+                    r["corr_updated_at"],
+                )
+                if r["corr_updated_at"] is not None
+                else None
+            )
+            signals[eid] = FeedbackSignals(
                 r["helpful"],
                 r["stale"],
                 r["wrong"],
                 last_confirmed(r["newest_noted_helpful_at"], r["newest_flag_at"]),
+                correction,
+                supersedes.get(eid, 0),
             )
         return signals
 

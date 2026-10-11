@@ -194,12 +194,12 @@ class Store(Protocol):
         embedding: list[float],
         limit: int,
         *,
-        exclude_id: str,
+        exclude_id: str | None = None,
         visibility: Visibility | None = None,
     ) -> list[tuple[str, float]]:
         """The active entries nearest to ``embedding``, as ``(id,
         similarity)`` pairs (cosine similarity, highest first), leaving out
-        ``exclude_id`` (ADR 0052). Restricted to ``visibility`` when given.
+        ``exclude_id`` when given (ADR 0052; check mode has no entry yet). Restricted to ``visibility`` when given.
         Approximate on Postgres, like ``search_vector`` (ADR 0025)."""
         ...
 
@@ -284,12 +284,24 @@ class Store(Protocol):
         feedback or names no entry; malformed ids are left out."""
         ...
 
-    async def feedback_signals(self, entry_ids: list[str]) -> dict[str, FeedbackSignals]:
+    async def feedback_signals(
+        self,
+        entry_ids: list[str],
+        *,
+        count_supersedes: bool = False,
+        visibility: Visibility | None = None,
+    ) -> dict[str, FeedbackSignals]:
         """``quality_counts`` plus each entry's ``last_confirmed_at`` (SPEC
-        §4.2), in one read: every requested id that is a well-formed UUID is
-        a key (zero counts and ``None`` when it has no feedback or names no
-        entry); malformed ids are left out. Revoked reporters are excluded
-        as in the counts (ADR 0067)."""
+        §4.2) and ``correction`` (the newest stale or wrong report with a
+        non-empty note, its note cut by ``truncate_note``; SPEC §6.1), in one
+        read: every requested id that is a well-formed UUID is a key (zero
+        counts and ``None`` when it has no feedback or names no entry);
+        malformed ids are left out. Revoked reporters are excluded as in the
+        counts (ADR 0067).
+
+        With ``count_supersedes``, ``supersedes`` is how many entries name
+        the id in ``superseded_by`` and are readable under ``visibility``
+        (``None`` = all, as everywhere else); otherwise it stays 0."""
         ...
 
     async def list_feedback(self, entry_id: str, limit: int) -> list[Feedback]:
