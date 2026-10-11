@@ -420,6 +420,8 @@ class SearchRequest(BaseModel):
     include_inactive: bool = False
     # Only entries reported stale or wrong at least once (ADR 0054).
     flagged: bool = False
+    # Opt-in diversity re-order of the ranked results (ADR 0078).
+    explore: bool = False
     # ADR 0073: how age should weigh in; honoured only when the server's
     # recency_hint_enabled is on. Send the same value on every page.
     recency: RecencyHint | None = None

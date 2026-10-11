@@ -474,6 +474,7 @@ async def hive_search(
     created_to: str | None = None,
     include_inactive: bool = False,
     flagged: bool = False,
+    explore: bool = False,
     recency: str | None = None,
 ) -> dict[str, object]:
     """Hybrid search over the pool; returns compact hits (no bodies).
@@ -486,6 +487,8 @@ async def hive_search(
     stream alone and the result carries ``degraded: "keyword_only"`` and
     a ``note`` (ADR 0048), instead of an ``embedding_unavailable`` error.
 
+    ``explore`` (ADR 0078) re-orders the hits for diversity: near-copies of a
+    higher hit sink. Nothing is hidden.
     ``recency`` (ADR 0073) is ``default``, ``prefer_recent`` (the question is
     about the current state) or ``ignore_age`` (it is timeless). It changes
     the ranking only when the server turned the hint on, and then the result
@@ -527,6 +530,7 @@ async def hive_search(
             limit,
             offset=offset,
             visibility=app.credential.visibility(),
+            explore=explore,
             recency=hint,
         )
     except InvalidInput as exc:

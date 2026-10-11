@@ -144,7 +144,9 @@ CREATE TABLE public.search_counts (
     fleet_id text NOT NULL,
     searches bigint DEFAULT 0 NOT NULL,
     empty bigint DEFAULT 0 NOT NULL,
+    explore bigint DEFAULT 0 NOT NULL,
     CONSTRAINT search_counts_empty_check CHECK (((empty >= 0) AND (empty <= searches))),
+    CONSTRAINT search_counts_explore_check CHECK (((explore >= 0) AND (explore <= searches))),
     CONSTRAINT search_counts_searches_check CHECK ((searches >= 0))
 );
 

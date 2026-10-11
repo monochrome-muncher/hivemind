@@ -168,10 +168,13 @@ class Store(Protocol):
         window); admin view over the whole pool; observation only."""
         ...
 
-    async def record_search(self, fleet_id: str | None, *, empty: bool) -> None:
+    async def record_search(
+        self, fleet_id: str | None, *, empty: bool, explore: bool = False
+    ) -> None:
         """Count one first-page search made from ``fleet_id`` (``None``: no
-        home fleet), and whether it found nothing (ADR 0056). Counts only:
-        no query text, no agent name."""
+        home fleet), whether it found nothing (ADR 0056) and whether it was
+        an ``explore`` search (ADR 0078). Counts only: no query text, no
+        agent name."""
         ...
 
     async def search_counts(self) -> list[SearchCount]:

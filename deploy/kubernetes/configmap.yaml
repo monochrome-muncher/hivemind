@@ -70,6 +70,9 @@ data:
   HIVEMIND_QUALITY_MIN: "0.5"
   HIVEMIND_QUALITY_MAX: "1.2"
   HIVEMIND_SOCIAL_MAX: "1.2"
+  # Relevance weight of an opt-in explore search's MMR re-ordering (ADR
+  # 0078), in (0, 1]; 1 = relevance order. Searches without explore ignore it.
+  HIVEMIND_EXPLORE_LAMBDA: "0.7"
   # A "last confirmed" date restarts the recency clock for the upside (ADR
   # 0071); off until measured with the deployment's embedder.
   HIVEMIND_RECENCY_FROM_CONFIRMATION: "false"

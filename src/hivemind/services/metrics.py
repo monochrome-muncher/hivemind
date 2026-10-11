@@ -15,7 +15,8 @@ Counters (ROADMAP §3.3 and §4.5):
 - fleets: total + per-fleet writes (``entries.fleet_id``).
 - agents: total, pending, active, trust-level distribution.
 - searches (ADR 0056): first-page searches and how many found nothing,
-  in total and per home fleet of the searching agent.
+  in total and per home fleet of the searching agent, and how many were
+  opt-in ``explore`` searches (ADR 0078).
 - feedback (ADR 0068): stale/wrong flags and how many were later confirmed
   by a supersession, in total and per registered reporter. Observation
   only: nothing here feeds ranking, scoring or quality.
@@ -239,15 +240,17 @@ class MetricsService:
     def _searches_report(
         self, fleets: Sequence[Fleet], rows: Sequence[SearchCount]
     ) -> dict[str, Any]:
-        """Search counters (ADR 0056): first-page searches and the ones that
-        found nothing, in total and per fleet name. Searches from callers
-        without a home fleet count in the totals only."""
+        """Search counters (ADR 0056): first-page searches, the ones that
+        found nothing and the explore ones (ADR 0078), in total and per fleet
+        name. Searches from callers without a home fleet count in the totals
+        only."""
         by_id = {r.fleet_id: r for r in rows}
         return {
             "total": sum(r.searches for r in rows),
             "empty": sum(r.empty for r in rows),
+            "explore": sum(r.explore for r in rows),
             "by_fleet": {
-                fleet.name: {"total": row.searches, "empty": row.empty}
+                fleet.name: {"total": row.searches, "empty": row.empty, "explore": row.explore}
                 for fleet in fleets
                 if (row := by_id.get(fleet.id)) is not None
             },

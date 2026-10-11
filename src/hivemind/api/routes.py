@@ -402,6 +402,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
             request.limit,
             offset=request.offset,
             visibility=credential.visibility(),
+            explore=request.explore,
             recency=request.recency or RecencyHint.DEFAULT,
         )
         if result.recency is not RecencyHint.DEFAULT:

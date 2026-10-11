@@ -140,12 +140,13 @@ SELECT scope, kind, importance_source, author, fleet_id,
 # One row per home fleet ('' = none), bumped once per first-page search
 # (ADR 0056). Counts only: no query text, no agent name.
 RECORD_SEARCH = """
-INSERT INTO search_counts (fleet_id, searches, empty) VALUES ($1, 1, $2)
+INSERT INTO search_counts (fleet_id, searches, empty, explore) VALUES ($1, 1, $2, $3)
 ON CONFLICT (fleet_id) DO UPDATE
    SET searches = search_counts.searches + 1,
-       empty = search_counts.empty + EXCLUDED.empty
+       empty = search_counts.empty + EXCLUDED.empty,
+       explore = search_counts.explore + EXCLUDED.explore
 """
-SEARCH_COUNTS = "SELECT fleet_id, searches, empty FROM search_counts"
+SEARCH_COUNTS = "SELECT fleet_id, searches, empty, explore FROM search_counts"
 
 # "See also" links (ADR 0057). The insert skips ids that name no entry
 # (the join), and the reads are oldest link first.
@@ -1103,9 +1104,11 @@ class PgStore:
             ),
         )
 
-    async def record_search(self, fleet_id: str | None, *, empty: bool) -> None:
+    async def record_search(
+        self, fleet_id: str | None, *, empty: bool, explore: bool = False
+    ) -> None:
         async with self._connection() as conn:
-            await conn.execute(RECORD_SEARCH, fleet_id or "", int(empty))
+            await conn.execute(RECORD_SEARCH, fleet_id or "", int(empty), int(explore))
 
     async def search_counts(self) -> list[SearchCount]:
         async with self._connection() as conn:
@@ -1115,6 +1118,7 @@ class PgStore:
                 fleet_id=row["fleet_id"] or None,
                 searches=int(row["searches"]),
                 empty=int(row["empty"]),
+                explore=int(row["explore"]),
             )
             for row in rows
         ]

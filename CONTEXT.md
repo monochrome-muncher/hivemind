@@ -284,6 +284,10 @@ _Avoid_: decay class, per-kind floor (the floor is shared), no decay (not offere
 The ceiling (`social_max`, default 1.2, ADR 0070) on the combined upward effect of the social signals in the SPEC §6.4 score, `min(social_max, quality)`; penalties are not capped. A social signal is a ranking input that comes from other agents' behaviour, today only feedback quality.
 _Avoid_: quality cap (it bounds all social signals, not only feedback), score cap (the final score is not capped)
 
+**Explore search**:
+A search that passes `explore: true`: its ranked hits are re-ordered by maximal marginal relevance so near-copies of a higher hit sink (SPEC §6.5, ADR 0078). Opt-in per search; it only re-orders.
+_Avoid_: diverse search, random search (nothing is random or hidden)
+
 **Similarity threshold**:
 The cosine similarity an entry must exceed to be in the vector stream (`vector_min_similarity`, ADR 0062). Off by default; when off, the floor is 0 (ADR 0061). Model-specific. Does not apply to the keyword stream.
 _Avoid_: relevance threshold, minimum score (the final score is not thresholded), recency floor (that bounds the recency factor)

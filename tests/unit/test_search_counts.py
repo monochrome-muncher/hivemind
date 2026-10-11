@@ -75,7 +75,9 @@ async def test_a_degraded_empty_search_is_not_a_miss() -> None:
 
 
 class _NoCountStore(MemoryStore):
-    async def record_search(self, fleet_id: str | None, *, empty: bool) -> None:
+    async def record_search(
+        self, fleet_id: str | None, *, empty: bool, explore: bool = False
+    ) -> None:
         raise RuntimeError("counter table is gone")
 
 
@@ -98,7 +100,8 @@ async def test_usage_report_lists_searches_per_fleet_name() -> None:
     assert report["searches"] == {
         "total": 3,
         "empty": 2,
-        "by_fleet": {"data-eng": {"total": 2, "empty": 1}},
+        "explore": 0,
+        "by_fleet": {"data-eng": {"total": 2, "empty": 1, "explore": 0}},
     }
 
 

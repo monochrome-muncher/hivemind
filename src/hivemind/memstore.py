@@ -126,7 +126,7 @@ class MemoryStore:
         self._agents: dict[str, Agent] = {}
         self._audit: list[AuditRecord] = []  # append-only (ADR 0027)
         self._pins: dict[tuple[str, str], Pin] = {}  # (fleet, entry), ADR 0058
-        self._searches: dict[str | None, tuple[int, int]] = {}  # ADR 0056
+        self._searches: dict[str | None, tuple[int, int, int]] = {}  # ADR 0056, 0078
         self._links: dict[tuple[str, str], None] = {}  # (from, to), insertion-ordered (ADR 0057)
 
     # -- write path -------------------------------------------------------
@@ -522,14 +522,16 @@ class MemoryStore:
                 ),
             )
 
-    async def record_search(self, fleet_id: str | None, *, empty: bool) -> None:
+    async def record_search(
+        self, fleet_id: str | None, *, empty: bool, explore: bool = False
+    ) -> None:
         with self._lock:
-            searches, misses = self._searches.get(fleet_id, (0, 0))
-            self._searches[fleet_id] = (searches + 1, misses + int(empty))
+            searches, misses, explored = self._searches.get(fleet_id, (0, 0, 0))
+            self._searches[fleet_id] = (searches + 1, misses + int(empty), explored + int(explore))
 
     async def search_counts(self) -> list[SearchCount]:
         with self._lock:
-            return [SearchCount(f, s, e) for f, (s, e) in self._searches.items()]
+            return [SearchCount(f, s, e, x) for f, (s, e, x) in self._searches.items()]
 
     async def list_entries(
         self,

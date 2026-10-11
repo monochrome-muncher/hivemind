@@ -151,6 +151,10 @@ class SearchConfig:
     # Ceiling on the upward effect of all social signals together (ADR
     # 0070). Finite and >= 1: below 1 it would penalise unrated entries.
     social_max: float = 1.2
+    # Weight of relevance against novelty in an ``explore`` search's MMR
+    # re-ordering (ADR 0078): 1 is plain relevance order, lower pushes
+    # near-copies of a higher hit down. In (0, 1].
+    explore_lambda: float = 0.7
     # A confirmation ("last confirmed", SPEC §4.2) restarts the recency
     # clock for the upside, inside the social_max cap (ADR 0071). Off until
     # measured with the real embedders.
@@ -208,6 +212,8 @@ class SearchConfig:
             raise ValueError(f"half_life_days must be finite and > 0, got {self.half_life_days}")
         if self.recency_floor is not None and not 0.0 < self.recency_floor <= 1.0:
             raise ValueError(f"recency_floor must be in (0, 1] or None, got {self.recency_floor}")
+        if not (math.isfinite(self.explore_lambda) and 0.0 < self.explore_lambda <= 1.0):
+            raise ValueError(f"explore_lambda must be in (0, 1], got {self.explore_lambda}")
         if self.prefer_recent_floor is not None and not 0.0 < self.prefer_recent_floor <= 1.0:
             raise ValueError(
                 f"prefer_recent_floor must be in (0, 1] or None, got {self.prefer_recent_floor}"
@@ -393,6 +399,8 @@ class Settings(BaseSettings):
     quality_max: float = 1.2
     # See SearchConfig.social_max (ADR 0070).
     social_max: float = 1.2
+    # See SearchConfig.explore_lambda (ADR 0078).
+    explore_lambda: float = 0.7
     # See SearchConfig.recency_from_confirmation (ADR 0071).
     recency_from_confirmation: bool = False
     # See SearchConfig.recency_by_kind (ADR 0072): ``insight=180,decision=365``.
@@ -507,6 +515,7 @@ class Settings(BaseSettings):
             quality_min=self.quality_min,
             quality_max=self.quality_max,
             social_max=self.social_max,
+            explore_lambda=self.explore_lambda,
             recency_from_confirmation=self.recency_from_confirmation,
             recency_by_kind=parse_recency_by_kind(self.recency_by_kind),
             recency_hint_enabled=self.recency_hint,

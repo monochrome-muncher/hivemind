@@ -855,6 +855,20 @@ async def test_search_counters_accumulate_per_fleet(adapter: Adapter) -> None:
     assert counts == {fleet: (2, 1), None: (1, 0)}
 
 
+async def test_explore_searches_are_counted_beside_the_others(adapter: Adapter) -> None:
+    """ADR 0078: ``explore`` is one more counter on the same per-fleet row; an
+    explore search is also a search, and omitting it counts as not explore."""
+    fleet = str(uuid.uuid4())
+    await adapter.store.record_search(fleet, empty=False, explore=True)
+    await adapter.store.record_search(fleet, empty=True, explore=True)
+    await adapter.store.record_search(fleet, empty=False)
+    await adapter.store.record_search(None, empty=False)
+    counts = {
+        c.fleet_id: (c.searches, c.empty, c.explore) for c in await adapter.store.search_counts()
+    }
+    assert counts == {fleet: (3, 1, 2), None: (1, 0, 0)}
+
+
 async def test_flag_counts_confirm_flags_a_later_supersession_proved_right(
     adapter: Adapter,
 ) -> None:
