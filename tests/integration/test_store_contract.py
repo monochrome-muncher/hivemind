@@ -433,20 +433,43 @@ async def test_links_of_one_write_read_in_id_order(adapter: Adapter) -> None:
 # -- pins (ADR 0058) -----------------------------------------------------------------
 
 
-async def test_pins_are_idempotent_capped_and_newest_first(adapter: Adapter) -> None:
+async def test_pins_are_refreshed_capped_and_newest_first(adapter: Adapter) -> None:
     fleet = str(uuid.uuid4())
     a = await write(adapter, "a", scope="fleet", fleet_id=fleet)
     b = await write(adapter, "b", scope="fleet", fleet_id=fleet)
     c = await write(adapter, "c", scope="fleet", fleet_id=fleet)
     first = await adapter.store.pin_entry(fleet, a.id, "boss", limit=2)
-    assert first is not None and first.entry_id == a.id and first.pinned_by == "boss"
-    assert await adapter.store.pin_entry(fleet, a.id, "other", limit=2) == first
+    assert first is not None and first.created and first.replaced == ()
+    assert first.pin.entry_id == a.id and first.pin.pinned_by == "boss"
     assert await adapter.store.pin_entry(fleet, b.id, "boss", limit=2) is not None
     assert await adapter.store.pin_entry(fleet, c.id, "boss", limit=2) is None
     assert [p.entry_id for p in await adapter.store.list_pins(fleet)] == [b.id, a.id]
+    # Pinning a pinned entry refreshes it (ADR 0076): same row, new pinner,
+    # back to the front, and a full fleet still accepts it.
+    again = await adapter.store.pin_entry(fleet, a.id, "other", limit=2)
+    assert again is not None and not again.created and again.pin.pinned_by == "other"
+    assert again.pin.pinned_at >= first.pin.pinned_at
+    assert [p.entry_id for p in await adapter.store.list_pins(fleet)] == [a.id, b.id]
     assert await adapter.store.unpin_entry(fleet, a.id) is True
     assert await adapter.store.unpin_entry(fleet, a.id) is False
     assert await adapter.store.list_pins(str(uuid.uuid4())) == []
+
+
+async def test_a_pin_replaces_the_older_pins_it_names(adapter: Adapter) -> None:
+    fleet = str(uuid.uuid4())
+    a = await write(adapter, "a", scope="fleet", fleet_id=fleet)
+    b = await write(adapter, "b", scope="fleet", fleet_id=fleet)
+    new = await write(adapter, "ab", scope="fleet", fleet_id=fleet)
+    gone = str(uuid.uuid4())
+    for entry in (a, b):
+        assert await adapter.store.pin_entry(fleet, entry.id, "boss", limit=2) is not None
+    # A full fleet may still swap pins: the count does not grow.
+    moved = await adapter.store.pin_entry(
+        fleet, new.id, "lead", limit=2, replaces=[a.id, b.id, gone, new.id]
+    )
+    assert moved is not None and moved.created and set(moved.replaced) == {a.id, b.id}
+    assert [p.entry_id for p in await adapter.store.list_pins(fleet)] == [new.id]
+    assert await adapter.store.unpin_entry(fleet, a.id) is False
 
 
 # -- feedback (SPEC §4.2, ADRs 0051, 0059) ---------------------------------------------

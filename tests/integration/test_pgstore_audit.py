@@ -65,6 +65,17 @@ async def test_record_and_list_audit_round_trip(pg) -> None:
     assert rows[0].action is AuditAction.AGENT_TRUST_LEVEL_SET
 
 
+async def test_pin_and_unpin_rows_by_an_agent_are_accepted(pg) -> None:
+    """ADR 0076: migration 0014 widened both CHECKs for agent pin rows."""
+    for action in (AuditAction.ENTRY_PIN, AuditAction.ENTRY_UNPIN):
+        await pg.record_audit(
+            AuditEvent(ActorKind.AGENT_KEY, "lead", action, "e1", {"fleet_id": "f1"})
+        )
+    rows = await pg.list_audit(AuditFilters(actor="lead"), limit=10)
+    assert {r.action for r in rows} == {AuditAction.ENTRY_PIN, AuditAction.ENTRY_UNPIN}
+    assert all(r.actor_kind is ActorKind.AGENT_KEY for r in rows)
+
+
 async def test_null_target_and_empty_detail(pg) -> None:
     stored = await pg.record_audit(
         AuditEvent(actor_kind=ActorKind.CLI, actor="john", action=AuditAction.ORG_KEY_ROTATE)
