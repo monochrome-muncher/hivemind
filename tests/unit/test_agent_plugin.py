@@ -153,7 +153,9 @@ def test_the_hermes_manifest_is_valid_yaml() -> None:
     yaml = pytest.importorskip("yaml")
     manifest = yaml.safe_load((PLUGIN / "plugin.yaml").read_text())
     assert manifest["name"] == "hivemind"
-    assert manifest["description"] == _json(PLUGIN / ".claude-plugin" / "plugin.json")["description"]
+    assert (
+        manifest["description"] == _json(PLUGIN / ".claude-plugin" / "plugin.json")["description"]
+    )
 
 
 def _yaml_scalar(path: Path, key: str) -> str:
