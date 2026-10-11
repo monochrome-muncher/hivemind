@@ -6,9 +6,27 @@ hivemind-setup skill.
 
 ## Connect
 
-Oh My Pi has **built-in MCP**: add the server to `~/.omp/agent/mcp.json`
-(or `.omp/mcp.json` in a project). `${VAR}` references are expanded at
-startup, so the key never lands in the file:
+Install the hivemind plugin through Oh My Pi's marketplace support, which
+reads the Hivemind repository as a Claude Code marketplace:
+
+```sh
+omp plugin marketplace add <git-url-of-the-hivemind-repo>
+omp plugin install hivemind@hivemind
+```
+
+It provides the MCP server, the two skills and the system-prompt
+reminder. The server comes from the plugin's `.mcp.json` and is named
+`hivemind:hivemind`; Oh My Pi expands its `${HIVEMIND_MCP_URL}` and
+`${HIVEMIND_API_KEY}` at startup, so the key never lands in a file. Its
+tools are routes (`xd://mcp__hivemind_hivemind_hive_*`), listed in your
+system prompt. (Checked with Oh My Pi 18.9.1. A plain `omp install
+<git-url>` is not enough: Oh My Pi only finds a package's skills in a
+top-level `skills/` folder.)
+
+**No `hivemind` entry in `~/.omp/agent/mcp.json` is needed.** One from an
+older setup still works: Oh My Pi then connects that one instead of the
+plugin's (routes `xd://mcp__hivemind_hive_*`), never both. Without the
+plugin, that hand entry is the way to connect:
 
 ```json
 {
@@ -22,18 +40,6 @@ startup, so the key never lands in the file:
 }
 ```
 
-Install the hivemind plugin through Oh My Pi's marketplace support, which
-reads the Hivemind repository as a Claude Code marketplace:
-
-```sh
-omp plugin marketplace add <git-url-of-the-hivemind-repo>
-omp plugin install hivemind@hivemind
-```
-
-It provides the two skills and the system-prompt reminder. (A plain
-`omp install <git-url>` is not enough: Oh My Pi only finds a package's
-skills in a top-level `skills/` folder.)
-
 **Where the key goes:** a private key file (hivemind-setup, "Key file",
 `~/.config/hivemind/omp.env`, mode 600) loaded **only for Oh My Pi** with
 a function in the shell profile: `omp() { ( . ~/.config/hivemind/omp.env;
@@ -44,19 +50,9 @@ fine.) Never a key in a project `.omp/mcp.json`.
 **Identity:** name this agent `<user>-omp`, distinct from the agents of
 other harnesses.
 
-**Duplicate-server risk (UNCONFIRMED).** Oh My Pi's marketplace plugins
-can load a plugin's MCP servers too, and the hivemind plugin ships a
-`.mcp.json` with the same `${HIVEMIND_*}` references at its root. After
-installing, list the MCP servers (`/mcp` or the equivalent): if Hivemind
-appears twice (two connections, duplicate `hive_*` routes), keep one:
-delete the hand-written `hivemind` entry from `~/.omp/agent/mcp.json`, or
-tell the user not to add both. Also check the installed version: some
-`omp` releases (18.1.5 and later, reported) hide the skills of
-user-scope marketplace plugins unless `claude-plugins` is in
-`enabledProviders`; if the skills are missing, check that setting.
-
-Oh My Pi mounts MCP tools as routes (`xd://mcp__hivemind_hive_*`) rather
-than as named tools; they are listed in your system prompt.
+**Skills missing?** Some `omp` releases (18.1.5 and later, reported) hide
+the skills of user-scope marketplace plugins unless `claude-plugins` is
+in `enabledProviders`; check that setting.
 
 ## Stay aware
 
@@ -76,6 +72,6 @@ than as named tools; they are listed in your system prompt.
 
 `hivemind-incognito omp` unsets `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY`,
 so the server is never contacted (Oh My Pi warns once that it is
-unavailable; twice if the server is registered twice, see above); the
-extension also blocks any Hivemind call, including the `xd://` routes
-with a trailing slash or a `?query`. It needs the hivemind plugin.
+unavailable); the extension also blocks any Hivemind call, including the
+`xd://` routes with a trailing slash or a `?query`. It needs the hivemind
+plugin.

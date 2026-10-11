@@ -43,7 +43,7 @@ reminder that survives compaction and new sessions.
 | DeepSeek Harness | the bundle's row in `cordis.patch.yml` | `dsh/hivemind-skills.js` | none needed: DSH keeps the server's instructions in the system prompt |
 | Hermes | the user's `~/.hermes/config.yaml` | the plugin | the plugin's system-prompt section (Hermes 0.21.5+), else the `SOUL.md` instruction block (see below) |
 | Pi | the extension registers it with Pi 0.99+ built-in MCP; with pi-mcp-adapter, the adapter's config | the package | the extension's system-prompt section |
-| Oh My Pi | the user's `~/.omp/agent/mcp.json` | the plugin | the extension's system-prompt section |
+| Oh My Pi | the plugin's `.mcp.json` (server `hivemind:hivemind`; a hand `hivemind` entry in `~/.omp/agent/mcp.json` replaces it) | the plugin | the extension's system-prompt section |
 | OpenCode | `opencode/hivemind.js` (skipped if a hand-configured `hivemind` server exists or no key is set) | the plugin | added to every model request |
 | Gemini CLI | the user's `~/.gemini/settings.json` | copied by hand | the `GEMINI.md` instruction block |
 
@@ -80,8 +80,12 @@ itself names no harness-specific paths, and a test enforces this.
   proxy, ignoring `exposure`), so the extension sends no `exposure` when
   the adapter is installed. Checked live with Pi 1.0.0 and pi-mcp-adapter
   5.0.0. The adapter route can be dropped later.
-- **Oh My Pi** mounts MCP tools as routes (`xd://mcp__hivemind_hive_*`)
-  rather than as named tools; the agent finds them in its system prompt.
+- **Oh My Pi** loads the plugin's `.mcp.json` as the server
+  `hivemind:hivemind`, expanding `${VAR}` in the URL and the header, and
+  mounts MCP tools as routes (`xd://mcp__hivemind_hivemind_hive_*`, or
+  `xd://mcp__hivemind_hive_*` for a hand entry, which then replaces the
+  plugin's) rather than as named tools; the agent finds them in its system
+  prompt. Checked with Oh My Pi 18.9.1.
   A plain `omp install <git-url>` misses the skills, so it installs
   through the marketplace.
 - **OpenCode** caches a Git plugin on first use and never refreshes an
