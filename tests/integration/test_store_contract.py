@@ -312,6 +312,16 @@ async def test_flagged_keeps_entries_reported_stale_or_wrong(adapter: Adapter) -
     assert [e.id for e in flagged] == [stale.id]
 
 
+async def test_malformed_fleet_filter_matches_nothing(adapter: Adapter) -> None:
+    await write(adapter, "in a fleet", scope="fleet", fleet_id=str(uuid.uuid4()))
+    await write(adapter, "no fleet")
+    bad = EntryFilters(fleet_id="not-a-uuid")
+    assert await adapter.store.list_entries(bad) == []
+    assert await adapter.store.count_entries(bad) == 0
+    assert await adapter.store.search_keyword("fleet", bad, 10) == []
+    assert await adapter.store.search_vector(adapter.vec(1), bad, 10) == []
+
+
 # -- visibility (ADR 0011, SPEC §12.2) ----------------------------------------------
 
 
@@ -1300,3 +1310,68 @@ async def test_feedback_without_a_date_is_stamped_by_the_clock_pins_use(adapter:
     }
     repin = await store.pin_entry("fleet-x", entry.id, "lead", 3)
     assert repin is not None and repin.pin.pinned_at > many[0].updated_at
+
+
+async def test_activity_aggregates_hand_computed(adapter: Adapter) -> None:
+    """ADR 0080: per (author, fleet), per reporter, received verdicts and
+    per UTC day from ``since``; revoked reporters are left out."""
+    store = adapter.store
+    blue = await store.create_fleet("blue")
+    for name in ("Scout", "Ghost"):
+        await store.register_agent(name)
+    await store.activate_agent("Ghost", trust_level=TrustLevel.LURKER, home_fleet_id=blue.id)
+    await store.revoke_agent("Ghost")
+    since = datetime(2030, 1, 10, tzinfo=UTC)
+    kw = {"occurred_at": None}
+
+    async def make(summary: str, at: datetime, **more: object) -> Entry:
+        e = await write(adapter, summary, **kw, **more)
+        await _backdate(adapter, e, at)
+        return e
+
+    old = await make("old", since - timedelta(hours=1), author="bob")
+    a = await make("a", since + timedelta(hours=1), author="bob", scope="fleet", fleet_id=blue.id)
+    b = await make("b", since + timedelta(hours=23, minutes=59), author="bob")
+    c = await make("c", since + timedelta(days=2, hours=5), author="carol")
+    d = await make("d", since + timedelta(days=2, hours=6), author="carol")
+    await store.withdraw_entry(d.id, None, "carol")
+
+    async def verdict(entry: Entry, user: str, v: Verdict, at: datetime) -> None:
+        await store.record_feedback(Feedback(entry.id, user, user, v, None, at))
+
+    await verdict(old, "Scout", Verdict.STALE, since - timedelta(days=3))
+    await verdict(a, "Scout", Verdict.HELPFUL, since + timedelta(hours=2))
+    await verdict(b, "Scout", Verdict.WRONG, since + timedelta(days=1, hours=1))
+    await verdict(c, "Scout", Verdict.HELPFUL, since + timedelta(days=2))
+    await verdict(a, "Ghost", Verdict.HELPFUL, since + timedelta(hours=3))  # revoked: ignored
+    await verdict(c, "dora", Verdict.WRONG, since + timedelta(days=2, hours=1))
+
+    got = await store.activity(since)
+    authors = {(r.author, r.fleet_id): r for r in got.authors}
+    assert set(authors) == {("bob", None), ("bob", blue.id), ("carol", None)}
+    bob = authors[("bob", None)]
+    assert (bob.entries, bob.active, bob.recent) == (2, 2, 1)
+    assert bob.last_write_at == since + timedelta(hours=23, minutes=59)
+    assert (authors[("bob", blue.id)].entries, authors[("bob", blue.id)].recent) == (1, 1)
+    carol = authors[("carol", None)]
+    assert (carol.entries, carol.active, carol.recent) == (2, 1, 2)
+    reporters = {r.reporter: r for r in got.reporters}
+    assert set(reporters) == {"Scout", "dora"}
+    scout = reporters["Scout"]
+    assert (scout.verdicts, scout.recent) == (4, 3)
+    assert (scout.helpful, scout.stale, scout.wrong) == (2, 1, 1)
+    assert scout.last_at == since + timedelta(days=2)
+    received = {r.author: (r.helpful, r.stale, r.wrong) for r in got.received}
+    assert received == {"bob": (1, 1, 1), "carol": (1, 0, 1)}
+    days = {r.day: (r.writes, r.helpful, r.stale, r.wrong) for r in got.days}
+    assert days == {
+        since.date(): (2, 1, 0, 0),
+        (since + timedelta(days=1)).date(): (0, 0, 0, 1),
+        (since + timedelta(days=2)).date(): (2, 1, 0, 1),
+    }
+    assert list(days) == sorted(days)
+
+
+async def test_activity_of_an_empty_pool(adapter: Adapter) -> None:
+    got = await adapter.store.activity(T0)
+    assert got.authors == got.reporters == got.received == got.days == ()

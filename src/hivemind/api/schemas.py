@@ -6,7 +6,7 @@ They mirror the domain and service results without leaking internals
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Annotated, Any, Literal
 
 from pydantic import AfterValidator, BaseModel, Field, field_validator
@@ -820,6 +820,71 @@ class HealthMetrics(BaseModel):
     top3_agent_label_write_share: LabelShare = LabelShare()
     top3_agent_label_verdict_share: LabelShare = LabelShare()
     by_fleet: dict[str, FleetHealthMetrics] = {}
+
+
+class AdminSearchRequest(SearchRequest):
+    """``POST /v1/admin/search`` (ADR 0080): a search plus a fleet filter."""
+
+    fleet_id: str | None = None
+
+
+class DayActivityOut(BaseModel):
+    day: date
+    writes: int
+    helpful: int
+    stale: int
+    wrong: int
+
+
+class ActivityTotalsOut(BaseModel):
+    writes: int
+    verdicts: int
+    writers: int
+    reporters: int
+
+
+class ReceivedOut(BaseModel):
+    helpful: int
+    stale: int
+    wrong: int
+
+
+class AgentActivityOut(BaseModel):
+    name: str
+    registered: bool
+    owner_alias: str | None
+    home_fleet: str | None
+    status: str | None
+    entries: int
+    active: int
+    recent_writes: int
+    last_write_at: datetime | None
+    verdicts_given: int
+    recent_verdicts: int
+    last_verdict_at: datetime | None
+    received: ReceivedOut
+
+
+class FleetActivityOut(BaseModel):
+    fleet_id: str | None
+    name: str | None
+    entries: int
+    active: int
+    recent_writes: int
+    writers: int
+    last_write_at: datetime | None
+    agents: int
+
+
+class ActivityOut(BaseModel):
+    """The admin activity view (ADR 0080): observation only."""
+
+    days: int
+    since: datetime
+    daily: list[DayActivityOut]
+    totals: ActivityTotalsOut
+    agents: list[AgentActivityOut]
+    fleets: list[FleetActivityOut]
 
 
 class MetricsOut(BaseModel):

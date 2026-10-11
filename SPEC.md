@@ -147,6 +147,10 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | `GET /v1/metrics` | Usage counters: entries / fleets / agents (trust-level distribution, writes per fleet, pending count) searches (first-page searches, the ones that found nothing and the explore ones, per fleet; ADRs 0056, 0078) feedback (stale/wrong flags per registered agent and how many a later supersession confirmed; ADR 0068) and `health` (fleet health metrics: verdict notes, sources, correction latency, flagged backlog, orphaned flags, floating gap, author and reporter concentration, synthesis, gap tags, supersession rate, and the convergence figures: echo rate, topic dispersion, rival lifetime, grounding share, agent-label mix; admin-only and observation-only, never read by search, ranking or any agent-facing surface; ADR 0075) — operational data (admin key; ROADMAP §3.3). The entry counts and the `health` aggregates come from reads cached up to `HIVEMIND_METRICS_ENTRY_COUNTS_TTL` (300 s default; ADRs 0069, 0075) |
 | `GET /metrics` | Prometheus scrape target: the usage counters as gauges (cached 30 s; the entry counts up to `HIVEMIND_METRICS_ENTRY_COUNTS_TTL` older, ADR 0069), the search counters of every runner (ADRs 0056, 0078), the flag counters per agent (ADR 0068), the `hivemind_health_*` fleet health gauges (ADR 0075), per-route request counts and latencies, degraded searches. No key; never on the public ingress (ADR 0050) |
 | `GET /v1/admin/audit-log` | The audit log of admin-surface actions, newest first; filters `actor`, `action`, `since`, `before`, `limit` (admin key; §12.5, ADRs 0027, 0028) |
+| `GET /v1/admin/entries` / `GET /v1/admin/entries/{id}` | List entries with the `GET /v1/entries` filters plus `fleet_id`, newest first / one entry in full with its feedback, links and supersession history (admin key; ADR 0080) |
+| `POST /v1/admin/search` | Hybrid search with the `POST /v1/search` filters plus `fleet_id`; not counted in the search counters (admin key; ADR 0080) |
+| `POST /v1/admin/entries/{id}/withdraw` | Withdraw any entry, as `POST /v1/entries/{id}/withdraw` does for the admin key (admin key; ADR 0080) |
+| `GET /v1/admin/activity` | Writes and verdicts per UTC day over the last `days` (1 to 365, default 30), and per-agent and per-fleet totals; observation only, cached like the usage report (admin key; ADR 0080) |
 
 **Request limits (ADR 0040).** A REST request body is capped at 2 MiB (`413 payload_too_large`, enforced by `Content-Length` and by counting streamed bytes, before the body is parsed). A `/v1` request with **no** `X-API-Key` header is refused `401` before its body is read; a present-but-unknown key is verified after the (bounded) body is parsed, so a malformed body with a bad key can still answer 422. A deployment's ingress should enforce its own, lower limit as well.
 
@@ -315,7 +319,7 @@ The schema is an **ordered chain of versioned migrations** under `src/hivemind/s
 
 ## 9. Non-goals (v1) — the explicit list
 
-- No human-facing UI (agent-only; the admin panel, ADR 0029, is the one exception — a browser front end over the admin REST surface, not a memory UI; a read-only web search is a later extension)
+- No human-facing UI (agent-only; the admin panel, ADR 0029, is the one exception — a browser front end over the admin REST surface, which since ADR 0080 includes a memory browser for the admin (read, search, withdraw); a memory UI for anyone else is still a non-goal)
 - No passive capture of transcripts/tool events (explicit writes only, ADR 0004)
 - No knowledge graph, no auto-contradiction detection (the **facet slice** of entity extraction became a commitment in §13 — ADR 0016; *graph-expanded* retrieval stays a non-goal)
 - No curation/verification workflow, no PII pipeline (trust levels are §12, not a non-goal — ADR 0011)
@@ -335,7 +339,7 @@ The schema is an **ordered chain of versioned migrations** under `src/hivemind/s
 | **Knowledge graph** — graph-expanded retrieval over a canonical entity registry | Cross-entry entity linking pays off in retrieval quality. *Partially pre-staged: the entity-extraction **facet** slice is shipped by ADR 0016 / SPEC §13 (a pre-staged §10 extension on scale ambition — the trigger has *not* fired); the graph half of this row (entity registry + multi-hop expansion) remains trigger-held* |
 | **LLM-assisted contradiction detection** — at write time, surface entries above a similarity floor that the new entry may conflict with, as a *claim for the writer to judge* (never an automatic resolution — ADR 0001: a supersession is a claim, not an arbitration) | Explicit supersession can't keep up with contradictory writes. **Measurable trigger:** the first observed incident of a contradicting entry landing without a supersession, **or** pool size > 10k entries — whichever comes first. Until then the similarity floor cannot be tuned (there is no corpus to tune it against), and an untuned floor is the failure mode to avoid. *(Not to be confused with ADR 0052: every write already reports its 3 nearest entries with their similarity, with no floor and no verdict.)* |
 | **Curation workflow** — verify/promote/retire roles | An org wants a "librarian" function |
-| **Human read-only UI** — browse/search the pool in a browser | Analysts want to see the pool without an agent |
+| **Human read-only UI** — browse/search the pool in a browser | Analysts want to see the pool without an agent. *Partially satisfied: the admin panel lets the admin browse and search the pool (ADR 0080); a UI for anyone else remains the extension* |
 | **Multi-tenant SaaS / OAuth** | More than one org wants it; an org has an IdP |
 | **Learned per-agent retrieval tuning** | Static decay factors stop beating per-agent profiles |
 
@@ -398,8 +402,11 @@ This section supersedes the flat-pool commitment of §1 and the "no trust tiers"
 | `PATCH /v1/admin/agents/{name}` | Change level / home fleet (demotion to `untrusted` = dormant) |
 | `POST /v1/admin/agents/{name}/revoke` | Kill the key, status → `revoked` (name stays reserved; re-activation issues a *new* key). On a pending agent: reject the registration |
 | `POST /v1/admin/org-key/rotate` | Rotate the org key — closes registration to every prior copy (ADR 0031) |
+| `GET /v1/admin/entries`, `GET /v1/admin/entries/{id}`, `POST /v1/admin/search` | Read the memories: list, one entry in full, search (ADR 0080) |
+| `POST /v1/admin/entries/{id}/withdraw` | Withdraw an entry (ADR 0080) |
+| `GET /v1/admin/activity` | Daily writes and verdicts, per-agent and per-fleet totals (ADR 0080) |
 
-The single admin key gates this surface; admin-issued entries use the reserved name `admin` (ADR 0012). The admin panel (ADR 0029) is a browser front end over exactly this table plus the audit log; issuing and revoking admin keys stays with `hivemind-keys`.
+The single admin key gates this surface; admin-issued entries use the reserved name `admin` (ADR 0012). The admin panel (ADR 0029) is a browser front end over exactly this table plus the audit log and the usage counters; issuing and revoking admin keys stays with `hivemind-keys`.
 
 ### 12.5 Audit log
 
@@ -416,7 +423,7 @@ Every admin-surface action, and every agent pin or unpin (ADR 0076), is recorded
 | `agent.revoke` | `POST /v1/admin/agents/{name}/revoke`, `hivemind-keys revoke` | agent name | `{"from": "pending"\|"active"}` (ADR 0028; a revoke from `pending` is a rejected registration) |
 | `fleet.create` | `POST /v1/admin/fleets` | fleet id | `{name}` |
 | `org_key.rotate` | `POST /v1/admin/org-key/rotate`, `hivemind-keys rotate-org` | — | `{}` |
-| `entry.withdraw` | `POST /v1/entries/{id}/withdraw` **only** when the admin key withdraws another agent's entry (§4.1) | entry id | `{author, reason}` |
+| `entry.withdraw` | `POST /v1/entries/{id}/withdraw` or `POST /v1/admin/entries/{id}/withdraw`, **only** when the admin key withdraws another agent's entry (§4.1) | entry id | `{author, reason}` |
 | `admin_key.issue` | `hivemind-keys issue-admin` | key fingerprint | `{}` |
 | `admin_key.revoke` | `hivemind-keys revoke-admin` (a successful revocation only) | key fingerprint | `{}` |
 | `entry.pin` | `PUT /v1/entries/{id}/pin`, `hive_pin` — every stored pin, a re-pin included (ADR 0076) | entry id | `{fleet_id}`, plus `from` (the replaced pin id, or a list) when a re-pin moved older pins |

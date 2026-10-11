@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from hivemind.config import SearchConfig, Settings, redact_url
 from hivemind.ports import Authenticator, Embedder, Extractor, Store
 from hivemind.services.access import AccessService
+from hivemind.services.activity import ActivityService
 from hivemind.services.governance import GovernanceService, WriteService
 from hivemind.services.metrics import DEFAULT_ENTRY_COUNTS_TTL, MetricsService
 from hivemind.services.search import SearchService
@@ -30,6 +31,7 @@ class Services:
     governance_service: GovernanceService
     access_service: AccessService
     metrics_service: MetricsService
+    activity_service: ActivityService
 
 
 def build_services(
@@ -52,6 +54,7 @@ def build_services(
         governance_service=GovernanceService(store, search_config),
         access_service=AccessService(store, authenticator),
         metrics_service=MetricsService(store, entry_counts_ttl=metrics_entry_counts_ttl),
+        activity_service=ActivityService(store, ttl=metrics_entry_counts_ttl),
     )
 
 

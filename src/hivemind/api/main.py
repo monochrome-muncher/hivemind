@@ -59,6 +59,7 @@ def create_app_for_config(
         search_service=services.search_service,
         access_service=services.access_service,
         metrics_service=services.metrics_service,
+        activity_service=services.activity_service,
     )
 
 

@@ -170,6 +170,7 @@ class SearchService:
         visibility: Visibility | None = None,
         recency: RecencyHint = RecencyHint.DEFAULT,
         explore: bool = False,
+        count: bool = True,
     ) -> SearchResult:
         """Run a hybrid query and return compact hits, best first.
 
@@ -180,10 +181,11 @@ class SearchService:
         the result says which hint was applied. Send the same hint on every
         page of one search. ``explore`` re-orders the ranked candidates for
         diversity (ADR 0078) and is counted too; off, the ranking is
-        untouched.
+        untouched. ``count=False`` leaves the search out of the counters
+        (the admin search, ADR 0080).
         """
         result = await self._ranked(query, filters, limit, offset, visibility, recency, explore)
-        if visibility is not None and not offset:
+        if count and visibility is not None and not offset:
             # An empty degraded answer reflects the embedder, not the pool.
             empty = not result.hits and not result.degraded
             await self._count_search(visibility, empty=empty, explore=explore)

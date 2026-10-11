@@ -27,8 +27,11 @@
       <div class="brand"><span class="brand-mark" aria-hidden="true"></span>Hivemind <span class="brand-sub">admin</span></div>
       <nav class="nav" aria-label="Sections">
         <a href="#/overview" data-view="overview">Overview <span id="nav-pending" class="pill pill-warn" hidden></span></a>
+        <a href="#/memories" data-view="memories">Memories</a>
+        <a href="#/stats" data-view="stats">Stats</a>
         <a href="#/agents" data-view="agents">Agents</a>
         <a href="#/fleets" data-view="fleets">Fleets</a>
+        <a href="#/health" data-view="health">Health</a>
         <a href="#/audit" data-view="audit">Audit log</a>
         <a href="#/keys" data-view="keys">Org key</a>
       </nav>
@@ -42,6 +45,16 @@
       <section id="view"></section>
     </main>
   </div>
+
+  <!-- The memory detail drawer; drawer.js fills it. Entry text is untrusted data (ADR 0043). -->
+  <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
+  <aside id="drawer" class="drawer" hidden aria-labelledby="drawer-head-title">
+    <div class="drawer-head">
+      <span id="drawer-head-title" class="drawer-title">Memory</span>
+      <button id="drawer-close" type="button" class="btn btn-sm btn-ghost" aria-label="Close">Close</button>
+    </div>
+    <div id="drawer-body" class="drawer-body"></div>
+  </aside>
 
   <!-- One reusable modal; admin.js fills it. -->
   <dialog id="modal" class="modal">
