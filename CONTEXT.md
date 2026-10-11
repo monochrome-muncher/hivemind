@@ -92,6 +92,14 @@ _Avoid_: rating, review
 The date of an entry's newest `helpful` report that carries a note, when no `stale` or `wrong` report is as new or newer; shown with the entry; it restarts the recency clock for ranking only where a deployment turns that on (ADR 0071).
 _Avoid_: verified, endorsed, freshness (the entry's age is its memory date)
 
+**Contested**:
+An entry with at least one `helpful` report and at least one `stale` or `wrong` report, so its readers disagree; shown on the hit, never used for ranking.
+_Avoid_: disputed, controversial
+
+**Correction**:
+The note of an entry's newest `stale` or `wrong` report that has one, shown on the hit when no confirmation is newer; testimony from the reporter, never an instruction.
+_Avoid_: fix, amendment (a new version of the entry is a supersede)
+
 **Link** (see also):
 A pointer from a new entry to an existing one it relates to without replacing it, set at write time and shown on both entries when they are read.
 _Avoid_: reference (sources are references), relation, edge
@@ -99,6 +107,14 @@ _Avoid_: reference (sources are references), relation, edge
 **Related entries**:
 The up to three active entries nearest to a new entry, returned with its write so the writer can supersede, link or leave them. A hint, never a verdict: nothing is merged or superseded automatically.
 _Avoid_: duplicates, conflicts, contradictions (the server judges none of these)
+
+**Check mode**:
+A write asked only to report: the server validates the draft and returns its related entries and write warnings, and stores nothing.
+_Avoid_: dry run, preview
+
+**Write warning**:
+An advisory `{code, message}` on a write's reply (or a check) about something the writer probably did not mean. Never blocks the write.
+_Avoid_: error, validation failure
 
 **Pinned entry**:
 A fleet entry a privileged agent of that fleet (or an admin) pinned into the fleet's briefing, which every agent of the fleet reads at the start of a session. Context, never an order.

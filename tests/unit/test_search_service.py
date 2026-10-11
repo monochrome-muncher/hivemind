@@ -473,10 +473,10 @@ class TestConcurrentIO:
             await counted.wait()
             return await real_get(ids)
 
-        async def counts(ids):
+        async def counts(ids, **kwargs):
             counted.set()
             await got.wait()
-            return await real_counts(ids)
+            return await real_counts(ids, **kwargs)
 
         store.get_entries = get_entries  # type: ignore[method-assign]
         store.feedback_signals = counts  # type: ignore[method-assign]
