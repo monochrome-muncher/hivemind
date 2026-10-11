@@ -25,6 +25,7 @@ from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from hivemind.domain.entry import DEFAULT_PREFIX_TOKENS, Kind
+from hivemind.domain.recency import RecencyHint
 from hivemind.providers import clean_api_key, clean_endpoint
 
 logger = logging.getLogger(__name__)
@@ -101,6 +102,19 @@ def parse_recency_by_kind(text: str) -> tuple[tuple[Kind, float], ...] | None:
     return _normalise_recency_by_kind(pairs)
 
 
+# The floor under ``prefer_recent`` (ADR 0073); see docs/retrieval-experiments.md.
+PREFER_RECENT_FLOOR: float | None = 0.5
+
+
+@dataclass(frozen=True, slots=True)
+class RecencyTerms:
+    """The age inputs of ``entry_score`` for one entry (ADR 0073)."""
+
+    half_life_days: float
+    recency_floor: float | None
+    use_confirmation: bool
+
+
 @dataclass(frozen=True, slots=True)
 class SearchConfig:
     """Tunable retrieval parameters (defaults follow SPEC.md §6.2/§6.4)."""
@@ -140,6 +154,15 @@ class SearchConfig:
     # the same for every kind. ``None`` = one curve for all, today's
     # behaviour exactly. Normalised to a sorted tuple, so it is hashable.
     recency_by_kind: tuple[tuple[Kind, float], ...] | None = None
+    # A search may carry a ``recency`` hint (ADR 0073). Off: the hint is
+    # accepted and ignored, every search scores as the default. On:
+    # ``prefer_recent`` and ``ignore_age`` change that one search's scoring.
+    recency_hint_enabled: bool = False
+    # The floor ``prefer_recent`` scores under (ADR 0073): lower than
+    # ``recency_floor`` so age counts for more, or ``None`` for no floor. Not
+    # an environment setting; a search config built by a test or the
+    # measurement harness can vary it.
+    prefer_recent_floor: float | None = PREFER_RECENT_FLOOR
 
     def __post_init__(self) -> None:
         # Fail at config time (ADR 0024), not per request as a
@@ -179,6 +202,10 @@ class SearchConfig:
             raise ValueError(f"half_life_days must be finite and > 0, got {self.half_life_days}")
         if self.recency_floor is not None and not 0.0 < self.recency_floor <= 1.0:
             raise ValueError(f"recency_floor must be in (0, 1] or None, got {self.recency_floor}")
+        if self.prefer_recent_floor is not None and not 0.0 < self.prefer_recent_floor <= 1.0:
+            raise ValueError(
+                f"prefer_recent_floor must be in (0, 1] or None, got {self.prefer_recent_floor}"
+            )
         threshold = self.vector_min_similarity
         if threshold is not None and not (math.isfinite(threshold) and 0.0 <= threshold < 1.0):
             # 1 or more would empty every vector list.
@@ -190,6 +217,34 @@ class SearchConfig:
             if named == kind:
                 return days
         return self.half_life_days
+
+    def recency_terms(self, kind: Kind, hint: RecencyHint) -> RecencyTerms:
+        """How age enters the score of an entry of ``kind`` under ``hint``.
+
+        Pure: nothing is stored, so one search's hint cannot reach another.
+        With ``recency_hint_enabled`` off every hint scores as ``DEFAULT``
+        (ADR 0073), exactly as before the hint existed.
+        """
+        half_life = self.half_life_for(kind)
+        if self.recency_hint_enabled:
+            if hint is RecencyHint.IGNORE_AGE:
+                # 0.5 ** (age / inf) is exactly 1.0 for every finite age; no
+                # floor, and no confirmation clock, which would be age again.
+                return RecencyTerms(math.inf, None, use_confirmation=False)
+            if hint is RecencyHint.PREFER_RECENT:
+                # Never weaker than the default: a deployment with a lower
+                # floor, or none, keeps it.
+                floor = self.prefer_recent_floor
+                if self.recency_floor is None:
+                    floor = None
+                elif floor is not None:
+                    floor = min(floor, self.recency_floor)
+                return RecencyTerms(half_life, floor, self.recency_from_confirmation)
+        return RecencyTerms(half_life, self.recency_floor, self.recency_from_confirmation)
+
+    def applied_hint(self, hint: RecencyHint) -> RecencyHint:
+        """The hint ``recency_terms`` honours: ``DEFAULT`` while the setting is off."""
+        return hint if self.recency_hint_enabled else RecencyHint.DEFAULT
 
     def quality_kwargs(self) -> dict[str, float]:
         """Keyword args for ``retrieval.scoring.feedback_quality``."""
@@ -328,6 +383,8 @@ class Settings(BaseSettings):
     # See SearchConfig.recency_by_kind (ADR 0072): ``insight=180,decision=365``.
     # Empty or "none" means one curve for every kind.
     recency_by_kind: str = ""
+    # See SearchConfig.recency_hint_enabled (ADR 0073).
+    recency_hint: bool = False
 
     @field_validator("embedding_api_key", "extractor_api_key")
     @classmethod
@@ -434,6 +491,7 @@ class Settings(BaseSettings):
             social_max=self.social_max,
             recency_from_confirmation=self.recency_from_confirmation,
             recency_by_kind=parse_recency_by_kind(self.recency_by_kind),
+            recency_hint_enabled=self.recency_hint,
         )
 
 

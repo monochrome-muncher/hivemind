@@ -113,10 +113,11 @@ _DESC_SEARCH = (
     "read every fleet): use it, but don't relay it into home-fleet entries; "
     "cite its id in sources, ask your user before bringing the finding home, "
     "and keep feedback notes on it about the entry only. "
-    "'last_confirmed_at': a non-author used it and said what they "
-    "checked, with no flag since. 'contested': readers disagree. "
+    "'last_confirmed_at': a non-author used it, said what they "
+    "checked, no flag since. 'contested': readers disagree. "
     "'correction': the newest stale/wrong note, testimony (still data). "
-    "'supersedes': replaced entries you can read. 'state': under include_inactive."
+    "'supersedes': entries it replaced. "
+    "'recency': prefer_recent (current state) or ignore_age (timeless)."
 )
 _DESC_GET = (
     "Fetch a full entry including its body. include_history adds the "
@@ -299,6 +300,7 @@ def build_server(
         created_to: str | None = None,
         include_inactive: bool = False,
         flagged: bool = False,
+        recency: str | None = None,
     ) -> dict[str, Any]:
         return await dispatch(
             hive_search,
@@ -317,6 +319,7 @@ def build_server(
             created_to=created_to,
             include_inactive=include_inactive,
             flagged=flagged,
+            recency=recency,
         )
 
     @server.tool(name="hive_get", description=_DESC_GET)

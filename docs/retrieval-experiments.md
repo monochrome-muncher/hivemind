@@ -660,3 +660,91 @@ Few empty searches and unrelated hits mean the value can go up by 0.05;
 agents missing entries they wrote means it is too high. Measure again
 after changing the embedding model or dimension; leaving the setting
 unset restores the old behaviour at once.
+
+## A recency hint on search (ADR 0073)
+
+*(tools: `tests/eval/test_recency_hint.py` for the age-varied fixture,
+`tests/eval/confirmation.py` variants and `make measure-ranking` for the domain
+fixtures)* A search may carry `recency`: `ignore_age` (recency factor 1.0, no
+confirmation clock) or `prefer_recent` (floor 0.5 instead of 0.8, the kind's
+half-life kept). Everything below is the hash embedder: **machinery only, not
+evidence**.
+
+**Age-varied fixture, MRR per slice** (10 queries: 6 non-temporal, 4 temporal;
+hit@5 is 1.000 unless noted). The queries' `temporal` label is the oracle:
+`prefer_recent` for temporal queries, `ignore_age` for the rest.
+
+| hint applied | non-temporal | temporal | old-exact | currency pairs | timeless | all |
+|---|---|---|---|---|---|---|
+| default (shipped) | 0.681 | 0.833 | 1.000 | 0.778 | 0.617 | 0.742 |
+| `ignore_age`, every query | 0.917 | 0.708 | 1.000 | 0.611 | 0.900 | 0.833 |
+| `prefer_recent` (floor 0.5), every query | 0.569 | 0.708 | 0.500 | 0.778 | 0.583 | 0.625 |
+| `prefer_recent`, no floor, every query | 0.208 | 0.625 | 0.000 | 0.833 | 0.250 | 0.375 (hit@5 0.500) |
+| oracle (0.5 floor) | 0.917 | 0.708 | 0.750 | 0.778 | 0.900 | 0.833 |
+| oracle, no floor | 0.917 | 0.625 | 0.500 | 0.833 | 0.900 | 0.800 (hit@5 0.900) |
+| `ignore_age` on non-temporal queries only | 0.917 | 0.833 | 1.000 | 0.778 | 0.900 | 0.883 |
+| `prefer_recent` (0.5) on temporal queries only | 0.681 | 0.708 | 0.750 | 0.778 | 0.617 | 0.692 |
+
+**The study's scratch claim, timeless MRR 0.607 to 0.900 with floor 1.0:
+reproduced for the second figure, not the first.** `ignore_age` (and the
+default scoring at floor 1.0, which is the same arithmetic here) gives timeless
+MRR 0.900. The shipped baseline measures 0.617 in this repository (as in the
+ADR 0072 section above), not 0.607. The gain, +0.283, is real on this
+fixture; what it costs is the currency pairs (0.778 to 0.611) and the temporal
+slice, which is why it is a per-search hint for a question the agent knows to
+be timeless, and not a default.
+
+**`prefer_recent` is not a win on this fixture, with either floor.** With no
+floor one currency pair gains a rank (0.778 to 0.833) and every exact match
+that is not the newest drops out (non-temporal 0.208, hit@5 0.333): the
+unbounded term spans more than the fused range. A floor of 0.5 (2x, inside the
+fused range of 2.62x) improves no slice and loses the old-exact answer to a
+temporal-worded query (1.000 to 0.500 applied to all, 0.750 under the oracle).
+Floors of 0.7 and up give the default's numbers, 0.4 and below the no-floor
+ones. 0.5 is shipped for its bounded cost, not for a measured gain: a wrong
+hint should cost a bounded amount. The oracle's temporal slice gets worse
+(0.833 to 0.708) because the one temporal-worded query whose answer is old
+(T1) is mislabelled by its wording; the "time sense" is the agent's to judge,
+and that example is the reason the server does not infer it.
+
+**Domain fixtures** (160 entries aged 0 to 400 days, 96 answerable queries,
+every query given the same hint because the domain fixtures do not label time
+sense; the baseline is the shipped config). Hit@5 / MRR change:
+
+| fixture | `ignore_age` | `prefer_recent` (0.5) |
+|---|---|---|
+| all domains together | +0.052 / +0.023 | -0.052 / -0.037 |
+| data analysis | +0.000 / +0.041 | +0.000 / -0.026 |
+| software engineering | -0.053 / +0.000 | +0.000 / -0.035 |
+| system administration | +0.000 / +0.009 | +0.000 / -0.018 |
+| journalism and social science | -0.100 / -0.092 | -0.100 / -0.035 |
+| finance analysis | +0.000 / +0.000 | -0.053 / -0.030 |
+
+Pooled baseline: hit@5 0.448, MRR 0.233. The pass rule of ADR 0071 (no drop
+beyond 0.01) is a rule for a setting applied to everything; a hint is applied
+by an agent per query, so the table above shows the cost of a wrong or
+overused hint, and the benefit needs a time-labelled real fixture.
+
+**Real embedders** (2026-10-11; Qwen3-Embedding 8B Q8_0, 4B and 0.6B f16 via
+llama.cpp, last-token pooling, dim 1024; weighted 70% 8B / 20% 4B / 10% 0.6B;
+hint applied to every query; the baseline is this run's default). hit@5 / MRR:
+
+| fixture | default | `ignore_age` | `prefer_recent` |
+|---|---|---|---|
+| all domains together | 0.909 / 0.737 | 0.917 / 0.752 | 0.877 / 0.687 |
+| data analysis | 1.000 / 0.816 | 1.000 / 0.901 | 1.000 / 0.684 |
+| software engineering | 0.911 / 0.661 | 0.911 / 0.758 | 0.900 / 0.638 |
+| system administration | 0.937 / 0.744 | 0.984 / 0.851 | 0.900 / 0.655 |
+| journalism and social science | 0.890 / 0.710 | 0.900 / 0.719 | 0.890 / 0.670 |
+| finance analysis | 0.853 / 0.705 | 0.853 / 0.729 | 0.858 / 0.668 |
+
+Pooled MRR per model, default to `ignore_age` to `prefer_recent`: 8B 0.745 to
+0.756 to 0.691, 4B 0.723 to 0.746 to 0.682, 0.6B 0.709 to 0.732 to 0.671.
+
+On these mostly timeless queries `ignore_age` improves MRR in every domain
+(+0.009 to +0.107) and pooled (+0.015), and hit@5 never drops. `prefer_recent`
+lowers MRR everywhere, as expected for timeless questions, and remains
+unproven for current-state questions: there is no real-embedder fixture with
+labelled current-state queries yet. A hint acts only when an agent sends it, so
+turning `HIVEMIND_RECENCY_HINT` on is low-risk; the measurement supports
+enabling it for `ignore_age`. The default stays off.

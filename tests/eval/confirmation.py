@@ -1,7 +1,10 @@
 """Measure ranking changes that are off by default with a real embedder.
 
-Two settings are measured here: "last confirmed restarts the recency clock"
-(ADR 0071) and "a recency profile per kind" (ADR 0072). Each is off by
+Three settings are measured here: "last confirmed restarts the recency clock"
+(ADR 0071), "a recency profile per kind" (ADR 0072) and the per-search
+recency hint (ADR 0073: ``ignore_age`` and ``prefer_recent``, each applied to
+every query because the domain fixtures do not label time sense; the
+labelled oracle run is ``tests/eval/test_recency_hint.py``). Each is off by
 default until this has been run with the embedders a deployment uses. For each domain fixture (``domains.py``: five kinds of
 work, 32 entries each) and for all of them pooled, it:
 
@@ -46,6 +49,7 @@ from typing import Any
 from hivemind.config import SearchConfig
 from hivemind.domain.entry import EntryDraft, Kind
 from hivemind.domain.feedback import Feedback, Verdict
+from hivemind.domain.recency import RecencyHint
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Embedder, Store
 from hivemind.retrieval.eval import hit_at_k, reciprocal_rank
@@ -73,6 +77,8 @@ class Variant:
 
     name: str
     overrides: Mapping[str, Any]
+    # The per-search hint sent with every query of the variant (ADR 0073).
+    recency: RecencyHint = RecencyHint.DEFAULT
 
 
 # The recency profiles of ADR 0072 that are measured (days; facts keep the
@@ -87,6 +93,16 @@ VARIANTS: tuple[Variant, ...] = (
     Variant("confirmation on", {"recency_from_confirmation": True}),
     Variant("kind profile: insight=180, decision=365", {"recency_by_kind": PROFILE_SLOW}),
     Variant("kind profile: insight=90, decision=180", {"recency_by_kind": PROFILE_MEDIUM}),
+    Variant(
+        "recency hint: ignore_age (all queries)",
+        {"recency_hint_enabled": True},
+        RecencyHint.IGNORE_AGE,
+    ),
+    Variant(
+        "recency hint: prefer_recent (all queries)",
+        {"recency_hint_enabled": True},
+        RecencyHint.PREFER_RECENT,
+    ),
 )
 
 
@@ -189,7 +205,9 @@ async def measure(
         hits = rrs = 0.0
         for query, relevant_indices in fixture.answerable:
             relevant = {ids[i]: 1 for i in relevant_indices}
-            ranked = [h.entry_id for h in await service.search(query, limit=K)]
+            ranked = [
+                h.entry_id for h in await service.search(query, limit=K, recency=variant.recency)
+            ]
             hits += hit_at_k(ranked, relevant, K)
             rrs += reciprocal_rank(ranked, relevant)
         n = len(fixture.answerable)

@@ -22,7 +22,7 @@ With a recency profile per kind (ADR 0072) I1 holds per kind, with that
 kind's half-life ``h`` in place of 30: a new unrated entry younger than
 ``h * log2(1 / (social_max * floor))`` is never outranked by an entry of
 the same kind older than ``h * log2(1 / floor)``. I3, I4 and I5 run with a
-profile on as well. "No decay" is not offered because it would break I1.
+profile on as well. "No decay" is not offered as a setting, because it would break I1; only per search via the explicit ``ignore_age`` hint (ADR 0073).
 I1 also holds across kinds: a new entry of kind A under A's bound (recency
 at least 0.96) is never outranked by an entry of any kind past its own
 kind's floor age (at most 0.8 x 1.2 = 0.96).
