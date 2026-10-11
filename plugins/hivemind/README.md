@@ -266,8 +266,8 @@ export HIVEMIND_API_KEY="hm_…"   # org key first, agent key after activation
   }
   ```
 
-- **Oh My Pi**: the shell that launches `omp`. The server goes in
-  `~/.omp/agent/mcp.json`, with the same JSON as Pi above.
+- **Oh My Pi**: the shell that launches `omp`. The plugin defines the
+  server from both variables; nothing goes in `~/.omp/agent/mcp.json`.
 - **OpenCode**: the shell that launches `opencode`. The plugin reads both
   variables and registers the server. Without the plugin, add
   `"mcp": {"hivemind": {"type": "remote", "url": "{env:HIVEMIND_MCP_URL}",
