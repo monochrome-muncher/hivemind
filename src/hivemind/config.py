@@ -24,13 +24,95 @@ from dotenv import dotenv_values
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from hivemind.domain.entry import DEFAULT_PREFIX_TOKENS
+from hivemind.domain.entry import DEFAULT_PREFIX_TOKENS, Kind
+from hivemind.domain.recency import RecencyHint
 from hivemind.providers import clean_api_key, clean_endpoint
 
 logger = logging.getLogger(__name__)
 
 # The HIVEMIND_STRICT_ENV spellings that mean "on" (ADR 0032).
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
+def _normalise_recency_by_kind(
+    value: object,
+) -> tuple[tuple[Kind, float], ...] | None:
+    """``value`` as a tuple of (Kind, half-life days) sorted by kind, or ``None``.
+
+    Rejects an unknown kind, a repeated kind, and a half-life that is not a
+    finite number > 0 (ADR 0024, 0072). An empty value is ``None``.
+    """
+    if value is None:
+        return None
+    pairs = list(value.items()) if isinstance(value, dict) else list(value)  # type: ignore[call-overload]
+    seen: dict[Kind, float] = {}
+    for item in pairs:
+        try:
+            raw_kind, days = item
+        except TypeError, ValueError:
+            raise ValueError(
+                f"recency_by_kind: expected (kind, days) pairs, got {item!r}"
+            ) from None
+        try:
+            kind = Kind(raw_kind)
+        except ValueError:
+            known = ", ".join(k.value for k in Kind)
+            raise ValueError(
+                f"recency_by_kind: unknown kind {raw_kind!r} (known: {known})"
+            ) from None
+        if kind in seen:
+            raise ValueError(f"recency_by_kind: kind {kind.value!r} is named twice")
+        if isinstance(days, bool) or not isinstance(days, int | float):
+            raise ValueError(f"recency_by_kind: {kind.value} must be a number, got {days!r}")
+        if not math.isfinite(days) or days <= 0:
+            raise ValueError(
+                f"recency_by_kind: {kind.value} must be a finite number of days > 0, got {days}"
+            )
+        seen[kind] = float(days)
+    if not seen:
+        return None
+    return tuple(sorted(seen.items(), key=lambda pair: pair[0].value))
+
+
+def parse_recency_by_kind(text: str) -> tuple[tuple[Kind, float], ...] | None:
+    """Parse ``HIVEMIND_RECENCY_BY_KIND``: ``insight=180,decision=365`` (ADR 0072).
+
+    Empty or "none" (case-insensitive) means off. Kinds are case-insensitive;
+    unknown or repeated kinds and non-finite or non-positive values raise
+    ``ValueError`` (via ``SearchConfig`` for the value rules).
+    """
+    text = text.strip()
+    if text.lower() in ("", "none"):
+        return None
+    pairs: list[tuple[str, float]] = []
+    for part in text.split(","):
+        name, sep, number = part.partition("=")
+        name = name.strip().lower()
+        if not sep or not name:
+            raise ValueError(
+                f"HIVEMIND_RECENCY_BY_KIND must look like insight=180,decision=365, got {text!r}"
+            )
+        try:
+            days = float(number.strip())
+        except ValueError:
+            raise ValueError(
+                f"HIVEMIND_RECENCY_BY_KIND: {name} needs a number of days, got {number.strip()!r}"
+            ) from None
+        pairs.append((name, days))
+    return _normalise_recency_by_kind(pairs)
+
+
+# The floor under ``prefer_recent`` (ADR 0073); see docs/retrieval-experiments.md.
+PREFER_RECENT_FLOOR: float | None = 0.5
+
+
+@dataclass(frozen=True, slots=True)
+class RecencyTerms:
+    """The age inputs of ``entry_score`` for one entry (ADR 0073)."""
+
+    half_life_days: float
+    recency_floor: float | None
+    use_confirmation: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +133,12 @@ class SearchConfig:
     # query is above this (ADR 0062). Model-specific, so off by default:
     # ``None`` keeps ADR 0061's floor of 0. In [0, 1).
     vector_min_similarity: float | None = None
+    # Read-time grouping of unlinked versions of one fact (ADR 0074): two
+    # active candidates whose stored vectors are at least this similar are
+    # shown adjacent, newest first, each naming the other. Nothing is hidden
+    # or merged and no score changes. Model-specific, so off by default:
+    # ``None`` = today's behaviour. In (0, 1) when set.
+    version_group_min_similarity: float | None = None
     # Consensus-share feedback quality (ADR 0063): each weight is where
     # quality heads when every report gives that verdict; the prior counts
     # imaginary neutral reports (> 0).
@@ -67,10 +155,31 @@ class SearchConfig:
     # re-ordering (ADR 0078): 1 is plain relevance order, lower pushes
     # near-copies of a higher hit down. In (0, 1].
     explore_lambda: float = 0.7
+    # A confirmation ("last confirmed", SPEC §4.2) restarts the recency
+    # clock for the upside, inside the social_max cap (ADR 0071). Off until
+    # measured with the real embedders.
+    recency_from_confirmation: bool = False
+    # A half-life in days per kind, as ``((Kind.INSIGHT, 180.0), ...)``
+    # (ADR 0072); a kind not named keeps ``half_life_days``. The floor is
+    # the same for every kind. ``None`` = one curve for all, today's
+    # behaviour exactly. Normalised to a sorted tuple, so it is hashable.
+    recency_by_kind: tuple[tuple[Kind, float], ...] | None = None
+    # A search may carry a ``recency`` hint (ADR 0073). Off: the hint is
+    # accepted and ignored, every search scores as the default. On:
+    # ``prefer_recent`` and ``ignore_age`` change that one search's scoring.
+    recency_hint_enabled: bool = False
+    # The floor ``prefer_recent`` scores under (ADR 0073): lower than
+    # ``recency_floor`` so age counts for more, or ``None`` for no floor. Not
+    # an environment setting; a search config built by a test or the
+    # measurement harness can vary it.
+    prefer_recent_floor: float | None = PREFER_RECENT_FLOOR
 
     def __post_init__(self) -> None:
         # Fail at config time (ADR 0024), not per request as a
         # ZeroDivisionError, a negative LIMIT, empty results or NaN scores.
+        object.__setattr__(
+            self, "recency_by_kind", _normalise_recency_by_kind(self.recency_by_kind)
+        )
         if self.rrf_k < 0:
             raise ValueError(f"rrf_k must be >= 0, got {self.rrf_k}")
         if self.candidate_top_k < 1:
@@ -105,10 +214,55 @@ class SearchConfig:
             raise ValueError(f"recency_floor must be in (0, 1] or None, got {self.recency_floor}")
         if not (math.isfinite(self.explore_lambda) and 0.0 < self.explore_lambda <= 1.0):
             raise ValueError(f"explore_lambda must be in (0, 1], got {self.explore_lambda}")
+        if self.prefer_recent_floor is not None and not 0.0 < self.prefer_recent_floor <= 1.0:
+            raise ValueError(
+                f"prefer_recent_floor must be in (0, 1] or None, got {self.prefer_recent_floor}"
+            )
         threshold = self.vector_min_similarity
         if threshold is not None and not (math.isfinite(threshold) and 0.0 <= threshold < 1.0):
             # 1 or more would empty every vector list.
             raise ValueError(f"vector_min_similarity must be in [0, 1) or None, got {threshold}")
+        group_cut = self.version_group_min_similarity
+        if group_cut is not None and not (math.isfinite(group_cut) and 0.0 < group_cut < 1.0):
+            # 0 would group everything; 1 or more groups nothing.
+            raise ValueError(
+                f"version_group_min_similarity must be in (0, 1) or None, got {group_cut}"
+            )
+
+    def half_life_for(self, kind: Kind) -> float:
+        """The half-life in days entries of ``kind`` age by (ADR 0072)."""
+        for named, days in self.recency_by_kind or ():
+            if named == kind:
+                return days
+        return self.half_life_days
+
+    def recency_terms(self, kind: Kind, hint: RecencyHint) -> RecencyTerms:
+        """How age enters the score of an entry of ``kind`` under ``hint``.
+
+        Pure: nothing is stored, so one search's hint cannot reach another.
+        With ``recency_hint_enabled`` off every hint scores as ``DEFAULT``
+        (ADR 0073), exactly as before the hint existed.
+        """
+        half_life = self.half_life_for(kind)
+        if self.recency_hint_enabled:
+            if hint is RecencyHint.IGNORE_AGE:
+                # 0.5 ** (age / inf) is exactly 1.0 for every finite age; no
+                # floor, and no confirmation clock, which would be age again.
+                return RecencyTerms(math.inf, None, use_confirmation=False)
+            if hint is RecencyHint.PREFER_RECENT:
+                # Never weaker than the default: a deployment with a lower
+                # floor, or none, keeps it.
+                floor = self.prefer_recent_floor
+                if self.recency_floor is None:
+                    floor = None
+                elif floor is not None:
+                    floor = min(floor, self.recency_floor)
+                return RecencyTerms(half_life, floor, self.recency_from_confirmation)
+        return RecencyTerms(half_life, self.recency_floor, self.recency_from_confirmation)
+
+    def applied_hint(self, hint: RecencyHint) -> RecencyHint:
+        """The hint ``recency_terms`` honours: ``DEFAULT`` while the setting is off."""
+        return hint if self.recency_hint_enabled else RecencyHint.DEFAULT
 
     def quality_kwargs(self) -> dict[str, float]:
         """Keyword args for ``retrieval.scoring.feedback_quality``."""
@@ -233,6 +387,9 @@ class Settings(BaseSettings):
     # See SearchConfig.vector_min_similarity (ADR 0062). Unset, empty or
     # "none" (case-insensitive) means off.
     vector_min_similarity: float | None = None
+    # See SearchConfig.version_group_min_similarity (ADR 0074). Same
+    # spellings for off.
+    version_group_min_similarity: float | None = None
     # See SearchConfig (ADR 0063).
     quality_helpful_weight: float = 0.2
     quality_stale_weight: float = 0.4
@@ -244,6 +401,13 @@ class Settings(BaseSettings):
     social_max: float = 1.2
     # See SearchConfig.explore_lambda (ADR 0078).
     explore_lambda: float = 0.7
+    # See SearchConfig.recency_from_confirmation (ADR 0071).
+    recency_from_confirmation: bool = False
+    # See SearchConfig.recency_by_kind (ADR 0072): ``insight=180,decision=365``.
+    # Empty or "none" means one curve for every kind.
+    recency_by_kind: str = ""
+    # See SearchConfig.recency_hint_enabled (ADR 0073).
+    recency_hint: bool = False
 
     @field_validator("embedding_api_key", "extractor_api_key")
     @classmethod
@@ -307,7 +471,9 @@ class Settings(BaseSettings):
             raise ValueError("extractor_model must be set when extractor_endpoint is set")
         return self
 
-    @field_validator("recency_floor", "vector_min_similarity", mode="before")
+    @field_validator(
+        "recency_floor", "vector_min_similarity", "version_group_min_similarity", mode="before"
+    )
     @classmethod
     def _parse_recency_floor(cls, value: object) -> object:
         """Map empty / "none" (case-insensitive) to ``None``: no floor (ADR
@@ -341,6 +507,7 @@ class Settings(BaseSettings):
             half_life_days=self.half_life_days,
             recency_floor=self.recency_floor,
             vector_min_similarity=self.vector_min_similarity,
+            version_group_min_similarity=self.version_group_min_similarity,
             quality_helpful_weight=self.quality_helpful_weight,
             quality_stale_weight=self.quality_stale_weight,
             quality_wrong_weight=self.quality_wrong_weight,
@@ -349,6 +516,9 @@ class Settings(BaseSettings):
             quality_max=self.quality_max,
             social_max=self.social_max,
             explore_lambda=self.explore_lambda,
+            recency_from_confirmation=self.recency_from_confirmation,
+            recency_by_kind=parse_recency_by_kind(self.recency_by_kind),
+            recency_hint_enabled=self.recency_hint,
         )
 
 

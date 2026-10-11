@@ -471,6 +471,39 @@ async def test_migrate_fails_loudly_on_dim_mismatch() -> None:
         await conn.close()
 
 
+async def test_0015_adds_the_explore_counter_over_existing_search_counts() -> None:
+    """ADR 0078: rows counted before 0015 keep their searches and empty
+    counts and start at zero explore searches; the CHECK is in force."""
+    dsn, dim = _dsn(), Settings().embedding_dim
+    await _require_postgres(dsn)
+    await _reset_chain(dsn)
+    await migrate(dsn, dim)
+    await rollback(dsn, dim, count=1)
+    assert await current_schema_version(dsn) == "0014.pin-audit"
+
+    conn = await asyncpg.connect(dsn)
+    try:
+        await conn.execute(
+            "INSERT INTO search_counts (fleet_id, searches, empty) VALUES ('', 5, 2), ('f1', 1, 0)"
+        )
+    finally:
+        await conn.close()
+
+    await migrate(dsn, dim)
+    assert await current_schema_version(dsn) == HEAD
+    conn = await asyncpg.connect(dsn)
+    try:
+        rows = await conn.fetch(
+            "SELECT fleet_id, searches, empty, explore FROM search_counts ORDER BY fleet_id"
+        )
+        assert [tuple(r) for r in rows] == [("", 5, 2, 0), ("f1", 1, 0, 0)]
+        with pytest.raises(asyncpg.CheckViolationError):  # never more explore than searches
+            await conn.execute("UPDATE search_counts SET explore = 6 WHERE fleet_id = ''")
+        await conn.execute("DELETE FROM search_counts")
+    finally:
+        await conn.close()
+
+
 async def test_0006_backfills_revoked_and_rolls_back_without_loss() -> None:
     """ADR 0028: an `active` agent with no agent credential is a pre-0006
     revocation, so 0006 marks it `revoked`; an active agent that holds a

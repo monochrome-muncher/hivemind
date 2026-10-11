@@ -240,9 +240,10 @@ class MetricsService:
     def _searches_report(
         self, fleets: Sequence[Fleet], rows: Sequence[SearchCount]
     ) -> dict[str, Any]:
-        """Search counters (ADR 0056): first-page searches and the ones that
-        found nothing or were explore searches (ADR 0078), in total and per fleet name. Searches from callers
-        without a home fleet count in the totals only."""
+        """Search counters (ADR 0056): first-page searches, the ones that
+        found nothing and the explore ones (ADR 0078), in total and per fleet
+        name. Searches from callers without a home fleet count in the totals
+        only."""
         by_id = {r.fleet_id: r for r in rows}
         return {
             "total": sum(r.searches for r in rows),

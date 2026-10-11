@@ -10,7 +10,7 @@ import pytest
 
 from hivemind.config import SearchConfig
 from hivemind.domain.access import TrustLevel, Visibility
-from hivemind.domain.entry import EntryDraft, EntryFilters
+from hivemind.domain.entry import Entry, EntryDraft, EntryFilters
 from hivemind.mcp.app import McpHivemind, hive_search, hive_write
 from hivemind.mcp.server import build_server
 from hivemind.memstore import MemoryStore
@@ -334,7 +334,7 @@ async def test_rest_explore_defaults_off_and_is_accepted_as_a_flag() -> None:
 
 
 @pytest.mark.parametrize("bad", ["maybe", [1], {"a": 1}, 7])
-async def test_rest_explore_must_be_a_boolean(bad: object) -> None:
+async def test_rest_explore_must_be_readable_as_a_boolean(bad: object) -> None:
     client = make_client(make_hivemind_app())
     async with client:
         resp = await client.post(
@@ -376,15 +376,38 @@ async def test_mcp_explore_is_an_argument_and_defaults_off(mcp_app: McpHivemind)
     assert sorted(h["id"] for h in on["hits"]) == sorted(h["id"] for h in plain["hits"])
 
 
-@pytest.mark.parametrize("bad", ["yes", 1, None, [True]])
-async def test_mcp_explore_must_be_a_boolean(mcp_app: McpHivemind, bad: object) -> None:
-    result = await hive_search(mcp_app, query="cohort", explore=bad)  # type: ignore[arg-type]
-    assert result.get("error", {}).get("code") == "invalid_input"
-
-
 async def test_mcp_tool_schema_has_explore_as_an_optional_boolean() -> None:
     server = build_server(build_app(MemoryStore(make_clock()), ALICE, make_clock()))
     tools = {t.name: t for t in await server.list_tools()}
     schema = tools["hive_search"].input_schema
     assert schema["properties"]["explore"]["type"] == "boolean"
     assert "explore" not in schema.get("required", [])
+
+
+def test_explore_reorder_keeps_a_version_groups_display_order() -> None:
+    """ADR 0078: a version group is a unit like a chain; its members keep
+    the order the normal ranking gave them wherever MMR puts them."""
+    from datetime import UTC, datetime
+
+    from hivemind.domain.entry import Kind
+    from hivemind.services.search import explore_reorder
+
+    def entry(eid: str, day: int) -> Entry:
+        return Entry(
+            id=eid,
+            kind=Kind.FACT,
+            summary=eid,
+            author="a",
+            agent="a",
+            occurred_at=datetime(2026, 1, day, tzinfo=UTC),
+            created_at=datetime(2026, 1, day, tzinfo=UTC),
+        )
+
+    # Display order of the group: "n" (newer) before "o"; "x" is unrelated.
+    ordered = [entry("n", 2), entry("o", 1), entry("x", 3)]
+    scores = {"n": 1.0, "o": 0.6, "x": 0.9}
+    sims = {("n", "o"): 0.99, ("n", "x"): 0.1, ("o", "x"): 0.1}
+    out = explore_reorder(ordered, scores, sims, 0.7, version_groups=[["n", "o"]])
+    assert sorted(e.id for e in out) == ["n", "o", "x"]
+    assert [e.id for e in out if e.id in "no"] == ["n", "o"]
+    assert explore_reorder(ordered, scores, sims, 1.0, [["n", "o"]]) == ordered

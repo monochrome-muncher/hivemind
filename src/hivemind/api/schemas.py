@@ -16,6 +16,7 @@ from hivemind.domain.audit import AuditRecord
 from hivemind.domain.entry import EntityKind, Entry, EntryState, ImportanceSource, Kind, SourceType
 from hivemind.domain.feedback import FeedbackCounts, FeedbackSummary, Verdict
 from hivemind.domain.pin import ChangeReason, Pin, PinnedEntry
+from hivemind.domain.recency import RecencyHint
 from hivemind.domain.validation import (
     MAX_FEEDBACK_IDS,
     MAX_GET_IDS,
@@ -152,7 +153,7 @@ class FeedbackSummaryOut(FeedbackCountsOut):
     counts plus the newest reports, notes included."""
 
     recent: list[FeedbackReportOut] = []
-    last_confirmed_at: datetime | None = None  # SPEC §4.2; display only
+    last_confirmed_at: datetime | None = None  # SPEC §4.2 (ranks only with ADR 0071 on)
 
     @classmethod
     def from_summary(cls, summary: FeedbackSummary) -> FeedbackSummaryOut:
@@ -331,6 +332,13 @@ class EntriesOut(BaseModel):
     not_found: list[str]
 
 
+class SimilarOut(BaseModel):
+    """Another member of a hit's version group (ADR 0074)."""
+
+    id: str
+    occurred_at: datetime
+
+
 class HitOut(BaseModel):
     """A compact search hit (SPEC.md §6.1: progressive disclosure).
 
@@ -349,12 +357,13 @@ class HitOut(BaseModel):
     scope: str = "fleet"
     fleet_id: str | None = None  # a foreign entry: != the reader's home fleet (ADR 0036)
     feedback: FeedbackCountsOut = FeedbackCountsOut()  # ADR 0051
-    last_confirmed_at: datetime | None = None  # SPEC §4.2; display only
+    last_confirmed_at: datetime | None = None  # SPEC §4.2 (ranks only with ADR 0071 on)
     # SPEC §6.1, display only; null when empty (state: unless include_inactive).
     contested: bool | None = None
     correction: CorrectionOut | None = None
     supersedes: int | None = None
     state: EntryState | None = None
+    similar: list[SimilarOut] | None = None  # ADR 0074; null when none
 
     @classmethod
     def from_hit(cls, hit: Hit) -> HitOut:
@@ -385,6 +394,11 @@ class HitOut(BaseModel):
             ),
             supersedes=hit.supersedes or None,
             state=hit.state,
+            similar=(
+                [SimilarOut(id=m.entry_id, occurred_at=m.occurred_at) for m in hit.similar]
+                if hit.similar
+                else None
+            ),
         )
 
 
@@ -408,6 +422,9 @@ class SearchRequest(BaseModel):
     flagged: bool = False
     # Opt-in diversity re-order of the ranked results (ADR 0078).
     explore: bool = False
+    # ADR 0073: how age should weigh in; honoured only when the server's
+    # recency_hint_enabled is on. Send the same value on every page.
+    recency: RecencyHint | None = None
     # SPEC §5.3 / ADR 0040: 1..100 and 0..10000 (a search also reaches at
     # most 2 x candidate_top_k ranked hits).
     limit: int | None = Field(default=None, ge=1, le=MAX_LIMIT)

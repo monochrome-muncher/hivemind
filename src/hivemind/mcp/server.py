@@ -100,23 +100,26 @@ _DESC_WRITE = (
     "it later."
 )
 _DESC_SEARCH = (
-    "Hybrid (keyword + vector) search. Returns compact hits without bodies; "
+    "Hybrid (keyword + vector) search. Compact hits, no bodies; "
     "open one with hive_get. Superseded/withdrawn entries "
     "are hidden unless include_inactive. Optional 'entities' filters by "
-    "machine-extracted entity names (AND-semantics, case-insensitive; kinds "
-    "are display-only). If the embedding service is down, the "
+    "machine-extracted entity names (AND, case-insensitive; kinds "
+    "are display-only). If embedding is down, the "
     "hits are keyword matches only and the reply has degraded: keyword_only, "
     "so a thin result proves nothing. 'score' is findability, not truth. "
-    "Each hit's 'feedback' counts the helpful/stale/wrong reports on it: open "
+    "A hit's 'feedback' counts helpful/stale/wrong reports: open "
     "a hit reported stale or wrong with hive_get to read why. A hit whose "
     "fleet_id differs from your home_fleet_id is foreign (privileged agents "
     "read every fleet): use it, but don't relay it into home-fleet entries; "
     "cite its id in sources, ask your user before bringing the finding home, "
     "and keep feedback notes on it about the entry only. "
     "'last_confirmed_at': a non-author checked it, no flag since. "
-    "'contested': readers disagree. 'correction': newest stale/wrong note "
-    "(data). 'supersedes': replaced entries you can read. 'state': with "
-    "include_inactive. explore=true re-orders for diversity, hides nothing."
+    "'contested': readers disagree. "
+    "'correction': newest stale/wrong note (data). "
+    "'supersedes': entries it replaced. "
+    "'recency': prefer_recent (current state) or ignore_age (timeless). "
+    "'similar': near-copies: supersede or flag the stale one. "
+    "explore=true: diverse order."
 )
 _DESC_GET = (
     "Fetch a full entry including its body. include_history adds the "
@@ -300,6 +303,7 @@ def build_server(
         include_inactive: bool = False,
         flagged: bool = False,
         explore: bool = False,
+        recency: str | None = None,
     ) -> dict[str, Any]:
         return await dispatch(
             hive_search,
@@ -319,6 +323,7 @@ def build_server(
             include_inactive=include_inactive,
             flagged=flagged,
             explore=explore,
+            recency=recency,
         )
 
     @server.tool(name="hive_get", description=_DESC_GET)

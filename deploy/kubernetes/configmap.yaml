@@ -60,6 +60,9 @@ data:
   # Search similarity threshold (ADR 0062), off when unset. Model-specific:
   # measure with `make measure-threshold` before setting it.
   # HIVEMIND_VECTOR_MIN_SIMILARITY: ""
+  # Read-time grouping of unlinked versions of one fact (ADR 0074), off when
+  # unset. Model-specific: measure with `make measure-versions` first.
+  # HIVEMIND_VERSION_GROUP_MIN_SIMILARITY: ""
   HIVEMIND_QUALITY_HELPFUL_WEIGHT: "0.2"
   HIVEMIND_QUALITY_STALE_WEIGHT: "0.4"
   HIVEMIND_QUALITY_WRONG_WEIGHT: "1.0"
@@ -70,6 +73,17 @@ data:
   # Relevance weight of an opt-in explore search's MMR re-ordering (ADR
   # 0078), in (0, 1]; 1 = relevance order. Searches without explore ignore it.
   HIVEMIND_EXPLORE_LAMBDA: "0.7"
+  # A "last confirmed" date restarts the recency clock for the upside (ADR
+  # 0071); off until measured with the deployment's embedder.
+  HIVEMIND_RECENCY_FROM_CONFIRMATION: "false"
+  # A recency half-life per kind, e.g. "insight=180,decision=365" (ADR 0072);
+  # empty = one curve for all kinds. Off until measured with the deployment's
+  # embedder.
+  HIVEMIND_RECENCY_BY_KIND: ""
+  # A search may carry a `recency` hint (prefer_recent, ignore_age; ADR
+  # 0073). "false": accepted and ignored. Off until measured with the
+  # deployment's embedder.
+  HIVEMIND_RECENCY_HINT: "false"
   # Seconds the usage report (/v1/metrics, /metrics) reuses its grouped
   # scan of the entries (ADR 0069); entry counts can be that old. 0 = off.
   HIVEMIND_METRICS_ENTRY_COUNTS_TTL: "300"

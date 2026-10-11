@@ -1,5 +1,11 @@
 # One capped budget for social signals
 
+> **Amended by [ADR 0073](0073-a-recency-hint-on-search.md):** I1 does not hold under the `ignore_age` recency hint, which a caller sends per search and which works only with `HIVEMIND_RECENCY_HINT` on. It holds under `default` and `prefer_recent`, and always with the setting off.
+
+> **Amended by [ADR 0072](0072-recency-profile-per-kind.md):** with a recency profile on, I1's ages are per kind: the floor age is `h × log2(1/floor)` and the new-entry bound `h × log2(1/(social_max × floor))` for the kind's own half-life `h`. The shipped 9.7 and 1.7 days are the 30-day case.
+
+> **Amended by [ADR 0071](0071-a-confirmation-can-restart-the-recency-clock.md):** the "last confirmed" date is the first signal to share this budget (the last factor is `min(social_max, quality × r_conf / r_occ)`, behind a setting that is off by default), and invariants I3 and I4 are now tested with it.
+
 Amends [ADR 0022](0022-recency-floor-so-match-quality-is-the-sort-key.md) and [ADR 0063](0063-feedback-quality-by-consensus-share.md).
 
 ## Context

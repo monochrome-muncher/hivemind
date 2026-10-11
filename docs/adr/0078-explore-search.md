@@ -10,17 +10,17 @@ Search returns the best match first, and a pool full of agents writes near-copie
 
 ## Decision
 
-1. **A per-search opt-in.** `explore` (boolean, default false) is a body field of `POST /v1/search` and an argument of `hive_search`. A non-boolean is `422 invalid_input` on REST and `invalid_input` over MCP. There is no server-wide switch and no automatic use.
+1. **A per-search opt-in.** `explore` (boolean, default false) is a body field of `POST /v1/search` and an argument of `hive_search`. On REST it is a lax boolean like `flagged` and `include_inactive`, and a value that cannot be read as a boolean is `422`; over MCP the framework coerces it. There is no server-wide switch and no automatic use.
 
 2. **Re-order, nothing else.** After scoring and the supersession invariant (SPEC §6.3), the service re-orders the ranked candidates (at most `2 x candidate_top_k`) by maximal marginal relevance. Each step picks the candidate that maximises `lambda * relevance - (1 - lambda) * max_similarity`, where relevance is the candidate's chain score (the best score in its supersession chain, the key the invariant already ranks chains by) divided by the best such score, and `max_similarity` is the highest cosine, floored at 0, to a candidate already placed. Nothing is hidden, merged or re-scored: the same hits come back with the same `score` values, only the order differs. Pagination then applies to the re-ordered list, so page two continues page one.
 
-3. **Chains stay ordered.** After MMR, the members of each supersession chain are put back newest first into the places the chain holds, so the successor still precedes its predecessor (SPEC §6.3). Because relevance is the chain score, `lambda = 1` reproduces the normal order exactly.
+3. **Chains and version groups stay ordered.** A unit is a supersession chain, joined with the chains of its version group (ADR 0074) when grouping is on. After MMR, the members of each unit are put back, in the order the normal ranking gave them (a chain newest first, a group in its display order), into the places the unit holds, so the successor still precedes its predecessor (SPEC §6.3). Because relevance is the unit's best score, `lambda = 1` reproduces the normal order exactly.
 
 4. **lambda is a setting.** `SearchConfig.explore_lambda` / `HIVEMIND_EXPLORE_LAMBDA`, default **0.7**, finite and in `(0, 1]` (0 would ignore relevance). 1 is a no-op; lower is more diverse. It is not tuned against the golden set, which scores the default ranking only; `explore` is an opt-in view and is not a ranking gate.
 
 5. **Stored vectors, not new embeddings.** Similarity comes from `Store.pairwise_similarity` (the same method and semantics as ADR 0074: cosine between the stored vectors of every pair, keyed `(a, b)` with `a < b`, a pair absent when either entry has no vector; one self-join with pgvector `<=>` in Postgres, the same arithmetic in `MemoryStore`). It needs no embedder call beyond the query embedding the search already makes, so it also works in keyword-only degraded mode (ADR 0048). A pair without a similarity counts as 0, so an entry with no vector is never pushed down.
 
-6. **At most two store calls at once (ADR 0059).** The read runs after the two gathered reads (`get_entries`, `feedback_signals`), never beside them, and only when `explore` is true and there are two or more candidates. It is best-effort like the search counter (ADR 0056): a failure logs a warning with its traceback and the normal order is returned.
+6. **At most two store calls at once (ADR 0059).** The read runs after the two gathered reads (`get_entries`, `feedback_signals`), never beside them, and only when `explore` is true and there are two or more candidates. With version grouping on too, that is a second sequential read after grouping's own. It is best-effort like the search counter (ADR 0056): a failure logs a warning with its traceback and the normal order is returned.
 
 7. **Off is today's ranking, bit for bit.** With `explore` false the store method and the MMR code are never reached, and a test compares the two paths. The invariants I1 to I5 of ADR 0070 concern scores, which explore does not touch.
 
@@ -32,5 +32,5 @@ Search returns the best match first, and a pool full of agents writes near-copie
 
 - A caller stuck on a topic can ask for a wider view at the price of the top hit sometimes sitting lower. Without the flag nothing changes.
 - An explore search costs one more store read, a self-join over at most 40 rows (780 pairs).
-- If version grouping (ADR 0074) is on as well, explore runs on the final order and can separate a group it placed side by side; near-copies are exactly what MMR spreads. The two are not combined here; whichever lands second decides whether explore should keep groups together.
+- If version grouping (ADR 0074) is on as well, explore runs on its final order and treats a version group like a supersession chain: the group's members keep their display order but may be separated, because near-copies are exactly what MMR spreads.
 - A tie in relevance between unrelated candidates keeps the normal order, so the result is deterministic.

@@ -1,5 +1,11 @@
 # A floor under the recency factor, so match quality is the sort key
 
+> **Amended by [ADR 0073](0073-a-recency-hint-on-search.md):** the floor and its 0.8 are unchanged; behind a setting that is off by default, a search can carry a `recency` hint: `prefer_recent` scores under a lower floor (0.5) and `ignore_age` drops the recency factor for that one search (I1 does not hold under it, by the caller's request).
+
+> **Amended by [ADR 0072](0072-recency-profile-per-kind.md):** the floor and its 0.8 are unchanged for every kind; behind a setting that is off by default, each kind can have its own half-life (a longer one for decisions and insights), and I1 holds per kind with that half-life.
+
+> **Amended by [ADR 0071](0071-a-confirmation-can-restart-the-recency-clock.md):** the floor and its 0.8 are unchanged; behind a setting that is off by default, a "last confirmed" date can restart the clock for the social factor, so an old confirmed entry gains at most `1/floor` (1.25x), inside the ADR 0070 cap.
+
 > **Amended by [ADR 0070](0070-one-capped-budget-for-social-signals.md):** the floor is unchanged; the study's finding that past about 9.7 days every entry looks equally old is now a stated policy, and the upward social factor is capped so it cannot outweigh recency (invariant I1).
 
 > **Amended by [ADR 0023](0023-recency-floor-gets-a-spelling-for-no-floor.md):** `HIVEMIND_RECENCY_FLOOR` set to an empty value or `none` turns the floor off.

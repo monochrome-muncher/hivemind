@@ -75,7 +75,7 @@ SPEC §6.4 now carries the floored formula. That **rules out direction
 (b)**, the additive form — per this section the two are competing
 answers to the same defect and must not be stacked; reopening (b)
 means *replacing* the floor under a new ADR. **Per-kind half-lives
-stays HELD**: orthogonal, not a fix for this finding. The `rrf_k`
+stays HELD** (since built, off by default, ADR 0072): orthogonal, not a fix for this finding. The `rrf_k`
 sweep came back negative and changed no default. What remains open
 here is the *value* 0.8, not the form — see the re-measure trigger at
 the end of this item.)* §4.4 measured
@@ -143,7 +143,7 @@ answers to "stop recency being the sort key", and stacking them just
 makes the term untunable. *Per-kind half-lives* (a `fact` and a
 `decision` decaying at different rates) is a third, **orthogonal**
 idea — it changes which entries decay, not how decay competes with
-match quality — and it **stays held**: it is not a fix for this
+match quality — and it **stays held** (since built, off by default, ADR 0072): it is not a fix for this
 finding and would only add a knob on top of an already-mismatched
 form.
 
@@ -342,7 +342,8 @@ divided out, so they read as importance × social factor.
 | S4 | importance 5, 16th in both streams vs importance 3, 1st in both | 0.013158 vs 0.013115 (fused × importance factor) | loose match | narrowed importance |
 
 S2 is barely separated: a recheck yesterday is worth the same 1.067 as
-one made two years ago. S4's fused scores are `Σ 0.5 / (60 + rank)` over
+one made two years ago (with the confirmation clock on it is 0.960 against
+0.800, see the next section). S4's fused scores are `Σ 0.5 / (60 + rank)` over
 the two streams.
 
 **Aged currency pairs** (`tests/eval/test_aged_currency.py`). The fixture's
@@ -365,6 +366,178 @@ it, and the shipped config is slightly behind decay off: the floor still
 lifts the fresh, unrelated entries over both members. The currency pairs
 are the case a confirmation date restarting the recency clock should
 improve.
+
+## A confirmation restarts the recency clock (ADR 0071)
+
+*(tools: `tests/eval/confirmation.py`, `make measure-confirmation`; the
+embedding-free slices in `test_social_scenarios.py` and
+`test_aged_currency.py`)* `HIVEMIND_RECENCY_FROM_CONFIRMATION` is off by
+default. With it on, the social factor is `min(social_max, quality ×
+r_conf / r_occ)`, where `r_conf` ages the entry from its "last confirmed"
+date. Everything below is the hash embedder or no embedder at all: it
+checks direction and arithmetic, and the real-embedder run decides.
+
+**S2** (two-year-old fact, 1 helpful, re-checked yesterday vs never
+checked, shipped config, floor divided out):
+
+| setting | re-checked | never checked | margin |
+|---|---|---|---|
+| off | 0.853 | 0.800 | 0.053 |
+| on | 0.960 | 0.800 | 0.160 |
+
+The gain is 1.0667 × 0.977 / 0.8 = 1.30, held at 1.2 by the cap, so 0.8 ×
+1.2 = 0.96. The winner is the same; the margin is three times as wide.
+
+**Aged currency pairs** (the 3 currency-pair queries, newer member relevant,
+k = 5), with a helpful-with-a-note report one day old on each newer member.
+The report lifts quality with the setting on or off, so compare the two
+settings on the same rows; the no-feedback rows are from the section above.
+
+| newer member | no feedback, shipped | confirmed, setting off | confirmed, setting on |
+|---|---|---|---|
+| 5-12 days (as written) | hit@5 1.000, MRR 0.778 | 1.000, 0.778 | 1.000, 0.833 |
+| 30, 60 or 120 days | 1.000, 0.583 | 1.000, 0.778 | 1.000, 0.833 |
+
+**Old-exact and the rest, with confirmations sprinkled on 20%** of the 16
+entries of the age-varied fixture, each dated a day ago, setting on against
+off over the same rows (MRR; hit@5 is 1.000 throughout). The 20% is the 3
+entries (18.75%) whose summary has the smallest SHA-256, chosen by a
+deterministic hash so it is independent of position and of any query:
+entries 3, 7 and 14.
+
+| slice | off | on | change |
+|---|---|---|---|
+| old_exact (2 queries) | 1.000 | 1.000 | 0.000 |
+| non_temporal (6) | 0.681 | 0.597 | -0.084 |
+| timeless (5) | 0.617 | 0.517 | -0.100 |
+| currency_pair (3) | 0.778 | 0.833 | +0.056 |
+| all (10) | 0.742 | 0.708 | -0.034 |
+
+Old-exact is within the 0.02 rule for this pick, but not robustly. The
+same comparison with every fifth entry confirmed, from offset 0 to 4 (4, 3,
+3, 3 and 3 entries), gives old_exact off to on of 0.750 to 0.750, 0.750 to
+0.750, 1.000 to 1.000, 1.000 to 0.500 and 0.667 to 0.333, and `all` falling
+by 0.013, 0.050, 0.083, 0.164 and 0.125. The cause is the intended
+mechanism and its risk: a confirmed recent distractor, or a confirmed
+older entry on the same topic, gains up to 1.25x on an old exact match that
+stays at the floor, in a 16-entry fixture where fused scores are close. On
+this fixture the pass rule is **not** met; it says nothing yet about the
+real embedders, whose match scores separate more, which is why the setting
+stays off.
+
+**The measurement entry point.** `make measure-confirmation` seeds each
+domain of `tests/eval/domains.py` and the pool of all five with entries aged
+0 to 400 days (a deterministic golden-ratio spread), sprinkles
+confirmations on the 20% with the smallest summary hash (helpful with a
+note, from a user who is not the author, 0.5 to 5 days old), and reports
+hit@5 and MRR per variant with the changes against the baseline. Variants
+are named sets of `SearchConfig` overrides, so later changes (a search
+recency hint) are added to `VARIANTS` (per-kind recency is, ADR 0072). Hash-embedder
+output, **machinery only, not evidence** (4 dimensions, the vector stream is
+close to noise):
+
+| fixture | hit@5 off | hit@5 on | MRR off | MRR on |
+|---|---|---|---|---|
+| all domains together | 0.458 | 0.365 | 0.244 | 0.208 |
+| data analysis | 0.632 | 0.632 | 0.366 | 0.306 |
+| software engineering | 0.684 | 0.632 | 0.486 | 0.467 |
+| system administration | 0.684 | 0.684 | 0.412 | 0.382 |
+| journalism and social science | 0.650 | 0.550 | 0.449 | 0.350 |
+| finance analysis | 0.684 | 0.632 | 0.375 | 0.365 |
+
+**Real embedders** (2026-10-11; Qwen3-Embedding 8B Q8_0, 4B and 0.6B f16 via
+llama.cpp, last-token pooling, dim 1024, MemoryStore keyword stream; weighted
+70% 8B / 20% 4B / 10% 0.6B):
+
+| fixture | hit@5 off | hit@5 on | MRR off | MRR on | MRR change |
+|---|---|---|---|---|---|
+| all domains together | 0.898 | 0.874 | 0.725 | 0.644 | -0.081 |
+| data analysis | 1.000 | 1.000 | 0.771 | 0.623 | -0.148 |
+| software engineering | 0.911 | 0.895 | 0.673 | 0.655 | -0.018 |
+| system administration | 0.937 | 0.931 | 0.726 | 0.528 | -0.198 |
+| journalism and social science | 0.900 | 0.850 | 0.720 | 0.542 | -0.178 |
+| finance analysis | 0.853 | 0.853 | 0.686 | 0.625 | -0.061 |
+
+Per model, pooled MRR off to on: 8B 0.737 to 0.650, 4B 0.706 to 0.639,
+0.6B 0.683 to 0.611. The pass rule is **not met** in any domain or pooled,
+on every model. Confirmations here fall on 20% of entries regardless of
+which query they answer, so a confirmed entry that is a close but wrong
+match gains up to 1.25x over the right one at the floor. Real confirmations
+probably correlate with usefulness, but nothing measured shows that yet, so
+the setting stays off and the default does not change.
+
+## A recency profile per kind (ADR 0072)
+
+*(tools: `tests/eval/confirmation.py` variants, `make measure-ranking`;
+`tests/eval/test_kind_profile.py` for the age-varied fixture)*
+`HIVEMIND_RECENCY_BY_KIND` is unset by default. Set to
+`insight=180,decision=365` (or `insight=90,decision=180`), decisions and
+insights age by a longer half-life while facts keep 30 days, under the same
+0.8 floor. The pass rule is ADR 0071's: no domain's or the pooled hit@5 or
+MRR drops by more than 0.01, and the timeless slice improves. Everything
+below is the hash embedder: **machinery only, not evidence**.
+
+**Domain fixtures** (`tests/eval/domains.py`: 73 facts, 47 insights and 40
+decisions in 160 entries, aged 0 to 400 days; the baseline is "confirmation
+off", i.e. the shipped config). Hit@5 / MRR change against it:
+
+| fixture | insight=180, decision=365 | insight=90, decision=180 |
+|---|---|---|
+| all domains together | -0.083 / -0.035 | -0.052 / -0.016 |
+| data analysis | +0.053 / -0.022 | +0.000 / -0.026 |
+| software engineering | -0.053 / -0.046 | +0.000 / +0.000 |
+| system administration | +0.000 / -0.079 | +0.000 / -0.079 |
+| journalism and social science | +0.000 / -0.044 | +0.000 / -0.002 |
+| finance analysis | -0.053 / -0.011 | +0.000 / +0.000 |
+
+Pooled baseline: hit@5 0.479, MRR 0.246. The pass rule is not met on the
+hash embedder (the vector stream is close to noise at 4 dimensions, so these
+numbers say little either way).
+
+**Age-varied fixture** (`temporal.py`, shipped config vs the slow profile,
+MRR; hit@5 is 1.000 throughout):
+
+| ages of the newer currency members | slice | shipped | 180/365 |
+|---|---|---|---|
+| as written (5 to 12 days) | currency pairs | 0.778 | 0.833 |
+| as written | timeless | 0.617 | 0.617 |
+| as written | old-exact | 1.000 | 1.000 |
+| 30 days | currency pairs | 0.583 | 0.611 |
+| 30 days | timeless | 0.667 | 0.633 |
+| 120 days | all slices | unchanged | unchanged |
+
+The aged currency pairs gain a little while the newer member is inside the
+profile's longer half-life, and nothing moves once everything is old
+(120 days), because the floor is the same. The timeless slice does **not**
+improve here: it is unchanged as written and falls 0.667 to 0.633 at 30
+days, where a longer half-life keeps older entries closer to the top. The
+pass rule's second clause is not met on this fixture. It is recorded as
+measured; the real-embedder run decides.
+
+**Real embedders** (2026-10-11; Qwen3-Embedding 8B Q8_0, 4B and 0.6B f16 via
+llama.cpp, last-token pooling, dim 1024; weighted 70% 8B / 20% 4B / 10% 0.6B;
+the baseline is the same run's "confirmation off"). hit@5 / MRR:
+
+| fixture | baseline | insight=180, decision=365 | insight=90, decision=180 |
+|---|---|---|---|
+| all domains together | 0.894 / 0.728 | 0.878 / 0.687 | 0.895 / 0.722 |
+| data analysis | 0.995 / 0.787 | 0.995 / 0.688 | 0.995 / 0.709 |
+| software engineering | 0.911 / 0.664 | 0.947 / 0.653 | 0.947 / 0.689 |
+| system administration | 0.937 / 0.758 | 0.937 / 0.633 | 0.937 / 0.677 |
+| journalism and social science | 0.900 / 0.705 | 0.900 / 0.642 | 0.900 / 0.712 |
+| finance analysis | 0.853 / 0.684 | 0.842 / 0.609 | 0.853 / 0.662 |
+
+Pooled MRR per model, baseline to 90/180: 8B 0.727 to 0.719, 4B 0.744 to
+0.744, 0.6B 0.700 to 0.696; with 180/365: 8B 0.686, 4B 0.708, 0.6B 0.649.
+
+The pass rule (no drop beyond 0.01 in any domain or pooled) is **not met** by
+either profile. 90/180 is nearly neutral pooled (-0.006 MRR) but costs data
+analysis -0.078 and system administration -0.081 MRR. Caveat: this fixture's
+queries do not favour old decisions or insights (ages are a deterministic
+spread, unrelated to which answers are timeless), so it measures the cost of
+the profile, not the benefit the setting is for (timeless knowledge not being
+buried); a fixture with timeless old decisions would be needed to show the
+benefit. The setting stays off.
 
 ## Similarity threshold
 
@@ -487,3 +660,153 @@ Few empty searches and unrelated hits mean the value can go up by 0.05;
 agents missing entries they wrote means it is too high. Measure again
 after changing the embedding model or dimension; leaving the setting
 unset restores the old behaviour at once.
+
+## A recency hint on search (ADR 0073)
+
+*(tools: `tests/eval/test_recency_hint.py` for the age-varied fixture,
+`tests/eval/confirmation.py` variants and `make measure-ranking` for the domain
+fixtures)* A search may carry `recency`: `ignore_age` (recency factor 1.0, no
+confirmation clock) or `prefer_recent` (floor 0.5 instead of 0.8, the kind's
+half-life kept). Everything below is the hash embedder: **machinery only, not
+evidence**.
+
+**Age-varied fixture, MRR per slice** (10 queries: 6 non-temporal, 4 temporal;
+hit@5 is 1.000 unless noted). The queries' `temporal` label is the oracle:
+`prefer_recent` for temporal queries, `ignore_age` for the rest.
+
+| hint applied | non-temporal | temporal | old-exact | currency pairs | timeless | all |
+|---|---|---|---|---|---|---|
+| default (shipped) | 0.681 | 0.833 | 1.000 | 0.778 | 0.617 | 0.742 |
+| `ignore_age`, every query | 0.917 | 0.708 | 1.000 | 0.611 | 0.900 | 0.833 |
+| `prefer_recent` (floor 0.5), every query | 0.569 | 0.708 | 0.500 | 0.778 | 0.583 | 0.625 |
+| `prefer_recent`, no floor, every query | 0.208 | 0.625 | 0.000 | 0.833 | 0.250 | 0.375 (hit@5 0.500) |
+| oracle (0.5 floor) | 0.917 | 0.708 | 0.750 | 0.778 | 0.900 | 0.833 |
+| oracle, no floor | 0.917 | 0.625 | 0.500 | 0.833 | 0.900 | 0.800 (hit@5 0.900) |
+| `ignore_age` on non-temporal queries only | 0.917 | 0.833 | 1.000 | 0.778 | 0.900 | 0.883 |
+| `prefer_recent` (0.5) on temporal queries only | 0.681 | 0.708 | 0.750 | 0.778 | 0.617 | 0.692 |
+
+**The study's scratch claim, timeless MRR 0.607 to 0.900 with floor 1.0:
+reproduced for the second figure, not the first.** `ignore_age` (and the
+default scoring at floor 1.0, which is the same arithmetic here) gives timeless
+MRR 0.900. The shipped baseline measures 0.617 in this repository (as in the
+ADR 0072 section above), not 0.607. The gain, +0.283, is real on this
+fixture; what it costs is the currency pairs (0.778 to 0.611) and the temporal
+slice, which is why it is a per-search hint for a question the agent knows to
+be timeless, and not a default.
+
+**`prefer_recent` is not a win on this fixture, with either floor.** With no
+floor one currency pair gains a rank (0.778 to 0.833) and every exact match
+that is not the newest drops out (non-temporal 0.208, hit@5 0.333): the
+unbounded term spans more than the fused range. A floor of 0.5 (2x, inside the
+fused range of 2.62x) improves no slice and loses the old-exact answer to a
+temporal-worded query (1.000 to 0.500 applied to all, 0.750 under the oracle).
+Floors of 0.7 and up give the default's numbers, 0.4 and below the no-floor
+ones. 0.5 is shipped for its bounded cost, not for a measured gain: a wrong
+hint should cost a bounded amount. The oracle's temporal slice gets worse
+(0.833 to 0.708) because the one temporal-worded query whose answer is old
+(T1) is mislabelled by its wording; the "time sense" is the agent's to judge,
+and that example is the reason the server does not infer it.
+
+**Domain fixtures** (160 entries aged 0 to 400 days, 96 answerable queries,
+every query given the same hint because the domain fixtures do not label time
+sense; the baseline is the shipped config). Hit@5 / MRR change:
+
+| fixture | `ignore_age` | `prefer_recent` (0.5) |
+|---|---|---|
+| all domains together | +0.052 / +0.023 | -0.052 / -0.037 |
+| data analysis | +0.000 / +0.041 | +0.000 / -0.026 |
+| software engineering | -0.053 / +0.000 | +0.000 / -0.035 |
+| system administration | +0.000 / +0.009 | +0.000 / -0.018 |
+| journalism and social science | -0.100 / -0.092 | -0.100 / -0.035 |
+| finance analysis | +0.000 / +0.000 | -0.053 / -0.030 |
+
+Pooled baseline: hit@5 0.448, MRR 0.233. The pass rule of ADR 0071 (no drop
+beyond 0.01) is a rule for a setting applied to everything; a hint is applied
+by an agent per query, so the table above shows the cost of a wrong or
+overused hint, and the benefit needs a time-labelled real fixture.
+
+**Real embedders** (2026-10-11; Qwen3-Embedding 8B Q8_0, 4B and 0.6B f16 via
+llama.cpp, last-token pooling, dim 1024; weighted 70% 8B / 20% 4B / 10% 0.6B;
+hint applied to every query; the baseline is this run's default). hit@5 / MRR:
+
+| fixture | default | `ignore_age` | `prefer_recent` |
+|---|---|---|---|
+| all domains together | 0.909 / 0.737 | 0.917 / 0.752 | 0.877 / 0.687 |
+| data analysis | 1.000 / 0.816 | 1.000 / 0.901 | 1.000 / 0.684 |
+| software engineering | 0.911 / 0.661 | 0.911 / 0.758 | 0.900 / 0.638 |
+| system administration | 0.937 / 0.744 | 0.984 / 0.851 | 0.900 / 0.655 |
+| journalism and social science | 0.890 / 0.710 | 0.900 / 0.719 | 0.890 / 0.670 |
+| finance analysis | 0.853 / 0.705 | 0.853 / 0.729 | 0.858 / 0.668 |
+
+Pooled MRR per model, default to `ignore_age` to `prefer_recent`: 8B 0.745 to
+0.756 to 0.691, 4B 0.723 to 0.746 to 0.682, 0.6B 0.709 to 0.732 to 0.671.
+
+On these mostly timeless queries `ignore_age` improves MRR in every domain
+(+0.009 to +0.107) and pooled (+0.015), and hit@5 never drops. `prefer_recent`
+lowers MRR everywhere, as expected for timeless questions, and remains
+unproven for current-state questions: there is no real-embedder fixture with
+labelled current-state queries yet. A hint acts only when an agent sends it, so
+turning `HIVEMIND_RECENCY_HINT` on is low-risk; the measurement supports
+enabling it for `ignore_age`. The default stays off.
+
+## Version grouping
+
+ADR 0074 shows unlinked near-copies of one fact next to each other, newest
+first, when `HIVEMIND_VERSION_GROUP_MIN_SIMILARITY` (tau) is set. Whether two
+entries are versions or merely about the same system depends on the
+embedding model, so tau is measured with the model a deployment runs:
+
+    make vllm   # or use the production endpoint
+    make measure-versions HIVEMIND_EMBEDDING_DIM=1024
+
+For each of the five domains of the threshold study, the pool is the
+domain's own 32 entries plus six pairs of an older and a newer unlinked
+statement of one fact (a changed value: "pool size is 20", later "raised to
+90") and six same-system distractors (another setting of the same service).
+The queries for the newer entry use the older statement's words, so the older
+one often has the higher lexical overlap, the case grouping is for. For
+grouping off and each tau from 0.70 to 0.95 it reports, per domain and
+pooled:
+
+| column | meaning |
+|---|---|
+| false grouping | distractors grouped with a version member or another distractor, in a search for their pair's fact |
+| true grouping | version pairs grouped in a search for the fact |
+| newer-member MRR | reciprocal rank of the newer entry for the query about the fact |
+| old-exact MRR | the same for the older entry and a query quoting it (it can only fall: the newer member moves ahead) |
+| hit@5 | over all the domain's queries: the two above and its answerable queries |
+| groups with other entries | groups touching the domain's own entries (information) |
+
+Adopt a tau only where pooled false grouping is at most 5%, no domain is
+above 10%, the sysadmin domain passes (false grouping at most 5%, no loss
+against off, old-exact within 0.02), newer-member MRR is up, old-exact MRR is
+at most 0.02 below baseline (it can only fall, so "not below" could never pass) and
+pooled hit@5 is not lower. The tool prints the verdict for every tau and the
+lowest passing one.
+
+`tests/eval/test_version_measurement.py` runs the same code on the 4-dimension
+hash embedder; that checks the machinery, and its numbers mean nothing.
+
+Measured 2026-10-11 with Qwen3-Embedding 8B, 4B and 0.6B (llama.cpp GGUF,
+vectors cut to 1024 dimensions), weighted 70/20/10, pooled over the five
+domains:
+
+| tau | false grouping | true grouping | newer-member MRR | old-exact MRR | hit@5 |
+|---|---|---|---|---|---|
+| off | 0% | 0% | 0.201 | 0.260 | 0.762 |
+| 0.70 | 66% | 74% | 0.255 | 0.186 | 0.743 |
+| 0.75 | 48% | 70% | 0.239 | 0.201 | 0.750 |
+| 0.80 | 31% | 54% | 0.230 | 0.225 | 0.743 |
+| 0.85 | 6% | 37% | 0.225 | 0.232 | 0.759 |
+| 0.90 | 1% | 12% | 0.212 | 0.248 | 0.760 |
+| 0.95 | 0% | 1% | 0.202 | 0.259 | 0.762 |
+
+No tau passes on any of the three models, so the suggestion is none: keep
+grouping off. The two sides never meet. Where false grouping is low enough
+(0.90 and up), grouping finds few true pairs and the newer-member gain is
+about 0.01; sysadmin, whose distractors are other settings of the same
+service, still loses against off at 0.90 on every model, and data analysis
+groups 17% of its distractors at 0.90 on 0.6B and 4B. Below 0.90, a third
+or more of the distractors are grouped. Same-system facts sit as close
+together in these embedders as two versions of one fact, so cosine alone
+cannot tell them apart.

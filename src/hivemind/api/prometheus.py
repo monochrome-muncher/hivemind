@@ -22,8 +22,9 @@ Three groups of series:
 * **Degraded searches** (ADR 0048): searches answered by the keyword
   stream alone because the embedder failed.
 * **Search counters** (ADR 0056): first-page searches and the ones that
-  found nothing or were explore searches (ADR 0078), per fleet, read from the pool with the usage report, so
-  they cover every runner (MCP included). Aggregate them with ``max``.
+  found nothing or were explore searches (ADR 0078), per fleet, read from
+  the pool with the usage report, so they cover every runner (MCP
+  included). Aggregate them with ``max``.
 * **Flag confirmation** (ADR 0068): `hivemind_feedback_flags` and
   `hivemind_feedback_flags_confirmed` per registered agent, the
   stale/wrong reports and the ones a later supersession confirmed. An
