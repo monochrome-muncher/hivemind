@@ -306,13 +306,18 @@ class Store(Protocol):
         ``limit`` of them."""
         ...
 
-    async def record_feedback(self, feedback: Feedback) -> None:
-        """Upsert a feedback verdict (one row per entry+user+agent)."""
+    async def record_feedback(self, feedback: Feedback) -> Feedback:
+        """Upsert a feedback verdict (one row per entry+user+agent) and
+        return the row as stored. A row without ``updated_at`` is stamped
+        with the store's clock, the one ``pinned_at`` and ``created_at``
+        use (ADR 0079)."""
         ...
 
-    async def record_feedback_many(self, feedbacks: list[Feedback]) -> None:
+    async def record_feedback_many(self, feedbacks: list[Feedback]) -> list[Feedback]:
         """Upsert several feedback rows in one transaction: all land or
-        none do. An empty list is a no-op."""
+        none do. Returns the rows as stored, in order; rows without
+        ``updated_at`` share one store-clock stamp (ADR 0079). An empty
+        list is a no-op."""
         ...
 
     async def feedback_counts(self, entry_id: str) -> FeedbackCounts:

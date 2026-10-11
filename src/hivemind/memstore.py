@@ -214,14 +214,17 @@ class MemoryStore:
             self._entries[entry_id] = updated
             return updated
 
-    async def record_feedback(self, feedback: Feedback) -> None:
-        with self._lock:
-            self._feedback[(feedback.entry_id, feedback.user, feedback.agent)] = feedback
+    async def record_feedback(self, feedback: Feedback) -> Feedback:
+        (stored,) = await self.record_feedback_many([feedback])
+        return stored
 
-    async def record_feedback_many(self, feedbacks: list[Feedback]) -> None:
+    async def record_feedback_many(self, feedbacks: list[Feedback]) -> list[Feedback]:
         with self._lock:
-            for feedback in feedbacks:
-                self._feedback[(feedback.entry_id, feedback.user, feedback.agent)] = feedback
+            now = self._clock()  # one stamp per call, like a transaction's now()
+            stored = [replace(fb, updated_at=fb.updated_at or now) for fb in feedbacks]
+            for fb in stored:
+                self._feedback[(fb.entry_id, fb.user, fb.agent)] = fb
+            return stored
 
     # -- read path --------------------------------------------------------
 

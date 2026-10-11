@@ -4,6 +4,7 @@ pins a few fleet entries; every agent of the fleet reads them first."""
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import UTC, datetime
 
 import httpx
 
@@ -16,6 +17,7 @@ from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.domain.validation import MAX_PINS_PER_FLEET
 from hivemind.mcp.app import (
     McpHivemind,
+    hive_feedback,
     hive_pin,
     hive_pinned,
     hive_withdraw,
@@ -395,6 +397,35 @@ async def test_repinning_a_flagged_entry_clears_the_flag() -> None:
     clock.advance_days(1)
     await hive_pin(lead, entry)
     assert (await hive_pinned(lead))["pins"][0]["changed_since_pin"] is False  # type: ignore[index]
+
+
+async def test_a_verdict_right_after_a_pin_flags_it_when_the_store_clock_runs_ahead() -> None:
+    """ADR 0079: feedback is stamped by the store's clock, the one pins use,
+    so a pod whose clock lags the database cannot date a verdict before the
+    pin it follows. The store clock here runs ahead of any wall clock."""
+    clock = make_clock(datetime(2100, 1, 1, tzinfo=UTC))
+    store = MemoryStore(clock)
+    entry = await _write(store, LEAD, "use runner pool A")
+    await hive_pin(_surface(store, LEAD), entry)
+    clock.advance_days(1)
+    result = await hive_feedback(_surface(store, DEV), entry_id=entry, verdict="stale")
+    assert "error" not in result, result
+    assert (await hive_pinned(_surface(store, DEV)))["pins"][0]["change_reason"] == "flagged"  # type: ignore[index]
+
+
+async def test_a_repin_after_a_verdict_clears_it_when_the_store_clock_lags() -> None:
+    """ADR 0079, the other way round: a pod whose clock runs ahead of the
+    database cannot date a verdict after the re-pin that acknowledged it."""
+    clock = make_clock(datetime(2000, 1, 1, tzinfo=UTC))
+    store = MemoryStore(clock)
+    entry = await _write(store, LEAD, "use runner pool A")
+    await hive_pin(_surface(store, LEAD), entry)
+    clock.advance_days(1)
+    result = await hive_feedback(_surface(store, DEV), entry_id=entry, verdict="wrong")
+    assert "error" not in result, result
+    clock.advance_days(1)
+    await hive_pin(_surface(store, LEAD), entry)
+    assert (await hive_pinned(_surface(store, DEV)))["pins"][0]["changed_since_pin"] is False  # type: ignore[index]
 
 
 async def test_a_note_on_a_helpful_verdict_is_not_a_flag() -> None:

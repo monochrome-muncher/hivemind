@@ -1270,3 +1270,33 @@ async def test_record_feedback_many_of_nothing_is_a_no_op(adapter: Adapter) -> N
     entry = await write(adapter, "untouched")
     await adapter.store.record_feedback_many([])
     assert await adapter.store.feedback_counts(entry.id) == (0, 0, 0)
+
+
+async def test_feedback_without_a_date_is_stamped_by_the_clock_pins_use(adapter: Adapter) -> None:
+    """ADR 0079: the store dates feedback with the clock it dates pins with,
+    so a verdict after a pin is newer than it and a re-pin after a verdict
+    is newer than the verdict, whatever the application's clock says."""
+    entry = await write(adapter, "pinned")
+    other = await write(adapter, "other")
+    store = adapter.store
+    pin = await store.pin_entry("fleet-x", entry.id, "lead", 3)
+    assert pin is not None
+    stored = await store.record_feedback(Feedback(entry.id, "u1", "a", Verdict.STALE))
+    assert stored.updated_at is not None and stored.updated_at > pin.pin.pinned_at
+    assert [r.updated_at for r in await store.list_feedback(entry.id, 10)] == [stored.updated_at]
+    many = await store.record_feedback_many(
+        [
+            Feedback(entry.id, "u2", "a", Verdict.WRONG),
+            Feedback(other.id, "u2", "a", Verdict.WRONG),
+            Feedback(other.id, "u3", "a", Verdict.HELPFUL, None, T0),
+        ]
+    )
+    assert many[0].updated_at is not None and many[0].updated_at > stored.updated_at
+    assert many[1].updated_at == many[0].updated_at  # one stamp per call
+    assert many[2].updated_at == T0  # a given date is kept
+    assert {r.user: r.updated_at for r in await store.list_feedback(other.id, 10)} == {
+        "u2": many[0].updated_at,
+        "u3": T0,
+    }
+    repin = await store.pin_entry("fleet-x", entry.id, "lead", 3)
+    assert repin is not None and repin.pin.pinned_at > many[0].updated_at
