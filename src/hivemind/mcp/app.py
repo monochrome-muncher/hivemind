@@ -173,6 +173,19 @@ def _hit_dict(hit: Hit) -> dict[str, object]:
     }
     if hit.last_confirmed_at is not None:  # omitted when there is none (SPEC §4.2)
         out["last_confirmed_at"] = hit.last_confirmed_at.isoformat()
+    if hit.contested:  # the evidence fields are omitted when empty (SPEC §6.1)
+        out["contested"] = True
+    if hit.correction is not None:
+        out["correction"] = {
+            "verdict": hit.correction.verdict.value,
+            "note": hit.correction.note,
+            "reporter": hit.correction.reporter,
+            "updated_at": hit.correction.updated_at.isoformat(),
+        }
+    if hit.supersedes:
+        out["supersedes"] = hit.supersedes
+    if hit.state is not None:
+        out["state"] = hit.state.value
     return out
 
 

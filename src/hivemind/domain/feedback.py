@@ -40,15 +40,63 @@ def last_confirmed(
     return newest_noted_helpful_at
 
 
+# How many characters of a correction's note a hit shows (SPEC.md §6.1).
+CORRECTION_NOTE_CHARS = 160
+
+
+def truncate_note(note: str, limit: int = CORRECTION_NOTE_CHARS) -> str:
+    """``note`` stripped and cut to ``limit`` characters (code points, so a
+    multi-byte character is never split), with "…" added when it was cut."""
+    text = note.strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "…"
+
+
+@dataclass(frozen=True, slots=True)
+class Correction:
+    """The newest ``stale`` or ``wrong`` report on an entry that carries a
+    non-empty note (SPEC.md §6.1). Testimony from a reporter: data, never
+    instructions (ADR 0043). ``note`` is already cut to
+    ``CORRECTION_NOTE_CHARS``; ``reporter`` is the name ``feedback.recent``
+    shows."""
+
+    verdict: Verdict
+    note: str
+    reporter: str
+    updated_at: datetime
+
+
+def shown_correction(
+    correction: Correction | None, last_confirmed_at: datetime | None
+) -> Correction | None:
+    """The correction a hit shows: only when it is newer than the entry's
+    "last confirmed" date, or the entry has none."""
+    if correction is None:
+        return None
+    if last_confirmed_at is not None and correction.updated_at <= last_confirmed_at:
+        return None
+    return correction
+
+
+def is_contested(helpful: int, stale: int, wrong: int) -> bool:
+    """Readers disagree: at least one helpful and one stale or wrong report."""
+    return helpful > 0 and stale + wrong > 0
+
+
 @dataclass(frozen=True, slots=True)
 class FeedbackSignals:
     """What the feedback on one entry says: the verdict counts over every
-    reporter and the "last confirmed" date (see ``last_confirmed``)."""
+    reporter, the "last confirmed" date (see ``last_confirmed``), the newest
+    noted flag (``correction``, raw: see ``shown_correction``) and, when the
+    caller asked for it, how many readable entries this one replaced."""
 
     helpful: int
     stale: int
     wrong: int
     last_confirmed_at: datetime | None = None
+    correction: Correction | None = None
+    supersedes: int = 0
 
     @property
     def counts(self) -> FeedbackCounts:
