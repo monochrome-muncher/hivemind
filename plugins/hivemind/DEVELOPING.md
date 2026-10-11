@@ -19,7 +19,7 @@ to install or use it, read [README.md](README.md) instead.
 | `skills/hivemind/` | The always-on rules: `hive_whoami` first, when to search, when and how to write, what never to write, local memory only as a fallback |
 | `skills/hivemind-setup/` | The guided setup. Harness-neutral itself: it works out its harness first (never from the model), then reads only that harness's file in `references/` |
 | `skills/hivemind-setup/scripts/hivemind-session-start.sh` | The reminder text the startup hook prints, including its incognito variant |
-| `hooks/hooks.json` | A `SessionStart` hook (`startup`, `resume`, `clear`, `compact`, `fork`) that re-injects the reminder whenever the context is rebuilt (Claude Code, Codex), and a `Stop` hook (Claude Code) |
+| `hooks/hooks.json` | A `SessionStart` hook (`startup`, `resume`, `clear`, `compact`, `fork`) that re-injects the reminder whenever the context is rebuilt (Claude Code, Codex), and a `Stop` hook (Claude Code, Codex) |
 | `skills/hivemind-setup/scripts/hivemind-stop.sh` | The `Stop` hook ([below](#the-stop-hook-and-the-post-compaction-line)) |
 | `.mcp.json` | The MCP server for Claude Code, built from `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY` |
 | `package.json`, `cordis.patch.yml`, `dsh/` | The DeepSeek Harness bundle: the MCP server row, and a small provider (`dsh/hivemind-skills.js`) that serves `skills/` |
@@ -85,12 +85,14 @@ itself names no harness-specific paths, and a test enforces this.
 
 ## The Stop hook and the post-compaction line
 
-Two nudges that get knowledge written before it is lost (Claude Code only
-in this release; the OpenCode, Pi and Hermes equivalents are follow-ups).
-Codex loads the same `hooks/hooks.json`, so it runs the Stop hook too, but
-the script counts Claude Code transcript records (`"type": "tool_use"`),
-so it has only been tested with Claude Code and is not expected to fire in
-Codex.
+Two nudges that get knowledge written before it is lost, for Claude Code
+and Codex, which load the same `hooks/hooks.json`. The script counts both
+transcript formats: Claude Code's `"type": "tool_use"` records and Codex's
+`function_call`, `custom_tool_call` and `local_shell_call` items (checked
+with Codex 0.162.1 against a mock model: it blocks once, Codex continues
+with the reason as the next prompt, and an MCP `hive_write`, recorded as
+`"name":"hive_write","namespace":"mcp__hivemind"`, keeps it quiet). Codex
+runs plugin hooks only after the user trusts them in `/hooks`.
 
 - **Post-compaction line.** When the `SessionStart` source is `compact`
   (read from the hook's stdin JSON), `hivemind-session-start.sh` appends

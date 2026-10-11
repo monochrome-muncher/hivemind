@@ -1,5 +1,5 @@
 #!/bin/sh
-# Hivemind Stop hook (Claude Code): at most once per session, blocks the stop
+# Hivemind Stop hook (Claude Code, Codex): at most once per session, blocks the stop
 # once with a short reminder to write what another agent could reuse and to
 # rate the entries the work tested. Registered in hooks/hooks.json.
 #
@@ -41,7 +41,10 @@ dir="${TMPDIR:-/tmp}/hivemind-stop-reminder"
 grep -Eq '"name" *: *"[^"]*hive_(write|feedback)"' "$transcript" 2>/dev/null && exit 0
 min="${HIVEMIND_STOP_MIN_TOOLS:-20}"
 case "$min" in ''|*[!0-9]*) min=20 ;; esac
-uses="$(grep -o '"type" *: *"tool_use"' "$transcript" 2>/dev/null | wc -l)" || exit 0
+# Claude Code records a call as "tool_use"; Codex as "function_call",
+# "custom_tool_call" or "local_shell_call" (their outputs end in "_output").
+uses="$(grep -Eo '"type" *: *"(tool_use|function_call|custom_tool_call|local_shell_call)"' \
+  "$transcript" 2>/dev/null | wc -l)" || exit 0
 [ "${uses:-0}" -ge "$min" ] 2>/dev/null || exit 0
 
 mkdir -p "$dir" 2>/dev/null && : > "$dir/$sid" 2>/dev/null || exit 0
