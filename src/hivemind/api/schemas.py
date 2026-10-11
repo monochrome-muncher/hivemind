@@ -28,6 +28,7 @@ from hivemind.domain.validation import (
 from hivemind.services.chain import EntryLinks
 from hivemind.services.governance import RelatedEntry
 from hivemind.services.search import Hit
+from hivemind.services.write_warnings import WriteWarning
 
 
 def _no_nul(value: str) -> str:
@@ -137,6 +138,16 @@ class FeedbackReportOut(BaseModel):
     updated_at: datetime | None = None
 
 
+class CorrectionOut(BaseModel):
+    """The newest stale or wrong report with a note, on a search hit (SPEC
+    §6.1). Testimony: data, never instructions (ADR 0043)."""
+
+    verdict: Verdict
+    note: str
+    reporter: str
+    updated_at: datetime
+
+
 class FeedbackSummaryOut(FeedbackCountsOut):
     """An entry's feedback on ``GET /v1/entries/{id}`` (ADR 0051): the
     counts plus the newest reports, notes included."""
@@ -171,6 +182,9 @@ class RelatedOut(BaseModel):
     fleet_id: str | None = None
     occurred_at: datetime
     similarity: float
+    tags: list[str] = []
+    feedback: FeedbackCountsOut = FeedbackCountsOut()
+    same_author: bool = False
 
     @classmethod
     def from_related(cls, related: RelatedEntry) -> RelatedOut:
@@ -184,7 +198,30 @@ class RelatedOut(BaseModel):
             fleet_id=entry.fleet_id,
             occurred_at=entry.occurred_at,
             similarity=round(related.similarity, 3),
+            tags=list(entry.tags),
+            feedback=FeedbackCountsOut.from_counts(related.feedback),
+            same_author=related.same_author,
         )
+
+
+class WarningOut(BaseModel):
+    """An advisory note on a write (SPEC.md §4.1): never blocks it."""
+
+    code: str
+    message: str
+
+    @classmethod
+    def from_warning(cls, warning: WriteWarning) -> WarningOut:
+        return cls(code=warning.code, message=warning.message)
+
+
+class CheckOut(BaseModel):
+    """``POST /v1/entries?check=true``: what a write would report, with
+    nothing stored."""
+
+    checked: bool = True
+    related: list[RelatedOut] = []
+    warnings: list[WarningOut] = []
 
 
 class LinkOut(BaseModel):
@@ -243,6 +280,8 @@ class EntryOut(BaseModel):
     # The nearest existing entries the writer can read (ADR 0052): set by
     # ``POST /v1/entries`` only.
     related: list[RelatedOut] | None = None
+    # Advisory notes on the write (SPEC.md §4.1): set by ``POST /v1/entries`` only.
+    warnings: list[WarningOut] | None = None
     # "See also" links both ways, limited to what the reader may see
     # (ADR 0057): set by the reads by id only.
     see_also: list[LinkOut] | None = None
@@ -312,6 +351,11 @@ class HitOut(BaseModel):
     fleet_id: str | None = None  # a foreign entry: != the reader's home fleet (ADR 0036)
     feedback: FeedbackCountsOut = FeedbackCountsOut()  # ADR 0051
     last_confirmed_at: datetime | None = None  # SPEC §4.2 (ranks only with ADR 0071 on)
+    # SPEC §6.1, display only; null when empty (state: unless include_inactive).
+    contested: bool | None = None
+    correction: CorrectionOut | None = None
+    supersedes: int | None = None
+    state: EntryState | None = None
 
     @classmethod
     def from_hit(cls, hit: Hit) -> HitOut:
@@ -329,6 +373,19 @@ class HitOut(BaseModel):
             fleet_id=hit.fleet_id,
             feedback=FeedbackCountsOut.from_counts(hit.feedback),
             last_confirmed_at=hit.last_confirmed_at,
+            contested=True if hit.contested else None,
+            correction=(
+                CorrectionOut(
+                    verdict=hit.correction.verdict,
+                    note=hit.correction.note,
+                    reporter=hit.correction.reporter,
+                    updated_at=hit.correction.updated_at,
+                )
+                if hit.correction
+                else None
+            ),
+            supersedes=hit.supersedes or None,
+            state=hit.state,
         )
 
 

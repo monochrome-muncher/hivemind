@@ -61,7 +61,7 @@ is unused.
 | [0049](0049-keyword-stream-matches-at-most-16-terms.md) | The keyword stream matches at most 16 distinct query terms | Accepted |
 | [0050](0050-prometheus-scrape-endpoint.md) | The REST runner serves a Prometheus scrape endpoint | Amended by 0069 |
 | [0051](0051-feedback-is-readable.md) | Feedback is readable by the entry's audience | Amended by 0064 |
-| [0052](0052-writes-report-the-nearest-entries.md) | Writes report the nearest existing entries | Accepted |
+| [0052](0052-writes-report-the-nearest-entries.md) | Writes report the nearest existing entries | Amended by 0077 |
 | [0053](0053-feedback-on-several-entries-at-once.md) | Feedback on several entries at once | Amended by 0065 |
 | [0054](0054-a-flagged-filter-for-entries-reported-stale-or-wrong.md) | A `flagged` filter for entries reported stale or wrong | Accepted |
 | [0055](0055-read-several-entries-in-one-call.md) | Read several entries in one call | Amended by 0059 |
@@ -83,3 +83,4 @@ is unused.
 | [0071](0071-a-confirmation-can-restart-the-recency-clock.md) | A confirmation can restart the recency clock | Accepted (off by default) |
 | [0072](0072-recency-profile-per-kind.md) | A recency profile per kind | Accepted (off by default) |
 | [0073](0073-a-recency-hint-on-search.md) | A recency hint on search | Accepted (off by default) |
+| [0077](0077-write-check-mode-and-warnings.md) | Writes can be checked first, and answer with advisory warnings | Accepted |

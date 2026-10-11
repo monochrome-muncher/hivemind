@@ -51,6 +51,7 @@ from hivemind.services.feedback import reporter_agent
 from hivemind.services.governance import GovernanceService, RelatedEntry, WriteService
 from hivemind.services.search import Hit, SearchService
 from hivemind.services.wiring import Services
+from hivemind.services.write_warnings import WriteWarning
 
 logger = logging.getLogger(__name__)
 
@@ -173,11 +174,25 @@ def _hit_dict(hit: Hit) -> dict[str, object]:
     }
     if hit.last_confirmed_at is not None:  # omitted when there is none (SPEC §4.2)
         out["last_confirmed_at"] = hit.last_confirmed_at.isoformat()
+    if hit.contested:  # the evidence fields are omitted when empty (SPEC §6.1)
+        out["contested"] = True
+    if hit.correction is not None:
+        out["correction"] = {
+            "verdict": hit.correction.verdict.value,
+            "note": hit.correction.note,
+            "reporter": hit.correction.reporter,
+            "updated_at": hit.correction.updated_at.isoformat(),
+        }
+    if hit.supersedes:
+        out["supersedes"] = hit.supersedes
+    if hit.state is not None:
+        out["state"] = hit.state.value
     return out
 
 
 def _related_dict(related: RelatedEntry) -> dict[str, object]:
-    """A nearby existing entry in a write's reply (ADR 0052): compact, like a hit."""
+    """A nearby existing entry in a write's reply (ADR 0052): compact, like a hit,
+    with its tags, feedback counts and whether the writer wrote it."""
     entry = related.entry
     return {
         "id": entry.id,
@@ -188,7 +203,14 @@ def _related_dict(related: RelatedEntry) -> dict[str, object]:
         "fleet_id": entry.fleet_id,
         "occurred_at": entry.occurred_at.isoformat(),
         "similarity": round(related.similarity, 3),
+        "tags": list(entry.tags),
+        "feedback": _counts_dict(related.feedback),
+        "same_author": related.same_author,
     }
+
+
+def _warning_dict(warning: WriteWarning) -> dict[str, str]:
+    return {"code": warning.code, "message": warning.message}
 
 
 def _link_dict(entry: Entry) -> dict[str, object]:
@@ -337,6 +359,7 @@ async def hive_write(
     supersedes: list[str] | None = None,
     agent: str | None = None,
     see_also: list[str] | None = None,
+    check: bool = False,
 ) -> dict[str, object]:
     """Write a distilled entry into the shared pool (SPEC §4.1, §5.2).
 
@@ -362,6 +385,11 @@ async def hive_write(
     ``importance_source=default``; supply it and the value is kept with
     ``importance_source=caller`` (ROADMAP §4.5) — the 1..5 range is
     still enforced.
+
+    ``check``: run every validation a write runs and report ``related``
+    and ``warnings`` as ``{"checked": true, ...}``, storing nothing.
+    A write's reply carries ``warnings`` too: advisory ``{code, message}``
+    notes, never blocking.
 
     ``scope``: omit it and the entry lands at the highest scope the
     caller's trust level permits (L1 -> self; L2/L3 -> fleet; legacy
@@ -405,6 +433,13 @@ async def hive_write(
     except ValueError as exc:
         return _error(ERR_INVALID_INPUT, str(exc))
     try:
+        if check:
+            checked = await app.write_service.check(draft, writer=cred.visibility())
+            return {
+                "checked": True,
+                "related": [_related_dict(r) for r in checked.related],
+                "warnings": [_warning_dict(w) for w in checked.warnings],
+            }
         written = await app.write_service.write_and_relate(draft, writer=cred.visibility())
     except SupersedeDenied as exc:
         return _error(ERR_SUPERSEDE_DENIED, str(exc))
@@ -414,6 +449,7 @@ async def hive_write(
         return _error(ERR_INVALID_INPUT, str(exc))
     result = _entry_dict(written.entry)
     result["related"] = [_related_dict(r) for r in written.related]
+    result["warnings"] = [_warning_dict(w) for w in written.warnings]
     return result
 
 

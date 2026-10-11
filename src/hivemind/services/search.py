@@ -21,7 +21,14 @@ from hivemind.domain.entry import (
     EntryState,
     Kind,
 )
-from hivemind.domain.feedback import NO_SIGNALS, FeedbackCounts, FeedbackSignals
+from hivemind.domain.feedback import (
+    NO_SIGNALS,
+    Correction,
+    FeedbackCounts,
+    FeedbackSignals,
+    is_contested,
+    shown_correction,
+)
 from hivemind.domain.recency import RecencyHint
 from hivemind.domain.validation import check_pagination, check_query
 from hivemind.embeddings import EmbeddingError
@@ -52,6 +59,15 @@ class Hit:
     # they checked, with no flag since (SPEC §4.2); ranked on only when
     # ``recency_from_confirmation`` is on (ADR 0071).
     last_confirmed_at: datetime | None = None
+    # The evidence on the hit (SPEC §6.1), display only: readers disagree
+    # (a helpful and a stale or wrong report), the newest stale or wrong
+    # report with a note when no confirmation is newer, and how many entries
+    # the hit replaced that the caller may read. ``state`` only under
+    # ``include_inactive``.
+    contested: bool = False
+    correction: Correction | None = None
+    supersedes: int = 0
+    state: EntryState | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,7 +213,9 @@ class SearchService:
         candidate_ids = list(fused)
         entries, signals = await _gather(
             self._store.get_entries(candidate_ids),
-            self._store.feedback_signals(candidate_ids),
+            self._store.feedback_signals(
+                candidate_ids, count_supersedes=True, visibility=visibility
+            ),
         )
         quality_kwargs = self._config.quality_kwargs()
 
@@ -235,7 +253,12 @@ class SearchService:
 
         # 6. Pagination (SPEC.md §5.3: limit/offset on search and list).
         hits = [
-            self._to_hit(entry, entry_scores[entry.id], entry_feedback[entry.id])
+            self._to_hit(
+                entry,
+                entry_scores[entry.id],
+                entry_feedback[entry.id],
+                with_state=filters.include_inactive,
+            )
             for entry in ordered[offset : offset + limit]
         ]
         return SearchResult(hits, degraded, applied)
@@ -263,7 +286,9 @@ class SearchService:
             min_similarity=self._config.vector_min_similarity or 0.0,
         )
 
-    def _to_hit(self, entry: Entry, score: float, signals: FeedbackSignals) -> Hit:
+    def _to_hit(
+        self, entry: Entry, score: float, signals: FeedbackSignals, *, with_state: bool = False
+    ) -> Hit:
         return Hit(
             entry_id=entry.id,
             kind=entry.kind,
@@ -277,6 +302,10 @@ class SearchService:
             fleet_id=entry.fleet_id,
             feedback=signals.counts,
             last_confirmed_at=signals.last_confirmed_at,
+            contested=is_contested(*signals.counts),
+            correction=shown_correction(signals.correction, signals.last_confirmed_at),
+            supersedes=signals.supersedes,
+            state=entry.state if with_state else None,
         )
 
 
