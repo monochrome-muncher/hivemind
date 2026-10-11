@@ -70,6 +70,10 @@ data:
   # A "last confirmed" date restarts the recency clock for the upside (ADR
   # 0071); off until measured with the deployment's embedder.
   HIVEMIND_RECENCY_FROM_CONFIRMATION: "false"
+  # A recency half-life per kind, e.g. "insight=180,decision=365" (ADR 0072);
+  # empty = one curve for all kinds. Off until measured with the deployment's
+  # embedder.
+  HIVEMIND_RECENCY_BY_KIND: ""
   # Seconds the usage report (/v1/metrics, /metrics) reuses its grouped
   # scan of the entries (ADR 0069); entry counts can be that old. 0 = off.
   HIVEMIND_METRICS_ENTRY_COUNTS_TTL: "300"

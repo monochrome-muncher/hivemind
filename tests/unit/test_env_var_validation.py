@@ -284,3 +284,52 @@ def test_recency_from_confirmation_env_var_reaches_the_search_config(
     assert load_settings().search_config().recency_from_confirmation is False
     monkeypatch.setenv("HIVEMIND_RECENCY_FROM_CONFIRMATION", "true")
     assert load_settings().search_config().recency_from_confirmation is True
+
+
+def test_recency_by_kind_env_var_reaches_the_search_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR 0072: ``HIVEMIND_RECENCY_BY_KIND`` is a known field, unset by default."""
+    from hivemind.domain.entry import Kind
+
+    _clear_hivemind_env(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HIVEMIND_STRICT_ENV", "true")
+    assert load_settings().search_config().recency_by_kind is None
+    for off in ("", "none", " NONE "):
+        monkeypatch.setenv("HIVEMIND_RECENCY_BY_KIND", off)
+        assert load_settings().search_config().recency_by_kind is None
+    monkeypatch.setenv("HIVEMIND_RECENCY_BY_KIND", " Insight = 180 , decision=365.5 ")
+    config = load_settings().search_config()
+    assert config.recency_by_kind == ((Kind.DECISION, 365.5), (Kind.INSIGHT, 180.0))
+    assert config.half_life_for(Kind.INSIGHT) == 180.0
+    assert config.half_life_for(Kind.FACT) == config.half_life_days
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "note=10",  # unknown kind
+        "insight",  # no value
+        "insight=",
+        "=5",
+        "insight=abc",
+        "insight=0",
+        "insight=-3",
+        "insight=nan",
+        "insight=inf",
+        "insight=-inf",
+        "insight=1,insight=2",  # repeated
+        "insight=1,,decision=2",  # empty segment
+        "insight=1,",
+        "insight=1;decision=2",
+    ],
+)
+def test_recency_by_kind_rejects_bad_values_at_load_time(
+    value: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _clear_hivemind_env(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HIVEMIND_RECENCY_BY_KIND", value)
+    with pytest.raises(ValueError, match=r"(?i)recency_by_kind"):
+        load_settings()

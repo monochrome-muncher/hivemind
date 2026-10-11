@@ -142,6 +142,7 @@ async def ranked_ids(
     rrf_k: int = DEFAULT_RRF_K,
     recency_floor: float | None = None,
     recency_from_confirmation: bool = False,
+    recency_by_kind: tuple[tuple[Kind, float], ...] | None = None,
 ) -> list[str]:
     """The ranked entry ids for one query under one search config."""
     config = replace(
@@ -153,6 +154,7 @@ async def ranked_ids(
             recency_floor=recency_floor,
         ),
         recency_from_confirmation=recency_from_confirmation,
+        recency_by_kind=recency_by_kind,
     )
     service = SearchService(store, make_embedder(), config, now_fn=now_clock)
     hits = await service.search(query, limit=K)
@@ -167,6 +169,7 @@ async def measure_slices(
     age_overrides: dict[int, float] | None = None,
     confirmations: dict[int, float] | None = None,
     recency_from_confirmation: bool = False,
+    recency_by_kind: tuple[tuple[Kind, float], ...] | None = None,
 ) -> dict[str, dict[str, QueryMetrics]]:
     """Run every labelled query under one config, bucketed into the slices."""
     store, entry_ids, now_clock = await seed_temporal_corpus(age_overrides, confirmations)
@@ -180,6 +183,7 @@ async def measure_slices(
             rrf_k=rrf_k,
             recency_floor=recency_floor,
             recency_from_confirmation=recency_from_confirmation,
+            recency_by_kind=recency_by_kind,
         )
         relevant = {entry_ids[i]: 1 for i in labelled.relevant}
         metrics = evaluate_query(ranked, relevant, K)

@@ -75,7 +75,7 @@ SPEC §6.4 now carries the floored formula. That **rules out direction
 (b)**, the additive form — per this section the two are competing
 answers to the same defect and must not be stacked; reopening (b)
 means *replacing* the floor under a new ADR. **Per-kind half-lives
-stays HELD**: orthogonal, not a fix for this finding. The `rrf_k`
+stays HELD** (since built, off by default, ADR 0072): orthogonal, not a fix for this finding. The `rrf_k`
 sweep came back negative and changed no default. What remains open
 here is the *value* 0.8, not the form — see the re-measure trigger at
 the end of this item.)* §4.4 measured
@@ -143,7 +143,7 @@ answers to "stop recency being the sort key", and stacking them just
 makes the term untunable. *Per-kind half-lives* (a `fact` and a
 `decision` decaying at different rates) is a third, **orthogonal**
 idea — it changes which entries decay, not how decay competes with
-match quality — and it **stays held**: it is not a fix for this
+match quality — and it **stays held** (since built, off by default, ADR 0072): it is not a fix for this
 finding and would only add a knob on top of an already-mismatched
 form.
 
@@ -431,8 +431,8 @@ domain of `tests/eval/domains.py` and the pool of all five with entries aged
 confirmations on the 20% with the smallest summary hash (helpful with a
 note, from a user who is not the author, 0.5 to 5 days old), and reports
 hit@5 and MRR per variant with the changes against the baseline. Variants
-are named sets of `SearchConfig` overrides, so later changes (per-kind
-recency, a search recency hint) are added to `VARIANTS`. Hash-embedder
+are named sets of `SearchConfig` overrides, so later changes (a search
+recency hint) are added to `VARIANTS` (per-kind recency is, ADR 0072). Hash-embedder
 output, **machinery only, not evidence** (4 dimensions, the vector stream is
 close to noise):
 
@@ -465,6 +465,79 @@ which query they answer, so a confirmed entry that is a close but wrong
 match gains up to 1.25x over the right one at the floor. Real confirmations
 probably correlate with usefulness, but nothing measured shows that yet, so
 the setting stays off and the default does not change.
+
+## A recency profile per kind (ADR 0072)
+
+*(tools: `tests/eval/confirmation.py` variants, `make measure-ranking`;
+`tests/eval/test_kind_profile.py` for the age-varied fixture)*
+`HIVEMIND_RECENCY_BY_KIND` is unset by default. Set to
+`insight=180,decision=365` (or `insight=90,decision=180`), decisions and
+insights age by a longer half-life while facts keep 30 days, under the same
+0.8 floor. The pass rule is ADR 0071's: no domain's or the pooled hit@5 or
+MRR drops by more than 0.01, and the timeless slice improves. Everything
+below is the hash embedder: **machinery only, not evidence**.
+
+**Domain fixtures** (`tests/eval/domains.py`: 73 facts, 47 insights and 40
+decisions in 160 entries, aged 0 to 400 days; the baseline is "confirmation
+off", i.e. the shipped config). Hit@5 / MRR change against it:
+
+| fixture | insight=180, decision=365 | insight=90, decision=180 |
+|---|---|---|
+| all domains together | -0.083 / -0.035 | -0.052 / -0.016 |
+| data analysis | +0.053 / -0.022 | +0.000 / -0.026 |
+| software engineering | -0.053 / -0.046 | +0.000 / +0.000 |
+| system administration | +0.000 / -0.079 | +0.000 / -0.079 |
+| journalism and social science | +0.000 / -0.044 | +0.000 / -0.002 |
+| finance analysis | -0.053 / -0.011 | +0.000 / +0.000 |
+
+Pooled baseline: hit@5 0.479, MRR 0.246. The pass rule is not met on the
+hash embedder (the vector stream is close to noise at 4 dimensions, so these
+numbers say little either way).
+
+**Age-varied fixture** (`temporal.py`, shipped config vs the slow profile,
+MRR; hit@5 is 1.000 throughout):
+
+| ages of the newer currency members | slice | shipped | 180/365 |
+|---|---|---|---|
+| as written (5 to 12 days) | currency pairs | 0.778 | 0.833 |
+| as written | timeless | 0.617 | 0.617 |
+| as written | old-exact | 1.000 | 1.000 |
+| 30 days | currency pairs | 0.583 | 0.611 |
+| 30 days | timeless | 0.667 | 0.633 |
+| 120 days | all slices | unchanged | unchanged |
+
+The aged currency pairs gain a little while the newer member is inside the
+profile's longer half-life, and nothing moves once everything is old
+(120 days), because the floor is the same. The timeless slice does **not**
+improve here: it is unchanged as written and falls 0.667 to 0.633 at 30
+days, where a longer half-life keeps older entries closer to the top. The
+pass rule's second clause is not met on this fixture. It is recorded as
+measured; the real-embedder run decides.
+
+**Real embedders** (2026-10-11; Qwen3-Embedding 8B Q8_0, 4B and 0.6B f16 via
+llama.cpp, last-token pooling, dim 1024; weighted 70% 8B / 20% 4B / 10% 0.6B;
+the baseline is the same run's "confirmation off"). hit@5 / MRR:
+
+| fixture | baseline | insight=180, decision=365 | insight=90, decision=180 |
+|---|---|---|---|
+| all domains together | 0.894 / 0.728 | 0.878 / 0.687 | 0.895 / 0.722 |
+| data analysis | 0.995 / 0.787 | 0.995 / 0.688 | 0.995 / 0.709 |
+| software engineering | 0.911 / 0.664 | 0.947 / 0.653 | 0.947 / 0.689 |
+| system administration | 0.937 / 0.758 | 0.937 / 0.633 | 0.937 / 0.677 |
+| journalism and social science | 0.900 / 0.705 | 0.900 / 0.642 | 0.900 / 0.712 |
+| finance analysis | 0.853 / 0.684 | 0.842 / 0.609 | 0.853 / 0.662 |
+
+Pooled MRR per model, baseline to 90/180: 8B 0.727 to 0.719, 4B 0.744 to
+0.744, 0.6B 0.700 to 0.696; with 180/365: 8B 0.686, 4B 0.708, 0.6B 0.649.
+
+The pass rule (no drop beyond 0.01 in any domain or pooled) is **not met** by
+either profile. 90/180 is nearly neutral pooled (-0.006 MRR) but costs data
+analysis -0.078 and system administration -0.081 MRR. Caveat: this fixture's
+queries do not favour old decisions or insights (ages are a deterministic
+spread, unrelated to which answers are timeless), so it measures the cost of
+the profile, not the benefit the setting is for (timeless knowledge not being
+buried); a fixture with timeless old decisions would be needed to show the
+benefit. The setting stays off.
 
 ## Similarity threshold
 
