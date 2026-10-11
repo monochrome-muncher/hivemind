@@ -284,7 +284,9 @@ def test_entry_content_is_declared_untrusted_data_everywhere() -> None:
 
 # Measured 17,336 bytes once the distillation-loop skill (9,438) and the
 # compact hive_list description landed; the margin leaves room for a small
-# fix, not for a new section.
+# fix, not for a new section. The study's later additions took it to
+# 17,980; the post-2.5.0 compaction (shorter write, register and feedback
+# descriptions, no behaviour change) brought it back to 17,607.
 ALWAYS_ON_BUDGET = 18_000
 
 
