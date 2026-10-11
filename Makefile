@@ -105,6 +105,10 @@ test-unit: ## Run unit tests only (no Postgres needed)
 measure-threshold: ## Measure a search similarity threshold with the configured embedder (ADR 0062; e.g. after `make vllm`; set HIVEMIND_EMBEDDING_DIM to the deployment's)
 	uv run python -m tests.eval.threshold
 
+.PHONY: measure-confirmation
+measure-confirmation: ## Measure the confirmation recency clock (ADR 0071) with the configured embedder (e.g. after `make vllm`; set HIVEMIND_EMBEDDING_DIM to the deployment's)
+	uv run python -m tests.eval.confirmation
+
 .PHONY: check
 check: ## Type-check + lint (mypy strict + ruff)
 	uv run mypy

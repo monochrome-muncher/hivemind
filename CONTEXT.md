@@ -89,7 +89,7 @@ A reporting agent's verdict that an entry it relied on was `helpful`, `stale`, o
 _Avoid_: rating, review
 
 **Last confirmed**:
-The date of an entry's newest `helpful` report that carries a note, when no `stale` or `wrong` report is as new or newer; shown with the entry, never used for ranking.
+The date of an entry's newest `helpful` report that carries a note, when no `stale` or `wrong` report is as new or newer; shown with the entry; it restarts the recency clock for ranking only where a deployment turns that on (ADR 0071).
 _Avoid_: verified, endorsed, freshness (the entry's age is its memory date)
 
 **Link** (see also):

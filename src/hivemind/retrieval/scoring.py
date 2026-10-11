@@ -72,13 +72,19 @@ def entry_score(
     *,
     recency_floor: float | None = None,
     social_max: float | None = None,
+    confirmed_at: datetime | None = None,
 ) -> float:
     """Decay-aware final score for one entry (SPEC.md §6.4).
 
     final = fused
           * (0.5 + 0.1 * importance)
           * max(recency_floor, 0.5 ** (age_days / half_life_days))
-          * min(social_max, quality)
+          * min(social_max, quality * r_conf / r_occ)
+
+    where ``r_occ`` is the recency factor above and ``r_conf`` is the same
+    factor computed from the newer of ``occurred_at`` and ``confirmed_at``
+    (see below); without a confirmation the ratio is 1 and the last factor
+    is ``min(social_max, quality)``.
 
     ``age_days`` is derived from the entry's *occurrence* time (the
     "memory date"), not its ingest time, so a backdated entry decays
@@ -104,6 +110,19 @@ def entry_score(
     ``None`` means no cap. The service ships ``1.2``
     (``SearchConfig.social_max``), equal to the default ``quality_max``,
     so the cap changes no ranking at the shipped defaults.
+
+    ``confirmed_at`` (ADR 0071) is the entry's "last confirmed" date
+    (``FeedbackSignals.last_confirmed_at``), passed only when the service's
+    ``recency_from_confirmation`` setting is on; ``None`` is bit-identical
+    to the form above. A confirmation newer than ``occurred_at`` restarts
+    the recency clock for the upside only: the social factor becomes
+    ``min(social_max, quality * r_conf / r_occ)``, so the gain is at most
+    ``1 / recency_floor`` before the cap and the cap keeps it inside the
+    shared social budget. A confirmation at or before ``occurred_at`` adds
+    nothing. A future confirmation date clamps to age zero, like a future
+    ``occurred_at``. If ``r_occ`` underflows to 0 (unbounded form, extreme
+    age) the ratio is taken as 1 rather than dividing by zero. Only the
+    date matters, never how many confirmations there were.
     """
     age_days = (now - occurred_at).total_seconds() / 86_400.0
     if age_days < 0:
@@ -114,5 +133,15 @@ def entry_score(
     recency = math.exp(math.log(0.5) * (age_days / half_life_days))
     if recency_floor is not None and recency_floor > recency:
         recency = recency_floor
+    if confirmed_at is not None and confirmed_at > occurred_at and recency > 0.0:
+        conf_age = max(0.0, (now - confirmed_at).total_seconds() / 86_400.0)
+        conf_recency = math.exp(math.log(0.5) * (conf_age / half_life_days))
+        if recency_floor is not None and recency_floor > conf_recency:
+            conf_recency = recency_floor
+        # The gain is at most 1/floor; without a floor, an underflowed
+        # recency must not turn the ratio into inf.
+        ratio = conf_recency / recency
+        if math.isfinite(ratio):
+            quality = quality * ratio
     social = quality if social_max is None else min(social_max, quality)
     return fused * importance_factor * recency * social

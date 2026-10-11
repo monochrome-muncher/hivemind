@@ -63,6 +63,10 @@ class SearchConfig:
     # Ceiling on the upward effect of all social signals together (ADR
     # 0070). Finite and >= 1: below 1 it would penalise unrated entries.
     social_max: float = 1.2
+    # A confirmation ("last confirmed", SPEC §4.2) restarts the recency
+    # clock for the upside, inside the social_max cap (ADR 0071). Off until
+    # measured with the real embedders.
+    recency_from_confirmation: bool = False
 
     def __post_init__(self) -> None:
         # Fail at config time (ADR 0024), not per request as a
@@ -236,6 +240,8 @@ class Settings(BaseSettings):
     quality_max: float = 1.2
     # See SearchConfig.social_max (ADR 0070).
     social_max: float = 1.2
+    # See SearchConfig.recency_from_confirmation (ADR 0071).
+    recency_from_confirmation: bool = False
 
     @field_validator("embedding_api_key", "extractor_api_key")
     @classmethod
@@ -340,6 +346,7 @@ class Settings(BaseSettings):
             quality_min=self.quality_min,
             quality_max=self.quality_max,
             social_max=self.social_max,
+            recency_from_confirmation=self.recency_from_confirmation,
         )
 
 

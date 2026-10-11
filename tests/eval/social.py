@@ -32,6 +32,9 @@ class Candidate:
     counts: tuple[int, int, int] = (0, 0, 0)
     fused: float = 1.0
     importance: int = 3
+    # Days ago of the entry's "last confirmed" date; reaches the score only
+    # under a config with ``recency_from_confirmation`` on (ADR 0071).
+    confirmed_ago_days: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +48,11 @@ class Scenario:
 def score(candidate: Candidate, config: SearchConfig = CONFIG) -> float:
     """The final score of one candidate under ``config`` (the service's call)."""
     quality = feedback_quality(*candidate.counts, **config.quality_kwargs())
+    confirmed_at = (
+        FIXED_NOW - timedelta(days=candidate.confirmed_ago_days)
+        if config.recency_from_confirmation and candidate.confirmed_ago_days is not None
+        else None
+    )
     return entry_score(
         candidate.fused,
         candidate.importance,
@@ -54,6 +62,7 @@ def score(candidate: Candidate, config: SearchConfig = CONFIG) -> float:
         config.half_life_days,
         recency_floor=config.recency_floor,
         social_max=config.social_max,
+        confirmed_at=confirmed_at,
     )
 
 
@@ -83,7 +92,7 @@ S1 = Scenario(
 S2 = Scenario(
     "S2",
     "a two-year-old fact with 1 helpful (re-checked yesterday) vs one never checked",
-    Candidate("rechecked_fact", 730.0, (1, 0, 0)),
+    Candidate("rechecked_fact", 730.0, (1, 0, 0), confirmed_ago_days=1.0),
     Candidate("never_checked_fact", 730.0),
 )
 S3 = Scenario(
@@ -104,7 +113,8 @@ SCENARIOS: tuple[Scenario, ...] = (S1, S2, S3, S4)
 # Who wins today. A later ranking change that flips one edits this table in
 # the same change (and its ADR says why); nothing else should move it.
 #   S1  version grouping / supersession of the older version
-#   S2  confirmation date as the recency clock
+#   S2  confirmation date as the recency clock (ADR 0071, setting on: still
+#       the same winner, by a clear margin instead of a sliver)
 #   S3  reserve "helpful evaporation" (helpfuls fade when a fresh stale lands)
 #   S4  a narrowed importance factor
 EXPECTED_WINNER: dict[str, str] = {

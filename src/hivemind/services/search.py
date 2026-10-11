@@ -48,7 +48,8 @@ class Hit:
     # (helpful, stale, wrong) over every reporter (ADR 0051).
     feedback: FeedbackCounts = (0, 0, 0)
     # When someone other than the author last used the entry and said what
-    # they checked, with no flag since (SPEC §4.2); display only.
+    # they checked, with no flag since (SPEC §4.2); ranked on only when
+    # ``recency_from_confirmation`` is on (ADR 0071).
     last_confirmed_at: datetime | None = None
 
 
@@ -210,6 +211,11 @@ class SearchService:
                 self._config.half_life_days,
                 recency_floor=self._config.recency_floor,
                 social_max=self._config.social_max,
+                confirmed_at=(
+                    entry_signals.last_confirmed_at
+                    if self._config.recency_from_confirmation
+                    else None
+                ),
             )
             entry_scores[entry.id] = score
             scored.append(entry)
