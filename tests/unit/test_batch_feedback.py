@@ -181,11 +181,11 @@ class _CountingStore(MemoryStore):
             object.__setattr__(self, "calls", super().__getattribute__("calls") + 1)
         return attr
 
-    async def record_feedback_many(self, feedbacks: list[Feedback]) -> None:
+    async def record_feedback_many(self, feedbacks: list[Feedback]) -> list[Feedback]:
         self.calls += 1
         if self.fail_upsert:
             raise RuntimeError("store down")
-        await super().record_feedback_many(feedbacks)
+        return await super().record_feedback_many(feedbacks)
 
 
 async def test_one_entry_spelled_two_ways_is_recorded_once_under_its_canonical_id() -> None:

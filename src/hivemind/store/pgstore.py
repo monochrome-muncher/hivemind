@@ -17,7 +17,7 @@ import uuid
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 import asyncpg
@@ -293,13 +293,16 @@ _REPORTER_NOT_REVOKED = (
     "NOT EXISTS (SELECT 1 FROM agents a WHERE a.name = f.\"user\" AND a.status = 'revoked')"
 )
 
+# ``updated_at`` defaults to the database clock, like ``pinned_at`` and
+# ``created_at``, so feedback compares truthfully with them (ADR 0079).
 UPSERT_FEEDBACK = """
 INSERT INTO feedbacks (entry_id, "user", agent, verdict, note, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6)
+VALUES ($1, $2, $3, $4, $5, COALESCE($6, now()))
 ON CONFLICT (entry_id, "user", agent) DO UPDATE
 SET verdict = EXCLUDED.verdict,
     note = EXCLUDED.note,
     updated_at = EXCLUDED.updated_at
+RETURNING updated_at
 """
 
 COUNT_FEEDBACK = f"""
@@ -1280,40 +1283,37 @@ class PgStore:
 
     # -- feedback -----------------------------------------------------------------
 
-    async def record_feedback(self, feedback: Feedback) -> None:
+    async def record_feedback(self, feedback: Feedback) -> Feedback:
         """Upsert a feedback verdict (one row per entry+user+agent)."""
         async with self._connection() as conn:
-            await conn.execute(
+            updated_at = await conn.fetchval(
                 UPSERT_FEEDBACK,
                 feedback.entry_id,
                 feedback.user,
                 feedback.agent,
                 feedback.verdict.value,
                 feedback.note,
-                feedback.updated_at or datetime.now(UTC),
+                feedback.updated_at,
             )
+        return replace(feedback, updated_at=updated_at)
 
-    async def record_feedback_many(self, feedbacks: list[Feedback]) -> None:
+    async def record_feedback_many(self, feedbacks: list[Feedback]) -> list[Feedback]:
         """Upsert several feedback rows in one transaction: all land or
         none do."""
         if not feedbacks:
-            return
-        now = datetime.now(UTC)
+            return []
         async with self._transaction() as conn:
+            # ``now()`` is the transaction's start time, so this is the
+            # stamp every row without its own ``updated_at`` gets.
+            now = await conn.fetchval("SELECT now()")
             await conn.executemany(
                 UPSERT_FEEDBACK,
                 [
-                    (
-                        f.entry_id,
-                        f.user,
-                        f.agent,
-                        f.verdict.value,
-                        f.note,
-                        f.updated_at or now,
-                    )
+                    (f.entry_id, f.user, f.agent, f.verdict.value, f.note, f.updated_at)
                     for f in feedbacks
                 ],
             )
+        return [replace(f, updated_at=f.updated_at or now) for f in feedbacks]
 
     async def feedback_counts(self, entry_id: str) -> tuple[int, int, int]:
         if not _is_valid_uuid(entry_id):

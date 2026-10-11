@@ -1,5 +1,7 @@
 # Pin integrity: audited pins and "changed since pinned"
 
+> **Status note:** amended by [ADR 0079](0079-feedback-dates-on-the-database-clock.md): feedback `updated_at` now comes from the store's clock, like `pinned_at`, so the skew noted under Consequences is corrected.
+
 Amends [ADR 0058](0058-pinned-fleet-briefing.md) (pins follow supersession
 silently). Uses the audit log of [ADR 0027](0027-audit-log-of-admin-actions.md)
 and [ADR 0046](0046-registrations-are-audited.md).

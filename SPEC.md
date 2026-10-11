@@ -94,6 +94,7 @@ A lightweight, **dumb** outcome loop (no learned tuning in v1):
 | `reporter` (user, agent) | Who reported; one feedback row per (entry, user, agent) — **upsert semantics**, latest wins. An agent key reports as its agent; the admin key always as `admin`, whatever `agent` it passes, so it has one vote per entry (ADR 0066) |
 | `verdict` | `helpful` \| `stale` \| `wrong` |
 | `note` | optional free text |
+| `updated_at` | when the verdict was last set, dated by the store's clock (the one `created_at` and `pinned_at` use), never the calling pod's (ADR 0079) |
 
 Feedback feeds a bounded `quality` multiplier used only by retrieval scoring (§6.4):
 

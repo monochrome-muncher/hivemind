@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import UTC, datetime
 
 from hivemind.config import SearchConfig
 from hivemind.domain.feedback import (
@@ -34,10 +33,6 @@ def _own_entry_message(ids: list[str]) -> str:
         f"you cannot rate your own entry ({', '.join(ids)}); "
         "supersede or withdraw it instead (ADR 0065)"
     )
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC)
 
 
 ADMIN_REPORTER = "admin"  # the reserved name ADR 0060 gives the admin key's entries
@@ -121,9 +116,8 @@ class FeedbackService:
             agent=effective_agent,
             verdict=verdict,
             note=note,
-            updated_at=_utcnow(),
-        )
-        await self._store.record_feedback(feedback)
+        )  # the store stamps ``updated_at`` with its clock (ADR 0079)
+        feedback = await self._store.record_feedback(feedback)
         return FeedbackOutcome(
             feedback=feedback,
             quality=await self.quality(entry.id),
@@ -167,7 +161,6 @@ class FeedbackService:
         if own:  # ADR 0065: after readability, so an unreadable id stays not_found
             raise PermissionDenied(_own_entry_message(own))
         canonical = list(dict.fromkeys(found[eid].id for eid in ids))
-        now = _utcnow()
         rows = [
             Feedback(
                 entry_id=eid,
@@ -175,11 +168,10 @@ class FeedbackService:
                 agent=effective_agent,
                 verdict=verdict,
                 note=note,
-                updated_at=now,
             )
             for eid in canonical
         ]
-        await self._store.record_feedback_many(rows)
+        rows = await self._store.record_feedback_many(rows)  # stamped (ADR 0079)
         counts = await self._store.quality_counts(canonical)
         kwargs = self._config.quality_kwargs()
         outcomes = []
