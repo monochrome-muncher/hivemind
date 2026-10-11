@@ -29,6 +29,7 @@ from hivemind.domain.feedback import (
     is_contested,
     shown_correction,
 )
+from hivemind.domain.recency import RecencyHint
 from hivemind.domain.validation import check_pagination, check_query
 from hivemind.embeddings import EmbeddingError
 from hivemind.ports import Embedder, Store
@@ -64,7 +65,8 @@ class Hit:
     # (helpful, stale, wrong) over every reporter (ADR 0051).
     feedback: FeedbackCounts = (0, 0, 0)
     # When someone other than the author last used the entry and said what
-    # they checked, with no flag since (SPEC §4.2); display only.
+    # they checked, with no flag since (SPEC §4.2); ranked on only when
+    # ``recency_from_confirmation`` is on (ADR 0071).
     last_confirmed_at: datetime | None = None
     # The evidence on the hit (SPEC §6.1), display only: readers disagree
     # (a helpful and a stale or wrong report), the newest stale or wrong
@@ -88,6 +90,9 @@ class SearchResult:
 
     hits: list[Hit]
     degraded: bool = False
+    # The hint the scores were computed under (ADR 0073): ``DEFAULT`` unless
+    # the server setting is on and the caller asked for another.
+    recency: RecencyHint = RecencyHint.DEFAULT
 
 
 NowFn = Callable[[], datetime]
@@ -139,9 +144,12 @@ class SearchService:
         offset: int | None = None,
         *,
         visibility: Visibility | None = None,
+        recency: RecencyHint = RecencyHint.DEFAULT,
     ) -> list[Hit]:
         """``search_result`` without the degraded flag: the hits only."""
-        result = await self.search_result(query, filters, limit, offset, visibility=visibility)
+        result = await self.search_result(
+            query, filters, limit, offset, visibility=visibility, recency=recency
+        )
         return result.hits
 
     async def search_result(
@@ -152,14 +160,18 @@ class SearchService:
         offset: int | None = None,
         *,
         visibility: Visibility | None = None,
+        recency: RecencyHint = RecencyHint.DEFAULT,
     ) -> SearchResult:
         """Run a hybrid query and return compact hits, best first.
 
         If the embedder fails the result is keyword-only and ``degraded``
         (ADR 0048), not an error. A caller's first-page search is counted
-        per home fleet (ADR 0056).
+        per home fleet (ADR 0056). ``recency`` is a per-call hint (ADR 0073):
+        it changes the scoring only while ``recency_hint_enabled`` is on, and
+        the result says which hint was applied. Send the same hint on every
+        page of one search.
         """
-        result = await self._ranked(query, filters, limit, offset, visibility)
+        result = await self._ranked(query, filters, limit, offset, visibility, recency)
         if visibility is not None and not offset:
             # An empty degraded answer reflects the embedder, not the pool.
             empty = not result.hits and not result.degraded
@@ -180,6 +192,7 @@ class SearchService:
         limit: int | None,
         offset: int | None,
         visibility: Visibility | None,
+        recency: RecencyHint,
     ) -> SearchResult:
         """The search itself (``search_result`` without the counting)."""
         # Validate before any embedder or store call (ADR 0040).
@@ -190,6 +203,7 @@ class SearchService:
         limit = limit if limit is not None else self._config.default_limit
         offset = offset or 0
         top_k = self._config.candidate_top_k
+        applied = self._config.applied_hint(recency)
 
         # 1. Both streams concurrently (PERF-4); ``vector_ids`` is None when
         # the embedder failed (ADR 0048).
@@ -206,7 +220,7 @@ class SearchService:
             weights=[self._config.weight_keyword, self._config.weight_vector],
         )
         if not fused:
-            return SearchResult([], degraded)
+            return SearchResult([], degraded, applied)
 
         # 3. Fetch candidates + batched feedback signals.
         candidate_ids = list(fused)
@@ -232,15 +246,17 @@ class SearchService:
             entry_feedback[entry.id] = entry_signals
             helpful, stale, wrong = entry_signals.counts
             quality = feedback_quality(helpful, stale, wrong, **quality_kwargs)
+            terms = self._config.recency_terms(entry.kind, recency)
             score = entry_score(
                 fused[entry.id],
                 entry.importance,
                 entry.occurred_at,
                 quality,
                 now,
-                self._config.half_life_days,
-                recency_floor=self._config.recency_floor,
+                terms.half_life_days,
+                recency_floor=terms.recency_floor,
                 social_max=self._config.social_max,
+                confirmed_at=(entry_signals.last_confirmed_at if terms.use_confirmation else None),
             )
             entry_scores[entry.id] = score
             scored.append(entry)
@@ -270,7 +286,7 @@ class SearchService:
             )
             for entry in ordered[offset : offset + limit]
         ]
-        return SearchResult(hits, degraded)
+        return SearchResult(hits, degraded, applied)
 
     async def _version_groups(
         self,

@@ -25,6 +25,7 @@ from hivemind.domain.entry import (
     SourceType,
 )
 from hivemind.domain.feedback import Feedback, FeedbackCounts, FeedbackSummary, Verdict
+from hivemind.domain.recency import RecencyHint, parse_recency_hint
 from hivemind.domain.validation import MAX_GET_IDS, InvalidInput, check_pagination
 from hivemind.embeddings import EmbeddingError
 from hivemind.ports import Credential, Store
@@ -473,6 +474,7 @@ async def hive_search(
     created_to: str | None = None,
     include_inactive: bool = False,
     flagged: bool = False,
+    recency: str | None = None,
 ) -> dict[str, object]:
     """Hybrid search over the pool; returns compact hits (no bodies).
 
@@ -483,6 +485,13 @@ async def hive_search(
     If the embedding service is down the hits come from the keyword
     stream alone and the result carries ``degraded: "keyword_only"`` and
     a ``note`` (ADR 0048), instead of an ``embedding_unavailable`` error.
+
+    ``recency`` (ADR 0073) is ``default``, ``prefer_recent`` (the question is
+    about the current state) or ``ignore_age`` (it is timeless). It changes
+    the ranking only when the server turned the hint on, and then the result
+    carries ``recency`` with the hint applied; without that key the default
+    scoring was used. Send the same value on every page. An unknown value is
+    ``invalid_input``.
 
     ``entities`` (ADR 0016, SPEC §13) filters by machine-extracted
     entity names: AND-semantics, case-insensitive; kinds are display-only.
@@ -508,11 +517,17 @@ async def hive_search(
             include_inactive=include_inactive,
             flagged=flagged,
         )
+        hint = parse_recency_hint(recency)
     except ValueError as exc:
         return _error(ERR_INVALID_INPUT, str(exc))
     try:
         result = await app.search_service.search_result(
-            query, filters, limit, offset=offset, visibility=app.credential.visibility()
+            query,
+            filters,
+            limit,
+            offset=offset,
+            visibility=app.credential.visibility(),
+            recency=hint,
         )
     except InvalidInput as exc:
         return _error(ERR_INVALID_INPUT, str(exc))
@@ -520,6 +535,8 @@ async def hive_search(
         "count": len(result.hits),
         "hits": [_hit_dict(h) for h in result.hits],
     }
+    if result.recency is not RecencyHint.DEFAULT:
+        response["recency"] = result.recency.value  # ADR 0073: only when applied
     if result.degraded:
         # ADR 0048: the embedding service is down; these hits are keyword
         # matches only, so a miss here is weaker evidence than usual.

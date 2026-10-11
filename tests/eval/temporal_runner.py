@@ -27,10 +27,14 @@ pipeline is untouched.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import timedelta
 from typing import Any
 
+from hivemind.config import PREFER_RECENT_FLOOR
 from hivemind.domain.entry import EntryDraft, Kind
+from hivemind.domain.feedback import Feedback, Verdict
+from hivemind.domain.recency import RecencyHint
 from hivemind.memstore import MemoryStore
 from hivemind.retrieval.eval import aggregate_report, evaluate_query
 from hivemind.services.governance import WriteService
@@ -66,6 +70,8 @@ FUSED_RANGE_AT_DEFAULT_K = 2 * (DEFAULT_RRF_K + CANDIDATE_TOP_K) / (DEFAULT_RRF_
 
 # A variant is a rule mapping a query to the half-life it is scored under.
 HalfLifeRule = Callable[[LabelledQuery], float]
+# ... or, for the recency hint (ADR 0073), to the hint the query carries.
+HintRule = Callable[[LabelledQuery], RecencyHint]
 
 # The slices reported, in report order: the §4.4 axis first, then the
 # competition-pattern diagnostic, then the whole set.
@@ -82,6 +88,7 @@ def slices_of(labelled: LabelledQuery) -> tuple[str, ...]:
 
 async def seed_temporal_corpus(
     age_overrides: dict[int, float] | None = None,
+    confirmations: dict[int, float] | None = None,
 ) -> tuple[MemoryStore, list[str], FixedClock]:
     """Seed the age-varied corpus; return the store, entry ids and the "now".
 
@@ -91,7 +98,11 @@ async def seed_temporal_corpus(
     be). ``age_overrides`` maps a corpus index to a replacement age in days
     (the aged-currency slice uses it; ``None`` is the fixture as written).
     The search clock stays pinned at ``FIXED_NOW``; entry ages come
-    from the explicit ``occurred_at`` each draft carries.
+    from the explicit ``occurred_at`` each draft carries. ``confirmations``
+    maps a corpus index to how many days ago a user other than the author
+    marked the entry helpful with a note, which gives it that "last
+    confirmed" date (SPEC §4.2); it only affects ranking under a config with
+    ``recency_from_confirmation`` on (ADR 0071).
     """
     store_clock = make_clock()
     now_clock = make_clock()
@@ -112,6 +123,17 @@ async def seed_temporal_corpus(
         entry = await write_service.write(draft)
         entry_ids.append(entry.id)
         store_clock.advance_days(1.0 / 86_400.0)
+    for index, days_ago in (confirmations or {}).items():
+        await store.record_feedback(
+            Feedback(
+                entry_ids[index],
+                "eval-confirmer",
+                "eval-confirmer-agent",
+                Verdict.HELPFUL,
+                note="re-checked against the live system",
+                updated_at=FIXED_NOW - timedelta(days=days_ago),
+            )
+        )
     return store, entry_ids, now_clock
 
 
@@ -123,11 +145,18 @@ async def ranked_ids(
     *,
     rrf_k: int = DEFAULT_RRF_K,
     recency_floor: float | None = None,
+    recency_from_confirmation: bool = False,
+    recency_by_kind: tuple[tuple[Kind, float], ...] | None = None,
+    recency: RecencyHint = RecencyHint.DEFAULT,
+    prefer_recent_floor: float | None = PREFER_RECENT_FLOOR,
 ) -> list[str]:
-    """The ranked entry ids for one query under one search config."""
-    service = SearchService(
-        store,
-        make_embedder(),
+    """The ranked entry ids for one query under one search config.
+
+    A non-default ``recency`` hint turns ``recency_hint_enabled`` on for
+    this config (ADR 0073); ``prefer_recent_floor`` is the floor
+    ``prefer_recent`` scores under (``None`` = no floor).
+    """
+    config = replace(
         make_search_config(
             candidate_top_k=CANDIDATE_TOP_K,
             default_limit=K,
@@ -135,9 +164,13 @@ async def ranked_ids(
             rrf_k=rrf_k,
             recency_floor=recency_floor,
         ),
-        now_fn=now_clock,
+        recency_from_confirmation=recency_from_confirmation,
+        recency_by_kind=recency_by_kind,
+        recency_hint_enabled=recency is not RecencyHint.DEFAULT,
+        prefer_recent_floor=prefer_recent_floor,
     )
-    hits = await service.search(query, limit=K)
+    service = SearchService(store, make_embedder(), config, now_fn=now_clock)
+    hits = await service.search(query, limit=K, recency=recency)
     return [hit.entry_id for hit in hits]
 
 
@@ -147,9 +180,18 @@ async def measure_slices(
     rrf_k: int = DEFAULT_RRF_K,
     recency_floor: float | None = None,
     age_overrides: dict[int, float] | None = None,
+    confirmations: dict[int, float] | None = None,
+    recency_from_confirmation: bool = False,
+    recency_by_kind: tuple[tuple[Kind, float], ...] | None = None,
+    hint: HintRule | None = None,
+    prefer_recent_floor: float | None = PREFER_RECENT_FLOOR,
 ) -> dict[str, dict[str, QueryMetrics]]:
-    """Run every labelled query under one config, bucketed into the slices."""
-    store, entry_ids, now_clock = await seed_temporal_corpus(age_overrides)
+    """Run every labelled query under one config, bucketed into the slices.
+
+    ``hint`` maps a query to the recency hint it carries (ADR 0073); the
+    default is no hint, the shipped scoring.
+    """
+    store, entry_ids, now_clock = await seed_temporal_corpus(age_overrides, confirmations)
     slices: dict[str, dict[str, QueryMetrics]] = {name: {} for name in SLICES}
     for labelled in temporal_queries():
         ranked = await ranked_ids(
@@ -159,6 +201,10 @@ async def measure_slices(
             half_life(labelled),
             rrf_k=rrf_k,
             recency_floor=recency_floor,
+            recency_from_confirmation=recency_from_confirmation,
+            recency_by_kind=recency_by_kind,
+            recency=hint(labelled) if hint else RecencyHint.DEFAULT,
+            prefer_recent_floor=prefer_recent_floor,
         )
         relevant = {entry_ids[i]: 1 for i in labelled.relevant}
         metrics = evaluate_query(ranked, relevant, K)
