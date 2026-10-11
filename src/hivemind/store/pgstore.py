@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import re
 import uuid
 from collections.abc import AsyncIterator, Sequence
@@ -109,6 +110,15 @@ INSERT_ENTRY_RETURNING = INSERT_ENTRY.rstrip() + " RETURNING " + _ENTRY_COLUMNS
 SELECT_ENTRY = "SELECT " + _ENTRY_COLUMNS + " FROM entries WHERE id = $1"
 
 SELECT_ENTRIES = "SELECT " + _ENTRY_COLUMNS + " FROM entries WHERE id = ANY($1)"
+
+# ADR 0074: every pair among the candidates, from the stored vectors (one
+# self-join, no embedder call). Rows without a vector drop out of the join.
+PAIRWISE_SIMILARITY = (
+    "SELECT a.id AS a, b.id AS b, 1 - (a.embedding <=> b.embedding) AS similarity "
+    "FROM entries a JOIN entries b ON a.id < b.id "
+    "WHERE a.id = ANY($1) AND b.id = ANY($1) "
+    "AND a.embedding IS NOT NULL AND b.embedding IS NOT NULL"
+)
 
 # Reverse supersession link (PERF-1/STORE-2): served by the partial
 # ``entries_superseded_by_idx`` (migration 0008); the predicate below must
@@ -897,6 +907,20 @@ class PgStore:
         async with self._connection() as conn:
             rows = await conn.fetch(SELECT_ENTRIES, ids)
         return {str(row["id"]): _row_to_entry(row) for row in rows}
+
+    async def pairwise_similarity(self, entry_ids: list[str]) -> dict[tuple[str, str], float]:
+        ids = _valid_uuids(list(dict.fromkeys(entry_ids)))
+        if len(ids) < 2:
+            return {}
+        async with self._connection() as conn:
+            rows = await conn.fetch(PAIRWISE_SIMILARITY, ids)
+        out: dict[tuple[str, str], float] = {}
+        for row in rows:
+            a, b = sorted((str(row["a"]), str(row["b"])))
+            similarity = float(row["similarity"])
+            # pgvector gives NaN for a zero vector; MemoryStore says 0.0.
+            out[(a, b)] = similarity if math.isfinite(similarity) else 0.0
+        return out
 
     async def list_predecessors(self, entry_ids: list[str]) -> list[Entry]:
         ids = _valid_uuids(entry_ids)

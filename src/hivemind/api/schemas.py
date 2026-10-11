@@ -332,6 +332,13 @@ class EntriesOut(BaseModel):
     not_found: list[str]
 
 
+class SimilarOut(BaseModel):
+    """Another member of a hit's version group (ADR 0074)."""
+
+    id: str
+    occurred_at: datetime
+
+
 class HitOut(BaseModel):
     """A compact search hit (SPEC.md §6.1: progressive disclosure).
 
@@ -356,6 +363,7 @@ class HitOut(BaseModel):
     correction: CorrectionOut | None = None
     supersedes: int | None = None
     state: EntryState | None = None
+    similar: list[SimilarOut] | None = None  # ADR 0074; null when none
 
     @classmethod
     def from_hit(cls, hit: Hit) -> HitOut:
@@ -386,6 +394,11 @@ class HitOut(BaseModel):
             ),
             supersedes=hit.supersedes or None,
             state=hit.state,
+            similar=(
+                [SimilarOut(id=m.entry_id, occurred_at=m.occurred_at) for m in hit.similar]
+                if hit.similar
+                else None
+            ),
         )
 
 

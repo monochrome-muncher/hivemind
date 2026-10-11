@@ -748,3 +748,65 @@ unproven for current-state questions: there is no real-embedder fixture with
 labelled current-state queries yet. A hint acts only when an agent sends it, so
 turning `HIVEMIND_RECENCY_HINT` on is low-risk; the measurement supports
 enabling it for `ignore_age`. The default stays off.
+
+## Version grouping
+
+ADR 0074 shows unlinked near-copies of one fact next to each other, newest
+first, when `HIVEMIND_VERSION_GROUP_MIN_SIMILARITY` (tau) is set. Whether two
+entries are versions or merely about the same system depends on the
+embedding model, so tau is measured with the model a deployment runs:
+
+    make vllm   # or use the production endpoint
+    make measure-versions HIVEMIND_EMBEDDING_DIM=1024
+
+For each of the five domains of the threshold study, the pool is the
+domain's own 32 entries plus six pairs of an older and a newer unlinked
+statement of one fact (a changed value: "pool size is 20", later "raised to
+90") and six same-system distractors (another setting of the same service).
+The queries for the newer entry use the older statement's words, so the older
+one often has the higher lexical overlap, the case grouping is for. For
+grouping off and each tau from 0.70 to 0.95 it reports, per domain and
+pooled:
+
+| column | meaning |
+|---|---|
+| false grouping | distractors grouped with a version member or another distractor, in a search for their pair's fact |
+| true grouping | version pairs grouped in a search for the fact |
+| newer-member MRR | reciprocal rank of the newer entry for the query about the fact |
+| old-exact MRR | the same for the older entry and a query quoting it (it can only fall: the newer member moves ahead) |
+| hit@5 | over all the domain's queries: the two above and its answerable queries |
+| groups with other entries | groups touching the domain's own entries (information) |
+
+Adopt a tau only where pooled false grouping is at most 5%, no domain is
+above 10%, the sysadmin domain passes (false grouping at most 5%, no loss
+against off, old-exact within 0.02), newer-member MRR is up, old-exact MRR is
+at most 0.02 below baseline (it can only fall, so "not below" could never pass) and
+pooled hit@5 is not lower. The tool prints the verdict for every tau and the
+lowest passing one.
+
+`tests/eval/test_version_measurement.py` runs the same code on the 4-dimension
+hash embedder; that checks the machinery, and its numbers mean nothing.
+
+Measured 2026-10-11 with Qwen3-Embedding 8B, 4B and 0.6B (llama.cpp GGUF,
+vectors cut to 1024 dimensions), weighted 70/20/10, pooled over the five
+domains:
+
+| tau | false grouping | true grouping | newer-member MRR | old-exact MRR | hit@5 |
+|---|---|---|---|---|---|
+| off | 0% | 0% | 0.201 | 0.260 | 0.762 |
+| 0.70 | 66% | 74% | 0.255 | 0.186 | 0.743 |
+| 0.75 | 48% | 70% | 0.239 | 0.201 | 0.750 |
+| 0.80 | 31% | 54% | 0.230 | 0.225 | 0.743 |
+| 0.85 | 6% | 37% | 0.225 | 0.232 | 0.759 |
+| 0.90 | 1% | 12% | 0.212 | 0.248 | 0.760 |
+| 0.95 | 0% | 1% | 0.202 | 0.259 | 0.762 |
+
+No tau passes on any of the three models, so the suggestion is none: keep
+grouping off. The two sides never meet. Where false grouping is low enough
+(0.90 and up), grouping finds few true pairs and the newer-member gain is
+about 0.01; sysadmin, whose distractors are other settings of the same
+service, still loses against off at 0.90 on every model, and data analysis
+groups 17% of its distractors at 0.90 on 0.6B and 4B. Below 0.90, a third
+or more of the distractors are grouped. Same-system facts sit as close
+together in these embedders as two versions of one fact, so cosine alone
+cannot tell them apart.

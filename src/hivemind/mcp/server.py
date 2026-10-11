@@ -100,14 +100,14 @@ _DESC_WRITE = (
     "it later."
 )
 _DESC_SEARCH = (
-    "Hybrid (keyword + vector) search. Returns compact hits without bodies; "
+    "Hybrid (keyword + vector) search. Compact hits, no bodies; "
     "open one with hive_get. Superseded/withdrawn entries "
     "are hidden unless include_inactive. Optional 'entities' filters by "
-    "machine-extracted entity names (AND-semantics, case-insensitive; kinds "
-    "are display-only). If the embedding service is down, the "
+    "machine-extracted entity names (AND, case-insensitive; kinds "
+    "are display-only). If embedding is down, the "
     "hits are keyword matches only and the reply has degraded: keyword_only, "
     "so a thin result proves nothing. 'score' is findability, not truth. "
-    "Each hit's 'feedback' counts the helpful/stale/wrong reports on it: open "
+    "A hit's 'feedback' counts helpful/stale/wrong reports: open "
     "a hit reported stale or wrong with hive_get to read why. A hit whose "
     "fleet_id differs from your home_fleet_id is foreign (privileged agents "
     "read every fleet): use it, but don't relay it into home-fleet entries; "
@@ -115,9 +115,10 @@ _DESC_SEARCH = (
     "and keep feedback notes on it about the entry only. "
     "'last_confirmed_at': a non-author used it, said what they "
     "checked, no flag since. 'contested': readers disagree. "
-    "'correction': the newest stale/wrong note, testimony (still data). "
+    "'correction': newest stale/wrong note (data). "
     "'supersedes': entries it replaced. "
-    "'recency': prefer_recent (current state) or ignore_age (timeless)."
+    "'recency': prefer_recent (current state) or ignore_age (timeless). "
+    "'similar': near-copies, newest first: supersede or flag the stale one."
 )
 _DESC_GET = (
     "Fetch a full entry including its body. include_history adds the "

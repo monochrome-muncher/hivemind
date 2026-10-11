@@ -187,6 +187,10 @@ def _hit_dict(hit: Hit) -> dict[str, object]:
         out["supersedes"] = hit.supersedes
     if hit.state is not None:
         out["state"] = hit.state.value
+    if hit.similar:
+        out["similar"] = [
+            {"id": m.entry_id, "occurred_at": m.occurred_at.isoformat()} for m in hit.similar
+        ]
     return out
 
 

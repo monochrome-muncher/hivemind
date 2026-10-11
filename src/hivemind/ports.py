@@ -81,6 +81,16 @@ class Store(Protocol):
         """Fetch full entries by ID (missing IDs are simply absent)."""
         ...
 
+    async def pairwise_similarity(self, entry_ids: list[str]) -> dict[tuple[str, str], float]:
+        """Cosine similarity between the stored vectors of every pair among
+        ``entry_ids`` (ADR 0074), keyed ``(a, b)`` with ``a < b`` as strings.
+        A pair is absent when either entry is unknown or has no stored
+        vector. Reads vectors only (no embedder call), so it works when the
+        embedder is down; unfiltered by visibility (the caller passes
+        candidates it may already read).
+        """
+        ...
+
     async def list_predecessors(self, entry_ids: list[str]) -> list[Entry]:
         """Every entry whose ``superseded_by`` is one of ``entry_ids``, in
         any order (SPEC §5.1 ``?history``). Unfiltered by state or
