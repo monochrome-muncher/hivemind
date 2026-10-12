@@ -1,6 +1,6 @@
 ---
 name: hivemind
-description: Your organization's Hivemind (the hive_* MCP tools) is your long-term memory. Use it every session: recall before non-trivial work, write what others could reuse, prefer it over local memory files. Load at session start, after compaction, and whenever you remember, look up or record knowledge.
+description: Your organization's Hivemind (the hive_* MCP tools) is your long-term memory. Use it every session. Recall before non-trivial work, write what others could reuse, prefer it over local memory files. Load at session start, after compaction, and whenever you remember, look up or record knowledge.
 ---
 
 # Hivemind: your long-term memory

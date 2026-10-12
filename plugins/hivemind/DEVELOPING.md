@@ -19,9 +19,9 @@ to install or use it, read [README.md](README.md) instead.
 | `skills/hivemind/` | The always-on rules: `hive_whoami` first, when to search, when and how to write, what never to write, local memory only as a fallback |
 | `skills/hivemind-setup/` | The guided setup. Harness-neutral itself: it works out its harness first (never from the model), then reads only that harness's file in `references/` |
 | `skills/hivemind-setup/scripts/hivemind-session-start.sh` | The reminder text the startup hook prints, including its incognito variant |
-| `hooks/hooks.json` | A `SessionStart` hook (`startup`, `resume`, `clear`, `compact`, `fork`) that re-injects the reminder whenever the context is rebuilt (Claude Code, Codex), and a `Stop` hook (Claude Code, Codex) |
+| `hooks/hooks.json` | A `SessionStart` hook (`startup`, `resume`, `clear`, `compact`, `fork`) that re-injects the reminder whenever the context is rebuilt (Claude Code, Codex), and a `Stop` hook (Claude Code, Codex). GitHub Copilot CLI reads the same file (its Claude-style hooks format) |
 | `skills/hivemind-setup/scripts/hivemind-stop.sh` | The `Stop` hook ([below](#the-stop-hook-and-the-post-compaction-line)) |
-| `.mcp.json` | The MCP server for Claude Code, built from `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY` |
+| `.mcp.json` | The MCP server for Claude Code, built from `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY`. GitHub Copilot CLI rejects it (see its quirk below) |
 | `package.json`, `cordis.patch.yml`, `dsh/` | The DeepSeek Harness bundle: the MCP server row, a small provider (`dsh/hivemind-skills.js`) that serves `skills/`, and the Stop reminder (`dsh/hivemind-reminders.js`) |
 | `plugin.yaml`, `__init__.py` | The Hermes plugin: serves `skills/` and registers a system-prompt section |
 | `extensions/hivemind.ts` | The Pi and Oh My Pi extension: the system-prompt section, the MCP server on Pi 0.99+, and blocking Hivemind calls in incognito sessions |
@@ -30,7 +30,7 @@ to install or use it, read [README.md](README.md) instead.
 | `CHANGELOG.md` | What changed for agents in each release |
 | `../../package.json` (repository root) | Same package name as `plugins/hivemind/package.json`. Lets DeepSeek Harness, Pi and OpenCode install the plugin from the repository's Git URL (OpenCode loads `exports["./server"]`, else `main`) |
 | `../../gemini-extension.json`, `../../skills`, `../../hooks/hooks.json` (repository root) | The Gemini CLI extension, installed with `gemini extensions install <git-url>`: Gemini reads these three at the root of what it installs. `skills` is a link to `skills/` here; the hooks run the two scripts above as `SessionStart` and `AfterAgent` hooks |
-| `../../.claude-plugin/`, `../../.agents/plugins/` (repository root) | The marketplaces Claude Code, Codex and Oh My Pi install from |
+| `../../.claude-plugin/`, `../../.agents/plugins/` (repository root) | The marketplaces Claude Code, Codex and Oh My Pi install from. GitHub Copilot CLI reads `.claude-plugin/marketplace.json` and `.claude-plugin/plugin.json` too, so it needs no manifest of its own |
 
 ## How each harness gets each piece
 
@@ -47,6 +47,7 @@ reminder that survives compaction and new sessions.
 | Oh My Pi | the plugin's `.mcp.json` (server `hivemind:hivemind`; a hand `hivemind` entry in `~/.omp/agent/mcp.json` replaces it) | the plugin | the extension's system-prompt section |
 | OpenCode | `opencode/hivemind.js` (skipped if a hand-configured `hivemind` server exists or no key is set) | the plugin | added to every model request |
 | Gemini CLI | the extension's `gemini-extension.json` (a `hivemind` entry in `~/.gemini/settings.json` replaces it) | the extension | the `GEMINI.md` instruction block, plus the extension's `SessionStart` hook |
+| GitHub Copilot CLI | the user's `~/.copilot/mcp-config.json` (the whole `url` cannot come from the environment; the key can) | the plugin | the plugin's `SessionStart` hook, plus the `~/.copilot/copilot-instructions.md` instruction block |
 
 Everything the setup skill tells an agent to do for one harness lives in
 that harness's file under `skills/hivemind-setup/references/`. The skill
@@ -101,6 +102,46 @@ itself names no harness-specific paths, and a test enforces this.
   without symlink support the `skills` link is a plain file, so the
   skills would have to be copied by hand.
 
+- **GitHub Copilot CLI** (checked with 1.0.95, headless against a mock
+  OpenAI-compatible model: `COPILOT_PROVIDER_BASE_URL`, `COPILOT_MODEL`,
+  `COPILOT_PROVIDER_API_KEY` and `copilot -p ... --allow-all-tools`; no
+  GitHub login is needed there).
+  - *Install.* `copilot plugin marketplace add <repo-url>` reads the
+    root `.claude-plugin/marketplace.json`, and `copilot plugin install
+    hivemind@hivemind` installs `plugins/hivemind` through
+    `.claude-plugin/plugin.json`: both skills, and the hooks from
+    `hooks/hooks.json` (Claude-style `SessionStart` and `Stop`; Copilot
+    sets `CLAUDE_PLUGIN_ROOT`, `COPILOT_PLUGIN_ROOT` and `PLUGIN_ROOT`
+    for them). A local-path marketplace is loaded live, not copied.
+    `copilot plugin install <owner>/<repo>` fails (no `plugin.json` at
+    the root), `<owner>/<repo>:plugins/hivemind` works but Copilot warns
+    that direct installs are deprecated, so the docs name the marketplace.
+  - *MCP server.* Copilot validates a server's `url` as a URL before
+    expanding variables: `"${HIVEMIND_MCP_URL}"`, `$HIVEMIND_MCP_URL`,
+    `${env:...}` and `${SCHEME}://host` are all "Invalid url", and the
+    rest of that file's servers go with it. A variable inside the host or
+    path (`http://${HOST}/mcp`) and `${VAR}` in `headers` do expand. So
+    the shared `.mcp.json` (Claude Code, Oh My Pi) is skipped with a
+    warning in Copilot's log, and the server comes from the user's own
+    `~/.copilot/mcp-config.json` entry (`copilot mcp add` stores the
+    literal `${HIVEMIND_API_KEY}`), which the setup skill writes. Tools
+    appear as `<server>-hive_*`. A server's own `instructions` reach the
+    system prompt only for allowlisted servers
+    (`--allow-all-mcp-server-instructions`), so the skill and the
+    reminders carry the rules.
+  - *SessionStart.* Copilot reads only a top-level `additionalContext`
+    in the hook's JSON and drops `hookSpecificOutput`, so
+    `hivemind-session-start.sh` prints the flat form when `COPILOT_CLI`
+    is set (Copilot sets it for hooks). The text arrives as its own user
+    message before the first prompt. `source` is `new`, `resume` or
+    `startup`: no compaction source, hence no post-compaction line, and
+    nothing re-injects the text after a compaction.
+  - *Skills.* Copilot parses `SKILL.md` frontmatter with a strict YAML
+    parser: an unquoted `: ` in `description` skipped the `hivemind` skill
+    entirely until the fix after 2.7.0 (`copilot skill list` reports
+    "failed to parse YAML frontmatter"). `test_skill_descriptions_are_strict_yaml`
+    pins it.
+
 ## The Stop hook and the post-compaction line
 
 Two nudges that get knowledge written before it is lost: in Claude Code
@@ -108,9 +149,11 @@ and Codex from `hooks/hooks.json`, in Pi and Oh My Pi from the extension
 and the OpenCode plugin, in DeepSeek Harness the Stop reminder from
 `dsh/hivemind-reminders.js` (below). Gemini CLI gets the Stop reminder
 from the extension's `AfterAgent` hook (`../../hooks/hooks.json`).
-Hermes does not have them.
+Hermes does not have them. GitHub Copilot CLI gets the Stop reminder from
+the plugin's `Stop` hook (the shared `hooks/hooks.json`), and no
+post-compaction line.
 
-The script counts three transcript formats:
+The script counts four transcript formats:
 
 - Claude Code's `"type": "tool_use"` records.
 - Codex's `function_call`, `custom_tool_call` and `local_shell_call`
@@ -125,6 +168,16 @@ The script counts three transcript formats:
   and sends the reason as the next prompt, and `mcp_hivemind_hive_write`
   keeps it quiet. Gemini's `SessionStart` has no compaction source, so it
   gets no post-compaction line.
+
+- Copilot CLI's `events.jsonl`, with one `tool.execution_start` event per
+  call; a Hivemind write shows as `"name":"hivemind-hive_write"`.
+  Checked with Copilot CLI 1.0.95 against a mock model (`Stop` input:
+  `session_id`, `transcript_path`, `stop_hook_active`, as for Claude
+  Code): the hook blocks once, the reason becomes the next prompt, and a
+  `hive_write` keeps it quiet. Copilot writes `events.jsonl` a moment
+  after the events happen (it was not there yet when a sub-second session
+  stopped), so the count can trail by a call or two: fine for a 20-call
+  threshold, and the script fails open when the file is missing.
 
 - **Post-compaction line.** When the `SessionStart` source is `compact`
   (read from the hook's stdin JSON), `hivemind-session-start.sh` appends
@@ -217,6 +270,7 @@ does two things:
 | Hermes | `HIVEMIND_ENABLED=false` | `enabled: ${HIVEMIND_ENABLED}` in the hivemind server entry in `~/.hermes/config.yaml`, and **no** `HIVEMIND_ENABLED` in `~/.hermes/.env` (Hermes loads it over the environment, so it would override the launcher); for normal sessions leave it unset or export `HIVEMIND_ENABLED=true` in the shell profile |
 | Pi | Pi 0.99+ built-in MCP: the package registers no server, and the key and URL are unset. With pi-mcp-adapter: an exclusive MCP config, the servers of your global MCP config files minus hivemind (project servers are left out: the adapter would start them without its approval prompt). Either way the extension also blocks `mcp__hivemind…` calls (codemode scripts included), the adapter's `mcp` proxy and `mcpScript` calls that name Hivemind (the `mcpScript` scan is best effort) | the hivemind package; `python3` with the adapter |
 | Oh My Pi | `HIVEMIND_MCP_URL`/`HIVEMIND_API_KEY` unset, so the server is never contacted (Oh My Pi warns once that it is unavailable); the extension also blocks any Hivemind call | the hivemind plugin |
+| GitHub Copilot CLI | `--disable-mcp-server hivemind` for the session (it never contacts the server); the launcher also unsets the key and URL | the server named `hivemind` in `~/.copilot/mcp-config.json` |
 | Gemini CLI | `HIVEMIND_MCP_URL`/`HIVEMIND_API_KEY` unset, so the extension's server is never contacted (Gemini notes an MCP issue) | the hivemind extension, and no hand entry in `settings.json` |
 | OpenCode | the plugin skips the server; a hand-configured one is disabled with `OPENCODE_CONFIG_CONTENT` | nothing |
 
@@ -225,8 +279,8 @@ Where the switch is missing or not configured (the Hermes entry without
 command), the session is incognito **by restraint**: the tools are
 loaded, the key and URL stay in the environment, and an agent with a
 shell could still call the REST API. The launcher unsets the key and URL
-only where the server is kept from loading (Claude Code, Codex, DeepSeek
-Harness, Pi, Oh My Pi, Gemini CLI), because the other harnesses may still need them
+only where the server is kept from loading (Claude Code, Codex, Copilot CLI,
+DeepSeek Harness, Pi, Oh My Pi, Gemini CLI), because the other harnesses may still need them
 (ADR 0035). A DeepSeek Harness session also stays incognito when a
 project `.env` names `HIVEMIND_*` variables: incognito is on if the
 process environment or `~/.dsh/.env` says so, and no project `.env` can
@@ -237,6 +291,10 @@ session's shell.
 Setting only `HIVEMIND_INCOGNITO=1`, or turning incognito on during a
 session, is incognito by restraint, and the agent says so. A session
 started incognito cannot turn Hivemind back on.
+
+Copilot CLI's switch was checked live with 1.0.95: with it the model sees no
+`hivemind-hive_*` tool, the Hivemind server gets no request, the startup
+hook prints the incognito text and the stop hook stays silent.
 
 The Claude Code switch was checked live with Claude Code 2.1.287 against
 a local listener: denying `plugin:hivemind:hivemind` or the URL stopped

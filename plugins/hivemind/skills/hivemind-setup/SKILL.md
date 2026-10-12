@@ -38,7 +38,7 @@ you stand.
 ## Which harness am I in?
 
 The **harness** is the program that runs you and gives you your tools:
-Claude Code, Codex, Gemini CLI, DeepSeek Harness, Hermes, Pi, Oh My Pi,
+Claude Code, Codex, GitHub Copilot CLI, Gemini CLI, DeepSeek Harness, Hermes, Pi, Oh My Pi,
 OpenCode or another. The **model** is what you are. They are independent: any model
 can run in any harness.
 
@@ -48,7 +48,7 @@ can run in any harness.
   in Codex.
 - **Decide from evidence**, strongest first:
   1. **Your system prompt**: most harnesses name themselves there ("You
-     are Claude Code…", "You are opencode…", "You are DeepSeek
+     are Claude Code…", "You are opencode…", "You are the GitHub Copilot CLI…", "You are DeepSeek
      Harness…", "…operating inside pi…"). Oh My Pi is a fork of Pi and
      its prompt may say the same: if anything else points to Oh My Pi
      (below), it is Oh My Pi, not Pi.
@@ -65,7 +65,7 @@ can run in any harness.
      ```
 
      Match the **program name** (the basename of the first word) exactly
-     against `claude`, `codex`, `gemini`, `dsh`, `hermes`, `pi`, `omp` or
+     against `claude`, `codex`, `copilot`, `gemini`, `dsh`, `hermes`, `pi`, `omp` or
      `opencode`; do not match substrings (`pip`, `pipx`, a path that
      happens to contain `pi`). **The nearest ancestor that matches wins**:
      a harness started from another harness's shell sees both. Pi and Oh My
@@ -87,6 +87,7 @@ can run in any harness.
 |---|---|
 | Claude Code | `references/claude-code.md` |
 | Codex | `references/codex.md` |
+| GitHub Copilot CLI (`copilot`) | `references/copilot-cli.md` |
 | Gemini CLI | `references/gemini-cli.md` |
 | DeepSeek Harness (`dsh`) | `references/deepseek-harness.md` |
 | Hermes | `references/hermes.md` |
@@ -392,7 +393,7 @@ switch to their incognito text) and adds the harness's own switch so the
 Hivemind tools do not load at all:
 
 ```sh
-hivemind-incognito <harness>     # claude, codex, dsh, hermes, pi, omp or opencode
+hivemind-incognito <harness>     # claude, codex, copilot, dsh, hermes, pi, omp or opencode
 ```
 
 Your harness's **Incognito** section says what the switch is and whether

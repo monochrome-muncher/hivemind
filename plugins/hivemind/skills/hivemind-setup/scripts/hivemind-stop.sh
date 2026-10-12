@@ -1,5 +1,6 @@
 #!/bin/sh
-# Hivemind Stop hook (Claude Code, Codex; Gemini CLI as an AfterAgent hook):
+# Hivemind Stop hook (Claude Code, Codex, GitHub Copilot CLI; Gemini CLI as an
+# AfterAgent hook):
 # at most once per session, blocks the stop once with a short reminder to
 # write what another agent could reuse and to rate the entries the work
 # tested. Registered in hooks/hooks.json (Gemini CLI: by hand, hivemind-setup).
@@ -60,8 +61,9 @@ grep -Eq '"name" *: *"[^"]*hive_(write|feedback)"' "$transcript" 2>/dev/null && 
 min="${HIVEMIND_STOP_MIN_TOOLS:-20}"
 case "$min" in ''|*[!0-9]*) min=20 ;; esac
 # Claude Code records a call as "tool_use"; Codex as "function_call",
-# "custom_tool_call" or "local_shell_call" (their outputs end in "_output").
-uses="$(grep -Eo '"type" *: *"(tool_use|function_call|custom_tool_call|local_shell_call)"' \
+# "custom_tool_call" or "local_shell_call" (their outputs end in "_output");
+# GitHub Copilot CLI writes one "tool.execution_start" event per call.
+uses="$(grep -Eo '"type" *: *"(tool_use|function_call|custom_tool_call|local_shell_call|tool\.execution_start)"' \
   "$transcript" 2>/dev/null | wc -l)" || exit 0
 # Gemini CLI rewrites a call's record as it progresses, so count each
 # functionResponse id once.

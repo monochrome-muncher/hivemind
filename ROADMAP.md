@@ -168,9 +168,11 @@ or its own trigger):
   visibility filter (ADR 0025).
 - Contract step for a later release: narrow `credentials_kind_check` to
   drop `user` once no deployment has such rows.
-- **Harnesses**: next GitHub Copilot CLI (its `sessionStart` hook injects
-  context), then Cursor (re-test `${env:}` in remote headers first), then
-  Kiro and Amp as reference-only; Qwen Code is a Gemini CLI variant.
+- **Harnesses**: GitHub Copilot CLI is done (plugin from the existing
+  Claude marketplace, `sessionStart` and `Stop` hooks; its MCP server is a
+  user entry because Copilot refuses a whole-variable `url`). Next Cursor
+  (re-test `${env:}` in remote headers first), then Kiro and Amp as
+  reference-only; Qwen Code is a Gemini CLI variant.
   Still unconfirmed: whether Claude Code's `deniedMcpServers` matches the
   plugin-scoped server name, Gemini CLI's SessionStart context injection,
   and whether DeepSeek Harness keeps the server instructions after
