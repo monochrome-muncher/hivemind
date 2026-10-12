@@ -7,7 +7,7 @@ from __future__ import annotations
 from hivemind.domain.access import TrustLevel, Visibility
 from hivemind.domain.audit import AuditAction
 from hivemind.domain.entry import Entry, EntryState
-from hivemind.domain.feedback import Feedback, Verdict
+from hivemind.domain.feedback import NO_SIGNALS, FeedbackSignals
 from hivemind.domain.pin import ChangeReason, Pin, PinnedEntry
 from hivemind.domain.validation import MAX_ID_CHARS, MAX_PINS_PER_FLEET, InvalidInput, check_text
 from hivemind.ports import Credential, Store
@@ -17,11 +17,6 @@ from hivemind.services.errors import EntryNotActive, EntryNotFound, PermissionDe
 
 # How far a pin follows supersession to the current version (ADR 0058).
 _PIN_FOLLOW_HOPS = 16
-
-# How many feedback rows per shown entry the flagged check reads (ADR 0076):
-# the newest informative ones, so a stale or wrong verdict after the pin is
-# among them unless dozens of newer notes bury it.
-_FLAG_CHECK_ROWS = 50
 
 
 class PinService:
@@ -114,12 +109,12 @@ class PinService:
             if current.id not in shown:
                 shown.add(current.id)
                 shown_pins.append((pin, current))
-        # One batched read of the shown entries' feedback, not one per pin.
-        feedback = await self._store.list_feedback_many(
-            [current.id for _, current in shown_pins], _FLAG_CHECK_ROWS
-        )
+        # One batched read of the shown entries' feedback signals, not one per pin.
+        signals = await self._store.feedback_signals([current.id for _, current in shown_pins])
         return [
-            PinnedEntry(pin, current, _change_reason(pin, current, feedback.get(current.id, [])))
+            PinnedEntry(
+                pin, current, _change_reason(pin, current, signals.get(current.id, NO_SIGNALS))
+            )
             for pin, current in shown_pins
         ]
 
@@ -169,17 +164,12 @@ class PinService:
         return entry, entry.fleet_id
 
 
-def _change_reason(pin: Pin, current: Entry, feedback: list[Feedback]) -> ChangeReason | None:
+def _change_reason(pin: Pin, current: Entry, signals: FeedbackSignals) -> ChangeReason | None:
     """Why the briefing no longer shows what was pinned (ADR 0076):
     ``superseded`` (a later version), else ``flagged`` (a stale or wrong
     verdict newer than the pin), else ``None``."""
     if current.id != pin.entry_id:
         return "superseded"
-    if any(
-        fb.verdict is not Verdict.HELPFUL
-        and fb.updated_at is not None
-        and fb.updated_at > pin.pinned_at
-        for fb in feedback
-    ):
+    if signals.newest_flag_at is not None and signals.newest_flag_at > pin.pinned_at:
         return "flagged"
     return None

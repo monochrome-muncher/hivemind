@@ -287,9 +287,19 @@ class SearchService:
         # concurrent reads above, never beside them (ADR 0059).
         version_groups: list[list[Entry]] = []
         threshold = self._config.version_group_min_similarity
+        # With grouping and explore both on, explore's candidates (every
+        # scored entry) are a superset of the grouped ones: read the
+        # similarities once. A failed shared read leaves each step to read
+        # (and fail) on its own, as when only one is on.
+        shared: dict[tuple[str, str], float] | None = None
+        if threshold is not None and explore and len(scored) > 1:
+            try:
+                shared = await self._store.pairwise_similarity([e.id for e in scored])
+            except Exception:
+                logger.warning("shared similarity read failed", exc_info=True)
         if threshold is not None:
             version_groups = await self._version_groups(
-                scored, entry_scores, entry_feedback, threshold
+                scored, entry_scores, entry_feedback, threshold, shared
             )
         ordered = apply_supersession_invariant(
             scored, entry_scores, version_groups=[[m.id for m in g] for g in version_groups]
@@ -299,7 +309,7 @@ class SearchService:
         # 5b. Opt-in diversity re-order (ADR 0078); never on the default path.
         if explore and len(ordered) > 1:
             ordered = await self._explore_order(
-                ordered, entry_scores, [[m.id for m in g] for g in version_groups]
+                ordered, entry_scores, [[m.id for m in g] for g in version_groups], shared
             )
 
         # 6. Pagination (SPEC.md §5.3: limit/offset on search and list).
@@ -341,10 +351,12 @@ class SearchService:
         scores: dict[str, float],
         feedback: dict[str, FeedbackSignals],
         threshold: float,
+        similarity: Mapping[tuple[str, str], float] | None = None,
     ) -> list[list[Entry]]:
         """The version groups among the best candidates (ADR 0074), each
         ordered for display. Best-effort: grouping is a display nicety, so a
-        failed read means no groups, never a failed search."""
+        failed read means no groups, never a failed search. ``similarity``, when
+        given, covers at least the candidates and spares the read."""
         ranked = sorted(
             (e for e in scored if e.state is EntryState.ACTIVE),
             key=lambda e: scores[e.id],
@@ -353,7 +365,8 @@ class SearchService:
         if len(ranked) < 2:
             return []
         try:
-            similarity = await self._store.pairwise_similarity([e.id for e in ranked])
+            if similarity is None:
+                similarity = await self._store.pairwise_similarity([e.id for e in ranked])
         except Exception as exc:
             # Logged with the traceback: a broken adapter would otherwise only
             # show as grouping that never happens.
@@ -366,15 +379,18 @@ class SearchService:
         ordered: list[Entry],
         scores: dict[str, float],
         version_groups: Sequence[Sequence[str]] = (),
+        similarity: Mapping[tuple[str, str], float] | None = None,
     ) -> list[Entry]:
         """``ordered`` re-ordered by MMR over the stored vectors (ADR 0078).
 
         Runs after the gathered reads (ADR 0059), so a search never has more
         than two store calls in flight. Best-effort: a failed similarity read
-        keeps the normal order.
+        keeps the normal order. ``similarity``, when given, covers ``ordered``
+        and spares the read.
         """
         try:
-            similarity = await self._store.pairwise_similarity([e.id for e in ordered])
+            if similarity is None:
+                similarity = await self._store.pairwise_similarity([e.id for e in ordered])
         except Exception:
             logger.warning("explore: similarity read failed, normal order kept", exc_info=True)
             return ordered

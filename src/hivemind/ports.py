@@ -364,7 +364,8 @@ class Store(Protocol):
         visibility: Visibility | None = None,
     ) -> dict[str, FeedbackSignals]:
         """``quality_counts`` plus each entry's ``last_confirmed_at`` (SPEC
-        §4.2) and ``correction`` (the newest stale or wrong report with a
+        §4.2), ``newest_flag_at`` (the newest stale or wrong row, noted or not)
+        and ``correction`` (the newest stale or wrong report with a
         non-empty note, its note cut by ``truncate_note``; SPEC §6.1), in one
         read: every requested id that is a well-formed UUID is a key (zero
         counts and ``None`` when it has no feedback or names no entry);

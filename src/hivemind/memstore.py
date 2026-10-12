@@ -112,13 +112,22 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
+def _all_pairs_cosine(
+    ids: list[str], vectors: dict[str, list[float]]
+) -> dict[tuple[str, str], float]:
+    """Cosine of every pair among ``ids`` (in that order; sorted, a pair is
+    keyed ``(a, b)`` with ``a < b``), from ``vectors``."""
+    return {
+        (a, b): cosine_similarity(vectors[a], vectors[b])
+        for i, a in enumerate(ids)
+        for b in ids[i + 1 :]
+    }
+
+
 def _mean_pairwise_cosine(entries: list[Entry]) -> float:
     """Mean cosine over all pairs; the caller guarantees at least two."""
-    pairs = [
-        cosine_similarity(list(a.embedding or ()), list(b.embedding or ()))
-        for i, a in enumerate(entries)
-        for b in entries[i + 1 :]
-    ]
+    vectors = {e.id: list(e.embedding or ()) for e in entries}
+    pairs = _all_pairs_cosine([e.id for e in entries], vectors).values()
     return sum(pairs) / len(pairs)
 
 
@@ -304,12 +313,7 @@ class MemoryStore:
                 for eid in dict.fromkeys(entry_ids)
                 if (entry := self._entries.get(eid)) is not None and entry.embedding is not None
             }
-        ids = sorted(vectors)
-        return {
-            (a, b): cosine_similarity(vectors[a], vectors[b])
-            for i, a in enumerate(ids)
-            for b in ids[i + 1 :]
-        }
+        return _all_pairs_cosine(sorted(vectors), vectors)
 
     async def list_predecessors(self, entry_ids: list[str]) -> list[Entry]:
         wanted = set(entry_ids)
@@ -1006,6 +1010,7 @@ def _signals_for(feedback: dict[tuple[str, str, str], Feedback], entry_id: str) 
     helpful, stale, wrong = _count_for(feedback, entry_id)
     noted: list[datetime] = []
     flags: list[datetime] = []
+    flagged: list[Feedback] = []
     flagged_notes: list[Feedback] = []
     for fb in feedback.values():
         if fb.entry_id != entry_id:
@@ -1015,6 +1020,7 @@ def _signals_for(feedback: dict[tuple[str, str, str], Feedback], entry_id: str) 
                 noted.append(fb.updated_at)
         else:
             flags.append(fb.updated_at or _EPOCH)
+            flagged.append(fb)
             if fb.note and fb.note.strip():
                 flagged_notes.append(fb)
     correction = None
@@ -1035,6 +1041,9 @@ def _signals_for(feedback: dict[tuple[str, str, str], Feedback], entry_id: str) 
         wrong,
         last_confirmed(max(noted, default=None), max(flags, default=None)),
         correction,
+        newest_flag_at=max(
+            (fb.updated_at for fb in flagged if fb.updated_at is not None), default=None
+        ),
     )
 
 

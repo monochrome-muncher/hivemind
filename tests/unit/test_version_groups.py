@@ -483,3 +483,28 @@ def test_the_env_spellings(
 def test_off_by_default_in_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("HIVEMIND_VERSION_GROUP_MIN_SIMILARITY", raising=False)
     assert Settings(_env_file=None).search_config().version_group_min_similarity is None  # type: ignore[call-arg]
+
+
+async def test_grouping_and_explore_share_one_similarity_read() -> None:
+    store = _CountingStore()
+    await _pool(store)
+    svc = service(store)
+    got = await svc.search(QUERY, explore=True)
+    assert store.pairwise_calls == 1
+    assert any(h.similar for h in got)  # the pool really has a version group
+
+    # The reference: the shared read fails once, so each step reads for
+    # itself, the way grouping and explore did before they shared one read.
+    store.pairwise_calls = 0
+    real = MemoryStore.pairwise_similarity
+
+    async def fail_once(entry_ids: list[str]) -> dict[tuple[str, str], float]:
+        store.pairwise_calls += 1
+        if store.pairwise_calls == 1:
+            raise RuntimeError("db down")
+        return await real(store, entry_ids)
+
+    store.pairwise_similarity = fail_once  # type: ignore[method-assign]
+    expected = await svc.search(QUERY, explore=True)
+    assert store.pairwise_calls == 3  # the failed shared read, then one per step
+    assert got == expected
