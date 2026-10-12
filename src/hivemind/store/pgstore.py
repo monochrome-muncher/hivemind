@@ -82,6 +82,7 @@ from hivemind.domain.health import (
     TagDispersion,
 )
 from hivemind.domain.pin import Pin, PinWrite
+from hivemind.domain.upstream import UpstreamLink
 from hivemind.ports import SupersedeConflict
 from hivemind.store.pool import PoolTimeouts, make_pool
 
@@ -299,6 +300,31 @@ stated explicitly; untuned for now (ADR 0025).
 _REPORTER_NOT_REVOKED = (
     "NOT EXISTS (SELECT 1 FROM agents a WHERE a.name = f.\"user\" AND a.status = 'revoked')"
 )
+
+# What happened to the targets of several entries' "see also" links (ADR 0081),
+# one statement. ``{vis}`` is the visibility clause on the target (columns
+# resolve to ``entries`` inside the subquery; any state). The feedback dates
+# are the two "last confirmed" is made of (BATCH_FEEDBACK_SIGNALS). A link
+# is at most five per entry, served by the primary key (from_id, to_id).
+SELECT_UPSTREAM_LINKS = f"""
+SELECT l.from_id, l.to_id, l.created_at AS linked_at, t.state,
+       s.created_at AS superseded_at, s.author AS superseded_author,
+       fb.newest_flag_at, fb.newest_noted_helpful_at
+  FROM entry_links l
+  JOIN (SELECT id, state, superseded_by FROM entries
+         WHERE id IN (SELECT to_id FROM entry_links WHERE from_id = ANY($1::uuid[])){{vis}}) t
+    ON t.id = l.to_id
+  LEFT JOIN entries s ON s.id = t.superseded_by
+  LEFT JOIN LATERAL (
+       SELECT MAX(f.updated_at) FILTER (WHERE f.verdict IN ('stale', 'wrong')) AS newest_flag_at,
+              MAX(f.updated_at) FILTER (
+                  WHERE f.verdict = 'helpful' AND coalesce(f.note, '') ~ '\\S'
+              ) AS newest_noted_helpful_at
+         FROM feedbacks f
+        WHERE f.entry_id = t.id AND {_REPORTER_NOT_REVOKED}) fb ON true
+ WHERE l.from_id = ANY($1::uuid[])
+ ORDER BY l.from_id, l.created_at, l.to_id
+"""
 
 # The admin activity view (ADR 0080): plain grouped scans, one per figure.
 # ``$1`` is the window start. Revoked reporters are left out (ADR 0067).
@@ -1009,6 +1035,33 @@ class PgStore:
             for r in incoming:
                 links[str(r["to_id"])][1].append(str(r["from_id"]))
         return {eid: links[c] if c is not None else ([], []) for eid, c in canonical.items()}
+
+    async def upstream_links(
+        self, entry_ids: list[str], *, visibility: Visibility | None = None
+    ) -> dict[str, list[UpstreamLink]]:
+        ids = _valid_uuids(entry_ids)
+        if not ids:
+            return {}
+        params: list[Any] = [ids]
+        vis = _visibility_clause(visibility, params)
+        sql = SELECT_UPSTREAM_LINKS.format(vis=f" AND {vis}" if vis else "")
+        async with self._connection() as conn:
+            rows = await conn.fetch(sql, *params)
+        out: dict[str, list[UpstreamLink]] = {}
+        for r in rows:
+            out.setdefault(str(r["from_id"]), []).append(
+                UpstreamLink(
+                    from_id=str(r["from_id"]),
+                    to_id=str(r["to_id"]),
+                    linked_at=r["linked_at"],
+                    state=EntryState(r["state"]),
+                    superseded_at=r["superseded_at"],
+                    superseded_author=r["superseded_author"],
+                    newest_flag_at=r["newest_flag_at"],
+                    newest_noted_helpful_at=r["newest_noted_helpful_at"],
+                )
+            )
+        return out
 
     async def pin_entry(
         self,

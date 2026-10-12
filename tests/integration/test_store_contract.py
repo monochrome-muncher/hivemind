@@ -482,6 +482,139 @@ async def test_links_of_one_write_read_in_id_order(adapter: Adapter) -> None:
     assert outgoing == sorted([a.id, b.id])
 
 
+# -- upstream links (ADR 0081) --------------------------------------------------------
+
+
+async def test_upstream_links_report_what_happened_to_each_target(adapter: Adapter) -> None:
+    store = adapter.store
+    plain = await write(adapter, "plain", author="ann")
+    flagged = await write(adapter, "flagged", author="ann")
+    old = await write(adapter, "old", author="ann")
+    gone = await write(adapter, "gone", author="ann")
+    built = await write(
+        adapter,
+        "built",
+        kind=Kind.INSIGHT,
+        author="bob",
+        see_also=(plain.id, flagged.id, old.id, gone.id),
+    )
+    linked = (await store.upstream_links([built.id]))[built.id]
+    assert sorted(link.to_id for link in linked) == sorted([plain.id, flagged.id, old.id, gone.id])
+    linked_at = linked[0].linked_at
+    assert {link.linked_at for link in linked} == {linked_at}
+    soon = linked_at + timedelta(minutes=5)
+
+    new = await write(adapter, "new", author="cat", supersedes=(old.id,))
+    await store.withdraw_entry(gone.id, "wrong", by_user="ann")
+    await store.record_feedback(Feedback(flagged.id, "u1", "a", Verdict.WRONG, None, soon))
+    await store.record_feedback(Feedback(flagged.id, "u2", "a", Verdict.HELPFUL, "ok", soon))
+    await store.record_feedback(
+        Feedback(flagged.id, "u3", "a", Verdict.HELPFUL, " ", soon + timedelta(minutes=1))
+    )
+
+    by_target = {link.to_id: link for link in (await store.upstream_links([built.id]))[built.id]}
+    assert by_target[plain.id].state is EntryState.ACTIVE
+    assert by_target[plain.id].newest_flag_at is None
+    assert by_target[old.id].state is EntryState.SUPERSEDED
+    assert by_target[old.id].superseded_author == "cat"
+    assert by_target[old.id].superseded_at == new.created_at
+    assert by_target[old.id].superseded_at > linked_at  # type: ignore[operator]
+    assert by_target[gone.id].state is EntryState.WITHDRAWN
+    assert by_target[flagged.id].newest_flag_at == soon
+    assert by_target[flagged.id].newest_noted_helpful_at == soon
+    assert all(link.from_id == built.id for link in by_target.values())
+
+
+async def test_upstream_links_are_one_read_for_many_and_skip_the_unlinked(
+    adapter: Adapter,
+) -> None:
+    store = adapter.store
+    a = await write(adapter, "a")
+    b = await write(adapter, "b")
+    c = await write(adapter, "c", see_also=(a.id,))
+    d = await write(adapter, "d", see_also=(b.id, a.id))
+    got = await store.upstream_links([c.id, d.id, a.id, NO_SUCH_ID, "not-a-uuid"])
+    assert set(got) == {c.id, d.id}
+    assert [link.to_id for link in got[c.id]] == [a.id]
+    assert sorted(link.to_id for link in got[d.id]) == sorted([a.id, b.id])
+    assert await store.upstream_links([]) == {}
+
+
+async def test_upstream_links_ignore_a_revoked_reporters_flag(adapter: Adapter) -> None:
+    store = adapter.store
+    fleet = await store.create_fleet("blue")
+    await store.register_agent("Scout")
+    base = await write(adapter, "base", author="ann")
+    built = await write(adapter, "built", author="bob", see_also=(base.id,))
+    [link] = (await store.upstream_links([built.id]))[built.id]
+    later = link.linked_at + timedelta(minutes=5)
+    await store.record_feedback(Feedback(base.id, "Scout", "Scout", Verdict.WRONG, None, later))
+    [link] = (await store.upstream_links([built.id]))[built.id]
+    assert link.newest_flag_at == later
+    await store.activate_agent("Scout", trust_level=TrustLevel.LURKER, home_fleet_id=fleet.id)
+    await store.revoke_agent("Scout")
+    [link] = (await store.upstream_links([built.id]))[built.id]
+    assert link.newest_flag_at is None
+
+
+async def test_upstream_links_leave_out_targets_the_reader_cannot_read(adapter: Adapter) -> None:
+    home, other = str(uuid.uuid4()), str(uuid.uuid4())
+    store = adapter.store
+    org = await write(adapter, "org", scope="org", author="w")
+    mine = await write(adapter, "mine", scope="fleet", fleet_id=home, author="w")
+    foreign = await write(adapter, "foreign", scope="fleet", fleet_id=other, author="w")
+    secret = await write(adapter, "secret", scope="self", author="w")
+    built = await write(
+        adapter,
+        "built",
+        kind=Kind.INSIGHT,
+        scope="self",
+        author="w",
+        see_also=(org.id, mine.id, foreign.id, secret.id),
+    )
+
+    async def seen(v: Visibility | None) -> set[str]:
+        links = (await store.upstream_links([built.id], visibility=v)).get(built.id, [])
+        return {link.to_id for link in links}
+
+    assert await seen(None) == {org.id, mine.id, foreign.id, secret.id}
+    assert await seen(Visibility(TrustLevel.PRIVILEGED, "x", is_admin=True)) == await seen(None)
+    assert await seen(_vis(TrustLevel.UNTRUSTED, fleet=home)) == set()
+    assert await seen(_vis(TrustLevel.CONTRIBUTOR, fleet=home)) == {org.id, mine.id}
+    assert await seen(_vis(TrustLevel.PRIVILEGED, fleet=home)) == {org.id, mine.id, foreign.id}
+    assert await seen(_vis(TrustLevel.LURKER, name="w", fleet=other)) == {
+        org.id,
+        mine.id,  # its own entry, whatever the fleet
+        foreign.id,
+        secret.id,
+    }
+
+
+async def test_upstream_links_show_a_supersession_or_flag_before_the_link_as_older(
+    adapter: Adapter,
+) -> None:
+    """Facts only: the successor and the flag predate the link, so the rule
+    (``upstream_changed``) reports neither."""
+    store = adapter.store
+    old = await write(adapter, "old", author="ann")
+    await write(adapter, "new", author="cat", supersedes=(old.id,))
+    flagged = await write(adapter, "flagged", author="ann")
+    await store.record_feedback(
+        Feedback(flagged.id, "u1", "a", Verdict.WRONG, None, T0 - timedelta(days=1))
+    )
+    built = await write(
+        adapter, "built", kind=Kind.INSIGHT, author="bob", see_also=(old.id, flagged.id)
+    )
+    by_target = {link.to_id: link for link in (await store.upstream_links([built.id]))[built.id]}
+    assert by_target[old.id].superseded_at is not None
+    assert by_target[old.id].superseded_at < by_target[old.id].linked_at
+    flag_at = by_target[flagged.id].newest_flag_at
+    assert flag_at is not None and flag_at < by_target[flagged.id].linked_at
+    from hivemind.domain.upstream import upstream_changed
+
+    assert upstream_changed(Kind.INSIGHT, "bob", list(by_target.values())) == ()
+
+
 # -- pins (ADR 0058) -----------------------------------------------------------------
 
 

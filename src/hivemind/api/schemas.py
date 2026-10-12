@@ -17,6 +17,7 @@ from hivemind.domain.entry import EntityKind, Entry, EntryState, ImportanceSourc
 from hivemind.domain.feedback import FeedbackCounts, FeedbackSummary, Verdict
 from hivemind.domain.pin import ChangeReason, Pin, PinnedEntry
 from hivemind.domain.recency import RecencyHint
+from hivemind.domain.upstream import UpstreamChangeKind
 from hivemind.domain.validation import (
     MAX_FEEDBACK_IDS,
     MAX_GET_IDS,
@@ -339,6 +340,13 @@ class SimilarOut(BaseModel):
     occurred_at: datetime
 
 
+class UpstreamChangeOut(BaseModel):
+    """A changed ``see_also`` target of a hit (ADR 0081)."""
+
+    id: str
+    change: UpstreamChangeKind
+
+
 class HitOut(BaseModel):
     """A compact search hit (SPEC.md §6.1: progressive disclosure).
 
@@ -364,6 +372,7 @@ class HitOut(BaseModel):
     supersedes: int | None = None
     state: EntryState | None = None
     similar: list[SimilarOut] | None = None  # ADR 0074; null when none
+    upstream_changed: list[UpstreamChangeOut] | None = None  # ADR 0081; null when none
 
     @classmethod
     def from_hit(cls, hit: Hit) -> HitOut:
@@ -397,6 +406,11 @@ class HitOut(BaseModel):
             similar=(
                 [SimilarOut(id=m.entry_id, occurred_at=m.occurred_at) for m in hit.similar]
                 if hit.similar
+                else None
+            ),
+            upstream_changed=(
+                [UpstreamChangeOut(id=c.id, change=c.change) for c in hit.upstream_changed]
+                if hit.upstream_changed
                 else None
             ),
         )

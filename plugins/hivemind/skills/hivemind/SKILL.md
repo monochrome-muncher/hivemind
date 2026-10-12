@@ -54,7 +54,8 @@ you, and before writing.
 - `hive_get` the promising hits. Before relying on one reported `stale`
   or `wrong`, read the notes in its `feedback`: they often say what is
   true now. Open `see_also` and `linked_from` entries that bear on the
-  task.
+  task. A hit with `upstream_changed` rests on a changed entry: re-check
+  it before relying on it.
 - `score` is findability, not truth. Before a consequential step, check
   an old, unconfirmed or single-source entry against the system when
   that is cheap.

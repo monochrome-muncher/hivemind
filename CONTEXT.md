@@ -108,6 +108,10 @@ _Avoid_: fix, amendment (a new version of the entry is a supersede)
 A pointer from a new entry to an existing one it relates to without replacing it, set at write time and shown on both entries when they are read.
 _Avoid_: reference (sources are references), relation, edge
 
+**Upstream changed**:
+A marker on an insight or decision hit whose linked entry was withdrawn, superseded by someone else, or flagged since the link was made; shown on the hit, never used for ranking.
+_Avoid_: stale dependency, broken link, invalidated
+
 **Related entries**:
 The up to three active entries nearest to a new entry, returned with its write so the writer can supersede, link or leave them. A hint, never a verdict: nothing is merged or superseded automatically.
 _Avoid_: duplicates, conflicts, contradictions (the server judges none of these)
