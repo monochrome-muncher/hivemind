@@ -187,6 +187,7 @@ def test_the_hook_runs_the_shipped_script_on_every_context_rebuild() -> None:
 @pytest.mark.parametrize("key", ["hm_secret_value", None])
 def test_the_hook_prints_valid_json_and_never_the_key(key: str | None) -> None:
     env = {k: v for k, v in os.environ.items() if not k.startswith("HIVEMIND_")}
+    env.pop("COPILOT_CLI", None)  # Copilot CLI's flat form has its own test
     if key is not None:
         env["HIVEMIND_API_KEY"] = key
     out = subprocess.run(["sh", str(HOOK)], env=env, capture_output=True, text=True, check=True)
@@ -211,6 +212,7 @@ HARNESS_REFS = {
     "Claude Code": "claude-code.md",
     "Codex": "codex.md",
     "Gemini CLI": "gemini-cli.md",
+    "GitHub Copilot CLI": "copilot-cli.md",
     "DeepSeek Harness": "deepseek-harness.md",
     "Hermes": "hermes.md",
     "Pi": "pi.md",
@@ -245,6 +247,7 @@ def test_the_setup_skill_itself_is_harness_neutral() -> None:
     for local in (
         "~/.claude",
         "~/.codex",
+        "~/.copilot",
         "~/.dsh",
         "~/.hermes",
         "~/.pi",
@@ -1074,6 +1077,77 @@ def test_the_gemini_extension_serves_the_plugin() -> None:
         assert (ROOT / hook["command"].removeprefix(prefix)).resolve() == script.resolve()
 
 
+def test_launcher_switches_the_copilot_cli_server_off_by_name(tmp_path: Path) -> None:
+    """`--disable-mcp-server hivemind` keeps Copilot CLI 1.0.95 from loading
+    or contacting the server (checked live); the key and URL are not needed."""
+    env = _fake_harness(tmp_path, "copilot")
+    script = tmp_path / "bin" / "copilot"
+    script.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "URL=${HIVEMIND_MCP_URL:-unset}" "KEY=${HIVEMIND_API_KEY:-unset}" '
+        '"INCOGNITO=$HIVEMIND_INCOGNITO" "$@"\n'
+    )
+    env.update(HIVEMIND_MCP_URL="https://hm.example/mcp", HIVEMIND_API_KEY="hm_x")
+    assert _launch(tmp_path, env, "copilot", "-p", "hi") == [
+        "URL=unset",
+        "KEY=unset",
+        "INCOGNITO=1",
+        "--disable-mcp-server",
+        "hivemind",
+        "-p",
+        "hi",
+    ]
+
+
+def test_the_copilot_cli_plugin_route_uses_the_claude_manifests() -> None:
+    """`copilot plugin marketplace add <repo>` reads `.claude-plugin/
+    marketplace.json` at the root and the plugin's `.claude-plugin/
+    plugin.json` (checked with Copilot CLI 1.0.95, which requires a
+    kebab-case marketplace name, an owner name and plugin names, and runs
+    the Claude-style hooks with CLAUDE_PLUGIN_ROOT set)."""
+    kebab = re.compile(r"^[a-z0-9][a-z0-9.-]*$")
+    market = _json(ROOT / ".claude-plugin" / "marketplace.json")
+    assert kebab.match(market["name"]) and market["owner"]["name"]  # type: ignore[index,call-overload,arg-type]
+    for entry in market["plugins"]:  # type: ignore[attr-defined]
+        assert kebab.match(entry["name"]) and entry["description"]
+    manifest = _json(PLUGIN / ".claude-plugin" / "plugin.json")
+    assert kebab.match(manifest["name"]) and manifest["description"]  # type: ignore[arg-type]
+    hooks = _json(PLUGIN / "hooks" / "hooks.json")["hooks"]
+    assert set(hooks) == {"SessionStart", "Stop"}  # type: ignore[arg-type]
+    for groups in hooks.values():  # type: ignore[attr-defined]
+        for group in groups:
+            for hook in group["hooks"]:
+                assert "${CLAUDE_PLUGIN_ROOT}/skills/hivemind-setup/scripts/" in hook["command"]
+
+
+def test_skill_descriptions_are_strict_yaml() -> None:
+    """Copilot CLI parses SKILL.md frontmatter strictly: an unquoted ": " in
+    the `hivemind` description made it skip the skill ("mapping values are
+    not allowed in this context"), where Claude Code was lenient."""
+    yaml = pytest.importorskip("yaml")
+    for folder in (PLUGIN / "skills").iterdir():
+        text = (folder / "SKILL.md").read_text()
+        front = yaml.safe_load(text.split("---\n")[1])
+        assert front["name"] == folder.name and front["description"], folder
+
+
+def test_the_copilot_cli_reference_is_complete() -> None:
+    text = (SETUP_REFS / "copilot-cli.md").read_text()
+    flat = " ".join(text.split())
+    # The server is a user entry: Copilot rejects a whole-variable `url`.
+    assert "~/.copilot/mcp-config.json" in text and "copilot mcp add" in text
+    assert "Authorization: Bearer ${HIVEMIND_API_KEY}" in text
+    assert "must be named `hivemind`" in flat and "--disable-mcp-server" in text
+    assert "~/.copilot/copilot-instructions.md" in text and "sessionStart" in text
+    assert "copilot plugin marketplace add" in text and "hivemind@hivemind" in text
+    assert "no post-compaction reminder" in flat
+    assert "hm_" not in text.replace("hm_…", "")
+    # The plugin's own .mcp.json still reads the whole URL, for Claude Code
+    # and Oh My Pi; the reference is where Copilot's limit is explained.
+    mcp = _json(PLUGIN / ".mcp.json")["mcpServers"]["hivemind"]  # type: ignore[index]
+    assert mcp["url"] == "${HIVEMIND_MCP_URL}"  # type: ignore[index]
+    assert "cannot read the whole MCP address" in flat
+
+
 def test_launcher_disables_a_hand_configured_opencode_server(tmp_path: Path) -> None:
     env = _fake_harness(tmp_path, "opencode")
     script = tmp_path / "bin" / "opencode"
@@ -1303,6 +1377,7 @@ def test_every_reference_that_holds_a_key_says_chmod_600_and_never_a_project_fil
         "opencode",
         "deepseek-harness",
         "gemini-cli",
+        "copilot-cli",
     ):
         text = " ".join((SETUP_REFS / f"{name}.md").read_text().split())
         assert "chmod 600" in text or "mode 600" in text, name

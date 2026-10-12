@@ -6,8 +6,8 @@ the plugin installed, the agent checks in with Hivemind at the start of
 each session, searches it before starting work, writes down what it
 learns and tells you when it needs more rights.
 
-It works with Claude Code, Codex, DeepSeek Harness, Gemini CLI, Hermes,
-OpenCode, Pi and Oh My Pi. Its two skills also work in any other agent
+It works with Claude Code, Codex, DeepSeek Harness, Gemini CLI, GitHub
+Copilot CLI, Hermes, OpenCode, Pi and Oh My Pi. Its two skills also work in any other agent
 that reads `SKILL.md` files.
 
 If you want to know what Hivemind itself is, or want to run the server,
@@ -21,6 +21,7 @@ read the [main README](../../README.md) instead.
   [Codex](#codex) ·
   [DeepSeek Harness](#deepseek-harness) ·
   [Gemini CLI](#gemini-cli) ·
+  [GitHub Copilot CLI](#github-copilot-cli) ·
   [Hermes](#hermes) ·
   [OpenCode](#opencode) ·
   [Pi](#pi) ·
@@ -124,6 +125,23 @@ skills and the reminders.
 
 Add `--ref v<version>` to stay on one release. This works from
 `v2.6.0` on; 2.5.0 and older came out before the extension existed.
+
+### GitHub Copilot CLI
+
+In a terminal:
+
+```sh
+copilot plugin marketplace add https://github.com/monochrome-muncher/hivemind
+copilot plugin install hivemind@hivemind
+```
+
+The plugin brings both skills and the reminders. It does not bring the
+connection: Copilot CLI cannot read the whole address from an
+environment variable, so you add the MCP server once yourself (see
+[Setting it up by hand](#setting-it-up-by-hand)), or let the setup in
+step 2 do it. Don't use `copilot plugin install <owner>/<repo>`: Copilot
+calls direct installs deprecated, and the repository root is not a
+plugin. Checked with Copilot CLI 1.0.95.
 
 ### Hermes
 
@@ -306,6 +324,22 @@ export HIVEMIND_API_KEY="hm_…"   # the org key at first, the agent key once ac
   If `~/.gemini/settings.json` still has a `hivemind` server from an older
   setup, remove it, because it replaces the extension's. Gemini CLI turns
   off all MCP servers in a folder you haven't marked as trusted.
+- **GitHub Copilot CLI**: the key comes from the shell that starts
+  `copilot`, and the address goes in `~/.copilot/mcp-config.json`.
+  Copilot checks that `url` is a real address before it fills in
+  variables, so `"url": "${HIVEMIND_MCP_URL}"` is refused. The command
+  below writes the entry; use single quotes so the shell leaves
+  `${HIVEMIND_API_KEY}` alone and the key stays out of the file:
+
+  ```sh
+  copilot mcp add --transport http hivemind https://hivemind.example.org/mcp \
+    --header 'Authorization: Bearer ${HIVEMIND_API_KEY}'
+  ```
+
+  Keep the name `hivemind`, because the incognito launcher switches the
+  server off by that name. Add the instruction block to
+  `~/.copilot/copilot-instructions.md` as described in
+  [the setup skill's Copilot notes](skills/hivemind-setup/references/copilot-cli.md).
 - **Hermes**: the key goes in `~/.hermes/.env` (or
   `~/.hermes/profiles/<name>/.env`), `chmod 600`. The connection goes in
   `~/.hermes/config.yaml` and refers to the variables, so the key itself
@@ -383,6 +417,12 @@ Neither reminder appears in an incognito session or when
 - **Gemini CLI**: only the end-of-session reminder, from an `AfterAgent`
   hook (turn it off with `gemini hooks`). Gemini runs no startup hook
   after compressing its context.
+- **GitHub Copilot CLI**: the startup reminder and the end-of-session
+  one, from the plugin's `SessionStart` and `Stop` hooks. Copilot runs no
+  startup hook after compacting its context, so there is no
+  post-compaction line; the instruction block in
+  `~/.copilot/copilot-instructions.md` is what carries Hivemind across a
+  compaction.
 - **Hermes**: neither. Hermes has no hook that can hold the end of a
   session.
 
@@ -401,8 +441,8 @@ way):
 /path/to/hivemind/plugins/hivemind/bin/hivemind-incognito claude
 ```
 
-It also takes `codex`, `dsh`, `gemini`, `hermes`, `pi`, `omp` and
-`opencode`. To make it shorter to type, link it into a folder on your
+It also takes `codex`, `copilot`, `dsh`, `gemini`, `hermes`, `pi`, `omp`
+and `opencode`. To make it shorter to type, link it into a folder on your
 `PATH` (`ln -s /path/to/hivemind/plugins/hivemind/bin/hivemind-incognito ~/.local/bin/`)
 or add an alias such as `alias claude-incognito='hivemind-incognito claude'`.
 
@@ -415,6 +455,9 @@ How well it works depends on the agent:
   MCP servers.
 - **Codex**: the tools aren't loaded, as long as the connection is in
   `~/.codex/config.toml` as described above.
+- **GitHub Copilot CLI**: the tools aren't loaded, as long as the
+  connection is the server named `hivemind` described above (the
+  launcher starts Copilot with `--disable-mcp-server hivemind`).
 - **Hermes**: the tools aren't loaded once you add
   `enabled: ${HIVEMIND_ENABLED}` to the `hivemind` entry in
   `~/.hermes/config.yaml`. Don't set `HIVEMIND_ENABLED` in
@@ -463,6 +506,10 @@ All of these go in a terminal:
   ask the agent to update the Hivemind setup, which refreshes the block in
   `~/.gemini/GEMINI.md`. If you set Gemini up by hand before the extension
   existed, the setup skill's Gemini notes explain how to switch.
+- **GitHub Copilot CLI**: `copilot plugin marketplace update hivemind`,
+  then `copilot plugin update hivemind@hivemind`. Then ask the agent to
+  update the Hivemind setup, which refreshes the block in
+  `~/.copilot/copilot-instructions.md`.
 - **Hermes**: `hermes plugins update hivemind`. If you installed a fixed
   ref: `hermes plugins install <source> --force --ref <new-ref>`.
 - **OpenCode**: change the version in the `plugin` entry and restart. An
@@ -488,6 +535,8 @@ First uninstall the plugin, in a terminal:
   by hand, delete the two skill folders from `~/.gemini/skills/`, and
   `mcpServers.hivemind` and the Hivemind hooks from
   `~/.gemini/settings.json`.
+- **GitHub Copilot CLI**: `copilot plugin uninstall hivemind@hivemind`,
+  then `copilot mcp remove hivemind`.
 - **Hermes**: `hermes plugins remove hivemind`, then delete the
   `hivemind` entry from `~/.hermes/config.yaml`.
 - **OpenCode**: remove the entry from the `plugin` list.
@@ -498,7 +547,8 @@ First uninstall the plugin, in a terminal:
 Then delete the block between `<!-- hivemind:begin -->` and
 `<!-- hivemind:end -->` from the instructions file the setup added it to.
 Depending on the agent, that is `CLAUDE.md`, `AGENTS.md`,
-`~/.dsh/AGENTS.md`, `~/.gemini/GEMINI.md`, `~/.hermes/SOUL.md`,
+`~/.copilot/copilot-instructions.md`, `~/.dsh/AGENTS.md`,
+`~/.gemini/GEMINI.md`, `~/.hermes/SOUL.md`,
 `~/.config/opencode/AGENTS.md`, `~/.pi/agent/AGENTS.md` or
 `~/.omp/agent/AGENTS.md`. You may also want to delete your key file and
 any connection settings you added by hand.

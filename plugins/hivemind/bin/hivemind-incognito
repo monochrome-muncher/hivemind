@@ -15,7 +15,7 @@
 #      such switch configured, this prints a note and the session relies on
 #      the agent honouring layer 1 ("by restraint").
 #
-# Where the server is kept from loading (claude, codex, dsh, gemini with the
+# Where the server is kept from loading (claude, codex, copilot, dsh, gemini with the
 # extension, pi, omp) the
 # launcher also removes HIVEMIND_API_KEY and HIVEMIND_MCP_URL from the
 # child's environment, so an agent with a shell cannot read the key or call
@@ -25,7 +25,7 @@
 set -eu
 
 if [ "$#" -lt 1 ]; then
-  echo "usage: hivemind-incognito <claude|codex|dsh|gemini|hermes|pi|omp|opencode|other-command> [args...]" >&2
+  echo "usage: hivemind-incognito <claude|codex|copilot|dsh|gemini|hermes|pi|omp|opencode|other-command> [args...]" >&2
   exit 2
 fi
 harness=$1
@@ -91,6 +91,15 @@ PY
     fi
     note "no mcp_servers.hivemind in ~/.codex/config.toml or .codex/config.toml; starting without an override"
     exec "$harness" "$@"
+    ;;
+  copilot)
+    # GitHub Copilot CLI has a per-session switch for exactly this:
+    # --disable-mcp-server <name> (checked with 1.0.95: the server is never
+    # contacted). It covers the "hivemind" entry the setup skill writes to
+    # ~/.copilot/mcp-config.json. The key is not needed either, and the
+    # plugin's hooks see HIVEMIND_INCOGNITO and stay silent.
+    unset HIVEMIND_API_KEY HIVEMIND_MCP_URL
+    exec "$harness" --disable-mcp-server hivemind "$@"
     ;;
   dsh)
     # The hivemind bundle disables its own server row when
