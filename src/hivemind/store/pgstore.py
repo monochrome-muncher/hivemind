@@ -354,11 +354,14 @@ SET verdict = EXCLUDED.verdict,
 RETURNING updated_at
 """
 
+# The verdict counts, spelled once for every counting statement below.
+_VERDICT_COUNTS = """COUNT(*) FILTER (WHERE verdict = 'helpful') AS helpful,
+    COUNT(*) FILTER (WHERE verdict = 'stale') AS stale,
+    COUNT(*) FILTER (WHERE verdict = 'wrong') AS wrong"""
+
 COUNT_FEEDBACK = f"""
 SELECT
-    COUNT(*) FILTER (WHERE verdict = 'helpful') AS helpful,
-    COUNT(*) FILTER (WHERE verdict = 'stale') AS stale,
-    COUNT(*) FILTER (WHERE verdict = 'wrong') AS wrong
+    {_VERDICT_COUNTS}
 FROM feedbacks f
 WHERE entry_id = $1 AND {_REPORTER_NOT_REVOKED}
 """
@@ -388,25 +391,22 @@ ORDER BY entry_id, (verdict = 'helpful' AND COALESCE(note, '') = ''), updated_at
 BATCH_FEEDBACK = f"""
 SELECT
     entry_id,
-    COUNT(*) FILTER (WHERE verdict = 'helpful') AS helpful,
-    COUNT(*) FILTER (WHERE verdict = 'stale') AS stale,
-    COUNT(*) FILTER (WHERE verdict = 'wrong') AS wrong
+    {_VERDICT_COUNTS}
 FROM feedbacks f
 WHERE entry_id = ANY($1) AND {_REPORTER_NOT_REVOKED}
 GROUP BY entry_id
 """
 
-# BATCH_FEEDBACK plus the two newest dates "last confirmed" is made of
-# (SPEC §4.2): the newest helpful row with a note, the newest flag.
+# BATCH_FEEDBACK's counts plus the two newest dates "last confirmed" is made
+# of (SPEC §4.2): the newest helpful row with a note, the newest flag (also
+# what a pin's flagged check reads, ADR 0076).
 BATCH_FEEDBACK_SIGNALS = f"""
 SELECT g.*, corr.verdict AS corr_verdict, corr.note AS corr_note,
        corr."user" AS corr_user, corr.updated_at AS corr_updated_at
 FROM (
     SELECT
         entry_id,
-        COUNT(*) FILTER (WHERE verdict = 'helpful') AS helpful,
-        COUNT(*) FILTER (WHERE verdict = 'stale') AS stale,
-        COUNT(*) FILTER (WHERE verdict = 'wrong') AS wrong,
+        {_VERDICT_COUNTS},
         MAX(updated_at) FILTER (
             WHERE verdict = 'helpful' AND coalesce(note, '') ~ '\\S'
         ) AS newest_noted_helpful_at,
@@ -1485,6 +1485,7 @@ class PgStore:
                 last_confirmed(r["newest_noted_helpful_at"], r["newest_flag_at"]),
                 correction,
                 supersedes.get(eid, 0),
+                r["newest_flag_at"],
             )
         return signals
 

@@ -88,8 +88,10 @@ def is_contested(helpful: int, stale: int, wrong: int) -> bool:
 class FeedbackSignals:
     """What the feedback on one entry says: the verdict counts over every
     reporter, the "last confirmed" date (see ``last_confirmed``), the newest
-    noted flag (``correction``, raw: see ``shown_correction``) and, when the
-    caller asked for it, how many readable entries this one replaced."""
+    noted flag (``correction``, raw: see ``shown_correction``), the date of
+    the newest ``stale`` or ``wrong`` row of any kind (``newest_flag_at``, what
+    a pin's "flagged" check compares, ADR 0076) and, when the caller asked
+    for it, how many readable entries this one replaced."""
 
     helpful: int
     stale: int
@@ -97,6 +99,7 @@ class FeedbackSignals:
     last_confirmed_at: datetime | None = None
     correction: Correction | None = None
     supersedes: int = 0
+    newest_flag_at: datetime | None = None
 
     @property
     def counts(self) -> FeedbackCounts:

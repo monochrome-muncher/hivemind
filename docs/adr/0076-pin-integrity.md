@@ -1,6 +1,8 @@
 # Pin integrity: audited pins and "changed since pinned"
 
 > **Status note:** amended by [ADR 0079](0079-feedback-dates-on-the-database-clock.md): feedback `updated_at` now comes from the store's clock, like `pinned_at`, so the skew noted under Consequences is corrected.
+>
+> **Amendment (2026-10-12):** the flag check no longer reads feedback rows. It compares `pinned_at` with `newest_flag_at`, the newest `stale` or `wrong` row of a non-revoked reporter, which `Store.feedback_signals` returns; the rule is unchanged, and the 50-row window (items 3 and Consequences below) is gone, so a flag is no longer missed when dozens of newer notes follow it.
 
 Amends [ADR 0058](0058-pinned-fleet-briefing.md) (pins follow supersession
 silently). Uses the audit log of [ADR 0027](0027-audit-log-of-admin-actions.md)
@@ -51,7 +53,8 @@ that ADR 0027 audits.
    and `pinned_at`; the flag check reads feedback `updated_at`. The
    feedback of every shown entry is read in one batched call
    (`list_feedback_many`, ADR 0059), the newest informative rows first, so
-   a pinned list costs one extra read, not one per pin.
+   a pinned list costs one extra read, not one per pin. (Now one batched
+   `feedback_signals` read, see the amendment above.)
 
 4. **Migration `0014.pin-audit.sql`** widens the two audit CHECKs (the 0009
    pattern): expand-only, with a rollback that deletes the pin rows it
@@ -67,8 +70,9 @@ that ADR 0027 audits.
   pinned.
 - A pin audited by agent name is only as strong as the agent key; the admin
   key rows carry a fingerprint.
-- A stale or wrong verdict older than dozens of newer notes on the same
-  entry can fall outside the flag check's window (50 rows per entry).
+- ~~A stale or wrong verdict older than dozens of newer notes on the same
+  entry can fall outside the flag check's window (50 rows per entry).~~
+  [Edit 2026-10-12: removed, see the amendment at the top.]
 - A withdrawn pinned entry still shows `state: withdrawn` and no extra
   reason.
 - The audit write follows the pin and is not atomic with it (ADR 0027). If

@@ -711,6 +711,35 @@ async def test_a_revoked_reporters_confirmation_and_flag_are_ignored(adapter: Ad
     assert (await store.feedback_signals([entry.id]))[entry.id].counts == (1, 0, 0)
 
 
+async def test_newest_flag_at_is_the_newest_stale_or_wrong_row_of_any_kind(
+    adapter: Adapter,
+) -> None:
+    store = adapter.store
+    fleet = await store.create_fleet("blue")
+    entry = await write(adapter, "flag dates")
+    unflagged = await write(adapter, "only helpful")
+    await store.record_feedback(Feedback(unflagged.id, "u", "a", Verdict.HELPFUL, "ok", _min(9)))
+    await store.record_feedback(Feedback(entry.id, "u1", "a", Verdict.HELPFUL, "ran it", _min(8)))
+    signals = await store.feedback_signals([entry.id, unflagged.id])
+    assert signals[entry.id].newest_flag_at is None
+    assert signals[unflagged.id].newest_flag_at is None
+    # A bare (note-less) flag counts, and the newest of several wins.
+    await store.record_feedback(Feedback(entry.id, "u2", "a", Verdict.STALE, None, _min(3)))
+    await store.record_feedback(Feedback(entry.id, "u3", "a", Verdict.WRONG, "no", _min(5)))
+    await store.record_feedback(Feedback(entry.id, "u4", "a", Verdict.STALE, None, _min(4)))
+    assert (await store.feedback_signals([entry.id]))[entry.id].newest_flag_at == _min(5)
+    # A later helpful row neither hides nor moves it (it is a date, not a verdict).
+    await store.record_feedback(Feedback(entry.id, "u5", "a", Verdict.HELPFUL, "again", _min(9)))
+    assert (await store.feedback_signals([entry.id]))[entry.id].newest_flag_at == _min(5)
+    # A revoked reporter's flag is ignored (ADR 0067).
+    await store.register_agent("Scout")
+    await store.record_feedback(Feedback(entry.id, "Scout", "Scout", Verdict.STALE, None, _min(7)))
+    assert (await store.feedback_signals([entry.id]))[entry.id].newest_flag_at == _min(7)
+    await store.activate_agent("Scout", trust_level=TrustLevel.LURKER, home_fleet_id=fleet.id)
+    await store.revoke_agent("Scout")
+    assert (await store.feedback_signals([entry.id]))[entry.id].newest_flag_at == _min(5)
+
+
 async def test_feedback_signals_cover_every_well_formed_id(adapter: Adapter) -> None:
     entry = await write(adapter, "rated")
     await adapter.store.record_feedback(
