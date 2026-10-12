@@ -18,6 +18,7 @@ START = SCRIPTS / "hivemind-session-start.sh"
 def _env(tmp_path: Path, **extra: str) -> dict[str, str]:
     env = {k: v for k, v in os.environ.items() if not k.startswith("HIVEMIND_")}
     env.pop("XDG_RUNTIME_DIR", None)  # the host's value must not leak in
+    env.pop("COPILOT_CLI", None)  # nor the flat Copilot CLI output form
     env.update(TMPDIR=str(tmp_path / "tmp"), HIVEMIND_API_KEY="hm_key", **extra)
     (tmp_path / "tmp").mkdir(exist_ok=True)
     return env
@@ -135,6 +136,39 @@ def test_a_substantial_gemini_session_is_blocked_counting_each_call_once(tmp_pat
 
 def test_a_gemini_session_that_already_wrote_is_not_blocked(tmp_path: Path) -> None:
     out = _stop(tmp_path, _gemini_transcript(tmp_path, 25, "mcp_hivemind_hive_write"))
+    assert (out.returncode, out.stdout) == (0, "")
+
+
+def _copilot_transcript(tmp_path: Path, calls: int, *names: str) -> Path:
+    """A Copilot CLI 1.0.95 `events.jsonl`: one `tool.execution_start` event
+    per call (the call also appears in the `assistant.message` that asked
+    for it, as a `toolRequests` entry carrying `name`). An MCP tool is
+    named `<server>-<tool>`."""
+    path = tmp_path / "events.jsonl"
+    lines = [json.dumps({"type": "session.start", "data": {"sessionId": "s1"}})]
+    for i, name in enumerate(["bash"] * calls + list(names)):
+        request = {"toolCallId": f"call_{i}", "name": name, "arguments": {}, "type": "function"}
+        lines.append(json.dumps({"type": "assistant.message", "data": {"toolRequests": [request]}}))
+        start = {"toolCallId": f"call_{i}", "toolName": name, "arguments": {}}
+        lines.append(json.dumps({"type": "tool.execution_start", "data": start}))
+        done = {"toolCallId": f"call_{i}", "success": True, "result": {"content": "ok"}}
+        lines.append(json.dumps({"type": "tool.execution_complete", "data": done}))
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
+def test_a_substantial_copilot_session_is_blocked_counting_each_call_once(tmp_path: Path) -> None:
+    out = _stop(tmp_path, _copilot_transcript(tmp_path, 20))
+    assert json.loads(out.stdout)["decision"] == "block"
+    short = _stop(tmp_path, _copilot_transcript(tmp_path, 19), session_id="s2")
+    assert (short.returncode, short.stdout) == (0, "")
+
+
+@pytest.mark.parametrize("tool", ["hivemind-hive_write", "hivemind-hive_feedback"])
+def test_a_copilot_session_that_already_wrote_or_rated_is_not_blocked(
+    tmp_path: Path, tool: str
+) -> None:
+    out = _stop(tmp_path, _copilot_transcript(tmp_path, 25, tool))
     assert (out.returncode, out.stdout) == (0, "")
 
 
@@ -265,6 +299,24 @@ def _start(tmp_path: Path, stdin: str, **extra: str) -> str:
         check=True,
     )
     return json.loads(out.stdout)["hookSpecificOutput"]["additionalContext"]
+
+
+@pytest.mark.parametrize("extra", [{}, {"HIVEMIND_INCOGNITO": "1"}])
+def test_copilot_cli_gets_a_flat_additional_context(tmp_path: Path, extra: dict[str, str]) -> None:
+    """Copilot CLI 1.0.95 reads only a top-level `additionalContext` and drops
+    `hookSpecificOutput`; it sets COPILOT_CLI=1 for its hooks (checked live)."""
+    out = subprocess.run(
+        ["sh", str(START)],
+        input='{"hook_event_name":"SessionStart","source":"new"}',
+        env=_env(tmp_path, COPILOT_CLI="1", **extra),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    payload = json.loads(out.stdout)
+    assert list(payload) == ["additionalContext"]
+    assert payload["additionalContext"].startswith("HIVEMIND:")
+    assert ("incognito" in payload["additionalContext"]) == bool(extra)
 
 
 def test_only_the_compact_source_gets_the_post_compaction_line(tmp_path: Path) -> None:
