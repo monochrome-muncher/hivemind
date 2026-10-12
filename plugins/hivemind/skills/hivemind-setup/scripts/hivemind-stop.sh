@@ -34,8 +34,25 @@ sid="$(field session_id | tr -c 'A-Za-z0-9_-' '_')"
 transcript="$(field transcript_path)"
 [ -n "$sid" ] && [ -n "$transcript" ] && [ -r "$transcript" ] || exit 0
 
-# (a) Once per session: the marker is written only when a stop is blocked.
-dir="${TMPDIR:-/tmp}/hivemind-stop-reminder"
+# (a) Once per session: the marker is written only when a stop is blocked. It
+# lives in a private per-user folder: $XDG_RUNTIME_DIR/hivemind-stop-reminder
+# when that is ours, else ${TMPDIR:-/tmp}/hivemind-stop-reminder-<uid>. A
+# folder that is not a real directory of ours, or is group/other writable,
+# is refused (no reminder), so another user cannot suppress or spy on it.
+if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -d "$XDG_RUNTIME_DIR" ] \
+  && [ ! -L "$XDG_RUNTIME_DIR" ] && [ -O "$XDG_RUNTIME_DIR" ]; then
+  dir="$XDG_RUNTIME_DIR/hivemind-stop-reminder"
+else
+  uid="$(id -u 2>/dev/null)" && [ -n "$uid" ] || exit 0
+  dir="${TMPDIR:-/tmp}/hivemind-stop-reminder-$uid"
+fi
+[ -e "$dir" ] || [ -L "$dir" ] || mkdir -m 700 "$dir" 2>/dev/null
+private() {
+  [ -d "$dir" ] && [ ! -L "$dir" ] && [ -O "$dir" ] || return 1
+  mode="$(ls -ld "$dir" 2>/dev/null)" || return 1
+  case "$mode" in d????w*|d???????w*) return 1 ;; esac
+}
+private || exit 0
 [ -e "$dir/$sid" ] && exit 0
 
 # (e) Qualifying: enough tool uses, and no hive_write / hive_feedback yet.
@@ -53,7 +70,7 @@ gemini="$(grep -Eo '"functionResponse" *: *\{ *"id" *: *"[^"]*"' "$transcript" 2
 uses=$((uses + gemini))
 [ "${uses:-0}" -ge "$min" ] 2>/dev/null || exit 0
 
-mkdir -p "$dir" 2>/dev/null && : > "$dir/$sid" 2>/dev/null || exit 0
+private && (umask 077; : > "$dir/$sid") 2>/dev/null || exit 0
 
 printf '%s\n' '{"decision":"block","reason":"HIVEMIND: before finishing, write to Hivemind (hive_write) what another agent could reuse from this task, and rate the entries your work tested (hive_feedback). If nothing is new, write nothing and just finish."}'
 exit 0
