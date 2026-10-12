@@ -343,7 +343,7 @@ Today a hit carries `id, kind, summary, tags, author, agent, occurred_at, score,
 | `supersedes` | How many entries this one replaced: corrections are the fleet's most important news; read them first at catch-up. | Evidence-on-hits PR |
 | `state` | Only under `include_inactive`, so superseded and withdrawn hits stop looking active. | Evidence-on-hits PR |
 | `similar` | Unlinked near-copies, newest first: check which holds, then supersede or flag the other. | Version grouping |
-| `upstream_changed` | An insight or decision whose `see_also` target was withdrawn, superseded by someone else, or flagged since the link was made: re-check before relying. | Later PR |
+| `upstream_changed` | An insight or decision whose `see_also` target was withdrawn, superseded by someone else, or flagged since the link was made: re-check before relying. | Upstream-changed PR (ADR 0081) |
 | `distilled_in` | Up to 2 active insights or decisions that build on this entry: open the synthesis first. | Later PR |
 
 `_DESC_SEARCH` explains each field in one clause, and says *"score is findability, not truth"*.
@@ -581,7 +581,7 @@ The fleet "got smarter" when, over a month, more verdicts carry evidence, correc
 | 11 | **Confirmation as recency clock** (flag, default off) | S | Yes (amends 0022, SPEC §6.4) | No | Aged-currency and S2 improve; old-exact within 0.02; 70/20/10 with confirmations on 20% | Choose this, or helpful evaporation, as the second use of feedback dates | Merged off, PR #115 (ADR 0071); measured worse, leave off |
 | 12 | **Narrow importance** to 0.9-1.1 with the rubric; per-author importance share in admin | S | Yes (SPEC §6.2/§6.4) | No | S4 flips; importance-randomized domains slice at 70/20/10 | Accept a live ranking change | Not started |
 | 13 | **Length-normalized keyword rank** (flag; default only after measurement) | S | Yes | No | Keyword-stuffing slice; sysadmin long-insight check; 70/20/10 | None until measured | Not started |
-| 14 | **`upstream_changed` marker and catch-up filter** (+~60 B skill) | M | No | No | Contract tests; dependents resolved within 14 days | None | Not started |
+| 14 | **`upstream_changed` marker and catch-up filter** (+~60 B skill) | M | No | No | Contract tests; dependents resolved within 14 days | None | In PR (ADR 0081); the marker only, the catch-up filter is not in it |
 | 15 | **`distilled_in` on hits** | M | No | No | Consolidation arm with fragments active: synthesis reachable in top 5; p95 +<5 ms | None | Not started |
 | 16 | **Version grouping** (τ off by default) with `similar` and a skill clause | L | Yes (amends SPEC §6.3) | No | τ sweep 0.70-0.95 at 70/20/10; false grouping ≤5% pooled, ≤10% per domain; then re-sweep the recency floor | Adopt τ only on the measurement | Merged off, PR #123 (ADR 0074) |
 | 17 | **Per-owner collapse** and no votes from the author's siblings (flag, default off) | M | Yes (amends 0063/0066) | No | Sybil scenario; sibling share from PR 3's metric | Turn on only if sibling voting proves material; `owner_alias` is self-reported | Not started; now the only open independence gap |

@@ -39,6 +39,7 @@ from hivemind.domain.entry import (
 from hivemind.domain.feedback import Feedback, FeedbackCounts, FeedbackSignals, FlagCount
 from hivemind.domain.health import Convergence, FleetHealth
 from hivemind.domain.pin import Pin, PinWrite
+from hivemind.domain.upstream import UpstreamLink
 
 
 class SupersedeConflict(Exception):
@@ -111,6 +112,19 @@ class Store(Protocol):
         """``entry_links`` for several entries in one read (ADR 0059),
         keyed by every requested id; an id with no links (or naming no
         entry) maps to ``([], [])``."""
+        ...
+
+    async def upstream_links(
+        self, entry_ids: list[str], *, visibility: Visibility | None = None
+    ) -> dict[str, list[UpstreamLink]]:
+        """The outgoing ``see_also`` links of several entries with what
+        happened to each target, in one read (ADR 0081): per entry, its
+        links (at most ``MAX_SEE_ALSO``, by the write cap) oldest first then by target id,
+        each target limited to what ``visibility`` may read, in any state
+        (``None`` = all); a link to an unreadable target is left out as if
+        it did not exist. Only entries that have such a link are keys;
+        malformed ids are left out. Facts only: ``upstream_changed`` applies
+        the rule."""
         ...
 
     async def pin_entry(

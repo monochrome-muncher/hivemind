@@ -30,6 +30,7 @@ from hivemind.domain.feedback import (
     shown_correction,
 )
 from hivemind.domain.recency import RecencyHint
+from hivemind.domain.upstream import UPSTREAM_KINDS, UpstreamChange, upstream_changed
 from hivemind.domain.validation import check_pagination, check_query
 from hivemind.embeddings import EmbeddingError
 from hivemind.ports import Embedder, Store
@@ -82,6 +83,10 @@ class Hit:
     # newest first (ADR 0074); empty unless version grouping is on and found
     # some. Display only.
     similar: tuple[SimilarEntry, ...] = ()
+    # Entries this insight or decision links to (see_also) that were
+    # withdrawn, superseded by someone else or flagged since the link was
+    # made, at most 3 (ADR 0081). Display only.
+    upstream_changed: tuple[UpstreamChange, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -308,6 +313,8 @@ class SearchService:
             )
 
         # 6. Pagination (SPEC.md §5.3: limit/offset on search and list).
+        page = ordered[offset : offset + limit]
+        upstream = await self._upstream_changes(page, visibility)
         hits = [
             self._to_hit(
                 entry,
@@ -315,10 +322,28 @@ class SearchService:
                 entry_feedback[entry.id],
                 with_state=filters.include_inactive,
                 similar=similar.get(entry.id, ()),
+                upstream_changed=upstream.get(entry.id, ()),
             )
-            for entry in ordered[offset : offset + limit]
+            for entry in page
         ]
         return SearchResult(hits, degraded, applied)
+
+    async def _upstream_changes(
+        self, page: list[Entry], visibility: Visibility | None
+    ) -> dict[str, tuple[UpstreamChange, ...]]:
+        """The ``upstream_changed`` marker of each insight or decision on
+        the page (ADR 0081): one batched read after the gathered ones, only
+        for the page. Best-effort like version grouping: a display nicety,
+        so a failed read means no marker, never a failed search."""
+        wanted = [e for e in page if e.kind in UPSTREAM_KINDS]
+        if not wanted:
+            return {}
+        try:
+            links = await self._store.upstream_links([e.id for e in wanted], visibility=visibility)
+        except Exception:
+            logger.warning("upstream_changed skipped", exc_info=True)
+            return {}
+        return {e.id: upstream_changed(e.kind, e.author, links.get(e.id, [])) for e in wanted}
 
     async def _version_groups(
         self,
@@ -404,6 +429,7 @@ class SearchService:
         *,
         with_state: bool = False,
         similar: tuple[SimilarEntry, ...] = (),
+        upstream_changed: tuple[UpstreamChange, ...] = (),
     ) -> Hit:
         return Hit(
             entry_id=entry.id,
@@ -423,6 +449,7 @@ class SearchService:
             supersedes=signals.supersedes,
             state=entry.state if with_state else None,
             similar=similar,
+            upstream_changed=upstream_changed,
         )
 
 

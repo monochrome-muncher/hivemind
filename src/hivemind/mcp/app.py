@@ -191,6 +191,10 @@ def _hit_dict(hit: Hit) -> dict[str, object]:
         out["similar"] = [
             {"id": m.entry_id, "occurred_at": m.occurred_at.isoformat()} for m in hit.similar
         ]
+    if hit.upstream_changed:
+        out["upstream_changed"] = [
+            {"id": c.id, "change": c.change.value} for c in hit.upstream_changed
+        ]
     return out
 
 

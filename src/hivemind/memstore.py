@@ -80,6 +80,7 @@ from hivemind.domain.health import (
     is_entry_ref,
 )
 from hivemind.domain.pin import Pin, PinWrite
+from hivemind.domain.upstream import UpstreamLink
 from hivemind.ports import SupersedeConflict
 
 # Sort key for a feedback row that has no timestamp (fixtures only).
@@ -143,7 +144,8 @@ class MemoryStore:
         self._audit: list[AuditRecord] = []  # append-only (ADR 0027)
         self._pins: dict[tuple[str, str], Pin] = {}  # (fleet, entry), ADR 0058
         self._searches: dict[str | None, tuple[int, int, int]] = {}  # ADR 0056, 0078
-        self._links: dict[tuple[str, str], None] = {}  # (from, to), insertion-ordered (ADR 0057)
+        # (from, to) -> when the link was made, insertion-ordered (ADR 0057, 0081)
+        self._links: dict[tuple[str, str], datetime] = {}
 
     # -- write path -------------------------------------------------------
 
@@ -201,7 +203,7 @@ class MemoryStore:
             # (same ``created_at``, then ``to_id``).
             for target_id in sorted(draft.see_also):
                 if target_id in self._entries and target_id != entry.id:
-                    self._links[(entry.id, target_id)] = None
+                    self._links[(entry.id, target_id)] = now
         return entry
 
     async def entry_links(self, entry_id: str, limit: int) -> tuple[list[str], list[str]]:
@@ -214,6 +216,52 @@ class MemoryStore:
         self, entry_ids: list[str], limit: int
     ) -> dict[str, tuple[list[str], list[str]]]:
         return {eid: await self.entry_links(eid, limit) for eid in entry_ids}
+
+    async def upstream_links(
+        self, entry_ids: list[str], *, visibility: Visibility | None = None
+    ) -> dict[str, list[UpstreamLink]]:
+        wanted = {str(uuid.UUID(eid)) for eid in entry_ids if _is_uuid(eid)}
+        out: dict[str, list[UpstreamLink]] = {}
+        with self._lock:
+            targets = {to for (frm, to) in self._links if frm in wanted}
+            by_target: dict[str, list[Feedback]] = {}
+            for fb in self._live_feedback().values():
+                if fb.entry_id in targets:
+                    by_target.setdefault(fb.entry_id, []).append(fb)
+            for (frm, to), linked_at in self._links.items():
+                target = self._entries.get(to)
+                if frm not in wanted or target is None or not self._visible(target, visibility):
+                    continue
+                successor = (
+                    self._entries.get(target.superseded_by) if target.superseded_by else None
+                )
+                rows = by_target.get(to, [])
+                flags = [
+                    fb.updated_at or _EPOCH for fb in rows if fb.verdict is not Verdict.HELPFUL
+                ]
+                noted = [
+                    fb.updated_at
+                    for fb in rows
+                    if fb.verdict is Verdict.HELPFUL
+                    and fb.note
+                    and fb.note.strip()
+                    and fb.updated_at is not None
+                ]
+                out.setdefault(frm, []).append(
+                    UpstreamLink(
+                        from_id=frm,
+                        to_id=to,
+                        linked_at=linked_at,
+                        state=target.state,
+                        superseded_at=successor.created_at if successor else None,
+                        superseded_author=successor.author if successor else None,
+                        newest_flag_at=max(flags, default=None),
+                        newest_noted_helpful_at=max(noted, default=None),
+                    )
+                )
+        for links in out.values():
+            links.sort(key=lambda link: (link.linked_at, link.to_id))
+        return out
 
     async def withdraw_entry(self, entry_id: str, reason: str | None, by_user: str) -> Entry:
         with self._lock:

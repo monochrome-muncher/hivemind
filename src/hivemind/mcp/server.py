@@ -117,6 +117,7 @@ _DESC_SEARCH = (
     "'supersedes': entries it replaced. "
     "'recency': prefer_recent (current state) or ignore_age (timeless). "
     "'similar': near-copies: supersede or flag the stale one. "
+    "'upstream_changed': a see_also entry it builds on changed: re-check. "
     "explore=true: diverse order."
 )
 _DESC_GET = (

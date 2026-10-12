@@ -90,3 +90,4 @@ is unused.
 | [0078](0078-explore-search.md) | Opt-in explore search: MMR re-ordering for diversity | Accepted |
 | [0079](0079-feedback-dates-on-the-database-clock.md) | Feedback is dated by the store's clock | Accepted |
 | [0080](0080-admin-memory-browser-and-activity.md) | The admin panel can read memories and show activity | Accepted |
+| [0081](0081-upstream-changed-on-hits.md) | A hit shows when an entry it links to changed (`upstream_changed`) | Accepted |
