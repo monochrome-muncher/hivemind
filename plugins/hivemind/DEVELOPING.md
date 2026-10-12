@@ -140,8 +140,12 @@ The script counts three transcript formats:
   1. not incognito (same test as the session-start script);
   2. `HIVEMIND_API_KEY` is set (same test as the session-start script);
   3. `stop_hook_active` is not true;
-  4. no marker for this `session_id` in `${TMPDIR:-/tmp}/hivemind-stop-reminder/`
-     (written only when it blocks, so it never fires twice);
+  4. no marker for this `session_id` in `$XDG_RUNTIME_DIR/hivemind-stop-reminder/`
+     (when that variable names a real directory the user owns), else
+     `${TMPDIR:-/tmp}/hivemind-stop-reminder-<uid>/` (written only when it
+     blocks, so it never fires twice). The folder is private: created 0700,
+     and refused (no reminder) unless it is a real directory owned by the
+     user and not group or other writable;
   5. the transcript (grep only, no jq, python or node) has no `hive_write`
      or `hive_feedback` tool call and at least 20 tool uses
      (`HIVEMIND_STOP_MIN_TOOLS` overrides the 20).

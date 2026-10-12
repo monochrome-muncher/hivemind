@@ -17,6 +17,7 @@ START = SCRIPTS / "hivemind-session-start.sh"
 
 def _env(tmp_path: Path, **extra: str) -> dict[str, str]:
     env = {k: v for k, v in os.environ.items() if not k.startswith("HIVEMIND_")}
+    env.pop("XDG_RUNTIME_DIR", None)  # the host's value must not leak in
     env.update(TMPDIR=str(tmp_path / "tmp"), HIVEMIND_API_KEY="hm_key", **extra)
     (tmp_path / "tmp").mkdir(exist_ok=True)
     return env
@@ -199,6 +200,59 @@ def test_an_unwritable_state_dir_fails_open(tmp_path: Path) -> None:
     env["TMPDIR"] = str(blocker)  # a file, so mkdir -p under it fails
     out = _stop(tmp_path, _transcript(tmp_path, 30), env)
     assert (out.returncode, out.stdout) == (0, "")
+
+
+def _marker_dir(tmp_path: Path) -> Path:
+    return tmp_path / "tmp" / f"hivemind-stop-reminder-{os.getuid()}"
+
+
+def _markers(folder: Path) -> list[Path]:
+    return [p for p in folder.iterdir() if p.is_file()]
+
+
+def test_the_marker_folder_is_per_user_and_private(tmp_path: Path) -> None:
+    assert json.loads(_stop(tmp_path, _transcript(tmp_path, 25)).stdout)["decision"] == "block"
+    folder = _marker_dir(tmp_path)
+    [marker] = _markers(folder)
+    assert folder.stat().st_mode & 0o777 == 0o700
+    assert marker.stat().st_mode & 0o077 == 0
+    assert not (tmp_path / "tmp" / "hivemind-stop-reminder").exists()
+
+
+def test_xdg_runtime_dir_holds_the_marker_when_it_is_ours(tmp_path: Path) -> None:
+    runtime = tmp_path / "run"
+    runtime.mkdir(mode=0o700)
+    env = _env(tmp_path, XDG_RUNTIME_DIR=str(runtime))
+    assert json.loads(_stop(tmp_path, _transcript(tmp_path, 25), env).stdout)["decision"]
+    assert len(_markers(runtime / "hivemind-stop-reminder")) == 1
+    assert (runtime / "hivemind-stop-reminder").stat().st_mode & 0o777 == 0o700
+    assert not _marker_dir(tmp_path).exists()
+
+
+def test_an_unusable_xdg_runtime_dir_falls_back_to_tmpdir(tmp_path: Path) -> None:
+    env = _env(tmp_path, XDG_RUNTIME_DIR=str(tmp_path / "missing"))
+    assert json.loads(_stop(tmp_path, _transcript(tmp_path, 25), env).stdout)["decision"]
+    assert len(_markers(_marker_dir(tmp_path))) == 1
+
+
+def test_a_group_or_other_writable_marker_folder_is_refused(tmp_path: Path) -> None:
+    _env(tmp_path)
+    folder = _marker_dir(tmp_path)
+    folder.mkdir()
+    folder.chmod(0o777)
+    out = _stop(tmp_path, _transcript(tmp_path, 25))
+    assert (out.returncode, out.stdout) == (0, "")
+    assert list(folder.iterdir()) == []
+
+
+def test_a_symlinked_marker_folder_is_refused(tmp_path: Path) -> None:
+    _env(tmp_path)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir(mode=0o700)
+    _marker_dir(tmp_path).symlink_to(elsewhere)
+    out = _stop(tmp_path, _transcript(tmp_path, 25))
+    assert (out.returncode, out.stdout) == (0, "")
+    assert list(elsewhere.iterdir()) == []
 
 
 def _start(tmp_path: Path, stdin: str, **extra: str) -> str:
