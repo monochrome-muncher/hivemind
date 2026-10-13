@@ -9,7 +9,8 @@ before anything else.
 ## Connect
 
 - **With the hivemind plugin** (`/plugin marketplace add
-  <git-url-of-the-hivemind-repo>`, then `/plugin install
+  <git-url-of-the-hivemind-repo>` (on a server other than GitHub the
+  URL must end in `.git`), then `/plugin install
   hivemind@hivemind`): the plugin already defines the MCP server from
   `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY`. Only set the variables
   (below). Claude Code registers a plugin's server under the scoped name

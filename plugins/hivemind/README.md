@@ -67,6 +67,11 @@ says `v<version>`, that means a release such as `v2.5.0`;
 Install it in your agent, then carry on with
 [step 2](#2-let-the-agent-finish-the-setup).
 
+Use the URLs as shown. On a Git server other than GitHub, keep the
+`.git` at the end. DeepSeek Harness and OpenCode also need the `git+`
+prefix, and Hermes needs `#plugins/hivemind`. Don't paste a link with a
+trailing slash, or a `/tree/...` link copied from the browser.
+
 ### Claude Code
 
 In Claude Code's prompt:
@@ -100,7 +105,8 @@ dsh plugin --profile <name> add git+https://github.com/monochrome-muncher/hivemi
 
 Add `#v<version>` to the end of the URL to stay on one release. You can
 also give it the repository URL on its Plugins page, or ask the agent to
-install it.
+install it. A GitHub URL works there as is. A URL from another Git
+server must end in `.git`.
 
 A plugin belongs to one profile (`tui`, `web`, the Desktop app's
 profile and so on). If you use DSH both in a terminal and in the Desktop
@@ -153,6 +159,18 @@ hermes plugins enable hivemind
 ```
 
 From a local copy, use `hermes plugins install /path/to/hivemind/plugins/hivemind`.
+
+The short form above works for GitHub only. For another Git server, use:
+
+```sh
+hermes plugins install https://<git-server>/<owner>/hivemind.git#plugins/hivemind
+```
+
+Hermes scans a plugin before it installs it. It rates Hivemind CAUTION,
+lists what it found (mostly false alarms from text in the docs) and asks
+"Install anyway? [y/N]". Answer `y` if you trust the source. Without a
+terminal, for example when an agent runs the command, Hermes refuses
+and says to use `--force`.
 
 Hermes v2026.9.24 (0.21.5) and later add a Hivemind section to every new
 session by themselves. Older versions need a short block in
