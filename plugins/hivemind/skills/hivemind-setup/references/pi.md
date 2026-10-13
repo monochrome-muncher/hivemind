@@ -70,7 +70,8 @@ key never lands in the file:
   not show up in your tool list even though Hivemind is configured.
   `eager` connects at startup and `directTools: true` registers the tools
   by name. After editing the file, reload Pi's tools (`/reload`) or
-  restart.
+  restart. pi-mcp-adapter 5.2.0 and later no longer follow a redirect to a
+  different host, so `HIVEMIND_MCP_URL` must be the final URL.
 - **Project**: the same file as `.mcp.json` at the repository root (no
   key in it: only `${VAR}` references; the adapter asks the user to
   approve a project-scoped server).

@@ -43,7 +43,7 @@ One entry entity; a `kind` enum carries the distinction. There are no other read
 |---|---|---|
 | `id` | uuid | Server-assigned |
 | `kind` | `fact` \| `insight` \| `decision` | Required |
-| `summary` | text (≤ ~280 chars) | **Required.** Short, always embedded, always shown in compact hits |
+| `summary` | text (≤ 280 chars) | **Required.** Short, always embedded, always shown in compact hits |
 | `body` | markdown (optional) | Long-form content (the "analysis work"). Returned **in full** by `get`; never truncated server-side |
 | `payload` | JSONB (optional) | Structured data (numbers, small JSON documents) |
 | `sources` | array (optional) | `{type: path\|url\|session\|other, ref}` — provenance pointers to where the entry came from |

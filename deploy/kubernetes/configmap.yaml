@@ -6,8 +6,9 @@
 #
 # HIVEMIND_RUNNER/HOST/PORT are set on the Deployments; they are not
 # Settings fields (`_ALLOWED_EXTRA_ENV_VARS` in config.py). Any other
-# unknown HIVEMIND_* variable fails startup loudly (ADR 0024), so typos
-# surface immediately.
+# unknown HIVEMIND_* variable is logged as a WARNING at startup (ADR 0024),
+# so typos surface; it fails startup only with HIVEMIND_STRICT_ENV=true
+# (ADR 0032).
 apiVersion: v1
 kind: ConfigMap
 metadata:

@@ -117,7 +117,7 @@ _DESC_SEARCH = (
     "'supersedes': entries it replaced. "
     "'recency': prefer_recent (current state) or ignore_age (timeless). "
     "'similar': near-copies: supersede or flag the stale one. "
-    "'upstream_changed': a see_also entry it builds on changed: re-check. "
+    "'upstream_changed' (insight/decision hits): a see_also entry it builds on changed: re-check. "
     "explore=true: diverse order."
 )
 _DESC_GET = (
@@ -188,7 +188,7 @@ _DESC_REGISTER = (
 
 
 _DESC_WHOAMI = (
-    "Who am I to Hivemind? Returns this key's kind (agent/org/admin), the "
+    "Who am I to Hivemind? Returns this key's kind (agent/org/admin/legacy), the "
     "agent's name, status (pending/active/revoked), trust level and home "
     "fleet, and what it may read (can_read) and which scopes it may write "
     "(can_write_scopes). Call it at the start of every session: an empty "

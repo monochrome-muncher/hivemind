@@ -10,7 +10,9 @@ harness, go back to "Which harness am I in?" in the hivemind-setup skill.
 
 - **With the hivemind bundle**: the easiest install is the Hivemind
   repository's Git URL, pasted into DeepSeek Harness's Plugins page (or
-  `dsh plugin --profile <name> add git+https://<git-server>/<owner>/hivemind.git`);
+  `dsh plugin --profile <name> add git+https://<git-server>/<owner>/hivemind.git`;
+  a pasted URL must end in `.git` unless it is on github.com,
+  gitlab.com or bitbucket.org, and must not end in a slash);
   a local checkout also works (`dsh plugin --profile <name> add
   <path>/plugins/hivemind`). The bundle defines the MCP server from
   `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY` and serves both skills. The

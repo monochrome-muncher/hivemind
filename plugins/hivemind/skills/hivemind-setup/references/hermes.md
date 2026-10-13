@@ -18,7 +18,13 @@ in the hivemind-setup skill.
   block in `SOUL.md` (Stay aware, below) is **required**. The hivemind
   plugin from releases 2.3.1 to 2.5.0 does not load at all (its
   `plugin.yaml` is not valid YAML): update it. The MCP server is still configured by hand
-  (below).
+  (below). Off GitHub, the form is `hermes plugins install
+  https://<git-server>/<owner>/hivemind.git#plugins/hivemind`; without
+  `#plugins/hivemind` nothing loads. Hermes scans the plugin on install,
+  rates it CAUTION (mostly false alarms) and asks "Install anyway?
+  [y/N]". With no terminal it refuses and says to use `--force`. Ask the
+  user to confirm, or to run it themselves; use `--force` only after
+  they agree.
 - **The MCP server**: add this to `~/.hermes/config.yaml` (all profiles)
   or the profile's own `config.yaml`, merging into the existing file.
   `${VAR}` references are resolved from the environment at connection
@@ -68,7 +74,8 @@ other harnesses.
 
 `hermes plugins update hivemind` (a `git pull` of the installed plugin). A
 plugin installed at a pinned ref needs `hermes plugins install <source>
---force --ref <new-ref>` instead.
+--force --ref <commit-sha>` instead; the ref must be the full 40-character
+commit SHA (a tag or branch name is refused).
 
 ## Incognito
 
