@@ -68,7 +68,8 @@ other harnesses.
 
 `hermes plugins update hivemind` (a `git pull` of the installed plugin). A
 plugin installed at a pinned ref needs `hermes plugins install <source>
---force --ref <new-ref>` instead.
+--force --ref <commit-sha>` instead; the ref must be the full 40-character
+commit SHA (a tag or branch name is refused).
 
 ## Incognito
 

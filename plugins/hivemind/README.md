@@ -402,8 +402,9 @@ reminders:
   whether there is anything another agent could reuse. If there isn't, it
   simply finishes.
 
-Neither reminder appears in an incognito session or when
-`HIVEMIND_API_KEY` is not set. What each agent gets:
+Neither reminder appears in an incognito session, and the
+end-of-session one is skipped when `HIVEMIND_API_KEY` is not set. What
+each agent gets:
 
 - **Claude Code and Codex**: both reminders. To turn off the
   end-of-session one, disable the plugin's `Stop` hook in `/hooks`. Codex
@@ -417,10 +418,10 @@ Neither reminder appears in an incognito session or when
 - **Gemini CLI**: only the end-of-session reminder, from an `AfterAgent`
   hook (turn it off with `gemini hooks`). Gemini runs no startup hook
   after compressing its context.
-- **GitHub Copilot CLI**: the startup reminder and the end-of-session
-  one, from the plugin's `SessionStart` and `Stop` hooks. Copilot runs no
-  startup hook after compacting its context, so there is no
-  post-compaction line; the instruction block in
+- **GitHub Copilot CLI**: only the end-of-session reminder, from the
+  plugin's `Stop` hook. Its `SessionStart` hook still gives the startup
+  text, but Copilot runs no startup hook after compacting its context, so
+  there is no post-compaction line; the instruction block in
   `~/.copilot/copilot-instructions.md` is what carries Hivemind across a
   compaction.
 - **Hermes**: neither. Hermes has no hook that can hold the end of a
@@ -511,7 +512,8 @@ All of these go in a terminal:
   update the Hivemind setup, which refreshes the block in
   `~/.copilot/copilot-instructions.md`.
 - **Hermes**: `hermes plugins update hivemind`. If you installed a fixed
-  ref: `hermes plugins install <source> --force --ref <new-ref>`.
+  ref: `hermes plugins install <source> --force --ref <commit-sha>`
+  (the full 40-character commit SHA; a tag or branch name is refused).
 - **OpenCode**: change the version in the `plugin` entry and restart. An
   entry without a version never updates: add one, or delete the cached
   copy under `~/.cache/opencode/` and restart.

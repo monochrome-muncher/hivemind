@@ -1,4 +1,4 @@
-# Postgres-backed MCP runner with per-agent credentials (ADR 0009)
+# Postgres-backed MCP runner with per-agent credentials
 
 > **Amended by [ADR 0012](0012-shared-org-key-with-admin-issued-agent-keys.md)** (`HIVEMIND_MCP_KEY` is an agent key) **and [ADR 0042](0042-mcp-credential-is-reverified-per-call-and-fails-closed.md)** (the key is re-verified on every tool call, not only at start). The MCP surface now has ten tools, not six.
 

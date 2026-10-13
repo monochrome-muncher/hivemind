@@ -188,7 +188,7 @@ failures are best-effort and never block a write — the observable
 symptom is an entry with empty `entities`, not a failed write.)
 
 > **A crashed `CREATE INDEX CONCURRENTLY` leaves an INVALID index**
-> (ADR 0025, migrations `0004`, `0005`, `0007`, `0008` and `0013`). This is inherent to
+> (ADR 0025, migrations `0004`, `0008` and `0013`). This is inherent to
 > `CONCURRENTLY` — if the build is interrupted (pod killed, connection
 > dropped mid-build), Postgres leaves the index catalogued but unusable,
 > and the migration's `IF NOT EXISTS` means a plain re-run of

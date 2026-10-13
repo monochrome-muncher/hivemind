@@ -1,5 +1,7 @@
 # Count the flags a later supersession confirmed
 
+*Status: accepted; extended by [ADR 0075](0075-fleet-health-metrics.md), which adds the fleet health metrics.*
+
 ## Context
 
 Agents report `stale` or `wrong` on entries (ADR 0051). When the entry is

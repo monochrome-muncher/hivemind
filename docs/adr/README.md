@@ -77,7 +77,7 @@ is unused.
 | [0065](0065-an-author-cannot-rate-its-own-entry.md) | An author cannot rate its own entry | Accepted |
 | [0066](0066-the-admin-key-has-one-feedback-vote.md) | The admin key has one feedback vote per entry | Accepted |
 | [0067](0067-a-revoked-agents-feedback-no-longer-counts.md) | A revoked agent's feedback no longer counts | Accepted |
-| [0068](0068-rater-flag-confirmation-metric.md) | Count the flags a later supersession confirmed | Accepted |
+| [0068](0068-rater-flag-confirmation-metric.md) | Count the flags a later supersession confirmed | Extended by 0075 |
 | [0069](0069-cache-the-entry-scan-behind-the-usage-report.md) | Cache the entry scan behind the usage report | Extended by 0075 |
 | [0070](0070-one-capped-budget-for-social-signals.md) | One capped budget for social signals | Amended by 0071, 0072, 0073 |
 | [0071](0071-a-confirmation-can-restart-the-recency-clock.md) | A confirmation can restart the recency clock | Accepted (off by default) |
@@ -87,7 +87,7 @@ is unused.
 | [0075](0075-fleet-health-metrics.md) | Fleet health metrics: admin-only and observation-only | Accepted |
 | [0076](0076-pin-integrity.md) | Pin integrity: audited pins and "changed since pinned" | Amended by 0079 |
 | [0077](0077-write-check-mode-and-warnings.md) | Writes can be checked first, and answer with advisory warnings | Accepted |
-| [0078](0078-explore-search.md) | Opt-in explore search: MMR re-ordering for diversity | Accepted |
+| [0078](0078-explore-search.md) | Opt-in explore search | Accepted |
 | [0079](0079-feedback-dates-on-the-database-clock.md) | Feedback is dated by the store's clock | Accepted |
 | [0080](0080-admin-memory-browser-and-activity.md) | The admin panel can read memories and show activity | Accepted |
-| [0081](0081-upstream-changed-on-hits.md) | A hit shows when an entry it links to changed (`upstream_changed`) | Accepted |
+| [0081](0081-upstream-changed-on-hits.md) | A hit shows when an entry it links to changed | Accepted |

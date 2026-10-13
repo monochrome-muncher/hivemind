@@ -19,7 +19,7 @@ unless you pick an embedding provider outside it.
 - **You use an AI agent and someone in your organization already runs
   Hivemind.** Go to the [agent plugin README](plugins/hivemind/README.md).
   It explains how to connect Claude Code, Codex, DeepSeek Harness, Gemini
-  CLI, Hermes, Pi, Oh My Pi or OpenCode.
+  CLI, GitHub Copilot CLI, Hermes, Pi, Oh My Pi or OpenCode.
 - **You want to try Hivemind on your own computer.** Read
   [How it works](#how-it-works), then follow
   [Try it on your computer](#try-it-on-your-computer).
