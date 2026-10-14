@@ -17,6 +17,7 @@ from hivemind.services.access import AccessService
 from hivemind.services.activity import ActivityService
 from hivemind.services.governance import GovernanceService, WriteService
 from hivemind.services.metrics import DEFAULT_ENTRY_COUNTS_TTL, MetricsService
+from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
 
 
@@ -27,6 +28,7 @@ class Services:
 
     search_config: SearchConfig
     write_service: WriteService
+    read_service: ReadService
     search_service: SearchService
     governance_service: GovernanceService
     access_service: AccessService
@@ -50,13 +52,15 @@ def build_services(
     ``Settings.metrics_entry_counts_ttl`` (ADR 0069). ``require_stored_keys``
     is ``Settings.require_stored_keys`` (ADR 0082): when true, a dev-mode
     credential is downgraded to trust level 0 at the service seam."""
+    governance_service = GovernanceService(
+        store, search_config, require_stored_keys=require_stored_keys
+    )
     return Services(
         search_config=search_config,
         write_service=WriteService(store, embedder, extractor),
+        governance_service=governance_service,
+        read_service=ReadService(store, governance_service, search_config),
         search_service=SearchService(store, embedder, search_config),
-        governance_service=GovernanceService(
-            store, search_config, require_stored_keys=require_stored_keys
-        ),
         access_service=AccessService(store, authenticator),
         metrics_service=MetricsService(store, entry_counts_ttl=metrics_entry_counts_ttl),
         activity_service=ActivityService(store, ttl=metrics_entry_counts_ttl),

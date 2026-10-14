@@ -26,6 +26,7 @@ from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService, WriteService
+from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
 from tests.fakes import FakeAuthenticator, make_clock, make_embedder, make_search_config
 
@@ -69,6 +70,7 @@ class World:
             write_service=WriteService(self.store, embedder),
             search_service=SearchService(self.store, embedder, config),
             governance_service=GovernanceService(self.store, config),
+            read_service=ReadService(self.store, GovernanceService(self.store, config), config),
             access_service=AccessService(self.store, self.authenticator),
             search_config=config,
             credential=self.authenticator._by_key[key],

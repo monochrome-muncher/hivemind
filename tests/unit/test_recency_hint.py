@@ -26,6 +26,7 @@ from hivemind.ports import Credential
 from hivemind.retrieval.scoring import entry_score
 from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService, WriteService
+from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
 from tests.fakes import FIXED_NOW, make_clock, make_embedder, make_search_config
 from tests.unit.test_api_endpoints import make_authenticator, make_hivemind_app, post_entry
@@ -519,6 +520,7 @@ def _mcp(enabled: bool, store: MemoryStore) -> McpHivemind:
         write_service=WriteService(store, embedder),
         search_service=SearchService(store, embedder, config, now_fn=lambda: NOW),
         governance_service=GovernanceService(store),
+        read_service=ReadService(store, GovernanceService(store), config),
         access_service=AccessService(store),
         search_config=config,
         credential=Credential(user_id="alice", agent_id="agent-1"),

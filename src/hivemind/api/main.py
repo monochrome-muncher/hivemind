@@ -56,6 +56,7 @@ def create_app_for_config(
         authenticator=authenticator,
         search_config=search_config,
         write_service=services.write_service,
+        read_service=services.read_service,
         governance_service=services.governance_service,
         search_service=services.search_service,
         access_service=services.access_service,

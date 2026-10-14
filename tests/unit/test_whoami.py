@@ -19,6 +19,7 @@ from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService, PermissionDenied, resolve_write_scope
 from hivemind.services.governance import GovernanceService, WriteService
+from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
 from tests.fakes import (
     FakeAuthenticator,
@@ -161,6 +162,7 @@ async def test_mcp_whoami_tool_returns_the_standing() -> None:
         write_service=WriteService(store, embedder),
         search_service=SearchService(store, embedder, config, now_fn=clock),
         governance_service=GovernanceService(store),
+        read_service=ReadService(store, GovernanceService(store), config),
         access_service=access,
         search_config=config,
         credential=agent(TrustLevel.LURKER, fleet.id),

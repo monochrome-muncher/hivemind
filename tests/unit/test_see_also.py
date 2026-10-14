@@ -17,6 +17,7 @@ from hivemind.ports import Credential
 from hivemind.services.access import AccessService
 from hivemind.services.chain import MAX_LINKED_FROM
 from hivemind.services.governance import GovernanceService, WriteService
+from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
 from tests.fakes import FakeAuthenticator, make_clock, make_embedder, make_search_config
 
@@ -40,6 +41,7 @@ CAROL = _agent("carol", "fleet-b")
 def _surface(store: MemoryStore, credential: Credential) -> McpHivemind:
     clock, embedder, config = make_clock(), make_embedder(), make_search_config()
     return McpHivemind(
+        read_service=ReadService(store, GovernanceService(store), config),
         store=store,
         write_service=WriteService(store, embedder),
         search_service=SearchService(store, embedder, config, now_fn=clock),

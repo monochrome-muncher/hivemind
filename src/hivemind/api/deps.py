@@ -23,6 +23,7 @@ from hivemind.services.access import AccessService
 from hivemind.services.activity import ActivityService
 from hivemind.services.governance import GovernanceService, WriteService
 from hivemind.services.metrics import MetricsService
+from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ class HivemindApp:
     authenticator: Authenticator
     search_config: SearchConfig
     write_service: WriteService
+    read_service: ReadService
     governance_service: GovernanceService
     search_service: SearchService
     access_service: AccessService

@@ -12,7 +12,6 @@ Error codes: ``missing_api_key``/``unknown_api_key`` (401),
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import UTC, datetime
 from typing import Annotated
@@ -89,13 +88,6 @@ from hivemind.domain.validation import (
 from hivemind.embeddings import EmbeddingError
 from hivemind.ports import Credential
 from hivemind.services.access import resolve_write_scope
-from hivemind.services.chain import (
-    entries_links,
-    entry_links,
-    get_visible_entries,
-    get_visible_entry,
-    supersession_chain,
-)
 from hivemind.services.drafts import entry_draft
 from hivemind.services.errors import (
     AgentIdentityRequired,
@@ -180,24 +172,20 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         read (ADR 0080)."""
         # ADR 0033: follows readability; an invisible entry is a 404 like
         # an unknown one, and the chain leaves out invisible versions.
-        visibility = credential.visibility()
-        entry = await get_visible_entry(app.store, entry_id, visibility)
-        if entry is None:
-            raise api_error(404, "not_found", f"unknown entry: {entry_id}")
-        summary, links = await asyncio.gather(
-            app.governance_service.feedback_summary(entry.id),
-            entry_links(app.store, entry.id, visibility),
+        detail = await app.read_service.entry(
+            entry_id,
+            visibility=credential.visibility(),
+            include_history=history,
         )
-        out = EntryOut.from_entry(entry)
-        out.feedback = FeedbackSummaryOut.from_summary(summary)
-        out.set_links(links)
+        if detail is None:
+            raise api_error(404, "not_found", f"unknown entry: {entry_id}")
+        out = EntryOut.from_entry(detail.entry)
+        out.feedback = FeedbackSummaryOut.from_summary(detail.feedback)
+        out.set_links(detail.links)
         if history:
-            successors, superseded = await supersession_chain(
-                app.store, entry, visibility=visibility
-            )
             out.history = {
-                "successors": [EntryOut.from_entry(e) for e in successors],
-                "superseded": [EntryOut.from_entry(e) for e in superseded],
+                "successors": [EntryOut.from_entry(e) for e in detail.successors],
+                "superseded": [EntryOut.from_entry(e) for e in detail.superseded],
             }
         return out
 
@@ -376,23 +364,16 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         its feedback like ``GET /v1/entries/{id}``. Ids that name nothing
         the caller may read are listed in ``not_found`` (ADR 0033: the same
         answer for "invisible" and "does not exist")."""
-        ids = list(dict.fromkeys(request.entry_ids))
-        visibility = credential.visibility()
-        found = await get_visible_entries(app.store, ids, visibility)
-        entries = [found[eid] for eid in ids if eid in found]
-        # A fixed number of store reads for the whole batch (ADR 0059).
-        entry_ids = [e.id for e in entries]
-        summaries, links = await asyncio.gather(
-            app.governance_service.feedback_summaries(entry_ids),
-            entries_links(app.store, entry_ids, visibility),
+        batch = await app.read_service.entries(
+            request.entry_ids, visibility=credential.visibility()
         )
         outs = []
-        for entry in entries:
-            out = EntryOut.from_entry(entry)
-            out.feedback = FeedbackSummaryOut.from_summary(summaries[entry.id])
-            out.set_links(links[entry.id])
+        for detail in batch.entries:
+            out = EntryOut.from_entry(detail.entry)
+            out.feedback = FeedbackSummaryOut.from_summary(detail.feedback)
+            out.set_links(detail.links)
             outs.append(out)
-        return EntriesOut(entries=outs, not_found=[eid for eid in ids if eid not in found])
+        return EntriesOut(entries=outs, not_found=list(batch.not_found))
 
     @router.get("/entries", response_model=list[EntryOut])
     async def list_entries(
@@ -432,13 +413,10 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
             include_inactive=include_inactive,
             flagged=flagged,
         )
-        filters.validate()  # ADR 0040 (raises InvalidInput -> 422)
-        effective_limit = limit if limit is not None else app.search_config.default_limit
-        effective_offset = offset if offset is not None else 0
-        entries = await app.store.list_entries(
+        entries = await app.read_service.list(
             filters,
-            limit=effective_limit,
-            offset=effective_offset,
+            limit=limit,
+            offset=offset if offset is not None else 0,
             visibility=credential.visibility(),
         )
         return [EntryOut.from_entry(e) for e in entries]
@@ -652,8 +630,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
             include_inactive=include_inactive,
             flagged=flagged,
         )
-        filters.validate()  # ADR 0040 (raises InvalidInput -> 422)
-        entries = await app.store.list_entries(
+        entries = await app.read_service.list(
             filters,
             limit=limit,
             offset=offset if offset is not None else 0,

@@ -21,6 +21,7 @@ from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService, WriteService
+from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
 from tests.fakes import make_clock, make_embedder, make_search_config
 
@@ -49,6 +50,7 @@ def make_app() -> McpHivemind:
         write_service=WriteService(store, embedder),
         search_service=SearchService(store, embedder, config, now_fn=clock),
         governance_service=GovernanceService(store),
+        read_service=ReadService(store, GovernanceService(store), config),
         access_service=AccessService(store),
         search_config=config,
         credential=Credential(user_id="dev", agent_id="hivemind-mcp"),
@@ -157,6 +159,7 @@ async def _l2_app() -> tuple[McpHivemind, str]:
         write_service=WriteService(store, embedder),
         search_service=SearchService(store, embedder, config, now_fn=clock),
         governance_service=GovernanceService(store),
+        read_service=ReadService(store, GovernanceService(store), config),
         access_service=AccessService(store),
         search_config=config,
         credential=cred,
