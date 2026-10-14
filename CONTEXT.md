@@ -224,6 +224,10 @@ _Avoid_: key id, key prefix (it is a prefix of the hash, never of the key)
 A stored key that no longer authenticates although its row remains: a pre-v2 `user` key, an agent key without a registered name, or the key of an agent that is not active (ADR 0039). `hivemind-keys list` marks it `[dead]`.
 _Avoid_: expired key (keys do not expire), revoked key (revocation deletes the key)
 
+**Dev-mode credential**:
+Any credential that is not a stored key — not an admin key, not an org key, not an active agent's key: a hand-built identity such as the dev runner's fixed `dev`. Not access-controlled, so it carries admin-equivalent rights (full visibility, `org` writes); where the deployment requires stored keys (`HIVEMIND_REQUIRE_STORED_KEYS`, ADR 0082) it sits at trust level 0 on the data plane.
+_Avoid_: anonymous credential, legacy credential (that is a dead stored key)
+
 ### Surfaces
 
 **MCP runner**:
