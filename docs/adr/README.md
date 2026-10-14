@@ -93,3 +93,4 @@ is unused.
 | [0081](0081-upstream-changed-on-hits.md) | A hit shows when an entry it links to changed | Accepted |
 | [0082](0082-dev-mode-credentials-sit-at-trust-level-zero.md) | Dev-mode credentials sit at trust level 0 when the pool requires stored keys | Accepted (off by default) |
 | [0083](0083-the-entry-read-path-is-serviced.md) | The entry-read path is serviced | Accepted |
+| [0084](0084-the-wire-contract-is-single-sourced-and-the-usage-report-is-typed.md) | The wire contract is single-sourced, and the usage report is typed | Accepted |

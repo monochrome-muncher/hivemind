@@ -13,6 +13,7 @@ Error codes: ``missing_api_key``/``unknown_api_key`` (401),
 from __future__ import annotations
 
 import logging
+from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
@@ -60,6 +61,7 @@ from hivemind.api.schemas import (
     RegisterAgentRequest,
     RegisteredAgentOut,
     RelatedOut,
+    SearchesMetrics,
     SearchRequest,
     UnpinOut,
     UpdateAgentRequest,
@@ -259,11 +261,12 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
             raise api_error(403, "forbidden", "metrics requires an admin key")
         report = await app.metrics_service.usage_report()
         return MetricsOut(
-            entries=EntriesMetrics(**report["entries"]),
-            fleets=FleetsMetrics(**report["fleets"]),
-            agents=AgentsMetrics(**report["agents"]),
-            feedback=FeedbackMetrics(**report["feedback"]),
-            health=HealthMetrics(**report["health"]) if report["health"] is not None else None,
+            entries=EntriesMetrics(**asdict(report.entries)),
+            fleets=FleetsMetrics(**asdict(report.fleets)),
+            agents=AgentsMetrics(**asdict(report.agents)),
+            searches=SearchesMetrics(**asdict(report.searches)),
+            feedback=FeedbackMetrics(**asdict(report.feedback)),
+            health=HealthMetrics(**asdict(report.health)) if report.health is not None else None,
         )
 
     @router.post(

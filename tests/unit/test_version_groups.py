@@ -19,7 +19,6 @@ from hivemind.domain.access import TrustLevel, Visibility
 from hivemind.domain.entry import Entry, EntryDraft, EntryFilters, Kind
 from hivemind.domain.feedback import Feedback, FeedbackSignals, Verdict
 from hivemind.embeddings import EmbeddingError
-from hivemind.mcp.app import _hit_dict
 from hivemind.memstore import MemoryStore
 from hivemind.services.search import (
     Hit,
@@ -28,6 +27,7 @@ from hivemind.services.search import (
     apply_supersession_invariant,
     group_versions,
 )
+from hivemind.wire import hit_dict
 from tests.fakes import FIXED_NOW, make_clock, make_search_config
 
 TAU = 0.9
@@ -448,11 +448,11 @@ def _hit(similar: tuple[SimilarEntry, ...]) -> Hit:
 
 def test_similar_is_omitted_on_mcp_and_null_on_rest_when_empty() -> None:
     plain = _hit(())
-    assert "similar" not in _hit_dict(plain)
+    assert "similar" not in hit_dict(plain)
     assert HitOut.from_hit(plain).similar is None
 
     grouped = _hit((SimilarEntry("e2", day(3)), SimilarEntry("e3", day(9))))
-    assert _hit_dict(grouped)["similar"] == [
+    assert hit_dict(grouped)["similar"] == [
         {"id": "e2", "occurred_at": day(3).isoformat()},
         {"id": "e3", "occurred_at": day(9).isoformat()},
     ]

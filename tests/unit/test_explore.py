@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import math
+from dataclasses import asdict
 
 import pytest
 
@@ -299,8 +300,8 @@ async def test_usage_report_and_prometheus_expose_explore_counts() -> None:
     await app.store.record_search(fleet.id, empty=False, explore=True)
     await app.store.record_search(fleet.id, empty=False)
     report = await MetricsService(app.store).usage_report()
-    assert report["searches"]["explore"] == 1
-    assert report["searches"]["by_fleet"] == {"data-eng": {"total": 2, "empty": 0, "explore": 1}}
+    assert report.searches.explore == 1
+    assert asdict(report.searches.by_fleet["data-eng"]) == {"total": 2, "empty": 0, "explore": 1}
     client = make_client(app)
     async with client:
         got = samples((await client.get("/metrics")).text)
