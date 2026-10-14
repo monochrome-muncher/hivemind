@@ -636,8 +636,11 @@ The panel holds the admin key in the browser tab's `sessionStorage`
 (cleared on sign-out or when the tab closes), so serve it over TLS
 wherever it is not `localhost`.
 
-**Locally:** `make api` in one shell, `make admin` in another, then open
-`http://localhost:8080`.
+**Locally:** `make up` brings the whole compose stack up — the API on
+`http://localhost:8000` and the panel on `http://localhost:8089` (sign in
+with an admin key from `hivemind-keys issue-admin`). The uv-process path
+works too: `make api` in one shell, `make admin` in another, then open
+`http://localhost:8080`. One path at a time — both put the API on :8000.
 
 **What it forwards.** Only the admin endpoints (the memory browser uses
 the admin-only `/v1/admin/entries`, `/v1/admin/search` and
