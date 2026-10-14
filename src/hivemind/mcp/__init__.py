@@ -20,7 +20,8 @@ from hivemind.mcp.app import (
     hive_withdraw,
     hive_write,
 )
-from hivemind.mcp.server import build_server, main
+from hivemind.mcp.runners import main
+from hivemind.mcp.server import build_server
 
 __all__ = [
     "McpHivemind",
