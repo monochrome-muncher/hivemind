@@ -465,7 +465,9 @@ not edge-case insurance.
 - **Dev compose gets a smaller version of the same setting.** The
   `mcp-http` compose service sets `stop_grace_period: 35s` (compose's
   default is 10s — shorter than a *single* embedder attempt). It runs
-  with extraction off, so its worst case is the embedder leg alone.
+  with extraction off by default (opt in via `.env`), so its worst case
+  is the embedder leg alone; with extraction on, lengthen it per the
+  table above.
 
 ### Probe endpoints (ADR 0019)
 

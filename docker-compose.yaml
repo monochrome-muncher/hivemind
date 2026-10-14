@@ -19,6 +19,12 @@
 #
 # Signing into the admin panel needs an admin key, issued once:
 #   uv run hivemind-keys issue-admin
+#
+# Extra settings (e.g. entity extraction, ADR 0016): set the variable in a
+# gitignored `.env` in this directory — compose interpolates it into the
+# `${VAR:-}` pass-throughs of the services that need it (the extractor trio
+# is plumbed into api and mcp-http). The ADR 0017 profile files (`.env.*`)
+# feed the uv processes only; compose never reads them.
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -90,6 +96,10 @@ services:
       HIVEMIND_EMBEDDING_ENDPOINT: http://vllm:8000/v1
       HIVEMIND_EMBEDDING_MODEL: Qwen/Qwen3-Embedding-0.6B
       HIVEMIND_EMBEDDING_DIM: "512"
+      # Entity extraction (ADR 0016): off unless set in .env.
+      HIVEMIND_EXTRACTOR_ENDPOINT: ${HIVEMIND_EXTRACTOR_ENDPOINT:-}
+      HIVEMIND_EXTRACTOR_MODEL: ${HIVEMIND_EXTRACTOR_MODEL:-}
+      HIVEMIND_EXTRACTOR_API_KEY: ${HIVEMIND_EXTRACTOR_API_KEY:-}
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -98,7 +108,8 @@ services:
       vllm:
         condition: service_started
     # Same rationale as mcp-http: the worst request is the embedder leg
-    # (3 x 10s + backoff, ADR 0014); extraction is OFF here (ADR 0016).
+    # (3 x 10s + backoff, ADR 0014); extraction is off by default (ADR
+    # 0016) — with it on, lengthen the grace per DEPLOY.md §5.
     stop_grace_period: 35s
     healthcheck:
       # Static public probe (ADR 0019); no DB check, no credential.
@@ -168,9 +179,10 @@ services:
     build: .
     image: hivemind-mcp-http
     # Compose's default 10s before SIGKILL is shorter than one embedder
-    # attempt. Extraction is OFF here (ADR 0016), so the worst request is
-    # the embedder leg: 3 x 10s + 0.5s + 1.0s backoff = 31.5s (ADR 0014).
-    # The k8s deployments budget embed+extract (DEPLOY.md §5).
+    # attempt. Extraction is off by default (ADR 0016; opt in via .env), so
+    # the worst request is the embedder leg: 3 x 10s + 0.5s + 1.0s backoff
+    # = 31.5s (ADR 0014). With extraction on, lengthen this to cover
+    # embed+extract — the k8s deployments use 150s (DEPLOY.md §5).
     stop_grace_period: 35s
     environment:
       HIVEMIND_HOST: "0.0.0.0"
@@ -179,6 +191,10 @@ services:
       HIVEMIND_EMBEDDING_ENDPOINT: http://vllm:8000/v1
       HIVEMIND_EMBEDDING_MODEL: Qwen/Qwen3-Embedding-0.6B
       HIVEMIND_EMBEDDING_DIM: "512"
+      # Entity extraction (ADR 0016): off unless set in .env.
+      HIVEMIND_EXTRACTOR_ENDPOINT: ${HIVEMIND_EXTRACTOR_ENDPOINT:-}
+      HIVEMIND_EXTRACTOR_MODEL: ${HIVEMIND_EXTRACTOR_MODEL:-}
+      HIVEMIND_EXTRACTOR_API_KEY: ${HIVEMIND_EXTRACTOR_API_KEY:-}
     ports:
       - "${HIVEMIND_MCP_HTTP_PORT:-8088}:8088"
     depends_on:
