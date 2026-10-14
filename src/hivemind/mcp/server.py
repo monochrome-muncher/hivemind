@@ -9,6 +9,7 @@ lives in ``hivemind.mcp.http`` (ADR 0010).
 
 from __future__ import annotations
 
+import inspect
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
@@ -42,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 def compact_schema(schema: Any) -> Any:
     """A JSON schema without what pydantic adds for nothing: every
-    ``title`` (the property name again, or ``_hive_writeArguments``) and the
+    ``title`` (the property name again, or ``hive_writeArguments``) and the
     ``anyOf [T, null]`` / ``default: null`` of an optional argument, which
     becomes plain ``T`` (it is not in ``required``, so it can be left out).
     Clients load these schemas into every session's context; the server
@@ -78,6 +79,32 @@ class _CompactSchemaServer(MCPServer):
             )
             for tool in await super().list_tools()
         ]
+
+
+def register_tool(
+    server: MCPServer,
+    name: str,
+    description: str,
+    verb: Callable[..., Awaitable[dict[str, object]]],
+    dispatch: Callable[..., Awaitable[dict[str, object]]],
+) -> None:
+    """Bind one app tool to the server (ADR 0085). The closure carries
+    ``verb``'s signature — the MCP schema is generated from it — and every
+    call resolves the acting app first; the identity never leaves the
+    server."""
+
+    async def _tool(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return await dispatch(verb, **kwargs)
+
+    # The MCP schema is generated from the closure's signature at decoration
+    # time: the verb's, minus its ``app`` parameter (bound here, never
+    # exposed). Set before the decorator snapshots it.
+    _tool.__name__ = verb.__name__
+    _tool.__doc__ = verb.__doc__
+    setattr(_tool, "__wrapped__", verb)  # noqa: B010 (mypy: dynamic attr)
+    parameters = list(inspect.signature(verb).parameters.values())[1:]
+    setattr(_tool, "__signature__", inspect.signature(verb).replace(parameters=parameters))  # noqa: B010 (mypy: dynamic attr)
+    server.tool(name=name, description=description)(_tool)
 
 
 def build_server(
@@ -137,168 +164,16 @@ def build_server(
             logger.warning("store call timed out during an MCP tool call")
             return _error(ERR_STORE_UNAVAILABLE, STORE_UNAVAILABLE_MESSAGE)
 
-    @server.tool(name="hive_write", description=contract.DESC_WRITE)
-    async def _hive_write(
-        kind: str,
-        summary: str,
-        body: str | None = None,
-        payload: dict[str, Any] | None = None,
-        sources: list[dict[str, str]] | None = None,
-        tags: list[str] | None = None,
-        occurred_at: str | None = None,
-        importance: int | None = None,
-        scope: str | None = None,
-        supersedes: list[str] | None = None,
-        agent: str | None = None,
-        see_also: list[str] | None = None,
-        check: bool = False,
-    ) -> dict[str, Any]:
-        return await dispatch(
-            hive_write,
-            kind=kind,
-            summary=summary,
-            body=body,
-            payload=payload,
-            sources=sources,
-            tags=tags,
-            occurred_at=occurred_at,
-            importance=importance,
-            scope=scope,
-            supersedes=supersedes,
-            agent=agent,
-            see_also=see_also,
-            check=check,
-        )
-
-    @server.tool(name="hive_search", description=contract.DESC_SEARCH)
-    async def _hive_search(
-        query: str,
-        limit: int | None = None,
-        offset: int | None = None,
-        kind: str | None = None,
-        tags: list[str] | None = None,
-        entities: list[str] | None = None,
-        scope: str | None = None,
-        author: str | None = None,
-        agent: str | None = None,
-        occurred_from: str | None = None,
-        occurred_to: str | None = None,
-        created_from: str | None = None,
-        created_to: str | None = None,
-        include_inactive: bool = False,
-        flagged: bool = False,
-        explore: bool = False,
-        recency: str | None = None,
-    ) -> dict[str, Any]:
-        return await dispatch(
-            hive_search,
-            query=query,
-            limit=limit,
-            offset=offset,
-            kind=kind,
-            tags=tags,
-            entities=entities,
-            scope=scope,
-            author=author,
-            agent=agent,
-            occurred_from=occurred_from,
-            occurred_to=occurred_to,
-            created_from=created_from,
-            created_to=created_to,
-            include_inactive=include_inactive,
-            flagged=flagged,
-            explore=explore,
-            recency=recency,
-        )
-
-    @server.tool(name="hive_get", description=contract.DESC_GET)
-    async def _hive_get(
-        entry_id: str = "",
-        include_history: bool = False,
-        entry_ids: list[str] | None = None,
-    ) -> dict[str, Any]:
-        return await dispatch(
-            hive_get, entry_id=entry_id, include_history=include_history, entry_ids=entry_ids
-        )
-
-    @server.tool(name="hive_list", description=contract.DESC_LIST)
-    async def _hive_list(
-        kind: str | None = None,
-        tags: list[str] | None = None,
-        entities: list[str] | None = None,
-        scope: str | None = None,
-        author: str | None = None,
-        agent: str | None = None,
-        occurred_from: str | None = None,
-        occurred_to: str | None = None,
-        created_from: str | None = None,
-        created_to: str | None = None,
-        include_inactive: bool = False,
-        flagged: bool = False,
-        limit: int | None = None,
-        offset: int = 0,
-        include_body: bool = False,
-    ) -> dict[str, Any]:
-        return await dispatch(
-            hive_list,
-            kind=kind,
-            tags=tags,
-            entities=entities,
-            scope=scope,
-            author=author,
-            agent=agent,
-            occurred_from=occurred_from,
-            occurred_to=occurred_to,
-            created_from=created_from,
-            created_to=created_to,
-            include_inactive=include_inactive,
-            flagged=flagged,
-            limit=limit,
-            offset=offset,
-            include_body=include_body,
-        )
-
-    @server.tool(name="hive_withdraw", description=contract.DESC_WITHDRAW)
-    async def _hive_withdraw(
-        entry_id: str,
-        reason: str | None = None,
-    ) -> dict[str, Any]:
-        return await dispatch(hive_withdraw, entry_id=entry_id, reason=reason)
-
-    @server.tool(name="hive_pinned", description=contract.DESC_PINNED)
-    async def _hive_pinned(fleet_id: str | None = None) -> dict[str, Any]:
-        return await dispatch(hive_pinned, fleet_id=fleet_id)
-
-    @server.tool(name="hive_pin", description=contract.DESC_PIN)
-    async def _hive_pin(entry_id: str, unpin: bool = False) -> dict[str, Any]:
-        return await dispatch(hive_pin, entry_id=entry_id, unpin=unpin)
-
-    @server.tool(name="hive_register", description=contract.DESC_REGISTER)
-    async def _hive_register(
-        name: str,
-        owner_alias: str | None = None,
-    ) -> dict[str, Any]:
-        return await dispatch(hive_register, name=name, owner_alias=owner_alias)
-
-    @server.tool(name="hive_feedback", description=contract.DESC_FEEDBACK)
-    async def _hive_feedback(
-        verdict: str,
-        entry_id: str = "",
-        note: str | None = None,
-        agent: str | None = None,
-        entry_ids: list[str] | None = None,
-    ) -> dict[str, Any]:
-        return await dispatch(
-            hive_feedback,
-            entry_id=entry_id,
-            verdict=verdict,
-            note=note,
-            agent=agent,
-            entry_ids=entry_ids,
-        )
-
-    @server.tool(name="hive_whoami", description=contract.DESC_WHOAMI)
-    async def _hive_whoami() -> dict[str, Any]:
-        return await dispatch(hive_whoami)
-
+    # The ten tools, registered explicitly (ADR 0085): one line each; the
+    # helper binds the signature and the per-call app resolution.
+    register_tool(server, "hive_write", contract.DESC_WRITE, hive_write, dispatch)
+    register_tool(server, "hive_search", contract.DESC_SEARCH, hive_search, dispatch)
+    register_tool(server, "hive_get", contract.DESC_GET, hive_get, dispatch)
+    register_tool(server, "hive_list", contract.DESC_LIST, hive_list, dispatch)
+    register_tool(server, "hive_withdraw", contract.DESC_WITHDRAW, hive_withdraw, dispatch)
+    register_tool(server, "hive_pinned", contract.DESC_PINNED, hive_pinned, dispatch)
+    register_tool(server, "hive_pin", contract.DESC_PIN, hive_pin, dispatch)
+    register_tool(server, "hive_register", contract.DESC_REGISTER, hive_register, dispatch)
+    register_tool(server, "hive_feedback", contract.DESC_FEEDBACK, hive_feedback, dispatch)
+    register_tool(server, "hive_whoami", contract.DESC_WHOAMI, hive_whoami, dispatch)
     return server
