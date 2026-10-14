@@ -59,6 +59,10 @@ pg: ## Start Postgres + pgvector (docker)
 vllm: ## Start the local vLLM embedding server (CPU docker; Qwen3-Embedding on :8001)
 	docker compose up -d vllm
 
+.PHONY: up
+up: ## Start the full local stack in docker (postgres, vllm, api :8000, admin :8089, mcp-http :8088; migrations are automatic, ADR 0018)
+	docker compose up -d
+
 .PHONY: pg-down
 pg-down: ## Stop Postgres
 	docker compose down

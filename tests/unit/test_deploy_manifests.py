@@ -421,9 +421,10 @@ def test_dockerfile_installs_from_the_lock_and_drops_root() -> None:
     assert "HIVEMIND_RUNNER" in text
 
 
-def test_compose_publishes_databases_on_loopback_only() -> None:
+def test_compose_publishes_dev_services_on_loopback_only() -> None:
+    # mcp-http is the deliberate exception: remote agents must reach it.
     compose = yaml.safe_load((ROOT / "docker-compose.yaml").read_text())
-    for svc in ("postgres", "vllm"):
+    for svc in ("postgres", "vllm", "api", "admin"):
         for port in compose["services"][svc]["ports"]:
             assert str(port).startswith("127.0.0.1:"), (svc, port)
 

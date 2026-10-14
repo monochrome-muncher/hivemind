@@ -1,13 +1,30 @@
-# docker-compose for local development: Postgres 16 + pgvector, plus a CPU
-# vLLM embedding server for a fully local setup (ADR 0005: self-hosted
-# embeddings, no data leaves the machine).
-#   make pg          -> start the database
-#   make vllm        -> start the local vLLM embedding server (:8001)
-#   make pg-down     -> stop it
-#   make migrate     -> apply migrations
-#   make api         -> run the REST API locally
+# docker-compose for local development: a self-contained stack — Postgres
+# 16 + pgvector, a CPU vLLM embedding server (ADR 0005: self-hosted
+# embeddings, no data leaves the machine), the REST API, the admin panel,
+# and the streamable-HTTP MCP runner. `docker compose up -d` (or `make up`)
+# brings the whole system up; the entrypoint runs migrations before each
+# runner (ADR 0018), so there is no manual migrate step.
+#   make up          -> start the full stack (postgres, vllm, api, admin, mcp-http)
+#   make pg          -> start just the database
+#   make vllm        -> start just the local vLLM embedding server (:8001)
+#   make pg-down     -> stop it (stops every compose service)
+#   make migrate     -> apply migrations for the uv processes (`make api` et al.);
+#                       the compose services migrate themselves
+#   make api         -> run the REST API locally instead of the compose service
+#                       (same host port 8000 — one path at a time)
+#   make admin       -> run the admin panel locally on :8080 (the compose
+#                       panel maps to :8089; ADR 0029)
 #   make mcp-http    -> start the hostable streamable-HTTP MCP runner (detached docker service, :8088)
 #   make test        -> run the test suite (integration tests use this DB)
+#
+# Signing into the admin panel needs an admin key, issued once:
+#   uv run hivemind-keys issue-admin
+#
+# Extra settings (e.g. entity extraction, ADR 0016): set the variable in a
+# gitignored `.env` in this directory — compose interpolates it into the
+# `${VAR:-}` pass-throughs of the services that need it (the extractor trio
+# is plumbed into api and mcp-http). The ADR 0017 profile files (`.env.*`)
+# feed the uv processes only; compose never reads them.
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -62,6 +79,92 @@ services:
     volumes:
       - hivemind-vllm-cache:/root/.cache/huggingface
 
+  # REST API (SPEC §5.1): the data plane, same image and entrypoint as
+  # mcp-http; the entrypoint runs migrations before the runner (ADR 0018).
+  # Loopback only (DEP-7): a dev convenience; put a TLS proxy in front to
+  # reach it from elsewhere. One path at a time: this service holds host
+  # port 8000, so `make api` (the uv process on the same port) cannot run
+  # while it is up.
+  api:
+    build: .
+    image: hivemind-api
+    environment:
+      HIVEMIND_RUNNER: api
+      HIVEMIND_HOST: "0.0.0.0"
+      HIVEMIND_PORT: "8000"
+      HIVEMIND_DATABASE_URL: postgresql://hivemind:hivemind@postgres:5432/hivemind
+      HIVEMIND_EMBEDDING_ENDPOINT: http://vllm:8000/v1
+      HIVEMIND_EMBEDDING_MODEL: Qwen/Qwen3-Embedding-0.6B
+      HIVEMIND_EMBEDDING_DIM: "512"
+      # Entity extraction (ADR 0016): off unless set in .env.
+      HIVEMIND_EXTRACTOR_ENDPOINT: ${HIVEMIND_EXTRACTOR_ENDPOINT:-}
+      HIVEMIND_EXTRACTOR_MODEL: ${HIVEMIND_EXTRACTOR_MODEL:-}
+      HIVEMIND_EXTRACTOR_API_KEY: ${HIVEMIND_EXTRACTOR_API_KEY:-}
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      vllm:
+        condition: service_started
+    # Same rationale as mcp-http: the worst request is the embedder leg
+    # (3 x 10s + backoff, ADR 0014); extraction is off by default (ADR
+    # 0016) — with it on, lengthen the grace per DEPLOY.md §5.
+    stop_grace_period: 35s
+    healthcheck:
+      # Static public probe (ADR 0019); no DB check, no credential.
+      test:
+        - CMD-SHELL
+        - |
+          python -c "
+          import urllib.request, sys
+          try:
+              r = urllib.request.urlopen('http://127.0.0.1:8000/v1/health', timeout=3)
+              sys.exit(0 if r.status == 200 else 1)
+          except Exception:
+              sys.exit(1)
+          "
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  # Admin panel (ADR 0029): static UI + same-origin proxy to the REST API.
+  # Holds no DSN and never talks to Postgres; the entrypoint skips the
+  # migration step for it. Loopback only (DEP-7): an operator tool. Host
+  # port 8080 is left to `make admin`; the panel maps to 8089 by default —
+  # override with HIVEMIND_ADMIN_HTTP_PORT.
+  admin:
+    build: .
+    image: hivemind-admin
+    environment:
+      HIVEMIND_RUNNER: admin
+      HIVEMIND_HOST: "0.0.0.0"
+      HIVEMIND_PORT: "8080"
+      HIVEMIND_ADMIN_API_URL: http://api:8000
+    ports:
+      - "127.0.0.1:${HIVEMIND_ADMIN_HTTP_PORT:-8089}:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      # The panel's own probe (ADR 0029): answers without calling hivemind-api.
+      test:
+        - CMD-SHELL
+        - |
+          python -c "
+          import urllib.request, sys
+          try:
+              r = urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)
+              sys.exit(0 if r.status == 200 else 1)
+          except Exception:
+              sys.exit(1)
+          "
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
   # Streamable-HTTP MCP runner (ADR 0010): one process serving any number
   # of agents, each authenticating PER REQUEST with its own agent key
   # (ADR 0008), e.g. one from `hivemind-keys issue-agent --name <agent>`.
@@ -76,9 +179,10 @@ services:
     build: .
     image: hivemind-mcp-http
     # Compose's default 10s before SIGKILL is shorter than one embedder
-    # attempt. Extraction is OFF here (ADR 0016), so the worst request is
-    # the embedder leg: 3 x 10s + 0.5s + 1.0s backoff = 31.5s (ADR 0014).
-    # The k8s deployments budget embed+extract (DEPLOY.md §5).
+    # attempt. Extraction is off by default (ADR 0016; opt in via .env), so
+    # the worst request is the embedder leg: 3 x 10s + 0.5s + 1.0s backoff
+    # = 31.5s (ADR 0014). With extraction on, lengthen this to cover
+    # embed+extract — the k8s deployments use 150s (DEPLOY.md §5).
     stop_grace_period: 35s
     environment:
       HIVEMIND_HOST: "0.0.0.0"
@@ -87,6 +191,10 @@ services:
       HIVEMIND_EMBEDDING_ENDPOINT: http://vllm:8000/v1
       HIVEMIND_EMBEDDING_MODEL: Qwen/Qwen3-Embedding-0.6B
       HIVEMIND_EMBEDDING_DIM: "512"
+      # Entity extraction (ADR 0016): off unless set in .env.
+      HIVEMIND_EXTRACTOR_ENDPOINT: ${HIVEMIND_EXTRACTOR_ENDPOINT:-}
+      HIVEMIND_EXTRACTOR_MODEL: ${HIVEMIND_EXTRACTOR_MODEL:-}
+      HIVEMIND_EXTRACTOR_API_KEY: ${HIVEMIND_EXTRACTOR_API_KEY:-}
     ports:
       - "${HIVEMIND_MCP_HTTP_PORT:-8088}:8088"
     depends_on:
