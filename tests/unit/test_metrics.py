@@ -9,6 +9,8 @@ usage-based triggers measurable (pair with the §1.1 eval harness).
 
 from __future__ import annotations
 
+import dataclasses
+from dataclasses import asdict
 from datetime import timedelta
 
 from hivemind.domain.access import TrustLevel
@@ -101,15 +103,15 @@ class TestMetricsService:
         await _seed_entry(store, scope="self", kind="decision")
         service = MetricsService(store)
         report = await service.usage_report()
-        entries = report["entries"]
-        assert entries["total"] == 3
-        assert entries["active"] == 3
-        assert entries["inactive"] == 0
-        assert entries["by_scope"] == {"org": 1, "fleet": 1, "self": 1}
-        assert entries["by_kind"] == {"fact": 1, "insight": 1, "decision": 1}
+        entries = report.entries
+        assert entries.total == 3
+        assert entries.active == 3
+        assert entries.inactive == 0
+        assert entries.by_scope == {"org": 1, "fleet": 1, "self": 1}
+        assert entries.by_kind == {"fact": 1, "insight": 1, "decision": 1}
         # All three entries above rode the default (no explicit
         # importance_source), so `caller` is omitted (ROADMAP §4.5).
-        assert entries["by_importance_source"] == {"default": 3}
+        assert entries.by_importance_source == {"default": 3}
 
     async def test_entries_report_by_importance_source(self) -> None:
         clock = make_clock()
@@ -119,7 +121,7 @@ class TestMetricsService:
         await _seed_entry(store, importance_source=ImportanceSource.CALLER)
         service = MetricsService(store)
         report = await service.usage_report()
-        assert report["entries"]["by_importance_source"] == {"default": 1, "caller": 2}
+        assert report.entries.by_importance_source == {"default": 1, "caller": 2}
 
     async def test_entries_report_by_author_kind(self) -> None:
         """ROADMAP §4.5's follow-on: are agents using the three kinds
@@ -134,7 +136,7 @@ class TestMetricsService:
         await _seed_entry(store, author="bob", kind="insight")
         service = MetricsService(store)
         report = await service.usage_report()
-        assert report["entries"]["by_author_kind"] == {
+        assert report.entries.by_author_kind == {
             # `insight` is omitted for alice and `fact`/`decision` for bob:
             # zero counts are dropped, exactly like by_scope / by_kind.
             "alice": {"fact": 2, "decision": 1},
@@ -151,7 +153,7 @@ class TestMetricsService:
         await store.register_agent("silent")
         service = MetricsService(store)
         report = await service.usage_report()
-        assert report["entries"]["by_author_kind"] == {"silent": {}}
+        assert report.entries.by_author_kind == {"silent": {}}
 
     async def test_entries_report_ignores_unregistered_authors(self) -> None:
         """An entry whose author is not on the roster is still counted in
@@ -164,8 +166,8 @@ class TestMetricsService:
         await _seed_entry(store, author="ghost", kind="fact")
         service = MetricsService(store)
         report = await service.usage_report()
-        assert report["entries"]["by_kind"] == {"fact": 1}
-        assert report["entries"]["by_author_kind"] == {}
+        assert report.entries.by_kind == {"fact": 1}
+        assert report.entries.by_author_kind == {}
 
     async def test_entries_report_by_author_kind_counts_inactive_entries(self) -> None:
         """Consistent with every other entries counter: the question is
@@ -177,8 +179,8 @@ class TestMetricsService:
         await store.withdraw_entry(entry_id, "no longer relevant", "alice")
         service = MetricsService(store)
         report = await service.usage_report()
-        assert report["entries"]["active"] == 0
-        assert report["entries"]["by_author_kind"] == {"alice": {"fact": 1}}
+        assert report.entries.active == 0
+        assert report.entries.by_author_kind == {"alice": {"fact": 1}}
 
     async def test_fleets_report_writes_per_fleet(self) -> None:
         clock = make_clock()
@@ -190,9 +192,9 @@ class TestMetricsService:
         await _seed_entry(store, fleet_id=f2.id, scope="fleet")
         service = MetricsService(store)
         report = await service.usage_report()
-        fleets = report["fleets"]
-        assert fleets["total"] == 2
-        assert fleets["writes_by_fleet"] == {"data-eng": 2, "ml": 1}
+        fleets = report.fleets
+        assert fleets.total == 2
+        assert fleets.writes_by_fleet == {"data-eng": 2, "ml": 1}
 
     async def test_agents_report_trust_levels_and_pending(self) -> None:
         clock = make_clock()
@@ -211,12 +213,12 @@ class TestMetricsService:
         )
         service = MetricsService(store)
         report = await service.usage_report()
-        agents = report["agents"]
-        assert agents["total"] == 3
-        assert agents["pending"] == 1
-        assert agents["active"] == 2
+        agents = report.agents
+        assert agents.total == 3
+        assert agents.pending == 1
+        assert agents.active == 2
         # Trust-level distribution (the §12 counter, ADR 0011).
-        assert agents["by_trust_level"] == {
+        assert agents.by_trust_level == {
             "untrusted": 1,
             "lurker": 0,
             "contributor": 1,
@@ -228,7 +230,8 @@ class TestMetricsService:
         store = _make_store(clock)
         service = MetricsService(store)
         report = await service.usage_report()
-        assert set(report) == {
+        # ADR 0084: the report is a typed dataclass; the shape is its fields.
+        assert {field.name for field in dataclasses.fields(report)} == {
             "entries",
             "fleets",
             "agents",
@@ -237,7 +240,7 @@ class TestMetricsService:
             "health",
             "health_status",
         }
-        assert report["feedback"] == {"flags": 0, "confirmed": 0, "by_agent": {}}
+        assert asdict(report.feedback) == {"flags": 0, "confirmed": 0, "by_agent": {}}
 
     async def test_usage_report_reads_the_pool_in_one_grouped_query(self) -> None:
         """PERF-2: the report used to issue 10 + 3 x agents + fleets COUNTs.
@@ -266,8 +269,8 @@ class TestMetricsService:
         report = await MetricsService(store).usage_report()
 
         assert calls == {"count_entries": 0, "usage_counts": 1}
-        assert report["entries"]["by_author_kind"]["agent-1"] == {"insight": 1}
-        assert report["entries"]["total"] == 1
+        assert report.entries.by_author_kind["agent-1"] == {"insight": 1}
+        assert report.entries.total == 1
 
 
 class TestFeedbackReport:
@@ -292,7 +295,7 @@ class TestFeedbackReport:
             Feedback(old.id, "quiet", "quiet", Verdict.HELPFUL, None, before)
         )
         report = await MetricsService(store).usage_report()
-        assert report["feedback"] == {
+        assert asdict(report.feedback) == {
             "flags": 3,
             "confirmed": 2,
             "by_agent": {"scout": {"flags": 2, "confirmed": 1}},

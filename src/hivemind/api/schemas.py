@@ -731,6 +731,24 @@ class AgentsMetrics(BaseModel):
     by_trust_level: dict[str, int] = {}
 
 
+class FleetSearchMetrics(BaseModel):
+    """Search counters for one fleet name (ADR 0056)."""
+
+    total: int
+    empty: int
+    explore: int = 0
+
+
+class SearchesMetrics(BaseModel):
+    """Search counters in total and per fleet name (ADRs 0056, 0078).
+    Searches from callers without a home fleet count in the totals only."""
+
+    total: int
+    empty: int
+    explore: int = 0
+    by_fleet: dict[str, FleetSearchMetrics] = {}
+
+
 class FeedbackMetrics(BaseModel):
     """Flag counters (ADR 0068): ``stale``/``wrong`` reports made while the
     entry was current, and how many were later confirmed by a supersession.
@@ -907,5 +925,6 @@ class MetricsOut(BaseModel):
     entries: EntriesMetrics
     fleets: FleetsMetrics
     agents: AgentsMetrics
+    searches: SearchesMetrics
     feedback: FeedbackMetrics = FeedbackMetrics()
     health: HealthMetrics | None = None

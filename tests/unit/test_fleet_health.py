@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import pathlib
 import re
+from dataclasses import asdict
 from datetime import timedelta
 
 from prometheus_client.parser import text_string_to_metric_families
@@ -29,18 +30,18 @@ async def _write(store: MemoryStore, summary: str, **kw: object):
 
 
 async def test_an_empty_pool_reports_unknown_shares_not_zero() -> None:
-    health = (await MetricsService(MemoryStore(make_clock())).usage_report())["health"]
-    assert health["helpful_with_note_share"] == {"count": 0, "total": 0, "share": None}
-    assert health["sourced_share"]["share"] is None
-    assert health["correction_latency_p50_seconds"] is None
-    assert health["supersessions_per_100_writes"]["per_100"] is None
-    assert health["gap_tag_counts"] == {"anomaly": 0, "open-question": 0, "dead-end": 0}
-    assert health["by_fleet"] == {}
-    assert health["echo_rate"] == {"count": 0, "total": 0, "share": None}
-    assert health["topic_dispersion"] == []
-    assert health["rival_lifetime"]["alternative"] == {"count": 0, "median_age_seconds": None}
-    assert health["grounding_share"]["share"] is None
-    assert health["top3_agent_label_write_share"]["labels"] == 0
+    health = (await MetricsService(MemoryStore(make_clock())).usage_report()).health
+    assert asdict(health.helpful_with_note_share) == {"count": 0, "total": 0, "share": None}
+    assert health.sourced_share.share is None
+    assert health.correction_latency_p50_seconds is None
+    assert health.supersessions_per_100_writes.per_100 is None
+    assert health.gap_tag_counts == {"anomaly": 0, "open-question": 0, "dead-end": 0}
+    assert health.by_fleet == {}
+    assert asdict(health.echo_rate) == {"count": 0, "total": 0, "share": None}
+    assert health.topic_dispersion == []
+    assert asdict(health.rival_lifetime.alternative) == {"count": 0, "median_age_seconds": None}
+    assert health.grounding_share.share is None
+    assert health.top3_agent_label_write_share.labels == 0
 
 
 async def test_convergence_figures_reach_the_report_and_the_gauges() -> None:
@@ -58,12 +59,12 @@ async def test_convergence_figures_reach_the_report_and_the_gauges() -> None:
             VEC,
         )
     report = await MetricsService(store, wall_clock=lambda: last.created_at).usage_report()
-    body = report["health"]
-    assert body["echo_rate"] == {"count": 2, "total": 3, "share": 2 / 3}  # identical vectors
-    assert body["grounding_share"]["share"] == 1.0
-    assert body["rival_lifetime"]["alternative"]["count"] == 3
-    assert body["rival_lifetime"]["conflict"]["count"] == 1
-    assert body["top3_agent_label_write_share"] == {
+    body = report.health
+    assert asdict(body.echo_rate) == {"count": 2, "total": 3, "share": 2 / 3}  # identical vectors
+    assert body.grounding_share.share == 1.0
+    assert body.rival_lifetime.alternative.count == 3
+    assert body.rival_lifetime.conflict.count == 1
+    assert asdict(body.top3_agent_label_write_share) == {
         "count": 3, "total": 3, "share": 1.0, "labels": 1,
     }  # fmt: skip
     got = {
@@ -88,18 +89,18 @@ async def test_the_report_folds_the_store_aggregates() -> None:
     await store.record_feedback(Feedback(new.id, "r", "r", Verdict.HELPFUL, "checked", flag))
     await store.record_feedback(Feedback(new.id, "s", "s", Verdict.HELPFUL, None, flag))
     report = await MetricsService(store, wall_clock=lambda: new.created_at).usage_report()
-    health = report["health"]
-    assert health["helpful_with_note_share"] == {"count": 1, "total": 2, "share": 0.5}
-    assert health["sourced_share"]["count"] == 1  # "v2" and the sourced one are sourceable
-    assert health["sourced_share"]["total"] == 2
-    assert health["correction_latency_p50_seconds"] == 7200.0
-    assert health["supersessions_per_100_writes"] == {
+    health = report.health
+    assert asdict(health.helpful_with_note_share) == {"count": 1, "total": 2, "share": 0.5}
+    assert health.sourced_share.count == 1  # "v2" and the sourced one are sourceable
+    assert health.sourced_share.total == 2
+    assert health.correction_latency_p50_seconds == 7200.0
+    assert asdict(health.supersessions_per_100_writes) == {
         "supersessions": 1,
         "writes": 3,
         "per_100": 100 / 3,
     }
-    assert health["by_fleet"]["blue"]["sourced_share"]["share"] == 0.5
-    assert health["by_fleet"]["blue"]["gap_tag_counts"]["anomaly"] == 0  # superseded: not active
+    assert health.by_fleet["blue"].sourced_share.share == 0.5
+    assert health.by_fleet["blue"].gap_tag_counts["anomaly"] == 0  # superseded: not active
 
 
 class _CountingStore(MemoryStore):
@@ -218,18 +219,18 @@ async def test_a_health_failure_does_not_fail_the_usage_report() -> None:
     service = MetricsService(store, entry_counts_ttl=300.0, clock=lambda: tick[0])
     store.fail_health = True
     report = await service.usage_report()  # no exception
-    assert report["health"] is None and report["health_status"] == {"ok": False}
-    assert report["entries"]["total"] == 0
+    assert report.health is None and asdict(report.health_status) == {"ok": False}
+    assert report.entries.total == 0
     # The failure is not cached: the next report retries, and recovers.
     store.fail_health = False
     report = await service.usage_report()
-    assert report["health"] is not None and report["health_status"] == {"ok": True}
+    assert report.health is not None and asdict(report.health_status) == {"ok": True}
     assert (store.usage_calls, store.health_calls) == (1, 2)  # the entry scan stayed cached
     # Later failures serve the last good values and say they are stale.
     tick[0] = 301.0
     store.fail_convergence = True
     report = await service.usage_report()
-    assert report["health"] is not None and report["health_status"] == {"ok": False}
+    assert report.health is not None and asdict(report.health_status) == {"ok": False}
 
 
 async def test_prometheus_reports_health_success_and_leaks_no_tag_strings() -> None:
@@ -246,7 +247,7 @@ async def test_prometheus_reports_health_success_and_leaks_no_tag_strings() -> N
         k[0].startswith("hivemind_health_") and k[0] != "hivemind_health_success" for k in got
     )
     # only the fixed gap tags ever appear as a tag label
-    body = (await MetricsService(MemoryStore(make_clock())).usage_report())["health"]
+    body = (await MetricsService(MemoryStore(make_clock())).usage_report()).health
     labels = {
         v
         for family in _health_families(body)

@@ -4,6 +4,8 @@ reports them, and read back through the usage report and ``/metrics``."""
 
 from __future__ import annotations
 
+from dataclasses import asdict
+
 import pytest
 
 from hivemind.domain.access import TrustLevel, Visibility
@@ -97,7 +99,7 @@ async def test_usage_report_lists_searches_per_fleet_name() -> None:
     await service.search_result("zzyzx", visibility=_reader(fleet_id))
     await service.search_result("zzyzx", visibility=_reader(None))
     report = await MetricsService(store).usage_report()
-    assert report["searches"] == {
+    assert asdict(report.searches) == {
         "total": 3,
         "empty": 2,
         "explore": 0,

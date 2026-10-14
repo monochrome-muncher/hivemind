@@ -8,6 +8,7 @@ fake monotonic one, so no test sleeps.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import asdict
 
 import pytest
 
@@ -77,7 +78,7 @@ async def test_second_report_within_ttl_reuses_the_scan() -> None:
     clock.now += 299
     second = await service.usage_report()
     assert store.calls["usage"] == 1
-    assert first["entries"]["total"] == second["entries"]["total"] == 1
+    assert first.entries.total == second.entries.total == 1
 
 
 async def test_scan_refreshes_after_the_ttl() -> None:
@@ -89,7 +90,7 @@ async def test_scan_refreshes_after_the_ttl() -> None:
     clock.now += 300
     report = await service.usage_report()
     assert store.calls["usage"] == 2
-    assert report["entries"]["total"] == 2
+    assert report.entries.total == 2
 
 
 async def test_ttl_zero_scans_on_every_report() -> None:
@@ -99,7 +100,7 @@ async def test_ttl_zero_scans_on_every_report() -> None:
     await _write(store, "one")
     report = await service.usage_report()
     assert store.calls["usage"] == 2
-    assert report["entries"]["total"] == 1
+    assert report.entries.total == 1
 
 
 async def test_concurrent_reports_share_one_scan() -> None:
@@ -109,7 +110,7 @@ async def test_concurrent_reports_share_one_scan() -> None:
     await _write(store, "one")
     reports = await asyncio.gather(*(service.usage_report() for _ in range(5)))
     assert store.calls["usage"] == 1
-    assert all(r["entries"]["total"] == 1 for r in reports)
+    assert all(r.entries.total == 1 for r in reports)
 
 
 async def test_a_failed_scan_is_not_cached() -> None:
@@ -122,7 +123,7 @@ async def test_a_failed_scan_is_not_cached() -> None:
     await _write(store, "one")
     report = await service.usage_report()  # no clock advance: the failure left no cache
     assert store.calls["usage"] == 2
-    assert report["entries"]["total"] == 1
+    assert report.entries.total == 1
 
 
 async def test_a_failed_refresh_after_the_ttl_raises_and_retries() -> None:
@@ -135,7 +136,7 @@ async def test_a_failed_refresh_after_the_ttl_raises_and_retries() -> None:
         await service.usage_report()
     store.fail = False
     await _write(store, "one")
-    assert (await service.usage_report())["entries"]["total"] == 1
+    assert (await service.usage_report()).entries.total == 1
 
 
 async def test_agents_fleets_and_searches_are_read_on_every_report() -> None:
@@ -147,7 +148,7 @@ async def test_agents_fleets_and_searches_are_read_on_every_report() -> None:
     await store.record_search(fleet.id, empty=True)
     second = await service.usage_report()
     assert store.calls == {"usage": 1, "agents": 2, "fleets": 2, "searches": 2}
-    assert first["agents"]["total"] == 0
-    assert second["agents"]["total"] == 1
-    assert second["fleets"]["total"] == 1
-    assert second["searches"]["by_fleet"] == {"ml": {"total": 1, "empty": 1, "explore": 0}}
+    assert first.agents.total == 0
+    assert second.agents.total == 1
+    assert second.fleets.total == 1
+    assert asdict(second.searches.by_fleet["ml"]) == {"total": 1, "empty": 1, "explore": 0}

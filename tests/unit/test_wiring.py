@@ -31,7 +31,7 @@ async def test_services_share_one_store_and_embedder() -> None:
     hits = await services.search_service.search("wiring shares the store")
     assert [h.entry_id for h in hits] == [written.id]
     report = await services.metrics_service.usage_report()
-    assert report["entries"]["total"] == 1
+    assert report.entries.total == 1
 
 
 async def test_the_search_config_reaches_search_and_quality() -> None:
@@ -98,8 +98,8 @@ async def test_metrics_entry_counts_ttl_reaches_the_metrics_service() -> None:
     services = build_services(
         store, make_embedder(), make_search_config(), metrics_entry_counts_ttl=0
     )
-    assert (await services.metrics_service.usage_report())["entries"]["total"] == 0
+    assert (await services.metrics_service.usage_report()).entries.total == 0
     await services.write_service.write(
         EntryDraft(kind=Kind.FACT, summary="written after the first report", author="a", agent="a")
     )
-    assert (await services.metrics_service.usage_report())["entries"]["total"] == 1
+    assert (await services.metrics_service.usage_report()).entries.total == 1
