@@ -17,6 +17,7 @@ from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService, WriteService
+from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
 from tests.fakes import (
     FakeAuthenticator,
@@ -57,6 +58,7 @@ def _surface(store: MemoryStore, credential: Credential) -> McpHivemind:
         write_service=WriteService(store, embedder),
         search_service=SearchService(store, embedder, config, now_fn=clock),
         governance_service=GovernanceService(store),
+        read_service=ReadService(store, GovernanceService(store), config),
         access_service=AccessService(store),
         search_config=config,
         credential=credential,
@@ -136,6 +138,7 @@ async def test_check_does_not_run_the_extractor() -> None:
         write_service=WriteService(store, embedder, extractor),
         search_service=SearchService(store, embedder, config, now_fn=clock),
         governance_service=GovernanceService(store),
+        read_service=ReadService(store, GovernanceService(store), config),
         access_service=AccessService(store),
         search_config=config,
         credential=WRITER,

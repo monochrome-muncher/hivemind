@@ -18,6 +18,7 @@ from hivemind.mcp.app import McpHivemind, hive_feedback, hive_get, hive_withdraw
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService, WriteService
+from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
 from hivemind.store import PgAuthenticator, PgStore
 from hivemind.store.keys import _issue_admin
@@ -53,6 +54,7 @@ def _surface(store: PgStore, credential: Credential) -> McpHivemind:
     embedder = FakeEmbedder(dimension=Settings().embedding_dim)
     config = make_search_config()
     return McpHivemind(
+        read_service=ReadService(store, GovernanceService(store), config),
         store=store,
         write_service=WriteService(store, embedder),
         search_service=SearchService(store, embedder, config),

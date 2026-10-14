@@ -17,6 +17,7 @@ from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService, WriteService
+from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
 from hivemind.services.write_warnings import has_local_path, is_entry_link
 from tests.fakes import FakeAuthenticator, make_clock, make_embedder, make_search_config
@@ -83,6 +84,7 @@ def _surface(store: MemoryStore, credential: Credential) -> McpHivemind:
         write_service=WriteService(store, embedder),
         search_service=SearchService(store, embedder, config, now_fn=clock),
         governance_service=GovernanceService(store),
+        read_service=ReadService(store, GovernanceService(store), config),
         access_service=AccessService(store),
         search_config=config,
         credential=credential,

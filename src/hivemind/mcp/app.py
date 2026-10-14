@@ -10,7 +10,6 @@ call them with fakes.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -26,18 +25,11 @@ from hivemind.domain.entry import (
 )
 from hivemind.domain.feedback import Feedback, FeedbackCounts, FeedbackSummary, Verdict
 from hivemind.domain.recency import RecencyHint, parse_recency_hint
-from hivemind.domain.validation import MAX_GET_IDS, InvalidInput, check_pagination
+from hivemind.domain.validation import InvalidInput, check_pagination
 from hivemind.embeddings import EmbeddingError
 from hivemind.ports import Credential, Store
 from hivemind.services.access import AccessService, resolve_write_scope
-from hivemind.services.chain import (
-    EntryLinks,
-    entries_links,
-    entry_links,
-    get_visible_entries,
-    get_visible_entry,
-    supersession_chain,
-)
+from hivemind.services.chain import EntryLinks
 from hivemind.services.drafts import entry_draft
 from hivemind.services.errors import (
     AgentIdentityRequired,
@@ -49,6 +41,7 @@ from hivemind.services.errors import (
 )
 from hivemind.services.feedback import reporter_agent
 from hivemind.services.governance import GovernanceService, RelatedEntry, WriteService
+from hivemind.services.read import ReadService
 from hivemind.services.search import Hit, SearchService
 from hivemind.services.wiring import Services
 from hivemind.services.write_warnings import WriteWarning
@@ -86,6 +79,7 @@ class McpHivemind:
 
     store: Store
     write_service: WriteService
+    read_service: ReadService
     search_service: SearchService
     governance_service: GovernanceService
     access_service: AccessService
@@ -98,6 +92,7 @@ class McpHivemind:
         return cls(
             store=store,
             write_service=services.write_service,
+            read_service=services.read_service,
             search_service=services.search_service,
             governance_service=services.governance_service,
             access_service=services.access_service,
@@ -586,50 +581,37 @@ async def hive_get(
         return await _hive_get_many(app, entry_ids)
     if not entry_id or not entry_id.strip():
         return _error(ERR_INVALID_INPUT, "entry_id is required (pass a hit's id)")
-    entry = await get_visible_entry(app.store, entry_id, app.credential.visibility())
-    if entry is None:
-        return _error(ERR_NOT_FOUND, f"unknown entry: {entry_id}")
-    summary, links = await asyncio.gather(
-        app.governance_service.feedback_summary(entry.id),
-        entry_links(app.store, entry.id, app.credential.visibility()),
+    detail = await app.read_service.entry(
+        entry_id,
+        visibility=app.credential.visibility(),
+        include_history=include_history,
     )
-    result = _entry_dict(entry)
-    result["feedback"] = _feedback_dict(summary)
-    result.update(_links_dict(links))
+    if detail is None:
+        return _error(ERR_NOT_FOUND, f"unknown entry: {entry_id}")
+    result = _entry_dict(detail.entry)
+    result["feedback"] = _feedback_dict(detail.feedback)
+    result.update(_links_dict(detail.links))
     if include_history:
-        successors, superseded = await supersession_chain(
-            app.store, entry, visibility=app.credential.visibility()
-        )
-        result["successors"] = [_entry_dict(s) for s in successors]
-        result["superseded"] = [_entry_dict(s) for s in superseded]
+        result["successors"] = [_entry_dict(s) for s in detail.successors]
+        result["superseded"] = [_entry_dict(s) for s in detail.superseded]
     return result
 
 
 async def _hive_get_many(app: McpHivemind, entry_ids: list[str]) -> dict[str, object]:
-    ids = list(dict.fromkeys(entry_ids))
-    if not ids:
-        return _error(ERR_INVALID_INPUT, "entry_ids must name at least one entry")
-    if len(ids) > MAX_GET_IDS:
-        return _error(ERR_INVALID_INPUT, f"entry_ids may name at most {MAX_GET_IDS} entries")
-    found = await get_visible_entries(app.store, ids, app.credential.visibility())
-    entries = [found[eid] for eid in ids if eid in found]
-    visibility = app.credential.visibility()
-    # A fixed number of store reads for the whole batch (ADR 0059).
-    entry_ids = [e.id for e in entries]
-    summaries, links = await asyncio.gather(
-        app.governance_service.feedback_summaries(entry_ids),
-        entries_links(app.store, entry_ids, visibility),
-    )
+    try:
+        batch = await app.read_service.entries(entry_ids, visibility=app.credential.visibility())
+    except InvalidInput as exc:
+        return _error(ERR_INVALID_INPUT, str(exc))
     return {
         "entries": [
             {
-                **_entry_dict(e),
-                "feedback": _feedback_dict(summaries[e.id]),
-                **_links_dict(links[e.id]),
+                **_entry_dict(d.entry),
+                "feedback": _feedback_dict(d.feedback),
+                **_links_dict(d.links),
             }
-            for e in entries
+            for d in batch.entries
         ],
-        "not_found": [eid for eid in ids if eid not in found],
+        "not_found": list(batch.not_found),
     }
 
 
@@ -682,10 +664,9 @@ async def hive_list(
         )
     except ValueError as exc:
         return _error(ERR_INVALID_INPUT, str(exc))
-    effective_limit = limit if limit is not None else app.search_config.default_limit
-    entries = await app.store.list_entries(
+    entries = await app.read_service.list(
         filters,
-        limit=effective_limit,
+        limit=limit,
         offset=offset,
         visibility=app.credential.visibility(),
     )

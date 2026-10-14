@@ -29,6 +29,7 @@ from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService, WriteService
+from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
 from tests.fakes import make_clock, make_embedder, make_search_config
 
@@ -43,6 +44,7 @@ def build_app(store: MemoryStore, credential: Credential, clock) -> McpHivemind:
     embedder = make_embedder()
     config = make_search_config()
     return McpHivemind(
+        read_service=ReadService(store, GovernanceService(store), config),
         store=store,
         write_service=WriteService(store, embedder),
         search_service=SearchService(store, embedder, config, now_fn=clock),

@@ -27,6 +27,7 @@ from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService, WriteService
+from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
 from tests.fakes import (
     FakeAuthenticator,
@@ -68,6 +69,7 @@ class Pool:
 
     def as_(self, credential: Credential) -> McpHivemind:
         return McpHivemind(
+            read_service=ReadService(self.store, GovernanceService(self.store), self.config),
             store=self.store,
             write_service=WriteService(self.store, self.embedder),
             search_service=SearchService(self.store, self.embedder, self.config, now_fn=self.clock),
