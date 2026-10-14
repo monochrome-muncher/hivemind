@@ -242,6 +242,7 @@ def build_server(
     *,
     credential_provider: Callable[[], Credential | Awaitable[Credential | None] | None]
     | None = None,
+    require_stored_keys: bool = False,
 ) -> MCPServer:
     """Build an ``MCPServer`` exposing exactly the ten Hivemind tools.
 
@@ -269,6 +270,9 @@ def build_server(
         credential = await resolved if isinstance(resolved, Awaitable) else resolved
         if credential is None:
             return None
+        # ADR 0082: a dev-mode credential sits at trust level 0 when the
+        # deployment requires stored keys.
+        credential = credential.effective(require_stored_keys)
         if credential == app.credential:
             return app
         return replace(app, credential=credential)
@@ -466,9 +470,19 @@ def main() -> None:
         dimension=settings.embedding_dim, prefix_tokens=settings.embedding_prefix_tokens
     )
     extractor = build_extractor(settings)  # optional (ADR 0016): None when the endpoint is unset
-    services = build_services(store, embedder, settings.search_config(), extractor=extractor)
+    services = build_services(
+        store,
+        embedder,
+        settings.search_config(),
+        extractor=extractor,
+        require_stored_keys=settings.require_stored_keys,
+    )
     app = McpHivemind.from_services(
-        store, services, credential=Credential(user_id="dev", agent_id="hivemind-mcp")
+        store,
+        services,
+        credential=Credential(user_id="dev", agent_id="hivemind-mcp").effective(
+            settings.require_stored_keys
+        ),
     )
     server = build_server(app)
     asyncio.run(server.run_stdio_async())
@@ -535,7 +549,11 @@ def main_pg() -> None:
             # or re-homing applies at once, not at the next restart.
             return await authenticator.verify(raw_key)
 
-        server = build_server(app, credential_provider=current_credential)
+        server = build_server(
+            app,
+            credential_provider=current_credential,
+            require_stored_keys=settings.require_stored_keys,
+        )
         try:
             await server.run_stdio_async()
         finally:

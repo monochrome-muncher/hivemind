@@ -23,8 +23,11 @@ class PinService:
     """A privileged agent of an entry's fleet, or an admin, pins and
     unpins; any reader sees the pins they may read (ADR 0058)."""
 
-    def __init__(self, store: Store) -> None:
+    def __init__(self, store: Store, require_stored_keys: bool = False) -> None:
         self._store = store
+        # ADR 0082: a dev-mode credential is downgraded to trust level 0
+        # when the deployment requires stored keys.
+        self._require_stored_keys = require_stored_keys
 
     async def pin(self, credential: Credential, entry_id: str) -> Pin:
         """Pin an active fleet entry to its own fleet. A privileged agent of
@@ -34,6 +37,7 @@ class PinService:
         and re-pinning the version an older pin now shows moves that pin to
         it; either way the pin is no longer ``changed_since_pin`` (ADR 0076).
         Every pin is audited, naming the pin it replaced."""
+        credential = credential.effective(self._require_stored_keys)
         entry, fleet_id = await self._pinnable(credential, entry_id)
         if entry.state is not EntryState.ACTIVE:
             raise EntryNotActive(
@@ -62,6 +66,7 @@ class PinService:
         version a pin shows unpins it too, since that is the id readers
         see once the pinned entry is superseded. An unpin that removed a pin
         is audited once, with the removed pin ids (ADR 0076)."""
+        credential = credential.effective(self._require_stored_keys)
         entry, fleet_id = await self._pinnable(credential, entry_id)
         removed_ids: list[str] = []
         if await self._store.unpin_entry(fleet_id, entry.id):
@@ -90,6 +95,7 @@ class PinService:
         left out, and a version two pins lead to is shown once (newest pin).
         Each carries why it changed since it was pinned, if it did (ADR 0076).
         """
+        credential = credential.effective(self._require_stored_keys)
         fleet = fleet_id or credential.home_fleet_id
         if fleet is None:
             return []

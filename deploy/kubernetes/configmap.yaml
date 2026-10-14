@@ -88,3 +88,9 @@ data:
   # Uncomment with the public Host header your ingress forwards to enforce it.
   # HIVEMIND_MCP_ALLOWED_HOSTS: "hivemind.example.com"
   # HIVEMIND_MCP_ALLOWED_ORIGINS: ""
+  # --- credentials (ADR 0082) -----------------------------------------------
+  # Require stored keys: a dev-mode credential (one that is not an admin
+  # key, an org key, or an active agent's key) sits at trust level 0 on the
+  # data plane. True in production, so a keyless script or custom runner can
+  # no longer read everything and write `org` under a placeholder author.
+  HIVEMIND_REQUIRE_STORED_KEYS: "true"

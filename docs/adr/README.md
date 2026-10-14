@@ -91,3 +91,4 @@ is unused.
 | [0079](0079-feedback-dates-on-the-database-clock.md) | Feedback is dated by the store's clock | Accepted |
 | [0080](0080-admin-memory-browser-and-activity.md) | The admin panel can read memories and show activity | Accepted |
 | [0081](0081-upstream-changed-on-hits.md) | A hit shows when an entry it links to changed | Accepted |
+| [0082](0082-dev-mode-credentials-sit-at-trust-level-zero.md) | Dev-mode credentials sit at trust level 0 when the pool requires stored keys | Accepted (off by default) |

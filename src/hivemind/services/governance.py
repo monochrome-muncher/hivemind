@@ -43,10 +43,15 @@ class GovernanceService:
     the reported quality matches what search uses.
     """
 
-    def __init__(self, store: Store, config: SearchConfig | None = None) -> None:
+    def __init__(
+        self,
+        store: Store,
+        config: SearchConfig | None = None,
+        require_stored_keys: bool = False,
+    ) -> None:
         self._store = store
-        self._feedback = FeedbackService(store, config)
-        self._pins = PinService(store)
+        self._feedback = FeedbackService(store, config, require_stored_keys=require_stored_keys)
+        self._pins = PinService(store, require_stored_keys=require_stored_keys)
 
     async def withdraw(
         self, credential: Credential, entry_id: str, reason: str | None = None

@@ -298,7 +298,11 @@ def build_http_app(
             user_id="shared", agent_id="hivemind-mcp-http", access_controlled=True
         ),
     )
-    server = build_server(template, credential_provider=make_credential_provider())
+    server = build_server(
+        template,
+        credential_provider=make_credential_provider(),
+        require_stored_keys=settings.require_stored_keys,
+    )
     host = os.environ.get("HIVEMIND_HOST", "0.0.0.0")
     mcp_app = server.streamable_http_app(
         stateless_http=True, host=host, transport_security=build_transport_security(settings, host)

@@ -319,6 +319,11 @@ class Settings(BaseSettings):
     # inject prefixed variables; True makes them a startup failure (ADR
     # 0032, for CI and dev). Read by load_settings() BEFORE Settings is built.
     strict_env: bool = False
+    # ADR 0082: when true, a dev-mode credential (one that is not an admin
+    # key, an org key, or an active agent's key) sits at trust level 0 on
+    # the data plane. Off by default, so the keyless dev runner and local
+    # scripts are unchanged; production deployments set it true.
+    require_stored_keys: bool = False
     # asyncpg pool size, per pod (same defaults as ``make_pool``).
     pool_min_size: int = Field(default=1, ge=0)
     pool_max_size: int = Field(default=10, ge=1)

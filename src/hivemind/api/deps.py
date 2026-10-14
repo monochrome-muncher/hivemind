@@ -42,6 +42,8 @@ class HivemindApp:
     access_service: AccessService
     metrics_service: MetricsService
     activity_service: ActivityService
+    # ADR 0082: downgrade dev-mode credentials to trust level 0.
+    require_stored_keys: bool = False
 
 
 class ApiError(Exception):
@@ -83,6 +85,9 @@ async def require_credential(request: Request) -> Credential:
     credential = await app.authenticator.verify(key)
     if credential is None:
         raise api_error(401, "unknown_api_key", "the API key is unknown or revoked")
+    # ADR 0082: a dev-mode credential sits at trust level 0 when the
+    # deployment requires stored keys.
+    credential = credential.effective(app.require_stored_keys)
     request.state.credential = credential
     return credential
 

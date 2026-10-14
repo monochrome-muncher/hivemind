@@ -555,6 +555,29 @@ class Credential:
             return True
         return self.trust_level > TrustLevel.UNTRUSTED
 
+    @property
+    def is_stored(self) -> bool:
+        """Whether this credential was issued by the authenticator (ADR
+        0082): an admin key, an org key, or an active agent's key. Anything
+        else is a *dev-mode* credential — a hand-built identity such as the
+        dev runner's fixed ``dev``."""
+        return self.is_admin or self.is_org or self.agent_name is not None
+
+    def effective(self, require_stored_keys: bool = False) -> Credential:
+        """This credential, or — when the deployment requires stored keys
+        (``HIVEMIND_REQUIRE_STORED_KEYS``, ADR 0082) and this one is
+        dev-mode — its trust-level-0 stand-in: access-controlled,
+        untrusted, same ``user_id``. Stored credentials are returned
+        unchanged (the same object)."""
+        if require_stored_keys and not self.is_stored:
+            return Credential(
+                user_id=self.user_id,
+                agent_id=self.agent_id,  # attribution survives the downgrade
+                access_controlled=True,
+                trust_level=TrustLevel.UNTRUSTED,
+            )
+        return self
+
     def __str__(self) -> str:  # pragma: no cover - debugging aid
         kind = "admin" if self.is_admin else ("org" if self.is_org else "agent")
         return (

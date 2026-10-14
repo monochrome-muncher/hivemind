@@ -48,6 +48,7 @@ def create_app_for_config(
         extractor=extractor,
         authenticator=authenticator,
         metrics_entry_counts_ttl=settings.metrics_entry_counts_ttl,
+        require_stored_keys=settings.require_stored_keys,
     )
     return HivemindApp(
         store=store,
@@ -60,6 +61,7 @@ def create_app_for_config(
         access_service=services.access_service,
         metrics_service=services.metrics_service,
         activity_service=services.activity_service,
+        require_stored_keys=settings.require_stored_keys,
     )
 
 

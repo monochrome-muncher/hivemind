@@ -42,16 +42,21 @@ def build_services(
     extractor: Extractor | None = None,
     authenticator: Authenticator | None = None,
     metrics_entry_counts_ttl: float = DEFAULT_ENTRY_COUNTS_TTL,
+    require_stored_keys: bool = False,
 ) -> Services:
     """Wire the services. ``extractor`` is optional (ADR 0016: ``None`` is
     extraction off); without ``authenticator`` key management is refused
     (the in-memory dev runner). ``metrics_entry_counts_ttl`` is
-    ``Settings.metrics_entry_counts_ttl`` (ADR 0069)."""
+    ``Settings.metrics_entry_counts_ttl`` (ADR 0069). ``require_stored_keys``
+    is ``Settings.require_stored_keys`` (ADR 0082): when true, a dev-mode
+    credential is downgraded to trust level 0 at the service seam."""
     return Services(
         search_config=search_config,
         write_service=WriteService(store, embedder, extractor),
         search_service=SearchService(store, embedder, search_config),
-        governance_service=GovernanceService(store, search_config),
+        governance_service=GovernanceService(
+            store, search_config, require_stored_keys=require_stored_keys
+        ),
         access_service=AccessService(store, authenticator),
         metrics_service=MetricsService(store, entry_counts_ttl=metrics_entry_counts_ttl),
         activity_service=ActivityService(store, ttl=metrics_entry_counts_ttl),

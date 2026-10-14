@@ -77,9 +77,17 @@ class FeedbackService:
     uses.
     """
 
-    def __init__(self, store: Store, config: SearchConfig | None = None) -> None:
+    def __init__(
+        self,
+        store: Store,
+        config: SearchConfig | None = None,
+        require_stored_keys: bool = False,
+    ) -> None:
         self._store = store
         self._config = config or SearchConfig()
+        # ADR 0082: a dev-mode credential is downgraded to trust level 0
+        # when the deployment requires stored keys.
+        self._require_stored_keys = require_stored_keys
 
     async def record_feedback(
         self,
@@ -99,6 +107,7 @@ class FeedbackService:
         check_text(note, "note", MAX_NOTE_CHARS)  # ADR 0040
         note = _clean_note(note)
         check_text(agent, "agent", MAX_IDENTITY_CHARS)
+        credential = credential.effective(self._require_stored_keys)
         effective_agent = reporter_agent(credential, agent)
         if effective_agent is None:
             raise AgentIdentityRequired(
@@ -142,6 +151,7 @@ class FeedbackService:
         check_text(note, "note", MAX_NOTE_CHARS)  # ADR 0040
         note = _clean_note(note)
         check_text(agent, "agent", MAX_IDENTITY_CHARS)
+        credential = credential.effective(self._require_stored_keys)
         effective_agent = reporter_agent(credential, agent)
         if effective_agent is None:
             raise AgentIdentityRequired(
