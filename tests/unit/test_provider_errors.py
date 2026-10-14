@@ -393,7 +393,7 @@ class TestLogging:
     def test_startup_lines_redact_the_endpoint(self, monkeypatch, caplog) -> None:
         import hivemind.api.main as api_main
         import hivemind.mcp.http as mcp_http
-        import hivemind.mcp.server as mcp_server
+        import hivemind.mcp.runners as mcp_runners
         import hivemind.store as store_mod
 
         settings = Settings(embedding_endpoint="https://bob:hunter2@emb.example/v1")
@@ -404,14 +404,14 @@ class TestLogging:
         def boom(*a, **k):
             raise Stop
 
-        for mod in (api_main, mcp_http, mcp_server):
+        for mod in (api_main, mcp_http, mcp_runners):
             monkeypatch.setattr(mod, "load_settings", lambda: settings)
             monkeypatch.setattr(mod, "configure_logging", lambda level: None)
         monkeypatch.setattr(api_main, "create_app_from_settings", boom)
         monkeypatch.setattr(store_mod, "build_store", boom)
         monkeypatch.setenv("HIVEMIND_MCP_KEY", "hm_x")
         caplog.set_level(logging.INFO)
-        for run in (api_main.run, mcp_http.main_http, mcp_server.main_pg):
+        for run in (api_main.run, mcp_http.main_http, mcp_runners.main_pg):
             with pytest.raises(Stop):
                 run()
         assert "starting hivemind" in caplog.text
