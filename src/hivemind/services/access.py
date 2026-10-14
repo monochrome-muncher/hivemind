@@ -17,6 +17,10 @@ from typing import Any
 
 from hivemind.domain.access import (
     REVOCABLE,
+    SCOPE_FLEET,
+    SCOPE_ORG,
+    SCOPE_RANK,
+    SCOPE_SELF,
     Agent,
     AgentStatus,
     Fleet,
@@ -25,6 +29,7 @@ from hivemind.domain.access import (
     TrustLevel,
     UnknownAgent,
     UnknownFleet,
+    write_scopes_for,
 )
 from hivemind.domain.audit import AuditAction, AuditFilters, AuditRecord
 from hivemind.domain.validation import (
@@ -340,9 +345,6 @@ class WriteResolution:
 
 
 # Scope ranks: a writer may not write a scope higher than its level allows.
-_SCOPE_RANK = {"self": 1, "fleet": 2, "org": 3}
-
-
 def _readable(key_kind: str, credential: Credential) -> tuple[str, ...]:
     """``can_read`` for ``whoami`` (ADR 0030) — mirrors ``entry_is_visible``."""
     if key_kind in ("admin", "legacy"):
@@ -359,8 +361,11 @@ def _writable_scopes(key_kind: str, credential: Credential) -> tuple[str, ...]:
     (``resolve_write_scope`` would reject it)."""
     if key_kind == "org" or not credential.can_write():
         return ()
-    max_rank = _SCOPE_RANK[credential.max_write_scope()]
-    scopes = tuple(scope for scope, rank in _SCOPE_RANK.items() if rank <= max_rank)
+    if credential.is_admin or not credential.access_controlled:
+        # Off-ladder access (admin / legacy / dev-mode): every scope.
+        scopes: tuple[str, ...] = (SCOPE_SELF, SCOPE_FLEET, SCOPE_ORG)
+    else:
+        scopes = write_scopes_for(credential.trust_level)
     if (key_kind == "agent" and credential.home_fleet_id is None) or key_kind == "admin":
         scopes = tuple(scope for scope in scopes if scope != "fleet")
     return scopes
@@ -383,7 +388,7 @@ def resolve_write_scope(
         scope = max_scope
     else:
         scope = requested_scope
-        if _SCOPE_RANK.get(scope, 99) > _SCOPE_RANK.get(max_scope, 99):
+        if SCOPE_RANK.get(scope, 99) > SCOPE_RANK.get(max_scope, 99):
             raise PermissionDenied(
                 f"trust level {credential.trust_level.value} may not write "
                 f"scope '{scope}' (ADR 0011)"

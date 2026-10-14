@@ -10,7 +10,11 @@ from __future__ import annotations
 
 import pytest
 
-from hivemind.domain.access import AgentStatus, TrustLevel
+from hivemind.domain.access import (
+    AgentStatus,
+    TrustLevel,
+    write_scopes_for,
+)
 from hivemind.ports import Credential
 from hivemind.services.access import (
     AccessService,
@@ -290,6 +294,26 @@ async def test_rotate_org_key_admin_only() -> None:
 
 
 # -- write-scope resolution (ADR 0011) --------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("level", "scopes"),
+    [
+        (TrustLevel.UNTRUSTED, ()),
+        (TrustLevel.LURKER, ("self",)),
+        (TrustLevel.CONTRIBUTOR, ("self", "fleet")),
+        (TrustLevel.PRIVILEGED, ("self", "fleet")),
+    ],
+)
+def test_write_scopes_for_the_ladder(level: TrustLevel, scopes: tuple[str, ...]) -> None:
+    # ADR 0011: level 0 writes nothing; 1 -> self; 2/3 -> self + fleet.
+    assert write_scopes_for(level) == scopes
+
+
+def test_write_scopes_for_keeps_org_off_the_ladder() -> None:
+    # org is reached only by admin / legacy / dev-mode credentials
+    # (Credential.max_write_scope), never by a trust level.
+    assert all("org" not in write_scopes_for(level) for level in TrustLevel)
 
 
 def test_resolve_default_scope_by_level() -> None:

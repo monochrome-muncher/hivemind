@@ -99,6 +99,24 @@ SCOPE_SELF = "self"
 SCOPE_FLEET = "fleet"
 SCOPE_ORG = "org"  # legacy v1 value: grandfathered read-only (ADR 0011).
 
+# The scope ordering, lowest to highest (ADR 0011). The single source for
+# "which scope exceeds which": `resolve_write_scope` (services) and
+# `whoami`'s `can_write_scopes` rank against this.
+SCOPE_RANK: dict[str, int] = {SCOPE_SELF: 1, SCOPE_FLEET: 2, SCOPE_ORG: 3}
+
+
+def write_scopes_for(trust_level: TrustLevel) -> tuple[str, ...]:
+    """The scopes ``trust_level`` may write (ADR 0011), lowest first: level
+    0 none, 1 (lurker) ``self``, 2/3 (contributor/privileged) ``self`` +
+    ``fleet``. ``org`` is off the ladder — admin keys and legacy/dev-mode
+    credentials reach it via ``Credential.max_write_scope`` (ports.py),
+    never a trust level."""
+    if trust_level <= TrustLevel.UNTRUSTED:
+        return ()
+    if trust_level <= TrustLevel.LURKER:
+        return (SCOPE_SELF,)
+    return (SCOPE_SELF, SCOPE_FLEET)
+
 
 @dataclass(frozen=True, slots=True)
 class Fleet:

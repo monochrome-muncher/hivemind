@@ -17,13 +17,13 @@ from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 from hivemind.domain.access import (
-    SCOPE_FLEET,
     SCOPE_ORG,
     SCOPE_SELF,
     Agent,
     Fleet,
     TrustLevel,
     Visibility,
+    write_scopes_for,
 )
 from hivemind.domain.activity import Activity
 from hivemind.domain.audit import AuditEvent, AuditFilters, AuditRecord
@@ -544,9 +544,11 @@ class Credential:
         at all (enforced at the write seam)."""
         if self.is_admin or not self.access_controlled:
             return SCOPE_ORG
-        if self.trust_level in (TrustLevel.CONTRIBUTOR, TrustLevel.PRIVILEGED):
-            return SCOPE_FLEET
-        return SCOPE_SELF
+        # ADR 0011 ladder, single-sourced in the domain: the level's
+        # highest writable scope (level 0 keeps `self`; it writes nothing,
+        # gated by `can_write`).
+        scopes = write_scopes_for(self.trust_level)
+        return scopes[-1] if scopes else SCOPE_SELF
 
     def can_write(self) -> bool:
         """Whether this credential may write at all (ADR 0011). Level 0
