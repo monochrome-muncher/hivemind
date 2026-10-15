@@ -21,6 +21,7 @@ The dev environment is `uv`-managed (Python 3.14); Postgres (with pgvector) runs
 | Install deps (creates `.venv`) | `make install` (or `uv sync`) |
 | Start Postgres (pgvector, `localhost:5432`, db `hivemind`) | `make pg` |
 | Start the full local stack in docker (API :8000, admin :8089, MCP :8088) | `make up` (or `docker compose up -d`) |
+| Start the standalone stack (API :8100, admin :8189, MCP :8188, pg :5433 db `hivemind_live`) — survives `make test` | `make standalone` / `make standalone-down` / `make standalone-reset` |
 | Apply DB migrations (ordered chain, advisory-locked; ADR 0020) | `make migrate` (or `uv run hivemind-migrate`) |
 | Roll back the last migration (refuses `0001`; ADR 0020) | `make rollback` (or `make rollback N=2`) |
 | Regenerate the `schema.sql` reference (generated, never applied) | `make schema-ref` |
