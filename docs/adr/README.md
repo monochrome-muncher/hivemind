@@ -95,3 +95,4 @@ is unused.
 | [0083](0083-the-entry-read-path-is-serviced.md) | The entry-read path is serviced | Accepted |
 | [0084](0084-the-wire-contract-is-single-sourced-and-the-usage-report-is-typed.md) | The wire contract is single-sourced, and the usage report is typed | Accepted |
 | [0085](0085-the-mcp-package-splits-into-contract-server-and-runners.md) | The MCP package splits into contract, server assembly, and runners | Accepted |
+| [0086](0086-key-hashes-stay-sha-256.md) | Key hashes stay SHA-256; the KDF upgrade is held (rotation cost vs. 256-bit random keys) | Accepted |
