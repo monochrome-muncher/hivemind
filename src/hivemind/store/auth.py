@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
 import secrets
 
 import asyncpg
@@ -49,6 +50,11 @@ _ISSUE_ADMIN_KEY = "INSERT INTO credentials (key_hash, kind, user_id) VALUES ($1
 _ISSUE_ORG_KEY = "INSERT INTO credentials (key_hash, kind, user_id) VALUES ($1, 'org', $2)"
 _DELETE_ORG_KEY = "DELETE FROM credentials WHERE kind = 'org'"
 
+_KEY_HASH_ITERATIONS = 600_000
+_KEY_HASH_PEPPER = os.environ.get("HIVEMIND_KEY_HASH_PEPPER", "hivemind-key-hash-pepper").encode(
+    "utf-8"
+)
+
 
 def _generate_key() -> str:
     """A fresh random API key (32 bytes, URL-safe). The raw secret is
@@ -57,8 +63,14 @@ def _generate_key() -> str:
 
 
 def key_hash(key: str) -> str:
-    """The SHA-256 hex digest of a raw API key (the stored identifier)."""
-    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+    """A PBKDF2-HMAC-SHA256 hex digest of a raw API key (the stored identifier)."""
+    derived = hashlib.pbkdf2_hmac(
+        "sha256",
+        key.encode("utf-8"),
+        _KEY_HASH_PEPPER,
+        _KEY_HASH_ITERATIONS,
+    )
+    return derived.hex()
 
 
 class PgAuthenticator:
