@@ -31,10 +31,19 @@ let currentContainer = null;
 async function route() {
   if (!hasKey()) { showLogin(); return; }
   const { view: requested } = parseHash();
-  const isKnownView = Object.prototype.hasOwnProperty.call(VIEWS, requested);
-  const name = isKnownView ? requested : "overview";
-  const selectedView = VIEWS[name];
-  const view = typeof selectedView === "function" ? selectedView : viewOverview;
+  let name = "overview";
+  let view = viewOverview;
+  switch (requested) {
+    case "overview": name = "overview"; view = viewOverview; break;
+    case "memories": name = "memories"; view = viewMemories; break;
+    case "stats": name = "stats"; view = viewStats; break;
+    case "agents": name = "agents"; view = viewAgents; break;
+    case "fleets": name = "fleets"; view = viewFleets; break;
+    case "health": name = "health"; view = viewHealth; break;
+    case "audit": name = "audit"; view = viewAudit; break;
+    case "keys": name = "keys"; view = viewKeys; break;
+    default: break;
+  }
   document.querySelectorAll(".nav a").forEach((a) => a.classList.toggle("active", a.dataset.view === name));
   const page = $("view");
   const mine = ++renderToken;
