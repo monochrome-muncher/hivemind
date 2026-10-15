@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or discussion
+    url: https://github.com/monochrome-muncher/hivemind/discussions
+    about: Use Discussions for usage questions, brainstorming, and "have you considered…" conversations. The issue tracker is for bugs and feature requests only.
+  - name: Security vulnerability
+    url: https://github.com/monochrome-muncher/hivemind/security/advisories/new
+    about: Report vulnerabilities privately, not as a public issue. See SECURITY.md.
