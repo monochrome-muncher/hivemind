@@ -383,7 +383,8 @@ The code is split into layers: `domain` (plain data, no I/O), `ports`
 (the interfaces), `services` (all the logic) and the adapters around them
 (`store`, `embeddings`, `api`, `mcp`). [AGENTS.md](AGENTS.md) has the
 full map and the checks a change has to pass. If you're contributing,
-please read the [Code of Conduct](CODE_OF_CONDUCT.md) first.
+start with [CONTRIBUTING.md](CONTRIBUTING.md) and the
+[Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
