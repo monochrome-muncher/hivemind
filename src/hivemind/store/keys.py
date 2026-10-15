@@ -1,7 +1,7 @@
 """Issue, rotate, and revoke API keys for the credential model (ADRs 0008, 0012).
 
 Console entry point (``hivemind-keys``). Raw keys are printed **once**;
-only their SHA-256 hash is stored (SPEC.md §8.1). Three kinds (ADR
+only their hash is stored (SPEC.md §8.1). Three kinds (ADR
 0012): the shared **org** key (registration + health only; ``rotate-org``
 closes registration to prior copies, ADR 0031), one **agent** key per
 registered agent, and **admin** keys.
@@ -17,7 +17,7 @@ Usage:
     hivemind-keys rotate-org
     hivemind-keys bootstrap-secret [--secret hivemind-keys]   (in-cluster, ADR 0044)
     hivemind-keys revoke --name alice
-    hivemind-keys revoke-admin --key hm_xxx   (or --hash <sha256 from list>)
+    hivemind-keys revoke-admin --key hm_xxx   (or --hash <hash from list>)
     hivemind-keys list
 """
 
@@ -327,7 +327,7 @@ async def _revoke_admin(
         if len(target) < _MIN_HASH_PREFIX or any(c not in "0123456789abcdef" for c in target):
             raise ValueError(
                 f"--hash must be hex, at least {_MIN_HASH_PREFIX} characters "
-                "(the fingerprint from `hivemind-keys list`, or the full SHA-256)"
+                "(the fingerprint from `hivemind-keys list`, or the full stored hash)"
             )
     elif raw_key is not None:
         target = key_hash(raw_key)  # the guard above proves it is set
@@ -413,7 +413,7 @@ def main() -> None:
     revoke_admin.add_argument(
         "--hash",
         dest="stored_hash",
-        help="the stored SHA-256 hex, or its unique fingerprint prefix (>= 12 hex) from `hivemind-keys list`",
+        help="the stored key hash hex, or its unique fingerprint prefix (>= 12 hex) from `hivemind-keys list`",
     )
 
     revoke = sub.add_parser("revoke", help="revoke an agent's key (name stays reserved)")

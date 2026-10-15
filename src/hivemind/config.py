@@ -598,6 +598,9 @@ _ALLOWED_EXTRA_ENV_VARS: dict[str, str] = {
     # Per-process identity (ADR 0009), so deliberately outside Settings.
     "HIVEMIND_MCP_KEY": "per-agent hivemind-mcp-pg credential, read via os.environ in mcp/runners.py",
     "HIVEMIND_MCP_HTTP_PORT": "mcp-http port for docker compose and `make mcp-http-dev`; the app never reads it",
+    # Key-hashing pepper (code-scanning alert #5): a deployment secret
+    # read via os.environ in store/auth.py at import time.
+    "HIVEMIND_KEY_HASH_PEPPER": "PBKDF2 pepper for key_hash, read via os.environ in store/auth.py",
 }
 
 

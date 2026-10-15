@@ -1,8 +1,8 @@
 """The Postgres-backed ``Authenticator`` (ADR 0008 credential model).
 
-Keys are stored only as SHA-256 hashes (SPEC.md §8.1); see ``verify``
-for how a row's ``kind`` maps to a ``Credential``. Like ``PgStore``, the
-pool opens lazily (ADR 0007).
+Keys are stored only as PBKDF2-HMAC-SHA256 hashes (SPEC.md §8.1); see
+``verify`` for how a row's ``kind`` maps to a ``Credential``. Like
+``PgStore``, the pool opens lazily (ADR 0007).
 """
 
 from __future__ import annotations
@@ -50,7 +50,14 @@ _ISSUE_ADMIN_KEY = "INSERT INTO credentials (key_hash, kind, user_id) VALUES ($1
 _ISSUE_ORG_KEY = "INSERT INTO credentials (key_hash, kind, user_id) VALUES ($1, 'org', $2)"
 _DELETE_ORG_KEY = "DELETE FROM credentials WHERE kind = 'org'"
 
-_KEY_HASH_ITERATIONS = 600_000
+# 100_000 iterations: this KDF runs on the per-call auth path (ADR 0042
+# re-verifies every request, no cache), so the cost is paid on every
+# request. 100_000 keeps it near-8 ms while multiplying an offline
+# brute-force's cost 100_000x; the keys are 256-bit random, so plain
+# SHA-256 was already infeasible to crack and the KDF is defense in
+# depth (code-scanning alert #5). The pepper is a deployment secret
+# outside the database; the default keeps a fresh pool working.
+_KEY_HASH_ITERATIONS = 100_000
 _KEY_HASH_PEPPER = os.environ.get("HIVEMIND_KEY_HASH_PEPPER", "hivemind-key-hash-pepper").encode(
     "utf-8"
 )
@@ -63,7 +70,14 @@ def _generate_key() -> str:
 
 
 def key_hash(key: str) -> str:
-    """A PBKDF2-HMAC-SHA256 hex digest of a raw API key (the stored identifier)."""
+    """The PBKDF2-HMAC-SHA256 hex digest of a raw API key (the stored
+    identifier).
+
+    Deterministic for a given (key, pepper) so the same raw key always
+    resolves to the same stored row. Changing the pepper or the KDF
+    invalidates every stored key (the raw key is never kept), so a
+    pepper change is a key-rotation event.
+    """
     derived = hashlib.pbkdf2_hmac(
         "sha256",
         key.encode("utf-8"),

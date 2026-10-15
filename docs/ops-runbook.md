@@ -249,7 +249,7 @@ uv run hivemind-keys issue-agent --name alice --trust-level 1 --home-fleet <flee
 
 The admin REST surface does the same (`POST /v1/admin/agents/{name}/activate`
 returns the generated agent key **once** — the only moment a key is ever
-shown). Raw keys are random 32-byte secrets shown once; only the SHA-256
+shown). Raw keys are random 32-byte secrets shown once; only the key
 hash is stored (a leaked database never leaks usable keys, SPEC §8.1).
 
 ### Rotation / revocation

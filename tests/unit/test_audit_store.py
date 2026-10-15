@@ -123,3 +123,41 @@ async def test_verify_threads_the_key_fingerprint_into_the_credential() -> None:
     assert credential.key_id == key_hash(raw_key)[:12]
     assert raw_key not in credential.key_id
     assert credential.audit_actor() == f"admin:{key_hash(raw_key)[:12]}"
+
+
+# -- key_hash: the stored identifier (code-scanning alert #5) -------------
+
+
+def test_key_hash_is_deterministic_hex_and_not_raw_sha256() -> None:
+    """The same raw key always resolves to the same stored hash, it is a
+    64-char hex string, and it is a KDF (PBKDF2), not a bare SHA-256."""
+    import hashlib
+
+    raw = "hm_some_admin_secret"
+    h1 = key_hash(raw)
+    h2 = key_hash(raw)
+    assert h1 == h2
+    assert len(h1) == 64
+    int(h1, 16)  # valid hex
+    # Distinct from the raw key's plain SHA-256 (a KDF with a pepper).
+    assert h1 != hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    # Never embeds the raw key.
+    assert raw not in h1
+
+
+def test_key_hash_depends_on_the_pepper(monkeypatch) -> None:
+    """Changing the pepper changes the stored hash, so a pepper change is a
+    key-rotation event (every stored key stops matching)."""
+    import importlib
+
+    import hivemind.store.auth as auth
+
+    raw = "hm_some_admin_secret"
+    baseline = key_hash(raw)
+    monkeypatch.setenv("HIVEMIND_KEY_HASH_PEPPER", "a-different-pepper")
+    importlib.reload(auth)
+    try:
+        assert auth.key_hash(raw) != baseline
+    finally:
+        monkeypatch.delenv("HIVEMIND_KEY_HASH_PEPPER", raising=False)
+        importlib.reload(auth)

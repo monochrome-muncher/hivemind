@@ -22,7 +22,7 @@ Four actor kinds (ADR 0027, ADR 0046, ADR 0076):
 
 No field of either type ever carries a raw API key: key-producing
 actions record a key *fingerprint* (the first 12 hex chars of the
-stored SHA-256 hash) or nothing (ADR 0027).
+stored key hash) or nothing (ADR 0027).
 """
 
 from __future__ import annotations
@@ -62,14 +62,14 @@ class AuditAction(StrEnum):
     ENTRY_UNPIN = "entry.unpin"  # ADR 0076
 
 
-# The key fingerprint is the first 12 hex chars of the stored SHA-256
-# key hash — exactly what `hivemind-keys list` displays. Non-secret: it
+# The key fingerprint is the first 12 hex chars of the stored key hash
+# — exactly what `hivemind-keys list` displays. Non-secret: it
 # identifies a key without being usable as one.
 KEY_FINGERPRINT_LENGTH = 12
 
 
 def key_fingerprint(stored_key_hash: str) -> str:
-    """The non-secret fingerprint of a key, from its stored SHA-256 hex."""
+    """The non-secret fingerprint of a key, from its stored key hash hex."""
     return stored_key_hash[:KEY_FINGERPRINT_LENGTH]
 
 
