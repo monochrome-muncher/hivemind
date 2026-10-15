@@ -501,9 +501,9 @@ def main() -> None:
             print(f"{exc}; no key was issued", file=sys.stderr)
             raise SystemExit(1) from None
         if created:
-            print(f"issued the admin and org keys into Secret {args.secret} (not printed)")
+            print("issued the admin and org keys into the configured Secret (not printed)")
         else:
-            print(f"Secret {args.secret} already exists; nothing issued")
+            print("target Secret already exists; nothing issued")
     elif args.cmd == "list":
         asyncio.run(_list(dsn))
     elif args.cmd == "revoke-admin":
