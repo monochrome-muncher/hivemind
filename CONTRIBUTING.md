@@ -10,6 +10,8 @@ guide that goes with it is short too.
 - Use short conventional-commit subjects: `feat:`, `fix:`, `docs:`,
   `refactor:`, optionally scoped (`refactor(mcp): …`).
 - Be respectful. See the [Code of Conduct](CODE_OF_CONDUCT.md).
+- For security issues, see [SECURITY.md](SECURITY.md): report them
+  privately, not as a public issue.
 
 ## Getting started
 
