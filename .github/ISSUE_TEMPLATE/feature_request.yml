@@ -1,0 +1,49 @@
+name: Feature request
+description: Suggest a new capability or enhancement
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For open-ended brainstorming or "have you considered…" questions,
+        prefer [Discussions](https://github.com/monochrome-muncher/hivemind/discussions).
+        Use this form when you have a concrete proposal.
+
+        Before submitting, check [SPEC.md](https://github.com/monochrome-muncher/hivemind/blob/main/SPEC.md)
+        and [ROADMAP.md](https://github.com/monochrome-muncher/hivemind/blob/main/ROADMAP.md) to
+        see whether it's already in scope or already planned.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem are you trying to solve? Framing it as a use case works well.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like Hivemind to do? An API shape, a behavior change, or a configuration change.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you thought about, and why they're less good.
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Affected surface
+      options:
+        - REST API
+        - MCP
+        - Agent plugin
+        - Admin panel
+        - Deployment
+        - Other
+    validations:
+      required: true

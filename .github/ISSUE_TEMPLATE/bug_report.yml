@@ -1,0 +1,57 @@
+name: Bug report
+description: Report something that isn't working as expected
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. Please fill in
+        every section; incomplete reports are slower to triage.
+
+        For security vulnerabilities, **do not open a public issue**.
+        Report them via [GitHub Security
+        Advisories](https://github.com/monochrome-muncher/hivemind/security/advisories/new).
+  - type: input
+    id: version
+    attributes:
+      label: Hivemind version
+      description: The tag you're running, or `git rev-parse --short HEAD` if you're running from source.
+      placeholder: 2.8.1
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: How it's running
+      options:
+        - Docker Compose (dev stack, `make up`)
+        - Standalone stack (`make standalone`)
+        - Kubernetes
+        - Other (describe in the body)
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: A minimal sequence that triggers the bug. Include exact commands and the output you saw.
+      placeholder: |
+        1. `make up`
+        2. `curl -X POST http://localhost:8000/v1/entries ...`
+        3. Observe: ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include error messages and stack traces. Redact any keys before pasting.
+    validations:
+      required: true
