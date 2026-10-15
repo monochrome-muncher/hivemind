@@ -266,7 +266,7 @@ def test_the_csp_allows_only_same_origin_scripts_and_connections() -> None:
 
 def test_the_page_has_no_inline_script_or_style() -> None:
     html = (STATIC_DIR / "index.html").read_text()
-    assert re.findall(r"<script(?![^>]*\bsrc=)[^>]*>", html) == []
+    assert re.findall(r"<script(?![^>]*\bsrc=)[^>]*>", html, flags=re.IGNORECASE) == []
     assert re.search(r"\sstyle=", html) is None
     assert re.search(r"\son[a-z]+=", html) is None
     assert "<style" not in html
