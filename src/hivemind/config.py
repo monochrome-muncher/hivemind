@@ -596,7 +596,7 @@ _ALLOWED_EXTRA_ENV_VARS: dict[str, str] = {
         "mcp/http.py and admin/main.py"
     ),
     # Per-process identity (ADR 0009), so deliberately outside Settings.
-    "HIVEMIND_MCP_KEY": "per-agent hivemind-mcp-pg credential, read via os.environ in mcp/server.py",
+    "HIVEMIND_MCP_KEY": "per-agent hivemind-mcp-pg credential, read via os.environ in mcp/runners.py",
     "HIVEMIND_MCP_HTTP_PORT": "mcp-http port for docker compose and `make mcp-http-dev`; the app never reads it",
 }
 
