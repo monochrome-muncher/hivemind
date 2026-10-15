@@ -503,7 +503,7 @@ def main() -> None:
         if created:
             print(f"issued the admin and org keys into Secret {args.secret} (not printed)")
         else:
-            print(f"Secret {args.secret} already exists; nothing issued")
+            print("Secret already exists; nothing issued")
     elif args.cmd == "list":
         asyncio.run(_list(dsn))
     elif args.cmd == "revoke-admin":
