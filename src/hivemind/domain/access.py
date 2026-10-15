@@ -232,7 +232,9 @@ def entry_is_visible(entry: Entry, v: Visibility) -> bool:
         return True
     if v.level == TrustLevel.PRIVILEGED:
         return True
-    return entry.fleet_id is not None and entry.fleet_id == v.home_fleet_id
+    # A fleet id must be non-empty: two empty strings are "no fleet",
+    # not the same fleet.
+    return bool(entry.fleet_id) and entry.fleet_id == v.home_fleet_id
 
 
 def may_supersede(

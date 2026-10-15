@@ -88,7 +88,7 @@ class CreateEntryRequest(BaseModel):
     scope: Literal["self", "fleet", "org"] | None = None
     supersedes: list[str] = []
     agent: str | None = None
-    # "See also" links (ADR 0057): up to 5 entries the writer can read.
+    # "See also" links: up to 5 entries the writer can read.
     see_also: list[str] = []
 
     @field_validator("occurred_at")
@@ -106,7 +106,7 @@ class SourceOut(BaseModel):
 
 
 class EntityOut(BaseModel):
-    """A machine-extracted entity facet (ADR 0016, SPEC §13).
+    """A machine-extracted entity facet (SPEC §13).
 
     ``name`` is open vocabulary (the extractor's output); ``kind`` is the
     closed six-value ``EntityKind`` vocabulary (display-only in v1 —
@@ -118,7 +118,7 @@ class EntityOut(BaseModel):
 
 
 class FeedbackCountsOut(BaseModel):
-    """Verdict counts over every reporter (SPEC.md §4.2, ADR 0051)."""
+    """Verdict counts over every reporter (SPEC.md §4.2)."""
 
     helpful: int = 0
     stale: int = 0
@@ -150,7 +150,7 @@ class CorrectionOut(BaseModel):
 
 
 class FeedbackSummaryOut(FeedbackCountsOut):
-    """An entry's feedback on ``GET /v1/entries/{id}`` (ADR 0051): the
+    """An entry's feedback on ``GET /v1/entries/{id}``: the
     counts plus the newest reports, notes included."""
 
     recent: list[FeedbackReportOut] = []
@@ -173,7 +173,7 @@ class FeedbackSummaryOut(FeedbackCountsOut):
 
 
 class RelatedOut(BaseModel):
-    """A nearby existing entry in a write's response (ADR 0052)."""
+    """A nearby existing entry in a write's response."""
 
     id: str
     kind: Kind
@@ -226,7 +226,7 @@ class CheckOut(BaseModel):
 
 
 class LinkOut(BaseModel):
-    """A linked entry on a read (ADR 0057): compact, with its state."""
+    """A linked entry on a read: compact, with its state."""
 
     id: str
     kind: Kind
@@ -276,15 +276,15 @@ class EntryOut(BaseModel):
     entities_model: str | None = None
     # Only with ``?history=true`` (SPEC.md §5.1).
     history: dict[str, list[EntryOut]] | None = None
-    # The entry's feedback (ADR 0051): set by ``GET /v1/entries/{id}`` only.
+    # The entry's feedback: set by ``GET /v1/entries/{id}`` only.
     feedback: FeedbackSummaryOut | None = None
-    # The nearest existing entries the writer can read (ADR 0052): set by
+    # The nearest existing entries the writer can read: set by
     # ``POST /v1/entries`` only.
     related: list[RelatedOut] | None = None
     # Advisory notes on the write (SPEC.md §4.1): set by ``POST /v1/entries`` only.
     warnings: list[WarningOut] | None = None
     # "See also" links both ways, limited to what the reader may see
-    # (ADR 0057): set by the reads by id only.
+    # Set by the reads by id only.
     see_also: list[LinkOut] | None = None
     linked_from: list[LinkOut] | None = None
 
@@ -320,7 +320,7 @@ class EntryOut(BaseModel):
 
 
 class GetEntriesRequest(BaseModel):
-    """Read several entries by id at once (ADR 0055)."""
+    """Read several entries by id at once."""
 
     entry_ids: list[str] = Field(min_length=1, max_length=MAX_GET_IDS)
 
@@ -334,14 +334,14 @@ class EntriesOut(BaseModel):
 
 
 class SimilarOut(BaseModel):
-    """Another member of a hit's version group (ADR 0074)."""
+    """Another member of a hit's version group."""
 
     id: str
     occurred_at: datetime
 
 
 class UpstreamChangeOut(BaseModel):
-    """A changed ``see_also`` target of a hit (ADR 0081)."""
+    """A changed ``see_also`` target of a hit."""
 
     id: str
     change: UpstreamChangeKind
@@ -364,15 +364,15 @@ class HitOut(BaseModel):
     score: float
     scope: str = "fleet"
     fleet_id: str | None = None  # a foreign entry: != the reader's home fleet (ADR 0036)
-    feedback: FeedbackCountsOut = FeedbackCountsOut()  # ADR 0051
+    feedback: FeedbackCountsOut = FeedbackCountsOut()
     last_confirmed_at: datetime | None = None  # SPEC §4.2 (ranks only with ADR 0071 on)
     # SPEC §6.1, display only; null when empty (state: unless include_inactive).
     contested: bool | None = None
     correction: CorrectionOut | None = None
     supersedes: int | None = None
     state: EntryState | None = None
-    similar: list[SimilarOut] | None = None  # ADR 0074; null when none
-    upstream_changed: list[UpstreamChangeOut] | None = None  # ADR 0081; null when none
+    similar: list[SimilarOut] | None = None  # null when none
+    upstream_changed: list[UpstreamChangeOut] | None = None  # null when none
 
     @classmethod
     def from_hit(cls, hit: Hit) -> HitOut:
@@ -432,9 +432,9 @@ class SearchRequest(BaseModel):
     created_from: datetime | None = None
     created_to: datetime | None = None
     include_inactive: bool = False
-    # Only entries reported stale or wrong at least once (ADR 0054).
+    # Only entries reported stale or wrong at least once.
     flagged: bool = False
-    # Opt-in diversity re-order of the ranked results (ADR 0078).
+    # Opt-in diversity re-order of the ranked results.
     explore: bool = False
     # ADR 0073: how age should weigh in; honoured only when the server's
     # recency_hint_enabled is on. Send the same value on every page.
@@ -468,7 +468,7 @@ class FeedbackRequest(BaseModel):
 
 
 class BatchFeedbackRequest(BaseModel):
-    """One verdict on several entries at once (ADR 0053)."""
+    """One verdict on several entries at once."""
 
     entry_ids: list[str] = Field(min_length=1, max_length=MAX_FEEDBACK_IDS)
     verdict: Verdict
@@ -477,7 +477,7 @@ class BatchFeedbackRequest(BaseModel):
 
 
 class PinOut(BaseModel):
-    """A pin (ADR 0058): which entry is pinned to which fleet, by whom."""
+    """A pin: which entry is pinned to which fleet, by whom."""
 
     entry_id: str
     fleet_id: str
@@ -495,14 +495,14 @@ class PinOut(BaseModel):
 
 
 class UnpinOut(BaseModel):
-    """The answer to an unpin (ADR 0058): whether the entry was pinned."""
+    """The answer to an unpin: whether the entry was pinned."""
 
     entry_id: str
     removed: bool
 
 
 class PinnedOut(BaseModel):
-    """One pinned entry as the reader sees it (ADR 0058): ``id`` is the
+    """One pinned entry as the reader sees it: ``id`` is the
     current version, ``pinned_id`` the version that was pinned."""
 
     id: str
@@ -513,7 +513,7 @@ class PinnedOut(BaseModel):
     state: EntryState
     pinned_by: str
     pinned_at: datetime
-    # ADR 0076: ``change_reason`` is ``superseded`` or ``flagged`` when set.
+    # ``change_reason`` is ``superseded`` or ``flagged`` when set.
     changed_since_pin: bool
     change_reason: ChangeReason | None
 
@@ -534,7 +534,7 @@ class PinnedOut(BaseModel):
 
 
 class PinsOut(BaseModel):
-    """A fleet's pinned entries, newest pin first (ADR 0058)."""
+    """A fleet's pinned entries, newest pin first."""
 
     fleet_id: str | None
     pins: list[PinnedOut]
@@ -575,7 +575,7 @@ class RegisterAgentRequest(BaseModel):
 
 
 class ActivateAgentRequest(BaseModel):
-    """Activate a pending agent (ADR 0012): set its trust level + home
+    """Activate a pending agent: set its trust level + home
     fleet; the agent key is issued once. The trust level defaults to
     `lurker` (1) (SPEC §5.1). Out-of-range values are a 422, not a 500."""
 
@@ -593,13 +593,13 @@ class UpdateAgentRequest(BaseModel):
 
 
 class CreateFleetRequest(BaseModel):
-    """Create a named fleet (ADR 0011)."""
+    """Create a named fleet."""
 
     name: str
 
 
 class AgentOut(BaseModel):
-    """A registered agent (ADR 0012)."""
+    """A registered agent."""
 
     name: str
     status: str
@@ -623,7 +623,7 @@ class AgentOut(BaseModel):
 
 
 class RegisteredAgentOut(AgentOut):
-    """The answer to ``POST /v1/agents`` (ADR 0039): the agent record plus
+    """The answer to ``POST /v1/agents``: the agent record plus
     whether this caller had already registered the name (same alias) and
     what its status means for the caller (pending / active → ask the admin
     for the key / revoked)."""
@@ -633,7 +633,7 @@ class RegisteredAgentOut(AgentOut):
 
 
 class FleetOut(BaseModel):
-    """A fleet (ADR 0011)."""
+    """A fleet."""
 
     id: str
     name: str
@@ -645,7 +645,7 @@ class FleetOut(BaseModel):
 
 
 class WhoamiOut(BaseModel):
-    """The calling key's standing (``GET /v1/whoami``, ADR 0030)."""
+    """The calling key's standing (``GET /v1/whoami``)."""
 
     key_kind: str
     name: str
@@ -722,7 +722,7 @@ class FleetsMetrics(BaseModel):
 
 class AgentsMetrics(BaseModel):
     """Agent usage counters (the §12 counters: trust-level distribution,
-    pending-agent count, ADR 0012)."""
+    pending-agent count)."""
 
     total: int
     pending: int
@@ -732,7 +732,7 @@ class AgentsMetrics(BaseModel):
 
 
 class FleetSearchMetrics(BaseModel):
-    """Search counters for one fleet name (ADR 0056)."""
+    """Search counters for one fleet name."""
 
     total: int
     empty: int
@@ -750,7 +750,7 @@ class SearchesMetrics(BaseModel):
 
 
 class FeedbackMetrics(BaseModel):
-    """Flag counters (ADR 0068): ``stale``/``wrong`` reports made while the
+    """Flag counters: ``stale``/``wrong`` reports made while the
     entry was current, and how many were later confirmed by a supersession.
     The totals include every non-revoked reporter (the admin key too);
     ``by_agent`` is keyed by the registered roster and omits agents with no
@@ -790,7 +790,7 @@ class RivalAge(BaseModel):
 
 class RivalLifetime(BaseModel):
     """Active ``alternative`` entries, ``Conflict:`` entries and contested
-    entries (ADR 0075)."""
+    entries."""
 
     alternative: RivalAge = RivalAge()
     conflict: RivalAge = RivalAge()
@@ -855,7 +855,7 @@ class HealthMetrics(BaseModel):
 
 
 class AdminSearchRequest(SearchRequest):
-    """``POST /v1/admin/search`` (ADR 0080): a search plus a fleet filter."""
+    """``POST /v1/admin/search``: a search plus a fleet filter."""
 
     fleet_id: str | None = None
 
@@ -909,7 +909,7 @@ class FleetActivityOut(BaseModel):
 
 
 class ActivityOut(BaseModel):
-    """The admin activity view (ADR 0080): observation only."""
+    """The admin activity view: observation only."""
 
     days: int
     since: datetime
