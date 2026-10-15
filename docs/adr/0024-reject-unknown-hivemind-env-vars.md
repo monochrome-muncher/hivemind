@@ -1,6 +1,8 @@
 # Reject unknown `HIVEMIND_*` environment variables
 
 > **Status: the "fail at startup" clause is superseded by [ADR 0032](0032-unknown-hivemind-env-vars-warn-by-default.md).** An unknown `HIVEMIND_*` variable is a warning by default; `HIVEMIND_STRICT_ENV=true` restores the failure.
+>
+> **Note (ADR 0085):** the stdio runners moved from `mcp/server.py` to `mcp/runners.py`; the file references below are updated to match.
 
 `Settings` (`src/hivemind/config.py`) has always used
 `model_config = SettingsConfigDict(env_prefix="HIVEMIND_", extra="ignore", ...)`.
@@ -21,7 +23,7 @@ anyone who missed the changelog.
 ## Decision
 
 `load_settings()` — the function every runner (`api/main.py`,
-`mcp/http.py`, `mcp/server.py`, `store/migrate.py`, `store/keys.py`)
+`mcp/http.py`, `mcp/runners.py`, `store/migrate.py`, `store/keys.py`)
 actually calls to build its `Settings` — now rejects any `HIVEMIND_*`
 variable that is **neither a `Settings` field nor on an explicit
 allowlist**, checked against both real process env vars and the active
@@ -38,7 +40,7 @@ constructs `Settings` at all:
 | `HIVEMIND_RUNNER` | Dockerfile `ENV` / `entrypoint.sh` / k8s ConfigMap | `entrypoint.sh` — selects the runner |
 | `HIVEMIND_HOST` | Dockerfile `ENV HIVEMIND_HOST=0.0.0.0` | `api/main.py`, `mcp/http.py` via `os.environ` |
 | `HIVEMIND_PORT` | k8s Deployment env | the runners via `os.environ` |
-| `HIVEMIND_MCP_KEY` | per-agent operator config | `mcp/server.py` via `os.environ` |
+| `HIVEMIND_MCP_KEY` | per-agent operator config | `mcp/runners.py` via `os.environ` |
 | `HIVEMIND_MCP_HTTP_PORT` | `docker-compose.yaml` | compose only; the app never reads it |
 
 A future reader can tell "deliberately not a setting" (in the table

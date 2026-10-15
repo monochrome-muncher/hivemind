@@ -129,8 +129,8 @@ on an internal ingress.
 
 ### 3.10 Agent plugin and skills  *(shipped: ADRs 0030–0031, `plugins/hivemind/`)*
 The plugin and skills that make Hivemind an agent's long-term memory, now
-for Claude Code, Codex, DeepSeek Harness, Hermes, Pi, Oh My Pi and
-OpenCode, with setup notes for Gemini CLI. It needed `hive_whoami`
+for Claude Code, Codex, DeepSeek Harness, Gemini CLI, GitHub Copilot CLI,
+Hermes, Pi, Oh My Pi and OpenCode. It needed `hive_whoami`
 (ADR 0030) and the one-key-per-request correction (ADR 0031).
 
 ### 3.11 Server-enforced access on every entry path  *(shipped: ADR 0033)*

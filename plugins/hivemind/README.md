@@ -434,8 +434,10 @@ each agent gets:
 - **DeepSeek Harness**: only the end-of-session reminder. DSH already
   keeps Hivemind's instructions through a compaction.
 - **Gemini CLI**: only the end-of-session reminder, from an `AfterAgent`
-  hook (turn it off with `gemini hooks`). Gemini runs no startup hook
-  after compressing its context.
+  hook (turn it off with `gemini hooks`). The `SessionStart` hook still
+  gives the startup text, but Gemini runs no startup hook after compacting
+  its context, so there is no post-compaction line; the instruction block
+  in `~/.gemini/GEMINI.md` is what carries Hivemind across a compaction.
 - **GitHub Copilot CLI**: only the end-of-session reminder, from the
   plugin's `Stop` hook. Its `SessionStart` hook still gives the startup
   text, but Copilot runs no startup hook after compacting its context, so

@@ -1,8 +1,4 @@
-# ADR 0085: the MCP package splits into contract, server assembly, and runners
-
-- Status: accepted
-- Date: 2026-10-14
-- Supersedes: —
+# The MCP package splits into contract, server assembly, and runners
 
 ## Context
 
