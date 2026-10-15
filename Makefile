@@ -111,6 +111,24 @@ mcp-http-dev: ## Run the streamable-HTTP MCP server as a local process instead o
 mcp-http-down: ## Stop the mcp-http docker service
 	docker compose down mcp-http
 
+# The standalone stack (docker-compose.standalone.yaml): a Hivemind that
+# stays up while you develop. Its database (`hivemind_live` on :5433) is
+# NOT the one the test suite wipes — db_guard refuses that name, so a
+# test run pointed at it fails loudly instead of TRUNCATE-ing it.
+STANDALONE_COMPOSE ?= docker compose -f docker-compose.standalone.yaml
+
+.PHONY: standalone
+standalone: ## Start the standalone local stack (pg :5433 db hivemind_live, vllm :8101, api :8100, admin :8189, mcp-http :8188; survives `make test`)
+	$(STANDALONE_COMPOSE) up -d
+
+.PHONY: standalone-down
+standalone-down: ## Stop the standalone stack
+	$(STANDALONE_COMPOSE) down
+
+.PHONY: standalone-reset
+standalone-reset: ## Stop the standalone stack and wipe its data volume
+	$(STANDALONE_COMPOSE) down -v
+
 .PHONY: test
 test: ## Run the full test suite (unit + integration; integration needs `make pg`)
 	uv run pytest

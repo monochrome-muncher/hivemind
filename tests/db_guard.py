@@ -55,8 +55,10 @@ def check_test_database(dsn: str, *, allow_any: bool) -> None:
             "HM_TEST_ALLOW_ANY_DB=1 if you really mean it."
         )
     safe = (name == "hivemind" or name.startswith("hivemind_") or _SAFE_TOKEN.search(name)) and (
-        "prod" not in name
+        "prod" not in name and name != "hivemind_live"
     )
+    # `hivemind_live` is the standalone local pool (docker-compose.standalone.yaml):
+    # it is local, not disposable — it must survive `make test`.
     if not safe:
         raise UnsafeTestDatabase(
             f"refusing to run the integration tests against database {name!r}: they TRUNCATE "

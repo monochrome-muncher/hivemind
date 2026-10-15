@@ -56,6 +56,15 @@ def test_unix_socket_host_is_accepted() -> None:
     check_test_database("postgresql:///hivemind?host=/var/run/postgresql", allow_any=False)
 
 
+def test_the_standalone_pool_name_is_refused() -> None:
+    # The standalone local pool (docker-compose.standalone.yaml) is local,
+    # not disposable: a test run pointed at it must refuse, not TRUNCATE.
+    with pytest.raises(UnsafeTestDatabase, match="HM_TEST_ALLOW_ANY_DB"):
+        check_test_database(
+            "postgresql://hivemind:hivemind@localhost:5433/hivemind_live", allow_any=False
+        )
+
+
 def test_the_conftest_hook_is_wired_into_pytest() -> None:
     # Revert-sensitive: collecting the integration tests against a production-
     # looking DSN must abort before any test can run.

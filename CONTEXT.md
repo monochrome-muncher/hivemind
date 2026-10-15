@@ -338,6 +338,10 @@ _Avoid_: quality threshold, search-quality SLA, retrieval budget
 One deployed Hivemind, serving exactly one organization over one Postgres node (ADR 0007, restated by ADR 0026). A second instance is a **second organization**: no data flows between instances.
 _Avoid_: tenant (multi-tenancy is a non-goal, SPEC §9), replica (that is a process of one instance), cluster, environment (that is the ADR 0017 profile)
 
+**Standalone pool**:
+The local Hivemind kept standing while development happens against the test pool: its own database (named so the test suite's guard refuses to wipe it) and its own ports. Agents pointed at it keep their memory across test runs; the test pool is disposable, the standalone pool is not.
+_Avoid_: dev pool (that is the one the tests wipe), production (a standalone pool is local, not deployed)
+
 **Replica**:
 One interchangeable process of a runner's Deployment (`hivemind-api` or `hivemind-mcp-http`) — 2 of each in production, for availability (ADR 0026). All replicas of an instance share one pool and serve one organization, so a second replica is **not** a second instance and adds no organization.
 _Avoid_: instance (that is the whole deployment, and one organization), node (that is the machine), shard, read replica (there is no read/write split)
