@@ -81,6 +81,7 @@ from hivemind.domain.health import (
 )
 from hivemind.domain.pin import Pin, PinWrite
 from hivemind.domain.upstream import UpstreamLink
+from hivemind.domain.validation import is_valid_uuid, utcnow
 from hivemind.ports import SupersedeConflict
 
 # Sort key for a feedback row that has no timestamp (fixtures only).
@@ -90,10 +91,6 @@ _EPOCH = datetime.min.replace(tzinfo=UTC)
 _DAYS_90 = timedelta(days=90)
 _DAYS_60 = timedelta(days=60)
 _DAYS_30 = timedelta(days=30)
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC)
 
 
 def _tokens(text: str) -> set[str]:
@@ -135,7 +132,7 @@ class MemoryStore:
     """Thread-safe in-memory Store (a ``dict`` under a lock)."""
 
     def __init__(self, clock: Callable[[], datetime] | None = None) -> None:
-        self._clock: Callable[[], datetime] = clock or _utcnow
+        self._clock: Callable[[], datetime] = clock or utcnow
         self._lock = threading.RLock()
         self._entries: dict[str, Entry] = {}
         self._feedback: dict[tuple[str, str, str], Feedback] = {}
@@ -220,7 +217,7 @@ class MemoryStore:
     async def upstream_links(
         self, entry_ids: list[str], *, visibility: Visibility | None = None
     ) -> dict[str, list[UpstreamLink]]:
-        wanted = {str(uuid.UUID(eid)) for eid in entry_ids if _is_uuid(eid)}
+        wanted = {str(uuid.UUID(eid)) for eid in entry_ids if is_valid_uuid(eid)}
         out: dict[str, list[UpstreamLink]] = {}
         with self._lock:
             targets = {to for (frm, to) in self._links if frm in wanted}
@@ -796,7 +793,7 @@ class MemoryStore:
         with self._lock:
             # Every well-formed id, known or not, as on PgStore.
             live = self._live_feedback()
-            return {eid: _count_for(live, eid) for eid in entry_ids if _is_uuid(eid)}
+            return {eid: _count_for(live, eid) for eid in entry_ids if is_valid_uuid(eid)}
 
     async def feedback_signals(
         self,
@@ -807,7 +804,7 @@ class MemoryStore:
     ) -> dict[str, FeedbackSignals]:
         with self._lock:
             live = self._live_feedback()
-            out = {eid: _signals_for(live, eid) for eid in entry_ids if _is_uuid(eid)}
+            out = {eid: _signals_for(live, eid) for eid in entry_ids if is_valid_uuid(eid)}
             if count_supersedes:
                 counts: dict[str, int] = {}
                 for entry in self._entries.values():
@@ -982,14 +979,6 @@ class MemoryStore:
                     return []
                 ordered = ordered[ids.index(filters.before) + 1 :]
             return [r for r in ordered if filters.matches(r)][:limit]
-
-
-def _is_uuid(value: str) -> bool:
-    try:
-        uuid.UUID(value)
-    except ValueError:
-        return False
-    return True
 
 
 def _count_for(feedback: dict[tuple[str, str, str], Feedback], entry_id: str) -> FeedbackCounts:

@@ -12,7 +12,6 @@ import asyncio
 import json
 import logging
 import math
-import re
 import uuid
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
@@ -83,6 +82,7 @@ from hivemind.domain.health import (
 )
 from hivemind.domain.pin import Pin, PinWrite
 from hivemind.domain.upstream import UpstreamLink
+from hivemind.domain.validation import canonical_uuid, is_valid_uuid
 from hivemind.ports import SupersedeConflict
 from hivemind.store.pool import PoolTimeouts, make_pool
 
@@ -251,7 +251,7 @@ WITHDRAW = (
 # --- Keyword-stream query (ADR 0047) ------------------------------------------
 
 MAX_KEYWORD_TERMS = 16
-"""The most distinct query terms the keyword stream matches on (ADR 0049).
+"""The most distinct query terms the keyword stream matches on.
 
 Caps ``ts_rank`` cost: a long any-term query of common words would
 otherwise cost seconds of CPU. The vector stream still sees the whole query."""
@@ -301,7 +301,7 @@ _REPORTER_NOT_REVOKED = (
     "NOT EXISTS (SELECT 1 FROM agents a WHERE a.name = f.\"user\" AND a.status = 'revoked')"
 )
 
-# What happened to the targets of several entries' "see also" links (ADR 0081),
+# What happened to the targets of several entries' "see also" links,
 # one statement. ``{vis}`` is the visibility clause on the target (columns
 # resolve to ``entries`` inside the subquery; any state). The feedback dates
 # are the two "last confirmed" is made of (BATCH_FEEDBACK_SIGNALS). A link
@@ -481,7 +481,7 @@ WHERE f.verdict IN ('stale', 'wrong')
 GROUP BY f."user"
 """
 
-# Fleet health metrics (ADR 0075). $1 is "now"; the windows are read off it.
+# Fleet health metrics. $1 is "now"; the windows are read off it.
 # Four statements run one after the other in one read-only REPEATABLE READ
 # transaction, so they share a snapshot. Each is dominated by a pass over
 # the wide ``entries`` heap; fusing them through a materialised CTE spills
@@ -612,7 +612,7 @@ SELECT (SELECT n FROM helpful) AS helpful,
        (SELECT count(*) FROM verdicts30) AS verdict_labels
 """
 
-# Ages in seconds of the active entries that show rivals alive (ADR 0075):
+# Ages in seconds of the active entries that show rivals alive:
 # tagged ``alternative``, a summary starting "Conflict:", and contested ones
 # (a live helpful verdict beside a live stale/wrong one).
 HEALTH_RIVALS = f"""
@@ -751,7 +751,7 @@ def _filter_conditions(
     if filters.scope is not None:
         add("scope = ?", filters.scope)
     if filters.fleet_id is not None:
-        if _is_valid_uuid(filters.fleet_id):
+        if is_valid_uuid(filters.fleet_id):
             add("fleet_id = ?", filters.fleet_id)
         else:
             clauses.append("FALSE")  # no such fleet, so no entry (as MemoryStore)
@@ -811,38 +811,9 @@ def _visibility_clause(visibility: Visibility | None, params: list[Any]) -> str 
     )
 
 
-# What asyncpg's ``uuid`` codec accepts: 32 hex digits, hyphens anywhere,
-# at most 36 characters. ``uuid.UUID`` is laxer (braces, ``urn:uuid:``,
-# any number of hyphens), and asyncpg answers those with a ``DataError``.
-_UUID_TEXT_RE = re.compile(r"[0-9A-Fa-f-]{32,36}")
-
-
-def _is_valid_uuid(value: str) -> bool:
-    """Whether ``value`` is a UUID spelling the ``uuid`` columns accept."""
-    if not isinstance(value, str) or not _UUID_TEXT_RE.fullmatch(value):
-        return False
-    try:
-        uuid.UUID(value)
-    except ValueError:
-        return False
-    return True
-
-
-def _canonical_uuid(value: str) -> str | None:
-    """``value`` in Postgres's canonical ``uuid`` text form, or ``None``.
-
-    Both ``uuid.UUID`` and Postgres accept non-canonical spellings
-    (upper case, no hyphens, braces); comparisons against ids read back
-    from the database must use the canonical form."""
-    try:
-        return str(uuid.UUID(value))
-    except ValueError, TypeError:
-        return None
-
-
 def _valid_uuids(ids: list[str] | tuple[str, ...]) -> list[str]:
     """Keep only the IDs that parse as UUIDs (others simply don't exist)."""
-    return [i for i in ids if _is_valid_uuid(i)]
+    return [i for i in ids if is_valid_uuid(i)]
 
 
 class PgStore:
@@ -948,7 +919,7 @@ class PgStore:
                 draft.fleet_id,
                 embedding,
                 embedding_model,  # SPEC.md §7: model that produced the vector
-                json.dumps(_encode_entities(entities)),  # jsonb (ADR 0016)
+                json.dumps(_encode_entities(entities)),  # jsonb
                 [e.name.lower() for e in entities],  # lower-cased names: the filter column
                 entities_model,  # ADR 0016: extractor model (provenance)
             )
@@ -962,7 +933,7 @@ class PgStore:
                     str(r["id"])
                     for r in await conn.fetch(FLIP_SUPERSEDED, entry_id, _valid_uuids(wanted))
                 }
-                denied = [t for t in wanted if _canonical_uuid(t) not in flipped]
+                denied = [t for t in wanted if canonical_uuid(t) not in flipped]
                 if denied:
                     raise SupersedeConflict(denied)
         if row is None:
@@ -976,7 +947,7 @@ class PgStore:
     # -- read path ---------------------------------------------------------------
 
     async def get_entry(self, entry_id: str) -> Entry | None:
-        if not _is_valid_uuid(entry_id):
+        if not is_valid_uuid(entry_id):
             return None
         async with self._connection() as conn:
             row = await conn.fetchrow(SELECT_ENTRY, entry_id)
@@ -1013,7 +984,7 @@ class PgStore:
         return [_row_to_entry(row) for row in rows]
 
     async def entry_links(self, entry_id: str, limit: int) -> tuple[list[str], list[str]]:
-        if not _is_valid_uuid(entry_id):
+        if not is_valid_uuid(entry_id):
             return [], []
         async with self._connection() as conn:
             outgoing = await conn.fetch(SELECT_LINKS_OUT, entry_id)
@@ -1023,7 +994,7 @@ class PgStore:
     async def entry_links_many(
         self, entry_ids: list[str], limit: int
     ) -> dict[str, tuple[list[str], list[str]]]:
-        canonical = {eid: _canonical_uuid(eid) for eid in entry_ids}
+        canonical = {eid: canonical_uuid(eid) for eid in entry_ids}
         ids = list(dict.fromkeys(c for c in canonical.values() if c is not None))
         links: dict[str, tuple[list[str], list[str]]] = {c: ([], []) for c in ids}
         if ids:
@@ -1071,7 +1042,7 @@ class PgStore:
         limit: int,
         replaces: Sequence[str] = (),
     ) -> PinWrite | None:
-        if not _is_valid_uuid(entry_id):
+        if not is_valid_uuid(entry_id):
             return None
         async with self._transaction() as conn:
             await conn.execute(LOCK_FLEET_PINS, fleet_id)
@@ -1080,7 +1051,7 @@ class PgStore:
                 old
                 for old in dict.fromkeys(replaces)
                 if old != entry_id
-                and _is_valid_uuid(old)
+                and is_valid_uuid(old)
                 and (await conn.execute(DELETE_PIN, fleet_id, old)).endswith(" 1")
             ]
             if (
@@ -1095,7 +1066,7 @@ class PgStore:
         return PinWrite(_row_to_pin(row), bool(row["created"]), tuple(replaced))
 
     async def unpin_entry(self, fleet_id: str, entry_id: str) -> bool:
-        if not _is_valid_uuid(entry_id):
+        if not is_valid_uuid(entry_id):
             return False
         async with self._connection() as conn:
             status = await conn.execute(DELETE_PIN, fleet_id, entry_id)
@@ -1336,7 +1307,7 @@ class PgStore:
         ``KeyError`` if unknown, ``ValueError`` if not active. Only the
         reason is persisted (there is no ``withdrawn_by`` column).
         """
-        if not _is_valid_uuid(entry_id):
+        if not is_valid_uuid(entry_id):
             raise KeyError(f"unknown entry: {entry_id}")
         async with self._connection() as conn:
             existing = await conn.fetchrow(LOOKUP_STATE, entry_id)
@@ -1364,7 +1335,7 @@ class PgStore:
         visibility: Visibility | None = None,
     ) -> list[str]:
         """Ranked entry IDs by ``ts_rank`` (SPEC.md §6.2 keyword stream).
-        Any query term matches (ADR 0047); see ``ANY_TERM_TSQUERY``."""
+        Any query term matches; see ``ANY_TERM_TSQUERY``."""
         clauses, params = _filter_conditions(filters, visibility)
         query_idx = len(params) + 1
         tsquery = ANY_TERM_TSQUERY.format(param=f"${query_idx}")
@@ -1428,7 +1399,7 @@ class PgStore:
         settings as ``search_vector``, so it is approximate too (ADR 0025)."""
         clauses, params = _filter_conditions(EntryFilters(), visibility)
         clauses.append("embedding IS NOT NULL")
-        if exclude_id is not None and _is_valid_uuid(exclude_id):
+        if exclude_id is not None and is_valid_uuid(exclude_id):
             params.append(exclude_id)
             clauses.append(f"id <> ${len(params)}")
         vec_idx = len(params) + 1
@@ -1478,7 +1449,7 @@ class PgStore:
         return [replace(f, updated_at=f.updated_at or now) for f in feedbacks]
 
     async def feedback_counts(self, entry_id: str) -> tuple[int, int, int]:
-        if not _is_valid_uuid(entry_id):
+        if not is_valid_uuid(entry_id):
             return (0, 0, 0)
         async with self._connection() as conn:
             row = await conn.fetchrow(COUNT_FEEDBACK, entry_id)
@@ -1543,9 +1514,9 @@ class PgStore:
         return signals
 
     async def list_feedback(self, entry_id: str, limit: int) -> list[Feedback]:
-        """An entry's newest feedback rows (ADR 0051). The primary key
+        """An entry's newest feedback rows. The primary key
         ``(entry_id, "user", agent)`` narrows the scan to one entry's rows."""
-        if not _is_valid_uuid(entry_id):
+        if not is_valid_uuid(entry_id):
             return []
         async with self._connection() as conn:
             rows = await conn.fetch(LIST_FEEDBACK, entry_id, limit)
@@ -1554,7 +1525,7 @@ class PgStore:
     async def list_feedback_many(
         self, entry_ids: list[str], limit: int
     ) -> dict[str, list[Feedback]]:
-        canonical = {eid: _canonical_uuid(eid) for eid in entry_ids}
+        canonical = {eid: canonical_uuid(eid) for eid in entry_ids}
         ids = list(dict.fromkeys(c for c in canonical.values() if c is not None))
         rows_by_id: dict[str, list[Feedback]] = {c: [] for c in ids}
         if ids:
@@ -1567,7 +1538,7 @@ class PgStore:
     # -- fleets (ADR 0011) ------------------------------------------------------
 
     async def create_fleet(self, name: str) -> Fleet:
-        """Create a named fleet (ADR 0011). ``FleetExists`` if the name
+        """Create a named fleet. ``FleetExists`` if the name
         exists, including a racing duplicate (conflict-guarded insert)."""
         async with self._connection() as conn:
             dup = await conn.fetchrow(SELECT_FLEET_BY_NAME, name)
@@ -1585,7 +1556,7 @@ class PgStore:
         return [_row_to_fleet(r) for r in rows]
 
     async def get_fleet(self, fleet_id: str) -> Fleet | None:
-        if not _is_valid_uuid(fleet_id):
+        if not is_valid_uuid(fleet_id):
             return None
         async with self._connection() as conn:
             row = await conn.fetchrow(GET_FLEET, fleet_id)
@@ -1594,7 +1565,7 @@ class PgStore:
     # -- agent registration / activation (ADR 0012) ----------------------------
 
     async def register_agent(self, name: str, owner_alias: str | None = None) -> Agent:
-        """Register an agent idempotently (ADR 0012, SPEC §12.3).
+        """Register an agent idempotently (SPEC §12.3).
 
         An existing record comes back unchanged (``owner_alias`` never
         overwritten, ADR 0039), including a racing duplicate or a
@@ -1642,7 +1613,7 @@ class PgStore:
         return _row_to_agent(row)
 
     async def revoke_agent(self, name: str) -> Agent:
-        """Flip a pending or active agent to ``revoked`` (ADR 0028).
+        """Flip a pending or active agent to ``revoked``.
         ``UnknownAgent`` if unknown; ``InvalidAgentStatus`` if already revoked.
         """
         async with self._connection() as conn:
@@ -1662,7 +1633,7 @@ class PgStore:
         raise InvalidAgentStatus(name, AgentStatus(existing["status"]), verb)
 
     async def set_agent_trust_level(self, name: str, level: TrustLevel) -> Agent:
-        """Promote/demote an agent's trust level (ADR 0011). ``UnknownAgent``
+        """Promote/demote an agent's trust level. ``UnknownAgent``
         if unknown. Demotion to level 0 is *dormant* (still active, no
         access) — distinct from revocation (ADR 0012).
         """
@@ -1676,7 +1647,7 @@ class PgStore:
         return _row_to_agent(row)
 
     async def set_agent_home_fleet(self, name: str, fleet_id: str) -> Agent:
-        """Re-parent an agent to a new home fleet (ADR 0011). The agent's
+        """Re-parent an agent to a new home fleet. The agent's
         earlier ``fleet``-scoped entries stay in the fleet they were written
         into (never re-parented). ``UnknownAgent`` if unknown.
         """
@@ -1741,7 +1712,7 @@ class PgStore:
     # -- orchestrator probes (ADR 0019) ---------------------------------------
 
     async def health_check(self) -> bool:
-        """Deep probe (ADR 0019): whether ``SELECT 1`` succeeds. Never
+        """Deep probe: whether ``SELECT 1`` succeeds. Never
         raises; the endpoint's 503 is the signal.
         """
         try:
@@ -1769,7 +1740,7 @@ def _encode_sources(sources: tuple[Source, ...]) -> list[dict[str, str]]:
 
 
 def _encode_entities(entities: tuple[ExtractedEntity, ...]) -> list[dict[str, str]]:
-    """``entities`` is a jsonb list of {name, kind} (ADR 0016); the
+    """``entities`` is a jsonb list of {name, kind}; the
     lower-cased names go separately on ``entity_names``."""
     return [{"name": e.name, "kind": e.kind.value} for e in entities]
 
@@ -1842,18 +1813,18 @@ def _row_to_entry(row: asyncpg.Record) -> Entry:
         state=EntryState(row["state"]),
         superseded_by=str(row["superseded_by"]) if row["superseded_by"] else None,
         withdrawn_reason=row["withdrawn_reason"],
-        entities=_decode_entities(row["entities"]),  # ADR 0016
+        entities=_decode_entities(row["entities"]),
         entities_model=row["entities_model"],
     )
 
 
 def _row_to_fleet(row: asyncpg.Record) -> Fleet:
-    """Map a ``fleets`` row to the domain ``Fleet`` (ADR 0011)."""
+    """Map a ``fleets`` row to the domain ``Fleet``."""
     return Fleet(id=str(row["id"]), name=row["name"], created_at=row["created_at"])
 
 
 def _row_to_agent(row: asyncpg.Record) -> Agent:
-    """Map an ``agents`` row to the domain ``Agent`` (ADR 0012)."""
+    """Map an ``agents`` row to the domain ``Agent``."""
     return Agent(
         name=row["name"],
         status=AgentStatus(row["status"]),
@@ -1866,7 +1837,7 @@ def _row_to_agent(row: asyncpg.Record) -> Agent:
 
 
 def _row_to_audit(row: asyncpg.Record) -> AuditRecord:
-    """Map an ``audit_log`` row to the domain ``AuditRecord`` (ADR 0027).
+    """Map an ``audit_log`` row to the domain ``AuditRecord``.
     ``detail`` is jsonb: native dict or raw JSON text, per the codec."""
     detail = row["detail"]
     return AuditRecord(

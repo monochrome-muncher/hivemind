@@ -99,6 +99,14 @@ class TestLurker:
         e = make_entry(scope="fleet", author="bob", fleet_id=FL_B)
         assert entry_is_visible(e, vis(1, "alice", home=FL_A)) is False
 
+    def test_empty_fleet_id_matches_no_reader(self) -> None:
+        # Two empty strings must not compare as "same fleet": a
+        # fleet-scoped entry with no fleet is not in any reader's home.
+        e = make_entry(scope="fleet", author="bob", fleet_id="")
+        assert entry_is_visible(e, vis(1, "alice", home="")) is False
+        assert entry_is_visible(e, vis(2, "alice", home="")) is False
+        assert entry_is_visible(e, vis(1, "alice", home=FL_A)) is False
+
     def test_lurker_reads_legacy_org(self) -> None:
         e = make_entry(scope="org", author="bob")
         assert entry_is_visible(e, vis(1, "alice", home=FL_A)) is True

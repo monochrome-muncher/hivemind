@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
+import uuid
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Any
@@ -116,6 +117,45 @@ def check_datetime(value: datetime | None, field: str) -> None:
         raise InvalidInput(f"{field} is out of range") from exc
     if not MIN_DATETIME <= utc < MAX_DATETIME:
         raise InvalidInput(f"{field} must be between the years 1900 and 2199")
+
+
+def utcnow() -> datetime:
+    """The current UTC time (aware)."""
+    return datetime.now(UTC)
+
+
+# What asyncpg's ``uuid`` codec accepts: 32 hex digits, hyphens anywhere,
+# at most 36 characters. ``uuid.UUID`` is laxer (braces, ``urn:uuid:``,
+# any number of hyphens), and asyncpg answers those with a ``DataError``.
+_UUID_TEXT_RE = re.compile(r"[0-9A-Fa-f-]{32,36}")
+
+
+def is_valid_uuid(value: str) -> bool:
+    """Whether ``value`` is a UUID spelling the ``uuid`` columns accept.
+
+    Both store adapters use this one check, so a non-canonical spelling
+    (braces, ``urn:uuid:``, no hyphens) is "no such entry" in every
+    store, never a 500.
+    """
+    if not isinstance(value, str) or not _UUID_TEXT_RE.fullmatch(value):
+        return False
+    try:
+        uuid.UUID(value)
+    except ValueError:
+        return False
+    return True
+
+
+def canonical_uuid(value: str) -> str | None:
+    """``value`` in Postgres's canonical ``uuid`` text form, or ``None``.
+
+    Both ``uuid.UUID`` and Postgres accept non-canonical spellings
+    (upper case, no hyphens, braces); comparisons against ids read back
+    from the database must use the canonical form."""
+    try:
+        return str(uuid.UUID(value))
+    except ValueError, TypeError:
+        return None
 
 
 def check_id(value: str, field: str) -> str:

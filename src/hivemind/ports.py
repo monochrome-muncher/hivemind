@@ -100,7 +100,7 @@ class Store(Protocol):
         ...
 
     async def entry_links(self, entry_id: str, limit: int) -> tuple[list[str], list[str]]:
-        """The "see also" links of one entry (ADR 0057): the ids it links
+        """The "see also" links of one entry: the ids it links
         to (oldest link first), and the ids of at most ``limit`` entries
         that link to it (newest link first). Unfiltered by state or
         visibility (the caller filters)."""
@@ -135,7 +135,7 @@ class Store(Protocol):
         limit: int,
         replaces: Sequence[str] = (),
     ) -> PinWrite | None:
-        """Pin ``entry_id`` to ``fleet_id`` (ADR 0058, 0076) with a fresh
+        """Pin ``entry_id`` to ``fleet_id`` with a fresh
         ``pinned_at`` / ``pinned_by``: a new row, or the existing one
         refreshed (a re-pin acknowledges a change since pinned). Pins named
         in ``replaces`` (older versions it now shows) are removed in the
@@ -150,7 +150,7 @@ class Store(Protocol):
         ...
 
     async def list_pins(self, fleet_id: str) -> list[Pin]:
-        """A fleet's pins, newest first (ADR 0058)."""
+        """A fleet's pins, newest first."""
         ...
 
     async def usage_counts(self) -> list[UsageCount]:
@@ -168,7 +168,7 @@ class Store(Protocol):
         ...
 
     async def fleet_health(self, now: datetime) -> FleetHealth:
-        """The fleet health aggregates as of ``now`` (ADR 0075): counts the
+        """The fleet health aggregates as of ``now``: counts the
         service turns into the ``health`` report. Verdicts of revoked
         reporters are left out (ADR 0067); a flag is a standing
         ``stale``/``wrong`` row, its age its ``updated_at``. Observation
@@ -176,7 +176,7 @@ class Store(Protocol):
         ...
 
     async def activity(self, since: datetime) -> Activity:
-        """Who wrote and who reported what (ADR 0080), for the admin
+        """Who wrote and who reported what, for the admin
         activity view: per (author, fleet) entry counts, per reporter
         verdict counts, the verdicts received per author, and per UTC day
         the writes (``created_at``) and verdicts (``updated_at``) from
@@ -187,7 +187,7 @@ class Store(Protocol):
         ...
 
     async def fleet_convergence(self, now: datetime) -> Convergence:
-        """The vector-backed convergence figures as of ``now`` (ADR 0075):
+        """The vector-backed convergence figures as of ``now``:
         the echo rate over a bounded sample of the newest writes and the
         dispersion of the busiest tags. Bounded work (``ECHO_SAMPLE``
         nearest-neighbour lookups, ``DISPERSION_CAP`` entries per tag and
@@ -205,7 +205,7 @@ class Store(Protocol):
 
     async def search_counts(self) -> list[SearchCount]:
         """The search counters recorded so far, one row per home fleet
-        (ADR 0056), in any order."""
+        in any order."""
         ...
 
     async def withdraw_entry(self, entry_id: str, reason: str | None, by_user: str) -> Entry:
@@ -283,7 +283,7 @@ class Store(Protocol):
     # -- agent registration / activation (ADR 0012) ----------------------------
 
     async def register_agent(self, name: str, owner_alias: str | None = None) -> Agent:
-        """Register an agent idempotently (ADR 0012): an existing record
+        """Register an agent idempotently: an existing record
         comes back unchanged, a new one is ``pending`` (level 0, no fleet).
         A case-only variant of an existing name returns **that** agent
         (ADR 0045)."""
@@ -302,7 +302,7 @@ class Store(Protocol):
         ...
 
     async def revoke_agent(self, name: str) -> Agent:
-        """Flip a pending or active agent to ``revoked`` (ADR 0028). The
+        """Flip a pending or active agent to ``revoked``. The
         credential is the ``Authenticator``'s; this only moves the status.
         ``UnknownAgent`` if unknown; ``InvalidAgentStatus`` if already
         ``revoked``."""
@@ -315,7 +315,7 @@ class Store(Protocol):
         ...
 
     async def set_agent_home_fleet(self, name: str, fleet_id: str) -> Agent:
-        """Re-parent an agent to a new home fleet (ADR 0011). The agent's
+        """Re-parent an agent to a new home fleet. The agent's
         earlier ``fleet``-scoped entries stay in the fleet they were written
         into (never re-parented). ``UnknownAgent`` if unknown."""
         ...
@@ -336,7 +336,7 @@ class Store(Protocol):
         """Upsert a feedback verdict (one row per entry+user+agent) and
         return the row as stored. A row without ``updated_at`` is stamped
         with the store's clock, the one ``pinned_at`` and ``created_at``
-        use (ADR 0079)."""
+        use."""
         ...
 
     async def record_feedback_many(self, feedbacks: list[Feedback]) -> list[Feedback]:
@@ -370,7 +370,7 @@ class Store(Protocol):
         read: every requested id that is a well-formed UUID is a key (zero
         counts and ``None`` when it has no feedback or names no entry);
         malformed ids are left out. Revoked reporters are excluded as in the
-        counts (ADR 0067).
+        counts.
 
         With ``count_supersedes``, ``supersedes`` is how many entries name
         the id in ``superseded_by`` and are readable under ``visibility``
@@ -378,7 +378,7 @@ class Store(Protocol):
         ...
 
     async def list_feedback(self, entry_id: str, limit: int) -> list[Feedback]:
-        """An entry's feedback rows, at most ``limit`` of them (ADR 0051): the
+        """An entry's feedback rows, at most ``limit`` of them: the
         informative ones first (verdict stale or wrong, or a non-empty note),
         then the bare ``helpful`` ones (ADR 0064); within each group newest
         first (``updated_at`` DESC), then reporter. No visibility
@@ -394,7 +394,7 @@ class Store(Protocol):
         ...
 
     async def health_check(self) -> bool:
-        """Deep probe (ADR 0019): whether the database answers. Must
+        """Deep probe: whether the database answers. Must
         never raise (unauthenticated probe endpoints call it).
         """
         ...
@@ -411,7 +411,7 @@ class Embedder(Protocol):
 
     @property
     def model_name(self) -> str:
-        """The embedding model identifier (recorded per entry, ADR 0005)."""
+        """The embedding model identifier (recorded per entry)."""
         ...
 
     async def embed_text(self, text: str) -> list[float]:
@@ -436,7 +436,7 @@ class Extractor(Protocol):
 
     @property
     def model_name(self) -> str:
-        """The extractor model identifier (recorded per entry, ADR 0016)."""
+        """The extractor model identifier (recorded per entry)."""
         ...
 
     async def extract_entry(self, draft: EntryDraft) -> tuple[ExtractedEntity, ...]:
@@ -551,7 +551,7 @@ class Credential:
         return scopes[-1] if scopes else SCOPE_SELF
 
     def can_write(self) -> bool:
-        """Whether this credential may write at all (ADR 0011). Level 0
+        """Whether this credential may write at all. Level 0
         (untrusted) may not; the admin key always may."""
         if self.is_admin or not self.access_controlled:
             return True

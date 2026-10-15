@@ -87,3 +87,14 @@ def test_request_fields_are_carried_over() -> None:
     assert draft.sources == (source,)
     assert (draft.tags, draft.supersedes, draft.see_also) == (("a", "b"), ("x",), ("y",))
     assert draft.occurred_at == when
+
+
+def test_naive_occurred_at_is_normalised_to_utc() -> None:
+    """A naive memory date means UTC (check_datetime's contract); the
+    resolved value is aware, so every store receives aware datetimes and
+    retrieval math never mixes naive and aware."""
+    naive = datetime(2026, 1, 2, 3, 4, 5)
+    draft = _draft(AGENT, occurred_at=naive)
+    resolved = draft.resolved_occurred_at()
+    assert resolved.tzinfo is not None
+    assert resolved == naive.replace(tzinfo=UTC)

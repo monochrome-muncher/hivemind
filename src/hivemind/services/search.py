@@ -11,7 +11,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 
 from hivemind.config import SearchConfig
 from hivemind.domain.access import Visibility
@@ -31,7 +31,7 @@ from hivemind.domain.feedback import (
 )
 from hivemind.domain.recency import RecencyHint
 from hivemind.domain.upstream import UPSTREAM_KINDS, UpstreamChange, upstream_changed
-from hivemind.domain.validation import check_pagination, check_query
+from hivemind.domain.validation import check_pagination, check_query, utcnow
 from hivemind.embeddings import EmbeddingError
 from hivemind.ports import Embedder, Store
 from hivemind.retrieval.mmr import mmr_order
@@ -122,10 +122,6 @@ async def _gather[A, B](first: Awaitable[A], second: Awaitable[B]) -> tuple[A, B
         raise
 
 
-def _utcnow() -> datetime:
-    return datetime.now(UTC)
-
-
 class SearchService:
     """Orchestrates hybrid search over the store (SPEC.md §6.2/§6.3/§6.4)."""
 
@@ -140,7 +136,7 @@ class SearchService:
         self._store = store
         self._embedder = embedder
         self._config = config
-        self._now_fn: NowFn = now_fn or _utcnow
+        self._now_fn: NowFn = now_fn or utcnow
 
     async def search(
         self,

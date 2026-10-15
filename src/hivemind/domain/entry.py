@@ -30,6 +30,7 @@ from hivemind.domain.validation import (
     check_payload,
     check_tags,
     check_text,
+    utcnow,
 )
 
 
@@ -62,10 +63,6 @@ EMBED_CHARS_PER_PREFIX_TOKEN = 10
 
 def embed_body_char_ceiling(prefix_tokens: int) -> int:
     return max(EMBED_BODY_MAX_CHARS, prefix_tokens * EMBED_CHARS_PER_PREFIX_TOKEN)
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC)
 
 
 class Kind(StrEnum):
@@ -219,8 +216,16 @@ class EntryDraft:
             check_text(self.fleet_id, "fleet_id", MAX_ID_CHARS)
 
     def resolved_occurred_at(self) -> datetime:
-        """The entry's memory date: the supplied value, or now."""
-        return self.occurred_at or _utcnow()
+        """The entry's memory date: the supplied value, or now.
+
+        A naive value means UTC (check_datetime's contract); normalising
+        here means every store receives aware datetimes, so retrieval
+        math never mixes naive and aware.
+        """
+        value = self.occurred_at
+        if value is None:
+            return utcnow()
+        return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
     @property
     def supersedes_ids(self) -> tuple[str, ...]:
