@@ -155,6 +155,15 @@ starting with `hm_`. Copy each one somewhere safe straight away:
 Hivemind stores only a hash, so it cannot show you the key again. If you
 lose one, run the command again to get a new key.
 
+Keys are per-pool. For the **standalone stack** (a separate pool on
+`:5433`, see `docker-compose.standalone.yaml`), point the same command at
+its database:
+
+```bash
+HIVEMIND_DATABASE_URL=postgresql://hivemind:hivemind@localhost:5433/hivemind_live \
+  uv run hivemind-keys issue-admin
+```
+
 ### 3. Open the admin panel
 
 In another terminal:
