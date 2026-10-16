@@ -478,7 +478,7 @@ const client = { session: {
   get: async ({ path }) => ({ data: { id: path.id, parentID: parents[path.id] } }),
   promptAsync: async (req) => { sent.push(req) },
 } }
-const hooks = await mod.HivemindPlugin({ client })
+const hooks = await mod.default.server({ client })
 const out = { sent, system: [] }
 for (const [kind, arg] of JSON.parse(process.env.STEPS)) {
   if (kind === "message") await hooks["chat.message"](arg, { message: {}, parts: [] })

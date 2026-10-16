@@ -181,13 +181,21 @@ session by themselves. Older versions need a short block in
 In a terminal:
 
 ```sh
+# OpenCode v1
 opencode plugin -g git+https://github.com/monochrome-muncher/hivemind.git#v<version>
+
+# OpenCode v2
+opencode plugin add git+https://github.com/monochrome-muncher/hivemind.git#v<version>
 ```
 
-Without `-g` it installs for the current project only. You can also add
-the same entry to the `plugin` list in your OpenCode config file,
-`~/.config/opencode/opencode.json` or `opencode.jsonc` (the command above
-creates the `.jsonc` one):
+The plugin supports both v1 (1.18.29 and later) and v2; they have
+different plugin APIs and it carries both. Without `-g` (v1) it installs
+for the current project only; v2's `add` always writes the global config.
+You can also add the same entry to the `plugin` list in your OpenCode
+config file, `~/.config/opencode/opencode.json` or `opencode.jsonc` (the
+command above creates the `.jsonc` one). Write `plugin`, not v2's `plugins`
+key: v2 migrates a `plugin` entry automatically, while v1 only warns
+about `plugins` and does not load it:
 
 ```json
 { "plugin": ["git+https://github.com/monochrome-muncher/hivemind.git#v<version>"] }
@@ -561,7 +569,9 @@ First uninstall the plugin, in a terminal:
   then `copilot mcp remove hivemind`.
 - **Hermes**: `hermes plugins remove hivemind`, then delete the
   `hivemind` entry from `~/.hermes/config.yaml`.
-- **OpenCode**: remove the entry from the `plugin` list.
+- **OpenCode**: remove the entry from the `plugin` list — v2's
+  `opencode plugin remove <package>` does it, v1 has no remove command,
+  so edit the config file.
 - **Pi**: `pi remove <source>`, with the same source you installed from.
 - **Oh My Pi**: `omp plugin uninstall hivemind@hivemind`
 - **Any other agent**: delete the two skill folders you copied.

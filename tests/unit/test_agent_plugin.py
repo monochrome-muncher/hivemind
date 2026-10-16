@@ -846,13 +846,13 @@ def _node(script: str, module: Path, **env_overrides: str) -> object:
 
 _OPENCODE_SCRIPT = """
 const mod = await import(process.argv[1])
-const names = Object.keys(mod)
-const hooks = await mod.HivemindPlugin({})
+const def = mod.default
+const hooks = await def.server({})
 const cfg = JSON.parse(process.env.CFG ?? "{}")
 await hooks.config(cfg)
 const out = { system: [] }
 await hooks["experimental.chat.system.transform"]({ model: {} }, out)
-console.log(JSON.stringify({ names, types: names.map((n) => typeof mod[n]), cfg, system: out.system }))
+console.log(JSON.stringify({ id: def.id, hasSetup: typeof def.setup === "function", hasServer: typeof def.server === "function", cfg, system: out.system }))
 """
 
 needs_node = pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
@@ -866,7 +866,10 @@ def test_opencode_plugin_registers_the_server_and_skills() -> None:
         HIVEMIND_MCP_URL="https://hm.example/mcp",
         HIVEMIND_API_KEY="hm_secret_value",
     )
-    assert r["types"] == ["function"] * len(r["names"])  # OpenCode: every export is a plugin
+    assert r["id"] == "hivemind"
+    # The dual shape: a plain-object default export carrying both the v2
+    # setup and the v1 server entry points.
+    assert r["hasSetup"] is True and r["hasServer"] is True
     server = r["cfg"]["mcp"]["hivemind"]
     assert (server["type"], server["url"], server["enabled"]) == (
         "remote",
@@ -905,6 +908,191 @@ def test_opencode_plugin_goes_incognito() -> None:
         CFG=json.dumps({"mcp": {"hivemind": {"type": "remote", "url": "u", "enabled": True}}}),
     )
     assert manual["cfg"]["mcp"]["hivemind"]["enabled"] is False
+
+
+# The v2 half of the dual export: setup(ctx) registers the same behaviour on
+# v2's domains (mcp/skill transforms, session+tool hooks, the event stream).
+# The mock ctx records every registration and the prompts it receives; the
+# events drive the compaction line and the once-per-session stop reminder.
+_OPENCODE_V2_SCRIPT = """
+const mod = await import(process.argv[1])
+const def = mod.default
+
+const mcp = new Map(Object.entries(JSON.parse(process.env.MANUAL_MCP ?? "{}")))
+const mcpEditor = {
+  get: (name) => mcp.get(name),
+  set: (name, cfg) => mcp.set(name, cfg),
+  update: (name, fn) => { if (mcp.has(name)) fn(mcp.get(name)) },
+  remove: (name) => mcp.delete(name),
+  list: () => [...mcp],
+}
+const skills = new Map()
+const skillEditor = {
+  get: (name) => skills.get(name),
+  add: (s) => skills.set(s.id, s),
+  update: (name, fn) => { if (skills.has(name)) fn(skills.get(name)) },
+  remove: (name) => skills.delete(name),
+  list: () => [...skills.values()],
+}
+const sessions = new Map(Object.entries(JSON.parse(process.env.SESSIONS ?? "{}")))
+const hooks = {}
+const prompts = []
+const ctx = {
+  mcp: { transform: async (cb) => cb(mcpEditor) },
+  skill: { transform: (cb) => cb(skillEditor) },
+  session: {
+    hook: async (name, cb) => { hooks[name] = cb; return { dispose() {} } },
+    get: async ({ sessionID }) => sessions.get(sessionID) ?? { sessionID },
+    prompt: async (input) => { prompts.push(input) },
+  },
+  tool: { hook: async (name, cb) => { hooks[name] = cb; return { dispose() {} } } },
+  event: {
+    subscribe: () => (async function* () {
+      for (const e of JSON.parse(process.env.EVENTS ?? "[]")) yield e
+    })(),
+  },
+}
+
+const cleanup = await def.setup(ctx)
+for (const t of JSON.parse(process.env.TOOLS ?? "[]")) await hooks["execute.after"](t)
+await new Promise((r) => setTimeout(r, 50))  // let the event stream drain first
+const first = { sessionID: "s1", system: [] }
+await hooks["context"](first)
+const second = { sessionID: "s1", system: [] }
+await hooks["context"](second)
+
+console.log(JSON.stringify({
+  id: def.id,
+  hasServer: typeof def.server === "function",
+  cleanup: typeof cleanup === "function",
+  mcp: [...mcp],
+  skills: [...skills.values()].map(({ id, name, description, path, content }) => ({ id, name, description, path, contentLen: content.length })),
+  prompts,
+  system: [first.system, second.system],
+}))
+"""
+
+_V2_SESSIONS = json.dumps(
+    {
+        "s1": {"sessionID": "s1"},
+        "child": {"sessionID": "child", "parentID": "s1"},
+        "s2": {"sessionID": "s2"},
+    }
+)
+# s1: three plain calls -> reminded; child: three calls but a subagent;
+# s2: three calls including a contribution -> not reminded.
+_V2_TOOLS = json.dumps(
+    [
+        {"tool": "read", "sessionID": "s1"},
+        {"tool": "bash", "sessionID": "s1"},
+        {"tool": "write", "sessionID": "s1"},
+        {"tool": "read", "sessionID": "child"},
+        {"tool": "bash", "sessionID": "child"},
+        {"tool": "read", "sessionID": "child"},
+        {"tool": "read", "sessionID": "s2"},
+        {"tool": "hivemind_hive_write", "sessionID": "s2"},
+        {"tool": "read", "sessionID": "s2"},
+    ]
+)
+# v2 terminal events: an execution ends with succeeded/failed/interrupted
+# (v1's session.idle fired on each of them); compaction ends with
+# session.compaction.ended. The shutdown interruption stays excluded.
+_V2_EVENTS = json.dumps(
+    [
+        {"type": "session.compaction.ended", "data": {"sessionID": "s1"}},
+        {"type": "session.execution.succeeded", "data": {"sessionID": "s1"}},
+        {"type": "session.execution.succeeded", "data": {"sessionID": "child"}},
+        {"type": "session.execution.succeeded", "data": {"sessionID": "s2"}},
+        {
+            "type": "session.execution.interrupted",
+            "data": {"sessionID": "s1", "reason": "shutdown"},
+        },
+        {"type": "session.execution.succeeded", "data": {"sessionID": "s1"}},
+    ]
+)
+
+
+@needs_node
+def test_opencode_v2_setup_registers_server_skills_and_hooks() -> None:
+    r = _node(
+        _OPENCODE_V2_SCRIPT,
+        OPENCODE_PLUGIN,
+        HIVEMIND_MCP_URL="https://hm.example/mcp",
+        HIVEMIND_API_KEY="hm_secret_value",
+        HIVEMIND_STOP_MIN_TOOLS="3",
+        SESSIONS=_V2_SESSIONS,
+        TOOLS=_V2_TOOLS,
+        EVENTS=_V2_EVENTS,
+    )
+    assert r["id"] == "hivemind" and r["hasServer"] is True and r["cleanup"] is True
+    # MCP: registered from the environment; v2 uses `disabled`, not `enabled`.
+    [pair] = r["mcp"]
+    name, server = pair
+    assert name == "hivemind"
+    assert (server["type"], server["url"], server["oauth"], server["disabled"]) == (
+        "remote",
+        "https://hm.example/mcp",
+        False,
+        False,
+    )
+    assert server["headers"] == {"Authorization": "Bearer hm_secret_value"}
+    # Skills: both, by id, with the frontmatter name and description.
+    by_id = {s["id"]: s for s in r["skills"]}
+    assert set(by_id) == {"hivemind", "hivemind-setup"}
+    for name, folder in (("hivemind", "hivemind"), ("hivemind-setup", "hivemind-setup")):
+        skill = by_id[name]
+        assert skill["name"] == name
+        assert skill["description"] and skill["contentLen"] > 0
+        assert Path(skill["path"]).resolve() == (PLUGIN / "skills" / folder / "SKILL.md").resolve()
+    # The reminder is a {type, text} part; the compaction line rides the
+    # request right after session.compaction.ended, and no later one.
+    [first] = r["system"][0]
+    assert first["type"] == "text"
+    assert first["text"].startswith(STAY_AWARE_CORE) and "Hivemind is configured" in first["text"]
+    assert first["text"].endswith(
+        "Context was just compacted: before continuing, write now (hive_write) "
+        "anything learned earlier that another agent could reuse, and rate the "
+        "entries your work tested (hive_feedback)."
+    )
+    [second] = r["system"][1]
+    assert "Context was just compacted" not in second["text"]
+    # The stop reminder went out once, for s1 only (child is a subagent, s2
+    # contributed), as a v2 prompt with the session's own agent and model.
+    assert r["prompts"] == [
+        {
+            "sessionID": "s1",
+            "text": "HIVEMIND: before finishing, write to Hivemind (hive_write) "
+            "what another agent could reuse from this task, and rate the entries "
+            "your work tested (hive_feedback). If nothing is new, write nothing "
+            "and just finish.",
+        }
+    ]
+
+
+@needs_node
+def test_opencode_v2_setup_goes_incognito() -> None:
+    fresh = _node(
+        _OPENCODE_V2_SCRIPT,
+        OPENCODE_PLUGIN,
+        HIVEMIND_INCOGNITO="1",
+        HIVEMIND_MCP_URL="https://x/mcp",
+        SESSIONS=_V2_SESSIONS,
+        TOOLS=_V2_TOOLS,
+        EVENTS=_V2_EVENTS,
+    )
+    assert fresh["mcp"] == []
+    [reminder] = fresh["system"][0]
+    assert reminder["text"] == INCOGNITO_TEXT
+    assert fresh["prompts"] == []
+    manual = _node(
+        _OPENCODE_V2_SCRIPT,
+        OPENCODE_PLUGIN,
+        HIVEMIND_INCOGNITO="true",
+        MANUAL_MCP=json.dumps({"hivemind": {"type": "remote", "url": "https://mine/mcp"}}),
+    )
+    [pair] = manual["mcp"]
+    name, server = pair
+    assert name == "hivemind" and server["disabled"] is True
 
 
 _EXTENSION_SCRIPT = """
