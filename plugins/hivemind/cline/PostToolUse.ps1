@@ -34,7 +34,9 @@ if ($parent -ne "") {
 }
 
 $safe = if ($taskId -ne "") { $taskId -replace '[^a-zA-Z0-9]', '_' } else { "none" }
-$state = Join-Path $env:TEMP "hivemind-cline-$safe"
+$stateDir = Join-Path $env:TEMP "hivemind-cline"
+New-Item -ItemType Directory -Force -Path $stateDir -ErrorAction SilentlyContinue | Out-Null
+$state = Join-Path $stateDir $safe
 
 $calls = 0
 $contributed = 0

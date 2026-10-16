@@ -10,7 +10,9 @@ $payload = [Console]::In.ReadToEnd()
 $taskMatch = [regex]::Match($payload, '"taskId":"([^"]*)"')
 $taskId = if ($taskMatch.Success) { $taskMatch.Groups[1].Value } else { "" }
 $safe = if ($taskId -ne "") { $taskId -replace '[^a-zA-Z0-9]', '_' } else { "none" }
-$state = Join-Path $env:TEMP "hivemind-cline-$safe"
+$stateDir = Join-Path $env:TEMP "hivemind-cline"
+New-Item -ItemType Directory -Force -Path $stateDir -ErrorAction SilentlyContinue | Out-Null
+$state = Join-Path $stateDir $safe
 
 Set-Content -Path $state -Value "0 0 0" -NoNewline -ErrorAction SilentlyContinue
 Write-Output '{"cancel":false}'

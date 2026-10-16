@@ -1111,9 +1111,18 @@ STOP_REMINDER_TEXT = (
 
 
 def _cline_hook(name: str, payload: str, tmp_path: Path, **env_overrides: str) -> str:
-    """Run one Cline hook script with a payload on stdin and return its line."""
+    """Run one Cline hook script with a payload on stdin and return its line.
+
+    The hooks keep their counter in a private per-user folder; they prefer
+    $XDG_RUNTIME_DIR when it is a real directory of ours. Point it at a fresh
+    per-test directory so state is isolated between tests but stable across
+    the several hook calls a test makes.
+    """
     env = {k: v for k, v in os.environ.items() if not k.startswith("HIVEMIND_")}
-    env["TMPDIR"] = str(tmp_path)  # the hooks keep their state in $TMPDIR
+    xdg = tmp_path / "xdg"
+    xdg.mkdir(exist_ok=True)
+    env["XDG_RUNTIME_DIR"] = str(xdg)
+    env["TMPDIR"] = str(tmp_path)  # fallback if the XDG dir is refused
     env.update(env_overrides)
     out = subprocess.run(
         ["sh", str(CLINE_HOOKS / name)],
@@ -1209,10 +1218,63 @@ def test_cline_hook_texts_do_not_drift_between_platforms() -> None:
         for text in texts:
             assert text in unix, (name, "unix")
             assert text in win, (name, "windows")
-    # TaskStart carries no text; only the two platforms' state-file names
-    # must agree.
-    assert "hivemind-cline-" in (CLINE_HOOKS / "TaskStart").read_text()
-    assert "hivemind-cline-" in (CLINE_HOOKS / "TaskStart.ps1").read_text()
+    # TaskStart carries no text; only the two platforms' state-folder names
+    # must agree (a private per-user folder, as in hivemind-stop.sh).
+    assert "hivemind-cline" in (CLINE_HOOKS / "TaskStart").read_text()
+    assert "hivemind-cline" in (CLINE_HOOKS / "TaskStart.ps1").read_text()
+
+
+def test_cline_hooks_refuse_a_symlinked_state_folder(tmp_path: Path) -> None:
+    """The counter must not be written through a pre-created symlink: on a
+    multi-user host another local user could plant `hivemind-cline` as a
+    symlink and have the hook truncate a file they own. A symlinked (or
+    non-owned) state folder is refused and the hook fails open."""
+    target = tmp_path / "victim"
+    target.write_text("precious")
+    xdg = tmp_path / "xdg"
+    xdg.mkdir()
+    link = xdg / "hivemind-cline"
+    link.symlink_to(target)
+    payload = json.dumps({"taskId": "t1", "postToolUse": {"tool_name": "bash"}})
+    for name in ("TaskStart", "PostToolUse"):
+        env = {k: v for k, v in os.environ.items() if not k.startswith("HIVEMIND_")}
+        env["XDG_RUNTIME_DIR"] = str(xdg)
+        env["HIVEMIND_API_KEY"] = "hm_secret_value"
+        out = subprocess.run(
+            ["sh", str(CLINE_HOOKS / name)],
+            env=env,
+            input=payload,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert json.loads(out.stdout.strip()) == {"cancel": False}
+    # The symlink target was left untouched (not truncated to the counter).
+    assert target.read_text() == "precious"
+
+
+def test_cline_hooks_write_the_counter_into_a_private_folder(tmp_path: Path) -> None:
+    """The counter lands in a 0700 folder owned by the user, not a
+    world-writable file in shared /tmp."""
+    xdg = tmp_path / "xdg"
+    xdg.mkdir()
+    env = {k: v for k, v in os.environ.items() if not k.startswith("HIVEMIND_")}
+    env["XDG_RUNTIME_DIR"] = str(xdg)
+    env["HIVEMIND_API_KEY"] = "hm_secret_value"
+    for _ in range(3):
+        subprocess.run(
+            ["sh", str(CLINE_HOOKS / "PostToolUse")],
+            env=env,
+            input=json.dumps({"taskId": "t1", "postToolUse": {"tool_name": "bash"}}),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    folder = xdg / "hivemind-cline"
+    assert folder.is_dir() and not folder.is_symlink()
+    assert oct(folder.stat().st_mode & 0o777) == "0o700"
+    counter = folder / "t1"
+    assert counter.read_text().split() == ["3", "0", "0"]
 
 
 # -- KiloCode: an OpenCode fork, the same plugin file --------------------------

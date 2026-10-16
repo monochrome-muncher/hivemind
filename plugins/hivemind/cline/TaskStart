@@ -22,7 +22,25 @@ field() {
 payload=$(cat 2>/dev/null)
 task_id=$(field taskId)
 safe=$(printf '%s' "$task_id" | tr -c 'a-zA-Z0-9' '_')
-state="${TMPDIR:-/tmp}/hivemind-cline-${safe:-none}"
 
-printf '0 0 0\n' > "$state" 2>/dev/null
+# The counter lives in a private per-user folder, as in
+# skills/hivemind-setup/scripts/hivemind-stop.sh: a predictable path in
+# shared /tmp let another local user pre-create it as a symlink (so our
+# write truncated a file they owned) or plant counter values. A folder that
+# is not a real directory of ours, or is group/other writable, is refused:
+# the hook fails open, writing nothing.
+bail() { printf '{"cancel":false}\n'; exit 0; }
+if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -d "$XDG_RUNTIME_DIR" ] \
+  && [ ! -L "$XDG_RUNTIME_DIR" ] && [ -O "$XDG_RUNTIME_DIR" ]; then
+  state_dir="$XDG_RUNTIME_DIR/hivemind-cline"
+else
+  uid=$(id -u 2>/dev/null) && [ -n "$uid" ] || bail
+  state_dir="${TMPDIR:-/tmp}/hivemind-cline-$uid"
+fi
+[ -e "$state_dir" ] || [ -L "$state_dir" ] || mkdir -m 700 "$state_dir" 2>/dev/null
+[ -d "$state_dir" ] && [ ! -L "$state_dir" ] && [ -O "$state_dir" ] || bail
+case "$(ls -ld "$state_dir" 2>/dev/null)" in d????w*|d???????w*) bail ;; esac
+state="$state_dir/${safe:-none}"
+
+(umask 077; printf '0 0 0\n' > "$state") 2>/dev/null
 printf '{"cancel":false}\n'
