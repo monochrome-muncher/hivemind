@@ -1,0 +1,28 @@
+#!/bin/sh
+# Hivemind Cline hook: TaskStart.
+#
+# A Cline task is one run of the agent (a "task" in the Cline panel). This
+# hook resets the stop-nudge counter the PostToolUse hook keeps, so each
+# task counts its own tool calls. Cline runs the script named TaskStart
+# from its global hooks directory (~/Documents/Cline/Hooks/, .ps1 on
+# Windows) when a task begins; stdin is the payload JSON, which carries the
+# task's id at the top level.
+#
+# Static and offline; emits { cancel: false } so it never touches the
+# context.
+
+# Extract "name": "value" from the payload, tolerating whitespace after
+# the colon (Cline's serializer and tests format it differently).
+field() {
+  printf '%s' "$payload" \
+    | grep -o "\"$1\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | head -1 \
+    | sed "s/^\"$1\"[[:space:]]*:[[:space:]]*\"//; s/\"$//"
+}
+
+payload=$(cat 2>/dev/null)
+task_id=$(field taskId)
+safe=$(printf '%s' "$task_id" | tr -c 'a-zA-Z0-9' '_')
+state="${TMPDIR:-/tmp}/hivemind-cline-${safe:-none}"
+
+printf '0 0 0\n' > "$state" 2>/dev/null
+printf '{"cancel":false}\n'

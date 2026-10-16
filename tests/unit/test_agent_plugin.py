@@ -25,6 +25,7 @@ PLUGIN = ROOT / "plugins" / "hivemind"
 SKILL = (PLUGIN / "skills" / "hivemind" / "SKILL.md").read_text()
 SETUP = (PLUGIN / "skills" / "hivemind-setup" / "SKILL.md").read_text()
 SETUP_REFS = PLUGIN / "skills" / "hivemind-setup" / "references"
+SKILLS_DIR = PLUGIN / "skills"
 HOOK = PLUGIN / "skills" / "hivemind-setup" / "scripts" / "hivemind-session-start.sh"
 
 # The one sentence every harness's stay-aware layer must carry, byte for
@@ -218,6 +219,8 @@ HARNESS_REFS = {
     "Pi": "pi.md",
     "Oh My Pi": "oh-my-pi.md",
     "OpenCode": "opencode.md",
+    "Cline": "cline.md",
+    "KiloCode": "kilocode.md",
 }
 
 
@@ -1093,6 +1096,188 @@ def test_opencode_v2_setup_goes_incognito() -> None:
     [pair] = manual["mcp"]
     name, server = pair
     assert name == "hivemind" and server["disabled"] is True
+
+
+# -- Cline: the file hooks (stay-aware line + end-of-task nudge) ----------------
+
+CLINE_HOOKS = PLUGIN / "cline"
+
+STOP_REMINDER_TEXT = (
+    "HIVEMIND: before finishing, write to Hivemind (hive_write) "
+    "what another agent could reuse from this task, and rate the entries "
+    "your work tested (hive_feedback). If nothing is new, write nothing "
+    "and just finish."
+)
+
+
+def _cline_hook(name: str, payload: str, tmp_path: Path, **env_overrides: str) -> str:
+    """Run one Cline hook script with a payload on stdin and return its line."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("HIVEMIND_")}
+    env["TMPDIR"] = str(tmp_path)  # the hooks keep their state in $TMPDIR
+    env.update(env_overrides)
+    out = subprocess.run(
+        ["sh", str(CLINE_HOOKS / name)],
+        env=env,
+        input=payload,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return out.stdout.strip()
+
+
+@pytest.mark.parametrize(
+    ("env", "expected"),
+    [
+        ({"HIVEMIND_API_KEY": "hm_secret_value"}, "Hivemind is configured."),
+        ({}, "probably not connected"),
+        ({"HIVEMIND_INCOGNITO": "1", "HIVEMIND_API_KEY": "hm_secret_value"}, INCOGNITO_TEXT),
+    ],
+)
+def test_cline_user_prompt_submit_carries_the_stay_aware_line(
+    tmp_path: Path, env: dict[str, str], expected: str
+) -> None:
+    line = _cline_hook("UserPromptSubmit", "{}", tmp_path, **env)
+    hook = json.loads(line)
+    assert hook["cancel"] is False
+    assert expected in hook["contextModification"]
+    if expected != INCOGNITO_TEXT:
+        assert hook["contextModification"].startswith(STAY_AWARE_CORE)
+    assert "hm_secret_value" not in line
+
+
+def test_cline_post_tool_use_nudges_once_at_the_threshold(tmp_path: Path) -> None:
+    def calls(n: int, task: str = "t1", tool: str = "bash", **extra: str) -> list[str]:
+        return [
+            _cline_hook(
+                "PostToolUse",
+                json.dumps({"taskId": task, "postToolUse": {"tool_name": tool}, **extra}),
+                tmp_path,
+                HIVEMIND_API_KEY="hm_secret_value",
+                HIVEMIND_STOP_MIN_TOOLS="3",
+            )
+            for _ in range(n)
+        ]
+
+    _cline_hook("TaskStart", json.dumps({"taskId": "t1"}), tmp_path)
+    out = calls(3)
+    # The nudge goes out on the call that reaches the threshold, once.
+    assert json.loads(out[2])["contextModification"] == STOP_REMINDER_TEXT
+    assert json.loads(calls(1)[0])["cancel"] is False and "contextModification" not in json.loads(
+        calls(1)[0]
+    )
+    # A contribution keeps it quiet.
+    _cline_hook("TaskStart", json.dumps({"taskId": "t2"}), tmp_path)
+    calls(2, task="t2")
+    assert "contextModification" not in json.loads(
+        calls(1, task="t2", tool="hivemind__hive_write")[0]
+    )
+    assert "contextModification" not in json.loads(calls(1, task="t2")[0])
+    # A subagent (parentAgentId set) is never counted and never nudged.
+    sub = calls(5, task="t3", **{"parentAgentId": "t1"})
+    assert all("contextModification" not in json.loads(x) for x in sub)
+
+
+def test_cline_nudge_is_silent_when_it_cannot_work(tmp_path: Path) -> None:
+    def run(n: int, **env: str) -> list[str]:
+        return [
+            _cline_hook(
+                "PostToolUse",
+                json.dumps({"taskId": "t", "postToolUse": {"tool_name": "bash"}}),
+                tmp_path,
+                HIVEMIND_STOP_MIN_TOOLS="2",
+                **env,
+            )
+            for _ in range(n)
+        ]
+
+    incognito = run(3, HIVEMIND_INCOGNITO="1", HIVEMIND_API_KEY="hm_secret_value")
+    assert all("contextModification" not in json.loads(x) for x in incognito)
+    no_key = run(3)
+    assert all("contextModification" not in json.loads(x) for x in no_key)
+
+
+def test_cline_hook_texts_do_not_drift_between_platforms() -> None:
+    """The .ps1 twins carry the same texts as the Unix scripts: a Windows
+    session must say the same thing."""
+    for name, texts in (
+        ("UserPromptSubmit", (STAY_AWARE_CORE, INCOGNITO_TEXT)),
+        ("PostToolUse", (STOP_REMINDER_TEXT,)),
+    ):
+        unix = (CLINE_HOOKS / name).read_text()
+        win = (CLINE_HOOKS / f"{name}.ps1").read_text()
+        for text in texts:
+            assert text in unix, (name, "unix")
+            assert text in win, (name, "windows")
+    # TaskStart carries no text; only the two platforms' state-file names
+    # must agree.
+    assert "hivemind-cline-" in (CLINE_HOOKS / "TaskStart").read_text()
+    assert "hivemind-cline-" in (CLINE_HOOKS / "TaskStart.ps1").read_text()
+
+
+# -- KiloCode: an OpenCode fork, the same plugin file --------------------------
+
+
+def test_kilocode_loads_the_opencode_plugin_from_the_git_spec() -> None:
+    """The KiloCode reference points its git: spec's subpath at the OpenCode
+    plugin, and that file is the package entry point."""
+    ref = (SETUP_REFS / "kilocode.md").read_text()
+    assert (
+        "git:https://<git-server>/<owner>/hivemind@v<version>#plugins/hivemind/opencode/hivemind.js"
+        in ref
+    )
+    root_pkg = json.loads((ROOT / "package.json").read_text())
+    assert root_pkg["main"] == "./plugins/hivemind/opencode/hivemind.js"
+    # The v1 plugin key is what gives the full feature set there; the docs
+    # say so and the launcher's incognito overlay uses KiloCode's v2 mcp shape.
+    assert '"plugin"' in ref
+    launcher = LAUNCHER.read_text()
+    assert "KILO_CONFIG_CONTENT" in launcher and '"disabled":true' in launcher
+
+
+_KILOCODE_V2_SCRIPT = """
+const mod = await import(process.argv[1])
+// KiloCode's v2 plugin context: only options/agent/aisdk/catalog/command/
+// integration/plugin/reference/skill — no mcp, session, tool or event.
+// Its skill draft takes sources, not get/add.
+const sources = []
+const ctx = {
+  options: {},
+  agent: { transform: async () => {}, reload: async () => {} },
+  aisdk: { sdk: async () => {}, language: async () => {} },
+  catalog: { transform: async () => {}, reload: async () => {} },
+  command: { transform: async () => {}, reload: async () => {} },
+  integration: { transform: async () => {}, reload: async () => {} },
+  plugin: { add: async () => {}, remove: async () => {} },
+  reference: { transform: async () => {}, reload: async () => {} },
+  skill: {
+    transform: async (cb) => {
+      await cb({ source: (s) => sources.push(s), list: () => sources })
+    },
+    reload: async () => {},
+  },
+}
+const teardown = await mod.default.setup(ctx)
+console.log(JSON.stringify({ sources, teardown: typeof teardown }))
+"""
+
+
+@needs_node
+def test_opencode_v2_setup_degrades_on_the_kilocode_context() -> None:
+    """The same file loads under KiloCode's v2 key: no mcp/session/tool/event
+    domains, a source-based skill draft. It must register the skills and do
+    nothing else, without raising."""
+    r = _node(
+        _KILOCODE_V2_SCRIPT,
+        OPENCODE_PLUGIN,
+        HIVEMIND_API_KEY="hm_secret_value",
+        HIVEMIND_MCP_URL="https://hm.example/mcp",
+    )
+    # The whole skills folder goes in as one directory source (Node keeps the
+    # trailing slash of the URL); nothing else is registered, and no teardown
+    # is returned (no event stream to abort).
+    assert r["sources"] == [{"type": "directory", "path": str(SKILLS_DIR) + "/"}]
+    assert r["teardown"] == "undefined"
 
 
 _EXTENSION_SCRIPT = """

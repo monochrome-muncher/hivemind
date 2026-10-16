@@ -175,8 +175,18 @@ async function server({ client } = {}) {
     event: async ({ event }) => {
       const id = event?.properties?.sessionID;
       if (!id) return;
-      if (event.type === "session.compacted") state(id).compacted = true;
-      if (event.type === "session.idle") await remind(id);
+      // KiloCode (an OpenCode fork) delivers v2 events to the v1 hook, so
+      // both name sets are honoured; in OpenCode v1 only the v1 names occur
+      // (its idle carries no reason, so there is nothing to exclude there).
+      if (event.type === "session.compacted" || event.type === "session.compaction.ended")
+        state(id).compacted = true;
+      if (
+        event.type === "session.idle" ||
+        event.type === "session.execution.succeeded" ||
+        event.type === "session.execution.failed" ||
+        (event.type === "session.execution.interrupted" && event.properties?.reason !== "shutdown")
+      )
+        await remind(id);
     },
   };
 }
@@ -205,7 +215,9 @@ async function setup(ctx) {
 
   // MCP server: register from the environment, or disable a hand-configured
   // one in an incognito session. v2 uses `disabled`, not `enabled`.
-  await ctx.mcp.transform((editor) => {
+  // KiloCode's v2 context has no mcp domain (its servers come from config),
+  // so the whole call is skipped there.
+  await ctx.mcp?.transform((editor) => {
     if (incognito()) {
       if (editor.get("hivemind")) editor.update("hivemind", (srv) => (srv.disabled = true));
       return;
@@ -224,15 +236,24 @@ async function setup(ctx) {
   });
 
   // Skills: v2 has no skills.paths; add each skill by its SKILL.md.
-  await ctx.skill.transform((editor) => {
+  // KiloCode's v2 skill draft has no get/add — it takes sources, and a
+  // directory source scans `**/SKILL.md`, so the whole skills folder goes
+  // in as one directory source.
+  await ctx.skill?.transform((editor) => {
+    if (typeof editor.source === "function") {
+      const has = editor.list().some((src) => src.type === "directory" && src.path === SKILLS_DIR);
+      if (!has) editor.source({ type: "directory", path: SKILLS_DIR });
+      return;
+    }
     for (const name of SKILLS) {
       if (!editor.get(name)) editor.add(readSkill(name));
     }
   });
 
   // The reminder, on every agent-loop model request (v2's `context` hook).
-  // `event.system` takes { type, text } parts, not bare strings.
-  await ctx.session.hook("context", (event) => {
+  // `event.system` takes { type, text } parts, not bare strings. KiloCode's
+  // v2 context has no session domain, so there is no reminder there.
+  await ctx.session?.hook("context", (event) => {
     const id = event?.sessionID;
     const s = id ? state(id) : undefined;
     const extra = s?.compacted && nudges() ? COMPACTED : "";
@@ -240,8 +261,8 @@ async function setup(ctx) {
     event.system.push({ type: "text", text: reminder() + extra });
   });
 
-  // Tool counting.
-  await ctx.tool.hook("execute.after", (event) => {
+  // Tool counting. KiloCode's v2 context has no tool domain.
+  await ctx.tool?.hook("execute.after", (event) => {
     const id = event?.sessionID;
     if (!id) return;
     const s = state(id);
@@ -252,25 +273,28 @@ async function setup(ctx) {
   // Session events: compaction, and the session going idle. v2 events are
   // { type, data }; an execution ends with one of the three terminal events
   // (v1's session.idle fired on each of them, shutdown stays excluded).
-  const controller = new AbortController();
-  void (async () => {
-    try {
-      for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
-        const id = event?.data?.sessionID;
-        if (!id) continue;
-        if (event.type === "session.compaction.ended") state(id).compacted = true;
-        if (
-          event.type === "session.execution.succeeded" ||
-          event.type === "session.execution.failed" ||
-          (event.type === "session.execution.interrupted" && event.data.reason !== "shutdown")
-        )
-          await remind(id);
+  // KiloCode's v2 context has no event domain, so there are no nudges there.
+  if (ctx.event?.subscribe) {
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
+          const id = event?.data?.sessionID;
+          if (!id) continue;
+          if (event.type === "session.compaction.ended") state(id).compacted = true;
+          if (
+            event.type === "session.execution.succeeded" ||
+            event.type === "session.execution.failed" ||
+            (event.type === "session.execution.interrupted" && event.data.reason !== "shutdown")
+          )
+            await remind(id);
+        }
+      } catch {
+        // The stream ends with the plugin; a dead stream is not an error.
       }
-    } catch {
-      // The stream ends with the plugin; a dead stream is not an error.
-    }
-  })();
-  return () => controller.abort();
+    })();
+    return () => controller.abort();
+  }
 }
 
 // The one default export both OpenCode v1 and v2 load. v1 (1.18.29+) calls

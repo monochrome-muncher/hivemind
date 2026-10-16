@@ -1,0 +1,83 @@
+# Hivemind Cline hook: PostToolUse (Windows) — the end-of-task write-and-rate
+# nudge.
+#
+# Cline fires PostToolUse after every tool call, with the payload JSON on
+# stdin (taskId at the top level, postToolUse.tool_name the tool). This
+# counts the task's tool calls in a temp file (reset by the TaskStart hook)
+# and, once a task has made HIVEMIND_STOP_MIN_TOOLS (default 20) calls
+# without calling hive_write or hive_feedback, steers the agent once, via
+# contextModification, to write what another agent could reuse; if nothing
+# is new it just finishes.
+#
+# Subagent tasks are never counted and never reminded (a non-empty
+# parentAgentId marks one). The nudge stays silent in incognito sessions and
+# while HIVEMIND_API_KEY is unset. Static and offline; it never prints the
+# key. Extensionless PostToolUse is the Unix twin (Cline ignores .ps1 on
+# Unix).
+
+$payload = [Console]::In.ReadToEnd()
+
+function Field {
+    param([string]$Name)
+    $m = [regex]::Match($payload, '"' + $Name + '":"([^"]*)"')
+    if ($m.Success) { $m.Groups[1].Value } else { "" }
+}
+
+$taskId = Field "taskId"
+$parent = Field "parentAgentId"
+$toolName = Field "tool_name"
+
+# A subagent reports to its parent; leave it alone, as in Claude Code.
+if ($parent -ne "") {
+    Write-Output '{"cancel":false}'
+    return
+}
+
+$safe = if ($taskId -ne "") { $taskId -replace '[^a-zA-Z0-9]', '_' } else { "none" }
+$state = Join-Path $env:TEMP "hivemind-cline-$safe"
+
+$calls = 0
+$contributed = 0
+$reminded = 0
+if (Test-Path $state) {
+    $parts = (Get-Content $state -Raw -ErrorAction SilentlyContinue) -split '\s+'
+    if ($parts.Count -ge 3) {
+        $calls = [int]$parts[0]
+        $contributed = [int]$parts[1]
+        $reminded = [int]$parts[2]
+    }
+}
+
+if ($toolName -like "*hive_write" -or $toolName -like "*hive_feedback") {
+    $contributed = 1
+}
+$calls++
+
+$threshold = 20
+if ($env:HIVEMIND_STOP_MIN_TOOLS) {
+    $parsed = 0
+    if ([int]::TryParse($env:HIVEMIND_STOP_MIN_TOOLS, [ref]$parsed)) { $threshold = $parsed }
+}
+
+$incognito = if ($env:HIVEMIND_INCOGNITO) { $env:HIVEMIND_INCOGNITO.ToLower() } else { "" }
+if (-not @("1", "true", "yes", "on").Contains($incognito)) { $incognito = "" }
+
+$emitNudge = $false
+if ($calls -ge $threshold -and $contributed -eq 0 -and $reminded -eq 0) {
+    if ($incognito -ne "" -or [string]::IsNullOrWhiteSpace($env:HIVEMIND_API_KEY)) {
+        # Still record the count so a later key change does not fire it.
+        Set-Content -Path $state -Value "$calls $contributed $reminded" -NoNewline -ErrorAction SilentlyContinue
+    } else {
+        $reminded = 1
+        $emitNudge = $true
+        Set-Content -Path $state -Value "$calls $contributed $reminded" -NoNewline -ErrorAction SilentlyContinue
+    }
+} else {
+    Set-Content -Path $state -Value "$calls $contributed $reminded" -NoNewline -ErrorAction SilentlyContinue
+}
+
+if ($emitNudge) {
+    Write-Output '{"cancel":false,"contextModification":"HIVEMIND: before finishing, write to Hivemind (hive_write) what another agent could reuse from this task, and rate the entries your work tested (hive_feedback). If nothing is new, write nothing and just finish.","errorMessage":""}'
+} else {
+    Write-Output '{"cancel":false}'
+}

@@ -1,0 +1,76 @@
+#!/bin/sh
+# Hivemind Cline hook: PostToolUse — the end-of-task write-and-rate nudge.
+#
+# Cline fires PostToolUse after every tool call, with the payload JSON on
+# stdin (taskId at the top level, postToolUse.tool_name the tool). This
+# counts the task's tool calls in a temp file (reset by the TaskStart hook)
+# and, once a task has made HIVEMIND_STOP_MIN_TOOLS (default 20) calls
+# without calling hive_write or hive_feedback, steers the agent once, via
+# contextModification, to write what another agent could reuse; if nothing
+# is new it just finishes.
+#
+# Subagent tasks are never counted and never reminded (a non-empty
+# parentAgentId marks one). The nudge stays silent in incognito sessions
+# and while HIVEMIND_API_KEY is unset, when the tools cannot work. Static
+# and offline; it never prints the key.
+
+# Extract "name": "value" from the payload, tolerating whitespace after
+# the colon (Cline's serializer and tests format it differently).
+field() {
+  printf '%s' "$payload" \
+    | grep -o "\"$1\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | head -1 \
+    | sed "s/^\"$1\"[[:space:]]*:[[:space:]]*\"//; s/\"$//"
+}
+
+payload=$(cat 2>/dev/null)
+task_id=$(field taskId)
+parent=$(field parentAgentId)
+tool_name=$(field tool_name)
+
+# A subagent reports to its parent; leave it alone, as in Claude Code.
+if [ -n "$parent" ]; then
+  printf '{"cancel":false}\n'
+  exit 0
+fi
+
+safe=$(printf '%s' "$task_id" | tr -c 'a-zA-Z0-9' '_')
+state="${TMPDIR:-/tmp}/hivemind-cline-${safe:-none}"
+
+calls=0
+contributed=0
+reminded=0
+if [ -f "$state" ]; then
+  read -r calls contributed reminded < "$state" 2>/dev/null
+fi
+case "$calls" in ''|*[!0-9]*) calls=0 ;; esac
+case "$contributed" in ''|*[!0-9]*) contributed=0 ;; esac
+case "$reminded" in ''|*[!0-9]*) reminded=0 ;; esac
+
+case "${tool_name:-}" in
+  *hive_write|*hive_feedback) contributed=1 ;;
+esac
+calls=$((calls + 1))
+
+threshold="${HIVEMIND_STOP_MIN_TOOLS:-20}"
+case "$threshold" in ''|*[!0-9]*) threshold=20 ;; esac
+
+if [ "$calls" -ge "$threshold" ] && [ "$contributed" -eq 0 ] && [ "$reminded" -eq 0 ]; then
+  incognito=$(printf '%s' "${HIVEMIND_INCOGNITO:-}" | tr '[:upper:]' '[:lower:]')
+  case "$incognito" in
+    1|true|yes|on) incognito=1 ;;
+    *) incognito="" ;;
+  esac
+  if [ -n "$incognito" ] || [ -z "${HIVEMIND_API_KEY:-}" ]; then
+    # Still record the count so a later key change does not fire it.
+    printf '%s %s %s\n' "$calls" "$contributed" "$reminded" > "$state" 2>/dev/null
+    printf '{"cancel":false}\n'
+    exit 0
+  fi
+  reminded=1
+  printf '%s %s %s\n' "$calls" "$contributed" "$reminded" > "$state" 2>/dev/null
+  printf '{"cancel":false,"contextModification":"HIVEMIND: before finishing, write to Hivemind (hive_write) what another agent could reuse from this task, and rate the entries your work tested (hive_feedback). If nothing is new, write nothing and just finish.","errorMessage":""}\n'
+  exit 0
+fi
+
+printf '%s %s %s\n' "$calls" "$contributed" "$reminded" > "$state" 2>/dev/null
+printf '{"cancel":false}\n'

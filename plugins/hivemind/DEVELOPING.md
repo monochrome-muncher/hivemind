@@ -25,7 +25,8 @@ to install or use it, read [README.md](README.md) instead.
 | `package.json`, `cordis.patch.yml`, `dsh/` | The DeepSeek Harness bundle: the MCP server row, a small provider (`dsh/hivemind-skills.js`) that serves `skills/`, and the Stop reminder (`dsh/hivemind-reminders.js`) |
 | `plugin.yaml`, `__init__.py` | The Hermes plugin: serves `skills/` and registers a system-prompt section |
 | `extensions/hivemind.ts` | The Pi and Oh My Pi extension: the system-prompt section, the MCP server on Pi 0.99+, and blocking Hivemind calls in incognito sessions |
-| `opencode/hivemind.js` | The OpenCode plugin: registers the MCP server, adds the skills, and puts the reminder in every model request |
+| `opencode/hivemind.js` | The OpenCode plugin (which KiloCode 7.x, an OpenCode fork, loads too): registers the MCP server, adds the skills, and puts the reminder in every model request |
+| `cline/` | The Cline hooks: `UserPromptSubmit` (the stay-aware line on every prompt), `TaskStart` and `PostToolUse` (the end-of-task write-and-rate nudge), each with a `.ps1` twin for Windows |
 | `bin/hivemind-incognito` | The incognito launcher ([below](#incognito)) |
 | `CHANGELOG.md` | What changed for agents in each release |
 | `../../package.json` (repository root) | Same package name as `plugins/hivemind/package.json`. Lets DeepSeek Harness, Pi and OpenCode install the plugin from the repository's Git URL (OpenCode loads `exports["./server"]`, else `main`) |
@@ -46,6 +47,8 @@ reminder that survives compaction and new sessions.
 | Pi | the extension registers it with Pi 0.99+ built-in MCP; with pi-mcp-adapter, the adapter's config | the package | the extension's system-prompt section |
 | Oh My Pi | the plugin's `.mcp.json` (server `hivemind:hivemind`; a hand `hivemind` entry in `~/.omp/agent/mcp.json` replaces it) | the plugin | the extension's system-prompt section |
 | OpenCode | `opencode/hivemind.js` (skipped if a hand-configured `hivemind` server exists or no key is set; supports v1 and v2) | the plugin | added to every model request |
+| KiloCode | `opencode/hivemind.js` via the `plugin` key (KiloCode is an OpenCode fork; the v1 key gives the full feature set, the v2 `plugins` key only the skills) | the plugin | added to every model request |
+| Cline | the user's `~/.cline/data/settings/cline_mcp_settings.json` with `${env:…}` references (Cline has no package plugin) | copied to `~/.cline/skills/` | the `UserPromptSubmit` hook in `~/Documents/Cline/Hooks/`, plus the `PostToolUse` end-of-task nudge |
 | Gemini CLI | the extension's `gemini-extension.json` (a `hivemind` entry in `~/.gemini/settings.json` replaces it) | the extension | the `GEMINI.md` instruction block, plus the extension's `SessionStart` hook |
 | GitHub Copilot CLI | the user's `~/.copilot/mcp-config.json` (the whole `url` cannot come from the environment; the key can) | the plugin | the plugin's `SessionStart` hook, plus the `~/.copilot/copilot-instructions.md` instruction block |
 
@@ -109,6 +112,43 @@ itself names no harness-specific paths, and a test enforces this.
   fired on each of them) and compaction ends with
   `session.compaction.ended`. Verified against the v2 source (`@opencode`
   packages) and v1.18.29.
+- **KiloCode** 7.x is a fork of OpenCode (`Kilo-Org/kilocode`): the same
+  plugin file loads in it, and its v1 plugin API is the OpenCode v1 one
+  (same hooks; the `plugin` config key). Its v1 `event` hook receives v2
+  events (`session.execution.*`, `session.compaction.ended`), which is why
+  the stop and post-compaction nudges work there. KiloCode has its own
+  `git:` plugin spec — `git:<repo>[@ref][#subpath]` — that clones the
+  repository and loads the file at `#subpath`; a pinned ref is never
+  refreshed, a branch ref is re-checked about hourly. The v2 `plugins`
+  key loads a reduced plugin context (no `mcp`, `session`, `tool` or
+  `event` domains — only `skill`, `agent`, `command` and `integration`
+  transforms), so the same file's `setup` registers only the skills there.
+  Its MCP config is the OpenCode v2 shape (`mcp.servers`, `disabled`), and
+  `KILO_CONFIG_CONTENT` is the highest-precedence inline config overlay
+  (the incognito launcher uses it). Global config is `~/.config/kilo/`
+  (`kilo.jsonc`, `AGENTS.md`), and it also reads `opencode.json(c)`
+  config files. Verified against `Kilo-Org/kilocode` 7.8.12.
+- **Cline** has no package plugin for the VS Code extension (the SDK
+  plugin system runs in the CLI/SDK; the extension uses file hooks). It
+  expands `${env:NAME}` in an MCP server's URL and headers from the
+  process environment, and leaves an unset reference unexpanded (with a
+  warning), so an incognito session with the variables unset never
+  connects. MCP tools appear as `<server>__<tool>` (`hivemind__hive_write`).
+  Skills are SKILL.md folders in `~/.cline/skills/` (global) or
+  `.cline/skills/`, `.clinerules/skills/`, `.claude/skills/`,
+  `.agents/skills/` (project); the frontmatter `name` must match the
+  folder name or the skill is dropped. File hooks are scripts named
+  exactly after the hook type in `~/Documents/Cline/Hooks/` (global) or
+  `.clinerules/hooks/` (project): no extension on Unix, `.ps1` on Windows
+  (`.ps1` is ignored on Unix). A hook gets the payload JSON on stdin
+  (top-level `taskId`; `postToolUse.tool_name` the tool) and prints
+  `{ cancel, contextModification, errorMessage }` on stdout; hooks are
+  enabled by default. `UserPromptSubmit` fires on every prompt (the
+  per-prompt reminder is what carries Hivemind across a compaction, whose
+  `PreCompact` hook output is not injected — it is wired as a deferred
+  hook in the extension's hooks adapter). Verified against `cline/cline`
+  main (extension source: `envExpansion.ts`, `skill-directories.ts`,
+  `hooks-adapter.ts`, `disk.ts`, `name-transform.ts`).
 - **Gemini CLI** installs an extension from a Git URL by cloning the whole
   repository and reading `gemini-extension.json`, `skills/` and
   `hooks/hooks.json` at its root (hence the root files; there is no
@@ -163,11 +203,14 @@ itself names no harness-specific paths, and a test enforces this.
 
 Two nudges that get knowledge written before it is lost: in Claude Code
 and Codex from `hooks/hooks.json`, in Pi and Oh My Pi from the extension
-and the OpenCode plugin, in DeepSeek Harness the Stop reminder from
-`dsh/hivemind-reminders.js` (below). Gemini CLI gets the Stop reminder
+and the OpenCode plugin (which KiloCode runs as well), in DeepSeek
+Harness the Stop reminder from `dsh/hivemind-reminders.js` (below). Gemini CLI gets the Stop reminder
 from the extension's `AfterAgent` hook (`../../hooks/hooks.json`).
 Hermes does not have them. GitHub Copilot CLI gets the Stop reminder from
 the plugin's `Stop` hook (the shared `hooks/hooks.json`), and no
+post-compaction line. Cline gets the end-of-task nudge from the
+`PostToolUse` hook in `cline/` (it counts the task's tool calls in a temp
+file, reset by `TaskStart`, and never nudges a subagent task); it has no
 post-compaction line.
 
 The script counts four transcript formats:
@@ -290,14 +333,17 @@ does two things:
 | GitHub Copilot CLI | `--disable-mcp-server hivemind` for the session (it never contacts the server); the launcher also unsets the key and URL | the server named `hivemind` in `~/.copilot/mcp-config.json` |
 | Gemini CLI | `HIVEMIND_MCP_URL`/`HIVEMIND_API_KEY` unset, so the extension's server is never contacted (Gemini notes an MCP issue) | the hivemind extension, and no hand entry in `settings.json` |
 | OpenCode | the plugin skips the server; a hand-configured one is disabled with `OPENCODE_CONFIG_CONTENT` | nothing |
+| KiloCode | the plugin (the OpenCode one) skips the server; a hand-configured one is disabled with `KILO_CONFIG_CONTENT` (`mcp.servers.hivemind.disabled`) | nothing |
+| Cline | `HIVEMIND_MCP_URL`/`HIVEMIND_API_KEY` unset, so the `${env:…}` references in `cline_mcp_settings.json` stay unexpanded and the server never connects; the hooks see `HIVEMIND_INCOGNITO` and say the incognito line (the skills stay installed) | the server entry with `${env:…}` references |
 
 Where the switch is missing or not configured (the Hermes entry without
-`${HIVEMIND_ENABLED}`, a Codex without the entry, a hand-configured Gemini CLI, any other
+`${HIVEMIND_ENABLED}`, a Codex without the entry, a hand-configured Gemini CLI, a Cline
+whose server entry does not use `${env:…}`, any other
 command), the session is incognito **by restraint**: the tools are
 loaded, the key and URL stay in the environment, and an agent with a
 shell could still call the REST API. The launcher unsets the key and URL
 only where the server is kept from loading (Claude Code, Codex, Copilot CLI,
-DeepSeek Harness, Pi, Oh My Pi, Gemini CLI), because the other harnesses may still need them
+DeepSeek Harness, Pi, Oh My Pi, Gemini CLI, Cline), because the other harnesses may still need them
 (ADR 0035). A DeepSeek Harness session also stays incognito when a
 project `.env` names `HIVEMIND_*` variables: incognito is on if the
 process environment or `~/.dsh/.env` says so, and no project `.env` can

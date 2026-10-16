@@ -19,6 +19,7 @@
   },
   "files": [
     "plugins/hivemind/cordis.patch.yml",
+    "plugins/hivemind/cline/",
     "plugins/hivemind/dsh/",
     "plugins/hivemind/skills/",
     "plugins/hivemind/extensions/",

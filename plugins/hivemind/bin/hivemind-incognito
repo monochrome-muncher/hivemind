@@ -15,7 +15,7 @@
 #      such switch configured, this prints a note and the session relies on
 #      the agent honouring layer 1 ("by restraint").
 #
-# Where the server is kept from loading (claude, codex, copilot, dsh, gemini with the
+# Where the server is kept from loading (claude, codex, copilot, cline, dsh, gemini with the
 # extension, pi, omp) the
 # launcher also removes HIVEMIND_API_KEY and HIVEMIND_MCP_URL from the
 # child's environment, so an agent with a shell cannot read the key or call
@@ -25,7 +25,7 @@
 set -eu
 
 if [ "$#" -lt 1 ]; then
-  echo "usage: hivemind-incognito <claude|codex|copilot|dsh|gemini|hermes|pi|omp|opencode|other-command> [args...]" >&2
+  echo "usage: hivemind-incognito <claude|codex|copilot|dsh|gemini|hermes|pi|omp|opencode|cline|kilocode|other-command> [args...]" >&2
   exit 2
 fi
 harness=$1
@@ -250,6 +250,26 @@ PY
       exit "$rc"
     fi
     note "python3 or a writable temp directory not found; starting without removing the hivemind server"
+    exec "$harness" "$@"
+    ;;
+  cline)
+    # Cline expands ${env:NAME} in the MCP URL and headers; with the two
+    # variables unset the references stay unexpanded and the server never
+    # connects (checked in the extension source). The hooks in
+    # ~/Documents/Cline/Hooks/ see HIVEMIND_INCOGNITO and say the incognito
+    # line; the skills stay installed, and the line tells the agent to keep
+    # them quiet.
+    unset HIVEMIND_API_KEY HIVEMIND_MCP_URL
+    exec "$harness" "$@"
+    ;;
+  kilo|kilocode)
+    # KiloCode is an OpenCode fork, so the hivemind OpenCode plugin runs in
+    # it and skips the server when HIVEMIND_INCOGNITO is set. A server added
+    # by hand in kilo.jsonc is disabled for this run through KiloCode's
+    # highest-precedence config overlay (v2 form: mcp.servers, disabled).
+    if [ -z "${KILO_CONFIG_CONTENT:-}" ]; then
+      export KILO_CONFIG_CONTENT='{"mcp":{"servers":{"hivemind":{"disabled":true}}}}'
+    fi
     exec "$harness" "$@"
     ;;
   *)
