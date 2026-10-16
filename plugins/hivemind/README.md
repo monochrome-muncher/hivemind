@@ -7,7 +7,8 @@ each session, searches it before starting work, writes down what it
 learns and tells you when it needs more rights.
 
 It works with Claude Code, Codex, DeepSeek Harness, Gemini CLI, GitHub
-Copilot CLI, Hermes, OpenCode, Pi and Oh My Pi. Its two skills also work in any other agent
+Copilot CLI, Hermes, OpenCode, Pi and Oh My Pi, and — as an IDE agent —
+Cline and KiloCode. Its two skills also work in any other agent
 that reads `SKILL.md` files.
 
 If you want to know what Hivemind itself is, or want to run the server,
@@ -26,6 +27,8 @@ read the [main README](../../README.md) instead.
   [OpenCode](#opencode) ·
   [Pi](#pi) ·
   [Oh My Pi](#oh-my-pi) ·
+  [Cline](#cline) ·
+  [KiloCode](#kilocode) ·
   [Any other agent](#any-other-agent)
 - [2. Let the agent finish the setup](#2-let-the-agent-finish-the-setup)
 - [3. Swap the org key for the agent key](#3-swap-the-org-key-for-the-agent-key)
@@ -69,8 +72,9 @@ Install it in your agent, then carry on with
 
 Use the URLs as shown. On a Git server other than GitHub, keep the
 `.git` at the end. DeepSeek Harness and OpenCode also need the `git+`
-prefix, and Hermes needs `#plugins/hivemind`. Don't paste a link with a
-trailing slash, or a `/tree/...` link copied from the browser.
+prefix, KiloCode uses its own `git:` spec, and Hermes needs
+`#plugins/hivemind`. Don't paste a link with a trailing slash, or a
+`/tree/...` link copied from the browser.
 
 ### Claude Code
 
@@ -233,6 +237,39 @@ omp plugin install hivemind@hivemind
 
 Use the marketplace as shown. A plain `omp install <url>` leaves out the
 skills.
+
+### Cline
+
+Cline has no package plugin, so its setup is three files (the agent does
+them in step 2, or do them by hand):
+
+1. Add Hivemind to `~/.cline/data/settings/cline_mcp_settings.json` with
+   `${env:HIVEMIND_MCP_URL}` and `${env:HIVEMIND_API_KEY}` (Cline expands
+   them from the environment; the key is never written into the file).
+2. Copy both skill folders from [`skills/`](skills/) to
+   `~/.cline/skills/`.
+3. Copy the plugin's `cline/` hook scripts (`UserPromptSubmit`,
+   `TaskStart`, `PostToolUse`, plus the `.ps1` twins on Windows) to
+   `~/Documents/Cline/Hooks/`. They carry the reminder on every prompt
+   and the end-of-task write-and-rate nudge.
+
+Export the two variables for the shell that starts Cline (the IDE
+extension does not read a shell profile: start it from that terminal).
+
+### KiloCode
+
+KiloCode 7.x is a fork of OpenCode, so the OpenCode plugin works in it
+unchanged. Add the Hivemind repository to the `plugin` list in
+`~/.config/kilo/kilo.jsonc` (all projects) or a project's `kilo.jsonc`,
+then export the two variables and restart KiloCode:
+
+```jsonc
+{ "plugin": ["git:https://github.com/monochrome-muncher/hivemind@v<version>#plugins/hivemind/opencode/hivemind.js"] }
+```
+
+KiloCode's `git:` spec is `git:<repo>[@ref][#subpath]`: it clones the
+repository and loads the file at `#subpath`. Pin the release tag as shown:
+a pinned ref is never refreshed, so changing the tag is how it updates.
 
 ### Any other agent
 
@@ -414,6 +451,30 @@ export HIVEMIND_API_KEY="hm_…"   # the org key at first, the agent key once ac
 - **Oh My Pi**: the shell that starts `omp`. The plugin sets up the
   connection from both variables. Nothing goes in
   `~/.omp/agent/mcp.json`.
+- **Cline**: the shell that starts `cline` (the IDE extension does not
+  read a shell profile: start it from that terminal). The connection goes
+  in `~/.cline/data/settings/cline_mcp_settings.json` and refers to the
+  variables, so the key itself never lands in that file:
+
+  ```json
+  { "mcpServers": { "hivemind": {
+      "type": "streamableHttp",
+      "url": "${env:HIVEMIND_MCP_URL}",
+      "headers": { "Authorization": "Bearer ${env:HIVEMIND_API_KEY}" },
+      "disabled": false } } }
+  ```
+
+- **KiloCode**: the shell that starts `kilo` (the IDE extension does not
+  read a shell profile: start it from that terminal). The plugin reads
+  both variables and sets up the connection. Without the plugin, add this
+  to `~/.config/kilo/kilo.jsonc`:
+
+  ```jsonc
+  { "mcp": { "hivemind": {
+      "type": "remote",
+      "url": "{env:HIVEMIND_MCP_URL}",
+      "headers": { "Authorization": "Bearer {env:HIVEMIND_API_KEY}" } } } }
+  ```
 
 ## Reminders to write and rate
 
@@ -454,6 +515,15 @@ each agent gets:
   compaction.
 - **Hermes**: neither. Hermes has no hook that can hold the end of a
   session.
+- **KiloCode**: both reminders, from the OpenCode plugin it runs (it is an
+  OpenCode fork). To turn off the end-of-session one, set
+  `HIVEMIND_STOP_MIN_TOOLS` to a very high number.
+- **Cline**: the end-of-task one, from the `PostToolUse` hook (a Cline
+  "task" is one run of the agent; to turn it off, set
+  `HIVEMIND_STOP_MIN_TOOLS` to a very high number). There is no
+  post-compaction line: Cline's `PreCompact` hook output is not injected.
+  The `UserPromptSubmit` hook gives the startup text on every prompt,
+  which is what carries Hivemind across a compaction.
 
 ## Incognito sessions
 
@@ -470,18 +540,23 @@ way):
 /path/to/hivemind/plugins/hivemind/bin/hivemind-incognito claude
 ```
 
-It also takes `codex`, `copilot`, `dsh`, `gemini`, `hermes`, `pi`, `omp`
-and `opencode`. To make it shorter to type, link it into a folder on your
+It also takes `codex`, `copilot`, `dsh`, `gemini`, `hermes`, `pi`, `omp`,
+`opencode`, `cline` and `kilocode`. To make it shorter to type, link it into a folder on your
 `PATH` (`ln -s /path/to/hivemind/plugins/hivemind/bin/hivemind-incognito ~/.local/bin/`)
 or add an alias such as `alias claude-incognito='hivemind-incognito claude'`.
 
 How well it works depends on the agent:
 
 - **Claude Code, DeepSeek Harness, Gemini CLI (installed as an
-  extension), Pi, Oh My Pi and OpenCode**: the Hivemind tools aren't
-  loaded at all, and there is nothing to set up. Pi with pi-mcp-adapter
+  extension), Pi, Oh My Pi, OpenCode and KiloCode**: the Hivemind tools
+  aren't loaded at all, and there is nothing to set up. Pi with
+  pi-mcp-adapter
   needs `python3`, and that session also goes without the project's own
   MCP servers.
+- **Cline**: the tools aren't loaded as long as the connection uses the
+  `${env:…}` references described above — the launcher unsets the two
+  variables, so the references stay unexpanded and the server never
+  connects. The hooks say the incognito line; the skills stay installed.
 - **Codex**: the tools aren't loaded, as long as the connection is in
   `~/.codex/config.toml` as described above.
 - **GitHub Copilot CLI**: the tools aren't loaded, as long as the
@@ -545,6 +620,14 @@ All of these go in a terminal:
 - **OpenCode**: change the version in the `plugin` entry and restart. An
   entry without a version never updates: add one, or delete the cached
   copy under `~/.cache/opencode/` and restart.
+- **KiloCode**: change the tag in the `plugin` entry
+  (`git:…/hivemind@v<version>#…`) and restart. A pinned entry is never
+  refreshed, so the tag change is the update; a branch entry updates on
+  its own about hourly.
+- **Cline**: copy the new plugin's `cline/` hook scripts over the old
+  ones in `~/Documents/Cline/Hooks/` and the new `skills/` folders over
+  the old copies in `~/.cline/skills/`. The MCP entry does not change
+  between releases. Then restart Cline.
 - **Pi**: `pi update --extensions`. If you installed a fixed version,
   install again with the new one. From a local copy, run `git pull` in it.
 - **Oh My Pi**: `omp plugin marketplace update hivemind`, then
@@ -572,6 +655,12 @@ First uninstall the plugin, in a terminal:
 - **OpenCode**: remove the entry from the `plugin` list — v2's
   `opencode plugin remove <package>` does it, v1 has no remove command,
   so edit the config file.
+- **KiloCode**: remove the entry from the `plugin` list in
+  `kilo.jsonc` (edit the file).
+- **Cline**: remove the `hivemind` entry from
+  `~/.cline/data/settings/cline_mcp_settings.json`, delete the two skill
+  folders from `~/.cline/skills/`, and the hook scripts from
+  `~/Documents/Cline/Hooks/`.
 - **Pi**: `pi remove <source>`, with the same source you installed from.
 - **Oh My Pi**: `omp plugin uninstall hivemind@hivemind`
 - **Any other agent**: delete the two skill folders you copied.
@@ -581,7 +670,8 @@ Then delete the block between `<!-- hivemind:begin -->` and
 Depending on the agent, that is `CLAUDE.md`, `AGENTS.md`,
 `~/.copilot/copilot-instructions.md`, `~/.dsh/AGENTS.md`,
 `~/.gemini/GEMINI.md`, `~/.hermes/SOUL.md`,
-`~/.config/opencode/AGENTS.md`, `~/.pi/agent/AGENTS.md` or
+`~/.config/opencode/AGENTS.md`, `~/.config/kilo/AGENTS.md`,
+`~/.pi/agent/AGENTS.md` or
 `~/.omp/agent/AGENTS.md`. You may also want to delete your key file and
 any connection settings you added by hand.
 

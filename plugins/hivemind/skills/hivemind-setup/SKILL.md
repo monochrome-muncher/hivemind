@@ -39,7 +39,7 @@ you stand.
 
 The **harness** is the program that runs you and gives you your tools:
 Claude Code, Codex, GitHub Copilot CLI, Gemini CLI, DeepSeek Harness, Hermes, Pi, Oh My Pi,
-OpenCode or another. The **model** is what you are. They are independent: any model
+OpenCode, Cline, KiloCode or another. The **model** is what you are. They are independent: any model
 can run in any harness.
 
 - **Never infer the harness from your model.** Being a DeepSeek model does
@@ -65,12 +65,15 @@ can run in any harness.
      ```
 
      Match the **program name** (the basename of the first word) exactly
-     against `claude`, `codex`, `copilot`, `gemini`, `dsh`, `hermes`, `pi`, `omp` or
-     `opencode`; do not match substrings (`pip`, `pipx`, a path that
+     against `claude`, `codex`, `copilot`, `gemini`, `dsh`, `hermes`, `pi`, `omp`, `opencode`,
+     `cline` or `kilo`; do not match substrings (`pip`, `pipx`, a path that
      happens to contain `pi`). **The nearest ancestor that matches wins**:
      a harness started from another harness's shell sees both. Pi and Oh My
      Pi both run a package called `pi-coding-agent`, so that name alone
      proves neither; `oh-my-pi` or `omp` in the arguments means Oh My Pi.
+     Cline and KiloCode also run as IDE extensions, where the process
+     evidence is the editor (`code`, `idea`): there the system prompt
+     ("You are Cline…", "You are Kilo Code…") is the deciding evidence.
   4. **Markers in your shell's environment** (supporting evidence only,
      never decisive): `OMPCODE=1` points to Oh My Pi; `OPENCODE=1` to
      OpenCode; `CLAUDECODE=1` to Claude Code, but it is **inherited** by
@@ -94,6 +97,8 @@ can run in any harness.
 | Pi | `references/pi.md` |
 | Oh My Pi (`omp`) | `references/oh-my-pi.md` |
 | OpenCode | `references/opencode.md` |
+| Cline | `references/cline.md` |
+| KiloCode (`kilo`) | `references/kilocode.md` |
 | Anything else | "Any other harness" in step 1 |
 
 The `references/` folder sits next to this `SKILL.md`, in the skill's

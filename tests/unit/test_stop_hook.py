@@ -571,6 +571,39 @@ def test_the_opencode_reminder_after_a_compaction_asks_once_to_write() -> None:
     assert all(line not in str(s) for s in (before, elsewhere, later))
 
 
+@needs_node
+def test_the_opencode_v1_hook_honours_kilocodes_v2_event_names() -> None:
+    """KiloCode (an OpenCode fork) delivers v2 events to the v1 event hook:
+    an execution end fires the stop nudge, compaction.ended carries the
+    post-compaction line, and a shutdown interruption stays excluded."""
+    succeeded = [
+        "event",
+        {"type": "session.execution.succeeded", "properties": {"sessionID": "s1"}},
+    ]
+    assert [s["path"]["id"] for s in _opencode([*_oc_calls(20), succeeded])["sent"]] == ["s1"]
+    shutdown = [
+        "event",
+        {
+            "type": "session.execution.interrupted",
+            "properties": {"sessionID": "s2", "reason": "shutdown"},
+        },
+    ]
+    assert _opencode([*_oc_calls(20, sid="s2"), shutdown])["sent"] == []
+    interrupted = [
+        "event",
+        {"type": "session.execution.interrupted", "properties": {"sessionID": "s3"}},
+    ]
+    assert [
+        s["path"]["id"] for s in _opencode([*_oc_calls(20, sid="s3"), interrupted])["sent"]
+    ] == ["s3"]
+    line = COMPACT_LINE.group(1)  # type: ignore[union-attr]
+    compacted = ["event", {"type": "session.compaction.ended", "properties": {"sessionID": "s1"}}]
+    system = ["system", {"sessionID": "s1", "model": {}}]
+    r = _opencode([system, compacted, system, system])
+    assert isinstance(r["system"][1], str) and r["system"][1].endswith(line)
+    assert all(line not in str(s) for s in (*r["system"][:1], *r["system"][2:]))
+
+
 # -- DeepSeek Harness: the Stop reminder from the bundle's own plugin ---------------
 
 DSH_PLUGIN = PLUGIN / "dsh" / "hivemind-reminders.js"
