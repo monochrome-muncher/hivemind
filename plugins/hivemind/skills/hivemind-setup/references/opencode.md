@@ -8,10 +8,15 @@ in?" in the hivemind-setup skill.
 
 The hivemind **OpenCode plugin** does the whole setup itself: it registers
 the Hivemind MCP server from `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY`, adds
-the two skills, and puts the reminder into every model request. Add the
-Hivemind repository's Git URL to the `plugin` list in
+the two skills, and puts the reminder into every model request. It supports
+both OpenCode v1 and v2 (the two plugin APIs differ; the plugin carries
+both). Add the Hivemind repository's Git URL to the plugin list in
 `~/.config/opencode/opencode.json` (all projects) or a project's
 `opencode.json`, then export the two variables and restart OpenCode:
+
+OpenCode v1 uses the `plugin` key; v2 uses `plugins` and migrates a `plugin`
+entry automatically. Write `plugin` — it works on both (v1 does not read
+`plugins`; an entry under it is only warned about, not loaded):
 
 ```json
 { "plugin": ["git+https://<git-server>/<owner>/hivemind.git#v<version>"] }
@@ -20,16 +25,15 @@ Hivemind repository's Git URL to the `plugin` list in
 Pin a release tag as shown: OpenCode caches a Git plugin on first use and
 never refreshes an unpinned entry, so changing the tag is how it updates.
 
-Or run `opencode plugin -g <git-url>`, which installs it and updates the
-global config (without `-g` it writes the current project's
+Or run `opencode plugin -g <git-url>` (v1) / `opencode plugin add <git-url>`
+(v2, which always writes the global config), which installs it and updates
+the config (on v1, without `-g` it writes the current project's
 `.opencode/opencode.json`, so Hivemind would load only in that project).
 **The plugin is the supported route**: it builds the `Authorization`
 header from the environment in its own code. With the key unset it does
 not register the server at all (no empty `Bearer ` header, no 401 loop),
 and the reminder says Hivemind is not connected. Installing a plugin from
-a `git+https` URL has open reports of Bun/npm conflicts, and the reminder
-uses OpenCode's `experimental.chat.system.transform` hook, which may be
-renamed in a release.
+a `git+https` URL has open reports of Bun/npm conflicts.
 
 Without the plugin, add the server by hand (the skills are found in
 `~/.claude/skills` or `~/.agents/skills` anyway):
@@ -75,10 +79,10 @@ of other harnesses.
 
 ## Update
 
-Change the tag in the `plugin` entry (`git+https://…/hivemind.git#v<version>`)
-to the new release, then restart OpenCode. An unpinned entry never
-updates: pin it, or delete OpenCode's cached copy under `~/.cache/opencode/`
-and restart.
+Change the tag in the `plugin` entry (`git+https://…/hivemind.git#v<version>`,
+under `plugin` on v1 and migrated to `plugins` on v2) to the new release,
+then restart OpenCode. An unpinned entry never updates: pin it, or delete
+OpenCode's cached copy under `~/.cache/opencode/` and restart.
 
 ## Incognito
 

@@ -45,7 +45,7 @@ reminder that survives compaction and new sessions.
 | Hermes | the user's `~/.hermes/config.yaml` | the plugin | the plugin's system-prompt section (Hermes 0.21.5+), else the `SOUL.md` instruction block (see below) |
 | Pi | the extension registers it with Pi 0.99+ built-in MCP; with pi-mcp-adapter, the adapter's config | the package | the extension's system-prompt section |
 | Oh My Pi | the plugin's `.mcp.json` (server `hivemind:hivemind`; a hand `hivemind` entry in `~/.omp/agent/mcp.json` replaces it) | the plugin | the extension's system-prompt section |
-| OpenCode | `opencode/hivemind.js` (skipped if a hand-configured `hivemind` server exists or no key is set) | the plugin | added to every model request |
+| OpenCode | `opencode/hivemind.js` (skipped if a hand-configured `hivemind` server exists or no key is set; supports v1 and v2) | the plugin | added to every model request |
 | Gemini CLI | the extension's `gemini-extension.json` (a `hivemind` entry in `~/.gemini/settings.json` replaces it) | the extension | the `GEMINI.md` instruction block, plus the extension's `SessionStart` hook |
 | GitHub Copilot CLI | the user's `~/.copilot/mcp-config.json` (the whole `url` cannot come from the environment; the key can) | the plugin | the plugin's `SessionStart` hook, plus the `~/.copilot/copilot-instructions.md` instruction block |
 
@@ -91,7 +91,24 @@ itself names no harness-specific paths, and a test enforces this.
   A plain `omp install <git-url>` misses the skills, so it installs
   through the marketplace.
 - **OpenCode** caches a Git plugin on first use and never refreshes an
-  unpinned entry, so users pin a release tag.
+  unpinned entry, so users pin a release tag. v1 (1.18.29+) and v2 have
+  different plugin APIs, so `opencode/hivemind.js` default-exports one
+  plain object that carries both: v1 calls `server()` (an object default
+  export is supported from 1.18.29; older v1 releases expect a function
+  export) and v2 validates the default export as `{ id, setup }` and
+  ignores `server()`. The two implementations are separate — nothing
+  translates hooks: v1's `config` hook / `experimental.chat.system.transform`
+  / `chat.message` / `tool.execute.after` / `event` become v2's
+  `ctx.mcp.transform` + `ctx.skill.transform` / `ctx.session.hook("context")`
+  (`event.system` takes `{type, text}` parts) / — / `ctx.tool.hook(
+  "execute.after")` / `ctx.event.subscribe`. v2 MCP servers use `disabled`
+  (v1 `enabled`); v2 config uses the `plugins` key and migrates a v1
+  `plugin` entry, while v1 only warns about `plugins` and does not load
+  it; v2 has no `session.idle` — an execution ends with
+  `session.execution.succeeded` / `failed` / `interrupted` (v1's idle
+  fired on each of them) and compaction ends with
+  `session.compaction.ended`. Verified against the v2 source (`@opencode`
+  packages) and v1.18.29.
 - **Gemini CLI** installs an extension from a Git URL by cloning the whole
   repository and reading `gemini-extension.json`, `skills/` and
   `hooks/hooks.json` at its root (hence the root files; there is no
