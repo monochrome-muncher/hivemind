@@ -677,6 +677,19 @@ their entries are tightly clustered), which is the same reason the
 five-domain study reported a per-pool range: one value is a starting
 point, not a fit.
 
+Caveat on the expanded corpus: the generator that produced the eleven
+new domains and the five extensions gives a quarter of its entries a short
+body, and those bodies are formulaic ("The N figure is the one the desk
+verifies against the raw report before it is written to the pool"), so a
+hundred of the 472 bodies repeat verbatim. That raises entry-to-entry
+similarity within the pool, which is why the off-topic similarities sit high
+(0.89–0.90) and the suggested value is conservative. The version-pair
+entries carry no body, so the tau measurement is unaffected; and because the
+same corpus is used for all three models, the relative comparison across
+models is unaffected. The absolute thresholds should be re-checked on a
+corpus with diverse bodies before a deployment sets the value from this
+alone.
+
 **How to measure.** Point the `HIVEMIND_EMBEDDING_*` settings at the
 embedder the deployment uses, with the deployment's dimension, and run:
 
