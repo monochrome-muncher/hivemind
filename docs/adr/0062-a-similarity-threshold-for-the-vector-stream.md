@@ -44,6 +44,12 @@ age-varied sets (`tests/eval/`).
    `docs/retrieval-experiments.md` describes how to read it. Measured
    for Qwen3-Embedding 8B, 4B and 0.6B at 1024 dimensions over five
    domains of agent work, it suggests 0.45; the default stays off.
+   Re-measured 2026-10-17 on the expanded sixteen-domain corpus
+   (`tests/eval/corpus`: 16 domains × 128 entries = 2048, 646
+   answerable, 192 off-topic): the suggested value drops to 0.25 on
+   0.6B and 0.30 on 4B and 8B, because the weakest answer falls to
+   0.34–0.39 with sixteen domains competing for the same queries; the
+   default stays off.
 
 ## Consequences
 

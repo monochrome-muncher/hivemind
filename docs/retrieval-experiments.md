@@ -627,6 +627,56 @@ keyword stream finds a shared word and the near misses are genuinely
 near. These are 156 synthetic queries over 184 entries: tune from there
 with the counters below.
 
+**Measured: expanded 16-domain corpus (0.25–0.30).**
+*(2026-10-17; `tests/eval/corpus`, 16 domains × 128 entries = 2048, 646
+answerable and 192 off-topic queries in the combined pool; Qwen3-Embedding
+0.6B, 4B and 8B via vLLM at 1024 dimensions; `tests/eval/threshold.py`'s
+`extended_scenarios()`, one fixture per process.)*
+
+The five-domain set above is extended to sixteen domains (`tests/eval/corpus`):
+the five original domains each grow from 32 to 128 entries (96 more, 22 more
+answerable, 6 more unanswered), and eleven new domains are added (web search,
+intelligence analysis, vulnerability research, blue team, red team, database
+engineering, network operations, data engineering, platform engineering,
+research literature, legal compliance), each 128 entries, 40 answerable,
+12 unanswered. Every domain keeps the same shape: a quarter with a body, a
+~70/20/10 fact/insight/decision mix, and off-topic queries answered in another
+domain.
+
+The combined pool (2048 entries, 646 answerable, 192 off-topic):
+
+| model | weakest answer | strongest off-topic | keep all 646 answers at ≤ | off-topic starts emptying at ≥ | suggested |
+|---|---|---|---|---|---|
+| 0.6B | 0.343 | 0.890 | 0.30 | 0.55 | 0.25 |
+| 4B | 0.354 | 0.897 | 0.35 | 0.50 | 0.30 |
+| 8B | 0.393 | 0.902 | 0.35 | 0.55 | 0.30 |
+
+The per-model combined sweep (answers kept in the vector stream / off-topic
+vector stream empty):
+
+| threshold | 0.6B | 4B | 8B |
+|---|---|---|---|
+| 0.30 | 646/646, 0/192 | 646/646, 0/192 | 646/646, 0/192 |
+| 0.35 | 645/646, 0/192 | 646/646, 0/192 | 646/646, 0/192 |
+| 0.45 | 639/646, 0/192 | 639/646, 0/192 | 640/646, 0/192 |
+| 0.55 | 609/646, 6/192 | 604/646, 9/192 | 618/646, 4/192 |
+| 0.60 | 572/646, 17/192 | 563/646, 17/192 | 573/646, 10/192 |
+| 0.65 | 490/646, 51/192 | 489/646, 61/192 | 511/646, 34/192 |
+
+The five-domain result (0.45) does not carry over: with sixteen domains the
+weakest answer drops to 0.34–0.39 (more domains compete for the same
+queries, and the new domains include vaguer question styles), so 0.45 already
+loses 7 answers (1%) and 0.50 loses 14. The suggested value — the highest
+0.05 step at least 0.05 below the weakest answer — is 0.25 on 0.6B and 0.30
+on 4B and 8B. The trade-off gap is wider than on five domains: keeping
+every answer needs ≤0.30–0.35, but off-topic queries only start to empty
+the vector stream at ≥0.50. Between 0.35 and 0.50 the threshold loses
+answers without emptying anything. The per-domain suggested values span
+0.30 to 0.70 (blue team and database engineering are the highest, where
+their entries are tightly clustered), which is the same reason the
+five-domain study reported a per-pool range: one value is a starting
+point, not a fit.
+
 **How to measure.** Point the `HIVEMIND_EMBEDDING_*` settings at the
 embedder the deployment uses, with the deployment's dimension, and run:
 
@@ -810,3 +860,53 @@ groups 17% of its distractors at 0.90 on 0.6B and 4B. Below 0.90, a third
 or more of the distractors are grouped. Same-system facts sit as close
 together in these embedders as two versions of one fact, so cosine alone
 cannot tell them apart.
+
+**Measured: expanded 16-domain corpus — still no passing tau.**
+*(2026-10-17; `tests/eval/corpus`, 16 domains × 16 version pairs = 256
+pairs, 2048 background entries; Qwen3-Embedding 0.6B, 4B, 8B via vLLM at
+1024 dimensions; `tests/eval/versions.py`'s `measure_all()` over four
+fleet constellations)*
+
+The five-domain fixture is extended to sixteen domains (`tests/eval/corpus`):
+each domain now carries 16 version pairs (6 original + 10 from its
+extension) and 128 background entries, for 256 pairs and 2048 background
+entries in total. The harness also sweeps four fleet constellations —
+org-only (legacy), an isolated single fleet (the adoption rule's
+constellation), two mixed fleets with overlapping systems, and org
+alongside a fleet — so the fleet rule can be read against the
+similarities. The adoption rule is applied to the isolated-fleet
+constellation only; the others are sensitivity readings.
+
+Pooled over the sixteen domains (256 pairs), isolated fleet:
+
+| model | tau | false grouping | true grouping | newer-member MRR | old-exact MRR | hit@5 |
+|---|---|---|---|---|---|---|
+| 0.6B | off | 0% | 0% | 0.196 | 0.266 | 0.790 |
+| 0.6B | 0.90 | 14% | 71% | 0.243 | 0.261 | 0.800 |
+| 0.6B | 0.95 | 0% | 52% | 0.214 | 0.248 | 0.776 |
+| 4B | off | 0% | 0% | 0.202 | 0.273 | 0.786 |
+| 4B | 0.90 | 5% | 61% | 0.226 | 0.251 | 0.778 |
+| 4B | 0.95 | 1% | 45% | 0.214 | 0.244 | 0.788 |
+| 8B | off | 0% | 0% | 0.204 | 0.292 | 0.773 |
+| 8B | 0.90 | 6% | 52% | 0.227 | 0.274 | 0.766 |
+| 8B | 0.95 | 0% | 32% | 0.216 | 0.272 | 0.766 |
+
+No tau passes the adoption rule on any model, on the larger corpus. The
+4B model at tau=0.90 is the closest: pooled false grouping is exactly
+5% (meets "at most 5%") and true grouping is 61%, but it fails on
+three counts — old-exact MRR drops 0.022 (0.273 to 0.251, over the
+0.02 allowance), hit@5 drops 0.008 (0.786 to 0.778), and three
+domains exceed 10% false grouping (data analysis 12%, web search
+19%, database engineering 25%). 0.6B and 8B are further off (14%
+and 6% pooled false grouping at 0.90). Raising tau to 0.95 cuts
+false grouping to 0–1% but true grouping falls to 32–52%, so the
+newer-member gain is small and old-exact stays down.
+
+The conclusion matches the five-domain study and is now established
+on 8× the pairs: same-system facts sit as close together in these
+embedders as two versions of one fact, so a single cosine cut-off
+cannot separate them. The fleet constellations change what is
+eligible to group (an isolated fleet sees only its own entries), not
+the similarities, so they do not rescue a tau: the isolated-fleet
+constellation (the one the adoption rule uses) is the most
+favourable and it still fails. **Keep grouping off.**

@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import math
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 from hivemind.domain.entry import EntryDraft, Kind
 from hivemind.memstore import MemoryStore, cosine_similarity
@@ -88,11 +88,11 @@ def golden_fixture() -> Fixture:
     return Fixture("golden + age-varied", tuple(entries), tuple(answerable), OFF_TOPIC_QUERIES)
 
 
-def domain_fixture(domain: Domain) -> Fixture:
+def domain_fixture(domain: Domain, all_domains: tuple[Domain, ...] = DOMAINS) -> Fixture:
     """One domain's pool alone, as one fleet's would be. Off-topic: the
     domain's unanswered queries, then every other domain's queries (answered
     elsewhere, not here)."""
-    others = [d for d in DOMAINS if d is not domain]
+    others = [d for d in all_domains if d is not domain]
     answerable = list(domain.answerable)
     answerable += [(q, (i,)) for q, name, i in CROSS_DOMAIN if name == domain.name]
     off_topic = list(domain.unanswered)
@@ -102,25 +102,39 @@ def domain_fixture(domain: Domain) -> Fixture:
     return Fixture(domain.name, domain.entries, tuple(answerable), tuple(off_topic))
 
 
-def combined_fixture() -> Fixture:
+def combined_fixture(
+    all_domains: tuple[Domain, ...] = DOMAINS, name: str = "all domains together"
+) -> Fixture:
     """Every domain in one pool, as an org-wide reader sees it."""
     entries: list[Entry] = []
     answerable: list[tuple[str, tuple[int, ...]]] = []
     offsets = {}
-    for domain in DOMAINS:
+    for domain in all_domains:
         offsets[domain.name] = len(entries)
         answerable += [(q, tuple(len(entries) + i for i in rel)) for q, rel in domain.answerable]
         entries += domain.entries
     answerable += [(q, (offsets[name] + i,)) for q, name, i in CROSS_DOMAIN]
-    off_topic = tuple(q for d in DOMAINS for q in d.unanswered)
-    return Fixture("all domains together", tuple(entries), tuple(answerable), off_topic)
+    off_topic = tuple(q for d in all_domains for q in d.unanswered)
+    return Fixture(name, tuple(entries), tuple(answerable), off_topic)
 
 
 def scenarios() -> list[Fixture]:
-    """What ``make measure-threshold`` runs."""
+    """What ``make measure-threshold`` ran on the five-domain study set."""
     return [
         combined_fixture(),
         *(domain_fixture(d) for d in DOMAINS),
+        golden_fixture(),
+    ]
+
+
+def extended_scenarios() -> list[Fixture]:
+    """The same scenarios over the expanded sixteen-domain corpus
+    (``tests/eval/corpus``), plus the golden and age-varied corpora."""
+    from tests.eval.corpus import EXTENDED_DOMAINS
+
+    return [
+        combined_fixture(EXTENDED_DOMAINS, "all sixteen domains together"),
+        *(domain_fixture(d, EXTENDED_DOMAINS) for d in EXTENDED_DOMAINS),
         golden_fixture(),
     ]
 
@@ -159,8 +173,74 @@ def suggest(relevant_similarities: list[float], margin: float = MARGIN) -> float
     return max(0.0, math.floor((lowest - margin) * 20 + 1e-9) / 20)
 
 
+@dataclass(frozen=True, slots=True)
+class EmbedCache:
+    """Caches embeddings by text so one run of many scenarios embeds each
+    entry and query once. The entry key is the summary, which the corpus
+    keeps unique; the query key is the query itself."""
+
+    embedder: Embedder
+    by_key: dict[str, list[float]] = field(default_factory=dict)
+
+    async def entry(self, draft: EntryDraft) -> list[float]:
+        key = "e\x00" + draft.summary
+        vector = self.by_key.get(key)
+        if vector is None:
+            vector = await self.embedder.embed_entry(draft)
+            self.by_key[key] = vector
+        return vector
+
+    async def text(self, text: str) -> list[float]:
+        key = "q\x00" + text
+        vector = self.by_key.get(key)
+        if vector is None:
+            vector = await self.embedder.embed_text(text)
+            self.by_key[key] = vector
+        return vector
+
+
+class CachingEmbedder:
+    """An ``Embedder`` that embeds each distinct text once, delegating to a
+    wrapped embedder. Lets ``SearchService.search`` (which embeds the query on
+    every call) reuse vectors across the whole sweep and across scenarios, so
+    one run of many fixtures embeds each entry and query a single time."""
+
+    _wrapped: Embedder
+    _by_text: dict[str, list[float]]
+
+    def __init__(self, wrapped: Embedder) -> None:
+        self._wrapped = wrapped
+        self._by_text = {}
+
+    @property
+    def dimension(self) -> int:
+        return self._wrapped.dimension
+
+    @property
+    def model_name(self) -> str:
+        return self._wrapped.model_name
+
+    def entry_embeddable_text(self, draft: EntryDraft) -> str:
+        return self._wrapped.entry_embeddable_text(draft)
+
+    async def embed_text(self, text: str) -> list[float]:
+        vector = self._by_text.get(text)
+        if vector is None:
+            vector = await self._wrapped.embed_text(text)
+            self._by_text[text] = vector
+        return vector
+
+    async def embed_entry(self, draft: EntryDraft) -> list[float]:
+        key = "e\x00" + self.entry_embeddable_text(draft)
+        vector = self._by_text.get(key)
+        if vector is None:
+            vector = await self._wrapped.embed_entry(draft)
+            self._by_text[key] = vector
+        return vector
+
+
 async def _seed(
-    embedder: Embedder, store: Store, entries: tuple[Entry, ...]
+    embedder: Embedder, store: Store, entries: tuple[Entry, ...], cache: EmbedCache | None = None
 ) -> list[tuple[str, list[float]]]:
     """Write the entries; return (id, stored vector) in fixture order."""
     writer = WriteService(store, embedder)
@@ -169,12 +249,15 @@ async def _seed(
         draft = EntryDraft(
             kind=Kind(kind),
             summary=summary,
-            tags=list(tags),
+            tags=tuple(tags),
             body=body,
             author="eval",
             agent="eval",
         )
-        stored.append(((await writer.write(draft)).id, await embedder.embed_entry(draft)))
+        vector = (
+            await cache.entry(draft) if cache is not None else await embedder.embed_entry(draft)
+        )
+        stored.append(((await writer.write(draft)).id, vector))
     return stored
 
 
@@ -184,22 +267,24 @@ async def measure(
     sweep: tuple[float, ...] = SWEEP,
     *,
     store: Store | None = None,
+    cache: EmbedCache | None = None,
 ) -> Measurement:
     """Run the sweep on ``fixture`` (the golden one by default) with
     ``embedder``; see the module docstring.
 
     ``store`` must be empty; a ``MemoryStore`` by default. A scratch
     ``PgStore`` gives Postgres's keyword matching (never a real pool: the
-    corpus is written into it)."""
+    corpus is written into it). ``cache`` shares embeddings across the
+    scenarios of one run."""
     fixture = fixture or golden_fixture()
     store = store or MemoryStore(make_clock())
-    seeded = await _seed(embedder, store, fixture.entries)
+    seeded = await _seed(embedder, store, fixture.entries, cache)
     ids = [eid for eid, _ in seeded]
     stored = dict(seeded)
     answerable = [(q, {ids[i] for i in rel}) for q, rel in fixture.answerable]
 
     async def similarities(query: str) -> dict[str, float]:
-        vector = await embedder.embed_text(query)
+        vector = await cache.text(query) if cache is not None else await embedder.embed_text(query)
         return {eid: cosine_similarity(vector, emb) for eid, emb in stored.items()}
 
     relevant_sims = []
@@ -271,19 +356,57 @@ def _median(values: list[float]) -> float:
     return ordered[mid] if len(ordered) % 2 else (ordered[mid - 1] + ordered[mid]) / 2
 
 
-async def _main() -> None:
+def _measure_fixture(
+    fixture: Fixture,
+    endpoint: str,
+    model: str,
+    dim: int,
+    api_key: str,
+) -> str:
+    """Measure one fixture in its own process: the search work is CPU-bound
+    (pure-Python cosine) and GIL-bound, so true parallelism needs one process
+    per fixture. Each process builds its own embedder against the shared vLLM
+    server and caches its embeddings."""
+    from hivemind.config import Settings
+    from hivemind.embeddings import build_embedder
+
+    settings = Settings(
+        embedding_endpoint=endpoint,
+        embedding_model=model,
+        embedding_dim=dim,
+        embedding_api_key=api_key,
+    )
+    embedder = CachingEmbedder(build_embedder(settings))
+    return report(asyncio.run(measure(embedder, fixture)))
+
+
+def _main() -> None:
+    from concurrent.futures import ProcessPoolExecutor
+
     from hivemind.config import endpoint_label, load_settings
-    from hivemind.embeddings import EmbeddingError, build_embedder
+    from hivemind.embeddings import EmbeddingError
 
     settings = load_settings()
+    fixtures = extended_scenarios()
     try:
-        embedder = build_embedder(settings)
-        for fixture in scenarios():
-            print(report(await measure(embedder, fixture)), end="\n\n")
+        with ProcessPoolExecutor(max_workers=8) as pool:
+            futures = [
+                pool.submit(
+                    _measure_fixture,
+                    f,
+                    str(settings.embedding_endpoint),
+                    settings.embedding_model,
+                    settings.embedding_dim,
+                    settings.embedding_api_key,
+                )
+                for f in fixtures
+            ]
+            results = [f.result() for f in futures]
+        print("\n\n".join(results))
     except EmbeddingError as exc:
         where = endpoint_label(settings.embedding_endpoint)
         raise SystemExit(f"embedder at {where} unavailable ({exc}); start it (make vllm)") from None
 
 
 if __name__ == "__main__":
-    asyncio.run(_main())
+    _main()
