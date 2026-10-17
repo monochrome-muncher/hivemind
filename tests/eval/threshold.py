@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import os
 from dataclasses import dataclass, field, replace
 
 from hivemind.domain.entry import EntryDraft, Kind
@@ -135,6 +136,45 @@ def extended_scenarios() -> list[Fixture]:
     return [
         combined_fixture(EXTENDED_DOMAINS, "all sixteen domains together"),
         *(domain_fixture(d, EXTENDED_DOMAINS) for d in EXTENDED_DOMAINS),
+        golden_fixture(),
+    ]
+
+
+def extended_scenarios_specific() -> list[Fixture]:
+    """The extended scenarios with the answerable queries replaced by their
+    specific (de-vagued) variants (``tests/eval/corpus/specific_queries``), so
+    the sweep measures what a refined agent retry — a query that names the
+    system and setting — scores against the entries. The off-topic queries
+    and the entries are unchanged; only the answerable query text differs."""
+    from tests.eval.corpus import EXTENDED_DOMAINS
+    from tests.eval.corpus.specific_queries import SPECIFIC_ANSWERABLE
+
+    def _spec_domain(domain: Domain) -> Fixture:
+        base = domain_fixture(domain, EXTENDED_DOMAINS)
+        spec = SPECIFIC_ANSWERABLE[domain.name]
+        answerable = [(spec[i], rel) for i, (_q, rel) in enumerate(domain.answerable)]
+        answerable += list(base.answerable[len(domain.answerable) :])  # cross-domain stays
+        return Fixture(
+            base.name + " (specific queries)", base.entries, tuple(answerable), base.off_topic
+        )
+
+    def _spec_combined() -> Fixture:
+        base = combined_fixture(EXTENDED_DOMAINS, "all sixteen domains together")
+        answerable = list(base.answerable)
+        i = 0
+        for domain in EXTENDED_DOMAINS:
+            spec = SPECIFIC_ANSWERABLE[domain.name]
+            for _j in range(len(domain.answerable)):
+                answerable[i] = (spec[_j], answerable[i][1])
+                i += 1
+        # the trailing cross-domain queries (i onwards) stay as written
+        return Fixture(
+            base.name + " (specific queries)", base.entries, tuple(answerable), base.off_topic
+        )
+
+    return [
+        _spec_combined(),
+        *(_spec_domain(d) for d in EXTENDED_DOMAINS),
         golden_fixture(),
     ]
 
@@ -387,7 +427,8 @@ def _main() -> None:
     from hivemind.embeddings import EmbeddingError
 
     settings = load_settings()
-    fixtures = extended_scenarios()
+    query_style = os.environ.get("EVAL_QUERY_STYLE", "vague").strip().lower()
+    fixtures = extended_scenarios_specific() if query_style == "specific" else extended_scenarios()
     try:
         with ProcessPoolExecutor(max_workers=8) as pool:
             futures = [

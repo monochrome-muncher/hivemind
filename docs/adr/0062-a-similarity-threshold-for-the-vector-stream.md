@@ -49,7 +49,12 @@ age-varied sets (`tests/eval/`).
    answerable, 192 off-topic): the suggested value drops to 0.25 on
    0.6B and 0.30 on 4B and 8B, because the weakest answer falls to
    0.34–0.39 with sixteen domains competing for the same queries; the
-   default stays off.
+   default stays off. Re-measured the same day with de-vagued answerable
+   queries (`tests/eval/corpus/specific_queries.py`, a refined agent
+   retry that names the system and setting): the weakest answer rises to
+   0.41–0.50 and the suggested value to 0.35–0.45, so a high cut-off is
+   viable again when queries are specific — the threshold is a property of
+   the query, not just the model.
 
 ## Consequences
 

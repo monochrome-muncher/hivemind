@@ -239,14 +239,29 @@ def suggest(m: Measurement) -> float | None:
     return min(passing) if passing else None
 
 
+def _with_specific_queries(vdomain: VersionDomain) -> VersionDomain:
+    """The same domain with each pair's ``query`` replaced by its specific
+    (de-vagued) variant (`tests/eval/corpus/specific_queries`), so the tau
+    sweep measures a refined agent retry. The entries are unchanged."""
+    from tests.eval.corpus.specific_queries import SPECIFIC_PAIRS
+
+    spec = SPECIFIC_PAIRS[vdomain.name]
+    pairs = tuple(replace(p, query=spec[i]) for i, p in enumerate(vdomain.pairs))
+    return replace(vdomain, pairs=pairs)
+
+
 async def measure_domain(
     embedder: Embedder,
     vdomain: VersionDomain,
     sweep: tuple[float, ...] = SWEEP,
     constellation: Constellation = ORG_ONLY,
+    query_style: str = "vague",
 ) -> list[Row]:
     """The grouping-off baseline, then one row per tau, on one domain,
-    with the pool scoped per ``constellation``."""
+    with the pool scoped per ``constellation``. ``query_style`` of
+    "specific" swaps each pair's query for its de-vagued variant."""
+    if query_style == "specific":
+        vdomain = _with_specific_queries(vdomain)
     domain = vdomain.domain
     store = MemoryStore(make_clock())
     writer = WriteService(store, embedder)
@@ -343,10 +358,13 @@ async def measure(
     domains: tuple[VersionDomain, ...] = VERSION_DOMAINS,
     sweep: tuple[float, ...] = SWEEP,
     constellation: Constellation = ORG_ONLY,
+    query_style: str = "vague",
 ) -> Measurement:
     result = Measurement(embedder.model_name)
     for vdomain in domains:
-        result.domains[vdomain.name] = await measure_domain(embedder, vdomain, sweep, constellation)
+        result.domains[vdomain.name] = await measure_domain(
+            embedder, vdomain, sweep, constellation, query_style
+        )
     return result
 
 
@@ -355,9 +373,10 @@ async def measure_all(
     domains: tuple[VersionDomain, ...] = VERSION_DOMAINS,
     constellations: tuple[Constellation, ...] = CONSTELLATIONS,
     sweep: tuple[float, ...] = SWEEP,
+    query_style: str = "vague",
 ) -> dict[str, Measurement]:
     """The sweep on every constellation; the keys are constellation names."""
-    return {c.name: await measure(embedder, domains, sweep, c) for c in constellations}
+    return {c.name: await measure(embedder, domains, sweep, c, query_style) for c in constellations}
 
 
 def _table(rows: list[Row]) -> list[str]:
@@ -423,15 +442,18 @@ def report_all(results: dict[str, Measurement]) -> str:
 
 
 async def _main() -> None:
+    import os
+
     from hivemind.config import endpoint_label, load_settings
     from hivemind.embeddings import EmbeddingError, build_embedder
     from tests.eval.corpus import EXTENDED_VERSION_DOMAINS
     from tests.eval.threshold import CachingEmbedder
 
     settings = load_settings()
+    query_style = os.environ.get("EVAL_QUERY_STYLE", "vague").strip().lower()
     try:
         embedder = CachingEmbedder(build_embedder(settings))
-        results = await measure_all(embedder, EXTENDED_VERSION_DOMAINS)
+        results = await measure_all(embedder, EXTENDED_VERSION_DOMAINS, query_style=query_style)
         print(report_all(results))
     except EmbeddingError as exc:
         where = endpoint_label(settings.embedding_endpoint)
