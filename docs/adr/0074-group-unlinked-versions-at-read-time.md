@@ -2,7 +2,7 @@
 
 Amends SPEC §6.3 (the supersession ranking invariant). Does not change [ADR 0001](0001-append-only-entries-with-explicit-supersession.md) or [ADR 0070](0070-one-capped-budget-for-social-signals.md).
 
-Status: Accepted. Ships **off**: nothing changes until an operator sets a cut-off measured with their embedder.
+Status: Accepted. Ships **off**: nothing changes until an operator sets a cut-off measured with their embedder. Re-measured 2026-10-17 on the expanded sixteen-domain corpus (`tests/eval/corpus`, 256 pairs, Qwen3-Embedding 0.6B/4B/8B via vLLM): still no tau passes the adoption rule on any model — the 4B model at tau=0.90 is the closest (5% pooled false grouping, 61% true) but fails on old-exact MRR, hit@5 and three domains above 10% false grouping. Grouping stays off.
 
 ## Context
 
@@ -26,7 +26,7 @@ Supersession is a claim an agent has to make. When two agents write "pool is 20"
 
 8. **A counts-only instrument is not built yet.** The study asks for unlinked version groups shown, per home fleet per day, as the first instrument for the held contradiction-detection trigger (SPEC §10). `search_counts` (ADR 0056) is a lifetime counter per fleet with no date, so a per-day count needs a new table or column, hence a migration, which this change does not add. It would be one row per (home fleet, day) with a count, written beside `record_search`, best-effort; `MetricsService` and the Prometheus gauges would read it. Until then the trigger has no number.
 
-9. **tau is measured, not guessed.** `make measure-versions` (`tests/eval/versions.py`) runs six version pairs and six same-system distractors per domain, in the five domains of the threshold study, across tau 0.70 to 0.95. Adopt a tau only where pooled false grouping is at most 5 percent and no domain is above 10 percent, the sysadmin domain passes, newer-member MRR rises, old-exact MRR falls at most 0.02 below baseline (grouping moves the newer member ahead, so it can only fall; the confirmation-clock rule uses the same tolerance) and pooled hit@5 does not fall. Results go in `docs/retrieval-experiments.md`. Measured 2026-10-11 on Qwen3-Embedding 8B/4B/0.6B: no tau passes on any model (same-system distractors sit as close as true versions), so grouping ships off with no recommended tau.
+9. **tau is measured, not guessed.** `make measure-versions` (`tests/eval/versions.py`) runs six version pairs and six same-system distractors per domain, in the five domains of the threshold study, across tau 0.70 to 0.95. Adopt a tau only where pooled false grouping is at most 5 percent and no domain is above 10 percent, the sysadmin domain passes, newer-member MRR rises, old-exact MRR falls at most 0.02 below baseline (grouping moves the newer member ahead, so it can only fall; the confirmation-clock rule uses the same tolerance) and pooled hit@5 does not fall. Results go in `docs/retrieval-experiments.md`. Measured 2026-10-11 on Qwen3-Embedding 8B/4B/0.6B: no tau passes on any model (same-system distractors sit as close as true versions), so grouping ships off with no recommended tau. Re-measured 2026-10-17 on the expanded sixteen-domain corpus (`tests/eval/corpus`: 16 domains × 16 pairs = 256 pairs, 2048 background entries, four fleet constellations): the same conclusion holds on 8× the pairs — no tau passes on any model, so the recommendation is unchanged (keep grouping off).
 
 ## Consequences
 
