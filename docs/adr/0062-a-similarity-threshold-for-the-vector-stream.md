@@ -44,6 +44,21 @@ age-varied sets (`tests/eval/`).
    `docs/retrieval-experiments.md` describes how to read it. Measured
    for Qwen3-Embedding 8B, 4B and 0.6B at 1024 dimensions over five
    domains of agent work, it suggests 0.45; the default stays off.
+   Re-measured 2026-10-17 on the expanded sixteen-domain corpus
+   (`tests/eval/corpus`: 16 domains × 128 entries = 2048, 646
+   answerable, 192 off-topic): the suggested value drops to 0.25 on
+   0.6B and 0.30 on 4B and 8B, because the weakest answer falls to
+   0.34–0.39 with sixteen domains competing for the same queries; the
+   default stays off. Re-measured the same day with de-vagued answerable
+   queries (`tests/eval/corpus/specific_queries.py`, a refined agent
+   retry that names the system and setting): the weakest answer rises to
+   0.41–0.50 and the suggested value to 0.35–0.45, so a high cut-off is
+   viable again when queries are specific — the threshold is a property of
+   the query, not just the model. Checked through search on 8B, the
+   production embedder (2026-10-18): up to 0.50 the threshold changes
+   nothing (hit@5 0.935 vague, 0.961 specific), 0.55 is the first value
+   with any effect, and 0.60 empties only 10 of 192 off-topic vector
+   streams, so no value is recommended and the default stays off.
 
 ## Consequences
 

@@ -627,6 +627,152 @@ keyword stream finds a shared word and the near misses are genuinely
 near. These are 156 synthetic queries over 184 entries: tune from there
 with the counters below.
 
+**Measured: expanded 16-domain corpus (0.25–0.30).**
+*(2026-10-17; `tests/eval/corpus`, 16 domains × 128 entries = 2048, 646
+answerable and 192 off-topic queries in the combined pool; Qwen3-Embedding
+0.6B, 4B and 8B via vLLM at 1024 dimensions; `tests/eval/threshold.py`'s
+`extended_scenarios()`, one fixture per process.)*
+
+The five-domain set above is extended to sixteen domains (`tests/eval/corpus`):
+the five original domains each grow from 32 to 128 entries (96 more, 22 more
+answerable, 6 more unanswered), and eleven new domains are added (web search,
+intelligence analysis, vulnerability research, blue team, red team, database
+engineering, network operations, data engineering, platform engineering,
+research literature, legal compliance), each 128 entries, 40 answerable,
+12 unanswered. Every domain keeps the same shape: a quarter with a body, a
+~70/20/10 fact/insight/decision mix, and off-topic queries answered in another
+domain.
+
+The combined pool (2048 entries, 646 answerable, 192 off-topic):
+
+| model | weakest answer | strongest off-topic | keep all 646 answers at ≤ | off-topic starts emptying at ≥ | suggested |
+|---|---|---|---|---|---|
+| 0.6B | 0.343 | 0.890 | 0.30 | 0.55 | 0.25 |
+| 4B | 0.354 | 0.897 | 0.35 | 0.50 | 0.30 |
+| 8B | 0.393 | 0.902 | 0.35 | 0.55 | 0.30 |
+
+The per-model combined sweep (answers kept in the vector stream / off-topic
+vector stream empty):
+
+| threshold | 0.6B | 4B | 8B |
+|---|---|---|---|
+| 0.30 | 646/646, 0/192 | 646/646, 0/192 | 646/646, 0/192 |
+| 0.35 | 645/646, 0/192 | 646/646, 0/192 | 646/646, 0/192 |
+| 0.45 | 639/646, 0/192 | 639/646, 0/192 | 640/646, 0/192 |
+| 0.55 | 609/646, 6/192 | 604/646, 9/192 | 618/646, 4/192 |
+| 0.60 | 572/646, 17/192 | 563/646, 17/192 | 573/646, 10/192 |
+| 0.65 | 490/646, 51/192 | 489/646, 61/192 | 511/646, 34/192 |
+
+The five-domain result (0.45) does not carry over: with sixteen domains the
+weakest answer drops to 0.34–0.39 (more domains compete for the same
+queries, and the new domains include vaguer question styles), so 0.45 already
+loses 7 answers (1%) and 0.50 loses 14. The suggested value — the highest
+0.05 step at least 0.05 below the weakest answer — is 0.25 on 0.6B and 0.30
+on 4B and 8B. The trade-off gap is wider than on five domains: keeping
+every answer needs ≤0.30–0.35, but off-topic queries only start to empty
+the vector stream at ≥0.50. Between 0.35 and 0.50 the threshold loses
+answers without emptying anything. The per-domain suggested values span
+0.30 to 0.70 (blue team and database engineering are the highest, where
+their entries are tightly clustered), which is the same reason the
+five-domain study reported a per-pool range: one value is a starting
+point, not a fit.
+
+Caveat on the expanded corpus: the generator that produced the eleven
+new domains and the five extensions gives a quarter of its entries a short
+body, and those bodies are formulaic ("The N figure is the one the desk
+verifies against the raw report before it is written to the pool"), so a
+hundred of the 472 bodies repeat verbatim. That raises entry-to-entry
+similarity within the pool, which is why the off-topic similarities sit high
+(0.89–0.90) and the suggested value is conservative. The version-pair
+entries carry no body, so the tau measurement is unaffected; and because the
+same corpus is used for all three models, the relative comparison across
+models is unaffected. The absolute thresholds should be re-checked on a
+corpus with diverse bodies before a deployment sets the value from this
+alone.
+
+The summaries have the same problem, and more of it (checked 2026-10-18).
+In nine of the eleven new domains (intelligence analysis, blue team, red
+team, database engineering, network operations, data engineering, platform
+engineering, research literature, legal compliance) 113 to 125 of each
+domain's 128 summaries follow one template ("The compliance slo is the 10
+with the 2 that are the critical and the 8 that are the standard", "The
+vision is the 1 with the 2 that are the 2 and the 1 that is the 1"), about
+1,100 of the 2,048, and many of their queries are keyword fragments ("siem
+licence 5000"). 257 of the 768 version-pair entries use it too, so the tau
+measurement is not fully clear of it either. On Qwen3-Embedding-8B the
+threshold conclusions hold on the seven untemplated domains alone (weakest
+answer 0.396, off-topic first empties at 0.55), but entry-to-entry
+similarity is inflated: each entry's nearest other entry is at 0.85 or more
+for 39% of the full pool, 7% of the untemplated domains and 1% of the five
+original ones. Read the entry-to-entry figures (tau, the `near_duplicate`
+band) from the untemplated domains.
+
+**De-vagued queries make a high threshold viable.**
+*(2026-10-17; `tests/eval/corpus/specific_queries.py`,
+`tests/eval/threshold.py`'s `extended_scenarios_specific()`,
+`EVAL_QUERY_STYLE=specific`; same entries and off-topic queries, only the
+answerable query text differs.)*
+
+The weakest answers above come from paraphrased queries ("how do we define a
+churned customer"). An agent that gets nothing for a vague query typically
+retries with a more specific one that names the system and the setting
+("what inactivity window does the churn model use as the churn label"). The
+question is whether that refined query is good enough for a high cut-off: if
+so, a deployment can keep `HIVEMIND_VECTOR_MIN_SIMILARITY` high and rely on
+the vague-then-specific loop, instead of lowering it to rescue vague queries.
+
+Replacing the 646 answerable queries with their de-vagued variants (the
+off-topic queries and the entries are unchanged) raises the weakest answer on
+every model:
+
+| model | weakest answer (vague → specific) | suggested (vague → specific) |
+|---|---|---|
+| 0.6B | 0.343 → 0.503 | 0.25 → 0.45 |
+| 4B | 0.354 → 0.424 | 0.30 → 0.35 |
+| 8B | 0.393 → 0.413 | 0.30 → 0.35 |
+
+The lift is largest on 0.6B, where the weak model needs the extra lexical
+overlap a specific query provides; on 4B and 8B the weak answers were already
+higher, so the lift is smaller. In the combined pool, the specific queries
+keep every answer at 0.45 on 0.6B and nearly all at 0.60 on every model:
+
+| threshold | 0.6B vague → specific | 4B vague → specific | 8B vague → specific |
+|---|---|---|---|
+| 0.45 | 639 → 646 / 646 | 639 → 645 / 646 | 640 → 644 / 646 |
+| 0.55 | 609 → 643 / 646 | 604 → 639 / 646 | 618 → 636 / 646 |
+| 0.60 | 572 → 630 / 646 | 563 → 618 / 646 | 573 → 615 / 646 |
+| 0.65 | 490 → 602 / 646 | 489 → 589 / 646 | 511 → 588 / 646 |
+
+So the answer to the threshold question is yes: once queries are refined,
+a high, selective cut-off (0.45–0.60) keeps the answers while emptying the
+off-topic vector stream, and the five-domain value (0.45) becomes viable
+again on 0.6B. The threshold is a property of the *query*, not just the
+model — a deployment that gets specific queries can run a higher value than
+one that gets vague ones.
+
+**What it buys on 8B, through search (2026-10-18).** Re-run on
+Qwen3-Embedding-8B (Q8_0 GGUF via llama.cpp, last-token pooling, 1024 dims;
+it reproduces the vLLM figures above to within 0.004) with hit@5 through
+`SearchService`, combined pool:
+
+| threshold | vague: kept / hit@5 / off-topic vector empty | specific: kept / hit@5 / off-topic vector empty |
+|---|---|---|
+| off | 646 / 0.935 / 0 | 646 / 0.961 / 0 |
+| 0.45 | 640 / 0.935 / 0 | 644 / 0.961 / 0 |
+| 0.50 | 633 / 0.935 / 0 | 642 / 0.961 / 0 |
+| 0.55 | 620 / 0.938 / 4 | 637 / 0.961 / 4 |
+| 0.60 | 575 / 0.943 / 10 | 616 / 0.963 / 10 |
+| 0.65 | 511 / 0.943 / 34 | 588 / 0.964 / 34 |
+
+No off-topic search is ever empty (the keyword stream always matches). Up to
+0.50 the threshold changes nothing on 8B; 0.55 is the first value with any
+effect, and from there each step trades a few thousandths of hit@5 for
+answers the vector stream drops. "Emptying the off-topic stream" is too
+strong for 8B: 0.60 empties 10 of 192, because the off-topic queries are
+in-domain questions with no answer (median nearest entry 0.71, inside the
+answer band). On 8B the threshold does not pay for itself on this corpus,
+so the default stays off and no value is recommended.
+
 **How to measure.** Point the `HIVEMIND_EMBEDDING_*` settings at the
 embedder the deployment uses, with the deployment's dimension, and run:
 
@@ -810,3 +956,93 @@ groups 17% of its distractors at 0.90 on 0.6B and 4B. Below 0.90, a third
 or more of the distractors are grouped. Same-system facts sit as close
 together in these embedders as two versions of one fact, so cosine alone
 cannot tell them apart.
+
+**Measured: expanded 16-domain corpus — still no passing tau.**
+*(2026-10-17; `tests/eval/corpus`, 16 domains × 16 version pairs = 256
+pairs, 2048 background entries; Qwen3-Embedding 0.6B, 4B, 8B via vLLM at
+1024 dimensions; `tests/eval/versions.py`'s `measure_all()` over four
+fleet constellations)*
+
+The five-domain fixture is extended to sixteen domains (`tests/eval/corpus`):
+each domain now carries 16 version pairs (6 original + 10 from its
+extension) and 128 background entries, for 256 pairs and 2048 background
+entries in total. The harness also sweeps four fleet constellations —
+org-only (legacy), an isolated single fleet (the adoption rule's
+constellation), two mixed fleets with overlapping systems, and org
+alongside a fleet — so the fleet rule can be read against the
+similarities. The adoption rule is applied to the isolated-fleet
+constellation only; the others are sensitivity readings.
+
+Pooled over the sixteen domains (256 pairs), isolated fleet:
+
+| model | tau | false grouping | true grouping | newer-member MRR | old-exact MRR | hit@5 |
+|---|---|---|---|---|---|---|
+| 0.6B | off | 0% | 0% | 0.196 | 0.266 | 0.790 |
+| 0.6B | 0.90 | 14% | 71% | 0.243 | 0.261 | 0.800 |
+| 0.6B | 0.95 | 0% | 52% | 0.214 | 0.248 | 0.776 |
+| 4B | off | 0% | 0% | 0.202 | 0.273 | 0.786 |
+| 4B | 0.90 | 5% | 61% | 0.226 | 0.251 | 0.778 |
+| 4B | 0.95 | 1% | 45% | 0.214 | 0.244 | 0.788 |
+| 8B | off | 0% | 0% | 0.204 | 0.292 | 0.773 |
+| 8B | 0.90 | 6% | 52% | 0.227 | 0.274 | 0.766 |
+| 8B | 0.95 | 0% | 32% | 0.216 | 0.272 | 0.766 |
+
+No tau passes the adoption rule on any model, on the larger corpus. The
+4B model at tau=0.90 is the closest: pooled false grouping is exactly
+5% (meets "at most 5%") and true grouping is 61%, but it fails on
+three counts — old-exact MRR drops 0.022 (0.273 to 0.251, over the
+0.02 allowance), hit@5 drops 0.008 (0.786 to 0.778), and three
+domains exceed 10% false grouping (data analysis 12%, web search
+19%, database engineering 25%). 0.6B and 8B are further off (14%
+and 6% pooled false grouping at 0.90). Raising tau to 0.95 cuts
+false grouping to 0–1% but true grouping falls to 32–52%, so the
+newer-member gain is small and old-exact stays down.
+
+The conclusion matches the five-domain study and is now established
+on 8× the pairs: same-system facts sit as close together in these
+embedders as two versions of one fact, so a single cosine cut-off
+cannot separate them. The fleet constellations change what is
+eligible to group (an isolated fleet sees only its own entries), not
+the similarities, so they do not rescue a tau: the isolated-fleet
+constellation (the one the adoption rule uses) is the most
+favourable and it still fails. **Keep grouping off.**
+
+**De-vagued pair queries do not help the tau.**
+*(2026-10-17; `tests/eval/corpus/specific_queries.py`,
+`tests/eval/versions.py`'s `query_style="specific"`;
+same entries, only each pair's `query` is de-vagued.)*
+
+Where the threshold is a property of the *query*, the tau is a property of
+the *entries*: grouping is decided by the entry-to-entry similarity between
+the anchor and each candidate, and the query only decides which candidates
+reach the top of the list. Replacing each pair's query with its de-vagued
+variant (naming the exact setting) does not move the pooled false-grouping
+rate on any model — 0.6B 14% → 14%, 4B 5% → 5%, 8B 6% → 7% at tau=0.90 —
+and does not lift true grouping. The distractors are near-copies of the
+version members ("The postgres checkpoint is the 5 minute" beside "has the 1
+time"), so a specific query ranks them into the candidate list but cannot
+stop them grouping: their cosine to the anchor is what groups them. A
+passing tau needs the *distractors* to be less similar to the version members
+(genuinely different settings, not near-copies), not the *queries* to be
+more specific.
+
+This bears on how representative the corpus is. Hivemind already steers
+writers away from near-copies — the skill says to recall before writing and
+to "supersede, don't duplicate", and every write answers with `related`, its
+up-to-3 nearest entries with a cosine `similarity`, so a writer can see a
+near-duplicate before committing (ADR 0052, 0077). That convention is
+advisory, not enforced: there is no similarity floor that refuses a
+near-duplicate (ADR 0052 rejected one, because an untuned floor blocks
+legitimate writes). The corpus's near-copied distractors are therefore a
+worst case — a pool where no writer superseded — and the real false-grouping
+rate should be lower, because the `related` reply and the supersede convention
+keep some near-copies out of the pool. A `near_duplicate` advisory warning
+(SPEC §4.1, ADR 0087) now makes that signal explicit without refusing
+anything: it fires when a write's nearest `related` entry (ADR 0052), other
+than one the draft links with `see_also`, is at similarity ≥ 0.90, and asks
+the writer to rate it, supersede it or link it, whichever fits. On
+Qwen3-Embedding-8B over the seven untemplated domains (112 pairs), 0.90
+catches 71% of version pairs and 1% of same-system distractors; 0.85 would
+catch 84% and 7% (a distinct fact such as "the Airflow default pool has 128
+slots" beside "the backfill pool has 2048 slots" sits at 0.883), and 0.95
+catches 54% and 0%.

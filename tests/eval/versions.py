@@ -3,11 +3,11 @@
 Whether two entries are versions of one fact depends on the embedding
 model, so the cut-off ``HIVEMIND_VERSION_GROUP_MIN_SIMILARITY`` (tau) is
 measured with the model a deployment runs: ``make measure-versions``. For
-each of the five domains of ``domains.py`` the pool is the domain's own
-entries plus, from ``version_pairs.py``, six pairs of an older and a newer
-unlinked statement of one fact and six same-system distractors. For each
-tau of the sweep, and for grouping off, it runs the shipped search and
-reports, per domain and pooled:
+each domain the pool is the domain's own entries plus pairs of an older
+and a newer unlinked statement of one fact and same-system distractors
+(five domains in ``version_pairs.py``; the expanded sixteen-domain corpus
+in ``tests/eval/corpus``). For each tau of the sweep, and for grouping
+off, it runs the shipped search and reports, per domain and pooled:
 
 * false grouping: the share of distractors grouped with a version member or
   with another distractor, in a search for their pair's fact;
@@ -48,6 +48,75 @@ EPS = 1e-9
 # Grouping always moves the newer member ahead, so old-exact MRR can only
 # fall; it may fall this far (the confirmation-clock rule's tolerance).
 OLD_EXACT_TOLERANCE = 0.02
+FLEET_A = "fleet-a"
+FLEET_B = "fleet-b"
+
+
+@dataclass(frozen=True, slots=True)
+class Constellation:
+    """How a pool's entries are scoped, one role at a time.
+
+    ADR 0074's fleet rule groups only within one fleet, or between two
+    org-scoped entries, so the constellation changes what *can* group,
+    not the similarity values. ``assign`` returns (scope, fleet_id) for a
+    role: ``background`` (index into the pool), ``old`` / ``new`` / ``distractor``
+    (index into the pairs).
+    """
+
+    name: str
+    note: str
+
+    def assign(self, role: str, index: int) -> tuple[str, str | None]:
+        raise NotImplementedError
+
+
+ORG_ONLY = Constellation(
+    "org only (legacy)",
+    "every entry org-scoped; the 2026-10-11 measurement's shape",
+)
+
+ISOLATED_FLEET = Constellation(
+    "isolated fleet",
+    "one fleet's pool; the adoption rule's constellation",
+)
+
+MIXED_FLEETS = Constellation(
+    "two mixed fleets",
+    "background and distractors split across two fleets whose systems overlap; "
+    "each version pair spans the fleets, so a pair can never group",
+)
+
+ORG_BOUNDARY = Constellation(
+    "org alongside fleet",
+    "a quarter of the background and every newer statement org-scoped, the rest "
+    "in one fleet; org entries group only with org entries (ADR 0074)",
+)
+
+CONSTELLATIONS: tuple[Constellation, ...] = (
+    ORG_ONLY,
+    ISOLATED_FLEET,
+    MIXED_FLEETS,
+    ORG_BOUNDARY,
+)
+
+# The constellation the adoption rule applies to.
+ADOPTION_CONSTELLATION = ISOLATED_FLEET
+
+
+def _assign(constellation: Constellation, role: str, index: int) -> tuple[str, str | None]:
+    if constellation is ORG_ONLY:
+        return ("org", None)
+    if constellation is ISOLATED_FLEET:
+        return ("fleet", FLEET_A)
+    if constellation is MIXED_FLEETS:
+        if role in ("background", "distractor"):
+            return ("fleet", FLEET_A if index % 2 == 0 else FLEET_B)
+        return ("fleet", FLEET_A if role == "old" else FLEET_B)
+    if constellation is ORG_BOUNDARY:
+        if role in ("background", "distractor"):
+            return ("org", None) if role == "background" and index % 4 == 0 else ("fleet", FLEET_A)
+        return ("org", None) if role == "new" else ("fleet", FLEET_A)
+    return constellation.assign(role, index)
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,16 +239,36 @@ def suggest(m: Measurement) -> float | None:
     return min(passing) if passing else None
 
 
+def _with_specific_queries(vdomain: VersionDomain) -> VersionDomain:
+    """The same domain with each pair's ``query`` replaced by its specific
+    (de-vagued) variant (`tests/eval/corpus/specific_queries`), so the tau
+    sweep measures a refined agent retry. The entries are unchanged."""
+    from tests.eval.corpus.specific_queries import SPECIFIC_PAIRS
+
+    spec = SPECIFIC_PAIRS[vdomain.name]
+    pairs = tuple(replace(p, query=spec[i]) for i, p in enumerate(vdomain.pairs))
+    return replace(vdomain, pairs=pairs)
+
+
 async def measure_domain(
-    embedder: Embedder, vdomain: VersionDomain, sweep: tuple[float, ...] = SWEEP
+    embedder: Embedder,
+    vdomain: VersionDomain,
+    sweep: tuple[float, ...] = SWEEP,
+    constellation: Constellation = ORG_ONLY,
+    query_style: str = "vague",
 ) -> list[Row]:
-    """The grouping-off baseline, then one row per tau, on one domain."""
+    """The grouping-off baseline, then one row per tau, on one domain,
+    with the pool scoped per ``constellation``. ``query_style`` of
+    "specific" swaps each pair's query for its de-vagued variant."""
+    if query_style == "specific":
+        vdomain = _with_specific_queries(vdomain)
     domain = vdomain.domain
     store = MemoryStore(make_clock())
     writer = WriteService(store, embedder)
 
-    async def seed(entry: Entry, age_days: float) -> str:
+    async def seed(entry: Entry, age_days: float, role: str, index: int) -> str:
         kind, summary, tags, body = entry
+        scope, fleet_id = _assign(constellation, role, index)
         draft = EntryDraft(
             kind=Kind(kind),
             summary=summary,
@@ -188,16 +277,18 @@ async def measure_domain(
             author="eval",
             agent="eval",
             occurred_at=FIXED_NOW - timedelta(days=age_days),
+            scope=scope,
+            fleet_id=fleet_id,
         )
         return (await writer.write(draft)).id
 
-    background = [await seed(e, 0.0) for e in domain.entries]
+    background = [await seed(e, 0.0, "background", i) for i, e in enumerate(domain.entries)]
     background_set = set(background)
     old_ids, new_ids, distractor_ids = [], [], []
     for i, pair in enumerate(vdomain.pairs):
-        old_ids.append(await seed(pair.old, 90 + 15 * i))  # long ago
-        new_ids.append(await seed(pair.new, 5 + 6 * i))  # recent
-        distractor_ids.append(await seed(pair.distractor, 20 + 7 * i))
+        old_ids.append(await seed(pair.old, 90 + 15 * i, "old", i))  # long ago
+        new_ids.append(await seed(pair.new, 5 + 6 * i, "new", i))  # recent
+        distractor_ids.append(await seed(pair.distractor, 20 + 7 * i, "distractor", i))
     version_members = {*old_ids, *new_ids}
     distractors = set(distractor_ids)
 
@@ -266,11 +357,26 @@ async def measure(
     embedder: Embedder,
     domains: tuple[VersionDomain, ...] = VERSION_DOMAINS,
     sweep: tuple[float, ...] = SWEEP,
+    constellation: Constellation = ORG_ONLY,
+    query_style: str = "vague",
 ) -> Measurement:
     result = Measurement(embedder.model_name)
     for vdomain in domains:
-        result.domains[vdomain.name] = await measure_domain(embedder, vdomain, sweep)
+        result.domains[vdomain.name] = await measure_domain(
+            embedder, vdomain, sweep, constellation, query_style
+        )
     return result
+
+
+async def measure_all(
+    embedder: Embedder,
+    domains: tuple[VersionDomain, ...] = VERSION_DOMAINS,
+    constellations: tuple[Constellation, ...] = CONSTELLATIONS,
+    sweep: tuple[float, ...] = SWEEP,
+    query_style: str = "vague",
+) -> dict[str, Measurement]:
+    """The sweep on every constellation; the keys are constellation names."""
+    return {c.name: await measure(embedder, domains, sweep, c, query_style) for c in constellations}
 
 
 def _table(rows: list[Row]) -> list[str]:
@@ -314,14 +420,41 @@ def report(m: Measurement) -> str:
     return "\n".join(lines)
 
 
+def report_all(results: dict[str, Measurement]) -> str:
+    """The sweep on every constellation, as Markdown.
+
+    The adoption rule applies to ``ADOPTION_CONSTELLATION`` only; the other
+    constellations are sensitivity readings (the fleet rule changes what can
+    group, not the similarities).
+    """
+    lines: list[str] = []
+    for name, m in results.items():
+        lines += [f"## Constellation: {name}", ""]
+        if name == ADOPTION_CONSTELLATION.name:
+            lines += [report(m), ""]
+        else:
+            note = next(c.note for c in CONSTELLATIONS if c.name == name)
+            lines += [f"{note}.", ""]
+            for dom, rows in m.domains.items():
+                lines += [f"### {dom}", "", *_table(rows), ""]
+            lines += ["### Pooled", "", *_table(m.pooled()), ""]
+    return "\n".join(lines)
+
+
 async def _main() -> None:
+    import os
+
     from hivemind.config import endpoint_label, load_settings
     from hivemind.embeddings import EmbeddingError, build_embedder
+    from tests.eval.corpus import EXTENDED_VERSION_DOMAINS
+    from tests.eval.threshold import CachingEmbedder
 
     settings = load_settings()
+    query_style = os.environ.get("EVAL_QUERY_STYLE", "vague").strip().lower()
     try:
-        embedder = build_embedder(settings)
-        print(report(await measure(embedder)))
+        embedder = CachingEmbedder(build_embedder(settings))
+        results = await measure_all(embedder, EXTENDED_VERSION_DOMAINS, query_style=query_style)
+        print(report_all(results))
     except EmbeddingError as exc:
         where = endpoint_label(settings.embedding_endpoint)
         raise SystemExit(f"embedder at {where} unavailable ({exc}); start it (make vllm)") from None

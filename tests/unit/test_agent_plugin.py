@@ -309,7 +309,7 @@ def test_entry_content_is_declared_untrusted_data_everywhere() -> None:
 # 17,980; the post-2.5.0 compaction (shorter write, register and feedback
 # descriptions, no behaviour change) brought it back to 17,607. The
 # `upstream_changed` cue (one skill line, one description clause, ADR 0081)
-# measures 17,847.
+# measures 17,847; the `near_duplicate` pointer (ADR 0087) 17,929.
 ALWAYS_ON_BUDGET = 18_000
 
 

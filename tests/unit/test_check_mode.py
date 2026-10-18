@@ -194,7 +194,9 @@ async def test_rest_check_returns_200_without_an_entry() -> None:
         real = await client.post("/v1/entries", json=body, headers=headers)
     assert checked.status_code == 200
     data = checked.json()
-    assert data["checked"] is True and data["warnings"] == []
+    # the check's summary is identical to `original`, so it reports a
+    # near-duplicate (ADR 0052's `related` now carries that signal).
+    assert data["checked"] is True and [w["code"] for w in data["warnings"]] == ["near_duplicate"]
     assert "id" not in data
     [related] = data["related"]
     assert related["id"] == original["id"]
