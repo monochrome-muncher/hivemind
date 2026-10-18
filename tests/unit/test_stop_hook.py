@@ -73,6 +73,45 @@ def test_a_substantial_session_is_blocked_once_with_a_reason(tmp_path: Path) -> 
     assert json.loads(other.stdout)["decision"] == "block"
 
 
+def _snapshot_transcript(tmp_path: Path, tool_uses: int, *names: str) -> Path:
+    """Claude Code lists every tool definition in a prompt_snapshot attachment line."""
+    path = _transcript(tmp_path, tool_uses, *names)
+    tools = [
+        {
+            "name": f"mcp__plugin_hivemind_hivemind__{t}",
+            "description": "d",
+            "schema": {"type": "object", "properties": {}},
+            "server": "plugin:hivemind:hivemind",
+        }
+        for t in ("hive_write", "hive_feedback")
+    ]
+    snapshot = {"type": "attachment", "attachment": {"type": "prompt_snapshot", "tools": tools}}
+    path.write_text(json.dumps(snapshot) + "\n" + path.read_text())
+    return path
+
+
+def test_tool_definitions_in_a_prompt_snapshot_are_not_calls(tmp_path: Path) -> None:
+    t = _snapshot_transcript(tmp_path, 25)
+    assert json.loads(_stop(tmp_path, t).stdout)["decision"] == "block"
+
+
+def test_a_real_call_after_a_prompt_snapshot_keeps_it_quiet(tmp_path: Path) -> None:
+    t = _snapshot_transcript(tmp_path, 25, "mcp__plugin_hivemind_hivemind__hive_write")
+    out = _stop(tmp_path, t)
+    assert (out.returncode, out.stdout) == (0, "")
+
+
+def test_a_definition_line_does_not_add_to_the_tool_count(tmp_path: Path) -> None:
+    path = _transcript(tmp_path, 4)
+    deferred = {"type": "deferred_tools_record", "tools": [{"type": "tool_use", "name": "x"}]}
+    snapshot = {"type": "attachment", "attachment": {"type": "prompt_snapshot", "x": "tool_use"}}
+    schema = {"type": "tool_use", "name": "y", "input_schema": {"type": "object"}}
+    extra = [json.dumps(d) for d in (deferred, snapshot, schema)]
+    path.write_text(path.read_text() + "\n".join(extra) + "\n")
+    out = _stop(tmp_path, path, env=_env(tmp_path, HIVEMIND_STOP_MIN_TOOLS="5"))
+    assert (out.returncode, out.stdout) == (0, "")
+
+
 def _codex_transcript(tmp_path: Path, calls: int, *mcp_names: str) -> Path:
     """A Codex rollout as Codex 0.162 writes it: each call a compact
     `response_item` of type `function_call` with its output in a separate
