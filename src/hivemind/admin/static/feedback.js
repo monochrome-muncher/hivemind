@@ -60,6 +60,7 @@ export async function viewFeedback(root) {
     onOpen: (id) => openEntry(id, () => table.load(true)),
     fleetName,
     agentHref,
+    csvName: "feedback",
   });
 
   form.addEventListener("submit", (event) => { event.preventDefault(); table.load(true); });

@@ -106,6 +106,7 @@ function flaggedList(root) {
     onOpen: (id) => openEntry(id, () => list.load(true)),
     fleetName,
     agentHref,
+    csvName: "flagged",
   });
   fleet.addEventListener("change", () => list.load(true));
   const head = h("div", { class: "card", id: FLAGGED_ID },
