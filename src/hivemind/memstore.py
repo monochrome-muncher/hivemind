@@ -78,6 +78,7 @@ from hivemind.domain.health import (
     HealthCounts,
     TagDispersion,
     is_entry_ref,
+    owner_key,
 )
 from hivemind.domain.pin import Pin, PinWrite
 from hivemind.domain.upstream import UpstreamLink
@@ -510,6 +511,23 @@ class MemoryStore:
             recent = [e for e in self._entries.values() if since <= e.created_at <= now]
             authors = Counter(e.author for e in recent)
             verdicts = Counter(fb.user for fb in live if since <= (fb.updated_at or now) <= now)
+            in_window = [fb for fb in live if since <= (fb.updated_at or now) <= now]
+            owner_of: dict[str, str | None] = {
+                n: owner_key(a.owner_alias) for n, a in self._agents.items()
+            }
+            owners = Counter(
+                f"o:{key}" if (key := owner_of.get(fb.user)) else f"r:{fb.user}" for fb in in_window
+            )
+            siblings = 0
+            for fb in in_window:
+                entry = self._entries.get(fb.entry_id)
+                key = owner_of.get(fb.user)
+                siblings += (
+                    entry is not None
+                    and key is not None
+                    and entry.author != fb.user
+                    and owner_of.get(entry.author) == key
+                )
             latencies: list[float] = []
             supersessions = 0
             promoted: set[str] = set()
@@ -582,6 +600,9 @@ class MemoryStore:
                 verdicts_90d=sum(verdicts.values()),
                 top3_reporter_verdicts_90d=sum(n for _, n in verdicts.most_common(3)),
                 reporters_90d=len(verdicts),
+                sibling_verdicts_90d=siblings,
+                top3_owner_verdicts_90d=sum(n for _, n in owners.most_common(3)),
+                owners_90d=len(owners),
                 supersessions_90d=supersessions,
                 self_to_fleet_promotions_90d=len(promoted),
                 alternative_ages=ages(lambda e: "alternative" in e.tags),

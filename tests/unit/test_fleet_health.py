@@ -42,6 +42,10 @@ async def test_an_empty_pool_reports_unknown_shares_not_zero() -> None:
     assert asdict(health.rival_lifetime.alternative) == {"count": 0, "median_age_seconds": None}
     assert health.grounding_share.share is None
     assert health.top3_agent_label_write_share.labels == 0
+    assert asdict(health.sibling_verdict_share) == {"count": 0, "total": 0, "share": None}
+    assert asdict(health.top3_owner_verdict_share) == {
+        "count": 0, "total": 0, "share": None, "owners": 0,
+    }  # fmt: skip
 
 
 async def test_convergence_figures_reach_the_report_and_the_gauges() -> None:
@@ -101,6 +105,46 @@ async def test_the_report_folds_the_store_aggregates() -> None:
     }
     assert health.by_fleet["blue"].sourced_share.share == 0.5
     assert health.by_fleet["blue"].gap_tag_counts["anomaly"] == 0  # superseded: not active
+
+
+async def test_owner_level_shares_reach_the_report_the_rest_body_and_the_gauges() -> None:
+    app = make_hivemind_app()
+    store = app.store
+    for name, alias in (("a1", "Ann"), ("a2", "ann"), ("b1", None)):
+        await store.register_agent(name, alias)
+    by_a2 = await store.create_entry(
+        EntryDraft(kind=Kind.FACT, summary="by a2", author="a2", agent="a2"), VEC
+    )
+    by_b1 = await store.create_entry(
+        EntryDraft(kind=Kind.FACT, summary="by b1", author="b1", agent="b1"), VEC
+    )
+    at = max(by_a2.created_at, by_b1.created_at)
+    for entry, user in ((by_a2, "a1"), (by_a2, "b1"), (by_b1, "a1"), (by_b1, "a2")):
+        await store.record_feedback(Feedback(entry.id, user, user, Verdict.HELPFUL, None, at))
+    report = await MetricsService(store, wall_clock=lambda: at).usage_report()
+    body = report.health
+    assert asdict(body.sibling_verdict_share) == {"count": 1, "total": 4, "share": 0.25}
+    assert asdict(body.top3_owner_verdict_share) == {
+        "count": 4, "total": 4, "share": 1.0, "owners": 2,
+    }  # fmt: skip
+    got = {
+        (s.name, tuple(sorted(s.labels.items()))): s.value
+        for family in _health_families(body)
+        for s in family.samples
+    }
+    assert got[("hivemind_health_sibling_verdict_ratio", ())] == 0.25
+    assert got[("hivemind_health_top3_owner_verdict_ratio", ())] == 1.0
+    client = make_client(app)
+    async with client:
+        rest = (await client.get("/v1/metrics", headers=ADMIN)).json()["health"]
+    assert rest["sibling_verdict_share"] == {"count": 0, "total": 0, "share": None}
+    assert rest["top3_owner_verdict_share"] == {"count": 0, "total": 0, "share": None, "owners": 0}
+
+
+def test_the_admin_health_card_shows_the_owner_figures_with_the_caveat() -> None:
+    js = (pathlib.Path(__file__).parents[2] / "src/hivemind/admin/static/health.js").read_text()
+    assert "health.sibling_verdict_share" in js and "health.top3_owner_verdict_share" in js
+    assert "self-reported" in js
 
 
 class _CountingStore(MemoryStore):

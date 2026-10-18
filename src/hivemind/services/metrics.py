@@ -304,6 +304,11 @@ class MetricsService:
                 **asdict(_share(health.top3_reporter_verdicts_90d, health.verdicts_90d)),
                 reporters=health.reporters_90d,
             ),
+            sibling_verdict_share=_share(health.sibling_verdicts_90d, health.verdicts_90d),
+            top3_owner_verdict_share=usage.Top3Owners(
+                **asdict(_share(health.top3_owner_verdicts_90d, health.verdicts_90d)),
+                owners=health.owners_90d,
+            ),
             synthesis_rate=_share(total["synthesizing"], total["insights"]),
             self_to_fleet_promotions=health.self_to_fleet_promotions_90d,
             gap_tag_counts=_gap_tags(total),
