@@ -64,6 +64,7 @@ _ALLOWED: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
         ("POST", r"admin/search"),
         ("GET", r"admin/activity"),
         ("GET", r"admin/feedback"),
+        ("GET", r"admin/fleets/[^/]+/pins"),
     )
 )
 

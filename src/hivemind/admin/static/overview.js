@@ -3,7 +3,7 @@
 
 import {
   api, h, state, loadAgentsAndFleets, fetchMetrics, fetchActivity, optional, pageHead, refreshButton, windowSelector,
-  card, stat, unavailable, fmtNum, fmtPct, fmtAgo, fmtTime, link, memoriesHref, feedbackHref, hooks, miniBar, fleetName, agentHref,
+  card, stat, unavailable, fmtNum, fmtPct, fmtAgo, fmtTime, link, memoriesHref, feedbackHref, hooks, miniBar, fleetName, agentHref, fill,
 } from "./core.js";
 import { pendingQueue } from "./manage.js";
 import { stackedBars } from "./charts.js";
@@ -76,7 +76,7 @@ export async function viewOverview(root) {
     ? pendingQueue(() => hooks.refresh())
     : h("p", { class: "quiet-line" }, h("span", { class: "dot dot-ok", "aria-hidden": "true" }), " Nobody is waiting for activation.");
 
-  root.replaceChildren(
+  fill(root, 
     pageHead("Overview", "Registrations waiting on you, and how the agents are using the pool.",
       windowSelector(() => hooks.refresh()), refreshButton()),
     queue,

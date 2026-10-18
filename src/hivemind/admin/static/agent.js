@@ -11,7 +11,7 @@
 import {
   api, h, state, guarded, parseHash, loadAgentsAndFleets, fetchMetrics, fetchActivity, fleetName, pageHead, refreshButton,
   card, stat, statusBadge, levelBadge, fmtNum, fmtAgo, fmtTime, link, memoriesHref, feedbackHref, agentHref, hooks,
-  windowSelector,
+  windowSelector, fill,
 } from "./core.js";
 import { openEntry } from "./drawer.js";
 import { entryTable, feedbackTable } from "./lists.js";
@@ -47,7 +47,7 @@ function numbers(row, flags, days) {
 export async function viewAgent(root) {
   const name = parseHash().params.get("name") || "";
   if (!name) {
-    root.replaceChildren(pageHead("Agent", null, link("All agents", "#/agents", { class: "link small" })),
+    fill(root, pageHead("Agent", null, link("All agents", "#/agents", { class: "link small" })),
       card(null, h("p", { class: "muted", text: "No agent named. Open one from the Agents or Stats page." })));
     return;
   }
@@ -82,7 +82,7 @@ export async function viewAgent(root) {
     h("div", { class: "section-head" }, h("h2", { text: title }), link("Open with filters", href, { class: "link small" })),
     table.el);
 
-  root.replaceChildren(
+  fill(root, 
     pageHead(name, agent && agent.owner_alias ? `Owned by ${agent.owner_alias}` : null,
       link("All agents", "#/agents", { class: "link small" }), windowSelector(() => hooks.refresh()), refreshButton()),
     numbers(row, flags, state.days),

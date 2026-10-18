@@ -64,6 +64,7 @@ def _panel(transport: httpx.AsyncBaseTransport) -> httpx.AsyncClient:
         ("POST", "admin/search"),
         ("GET", "admin/activity"),
         ("GET", "admin/feedback"),
+        ("GET", "admin/fleets/abc/pins"),
     ],
 )
 def test_the_admin_surface_is_forwarded(method: str, path: str) -> None:
@@ -92,6 +93,9 @@ def test_the_admin_surface_is_forwarded(method: str, path: str) -> None:
         ("POST", "admin/activity"),
         ("POST", "admin/feedback"),
         ("GET", "admin/feedback/x"),
+        ("POST", "admin/fleets/abc/pins"),
+        ("GET", "admin/fleets/abc/pins/x"),
+        ("GET", "admin/fleets//pins"),
         ("GET", "admin/entries/x/extra"),
         ("GET", "admin/entries/"),
     ],
@@ -405,3 +409,9 @@ def test_the_shared_modules_import_nothing_admin_specific() -> None:
         imports = {t[2:] for t in re.findall(r"""from\s+["']([^"']+)["']""", js)}
         assert imports <= shared, (name, imports - shared)
         assert "admin/" not in js and "hivemind.adminKey" not in js, name
+
+
+def test_views_fill_their_root_without_printing_null() -> None:
+    """``replaceChildren(a, null)`` prints "null"; views use ui.js ``fill``."""
+    for script in _scripts():
+        assert "root.replaceChildren(" not in script.read_text(), script.name

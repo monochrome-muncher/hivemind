@@ -49,6 +49,7 @@ ROUTES = [
     ("POST", f"/v1/admin/entries/{FAKE_ID}/withdraw", {}),
     ("GET", "/v1/admin/activity", None),
     ("GET", "/v1/admin/feedback", None),
+    ("GET", f"/v1/admin/fleets/{FAKE_ID}/pins", None),
 ]
 
 
@@ -275,3 +276,26 @@ async def test_admin_feedback_refuses_bad_filters_and_matches_nothing_on_a_bad_i
         )
     assert nul.status_code == long_id.status_code == 422
     assert malformed.status_code == 200 and malformed.json() == []
+
+
+async def test_admin_fleet_pins_lists_any_fleets_pins_with_their_changes() -> None:
+    app, blue, red, _mine, in_blue, in_red = await _seed()
+    t0 = datetime(2026, 6, 1, tzinfo=UTC)
+    await app.store.pin_entry(blue.id, in_blue.id, "alice", 10)
+    await app.store.pin_entry(red.id, in_red.id, "bob", 10)
+    await app.store.record_feedback(
+        Feedback(in_red.id, "carol", "carol", Verdict.WRONG, "moved", t0 + timedelta(days=3650))
+    )
+    async with make_client(app) as client:
+        blue_pins = await client.get(f"/v1/admin/fleets/{blue.id}/pins", headers=ADMIN)
+        red_pins = await client.get(f"/v1/admin/fleets/{red.id}/pins", headers=ADMIN)
+        unknown = await client.get(f"/v1/admin/fleets/{FAKE_ID}/pins", headers=ADMIN)
+        malformed = await client.get("/v1/admin/fleets/not-a-fleet/pins", headers=ADMIN)
+    assert blue_pins.status_code == 200
+    assert blue_pins.json()["fleet_id"] == blue.id
+    [pin] = blue_pins.json()["pins"]
+    assert (pin["id"], pin["pinned_by"], pin["changed_since_pin"]) == (in_blue.id, "alice", False)
+    [flagged] = red_pins.json()["pins"]
+    assert (flagged["id"], flagged["change_reason"]) == (in_red.id, "flagged")
+    assert unknown.status_code == malformed.status_code == 404
+    assert unknown.json()["error"]["code"] == "not_found"

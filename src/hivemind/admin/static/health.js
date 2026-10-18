@@ -1,7 +1,8 @@
 // Hivemind admin panel: fleet health (ADR 0075). Observation only, for the
 // operator: nothing agent-facing reads these numbers.
 
-import { h, fmtOf, fmtDuration, table, card, pageHead, refreshButton, fetchMetrics, loadAgentsAndFleets, unavailable } from "./core.js";
+import { h, fmtOf, fmtDuration, table, card, pageHead, refreshButton, fetchMetrics, loadAgentsAndFleets, unavailable, fill,
+} from "./core.js";
 
 const fmtRival = (r) => (r.count ? `${r.count} · ${fmtDuration(r.median_age_seconds)}` : "0");
 
@@ -53,7 +54,7 @@ export function healthCard(health) {
 
 export async function viewHealth(root) {
   const [, metrics] = await Promise.all([loadAgentsAndFleets(), fetchMetrics()]);
-  root.replaceChildren(
+  fill(root, 
     pageHead("Health", "Observations of the pool, for you only. Nothing ranks by these and no agent sees them.", refreshButton()),
     metrics && metrics.health ? healthCard(metrics.health) : card("Fleet health", unavailable("Fleet health")));
 }

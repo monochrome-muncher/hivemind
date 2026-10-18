@@ -710,6 +710,17 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         )
         return [FeedbackLogItemOut.from_item(i) for i in items]
 
+    @router.get("/admin/fleets/{fleet_id}/pins", response_model=PinsOut)
+    async def admin_fleet_pins(fleet_id: NameParam, credential: require) -> PinsOut:
+        """One fleet's pinned entries as the admin sees them: ``GET /v1/pins``
+        for any fleet, newest pin first, each with why it changed since it
+        was pinned. 404 for a fleet that does not exist."""
+        _require_admin(credential, "the fleet pins")
+        if await app.store.get_fleet(fleet_id) is None:
+            raise api_error(404, "not_found", f"unknown fleet: {fleet_id}")
+        pinned = await app.governance_service.pinned(credential, fleet_id)
+        return PinsOut(fleet_id=fleet_id, pins=[PinnedOut.from_pinned(p) for p in pinned])
+
     @router.post("/admin/fleets", response_model=FleetOut, status_code=201)
     async def create_fleet(payload: CreateFleetRequest, credential: require) -> FleetOut:
         """Create a named fleet (admin-gated, ADR 0012)."""

@@ -4,7 +4,7 @@
 
 import {
   h, state, loadAgentsAndFleets, fetchMetrics, fetchActivity, pageHead, refreshButton, windowSelector, card, unavailable,
-  fmtNum, fmtAgo, fmtTime, fmtOf, link, memoriesHref, feedbackHref, hooks, miniBar, agentHref,
+  fmtNum, fmtAgo, fmtTime, fmtOf, link, memoriesHref, feedbackHref, hooks, miniBar, agentHref, fill,
 } from "./core.js";
 
 let tab = "fleets";
@@ -153,7 +153,7 @@ export async function viewStats(root) {
       body = h("div", {}, sortedTable(tab, rows),
         tab === "users" ? h("p", { class: "muted small note", text: "Users are owners as named at registration (the owner alias); an alias is a claim, not a verified identity." }) : null);
     }
-    root.replaceChildren(
+    fill(root, 
       pageHead("Stats", `Writes and verdicts over the last ${state.days} days. For you only: nothing here ranks or reaches agents.`,
         windowSelector(() => hooks.refresh()), refreshButton()),
       h("div", { class: "card" }, h("div", { class: "card-head" }, tabs, filter), body));

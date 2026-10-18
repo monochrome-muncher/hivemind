@@ -4,8 +4,10 @@
 import {
   api, guarded, h, LEVELS, hooks, state, toast, openModal, closeModal, showKeyOnce, fleetName, fmtAgo, fmtTime, fmtNum,
   levelBadge, statusBadge, loadAgentsAndFleets, pageHead, refreshButton, table, card, link, memoriesHref,
-  fetchActivity, fetchMetrics, miniBar, unavailable, agentHref,
+  fetchActivity, fetchMetrics, miniBar, unavailable, agentHref, optional, fill,
 } from "./core.js";
+import { openEntry } from "./drawer.js";
+import { PIN_HEADERS, pinRow } from "./lists.js";
 
 const AUDIT_ACTIONS = [
   "agent.register", "agent.activate", "agent.trust_level_set", "agent.home_fleet_set", "agent.revoke",
@@ -268,7 +270,7 @@ export async function viewAudit(root) {
   form.addEventListener("submit", (event) => { event.preventDefault(); load(false).catch((err) => toast(err.message, true)); });
   more.addEventListener("click", () => load(true).catch((err) => toast(err.message, true)));
 
-  root.replaceChildren(
+  fill(root, 
     pageHead("Audit log", "Every admin action, newest first. CLI actors are claims typed by the operator, not verified identities."),
     h("div", { class: "card" },
       h("div", { class: "card-head" }, form),
@@ -299,7 +301,7 @@ export async function viewKeys(root) {
       toast(err.message, true);
     }
   });
-  root.replaceChildren(
+  fill(root, 
     pageHead("Org key", "The single key shared by the whole cluster. It gates registration only."),
     h("div", { class: "card card-danger" },
       h("div", { class: "card-head" }, h("h2", { text: "Rotate the org key" })),
@@ -355,7 +357,7 @@ export async function viewAgents(root) {
   search.addEventListener("input", render);
   statusFilter.addEventListener("change", render);
   render();
-  root.replaceChildren(
+  fill(root, 
     pageHead("Agents", `${state.agents.length} registered`, refreshButton()),
     card(null, holder, { head: [h("div", { class: "filters" }, search, statusFilter)], flush: true }),
     activity ? null : unavailable("Per-agent activity"));
@@ -363,8 +365,39 @@ export async function viewAgents(root) {
 
 // --- fleets ---------------------------------------------------------------------------------
 
+const pinCount = (list) => {
+  if (!list) return h("span", { class: "muted", text: "—" });
+  const changed = list.filter((p) => p.changed_since_pin || p.state === "withdrawn").length;
+  return h("span", {}, fmtNum(list.length),
+    changed ? [" ", h("span", { class: "badge badge-pending", title: "Pins superseded, flagged or withdrawn since they were pinned", text: `${changed} to review` })] : null);
+};
+
+/** The pinned memories of one fleet, with a fleet picker. `pins` maps fleet id to its pins (or null). */
+function pinsCard(pins) {
+  // Fleets whose pins need attention (changed or withdrawn) come first.
+  const attention = (f) => pins.get(f.id).filter((p) => p.changed_since_pin || p.state === "withdrawn").length;
+  const withPins = state.fleets.filter((f) => pins.get(f.id) && pins.get(f.id).length)
+    .sort((a, b) => attention(b) - attention(a));
+  if (!withPins.length) {
+    return card("Pinned memories", h("p", { class: "muted", text: "No fleet has pinned anything. Agents pin a fleet's must-read memories (up to 10 per fleet)." }));
+  }
+  const picker = h("select", { "aria-label": "Fleet" }, withPins.map((f) => h("option", { value: f.id, text: `${f.name} · ${pins.get(f.id).length}` })));
+  const holder = h("div");
+  const render = () => holder.replaceChildren(table(PIN_HEADERS,
+    pins.get(picker.value).map((p) => pinRow(p, { onOpen: (id) => openEntry(id, () => hooks.refresh()), agentHref })), ""));
+  picker.addEventListener("change", render);
+  render();
+  return card("Pinned memories", holder, {
+    head: [picker], flush: true,
+  });
+}
+
 export async function viewFleets(root) {
   const [, metrics, activity] = await Promise.all([loadAgentsAndFleets(), fetchMetrics(), fetchActivity(state.days)]);
+  // One read per fleet: fleets are few, and a fleet holds at most 10 pins.
+  const pinLists = await Promise.all(state.fleets.map((f) =>
+    optional(() => api("GET", `admin/fleets/${encodeURIComponent(f.id)}/pins`)).then((r) => [f.id, r ? r.pins : null])));
+  const pins = new Map(pinLists);
   const writes = (metrics && metrics.fleets.writes_by_fleet) || {};
   const act = new Map(((activity && activity.fleets) || []).filter((f) => f.fleet_id).map((f) => [f.fleet_id, f]));
   const nofleet = ((activity && activity.fleets) || []).find((f) => !f.fleet_id);
@@ -394,15 +427,17 @@ export async function viewFleets(root) {
       h("td", { class: "num", text: x ? fmtNum(x.writers) : "—" }),
       h("td", { class: "num", text: x ? fmtNum(x.recent_writes) : "—" }),
       h("td", { title: x ? fmtTime(x.last_write_at) : "", text: x && x.last_write_at ? fmtAgo(x.last_write_at) : "—" }),
+      h("td", { class: "num" }, pinCount(pins.get(f.id))),
       h("td", { title: fmtTime(f.created_at), text: fmtAgo(f.created_at) }),
       h("td", {}, h("code", { text: f.id })));
   });
-  root.replaceChildren(
+  fill(root, 
     pageHead("Fleets", "Fleets partition the pool. They cannot be deleted.", refreshButton()),
     card("New fleet", form),
     card(null, table(
-      ["Fleet", "Active agents", "Entries (active / all)", "Writers", `Writes (${state.days}d)`, "Last write", "Created", "Id"],
+      ["Fleet", "Active agents", "Entries (active / all)", "Writers", `Writes (${state.days}d)`, "Last write", "Pins", "Created", "Id"],
       rows, "No fleets yet. Create one before activating agents."), { flush: true }),
+    pinsCard(pins),
     nofleet ? h("p", { class: "muted small" }, `${fmtNum(nofleet.entries)} entries carry no fleet (${fmtNum(nofleet.active)} active).`) : null,
     activity ? null : unavailable("Per-fleet activity"));
 }

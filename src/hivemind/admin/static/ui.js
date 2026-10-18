@@ -62,6 +62,12 @@ export function svg(tag, props = {}, ...children) {
 
 export const $ = (id) => document.getElementById(id);
 
+/** Replace `el`'s children, skipping null/false (replaceChildren would print "null"). */
+export function fill(el, ...children) {
+  el.replaceChildren(...children.flat().filter((c) => c !== null && c !== undefined && c !== false));
+  return el;
+}
+
 /** Parse `#/view?a=b&c=d` into {view, params}. */
 export function parseHash(hash = window.location.hash) {
   const raw = hash.replace(/^#\/?/, "");

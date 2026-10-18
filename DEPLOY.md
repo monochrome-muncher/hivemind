@@ -646,7 +646,8 @@ works too: `make api` in one shell, `make admin` in another, then open
 
 **What it forwards.** Only the admin endpoints (the memory browser uses
 the admin-only `/v1/admin/entries`, `/v1/admin/search`,
-`/v1/admin/activity` and `/v1/admin/feedback`, never the data plane),
+`/v1/admin/activity`, `/v1/admin/feedback` and
+`/v1/admin/fleets/{id}/pins`, never the data plane),
 `GET /v1/metrics` and `GET /v1/health`. Anything else is a 404 from the panel itself. It
 forwards `X-API-Key`, `Content-Type` and `Accept` and nothing else, marks
 every forwarded response `Cache-Control: no-store`, and never logs a

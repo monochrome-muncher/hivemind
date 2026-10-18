@@ -7,7 +7,7 @@
 // front end; this module only adds the admin filters and route.
 
 import {
-  api, h, state, guarded, parseHash, loadAgentsAndFleets, fleetName, pageHead, refreshButton, card, link, memoriesHref, agentHref, VERDICTS,
+  api, h, state, guarded, parseHash, loadAgentsAndFleets, fleetName, pageHead, refreshButton, card, link, memoriesHref, agentHref, VERDICTS, fill,
 } from "./core.js";
 import { openEntry } from "./drawer.js";
 import { feedbackTable } from "./lists.js";
@@ -69,7 +69,7 @@ export async function viewFeedback(root) {
     table.load(true);
   });
 
-  root.replaceChildren(
+  fill(root, 
     pageHead("Feedback", "Who rated which memory, newest first. A reporter's latest verdict on a memory replaces its earlier one.",
       link("Memories", memoriesHref(), { class: "link small" }), refreshButton()),
     card(null, h("div", {}, form), { className: "card-filters" }),
