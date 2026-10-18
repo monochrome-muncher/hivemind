@@ -388,3 +388,8 @@ body.drawer-open { overflow: hidden; }
 }
 .card-head { padding-bottom: 12px; }
 .card-head + .card-body { padding-top: 4px; }
+
+/* Agent page: a list section with its heading and a link to the full view. */
+.agent-sec { margin-top: 18px; }
+.section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 0 2px 8px; flex-wrap: wrap; }
+.section-head h2 { margin: 0; font-size: 16px; }

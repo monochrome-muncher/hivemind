@@ -1,30 +1,39 @@
 // Hivemind admin panel (ADR 0029): entry point, routing and session.
 //
 // The panel is plain ES modules served from this directory (no build step):
-//   core.js      helpers, API client, formatting, modal, shared widgets
+//   ui.js        generic DOM helpers, formatting, badges, modal, layout pieces
+//   client.js    the API client (one key per tab, its own storage slot)
+//   lists.js     paged memory and feedback tables
+//   drawer.js    the memory detail drawer (configured below)
 //   charts.js    the SVG activity chart
-//   drawer.js    the memory detail drawer
-//   overview.js  memories.js  feedback.js  stats.js  manage.js  health.js   the views
+//   core.js      the admin session and shared state; re-exports ui.js and client.js
+//   overview.js  memories.js  feedback.js  stats.js  manage.js  health.js  agent.js   the views
+//
+// ui.js, client.js, lists.js, drawer.js and charts.js import nothing
+// admin-specific, so another front end can serve them as they are.
 //
 // Rules every module keeps: API data reaches the page through textContent
 // (h(), svg()) and never through an HTML-parsing sink; the admin key lives in
 // sessionStorage for this tab only; a new key is shown once.
 
 import {
-  $, h, api, hooks, hasKey, setKey, clearKey, closeModal, guarded, parseHash,
+  $, h, api, hooks, hasKey, setKey, clearKey, closeModal, guarded, parseHash, fleetName, memoriesHref, feedbackHref, agentHref,
 } from "./core.js";
-import { closeDrawer, initDrawer } from "./drawer.js";
+import { closeDrawer, configureDrawer, initDrawer } from "./drawer.js";
 import { viewOverview } from "./overview.js";
 import { viewMemories } from "./memories.js";
 import { viewFeedback } from "./feedback.js";
 import { viewStats } from "./stats.js";
 import { viewAgents, viewFleets, viewAudit, viewKeys } from "./manage.js";
 import { viewHealth } from "./health.js";
+import { viewAgent } from "./agent.js";
 
 const VIEWS = {
   overview: viewOverview, memories: viewMemories, feedback: viewFeedback, stats: viewStats, agents: viewAgents,
-  fleets: viewFleets, health: viewHealth, audit: viewAudit, keys: viewKeys,
+  fleets: viewFleets, health: viewHealth, audit: viewAudit, keys: viewKeys, agent: viewAgent,
 };
+// A detail page lights up the list it belongs to in the sidebar.
+const NAV_PARENT = { agent: "agents" };
 
 let renderToken = 0;
 let currentContainer = null;
@@ -36,7 +45,8 @@ async function route() {
   const name = isKnownView ? requested : "overview";
   const selectedView = VIEWS[name];
   const view = typeof selectedView === "function" ? selectedView : viewOverview;
-  document.querySelectorAll(".nav a").forEach((a) => a.classList.toggle("active", a.dataset.view === name));
+  const navName = NAV_PARENT[name] || name;
+  document.querySelectorAll(".nav a").forEach((a) => a.classList.toggle("active", a.dataset.view === navName));
   const page = $("view");
   const mine = ++renderToken;
   if (!page.firstChild) page.append(h("p", { class: "loading", text: "Loading…" }));
@@ -115,6 +125,16 @@ async function checkApi() {
     $("api-status").textContent = "API unreachable";
   }
 }
+
+// The drawer as the admin sees it: any entry, withdrawable, linked into the panel's views.
+configureDrawer({
+  fetchEntry: (id) => guarded(() => api("GET", `admin/entries/${encodeURIComponent(id)}`)),
+  withdrawEntry: (id, reason) => guarded(() => api("POST", `admin/entries/${encodeURIComponent(id)}/withdraw`, { body: reason ? { reason } : {} })),
+  fleetName,
+  authorHref: (author) => agentHref(author),
+  fleetHref: (fleet) => memoriesHref({ fleet }),
+  feedbackHref: (entry) => feedbackHref({ entry }),
+});
 
 hooks.refresh = route;
 hooks.signOut = signOut;

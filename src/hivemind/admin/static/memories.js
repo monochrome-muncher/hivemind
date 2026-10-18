@@ -4,53 +4,10 @@
 // can deep-link: #/memories?author=alice&fleet=<id>.
 
 import {
-  api, apiRaw, h, state, toast, guarded, parseHash, loadAgentsAndFleets, fleetName, fmtAgo, fmtTime, kindBadge,
-  stateBadge, pageHead, refreshButton, card, KINDS, SCOPES,
+  api, apiRaw, h, state, toast, guarded, parseHash, loadAgentsAndFleets, fleetName, pageHead, refreshButton, card, KINDS, SCOPES,
 } from "./core.js";
 import { openEntry } from "./drawer.js";
-
-const PAGE = 50;
-
-/** Normalise a listing row (EntryOut) or a search hit (HitOut) to one shape. */
-function normalise(x) {
-  const fb = x.feedback || null;
-  return {
-    id: x.id || x.entry_id,
-    kind: x.kind,
-    summary: x.summary,
-    tags: x.tags || [],
-    scope: x.scope,
-    fleet_id: x.fleet_id,
-    author: x.author,
-    agent: x.agent,
-    when: x.created_at || x.occurred_at,
-    state: x.state || "active",
-    feedback: fb && (fb.helpful || fb.stale || fb.wrong) ? fb : null,
-    score: x.score,
-  };
-}
-
-export function entryRow(item, { onOpen, compact = false } = {}) {
-  const open = () => onOpen(item.id);
-  const row = h("tr", { class: "clickable", tabindex: "0", role: "button", "aria-label": `Open memory: ${item.summary}` });
-  row.addEventListener("click", open);
-  row.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } });
-  row.append(...[
-    h("td", { class: "cell-summary" }, h("div", { class: "summary-text", text: item.summary }),
-      item.tags.length ? h("div", { class: "chips chips-sm" }, item.tags.slice(0, 5).map((t) => h("span", { class: "chip", text: t }))) : null),
-    h("td", {}, kindBadge(item.kind)),
-    h("td", { class: "nowrap", text: item.fleet_id ? `${item.scope} · ${fleetName(item.fleet_id)}` : item.scope }),
-    h("td", {}, item.author, item.agent && item.agent !== item.author ? h("div", { class: "muted small", text: `via ${item.agent}` }) : null),
-    h("td", { class: "nowrap", title: fmtTime(item.when), text: fmtAgo(item.when) }),
-    h("td", {}, stateBadge(item.state)),
-    compact ? null : h("td", { class: "nowrap" }, item.feedback
-      ? [item.feedback.helpful ? h("span", { class: "badge badge-active", title: "helpful", text: item.feedback.helpful }) : null, " ",
-        item.feedback.stale ? h("span", { class: "badge badge-pending", title: "stale", text: item.feedback.stale }) : null, " ",
-        item.feedback.wrong ? h("span", { class: "badge badge-revoked", title: "wrong", text: item.feedback.wrong }) : null]
-      : h("span", { class: "muted", text: "—" })),
-  ].filter(Boolean));
-  return row;
-}
+import { ENTRY_HEADERS, PAGE, entryRow, normaliseEntry } from "./lists.js";
 
 export async function viewMemories(root) {
   await loadAgentsAndFleets();
@@ -118,7 +75,7 @@ export async function viewMemories(root) {
         const res = await guarded(() => apiRaw("POST", "admin/search", { body }));
         if (!res || mine !== ticket) return;
         degraded.hidden = (res.headers.get("X-Hivemind-Degraded") || "") !== "keyword-only";
-        items = (res.payload || []).map(normalise);
+        items = (res.payload || []).map(normaliseEntry);
         if (!append) tbody.replaceChildren();
       } else {
         degraded.hidden = true;
@@ -128,12 +85,12 @@ export async function viewMemories(root) {
         };
         const res = await guarded(() => api("GET", "admin/entries", { query }));
         if (!res || mine !== ticket) return;
-        items = res.map(normalise);
+        items = res.map(normaliseEntry);
         if (!append) tbody.replaceChildren();
       }
       offset += items.length;
       const open = (id) => openEntry(id, () => load(false));
-      tbody.append(...items.map((it) => entryRow(it, { onOpen: open })));
+      tbody.append(...items.map((it) => entryRow(it, { onOpen: open, fleetName })));
       const count = tbody.querySelectorAll("tr.clickable").length;
       if (count === 0) {
         tbody.replaceChildren(h("tr", {}, h("td", { class: "empty", colspan: 7, text: f.q ? "No memories match this search." : "No memories match these filters." })));
@@ -163,7 +120,7 @@ export async function viewMemories(root) {
     h("div", { class: "card" },
       h("div", { class: "card-body card-body-tight" }, status),
       h("div", { class: "table-wrap" }, h("table", { class: "entries" },
-        h("thead", {}, h("tr", {}, ["Memory", "Kind", "Scope", "Author", "Written", "State", "Flags"].map((t) => h("th", { text: t })))),
+        h("thead", {}, h("tr", {}, ENTRY_HEADERS.map((t) => h("th", { text: t })))),
         tbody)),
       moreWrap));
   await load(false);

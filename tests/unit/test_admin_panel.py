@@ -331,10 +331,14 @@ def test_the_scripts_never_build_a_link_from_entry_data() -> None:
         js = script.read_text()
         assert ".href =" not in js and 'setAttribute("href"' not in js, script.name
         for href in re.findall(r"\bhref:\s*([^,}]+)", js):
-            assert "memoriesHref(" in href or re.match(r"""\s*(?:["'`]#|href\b|null)""", href), (
-                script.name,
-                href,
-            )
+            assert re.search(r"\b(?:memories|feedback|agent|view)Href\(", href) or re.match(
+                r"""\s*(?:["'`]#|href\b|null)""", href
+            ), (script.name, href)
+    # The href helpers build in-panel hash routes and nothing else.
+    ui = (STATIC_DIR / "ui.js").read_text()
+    assert "return `#/${view}" in ui
+    for helper in ("memoriesHref", "feedbackHref", "agentHref"):
+        assert re.search(rf"export const {helper} = \([^)]*\) => viewHref\(", ui), helper
 
 
 def test_the_runner_refuses_to_start_without_an_api_url(monkeypatch) -> None:
@@ -391,3 +395,13 @@ async def test_an_oversized_body_is_refused_and_never_forwarded(chunked: bool) -
     assert resp.json()["error"]["code"] == "payload_too_large"
     assert ok.status_code == 201
     assert len(seen) == 1
+
+
+def test_the_shared_modules_import_nothing_admin_specific() -> None:
+    """ADR 0091: these can be served to another front end as they are."""
+    shared = {"ui.js", "client.js", "lists.js", "drawer.js", "charts.js"}
+    for name in shared:
+        js = (STATIC_DIR / name).read_text()
+        imports = {t[2:] for t in re.findall(r"""from\s+["']([^"']+)["']""", js)}
+        assert imports <= shared, (name, imports - shared)
+        assert "admin/" not in js and "hivemind.adminKey" not in js, name
