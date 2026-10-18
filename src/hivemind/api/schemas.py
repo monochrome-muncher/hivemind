@@ -777,6 +777,10 @@ class ReporterShare(Share):
     reporters: int = 0
 
 
+class OwnerShare(Share):
+    owners: int = 0
+
+
 class SupersessionRate(BaseModel):
     supersessions: int = 0
     writes: int = 0
@@ -841,6 +845,8 @@ class HealthMetrics(BaseModel):
     floating_gap: int = 0
     top3_author_write_share: AuthorShare = AuthorShare()
     top3_reporter_verdict_share: ReporterShare = ReporterShare()
+    sibling_verdict_share: Share = Share()
+    top3_owner_verdict_share: OwnerShare = OwnerShare()
     synthesis_rate: Share = Share()
     self_to_fleet_promotions: int = 0
     gap_tag_counts: dict[str, int] = {}

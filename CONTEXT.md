@@ -89,7 +89,7 @@ The bounded re-scoring signal derived from feedback on an entry; it affects retr
 _Avoid_: score (in specs, "score" always means the retrieval score; "quality" is the feedback-derived factor)
 
 **Feedback**:
-A reporting agent's verdict that an entry it relied on was `helpful`, `stale`, or `wrong`, with an optional note. Aggregated into an entry's quality, and readable by everyone who can read the entry.
+A reporting agent's verdict that an entry its work tested was `helpful`, `stale`, or `wrong`, with an optional note. Aggregated into an entry's quality, and readable by everyone who can read the entry.
 _Avoid_: rating, review
 
 **Last confirmed**:
@@ -367,7 +367,7 @@ The minimal operational metrics surface (`GET /v1/metrics`, admin-gated): entrie
 _Avoid_: analytics, telemetry (that is the broader §10 story), dashboards (a UI is a non-goal, SPEC §9)
 
 **Fleet health metrics**:
-The `health` section of the usage report: observations of the pool (verdict notes, sources, correction speed, orphaned flags, concentration, synthesis) for the operator. Admin-only and never an input to search, ranking, scoring or the briefing (ADR 0075).
+The `health` section of the usage report: observations of the pool (verdict notes, sources, correction speed, orphaned flags, concentration, owner-level sibling verdicts, synthesis) for the operator. Admin-only and never an input to search, ranking, scoring or the briefing (ADR 0075).
 _Avoid_: scorecard, KPIs, leaderboard (they invite agents to optimise the number)
 
 **Scrape target**:

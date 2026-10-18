@@ -29,6 +29,8 @@ export function healthCard(health) {
     ["Floating gap (older than 90 days, no feedback in 90 days)", health.floating_gap, "Down, or stable with growth"],
     ["Top 3 authors' share of writes (90 days)", `${fmtOf(health.top3_author_write_share)} · ${health.top3_author_write_share.authors} authors`, "Not rising"],
     ["Top 3 reporters' share of verdicts (90 days)", `${fmtOf(health.top3_reporter_verdict_share)} · ${health.top3_reporter_verdict_share.reporters} reporters`, "Not rising"],
+    ["Verdicts on a sibling agent's entry (same owner alias, different agent; 90 days). Owner aliases are self-reported, so this is a lower bound", fmtOf(health.sibling_verdict_share), "Not rising"],
+    ["Top 3 owners' share of verdicts (90 days). Owner aliases are self-reported; an agent without one counts as its own owner", `${fmtOf(health.top3_owner_verdict_share)} · ${health.top3_owner_verdict_share.owners} owners`, "Not rising"],
     ["Insights linking at least 2 entries", fmtOf(health.synthesis_rate), "Up: combining happens"],
     ["Self entries promoted to the fleet (90 days)", health.self_to_fleet_promotions, "Up"],
     ["Supersessions per 100 writes (90 days)", health.supersessions_per_100_writes.per_100 == null ? "—" : Math.round(health.supersessions_per_100_writes.per_100 * 10) / 10, "Up modestly"],

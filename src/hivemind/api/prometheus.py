@@ -232,6 +232,18 @@ def _health_families(health: HealthUsage) -> Iterator[GaugeMetricFamily]:
         health.top3_reporter_verdict_share.share,
     )
     yield from _optional(
+        p + "sibling_verdict_ratio",
+        "Share of the last 90 days' verdicts given to an entry by a sibling agent"
+        " (same self-reported owner alias, different agent)",
+        health.sibling_verdict_share.share,
+    )
+    yield from _optional(
+        p + "top3_owner_verdict_ratio",
+        "Share of the last 90 days' verdicts given by the three busiest owners"
+        " (self-reported owner aliases; no alias is its own owner)",
+        health.top3_owner_verdict_share.share,
+    )
+    yield from _optional(
         p + "synthesis_ratio",
         "Share of active insights with at least two see-also links",
         health.synthesis_rate.share,

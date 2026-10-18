@@ -1183,6 +1183,67 @@ async def test_fleet_health_aggregates_hand_computed(adapter: Adapter) -> None:
     assert gone.top3_author_writes_90d == gone.authors_90d == 0
 
 
+async def test_fleet_health_owner_level_verdicts_hand_computed(adapter: Adapter) -> None:
+    """ADR 0089. Two agents of one owner (aliases differing in case and
+    padding) rate each other; another owner; an agent with no alias; an
+    unregistered reporter (the admin); a revoked sibling and an old verdict
+    that do not count."""
+    store = adapter.store
+    red = await store.create_fleet("red")
+    for name, alias in (
+        ("a1", " Ann "),
+        ("a2", "ann"),
+        ("b1", "Bo"),
+        ("c1", None),
+        ("g1", "Ann"),
+    ):
+        await store.register_agent(name, alias)
+    await store.activate_agent("g1", trust_level=TrustLevel.LURKER, home_fleet_id=red.id)
+    await store.revoke_agent("g1")
+    ea1 = await write(adapter, "ea1", author="a1")
+    ea2 = await write(adapter, "ea2", author="a2")
+    eb1 = await write(adapter, "eb1", author="b1")
+    ec1 = await write(adapter, "ec1", author="c1")
+    ex = await write(adapter, "ex", author="stranger")  # no agent record
+    now = ex.created_at + timedelta(hours=1)
+    day = timedelta(days=1)
+
+    async def verdict(entry: Entry, user: str, at: datetime) -> None:
+        await store.record_feedback(Feedback(entry.id, user, user, Verdict.HELPFUL, None, at))
+
+    for entry, user in (
+        (ea2, "a1"),  # sibling
+        (ea1, "a1"),  # its own entry: not a sibling
+        (eb1, "a1"),
+        (ex, "a1"),
+        (ea1, "a2"),  # sibling
+        (ec1, "a2"),
+        (ea1, "b1"),
+        (ex, "b1"),
+        (ea1, "c1"),  # no alias: never a sibling
+        (ea2, "c1"),
+        (eb1, "c1"),
+        (ex, "c1"),
+        (ea1, "admin"),  # unregistered reporter: its own owner
+    ):
+        await verdict(entry, user, now - day)
+    await verdict(ea1, "g1", now - day)  # revoked reporter: ignored
+    await verdict(ec1, "a1", now - 100 * day)  # outside the 90 days
+
+    health = await store.fleet_health(now)
+    # Reporters: a1 4, c1 4, a2 2, b1 2, admin 1. Owners: Ann (a1 + a2) 6,
+    # c1 4, Bo 2, admin 1.
+    assert (health.verdicts_90d, health.top3_reporter_verdicts_90d, health.reporters_90d) == (
+        13,
+        10,
+        5,
+    )
+    assert health.sibling_verdicts_90d == 2
+    assert (health.top3_owner_verdicts_90d, health.owners_90d) == (12, 4)
+    gone = await store.fleet_health(now + 400 * day)
+    assert (gone.sibling_verdicts_90d, gone.top3_owner_verdicts_90d, gone.owners_90d) == (0, 0, 0)
+
+
 async def test_fleet_health_of_an_empty_pool(adapter: Adapter) -> None:
     health = await adapter.store.fleet_health(T0)
     assert health.by_fleet == () and health.correction_latencies == ()

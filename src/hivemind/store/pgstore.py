@@ -549,12 +549,20 @@ SELECT fleet_id, sum(sourceable) AS sourceable, sum(sourced) AS sourced,
  GROUP BY fleet_id
 """
 
+
+# An owner alias as the sibling and owner metrics compare it (ADR 0089):
+# trimmed of ASCII whitespace, lower-cased, blank = none. ``owner_key`` in
+# ``domain/health.py`` is the same rule for ``MemoryStore``.
+def _owner_key(column: str) -> str:
+    return f"nullif(lower(btrim({column}, E' \\t\\r\\n\\f\\v')), '')"
+
+
 # Fleet-wide scalars in one round trip: helpful verdicts, the 90-day writes
 # and verdicts with their top-3 concentration, the 30-day writes and
 # verdicts by agent label, grounding of the 30-day insights and decisions
 # ($2 is the pattern of a source ref that only names an entry),
 # supersessions (counted when the successor was written) and self -> fleet
-# promotions.
+# promotions; and the owner-level verdict figures (ADR 0089).
 HEALTH_SCALARS = f"""
 WITH writes AS (
     SELECT author, count(*) AS n FROM entries
@@ -565,6 +573,25 @@ WITH writes AS (
      WHERE f.updated_at BETWEEN $1::timestamptz - interval '2160 hours' AND $1::timestamptz
        AND {_REPORTER_NOT_REVOKED}
      GROUP BY f."user"
+), owners AS (
+    SELECT CASE WHEN o.key IS NOT NULL THEN 'o:' || o.key ELSE 'r:' || f."user" END AS owner,
+           count(*) AS n
+      FROM feedbacks f
+      LEFT JOIN LATERAL (SELECT {_owner_key("a.owner_alias")} AS key
+                           FROM agents a WHERE a.name = f."user") o ON true
+     WHERE f.updated_at BETWEEN $1::timestamptz - interval '2160 hours' AND $1::timestamptz
+       AND {_REPORTER_NOT_REVOKED}
+     GROUP BY 1
+), siblings AS (
+    SELECT count(*) AS n
+      FROM feedbacks f
+      JOIN entries e ON e.id = f.entry_id
+      JOIN agents ra ON ra.name = f."user"
+      JOIN agents ea ON ea.name = e.author
+     WHERE f.updated_at BETWEEN $1::timestamptz - interval '2160 hours' AND $1::timestamptz
+       AND {_REPORTER_NOT_REVOKED}
+       AND ra.name <> ea.name
+       AND {_owner_key("ra.owner_alias")} = {_owner_key("ea.owner_alias")}
 ), helpful AS (
     SELECT count(*) AS n, count(*) FILTER (WHERE f.note ~ '\\S') AS noted
       FROM feedbacks f WHERE f.verdict = 'helpful' AND {_REPORTER_NOT_REVOKED}
@@ -600,6 +627,9 @@ SELECT (SELECT n FROM helpful) AS helpful,
        (SELECT coalesce(sum(n), 0) FROM verdicts) AS verdicts,
        (SELECT coalesce(sum(n), 0) FROM (SELECT n FROM verdicts ORDER BY n DESC LIMIT 3) t) AS top_reporters,
        (SELECT count(*) FROM verdicts) AS reporters,
+       (SELECT n FROM siblings) AS sibling_verdicts,
+       (SELECT coalesce(sum(n), 0) FROM (SELECT n FROM owners ORDER BY n DESC LIMIT 3) t) AS top_owners,
+       (SELECT count(*) FROM owners) AS owners,
        (SELECT supersessions FROM chains) AS supersessions,
        (SELECT promotions FROM chains) AS promotions,
        (SELECT n FROM grounding) AS synthesis_writes,
@@ -1144,6 +1174,9 @@ class PgStore:
             verdicts_90d=int(scalars["verdicts"]),
             top3_reporter_verdicts_90d=int(scalars["top_reporters"]),
             reporters_90d=int(scalars["reporters"]),
+            sibling_verdicts_90d=int(scalars["sibling_verdicts"]),
+            top3_owner_verdicts_90d=int(scalars["top_owners"]),
+            owners_90d=int(scalars["owners"]),
             supersessions_90d=int(scalars["supersessions"]),
             self_to_fleet_promotions_90d=int(scalars["promotions"]),
             alternative_ages=_ages(rivals, "alternative"),

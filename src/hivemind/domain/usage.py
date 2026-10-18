@@ -61,6 +61,16 @@ class Top3Reporters:
 
 
 @dataclass(frozen=True, slots=True)
+class Top3Owners:
+    """Top-3 owner verdicts over the window, with the number of owners."""
+
+    count: int
+    total: int
+    share: float | None
+    owners: int
+
+
+@dataclass(frozen=True, slots=True)
 class Top3Labels:
     """Top-3 agent-label writes/verdicts over the window, with the labels."""
 
@@ -187,6 +197,8 @@ class HealthUsage:
     floating_gap: int
     top3_author_write_share: Top3Authors
     top3_reporter_verdict_share: Top3Reporters
+    sibling_verdict_share: Share
+    top3_owner_verdict_share: Top3Owners
     synthesis_rate: Share
     self_to_fleet_promotions: int
     gap_tag_counts: dict[str, int]

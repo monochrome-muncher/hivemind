@@ -28,6 +28,13 @@ def is_entry_ref(ref: str) -> bool:
     return _ENTRY_ID_REF.match(ref) is not None
 
 
+def owner_key(alias: str | None) -> str | None:
+    """An owner alias as the owner-level metrics compare it (ADR 0089):
+    trimmed of ASCII whitespace and lower-cased, ``None`` when blank. The
+    Postgres query applies the same rule."""
+    return (alias or "").strip(" \t\r\n\f\v").lower() or None
+
+
 @dataclass(frozen=True, slots=True)
 class HealthCounts:
     """Additive counters over the active entries of one fleet
@@ -64,7 +71,7 @@ class FleetHealth:
 
     The 90-day figures cover entries created (or verdicts last written) in
     the 90 days before ``now``. ``top3_*`` are the sums of the three
-    largest per-author / per-reporter counts. ``correction_latencies`` are
+    largest per-author / per-reporter / per-owner counts. ``correction_latencies`` are
     seconds from an entry's first standing stale/wrong verdict to its
     successor's creation, for successors created in those 90 days.
     """
@@ -79,6 +86,13 @@ class FleetHealth:
     verdicts_90d: int = 0
     top3_reporter_verdicts_90d: int = 0
     reporters_90d: int = 0
+    # Owner level (ADR 0089): verdicts whose reporter and the entry's author
+    # are different agents with the same owner alias, and the verdicts
+    # grouped by the reporter's owner (a reporter without an alias is its
+    # own owner).
+    sibling_verdicts_90d: int = 0
+    top3_owner_verdicts_90d: int = 0
+    owners_90d: int = 0
     supersessions_90d: int = 0
     self_to_fleet_promotions_90d: int = 0
     # Convergence figures (ADR 0075). Ages are seconds since ``created_at``
