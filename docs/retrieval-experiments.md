@@ -1051,11 +1051,56 @@ catches 54% and 0%.
 
 *(tool: `tests/eval/importance.py`, `make measure-importance`; set
 `EVAL_IMPORTANCE_JSON=path` to also write the rows as JSON)*
-`HIVEMIND_NARROW_IMPORTANCE` is off by default. The harness seeds each of the
+`HIVEMIND_NARROW_IMPORTANCE` is on by default. The harness seeds each of the
 sixteen domains alone, and all of them pooled, under three importance
 assignments (`equal`: all 3; `random`: seeded 1 to 5 independent of
 relevance; `aligned`: answers 4 or 5, everything else random) and scores each
 with the narrow factor off and on: hit@1, hit@5 and MRR, and the change.
 `equal` must show no change. Run it with the embedders a deployment uses.
 
-Results: pending.
+Run on 2026-10-18 with Qwen3-Embedding 8B, 4B and 0.6B at 1024 dimensions
+(llama.cpp, last-token pooling, truncated and renormalised), 646 queries
+pooled. Cells are hit@1 / hit@5 / MRR, off then on.
+
+| model | importance | narrow off | narrow on | change (hit@1 / hit@5 / MRR) |
+|---|---|---|---|---|
+| 8B | equal | 0.748 / 0.941 / 0.829 | 0.748 / 0.941 / 0.829 | +0.000 / +0.000 / +0.000 |
+| 8B | random | 0.458 / 0.847 / 0.602 | 0.542 / 0.892 / 0.676 | +0.084 / +0.045 / +0.075 |
+| 8B | aligned | 0.659 / 0.909 / 0.763 | 0.751 / 0.940 / 0.828 | +0.091 / +0.031 / +0.065 |
+| 4B | equal | 0.783 / 0.958 / 0.855 | 0.783 / 0.958 / 0.855 | +0.000 / +0.000 / +0.000 |
+| 4B | random | 0.463 / 0.864 / 0.613 | 0.553 / 0.907 / 0.691 | +0.090 / +0.043 / +0.079 |
+| 4B | aligned | 0.681 / 0.932 / 0.787 | 0.763 / 0.960 / 0.843 | +0.082 / +0.028 / +0.056 |
+| 0.6B | equal | 0.810 / 0.954 / 0.870 | 0.810 / 0.954 / 0.870 | +0.000 / +0.000 / +0.000 |
+| 0.6B | random | 0.471 / 0.859 / 0.616 | 0.559 / 0.913 / 0.697 | +0.088 / +0.054 / +0.080 |
+| 0.6B | aligned | 0.676 / 0.935 / 0.784 | 0.785 / 0.955 / 0.855 | +0.108 / +0.020 / +0.071 |
+
+Weighted 70/20/10 (8B/4B/0.6B), pooled MRR changes by +0.076 under
+`random` and +0.064 under `aligned`; `equal` is unchanged. MRR change per
+domain:
+
+| domain | 8B random | 8B aligned | 4B random | 4B aligned | 0.6B random | 0.6B aligned |
+|---|---|---|---|---|---|---|
+| data analysis | +0.086 | +0.025 | +0.128 | +0.053 | +0.133 | +0.096 |
+| software engineering | +0.074 | +0.029 | +0.108 | +0.034 | +0.100 | +0.071 |
+| system administration | +0.120 | +0.056 | +0.076 | +0.037 | +0.098 | +0.038 |
+| journalism and social science | +0.060 | +0.052 | +0.040 | +0.021 | +0.026 | +0.053 |
+| finance analysis | +0.055 | +0.015 | +0.037 | +0.030 | +0.052 | +0.007 |
+| web search | +0.046 | +0.008 | +0.055 | +0.055 | +0.028 | +0.054 |
+| intelligence analysis | +0.083 | +0.102 | +0.059 | +0.048 | +0.059 | +0.079 |
+| vulnerability research | +0.020 | +0.035 | +0.004 | +0.049 | +0.035 | +0.044 |
+| blue team | +0.065 | +0.147 | +0.083 | +0.191 | +0.135 | +0.172 |
+| red team | +0.127 | +0.052 | +0.140 | +0.063 | +0.129 | +0.021 |
+| database engineering | +0.104 | +0.119 | +0.166 | +0.093 | +0.125 | +0.106 |
+| network operations | +0.139 | +0.125 | +0.175 | +0.175 | +0.180 | +0.156 |
+| data engineering | +0.155 | +0.096 | +0.195 | +0.161 | +0.162 | +0.073 |
+| platform engineering | +0.172 | +0.035 | +0.172 | +0.165 | +0.172 | +0.083 |
+| research literature | +0.061 | +0.020 | +0.109 | +0.145 | +0.197 | +0.110 |
+| legal compliance | +0.019 | +0.062 | +0.047 | +0.091 | +0.060 | +0.077 |
+
+MRR rises in every domain on every model. The only drops are single queries
+(0.025 in a 40-query domain) in hit@1 or hit@5 in six of the 96 domain rows.
+`aligned` was meant as the wide factor's best case and still favours the
+narrow one: every answer gets 4 or 5, including answers that are distractors
+for other queries, and a 5 on a near-miss beats a 4 on the right answer by
+1.25x under the wide factor. On these results the setting ships on (ADR
+0088).

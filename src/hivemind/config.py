@@ -174,9 +174,9 @@ class SearchConfig:
     # measurement harness can vary it.
     prefer_recent_floor: float | None = PREFER_RECENT_FLOOR
     # The importance factor spans 0.9..1.1 (one step about 1.05x, below
-    # ``social_max``) instead of 0.6..1.0 (ADR 0088). Off until measured
-    # with the real embedders.
-    narrow_importance: bool = False
+    # ``social_max``) instead of 0.6..1.0 (ADR 0088). On by default since
+    # the measurement with the Qwen3 embedders; false restores 0.6..1.0.
+    narrow_importance: bool = True
 
     def __post_init__(self) -> None:
         # Fail at config time (ADR 0024), not per request as a
@@ -418,7 +418,7 @@ class Settings(BaseSettings):
     # See SearchConfig.recency_hint_enabled (ADR 0073).
     recency_hint: bool = False
     # See SearchConfig.narrow_importance (ADR 0088).
-    narrow_importance: bool = False
+    narrow_importance: bool = True
 
     @field_validator("embedding_api_key", "extractor_api_key")
     @classmethod
