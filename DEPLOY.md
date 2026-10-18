@@ -645,9 +645,9 @@ works too: `make api` in one shell, `make admin` in another, then open
 `http://localhost:8080`. One path at a time — both put the API on :8000.
 
 **What it forwards.** Only the admin endpoints (the memory browser uses
-the admin-only `/v1/admin/entries`, `/v1/admin/search` and
-`/v1/admin/activity`, never the data plane), `GET /v1/metrics` and
-`GET /v1/health`. Anything else is a 404 from the panel itself. It
+the admin-only `/v1/admin/entries`, `/v1/admin/search`,
+`/v1/admin/activity` and `/v1/admin/feedback`, never the data plane),
+`GET /v1/metrics` and `GET /v1/health`. Anything else is a 404 from the panel itself. It
 forwards `X-API-Key`, `Content-Type` and `Accept` and nothing else, marks
 every forwarded response `Cache-Control: no-store`, and never logs a
 header or a body. `GET /healthz` is its own probe and does not call the

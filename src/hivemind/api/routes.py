@@ -43,6 +43,7 @@ from hivemind.api.schemas import (
     EntriesMetrics,
     EntriesOut,
     EntryOut,
+    FeedbackLogItemOut,
     FeedbackMetrics,
     FeedbackOut,
     FeedbackRequest,
@@ -79,8 +80,10 @@ from hivemind.domain.access import (
 )
 from hivemind.domain.audit import AuditAction, AuditFilters
 from hivemind.domain.entry import EntryFilters, Kind, Source
+from hivemind.domain.feedback import FeedbackLogFilters, Verdict
 from hivemind.domain.recency import RecencyHint
 from hivemind.domain.validation import (
+    MAX_ID_CHARS,
     MAX_IDENTITY_CHARS,
     MAX_LIMIT,
     MAX_OFFSET,
@@ -114,6 +117,7 @@ def _no_nul(value: str | None) -> str | None:
 # before ADR 0040 stays manageable.
 NameParam = Annotated[str, Path(), AfterValidator(_no_nul)]
 ActorQuery = Annotated[str | None, Query(max_length=MAX_IDENTITY_CHARS), AfterValidator(_no_nul)]
+IdQuery = Annotated[str | None, Query(max_length=MAX_ID_CHARS), AfterValidator(_no_nul)]
 
 # GET /v1/admin/audit-log page size (ADR 0027): default and hard ceiling.
 AUDIT_LOG_DEFAULT_LIMIT = 100
@@ -121,6 +125,8 @@ AUDIT_LOG_MAX_LIMIT = 1000
 
 # GET /v1/admin/entries default page size (ADR 0080); the ceiling is MAX_LIMIT.
 ADMIN_ENTRIES_DEFAULT_LIMIT = 50
+# GET /v1/admin/feedback default page size; the ceiling is MAX_LIMIT.
+ADMIN_FEEDBACK_DEFAULT_LIMIT = 50
 MIN_ACTIVITY_DAYS = 1
 MAX_ACTIVITY_DAYS = 365
 
@@ -676,6 +682,33 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         the last ``days`` days (ADR 0080). Observation only."""
         _require_admin(credential, "the activity view")
         return ActivityOut(**await app.activity_service.report(days))
+
+    @router.get("/admin/feedback", response_model=list[FeedbackLogItemOut])
+    async def admin_feedback(
+        credential: require,
+        reporter: ActorQuery = None,
+        verdict: Annotated[Verdict | None, Query()] = None,
+        author: ActorQuery = None,
+        fleet_id: IdQuery = None,
+        entry_id: IdQuery = None,
+        limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = ADMIN_FEEDBACK_DEFAULT_LIMIT,
+        offset: Annotated[int, Query(ge=0, le=MAX_OFFSET)] = 0,
+    ) -> list[FeedbackLogItemOut]:
+        """Who gave which verdict on which entry, newest first: every
+        feedback row of every fleet, each with the entry it rates.
+        Observation only, like the activity view."""
+        _require_admin(credential, "the feedback log")
+        filters = FeedbackLogFilters(
+            reporter=reporter,
+            verdict=verdict,
+            author=author,
+            fleet_id=fleet_id,
+            entry_id=entry_id,
+        )
+        items = await app.governance_service.feedback_log(
+            credential, filters, limit=limit, offset=offset
+        )
+        return [FeedbackLogItemOut.from_item(i) for i in items]
 
     @router.post("/admin/fleets", response_model=FleetOut, status_code=201)
     async def create_fleet(payload: CreateFleetRequest, credential: require) -> FleetOut:

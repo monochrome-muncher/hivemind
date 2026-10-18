@@ -19,6 +19,7 @@ export const LEVELS = [
   { value: 3, name: "privileged", hint: "+ read across all fleets" },
 ];
 export const KINDS = ["fact", "insight", "decision"];
+export const VERDICTS = ["helpful", "stale", "wrong"];
 export const SCOPES = ["self", "fleet", "org"];
 export const WINDOWS = [7, 30, 90];
 
@@ -78,15 +79,21 @@ export function parseHash(hash = window.location.hash) {
   return { view: view || "overview", params: new URLSearchParams(query) };
 }
 
-/** An in-panel hash link to Memories with the given filters. */
-export function memoriesHref(filters = {}) {
+/** An in-panel hash route to `view` with the given query (empty values dropped). */
+export function viewHref(view, filters = {}) {
   const params = new URLSearchParams();
   for (const [k, v] of Object.entries(filters)) {
     if (v !== undefined && v !== null && v !== "" && v !== false) params.set(k, String(v));
   }
   const q = params.toString();
-  return `#/memories${q ? "?" + q : ""}`;
+  return `#/${view}${q ? "?" + q : ""}`;
 }
+
+/** An in-panel hash link to Memories with the given filters. */
+export const memoriesHref = (filters = {}) => viewHref("memories", filters);
+
+/** An in-panel hash link to the Feedback log (reporter, verdict, author, fleet, entry). */
+export const feedbackHref = (filters = {}) => viewHref("feedback", filters);
 
 /** An <a> to an in-panel hash route (the href is built from our own params only). */
 export function link(text, href, props = {}) {
@@ -225,6 +232,8 @@ export function fmtDuration(seconds) {
 export const statusBadge = (status) => h("span", { class: `badge badge-${status}`, text: status });
 export const levelBadge = (value) => h("span", { class: "badge badge-level", text: `${value} · ${levelName(value)}` });
 export const kindBadge = (kind) => h("span", { class: `badge badge-kind badge-kind-${kind}`, text: kind });
+const VERDICT_BADGE = { helpful: "badge-active", stale: "badge-pending", wrong: "badge-revoked" };
+export const verdictBadge = (verdict, text = verdict) => h("span", { class: `badge ${VERDICT_BADGE[verdict] || "badge-muted"}`, title: verdict, text });
 export const stateBadge = (st) => h("span", {
   class: `badge ${st === "active" ? "badge-active" : st === "withdrawn" ? "badge-revoked" : "badge-muted"}`, text: st,
 });

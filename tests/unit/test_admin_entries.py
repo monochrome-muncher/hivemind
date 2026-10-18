@@ -4,12 +4,14 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from hivemind.domain.access import TrustLevel
 from hivemind.domain.audit import AuditAction, AuditFilters
 from hivemind.domain.entry import EntryDraft, Kind
-from hivemind.domain.feedback import Feedback, Verdict
+from hivemind.domain.feedback import Feedback, FeedbackLogFilters, Verdict
 from hivemind.ports import Credential
 from tests.fakes import make_embedder
 from tests.unit.test_api_endpoints import make_client, make_hivemind_app
@@ -46,6 +48,7 @@ ROUTES = [
     ("POST", "/v1/admin/search", {"query": "kaniko"}),
     ("POST", f"/v1/admin/entries/{FAKE_ID}/withdraw", {}),
     ("GET", "/v1/admin/activity", None),
+    ("GET", "/v1/admin/feedback", None),
 ]
 
 
@@ -177,3 +180,98 @@ async def test_admin_withdraw_works_is_audited_and_conflicts_the_second_time() -
     assert unknown.status_code == 404
     records = await app.store.list_audit(AuditFilters(action=AuditAction.ENTRY_WITHDRAW), 10)
     assert [r.target for r in records] == [in_blue.id]
+
+
+async def test_admin_feedback_lists_who_rated_what_across_fleets() -> None:
+    app, blue, red, mine, in_blue, in_red = await _seed()
+    t0 = datetime(2026, 6, 1, tzinfo=UTC)
+    await app.store.record_feedback(
+        Feedback(in_blue.id, "bob", "codex", Verdict.WRONG, "wrong port", t0)
+    )
+    await app.store.record_feedback(
+        Feedback(in_red.id, "alice", "alice", Verdict.HELPFUL, None, t0 + timedelta(hours=1))
+    )
+    await app.store.record_feedback(
+        Feedback(mine.id, "bob", "bob", Verdict.STALE, None, t0 + timedelta(hours=2))
+    )
+    async with make_client(app) as client:
+        everything = await client.get("/v1/admin/feedback", headers=ADMIN)
+        by_bob = await client.get("/v1/admin/feedback", params={"reporter": "bob"}, headers=ADMIN)
+        wrong = await client.get("/v1/admin/feedback", params={"verdict": "wrong"}, headers=ADMIN)
+        on_bob = await client.get("/v1/admin/feedback", params={"author": "bob"}, headers=ADMIN)
+        in_red_fleet = await client.get(
+            "/v1/admin/feedback", params={"fleet_id": red.id}, headers=ADMIN
+        )
+        one_entry = await client.get(
+            "/v1/admin/feedback", params={"entry_id": in_blue.id}, headers=ADMIN
+        )
+        paged = await client.get(
+            "/v1/admin/feedback", params={"limit": 1, "offset": 1}, headers=ADMIN
+        )
+        bad_verdict = await client.get(
+            "/v1/admin/feedback", params={"verdict": "meh"}, headers=ADMIN
+        )
+        bad_limit = await client.get("/v1/admin/feedback", params={"limit": 0}, headers=ADMIN)
+    assert everything.status_code == 200
+    rows = everything.json()
+    assert [(r["reporter"], r["entry"]["summary"]) for r in rows] == [
+        ("bob", "alice private note kaniko"),
+        ("alice", "red fleet deploy kaniko"),
+        ("bob", "blue fleet deploy kaniko"),
+    ]
+    assert rows[2] == {
+        "reporter": "bob",
+        "agent": "codex",
+        "verdict": "wrong",
+        "note": "wrong port",
+        "updated_at": "2026-06-01T00:00:00Z",
+        "entry": {
+            "id": in_blue.id,
+            "kind": "fact",
+            "summary": "blue fleet deploy kaniko",
+            "author": "alice",
+            "scope": "fleet",
+            "fleet_id": blue.id,
+            "state": "active",
+        },
+    }
+    assert [r["entry"]["id"] for r in by_bob.json()] == [mine.id, in_blue.id]
+    assert [r["entry"]["id"] for r in wrong.json()] == [in_blue.id]
+    assert [r["entry"]["id"] for r in on_bob.json()] == [in_red.id]
+    assert [r["entry"]["id"] for r in in_red_fleet.json()] == [in_red.id]
+    assert [r["reporter"] for r in one_entry.json()] == ["bob"]
+    assert [r["entry"]["id"] for r in paged.json()] == [in_red.id]
+    assert bad_verdict.status_code == bad_limit.status_code == 422
+
+
+async def test_the_feedback_log_service_follows_the_callers_visibility() -> None:
+    """The service behind the admin route also serves an agent's own view:
+    an agent key reads rows on the entries it can read, nothing more."""
+    app, blue, _red, mine, in_blue, in_red = await _seed()
+    for entry in (mine, in_blue, in_red):
+        await app.store.record_feedback(Feedback(entry.id, "zed", "zed", Verdict.HELPFUL))
+    lurker = Credential(
+        user_id="carol",
+        agent_name="carol",
+        access_controlled=True,
+        trust_level=TrustLevel.LURKER,
+        home_fleet_id=blue.id,
+    )
+    rows = await app.governance_service.feedback_log(
+        lurker, FeedbackLogFilters(reporter="zed"), limit=10
+    )
+    assert [r.feedback.entry_id for r in rows] == [in_blue.id]
+
+
+async def test_admin_feedback_refuses_bad_filters_and_matches_nothing_on_a_bad_id() -> None:
+    app = make_hivemind_app()
+    async with make_client(app) as client:
+        nul = await client.get("/v1/admin/feedback", params={"reporter": "a\x00b"}, headers=ADMIN)
+        long_id = await client.get(
+            "/v1/admin/feedback", params={"entry_id": "x" * 65}, headers=ADMIN
+        )
+        malformed = await client.get(
+            "/v1/admin/feedback", params={"entry_id": "not-an-id", "fleet_id": "x"}, headers=ADMIN
+        )
+    assert nul.status_code == long_id.status_code == 422
+    assert malformed.status_code == 200 and malformed.json() == []

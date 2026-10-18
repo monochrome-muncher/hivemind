@@ -62,6 +62,8 @@ from hivemind.domain.entry import (
 from hivemind.domain.feedback import (
     Correction,
     Feedback,
+    FeedbackLogFilters,
+    FeedbackLogItem,
     FeedbackSignals,
     FlagCount,
     Verdict,
@@ -412,6 +414,17 @@ SELECT entry_id, "user", agent, verdict, note, updated_at FROM (
 ) AS ranked
 WHERE rn <= $2
 ORDER BY entry_id, (verdict = 'helpful' AND COALESCE(note, '') = ''), updated_at DESC, "user", agent
+"""
+
+# The feedback log: rows across entries with the rated entry's list fields.
+# ``{where}`` is built by ``list_feedback_log``.
+FEEDBACK_LOG = """
+SELECT f.entry_id, f."user", f.agent, f.verdict, f.note, f.updated_at,
+       e.kind, e.summary, e.author, e.scope, e.fleet_id, e.state
+  FROM feedbacks f JOIN entries e ON e.id = f.entry_id
+ WHERE {where}
+ ORDER BY f.updated_at DESC, f.entry_id, f."user", f.agent
+ LIMIT ${limit} OFFSET ${offset}
 """
 
 BATCH_FEEDBACK = f"""
@@ -813,11 +826,14 @@ def _filter_conditions(
     return clauses, params
 
 
-def _visibility_clause(visibility: Visibility | None, params: list[Any]) -> str | None:
+def _visibility_clause(
+    visibility: Visibility | None, params: list[Any], table: str = ""
+) -> str | None:
     """The visibility clause for ``visibility`` (ADR 0011), or ``None``
     for no restriction; appends its parameters to ``params``.
 
-    Mirrors ``domain.access.entry_is_visible``.
+    Mirrors ``domain.access.entry_is_visible``. ``table`` qualifies the
+    ``entries`` columns (``"e."``) when the query joins another table.
     """
     if visibility is None or visibility.is_admin:
         return None
@@ -831,13 +847,16 @@ def _visibility_clause(visibility: Visibility | None, params: list[Any]) -> str 
     name_p = _p(visibility.name)
     if visibility.level == TrustLevel.PRIVILEGED:
         # L3 reads every fleet's entries.
-        return f"(scope = 'org' OR (scope = 'self' AND author = {name_p}) OR scope = 'fleet')"
+        return (
+            f"({table}scope = 'org' OR ({table}scope = 'self' AND {table}author = {name_p}) "
+            f"OR {table}scope = 'fleet')"
+        )
     # L1/L2: fleet entries only if own or in the home fleet.
     home_p = _p(visibility.home_fleet_id)
     return (
-        "(scope = 'org' "
-        f"OR (scope = 'self' AND author = {name_p}) "
-        f"OR (scope = 'fleet' AND (author = {name_p} OR fleet_id = {home_p})))"
+        f"({table}scope = 'org' "
+        f"OR ({table}scope = 'self' AND {table}author = {name_p}) "
+        f"OR ({table}scope = 'fleet' AND ({table}author = {name_p} OR {table}fleet_id = {home_p})))"
     )
 
 
@@ -1567,6 +1586,61 @@ class PgStore:
             for r in rows:
                 rows_by_id[str(r["entry_id"])].append(_row_to_feedback(r))
         return {eid: rows_by_id[c] if c is not None else [] for eid, c in canonical.items()}
+
+    async def list_feedback_log(
+        self,
+        filters: FeedbackLogFilters,
+        limit: int,
+        offset: int = 0,
+        *,
+        visibility: Visibility | None = None,
+    ) -> list[FeedbackLogItem]:
+        """Feedback rows across entries, newest first. No index serves the
+        order: a scan of ``feedbacks`` and a top-N sort, read by the admin
+        panel only."""
+        clauses = [_REPORTER_NOT_REVOKED]
+        params: list[Any] = []
+
+        def add(fragment: str, value: Any) -> None:
+            params.append(value)
+            clauses.append(fragment.replace("?", f"${len(params)}"))
+
+        for value, fragment in (
+            (filters.entry_id, "f.entry_id = ?"),
+            (filters.fleet_id, "e.fleet_id = ?"),
+        ):
+            if value is None:
+                continue
+            if is_valid_uuid(value):
+                add(fragment, value)
+            else:
+                clauses.append("FALSE")
+        if filters.reporter is not None:
+            add('f."user" = ?', filters.reporter)
+        if filters.verdict is not None:
+            add("f.verdict = ?", filters.verdict.value)
+        if filters.author is not None:
+            add("e.author = ?", filters.author)
+        vis = _visibility_clause(visibility, params, "e.")
+        if vis is not None:
+            clauses.append(vis)
+        sql = FEEDBACK_LOG.format(
+            where=" AND ".join(clauses), limit=len(params) + 1, offset=len(params) + 2
+        )
+        async with self._connection() as conn:
+            rows = await conn.fetch(sql, *params, limit, offset)
+        return [
+            FeedbackLogItem(
+                feedback=_row_to_feedback(r),
+                entry_kind=Kind(r["kind"]),
+                entry_summary=r["summary"],
+                entry_author=r["author"],
+                entry_scope=r["scope"],
+                entry_fleet_id=str(r["fleet_id"]) if r["fleet_id"] is not None else None,
+                entry_state=EntryState(r["state"]),
+            )
+            for r in rows
+        ]
 
     # -- fleets (ADR 0011) ------------------------------------------------------
 

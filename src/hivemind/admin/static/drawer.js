@@ -7,7 +7,7 @@
 
 import {
   $, api, guarded, h, toast, openModal, closeModal, fleetName, fmtTime, fmtAgo, kindBadge, stateBadge,
-  copyText, link, memoriesHref,
+  copyText, link, memoriesHref, feedbackHref, verdictBadge,
 } from "./core.js";
 
 let onChange = () => {};
@@ -136,15 +136,18 @@ function render(e) {
     h("section", { class: "drawer-sec" },
       h("h3", { text: "Feedback" }),
       h("div", { class: "fb-counts" },
-        h("span", { class: "badge badge-active", text: `${fb.helpful} helpful` }),
-        h("span", { class: "badge badge-pending", text: `${fb.stale} stale` }),
-        h("span", { class: "badge badge-revoked", text: `${fb.wrong} wrong` })),
+        verdictBadge("helpful", `${fb.helpful} helpful`),
+        verdictBadge("stale", `${fb.stale} stale`),
+        verdictBadge("wrong", `${fb.wrong} wrong`)),
       fb.recent && fb.recent.length
         ? h("ul", { class: "notes" }, fb.recent.map((r) => h("li", {},
-          h("div", {}, h("span", { class: `badge ${r.verdict === "helpful" ? "badge-active" : r.verdict === "stale" ? "badge-pending" : "badge-revoked"}`, text: r.verdict }),
+          h("div", {}, verdictBadge(r.verdict),
             h("span", { class: "muted small", text: ` ${r.reporter} · ${fmtAgo(r.updated_at)}` })),
           r.note ? h("div", { class: "plain", text: r.note }) : null)))
-        : h("p", { class: "muted small", text: "No verdicts yet." })),
+        : h("p", { class: "muted small", text: "No verdicts yet." }),
+      fb.helpful + fb.stale + fb.wrong > (fb.recent || []).length
+        ? h("p", { class: "small" }, link(`All ${fb.helpful + fb.stale + fb.wrong} verdicts`, feedbackHref({ entry: e.id })))
+        : null),
 
     related("See also", e.see_also, "No links from this entry."),
     related("Linked from", e.linked_from, "Nothing links to this entry."),

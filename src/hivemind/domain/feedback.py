@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 
+from hivemind.domain.entry import EntryState, Kind
+
 
 class Verdict(StrEnum):
     """A reporting agent's judgment of an entry it relied on."""
@@ -151,3 +153,30 @@ class FeedbackSummary:
     wrong: int
     recent: tuple[Feedback, ...] = ()
     last_confirmed_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FeedbackLogFilters:
+    """What a feedback log read narrows by. ``reporter`` is the registered
+    reporter name (``Feedback.user``); ``author``, ``fleet_id`` and
+    ``entry_id`` describe the rated entry. ``None`` leaves a field open."""
+
+    reporter: str | None = None
+    verdict: Verdict | None = None
+    author: str | None = None
+    fleet_id: str | None = None
+    entry_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FeedbackLogItem:
+    """One feedback row with the entry it is about: who said what of which
+    entry. The entry fields are what a list row shows of it."""
+
+    feedback: Feedback
+    entry_kind: Kind
+    entry_summary: str
+    entry_author: str
+    entry_scope: str
+    entry_fleet_id: str | None
+    entry_state: EntryState

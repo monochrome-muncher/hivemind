@@ -312,6 +312,8 @@ tr.clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: -
 .check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; white-space: nowrap; }
 .check input { min-width: 0; }
 .result-status { margin: 0; }
+.cell-note { min-width: 180px; max-width: 360px; }
+.chip-filter { display: inline-flex; gap: 6px; align-items: center; color: var(--text); }
 .row.tight { gap: 6px; }
 .row.entry-top { gap: 6px; margin-bottom: 4px; }
 

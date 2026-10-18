@@ -14,7 +14,7 @@ from pydantic import AfterValidator, BaseModel, Field, field_validator
 from hivemind.domain.access import Agent, Fleet, Standing
 from hivemind.domain.audit import AuditRecord
 from hivemind.domain.entry import EntityKind, Entry, EntryState, ImportanceSource, Kind, SourceType
-from hivemind.domain.feedback import FeedbackCounts, FeedbackSummary, Verdict
+from hivemind.domain.feedback import FeedbackCounts, FeedbackLogItem, FeedbackSummary, Verdict
 from hivemind.domain.pin import ChangeReason, Pin, PinnedEntry
 from hivemind.domain.recency import RecencyHint
 from hivemind.domain.upstream import UpstreamChangeKind
@@ -923,6 +923,51 @@ class ActivityOut(BaseModel):
     totals: ActivityTotalsOut
     agents: list[AgentActivityOut]
     fleets: list[FleetActivityOut]
+
+
+class FeedbackLogEntryOut(BaseModel):
+    """The entry a feedback log row rates, as a list row shows it."""
+
+    id: str
+    kind: Kind
+    summary: str
+    author: str
+    scope: str
+    fleet_id: str | None
+    state: EntryState
+
+
+class FeedbackLogItemOut(BaseModel):
+    """One row of ``GET /v1/admin/feedback``: who gave which verdict on
+    which entry. ``reporter`` is the registered name, ``agent`` the label
+    the row was filed under."""
+
+    reporter: str
+    agent: str
+    verdict: Verdict
+    note: str | None
+    updated_at: datetime | None
+    entry: FeedbackLogEntryOut
+
+    @classmethod
+    def from_item(cls, item: FeedbackLogItem) -> FeedbackLogItemOut:
+        fb = item.feedback
+        return cls(
+            reporter=fb.user,
+            agent=fb.agent,
+            verdict=fb.verdict,
+            note=fb.note,
+            updated_at=fb.updated_at,
+            entry=FeedbackLogEntryOut(
+                id=fb.entry_id,
+                kind=item.entry_kind,
+                summary=item.entry_summary,
+                author=item.entry_author,
+                scope=item.entry_scope,
+                fleet_id=item.entry_fleet_id,
+                state=item.entry_state,
+            ),
+        )
 
 
 class MetricsOut(BaseModel):
