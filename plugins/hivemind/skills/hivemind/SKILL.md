@@ -88,8 +88,7 @@ nothing new, write nothing ("task done" helps nobody).
 **Check your draft first** (`hive_write` with `check: true` stores
 nothing; a reply with an `id` was stored), fix what its `warnings` name
 and act on the nearest entry in `related` (withdraw yours if stored and
-it duplicated one). A `near_duplicate` warning means a second copy of the
-same fact: supersede it:
+it duplicated one); a `near_duplicate` warning names a very close one:
 
 | The nearest entry | Do |
 |---|---|

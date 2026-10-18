@@ -84,7 +84,7 @@ class WriteService:
 
     async def write(self, draft: EntryDraft, *, writer: Visibility | None = None) -> Entry:
         """Embed-then-persist a fully-resolved entry draft (see ``_write``)."""
-        entry, _, _ = await self._write(draft, writer=writer)
+        entry, _, _, _ = await self._write(draft, writer=writer)
         return entry
 
     async def write_and_relate(
@@ -94,9 +94,11 @@ class WriteService:
         (ADR 0052), reusing the embedding. Best-effort: the entry is
         already stored, so a failed lookup is logged, not raised.
         """
-        entry, embedding, warnings = await self._write(draft, writer=writer)
+        entry, embedding, warnings, resolved = await self._write(draft, writer=writer)
         related = await self._related_best_effort(draft, entry.id, embedding, writer)
-        return WriteResult(entry, related, warnings + near_duplicate_warning(related))
+        return WriteResult(
+            entry, related, warnings + near_duplicate_warning(related, resolved.see_also)
+        )
 
     async def check(self, draft: EntryDraft, *, writer: Visibility | None = None) -> CheckResult:
         """Check mode: everything ``write_and_relate`` validates (supersede
@@ -111,7 +113,7 @@ class WriteService:
         related = await self._related_best_effort(
             draft, None, embedding, writer, skip=frozenset(e.id for e in superseded)
         )
-        return CheckResult(related, warnings + near_duplicate_warning(related))
+        return CheckResult(related, warnings + near_duplicate_warning(related, draft.see_also))
 
     async def _related_best_effort(
         self,
@@ -178,9 +180,10 @@ class WriteService:
 
     async def _write(
         self, draft: EntryDraft, *, writer: Visibility | None = None
-    ) -> tuple[Entry, list[float], tuple[WriteWarning, ...]]:
+    ) -> tuple[Entry, list[float], tuple[WriteWarning, ...], EntryDraft]:
         """Embed-then-persist a fully-resolved entry draft; returns the
-        stored entry, the embedding it was stored with and the warnings.
+        stored entry, the embedding it was stored with, the warnings and the
+        draft as resolved (``see_also`` in the targets' own ids).
 
         With ``writer`` (both surfaces pass it), every supersession target
         must pass ``may_supersede`` (ADR 0033) or ``SupersedeDenied`` is
@@ -216,7 +219,7 @@ class WriteService:
             # A target was superseded/withdrawn after the pre-check
             # (ADR 0034): the store rolled the write back atomically.
             raise SupersedeDenied(exc.ids) from exc
-        return entry, embedding, warnings
+        return entry, embedding, warnings, draft
 
     @staticmethod
     async def _extract(

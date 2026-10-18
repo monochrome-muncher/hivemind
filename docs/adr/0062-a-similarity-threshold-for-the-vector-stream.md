@@ -54,7 +54,11 @@ age-varied sets (`tests/eval/`).
    retry that names the system and setting): the weakest answer rises to
    0.41–0.50 and the suggested value to 0.35–0.45, so a high cut-off is
    viable again when queries are specific — the threshold is a property of
-   the query, not just the model.
+   the query, not just the model. Checked through search on 8B, the
+   production embedder (2026-10-18): up to 0.50 the threshold changes
+   nothing (hit@5 0.935 vague, 0.961 specific), 0.55 is the first value
+   with any effect, and 0.60 empties only 10 of 192 off-topic vector
+   streams, so no value is recommended and the default stays off.
 
 ## Consequences
 

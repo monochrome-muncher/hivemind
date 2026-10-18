@@ -118,8 +118,8 @@ async def test_local_path_warns_on_fleet_entries_only() -> None:
     assert fleet["warnings"][0]["message"]  # type: ignore[index]
     summary = await _write(store, A, summary="fix in ~/repo/x.py", scope="fleet")
     assert _codes(summary) == ["local_path"]
-    private = await _write(store, A, body="the backup job runs nightly", scope="self")
-    assert private["warnings"] == []
+    private = await _write(store, A, body="checkout at /home/a/repo", scope="self")
+    assert "local_path" not in _codes(private)  # a self note may name local paths
 
 
 async def test_foreign_link_when_a_fleet_entry_relays_another_fleets_entry() -> None:
@@ -277,31 +277,43 @@ def test_near_duplicate_warning_fires_at_the_threshold() -> None:
     (w,) = near_duplicate_warning([rel(0.9)])
     assert w.code == "near_duplicate"
     assert "abc" in w.message and "0.90" in w.message
-    assert near_duplicate_warning([rel(0.84)]) == ()
+    # the message offers the three readings, not one fixed remedy
+    assert "rate it" in w.message and "supersede" in w.message and "see_also" in w.message
+    assert near_duplicate_warning([rel(0.89)]) == ()
     assert near_duplicate_warning([]) == ()
     (w,) = near_duplicate_warning([rel(0.5, "low"), rel(0.95, "high")])
     assert "high" in w.message
+    # an entry the draft already links with see_also does not count
+    assert near_duplicate_warning([rel(0.95, "linked")], ("linked",)) == ()
+    (w,) = near_duplicate_warning([rel(0.97, "linked"), rel(0.92, "other")], ("linked",))
+    assert "other" in w.message
 
 
 async def test_near_duplicate_warns_on_a_near_identical_write() -> None:
-    """Through the write path: a near-copy of an existing entry warns; a
-    dissimilar one does not. A 16-dim fake embedder reaches the threshold
-    for near-identical text (the default 4-dim one is too noisy)."""
+    """Through the write path: a near-copy of an existing entry warns, in a
+    write and in a check; a dissimilar one does not, and neither does a
+    near-copy that names the entry in ``see_also``. A 16-dim fake embedder
+    reaches the threshold for near-identical text (the default 4-dim one is
+    too noisy)."""
     from tests.fakes import FakeEmbedder
 
     store = MemoryStore(make_clock())
     surface = _surface(store, A, embedder=FakeEmbedder(dimension=16))
-    await hive_write(
-        surface,
-        kind="fact",
-        summary="billing runs on node 20",  # type: ignore[arg-type]
-    )
-    near = await hive_write(
-        surface,
-        kind="fact",
-        summary="billing runs on node 21",  # type: ignore[arg-type]
-    )
+    summary = "billing in the eu region runs on node 20 behind the shared proxy"
+    first = await hive_write(surface, kind="fact", summary=summary)  # type: ignore[arg-type]
+    copy = summary.replace("node 20", "node 21")
+    checked = await hive_write(surface, kind="fact", summary=copy, check=True)  # type: ignore[arg-type]
+    assert _codes(checked) == ["near_duplicate"]
+    near = await hive_write(surface, kind="fact", summary=copy)  # type: ignore[arg-type]
     assert "near_duplicate" in _codes(near)
+    linked = await hive_write(
+        surface,
+        kind="fact",
+        summary=copy,  # type: ignore[arg-type]
+        see_also=[first["id"], near["id"]],  # type: ignore[list-item]
+        scope="self",
+    )
+    assert "near_duplicate" not in _codes(linked)
     other = await hive_write(
         surface,
         kind="fact",

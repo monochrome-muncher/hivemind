@@ -2,6 +2,8 @@
 
 > **Status: amended by [ADR 0077](0077-write-check-mode-and-warnings.md):**
 > `check: true` replaces the rejected pre-write check verb, and `related` items carry tags, feedback counts and `same_author`.
+>
+> **Amended by [ADR 0087](0087-near-duplicate-write-warning.md):** §3's "no floor" now has one advisory exception: a `near_duplicate` warning when the nearest entry is at similarity 0.90 or more. Nothing is refused.
 
 ## Context
 

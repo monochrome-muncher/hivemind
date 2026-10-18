@@ -690,6 +690,23 @@ models is unaffected. The absolute thresholds should be re-checked on a
 corpus with diverse bodies before a deployment sets the value from this
 alone.
 
+The summaries have the same problem, and more of it (checked 2026-10-18).
+In nine of the eleven new domains (intelligence analysis, blue team, red
+team, database engineering, network operations, data engineering, platform
+engineering, research literature, legal compliance) 113 to 125 of each
+domain's 128 summaries follow one template ("The compliance slo is the 10
+with the 2 that are the critical and the 8 that are the standard", "The
+vision is the 1 with the 2 that are the 2 and the 1 that is the 1"), about
+1,100 of the 2,048, and many of their queries are keyword fragments ("siem
+licence 5000"). 257 of the 768 version-pair entries use it too, so the tau
+measurement is not fully clear of it either. On Qwen3-Embedding-8B the
+threshold conclusions hold on the seven untemplated domains alone (weakest
+answer 0.396, off-topic first empties at 0.55), but entry-to-entry
+similarity is inflated: each entry's nearest other entry is at 0.85 or more
+for 39% of the full pool, 7% of the untemplated domains and 1% of the five
+original ones. Read the entry-to-entry figures (tau, the `near_duplicate`
+band) from the untemplated domains.
+
 **De-vagued queries make a high threshold viable.**
 *(2026-10-17; `tests/eval/corpus/specific_queries.py`,
 `tests/eval/threshold.py`'s `extended_scenarios_specific()`,
@@ -732,6 +749,29 @@ off-topic vector stream, and the five-domain value (0.45) becomes viable
 again on 0.6B. The threshold is a property of the *query*, not just the
 model — a deployment that gets specific queries can run a higher value than
 one that gets vague ones.
+
+**What it buys on 8B, through search (2026-10-18).** Re-run on
+Qwen3-Embedding-8B (Q8_0 GGUF via llama.cpp, last-token pooling, 1024 dims;
+it reproduces the vLLM figures above to within 0.004) with hit@5 through
+`SearchService`, combined pool:
+
+| threshold | vague: kept / hit@5 / off-topic vector empty | specific: kept / hit@5 / off-topic vector empty |
+|---|---|---|
+| off | 646 / 0.935 / 0 | 646 / 0.961 / 0 |
+| 0.45 | 640 / 0.935 / 0 | 644 / 0.961 / 0 |
+| 0.50 | 633 / 0.935 / 0 | 642 / 0.961 / 0 |
+| 0.55 | 620 / 0.938 / 4 | 637 / 0.961 / 4 |
+| 0.60 | 575 / 0.943 / 10 | 616 / 0.963 / 10 |
+| 0.65 | 511 / 0.943 / 34 | 588 / 0.964 / 34 |
+
+No off-topic search is ever empty (the keyword stream always matches). Up to
+0.50 the threshold changes nothing on 8B; 0.55 is the first value with any
+effect, and from there each step trades a few thousandths of hit@5 for
+answers the vector stream drops. "Emptying the off-topic stream" is too
+strong for 8B: 0.60 empties 10 of 192, because the off-topic queries are
+in-domain questions with no answer (median nearest entry 0.71, inside the
+answer band). On 8B the threshold does not pay for itself on this corpus,
+so the default stays off and no value is recommended.
 
 **How to measure.** Point the `HIVEMIND_EMBEDDING_*` settings at the
 embedder the deployment uses, with the deployment's dimension, and run:
@@ -997,7 +1037,12 @@ legitimate writes). The corpus's near-copied distractors are therefore a
 worst case — a pool where no writer superseded — and the real false-grouping
 rate should be lower, because the `related` reply and the supersede convention
 keep some near-copies out of the pool. A `near_duplicate` advisory warning
-(SPEC §4.1) now makes that signal explicit without adding a floor: it fires
-when a write's nearest `related` entry (ADR 0052) is at similarity ≥ 0.85,
-the band where same-system near-copies sit, and asks the writer to supersede
-it rather than write a second copy.
+(SPEC §4.1, ADR 0087) now makes that signal explicit without refusing
+anything: it fires when a write's nearest `related` entry (ADR 0052), other
+than one the draft links with `see_also`, is at similarity ≥ 0.90, and asks
+the writer to rate it, supersede it or link it, whichever fits. On
+Qwen3-Embedding-8B over the seven untemplated domains (112 pairs), 0.90
+catches 71% of version pairs and 1% of same-system distractors; 0.85 would
+catch 84% and 7% (a distinct fact such as "the Airflow default pool has 128
+slots" beside "the backfill pool has 2048 slots" sits at 0.883), and 0.95
+catches 54% and 0%.

@@ -6,7 +6,7 @@ already loaded. They never block a write.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import TYPE_CHECKING
@@ -25,8 +25,10 @@ _FRESH_CONSOLIDATION_GAP = timedelta(days=1)
 _IDS_IN_MESSAGE = 3
 
 # A related entry at or above this similarity is a near-duplicate signal
-# (same system, near-copied wording). Advisory only: the writer judges.
-_NEAR_DUPLICATE_SIMILARITY = 0.85
+# (ADR 0087). Measured on Qwen3-Embedding-8B: 0.90 catches most versions of
+# one fact and almost no distinct same-system facts, which 0.85 still
+# catches. Tuned for Qwen3; advisory only, the writer judges.
+_NEAR_DUPLICATE_SIMILARITY = 0.90
 
 # A local path: a home directory (/home/x, /Users/x, ~/x) or a Windows
 # profile (C:\Users\x, C:/Users/x, or JSON-escaped C:\\Users\\x). Not
@@ -61,19 +63,24 @@ def is_entry_link(source: Source) -> bool:
     return is_entry_ref(source.ref)
 
 
-def near_duplicate_warning(related: Iterable[RelatedEntry]) -> tuple[WriteWarning, ...]:
-    """A near-duplicate signal: a related entry at or above the threshold."""
-    if not related:
+def near_duplicate_warning(
+    related: Sequence[RelatedEntry], linked: Collection[str] = ()
+) -> tuple[WriteWarning, ...]:
+    """A near-duplicate signal: a related entry at or above the threshold.
+    Entries in ``linked`` (the draft's ``see_also``) are skipped: the writer
+    already said how they relate."""
+    candidates = [r for r in related if r.entry.id not in linked]
+    if not candidates:
         return ()
-    top = max(related, key=lambda r: r.similarity)
+    top = max(candidates, key=lambda r: r.similarity)
     if top.similarity < _NEAR_DUPLICATE_SIMILARITY:
         return ()
     return (
         WriteWarning(
             "near_duplicate",
-            f"very similar to an existing entry ({top.entry.id}, similarity "
-            f"{top.similarity:.2f}); if it says the same thing, supersede it "
-            "instead of writing a second copy",
+            f"very similar to {top.entry.id} (similarity {top.similarity:.2f}): "
+            "if it says the same, rate it instead of writing; if yours updates "
+            "it, supersede it; if it is another point, link it with see_also",
         ),
     )
 
