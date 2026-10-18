@@ -380,6 +380,7 @@ This section supersedes the flat-pool commitment of §1 and the "no trust tiers"
 | 3 | `privileged` | own + home fleet + **every fleet** | own + home fleet only (read-broad, write-local) |
 
 * At level 0 (`untrusted`) — what pending and demoted agents sit at — all read verbs return **empty results** (the visibility filter hides everything); writes are explicit permission errors, and feedback/withdrawal answer **not found** (they follow readability, and at level 0 nothing is readable).
+* **Stored keys only** (ADR 0082, off by default): with `HIVEMIND_REQUIRE_STORED_KEYS=true`, a dev-mode credential (one that is not an admin key, an org key or an active agent's key) sits at level 0 on the data plane, so its reads come back empty and its writes are permission errors. The admin surface is unchanged.
 * Reads beyond visibility behave **as if the entry does not exist** (no existence leaking).
 * `self`-scoped entries are private to their author **even at level 3** (that is what `self` is for).
 * **Read-broad does not mean relay** (ADR 0036): a privileged agent uses what it reads in other fleets but does not restate it in its home fleet; it links a foreign entry by id and asks its user before bringing one home. This is agent guidance (the hivemind skill), not something the server can enforce.

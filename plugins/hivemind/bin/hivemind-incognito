@@ -20,12 +20,12 @@
 # launcher also removes HIVEMIND_API_KEY and HIVEMIND_MCP_URL from the
 # child's environment, so an agent with a shell cannot read the key or call
 # the REST API with it. Where the session is incognito by restraint only
-# (hermes, opencode, other launchers) the variables are left in place: the
+# (hermes, opencode, kilocode, other launchers) the variables are left in place: the
 # harness may still need them, and the README says so.
 set -eu
 
 if [ "$#" -lt 1 ]; then
-  echo "usage: hivemind-incognito <claude|codex|copilot|dsh|gemini|hermes|pi|omp|opencode|cline|kilocode|other-command> [args...]" >&2
+  echo "usage: hivemind-incognito <claude|codex|copilot|dsh|gemini|hermes|pi|omp|opencode|cline|kilocode|kilo|other-command> [args...]" >&2
   exit 2
 fi
 harness=$1
