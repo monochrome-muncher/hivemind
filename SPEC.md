@@ -79,6 +79,7 @@ One entry entity; a `kind` enum carries the distinction. There are no other read
 | `fresh_consolidation` | the entry supersedes two or more entries and its `occurred_at` is more than one day after the newest superseded one; the message asks for the newest observation unless the writer observed or re-checked it today |
 | `no_primary_source` | an `org` or `fleet` `insight` or `decision` whose `sources` are all links to Hivemind entries (a bare entry id, `entry:<id>` or an `.../entries/<id>` URL), or are empty while it has `supersedes` or `see_also` links; an entry with no sources and no links is not flagged |
 | `sources_dropped` | a `supersedes` target has `sources` and the new entry carries none of them |
+| `near_duplicate` | one of the `related` entries (ADR 0052) has a cosine `similarity` of at least 0.85; the message names it and asks the writer to supersede it rather than write a second copy |
 
 **Derived validity (ADR 0001, no `valid_until` column):** an entry is "active as of T" iff `created_at ≤ T` and it has no supersession/withdrawal state transition before T. Read-side time-travel questions ("what did the org know in March?") are answered by `created_at`/`occurred_at` range filters + `state`.
 

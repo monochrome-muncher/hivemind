@@ -9,9 +9,13 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import timedelta
+from typing import TYPE_CHECKING
 
 from hivemind.domain.entry import Entry, EntryDraft, Source
 from hivemind.domain.health import is_entry_ref
+
+if TYPE_CHECKING:
+    from hivemind.services.write import RelatedEntry
 
 # Consolidating entries whose newest observation is older than this, under
 # a fresh ``occurred_at``, ranks the result as newer than its evidence.
@@ -19,6 +23,10 @@ _FRESH_CONSOLIDATION_GAP = timedelta(days=1)
 
 # Ids named in one message, so a long supersedes list stays short.
 _IDS_IN_MESSAGE = 3
+
+# A related entry at or above this similarity is a near-duplicate signal
+# (same system, near-copied wording). Advisory only: the writer judges.
+_NEAR_DUPLICATE_SIMILARITY = 0.85
 
 # A local path: a home directory (/home/x, /Users/x, ~/x) or a Windows
 # profile (C:\Users\x, C:/Users/x, or JSON-escaped C:\\Users\\x). Not
@@ -51,6 +59,23 @@ def has_local_path(text: str) -> bool:
 def is_entry_link(source: Source) -> bool:
     """Whether ``source`` points at another Hivemind entry, not the world."""
     return is_entry_ref(source.ref)
+
+
+def near_duplicate_warning(related: Iterable[RelatedEntry]) -> tuple[WriteWarning, ...]:
+    """A near-duplicate signal: a related entry at or above the threshold."""
+    if not related:
+        return ()
+    top = max(related, key=lambda r: r.similarity)
+    if top.similarity < _NEAR_DUPLICATE_SIMILARITY:
+        return ()
+    return (
+        WriteWarning(
+            "near_duplicate",
+            f"very similar to an existing entry ({top.entry.id}, similarity "
+            f"{top.similarity:.2f}); if it says the same thing, supersede it "
+            "instead of writing a second copy",
+        ),
+    )
 
 
 def _ids(entries: Iterable[Entry]) -> str:

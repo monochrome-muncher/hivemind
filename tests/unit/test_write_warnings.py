@@ -19,7 +19,11 @@ from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService, WriteService
 from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
-from hivemind.services.write_warnings import has_local_path, is_entry_link
+from hivemind.services.write_warnings import (
+    has_local_path,
+    is_entry_link,
+    near_duplicate_warning,
+)
 from tests.fakes import FakeAuthenticator, make_clock, make_embedder, make_search_config
 
 
@@ -77,8 +81,9 @@ B = _agent("b", "fleet-b")
 LEAD = _agent("lead", "fleet-a", TrustLevel.PRIVILEGED)
 
 
-def _surface(store: MemoryStore, credential: Credential) -> McpHivemind:
-    clock, embedder, config = make_clock(), make_embedder(), make_search_config()
+def _surface(store: MemoryStore, credential: Credential, embedder: object = None) -> McpHivemind:
+    clock, config = make_clock(), make_search_config()
+    embedder = embedder if embedder is not None else make_embedder()
     return McpHivemind(
         store=store,
         write_service=WriteService(store, embedder),
@@ -113,7 +118,7 @@ async def test_local_path_warns_on_fleet_entries_only() -> None:
     assert fleet["warnings"][0]["message"]  # type: ignore[index]
     summary = await _write(store, A, summary="fix in ~/repo/x.py", scope="fleet")
     assert _codes(summary) == ["local_path"]
-    private = await _write(store, A, body="checkout at /home/a/repo", scope="self")
+    private = await _write(store, A, body="the backup job runs nightly", scope="self")
     assert private["warnings"] == []
 
 
@@ -249,14 +254,60 @@ async def test_no_primary_source_misses() -> None:
     link = {"type": "other", "ref": f"entry:{base['id']}"}
     real = {"type": "url", "ref": "https://example.com/doc"}
 
+    counter = {"n": 0}
+
     async def codes(**kw: object) -> list[str]:
-        args = {"kind": "insight", "summary": "s", **kw}
+        counter["n"] += 1
+        args = {"kind": "insight", "summary": f"entry {counter['n']}", **kw}
         return _codes(await hive_write(_surface(store, A), **args))  # type: ignore[arg-type]
 
     assert await codes(sources=[link, real]) == []  # one external source is enough
     assert await codes() == []  # no sources, no links: not a synthesis
     assert await codes(kind="fact", sources=[link]) == []
     assert await codes(sources=[link], scope="self") == []
+
+
+def test_near_duplicate_warning_fires_at_the_threshold() -> None:
+    """The pure warning logic: high similarity warns, low stays quiet."""
+    from types import SimpleNamespace
+
+    def rel(sim: float, entry_id: str = "abc") -> object:
+        return SimpleNamespace(similarity=sim, entry=SimpleNamespace(id=entry_id))
+
+    (w,) = near_duplicate_warning([rel(0.9)])
+    assert w.code == "near_duplicate"
+    assert "abc" in w.message and "0.90" in w.message
+    assert near_duplicate_warning([rel(0.84)]) == ()
+    assert near_duplicate_warning([]) == ()
+    (w,) = near_duplicate_warning([rel(0.5, "low"), rel(0.95, "high")])
+    assert "high" in w.message
+
+
+async def test_near_duplicate_warns_on_a_near_identical_write() -> None:
+    """Through the write path: a near-copy of an existing entry warns; a
+    dissimilar one does not. A 16-dim fake embedder reaches the threshold
+    for near-identical text (the default 4-dim one is too noisy)."""
+    from tests.fakes import FakeEmbedder
+
+    store = MemoryStore(make_clock())
+    surface = _surface(store, A, embedder=FakeEmbedder(dimension=16))
+    await hive_write(
+        surface,
+        kind="fact",
+        summary="billing runs on node 20",  # type: ignore[arg-type]
+    )
+    near = await hive_write(
+        surface,
+        kind="fact",
+        summary="billing runs on node 21",  # type: ignore[arg-type]
+    )
+    assert "near_duplicate" in _codes(near)
+    other = await hive_write(
+        surface,
+        kind="fact",
+        summary="the deploy pipeline uses a separate queue",  # type: ignore[arg-type]
+    )
+    assert "near_duplicate" not in _codes(other)
 
 
 @pytest.mark.parametrize(

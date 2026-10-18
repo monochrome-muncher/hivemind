@@ -15,7 +15,11 @@ from hivemind.domain.validation import InvalidInput
 from hivemind.ports import Embedder, Extractor, Store, SupersedeConflict
 from hivemind.services.chain import get_visible_entries
 from hivemind.services.errors import SupersedeDenied
-from hivemind.services.write_warnings import WriteWarning, write_warnings
+from hivemind.services.write_warnings import (
+    WriteWarning,
+    near_duplicate_warning,
+    write_warnings,
+)
 
 # The name these warnings were always logged under, so log filters keep matching.
 logger = logging.getLogger("hivemind.services.governance")
@@ -92,7 +96,7 @@ class WriteService:
         """
         entry, embedding, warnings = await self._write(draft, writer=writer)
         related = await self._related_best_effort(draft, entry.id, embedding, writer)
-        return WriteResult(entry, related, warnings)
+        return WriteResult(entry, related, warnings + near_duplicate_warning(related))
 
     async def check(self, draft: EntryDraft, *, writer: Visibility | None = None) -> CheckResult:
         """Check mode: everything ``write_and_relate`` validates (supersede
@@ -107,7 +111,7 @@ class WriteService:
         related = await self._related_best_effort(
             draft, None, embedding, writer, skip=frozenset(e.id for e in superseded)
         )
-        return CheckResult(related, warnings)
+        return CheckResult(related, warnings + near_duplicate_warning(related))
 
     async def _related_best_effort(
         self,
