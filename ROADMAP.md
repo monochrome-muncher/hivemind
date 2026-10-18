@@ -15,7 +15,11 @@ the 2.4.0–2.5.0 search threshold and feedback work). The hive-mind study's
 ranking, evidence and fleet-health items shipped in 2.6.0, with every new
 ranking feature off by default (§3.15). 2.7.0 added the admin panel's memory
 browser, activity and stats (ADR 0080); 2.8.0 added GitHub Copilot CLI
-support, `upstream_changed` on search hits (ADR 0081) and faster search.
+support, `upstream_changed` on search hits (ADR 0081) and faster search;
+2.8.1 was documentation only. 2.9.0 added the `HIVEMIND_REQUIRE_STORED_KEYS`
+setting (ADR 0082) and the standalone docker stack, and split the entry-read
+path, the wire mappers and the MCP package into their own modules
+(ADRs 0083–0085).
 Tier 4's measurement items are closed or deferred with their reasons.
 The SPEC §10 extensions (Tier 5) stay held until their triggers fire.
 

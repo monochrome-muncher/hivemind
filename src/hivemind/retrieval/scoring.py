@@ -81,7 +81,7 @@ def entry_score(
     """Decay-aware final score for one entry (SPEC.md §6.4).
 
     final = fused
-          * (0.5 + 0.1 * importance)
+          * (0.5 + 0.1 * importance)     # or 1 + 0.05 * (importance - 3), see narrow_importance
           * max(recency_floor, 0.5 ** (age_days / half_life_days))
           * min(social_max, quality * r_conf / r_occ)
 
@@ -131,7 +131,8 @@ def entry_score(
     ``narrow_importance`` (ADR 0088) swaps the importance factor for
     ``1 + 0.05 * (importance - 3)`` (0.9..1.1, one step about 1.05x), so
     one importance step stays below ``social_max``; ``False`` is
-    bit-identical to the form above.
+    bit-identical to the form above. The setting ``HIVEMIND_NARROW_IMPORTANCE``
+    is on by default and passes ``True``; this function's own default is off.
     """
     age_days = (now - occurred_at).total_seconds() / 86_400.0
     if age_days < 0:

@@ -25,9 +25,9 @@ entry automatically. Write `plugin` — it works on both (v1 does not read
 Pin a release tag as shown: OpenCode caches a Git plugin on first use and
 never refreshes an unpinned entry, so changing the tag is how it updates.
 
-Or run `opencode plugin -g <git-url>` (v1) / `opencode plugin add <git-url>`
-(v2, which always writes the global config), which installs it and updates
-the config (on v1, without `-g` it writes the current project's
+Or run `opencode plugin -g git+https://<git-server>/<owner>/hivemind.git#v<version>`
+(v1) / `opencode plugin add` with the same URL (v2, which always writes the
+global config), which installs it and updates the config (on v1, without `-g` it writes the current project's
 `.opencode/opencode.json`, so Hivemind would load only in that project).
 **The plugin is the supported route**: it builds the `Authorization`
 header from the environment in its own code. With the key unset it does

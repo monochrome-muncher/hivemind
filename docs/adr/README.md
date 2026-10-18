@@ -32,7 +32,7 @@ is unused.
 | [0019](0019-unauthenticated-orchestrator-probe-endpoints.md) | Unauthenticated orchestrator probe endpoints | Partly superseded by 0037 |
 | [0020](0020-versioned-migrations-with-rollback-and-an-advisory-lock.md) | Versioned migrations with rollback, guarded by a Postgres advisory lock | Amended by 0025; dim guard note |
 | [0021](0021-embedded-text-budget-in-whitespace-words-not-model-tokens.md) | The embedded-text budget is counted in whitespace words, not model tokens | Amended by 0040 |
-| [0022](0022-recency-floor-so-match-quality-is-the-sort-key.md) | A floor under the recency factor, so match quality is the sort key | Amended by 0023, 0070, 0071, 0072, 0073 |
+| [0022](0022-recency-floor-so-match-quality-is-the-sort-key.md) | A floor under the recency factor, so match quality is the sort key | Amended by 0023, 0070, 0071, 0072, 0073, 0088 |
 | [0023](0023-recency-floor-gets-a-spelling-for-no-floor.md) | `HIVEMIND_RECENCY_FLOOR` gets an explicit spelling for "no floor" | Accepted |
 | [0024](0024-reject-unknown-hivemind-env-vars.md) | Reject unknown `HIVEMIND_*` environment variables | Partly superseded by 0032 |
 | [0025](0025-hnsw-vector-index-approximate-nearest-neighbours.md) | An HNSW index on `entries.embedding`: approximate, not exact, nearest neighbours | Accepted |
@@ -79,12 +79,12 @@ is unused.
 | [0067](0067-a-revoked-agents-feedback-no-longer-counts.md) | A revoked agent's feedback no longer counts | Accepted |
 | [0068](0068-rater-flag-confirmation-metric.md) | Count the flags a later supersession confirmed | Extended by 0075 |
 | [0069](0069-cache-the-entry-scan-behind-the-usage-report.md) | Cache the entry scan behind the usage report | Extended by 0075 |
-| [0070](0070-one-capped-budget-for-social-signals.md) | One capped budget for social signals | Amended by 0071, 0072, 0073 |
+| [0070](0070-one-capped-budget-for-social-signals.md) | One capped budget for social signals | Amended by 0071, 0072, 0073, 0088 |
 | [0071](0071-a-confirmation-can-restart-the-recency-clock.md) | A confirmation can restart the recency clock | Accepted (off by default) |
 | [0072](0072-recency-profile-per-kind.md) | A recency profile per kind | Accepted (off by default); amended by 0073 |
 | [0073](0073-a-recency-hint-on-search.md) | A recency hint on search | Accepted (off by default) |
 | [0074](0074-group-unlinked-versions-at-read-time.md) | Group unlinked versions at read time | Accepted (off by default) |
-| [0075](0075-fleet-health-metrics.md) | Fleet health metrics: admin-only and observation-only | Accepted |
+| [0075](0075-fleet-health-metrics.md) | Fleet health metrics: admin-only and observation-only | Extended by 0089 |
 | [0076](0076-pin-integrity.md) | Pin integrity: audited pins and "changed since pinned" | Amended by 0079 |
 | [0077](0077-write-check-mode-and-warnings.md) | Writes can be checked first, and answer with advisory warnings | Amended by 0087 |
 | [0078](0078-explore-search.md) | Opt-in explore search | Accepted |
@@ -95,7 +95,7 @@ is unused.
 | [0083](0083-the-entry-read-path-is-serviced.md) | The entry-read path is serviced | Accepted |
 | [0084](0084-the-wire-contract-is-single-sourced-and-the-usage-report-is-typed.md) | The wire contract is single-sourced, and the usage report is typed | Accepted |
 | [0085](0085-the-mcp-package-splits-into-contract-server-and-runners.md) | The MCP package splits into contract, server assembly, and runners | Accepted |
-| [0086](0086-key-hashes-stay-sha-256.md) | Key hashes stay SHA-256; the KDF upgrade is held (rotation cost vs. 256-bit random keys) | Accepted |
+| [0086](0086-key-hashes-stay-sha-256.md) | Key hashes stay SHA-256 (the KDF upgrade is held) | Accepted |
 | [0087](0087-near-duplicate-write-warning.md) | A write warns when its nearest entry is a near-duplicate | Accepted |
-| [0088](0088-narrow-importance.md) | A narrower importance factor, so one importance step (e.g. 5 against 3) stays below the peer cap at the default social_max (on by default after measurement) | Accepted |
+| [0088](0088-narrow-importance.md) | A narrower importance factor, so one importance step stays below the peer cap | Accepted |
 | [0089](0089-owner-level-rating-metrics.md) | Owner-level rating metrics: sibling verdicts and owner concentration (admin-only, observation-only) | Accepted |

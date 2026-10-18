@@ -398,7 +398,7 @@ switch to their incognito text) and adds the harness's own switch so the
 Hivemind tools do not load at all:
 
 ```sh
-hivemind-incognito <harness>     # claude, codex, copilot, dsh, gemini, hermes, pi, omp or opencode
+hivemind-incognito <harness>     # claude, codex, copilot, dsh, gemini, hermes, pi, omp, opencode, cline or kilocode (alias kilo)
 ```
 
 Your harness's **Incognito** section says what the switch is and whether

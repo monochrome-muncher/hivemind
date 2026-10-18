@@ -221,18 +221,21 @@ The script counts four transcript formats:
   Codex continues with the reason as the next prompt, and an MCP
   `hive_write`, recorded as `"name":"hive_write","namespace":"mcp__hivemind"`,
   keeps it quiet. Codex runs plugin hooks only after the user trusts them
-  in `/hooks`.
+  in `/hooks`. Codex 0.163.0 writes the same transcript format and
+  `hive_write` record (its hooks were not re-run).
 - The distinct `functionResponse` ids in Gemini CLI's JSONL chat log,
   which rewrites a call's record as it progresses. Checked with Gemini CLI
-  0.63 against a mock model: `AfterAgent` takes the same `block` output
+  0.64.0 against a mock model: `SessionStart` sends the reminder,
+  `AfterAgent` blocks once and takes the same `block` output
   and sends the reason as the next prompt, and `mcp_hivemind_hive_write`
   keeps it quiet. Gemini's `SessionStart` has no compaction source, so it
   gets no post-compaction line.
 
 - Copilot CLI's `events.jsonl`, with one `tool.execution_start` event per
   call; a Hivemind write shows as `"name":"hivemind-hive_write"`.
-  Checked with Copilot CLI 1.0.95 against a mock model (`Stop` input:
-  `session_id`, `transcript_path`, `stop_hook_active`, as for Claude
+  Checked with Copilot CLI 1.0.98 against a mock model (`SessionStart`
+  sends a flat `additionalContext`; `Stop` input: `session_id`,
+  `transcript_path`, `stop_hook_active`, as for Claude
   Code): the hook blocks once, the reason becomes the next prompt, and a
   `hive_write` keeps it quiet. Copilot writes `events.jsonl` a moment
   after the events happen (it was not there yet when a sub-second session
