@@ -183,3 +183,35 @@ export function pinRow(pin, { onOpen, agentHref = noHref } = {}) {
         ? h("span", { class: "badge badge-pending", title: "A fleet member should re-pin or unpin it", text: CHANGE_TEXT[pin.change_reason] || "changed" })
         : h("span", { class: "muted", text: "unchanged" })));
 }
+
+// --- flagged memories ------------------------------------------------------------------
+
+export const FLAGGED_HEADERS = ["Memory", "Kind", "Scope", "Author", "First flagged", "Last flagged", "Verdicts"];
+
+/** One memory with a standing stale or wrong verdict (ADR 0093 shape), oldest flag first. */
+export function flaggedRow(row, { onOpen, fleetName = sameName, agentHref = noHref } = {}) {
+  return h("tr", {},
+    h("td", { class: "cell-summary" },
+      h("button", { type: "button", class: "linklike summary-text", text: row.summary, onclick: () => onOpen(row.id) })),
+    h("td", {}, kindBadge(row.kind)),
+    h("td", { class: "nowrap", text: scopeText(row.scope, row.fleet_id, fleetName) }),
+    h("td", { class: "nowrap" }, nameCell(row.author, agentHref),
+      row.orphaned ? h("div", {}, h("span", { class: "badge badge-revoked", title: "The author is revoked or has not written for 30 days: nobody is likely to fix it", text: "no owner" })) : null),
+    h("td", { class: "nowrap", title: fmtTime(row.first_flag_at), text: fmtAgo(row.first_flag_at) }),
+    h("td", { class: "nowrap", title: fmtTime(row.last_flag_at), text: fmtAgo(row.last_flag_at) }),
+    h("td", { class: "nowrap" },
+      row.helpful ? verdictBadge("helpful", row.helpful) : null, " ",
+      row.stale ? verdictBadge("stale", row.stale) : null, " ",
+      row.wrong ? verdictBadge("wrong", row.wrong) : null));
+}
+
+/** A paged list of flagged memories over `fetchPage`, oldest first flag first. */
+export function flaggedTable({ fetchPage, onOpen, fleetName = sameName, agentHref = noHref, emptyText = "No flagged memory matches." }) {
+  return pagedTable({
+    headers: FLAGGED_HEADERS,
+    fetchPage,
+    renderRow: (row) => flaggedRow(row, { onOpen, fleetName, agentHref }),
+    emptyText,
+    statusText: (n) => `${n} shown, oldest flag first`,
+  });
+}

@@ -14,7 +14,13 @@ from pydantic import AfterValidator, BaseModel, Field, field_validator
 from hivemind.domain.access import Agent, Fleet, Standing
 from hivemind.domain.audit import AuditRecord
 from hivemind.domain.entry import EntityKind, Entry, EntryState, ImportanceSource, Kind, SourceType
-from hivemind.domain.feedback import FeedbackCounts, FeedbackLogItem, FeedbackSummary, Verdict
+from hivemind.domain.feedback import (
+    FeedbackCounts,
+    FeedbackLogItem,
+    FeedbackSummary,
+    FlaggedEntry,
+    Verdict,
+)
 from hivemind.domain.pin import ChangeReason, Pin, PinnedEntry
 from hivemind.domain.recency import RecencyHint
 from hivemind.domain.upstream import UpstreamChangeKind
@@ -967,6 +973,42 @@ class FeedbackLogItemOut(BaseModel):
                 fleet_id=item.entry_fleet_id,
                 state=item.entry_state,
             ),
+        )
+
+
+class FlaggedEntryOut(BaseModel):
+    """One row of ``GET /v1/admin/flagged`` (ADR 0093): an active entry
+    with a standing ``stale`` or ``wrong`` verdict. ``orphaned`` is true
+    when its author is revoked or has not written for 30 days."""
+
+    id: str
+    kind: Kind
+    summary: str
+    author: str
+    scope: str
+    fleet_id: str | None
+    first_flag_at: datetime
+    last_flag_at: datetime
+    helpful: int
+    stale: int
+    wrong: int
+    orphaned: bool
+
+    @classmethod
+    def from_flagged(cls, item: FlaggedEntry) -> FlaggedEntryOut:
+        return cls(
+            id=item.entry_id,
+            kind=item.kind,
+            summary=item.summary,
+            author=item.author,
+            scope=item.scope,
+            fleet_id=item.fleet_id,
+            first_flag_at=item.first_flag_at,
+            last_flag_at=item.last_flag_at,
+            helpful=item.helpful,
+            stale=item.stale,
+            wrong=item.wrong,
+            orphaned=item.orphaned,
         )
 
 

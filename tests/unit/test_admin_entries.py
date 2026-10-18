@@ -50,6 +50,7 @@ ROUTES = [
     ("GET", "/v1/admin/activity", None),
     ("GET", "/v1/admin/feedback", None),
     ("GET", f"/v1/admin/fleets/{FAKE_ID}/pins", None),
+    ("GET", "/v1/admin/flagged", None),
 ]
 
 
@@ -299,3 +300,74 @@ async def test_admin_fleet_pins_lists_any_fleets_pins_with_their_changes() -> No
     assert (flagged["id"], flagged["change_reason"]) == (in_red.id, "flagged")
     assert unknown.status_code == malformed.status_code == 404
     assert unknown.json()["error"]["code"] == "not_found"
+
+
+async def test_admin_flagged_lists_the_flag_backlog_oldest_flag_first() -> None:
+    """ADR 0093: active entries with a standing stale/wrong verdict, the
+    oldest first flag first; the age and orphan filters; a bad id matches
+    nothing."""
+    app, blue, red, mine, in_blue, in_red = await _seed()
+    now = datetime.now(UTC)
+    for entry, user, verdict, days in (
+        (in_blue, "bob", Verdict.WRONG, 20),
+        (in_blue, "carol", Verdict.HELPFUL, 1),
+        (in_red, "alice", Verdict.STALE, 3),
+        (mine, "bob", Verdict.HELPFUL, 2),
+    ):
+        await app.store.record_feedback(
+            Feedback(entry.id, user, user, verdict, None, now - timedelta(days=days))
+        )
+    async with make_client(app) as client:
+        everything = await client.get("/v1/admin/flagged", headers=ADMIN)
+        old = await client.get("/v1/admin/flagged", params={"older_than_days": 14}, headers=ADMIN)
+        in_red_fleet = await client.get(
+            "/v1/admin/flagged", params={"fleet_id": red.id}, headers=ADMIN
+        )
+        orphans = await client.get("/v1/admin/flagged", params={"orphaned": True}, headers=ADMIN)
+        paged = await client.get(
+            "/v1/admin/flagged", params={"limit": 1, "offset": 1}, headers=ADMIN
+        )
+        malformed = await client.get(
+            "/v1/admin/flagged", params={"fleet_id": "not-a-fleet"}, headers=ADMIN
+        )
+        too_old = await client.get(
+            "/v1/admin/flagged", params={"older_than_days": 3651}, headers=ADMIN
+        )
+        long_id = await client.get(
+            "/v1/admin/flagged", params={"fleet_id": "x" * 65}, headers=ADMIN
+        )
+    assert everything.status_code == 200
+    rows = everything.json()
+    assert [r["id"] for r in rows] == [in_blue.id, in_red.id]
+    first = rows[0]
+    assert {k: first[k] for k in ("kind", "author", "scope", "fleet_id")} == {
+        "kind": "fact",
+        "author": "alice",
+        "scope": "fleet",
+        "fleet_id": blue.id,
+    }
+    # The test store's clock is fixed in the past, so every author has been
+    # silent for more than 30 days: every flagged entry is an orphan.
+    assert (first["helpful"], first["stale"], first["wrong"], first["orphaned"]) == (1, 0, 1, True)
+    assert first["first_flag_at"] == first["last_flag_at"]
+    assert [r["id"] for r in old.json()] == [in_blue.id]
+    assert [r["id"] for r in in_red_fleet.json()] == [in_red.id]
+    assert [r["id"] for r in orphans.json()] == [in_blue.id, in_red.id]
+    assert [r["id"] for r in paged.json()] == [in_red.id]
+    assert malformed.status_code == 200 and malformed.json() == []
+    assert too_old.status_code == long_id.status_code == 422
+
+
+async def test_the_flag_backlog_service_follows_the_callers_visibility() -> None:
+    app, blue, _red, mine, in_blue, in_red = await _seed()
+    for entry in (mine, in_blue, in_red):
+        await app.store.record_feedback(Feedback(entry.id, "zed", "zed", Verdict.STALE))
+    lurker = Credential(
+        user_id="carol",
+        agent_name="carol",
+        access_controlled=True,
+        trust_level=TrustLevel.LURKER,
+        home_fleet_id=blue.id,
+    )
+    rows = await app.governance_service.flag_backlog(lurker, limit=10)
+    assert [r.entry_id for r in rows] == [in_blue.id]

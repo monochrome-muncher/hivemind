@@ -65,6 +65,7 @@ def _panel(transport: httpx.AsyncBaseTransport) -> httpx.AsyncClient:
         ("GET", "admin/activity"),
         ("GET", "admin/feedback"),
         ("GET", "admin/fleets/abc/pins"),
+        ("GET", "admin/flagged"),
     ],
 )
 def test_the_admin_surface_is_forwarded(method: str, path: str) -> None:
@@ -96,6 +97,8 @@ def test_the_admin_surface_is_forwarded(method: str, path: str) -> None:
         ("POST", "admin/fleets/abc/pins"),
         ("GET", "admin/fleets/abc/pins/x"),
         ("GET", "admin/fleets//pins"),
+        ("POST", "admin/flagged"),
+        ("GET", "admin/flagged/x"),
         ("GET", "admin/entries/x/extra"),
         ("GET", "admin/entries/"),
     ],

@@ -3,7 +3,7 @@
 Amends [ADR 0029](0029-admin-panel-runner-with-a-browser-held-key.md)
 (what the panel covers and what its proxy forwards) and the "not a memory UI" line of SPEC §9.
 
-Status: Accepted. Extended by [ADR 0090](0090-admin-feedback-log.md) (the feedback log) and [ADR 0092](0092-admin-fleet-pins.md) (fleet pins).
+Status: Accepted. Extended by [ADR 0090](0090-admin-feedback-log.md) (the feedback log), [ADR 0092](0092-admin-fleet-pins.md) (fleet pins) and [ADR 0093](0093-admin-flag-backlog.md) (the flag backlog).
 
 ## Context
 

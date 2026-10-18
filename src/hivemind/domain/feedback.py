@@ -180,3 +180,41 @@ class FeedbackLogItem:
     entry_scope: str
     entry_fleet_id: str | None
     entry_state: EntryState
+
+
+# How long an author must go without writing before the flagged entries
+# they wrote count as having no owner (ADR 0075's orphaned flags).
+ORPHAN_SILENCE_DAYS = 30
+
+
+@dataclass(frozen=True, slots=True)
+class FlagBacklogFilters:
+    """What a flag backlog read narrows by (ADR 0093). ``flagged_before``
+    keeps entries whose first standing flag is older than it; ``orphaned``
+    keeps entries whose author is revoked or has not written for
+    ``ORPHAN_SILENCE_DAYS``. ``None`` and ``False`` leave a field open."""
+
+    fleet_id: str | None = None
+    flagged_before: datetime | None = None
+    orphaned: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class FlaggedEntry:
+    """An active entry with at least one standing ``stale`` or ``wrong``
+    verdict, as the flag backlog lists it (ADR 0093). The flag dates are
+    the oldest and newest standing flag; the counts leave revoked
+    reporters out (ADR 0067), as every count does."""
+
+    entry_id: str
+    kind: Kind
+    summary: str
+    author: str
+    scope: str
+    fleet_id: str | None
+    first_flag_at: datetime
+    last_flag_at: datetime
+    helpful: int
+    stale: int
+    wrong: int
+    orphaned: bool
