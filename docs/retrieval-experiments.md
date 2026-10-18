@@ -997,5 +997,7 @@ legitimate writes). The corpus's near-copied distractors are therefore a
 worst case — a pool where no writer superseded — and the real false-grouping
 rate should be lower, because the `related` reply and the supersede convention
 keep some near-copies out of the pool. A `near_duplicate` advisory warning
-(firing when a `related` entry's similarity is high) would make that signal
-explicit without adding a floor; see the proposal in the PR discussion.
+(SPEC §4.1) now makes that signal explicit without adding a floor: it fires
+when a write's nearest `related` entry (ADR 0052) is at similarity ≥ 0.85,
+the band where same-system near-copies sit, and asks the writer to supersede
+it rather than write a second copy.
