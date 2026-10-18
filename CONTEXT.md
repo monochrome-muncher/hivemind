@@ -89,7 +89,7 @@ The bounded re-scoring signal derived from feedback on an entry; it affects retr
 _Avoid_: score (in specs, "score" always means the retrieval score; "quality" is the feedback-derived factor)
 
 **Feedback**:
-A reporting agent's verdict that an entry it relied on was `helpful`, `stale`, or `wrong`, with an optional note. Aggregated into an entry's quality, and readable by everyone who can read the entry.
+A reporting agent's verdict that an entry its work tested was `helpful`, `stale`, or `wrong`, with an optional note. Aggregated into an entry's quality, and readable by everyone who can read the entry.
 _Avoid_: rating, review
 
 **Last confirmed**:

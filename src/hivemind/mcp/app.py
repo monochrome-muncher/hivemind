@@ -609,7 +609,7 @@ async def hive_feedback(
     agent: str | None = None,
     entry_ids: list[str] | None = None,
 ) -> dict[str, object]:
-    """Report ``helpful|stale|wrong`` on an entry the caller relied on.
+    """Report ``helpful|stale|wrong`` on an entry the caller's work tested.
 
     One row per (entry, user, agent); the latest verdict wins (SPEC §4.2).
     The acting credential supplies the reporter identity; a plain user key
