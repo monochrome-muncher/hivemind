@@ -257,7 +257,7 @@ class FeedbackService:
         """Active entries with a standing ``stale`` or ``wrong`` verdict,
         oldest first flag first (ADR 0093), each with whether its author
         is still around; only entries the caller can read. ``older_than``
-        keeps entries first flagged at least that long ago."""
+        keeps entries first flagged more than that long ago."""
         credential = credential.effective(self._require_stored_keys)
         now = utcnow()
         filters = FlagBacklogFilters(

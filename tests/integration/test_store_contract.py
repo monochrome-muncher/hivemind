@@ -868,8 +868,22 @@ async def test_flag_backlog_lists_flagged_active_entries_oldest_flag_first(
         "gone author",
         "recent flag",
     ]
+    # Every filter at once: the fleet, a member's visibility and the age.
+    member = _vis(TrustLevel.LURKER, "dora", red.id)
+    assert await backlog(fleet_id=red.id, visibility=member, flagged_before=now - 4 * day) == [
+        "gone author"
+    ]
     # A month on, nobody has written for 30 days: every author is gone.
     assert await backlog(now + 30 * day, orphaned=True) == everything
+    # The list holds what the two Health counts count (ADR 0075), at any time.
+    for at in (now, now + 30 * day):
+        health = await store.fleet_health(at)
+        assert len(await backlog(at, flagged_before=at - 14 * day)) == sum(
+            r.flagged_backlog_14d for r in health.by_fleet
+        )
+        assert len(await backlog(at, orphaned=True)) == sum(
+            r.orphaned_flagged for r in health.by_fleet
+        )
     rows = await store.list_flag_backlog(FlagBacklogFilters(), now, 10)
     first, _, last = rows
     assert (first.entry_id, first.kind, first.author, first.scope) == (

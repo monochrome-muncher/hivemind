@@ -128,6 +128,7 @@ AUDIT_LOG_MAX_LIMIT = 1000
 ADMIN_ENTRIES_DEFAULT_LIMIT = 50
 # GET /v1/admin/feedback default page size; the ceiling is MAX_LIMIT.
 ADMIN_FEEDBACK_DEFAULT_LIMIT = 50
+ADMIN_FLAGGED_DEFAULT_LIMIT = 50
 MAX_FLAG_AGE_DAYS = 3650  # the flag backlog's age filter: ten years
 MIN_ACTIVITY_DAYS = 1
 MAX_ACTIVITY_DAYS = 365
@@ -718,13 +719,13 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         fleet_id: IdQuery = None,
         older_than_days: Annotated[int, Query(ge=0, le=MAX_FLAG_AGE_DAYS)] = 0,
         orphaned: bool = False,
-        limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = ADMIN_FEEDBACK_DEFAULT_LIMIT,
+        limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = ADMIN_FLAGGED_DEFAULT_LIMIT,
         offset: Annotated[int, Query(ge=0, le=MAX_OFFSET)] = 0,
     ) -> list[FlaggedEntryOut]:
         """The flag backlog (ADR 0093): active entries with a standing
         ``stale`` or ``wrong`` verdict, oldest first flag first, with
         whether the author is still around. ``older_than_days`` keeps
-        entries first flagged at least that long ago; ``orphaned`` keeps
+        entries first flagged more than that many days ago; ``orphaned`` keeps
         entries with no owner. Observation only, like the health metrics."""
         _require_admin(credential, "the flag backlog")
         items = await app.governance_service.flag_backlog(

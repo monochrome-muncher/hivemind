@@ -15,6 +15,18 @@ const FLAG_FILTERS = [
   { value: "orphaned", text: "No owner", query: { orphaned: true } },
 ];
 const flagsHref = (flags) => viewHref("health", { flags });
+const FLAGGED_ID = "flagged-memories";
+// A count linking to its list. Already on that hash, a click changes nothing,
+// so it scrolls to the list itself.
+const flagsLink = (count, flags) => {
+  const href = flagsHref(flags);
+  return link(String(count), href, { title: "List them", onclick: (event) => {
+    if (window.location.hash !== href) return;
+    event.preventDefault();
+    const list = document.getElementById(FLAGGED_ID);
+    if (list) list.scrollIntoView({ block: "start" });
+  } });
+};
 
 const fmtRival = (r) => (r.count ? `${r.count} · ${fmtDuration(r.median_age_seconds)}` : "0");
 
@@ -37,8 +49,8 @@ export function healthCard(health) {
     ["Helpful verdicts with a note", fmtOf(health.helpful_with_note_share), "Up: verdicts carry evidence"],
     ["Sourced active org/fleet facts and insights", fmtOf(health.sourced_share), "Up: traceable"],
     ["Correction latency p50 (first flag to successor, 90 days)", `${fmtDuration(health.correction_latency_p50_seconds)} · ${health.corrections_measured} measured`, "Down: errors get fixed faster"],
-    ["Flagged more than 14 days ago, still active", link(String(health.flagged_backlog_14d), flagsHref("old"), { title: "List them" }), "Down"],
-    ["Flagged entries with no owner (author revoked or silent 30 days)", link(String(health.orphaned_flagged), flagsHref("orphaned"), { title: "List them" }), "Down"],
+    ["Flagged more than 14 days ago, still active", flagsLink(health.flagged_backlog_14d, "old"), "Down"],
+    ["Flagged entries with no owner (author revoked or silent 30 days)", flagsLink(health.orphaned_flagged, "orphaned"), "Down"],
     ["Floating gap (older than 90 days, no feedback in 90 days)", health.floating_gap, "Down, or stable with growth"],
     ["Top 3 authors' share of writes (90 days)", `${fmtOf(health.top3_author_write_share)} · ${health.top3_author_write_share.authors} authors`, "Not rising"],
     ["Top 3 reporters' share of verdicts (90 days)", `${fmtOf(health.top3_reporter_verdict_share)} · ${health.top3_reporter_verdict_share.reporters} reporters`, "Not rising"],
@@ -96,7 +108,7 @@ function flaggedList(root) {
     agentHref,
   });
   fleet.addEventListener("change", () => list.load(true));
-  const head = h("div", { class: "card" },
+  const head = h("div", { class: "card", id: FLAGGED_ID },
     h("div", { class: "card-head" }, h("h2", { text: "Flagged memories" })),
     h("div", { class: "card-body" },
       h("p", { class: "muted small", text: "Active memories with a standing stale or wrong verdict, the oldest flag first. Open one to read the verdicts, then withdraw it or leave it for its author or a successor. “No owner” means the author is revoked or has not written for 30 days." }),
