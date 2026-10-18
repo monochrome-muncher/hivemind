@@ -439,6 +439,7 @@ def test_csv_export_quotes_cells_defuses_formulas_and_pages_to_the_end() -> None
       { summary: 'say "hi", then\nleave', tags: ["a", "b"], n: -3 },
       { summary: "=HYPERLINK(1)", tags: ["@x"], n: 0 },
       { summary: "+1", tags: [], n: 1.5 },
+      { summary: " =1+1", tags: ["\uFF1Dx"], n: true },
     ])
     const pages = (total) => async ({ limit, offset }) =>
       Array.from({ length: Math.max(0, Math.min(limit, total - offset)) }, (_, i) => offset + i)
@@ -447,12 +448,19 @@ def test_csv_export_quotes_cells_defuses_formulas_and_pages_to_the_end() -> None
     const full = await csv.fetchAll(pages(200))
     const stopped = await csv.fetchAll(pages(500), { cancelled: () => true })
     const signedOut = await csv.fetchAll(async () => undefined)
+    const exactMax = await csv.fetchAll(pages(200), { max: 200 })
+    // A row written mid-export shifts the second page back by one.
+    const shifted = async ({ limit, offset }) =>
+      offset >= 200 ? [] : Array.from({ length: limit }, (_, i) => offset - (offset ? 1 : 0) + i)
+    const deduped = await csv.fetchAll(shifted, { key: (r) => r })
     console.log(JSON.stringify({
       text,
       exact: [exact.rows.length, exact.truncated, exact.rows[249]],
       capped: [capped.rows.length, capped.truncated],
       full: [full.rows.length, full.truncated],
       stopped, signedOut,
+      exactMax: [exactMax.rows.length, exactMax.truncated],
+      deduped: [deduped.rows.length, new Set(deduped.rows).size],
       name: csv.csvName("agent-a/b c", new Date("2026-10-18T12:00:00Z")),
     }))
     """
@@ -468,9 +476,12 @@ def test_csv_export_quotes_cells_defuses_formulas_and_pages_to_the_end() -> None
         '"say ""hi"", then\nleave",a; b,-3,\r\n'
         "'=HYPERLINK(1),'@x,0,\r\n"
         "'+1,,1.5,\r\n"
+        "' =1+1,'\uff1dx,true,\r\n"
     )
     assert result["exact"] == [250, False, 249]
     assert result["capped"] == [200, True]
     assert result["full"] == [200, False]  # a full last page costs one empty read
+    assert result["exactMax"] == [200, False]  # exactly the cap: a probe says nothing is cut
+    assert result["deduped"] == [199, 199]
     assert result["stopped"] is None and result["signedOut"] is None
     assert result["name"] == "hivemind-agent-a_b_c-2026-10-18.csv"

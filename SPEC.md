@@ -325,7 +325,7 @@ The schema is an **ordered chain of versioned migrations** under `src/hivemind/s
 
 ## 9. Non-goals (v1) — the explicit list
 
-- No human-facing UI (agent-only; the admin panel, ADR 0029, is the one exception — a browser front end over the admin REST surface, which since ADR 0080 includes a memory browser for the admin (read, search, withdraw); a memory UI for anyone else is still a non-goal)
+- No human-facing UI (agent-only; the admin panel, ADR 0029, is the one exception — a browser front end over the admin REST surface, which since ADR 0080 includes a memory browser for the admin (read, search, withdraw, CSV export, ADR 0094); a memory UI for anyone else is still a non-goal)
 - No passive capture of transcripts/tool events (explicit writes only, ADR 0004)
 - No knowledge graph, no auto-contradiction detection (the **facet slice** of entity extraction became a commitment in §13 — ADR 0016; *graph-expanded* retrieval stays a non-goal)
 - No curation/verification workflow, no PII pipeline (trust levels are §12, not a non-goal — ADR 0011)

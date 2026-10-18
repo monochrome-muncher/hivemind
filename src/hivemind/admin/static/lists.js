@@ -23,8 +23,10 @@ const scopeText = (scope, fleetId, fleetName) => (fleetId ? `${scope} · ${fleet
  * A table that loads `PAGE` rows at a time. `fetchPage({limit, offset})`
  * resolves to an array of rows (or undefined to stop, e.g. after a sign-out);
  * `renderRow(row)` builds a <tr>. Returns {el, tbody, load(reset)}: load(true)
- * starts again from the top, load(false) appends the next page. With `csv`
- * ({columns, name}) it also offers every row under the current filters as a
+ * starts again from the top, load(false) appends the next page; `fetchPage`
+ * gets `fresh: true` on a reload from the top, the moment a caller should
+ * read its filters (later pages and an export reuse them). With `csv`
+ * ({columns, name, key}) it also offers every row under those filters as a
  * CSV file.
  */
 export function pagedTable({ headers, className = "entries", fetchPage, renderRow, emptyText, statusText, csv = null }) {
@@ -45,7 +47,7 @@ export function pagedTable({ headers, className = "entries", fetchPage, renderRo
     resetting = reset;
     more.disabled = true;
     try {
-      const rows = await fetchPage({ limit: PAGE, offset: reset ? 0 : offset });
+      const rows = await fetchPage({ limit: PAGE, offset: reset ? 0 : offset, fresh: reset });
       if (!rows || mine !== ticket) return;
       // Counters move only on a response that is still current, so a failed
       // or superseded reset never leaves old rows with a reset offset.
@@ -78,19 +80,21 @@ export function pagedTable({ headers, className = "entries", fetchPage, renderRo
 /**
  * An "Export CSV" button: fetches every row `fetchPage` gives (up to
  * EXPORT_MAX) and saves them under `columns` as hivemind-<name>-<date>.csv.
- * `generation()` changes when the list's filters do; an export that sees it
- * change stops rather than mix two filters in one file.
+ * `generation()` changes whenever the list reloads from the top; an export
+ * that sees it change stops rather than risk mixing two filters in one file.
+ * `fetchPage` must read the filters the list shows, not unsent form input.
+ * `key(row)` drops a row a shifting page returns twice.
  */
-export function exportButton({ fetchPage, columns, name, generation = () => 0 }) {
+export function exportButton({ fetchPage, columns, name, key = null, generation = () => 0 }) {
   const button = h("button", { type: "button", class: "btn btn-sm btn-ghost", text: "Export CSV" });
   button.addEventListener("click", async () => {
     const started = generation();
     button.disabled = true;
     button.textContent = "Exporting…";
     try {
-      const result = await fetchAll(fetchPage, { cancelled: () => generation() !== started });
+      const result = await fetchAll(fetchPage, { key, cancelled: () => generation() !== started });
       if (!result) {
-        if (generation() !== started) toast("The filters changed during the export. Export again.", true);
+        if (generation() !== started) toast("The list was reloaded during the export, so it stopped. Export again.", true);
         return;
       }
       downloadCsv(csvName(name), toCsv(columns, result.rows));
@@ -179,7 +183,7 @@ export function entryTable({ fetchPage, onOpen, fleetName = sameName, emptyText 
     renderRow: (item) => entryRow(item, { onOpen, fleetName }),
     emptyText,
     statusText: statusText || ((n) => `${n} shown, newest first`),
-    csv: name ? { columns: entryCsvColumns(fleetName), name } : null,
+    csv: name ? { columns: entryCsvColumns(fleetName), name, key: (r) => r.id } : null,
   });
 }
 
@@ -221,7 +225,7 @@ export function feedbackTable({ fetchPage, onOpen, fleetName = sameName, agentHr
     renderRow: (row) => feedbackRow(row, { onOpen, fleetName, agentHref }),
     emptyText,
     statusText: (n) => `${n} shown, newest first`,
-    csv: name ? { columns: feedbackCsvColumns(fleetName), name } : null,
+    csv: name ? { columns: feedbackCsvColumns(fleetName), name, key: (r) => JSON.stringify([r.entry.id, r.reporter, r.agent]) } : null,
   });
 }
 
@@ -282,6 +286,6 @@ export function flaggedTable({ fetchPage, onOpen, fleetName = sameName, agentHre
     renderRow: (row) => flaggedRow(row, { onOpen, fleetName, agentHref }),
     emptyText,
     statusText: (n) => `${n} shown, oldest flag first`,
-    csv: name ? { columns: flaggedCsvColumns(fleetName), name } : null,
+    csv: name ? { columns: flaggedCsvColumns(fleetName), name, key: (r) => r.id } : null,
   });
 }

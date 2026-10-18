@@ -92,16 +92,17 @@ function flaggedList(root) {
     onclick: () => { flags = f.value; paint(); list.load(true); },
   })));
   paint();
+  let applied = null; // the filters the list shows; later pages and an export reuse them
   const syncHash = () => {
-    const next = viewHref("health", { flags, fleet: fleet.value });
+    const next = viewHref("health", { flags: applied.flags, fleet: applied.fleet });
     if (root.dataset.superseded) return; // the user navigated away while this view loaded
     if (window.location.hash !== next) history.replaceState(null, "", next);
   };
   const list = flaggedTable({
-    fetchPage: ({ limit, offset }) => {
-      syncHash();
-      const { query } = FLAG_FILTERS.find((f) => f.value === flags);
-      return guarded(() => api("GET", "admin/flagged", { query: { ...query, fleet_id: fleet.value, limit, offset } }));
+    fetchPage: ({ limit, offset, fresh }) => {
+      if (fresh || !applied) { applied = { flags, fleet: fleet.value }; syncHash(); }
+      const { query } = FLAG_FILTERS.find((f) => f.value === applied.flags);
+      return guarded(() => api("GET", "admin/flagged", { query: { ...query, fleet_id: applied.fleet, limit, offset } }));
     },
     onOpen: (id) => openEntry(id, () => list.load(true)),
     fleetName,

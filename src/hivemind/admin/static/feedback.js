@@ -49,10 +49,11 @@ export async function viewFeedback(root) {
     if (window.location.hash !== next) history.replaceState(null, "", next);
   };
 
+  let applied = null; // the filters the table shows; later pages and an export reuse them
   const table = feedbackTable({
-    fetchPage: ({ limit, offset }) => {
-      syncHash();
-      const f = filters();
+    fetchPage: ({ limit, offset, fresh }) => {
+      if (fresh || !applied) { applied = filters(); syncHash(); }
+      const f = applied;
       return guarded(() => api("GET", "admin/feedback", {
         query: { reporter: f.reporter, verdict: f.verdict, author: f.author, fleet_id: f.fleet, entry_id: f.entry, limit, offset },
       }));

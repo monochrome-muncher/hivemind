@@ -116,6 +116,7 @@ export async function viewMemories(root) {
     },
     columns: entryCsvColumns(fleetName),
     name: "memories",
+    key: (r) => r.id,
     generation: () => generation,
   });
 

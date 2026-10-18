@@ -8,10 +8,11 @@
 export const EXPORT_PAGE = 100; // the API's largest page (SPEC §5.3)
 export const EXPORT_MAX = 10000; // the API's largest offset: the most one export reaches
 
-// A cell that a spreadsheet would read as a formula (=, +, -, @, or a tab or
-// carriage return before one) gets a leading apostrophe. Agents write the
+// A cell that a spreadsheet would read as a formula gets a leading apostrophe:
+// one starting with =, +, - or @ (also full-width, or after whitespace that an
+// importer may trim), or with a tab or carriage return. Agents write the
 // summaries and notes, so an export opened in a spreadsheet must never run them.
-const FORMULA_START = /^[=+\-@\t\r]/;
+const FORMULA_START = /^[\s\u3000]*[=+\-@\uFF1D\uFF0B\uFF0D\uFF20]|^[\t\r]/;
 
 /** One CSV cell: text quoted when it holds a comma, quote or line break. */
 export function csvCell(value) {
@@ -30,29 +31,47 @@ export function toCsv(columns, rows) {
 
 /** Save `text` as a file named `filename` (a byte-order mark so Excel reads UTF-8). */
 export function downloadCsv(filename, text) {
-  const url = URL.createObjectURL(new Blob(["﻿", text], { type: "text/csv;charset=utf-8" }));
+  const url = URL.createObjectURL(new Blob(["\uFEFF", text], { type: "text/csv;charset=utf-8" }));
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
   document.body.append(a);
   a.click();
   a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
+  setTimeout(() => URL.revokeObjectURL(url), 10000); // some browsers drop a download whose URL goes at once
 }
 
 /**
  * Fetch every row `fetchPage({limit, offset})` gives, up to `max`, a page of
  * `EXPORT_PAGE` at a time. Resolves to {rows, truncated}, or null when a page
  * resolves to undefined (a sign-out) or `cancelled()` turns true between pages.
+ *
+ * Offset pages over a live list are not a snapshot: a row written meanwhile
+ * shifts the next page, so with `key(row)` a row seen twice is kept once.
  */
-export async function fetchAll(fetchPage, { max = EXPORT_MAX, cancelled = () => false } = {}) {
+export async function fetchAll(fetchPage, { max = EXPORT_MAX, cancelled = () => false, key = null } = {}) {
   const rows = [];
+  const seen = new Set();
+  let offset = 0;
   for (;;) {
-    const page = await fetchPage({ limit: EXPORT_PAGE, offset: rows.length });
+    const page = await fetchPage({ limit: EXPORT_PAGE, offset });
     if (!page || cancelled()) return null;
-    rows.push(...page);
+    offset += page.length;
+    for (const row of page) {
+      if (key) {
+        const k = key(row);
+        if (seen.has(k)) continue;
+        seen.add(k);
+      }
+      rows.push(row);
+    }
     if (page.length < EXPORT_PAGE) return { rows, truncated: false };
-    if (rows.length >= max) return { rows: rows.slice(0, max), truncated: true };
+    if (offset >= max) {
+      // The API reads one more offset, so a list of exactly `max` rows is not called cut.
+      const probe = await fetchPage({ limit: 1, offset });
+      if (!probe || cancelled()) return null;
+      return { rows: rows.slice(0, max), truncated: probe.length > 0 };
+    }
   }
 }
 
