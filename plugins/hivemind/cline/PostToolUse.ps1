@@ -2,18 +2,20 @@
 # nudge.
 #
 # Cline fires PostToolUse after every tool call, with the payload JSON on
-# stdin (taskId at the top level, postToolUse.tool_name the tool). This
-# counts the task's tool calls in a temp file (reset by the TaskStart hook)
-# and, once a task has made HIVEMIND_STOP_MIN_TOOLS (default 20) calls
-# without calling hive_write or hive_feedback, steers the agent once, via
-# contextModification, to write what another agent could reuse; if nothing
-# is new it just finishes.
+# stdin (taskId at the top level, postToolUse.toolName the tool; the older
+# tool_name spelling is still read). This counts the task's tool calls in a
+# temp file (reset by the TaskStart hook) and, once a task has made
+# HIVEMIND_STOP_MIN_TOOLS (default 20) calls without calling hive_write or
+# hive_feedback, steers the agent once, via contextModification, to write
+# what another agent could reuse; if nothing is new it just finishes.
 #
-# Subagent tasks are never counted and never reminded (a non-empty
-# parentAgentId marks one). The nudge stays silent in incognito sessions and
-# while HIVEMIND_API_KEY is unset. Static and offline; it never prints the
-# key. Extensionless PostToolUse is the Unix twin (Cline ignores .ps1 on
-# Unix).
+# Subagent tasks are never counted and never reminded (a non-empty string in
+# parent_agent_id, which the CLI hook runner sends at the top level, or in
+# parentAgentId, which the other runner sends in sessionContext, marks one;
+# a JSON null is not a string and so does not). The nudge stays silent in
+# incognito sessions and while HIVEMIND_API_KEY is unset. Static and
+# offline; it never prints the key. Extensionless PostToolUse is the Unix
+# twin (Cline ignores .ps1 on Unix).
 
 $payload = [Console]::In.ReadToEnd()
 
@@ -24,8 +26,10 @@ function Field {
 }
 
 $taskId = Field "taskId"
-$parent = Field "parentAgentId"
-$toolName = Field "tool_name"
+$parent = Field "parent_agent_id"
+if ($parent -eq "") { $parent = Field "parentAgentId" }
+$toolName = Field "toolName"
+if ($toolName -eq "") { $toolName = Field "tool_name" }
 
 # A subagent reports to its parent; leave it alone, as in Claude Code.
 if ($parent -ne "") {

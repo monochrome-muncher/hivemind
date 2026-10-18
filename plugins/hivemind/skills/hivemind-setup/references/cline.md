@@ -32,6 +32,14 @@ environment (checked in the extension source), so the key never needs to be
 written into the file. When the variables are unset the references stay
 unexpanded and the server never connects.
 
+**The `cline` CLI does not expand them** (checked with 3.0.73): it rejects
+a `${env:…}` URL as invalid and skips the server, and sends a `${env:…}`
+header as written. So with this setup Hivemind stays off in the CLI and
+works in the extension. Do not work around it by writing the URL and key
+into the file: the CLI would then connect in an incognito session too,
+because the incognito launcher works by unsetting the two variables, and
+the CLI does not show the hooks' incognito line to the agent (below).
+
 **2. The skills.** Copy both skill folders from this skill's `skills/`
 directory (next to this `SKILL.md`) to `~/.cline/skills/`, so that
 `~/.cline/skills/hivemind/SKILL.md` and
@@ -65,7 +73,10 @@ other harnesses.
   reminder to every prompt, so it also rides back after a compaction. Cline
   runs no hook that can add a line to the compaction itself (its
   `PreCompact` hook's output is not injected), so there is no post-compaction
-  line; the per-prompt reminder is what carries Hivemind across it.
+  line; the per-prompt reminder is what carries Hivemind across it. The
+  `cline` CLI (3.0.73) runs this hook but does not add its text to the
+  prompt, so in the CLI the skills and the `PostToolUse` nudge are the only
+  reminders.
 - The `PostToolUse` hook asks you once, when a task has made 20 or more
   tool calls (`HIVEMIND_STOP_MIN_TOOLS` to change) without writing or
   rating, to write and rate before finishing.
@@ -92,5 +103,6 @@ incognito by the same restraint only if the variables are unset.
 ## Removing
 
 Remove the `hivemind` entry from `cline_mcp_settings.json`, delete the two
-skill folders from `~/.cline/skills/`, and the four (or six, with the
-`.ps1` twins) hook scripts from `~/Documents/Cline/Hooks/`.
+skill folders from `~/.cline/skills/`, and the three hook scripts
+(`UserPromptSubmit`, `TaskStart`, `PostToolUse`, plus their three `.ps1`
+twins) from `~/Documents/Cline/Hooks/`.

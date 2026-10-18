@@ -1160,7 +1160,7 @@ def test_cline_post_tool_use_nudges_once_at_the_threshold(tmp_path: Path) -> Non
         return [
             _cline_hook(
                 "PostToolUse",
-                json.dumps({"taskId": task, "postToolUse": {"tool_name": tool}, **extra}),
+                json.dumps({"taskId": task, "postToolUse": {"toolName": tool}, **extra}),
                 tmp_path,
                 HIVEMIND_API_KEY="hm_secret_value",
                 HIVEMIND_STOP_MIN_TOOLS="3",
@@ -1182,9 +1182,47 @@ def test_cline_post_tool_use_nudges_once_at_the_threshold(tmp_path: Path) -> Non
         calls(1, task="t2", tool="hivemind__hive_write")[0]
     )
     assert "contextModification" not in json.loads(calls(1, task="t2")[0])
-    # A subagent (parentAgentId set) is never counted and never nudged.
-    sub = calls(5, task="t3", **{"parentAgentId": "t1"})
-    assert all("contextModification" not in json.loads(x) for x in sub)
+    # A subagent is never counted and never nudged: the CLI hook runner marks
+    # one with a top-level parent_agent_id, the other runner with
+    # sessionContext.parentAgentId (and the camelCase twin at the top level).
+    for i, marker in enumerate(
+        (
+            {"parent_agent_id": "t1"},
+            {"parentAgentId": "t1"},
+            {"sessionContext": {"parentAgentId": "t1"}},
+        )
+    ):
+        sub = calls(5, task=f"sub{i}", **marker)
+        assert all("contextModification" not in json.loads(x) for x in sub)
+
+
+def test_cline_post_tool_use_reads_the_real_tool_name_field(tmp_path: Path) -> None:
+    """Cline sends postToolUse.toolName (camelCase); a hive_write by that name
+    counts as a contribution and keeps the nudge quiet."""
+
+    def run(task: str, tool: str, n: int, shape: str = "toolName", **extra: object) -> list[str]:
+        return [
+            _cline_hook(
+                "PostToolUse",
+                json.dumps({"taskId": task, "postToolUse": {shape: tool}, **extra}),
+                tmp_path,
+                HIVEMIND_API_KEY="hm_secret_value",
+                HIVEMIND_STOP_MIN_TOOLS="3",
+            )
+            for _ in range(n)
+        ]
+
+    # Control: the same calls without a write do nudge.
+    assert "contextModification" in json.loads(run("w0", "bash", 3)[2])
+    # A write via toolName prevents it.
+    out = run("w1", "bash", 1) + run("w1", "mcp__hivemind__hive_write", 1) + run("w1", "bash", 3)
+    assert all("contextModification" not in json.loads(x) for x in out)
+    # The legacy snake_case name still works.
+    out = run("w2", "mcp__hivemind__hive_write", 1, shape="tool_name") + run("w2", "bash", 4)
+    assert all("contextModification" not in json.loads(x) for x in out)
+    # A JSON null parentAgentId on a main task does not mark a subagent.
+    out = run("w3", "bash", 3, sessionContext={"parentAgentId": None})
+    assert "contextModification" in json.loads(out[2])
 
 
 def test_cline_nudge_is_silent_when_it_cannot_work(tmp_path: Path) -> None:
@@ -1192,7 +1230,7 @@ def test_cline_nudge_is_silent_when_it_cannot_work(tmp_path: Path) -> None:
         return [
             _cline_hook(
                 "PostToolUse",
-                json.dumps({"taskId": "t", "postToolUse": {"tool_name": "bash"}}),
+                json.dumps({"taskId": "t", "postToolUse": {"toolName": "bash"}}),
                 tmp_path,
                 HIVEMIND_STOP_MIN_TOOLS="2",
                 **env,
@@ -1235,7 +1273,7 @@ def test_cline_hooks_refuse_a_symlinked_state_folder(tmp_path: Path) -> None:
     xdg.mkdir()
     link = xdg / "hivemind-cline"
     link.symlink_to(target)
-    payload = json.dumps({"taskId": "t1", "postToolUse": {"tool_name": "bash"}})
+    payload = json.dumps({"taskId": "t1", "postToolUse": {"toolName": "bash"}})
     for name in ("TaskStart", "PostToolUse"):
         env = {k: v for k, v in os.environ.items() if not k.startswith("HIVEMIND_")}
         env["XDG_RUNTIME_DIR"] = str(xdg)
@@ -1265,7 +1303,7 @@ def test_cline_hooks_write_the_counter_into_a_private_folder(tmp_path: Path) -> 
         subprocess.run(
             ["sh", str(CLINE_HOOKS / "PostToolUse")],
             env=env,
-            input=json.dumps({"taskId": "t1", "postToolUse": {"tool_name": "bash"}}),
+            input=json.dumps({"taskId": "t1", "postToolUse": {"toolName": "bash"}}),
             capture_output=True,
             text=True,
             check=True,

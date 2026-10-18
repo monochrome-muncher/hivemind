@@ -133,7 +133,11 @@ itself names no harness-specific paths, and a test enforces this.
   expands `${env:NAME}` in an MCP server's URL and headers from the
   process environment, and leaves an unset reference unexpanded (with a
   warning), so an incognito session with the variables unset never
-  connects. MCP tools appear as `<server>__<tool>` (`hivemind__hive_write`).
+  connects. The `cline` CLI (3.0.73, `@cline/core`) does neither: its MCP
+  settings schema needs a real URL and takes headers as written, and it
+  runs `UserPromptSubmit` without using its output (checked live against
+  a mock model; `PostToolUse` and `TaskStart` work there). MCP tools appear
+  as `<server>__<tool>` (`hivemind__hive_write`).
   Skills are SKILL.md folders in `~/.cline/skills/` (global) or
   `.cline/skills/`, `.clinerules/skills/`, `.claude/skills/`,
   `.agents/skills/` (project); the frontmatter `name` must match the
@@ -141,7 +145,8 @@ itself names no harness-specific paths, and a test enforces this.
   exactly after the hook type in `~/Documents/Cline/Hooks/` (global) or
   `.clinerules/hooks/` (project): no extension on Unix, `.ps1` on Windows
   (`.ps1` is ignored on Unix). A hook gets the payload JSON on stdin
-  (top-level `taskId`; `postToolUse.tool_name` the tool) and prints
+  (top-level `taskId`; `postToolUse.toolName` the tool; a subagent carries a non-empty
+  `parent_agent_id`, or `sessionContext.parentAgentId`) and prints
   `{ cancel, contextModification, errorMessage }` on stdout; hooks are
   enabled by default. `UserPromptSubmit` fires on every prompt (the
   per-prompt reminder is what carries Hivemind across a compaction, whose

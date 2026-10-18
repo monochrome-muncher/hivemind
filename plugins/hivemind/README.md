@@ -246,6 +246,8 @@ them in step 2, or do them by hand):
 1. Add Hivemind to `~/.cline/data/settings/cline_mcp_settings.json` with
    `${env:HIVEMIND_MCP_URL}` and `${env:HIVEMIND_API_KEY}` (Cline expands
    them from the environment; the key is never written into the file).
+   The `cline` CLI (3.0.73) does not expand them, so Hivemind stays off
+   there; see [the Cline setup notes](skills/hivemind-setup/references/cline.md).
 2. Copy both skill folders from [`skills/`](skills/) to
    `~/.cline/skills/`.
 3. Copy the plugin's `cline/` hook scripts (`UserPromptSubmit`,
