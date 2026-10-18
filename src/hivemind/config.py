@@ -173,6 +173,10 @@ class SearchConfig:
     # an environment setting; a search config built by a test or the
     # measurement harness can vary it.
     prefer_recent_floor: float | None = PREFER_RECENT_FLOOR
+    # The importance factor spans 0.9..1.1 (one step about 1.05x, below
+    # ``social_max``) instead of 0.6..1.0 (ADR 0088). Off until measured
+    # with the real embedders.
+    narrow_importance: bool = False
 
     def __post_init__(self) -> None:
         # Fail at config time (ADR 0024), not per request as a
@@ -413,6 +417,8 @@ class Settings(BaseSettings):
     recency_by_kind: str = ""
     # See SearchConfig.recency_hint_enabled (ADR 0073).
     recency_hint: bool = False
+    # See SearchConfig.narrow_importance (ADR 0088).
+    narrow_importance: bool = False
 
     @field_validator("embedding_api_key", "extractor_api_key")
     @classmethod
@@ -524,6 +530,7 @@ class Settings(BaseSettings):
             recency_from_confirmation=self.recency_from_confirmation,
             recency_by_kind=parse_recency_by_kind(self.recency_by_kind),
             recency_hint_enabled=self.recency_hint,
+            narrow_importance=self.narrow_importance,
         )
 
 

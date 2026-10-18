@@ -1046,3 +1046,16 @@ catches 71% of version pairs and 1% of same-system distractors; 0.85 would
 catch 84% and 7% (a distinct fact such as "the Airflow default pool has 128
 slots" beside "the backfill pool has 2048 slots" sits at 0.883), and 0.95
 catches 54% and 0%.
+
+## A narrower importance factor (ADR 0088)
+
+*(tool: `tests/eval/importance.py`, `make measure-importance`; set
+`EVAL_IMPORTANCE_JSON=path` to also write the rows as JSON)*
+`HIVEMIND_NARROW_IMPORTANCE` is off by default. The harness seeds each of the
+sixteen domains alone, and all of them pooled, under three importance
+assignments (`equal`: all 3; `random`: seeded 1 to 5 independent of
+relevance; `aligned`: answers 4 or 5, everything else random) and scores each
+with the narrow factor off and on: hit@1, hit@5 and MRR, and the change.
+`equal` must show no change. Run it with the embedders a deployment uses.
+
+Results: pending.

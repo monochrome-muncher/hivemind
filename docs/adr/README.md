@@ -97,3 +97,4 @@ is unused.
 | [0085](0085-the-mcp-package-splits-into-contract-server-and-runners.md) | The MCP package splits into contract, server assembly, and runners | Accepted |
 | [0086](0086-key-hashes-stay-sha-256.md) | Key hashes stay SHA-256; the KDF upgrade is held (rotation cost vs. 256-bit random keys) | Accepted |
 | [0087](0087-near-duplicate-write-warning.md) | A write warns when its nearest entry is a near-duplicate | Accepted |
+| [0088](0088-narrow-importance.md) | A narrower importance factor, so one importance step (e.g. 5 against 3) stays below the peer cap at the default social_max (off until measured) | Accepted |

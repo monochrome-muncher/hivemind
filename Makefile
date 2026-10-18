@@ -141,7 +141,7 @@ test-unit: ## Run unit tests only (no Postgres needed)
 measure-threshold: ## Measure a search similarity threshold with the configured embedder (ADR 0062; e.g. after `make vllm`; set HIVEMIND_EMBEDDING_DIM to the deployment's)
 	uv run python -m tests.eval.threshold
 
-.PHONY: measure-confirmation measure-ranking measure-versions
+.PHONY: measure-confirmation measure-ranking measure-versions measure-importance
 measure-ranking: measure-confirmation ## Alias: measure the off-by-default ranking changes (ADR 0071 confirmation clock, ADR 0072 recency profile per kind)
 
 measure-confirmation: ## Measure the confirmation recency clock (ADR 0071) and the per-kind recency profiles (ADR 0072) with the configured embedder (e.g. after `make vllm`; set HIVEMIND_EMBEDDING_DIM to the deployment's)
@@ -149,6 +149,9 @@ measure-confirmation: ## Measure the confirmation recency clock (ADR 0071) and t
 
 measure-versions: ## Measure the version-grouping cut-off with the configured embedder (ADR 0074; e.g. after `make vllm`; set HIVEMIND_EMBEDDING_DIM to the deployment's)
 	uv run python -m tests.eval.versions
+
+measure-importance: ## Measure the narrow importance factor (ADR 0088) with the configured embedder (e.g. after `make vllm`; set HIVEMIND_EMBEDDING_DIM to the deployment's; EVAL_IMPORTANCE_JSON=path also writes JSON)
+	uv run python -m tests.eval.importance
 
 .PHONY: check
 check: ## Type-check + lint (mypy strict + ruff)

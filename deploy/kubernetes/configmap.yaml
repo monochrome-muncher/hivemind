@@ -81,6 +81,10 @@ data:
   # 0073). "false": accepted and ignored. Off until measured with the
   # deployment's embedder.
   HIVEMIND_RECENCY_HINT: "false"
+  # Narrow the importance factor to 0.9..1.1 so one importance step stays
+  # below the social cap (ADR 0088). "false": 0.6..1.0. Off until measured
+  # with the deployment's embedder (`make measure-importance`).
+  HIVEMIND_NARROW_IMPORTANCE: "false"
   # Seconds the usage report (/v1/metrics, /metrics) reuses its grouped
   # scan of the entries (ADR 0069); entry counts can be that old. 0 = off.
   HIVEMIND_METRICS_ENTRY_COUNTS_TTL: "300"

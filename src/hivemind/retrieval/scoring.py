@@ -26,6 +26,9 @@ SOCIAL_MAX = 1.2
 # Importance factor: 0.5 + 0.1 * importance (importance in 1..5 -> 0.6..1.0).
 _IMPORTANCE_BASE = 0.5
 _IMPORTANCE_STEP = 0.1
+# Narrow importance factor (ADR 0088): 1 + 0.05 * (importance - 3) -> 0.9..1.1.
+_NARROW_IMPORTANCE_STEP = 0.05
+_NARROW_IMPORTANCE_MID = 3
 
 
 def feedback_quality(
@@ -73,6 +76,7 @@ def entry_score(
     recency_floor: float | None = None,
     social_max: float | None = None,
     confirmed_at: datetime | None = None,
+    narrow_importance: bool = False,
 ) -> float:
     """Decay-aware final score for one entry (SPEC.md §6.4).
 
@@ -123,11 +127,19 @@ def entry_score(
     ``occurred_at``. If ``r_occ`` underflows to 0 (unbounded form, extreme
     age) the ratio is taken as 1 rather than dividing by zero. Only the
     date matters, never how many confirmations there were.
+
+    ``narrow_importance`` (ADR 0088) swaps the importance factor for
+    ``1 + 0.05 * (importance - 3)`` (0.9..1.1, one step about 1.05x), so
+    one importance step stays below ``social_max``; ``False`` is
+    bit-identical to the form above.
     """
     age_days = (now - occurred_at).total_seconds() / 86_400.0
     if age_days < 0:
         age_days = 0.0
-    importance_factor = _IMPORTANCE_BASE + _IMPORTANCE_STEP * importance
+    if narrow_importance:
+        importance_factor = 1.0 + _NARROW_IMPORTANCE_STEP * (importance - _NARROW_IMPORTANCE_MID)
+    else:
+        importance_factor = _IMPORTANCE_BASE + _IMPORTANCE_STEP * importance
     # Half-life decay: 0.5 ** (age / half_life). Computed via exp/log so
     # the result is a plain float (no complex-number branch).
     recency = math.exp(math.log(0.5) * (age_days / half_life_days))
