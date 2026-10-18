@@ -111,7 +111,11 @@ async def _write(store: SimStore, summary: str, importance: int = 3, **kw: objec
 async def _fixture(lam: float = 0.7) -> tuple[SimStore, SearchService]:
     clock = make_clock()
     store = SimStore(clock)
-    config = SearchConfig(candidate_top_k=10, default_limit=10, explore_lambda=lam)
+    # The wide importance factor (ADR 0088 off) keeps the score gaps these
+    # fixtures were built around.
+    config = SearchConfig(
+        candidate_top_k=10, default_limit=10, explore_lambda=lam, narrow_importance=False
+    )
     return store, SearchService(store, make_embedder(), config, now_fn=clock)
 
 

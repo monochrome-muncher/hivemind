@@ -273,6 +273,7 @@ class SearchService:
                 terms.half_life_days,
                 recency_floor=terms.recency_floor,
                 social_max=self._config.social_max,
+                narrow_importance=self._config.narrow_importance,
                 confirmed_at=(entry_signals.last_confirmed_at if terms.use_confirmation else None),
             )
             entry_scores[entry.id] = score

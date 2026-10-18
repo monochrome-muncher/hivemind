@@ -14,6 +14,10 @@ moves a default, or adds a social signal outside the cap, fails here.
       (ADR 0071).
 * I5  The upward multiplier from all social signals never exceeds
       ``social_max``; penalties are not capped.
+* I6  With the narrow importance factor on (ADR 0088), one importance step
+      (e.g. 5 against 3) stays below the peer cap at the default
+      ``social_max``, so it does not outweigh peer confirmation at the same
+      match and age.
 
 I1 and I5 also run with ``recency_from_confirmation`` on (ADR 0071), where
 a confirmation can restart the recency clock for the upside only.
@@ -48,6 +52,8 @@ from tests.fakes import FIXED_NOW, make_clock, make_embedder
 
 CONFIG = SearchConfig()
 CONFIRMING = SearchConfig(recency_from_confirmation=True)
+NARROW = SearchConfig(narrow_importance=True)
+WIDE = SearchConfig(narrow_importance=False)
 PROFILES = {
     "insight=180,decision=365": ((Kind.INSIGHT, 180.0), (Kind.DECISION, 365.0)),
     "insight=90,decision=180": ((Kind.INSIGHT, 90.0), (Kind.DECISION, 180.0)),
@@ -99,6 +105,7 @@ def shipped_score(
         recency_floor=config.recency_floor,
         social_max=config.social_max,
         confirmed_at=confirmed_at,
+        narrow_importance=config.narrow_importance,
     )
 
 
@@ -310,6 +317,7 @@ class TestI2NumbersAndDatesOnly:
             "recency_floor",
             "social_max",
             "confirmed_at",
+            "narrow_importance",
         }
 
     async def test_the_kind_reaches_the_score_only_as_a_half_life(self) -> None:
@@ -430,8 +438,8 @@ class TestI5UpwardMultiplierIsCapped:
     @pytest.mark.parametrize("helpful", [0, 1, 2, 5, 20, 100, 1000])
     def test_social_factor_never_exceeds_social_max(self, helpful: int) -> None:
         """I5: the product of the quality term never exceeds social_max."""
-        # recency is 1 at age 0, importance 5 gives 1.0, fused 1.0.
-        score = shipped_score(age_days=0.0, counts=(helpful, 0, 0), importance=5)
+        # recency is 1 at age 0, importance 3 gives 1.0 (narrow default), fused 1.0.
+        score = shipped_score(age_days=0.0, counts=(helpful, 0, 0), importance=3)
         assert score <= CONFIG.social_max
 
     @pytest.mark.parametrize("helpful", [0, 1, 5, 1000])
@@ -442,14 +450,14 @@ class TestI5UpwardMultiplierIsCapped:
         self, helpful: int, age: float, confirmed_ago: float, floor: float | None
     ) -> None:
         """I5 with the setting on: score / recency, the social multiplier, is
-        at most social_max however recent the confirmation (importance 5, fused 1)."""
+        at most social_max however recent the confirmation (importance 3, fused 1)."""
         if confirmed_ago > age:
             pytest.skip("a confirmation older than the memory date adds nothing")
         config = SearchConfig(recency_from_confirmation=True, recency_floor=floor)
         score = shipped_score(
             age_days=age,
             counts=(helpful, 0, 0),
-            importance=5,
+            importance=3,
             config=config,
             confirmed_ago_days=confirmed_ago,
         )
@@ -471,7 +479,7 @@ class TestI5UpwardMultiplierIsCapped:
         """I5: quality_max 2.0 (helpful reports heading to 2.0) is capped at 1.2."""
         wide = SearchConfig(quality_max=2.0, quality_helpful_weight=1.0)
         assert feedback_quality(100, 0, 0, **wide.quality_kwargs()) > 1.9
-        score = shipped_score(age_days=0.0, counts=(100, 0, 0), importance=5, config=wide)
+        score = shipped_score(age_days=0.0, counts=(100, 0, 0), importance=3, config=wide)
         assert score == pytest.approx(wide.social_max)
 
     @pytest.mark.parametrize("counts", [(0, 0, 1), (0, 5, 0), (0, 0, 1000), (1, 1, 1), (0, 1, 0)])
@@ -479,7 +487,7 @@ class TestI5UpwardMultiplierIsCapped:
         """I5: a quality below 1 is the multiplier as it is; the cap bounds only the upside."""
         quality = feedback_quality(*counts, **CONFIG.quality_kwargs())
         assert quality < 1.0
-        assert shipped_score(age_days=0.0, counts=counts, importance=5) == quality
+        assert shipped_score(age_days=0.0, counts=counts, importance=3) == quality
         assert (
             entry_score(1.0, 5, NOW, 0.5, NOW, 30.0, recency_floor=0.8, social_max=SOCIAL_MAX)
             == 0.5
@@ -559,7 +567,7 @@ class TestProfileRespectsI3I4I5:
         score = shipped_score(
             age_days=age,
             counts=(helpful, 0, 0),
-            importance=5,
+            importance=3,
             config=config,
             confirmed_ago_days=confirmed_ago,
             kind=kind,
@@ -594,6 +602,7 @@ class TestUnsetIsToday:
                         CONFIG.half_life_days,
                         recency_floor=CONFIG.recency_floor,
                         social_max=CONFIG.social_max,
+                        narrow_importance=CONFIG.narrow_importance,
                     )
                     assert flat == shipped_score(
                         age_days=age, counts=counts, fused=0.0164, importance=4, kind=kind
@@ -783,3 +792,38 @@ async def _pool(
     hits = await _service(store).search("deploy runbook", limit=10)
     names = dict(zip(ids, summaries, strict=True))
     return [(names[h.entry_id], h.score) for h in hits]
+
+
+class TestI6NarrowImportanceStaysBelowTheSocialCap:
+    """I6 (ADR 0088): the narrow factor is 0.9..1.1, one step about 1.05x."""
+
+    @staticmethod
+    def _factor(importance: int) -> float:
+        return entry_score(1.0, importance, NOW, 1.0, NOW, 30.0, narrow_importance=True)
+
+    def test_one_step_is_smaller_than_the_social_cap(self) -> None:
+        for importance in range(1, 5):
+            step = self._factor(importance + 1) / self._factor(importance)
+            assert 1.0 < step < CONFIG.social_max
+        # The widest step, importance 1 to 5, is 1.1 / 0.9 and still below
+        # the wide factor's own 1.0 / 0.6.
+        assert self._factor(5) / self._factor(1) == pytest.approx(1.1 / 0.9)
+
+    def test_importance_five_does_not_beat_a_peer_confirmed_importance_three(self) -> None:
+        """At the quality ceiling (1.2) and equal recency: 1.2 * 1.0 against 1.0 * 1.1."""
+        for age_days in (0.0, 5.0, 100.0):
+            five = shipped_score(age_days=age_days, importance=5, config=NARROW)
+            # Enough helpful reports to reach the 1.2 ceiling (within 1e-3).
+            three = shipped_score(
+                age_days=age_days, importance=3, counts=(10_000, 0, 0), config=NARROW
+            )
+            assert three > five
+            assert three / five == pytest.approx(1.2 / 1.1, rel=1e-3)
+
+    def test_the_wide_factor_is_what_let_importance_outweigh_peers(self) -> None:
+        five = shipped_score(age_days=0.0, importance=5, config=WIDE)
+        three = shipped_score(age_days=0.0, importance=3, counts=(10_000, 0, 0), config=WIDE)
+        assert five > three  # 1.0 against 0.8 * 1.2
+
+    def test_narrow_is_the_default(self) -> None:
+        assert CONFIG.narrow_importance is True

@@ -243,3 +243,47 @@ class TestConfirmedAt:
         old = NOW - timedelta(days=100_000)
         score = entry_score(1.0, 5, old, 1.0, NOW, 30.0, confirmed_at=NOW - timedelta(days=1))
         assert score == 0.0
+
+
+class TestNarrowImportance:
+    """ADR 0088: factor 1 + 0.05 * (importance - 3), 0.9..1.1."""
+
+    @staticmethod
+    def _score(importance: int, *, narrow: bool, **kw) -> float:
+        return entry_score(1.0, importance, NOW, 1.0, NOW, 30.0, narrow_importance=narrow, **kw)
+
+    @pytest.mark.parametrize(
+        ("importance", "factor"), [(1, 0.9), (2, 0.95), (3, 1.0), (4, 1.05), (5, 1.1)]
+    )
+    def test_factor_values(self, importance: int, factor: float) -> None:
+        assert self._score(importance, narrow=True) == pytest.approx(factor)
+
+    def test_importance_three_is_neutral(self) -> None:
+        assert self._score(3, narrow=True) == 1.0
+
+    def test_off_is_bit_identical_to_the_wide_factor(self) -> None:
+        for importance in range(1, 6):
+            for age_days in (0.0, 1.0, 10.0, 400.0):
+                for quality in (0.5, 1.0, 1.2):
+                    for floor in (None, 0.8):
+                        for fused in (0.016, 0.0328):
+                            occ = NOW - timedelta(days=age_days)
+                            args = (fused, importance, occ, quality, NOW, 30.0)
+                            default = entry_score(*args, recency_floor=floor, social_max=1.2)
+                            off = entry_score(
+                                *args, recency_floor=floor, social_max=1.2, narrow_importance=False
+                            )
+                            assert default == off
+                            wide = (
+                                fused
+                                * (0.5 + 0.1 * importance)
+                                * max(floor or 0.0, 0.5 ** (age_days / 30.0))
+                                * min(1.2, quality)
+                            )
+                            assert default == pytest.approx(wide)
+
+    def test_on_changes_only_the_importance_factor(self) -> None:
+        wide = self._score(5, narrow=False, recency_floor=0.8, social_max=1.2)
+        narrow = self._score(5, narrow=True, recency_floor=0.8, social_max=1.2)
+        assert wide == pytest.approx(1.0)
+        assert narrow == pytest.approx(1.1)
