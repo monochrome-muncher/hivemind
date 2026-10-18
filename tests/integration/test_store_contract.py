@@ -42,7 +42,14 @@ from hivemind.domain.entry import (
     Source,
     SourceType,
 )
-from hivemind.domain.feedback import Correction, Feedback, FeedbackSignals, Verdict, is_contested
+from hivemind.domain.feedback import (
+    Correction,
+    Feedback,
+    FeedbackLogFilters,
+    FeedbackSignals,
+    Verdict,
+    is_contested,
+)
 from hivemind.domain.health import HealthCounts
 from hivemind.memstore import MemoryStore, cosine_similarity
 from hivemind.ports import Store, SupersedeConflict
@@ -728,6 +735,69 @@ async def test_a_revoked_reporters_feedback_does_not_count_until_reactivated(
     await store.record_feedback(Feedback(entry.id, "nobody", "nobody", Verdict.WRONG, None, T0))
     await store.activate_agent("Scout", trust_level=TrustLevel.LURKER, home_fleet_id=fleet.id)
     assert await seen() == everyone
+
+
+async def test_feedback_log_lists_rows_across_entries_with_their_entry(adapter: Adapter) -> None:
+    store = adapter.store
+    blue = await store.create_fleet("blue")
+    red = await store.create_fleet("red")
+    org = await write(adapter, "org fact")
+    in_blue = await write(adapter, "blue fact", scope="fleet", fleet_id=blue.id, author="bob")
+    in_red = await write(adapter, "red fact", scope="fleet", fleet_id=red.id, author="bob")
+    mine = await write(adapter, "carol's own", scope="self", author="carol")
+    t = lambda m: T0 + timedelta(minutes=m)  # noqa: E731
+    await store.record_feedback(Feedback(org.id, "u1", "a1", Verdict.HELPFUL, None, t(1)))
+    await store.record_feedback(Feedback(in_blue.id, "u1", "a1", Verdict.WRONG, "no", t(2)))
+    await store.record_feedback(Feedback(in_red.id, "u2", "a2", Verdict.STALE, None, t(3)))
+    await store.record_feedback(Feedback(mine.id, "u2", "a2", Verdict.HELPFUL, "ok", t(4)))
+    await store.register_agent("gone")
+    await store.activate_agent("gone", trust_level=TrustLevel.LURKER, home_fleet_id=blue.id)
+    await store.record_feedback(Feedback(org.id, "gone", "gone", Verdict.WRONG, None, t(5)))
+    await store.revoke_agent("gone")  # ADR 0067: left out while revoked
+
+    async def log(**kw: object) -> list[tuple[str, str]]:
+        vis = kw.pop("visibility", None)
+        limit = kw.pop("limit", 10)
+        offset = kw.pop("offset", 0)
+        rows = await store.list_feedback_log(
+            FeedbackLogFilters(**kw),  # type: ignore[arg-type]
+            limit,  # type: ignore[arg-type]
+            offset,  # type: ignore[arg-type]
+            visibility=vis,  # type: ignore[arg-type]
+        )
+        return [(r.entry_summary, r.feedback.user) for r in rows]
+
+    everything = [
+        ("carol's own", "u2"),
+        ("red fact", "u2"),
+        ("blue fact", "u1"),
+        ("org fact", "u1"),
+    ]
+    assert await log() == everything
+    assert await log(limit=2, offset=1) == everything[1:3]
+    assert await log(reporter="u1") == everything[2:]
+    assert await log(verdict=Verdict.HELPFUL) == [everything[0], everything[3]]
+    assert await log(author="bob") == everything[1:3]
+    assert await log(fleet_id=blue.id) == [("blue fact", "u1")]
+    assert await log(entry_id=in_red.id.upper()) == [("red fact", "u2")]
+    assert await log(entry_id="not-a-uuid") == []
+    assert await log(entry_id="{" + in_red.id + "}") == []
+    assert await log(fleet_id="not-a-uuid") == []
+    # An agent of the blue fleet reads rows on org, blue and its own entries only.
+    assert await log(visibility=_vis(TrustLevel.LURKER, "carol", blue.id)) == [
+        ("carol's own", "u2"),
+        ("blue fact", "u1"),
+        ("org fact", "u1"),
+    ]
+    row = (await store.list_feedback_log(FeedbackLogFilters(entry_id=in_blue.id), 1))[0]
+    assert (row.feedback.agent, row.feedback.verdict, row.feedback.note) == (
+        "a1",
+        Verdict.WRONG,
+        "no",
+    )
+    assert (row.entry_kind, row.entry_author, row.entry_scope) == (Kind.FACT, "bob", "fleet")
+    assert (row.entry_fleet_id, row.entry_state) == (blue.id, EntryState.ACTIVE)
+    assert row.feedback.entry_id == in_blue.id
 
 
 async def test_feedback_lists_informative_reports_before_bare_helpful_ones(

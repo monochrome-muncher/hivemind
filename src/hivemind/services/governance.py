@@ -11,7 +11,12 @@ from __future__ import annotations
 from hivemind.config import SearchConfig
 from hivemind.domain.audit import AuditAction
 from hivemind.domain.entry import Entry
-from hivemind.domain.feedback import FeedbackSummary, Verdict
+from hivemind.domain.feedback import (
+    FeedbackLogFilters,
+    FeedbackLogItem,
+    FeedbackSummary,
+    Verdict,
+)
 from hivemind.domain.pin import Pin, PinnedEntry
 from hivemind.domain.validation import MAX_REASON_CHARS, check_text
 from hivemind.ports import Credential, Store
@@ -118,6 +123,16 @@ class GovernanceService:
 
     async def quality(self, entry_id: str) -> float:
         return await self._feedback.quality(entry_id)
+
+    async def feedback_log(
+        self,
+        credential: Credential,
+        filters: FeedbackLogFilters,
+        *,
+        limit: int,
+        offset: int = 0,
+    ) -> list[FeedbackLogItem]:
+        return await self._feedback.feedback_log(credential, filters, limit=limit, offset=offset)
 
     # -- pinned entries (services.pins) ---------------------------------------
 

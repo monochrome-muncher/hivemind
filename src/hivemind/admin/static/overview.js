@@ -3,7 +3,7 @@
 
 import {
   api, h, state, loadAgentsAndFleets, fetchMetrics, fetchActivity, optional, pageHead, refreshButton, windowSelector,
-  card, stat, unavailable, fmtNum, fmtPct, fmtAgo, fmtTime, link, memoriesHref, hooks, miniBar,
+  card, stat, unavailable, fmtNum, fmtPct, fmtAgo, fmtTime, link, memoriesHref, feedbackHref, hooks, miniBar,
 } from "./core.js";
 import { pendingQueue } from "./manage.js";
 import { stackedBars } from "./charts.js";
@@ -22,7 +22,8 @@ function activityCard(activity) {
   return card(`Activity, last ${activity.days} days`, h("div", { class: "charts" },
     stackedBars({ daily: activity.daily, series: WRITES, title: "Writes per day" }),
     stackedBars({ daily: activity.daily, series: VERDICTS, title: "Verdicts per day" })),
-  { head: [h("span", { class: "muted small", text: `${fmtNum(activity.totals.writers)} ${activity.totals.writers === 1 ? "writer" : "writers"} · ${fmtNum(activity.totals.reporters)} ${activity.totals.reporters === 1 ? "reporter" : "reporters"}` })] });
+  { head: [h("span", { class: "muted small", text: `${fmtNum(activity.totals.writers)} ${activity.totals.writers === 1 ? "writer" : "writers"} · ${fmtNum(activity.totals.reporters)} ${activity.totals.reporters === 1 ? "reporter" : "reporters"}` }),
+    link("Who rated what", feedbackHref(), { class: "link small" })] });
 }
 
 function topAgents(activity) {

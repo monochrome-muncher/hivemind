@@ -61,6 +61,8 @@ from hivemind.domain.feedback import (
     Correction,
     Feedback,
     FeedbackCounts,
+    FeedbackLogFilters,
+    FeedbackLogItem,
     FeedbackSignals,
     FlagCount,
     Verdict,
@@ -82,7 +84,7 @@ from hivemind.domain.health import (
 )
 from hivemind.domain.pin import Pin, PinWrite
 from hivemind.domain.upstream import UpstreamLink
-from hivemind.domain.validation import is_valid_uuid, utcnow
+from hivemind.domain.validation import canonical_uuid, is_valid_uuid, utcnow
 from hivemind.ports import SupersedeConflict
 
 # Sort key for a feedback row that has no timestamp (fixtures only).
@@ -849,6 +851,53 @@ class MemoryStore:
         self, entry_ids: list[str], limit: int
     ) -> dict[str, list[Feedback]]:
         return {eid: await self.list_feedback(eid, limit) for eid in entry_ids}
+
+    async def list_feedback_log(
+        self,
+        filters: FeedbackLogFilters,
+        limit: int,
+        offset: int = 0,
+        *,
+        visibility: Visibility | None = None,
+    ) -> list[FeedbackLogItem]:
+        def well_formed(value: str | None) -> str | None:
+            # ``is_valid_uuid`` first: it refuses the braced and URN spellings
+            # ``canonical_uuid`` would accept, as Postgres does here.
+            return canonical_uuid(value) if value is not None and is_valid_uuid(value) else None
+
+        entry_id = well_formed(filters.entry_id)
+        fleet_id = well_formed(filters.fleet_id)
+        if (filters.entry_id is not None and entry_id is None) or (
+            filters.fleet_id is not None and fleet_id is None
+        ):
+            return []
+        with self._lock:
+            pairs = [
+                (fb, entry)
+                for fb in self._live_feedback().values()
+                if (entry := self._entries.get(fb.entry_id)) is not None
+                and (entry_id is None or entry.id == entry_id)
+                and (fleet_id is None or entry.fleet_id == fleet_id)
+                and (filters.reporter is None or fb.user == filters.reporter)
+                and (filters.verdict is None or fb.verdict is filters.verdict)
+                and (filters.author is None or entry.author == filters.author)
+                and self._visible(entry, visibility)
+            ]
+        # Newest first, then entry id, reporter and agent, as on Postgres.
+        pairs.sort(key=lambda p: (p[0].entry_id, p[0].user, p[0].agent))
+        pairs.sort(key=lambda p: p[0].updated_at or _EPOCH, reverse=True)
+        return [
+            FeedbackLogItem(
+                feedback=fb,
+                entry_kind=entry.kind,
+                entry_summary=entry.summary,
+                entry_author=entry.author,
+                entry_scope=entry.scope,
+                entry_fleet_id=entry.fleet_id,
+                entry_state=entry.state,
+            )
+            for fb, entry in pairs[offset : offset + limit]
+        ]
 
     async def health_check(self) -> bool:
         """In-memory pool: always healthy (ADR 0019)."""

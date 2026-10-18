@@ -4,7 +4,7 @@
 
 import {
   h, state, loadAgentsAndFleets, fetchMetrics, fetchActivity, pageHead, refreshButton, windowSelector, card, unavailable,
-  fmtNum, fmtAgo, fmtTime, fmtOf, link, memoriesHref, hooks, miniBar,
+  fmtNum, fmtAgo, fmtTime, fmtOf, link, memoriesHref, feedbackHref, hooks, miniBar,
 } from "./core.js";
 
 let tab = "fleets";
@@ -60,6 +60,10 @@ function userRows(activity) {
 }
 
 const num = (key) => ({ key, num: true, render: (r) => fmtNum(r[key]) });
+// A count that opens the Feedback log on the rows behind it (none for zero).
+const fbNum = (key, label, filters) => ({
+  key, label, num: true, render: (r) => (r[key] ? link(fmtNum(r[key]), feedbackHref(filters(r))) : fmtNum(r[key])),
+});
 const when = (key, label) => ({ key, label, render: (r) => h("span", { title: fmtTime(r[key]), text: r[key] ? fmtAgo(r[key]) : "—" }) });
 
 function columns(which, rows) {
@@ -83,8 +87,10 @@ function columns(which, rows) {
   if (which === "agents") {
     return [nameCol("Agent"), { key: "owner", label: "Owner", render: (r) => r.owner || "—" }, { key: "fleet", label: "Home fleet", render: (r) => r.fleet || "—" },
       { ...num("entries"), label: "Entries" }, { ...num("active"), label: "Active" }, writes, when("last_write_at", "Last write"),
-      { ...num("verdicts_given"), label: "Verdicts given" },
-      { ...num("helpful"), label: "Helpful received" }, { ...num("stale"), label: "Stale received" }, { ...num("wrong"), label: "Wrong received" },
+      fbNum("verdicts_given", "Verdicts given", (r) => ({ reporter: r.name })),
+      fbNum("helpful", "Helpful received", (r) => ({ author: r.name, verdict: "helpful" })),
+      fbNum("stale", "Stale received", (r) => ({ author: r.name, verdict: "stale" })),
+      fbNum("wrong", "Wrong received", (r) => ({ author: r.name, verdict: "wrong" })),
       { key: "confirmed", label: "Flags confirmed", num: true, render: (r) => (r.flags == null ? "—" : `${r.confirmed} of ${r.flags}`) }];
   }
   return [nameCol("Owner"), { ...num("agents"), label: "Agents" }, { ...num("active_agents"), label: "Active agents" }, { ...num("entries"), label: "Entries" },

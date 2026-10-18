@@ -12,6 +12,8 @@ from hivemind.domain.feedback import (
     FEEDBACK_RECENT_LIMIT,
     NO_SIGNALS,
     Feedback,
+    FeedbackLogFilters,
+    FeedbackLogItem,
     FeedbackSummary,
     Verdict,
 )
@@ -220,6 +222,23 @@ class FeedbackService:
             )
             for eid in entry_ids
         }
+
+    async def feedback_log(
+        self,
+        credential: Credential,
+        filters: FeedbackLogFilters,
+        *,
+        limit: int,
+        offset: int = 0,
+    ) -> list[FeedbackLogItem]:
+        """Feedback rows across entries, newest first, each with the entry
+        it rates: only rows on entries the caller can read. The admin key
+        reads them all; an agent key reads the rows on its own, org and
+        home-fleet entries, so the same call can serve an agent's own view."""
+        credential = credential.effective(self._require_stored_keys)
+        return await self._store.list_feedback_log(
+            filters, limit, offset, visibility=credential.visibility()
+        )
 
     async def quality(self, entry_id: str) -> float:
         """An entry's current quality multiplier (SPEC.md §6.4)."""

@@ -4,7 +4,7 @@
 //   core.js      helpers, API client, formatting, modal, shared widgets
 //   charts.js    the SVG activity chart
 //   drawer.js    the memory detail drawer
-//   overview.js  memories.js  stats.js  manage.js  health.js   the views
+//   overview.js  memories.js  feedback.js  stats.js  manage.js  health.js   the views
 //
 // Rules every module keeps: API data reaches the page through textContent
 // (h(), svg()) and never through an HTML-parsing sink; the admin key lives in
@@ -16,12 +16,13 @@ import {
 import { closeDrawer, initDrawer } from "./drawer.js";
 import { viewOverview } from "./overview.js";
 import { viewMemories } from "./memories.js";
+import { viewFeedback } from "./feedback.js";
 import { viewStats } from "./stats.js";
 import { viewAgents, viewFleets, viewAudit, viewKeys } from "./manage.js";
 import { viewHealth } from "./health.js";
 
 const VIEWS = {
-  overview: viewOverview, memories: viewMemories, stats: viewStats, agents: viewAgents,
+  overview: viewOverview, memories: viewMemories, feedback: viewFeedback, stats: viewStats, agents: viewAgents,
   fleets: viewFleets, health: viewHealth, audit: viewAudit, keys: viewKeys,
 };
 

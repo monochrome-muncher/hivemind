@@ -36,7 +36,14 @@ from hivemind.domain.entry import (
     UsageCount,
     embeddable_text,
 )
-from hivemind.domain.feedback import Feedback, FeedbackCounts, FeedbackSignals, FlagCount
+from hivemind.domain.feedback import (
+    Feedback,
+    FeedbackCounts,
+    FeedbackLogFilters,
+    FeedbackLogItem,
+    FeedbackSignals,
+    FlagCount,
+)
 from hivemind.domain.health import Convergence, FleetHealth
 from hivemind.domain.pin import Pin, PinWrite
 from hivemind.domain.upstream import UpstreamLink
@@ -391,6 +398,22 @@ class Store(Protocol):
         """``list_feedback`` for several entries in one read (ADR 0059),
         keyed by every requested id (``[]`` when it has no feedback), each in
         ``list_feedback`` order."""
+        ...
+
+    async def list_feedback_log(
+        self,
+        filters: FeedbackLogFilters,
+        limit: int,
+        offset: int = 0,
+        *,
+        visibility: Visibility | None = None,
+    ) -> list[FeedbackLogItem]:
+        """Feedback rows across entries matching ``filters``, each with the
+        entry it is about: newest first (``updated_at`` DESC), then entry
+        id, reporter and agent. Only rows whose entry is readable under
+        ``visibility`` (``None`` = all, as in ``list_entries``); revoked
+        reporters are left out (ADR 0067). A malformed ``entry_id`` or
+        ``fleet_id`` matches nothing."""
         ...
 
     async def health_check(self) -> bool:
