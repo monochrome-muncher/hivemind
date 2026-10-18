@@ -367,7 +367,7 @@ The minimal operational metrics surface (`GET /v1/metrics`, admin-gated): entrie
 _Avoid_: analytics, telemetry (that is the broader §10 story), dashboards (a UI is a non-goal, SPEC §9)
 
 **Fleet health metrics**:
-The `health` section of the usage report: observations of the pool (verdict notes, sources, correction speed, orphaned flags, concentration, synthesis) for the operator. Admin-only and never an input to search, ranking, scoring or the briefing (ADR 0075).
+The `health` section of the usage report: observations of the pool (verdict notes, sources, correction speed, orphaned flags, concentration, owner-level sibling verdicts, synthesis) for the operator. Admin-only and never an input to search, ranking, scoring or the briefing (ADR 0075).
 _Avoid_: scorecard, KPIs, leaderboard (they invite agents to optimise the number)
 
 **Scrape target**:

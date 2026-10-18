@@ -1,5 +1,7 @@
 # Fleet health metrics: admin-only and observation-only
 
+> **Extended by [ADR 0089](0089-owner-level-rating-metrics.md):** sibling-verdict and owner-concentration figures join the `health` section. Everything below stands.
+
 Extends [ADR 0068](0068-rater-flag-confirmation-metric.md) and
 [ADR 0069](0069-cache-the-entry-scan-behind-the-usage-report.md).
 
