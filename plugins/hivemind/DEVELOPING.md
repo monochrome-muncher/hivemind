@@ -261,7 +261,9 @@ The script counts four transcript formats:
      user and not group or other writable;
   5. the transcript (grep only, no jq, python or node) has no `hive_write`
      or `hive_feedback` tool call and at least 20 tool uses
-     (`HIVEMIND_STOP_MIN_TOOLS` overrides the 20).
+     (`HIVEMIND_STOP_MIN_TOOLS` overrides the 20). Lines that carry tool
+     definitions (Claude Code's `prompt_snapshot` records list every tool
+     with its schema) are skipped, so a definition never counts as a call.
 
   Any error, missing file or unparsable input fails open. Tests:
   `tests/unit/test_stop_hook.py`.

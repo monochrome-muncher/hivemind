@@ -57,17 +57,24 @@ private || exit 0
 [ -e "$dir/$sid" ] && exit 0
 
 # (e) Qualifying: enough tool uses, and no hive_write / hive_feedback yet.
-grep -Eq '"name" *: *"[^"]*hive_(write|feedback)"' "$transcript" 2>/dev/null && exit 0
+# Claude Code records the tool list in prompt_snapshot attachments (and
+# deferred_tools_record), as {"name":...,"schema":{...}} definitions, so
+# lines that define tools are skipped: a definition is not a call.
+calls() {
+  grep -Ev '"(input_schema|inputSchema|schema|parameters)" *: *\{|"type" *: *"(prompt_snapshot|deferred_tools_record)"' \
+    "$transcript" 2>/dev/null
+}
+calls | grep -Eq '"name" *: *"[^"]*hive_(write|feedback)"' && exit 0
 min="${HIVEMIND_STOP_MIN_TOOLS:-20}"
 case "$min" in ''|*[!0-9]*) min=20 ;; esac
 # Claude Code records a call as "tool_use"; Codex as "function_call",
 # "custom_tool_call" or "local_shell_call" (their outputs end in "_output");
 # GitHub Copilot CLI writes one "tool.execution_start" event per call.
-uses="$(grep -Eo '"type" *: *"(tool_use|function_call|custom_tool_call|local_shell_call|tool\.execution_start)"' \
-  "$transcript" 2>/dev/null | wc -l)" || exit 0
+uses="$(calls | grep -Eo '"type" *: *"(tool_use|function_call|custom_tool_call|local_shell_call|tool\.execution_start)"' \
+  | wc -l)" || exit 0
 # Gemini CLI rewrites a call's record as it progresses, so count each
 # functionResponse id once.
-gemini="$(grep -Eo '"functionResponse" *: *\{ *"id" *: *"[^"]*"' "$transcript" 2>/dev/null \
+gemini="$(calls | grep -Eo '"functionResponse" *: *\{ *"id" *: *"[^"]*"' \
   | sort -u | wc -l)" || exit 0
 uses=$((uses + gemini))
 [ "${uses:-0}" -ge "$min" ] 2>/dev/null || exit 0
