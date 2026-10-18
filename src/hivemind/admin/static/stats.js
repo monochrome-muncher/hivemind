@@ -4,7 +4,7 @@
 
 import {
   h, state, loadAgentsAndFleets, fetchMetrics, fetchActivity, pageHead, refreshButton, windowSelector, card, unavailable,
-  fmtNum, fmtAgo, fmtTime, fmtOf, link, memoriesHref, feedbackHref, hooks, miniBar,
+  fmtNum, fmtAgo, fmtTime, fmtOf, link, memoriesHref, feedbackHref, hooks, miniBar, agentHref,
 } from "./core.js";
 
 let tab = "fleets";
@@ -33,7 +33,7 @@ function fleetRows(activity, metrics) {
 function agentRows(activity, metrics) {
   const flagged = (metrics && metrics.feedback && metrics.feedback.by_agent) || {};
   return (activity.agents || []).map((a) => ({
-    name: a.name, href: memoriesHref({ author: a.name }), registered: a.registered, owner: a.owner_alias, fleet: a.home_fleet, status: a.status,
+    name: a.name, href: agentHref(a.name), registered: a.registered, owner: a.owner_alias, fleet: a.home_fleet, status: a.status,
     entries: a.entries, active: a.active, recent_writes: a.recent_writes, last_write_at: a.last_write_at,
     verdicts_given: a.verdicts_given, recent_verdicts: a.recent_verdicts,
     helpful: a.received ? a.received.helpful : 0, stale: a.received ? a.received.stale : 0, wrong: a.received ? a.received.wrong : 0,

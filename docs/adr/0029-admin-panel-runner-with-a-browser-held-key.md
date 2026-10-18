@@ -2,7 +2,8 @@
 
 Status: Accepted; amended by [ADR 0080](0080-admin-memory-browser-and-activity.md),
 which adds a read-only memory browser and activity figures and five more
-admin paths to the proxy allowlist.
+admin paths to the proxy allowlist, and by [ADR 0091](0091-admin-panel-shared-front-end-modules.md),
+which splits the static UI into app-neutral modules and the admin half.
 
 ## Context
 

@@ -3,84 +3,14 @@
 // GET admin/feedback. Filters live in the hash query so other views can
 // deep-link: #/feedback?reporter=bob&verdict=wrong&author=alice&fleet=<id>&entry=<id>.
 //
-// feedbackTable() knows nothing about the admin routes: it takes a page
-// fetcher and an "open this memory" callback, so another front end can
-// reuse it over its own endpoint. Notes are written by agents: plain text.
+// The table itself is lists.js's feedbackTable(), shared with any other
+// front end; this module only adds the admin filters and route.
 
 import {
-  api, h, state, toast, guarded, parseHash, loadAgentsAndFleets, fleetName, fmtAgo, fmtTime, kindBadge, stateBadge,
-  verdictBadge, pageHead, refreshButton, card, link, memoriesHref, VERDICTS,
+  api, h, state, guarded, parseHash, loadAgentsAndFleets, fleetName, pageHead, refreshButton, card, link, memoriesHref, agentHref, VERDICTS,
 } from "./core.js";
 import { openEntry } from "./drawer.js";
-
-const PAGE = 50;
-const HEADERS = ["Given", "Reporter", "Verdict", "Note", "Memory", "Author"];
-
-function feedbackRow(row, onOpen) {
-  const e = row.entry;
-  return h("tr", {},
-    h("td", { class: "nowrap", title: fmtTime(row.updated_at), text: fmtAgo(row.updated_at) }),
-    h("td", { class: "nowrap" }, h("strong", { text: row.reporter }),
-      row.agent && row.agent !== row.reporter ? h("div", { class: "muted small", text: `as ${row.agent}` }) : null),
-    h("td", {}, verdictBadge(row.verdict)),
-    h("td", { class: "cell-note" }, row.note ? h("div", { class: "plain", text: row.note }) : h("span", { class: "muted", text: "—" })),
-    h("td", { class: "cell-summary" },
-      h("button", { type: "button", class: "linklike summary-text", text: e.summary, onclick: () => onOpen(e.id) }),
-      h("div", { class: "row tight" }, kindBadge(e.kind),
-        h("span", { class: "muted small", text: e.fleet_id ? `${e.scope} · ${fleetName(e.fleet_id)}` : e.scope }),
-        e.state !== "active" ? stateBadge(e.state) : null)),
-    h("td", { class: "nowrap", text: e.author }));
-}
-
-/**
- * A paged feedback table. `fetchPage({limit, offset})` resolves to an array
- * of feedback log rows (or undefined to stop); `onOpen(entryId)` opens a
- * memory. Returns {el, load(reset)} where load(true) starts from the top.
- */
-export function feedbackTable({ fetchPage, onOpen, emptyText = "No feedback matches." }) {
-  const tbody = h("tbody");
-  const status = h("p", { class: "muted small result-status", "aria-live": "polite" });
-  const more = h("button", { type: "button", class: "btn", text: "Load more" });
-  const moreWrap = h("div", { class: "load-more", hidden: true }, more);
-  let offset = 0;
-  let ticket = 0;
-  let shown = 0;
-  let resetting = false; // a "Load more" during a reset becomes part of it
-
-  const load = async (reset) => {
-    if (resetting) reset = true;
-    const mine = ++ticket;
-    resetting = reset;
-    more.disabled = true;
-    try {
-      const rows = await fetchPage({ limit: PAGE, offset: reset ? 0 : offset });
-      if (!rows || mine !== ticket) return;
-      // Counters move only on a response that is still current, so a failed
-      // or superseded reset never leaves old rows with a reset offset.
-      if (reset) { tbody.replaceChildren(); offset = 0; shown = 0; }
-      offset += rows.length;
-      shown += rows.length;
-      tbody.append(...rows.map((r) => feedbackRow(r, onOpen)));
-      if (shown === 0) tbody.replaceChildren(h("tr", {}, h("td", { class: "empty", colspan: HEADERS.length, text: emptyText })));
-      status.textContent = `${shown} shown, newest first`;
-      moreWrap.hidden = rows.length < PAGE;
-    } catch (err) {
-      if (mine !== ticket) return;
-      toast(err.message, true);
-      if (reset) moreWrap.hidden = true; // the rows shown no longer match the filters
-    } finally {
-      if (mine === ticket) { more.disabled = false; resetting = false; }
-    }
-  };
-  more.addEventListener("click", () => load(false));
-
-  const el = h("div", { class: "card" },
-    h("div", { class: "card-body card-body-tight" }, status),
-    h("div", { class: "table-wrap" }, h("table", { class: "entries feedback-log" },
-      h("thead", {}, h("tr", {}, HEADERS.map((t) => h("th", { text: t })))), tbody)),
-    moreWrap);
-  return { el, load };
-}
+import { feedbackTable } from "./lists.js";
 
 export async function viewFeedback(root) {
   await loadAgentsAndFleets();
@@ -128,6 +58,8 @@ export async function viewFeedback(root) {
       }));
     },
     onOpen: (id) => openEntry(id, () => table.load(true)),
+    fleetName,
+    agentHref,
   });
 
   form.addEventListener("submit", (event) => { event.preventDefault(); table.load(true); });

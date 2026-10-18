@@ -4,7 +4,7 @@
 import {
   api, guarded, h, LEVELS, hooks, state, toast, openModal, closeModal, showKeyOnce, fleetName, fmtAgo, fmtTime, fmtNum,
   levelBadge, statusBadge, loadAgentsAndFleets, pageHead, refreshButton, table, card, link, memoriesHref,
-  fetchActivity, fetchMetrics, miniBar, unavailable,
+  fetchActivity, fetchMetrics, miniBar, unavailable, agentHref,
 } from "./core.js";
 
 const AUDIT_ACTIONS = [
@@ -142,7 +142,8 @@ function editDialog(agent, onDone) {
   });
 }
 
-export function agentActions(agent, refresh) {
+/** The buttons for what can be done to `agent` now (activate, edit, revoke…). */
+export function agentButtons(agent, refresh) {
   const buttons = [];
   if (agent.status === "pending") {
     buttons.push(h("button", { type: "button", class: "btn btn-primary btn-sm", text: "Activate", onclick: () => activateDialog(agent, refresh) }));
@@ -153,8 +154,10 @@ export function agentActions(agent, refresh) {
   } else if (agent.status === "revoked") {
     buttons.push(h("button", { type: "button", class: "btn btn-sm", text: "Re-activate", onclick: () => activateDialog(agent, refresh) }));
   }
-  return h("td", { class: "actions" }, buttons);
+  return buttons;
 }
+
+export const agentActions = (agent, refresh) => h("td", { class: "actions" }, agentButtons(agent, refresh));
 
 export function pendingQueue(refresh) {
   const pending = state.agents
@@ -335,7 +338,7 @@ export async function viewAgents(root) {
       shown.map((a) => {
         const x = act.get(a.name);
         return h("tr", {},
-          h("td", {}, x && x.entries ? link(a.name, memoriesHref({ author: a.name }), { class: "link strong" }) : h("strong", { text: a.name })),
+          h("td", {}, link(a.name, agentHref(a.name), { class: "link strong" })),
           h("td", {}, statusBadge(a.status)),
           h("td", {}, a.status === "pending" ? h("span", { class: "muted", text: "—" }) : levelBadge(a.trust_level)),
           h("td", { text: fleetName(a.home_fleet_id) }),

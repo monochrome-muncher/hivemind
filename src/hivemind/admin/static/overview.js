@@ -3,12 +3,12 @@
 
 import {
   api, h, state, loadAgentsAndFleets, fetchMetrics, fetchActivity, optional, pageHead, refreshButton, windowSelector,
-  card, stat, unavailable, fmtNum, fmtPct, fmtAgo, fmtTime, link, memoriesHref, feedbackHref, hooks, miniBar,
+  card, stat, unavailable, fmtNum, fmtPct, fmtAgo, fmtTime, link, memoriesHref, feedbackHref, hooks, miniBar, fleetName, agentHref,
 } from "./core.js";
 import { pendingQueue } from "./manage.js";
 import { stackedBars } from "./charts.js";
 import { openEntry } from "./drawer.js";
-import { entryRow } from "./memories.js";
+import { entryRow } from "./lists.js";
 
 const WRITES = [{ key: "writes", label: "Writes", cls: "s-writes" }];
 const VERDICTS = [
@@ -32,7 +32,7 @@ function topAgents(activity) {
   const max = Math.max(1, ...top.map((a) => a.recent_writes));
   return card("Most active agents", top.length
     ? h("div", { class: "bars" }, top.map((a) => h("div", { class: "bar-row bar-row-wide" },
-      link(a.name, memoriesHref({ author: a.name })), miniBar(a.recent_writes, max), h("span", { class: "bar-count", text: a.recent_writes }))))
+      link(a.name, agentHref(a.name)), miniBar(a.recent_writes, max), h("span", { class: "bar-count", text: a.recent_writes }))))
     : h("p", { class: "muted", text: `No writes in the last ${activity.days} days.` }),
   { head: [link("All agents", "#/stats", { class: "link small" })] });
 }
@@ -42,7 +42,7 @@ function newest(entries) {
   const rows = entries.map((e) => entryRow({
     id: e.id, kind: e.kind, summary: e.summary, tags: e.tags || [], scope: e.scope, fleet_id: e.fleet_id, author: e.author,
     agent: e.agent, when: e.created_at, state: e.state, feedback: null,
-  }, { onOpen: (id) => openEntry(id, () => hooks.refresh()), compact: true }));
+  }, { onOpen: (id) => openEntry(id, () => hooks.refresh()), compact: true, fleetName }));
   return card("Newest memories", h("div", { class: "table-wrap" }, h("table", { class: "entries" },
     h("thead", {}, h("tr", {}, ["Memory", "Kind", "Scope", "Author", "Written", "State"].map((t) => h("th", { text: t })))),
     h("tbody", {}, rows.length ? rows : h("tr", {}, h("td", { class: "empty", colspan: 6, text: "No memories yet." }))))),

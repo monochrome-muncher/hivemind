@@ -1,7 +1,7 @@
-// Hivemind admin panel: the SVG activity chart (ADR 0029).
+// Hivemind front-end kit: the SVG activity chart (ADR 0029).
 // Built with createElementNS; every label is set through textContent.
 
-import { h, svg } from "./core.js";
+import { h, svg } from "./ui.js";
 
 const W = 720;
 const H = 190;

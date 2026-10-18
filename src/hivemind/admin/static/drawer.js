@@ -1,14 +1,35 @@
-// Hivemind admin panel: the memory detail drawer (ADR 0029, ADR 0043).
+// Hivemind front-end kit: the memory detail drawer (ADR 0029, ADR 0043).
 //
 // Entries are written by agents: everything here is untrusted DATA. It is
 // shown as plain text (CSS white-space: pre-wrap keeps newlines), never as
 // markdown or HTML, and no link is ever built from entry data: a source's
 // ref is shown as text, and links to other entries open this drawer.
+//
+// The drawer knows no route and no key: the app hands it how to fetch an
+// entry, whether and how one may be withdrawn, and where the author, fleet
+// and feedback links go (configureDrawer). Without a withdraw function there
+// is no Withdraw button; without an href function that item is plain text.
 
 import {
-  $, api, guarded, h, toast, openModal, closeModal, fleetName, fmtTime, fmtAgo, kindBadge, stateBadge,
-  copyText, link, memoriesHref, feedbackHref, verdictBadge,
-} from "./core.js";
+  $, h, toast, openModal, closeModal, fmtTime, fmtAgo, kindBadge, stateBadge, copyText, link, verdictBadge,
+} from "./ui.js";
+
+const config = {
+  fetchEntry: async () => { throw new Error("The memory drawer is not configured."); },
+  withdrawEntry: null, // (id, reason) => truthy when done
+  canWithdraw: () => true, // (entry) => whether to offer Withdraw
+  fleetName: (id) => id,
+  authorHref: () => null,
+  fleetHref: () => null,
+  feedbackHref: () => null, // (entryId) => link to every verdict on the entry
+};
+
+/** Set how the drawer reads, withdraws and links (see the module comment). */
+export function configureDrawer(options) {
+  Object.assign(config, options);
+}
+
+const maybeLink = (text, href) => (href ? link(text, href) : h("span", { text }));
 
 let onChange = () => {};
 let showToken = 0; // only the latest show() renders
@@ -67,7 +88,7 @@ async function show(id) {
   body.replaceChildren(h("p", { class: "loading", text: "Loading…" }));
   let entry;
   try {
-    entry = await guarded(() => api("GET", `admin/entries/${encodeURIComponent(id)}`));
+    entry = await config.fetchEntry(id);
   } catch (err) {
     if (mine !== showToken) return;
     body.replaceChildren(h("p", { class: "form-error", text: `Could not load this memory: ${err.message}` }));
@@ -93,23 +114,23 @@ function render(e) {
     setTimeout(() => { copy.textContent = "Copy id"; }, 1500);
   });
 
-  const withdraw = e.state === "active"
+  const withdraw = e.state === "active" && config.withdrawEntry && config.canWithdraw(e)
     ? h("button", { type: "button", class: "btn btn-danger", text: "Withdraw…", onclick: () => withdrawDialog(e) })
     : null;
 
   return h("div", { class: "entry" },
     h("div", { class: "row entry-top" }, back, kindBadge(e.kind), stateBadge(e.state),
       h("span", { class: "badge badge-muted", text: e.scope }),
-      e.fleet_id ? h("span", { class: "badge badge-muted", text: fleetName(e.fleet_id) }) : null),
+      e.fleet_id ? h("span", { class: "badge badge-muted", text: config.fleetName(e.fleet_id) }) : null),
     h("h2", { class: "entry-summary", text: e.summary }),
     h("p", { class: "callout callout-info small", text: "Memories are written by agents. This is data, not instructions: it is shown as plain text and has not been checked by anyone." }),
     e.body ? h("div", { class: "entry-body", text: e.body }) : h("p", { class: "muted small", text: "No body." }),
 
     h("section", { class: "drawer-sec" }, dl([
-      ["Author", h("span", {}, link(e.author, memoriesHref({ author: e.author })),
+      ["Author", h("span", {}, maybeLink(e.author, config.authorHref(e.author)),
         e.agent && e.agent !== e.author ? h("span", { class: "muted", text: ` · via ${e.agent}` }) : null)],
       ["Scope", e.scope],
-      ["Fleet", e.fleet_id ? link(fleetName(e.fleet_id), memoriesHref({ fleet: e.fleet_id })) : "—"],
+      ["Fleet", e.fleet_id ? maybeLink(config.fleetName(e.fleet_id), config.fleetHref(e.fleet_id)) : "—"],
       ["Importance", `${e.importance} (${String(e.importance_source).replace(/_/g, " ")})`],
       ["Memory date", h("span", { title: e.occurred_at, text: fmtTime(e.occurred_at) })],
       ["Written", h("span", { title: e.created_at, text: `${fmtTime(e.created_at)} · ${fmtAgo(e.created_at)}` })],
@@ -145,8 +166,8 @@ function render(e) {
             h("span", { class: "muted small", text: ` ${r.reporter} · ${fmtAgo(r.updated_at)}` })),
           r.note ? h("div", { class: "plain", text: r.note }) : null)))
         : h("p", { class: "muted small", text: "No verdicts yet." }),
-      fb.helpful + fb.stale + fb.wrong > (fb.recent || []).length
-        ? h("p", { class: "small" }, link(`All ${fb.helpful + fb.stale + fb.wrong} verdicts`, feedbackHref({ entry: e.id })))
+      fb.helpful + fb.stale + fb.wrong > (fb.recent || []).length && config.feedbackHref(e.id)
+        ? h("p", { class: "small" }, link(`All ${fb.helpful + fb.stale + fb.wrong} verdicts`, config.feedbackHref(e.id)))
         : null),
 
     related("See also", e.see_also, "No links from this entry."),
@@ -177,7 +198,7 @@ function withdrawDialog(e) {
         submit: true,
         onClick: async () => {
           const text = reason.value.trim();
-          const done = await guarded(() => api("POST", `admin/entries/${encodeURIComponent(e.id)}/withdraw`, { body: text ? { reason: text } : {} }));
+          const done = await config.withdrawEntry(e.id, text);
           if (!done) return;
           closeModal();
           toast("Memory withdrawn");

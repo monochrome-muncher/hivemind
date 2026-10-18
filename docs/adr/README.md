@@ -39,7 +39,7 @@ is unused.
 | [0026](0026-two-app-tier-replicas-for-availability.md) | Two app-tier replicas per runner, for availability — not throughput | Accepted |
 | [0027](0027-audit-log-of-admin-actions.md) | An append-only audit log of admin actions, with two actor kinds | Amended by 0028, 0046, 0076 |
 | [0028](0028-revoked-agent-status-and-an-activation-guard.md) | A `revoked` agent status, and activation only from `pending` or `revoked` | Refined by 0039 |
-| [0029](0029-admin-panel-runner-with-a-browser-held-key.md) | The admin panel: a static UI and an allowlisted proxy, with the key held in the browser | Amended by 0080 |
+| [0029](0029-admin-panel-runner-with-a-browser-held-key.md) | The admin panel: a static UI and an allowlisted proxy, with the key held in the browser | Amended by 0080, 0091 |
 | [0030](0030-hive-whoami-lets-an-agent-see-its-own-standing.md) | `hive_whoami`: an agent can read its own standing | Accepted |
 | [0031](0031-one-key-per-request-and-what-org-key-rotation-stops.md) | One key per request; rotating the org key closes registration, nothing more | Refined by 0039 |
 | [0032](0032-unknown-hivemind-env-vars-warn-by-default.md) | Unknown `HIVEMIND_*` variables warn by default; failing is opt-in | Accepted |
@@ -100,3 +100,4 @@ is unused.
 | [0088](0088-narrow-importance.md) | A narrower importance factor, so one importance step stays below the peer cap | Accepted |
 | [0089](0089-owner-level-rating-metrics.md) | Owner-level rating metrics: sibling verdicts and owner concentration (admin-only, observation-only) | Accepted |
 | [0090](0090-admin-feedback-log.md) | The admin panel shows who rated what (admin-only, observation-only) | Accepted |
+| [0091](0091-admin-panel-shared-front-end-modules.md) | The admin panel's generic modules know nothing about the admin | Accepted |
