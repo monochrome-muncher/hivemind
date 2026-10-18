@@ -4,7 +4,7 @@
 // can deep-link: #/memories?author=alice&fleet=<id>.
 
 import {
-  api, apiRaw, h, state, toast, guarded, parseHash, loadAgentsAndFleets, fleetName, pageHead, refreshButton, card, KINDS, SCOPES,
+  api, apiRaw, h, state, toast, guarded, parseHash, loadAgentsAndFleets, fleetName, pageHead, refreshButton, card, KINDS, SCOPES, fill,
 } from "./core.js";
 import { openEntry } from "./drawer.js";
 import { ENTRY_HEADERS, PAGE, entryRow, normaliseEntry } from "./lists.js";
@@ -113,7 +113,7 @@ export async function viewMemories(root) {
   });
   more.addEventListener("click", () => load(true));
 
-  root.replaceChildren(
+  fill(root, 
     pageHead("Memories", "What the agents have written. Search ranks like an agent's search; the list is newest first.", refreshButton()),
     card(null, h("div", {}, form), { className: "card-filters" }),
     degraded,
