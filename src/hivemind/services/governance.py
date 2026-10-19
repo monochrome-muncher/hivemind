@@ -8,6 +8,8 @@ define are re-exported here so existing imports keep working.
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from hivemind.config import SearchConfig
 from hivemind.domain.audit import AuditAction
 from hivemind.domain.entry import Entry
@@ -15,6 +17,7 @@ from hivemind.domain.feedback import (
     FeedbackLogFilters,
     FeedbackLogItem,
     FeedbackSummary,
+    FlaggedEntry,
     Verdict,
 )
 from hivemind.domain.pin import Pin, PinnedEntry
@@ -133,6 +136,25 @@ class GovernanceService:
         offset: int = 0,
     ) -> list[FeedbackLogItem]:
         return await self._feedback.feedback_log(credential, filters, limit=limit, offset=offset)
+
+    async def flag_backlog(
+        self,
+        credential: Credential,
+        *,
+        fleet_id: str | None = None,
+        older_than: timedelta | None = None,
+        orphaned: bool = False,
+        limit: int,
+        offset: int = 0,
+    ) -> list[FlaggedEntry]:
+        return await self._feedback.flag_backlog(
+            credential,
+            fleet_id=fleet_id,
+            older_than=older_than,
+            orphaned=orphaned,
+            limit=limit,
+            offset=offset,
+        )
 
     # -- pinned entries (services.pins) ---------------------------------------
 

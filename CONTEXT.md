@@ -243,7 +243,7 @@ What a key is and may do right now: its kind (agent, org, admin), the agent's st
 _Avoid_: permissions, profile, role
 
 **Admin panel**:
-The browser front end for the admin surface, run as its own runner (`hivemind-admin`) that talks only to `hivemind-api`. You log in by presenting an admin key. Its landing view opens with the pending-agent queue. It covers everything the admin surface does except issuing or revoking admin keys, which stays with the `hivemind-keys` CLI, and it lets the admin read the memories, see activity per fleet, agent and owner alias (ADR 0080), see who gave which verdict on which entry in the feedback log (ADR 0090), and see each fleet's pins (ADR 0092).
+The browser front end for the admin surface, run as its own runner (`hivemind-admin`) that talks only to `hivemind-api`. You log in by presenting an admin key. Its landing view opens with the pending-agent queue. It covers everything the admin surface does except issuing or revoking admin keys, which stays with the `hivemind-keys` CLI, and it lets the admin read the memories, see activity per fleet, agent and owner alias (ADR 0080), see who gave which verdict on which entry in the feedback log (ADR 0090), see each fleet's pins (ADR 0092), and work through the flagged entries, oldest flag first (ADR 0093).
 _Avoid_: dashboard, console, admin UI (fine informally; the term is admin panel)
 
 **Per-request credential**:

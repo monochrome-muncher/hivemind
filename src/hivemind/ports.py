@@ -42,7 +42,9 @@ from hivemind.domain.feedback import (
     FeedbackLogFilters,
     FeedbackLogItem,
     FeedbackSignals,
+    FlagBacklogFilters,
     FlagCount,
+    FlaggedEntry,
 )
 from hivemind.domain.health import Convergence, FleetHealth
 from hivemind.domain.pin import Pin, PinWrite
@@ -414,6 +416,25 @@ class Store(Protocol):
         ``visibility`` (``None`` = all, as in ``list_entries``); revoked
         reporters are left out (ADR 0067). A malformed ``entry_id`` or
         ``fleet_id`` matches nothing."""
+        ...
+
+    async def list_flag_backlog(
+        self,
+        filters: FlagBacklogFilters,
+        now: datetime,
+        limit: int,
+        offset: int = 0,
+        *,
+        visibility: Visibility | None = None,
+    ) -> list[FlaggedEntry]:
+        """Active entries with a standing ``stale`` or ``wrong`` verdict
+        (ADR 0093), oldest first flag first, then entry id. Revoked
+        reporters' rows are left out (ADR 0067), so an entry only they
+        flagged is not listed. ``orphaned`` is judged at ``now``: the
+        author is a revoked agent, or wrote nothing in the
+        ``ORPHAN_SILENCE_DAYS`` before it (as ``fleet_health`` counts).
+        Only entries readable under ``visibility`` (``None`` = all); a
+        malformed ``fleet_id`` matches nothing."""
         ...
 
     async def health_check(self) -> bool:

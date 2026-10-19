@@ -65,7 +65,9 @@ from hivemind.domain.feedback import (
     FeedbackLogFilters,
     FeedbackLogItem,
     FeedbackSignals,
+    FlagBacklogFilters,
     FlagCount,
+    FlaggedEntry,
     Verdict,
     last_confirmed,
     truncate_note,
@@ -425,6 +427,40 @@ SELECT f.entry_id, f."user", f.agent, f.verdict, f.note, f.updated_at,
  WHERE {where}
  ORDER BY f.updated_at DESC, f.entry_id, f."user", f.agent
  LIMIT ${limit} OFFSET ${offset}
+"""
+
+# The flag backlog (ADR 0093): active entries with a standing stale/wrong
+# verdict, oldest first flag first. $1 is now; "orphaned" is
+# HEALTH_BY_FLEET's rule (author revoked, or no write in the 720 hours
+# before now). {inner} filters the entry (visibility, fleet), {outer} the
+# listed row (first flag age, orphaned).
+FLAG_BACKLOG = f"""
+WITH flagged AS (
+    SELECT f.entry_id,
+           min(f.updated_at) FILTER (WHERE f.verdict IN ('stale', 'wrong')) AS first_flag,
+           max(f.updated_at) FILTER (WHERE f.verdict IN ('stale', 'wrong')) AS last_flag,
+           {_VERDICT_COUNTS}
+      FROM feedbacks f
+     WHERE {_REPORTER_NOT_REVOKED}
+     GROUP BY f.entry_id
+    HAVING count(*) FILTER (WHERE f.verdict IN ('stale', 'wrong')) > 0
+), backlog AS (
+    SELECT e.id, e.kind, e.summary, e.author, e.scope, e.fleet_id,
+           fl.first_flag, fl.last_flag, fl.helpful, fl.stale, fl.wrong,
+           coalesce(au.status = 'revoked', FALSE)
+             OR coalesce(lw.at < $1::timestamptz - interval '720 hours', FALSE) AS orphaned
+      FROM flagged fl
+      JOIN entries e ON e.id = fl.entry_id
+      LEFT JOIN agents au ON au.name = e.author
+      LEFT JOIN LATERAL (
+          SELECT max(w.created_at) AS at FROM entries w WHERE w.author = e.author
+      ) lw ON TRUE
+     WHERE e.state = 'active' AND {{inner}}
+)
+SELECT * FROM backlog
+ WHERE {{outer}}
+ ORDER BY first_flag, id
+ LIMIT ${{limit}} OFFSET ${{offset}}
 """
 
 BATCH_FEEDBACK = f"""
@@ -1638,6 +1674,61 @@ class PgStore:
                 entry_scope=r["scope"],
                 entry_fleet_id=str(r["fleet_id"]) if r["fleet_id"] is not None else None,
                 entry_state=EntryState(r["state"]),
+            )
+            for r in rows
+        ]
+
+    async def list_flag_backlog(
+        self,
+        filters: FlagBacklogFilters,
+        now: datetime,
+        limit: int,
+        offset: int = 0,
+        *,
+        visibility: Visibility | None = None,
+    ) -> list[FlaggedEntry]:
+        """The flag backlog, oldest first flag first. Every standing flag is
+        grouped before the page is cut: flagged entries are few, and only
+        the admin panel reads this."""
+        params: list[Any] = [now]
+        inner = ["TRUE"]
+        outer = ["TRUE"]
+        if filters.fleet_id is not None:
+            if is_valid_uuid(filters.fleet_id):
+                params.append(filters.fleet_id)
+                inner.append(f"e.fleet_id = ${len(params)}")
+            else:
+                inner.append("FALSE")
+        vis = _visibility_clause(visibility, params, "e.")
+        if vis is not None:
+            inner.append(vis)
+        if filters.flagged_before is not None:
+            params.append(filters.flagged_before)
+            outer.append(f"first_flag < ${len(params)}")
+        if filters.orphaned:
+            outer.append("orphaned")
+        sql = FLAG_BACKLOG.format(
+            inner=" AND ".join(inner),
+            outer=" AND ".join(outer),
+            limit=len(params) + 1,
+            offset=len(params) + 2,
+        )
+        async with self._connection() as conn:
+            rows = await conn.fetch(sql, *params, limit, offset)
+        return [
+            FlaggedEntry(
+                entry_id=str(r["id"]),
+                kind=Kind(r["kind"]),
+                summary=r["summary"],
+                author=r["author"],
+                scope=r["scope"],
+                fleet_id=str(r["fleet_id"]) if r["fleet_id"] is not None else None,
+                first_flag_at=r["first_flag"],
+                last_flag_at=r["last_flag"],
+                helpful=int(r["helpful"]),
+                stale=int(r["stale"]),
+                wrong=int(r["wrong"]),
+                orphaned=bool(r["orphaned"]),
             )
             for r in rows
         ]

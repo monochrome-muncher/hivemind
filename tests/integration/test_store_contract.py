@@ -47,6 +47,7 @@ from hivemind.domain.feedback import (
     Feedback,
     FeedbackLogFilters,
     FeedbackSignals,
+    FlagBacklogFilters,
     Verdict,
     is_contested,
 )
@@ -798,6 +799,105 @@ async def test_feedback_log_lists_rows_across_entries_with_their_entry(adapter: 
     assert (row.entry_kind, row.entry_author, row.entry_scope) == (Kind.FACT, "bob", "fleet")
     assert (row.entry_fleet_id, row.entry_state) == (blue.id, EntryState.ACTIVE)
     assert row.feedback.entry_id == in_blue.id
+
+
+async def test_flag_backlog_lists_flagged_active_entries_oldest_flag_first(
+    adapter: Adapter,
+) -> None:
+    """ADR 0093. Times are relative to the first write, as in the fleet
+    health test, so the 14-day and 30-day edges are exact."""
+    store = adapter.store
+    blue = await store.create_fleet("blue")
+    red = await store.create_fleet("red")
+    for name in ("Gone", "Ghost"):
+        await store.register_agent(name)
+        await store.activate_agent(name, trust_level=TrustLevel.LURKER, home_fleet_id=red.id)
+    old = await write(adapter, "old flag", author="bob", scope="fleet", fleet_id=blue.id)
+    recent = await write(adapter, "recent flag", author="carol")
+    gone = await write(adapter, "gone author", author="Gone", scope="fleet", fleet_id=red.id)
+    ghosted = await write(adapter, "only a revoked reporter", author="bob")
+    liked = await write(adapter, "only helpful", author="bob")
+    replaced = await write(adapter, "superseded", author="bob")
+    pulled = await write(adapter, "withdrawn", author="bob")
+    await write(adapter, "successor", author="bob", supersedes=(replaced.id,))
+    await store.withdraw_entry(pulled.id, None, by_user="bob")
+    now = old.created_at + timedelta(hours=1)
+    day = timedelta(days=1)
+    W, S, H = Verdict.WRONG, Verdict.STALE, Verdict.HELPFUL
+    for entry, user, verdict, at in (
+        (old, "Scout", W, now - 20 * day),
+        (old, "Rival", H, now - day),
+        (old, "Ghost", S, now - 30 * day),  # revoked below: neither counted nor dated
+        (recent, "Scout", S, now - 3 * day),
+        (recent, "Rival", W, now - day),
+        (gone, "Scout", S, now - 5 * day),
+        (ghosted, "Ghost", W, now - 2 * day),
+        (liked, "Scout", H, now - 2 * day),
+        (replaced, "Scout", W, now - 2 * day),
+        (pulled, "Scout", W, now - 2 * day),
+    ):
+        await store.record_feedback(Feedback(entry.id, user, user, verdict, None, at))
+    await store.revoke_agent("Ghost")
+    await store.revoke_agent("Gone")
+
+    async def backlog(at: datetime = now, **kw: object) -> list[str]:
+        vis = kw.pop("visibility", None)
+        limit = kw.pop("limit", 10)
+        offset = kw.pop("offset", 0)
+        rows = await store.list_flag_backlog(
+            FlagBacklogFilters(**kw),  # type: ignore[arg-type]
+            at,
+            limit,  # type: ignore[arg-type]
+            offset,  # type: ignore[arg-type]
+            visibility=vis,  # type: ignore[arg-type]
+        )
+        return [r.summary for r in rows]
+
+    everything = ["old flag", "gone author", "recent flag"]
+    assert await backlog() == everything
+    assert await backlog(limit=1, offset=1) == ["gone author"]
+    assert await backlog(flagged_before=now - 14 * day) == ["old flag"]
+    assert await backlog(flagged_before=now - 5 * day) == ["old flag"]  # strictly older
+    assert await backlog(orphaned=True) == ["gone author"]  # its author is revoked
+    assert await backlog(fleet_id=blue.id) == ["old flag"]
+    assert await backlog(fleet_id=blue.id.upper()) == ["old flag"]
+    assert await backlog(fleet_id="not-a-uuid") == []
+    assert await backlog(fleet_id="{" + blue.id + "}") == []
+    # A red-fleet agent reads org entries and its home fleet's, not blue's.
+    assert await backlog(visibility=_vis(TrustLevel.LURKER, "dora", red.id)) == [
+        "gone author",
+        "recent flag",
+    ]
+    # Every filter at once: the fleet, a member's visibility and the age.
+    member = _vis(TrustLevel.LURKER, "dora", red.id)
+    assert await backlog(fleet_id=red.id, visibility=member, flagged_before=now - 4 * day) == [
+        "gone author"
+    ]
+    # A month on, nobody has written for 30 days: every author is gone.
+    assert await backlog(now + 30 * day, orphaned=True) == everything
+    # The list holds what the two Health counts count (ADR 0075), at any time.
+    for at in (now, now + 30 * day):
+        health = await store.fleet_health(at)
+        assert len(await backlog(at, flagged_before=at - 14 * day)) == sum(
+            r.flagged_backlog_14d for r in health.by_fleet
+        )
+        assert len(await backlog(at, orphaned=True)) == sum(
+            r.orphaned_flagged for r in health.by_fleet
+        )
+    rows = await store.list_flag_backlog(FlagBacklogFilters(), now, 10)
+    first, _, last = rows
+    assert (first.entry_id, first.kind, first.author, first.scope) == (
+        old.id,
+        Kind.FACT,
+        "bob",
+        "fleet",
+    )
+    assert first.fleet_id == blue.id
+    assert (first.first_flag_at, first.last_flag_at) == (now - 20 * day, now - 20 * day)
+    assert (first.helpful, first.stale, first.wrong, first.orphaned) == (1, 0, 1, False)
+    assert (last.first_flag_at, last.last_flag_at) == (now - 3 * day, now - day)
+    assert (last.helpful, last.stale, last.wrong, last.fleet_id) == (0, 1, 1, None)
+    assert rows[1].orphaned is True
 
 
 async def test_feedback_lists_informative_reports_before_bare_helpful_ones(

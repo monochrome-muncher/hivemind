@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from datetime import timedelta
 
 from hivemind.config import SearchConfig
 from hivemind.domain.feedback import (
@@ -15,6 +16,8 @@ from hivemind.domain.feedback import (
     FeedbackLogFilters,
     FeedbackLogItem,
     FeedbackSummary,
+    FlagBacklogFilters,
+    FlaggedEntry,
     Verdict,
 )
 from hivemind.domain.validation import (
@@ -23,6 +26,7 @@ from hivemind.domain.validation import (
     MAX_NOTE_CHARS,
     InvalidInput,
     check_text,
+    utcnow,
 )
 from hivemind.ports import Credential, Store
 from hivemind.retrieval.scoring import feedback_quality
@@ -238,6 +242,31 @@ class FeedbackService:
         credential = credential.effective(self._require_stored_keys)
         return await self._store.list_feedback_log(
             filters, limit, offset, visibility=credential.visibility()
+        )
+
+    async def flag_backlog(
+        self,
+        credential: Credential,
+        *,
+        fleet_id: str | None = None,
+        older_than: timedelta | None = None,
+        orphaned: bool = False,
+        limit: int,
+        offset: int = 0,
+    ) -> list[FlaggedEntry]:
+        """Active entries with a standing ``stale`` or ``wrong`` verdict,
+        oldest first flag first (ADR 0093), each with whether its author
+        is still around; only entries the caller can read. ``older_than``
+        keeps entries first flagged more than that long ago."""
+        credential = credential.effective(self._require_stored_keys)
+        now = utcnow()
+        filters = FlagBacklogFilters(
+            fleet_id=fleet_id,
+            flagged_before=now - older_than if older_than else None,
+            orphaned=orphaned,
+        )
+        return await self._store.list_flag_backlog(
+            filters, now, limit, offset, visibility=credential.visibility()
         )
 
     async def quality(self, entry_id: str) -> float:

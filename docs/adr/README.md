@@ -102,3 +102,4 @@ is unused.
 | [0090](0090-admin-feedback-log.md) | The admin panel shows who rated what (admin-only, observation-only) | Accepted |
 | [0091](0091-admin-panel-shared-front-end-modules.md) | The admin panel's generic modules know nothing about the admin | Accepted |
 | [0092](0092-admin-fleet-pins.md) | The admin panel shows each fleet's pins (admin-only, read-only) | Accepted |
+| [0093](0093-admin-flag-backlog.md) | The admin panel lists the flag backlog, oldest flag first (admin-only, observation-only) | Accepted |

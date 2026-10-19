@@ -58,13 +58,16 @@ from hivemind.domain.entry import (
     new_entry_id,
 )
 from hivemind.domain.feedback import (
+    ORPHAN_SILENCE_DAYS,
     Correction,
     Feedback,
     FeedbackCounts,
     FeedbackLogFilters,
     FeedbackLogItem,
     FeedbackSignals,
+    FlagBacklogFilters,
     FlagCount,
+    FlaggedEntry,
     Verdict,
     last_confirmed,
     truncate_note,
@@ -503,7 +506,7 @@ class MemoryStore:
                 if flag_at is not None:
                     c["backlog"] += flag_at < now - timedelta(days=14)
                     c["orphaned"] += e.author in revoked or last_write[e.author] < now - timedelta(
-                        days=30
+                        days=ORPHAN_SILENCE_DAYS
                     )
                 c["floating"] += e.occurred_at < now - _DAYS_90 and e.id not in fresh
                 c["anomaly"] += "anomaly" in e.tags
@@ -898,6 +901,69 @@ class MemoryStore:
             )
             for fb, entry in pairs[offset : offset + limit]
         ]
+
+    async def list_flag_backlog(
+        self,
+        filters: FlagBacklogFilters,
+        now: datetime,
+        limit: int,
+        offset: int = 0,
+        *,
+        visibility: Visibility | None = None,
+    ) -> list[FlaggedEntry]:
+        fleet_id = filters.fleet_id
+        if fleet_id is not None:
+            if not is_valid_uuid(fleet_id):  # braced or URN spellings too, as on Postgres
+                return []
+            fleet_id = canonical_uuid(fleet_id)
+        with self._lock:
+            revoked = {n for n, a in self._agents.items() if a.status is AgentStatus.REVOKED}
+            by_entry: dict[str, list[Feedback]] = {}
+            for fb in self._live_feedback().values():
+                by_entry.setdefault(fb.entry_id, []).append(fb)
+            last_write: dict[str, datetime] = {}
+            for e in self._entries.values():
+                if e.author not in last_write or e.created_at > last_write[e.author]:
+                    last_write[e.author] = e.created_at
+            silent_since = now - timedelta(days=ORPHAN_SILENCE_DAYS)
+            items: list[FlaggedEntry] = []
+            for entry_id, rows in by_entry.items():
+                entry = self._entries.get(entry_id)
+                flags = [fb.updated_at or now for fb in rows if fb.verdict is not Verdict.HELPFUL]
+                if (
+                    entry is None
+                    or not flags
+                    or entry.state is not EntryState.ACTIVE
+                    or (fleet_id is not None and entry.fleet_id != fleet_id)
+                    or not self._visible(entry, visibility)
+                ):
+                    continue
+                verdicts = Counter(fb.verdict for fb in rows)
+                orphaned = entry.author in revoked or last_write[entry.author] < silent_since
+                first = min(flags)
+                if (filters.flagged_before is not None and first >= filters.flagged_before) or (
+                    filters.orphaned and not orphaned
+                ):
+                    continue
+                items.append(
+                    FlaggedEntry(
+                        entry_id=entry.id,
+                        kind=entry.kind,
+                        summary=entry.summary,
+                        author=entry.author,
+                        scope=entry.scope,
+                        fleet_id=entry.fleet_id,
+                        first_flag_at=first,
+                        last_flag_at=max(flags),
+                        helpful=verdicts[Verdict.HELPFUL],
+                        stale=verdicts[Verdict.STALE],
+                        wrong=verdicts[Verdict.WRONG],
+                        orphaned=orphaned,
+                    )
+                )
+        # Oldest first flag first, then entry id, as on Postgres.
+        items.sort(key=lambda i: (i.first_flag_at, i.entry_id))
+        return items[offset : offset + limit]
 
     async def health_check(self) -> bool:
         """In-memory pool: always healthy (ADR 0019)."""
