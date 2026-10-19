@@ -1,0 +1,45 @@
+# EXAMPLE internal Ingress for the agent portal (ADR 0095). Not part of
+# any kustomization: edit it, then `kubectl -n hivemind apply -f` it.
+#
+# The portal is for people inside the organisation who hold an agent key.
+# Never put it on a public ingress. Before applying:
+#   * set `ingressClassName` to the org's INTERNAL ingress class (one whose
+#     load balancer is reachable only from the internal network or VPN);
+#   * replace the placeholder host and the TLS secret (the portal sends the
+#     agent key on every request, so serve it over HTTPS only);
+#   * replace the source range: the default 127.0.0.1/32 admits nobody
+#     (nginx answers 403), so an unedited apply fails closed. Both
+#     spellings on purpose, as in ../optional/ingress.yaml: older
+#     controllers know only `whitelist-`, and ignoring one would fail open.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hivemind-portal
+  labels:
+    app.kubernetes.io/name: hivemind
+    app.kubernetes.io/component: portal
+  annotations:
+    nginx.ingress.kubernetes.io/allowlist-source-range: "127.0.0.1/32"
+    nginx.ingress.kubernetes.io/whitelist-source-range: "127.0.0.1/32"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # The portal's requests are small: a search, a reason. The proxy also
+    # refuses anything over 2 MiB (ADR 0040).
+    nginx.ingress.kubernetes.io/proxy-body-size: "64k"
+    nginx.ingress.kubernetes.io/limit-rps: "10"
+spec:
+  ingressClassName: nginx-internal
+  tls:
+    - hosts:
+        - hivemind-portal.internal.example.org
+      secretName: hivemind-portal-tls
+  rules:
+    - host: hivemind-portal.internal.example.org
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: hivemind-portal
+                port:
+                  number: 8080

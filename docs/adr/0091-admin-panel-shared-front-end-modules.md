@@ -2,7 +2,7 @@
 
 Amends [ADR 0029](0029-admin-panel-runner-with-a-browser-held-key.md) (how the panel's static UI is organised). No behaviour change for the admin.
 
-Status: Accepted. [ADR 0094](0094-admin-csv-export.md) adds a sixth shared module, `csv.js`.
+Status: Accepted. [ADR 0094](0094-admin-csv-export.md) adds a sixth shared module, `csv.js`. [ADR 0095](0095-agent-portal.md) is the second app: the agent portal serves these modules as they are.
 
 ## Context
 

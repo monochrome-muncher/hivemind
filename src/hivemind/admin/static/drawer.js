@@ -18,10 +18,11 @@ const config = {
   fetchEntry: async () => { throw new Error("The memory drawer is not configured."); },
   withdrawEntry: null, // (id, reason) => truthy when done
   canWithdraw: () => true, // (entry) => whether to offer Withdraw
+  reasonRequired: false, // whether a withdrawal needs a reason
   fleetName: (id) => id,
   authorHref: () => null,
   fleetHref: () => null,
-  feedbackHref: () => null, // (entryId) => link to every verdict on the entry
+  feedbackHref: () => null, // (entryId, entry) => link to every verdict on the entry
 };
 
 /** Set how the drawer reads, withdraws and links (see the module comment). */
@@ -166,8 +167,8 @@ function render(e) {
             h("span", { class: "muted small", text: ` ${r.reporter} · ${fmtAgo(r.updated_at)}` })),
           r.note ? h("div", { class: "plain", text: r.note }) : null)))
         : h("p", { class: "muted small", text: "No verdicts yet." }),
-      fb.helpful + fb.stale + fb.wrong > (fb.recent || []).length && config.feedbackHref(e.id)
-        ? h("p", { class: "small" }, link(`All ${fb.helpful + fb.stale + fb.wrong} verdicts`, config.feedbackHref(e.id)))
+      fb.helpful + fb.stale + fb.wrong > (fb.recent || []).length && config.feedbackHref(e.id, e)
+        ? h("p", { class: "small" }, link(`All ${fb.helpful + fb.stale + fb.wrong} verdicts`, config.feedbackHref(e.id, e)))
         : null),
 
     related("See also", e.see_also, "No links from this entry."),
@@ -182,7 +183,11 @@ function render(e) {
 }
 
 function withdrawDialog(e) {
-  const reason = h("textarea", { id: "f-reason", rows: "3", maxlength: "500", placeholder: "Why is this being withdrawn? (optional)" });
+  const required = config.reasonRequired;
+  const reason = h("textarea", {
+    id: "f-reason", rows: "3", maxlength: "500", required,
+    placeholder: required ? "Why is this being withdrawn?" : "Why is this being withdrawn? (optional)",
+  });
   openModal({
     title: "Withdraw this memory?",
     body: [
@@ -198,6 +203,7 @@ function withdrawDialog(e) {
         submit: true,
         onClick: async () => {
           const text = reason.value.trim();
+          if (required && !text) throw new Error("Say why it is being withdrawn: the reason is kept with the memory.");
           const done = await config.withdrawEntry(e.id, text);
           if (!done) return;
           closeModal();

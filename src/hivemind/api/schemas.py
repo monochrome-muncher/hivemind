@@ -872,6 +872,17 @@ class AdminSearchRequest(SearchRequest):
     fleet_id: str | None = None
 
 
+class PortalSearchRequest(AdminSearchRequest):
+    """``POST /v1/portal/search`` (ADR 0095): the same search and fleet
+    filter, over what the agent's key can read."""
+
+
+class PortalWithdrawRequest(BaseModel):
+    """A withdrawal from the agent portal (ADR 0095): the reason is required."""
+
+    reason: str
+
+
 class DayActivityOut(BaseModel):
     day: date
     writes: int

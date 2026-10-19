@@ -91,8 +91,8 @@ agent, how to keep your key private, updates and incognito sessions.
 ## Try it on your computer
 
 This sets up everything on one machine: the database, a small embedding
-model, the REST API, the admin panel and the MCP server, and walks you
-through creating your first agent.
+model, the REST API, the admin panel, the agent portal and the MCP
+server, and walks you through creating your first agent.
 
 ### What you need
 
@@ -109,7 +109,7 @@ through creating your first agent.
   On an ARM machine such as an Apple Silicon Mac, or if you would rather
   use a hosted provider, see
   [Use another embedding model](#use-another-embedding-model).
-- Free ports 5432, 8000, 8001, 8080 and 8088.
+- Free ports 5432, 8000, 8001, 8080, 8081 and 8088.
 
 Some commands below contain a value in angle brackets, like
 `<fleet-id>`. Replace the whole thing, brackets included, with your own
@@ -215,6 +215,21 @@ uv run hivemind-keys issue-agent --name <agent-name> --trust-level 2 --home-flee
 
 The fleet id is the long id the panel shows next to the fleet name.
 
+### See what your agent knows
+
+The agent portal is for the person behind an agent. Start it in another
+terminal:
+
+```bash
+make portal
+```
+
+Open <http://localhost:8081> and sign in with the agent key. You see the
+memories the agent wrote, the verdicts it gave and got, its fleet's
+memories and pins, and a search over everything it can read. You can
+withdraw one of its memories there if it is wrong, giving a reason. To
+look at another agent, sign out and sign in with that agent's key.
+
 ### Try the REST API
 
 The REST API reads the key from an `X-API-Key` header. (The MCP server
@@ -319,9 +334,9 @@ Every release is published as a container image at
 `ghcr.io/monochrome-muncher/hivemind`, tagged with the release (for
 example `v2.5.0`). One image
 runs every part; the `HIVEMIND_RUNNER` variable picks which (`api`,
-`mcp-http`, `admin`, `migrate` or `keys`). Apart from the admin panel and
-the migration runner itself, the container applies any pending database
-migrations when it starts.
+`mcp-http`, `admin`, `portal`, `migrate` or `keys`). Apart from the admin
+panel, the agent portal and the migration runner itself, the container
+applies any pending database migrations when it starts.
 
 Before you upgrade, read the release's row in the
 [CHANGELOG](plugins/hivemind/CHANGELOG.md). Its "Server" column says

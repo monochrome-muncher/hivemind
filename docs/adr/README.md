@@ -39,7 +39,7 @@ is unused.
 | [0026](0026-two-app-tier-replicas-for-availability.md) | Two app-tier replicas per runner, for availability — not throughput | Accepted |
 | [0027](0027-audit-log-of-admin-actions.md) | An append-only audit log of admin actions, with two actor kinds | Amended by 0028, 0046, 0076 |
 | [0028](0028-revoked-agent-status-and-an-activation-guard.md) | A `revoked` agent status, and activation only from `pending` or `revoked` | Refined by 0039 |
-| [0029](0029-admin-panel-runner-with-a-browser-held-key.md) | The admin panel: a static UI and an allowlisted proxy, with the key held in the browser | Amended by 0080, 0091 |
+| [0029](0029-admin-panel-runner-with-a-browser-held-key.md) | The admin panel: a static UI and an allowlisted proxy, with the key held in the browser | Amended by 0080, 0091; the agent portal (0095) is built the same way |
 | [0030](0030-hive-whoami-lets-an-agent-see-its-own-standing.md) | `hive_whoami`: an agent can read its own standing | Accepted |
 | [0031](0031-one-key-per-request-and-what-org-key-rotation-stops.md) | One key per request; rotating the org key closes registration, nothing more | Refined by 0039 |
 | [0032](0032-unknown-hivemind-env-vars-warn-by-default.md) | Unknown `HIVEMIND_*` variables warn by default; failing is opt-in | Accepted |
@@ -104,3 +104,4 @@ is unused.
 | [0092](0092-admin-fleet-pins.md) | The admin panel shows each fleet's pins (admin-only, read-only) | Accepted |
 | [0093](0093-admin-flag-backlog.md) | The admin panel lists the flag backlog, oldest flag first (admin-only, observation-only) | Accepted |
 | [0094](0094-admin-csv-export.md) | The admin panel exports its lists as CSV (front end only) | Accepted |
+| [0095](0095-agent-portal.md) | The agent portal: a browser front end for agent-key holders | Accepted |

@@ -155,6 +155,10 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | `GET /v1/admin/feedback` | Feedback rows across entries, newest first, each with the entry it rates; filters `reporter`, `verdict`, `author`, `fleet_id`, `entry_id`, `limit`, `offset`; revoked reporters left out; observation only (admin key; ADR 0090) |
 | `GET /v1/admin/fleets/{fleet_id}/pins` | One fleet's pins as `GET /v1/pins` shows them, with what changed since each was pinned; unknown fleet → 404; read-only (admin key; ADR 0092) |
 | `GET /v1/admin/flagged` | Active entries with a standing `stale` or `wrong` verdict, oldest flag first, each with its flag dates, verdict counts and whether its author is gone (revoked or silent 30 days); filters `fleet_id`, `older_than_days`, `orphaned`, `limit`, `offset`; revoked reporters left out; observation only (admin key; ADR 0093) |
+| `GET /v1/portal/entries` | List what the agent's key can read, newest first, with the `GET /v1/entries` filters `kind`, `tags`, `scope`, `author`, `include_inactive`, `flagged` plus `fleet_id` (agent key only: 403 for the admin and org keys; ADR 0095) |
+| `POST /v1/portal/search` | `POST /v1/search` plus `fleet_id`, over what the agent's key can read; not counted in the search counters (agent key only; ADR 0095) |
+| `GET /v1/portal/feedback` | The agent's verdicts (`direction=given`) or the verdicts on its own entries (`direction=received`), newest first, on entries its key can read; filters `verdict`, `entry_id`, `limit`, `offset` (agent key only; ADR 0095) |
+| `POST /v1/portal/entries/{id}/withdraw` | Withdraw the caller's own entry with a required `reason`; audited as `entry.withdraw` with `via: "portal"` (agent key only; ADR 0095) |
 
 **Request limits (ADR 0040).** A REST request body is capped at 2 MiB (`413 payload_too_large`, enforced by `Content-Length` and by counting streamed bytes, before the body is parsed). A `/v1` request with **no** `X-API-Key` header is refused `401` before its body is read; a present-but-unknown key is verified after the (bounded) body is parsed, so a malformed body with a bad key can still answer 422. A deployment's ingress should enforce its own, lower limit as well.
 
@@ -325,7 +329,7 @@ The schema is an **ordered chain of versioned migrations** under `src/hivemind/s
 
 ## 9. Non-goals (v1) — the explicit list
 
-- No human-facing UI (agent-only; the admin panel, ADR 0029, is the one exception — a browser front end over the admin REST surface, which since ADR 0080 includes a memory browser for the admin (read, search, withdraw, CSV export, ADR 0094); a memory UI for anyone else is still a non-goal)
+- No human-facing UI (agent-only) beyond two exceptions: the admin panel (ADR 0029), a browser front end over the admin REST surface, which since ADR 0080 includes a memory browser for the admin (read, search, withdraw, CSV export, ADR 0094); and the agent portal (ADR 0095), where a person signs in with one agent's key to see what that agent can read, wrote and rated, and withdraw its own entries. A memory UI for anyone else is still a non-goal
 - No passive capture of transcripts/tool events (explicit writes only, ADR 0004)
 - No knowledge graph, no auto-contradiction detection (the **facet slice** of entity extraction became a commitment in §13 — ADR 0016; *graph-expanded* retrieval stays a non-goal)
 - No curation/verification workflow, no PII pipeline (trust levels are §12, not a non-goal — ADR 0011)
@@ -345,7 +349,7 @@ The schema is an **ordered chain of versioned migrations** under `src/hivemind/s
 | **Knowledge graph** — graph-expanded retrieval over a canonical entity registry | Cross-entry entity linking pays off in retrieval quality. *Partially pre-staged: the entity-extraction **facet** slice is shipped by ADR 0016 / SPEC §13 (a pre-staged §10 extension on scale ambition — the trigger has *not* fired); the graph half of this row (entity registry + multi-hop expansion) remains trigger-held* |
 | **LLM-assisted contradiction detection** — at write time, surface entries above a similarity floor that the new entry may conflict with, as a *claim for the writer to judge* (never an automatic resolution — ADR 0001: a supersession is a claim, not an arbitration) | Explicit supersession can't keep up with contradictory writes. **Measurable trigger:** the first observed incident of a contradicting entry landing without a supersession, **or** pool size > 10k entries — whichever comes first. Until then the similarity floor cannot be tuned (there is no corpus to tune it against), and an untuned floor is the failure mode to avoid. *(Not to be confused with ADR 0052: every write already reports its 3 nearest entries with their similarity, with no floor and no verdict.)* |
 | **Curation workflow** — verify/promote/retire roles | An org wants a "librarian" function |
-| **Human read-only UI** — browse/search the pool in a browser | Analysts want to see the pool without an agent. *Partially satisfied: the admin panel lets the admin browse and search the pool (ADR 0080); a UI for anyone else remains the extension* |
+| **Human read-only UI** — browse/search the pool in a browser | Analysts want to see the pool without an agent. *Partially satisfied: the admin panel lets the admin browse and search the pool (ADR 0080), and the agent portal lets a person see what one agent's key can read (ADR 0095); a UI without an agent key remains the extension* |
 | **Multi-tenant SaaS / OAuth** | More than one org wants it; an org has an IdP |
 | **Learned per-agent retrieval tuning** | Static decay factors stop beating per-agent profiles |
 
@@ -420,7 +424,7 @@ The single admin key gates this surface; admin-issued entries use the reserved n
 
 ### 12.5 Audit log
 
-Every admin-surface action, and every agent pin or unpin (ADR 0076), is recorded in an append-only **audit log** (ADR 0027) — distinct from an entry's provenance and its supersession chain.
+Every admin-surface action, every agent pin or unpin (ADR 0076) and every withdrawal through the agent portal (ADR 0095) is recorded in an append-only **audit log** (ADR 0027) — distinct from an entry's provenance and its supersession chain.
 
 **What is recorded.** One row per successful action, with `occurred_at`, `actor_kind`, `actor`, `action`, `target` and a `detail` object:
 
@@ -433,16 +437,16 @@ Every admin-surface action, and every agent pin or unpin (ADR 0076), is recorded
 | `agent.revoke` | `POST /v1/admin/agents/{name}/revoke`, `hivemind-keys revoke` | agent name | `{"from": "pending"\|"active"}` (ADR 0028; a revoke from `pending` is a rejected registration) |
 | `fleet.create` | `POST /v1/admin/fleets` | fleet id | `{name}` |
 | `org_key.rotate` | `POST /v1/admin/org-key/rotate`, `hivemind-keys rotate-org` | — | `{}` |
-| `entry.withdraw` | `POST /v1/entries/{id}/withdraw` or `POST /v1/admin/entries/{id}/withdraw`, **only** when the admin key withdraws another agent's entry (§4.1) | entry id | `{author, reason}` |
+| `entry.withdraw` | `POST /v1/entries/{id}/withdraw` or `POST /v1/admin/entries/{id}/withdraw`, **only** when the admin key withdraws another agent's entry (§4.1); and every withdrawal through the agent portal, `POST /v1/portal/entries/{id}/withdraw` (ADR 0095) | entry id | `{author, reason}`, plus `"via": "portal"` from the portal |
 | `admin_key.issue` | `hivemind-keys issue-admin` | key fingerprint | `{}` |
 | `admin_key.revoke` | `hivemind-keys revoke-admin` (a successful revocation only) | key fingerprint | `{}` |
 | `entry.pin` | `PUT /v1/entries/{id}/pin`, `hive_pin` — every stored pin, a re-pin included (ADR 0076) | entry id | `{fleet_id}`, plus `from` (the replaced pin id, or a list) when a re-pin moved older pins |
 | `entry.unpin` | `DELETE /v1/entries/{id}/pin`, `hive_pin` with `unpin` — a pin actually removed (ADR 0076) | entry id | `{fleet_id, pin_ids}` (the removed pins) |
 | `agent_key.issue` | `hivemind-keys issue-agent` | agent name | `{}`, or `{"from", "trust_level", "home_fleet_id"}` when it activated a pending/revoked agent (ADR 0039) |
 
-**Actors.** `actor_kind` is `admin_key` for the REST admin surface — `actor` is `admin:<fingerprint>` of the verified admin key — `agent_key` for a privileged agent's pin or unpin — `actor` is the verified agent name (ADR 0076) — `org_key` for a registration made with the org key — `actor` is `org:<fingerprint>`, which identifies the key, not who used it (ADR 0046) — or `cli` for `hivemind-keys`, whose `actor` is the operator-supplied `--actor` (default: the OS user) and is **unverified**. A key **fingerprint** is the first 12 hex characters of the key's stored SHA-256 hash (what `hivemind-keys list` shows).
+**Actors.** `actor_kind` is `admin_key` for the REST admin surface — `actor` is `admin:<fingerprint>` of the verified admin key — `agent_key` for a privileged agent's pin or unpin (ADR 0076) or a withdrawal through the agent portal (ADR 0095) — `actor` is the verified agent name — `org_key` for a registration made with the org key — `actor` is `org:<fingerprint>`, which identifies the key, not who used it (ADR 0046) — or `cli` for `hivemind-keys`, whose `actor` is the operator-supplied `--actor` (default: the OS user) and is **unverified**. A key **fingerprint** is the first 12 hex characters of the key's stored SHA-256 hash (what `hivemind-keys list` shows).
 
-**Never recorded.** No raw API key appears in any column. Read-only calls, re-registrations (`already_registered`) and refused registrations are not audited; nor is an author withdrawing their own entry.
+**Never recorded.** No raw API key appears in any column. Read-only calls, re-registrations (`already_registered`) and refused registrations are not audited; nor is an author withdrawing their own entry through `POST /v1/entries/{id}/withdraw` or `hive_withdraw` (the agent portal's withdrawal is audited, ADR 0095).
 
 **Guarantees.** The CLI writes each row in the same transaction as its change. The REST surface writes the row **after** the change succeeds and not atomically with it: if the audit write fails the request fails (the change stands, unaudited), and a process crash between the two leaves the change unaudited.
 

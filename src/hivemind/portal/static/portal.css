@@ -1,0 +1,6 @@
+/* Hivemind agent portal (ADR 0095): what it adds to the shared admin.css. */
+.who { display: grid; gap: 2px; padding: 0 8px; }
+.who-name { font-weight: 600; overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .who { padding: 0; }
+}

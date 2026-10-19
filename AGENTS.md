@@ -20,8 +20,8 @@ The dev environment is `uv`-managed (Python 3.14); Postgres (with pgvector) runs
 |---|---|
 | Install deps (creates `.venv`) | `make install` (or `uv sync`) |
 | Start Postgres (pgvector, `localhost:5432`, db `hivemind`) | `make pg` |
-| Start the full local stack in docker (API :8000, admin :8089, MCP :8088) | `make up` (or `docker compose up -d`) |
-| Start the standalone stack (API :8100, admin :8189, MCP :8188, pg :5433 db `hivemind_live`) — survives `make test` | `make standalone` / `make standalone-down` / `make standalone-reset` |
+| Start the full local stack in docker (API :8000, admin :8089, portal :8090, MCP :8088) | `make up` (or `docker compose up -d`) |
+| Start the standalone stack (API :8100, admin :8189, portal :8190, MCP :8188, pg :5433 db `hivemind_live`) — survives `make test` | `make standalone` / `make standalone-down` / `make standalone-reset` |
 | Issue an admin key for the standalone pool (keys are per-pool) | `HIVEMIND_DATABASE_URL=postgresql://hivemind:hivemind@localhost:5433/hivemind_live uv run hivemind-keys issue-admin` |
 | Apply DB migrations (ordered chain, advisory-locked; ADR 0020) | `make migrate` (or `uv run hivemind-migrate`) |
 | Roll back the last migration (refuses `0001`; ADR 0020) | `make rollback` (or `make rollback N=2`) |
@@ -32,6 +32,7 @@ The dev environment is `uv`-managed (Python 3.14); Postgres (with pgvector) runs
 | Type-check (strict) + lint + format check | `make check` (mypy + ruff) |
 | Auto-format + auto-fix | `make format` |
 | Run the admin panel on :8080 against the local REST API (start `make api` first; ADR 0029) | `make admin` |
+| Run the agent portal on :8081 against the local REST API (start `make api` first; ADR 0095) | `make portal` |
 | Run the REST API | `make api` (or `uv run hivemind-api`) |
 | Run the MCP server (stdio) | `make mcp` (or `uv run hivemind-mcp`) |
 | Run the Postgres-backed MCP runner (per-agent, stdio; ADR 0009) | `make mcp-pg` (or `uv run hivemind-mcp-pg`) |
@@ -55,6 +56,7 @@ Environment: the service reads `HIVEMIND_*` env vars (see `src/hivemind/config.p
 - `src/hivemind/api/`: the FastAPI surface (SPEC §5.1): schemas, deps (auth), guards (body cap, 401-before-parse), routes, main, prometheus.
 - `src/hivemind/mcp/`: the MCP server (ten tools, SPEC §5.2): `app.py` (the tool functions and `McpHivemind`), `contract.py` (the agent contract text: server `instructions` + tool descriptions, ADR 0085), `server.py` (the server assembly: compact schemas and `build_server` with its `register_tool` helper, ADR 0085), `runners.py` (the stdio runners `hivemind-mcp` and `hivemind-mcp-pg`, ADR 0085), `http.py` (the hostable `hivemind-mcp-http`, ADR 0010), local hash embedder.
 - `src/hivemind/admin/`: the admin panel (`hivemind-admin`, ADR 0029): a static UI (including a memory browser, ADR 0080; `ui.js`, `client.js`, `lists.js`, `csv.js`, `drawer.js` and `charts.js` import nothing admin-specific so another front end can reuse them, ADR 0091) and an allowlisted same-origin proxy to the REST API.
+- `src/hivemind/portal/`: the agent portal (`hivemind-portal`, ADR 0095): its own static UI (`portal.js`, `session.js`, `views.js`), the admin panel's shared modules served by exact name, and its own allowlist. `src/hivemind/webapp.py` is the proxy app both front ends are built on (static files, allowlisted proxy, security headers).
 - `plugins/hivemind/`: the agent plugin for Claude Code, Codex, DeepSeek Harness, Gemini CLI, GitHub Copilot CLI, Hermes, Pi, Oh My Pi, OpenCode, Cline and KiloCode. Its [README](plugins/hivemind/README.md) is for users; [DEVELOPING.md](plugins/hivemind/DEVELOPING.md) describes every part, the per-harness wiring and incognito. The repository-root `package.json` (same name as `plugins/hivemind/package.json`) exists so DeepSeek Harness, Pi and OpenCode can install it from the Git URL; the root `gemini-extension.json`, `skills` link and `hooks/hooks.json` do the same for Gemini CLI, and the root `.claude-plugin/marketplace.json` (also read by `copilot plugin marketplace add`) serves GitHub Copilot CLI.
 - `tests/unit/`: hermetic unit tests (fakes in `tests/fakes.py`; no Postgres, no network). `tests/integration/`: Postgres-backed tests that skip when the database is down. `tests/eval/`: the retrieval eval (see Invariants).
 - Deployment: `Dockerfile` + `entrypoint.sh` (one image, runner chosen by `HIVEMIND_RUNNER`; the entrypoint runs migrations, ADR 0018), `deploy/kubernetes/` (kustomize; two replicas + a PDB per app-tier runner, ADR 0026), `.gitlab-ci.yml`, `config/` (environment profiles, ADR 0017). [DEPLOY.md](DEPLOY.md) and [docs/ops-runbook.md](docs/ops-runbook.md) are the operator docs.
@@ -62,7 +64,7 @@ Environment: the service reads `HIVEMIND_*` env vars (see `src/hivemind/config.p
 ## Rules
 
 - **Terminology is the glossary.** Use the canonical terms from CONTEXT.md. Say "supersede", never "update" or "overwrite" an entry (entries are immutable — ADR 0001). "Memory date" means `occurred_at`, not `created_at`.
-- **Implement what the spec commits to.** The non-goals (SPEC §9) are non-goals: no memory UI beyond the admin panel's memory browser (ADR 0080), no multi-tenancy, no knowledge graph, no passive capture, no Redis, no sharding. Build a SPEC §10 extension only when its trigger fires (ROADMAP Tier 5).
+- **Implement what the spec commits to.** The non-goals (SPEC §9) are non-goals: no memory UI beyond the admin panel's memory browser (ADR 0080) and the agent portal (ADR 0095), no multi-tenancy, no knowledge graph, no passive capture, no Redis, no sharding. Build a SPEC §10 extension only when its trigger fires (ROADMAP Tier 5).
 - **Code at the seams.** New data access goes behind the `Store` port (and into both `PgStore` and `MemoryStore`); new providers behind `Embedder`; new auth behind `Authenticator`. The services layer is the only orchestrator; the HTTP and MCP layers are thin (validation + auth + error mapping only); error mapping catches the typed errors only, never a bare builtin around a service call.
 - **TDD at the agreed seams.** Tests live at the seams (`tests/unit/`, `tests/integration/`), never against internals. Red → green, one behavior at a time.
 - **Decisions go in ADRs.** A new permanent design choice gets a new `docs/adr/NNNN-slug.md` (next free number; `0038` is unused), a row in `docs/adr/README.md`, and the matching SPEC.md change. A decision contradicting an existing ADR gets a NEW ADR that supersedes or amends it, plus a status note at the top of the old one — never a quiet edit of the old decision.
@@ -84,4 +86,4 @@ Environment: the service reads `HIVEMIND_*` env vars (see `src/hivemind/config.p
 
 ## State of this repo
 
-The v1 core (SPEC §1–§8), the fleet and trust model (§12), entity extraction (§13, off unless `HIVEMIND_EXTRACTOR_ENDPOINT` is set), the Kubernetes deployment, the admin panel and the agent plugin are all implemented. The current release and what changed for agents in it are in `plugins/hivemind/CHANGELOG.md`; what each feature does is in SPEC.md, and why in the ADRs. ROADMAP.md lists what is open: the follow-ups in §3.13, the open half of §4.2, the re-measure triggers in §4.6, and the held §10 extensions. Local dev endpoints used by the live tests: the embedder at `http://localhost:8001/v1` (`make vllm`) and an optional extractor at `http://localhost:8080/v1`.
+The v1 core (SPEC §1–§8), the fleet and trust model (§12), entity extraction (§13, off unless `HIVEMIND_EXTRACTOR_ENDPOINT` is set), the Kubernetes deployment, the admin panel, the agent portal and the agent plugin are all implemented. The current release and what changed for agents in it are in `plugins/hivemind/CHANGELOG.md`; what each feature does is in SPEC.md, and why in the ADRs. ROADMAP.md lists what is open: the follow-ups in §3.13, the open half of §4.2, the re-measure triggers in §4.6, and the held §10 extensions. Local dev endpoints used by the live tests: the embedder at `http://localhost:8001/v1` (`make vllm`) and an optional extractor at `http://localhost:8080/v1`.

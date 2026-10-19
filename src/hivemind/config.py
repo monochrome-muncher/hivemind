@@ -313,6 +313,10 @@ class Settings(BaseSettings):
     # file to verify an https API URL against; empty = system trust store.
     admin_api_url: str = ""
     admin_api_ca_bundle: str = ""
+    # Read only by `hivemind-portal` (ADR 0095), with the same meaning as
+    # the two admin settings above.
+    portal_api_url: str = ""
+    portal_api_ca_bundle: str = ""
     # MCP-HTTP DNS-rebinding guard (ADR 0042): comma-separated accepted
     # Host values (``name`` or ``name:*``) and browser Origins. Empty hosts
     # = the MCP SDK default (guard only on a loopback bind), which keeps an
@@ -595,12 +599,12 @@ def env_file_for(environment: str | None) -> str:
 _ALLOWED_EXTRA_ENV_VARS: dict[str, str] = {
     "HIVEMIND_RUNNER": "selects the runner in entrypoint.sh",
     "HIVEMIND_HOST": (
-        "REST/MCP-HTTP/admin bind host, read via os.environ in api/main.py, "
-        "mcp/http.py and admin/main.py"
+        "REST/MCP-HTTP/admin/portal bind host, read via os.environ in api/main.py, "
+        "mcp/http.py, admin/main.py and portal/main.py"
     ),
     "HIVEMIND_PORT": (
-        "REST/MCP-HTTP/admin bind port, read via os.environ in api/main.py, "
-        "mcp/http.py and admin/main.py"
+        "REST/MCP-HTTP/admin/portal bind port, read via os.environ in api/main.py, "
+        "mcp/http.py, admin/main.py and portal/main.py"
     ),
     # Per-process identity (ADR 0009), so deliberately outside Settings.
     "HIVEMIND_MCP_KEY": "per-agent hivemind-mcp-pg credential, read via os.environ in mcp/runners.py",

@@ -1,13 +1,15 @@
-# OPT-IN default-deny egress for hivemind-api, hivemind-mcp and
-# hivemind-admin (ROADMAP 3.13). Needs a CNI that enforces NetworkPolicy
-# egress (Calico, Cilium, ...). Once applied, these pods can reach ONLY:
+# OPT-IN default-deny egress for hivemind-api, hivemind-mcp,
+# hivemind-admin and hivemind-portal (ROADMAP 3.13). Needs a CNI that
+# enforces NetworkPolicy egress (Calico, Cilium, ...). Once applied, these
+# pods can reach ONLY:
 #
 #   * cluster DNS (kube-dns / CoreDNS in kube-system, port 53),
 #   * Postgres                       -> EDIT the ipBlock (and port),
 #   * the embedding endpoint and the optional extractor -> EDIT the ipBlock
 #     (and port); for an in-cluster model server use a namespaceSelector /
 #     podSelector instead,
-#   * hivemind-api, from the admin panel only (its same-origin proxy).
+#   * hivemind-api, from the admin panel and the agent portal only (their
+#     same-origin proxies).
 #
 # Every `192.0.2.x` address is a placeholder from the documentation range
 # (RFC 5737): it matches nothing, so an unedited policy fails CLOSED (the
@@ -30,7 +32,7 @@ spec:
         values: ["hivemind"]
       - key: app.kubernetes.io/component
         operator: In
-        values: ["api", "mcp", "admin"]
+        values: ["api", "mcp", "admin", "portal"]
   policyTypes: [Egress]
   egress:
     # Cluster DNS.
@@ -60,8 +62,8 @@ spec:
       ports:
         - port: 443
           protocol: TCP
-    # The admin panel's proxy -> hivemind-api (harmless for the other pods:
-    # the api and mcp runners never call hivemind-api).
+    # The admin panel's and the portal's proxies -> hivemind-api (harmless
+    # for the other pods: the api and mcp runners never call hivemind-api).
     - to:
         - podSelector:
             matchLabels:

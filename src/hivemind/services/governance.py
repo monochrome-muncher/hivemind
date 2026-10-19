@@ -21,7 +21,7 @@ from hivemind.domain.feedback import (
     Verdict,
 )
 from hivemind.domain.pin import Pin, PinnedEntry
-from hivemind.domain.validation import MAX_REASON_CHARS, check_text
+from hivemind.domain.validation import MAX_REASON_CHARS, InvalidInput, check_text
 from hivemind.ports import Credential, Store
 from hivemind.services.audit import record_admin_action
 from hivemind.services.chain import get_visible_entry
@@ -65,24 +65,10 @@ class GovernanceService:
         self, credential: Credential, entry_id: str, reason: str | None = None
     ) -> Entry:
         check_text(reason, "reason", MAX_REASON_CHARS)  # ADR 0040
-        entry = await get_visible_entry(self._store, entry_id, credential.visibility())
-        if entry is None:  # unknown, or not visible to the caller (ADR 0033)
-            raise EntryNotFound(f"unknown entry: {entry_id}")
+        entry = await self._visible(credential, entry_id)
         if not (credential.is_admin or entry.author == credential.user_id):
             raise PermissionDenied("only the author or an admin may withdraw an entry")
-        if entry.state.value != "active":
-            raise EntryNotActive(
-                f"entry {entry_id} is already {entry.state.value}; "
-                "only active entries can be withdrawn"
-            )
-        try:
-            withdrawn = await self._store.withdraw_entry(
-                entry_id, reason, by_user=credential.user_id
-            )
-        except KeyError as exc:  # the store's "unknown entry"
-            raise EntryNotFound(str(exc)) from exc
-        except ValueError as exc:  # the store's "not active": a concurrent withdraw won the race
-            raise EntryNotActive(str(exc)) from exc
+        withdrawn = await self._withdraw(credential, entry, reason)
         if credential.is_admin and entry.author != credential.user_id:
             # An admin withdrawing someone else's entry is audited (ADR 0027).
             await record_admin_action(
@@ -93,6 +79,47 @@ class GovernanceService:
                 {"author": entry.author, "reason": reason},
             )
         return withdrawn
+
+    async def withdraw_own(self, credential: Credential, entry_id: str, reason: str) -> Entry:
+        """A withdrawal from the agent portal (ADR 0095): the caller's own
+        entry only, with a reason, audited as ``entry.withdraw`` with
+        ``via: "portal"`` so an operator can tell it from an agent's own
+        call. Not even the admin key may withdraw someone else's entry here."""
+        check_text(reason, "reason", MAX_REASON_CHARS)  # ADR 0040
+        if not reason.strip():
+            raise InvalidInput("reason is required")
+        entry = await self._visible(credential, entry_id)
+        if entry.author != credential.user_id:
+            raise PermissionDenied("only the author may withdraw an entry from the agent portal")
+        withdrawn = await self._withdraw(credential, entry, reason)
+        await record_admin_action(
+            self._store,
+            credential,
+            AuditAction.ENTRY_WITHDRAW,
+            entry_id,
+            {"author": entry.author, "reason": reason, "via": "portal"},
+        )
+        return withdrawn
+
+    async def _visible(self, credential: Credential, entry_id: str) -> Entry:
+        entry = await get_visible_entry(self._store, entry_id, credential.visibility())
+        if entry is None:  # unknown, or not visible to the caller (ADR 0033)
+            raise EntryNotFound(f"unknown entry: {entry_id}")
+        return entry
+
+    async def _withdraw(self, credential: Credential, entry: Entry, reason: str | None) -> Entry:
+        """Withdraw ``entry`` once the caller's right to has been checked."""
+        if entry.state.value != "active":
+            raise EntryNotActive(
+                f"entry {entry.id} is already {entry.state.value}; "
+                "only active entries can be withdrawn"
+            )
+        try:
+            return await self._store.withdraw_entry(entry.id, reason, by_user=credential.user_id)
+        except KeyError as exc:  # the store's "unknown entry"
+            raise EntryNotFound(str(exc)) from exc
+        except ValueError as exc:  # the store's "not active": a concurrent withdraw won the race
+            raise EntryNotActive(str(exc)) from exc
 
     # -- feedback (services.feedback) -----------------------------------------
 

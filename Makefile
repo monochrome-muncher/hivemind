@@ -60,7 +60,7 @@ vllm: ## Start the local vLLM embedding server (CPU docker; Qwen3-Embedding on :
 	docker compose up -d vllm
 
 .PHONY: up
-up: ## Start the full local stack in docker (postgres, vllm, api :8000, admin :8089, mcp-http :8088; migrations are automatic, ADR 0018)
+up: ## Start the full local stack in docker (postgres, vllm, api :8000, admin :8089, portal :8090, mcp-http :8088; migrations are automatic, ADR 0018)
 	docker compose up -d
 
 .PHONY: pg-down
@@ -91,6 +91,10 @@ api: ## Run the REST API on :8000
 admin: ## Run the admin panel on :8080 against the local REST API (ADR 0029; start `make api` first)
 	HIVEMIND_ADMIN_API_URL=$${HIVEMIND_ADMIN_API_URL:-http://127.0.0.1:8000} HIVEMIND_PORT=8080 uv run hivemind-admin
 
+.PHONY: portal
+portal: ## Run the agent portal on :8081 against the local REST API (ADR 0095; start `make api` first)
+	HIVEMIND_PORTAL_API_URL=$${HIVEMIND_PORTAL_API_URL:-http://127.0.0.1:8000} HIVEMIND_PORT=8081 uv run hivemind-portal
+
 .PHONY: mcp
 mcp: ## Run the MCP server over stdio (wire into your agent's MCP config)
 	uv run hivemind-mcp
@@ -118,7 +122,7 @@ mcp-http-down: ## Stop the mcp-http docker service
 STANDALONE_COMPOSE ?= docker compose -f docker-compose.standalone.yaml
 
 .PHONY: standalone
-standalone: ## Start the standalone local stack (pg :5433 db hivemind_live, vllm :8101, api :8100, admin :8189, mcp-http :8188; survives `make test`)
+standalone: ## Start the standalone local stack (pg :5433 db hivemind_live, vllm :8101, api :8100, admin :8189, portal :8190, mcp-http :8188; survives `make test`)
 	$(STANDALONE_COMPOSE) up -d
 
 .PHONY: standalone-down

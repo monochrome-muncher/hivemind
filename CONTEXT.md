@@ -246,6 +246,10 @@ _Avoid_: permissions, profile, role
 The browser front end for the admin surface, run as its own runner (`hivemind-admin`) that talks only to `hivemind-api`. You log in by presenting an admin key. Its landing view opens with the pending-agent queue. It covers everything the admin surface does except issuing or revoking admin keys, which stays with the `hivemind-keys` CLI, and it lets the admin read the memories, see activity per fleet, agent and owner alias (ADR 0080), see who gave which verdict on which entry in the feedback log (ADR 0090), see each fleet's pins (ADR 0092), work through the flagged entries, oldest flag first (ADR 0093), and export its lists as CSV (ADR 0094).
 _Avoid_: dashboard, console, admin UI (fine informally; the term is admin panel)
 
+**Agent portal**:
+The browser front end for the person behind an agent, run as its own runner (`hivemind-portal`) that talks only to `hivemind-api`. You sign in with one agent's key (never the admin or org key) and see what that agent wrote, the verdicts it gave and received, its home fleet's memories and pins, and a search over what the key can read; you can withdraw the agent's own memories, with a reason, and that withdrawal is audited (ADR 0095). One key at a time. It reads nothing the key could not already read through the API.
+_Avoid_: user app, user portal, agent dashboard (there are no user accounts; it is the agent's key that signs in)
+
 **Per-request credential**:
 The acting identity a hostable `hivemind-mcp-http` process resolves **per HTTP request**: the request presents an agent key (ADR 0012), a thin ASGI middleware verifies it against the `credentials` table (ADR 0012), and the shared, stateless services are re-bound to that credential on every tool dispatch. Because it is resolved per request, revocation is immediate (ADR 0010).
 _Avoid_: agent key (that is the credential itself; this term is the per-request resolution of it), session identity

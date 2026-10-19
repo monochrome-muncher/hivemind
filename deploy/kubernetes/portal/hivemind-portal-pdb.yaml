@@ -1,0 +1,16 @@
+# PodDisruptionBudget for `hivemind-portal` (ADR 0095), as for the API
+# (ADR 0026): at replicas: 2, a drain waits until the first replacement is
+# Ready, so one portal pod is always serving.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: hivemind-portal
+  labels:
+    app.kubernetes.io/name: hivemind
+    app.kubernetes.io/component: portal
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hivemind
+      app.kubernetes.io/component: portal

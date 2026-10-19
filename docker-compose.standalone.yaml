@@ -10,11 +10,12 @@
 #   make standalone-down  -> stop it
 #   make standalone-reset -> stop it and wipe its data volume
 #
-# Ports (the dev set is 5432/8001/8000/8089/8088):
+# Ports (the dev set is 5432/8001/8000/8089/8090/8088):
 #   postgres  127.0.0.1:5433   db `hivemind_live`
 #   vllm      127.0.0.1:8101
 #   api       127.0.0.1:8100
 #   admin     127.0.0.1:8189
+#   portal    127.0.0.1:8190
 #   mcp-http  :8188 (all interfaces; HIVEMIND_STANDALONE_MCP_HTTP_PORT overrides)
 #
 # Point agents / uv processes at it with:
@@ -126,6 +127,37 @@ services:
       HIVEMIND_ADMIN_API_URL: http://api:8000
     ports:
       - "127.0.0.1:8189:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - |
+          python -c "
+          import urllib.request, sys
+          try:
+              r = urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)
+              sys.exit(0 if r.status == 200 else 1)
+          except Exception:
+              sys.exit(1)
+          "
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  # Agent portal (ADR 0095) against the standalone REST API, on :8190.
+  portal:
+    build: .
+    image: hivemind-portal
+    environment:
+      HIVEMIND_RUNNER: portal
+      HIVEMIND_HOST: "0.0.0.0"
+      HIVEMIND_PORT: "8080"
+      HIVEMIND_PORTAL_API_URL: http://api:8000
+    ports:
+      - "127.0.0.1:8190:8080"
     depends_on:
       api:
         condition: service_healthy
