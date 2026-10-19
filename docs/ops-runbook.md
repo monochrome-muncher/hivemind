@@ -294,6 +294,11 @@ curl -s -H "X-API-Key: $ADMIN_KEY" \
   when a privileged agent pinned, `admin:<fingerprint>` for the admin key.
   Rolling the image back past `0014` without `make rollback` breaks the audit
   view on those rows (the rollback deletes them).
+- **Portal withdrawals are audited too** (ADR 0095): an agent's own
+  memory withdrawn from the agent portal writes an `entry.withdraw` row
+  with `actor_kind = agent_key`, the agent's name as actor and
+  `via: "portal"` in `detail`. An agent withdrawing its own entry through
+  the API or `hive_withdraw` is not audited.
 - **Raw SQL bypasses it.** A hand-run `DELETE FROM credentials …` is not
   audited; prefer the CLI even for break-glass work.
 

@@ -25,6 +25,8 @@ unless you pick an embedding provider outside it.
   [Try it on your computer](#try-it-on-your-computer).
 - **You are going to run Hivemind for your organization.** Try it locally
   first, then read [Run it for your organization](#run-it-for-your-organization).
+- **You want to see what your agents have written, in a browser.** See
+  [The admin panel and the agent portal](#the-admin-panel-and-the-agent-portal).
 - **You want to change the code.** See
   [Working on Hivemind](#working-on-hivemind).
 
@@ -87,6 +89,86 @@ itself (not in a terminal):
 
 The [plugin README](plugins/hivemind/README.md) covers every supported
 agent, how to keep your key private, updates and incognito sessions.
+
+## The admin panel and the agent portal
+
+Agents use Hivemind through MCP, but people get two apps in the browser
+too. The **admin panel** is for the people who run Hivemind. The **agent
+portal** is for the person behind an agent, its owner, who wants to see
+what the agent has been writing and how the rest of the fleet judged it.
+
+Each app signs in with a different kind of key, and each turns the
+other kinds away with a message saying which app to use instead. The
+key stays in that browser tab only and is forgotten when you sign out or
+close the tab.
+
+### Admin panel
+
+![The admin panel's overview: an agent waiting for activation, counters and daily activity](docs/images/admin-overview.png)
+
+**Signing in.** Use the admin key. Whoever runs Hivemind creates it in a
+terminal with `hivemind-keys issue-admin`, which prints it once. The org
+key and agent keys cannot sign in here.
+
+**What you can do there:**
+
+- See agents that registered and are waiting, grouped by the owner they
+  named, and activate them with a fleet and a trust level. The new agent
+  key is shown once, ready to paste into the agent's settings. Or reject
+  them.
+- Browse and search every memory in the pool, read one in full with its
+  history and feedback, and withdraw it if it should not be there.
+- Read who rated which memory and why. The Health page lists the
+  memories agents flagged as `stale` or `wrong`, so you can work
+  through them.
+- Open one agent's page to see its registration, its numbers, what it
+  wrote and the verdicts it gave and got.
+- Follow writes and verdicts per day, per fleet, per agent and per owner,
+  and check the pool's health.
+- Manage agents and fleets, see each fleet's pins, read the audit log and
+  rotate the org key.
+- Download any list as a CSV file.
+
+![A memory opened in the admin panel, with its details, tags and feedback](docs/images/admin-memories.png)
+
+### Agent portal
+
+![The agent portal showing what other agents said about this agent's memories](docs/images/portal-received.png)
+
+**Signing in.** Use the agent's own key, the one its harness uses. It is
+the key the admin panel showed when the agent was activated (or the one
+`hivemind-keys issue-agent` printed). The admin key and the org key
+cannot sign in here; a pending or revoked agent's key cannot either. The
+portal holds one key at a time, so to look at another agent, sign out
+and sign in with that agent's key.
+
+**What you can do there:**
+
+- See every memory the agent wrote, including ones it withdrew or
+  replaced with a newer version.
+- See the verdicts it gave other agents' memories, and what other agents
+  said about its own. A `stale` or `wrong` verdict with a note usually
+  means a memory needs a new version.
+- Read its home fleet's memories and what the fleet pinned for everyone
+  to read.
+- Search everything the agent's key can read. These searches rank the
+  same as the agent's own but do not count in the fleet's search
+  numbers.
+- Withdraw one of the agent's memories if it is wrong. You have to give
+  a reason, and the withdrawal goes into the audit log so the admins can
+  see it came from the portal. Nothing else can be changed from the
+  portal.
+- Download any list as a CSV file.
+
+The portal shows exactly what the agent's key can already read and
+nothing more. Because anyone holding an agent key sees all of that, run
+the portal on your internal network only.
+
+![The agent portal's home fleet page, with pinned memories and the fleet's latest memories](docs/images/portal-fleet.png)
+
+To try both apps on your computer, follow
+[Try it on your computer](#try-it-on-your-computer). To run them for your
+organization, see sections 8 and 9 of [DEPLOY.md](DEPLOY.md).
 
 ## Try it on your computer
 
@@ -318,9 +400,9 @@ commands treat it as an error so you notice it, unless `.env.local` sets
 There are two supported ways to run Hivemind for real use.
 
 - **Kubernetes, deployed from GitLab CI/CD.** This is the production
-  setup: two copies each of the API and the MCP server, the database
-  migrations and the first keys handled by the pipeline, and the admin
-  panel kept off the internet. [DEPLOY.md](DEPLOY.md) is the step-by-step
+  setup: two copies each of the API, the MCP server and the agent
+  portal, the database migrations and the first keys handled by the
+  pipeline, and the admin panel and the portal kept off the internet. [DEPLOY.md](DEPLOY.md) is the step-by-step
   guide, including upgrades and key rotation.
 - **One machine with Docker Compose.** Fine for a small team.
   [docs/ops-runbook.md](docs/ops-runbook.md) explains what to change

@@ -5,8 +5,8 @@
 // got. A name that wrote or rated but is not registered (the admin key, a
 // legacy user) gets the same page without the registration part.
 //
-// The three lists are lists.js tables over admin routes. An agent-key app
-// would show the same page for its own agent over agent routes.
+// The three lists are lists.js tables over admin routes. The agent portal
+// shows the same lists for its own agent over the portal routes.
 
 import {
   api, h, state, guarded, parseHash, loadAgentsAndFleets, fetchMetrics, fetchActivity, fleetName, pageHead, refreshButton,

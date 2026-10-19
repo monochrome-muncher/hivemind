@@ -125,16 +125,22 @@ An insert-only audit log written by the REST admin surface (actor: the
 admin key's fingerprint) and the CLI (an unverified `--actor`), read at
 `GET /v1/admin/audit-log`. Registrations are audited since ADR 0046.
 
-### 3.9 Admin panel  *(shipped: ADRs 0028–0029, 0080, migration `0006`, DEPLOY.md §8)*
+### 3.9 Admin panel and agent portal  *(shipped: ADRs 0028–0029, 0080, 0090–0095, migration `0006`, DEPLOY.md §8–§9)*
 A browser front end for the admin surface, with a pending-agent queue.
 It needed the `revoked` agent status first (ADR 0028). The admin key
 lives in the tab's `sessionStorage` behind a strict CSP; keep the panel
-on an internal ingress.
+on an internal ingress. Later increments added the feedback log
+(ADR 0090), the shared front-end modules and the agent page (ADR 0091),
+per-fleet pins (ADR 0092), the flag backlog (ADR 0093) and CSV export
+(ADR 0094). The agent portal (ADR 0095, `hivemind-portal`) is a second
+front end for a person holding one agent's key: its memories, the
+verdicts it gave and got, its home fleet, search, and an audited
+withdraw. Keep it on an internal ingress as well.
 
 ### 3.10 Agent plugin and skills  *(shipped: ADRs 0030–0031, `plugins/hivemind/`)*
 The plugin and skills that make Hivemind an agent's long-term memory, now
 for Claude Code, Codex, DeepSeek Harness, Gemini CLI, GitHub Copilot CLI,
-Hermes, Pi, Oh My Pi and OpenCode. It needed `hive_whoami`
+Hermes, Pi, Oh My Pi, OpenCode, Cline and KiloCode. It needed `hive_whoami`
 (ADR 0030) and the one-key-per-request correction (ADR 0031).
 
 ### 3.11 Server-enforced access on every entry path  *(shipped: ADR 0033)*
@@ -316,7 +322,7 @@ Explore search is opt-in per search (ADR 0078). Results are in
 
 **Do not build any SPEC §10 extension yet** (passive capture, private
 staging, namespaces, binary artifacts, knowledge graph, contradiction
-detection, curation, human UI, multi-tenant SaaS, per-agent retrieval
+detection, curation, human UI beyond the admin panel and agent portal, multi-tenant SaaS, per-agent retrieval
 tuning). SPEC §10 is explicit: build it when its trigger fires. With no
 production usage, no trigger has fired.
 
@@ -347,7 +353,7 @@ so the later decision is data-driven. Two kinds:
 | Binary artifacts | "analyses outgrow file/URL refs" | count of `sources` with `type=file` or payload > threshold | §3.3 counters |
 | Contradiction detection | "explicit supersession can't keep up" | count of same-topic, conflicting-value entry pairs *not* linked by a supersession chain | §3.3 counters |
 | Curation workflow | "org wants a 'librarian'" | feedback (helpful/stale/wrong) accumulating without action; stale/wrong entries still in top-k *(the set is now listable: the `flagged` filter, ADR 0054)* | §3.3 counters + §1.1 harness |
-| Human read-only UI | "analysts want to see the pool" | direct demand for human browsing (usage signal, not a metric) | qualitative |
+| Human read-only UI | "analysts want to see the pool" | direct demand for human browsing (usage signal, not a metric) | qualitative *(partially satisfied: the admin panel browses and searches the pool, ADR 0080; the agent portal shows one agent's view, ADR 0095; a UI without a key remains held)* |
 | Multi-tenant SaaS / OAuth | "more than one org; an org has an IdP" | count of distinct orgs / tenants requested (count > 1) | §3.3 counters |
 | Redis (cache / rate limits / queue) | "API scales to multiple replicas; org demands distributed rate limiting" | API replicas > 1, or distinct orgs > 1, or a cross-process per-agent rate-limit ceiling is needed *(the replica clause is now satisfied — 2 replicas per runner, ADR 0026 — and still buys nothing: there is no distributed rate limiting, no fan-out, and the only cross-process lock is in Postgres (ADR 0020). The live half of this trigger is the **rate-limit ceiling**, not the replica count; a Redis queue for embedding is superseded by the Postgres-outbox design below)* | §3.3 counters + replica count |
 | Async embedding pipeline | "embedding latency/throughput starts blocking writes" | p95 write latency; embedder failure/retry rate; backlog of unembedded entries *(the embedder already has a bounded retry budget for transient failures — ADR 0014, `HIVEMIND_EMBEDDING_RETRIES`, default 2 — so this trigger is about the **fallback** (persist without a vector + catch-up), not retries. Design: a Postgres **outbox** — insert entry with `embedding IS NULL` in the same transaction, then a `FOR UPDATE SKIP LOCKED` worker embeds + updates; a single source of truth, no second queue service. New ADR required: it changes write semantics — an entry is vector-searchable only after its vector lands)* | §3.3 counters + p95 write latency |
