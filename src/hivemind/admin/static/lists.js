@@ -6,6 +6,7 @@
 // Summaries, tags and notes are written by agents: plain text only.
 
 import { h, link, toast, fmtAgo, fmtTime, kindBadge, stateBadge, verdictBadge } from "./ui.js";
+import { EXPORT_MAX, column, csvName, downloadCsv, fetchAll, toCsv } from "./csv.js";
 
 export const PAGE = 50;
 const sameName = (id) => id;
@@ -22,11 +23,16 @@ const scopeText = (scope, fleetId, fleetName) => (fleetId ? `${scope} · ${fleet
  * A table that loads `PAGE` rows at a time. `fetchPage({limit, offset})`
  * resolves to an array of rows (or undefined to stop, e.g. after a sign-out);
  * `renderRow(row)` builds a <tr>. Returns {el, tbody, load(reset)}: load(true)
- * starts again from the top, load(false) appends the next page.
+ * starts again from the top, load(false) appends the next page; `fetchPage`
+ * gets `fresh: true` on a reload from the top, the moment a caller should
+ * read its filters (later pages and an export reuse them). With `csv`
+ * ({columns, name, key}) it also offers every row under those filters as a
+ * CSV file.
  */
-export function pagedTable({ headers, className = "entries", fetchPage, renderRow, emptyText, statusText }) {
+export function pagedTable({ headers, className = "entries", fetchPage, renderRow, emptyText, statusText, csv = null }) {
   const tbody = h("tbody");
   const status = h("p", { class: "muted small result-status", "aria-live": "polite" });
+  let generation = 0; // bumped on every reset, so an export can tell the filters changed
   const more = h("button", { type: "button", class: "btn", text: "Load more" });
   const moreWrap = h("div", { class: "load-more", hidden: true }, more);
   let offset = 0;
@@ -36,11 +42,12 @@ export function pagedTable({ headers, className = "entries", fetchPage, renderRo
 
   const load = async (reset) => {
     if (resetting) reset = true;
+    if (reset) generation += 1;
     const mine = ++ticket;
     resetting = reset;
     more.disabled = true;
     try {
-      const rows = await fetchPage({ limit: PAGE, offset: reset ? 0 : offset });
+      const rows = await fetchPage({ limit: PAGE, offset: reset ? 0 : offset, fresh: reset });
       if (!rows || mine !== ticket) return;
       // Counters move only on a response that is still current, so a failed
       // or superseded reset never leaves old rows with a reset offset.
@@ -62,11 +69,46 @@ export function pagedTable({ headers, className = "entries", fetchPage, renderRo
   more.addEventListener("click", () => load(false));
 
   const el = h("div", { class: "card" },
-    h("div", { class: "card-body card-body-tight" }, status),
+    h("div", { class: "card-body card-body-tight result-bar" }, status,
+      csv ? exportButton({ fetchPage, ...csv, generation: () => generation }) : null),
     h("div", { class: "table-wrap" }, h("table", { class: className },
       h("thead", {}, h("tr", {}, headers.map((t) => h("th", { text: t })))), tbody)),
     moreWrap);
   return { el, tbody, load };
+}
+
+/**
+ * An "Export CSV" button: fetches every row `fetchPage` gives (up to
+ * EXPORT_MAX) and saves them under `columns` as hivemind-<name>-<date>.csv.
+ * `generation()` changes whenever the list reloads from the top; an export
+ * that sees it change stops rather than risk mixing two filters in one file.
+ * `fetchPage` must read the filters the list shows, not unsent form input.
+ * `key(row)` drops a row a shifting page returns twice.
+ */
+export function exportButton({ fetchPage, columns, name, key = null, generation = () => 0 }) {
+  const button = h("button", { type: "button", class: "btn btn-sm btn-ghost", text: "Export CSV" });
+  button.addEventListener("click", async () => {
+    const started = generation();
+    button.disabled = true;
+    button.textContent = "Exporting…";
+    try {
+      const result = await fetchAll(fetchPage, { key, cancelled: () => generation() !== started });
+      if (!result) {
+        if (generation() !== started) toast("The list was reloaded during the export, so it stopped. Export again.", true);
+        return;
+      }
+      downloadCsv(csvName(name), toCsv(columns, result.rows));
+      toast(result.truncated
+        ? `Exported the first ${EXPORT_MAX.toLocaleString()} rows; narrow the filters for the rest.`
+        : `Exported ${result.rows.length} row${result.rows.length === 1 ? "" : "s"}.`);
+    } catch (err) {
+      toast(err.message, true);
+    } finally {
+      button.disabled = false;
+      button.textContent = "Export CSV";
+    }
+  });
+  return button;
 }
 
 // --- memories ------------------------------------------------------------------------
@@ -86,6 +128,8 @@ export function normaliseEntry(x) {
     author: x.author,
     agent: x.agent,
     when: x.created_at || x.occurred_at,
+    created_at: x.created_at,
+    occurred_at: x.occurred_at,
     state: x.state || "active",
     feedback: fb && (fb.helpful || fb.stale || fb.wrong) ? fb : null,
     score: x.score,
@@ -115,8 +159,21 @@ export function entryRow(item, { onOpen, compact = false, fleetName = sameName }
   return row;
 }
 
-/** A paged memory list over `fetchPage` (rows as EntryOut or HitOut). */
-export function entryTable({ fetchPage, onOpen, fleetName = sameName, emptyText = "No memories match.", statusText }) {
+const fleetColumns = (fleetName, id = (r) => r.fleet_id, prefix = "") => [
+  column(`${prefix}fleet_id`, id),
+  column(`${prefix}fleet`, (r) => (id(r) ? fleetName(id(r)) : "")),
+];
+const countColumns = (counts) => ["helpful", "stale", "wrong"].map((v) => column(v, (r) => (counts(r) || {})[v] || 0));
+
+/** CSV columns for a memory list (rows from normaliseEntry). */
+export const entryCsvColumns = (fleetName = sameName) => [
+  column("id"), column("kind"), column("summary"), column("tags"), column("scope"), ...fleetColumns(fleetName),
+  column("author"), column("agent"), column("created_at"), column("occurred_at"), column("state"),
+  ...countColumns((r) => r.feedback), column("score"),
+];
+
+/** A paged memory list over `fetchPage` (rows as EntryOut or HitOut); `csvName` adds an export. */
+export function entryTable({ fetchPage, onOpen, fleetName = sameName, emptyText = "No memories match.", statusText, csvName: name = null }) {
   return pagedTable({
     headers: ENTRY_HEADERS,
     fetchPage: async (page) => {
@@ -126,6 +183,7 @@ export function entryTable({ fetchPage, onOpen, fleetName = sameName, emptyText 
     renderRow: (item) => entryRow(item, { onOpen, fleetName }),
     emptyText,
     statusText: statusText || ((n) => `${n} shown, newest first`),
+    csv: name ? { columns: entryCsvColumns(fleetName), name, key: (r) => r.id } : null,
   });
 }
 
@@ -150,8 +208,16 @@ export function feedbackRow(row, { onOpen, fleetName = sameName, agentHref = noH
     h("td", { class: "nowrap" }, nameCell(e.author, agentHref)));
 }
 
-/** A paged feedback log over `fetchPage` (rows in the feedback log shape, ADR 0090). */
-export function feedbackTable({ fetchPage, onOpen, fleetName = sameName, agentHref = noHref, emptyText = "No feedback matches." }) {
+/** CSV columns for a feedback log (rows in the ADR 0090 shape). */
+export const feedbackCsvColumns = (fleetName = sameName) => [
+  column("updated_at"), column("reporter"), column("agent"), column("verdict"), column("note"),
+  column("entry_id", (r) => r.entry.id), column("entry_summary", (r) => r.entry.summary), column("entry_kind", (r) => r.entry.kind),
+  column("entry_scope", (r) => r.entry.scope), ...fleetColumns(fleetName, (r) => r.entry.fleet_id, "entry_"),
+  column("entry_author", (r) => r.entry.author), column("entry_state", (r) => r.entry.state),
+];
+
+/** A paged feedback log over `fetchPage` (rows in the feedback log shape, ADR 0090); `csvName` adds an export. */
+export function feedbackTable({ fetchPage, onOpen, fleetName = sameName, agentHref = noHref, emptyText = "No feedback matches.", csvName: name = null }) {
   return pagedTable({
     headers: FEEDBACK_HEADERS,
     className: "entries feedback-log",
@@ -159,6 +225,7 @@ export function feedbackTable({ fetchPage, onOpen, fleetName = sameName, agentHr
     renderRow: (row) => feedbackRow(row, { onOpen, fleetName, agentHref }),
     emptyText,
     statusText: (n) => `${n} shown, newest first`,
+    csv: name ? { columns: feedbackCsvColumns(fleetName), name, key: (r) => JSON.stringify([r.entry.id, r.reporter, r.agent]) } : null,
   });
 }
 
@@ -205,13 +272,20 @@ export function flaggedRow(row, { onOpen, fleetName = sameName, agentHref = noHr
       row.wrong ? verdictBadge("wrong", row.wrong) : null));
 }
 
-/** A paged list of flagged memories over `fetchPage`, oldest first flag first. */
-export function flaggedTable({ fetchPage, onOpen, fleetName = sameName, agentHref = noHref, emptyText = "No flagged memory matches." }) {
+/** CSV columns for the flag backlog (rows in the ADR 0093 shape). */
+export const flaggedCsvColumns = (fleetName = sameName) => [
+  column("id"), column("kind"), column("summary"), column("scope"), ...fleetColumns(fleetName), column("author"),
+  column("orphaned"), column("first_flag_at"), column("last_flag_at"), ...countColumns((r) => r),
+];
+
+/** A paged list of flagged memories over `fetchPage`, oldest first flag first; `csvName` adds an export. */
+export function flaggedTable({ fetchPage, onOpen, fleetName = sameName, agentHref = noHref, emptyText = "No flagged memory matches.", csvName: name = null }) {
   return pagedTable({
     headers: FLAGGED_HEADERS,
     fetchPage,
     renderRow: (row) => flaggedRow(row, { onOpen, fleetName, agentHref }),
     emptyText,
     statusText: (n) => `${n} shown, oldest flag first`,
+    csv: name ? { columns: flaggedCsvColumns(fleetName), name, key: (r) => r.id } : null,
   });
 }

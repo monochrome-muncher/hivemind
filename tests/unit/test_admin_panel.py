@@ -8,8 +8,11 @@ an in-process ``hivemind-api``.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import httpx
@@ -336,6 +339,11 @@ def test_the_scripts_never_build_a_link_from_entry_data() -> None:
     """Entry text is data (ADR 0043): a link is an in-panel hash and nothing else."""
     for script in _scripts():
         js = script.read_text()
+        if script.name == "csv.js":
+            # The one exception: the download link points at a Blob URL the
+            # module itself made from the CSV text, never at entry data.
+            assert "const url = URL.createObjectURL(new Blob(" in js
+            js = js.replace("a.href = url;", "", 1)
         assert ".href =" not in js and 'setAttribute("href"' not in js, script.name
         for href in re.findall(r"\bhref:\s*([^,}]+)", js):
             assert re.search(r"\b(?:memories|feedback|agent|view)Href\(", href) or re.match(
@@ -406,7 +414,7 @@ async def test_an_oversized_body_is_refused_and_never_forwarded(chunked: bool) -
 
 def test_the_shared_modules_import_nothing_admin_specific() -> None:
     """ADR 0091: these can be served to another front end as they are."""
-    shared = {"ui.js", "client.js", "lists.js", "drawer.js", "charts.js"}
+    shared = {"ui.js", "client.js", "lists.js", "drawer.js", "charts.js", "csv.js"}
     for name in shared:
         js = (STATIC_DIR / name).read_text()
         imports = {t[2:] for t in re.findall(r"""from\s+["']([^"']+)["']""", js)}
@@ -418,3 +426,62 @@ def test_views_fill_their_root_without_printing_null() -> None:
     """``replaceChildren(a, null)`` prints "null"; views use ui.js ``fill``."""
     for script in _scripts():
         assert "root.replaceChildren(" not in script.read_text(), script.name
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_csv_export_quotes_cells_defuses_formulas_and_pages_to_the_end() -> None:
+    """The CSV module (csv.js) run as it ships: RFC 4180 quoting, no
+    spreadsheet formula from agent text, every page fetched up to the cap."""
+    script = r"""
+    const csv = await import(process.argv[1])
+    const columns = [csv.column("summary"), csv.column("tags"), csv.column("n"), csv.column("none")]
+    const text = csv.toCsv(columns, [
+      { summary: 'say "hi", then\nleave', tags: ["a", "b"], n: -3 },
+      { summary: "=HYPERLINK(1)", tags: ["@x"], n: 0 },
+      { summary: "+1", tags: [], n: 1.5 },
+      { summary: " =1+1", tags: ["\uFF1Dx"], n: true },
+    ])
+    const pages = (total) => async ({ limit, offset }) =>
+      Array.from({ length: Math.max(0, Math.min(limit, total - offset)) }, (_, i) => offset + i)
+    const exact = await csv.fetchAll(pages(250))
+    const capped = await csv.fetchAll(pages(500), { max: 200 })
+    const full = await csv.fetchAll(pages(200))
+    const stopped = await csv.fetchAll(pages(500), { cancelled: () => true })
+    const signedOut = await csv.fetchAll(async () => undefined)
+    const exactMax = await csv.fetchAll(pages(200), { max: 200 })
+    // A row written mid-export shifts the second page back by one.
+    const shifted = async ({ limit, offset }) =>
+      offset >= 200 ? [] : Array.from({ length: limit }, (_, i) => offset - (offset ? 1 : 0) + i)
+    const deduped = await csv.fetchAll(shifted, { key: (r) => r })
+    console.log(JSON.stringify({
+      text,
+      exact: [exact.rows.length, exact.truncated, exact.rows[249]],
+      capped: [capped.rows.length, capped.truncated],
+      full: [full.rows.length, full.truncated],
+      stopped, signedOut,
+      exactMax: [exactMax.rows.length, exactMax.truncated],
+      deduped: [deduped.rows.length, new Set(deduped.rows).size],
+      name: csv.csvName("agent-a/b c", new Date("2026-10-18T12:00:00Z")),
+    }))
+    """
+    out = subprocess.run(
+        ["node", "--input-type=module", "-e", script, (STATIC_DIR / "csv.js").as_uri()],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    result = json.loads(out.stdout)
+    assert result["text"] == (
+        "summary,tags,n,none\r\n"
+        '"say ""hi"", then\nleave",a; b,-3,\r\n'
+        "'=HYPERLINK(1),'@x,0,\r\n"
+        "'+1,,1.5,\r\n"
+        "' =1+1,'\uff1dx,true,\r\n"
+    )
+    assert result["exact"] == [250, False, 249]
+    assert result["capped"] == [200, True]
+    assert result["full"] == [200, False]  # a full last page costs one empty read
+    assert result["exactMax"] == [200, False]  # exactly the cap: a probe says nothing is cut
+    assert result["deduped"] == [199, 199]
+    assert result["stopped"] is None and result["signedOut"] is None
+    assert result["name"] == "hivemind-agent-a_b_c-2026-10-18.csv"

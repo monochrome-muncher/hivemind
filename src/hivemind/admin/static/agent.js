@@ -61,6 +61,7 @@ export async function viewAgent(root) {
     onOpen: (id) => openEntry(id, () => memories.load(true)),
     fleetName,
     emptyText: "It has not written any memories.",
+    csvName: `agent-${name}-memories`,
     statusText: (n) => `${n} shown, newest first, withdrawn and superseded included`,
   });
   const given = feedbackTable({
@@ -69,6 +70,7 @@ export async function viewAgent(root) {
     fleetName,
     agentHref,
     emptyText: "It has not rated any memory.",
+    csvName: `agent-${name}-verdicts-given`,
   });
   const received = feedbackTable({
     fetchPage: ({ limit, offset }) => guarded(() => api("GET", "admin/feedback", { query: { author: name, limit, offset } })),
@@ -76,6 +78,7 @@ export async function viewAgent(root) {
     fleetName,
     agentHref,
     emptyText: "Nobody has rated its memories yet.",
+    csvName: `agent-${name}-verdicts-received`,
   });
 
   const section = (title, table, href) => h("section", { class: "agent-sec" },

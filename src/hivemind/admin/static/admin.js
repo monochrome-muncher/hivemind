@@ -3,13 +3,14 @@
 // The panel is plain ES modules served from this directory (no build step):
 //   ui.js        generic DOM helpers, formatting, badges, modal, layout pieces
 //   client.js    the API client (one key per tab, its own storage slot)
-//   lists.js     paged memory and feedback tables
+//   lists.js     paged memory, feedback and flagged tables
+//   csv.js       CSV export of a list
 //   drawer.js    the memory detail drawer (configured below)
 //   charts.js    the SVG activity chart
 //   core.js      the admin session and shared state; re-exports ui.js and client.js
 //   overview.js  memories.js  feedback.js  stats.js  manage.js  health.js  agent.js   the views
 //
-// ui.js, client.js, lists.js, drawer.js and charts.js import nothing
+// ui.js, client.js, lists.js, csv.js, drawer.js and charts.js import nothing
 // admin-specific, so another front end can serve them as they are.
 //
 // Rules every module keeps: API data reaches the page through textContent

@@ -7,7 +7,7 @@ import {
   api, apiRaw, h, state, toast, guarded, parseHash, loadAgentsAndFleets, fleetName, pageHead, refreshButton, card, KINDS, SCOPES, fill,
 } from "./core.js";
 import { openEntry } from "./drawer.js";
-import { ENTRY_HEADERS, PAGE, entryRow, normaliseEntry } from "./lists.js";
+import { ENTRY_HEADERS, PAGE, entryCsvColumns, entryRow, exportButton, normaliseEntry } from "./lists.js";
 
 export async function viewMemories(root) {
   await loadAgentsAndFleets();
@@ -42,6 +42,8 @@ export async function viewMemories(root) {
 
   let offset = 0; // both modes page by offset (limit stays PAGE)
   let ticket = 0;
+  let generation = 0; // bumped when the filters are applied afresh, so an export can tell
+  let applied = null; // the filters the table shows (the search box may hold unsent text)
 
   const filters = () => ({
     q: q.value.trim(), fleet: fleet.value, author: author.value.trim(), kind: kind.value, scope: scope.value,
@@ -56,38 +58,42 @@ export async function viewMemories(root) {
     if (window.location.hash !== next) history.replaceState(null, "", next);
   };
 
+  // One page under filters `f`: search when there is text, else the listing.
+  // Resolves to {items, degraded}, or undefined after a sign-out.
+  const fetchItems = async (f, limit, offset) => {
+    if (f.q) {
+      const body = { query: f.q, limit, offset };
+      if (f.kind) body.kind = f.kind;
+      if (f.scope) body.scope = f.scope;
+      if (f.fleet) body.fleet_id = f.fleet;
+      if (f.author) body.author = f.author;
+      if (f.all) body.include_inactive = true;
+      if (f.flagged) body.flagged = true;
+      const res = await guarded(() => apiRaw("POST", "admin/search", { body }));
+      if (!res) return undefined;
+      return { items: (res.payload || []).map(normaliseEntry), degraded: (res.headers.get("X-Hivemind-Degraded") || "") === "keyword-only" };
+    }
+    const query = {
+      kind: f.kind, scope: f.scope, fleet_id: f.fleet, author: f.author, include_inactive: f.all ? "true" : "",
+      flagged: f.flagged ? "true" : "", limit, offset,
+    };
+    const res = await guarded(() => api("GET", "admin/entries", { query }));
+    return res && { items: res.map(normaliseEntry), degraded: false };
+  };
+
   const load = async (append) => {
     const f = filters();
     const mine = ++ticket;
+    if (!append) { generation += 1; applied = f; }
     syncHash();
     more.disabled = true;
     try {
-      let items;
       if (!append) offset = 0;
-      if (f.q) {
-        const body = { query: f.q, limit: PAGE, offset };
-        if (f.kind) body.kind = f.kind;
-        if (f.scope) body.scope = f.scope;
-        if (f.fleet) body.fleet_id = f.fleet;
-        if (f.author) body.author = f.author;
-        if (f.all) body.include_inactive = true;
-        if (f.flagged) body.flagged = true;
-        const res = await guarded(() => apiRaw("POST", "admin/search", { body }));
-        if (!res || mine !== ticket) return;
-        degraded.hidden = (res.headers.get("X-Hivemind-Degraded") || "") !== "keyword-only";
-        items = (res.payload || []).map(normaliseEntry);
-        if (!append) tbody.replaceChildren();
-      } else {
-        degraded.hidden = true;
-        const query = {
-          kind: f.kind, scope: f.scope, fleet_id: f.fleet, author: f.author, include_inactive: f.all ? "true" : "",
-          flagged: f.flagged ? "true" : "", limit: PAGE, offset,
-        };
-        const res = await guarded(() => api("GET", "admin/entries", { query }));
-        if (!res || mine !== ticket) return;
-        items = res.map(normaliseEntry);
-        if (!append) tbody.replaceChildren();
-      }
+      const page = await fetchItems(f, PAGE, offset);
+      if (!page || mine !== ticket) return;
+      degraded.hidden = !page.degraded;
+      const items = page.items;
+      if (!append) tbody.replaceChildren();
       offset += items.length;
       const open = (id) => openEntry(id, () => load(false));
       tbody.append(...items.map((it) => entryRow(it, { onOpen: open, fleetName })));
@@ -103,6 +109,16 @@ export async function viewMemories(root) {
       more.disabled = false;
     }
   };
+  const exporter = exportButton({
+    fetchPage: async ({ limit, offset: at }) => {
+      const page = await fetchItems(applied || filters(), limit, at);
+      return page && page.items;
+    },
+    columns: entryCsvColumns(fleetName),
+    name: "memories",
+    key: (r) => r.id,
+    generation: () => generation,
+  });
 
   form.addEventListener("submit", (event) => { event.preventDefault(); load(false); });
   for (const el of [fleet, kind, scope, stateSel, flagged]) el.addEventListener("change", () => load(false));
@@ -118,7 +134,7 @@ export async function viewMemories(root) {
     card(null, h("div", {}, form), { className: "card-filters" }),
     degraded,
     h("div", { class: "card" },
-      h("div", { class: "card-body card-body-tight" }, status),
+      h("div", { class: "card-body card-body-tight result-bar" }, status, exporter),
       h("div", { class: "table-wrap" }, h("table", { class: "entries" },
         h("thead", {}, h("tr", {}, ENTRY_HEADERS.map((t) => h("th", { text: t })))),
         tbody)),
