@@ -516,7 +516,7 @@ PORTAL_WITHDRAW_CASES: list[tuple[str, str, str, dict[str, str], tuple[int, str,
         (
             403,
             "forbidden",
-            "the agent portal requires an agent key (the admin key belongs in the admin panel)",
+            "the agent portal requires an agent key, not the admin or org key",
         ),
     ),
 ]

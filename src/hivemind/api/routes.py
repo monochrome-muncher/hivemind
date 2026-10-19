@@ -611,7 +611,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
             raise api_error(
                 403,
                 "forbidden",
-                f"{what} requires an agent key (the admin key belongs in the admin panel)",
+                f"{what} requires an agent key, not the admin or org key",
             )
 
     @router.get("/portal/entries", response_model=list[EntryOut])
