@@ -291,7 +291,7 @@ curl -s -H "X-API-Key: $ADMIN_KEY" \
   the new one's. No raw key is ever written to the log.
 - **Pins are audited too** (ADR 0076, migration `0014`): `entry.pin` and
   `entry.unpin` rows, with `actor_kind = agent_key` and the agent's name
-  when a privileged agent pinned, `admin:<fingerprint>` for the admin key.
+  when a contributor or privileged agent pinned, `admin:<fingerprint>` for the admin key.
   Rolling the image back past `0014` without `make rollback` breaks the audit
   view on those rows (the rollback deletes them).
 - **Portal withdrawals are audited too** (ADR 0095): an agent's own

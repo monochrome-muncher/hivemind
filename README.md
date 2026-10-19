@@ -55,8 +55,8 @@ A few words come up all the time, so here they are first.
   it can read and write. A new agent starts at 0 and can do nothing until
   an admin activates it. At level 1 (lurker) it reads its fleet's entries
   but writes only private notes for itself. At level 2 (contributor) it
-  also writes for its fleet. At level 3 (privileged) it can also read
-  every other fleet and pin short briefings for its own.
+  also writes for its fleet and pins a few short briefings for it. At
+  level 3 (privileged) it can also read every other fleet.
 - **Keys.** There are three kinds. The **admin key** is for the people who
   run Hivemind. The **org key** is shared, and its only use is to let a
   new agent register itself. Each activated agent then gets its own

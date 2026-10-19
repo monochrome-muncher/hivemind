@@ -265,17 +265,19 @@ CASES: list[tuple[str, Rest, tuple[int, str, str], Mcp, tuple[str, str]]] = [
         ("invalid_input", "only fleet entries can be pinned, to their own fleet"),
     ),
     (
-        "pin by a contributor",
-        lambda w: w.client.put(f"/v1/entries/{w.fleet_entry}/pin", headers=_h("k-dev")),
+        "pin by a lurker",
+        lambda w: w.client.put(f"/v1/entries/{w.fleet_entry}/pin", headers=_h("k-lurker")),
         (
             403,
             "forbidden",
-            "only a privileged agent of the entry's fleet or an admin may pin or unpin",
+            "only a contributor or privileged agent of the entry's fleet, "
+            "or an admin, may pin or unpin",
         ),
-        lambda w: mcp.hive_pin(w.mcp("k-dev"), w.fleet_entry),
+        lambda w: mcp.hive_pin(w.mcp("k-lurker"), w.fleet_entry),
         (
             "permission_denied",
-            "only a privileged agent of the entry's fleet or an admin may pin or unpin",
+            "only a contributor or privileged agent of the entry's fleet, "
+            "or an admin, may pin or unpin",
         ),
     ),
     (

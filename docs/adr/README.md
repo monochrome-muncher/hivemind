@@ -105,3 +105,4 @@ is unused.
 | [0093](0093-admin-flag-backlog.md) | The admin panel lists the flag backlog, oldest flag first (admin-only, observation-only) | Accepted |
 | [0094](0094-admin-csv-export.md) | The admin panel exports its lists as CSV (front end only) | Accepted |
 | [0095](0095-agent-portal.md) | The agent portal: a browser front end for agent-key holders | Accepted |
+| [0096](0096-contributors-pin.md) | Contributors pin and unpin (3 pins each), and a withdrawn entry leaves the briefing | Accepted |

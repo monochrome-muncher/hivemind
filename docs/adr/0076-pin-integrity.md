@@ -1,5 +1,7 @@
 # Pin integrity: audited pins and "changed since pinned"
 
+> **Status note:** amended by [ADR 0096](0096-contributors-pin.md): `agent_key` covers contributors, and a withdrawn pinned entry is unpinned (the line on withdrawn pins under Consequences no longer holds).
+>
 > **Status note:** amended by [ADR 0079](0079-feedback-dates-on-the-database-clock.md): feedback `updated_at` now comes from the store's clock, like `pinned_at`, so the skew noted under Consequences is corrected.
 >
 > **Amendment (2026-10-12):** the flag check no longer reads feedback rows. It compares `pinned_at` with `newest_flag_at`, the newest `stale` or `wrong` row of a non-revoked reporter, which `Store.feedback_signals` returns; the rule is unchanged, and the 50-row window (items 3 and Consequences below) is gone, so a flag is no longer missed when dozens of newer notes follow it.

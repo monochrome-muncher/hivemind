@@ -37,6 +37,7 @@ from hivemind.domain.entry import (
     SearchCount,
 )
 from hivemind.domain.feedback import Feedback, Verdict
+from hivemind.domain.pin import PinRefusal, PinWrite
 from hivemind.ports import Credential, SupersedeConflict
 from hivemind.services.chain import get_visible_entries
 from hivemind.services.pins import PinService
@@ -772,11 +773,12 @@ async def test_pins_are_capped_refreshed_and_newest_first(pg) -> None:
     store, _, _ = pg
     entries = [await store.create_entry(draft(f"Pin {i}")) for i in range(4)]
     writes = await asyncio.gather(*(store.pin_entry("fleet-x", e.id, "lead", 3) for e in entries))
-    assert sum(w is not None for w in writes) == 3
-    kept = [w for w in writes if w is not None]
+    kept = [w for w in writes if isinstance(w, PinWrite)]
+    assert len(kept) == 3 and all(w is PinRefusal.FLEET for w in writes if w not in kept)
     assert all(w.created for w in kept)
     again = await store.pin_entry("fleet-x", kept[0].pin.entry_id, "someone-else", 3)
-    assert again is not None and not again.created and again.pin.pinned_by == "someone-else"
+    assert isinstance(again, PinWrite) and not again.created
+    assert again.pin.pinned_by == "someone-else"
     assert again.pin.pinned_at >= kept[0].pin.pinned_at
     listed = await store.list_pins("fleet-x")
     assert len(listed) == 3 and listed[0].entry_id == kept[0].pin.entry_id
@@ -784,7 +786,20 @@ async def test_pins_are_capped_refreshed_and_newest_first(pg) -> None:
     assert await store.unpin_entry("fleet-x", kept[0].pin.entry_id) is True
     assert await store.unpin_entry("fleet-x", kept[0].pin.entry_id) is False
     assert await store.list_pins("fleet-y") == []
-    assert await store.pin_entry("fleet-x", "not-a-uuid", "lead", 3) is None
+    assert await store.pin_entry("fleet-x", "not-a-uuid", "lead", 3) is PinRefusal.FLEET
+
+
+async def test_the_agent_cap_holds_under_concurrent_pinners(pg) -> None:
+    """ADR 0096: the per-agent cap is checked under the fleet lock, so several
+    simultaneous pins by one agent store exactly the cap."""
+    store, _, _ = pg
+    entries = [await store.create_entry(draft(f"Agent pin {i}")) for i in range(6)]
+    writes = await asyncio.gather(
+        *(store.pin_entry("fleet-x", e.id, "dev", 10, agent_limit=3) for e in entries)
+    )
+    assert sum(isinstance(w, PinWrite) for w in writes) == 3
+    assert [w for w in writes if not isinstance(w, PinWrite)] == [PinRefusal.AGENT] * 3
+    assert len(await store.list_pins("fleet-x")) == 3
 
 
 async def test_pinned_listing_marks_superseded_and_flagged_pins(pg) -> None:

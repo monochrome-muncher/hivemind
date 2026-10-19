@@ -47,7 +47,7 @@ from hivemind.domain.feedback import (
     FlaggedEntry,
 )
 from hivemind.domain.health import Convergence, FleetHealth
-from hivemind.domain.pin import Pin, PinWrite
+from hivemind.domain.pin import Pin, PinRefusal, PinWrite
 from hivemind.domain.upstream import UpstreamLink
 
 
@@ -143,15 +143,19 @@ class Store(Protocol):
         pinned_by: str,
         limit: int,
         replaces: Sequence[str] = (),
-    ) -> PinWrite | None:
+        agent_limit: int | None = None,
+    ) -> PinWrite | PinRefusal:
         """Pin ``entry_id`` to ``fleet_id`` with a fresh
         ``pinned_at`` / ``pinned_by``: a new row, or the existing one
         refreshed (a re-pin acknowledges a change since pinned). Pins named
         in ``replaces`` (older versions it now shows) are removed in the
-        same step and reported in ``PinWrite.replaced``. ``None`` when the
-        fleet would hold more than ``limit`` pins (checked atomically; a
-        move or refresh never grows the count). The caller has checked the
-        entry and the permission."""
+        same step and reported in ``PinWrite.replaced``. A ``PinRefusal`` (nothing
+        written) when the fleet would hold more than ``limit`` pins (a move
+        or refresh never grows the count) or, with ``agent_limit``, when
+        ``pinned_by`` would hold more than that many of the fleet's pins
+        afterwards (a refresh restamps ``pinned_by``, so it counts; ``None``
+        is exempt). Both are checked atomically (ADR 0096; ``pin_refusal``).
+        The caller has checked the entry and the permission."""
         ...
 
     async def unpin_entry(self, fleet_id: str, entry_id: str) -> bool:
@@ -557,7 +561,7 @@ class Credential:
         """The audit-log ``actor`` (ADR 0027): ``admin:<fingerprint>``
         (all admin keys share ``user_id = "admin"``), ``org:<fingerprint>``
         for an org-key caller (ADR 0046), else the agent's name (a
-        privileged agent's pin, ADR 0076)."""
+        contributor's or privileged agent's pin, ADR 0096)."""
         if not (self.is_org or self.is_admin):
             return self.agent_name or self.user_id
         if self.key_id is None:

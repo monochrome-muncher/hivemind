@@ -239,16 +239,14 @@ export function pinRow(pin, { onOpen, agentHref = noHref } = {}) {
   return h("tr", {},
     h("td", { class: "cell-summary" },
       h("button", { type: "button", class: "linklike summary-text", text: pin.summary, onclick: () => onOpen(pin.id) }),
-      pin.state !== "active" && pin.state !== "withdrawn" ? h("div", {}, stateBadge(pin.state)) : null),
+      pin.state !== "active" ? h("div", {}, stateBadge(pin.state)) : null),
     h("td", {}, kindBadge(pin.kind)),
     h("td", { class: "nowrap" }, nameCell(pin.author, agentHref)),
     h("td", { class: "nowrap" }, nameCell(pin.pinned_by, agentHref)),
     h("td", { class: "nowrap", title: fmtTime(pin.pinned_at), text: fmtAgo(pin.pinned_at) }),
-    h("td", {}, pin.state === "withdrawn"
-      ? h("span", { class: "badge badge-revoked", title: "Withdrawn while pinned: a fleet member should unpin it", text: "withdrawn" })
-      : pin.changed_since_pin
-        ? h("span", { class: "badge badge-pending", title: "A fleet member should re-pin or unpin it", text: CHANGE_TEXT[pin.change_reason] || "changed" })
-        : h("span", { class: "muted", text: "unchanged" })));
+    h("td", {}, pin.changed_since_pin
+      ? h("span", { class: "badge badge-pending", title: "A fleet member should re-pin or unpin it", text: CHANGE_TEXT[pin.change_reason] || "changed" })
+      : h("span", { class: "muted", text: "unchanged" })));
 }
 
 // --- flagged memories ------------------------------------------------------------------

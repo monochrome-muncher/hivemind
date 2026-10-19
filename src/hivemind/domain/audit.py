@@ -14,8 +14,9 @@ Four actor kinds (ADR 0027, ADR 0046, ADR 0076):
 * ``org_key`` — a registration made with the shared org key (ADR 0046).
   The actor is ``org:<key fingerprint>``: verified as *an* org-key holder,
   which identifies no person (every agent shares that key).
-* ``agent_key`` — a privileged agent acting inside its own fleet (a pin
-  or unpin, ADR 0076). The actor is the server-verified agent name.
+* ``agent_key`` — a contributor or privileged agent acting inside its
+  own fleet (a pin or unpin, ADRs 0076, 0096; the unpin a withdrawal
+  triggers is the withdrawer's). The actor is the server-verified agent name.
 * ``cli`` — the ``hivemind-keys`` bootstrap / break-glass CLI. The
   actor is the operator-supplied ``--actor`` (default: the OS user) and
   is **unverified** — anyone with database access can type anything.
@@ -39,7 +40,7 @@ class ActorKind(StrEnum):
 
     ADMIN_KEY = "admin_key"  # the app admin surface: a verified admin key
     ORG_KEY = "org_key"  # a registration with the shared org key (ADR 0046)
-    AGENT_KEY = "agent_key"  # a privileged agent's own key: pin, unpin (ADR 0076)
+    AGENT_KEY = "agent_key"  # a contributor's or privileged agent's own key: pin, unpin (ADR 0096)
     CLI = "cli"  # the hivemind-keys CLI: an unverified, operator-typed name
 
 

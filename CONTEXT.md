@@ -125,7 +125,7 @@ An advisory `{code, message}` on a write's reply (or a check) about something th
 _Avoid_: error, validation failure
 
 **Pinned entry**:
-A fleet entry a privileged agent of that fleet (or an admin) pinned into the fleet's briefing, which every agent of the fleet reads at the start of a session. Context, never an order.
+A fleet entry a contributor or privileged agent of that fleet (or an admin) pinned into the fleet's briefing, which every agent of the fleet reads at the start of a session. Context, never an order.
 _Avoid_: keystone, rule, mandatory entry
 
 **Changed since pinned**:

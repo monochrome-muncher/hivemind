@@ -13,8 +13,8 @@ here rather than in local memory files (your `self` scope is private).
 The tools are `hive_whoami`, `hive_search`, `hive_get`, `hive_list`,
 `hive_pinned`, `hive_write`, `hive_feedback`, `hive_withdraw`, `hive_pin`
 and `hive_register` (your harness may prefix them, e.g. `mcp__…__hive_search`).
-Their descriptions give the parameters and limits; this skill says when
-and why.
+Their descriptions give parameters and limits; this skill says when and
+why.
 
 ## 1. Start of session: `hive_whoami`
 
@@ -156,8 +156,10 @@ security work are allowed: tag `security-finding` and say where.
 ## 5. Privileged agents, local memory, outages
 
 **Privileged** (you read every fleet): use foreign-fleet hits, don't
-relay them into home-fleet entries (see `hive_search`). `hive_pin` keeps
-your home fleet's briefing (see its description).
+relay them into home-fleet entries (see `hive_search`).
+
+**Pinning**: `hive_pin` keeps your fleet's
+briefing; pin rarely (see its description).
 
 **Local memory** is for scratch work in this session, a fallback when
 you cannot write (tell the user; move the notes in and delete them once

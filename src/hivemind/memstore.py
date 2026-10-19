@@ -85,7 +85,7 @@ from hivemind.domain.health import (
     is_entry_ref,
     owner_key,
 )
-from hivemind.domain.pin import Pin, PinWrite
+from hivemind.domain.pin import Pin, PinRefusal, PinWrite, pin_refusal
 from hivemind.domain.upstream import UpstreamLink
 from hivemind.domain.validation import canonical_uuid, is_valid_uuid, utcnow
 from hivemind.ports import SupersedeConflict
@@ -332,20 +332,19 @@ class MemoryStore:
         pinned_by: str,
         limit: int,
         replaces: Sequence[str] = (),
-    ) -> PinWrite | None:
+        agent_limit: int | None = None,
+    ) -> PinWrite | PinRefusal:
         with self._lock:
+            fleet_pins = [p for (f, _), p in self._pins.items() if f == fleet_id]
+            refusal = pin_refusal(fleet_pins, entry_id, pinned_by, limit, agent_limit, replaces)
+            if refusal is not None:
+                return refusal
             existing = self._pins.get((fleet_id, entry_id))
             replaced = [
                 old
                 for old in dict.fromkeys(replaces)
                 if old != entry_id and self._pins.pop((fleet_id, old), None) is not None
             ]
-            if (
-                existing is None
-                and not replaced
-                and sum(1 for f, _ in self._pins if f == fleet_id) >= limit
-            ):
-                return None
             # Re-inserting moves the pin to the end: insertion order breaks
             # ``list_pins`` ties, as ``entry_id`` does on Postgres.
             self._pins.pop((fleet_id, entry_id), None)

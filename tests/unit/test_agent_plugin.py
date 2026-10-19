@@ -76,6 +76,7 @@ def test_the_skill_carries_the_distillation_loop() -> None:
         "tags filter, they are not searched",
         "verified:",
         "Reading and agreeing is no test",
+        "Judge by your outcome, not the counts",
         "**Distill.**",
         "Conflict: A vs B",
         "`score` is findability, not truth",
@@ -98,7 +99,7 @@ def test_rules_moved_out_of_the_skill_live_in_the_tool_descriptions() -> None:
     assert "don't retry in a loop" in contract.DESC_WRITE
     assert "5 = outage" in contract.DESC_WRITE
     assert "verified:" in contract.DESC_FEEDBACK
-    assert "at most 10 pins" in contract.DESC_PIN
+    assert "an agent holds at most 3 pins, a fleet 10" in contract.DESC_PIN
 
 
 def test_the_skill_lists_every_tool_where_it_names_them() -> None:
@@ -309,7 +310,8 @@ def test_entry_content_is_declared_untrusted_data_everywhere() -> None:
 # 17,980; the post-2.5.0 compaction (shorter write, register and feedback
 # descriptions, no behaviour change) brought it back to 17,607. The
 # `upstream_changed` cue (one skill line, one description clause, ADR 0081)
-# measures 17,847; the `near_duplicate` pointer (ADR 0087) 17,929.
+# measures 17,847; the `near_duplicate` pointer (ADR 0087) 17,929; contributors
+# pinning (ADR 0096) 17,987 after trimming other wording.
 ALWAYS_ON_BUDGET = 18_000
 
 
