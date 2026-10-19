@@ -1,10 +1,10 @@
 # docker-compose for local development: a self-contained stack — Postgres
 # 16 + pgvector, a CPU vLLM embedding server (ADR 0005: self-hosted
 # embeddings, no data leaves the machine), the REST API, the admin panel,
-# and the streamable-HTTP MCP runner. `docker compose up -d` (or `make up`)
+# the agent portal and the streamable-HTTP MCP runner. `docker compose up -d` (or `make up`)
 # brings the whole system up; the entrypoint runs migrations before each
 # runner (ADR 0018), so there is no manual migrate step.
-#   make up          -> start the full stack (postgres, vllm, api, admin, mcp-http)
+#   make up          -> start the full stack (postgres, vllm, api, admin, portal, mcp-http)
 #   make pg          -> start just the database
 #   make vllm        -> start just the local vLLM embedding server (:8001)
 #   make pg-down     -> stop it (stops every compose service)
@@ -14,11 +14,14 @@
 #                       (same host port 8000 — one path at a time)
 #   make admin       -> run the admin panel locally on :8080 (the compose
 #                       panel maps to :8089; ADR 0029)
+#   make portal      -> run the agent portal locally on :8081 (the compose
+#                       portal maps to :8090; ADR 0095)
 #   make mcp-http    -> start the hostable streamable-HTTP MCP runner (detached docker service, :8088)
 #   make test        -> run the test suite (integration tests use this DB)
 #
 # Signing into the admin panel needs an admin key, issued once:
 #   uv run hivemind-keys issue-admin
+# The agent portal takes an agent's own key (the one its harness uses).
 #
 # Extra settings (e.g. entity extraction, ADR 0016): set the variable in a
 # gitignored `.env` in this directory — compose interpolates it into the
@@ -149,6 +152,42 @@ services:
         condition: service_healthy
     healthcheck:
       # The panel's own probe (ADR 0029): answers without calling hivemind-api.
+      test:
+        - CMD-SHELL
+        - |
+          python -c "
+          import urllib.request, sys
+          try:
+              r = urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)
+              sys.exit(0 if r.status == 200 else 1)
+          except Exception:
+              sys.exit(1)
+          "
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  # Agent portal (ADR 0095): the same kind of app as the admin panel, for
+  # people holding an agent key. Holds no DSN; the entrypoint skips the
+  # migration step for it. Loopback only (DEP-7). Host port 8081 is left to
+  # `make portal`; the portal maps to 8090 by default — override with
+  # HIVEMIND_PORTAL_HTTP_PORT.
+  portal:
+    build: .
+    image: hivemind-portal
+    environment:
+      HIVEMIND_RUNNER: portal
+      HIVEMIND_HOST: "0.0.0.0"
+      HIVEMIND_PORT: "8080"
+      HIVEMIND_PORTAL_API_URL: http://api:8000
+    ports:
+      - "127.0.0.1:${HIVEMIND_PORTAL_HTTP_PORT:-8090}:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      # The portal's own probe: answers without calling hivemind-api.
       test:
         - CMD-SHELL
         - |

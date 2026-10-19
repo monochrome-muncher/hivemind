@@ -27,6 +27,7 @@ WORKLOADS = [
     K8S / "hivemind-api-deployment.yaml",
     K8S / "hivemind-mcp-deployment.yaml",
     K8S / "admin" / "hivemind-admin-deployment.yaml",
+    K8S / "portal" / "hivemind-portal-deployment.yaml",
     K8S / "bootstrap" / "keys-job.yaml",
 ]
 
@@ -311,14 +312,14 @@ def test_workloads_are_hardened(path: Path) -> None:
         assert "/tmp" in mounts  # the only writable path
 
 
-@pytest.mark.parametrize("path", WORKLOADS[:3], ids=lambda p: p.name)
+@pytest.mark.parametrize("path", WORKLOADS[:4], ids=lambda p: p.name)
 def test_deployments_declare_resources(path: Path) -> None:
     res = _pod_spec(_load(path))["containers"][0]["resources"]
     assert res["requests"]["cpu"] and res["requests"]["memory"]
     assert res["limits"]["memory"]
 
 
-@pytest.mark.parametrize("path", WORKLOADS[:2], ids=lambda p: p.name)
+@pytest.mark.parametrize("path", [*WORKLOADS[:2], WORKLOADS[3]], ids=lambda p: p.name)
 def test_two_replica_deployments_spread_across_nodes(path: Path) -> None:
     pod = _pod_spec(_load(path))
     (tsc,) = pod["topologySpreadConstraints"]
@@ -366,6 +367,8 @@ def test_admin_api_is_denied_on_the_public_ingress_by_default() -> None:
     # The admin prefix, and the unauthenticated Prometheus target (ADR 0050).
     assert {(p["path"], p["pathType"]) for p in paths} == {
         ("/v1/admin", "Prefix"),
+        # The agent portal's routes: its proxy calls the API in-cluster (ADR 0095).
+        ("/v1/portal", "Prefix"),
         ("/metrics", "Exact"),
         # Admin-gated, but outside the /v1/admin prefix.
         ("/v1/metrics", "Exact"),
@@ -387,7 +390,7 @@ def test_egress_policy_is_its_own_opt_in_tree_and_fails_closed() -> None:
         for e in policy["spec"]["podSelector"]["matchExpressions"]
         if e["key"] == "app.kubernetes.io/component"
     }
-    assert selected == {("api", "mcp", "admin")}
+    assert selected == {("api", "mcp", "admin", "portal")}
     ports = {p["port"] for rule in policy["spec"]["egress"] for p in rule["ports"]}
     assert {53, 5432, 443, 8000} <= ports
     # Placeholder addresses come from the documentation range: unedited, the
@@ -424,7 +427,7 @@ def test_dockerfile_installs_from_the_lock_and_drops_root() -> None:
 def test_compose_publishes_dev_services_on_loopback_only() -> None:
     # mcp-http is the deliberate exception: remote agents must reach it.
     compose = yaml.safe_load((ROOT / "docker-compose.yaml").read_text())
-    for svc in ("postgres", "vllm", "api", "admin"):
+    for svc in ("postgres", "vllm", "api", "admin", "portal"):
         for port in compose["services"][svc]["ports"]:
             assert str(port).startswith("127.0.0.1:"), (svc, port)
 
@@ -524,3 +527,98 @@ def test_api_pods_are_annotated_for_prometheus() -> None:
     assert notes["prometheus.io/path"] == "/metrics"
     port = deployment["spec"]["template"]["spec"]["containers"][0]["ports"][0]["containerPort"]
     assert notes["prometheus.io/port"] == str(port)
+
+
+# --- the agent portal (ADR 0095) -----------------------------------------------------
+
+
+@pytest.mark.parametrize("runner", ["admin", "portal"])
+def test_entrypoint_skips_the_migration_for_the_web_apps(tmp_path: Path, runner: str) -> None:
+    env = _entrypoint_env(tmp_path, "echo SHOULD-NOT-MIGRATE; exit 9", "")
+    stub = tmp_path / "bin" / f"hivemind-{runner}"
+    stub.write_text('#!/bin/sh\necho "served $*"\n')
+    stub.chmod(0o755)
+    env["HIVEMIND_RUNNER"] = runner
+    proc = subprocess.run(
+        ["sh", str(ROOT / "entrypoint.sh"), "--x"], env=env, text=True, capture_output=True
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.split() == ["served", "--x"]
+
+
+def test_portal_deploys_on_its_own_with_two_replicas_a_pdb_and_no_secret() -> None:
+    portal = K8S / "portal"
+    assert _load(portal / "kustomization.yaml")["resources"] == [
+        "hivemind-portal-deployment.yaml",
+        "hivemind-portal-service.yaml",
+        "hivemind-portal-pdb.yaml",
+    ]
+    deployment = _load(portal / "hivemind-portal-deployment.yaml")
+    assert deployment["spec"]["replicas"] == 2
+    assert deployment["spec"]["strategy"]["rollingUpdate"]["maxUnavailable"] == 0
+    labels = deployment["spec"]["selector"]["matchLabels"]
+    assert labels == {"app.kubernetes.io/name": "hivemind", "app.kubernetes.io/component": "portal"}
+    pdb = _load(portal / "hivemind-portal-pdb.yaml")
+    assert pdb["spec"] == {"minAvailable": 1, "selector": {"matchLabels": labels}}
+    assert _load(portal / "hivemind-portal-service.yaml")["spec"]["type"] == "ClusterIP"
+    pod = _pod_spec(deployment)
+    assert pod["enableServiceLinks"] is False
+    (container,) = pod["containers"]
+    assert "envFrom" not in container  # never the DSN or the embedder key
+    env = {e["name"]: e.get("value") for e in container["env"]}
+    assert env["HIVEMIND_RUNNER"] == "portal"
+    assert env["HIVEMIND_PORTAL_API_URL"] == "http://hivemind-api:8000"
+    assert not any("DATABASE" in name or "KEY" in name for name in env)
+    for probe in ("livenessProbe", "readinessProbe"):
+        assert container[probe]["httpGet"]["path"] == "/healthz"
+
+
+def test_portal_ingress_example_is_internal_and_fails_closed() -> None:
+    portal = K8S / "portal"
+    (ingress,) = yaml.safe_load_all((portal / "ingress-internal.example.yaml").read_text())
+    notes = ingress["metadata"]["annotations"]
+    for spelling in ("allowlist", "whitelist"):
+        assert notes[f"nginx.ingress.kubernetes.io/{spelling}-source-range"] == "127.0.0.1/32"
+    assert (
+        ingress["spec"]["ingressClassName"]
+        != _optional_ingresses()["hivemind"]["spec"]["ingressClassName"]
+    )
+    assert ingress["spec"]["tls"]
+    # An example to edit, applied by hand: no kustomization pulls it in.
+    for kustomization in K8S.rglob("kustomization.yaml"):
+        assert "ingress-internal.example.yaml" not in _load(kustomization).get("resources", [])
+    # Nor does the public Ingress route anything to the portal.
+    for public in _optional_ingresses().values():
+        for rule in public["spec"]["rules"]:
+            for path in rule["http"]["paths"]:
+                assert path["backend"]["service"]["name"] != "hivemind-portal"
+
+
+def test_portal_network_policy_admits_the_ingress_and_lets_it_reach_the_api() -> None:
+    docs = yaml.safe_load_all(
+        (K8S / "optional" / "networkpolicy" / "networkpolicy.yaml").read_text()
+    )
+    policies = {d["metadata"]["name"]: d for d in docs}
+    assert policies["hivemind-portal"]["spec"]["ingress"][0]["ports"] == [{"port": 8080}]
+    api_sources = [
+        peer.get("podSelector", {}).get("matchLabels", {}).get("app.kubernetes.io/component")
+        for rule in policies["hivemind-api"]["spec"]["ingress"]
+        for peer in rule["from"]
+    ]
+    assert {"admin", "portal"} <= set(api_sources)
+
+
+@pytest.mark.parametrize(
+    ("compose_file", "port"),
+    [("docker-compose.yaml", "8090"), ("docker-compose.standalone.yaml", "8190")],
+)
+def test_compose_runs_the_portal_on_loopback_without_a_database(
+    compose_file: str, port: str
+) -> None:
+    service = yaml.safe_load((ROOT / compose_file).read_text())["services"]["portal"]
+    env = service["environment"]
+    assert env["HIVEMIND_RUNNER"] == "portal"
+    assert env["HIVEMIND_PORTAL_API_URL"] == "http://api:8000"
+    assert not any("DATABASE" in name for name in env)
+    (published,) = service["ports"]
+    assert published.startswith("127.0.0.1:") and port in published

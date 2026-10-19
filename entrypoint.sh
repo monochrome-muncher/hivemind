@@ -13,6 +13,7 @@
 #   HIVEMIND_RUNNER=api       REST surface (hivemind-api)
 #   HIVEMIND_RUNNER=mcp-http  hostable multi-agent MCP runner (ADR 0010)
 #   HIVEMIND_RUNNER=admin     admin panel UI + proxy to hivemind-api (ADR 0029)
+#   HIVEMIND_RUNNER=portal    agent portal UI + proxy to hivemind-api (ADR 0095)
 #   HIVEMIND_RUNNER=migrate   idempotent schema migration (ADR 0013)
 #   HIVEMIND_RUNNER=keys      key-management CLI (SPEC §8.1, ADR 0012)
 #
@@ -22,8 +23,8 @@ set -eu
 runner="${HIVEMIND_RUNNER:-mcp-http}"
 
 # The migration pre-step (ADR 0018), cheap on an up-to-date pool. Skipped
-# when the runner IS the migration, and for the admin panel, which has no
-# database (ADR 0029).
+# when the runner IS the migration, and for the admin panel and the agent
+# portal, which have no database (ADRs 0029, 0095).
 #
 # DEP-14: this shell is PID 1, which ignores SIGTERM without a handler, so
 # a foreground `hivemind-migrate` (e.g. waiting on the ADR 0020 advisory
@@ -44,7 +45,7 @@ case "$runner" in
     run_migrate "$@"
     exit 0
     ;;
-  admin) ;;
+  admin|portal) ;;
   *) run_migrate ;;
 esac
 

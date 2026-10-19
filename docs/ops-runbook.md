@@ -34,6 +34,7 @@ multi-tenant isolation.
 | `vllm` | `vllm/vllm-openai-cpu` | local CPU embedding server (ADR 0005; `:8001`, loopback only), fully-local path |
 | `api` | this repo (`Dockerfile`) | the REST API (SPEC §5.1; `127.0.0.1:8000`, loopback only) |
 | `admin` | this repo (`Dockerfile`) | the admin panel (ADR 0029; `127.0.0.1:8089`, loopback only), proxying to `api` |
+| `portal` | this repo (`Dockerfile`) | the agent portal (ADR 0095; `127.0.0.1:8090`, loopback only), proxying to `api` |
 | `mcp-http` | this repo (`Dockerfile`) | the hostable, multi-agent streamable-HTTP MCP runner (ADR 0010; host port 8088) |
 
 ### Bring up

@@ -6,10 +6,13 @@
 # sources may reach it. Probes from the kubelet (node-local) are allowed by
 # the mainstream CNIs; if yours blocks them, add an ipBlock for the node CIDR.
 #
-#   hivemind-api   <- the ingress controller + the admin panel + Prometheus
-#   hivemind-mcp   <- the ingress controller
-#   hivemind-admin <- the ingress controller only (operators normally use
-#                     `kubectl port-forward`, which is not subject to these)
+#   hivemind-api    <- the ingress controller + the admin panel + the agent
+#                      portal + Prometheus
+#   hivemind-mcp    <- the ingress controller
+#   hivemind-admin  <- the ingress controller only (operators normally use
+#                      `kubectl port-forward`, which is not subject to these)
+#   hivemind-portal <- the ingress controller only (EDIT the namespace when
+#                      the portal sits behind a separate internal controller)
 #
 # ADJUST before applying:
 #   * `ingress-nginx` below is the namespace of the org's ingress controller
@@ -45,6 +48,10 @@ spec:
             matchLabels:
               app.kubernetes.io/name: hivemind
               app.kubernetes.io/component: admin
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: hivemind
+              app.kubernetes.io/component: portal
       ports:
         - port: 8000
     # Prometheus (ADR 0050). EDIT the namespace to where yours runs.
@@ -90,6 +97,29 @@ spec:
       app.kubernetes.io/component: admin
   policyTypes: [Ingress]
   ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: hivemind-portal
+  labels:
+    app.kubernetes.io/name: hivemind
+    app.kubernetes.io/component: portal
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: hivemind
+      app.kubernetes.io/component: portal
+  policyTypes: [Ingress]
+  ingress:
+    # EDIT: the namespace of the INTERNAL ingress controller that fronts the
+    # portal (deploy/kubernetes/portal/ingress-internal.example.yaml).
     - from:
         - namespaceSelector:
             matchLabels:

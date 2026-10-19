@@ -1,0 +1,20 @@
+# The agent portal (`hivemind-portal`, ADR 0095) — its OWN kustomization,
+# like the admin panel's, so it deploys standalone:
+#
+#   kubectl kustomize deploy/kubernetes/portal | kubectl apply -f -
+#
+# It needs exactly one thing from the rest of the cluster: a reachable
+# hivemind-api, named by HIVEMIND_PORTAL_API_URL in the Deployment. It
+# mounts no Secret and holds no DSN — it never talks to Postgres, and the
+# agent key is typed into the browser by the person using it, never
+# configured.
+#
+# Not included: ingress-internal.example.yaml, an INTERNAL Ingress to edit
+# and apply by hand (DEPLOY.md). Never expose the portal publicly.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: hivemind
+resources:
+  - hivemind-portal-deployment.yaml
+  - hivemind-portal-service.yaml
+  - hivemind-portal-pdb.yaml

@@ -20,7 +20,9 @@ Layout:
   the api/mcp Deployments carry modest resource requests/limits and prefer
   different nodes (`topologySpreadConstraints`, `ScheduleAnyway`);
   the image installs the dependency set locked in `uv.lock`;
-  `optional/` is the opt-in nginx Ingress + cert-manager Certificate)
+  `optional/` is the opt-in nginx Ingress + cert-manager Certificate;
+  `admin/` and `portal/` are the admin panel and the agent portal, each
+  its own kustomization, §8 and §9)
 - [`.gitlab-ci.yml`](.gitlab-ci.yml) — the pipeline (test → build → deploy);
   the first-run key bootstrap is
   [`scripts/ci-bootstrap-keys.sh`](scripts/ci-bootstrap-keys.sh) +
@@ -118,7 +120,7 @@ The 5-step operator flow:
    (after setting the real hostname + issuer in
    `deploy/kubernetes/optional/ingress.yaml`). The tree has a second
    Ingress, `hivemind-admin-api`, that keeps the admin REST surface
-   (`/v1/admin/*` and the admin-only `/v1/metrics`) and the unauthenticated Prometheus target (`/metrics`, ADR 0050; scrape the pods directly) off the internet: it answers 403 to every source outside
+   (`/v1/admin/*` and the admin-only `/v1/metrics`), the agent portal's routes (`/v1/portal/*`, which the portal calls in-cluster, §9) and the unauthenticated Prometheus target (`/metrics`, ADR 0050; scrape the pods directly) off the internet: it answers 403 to every source outside
    its `allowlist-source-range` (default `127.0.0.1/32`, nobody). Operators
    use the admin panel (§8) or `kubectl port-forward`; to admit an operator
    network, put its CIDRs in both source-range annotations. The main
@@ -132,9 +134,9 @@ The 5-step operator flow:
    external traffic off. Needs a CNI that enforces NetworkPolicy; apply with
    `kubectl kustomize deploy/kubernetes/optional/networkpolicy | kubectl -n hivemind apply -f -`.
    The stricter **default-deny egress** policy is its own tree,
-   `deploy/kubernetes/optional/networkpolicy/egress/`: it lets the api, mcp
-   and admin pods reach only DNS, Postgres, the embedding/extractor
-   endpoints and (for the panel) `hivemind-api`. Replace its placeholder
+   `deploy/kubernetes/optional/networkpolicy/egress/`: it lets the api, mcp,
+   admin and portal pods reach only DNS, Postgres, the embedding/extractor
+   endpoints and (for the panel and the portal) `hivemind-api`. Replace its placeholder
    `192.0.2.x` addresses with yours first; unedited, it fails closed and the
    pods cannot reach Postgres.
 
@@ -655,3 +657,75 @@ every forwarded response `Cache-Control: no-store`, and never logs a
 header or a body. `GET /healthz` is its own probe and does not call the
 API.
 
+
+## 9. Agent portal (`hivemind-portal`, ADR 0095)
+
+A browser front end for the people behind the agents. Someone signs in
+with one agent's key and sees what that agent wrote (withdrawn and
+superseded included), the verdicts it gave, the verdicts on its memories,
+its home fleet's memories and pins, and a search over everything the key
+can read. They can withdraw the agent's own memories, with a reason, and
+each such withdrawal is in the audit log as `entry.withdraw` with
+`via: "portal"`. Nothing else is written: no new memories, no verdicts, no
+pins. Admin and org keys are turned away (the admin panel, §8, is for the
+admin key). Searches made in the portal are left out of the search
+counters.
+
+**What it needs.** One env var: `HIVEMIND_PORTAL_API_URL`, the base URL of
+the hivemind-api deployment (in-cluster: `http://hivemind-api:8000`). For
+an https URL behind an internal CA, also set `HIVEMIND_PORTAL_API_CA_BUNDLE`
+to a mounted PEM file. Like the panel it holds **no DSN and no Secret**,
+never talks to Postgres, and the entrypoint skips the migration step for
+it. Upgrade `hivemind-api` first, or together: an older API answers 404 to
+the portal's own routes.
+
+**Deploying it.** Its own kustomization, on the same image:
+
+```bash
+kubectl kustomize deploy/kubernetes/portal \
+  | sed "s|hivemind:0.0.0|$IMAGE|g" | kubectl -n hivemind apply -f -
+```
+
+The in-repo `.gitlab-ci.yml` deploy job runs exactly this as step 6. Two
+replicas with a `minAvailable: 1` PodDisruptionBudget and a
+`maxUnavailable: 0` rollout, as for the API (ADR 0026), because people
+other than the operator use it. It is stateless: the key lives in the
+browser tab, so any replica serves any request.
+
+**Reaching it.** Behind an **internal** ingress only, never a public one:
+an agent key is a credential, and the portal shows everything the key can
+read. `deploy/kubernetes/portal/ingress-internal.example.yaml` is a
+starting point that no kustomization applies. Before applying it with
+`kubectl -n hivemind apply -f`, set its `ingressClassName` to your
+internal ingress class, replace the placeholder host and TLS secret, and
+replace the `127.0.0.1/32` source range (which admits nobody) with your
+internal network's ranges. Serve it over TLS: the browser sends the agent
+key on every request. With the example NetworkPolicies (§2 step 6), edit
+the `hivemind-portal` policy's namespace when the internal controller
+runs somewhere other than `ingress-nginx`. For a quick look:
+
+```bash
+kubectl -n hivemind port-forward svc/hivemind-portal 8080:8080
+# then open http://localhost:8080 and sign in with an agent key
+```
+
+**Which key.** The agent's own key, the one its harness uses (from
+activation or `hivemind-keys issue-agent`). The portal keeps it in the
+tab's `sessionStorage` under its own name, separate from the admin
+panel's, and holds one key at a time: to look at another agent, sign out
+and sign in with that agent's key.
+
+**Locally:** `make up` starts it on `http://localhost:8090` (the
+standalone stack: `:8190`). The uv-process path: `make api` in one shell,
+`make portal` in another, then open `http://localhost:8081`.
+
+**What it forwards.** `GET /v1/whoami`, `GET /v1/entries/{id}` (the
+drawer, with `?history=true`), `GET /v1/pins`, the portal routes
+(`GET /v1/portal/entries`, `POST /v1/portal/search`,
+`GET /v1/portal/feedback`, `POST /v1/portal/entries/{id}/withdraw`) and
+`GET /v1/health`. Anything else, the data plane's writes and its counted
+search included, is a 404 from the portal itself. Headers, caching and
+logging are as for the panel: `X-API-Key`, `Content-Type` and `Accept`
+only, `Cache-Control: no-store`, no header or body logged, and
+`GET /healthz` as its own probe. The portal serves the panel's shared
+front-end modules (ADR 0091) by exact name and none of its other files.

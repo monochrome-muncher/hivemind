@@ -196,6 +196,11 @@ deploy:
     #    live in its own project; same image, no Secret, no migration.
     - kubectl kustomize deploy/kubernetes/admin | sed "s|hivemind:0.0.0|$IMAGE|g" | kubectl -n hivemind apply -f -
     - kubectl -n hivemind rollout status deployment/hivemind-admin --timeout=120s
+    # 6) The agent portal (ADR 0095), the same way: its own kustomization,
+    #    same image, no Secret, no migration. ClusterIP only; its internal
+    #    Ingress is applied by hand (DEPLOY.md).
+    - kubectl kustomize deploy/kubernetes/portal | sed "s|hivemind:0.0.0|$IMAGE|g" | kubectl -n hivemind apply -f -
+    - kubectl -n hivemind rollout status deployment/hivemind-portal --timeout=120s
     # kubectl credentials come from the GitLab Kubernetes agent; its
     # ServiceAccount needs the verbs in DEPLOY.md §7. K8S_SECRET_* MUST be
     # Protected (DEPLOY.md §1).

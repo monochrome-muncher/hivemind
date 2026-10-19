@@ -1,0 +1,21 @@
+# Cluster-internal exposure of the agent portal. Put it behind an INTERNAL
+# ingress (ingress-internal.example.yaml, DEPLOY.md) — never a
+# public one: an agent key is a credential, and the portal shows what the
+# key can read. `kubectl -n hivemind port-forward svc/hivemind-portal 8080`
+# works for a quick look.
+apiVersion: v1
+kind: Service
+metadata:
+  name: hivemind-portal
+  labels:
+    app.kubernetes.io/name: hivemind
+    app.kubernetes.io/component: portal
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: hivemind
+    app.kubernetes.io/component: portal
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

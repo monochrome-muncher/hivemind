@@ -62,7 +62,8 @@ spec:
 ---
 # The admin surface (/v1/admin/*, admin-only /v1/metrics) is for operators
 # via the admin panel (ADR 0029) or `kubectl port-forward`, never the
-# internet. This Ingress takes those paths (nginx picks the longest prefix)
+# internet; the agent portal's routes (/v1/portal/*, ADR 0095) are for the
+# portal, which calls the API in-cluster. This Ingress takes those paths (nginx picks the longest prefix)
 # plus /metrics, the unauthenticated Prometheus target (ADR 0050, scraped
 # per pod), and admits only the listed source ranges. The default
 # 127.0.0.1/32 admits nobody, so external requests get 403; add operator
@@ -92,6 +93,16 @@ spec:
       http:
         paths:
           - path: /v1/admin
+            pathType: Prefix
+            backend:
+              service:
+                name: hivemind-api
+                port:
+                  number: 8000
+          # The agent portal's routes (ADR 0095): the portal reaches the API
+          # in-cluster, and agents have the data plane's own routes, so the
+          # internet needs none of them (its search is not counted).
+          - path: /v1/portal
             pathType: Prefix
             backend:
               service:

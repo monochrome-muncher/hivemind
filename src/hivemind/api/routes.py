@@ -13,9 +13,10 @@ Error codes: ``missing_api_key``/``unknown_api_key`` (401),
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query, Response
@@ -60,6 +61,8 @@ from hivemind.api.schemas import (
     PinnedOut,
     PinOut,
     PinsOut,
+    PortalSearchRequest,
+    PortalWithdrawRequest,
     RegisterAgentRequest,
     RegisteredAgentOut,
     RelatedOut,
@@ -80,7 +83,7 @@ from hivemind.domain.access import (
     UnknownFleet,
 )
 from hivemind.domain.audit import AuditAction, AuditFilters
-from hivemind.domain.entry import EntryFilters, Kind, Source
+from hivemind.domain.entry import Entry, EntryFilters, Kind, Source
 from hivemind.domain.feedback import FeedbackLogFilters, Verdict
 from hivemind.domain.recency import RecencyHint
 from hivemind.domain.validation import (
@@ -129,6 +132,7 @@ ADMIN_ENTRIES_DEFAULT_LIMIT = 50
 # GET /v1/admin/feedback default page size; the ceiling is MAX_LIMIT.
 ADMIN_FEEDBACK_DEFAULT_LIMIT = 50
 ADMIN_FLAGGED_DEFAULT_LIMIT = 50
+PORTAL_DEFAULT_LIMIT = 50
 MAX_FLAG_AGE_DAYS = 3650  # the flag backlog's age filter: ten years
 MIN_ACTIVITY_DAYS = 1
 MAX_ACTIVITY_DAYS = 365
@@ -243,13 +247,11 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
                 prometheus.degraded_searches.inc()
         return [HitOut.from_hit(h) for h in result.hits]
 
-    async def _withdraw(
-        entry_id: str, request: WithdrawRequest, credential: Credential
-    ) -> EntryOut:
-        """Withdraw through the governance service (audited there as
-        ``entry.withdraw``) and map its typed errors."""
+    async def _withdraw(entry_id: str, withdrawal: Awaitable[Entry]) -> EntryOut:
+        """Await a governance withdrawal (audited there as ``entry.withdraw``
+        when it should be) and map its typed errors."""
         try:
-            entry = await app.governance_service.withdraw(credential, entry_id, request.reason)
+            entry = await withdrawal
         except EntryNotFound:
             raise api_error(404, "not_found", f"unknown entry: {entry_id}") from None
         except PermissionDenied as exc:
@@ -453,7 +455,9 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
 
         404 unknown entry, 403 non-author, 409 already inactive.
         """
-        return await _withdraw(entry_id, request, credential)
+        return await _withdraw(
+            entry_id, app.governance_service.withdraw(credential, entry_id, request.reason)
+        )
 
     @router.put("/entries/{entry_id}/pin", response_model=PinOut)
     async def pin(entry_id: str, credential: require) -> PinOut:
@@ -598,6 +602,96 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
             message=registration.message,
         )
 
+    # --- Agent portal (ADR 0095): agent keys only ------------------------
+
+    def _require_agent(credential: Credential, what: str) -> None:
+        # An active agent's own key: not the admin or org key, and not a
+        # dev-mode identity (which has no agent name).
+        if credential.is_admin or credential.is_org or credential.agent_name is None:
+            raise api_error(
+                403,
+                "forbidden",
+                f"{what} requires an agent key, not the admin or org key",
+            )
+
+    @router.get("/portal/entries", response_model=list[EntryOut])
+    async def portal_list_entries(
+        credential: require,
+        kind: Annotated[Kind | None, Query()] = None,
+        tags: Annotated[list[str] | None, Query()] = None,
+        scope: Annotated[str | None, Query()] = None,
+        fleet_id: IdQuery = None,
+        author: ActorQuery = None,
+        include_inactive: bool = False,
+        flagged: bool = False,
+        limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = PORTAL_DEFAULT_LIMIT,
+        offset: Annotated[int, Query(ge=0, le=MAX_OFFSET)] = 0,
+    ) -> list[EntryOut]:
+        """List what the agent's key can read, newest first (ADR 0095):
+        the ``GET /v1/entries`` filters plus ``fleet_id``, so the portal
+        can show the home fleet alone even to a privileged agent."""
+        _require_agent(credential, "the agent portal")
+        filters = EntryFilters(
+            kind=kind,
+            tags=tuple(tags or ()),
+            scope=scope,
+            fleet_id=fleet_id,
+            author=author,
+            include_inactive=include_inactive,
+            flagged=flagged,
+        )
+        entries = await app.read_service.list(
+            filters, limit=limit, offset=offset, visibility=credential.visibility()
+        )
+        return [EntryOut.from_entry(e) for e in entries]
+
+    @router.post("/portal/search", response_model=list[HitOut])
+    async def portal_search(
+        request: PortalSearchRequest, credential: require, response: Response
+    ) -> list[HitOut]:
+        """``POST /v1/search`` for a person holding an agent key (ADR 0095),
+        with a ``fleet_id`` filter. Not counted in the search counters, so
+        a person browsing does not move the agents' search numbers."""
+        _require_agent(credential, "the agent portal")
+        return await _search(request, credential, response, fleet_id=request.fleet_id, count=False)
+
+    @router.get("/portal/feedback", response_model=list[FeedbackLogItemOut])
+    async def portal_feedback(
+        credential: require,
+        direction: Annotated[Literal["given", "received"], Query()],
+        verdict: Annotated[Verdict | None, Query()] = None,
+        entry_id: IdQuery = None,
+        limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = PORTAL_DEFAULT_LIMIT,
+        offset: Annotated[int, Query(ge=0, le=MAX_OFFSET)] = 0,
+    ) -> list[FeedbackLogItemOut]:
+        """The agent's side of the feedback log (ADR 0095): the verdicts it
+        ``given``, or the verdicts its own memories ``received``, newest
+        first, on entries its key can read."""
+        _require_agent(credential, "the agent portal")
+        name = credential.agent_name
+        filters = FeedbackLogFilters(
+            reporter=name if direction == "given" else None,
+            author=name if direction == "received" else None,
+            verdict=verdict,
+            entry_id=entry_id,
+        )
+        items = await app.governance_service.feedback_log(
+            credential, filters, limit=limit, offset=offset
+        )
+        return [FeedbackLogItemOut.from_item(i) for i in items]
+
+    @router.post("/portal/entries/{entry_id}/withdraw", response_model=EntryOut)
+    async def portal_withdraw(
+        entry_id: str, request: PortalWithdrawRequest, credential: require
+    ) -> EntryOut:
+        """Withdraw one of the agent's own entries from the portal (ADR
+        0095): a reason is required and the withdrawal is audited as
+        ``entry.withdraw`` with ``via: "portal"``."""
+        _require_agent(credential, "the agent portal")
+        return await _withdraw(
+            entry_id, app.governance_service.withdraw_own(credential, entry_id, request.reason)
+        )
+
     # --- Admin console reads (ADR 0080): admin key only ------------------
 
     def _require_admin(credential: Credential, what: str) -> None:
@@ -674,7 +768,9 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         """Withdraw an entry as the admin (ADR 0080): the same call as
         ``POST /v1/entries/{id}/withdraw``, audited as ``entry.withdraw``."""
         _require_admin(credential, "the admin withdraw")
-        return await _withdraw(entry_id, request, credential)
+        return await _withdraw(
+            entry_id, app.governance_service.withdraw(credential, entry_id, request.reason)
+        )
 
     @router.get("/admin/activity", response_model=ActivityOut)
     async def admin_activity(
