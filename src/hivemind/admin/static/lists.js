@@ -2,7 +2,7 @@
 //
 // These know no route, no key and no app state: each takes a page fetcher,
 // an "open this memory" callback and a fleet-name lookup, so the admin panel
-// and an agent-key app can show the same rows over their own endpoints.
+// and the agent portal show the same rows over their own endpoints.
 // Summaries, tags and notes are written by agents: plain text only.
 
 import { h, link, toast, fmtAgo, fmtTime, kindBadge, stateBadge, verdictBadge } from "./ui.js";

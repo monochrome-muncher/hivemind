@@ -368,7 +368,7 @@ _Avoid_: DB version, migration cursor, schema fingerprint
 
 **Usage counters**:
 The minimal operational metrics surface (`GET /v1/metrics`, admin-gated): entries / fleets / agents counters (trust-level distribution, writes per fleet, pending-agent count) that make the SPEC §10 usage-based triggers measurable rather than guesswork (ROADMAP §3.3).
-_Avoid_: analytics, telemetry (that is the broader §10 story), dashboards (a UI is a non-goal, SPEC §9)
+_Avoid_: analytics, telemetry (that is the broader §10 story), dashboards (the admin panel is the operator's view of these numbers; see **Admin panel**)
 
 **Fleet health metrics**:
 The `health` section of the usage report: observations of the pool (verdict notes, sources, correction speed, orphaned flags, concentration, owner-level sibling verdicts, synthesis) for the operator. Admin-only and never an input to search, ranking, scoring or the briefing (ADR 0075).

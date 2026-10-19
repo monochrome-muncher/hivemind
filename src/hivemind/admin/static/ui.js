@@ -1,6 +1,6 @@
 // Hivemind front-end kit: the generic half of the panel, with no session,
-// no key and no admin route in it, so another front end (an agent-key app)
-// can import it as is.
+// no key and no admin route in it, so the agent portal (ADR 0095) imports
+// it as is.
 //
 // Rules every module that uses it keeps:
 // * Every piece of API data reaches the page through textContent (the
