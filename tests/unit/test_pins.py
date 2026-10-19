@@ -1,5 +1,6 @@
-"""Pinned entries (ADR 0058): a privileged agent of a fleet (or an admin)
-pins a few fleet entries; every agent of the fleet reads them first."""
+"""Pinned entries (ADRs 0058, 0096): a contributor or privileged agent of a
+fleet (or an admin) pins a few fleet entries; every agent of the fleet reads
+them first."""
 
 from __future__ import annotations
 
@@ -14,7 +15,7 @@ from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
 from hivemind.domain.audit import ActorKind, AuditAction, AuditFilters, AuditRecord
 from hivemind.domain.feedback import Feedback, Verdict
-from hivemind.domain.validation import MAX_PINS_PER_FLEET
+from hivemind.domain.validation import MAX_PINS_PER_AGENT, MAX_PINS_PER_FLEET
 from hivemind.mcp.app import (
     McpHivemind,
     hive_feedback,
@@ -27,6 +28,7 @@ from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService, WriteService
+from hivemind.services.pins import PinService
 from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
 from tests.fakes import FakeAuthenticator, make_clock, make_embedder, make_search_config
@@ -45,6 +47,8 @@ def _agent(name: str, level: TrustLevel, fleet: str = "fleet-a") -> Credential:
 
 LEAD = _agent("lead", TrustLevel.PRIVILEGED)
 DEV = _agent("dev", TrustLevel.CONTRIBUTOR)
+LURKER = _agent("lurker", TrustLevel.LURKER)
+DEV2 = _agent("dev2", TrustLevel.CONTRIBUTOR)
 OTHER_LEAD = _agent("other-lead", TrustLevel.PRIVILEGED, "fleet-b")
 OUTSIDER = _agent("outsider", TrustLevel.CONTRIBUTOR, "fleet-b")
 ADMIN = Credential(user_id="admin", is_admin=True)
@@ -91,15 +95,95 @@ async def test_a_privileged_member_pins_and_every_member_reads_it() -> None:
     assert _pinned_ids(await hive_pinned(_surface(store, DEV))) == [entry]
 
 
-async def test_only_privileged_members_or_admins_may_pin() -> None:
+async def test_contributors_and_privileged_members_and_admins_may_pin() -> None:
     store = MemoryStore(make_clock())
     entry = await _write(store, DEV, "a fleet decision")
-    denied = await hive_pin(_surface(store, DEV), entry)
-    assert denied["error"]["code"] == "permission_denied"  # type: ignore[index]
-    # A privileged agent of another fleet reads the entry but may not pin it.
-    foreign = await hive_pin(_surface(store, OTHER_LEAD), entry)
-    assert foreign["error"]["code"] == "permission_denied"  # type: ignore[index]
+    mine = await hive_pin(_surface(store, DEV), entry)
+    assert mine["pinned"] is True and mine["pinned_by"] == "dev"
     assert (await hive_pin(_surface(store, ADMIN), entry))["pinned"] is True
+
+
+async def test_lurkers_and_other_fleets_may_not_pin_or_unpin() -> None:
+    store = MemoryStore(make_clock())
+    entry = await _write(store, DEV, "a fleet decision")
+    await hive_pin(_surface(store, DEV), entry)
+    # A contributor of another fleet cannot even read the entry.
+    for cred, code in (
+        (LURKER, "permission_denied"),
+        (OUTSIDER, "not_found"),
+        (OTHER_LEAD, "permission_denied"),  # privileged: reads every fleet
+    ):
+        for unpin in (False, True):
+            denied = await hive_pin(_surface(store, cred), entry, unpin=unpin)
+            assert denied["error"]["code"] == code, (cred.user_id, unpin)  # type: ignore[index]
+    assert _pinned_ids(await hive_pinned(_surface(store, DEV))) == [entry]
+
+
+async def test_a_member_unpins_someone_elses_pin() -> None:
+    store = MemoryStore(make_clock())
+    entry = await _write(store, LEAD, "outdated rule")
+    await hive_pin(_surface(store, LEAD), entry)
+    removed = await hive_pin(_surface(store, DEV), entry, unpin=True)
+    assert removed["removed"] is True
+    assert (await hive_pinned(_surface(store, LEAD)))["pins"] == []
+    again = await _write(store, DEV, "dev's own")
+    await hive_pin(_surface(store, DEV), again)
+    assert (await hive_pin(_surface(store, LEAD), again, unpin=True))["removed"] is True
+
+
+async def test_an_agent_holds_a_bounded_number_of_pins() -> None:
+    store = MemoryStore(make_clock())
+    dev = _surface(store, DEV)
+    ids = [await _write(store, DEV, f"decision {i}") for i in range(MAX_PINS_PER_AGENT + 2)]
+    for entry in ids[:MAX_PINS_PER_AGENT]:
+        assert (await hive_pin(dev, entry))["pinned"] is True
+    over = await hive_pin(dev, ids[MAX_PINS_PER_AGENT])
+    assert over["error"]["code"] == "invalid_input"  # type: ignore[index]
+    assert f"you already hold {MAX_PINS_PER_AGENT} of this fleet's pins" in over["error"]["message"]  # type: ignore[index]
+    # Re-pinning one of one's own pins is a refresh, within the cap.
+    assert (await hive_pin(dev, ids[0]))["pinned"] is True
+    # Another agent has its own count, and taking over a pin counts for the taker.
+    other = _surface(store, DEV2)
+    assert (await hive_pin(other, ids[MAX_PINS_PER_AGENT]))["pinned"] is True
+    assert (await hive_pin(other, ids[0]))["pinned"] is True  # dev now holds two
+    assert (await hive_pin(dev, ids[MAX_PINS_PER_AGENT + 1]))["pinned"] is True
+    # dev holds three again; refreshing dev2's pin would make it four.
+    assert (await hive_pin(dev, ids[MAX_PINS_PER_AGENT]))["error"]["code"] == "invalid_input"  # type: ignore[index]
+    # Unpinning frees a slot, whoever made the pin.
+    assert (await hive_pin(other, ids[1], unpin=True))["removed"] is True
+    assert (await hive_pin(dev, ids[MAX_PINS_PER_AGENT]))["pinned"] is True
+
+
+async def test_the_admin_is_exempt_from_the_agent_cap_but_not_the_fleet_cap() -> None:
+    store = MemoryStore(make_clock())
+    admin = _surface(store, ADMIN)
+    ids = [await _write(store, DEV, f"decision {i}") for i in range(MAX_PINS_PER_FLEET + 1)]
+    for entry in ids[:MAX_PINS_PER_FLEET]:
+        assert (await hive_pin(admin, entry))["pinned"] is True
+    full = await hive_pin(admin, ids[-1])
+    assert "the fleet already has" in full["error"]["message"]  # type: ignore[index]
+    # A full fleet refuses a member with the fleet message, not the agent one.
+    member = await hive_pin(_surface(store, DEV), ids[-1])
+    assert "the fleet already has" in member["error"]["message"]  # type: ignore[index]
+
+
+async def test_a_move_onto_a_new_version_counts_once_for_the_agent() -> None:
+    store = MemoryStore(make_clock())
+    dev = _surface(store, DEV)
+    first = [await _write(store, DEV, f"rule {i}") for i in range(MAX_PINS_PER_AGENT)]
+    for entry in first:
+        await hive_pin(dev, entry)
+    new = await _write(store, LEAD, "rule 0, revised", supersedes=[first[0]])
+    moved = await hive_pin(dev, new)  # replaces dev's own pin: still three
+    assert moved["pinned"] is True
+    assert len((await hive_pinned(dev))["pins"]) == MAX_PINS_PER_AGENT  # type: ignore[arg-type]
+    # A lead's pin moved onto a new version is dev's to hold afterwards: dev is full.
+    lead_pin = await _write(store, LEAD, "lead rule")
+    await hive_pin(_surface(store, LEAD), lead_pin)
+    newer = await _write(store, LEAD, "lead rule, revised", supersedes=[lead_pin])
+    refused = await hive_pin(dev, newer)
+    assert refused["error"]["code"] == "invalid_input"  # type: ignore[index]
+    assert "you already hold" in refused["error"]["message"]  # type: ignore[index]
 
 
 async def test_only_active_fleet_entries_can_be_pinned() -> None:
@@ -119,8 +203,9 @@ async def test_a_fleet_holds_a_bounded_number_of_pins() -> None:
     store = MemoryStore(make_clock())
     lead = _surface(store, LEAD)
     ids = [await _write(store, LEAD, f"decision {i}") for i in range(MAX_PINS_PER_FLEET + 1)]
-    for entry in ids[:MAX_PINS_PER_FLEET]:
-        assert (await hive_pin(lead, entry))["pinned"] is True
+    for n, entry in enumerate(ids[:MAX_PINS_PER_FLEET]):
+        pinner = _surface(store, _agent(f"lead{n // MAX_PINS_PER_AGENT}", TrustLevel.PRIVILEGED))
+        assert (await hive_pin(pinner, entry))["pinned"] is True
     full = await hive_pin(lead, ids[-1])
     assert full["error"]["code"] == "invalid_input"  # type: ignore[index]
     assert (await hive_pin(lead, ids[0], unpin=True))["removed"] is True
@@ -137,7 +222,7 @@ async def test_unpin_reports_whether_it_was_pinned() -> None:
     assert (await hive_pinned(_surface(store, DEV)))["pins"] == []
 
 
-async def test_a_pin_follows_supersession_and_shows_withdrawal() -> None:
+async def test_a_pin_follows_supersession() -> None:
     store = MemoryStore(make_clock())
     lead = _surface(store, LEAD)
     old = await _write(store, LEAD, "use runner pool A")
@@ -147,12 +232,6 @@ async def test_a_pin_follows_supersession_and_shows_withdrawal() -> None:
     pin = briefing["pins"][0]  # type: ignore[index]
     assert (pin["id"], pin["pinned_id"]) == (new, old)
     assert pin["summary"] == "use runner pool B"
-
-    gone = await _write(store, LEAD, "temporary rule")
-    await hive_pin(lead, gone)
-    await hive_withdraw(lead, gone)
-    states = {p["id"]: p["state"] for p in (await hive_pinned(lead))["pins"]}  # type: ignore[attr-defined]
-    assert states[gone] == "withdrawn"
 
 
 async def test_the_version_a_pin_shows_unpins_it_and_does_not_pin_twice() -> None:
@@ -216,12 +295,14 @@ async def test_rest_pin_unpin_and_list() -> None:
         Settings(),
         store=store,
         embedder=make_embedder(),
-        authenticator=FakeAuthenticator(agent_credentials={"lead": LEAD, "dev": DEV}),
+        authenticator=FakeAuthenticator(
+            agent_credentials={"lead": LEAD, "dev": DEV, "lurker": LURKER}
+        ),
         search_config=make_search_config(),
     )
     transport = httpx.ASGITransport(app=create_app(app))
     async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
-        denied = await client.put(f"/v1/entries/{entry}/pin", headers={"X-API-Key": "dev"})
+        denied = await client.put(f"/v1/entries/{entry}/pin", headers={"X-API-Key": "lurker"})
         pinned = await client.put(f"/v1/entries/{entry}/pin", headers={"X-API-Key": "lead"})
         listed = await client.get("/v1/pins", headers={"X-API-Key": "dev"})
         removed = await client.delete(f"/v1/entries/{entry}/pin", headers={"X-API-Key": "lead"})
@@ -267,8 +348,8 @@ async def test_an_admin_pin_is_audited_under_the_admin_key_fingerprint() -> None
 async def test_a_refused_pin_or_unpin_writes_no_audit_row() -> None:
     store = MemoryStore(make_clock())
     entry = await _write(store, DEV, "a fleet decision")
-    await hive_pin(_surface(store, DEV), entry)
-    await hive_pin(_surface(store, DEV), entry, unpin=True)
+    await hive_pin(_surface(store, LURKER), entry)
+    await hive_pin(_surface(store, LURKER), entry, unpin=True)
     assert await _audit(store) == []
 
 
@@ -453,3 +534,125 @@ async def test_a_revoked_reporters_verdict_does_not_flag() -> None:
     )
     await store.revoke_agent("ghost")
     assert (await hive_pinned(_surface(store, DEV)))["pins"][0]["changed_since_pin"] is False  # type: ignore[index]
+
+
+# -- withdrawn entries leave the briefing (ADR 0096) --------------------------
+
+
+async def test_a_contributors_pin_is_audited_as_an_agent_key() -> None:
+    store = MemoryStore(make_clock())
+    entry = await _write(store, DEV, "a fleet decision")
+    await hive_pin(_surface(store, DEV2), entry)
+    await hive_pin(_surface(store, DEV2), entry, unpin=True)
+    rows = list(reversed(await _audit(store)))
+    assert [(r.action, r.actor_kind, r.actor) for r in rows] == [
+        (AuditAction.ENTRY_PIN, ActorKind.AGENT_KEY, "dev2"),
+        (AuditAction.ENTRY_UNPIN, ActorKind.AGENT_KEY, "dev2"),
+    ]
+    assert rows[1].detail == {"fleet_id": "fleet-a", "pin_ids": [entry]}  # no reason
+
+
+async def test_withdrawing_a_pinned_entry_unpins_it_and_audits_the_withdrawer() -> None:
+    store = MemoryStore(make_clock())
+    entry = await _write(store, DEV, "temporary rule")
+    keep = await _write(store, DEV, "lasting rule")
+    await hive_pin(_surface(store, LEAD), entry)
+    await hive_pin(_surface(store, LEAD), keep)
+    assert (await hive_withdraw(_surface(store, DEV), entry))["state"] == "withdrawn"
+    assert _pinned_ids(await hive_pinned(_surface(store, DEV))) == [keep]
+    # The pin row is gone, not just hidden: it no longer counts toward the caps.
+    assert [p.entry_id for p in await store.list_pins("fleet-a")] == [keep]
+    unpins = [r for r in await _audit(store) if r.action is AuditAction.ENTRY_UNPIN]
+    [row] = unpins
+    assert (row.actor_kind, row.actor, row.target) == (ActorKind.AGENT_KEY, "dev", entry)
+    assert row.detail == {"fleet_id": "fleet-a", "pin_ids": [entry], "reason": "withdrawn"}
+
+
+async def test_withdrawing_an_unpinned_entry_writes_no_unpin_row() -> None:
+    store = MemoryStore(make_clock())
+    entry = await _write(store, DEV, "never pinned")
+    await hive_withdraw(_surface(store, DEV), entry)
+    assert [r for r in await _audit(store) if r.action is AuditAction.ENTRY_UNPIN] == []
+
+
+async def test_withdrawing_the_version_a_pin_followed_removes_that_pin() -> None:
+    store = MemoryStore(make_clock())
+    old = await _write(store, LEAD, "use runner pool A")
+    await hive_pin(_surface(store, LEAD), old)
+    new = await _write(store, DEV, "use runner pool B", supersedes=[old])
+    assert _pinned_ids(await hive_pinned(_surface(store, DEV))) == [new]
+    await hive_withdraw(_surface(store, DEV), new)
+    assert (await hive_pinned(_surface(store, DEV)))["pins"] == []
+    assert await store.list_pins("fleet-a") == []
+    [row] = [r for r in await _audit(store) if r.action is AuditAction.ENTRY_UNPIN]
+    assert row.target == new
+    assert row.detail == {"fleet_id": "fleet-a", "pin_ids": [old], "reason": "withdrawn"}
+
+
+async def test_an_admin_withdrawal_unpins_under_the_admin_key() -> None:
+    store = MemoryStore(make_clock())
+    entry = await _write(store, DEV, "a rule an admin retracts")
+    await hive_pin(_surface(store, LEAD), entry)
+    admin = Credential(user_id="admin", is_admin=True, key_id="0123456789ab")
+    assert (await hive_withdraw(_surface(store, admin), entry))["state"] == "withdrawn"
+    rows = await _audit(store)
+    unpin = next(r for r in rows if r.action is AuditAction.ENTRY_UNPIN)
+    assert (unpin.actor_kind, unpin.actor) == (ActorKind.ADMIN_KEY, "admin:0123456789ab")
+    assert unpin.detail["reason"] == "withdrawn"
+    assert any(r.action is AuditAction.ENTRY_WITHDRAW for r in rows)
+
+
+async def test_a_portal_withdrawal_unpins_too() -> None:
+    store = MemoryStore(make_clock())
+    entry = await _write(store, DEV, "withdrawn from the portal")
+    await hive_pin(_surface(store, LEAD), entry)
+    await GovernanceService(store).withdraw_own(DEV, entry, "obsolete")
+    assert await store.list_pins("fleet-a") == []
+    [row] = [r for r in await _audit(store) if r.action is AuditAction.ENTRY_UNPIN]
+    assert row.detail["reason"] == "withdrawn"
+
+
+async def test_the_briefing_skips_a_withdrawn_entry_left_from_before() -> None:
+    """A pin row left from before withdrawing unpinned (or after a failed
+    unpin) is not shown."""
+    store = MemoryStore(make_clock())
+    entry = await _write(store, DEV, "retracted rule")
+    keep = await _write(store, DEV, "lasting rule")
+    await store.pin_entry("fleet-a", entry, "lead", 10)
+    await store.pin_entry("fleet-a", keep, "lead", 10)
+    await store.withdraw_entry(entry, "wrong", by_user="dev")  # the store alone: pin stays
+    assert [p.entry_id for p in await store.list_pins("fleet-a")] == [keep, entry]
+    assert _pinned_ids(await hive_pinned(_surface(store, DEV))) == [keep]
+
+
+async def test_a_withdrawer_who_moved_fleets_still_unpins_other_authors_versions() -> None:
+    """ADR 0096: the walk that finds the pins to remove reads as anyone, so a
+    withdrawer whose home fleet is no longer the entry's still finds the
+    older pinned version another author wrote."""
+    store = MemoryStore(make_clock())
+    old = await _write(store, LEAD, "use runner pool A")
+    await hive_pin(_surface(store, LEAD), old)
+    new = await _write(store, DEV, "use runner pool B", supersedes=[old])
+    entry = await store.get_entry(new)
+    assert entry is not None
+    moved = _agent("dev", TrustLevel.CONTRIBUTOR, "fleet-b")  # cannot read fleet-a any more
+    await store.withdraw_entry(new, None, by_user="dev")
+    removed = await PinService(store).unpin_withdrawn(moved, entry)
+    assert removed == [old]
+    assert await store.list_pins("fleet-a") == []
+
+
+async def test_a_leftover_withdrawn_pin_is_swept_on_the_next_pin_and_frees_the_cap() -> None:
+    store = MemoryStore(make_clock())
+    dev = _surface(store, DEV)
+    ids = [await _write(store, DEV, f"rule {i}") for i in range(MAX_PINS_PER_AGENT + 1)]
+    for entry in ids[:MAX_PINS_PER_AGENT]:
+        await hive_pin(dev, entry)
+    # Withdrawn at the store alone: the pin row stays, as from before ADR 0096.
+    await store.withdraw_entry(ids[0], "wrong", by_user="dev")
+    assert len(await store.list_pins("fleet-a")) == MAX_PINS_PER_AGENT
+    assert (await hive_pin(dev, ids[-1]))["pinned"] is True  # not "you already hold 3"
+    assert {p.entry_id for p in await store.list_pins("fleet-a")} == {*ids[1:]}
+    [row] = [r for r in await _audit(store) if r.action is AuditAction.ENTRY_UNPIN]
+    assert (row.actor, row.target) == ("dev", ids[0])
+    assert row.detail == {"fleet_id": "fleet-a", "pin_ids": [ids[0]], "reason": "withdrawn"}

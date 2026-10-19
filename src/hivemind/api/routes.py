@@ -462,10 +462,10 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
     @router.put("/entries/{entry_id}/pin", response_model=PinOut)
     async def pin(entry_id: str, credential: require) -> PinOut:
         """Pin an active fleet entry to its fleet's briefing (ADR 0058): a
-        privileged agent of that fleet or an admin. Idempotent.
+        contributor or privileged agent of that fleet or an admin. Idempotent.
 
         404 unknown entry, 403 not allowed, 409 inactive, 422 not a fleet
-        entry or the fleet already has 10 pins.
+        entry, the fleet already has 10 pins or the agent 3.
         """
         try:
             pin = await app.governance_service.pin(credential, entry_id)

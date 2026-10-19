@@ -1,5 +1,7 @@
 # The admin panel shows each fleet's pins
 
+> **Status note:** [ADR 0096](0096-contributors-pin.md): a withdrawn entry leaves the briefing, so the listing no longer shows withdrawn pins and none needs review for that.
+
 Extends [ADR 0080](0080-admin-memory-browser-and-activity.md) (the admin-only endpoints the panel's proxy forwards) and builds on [ADR 0058](0058-pinned-fleet-briefing.md) and [ADR 0076](0076-pin-integrity.md).
 
 Status: Accepted. Admin-only and read-only.

@@ -237,7 +237,7 @@ export async function viewAudit(root) {
       return h("span", { class: "badge badge-muted", title: "a registration with the shared org key: the fingerprint names the key, not who used it", text: "org key" });
     }
     if (kind === "agent_key") {
-      return h("span", { class: "badge badge-level", title: "a privileged agent's own key, recorded by its verified name", text: "agent key" });
+      return h("span", { class: "badge badge-level", title: "an agent's own key, recorded by its verified name", text: "agent key" });
     }
     return h("span", { class: "badge badge-level", title: "a verified admin key, recorded by fingerprint", text: "admin key" });
   };
@@ -367,15 +367,15 @@ export async function viewAgents(root) {
 
 const pinCount = (list) => {
   if (!list) return h("span", { class: "muted", text: "—" });
-  const changed = list.filter((p) => p.changed_since_pin || p.state === "withdrawn").length;
+  const changed = list.filter((p) => p.changed_since_pin).length;
   return h("span", {}, fmtNum(list.length),
-    changed ? [" ", h("span", { class: "badge badge-pending", title: "Pins superseded, flagged or withdrawn since they were pinned", text: `${changed} to review` })] : null);
+    changed ? [" ", h("span", { class: "badge badge-pending", title: "Pins superseded or flagged since they were pinned", text: `${changed} to review` })] : null);
 };
 
 /** The pinned memories of one fleet, with a fleet picker. `pins` maps fleet id to its pins (or null). */
 function pinsCard(pins) {
-  // Fleets whose pins need attention (changed or withdrawn) come first.
-  const attention = (f) => pins.get(f.id).filter((p) => p.changed_since_pin || p.state === "withdrawn").length;
+  // Fleets whose pins need attention (changed) come first.
+  const attention = (f) => pins.get(f.id).filter((p) => p.changed_since_pin).length;
   const withPins = state.fleets.filter((f) => pins.get(f.id) && pins.get(f.id).length)
     .sort((a, b) => attention(b) - attention(a));
   if (!withPins.length) {

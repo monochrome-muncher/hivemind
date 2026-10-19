@@ -78,6 +78,7 @@ class GovernanceService:
                 entry_id,
                 {"author": entry.author, "reason": reason},
             )
+        await self._pins.unpin_withdrawn(credential, entry)
         return withdrawn
 
     async def withdraw_own(self, credential: Credential, entry_id: str, reason: str) -> Entry:
@@ -99,6 +100,7 @@ class GovernanceService:
             entry_id,
             {"author": entry.author, "reason": reason, "via": "portal"},
         )
+        await self._pins.unpin_withdrawn(credential, entry)
         return withdrawn
 
     async def _visible(self, credential: Credential, entry_id: str) -> Entry:
@@ -108,7 +110,11 @@ class GovernanceService:
         return entry
 
     async def _withdraw(self, credential: Credential, entry: Entry, reason: str | None) -> Entry:
-        """Withdraw ``entry`` once the caller's right to has been checked."""
+        """Withdraw ``entry`` once the caller's right to has been checked.
+        Callers then take it out of the fleet briefing (``unpin_withdrawn``,
+        ADR 0096) after the withdrawal and its audit row: a failure there
+        propagates but leaves the withdrawal in place, and the briefing
+        already leaves withdrawn entries out."""
         if entry.state.value != "active":
             raise EntryNotActive(
                 f"entry {entry.id} is already {entry.state.value}; "

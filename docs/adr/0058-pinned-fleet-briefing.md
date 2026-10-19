@@ -1,6 +1,8 @@
 # A pinned briefing per fleet
 
 > **Status note:** amended by [ADR 0076](0076-pin-integrity.md): pins and unpins are audited, and a pinned entry shows `changed_since_pin`.
+>
+> **Status note:** amended by [ADR 0096](0096-contributors-pin.md): contributors pin and unpin too (item 2 no longer holds), each agent holds at most 3 pins, and a withdrawn entry leaves the briefing instead of showing as withdrawn (item 4).
 
 ## Context
 

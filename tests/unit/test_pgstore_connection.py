@@ -6,6 +6,7 @@ No live Postgres: the pool is a recording fake.
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -13,6 +14,7 @@ from typing import Any
 import pytest
 
 from hivemind.domain.entry import EntryFilters
+from hivemind.domain.pin import PinRefusal
 from hivemind.store.pgstore import PgStore
 from hivemind.store.pool import PoolTimeouts
 
@@ -20,9 +22,10 @@ VALID_ID = "00000000-0000-4000-8000-000000000001"
 
 
 class FakeConn:
-    def __init__(self, log: list[str], *, fetchval: Any = 0) -> None:
+    def __init__(self, log: list[str], *, fetchval: Any = 0, rows: list[Any] | None = None) -> None:
         self._log = log
         self._fetchval = fetchval
+        self._rows = rows or []
 
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[None]:
@@ -36,7 +39,7 @@ class FakeConn:
 
     async def fetch(self, *_a: Any) -> list[Any]:
         self._log.append("fetch")
-        return []
+        return list(self._rows)
 
     async def fetchrow(self, *_a: Any) -> Any:
         self._log.append("fetchrow")
@@ -67,9 +70,11 @@ class FakePool:
             self._log.append("release")
 
 
-def _store(*, fetchval: Any = 0) -> tuple[PgStore, FakePool, list[str]]:
+def _store(
+    *, fetchval: Any = 0, rows: list[Any] | None = None
+) -> tuple[PgStore, FakePool, list[str]]:
     log: list[str] = []
-    pool = FakePool(FakeConn(log, fetchval=fetchval), log)
+    pool = FakePool(FakeConn(log, fetchval=fetchval, rows=rows), log)
     store = PgStore("postgresql://example/db", timeouts=PoolTimeouts(acquire=3.5))
     store._pool = pool  # type: ignore[assignment]
     return store, pool, log
@@ -93,10 +98,14 @@ async def test_vector_search_runs_in_a_transaction_for_set_local() -> None:
 
 
 async def test_a_return_inside_the_transaction_commits() -> None:
-    # The pin cap is reached: pin_entry returns None from inside its
+    # The pin cap is reached: pin_entry returns a refusal from inside its
     # transaction, which must still commit (and release the connection).
-    store, pool, log = _store(fetchval=10)
-    assert await store.pin_entry("fleet", VALID_ID, "bob", limit=10) is None
+    pins = [
+        {"fleet_id": "fleet", "entry_id": str(uuid.uuid4()), "pinned_by": "ann", "pinned_at": None}
+        for _ in range(10)
+    ]
+    store, pool, log = _store(rows=pins)
+    assert await store.pin_entry("fleet", VALID_ID, "bob", limit=10) is PinRefusal.FLEET
     assert log[0:2] == ["acquire", "begin"]
     assert log[-2:] == ["commit", "release"]
     assert pool.timeouts == [3.5]

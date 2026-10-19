@@ -84,7 +84,7 @@ from hivemind.domain.health import (
     HealthCounts,
     TagDispersion,
 )
-from hivemind.domain.pin import Pin, PinWrite
+from hivemind.domain.pin import Pin, PinRefusal, PinWrite, pin_refusal
 from hivemind.domain.upstream import UpstreamLink
 from hivemind.domain.validation import canonical_uuid, is_valid_uuid
 from hivemind.ports import SupersedeConflict
@@ -190,8 +190,6 @@ SELECT t.id AS to_id, l.from_id
 # Pinned entries (ADR 0058). The per-fleet advisory lock serialises
 # pinners of one fleet, so the count check and the insert are atomic.
 LOCK_FLEET_PINS = "SELECT pg_advisory_xact_lock(hashtextextended('hivemind.pins:' || $1, 0))"
-SELECT_PIN = "SELECT fleet_id, entry_id, pinned_by, pinned_at FROM pins WHERE fleet_id = $1 AND entry_id = $2"
-COUNT_PINS = "SELECT count(*) FROM pins WHERE fleet_id = $1"
 INSERT_PIN = """
 INSERT INTO pins (fleet_id, entry_id, pinned_by) VALUES ($1, $2, $3)
 ON CONFLICT (fleet_id, entry_id) DO UPDATE SET pinned_by = EXCLUDED.pinned_by, pinned_at = now()
@@ -1126,12 +1124,18 @@ class PgStore:
         pinned_by: str,
         limit: int,
         replaces: Sequence[str] = (),
-    ) -> PinWrite | None:
+        agent_limit: int | None = None,
+    ) -> PinWrite | PinRefusal:
         if not is_valid_uuid(entry_id):
-            return None
+            return PinRefusal.FLEET
         async with self._transaction() as conn:
             await conn.execute(LOCK_FLEET_PINS, fleet_id)
-            existing = await conn.fetchrow(SELECT_PIN, fleet_id, entry_id)
+            # Decide before deleting anything: a refusal must leave the
+            # pins as they were.
+            fleet_pins = [_row_to_pin(r) for r in await conn.fetch(LIST_PINS, fleet_id)]
+            refusal = pin_refusal(fleet_pins, entry_id, pinned_by, limit, agent_limit, replaces)
+            if refusal is not None:
+                return refusal
             replaced = [
                 old
                 for old in dict.fromkeys(replaces)
@@ -1139,12 +1143,6 @@ class PgStore:
                 and is_valid_uuid(old)
                 and (await conn.execute(DELETE_PIN, fleet_id, old)).endswith(" 1")
             ]
-            if (
-                existing is None
-                and not replaced
-                and await conn.fetchval(COUNT_PINS, fleet_id) >= limit
-            ):
-                return None
             row = await conn.fetchrow(INSERT_PIN, fleet_id, entry_id, pinned_by)
         if row is None:
             raise RuntimeError("pin row vanished between insert and read")
