@@ -118,6 +118,8 @@ spec:
       app.kubernetes.io/component: portal
   policyTypes: [Ingress]
   ingress:
+    # EDIT: the namespace of the INTERNAL ingress controller that fronts the
+    # portal (deploy/kubernetes/portal/ingress-internal.example.yaml).
     - from:
         - namespaceSelector:
             matchLabels:

@@ -24,7 +24,7 @@ async function route() {
   if (!hasKey()) { showLogin(); return; }
   const mine = ++renderToken;
   if (!state.me) {
-    const ok = await loadMe();
+    const ok = await loadMe(mine);
     if (!ok || mine !== renderToken) return;
   }
   const { view: requested } = parseHash();
@@ -48,16 +48,22 @@ async function route() {
   }
 }
 
-/** Who the stored key belongs to; signs out if it is not (or no longer) an agent key. */
-async function loadMe() {
+/**
+ * Who the stored key belongs to; signs out if it is not (or no longer) an
+ * agent key. `mine` is the navigation asking: an answer that lands after a
+ * sign-out or another sign-in is dropped, so it never names the wrong agent.
+ */
+async function loadMe(mine) {
   let standing;
   try {
-    standing = await guarded(() => api("GET", "whoami"));
+    standing = await api("GET", "whoami");
   } catch (err) {
+    if (mine !== renderToken) return false;
+    if (err.status === 401) { signOut("Your agent key is no longer valid (the agent may have been revoked). Sign in again."); return false; }
     $("view").replaceChildren(h("p", { class: "form-error", text: `Could not check the key: ${err.message}` }));
     return false;
   }
-  if (!standing) return false; // signed out on a 401
+  if (mine !== renderToken) return false; // a sign-out or another sign-in came first
   const why = refusal(standing);
   if (why) { signOut(why); return false; }
   state.me = standing;
@@ -104,12 +110,13 @@ async function signIn(event) {
   if (!key) return;
   const button = event.target.querySelector("button");
   button.disabled = true;
+  renderToken += 1; // a whoami still in flight for an earlier key must not land
+  input.value = "";
   try {
     const standing = await api("GET", "whoami", { key });
     const why = refusal(standing);
     if (why) { showLogin(why); return; }
     setKey(key);
-    input.value = "";
     state.me = standing;
     paintWho();
     showShell();

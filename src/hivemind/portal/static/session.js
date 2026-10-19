@@ -22,12 +22,14 @@ export const hooks = {
   signOut: () => {},
 };
 
-/** Run an API call; on 401 sign out, otherwise surface the error. */
+/** Run an API call; on 401 sign out (unless the key changed meanwhile), otherwise surface the error. */
 export async function guarded(fn) {
+  const key = getKey();
   try {
     return await fn();
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
+      if (getKey() !== key) return undefined; // an earlier key's answer: not this session's
       hooks.signOut("Your agent key is no longer valid (the agent may have been revoked). Sign in again.");
       return undefined;
     }

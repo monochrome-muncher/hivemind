@@ -474,6 +474,69 @@ async def test_each_failure_reads_the_same_on_the_wire(
         assert _mcp_err(await tool(world)) == (code, message.format(**fill))
 
 
+# The agent portal's withdraw (ADR 0095) has no MCP twin: REST only.
+PORTAL_WITHDRAW_CASES: list[tuple[str, str, str, dict[str, str], tuple[int, str, str]]] = [
+    (
+        "unknown",
+        "k-dev",
+        NO_SUCH,
+        {"reason": "old"},
+        (404, "not_found", f"unknown entry: {NO_SUCH}"),
+    ),
+    (
+        "non-author",
+        "k-lead",
+        "{fleet_entry}",
+        {"reason": "old"},
+        (403, "forbidden", "only the author may withdraw an entry from the agent portal"),
+    ),
+    (
+        "twice",
+        "k-dev",
+        "{withdrawn}",
+        {"reason": "old"},
+        (
+            409,
+            "conflict",
+            "entry {withdrawn} is already withdrawn; only active entries can be withdrawn",
+        ),
+    ),
+    (
+        "blank reason",
+        "k-dev",
+        NO_SUCH,
+        {"reason": " "},
+        (422, "invalid_input", "reason is required"),
+    ),
+    (
+        "legacy key",
+        "k-user",
+        "{fleet_entry}",
+        {"reason": "old"},
+        (
+            403,
+            "forbidden",
+            "the agent portal requires an agent key (the admin key belongs in the admin panel)",
+        ),
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("key", "target", "body", "expected"),
+    [pytest.param(*case[1:], id=case[0]) for case in PORTAL_WITHDRAW_CASES],
+)
+async def test_the_portal_withdraw_reads_its_failures_on_the_wire(
+    world: World, key: str, target: str, body: dict[str, str], expected: tuple[int, str, str]
+) -> None:
+    fill = {"withdrawn": world.withdrawn, "fleet_entry": world.fleet_entry}
+    resp = await world.client.post(
+        f"/v1/portal/entries/{target.format(**fill)}/withdraw", json=body, headers=_h(key)
+    )
+    status, code, message = expected
+    assert _err(resp) == (status, code, message.format(**fill))
+
+
 def test_typed_errors_still_match_the_builtins_surfaces_catch() -> None:
     from hivemind.services import errors, governance
 

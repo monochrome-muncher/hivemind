@@ -120,7 +120,7 @@ The 5-step operator flow:
    (after setting the real hostname + issuer in
    `deploy/kubernetes/optional/ingress.yaml`). The tree has a second
    Ingress, `hivemind-admin-api`, that keeps the admin REST surface
-   (`/v1/admin/*` and the admin-only `/v1/metrics`) and the unauthenticated Prometheus target (`/metrics`, ADR 0050; scrape the pods directly) off the internet: it answers 403 to every source outside
+   (`/v1/admin/*` and the admin-only `/v1/metrics`), the agent portal's routes (`/v1/portal/*`, which the portal calls in-cluster, §9) and the unauthenticated Prometheus target (`/metrics`, ADR 0050; scrape the pods directly) off the internet: it answers 403 to every source outside
    its `allowlist-source-range` (default `127.0.0.1/32`, nobody). Operators
    use the admin panel (§8) or `kubectl port-forward`; to admit an operator
    network, put its CIDRs in both source-range annotations. The main

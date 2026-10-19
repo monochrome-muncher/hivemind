@@ -367,6 +367,8 @@ def test_admin_api_is_denied_on_the_public_ingress_by_default() -> None:
     # The admin prefix, and the unauthenticated Prometheus target (ADR 0050).
     assert {(p["path"], p["pathType"]) for p in paths} == {
         ("/v1/admin", "Prefix"),
+        # The agent portal's routes: its proxy calls the API in-cluster (ADR 0095).
+        ("/v1/portal", "Prefix"),
         ("/metrics", "Exact"),
         # Admin-gated, but outside the /v1/admin prefix.
         ("/v1/metrics", "Exact"),
