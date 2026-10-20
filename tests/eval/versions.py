@@ -20,7 +20,8 @@ off, it runs the shipped search and reports, per domain and pooled:
 
 Set ``EVAL_QUERY_INSTRUCTION`` to a literal instruction string to run the
 whole measurement with ``SearchConfig.query_instruction`` on (ADR 0097): the
-search embeds the wrapped query, (entries are embedded as before; this module embeds no query itself). Unset or empty is off; each report states
+search embeds the wrapped query and entries are embedded as before. Unset or
+empty runs with no instruction; each report states
 the instruction in use.
 
 The adoption rule is the study's (2026-10-10 proposal, section 6.1). Run

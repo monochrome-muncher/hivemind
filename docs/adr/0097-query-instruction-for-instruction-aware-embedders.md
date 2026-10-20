@@ -30,5 +30,6 @@ Qwen3-Embedding 8B, 4B and 0.6B at 1024 dimensions (llama.cpp, last-token poolin
 
 - An upgrade changes search ranking for existing deployments with no config change. Stored data is untouched: no re-embedding, and an empty `HIVEMIND_QUERY_INSTRUCTION` restores the old ranking at once.
 - A deployment that sets `HIVEMIND_VECTOR_MIN_SIMILARITY` should know that answer similarity drops by about 0.01 to 0.03 at the 10th percentile. The recommended 0.45 still keeps 98% of answers.
+- Statement-shaped queries, such as one that quotes an entry, rank that entry a little lower: on 8B, old-exact MRR in `make measure-versions` drops by about 0.04 and hit@5 barely moves. Version grouping itself compares entries and does not change.
 - A deployment with a non-Qwen embedder should measure, and turn the instruction off if it does not help.
 - The instruction is part of the query text the embedder sees, so it counts against the embedder's input limit (at most 500 characters more than the 2,000-character query bound).

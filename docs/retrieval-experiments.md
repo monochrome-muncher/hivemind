@@ -1226,4 +1226,27 @@ Neither beats the generic instruction, so there is one instruction for every
 route. The corpus is mostly topic-style queries (558 topic, 61 question, 27
 error), and the recency and explore routes cannot be measured with it.
 
-Version grouping and importance with the instruction: see below.
+**Version ranking (`make measure-versions`, 8B and 0.6B).** Whether two
+entries group as versions compares entries with each other, so the
+instruction does not change it. What it can change is where each version
+ranks. Means over the sixteen domains, with grouping off (the default):
+
+| model | instruction | newer-member MRR | old-exact MRR | hit@5 |
+|---|---|---|---|---|
+| 8B | none | 0.191 to 0.202 | 0.283 to 0.300 | 0.767 to 0.786 |
+| 8B | generic | 0.183 to 0.188 | 0.242 to 0.254 | 0.765 to 0.780 |
+| 0.6B | none | 0.205 to 0.212 | 0.265 to 0.278 | 0.774 to 0.797 |
+| 0.6B | generic | 0.181 to 0.190 | 0.234 to 0.239 | 0.759 to 0.772 |
+
+Each range spans the four fleet constellations of the harness. The newer
+member is asked for in the older statement's words, and the old-exact query
+quotes the older entry. These statement-shaped queries look like documents,
+so the instruction moves them away from the entry they quote: old-exact MRR
+drops by about 0.04 on 8B, newer-member MRR by about 0.01, and hit@5 barely
+moves. This is the one place the instruction costs something. It is far
+smaller than the gain on ordinary searches, so the default stays on.
+
+**Importance (`make measure-importance`, 0.6B).** Narrowed importance (ADR
+0088) gives the same lift with the instruction as without it: pooled MRR
+with aligned importance rises 0.782 to 0.851 without the instruction and
+0.782 to 0.854 with it.
