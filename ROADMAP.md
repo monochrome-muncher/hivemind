@@ -20,6 +20,10 @@ support, `upstream_changed` on search hits (ADR 0081) and faster search;
 setting (ADR 0082) and the standalone docker stack, and split the entry-read
 path, the wire mappers and the MCP package into their own modules
 (ADRs 0083–0085).
+2.10.0 narrowed the author importance factor and turned it on by default
+(ADR 0088), added the `near_duplicate` write warning (ADR 0087) and the agent
+portal (ADR 0095), and gave the admin panel a feedback log, an agent page,
+fleet pins, a flag backlog and CSV export (ADRs 0089–0094).
 Tier 4's measurement items are closed or deferred with their reasons.
 The SPEC §10 extensions (Tier 5) stay held until their triggers fire.
 

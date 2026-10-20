@@ -70,9 +70,9 @@ with another harness's key.
   the system prompt, which compaction never removes. With the bundle, a
   long turn that wrote nothing also gets one reminder to write and rate
   before it ends (`HIVEMIND_STOP_MIN_TOOLS`, default 20 tool calls). Do not
-  wire the Claude Code plugin's hooks through DSH's hooks bridge: its
-  `SessionStart` text does not survive compaction, and its `Stop` hook
-  never fires there.
+  wire the Claude Code plugin's hooks through DSH's hooks bridge (not
+  installed by default since 0.2.1): its `SessionStart` text does not
+  survive compaction, and its `Stop` hook never fires there.
 - **Instruction block:** `~/.dsh/AGENTS.md`, which DSH keeps as a durable
   baseline.
 
