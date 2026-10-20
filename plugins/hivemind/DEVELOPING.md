@@ -315,8 +315,9 @@ The script counts four transcript formats:
   announced by `subagent/start` are neither counted nor reminded. No
   post-compaction sentence: DSH keeps the server's instructions in the
   system prompt, and compaction is a session event, not a plugin hook.
-  DSH's Claude Code hooks bridge cannot run `hivemind-stop.sh` instead:
-  it passes an empty `transcript_path`. Checked live with DSH 0.2.0-rc.2
+  DSH's Claude Code hooks bridge (not installed by default
+  since 0.2.1) cannot run `hivemind-stop.sh` instead: it passes an empty
+  `transcript_path`. Checked live with DSH 0.2.0-rc.2
   and 0.2.1-alpha.2 (`dsh headless`) against a mock model: three shell
   calls get the reminder once, and a `hive_write`, incognito or a
   subagent's calls keep it quiet.

@@ -67,7 +67,7 @@ is unused.
 | [0055](0055-read-several-entries-in-one-call.md) | Read several entries in one call | Amended by 0059 |
 | [0056](0056-count-searches-that-find-nothing.md) | Count searches that find nothing | Accepted |
 | [0057](0057-see-also-links-between-entries.md) | "See also" links between entries | Accepted |
-| [0058](0058-pinned-fleet-briefing.md) | A pinned briefing per fleet | Amended by 0076 |
+| [0058](0058-pinned-fleet-briefing.md) | A pinned briefing per fleet | Amended by 0076, 0096 |
 | [0059](0059-batch-reads-use-a-fixed-number-of-store-reads.md) | Batch reads use a fixed number of store reads | Accepted |
 | [0060](0060-the-admin-key-writes-self-or-org-entries.md) | The admin key writes `self` or `org` entries | Amended by 0066 |
 | [0061](0061-vector-search-needs-positive-similarity.md) | Vector search needs a positive similarity | Amended by 0062 |
@@ -85,7 +85,7 @@ is unused.
 | [0073](0073-a-recency-hint-on-search.md) | A recency hint on search | Accepted (off by default) |
 | [0074](0074-group-unlinked-versions-at-read-time.md) | Group unlinked versions at read time | Accepted (off by default) |
 | [0075](0075-fleet-health-metrics.md) | Fleet health metrics: admin-only and observation-only | Extended by 0089 |
-| [0076](0076-pin-integrity.md) | Pin integrity: audited pins and "changed since pinned" | Amended by 0079 |
+| [0076](0076-pin-integrity.md) | Pin integrity: audited pins and "changed since pinned" | Amended by 0079, 0096 |
 | [0077](0077-write-check-mode-and-warnings.md) | Writes can be checked first, and answer with advisory warnings | Amended by 0087 |
 | [0078](0078-explore-search.md) | Opt-in explore search | Accepted |
 | [0079](0079-feedback-dates-on-the-database-clock.md) | Feedback is dated by the store's clock | Accepted |
@@ -98,11 +98,11 @@ is unused.
 | [0086](0086-key-hashes-stay-sha-256.md) | Key hashes stay SHA-256 (the KDF upgrade is held) | Accepted |
 | [0087](0087-near-duplicate-write-warning.md) | A write warns when its nearest entry is a near-duplicate | Accepted |
 | [0088](0088-narrow-importance.md) | A narrower importance factor, so one importance step stays below the peer cap | Accepted |
-| [0089](0089-owner-level-rating-metrics.md) | Owner-level rating metrics: sibling verdicts and owner concentration (admin-only, observation-only) | Accepted |
-| [0090](0090-admin-feedback-log.md) | The admin panel shows who rated what (admin-only, observation-only) | Accepted |
+| [0089](0089-owner-level-rating-metrics.md) | Owner-level rating metrics: sibling verdicts and owner concentration | Accepted; admin-only, observation-only |
+| [0090](0090-admin-feedback-log.md) | The admin panel shows who rated what | Accepted; admin-only, observation-only |
 | [0091](0091-admin-panel-shared-front-end-modules.md) | The admin panel's generic modules know nothing about the admin | Accepted |
-| [0092](0092-admin-fleet-pins.md) | The admin panel shows each fleet's pins (admin-only, read-only) | Accepted |
-| [0093](0093-admin-flag-backlog.md) | The admin panel lists the flag backlog, oldest flag first (admin-only, observation-only) | Accepted |
-| [0094](0094-admin-csv-export.md) | The admin panel exports its lists as CSV (front end only) | Accepted |
+| [0092](0092-admin-fleet-pins.md) | The admin panel shows each fleet's pins | Accepted; admin-only, read-only; withdrawn pins left out per 0096 |
+| [0093](0093-admin-flag-backlog.md) | The admin panel lists the flag backlog, oldest flag first | Accepted; admin-only, observation-only |
+| [0094](0094-admin-csv-export.md) | The admin panel exports its lists as CSV | Accepted; front end only |
 | [0095](0095-agent-portal.md) | The agent portal: a browser front end for agent-key holders | Accepted |
-| [0096](0096-contributors-pin.md) | Contributors pin and unpin (3 pins each), and a withdrawn entry leaves the briefing | Accepted |
+| [0096](0096-contributors-pin.md) | Contributors pin, three pins each, and a withdrawn entry leaves the briefing | Accepted |

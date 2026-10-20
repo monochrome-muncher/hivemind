@@ -544,9 +544,9 @@ async def hive_withdraw(
 
 async def hive_pin(app: McpHivemind, entry_id: str, unpin: bool = False) -> dict[str, object]:
     """Pin an active fleet entry to its fleet's briefing, or ``unpin`` it
-    (ADR 0058). A privileged agent of the entry's fleet or an admin may; a
-    fleet holds at most 10 pins. An entry the caller may not read is
-    ``not_found``."""
+    (ADR 0058). Contributors and privileged agents of the entry's fleet, or
+    an admin, may; an agent holds at most 3 pins (admins are exempt) and a
+    fleet 10 (ADR 0096). An entry the caller may not read is ``not_found``."""
     try:
         if unpin:
             removed = await app.governance_service.unpin(app.credential, entry_id)
