@@ -3,6 +3,8 @@
 > **Status:** amends [ADR 0052](0052-writes-report-the-nearest-entries.md).
 >
 > **Amended by [ADR 0087](0087-near-duplicate-write-warning.md):** a seventh code, `near_duplicate`, is computed from `related` (no extra round trip), not from the supersede and see-also targets as §4 says of the others.
+>
+> **Amended by [ADR 0099](0099-answers-open-question-warning.md):** an eighth code, `answers_open_question`, is also computed from `related`.
 
 ## Context
 

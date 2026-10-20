@@ -20,6 +20,7 @@ from hivemind.services.governance import GovernanceService, WriteService
 from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
 from hivemind.services.write_warnings import (
+    answers_open_question_warning,
     has_local_path,
     is_entry_link,
     near_duplicate_warning,
@@ -336,3 +337,129 @@ def test_entry_link_matches_the_grounding_metric(ref: str) -> None:
     grounded."""
     source = Source(type=SourceType.OTHER, ref=ref)
     assert is_entry_link(source) and is_entry_ref(ref)
+
+
+def _related(sim: float, entry_id: str, *tags: str, active: bool = True) -> object:
+    from types import SimpleNamespace
+
+    from hivemind.domain.entry import EntryState
+
+    state = EntryState.ACTIVE if active else EntryState.WITHDRAWN
+    return SimpleNamespace(
+        similarity=sim, entry=SimpleNamespace(id=entry_id, tags=tags, state=state)
+    )
+
+
+def test_answers_open_question_fires_at_the_floor_on_either_tag() -> None:
+    for tag in ("open-question", "anomaly"):
+        (w,) = answers_open_question_warning([_related(0.70, "q1", tag)])  # type: ignore[list-item]
+        assert w.code == "answers_open_question"
+        assert "q1" in w.message and "0.70" in w.message
+        assert "supersedes" in w.message and "see_also" in w.message
+
+
+def test_answers_open_question_stays_quiet_when_it_should() -> None:
+    quiet = answers_open_question_warning
+    assert quiet([]) == ()
+    # below the floor
+    assert quiet([_related(0.69, "q", "open-question")]) == ()  # type: ignore[list-item]
+    # not an open question
+    assert quiet([_related(0.95, "f", "billing")]) == ()  # type: ignore[list-item]
+    # inactive neighbour
+    assert quiet([_related(0.95, "q", "open-question", active=False)]) == ()  # type: ignore[list-item]
+    # already named in see_also or supersedes (any uuid spelling)
+    rel = [_related(0.95, "0F8FAD5B-D9CB-469F-A165-70867728950E", "open-question")]
+    assert quiet(rel, linked=("0f8fad5bd9cb469fa16570867728950e",)) == ()  # type: ignore[arg-type]
+    # the draft is itself a question or an anomaly
+    for tag in ("open-question", "anomaly"):
+        assert quiet([_related(0.95, "q", "open-question")], ("x", tag)) == ()  # type: ignore[list-item]
+
+
+def test_answers_open_question_names_the_closest_and_counts_the_rest() -> None:
+    rel = [
+        _related(0.80, "mid", "open-question"),
+        _related(0.92, "top", "anomaly"),
+        _related(0.75, "low", "open-question"),
+        _related(0.99, "linked", "open-question"),
+        _related(0.97, "plain", "fact"),
+    ]
+    (w,) = answers_open_question_warning(rel, linked=("linked",))  # type: ignore[arg-type]
+    assert "top" in w.message and "0.92" in w.message and "+2 more" in w.message
+    (w,) = answers_open_question_warning(rel[:1])  # type: ignore[arg-type]
+    assert "more" not in w.message
+
+
+async def test_answers_open_question_through_the_write_path() -> None:
+    """A write that restates an open question's subject warns, in a write and
+    in a check; naming the question in see_also or supersedes does not, and a
+    question tagged open-question itself does not."""
+    from tests.fakes import FakeEmbedder
+
+    store = MemoryStore(make_clock())
+    surface = _surface(store, A, embedder=FakeEmbedder(dimension=16))
+    text = "why does billing in the eu region stall on node 20 behind the shared proxy"
+    question = await hive_write(  # type: ignore[arg-type]
+        surface, kind="insight", summary=text, tags=["open-question"]
+    )
+    answer = text.replace("why does", "because").replace("stall", "stalls")
+    checked = await hive_write(surface, kind="fact", summary=answer, check=True)  # type: ignore[arg-type]
+    assert "answers_open_question" in _codes(checked)
+    assert str(question["id"]) in str(checked["warnings"])
+    written = await hive_write(surface, kind="fact", summary=answer)  # type: ignore[arg-type]
+    assert "answers_open_question" in _codes(written)
+    linked = await hive_write(
+        surface,
+        kind="fact",
+        summary=answer,
+        see_also=[question["id"]],  # type: ignore[list-item]
+        check=True,
+    )
+    assert "answers_open_question" not in _codes(linked)
+    another = await hive_write(  # type: ignore[arg-type]
+        surface, kind="insight", summary=answer, tags=["anomaly"], check=True
+    )
+    assert "answers_open_question" not in _codes(another)
+    superseding = await hive_write(
+        surface,
+        kind="fact",
+        summary=answer,
+        supersedes=[question["id"]],  # type: ignore[list-item]
+    )
+    assert "answers_open_question" not in _codes(superseding)
+
+
+async def test_answers_open_question_through_write_service_on_memory_store() -> None:
+    from dataclasses import replace
+
+    from hivemind.domain.access import Visibility
+    from hivemind.domain.entry import EntryDraft, Kind
+    from tests.fakes import FakeEmbedder
+
+    store = MemoryStore(make_clock())
+    service = WriteService(store, FakeEmbedder(dimension=16))
+    admin = Visibility(TrustLevel.PRIVILEGED, "admin", is_admin=True)
+
+    def draft(summary: str, **kw: object) -> EntryDraft:
+        return EntryDraft(
+            kind=Kind.FACT,
+            summary=summary,
+            author="a",
+            agent="ag",
+            scope="org",
+            **kw,  # type: ignore[arg-type]
+        )
+
+    text = "why does billing in the eu region stall on node 20 behind the shared proxy"
+    question = await service.write(draft(text, tags=("open-question",)), writer=admin)
+    answer = text.replace("why does", "because").replace("stall", "stalls")
+    checked = await service.check(draft(answer), writer=admin)
+    assert "answers_open_question" in [w.code for w in checked.warnings]
+    assert any(question.id in w.message for w in checked.warnings)
+    linked = replace(draft(answer), see_also=(question.id,))
+    assert "answers_open_question" not in [
+        w.code for w in (await service.check(linked, writer=admin)).warnings
+    ]
+    written = await service.write_and_relate(draft(answer), writer=admin)
+    assert "answers_open_question" in [w.code for w in written.warnings]
+    again = await service.write_and_relate(draft(answer, supersedes=(question.id,)), writer=admin)
+    assert "answers_open_question" not in [w.code for w in again.warnings]
