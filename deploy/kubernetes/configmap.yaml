@@ -58,8 +58,10 @@ data:
   # measure with `make measure-threshold` before setting it.
   # HIVEMIND_VECTOR_MIN_SIMILARITY: ""
   # Task line put before the search query for an instruction-aware embedder
-  # such as Qwen3-Embedding (ADR 0097), off when unset. Embedder-specific:
-  # measure with `make measure-query-instruction` first.
+  # such as Qwen3-Embedding (ADR 0097). On by default with "Given an agent's
+  # task or question, retrieve shared memory entries that answer it". Set it
+  # to "" to turn it off, for example with a non-Qwen embedder; with a
+  # different embedder, measure with `make measure-query-instruction`.
   # HIVEMIND_QUERY_INSTRUCTION: ""
   # Read-time grouping of unlinked versions of one fact (ADR 0074), off when
   # unset. Model-specific: measure with `make measure-versions` first.

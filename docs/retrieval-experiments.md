@@ -558,8 +558,8 @@ experiments use cannot stand in for a real model here.
 the "search empty" figures use Postgres keyword matching. Models run
 through llama.cpp with last-token pooling, truncated to 1024 dimensions
 and re-normalised as a `dimensions` request does: 8B as the Q8_0 GGUF,
-4B and 0.6B as f16. Embedded as the service does, with no query
-instruction. Figures weight 8B 70%, 4B 20%, 0.6B 10%.)*
+4B and 0.6B as f16. Embedded without a query
+instruction (this run predates ADR 0097). Figures weight 8B 70%, 4B 20%, 0.6B 10%.)*
 
 The multi-domain set (`tests/eval/domains.py`) has five kinds of agent
 work: data analysis, software engineering, system administration,
@@ -1104,3 +1104,126 @@ narrow one: every answer gets 4 or 5, including answers that are distractors
 for other queries, and a 5 on a near-miss beats a 4 on the right answer by
 1.25x under the wide factor. On these results the setting ships on (ADR
 0088).
+
+## Query instruction (ADR 0097)
+
+*(tool: `tests/eval/query_instruction.py`, `make measure-query-instruction`;
+thresholds from `tests/eval/threshold.py`)*
+`HIVEMIND_QUERY_INSTRUCTION` is on by default. The search query sent to the
+vector stream is embedded as `Instruct: {instruction}\nQuery:{query}`; entries
+never carry it. The harness scores every answerable query of the sixteen
+domain fixtures, alone and pooled, with no instruction and with the generic
+one (`Given an agent's task or question, retrieve shared memory entries that
+answer it`).
+
+**Setup.** Qwen3-Embedding through llama.cpp GGUFs with last-token pooling at
+1024 dimensions: 8B as Q8_0, 4B and 0.6B as f16. The sixteen domain fixtures,
+646 answerable queries pooled. Weighted figures use 70% 8B, 20% 4B, 10% 0.6B.
+
+**Ranking.** Pooled hit@1 / hit@5 / MRR, no instruction then the generic one.
+
+| model | none | generic | change (MRR) |
+|---|---|---|---|
+| 8B | 0.746 / 0.938 / 0.826 | 0.810 / 0.966 / 0.878 | +0.051 |
+| 4B | 0.776 / 0.957 / 0.853 | 0.828 / 0.971 / 0.888 | +0.035 |
+| 0.6B | 0.803 / 0.954 / 0.865 | 0.833 / 0.960 / 0.887 | +0.023 |
+
+Weighted pooled MRR goes from 0.835 to 0.881 (+0.046). Per domain the mean
+MRR change is +0.027 on 8B (6 of 16 domains slightly worse, the worst
+-0.037; the best, legal compliance, +0.187), +0.013 on 4B (7 worse, worst
+-0.037) and +0.002 on 0.6B (6 worse, worst -0.046); weighted, +0.022. So the
+gain is real in the pool and uneven by domain. A second wording, `Given a
+question or task description, retrieve a stored note that answers it`, gave
+the same result on 0.6B and 4B.
+
+The 8B run, per domain:
+
+| fixture | instruction | queries | hit@1 / hit@5 / MRR | change vs none (hit@1 / hit@5 / MRR) |
+|---|---|---|---|---|
+| all 16 domains together | none | 646 | 0.746 / 0.938 / 0.826 | baseline |
+| all 16 domains together | generic | 646 | 0.810 / 0.966 / 0.878 | +0.063 / +0.028 / +0.051 |
+| data analysis | none | 41 | 0.732 / 0.829 / 0.774 | baseline |
+| data analysis | generic | 41 | 0.659 / 0.829 / 0.738 | -0.073 / +0.000 / -0.037 |
+| software engineering | none | 41 | 0.756 / 0.951 / 0.824 | baseline |
+| software engineering | generic | 41 | 0.780 / 0.951 / 0.833 | +0.024 / +0.000 / +0.009 |
+| system administration | none | 41 | 0.780 / 1.000 / 0.873 | baseline |
+| system administration | generic | 41 | 0.854 / 0.976 / 0.903 | +0.073 / -0.024 / +0.030 |
+| journalism and social science | none | 42 | 0.714 / 0.857 / 0.778 | baseline |
+| journalism and social science | generic | 42 | 0.738 / 0.857 / 0.788 | +0.024 / +0.000 / +0.010 |
+| finance analysis | none | 41 | 0.707 / 0.951 / 0.809 | baseline |
+| finance analysis | generic | 41 | 0.659 / 0.951 / 0.774 | -0.049 / +0.000 / -0.035 |
+| web search | none | 40 | 0.725 / 0.975 / 0.838 | baseline |
+| web search | generic | 40 | 0.775 / 0.975 / 0.871 | +0.050 / +0.000 / +0.033 |
+| intelligence analysis | none | 40 | 0.875 / 0.975 / 0.925 | baseline |
+| intelligence analysis | generic | 40 | 0.825 / 1.000 / 0.906 | -0.050 / +0.025 / -0.019 |
+| vulnerability research | none | 40 | 0.925 / 1.000 / 0.963 | baseline |
+| vulnerability research | generic | 40 | 0.925 / 1.000 / 0.963 | +0.000 / +0.000 / +0.000 |
+| blue team | none | 40 | 0.700 / 1.000 / 0.842 | baseline |
+| blue team | generic | 40 | 0.675 / 1.000 / 0.823 | -0.025 / +0.000 / -0.019 |
+| red team | none | 40 | 0.600 / 0.875 / 0.726 | baseline |
+| red team | generic | 40 | 0.625 / 0.975 / 0.792 | +0.025 / +0.100 / +0.066 |
+| database engineering | none | 40 | 0.600 / 1.000 / 0.796 | baseline |
+| database engineering | generic | 40 | 0.700 / 1.000 / 0.842 | +0.100 / +0.000 / +0.046 |
+| network operations | none | 40 | 0.850 / 1.000 / 0.925 | baseline |
+| network operations | generic | 40 | 0.825 / 1.000 / 0.912 | -0.025 / +0.000 / -0.013 |
+| data engineering | none | 40 | 0.675 / 0.875 / 0.767 | baseline |
+| data engineering | generic | 40 | 0.750 / 0.975 / 0.854 | +0.075 / +0.100 / +0.087 |
+| platform engineering | none | 40 | 0.800 / 1.000 / 0.882 | baseline |
+| platform engineering | generic | 40 | 0.750 / 1.000 / 0.865 | -0.050 / +0.000 / -0.018 |
+| research literature | none | 40 | 0.650 / 0.850 / 0.733 | baseline |
+| research literature | generic | 40 | 0.725 / 1.000 / 0.844 | +0.075 / +0.150 / +0.110 |
+| legal compliance | none | 40 | 0.650 / 0.925 / 0.751 | baseline |
+| legal compliance | generic | 40 | 0.900 / 0.975 / 0.938 | +0.250 / +0.050 / +0.187 |
+
+**Answer similarity.** Cosine similarity of the best answer to the query,
+pooled, mean / 10th percentile.
+
+| model | none | generic |
+|---|---|---|
+| 8B | 0.741 / 0.594 | 0.712 / 0.569 |
+| 4B | 0.730 / 0.582 | 0.713 / 0.571 |
+| 0.6B | 0.727 / 0.590 | 0.723 / 0.582 |
+
+The instruction lowers answer similarity a little (p10 by 0.008 to 0.025).
+
+**Threshold.** Cells are kept / emptied: the share of answerable queries
+whose best answer clears t, and the share of off-topic queries whose nearest
+entry stays below t.
+
+| model | pool | instruction | t=0.35 | t=0.40 | t=0.45 | t=0.50 | t=0.55 | t=0.60 |
+|---|---|---|---|---|---|---|---|---|
+| 8B | all 16 domains together | none | 1.00/0.00 | 1.00/0.00 | 0.99/0.00 | 0.98/0.00 | 0.96/0.02 | 0.89/0.05 |
+| 8B | all 16 domains together | generic | 1.00/0.00 | 0.99/0.00 | 0.98/0.03 | 0.97/0.05 | 0.92/0.07 | 0.85/0.17 |
+| 8B | mean of 16 single-domain pools | none | 1.00/0.00 | 1.00/0.00 | 0.99/0.04 | 0.98/0.18 | 0.96/0.48 | 0.89/0.76 |
+| 8B | mean of 16 single-domain pools | generic | 1.00/0.12 | 0.99/0.31 | 0.98/0.55 | 0.97/0.75 | 0.92/0.88 | 0.85/0.94 |
+| 4B | all 16 domains together | none | 1.00/0.00 | 1.00/0.00 | 0.99/0.00 | 0.97/0.01 | 0.93/0.05 | 0.87/0.09 |
+| 4B | all 16 domains together | generic | 1.00/0.00 | 0.99/0.01 | 0.98/0.01 | 0.97/0.05 | 0.93/0.08 | 0.85/0.21 |
+| 4B | mean of 16 single-domain pools | none | 1.00/0.00 | 1.00/0.03 | 0.99/0.15 | 0.97/0.41 | 0.94/0.71 | 0.87/0.88 |
+| 4B | mean of 16 single-domain pools | generic | 1.00/0.10 | 0.99/0.30 | 0.98/0.55 | 0.97/0.76 | 0.93/0.88 | 0.85/0.95 |
+| 0.6B | all 16 domains together | none | 1.00/0.00 | 1.00/0.00 | 0.99/0.00 | 0.98/0.00 | 0.94/0.03 | 0.88/0.09 |
+| 0.6B | all 16 domains together | generic | 0.99/0.00 | 0.99/0.00 | 0.98/0.03 | 0.97/0.05 | 0.93/0.12 | 0.86/0.29 |
+| 0.6B | mean of 16 single-domain pools | none | 1.00/0.00 | 1.00/0.01 | 0.99/0.09 | 0.98/0.30 | 0.94/0.62 | 0.88/0.84 |
+| 0.6B | mean of 16 single-domain pools | generic | 0.99/0.08 | 0.99/0.27 | 0.98/0.57 | 0.97/0.79 | 0.93/0.90 | 0.86/0.95 |
+
+The instruction lowers answer similarity slightly but off-topic similarity
+much more, so a threshold separates the two better. At 0.45 in single-domain
+pools, the share of off-topic searches left empty rises from 4% to 55% on 8B
+(15% to 55% on 4B, 9% to 57% on 0.6B) while 98% of answers are kept (99%
+before). 0.45 stays the recommendation, and the threshold stays off by
+default (ADR 0062).
+
+**Search-aware strategies (4B only).** Two ways of using the query's shape or
+the kind filter were tried against the single generic instruction.
+
+| strategy | pooled MRR | per-domain mean MRR |
+|---|---|---|
+| generic instruction | 0.892 | 0.869 |
+| instruction chosen by query shape (question, error, topic) | 0.893 | 0.860 |
+| generic instruction, kind filter set | 0.909 | |
+| kind-specific instruction, kind filter set | 0.908 | |
+
+Neither beats the generic instruction, so there is one instruction for every
+route. The corpus is mostly topic-style queries (558 topic, 61 question, 27
+error), and the recency and explore routes cannot be measured with it.
+
+Version grouping and importance with the instruction: see below.

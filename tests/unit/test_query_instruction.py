@@ -4,7 +4,8 @@ reach.
 Set, the search query sent to the vector stream is embedded as
 ``Instruct: {task}\\nQuery:{query}``. The keyword stream keeps the raw query,
 and nothing that embeds an entry (a write, its ``related`` entries) ever
-carries the instruction. Off (empty) is today's behaviour.
+carries the instruction. On by default (``DEFAULT_QUERY_INSTRUCTION``); an
+explicitly empty value is off.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from hivemind.config import SearchConfig, Settings
+from hivemind.config import DEFAULT_QUERY_INSTRUCTION, SearchConfig, Settings
 from hivemind.domain.access import TrustLevel, Visibility
 from hivemind.domain.entry import EntryDraft, EntryFilters, Kind
 from hivemind.domain.validation import MAX_QUERY_INSTRUCTION_CHARS
@@ -66,11 +67,20 @@ def _services(instruction: str) -> tuple[RecordingStore, RecordingEmbedder, obje
 
 
 class TestConfig:
-    def test_off_by_default(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_on_by_default(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("HIVEMIND_QUERY_INSTRUCTION", raising=False)
         monkeypatch.chdir(tmp_path)
-        assert SearchConfig().query_instruction == ""
+        assert SearchConfig().query_instruction == DEFAULT_QUERY_INSTRUCTION
+        assert Settings().query_instruction == DEFAULT_QUERY_INSTRUCTION
+        assert Settings().search_config().query_instruction == DEFAULT_QUERY_INSTRUCTION
+
+    def test_an_explicitly_empty_variable_turns_it_off(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("HIVEMIND_QUERY_INSTRUCTION", "")
         assert Settings().search_config().query_instruction == ""
+        assert Settings().search_config().embedded_query("q") == "q"
 
     def test_an_operator_sets_it_through_the_environment(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -107,7 +117,7 @@ class TestConfig:
     def test_the_wrapped_query_has_no_space_after_the_colon(self) -> None:
         config = SearchConfig(query_instruction=TASK)
         assert config.embedded_query("q") == f"Instruct: {TASK}\nQuery:q"
-        assert SearchConfig().embedded_query("q") == "q"
+        assert SearchConfig(query_instruction="").embedded_query("q") == "q"
 
 
 class TestThroughTheServices:

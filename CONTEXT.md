@@ -301,7 +301,7 @@ A search that passes `explore: true`: its ranked hits are re-ordered by maximal 
 _Avoid_: diverse search, random search (nothing is random or hidden)
 
 **Query instruction**:
-An optional one-line task (`HIVEMIND_QUERY_INSTRUCTION`, ADR 0097) put before the search query as `Instruct: {task}\nQuery:{query}` on the vector stream only, for an instruction-aware embedder. Never applied to entries or to the keyword stream. Off by default.
+An optional one-line task (`HIVEMIND_QUERY_INSTRUCTION`, ADR 0097) put before the search query as `Instruct: {task}\nQuery:{query}` on the vector stream only, for an instruction-aware embedder. Never applied to entries or to the keyword stream. On by default with a generic instruction; empty turns it off.
 _Avoid_: prompt, prefix (an entry is never prefixed)
 
 **Similarity threshold**:

@@ -2,8 +2,8 @@
 
 ``SearchConfig.query_instruction`` wraps the search query sent to the vector
 stream as ``Instruct: {task}\\nQuery:{query}``; entries are never embedded
-with it. It is off by default until this has been run with the embedder a
-deployment uses. For each domain fixture (the sixteen ``EXTENDED_DOMAINS`` of
+with it. It is on by default (``DEFAULT_QUERY_INSTRUCTION``, the generic
+instruction measured here); re-run this with the embedder a deployment uses. For each domain fixture (the sixteen ``EXTENDED_DOMAINS`` of
 ``tests/eval/corpus``, each alone as one fleet's pool, and all together) it
 seeds the pool once and runs every answerable query with:
 
@@ -38,7 +38,7 @@ from dataclasses import asdict, dataclass, replace
 from datetime import timedelta
 from pathlib import Path
 
-from hivemind.config import SearchConfig
+from hivemind.config import DEFAULT_QUERY_INSTRUCTION, SearchConfig
 from hivemind.domain.entry import EntryDraft, Kind
 from hivemind.memstore import MemoryStore, cosine_similarity
 from hivemind.ports import Embedder
@@ -51,9 +51,7 @@ from tests.eval.threshold import Entry, Fixture, combined_fixture, domain_fixtur
 from tests.fakes import FIXED_NOW, make_clock
 
 K = 5
-GENERIC_INSTRUCTION = (
-    "Given an agent's task or question, retrieve shared memory entries that answer it"
-)
+GENERIC_INSTRUCTION = DEFAULT_QUERY_INSTRUCTION
 EXTRA_ENV = "EVAL_QUERY_INSTRUCTIONS"
 JSON_ENV = "EVAL_QUERY_INSTRUCTION_JSON"
 NONE_LABEL = "none"

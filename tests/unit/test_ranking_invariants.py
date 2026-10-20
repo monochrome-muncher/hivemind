@@ -737,7 +737,9 @@ async def _fused_by_id(store: MemoryStore, query: str) -> dict[str, float]:
 
     keyword = await store.search_keyword(query, EntryFilters(), CONFIG.candidate_top_k)
     vector = await store.search_vector(
-        await make_embedder().embed_text(query), EntryFilters(), CONFIG.candidate_top_k
+        await make_embedder().embed_text(CONFIG.embedded_query(query)),
+        EntryFilters(),
+        CONFIG.candidate_top_k,
     )
     return rrf_fuse(
         [keyword, vector],

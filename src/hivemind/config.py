@@ -105,6 +105,13 @@ def parse_recency_by_kind(text: str) -> tuple[tuple[Kind, float], ...] | None:
 
 # The floor under ``prefer_recent`` (ADR 0073); see docs/retrieval-experiments.md.
 PREFER_RECENT_FLOOR: float | None = 0.5
+# The task line put before the search query for an instruction-aware embedder
+# (ADR 0097). On by default: measured to help the Qwen3-Embedding family.
+# ``HIVEMIND_QUERY_INSTRUCTION=""`` turns it off. tests/eval/query_instruction.py
+# measures this same text.
+DEFAULT_QUERY_INSTRUCTION = (
+    "Given an agent's task or question, retrieve shared memory entries that answer it"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,9 +187,9 @@ class SearchConfig:
     narrow_importance: bool = True
     # For an instruction-aware embedder (Qwen3-Embedding, ADR 0097): the task
     # line put before the search query as ``Instruct: {task}\nQuery:{query}``
-    # on the vector stream only. Entries are never embedded with it. Empty =
-    # off, the default.
-    query_instruction: str = ""
+    # on the vector stream only. Entries are never embedded with it. On by
+    # default; empty turns it off.
+    query_instruction: str = DEFAULT_QUERY_INSTRUCTION
 
     def __post_init__(self) -> None:
         # Fail at config time (ADR 0024), not per request as a
@@ -438,9 +445,10 @@ class Settings(BaseSettings):
     recency_hint: bool = False
     # See SearchConfig.narrow_importance (ADR 0088).
     narrow_importance: bool = True
-    # See SearchConfig.query_instruction (ADR 0097). Empty means off;
+    # See SearchConfig.query_instruction (ADR 0097). Defaults to
+    # DEFAULT_QUERY_INSTRUCTION; an explicitly empty value means off;
     # surrounding whitespace is stripped.
-    query_instruction: str = ""
+    query_instruction: str = DEFAULT_QUERY_INSTRUCTION
 
     @field_validator("query_instruction")
     @classmethod

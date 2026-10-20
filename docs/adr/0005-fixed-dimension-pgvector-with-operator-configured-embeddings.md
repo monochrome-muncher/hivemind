@@ -2,7 +2,7 @@
 
 > **Amended by [ADR 0015](0015-default-embedding-dimension-1024-with-loud-dim-mismatch-guard.md):** the default dimension is 1024, not 1536, and a dimension mismatch fails `migrate` loudly. Everything else below stands.
 >
-> **Amended by [ADR 0097](0097-query-instruction-for-instruction-aware-embedders.md):** the search query may carry an instruction for an instruction-aware embedder. Entries never do.
+> **Amended by [ADR 0097](0097-query-instruction-for-instruction-aware-embedders.md):** the search query may carry an instruction for an instruction-aware embedder. Entries never do. It is on by default for the Qwen3 family and an empty `HIVEMIND_QUERY_INSTRUCTION` turns it off.
 
 Embeddings are generated at write time by an OpenAI-compatible endpoint that the organization configures at deploy (OpenAI, or a self-hosted vLLM/Ollama if data must not leave the org). The pgvector column is provisioned with a fixed dimension at deploy time (default 1536, matching `text-embedding-3-small`), and the stored embedding records the model name. Changing models later is an operator-run re-embedding migration (pgvector dimension is per-column, so a different-dimension model means a new column, backfill, and swap).
 

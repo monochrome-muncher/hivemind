@@ -106,4 +106,4 @@ is unused.
 | [0094](0094-admin-csv-export.md) | The admin panel exports its lists as CSV | Accepted; front end only |
 | [0095](0095-agent-portal.md) | The agent portal: a browser front end for agent-key holders | Accepted |
 | [0096](0096-contributors-pin.md) | Contributors pin, three pins each, and a withdrawn entry leaves the briefing | Accepted |
-| [0097](0097-query-instruction-for-instruction-aware-embedders.md) | A query instruction for instruction-aware embedders, on the query side only | Accepted; off by default |
+| [0097](0097-query-instruction-for-instruction-aware-embedders.md) | A query instruction for instruction-aware embedders, on the query side only | Accepted; on by default, empty value turns it off |
