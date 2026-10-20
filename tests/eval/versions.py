@@ -18,6 +18,11 @@ off, it runs the shipped search and reports, per domain and pooled:
 * hit@5 over every query of the pool (those two, plus the domain's own
   answerable queries), pooled across domains.
 
+Set ``EVAL_QUERY_INSTRUCTION`` to a literal instruction string to run the
+whole measurement with ``SearchConfig.query_instruction`` on (ADR 0097): the
+search embeds the wrapped query, (entries are embedded as before; this module embeds no query itself). Unset or empty is off; each report states
+the instruction in use.
+
 The adoption rule is the study's (2026-10-10 proposal, section 6.1). Run
 it with the deployment's embedder (``HIVEMIND_EMBEDDING_*``);
 ``tests/eval/test_version_measurement.py`` runs it on the hash embedder,
@@ -178,6 +183,7 @@ class Measurement:
 
     model: str
     domains: dict[str, list[Row]] = field(default_factory=dict)
+    query_instruction: str = ""
 
     def pooled(self) -> list[Row]:
         rows = list(self.domains.values())
@@ -256,6 +262,7 @@ async def measure_domain(
     sweep: tuple[float, ...] = SWEEP,
     constellation: Constellation = ORG_ONLY,
     query_style: str = "vague",
+    query_instruction: str = "",
 ) -> list[Row]:
     """The grouping-off baseline, then one row per tau, on one domain,
     with the pool scoped per ``constellation``. ``query_style`` of
@@ -293,7 +300,10 @@ async def measure_domain(
     distractors = set(distractor_ids)
 
     own = [(q, {background[i] for i in rel}) for q, rel in domain.answerable]
-    base_config = make_search_config(candidate_top_k=20, default_limit=40)
+    base_config = replace(
+        make_search_config(candidate_top_k=20, default_limit=40),
+        query_instruction=query_instruction,
+    )
     rows = []
     for tau in (None, *sweep):
         config = replace(base_config, version_group_min_similarity=tau)
@@ -359,11 +369,12 @@ async def measure(
     sweep: tuple[float, ...] = SWEEP,
     constellation: Constellation = ORG_ONLY,
     query_style: str = "vague",
+    query_instruction: str = "",
 ) -> Measurement:
-    result = Measurement(embedder.model_name)
+    result = Measurement(embedder.model_name, query_instruction=query_instruction)
     for vdomain in domains:
         result.domains[vdomain.name] = await measure_domain(
-            embedder, vdomain, sweep, constellation, query_style
+            embedder, vdomain, sweep, constellation, query_style, query_instruction
         )
     return result
 
@@ -374,9 +385,13 @@ async def measure_all(
     constellations: tuple[Constellation, ...] = CONSTELLATIONS,
     sweep: tuple[float, ...] = SWEEP,
     query_style: str = "vague",
+    query_instruction: str = "",
 ) -> dict[str, Measurement]:
     """The sweep on every constellation; the keys are constellation names."""
-    return {c.name: await measure(embedder, domains, sweep, c, query_style) for c in constellations}
+    return {
+        c.name: await measure(embedder, domains, sweep, c, query_style, query_instruction)
+        for c in constellations
+    }
 
 
 def _table(rows: list[Row]) -> list[str]:
@@ -395,9 +410,16 @@ def _table(rows: list[Row]) -> list[str]:
     return lines
 
 
+def _instruction_label(instruction: str) -> str:
+    return f"`{instruction}`" if instruction else "none"
+
+
 def report(m: Measurement) -> str:
     """The measurement as Markdown, ready for docs/retrieval-experiments.md."""
-    lines = [f"Model: `{m.model}`.", ""]
+    lines = [
+        f"Model: `{m.model}`. Query instruction: {_instruction_label(m.query_instruction)}.",
+        "",
+    ]
     for name, rows in m.domains.items():
         lines += [f"### {name}", "", *_table(rows), ""]
     lines += ["### Pooled", "", *_table(m.pooled()), ""]
@@ -429,6 +451,8 @@ def report_all(results: dict[str, Measurement]) -> str:
     """
     lines: list[str] = []
     for name, m in results.items():
+        if not lines:
+            lines += [f"Query instruction: {_instruction_label(m.query_instruction)}", ""]
         lines += [f"## Constellation: {name}", ""]
         if name == ADOPTION_CONSTELLATION.name:
             lines += [report(m), ""]
@@ -451,9 +475,15 @@ async def _main() -> None:
 
     settings = load_settings()
     query_style = os.environ.get("EVAL_QUERY_STYLE", "vague").strip().lower()
+    query_instruction = os.environ.get("EVAL_QUERY_INSTRUCTION", "").strip()
     try:
         embedder = CachingEmbedder(build_embedder(settings))
-        results = await measure_all(embedder, EXTENDED_VERSION_DOMAINS, query_style=query_style)
+        results = await measure_all(
+            embedder,
+            EXTENDED_VERSION_DOMAINS,
+            query_style=query_style,
+            query_instruction=query_instruction,
+        )
         print(report_all(results))
     except EmbeddingError as exc:
         where = endpoint_label(settings.embedding_endpoint)

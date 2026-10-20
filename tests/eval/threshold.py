@@ -17,6 +17,12 @@ each, and a sweep of thresholds, it reports:
   empty at least as often; ``measure(..., store=PgStore(...))`` on a
   scratch pool gives Postgres's own keyword matching.
 
+Set ``EVAL_QUERY_INSTRUCTION`` to a literal instruction string to run the
+whole measurement with ``SearchConfig.query_instruction`` on (ADR 0097): the
+search embeds the wrapped query, and so do the similarity statistics here
+(entries are embedded as before). Unset or empty is off; each report states
+the instruction in use.
+
 Run it against the deployment's embedder (the ``HIVEMIND_EMBEDDING_*``
 settings, e.g. ``make vllm`` locally): ``make measure-threshold``.
 ``tests/eval/test_threshold_measurement.py`` runs it on the hash embedder,
@@ -199,6 +205,7 @@ class Measurement:
     relevant_similarities: list[float]  # per answerable query, its best relevant entry
     off_topic_similarities: list[float]  # per off-topic query, its nearest entry
     rows: list[Row]
+    query_instruction: str = ""
 
     @property
     def suggested(self) -> float:
@@ -308,6 +315,7 @@ async def measure(
     *,
     store: Store | None = None,
     cache: EmbedCache | None = None,
+    query_instruction: str = "",
 ) -> Measurement:
     """Run the sweep on ``fixture`` (the golden one by default) with
     ``embedder``; see the module docstring.
@@ -315,7 +323,8 @@ async def measure(
     ``store`` must be empty; a ``MemoryStore`` by default. A scratch
     ``PgStore`` gives Postgres's keyword matching (never a real pool: the
     corpus is written into it). ``cache`` shares embeddings across the
-    scenarios of one run."""
+    scenarios of one run. ``query_instruction`` (empty = off) goes on every
+    config and onto the queries embedded for the similarity statistics."""
     fixture = fixture or golden_fixture()
     store = store or MemoryStore(make_clock())
     seeded = await _seed(embedder, store, fixture.entries, cache)
@@ -323,8 +332,13 @@ async def measure(
     stored = dict(seeded)
     answerable = [(q, {ids[i] for i in rel}) for q, rel in fixture.answerable]
 
+    base = replace(
+        make_search_config(candidate_top_k=20, default_limit=K), query_instruction=query_instruction
+    )
+
     async def similarities(query: str) -> dict[str, float]:
-        vector = await cache.text(query) if cache is not None else await embedder.embed_text(query)
+        text = base.embedded_query(query)
+        vector = await cache.text(text) if cache is not None else await embedder.embed_text(text)
         return {eid: cosine_similarity(vector, emb) for eid, emb in stored.items()}
 
     relevant_sims = []
@@ -334,7 +348,6 @@ async def measure(
     off_sims = [max((await similarities(query)).values()) for query in fixture.off_topic]
 
     rows = []
-    base = make_search_config(candidate_top_k=20, default_limit=K)
     for threshold in sweep:
         config = replace(base, vector_min_similarity=threshold)
         service = SearchService(store, embedder, config, now_fn=lambda: FIXED_NOW)
@@ -362,6 +375,7 @@ async def measure(
         relevant_similarities=relevant_sims,
         off_topic_similarities=off_sims,
         rows=rows,
+        query_instruction=query_instruction,
     )
 
 
@@ -371,6 +385,7 @@ def report(m: Measurement) -> str:
         f"### {m.fixture}",
         "",
         f"Model: `{m.model}`. {m.answerable} answerable queries, {m.off_topic} off-topic.",
+        f"Query instruction: {_instruction_label(m.query_instruction)}",
         "",
         "Lowest similarity of an answerable query to its relevant entry: "
         f"{min(m.relevant_similarities):.3f} (median {_median(m.relevant_similarities):.3f}).",
@@ -390,6 +405,10 @@ def report(m: Measurement) -> str:
     return "\n".join(lines)
 
 
+def _instruction_label(instruction: str) -> str:
+    return f"`{instruction}`" if instruction else "none"
+
+
 def _median(values: list[float]) -> float:
     ordered = sorted(values)
     mid = len(ordered) // 2
@@ -402,6 +421,7 @@ def _measure_fixture(
     model: str,
     dim: int,
     api_key: str,
+    query_instruction: str = "",
 ) -> str:
     """Measure one fixture in its own process: the search work is CPU-bound
     (pure-Python cosine) and GIL-bound, so true parallelism needs one process
@@ -417,7 +437,7 @@ def _measure_fixture(
         embedding_api_key=api_key,
     )
     embedder = CachingEmbedder(build_embedder(settings))
-    return report(asyncio.run(measure(embedder, fixture)))
+    return report(asyncio.run(measure(embedder, fixture, query_instruction=query_instruction)))
 
 
 def _main() -> None:
@@ -428,6 +448,7 @@ def _main() -> None:
 
     settings = load_settings()
     query_style = os.environ.get("EVAL_QUERY_STYLE", "vague").strip().lower()
+    query_instruction = os.environ.get("EVAL_QUERY_INSTRUCTION", "").strip()
     fixtures = extended_scenarios_specific() if query_style == "specific" else extended_scenarios()
     try:
         with ProcessPoolExecutor(max_workers=8) as pool:
@@ -439,6 +460,7 @@ def _main() -> None:
                     settings.embedding_model,
                     settings.embedding_dim,
                     settings.embedding_api_key,
+                    query_instruction,
                 )
                 for f in fixtures
             ]
