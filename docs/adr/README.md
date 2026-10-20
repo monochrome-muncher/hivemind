@@ -15,7 +15,7 @@ is unused.
 | [0002](0002-flat-org-wide-pool-with-scope-tag.md) | Flat org-wide pool with a scope tag | Superseded by 0011 |
 | [0003](0003-kill-switch-is-client-side.md) | The kill switch is client-side | Amended by 0035 |
 | [0004](0004-explicit-writes-only-no-passive-capture.md) | Explicit writes only (no passive capture in v1) | Accepted |
-| [0005](0005-fixed-dimension-pgvector-with-operator-configured-embeddings.md) | Fixed-dimension pgvector with operator-configured embeddings | Amended by 0015 |
+| [0005](0005-fixed-dimension-pgvector-with-operator-configured-embeddings.md) | Fixed-dimension pgvector with operator-configured embeddings | Amended by 0015, 0097 |
 | [0006](0006-hybrid-rrf-retrieval-no-knowledge-graph.md) | Hybrid retrieval: RRF fusion of BM25 + dense, no knowledge graph in v1 | Amended by 0022, 0025, 0047, 0048, 0049 |
 | [0007](0007-single-postgres-node-docker-compose-self-hosted.md) | One Postgres node, docker-compose, self-hosted per org | Superseded by 0026 |
 | [0008](0008-per-user-keys-plus-agent-scoped-sub-keys.md) | Per-user keys plus agent-scoped sub-keys, no OAuth in v1 | Superseded by 0012 |
@@ -106,3 +106,4 @@ is unused.
 | [0094](0094-admin-csv-export.md) | The admin panel exports its lists as CSV | Accepted; front end only |
 | [0095](0095-agent-portal.md) | The agent portal: a browser front end for agent-key holders | Accepted |
 | [0096](0096-contributors-pin.md) | Contributors pin, three pins each, and a withdrawn entry leaves the briefing | Accepted |
+| [0097](0097-query-instruction-for-instruction-aware-embedders.md) | A query instruction for instruction-aware embedders, on the query side only | Accepted; off by default |
