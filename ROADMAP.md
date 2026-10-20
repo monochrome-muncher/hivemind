@@ -42,6 +42,10 @@ The SPEC §10 extensions (Tier 5) stay held until their triggers fire.
 - **Parked ideas**: a `question` entry kind (wait for the empty-search
   counters of ADR 0056 to show demand). The legacy `pi-mcp-adapter` route in the Pi plugin is to be
   dropped once Pi's built-in MCP (0.99+) is the norm.
+- **Discovery and learning ideas** ([docs/proposals/2026-10-20-discovery-and-learning-ideas.md](docs/proposals/2026-10-20-discovery-and-learning-ideas.md)):
+  a re-check queue and a librarian skill, searchable tags, a tag
+  directory, "used together" trails and an ambient-recall pilot, kept as
+  candidates; its first three ideas are being built.
 - **The hive-mind study** ([docs/proposals/2026-10-10-hive-mind-ideas.md](docs/proposals/2026-10-10-hive-mind-ideas.md)):
   ideas for distillation, ranking evidence and sharing without
   converging, with each item's status. Its unbuilt items are candidates,
