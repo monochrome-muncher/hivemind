@@ -203,6 +203,22 @@ CASES: list[tuple[str, Rest, tuple[int, str, str], Mcp, tuple[str, str]]] = [
         ),
     ),
     (
+        "list relied_on_changed with no agent identity",
+        lambda w: w.client.get(
+            "/v1/entries", params={"relied_on_changed": "true"}, headers=_h("k-user")
+        ),
+        (
+            422,
+            "agent_identity_required",
+            "relied_on_changed needs the caller's agent identity (an agent or admin key)",
+        ),
+        lambda w: mcp.hive_list(w.mcp("k-user"), relied_on_changed=True),
+        (
+            "agent_unresolved",
+            "relied_on_changed needs the caller's agent identity (an agent or admin key)",
+        ),
+    ),
+    (
         "batch feedback naming an unknown entry",
         lambda w: w.client.post(
             "/v1/feedback",

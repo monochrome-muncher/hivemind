@@ -321,6 +321,14 @@ class EntryFilters:
     # At least one stale/wrong report (ADR 0054). Not evaluated by
     # ``matches`` (feedback is not on ``Entry``); each store applies it.
     flagged: bool = False
+    # Entries the ``reporter`` rated helpful that changed since (ADR 0098):
+    # superseded or withdrawn, or reported stale or wrong by someone else
+    # later. Implies inactive entries are listed. ``reporter`` is the
+    # (user, agent) a feedback row is keyed by; the read service fills it
+    # from the credential. Not evaluated by ``matches`` beyond the state;
+    # each store applies it.
+    relied_on_changed: bool = False
+    reporter: tuple[str, str] | None = None
 
     def validate(self) -> None:
         """Bounds for filters built from **caller input** (ADR 0040).
@@ -345,7 +353,11 @@ class EntryFilters:
 
     def matches(self, entry: Entry) -> bool:
         """Pure filter evaluation — shared by every store adapter."""
-        if not self.include_inactive and entry.state is not EntryState.ACTIVE:
+        if (
+            not self.include_inactive
+            and not self.relied_on_changed
+            and entry.state is not EntryState.ACTIVE
+        ):
             return False
         if self.kind is not None and entry.kind is not self.kind:
             return False

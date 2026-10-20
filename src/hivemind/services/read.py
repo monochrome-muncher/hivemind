@@ -12,14 +12,14 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from hivemind.config import SearchConfig
 from hivemind.domain.access import Visibility
 from hivemind.domain.entry import Entry, EntryFilters
-from hivemind.domain.feedback import FeedbackSummary
+from hivemind.domain.feedback import FeedbackCounts, FeedbackSummary
 from hivemind.domain.validation import MAX_GET_IDS, InvalidInput
-from hivemind.ports import Store
+from hivemind.ports import Credential, Store
 from hivemind.services.chain import (
     EntryLinks,
     entries_links,
@@ -28,6 +28,8 @@ from hivemind.services.chain import (
     get_visible_entry,
     supersession_chain,
 )
+from hivemind.services.errors import AgentIdentityRequired
+from hivemind.services.feedback import reporter_agent
 from hivemind.services.governance import GovernanceService
 
 
@@ -130,15 +132,32 @@ class ReadService:
         limit: int | None = None,
         offset: int = 0,
         visibility: Visibility,
+        credential: Credential | None = None,
     ) -> Sequence[Entry]:
         """The filtered list (SPEC §5.3): validates the filters (ADR 0040)
         and applies ``search_config.default_limit`` when ``limit`` is
-        omitted; a surface with its own default passes it explicitly."""
+        omitted; a surface with its own default passes it explicitly.
+
+        ``relied_on_changed`` (ADR 0098) needs the caller's feedback
+        identity, the one ``record_feedback`` files rows under; a
+        credential without one is ``AgentIdentityRequired``."""
         filters.validate()
+        if filters.relied_on_changed:
+            agent = reporter_agent(credential, None) if credential is not None else None
+            if credential is None or agent is None:
+                raise AgentIdentityRequired(
+                    "relied_on_changed needs the caller's agent identity (an agent or admin key)"
+                )
+            filters = replace(filters, reporter=(credential.user_id, agent))
         effective_limit = limit if limit is not None else self._search_config.default_limit
         return await self._store.list_entries(
             filters, limit=effective_limit, offset=offset, visibility=visibility
         )
+
+    async def feedback_counts(self, entries: Sequence[Entry]) -> dict[str, FeedbackCounts]:
+        """Live feedback counts per entry, one store read (the counts a
+        compact list item carries when ``relied_on_changed`` is on)."""
+        return await self._store.quality_counts([e.id for e in entries])
 
     async def _feedback_summary(self, entry_id: str) -> FeedbackSummary:
         if self._governance is None:
