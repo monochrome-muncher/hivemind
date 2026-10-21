@@ -111,6 +111,10 @@ lists every one with its default, and `src/hivemind/config.py` is the source.
 > (`HIVEMIND_API_SERVICE_HOST` and the like). Set
 > `HIVEMIND_STRICT_ENV=true` to make it a startup failure instead (the
 > dev Makefile does, unless the profile file sets it).
+> A setting a release removed (2.12.0: `HIVEMIND_RECENCY_FROM_CONFIRMATION`
+> and `HIVEMIND_RECENCY_BY_KIND`, ADR 0103) is not treated as unknown: it is
+> ignored and logged once as `Removed HIVEMIND_* environment variable(s)`,
+> even under `HIVEMIND_STRICT_ENV=true`. Delete it from the env file.
 
 > **Embedding dimension is a deploy-time decision** (ADR 0005): the
 > `vector(:dim)` column is created at migration time. Changing the

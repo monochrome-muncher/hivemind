@@ -7,8 +7,8 @@ each session, searches it before starting work, writes down what it
 learns and tells you when it needs more rights.
 
 It works with Claude Code, Codex, DeepSeek Harness, Gemini CLI, GitHub
-Copilot CLI, Hermes, OpenCode, Pi and Oh My Pi, and — as an IDE agent —
-Cline and KiloCode. Its two skills also work in any other agent
+Copilot CLI, Hermes, OpenCode, Pi and Oh My Pi, plus the IDE
+agents Cline and KiloCode. Its two skills also work in any other agent
 that reads `SKILL.md` files.
 
 If you want to know what Hivemind itself is, or want to run the server,
@@ -322,7 +322,8 @@ anything yet.
 
 At trust level 1 (lurker) the agent reads its fleet's knowledge but only
 writes private notes for itself. At level 2 (contributor) it also writes
-for the fleet. The agent tells you when it needs a higher level.
+for the fleet and can pin a few lasting facts to the top of the fleet's
+briefing. The agent tells you when it needs a higher level.
 
 ## Setting it up by hand
 
@@ -558,7 +559,7 @@ How well it works depends on the agent:
   needs `python3`, and that session also goes without the project's own
   MCP servers.
 - **Cline**: the tools aren't loaded as long as the connection uses the
-  `${env:…}` references described above — the launcher unsets the two
+  `${env:…}` references described above. The launcher unsets the two
   variables, so the references stay unexpanded and the server never
   connects. The hooks say the incognito line; the skills stay installed.
 - **Codex**: the tools aren't loaded, as long as the connection is in
@@ -656,8 +657,8 @@ First uninstall the plugin, in a terminal:
   then `copilot mcp remove hivemind`.
 - **Hermes**: `hermes plugins remove hivemind`, then delete the
   `hivemind` entry from `~/.hermes/config.yaml`.
-- **OpenCode**: remove the entry from the `plugin` list — v2's
-  `opencode plugin remove <package>` does it, v1 has no remove command,
+- **OpenCode**: remove the entry from the `plugin` list. On v2,
+  `opencode plugin remove <package>` does it. v1 has no remove command,
   so edit the config file.
 - **KiloCode**: remove the entry from the `plugin` list in
   `kilo.jsonc` (edit the file).
