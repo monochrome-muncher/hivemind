@@ -9,6 +9,7 @@ masked CLI failure, a missing `generic`).
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import signal
@@ -672,3 +673,21 @@ def test_service_monitors_scrape_the_api_and_the_mcp_runner() -> None:
         (endpoint,) = monitor["spec"]["endpoints"]
         assert endpoint["port"] in [p["name"] for p in service["spec"]["ports"]]
         assert endpoint["path"] == "/metrics"
+
+
+def test_grafana_dashboard_ships_with_the_monitoring_tree() -> None:
+    kust = _load(K8S / "optional" / "monitoring" / "kustomization.yaml")
+    (generator,) = kust["configMapGenerator"]
+    assert generator["files"] == ["hivemind-dashboard.json"]
+    assert generator["options"]["labels"]["grafana_dashboard"] == "1"
+    dashboard = json.loads(
+        (K8S / "optional" / "monitoring" / "hivemind-dashboard.json").read_text()
+    )
+    exprs = [t["expr"] for p in dashboard["panels"] for t in p.get("targets", [])]
+    assert exprs
+    # Every query is scoped by the namespace variable and reads a Hivemind series.
+    assert all('namespace=~"$namespace"' in e and "hivemind_" in e for e in exprs)
+    # The pool-wide counters repeat on every api replica: never summed raw.
+    for e in exprs:
+        if "hivemind_searches" in e:
+            assert "max by (fleet)" in e, e
