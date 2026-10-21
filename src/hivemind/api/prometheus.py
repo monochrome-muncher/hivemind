@@ -49,19 +49,18 @@ from collections.abc import Awaitable, Callable, Iterator, Mapping
 from typing import Any
 
 from fastapi import APIRouter, Response
-from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Counter, Histogram
+from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry
 from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
 from prometheus_client.exposition import generate_latest
 from prometheus_client.registry import Collector
-from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from hivemind.domain.usage import HealthUsage, UsageReport
+from hivemind.http_metrics import UNMATCHED_ROUTE, ProcessMetrics, RequestMetrics
 
 logger = logging.getLogger(__name__)
 
 METRICS_PATH = "/metrics"
 USAGE_TTL_SECONDS = 30.0
-UNMATCHED_ROUTE = "unmatched"
 
 Clock = Callable[[], float]
 
@@ -369,23 +368,10 @@ class PrometheusMetrics:
         self.usage_snapshot: UsageReport | None = None
         self.usage_ok = False
         self.registry = CollectorRegistry()
-        self.requests = Counter(
-            "hivemind_http_requests",
-            "HTTP requests handled by this process",
-            ["method", "route", "status"],
-            registry=self.registry,
-        )
-        self.latency = Histogram(
-            "hivemind_http_request_duration_seconds",
-            "HTTP request latency in this process",
-            ["method", "route"],
-            registry=self.registry,
-        )
-        self.degraded_searches = Counter(
-            "hivemind_search_degraded",
-            "Searches answered by the keyword stream alone because the embedder failed (ADR 0048)",
-            registry=self.registry,
-        )
+        self.process = process = ProcessMetrics(self.registry)
+        self.requests = process.requests
+        self.latency = process.latency
+        self.degraded_searches = process.degraded_searches
         self.registry.register(_UsageCollector(self))
 
     async def refresh_usage(self) -> None:
@@ -416,33 +402,4 @@ class PrometheusMetrics:
         return router
 
 
-class RequestMetrics:
-    """Pure-ASGI middleware: count and time every HTTP request by route
-    template. Outermost, so 401/413 answers from the guards are counted."""
-
-    def __init__(self, app: ASGIApp, metrics: PrometheusMetrics) -> None:
-        self._app = app
-        self._metrics = metrics
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http":
-            await self._app(scope, receive, send)
-            return
-        status = 500
-        started = time.perf_counter()
-
-        async def send_wrapper(message: Message) -> None:
-            nonlocal status
-            if message["type"] == "http.response.start":
-                status = int(message["status"])
-            await send(message)
-
-        try:
-            await self._app(scope, receive, send_wrapper)
-        finally:
-            route = scope.get("route")
-            template = getattr(route, "path_format", None) or getattr(route, "path", None)
-            label = template if isinstance(template, str) else UNMATCHED_ROUTE
-            method = str(scope.get("method", ""))
-            self._metrics.requests.labels(method, label, str(status)).inc()
-            self._metrics.latency.labels(method, label).observe(time.perf_counter() - started)
+__all__ = ["METRICS_PATH", "UNMATCHED_ROUTE", "PrometheusMetrics", "RequestMetrics"]

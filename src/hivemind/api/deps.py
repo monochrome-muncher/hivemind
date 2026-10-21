@@ -170,7 +170,7 @@ def create_app(app: HivemindApp) -> FastAPI:
     fastapi_app.add_exception_handler(TimeoutError, _handle_store_timeout)
     fastapi_app.add_middleware(PreAuthGuard, max_body_bytes=MAX_REQUEST_BODY_BYTES)
     # Added last, so outermost: the guards' 401 / 413 answers are counted too.
-    fastapi_app.add_middleware(RequestMetrics, metrics=prometheus)
+    fastapi_app.add_middleware(RequestMetrics, metrics=prometheus.process)
     fastapi_app.include_router(build_router(app, prometheus))
     fastapi_app.include_router(prometheus.router())
     return fastapi_app

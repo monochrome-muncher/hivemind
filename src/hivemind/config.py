@@ -270,6 +270,11 @@ class Settings(BaseSettings):
     # the data plane. Off by default, so the keyless dev runner and local
     # scripts are unchanged; production deployments set it true.
     require_stored_keys: bool = False
+    # ADR 0104: serve an unauthenticated GET /metrics from hivemind-mcp-http.
+    # Off by default, since the compose files publish the MCP port on every
+    # interface; the Kubernetes manifest turns it on (the Ingress routes only
+    # /mcp). When off, /metrics is a 404 and nothing is collected.
+    mcp_metrics_enabled: bool = False
     # asyncpg pool size, per pod (same defaults as ``make_pool``).
     pool_min_size: int = Field(default=1, ge=0)
     pool_max_size: int = Field(default=10, ge=1)

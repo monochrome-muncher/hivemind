@@ -35,6 +35,13 @@ spec:
       labels:
         app.kubernetes.io/name: hivemind
         app.kubernetes.io/component: mcp
+      # Prometheus scrape target (ADR 0104): GET /metrics on the app port,
+      # this pod's own request and tool series; the public Ingress only
+      # routes the /mcp prefix, so /metrics is not public.
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8088"
+        prometheus.io/path: /metrics
     spec:
       # The entrypoint runs the idempotent migration (ADR 0013) before the
       # runner (ADR 0018: no init container). A dim mismatch (ADR 0015) or an
@@ -104,6 +111,10 @@ spec:
               value: "0.0.0.0"
             - name: HIVEMIND_PORT
               value: "8088"
+            # Serve GET /metrics (ADR 0104); the shipped Ingress routes only
+            # the /mcp prefix to this Service, so it is not public.
+            - name: HIVEMIND_MCP_METRICS_ENABLED
+              value: "true"
           # 2. preStop: SIGTERM and EndpointSlice removal happen concurrently,
           #    so kube-proxy and the nginx ingress (which routes to pod IPs)
           #    may still send NEW requests after uvicorn closed its listener.

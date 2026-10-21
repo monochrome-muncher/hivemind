@@ -21,7 +21,9 @@ from mcp.server.transport_security import TransportSecuritySettings
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from hivemind.config import Settings, configure_logging, load_settings
+from hivemind.http_metrics import UNMATCHED_ROUTE, RequestMetrics
 from hivemind.mcp.app import McpHivemind
+from hivemind.mcp.metrics import McpMetrics
 from hivemind.mcp.server import build_server
 from hivemind.ports import Authenticator, Credential, Embedder, Store
 from hivemind.services.wiring import build_services, log_startup
@@ -159,6 +161,13 @@ class BearerAuthMiddleware:
 _PROBE_LIVENESS = "/mcp/liveness"
 _PROBE_HEALTH = "/mcp/health"
 _PROBE_DATABASE = "/mcp/health/database"
+_METRICS_PATH = "/metrics"
+# The MCP SDK's streamable-HTTP route (its default path).
+_MCP_PATH = "/mcp"
+# The paths the runner serves; any other path is one label, ``unmatched``.
+_KNOWN_PATHS = frozenset(
+    {_MCP_PATH, _PROBE_LIVENESS, _PROBE_HEALTH, _PROBE_DATABASE, _METRICS_PATH}
+)
 # A deep probe stuck on the pool answers 503 in time (ADR 0037).
 _DATABASE_PROBE_TIMEOUT = 5.0
 # The deep probe's answer is reused this long, so a flood of
@@ -177,22 +186,32 @@ class ProbeRouter:
       database outage must not pull every replica out at once.
     * ``/mcp/health/database`` — deep, for people and monitoring: 200 or
       503; the cause is logged, never returned.
+
+    With ``metrics`` it also answers ``GET /metrics`` (ADR 0104): this
+    process's own series, no agent, fleet or key in any label. Without, that
+    path is a 404.
     """
 
-    def __init__(self, app: ASGIApp, store: Store) -> None:
+    def __init__(self, app: ASGIApp, store: Store, metrics: McpMetrics | None = None) -> None:
         self._app = app
         self._store = store
+        self._metrics = metrics
         self._db_probe_lock = asyncio.Lock()
         self._db_probe_result: tuple[float, bool] | None = None  # (monotonic time, healthy)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if (
-            scope.get("type") == "http"
-            and scope.get("method") == "GET"
-            and scope.get("path") in (_PROBE_LIVENESS, _PROBE_HEALTH, _PROBE_DATABASE)
-        ):
-            await self._serve_probe(scope["path"], send)
-            return
+        if scope.get("type") == "http" and scope.get("method") == "GET":
+            path = scope.get("path")
+            if path in (_PROBE_LIVENESS, _PROBE_HEALTH, _PROBE_DATABASE):
+                await self._serve_probe(path, send)
+                return
+            if path == _METRICS_PATH:
+                # Before the key check: off means a plain 404, not a 401.
+                if self._metrics is None:
+                    await _send_not_found(send)
+                else:
+                    await _send_metrics(send, self._metrics)
+                return
         await self._app(scope, receive, send)
 
     async def _database_healthy(self) -> bool:
@@ -229,6 +248,21 @@ class ProbeRouter:
                 503,
                 {"status": "unhealthy", "database": "unreachable", "detail": "see the pod log"},
             )
+
+
+async def _send_metrics(send: Send, metrics: McpMetrics) -> None:
+    body = metrics.render()
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [
+                (b"content-type", metrics.content_type.encode()),
+                (b"content-length", str(len(body)).encode()),
+            ],
+        }
+    )
+    await send({"type": "http.response.body", "body": body})
 
 
 async def _send_json(send: Send, status: int, payload: dict[str, str]) -> None:
@@ -273,6 +307,11 @@ def build_transport_security(settings: Settings, host: str) -> TransportSecurity
     )
 
 
+def _route_label(scope: Scope) -> str:
+    path = str(scope.get("path", ""))
+    return path if path in _KNOWN_PATHS else UNMATCHED_ROUTE
+
+
 def build_http_app(
     settings: Settings,
     store: Store,
@@ -283,6 +322,8 @@ def build_http_app(
     credential per request (ADR 0010)."""
     from hivemind.extractor import build_extractor
 
+    # Opt-in (ADR 0104): nothing is collected or served when off.
+    metrics = McpMetrics() if settings.mcp_metrics_enabled else None
     search_config = settings.search_config()
     extractor = build_extractor(settings)  # optional (ADR 0016): None when the endpoint is unset
     services = build_services(
@@ -297,18 +338,24 @@ def build_http_app(
         credential=Credential(
             user_id="shared", agent_id="hivemind-mcp-http", access_controlled=True
         ),
+        on_degraded_search=metrics.degraded_search if metrics else None,
     )
     server = build_server(
         template,
         credential_provider=make_credential_provider(),
         require_stored_keys=settings.require_stored_keys,
+        metrics=metrics,
     )
     host = os.environ.get("HIVEMIND_HOST", "0.0.0.0")
     mcp_app = server.streamable_http_app(
         stateless_http=True, host=host, transport_security=build_transport_security(settings, host)
     )
-    # Probes outermost (ADR 0019): answered without a key, MCP stays protected.
-    return ProbeRouter(BearerAuthMiddleware(mcp_app, authenticator), store)
+    # Probes and /metrics (ADR 0019, 0104) answer without a key, MCP stays
+    # protected; request counting is outermost so 401s and probes are counted.
+    router = ProbeRouter(BearerAuthMiddleware(mcp_app, authenticator), store, metrics)
+    if metrics is None:
+        return router
+    return RequestMetrics(router, metrics.process, _route_label)
 
 
 def main_http() -> None:

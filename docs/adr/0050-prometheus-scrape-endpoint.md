@@ -3,6 +3,11 @@
 > **Status: amended by [ADR 0069](0069-cache-the-entry-scan-behind-the-usage-report.md):**
 > the grouped entry scan is also cached inside `MetricsService`, so the entry gauges can lag by more than 30 s.
 
+> **Amended by [ADR 0104](0104-mcp-runner-serves-process-metrics.md):**
+> `hivemind-mcp-http` now serves its own per-process `/metrics`, so the
+> MCP consequence below no longer holds for it (the stdio runners still
+> serve none).
+
 Adds to ROADMAP §3.3 (usage counters). `GET /v1/metrics` is unchanged.
 
 ## Context
