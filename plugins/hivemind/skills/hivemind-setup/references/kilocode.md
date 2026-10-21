@@ -45,7 +45,7 @@ of other harnesses.
 ## Stay aware
 
 - **No hook needed.** The plugin adds the reminder to every model request.
-  It also asks you once, when a long session that wrote nothing ends, to
+  It also asks you once, when a long session that rated nothing and wrote nothing or read entries ends, to
   write and rate before finishing, and after a compaction to write what you
   learned before it.
 - **Instruction block:** `~/.config/kilo/AGENTS.md`.

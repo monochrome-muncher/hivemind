@@ -224,6 +224,22 @@ def test_a_session_that_already_wrote_or_rated_is_not_blocked(tmp_path: Path, to
     assert (out.returncode, out.stdout) == (0, "")
 
 
+@pytest.mark.parametrize("read", ["mcp__hivemind__hive_search", "mcp__hivemind__hive_get"])
+def test_a_session_that_wrote_but_never_rated_after_reading_is_blocked(
+    tmp_path: Path, read: str
+) -> None:
+    t = _transcript(tmp_path, 30, read, "mcp__hivemind__hive_write")
+    assert json.loads(_stop(tmp_path, t).stdout)["decision"] == "block"
+
+
+def test_a_session_that_read_and_rated_is_not_blocked_even_if_it_wrote(tmp_path: Path) -> None:
+    names = ("mcp__hivemind__hive_search", "mcp__hivemind__hive_write")
+    for i, extra in enumerate(((), names)):
+        t = _transcript(tmp_path, 30, *extra, "mcp__hivemind__hive_feedback")
+        out = _stop(tmp_path, t, session_id=f"r{i}")
+        assert (out.returncode, out.stdout) == (0, "")
+
+
 def test_searching_alone_does_not_count_as_contributing(tmp_path: Path) -> None:
     t = _transcript(tmp_path, 30, "mcp__hivemind__hive_search")
     assert json.loads(_stop(tmp_path, t).stdout)["decision"] == "block"
@@ -470,6 +486,25 @@ def test_a_session_that_wrote_or_rated_is_not_reminded(call: dict[str, object]) 
 
 
 @needs_node
+@pytest.mark.parametrize(
+    ("read", "wrote"),
+    [
+        ({"toolName": "mcp__hivemind__hive_search", "args": {}}, "hive_write"),
+        ({"toolName": "hivemind_hive_get", "args": {}}, "hive_write"),
+        ({"toolName": "mcp", "args": {"tool": "hivemind_hive_get", "args": {}}}, "hive_write"),
+    ],
+)
+def test_a_pi_session_that_wrote_but_read_and_never_rated_is_reminded(
+    read: dict[str, object], wrote: str
+) -> None:
+    write = ["call", {"toolName": wrote, "args": {}}]
+    r = _pi([*_calls(25), ["call", read], write, ["settle", {}]])
+    assert r["settle"][0] is not None
+    rate = ["call", {"toolName": "hivemind_hive_feedback", "args": {}}]
+    assert _pi([*_calls(25), ["call", read], write, rate, ["settle", {}]]) == {"settle": [None]}
+
+
+@needs_node
 def test_reading_or_a_short_session_is_not_enough() -> None:
     r = _pi([*_calls(19), *_calls(1, "mcp__hivemind__hive_search"), ["settle", {}]])
     assert r["settle"][0] is not None  # a search is a call, not a contribution
@@ -584,6 +619,16 @@ def test_opencode_prompts_a_long_idle_session_once_with_its_own_model() -> None:
 @pytest.mark.parametrize("tool", ["hivemind_hive_write", "hivemind_hive_feedback"])
 def test_an_opencode_session_that_wrote_or_rated_is_not_prompted(tool: str) -> None:
     assert _opencode([*_oc_calls(25), *_oc_calls(1, tool), _idle()])["sent"] == []
+
+
+@needs_node
+def test_an_opencode_session_that_wrote_but_read_and_never_rated_is_prompted() -> None:
+    wrote = _oc_calls(1, "hivemind_hive_write")
+    for read in ("hivemind_hive_search", "hivemind_hive_get"):
+        r = _opencode([*_oc_calls(25), *_oc_calls(1, read), *wrote, _idle()])
+        assert len(r["sent"]) == 1
+    rated = _oc_calls(1, "hivemind_hive_feedback")
+    assert _opencode([*_oc_calls(25, "hivemind_hive_get"), *wrote, *rated, _idle()])["sent"] == []
 
 
 @needs_node
@@ -714,6 +759,15 @@ def test_dsh_steers_a_long_turn_once_with_a_user_message() -> None:
 @pytest.mark.parametrize("tool", ["mcp__hivemind__hive_write", "mcp__hivemind__hive_feedback"])
 def test_a_dsh_session_that_wrote_or_rated_is_not_steered(tool: str) -> None:
     assert _dsh([*_dsh_calls(25), *_dsh_calls(1, tool), ["stop", None]]) == []
+
+
+@needs_node
+def test_a_dsh_session_that_wrote_but_read_and_never_rated_is_steered() -> None:
+    wrote = _dsh_calls(1, "mcp__hivemind__hive_write")
+    for read in ("mcp__hivemind__hive_search", "mcp__hivemind__hive_get"):
+        assert len(_dsh([*_dsh_calls(25), *_dsh_calls(1, read), *wrote, ["stop", None]])) == 1
+    rated = _dsh_calls(1, "mcp__hivemind__hive_feedback")
+    assert _dsh([*_dsh_calls(25, "mcp__hivemind__hive_get"), *wrote, *rated, ["stop", None]]) == []
 
 
 @needs_node
