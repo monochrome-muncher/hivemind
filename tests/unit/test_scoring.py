@@ -30,30 +30,44 @@ class TestEntryScore:
     def test_fresh_importance_three_entry(self):
         occurred = NOW  # age 0
         assert entry_score(
-            fused=1.0, importance=3, occurred_at=occurred, quality=1.0, now=NOW, half_life_days=30.0
+            fused=1.0,
+            importance=3,
+            occurred_at=occurred,
+            quality=1.0,
+            now=NOW,
+            half_life_days=30.0,
+            narrow_importance=False,
         ) == pytest.approx(0.8)
 
     def test_fresh_max_importance(self):
         # importance 5 -> factor 1.0, age 0 -> 1.0, quality 1.0
-        assert entry_score(1.0, 5, NOW, 1.0, NOW, 30.0) == pytest.approx(1.0)
+        assert entry_score(1.0, 5, NOW, 1.0, NOW, 30.0, narrow_importance=False) == pytest.approx(
+            1.0
+        )
 
     def test_one_half_life_of_decay_halves_score(self):
         occurred = NOW - timedelta(days=30)
-        assert entry_score(1.0, 5, occurred, 1.0, NOW, 30.0) == pytest.approx(0.5)
+        assert entry_score(
+            1.0, 5, occurred, 1.0, NOW, 30.0, narrow_importance=False
+        ) == pytest.approx(0.5)
 
     def test_two_half_lives_quarter_score(self):
         occurred = NOW - timedelta(days=60)
         # 2.0 * (0.5 + 0.1*1) * 0.5**2 * 0.5 = 2.0 * 0.6 * 0.25 * 0.5
-        assert entry_score(2.0, 1, occurred, 0.5, NOW, 30.0) == pytest.approx(0.15)
+        assert entry_score(
+            2.0, 1, occurred, 0.5, NOW, 30.0, narrow_importance=False
+        ) == pytest.approx(0.15)
 
     def test_futures_are_treated_as_age_zero(self):
         occurred = NOW + timedelta(days=10)
-        assert entry_score(1.0, 3, occurred, 1.0, NOW, 30.0) == pytest.approx(0.8)
+        assert entry_score(
+            1.0, 3, occurred, 1.0, NOW, 30.0, narrow_importance=False
+        ) == pytest.approx(0.8)
 
     def test_quality_multiplies_score(self):
         occurred = NOW
-        base = entry_score(1.0, 3, occurred, 1.0, NOW, 30.0)
-        lowered = entry_score(1.0, 3, occurred, 0.5, NOW, 30.0)
+        base = entry_score(1.0, 3, occurred, 1.0, NOW, 30.0, narrow_importance=False)
+        lowered = entry_score(1.0, 3, occurred, 0.5, NOW, 30.0, narrow_importance=False)
         assert lowered == pytest.approx(base * 0.5)
 
 
@@ -82,9 +96,18 @@ class TestRecencyFloor:
         config = SearchConfig()
         floor = config.recency_floor
         assert floor is not None, "ADR 0022 ships a floor; None is the pre-0022 form"
-        newest = entry_score(1.0, 3, NOW, 1.0, NOW, 30.0, recency_floor=floor)
+        newest = entry_score(
+            1.0, 3, NOW, 1.0, NOW, 30.0, recency_floor=floor, narrow_importance=False
+        )
         oldest = entry_score(
-            1.0, 3, NOW - timedelta(days=100_000), 1.0, NOW, 30.0, recency_floor=floor
+            1.0,
+            3,
+            NOW - timedelta(days=100_000),
+            1.0,
+            NOW,
+            30.0,
+            recency_floor=floor,
+            narrow_importance=False,
         )
         fused_range = 2 * (config.rrf_k + config.candidate_top_k) / (config.rrf_k + 1)
         assert newest / oldest == pytest.approx(1.25)
@@ -96,15 +119,21 @@ class TestRecencyFloor:
         merely close: an `approx` here would hide a rounding change in the
         hot loop. This is what every §4.4/§4.6 measurement is against."""
         occurred = NOW - timedelta(days=age_days)
-        explicit_none = entry_score(1.0, 3, occurred, 1.0, NOW, 30.0, recency_floor=None)
-        assert entry_score(1.0, 3, occurred, 1.0, NOW, 30.0) == explicit_none
+        explicit_none = entry_score(
+            1.0, 3, occurred, 1.0, NOW, 30.0, recency_floor=None, narrow_importance=False
+        )
+        assert (
+            entry_score(1.0, 3, occurred, 1.0, NOW, 30.0, narrow_importance=False) == explicit_none
+        )
 
     def test_floor_clamps_a_very_old_entry(self) -> None:
         """500 days is 16.7 half-lives: the unfloored factor is ~1e-5, so
         the floored score is the floor's, not the decay's."""
         occurred = NOW - timedelta(days=500)
-        unfloored = entry_score(1.0, 5, occurred, 1.0, NOW, 30.0)
-        floored = entry_score(1.0, 5, occurred, 1.0, NOW, 30.0, recency_floor=0.5)
+        unfloored = entry_score(1.0, 5, occurred, 1.0, NOW, 30.0, narrow_importance=False)
+        floored = entry_score(
+            1.0, 5, occurred, 1.0, NOW, 30.0, recency_floor=0.5, narrow_importance=False
+        )
         assert unfloored < 1e-4
         assert floored == pytest.approx(0.5)  # 1.0 fused * 1.0 importance * 0.5 floor
 
@@ -112,21 +141,21 @@ class TestRecencyFloor:
         """The floor is a lower bound, never a boost: for any floor in
         (0, 1] and any age, a floored score stays at or below the score the
         same entry would get at age zero."""
-        undecayed = entry_score(1.0, 3, NOW, 1.0, NOW, 30.0)
+        undecayed = entry_score(1.0, 3, NOW, 1.0, NOW, 30.0, narrow_importance=False)
         for floor in (0.05, 0.381, 0.5, 0.7, 0.8, 1.0):
             for age_days in (0.0, 1.0, 30.0, 500.0):
                 occurred = NOW - timedelta(days=age_days)
-                assert entry_score(1.0, 3, occurred, 1.0, NOW, 30.0, recency_floor=floor) <= (
-                    undecayed + 1e-12
-                )
+                assert entry_score(
+                    1.0, 3, occurred, 1.0, NOW, 30.0, recency_floor=floor, narrow_importance=False
+                ) <= (undecayed + 1e-12)
 
     def test_a_floor_below_the_decay_factor_changes_nothing(self) -> None:
         """A young entry is above the floor, so the floor does not touch it
         — which is what makes the term a tie-break rather than a constant."""
         occurred = NOW - timedelta(days=10)  # 0.5 ** (1/3) = 0.794 > 0.5
-        assert entry_score(1.0, 3, occurred, 1.0, NOW, 30.0, recency_floor=0.5) == entry_score(
-            1.0, 3, occurred, 1.0, NOW, 30.0
-        )
+        assert entry_score(
+            1.0, 3, occurred, 1.0, NOW, 30.0, recency_floor=0.5, narrow_importance=False
+        ) == entry_score(1.0, 3, occurred, 1.0, NOW, 30.0, narrow_importance=False)
 
     def test_the_floor_bounds_the_recency_range_to_its_reciprocal(self) -> None:
         """Why a floor can work where `rrf_k` could not (ROADMAP §4.6): the
@@ -134,9 +163,18 @@ class TestRecencyFloor:
         which is a number the fused RRF range (2.62x at the §6.2 defaults)
         can beat once `floor > 1/2.62 = 0.381`."""
         floor = 0.5
-        newest = entry_score(1.0, 3, NOW, 1.0, NOW, 30.0, recency_floor=floor)
+        newest = entry_score(
+            1.0, 3, NOW, 1.0, NOW, 30.0, recency_floor=floor, narrow_importance=False
+        )
         oldest = entry_score(
-            1.0, 3, NOW - timedelta(days=100_000), 1.0, NOW, 30.0, recency_floor=floor
+            1.0,
+            3,
+            NOW - timedelta(days=100_000),
+            1.0,
+            NOW,
+            30.0,
+            recency_floor=floor,
+            narrow_importance=False,
         )
         assert newest / oldest == pytest.approx(1.0 / floor)
 
@@ -183,68 +221,6 @@ class TestFeedbackQuality:
         assert feedback_quality(50, 0, 0, max_quality=1.1) == pytest.approx(1.1)
 
 
-# --- confirmed_at (ADR 0071) --------------------------------------------------
-
-
-class TestConfirmedAt:
-    """``confirmed_at`` restarts the recency clock for the upside only."""
-
-    OCC = NOW - timedelta(days=730)
-
-    def _score(self, confirmed_at, quality=1.0, **kw) -> float:
-        return entry_score(
-            1.0, 5, self.OCC, quality, NOW, 30.0, recency_floor=0.8, confirmed_at=confirmed_at, **kw
-        )
-
-    def test_none_is_bit_identical(self) -> None:
-        for quality in (0.5, 1.0, 1.2):
-            for social_max in (None, 1.2):
-                a = entry_score(
-                    1.0, 3, self.OCC, quality, NOW, 30.0, recency_floor=0.8, social_max=social_max
-                )
-                b = entry_score(
-                    1.0,
-                    3,
-                    self.OCC,
-                    quality,
-                    NOW,
-                    30.0,
-                    recency_floor=0.8,
-                    social_max=social_max,
-                    confirmed_at=None,
-                )
-                assert a == b
-
-    def test_gain_is_r_conf_over_r_occ_before_the_cap(self) -> None:
-        confirmed = NOW - timedelta(days=1)
-        r_conf = 0.5 ** (1 / 30)
-        # final = r_occ * (r_conf / r_occ) = r_conf with importance factor 1.0.
-        assert self._score(confirmed) == pytest.approx(r_conf)
-
-    def test_gain_is_at_most_one_over_the_floor(self) -> None:
-        assert self._score(NOW) / self._score(None) == pytest.approx(1.25)
-
-    def test_the_cap_applies_to_quality_times_gain(self) -> None:
-        confirmed = NOW - timedelta(days=1)
-        assert self._score(confirmed, quality=1.2, social_max=1.2) == pytest.approx(0.8 * 1.2)
-
-    def test_a_confirmation_not_newer_than_the_memory_date_adds_nothing(self) -> None:
-        assert self._score(self.OCC) == self._score(None)
-        assert self._score(self.OCC - timedelta(days=5)) == self._score(None)
-
-    def test_a_future_confirmation_clamps_to_age_zero(self) -> None:
-        assert self._score(NOW + timedelta(days=9)) == self._score(NOW)
-
-    def test_a_confirmation_fades_into_the_floor(self) -> None:
-        assert self._score(NOW - timedelta(days=10)) == self._score(None)
-        assert self._score(NOW - timedelta(days=9)) > self._score(None)
-
-    def test_unbounded_form_guards_a_zero_recency(self) -> None:
-        old = NOW - timedelta(days=100_000)
-        score = entry_score(1.0, 5, old, 1.0, NOW, 30.0, confirmed_at=NOW - timedelta(days=1))
-        assert score == 0.0
-
-
 class TestNarrowImportance:
     """ADR 0088: factor 1 + 0.05 * (importance - 3), 0.9..1.1."""
 
@@ -261,26 +237,35 @@ class TestNarrowImportance:
     def test_importance_three_is_neutral(self) -> None:
         assert self._score(3, narrow=True) == 1.0
 
-    def test_off_is_bit_identical_to_the_wide_factor(self) -> None:
+    def test_off_is_the_wide_factor(self) -> None:
         for importance in range(1, 6):
             for age_days in (0.0, 1.0, 10.0, 400.0):
                 for quality in (0.5, 1.0, 1.2):
                     for floor in (None, 0.8):
                         for fused in (0.016, 0.0328):
                             occ = NOW - timedelta(days=age_days)
-                            args = (fused, importance, occ, quality, NOW, 30.0)
-                            default = entry_score(*args, recency_floor=floor, social_max=1.2)
                             off = entry_score(
-                                *args, recency_floor=floor, social_max=1.2, narrow_importance=False
+                                fused,
+                                importance,
+                                occ,
+                                quality,
+                                NOW,
+                                30.0,
+                                recency_floor=floor,
+                                social_max=1.2,
+                                narrow_importance=False,
                             )
-                            assert default == off
                             wide = (
                                 fused
                                 * (0.5 + 0.1 * importance)
                                 * max(floor or 0.0, 0.5 ** (age_days / 30.0))
                                 * min(1.2, quality)
                             )
-                            assert default == pytest.approx(wide)
+                            assert off == pytest.approx(wide)
+
+    def test_it_has_no_default(self) -> None:
+        with pytest.raises(TypeError, match="narrow_importance"):
+            entry_score(1.0, 3, NOW, 1.0, NOW, 30.0)  # type: ignore[call-arg]
 
     def test_on_changes_only_the_importance_factor(self) -> None:
         wide = self._score(5, narrow=False, recency_floor=0.8, social_max=1.2)

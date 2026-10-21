@@ -1,5 +1,7 @@
 # A recency hint on search
 
+> **Amended by [ADR 0103](0103-remove-confirmation-clock-and-per-kind-recency.md):** the kind half-life and the confirmation restart the hint was written to keep or drop are gone; every kind ages by `half_life_days`. The hint itself is unchanged.
+
 > **Amended by [ADR 0101](0101-recency-hint-on-by-default.md):** decision 2 ("off by default") no longer holds. The hint is on by default; `HIVEMIND_RECENCY_HINT=false` turns it off. The rest stands.
 
 Amends [ADR 0022](0022-recency-floor-so-match-quality-is-the-sort-key.md), [ADR 0070](0070-one-capped-budget-for-social-signals.md) (invariant I1 does not hold under `ignore_age`) and [ADR 0072](0072-recency-profile-per-kind.md) (decision 4, "no decay is not offered": it stays unavailable as a setting, and exists only per search through the explicit hint), and SPEC §5 (search surfaces) and §6.4.

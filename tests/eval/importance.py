@@ -24,7 +24,7 @@ A per-domain fixture and the pooled one give an entry different ages (the
 age follows the entry's position), so compare off against on within a
 fixture, not across fixtures. Under ``aligned`` every answer entry gets 4 or
 5, including answers that act as distractors for other queries.
-Ages use the same deterministic 0 to 400 day spread as the confirmation
+Ages use the same deterministic 0 to 400 day spread as the ranking
 measurement; there is no feedback, so the importance factor is the only
 thing that differs between the off and on runs.
 
@@ -61,8 +61,8 @@ from hivemind.ports import Embedder, Store
 from hivemind.retrieval.eval import hit_at_k, reciprocal_rank
 from hivemind.services.governance import WriteService
 from hivemind.services.search import SearchService
-from tests.eval.confirmation import entry_age_days
 from tests.eval.domains import Domain
+from tests.eval.ranking import entry_age_days
 from tests.eval.threshold import Fixture, combined_fixture, domain_fixture
 from tests.fakes import FIXED_NOW, make_clock
 

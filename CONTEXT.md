@@ -93,7 +93,7 @@ A reporting agent's verdict that an entry its work tested was `helpful`, `stale`
 _Avoid_: rating, review
 
 **Last confirmed**:
-The date of an entry's newest `helpful` report that carries a note, when no `stale` or `wrong` report is as new or newer; shown with the entry; it restarts the recency clock for ranking only where a deployment turns that on (ADR 0071).
+The date of an entry's newest `helpful` report that carries a note, when no `stale` or `wrong` report is as new or newer; shown with the entry; display only, it enters no score (ADR 0103).
 _Avoid_: verified, endorsed, freshness (the entry's age is its memory date)
 
 **Contested**:
@@ -291,10 +291,6 @@ _Avoid_: decay cutoff (nothing is excluded), minimum score (it bounds one factor
 **Recency hint**:
 The per-search value (`default`, `prefer_recent`, `ignore_age`) a caller sends to say how age should weigh in that search; on by default (ADRs 0073, 0101); a deployment can turn it off, and off it is ignored.
 _Avoid_: recency filter (nothing is excluded), recency boost (it can also drop age), time sense (that is the query's property, the hint is what the agent says about it)
-
-**Recency profile**:
-The half-life, in days, an entry of one kind ages by when a deployment sets one per kind (ADR 0072); a kind without one keeps the shared half-life, and the recency floor is the same for every kind.
-_Avoid_: decay class, per-kind floor (the floor is shared), no decay (not offered as a setting; only per search via the explicit `ignore_age` hint, ADR 0073)
 
 **Social cap**:
 The ceiling (`social_max`, default 1.2, ADR 0070) on the combined upward effect of the social signals in the SPEC §6.4 score, `min(social_max, quality)`; penalties are not capped. A social signal is a ranking input that comes from other agents' behaviour, today only feedback quality.

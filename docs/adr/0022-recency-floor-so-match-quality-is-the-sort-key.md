@@ -1,5 +1,7 @@
 # A floor under the recency factor, so match quality is the sort key
 
+> **Amended by [ADR 0103](0103-remove-confirmation-clock-and-per-kind-recency.md):** the per-kind half-life of ADR 0072 and the confirmation restart of ADR 0071 were removed; every kind ages by `half_life_days`, and the floor and its 0.8 are unchanged. The note below about 0072 describes the removed behaviour.
+
 > **Amended by [ADR 0088](0088-narrow-importance.md):** the floor and its 0.8 are unchanged; by default (`HIVEMIND_NARROW_IMPORTANCE`, on), the importance factor narrows from 0.6..1.0 to 0.9..1.1 (`1 + 0.05 * (importance - 3)`), so one importance step stays below `social_max`.
 
 > **Amended by [ADR 0073](0073-a-recency-hint-on-search.md):** the floor and its 0.8 are unchanged; behind a setting that is off by default, a search can carry a `recency` hint: `prefer_recent` scores under a lower floor (0.5) and `ignore_age` drops the recency factor for that one search (I1 does not hold under it, by the caller's request).

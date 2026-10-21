@@ -13,8 +13,6 @@ divided by it.
 
 from __future__ import annotations
 
-from dataclasses import replace
-
 import pytest
 
 from hivemind.config import SearchConfig
@@ -35,7 +33,6 @@ assert FLOOR is not None
 
 
 DEFAULT = SearchConfig()
-CONFIRMING = SearchConfig(recency_from_confirmation=True)
 
 
 def _relative(scenario, config: SearchConfig = DEFAULT) -> tuple[float, float]:
@@ -60,39 +57,12 @@ def test_s1_old_favourite_beats_a_newer_unlinked_correction() -> None:
 
 def test_s2_a_recheck_yesterday_barely_separates_old_facts() -> None:
     """S2: one helpful, however recent, is worth 1.0667 on a two-year-old fact:
-    0.853 vs 0.80. Meant to become clear with the confirmation date as the
-    recency clock."""
+    0.853 vs 0.80. The confirmation date does not restart the recency clock
+    (ADR 0103)."""
     first, second = _relative(S2)
     assert first == pytest.approx(0.8 * (1 + 0.2 / 3))
     assert round(first, 3) == 0.853
     assert second == pytest.approx(0.80)
-
-
-def test_s2_with_the_confirmation_clock_on_is_a_clear_win() -> None:
-    """S2 with ``recency_from_confirmation`` on (ADR 0071): the recheck yesterday
-    restarts the clock, so the gain is 1.0667 x 0.977 / 0.8 = 1.30, which the
-    cap holds at 1.2: 0.96 vs 0.80, against 0.853 vs 0.80 with it off. The
-    winner is unchanged; the margin is 0.16 instead of 0.053."""
-    first, second = _relative(S2, CONFIRMING)
-    assert first == pytest.approx(0.8 * 1.2)
-    assert round(first, 2) == 0.96
-    assert second == pytest.approx(0.80)
-    assert winner(S2, CONFIRMING) == EXPECTED_WINNER["S2"]
-    off_first, off_second = _relative(S2)
-    assert (first - second) > 2.5 * (off_first - off_second)
-
-
-def test_the_other_scenarios_do_not_move_with_the_setting_on() -> None:
-    """S1, S3 and S4 carry no confirmation date, so the setting changes nothing."""
-    for scenario in (S1, S3, S4):
-        assert score(scenario.first, CONFIRMING) == score(scenario.first)
-        assert score(scenario.second, CONFIRMING) == score(scenario.second)
-
-
-def test_s2_setting_on_without_a_confirmation_date_is_the_baseline() -> None:
-    """The setting only matters with a date: S2's first candidate without one scores as before."""
-    undated = replace(S2.first, confirmed_ago_days=None)
-    assert score(undated, CONFIRMING) == score(S2.first)
 
 
 def test_s3_a_fresh_stale_does_not_sink_an_entry_below_an_unrated_one() -> None:

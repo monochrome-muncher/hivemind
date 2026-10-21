@@ -1,42 +1,35 @@
-"""Measure ranking changes that are off by default with a real embedder.
+"""Measure ranking variants against a real embedder.
 
-Three settings are measured here: "last confirmed restarts the recency clock"
-(ADR 0071), "a recency profile per kind" (ADR 0072) and the per-search
-recency hint (ADR 0073: ``ignore_age`` and ``prefer_recent``, each applied to
-every query because the domain fixtures do not label time sense; the
-labelled oracle run is ``tests/eval/test_recency_hint.py``). The first two are
-off by default until this has been run with the embedders a deployment uses;
-the hint is on by default (ADR 0101) and acts only when a query carries it. For
-each domain fixture (``domains.py``: five kinds of work, 32 entries each) and
-for all of them pooled, it:
+The variants are the per-search recency hint (ADR 0073: ``ignore_age`` and
+``prefer_recent``, each applied to every query because the domain fixtures do
+not label time sense; the labelled oracle run is
+``tests/eval/test_recency_hint.py``) against the shipped ranking. The hint is
+on by default (ADR 0101) and acts only when a query carries it. (The
+confirmation clock of ADR 0071 and the recency profile per kind of ADR 0072
+were measured here and removed, ADR 0103.) For each domain fixture
+(``domains.py``: five kinds of work, 32 entries each) and for all of them
+pooled, it:
 
 * seeds the pool with entries aged 0 to 400 days (a golden-ratio spread,
   so the ages are deterministic and independent of the text), so the
   recency floor matters;
-* sprinkles confirmations on a deterministic 20% of the entries: a
-  ``helpful`` row with a note, from a user who is not the author, dated
-  0.5 to 5 days before the fixed clock;
+* sprinkles a ``helpful`` report with a note on a deterministic 20% of the
+  entries (unchanged from the recorded measurements);
 * runs every answerable query once per **variant** (a named set of
-  ``SearchConfig`` overrides) over the same seeded pool, and reports hit@5
-  and MRR per variant, with the change against the first variant.
+  ``SearchConfig`` overrides and a hint) over the same seeded pool, and
+  reports hit@5 and MRR per variant, with the change against the first
+  variant.
 
-Both variants see the same feedback rows, so the difference between them
-is the setting alone (the helpful row also lifts ``quality``, with the
-setting on or off). A new ranking change adds a ``Variant`` to
-``VARIANTS`` and is measured over the same fixtures.
+A new ranking change adds a ``Variant`` to ``VARIANTS`` and is measured over
+the same fixtures.
 
 The pass rule from the study (docs/retrieval-experiments.md): no hit@5 or
-MRR drop beyond 0.01 in any domain; aged-currency and S2 improve; old-exact
-queries within 0.02 (those three come from the embedding-free slices in
-``test_aged_currency.py`` and ``test_social_scenarios.py``).
+MRR drop beyond 0.01 in any domain.
 
 Run it against the deployment's embedder (the ``HIVEMIND_EMBEDDING_*``
-settings, e.g. ``make vllm`` locally): ``make measure-confirmation``.
-``make measure-ranking`` is the same command. The temporal slices of
-ADR 0072 (aged currency, timeless) are measured by
-``tests/eval/test_kind_profile.py``.
-``tests/eval/test_confirmation_measurement.py`` runs it on the hash
-embedder, which checks the machinery only; its numbers mean nothing.
+settings, e.g. ``make vllm`` locally): ``make measure-ranking``.
+``tests/eval/test_ranking_measurement.py`` runs it on the hash embedder, which
+checks the machinery only; its numbers mean nothing.
 """
 
 from __future__ import annotations
@@ -83,18 +76,9 @@ class Variant:
     recency: RecencyHint = RecencyHint.DEFAULT
 
 
-# The recency profiles of ADR 0072 that are measured (days; facts keep the
-# shipped 30). The domain fixtures have about 45% facts, 30% insights and
-# 25% decisions, each aged 0 to 400 days.
-PROFILE_SLOW = ((Kind.INSIGHT, 180.0), (Kind.DECISION, 365.0))
-PROFILE_MEDIUM = ((Kind.INSIGHT, 90.0), (Kind.DECISION, 180.0))
-
 # The first variant is the baseline the others are compared with.
 VARIANTS: tuple[Variant, ...] = (
-    Variant("confirmation off", {}),
-    Variant("confirmation on", {"recency_from_confirmation": True}),
-    Variant("kind profile: insight=180, decision=365", {"recency_by_kind": PROFILE_SLOW}),
-    Variant("kind profile: insight=90, decision=180", {"recency_by_kind": PROFILE_MEDIUM}),
+    Variant("shipped (no hint)", {}),
     Variant(
         "recency hint: ignore_age (all queries)",
         {"recency_hint_enabled": True},
@@ -145,7 +129,12 @@ def pick_fraction(summaries: Sequence[str], fraction: float = FRACTION) -> list[
 async def seed(
     embedder: Embedder, store: Store, fixture: Fixture, *, confirm_fraction: float = FRACTION
 ) -> list[str]:
-    """Write the fixture's entries with spread ages, then the confirmations.
+    """Write the fixture's entries with spread ages, then the helpful reports.
+
+    A deterministic 20% of the entries get a ``helpful`` report with a note
+    from a user who is not the author, as in every recorded measurement
+    (ADR 0101's hint figures included); nothing ranks on their date any more
+    (ADR 0103), but they still lift ``quality``, so the fixture stays the same.
 
     Returns the entry ids in fixture order. ``store`` must be empty.
     """
@@ -178,7 +167,7 @@ async def seed(
 
 
 def fixtures() -> list[Fixture]:
-    """Pooled first, then each domain alone (what ``make measure-confirmation`` runs)."""
+    """Pooled first, then each domain alone (what ``make measure-ranking`` runs)."""
     return [combined_fixture(), *(domain_fixture(d) for d in DOMAINS)]
 
 
@@ -199,8 +188,7 @@ async def measure(
     """
     store = store or MemoryStore(make_clock())
     ids = await seed(embedder, store, fixture)
-    # The hint is off in the baseline so the first variants measure their own
-    # setting alone; the hint variants turn it on themselves.
+    # The hint is off in the baseline; the hint variants turn it on themselves.
     base = replace(
         base or replace(SearchConfig(), recency_hint_enabled=False),
         default_limit=K,

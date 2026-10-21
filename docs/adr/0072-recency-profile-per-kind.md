@@ -1,5 +1,7 @@
 # A recency profile per kind
 
+> **Superseded by [ADR 0103](0103-remove-confirmation-clock-and-per-kind-recency.md):** the setting and its parsing were removed after the 2026-10-21 measurement with the Qwen3 embedders (180/365 about -0.04 MRR on every model; 90/180 flat on 8B, worse on 4B and 0.6B). The text below is the decision as it was made.
+
 > **Amended by [ADR 0073](0073-a-recency-hint-on-search.md):** decision 4 ("no decay" is not offered) stands for the setting. Per search, a caller can opt out of age with the explicit `ignore_age` hint, only when `HIVEMIND_RECENCY_HINT` is on; that search gives up I1 on request.
 
 Amends [ADR 0022](0022-recency-floor-so-match-quality-is-the-sort-key.md) and SPEC §6.4. Extends invariant I1 of [ADR 0070](0070-one-capped-budget-for-social-signals.md) per kind.
