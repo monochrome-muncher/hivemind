@@ -14,8 +14,8 @@ The query instruction (ADR 0097) changed the measurement. It lowers the similari
 |---|---|---|
 | none | 99% | 4% |
 | 0.45 | 98% | 55% |
-| 0.50 | 97% | |
-| 0.55 | 92% | |
+| 0.50 | 97% | 75% |
+| 0.55 | 92% | 88% |
 
 0.45 gives up one point of answers and empties more than half of the off-topic vector streams. 0.50 and 0.55 lose more answers for little extra.
 
@@ -30,6 +30,6 @@ The query instruction (ADR 0097) changed the measurement. It lowers the similari
 ## Consequences
 
 - On upgrade, with no configuration change, a deployment on 0.45 sees ranking and result counts change: weak vector matches disappear, and a search with nothing relevant can come back empty or with keyword matches only. The empty-search counter (ADR 0056) will rise.
-- About 2% of answerable searches lose their answer from the vector stream on 8B; the keyword stream still carries them if they share a word with the query. Vague questions are hit first.
+- About 1 in 100 answerable searches loses its answer from the vector stream on 8B (98% kept, against 99% with no cut-off; 4B and 0.6B also keep 98%). The keyword stream still carries it if it shares a word with the query.
 - A deployment on a non-Qwen embedder that does not set the value gets a cut-off that was never measured for it. It can drop real answers (a model with lower similarities) or cut nothing (a model with higher ones). Operators with such a model should set the value or turn it off before upgrading.
 - The numbers come from synthetic corpora (`tests/eval/corpus`). Check the value against the empty-search counter and agents' feedback, as ADR 0062 said.
