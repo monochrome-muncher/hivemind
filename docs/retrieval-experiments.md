@@ -75,7 +75,7 @@ SPEC §6.4 now carries the floored formula. That **rules out direction
 (b)**, the additive form — per this section the two are competing
 answers to the same defect and must not be stacked; reopening (b)
 means *replacing* the floor under a new ADR. **Per-kind half-lives
-stays HELD** (since built, off by default, ADR 0072): orthogonal, not a fix for this finding. The `rrf_k`
+stays HELD** (since built, off by default, ADR 0072; removed, ADR 0103): orthogonal, not a fix for this finding. The `rrf_k`
 sweep came back negative and changed no default. What remains open
 here is the *value* 0.8, not the form — see the re-measure trigger at
 the end of this item.)* §4.4 measured
@@ -143,7 +143,7 @@ answers to "stop recency being the sort key", and stacking them just
 makes the term untunable. *Per-kind half-lives* (a `fact` and a
 `decision` decaying at different rates) is a third, **orthogonal**
 idea — it changes which entries decay, not how decay competes with
-match quality — and it **stays held** (since built, off by default, ADR 0072): it is not a fix for this
+match quality — and it **stays held** (since built, off by default, ADR 0072; removed, ADR 0103): it is not a fix for this
 finding and would only add a knob on top of an already-mismatched
 form.
 
@@ -369,6 +369,8 @@ improve.
 
 ## A confirmation restarts the recency clock (ADR 0071)
 
+> **Removed (ADR 0103).** The confirmation clock was re-measured on 2026-10-21 with the Qwen3 embedders, came out worse, and were taken out. The results below are kept as history; `tests/eval/confirmation.py` is now `tests/eval/ranking.py` and no longer measures it.
+
 *(tools: `tests/eval/confirmation.py`, `make measure-confirmation`; the
 embedding-free slices in `test_social_scenarios.py` and
 `test_aged_currency.py`)* `HIVEMIND_RECENCY_FROM_CONFIRMATION` is off by
@@ -467,6 +469,8 @@ probably correlate with usefulness, but nothing measured shows that yet, so
 the setting stays off and the default does not change.
 
 ## A recency profile per kind (ADR 0072)
+
+> **Removed (ADR 0103).** The per-kind profiles were re-measured on 2026-10-21 with the Qwen3 embedders, came out worse, and was taken out. The results below are kept as history; `tests/eval/confirmation.py` is now `tests/eval/ranking.py` and no longer measures it.
 
 *(tools: `tests/eval/confirmation.py` variants, `make measure-ranking`;
 `tests/eval/test_kind_profile.py` for the age-varied fixture)*
@@ -817,10 +821,9 @@ unset restores the old behaviour at once.
 ## A recency hint on search (ADR 0073)
 
 *(tools: `tests/eval/test_recency_hint.py` for the age-varied fixture,
-`tests/eval/confirmation.py` variants and `make measure-ranking` for the domain
-fixtures)* A search may carry `recency`: `ignore_age` (recency factor 1.0, no
-confirmation clock) or `prefer_recent` (floor 0.5 instead of 0.8, the kind's
-half-life kept). Everything below is the hash embedder: **machinery only, not
+`tests/eval/ranking.py` variants and `make measure-ranking` for the domain
+fixtures)* A search may carry `recency`: `ignore_age` (recency factor 1.0) or
+`prefer_recent` (floor 0.5 instead of 0.8, the half-life kept). Everything below is the hash embedder: **machinery only, not
 evidence**.
 
 **Age-varied fixture, MRR per slice** (10 queries: 6 non-temporal, 4 temporal;
@@ -1378,5 +1381,19 @@ by design. The warning's wording (rate it, supersede it, or add see_also)
 covers that 3%, so 0.90 stays.
 
 **Not re-run:** the tau sweep (`make measure-versions`; grouping stays
-off), the confirmation clock and per-kind profiles (off), and narrowed
-importance.
+off), and narrowed importance. The confirmation clock and per-kind
+profiles were removed (below).
+
+## The confirmation clock and per-kind recency are removed (ADR 0103)
+
+Both off-by-default ranking options were measured a second time on
+2026-10-21 with Qwen3-Embedding 8B, 4B and 0.6B and came out worse again.
+The confirmation clock (ADR 0071, `HIVEMIND_RECENCY_FROM_CONFIRMATION`)
+lowered pooled MRR by 0.11 on 8B and 0.09 on 4B and 0.6B. The per-kind
+half-lives (ADR 0072, `HIVEMIND_RECENCY_BY_KIND`) cost about 0.04 MRR on
+every model at `insight=180,decision=365`; at `insight=90,decision=180` they
+were flat on 8B and worse on 4B and 0.6B. ADR 0103 removes both options and
+their measurement variants; the default ranking is unchanged. The earlier
+sections on ADR 0071 and ADR 0072 keep their results as history. The
+shared harness is now `tests/eval/ranking.py` (`make measure-ranking`) and
+measures the recency hint variants.

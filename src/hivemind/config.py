@@ -24,7 +24,7 @@ from dotenv import dotenv_values
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from hivemind.domain.entry import DEFAULT_PREFIX_TOKENS, Kind
+from hivemind.domain.entry import DEFAULT_PREFIX_TOKENS
 from hivemind.domain.recency import RecencyHint
 from hivemind.domain.validation import check_query_instruction
 from hivemind.providers import clean_api_key, clean_endpoint
@@ -33,74 +33,6 @@ logger = logging.getLogger(__name__)
 
 # The HIVEMIND_STRICT_ENV spellings that mean "on" (ADR 0032).
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
-
-
-def _normalise_recency_by_kind(
-    value: object,
-) -> tuple[tuple[Kind, float], ...] | None:
-    """``value`` as a tuple of (Kind, half-life days) sorted by kind, or ``None``.
-
-    Rejects an unknown kind, a repeated kind, and a half-life that is not a
-    finite number > 0 (ADR 0024, 0072). An empty value is ``None``.
-    """
-    if value is None:
-        return None
-    pairs = list(value.items()) if isinstance(value, dict) else list(value)  # type: ignore[call-overload]
-    seen: dict[Kind, float] = {}
-    for item in pairs:
-        try:
-            raw_kind, days = item
-        except TypeError, ValueError:
-            raise ValueError(
-                f"recency_by_kind: expected (kind, days) pairs, got {item!r}"
-            ) from None
-        try:
-            kind = Kind(raw_kind)
-        except ValueError:
-            known = ", ".join(k.value for k in Kind)
-            raise ValueError(
-                f"recency_by_kind: unknown kind {raw_kind!r} (known: {known})"
-            ) from None
-        if kind in seen:
-            raise ValueError(f"recency_by_kind: kind {kind.value!r} is named twice")
-        if isinstance(days, bool) or not isinstance(days, int | float):
-            raise ValueError(f"recency_by_kind: {kind.value} must be a number, got {days!r}")
-        if not math.isfinite(days) or days <= 0:
-            raise ValueError(
-                f"recency_by_kind: {kind.value} must be a finite number of days > 0, got {days}"
-            )
-        seen[kind] = float(days)
-    if not seen:
-        return None
-    return tuple(sorted(seen.items(), key=lambda pair: pair[0].value))
-
-
-def parse_recency_by_kind(text: str) -> tuple[tuple[Kind, float], ...] | None:
-    """Parse ``HIVEMIND_RECENCY_BY_KIND``: ``insight=180,decision=365`` (ADR 0072).
-
-    Empty or "none" (case-insensitive) means off. Kinds are case-insensitive;
-    unknown or repeated kinds and non-finite or non-positive values raise
-    ``ValueError`` (via ``SearchConfig`` for the value rules).
-    """
-    text = text.strip()
-    if text.lower() in ("", "none"):
-        return None
-    pairs: list[tuple[str, float]] = []
-    for part in text.split(","):
-        name, sep, number = part.partition("=")
-        name = name.strip().lower()
-        if not sep or not name:
-            raise ValueError(
-                f"HIVEMIND_RECENCY_BY_KIND must look like insight=180,decision=365, got {text!r}"
-            )
-        try:
-            days = float(number.strip())
-        except ValueError:
-            raise ValueError(
-                f"HIVEMIND_RECENCY_BY_KIND: {name} needs a number of days, got {number.strip()!r}"
-            ) from None
-        pairs.append((name, days))
-    return _normalise_recency_by_kind(pairs)
 
 
 # The floor under ``prefer_recent`` (ADR 0073); see docs/retrieval-experiments.md.
@@ -124,7 +56,6 @@ class RecencyTerms:
 
     half_life_days: float
     recency_floor: float | None
-    use_confirmation: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,15 +98,6 @@ class SearchConfig:
     # re-ordering (ADR 0078): 1 is plain relevance order, lower pushes
     # near-copies of a higher hit down. In (0, 1].
     explore_lambda: float = 0.7
-    # A confirmation ("last confirmed", SPEC §4.2) restarts the recency
-    # clock for the upside, inside the social_max cap (ADR 0071). Off until
-    # measured with the real embedders.
-    recency_from_confirmation: bool = False
-    # A half-life in days per kind, as ``((Kind.INSIGHT, 180.0), ...)``
-    # (ADR 0072); a kind not named keeps ``half_life_days``. The floor is
-    # the same for every kind. ``None`` = one curve for all, today's
-    # behaviour exactly. Normalised to a sorted tuple, so it is hashable.
-    recency_by_kind: tuple[tuple[Kind, float], ...] | None = None
     # A search may carry a ``recency`` hint (ADR 0073). Off: the hint is
     # accepted and ignored, every search scores as the default. On (the
     # default, ADR 0101): ``prefer_recent`` and ``ignore_age`` change that one
@@ -199,9 +121,6 @@ class SearchConfig:
     def __post_init__(self) -> None:
         # Fail at config time (ADR 0024), not per request as a
         # ZeroDivisionError, a negative LIMIT, empty results or NaN scores.
-        object.__setattr__(
-            self, "recency_by_kind", _normalise_recency_by_kind(self.recency_by_kind)
-        )
         if self.rrf_k < 0:
             raise ValueError(f"rrf_k must be >= 0, got {self.rrf_k}")
         if self.candidate_top_k < 1:
@@ -260,26 +179,18 @@ class SearchConfig:
             return query
         return f"Instruct: {self.query_instruction}\nQuery:{query}"
 
-    def half_life_for(self, kind: Kind) -> float:
-        """The half-life in days entries of ``kind`` age by (ADR 0072)."""
-        for named, days in self.recency_by_kind or ():
-            if named == kind:
-                return days
-        return self.half_life_days
-
-    def recency_terms(self, kind: Kind, hint: RecencyHint) -> RecencyTerms:
-        """How age enters the score of an entry of ``kind`` under ``hint``.
+    def recency_terms(self, hint: RecencyHint) -> RecencyTerms:
+        """How age enters the score of an entry under ``hint``.
 
         Pure: nothing is stored, so one search's hint cannot reach another.
         With ``recency_hint_enabled`` off every hint scores as ``DEFAULT``
         (ADR 0073), exactly as before the hint existed.
         """
-        half_life = self.half_life_for(kind)
         if self.recency_hint_enabled:
             if hint is RecencyHint.IGNORE_AGE:
                 # 0.5 ** (age / inf) is exactly 1.0 for every finite age; no
-                # floor, and no confirmation clock, which would be age again.
-                return RecencyTerms(math.inf, None, use_confirmation=False)
+                # floor.
+                return RecencyTerms(math.inf, None)
             if hint is RecencyHint.PREFER_RECENT:
                 # Never weaker than the default: a deployment with a lower
                 # floor, or none, keeps it.
@@ -288,8 +199,8 @@ class SearchConfig:
                     floor = None
                 elif floor is not None:
                     floor = min(floor, self.recency_floor)
-                return RecencyTerms(half_life, floor, self.recency_from_confirmation)
-        return RecencyTerms(half_life, self.recency_floor, self.recency_from_confirmation)
+                return RecencyTerms(self.half_life_days, floor)
+        return RecencyTerms(self.half_life_days, self.recency_floor)
 
     def applied_hint(self, hint: RecencyHint) -> RecencyHint:
         """The hint ``recency_terms`` honours: ``DEFAULT`` while the setting is off."""
@@ -442,11 +353,6 @@ class Settings(BaseSettings):
     social_max: float = 1.2
     # See SearchConfig.explore_lambda (ADR 0078).
     explore_lambda: float = 0.7
-    # See SearchConfig.recency_from_confirmation (ADR 0071).
-    recency_from_confirmation: bool = False
-    # See SearchConfig.recency_by_kind (ADR 0072): ``insight=180,decision=365``.
-    # Empty or "none" means one curve for every kind.
-    recency_by_kind: str = ""
     # See SearchConfig.recency_hint_enabled (ADR 0073).
     recency_hint: bool = True
     # See SearchConfig.narrow_importance (ADR 0088).
@@ -568,8 +474,6 @@ class Settings(BaseSettings):
             quality_max=self.quality_max,
             social_max=self.social_max,
             explore_lambda=self.explore_lambda,
-            recency_from_confirmation=self.recency_from_confirmation,
-            recency_by_kind=parse_recency_by_kind(self.recency_by_kind),
             recency_hint_enabled=self.recency_hint,
             narrow_importance=self.narrow_importance,
             query_instruction=self.query_instruction,
@@ -649,6 +553,14 @@ _ALLOWED_EXTRA_ENV_VARS: dict[str, str] = {
     "HIVEMIND_MCP_HTTP_PORT": "mcp-http port for docker compose and `make mcp-http-dev`; the app never reads it",
 }
 
+# Variables that once were ``Settings`` fields and are now ignored. Setting one
+# is not an error, even under HIVEMIND_STRICT_ENV, so a deployment can upgrade
+# before it edits its config; startup logs one warning naming them (ADR 0103).
+_RETIRED_ENV_VARS: dict[str, str] = {
+    "HIVEMIND_RECENCY_FROM_CONFIRMATION": "ADR 0071, removed by ADR 0103",
+    "HIVEMIND_RECENCY_BY_KIND": "ADR 0072, removed by ADR 0103",
+}
+
 
 def _known_hivemind_env_vars() -> set[str]:
     """Every ``HIVEMIND_*`` name ``Settings`` itself understands."""
@@ -686,7 +598,14 @@ def _check_unknown_hivemind_env_vars(env_file: str) -> None:
         present |= {
             name for name in dotenv_values(file_path) if name and name.startswith("HIVEMIND_")
         }
-    unknown = sorted(present - known)
+    retired = sorted(present & _RETIRED_ENV_VARS.keys())
+    if retired:
+        logger.warning(
+            "Removed HIVEMIND_* environment variable(s) are ignored: %s. "
+            "Delete them from the configuration (ADR 0103).",
+            ", ".join(retired),
+        )
+    unknown = sorted(present - known - _RETIRED_ENV_VARS.keys())
     if not unknown:
         return
     # Match on the part after "HIVEMIND_": the shared prefix would

@@ -12,23 +12,14 @@ neutral here (no feedback).
 
 It measures hit@5 and MRR for the newer member, with the shipped config
 and with decay off, and records them as a baseline. It pins direction and
-arithmetic, not a gate: it exists so a later change that lets a
-confirmation date restart the recency clock has a before to compare to.
-The numbers are in docs/retrieval-experiments.md.
-
-The second half is that "after": the same slice with a confirmation one day
-old on each newer member, measured with ``recency_from_confirmation`` on and
-off (ADR 0071), and the check that old-exact queries do not pay for it when
-confirmations are sprinkled on about 20% of the entries.
+arithmetic, not a gate. The numbers are in docs/retrieval-experiments.md;
+the confirmation-date clock that was measured against this baseline was
+removed (ADR 0103).
 """
 
 from __future__ import annotations
 
-import pytest
-
 from hivemind.config import SearchConfig
-from tests.eval.confirmation import pick_fraction
-from tests.eval.temporal import temporal_corpus
 from tests.eval.temporal_runner import (
     DECAY_OFF,
     DECAY_ON,
@@ -46,8 +37,6 @@ async def measure_slice(
     age: float | None,
     *,
     shipped: bool,
-    confirmations: dict[int, float] | None = None,
-    from_confirmation: bool = False,
 ) -> dict[str, float]:
     """One slice's report; ``age=None`` is the fixture as written."""
     overrides = None if age is None else dict.fromkeys(NEWER_MEMBERS, age)
@@ -55,8 +44,6 @@ async def measure_slice(
         lambda _q: DECAY_ON if shipped else DECAY_OFF,
         recency_floor=SHIPPED_FLOOR if shipped else None,
         age_overrides=overrides,
-        confirmations=confirmations,
-        recency_from_confirmation=from_confirmation,
     )
     return aggregate_slices(slices)[name]
 
@@ -90,75 +77,3 @@ def test_the_aged_ages_are_past_the_recency_floor() -> None:
     config = SearchConfig()
     assert config.recency_floor is not None
     assert all(0.5 ** (age / config.half_life_days) < config.recency_floor for age in AGES)
-
-
-# --- after: a confirmation restarts the clock (ADR 0071) ---------------------
-
-# A recheck one day ago on each currency pair's newer member.
-NEWER_CONFIRMED = dict.fromkeys(NEWER_MEMBERS, 1.0)
-
-
-async def test_confirming_the_newer_member_lifts_aged_currency_with_the_setting_on() -> None:
-    """Aged-currency, newer member confirmed yesterday, shipped config. The
-    helpful report itself lifts quality (1.067) with the setting on or off, so
-    the comparison is on vs off over the same feedback rows, plus the no-feedback
-    baseline above. At 30, 60 and 120 days: hit@5 1.000 both ways; MRR 0.778 off
-    -> 0.833 on (baseline without any feedback: 0.583)."""
-    for age in AGES:
-        off = await measure_slice("currency_pair", age, shipped=True, confirmations=NEWER_CONFIRMED)
-        on = await measure_slice(
-            "currency_pair",
-            age,
-            shipped=True,
-            confirmations=NEWER_CONFIRMED,
-            from_confirmation=True,
-        )
-        assert off["hit_at_k"] == on["hit_at_k"] == 1.0
-        assert off["mrr"] == pytest.approx(7 / 9)
-        assert on["mrr"] == pytest.approx(5 / 6)
-        assert on["mrr"] > off["mrr"]
-
-
-async def test_the_setting_is_inert_without_a_confirmation_date() -> None:
-    """The baseline above does not move with the setting on: no date, no gain."""
-    for age in (None, *AGES):
-        plain = await measure_slice("all", age, shipped=True)
-        on = await measure_slice("all", age, shipped=True, from_confirmation=True)
-        assert plain == on
-
-
-def test_the_sprinkled_fifth_is_deterministic() -> None:
-    """3 of the 16 entries (18.75%, the nearest whole number to 20%), the ones
-    whose summary has the smallest SHA-256: independent of position, so not
-    chosen to help or hurt any query."""
-    picked = pick_fraction([e.summary for e in temporal_corpus()])
-    assert picked == [3, 7, 14]
-
-
-async def test_old_exact_queries_with_sprinkled_confirmations() -> None:
-    """Old-exact (the 2 ``old_exact`` queries) with 3 of 16 entries confirmed a
-    day ago, setting on vs off over the same rows: MRR 1.000 -> 1.000. This
-    pick happens to stay within the study's 0.02; other 20% picks drop
-    old-exact by up to 0.5, so the rule is not met in general. Not every slice is so lucky: the non-temporal queries
-    fall 0.681 -> 0.597 and timeless 0.617 -> 0.517 on this fixture, because a
-    confirmed recent distractor (entry 3) and a confirmed newer pair member
-    (entry 7) gain on the old exact match. Recorded in
-    docs/retrieval-experiments.md; the real-embedder run decides."""
-    sprinkled = dict.fromkeys(pick_fraction([e.summary for e in temporal_corpus()]), 1.0)
-    reports = {}
-    for on in (False, True):
-        slices = await measure_slices(
-            lambda _q: DECAY_ON,
-            recency_floor=SHIPPED_FLOOR,
-            confirmations=sprinkled,
-            recency_from_confirmation=on,
-        )
-        reports[on] = aggregate_slices(slices)
-    assert reports[True]["old_exact"]["mrr"] >= reports[False]["old_exact"]["mrr"] - 0.02
-    assert reports[False]["old_exact"]["mrr"] == pytest.approx(1.0)
-    assert reports[False]["non_temporal"]["mrr"] == pytest.approx(0.681, abs=5e-4)
-    assert reports[True]["non_temporal"]["mrr"] == pytest.approx(0.597, abs=5e-4)
-    assert reports[False]["timeless"]["mrr"] == pytest.approx(0.617, abs=5e-4)
-    assert reports[True]["timeless"]["mrr"] == pytest.approx(0.517, abs=5e-4)
-    for name in reports[True]:
-        assert reports[True][name]["hit_at_k"] == reports[False][name]["hit_at_k"] == 1.0

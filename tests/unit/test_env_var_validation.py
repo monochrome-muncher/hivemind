@@ -19,6 +19,7 @@ scratch directory, so ambient dev-shell or CI exports never leak in.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -275,61 +276,53 @@ def test_a_real_env_var_overrides_strict_mode_in_the_profile_file(
     load_settings()  # the environment wins (ADR 0017): warn only
 
 
-def test_recency_from_confirmation_env_var_reaches_the_search_config(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("name", ["HIVEMIND_RECENCY_FROM_CONFIRMATION", "HIVEMIND_RECENCY_BY_KIND"])
+def test_a_removed_ranking_variable_is_ignored_with_one_warning_even_when_strict(
+    name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """ADR 0071: ``HIVEMIND_RECENCY_FROM_CONFIRMATION`` is a known field, off by default."""
-    _clear_hivemind_env(monkeypatch)
-    monkeypatch.chdir(tmp_path)
-    assert load_settings().search_config().recency_from_confirmation is False
-    monkeypatch.setenv("HIVEMIND_RECENCY_FROM_CONFIRMATION", "true")
-    assert load_settings().search_config().recency_from_confirmation is True
-
-
-def test_recency_by_kind_env_var_reaches_the_search_config(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """ADR 0072: ``HIVEMIND_RECENCY_BY_KIND`` is a known field, unset by default."""
-    from hivemind.domain.entry import Kind
-
+    """ADR 0103: the two retired ranking options still in a deployment's
+    config must not stop startup under HIVEMIND_STRICT_ENV; they warn once
+    and change nothing."""
     _clear_hivemind_env(monkeypatch)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HIVEMIND_STRICT_ENV", "true")
-    assert load_settings().search_config().recency_by_kind is None
-    for off in ("", "none", " NONE "):
-        monkeypatch.setenv("HIVEMIND_RECENCY_BY_KIND", off)
-        assert load_settings().search_config().recency_by_kind is None
-    monkeypatch.setenv("HIVEMIND_RECENCY_BY_KIND", " Insight = 180 , decision=365.5 ")
-    config = load_settings().search_config()
-    assert config.recency_by_kind == ((Kind.DECISION, 365.5), (Kind.INSIGHT, 180.0))
-    assert config.half_life_for(Kind.INSIGHT) == 180.0
-    assert config.half_life_for(Kind.FACT) == config.half_life_days
+    baseline = load_settings().search_config()
+    value = "true" if "CONFIRMATION" in name else "insight=180"
+    monkeypatch.setenv(name, value)
+    with caplog.at_level(logging.WARNING, logger="hivemind.config"):
+        settings = load_settings()
+    assert settings.search_config() == baseline
+    warnings = [r for r in caplog.records if name in r.getMessage()]
+    assert len(warnings) == 1
+    assert "ADR 0103" in warnings[0].getMessage()
+    assert "Unknown HIVEMIND_" not in caplog.text
+    assert value not in caplog.text
 
 
-@pytest.mark.parametrize(
-    "value",
-    [
-        "note=10",  # unknown kind
-        "insight",  # no value
-        "insight=",
-        "=5",
-        "insight=abc",
-        "insight=0",
-        "insight=-3",
-        "insight=nan",
-        "insight=inf",
-        "insight=-inf",
-        "insight=1,insight=2",  # repeated
-        "insight=1,,decision=2",  # empty segment
-        "insight=1,",
-        "insight=1;decision=2",
-    ],
-)
-def test_recency_by_kind_rejects_bad_values_at_load_time(
-    value: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_both_removed_ranking_variables_share_one_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     _clear_hivemind_env(monkeypatch)
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("HIVEMIND_RECENCY_BY_KIND", value)
-    with pytest.raises(ValueError, match=r"(?i)recency_by_kind"):
+    monkeypatch.setenv("HIVEMIND_STRICT_ENV", "true")
+    monkeypatch.setenv("HIVEMIND_RECENCY_FROM_CONFIRMATION", "false")
+    monkeypatch.setenv("HIVEMIND_RECENCY_BY_KIND", "")
+    with caplog.at_level(logging.WARNING, logger="hivemind.config"):
         load_settings()
+    assert len([r for r in caplog.records if "Removed HIVEMIND_" in r.getMessage()]) == 1
+
+
+def test_a_removed_ranking_variable_in_the_profile_file_is_ignored_when_strict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _clear_hivemind_env(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env.local").write_text(
+        "HIVEMIND_STRICT_ENV=true\nHIVEMIND_RECENCY_BY_KIND=insight=180\n"
+        "HIVEMIND_RECENCY_FROM_CONFIRMATION=true\n"
+    )
+    with caplog.at_level(logging.WARNING, logger="hivemind.config"):
+        load_settings()
+    assert len([r for r in caplog.records if "Removed HIVEMIND_" in r.getMessage()]) == 1
+    assert "Unknown HIVEMIND_" not in caplog.text
+    assert "insight=180" not in caplog.text

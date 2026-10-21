@@ -52,7 +52,7 @@ POOLED_FALSE_MAX = 0.05
 DOMAIN_FALSE_MAX = 0.10
 EPS = 1e-9
 # Grouping always moves the newer member ahead, so old-exact MRR can only
-# fall; it may fall this far (the confirmation-clock rule's tolerance).
+# fall; it may fall this far (the study's tolerance for old-exact).
 OLD_EXACT_TOLERANCE = 0.02
 FLEET_A = "fleet-a"
 FLEET_B = "fleet-b"

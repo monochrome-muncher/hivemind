@@ -2,8 +2,7 @@
 
 The hint is on unless the server setting ``recency_hint_enabled`` is turned
 off (ADR 0101). Off, every hint scores as ``default``, bit for bit. On, ``ignore_age`` drops
-the recency factor and the confirmation clock (so I1 does not hold under it,
-by construction), and ``prefer_recent`` scores under a lower floor (so I1
+the recency factor (so I1 does not hold under it, by construction), and ``prefer_recent`` scores under a lower floor (so I1
 holds, with more room).
 """
 
@@ -106,45 +105,35 @@ def test_the_setting_is_on_by_default() -> None:
 
 @pytest.mark.parametrize("hint", HINTS)
 def test_off_every_hint_scores_as_the_default(hint: RecencyHint) -> None:
-    for kind in Kind:
-        assert OFF.recency_terms(kind, hint) == OFF.recency_terms(kind, RecencyHint.DEFAULT)
+    assert OFF.recency_terms(hint) == OFF.recency_terms(RecencyHint.DEFAULT)
     assert OFF.applied_hint(hint) is RecencyHint.DEFAULT
 
 
 def test_on_the_default_hint_is_todays_terms() -> None:
-    config = replace(ON, recency_by_kind=((Kind.INSIGHT, 180.0),), recency_from_confirmation=True)
-    for kind in Kind:
-        terms = config.recency_terms(kind, RecencyHint.DEFAULT)
-        assert terms.half_life_days == config.half_life_for(kind)
-        assert terms.recency_floor == config.recency_floor
-        assert terms.use_confirmation is True
-    assert config.applied_hint(RecencyHint.DEFAULT) is RecencyHint.DEFAULT
+    terms = ON.recency_terms(RecencyHint.DEFAULT)
+    assert terms.half_life_days == ON.half_life_days
+    assert terms.recency_floor == ON.recency_floor
+    assert ON.applied_hint(RecencyHint.DEFAULT) is RecencyHint.DEFAULT
 
 
-def test_prefer_recent_keeps_the_kind_half_life_and_lowers_the_floor() -> None:
-    config = replace(ON, recency_by_kind=((Kind.DECISION, 365.0),), recency_from_confirmation=True)
-    decision = config.recency_terms(Kind.DECISION, RecencyHint.PREFER_RECENT)
-    fact = config.recency_terms(Kind.FACT, RecencyHint.PREFER_RECENT)
-    assert (decision.half_life_days, fact.half_life_days) == (365.0, 30.0)
-    assert decision.recency_floor == fact.recency_floor == PREFER_RECENT_FLOOR == 0.5
-    assert decision.use_confirmation is True
+def test_prefer_recent_keeps_the_half_life_and_lowers_the_floor() -> None:
+    terms = ON.recency_terms(RecencyHint.PREFER_RECENT)
+    assert terms.half_life_days == ON.half_life_days == 30.0
+    assert terms.recency_floor == PREFER_RECENT_FLOOR == 0.5
     # Never weaker than the deployment's own floor.
     low = replace(ON, recency_floor=0.3)
-    assert low.recency_terms(Kind.FACT, RecencyHint.PREFER_RECENT).recency_floor == 0.3
+    assert low.recency_terms(RecencyHint.PREFER_RECENT).recency_floor == 0.3
     none = replace(ON, recency_floor=None)
-    assert none.recency_terms(Kind.FACT, RecencyHint.PREFER_RECENT).recency_floor is None
+    assert none.recency_terms(RecencyHint.PREFER_RECENT).recency_floor is None
     assert (
-        replace(ON, prefer_recent_floor=None)
-        .recency_terms(Kind.FACT, RecencyHint.PREFER_RECENT)
-        .recency_floor
+        replace(ON, prefer_recent_floor=None).recency_terms(RecencyHint.PREFER_RECENT).recency_floor
         is None
     )
 
 
-def test_ignore_age_has_no_recency_factor_and_no_confirmation_clock() -> None:
-    config = replace(ON, recency_from_confirmation=True)
-    terms = config.recency_terms(Kind.FACT, RecencyHint.IGNORE_AGE)
-    assert terms.recency_floor is None and terms.use_confirmation is False
+def test_ignore_age_has_no_recency_factor() -> None:
+    terms = ON.recency_terms(RecencyHint.IGNORE_AGE)
+    assert terms.recency_floor is None
     for age in (0.0, 1.0, 400.0, 36_500.0):
         score = entry_score(
             0.5,
@@ -155,6 +144,7 @@ def test_ignore_age_has_no_recency_factor_and_no_confirmation_clock() -> None:
             terms.half_life_days,
             recency_floor=terms.recency_floor,
             social_max=1.2,
+            narrow_importance=False,
         )
         assert score == 0.5 * 0.8  # fused x importance, exactly
 
@@ -176,22 +166,11 @@ async def _ranking(
 
 
 @pytest.mark.parametrize("hint", HINTS)
-@pytest.mark.parametrize(
-    "config",
-    [
-        OFF,
-        replace(OFF, recency_from_confirmation=True),
-        replace(OFF, recency_by_kind=((Kind.INSIGHT, 180.0), (Kind.DECISION, 365.0))),
-    ],
-    ids=["plain", "confirmation", "profile"],
-)
-async def test_setting_off_no_hint_changes_a_search(
-    config: SearchConfig, hint: RecencyHint
-) -> None:
+async def test_setting_off_no_hint_changes_a_search(hint: RecencyHint) -> None:
     """The hint cannot change a search while the setting is off: hits, order
     and scores are exactly the default's, and the result says default."""
     store = await _pool()
-    service = _service(store, config)
+    service = _service(store, OFF)
     base = await service.search_result(QUERY, limit=10)
     asked = await service.search_result(QUERY, limit=10, recency=hint)
     assert asked == base
@@ -257,10 +236,9 @@ async def test_i1_old_never_beats_new_by_default_even_with_the_setting_on() -> N
                 updated_at=NOW - timedelta(hours=1),
             )
         )
-    config = replace(ON, recency_from_confirmation=True)
     for hint in (None, RecencyHint.DEFAULT):
         kw = {} if hint is None else {"recency": hint}
-        hits = await _service(store, config).search(QUERY, limit=5, **kw)  # type: ignore[arg-type]
+        hits = await _service(store, ON).search(QUERY, limit=5, **kw)  # type: ignore[arg-type]
         assert [h.entry_id for h in hits] == [new.id, old.id]
 
 
@@ -279,8 +257,7 @@ async def test_i1_holds_under_prefer_recent() -> None:
                 updated_at=NOW - timedelta(hours=1),
             )
         )
-    config = replace(ON, recency_from_confirmation=True)
-    hits = await _service(store, config).search(QUERY, limit=5, recency=RecencyHint.PREFER_RECENT)
+    hits = await _service(store, ON).search(QUERY, limit=5, recency=RecencyHint.PREFER_RECENT)
     assert [h.entry_id for h in hits] == [new.id, old.id]
 
 
@@ -291,7 +268,7 @@ def test_i1_arithmetic_under_prefer_recent(fresh_age: float, old_age: float, hel
     """I1 at equal match and importance, through the terms the service uses."""
     from hivemind.retrieval.scoring import feedback_quality
 
-    terms = ON.recency_terms(Kind.FACT, RecencyHint.PREFER_RECENT)
+    terms = ON.recency_terms(RecencyHint.PREFER_RECENT)
 
     def score(age: float, helpful_votes: int) -> float:
         return entry_score(
@@ -303,7 +280,7 @@ def test_i1_arithmetic_under_prefer_recent(fresh_age: float, old_age: float, hel
             terms.half_life_days,
             recency_floor=terms.recency_floor,
             social_max=ON.social_max,
-            confirmed_at=NOW - timedelta(minutes=1) if helpful else None,
+            narrow_importance=ON.narrow_importance,
         )
 
     assert score(fresh_age, 0) >= score(old_age, helpful)
@@ -390,41 +367,9 @@ async def test_i5_the_social_cap_holds_under_every_hint(hint: RecencyHint) -> No
                         updated_at=NOW - timedelta(hours=1),
                     )
                 )
-        config = replace(ON, recency_from_confirmation=True)
-        return (await _service(store, config).search(QUERY, limit=1, recency=hint))[0].score
+        return (await _service(store, ON).search(QUERY, limit=1, recency=hint))[0].score
 
     assert await score(rated=True) / await score(rated=False) <= ON.social_max + 1e-12
-
-
-async def test_i3_and_i4_with_prefer_recent_and_ignore_age() -> None:
-    """The confirmation clock works under prefer_recent (a flag newer than it
-    cancels it, I4) and does not exist under ignore_age."""
-
-    async def score(hint: RecencyHint, *, clock: bool, flag: bool) -> float:
-        store = MemoryStore(make_clock())
-        entry = await store.create_entry(_draft(QUERY, 730), [0.1] * 4)
-        await store.record_feedback(
-            Feedback(
-                entry.id, "c", "a", Verdict.HELPFUL, note="ok", updated_at=NOW - timedelta(days=2)
-            )
-        )
-        if flag:
-            await store.record_feedback(
-                Feedback(
-                    entry.id, "f", "a", Verdict.STALE, note="no", updated_at=NOW - timedelta(days=1)
-                )
-            )
-        config = replace(ON, recency_from_confirmation=clock, social_max=3.0)
-        return (await _service(store, config).search(QUERY, limit=1, recency=hint))[0].score
-
-    prefer, ignore = RecencyHint.PREFER_RECENT, RecencyHint.IGNORE_AGE
-    assert await score(prefer, clock=True, flag=False) > await score(
-        prefer, clock=False, flag=False
-    )
-    assert await score(prefer, clock=True, flag=True) == await score(prefer, clock=False, flag=True)
-    assert await score(ignore, clock=True, flag=False) == await score(
-        ignore, clock=False, flag=False
-    )
 
 
 # --- the surfaces -----------------------------------------------------------

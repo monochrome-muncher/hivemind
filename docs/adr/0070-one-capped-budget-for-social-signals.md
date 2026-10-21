@@ -1,5 +1,7 @@
 # One capped budget for social signals
 
+> **Amended by [ADR 0103](0103-remove-confirmation-clock-and-per-kind-recency.md):** I3 now reads "a confirmation date never reaches the score" and I4 is retired (there is no confirmation gain for a flag to cancel); I1, I2 and I5 stand, with every kind aging by one half-life. The notes below about 0071 and 0072 describe removed behaviour.
+
 > **Amended by [ADR 0088](0088-narrow-importance.md):** by default (`HIVEMIND_NARROW_IMPORTANCE`, on), the importance factor narrows from 0.6..1.0 to 0.9..1.1, so one importance step (about 1.05x) is smaller than `social_max`; invariant I6 states it. I1 is unchanged and is still stated at equal importance.
 
 > **Amended by [ADR 0073](0073-a-recency-hint-on-search.md):** I1 does not hold under the `ignore_age` recency hint, which a caller sends per search and which works only with `HIVEMIND_RECENCY_HINT` on. It holds under `default` and `prefer_recent`, and always with the setting off.

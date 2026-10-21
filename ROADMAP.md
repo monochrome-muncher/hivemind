@@ -216,9 +216,10 @@ one capped budget for social signals (ADR 0070); evidence on hits
 (`last_confirmed_at`, `contested`, `correction`, `supersedes`); write check
 mode and advisory warnings (ADR 0077); pin integrity (ADR 0076); fleet
 health and convergence metrics, admin-only (ADR 0075), with owner-level sibling-verdict figures (ADR 0089); and, off by default
-until measured, the confirmation clock (ADR 0071), per-kind recency
-(ADR 0072) and version grouping (ADR 0074). The recency hint (ADR 0073) is on
-by default since the Qwen3-Embedding run (ADR 0101).
+until measured, version grouping (ADR 0074). The confirmation clock (ADR
+0071) and per-kind recency (ADR 0072) were measured twice, worse each time,
+and removed (ADR 0103). The recency hint (ADR 0073) is on by default since
+the Qwen3-Embedding run (ADR 0101).
 Explore search is opt-in per search (ADR 0078). Results are in
 [docs/retrieval-experiments.md](docs/retrieval-experiments.md).
 
@@ -320,8 +321,8 @@ Explore search is opt-in per search (ADR 0078). Results are in
   from 0.000 to 1.000 MRR while `currency_pair` holds at 0.778 (decay-off
   0.611). The floor is a band, not a slider (0.9 measures worse than
   decay-off). Shipping (a) rules out (b), the additive form; reopening (b)
-  means replacing the floor under a new ADR. Per-kind half-lives are built
-  off by default (ADR 0072). **Still open:** the value 0.8, from a synthetic fixture.
+  means replacing the floor under a new ADR. Per-kind half-lives were built
+  off by default (ADR 0072) and removed after a worse re-measure (ADR 0103). **Still open:** the value 0.8, from a synthetic fixture.
   **Re-measure trigger:** the first real corpus with meaningful age
   spread; sweep 0.5–0.9 and expect to move the value, not the form.
   Tables and method:

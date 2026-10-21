@@ -67,8 +67,7 @@ class Hit:
     # (helpful, stale, wrong) over every reporter (ADR 0051).
     feedback: FeedbackCounts = (0, 0, 0)
     # When someone other than the author last used the entry and said what
-    # they checked, with no flag since (SPEC §4.2); ranked on only when
-    # ``recency_from_confirmation`` is on (ADR 0071).
+    # they checked, with no flag since (SPEC §4.2); display only, never ranked.
     last_confirmed_at: datetime | None = None
     # The evidence on the hit (SPEC §6.1), display only: readers disagree
     # (a helpful and a stale or wrong report), the newest stale or wrong
@@ -263,7 +262,7 @@ class SearchService:
             entry_feedback[entry.id] = entry_signals
             helpful, stale, wrong = entry_signals.counts
             quality = feedback_quality(helpful, stale, wrong, **quality_kwargs)
-            terms = self._config.recency_terms(entry.kind, recency)
+            terms = self._config.recency_terms(recency)
             score = entry_score(
                 fused[entry.id],
                 entry.importance,
@@ -274,7 +273,6 @@ class SearchService:
                 recency_floor=terms.recency_floor,
                 social_max=self._config.social_max,
                 narrow_importance=self._config.narrow_importance,
-                confirmed_at=(entry_signals.last_confirmed_at if terms.use_confirmation else None),
             )
             entry_scores[entry.id] = score
             scored.append(entry)

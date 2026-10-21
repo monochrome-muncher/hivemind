@@ -1,5 +1,7 @@
 # A confirmation can restart the recency clock
 
+> **Superseded by [ADR 0103](0103-remove-confirmation-clock-and-per-kind-recency.md):** the setting and its scoring path were removed after the 2026-10-21 measurement with the Qwen3 embedders (pooled MRR -0.11 on 8B, -0.09 on 4B and 0.6B). The text below is the decision as it was made.
+
 Amends [ADR 0022](0022-recency-floor-so-match-quality-is-the-sort-key.md) and [ADR 0070](0070-one-capped-budget-for-social-signals.md), and SPEC §6.4.
 
 ## Context
