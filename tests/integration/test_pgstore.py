@@ -241,6 +241,36 @@ async def test_write_service_supersedes_by_a_non_canonical_uuid_spelling(pg) -> 
     assert reloaded.superseded_by == successor.id
 
 
+async def test_write_service_warns_when_a_write_may_answer_an_open_question(pg) -> None:
+    """ADR 0099: the warning is computed from ``related`` on a real write and
+    on a check, and naming the question in ``see_also`` silences it."""
+    store, _, dim = pg
+    service = WriteService(store, FakeEmbedder(dimension=dim))
+    admin = Visibility(TrustLevel.PRIVILEGED, "admin", is_admin=True)
+    text = "why does billing in the eu region stall on node 20 behind the shared proxy"
+    question = await service.write(
+        draft(text, kind=Kind.INSIGHT, tags=("open-question",)), writer=admin
+    )
+    answer = text.replace("why does", "because").replace("stall", "stalls")
+
+    def codes(warnings) -> list[str]:
+        return [w.code for w in warnings]
+
+    checked = await service.check(draft(answer), writer=admin)
+    assert "answers_open_question" in codes(checked.warnings)
+    assert any(question.id in w.message for w in checked.warnings)
+    linked = replace(draft(answer), see_also=(question.id,))
+    assert "answers_open_question" not in codes(
+        (await service.check(linked, writer=admin)).warnings
+    )
+    written = await service.write_and_relate(draft(answer), writer=admin)
+    assert "answers_open_question" in codes(written.warnings)
+    superseding = await service.write_and_relate(
+        draft(answer, supersedes=(question.id,)), writer=admin
+    )
+    assert "answers_open_question" not in codes(superseding.warnings)
+
+
 async def test_supersede_of_withdrawn_target_rolls_back_insert(pg) -> None:
     store, _, _ = pg
     head = await store.create_entry(draft("head"))

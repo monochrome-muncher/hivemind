@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
-from hivemind.domain.entry import Entry, EntryDraft, Source
+from hivemind.domain.entry import Entry, EntryDraft, EntryState, Source
 from hivemind.domain.health import is_entry_ref
 
 if TYPE_CHECKING:
@@ -29,6 +29,14 @@ _IDS_IN_MESSAGE = 3
 # one fact and almost no distinct same-system facts, which 0.85 still
 # catches. Tuned for Qwen3; advisory only, the writer judges.
 _NEAR_DUPLICATE_SIMILARITY = 0.90
+
+# A related open question or anomaly at or above this similarity may be
+# answered by the new entry (ADR 0099). Provisional: to be checked against
+# Qwen3 measurements. Advisory only, the writer judges.
+_OPEN_QUESTION_SIMILARITY = 0.70
+
+# The tags that mark a gap or an unexplained surprise waiting for an answer.
+_OPEN_TAGS = frozenset({"open-question", "anomaly"})
 
 # A local path: a home directory (/home/x, /Users/x, ~/x) or a Windows
 # profile (C:\Users\x, C:/Users/x, or JSON-escaped C:\\Users\\x). Not
@@ -81,6 +89,47 @@ def near_duplicate_warning(
             f"very similar to {top.entry.id} (similarity {top.similarity:.2f}): "
             "if it says the same, rate it instead of writing; if yours updates "
             "it, supersede it; if it is another point, link it with see_also",
+        ),
+    )
+
+
+def _id_key(entry_id: str) -> str:
+    """An entry id with case and hyphens folded away (uuid spellings)."""
+    return entry_id.replace("-", "").lower()
+
+
+def answers_open_question_warning(
+    related: Sequence[RelatedEntry],
+    draft_tags: Collection[str] = (),
+    linked: Collection[str] = (),
+) -> tuple[WriteWarning, ...]:
+    """A signal that the write may answer an open question: an active
+    ``related`` entry tagged ``open-question`` or ``anomaly`` at or above the
+    similarity floor. Entries in ``linked`` (the draft's ``supersedes`` and
+    ``see_also``) are skipped, and a draft that is itself tagged
+    ``open-question`` or ``anomaly`` gets none: two questions are not an
+    answer. At most one warning, naming the closest."""
+    if _OPEN_TAGS & set(draft_tags):
+        return ()
+    skip = {_id_key(i) for i in linked}
+    candidates = [
+        r
+        for r in related
+        if r.entry.state is EntryState.ACTIVE
+        and _OPEN_TAGS & set(r.entry.tags)
+        and r.similarity >= _OPEN_QUESTION_SIMILARITY
+        and _id_key(r.entry.id) not in skip
+    ]
+    if not candidates:
+        return ()
+    top = max(candidates, key=lambda r: r.similarity)
+    others = len(candidates) - 1
+    more = f" (+{others} more nearby)" if others else ""
+    return (
+        WriteWarning(
+            "answers_open_question",
+            f"may answer open question {top.entry.id} (similarity {top.similarity:.2f}){more}: "
+            "if it does, write with supersedes (if you may) or see_also to it",
         ),
     )
 
