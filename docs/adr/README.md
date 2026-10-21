@@ -71,7 +71,7 @@ is unused.
 | [0059](0059-batch-reads-use-a-fixed-number-of-store-reads.md) | Batch reads use a fixed number of store reads | Accepted |
 | [0060](0060-the-admin-key-writes-self-or-org-entries.md) | The admin key writes `self` or `org` entries | Amended by 0066 |
 | [0061](0061-vector-search-needs-positive-similarity.md) | Vector search needs a positive similarity | Amended by 0062 |
-| [0062](0062-a-similarity-threshold-for-the-vector-stream.md) | A similarity threshold for the vector stream | Accepted |
+| [0062](0062-a-similarity-threshold-for-the-vector-stream.md) | A similarity threshold for the vector stream | Accepted; default amended by 0100 |
 | [0063](0063-feedback-quality-by-consensus-share.md) | Feedback quality by consensus share | Amended by 0070 |
 | [0064](0064-corrections-stay-visible-in-recent-feedback.md) | Corrections stay visible in an entry's recent feedback | Accepted |
 | [0065](0065-an-author-cannot-rate-its-own-entry.md) | An author cannot rate its own entry | Accepted |
@@ -109,4 +109,5 @@ is unused.
 | [0097](0097-query-instruction-for-instruction-aware-embedders.md) | A query instruction for instruction-aware embedders, on the query side only | Accepted; on by default, empty value turns it off |
 | [0098](0098-relied-on-changed-list-filter.md) | A `relied_on_changed` list filter: what changed under an entry you rated helpful | Accepted; display and filter only |
 | [0099](0099-answers-open-question-warning.md) | A write warns when it may answer an open question | Accepted; advisory only, floor 0.70 provisional |
+| [0100](0100-vector-similarity-cut-off-on-by-default.md) | The vector similarity cut-off is on by default | Accepted; 0.45, empty value turns it off |
 | [0102](0102-trim-search-hit-score-and-empty-feedback.md) | Search hits round `score` to 4 significant figures and omit all-zero `feedback` | Accepted; display only, ranking unchanged |

@@ -52,7 +52,7 @@ directory (the plugin's `cline/` folder, shipped with the plugin package)
 to `~/Documents/Cline/Hooks/`: `UserPromptSubmit`, `TaskStart` and
 `PostToolUse`, plus their `.ps1` twins on Windows (Cline runs the
 extensionless script on Unix and the `.ps1` on Windows). They carry the
-stay-aware line on every prompt and the end-of-task write-and-rate nudge;
+stay-aware line (full on a task's first prompt, short after) and the end-of-task write-and-rate nudge;
 a Cline hook is a script named exactly after the hook type, with no
 extension.
 
@@ -69,11 +69,13 @@ other harnesses.
 
 ## Stay aware
 
-- **Hooks, not an instruction block.** The `UserPromptSubmit` hook adds the
-  reminder to every prompt, so it also rides back after a compaction. Cline
-  runs no hook that can add a line to the compaction itself (its
-  `PreCompact` hook's output is not injected), so there is no post-compaction
-  line; the per-prompt reminder is what carries Hivemind across it. The
+- **Hooks, not an instruction block.** The `UserPromptSubmit` hook adds
+  the full reminder to a task's first prompt and a short one
+  (`follow the hivemind skill; recall before work, write what you learn`)
+  to its later prompts. Cline runs no hook that can add a line to the
+  compaction itself (its `PreCompact` hook's output is not injected) and
+  none tells a hook that one happened, so the full line does not come back
+  after a compaction; the short line still names the skill. The
   `cline` CLI (3.0.73) runs this hook but does not add its text to the
   prompt, so in the CLI the skills and the `PostToolUse` nudge are the only
   reminders.

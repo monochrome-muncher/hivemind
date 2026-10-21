@@ -173,4 +173,4 @@ async def test_mcp_whoami_tool_returns_the_standing() -> None:
     assert direct["can_write_scopes"] == ["self"]
     server = build_server(app)
     tools = {t.name: t for t in await server.list_tools()}
-    assert "session" in (tools["hive_whoami"].description or "")
+    assert "can_write_scopes" in (tools["hive_whoami"].description or "")

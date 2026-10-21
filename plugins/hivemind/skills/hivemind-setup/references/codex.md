@@ -61,7 +61,7 @@ apply.)
 
 - **Instruction block:** `~/.codex/AGENTS.md`.
 - **Startup and stop hooks:** the hivemind plugin has both (the stop
-  hook asks once, at the end of a long session that wrote nothing, to
+  hook asks once, at the end of a long session that rated nothing and wrote nothing or read entries, to
   write and rate before finishing). Codex runs a plugin's hooks only once
   the user has **trusted them in `/hooks`** (until then they are listed as
   untrusted and skipped, in `codex exec` too): tell the user to do that

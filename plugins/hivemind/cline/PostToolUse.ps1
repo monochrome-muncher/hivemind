@@ -4,10 +4,13 @@
 # Cline fires PostToolUse after every tool call, with the payload JSON on
 # stdin (taskId at the top level, postToolUse.toolName the tool; the older
 # tool_name spelling is still read). This counts the task's tool calls in a
-# temp file (reset by the TaskStart hook) and, once a task has made
-# HIVEMIND_STOP_MIN_TOOLS (default 20) calls without calling hive_write or
-# hive_feedback, steers the agent once, via contextModification, to write
-# what another agent could reuse; if nothing is new it just finishes.
+# temp file (reset by the TaskStart hook; the sixth field is the
+# UserPromptSubmit hook's "full line already sent" flag, kept as is) and, once a task has made
+# HIVEMIND_STOP_MIN_TOOLS (default 20) calls without calling hive_feedback
+# and either without hive_write or after reading entries (hive_search,
+# hive_get), steers the agent once, via contextModification, to write what
+# another agent could reuse and rate what it tested; if nothing is new it
+# just finishes.
 #
 # Subagent tasks are never counted and never reminded (a non-empty string in
 # parent_agent_id, which the CLI hook runner sends at the top level, or in
@@ -45,6 +48,9 @@ $state = Join-Path $stateDir $safe
 $calls = 0
 $contributed = 0
 $reminded = 0
+$rated = 0
+$seen = 0
+$prompted = 0
 if (Test-Path $state) {
     $parts = (Get-Content $state -Raw -ErrorAction SilentlyContinue) -split '\s+'
     if ($parts.Count -ge 3) {
@@ -52,10 +58,22 @@ if (Test-Path $state) {
         $contributed = [int]$parts[1]
         $reminded = [int]$parts[2]
     }
+    if ($parts.Count -ge 5) {
+        $rated = [int]$parts[3]
+        $seen = [int]$parts[4]
+    }
+    if ($parts.Count -ge 6) {
+        $prompted = [int]$parts[5]
+    }
 }
 
-if ($toolName -like "*hive_write" -or $toolName -like "*hive_feedback") {
+if ($toolName -like "*hive_write") {
     $contributed = 1
+} elseif ($toolName -like "*hive_feedback") {
+    $contributed = 1
+    $rated = 1
+} elseif ($toolName -like "*hive_search" -or $toolName -like "*hive_get") {
+    $seen = 1
 }
 $calls++
 
@@ -69,17 +87,17 @@ $incognito = if ($env:HIVEMIND_INCOGNITO) { $env:HIVEMIND_INCOGNITO.ToLower() } 
 if (-not @("1", "true", "yes", "on").Contains($incognito)) { $incognito = "" }
 
 $emitNudge = $false
-if ($calls -ge $threshold -and $contributed -eq 0 -and $reminded -eq 0) {
+if ($calls -ge $threshold -and $reminded -eq 0 -and $rated -eq 0 -and ($contributed -eq 0 -or $seen -eq 1)) {
     if ($incognito -ne "" -or [string]::IsNullOrWhiteSpace($env:HIVEMIND_API_KEY)) {
         # Still record the count so a later key change does not fire it.
-        Set-Content -Path $state -Value "$calls $contributed $reminded" -NoNewline -ErrorAction SilentlyContinue
+        Set-Content -Path $state -Value "$calls $contributed $reminded $rated $seen $prompted" -NoNewline -ErrorAction SilentlyContinue
     } else {
         $reminded = 1
         $emitNudge = $true
-        Set-Content -Path $state -Value "$calls $contributed $reminded" -NoNewline -ErrorAction SilentlyContinue
+        Set-Content -Path $state -Value "$calls $contributed $reminded $rated $seen $prompted" -NoNewline -ErrorAction SilentlyContinue
     }
 } else {
-    Set-Content -Path $state -Value "$calls $contributed $reminded" -NoNewline -ErrorAction SilentlyContinue
+    Set-Content -Path $state -Value "$calls $contributed $reminded $rated $seen $prompted" -NoNewline -ErrorAction SilentlyContinue
 }
 
 if ($emitNudge) {

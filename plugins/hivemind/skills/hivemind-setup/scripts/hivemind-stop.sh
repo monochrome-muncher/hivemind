@@ -6,8 +6,9 @@
 # tested. Registered in hooks/hooks.json (Gemini CLI: by hand, hivemind-setup).
 #
 # It only nudges a substantial session (at least HIVEMIND_STOP_MIN_TOOLS tool
-# uses, default 20) that has not called hive_write or hive_feedback yet, and
-# it fails open: any error, missing file or unparsable input exits 0 with no
+# uses, default 20) that has not called hive_write or hive_feedback yet, or
+# that read entries (hive_search, hive_get) and never rated any, and it
+# fails open: any error, missing file or unparsable input exits 0 with no
 # output. Plain POSIX sh, grep, sed and sort: no jq, python or node. No network.
 #
 # Stop input (stdin JSON): session_id, transcript_path, stop_hook_active.
@@ -56,7 +57,8 @@ private() {
 private || exit 0
 [ -e "$dir/$sid" ] && exit 0
 
-# (e) Qualifying: enough tool uses, and no hive_write / hive_feedback yet.
+# (e) Qualifying: enough tool uses, and either no hive_write / hive_feedback
+# yet, or entries read (hive_search / hive_get) and no hive_feedback.
 # Claude Code records the tool list in prompt_snapshot attachments (and
 # deferred_tools_record), as {"name":...,"schema":{...}} definitions, so
 # lines that define tools are skipped: a definition is not a call.
@@ -64,7 +66,10 @@ calls() {
   grep -Ev '"(input_schema|inputSchema|schema|parameters)" *: *\{|"type" *: *"(prompt_snapshot|deferred_tools_record)"' \
     "$transcript" 2>/dev/null
 }
-calls | grep -Eq '"name" *: *"[^"]*hive_(write|feedback)"' && exit 0
+calls | grep -Eq '"name" *: *"[^"]*hive_feedback"' && exit 0
+if calls | grep -Eq '"name" *: *"[^"]*hive_write"'; then
+  calls | grep -Eq '"name" *: *"[^"]*hive_(search|get)"' || exit 0
+fi
 min="${HIVEMIND_STOP_MIN_TOOLS:-20}"
 case "$min" in ''|*[!0-9]*) min=20 ;; esac
 # Claude Code records a call as "tool_use"; Codex as "function_call",

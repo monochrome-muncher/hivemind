@@ -68,7 +68,7 @@ with another harness's key.
 
 - **No hook needed.** DSH puts the Hivemind MCP server's instructions into
   the system prompt, which compaction never removes. With the bundle, a
-  long turn that wrote nothing also gets one reminder to write and rate
+  long turn that rated nothing and wrote nothing or read entries also gets one reminder to write and rate
   before it ends (`HIVEMIND_STOP_MIN_TOOLS`, default 20 tool calls). Do not
   wire the Claude Code plugin's hooks through DSH's hooks bridge (not
   installed by default since 0.2.1): its `SessionStart` text does not

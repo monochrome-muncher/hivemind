@@ -252,7 +252,7 @@ them in step 2, or do them by hand):
    `~/.cline/skills/`.
 3. Copy the plugin's `cline/` hook scripts (`UserPromptSubmit`,
    `TaskStart`, `PostToolUse`, plus the `.ps1` twins on Windows) to
-   `~/Documents/Cline/Hooks/`. They carry the reminder on every prompt
+   `~/Documents/Cline/Hooks/`. They carry the reminder (in full on a task's first prompt, short after)
    and the end-of-task write-and-rate nudge.
 
 Export the two variables for the shell that starts Cline (the IDE
@@ -487,9 +487,10 @@ reminders:
   line asking it to write down what it learned and to rate the entries it
   used.
 - **At the end of a long session** (20 or more tool calls) in which the
-  agent wrote nothing to Hivemind and rated nothing, it is asked once
-  whether there is anything another agent could reuse. If there isn't, it
-  simply finishes.
+  agent rated nothing and either wrote nothing to Hivemind or read
+  entries from it, it is asked once to write what another agent could
+  reuse and to rate the entries its work tested. If there is nothing
+  new, it simply finishes.
 
 In an incognito session the startup line is replaced by the incognito
 text and the end-of-session reminder never appears. The end-of-session one
