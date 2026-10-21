@@ -252,7 +252,7 @@ them in step 2, or do them by hand):
    `~/.cline/skills/`.
 3. Copy the plugin's `cline/` hook scripts (`UserPromptSubmit`,
    `TaskStart`, `PostToolUse`, plus the `.ps1` twins on Windows) to
-   `~/Documents/Cline/Hooks/`. They carry the reminder on every prompt
+   `~/Documents/Cline/Hooks/`. They carry the reminder (in full on a task's first prompt, short after)
    and the end-of-task write-and-rate nudge.
 
 Export the two variables for the shell that starts Cline (the IDE

@@ -148,10 +148,13 @@ itself names no harness-specific paths, and a test enforces this.
   (top-level `taskId`; `postToolUse.toolName` the tool; a subagent carries a non-empty
   `parent_agent_id`, or `sessionContext.parentAgentId`) and prints
   `{ cancel, contextModification, errorMessage }` on stdout; hooks are
-  enabled by default. `UserPromptSubmit` fires on every prompt (the
-  per-prompt reminder is what carries Hivemind across a compaction, whose
-  `PreCompact` hook output is not injected — it is wired as a deferred
-  hook in the extension's hooks adapter). Verified against `cline/cline`
+  enabled by default. `UserPromptSubmit` fires on every prompt: the
+  first prompt of a task gets the full stay-aware line and later prompts a
+  90-byte form (a sixth "full line sent" field in the per-task state file
+  `TaskStart` resets and `PostToolUse` keeps; 3- and 5-field files from
+  older releases still read). No hook signals a compaction (`PreCompact`
+  output is not injected — it is wired as a deferred hook in the
+  extension's hooks adapter), so the full line does not return after one. Verified against `cline/cline`
   main (extension source: `envExpansion.ts`, `skill-directories.ts`,
   `hooks-adapter.ts`, `disk.ts`, `name-transform.ts`).
 - **Gemini CLI** installs an extension from a Git URL by cloning the whole

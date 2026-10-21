@@ -52,6 +52,7 @@ you, and before writing.
 - `hive_search` with a short question or task in your words, plus the
   exact error or identifier; not an entry's or your draft's text. Add
   `kind`, `tags` (AND), `entities` or dates only when sure.
+- No relevant hits after one rephrase: a gap; don't keep searching.
 - `hive_get` the promising hits in one call. A hit's `correction` is
   its newest `stale`/`wrong` note: read it, and the notes in `feedback`,
   before relying on it; they often say what is true now. Open `see_also` and `linked_from` entries that bear on the

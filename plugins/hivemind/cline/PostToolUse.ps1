@@ -4,7 +4,8 @@
 # Cline fires PostToolUse after every tool call, with the payload JSON on
 # stdin (taskId at the top level, postToolUse.toolName the tool; the older
 # tool_name spelling is still read). This counts the task's tool calls in a
-# temp file (reset by the TaskStart hook) and, once a task has made
+# temp file (reset by the TaskStart hook; the sixth field is the
+# UserPromptSubmit hook's "full line already sent" flag, kept as is) and, once a task has made
 # HIVEMIND_STOP_MIN_TOOLS (default 20) calls without calling hive_feedback
 # and either without hive_write or after reading entries (hive_search,
 # hive_get), steers the agent once, via contextModification, to write what
@@ -49,6 +50,7 @@ $contributed = 0
 $reminded = 0
 $rated = 0
 $seen = 0
+$prompted = 0
 if (Test-Path $state) {
     $parts = (Get-Content $state -Raw -ErrorAction SilentlyContinue) -split '\s+'
     if ($parts.Count -ge 3) {
@@ -59,6 +61,9 @@ if (Test-Path $state) {
     if ($parts.Count -ge 5) {
         $rated = [int]$parts[3]
         $seen = [int]$parts[4]
+    }
+    if ($parts.Count -ge 6) {
+        $prompted = [int]$parts[5]
     }
 }
 
@@ -85,14 +90,14 @@ $emitNudge = $false
 if ($calls -ge $threshold -and $reminded -eq 0 -and $rated -eq 0 -and ($contributed -eq 0 -or $seen -eq 1)) {
     if ($incognito -ne "" -or [string]::IsNullOrWhiteSpace($env:HIVEMIND_API_KEY)) {
         # Still record the count so a later key change does not fire it.
-        Set-Content -Path $state -Value "$calls $contributed $reminded $rated $seen" -NoNewline -ErrorAction SilentlyContinue
+        Set-Content -Path $state -Value "$calls $contributed $reminded $rated $seen $prompted" -NoNewline -ErrorAction SilentlyContinue
     } else {
         $reminded = 1
         $emitNudge = $true
-        Set-Content -Path $state -Value "$calls $contributed $reminded $rated $seen" -NoNewline -ErrorAction SilentlyContinue
+        Set-Content -Path $state -Value "$calls $contributed $reminded $rated $seen $prompted" -NoNewline -ErrorAction SilentlyContinue
     }
 } else {
-    Set-Content -Path $state -Value "$calls $contributed $reminded $rated $seen" -NoNewline -ErrorAction SilentlyContinue
+    Set-Content -Path $state -Value "$calls $contributed $reminded $rated $seen $prompted" -NoNewline -ErrorAction SilentlyContinue
 }
 
 if ($emitNudge) {

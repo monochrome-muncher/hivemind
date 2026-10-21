@@ -4,7 +4,8 @@
 # Cline fires PostToolUse after every tool call, with the payload JSON on
 # stdin (taskId at the top level, postToolUse.toolName the tool; the older
 # tool_name spelling is still read). This counts the task's tool calls in a
-# temp file (reset by the TaskStart hook) and, once a task has made
+# temp file (reset by the TaskStart hook; the sixth field is the
+# UserPromptSubmit hook's "full line already sent" flag, kept as is) and, once a task has made
 # HIVEMIND_STOP_MIN_TOOLS (default 20) calls without calling hive_feedback
 # and either without hive_write or after reading entries (hive_search,
 # hive_get), steers the agent once, via contextModification, to write what
@@ -59,21 +60,23 @@ fi
 [ -d "$state_dir" ] && [ ! -L "$state_dir" ] && [ -O "$state_dir" ] || bail
 case "$(ls -ld "$state_dir" 2>/dev/null)" in d????w*|d???????w*) bail ;; esac
 state="$state_dir/${safe:-none}"
-write_state() { (umask 077; printf '%s %s %s %s %s\n' "$calls" "$contributed" "$reminded" "$rated" "$seen" > "$state") 2>/dev/null; }
+write_state() { (umask 077; printf '%s %s %s %s %s %s\n' "$calls" "$contributed" "$reminded" "$rated" "$seen" "$prompted" > "$state") 2>/dev/null; }
 
 calls=0
 contributed=0
 reminded=0
 rated=0
 seen=0
+prompted=0
 if [ -f "$state" ]; then
-  read -r calls contributed reminded rated seen < "$state" 2>/dev/null
+  read -r calls contributed reminded rated seen prompted < "$state" 2>/dev/null
 fi
 case "$calls" in ''|*[!0-9]*) calls=0 ;; esac
 case "$contributed" in ''|*[!0-9]*) contributed=0 ;; esac
 case "$reminded" in ''|*[!0-9]*) reminded=0 ;; esac
 case "$rated" in ''|*[!0-9]*) rated=0 ;; esac
 case "$seen" in ''|*[!0-9]*) seen=0 ;; esac
+case "$prompted" in ''|*[!0-9]*) prompted=0 ;; esac
 
 case "${tool_name:-}" in
   *hive_write) contributed=1 ;;
