@@ -40,8 +40,8 @@ from hivemind.domain.entry import EntryDraft, Kind
 from hivemind.memstore import MemoryStore, cosine_similarity
 from hivemind.ports import Embedder, Store
 from hivemind.retrieval.eval import hit_at_k
-from hivemind.services.governance import WriteService
 from hivemind.services.search import SearchService
+from hivemind.services.write import WriteService
 from tests.eval.domains import CROSS_DOMAIN, DOMAINS, Domain
 from tests.eval.golden import golden_corpus, golden_queries
 from tests.eval.temporal import temporal_corpus, temporal_queries

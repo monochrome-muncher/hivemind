@@ -17,9 +17,10 @@ from hivemind.mcp.app import McpHivemind, hive_feedback, hive_get, hive_search, 
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
-from hivemind.services.governance import GovernanceService, WriteService
+from hivemind.services.governance import GovernanceService
 from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
+from hivemind.services.write import WriteService
 from tests.fakes import FakeAuthenticator, make_clock, make_embedder, make_search_config
 
 

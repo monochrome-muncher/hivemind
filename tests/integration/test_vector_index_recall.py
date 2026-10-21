@@ -94,8 +94,8 @@ from hivemind.config import Settings
 from hivemind.domain.entry import EntryDraft, EntryFilters, Kind, embeddable_text
 from hivemind.ports import entry_embeddable_text
 from hivemind.retrieval.eval import aggregate_report, evaluate_query
-from hivemind.services.governance import WriteService
 from hivemind.services.search import SearchService
+from hivemind.services.write import WriteService
 from hivemind.store import PgStore
 from hivemind.store import pgstore as pgstore_module
 from hivemind.store.migrate import migrate

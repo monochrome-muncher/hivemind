@@ -24,9 +24,10 @@ from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.retrieval.scoring import entry_score
 from hivemind.services.access import AccessService
-from hivemind.services.governance import GovernanceService, WriteService
+from hivemind.services.governance import GovernanceService
 from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
+from hivemind.services.write import WriteService
 from tests.fakes import FIXED_NOW, make_clock, make_embedder, make_search_config
 from tests.unit.test_api_endpoints import make_authenticator, make_hivemind_app, post_entry
 

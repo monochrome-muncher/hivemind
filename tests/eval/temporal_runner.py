@@ -36,8 +36,8 @@ from hivemind.domain.entry import EntryDraft, Kind
 from hivemind.domain.recency import RecencyHint
 from hivemind.memstore import MemoryStore
 from hivemind.retrieval.eval import aggregate_report, evaluate_query
-from hivemind.services.governance import WriteService
 from hivemind.services.search import SearchService
+from hivemind.services.write import WriteService
 from tests.eval.temporal import TEMPORAL_K, LabelledQuery, temporal_corpus, temporal_queries
 from tests.fakes import FIXED_NOW, FixedClock, make_clock, make_embedder, make_search_config
 

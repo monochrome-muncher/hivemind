@@ -25,7 +25,7 @@ from hivemind.domain.validation import (
 from hivemind.mcp.app import hive_list, hive_search, hive_write
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
-from hivemind.services.governance import WriteService
+from hivemind.services.write import WriteService
 from tests.fakes import make_clock, make_embedder
 from tests.unit.test_api_endpoints import make_client, make_hivemind_app
 from tests.unit.test_mcp_app import ALICE, build_app

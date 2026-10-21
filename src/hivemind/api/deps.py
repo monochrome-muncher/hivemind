@@ -21,10 +21,11 @@ from hivemind.domain.validation import MAX_REQUEST_BODY_BYTES, InvalidInput
 from hivemind.ports import Authenticator, Credential, Embedder, Store
 from hivemind.services.access import AccessService
 from hivemind.services.activity import ActivityService
-from hivemind.services.governance import GovernanceService, WriteService
+from hivemind.services.governance import GovernanceService
 from hivemind.services.metrics import MetricsService
 from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
+from hivemind.services.write import WriteService
 
 logger = logging.getLogger(__name__)
 

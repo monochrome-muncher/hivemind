@@ -20,8 +20,8 @@ from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.errors import EntryNotFound
 from hivemind.services.feedback import FeedbackService
-from hivemind.services.governance import WriteService
 from hivemind.services.wiring import build_services
+from hivemind.services.write import WriteService
 from tests.fakes import make_embedder, make_search_config, make_store
 
 

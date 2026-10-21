@@ -16,12 +16,9 @@ from hivemind.domain.entry import EntryDraft, EntryFilters, Kind
 from hivemind.domain.feedback import Verdict
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
-from hivemind.services.governance import (
-    GovernanceService,
-    PermissionDenied,
-    SupersedeDenied,
-    WriteService,
-)
+from hivemind.services.errors import PermissionDenied, SupersedeDenied
+from hivemind.services.governance import GovernanceService
+from hivemind.services.write import WriteService
 from tests.fakes import FakeEmbedder, FakeExtractor, make_clock, make_embedder
 
 
@@ -52,7 +49,7 @@ class TestWriteService:
         """SP-13: N ``supersedes`` targets cost one ``get_entries``, not N
         ``get_entry`` round-trips; an unknown target is still denied."""
         from hivemind.domain.access import TrustLevel, Visibility
-        from hivemind.services.governance import SupersedeDenied
+        from hivemind.services.errors import SupersedeDenied
 
         store = MemoryStore(make_clock())
         service = WriteService(store, make_embedder())
@@ -90,7 +87,7 @@ class TestWriteService:
         from hivemind.domain.access import TrustLevel, Visibility
         from hivemind.domain.validation import MAX_SUPERSEDES
         from hivemind.services import write
-        from hivemind.services.governance import SupersedeDenied
+        from hivemind.services.errors import SupersedeDenied
 
         monkeypatch.setattr(write, "_SUPERSEDES_LOOKUP_CHUNK", 4)
         store = MemoryStore(make_clock())

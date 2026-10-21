@@ -10,7 +10,7 @@ from hivemind.config import Settings
 from hivemind.domain.entry import EntryDraft, Kind
 from hivemind.mcp.app import McpHivemind, hive_search, hive_write
 from hivemind.ports import Credential
-from hivemind.services.governance import PermissionDenied
+from hivemind.services.errors import PermissionDenied
 from hivemind.services.wiring import build_services, log_startup
 from tests.fakes import (
     FakeExtractor,
