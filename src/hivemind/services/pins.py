@@ -4,7 +4,7 @@ A pin follows supersession to the version readers now see.
 
 from __future__ import annotations
 
-from hivemind.domain.access import TrustLevel, Visibility
+from hivemind.domain.access import SCOPE_FLEET, TrustLevel, Visibility
 from hivemind.domain.audit import AuditAction
 from hivemind.domain.entry import Entry, EntryState
 from hivemind.domain.feedback import NO_SIGNALS, FeedbackSignals
@@ -101,7 +101,7 @@ class PinService:
         reads as anyone, so a withdrawer who has since left the fleet still
         finds other authors' older pinned versions. The
         removed pin ids; empty when the entry was not pinned."""
-        if entry.scope != "fleet" or entry.fleet_id is None:
+        if entry.scope != SCOPE_FLEET or entry.fleet_id is None:
             return []
         return await self._unpin_shown(
             credential, entry, entry.fleet_id, _ANYONE, reason="withdrawn"
@@ -230,7 +230,7 @@ class PinService:
         entry = await get_visible_entry(self._store, entry_id, credential.visibility())
         if entry is None:  # unknown, or not visible to the caller (ADR 0033)
             raise EntryNotFound(f"unknown entry: {entry_id}")
-        if entry.scope != "fleet" or entry.fleet_id is None:
+        if entry.scope != SCOPE_FLEET or entry.fleet_id is None:
             raise InvalidInput("only fleet entries can be pinned, to their own fleet")
         member = (
             credential.trust_level in (TrustLevel.CONTRIBUTOR, TrustLevel.PRIVILEGED)

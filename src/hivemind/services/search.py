@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from hivemind.config import SearchConfig
-from hivemind.domain.access import Visibility
+from hivemind.domain.access import SCOPE_FLEET, SCOPE_ORG, Visibility
 from hivemind.domain.entry import (
     Entry,
     EntryFilters,
@@ -62,7 +62,7 @@ class Hit:
     occurred_at: datetime
     score: float
     # Lets a privileged reader spot a foreign fleet's entry (ADR 0036).
-    scope: str = "fleet"
+    scope: str = SCOPE_FLEET
     fleet_id: str | None = None
     # (helpful, stale, wrong) over every reporter (ADR 0051).
     feedback: FeedbackCounts = (0, 0, 0)
@@ -529,7 +529,7 @@ MAX_GROUP_SIZE = 3
 def _group_key(entry: Entry) -> str | None:
     """Who may be grouped with whom (ADR 0074): entries of one fleet, or
     org-scoped entries. ``None``: with nobody."""
-    if entry.scope == "org":
+    if entry.scope == SCOPE_ORG:
         return "org"
     return f"fleet:{entry.fleet_id}" if entry.fleet_id else None
 

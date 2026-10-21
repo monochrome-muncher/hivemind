@@ -38,7 +38,15 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 
 from hivemind.domain import usage
-from hivemind.domain.access import Agent, AgentStatus, Fleet, TrustLevel
+from hivemind.domain.access import (
+    SCOPE_FLEET,
+    SCOPE_ORG,
+    SCOPE_SELF,
+    Agent,
+    AgentStatus,
+    Fleet,
+    TrustLevel,
+)
 from hivemind.domain.entry import ImportanceSource, Kind, SearchCount, UsageCount
 from hivemind.domain.feedback import FlagCount
 from hivemind.domain.health import Convergence, FleetHealth, HealthCounts
@@ -47,7 +55,7 @@ from hivemind.ports import Store
 logger = logging.getLogger(__name__)
 
 # The canonical scopes / kinds (the "distinct tags in use" signal).
-_SCOPES = ("org", "fleet", "self")
+_SCOPES = (SCOPE_ORG, SCOPE_FLEET, SCOPE_SELF)
 _KINDS = (Kind.FACT, Kind.INSIGHT, Kind.DECISION)
 _IMPORTANCE_SOURCES = (ImportanceSource.CALLER, ImportanceSource.DEFAULT)
 # Default lifetime (seconds) of the cached entry scan; the
