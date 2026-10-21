@@ -392,6 +392,10 @@ docs in step. Among other things it checks that:
 - the hook, the Hermes section, the Pi extension, the OpenCode plugin and
   the DSH row all switch to incognito, and the launcher applies each
   harness's switch;
+- every copy of each reminder text (startup, incognito, stop, compaction,
+  configured, not configured and Cline's short line) matches one canonical
+  text, read as its own runtime would. To change a reminder, change the
+  canonical text in `REMINDER_COPIES` and every file it lists;
 - CHANGELOG.md has a row for the current version, and README.md links it.
 
 Run it with `uv run pytest tests/unit/test_agent_plugin.py`. Some tests

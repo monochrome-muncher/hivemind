@@ -20,7 +20,10 @@ Layout:
   the api/mcp Deployments carry modest resource requests/limits and prefer
   different nodes (`topologySpreadConstraints`, `ScheduleAnyway`);
   the image installs the dependency set locked in `uv.lock`;
-  `optional/` is the opt-in nginx Ingress + cert-manager Certificate;
+  `optional/` is the opt-in nginx Ingress + cert-manager Certificate,
+  with two more opt-in trees under it: `optional/networkpolicy/` (§2
+  step 6) and `optional/monitoring/`, the Prometheus Operator
+  ServiceMonitors and the Grafana dashboard (§2 steps 7 and 8);
   `admin/` and `portal/` are the admin panel and the agent portal, each
   its own kustomization, §8 and §9)
 - [`.gitlab-ci.yml`](.gitlab-ci.yml) — the pipeline (test → build → deploy);
@@ -188,6 +191,8 @@ The 6-step operator flow:
 5. Fetch `ADMIN_KEY` / `ORG_KEY` from the `hivemind-keys` Secret and
    distribute them (§2 step 4).
 6. (Optional) apply the opt-in Ingress with the real hostname/issuer.
+7. (Optional) apply the NetworkPolicies, and set up scraping and the
+   Grafana dashboard (§2 steps 6 to 8).
 
 **What is automatic** (never do these by hand):
 
@@ -338,6 +343,13 @@ first-run bootstrap Job records itself as `ci-bootstrap`.
   config need not be synchronised. Schema changes follow
   **expand-and-contract** (SPEC §8.6): additive within a release, and a
   removal split across two.
+- **Removed settings are ignored, with a warning.** When a release
+  removes a setting, a deployment that still sets it starts normally,
+  even with `HIVEMIND_STRICT_ENV=true`, and logs `Removed HIVEMIND_*
+  environment variable(s) are ignored` with the names. Delete them from
+  the ConfigMap or Secret when convenient. 2.12.0 removes
+  `HIVEMIND_RECENCY_FROM_CONFIRMATION` and `HIVEMIND_RECENCY_BY_KIND`
+  (ADR 0103); both were off by default, so ranking does not change.
 - **Derived images add layers only — never an `ENTRYPOINT`.** An
   air-gapped high-side image built `FROM` this one (e.g. to install
   custom CA certificates) inherits the migrations and the entrypoint.
@@ -531,6 +543,7 @@ auth middleware — k8s probes carry no credential):
 | 401 on every agent call | an active agent: its agent key was revoked or mistyped. A not-yet-activated agent: a stale org key (after a rotation that wasn't distributed) | active: re-activate it for a new key (§4.3); pending: re-fetch `ORG_KEY` from the `hivemind-keys` Secret (§4.1) |
 | app container CrashLooping on the entrypoint's migrate pre-step | dim mismatch (ADR 0015) — the log names both dims + both fixes | `make pg-reset` equivalent (fresh pool) or set `HIVEMIND_EMBEDDING_DIM` to the pool's dim |
 | `Unknown HIVEMIND_* environment variable(s)` WARNING at startup | either a typo'd or stale `HIVEMIND_*` var (ADR 0024) — e.g. a renamed knob (ADR 0021's `_PREFIX_CHARS` → `_PREFIX_TOKENS`) left set under its old name — or a variable the platform injected (GitLab Auto DevOps; Kubernetes service links such as `HIVEMIND_API_SERVICE_HOST`) | a typo: fix it per the suggestion. A platform variable: ignore it, or set `enableServiceLinks: false` on the pod to drop the service-link ones. Startup only **fails** on this when `HIVEMIND_STRICT_ENV=true` (ADR 0032) |
+| `Removed HIVEMIND_* environment variable(s) are ignored` WARNING at startup | a setting this release removed is still set, e.g. `HIVEMIND_RECENCY_FROM_CONFIRMATION` or `HIVEMIND_RECENCY_BY_KIND` (ADR 0103). Harmless: the value is ignored and startup never fails on it | delete it from the ConfigMap or Secret (§5) |
 | A scrape of `hivemind-mcp` fails with 401 or 404 | 401: an older image without `/metrics` (ADR 0104), or a wrong path (e.g. through the Ingress's `/mcp` prefix, or a ServiceMonitor `path` other than `/metrics`). 404: `HIVEMIND_MCP_METRICS_ENABLED` is not `true` (it is off by default) | roll the MCP pods to the current image; set `HIVEMIND_MCP_METRICS_ENABLED=true` (the shipped Deployment does); scrape the pod port 8088 at `/metrics` (§2 step 7, or `deploy/kubernetes/optional/monitoring/`). Do not give Prometheus a key |
 | MCP session drops after ~60s | nginx default `proxy-read-timeout` killing the SSE stream (classic pitfall) | apply the opt-in Ingress with the SSE annotations (`deploy/kubernetes/optional/ingress.yaml`) |
 | entries have empty `entities` | extractor off (empty endpoint — by design) OR extractor dead (best-effort, ADR 0016) | check `HIVEMIND_EXTRACTOR_ENDPOINT` + `K8S_SECRET_EXTRACTOR_API_KEY`; §4.6 |
@@ -600,6 +613,11 @@ rules:
   # with the same ServiceAccount:
   # - apiGroups: ["networking.k8s.io"]
   #   resources: ["ingresses", "networkpolicies"]
+  #   verbs: ["get", "list", "watch", "create", "patch"]
+  # Only if you apply optional/monitoring/ with it (the dashboard ConfigMap
+  # is covered by the configmaps rule above):
+  # - apiGroups: ["monitoring.coreos.com"]
+  #   resources: ["servicemonitors"]
   #   verbs: ["get", "list", "watch", "create", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

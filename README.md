@@ -403,7 +403,8 @@ There are two supported ways to run Hivemind for real use.
   setup: two copies each of the API, the MCP server and the agent
   portal, the database migrations and the first keys handled by the
   pipeline, and the admin panel and the portal kept off the internet. [DEPLOY.md](DEPLOY.md) is the step-by-step
-  guide, including upgrades and key rotation.
+  guide, including upgrades, key rotation and monitoring with Prometheus
+  and an optional Grafana dashboard.
 - **One machine with Docker Compose.** Fine for a small team.
   [docs/ops-runbook.md](docs/ops-runbook.md) explains what to change
   first (the database password, which ports are exposed, TLS in front of

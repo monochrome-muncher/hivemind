@@ -369,7 +369,7 @@ improve.
 
 ## A confirmation restarts the recency clock (ADR 0071)
 
-> **Removed (ADR 0103).** The confirmation clock was re-measured on 2026-10-21 with the Qwen3 embedders, came out worse, and were taken out. The results below are kept as history; `tests/eval/confirmation.py` is now `tests/eval/ranking.py` and no longer measures it.
+> **Removed (ADR 0103).** The confirmation clock was re-measured on 2026-10-21 with the Qwen3 embedders, came out worse, and was taken out. The results below are kept as history; `tests/eval/confirmation.py` is now `tests/eval/ranking.py` and no longer measures it.
 
 *(tools: `tests/eval/confirmation.py`, `make measure-confirmation`; the
 embedding-free slices in `test_social_scenarios.py` and
@@ -470,7 +470,7 @@ the setting stays off and the default does not change.
 
 ## A recency profile per kind (ADR 0072)
 
-> **Removed (ADR 0103).** The per-kind profiles were re-measured on 2026-10-21 with the Qwen3 embedders, came out worse, and was taken out. The results below are kept as history; `tests/eval/confirmation.py` is now `tests/eval/ranking.py` and no longer measures it.
+> **Removed (ADR 0103).** The per-kind profiles were re-measured on 2026-10-21 with the Qwen3 embedders, came out worse, and were taken out. The results below are kept as history; `tests/eval/confirmation.py` is now `tests/eval/ranking.py` and no longer measures it.
 
 *(tools: `tests/eval/confirmation.py` variants, `make measure-ranking`;
 `tests/eval/test_kind_profile.py` for the age-varied fixture)*
@@ -907,7 +907,7 @@ enabling it for `ignore_age`. *(Superseded: ADR 0101 turned the hint on by
 default, after the re-run below.)*
 
 **Re-run with the query instruction on (2026-10-21; ADR 0101).** Same fixture
-and harness (`make measure-confirmation`; five domains, 160 entries aged 0 to
+and harness (`make measure-confirmation`, now `make measure-ranking`; five domains, 160 entries aged 0 to
 400 days, 96 answerable queries, the hint applied to every query), with the
 query instruction on (ADR 0097) and each embedder reported alone: Qwen3-Embedding
 8B Q8_0, 4B f16 and 0.6B f16 via llama.cpp, dim 1024. Pooled MRR, no hint, then
