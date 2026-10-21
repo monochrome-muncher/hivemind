@@ -636,8 +636,9 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         offset: Annotated[int, Query(ge=0, le=MAX_OFFSET)] = 0,
     ) -> list[EntryOut]:
         """List what the agent's key can read, newest first (ADR 0095):
-        the ``GET /v1/entries`` filters plus ``fleet_id``, so the portal
-        can show the home fleet alone even to a privileged agent."""
+        the browsing subset of the ``GET /v1/entries`` filters plus
+        ``fleet_id``, so the portal can show the home fleet alone even to a
+        privileged agent."""
         _require_agent(credential, "the agent portal")
         filters = EntryFilters(
             kind=kind,

@@ -367,7 +367,7 @@ def _writable_scopes(key_kind: str, credential: Credential) -> tuple[str, ...]:
     else:
         scopes = write_scopes_for(credential.trust_level)
     if (key_kind == "agent" and credential.home_fleet_id is None) or key_kind == "admin":
-        scopes = tuple(scope for scope in scopes if scope != "fleet")
+        scopes = tuple(scope for scope in scopes if scope != SCOPE_FLEET)
     return scopes
 
 
@@ -393,13 +393,13 @@ def resolve_write_scope(
                 f"trust level {credential.trust_level.value} may not write "
                 f"scope '{scope}' (ADR 0011)"
             )
-    if scope == "fleet" and credential.is_admin:
+    if scope == SCOPE_FLEET and credential.is_admin:
         # The admin key has no fleet: a fleet entry would reach no fleet (ADR 0060).
         raise PermissionDenied(
             "the admin key writes 'self' or 'org' entries, not 'fleet' (ADR 0060)"
         )
     fleet_id: str | None = None
-    if scope == "fleet" and credential.access_controlled and not credential.is_admin:
+    if scope == SCOPE_FLEET and credential.access_controlled and not credential.is_admin:
         # The entry lands in the home fleet; legacy and admin are unbound.
         if credential.home_fleet_id is None:
             raise PermissionDenied("agent has no home fleet; cannot write scope 'fleet' (ADR 0011)")

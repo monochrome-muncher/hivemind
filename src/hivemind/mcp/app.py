@@ -17,6 +17,7 @@ from typing import Any
 
 from hivemind import wire
 from hivemind.config import SearchConfig
+from hivemind.domain.access import SCOPE_FLEET, SCOPE_ORG, SCOPE_SELF
 from hivemind.domain.entry import (
     EntryFilters,
     Kind,
@@ -248,7 +249,7 @@ async def hive_write(
     ``invalid_input`` (a typo is not a trust-level problem).
     """
     cred = app.credential
-    if scope is not None and scope not in ("self", "fleet", "org"):
+    if scope is not None and scope not in (SCOPE_SELF, SCOPE_FLEET, SCOPE_ORG):
         return _error(ERR_INVALID_INPUT, f"scope must be 'self', 'fleet' or 'org', got {scope!r}")
     resolved_agent = cred.agent_id or agent
     if resolved_agent is None:

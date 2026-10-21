@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
+from hivemind.domain.access import SCOPE_FLEET, SCOPE_ORG
 from hivemind.domain.entry import Entry, EntryDraft, EntryState, Source
 from hivemind.domain.health import is_entry_ref
 
@@ -150,7 +151,9 @@ def write_warnings(
     superseded, linked = tuple(superseded), tuple(linked)
     found: list[WriteWarning] = []
 
-    if draft.scope in ("org", "fleet") and has_local_path(f"{draft.summary}\n{draft.body or ''}"):
+    if draft.scope in (SCOPE_ORG, SCOPE_FLEET) and has_local_path(
+        f"{draft.summary}\n{draft.body or ''}"
+    ):
         found.append(
             WriteWarning(
                 "local_path",
@@ -159,10 +162,10 @@ def write_warnings(
             )
         )
 
-    if draft.scope == "fleet":
+    if draft.scope == SCOPE_FLEET:
         # Only see_also can reach another fleet's entry: may_supersede
         # already refuses a foreign supersession target.
-        foreign = [e for e in linked if e.scope == "fleet" and e.fleet_id != draft.fleet_id]
+        foreign = [e for e in linked if e.scope == SCOPE_FLEET and e.fleet_id != draft.fleet_id]
         if foreign:
             found.append(
                 WriteWarning(
@@ -198,7 +201,7 @@ def write_warnings(
     # A synthesis grounded only in other entries: sources that all link to
     # entries, or none at all while it supersedes or links entries.
     if (
-        draft.scope in ("org", "fleet")
+        draft.scope in (SCOPE_ORG, SCOPE_FLEET)
         and draft.kind.value in ("insight", "decision")
         and all(is_entry_link(src) for src in draft.sources)
         and (draft.sources or draft.supersedes or draft.see_also)
