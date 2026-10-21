@@ -1,7 +1,8 @@
 // DeepSeek Harness plugin: the write-and-rate reminder the Claude Code
 // plugin's Stop hook gives. Once per session, when the main agent is about to
 // end a turn after 20+ tool calls (HIVEMIND_STOP_MIN_TOOLS) without calling
-// hive_write or hive_feedback, it is steered once to write what another agent
+// hive_write or hive_feedback (or after reading entries with hive_search or
+// hive_get and rating none), it is steered once to write what another agent
 // could reuse; if nothing is new it just finishes.
 //
 // It stays silent whenever the agent cannot see the Hivemind tools: the
@@ -17,7 +18,11 @@ import { randomUUID } from 'node:crypto'
 const STOP_REMINDER =
   'HIVEMIND: before finishing, write to Hivemind (hive_write) what another agent could reuse from this task, and rate the entries your work tested (hive_feedback). If nothing is new, write nothing and just finish.'
 const WRITE_TOOL = 'mcp__hivemind__hive_write'
-const CONTRIBUTION = /(^|[^a-z])hive_(write|feedback)$/
+const WROTE = /(^|[^a-z])hive_write$/
+const RATED = /(^|[^a-z])hive_feedback$/
+const READ = /(^|[^a-z])hive_(search|get)$/
+// Quiet once the session rated, or wrote without having read entries.
+const settled = (s) => s.rated || (s.wrote && !s.read)
 
 function stopThreshold() {
   const value = process.env.HIVEMIND_STOP_MIN_TOOLS ?? ''
@@ -38,10 +43,10 @@ export const inject = ['tools']
 
 export function apply(ctx) {
   const subagents = new Set()
-  const sessions = new Map() // agent id -> { calls, contributed, reminded }
+  const sessions = new Map() // agent id -> { calls, wrote, rated, read, reminded }
   const state = (agent) => {
     let s = sessions.get(agent.id)
-    if (!s) sessions.set(agent.id, (s = { calls: 0, contributed: false, reminded: false }))
+    if (!s) sessions.set(agent.id, (s = { calls: 0, wrote: false, rated: false, read: false, reminded: false }))
     return s
   }
   const isMain = (agent) => agent?.id !== undefined && !subagents.has(agent.id)
@@ -54,7 +59,9 @@ export function apply(ctx) {
     if (isMain(exec.agent)) {
       const s = state(exec.agent)
       s.calls += 1
-      if (CONTRIBUTION.test(exec.name)) s.contributed = true
+      if (WROTE.test(exec.name)) s.wrote = true
+      if (RATED.test(exec.name)) s.rated = true
+      if (READ.test(exec.name)) s.read = true
     }
     return next()
   })
@@ -62,7 +69,7 @@ export function apply(ctx) {
   ctx.on('agent/turn-stopping', async ({ agent }) => {
     if (!isMain(agent)) return
     const s = state(agent)
-    if (s.reminded || s.contributed || s.calls < stopThreshold()) return
+    if (s.reminded || settled(s) || s.calls < stopThreshold()) return
     if (!ctx.tools.get(WRITE_TOOL, agent)) return
     s.reminded = true
     agent.steer(message(STOP_REMINDER))

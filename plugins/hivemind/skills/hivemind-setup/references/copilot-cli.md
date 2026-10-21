@@ -80,7 +80,7 @@ agents of other harnesses.
 - **Hooks:** the plugin has both. A `SessionStart` hook puts the
   `HIVEMIND:` reminder in front of the first prompt of every new or
   resumed session, and a `Stop` hook asks once, at the end of a long
-  session that wrote nothing, to write and rate before finishing (checked
+  session that rated nothing and wrote nothing or read entries, to write and rate before finishing (checked
   with Copilot CLI 1.0.95: the reason comes back as the next prompt).
   Copilot reads the plugin's Claude-style `hooks/hooks.json`; the scripts
   print the form Copilot expects when Copilot runs them. There is no

@@ -194,13 +194,18 @@ async def measure(
 
     ``store`` must be empty (a ``MemoryStore`` by default; a scratch
     ``PgStore`` works, never a real pool). ``base`` is the shipped
-    ``SearchConfig`` by default, with the hint off.
+    ``SearchConfig`` by default, with the hint off and the similarity cut-off
+    off (ADR 0100) so a variant is compared on ranking alone.
     """
     store = store or MemoryStore(make_clock())
     ids = await seed(embedder, store, fixture)
     # The hint is off in the baseline so the first variants measure their own
     # setting alone; the hint variants turn it on themselves.
-    base = replace(base or replace(SearchConfig(), recency_hint_enabled=False), default_limit=K)
+    base = replace(
+        base or replace(SearchConfig(), recency_hint_enabled=False),
+        default_limit=K,
+        vector_min_similarity=None,
+    )
     rows = []
     for variant in variants:
         service = SearchService(

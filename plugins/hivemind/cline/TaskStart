@@ -42,5 +42,5 @@ fi
 case "$(ls -ld "$state_dir" 2>/dev/null)" in d????w*|d???????w*) bail ;; esac
 state="$state_dir/${safe:-none}"
 
-(umask 077; printf '0 0 0\n' > "$state") 2>/dev/null
+(umask 077; printf '0 0 0 0 0 0\n' > "$state") 2>/dev/null
 printf '{"cancel":false}\n'

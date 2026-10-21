@@ -208,7 +208,7 @@ empty-search counters (ADR 0056); see-also links (ADR 0057); a pinned
 fleet briefing (ADR 0058).
 
 ### 3.15 Feedback, ranking evidence and fleet health  *(2.4.0–2.5.0: ADRs 0061–0069, migration `0013`; 2.6.0: ADRs 0070–0078, migrations `0014`–`0015`)*
-A similarity threshold for the vector stream (ADR 0062, off by default).
+A similarity threshold for the vector stream (ADR 0062, on at 0.45 by default per ADR 0100).
 Feedback quality by consensus share and its guards (ADRs 0063–0067) and
 the rater flag metric (ADR 0068). From the hive-mind study
 ([docs/proposals/2026-10-10-hive-mind-ideas.md](docs/proposals/2026-10-10-hive-mind-ideas.md)):

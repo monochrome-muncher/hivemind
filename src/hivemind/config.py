@@ -105,6 +105,10 @@ def parse_recency_by_kind(text: str) -> tuple[tuple[Kind, float], ...] | None:
 
 # The floor under ``prefer_recent`` (ADR 0073); see docs/retrieval-experiments.md.
 PREFER_RECENT_FLOOR: float | None = 0.5
+# The vector stream's similarity cut-off (ADR 0100): measured for the
+# Qwen3-Embedding family. Another embedder should re-measure
+# (``make measure-threshold``). ``HIVEMIND_VECTOR_MIN_SIMILARITY=""`` turns it off.
+DEFAULT_VECTOR_MIN_SIMILARITY: float = 0.45
 # The task line put before the search query for an instruction-aware embedder
 # (ADR 0097). On by default: measured to help the Qwen3-Embedding family.
 # ``HIVEMIND_QUERY_INSTRUCTION=""`` turns it off. tests/eval/query_instruction.py
@@ -138,9 +142,9 @@ class SearchConfig:
     # than off, 1.0 is off. Do not tune it up. ``None`` = no floor.
     recency_floor: float | None = 0.8
     # The vector stream keeps only entries whose cosine similarity to the
-    # query is above this (ADR 0062). Model-specific, so off by default:
-    # ``None`` keeps ADR 0061's floor of 0. In [0, 1).
-    vector_min_similarity: float | None = None
+    # query is above this (ADR 0062, default per ADR 0100). Model-specific.
+    # ``None`` = off, which keeps ADR 0061's floor of 0. In [0, 1).
+    vector_min_similarity: float | None = DEFAULT_VECTOR_MIN_SIMILARITY
     # Read-time grouping of unlinked versions of one fact (ADR 0074): two
     # active candidates whose stored vectors are at least this similar are
     # shown adjacent, newest first, each naming the other. Nothing is hidden
@@ -420,9 +424,10 @@ class Settings(BaseSettings):
     # See SearchConfig.recency_floor (ADR 0022). In (0, 1]; empty or "none"
     # (case-insensitive) means no floor (ADR 0023).
     recency_floor: float | None = 0.8
-    # See SearchConfig.vector_min_similarity (ADR 0062). Unset, empty or
-    # "none" (case-insensitive) means off.
-    vector_min_similarity: float | None = None
+    # See SearchConfig.vector_min_similarity (ADR 0062, 0100). Unset means
+    # DEFAULT_VECTOR_MIN_SIMILARITY; empty or "none" (case-insensitive)
+    # means off.
+    vector_min_similarity: float | None = DEFAULT_VECTOR_MIN_SIMILARITY
     # See SearchConfig.version_group_min_similarity (ADR 0074). Same
     # spellings for off.
     version_group_min_similarity: float | None = None

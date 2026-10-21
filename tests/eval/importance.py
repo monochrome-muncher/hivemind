@@ -144,7 +144,12 @@ async def measure(
     query_instruction: str = "",
 ) -> list[Row]:
     """Every assignment over ``fixture``, each scored with the factor off, then on."""
-    base = replace(base or SearchConfig(), default_limit=K, query_instruction=query_instruction)
+    base = replace(
+        base or SearchConfig(),
+        default_limit=K,
+        query_instruction=query_instruction,
+        vector_min_similarity=None,  # measure the factor, not the cut-off (ADR 0100)
+    )
     rows = []
     for assignment in ASSIGNMENTS:
         store = MemoryStore(make_clock())

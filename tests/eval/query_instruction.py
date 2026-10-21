@@ -16,8 +16,8 @@ It reports hit@1, hit@5 and MRR per fixture and for the pooled one, and the
 change against no instruction. For the pooled fixture it also reports, per
 instruction, the mean and the 10th percentile of the cosine similarity
 between a query and its best answer entry: the instruction shifts query
-vectors, so ``HIVEMIND_VECTOR_MIN_SIMILARITY`` (ADR 0062; 0.45 is the Qwen3
-recommendation) may need re-checking. Set ``EVAL_QUERY_INSTRUCTION_JSON`` to
+vectors, so ``HIVEMIND_VECTOR_MIN_SIMILARITY`` (ADR 0062; 0.45 is the
+default, ADR 0100) may need re-checking. Set ``EVAL_QUERY_INSTRUCTION_JSON`` to
 a path to also write the rows as JSON.
 
 Entries are aged the same way as in the other measurements and there is no
@@ -122,7 +122,12 @@ async def measure(
     base: SearchConfig | None = None,
 ) -> list[Row]:
     """``fixture`` seeded once, then every answerable query under each instruction."""
-    base = replace(base or SearchConfig(), default_limit=K, query_instruction="")
+    base = replace(
+        base or SearchConfig(),
+        default_limit=K,
+        query_instruction="",
+        vector_min_similarity=None,  # compare instructions without the cut-off (ADR 0100)
+    )
     store = MemoryStore(make_clock())
     writer = WriteService(store, embedder)
     drafts = [_draft(entry, i) for i, entry in enumerate(fixture.entries)]

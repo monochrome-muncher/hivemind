@@ -542,7 +542,9 @@ benefit. The setting stays off.
 ## Similarity threshold
 
 *(ADR 0062; tool: `tests/eval/threshold.py`, `make measure-threshold`)*
-`HIVEMIND_VECTOR_MIN_SIMILARITY` is off by default. When set, the vector
+`HIVEMIND_VECTOR_MIN_SIMILARITY` defaults to 0.45 (ADR 0100); it was off
+until the query instruction measurement below, and the sections here up to
+that one record the reasoning and numbers from when it was off. The vector
 stream keeps only entries whose cosine similarity to the query is above
 it, so a search with nothing relevant can come back empty and shows up
 in the empty-search counter (ADR 0056). The keyword stream is not
@@ -771,7 +773,9 @@ answers the vector stream drops. "Emptying the off-topic stream" is too
 strong for 8B: 0.60 empties 10 of 192, because the off-topic queries are
 in-domain questions with no answer (median nearest entry 0.71, inside the
 answer band). On 8B the threshold does not pay for itself on this corpus,
-so the default stays off and no value is recommended.
+so the default stayed off and no value was recommended. That was before
+the query instruction (ADR 0097) was the default; with it, 0.45 became the
+default (ADR 0100, last section).
 
 **How to measure.** Point the `HIVEMIND_EMBEDDING_*` settings at the
 embedder the deployment uses, with the deployment's dimension, and run:
@@ -1241,8 +1245,9 @@ The instruction lowers answer similarity slightly but off-topic similarity
 much more, so a threshold separates the two better. At 0.45 in single-domain
 pools, the share of off-topic searches left empty rises from 4% to 55% on 8B
 (15% to 55% on 4B, 9% to 57% on 0.6B) while 98% of answers are kept (99%
-before). 0.45 stays the recommendation, and the threshold stays off by
-default (ADR 0062).
+before). 0.45 is the recommendation, and with the instruction on by
+default it became the default too (ADR 0100); 0.50 keeps 97% of answers and
+0.55 keeps 92%. Set `HIVEMIND_VECTOR_MIN_SIMILARITY` empty to turn it off.
 
 **Search-aware strategies (4B only).** Two ways of using the query's shape or
 the kind filter were tried against the single generic instruction.

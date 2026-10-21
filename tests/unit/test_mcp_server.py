@@ -290,6 +290,31 @@ async def test_tool_schemas_are_compact(app: McpHivemind) -> None:
     assert write.input_schema["properties"]["check"] == {"default": False, "type": "boolean"}
 
 
+async def test_tools_advertise_no_output_schema(app: McpHivemind) -> None:
+    """The SDK's derived schema (``{"result": object}``) says nothing, so
+    no tool carries one."""
+    tools = await build_server(app).list_tools()
+    assert len(tools) == len(EXPECTED_TOOLS)
+    assert all(t.output_schema is None for t in tools)
+
+
+async def test_replies_are_compact_json_text_without_structured_content(
+    app: McpHivemind,
+) -> None:
+    """A reply is one compact JSON text block: no indentation, no separator
+    spaces, and no duplicate ``structuredContent``."""
+    server = build_server(app)
+    reply = await server.call_tool("hive_write", {"kind": "fact", "summary": "compact é"})
+    [block] = reply.content
+    assert reply.structured_content is None
+    text = block.text
+    assert "\n" not in text and ": " not in text and ", " not in text
+    assert text == json.dumps(json.loads(text), separators=(",", ":"), ensure_ascii=False)
+    assert "compact é" in text
+    listing = await server.call_tool("hive_list", {})
+    assert "\n" not in listing.content[0].text
+
+
 async def test_an_explicit_null_argument_is_still_accepted(app: McpHivemind) -> None:
     """The compact schema drops ``null`` from optional arguments; the server
     still validates with its own model, so a client sending ``null`` works."""

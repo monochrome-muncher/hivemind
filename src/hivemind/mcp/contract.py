@@ -43,9 +43,8 @@ DESC_WRITE = (
     "one replaces: a self entry replaces only your own self entries, a fleet "
     "entry also your home fleet's entries. Any other target rejects the whole "
     "write (supersede_denied): flag it with hive_feedback instead. Optional "
-    "'importance' (1-5, default 3) feeds ranking: 5 = outage, data loss or "
-    "security exposure if unknown; 4 = costs hours; 3 = default; 2 = minor; "
-    "1 = trivia. 'body' by kind: fact: claim, conditions, how to check; "
+    "'importance' (1-5, default 3) is a small ranking tie-break: 5 = outage, data loss or "
+    "security exposure if unknown; 4 = costs hours; 2 = minor. 'body' by kind: fact: claim, conditions, how to check; "
     "insight: problem as met, environment (system, version, date), cause, fix, "
     "how verified, what did not work; decision: context, options, choice, why, "
     "who decided, when to revisit. The reply lists in 'related' the up to 3 "
@@ -118,7 +117,7 @@ DESC_PINNED = (
 DESC_PIN = (
     "Pin an active fleet entry to its fleet's briefing (hive_pinned), or "
     "unpin it with unpin: true. Contributors and privileged agents of that "
-    "fleet and admins may; an agent holds at most 3 pins, a fleet 10. Pin "
+    "fleet and admins may. Pin "
     "rarely: lasting facts every agent needs before starting, "
     "not task notes or news. Unpin what is withdrawn, wrong or outdated, "
     "others' pins too, and re-pin to acknowledge a change you checked; "
@@ -129,7 +128,7 @@ DESC_PIN = (
 DESC_FEEDBACK = (
     "Report helpful|stale|wrong on an entry your work tested (only "
     "entries you may read; others answer not_found). One row per (entry, "
-    "user, agent); the latest verdict wins (SPEC §4.2). Everyone who can read "
+    "user, agent); the latest verdict wins. Everyone who can read "
     "the entry sees your verdict, note and name. helpful means your work used "
     "the entry and it held: say in the note what you checked (verified: ...). "
     "For stale or wrong, say in the note what is true now. Verdicts move "
@@ -146,9 +145,7 @@ DESC_REGISTER = (
     "still pending / active, so ask your admin for the agent key / revoked). "
     "A name that belongs to another owner is a name_conflict: pick a "
     "different name."
-    " Name: 1-63 ASCII letters, digits, '.', '_' or '-', starting with a letter "
-    "or digit; admin, org, dev and shared (any case) are reserved; a bad name "
-    "answers invalid_input."
+    " A bad or reserved name answers invalid_input saying why."
 )
 
 
@@ -156,7 +153,7 @@ DESC_WHOAMI = (
     "Returns this key's kind (agent/org/admin/legacy), the "
     "agent's name, status (pending/active/revoked), trust level and home "
     "fleet, and what it may read (can_read) and which scopes it may write "
-    "(can_write_scopes). Call it at the start of every session: an empty "
+    "(can_write_scopes). An empty "
     "can_write_scopes means you cannot write yet; an empty can_read means "
     "searches come back empty."
 )
