@@ -177,9 +177,10 @@ class SearchConfig:
     # behaviour exactly. Normalised to a sorted tuple, so it is hashable.
     recency_by_kind: tuple[tuple[Kind, float], ...] | None = None
     # A search may carry a ``recency`` hint (ADR 0073). Off: the hint is
-    # accepted and ignored, every search scores as the default. On:
-    # ``prefer_recent`` and ``ignore_age`` change that one search's scoring.
-    recency_hint_enabled: bool = False
+    # accepted and ignored, every search scores as the default. On (the
+    # default, ADR 0101): ``prefer_recent`` and ``ignore_age`` change that one
+    # search's scoring; a search with no hint scores as before.
+    recency_hint_enabled: bool = True
     # The floor ``prefer_recent`` scores under (ADR 0073): lower than
     # ``recency_floor`` so age counts for more, or ``None`` for no floor. Not
     # an environment setting; a search config built by a test or the
@@ -447,7 +448,7 @@ class Settings(BaseSettings):
     # Empty or "none" means one curve for every kind.
     recency_by_kind: str = ""
     # See SearchConfig.recency_hint_enabled (ADR 0073).
-    recency_hint: bool = False
+    recency_hint: bool = True
     # See SearchConfig.narrow_importance (ADR 0088).
     narrow_importance: bool = True
     # See SearchConfig.query_instruction (ADR 0097). Defaults to

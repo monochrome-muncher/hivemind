@@ -317,6 +317,7 @@ def test_entry_content_is_declared_untrusted_data_everywhere() -> None:
 # Trimming the register name rule, the pin caps and a few repeats, then
 # sharper search and get wording, measures 17,688. The empty-search line
 # ("No relevant hits after one rephrase: a gap") takes it to 17,756.
+# The `recency` steer (ADR 0101) measures 17,762 after tightening the keyword-only sentence.
 ALWAYS_ON_BUDGET = 18_000
 
 
