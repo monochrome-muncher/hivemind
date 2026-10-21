@@ -33,8 +33,8 @@ from hivemind.domain.validation import (
     check_no_nul,
 )
 from hivemind.services.chain import EntryLinks
-from hivemind.services.governance import RelatedEntry
 from hivemind.services.search import Hit
+from hivemind.services.write import RelatedEntry
 from hivemind.services.write_warnings import WriteWarning
 from hivemind.wire import round_score
 

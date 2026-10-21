@@ -32,7 +32,8 @@ from hivemind.domain import (
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
-from hivemind.services.governance import GovernanceService, PermissionDenied
+from hivemind.services.errors import PermissionDenied
+from hivemind.services.governance import GovernanceService
 from tests.fakes import (
     FakeAuthenticator,
     fake_key_id,

@@ -20,8 +20,8 @@ from hivemind.config import SearchConfig
 from hivemind.domain.entry import EntryDraft, Kind
 from hivemind.memstore import MemoryStore
 from hivemind.retrieval.eval import aggregate_report, evaluate_query
-from hivemind.services.governance import WriteService
 from hivemind.services.search import SearchService
+from hivemind.services.write import WriteService
 from tests.eval.golden import golden_corpus, golden_queries
 from tests.fakes import make_clock, make_embedder, make_search_config
 

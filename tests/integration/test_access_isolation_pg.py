@@ -17,9 +17,10 @@ from hivemind.domain.access import TrustLevel
 from hivemind.mcp.app import McpHivemind, hive_feedback, hive_get, hive_withdraw, hive_write
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
-from hivemind.services.governance import GovernanceService, WriteService
+from hivemind.services.governance import GovernanceService
 from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
+from hivemind.services.write import WriteService
 from hivemind.store import PgAuthenticator, PgStore
 from hivemind.store.keys import _issue_admin
 from hivemind.store.migrate import migrate

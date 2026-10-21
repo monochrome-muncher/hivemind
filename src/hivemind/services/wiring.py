@@ -15,10 +15,11 @@ from hivemind.config import SearchConfig, Settings, redact_url
 from hivemind.ports import Authenticator, Embedder, Extractor, Store
 from hivemind.services.access import AccessService
 from hivemind.services.activity import ActivityService
-from hivemind.services.governance import GovernanceService, WriteService
+from hivemind.services.governance import GovernanceService
 from hivemind.services.metrics import DEFAULT_ENTRY_COUNTS_TTL, MetricsService
 from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
+from hivemind.services.write import WriteService
 
 
 @dataclass(frozen=True, slots=True)

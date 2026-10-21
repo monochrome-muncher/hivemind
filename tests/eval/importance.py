@@ -59,8 +59,8 @@ from hivemind.domain.entry import EntryDraft, ImportanceSource, Kind
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Embedder, Store
 from hivemind.retrieval.eval import hit_at_k, reciprocal_rank
-from hivemind.services.governance import WriteService
 from hivemind.services.search import SearchService
+from hivemind.services.write import WriteService
 from tests.eval.confirmation import entry_age_days
 from tests.eval.domains import Domain
 from tests.eval.threshold import Fixture, combined_fixture, domain_fixture

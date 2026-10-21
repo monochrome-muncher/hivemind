@@ -25,9 +25,10 @@ from hivemind.mcp.app import McpHivemind
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
-from hivemind.services.governance import GovernanceService, WriteService
+from hivemind.services.governance import GovernanceService
 from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
+from hivemind.services.write import WriteService
 from tests.fakes import FakeAuthenticator, make_clock, make_embedder, make_search_config
 
 NO_SUCH = "00000000-0000-4000-8000-00000000dead"
@@ -556,15 +557,12 @@ async def test_the_portal_withdraw_reads_its_failures_on_the_wire(
 
 
 def test_typed_errors_still_match_the_builtins_surfaces_catch() -> None:
-    from hivemind.services import errors, governance
+    from hivemind.services import errors
 
     assert issubclass(errors.EntryNotFound, LookupError)
     assert issubclass(errors.EntryNotActive, ValueError)
     assert issubclass(errors.AgentIdentityRequired, ValueError)
     assert issubclass(errors.SupersedeDenied, errors.PermissionDenied)
-    # The old import path names the very same classes.
-    assert governance.PermissionDenied is errors.PermissionDenied
-    assert governance.SupersedeDenied is errors.SupersedeDenied
     # NameTaken moved here; the old import path names the same class.
     from hivemind.domain import access as domain_access
     from hivemind.services import access as services_access

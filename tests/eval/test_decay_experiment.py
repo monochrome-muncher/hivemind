@@ -67,7 +67,7 @@ import pytest
 from hivemind.config import SearchConfig
 from hivemind.domain.entry import EntryDraft, Kind
 from hivemind.memstore import MemoryStore
-from hivemind.services.governance import WriteService
+from hivemind.services.write import WriteService
 from tests.eval.golden import golden_corpus, golden_queries
 from tests.eval.temporal import temporal_corpus, temporal_queries
 from tests.eval.temporal_runner import (

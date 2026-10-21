@@ -38,8 +38,8 @@ from hivemind.mcp.app import (
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
-from hivemind.services.governance import WriteService
 from hivemind.services.search import SearchService
+from hivemind.services.write import WriteService
 from tests.fakes import make_clock, make_embedder, make_search_config
 from tests.unit.test_api_endpoints import make_client, make_hivemind_app
 from tests.unit.test_mcp_app import ALICE, ORG, build_app
