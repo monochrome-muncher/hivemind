@@ -142,6 +142,7 @@ class MemoryStore:
         self._lock = threading.RLock()
         self._entries: dict[str, Entry] = {}
         self._feedback: dict[tuple[str, str, str], Feedback] = {}
+        self._withdrawn_at: dict[str, datetime] = {}  # ADR 0098; Postgres: entries.withdrawn_at
         self._fleets: dict[str, Fleet] = {}
         self._agents: dict[str, Agent] = {}
         self._audit: list[AuditRecord] = []  # append-only (ADR 0027)
@@ -279,6 +280,7 @@ class MemoryStore:
                 withdrawn_reason=reason,
             )
             self._entries[entry_id] = updated
+            self._withdrawn_at[entry_id] = self._clock()
             return updated
 
     async def record_feedback(self, feedback: Feedback) -> Feedback:
@@ -768,14 +770,49 @@ class MemoryStore:
 
     def _matches(self, entry: Entry, filters: EntryFilters) -> bool:
         """``filters.matches`` plus the one filter it cannot evaluate:
-        ``flagged`` (ADR 0054), which reads this store's feedback rows.
+        ``flagged`` (ADR 0054) and ``relied_on_changed`` (ADR 0098), which
+        read this store's feedback rows.
         Callers hold the lock."""
         if not filters.matches(_copy(entry)):
             return False
         if filters.flagged:
             _, stale, wrong = _count_for(self._live_feedback(), entry.id)
-            return stale + wrong > 0
-        return True
+            if stale + wrong == 0:
+                return False
+        return not filters.relied_on_changed or self._relied_on_changed(entry, filters.reporter)
+
+    def _relied_on_changed(self, entry: Entry, reporter: tuple[str, str] | None) -> bool:
+        """ADR 0098, as PgStore's clause: the reporter's helpful row on
+        ``entry``, and since its ``updated_at`` the entry was withdrawn, or
+        superseded by another user's successor, or another user's live
+        stale/wrong report is newer. A withdrawal with no recorded time
+        counts, as in PgStore. Callers hold the lock."""
+        if reporter is None:
+            return False
+        own = self._feedback.get((entry.id, *reporter))
+        if own is None or own.verdict is not Verdict.HELPFUL or own.updated_at is None:
+            return False
+        since = own.updated_at
+        if entry.state is EntryState.WITHDRAWN:
+            at = self._withdrawn_at.get(entry.id)
+            if at is None or at > since:
+                return True
+        if entry.state is EntryState.SUPERSEDED:
+            successor = self._entries.get(entry.superseded_by or "")
+            if (
+                successor is not None
+                and successor.author != reporter[0]
+                and successor.created_at > since
+            ):
+                return True
+        return any(
+            fb.entry_id == entry.id
+            and fb.verdict is not Verdict.HELPFUL
+            and fb.user != reporter[0]
+            and fb.updated_at is not None
+            and fb.updated_at > since
+            for fb in self._live_feedback().values()
+        )
 
     async def similar_entries(
         self,

@@ -311,7 +311,9 @@ def test_entry_content_is_declared_untrusted_data_everywhere() -> None:
 # descriptions, no behaviour change) brought it back to 17,607. The
 # `upstream_changed` cue (one skill line, one description clause, ADR 0081)
 # measures 17,847; the `near_duplicate` pointer (ADR 0087) 17,929; contributors
-# pinning (ADR 0096) 17,987 after trimming other wording.
+# pinning (ADR 0096) 17,987 after trimming other wording. The `relied_on_changed`
+# catch-up step (ADR 0098) measures 17,992 after merging the two catch-up list
+# lines and dropping wording that was said twice.
 ALWAYS_ON_BUDGET = 18_000
 
 

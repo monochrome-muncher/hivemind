@@ -112,6 +112,10 @@ _Avoid_: reference (sources are references), relation, edge
 A marker on an insight or decision hit whose linked entry was withdrawn, superseded by someone else, or flagged since the link was made; shown on the hit, never used for ranking.
 _Avoid_: stale dependency, broken link, invalidated
 
+**Relied-on entry changed**:
+An entry the caller rated `helpful` that was superseded, withdrawn, or reported `stale` or `wrong` by someone else after that rating; listed by the `relied_on_changed` filter, never used for ranking.
+_Avoid_: stale rating, invalidated
+
 **Related entries**:
 The up to three active entries nearest to a new entry, returned with its write so the writer can supersede, link or leave them. A hint, never a verdict: nothing is merged or superseded automatically.
 _Avoid_: duplicates, conflicts, contradictions (the server judges none of these)

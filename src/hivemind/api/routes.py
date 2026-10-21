@@ -404,6 +404,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         created_to: Annotated[datetime | None, Query()] = None,
         include_inactive: bool = False,
         flagged: bool = False,
+        relied_on_changed: bool = False,
         limit: Annotated[int | None, Query(ge=1, le=MAX_LIMIT)] = None,
         offset: Annotated[int | None, Query(ge=0, le=MAX_OFFSET)] = 0,
     ) -> list[EntryOut]:
@@ -411,7 +412,9 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
 
         ``entities`` (ADR 0016, SPEC §13) filters by machine-extracted
         entity names: AND-semantics, case-insensitive (the store layer
-        matches on lower-cased names).
+        matches on lower-cased names). ``relied_on_changed`` (ADR 0098) lists
+        the entries the caller rated helpful that were superseded, withdrawn
+        or flagged since; it needs an agent identity.
         """
         filters = EntryFilters(
             kind=kind,
@@ -426,13 +429,18 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
             created_to=_to_utc(created_to),
             include_inactive=include_inactive,
             flagged=flagged,
+            relied_on_changed=relied_on_changed,
         )
-        entries = await app.read_service.list(
-            filters,
-            limit=limit,
-            offset=offset if offset is not None else 0,
-            visibility=credential.visibility(),
-        )
+        try:
+            entries = await app.read_service.list(
+                filters,
+                limit=limit,
+                offset=offset if offset is not None else 0,
+                visibility=credential.visibility(),
+                credential=credential,
+            )
+        except AgentIdentityRequired as exc:
+            raise api_error(422, "agent_identity_required", str(exc)) from exc
         return [EntryOut.from_entry(e) for e in entries]
 
     @router.post("/search", response_model=list[HitOut])

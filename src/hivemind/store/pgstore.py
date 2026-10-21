@@ -246,7 +246,7 @@ RETURNING id
 LOOKUP_STATE = "SELECT state FROM entries WHERE id = $1"
 
 WITHDRAW = (
-    "UPDATE entries SET state = 'withdrawn', withdrawn_reason = $2 "
+    "UPDATE entries SET state = 'withdrawn', withdrawn_reason = $2, withdrawn_at = now() "
     "WHERE id = $1 AND state = 'active' RETURNING " + _ENTRY_COLUMNS
 )
 
@@ -814,7 +814,7 @@ def _filter_conditions(
         params.append(value)
         clauses.append(fragment.replace("?", f"${len(params)}"))
 
-    if not filters.include_inactive:
+    if not filters.include_inactive and not filters.relied_on_changed:
         clauses.append("state = 'active'")
     if filters.kind is not None:
         add("kind = ?", filters.kind.value)
@@ -852,6 +852,30 @@ def _filter_conditions(
             "EXISTS (SELECT 1 FROM feedbacks f WHERE f.entry_id = entries.id"
             " AND f.verdict IN ('stale', 'wrong') AND " + _REPORTER_NOT_REVOKED + ")"
         )
+
+    if filters.relied_on_changed:
+        # ADR 0098: the reporter's helpful row, and since its updated_at the
+        # entry was withdrawn or superseded by someone else, or another
+        # reporter filed stale/wrong. A withdrawal with no recorded time
+        # (written by a pre-0016 pod) counts.
+        if filters.reporter is None:
+            clauses.append("FALSE")
+        else:
+            params.extend(filters.reporter)
+            user_p, agent_p = f"${len(params) - 1}", f"${len(params)}"
+            clauses.append(
+                "EXISTS (SELECT 1 FROM feedbacks h WHERE h.entry_id = entries.id"
+                f" AND h.\"user\" = {user_p} AND h.agent = {agent_p} AND h.verdict = 'helpful'"
+                " AND (entries.state = 'withdrawn'"
+                " AND coalesce(entries.withdrawn_at > h.updated_at, TRUE)"
+                " OR entries.state = 'superseded' AND EXISTS (SELECT 1 FROM entries s"
+                ' WHERE s.id = entries.superseded_by AND s.author <> h."user"'
+                " AND s.created_at > h.updated_at)"
+                " OR EXISTS (SELECT 1 FROM feedbacks f WHERE f.entry_id = entries.id"
+                " AND f.verdict IN ('stale', 'wrong') AND f.updated_at > h.updated_at"
+                ' AND f."user" <> h."user"'
+                " AND " + _REPORTER_NOT_REVOKED + ")))"
+            )
 
     vis_clause = _visibility_clause(visibility, params)
     if vis_clause is not None:

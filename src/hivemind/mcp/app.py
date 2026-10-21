@@ -168,6 +168,7 @@ def _build_filters(
     created_to: str | None,
     include_inactive: bool,
     flagged: bool = False,
+    relied_on_changed: bool = False,
 ) -> EntryFilters:
     """Parse the shared filter parameters into an ``EntryFilters`` (SPEC §5.3)."""
     filters = EntryFilters(
@@ -183,6 +184,7 @@ def _build_filters(
         created_to=_parse_dt(created_to, "created_to"),
         include_inactive=include_inactive,
         flagged=flagged,
+        relied_on_changed=relied_on_changed,
     )
     filters.validate()  # ADR 0040: caller input, unlike service-built filters
     return filters
@@ -474,6 +476,7 @@ async def hive_list(
     created_to: str | None = None,
     include_inactive: bool = False,
     flagged: bool = False,
+    relied_on_changed: bool = False,
     limit: int | None = None,
     offset: int = 0,
     include_body: bool = False,
@@ -485,6 +488,11 @@ async def hive_list(
 
     ``flagged`` keeps only entries reported stale or wrong at least once
     (ADR 0054): the queue of entries waiting to be superseded.
+
+    ``relied_on_changed`` keeps the entries you rated helpful that have since
+    been superseded, withdrawn, or reported stale or wrong by someone else
+    (ADR 0098); superseded and withdrawn ones are listed, with ``state`` and
+    feedback counts. It needs an agent identity.
 
     Items are compact (no body); ``include_body`` returns full entries.
 
@@ -506,17 +514,27 @@ async def hive_list(
             created_to=created_to,
             include_inactive=include_inactive,
             flagged=flagged,
+            relied_on_changed=relied_on_changed,
         )
     except ValueError as exc:
         return _error(ERR_INVALID_INPUT, str(exc))
-    entries = await app.read_service.list(
-        filters,
-        limit=limit,
-        offset=offset,
-        visibility=app.credential.visibility(),
-    )
+    try:
+        entries = await app.read_service.list(
+            filters,
+            limit=limit,
+            offset=offset,
+            visibility=app.credential.visibility(),
+            credential=app.credential,
+        )
+    except AgentIdentityRequired as exc:
+        return _error(ERR_AGENT_UNRESOLVED, str(exc))
     to_dict = wire.entry_dict if include_body else wire.list_item_dict
-    return {"count": len(entries), "entries": [to_dict(e) for e in entries]}
+    items = [to_dict(e) for e in entries]
+    if relied_on_changed and entries:  # why each is listed: its state and the reports
+        counts = await app.read_service.feedback_counts(entries)
+        for item, entry in zip(items, entries, strict=True):
+            item["feedback"] = wire.counts_dict(counts.get(entry.id, (0, 0, 0)))
+    return {"count": len(entries), "entries": items}
 
 
 async def hive_withdraw(

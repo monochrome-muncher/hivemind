@@ -99,6 +99,8 @@ DESC_LIST = (
     "memory-date and ingest-date ranges. 'flagged': only entries reported "
     "stale or wrong at least once, the ones waiting for someone "
     "to supersede or withdraw them; open one with hive_get to read the reports. "
+    "'relied_on_changed': entries you rated helpful since superseded, withdrawn "
+    "or flagged by another. "
     "Items are compact (no body): open with hive_get, or pass include_body: true."
 )
 DESC_WITHDRAW = (
@@ -151,7 +153,7 @@ DESC_REGISTER = (
 
 
 DESC_WHOAMI = (
-    "Who am I to Hivemind? Returns this key's kind (agent/org/admin/legacy), the "
+    "Returns this key's kind (agent/org/admin/legacy), the "
     "agent's name, status (pending/active/revoked), trust level and home "
     "fleet, and what it may read (can_read) and which scopes it may write "
     "(can_write_scopes). Call it at the start of every session: an empty "

@@ -46,7 +46,8 @@ def entry_dict(entry: Entry) -> dict[str, object]:
 
 def list_item_dict(entry: Entry) -> dict[str, object]:
     """A compact ``hive_list`` item (no body, payload or sources; open it with
-    ``hive_get``). No feedback counts: listing does not load them."""
+    ``hive_get``). No feedback counts: listing does not load them, except
+    when ``relied_on_changed`` is on, where ``hive_list`` adds them (ADR 0098)."""
     return {
         "id": entry.id,
         "kind": entry.kind.value,
