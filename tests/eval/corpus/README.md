@@ -76,3 +76,9 @@ topic, but no entry answers them.
   `uv run ruff check`.
 - Verify before finishing: `uv run python -c "import tests.eval.corpus.<slug>"`
   and a count assertion over the four tuples.
+- `uv run python -m tests.eval.corpus.quality <slug>` must print `clean`.
+  It catches a templated domain without an embedder: one phrase or opening
+  shared by too many summaries, lexical near-copies, repeated bodies or
+  queries, keyword-only query sets, stub version pairs, a tag tuple that is
+  really one string split into letters. `tests/eval/test_corpus_quality.py`
+  runs it over all sixteen domains in the normal suite.
