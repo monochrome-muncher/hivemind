@@ -170,6 +170,8 @@ def make_search_config(
     never silently diverge from
     (``test_make_search_config_mirrors_the_production_rrf_k``,
     ``test_the_sweeps_baseline_is_floor_off_explicitly_not_by_default``).
+    The query instruction (ADR 0097) is off here, though on in production, so
+    a test's embedded query is the raw query; a test of the instruction sets it.
     """
     return SearchConfig(
         candidate_top_k=candidate_top_k,
@@ -177,6 +179,7 @@ def make_search_config(
         half_life_days=half_life_days,
         rrf_k=rrf_k,
         recency_floor=recency_floor,
+        query_instruction="",
     )
 
 

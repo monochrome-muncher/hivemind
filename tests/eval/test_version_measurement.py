@@ -23,7 +23,7 @@ from tests.eval.versions import (
     report,
     suggest,
 )
-from tests.fakes import make_embedder
+from tests.fakes import FakeEmbedder, make_embedder
 
 
 def _words(text: str) -> set[str]:
@@ -115,3 +115,29 @@ def test_the_adoption_rule() -> None:
         _row(0.8, rr_new=6.0), _row(0.8, rr_new=6.0, false_grouped=2)
     )
     assert suggest(_measurement(_row(0.8, rr_new=5.0))) is None
+
+
+class _RecordingEmbedder(FakeEmbedder):
+    """The hash embedder, remembering every text it was asked to embed."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.texts: list[str] = []
+
+    async def embed_text(self, text: str) -> list[float]:
+        self.texts.append(text)
+        return await super().embed_text(text)
+
+
+async def test_a_query_instruction_reaches_the_embedder_without_changing_the_shape() -> None:
+    domains = VERSION_DOMAINS[:1]
+    plain = await measure(make_embedder(), domains)
+    instruction = "Retrieve the entry that answers this question"
+    recorder = _RecordingEmbedder()
+    m = await measure(recorder, domains, query_instruction=instruction)
+    assert any(t.startswith(f"Instruct: {instruction}\nQuery:") for t in recorder.texts)
+    assert [r.tau for r in m.domains[domains[0].name]] == [
+        r.tau for r in plain.domains[domains[0].name]
+    ]
+    assert f"Query instruction: `{instruction}`" in report(m)
+    assert "Query instruction: none" in report(plain)
