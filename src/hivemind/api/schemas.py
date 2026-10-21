@@ -36,6 +36,7 @@ from hivemind.services.chain import EntryLinks
 from hivemind.services.governance import RelatedEntry
 from hivemind.services.search import Hit
 from hivemind.services.write_warnings import WriteWarning
+from hivemind.wire import round_score
 
 
 def _no_nul(value: str) -> str:
@@ -367,10 +368,10 @@ class HitOut(BaseModel):
     author: str
     agent: str
     occurred_at: datetime
-    score: float
+    score: float  # 4 significant figures (SPEC §6.1)
     scope: str = "fleet"
     fleet_id: str | None = None  # a foreign entry: != the reader's home fleet (ADR 0036)
-    feedback: FeedbackCountsOut = FeedbackCountsOut()
+    feedback: FeedbackCountsOut | None = None  # null when all three counts are zero
     last_confirmed_at: datetime | None = None  # SPEC §4.2 (ranks only with ADR 0071 on)
     # SPEC §6.1, display only; null when empty (state: unless include_inactive).
     contested: bool | None = None
@@ -391,10 +392,10 @@ class HitOut(BaseModel):
             author=hit.author,
             agent=hit.agent,
             occurred_at=hit.occurred_at,
-            score=hit.score,
+            score=round_score(hit.score),
             scope=hit.scope,
             fleet_id=hit.fleet_id,
-            feedback=FeedbackCountsOut.from_counts(hit.feedback),
+            feedback=FeedbackCountsOut.from_counts(hit.feedback) if any(hit.feedback) else None,
             last_confirmed_at=hit.last_confirmed_at,
             contested=True if hit.contested else None,
             correction=(

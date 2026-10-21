@@ -3,6 +3,9 @@
 > **Status: amended by [ADR 0064](0064-corrections-stay-visible-in-recent-feedback.md):**
 > point 2's "newest first" is now informative reports first, then bare
 > `helpful` ones, each group newest first.
+>
+> **Also amended by [ADR 0102](0102-trim-search-hit-score-and-empty-feedback.md):**
+> a search hit leaves `feedback` out when all three counts are zero.
 
 ## Context
 

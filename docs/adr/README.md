@@ -60,7 +60,7 @@ is unused.
 | [0048](0048-search-falls-back-to-keywords-when-the-embedder-is-down.md) | Search falls back to keywords when the embedder is down | Accepted |
 | [0049](0049-keyword-stream-matches-at-most-16-terms.md) | The keyword stream matches at most 16 distinct query terms | Accepted |
 | [0050](0050-prometheus-scrape-endpoint.md) | The REST runner serves a Prometheus scrape endpoint | Amended by 0069 |
-| [0051](0051-feedback-is-readable.md) | Feedback is readable by the entry's audience | Amended by 0064 |
+| [0051](0051-feedback-is-readable.md) | Feedback is readable by the entry's audience | Amended by 0064, 0102 |
 | [0052](0052-writes-report-the-nearest-entries.md) | Writes report the nearest existing entries | Amended by 0077, 0087 |
 | [0053](0053-feedback-on-several-entries-at-once.md) | Feedback on several entries at once | Amended by 0065 |
 | [0054](0054-a-flagged-filter-for-entries-reported-stale-or-wrong.md) | A `flagged` filter for entries reported stale or wrong | Accepted |
@@ -111,3 +111,4 @@ is unused.
 | [0099](0099-answers-open-question-warning.md) | A write warns when it may answer an open question | Accepted; advisory only, floor 0.70 provisional |
 | [0100](0100-vector-similarity-cut-off-on-by-default.md) | The vector similarity cut-off is on by default | Accepted; 0.45, empty value turns it off |
 | [0101](0101-recency-hint-on-by-default.md) | The recency hint is on by default | Accepted; amends 0073, `HIVEMIND_RECENCY_HINT=false` turns it off |
+| [0102](0102-trim-search-hit-score-and-empty-feedback.md) | Search hits round `score` to 4 significant figures and omit all-zero `feedback` | Accepted; display only, ranking unchanged |

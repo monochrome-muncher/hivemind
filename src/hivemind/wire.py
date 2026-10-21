@@ -64,8 +64,15 @@ def list_item_dict(entry: Entry) -> dict[str, object]:
     }
 
 
+def round_score(score: float) -> float:
+    """A hit's score as shown: 4 significant figures (SPEC §6.1). Applied at
+    serialisation only; ranking uses the unrounded value."""
+    return float(f"{score:.4g}")
+
+
 def hit_dict(hit: Hit) -> dict[str, object]:
-    """A compact search hit (no body — progressive disclosure, SPEC §6.1)."""
+    """A compact search hit (no body — progressive disclosure, SPEC §6.1).
+    ``feedback`` is left out when all three counts are zero."""
     out: dict[str, object] = {
         "id": hit.entry_id,
         "kind": hit.kind.value,
@@ -74,11 +81,12 @@ def hit_dict(hit: Hit) -> dict[str, object]:
         "author": hit.author,
         "agent": hit.agent,
         "occurred_at": hit.occurred_at.isoformat(),
-        "score": hit.score,
+        "score": round_score(hit.score),
         "scope": hit.scope,
         "fleet_id": hit.fleet_id,
-        "feedback": counts_dict(hit.feedback),
     }
+    if any(hit.feedback):
+        out["feedback"] = counts_dict(hit.feedback)
     if hit.last_confirmed_at is not None:  # omitted when there is none (SPEC §4.2)
         out["last_confirmed_at"] = hit.last_confirmed_at.isoformat()
     if hit.contested:  # the evidence fields are omitted when empty (SPEC §6.1)

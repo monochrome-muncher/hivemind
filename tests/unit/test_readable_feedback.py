@@ -82,12 +82,21 @@ async def _flagged_entry(store: MemoryStore) -> str:
 # --- search hits -----------------------------------------------------------------
 
 
-async def test_mcp_hit_without_feedback_has_zero_counts() -> None:
+async def test_mcp_hit_without_feedback_leaves_the_counts_out() -> None:
     store = MemoryStore(make_clock())
     await hive_write(_surface(store, WRITER), kind="fact", summary="billing runs on node 20")
     result = await hive_search(_surface(store, WRITER), query="billing node")
     [hit] = result["hits"]  # type: ignore[index]
-    assert hit["feedback"] == {"helpful": 0, "stale": 0, "wrong": 0}
+    assert "feedback" not in hit
+
+
+async def test_rest_hit_without_feedback_is_null() -> None:
+    store = MemoryStore(make_clock())
+    await hive_write(_surface(store, WRITER), kind="fact", summary="billing runs on node 20")
+    async with _rest_client(store, WRITER) as client:
+        resp = await client.post("/v1/search", json={"query": "billing node"})
+    [hit] = resp.json()
+    assert hit["feedback"] is None
 
 
 async def test_mcp_hit_carries_feedback_counts() -> None:
