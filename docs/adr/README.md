@@ -82,7 +82,7 @@ is unused.
 | [0070](0070-one-capped-budget-for-social-signals.md) | One capped budget for social signals | Amended by 0071, 0072, 0073, 0088 |
 | [0071](0071-a-confirmation-can-restart-the-recency-clock.md) | A confirmation can restart the recency clock | Accepted (off by default) |
 | [0072](0072-recency-profile-per-kind.md) | A recency profile per kind | Accepted (off by default); amended by 0073 |
-| [0073](0073-a-recency-hint-on-search.md) | A recency hint on search | Accepted (off by default) |
+| [0073](0073-a-recency-hint-on-search.md) | A recency hint on search | Accepted; on by default since 0101 |
 | [0074](0074-group-unlinked-versions-at-read-time.md) | Group unlinked versions at read time | Accepted (off by default) |
 | [0075](0075-fleet-health-metrics.md) | Fleet health metrics: admin-only and observation-only | Extended by 0089 |
 | [0076](0076-pin-integrity.md) | Pin integrity: audited pins and "changed since pinned" | Amended by 0079, 0096 |
@@ -110,4 +110,5 @@ is unused.
 | [0098](0098-relied-on-changed-list-filter.md) | A `relied_on_changed` list filter: what changed under an entry you rated helpful | Accepted; display and filter only |
 | [0099](0099-answers-open-question-warning.md) | A write warns when it may answer an open question | Accepted; advisory only, floor 0.70 provisional |
 | [0100](0100-vector-similarity-cut-off-on-by-default.md) | The vector similarity cut-off is on by default | Accepted; 0.45, empty value turns it off |
+| [0101](0101-recency-hint-on-by-default.md) | The recency hint is on by default | Accepted; amends 0073, `HIVEMIND_RECENCY_HINT=false` turns it off |
 | [0102](0102-trim-search-hit-score-and-empty-feedback.md) | Search hits round `score` to 4 significant figures and omit all-zero `feedback` | Accepted; display only, ranking unchanged |

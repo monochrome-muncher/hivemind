@@ -1,7 +1,7 @@
 """The per-search recency hint (ADR 0073) and the invariants under each hint.
 
-The hint is off unless the server setting ``recency_hint_enabled`` is on.
-Off, every hint scores as ``default``, bit for bit. On, ``ignore_age`` drops
+The hint is on unless the server setting ``recency_hint_enabled`` is turned
+off (ADR 0101). Off, every hint scores as ``default``, bit for bit. On, ``ignore_age`` drops
 the recency factor and the confirmation clock (so I1 does not hold under it,
 by construction), and ``prefer_recent`` scores under a lower floor (so I1
 holds, with more room).
@@ -32,7 +32,7 @@ from tests.fakes import FIXED_NOW, make_clock, make_embedder, make_search_config
 from tests.unit.test_api_endpoints import make_authenticator, make_hivemind_app, post_entry
 
 NOW = FIXED_NOW
-OFF = SearchConfig()
+OFF = SearchConfig(recency_hint_enabled=False)
 ON = SearchConfig(recency_hint_enabled=True)
 HINTS = tuple(RecencyHint)
 NON_DEFAULT = (RecencyHint.PREFER_RECENT, RecencyHint.IGNORE_AGE)
@@ -99,8 +99,8 @@ def test_parse_recency_hint() -> None:
             parse_recency_hint(bad)
 
 
-def test_the_setting_is_off_by_default() -> None:
-    assert SearchConfig().recency_hint_enabled is False
+def test_the_setting_is_on_by_default() -> None:
+    assert SearchConfig().recency_hint_enabled is True
 
 
 @pytest.mark.parametrize("hint", HINTS)
@@ -561,10 +561,12 @@ def test_the_env_var_reaches_the_search_config(
             monkeypatch.delenv(name)
     monkeypatch.chdir(tmp_path)  # type: ignore[arg-type]
     monkeypatch.setenv("HIVEMIND_STRICT_ENV", "true")
+    assert load_settings().search_config().recency_hint_enabled is True
+    monkeypatch.setenv("HIVEMIND_RECENCY_HINT", "false")
     assert load_settings().search_config().recency_hint_enabled is False
     monkeypatch.setenv("HIVEMIND_RECENCY_HINT", "true")
     assert load_settings().search_config().recency_hint_enabled is True
 
 
-def test_make_hivemind_app_default_has_the_hint_off() -> None:
-    assert make_hivemind_app().search_config.recency_hint_enabled is False
+def test_make_hivemind_app_default_has_the_hint_on() -> None:
+    assert make_hivemind_app().search_config.recency_hint_enabled is True

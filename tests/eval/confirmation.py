@@ -4,9 +4,11 @@ Three settings are measured here: "last confirmed restarts the recency clock"
 (ADR 0071), "a recency profile per kind" (ADR 0072) and the per-search
 recency hint (ADR 0073: ``ignore_age`` and ``prefer_recent``, each applied to
 every query because the domain fixtures do not label time sense; the
-labelled oracle run is ``tests/eval/test_recency_hint.py``). Each is off by
-default until this has been run with the embedders a deployment uses. For each domain fixture (``domains.py``: five kinds of
-work, 32 entries each) and for all of them pooled, it:
+labelled oracle run is ``tests/eval/test_recency_hint.py``). The first two are
+off by default until this has been run with the embedders a deployment uses;
+the hint is on by default (ADR 0101) and acts only when a query carries it. For
+each domain fixture (``domains.py``: five kinds of work, 32 entries each) and
+for all of them pooled, it:
 
 * seeds the pool with entries aged 0 to 400 days (a golden-ratio spread,
   so the ages are deterministic and independent of the text), so the
@@ -192,12 +194,18 @@ async def measure(
 
     ``store`` must be empty (a ``MemoryStore`` by default; a scratch
     ``PgStore`` works, never a real pool). ``base`` is the shipped
-    ``SearchConfig`` by default, with the similarity cut-off off (ADR 0100) so
-    a variant is compared on ranking alone.
+    ``SearchConfig`` by default, with the hint off and the similarity cut-off
+    off (ADR 0100) so a variant is compared on ranking alone.
     """
     store = store or MemoryStore(make_clock())
     ids = await seed(embedder, store, fixture)
-    base = replace(base or SearchConfig(), default_limit=K, vector_min_similarity=None)
+    # The hint is off in the baseline so the first variants measure their own
+    # setting alone; the hint variants turn it on themselves.
+    base = replace(
+        base or replace(SearchConfig(), recency_hint_enabled=False),
+        default_limit=K,
+        vector_min_similarity=None,
+    )
     rows = []
     for variant in variants:
         service = SearchService(
