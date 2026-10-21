@@ -59,7 +59,7 @@ is unused.
 | [0047](0047-keyword-stream-matches-any-term.md) | The keyword stream matches any query term | Amended by 0049 |
 | [0048](0048-search-falls-back-to-keywords-when-the-embedder-is-down.md) | Search falls back to keywords when the embedder is down | Accepted |
 | [0049](0049-keyword-stream-matches-at-most-16-terms.md) | The keyword stream matches at most 16 distinct query terms | Accepted |
-| [0050](0050-prometheus-scrape-endpoint.md) | The REST runner serves a Prometheus scrape endpoint | Amended by 0069 |
+| [0050](0050-prometheus-scrape-endpoint.md) | The REST runner serves a Prometheus scrape endpoint | Amended by 0069, 0104 |
 | [0051](0051-feedback-is-readable.md) | Feedback is readable by the entry's audience | Amended by 0064, 0102 |
 | [0052](0052-writes-report-the-nearest-entries.md) | Writes report the nearest existing entries | Amended by 0077, 0087 |
 | [0053](0053-feedback-on-several-entries-at-once.md) | Feedback on several entries at once | Amended by 0065 |
@@ -113,3 +113,4 @@ is unused.
 | [0101](0101-recency-hint-on-by-default.md) | The recency hint is on by default | Accepted; amends 0073, `HIVEMIND_RECENCY_HINT=false` turns it off |
 | [0102](0102-trim-search-hit-score-and-empty-feedback.md) | Search hits round `score` to 4 significant figures and omit all-zero `feedback` | Accepted; display only, ranking unchanged |
 | [0103](0103-remove-confirmation-clock-and-per-kind-recency.md) | Remove the confirmation clock and the recency profile per kind | Accepted; supersedes 0071 and 0072, default ranking unchanged |
+| [0104](0104-mcp-runner-serves-process-metrics.md) | The MCP HTTP runner serves per-process metrics | Accepted; amends 0050, no usage series, `sum` across api and mcp |

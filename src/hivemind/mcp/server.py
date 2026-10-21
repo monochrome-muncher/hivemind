@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from typing import Any
@@ -38,6 +39,7 @@ from hivemind.mcp.app import (
     hive_withdraw,
     hive_write,
 )
+from hivemind.mcp.metrics import OUTCOME_ERROR, OUTCOME_OK, McpMetrics
 from hivemind.ports import Credential
 
 logger = logging.getLogger(__name__)
@@ -89,6 +91,7 @@ def register_tool(
     description: str,
     verb: Callable[..., Awaitable[dict[str, object]]],
     dispatch: Callable[..., Awaitable[dict[str, object]]],
+    metrics: McpMetrics | None = None,
 ) -> None:
     """Bind one app tool to the server (ADR 0085). The closure carries
     ``verb``'s signature — the MCP schema is generated from it — and every
@@ -98,10 +101,22 @@ def register_tool(
     The reply is one compact JSON ``TextContent`` and the tool declares no
     output schema. The SDK's default is indent-2 text, a duplicate
     ``structuredContent`` and a schema (``{"result": object}``) that tells
-    a client nothing, all of which land in the agent's context."""
+    a client nothing, all of which land in the agent's context.
+
+    With ``metrics``, each call is counted by tool name and outcome: an
+    error reply or a raise is ``error`` (the raise propagates)."""
 
     async def _tool(*args: Any, **kwargs: Any) -> list[TextContent]:
-        result = await dispatch(verb, **kwargs)
+        started = time.perf_counter()
+        try:
+            result = await dispatch(verb, **kwargs)
+        except Exception:
+            if metrics is not None:
+                metrics.record_tool(name, OUTCOME_ERROR, time.perf_counter() - started)
+            raise
+        if metrics is not None:
+            outcome = OUTCOME_ERROR if isinstance(result.get("error"), dict) else OUTCOME_OK
+            metrics.record_tool(name, outcome, time.perf_counter() - started)
         return [TextContent(type="text", text=to_json(result).decode())]
 
     # The MCP schema is generated from the closure's signature at decoration
@@ -121,6 +136,7 @@ def build_server(
     credential_provider: Callable[[], Credential | Awaitable[Credential | None] | None]
     | None = None,
     require_stored_keys: bool = False,
+    metrics: McpMetrics | None = None,
 ) -> MCPServer:
     """Build an ``MCPServer`` exposing exactly the ten Hivemind tools.
 
@@ -132,6 +148,9 @@ def build_server(
     request over HTTP, ADR 0010; re-verified per call for
     ``hivemind-mcp-pg``). A provider yielding ``None`` fails closed with
     ``unauthenticated``, never falling back to ``app.credential`` (ADR 0042).
+
+    With ``metrics`` every tool call is counted (ADR 0104); the stdio
+    runners pass none.
     """
     server = _CompactSchemaServer(
         name="hivemind",
@@ -174,14 +193,14 @@ def build_server(
 
     # The ten tools, registered explicitly (ADR 0085): one line each; the
     # helper binds the signature and the per-call app resolution.
-    register_tool(server, "hive_write", contract.DESC_WRITE, hive_write, dispatch)
-    register_tool(server, "hive_search", contract.DESC_SEARCH, hive_search, dispatch)
-    register_tool(server, "hive_get", contract.DESC_GET, hive_get, dispatch)
-    register_tool(server, "hive_list", contract.DESC_LIST, hive_list, dispatch)
-    register_tool(server, "hive_withdraw", contract.DESC_WITHDRAW, hive_withdraw, dispatch)
-    register_tool(server, "hive_pinned", contract.DESC_PINNED, hive_pinned, dispatch)
-    register_tool(server, "hive_pin", contract.DESC_PIN, hive_pin, dispatch)
-    register_tool(server, "hive_register", contract.DESC_REGISTER, hive_register, dispatch)
-    register_tool(server, "hive_feedback", contract.DESC_FEEDBACK, hive_feedback, dispatch)
-    register_tool(server, "hive_whoami", contract.DESC_WHOAMI, hive_whoami, dispatch)
+    register_tool(server, "hive_write", contract.DESC_WRITE, hive_write, dispatch, metrics)
+    register_tool(server, "hive_search", contract.DESC_SEARCH, hive_search, dispatch, metrics)
+    register_tool(server, "hive_get", contract.DESC_GET, hive_get, dispatch, metrics)
+    register_tool(server, "hive_list", contract.DESC_LIST, hive_list, dispatch, metrics)
+    register_tool(server, "hive_withdraw", contract.DESC_WITHDRAW, hive_withdraw, dispatch, metrics)
+    register_tool(server, "hive_pinned", contract.DESC_PINNED, hive_pinned, dispatch, metrics)
+    register_tool(server, "hive_pin", contract.DESC_PIN, hive_pin, dispatch, metrics)
+    register_tool(server, "hive_register", contract.DESC_REGISTER, hive_register, dispatch, metrics)
+    register_tool(server, "hive_feedback", contract.DESC_FEEDBACK, hive_feedback, dispatch, metrics)
+    register_tool(server, "hive_whoami", contract.DESC_WHOAMI, hive_whoami, dispatch, metrics)
     return server

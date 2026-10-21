@@ -379,7 +379,7 @@ The `health` section of the usage report: observations of the pool (verdict note
 _Avoid_: scorecard, KPIs, leaderboard (they invite agents to optimise the number)
 
 **Scrape target**:
-The REST runner's unauthenticated `GET /metrics` in the Prometheus text format: the usage counters as gauges plus per-process request metrics (ADR 0050). Kept off the public ingress.
+The REST runner's unauthenticated `GET /metrics` in the Prometheus text format: the usage counters as gauges plus per-process request metrics (ADR 0050). The MCP HTTP runner serves its own, per-process series only, when enabled (ADR 0104). Kept off the public ingress.
 _Avoid_: metrics endpoint (ambiguous with `GET /v1/metrics`)
 
 **Input bounds**:

@@ -139,18 +139,28 @@ The 6-step operator flow:
    endpoints and (for the panel and the portal) `hivemind-api`. Replace its placeholder
    `192.0.2.x` addresses with yours first; unedited, it fails closed and the
    pods cannot reach Postgres.
-7. **(Optional)** Prometheus scraping (ADR 0050). `GET /metrics` is served
-   by the `hivemind-api` pods only, with no key, so Prometheus must scrape
-   them in-cluster (never through the public Ingress). Plain Prometheus with
-   the usual `kubernetes-pods` job finds them by their `prometheus.io/*`
-   annotations. The Prometheus Operator ignores those: apply the
-   ServiceMonitor in `deploy/kubernetes/optional/monitoring/` (add your
-   Operator's release label first), or write your own that selects
-   `app.kubernetes.io/component: api` as well as the name label. Every
-   Hivemind Service carries `app.kubernetes.io/name: hivemind`, so a
-   selector on the name alone also scrapes `hivemind-mcp`, which has no
-   `/metrics` and answers 401. With the optional NetworkPolicies,
-   Prometheus must run in the `monitoring` namespace (or edit the policy).
+7. **(Optional)** Prometheus scraping (ADRs 0050, 0104). `GET /metrics` is
+   served with no key by the `hivemind-api` pods (usage gauges and request
+   series) and by the `hivemind-mcp` pods (their own request, tool-call and
+   degraded-search series only), so Prometheus must scrape them in-cluster
+   (never through the public Ingress, which sends only `/mcp` to the MCP
+   Service). The MCP endpoint is off unless `HIVEMIND_MCP_METRICS_ENABLED=true`
+   (the shipped manifest sets it). It reveals request volume and latency,
+   per-tool call mix and error share, the count of 401s (an outsider could
+   watch a key-guessing run) and the degraded-search count, never an agent,
+   fleet, owner, key or argument. If the MCP port is reachable from outside
+   some other way (a LoadBalancer, a compose host port behind a TLS proxy),
+   leave it off or block `/metrics` in the proxy.
+   Plain Prometheus with the usual `kubernetes-pods` job finds both by their
+   `prometheus.io/*` annotations. The Prometheus Operator ignores those:
+   apply the ServiceMonitors in `deploy/kubernetes/optional/monitoring/`
+   (add your Operator's release label first), or write your own that
+   selects `app.kubernetes.io/component: api` or `mcp` as well as the name
+   label. Every Hivemind Service carries `app.kubernetes.io/name: hivemind`,
+   so a selector on the name alone also scrapes the admin panel and the
+   portal, which have no `/metrics`. `sum` the process counters across the
+   two jobs. With the optional NetworkPolicies, Prometheus must run in the
+   `monitoring` namespace (or edit the policies).
 
 ---
 
@@ -509,7 +519,7 @@ auth middleware — k8s probes carry no credential):
 | 401 on every agent call | an active agent: its agent key was revoked or mistyped. A not-yet-activated agent: a stale org key (after a rotation that wasn't distributed) | active: re-activate it for a new key (§4.3); pending: re-fetch `ORG_KEY` from the `hivemind-keys` Secret (§4.1) |
 | app container CrashLooping on the entrypoint's migrate pre-step | dim mismatch (ADR 0015) — the log names both dims + both fixes | `make pg-reset` equivalent (fresh pool) or set `HIVEMIND_EMBEDDING_DIM` to the pool's dim |
 | `Unknown HIVEMIND_* environment variable(s)` WARNING at startup | either a typo'd or stale `HIVEMIND_*` var (ADR 0024) — e.g. a renamed knob (ADR 0021's `_PREFIX_CHARS` → `_PREFIX_TOKENS`) left set under its old name — or a variable the platform injected (GitLab Auto DevOps; Kubernetes service links such as `HIVEMIND_API_SERVICE_HOST`) | a typo: fix it per the suggestion. A platform variable: ignore it, or set `enableServiceLinks: false` on the pod to drop the service-link ones. Startup only **fails** on this when `HIVEMIND_STRICT_ENV=true` (ADR 0032) |
-| `hivemind-mcp` logs repeated `GET /metrics` 401s | a Prometheus scrape config (often a ServiceMonitor on `app.kubernetes.io/name: hivemind` alone) also targets the MCP pods, which serve no `/metrics` | scrape `hivemind-api` only: select `app.kubernetes.io/component: api` too, or apply `deploy/kubernetes/optional/monitoring/` (§2 step 7). Do not give Prometheus a key |
+| A scrape of `hivemind-mcp` fails with 401 or 404 | 401: an older image without `/metrics` (ADR 0104), or a wrong path (e.g. through the Ingress's `/mcp` prefix, or a ServiceMonitor `path` other than `/metrics`). 404: `HIVEMIND_MCP_METRICS_ENABLED` is not `true` (it is off by default) | roll the MCP pods to the current image; set `HIVEMIND_MCP_METRICS_ENABLED=true` (the shipped Deployment does); scrape the pod port 8088 at `/metrics` (§2 step 7, or `deploy/kubernetes/optional/monitoring/`). Do not give Prometheus a key |
 | MCP session drops after ~60s | nginx default `proxy-read-timeout` killing the SSE stream (classic pitfall) | apply the opt-in Ingress with the SSE annotations (`deploy/kubernetes/optional/ingress.yaml`) |
 | entries have empty `entities` | extractor off (empty endpoint — by design) OR extractor dead (best-effort, ADR 0016) | check `HIVEMIND_EXTRACTOR_ENDPOINT` + `K8S_SECRET_EXTRACTOR_API_KEY`; §4.6 |
 | writes failing with `EmbeddingError` | embedder dead (ADR 0014 retry budget exhausted) | §4.5 |

@@ -2,19 +2,20 @@
 # finds hivemind-api by its prometheus.io/* pod annotations; the Operator
 # (kube-prometheus-stack and friends) ignores those and needs this instead.
 #
-# Selects ONLY the api component. Every Hivemind Service shares
-# app.kubernetes.io/name: hivemind and a port named `http`, so a selector on
-# the name alone also scrapes hivemind-mcp, which serves no /metrics and
-# answers 401 to a scrape (it has no key), plus the admin panel and the
-# portal. Scraping needs no key: /metrics is unauthenticated, so keep it
-# inside the cluster (the public Ingress never routes it).
+# Two monitors: hivemind-api (usage gauges plus its request series) and
+# hivemind-mcp (its own request, tool-call and degraded-search series, ADR
+# 0104). Every Hivemind Service shares app.kubernetes.io/name: hivemind and a
+# port named `http`, so each monitor also selects its component; a selector
+# on the name alone would scrape the admin panel and the portal, which serve
+# no /metrics. Scraping needs no key: /metrics is unauthenticated, so keep it
+# inside the cluster (the public Ingress never routes it to either runner).
 #
 # ADJUST before applying:
 #   * Most Operator installs only pick up ServiceMonitors carrying their
 #     release label (kube-prometheus-stack: `release: <helm release name>`),
 #     or set serviceMonitorSelectorNilUsesHelmValues=false. Add the label below.
 #   * With the optional NetworkPolicies, Prometheus's namespace must be the
-#     `monitoring` one they admit on port 8000.
+#     `monitoring` one they admit on ports 8000 (api) and 8088 (mcp).
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
@@ -31,4 +32,21 @@ spec:
     - port: http
       path: /metrics
       # The usage gauges are cached for 30 s, so scraping faster buys nothing.
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: hivemind-mcp
+  labels:
+    app.kubernetes.io/name: hivemind
+    app.kubernetes.io/component: mcp
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hivemind
+      app.kubernetes.io/component: mcp
+  endpoints:
+    - port: http
+      path: /metrics
       interval: 30s

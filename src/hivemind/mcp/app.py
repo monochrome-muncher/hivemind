@@ -11,6 +11,7 @@ call them with fakes.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -85,9 +86,17 @@ class McpHivemind:
     access_service: AccessService
     search_config: SearchConfig
     credential: Credential
+    # Called once per degraded search; the HTTP runner counts them.
+    on_degraded_search: Callable[[], None] | None = None
 
     @classmethod
-    def from_services(cls, store: Store, services: Services, credential: Credential) -> McpHivemind:
+    def from_services(
+        cls,
+        store: Store,
+        services: Services,
+        credential: Credential,
+        on_degraded_search: Callable[[], None] | None = None,
+    ) -> McpHivemind:
         """Bind the shared services (``build_services``) to ``credential``."""
         return cls(
             store=store,
@@ -98,6 +107,7 @@ class McpHivemind:
             access_service=services.access_service,
             search_config=services.search_config,
             credential=credential,
+            on_degraded_search=on_degraded_search,
         )
 
 
@@ -394,6 +404,8 @@ async def hive_search(
         # matches only, so a miss here is weaker evidence than usual.
         response["degraded"] = DEGRADED_KEYWORD_ONLY
         response["note"] = DEGRADED_NOTE
+        if app.on_degraded_search is not None:
+            app.on_degraded_search()
     return response
 
 

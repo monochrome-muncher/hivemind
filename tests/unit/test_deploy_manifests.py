@@ -529,6 +529,31 @@ def test_api_pods_are_annotated_for_prometheus() -> None:
     assert notes["prometheus.io/port"] == str(port)
 
 
+def test_mcp_pods_are_annotated_for_prometheus() -> None:
+    """ADR 0104: the MCP runner serves /metrics on its app port."""
+    deployment = _load(K8S / "hivemind-mcp-deployment.yaml")
+    notes = deployment["spec"]["template"]["metadata"]["annotations"]
+    assert notes["prometheus.io/scrape"] == "true"
+    assert notes["prometheus.io/path"] == "/metrics"
+    port = deployment["spec"]["template"]["spec"]["containers"][0]["ports"][0]["containerPort"]
+    assert notes["prometheus.io/port"] == str(port)
+
+
+def test_mcp_network_policy_admits_the_monitoring_namespace() -> None:
+    path = K8S / "optional" / "networkpolicy" / "networkpolicy.yaml"
+    policy = next(
+        d for d in yaml.safe_load_all(path.read_text()) if d["metadata"]["name"] == "hivemind-mcp"
+    )
+    sources = [
+        s["namespaceSelector"]["matchLabels"]["kubernetes.io/metadata.name"]
+        for rule in policy["spec"]["ingress"]
+        for s in rule["from"]
+        if "namespaceSelector" in s
+    ]
+    assert "monitoring" in sources
+    assert all(p["port"] == 8088 for rule in policy["spec"]["ingress"] for p in rule["ports"])
+
+
 # --- the agent portal (ADR 0095) -----------------------------------------------------
 
 
@@ -624,19 +649,26 @@ def test_compose_runs_the_portal_on_loopback_without_a_database(
     assert published.startswith("127.0.0.1:") and port in published
 
 
-def test_service_monitor_scrapes_only_the_api() -> None:
+def test_service_monitors_scrape_the_api_and_the_mcp_runner() -> None:
     # Its own opt-in tree (the Operator's CRDs may not exist).
     assert "monitoring" not in _load(K8S / "optional" / "kustomization.yaml")["resources"]
     assert _load(K8S / "optional" / "monitoring" / "kustomization.yaml")["resources"] == [
         "servicemonitor.yaml"
     ]
-    monitor = _load(K8S / "optional" / "monitoring" / "servicemonitor.yaml")
-    assert monitor["kind"] == "ServiceMonitor"
-    # Every Service shares the name label; only the api serves /metrics
-    # (hivemind-mcp would answer 401).
-    selector = monitor["spec"]["selector"]["matchLabels"]
-    assert selector == _load(K8S / "hivemind-api-service.yaml")["spec"]["selector"]
-    (endpoint,) = monitor["spec"]["endpoints"]
-    api_ports = [p["name"] for p in _load(K8S / "hivemind-api-service.yaml")["spec"]["ports"]]
-    assert endpoint["port"] in api_ports
-    assert endpoint["path"] == "/metrics"
+    path = K8S / "optional" / "monitoring" / "servicemonitor.yaml"
+    monitors = {d["metadata"]["name"]: d for d in yaml.safe_load_all(path.read_text())}
+    assert set(monitors) == {"hivemind-api", "hivemind-mcp"}
+    for name, monitor in monitors.items():
+        assert monitor["kind"] == "ServiceMonitor"
+        # A ServiceMonitor selects Services by their labels. Every Service
+        # shares the name label: each monitor selects its own component too,
+        # never the bare name (that would hit admin and portal).
+        service = _load(K8S / f"{name}-service.yaml")
+        selector = monitor["spec"]["selector"]["matchLabels"]
+        labels = service["metadata"]["labels"]
+        assert all(labels.get(k) == v for k, v in selector.items())
+        assert selector == {k: labels[k] for k in selector}
+        assert "app.kubernetes.io/component" in selector
+        (endpoint,) = monitor["spec"]["endpoints"]
+        assert endpoint["port"] in [p["name"] for p in service["spec"]["ports"]]
+        assert endpoint["path"] == "/metrics"
