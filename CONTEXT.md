@@ -309,7 +309,7 @@ An optional one-line task (`HIVEMIND_QUERY_INSTRUCTION`, ADR 0097) put before th
 _Avoid_: prompt, prefix (an entry is never prefixed)
 
 **Similarity threshold**:
-The cosine similarity an entry must exceed to be in the vector stream (`vector_min_similarity`, ADR 0062). Off by default; when off, the floor is 0 (ADR 0061). Model-specific. Does not apply to the keyword stream.
+The cosine similarity an entry must exceed to be in the vector stream (`vector_min_similarity`, ADR 0062). 0.45 by default (ADR 0100); when off, the floor is 0 (ADR 0061). Model-specific. Does not apply to the keyword stream.
 _Avoid_: relevance threshold, minimum score (the final score is not thresholded), recency floor (that bounds the recency factor)
 
 ### Entities (ADR 0016)
