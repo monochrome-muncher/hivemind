@@ -128,21 +128,23 @@ function isHivemindCall(event: any): boolean {
 
 // Does this call name one of these tools (a write, a rating, a read of
 // entries), by any of the routes above? A script counts when its code names
-// the tool.
-const WROTE = /(^|[^a-z])hive_write$/;
-const RATED = /(^|[^a-z])hive_feedback$/;
-const READ = /(^|[^a-z])hive_(search|get)$/;
+// the tool: each tool has an exact pattern for a name and a code pattern
+// for a mention in a script's code.
+type Tool = { exact: RegExp; code: RegExp };
+const WROTE: Tool = { exact: /(^|[^a-z])hive_write$/, code: /(^|[^a-z])hive_write\b/ };
+const RATED: Tool = { exact: /(^|[^a-z])hive_feedback$/, code: /(^|[^a-z])hive_feedback\b/ };
+const READ: Tool = { exact: /(^|[^a-z])hive_(search|get)$/, code: /(^|[^a-z])hive_(search|get)\b/ };
 
-function names(tool: RegExp, name: string, input: any): boolean {
-	if (tool.test(name)) return true;
+function names(tool: Tool, name: string, input: any): boolean {
+	if (tool.exact.test(name)) return true;
 	if (name === "mcp") {
-		return ROUTING_FIELDS.some((f) => typeof input?.[f] === "string" && tool.test(input[f].trim()));
+		return ROUTING_FIELDS.some((f) => typeof input?.[f] === "string" && tool.exact.test(input[f].trim()));
 	}
 	const code = input?.code;
-	if (typeof code === "string" && new RegExp(tool.source.replace("$", "\\b")).test(code)) return true;
+	if (typeof code === "string" && tool.code.test(code)) return true;
 	const path = String(input?.path ?? "").trim();
 	if (!/^xd:\/\//i.test(path)) return false;
-	return tool.test(path.slice("xd://".length).replace(/[?#].*$/, "").replace(/\/+$/, ""));
+	return tool.exact.test(path.slice("xd://".length).replace(/[?#].*$/, "").replace(/\/+$/, ""));
 }
 
 function stopThreshold(): number {
