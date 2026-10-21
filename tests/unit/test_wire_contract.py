@@ -10,6 +10,7 @@ fails if the two surfaces drift.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from hivemind.api.schemas import EntryOut, FeedbackSummaryOut, HitOut, LinkOut
@@ -291,11 +292,11 @@ def test_hit_omits_the_optional_fields_when_empty() -> None:
         "score": 0.87,
         "scope": "fleet",
         "fleet_id": None,
-        "feedback": {"helpful": 0, "stale": 0, "wrong": 0},
     }
     rest = HitOut.from_hit(bare).model_dump(mode="json")
     assert rest["entry_id"] == HIT.entry_id
     for optional in (
+        "feedback",
         "last_confirmed_at",
         "contested",
         "correction",
@@ -305,3 +306,25 @@ def test_hit_omits_the_optional_fields_when_empty() -> None:
         "upstream_changed",
     ):
         assert rest[optional] is None
+
+
+def test_hit_score_is_rounded_to_four_significant_figures_on_both_surfaces() -> None:
+    raw = replace(HIT, score=0.01600102405288303)
+    assert hit_dict(raw)["score"] == 0.016
+    assert HitOut.from_hit(raw).score == 0.016
+    assert hit_dict(replace(HIT, score=0.0118349))["score"] == 0.01183
+    assert hit_dict(replace(HIT, score=1.23456))["score"] == 1.235
+    assert raw.score == 0.01600102405288303  # the hit itself, and so the ranking, is untouched
+
+
+def test_hit_feedback_is_left_out_only_when_all_counts_are_zero() -> None:
+    for counts in ((0, 0, 0),):
+        zero = replace(HIT, feedback=counts)
+        assert "feedback" not in hit_dict(zero)
+        assert HitOut.from_hit(zero).feedback is None
+    for counts in ((1, 0, 0), (0, 1, 0), (0, 0, 1)):
+        some = replace(HIT, feedback=counts)
+        assert hit_dict(some)["feedback"] == dict(
+            zip(("helpful", "stale", "wrong"), counts, strict=True)
+        )
+        assert HitOut.from_hit(some).feedback is not None
