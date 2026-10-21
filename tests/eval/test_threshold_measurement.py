@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from tests.eval.threshold import OFF_TOPIC_QUERIES, SWEEP, measure, report, suggest
-from tests.fakes import make_embedder
+from tests.fakes import FakeEmbedder, make_embedder
 
 
 async def test_the_sweep_reports_every_threshold() -> None:
@@ -63,3 +63,30 @@ async def test_a_domain_alone_counts_other_domains_queries_as_off_topic() -> Non
     m = await measure(make_embedder(), domain_fixture(DOMAINS[4]), sweep=(0.0, 0.5))
     # 18 own queries + 1 cross-domain one; 6 unanswered + 4 domains x 24 + 5 cross.
     assert (m.answerable, m.off_topic) == (19, 6 + 4 * 24 + 5)
+
+
+class _RecordingEmbedder(FakeEmbedder):
+    """The hash embedder, remembering every text it was asked to embed."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.texts: list[str] = []
+
+    async def embed_text(self, text: str) -> list[float]:
+        self.texts.append(text)
+        return await super().embed_text(text)
+
+
+async def test_a_query_instruction_reaches_the_embedder_and_the_statistics() -> None:
+    plain = await measure(make_embedder())
+    instruction = "Retrieve the entry that answers this question"
+    recorder = _RecordingEmbedder()
+    m = await measure(recorder, query_instruction=instruction)
+    wrapped = f"Instruct: {instruction}\nQuery:"
+    assert any(t.startswith(wrapped) for t in recorder.texts)
+    assert m.query_instruction == instruction
+    assert f"Query instruction: `{instruction}`" in report(m)
+    assert "Query instruction: none" in report(plain)
+    assert [r.threshold for r in m.rows] == [r.threshold for r in plain.rows]
+    assert (m.answerable, m.off_topic) == (plain.answerable, plain.off_topic)
+    assert len(m.relevant_similarities) == len(plain.relevant_similarities)

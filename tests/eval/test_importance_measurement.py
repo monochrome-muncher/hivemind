@@ -22,7 +22,7 @@ from tests.eval.importance import (
     to_json,
 )
 from tests.eval.threshold import combined_fixture, domain_fixture
-from tests.fakes import make_clock, make_embedder
+from tests.fakes import FakeEmbedder, make_clock, make_embedder
 
 
 def test_equal_is_all_threes() -> None:
@@ -71,3 +71,30 @@ async def test_equal_ranks_the_same_off_and_on_and_the_report_reads() -> None:
     text = report(rows, "hash")
     assert "aligned" in text and "narrow on" in text
     assert len(json.loads(to_json(rows, "hash"))["rows"]) == len(rows)
+
+
+class _RecordingEmbedder(FakeEmbedder):
+    """The hash embedder, remembering every text it was asked to embed."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.texts: list[str] = []
+
+    async def embed_text(self, text: str) -> list[float]:
+        self.texts.append(text)
+        return await super().embed_text(text)
+
+
+async def test_a_query_instruction_reaches_the_embedder_without_changing_the_shape() -> None:
+    fixture = domain_fixture(DOMAINS[4])
+    plain = await measure(make_embedder(), fixture)
+    instruction = "Retrieve the entry that answers this question"
+    recorder = _RecordingEmbedder()
+    rows = await measure(recorder, fixture, query_instruction=instruction)
+    assert any(t.startswith(f"Instruct: {instruction}\nQuery:") for t in recorder.texts)
+    assert [(r.assignment, r.narrow, r.queries) for r in rows] == [
+        (r.assignment, r.narrow, r.queries) for r in plain
+    ]
+    assert f"Query instruction: `{instruction}`" in report(rows, "hash", instruction)
+    assert "Query instruction: none" in report(plain, "hash")
+    assert json.loads(to_json(rows, "hash", instruction))["query_instruction"] == instruction

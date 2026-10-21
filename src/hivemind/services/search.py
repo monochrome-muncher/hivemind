@@ -403,9 +403,10 @@ class SearchService:
         visibility: Visibility | None,
     ) -> list[str] | None:
         """The vector stream, or None on an ``EmbeddingError`` (ADR 0048);
-        store failures propagate."""
+        store failures propagate. The query carries the configured
+        instruction, if any (ADR 0097); the keyword stream never does."""
         try:
-            query_vector = await self._embedder.embed_text(query)
+            query_vector = await self._embedder.embed_text(self._config.embedded_query(query))
         except EmbeddingError as exc:
             # Already sanitized (providers.py); the caller sees no error.
             logger.warning("embedding unavailable, searching by keyword only: %s", exc)

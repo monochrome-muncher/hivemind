@@ -51,6 +51,7 @@ MAX_IDENTITY_CHARS = 256  # author / agent / actor strings
 
 # -- request text -------------------------------------------------------------
 MAX_QUERY_CHARS = 2_000
+MAX_QUERY_INSTRUCTION_CHARS = 500  # the optional embedder task line (ADR 0097)
 MAX_FILTER_VALUE_CHARS = 256
 MAX_FILTER_VALUES = 32
 MAX_NOTE_CHARS = 2_000
@@ -97,6 +98,15 @@ def check_text(value: str | None, field: str, max_chars: int) -> str | None:
 def check_query(query: str) -> str:
     check_text(query, "query", MAX_QUERY_CHARS)
     return query
+
+
+def check_query_instruction(instruction: str) -> str:
+    """The task line put before a search query for an instruction-aware
+    embedder (ADR 0097): one line, at most ``MAX_QUERY_INSTRUCTION_CHARS``."""
+    check_text(instruction, "query_instruction", MAX_QUERY_INSTRUCTION_CHARS)
+    if "\n" in instruction or "\r" in instruction:
+        raise InvalidInput("query_instruction must be a single line (no newlines)")
+    return instruction
 
 
 def check_pagination(limit: int | None, offset: int | None) -> None:
