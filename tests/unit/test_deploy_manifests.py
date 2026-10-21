@@ -622,3 +622,21 @@ def test_compose_runs_the_portal_on_loopback_without_a_database(
     assert not any("DATABASE" in name for name in env)
     (published,) = service["ports"]
     assert published.startswith("127.0.0.1:") and port in published
+
+
+def test_service_monitor_scrapes_only_the_api() -> None:
+    # Its own opt-in tree (the Operator's CRDs may not exist).
+    assert "monitoring" not in _load(K8S / "optional" / "kustomization.yaml")["resources"]
+    assert _load(K8S / "optional" / "monitoring" / "kustomization.yaml")["resources"] == [
+        "servicemonitor.yaml"
+    ]
+    monitor = _load(K8S / "optional" / "monitoring" / "servicemonitor.yaml")
+    assert monitor["kind"] == "ServiceMonitor"
+    # Every Service shares the name label; only the api serves /metrics
+    # (hivemind-mcp would answer 401).
+    selector = monitor["spec"]["selector"]["matchLabels"]
+    assert selector == _load(K8S / "hivemind-api-service.yaml")["spec"]["selector"]
+    (endpoint,) = monitor["spec"]["endpoints"]
+    api_ports = [p["name"] for p in _load(K8S / "hivemind-api-service.yaml")["spec"]["ports"]]
+    assert endpoint["port"] in api_ports
+    assert endpoint["path"] == "/metrics"
