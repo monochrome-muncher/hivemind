@@ -152,7 +152,7 @@ security work are allowed: tag `security-finding` and say where.
   the system's `tags`) when you start on a system: supersede what you can
   confirm is wrong. A lurker flags; a contributor fixes.
 
-## 5. Privileged agents, local memory, outages
+## 5. Pinning, local memory, outages
 
 **Pinning**: `hive_pin` keeps your fleet's briefing; pin rarely.
 

@@ -26,7 +26,7 @@ to install or use it, read [README.md](README.md) instead.
 | `plugin.yaml`, `__init__.py` | The Hermes plugin: serves `skills/` and registers a system-prompt section |
 | `extensions/hivemind.ts` | The Pi and Oh My Pi extension: the system-prompt section, the MCP server on Pi 0.99+, and blocking Hivemind calls in incognito sessions |
 | `opencode/hivemind.js` | The OpenCode plugin (which KiloCode 7.x, an OpenCode fork, loads too): registers the MCP server, adds the skills, and puts the reminder in every model request |
-| `cline/` | The Cline hooks: `UserPromptSubmit` (the stay-aware line on every prompt), `TaskStart` and `PostToolUse` (the end-of-task write-and-rate nudge), each with a `.ps1` twin for Windows |
+| `cline/` | The Cline hooks: `UserPromptSubmit` (the stay-aware line: in full on a task's first prompt, short on later ones), `TaskStart` and `PostToolUse` (the end-of-task write-and-rate nudge), each with a `.ps1` twin for Windows |
 | `bin/hivemind-incognito` | The incognito launcher ([below](#incognito)) |
 | `CHANGELOG.md` | What changed for agents in each release |
 | `../../package.json` (repository root) | Same package name as `plugins/hivemind/package.json`. Lets DeepSeek Harness, Pi and OpenCode install the plugin from the repository's Git URL (OpenCode loads `exports["./server"]`, else `main`) |

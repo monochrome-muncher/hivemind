@@ -277,7 +277,11 @@ first-run bootstrap Job records itself as `ci-bootstrap`.
   tags: `git diff --stat v<old> v<new> -- src/hivemind/store/migrations/`.
   No output means no schema change. Even when there is one, there is no
   manual step: the entrypoint applies it. The current chain ends at
-  `0015`. 2.6.0 adds `0014` (pin audit, ADR 0076;
+  `0016`. 2.11.0 adds `0016` (`withdrawn_at` on entries, ADR 0098; one
+  nullable column plus a backfill of the withdrawn rows, so an older pod
+  ignores it, and a withdrawal an older pod writes during a rolling deploy
+  leaves it empty, which the `relied_on_changed` filter reads as "withdrawn
+  after any rating"). 2.6.0 adds `0014` (pin audit, ADR 0076;
   widens the audit-log CHECKs; rolling the image back after it without
   `make rollback` breaks the audit view on `entry.pin` rows) and `0015` (an
   `explore` column on the search counters, ADR 0078; additive, an older pod

@@ -86,7 +86,7 @@ is unused.
 | [0074](0074-group-unlinked-versions-at-read-time.md) | Group unlinked versions at read time | Accepted (off by default) |
 | [0075](0075-fleet-health-metrics.md) | Fleet health metrics: admin-only and observation-only | Extended by 0089 |
 | [0076](0076-pin-integrity.md) | Pin integrity: audited pins and "changed since pinned" | Amended by 0079, 0096 |
-| [0077](0077-write-check-mode-and-warnings.md) | Writes can be checked first, and answer with advisory warnings | Amended by 0087 |
+| [0077](0077-write-check-mode-and-warnings.md) | Writes can be checked first, and answer with advisory warnings | Amended by 0087, 0099 |
 | [0078](0078-explore-search.md) | Opt-in explore search | Accepted |
 | [0079](0079-feedback-dates-on-the-database-clock.md) | Feedback is dated by the store's clock | Accepted |
 | [0080](0080-admin-memory-browser-and-activity.md) | The admin panel can read memories and show activity | Extended by 0090, 0092, 0093 |
