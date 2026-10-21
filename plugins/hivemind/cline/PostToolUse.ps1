@@ -45,6 +45,8 @@ $state = Join-Path $stateDir $safe
 $calls = 0
 $contributed = 0
 $reminded = 0
+$rated = 0
+$seen = 0
 if (Test-Path $state) {
     $parts = (Get-Content $state -Raw -ErrorAction SilentlyContinue) -split '\s+'
     if ($parts.Count -ge 3) {
@@ -52,10 +54,19 @@ if (Test-Path $state) {
         $contributed = [int]$parts[1]
         $reminded = [int]$parts[2]
     }
+    if ($parts.Count -ge 5) {
+        $rated = [int]$parts[3]
+        $seen = [int]$parts[4]
+    }
 }
 
-if ($toolName -like "*hive_write" -or $toolName -like "*hive_feedback") {
+if ($toolName -like "*hive_write") {
     $contributed = 1
+} elseif ($toolName -like "*hive_feedback") {
+    $contributed = 1
+    $rated = 1
+} elseif ($toolName -like "*hive_search" -or $toolName -like "*hive_get") {
+    $seen = 1
 }
 $calls++
 
@@ -69,17 +80,17 @@ $incognito = if ($env:HIVEMIND_INCOGNITO) { $env:HIVEMIND_INCOGNITO.ToLower() } 
 if (-not @("1", "true", "yes", "on").Contains($incognito)) { $incognito = "" }
 
 $emitNudge = $false
-if ($calls -ge $threshold -and $contributed -eq 0 -and $reminded -eq 0) {
+if ($calls -ge $threshold -and $reminded -eq 0 -and $rated -eq 0 -and ($contributed -eq 0 -or $seen -eq 1)) {
     if ($incognito -ne "" -or [string]::IsNullOrWhiteSpace($env:HIVEMIND_API_KEY)) {
         # Still record the count so a later key change does not fire it.
-        Set-Content -Path $state -Value "$calls $contributed $reminded" -NoNewline -ErrorAction SilentlyContinue
+        Set-Content -Path $state -Value "$calls $contributed $reminded $rated $seen" -NoNewline -ErrorAction SilentlyContinue
     } else {
         $reminded = 1
         $emitNudge = $true
-        Set-Content -Path $state -Value "$calls $contributed $reminded" -NoNewline -ErrorAction SilentlyContinue
+        Set-Content -Path $state -Value "$calls $contributed $reminded $rated $seen" -NoNewline -ErrorAction SilentlyContinue
     }
 } else {
-    Set-Content -Path $state -Value "$calls $contributed $reminded" -NoNewline -ErrorAction SilentlyContinue
+    Set-Content -Path $state -Value "$calls $contributed $reminded $rated $seen" -NoNewline -ErrorAction SilentlyContinue
 }
 
 if ($emitNudge) {

@@ -48,7 +48,17 @@ const SKILLS_DIR = fileURLToPath(new URL("../skills/", import.meta.url));
 const SKILLS = ["hivemind", "hivemind-setup"];
 
 // OpenCode names an MCP tool <server>_<tool>, e.g. hivemind_hive_write.
-const CONTRIBUTION = /(^|[^a-z])hive_(write|feedback)$/;
+const WROTE = /(^|[^a-z])hive_write$/;
+const RATED = /(^|[^a-z])hive_feedback$/;
+const READ = /(^|[^a-z])hive_(search|get)$/;
+// Quiet once the session rated, or wrote without having read entries.
+const settled = (s) => s.rated || (s.wrote && !s.read);
+
+function note(s, tool) {
+  if (WROTE.test(tool)) s.wrote = true;
+  if (RATED.test(tool)) s.rated = true;
+  if (READ.test(tool)) s.read = true;
+}
 
 function incognito() {
   const value = (process.env.HIVEMIND_INCOGNITO ?? "").trim().toLowerCase();
@@ -93,7 +103,7 @@ function readSkill(name) {
 function makeSessions() {
   const sessions = new Map();
   const state = (id) => {
-    if (!sessions.has(id)) sessions.set(id, { calls: 0, contributed: false, reminded: false, compacted: false });
+    if (!sessions.has(id)) sessions.set(id, { calls: 0, wrote: false, rated: false, read: false, reminded: false, compacted: false });
     return sessions.get(id);
   };
   return { sessions, state };
@@ -111,7 +121,7 @@ async function server({ client } = {}) {
 
   async function remind(id) {
     const s = state(id);
-    if (!nudges() || s.reminded || s.contributed || s.calls < stopThreshold()) return;
+    if (!nudges() || s.reminded || settled(s) || s.calls < stopThreshold()) return;
     s.reminded = true;
     try {
       // A subagent's (task tool) session reports to its parent: leave it.
@@ -170,7 +180,7 @@ async function server({ client } = {}) {
       if (!input?.sessionID) return;
       const s = state(input.sessionID);
       s.calls += 1;
-      if (CONTRIBUTION.test(String(input.tool ?? ""))) s.contributed = true;
+      note(s, String(input.tool ?? ""));
     },
     event: async ({ event }) => {
       const id = event?.properties?.sessionID;
@@ -199,7 +209,7 @@ async function setup(ctx) {
 
   async function remind(id) {
     const s = state(id);
-    if (!nudges() || s.reminded || s.contributed || s.calls < stopThreshold()) return;
+    if (!nudges() || s.reminded || settled(s) || s.calls < stopThreshold()) return;
     s.reminded = true;
     try {
       // A subagent's (task tool) session reports to its parent: leave it.
@@ -267,7 +277,7 @@ async function setup(ctx) {
     if (!id) return;
     const s = state(id);
     s.calls += 1;
-    if (CONTRIBUTION.test(String(event.tool ?? ""))) s.contributed = true;
+    note(s, String(event.tool ?? ""));
   });
 
   // Session events: compaction, and the session going idle. v2 events are

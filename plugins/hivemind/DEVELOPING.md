@@ -267,8 +267,10 @@ The script counts four transcript formats:
      blocks, so it never fires twice). The folder is private: created 0700,
      and refused (no reminder) unless it is a real directory owned by the
      user and not group or other writable;
-  5. the transcript (grep only, no jq, python or node) has no `hive_write`
-     or `hive_feedback` tool call and at least 20 tool uses
+  5. the transcript (grep only, no jq, python or node) shows no
+     `hive_feedback` call, and either no `hive_write` call or a
+     `hive_search` or `hive_get` call (a session that wrote but read
+     entries and rated none is still asked to rate), and at least 20 tool uses
      (`HIVEMIND_STOP_MIN_TOOLS` overrides the 20). Lines that carry tool
      definitions (Claude Code's `prompt_snapshot` records list every tool
      with its schema) are skipped, so a definition never counts as a call.
@@ -279,8 +281,8 @@ The script counts four transcript formats:
   same two nudges with the same texts, under the same conditions (not
   incognito, a key set, `HIVEMIND_STOP_MIN_TOOLS`), counting the calls
   the model made in `tool_execution_start` (a call a script made for it,
-  with a `parentToolCallId`, is not counted) and noting a `hive_write` or
-  `hive_feedback` by any route (named tool, the adapter's `mcp` proxy, a
+  with a `parentToolCallId`, is not counted) and noting a `hive_write`,
+  `hive_feedback`, `hive_search` or `hive_get` by any route (named tool, the adapter's `mcp` proxy, a
   script's code, an Oh My Pi `xd://` route). Once per session (reset on
   `session_start`), Pi's `agent_before_settle` appends the reminder as a
   visible `custom_message` and asks for one more model request; Oh My
@@ -295,7 +297,7 @@ The script counts four transcript formats:
   (`opencode/hivemind.js`) counts each session's calls in
   `tool.execute.after` (MCP tools are named `hivemind_hive_write`) and, on
   the `session.idle` event of a long top-level session that wrote
-  nothing, sends the reminder once with `client.session.promptAsync`,
+  nothing, or read entries and rated none, sends the reminder once with `client.session.promptAsync`,
   using the agent and model of the session's last message (from
   `chat.message`). A subagent's session (one with a `parentID`) is left
   alone. After `session.compacted`, the next
@@ -307,7 +309,8 @@ The script counts four transcript formats:
   idle, so the reminder never runs there.
 - **DeepSeek Harness.** The bundle's `dsh/hivemind-reminders.js` counts
   the main agent's calls in `tools/post-execute` and, in
-  `agent/turn-stopping` of a long turn that wrote nothing, steers the agent
+  `agent/turn-stopping` of a long turn that wrote nothing (or read entries
+  and rated none), steers the agent
   once with the reminder as a user message (as DSH's own Claude Code hooks
   bridge does with a `Stop` block). It stays silent while
   `mcp__hivemind__hive_write` is not visible to the agent, which covers

@@ -99,7 +99,7 @@ def test_rules_moved_out_of_the_skill_live_in_the_tool_descriptions() -> None:
     assert "don't retry in a loop" in contract.DESC_WRITE
     assert "5 = outage" in contract.DESC_WRITE
     assert "verified:" in contract.DESC_FEEDBACK
-    assert "an agent holds at most 3 pins, a fleet 10" in contract.DESC_PIN
+    assert "Pin rarely" in contract.DESC_PIN
 
 
 def test_the_skill_lists_every_tool_where_it_names_them() -> None:
@@ -314,6 +314,8 @@ def test_entry_content_is_declared_untrusted_data_everywhere() -> None:
 # pinning (ADR 0096) 17,987 after trimming other wording. The `relied_on_changed`
 # catch-up step (ADR 0098) measures 17,992 after merging the two catch-up list
 # lines and dropping wording that was said twice.
+# Trimming the register name rule, the pin caps and a few repeats, then
+# sharper search and get wording, measures 17,663.
 ALWAYS_ON_BUDGET = 18_000
 
 
@@ -1186,6 +1188,17 @@ def test_cline_post_tool_use_nudges_once_at_the_threshold(tmp_path: Path) -> Non
         calls(1, task="t2", tool="hivemind__hive_write")[0]
     )
     assert "contextModification" not in json.loads(calls(1, task="t2")[0])
+    # A write after reading entries, with no rating, still nudges once; a
+    # rating keeps it quiet.
+    _cline_hook("TaskStart", json.dumps({"taskId": "t3"}), tmp_path)
+    calls(1, task="t3", tool="hivemind__hive_get")
+    calls(1, task="t3", tool="hivemind__hive_write")
+    assert json.loads(calls(1, task="t3")[0])["contextModification"] == STOP_REMINDER_TEXT
+    assert "contextModification" not in json.loads(calls(1, task="t3")[0])
+    _cline_hook("TaskStart", json.dumps({"taskId": "t4"}), tmp_path)
+    calls(1, task="t4", tool="hivemind__hive_search")
+    calls(1, task="t4", tool="hivemind__hive_feedback")
+    assert "contextModification" not in json.loads(calls(1, task="t4")[0])
     # A subagent is never counted and never nudged: the CLI hook runner marks
     # one with a top-level parent_agent_id, the other runner with
     # sessionContext.parentAgentId (and the camelCase twin at the top level).
@@ -1316,7 +1329,7 @@ def test_cline_hooks_write_the_counter_into_a_private_folder(tmp_path: Path) -> 
     assert folder.is_dir() and not folder.is_symlink()
     assert oct(folder.stat().st_mode & 0o777) == "0o700"
     counter = folder / "t1"
-    assert counter.read_text().split() == ["3", "0", "0"]
+    assert counter.read_text().split() == ["3", "0", "0", "0", "0"]
 
 
 # -- KiloCode: an OpenCode fork, the same plugin file --------------------------

@@ -126,20 +126,23 @@ function isHivemindCall(event: any): boolean {
 	return HIVE_TOOL.test(route);
 }
 
-// Does this call write or rate (hive_write, hive_feedback), by any of the
-// routes above? A script counts when its code names either tool.
-const CONTRIBUTION = /(^|[^a-z])hive_(write|feedback)$/;
+// Does this call name one of these tools (a write, a rating, a read of
+// entries), by any of the routes above? A script counts when its code names
+// the tool.
+const WROTE = /(^|[^a-z])hive_write$/;
+const RATED = /(^|[^a-z])hive_feedback$/;
+const READ = /(^|[^a-z])hive_(search|get)$/;
 
-function isContribution(name: string, input: any): boolean {
-	if (CONTRIBUTION.test(name)) return true;
+function names(tool: RegExp, name: string, input: any): boolean {
+	if (tool.test(name)) return true;
 	if (name === "mcp") {
-		return ROUTING_FIELDS.some((f) => typeof input?.[f] === "string" && CONTRIBUTION.test(input[f].trim()));
+		return ROUTING_FIELDS.some((f) => typeof input?.[f] === "string" && tool.test(input[f].trim()));
 	}
 	const code = input?.code;
-	if (typeof code === "string" && /(^|[^a-z])hive_(write|feedback)\b/.test(code)) return true;
+	if (typeof code === "string" && new RegExp(tool.source.replace("$", "\\b")).test(code)) return true;
 	const path = String(input?.path ?? "").trim();
 	if (!/^xd:\/\//i.test(path)) return false;
-	return CONTRIBUTION.test(path.slice("xd://".length).replace(/[?#].*$/, "").replace(/\/+$/, ""));
+	return tool.test(path.slice("xd://".length).replace(/[?#].*$/, "").replace(/\/+$/, ""));
 }
 
 function stopThreshold(): number {
@@ -149,11 +152,12 @@ function stopThreshold(): number {
 
 // Per-session state for the two nudges. Reset when a session starts (new,
 // resumed or forked), so a resumed session can be reminded once more.
-const session = { calls: 0, contributed: false, reminded: false, compacted: false };
+const session = { calls: 0, wrote: false, rated: false, read: false, reminded: false, compacted: false };
 
 function remindBeforeStop(): boolean {
 	if (incognito() || !process.env.HIVEMIND_API_KEY) return false;
-	if (session.reminded || session.contributed || session.calls < stopThreshold()) return false;
+	// Quiet once the session rated, or wrote without having read entries.
+	if (session.reminded || session.rated || (session.wrote && !session.read) || session.calls < stopThreshold()) return false;
 	session.reminded = true;
 	return true;
 }
@@ -257,7 +261,7 @@ export default function hivemind(pi: ExtensionAPI) {
 	});
 
 	pi.on("session_start", () => {
-		Object.assign(session, { calls: 0, contributed: false, reminded: false, compacted: false });
+		Object.assign(session, { calls: 0, wrote: false, rated: false, read: false, reminded: false, compacted: false });
 	});
 
 	pi.on("session_compact", () => {
@@ -269,7 +273,9 @@ export default function hivemind(pi: ExtensionAPI) {
 	pi.on("tool_execution_start", (event: any) => {
 		const name = String(event.toolName ?? "");
 		if (!event.parentToolCallId) session.calls += 1;
-		if (isContribution(name, event.args)) session.contributed = true;
+		if (names(WROTE, name, event.args)) session.wrote = true;
+		if (names(RATED, name, event.args)) session.rated = true;
+		if (names(READ, name, event.args)) session.read = true;
 	});
 
 	// Pi: one more model request, with the reminder as a visible message.
