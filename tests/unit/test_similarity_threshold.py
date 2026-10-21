@@ -3,8 +3,8 @@ a search through the service.
 
 The vector stream keeps only entries above the threshold; the keyword
 stream is untouched, so a search finds nothing only when neither stream
-does, and that miss is counted (ADR 0056). Off (``None``) by default, and
-off is today's behaviour: any positive similarity (ADR 0061).
+does, and that miss is counted (ADR 0056). On at 0.45 by default (ADR 0100);
+off (``None``) is any positive similarity (ADR 0061).
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from hivemind.config import SearchConfig, Settings
+from hivemind.config import DEFAULT_VECTOR_MIN_SIMILARITY, SearchConfig, Settings
 from hivemind.domain.access import TrustLevel, Visibility
 from hivemind.domain.entry import EntryDraft, EntryFilters, Kind, SearchCount
 from hivemind.memstore import MemoryStore
@@ -56,18 +56,24 @@ def _service(store: MemoryStore, threshold: float | None) -> SearchService:
 
 
 class TestConfig:
-    def test_off_by_default(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_unset_means_the_default_cut_off(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.delenv("HIVEMIND_VECTOR_MIN_SIMILARITY", raising=False)
         monkeypatch.chdir(tmp_path)
-        assert SearchConfig().vector_min_similarity is None
-        assert Settings().search_config().vector_min_similarity is None
+        assert DEFAULT_VECTOR_MIN_SIMILARITY == 0.45
+        assert SearchConfig().vector_min_similarity == 0.45
+        assert Settings().search_config().vector_min_similarity == 0.45
+
+    def test_a_test_config_has_no_cut_off(self) -> None:
+        assert make_search_config().vector_min_similarity is None
 
     def test_an_operator_sets_it_through_the_environment(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.chdir(tmp_path)
-        monkeypatch.setenv("HIVEMIND_VECTOR_MIN_SIMILARITY", "0.45")
-        assert Settings().search_config().vector_min_similarity == 0.45
+        monkeypatch.setenv("HIVEMIND_VECTOR_MIN_SIMILARITY", "0.6")
+        assert Settings().search_config().vector_min_similarity == 0.6
 
     @pytest.mark.parametrize("spelling", ["", "none", "None", " NONE "])
     def test_empty_and_none_mean_off(

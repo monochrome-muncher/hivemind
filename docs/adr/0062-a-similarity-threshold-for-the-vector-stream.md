@@ -1,5 +1,10 @@
 # A similarity threshold for the vector stream
 
+> **Status: amended by [ADR 0100](0100-vector-similarity-cut-off-on-by-default.md):**
+> the setting now defaults to 0.45 instead of off. An empty value still turns
+> it off. "Off by default" and "the default stays off" below are the original
+> decision.
+
 ## Context
 
 The vector stream returns the entries nearest to the query, however far

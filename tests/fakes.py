@@ -172,6 +172,10 @@ def make_search_config(
     ``test_the_sweeps_baseline_is_floor_off_explicitly_not_by_default``).
     The query instruction (ADR 0097) is off here, though on in production, so
     a test's embedded query is the raw query; a test of the instruction sets it.
+    The vector similarity cut-off (ADR 0100) is likewise off here
+    (``vector_min_similarity=None``): the hash embedder's similarities are not
+    Qwen-like, so the 0.45 production default would empty its vector stream.
+    A test of the cut-off sets it.
     """
     return SearchConfig(
         candidate_top_k=candidate_top_k,
@@ -180,6 +184,7 @@ def make_search_config(
         rrf_k=rrf_k,
         recency_floor=recency_floor,
         query_instruction="",
+        vector_min_similarity=None,
     )
 
 
