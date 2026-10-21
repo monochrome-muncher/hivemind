@@ -16,7 +16,9 @@ from dataclasses import replace
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
+from mcp.types import TextContent
 from mcp.types import Tool as MCPTool
+from pydantic_core import to_json
 
 from hivemind.mcp import contract
 from hivemind.mcp.app import (
@@ -91,10 +93,16 @@ def register_tool(
     """Bind one app tool to the server (ADR 0085). The closure carries
     ``verb``'s signature — the MCP schema is generated from it — and every
     call resolves the acting app first; the identity never leaves the
-    server."""
+    server.
 
-    async def _tool(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        return await dispatch(verb, **kwargs)
+    The reply is one compact JSON ``TextContent`` and the tool declares no
+    output schema. The SDK's default is indent-2 text, a duplicate
+    ``structuredContent`` and a schema (``{"result": object}``) that tells
+    a client nothing, all of which land in the agent's context."""
+
+    async def _tool(*args: Any, **kwargs: Any) -> list[TextContent]:
+        result = await dispatch(verb, **kwargs)
+        return [TextContent(type="text", text=to_json(result).decode())]
 
     # The MCP schema is generated from the closure's signature at decoration
     # time: the verb's, minus its ``app`` parameter (bound here, never
@@ -104,7 +112,7 @@ def register_tool(
     setattr(_tool, "__wrapped__", verb)  # noqa: B010 (mypy: dynamic attr)
     parameters = list(inspect.signature(verb).parameters.values())[1:]
     setattr(_tool, "__signature__", inspect.signature(verb).replace(parameters=parameters))  # noqa: B010 (mypy: dynamic attr)
-    server.tool(name=name, description=description)(_tool)
+    server.tool(name=name, description=description, structured_output=False)(_tool)
 
 
 def build_server(
