@@ -1,0 +1,10 @@
+# OPT-IN Prometheus Operator ServiceMonitor for hivemind-api (ADR 0050) — a
+# SEPARATE tree: it needs the Operator's CRDs, and plain Prometheus uses the
+# pod annotations instead. Read servicemonitor.yaml's ADJUST notes first.
+#
+#   kubectl kustomize deploy/kubernetes/optional/monitoring | kubectl -n hivemind apply -f -
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: hivemind
+resources:
+  - servicemonitor.yaml

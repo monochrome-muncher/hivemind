@@ -1,0 +1,34 @@
+# OPT-IN Prometheus Operator scrape config (ADR 0050). Plain Prometheus
+# finds hivemind-api by its prometheus.io/* pod annotations; the Operator
+# (kube-prometheus-stack and friends) ignores those and needs this instead.
+#
+# Selects ONLY the api component. Every Hivemind Service shares
+# app.kubernetes.io/name: hivemind and a port named `http`, so a selector on
+# the name alone also scrapes hivemind-mcp, which serves no /metrics and
+# answers 401 to a scrape (it has no key), plus the admin panel and the
+# portal. Scraping needs no key: /metrics is unauthenticated, so keep it
+# inside the cluster (the public Ingress never routes it).
+#
+# ADJUST before applying:
+#   * Most Operator installs only pick up ServiceMonitors carrying their
+#     release label (kube-prometheus-stack: `release: <helm release name>`),
+#     or set serviceMonitorSelectorNilUsesHelmValues=false. Add the label below.
+#   * With the optional NetworkPolicies, Prometheus's namespace must be the
+#     `monitoring` one they admit on port 8000.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: hivemind-api
+  labels:
+    app.kubernetes.io/name: hivemind
+    app.kubernetes.io/component: api
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hivemind
+      app.kubernetes.io/component: api
+  endpoints:
+    - port: http
+      path: /metrics
+      # The usage gauges are cached for 30 s, so scraping faster buys nothing.
+      interval: 30s
