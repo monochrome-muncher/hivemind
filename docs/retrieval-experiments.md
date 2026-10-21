@@ -709,6 +709,9 @@ for 39% of the full pool, 7% of the untemplated domains and 1% of the five
 original ones. Read the entry-to-entry figures (tau, the `near_duplicate`
 band) from the untemplated domains.
 
+Fixed on 2026-10-21: the templated domains were rewritten, and the
+re-measured figures are in the last section, "The rewritten corpus".
+
 **De-vagued queries make a high threshold viable.**
 *(2026-10-17; `tests/eval/corpus/specific_queries.py`,
 `tests/eval/threshold.py`'s `extended_scenarios_specific()`,
@@ -1150,7 +1153,9 @@ vector stream is embedded as `Instruct: {instruction}\nQuery:{query}`; entries
 never carry it. The harness scores every answerable query of the sixteen
 domain fixtures, alone and pooled, with no instruction and with the generic
 one (`Given an agent's task or question, retrieve shared memory entries that
-answer it`).
+answer it`). These figures were measured on the templated corpus;
+the re-measurement on the rewritten one is in the last section, "The
+rewritten corpus".
 
 **Setup.** Qwen3-Embedding through llama.cpp GGUFs with last-token pooling at
 1024 dimensions: 8B as Q8_0, 4B and 0.6B as f16. The sixteen domain fixtures,
@@ -1287,3 +1292,91 @@ smaller than the gain on ordinary searches, so the default stays on.
 0088) gives the same lift with the instruction as without it: pooled MRR
 with aligned importance rises 0.782 to 0.851 without the instruction and
 0.782 to 0.854 with it.
+
+## The rewritten corpus (2026-10-21)
+
+The templated domains named in the caveat under "Similarity threshold"
+(and vulnerability research, which used a second template: "The X is in
+the Y where Z is done with the W") were rewritten with varied, specific
+entries, bodies, version pairs and queries; web search kept its summaries.
+Sizes and labels are unchanged. `tests/eval/corpus/quality.py` now fails a
+templated domain without an embedder, and the normal test suite runs it.
+The per-domain and pooled figures in the earlier sections of this file
+predate the rewrite.
+
+**Setup.** Qwen3-Embedding 8B, 4B and 0.6B as Q8_0 GGUFs through llama.cpp
+(last-token pooling, first 1024 dimensions, L2-normalised), on CPU. The
+sixteen domain fixtures alone and pooled (646 answerable queries), entries
+aged as in the other harnesses, `SearchService` at k = 5 with the 2.11.0
+defaults: query instruction on, `HIVEMIND_VECTOR_MIN_SIMILARITY` 0.45, the
+`ignore_age` recency hint agents send. Each other row turns one of those
+off. Weighted figures use 70% 8B, 20% 4B, 10% 0.6B.
+
+**Ranking (MRR).** Pooled, then the mean of the sixteen single-domain pools.
+
+| configuration | 8B | 4B | 0.6B | weighted |
+|---|---|---|---|---|
+| 2.11.0 defaults, pooled | 0.856 | 0.843 | 0.846 | 0.853 |
+| no query instruction | 0.852 | 0.839 | 0.832 | 0.847 |
+| no cut-off | 0.855 | 0.842 | 0.846 | 0.852 |
+| `default` recency hint | 0.840 | 0.829 | 0.832 | 0.837 |
+| all three off (2.10.0) | 0.839 | 0.825 | 0.815 | 0.834 |
+| 2.11.0 defaults, domain mean | 0.887 | 0.887 | 0.895 | 0.888 |
+| no query instruction | 0.882 | 0.885 | 0.884 | 0.883 |
+| no cut-off | 0.881 | 0.883 | 0.888 | 0.882 |
+| `default` recency hint | 0.844 | 0.849 | 0.858 | 0.846 |
+| all three off (2.10.0) | 0.838 | 0.844 | 0.838 | 0.839 |
+
+Every 2.11.0 default still helps on every model. The `ignore_age` hint is
+the largest single gain (0.042 weighted, domain mean). The query
+instruction gains far less than the ADR 0097 measurement found (pooled 8B
++0.004 here against +0.051 there): most of that gain came from the
+templated domains (legal compliance +0.187, research literature +0.110,
+data engineering +0.087 on 8B), whose keyword-fragment queries the
+instruction helped. Weighted per domain, the instruction is worse in four
+of sixteen domains, by at most 0.016 (blue team); none of them is a
+regression worth a per-domain setting.
+
+**Cut-off sweep, single-domain pools.** Cells are answers kept in the
+vector stream / off-topic queries with an empty vector stream (every query
+the pool cannot answer, mostly other domains' questions) / in-domain
+unanswered queries with an empty vector stream / mean MRR.
+
+| t | 8B | 4B | 0.6B |
+|---|---|---|---|
+| off | 100% / 0% / 0% / 0.881 | 100% / 0% / 0% / 0.883 | 100% / 0% / 0% / 0.888 |
+| 0.40 | 99% / 20% / 1% / 0.883 | 99% / 18% / 1% / 0.884 | 99% / 18% / 1% / 0.889 |
+| 0.45 | 99% / 41% / 3% / 0.887 | 98% / 38% / 3% / 0.887 | 99% / 43% / 5% / 0.895 |
+| 0.50 | 98% / 65% / 7% / 0.892 | 98% / 62% / 6% / 0.896 | 97% / 71% / 9% / 0.903 |
+| 0.55 | 97% / 83% / 16% / 0.903 | 97% / 82% / 16% / 0.901 | 95% / 88% / 29% / 0.904 |
+| 0.60 | 94% / 92% / 28% / 0.906 | 93% / 92% / 32% / 0.901 | 89% / 96% / 53% / 0.901 |
+
+0.45 keeps 99% of answers on 8B and empties the vector stream for 41% of
+off-topic searches (55% on the old corpus, where the templated domains
+were easy to tell apart). In-domain questions with no answer stay close to
+the pool's entries and are rarely emptied below 0.55. MRR keeps rising up
+to 0.55-0.60 because dropping weak vector candidates lets the keyword
+stream's answer rank higher, but each step loses answers from the vector
+stream (97% at 0.55, 94% at 0.60 on 8B), so 0.45 stays the default.
+
+**Near-duplicate warning (0.90) and entry-to-entry similarity, 8B.** Share
+of the 256 version pairs whose old and new entries are at or above the
+cut-off, of same-system distractors at or above it against either member,
+and of background entries whose nearest other entry is at or above it:
+
+| cut-off | versions | distinct same-system facts | background nearest neighbour |
+|---|---|---|---|
+| 0.85 | 92% | 12% | 1.5% |
+| 0.90 | 83% | 3% | 0.1% |
+| 0.95 | 59% | 1% | 0% |
+
+The background inflation is gone (nearest neighbour at 0.85 or more: 39%
+of the old pool, 1.5% now). 0.90 catches more versions than on the old
+clean domains (83% against 71%) and flags 3% of distinct same-system facts
+(1% before); the rewritten distractors share more wording with their pair
+by design. The warning's wording (rate it, supersede it, or add see_also)
+covers that 3%, so 0.90 stays.
+
+**Not re-run:** the tau sweep (`make measure-versions`; grouping stays
+off), the confirmation clock and per-kind profiles (off), and narrowed
+importance.
