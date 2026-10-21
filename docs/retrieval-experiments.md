@@ -893,7 +893,39 @@ lowers MRR everywhere, as expected for timeless questions, and remains
 unproven for current-state questions: there is no real-embedder fixture with
 labelled current-state queries yet. A hint acts only when an agent sends it, so
 turning `HIVEMIND_RECENCY_HINT` on is low-risk; the measurement supports
-enabling it for `ignore_age`. The default stays off.
+enabling it for `ignore_age`. *(Superseded: ADR 0101 turned the hint on by
+default, after the re-run below.)*
+
+**Re-run with the query instruction on (2026-10-21; ADR 0101).** Same fixture
+and harness (`make measure-confirmation`; five domains, 160 entries aged 0 to
+400 days, 96 answerable queries, the hint applied to every query), with the
+query instruction on (ADR 0097) and each embedder reported alone: Qwen3-Embedding
+8B Q8_0, 4B f16 and 0.6B f16 via llama.cpp, dim 1024. Pooled MRR, no hint, then
+`ignore_age`, then `prefer_recent`:
+
+| embedder | no hint | `ignore_age` | `prefer_recent` |
+|---|---|---|---|
+| 8B | 0.729 | 0.738 | 0.724 |
+| 4B | 0.741 | 0.745 | 0.687 |
+| 0.6B | 0.711 | 0.743 | 0.653 |
+
+Pooled hit@5 never drops with `ignore_age`: 8B 0.906 to 0.906, 4B 0.896 to
+0.896, 0.6B 0.906 to 0.927. Change in MRR with `ignore_age`, per domain:
+
+| domain | 8B | 4B | 0.6B |
+|---|---|---|---|
+| data analysis | +0.121 | +0.132 | +0.066 |
+| software engineering | +0.092 | +0.079 | +0.018 |
+| system administration | +0.079 | +0.070 | +0.082 |
+| journalism and social science | +0.027 | -0.029 | +0.027 |
+| finance analysis | +0.088 | +0.053 | +0.026 |
+
+`ignore_age` helps in 14 of 15 cells; the one loss is journalism on the 4B
+model. `prefer_recent` lowers MRR in every domain on these mostly timeless
+queries; it stays for current-state questions, for which there is still no
+labelled real-embedder fixture. The hint is on by default, and the `hive_search`
+description sends agents to `ignore_age` for a question whose answer does not
+age and to `prefer_recent` only for a "what is current" question.
 
 ## Version grouping
 

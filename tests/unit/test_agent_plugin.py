@@ -313,7 +313,8 @@ def test_entry_content_is_declared_untrusted_data_everywhere() -> None:
 # measures 17,847; the `near_duplicate` pointer (ADR 0087) 17,929; contributors
 # pinning (ADR 0096) 17,987 after trimming other wording. The `relied_on_changed`
 # catch-up step (ADR 0098) measures 17,992 after merging the two catch-up list
-# lines and dropping wording that was said twice.
+# lines and dropping wording that was said twice. The `recency` steer (ADR 0101)
+# measures 17,998 after tightening the keyword-only sentence.
 ALWAYS_ON_BUDGET = 18_000
 
 

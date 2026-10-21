@@ -289,7 +289,7 @@ The lower bound on the SPEC §6.4 recency factor (`max(floor, 0.5 ** (age/half_l
 _Avoid_: decay cutoff (nothing is excluded), minimum score (it bounds one factor, not the final score), recency cap (it is a lower bound, not an upper one)
 
 **Recency hint**:
-The per-search value (`default`, `prefer_recent`, `ignore_age`) a caller sends to say how age should weigh in that search; a deployment turns it on (ADR 0073), and off it is ignored.
+The per-search value (`default`, `prefer_recent`, `ignore_age`) a caller sends to say how age should weigh in that search; on by default (ADRs 0073, 0101); a deployment can turn it off, and off it is ignored.
 _Avoid_: recency filter (nothing is excluded), recency boost (it can also drop age), time sense (that is the query's property, the hint is what the agent says about it)
 
 **Recency profile**:

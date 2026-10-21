@@ -84,9 +84,8 @@ data:
   # embedder.
   HIVEMIND_RECENCY_BY_KIND: ""
   # A search may carry a `recency` hint (prefer_recent, ignore_age; ADR
-  # 0073). "false": accepted and ignored. Off until measured with the
-  # deployment's embedder.
-  HIVEMIND_RECENCY_HINT: "false"
+  # 0073). On by default (ADR 0101); "false": accepted and ignored.
+  HIVEMIND_RECENCY_HINT: "true"
   # Narrow the importance factor to 0.9..1.1 so one importance step stays
   # below the social cap (ADR 0088). On by default; "false" restores
   # 0.6..1.0.

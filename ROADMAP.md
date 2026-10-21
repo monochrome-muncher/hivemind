@@ -217,7 +217,8 @@ one capped budget for social signals (ADR 0070); evidence on hits
 mode and advisory warnings (ADR 0077); pin integrity (ADR 0076); fleet
 health and convergence metrics, admin-only (ADR 0075), with owner-level sibling-verdict figures (ADR 0089); and, off by default
 until measured, the confirmation clock (ADR 0071), per-kind recency
-(ADR 0072), the recency hint (ADR 0073) and version grouping (ADR 0074).
+(ADR 0072) and version grouping (ADR 0074). The recency hint (ADR 0073) is on
+by default since the Qwen3-Embedding run (ADR 0101).
 Explore search is opt-in per search (ADR 0078). Results are in
 [docs/retrieval-experiments.md](docs/retrieval-experiments.md).
 
