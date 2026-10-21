@@ -525,8 +525,9 @@ is also skipped when `HIVEMIND_API_KEY` is not set. What each agent gets:
   "task" is one run of the agent; to turn it off, set
   `HIVEMIND_STOP_MIN_TOOLS` to a very high number). There is no
   post-compaction line: Cline's `PreCompact` hook output is not injected.
-  The `UserPromptSubmit` hook gives the startup text on every prompt,
-  which is what carries Hivemind across a compaction.
+  The `UserPromptSubmit` hook gives the full startup text on a task's
+  first prompt and a short line naming the skill on each later one, which
+  is what carries Hivemind across a compaction.
 
 ## Incognito sessions
 
