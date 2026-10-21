@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
 from hivemind.domain.access import Visibility, may_supersede
@@ -17,6 +18,7 @@ from hivemind.services.chain import get_visible_entries
 from hivemind.services.errors import SupersedeDenied
 from hivemind.services.write_warnings import (
     WriteWarning,
+    answers_open_question_warning,
     near_duplicate_warning,
     write_warnings,
 )
@@ -66,6 +68,15 @@ class CheckResult:
     warnings: tuple[WriteWarning, ...] = ()
 
 
+def _related_warnings(
+    related: Sequence[RelatedEntry], draft: EntryDraft
+) -> tuple[WriteWarning, ...]:
+    """The warnings computed from ``related`` (no extra round trip)."""
+    return near_duplicate_warning(related, draft.see_also) + answers_open_question_warning(
+        related, draft.tags, (*draft.supersedes, *draft.see_also)
+    )
+
+
 class WriteService:
     """Creates entries: embed, persist, apply supersessions (SPEC.md §4.1,
     §7). An optional ``Extractor`` adds entity facets, best-effort (ADR
@@ -96,9 +107,7 @@ class WriteService:
         """
         entry, embedding, warnings, resolved = await self._write(draft, writer=writer)
         related = await self._related_best_effort(draft, entry.id, embedding, writer)
-        return WriteResult(
-            entry, related, warnings + near_duplicate_warning(related, resolved.see_also)
-        )
+        return WriteResult(entry, related, warnings + _related_warnings(related, resolved))
 
     async def check(self, draft: EntryDraft, *, writer: Visibility | None = None) -> CheckResult:
         """Check mode: everything ``write_and_relate`` validates (supersede
@@ -113,7 +122,7 @@ class WriteService:
         related = await self._related_best_effort(
             draft, None, embedding, writer, skip=frozenset(e.id for e in superseded)
         )
-        return CheckResult(related, warnings + near_duplicate_warning(related, draft.see_also))
+        return CheckResult(related, warnings + _related_warnings(related, draft))
 
     async def _related_best_effort(
         self,
