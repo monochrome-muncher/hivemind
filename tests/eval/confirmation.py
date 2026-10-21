@@ -55,8 +55,8 @@ from hivemind.domain.recency import RecencyHint
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Embedder, Store
 from hivemind.retrieval.eval import hit_at_k, reciprocal_rank
-from hivemind.services.governance import WriteService
 from hivemind.services.search import SearchService
+from hivemind.services.write import WriteService
 from tests.eval.domains import DOMAINS
 from tests.eval.threshold import Fixture, combined_fixture, domain_fixture
 from tests.fakes import FIXED_NOW, make_clock

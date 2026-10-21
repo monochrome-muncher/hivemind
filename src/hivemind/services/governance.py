@@ -2,8 +2,7 @@
 the surfaces hold for feedback and pins.
 
 The write path lives in ``services.write``, feedback in
-``services.feedback`` and pins in ``services.pins``; the names they
-define are re-exported here so existing imports keep working.
+``services.feedback`` and pins in ``services.pins``; import their names from those modules.
 """
 
 from __future__ import annotations
@@ -25,20 +24,9 @@ from hivemind.domain.validation import MAX_REASON_CHARS, InvalidInput, check_tex
 from hivemind.ports import Credential, Store
 from hivemind.services.audit import record_admin_action
 from hivemind.services.chain import get_visible_entry
-from hivemind.services.errors import EntryNotActive, EntryNotFound
-
-# Defined in ``services.errors``; re-exported because callers import them from here.
-from hivemind.services.errors import PermissionDenied as PermissionDenied
-from hivemind.services.errors import SupersedeDenied as SupersedeDenied
-
-# Defined in the modules named above; re-exported for the same reason.
-from hivemind.services.feedback import FeedbackOutcome as FeedbackOutcome
-from hivemind.services.feedback import FeedbackService
+from hivemind.services.errors import EntryNotActive, EntryNotFound, PermissionDenied
+from hivemind.services.feedback import FeedbackOutcome, FeedbackService
 from hivemind.services.pins import PinService
-from hivemind.services.write import RELATED_ON_WRITE_LIMIT as RELATED_ON_WRITE_LIMIT
-from hivemind.services.write import RelatedEntry as RelatedEntry
-from hivemind.services.write import WriteResult as WriteResult
-from hivemind.services.write import WriteService as WriteService
 
 
 class GovernanceService:

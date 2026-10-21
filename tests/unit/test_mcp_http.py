@@ -38,9 +38,10 @@ from hivemind.mcp.server import build_server
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
-from hivemind.services.governance import GovernanceService, WriteService
+from hivemind.services.governance import GovernanceService
 from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
+from hivemind.services.write import WriteService
 from tests.fakes import make_clock, make_embedder, make_search_config
 
 ALICE = Credential(user_id="alice", agent_id="agent-a")

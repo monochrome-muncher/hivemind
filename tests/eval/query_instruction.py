@@ -43,8 +43,8 @@ from hivemind.domain.entry import EntryDraft, Kind
 from hivemind.memstore import MemoryStore, cosine_similarity
 from hivemind.ports import Embedder
 from hivemind.retrieval.eval import hit_at_k, reciprocal_rank
-from hivemind.services.governance import WriteService
 from hivemind.services.search import SearchService
+from hivemind.services.write import WriteService
 from tests.eval.confirmation import entry_age_days
 from tests.eval.domains import Domain
 from tests.eval.threshold import Entry, Fixture, combined_fixture, domain_fixture

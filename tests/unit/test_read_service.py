@@ -17,8 +17,8 @@ from hivemind.domain.access import TrustLevel
 from hivemind.domain.entry import EntryDraft, EntryFilters, Kind
 from hivemind.domain.validation import MAX_GET_IDS, InvalidInput
 from hivemind.ports import Credential
-from hivemind.services.governance import WriteService
 from hivemind.services.read import EntryDetail, ReadService
+from hivemind.services.write import WriteService
 from tests.fakes import make_embedder, make_search_config, make_store
 
 

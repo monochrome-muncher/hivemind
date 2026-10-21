@@ -12,8 +12,8 @@ from __future__ import annotations
 from hivemind.domain.entry import Entry
 from hivemind.domain.feedback import FeedbackCounts, FeedbackSummary
 from hivemind.services.chain import EntryLinks
-from hivemind.services.governance import RelatedEntry
 from hivemind.services.search import Hit
+from hivemind.services.write import RelatedEntry
 from hivemind.services.write_warnings import WriteWarning
 
 
