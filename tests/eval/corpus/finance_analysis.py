@@ -22,13 +22,13 @@ EXTRA_ENTRIES: tuple[Entry, ...] = (
     (
         "fact",
         "The deferred tax uses the balance sheet method with the 25 percent statutory rate on the operating entities",
-        ("d", "e", "f", "e", "r", "r", "e", "d", "-", "t", "a", "x"),
+        ("deferred-tax",),
         "The 25 percent rate is the operating entity rate; the holding company at 15 percent is measured separately and the blended rate is the effective rate note.",
     ),
     (
         "fact",
         "The effective tax rate reconciliation separates the permanent differences from the rate changes in the note",
-        ("t", "a", "x"),
+        ("tax",),
         None,
     ),
     (
@@ -58,7 +58,7 @@ EXTRA_ENTRIES: tuple[Entry, ...] = (
     (
         "fact",
         "The fair value hierarchy classifies the fund positions as level two because the pricing uses observable inputs",
-        ("f", "a", "i", "r", "-", "v", "a", "l", "u", "e"),
+        ("fair-value",),
         "The level two classification is the pricing source, not the asset; a liquid equity priced off a stale feed would still be level two with a stale flag.",
     ),
     (
@@ -76,7 +76,7 @@ EXTRA_ENTRIES: tuple[Entry, ...] = (
     (
         "fact",
         "The ineffectiveness of the FX hedge is measured against the forecast transaction and booked to profit or loss",
-        ("h", "e", "d", "g", "e", "-", "a", "c", "c", "o", "u", "n", "t", "i", "n", "g"),
+        ("hedge-accounting",),
         "The ineffectiveness is the gap between the hedge and the forecast; a gap over the 10 percent band is the trigger to de-designate the hedge.",
     ),
     (
@@ -106,7 +106,7 @@ EXTRA_ENTRIES: tuple[Entry, ...] = (
     (
         "fact",
         "The VaR limit is 2 million euros at 99 percent confidence over a 10 day horizon",
-        ("v", "a", "r"),
+        ("var",),
         "The limit is a daily one; a breach is an exception report to the risk committee with the position decomposition attached.",
     ),
     (
@@ -118,7 +118,7 @@ EXTRA_ENTRIES: tuple[Entry, ...] = (
     (
         "fact",
         "The stress test scenario is a 300 basis point parallel shift with a 20 percent equity drawdown",
-        ("s", "t", "r", "e", "s", "s", "-", "t", "e", "s", "t"),
+        ("stress-test",),
         "The scenario is the regulatory one; an internal stress adds a 50 percent drawdown on the illiquid book and a 200 basis point steepener.",
     ),
     (
@@ -148,13 +148,13 @@ EXTRA_ENTRIES: tuple[Entry, ...] = (
     (
         "fact",
         "The ratio analysis pack includes the liquidity, leverage and profitability ratios with the two year trend",
-        ("r", "a", "t", "i", "o", "s"),
+        ("ratios",),
         "The two year trend is the minimum; a single year was measured and it missed the leverage build that started in the second year.",
     ),
     (
         "fact",
         "The working capital forecast uses the days metrics with the 13 week roll from the cash forecast",
-        ("w", "o", "r", "k", "i", "n", "g", "-", "c", "a", "p", "i", "t", "a", "l"),
+        ("working-capital",),
         None,
     ),
     (
@@ -184,19 +184,19 @@ EXTRA_ENTRIES: tuple[Entry, ...] = (
     (
         "fact",
         "The equity method investment is picked up at the investee's results with the fair value adjustment on acquisition",
-        ("e", "q", "u", "i", "t", "y", "-", "m", "e", "t", "h", "o", "d"),
+        ("equity-method",),
         None,
     ),
     (
         "fact",
         "The consolidation eliminates the intercompany transactions with the unrealised profit on the inventory",
-        ("c", "o", "n", "s", "o", "l", "i", "d", "a", "t", "i", "o", "n"),
+        ("consolidation",),
         None,
     ),
     (
         "fact",
         "The share-based compensation is expensed over the vesting period with the grant date fair value",
-        ("s", "h", "a", "r", "e", "-", "b", "a", "s", "e", "d", "-", "c", "o", "m", "p"),
+        ("share-based-comp",),
         None,
     ),
     (
@@ -214,13 +214,13 @@ EXTRA_ENTRIES: tuple[Entry, ...] = (
     (
         "fact",
         "The SaaS metrics pack reports the net revenue retention, the gross churn and the logo churn per cohort",
-        ("s", "a", "a", "s", "-", "m", "e", "t", "r", "i", "c", "s"),
+        ("saas-metrics",),
         "The cohort view is the pack; a blended number was measured and it hid the churn in the oldest cohort that the blended one averaged out.",
     ),
     (
         "insight",
         "The net revenue retention denominator is the cohort revenue at the start of the period, not the end",
-        ("s", "a", "a", "s", "-", "m", "e", "t", "r", "i", "c", "s"),
+        ("saas-metrics",),
         "The start-of-period denominator is what makes the NRR honest; the end-of-period one was 4 points higher and the board asked why the number moved without a change in the business.",
     ),
     (
@@ -238,7 +238,7 @@ EXTRA_ENTRIES: tuple[Entry, ...] = (
     (
         "fact",
         "The solvency margin for the insurance entity is measured at 150 percent of the SCR requirement",
-        ("s", "o", "l", "v", "e", "n", "c", "y"),
+        ("solvency",),
         None,
     ),
     (
@@ -250,25 +250,25 @@ EXTRA_ENTRIES: tuple[Entry, ...] = (
     (
         "fact",
         "The benchmark for the equity fund is the cap-weighted index with the 300 largest constituents",
-        ("b", "e", "n", "c", "h", "m", "a", "r", "k"),
+        ("benchmark",),
         None,
     ),
     (
         "fact",
         "The tracking error budget is 50 basis points annualised against the benchmark",
-        ("t", "r", "a", "c", "k", "i", "n", "g", "-", "e", "r", "r", "o", "r"),
+        ("tracking-error",),
         None,
     ),
     (
         "fact",
         "The Sharpe ratio is measured on the monthly returns with the risk-free rate from the 3 month deposit",
-        ("s", "h", "a", "r", "p", "e"),
+        ("sharpe",),
         None,
     ),
     (
         "fact",
         "The yield curve for the discount is the spline from the swap curve with the tenors at 1, 2, 5, 10 and 20 years",
-        ("y", "i", "e", "l", "d", "-", "c", "u", "r", "v", "e"),
+        ("yield-curve",),
         None,
     ),
     (
@@ -298,7 +298,7 @@ EXTRA_ENTRIES: tuple[Entry, ...] = (
     (
         "fact",
         "The LBO model uses the 4x leverage at entry with the 60 percent debt to EBITDA at exit",
-        ("l", "b", "o"),
+        ("lbo",),
         None,
     ),
     (
@@ -316,13 +316,13 @@ EXTRA_ENTRIES: tuple[Entry, ...] = (
     (
         "fact",
         "The credit rating of the corporate is A- with the outlook stable from the internal model",
-        ("c", "r", "e", "d", "i", "t", "-", "r", "a", "t", "i", "n", "g"),
+        ("credit-rating",),
         None,
     ),
     (
         "fact",
         "The liquidity coverage ratio uses the high quality liquid assets against the 30 day net outflow",
-        ("l", "c", "r"),
+        ("lcr",),
         None,
     ),
     (
@@ -334,13 +334,13 @@ EXTRA_ENTRIES: tuple[Entry, ...] = (
     (
         "fact",
         "The cash flow statement classification puts the investment income in the operating section per the policy",
-        ("c", "a", "s", "h", "-", "f", "l", "o", "w"),
+        ("cash-flow",),
         None,
     ),
     (
         "fact",
         "The operating cash flow is reconciled from the net income with the working capital movements and the non-cash items",
-        ("c", "a", "s", "h", "-", "f", "l", "o", "w"),
+        ("cash-flow",),
         None,
     ),
     (
@@ -358,7 +358,7 @@ EXTRA_ENTRIES: tuple[Entry, ...] = (
     (
         "fact",
         "The mark-to-market convention for the derivatives is the daily valuation with the close of business as the cut",
-        ("m", "a", "r", "k", "-", "t", "o", "-", "m", "a", "r", "k", "e", "t"),
+        ("mark-to-market",),
         None,
     ),
     (
@@ -370,19 +370,19 @@ EXTRA_ENTRIES: tuple[Entry, ...] = (
     (
         "fact",
         "The covariance matrix for the portfolio risk uses the 250 day daily returns with the Ledoit-Wolf shrinkage",
-        ("p", "o", "r", "t", "f", "o", "l", "i", "o", "-", "r", "i", "s", "k"),
+        ("portfolio-risk",),
         None,
     ),
     (
         "fact",
         "The factor model for the equity risk uses the three factor model with the market, size and value factors",
-        ("f", "a", "c", "t", "o", "r", "-", "m", "o", "d", "e", "l"),
+        ("factor-model",),
         None,
     ),
     (
         "fact",
         "The attribution analysis splits the return into the allocation, the selection and the interaction effects",
-        ("a", "t", "t", "r", "i", "b", "u", "t", "i", "o", "n"),
+        ("attribution",),
         None,
     ),
     (
@@ -394,13 +394,13 @@ EXTRA_ENTRIES: tuple[Entry, ...] = (
     (
         "fact",
         "The liquidity risk of the fund is measured with the 10 day redemption stress on the illiquid positions",
-        ("l", "i", "q", "u", "i", "d", "i", "t", "y", "-", "r", "i", "s", "k"),
+        ("liquidity-risk",),
         None,
     ),
     (
         "fact",
         "The leverage of the fund is measured with the committed and the drawn notional at 2.5x the NAV",
-        ("l", "e", "v", "e", "r", "a", "g", "e"),
+        ("leverage",),
         None,
     ),
     (
@@ -418,7 +418,7 @@ EXTRA_ENTRIES: tuple[Entry, ...] = (
     (
         "fact",
         "The early warning indicator for the credit portfolio is the migration to watch list at 2 percent of the book",
-        ("c", "r", "e", "d", "i", "t", "-", "r", "i", "s", "k"),
+        ("credit-risk",),
         None,
     ),
     (
@@ -430,7 +430,7 @@ EXTRA_ENTRIES: tuple[Entry, ...] = (
     (
         "fact",
         "The covenant monitoring for the corporate uses the semi-annual test with the 50 percent headroom alarm",
-        ("c", "o", "v", "e", "n", "a", "n", "t", "s"),
+        ("covenants",),
         None,
     ),
     (
@@ -448,37 +448,37 @@ EXTRA_ENTRIES: tuple[Entry, ...] = (
     (
         "fact",
         "The dividend policy is the 40 percent payout with the special dividend on the excess cash at the board discretion",
-        ("d", "i", "v", "i", "d", "e", "n", "d"),
+        ("dividend",),
         None,
     ),
     (
         "fact",
         "The share buyback is executed at a discount to the intrinsic value with the 10 percent market cap cap per year",
-        ("b", "u", "y", "b", "a", "c", "k"),
+        ("buyback",),
         None,
     ),
     (
         "fact",
         "The earnings call preparation uses the bridge from the prior year with the 100 percent of the variance explained",
-        ("e", "a", "r", "n", "i", "n", "g", "s"),
+        ("earnings",),
         None,
     ),
     (
         "fact",
         "The guidance range is set at a 90 percent confidence interval on the base case with the downside as the floor",
-        ("g", "u", "i", "d", "a", "n", "c", "e"),
+        ("guidance",),
         None,
     ),
     (
         "fact",
         "The segment reporting follows the management view with the 10 percent materiality on the segment profit",
-        ("s", "e", "g", "m", "e", "n", "t", "-", "r", "e", "p", "o", "r", "t", "i", "n", "g"),
+        ("segment-reporting",),
         None,
     ),
     (
         "fact",
         "The related party disclosure lists the transactions with the 5 percent ownership threshold as the trigger",
-        ("r", "e", "l", "a", "t", "e", "d", "-", "p", "a", "r", "t", "y"),
+        ("related-party",),
         None,
     ),
     (
@@ -496,13 +496,13 @@ EXTRA_ENTRIES: tuple[Entry, ...] = (
     (
         "fact",
         "The accounting policy for the development costs is the capitalisation at the technical feasibility with the 5 year amortisation",
-        ("d", "e", "v", "e", "l", "o", "p", "m", "e", "n", "t", "-", "c", "o", "s", "t", "s"),
+        ("development-costs",),
         None,
     ),
     (
         "fact",
         "The research costs are expensed as incurred with the 20 percent of the R&D spend in the income statement",
-        ("r", "e", "s", "e", "a", "r", "c", "h", "-", "c", "o", "s", "t", "s"),
+        ("research-costs",),
         None,
     ),
     (
@@ -550,7 +550,7 @@ EXTRA_ENTRIES: tuple[Entry, ...] = (
     (
         "fact",
         "The cash sweep for the operating accounts runs daily at the close with the 100 percent of the excess to the treasury",
-        ("c", "a", "s", "h", "-", "m", "a", "n", "a", "g", "e", "m", "e", "n", "t"),
+        ("cash-management",),
         None,
     ),
     (
@@ -580,7 +580,7 @@ EXTRA_ENTRIES: tuple[Entry, ...] = (
     (
         "fact",
         "The treasury policy for the investment of the cash uses the 90 day maturity cap with the AA rating floor",
-        ("t", "r", "e", "a", "s", "u", "r", "y"),
+        ("treasury",),
         None,
     ),
     (
@@ -608,13 +608,13 @@ EXTRA_PAIRS: tuple[VersionPair, ...] = (
         (
             "fact",
             "The hedge accounting effective portion threshold is 80 percent",
-            ("h", "e", "d", "g", "e", "-", "a", "c", "c", "o", "u", "n", "t", "i", "n", "g"),
+            ("hedge-accounting",),
             None,
         ),
         (
             "fact",
             "The hedge accounting effective portion threshold is 90 percent",
-            ("h", "e", "d", "g", "e", "-", "a", "c", "c", "o", "u", "n", "t", "i", "n", "g"),
+            ("hedge-accounting",),
             None,
         ),
         "what is the effectiveness threshold for the hedge accounting",
@@ -622,7 +622,7 @@ EXTRA_PAIRS: tuple[VersionPair, ...] = (
         (
             "fact",
             "The hedge accounting uses the prospective method for the effectiveness test",
-            ("h", "e", "d", "g", "e", "-", "a", "c", "c", "o", "u", "n", "t", "i", "n", "g"),
+            ("hedge-accounting",),
             None,
         ),
     ),
@@ -671,11 +671,11 @@ EXTRA_PAIRS: tuple[VersionPair, ...] = (
         ),
     ),
     VersionPair(
-        ("fact", "The LBO entry leverage is 4x", ("l", "b", "o"), None),
-        ("fact", "The LBO entry leverage is 5x", ("l", "b", "o"), None),
+        ("fact", "The LBO entry leverage is 4x", ("lbo",), None),
+        ("fact", "The LBO entry leverage is 5x", ("lbo",), None),
         "what entry leverage does the lbo model use",
         "the lbo entry leverage is 4x",
-        ("fact", "The LBO exit multiple is the 8x EV to EBITDA", ("l", "b", "o"), None),
+        ("fact", "The LBO exit multiple is the 8x EV to EBITDA", ("lbo",), None),
     ),
     VersionPair(
         ("fact", "The synergy ramp for the M&A case is 3 years", ("mna", "synergies"), None),
@@ -693,13 +693,13 @@ EXTRA_PAIRS: tuple[VersionPair, ...] = (
         (
             "fact",
             "The tracking error budget is 50 basis points annualised",
-            ("t", "r", "a", "c", "k", "i", "n", "g", "-", "e", "r", "r", "o", "r"),
+            ("tracking-error",),
             None,
         ),
         (
             "fact",
             "The tracking error budget is 75 basis points annualised",
-            ("t", "r", "a", "c", "k", "i", "n", "g", "-", "e", "r", "r", "o", "r"),
+            ("tracking-error",),
             None,
         ),
         "what is the tracking error budget",
@@ -707,7 +707,7 @@ EXTRA_PAIRS: tuple[VersionPair, ...] = (
         (
             "fact",
             "The tracking error is measured monthly against the benchmark",
-            ("t", "r", "a", "c", "k", "i", "n", "g", "-", "e", "r", "r", "o", "r"),
+            ("tracking-error",),
             None,
         ),
     ),
@@ -729,7 +729,7 @@ EXTRA_PAIRS: tuple[VersionPair, ...] = (
         (
             "fact",
             "The counterparty limit for the OTC positions is 50 million euros",
-            ("c", "o", "u", "n", "t", "e", "r", "p", "a", "r", "t", "y", "-", "r", "i", "s", "k"),
+            ("counterparty-risk",),
             None,
         ),
     ),
@@ -737,13 +737,13 @@ EXTRA_PAIRS: tuple[VersionPair, ...] = (
         (
             "fact",
             "The dividend payout is 40 percent of the earnings",
-            ("d", "i", "v", "i", "d", "e", "n", "d"),
+            ("dividend",),
             None,
         ),
         (
             "fact",
             "The dividend payout is 50 percent of the earnings",
-            ("d", "i", "v", "i", "d", "e", "n", "d"),
+            ("dividend",),
             None,
         ),
         "what is the dividend payout ratio",
@@ -751,7 +751,7 @@ EXTRA_PAIRS: tuple[VersionPair, ...] = (
         (
             "fact",
             "The special dividend is on the excess cash at the board discretion",
-            ("d", "i", "v", "i", "d", "e", "n", "d"),
+            ("dividend",),
             None,
         ),
     ),
@@ -759,13 +759,13 @@ EXTRA_PAIRS: tuple[VersionPair, ...] = (
         (
             "fact",
             "The cash sweep runs daily at the close",
-            ("c", "a", "s", "h", "-", "m", "a", "n", "a", "g", "e", "m", "e", "n", "t"),
+            ("cash-management",),
             None,
         ),
         (
             "fact",
             "The cash sweep runs twice daily at the close and midday",
-            ("c", "a", "s", "h", "-", "m", "a", "n", "a", "g", "e", "m", "e", "n", "t"),
+            ("cash-management",),
             None,
         ),
         "how often does the cash sweep run",
@@ -773,7 +773,7 @@ EXTRA_PAIRS: tuple[VersionPair, ...] = (
         (
             "fact",
             "The cash sweep moves 100 percent of the excess to the treasury",
-            ("c", "a", "s", "h", "-", "m", "a", "n", "a", "g", "e", "m", "e", "n", "t"),
+            ("cash-management",),
             None,
         ),
     ),
