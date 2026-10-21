@@ -32,6 +32,11 @@ It reports hit@1, hit@5 and MRR per fixture and for the pooled one, off and
 on, and the change. Set ``EVAL_IMPORTANCE_JSON`` to a path to also write
 the rows as JSON.
 
+Set ``EVAL_QUERY_INSTRUCTION`` to a literal instruction string to run the
+whole measurement with ``SearchConfig.query_instruction`` on (ADR 0097): the
+search embeds the wrapped query, (entries are embedded as before; this module embeds no query itself). Unset or empty is off; each report states
+the instruction in use.
+
 Run it against the deployment's embedder (the ``HIVEMIND_EMBEDDING_*``
 settings, e.g. ``make vllm`` locally): ``make measure-importance``.
 ``tests/eval/test_importance_measurement.py`` runs it on the hash embedder,
@@ -132,10 +137,14 @@ async def seed_pool(
 
 
 async def measure(
-    embedder: Embedder, fixture: Fixture, *, base: SearchConfig | None = None
+    embedder: Embedder,
+    fixture: Fixture,
+    *,
+    base: SearchConfig | None = None,
+    query_instruction: str = "",
 ) -> list[Row]:
     """Every assignment over ``fixture``, each scored with the factor off, then on."""
-    base = replace(base or SearchConfig(), default_limit=K)
+    base = replace(base or SearchConfig(), default_limit=K, query_instruction=query_instruction)
     rows = []
     for assignment in ASSIGNMENTS:
         store = MemoryStore(make_clock())
@@ -172,11 +181,13 @@ def fixtures(domains: Sequence[Domain] | None = None) -> list[Fixture]:
     ]
 
 
-def report(rows: Sequence[Row], model: str | None = None) -> str:
+def report(rows: Sequence[Row], model: str | None = None, query_instruction: str = "") -> str:
     """The measurement as Markdown: one line per fixture and assignment."""
+    shown = f"`{query_instruction}`" if query_instruction else "none"
     lines = []
     if model:
         lines += [f"Model: `{model}`. Cells are hit@1 / hit@5 / MRR.", ""]
+    lines += [f"Query instruction: {shown}", ""]
     lines += [
         "| fixture | importance | queries | narrow off | narrow on | change (hit@1 / hit@5 / MRR) |",
         "|---|---|---|---|---|---|",
@@ -196,8 +207,14 @@ def report(rows: Sequence[Row], model: str | None = None) -> str:
     return "\n".join(lines)
 
 
-def to_json(rows: Sequence[Row], model: str | None = None) -> str:
-    return json.dumps({"model": model, "k": K, "rows": [asdict(r) for r in rows]}, indent=2)
+def to_json(rows: Sequence[Row], model: str | None = None, query_instruction: str = "") -> str:
+    payload = {
+        "model": model,
+        "query_instruction": query_instruction,
+        "k": K,
+        "rows": [asdict(r) for r in rows],
+    }
+    return json.dumps(payload, indent=2)
 
 
 async def _main() -> None:
@@ -206,17 +223,18 @@ async def _main() -> None:
     from tests.eval.threshold import CachingEmbedder
 
     settings = load_settings()
+    query_instruction = os.environ.get("EVAL_QUERY_INSTRUCTION", "").strip()
     try:
         embedder = CachingEmbedder(build_embedder(settings))
         rows: list[Row] = []
         for fixture in fixtures():
-            rows += await measure(embedder, fixture)
+            rows += await measure(embedder, fixture, query_instruction=query_instruction)
     except EmbeddingError as exc:
         where = endpoint_label(settings.embedding_endpoint)
         raise SystemExit(f"embedder at {where} unavailable ({exc}); start it (make vllm)") from None
-    print(report(rows, embedder.model_name))
+    print(report(rows, embedder.model_name, query_instruction))
     if path := os.environ.get(JSON_ENV):
-        Path(path).write_text(to_json(rows, embedder.model_name) + "\n")
+        Path(path).write_text(to_json(rows, embedder.model_name, query_instruction) + "\n")
 
 
 if __name__ == "__main__":

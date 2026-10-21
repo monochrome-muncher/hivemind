@@ -26,6 +26,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from hivemind.domain.entry import DEFAULT_PREFIX_TOKENS, Kind
 from hivemind.domain.recency import RecencyHint
+from hivemind.domain.validation import check_query_instruction
 from hivemind.providers import clean_api_key, clean_endpoint
 
 logger = logging.getLogger(__name__)
@@ -104,6 +105,13 @@ def parse_recency_by_kind(text: str) -> tuple[tuple[Kind, float], ...] | None:
 
 # The floor under ``prefer_recent`` (ADR 0073); see docs/retrieval-experiments.md.
 PREFER_RECENT_FLOOR: float | None = 0.5
+# The task line put before the search query for an instruction-aware embedder
+# (ADR 0097). On by default: measured to help the Qwen3-Embedding family.
+# ``HIVEMIND_QUERY_INSTRUCTION=""`` turns it off. tests/eval/query_instruction.py
+# measures this same text.
+DEFAULT_QUERY_INSTRUCTION = (
+    "Given an agent's task or question, retrieve shared memory entries that answer it"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,6 +185,11 @@ class SearchConfig:
     # ``social_max``) instead of 0.6..1.0 (ADR 0088). On by default since
     # the measurement with the Qwen3 embedders; false restores 0.6..1.0.
     narrow_importance: bool = True
+    # For an instruction-aware embedder (Qwen3-Embedding, ADR 0097): the task
+    # line put before the search query as ``Instruct: {task}\nQuery:{query}``
+    # on the vector stream only. Entries are never embedded with it. On by
+    # default; empty turns it off.
+    query_instruction: str = DEFAULT_QUERY_INSTRUCTION
 
     def __post_init__(self) -> None:
         # Fail at config time (ADR 0024), not per request as a
@@ -226,12 +239,21 @@ class SearchConfig:
         if threshold is not None and not (math.isfinite(threshold) and 0.0 <= threshold < 1.0):
             # 1 or more would empty every vector list.
             raise ValueError(f"vector_min_similarity must be in [0, 1) or None, got {threshold}")
+        check_query_instruction(self.query_instruction)
         group_cut = self.version_group_min_similarity
         if group_cut is not None and not (math.isfinite(group_cut) and 0.0 < group_cut < 1.0):
             # 0 would group everything; 1 or more groups nothing.
             raise ValueError(
                 f"version_group_min_similarity must be in (0, 1) or None, got {group_cut}"
             )
+
+    def embedded_query(self, query: str) -> str:
+        """The text the vector stream embeds for ``query`` (ADR 0097): the
+        query itself, or with the instruction in front when one is set. The
+        keyword stream always gets the raw query."""
+        if not self.query_instruction:
+            return query
+        return f"Instruct: {self.query_instruction}\nQuery:{query}"
 
     def half_life_for(self, kind: Kind) -> float:
         """The half-life in days entries of ``kind`` age by (ADR 0072)."""
@@ -423,6 +445,15 @@ class Settings(BaseSettings):
     recency_hint: bool = False
     # See SearchConfig.narrow_importance (ADR 0088).
     narrow_importance: bool = True
+    # See SearchConfig.query_instruction (ADR 0097). Defaults to
+    # DEFAULT_QUERY_INSTRUCTION; an explicitly empty value means off;
+    # surrounding whitespace is stripped.
+    query_instruction: str = DEFAULT_QUERY_INSTRUCTION
+
+    @field_validator("query_instruction")
+    @classmethod
+    def _clean_query_instruction(cls, value: str) -> str:
+        return value.strip()
 
     @field_validator("embedding_api_key", "extractor_api_key")
     @classmethod
@@ -535,6 +566,7 @@ class Settings(BaseSettings):
             recency_by_kind=parse_recency_by_kind(self.recency_by_kind),
             recency_hint_enabled=self.recency_hint,
             narrow_importance=self.narrow_importance,
+            query_instruction=self.query_instruction,
         )
 
 
