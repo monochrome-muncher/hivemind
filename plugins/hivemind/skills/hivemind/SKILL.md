@@ -123,7 +123,7 @@ rest.
 
 An unexplained surprise: a `fact` tagged `anomaly`, summary
 "Unexplained: …", with how to reproduce it. A gap you could not fill:
-tag `open-question`; the answer supersedes it.
+tag `open-question`; the answer supersedes it or links it (`see_also`).
 
 On a permission error, don't switch scope silently: tell the user.
 

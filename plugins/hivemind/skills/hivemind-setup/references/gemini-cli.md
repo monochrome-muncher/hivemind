@@ -80,7 +80,7 @@ agents of other harnesses.
   layer: nothing re-injects the reminder after the context is compressed.
 - **Hooks:** a `SessionStart` hook puts the reminder in front of the
   first prompt, and an `AfterAgent` hook asks once, at the end of a long
-  session that wrote nothing, to write and rate before finishing (checked
+  session that rated nothing and wrote nothing or read entries, to write and rate before finishing (checked
   with Gemini CLI 0.63). The extension has both. Without it, merge this
   into `~/.gemini/settings.json`, with `/ABSOLUTE/PATH/scripts` replaced by the
   full path of the hivemind-setup skill's `scripts/` folder (normally
