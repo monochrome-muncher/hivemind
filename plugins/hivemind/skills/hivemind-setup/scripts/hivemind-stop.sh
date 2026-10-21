@@ -7,7 +7,8 @@
 #
 # It only nudges a substantial session (at least HIVEMIND_STOP_MIN_TOOLS tool
 # uses, default 20) that has not called hive_write or hive_feedback yet, or
-# that read entries (hive_search, hive_get) and never rated any, and it fails open: any error, missing file or unparsable input exits 0 with no
+# that read entries (hive_search, hive_get) and never rated any, and it
+# fails open: any error, missing file or unparsable input exits 0 with no
 # output. Plain POSIX sh, grep, sed and sort: no jq, python or node. No network.
 #
 # Stop input (stdin JSON): session_id, transcript_path, stop_hook_active.

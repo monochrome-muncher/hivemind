@@ -315,7 +315,7 @@ def test_entry_content_is_declared_untrusted_data_everywhere() -> None:
 # catch-up step (ADR 0098) measures 17,992 after merging the two catch-up list
 # lines and dropping wording that was said twice.
 # Trimming the register name rule, the pin caps and a few repeats, then
-# sharper search and get wording, measures 17,663.
+# sharper search and get wording, measures 17,688.
 ALWAYS_ON_BUDGET = 18_000
 
 

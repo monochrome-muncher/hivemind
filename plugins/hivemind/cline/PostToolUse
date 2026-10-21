@@ -5,9 +5,11 @@
 # stdin (taskId at the top level, postToolUse.toolName the tool; the older
 # tool_name spelling is still read). This counts the task's tool calls in a
 # temp file (reset by the TaskStart hook) and, once a task has made
-# HIVEMIND_STOP_MIN_TOOLS (default 20) calls without calling hive_write or
-# hive_feedback, steers the agent once, via contextModification, to write
-# what another agent could reuse; if nothing is new it just finishes.
+# HIVEMIND_STOP_MIN_TOOLS (default 20) calls without calling hive_feedback
+# and either without hive_write or after reading entries (hive_search,
+# hive_get), steers the agent once, via contextModification, to write what
+# another agent could reuse and rate what it tested; if nothing is new it
+# just finishes.
 #
 # Subagent tasks are never counted and never reminded (a non-empty string in
 # parent_agent_id, which the CLI hook runner sends at the top level, or in
