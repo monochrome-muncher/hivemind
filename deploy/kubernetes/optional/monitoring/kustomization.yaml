@@ -1,10 +1,28 @@
-# OPT-IN Prometheus Operator ServiceMonitor for hivemind-api (ADR 0050) — a
+# OPT-IN Prometheus Operator ServiceMonitors for hivemind-api and hivemind-mcp
+# (ADRs 0050, 0104) — a
 # SEPARATE tree: it needs the Operator's CRDs, and plain Prometheus uses the
 # pod annotations instead. Read servicemonitor.yaml's ADJUST notes first.
 #
 #   kubectl kustomize deploy/kubernetes/optional/monitoring | kubectl -n hivemind apply -f -
+#
+# It also ships the Grafana dashboard (hivemind-dashboard.json) as a
+# ConfigMap labelled grafana_dashboard: "1", the label the Grafana sidecar
+# of kube-prometheus-stack picks up by default (the sidecar must watch this
+# namespace, or all of them). Without the sidecar, import the JSON in
+# Grafana by hand (Dashboards > New > Import) and pick the Prometheus data
+# source; nothing else here is needed for it.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: hivemind
 resources:
   - servicemonitor.yaml
+configMapGenerator:
+  - name: hivemind-grafana-dashboard
+    files:
+      - hivemind-dashboard.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"
+        app.kubernetes.io/name: hivemind
+        app.kubernetes.io/component: monitoring

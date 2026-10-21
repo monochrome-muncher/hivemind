@@ -161,6 +161,18 @@ The 6-step operator flow:
    portal, which have no `/metrics`. `sum` the process counters across the
    two jobs. With the optional NetworkPolicies, Prometheus must run in the
    `monitoring` namespace (or edit the policies).
+8. **(Optional)** Grafana dashboard. `deploy/kubernetes/optional/monitoring/hivemind-dashboard.json`
+   shows search health (the share of searches finding nothing, per fleet;
+   keyword-only searches; explore share), traffic (requests, 5xx share,
+   401s, p50/p95 latency per route), MCP tool calls (rate, error share, p95
+   latency) and the fleet health gauges over time, so a release can be
+   compared with the one before it by moving the time range. The same tree
+   ships it as a ConfigMap labelled `grafana_dashboard: "1"`, which the
+   Grafana sidecar of kube-prometheus-stack loads on its own; elsewhere,
+   import the JSON (Dashboards > New > Import) and pick the Prometheus data
+   source. The search panels smooth over the `Search window` variable
+   (default 1h): those counters refresh about every 30 s. The MCP panels stay
+   empty while `HIVEMIND_MCP_METRICS_ENABLED` is off.
 
 ---
 
