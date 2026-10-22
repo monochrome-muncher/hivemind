@@ -47,6 +47,8 @@ Progress goes to stderr.
 
 Run it against the deployment's embedder (the ``HIVEMIND_EMBEDDING_*``
 settings, e.g. ``make vllm`` locally): ``make measure-longmemeval``.
+On a CPU the full set takes days; ``scripts/longmemeval-gpu/`` computes the
+embeddings on a GPU (a Kaggle notebook) and then runs this harness.
 ``tests/eval/test_longmemeval_measurement.py`` runs it on the hash embedder,
 which checks the machinery only; its numbers mean nothing.
 """
