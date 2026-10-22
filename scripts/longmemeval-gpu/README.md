@@ -10,7 +10,9 @@ run the same measurement with the embeddings computed in batches on a GPU.
   with `transformers` (fp16), writes them into the harness's disk cache
   ([tests/eval/embed_cache.py](../../tests/eval/embed_cache.py)), and runs the
   harness with every vector already cached. A run that stops can be started
-  again and picks up where it left off.
+  again and picks up where it left off. Qwen3-Embedding-8B overflows in fp16 on a few
+  texts whatever their length; those are embedded again in fp32 (weights spread
+  over the GPUs and CPU memory) and counted in `longmemeval-<tag>-notes.txt`.
 - [hivemind-longmemeval.ipynb](hivemind-longmemeval.ipynb) is a Kaggle notebook
   that clones the repository, downloads the dataset and runs `lme_gpu.py`. It
   runs Qwen3-Embedding-0.6B (dim 1024) on all 470 answerable questions, then

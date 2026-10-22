@@ -69,12 +69,19 @@ def harness_env(run, cache_dir):
     return env
 
 
-def load_model(name):
+def load_model(name, fp32=False):
     import torch
     from transformers import AutoModel, AutoTokenizer
 
     tokenizer = AutoTokenizer.from_pretrained(name, padding_side="left")
-    if torch.cuda.is_available():
+    if torch.cuda.is_available() and fp32:
+        # For the few texts fp16 overflows on: fp32 weights across the GPUs,
+        # the rest offloaded to CPU memory. Slow, but only for those texts.
+        gpus = {i: "13GiB" for i in range(torch.cuda.device_count())}
+        model = AutoModel.from_pretrained(
+            name, torch_dtype=torch.float32, device_map="auto", max_memory={**gpus, "cpu": "64GiB"}
+        )
+    elif torch.cuda.is_available():
         model = AutoModel.from_pretrained(name, torch_dtype=torch.float16, device_map="auto")
     else:
         model = AutoModel.from_pretrained(name, torch_dtype=torch.float32)
@@ -93,9 +100,6 @@ def tokenize(tokenizer, texts, max_len):
             x = x + [eos]
         ids.append(x)
     return ids
-
-
-TRUNCATED = []  # original token lengths of texts shortened after an fp16 overflow
 
 
 def embed_batch(tokenizer, model, ids, dim):
@@ -121,20 +125,24 @@ def embed_batch(tokenizer, model, ids, dim):
         return embed_batch(tokenizer, model, ids[:half], dim) + embed_batch(tokenizer, model, ids[half:], dim)
     finite = torch.isfinite(last).all(dim=-1)
     if not finite.all():
-        if len(ids) > 1:
-            # fp16 can overflow on a long text: redo the bad rows one at a time.
-            rows = [embed_batch(tokenizer, model, [x], dim)[0] if not ok else None for x, ok in zip(ids, finite.tolist())]
-        else:
-            if len(ids[0]) <= 64:
-                raise RuntimeError("non-finite embedding even for a short text")
-            # One text that still overflows: keep its first half (and its final
-            # <|endoftext|>) and try again, halving until the vector is finite.
-            TRUNCATED.append(len(ids[0]))
-            return embed_batch(tokenizer, model, [ids[0][: len(ids[0]) // 2 - 1] + ids[0][-1:]], dim)
+        # fp16 overflows on some texts, whatever their length. Redo a bad row
+        # alone; one that still overflows comes back as None for the fp32 pass.
+        if len(ids) == 1:
+            return [None]
         good = torch.nn.functional.normalize(last[:, :dim], dim=-1).cpu().tolist()
-        return [r if r is not None else g for r, g in zip(rows, good)]
+        return [g if ok else embed_batch(tokenizer, model, [x], dim)[0] for x, g, ok in zip(ids, good, finite.tolist())]
     vec = torch.nn.functional.normalize(last[:, :dim], dim=-1)
     return vec.cpu().tolist()
+
+
+def free_gpu():
+    gc.collect()
+    try:
+        import torch
+
+        torch.cuda.empty_cache()
+    except Exception:
+        pass
 
 
 def run_one(run):
@@ -157,6 +165,7 @@ def run_one(run):
         db.execute("CREATE TABLE IF NOT EXISTS vectors (key TEXT PRIMARY KEY, vector TEXT)")
         total = sum(len(x) for x in ids)
         done_tokens, started, pos = 0, time.time(), 0
+        deferred = []
         while pos < len(order):
             # Padded batches cost tokens x n and attention L^2 x n; long texts go one at a time.
             n = 1
@@ -167,9 +176,10 @@ def run_one(run):
                 n += 1
             chunk = order[pos : pos + n]
             vectors = embed_batch(tokenizer, model, [ids[i] for i in chunk], run["dim"])
+            deferred += [i for i, v in zip(chunk, vectors) if v is None]
             db.executemany(
                 "INSERT OR REPLACE INTO vectors (key, vector) VALUES (?, ?)",
-                [(items[i]["key"], json.dumps(v)) for i, v in zip(chunk, vectors)],
+                [(items[i]["key"], json.dumps(v)) for i, v in zip(chunk, vectors) if v is not None],
             )
             db.commit()
             pos += n
@@ -178,21 +188,23 @@ def run_one(run):
                 rate = done_tokens / max(time.time() - started, 1e-9)
                 left = (total - done_tokens) / max(rate, 1e-9)
                 print(f"[{tag}] {pos}/{len(order)} texts, {rate:,.0f} tok/s, about {left / 60:.0f} min left", flush=True)
-        db.close()
-        if TRUNCATED:
-            note = f"{len(TRUNCATED)} halvings after fp16 overflow, from texts of {sorted(set(TRUNCATED))} tokens"
-            print(f"[{tag}] {note}", flush=True)
-            OUT.mkdir(parents=True, exist_ok=True)
-            (OUT / f"longmemeval-{tag}-notes.txt").write_text(note + "\n")
-            TRUNCATED.clear()
         del model
-        gc.collect()
-        try:
-            import torch
-
-            torch.cuda.empty_cache()
-        except Exception:
-            pass
+        free_gpu()
+        if deferred:
+            print(f"[{tag}] {len(deferred)} texts overflowed in fp16; embedding them in fp32", flush=True)
+            tokenizer, model = load_model(run["model"], fp32=True)
+            for i in deferred:
+                vector = embed_batch(tokenizer, model, [ids[i]], run["dim"])[0]
+                if vector is None:
+                    raise RuntimeError(f"non-finite embedding in fp32 too ({len(ids[i])} tokens)")
+                db.execute("INSERT OR REPLACE INTO vectors (key, vector) VALUES (?, ?)", (items[i]["key"], json.dumps(vector)))
+                db.commit()
+            del model
+            free_gpu()
+            OUT.mkdir(parents=True, exist_ok=True)
+            note = f"{len(deferred)} of {len(items)} texts embedded in fp32 after an fp16 overflow"
+            (OUT / f"longmemeval-{tag}-notes.txt").write_text(note + "\n")
+        db.close()
 
     OUT.mkdir(parents=True, exist_ok=True)
     env["EVAL_LONGMEMEVAL_JSON"] = str(OUT / f"longmemeval-{tag}.json")
