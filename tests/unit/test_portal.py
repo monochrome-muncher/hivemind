@@ -186,6 +186,19 @@ async def test_the_portal_serves_its_page_and_only_the_shared_admin_files() -> N
         assert resp.headers["x-frame-options"] == "DENY"
 
 
+async def test_static_files_are_revalidated_on_every_load() -> None:
+    """As in the admin panel (same shared webapp): a cached module would
+    keep a tab on old code across a redeploy, so every full load must
+    revalidate against the server's ETag."""
+    _, api_app = _api()
+    async with _portal(httpx.ASGITransport(app=api_app)) as portal:
+        page = await portal.get("/")
+        own = await portal.get("/static/portal.js")
+        shared = [await portal.get(f"/static/{name}") for name in SHARED_MODULES]
+    for resp in (page, own, *shared):
+        assert resp.headers["cache-control"] == "no-cache", resp.url
+
+
 def test_the_portal_and_admin_files_do_not_collide() -> None:
     """A portal file named like a shared one would be shadowed by it."""
     own = {p.name for p in STATIC_DIR.iterdir()}
