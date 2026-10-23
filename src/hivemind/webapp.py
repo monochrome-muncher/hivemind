@@ -180,7 +180,7 @@ def create_proxy_app(
     routes.append(Mount("/static", StaticFiles(directory=static_dir), name="static"))
     return Starlette(
         routes=routes,
-        middleware=[Middleware(SecurityHeaders)],
+        middleware=[Middleware(SecurityHeaders), Middleware(StaticCacheHeaders)],
         lifespan=lifespan,
     )
 
@@ -230,3 +230,28 @@ class SecurityHeaders:
             await send(message)
 
         await self.app(scope, receive, send_with_headers)
+
+
+class StaticCacheHeaders:
+    """Pure-ASGI middleware: put ``Cache-Control: no-cache`` on every
+    ``/static/`` response. The bundle is unversioned static files, and a
+    browser that keeps a cached module across a redeploy runs old code
+    with no sign of it (a view added in a later release routes to the
+    landing page). ``no-cache`` makes every full load revalidate against
+    the ETag ``StaticFiles`` already sends — a 304 when unchanged —
+    instead of trusting a heuristic cache."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or not scope["path"].startswith("/static/"):
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_cache(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                MutableHeaders(scope=message)["Cache-Control"] = "no-cache"
+            await send(message)
+
+        await self.app(scope, receive, send_with_cache)

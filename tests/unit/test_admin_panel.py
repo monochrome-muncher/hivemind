@@ -269,6 +269,23 @@ async def test_every_response_carries_the_security_headers() -> None:
         assert resp.headers["referrer-policy"] == "no-referrer"
 
 
+async def test_static_files_are_revalidated_on_every_load() -> None:
+    """The bundle is plain static files with no versioning: a browser that
+    keeps a cached module across a redeploy runs old code (a view added in
+    a later release routes to the landing page, with no sign of it).
+    ``no-cache`` makes every full load revalidate against the server's
+    ETag (a 304 when unchanged) instead of trusting a heuristic cache."""
+    _, api_app = _api()
+    async with _panel(httpx.ASGITransport(app=api_app)) as panel:
+        responses = [
+            await panel.get("/"),
+            await panel.get("/static/admin.js"),
+            await panel.get("/static/admin.css"),
+        ]
+    for resp in responses:
+        assert resp.headers["cache-control"] == "no-cache", resp.url
+
+
 def test_the_csp_allows_only_same_origin_scripts_and_connections() -> None:
     directives = dict(d.strip().split(" ", 1) for d in CONTENT_SECURITY_POLICY.split(";"))
     assert directives["script-src"] == "'self'"
