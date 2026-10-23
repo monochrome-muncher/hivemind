@@ -268,6 +268,55 @@ async def test_registered_list_tool_exposes_include_body_param() -> None:
     assert "include_body" in tools["hive_list"].input_schema.get("properties", {})
 
 
+async def test_hive_write_sources_schema_is_typed() -> None:
+    """The exposed ``hive_write`` ``sources`` schema is typed to the entry
+    model (ADR 0105): items are ``{type, ref}`` with the ``type`` enum, both
+    required, no extra keys. It stays optional (not in ``required``)."""
+    server = build_server(make_app())
+    tools = {t.name: t for t in await server.list_tools()}
+    schema = tools["hive_write"].input_schema
+    assert "sources" not in schema.get("required", [])
+    items = schema["properties"]["sources"]["items"]
+    assert items["type"] == "object"
+    assert items["required"] == ["type", "ref"]
+    assert items["additionalProperties"] is False
+    assert items["properties"]["ref"] == {"type": "string"}
+    assert items["properties"]["type"]["enum"] == ["path", "url", "session", "other"]
+
+
+async def test_hive_write_malformed_source_is_structured_invalid_input() -> None:
+    """A malformed source still answers the structured ``invalid_input``
+    envelope (not a raw SDK ``is_error``), because the runtime stays lenient
+    (ADR 0105)."""
+    server = build_server(make_app())
+    for bad in (
+        [{"type": "bogus", "ref": "x"}],
+        [{"type": "url"}],
+        [{"type": "url", "ref": "   "}],
+    ):
+        result = await server.call_tool(
+            "hive_write", {"kind": "fact", "summary": "s", "sources": bad}
+        )
+        assert result.is_error is False
+        payload = json.loads(result.content[0].text)
+        assert payload["error"]["code"] == "invalid_input"
+
+
+async def test_hive_write_valid_source_roundtrips() -> None:
+    server = build_server(make_app())
+    result = await server.call_tool(
+        "hive_write",
+        {
+            "kind": "fact",
+            "summary": "s",
+            "sources": [{"type": "url", "ref": "https://example.com"}],
+        },
+    )
+    assert result.is_error is False
+    payload = json.loads(result.content[0].text)
+    assert payload["sources"] == [{"type": "url", "ref": "https://example.com"}]
+
+
 async def test_registered_list_tool_is_compact_unless_include_body() -> None:
     app = await _app_with_entity_entry()
     server = build_server(app)

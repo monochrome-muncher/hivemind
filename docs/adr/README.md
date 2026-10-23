@@ -114,3 +114,4 @@ is unused.
 | [0102](0102-trim-search-hit-score-and-empty-feedback.md) | Search hits round `score` to 4 significant figures and omit all-zero `feedback` | Accepted; display only, ranking unchanged |
 | [0103](0103-remove-confirmation-clock-and-per-kind-recency.md) | Remove the confirmation clock and the recency profile per kind | Accepted; supersedes 0071 and 0072, default ranking unchanged |
 | [0104](0104-mcp-runner-serves-process-metrics.md) | The MCP HTTP runner serves per-process metrics | Accepted; amends 0050, no usage series, `sum` across api and mcp |
+| [0105](0105-mcp-hive-write-sources-schema-typed.md) | The MCP `hive_write` `sources` schema is typed, validated leniently | Accepted; schema-only, keeps structured `invalid_input` |

@@ -14,7 +14,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
-from typing import Any
+from typing import Any, get_type_hints
 
 from mcp.server.mcpserver import MCPServer
 from mcp.types import TextContent
@@ -121,11 +121,18 @@ def register_tool(
 
     # The MCP schema is generated from the closure's signature at decoration
     # time: the verb's, minus its ``app`` parameter (bound here, never
-    # exposed). Set before the decorator snapshots it.
+    # exposed). Set before the decorator snapshots it. The SDK reads this
+    # ``__signature__`` without re-evaluating its string annotations, so
+    # resolve them in the verb's own namespace (where annotation names such
+    # as schema constants are defined) and store concrete types.
     _tool.__name__ = verb.__name__
     _tool.__doc__ = verb.__doc__
     setattr(_tool, "__wrapped__", verb)  # noqa: B010 (mypy: dynamic attr)
-    parameters = list(inspect.signature(verb).parameters.values())[1:]
+    resolved = get_type_hints(verb, include_extras=True)
+    parameters = [
+        p.replace(annotation=resolved[p.name]) if p.name in resolved else p
+        for p in list(inspect.signature(verb).parameters.values())[1:]
+    ]
     setattr(_tool, "__signature__", inspect.signature(verb).replace(parameters=parameters))  # noqa: B010 (mypy: dynamic attr)
     server.tool(name=name, description=description, structured_output=False)(_tool)
 
