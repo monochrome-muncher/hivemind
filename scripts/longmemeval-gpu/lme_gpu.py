@@ -77,7 +77,7 @@ def load_model(name, fp32=False):
     if torch.cuda.is_available() and fp32:
         # For the few texts fp16 overflows on: fp32 weights across the GPUs,
         # the rest offloaded to CPU memory. Slow, but only for those texts.
-        gpus = {i: "13GiB" for i in range(torch.cuda.device_count())}
+        gpus = {i: "11GiB" for i in range(torch.cuda.device_count())}
         model = AutoModel.from_pretrained(
             name, torch_dtype=torch.float32, device_map="auto", max_memory={**gpus, "cpu": "64GiB"}
         )
@@ -102,6 +102,23 @@ def tokenize(tokenizer, texts, max_len):
     return ids
 
 
+def forward(model, **inputs):
+    """The model call, with attention forced onto the memory-efficient kernel
+    where it exists: the default can pick the math kernel, which builds the full
+    heads x L x L score matrix (gigabytes for an 8k-token text on 8B)."""
+    import torch
+    from torch.nn.attention import SDPBackend, sdpa_kernel
+
+    if torch.cuda.is_available():
+        try:
+            with sdpa_kernel([SDPBackend.EFFICIENT_ATTENTION]):
+                return model(**inputs)
+        except RuntimeError as exc:
+            if "No available kernel" not in str(exc):
+                raise
+    return model(**inputs)
+
+
 def embed_batch(tokenizer, model, ids, dim):
     import torch
 
@@ -111,10 +128,10 @@ def embed_batch(tokenizer, model, ids, dim):
         with torch.no_grad():
             if len(ids) == 1:
                 # No padding, no mask: attention takes the memory-efficient causal path.
-                out = model(input_ids=torch.tensor(ids, device=device))
+                out = forward(model, input_ids=torch.tensor(ids, device=device))
             else:
                 batch = tokenizer.pad({"input_ids": ids}, padding=True, return_tensors="pt")
-                out = model(input_ids=batch["input_ids"].to(device), attention_mask=batch["attention_mask"].to(device))
+                out = forward(model, input_ids=batch["input_ids"].to(device), attention_mask=batch["attention_mask"].to(device))
             last = out.last_hidden_state[:, -1].float()  # left padding: the last position is each text's EOS
     except torch.OutOfMemoryError:
         if len(ids) == 1:
@@ -145,6 +162,21 @@ def free_gpu():
         pass
 
 
+def embed_fitting(tokenizer, model, text, dim):
+    """One text, shortened if the GPU runs out of memory: keep its first half
+    (and its final <|endoftext|>) until it fits. Returns (vector, tokens used)."""
+    import torch
+
+    while True:
+        try:
+            return embed_batch(tokenizer, model, [text], dim)[0], text
+        except torch.OutOfMemoryError:
+            free_gpu()
+            if len(text) <= 64:
+                raise
+            text = text[: len(text) // 2 - 1] + text[-1:]
+
+
 def run_one(run):
     tag = run["tag"]
     cache_dir = WORK / f"cache-{tag}"
@@ -157,6 +189,8 @@ def run_one(run):
 
     items = [json.loads(line) for line in texts_file.open()]
     if items:
+        import torch
+
         tokenizer, model = load_model(run["model"])
         ids = tokenize(tokenizer, [i["text"] for i in items], run.get("max_len", 8192))
         order = sorted(range(len(items)), key=lambda i: len(ids[i]))
@@ -165,7 +199,7 @@ def run_one(run):
         db.execute("CREATE TABLE IF NOT EXISTS vectors (key TEXT PRIMARY KEY, vector TEXT)")
         total = sum(len(x) for x in ids)
         done_tokens, started, pos = 0, time.time(), 0
-        deferred = []
+        deferred, too_long, shortened = [], [], []
         while pos < len(order):
             # Padded batches cost tokens x n and attention L^2 x n; long texts go one at a time.
             n = 1
@@ -175,7 +209,12 @@ def run_one(run):
                     break
                 n += 1
             chunk = order[pos : pos + n]
-            vectors = embed_batch(tokenizer, model, [ids[i] for i in chunk], run["dim"])
+            try:
+                vectors = embed_batch(tokenizer, model, [ids[i] for i in chunk], run["dim"])
+            except torch.OutOfMemoryError:  # a single text too long for the GPU
+                free_gpu()
+                too_long += chunk
+                vectors = []
             deferred += [i for i, v in zip(chunk, vectors) if v is None]
             db.executemany(
                 "INSERT OR REPLACE INTO vectors (key, vector) VALUES (?, ?)",
@@ -188,22 +227,40 @@ def run_one(run):
                 rate = done_tokens / max(time.time() - started, 1e-9)
                 left = (total - done_tokens) / max(rate, 1e-9)
                 print(f"[{tag}] {pos}/{len(order)} texts, {rate:,.0f} tok/s, about {left / 60:.0f} min left", flush=True)
+        for i in too_long:
+            vector, text = embed_fitting(tokenizer, model, ids[i], run["dim"])
+            if len(text) < len(ids[i]):
+                shortened.append((len(ids[i]), len(text)))
+            if vector is None:
+                ids[i] = text
+                deferred.append(i)
+            else:
+                db.execute("INSERT OR REPLACE INTO vectors (key, vector) VALUES (?, ?)", (items[i]["key"], json.dumps(vector)))
+                db.commit()
         del model
         free_gpu()
         if deferred:
             print(f"[{tag}] {len(deferred)} texts overflowed in fp16; embedding them in fp32", flush=True)
             tokenizer, model = load_model(run["model"], fp32=True)
             for i in deferred:
-                vector = embed_batch(tokenizer, model, [ids[i]], run["dim"])[0]
+                vector, text = embed_fitting(tokenizer, model, ids[i], run["dim"])
+                if len(text) < len(ids[i]):
+                    shortened.append((len(ids[i]), len(text)))
                 if vector is None:
                     raise RuntimeError(f"non-finite embedding in fp32 too ({len(ids[i])} tokens)")
                 db.execute("INSERT OR REPLACE INTO vectors (key, vector) VALUES (?, ?)", (items[i]["key"], json.dumps(vector)))
                 db.commit()
             del model
             free_gpu()
+        notes = []
+        if deferred:
+            notes.append(f"{len(deferred)} of {len(items)} texts embedded in fp32 after an fp16 overflow")
+        if shortened:
+            notes.append(f"{len(shortened)} texts too long for the GPU, shortened (tokens before, after): {shortened}")
+        if notes:
             OUT.mkdir(parents=True, exist_ok=True)
-            note = f"{len(deferred)} of {len(items)} texts embedded in fp32 after an fp16 overflow"
-            (OUT / f"longmemeval-{tag}-notes.txt").write_text(note + "\n")
+            (OUT / f"longmemeval-{tag}-notes.txt").write_text("\n".join(notes) + "\n")
+            print(f"[{tag}] " + "; ".join(notes), flush=True)
         db.close()
 
     OUT.mkdir(parents=True, exist_ok=True)
