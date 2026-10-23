@@ -99,6 +99,7 @@ def test_rules_moved_out_of_the_skill_live_in_the_tool_descriptions() -> None:
     assert "a thin result proves nothing" in contract.DESC_SEARCH
     assert "don't retry in a loop" in contract.DESC_WRITE
     assert "5 = outage" in contract.DESC_WRITE
+    assert "path|url|session|other" in contract.DESC_WRITE  # ADR 0105: sources named
     assert "verified:" in contract.DESC_FEEDBACK
     assert "Pin rarely" in contract.DESC_PIN
 

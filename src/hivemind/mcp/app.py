@@ -14,7 +14,9 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Annotated, Any
+
+from pydantic import WithJsonSchema
 
 from hivemind import wire
 from hivemind.config import SearchConfig
@@ -148,6 +150,26 @@ def _parse_kind(value: str | None) -> Kind | None:
         raise ValueError(f"kind must be one of fact|insight|decision, got {value!r}") from exc
 
 
+# The exposed MCP schema for ``hive_write`` ``sources`` (ADR 0105): typed
+# from the domain ``Source`` shape so ``tools/list`` shows ``{ref, type}``
+# with the ``type`` enum instead of an open map. The runtime type stays a
+# loose ``dict[str, str]`` so a malformed source still reaches
+# ``_parse_sources`` and answers the structured ``invalid_input`` envelope
+# (not a raw SDK ``is_error``).
+_SOURCES_ITEMS_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "type": {"type": "string", "enum": [t.value for t in SourceType]},
+        "ref": {"type": "string"},
+    },
+    "required": ["type", "ref"],
+    "additionalProperties": False,
+}
+_SOURCES_FIELD_SCHEMA: dict[str, Any] = {
+    "anyOf": [{"type": "array", "items": _SOURCES_ITEMS_SCHEMA}, {"type": "null"}]
+}
+
+
 def _parse_sources(raw: list[dict[str, str]] | None) -> tuple[Source, ...]:
     if not raw:
         return ()
@@ -213,7 +235,7 @@ async def hive_write(
     summary: str,
     body: str | None = None,
     payload: dict[str, Any] | None = None,
-    sources: list[dict[str, str]] | None = None,
+    sources: Annotated[list[dict[str, str]] | None, WithJsonSchema(_SOURCES_FIELD_SCHEMA)] = None,
     tags: list[str] | None = None,
     occurred_at: str | None = None,
     importance: int | None = None,
