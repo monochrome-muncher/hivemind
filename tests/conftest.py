@@ -78,3 +78,12 @@ def pytest_runtest_makereport(
         report.outcome = "failed"
         report.longrepr = f"HM_TEST_REQUIRE_PG=1 but the test skipped: {report.longrepr[2]}"
     return report
+
+
+@pytest.fixture(autouse=True)
+def _no_dev_bind_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`make test` exports the dev bind host HIVEMIND_HOST=127.0.0.1. On a
+    loopback bind with no allowed hosts the MCP SDK turns on its own Host
+    check, so in-process clients (Host `testserver`) got a 421. Tests that
+    need a bind host set it themselves."""
+    monkeypatch.delenv("HIVEMIND_HOST", raising=False)
