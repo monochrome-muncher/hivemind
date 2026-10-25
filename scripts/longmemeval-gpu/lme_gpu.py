@@ -97,16 +97,35 @@ def load_model(name, fp32=False):
 
 
 def tokenize(tokenizer, texts, max_len):
+    """Token ids per text, each a compact int32 array: as Python lists the full
+    set's 35M ids take gigabytes of RAM, enough to get the process killed."""
+    import numpy as np
+
     # Qwen3-Embedding's tokenizer appends <|endoftext|> (not eos_token, which is
     # <|im_end|>); keep it on texts cut by truncation too.
     eos = tokenizer.convert_tokens_to_ids("<|endoftext|>")
     ids = []
-    for t in texts:
-        x = tokenizer(t, add_special_tokens=True, truncation=True, max_length=max_len - 1)["input_ids"]
-        if not x or x[-1] != eos:  # Qwen3-Embedding pools the final <|endoftext|> token
-            x = x + [eos]
-        ids.append(x)
+    for start in range(0, len(texts), 256):
+        chunk = texts[start : start + 256]
+        for x in tokenizer(chunk, add_special_tokens=True, truncation=True, max_length=max_len - 1)["input_ids"]:
+            if not x or x[-1] != eos:  # Qwen3-Embedding pools the final <|endoftext|> token
+                x = [*x, eos]
+            ids.append(np.asarray(x, dtype=np.int32))
     return ids
+
+
+def memory():
+    """This process's peak RAM and the machine's available RAM, for the log."""
+    import resource
+
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 2**20
+    try:
+        with open("/proc/meminfo") as f:
+            info = dict(line.split(":", 1) for line in f)
+        available = int(info["MemAvailable"].split()[0]) / 2**20
+    except (OSError, KeyError, ValueError):
+        return f"peak RAM {peak:.1f} GiB"
+    return f"peak RAM {peak:.1f} GiB, {available:.1f} GiB available"
 
 
 def forward(model, **inputs):
@@ -238,13 +257,24 @@ def run_one(run):
     dump_file.write_text(DUMP)
     subprocess.run(["uv", "run", "python", str(dump_file), str(texts_file)], cwd=REPO, env=env, check=True)
 
-    items = [json.loads(line) for line in texts_file.open()]
-    if items:
+    keys, texts = [], []
+    for line in texts_file.open():
+        item = json.loads(line)
+        keys.append(item["key"])
+        texts.append(item["text"])
+    if keys:
+        import numpy as np
         import torch
+        from transformers import AutoTokenizer
 
+        # Tokenized before the model loads, and the texts dropped, to keep RAM low.
+        ids = tokenize(AutoTokenizer.from_pretrained(run["model"]), texts, run.get("max_len", 8192))
+        del texts
+        gc.collect()
+        print(f"[{tag}] {len(ids)} texts tokenized; {memory()}", flush=True)
         tokenizer, model = load_model(run["model"])
-        ids = tokenize(tokenizer, [i["text"] for i in items], run.get("max_len", 8192))
-        order = sorted(range(len(items)), key=lambda i: len(ids[i]))
+        print(f"[{tag}] model loaded; {memory()}", flush=True)
+        order = sorted(range(len(keys)), key=lambda i: len(ids[i]))
         db = sqlite3.connect(cache_dir / "embeddings.sqlite3")
         db.execute("PRAGMA journal_mode=WAL")
         db.execute("CREATE TABLE IF NOT EXISTS vectors (key TEXT PRIMARY KEY, vector TEXT)")
@@ -263,7 +293,7 @@ def run_one(run):
                 n += 1
             chunk = order[pos : pos + n]
             try:
-                vectors = embed_batch(tokenizer, model, [ids[i] for i in chunk], run["dim"])
+                vectors = embed_batch(tokenizer, model, [ids[i].tolist() for i in chunk], run["dim"])
             except torch.OutOfMemoryError:  # a single text too long for the GPU
                 free_gpu()
                 too_long += chunk
@@ -271,7 +301,7 @@ def run_one(run):
             deferred += [i for i, v in zip(chunk, vectors) if v is None]
             db.executemany(
                 "INSERT OR REPLACE INTO vectors (key, vector) VALUES (?, ?)",
-                [(items[i]["key"], json.dumps(v)) for i, v in zip(chunk, vectors) if v is not None],
+                [(keys[i], json.dumps(v)) for i, v in zip(chunk, vectors) if v is not None],
             )
             db.commit()
             pos += n
@@ -279,7 +309,7 @@ def run_one(run):
             if pos == len(order) or pos % 500 < n:
                 rate = done_tokens / max(time.time() - started, 1e-9)
                 left = (total - done_tokens) / max(rate, 1e-9)
-                print(f"[{tag}] {pos}/{len(order)} texts, {rate:,.0f} tok/s, about {left / 60:.0f} min left", flush=True)
+                print(f"[{tag}] {pos}/{len(order)} texts, {rate:,.0f} tok/s, about {left / 60:.0f} min left; {memory()}", flush=True)
         if pos < len(order) or over_budget(run):
             return stop_for_time(
                 tag, db, f"{pos} of {len(order)} texts ({done_tokens:,} of {total:,} tokens) done this run, "
@@ -289,14 +319,14 @@ def run_one(run):
         for i in too_long:
             if over_budget(run, grace=1.0):
                 return stop_for_time(tag, db, "in the pass for texts too long for the GPU")
-            vector, text = embed_fitting(tokenizer, model, ids[i], run["dim"])
+            vector, text = embed_fitting(tokenizer, model, ids[i].tolist(), run["dim"])
             if len(text) < len(ids[i]):
                 shortened.append((len(ids[i]), len(text)))
             if vector is None:
-                ids[i] = text
+                ids[i] = np.asarray(text, dtype=np.int32)
                 deferred.append(i)
             else:
-                db.execute("INSERT OR REPLACE INTO vectors (key, vector) VALUES (?, ?)", (items[i]["key"], json.dumps(vector)))
+                db.execute("INSERT OR REPLACE INTO vectors (key, vector) VALUES (?, ?)", (keys[i], json.dumps(vector)))
                 db.commit()
         del model
         free_gpu()
@@ -306,18 +336,18 @@ def run_one(run):
             for i in deferred:
                 if over_budget(run, grace=1.0):
                     return stop_for_time(tag, db, "in the fp32 pass")
-                vector, text = embed_fitting(tokenizer, model, ids[i], run["dim"])
+                vector, text = embed_fitting(tokenizer, model, ids[i].tolist(), run["dim"])
                 if len(text) < len(ids[i]):
                     shortened.append((len(ids[i]), len(text)))
                 if vector is None:
                     raise RuntimeError(f"non-finite embedding in fp32 too ({len(ids[i])} tokens)")
-                db.execute("INSERT OR REPLACE INTO vectors (key, vector) VALUES (?, ?)", (items[i]["key"], json.dumps(vector)))
+                db.execute("INSERT OR REPLACE INTO vectors (key, vector) VALUES (?, ?)", (keys[i], json.dumps(vector)))
                 db.commit()
             del model
             free_gpu()
         notes = []
         if deferred:
-            notes.append(f"{len(deferred)} of {len(items)} texts embedded in fp32 after an fp16 overflow")
+            notes.append(f"{len(deferred)} of {len(keys)} texts embedded in fp32 after an fp16 overflow")
         if shortened:
             notes.append(f"{len(shortened)} texts too long for the GPU, shortened (tokens before, after): {shortened}")
         if notes:
