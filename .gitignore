@@ -28,3 +28,6 @@ data/
 
 # OS
 .DS_Store
+
+# Downloaded datasets and embedding caches
+.cache/
