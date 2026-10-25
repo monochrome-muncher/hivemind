@@ -82,8 +82,9 @@ def pytest_runtest_makereport(
 
 @pytest.fixture(autouse=True)
 def _no_dev_bind_host(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`make test` exports the dev bind host HIVEMIND_HOST=127.0.0.1. On a
-    loopback bind with no allowed hosts the MCP SDK turns on its own Host
-    check, so in-process clients (Host `testserver`) got a 421. Tests that
-    need a bind host set it themselves."""
+    """A bind host in the shell (`make test` no longer passes the dev
+    HIVEMIND_HOST=127.0.0.1 on) must not reach the tests: on a loopback bind
+    with no allowed hosts the MCP SDK turns on its own Host check, so
+    in-process clients (Host `testserver`) got a 421. Tests that need a bind
+    host set it themselves."""
     monkeypatch.delenv("HIVEMIND_HOST", raising=False)

@@ -9,7 +9,7 @@ ENV_NAME := $(strip $(shell printf '%s' '$(ENVIRONMENT)' | tr '[:upper:]' '[:low
 ENV_PROFILE := $(if $(filter production prod,$(ENV_NAME)),.env.production,$(if $(filter staging,$(ENV_NAME)),.env.staging,$(if $(filter test,$(ENV_NAME)),.env.test,.env.local)))
 PROFILE_VARS := $(shell sed -n -E 's/^[[:space:]]*(export[[:space:]]+)?(HIVEMIND_[A-Za-z0-9_]+)[[:space:]]*=.*/\2/p' $(ENV_PROFILE) 2>/dev/null)
 # $(call dev_default,NAME,VALUE): export NAME ?= VALUE unless the profile sets NAME.
-dev_default = $(if $(filter $(1),$(PROFILE_VARS)),,$(eval export $(1) ?= $(2)))
+dev_default = $(eval DEV_DEFAULTS += $(1))$(if $(filter $(1),$(PROFILE_VARS)),,$(eval export $(1) ?= $(2)))
 # Local vLLM embedding endpoint (make vllm; ADR 0005). Override per target,
 # e.g. `make api HIVEMIND_EMBEDDING_ENDPOINT=https://api.openai.com/v1`.
 $(call dev_default,HIVEMIND_DATABASE_URL,$(PG_DSN))
@@ -42,6 +42,18 @@ $(call dev_default,HIVEMIND_PORT,8000)
 # passed on here.
 HIVEMIND_MCP_HTTP_PORT ?= $(or $(shell sed -n -E 's/^[[:space:]]*(export[[:space:]]+)?HIVEMIND_MCP_HTTP_PORT[[:space:]]*=[[:space:]]*["'"'"']?([0-9]+).*/\2/p' $(ENV_PROFILE) 2>/dev/null | tail -n 1),8088)
 export HIVEMIND_MCP_HTTP_PORT
+DEV_DEFAULTS += HIVEMIND_MCP_HTTP_PORT
+
+# `make test` runs the suite with the environment CI gives it
+# (.github/workflows/tests.yml): of the dev defaults it keeps only the
+# database DSN and the embedding dim, which match CI's and the pool
+# `make migrate` provisions. The rest are for running the services; a test
+# that saw them would pass or fail by how it was started (the MCP 421 that
+# HIVEMIND_HOST caused). Only defaults set here are dropped: a shell export
+# or `make VAR=...` still reaches the tests.
+TEST_ENV_KEEP := HIVEMIND_DATABASE_URL HIVEMIND_EMBEDDING_DIM
+TEST_ENV = env $(foreach v,$(filter-out $(TEST_ENV_KEEP),$(DEV_DEFAULTS)),$(if $(filter file,$(origin $(v))),-u $(v)))
+PYTEST ?= uv run pytest
 
 .PHONY: help
 help: ## Show this help
@@ -134,12 +146,12 @@ standalone-reset: ## Stop the standalone stack and wipe its data volume
 	$(STANDALONE_COMPOSE) down -v
 
 .PHONY: test
-test: ## Run the full test suite (unit + integration; integration needs `make pg`)
-	uv run pytest
+test: ## Run the full test suite (unit + integration; integration needs `make pg`), with only CI's dev settings
+	$(TEST_ENV) $(PYTEST)
 
 .PHONY: test-unit
-test-unit: ## Run unit tests only (no Postgres needed)
-	uv run pytest tests/unit
+test-unit: ## Run unit tests only (no Postgres needed), with only CI's dev settings
+	$(TEST_ENV) $(PYTEST) tests/unit
 
 .PHONY: measure-threshold
 measure-threshold: ## Measure a search similarity threshold with the configured embedder (ADR 0062; e.g. after `make vllm`; set HIVEMIND_EMBEDDING_DIM to the deployment's)
