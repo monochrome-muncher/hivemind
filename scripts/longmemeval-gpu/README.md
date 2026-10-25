@@ -19,11 +19,20 @@ run the same measurement with the embeddings computed in batches on a GPU.
   Qwen3-Embedding-8B (dim 2000, the largest the index allows) on 20 questions
   per type. Kaggle's free GPU quota covers both. The steps are in the
   notebook's first cell.
+- [hivemind-longmemeval-8b-all.ipynb](hivemind-longmemeval-8b-all.ipynb) runs
+  Qwen3-Embedding-8B on all 470 questions. That is about 35 million tokens,
+  9 to 10 hours on two T4s, close to Kaggle's 12-hour session limit, so the run
+  stops itself after a time budget (`time_budget_hours`) and keeps its vector
+  cache in the version's output. Adding that output as an input to the next run
+  carries on where it stopped (`LME_SEED` points at the inputs, and every cache
+  found there is merged in).
 
 Elsewhere, run `python lme_gpu.py '<runs as JSON>'` on any machine that has a
 GPU, `torch`, `transformers` and `uv`, setting `LME_REPO`, `LME_DATA`,
 `LME_WORK` and `LME_OUT` to the checkout, the dataset file, a scratch directory
-and the output directory. The runs JSON format is in the notebook's last cell.
+and the output directory. `LME_CACHE` moves the vector caches (default
+`LME_WORK`) and `LME_SEED` names a directory searched for earlier
+`cache-<tag>/embeddings.sqlite3` files to merge in. The runs JSON format is in the notebook's last cell.
 
 The vectors match the llama.cpp Q8_0 GGUF served over HTTP (cosine ≥ 0.998 on
 spot checks), so results from either route are comparable.

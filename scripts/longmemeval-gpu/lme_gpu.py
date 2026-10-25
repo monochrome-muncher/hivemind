@@ -19,6 +19,13 @@ REPO = Path(os.environ.get("LME_REPO", "/tmp/hivemind"))
 DATA = Path(os.environ.get("LME_DATA", "/tmp/lme/longmemeval_s_cleaned.json"))
 WORK = Path(os.environ.get("LME_WORK", "/tmp/lme"))
 OUT = Path(os.environ.get("LME_OUT", "/kaggle/working"))
+# Where the vector caches live, and where to look for caches from earlier runs
+# to merge in. On Kaggle the notebook points LME_CACHE into /kaggle/working, so
+# a version's output holds the cache, and LME_SEED at /kaggle/input, where an
+# earlier version's output appears once it is added as an input.
+CACHE = Path(os.environ.get("LME_CACHE", str(WORK)))
+SEED = os.environ.get("LME_SEED")
+STARTED = time.time()
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 # Runs the harness's code to list the (cache key, text) pairs one model needs.
@@ -177,10 +184,54 @@ def embed_fitting(tokenizer, model, text, dim):
             text = text[: len(text) // 2 - 1] + text[-1:]
 
 
+def seed_cache(tag, cache_dir):
+    """Merge in the vectors of any earlier run's cache for this tag found under SEED."""
+    if not SEED:
+        return
+    target = cache_dir / "embeddings.sqlite3"
+    db = sqlite3.connect(f"file:{target}", uri=True)  # so ATTACH takes a read-only URI
+    db.execute("CREATE TABLE IF NOT EXISTS vectors (key TEXT PRIMARY KEY, vector TEXT)")
+    for found in sorted(Path(SEED).glob(f"**/cache-{tag}/embeddings.sqlite3")):
+        if found.resolve() == target.resolve():
+            continue
+        db.execute("ATTACH DATABASE ? AS seed", (f"file:{found}?mode=ro&immutable=1",))
+        before = db.execute("SELECT COUNT(*) FROM vectors").fetchone()[0]
+        db.execute("INSERT OR IGNORE INTO vectors SELECT key, vector FROM seed.vectors")
+        db.commit()
+        db.execute("DETACH DATABASE seed")
+        after = db.execute("SELECT COUNT(*) FROM vectors").fetchone()[0]
+        print(f"[{tag}] merged {after - before} vectors from {found}", flush=True)
+    db.close()
+
+
+def over_budget(run, grace=0.0):
+    """True once the run's time budget (hours since this script started), plus
+    `grace` hours, is spent."""
+    budget = run.get("time_budget_hours")
+    return budget is not None and time.time() - STARTED > (budget + grace) * 3600
+
+
+def stop_for_time(tag, db, message):
+    """Out of time: keep what is cached and say how far the run got. Texts not
+    yet cached, including any held back for the fp32 pass or for being too
+    long, are listed again by the next run."""
+    db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    db.close()
+    OUT.mkdir(parents=True, exist_ok=True)
+    message = f"Time budget spent: {message}. Run again with this run's output added as an input to carry on."
+    (OUT / f"longmemeval-{tag}-progress.txt").write_text(message + "\n")
+    print(f"[{tag}] {message}", flush=True)
+    return False
+
+
 def run_one(run):
+    """Embed what the cache lacks, then run the harness. Returns False if the
+    time budget ran out first: the cache keeps what was done, and running
+    again (with that cache) carries on from there."""
     tag = run["tag"]
-    cache_dir = WORK / f"cache-{tag}"
+    cache_dir = CACHE / f"cache-{tag}"
     cache_dir.mkdir(parents=True, exist_ok=True)
+    seed_cache(tag, cache_dir)
     env = harness_env(run, cache_dir)
     texts_file = WORK / f"texts-{tag}.jsonl"
     dump_file = WORK / "dump.py"
@@ -201,6 +252,8 @@ def run_one(run):
         done_tokens, started, pos = 0, time.time(), 0
         deferred, too_long, shortened = [], [], []
         while pos < len(order):
+            if over_budget(run):
+                break
             # Padded batches cost tokens x n and attention L^2 x n; long texts go one at a time.
             n = 1
             while pos + n < len(order):
@@ -227,7 +280,15 @@ def run_one(run):
                 rate = done_tokens / max(time.time() - started, 1e-9)
                 left = (total - done_tokens) / max(rate, 1e-9)
                 print(f"[{tag}] {pos}/{len(order)} texts, {rate:,.0f} tok/s, about {left / 60:.0f} min left", flush=True)
+        if pos < len(order) or over_budget(run):
+            return stop_for_time(
+                tag, db, f"{pos} of {len(order)} texts ({done_tokens:,} of {total:,} tokens) done this run, "
+                f"{len(deferred) + len(too_long)} of them held back for a later pass"
+            )
+        # The passes below are slow but short; they get an hour past the budget.
         for i in too_long:
+            if over_budget(run, grace=1.0):
+                return stop_for_time(tag, db, "in the pass for texts too long for the GPU")
             vector, text = embed_fitting(tokenizer, model, ids[i], run["dim"])
             if len(text) < len(ids[i]):
                 shortened.append((len(ids[i]), len(text)))
@@ -243,6 +304,8 @@ def run_one(run):
             print(f"[{tag}] {len(deferred)} texts overflowed in fp16; embedding them in fp32", flush=True)
             tokenizer, model = load_model(run["model"], fp32=True)
             for i in deferred:
+                if over_budget(run, grace=1.0):
+                    return stop_for_time(tag, db, "in the fp32 pass")
                 vector, text = embed_fitting(tokenizer, model, ids[i], run["dim"])
                 if len(text) < len(ids[i]):
                     shortened.append((len(ids[i]), len(text)))
@@ -261,15 +324,19 @@ def run_one(run):
             OUT.mkdir(parents=True, exist_ok=True)
             (OUT / f"longmemeval-{tag}-notes.txt").write_text("\n".join(notes) + "\n")
             print(f"[{tag}] " + "; ".join(notes), flush=True)
+        db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         db.close()
 
     OUT.mkdir(parents=True, exist_ok=True)
+    (OUT / f"longmemeval-{tag}-progress.txt").unlink(missing_ok=True)
     env["EVAL_LONGMEMEVAL_JSON"] = str(OUT / f"longmemeval-{tag}.json")
     with (OUT / f"longmemeval-{tag}.md").open("w") as md:
         subprocess.run(["uv", "run", "python", "-m", "tests.eval.longmemeval"], cwd=REPO, env=env, stdout=md, check=True)
     print((OUT / f"longmemeval-{tag}.md").read_text())
+    return True
 
 
 if __name__ == "__main__":
     for r in json.loads(sys.argv[1]):
-        run_one(r)
+        if not run_one(r):
+            break  # out of time; later runs would only be cut short too
