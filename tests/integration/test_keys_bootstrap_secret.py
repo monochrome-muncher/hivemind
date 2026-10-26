@@ -13,12 +13,12 @@ from __future__ import annotations
 
 import asyncpg
 import pytest
+from tests.pg import ensure_migrated
 
 from hivemind.config import Settings
 from hivemind.store import PgAuthenticator
 from hivemind.store.keys import _bootstrap_secret, _rotate_org
 from hivemind.store.kube_secret import KubeApiError
-from hivemind.store.migrate import migrate
 
 TABLES = "TRUNCATE audit_log, credentials"
 
@@ -69,12 +69,7 @@ async def _rows(dsn: str, sql: str) -> list[asyncpg.Record]:
 @pytest.fixture
 async def dsn():
     dsn = _dsn()
-    try:
-        probe = await asyncpg.connect(dsn, timeout=5)
-    except Exception as exc:  # connection refused / timeout / auth
-        pytest.skip(f"Postgres unreachable at {dsn}: {exc}")
-    await probe.close()
-    await migrate(dsn, Settings().embedding_dim)
+    await ensure_migrated(dsn, Settings().embedding_dim)
     await _exec(dsn, TABLES)
     try:
         yield dsn

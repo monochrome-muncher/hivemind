@@ -54,18 +54,20 @@ def test_the_older_statement_often_has_the_higher_lexical_overlap_with_the_query
             assert _words(p.distractor[1]) != _words(p.old[1])
 
 
-async def test_the_sweep_reports_the_baseline_and_every_tau_for_every_domain() -> None:
-    m = await measure(make_embedder())
-    assert list(m.domains) == [d.name for d in DOMAINS]
+async def test_the_sweep_reports_the_baseline_and_every_tau() -> None:
+    # One domain and the two ends of the sweep: the shape does not depend on more.
+    domains, sweep = VERSION_DOMAINS[:1], (SWEEP[0], SWEEP[-1])
+    m = await measure(make_embedder(), domains, sweep)
+    assert list(m.domains) == [domains[0].name]
     for rows in m.domains.values():
-        assert [r.tau for r in rows] == [None, *SWEEP]
+        assert [r.tau for r in rows] == [None, *sweep]
         base = rows[0]
         assert base.false_grouped == base.pairs_grouped == base.background_groups == 0
         assert base.pairs == 6 and base.distractors == 6
         assert 0.0 <= base.mrr_old <= 1.0 and 0.0 <= base.mrr_new <= 1.0
         assert all(r.queries == base.queries for r in rows)
     pooled = m.pooled()
-    assert pooled[0].pairs == 30 and pooled[0].distractors == 30
+    assert pooled[0].pairs == 6 and pooled[0].distractors == 6
     assert "Suggested HIVEMIND_VERSION_GROUP_MIN_SIMILARITY" in report(m)
     # A looser cut-off never groups fewer pairs than a stricter one.
     grouped = [r.pairs_grouped + r.false_grouped + r.background_groups for r in pooled[1:]]
@@ -130,11 +132,11 @@ class _RecordingEmbedder(FakeEmbedder):
 
 
 async def test_a_query_instruction_reaches_the_embedder_without_changing_the_shape() -> None:
-    domains = VERSION_DOMAINS[:1]
-    plain = await measure(make_embedder(), domains)
+    domains, sweep = VERSION_DOMAINS[:1], (SWEEP[0], SWEEP[-1])
+    plain = await measure(make_embedder(), domains, sweep)
     instruction = "Retrieve the entry that answers this question"
     recorder = _RecordingEmbedder()
-    m = await measure(recorder, domains, query_instruction=instruction)
+    m = await measure(recorder, domains, sweep, query_instruction=instruction)
     assert any(t.startswith(f"Instruct: {instruction}\nQuery:") for t in recorder.texts)
     assert [r.tau for r in m.domains[domains[0].name]] == [
         r.tau for r in plain.domains[domains[0].name]

@@ -8,23 +8,17 @@ Skips cleanly when Postgres is unreachable.
 
 from __future__ import annotations
 
-import asyncpg
 import pytest
+from tests.pg import ensure_migrated
 
 from hivemind.config import Settings
 from hivemind.store import PgStore
-from hivemind.store.migrate import migrate
 from hivemind.store.pool import PoolTimeouts
 
 
 async def test_an_exhausted_pool_raises_timeout_error() -> None:
     dsn = Settings().database_url
-    try:
-        probe = await asyncpg.connect(dsn, timeout=5)
-    except Exception as exc:  # connection refused / timeout / auth
-        pytest.skip(f"Postgres unreachable at {dsn}: {exc}")
-    await probe.close()
-    await migrate(dsn, Settings().embedding_dim)
+    await ensure_migrated(dsn, Settings().embedding_dim)
     store = PgStore(dsn, pool_min_size=1, pool_max_size=1, timeouts=PoolTimeouts(acquire=0.2))
     try:
         pool = await store._ensure_pool()

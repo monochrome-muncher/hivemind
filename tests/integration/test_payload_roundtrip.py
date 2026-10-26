@@ -13,13 +13,13 @@ import asyncpg
 import httpx
 import pytest
 from tests.fakes import FakeEmbedder, make_search_config
+from tests.pg import ensure_migrated
 
 from hivemind.api.deps import create_app
 from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
 from hivemind.domain.entry import EntryDraft, EntryFilters, Kind
 from hivemind.store import PgAuthenticator, PgStore
-from hivemind.store.migrate import migrate
 
 PAYLOAD = {"n": 1, "nested": {"a": [1, 2, {"b": None}]}, "s": "x"}
 
@@ -27,12 +27,7 @@ PAYLOAD = {"n": 1, "nested": {"a": [1, 2, {"b": None}]}, "s": "x"}
 @pytest.fixture
 async def store():
     dsn, dim = Settings().database_url, Settings().embedding_dim
-    try:
-        probe = await asyncpg.connect(dsn, timeout=5)
-    except Exception as exc:
-        pytest.skip(f"Postgres unreachable at {dsn}: {exc}")
-    await probe.close()
-    await migrate(dsn, dim)
+    await ensure_migrated(dsn, dim)
     conn = await asyncpg.connect(dsn)
     try:
         await conn.execute("TRUNCATE credentials, feedbacks, entries")

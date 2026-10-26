@@ -194,7 +194,14 @@ def test_the_hook_prints_valid_json_and_never_the_key(key: str | None) -> None:
     env.pop("COPILOT_CLI", None)  # Copilot CLI's flat form has its own test
     if key is not None:
         env["HIVEMIND_API_KEY"] = key
-    out = subprocess.run(["sh", str(HOOK)], env=env, capture_output=True, text=True, check=True)
+    out = subprocess.run(
+        ["sh", str(HOOK)],
+        env=env,
+        stdin=subprocess.DEVNULL,  # the hook reads stdin when it is not a TTY
+        capture_output=True,
+        text=True,
+        check=True,
+    )
     payload = json.loads(out.stdout)["hookSpecificOutput"]
     assert payload["hookEventName"] == "SessionStart"
     assert payload["additionalContext"].startswith("HIVEMIND:")
@@ -511,7 +518,14 @@ LAUNCHER = PLUGIN / "bin" / "hivemind-incognito"
 def test_the_hook_goes_incognito(value: str) -> None:
     env = {k: v for k, v in os.environ.items() if not k.startswith("HIVEMIND_")}
     env.update(HIVEMIND_INCOGNITO=value, HIVEMIND_API_KEY="hm_secret_value")
-    out = subprocess.run(["sh", str(HOOK)], env=env, capture_output=True, text=True, check=True)
+    out = subprocess.run(
+        ["sh", str(HOOK)],
+        env=env,
+        stdin=subprocess.DEVNULL,  # the hook reads stdin when it is not a TTY
+        capture_output=True,
+        text=True,
+        check=True,
+    )
     assert json.loads(out.stdout)["hookSpecificOutput"]["additionalContext"] == INCOGNITO_TEXT
     assert "hm_secret_value" not in out.stdout
 
@@ -519,7 +533,14 @@ def test_the_hook_goes_incognito(value: str) -> None:
 def test_the_hook_ignores_a_false_incognito_value() -> None:
     env = {k: v for k, v in os.environ.items() if not k.startswith("HIVEMIND_")}
     env["HIVEMIND_INCOGNITO"] = "0"
-    out = subprocess.run(["sh", str(HOOK)], env=env, capture_output=True, text=True, check=True)
+    out = subprocess.run(
+        ["sh", str(HOOK)],
+        env=env,
+        stdin=subprocess.DEVNULL,  # the hook reads stdin when it is not a TTY
+        capture_output=True,
+        text=True,
+        check=True,
+    )
     assert STAY_AWARE_CORE in out.stdout
 
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncpg
 import pytest
 from tests.fakes import FakeEmbedder, make_search_config
+from tests.pg import ensure_migrated
 
 from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
@@ -23,7 +24,6 @@ from hivemind.services.search import SearchService
 from hivemind.services.write import WriteService
 from hivemind.store import PgAuthenticator, PgStore
 from hivemind.store.keys import _issue_admin
-from hivemind.store.migrate import migrate
 
 TABLES = "TRUNCATE audit_log, credentials, agents, fleets, entries, feedbacks"
 
@@ -31,12 +31,7 @@ TABLES = "TRUNCATE audit_log, credentials, agents, fleets, entries, feedbacks"
 @pytest.fixture
 async def pool():
     dsn = Settings().database_url
-    try:
-        probe = await asyncpg.connect(dsn, timeout=5)
-    except Exception as exc:  # connection refused / timeout / auth
-        pytest.skip(f"Postgres unreachable at {dsn}: {exc}")
-    await probe.close()
-    await migrate(dsn, Settings().embedding_dim)
+    await ensure_migrated(dsn, Settings().embedding_dim)
     conn = await asyncpg.connect(dsn)
     await conn.execute(TABLES)
     await conn.close()

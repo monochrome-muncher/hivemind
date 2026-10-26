@@ -150,7 +150,7 @@ discarding ordering we then depend on is worse.
 ## Evidence: the measurement, and what it actually says
 
 `tests/integration/test_vector_index_recall.py` (Postgres-backed,
-skips when the DB is down; run with `-s` for the tables). It seeds the
+skips when the DB is down; `make measure-vector-index` prints the tables). It seeds the
 **same** golden corpus and golden queries as the ROADMAP §1.1 gate
 (`tests/eval/golden.py`, untouched and un-re-pinned) into a real
 `PgStore`, interleaved with distractor entries, and runs the real

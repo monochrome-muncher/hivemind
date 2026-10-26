@@ -46,7 +46,12 @@ dev = [
 testpaths = ["tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
-addopts = "-q"
+# Measurements print tables and are not gates; `make measure-vector-index`
+# runs them with `-m measurement` (the last -m wins over this one).
+addopts = "-q -m 'not measurement'"
+markers = [
+    "measurement: a slow measurement that prints; deselected from the default run",
+]
 
 [tool.ruff]
 line-length = 100
