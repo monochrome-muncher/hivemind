@@ -26,6 +26,9 @@ run the same measurement with the embeddings computed in batches on a GPU.
   cache in the version's output. Adding that output as an input to the next run
   carries on where it stopped (`LME_SEED` points at the inputs, and every cache
   found there is merged in).
+  The same route reruns the harness after it changes (a new variant, say)
+  without embedding everything again; `max_new_texts` stops a run early when
+  the earlier cache isn't attached. The steps are in the notebook's first cell.
 
 Elsewhere, run `python lme_gpu.py '<runs as JSON>'` on any machine that has a
 GPU, `torch`, `transformers` and `uv`, setting `LME_REPO`, `LME_DATA`,
