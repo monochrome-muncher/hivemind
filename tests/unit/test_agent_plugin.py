@@ -1613,6 +1613,28 @@ def test_launcher_keeps_oh_my_pi_and_gemini_from_contacting_the_server(
     assert _launch(tmp_path, env, harness) == ["URL=unset", "KEY=unset"]
 
 
+@pytest.mark.parametrize(
+    ("harness", "kept"),
+    [("cline", False), ("dsh", False), ("opencode", True), ("some-other-agent", True)],
+)
+def test_launcher_removes_the_key_and_url_only_where_the_server_is_kept_from_loading(
+    tmp_path: Path, harness: str, kept: bool
+) -> None:
+    """Where the launcher keeps the server from loading, an agent with a shell
+    must not be able to read the key; where it relies on restraint, the
+    harness may still need both, so they stay."""
+    env = _fake_harness(tmp_path, harness)
+    script = tmp_path / "bin" / harness
+    script.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "URL=${HIVEMIND_MCP_URL:-unset}" "KEY=${HIVEMIND_API_KEY:-unset}" '
+        '"INCOGNITO=$HIVEMIND_INCOGNITO" "$@"\n'
+    )
+    env.update(HIVEMIND_MCP_URL="https://hm.example/mcp", HIVEMIND_API_KEY="hm_x")
+    lines = _launch(tmp_path, env, harness, "--flag")
+    expected = ["URL=https://hm.example/mcp", "KEY=hm_x"] if kept else ["URL=unset", "KEY=unset"]
+    assert lines == [*expected, "INCOGNITO=1", "--flag"]
+
+
 def test_the_gemini_extension_serves_the_plugin() -> None:
     """`gemini extensions install <git-url>` reads gemini-extension.json,
     skills/ and hooks/hooks.json at the repository root (checked with

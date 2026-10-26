@@ -191,6 +191,55 @@ async def test_middleware_unknown_key_401s() -> None:
     assert sent and sent[0]["status"] == 401
 
 
+async def _through_middleware(
+    headers: list[tuple[bytes, bytes]],
+) -> tuple[_RecordingApp, list[dict[str, Any]]]:
+    inner = _RecordingApp()
+    mw = BearerAuthMiddleware(inner, FakeAuthenticator({"key-alice": ALICE, "key-bob": BOB}))
+    sent: list[dict[str, Any]] = []
+
+    async def send(msg: dict[str, Any]) -> None:
+        sent.append(msg)
+
+    await mw(_scope(headers), _noop_receive, send)
+    return inner, sent
+
+
+@pytest.mark.parametrize("header", [b"X-Api-Key", b"x-api-key"])
+async def test_middleware_accepts_the_x_api_key_header(header: bytes) -> None:
+    inner, sent = await _through_middleware([(header, b"  key-alice ")])
+    assert inner.cred == ALICE
+    assert not sent
+
+
+async def test_middleware_x_api_key_unknown_401s() -> None:
+    inner, sent = await _through_middleware([(b"x-api-key", b"key-stranger")])
+    assert not inner.called
+    assert sent[0]["status"] == 401
+
+
+async def test_middleware_bearer_takes_precedence_over_x_api_key() -> None:
+    inner, _ = await _through_middleware(
+        [(b"x-api-key", b"key-bob"), (b"authorization", b"Bearer key-alice")]
+    )
+    assert inner.cred == ALICE
+
+
+async def test_middleware_an_unknown_bearer_key_does_not_fall_back_to_x_api_key() -> None:
+    inner, sent = await _through_middleware(
+        [(b"authorization", b"Bearer key-stranger"), (b"x-api-key", b"key-alice")]
+    )
+    assert not inner.called
+    assert sent[0]["status"] == 401
+
+
+async def test_middleware_a_non_bearer_authorization_scheme_falls_back_to_x_api_key() -> None:
+    inner, _ = await _through_middleware(
+        [(b"authorization", b"Basic dXNlcjpwdw=="), (b"x-api-key", b"key-alice")]
+    )
+    assert inner.cred == ALICE
+
+
 async def test_middleware_non_http_scope_passes_through() -> None:
     """Non-HTTP scopes (e.g. ``lifespan``) bypass auth entirely."""
     auth = FakeAuthenticator({"key-alice": ALICE})

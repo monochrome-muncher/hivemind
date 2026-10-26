@@ -109,6 +109,46 @@ class TestKeyNeverLeaks:
             await _extractor(_leaky).extract_entry(_draft())
         assert KEY not in str(exc.value) and KEY not in caplog.text
 
+    @pytest.mark.parametrize(
+        "failure",
+        [httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError],
+    )
+    @pytest.mark.parametrize("provider", ["embedder", "extractor"])
+    async def test_a_retried_transient_failure_leaks_neither_key_nor_url(
+        self, caplog, failure, provider: str
+    ) -> None:
+        """The exception text of a transient failure can carry the key and the
+        endpoint; it is retried until the budget is spent, and none of the
+        attempts, the final error or the logs may repeat it."""
+        caplog.set_level(logging.DEBUG)
+        secret_url = "http://user:URLPASSWORD@private-host.test/v1"
+        calls: list[int] = []
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            calls.append(1)
+            raise failure(f"{secret_url} rejected 'Bearer {KEY}'")
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        if provider == "embedder":
+            call = OpenAICompatEmbedder(
+                client, secret_url, KEY, "m", 3, retries=2, sleep=_nosleep
+            ).embed_text("x")
+            expected: type[Exception] = EmbeddingError
+        else:
+            call = OpenAICompatExtractor(
+                client, secret_url, KEY, "m", retries=2, sleep=_nosleep
+            ).extract_entry(_draft())
+            expected = ExtractorError
+        with pytest.raises(expected) as exc:
+            await call
+        assert len(calls) == 3
+        assert "retrying" in caplog.text and "giving up" in caplog.text
+        for text in (str(exc.value), caplog.text):
+            for secret in (KEY, "URLPASSWORD", "private-host"):
+                assert secret not in text
+            assert failure.__name__ in text
+        assert exc.value.__cause__ is None
+
     async def test_rest_write_502_is_generic_and_search_degrades(self, caplog) -> None:
         app = create_app_for_config(
             Settings(),

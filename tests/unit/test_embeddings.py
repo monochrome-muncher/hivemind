@@ -445,6 +445,26 @@ class TestFactoryAndProtocol:
         finally:
             await embedder.aclose()  # the embedder owns the client it built
 
+    async def test_from_settings_sends_the_configured_key_as_a_bearer_header(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        env = MockEnv()
+        client = env.client()  # built before httpx.AsyncClient is swapped out
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **_: client)
+        embedder = OpenAICompatEmbedder.from_settings(
+            Settings(
+                embedding_endpoint="http://e.test/v1",
+                embedding_api_key="sk-from-settings\n",
+                embedding_dim=4,
+            )
+        )
+        try:
+            await embedder.embed_text("x")
+        finally:
+            await embedder.aclose()
+        assert env.requests[-1].headers["Authorization"] == "Bearer sk-from-settings"
+        assert str(env.requests[-1].url) == "http://e.test/v1/embeddings"
+
     async def test_satisfies_the_embedder_port(self) -> None:
         env = MockEnv()
         embedder = make_embedder(env)

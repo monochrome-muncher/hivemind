@@ -13,7 +13,15 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import UTC, datetime
 
-from hivemind.api.schemas import EntryOut, FeedbackSummaryOut, HitOut, LinkOut
+from hivemind.api.schemas import (
+    CheckOut,
+    EntryOut,
+    FeedbackSummaryOut,
+    HitOut,
+    LinkOut,
+    RelatedOut,
+    WarningOut,
+)
 from hivemind.domain.entry import (
     EntityKind,
     Entry,
@@ -26,13 +34,19 @@ from hivemind.domain.entry import (
 )
 from hivemind.domain.feedback import Correction, Feedback, FeedbackSummary, Verdict
 from hivemind.domain.upstream import UpstreamChange, UpstreamChangeKind
+from hivemind.services.chain import EntryLinks
 from hivemind.services.search import Hit, SimilarEntry
+from hivemind.services.write import RelatedEntry
+from hivemind.services.write_warnings import WriteWarning
 from hivemind.wire import (
     entry_dict,
     feedback_dict,
     hit_dict,
     link_dict,
+    links_dict,
     list_item_dict,
+    related_dict,
+    warning_dict,
 )
 
 DT_OCCURRED = datetime(2026, 10, 1, 12, 0, 0, tzinfo=UTC)
@@ -152,6 +166,38 @@ LINK_TABLE: dict[str, object] = {
     "fleet_id": "fleet-1",
 }
 
+LINKS = EntryLinks(
+    see_also=(ENTRY,),
+    linked_from=(
+        replace(ENTRY, id="55555555-5555-4555-8555-555555555555", state=EntryState.WITHDRAWN),
+    ),
+)
+LINKS_TABLE: dict[str, object] = {
+    "see_also": [LINK_TABLE],
+    "linked_from": [
+        {**LINK_TABLE, "id": "55555555-5555-4555-8555-555555555555", "state": "withdrawn"}
+    ],
+}
+
+# A nearby existing entry in a write's reply (and in a check-mode reply).
+RELATED = RelatedEntry(entry=ENTRY, similarity=0.87654, feedback=(3, 1, 2), same_author=True)
+RELATED_TABLE: dict[str, object] = {
+    "id": ENTRY.id,
+    "kind": "fact",
+    "summary": "the summary",
+    "author": "author-a",
+    "scope": "fleet",
+    "fleet_id": "fleet-1",
+    "occurred_at": "2026-10-01T12:00:00+00:00",
+    "similarity": 0.877,
+    "tags": ["tag-1"],
+    "feedback": {"helpful": 3, "stale": 1, "wrong": 2},
+    "same_author": True,
+}
+
+WARNING = WriteWarning(code="a_code", message="what to do about it")
+WARNING_TABLE: dict[str, object] = {"code": "a_code", "message": "what to do about it"}
+
 HIT = Hit(
     entry_id="22222222-2222-4222-8222-222222222222",
     kind=Kind.INSIGHT,
@@ -262,6 +308,33 @@ def test_feedback_summary_matches_the_contract_on_both_surfaces() -> None:
 def test_link_matches_the_contract_on_both_surfaces() -> None:
     assert link_dict(ENTRY) == LINK_TABLE
     assert _norm(LinkOut.from_entry(ENTRY).model_dump(mode="json")) == LINK_TABLE
+
+
+def test_links_match_the_contract_on_both_surfaces() -> None:
+    assert links_dict(LINKS) == LINKS_TABLE
+    rest = EntryOut.from_entry(ENTRY)
+    rest.set_links(LINKS)
+    dumped = rest.model_dump(mode="json")
+    assert _norm({k: dumped[k] for k in LINKS_TABLE}) == LINKS_TABLE
+
+
+def test_related_entry_matches_the_contract_on_both_surfaces() -> None:
+    assert related_dict(RELATED) == RELATED_TABLE
+    assert _norm(RelatedOut.from_related(RELATED).model_dump(mode="json")) == RELATED_TABLE
+
+
+def test_warning_matches_the_contract_on_both_surfaces() -> None:
+    assert warning_dict(WARNING) == WARNING_TABLE
+    assert WarningOut.from_warning(WARNING).model_dump(mode="json") == WARNING_TABLE
+
+
+def test_a_check_reply_carries_the_related_and_warning_tables() -> None:
+    check = CheckOut(
+        related=[RelatedOut.from_related(RELATED)], warnings=[WarningOut.from_warning(WARNING)]
+    ).model_dump(mode="json")
+    assert check["checked"] is True
+    assert _norm(check["related"]) == [RELATED_TABLE]
+    assert check["warnings"] == [WARNING_TABLE]
 
 
 def test_hit_matches_the_contract_on_both_surfaces() -> None:

@@ -202,6 +202,39 @@ def test_by_default_an_unknown_variable_warns_and_startup_continues(
     assert "did you mean HIVEMIND_EMBEDDING_PREFIX_TOKENS" in caplog.text
 
 
+SECRET = "sk-SECRETVALUE-do-not-log"
+
+
+@pytest.mark.parametrize("strict", [False, True], ids=["warn", "strict"])
+def test_an_unknown_variables_value_is_never_logged_or_raised(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    strict: bool,
+) -> None:
+    """A mistyped key variable (``..._APIKEY``) holds a real key; the check
+    names it and nothing more. Its value may come from the environment or
+    from the profile file."""
+    _clear_hivemind_env(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HIVEMIND_EMBEDDING_APIKEY", SECRET)
+    (tmp_path / ".env.local").write_text(f"HIVEMIND_EXTRACTOR_APIKEY={SECRET}-file\n")
+    if strict:
+        monkeypatch.setenv("HIVEMIND_STRICT_ENV", "true")
+    with caplog.at_level(logging.DEBUG):
+        if strict:
+            with pytest.raises(RuntimeError) as exc_info:
+                load_settings()
+            message = str(exc_info.value)
+        else:
+            load_settings()
+            message = ""
+    for text in (message, caplog.text):
+        assert "SECRETVALUE" not in text
+    shown = message if strict else caplog.text
+    assert "HIVEMIND_EMBEDDING_APIKEY" in shown and "HIVEMIND_EXTRACTOR_APIKEY" in shown
+
+
 def test_platform_injected_variables_do_not_stop_startup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:

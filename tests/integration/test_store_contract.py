@@ -34,10 +34,13 @@ from hivemind.domain.access import (
 )
 from hivemind.domain.audit import ActorKind, AuditAction, AuditEvent, AuditFilters
 from hivemind.domain.entry import (
+    EntityKind,
     Entry,
     EntryDraft,
     EntryFilters,
     EntryState,
+    ExtractedEntity,
+    ImportanceSource,
     Kind,
     Source,
     SourceType,
@@ -303,6 +306,63 @@ async def test_filters_combine_with_and(adapter: Adapter) -> None:
     assert await adapter.store.count_entries(filters) == 1
 
 
+async def test_agent_filter_matches_the_writing_agent(adapter: Adapter) -> None:
+    mine = await write(adapter, "claude note", agent="claude-code")
+    await write(adapter, "codex note", agent="codex")
+    filters = EntryFilters(agent="claude-code")
+    assert [e.id for e in await adapter.store.list_entries(filters)] == [mine.id]
+    assert await adapter.store.count_entries(filters) == 1
+    assert await adapter.store.search_keyword("note", filters, 10) == [mine.id]
+
+
+async def test_created_range_bounds_are_inclusive(adapter: Adapter) -> None:
+    first = await write(adapter, "first")
+    middle = await write(adapter, "middle")
+    last = await write(adapter, "last")
+    assert first.created_at < middle.created_at < last.created_at
+
+    async def created(**bounds: datetime) -> list[str]:
+        filters = EntryFilters(**bounds)  # type: ignore[arg-type]
+        listed = await adapter.store.list_entries(filters)
+        assert await adapter.store.count_entries(filters) == len(listed)
+        return [e.id for e in listed]
+
+    assert await created(created_from=middle.created_at) == [last.id, middle.id]
+    assert await created(created_to=middle.created_at) == [middle.id, first.id]
+    assert await created(created_from=middle.created_at, created_to=middle.created_at) == [
+        middle.id
+    ]
+    assert await created(created_from=last.created_at + timedelta(seconds=1)) == []
+    assert await created(created_to=first.created_at - timedelta(seconds=1)) == []
+
+
+async def test_scope_fleet_importance_source_and_entity_filters(adapter: Adapter) -> None:
+    fleet_a, fleet_b = str(uuid.uuid4()), str(uuid.uuid4())
+    postgres = (ExtractedEntity("Postgres", EntityKind.SYSTEM),)
+
+    async def put(summary: str, **kwargs: object) -> Entry:
+        made = EntryDraft(kind=Kind.FACT, summary=summary, author="alice", agent="a", **kwargs)  # type: ignore[arg-type]
+        return await adapter.store.create_entry(made, adapter.vec(0), "test-model", postgres)
+
+    caller = await put("caller rated", importance=5, importance_source=ImportanceSource.CALLER)
+    in_a = await put("fleet a", scope="fleet", fleet_id=fleet_a)
+    in_b = await put("fleet b", scope="fleet", fleet_id=fleet_b)
+    plain = await adapter.store.create_entry(draft("no entities"), adapter.vec(0), "test-model")
+
+    async def listed(**kwargs: object) -> set[str]:
+        filters = EntryFilters(**kwargs)  # type: ignore[arg-type]
+        ids = {e.id for e in await adapter.store.list_entries(filters)}
+        assert await adapter.store.count_entries(filters) == len(ids)
+        return ids
+
+    assert await listed(scope="fleet") == {in_a.id, in_b.id}
+    assert await listed(scope="org") == {caller.id, plain.id}
+    assert await listed(fleet_id=fleet_a) == {in_a.id}
+    assert await listed(importance_source=ImportanceSource.CALLER) == {caller.id}
+    assert await listed(entities=("postgres",)) == {caller.id, in_a.id, in_b.id}
+    assert await listed(scope="fleet", entities=("POSTGRES",), fleet_id=fleet_b) == {in_b.id}
+
+
 async def test_inactive_entries_are_hidden_unless_asked(adapter: Adapter) -> None:
     old = await write(adapter, "v1")
     new = await write(adapter, "v2", supersedes=(old.id,))
@@ -522,6 +582,31 @@ async def test_own_fleet_entries_stay_visible_after_a_fleet_move(adapter: Adapte
     ]
 
 
+async def test_moving_an_agent_leaves_its_fleet_entries_in_the_old_fleet(
+    adapter: Adapter,
+) -> None:
+    old = await adapter.store.create_fleet("old")
+    new = await adapter.store.create_fleet("new")
+    await adapter.store.register_agent("me")
+    await adapter.store.activate_agent(
+        "me", trust_level=TrustLevel.CONTRIBUTOR, home_fleet_id=old.id
+    )
+    entry = await write(adapter, "written at old", scope="fleet", fleet_id=old.id, author="me")
+    moved = await adapter.store.set_agent_home_fleet("me", new.id)
+    assert moved.home_fleet_id == new.id
+
+    stored = await adapter.store.get_entry(entry.id)
+    assert stored is not None
+    assert (stored.scope, stored.fleet_id) == ("fleet", old.id)
+
+    async def sees(fleet: str, name: str) -> list[str]:
+        v = _vis(TrustLevel.CONTRIBUTOR, name=name, fleet=fleet)
+        return [e.id for e in await adapter.store.list_entries(EntryFilters(), visibility=v)]
+
+    assert await sees(old.id, "teammate") == [entry.id]
+    assert await sees(new.id, "newcomer") == []
+
+
 # -- search streams (SPEC §6.2) -----------------------------------------------------
 
 
@@ -560,6 +645,28 @@ async def test_similar_entries_without_an_excluded_id_returns_every_active_match
     first = await write(adapter, "first", hot=3)
     pairs = await adapter.store.similar_entries(adapter.vec(3), 5)
     assert [eid for eid, _ in pairs] == [first.id]
+
+
+async def test_similar_entries_apply_the_readers_visibility(adapter: Adapter) -> None:
+    """Related entries on a write are the writer's own view: another agent's
+    ``self`` entries and another fleet's entries never show up as related."""
+    home, other = str(uuid.uuid4()), str(uuid.uuid4())
+    org = await write(adapter, "org note", hot=3, author="w")
+    mine = await write(adapter, "my note", hot=3, scope="self", author="reader")
+    theirs = await write(adapter, "their note", hot=3, scope="self", author="w")
+    in_home = await write(adapter, "home fleet", hot=3, scope="fleet", fleet_id=home, author="w")
+    in_other = await write(adapter, "other fleet", hot=3, scope="fleet", fleet_id=other, author="w")
+
+    async def related(v: Visibility | None) -> set[str]:
+        pairs = await adapter.store.similar_entries(adapter.vec(3), 10, visibility=v)
+        return {eid for eid, _ in pairs}
+
+    assert await related(None) == {org.id, mine.id, theirs.id, in_home.id, in_other.id}
+    assert await related(_vis(TrustLevel.UNTRUSTED, fleet=home)) == set()
+    member = {org.id, mine.id, in_home.id}
+    assert await related(_vis(TrustLevel.LURKER, fleet=home)) == member
+    assert await related(_vis(TrustLevel.CONTRIBUTOR, fleet=home)) == member
+    assert await related(_vis(TrustLevel.PRIVILEGED, fleet=home)) == member | {in_other.id}
 
 
 async def test_keyword_ties_break_newest_first(adapter: Adapter) -> None:
@@ -616,6 +723,49 @@ async def test_withdraw(adapter: Adapter) -> None:
         await adapter.store.withdraw_entry(entry.id, None, by_user="alice")
     with pytest.raises(KeyError):
         await adapter.store.withdraw_entry(NO_SUCH_ID, None, by_user="alice")
+
+
+async def test_supersede_and_withdraw_leave_the_content_fields_unchanged(
+    adapter: Adapter,
+) -> None:
+    """Entries are immutable: only the state fields move."""
+
+    async def put(summary: str) -> Entry:
+        made = EntryDraft(
+            kind=Kind.DECISION,
+            summary=summary,
+            author="alice",
+            agent="claude-code",
+            body="the long form",
+            payload={"k": [1, 2], "nested": {"a": "b"}},
+            sources=(Source(SourceType.URL, "https://example.test/doc"),),
+            tags=("auth", "jwt"),
+            occurred_at=T0 - timedelta(days=3),
+            importance=5,
+            importance_source=ImportanceSource.CALLER,
+            scope="self",
+        )
+        entities = (ExtractedEntity("JWT", EntityKind.CONCEPT),)
+        return await adapter.store.create_entry(made, adapter.vec(1), "test-model", entities)
+
+    async def snapshot(entry: Entry) -> Entry:
+        got = await adapter.store.get_entry(entry.id)
+        assert got is not None
+        return got
+
+    old, doomed = await put("to supersede"), await put("to withdraw")
+    old_before, doomed_before = await snapshot(old), await snapshot(doomed)
+    assert old_before.entities and old_before.payload and old_before.sources
+
+    new = await write(adapter, "replacement", supersedes=(old.id,))
+    await adapter.store.withdraw_entry(doomed.id, "obsolete", by_user="alice")
+
+    old_after, doomed_after = await snapshot(old), await snapshot(doomed)
+    assert (old_after.state, old_after.superseded_by) == (EntryState.SUPERSEDED, new.id)
+    assert doomed_after.state is EntryState.WITHDRAWN
+    moved = {"state": EntryState.ACTIVE, "superseded_by": None, "withdrawn_reason": None}
+    assert replace(old_after, **moved) == old_before
+    assert replace(doomed_after, **moved) == doomed_before
 
 
 # -- "see also" links (ADR 0057, 0059) ------------------------------------------------
