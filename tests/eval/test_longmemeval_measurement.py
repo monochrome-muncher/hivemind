@@ -123,6 +123,18 @@ async def test_seed_writes_one_entry_per_session() -> None:
     assert sorted(by_entry.values()) == ["s1", "s2", "s3"]
 
 
+async def test_seed_gives_each_session_a_fixed_distinct_created_at() -> None:
+    # Score ties are broken by created_at; a shared one fell through to the
+    # random entry ids and made runs differ.
+    async def created() -> dict[str, datetime]:
+        store, by_entry = await seed(QUESTIONS[0], make_embedder())
+        entries = await store.get_entries(list(by_entry))
+        return {by_entry[eid]: e.created_at for eid, e in entries.items()}
+
+    first, second = await created(), await created()
+    assert first == second and len(set(first.values())) == 3
+
+
 async def test_measure_report_and_json() -> None:
     lines: list[str] = []
     rows = await measure(make_embedder(), QUESTIONS, progress=lines.append)
