@@ -31,23 +31,24 @@ os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 # Runs the harness's code to list the (cache key, text) pairs one model needs.
 DUMP = r'''
 import json, os, sqlite3, sys
-from hivemind.config import SearchConfig, load_settings
+from hivemind.config import load_settings
 from hivemind.embeddings import build_embedder
 from tests.eval.embed_cache import CACHE_FILE, DiskCachingEmbedder
-from tests.eval.longmemeval import (dataset_path, is_abstention, load_questions,
-    parse_date, per_type_limit, select, session_draft)
+from tests.eval.longmemeval import (VARIANTS, dataset_path, is_abstention, load_questions,
+    parse_date, per_type_limit, select, session_draft, variant_config)
 
 settings = load_settings()
 cache = DiskCachingEmbedder(build_embedder(settings), os.environ["EVAL_EMBED_CACHE"])
 questions = [q for q in select(load_questions(dataset_path()),
              per_type_limit(os.environ.get("EVAL_LONGMEMEVAL_PER_TYPE")))
              if not is_abstention(q)]
-query = SearchConfig().embedded_query  # the variants all start from SearchConfig()
+# The query text differs only by the instruction, so one config per distinct one.
+queries = list({variant_config(v).query_instruction: variant_config(v).embedded_query for v in VARIANTS}.values())
 done = {r[0] for r in cache._db.execute("SELECT key FROM vectors")}
 seen = set()
 with open(sys.argv[1], "w") as out:
     for q in questions:
-        items = [("t", query(q["question"]))]
+        items = [("t", query(q["question"])) for query in queries]
         for session, date in zip(q["haystack_sessions"], q["haystack_dates"], strict=True):
             items.append(("e", cache.entry_embeddable_text(session_draft(session, parse_date(date)))))
         for kind, text in items:
@@ -262,6 +263,12 @@ def run_one(run):
         item = json.loads(line)
         keys.append(item["key"])
         texts.append(item["text"])
+    if run.get("max_new_texts") is not None and len(keys) > run["max_new_texts"]:
+        # A rerun meant to reuse an earlier run's vectors, without them attached.
+        raise SystemExit(
+            f"[{tag}] {len(keys)} texts to embed, more than max_new_texts ({run['max_new_texts']}): "
+            "the earlier run's cache is missing. Attach that run's output as an input and run again."
+        )
     if keys:
         import numpy as np
         import torch

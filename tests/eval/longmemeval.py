@@ -30,7 +30,9 @@ Variants, all run on the same seeded store per question:
 * ``ignore_age``: shipped, recency hint ``ignore_age`` (what agents are
   steered to);
 * ``no_cutoff``: shipped without the similarity cut-off;
-* ``keyword_only``: shipped with ``weight_vector=0``.
+* ``keyword_only``: shipped with ``weight_vector=0``;
+* ``no_instruction``: shipped without the query instruction (ADR 0097), so
+  the vector stream embeds the bare question.
 
 Metrics, excluding abstention questions (ids ending ``_abs``) as the paper
 does: recall_any@5/@10 (at least one evidence session in the top k),
@@ -113,6 +115,7 @@ class Variant:
     recency: RecencyHint = RecencyHint.DEFAULT
     vector_min_similarity: bool = True  # False: no cut-off
     weight_vector: float | None = None  # None: the shipped weight
+    query_instruction: bool = True  # False: embed the bare question
 
 
 VARIANTS: tuple[Variant, ...] = (
@@ -120,6 +123,7 @@ VARIANTS: tuple[Variant, ...] = (
     Variant("ignore_age", recency=RecencyHint.IGNORE_AGE),
     Variant("no_cutoff", vector_min_similarity=False),
     Variant("keyword_only", weight_vector=0.0),
+    Variant("no_instruction", query_instruction=False),
 )
 
 
@@ -129,6 +133,8 @@ def variant_config(variant: Variant) -> SearchConfig:
         config = replace(config, vector_min_similarity=None)
     if variant.weight_vector is not None:
         config = replace(config, weight_vector=variant.weight_vector)
+    if not variant.query_instruction:
+        config = replace(config, query_instruction="")
     return config
 
 
