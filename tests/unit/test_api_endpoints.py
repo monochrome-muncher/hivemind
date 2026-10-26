@@ -131,6 +131,20 @@ class TestHealth:
         assert resp.json() == {"status": "ok"}
 
 
+class TestAppIsolation:
+    async def test_apps_over_different_hivemind_apps_share_no_state(self) -> None:
+        # The /v1 router is built once per process; each app must still
+        # serve only its own HivemindApp.
+        client_a = make_client(make_hivemind_app())
+        client_b = make_client(make_hivemind_app())
+        async with client_a, client_b:
+            await post_entry(client_a, "key-alice", "only in app A", agent="a")
+            listed_a = await client_a.get("/v1/entries", headers={"X-API-Key": "key-alice"})
+            listed_b = await client_b.get("/v1/entries", headers={"X-API-Key": "key-alice"})
+        assert [e["summary"] for e in listed_a.json()] == ["only in app A"]
+        assert listed_b.json() == []
+
+
 class TestAuth:
     async def test_missing_key_is_401(self) -> None:
         client = make_client(make_hivemind_app())
