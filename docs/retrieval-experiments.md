@@ -1414,61 +1414,75 @@ dimension 2000, the largest the index allows, and 0.6B dimension 1024.
 
 **Setup.** The 2.12.0 defaults (query instruction on, cut-off 0.45, no
 recency hint) as "shipped"; then the `ignore_age` hint agents send, no
-cut-off, and the keyword stream alone.
+cut-off, the keyword stream alone, and no query instruction.
+
+**Reproducibility.** Until PR #233 every seeded entry shared one
+`created_at`, so score ties (frequent in `MemoryStore`'s word-overlap
+keyword stream) fell through to random entry ids, and two runs on the same
+vectors differed on about half the questions (overall nDCG@10 by up to
+about 0.005). The harness now orders ties by a hash of the session id. The
+8B figures below come from a run with that fix; the 0.6B figures predate
+it.
 
 **Overall, all 470 questions.**
 
 | variant | model | recall_any@5 | recall_all@10 | nDCG@10 |
 |---|---|---|---|---|
-| shipped | 8B | 0.923 | 0.853 | 0.841 |
-| `ignore_age` hint | 8B | 0.943 | 0.853 | 0.857 |
-| no cut-off | 8B | 0.902 | 0.874 | 0.766 |
-| keyword only | 8B | 0.787 | 0.719 | 0.615 |
+| shipped | 8B | 0.923 | 0.847 | 0.841 |
+| `ignore_age` hint | 8B | 0.940 | 0.853 | 0.858 |
+| no cut-off | 8B | 0.898 | 0.872 | 0.772 |
+| keyword only | 8B | 0.781 | 0.717 | 0.614 |
+| no query instruction | 8B | 0.900 | 0.821 | 0.815 |
 | shipped | 0.6B | 0.872 | 0.787 | 0.782 |
 | `ignore_age` hint | 0.6B | 0.917 | 0.809 | 0.817 |
 | no cut-off | 0.6B | 0.898 | 0.868 | 0.771 |
 | keyword only | 0.6B | 0.777 | 0.702 | 0.608 |
 
-**nDCG@10 per question type, shipped.**
+**nDCG@10 per question type.**
 
-| type | n | 0.6B | 8B | 8B, `ignore_age` | 8B, no cut-off |
-|---|---|---|---|---|---|
-| knowledge-update | 72 | 0.887 | 0.918 | 0.941 | 0.861 |
-| multi-session | 121 | 0.728 | 0.799 | 0.822 | 0.771 |
-| single-session-assistant | 56 | 0.938 | 0.981 | 0.967 | 0.648 |
-| single-session-preference | 30 | 0.608 | 0.673 | 0.669 | 0.480 |
-| single-session-user | 64 | 0.711 | 0.792 | 0.866 | 0.708 |
-| temporal-reasoning | 127 | 0.783 | 0.841 | 0.833 | 0.856 |
+| type | n | 0.6B shipped | 8B shipped | 8B `ignore_age` | 8B no cut-off | 8B no instruction |
+|---|---|---|---|---|---|---|
+| knowledge-update | 72 | 0.887 | 0.909 | 0.935 | 0.856 | 0.881 |
+| multi-session | 121 | 0.728 | 0.792 | 0.818 | 0.762 | 0.761 |
+| single-session-assistant | 56 | 0.938 | 0.984 | 0.974 | 0.683 | 0.978 |
+| single-session-preference | 30 | 0.608 | 0.688 | 0.675 | 0.493 | 0.626 |
+| single-session-user | 64 | 0.711 | 0.806 | 0.878 | 0.734 | 0.794 |
+| temporal-reasoning | 127 | 0.783 | 0.839 | 0.833 | 0.858 | 0.813 |
 
 **Findings.**
 
 1. 8B beats 0.6B on every question type, by 0.059 nDCG@10 overall.
 2. The cut-off is a clear win on 8B: without it nDCG@10 drops from 0.841
-   to 0.766, and the order is worse on 182 questions and better on 94.
-   Weak vector matches otherwise take part in the fusion and push the
-   answer session down. The cost is some recall where the answer is spread
-   over several long sessions (multi-session recall_all@10 0.711 with the
-   cut-off, 0.802 without): a whole chat session is far longer than a
-   Hivemind entry, and some score under 0.45 against a short question. On
-   0.6B the cut-off is closer to neutral (nDCG@10 0.782 against 0.771).
-   Every search returned 10 results either way; the keyword stream fills
-   the list.
-3. The `ignore_age` hint helps overall on both models (+0.016 nDCG@10 on
-   8B), most on single-session-user. On 8B it is slightly worse on three
-   types; per question it improves 71 and worsens 38, and changes
-   recall_all@10 on only 8.
-4. The keyword stream alone is far behind (nDCG@10 0.615 on 8B).
-5. The weak spots on both models are preferences (8B recall_any@10 0.80)
-   and finding every session of a multi-session question (8B
-   recall_all@10 0.71).
+   to 0.772, most where one session holds the answer (single-session
+   assistant 0.984 against 0.683). Weak vector matches otherwise take part
+   in the fusion and push the answer session down. The cost is some recall
+   where the answer is spread over several long sessions (multi-session
+   recall_all@10 0.702 with the cut-off, 0.777 without): a whole chat
+   session is far longer than a Hivemind entry, and some score under 0.45
+   against a short question. On 0.6B the cut-off is closer to neutral
+   (nDCG@10 0.782 against 0.771). Every search returned 10 results either
+   way; the keyword stream fills the list.
+3. The query instruction (ADR 0097) helps on every question type: without
+   it nDCG@10 drops from 0.841 to 0.815 and recall_all@10 from 0.847 to
+   0.821, most on preferences (0.688 against 0.626), multi-session and
+   knowledge-update. The gain is larger than on the rewritten synthetic
+   corpus (MRR +0.005 there), as expected for short questions searched
+   against long sessions.
+4. The `ignore_age` hint helps overall (+0.017 nDCG@10 on 8B), most on
+   single-session-user and knowledge-update, with small losses on three
+   types.
+5. The keyword stream alone is far behind (nDCG@10 0.614 on 8B).
+6. The weak spots on both models are preferences (8B recall_any@10 0.83,
+   nDCG@10 0.69) and finding every session of a multi-session question (8B
+   recall_all@10 0.70).
 
-**Decision.** No default changes. The cut-off stays at 0.45, and the
-query instruction stays on (not varied here). A search with no hint keeps
-the default recency term: this benchmark puts answers in old sessions on
-purpose, which favours `ignore_age`, while a live fleet also needs news to
-rise; agents already send `ignore_age` (ADR 0101), and that is the row to
-compare with. The 8B shipped row is the baseline for later ranking work.
+**Decision.** No default changes. The cut-off stays at 0.45 and the query
+instruction stays on. A search with no hint keeps the default recency
+term: this benchmark puts answers in old sessions on purpose, which
+favours `ignore_age`, while a live fleet also needs news to rise; agents
+already send `ignore_age` (ADR 0101), and that is the row to compare with.
+The 8B shipped row is the baseline for later ranking work.
 
-Of the 18,064 texts, 3 overflowed in fp16 and were embedded in fp32, and
-10 were too long for the GPU and were embedded from their first half;
-none of the 10 is an answer session.
+Of the 18,064 session texts, 3 overflowed in fp16 and were embedded in
+fp32, and 10 were too long for the GPU and were embedded from their first
+half; none of the 10 is an answer session.
