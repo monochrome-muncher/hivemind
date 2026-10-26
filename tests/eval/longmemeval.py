@@ -68,7 +68,7 @@ import urllib.request
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -267,13 +267,24 @@ def session_draft(session: Sequence[Mapping[str, Any]], date: datetime) -> Entry
 async def seed(question: Question, embedder: Embedder) -> tuple[MemoryStore, dict[str, str]]:
     """A fresh store with the question's haystack, one entry per session, and
     the map entry id -> session id."""
-    store = MemoryStore(make_clock())
+    clock = make_clock()
+    store = MemoryStore(clock)
     writer = WriteService(store, embedder)
     sessions = question["haystack_sessions"]
     dates = question["haystack_dates"]
     session_ids = question["haystack_session_ids"]
     by_entry: dict[str, str] = {}
+    # The stores break score ties by created_at, then by the random entry id,
+    # so one shared timestamp made runs differ (the keyword stream's overlap
+    # counts tie often). Each entry gets its own created_at, a microsecond
+    # apart in an order fixed by a hash of the session id: reproducible, and
+    # neutral between old and new sessions. Ranking ages entries by
+    # occurred_at, not created_at.
+    order = sorted(session_ids, key=lambda sid: hashlib.sha256(str(sid).encode()).digest())
+    tie_rank = {sid: rank for rank, sid in enumerate(order)}
+    start = clock()
     for session, date, session_id in zip(sessions, dates, session_ids, strict=True):
+        clock.set(start + timedelta(microseconds=tie_rank[session_id]))
         entry = await writer.write(session_draft(session, parse_date(date)))
         by_entry[entry.id] = session_id
     return store, by_entry
