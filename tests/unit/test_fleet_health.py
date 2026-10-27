@@ -12,7 +12,7 @@ from datetime import timedelta
 
 from prometheus_client.parser import text_string_to_metric_families
 
-from hivemind.api.prometheus import _health_families
+from hivemind.api.prometheus import _health_families, _usage_families
 from hivemind.domain.entry import EntryDraft, Kind, Source, SourceType
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.memstore import MemoryStore
@@ -259,22 +259,30 @@ class _FailingHealthStore(MemoryStore):
 
 async def test_a_health_failure_does_not_fail_the_usage_report() -> None:
     store = _FailingHealthStore()
+    # Three identical vectors, so the convergence figures are not the empty defaults.
+    for i in range(3):
+        last = await _write(store, f"s{i}")
     tick = [0.0]
-    service = MetricsService(store, entry_counts_ttl=300.0, clock=lambda: tick[0])
+    service = MetricsService(
+        store, entry_counts_ttl=300.0, clock=lambda: tick[0], wall_clock=lambda: last.created_at
+    )
     store.fail_health = True
     report = await service.usage_report()  # no exception
     assert report.health is None and asdict(report.health_status) == {"ok": False}
-    assert report.entries.total == 0
+    assert report.entries.total == 3
     # The failure is not cached: the next report retries, and recovers.
     store.fail_health = False
     report = await service.usage_report()
     assert report.health is not None and asdict(report.health_status) == {"ok": True}
     assert (store.usage_calls, store.health_calls) == (1, 2)  # the entry scan stayed cached
+    last_good = report.health
+    assert last_good.echo_rate.count == 2
     # Later failures serve the last good values and say they are stale.
     tick[0] = 301.0
     store.fail_convergence = True
     report = await service.usage_report()
-    assert report.health is not None and asdict(report.health_status) == {"ok": False}
+    assert report.health == last_good
+    assert asdict(report.health_status) == {"ok": False}
 
 
 async def test_prometheus_reports_health_success_and_leaks_no_tag_strings() -> None:
@@ -283,20 +291,19 @@ async def test_prometheus_reports_health_success_and_leaks_no_tag_strings() -> N
     report = await MetricsService(store).usage_report()
     got = {
         (s.name, tuple(sorted(s.labels.items()))): s.value
-        for family in __import__("hivemind.api.prometheus", fromlist=["x"])._usage_families(report)
+        for family in _usage_families(report)
         for s in family.samples
     }
     assert got[("hivemind_health_success", ())] == 0.0
     assert not any(
         k[0].startswith("hivemind_health_") and k[0] != "hivemind_health_success" for k in got
     )
-    # only the fixed gap tags ever appear as a tag label
-    body = (await MetricsService(MemoryStore(make_clock())).usage_report()).health
-    labels = {
-        v
-        for family in _health_families(body)
-        for sample in family.samples
-        for k, v in sample.labels.items()
-        if k == "tag"
-    }
-    assert labels <= {"anomaly", "open-question", "dead-end"}
+    # Only the fixed gap tags ever appear as a tag label, whatever tags the pool holds.
+    pool = MemoryStore(make_clock())
+    await _write(pool, "a gap", tags=("anomaly", "customer-acme-secret"))
+    health = (await MetricsService(pool).usage_report()).health
+    assert health is not None and health.gap_tag_counts["anomaly"] == 1
+    samples = [s for family in _health_families(health) for s in family.samples]
+    labels = {v for s in samples for k, v in s.labels.items() if k == "tag"}
+    assert labels == {"anomaly", "open-question", "dead-end"}
+    assert not any("customer-acme-secret" in str(s) for s in samples)

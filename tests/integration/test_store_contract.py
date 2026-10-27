@@ -22,6 +22,7 @@ from datetime import UTC, datetime, timedelta
 
 import asyncpg
 import pytest
+from tests.pg import ensure_migrated
 
 from hivemind.config import Settings
 from hivemind.domain.access import (
@@ -59,7 +60,6 @@ from hivemind.domain.pin import PinRefusal, PinWrite
 from hivemind.memstore import MemoryStore, cosine_similarity
 from hivemind.ports import Store, SupersedeConflict
 from hivemind.store import PgStore
-from hivemind.store.migrate import migrate
 
 T0 = datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC)
 NO_SUCH_ID = "00000000-0000-4000-8000-00000000dead"
@@ -97,19 +97,7 @@ class Adapter:
 async def _pg_adapter() -> AsyncIterator[Adapter]:
     settings = Settings()
     dsn, dim = settings.database_url, settings.embedding_dim
-    try:
-        probe = await asyncpg.connect(dsn, timeout=5)
-    except Exception as exc:
-        pytest.skip(f"Postgres unreachable at {dsn}: {exc}")
-    try:
-        has_vector = await probe.fetchval(
-            "SELECT count(*) FROM pg_available_extensions WHERE name = 'vector'"
-        )
-    finally:
-        await probe.close()
-    if not has_vector:
-        pytest.skip("'vector' extension is not available on the dev database")
-    await migrate(dsn, dim)
+    await ensure_migrated(dsn, dim)
 
     async def truncate() -> None:
         conn = await asyncpg.connect(dsn)
@@ -361,6 +349,22 @@ async def test_scope_fleet_importance_source_and_entity_filters(adapter: Adapter
     assert await listed(importance_source=ImportanceSource.CALLER) == {caller.id}
     assert await listed(entities=("postgres",)) == {caller.id, in_a.id, in_b.id}
     assert await listed(scope="fleet", entities=("POSTGRES",), fleet_id=fleet_b) == {in_b.id}
+
+
+async def test_occurred_range_includes_both_bounds(adapter: Adapter) -> None:
+    before = await write(adapter, "before", occurred_at=T0 - timedelta(days=1))
+    at_start = await write(adapter, "at the start", occurred_at=T0)
+    inside = await write(adapter, "inside", occurred_at=T0 + timedelta(days=1))
+    at_end = await write(adapter, "at the end", occurred_at=T0 + timedelta(days=2))
+    after = await write(adapter, "after", occurred_at=T0 + timedelta(days=3))
+    filters = EntryFilters(occurred_from=T0, occurred_to=T0 + timedelta(days=2))
+    assert {e.id for e in await adapter.store.list_entries(filters)} == {
+        at_start.id,
+        inside.id,
+        at_end.id,
+    }
+    assert await adapter.store.count_entries(filters) == 3
+    assert {before.id, after.id}.isdisjoint(e.id for e in await adapter.store.list_entries(filters))
 
 
 async def test_inactive_entries_are_hidden_unless_asked(adapter: Adapter) -> None:
@@ -642,9 +646,11 @@ async def test_similar_entries_exclude_the_entry_and_inactive_ones(adapter: Adap
 async def test_similar_entries_without_an_excluded_id_returns_every_active_match(
     adapter: Adapter,
 ) -> None:
-    first = await write(adapter, "first", hot=3)
+    old = await write(adapter, "old", hot=3)
+    new = await write(adapter, "new", hot=3, supersedes=(old.id,))
+    other = await write(adapter, "other", hot=3)
     pairs = await adapter.store.similar_entries(adapter.vec(3), 5)
-    assert [eid for eid, _ in pairs] == [first.id]
+    assert {eid for eid, _ in pairs} == {new.id, other.id}
 
 
 async def test_similar_entries_apply_the_readers_visibility(adapter: Adapter) -> None:

@@ -2,13 +2,23 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
+import sys
 from collections.abc import Generator
 
+import psycopg
 import pytest
+from psycopg import errors as pg_errors
+from psycopg import sql
 
 from hivemind.config import Settings
-from tests.db_guard import UnsafeTestDatabase, check_test_database
+from tests.db_guard import (
+    UnsafeTestDatabase,
+    check_test_database,
+    database_name,
+    worker_dsn,
+)
 from tests.fakes import (
     FIXED_NOW,
     FakeEmbedder,
@@ -46,16 +56,62 @@ def search_config():
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """STORE-9: integration tests wipe the DB in HIVEMIND_DATABASE_URL; vet its name first."""
+    """STORE-9: integration tests wipe the DB in HIVEMIND_DATABASE_URL; vet its name first.
+
+    Runs before any test, so the worker database set here is what every DSN
+    read sees. Nothing may read ``Settings().database_url`` at import time:
+    it would capture the base database instead of the worker's.
+    """
     if not any("integration" in item.nodeid.split("/") for item in items):
         return
+    allow_any = os.environ.get("HM_TEST_ALLOW_ANY_DB") == "1"
+    workerinput = getattr(config, "workerinput", None)
+    worker = workerinput["workerid"] if workerinput else None
+    base = Settings().database_url
+    own = None
     try:
-        check_test_database(
-            Settings().database_url,
-            allow_any=os.environ.get("HM_TEST_ALLOW_ANY_DB") == "1",
-        )
+        check_test_database(base, allow_any=allow_any)
+        if worker:
+            # The base database is vetted above, before anything is created.
+            own = worker_dsn(base, worker)
+            check_test_database(own, allow_any=allow_any)
     except UnsafeTestDatabase as exc:
+        if worker:  # an xdist worker's UsageError dies without a message
+            print(f"ERROR: {exc}", file=sys.stderr, flush=True)
         raise pytest.UsageError(str(exc)) from None
+    if own is not None:
+        _use_worker_database(base, own)
+
+
+def _use_worker_database(base: str, own: str) -> None:
+    """Point this xdist worker (and every subprocess it spawns) at its own database.
+
+    The integration tests TRUNCATE and DROP SCHEMA, so workers cannot share
+    one: the worker always switches, even when the database cannot be made
+    here, and its tests then skip (or fail under HM_TEST_REQUIRE_PG=1) as
+    on an unreachable Postgres. The database is created on first use with
+    the vector extension, which the Postgres tests probe for before they
+    migrate, and kept for the next run (`DROP DATABASE` to clean up).
+    """
+    os.environ["HIVEMIND_DATABASE_URL"] = own
+    name = database_name(own)
+    try:
+        with psycopg.connect(base, autocommit=True, connect_timeout=5) as conn:
+            exists = conn.execute("SELECT 1 FROM pg_database WHERE datname = %s", (name,))
+            if exists.fetchone() is None:
+                # DuplicateDatabase: lost a race with another run.
+                with contextlib.suppress(pg_errors.DuplicateDatabase):
+                    conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
+        with psycopg.connect(own, autocommit=True, connect_timeout=5) as conn:
+            conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
+    except psycopg.OperationalError:
+        return
+    except pg_errors.FeatureNotSupported, pg_errors.UndefinedFile:
+        return  # no pgvector: the tests skip on their extension probe
+    except psycopg.Error as exc:
+        raise pytest.UsageError(
+            f"could not create the xdist worker database {name!r}: {exc}"
+        ) from None
 
 
 # The Postgres-backed tests skip when the database is missing so a laptop

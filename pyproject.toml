@@ -39,6 +39,7 @@ dev = [
     "mypy>=2.3.1",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
+    "pytest-xdist>=3.8.0",
     "ruff>=0.16.6",
 ]
 
@@ -46,7 +47,12 @@ dev = [
 testpaths = ["tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
-addopts = "-q"
+# Measurements print tables and are not gates; `make measure-vector-index`
+# runs them with `-m measurement` (the last -m wins over this one).
+addopts = "-q -m 'not measurement'"
+markers = [
+    "measurement: a slow measurement that prints; deselected from the default run",
+]
 
 [tool.ruff]
 line-length = 100

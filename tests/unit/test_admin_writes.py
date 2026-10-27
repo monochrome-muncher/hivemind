@@ -9,6 +9,7 @@ from hivemind.api.deps import create_app
 from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
+from hivemind.domain.entry import EntryFilters
 from hivemind.mcp.app import McpHivemind, hive_feedback, hive_get, hive_search, hive_write
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
@@ -84,9 +85,10 @@ async def test_an_admin_correction_of_a_fleet_entry_stays_readable_to_the_fleet(
 
 
 async def test_rest_refuses_an_admin_fleet_write() -> None:
+    store = MemoryStore(make_clock())
     app = create_app_for_config(
         Settings(),
-        store=MemoryStore(make_clock()),
+        store=store,
         embedder=make_embedder(),
         authenticator=FakeAuthenticator(agent_credentials={"k": ADMIN}),
         search_config=make_search_config(),
@@ -101,7 +103,11 @@ async def test_rest_refuses_an_admin_fleet_write() -> None:
         )
         ok = await client.post("/v1/entries", json={"kind": "fact", "summary": "s", "agent": "ops"})
     assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == "forbidden"
     assert (ok.status_code, ok.json()["scope"]) == (201, "org")
+    # The refused fleet write stored nothing: the org write is the only entry.
+    stored = await store.list_entries(EntryFilters(), limit=10)
+    assert [e.id for e in stored] == [ok.json()["id"]]
 
 
 # ADR 0066: the admin key has one feedback vote per entry.

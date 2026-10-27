@@ -100,6 +100,8 @@ async def test_batch_of_only_others_entries_works() -> None:
     ids = [await _write(store, PEER, f"fact {i}") for i in range(2)]
     result = await hive_feedback(_surface(store, ME), verdict="helpful", entry_ids=ids)
     assert "error" not in result
+    for entry_id in ids:
+        assert await store.feedback_counts(entry_id) == (1, 0, 0)
 
 
 async def test_an_unreadable_id_is_still_not_found_beside_an_own_one() -> None:

@@ -5,6 +5,7 @@ in-memory reference store, plus ``Credential.key_id`` threading from
 
 from __future__ import annotations
 
+import hashlib
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import Any
@@ -118,8 +119,8 @@ async def test_verify_threads_the_key_fingerprint_into_the_credential() -> None:
         credential = await auth.verify(raw_key)
     assert credential is not None and credential.is_admin
     # The fingerprint is the first 12 hex chars of the STORED hash (what
-    # `hivemind-keys list` shows) — never the raw key or a prefix of it.
+    # `hivemind-keys list` shows), computed here independently of the code.
+    fingerprint = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()[:12]
+    assert credential.key_id == fingerprint
     assert credential.key_id == key_fingerprint(key_hash(raw_key))
-    assert credential.key_id == key_hash(raw_key)[:12]
-    assert raw_key not in credential.key_id
-    assert credential.audit_actor() == f"admin:{key_hash(raw_key)[:12]}"
+    assert credential.audit_actor() == f"admin:{fingerprint}"

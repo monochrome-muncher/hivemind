@@ -110,7 +110,7 @@ def test_memstore_roundtrips_facets_and_provenance() -> None:
         assert stored.entities_model == "qwen3.8-27b"
         # The filter surface sees the facets (AND + case-insensitive).
         assert await store.list_entries(EntryFilters(entities=("vllm",))) == [entry]
-        assert await store.list_entries(EntryFilters(entities=("VLLM", "EMBEDDINGS")))
+        assert await store.list_entries(EntryFilters(entities=("VLLM", "EMBEDDINGS"))) == [entry]
         assert await store.list_entries(EntryFilters(entities=("vllm", "etcd"))) == []
 
         # An entry created without extraction (extractor off / failed)

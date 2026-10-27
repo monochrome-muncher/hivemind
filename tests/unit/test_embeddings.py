@@ -24,7 +24,6 @@ from hivemind.domain.entry import (
     Kind,
     Source,
     SourceType,
-    embeddable_text,
 )
 from hivemind.embeddings.openai_compat import (
     EmbeddingError,
@@ -65,6 +64,14 @@ def _default_ok_handler(request: httpx.Request) -> httpx.Response:
     )
 
 
+async def _no_sleep(_: float) -> None:
+    """The default backoff sleep: tests that assert the delays pass a recorder."""
+
+
+def _full_backoff() -> float:
+    return 1.0
+
+
 def make_embedder(
     env: MockEnv,
     base_url: str = BASE_URL,
@@ -74,8 +81,8 @@ def make_embedder(
     prefix_tokens: int = DEFAULT_PREFIX_TOKENS,
     retries: int = 2,
     backoff: float = 0.5,
-    sleep=None,
-    jitter=None,
+    sleep=_no_sleep,
+    jitter=_full_backoff,
     deadline: float = 30.0,
 ) -> OpenAICompatEmbedder:
     return OpenAICompatEmbedder(
@@ -344,7 +351,7 @@ class TestEmbedEntry:
         await embedder.embed_entry(draft)
         # The request carries exactly the domain's embeddable text
         # (summary + bounded body prefix), never the full body.
-        expected = embeddable_text(draft.summary, draft.body)
+        expected = "cohort churn write-up\n" + " ".join(f"w{i}" for i in range(2000))
         assert env.last_body["input"] == expected
         assert len(expected) < len(draft.body or "")
         # The port method agrees with what was actually sent.

@@ -288,16 +288,18 @@ class TestRetryPolicy:
         await e.embed_text("x")
         assert sleeps == [3.0, 10.0]
 
-    async def test_backoff_is_jittered(self) -> None:
+    @pytest.mark.parametrize(("jitter", "expected"), [(0.0, 0.5), (0.5, 0.75), (1.0, 1.0)])
+    async def test_backoff_is_jittered(self, jitter: float, expected: float) -> None:
+        """The jitter scales the backoff between half and the whole of it."""
         sleeps: list[float] = []
 
         async def rec(d: float) -> None:
             sleeps.append(d)
 
         answers = [httpx.Response(500), _ok()]
-        e = _embedder(lambda req: answers.pop(0), sleep=rec, backoff=1.0, jitter=lambda: 0.0)
+        e = _embedder(lambda req: answers.pop(0), sleep=rec, backoff=1.0, jitter=lambda: jitter)
         await e.embed_text("x")
-        assert sleeps == [0.5]
+        assert sleeps == [expected]
 
     async def test_negative_retries_make_one_attempt(self) -> None:
         calls: list[int] = []
@@ -457,8 +459,11 @@ class TestLogging:
         assert "starting hivemind" in caplog.text
         assert "hunter2" not in caplog.text
 
-    def test_httpx_loggers_are_quieted(self) -> None:
-        configure_logging("INFO")
+    @pytest.mark.parametrize("level", ["DEBUG", "INFO"])
+    def test_httpx_loggers_are_quieted(self, level: str) -> None:
+        """httpx logs request URLs at INFO and httpcore at DEBUG, so a
+        DEBUG root level must not bring them back."""
+        configure_logging(level)
         assert logging.getLogger("httpx").getEffectiveLevel() >= logging.WARNING
         assert logging.getLogger("httpcore").getEffectiveLevel() >= logging.WARNING
 
@@ -504,13 +509,15 @@ class TestExtractorRobustness:
             " \n" * 30_000,
         ],
     )
-    async def test_unwrapping_is_linear_time(self, content) -> None:
+    async def test_unwrapping_does_not_stall_on_pathological_output(self, content) -> None:
+        """A backtracking pattern takes minutes on these inputs, so a bound
+        well above any machine's linear-time cost still catches it."""
         import time
 
         start = time.perf_counter()
         with pytest.raises(ExtractorError):
             await _extractor(lambda r: _chat(content)).extract_entry(_draft())
-        assert time.perf_counter() - start < 0.5
+        assert time.perf_counter() - start < 5.0
 
     async def test_dedupe_is_lower_of_the_collapsed_name(self) -> None:
         # str.lower() is the store / filter key (ADR 0016); casefold would

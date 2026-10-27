@@ -63,7 +63,8 @@ jobs:
           --health-timeout 3s
           --health-retries 15
     env:
-      # A throwaway service database; the integration tests TRUNCATE it.
+      # A throwaway service database; the integration tests TRUNCATE it (and
+      # each xdist worker's `hivemind_gw<N>` next to it).
       HIVEMIND_DATABASE_URL: postgresql://hivemind:hivemind@localhost:5432/hivemind
       HIVEMIND_EMBEDDING_DIM: "512"
       # Fail, don't skip, if the Postgres tests cannot reach the service.
@@ -83,5 +84,8 @@ jobs:
       - name: Apply migrations
         run: uv run hivemind-migrate
 
+      # One xdist worker per CPU (at most 4, so the pools stay under the
+      # service's max_connections), each on its own database (`hivemind_gw0`,
+      # ...) created next to the service database; module-grouped.
       - name: Run the test suite
-        run: uv run pytest -rs
+        run: uv run pytest -rs -n auto --maxprocesses=4 --dist loadscope

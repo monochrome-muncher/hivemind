@@ -180,7 +180,9 @@ async def test_get_returns_the_newest_reports_only_but_counts_all() -> None:
     feedback = result["feedback"]
     assert feedback["helpful"] == total  # type: ignore[index]
     reporters = [r["reporter"] for r in feedback["recent"]]  # type: ignore[index]
-    assert reporters == [f"agent-{i}" for i in reversed(range(2, total))]
+    assert reporters == [
+        f"agent-{i}" for i in reversed(range(total - FEEDBACK_RECENT_LIMIT, total))
+    ]
 
 
 async def test_get_keeps_a_correction_after_five_later_helpful_reports() -> None:

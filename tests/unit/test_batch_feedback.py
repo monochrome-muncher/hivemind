@@ -21,7 +21,13 @@ from hivemind.services.governance import GovernanceService
 from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
 from hivemind.services.write import WriteService
-from tests.fakes import FakeAuthenticator, make_clock, make_embedder, make_search_config
+from tests.fakes import (
+    FakeAuthenticator,
+    RecordingStore,
+    make_clock,
+    make_embedder,
+    make_search_config,
+)
 
 
 def _agent(name: str, fleet: str) -> Credential:
@@ -170,27 +176,6 @@ async def test_rest_batch_feedback_bounds() -> None:
     assert many.status_code == 422
 
 
-class _CountingStore(MemoryStore):
-    """Counts every Store call a batch makes; can fail the batch upsert."""
-
-    def __init__(self) -> None:
-        super().__init__(make_clock())
-        self.calls = 0
-        self.fail_upsert = False
-
-    def __getattribute__(self, name: str) -> object:
-        attr = super().__getattribute__(name)
-        if name in {"get_entry", "get_entries", "record_feedback", "quality_counts"}:
-            object.__setattr__(self, "calls", super().__getattribute__("calls") + 1)
-        return attr
-
-    async def record_feedback_many(self, feedbacks: list[Feedback]) -> list[Feedback]:
-        self.calls += 1
-        if self.fail_upsert:
-            raise RuntimeError("store down")
-        return await super().record_feedback_many(feedbacks)
-
-
 async def test_one_entry_spelled_two_ways_is_recorded_once_under_its_canonical_id() -> None:
     store = MemoryStore(make_clock())
     (eid,) = await _entries(store, WRITER, 1)
@@ -204,21 +189,26 @@ async def test_one_entry_spelled_two_ways_is_recorded_once_under_its_canonical_i
 
 
 async def test_a_batch_makes_the_same_store_calls_for_one_id_as_for_sixteen() -> None:
-    counts = []
+    calls = []
     for n in (1, MAX_FEEDBACK_IDS):
-        store = _CountingStore()
+        store = RecordingStore()
         ids = await _entries(store, WRITER, n)
-        store.calls = 0
+        store.calls.clear()
         await FeedbackService(store).record_feedback_many(READER, ids, Verdict.HELPFUL)
-        counts.append(store.calls)
-    assert counts[0] == counts[1]
+        calls.append(store.calls)
+    # One readable-ids read, one transactional upsert, one count read.
+    assert calls[0] == calls[1] == ["get_entries", "record_feedback_many", "quality_counts"]
 
 
 async def test_a_store_failure_in_the_batch_records_nothing() -> None:
-    store = _CountingStore()
+    store = RecordingStore()
     ids = await _entries(store, WRITER, 3)
-    store.fail_upsert = True
-    with pytest.raises(RuntimeError):
+
+    async def down(feedbacks: list[Feedback]) -> list[Feedback]:
+        raise RuntimeError("store down")
+
+    store.record_feedback_many = down  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError, match="store down"):
         await FeedbackService(store).record_feedback_many(READER, ids, Verdict.HELPFUL)
     for eid in ids:
         assert await store.feedback_counts(eid) == (0, 0, 0)

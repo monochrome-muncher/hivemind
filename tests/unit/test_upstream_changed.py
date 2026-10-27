@@ -325,12 +325,14 @@ async def _withdrawn_upstream() -> tuple[MemoryStore, str]:
 
 async def test_mcp_hit_lists_the_change_and_omits_it_when_empty() -> None:
     store, base = await _withdrawn_upstream()
+    await _put(store, "billing node standalone", kind=Kind.FACT, author="ann", scope="org")
     reply = await hive_search(_surface(store, WRITER), query="billing node build")
     by_summary = {h["summary"]: h for h in reply["hits"]}  # type: ignore[index,union-attr]
+    assert set(by_summary) == {"billing node build", "billing node standalone"}
     assert by_summary["billing node build"]["upstream_changed"] == [
         {"id": base, "change": "withdrawn"}
     ]
-    assert "upstream_changed" not in by_summary.get("billing node base", {})
+    assert "upstream_changed" not in by_summary["billing node standalone"]
 
 
 async def test_mcp_plain_hit_has_no_upstream_field() -> None:

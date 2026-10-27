@@ -10,11 +10,11 @@ import pytest
 
 from hivemind.domain.access import TrustLevel
 from hivemind.domain.audit import AuditAction, AuditFilters
-from hivemind.domain.entry import EntryDraft, Kind
+from hivemind.domain.entry import EntryDraft, EntryState, Kind
 from hivemind.domain.feedback import Feedback, FeedbackLogFilters, Verdict
 from hivemind.ports import Credential
-from tests.fakes import make_embedder
-from tests.unit.test_api_endpoints import make_client, make_hivemind_app
+from tests.fakes import FIXED_NOW, FixedClock, make_embedder
+from tests.unit.test_api_endpoints import make_app_with_clock, make_client, make_hivemind_app
 
 ADMIN = {"X-API-Key": "key-admin"}
 ALICE = {"X-API-Key": "key-alice"}
@@ -112,6 +112,24 @@ async def test_every_registered_admin_route_is_403_for_agent_and_org_keys(header
     assert (await app.store.get_agent("ghost")).status.value == "pending"  # type: ignore[union-attr]
 
 
+@pytest.mark.parametrize("headers", [ALICE, ORG], ids=["agent-key", "org-key"])
+async def test_agent_patch_by_a_non_admin_is_403_before_any_lookup(headers) -> None:
+    """A known fleet, an unknown fleet and an empty body all answer 403, so
+    a non-admin key cannot probe which fleet ids exist."""
+    app = make_hivemind_app()
+    known = await app.store.create_fleet("blue")
+    async with make_client(app) as client:
+        known_fleet = await client.patch(
+            "/v1/admin/agents/ghost", json={"home_fleet_id": known.id}, headers=headers
+        )
+        unknown_fleet = await client.patch(
+            "/v1/admin/agents/ghost", json={"home_fleet_id": FAKE_ID}, headers=headers
+        )
+        empty = await client.patch("/v1/admin/agents/ghost", json={}, headers=headers)
+    assert known_fleet.status_code == unknown_fleet.status_code == empty.status_code == 403
+    assert known_fleet.json() == unknown_fleet.json() == empty.json()
+
+
 async def test_admin_list_sees_self_and_fleet_entries_of_any_fleet() -> None:
     app, *_ = await _seed()
     async with make_client(app) as client:
@@ -201,7 +219,7 @@ async def test_admin_search_sees_every_fleet_and_is_not_counted() -> None:
 
 
 async def test_admin_withdraw_works_is_audited_and_conflicts_the_second_time() -> None:
-    app, _, _, _, in_blue, _ = await _seed()
+    app, _, _, mine, in_blue, in_red = await _seed()
     async with make_client(app) as client:
         first = await client.post(
             f"/v1/admin/entries/{in_blue.id}/withdraw", json={"reason": "wrong"}, headers=ADMIN
@@ -215,6 +233,14 @@ async def test_admin_withdraw_works_is_audited_and_conflicts_the_second_time() -
     assert second.status_code == 409
     assert second.json()["error"]["code"] == "conflict"
     assert unknown.status_code == 404
+    assert unknown.json()["error"]["code"] == "not_found"
+    # The refused calls changed nothing: the first withdrawal's reason stands,
+    # and the only other entries are still active.
+    stored = await app.store.get_entry(in_blue.id)
+    assert stored is not None and stored.withdrawn_reason == "wrong"
+    for other in (mine, in_red):
+        untouched = await app.store.get_entry(other.id)
+        assert untouched is not None and untouched.state is EntryState.ACTIVE
     records = await app.store.list_audit(AuditFilters(action=AuditAction.ENTRY_WITHDRAW), 10)
     assert [r.target for r in records] == [in_blue.id]
 
@@ -391,6 +417,26 @@ async def test_admin_flagged_lists_the_flag_backlog_oldest_flag_first() -> None:
     assert [r["id"] for r in paged.json()] == [in_red.id]
     assert malformed.status_code == 200 and malformed.json() == []
     assert too_old.status_code == long_id.status_code == 422
+
+
+async def test_the_orphan_filter_keeps_out_authors_who_wrote_recently() -> None:
+    """The flag backlog judges silence against the real clock, so the store
+    clock is moved to now for one author; the other wrote long ago."""
+    clock = FixedClock(FIXED_NOW)
+    app = make_app_with_clock(clock)
+    long_gone = await _add(app, "erin wrote this ages ago", author="erin")
+    clock.set(datetime.now(UTC))
+    active = await _add(app, "dave wrote this today", author="dave")
+    for entry in (long_gone, active):
+        await app.store.record_feedback(Feedback(entry.id, "zed", "zed", Verdict.STALE))
+    async with make_client(app) as client:
+        everything = await client.get("/v1/admin/flagged", headers=ADMIN)
+        orphans = await client.get("/v1/admin/flagged", params={"orphaned": True}, headers=ADMIN)
+    assert {r["id"]: r["orphaned"] for r in everything.json()} == {
+        long_gone.id: True,
+        active.id: False,
+    }
+    assert [r["id"] for r in orphans.json()] == [long_gone.id]
 
 
 async def test_the_flag_backlog_service_follows_the_callers_visibility() -> None:

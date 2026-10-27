@@ -272,6 +272,7 @@ async def test_an_unreachable_api_is_a_502_in_the_api_error_shape(caplog) -> Non
         resp = await panel.get("/v1/admin/agents", headers=ADMIN)
     assert resp.status_code == 502
     assert resp.json()["error"]["code"] == "api_unreachable"
+    assert "hivemind-api unreachable: ConnectError" in caplog.text  # something was logged
     assert "hm_admin" not in caplog.text
 
 
@@ -285,6 +286,7 @@ async def test_activation_through_the_proxy_returns_the_key_uncached_and_unlogge
     await hivemind.store.register_agent("alice", "john")
     fleet = await hivemind.store.create_fleet("data-eng")
     caplog.set_level(logging.DEBUG)
+    caplog.set_level(logging.INFO, logger="httpx")  # other tests may have quieted it
     async with _panel(httpx.ASGITransport(app=api_app)) as panel:
         pending = await panel.get("/v1/admin/agents", headers=ADMIN)
         activated = await panel.post(
@@ -298,11 +300,16 @@ async def test_activation_through_the_proxy_returns_the_key_uncached_and_unlogge
     raw_key = activated.json()["key"]
     assert activated.headers["cache-control"] == "no-store"
     assert denied.status_code == 403  # the API still does the authorization
+    assert "/v1/admin/agents/alice/activate" in caplog.text  # the proxied call was logged
     assert raw_key not in caplog.text
     assert "hm_admin" not in caplog.text
 
 
 # -- the static bundle and its headers ----------------------------------------------
+
+
+def _unreachable(request: httpx.Request) -> httpx.Response:
+    raise httpx.ConnectError("down", request=request)
 
 
 async def test_every_response_carries_the_security_headers() -> None:
@@ -315,8 +322,17 @@ async def test_every_response_carries_the_security_headers() -> None:
             await panel.get("/healthz"),
             await panel.get("/v1/health"),
         ]
+        errors = [
+            (await panel.get("/v1/admin/agents"), 401),  # no key: refused before the proxy
+            (await panel.get("/v1/not-allowlisted", headers=ADMIN), 404),
+        ]
+    async with _panel(httpx.MockTransport(_unreachable)) as down:
+        errors.append((await down.get("/v1/admin/agents", headers=ADMIN), 502))
     for resp in responses:
         assert resp.status_code == 200, resp.url
+    for resp, status in errors:
+        assert resp.status_code == status, resp.url
+    for resp in [*responses, *(r for r, _ in errors)]:
         assert resp.headers["content-security-policy"] == CONTENT_SECURITY_POLICY
         assert resp.headers["x-frame-options"] == "DENY"
         assert resp.headers["x-content-type-options"] == "nosniff"
@@ -441,15 +457,22 @@ def test_the_runner_refuses_to_start_without_an_api_url(monkeypatch) -> None:
 
 async def test_a_keyless_call_is_refused_before_its_body_is_read() -> None:
     seen: list[httpx.Request] = []
+    pulled: list[int] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
         return httpx.Response(200, json={})
 
+    async def body():  # type: ignore[no-untyped-def]
+        for _ in range(4):
+            pulled.append(1)  # the app asked for another chunk
+            yield b"x" * 1024
+
     async with _panel(httpx.MockTransport(handler)) as panel:
-        resp = await panel.post("/v1/admin/fleets", content=b"x" * 4096)
+        resp = await panel.post("/v1/admin/fleets", content=body())
         health = await panel.get("/v1/health")
     assert resp.status_code == 401
+    assert pulled == []
     assert resp.json()["error"]["code"] == "missing_api_key"
     # The public probe still needs no key.
     assert health.status_code == 200

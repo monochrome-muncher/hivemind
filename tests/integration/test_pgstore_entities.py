@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 
 import asyncpg
 import pytest
+from tests.pg import ensure_migrated
 
 from hivemind.config import Settings
 from hivemind.domain.entry import (
@@ -28,7 +29,6 @@ from hivemind.domain.entry import (
     Kind,
 )
 from hivemind.store import PgStore
-from hivemind.store.migrate import migrate
 
 FIXED_NOW = datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC)
 
@@ -62,30 +62,12 @@ async def _truncate(dsn: str) -> None:
         await conn.close()
 
 
-async def _vector_extension_available(dsn: str) -> bool:
-    conn = await asyncpg.connect(dsn)
-    try:
-        count = await conn.fetchval("SELECT count(*) FROM pg_extension WHERE extname = 'vector'")
-        return count > 0
-    finally:
-        await conn.close()
-
-
 @pytest.fixture
 async def pg():
     """A ready ``PgStore`` on a clean dev database (skip when unreachable)."""
     dsn = _dsn()
     dim = _dim()
-    try:
-        probe = await asyncpg.connect(dsn, timeout=5)
-    except Exception as exc:  # connection refused / timeout / auth
-        pytest.skip(f"Postgres unreachable at {dsn}: {exc}")
-    await probe.close()
-
-    if not await _vector_extension_available(dsn):
-        pytest.skip("the 'vector' extension is not available on the dev database")
-
-    await migrate(dsn, dim)
+    await ensure_migrated(dsn, dim)
     await _truncate(dsn)
 
     store = PgStore(dsn)

@@ -3,6 +3,7 @@ its plumbing through REST and MCP, and its counter."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 from dataclasses import asdict
@@ -222,15 +223,19 @@ async def test_explore_reads_similarity_only_after_the_concurrent_reads() -> Non
     store, service, _ = await _three_with_a_near_copy()
     active = 0
     peak = 0
+    inflight_at_pairwise: list[int] = []
 
     def wrap(name: str) -> None:
         original = getattr(store, name)
 
         async def counted(*args, **kwargs):  # type: ignore[no-untyped-def]
             nonlocal active, peak
+            if name == "pairwise_similarity":
+                inflight_at_pairwise.append(active)
             active += 1
             peak = max(peak, active)
             try:
+                await asyncio.sleep(0)  # let a sibling that runs beside this call start
                 return await original(*args, **kwargs)
             finally:
                 active -= 1
@@ -246,6 +251,7 @@ async def test_explore_reads_similarity_only_after_the_concurrent_reads() -> Non
     ):
         wrap(name)
     await service.search("alpha", visibility=READER, explore=True)
+    assert inflight_at_pairwise == [0]  # the similarity read ran alone, once
     assert peak <= 2
 
 

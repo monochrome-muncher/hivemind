@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -26,6 +26,9 @@ from hivemind.services.metrics import MetricsService
 from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
 from hivemind.services.write import WriteService
+
+if TYPE_CHECKING:
+    from hivemind.api.prometheus import PrometheusMetrics
 
 logger = logging.getLogger(__name__)
 
@@ -69,9 +72,16 @@ def api_error(status_code: int, code: str, message: str) -> ApiError:
     return ApiError(status_code, code, message)
 
 
-def get_app(request: Request) -> HivemindApp:
+# The accessors are ``async`` so FastAPI runs them inline as dependencies
+# instead of hopping to a worker thread on every request.
+async def get_app(request: Request) -> HivemindApp:
     """The HivemindApp bundle, attached by ``create_app``."""
     return cast(HivemindApp, request.app.state.hivemind)
+
+
+async def get_prometheus(request: Request) -> PrometheusMetrics:
+    """The app's Prometheus metrics, attached by ``create_app``."""
+    return cast("PrometheusMetrics", request.app.state.prometheus)
 
 
 async def require_credential(request: Request) -> Credential:
@@ -81,7 +91,7 @@ async def require_credential(request: Request) -> Credential:
     ``unknown_api_key``. The verified Credential is attached to
     ``request.state`` for downstream use.
     """
-    app = get_app(request)
+    app = await get_app(request)
     key = request.headers.get("X-API-Key")
     if key is None:
         raise api_error(401, "missing_api_key", "the X-API-Key header is required")
@@ -160,7 +170,10 @@ def create_app(app: HivemindApp) -> FastAPI:
 
     # ADR 0050: the Prometheus scrape target and per-process request metrics.
     prometheus = PrometheusMetrics(app.metrics_service.usage_report)
-    fastapi_app = FastAPI(title="Hivemind")
+    # The shared /v1 route objects, not include_router, which would rebuild
+    # every route on the app's first request. Routes passed this way skip
+    # the app's ``dependency_overrides``.
+    fastapi_app = FastAPI(title="Hivemind", routes=build_router().routes)
     fastapi_app.state.hivemind = app
     fastapi_app.state.prometheus = prometheus
     fastapi_app.add_exception_handler(ApiError, _handle_api_error)
@@ -171,6 +184,5 @@ def create_app(app: HivemindApp) -> FastAPI:
     fastapi_app.add_middleware(PreAuthGuard, max_body_bytes=MAX_REQUEST_BODY_BYTES)
     # Added last, so outermost: the guards' 401 / 413 answers are counted too.
     fastapi_app.add_middleware(RequestMetrics, metrics=prometheus.process)
-    fastapi_app.include_router(build_router(app, prometheus))
     fastapi_app.include_router(prometheus.router())
     return fastapi_app

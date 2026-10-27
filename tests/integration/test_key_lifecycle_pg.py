@@ -19,6 +19,7 @@ import asyncio
 
 import asyncpg
 import pytest
+from tests.pg import ensure_migrated
 
 from hivemind.config import Settings
 from hivemind.domain.access import InvalidAgentStatus, TrustLevel
@@ -56,12 +57,7 @@ async def _fetch(dsn: str, sql: str, *args: object) -> list[asyncpg.Record]:
 @pytest.fixture
 async def env():
     dsn = Settings().database_url
-    try:
-        probe = await asyncpg.connect(dsn, timeout=5)
-    except Exception as exc:
-        pytest.skip(f"Postgres unreachable at {dsn}: {exc}")
-    await probe.close()
-    await migrate(dsn, Settings().embedding_dim)
+    await ensure_migrated(dsn, Settings().embedding_dim)
     await _exec(dsn, TABLES)
     store, auth = PgStore(dsn), PgAuthenticator(dsn)
     try:
@@ -199,7 +195,7 @@ async def test_concurrent_activate_and_revoke_never_leave_a_live_key_on_a_revoke
         if agent.status.value == "revoked":
             assert keys == [], f"round {round_no}: revoked agent holds a key"
         elif agent.status.value == "active":
-            assert len(keys) <= 1
+            assert len(keys) == 1
             activation = results[0]
             if not isinstance(activation, BaseException):
                 assert await auth.verify(activation[1]) is not None

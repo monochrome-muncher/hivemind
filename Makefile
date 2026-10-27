@@ -54,6 +54,11 @@ DEV_DEFAULTS += HIVEMIND_MCP_HTTP_PORT
 TEST_ENV_KEEP := HIVEMIND_DATABASE_URL HIVEMIND_EMBEDDING_DIM
 TEST_ENV = env $(foreach v,$(filter-out $(TEST_ENV_KEEP),$(DEV_DEFAULTS)),$(if $(filter file,$(origin $(v))),-u $(v)))
 PYTEST ?= uv run pytest
+# pytest-xdist: one worker per CPU (at most 8, each opens connection pools),
+# each on its own database `<name>_gw0`, ... (tests/conftest.py), grouped by
+# module (`loadscope`) so a module's fixtures are built once per worker.
+# `make test PYTEST_PARALLEL=` runs serially on the base database.
+PYTEST_PARALLEL ?= -n auto --maxprocesses=8 --dist loadscope
 
 .PHONY: help
 help: ## Show this help
@@ -146,18 +151,18 @@ standalone-reset: ## Stop the standalone stack and wipe its data volume
 	$(STANDALONE_COMPOSE) down -v
 
 .PHONY: test
-test: ## Run the full test suite (unit + integration; integration needs `make pg`), with only CI's dev settings
-	$(TEST_ENV) $(PYTEST)
+test: ## Run the full test suite in parallel (unit + integration, one database per xdist worker; integration needs `make pg`), with only CI's dev settings
+	$(TEST_ENV) $(PYTEST) $(PYTEST_PARALLEL)
 
 .PHONY: test-unit
-test-unit: ## Run unit tests only (no Postgres needed), with only CI's dev settings
-	$(TEST_ENV) $(PYTEST) tests/unit
+test-unit: ## Run unit tests only in parallel (no Postgres needed), with only CI's dev settings
+	$(TEST_ENV) $(PYTEST) $(PYTEST_PARALLEL) tests/unit
 
 .PHONY: measure-threshold
 measure-threshold: ## Measure a search similarity threshold with the configured embedder (ADR 0062; e.g. after `make vllm`; set HIVEMIND_EMBEDDING_DIM to the deployment's)
 	uv run python -m tests.eval.threshold
 
-.PHONY: measure-ranking measure-versions measure-importance measure-query-instruction measure-longmemeval
+.PHONY: measure-ranking measure-versions measure-importance measure-query-instruction measure-longmemeval measure-vector-index
 measure-ranking: ## Measure the per-search recency hint variants (ADR 0073) against the shipped ranking with the configured embedder (e.g. after `make vllm`; set HIVEMIND_EMBEDDING_DIM to the deployment's)
 	uv run python -m tests.eval.ranking
 
@@ -172,6 +177,9 @@ measure-query-instruction: ## Measure the Qwen3 query instruction (ADR 0097) wit
 
 measure-longmemeval: ## Measure search-only recall on LongMemEval_S with the configured embedder (e.g. after `make vllm`; set HIVEMIND_EMBEDDING_DIM to the deployment's; EVAL_LONGMEMEVAL_PATH=file or a one-time download; EVAL_LONGMEMEVAL_PER_TYPE=N samples N per question type; EVAL_EMBED_CACHE=dir caches vectors on disk and resumes; EVAL_LONGMEMEVAL_JSON=path also writes JSON)
 	uv run python -m tests.eval.longmemeval
+
+measure-vector-index: ## Measure the HNSW index against an exact scan on the golden set (ADR 0025; needs `make pg`; hash embedder, so no vLLM; TRUNCATEs HIVEMIND_DATABASE_URL's database like `make test`; VECTOR_INDEX_EVAL_FILLER=N sets the distractor count)
+	$(TEST_ENV) $(PYTEST) tests/integration/test_vector_index_recall.py -m measurement -s
 
 .PHONY: check
 check: ## Type-check + lint (mypy strict + ruff)

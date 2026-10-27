@@ -36,9 +36,12 @@ make test-unit  # hermetic unit tests, no Postgres needed
 ```
 
 `make test` runs the full suite, including the Postgres-backed
-integration tests. It empties the tables in the database that
-`HIVEMIND_DATABASE_URL` points at, so only run it against the local
-dev database. `make format` fixes most style complaints for you.
+integration tests, in parallel (pytest-xdist: one worker per CPU, each
+on its own database `<name>_gw0`, `<name>_gw1`, ..., created next to
+the one `HIVEMIND_DATABASE_URL` names and kept for the next run;
+`make pg-reset` or `DROP DATABASE` removes them). It empties the
+tables in those databases, so only run it against the local dev
+database. `make format` fixes most style complaints for you.
 
 ## Opening a pull request
 

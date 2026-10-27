@@ -25,6 +25,7 @@ from datetime import UTC, datetime, timedelta
 import asyncpg
 import pytest
 from tests.fakes import FakeEmbedder
+from tests.pg import ensure_migrated
 
 from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel, Visibility
@@ -93,7 +94,8 @@ async def _truncate(dsn: str) -> None:
     conn = await asyncpg.connect(dsn)
     try:
         await conn.execute(
-            "TRUNCATE credentials, feedbacks, entries, search_counts, entry_links, pins"
+            "TRUNCATE credentials, feedbacks, entries, search_counts, entry_links, pins, "
+            "agents, fleets, audit_log"
         )
     finally:
         await conn.close()
@@ -109,20 +111,7 @@ async def pg():
     """
     dsn = _dsn()
     dim = _dim()
-    try:
-        probe = await asyncpg.connect(dsn, timeout=5)
-    except Exception as exc:  # connection refused / timeout / auth
-        pytest.skip(f"Postgres unreachable at {dsn}: {exc}")
-    await probe.close()
-
-    try:
-        vector_ok = await _vector_extension_available(dsn)
-    except Exception:
-        pytest.skip("could not verify the 'vector' extension on the dev database")
-    if not vector_ok:
-        pytest.skip("'vector' extension is not available on the dev database")
-
-    await migrate(dsn, dim)
+    await ensure_migrated(dsn, dim)
     await _truncate(dsn)
 
     store = PgStore(dsn)
@@ -133,15 +122,6 @@ async def pg():
         await _truncate(dsn)
         await store.close()
         await auth.close()
-
-
-async def _vector_extension_available(dsn: str) -> bool:
-    conn = await asyncpg.connect(dsn)
-    try:
-        count = await conn.fetchval("SELECT count(*) FROM pg_extension WHERE extname = 'vector'")
-        return count > 0
-    finally:
-        await conn.close()
 
 
 # --- write path -----------------------------------------------------------------
@@ -530,16 +510,28 @@ async def test_keyword_search_of_only_stop_words_matches_nothing(pg) -> None:
 
 
 @pytest.mark.parametrize(
-    "query",
-    ["jwt & !cookie", "jwt | (cookie", "jwt:* <-> cookie", "' & '", "it's o'neil", "a\\b"],
+    ("query", "reads_as_terms"),
+    [
+        ("jwt & !cookie", True),
+        ("jwt | (cookie", True),
+        ("jwt:* <-> cookie", True),
+        ("' & '", False),
+        ("it's o'neil", False),
+        ("a\\b", False),
+    ],
 )
-async def test_keyword_search_never_reads_tsquery_syntax(pg, query: str) -> None:
+async def test_keyword_search_never_reads_tsquery_syntax(
+    pg, query: str, reads_as_terms: bool
+) -> None:
     """The query is parsed by ``plainto_tsquery`` before the any-term
-    rewrite, so operator characters are plain text, never syntax."""
+    rewrite, so operator characters are plain text, never syntax: ``jwt &
+    !cookie`` is the two words ``jwt`` and ``cookie`` (an entry with either
+    matches), not "jwt and not cookie", and a malformed one is no error."""
     store, _, _ = pg
     jwt = await store.create_entry(draft("JWT tokens expire"))
+    cookie = await store.create_entry(draft("Cookie jar settings"))
     results = await store.search_keyword(query, EntryFilters(), limit=10)
-    assert results in ([], [jwt.id])
+    assert set(results) == ({jwt.id, cookie.id} if reads_as_terms else set())
 
 
 async def test_keyword_stream_finds_every_golden_entry(pg) -> None:

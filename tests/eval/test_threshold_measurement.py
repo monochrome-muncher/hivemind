@@ -10,7 +10,15 @@ from __future__ import annotations
 
 import pytest
 
-from tests.eval.threshold import OFF_TOPIC_QUERIES, SWEEP, measure, report, suggest
+from tests.eval.domains import DOMAINS
+from tests.eval.threshold import (
+    OFF_TOPIC_QUERIES,
+    SWEEP,
+    domain_fixture,
+    measure,
+    report,
+    suggest,
+)
 from tests.fakes import FakeEmbedder, make_embedder
 
 
@@ -57,9 +65,6 @@ def test_every_scenario_is_well_formed() -> None:
 
 
 async def test_a_domain_alone_counts_other_domains_queries_as_off_topic() -> None:
-    from tests.eval.domains import DOMAINS
-    from tests.eval.threshold import domain_fixture
-
     m = await measure(make_embedder(), domain_fixture(DOMAINS[4]), sweep=(0.0, 0.5))
     # 18 own queries + 1 cross-domain one; 6 unanswered + 4 domains x 24 + 5 cross.
     assert (m.answerable, m.off_topic) == (19, 6 + 4 * 24 + 5)
@@ -78,10 +83,11 @@ class _RecordingEmbedder(FakeEmbedder):
 
 
 async def test_a_query_instruction_reaches_the_embedder_and_the_statistics() -> None:
-    plain = await measure(make_embedder())
+    fixture, sweep = domain_fixture(DOMAINS[0]), (0.0, 0.5)  # the wiring needs no more
+    plain = await measure(make_embedder(), fixture, sweep)
     instruction = "Retrieve the entry that answers this question"
     recorder = _RecordingEmbedder()
-    m = await measure(recorder, query_instruction=instruction)
+    m = await measure(recorder, fixture, sweep, query_instruction=instruction)
     wrapped = f"Instruct: {instruction}\nQuery:"
     assert any(t.startswith(wrapped) for t in recorder.texts)
     assert m.query_instruction == instruction

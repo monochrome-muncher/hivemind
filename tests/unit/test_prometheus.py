@@ -164,6 +164,27 @@ async def test_a_first_refresh_that_fails_still_answers_200_with_success_zero() 
     assert recovered[("hivemind_entries", (("state", "active"),))] == 1.0
 
 
+async def test_degraded_searches_are_counted_per_app() -> None:
+    from hivemind.embeddings import EmbeddingError
+
+    async def boom(text: str) -> list[float]:
+        raise EmbeddingError("embedding endpoint is down")
+
+    app_a, app_b = make_hivemind_app(), make_hivemind_app()
+    client_a, client_b = make_client(app_a), make_client(app_b)
+    async with client_a, client_b:
+        for app, client, searches in ((app_a, client_a, 1), (app_b, client_b, 2)):
+            app.search_service._embedder.embed_text = boom  # type: ignore[attr-defined]
+            for _ in range(searches):
+                await client.post(
+                    "/v1/search", json={"query": "x"}, headers={"X-API-Key": "key-alice"}
+                )
+        got_a = samples((await client_a.get("/metrics")).text)
+        got_b = samples((await client_b.get("/metrics")).text)
+    assert got_a[("hivemind_search_degraded_total", ())] == 1
+    assert got_b[("hivemind_search_degraded_total", ())] == 2
+
+
 async def test_usage_report_is_cached_and_a_failure_keeps_the_last_snapshot() -> None:
     now = [0.0]
     calls = [0]

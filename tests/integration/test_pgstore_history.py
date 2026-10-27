@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import asyncpg
 import pytest
+import pytest_asyncio
+from tests.pg import ensure_migrated
 
 from hivemind.config import Settings
 from hivemind.domain.entry import EntryDraft, ImportanceSource, Kind
 from hivemind.memstore import MemoryStore
 from hivemind.store import PgStore
-from hivemind.store.migrate import migrate
 from hivemind.store.pgstore import SELECT_PREDECESSORS
 
 VEC_DIM = Settings().embedding_dim
@@ -39,12 +40,7 @@ async def _truncate(dsn: str) -> None:
 @pytest.fixture
 async def pg() -> PgStore:
     dsn = _dsn()
-    try:
-        probe = await asyncpg.connect(dsn, timeout=5)
-    except Exception as exc:
-        pytest.skip(f"Postgres unreachable at {dsn}: {exc}")
-    await probe.close()
-    await migrate(dsn, VEC_DIM)
+    await ensure_migrated(dsn, VEC_DIM)
     await _truncate(dsn)
     store = PgStore(dsn)
     try:
@@ -175,71 +171,67 @@ async def test_usage_counts_group_like_the_reference_store(pg: PgStore) -> None:
     assert sum(r.count for r in await pg.usage_counts()) == 3
 
 
-async def test_the_partial_index_serves_the_predecessor_query(pg: PgStore) -> None:
-    """The reverse link must be answered from ``entries_superseded_by_idx``
-    (partial, ``WHERE superseded_by IS NOT NULL``) — the planner has to be
-    able to prove the query's predicate implies the index's."""
+async def _plan(sql: str, *args: object) -> str:
+    await ensure_migrated(_dsn(), VEC_DIM)
     conn = await asyncpg.connect(_dsn())
     try:
         await conn.execute("SET enable_seqscan = off")
-        plan = "\n".join(
-            r[0]
-            for r in await conn.fetch(
-                "EXPLAIN " + SELECT_PREDECESSORS,
-                ["00000000-0000-0000-0000-000000000001"],
-            )
-        )
+        return "\n".join(r[0] for r in await conn.fetch("EXPLAIN " + sql, *args))
     finally:
         await conn.close()
+
+
+async def test_the_partial_index_serves_the_predecessor_query() -> None:
+    """The reverse link must be answered from ``entries_superseded_by_idx``
+    (partial, ``WHERE superseded_by IS NOT NULL``) — the planner has to be
+    able to prove the query's predicate implies the index's."""
+    plan = await _plan(SELECT_PREDECESSORS, ["00000000-0000-0000-0000-000000000001"])
     assert "entries_superseded_by_idx" in plan, plan
 
 
-async def test_the_default_list_order_is_served_by_the_created_at_index(pg: PgStore) -> None:
-    conn = await asyncpg.connect(_dsn())
+@pytest_asyncio.fixture(scope="class", loop_scope="class")
+async def listed_entries():
+    """The table the list-order plans are read from: seeded once per class
+    rather than per test, and not by the ``pg`` fixture, whose TRUNCATE
+    would empty it."""
+    dsn = _dsn()
+    await ensure_migrated(dsn, VEC_DIM)
+    await _truncate(dsn)
+    conn = await asyncpg.connect(dsn)
     try:
         # Enough rows (and fresh stats) that the planner's choice reflects
         # the index, not the cost of an empty table.
         await conn.execute(
             "INSERT INTO entries (kind, summary, occurred_at, created_at, author, agent) "
-            "SELECT 'fact', 's' || g, now(), now() - g * interval '1 second', 'a', 'a' "
-            "FROM generate_series(1, 5000) g"
-        )
-        await conn.execute("ANALYZE entries")
-        await conn.execute("SET enable_seqscan = off")
-        plan = "\n".join(
-            r[0]
-            for r in await conn.fetch(
-                "EXPLAIN SELECT id FROM entries WHERE state = 'active' "
-                "ORDER BY created_at DESC, id DESC LIMIT 20"
-            )
-        )
-    finally:
-        await conn.close()
-    assert "entries_created_at_id_idx" in plan, plan
-    assert "Sort" not in plan, plan
-
-
-async def test_the_author_list_order_is_served_by_the_composite_index(pg: PgStore) -> None:
-    """An author whose entries are all OLD must not be answered by walking
-    the global created_at index (82 ms at 200k rows, measured): the
-    (author, created_at, id) index gives a range scan that stops at LIMIT."""
-    conn = await asyncpg.connect(_dsn())
-    try:
-        await conn.execute(
-            "INSERT INTO entries (kind, summary, occurred_at, created_at, author, agent) "
-            "SELECT 'fact', 's' || g, now(), now() - interval '1 day' - g * interval '1 second', "
+            "SELECT 'fact', 's' || g, now(), "
+            "now() - interval '1 day' - g * interval '1 second', "
             "CASE WHEN g > 19700 THEN 'old-author' ELSE 'author-' || (g % 50) END, 'a' "
             "FROM generate_series(1, 20000) g"
         )
         await conn.execute("ANALYZE entries")
-        plan = "\n".join(
-            r[0]
-            for r in await conn.fetch(
-                "EXPLAIN SELECT id FROM entries WHERE state = 'active' AND author = 'old-author' "
-                "ORDER BY created_at DESC, id DESC LIMIT 20"
-            )
-        )
     finally:
         await conn.close()
-    assert "entries_author_created_idx" in plan, plan
-    assert "Sort" not in plan, plan
+    yield
+    await _truncate(dsn)
+
+
+@pytest.mark.usefixtures("listed_entries")
+class TestListPlans:
+    async def test_the_default_list_order_is_served_by_the_created_at_index(self) -> None:
+        plan = await _plan(
+            "SELECT id FROM entries WHERE state = 'active' "
+            "ORDER BY created_at DESC, id DESC LIMIT 20"
+        )
+        assert "entries_created_at_id_idx" in plan, plan
+        assert "Sort" not in plan, plan
+
+    async def test_the_author_list_order_is_served_by_the_composite_index(self) -> None:
+        """An author whose entries are all OLD must not be answered by walking
+        the global created_at index (82 ms at 200k rows, measured): the
+        (author, created_at, id) index gives a range scan that stops at LIMIT."""
+        plan = await _plan(
+            "SELECT id FROM entries WHERE state = 'active' AND author = 'old-author' "
+            "ORDER BY created_at DESC, id DESC LIMIT 20"
+        )
+        assert "entries_author_created_idx" in plan, plan
+        assert "Sort" not in plan, plan
