@@ -55,6 +55,33 @@ def search_config():
     return make_search_config()
 
 
+def _may_select_integration_tests(config: pytest.Config) -> bool:
+    """Whether the command line can reach ``tests/integration``: no path
+    (the default testpaths) or any path outside ``tests/unit`` and
+    ``tests/eval``. Before collection that is as precise as it gets; a run
+    that deselects them later is vetted anyway, which only costs a refusal."""
+    hermetic = [config.rootpath / "tests" / "unit", config.rootpath / "tests" / "eval"]
+    paths = [(config.invocation_params.dir / arg.split("::")[0]).resolve() for arg in config.args]
+    return not paths or any(not any(p.is_relative_to(h) for h in hermetic) for p in paths)
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Under xdist, vet the base database once here, in the controller, so a
+    refusal is one clean usage error. Left to the workers, it ends in an
+    INTERNALERROR traceback after the message (a worker's UsageError dies
+    without one). The workers still vet in ``pytest_collection_modifyitems``."""
+    if hasattr(config, "workerinput") or not config.getoption("numprocesses", None):
+        return
+    if not _may_select_integration_tests(config):
+        return
+    try:
+        check_test_database(
+            Settings().database_url, allow_any=os.environ.get("HM_TEST_ALLOW_ANY_DB") == "1"
+        )
+    except UnsafeTestDatabase as exc:
+        raise pytest.UsageError(str(exc)) from None
+
+
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """STORE-9: integration tests wipe the DB in HIVEMIND_DATABASE_URL; vet its name first.
 

@@ -5,8 +5,9 @@ readable summary (ADR 0051) and the quality multiplier search uses.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from hivemind.config import SearchConfig
 from hivemind.domain.feedback import (
@@ -88,9 +89,11 @@ class FeedbackService:
         store: Store,
         config: SearchConfig | None = None,
         require_stored_keys: bool = False,
+        now_fn: Callable[[], datetime] | None = None,
     ) -> None:
         self._store = store
         self._config = config or SearchConfig()
+        self._now_fn: Callable[[], datetime] = now_fn or utcnow
         # ADR 0082: a dev-mode credential is downgraded to trust level 0
         # when the deployment requires stored keys.
         self._require_stored_keys = require_stored_keys
@@ -259,7 +262,7 @@ class FeedbackService:
         is still around; only entries the caller can read. ``older_than``
         keeps entries first flagged more than that long ago."""
         credential = credential.effective(self._require_stored_keys)
-        now = utcnow()
+        now = self._now_fn()
         filters = FlagBacklogFilters(
             fleet_id=fleet_id,
             flagged_before=now - older_than if older_than else None,

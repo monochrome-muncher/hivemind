@@ -449,7 +449,7 @@ def test_the_pi_package_declares_real_resources() -> None:
     assert "pi-package" in manifest["keywords"]  # type: ignore[union-attr]
 
 
-def _pi_extension_text(**env_overrides: str) -> str:
+def _pi_extension_text(*, with_key: bool = True, **env_overrides: str) -> str:
     script = """
     const mod = await import(process.argv[1])
     let handler
@@ -459,7 +459,8 @@ def _pi_extension_text(**env_overrides: str) -> str:
     console.log(JSON.stringify(event.systemPromptOptions.sections))
     """
     env = {k: v for k, v in os.environ.items() if not k.startswith("HIVEMIND_")}
-    env["HIVEMIND_API_KEY"] = "hm_secret_value"
+    if with_key:
+        env["HIVEMIND_API_KEY"] = "hm_secret_value"
     env.update(env_overrides)
     out = subprocess.run(
         ["node", "--input-type=module", "-e", script, str(PLUGIN / "extensions" / "hivemind.ts")],
@@ -544,8 +545,9 @@ def test_the_hermes_section_goes_incognito(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
-def test_the_pi_section_goes_incognito() -> None:
-    assert _pi_extension_text(HIVEMIND_INCOGNITO="true") == INCOGNITO_TEXT
+@pytest.mark.parametrize("with_key", [True, False], ids=["key-set", "no-key"])
+def test_the_pi_section_goes_incognito(with_key: bool) -> None:
+    assert _pi_extension_text(with_key=with_key, HIVEMIND_INCOGNITO="true") == INCOGNITO_TEXT
 
 
 def _fake_harness(tmp_path: Path, name: str) -> dict[str, str]:

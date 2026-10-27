@@ -7,6 +7,7 @@ Seams under test: ``WriteService`` (embed-then-persist) and
 from __future__ import annotations
 
 import asyncio
+import inspect
 
 import pytest
 
@@ -22,7 +23,9 @@ from hivemind.services.errors import (
     PermissionDenied,
     SupersedeDenied,
 )
+from hivemind.services.feedback import FeedbackService
 from hivemind.services.governance import GovernanceService
+from hivemind.services.pins import PinService
 from hivemind.services.write import WriteService
 from tests.fakes import FakeEmbedder, FakeExtractor, make_clock, make_embedder
 
@@ -444,3 +447,30 @@ async def test_feedback_accepts_self_reported_agent() -> None:
     # No credential agent AND no self-reported agent -> AgentIdentityRequired.
     with pytest.raises(AgentIdentityRequired, match="agent identity"):
         await governance.record_feedback(Credential(user_id="bob"), entry.id, Verdict.STALE)
+
+
+@pytest.mark.parametrize(
+    ("target", "name"),
+    [
+        (FeedbackService, name)
+        for name in (
+            "record_feedback",
+            "record_feedback_many",
+            "feedback_summary",
+            "feedback_summaries",
+            "quality",
+            "feedback_log",
+            "flag_backlog",
+        )
+    ]
+    + [(PinService, name) for name in ("pin", "unpin", "pinned")],
+)
+def test_a_forwarding_method_keeps_its_targets_signature(target: type, name: str) -> None:
+    """mypy checks the types of a forwarded call, not that a default here
+    equals the target's, so a drifted default would silently change what a
+    caller who omits the argument gets."""
+    forwarded = inspect.signature(getattr(GovernanceService, name)).parameters
+    wanted = inspect.signature(getattr(target, name)).parameters
+    assert {p.name: (p.kind, p.default) for p in forwarded.values()} == {
+        p.name: (p.kind, p.default) for p in wanted.values()
+    }

@@ -112,28 +112,33 @@ def test_a_dsn_that_hides_the_real_target_is_refused(dsn: str) -> None:
         check_test_database(dsn, allow_any=False)
 
 
-def test_the_conftest_hook_refuses_under_xdist_too() -> None:
-    # Each worker vets the base before creating its own database.
+def _xdist_run(*paths: str) -> subprocess.CompletedProcess[str]:
+    """``pytest -n 2`` over ``paths`` against a production-looking DSN."""
     env = {k: v for k, v in os.environ.items() if k != "HM_TEST_ALLOW_ANY_DB"}
     env["HIVEMIND_DATABASE_URL"] = "postgresql://u:p@pg.prod.example.com:5432/memory"
-    proc = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            "-n",
-            "2",
-            "-p",
-            "no:cacheprovider",
-            "tests/integration/test_keys_cli.py",
-        ],
+    return subprocess.run(
+        [sys.executable, "-m", "pytest", "-n", "2", "-p", "no:cacheprovider", *paths],
         cwd=Path(__file__).resolve().parents[2],
         env=env,
         text=True,
         capture_output=True,
     )
-    assert proc.returncode != 0
-    assert "refusing to run the integration tests" in proc.stdout + proc.stderr
+
+
+def test_the_conftest_hook_refuses_under_xdist_too() -> None:
+    # The controller vets the base before any worker starts, so the refusal
+    # is one usage error (exit 4), not a worker crash behind an INTERNALERROR.
+    proc = _xdist_run("tests/integration/test_keys_cli.py")
+    output = proc.stdout + proc.stderr
+    assert proc.returncode == 4
+    assert output.count("refusing to run the integration tests") == 1
+    assert "INTERNALERROR" not in output
+
+
+def test_a_hermetic_xdist_run_does_not_vet_the_database() -> None:
+    # Unit-only runs need no database, so a DSN they never use cannot refuse them.
+    proc = _xdist_run("tests/unit/test_db_guard.py::test_unix_socket_host_is_accepted")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
 
 
 def test_escape_hatch_allows_any_name() -> None:
