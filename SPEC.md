@@ -144,6 +144,7 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | `GET /v1/admin/agents` | List agents: status, trust level, home fleet, owner alias (admin key) |
 | `GET /v1/admin/fleets` | List fleets (admin key); fleets merged into another are left out unless `?include_merged=true`, which adds `merged_into` and `merged_at` (§12.1, ADR 0107) |
 | `POST /v1/admin/fleets` | Create a fleet (admin key; no deletion in this increment — ADR 0011) |
+| `PATCH /v1/admin/fleets/{id}` | Rename a fleet: `{name}`, validated like a new fleet's name (admin key; audited `fleet.rename`; a merged fleet can be renamed; the current name again is a 200 with no audit row; 404 unknown fleet, 409 `fleet_exists` when another fleet has the name, 422 for a bad name; §12.1, ADR 0109) |
 | `POST /v1/admin/fleets/{source_id}/merge` | Merge a fleet into another or into a new one: `{target_fleet_id \| new_fleet_name, keep_pin_ids?, expected_pin_ids?, dry_run}`. `dry_run: true` answers the preview and changes nothing; otherwise it moves the source's entries, agents and kept pins in one transaction (admin key; audited `fleet.merge`; §12.1, ADR 0107). 404 unknown fleet, 409 `fleet_merged` / `merge_refused` / `fleet_exists`, 422 for a pin choice over 10 |
 | `GET /v1/admin/fleet-merges` | The recorded fleet merges, newest first, each with `undoable` (admin key; ADR 0107) |
 | `POST /v1/admin/fleet-merges/{merge_id}/undo` | Undo a merge: what it moved goes back where it is still in the target (admin key; audited `fleet.unmerge`; 409 `merge_refused` unless it is the newest standing merge involving the target; ADR 0107) |
@@ -379,7 +380,7 @@ This section supersedes the flat-pool commitment of §1 and the "no trust tiers"
 
 ### 12.1 Fleets and scope
 
-* A **fleet** is a named group of agents. The admin creates fleets (`POST /v1/admin/fleets`); **no fleet deletion in this increment** (ADR 0011). An admin can **merge** a fleet into another (below).
+* A **fleet** is a named group of agents. The admin creates fleets (`POST /v1/admin/fleets`); **no fleet deletion in this increment** (ADR 0011). An admin can **rename** a fleet (`PATCH /v1/admin/fleets/{id}`: the id, entries, pins and agents are untouched, names stay unique, a merged fleet can be renamed; ADR 0109) and **merge** a fleet into another (below).
 * Every active agent belongs to exactly **one home fleet** — admin-assigned, re-assignable at any time via `PATCH /v1/admin/agents/{name}`. One home fleet per agent in this increment; multi-fleet membership is a §10 extension.
 * An entry is written into exactly one scope: `self` (the author agent only) or `fleet` (the home fleet it was written into). **An entry's fleet membership is fixed at write time** — when an agent moves fleets, its earlier entries stay in the old fleet (ADR 0011) — **except that an admin fleet merge re-files a whole fleet** (ADR 0107).
 * Legacy `scope='org'` entries are **read-only for agent keys**: an agent key may not write `org` (the sanctioned `org` writers are the admin key; pre-v2 `user` keys no longer authenticate, ADR 0039); they remain readable at trust level 1+. The admin key writes `self` or `org` only: it has no fleet, so a `fleet` write from it is refused (ADR 0060).
@@ -418,6 +419,7 @@ This section supersedes the flat-pool commitment of §1 and the "no trust tiers"
 |---|---|
 | `GET /v1/admin/agents` / `GET /v1/admin/fleets` | List agents (status, level, home fleet, alias) / fleets |
 | `POST /v1/admin/fleets` | Create a fleet (ADR 0011: no deletion in this increment) |
+| `PATCH /v1/admin/fleets/{id}` | Rename a fleet (ADR 0109) |
 | `POST /v1/admin/fleets/{source_id}/merge` | Merge a fleet into another or a new one, or preview it with `dry_run` (ADR 0107) |
 | `GET /v1/admin/fleet-merges` / `POST /v1/admin/fleet-merges/{merge_id}/undo` | The recorded merges / undo one (ADR 0107) |
 | `POST /v1/admin/agents/{name}/activate` | Set level + home fleet; **returns the agent key once** (§12.3) |
@@ -447,6 +449,7 @@ Every admin-surface action, every agent pin or unpin (ADR 0076) and every withdr
 | `agent.home_fleet_set` | `PATCH /v1/admin/agents/{name}` | agent name | `{from, to}` |
 | `agent.revoke` | `POST /v1/admin/agents/{name}/revoke`, `hivemind-keys revoke` | agent name | `{"from": "pending"\|"active"}` (ADR 0028; a revoke from `pending` is a rejected registration) |
 | `fleet.create` | `POST /v1/admin/fleets` | fleet id | `{name}` |
+| `fleet.rename` | `PATCH /v1/admin/fleets/{id}`, only when the name changes (ADR 0109) | fleet id | `{from, to}` |
 | `fleet.merge` | `POST /v1/admin/fleets/{source_id}/merge`, not a `dry_run` (ADR 0107); a new target is also recorded as `fleet.create` | source fleet id | `{merge_id, target_fleet_id, target_fleet_name, created_target, entries, agents, pins_kept, pins_dropped}` |
 | `fleet.unmerge` | `POST /v1/admin/fleet-merges/{merge_id}/undo` (ADR 0107) | source fleet id | `{merge_id, target_fleet_id, entries, agents, pins_returned, pins_restored, pins_skipped}` (the skipped pins' entry ids) |
 | `org_key.rotate` | `POST /v1/admin/org-key/rotate`, `hivemind-keys rotate-org` | — | `{}` |

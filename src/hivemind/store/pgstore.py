@@ -322,6 +322,13 @@ INSERT_FLEET = (
     "INSERT INTO fleets (name) VALUES ($1) "
     "ON CONFLICT (name) DO NOTHING RETURNING id, name, created_at, merged_into, merged_at"
 )
+RENAME_FLEET = (
+    "UPDATE fleets SET name = $2 WHERE id = $1 "
+    "RETURNING id, name, created_at, merged_into, merged_at"
+)
+GET_FLEET_FOR_UPDATE = (
+    "SELECT id, name, created_at, merged_into, merged_at FROM fleets WHERE id = $1 FOR UPDATE"
+)
 GET_FLEET = "SELECT id, name, created_at, merged_into, merged_at FROM fleets WHERE id = $1"
 LIST_FLEETS = "SELECT id, name, created_at, merged_into, merged_at FROM fleets ORDER BY created_at"
 # ADR 0107: a write into a fleet holds a share lock on its row for the rest of
@@ -1933,6 +1940,28 @@ class PgStore:
         async with self._connection() as conn:
             row = await conn.fetchrow(GET_FLEET, fleet_id)
         return _row_to_fleet(row) if row is not None else None
+
+    async def rename_fleet(self, fleet_id: str, name: str) -> tuple[Fleet, Fleet]:
+        """Rename a fleet (ADR 0109); see ``Store.rename_fleet``. The row is
+        locked so the returned ``before`` is the name the audit row reports;
+        a racing rename to the same name loses on the unique index."""
+        if not is_valid_uuid(fleet_id):
+            raise UnknownFleet(f"unknown fleet: {fleet_id}")
+        try:
+            async with self._transaction() as conn:
+                row = await conn.fetchrow(GET_FLEET_FOR_UPDATE, fleet_id)
+                if row is None:
+                    raise UnknownFleet(f"unknown fleet: {fleet_id}")
+                before = _row_to_fleet(row)
+                if before.name == name:
+                    return before, before
+                if await conn.fetchrow(SELECT_FLEET_BY_NAME, name) is not None:
+                    raise FleetExists(f"fleet already exists: {name!r}")
+                renamed = await conn.fetchrow(RENAME_FLEET, fleet_id, name)
+        except asyncpg.UniqueViolationError as exc:
+            raise FleetExists(f"fleet already exists: {name!r}") from exc
+        assert renamed is not None  # the row is locked above
+        return before, _row_to_fleet(renamed)
 
     # -- fleet merge (ADR 0107) ---------------------------------------------------
 

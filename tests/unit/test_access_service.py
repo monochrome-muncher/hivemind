@@ -12,10 +12,13 @@ import pytest
 
 from hivemind.domain.access import (
     AgentStatus,
+    FleetExists,
     InvalidAgentStatus,
     TrustLevel,
+    UnknownFleet,
     write_scopes_for,
 )
+from hivemind.domain.validation import InvalidInput
 from hivemind.ports import Credential
 from hivemind.services.access import (
     AccessService,
@@ -222,6 +225,31 @@ async def test_create_fleet_admin_only() -> None:
     assert fleet.name == "data-eng"
     with pytest.raises(PermissionDenied):
         await service.create_fleet("ml", org_credential())
+
+
+async def test_rename_fleet_admin_only_and_validated() -> None:
+    service, _, _ = make_service()
+    fleet = await service.create_fleet("data-eng", admin_credential())
+    renamed = await service.rename_fleet(fleet.id, "data-platform", admin_credential())
+    assert (renamed.id, renamed.name) == (fleet.id, "data-platform")
+    assert await service.list_fleets(admin_credential()) == [renamed]
+    with pytest.raises(PermissionDenied):
+        await service.rename_fleet(fleet.id, "ml", org_credential())
+    with pytest.raises(PermissionDenied):  # refused before it learns whether the id exists
+        await service.rename_fleet("no-such-fleet", "ml", org_credential())
+    with pytest.raises(InvalidInput):
+        await service.rename_fleet(fleet.id, "   ", admin_credential())
+    with pytest.raises(InvalidInput):
+        await service.rename_fleet(fleet.id, "x" * 1000, admin_credential())
+    with pytest.raises(UnknownFleet):
+        await service.rename_fleet("no-such-fleet", "ml", admin_credential())
+    other = await service.create_fleet("ml", admin_credential())
+    with pytest.raises(FleetExists):
+        await service.rename_fleet(other.id, "data-platform", admin_credential())
+    assert [f.name for f in await service.list_fleets(admin_credential())] == [
+        "data-platform",
+        "ml",
+    ]
 
 
 async def test_set_trust_level_demotes_dormant() -> None:

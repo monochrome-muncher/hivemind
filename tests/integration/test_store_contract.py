@@ -2020,6 +2020,38 @@ async def test_fleets(adapter: Adapter) -> None:
     assert [f.name for f in await adapter.store.list_fleets()] == ["blue"]
 
 
+async def test_rename_fleet(adapter: Adapter) -> None:
+    store = adapter.store
+    a, _ = await _two_fleets(adapter)
+    entry = await _fleet_entry(adapter, "kept", a)
+    before, after = await store.rename_fleet(a, "alpha")
+    assert (before.name, after.name, after.id) == ("a", "alpha", a)
+    assert (after.created_at, after.merged_into) == (before.created_at, None)
+    assert await store.get_fleet(a) == after
+    assert [f.name for f in await store.list_fleets()] == ["alpha", "b"]
+    got = await store.get_entry(entry.id)  # the id never changes, so memories stay put
+    assert got is not None and got.fleet_id == a
+    # The current name again is a no-op; a taken name (exact match) is refused.
+    assert await store.rename_fleet(a, "alpha") == (after, after)
+    with pytest.raises(FleetExists, match="fleet already exists: 'b'"):
+        await store.rename_fleet(a, "b")
+    assert (await store.get_fleet(a)) == after
+    await store.rename_fleet(a, "B")  # names are case-sensitive, as create is
+    with pytest.raises(UnknownFleet):
+        await store.rename_fleet(NO_SUCH_ID, "x")
+    with pytest.raises(UnknownFleet):
+        await store.rename_fleet("not-a-uuid", "x")
+
+
+async def test_rename_a_merged_fleet(adapter: Adapter) -> None:
+    store = adapter.store
+    a, b = await _two_fleets(adapter)
+    await store.merge_fleets(a, target_fleet_id=b, merged_by="admin:1")
+    _, after = await store.rename_fleet(a, "a (merged)")
+    assert (after.name, after.merged_into) == ("a (merged)", b)
+    assert await store.get_fleet(a) == after
+
+
 async def test_agent_lifecycle(adapter: Adapter) -> None:
     store = adapter.store
     fleet = await store.create_fleet("blue")

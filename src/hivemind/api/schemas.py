@@ -607,6 +607,12 @@ class CreateFleetRequest(BaseModel):
     name: str
 
 
+class RenameFleetRequest(BaseModel):
+    """Give a fleet a new name (ADR 0109)."""
+
+    name: str
+
+
 class AgentOut(BaseModel):
     """A registered agent."""
 

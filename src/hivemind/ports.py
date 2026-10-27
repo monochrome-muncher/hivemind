@@ -306,6 +306,14 @@ class Store(Protocol):
 
     async def get_fleet(self, fleet_id: str) -> Fleet | None: ...
 
+    async def rename_fleet(self, fleet_id: str, name: str) -> tuple[Fleet, Fleet]:
+        """Give a fleet a new name (ADR 0109), merged fleets included; the
+        id never changes. Returns the fleet as it was and as it is now (the
+        same object when ``name`` is the current one, then nothing is
+        written). ``UnknownFleet`` for an id that names none, ``FleetExists``
+        when another fleet has the name."""
+        ...
+
     # -- fleet merge (ADR 0107) ------------------------------------------------
 
     async def fleet_facts(self, fleet_id: str) -> FleetFacts:

@@ -31,6 +31,8 @@ from hivemind.domain import (
     Kind,
     TrustLevel,
 )
+from hivemind.domain.access import FleetExists, UnknownFleet
+from hivemind.domain.validation import InvalidInput
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
@@ -99,6 +101,28 @@ async def test_create_fleet_writes_one_row() -> None:
     assert row.target == fleet.id
     assert row.detail == {"name": "ml"}
     assert row.actor == ADMIN_ACTOR
+
+
+async def test_rename_fleet_records_from_and_to_and_a_noop_records_nothing() -> None:
+    service, store, _, admin, _ = await _setup()
+    fleet = await service.create_fleet("ml", admin)
+    await service.rename_fleet(fleet.id, "ml", admin)  # the current name: nothing to say
+    assert [r.action for r in await _rows(store)] == [AuditAction.FLEET_CREATE]
+    await service.rename_fleet(fleet.id, "machine-learning", admin)
+    row = (await _rows(store))[0]  # newest first
+    assert row.action is AuditAction.FLEET_RENAME
+    assert row.target == fleet.id
+    assert row.detail == {"from": "ml", "to": "machine-learning"}
+    assert row.actor == ADMIN_ACTOR
+
+
+async def test_refused_renames_write_no_audit_row() -> None:
+    service, store, _, admin, fleet_id = await _setup()
+    await service.create_fleet("ml", admin)
+    for target, name in ((fleet_id, "ml"), (fleet_id, " "), ("nope", "x")):
+        with pytest.raises((FleetExists, InvalidInput, UnknownFleet)):
+            await service.rename_fleet(target, name, admin)
+    assert [r.action for r in await _rows(store)] == [AuditAction.FLEET_CREATE]
 
 
 async def test_set_trust_level_records_from_and_to() -> None:

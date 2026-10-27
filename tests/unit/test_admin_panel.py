@@ -72,6 +72,7 @@ def _panel(transport: httpx.AsyncBaseTransport) -> httpx.AsyncClient:
         ("GET", "admin/fleets/abc/pins"),
         ("GET", "admin/flagged"),
         ("POST", "admin/fleets/abc/merge"),
+        ("PATCH", "admin/fleets/abc"),
         ("GET", "admin/fleet-merges"),
         ("POST", "admin/fleet-merges/abc/undo"),
     ],

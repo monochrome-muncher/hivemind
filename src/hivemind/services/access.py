@@ -205,6 +205,22 @@ class AccessService:
         await self._audit(credential, AuditAction.FLEET_CREATE, fleet.id, {"name": name})
         return fleet
 
+    async def rename_fleet(self, fleet_id: str, name: str, credential: Credential) -> Fleet:
+        """Rename a fleet (admin-gated, audited ``fleet.rename``, ADR 0109).
+        Merged fleets can be renamed. Renaming to the current name changes
+        nothing and writes no audit row."""
+        self._require_admin(credential)
+        validate_fleet_name(name)  # same bounds as a new fleet's name (ADR 0040)
+        before, after = await self._store.rename_fleet(fleet_id, name)
+        if before.name != after.name:
+            await self._audit(
+                credential,
+                AuditAction.FLEET_RENAME,
+                after.id,
+                {"from": before.name, "to": after.name},
+            )
+        return after
+
     async def set_trust_level(self, name: str, level: TrustLevel, credential: Credential) -> Agent:
         """Promote/demote an agent's trust level (admin-gated, ADR 0011).
         Demotion to level 0 is *dormant* (key still valid, no access) —

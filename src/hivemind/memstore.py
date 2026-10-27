@@ -1049,6 +1049,20 @@ class MemoryStore:
         with self._lock:
             return self._fleets.get(fleet_id)
 
+    async def rename_fleet(self, fleet_id: str, name: str) -> tuple[Fleet, Fleet]:
+        """Rename a fleet (ADR 0109); see ``Store.rename_fleet``."""
+        with self._lock:
+            before = self._fleets.get(fleet_id)
+            if before is None:
+                raise UnknownFleet(f"unknown fleet: {fleet_id}")
+            if before.name == name:
+                return before, before
+            if any(f.name == name for f in self._fleets.values()):
+                raise FleetExists(f"fleet already exists: {name!r}")
+            after = replace(before, name=name)
+            self._fleets[fleet_id] = after
+            return before, after
+
     def _refuse_merged(self, fleet_id: str | None) -> None:
         """``FleetMerged`` when ``fleet_id`` names a merged fleet (ADR 0107).
         Caller holds the lock. An id naming no fleet passes, as on Postgres."""
