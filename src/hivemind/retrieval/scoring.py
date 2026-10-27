@@ -22,6 +22,9 @@ QUALITY_MIN = 0.5
 QUALITY_MAX = 1.2
 # Ceiling on the combined upward effect of all social signals (ADR 0070).
 SOCIAL_MAX = 1.2
+# What each stale or wrong report counts as once a confirmation is newer
+# than all of them (ADR 0106).
+CONFIRMED_FLAG_SCALE = 0.5
 
 # Importance factor: 0.5 + 0.1 * importance (importance in 1..5 -> 0.6..1.0).
 _IMPORTANCE_BASE = 0.5
@@ -42,6 +45,7 @@ def feedback_quality(
     prior: float = QUALITY_PRIOR,
     min_quality: float = QUALITY_MIN,
     max_quality: float = QUALITY_MAX,
+    flag_scale: float = 1.0,
 ) -> float:
     """Bounded quality multiplier derived from an entry's feedback.
 
@@ -57,11 +61,16 @@ def feedback_quality(
     share, not a running total, so helpful reports cannot be banked to
     cancel later wrong ones. No feedback -> exactly 1.0 (neutral). The
     result is clamped to [min_quality, max_quality].
+
+    ``flag_scale`` is what each ``stale`` and ``wrong`` report counts as,
+    in the share and in ``n``: 1.0 normally, ``CONFIRMED_FLAG_SCALE`` when
+    the caller knows a confirmation is newer than every flag (ADR 0106).
+    Any scale in [0, 1] keeps the result between the unscaled quality and
+    the quality of the helpful reports alone.
     """
-    n = helpful + stale + wrong
-    score = 1.0 + (helpful * helpful_weight - stale * stale_weight - wrong * wrong_weight) / (
-        n + prior
-    )
+    s, w = stale * flag_scale, wrong * flag_scale
+    n = helpful + s + w
+    score = 1.0 + (helpful * helpful_weight - s * stale_weight - w * wrong_weight) / (n + prior)
     return max(min_quality, min(max_quality, score))
 
 

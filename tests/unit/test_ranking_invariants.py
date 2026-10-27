@@ -8,15 +8,19 @@ moves a default, or adds a social signal outside the cap, fails here.
       importance, however much feedback the old one has.
 * I2  Ranking inputs are numbers and dates only: no author, agent label,
       pin, link or rater identity reaches the score.
-* I3  A confirmation date never reaches the score: "last confirmed" is
-      display only (ADR 0103; ``tests/unit/test_last_confirmed.py`` pins it
-      through the service).
+* I3  A confirmation date never reaches the score: its value moves no
+      factor (ADR 0103; ``tests/unit/test_last_confirmed.py`` pins it
+      through the service). Only whether one exists, newer than every flag,
+      does: it halves those flags (ADR 0106, I7).
 * I5  The upward multiplier from all social signals never exceeds
       ``social_max``; penalties are not capped.
 * I6  With the narrow importance factor on (ADR 0088), one importance step
       (e.g. 5 against 3) stays below the peer cap at the default
       ``social_max``, so it does not outweigh peer confirmation at the same
       match and age.
+* I7  Halving confirmed flags (ADR 0106) never lowers quality, and never
+      lifts it above what the helpful reports alone would give; a newer
+      flag ends it.
 
 Ranking has no per-kind recency profile and no confirmation clock (both
 removed, ADR 0103): every kind ages by ``half_life_days``. "No decay" is
@@ -65,7 +69,7 @@ def shipped_score(
     config: SearchConfig = CONFIG,
 ) -> float:
     """The score SearchService computes, for one entry, through the pure functions."""
-    quality = feedback_quality(*counts, **config.quality_kwargs())
+    quality = feedback_quality(*counts, **config.quality_kwargs(confirmed=False))
     return entry_score(
         fused,
         importance,
@@ -200,14 +204,14 @@ class TestI5UpwardMultiplierIsCapped:
     def test_a_larger_quality_max_still_stops_at_social_max(self) -> None:
         """I5: quality_max 2.0 (helpful reports heading to 2.0) is capped at 1.2."""
         wide = SearchConfig(quality_max=2.0, quality_helpful_weight=1.0)
-        assert feedback_quality(100, 0, 0, **wide.quality_kwargs()) > 1.9
+        assert feedback_quality(100, 0, 0, **wide.quality_kwargs(confirmed=False)) > 1.9
         score = shipped_score(age_days=0.0, counts=(100, 0, 0), importance=3, config=wide)
         assert score == pytest.approx(wide.social_max)
 
     @pytest.mark.parametrize("counts", [(0, 0, 1), (0, 5, 0), (0, 0, 1000), (1, 1, 1), (0, 1, 0)])
     def test_penalties_pass_through_uncapped(self, counts: tuple[int, int, int]) -> None:
         """I5: a quality below 1 is the multiplier as it is; the cap bounds only the upside."""
-        quality = feedback_quality(*counts, **CONFIG.quality_kwargs())
+        quality = feedback_quality(*counts, **CONFIG.quality_kwargs(confirmed=False))
         assert quality < 1.0
         assert shipped_score(age_days=0.0, counts=counts, importance=3) == quality
         assert (
@@ -245,7 +249,9 @@ class TestBitIdentity:
             for importance in range(1, 6):
                 for age in (0.0, 1.0, 9.0, 10.0, 45.0, 400.0, 5000.0):
                     for counts in (*FEEDBACK_MIXES, (0, 0, 3), (0, 4, 0), (2, 2, 2)):
-                        quality = feedback_quality(*counts, **CONFIG.quality_kwargs())
+                        quality = feedback_quality(
+                            *counts, **CONFIG.quality_kwargs(confirmed=False)
+                        )
                         args = (
                             fused,
                             importance,
@@ -386,3 +392,20 @@ class TestI6NarrowImportanceStaysBelowTheSocialCap:
 
     def test_narrow_is_the_default(self) -> None:
         assert CONFIG.narrow_importance is True
+
+
+class TestI7ConfirmedFlagsStayBetweenTheTwoCounts:
+    @pytest.mark.parametrize(
+        "counts", [*FEEDBACK_MIXES, (1, 0, 1), (3, 0, 1), (1, 3, 0), (2, 2, 2), (0, 0, 4)]
+    )
+    def test_halving_sits_between_full_flags_and_no_flags(
+        self, counts: tuple[int, int, int]
+    ) -> None:
+        helpful = counts[0]
+        full = feedback_quality(*counts, **CONFIG.quality_kwargs(confirmed=False))
+        halved = feedback_quality(*counts, **CONFIG.quality_kwargs(confirmed=True))
+        alone = feedback_quality(helpful, 0, 0, **CONFIG.quality_kwargs(confirmed=False))
+        assert full <= halved <= alone
+
+    def test_halving_is_on_by_default(self) -> None:
+        assert CONFIG.confirmation_halves_flags is True

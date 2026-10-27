@@ -202,6 +202,32 @@ class TestFeedbackQuality:
         assert feedback_quality(50, 0, 0, max_quality=1.1) == pytest.approx(1.1)
 
 
+class TestFlagScale:
+    """ADR 0106: ``flag_scale`` is what each stale or wrong report counts as."""
+
+    def test_half_scale_values(self):
+        # 1 + (0.2 - 0.5) / (1 + 0.5 + 2)
+        assert feedback_quality(1, 0, 1, flag_scale=0.5) == pytest.approx(1 - 0.3 / 3.5)
+        # 1 + (0.6 - 0.2) / (3 + 0.5 + 2)
+        assert feedback_quality(3, 1, 0, flag_scale=0.5) == pytest.approx(1 + 0.4 / 5.5)
+
+    @pytest.mark.parametrize("counts", [(0, 0, 0), (3, 1, 0), (1, 2, 3), (7, 0, 5), (0, 4, 0)])
+    def test_scale_one_is_bit_for_bit_the_unscaled_formula(self, counts):
+        assert feedback_quality(*counts, flag_scale=1.0) == feedback_quality(*counts)
+
+    def test_it_does_nothing_without_flags(self):
+        for helpful in (0, 1, 5, 50):
+            assert feedback_quality(helpful, 0, 0, flag_scale=0.5) == feedback_quality(
+                helpful, 0, 0
+            )
+
+    def test_config_halves_only_for_a_confirmed_entry(self):
+        on, off = SearchConfig(), SearchConfig(confirmation_halves_flags=False)
+        assert on.quality_kwargs(confirmed=True)["flag_scale"] == 0.5
+        assert on.quality_kwargs(confirmed=False)["flag_scale"] == 1.0
+        assert off.quality_kwargs(confirmed=True)["flag_scale"] == 1.0
+
+
 class TestNarrowImportance:
     """ADR 0088: factor 1 + 0.05 * (importance - 3), 0.9..1.1."""
 

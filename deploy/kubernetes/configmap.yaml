@@ -84,6 +84,9 @@ data:
   # below the social cap (ADR 0088). On by default; "false" restores
   # 0.6..1.0.
   HIVEMIND_NARROW_IMPORTANCE: "true"
+  # Flags older than an entry's last confirmation count at half weight in
+  # quality (ADR 0106). On by default; "false" counts them in full.
+  HIVEMIND_CONFIRMATION_HALVES_FLAGS: "true"
   # Seconds the usage report (/v1/metrics, /metrics) reuses its grouped
   # scan of the entries (ADR 0069); entry counts can be that old. 0 = off.
   HIVEMIND_METRICS_ENTRY_COUNTS_TTL: "300"

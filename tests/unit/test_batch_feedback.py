@@ -196,8 +196,8 @@ async def test_a_batch_makes_the_same_store_calls_for_one_id_as_for_sixteen() ->
         store.calls.clear()
         await FeedbackService(store).record_feedback_many(READER, ids, Verdict.HELPFUL)
         calls.append(store.calls)
-    # One readable-ids read, one transactional upsert, one count read.
-    assert calls[0] == calls[1] == ["get_entries", "record_feedback_many", "quality_counts"]
+    # One readable-ids read, one transactional upsert, one feedback read.
+    assert calls[0] == calls[1] == ["get_entries", "record_feedback_many", "feedback_signals"]
 
 
 async def test_a_store_failure_in_the_batch_records_nothing() -> None:

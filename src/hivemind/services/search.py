@@ -246,7 +246,6 @@ class SearchService:
                 candidate_ids, count_supersedes=True, visibility=visibility
             ),
         )
-        quality_kwargs = self._config.quality_kwargs()
 
         # 4. Decay-aware rescore (SPEC.md §6.4).
         now = self._now_fn()
@@ -261,7 +260,14 @@ class SearchService:
             entry_signals = signals.get(entry.id, NO_SIGNALS)
             entry_feedback[entry.id] = entry_signals
             helpful, stale, wrong = entry_signals.counts
-            quality = feedback_quality(helpful, stale, wrong, **quality_kwargs)
+            quality = feedback_quality(
+                helpful,
+                stale,
+                wrong,
+                **self._config.quality_kwargs(
+                    confirmed=entry_signals.last_confirmed_at is not None
+                ),
+            )
             terms = self._config.recency_terms(recency)
             score = entry_score(
                 fused[entry.id],

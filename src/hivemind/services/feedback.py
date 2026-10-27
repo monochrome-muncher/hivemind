@@ -16,6 +16,7 @@ from hivemind.domain.feedback import (
     Feedback,
     FeedbackLogFilters,
     FeedbackLogItem,
+    FeedbackSignals,
     FeedbackSummary,
     FlagBacklogFilters,
     FlaggedEntry,
@@ -155,7 +156,7 @@ class FeedbackService:
         caller's own entry (``PermissionDenied``, ADR 0065), nothing is
         recorded and the error names them. Spellings of one entry count
         once. A fixed number of store calls however many ids: one read,
-        one transactional upsert, one count read.
+        one transactional upsert, one feedback read.
         """
         check_text(note, "note", MAX_NOTE_CHARS)  # ADR 0040
         note = _clean_note(note)
@@ -191,14 +192,13 @@ class FeedbackService:
             for eid in canonical
         ]
         rows = await self._store.record_feedback_many(rows)  # stamped (ADR 0079)
-        counts = await self._store.quality_counts(canonical)
-        kwargs = self._config.quality_kwargs()
-        outcomes = []
-        for row in rows:
-            helpful, stale, wrong = counts.get(row.entry_id, (0, 0, 0))
-            quality = feedback_quality(helpful, stale, wrong, **kwargs)
-            outcomes.append(FeedbackOutcome(feedback=row, quality=quality))
-        return outcomes
+        signals = await self._store.feedback_signals(canonical)
+        return [
+            FeedbackOutcome(
+                feedback=row, quality=self._quality(signals.get(row.entry_id, NO_SIGNALS))
+            )
+            for row in rows
+        ]
 
     async def feedback_summary(self, entry_id: str) -> FeedbackSummary:
         """What a reader of an entry sees of its feedback (ADR 0051): the
@@ -274,5 +274,9 @@ class FeedbackService:
 
     async def quality(self, entry_id: str) -> float:
         """An entry's current quality multiplier (SPEC.md §6.4)."""
-        helpful, stale, wrong = await self._store.feedback_counts(entry_id)
-        return feedback_quality(helpful, stale, wrong, **self._config.quality_kwargs())
+        signals = await self._store.feedback_signals([entry_id])
+        return self._quality(signals.get(entry_id, NO_SIGNALS))
+
+    def _quality(self, signals: FeedbackSignals) -> float:
+        kwargs = self._config.quality_kwargs(confirmed=signals.last_confirmed_at is not None)
+        return feedback_quality(signals.helpful, signals.stale, signals.wrong, **kwargs)
