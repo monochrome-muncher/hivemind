@@ -714,6 +714,15 @@ UNEXPECTED: list[tuple[str, Rest, Mcp | None, str, str]] = [
         "create_fleet",
     ),
     (
+        "rename fleet",
+        lambda w: w.client.patch(
+            f"/v1/admin/fleets/{w.fleet_id}", json={"name": "beta"}, headers=_h("hm_admin")
+        ),
+        None,
+        "access_service",
+        "rename_fleet",
+    ),
+    (
         "activate",
         lambda w: w.client.post(
             "/v1/admin/agents/taken/activate",

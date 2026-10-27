@@ -56,6 +56,7 @@ ROUTES = [
     ("POST", f"/v1/admin/fleets/{FAKE_ID}/merge", {"new_fleet_name": "c", "dry_run": True}),
     ("GET", "/v1/admin/fleet-merges", None),
     ("POST", f"/v1/admin/fleet-merges/{FAKE_ID}/undo", None),
+    ("PATCH", f"/v1/admin/fleets/{FAKE_ID}", {"name": "renamed"}),
 ]
 
 
@@ -90,6 +91,7 @@ ADMIN_BODIES = {
     ("POST", "/v1/admin/agents/{name}/activate"): {"trust_level": 1, "home_fleet_id": FAKE_ID},
     ("PATCH", "/v1/admin/agents/{name}"): {"trust_level": 1},
     ("POST", "/v1/admin/fleets/{source_id}/merge"): {"new_fleet_name": "c", "dry_run": False},
+    ("PATCH", "/v1/admin/fleets/{fleet_id}"): {"name": "renamed"},
 }
 
 

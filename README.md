@@ -133,6 +133,8 @@ key and agent keys cannot sign in here.
   the move first, lets you choose which pins to keep, and asks you to type
   the fleet's name. No new keys are needed, the agents keep all their
   memories, and a merge can be undone from the list of merges.
+- Rename a fleet from the Fleets list. Its memories, pins and agents stay
+  with it.
 - Download any list as a CSV file.
 
 ![A memory opened in the admin panel, with its details, tags and feedback](docs/images/admin-memories.png)
