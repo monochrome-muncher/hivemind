@@ -15,7 +15,13 @@ from hivemind.domain.entry import EntryDraft, EntryFilters, Kind
 from hivemind.domain.feedback import Verdict
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
-from hivemind.services.errors import PermissionDenied, SupersedeDenied
+from hivemind.services.errors import (
+    AgentIdentityRequired,
+    EntryNotActive,
+    EntryNotFound,
+    PermissionDenied,
+    SupersedeDenied,
+)
 from hivemind.services.governance import GovernanceService
 from hivemind.services.write import WriteService
 from tests.fakes import FakeEmbedder, FakeExtractor, make_clock, make_embedder
@@ -107,12 +113,13 @@ class TestWriteService:
         assert max(sizes) <= 4
         assert sum(sizes) == MAX_SUPERSEDES
 
-    async def test_an_over_cap_supersedes_list_is_refused_before_any_lookup(self) -> None:
+    async def test_a_draft_cannot_name_more_than_the_supersedes_cap(self) -> None:
         """The draft itself refuses more than MAX_SUPERSEDES targets, so no
         caller can make the lookup load an unbounded list (ADR 0040)."""
         from hivemind.domain.validation import MAX_SUPERSEDES, InvalidInput
 
-        with pytest.raises(InvalidInput):
+        make_draft("x", supersedes=tuple(f"id-{i}" for i in range(MAX_SUPERSEDES)))
+        with pytest.raises(InvalidInput, match=f"at most {MAX_SUPERSEDES}"):
             make_draft("x", supersedes=tuple(f"id-{i}" for i in range(MAX_SUPERSEDES + 1)))
 
     async def test_write_with_supersedes_flips_targets(self) -> None:
@@ -350,7 +357,7 @@ class TestGovernanceService:
         assert withdrawn.state.value == "withdrawn"
 
     async def test_withdraw_unknown_entry_raises(self, governance: GovernanceService) -> None:
-        with pytest.raises(LookupError):
+        with pytest.raises(EntryNotFound):
             await governance.withdraw(Credential(user_id="alice", agent_id="agent-1"), "nope")
 
     async def test_withdraw_of_inactive_entry_raises(
@@ -358,7 +365,7 @@ class TestGovernanceService:
     ) -> None:
         entry = await store.create_entry(make_draft("once active"))
         await store.withdraw_entry(entry.id, None, "alice")
-        with pytest.raises(ValueError):
+        with pytest.raises(EntryNotActive):
             await governance.withdraw(Credential(user_id="alice", agent_id="agent-1"), entry.id)
 
     async def test_record_feedback_upserts_per_reporter(self) -> None:
@@ -379,7 +386,7 @@ class TestGovernanceService:
     async def test_record_feedback_unknown_entry_raises(
         self, governance: GovernanceService
     ) -> None:
-        with pytest.raises(LookupError):
+        with pytest.raises(EntryNotFound):
             await governance.record_feedback(
                 Credential(user_id="bob", agent_id="agent-9"),
                 "nope",
@@ -446,6 +453,6 @@ async def test_feedback_accepts_self_reported_agent() -> None:
     counts = await store.feedback_counts(entry_id=entry.id)
     assert counts == (1, 0, 0)
 
-    # No credential agent AND no self-reported agent -> ValueError.
-    with pytest.raises(ValueError, match="agent identity"):
+    # No credential agent AND no self-reported agent -> AgentIdentityRequired.
+    with pytest.raises(AgentIdentityRequired, match="agent identity"):
         await governance.record_feedback(Credential(user_id="bob"), entry.id, Verdict.STALE)

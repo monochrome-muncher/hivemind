@@ -163,22 +163,46 @@ def test_bootstrap_job_script_is_valid_shell() -> None:
     _shell_syntax_ok("sh", _job_script())
 
 
-def _run_job_script(tmp_path: Path, keys_stub: str) -> subprocess.CompletedProcess[str]:
+def _stub_env(bindir: Path, **extra: str) -> dict[str, str]:
+    """The environment for a script under test: ``bindir`` first on PATH, and
+    none of the host's deploy variables (HIVEMIND_RUNNER, NAMESPACE, IMAGE,
+    BOOTSTRAP_*) leaking into the run."""
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith(("HIVEMIND_", "BOOTSTRAP_", "FAKE_"))
+        and k not in {"NAMESPACE", "IMAGE"}
+    }
+    return {**env, "PATH": f"{bindir}:{os.environ['PATH']}", **extra}
+
+
+def _run_job_script(
+    tmp_path: Path, keys_stub: str, **extra_env: str
+) -> subprocess.CompletedProcess[str]:
     bindir = tmp_path / "bin"
     bindir.mkdir()
     for name, body in {"hivemind-migrate": "exit 0", "hivemind-keys": keys_stub}.items():
         stub = bindir / name
         stub.write_text(f"#!/bin/sh\n{body}\n")
         stub.chmod(0o755)
-    env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}"}
     return subprocess.run(
-        ["sh", "-c", _job_script()], env=env, text=True, capture_output=True, timeout=30
+        ["sh", "-c", _job_script()],
+        env=_stub_env(bindir),
+        text=True,
+        capture_output=True,
+        timeout=30,
     )
 
 
 def test_bootstrap_job_writes_the_secret_and_prints_no_key(tmp_path: Path) -> None:
     calls = tmp_path / "keys-calls"
-    proc = _run_job_script(tmp_path, f'echo "$*" >> {calls}; echo "issued (not printed)"')
+    # Decoy key variables in the Job's environment: nothing may echo them.
+    proc = _run_job_script(
+        tmp_path,
+        f'echo "$*" >> {calls}; echo "issued (not printed)"',
+        ADMIN_KEY="decoy-admin-key",
+        ORG_KEY="decoy-org-key",
+    )
     assert proc.returncode == 0, proc.stderr
     assert calls.read_text().split() == [
         "--actor",
@@ -189,6 +213,8 @@ def test_bootstrap_job_writes_the_secret_and_prints_no_key(tmp_path: Path) -> No
     ]
     # The old Job echoed ADMIN_KEY= / ORG_KEY= for the CI script to scrape.
     assert "KEY=" not in _job_script()
+    output = proc.stdout + proc.stderr
+    assert "KEY=" not in output and "decoy-" not in output
 
 
 def test_bootstrap_job_fails_when_the_cli_fails(tmp_path: Path) -> None:
@@ -203,6 +229,8 @@ def _bootstrap_with_fake_kubectl(
     bindir.mkdir()
     calls = tmp_path / "calls"
     created = tmp_path / "created"
+    applied = tmp_path / "applied"  # every manifest piped to `apply -f -`
+    deleted = tmp_path / "deleted"  # every manifest piped to `delete -f -`
     kubectl = bindir / "kubectl"
     kubectl.write_text(
         textwrap.dedent(
@@ -210,6 +238,8 @@ def _bootstrap_with_fake_kubectl(
             #!/bin/sh
             echo "$*" >> {calls}
             case "$*" in
+              *"apply -f -"*) cat >> {applied}; echo "---" >> {applied}; exit 0 ;;
+              *"delete --ignore-not-found=true -f -"*) cat >> {deleted}; exit 0 ;;
               *"get secret hivemind-keys"*)
                 [ -n "$FAKE_API_ERROR" ] && {{ echo "Unable to connect to the server" >&2; exit 1; }}
                 [ -n "$FAKE_SECRET_EXISTS" ] && echo secret/hivemind-keys
@@ -227,16 +257,10 @@ def _bootstrap_with_fake_kubectl(
         )
     )
     kubectl.chmod(0o755)
-    env = {
-        **os.environ,
-        "PATH": f"{bindir}:{os.environ['PATH']}",
-        "IMAGE": "reg/hivemind:abc",
-        **extra_env,
-    }
     return subprocess.run(
         ["sh", str(ROOT / "scripts" / "ci-bootstrap-keys.sh")],
         cwd=ROOT,
-        env=env,
+        env=_stub_env(bindir, IMAGE="reg/hivemind:abc", **extra_env),
         text=True,
         capture_output=True,
         timeout=60,
@@ -254,6 +278,21 @@ def test_ci_bootstrap_runs_the_job_and_removes_its_rbac(tmp_path: Path) -> None:
     # The script never reads keys and never creates the Secret itself.
     assert not any(" logs " in c or "create secret" in c for c in calls)
     assert "hivemind-keys secret created" in proc.stdout
+
+
+def test_ci_bootstrap_applies_the_manifests_for_its_namespace_and_image(tmp_path: Path) -> None:
+    proc = _bootstrap_with_fake_kubectl(tmp_path, NAMESPACE="ci-ns")
+    assert proc.returncode == 0, proc.stderr
+    calls = (tmp_path / "calls").read_text().splitlines()
+    assert all(c.startswith("-n ci-ns ") for c in calls)
+    applied = (tmp_path / "applied").read_text()
+    # The RBAC binds the service account in the namespace the script was given...
+    assert "namespace: ci-ns" in applied and "namespace: hivemind" not in applied
+    # ...and the Job runs the image it was given, not the manifest's placeholder.
+    assert "image: reg/hivemind:abc" in applied and "hivemind:0.0.0" not in applied
+    # The RBAC is removed with the same namespace rewrite.
+    deleted = (tmp_path / "deleted").read_text()
+    assert "namespace: ci-ns" in deleted and "namespace: hivemind" not in deleted
 
 
 def test_ci_bootstrap_shows_the_log_and_removes_rbac_when_the_job_fails(tmp_path: Path) -> None:
@@ -456,7 +495,7 @@ def _entrypoint_env(tmp_path: Path, migrate_body: str, runner_body: str) -> dict
         stub = bindir / name
         stub.write_text(f"#!/bin/sh\n{body}\n")
         stub.chmod(0o755)
-    return {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}"}
+    return _stub_env(bindir)
 
 
 def _started_stub(tmp_path: Path) -> tuple[str, Path]:

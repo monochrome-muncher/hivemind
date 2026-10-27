@@ -6,6 +6,8 @@ agrees with what the data plane actually enforces.
 
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 
@@ -172,6 +174,6 @@ async def test_mcp_whoami_tool_returns_the_standing() -> None:
     assert direct["status"] == "active"
     assert direct["trust_level_name"] == "lurker"
     assert direct["can_write_scopes"] == ["self"]
-    server = build_server(app)
-    tools = {t.name: t for t in await server.list_tools()}
-    assert "can_write_scopes" in (tools["hive_whoami"].description or "")
+    result = await build_server(app).call_tool("hive_whoami", {})
+    assert result.is_error is False
+    assert json.loads(result.content[0].text) == direct

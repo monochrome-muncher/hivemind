@@ -70,8 +70,10 @@ async def test_a_corrupt_superseded_by_cycle_is_bounded_and_deduped() -> None:
     b = await store.create_entry(_draft("v2", supersedes=(a.id,)))
     # Corrupt: point b's superseded_by back at a.
     store._entries[b.id] = dataclasses.replace(store._entries[b.id], superseded_by=a.id)
-    successors, _ = await supersession_chain(store, await store.get_entry(a.id))
+    successors, superseded = await supersession_chain(store, await store.get_entry(a.id))
     assert [e.id for e in successors] == [b.id]
+    # The reverse walk loops back to a: it must not return the entry itself.
+    assert [e.id for e in superseded] == [b.id]
 
 
 async def test_tail_entry_has_no_superseded() -> None:

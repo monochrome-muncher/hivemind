@@ -10,7 +10,7 @@ import pytest
 
 from hivemind.domain.access import TrustLevel
 from hivemind.domain.audit import ActorKind, AuditAction, AuditFilters
-from hivemind.domain.entry import EntryDraft, Kind
+from hivemind.domain.entry import EntryDraft, EntryState, Kind
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.ports import Credential
 from tests.fakes import make_embedder
@@ -174,6 +174,10 @@ async def test_portal_withdraw_takes_own_entries_with_a_reason_and_audits_them()
         unreadable = await client.post(
             f"/v1/portal/entries/{in_red.id}/withdraw", json={"reason": "no"}, headers=CAROL
         )
+        # Every refusal above left its entry untouched.
+        for refused in (mine, by_bob, in_red, in_blue):
+            stored = await app.store.get_entry(refused.id)
+            assert stored is not None and stored.state is EntryState.ACTIVE
         done = await client.post(
             f"/v1/portal/entries/{in_blue.id}/withdraw",
             json={"reason": "the port moved"},

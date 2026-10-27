@@ -16,12 +16,14 @@ Skips cleanly when Postgres is unreachable.
 from __future__ import annotations
 
 import asyncio
+import os
 
 import asyncpg
 import pytest
 
 from hivemind.config import Settings
 from hivemind.store.migrate import (
+    MIGRATION_LOCK_KEY,
     current_embedding_dim,
     current_schema_version,
     migrate,
@@ -151,7 +153,9 @@ async def test_migrate_releases_the_lock_for_the_next_caller() -> None:
     try:
         held = await conn.fetchval(
             "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' "
-            "AND database = (SELECT oid FROM pg_database WHERE datname = current_database())",
+            "AND database = (SELECT oid FROM pg_database WHERE datname = current_database()) "
+            "AND ((classid::bigint << 32) | objid::bigint) = $1",
+            MIGRATION_LOCK_KEY,
         )
         assert held == 0, "advisory lock still held after migrate returned"
     finally:
@@ -636,14 +640,16 @@ async def test_0007_dedupes_keeping_the_newest_then_enforces_uniqueness() -> Non
     await migrate(dsn, dim)
 
 
-async def _backend_count(dsn: str) -> int:
+async def _backend_count(dsn: str, application: str) -> int:
+    """Open backends that identify themselves as ``application`` (set through
+    the DSN), so another client of the database does not change the count."""
     conn = await asyncpg.connect(dsn)
     try:
         return int(
             await conn.fetchval(
                 "SELECT count(*) FROM pg_stat_activity "
-                "WHERE backend_type = 'client backend' AND pid <> pg_backend_pid() "
-                "AND datname = current_database()"
+                "WHERE backend_type = 'client backend' AND application_name = $1",
+                application,
             )
         )
     finally:
@@ -654,15 +660,15 @@ async def test_migrate_and_rollback_leave_no_connection_open() -> None:
     """yoyo's backend holds a psycopg connection and has no close(); the
     runner must close it, or every migrate() call (each pod start, every
     integration fixture) leaks one connection until the process exits."""
-    dsn, dim = _dsn(), Settings().embedding_dim
-    await _require_postgres(dsn)
-    await migrate(dsn, dim)
-    before = await _backend_count(dsn)
+    plain, dim = _dsn(), Settings().embedding_dim
+    await _require_postgres(plain)
+    application = f"hm-migration-test-{os.getpid()}"
+    dsn = f"{plain}{'&' if '?' in plain else '?'}application_name={application}"
     for _ in range(3):
         await migrate(dsn, dim)
     await rollback(dsn, dim, count=1)
     await migrate(dsn, dim)
-    assert await _backend_count(dsn) == before
+    assert await _backend_count(plain, application) == 0
 
 
 async def test_migrate_fails_loudly_on_an_invalid_hnsw_index() -> None:

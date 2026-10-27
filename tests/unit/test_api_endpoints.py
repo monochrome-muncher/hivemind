@@ -11,6 +11,8 @@ Error responses use the standard envelope:
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import httpx
 import pytest
 
@@ -19,6 +21,7 @@ from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
 from hivemind.domain.entry import EntityKind, EntryDraft, ExtractedEntity, Kind
+from hivemind.domain.feedback import Verdict
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from tests.fakes import make_clock, make_embedder, make_search_config
@@ -376,7 +379,7 @@ class TestListEntries:
                 params=[("tags", "x"), ("limit", "1"), ("offset", "1")],
                 headers={"X-API-Key": "key-alice"},
             )
-        assert len(page.json()) == 1
+        assert [e["id"] for e in page.json()] == [e["id"] for e in resp.json()][1:2]
 
     async def test_list_hides_inactive_by_default(self) -> None:
         client = make_client(make_hivemind_app())
@@ -566,7 +569,7 @@ class TestHistoryChain:
             await post_entry(client, "key-alice", "v2", supersedes=[r1["id"]])
             resp = await client.get(f"/v1/entries/{r1['id']}", headers={"X-API-Key": "key-bob"})
         assert resp.status_code == 200
-        assert resp.json().get("history") in (None, {})
+        assert resp.json()["history"] is None
 
 
 class TestSearchFiltersAndPaging:
@@ -575,18 +578,23 @@ class TestSearchFiltersAndPaging:
         async with client:
             for i in range(5):
                 await post_entry(client, "key-alice", f"cohort note number {i}")
+            unpaged = await client.post(
+                "/v1/search",
+                json={"query": "cohort note", "limit": 5},
+                headers={"X-API-Key": "key-bob"},
+            )
             resp = await client.post(
                 "/v1/search",
                 json={"query": "cohort note", "limit": 2, "offset": 1},
                 headers={"X-API-Key": "key-bob"},
             )
         assert resp.status_code == 200
-        assert len(resp.json()) == 2
+        all_ids = [h["entry_id"] for h in unpaged.json()]
+        assert len(all_ids) == 5
+        assert [h["entry_id"] for h in resp.json()] == all_ids[1:3]
 
     async def test_search_created_range_filters(self) -> None:
         """SPEC.md §5.3: ``created_from``/``created_to`` are created_at (store time)."""
-        from datetime import timedelta
-
         from tests.fakes import FIXED_NOW, make_clock
 
         clock = make_clock()
@@ -611,8 +619,6 @@ class TestSearchFiltersAndPaging:
 
     async def test_list_created_range_filters(self) -> None:
         """SPEC.md §5.3: ``created_from``/``created_to`` on the list endpoint."""
-        from datetime import timedelta
-
         from tests.fakes import FIXED_NOW, make_clock
 
         clock = make_clock()
@@ -637,7 +643,8 @@ class TestSearchFiltersAndPaging:
 
 class TestFeedbackAgentResolution:
     async def test_user_key_self_reports_agent(self) -> None:
-        client = make_client(make_hivemind_app())
+        app = make_hivemind_app()
+        client = make_client(app)
         async with client:
             e = await post_entry(client, "key-bob", "a fact")  # not alice's own (ADR 0065)
             resp = await client.post(
@@ -647,6 +654,12 @@ class TestFeedbackAgentResolution:
             )
         assert resp.status_code == 200
         assert resp.json()["verdict"] == "helpful"
+        [stored] = await app.store.list_feedback(e["id"], 10)
+        assert (stored.user, stored.agent, stored.verdict) == (
+            "alice",
+            "claude-code",
+            Verdict.HELPFUL,
+        )
 
     async def test_user_key_without_agent_is_422(self) -> None:
         client = make_client(make_hivemind_app())
@@ -773,9 +786,8 @@ class TestNaiveDatetimeNormalization:
             agent="a",
             occurred_at="2026-06-01T12:00:00",  # naive
         )
-        assert aware.occurred_at is not None
-        assert aware.occurred_at.tzinfo is not None
-        assert aware.occurred_at.utcoffset() is not None
+        assert aware.occurred_at == datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC)
+        assert aware.occurred_at.utcoffset() == timedelta(0)
 
 
 class TestAccessEndpoints:
@@ -831,7 +843,8 @@ class TestAccessEndpoints:
         assert resp.json()["error"]["code"] == "forbidden"
 
     async def test_create_fleet_admin_only(self) -> None:
-        client = make_client(make_hivemind_app())
+        app = make_hivemind_app()
+        client = make_client(app)
         async with client:
             ok = await client.post(
                 "/v1/admin/fleets",
@@ -846,6 +859,8 @@ class TestAccessEndpoints:
                 headers={"X-API-Key": "key-org"},
             )
         assert denied.status_code == 403
+        assert denied.json()["error"]["code"] == "forbidden"
+        assert [f.name for f in await app.store.list_fleets()] == ["data-eng"]
 
     async def test_activate_agent_issues_key_once(self) -> None:
         app = make_hivemind_app()
@@ -859,8 +874,20 @@ class TestAccessEndpoints:
                 json={"trust_level": 2, "home_fleet_id": fleet.id},
                 headers={"X-API-Key": "key-admin"},
             )
-        assert resp.status_code == 200
-        assert resp.json()["key"]  # the raw key is returned once
+            assert resp.status_code == 200
+            # The returned key authenticates as the agent.
+            who = await client.get("/v1/whoami", headers={"X-API-Key": resp.json()["key"]})
+            assert who.status_code == 200
+            assert who.json()["name"] == "alice"
+            # A repeat activation is refused and hands out no key.
+            again = await client.post(
+                "/v1/admin/agents/alice/activate",
+                json={"trust_level": 2, "home_fleet_id": fleet.id},
+                headers={"X-API-Key": "key-admin"},
+            )
+            assert again.status_code == 409
+            assert again.json()["error"]["code"] == "invalid_status"
+            assert "key" not in again.json()
         # The agent is now active at level 2 with the home fleet.
         agent = await app.store.get_agent("alice")
         assert agent is not None
@@ -999,16 +1026,30 @@ class TestAccessEndpoints:
     async def test_revoke_agent_admin_only(self) -> None:
         app = make_hivemind_app()
         await app.store.register_agent("alice")
+        fleet = await app.store.create_fleet("data-eng")
         client = make_client(app)
         async with client:
+            activated = await client.post(
+                "/v1/admin/agents/alice/activate",
+                json={"trust_level": 2, "home_fleet_id": fleet.id},
+                headers={"X-API-Key": "key-admin"},
+            )
+            agent_key = {"X-API-Key": activated.json()["key"]}
+            assert (await client.get("/v1/whoami", headers=agent_key)).status_code == 200
             denied = await client.post(
                 "/v1/admin/agents/alice/revoke", headers={"X-API-Key": "key-org"}
             )
             assert denied.status_code == 403
+            assert denied.json()["error"]["code"] == "forbidden"
+            # The refused revoke left the agent and its key as they were.
+            assert (await client.get("/v1/whoami", headers=agent_key)).status_code == 200
             ok = await client.post(
                 "/v1/admin/agents/alice/revoke", headers={"X-API-Key": "key-admin"}
             )
-        assert ok.status_code == 200
+            assert ok.status_code == 200
+            assert (await client.get("/v1/whoami", headers=agent_key)).status_code == 401
+        agent = await app.store.get_agent("alice")
+        assert agent is not None and agent.status.value == "revoked"
 
     async def test_rotate_org_key_admin_only(self) -> None:
         client = make_client(make_hivemind_app())

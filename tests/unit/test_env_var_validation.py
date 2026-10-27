@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pytest
 
-from hivemind.config import _ALLOWED_EXTRA_ENV_VARS, load_settings
+from hivemind.config import load_settings
 
 
 def _clear_hivemind_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -91,11 +91,21 @@ def test_multiple_unknown_variables_are_all_named(
     assert "HIVEMIND_BAR" in str(exc_info.value)
 
 
-@pytest.mark.parametrize("name", sorted(_ALLOWED_EXTRA_ENV_VARS))
+@pytest.mark.parametrize(
+    "name",
+    [
+        "HIVEMIND_RUNNER",
+        "HIVEMIND_HOST",
+        "HIVEMIND_PORT",
+        "HIVEMIND_MCP_KEY",
+        "HIVEMIND_MCP_HTTP_PORT",
+    ],
+)
 def test_each_allowlisted_variable_is_accepted_alone(
     name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _clear_hivemind_env(monkeypatch)
+    monkeypatch.setenv("HIVEMIND_STRICT_ENV", "true")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv(name, "some-value")
     load_settings()  # must not raise
@@ -108,6 +118,7 @@ def test_realistic_production_environment_loads_cleanly(
     (all non-Settings-field, pod-wide variables) alongside real settings.
     """
     _clear_hivemind_env(monkeypatch)
+    monkeypatch.setenv("HIVEMIND_STRICT_ENV", "true")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HIVEMIND_RUNNER", "api")
     monkeypatch.setenv("HIVEMIND_HOST", "0.0.0.0")
@@ -125,6 +136,7 @@ def test_a_known_settings_field_env_var_is_never_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _clear_hivemind_env(monkeypatch)
+    monkeypatch.setenv("HIVEMIND_STRICT_ENV", "true")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HIVEMIND_QUALITY_MIN", "0.3")
     settings = load_settings()
@@ -227,6 +239,7 @@ def test_no_warning_when_every_variable_is_known(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     _clear_hivemind_env(monkeypatch)
+    monkeypatch.setenv("HIVEMIND_STRICT_ENV", "true")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HIVEMIND_RUNNER", "api")
     monkeypatch.setenv("HIVEMIND_STRICT_ENV", "false")

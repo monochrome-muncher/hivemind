@@ -118,7 +118,7 @@ async def test_registered_write_tool_supplied_importance_is_marked_caller(
     assert payload["importance_source"] == "caller"
 
 
-async def test_registered_get_tool_returns_error_for_unknown_id(
+async def test_registered_get_tool_returns_the_entry_for_a_known_id(
     app: McpHivemind,
 ) -> None:
     server = build_server(app)
@@ -128,6 +128,11 @@ async def test_registered_get_tool_returns_error_for_unknown_id(
     payload = json.loads(result.content[0].text)
     assert payload["id"] == written["id"]
 
+
+async def test_registered_get_tool_returns_error_for_unknown_id(
+    app: McpHivemind,
+) -> None:
+    server = build_server(app)
     missing = await server.call_tool("hive_get", {"entry_id": "no-such-id"})
     assert json.loads(missing.content[0].text)["error"]["code"] == "not_found"
 

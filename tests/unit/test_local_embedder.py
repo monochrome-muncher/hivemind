@@ -20,6 +20,11 @@ def _draft(body: str) -> EntryDraft:
 def test_the_default_prefix_budget_is_the_spec_default() -> None:
     embedder = LocalEmbedder(dimension=16)
     assert embedder.entry_embeddable_text(_draft("a b c d e f")) == "summary\na b c d e f"
+    # SPEC §7: the body prefix is 2000 words, written out here rather than read back.
+    words = [f"w{i}" for i in range(2100)]
+    assert embedder.entry_embeddable_text(_draft(" ".join(words))) == (
+        "summary\n" + " ".join(words[:2000])
+    )
 
 
 def test_a_configured_prefix_budget_truncates_the_body() -> None:

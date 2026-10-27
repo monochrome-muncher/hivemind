@@ -42,6 +42,21 @@ def test_other_database_names_are_refused(dsn: str) -> None:
 @pytest.mark.parametrize(
     "dsn",
     [
+        "postgresql://u:p@localhost:5432/hivemind-production",
+        "postgresql://u:p@localhost:5432/hivemind_prod",
+        "postgresql://u:p@localhost:5432/customers",
+        "postgresql://u:p@localhost:5432/postgres",
+    ],
+)
+def test_other_database_names_are_refused_on_a_local_host(dsn: str) -> None:
+    # The host is fine here, so only the name rule can refuse.
+    with pytest.raises(UnsafeTestDatabase, match=r"against database '"):
+        check_test_database(dsn, allow_any=False)
+
+
+@pytest.mark.parametrize(
+    "dsn",
+    [
         "postgresql://u:p@pg.prod.example.com:5432/hivemind",  # DEPLOY.md's production name
         "postgresql://hivemind:x@pg.hivemind.svc:5432/hivemind",
         "postgresql://u:p@10.0.0.5/hivemind_test",
