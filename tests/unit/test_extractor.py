@@ -216,8 +216,8 @@ class TestBuildExtractor:
         settings = Settings(extractor_endpoint="http://chat.test/v1", extractor_model="m")
         extractor = build_extractor(settings)
         assert isinstance(extractor, OpenAICompatExtractor)
-        if extractor is not None:
-            assert extractor.model_name == "m"
+        assert isinstance(extractor, Extractor)  # a drop-in for the WriteService hook
+        assert extractor.model_name == "m"
 
 
 class TestExtractEntry:
@@ -385,34 +385,14 @@ class TestValidation:
 
 
 class TestRetries:
-    """Bounded retries on transient failures (ADR 0014 pattern): timeouts,
-    connection errors, ``429`` and 5xx are retried with exponential
-    backoff; deterministic 4xx and validation failures fail fast."""
+    """The extractor's use of the shared retry policy (ADR 0014 pattern; the
+    policy itself is pinned through the embedder in ``test_embeddings.py`` and
+    in ``test_provider_errors.py``): its typed error, and a give-up that logs
+    a WARNING, not an ERROR."""
 
     async def test_retries_transient_5xx_then_succeeds(self) -> None:
         env = MockEnv()
         env.script([httpx.Response(500, text="boom"), _chat_response("[]")])
-        extractor = make_extractor(env)
-        assert await extractor.extract_entry(make_draft()) == ()
-        assert len(env.requests) == 2
-
-    async def test_retries_429_then_succeeds(self) -> None:
-        env = MockEnv()
-        env.script([httpx.Response(429, text="slow down"), _chat_response("[]")])
-        extractor = make_extractor(env)
-        assert await extractor.extract_entry(make_draft()) == ()
-        assert len(env.requests) == 2
-
-    async def test_retries_timeout_then_succeeds(self) -> None:
-        env = MockEnv()
-        env.script([httpx.ReadTimeout("read timed out"), _chat_response("[]")])
-        extractor = make_extractor(env)
-        assert await extractor.extract_entry(make_draft()) == ()
-        assert len(env.requests) == 2
-
-    async def test_retries_connection_error_then_succeeds(self) -> None:
-        env = MockEnv()
-        env.script([httpx.ConnectError("refused"), _chat_response("[]")])
         extractor = make_extractor(env)
         assert await extractor.extract_entry(make_draft()) == ()
         assert len(env.requests) == 2
@@ -435,13 +415,26 @@ class TestRetries:
         assert exc_info.value.status == 500
         assert len(env.requests) == 3  # initial attempt + 2 retries
 
-    async def test_a_retry_is_logged_as_a_warning(self, caplog) -> None:
+    async def test_zero_retries_is_a_single_attempt(self) -> None:
+        # Not the default (2): proves the extractor passes its own `retries`.
         env = MockEnv()
-        env.script([httpx.Response(500, text="boom"), _chat_response("[]")])
-        extractor = make_extractor(env)
-        with caplog.at_level("WARNING"):
+        env.script([httpx.Response(500, text="boom")])
+        extractor = make_extractor(env, retries=0)
+        with pytest.raises(ExtractorError):
             await extractor.extract_entry(make_draft())
-        assert any(r.levelname == "WARNING" and "retrying" in r.message for r in caplog.records)
+        assert len(env.requests) == 1
+
+    async def test_backoff_sleep_and_jitter_reach_the_policy(self) -> None:
+        sleeps: list[float] = []
+
+        async def record(delay: float) -> None:
+            sleeps.append(delay)
+
+        env = MockEnv()
+        env.script([httpx.Response(503), httpx.Response(502), _chat_response("[]")])
+        extractor = make_extractor(env, retries=2, backoff=0.5, sleep=record, jitter=lambda: 1.0)
+        await extractor.extract_entry(make_draft())
+        assert sleeps == [0.5, 1.0]
 
     async def test_exhausted_budget_is_logged_as_a_warning_not_an_error(self, caplog) -> None:
         """Unlike the embedder's, this give-up is a WARNING, not an
@@ -456,26 +449,6 @@ class TestRetries:
             await extractor.extract_entry(make_draft())
         assert any(r.levelname == "WARNING" and "giving up" in r.message for r in caplog.records)
         assert not any(r.levelname == "ERROR" for r in caplog.records)
-
-    async def test_zero_retries_is_a_single_attempt(self) -> None:
-        env = MockEnv()
-        env.script([httpx.Response(500, text="boom")])
-        extractor = make_extractor(env, retries=0)
-        with pytest.raises(ExtractorError):
-            await extractor.extract_entry(make_draft())
-        assert len(env.requests) == 1
-
-    async def test_backoff_doubles_per_retry(self) -> None:
-        sleeps: list[float] = []
-
-        async def record(delay: float) -> None:
-            sleeps.append(delay)
-
-        env = MockEnv()
-        env.script([httpx.Response(503), httpx.Response(502), _chat_response("[]")])
-        extractor = make_extractor(env, retries=2, backoff=0.5, sleep=record, jitter=lambda: 1.0)
-        await extractor.extract_entry(make_draft())
-        assert sleeps == [0.5, 1.0]
 
 
 class TestFactoryAndProtocol:

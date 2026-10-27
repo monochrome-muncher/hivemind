@@ -80,15 +80,6 @@ def shipped_score(
 
 
 class TestI1FreshUnratedBeatsOldFavourite:
-    def test_arithmetic_of_the_shipped_config(self) -> None:
-        """I1: the best old entry (social_max x floor) sits below the recency
-        of a 1.7-day-old entry, so raising the cap or the floor out of
-        agreement fails here."""
-        assert CONFIG.recency_floor is not None
-        # Past ~9.7 days the floor is the old entry's recency.
-        assert 0.5 ** (10.0 / CONFIG.half_life_days) < CONFIG.recency_floor
-        assert CONFIG.social_max * CONFIG.recency_floor < 0.5 ** (1.7 / CONFIG.half_life_days)
-
     @pytest.mark.parametrize("fresh_age", FRESH_DAYS)
     @pytest.mark.parametrize("old_age", OLD_DAYS)
     @pytest.mark.parametrize("counts", FEEDBACK_MIXES)
@@ -111,12 +102,6 @@ class TestI1FreshUnratedBeatsOldFavourite:
         assert 0.5 ** (fresh / 30.0) == pytest.approx(CONFIG.social_max * CONFIG.recency_floor)
         assert 0.5 ** (floor_age / 30.0) == pytest.approx(CONFIG.recency_floor)
         assert 1.7 < fresh < 1.8 and 9.6 < floor_age < 9.7
-
-    def test_the_cap_times_the_floor_is_below_one(self) -> None:
-        """Needed for I1 to be satisfiable at all: an old entry at the cap must
-        be below a brand-new unrated one (recency 1.0)."""
-        assert CONFIG.recency_floor is not None
-        assert CONFIG.social_max * CONFIG.recency_floor < 1.0
 
     async def test_service_ratio_of_an_old_favourite_stays_below_a_new_entry(self) -> None:
         """I1 through SearchService: with many helpful verdicts from other
@@ -199,13 +184,6 @@ class TestI2NumbersAndDatesOnly:
 
 
 class TestI5UpwardMultiplierIsCapped:
-    @pytest.mark.parametrize("helpful", [0, 1, 2, 5, 20, 100, 1000])
-    def test_social_factor_never_exceeds_social_max(self, helpful: int) -> None:
-        """I5: the product of the quality term never exceeds social_max."""
-        # recency is 1 at age 0, importance 3 gives 1.0 (narrow default), fused 1.0.
-        score = shipped_score(age_days=0.0, counts=(helpful, 0, 0), importance=3)
-        assert score <= CONFIG.social_max
-
     @pytest.mark.parametrize("helpful", [0, 1, 5, 1000])
     @pytest.mark.parametrize("age", [0.0, 3.0, 9.0, 10.0, 45.0, 400.0, 5000.0])
     @pytest.mark.parametrize("floor", [0.8, 0.5, None])

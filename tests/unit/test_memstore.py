@@ -1,13 +1,12 @@
 """Unit tests for MemoryStore (the reference Store implementation).
 
-The in-memory store is a *reference implementation of the Store port*:
-these tests pin its observable behavior so the Postgres adapter can be
-tested against the same expectations.
+What both adapters share lives in ``tests/integration/test_store_contract.py``;
+this file keeps what only the in-memory store pins: its keyword ranking, the
+id tie-break under a fixed clock, and the draft's own validation.
 """
 
 from __future__ import annotations
 
-import asyncio
 from datetime import timedelta
 
 import pytest
@@ -19,9 +18,7 @@ from hivemind.domain.entry import (
     ImportanceSource,
     Kind,
 )
-from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.memstore import MemoryStore
-from hivemind.ports import SupersedeConflict
 from tests.fakes import FIXED_NOW, make_clock
 
 UTC = FIXED_NOW.tzinfo
@@ -65,131 +62,6 @@ async def test_create_entry_assigns_ids_and_created_at(store: MemoryStore) -> No
     assert entry.embedding == (0.1, 0.2, 0.3)
 
 
-async def test_create_entry_with_supersedes_flips_targets(
-    store: MemoryStore,
-) -> None:
-    old = await store.create_entry(draft("Token lifetime is 15 minutes"))
-    new = await store.create_entry(draft("Token lifetime is 30 minutes", supersedes=(old.id,)))
-    reloaded_old = await store.get_entry(old.id)
-    reloaded_new = await store.get_entry(new.id)
-    assert reloaded_old is not None
-    assert reloaded_old.state is EntryState.SUPERSEDED
-    assert reloaded_old.superseded_by == new.id
-    assert reloaded_new is not None
-    assert reloaded_new.state is EntryState.ACTIVE
-
-
-async def test_supersede_unknown_target_is_rejected_atomically(store: MemoryStore) -> None:
-    with pytest.raises(SupersedeConflict) as exc:
-        await store.create_entry(draft("Something", supersedes=("no-such-id",)))
-    assert exc.value.ids == ["no-such-id"]
-    assert await store.list_entries(EntryFilters(include_inactive=True)) == []
-
-
-async def test_supersede_of_non_active_target_is_rejected_whole_write(
-    store: MemoryStore,
-) -> None:
-    a = await store.create_entry(draft("v1"))
-    b = await store.create_entry(draft("v2", supersedes=(a.id,)))
-    with pytest.raises(SupersedeConflict) as exc:
-        await store.create_entry(draft("v3", supersedes=(a.id, b.id)))
-    assert exc.value.ids == [a.id]
-    # nothing written, b untouched
-    reloaded_b = await store.get_entry(b.id)
-    assert reloaded_b is not None
-    assert reloaded_b.state is EntryState.ACTIVE
-    assert len(await store.list_entries(EntryFilters(include_inactive=True))) == 2
-
-
-async def test_concurrent_supersedes_of_one_head_exactly_one_wins(
-    store: MemoryStore,
-) -> None:
-    head = await store.create_entry(draft("head"))
-    results = await asyncio.gather(
-        *(store.create_entry(draft(f"v{i}", supersedes=(head.id,))) for i in range(8)),
-        return_exceptions=True,
-    )
-    wins = [r for r in results if not isinstance(r, BaseException)]
-    assert len(wins) == 1
-    assert all(isinstance(r, SupersedeConflict) for r in results if r not in wins)
-    active = await store.list_entries(EntryFilters())
-    assert [e.id for e in active] == [wins[0].id]
-
-
-async def test_withdraw_entry_sets_state_and_reason(store: MemoryStore) -> None:
-    entry = await store.create_entry(draft("Retract this"))
-    withdrawn = await store.withdraw_entry(entry.id, "turned out to be wrong", by_user="alice")
-    assert withdrawn.state is EntryState.WITHDRAWN
-    assert withdrawn.withdrawn_reason == "turned out to be wrong"
-    reloaded = await store.get_entry(entry.id)
-    assert reloaded is not None
-    assert reloaded.state is EntryState.WITHDRAWN
-
-
-async def test_withdraw_inactive_entry_raises(store: MemoryStore) -> None:
-    entry = await store.create_entry(draft("Once active"))
-    await store.withdraw_entry(entry.id, None, by_user="alice")
-    with pytest.raises(ValueError):
-        await store.withdraw_entry(entry.id, "again", by_user="alice")
-
-
-async def test_withdraw_unknown_entry_raises(store: MemoryStore) -> None:
-    with pytest.raises(KeyError):
-        await store.withdraw_entry("nope", None, by_user="alice")
-
-
-async def test_feedback_counts_aggregate_verdicts(store: MemoryStore) -> None:
-    entry = await store.create_entry(draft("A fact"))
-
-    async def give(verdict: Verdict, agent: str) -> None:
-        await store.record_feedback(
-            Feedback(
-                entry_id=entry.id,
-                user="bob",
-                agent=agent,
-                verdict=verdict,
-            )
-        )
-
-    await give(Verdict.HELPFUL, "agent-1")
-    await give(Verdict.STALE, "agent-2")
-    await give(Verdict.WRONG, "agent-3")
-    assert await store.feedback_counts(entry.id) == (1, 1, 1)
-
-
-async def test_feedback_upsert_same_reporter_overrides(
-    store: MemoryStore,
-) -> None:
-    entry = await store.create_entry(draft("A fact"))
-
-    async def give(verdict: Verdict) -> None:
-        await store.record_feedback(
-            Feedback(entry_id=entry.id, user="bob", agent="agent-1", verdict=verdict)
-        )
-
-    await give(Verdict.HELPFUL)
-    await give(Verdict.WRONG)  # same reporter, new verdict
-    assert await store.feedback_counts(entry.id) == (0, 0, 1)
-
-
-async def test_quality_counts_is_batched(store: MemoryStore) -> None:
-    a = await store.create_entry(draft("fact a"))
-    b = await store.create_entry(draft("fact b"))
-    await store.record_feedback(
-        Feedback(entry_id=a.id, user="bob", agent="a1", verdict=Verdict.HELPFUL)
-    )
-    counts = await store.quality_counts([a.id, b.id, "missing"])
-    assert counts[a.id] == (1, 0, 0)
-    assert counts[b.id] == (0, 0, 0)
-    assert "missing" not in counts
-
-
-async def test_get_entries_returns_only_known_ids(store: MemoryStore) -> None:
-    e = await store.create_entry(draft("one"))
-    got = await store.get_entries([e.id, "missing"])
-    assert list(got) == [e.id]
-
-
 async def test_keyword_search_ranks_by_token_overlap(store: MemoryStore) -> None:
     jwt = await store.create_entry(draft("JWT tokens expire after 15 minutes", tags=("auth",)))
     other = await store.create_entry(draft("Cookies are HTTP only"))
@@ -214,46 +86,6 @@ async def test_keyword_search_respects_filters(store: MemoryStore) -> None:
     assert fact.id not in results
 
 
-async def test_vector_search_ranks_by_cosine_similarity(store: MemoryStore) -> None:
-    close = await store.create_entry(draft("Auth uses JWT"), [0.9, 0.1, 0.0, 0.0])
-    # Slightly positive dot with the query -> small-but-positive cosine,
-    # ranked below `close`. (Exactly-orthogonal vectors score 0 and are
-    # excluded, which is the intended behavior.)
-    far = await store.create_entry(draft("Cookies"), [0.1, 0.1, 0.9, 0.1])
-    unembedded = await store.create_entry(draft("No vector"), None)  # type: ignore[arg-type]
-
-    results = await store.search_vector([0.95, 0.05, 0.0, 0.0], EntryFilters(), limit=10)
-    assert results[0] == close.id
-    assert unembedded.id not in results
-    assert far.id in results
-    assert results.index(close.id) < results.index(far.id)
-
-
-async def test_list_entries_filters_and_pagination(store: MemoryStore) -> None:
-    alice = await store.create_entry(draft("alice's fact", author="alice", tags=("x",)))
-    bob = await store.create_entry(draft("bob's decision", author="bob", kind=Kind.DECISION))
-    bob2 = await store.create_entry(draft("bob's fact", author="bob", tags=("x", "y")))
-
-    all_x = await store.list_entries(EntryFilters(tags=("x",)), limit=10)
-    assert {e.id for e in all_x} == {alice.id, bob2.id}
-
-    bob_only = await store.list_entries(EntryFilters(author="bob", kind=Kind.DECISION), limit=10)
-    assert [e.id for e in bob_only] == [bob.id]
-
-    page = await store.list_entries(EntryFilters(), limit=1, offset=1)
-    assert len(page) == 1
-
-
-async def test_list_entries_hides_inactive_by_default(store: MemoryStore) -> None:
-    old = await store.create_entry(draft("v1"))
-    new = await store.create_entry(draft("v2", supersedes=(old.id,)))
-    visible = await store.list_entries(EntryFilters(), limit=10)
-    assert [e.id for e in visible] == [new.id]
-
-    everything = await store.list_entries(EntryFilters(include_inactive=True), limit=10)
-    assert {e.id for e in everything} == {old.id, new.id}
-
-
 async def test_occurred_range_filter(store: MemoryStore) -> None:
     t0 = FIXED_NOW
     early = await store.create_entry(draft("early", occurred_at=t0 - timedelta(days=10)))
@@ -270,21 +102,6 @@ async def test_occurred_range_filter(store: MemoryStore) -> None:
     assert {e.id for e in from_to} == {early.id, late.id}
 
 
-async def test_list_entries_orders_newest_first() -> None:
-    """SPEC.md §11.4: most-recent-first is the assumed default list order."""
-    from tests.fakes import make_clock
-
-    clock = make_clock()
-    store = MemoryStore(clock)
-    first = await store.create_entry(draft("first"))
-    clock.advance_days(1)
-    second = await store.create_entry(draft("second"))
-    clock.advance_days(1)
-    third = await store.create_entry(draft("third"))
-    listed = await store.list_entries(EntryFilters(), limit=10)
-    assert [e.id for e in listed] == [third.id, second.id, first.id]
-
-
 async def test_list_entries_tie_breaks_by_id_desc(store: MemoryStore) -> None:
     """Same ``created_at`` (fixed clock) -> order by id DESC (matches PgStore)."""
     a = await store.create_entry(draft("a"))
@@ -292,17 +109,6 @@ async def test_list_entries_tie_breaks_by_id_desc(store: MemoryStore) -> None:
     c = await store.create_entry(draft("c"))
     listed = await store.list_entries(EntryFilters(), limit=10)
     assert [e.id for e in listed] == sorted([a.id, b.id, c.id], reverse=True)
-
-
-async def test_create_entry_records_embedding_model(store: MemoryStore) -> None:
-    """SPEC.md §7: the store records the embedding model per entry."""
-    entry = await store.create_entry(
-        draft("Uses embeddings"), [0.1, 0.2], embedding_model="fake-embedder"
-    )
-    assert entry.embedding_model == "fake-embedder"
-    reloaded = await store.get_entry(entry.id)
-    assert reloaded is not None
-    assert reloaded.embedding_model == "fake-embedder"
 
 
 def test_summary_over_280_chars_is_rejected() -> None:

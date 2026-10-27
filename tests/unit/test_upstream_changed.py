@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from hivemind.api.schemas import HitOut
 from hivemind.domain.access import TrustLevel, Visibility
 from hivemind.domain.entry import EntryDraft, EntryFilters, EntryState, Kind
 from hivemind.domain.feedback import Feedback, Verdict
@@ -356,7 +355,3 @@ async def test_rest_hit_lists_the_change_and_is_null_when_empty() -> None:
     async with _rest_client(plain, WRITER) as client:
         [hit] = (await client.post("/v1/search", json={"query": "billing node build"})).json()
     assert hit["upstream_changed"] is None
-
-
-def test_rest_schema_default_is_null() -> None:
-    assert HitOut.model_fields["upstream_changed"].default is None

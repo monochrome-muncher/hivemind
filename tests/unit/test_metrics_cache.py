@@ -2,7 +2,7 @@
 
 Only ``Store.usage_counts`` (the grouped scan of ``entries``) is cached;
 the agent, fleet and search reads run on every report. The clock is a
-fake monotonic one, so no test sleeps.
+fake monotonic one; the only real wait is the 10 ms a slow scan takes.
 """
 
 from __future__ import annotations

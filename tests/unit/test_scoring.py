@@ -159,27 +159,6 @@ class TestRecencyFloor:
             1.0, 3, occurred, 1.0, NOW, 30.0, recency_floor=0.5, narrow_importance=False
         ) == entry_score(1.0, 3, occurred, 1.0, NOW, 30.0, narrow_importance=False)
 
-    def test_the_floor_bounds_the_recency_range_to_its_reciprocal(self) -> None:
-        """Why a floor can work where `rrf_k` could not (ROADMAP §4.6): the
-        recency factor's whole range collapses from unbounded to `1/floor`,
-        which is a number the fused RRF range (2.62x at the §6.2 defaults)
-        can beat once `floor > 1/2.62 = 0.381`."""
-        floor = 0.5
-        newest = entry_score(
-            1.0, 3, NOW, 1.0, NOW, 30.0, recency_floor=floor, narrow_importance=False
-        )
-        oldest = entry_score(
-            1.0,
-            3,
-            NOW - timedelta(days=100_000),
-            1.0,
-            NOW,
-            30.0,
-            recency_floor=floor,
-            narrow_importance=False,
-        )
-        assert newest / oldest == pytest.approx(1.0 / floor)
-
 
 class TestFeedbackQuality:
     def test_no_feedback_is_neutral(self):

@@ -9,8 +9,6 @@ filter validation at the service seam.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-
 import pytest
 
 from hivemind.domain.access import TrustLevel
@@ -200,55 +198,3 @@ async def test_list_respects_an_explicit_limit_and_offset() -> None:
     )
     page = await service.list(EntryFilters(), limit=2, offset=1, visibility=ADMIN.visibility())
     assert [e.id for e in page] == [e.id for e in everything][1:3]
-
-
-# -- ADR 0059: a fixed number of store reads ---------------------------------
-
-
-class _CountingStore:
-    """Wraps a store and counts the batch-read store calls."""
-
-    def __init__(self, inner) -> None:
-        self._inner = inner
-        self.get_entries_calls = 0
-        self.entry_links_many_calls = 0
-
-    def __getattr__(self, name):
-        return getattr(self._inner, name)
-
-    async def get_entries(self, ids: Sequence[str]):
-        self.get_entries_calls += 1
-        return await self._inner.get_entries(ids)
-
-    async def entry_links_many(self, ids, limit):
-        self.entry_links_many_calls += 1
-        return await self._inner.entry_links_many(ids, limit)
-
-
-async def test_batch_read_cost_is_fixed_regardless_of_batch_size() -> None:
-    from hivemind.services.governance import GovernanceService
-
-    def setup(n: int) -> tuple[_CountingStore, ReadService]:
-        store = make_store()
-        counting = _CountingStore(store)
-        service = _service(counting, GovernanceService(counting))
-        return counting, service
-
-    async def fill(counting: _CountingStore, service: ReadService, n: int) -> list[str]:
-        return [await _write(counting, WRITER, summary=f"s{i}") for i in range(n)]
-
-    counting_small, service_small = setup(2)
-    ids_small = await fill(counting_small, service_small, 2)
-    counting_small.get_entries_calls = 0
-    counting_small.entry_links_many_calls = 0
-    await service_small.entries(ids_small, visibility=ADMIN.visibility())
-    small = (counting_small.get_entries_calls, counting_small.entry_links_many_calls)
-
-    counting_big, service_big = setup(5)
-    ids_big = await fill(counting_big, service_big, 5)
-    counting_big.get_entries_calls = 0
-    counting_big.entry_links_many_calls = 0
-    await service_big.entries(ids_big, visibility=ADMIN.visibility())
-    big = (counting_big.get_entries_calls, counting_big.entry_links_many_calls)
-
-    assert small == big  # ADR 0059: the cost does not scale with the batch

@@ -1,81 +1,20 @@
-"""The audit log at the ``Store`` seam (ADR 0027, SPEC §12.5), on the
-in-memory reference store, plus ``Credential.key_id`` threading from
-``PgAuthenticator.verify`` (the pool is faked — no live Postgres).
+"""``Credential.key_id`` threading from ``PgAuthenticator.verify`` into the
+audit actor (ADR 0027; the pool is faked — no live Postgres). The audit log
+at the ``Store`` seam is in ``tests/integration/test_store_contract.py``.
 """
 
 from __future__ import annotations
 
 import hashlib
 from contextlib import asynccontextmanager
-from datetime import timedelta
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 from hivemind.domain import (
-    ActorKind,
-    AuditAction,
-    AuditEvent,
-    AuditFilters,
     key_fingerprint,
 )
-from hivemind.ports import Credential, Store
+from hivemind.ports import Credential
 from hivemind.store.auth import PgAuthenticator, key_hash
-from tests.fakes import make_clock, make_store
-
-
-def _event(actor: str = "admin:abc", action: AuditAction = AuditAction.FLEET_CREATE) -> AuditEvent:
-    return AuditEvent(
-        actor_kind=ActorKind.ADMIN_KEY,
-        actor=actor,
-        action=action,
-        target="data-eng",
-        detail={"name": "data-eng"},
-    )
-
-
-async def test_memory_store_satisfies_the_store_port() -> None:
-    assert isinstance(make_store(), Store)
-
-
-async def test_record_audit_round_trips() -> None:
-    store = make_store()
-    stored = await store.record_audit(_event())
-    assert stored.id
-    assert stored.actor_kind is ActorKind.ADMIN_KEY
-    assert stored.action is AuditAction.FLEET_CREATE
-    assert stored.target == "data-eng"
-    assert stored.detail == {"name": "data-eng"}
-    assert await store.list_audit(AuditFilters(), limit=10) == [stored]
-
-
-async def test_list_audit_is_newest_first_and_bounded() -> None:
-    clock = make_clock()
-    store = make_store(clock)
-    first = await store.record_audit(_event(actor="a"))
-    clock.advance_days(1)
-    second = await store.record_audit(_event(actor="b"))
-    clock.advance_days(1)
-    third = await store.record_audit(_event(actor="c"))
-    assert await store.list_audit(AuditFilters(), limit=10) == [third, second, first]
-    assert await store.list_audit(AuditFilters(), limit=2) == [third, second]
-
-
-async def test_list_audit_filters_by_actor_action_and_since() -> None:
-    clock = make_clock()
-    store = make_store(clock)
-    old = await store.record_audit(_event(actor="a"))
-    clock.advance_days(2)
-    revoke = await store.record_audit(_event(actor="b", action=AuditAction.AGENT_REVOKE))
-    newer = await store.record_audit(_event(actor="a"))
-
-    assert await store.list_audit(AuditFilters(actor="a"), limit=10) == [newer, old]
-    assert await store.list_audit(AuditFilters(action=AuditAction.AGENT_REVOKE), limit=10) == [
-        revoke
-    ]
-    since = old.occurred_at + timedelta(days=1)
-    assert await store.list_audit(AuditFilters(since=since), limit=10) == [newer, revoke]
-    assert await store.list_audit(AuditFilters(actor="a", since=since), limit=10) == [newer]
-
 
 # -- Credential.key_id (ADR 0027) ---------------------------------------------
 

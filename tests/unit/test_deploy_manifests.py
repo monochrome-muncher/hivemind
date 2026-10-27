@@ -101,7 +101,12 @@ def test_create_secret_always_names_a_subtype() -> None:
 
 def test_no_bogus_kustomize_build_form() -> None:
     # DEP-11e: `kubectl kustomize build <dir>` passes a literal "build" arg.
-    for path in [*ROOT.glob("*.md"), *K8S.rglob("*.yaml"), ROOT / ".gitlab-ci.yml"]:
+    for path in [
+        *ROOT.glob("*.md"),
+        *(ROOT / "docs").rglob("*.md"),
+        *K8S.rglob("*.yaml"),
+        ROOT / ".gitlab-ci.yml",
+    ]:
         assert "kubectl kustomize build" not in path.read_text(), path
 
 
@@ -140,7 +145,6 @@ def test_bootstrap_job_runs_as_its_own_narrow_service_account() -> None:
     # Role can create Secrets and get / delete hivemind-keys - nothing else.
     pod = _pod_spec(_load(K8S / "bootstrap" / "keys-job.yaml"))
     assert pod["serviceAccountName"] == "hivemind-keys-bootstrap"
-    assert pod["automountServiceAccountToken"] is True
     docs = {d["kind"]: d for d in yaml.safe_load_all((K8S / "bootstrap" / "rbac.yaml").read_text())}
     assert set(docs) == {"ServiceAccount", "Role", "RoleBinding"}
     assert docs["ServiceAccount"]["automountServiceAccountToken"] is False

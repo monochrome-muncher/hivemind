@@ -164,7 +164,10 @@ async def test_middleware_valid_key_sets_credential_and_dispatches() -> None:
     assert not sent  # the middleware forwards; the inner app owns the response
 
 
-async def test_middleware_missing_key_401s() -> None:
+@pytest.mark.parametrize(
+    "headers", [[], [(b"authorization", b"Bearer key-stranger")]], ids=["missing", "unknown"]
+)
+async def test_middleware_missing_or_unknown_key_401s(headers: list[tuple[bytes, bytes]]) -> None:
     auth = FakeAuthenticator({"key-alice": ALICE})
     inner = _RecordingApp()
     mw = BearerAuthMiddleware(inner, auth)
@@ -173,21 +176,7 @@ async def test_middleware_missing_key_401s() -> None:
     async def send(msg: dict[str, Any]) -> None:
         sent.append(msg)
 
-    await mw(_scope([]), _noop_receive, send)
-    assert not inner.called
-    assert sent and sent[0]["status"] == 401
-
-
-async def test_middleware_unknown_key_401s() -> None:
-    auth = FakeAuthenticator({"key-alice": ALICE})
-    inner = _RecordingApp()
-    mw = BearerAuthMiddleware(inner, auth)
-    sent: list[dict[str, Any]] = []
-
-    async def send(msg: dict[str, Any]) -> None:
-        sent.append(msg)
-
-    await mw(_scope([(b"authorization", b"Bearer key-stranger")]), _noop_receive, send)
+    await mw(_scope(headers), _noop_receive, send)
     assert not inner.called
     assert sent and sent[0]["status"] == 401
 

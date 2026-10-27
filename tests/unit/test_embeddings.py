@@ -22,8 +22,6 @@ from hivemind.domain.entry import (
     DEFAULT_PREFIX_TOKENS,
     EntryDraft,
     Kind,
-    Source,
-    SourceType,
 )
 from hivemind.embeddings.openai_compat import (
     EmbeddingError,
@@ -160,24 +158,13 @@ class TestRetries:
 
     async def test_exhausted_budget_raises_with_status(self) -> None:
         env = MockEnv()
-        self._scripted_handler(env, [httpx.Response(500, text="boom")])  # 500 forever
+        # 500 until the 4th attempt, which the budget never reaches.
+        self._scripted_handler(env, [httpx.Response(500, text="boom")] * 3 + [self._ok()])
         embedder = make_embedder(env, retries=2)
         with pytest.raises(EmbeddingError) as exc_info:
             await embedder.embed_text("x")
         assert exc_info.value.status == 500
         assert len(env.requests) == 3  # initial attempt + 2 retries
-
-    async def test_default_budget_is_three_attempts(self) -> None:
-        """Default ``retries=2``: three 5xx in a row exhaust the budget
-        before the 4th (which would have succeeded)."""
-        env = MockEnv()
-        self._scripted_handler(
-            env, [httpx.Response(500), httpx.Response(500), httpx.Response(500), self._ok()]
-        )
-        embedder = make_embedder(env)  # default retries=2
-        with pytest.raises(EmbeddingError):
-            await embedder.embed_text("x")
-        assert len(env.requests) == 3  # the 4th (ok) attempt never happens
 
     async def test_a_retry_is_logged_as_a_warning(self, caplog) -> None:
         """Every transient failure was previously invisible — retried
@@ -315,21 +302,6 @@ class TestEmbedText:
         embedder = make_embedder(env, api_key="")
         await embedder.embed_text("x")
         assert "Authorization" not in env.requests[-1].headers
-
-    async def test_dimension_mismatch_raises(self) -> None:
-        env = MockEnv()  # answers with a 4-dim vector
-        embedder = make_embedder(env, dim=2)
-        with pytest.raises(EmbeddingError) as exc_info:
-            await embedder.embed_text("x")
-        # Validation failures carry no HTTP status.
-        assert exc_info.value.status is None
-
-    async def test_http_error_raises_with_status(self) -> None:
-        env = MockEnv(handler=lambda request: httpx.Response(500, text="boom"))
-        embedder = make_embedder(env)
-        with pytest.raises(EmbeddingError) as exc_info:
-            await embedder.embed_text("x")
-        assert exc_info.value.status == 500
 
 
 class TestEmbedEntry:
@@ -491,7 +463,3 @@ class TestFactoryAndProtocol:
         await embedder.aclose()
         vec = await embedder.embed_text("x")  # still works
         assert vec == OK_VECTOR
-
-    def test_source_domain_imports_are_the_frozen_ones(self) -> None:
-        """Sanity: the domain types used above are the frozen ones."""
-        assert Source(type=SourceType.URL, ref="http://x").ref == "http://x"

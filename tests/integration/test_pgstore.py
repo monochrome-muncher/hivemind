@@ -12,7 +12,7 @@ Hermetic-by-construction:
   leftover state between runs or between the unit and integration
   suites).
 - The schema is applied idempotently (``migrate``) before each test,
-  matching how the service migrates on start (ADR 0007).
+  matching how the service migrates on start (ADR 0018).
 """
 
 from __future__ import annotations
@@ -35,7 +35,6 @@ from hivemind.domain.entry import (
     EntryState,
     ImportanceSource,
     Kind,
-    SearchCount,
 )
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.domain.pin import PinRefusal, PinWrite
@@ -45,7 +44,6 @@ from hivemind.services.pins import PinService
 from hivemind.services.write import WriteService
 from hivemind.store import PgAuthenticator, PgStore
 from hivemind.store.auth import key_hash
-from hivemind.store.migrate import migrate
 
 # --- helpers -------------------------------------------------------------------
 
@@ -153,26 +151,6 @@ async def test_reads_do_not_fetch_the_stored_vector(pg) -> None:
     assert await store.search_vector(make_vec(dim, 3), EntryFilters(), 5) == [entry.id]
 
 
-async def test_create_entry_with_supersedes_flips_targets(pg) -> None:
-    store, _auth, _dim = pg
-    old = await store.create_entry(draft("Token lifetime is 15 minutes"))
-    new = await store.create_entry(draft("Token lifetime is 30 minutes", supersedes=(old.id,)))
-    reloaded_old = await store.get_entry(old.id)
-    reloaded_new = await store.get_entry(new.id)
-    assert reloaded_old is not None
-    assert reloaded_old.state is EntryState.SUPERSEDED
-    assert reloaded_old.superseded_by == new.id
-    assert reloaded_new is not None
-    assert reloaded_new.state is EntryState.ACTIVE
-
-
-async def test_supersede_unknown_target_is_rejected(pg) -> None:
-    store, _, _ = pg
-    with pytest.raises(SupersedeConflict):
-        await store.create_entry(draft("Something", supersedes=("no-such-id",)))
-    assert await store.list_entries(EntryFilters(include_inactive=True)) == []
-
-
 async def test_concurrent_supersedes_of_one_head_exactly_one_wins(pg) -> None:
     """ADR 0034 atomicity: N writers superseding one head -> one wins, the
     rest roll back (no orphaned active successors)."""
@@ -251,40 +229,6 @@ async def test_write_service_warns_when_a_write_may_answer_an_open_question(pg) 
     assert "answers_open_question" not in codes(superseding.warnings)
 
 
-async def test_supersede_of_withdrawn_target_rolls_back_insert(pg) -> None:
-    store, _, _ = pg
-    head = await store.create_entry(draft("head"))
-    await store.withdraw_entry(head.id, None, by_user="alice")
-    with pytest.raises(SupersedeConflict):
-        await store.create_entry(draft("v2", supersedes=(head.id,)))
-    assert len(await store.list_entries(EntryFilters(include_inactive=True))) == 1
-
-
-async def test_withdraw_entry_sets_state_and_reason(pg) -> None:
-    store, _, _ = pg
-    entry = await store.create_entry(draft("Retract this"))
-    withdrawn = await store.withdraw_entry(entry.id, "turned out to be wrong", by_user="alice")
-    assert withdrawn.state is EntryState.WITHDRAWN
-    assert withdrawn.withdrawn_reason == "turned out to be wrong"
-    reloaded = await store.get_entry(entry.id)
-    assert reloaded is not None
-    assert reloaded.state is EntryState.WITHDRAWN
-
-
-async def test_withdraw_inactive_entry_raises(pg) -> None:
-    store, _, _ = pg
-    entry = await store.create_entry(draft("Once active"))
-    await store.withdraw_entry(entry.id, None, by_user="alice")
-    with pytest.raises(ValueError):
-        await store.withdraw_entry(entry.id, "again", by_user="alice")
-
-
-async def test_withdraw_unknown_entry_raises(pg) -> None:
-    store, _, _ = pg
-    with pytest.raises(KeyError):
-        await store.withdraw_entry("nope", None, by_user="alice")
-
-
 async def test_concurrent_withdraw_raises_typed_error_not_assertion(pg) -> None:
     """Two concurrent withdrawals of one active entry: exactly one wins;
     the loser gets the port-contract ``ValueError`` (a 409 upstream),
@@ -334,33 +278,6 @@ async def test_concurrent_fleet_create_raises_typed_error(pg) -> None:
 
 
 # --- feedback -------------------------------------------------------------------
-
-
-async def test_feedback_counts_aggregate_verdicts(pg) -> None:
-    store, _, _ = pg
-    entry = await store.create_entry(draft("A fact"))
-    await store.record_feedback(
-        Feedback(entry_id=entry.id, user="bob", agent="agent-1", verdict=Verdict.HELPFUL)
-    )
-    await store.record_feedback(
-        Feedback(entry_id=entry.id, user="bob", agent="agent-2", verdict=Verdict.STALE)
-    )
-    await store.record_feedback(
-        Feedback(entry_id=entry.id, user="bob", agent="agent-3", verdict=Verdict.WRONG)
-    )
-    assert await store.feedback_counts(entry.id) == (1, 1, 1)
-
-
-async def test_feedback_upsert_same_reporter_overrides(pg) -> None:
-    store, _, _ = pg
-    entry = await store.create_entry(draft("A fact"))
-    await store.record_feedback(
-        Feedback(entry_id=entry.id, user="bob", agent="agent-1", verdict=Verdict.HELPFUL)
-    )
-    await store.record_feedback(
-        Feedback(entry_id=entry.id, user="bob", agent="agent-1", verdict=Verdict.WRONG)
-    )
-    assert await store.feedback_counts(entry.id) == (0, 0, 1)
 
 
 async def test_list_feedback_newest_first_with_notes(pg) -> None:
@@ -431,27 +348,7 @@ async def test_flagged_filter_keeps_stale_or_wrong_entries(pg) -> None:
     assert set(await store.search_vector(make_vec(dim, 0), flagged, 10)) == expected
 
 
-async def test_quality_counts_is_batched(pg) -> None:
-    store, _, _ = pg
-    a = await store.create_entry(draft("fact a"))
-    b = await store.create_entry(draft("fact b"))
-    await store.record_feedback(
-        Feedback(entry_id=a.id, user="bob", agent="a1", verdict=Verdict.HELPFUL)
-    )
-    counts = await store.quality_counts([a.id, b.id, "missing"])
-    assert counts[a.id] == (1, 0, 0)
-    assert counts[b.id] == (0, 0, 0)
-    assert "missing" not in counts
-
-
 # --- read path ------------------------------------------------------------------
-
-
-async def test_get_entries_returns_only_known_ids(pg) -> None:
-    store, _, _ = pg
-    e = await store.create_entry(draft("one"))
-    got = await store.get_entries([e.id, "missing"])
-    assert list(got) == [e.id]
 
 
 # --- search ---------------------------------------------------------------------
@@ -586,47 +483,7 @@ async def test_similar_entries_returns_nearest_active_with_similarity(pg) -> Non
     assert len(await store.similar_entries(make_vec(dim, 0), 1, exclude_id=new.id)) == 1
 
 
-async def test_vector_search_ranks_by_cosine_similarity(pg) -> None:
-    store, _, dim = pg
-    close = await store.create_entry(draft("Auth uses JWT"), make_vec(dim, 0))
-    far = await store.create_entry(draft("Cookies"), make_vec(dim, 3))
-    unembedded = await store.create_entry(draft("No vector"))
-
-    query = [0.95] * dim
-    query[0] = 1.0
-    results = await store.search_vector(query, EntryFilters(), limit=10)
-    assert close.id in results
-    assert unembedded.id not in results
-    assert far.id in results
-    assert results.index(close.id) < results.index(far.id)
-    assert results[0] == close.id
-
-
 # --- list -------------------------------------------------------------------------
-
-
-async def test_list_entries_filters_and_pagination(pg) -> None:
-    store, _, _ = pg
-    alice = await store.create_entry(draft("alice's fact", author="alice", tags=("x",)))
-    bob = await store.create_entry(draft("bob's decision", author="bob", kind=Kind.DECISION))
-    bob2 = await store.create_entry(draft("bob's fact", author="bob", tags=("x", "y")))
-
-    all_x = await store.list_entries(EntryFilters(tags=("x",)), limit=10)
-    assert {e.id for e in all_x} == {alice.id, bob2.id}
-
-    bob_only = await store.list_entries(EntryFilters(author="bob", kind=Kind.DECISION), limit=10)
-    assert [e.id for e in bob_only] == [bob.id]
-
-    page = await store.list_entries(EntryFilters(), limit=1, offset=1)
-    assert len(page) == 1
-
-
-async def test_list_entries_hides_inactive_by_default(pg) -> None:
-    store, _, _ = pg
-    old = await store.create_entry(draft("v1"))
-    new = await store.create_entry(draft("v2", supersedes=(old.id,)))
-    visible = await store.list_entries(EntryFilters(), limit=10)
-    assert [e.id for e in visible] == [new.id]
 
 
 async def test_list_entries_occurred_range(pg) -> None:
@@ -670,30 +527,6 @@ async def test_authenticator_resolves_key_to_credential(pg) -> None:
 
 
 # --- migration idempotency ---------------------------------------------------------
-
-
-async def test_migrate_is_idempotent(pg) -> None:
-    dsn = _dsn()
-    dim = _dim()
-    # Running the migration twice must be a no-op (all DDL is guarded).
-    await migrate(dsn, dim)
-    await migrate(dsn, dim)
-    # The schema must still be usable after the double migrate.
-    store, _auth, _ = pg
-    entry = await store.create_entry(draft("still works"))
-    assert entry.state is EntryState.ACTIVE
-
-
-async def test_create_entry_records_embedding_model(pg) -> None:
-    """SPEC.md §7: the store records the embedding model per entry."""
-    store, _, dim = pg
-    entry = await store.create_entry(
-        draft("Embedded fact"), make_vec(dim, 1), embedding_model="test-model"
-    )
-    assert entry.embedding_model == "test-model"
-    reloaded = await store.get_entry(entry.id)
-    assert reloaded is not None
-    assert reloaded.embedding_model == "test-model"
 
 
 async def test_create_entry_records_importance_source(pg) -> None:
@@ -753,61 +586,15 @@ async def test_get_visible_entries_keys_by_the_id_as_asked(pg) -> None:
     assert found[upper].id == entry.id
 
 
-async def test_search_counts_add_up_per_home_fleet(pg) -> None:
-    """ADR 0056: one counter row per home fleet; no fleet is its own row."""
-    store, _, _ = pg
-    fleet = await store.create_fleet(f"search-{uuid.uuid4().hex[:8]}")
-    await store.record_search(fleet.id, empty=True)
-    await store.record_search(fleet.id, empty=False)
-    await store.record_search(None, empty=True)
-    counts = {c.fleet_id: c for c in await store.search_counts()}
-    assert counts[fleet.id] == SearchCount(fleet.id, searches=2, empty=1, explore=0)
-    assert counts[None] == SearchCount(None, searches=1, empty=1)
-
-
-async def test_entry_links_both_ways_and_unknown_targets_dropped(pg) -> None:
-    """ADR 0057: links land with the entry; an id naming no entry is
-    dropped by the insert's join; incoming links come newest first."""
-    store, _, _ = pg
-    target = await store.create_entry(draft("Target"))
-    first = await store.create_entry(
-        replace(draft("First"), see_also=(target.id, "00000000-0000-0000-0000-000000000000"))
-    )
-    second = await store.create_entry(replace(draft("Second"), see_also=(target.id,)))
-    assert await store.entry_links(first.id, 10) == ([target.id], [])
-    assert await store.entry_links(target.id, 10) == ([], [second.id, first.id])
-    assert await store.entry_links(target.id, 1) == ([], [second.id])
-    assert await store.entry_links("not-a-uuid", 10) == ([], [])
-    # ADR 0059: the batched read answers the same, per requested id.
-    many = await store.entry_links_many([target.id, first.id, second.id, "not-a-uuid"], 1)
-    assert many == {
-        target.id: ([], [second.id]),
-        first.id: ([target.id], []),
-        second.id: ([target.id], []),
-        "not-a-uuid": ([], []),
-    }
-
-
-async def test_pins_are_capped_refreshed_and_newest_first(pg) -> None:
-    """ADR 0058, 0076: the per-fleet cap holds under concurrent pinners, a
-    repeat pin refreshes the row (creating nothing new), and unpin says
-    whether it removed one."""
+async def test_the_fleet_cap_holds_under_concurrent_pinners(pg) -> None:
+    """ADR 0058: the per-fleet cap holds when the pins arrive together."""
     store, _, _ = pg
     entries = [await store.create_entry(draft(f"Pin {i}")) for i in range(4)]
     writes = await asyncio.gather(*(store.pin_entry("fleet-x", e.id, "lead", 3) for e in entries))
     kept = [w for w in writes if isinstance(w, PinWrite)]
     assert len(kept) == 3 and all(w is PinRefusal.FLEET for w in writes if w not in kept)
-    assert all(w.created for w in kept)
-    again = await store.pin_entry("fleet-x", kept[0].pin.entry_id, "someone-else", 3)
-    assert isinstance(again, PinWrite) and not again.created
-    assert again.pin.pinned_by == "someone-else"
-    assert again.pin.pinned_at >= kept[0].pin.pinned_at
-    listed = await store.list_pins("fleet-x")
-    assert len(listed) == 3 and listed[0].entry_id == kept[0].pin.entry_id
-    assert [p.pinned_at for p in listed] == sorted((p.pinned_at for p in listed), reverse=True)
-    assert await store.unpin_entry("fleet-x", kept[0].pin.entry_id) is True
-    assert await store.unpin_entry("fleet-x", kept[0].pin.entry_id) is False
-    assert await store.list_pins("fleet-y") == []
+    assert len(await store.list_pins("fleet-x")) == 3
+    # MemoryStore does not refuse a malformed entry id, so this is not in the contract.
     assert await store.pin_entry("fleet-x", "not-a-uuid", "lead", 3) is PinRefusal.FLEET
 
 

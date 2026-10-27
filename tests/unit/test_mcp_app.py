@@ -275,13 +275,6 @@ async def test_hive_search_out_of_range_pagination_is_invalid_input(
     assert result.get("error", {}).get("code") == "invalid_input"
 
 
-async def test_hive_search_in_range_pagination_still_works(app: McpHivemind) -> None:
-    await hive_write(app, kind="fact", summary="Weekly cohorts fact")
-    result = await hive_search(app, query="weekly cohorts", limit=1, offset=0)
-    assert "error" not in result
-    assert len(result["hits"]) == 1
-
-
 # --------------------------------------------------------------------------- #
 # hive_get
 # --------------------------------------------------------------------------- #
@@ -514,6 +507,13 @@ async def test_hive_feedback_user_key_without_agent_is_rejected(app: McpHivemind
     entry = await hive_write(user_key_app, kind="fact", summary="a fact", agent="claude-code")
     result = await hive_feedback(user_key_app, entry["id"], verdict="stale")
     assert result.get("error", {}).get("code") == ERR_AGENT_UNRESOLVED
+    # MCP-8: ``agent_unresolved`` means exactly "no agent identity", and is
+    # answered before the entry is looked up; a bad verdict is still
+    # ``invalid_verdict``, never mislabelled.
+    unknown = await hive_feedback(user_key_app, "no-such-id", verdict="helpful")
+    assert unknown.get("error", {}).get("code") == ERR_AGENT_UNRESOLVED
+    bad = await hive_feedback(user_key_app, "no-such-id", verdict="meh")
+    assert bad.get("error", {}).get("code") == "invalid_verdict"
 
 
 async def test_hive_search_offset_paginates(app: McpHivemind) -> None:
@@ -674,16 +674,3 @@ class TestHiveRegister:
         assert (again["status"], again["already_registered"]) == ("pending", True)
         squat = await hive_register(app, "alice", owner_alias="mallory")
         assert squat["error"]["code"] == "name_conflict"
-
-
-async def test_hive_feedback_without_agent_identity_is_agent_unresolved(
-    store: MemoryStore, clock
-) -> None:
-    """MCP-8: ``agent_unresolved`` means exactly "no agent identity"; a
-    bad verdict is ``invalid_verdict`` and other rejected input is
-    ``invalid_input``, never mislabelled."""
-    nameless = build_app(store, Credential(user_id="legacy"), clock)
-    result = await hive_feedback(nameless, entry_id="e1", verdict="helpful")
-    assert result["error"]["code"] == "agent_unresolved"  # type: ignore[index]
-    result = await hive_feedback(nameless, entry_id="e1", verdict="meh")
-    assert result["error"]["code"] == "invalid_verdict"  # type: ignore[index]

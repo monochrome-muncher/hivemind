@@ -6,7 +6,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from hivemind.api.schemas import HitOut
 from hivemind.domain.access import TrustLevel, Visibility
 from hivemind.domain.entry import EntryDraft, EntryFilters, Kind
 from hivemind.domain.feedback import (
@@ -182,11 +181,6 @@ async def test_rest_hit_has_null_evidence_when_empty_and_the_fields_when_present
             )
         ).json()
         assert hit["state"] == "active"
-
-
-def test_rest_schema_defaults_are_null() -> None:
-    for name in EVIDENCE:
-        assert HitOut.model_fields[name].default is None
 
 
 # --- display only -------------------------------------------------------------------

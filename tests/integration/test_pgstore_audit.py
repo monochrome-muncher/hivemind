@@ -79,29 +79,6 @@ async def test_null_target_and_empty_detail(pg) -> None:
     assert stored.detail == {}
 
 
-async def test_list_audit_newest_first_with_filters(pg) -> None:
-    a1 = await pg.record_audit(
-        AuditEvent(ActorKind.ADMIN_KEY, "admin:a", AuditAction.FLEET_CREATE, "f1")
-    )
-    b = await pg.record_audit(AuditEvent(ActorKind.CLI, "ops", AuditAction.AGENT_REVOKE, "alice"))
-    a2 = await pg.record_audit(
-        AuditEvent(ActorKind.ADMIN_KEY, "admin:a", AuditAction.FLEET_CREATE, "f2")
-    )
-    assert [r.id for r in await pg.list_audit(AuditFilters(), limit=10)] == [a2.id, b.id, a1.id]
-    assert [r.id for r in await pg.list_audit(AuditFilters(), limit=1)] == [a2.id]
-    assert [r.id for r in await pg.list_audit(AuditFilters(actor="admin:a"), limit=10)] == [
-        a2.id,
-        a1.id,
-    ]
-    assert [
-        r.id for r in await pg.list_audit(AuditFilters(action=AuditAction.AGENT_REVOKE), limit=10)
-    ] == [b.id]
-    assert [r.id for r in await pg.list_audit(AuditFilters(since=b.occurred_at), limit=10)] == [
-        a2.id,
-        b.id,
-    ]
-
-
 async def test_the_vocabulary_checks_reject_unknown_values(pg) -> None:
     conn = await asyncpg.connect(_dsn())
     try:
@@ -116,15 +93,3 @@ async def test_the_vocabulary_checks_reject_unknown_values(pg) -> None:
             )
     finally:
         await conn.close()
-
-
-async def test_before_pages_back_through_the_log(pg) -> None:
-    """ADR 0028: `before` is a row-id cursor over (occurred_at, id)."""
-    for n in range(5):
-        await pg.record_audit(AuditEvent(ActorKind.CLI, "john", AuditAction.FLEET_CREATE, f"f{n}"))
-    first = await pg.list_audit(AuditFilters(), 2)
-    second = await pg.list_audit(AuditFilters(before=first[-1].id), 2)
-    rest = await pg.list_audit(AuditFilters(before=second[-1].id), 10)
-    assert [r.target for r in first + second + rest] == ["f4", "f3", "f2", "f1", "f0"]
-    unknown = AuditFilters(before="00000000-0000-0000-0000-000000000000")
-    assert await pg.list_audit(unknown, 10) == []

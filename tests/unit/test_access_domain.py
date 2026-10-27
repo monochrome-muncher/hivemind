@@ -14,8 +14,6 @@ from datetime import UTC, datetime
 import pytest
 
 from hivemind.domain.access import (
-    Agent,
-    AgentStatus,
     TrustLevel,
     Visibility,
     entry_is_visible,
@@ -70,11 +68,6 @@ class TestUntrusted:
         # Even one's own `self` entries are hidden at level 0 (dormant).
         e = make_entry(scope="self", author="alice")
         assert entry_is_visible(e, vis(0, "alice")) is False
-
-    def test_untrusted_admin_bypass(self) -> None:
-        # Admin is a bypass: an admin *acting at* level 0 still sees all.
-        e = make_entry(scope="self", author="alice")
-        assert entry_is_visible(e, vis(0, "admin", is_admin=True)) is True
 
 
 class TestLurker:
@@ -289,31 +282,3 @@ class TestVisibilityWrapper:
         assert v.entry_visible(e) is True
         e2 = make_entry(scope="fleet", author="bob", fleet_id=FL_B)
         assert v.entry_visible(e2) is False
-
-
-# --- domain records ------------------------------------------------------
-
-
-class TestDomainRecords:
-    def test_fleet_record(self) -> None:
-        f = Agent(name="alice", status=AgentStatus.ACTIVE, trust_level=TrustLevel.LURKER)
-        assert f.name == "alice"
-        assert f.status is AgentStatus.ACTIVE
-        assert f.trust_level is TrustLevel.LURKER
-
-    def test_agent_pending_defaults(self) -> None:
-        a = Agent(name="new", status=AgentStatus.PENDING, trust_level=TrustLevel.UNTRUSTED)
-        assert a.home_fleet_id is None
-        assert a.trust_level is TrustLevel.UNTRUSTED
-
-    def test_agent_active_with_fleet(self) -> None:
-        a = Agent(
-            name="alice",
-            status=AgentStatus.ACTIVE,
-            trust_level=TrustLevel.CONTRIBUTOR,
-            home_fleet_id=FL_A,
-            owner_alias="alice@example.com",
-        )
-        assert a.home_fleet_id == FL_A
-        assert a.owner_alias == "alice@example.com"
-        assert a.activated_at is None

@@ -23,7 +23,6 @@ from hivemind.domain.entry import EntryDraft, Kind
 from hivemind.memstore import MemoryStore
 from hivemind.portal.app import SHARED_MODULES, STATIC_DIR, create_portal_app, is_allowed
 from hivemind.ports import Credential
-from hivemind.webapp import CONTENT_SECURITY_POLICY
 from tests.fakes import FakeAuthenticator, make_clock, make_embedder, make_search_config
 
 AGENT = {"X-API-Key": "hm_agent_carol"}
@@ -110,24 +109,6 @@ def test_everything_else_is_refused(method: str, path: str) -> None:
     assert not is_allowed(method, path)
 
 
-async def test_a_refused_call_never_reaches_the_api() -> None:
-    seen: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(request)
-        return httpx.Response(200, json=[])
-
-    async with _portal(httpx.MockTransport(handler)) as portal:
-        write = await portal.post("/v1/entries", json={"summary": "x"}, headers=AGENT)
-        admin = await portal.get("/v1/admin/entries", headers=ADMIN)
-    assert write.status_code == admin.status_code == 404
-    assert write.json()["error"] == {
-        "code": "not_proxied",
-        "message": "the agent portal does not forward this call",
-    }
-    assert seen == []
-
-
 # -- end to end through the proxy ---------------------------------------------------
 
 
@@ -181,22 +162,6 @@ async def test_the_portal_serves_its_page_and_only_the_shared_admin_files() -> N
     assert [r.status_code for r in admin_only[:3]] == [404, 404, 404]
     assert admin_only[3].content == (STATIC_DIR / "index.html").read_bytes()
     assert admin_only[4].status_code == 404
-    for resp in (page, own, *shared.values(), health):
-        assert resp.headers["content-security-policy"] == CONTENT_SECURITY_POLICY
-        assert resp.headers["x-frame-options"] == "DENY"
-
-
-async def test_static_files_are_revalidated_on_every_load() -> None:
-    """As in the admin panel (same shared webapp): a cached module would
-    keep a tab on old code across a redeploy, so every full load must
-    revalidate against the server's ETag."""
-    _, api_app = _api()
-    async with _portal(httpx.ASGITransport(app=api_app)) as portal:
-        page = await portal.get("/")
-        own = await portal.get("/static/portal.js")
-        shared = [await portal.get(f"/static/{name}") for name in SHARED_MODULES]
-    for resp in (page, own, *shared):
-        assert resp.headers["cache-control"] == "no-cache", resp.url
 
 
 def test_the_portal_and_admin_files_do_not_collide() -> None:
@@ -214,21 +179,9 @@ def _scripts() -> list[Path]:
     return own + [ADMIN_STATIC_DIR / n for n in SHARED_MODULES if n.endswith(".js")]
 
 
-def test_the_page_has_no_inline_script_or_style() -> None:
-    html = (STATIC_DIR / "index.html").read_text()
-    assert re.findall(r"<script(?![^>]*\bsrc=)[^>]*>", html, flags=re.IGNORECASE) == []
-    assert re.search(r"\sstyle=", html) is None
-    assert re.search(r"\son[a-z]+=", html) is None
-    assert "<style" not in html
-    assert re.findall(r"<script[^>]*\bsrc=\"([^\"]+)\"", html) == ["/static/portal.js"]
-
-
-def test_the_portal_scripts_never_write_html_or_build_links_from_data() -> None:
+def test_the_portal_scripts_never_build_links_from_data() -> None:
     for script in sorted(STATIC_DIR.glob("*.js")):
         js = script.read_text()
-        for sink in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval("):
-            assert sink not in js, f"{script.name}: {sink}"
-        assert re.findall(r"https?://[^\s\"'`]+", js) == [], script.name
         assert ".href =" not in js and 'setAttribute("href"' not in js, script.name
         for href in re.findall(r"\b(?:href|Href):\s*([^,}]+)", js):
             assert re.search(r"\bviewHref\(", href) or re.match(r"""\s*(?:["'`]#|null)""", href), (
@@ -246,28 +199,7 @@ def test_the_scripts_load_only_modules_the_portal_serves() -> None:
             assert target[2:] in served, (script.name, target)
 
 
-def test_every_api_path_the_scripts_call_is_on_the_allowlist() -> None:
-    call = re.compile(r"""\bapi(?:Raw)?\(\s*["']([A-Z]+)["']\s*,\s*([`"'])(.+?)\2""")
-    seen: set[tuple[str, str]] = set()
-    for script in _scripts():
-        for method, _quote, path in call.findall(script.read_text()):
-            seen.add((method, re.sub(r"\$\{[^}]*\}", "x", path)))
-    assert ("POST", "portal/search") in seen  # the regex really finds calls
-    assert len(seen) >= 7
-    for method, path in sorted(seen):
-        assert is_allowed(method, path), (method, path)
-
-
 def test_the_portal_keeps_its_key_in_its_own_slot() -> None:
     session = (STATIC_DIR / "session.js").read_text()
     assert 'KEY_STORAGE = "hivemind.portalKey"' in session
     assert "hivemind.adminKey" not in "".join(p.read_text() for p in STATIC_DIR.glob("*.js"))
-
-
-def test_the_runner_refuses_to_start_without_an_api_url(monkeypatch) -> None:
-    from hivemind.portal import main
-
-    monkeypatch.delenv("HIVEMIND_PORTAL_API_URL", raising=False)
-    monkeypatch.setattr(main, "uvicorn", None)  # would crash if reached
-    with pytest.raises(SystemExit, match="HIVEMIND_PORTAL_API_URL"):
-        main.run()

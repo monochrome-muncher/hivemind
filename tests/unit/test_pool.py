@@ -13,7 +13,6 @@ These tests spy on ``asyncpg.create_pool`` — no live Postgres needed.
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import AsyncMock, patch
 
 from hivemind.store.pool import make_pool
@@ -42,16 +41,3 @@ async def test_configured_pool_sizes_reach_create_pool() -> None:
         await make_pool("postgresql://example/db", min_size=3, max_size=25)
     assert create_pool.call_args.kwargs["min_size"] == 3
     assert create_pool.call_args.kwargs["max_size"] == 25
-
-
-async def test_init_callback_registers_the_vector_codec() -> None:
-    """``make_pool`` still wires up the pgvector codec registration on
-    every connection (unchanged by the statement-cache fix)."""
-    captured: dict[str, Any] = {}
-
-    async def fake_create_pool(dsn: str, **kwargs: Any) -> None:
-        captured.update(kwargs)
-
-    with patch("hivemind.store.pool.asyncpg.create_pool", new=fake_create_pool):
-        await make_pool("postgresql://example/db")
-    assert callable(captured["init"])

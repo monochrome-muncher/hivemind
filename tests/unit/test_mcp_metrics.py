@@ -8,7 +8,6 @@ auth middleware, request counting outermost), the degraded-search hook on
 from __future__ import annotations
 
 import json
-from dataclasses import replace
 from typing import Any
 
 import httpx
@@ -173,7 +172,9 @@ def test_a_degraded_search_through_the_app_is_counted() -> None:
 
     with TestClient(_app(embedder=DownEmbedder())) as client:
         for _ in range(2):
-            assert _call_tool(client, "hive_search", {"query": "gamma"}).status_code == 200
+            response = _call_tool(client, "hive_search", {"query": "gamma"})
+            assert response.status_code == 200
+            assert "keyword_only" in response.text
         got = samples(client.get("/metrics").text)
     assert got[("hivemind_search_degraded_total", ())] == 2
 
@@ -204,21 +205,6 @@ async def test_an_odd_method_is_labelled_other() -> None:
         (("method", "other"), ("route", "/mcp"), ("status", "401")),
     )
     assert got[key] == 2
-
-
-async def test_a_degraded_search_is_counted() -> None:
-    metrics = McpMetrics()
-    app = replace(make_app(ALICE), on_degraded_search=metrics.degraded_search)
-
-    async def boom(text: str) -> list[float]:
-        raise EmbeddingError("embedding endpoint is down")
-
-    app.search_service._embedder.embed_text = boom  # type: ignore[attr-defined]
-    server = build_server(app, metrics=metrics)
-    for _ in range(2):
-        result = await server.call_tool("hive_search", {"query": "gamma"})
-        assert json.loads(result.content[0].text)["degraded"] == "keyword_only"
-    assert samples(metrics.render().decode())[("hivemind_search_degraded_total", ())] == 2
 
 
 async def test_tool_calls_are_counted_by_outcome() -> None:

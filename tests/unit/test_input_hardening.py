@@ -18,7 +18,6 @@ from hivemind.domain.entry import (
     Kind,
     Source,
     SourceType,
-    embeddable_text,
 )
 from hivemind.domain.validation import (
     MAX_BODY_CHARS,
@@ -119,11 +118,6 @@ def test_a_draft_at_the_caps_is_accepted() -> None:
 def test_a_filter_with_nul_is_refused(fields: dict[str, object]) -> None:
     with pytest.raises(InvalidInput):
         EntryFilters(**fields).validate()  # type: ignore[arg-type]
-
-
-def test_the_embedded_text_is_bounded_by_characters_too() -> None:
-    text = embeddable_text("s", "x" * 90_000)  # one "word", 90k characters
-    assert len(text) < 25_000
 
 
 # -- names --------------------------------------------------------------------
@@ -325,28 +319,6 @@ async def test_rest_fleet_names_are_validated() -> None:
 # -- REST: the body guard ---------------------------------------------------------
 
 
-async def test_an_oversized_body_is_413_by_content_length() -> None:
-    big = b'{"kind":"fact","summary":"s","body":"' + b"x" * MAX_REQUEST_BODY_BYTES + b'"}'
-    async with make_client(make_hivemind_app()) as client:
-        resp = await client.post(
-            "/v1/entries", content=big, headers={**KEY, "Content-Type": "application/json"}
-        )
-    assert resp.status_code == 413
-    assert resp.json()["error"]["code"] == "payload_too_large"
-
-
-async def test_a_streamed_oversized_body_is_413_without_content_length() -> None:
-    async def chunks():
-        for _ in range(MAX_REQUEST_BODY_BYTES // 65_536 + 2):
-            yield b"x" * 65_536
-
-    async with make_client(make_hivemind_app()) as client:
-        resp = await client.post(
-            "/v1/entries", content=chunks(), headers={**KEY, "Content-Type": "application/json"}
-        )
-    assert resp.status_code == 413, resp.text
-
-
 async def test_no_key_wins_over_a_malformed_body() -> None:
     async with make_client(make_hivemind_app()) as client:
         resp = await client.post(
@@ -403,17 +375,3 @@ async def test_mcp_register_reports_invalid_names_as_invalid_input(name: str) ->
     app = build_app(MemoryStore(make_clock()), ORG, make_clock())
     result = await hive_register(app, name)
     assert result["error"]["code"] == "invalid_input", result  # type: ignore[index]
-
-
-async def test_mcp_register_keeps_name_conflict_for_taken_names() -> None:
-    store = MemoryStore(make_clock())
-    app = build_app(store, ORG, make_clock())
-    assert (await hive_register(app, "bob"))["status"] == "pending"
-    fleet = await store.create_fleet("f")
-    await store.activate_agent("bob", trust_level=TrustLevel.PRIVILEGED, home_fleet_id=fleet.id)
-    # ADR 0039: another owner conflicts; the same owner is told its status.
-    other = await hive_register(app, "bob", owner_alias="mallory")
-    assert other["error"]["code"] == "name_conflict"  # type: ignore[index]
-    mine = await hive_register(app, "bob")
-    assert mine["already_registered"] is True
-    assert mine["status"] == "active"

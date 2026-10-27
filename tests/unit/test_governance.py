@@ -263,18 +263,6 @@ class TestWriteServiceExtraction:
         assert reloaded.entities == entry.entities
         assert reloaded.entities_model == "fake-extractor"
 
-    async def test_extraction_failure_never_blocks_the_write(self) -> None:
-        """A failing extractor must not fail the write: the entry lands
-        with the embedding, empty facets, and no ``entities_model``
-        (ADR 0016: best-effort enrichment only)."""
-        store = MemoryStore(make_clock())
-        service = WriteService(store, make_embedder(), FakeExtractor(fail=True))
-
-        entry = await service.write(make_draft("Auth uses JWT"))  # must not raise
-        assert entry.embedding is not None  # the embedding still landed
-        assert entry.entities == ()
-        assert entry.entities_model is None
-
     async def test_extraction_failure_is_logged_not_only_swallowed(self, caplog) -> None:
         """Before this, a failing extractor left no record anywhere —
         the only symptom was an entry with empty facets (the very thing

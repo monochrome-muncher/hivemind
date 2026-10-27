@@ -82,14 +82,6 @@ async def test_count_entries_total_and_by_scope(pg: PgStore) -> None:
     assert await pg.count_entries(EntryFilters(scope="self")) == 1
 
 
-async def test_count_entries_by_kind(pg: PgStore) -> None:
-    await _seed(pg, "s1", kind=Kind.FACT)
-    await _seed(pg, "s2", kind=Kind.INSIGHT)
-    await _seed(pg, "s3", kind=Kind.INSIGHT)
-    assert await pg.count_entries(EntryFilters(kind=Kind.INSIGHT)) == 2
-    assert await pg.count_entries(EntryFilters(kind=Kind.FACT)) == 1
-
-
 async def test_count_entries_by_importance_source(pg: PgStore) -> None:
     await _seed(pg, "s1", importance_source=ImportanceSource.DEFAULT)
     await _seed(pg, "s2", importance_source=ImportanceSource.CALLER)
@@ -106,18 +98,6 @@ async def test_count_entries_by_fleet(pg: PgStore) -> None:
     await _seed(pg, "s3", scope="fleet", fleet_id=other.id)
     assert await pg.count_entries(EntryFilters(fleet_id=fleet.id)) == 2
     assert await pg.count_entries(EntryFilters(fleet_id=other.id)) == 1
-
-
-async def test_count_entries_active_only_by_default(pg: PgStore) -> None:
-    draft = EntryDraft(
-        kind=Kind.FACT, summary="to withdraw", author="alice", agent="alice", scope="org"
-    )
-    entry = await pg.create_entry(draft, VEC, embedding_model="fake")
-    await pg.withdraw_entry(entry.id, "no longer relevant", "alice")
-    # Default (active-only) count excludes the withdrawn entry.
-    assert await pg.count_entries(EntryFilters()) == 0
-    # include_inactive lifts the state restriction.
-    assert await pg.count_entries(EntryFilters(include_inactive=True)) == 1
 
 
 async def test_count_entries_with_visibility(pg: PgStore) -> None:

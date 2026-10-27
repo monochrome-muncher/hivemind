@@ -166,6 +166,10 @@ async def test_the_admin_is_exempt_from_the_agent_cap_but_not_the_fleet_cap() ->
     # A full fleet refuses a member with the fleet message, not the agent one.
     member = await hive_pin(_surface(store, DEV), ids[-1])
     assert "the fleet already has" in member["error"]["message"]  # type: ignore[index]
+    assert member["error"]["code"] == "invalid_input"  # type: ignore[index]
+    # Unpinning frees a slot for a member.
+    assert (await hive_pin(admin, ids[0], unpin=True))["removed"] is True
+    assert (await hive_pin(_surface(store, DEV), ids[-1]))["pinned"] is True
 
 
 async def test_a_move_onto_a_new_version_counts_once_for_the_agent() -> None:
@@ -218,19 +222,6 @@ async def test_an_org_entry_cannot_be_pinned_by_anyone() -> None:
         assert refused["error"]["code"] == "invalid_input", cred.user_id  # type: ignore[index]
         assert "only fleet entries" in refused["error"]["message"]  # type: ignore[index]
     assert _pinned_ids(await hive_pinned(_surface(store, DEV))) == []
-
-
-async def test_a_fleet_holds_a_bounded_number_of_pins() -> None:
-    store = MemoryStore(make_clock())
-    lead = _surface(store, LEAD)
-    ids = [await _write(store, LEAD, f"decision {i}") for i in range(MAX_PINS_PER_FLEET + 1)]
-    for n, entry in enumerate(ids[:MAX_PINS_PER_FLEET]):
-        pinner = _surface(store, _agent(f"lead{n // MAX_PINS_PER_AGENT}", TrustLevel.PRIVILEGED))
-        assert (await hive_pin(pinner, entry))["pinned"] is True
-    full = await hive_pin(lead, ids[-1])
-    assert full["error"]["code"] == "invalid_input"  # type: ignore[index]
-    assert (await hive_pin(lead, ids[0], unpin=True))["removed"] is True
-    assert (await hive_pin(lead, ids[-1]))["pinned"] is True
 
 
 async def test_unpin_reports_whether_it_was_pinned() -> None:
