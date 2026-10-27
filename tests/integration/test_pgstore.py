@@ -530,16 +530,28 @@ async def test_keyword_search_of_only_stop_words_matches_nothing(pg) -> None:
 
 
 @pytest.mark.parametrize(
-    "query",
-    ["jwt & !cookie", "jwt | (cookie", "jwt:* <-> cookie", "' & '", "it's o'neil", "a\\b"],
+    ("query", "reads_as_terms"),
+    [
+        ("jwt & !cookie", True),
+        ("jwt | (cookie", True),
+        ("jwt:* <-> cookie", True),
+        ("' & '", False),
+        ("it's o'neil", False),
+        ("a\\b", False),
+    ],
 )
-async def test_keyword_search_never_reads_tsquery_syntax(pg, query: str) -> None:
+async def test_keyword_search_never_reads_tsquery_syntax(
+    pg, query: str, reads_as_terms: bool
+) -> None:
     """The query is parsed by ``plainto_tsquery`` before the any-term
-    rewrite, so operator characters are plain text, never syntax."""
+    rewrite, so operator characters are plain text, never syntax: ``jwt &
+    !cookie`` is the two words ``jwt`` and ``cookie`` (an entry with either
+    matches), not "jwt and not cookie", and a malformed one is no error."""
     store, _, _ = pg
     jwt = await store.create_entry(draft("JWT tokens expire"))
+    cookie = await store.create_entry(draft("Cookie jar settings"))
     results = await store.search_keyword(query, EntryFilters(), limit=10)
-    assert results in ([], [jwt.id])
+    assert set(results) == ({jwt.id, cookie.id} if reads_as_terms else set())
 
 
 async def test_keyword_stream_finds_every_golden_entry(pg) -> None:

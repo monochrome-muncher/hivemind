@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 
 import pytest
 
 from hivemind.config import Settings
 from hivemind.domain.entry import EntryDraft, Kind
+from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.mcp.app import McpHivemind, hive_search, hive_write
 from hivemind.ports import Credential
+from hivemind.retrieval.scoring import feedback_quality
 from hivemind.services.errors import PermissionDenied
 from hivemind.services.wiring import build_services, log_startup
 from tests.fakes import (
@@ -39,6 +42,23 @@ async def test_the_search_config_reaches_search_and_quality() -> None:
     services = build_services(make_store(), make_embedder(), config)
     assert services.search_config is config
     assert await services.governance_service.quality("no-such-entry") == pytest.approx(1.0)
+
+
+async def test_the_quality_weights_of_the_config_reach_the_quality_multiplier() -> None:
+    store = make_store()
+    entry = await store.create_entry(
+        EntryDraft(kind=Kind.FACT, summary="quality wiring", author="a", agent="a")
+    )
+    await store.record_feedback(Feedback(entry.id, "u1", "a1", Verdict.HELPFUL))
+    await store.record_feedback(Feedback(entry.id, "u2", "a2", Verdict.STALE))
+    qualities = []
+    for stale_weight in (0.4, 0.1):
+        config = replace(make_search_config(), quality_stale_weight=stale_weight)
+        services = build_services(store, make_embedder(), config)
+        quality = await services.governance_service.quality(entry.id)
+        assert quality == pytest.approx(feedback_quality(1, 1, 0, **config.quality_kwargs()))
+        qualities.append(quality)
+    assert qualities[0] < qualities[1]  # a heavier stale weight lowers the multiplier
 
 
 async def test_extractor_is_optional_and_used_when_given() -> None:

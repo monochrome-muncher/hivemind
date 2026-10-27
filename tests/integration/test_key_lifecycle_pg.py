@@ -199,7 +199,7 @@ async def test_concurrent_activate_and_revoke_never_leave_a_live_key_on_a_revoke
         if agent.status.value == "revoked":
             assert keys == [], f"round {round_no}: revoked agent holds a key"
         elif agent.status.value == "active":
-            assert len(keys) <= 1
+            assert len(keys) == 1
             activation = results[0]
             if not isinstance(activation, BaseException):
                 assert await auth.verify(activation[1]) is not None

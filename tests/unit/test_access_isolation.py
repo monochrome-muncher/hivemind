@@ -111,8 +111,13 @@ async def test_invisible_and_nonexistent_ids_answer_identically() -> None:
     pool = Pool()
     secret = await _write(pool, ALICE, "alice private note", scope="self")
     hidden = await hive_get(pool.as_(BOB), entry_id=str(secret["id"]))
-    missing = await hive_get(pool.as_(BOB), entry_id="00000000-0000-0000-0000-000000000000")
-    assert hidden["error"]["code"] == missing["error"]["code"] == "not_found"  # type: ignore[index]
+    missing_id = "00000000-0000-0000-0000-000000000000"
+    missing = await hive_get(pool.as_(BOB), entry_id=missing_id)
+    # The whole envelope, not just the code: no message difference leaks existence.
+    assert str(hidden).replace(str(secret["id"]), "<id>") == str(missing).replace(
+        missing_id, "<id>"
+    )
+    assert hidden["error"]["code"] == "not_found"  # type: ignore[index]
 
 
 async def test_the_author_and_admin_still_get_it_and_fleet_rules_still_hold() -> None:

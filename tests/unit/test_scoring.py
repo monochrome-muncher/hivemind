@@ -125,6 +125,8 @@ class TestRecencyFloor:
         assert (
             entry_score(1.0, 3, occurred, 1.0, NOW, 30.0, narrow_importance=False) == explicit_none
         )
+        # And that term is the plain unbounded product, written out here.
+        assert explicit_none == pytest.approx((0.5 + 0.1 * 3) * 0.5 ** (age_days / 30.0))
 
     def test_floor_clamps_a_very_old_entry(self) -> None:
         """500 days is 16.7 half-lives: the unfloored factor is ~1e-5, so

@@ -24,7 +24,6 @@ from hivemind.domain.entry import (
     Kind,
     Source,
     SourceType,
-    embeddable_text,
 )
 from hivemind.embeddings.openai_compat import (
     EmbeddingError,
@@ -344,7 +343,7 @@ class TestEmbedEntry:
         await embedder.embed_entry(draft)
         # The request carries exactly the domain's embeddable text
         # (summary + bounded body prefix), never the full body.
-        expected = embeddable_text(draft.summary, draft.body)
+        expected = "cohort churn write-up\n" + " ".join(f"w{i}" for i in range(2000))
         assert env.last_body["input"] == expected
         assert len(expected) < len(draft.body or "")
         # The port method agrees with what was actually sent.

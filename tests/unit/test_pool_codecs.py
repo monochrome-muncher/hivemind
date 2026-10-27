@@ -23,8 +23,9 @@ async def test_init_registers_a_jsonb_codec_that_decodes_but_does_not_reencode()
 
     conn = MagicMock()
     conn.set_type_codec = AsyncMock()
-    with patch("hivemind.store.pool.register_vector", new=AsyncMock()):
+    with patch("hivemind.store.pool.register_vector", new=AsyncMock()) as register_vector:
         await captured["init"](conn)
+    register_vector.assert_awaited_once_with(conn)
     calls = {c.args[0]: c.kwargs for c in conn.set_type_codec.call_args_list}
     assert {"json", "jsonb"} <= calls.keys()
     jsonb = calls["jsonb"]

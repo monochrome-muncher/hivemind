@@ -81,7 +81,9 @@ class TestFeedbackAndWithdrawRequests:
 
     def test_feedback_accepts_all_verdicts(self) -> None:
         for verdict in ("helpful", "stale", "wrong"):
-            assert FeedbackRequest(verdict=verdict).note is None
+            request = FeedbackRequest(verdict=verdict)
+            assert request.verdict.value == verdict
+            assert request.note is None
 
     def test_withdraw_reason_is_optional(self) -> None:
         assert WithdrawRequest().reason is None

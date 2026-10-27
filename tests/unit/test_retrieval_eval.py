@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import math
 
+import pytest
+
 from hivemind.retrieval.eval import (
     aggregate_report,
     dcg_at_k,
@@ -79,17 +81,19 @@ def test_ndcg_no_relevant_is_zero() -> None:
     assert ndcg_at_k(RANKED, {"z": 1}, 5) == 0.0
 
 
-def test_ndcg_partial_is_between_zero_and_one() -> None:
-    # c and e are not at the top -> nDCG < 1 but > 0.
-    value = ndcg_at_k(RANKED, RELEVANT, 5)
-    assert 0.0 < value < 1.0
+def test_ndcg_partial_ranking_is_dcg_over_the_ideal_dcg() -> None:
+    # c at position 3 and e at position 5, against the ideal positions 1 and 2.
+    dcg = 1 / math.log2(4) + 1 / math.log2(6)
+    ideal = 1 / math.log2(2) + 1 / math.log2(3)
+    assert ndcg_at_k(RANKED, RELEVANT, 5) == pytest.approx(dcg / ideal)
+    assert ndcg_at_k(RANKED, RELEVANT, 5) == pytest.approx(0.5438, abs=1e-4)
 
 
 def test_evaluate_query_combines_metrics() -> None:
     result = evaluate_query(RANKED, RELEVANT, 5)
     assert result["hit_at_k"] is True
     assert result["reciprocal_rank"] == 1 / 3  # 'c' is 3rd
-    assert 0.0 < result["ndcg_at_k"] < 1.0
+    assert result["ndcg_at_k"] == ndcg_at_k(RANKED, RELEVANT, 5)
 
 
 def test_aggregate_report_averages_over_queries() -> None:

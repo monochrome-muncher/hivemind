@@ -12,6 +12,7 @@ import pytest
 
 from hivemind.domain.access import (
     AgentStatus,
+    InvalidAgentStatus,
     TrustLevel,
     write_scopes_for,
 )
@@ -175,8 +176,6 @@ async def test_the_exact_name_still_reregisters_after_a_variant_was_refused() ->
 
 
 async def test_issuing_a_key_for_a_non_active_agent_raises() -> None:
-    from hivemind.domain.access import InvalidAgentStatus
-
     service, auth, _ = make_service()
     await service.register("alice", org_credential())
     with pytest.raises(InvalidAgentStatus):
@@ -224,14 +223,18 @@ async def test_activate_with_admin_issues_key_once() -> None:
     service, auth, store = make_service()
     await service.register("alice", org_credential())
     await store.create_fleet("data-eng")  # ensure a fleet exists for the FK
+    fleet_id = (await store.list_fleets())[0].id
     agent, key = await service.activate(
-        "alice", TrustLevel.CONTRIBUTOR, (await store.list_fleets())[0].id, admin_credential()
+        "alice", TrustLevel.CONTRIBUTOR, fleet_id, admin_credential()
     )
     assert agent.status is AgentStatus.ACTIVE
     assert agent.trust_level is TrustLevel.CONTRIBUTOR
-    assert key  # the raw key is returned
-    # The key is verified (resolves back to the agent's credential).
-    assert auth._by_key.get(key) is not None
+    credential = await auth.verify(key)
+    assert credential is not None and credential.agent_name == "alice"
+    # A second activation hands out no second key and leaves the first working.
+    with pytest.raises(InvalidAgentStatus):
+        await service.activate("alice", TrustLevel.CONTRIBUTOR, fleet_id, admin_credential())
+    assert await auth.verify(key) == credential
 
 
 async def test_activate_with_non_admin_denied() -> None:
@@ -277,20 +280,31 @@ async def test_set_home_fleet_moves_agent() -> None:
 
 
 async def test_revoke_admin_only() -> None:
-    service, _, _ = make_service()
+    service, auth, store = make_service()
+    await service.register("alice", org_credential())
+    fleet = await service.create_fleet("data-eng", admin_credential())
+    _, key = await service.activate("alice", TrustLevel.LURKER, fleet.id, admin_credential())
     with pytest.raises(PermissionDenied):
         await service.revoke("alice", org_credential())
-    # Admin revocation succeeds (no error).
-    await service.register("alice", org_credential())
-    await service.revoke("alice", admin_credential())  # should not raise
+    # The refused revoke changed nothing.
+    assert (await store.get_agent("alice")).status is AgentStatus.ACTIVE
+    assert await auth.verify(key) is not None
+    await service.revoke("alice", admin_credential())
+    assert (await store.get_agent("alice")).status is AgentStatus.REVOKED
+    assert await auth.verify(key) is None
 
 
 async def test_rotate_org_key_admin_only() -> None:
-    service, _, _ = make_service()
+    service, auth, _ = make_service()
     with pytest.raises(PermissionDenied):
         await service.rotate_org_key(org_credential())
+    # The refused rotation left the org key as it was.
+    assert (await auth.verify("hm_org")) is not None
     new_key = await service.rotate_org_key(admin_credential())
-    assert new_key  # a new raw key is returned once
+    assert new_key != "hm_org"
+    assert await auth.verify("hm_org") is None
+    new_credential = await auth.verify(new_key)
+    assert new_credential is not None and new_credential.is_org
 
 
 # -- write-scope resolution (ADR 0011) --------------------------------------

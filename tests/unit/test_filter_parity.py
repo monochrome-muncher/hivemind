@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 
-from hivemind.domain.entry import EntryFilters, ImportanceSource, Kind
+from hivemind.domain.entry import EntryFilters, Kind
 from hivemind.domain.recency import RecencyHint
 from hivemind.mcp.app import McpHivemind, hive_list, hive_search
 from hivemind.ports import Credential
@@ -194,4 +194,4 @@ async def test_surface_passes_exactly_the_filters_it_accepts(surface: str) -> No
         else:
             assert getattr(got, f) == getattr(default, f), f"{surface} set {f}"
     assert not {f for f in refused if getattr(got, f) != getattr(default, f)}
-    assert got.importance_source is None and ImportanceSource  # internal, never from a request
+    assert got.importance_source is None  # internal, never from a request
