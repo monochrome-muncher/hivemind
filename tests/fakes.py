@@ -237,6 +237,7 @@ class FakeAuthenticator:
         org_key: str = "hm_org",
         admin_key: str = "hm_admin",
         store: Store | None = None,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         # Bind a store to model the real adapter's status gate (ADR 0039):
         # keys issued here authenticate only while their agent is active,
@@ -249,6 +250,11 @@ class FakeAuthenticator:
         }
         self._issued_agent_keys: dict[str, str] = {}
         self._rotations = 0
+        # Last use per key and how many times it was recorded (ADR 0110):
+        # the real adapter's once-an-hour write, observable here.
+        self._last_used: dict[str, datetime] = {}
+        self.use_writes = 0
+        self._clock: Callable[[], datetime] = clock or (lambda: datetime.now(UTC))
 
     async def verify(self, key: str) -> Credential | None:
         credential = self._by_key.get(key)
@@ -261,7 +267,20 @@ class FakeAuthenticator:
             agent = await self._store.get_agent(credential.agent_name)
             if agent is None or agent.status is not AgentStatus.ACTIVE:
                 return None
+        if credential is not None:
+            self._record_use(key, credential)
         return credential
+
+    def _record_use(self, key: str, credential: Credential) -> None:
+        """Mirror ``PgAuthenticator``: stamp the key at most once an hour."""
+        now = self._clock()
+        last = self._last_used.get(key)
+        if last is not None and now - last < timedelta(hours=1):
+            return
+        self._last_used[key] = now
+        self.use_writes += 1
+        if isinstance(self._store, MemoryStore) and credential.agent_name is not None:
+            self._store.record_key_use(credential.agent_name, now)
 
     async def issue_agent_key(self, agent_name: str) -> str:
         """Issue an agent key bound to ``agent_name``; return the raw key once."""
@@ -273,6 +292,8 @@ class FakeAuthenticator:
                 raise InvalidAgentStatus(agent_name, agent.status, "issue a key for")
         raw = f"hm_agent_{agent_name}"
         self._issued_agent_keys[agent_name] = raw
+        if isinstance(self._store, MemoryStore):
+            self._store.record_key_issued(agent_name, self._clock())
         self._by_key[raw] = Credential(user_id=agent_name, agent_name=agent_name)
         return raw
 

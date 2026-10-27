@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import secrets
+import time
 
 import asyncpg
 
@@ -18,13 +20,29 @@ from hivemind.domain.audit import key_fingerprint
 from hivemind.ports import Credential
 from hivemind.store.pool import PoolTimeouts, make_pool
 
+logger = logging.getLogger(__name__)
+
+# The stamp is best effort, so it gets a short budget of its own: a row lock
+# held by someone else must not stall a request for the pool's command timeout.
+_STAMP_TIMEOUT_S = 1.0
+# A broken stamp fails every stale key check; log it once a minute per process.
+_WARN_EVERY_S = 60.0
+_last_warned: float | None = None
+
 # Key and agent in one query: an agent key authenticates only while its
 # agent is active (ADR 0039).
 _SELECT_CREDENTIAL = (
     "SELECT c.kind, c.user_id, c.agent_id, c.agent_name, "
-    "a.status AS agent_status, a.trust_level, a.home_fleet_id "
+    "a.status AS agent_status, a.trust_level, a.home_fleet_id, "
+    "(c.last_used_at IS NULL OR c.last_used_at < now() - interval '1 hour') AS use_stale "
     "FROM credentials c LEFT JOIN agents a ON a.name = c.agent_name "
     "WHERE c.key_hash = $1"
+)
+# Record that a key was used (ADR 0110). The WHERE repeats the staleness test,
+# so two requests racing on one stale key write once.
+_TOUCH_CREDENTIAL = (
+    "UPDATE credentials SET last_used_at = now() WHERE key_hash = $1 "
+    "AND (last_used_at IS NULL OR last_used_at < now() - interval '1 hour')"
 )
 # Rows ``verify`` can never resolve (ADR 0039). Inert, but they would live
 # again on a rollback to a release that does not join ``agents``.
@@ -59,6 +77,59 @@ def _generate_key() -> str:
 def key_hash(key: str) -> str:
     """The SHA-256 hex digest of a raw API key (the stored identifier)."""
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
+async def _record_use(conn: asyncpg.Connection, stored_hash: str, key_id: str) -> None:
+    """Stamp the key's last use, at most once an hour per key (ADR 0110).
+
+    Runs on the connection ``verify`` already holds, outside any request
+    transaction, and never fails the request: a database error, a dropped
+    connection or a timeout is logged (by key fingerprint) and swallowed,
+    and the next request tries again. Only these errors are caught, so a
+    bug in the statement itself still surfaces in tests."""
+    global _last_warned
+    try:
+        await conn.execute(_TOUCH_CREDENTIAL, stored_hash, timeout=_STAMP_TIMEOUT_S)
+    except (asyncpg.PostgresError, asyncpg.InterfaceError, OSError, TimeoutError) as exc:
+        now = time.monotonic()
+        if _last_warned is None or now - _last_warned >= _WARN_EVERY_S:
+            _last_warned = now
+            logger.warning("could not record last use of key %s: %s", key_id, type(exc).__name__)
+
+
+def _credential_from_row(row: asyncpg.Record, key_id: str) -> Credential | None:
+    """The ``Credential`` a looked-up key row stands for, by ``kind`` (ADR
+    0012), or ``None`` when it is not an identity (ADR 0039)."""
+    kind = row["kind"]
+    if kind == "admin":
+        return Credential(
+            user_id=row["user_id"], agent_id=row["agent_id"], is_admin=True, key_id=key_id
+        )
+    if kind == "org":
+        return Credential(
+            user_id=row["user_id"],
+            agent_id=row["agent_id"],
+            is_org=True,
+            access_controlled=True,
+            key_id=key_id,
+        )
+    if kind == "agent":
+        agent_name = row["agent_name"]
+        if agent_name is None or row["agent_status"] != "active":
+            # A name-less (pre-v2) key, a key with no agent record, or a
+            # key whose agent is pending / revoked: not an identity.
+            return None
+        return Credential(
+            user_id=agent_name,
+            agent_id=row["agent_id"],
+            agent_name=agent_name,
+            access_controlled=True,
+            trust_level=TrustLevel(row["trust_level"]),
+            home_fleet_id=str(row["home_fleet_id"]) if row["home_fleet_id"] else None,
+            key_id=key_id,
+        )
+    # kind == "user" (pre-v2, retired by ADR 0012): dead since ADR 0039.
+    return None
 
 
 class PgAuthenticator:
@@ -117,38 +188,12 @@ class PgAuthenticator:
         pool = await self._ensure_pool()
         async with pool.acquire(timeout=self._acquire_timeout) as conn:
             row = await conn.fetchrow(_SELECT_CREDENTIAL, stored_hash)
-        if row is None:
-            return None
-        kind = row["kind"]
-        if kind == "admin":
-            return Credential(
-                user_id=row["user_id"], agent_id=row["agent_id"], is_admin=True, key_id=key_id
-            )
-        if kind == "org":
-            return Credential(
-                user_id=row["user_id"],
-                agent_id=row["agent_id"],
-                is_org=True,
-                access_controlled=True,
-                key_id=key_id,
-            )
-        if kind == "agent":
-            agent_name = row["agent_name"]
-            if agent_name is None or row["agent_status"] != "active":
-                # A name-less (pre-v2) key, a key with no agent record, or a
-                # key whose agent is pending / revoked: not an identity.
+            if row is None:
                 return None
-            return Credential(
-                user_id=agent_name,
-                agent_id=row["agent_id"],
-                agent_name=agent_name,
-                access_controlled=True,
-                trust_level=TrustLevel(row["trust_level"]),
-                home_fleet_id=str(row["home_fleet_id"]) if row["home_fleet_id"] else None,
-                key_id=key_id,
-            )
-        # kind == "user" (pre-v2, retired by ADR 0012): dead since ADR 0039.
-        return None
+            credential = _credential_from_row(row, key_id)
+            if credential is not None and row["use_stale"]:
+                await _record_use(conn, stored_hash, key_id)
+        return credential
 
     # -- key management (ADR 0012) ------------------------------------------
 

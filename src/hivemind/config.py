@@ -281,6 +281,10 @@ class Settings(BaseSettings):
     # the data plane. Off by default, so the keyless dev runner and local
     # scripts are unchanged; production deployments set it true.
     require_stored_keys: bool = False
+    # ADR 0110: an active agent whose key has not been used for this many
+    # days shows as idle in the admin agent list. A list only: nothing is
+    # revoked or ranked on it.
+    idle_agent_days: int = Field(default=30, ge=1)
     # ADR 0104: serve an unauthenticated GET /metrics from hivemind-mcp-http.
     # Off by default, since the compose files publish the MCP port on every
     # interface; the Kubernetes manifest turns it on (the Ingress routes only

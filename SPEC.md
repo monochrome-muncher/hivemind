@@ -141,7 +141,7 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | `GET /v1/liveness` | Unauthenticated orchestrator liveness probe (ADR 0019) |
 | `GET /v1/whoami` | The calling key's standing: kind (`agent`/`org`/`admin`/`legacy`), agent name, status, trust level, home fleet, `can_read`, `can_write_scopes` (any valid key; not audited — ADR 0030) |
 | `POST /v1/agents` | Register an agent (org key or admin key; `{name, owner_alias?}`) → pending agent, 201 (§12, ADR 0012); the same name + alias again → 200 with the current status; another alias → 409 (§12.3, ADR 0039) |
-| `GET /v1/admin/agents` | List agents: status, trust level, home fleet, owner alias (admin key) |
+| `GET /v1/admin/agents` | List agents: status, trust level, home fleet, owner alias, `last_used_at` (when the agent's key last authenticated, to the hour; null if never since the field shipped or no key), `idle` (an active agent whose key has been unused for `idle_after_days`; a key never used counts from when it was issued, so a new or replaced key is not idle) and `idle_after_days` (`HIVEMIND_IDLE_AGENT_DAYS`, default 30) (admin key; ADR 0110) |
 | `GET /v1/admin/fleets` | List fleets (admin key); fleets merged into another are left out unless `?include_merged=true`, which adds `merged_into` and `merged_at` (§12.1, ADR 0107) |
 | `POST /v1/admin/fleets` | Create a fleet (admin key; no deletion in this increment — ADR 0011) |
 | `PATCH /v1/admin/fleets/{id}` | Rename a fleet: `{name}`, validated like a new fleet's name (admin key; audited `fleet.rename`; a merged fleet can be renamed; the current name again is a 200 with no audit row; 404 unknown fleet, 409 `fleet_exists` when another fleet has the name, 422 for a bad name; §12.1, ADR 0109) |
@@ -280,6 +280,8 @@ A search may pass `explore: true` (REST body field; `hive_search` argument; defa
 | **agent key** | one registered agent | Carries the agent's trust level + home fleet; `author` is server-filled with the agent's registered name (§12, ADR 0012) |
 | **admin key** | the operator | The admin surface: activate / promote / demote / revoke, fleets, org-key rotation (§12.4). Its entries have author `admin` (ADR 0060) and its feedback is reported as `admin` (ADR 0066) |
 
+Every key that authenticates records `credentials.last_used_at`, at most once an hour (ADR 0110). The write is best effort and outside the request; it only feeds the admin agent list and changes no access.
+
 No OAuth/SSO; keys are issued by the org operator via the admin surface (§12.4). (An org with an IdP is a later story.) This table supersedes ADR 0008's key kinds (`user`/`agent`/`admin`) — ADR 0012. The agent key is now the credential the MCP runners verify (ADRs 0009–0010).
 
 ### 8.2 Deployment (ADR 0026, superseding ADR 0007)
@@ -417,7 +419,7 @@ This section supersedes the flat-pool commitment of §1 and the "no trust tiers"
 
 | Endpoint | Effect |
 |---|---|
-| `GET /v1/admin/agents` / `GET /v1/admin/fleets` | List agents (status, level, home fleet, alias) / fleets |
+| `GET /v1/admin/agents` / `GET /v1/admin/fleets` | List agents (status, level, home fleet, alias, last use and idle, ADR 0110) / fleets |
 | `POST /v1/admin/fleets` | Create a fleet (ADR 0011: no deletion in this increment) |
 | `PATCH /v1/admin/fleets/{id}` | Rename a fleet (ADR 0109) |
 | `POST /v1/admin/fleets/{source_id}/merge` | Merge a fleet into another or a new one, or preview it with `dry_run` (ADR 0107) |

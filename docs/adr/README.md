@@ -118,3 +118,4 @@ is unused.
 | [0106](0106-confirmation-halves-older-flags.md) | A confirmation newer than every flag halves those flags | Accepted; amends 0063, 0070, 0103 (I3, new I7), `HIVEMIND_CONFIRMATION_HALVES_FLAGS=false` turns it off |
 | [0107](0107-fleet-merge.md) | Merge fleets into one home fleet | Accepted; amends 0011, touches 0058 and 0096, migration 0017, admin only, undoable |
 | [0109](0109-rename-a-fleet.md) | Rename a fleet | Accepted; amends 0011 (no rename), migration 0019, admin only, audited `fleet.rename` |
+| [0110](0110-agent-key-last-use.md) | An agent key records its last use, at most hourly | Accepted; migration 0021, `credentials.last_used_at`, `HIVEMIND_IDLE_AGENT_DAYS`, observation only |
