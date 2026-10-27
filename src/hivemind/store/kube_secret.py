@@ -50,6 +50,10 @@ class KubeSecrets:
         self._token = token
         self._ssl = ssl_context
 
+    @property
+    def namespace(self) -> str:
+        return self._namespace
+
     @classmethod
     def in_cluster(cls, sa_dir: Path = SERVICE_ACCOUNT_DIR) -> KubeSecrets:
         """Build from the pod's mounted ServiceAccount (token, namespace,

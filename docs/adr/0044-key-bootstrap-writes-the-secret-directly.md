@@ -33,6 +33,13 @@ had already invalidated the previous org key.
    never prints a key. Its audit rows are the usual `cli` rows
    (`admin_key.issue`, `org_key.rotate`) under `--actor ci-bootstrap`.
 
+   *Corrected 2026-10-27: the delete after a failed commit is no longer
+   silent when it fails too. The run then fails, naming the Secret and its
+   namespace to delete by hand, since a Secret left behind would make every
+   later run report that it exists and issue nothing. The message also says
+   to check `hivemind-keys list` first: a commit whose reply was lost may
+   have reached the database.*
+
 2. **The bootstrap Job gets its own narrow identity**
    (`deploy/kubernetes/bootstrap/rbac.yaml`): a ServiceAccount, a Role with
    `create` on Secrets (Kubernetes cannot narrow `create` by name) plus

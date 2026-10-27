@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import contextlib
 import getpass
 import json
 import os
@@ -231,11 +230,31 @@ class SecretWriter(Protocol):
     """The slice of the Kubernetes API the bootstrap needs (ADR 0044);
     ``kube_secret.KubeSecrets`` in a cluster, a fake in tests."""
 
+    @property
+    def namespace(self) -> str: ...
+
     def exists(self, name: str) -> bool: ...
 
     def create(self, name: str, string_data: dict[str, str], labels: dict[str, str]) -> None: ...
 
     def delete(self, name: str) -> None: ...
+
+
+class SecretLeftBehind(RuntimeError):
+    """The bootstrap commit failed and the Secret it created could not be
+    deleted. Its keys most likely never reached the database, but a commit
+    whose reply was lost may have reached it, so the message says how to
+    check before the Secret is deleted."""
+
+    def __init__(self, name: str, namespace: str, cause: Exception) -> None:
+        super().__init__(
+            f"the database commit failed after Secret {name!r} was created in namespace "
+            f"{namespace!r}, and deleting it failed too ({cause}). Its keys most likely "
+            f"never reached the database; `hivemind-keys list` shows whether an admin key "
+            f"was issued by this run (revoke it with `hivemind-keys revoke-admin --hash`). "
+            f"Then delete the Secret by hand (kubectl delete secret {name} -n {namespace}) "
+            f"and run bootstrap-secret again."
+        )
 
 
 async def _bootstrap_secret(
@@ -247,7 +266,9 @@ async def _bootstrap_secret(
     Returns ``False`` if the Secret exists. The keys are never printed.
     The Secret is created inside the transaction, so a failed create
     rolls the keys back and the run can be repeated; a failed commit
-    deletes the Secret again (best effort)."""
+    deletes the Secret again, and if that fails too raises
+    ``SecretLeftBehind`` naming it, rather than leaving it quietly. (A
+    pod killed between the create and the commit can still leave it.)"""
     if await asyncio.to_thread(secrets_api.exists, name):
         return False
     who = actor or default_actor()
@@ -270,9 +291,14 @@ async def _bootstrap_secret(
             raise
         try:
             await tx.commit()
-        except BaseException:
-            with contextlib.suppress(Exception):
+        except BaseException as commit_error:
+            try:
                 await asyncio.to_thread(secrets_api.delete, name)
+            except Exception as delete_error:
+                # The Secret holds keys that were never committed. Left in
+                # place, every later run would see it, report it exists and
+                # issue nothing, so the operator must remove it by hand.
+                raise SecretLeftBehind(name, secrets_api.namespace, delete_error) from commit_error
             raise
     finally:
         await conn.close()
@@ -499,6 +525,9 @@ def main() -> None:
             )
         except KubeApiError as exc:
             print(f"{exc}; no key was issued", file=sys.stderr)
+            raise SystemExit(1) from None
+        except SecretLeftBehind as exc:
+            print(str(exc), file=sys.stderr)
             raise SystemExit(1) from None
         if created:
             print("issued the admin and org keys into the configured Secret (not printed)")
