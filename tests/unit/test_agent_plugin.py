@@ -206,10 +206,12 @@ def test_the_hook_prints_valid_json_and_never_the_key(key: str | None) -> None:
     assert payload["hookEventName"] == "SessionStart"
     assert payload["additionalContext"].startswith("HIVEMIND:")
     assert STAY_AWARE_CORE in payload["additionalContext"]
-    assert (
-        "hive_whoami" in payload["additionalContext"]
-        or "hivemind-setup" in payload["additionalContext"]
-    )
+    if key is not None:
+        assert "call hive_whoami" in payload["additionalContext"]
+        assert "hivemind-setup" not in payload["additionalContext"]
+    else:
+        assert "offer to run the hivemind-setup skill" in payload["additionalContext"]
+        assert "call hive_whoami" not in payload["additionalContext"]
     assert "hm_secret_value" not in out.stdout
 
 
@@ -1241,9 +1243,8 @@ def test_cline_post_tool_use_nudges_once_at_the_threshold(tmp_path: Path) -> Non
     out = calls(3)
     # The nudge goes out on the call that reaches the threshold, once.
     assert json.loads(out[2])["contextModification"] == STOP_REMINDER_TEXT
-    assert json.loads(calls(1)[0])["cancel"] is False and "contextModification" not in json.loads(
-        calls(1)[0]
-    )
+    quiet = json.loads(calls(1)[0])
+    assert quiet["cancel"] is False and "contextModification" not in quiet
     # A contribution keeps it quiet.
     _cline_hook("TaskStart", json.dumps({"taskId": "t2"}), tmp_path)
     calls(2, task="t2")

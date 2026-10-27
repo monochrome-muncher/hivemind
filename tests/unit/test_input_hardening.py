@@ -9,6 +9,8 @@ from dataclasses import replace
 
 import pytest
 
+from hivemind.api.main import create_app_for_config
+from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
 from hivemind.domain.entry import (
     EntryDraft,
@@ -39,8 +41,8 @@ from hivemind.ports import Credential
 from hivemind.services.access import AccessService
 from hivemind.services.search import SearchService
 from hivemind.services.write import WriteService
-from tests.fakes import make_clock, make_embedder, make_search_config
-from tests.unit.test_api_endpoints import make_client, make_hivemind_app
+from tests.fakes import RecordingStore, make_clock, make_embedder, make_search_config
+from tests.unit.test_api_endpoints import make_authenticator, make_client, make_hivemind_app
 from tests.unit.test_mcp_app import ALICE, ORG, build_app
 
 KEY = {"X-API-Key": "key-alice"}
@@ -242,9 +244,24 @@ async def test_rest_write_refuses_bad_entries_with_422_and_no_embedding(
 async def test_rest_refuses_bad_reads_and_governance_input_with_422(
     method: str, url: str, body: object
 ) -> None:
-    async with make_client(make_hivemind_app()) as client:
+    store = RecordingStore()
+    app = create_app_for_config(
+        Settings(),
+        store=store,
+        embedder=make_embedder(),
+        authenticator=make_authenticator(),
+        search_config=make_search_config(),
+    )
+    async with make_client(app) as client:
         resp = await client.request(method, url, json=body, headers=ADMIN)
     assert resp.status_code == 422, resp.text
+    # Either the service's typed refusal or FastAPI's own validation error.
+    payload = resp.json()
+    if "error" in payload:
+        assert payload["error"]["code"] == "invalid_input"
+    else:
+        assert payload["detail"]
+    assert store.calls == []  # refused before the store was touched
 
 
 async def test_rest_paging_at_the_bounds_is_fine() -> None:

@@ -7,7 +7,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from hivemind.domain.access import TrustLevel, Visibility
-from hivemind.domain.entry import EntryDraft, EntryFilters, EntryState, Kind
+from hivemind.domain.entry import EntryDraft, EntryFilters, Kind
 from hivemind.domain.feedback import (
     CORRECTION_NOTE_CHARS,
     Correction,
@@ -203,7 +203,7 @@ async def test_the_evidence_never_changes_a_score() -> None:
         )
         [hit] = await service.search("billing node", EntryFilters())
         assert hit.contested and (hit.correction is not None) == (note is not None)
-        assert hit.state is None or hit.state is EntryState.ACTIVE
+        assert hit.state is None  # state is only reported with include_inactive
         return hit.score
 
     assert await score_of(None) == await score_of("wrong since v3")

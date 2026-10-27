@@ -130,7 +130,8 @@ class TestI1FreshUnratedBeatsOldFavourite:
         by_id = {h.entry_id: h.score for h in hits}
         fused = await _fused_by_id(store, "gamma rollout note")
         assert set(by_id) == {old.id, new.id}
-        assert by_id[old.id] / fused[old.id] <= by_id[new.id] / fused[new.id]
+        assert by_id[old.id] / fused[old.id] < by_id[new.id] / fused[new.id]
+        assert [h.entry_id for h in hits] == [new.id, old.id]
 
 
 class TestI2NumbersAndDatesOnly:

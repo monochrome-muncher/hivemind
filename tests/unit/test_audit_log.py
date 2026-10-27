@@ -11,6 +11,7 @@ the REST app over the same fakes.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict
 
 import httpx
@@ -26,6 +27,7 @@ from hivemind.domain import (
     AuditFilters,
     AuditRecord,
     EntryDraft,
+    EntryState,
     Kind,
     TrustLevel,
 )
@@ -199,10 +201,13 @@ async def test_withdraw_audit_failure_raises() -> None:
     entry = await store.create_entry(
         EntryDraft(kind=Kind.FACT, summary="x", author="alice", agent="a1")
     )
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="audit_log is unwritable"):
         await GovernanceService(store).withdraw(
             Credential(user_id="admin", is_admin=True, key_id="abc"), entry.id, "bad"
         )
+    # Not atomic, as for the fleets above: the withdrawal stands.
+    withdrawn = await store.get_entry(entry.id)
+    assert withdrawn is not None and withdrawn.state is EntryState.WITHDRAWN
 
 
 # -- entry.withdraw: only when admin privilege authorised it ------------------
@@ -253,6 +258,7 @@ async def test_no_raw_key_appears_in_any_audit_row() -> None:
     rest for good measure: no raw key string anywhere in any column."""
     service, store, _, admin, fleet_id = await _setup()
     raw_keys = [
+        "hm_org",  # the key the first rotation retires
         (await service.activate("alice", TrustLevel.CONTRIBUTOR, fleet_id, admin))[1],
         await service.rotate_org_key(admin),
         await service.rotate_org_key(admin),
@@ -265,6 +271,8 @@ async def test_no_raw_key_appears_in_any_audit_row() -> None:
     serialized = json.dumps([asdict(r) for r in rows], default=str)
     for raw in raw_keys:
         assert raw not in serialized
+    # The actor is the admin key's 12-hex fingerprint, nothing longer.
+    assert all(re.fullmatch(r"admin:[0-9a-f]{12}", r.actor) for r in rows)
 
 
 # -- GET /v1/admin/audit-log ----------------------------------------------------

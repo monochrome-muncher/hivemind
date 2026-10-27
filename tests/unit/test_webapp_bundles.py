@@ -126,6 +126,30 @@ async def test_every_response_carries_the_security_headers_and_is_revalidated(
         assert resp.headers["cache-control"] == "no-cache", resp.url
 
 
+def _unreachable(request: httpx.Request) -> httpx.Response:
+    raise httpx.ConnectError("down", request=request)
+
+
+@bundles
+async def test_error_responses_carry_the_security_headers_too(bundle: Bundle) -> None:
+    method, path = bundle.api_call
+    key = {"X-API-Key": "hm_key"}
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={}))
+    async with _client(bundle, transport) as client:
+        errors = [
+            (await client.request(method, f"/v1/{path}"), 401),  # no key: refused first
+            (await client.request(*bundle.refused[0], headers=key), 404),
+        ]
+    async with _client(bundle, httpx.MockTransport(_unreachable)) as down:
+        errors.append((await down.request(method, f"/v1/{path}", headers=key), 502))
+    for resp, status in errors:
+        assert resp.status_code == status, resp.url
+        assert resp.headers["content-security-policy"] == CONTENT_SECURITY_POLICY
+        assert resp.headers["x-frame-options"] == "DENY"
+        assert resp.headers["x-content-type-options"] == "nosniff"
+        assert resp.headers["referrer-policy"] == "no-referrer"
+
+
 @bundles
 def test_the_page_has_no_inline_script_or_style(bundle: Bundle) -> None:
     html = (bundle.static_dir / "index.html").read_text()

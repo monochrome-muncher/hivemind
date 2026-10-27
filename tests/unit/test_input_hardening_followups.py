@@ -243,7 +243,9 @@ async def test_probes_need_no_key_with_or_without_a_trailing_slash() -> None:
         assert (await client.get("/v1/liveness")).status_code == 200
         assert (await client.get("/v1/health")).status_code == 200
         for path in ("/v1/health/", "/v1/liveness/"):
-            assert (await client.get(path)).status_code != 401  # Starlette's redirect, as before
+            resp = await client.get(path)  # Starlette's redirect, as before
+            assert resp.status_code == 307
+            assert resp.headers["location"].endswith(path.rstrip("/"))
 
 
 # -- F7: fleet-name characters --------------------------------------------------------

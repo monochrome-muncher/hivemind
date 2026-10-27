@@ -9,8 +9,11 @@ deterministic.
 from __future__ import annotations
 
 import hashlib
+import inspect
 import re
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from hivemind.config import SearchConfig
 from hivemind.domain.access import AgentStatus, InvalidAgentStatus, UnknownAgent
@@ -147,6 +150,25 @@ def make_embedder() -> FakeEmbedder:
 
 def make_store(clock: FixedClock | None = None) -> MemoryStore:
     return MemoryStore(clock or make_clock())
+
+
+class RecordingStore(MemoryStore):
+    """A ``MemoryStore`` that appends the name of every public ``Store``
+    method called on it to ``calls`` (a call, not an attribute read)."""
+
+    def __init__(self, clock: Callable[[], datetime] | None = None) -> None:
+        super().__init__(clock or make_clock())
+        self.calls: list[str] = []
+        for name, _ in inspect.getmembers(MemoryStore, inspect.iscoroutinefunction):
+            if not name.startswith("_"):
+                setattr(self, name, self._recorded(name, getattr(self, name)))
+
+    def _recorded(self, name: str, method: Callable[..., Awaitable[Any]]) -> Any:
+        async def call(*args: Any, **kwargs: Any) -> Any:
+            self.calls.append(name)
+            return await method(*args, **kwargs)
+
+        return call
 
 
 def make_search_config(

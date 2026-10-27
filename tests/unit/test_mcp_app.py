@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from hivemind.domain.access import TrustLevel
-from hivemind.domain.entry import EntityKind, EntryDraft, ExtractedEntity, Kind
+from hivemind.domain.entry import EntityKind, EntryDraft, EntryState, ExtractedEntity, Kind
 from hivemind.mcp.app import (
     ERR_AGENT_UNRESOLVED,
     ERR_INVALID_INPUT,
@@ -327,11 +327,11 @@ async def test_hive_get_include_history_surfaces_successor(
 
 
 async def test_hive_list_filters_by_kind_and_tags(app: McpHivemind) -> None:
-    await hive_write(app, kind="fact", summary="fact x", tags=["x"])
+    fact = await hive_write(app, kind="fact", summary="fact x", tags=["x"])
     decision = await hive_write(app, kind="decision", summary="decision x", tags=["x"])
     result = await hive_list(app, kind="fact", tags=["x"])
     assert result["count"] == 1
-    assert result["entries"][0]["id"] is not None
+    assert [e["id"] for e in result["entries"]] == [fact["id"]]
     assert all(e["kind"] == "fact" for e in result["entries"])
     assert "decision" not in {e["kind"] for e in result["entries"]}
     # The decision entry is still present in the pool, just filtered out.
@@ -355,13 +355,25 @@ async def test_hive_list_items_are_compact_by_default(app: McpHivemind) -> None:
 
 
 async def test_hive_list_include_body_returns_full_entries(app: McpHivemind) -> None:
-    written = await hive_write(app, kind="fact", summary="s", body="a long body")
+    written = await hive_write(
+        app,
+        kind="fact",
+        summary="s",
+        body="a long body",
+        payload={"k": "v"},
+        sources=[{"type": "url", "ref": "https://example.test/a"}],
+        importance=4,
+    )
     result = await hive_list(app, include_body=True)
     assert result["count"] == 1
     got = await hive_get(app, entry_id=written["id"])
-    assert all(result["entries"][0][k] == v for k, v in got.items() if k in result["entries"][0])
-    assert {"body", "payload", "sources", "importance"} <= set(result["entries"][0])
-    assert result["entries"][0]["body"] == "a long body"
+    item = result["entries"][0]
+    assert all(item[k] == v for k, v in got.items() if k in item)
+    for field in ("body", "payload", "sources", "importance"):
+        assert item[field] == got[field], field
+    assert item["body"] == "a long body"
+    assert item["payload"] == {"k": "v"}
+    assert item["importance"] == 4
 
 
 @pytest.mark.parametrize("limit", [0, -1], ids=["zero", "negative"])
@@ -410,6 +422,8 @@ async def test_hive_withdraw_enforces_author_rule(store: MemoryStore, clock) -> 
     other = await hive_write(alice_app, kind="fact", summary="alice's other entry")
     denied = await hive_withdraw(bob_app, other["id"])
     assert denied.get("error", {}).get("code") == "permission_denied"
+    untouched = await store.get_entry(other["id"])
+    assert untouched is not None and untouched.state is EntryState.ACTIVE
 
     # An admin may withdraw any entry.
     admin_target = await hive_write(alice_app, kind="fact", summary="third")
@@ -506,10 +520,12 @@ async def test_hive_search_offset_paginates(app: McpHivemind) -> None:
     """SPEC.md §5.3: limit/offset on search (parity with list)."""
     for i in range(5):
         await hive_write(app, kind="fact", summary=f"cohort note number {i}")
-    full = await hive_search(app, "cohort note", limit=5)
+    unpaged = await hive_search(app, "cohort note", limit=5)
     result = await hive_search(app, "cohort note", limit=2, offset=1)
+    all_ids = [h["id"] for h in unpaged["hits"]]
+    assert len(all_ids) == 5
+    assert [h["id"] for h in result["hits"]] == all_ids[1:3]
     assert result["count"] == 2
-    assert [h["id"] for h in result["hits"]] == [h["id"] for h in full["hits"][1:3]]
 
 
 # --------------------------------------------------------------------------- #

@@ -29,6 +29,7 @@ from hivemind.domain.entry import EntryFilters
 from hivemind.mcp.app import McpHivemind
 from hivemind.mcp.http import (
     BearerAuthMiddleware,
+    _current_credential,
     build_http_app,
     build_transport_security,
     current_credential,
@@ -202,6 +203,12 @@ async def test_credential_provider_is_the_context_var_getter() -> None:
     unset -> ``None``; set (as the middleware does) -> the set credential."""
     provider = make_credential_provider()
     assert provider() is None
+    token = _current_credential.set(ALICE)
+    try:
+        assert provider() == ALICE
+    finally:
+        _current_credential.reset(token)
+    assert provider() is None
 
 
 # --- ADR 0042: fail closed, WWW-Authenticate, no OAuth discovery ----------
@@ -317,11 +324,27 @@ def test_built_app_rejects_a_foreign_host_when_hosts_are_set() -> None:
         "content-type": "application/json",
         "accept": "application/json, text/event-stream",
     }
+    initialize = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-03-26",
+                "capabilities": {},
+                "clientInfo": {"name": "test", "version": "0"},
+            },
+        }
+    ).encode()
     with TestClient(app) as client:
-        bad = client.post("/mcp", content=b"{}", headers={**headers, "host": "evil.example.com"})
-        good = client.post("/mcp", content=b"{}", headers={**headers, "host": "hive.example.com"})
+        bad = client.post(
+            "/mcp", content=initialize, headers={**headers, "host": "evil.example.com"}
+        )
+        good = client.post(
+            "/mcp", content=initialize, headers={**headers, "host": "hive.example.com"}
+        )
     assert bad.status_code == 421
-    assert good.status_code != 421
+    assert good.status_code == 200
 
 
 # --- ADR 0042: the stdio runner re-verifies per call ----------------------

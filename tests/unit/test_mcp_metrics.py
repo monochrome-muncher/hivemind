@@ -12,6 +12,7 @@ from typing import Any
 
 import httpx
 import pytest
+from mcp.server.mcpserver.exceptions import ToolError
 from prometheus_client.parser import text_string_to_metric_families
 from starlette.testclient import TestClient
 
@@ -226,8 +227,10 @@ async def test_a_raising_tool_is_counted_as_an_error_and_reraised() -> None:
 
     app.store.list_entries = broken  # type: ignore[method-assign]
     server = build_server(app, metrics=metrics)
-    with pytest.raises(Exception, match="hive_list"):
+    with pytest.raises(ToolError, match="hive_list") as raised:
         await server.call_tool("hive_list", {})
+    assert isinstance(raised.value.__cause__, RuntimeError)
+    assert str(raised.value.__cause__) == "boom"
     got = samples(metrics.render().decode())
     assert (
         got[("hivemind_mcp_tool_calls_total", (("outcome", "error"), ("tool", "hive_list")))] == 1

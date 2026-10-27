@@ -168,7 +168,9 @@ def _gemini_transcript(tmp_path: Path, calls: int, *names: str) -> Path:
 
 
 def test_a_substantial_gemini_session_is_blocked_counting_each_call_once(tmp_path: Path) -> None:
-    assert json.loads(_stop(tmp_path, _gemini_transcript(tmp_path, 20)).stdout)["decision"]
+    assert (
+        json.loads(_stop(tmp_path, _gemini_transcript(tmp_path, 20)).stdout)["decision"] == "block"
+    )
     short = _stop(tmp_path, _gemini_transcript(tmp_path, 10), session_id="s2")
     assert (short.returncode, short.stdout) == (0, "")
 
@@ -312,7 +314,7 @@ def test_xdg_runtime_dir_holds_the_marker_when_it_is_ours(tmp_path: Path) -> Non
     runtime = tmp_path / "run"
     runtime.mkdir(mode=0o700)
     env = _env(tmp_path, XDG_RUNTIME_DIR=str(runtime))
-    assert json.loads(_stop(tmp_path, _transcript(tmp_path, 25), env).stdout)["decision"]
+    assert json.loads(_stop(tmp_path, _transcript(tmp_path, 25), env).stdout)["decision"] == "block"
     assert len(_markers(runtime / "hivemind-stop-reminder")) == 1
     assert (runtime / "hivemind-stop-reminder").stat().st_mode & 0o777 == 0o700
     assert not _marker_dir(tmp_path).exists()
@@ -320,7 +322,7 @@ def test_xdg_runtime_dir_holds_the_marker_when_it_is_ours(tmp_path: Path) -> Non
 
 def test_an_unusable_xdg_runtime_dir_falls_back_to_tmpdir(tmp_path: Path) -> None:
     env = _env(tmp_path, XDG_RUNTIME_DIR=str(tmp_path / "missing"))
-    assert json.loads(_stop(tmp_path, _transcript(tmp_path, 25), env).stdout)["decision"]
+    assert json.loads(_stop(tmp_path, _transcript(tmp_path, 25), env).stdout)["decision"] == "block"
     assert len(_markers(_marker_dir(tmp_path))) == 1
 
 
@@ -375,17 +377,20 @@ def test_copilot_cli_gets_a_flat_additional_context(tmp_path: Path, extra: dict[
 
 
 def test_only_the_compact_source_gets_the_post_compaction_line(tmp_path: Path) -> None:
+    assert COMPACT_LINE
+    line = COMPACT_LINE.group(1)
     compact = _start(tmp_path, '{"hook_event_name":"SessionStart","source":"compact"}')
-    assert "compacted" in compact and "hive_write" in compact and "hive_feedback" in compact
+    assert line in compact and "hive_write" in compact and "hive_feedback" in compact
     for source in ("startup", "resume", "clear", "fork"):
         text = _start(tmp_path, json.dumps({"source": source}))
-        assert "compacted" not in text
-    assert "compacted" not in _start(tmp_path, "")
+        assert line not in text and "compacted" not in text
+    assert line not in _start(tmp_path, "")
 
 
 def test_incognito_compact_stays_incognito(tmp_path: Path) -> None:
+    assert COMPACT_LINE
     text = _start(tmp_path, '{"source":"compact"}', HIVEMIND_INCOGNITO="1")
-    assert "incognito" in text and "compacted" not in text
+    assert "incognito" in text and COMPACT_LINE.group(1) not in text and "compacted" not in text
 
 
 # -- Pi and Oh My Pi: the same two nudges from the extension ----------------------

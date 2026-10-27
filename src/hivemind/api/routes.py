@@ -16,6 +16,7 @@ import logging
 from collections.abc import Awaitable
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
+from functools import cache
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -27,6 +28,8 @@ from hivemind.api.deps import (
     ApiError,
     HivemindApp,
     api_error,
+    get_app,
+    get_prometheus,
     require_credential,
 )
 from hivemind.api.prometheus import PrometheusMetrics
@@ -108,6 +111,8 @@ from hivemind.services.errors import (
 )
 
 require = Annotated[Credential, Depends(require_credential)]
+hive = Annotated[HivemindApp, Depends(get_app)]
+prom = Annotated[PrometheusMetrics, Depends(get_prometheus)]
 
 
 def _no_nul(value: str | None) -> str | None:
@@ -162,9 +167,13 @@ def _to_utc(value: datetime | None) -> datetime | None:
     return value
 
 
-def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) -> APIRouter:
-    """Build the /v1 router (SPEC.md §5.1). ``prometheus`` counts degraded
-    searches for ``GET /metrics`` (ADR 0050)."""
+@cache
+def build_router() -> APIRouter:
+    """The /v1 router (SPEC.md §5.1), built once per process and shared by
+    every app: it holds no app state, and the handlers take the
+    ``HivemindApp`` and the Prometheus metrics from the request. Building it
+    is the costly part of ``create_app``, and the tests build hundreds of
+    apps."""
     router = APIRouter(prefix="/v1")
 
     @router.get("/health", response_model=HealthOut)
@@ -181,7 +190,9 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         """
         return HealthOut(status="ok")
 
-    async def _entry_detail(entry_id: str, credential: Credential, *, history: bool) -> EntryOut:
+    async def _entry_detail(
+        app: HivemindApp, entry_id: str, credential: Credential, *, history: bool
+    ) -> EntryOut:
         """The full entry with its feedback and links, and (``history``) the
         supersession chain: shared by ``GET /v1/entries/{id}`` and the admin
         read (ADR 0080)."""
@@ -205,6 +216,8 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         return out
 
     async def _search(
+        app: HivemindApp,
+        prometheus: PrometheusMetrics,
         request: SearchRequest,
         credential: Credential,
         response: Response,
@@ -243,8 +256,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
             response.headers[RECENCY_HEADER] = result.recency.value
         if result.degraded:
             response.headers[DEGRADED_HEADER] = DEGRADED_KEYWORD_ONLY
-            if prometheus is not None:
-                prometheus.degraded_searches.inc()
+            prometheus.degraded_searches.inc()
         return [HitOut.from_hit(h) for h in result.hits]
 
     async def _withdraw(entry_id: str, withdrawal: Awaitable[Entry]) -> EntryOut:
@@ -263,7 +275,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         return EntryOut.from_entry(entry)
 
     @router.get("/metrics", response_model=MetricsOut)
-    async def metrics(credential: require) -> MetricsOut:
+    async def metrics(credential: require, app: hive) -> MetricsOut:
         """Usage counters (ROADMAP §3.3, Tier 3). Admin-gated: the report
         is operational data (usage volume, fleet writes, trust-level
         distribution, pending-agent count). Makes the SPEC §10
@@ -289,6 +301,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
     async def create_entry(
         payload: CreateEntryRequest,
         credential: require,
+        app: hive,
         check: bool = False,
     ) -> EntryOut | JSONResponse:
         """Create an entry (SPEC.md §4.1, §8.1).
@@ -361,6 +374,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
     async def get_entry(
         entry_id: str,
         credential: require,
+        app: hive,
         history: bool = False,
     ) -> EntryOut:
         """Fetch the full entry, body included (SPEC.md §5.1).
@@ -370,10 +384,10 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         ``feedback`` carries the verdict counts and the newest reports,
         notes included (ADR 0051).
         """
-        return await _entry_detail(entry_id, credential, history=history)
+        return await _entry_detail(app, entry_id, credential, history=history)
 
     @router.post("/entries/get", response_model=EntriesOut)
-    async def get_entries(request: GetEntriesRequest, credential: require) -> EntriesOut:
+    async def get_entries(request: GetEntriesRequest, credential: require, app: hive) -> EntriesOut:
         """Read up to 10 entries by id in one call (ADR 0055), each with
         its feedback like ``GET /v1/entries/{id}``. Ids that name nothing
         the caller may read are listed in ``not_found`` (ADR 0033: the same
@@ -392,6 +406,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
     @router.get("/entries", response_model=list[EntryOut])
     async def list_entries(
         credential: require,
+        app: hive,
         kind: Annotated[Kind | None, Query()] = None,
         tags: Annotated[list[str] | None, Query()] = None,
         entities: Annotated[list[str] | None, Query()] = None,
@@ -445,7 +460,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
 
     @router.post("/search", response_model=list[HitOut])
     async def search(
-        request: SearchRequest, credential: require, response: Response
+        request: SearchRequest, credential: require, app: hive, prometheus: prom, response: Response
     ) -> list[HitOut]:
         """Hybrid search with filters; compact hits, no bodies (SPEC.md §6).
 
@@ -455,10 +470,12 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         (ADR 0073) is applied only when the server turned the hint on, and
         then the response carries ``X-Hivemind-Recency`` with the hint used.
         """
-        return await _search(request, credential, response)
+        return await _search(app, prometheus, request, credential, response)
 
     @router.post("/entries/{entry_id}/withdraw", response_model=EntryOut)
-    async def withdraw(entry_id: str, request: WithdrawRequest, credential: require) -> EntryOut:
+    async def withdraw(
+        entry_id: str, request: WithdrawRequest, credential: require, app: hive
+    ) -> EntryOut:
         """Withdraw an entry (SPEC.md §4.1): the author or an admin.
 
         404 unknown entry, 403 non-author, 409 already inactive.
@@ -468,7 +485,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         )
 
     @router.put("/entries/{entry_id}/pin", response_model=PinOut)
-    async def pin(entry_id: str, credential: require) -> PinOut:
+    async def pin(entry_id: str, credential: require, app: hive) -> PinOut:
         """Pin an active fleet entry to its fleet's briefing (ADR 0058): a
         contributor or privileged agent of that fleet or an admin. Idempotent.
 
@@ -488,7 +505,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         return PinOut.from_pin(pin)
 
     @router.delete("/entries/{entry_id}/pin", response_model=UnpinOut)
-    async def unpin(entry_id: str, credential: require) -> UnpinOut:
+    async def unpin(entry_id: str, credential: require, app: hive) -> UnpinOut:
         """Unpin an entry (ADR 0058); ``removed`` says whether it was pinned."""
         try:
             removed = await app.governance_service.unpin(credential, entry_id)
@@ -501,7 +518,9 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         return UnpinOut(entry_id=entry_id, removed=removed)
 
     @router.get("/pins", response_model=PinsOut)
-    async def pins(credential: require, fleet_id: Annotated[str | None, Query()] = None) -> PinsOut:
+    async def pins(
+        credential: require, app: hive, fleet_id: Annotated[str | None, Query()] = None
+    ) -> PinsOut:
         """A fleet's pinned entries, newest pin first (ADR 0058): the
         caller's home fleet unless ``fleet_id`` names another. Entries the
         caller may not read are left out."""
@@ -516,7 +535,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
 
     @router.post("/feedback", response_model=list[FeedbackOut])
     async def batch_feedback(
-        request: BatchFeedbackRequest, credential: require
+        request: BatchFeedbackRequest, credential: require, app: hive
     ) -> list[FeedbackOut]:
         """One verdict (and note) on up to 16 entries at once (ADR 0053).
 
@@ -545,7 +564,9 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         ]
 
     @router.post("/entries/{entry_id}/feedback", response_model=FeedbackOut)
-    async def feedback(entry_id: str, request: FeedbackRequest, credential: require) -> FeedbackOut:
+    async def feedback(
+        entry_id: str, request: FeedbackRequest, credential: require, app: hive
+    ) -> FeedbackOut:
         """Report a verdict on an entry (SPEC.md §4.2); upsert per reporter.
 
         A plain user key self-reports the agent instance via ``agent``
@@ -574,7 +595,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         )
 
     @router.get("/whoami", response_model=WhoamiOut)
-    async def whoami(credential: require) -> WhoamiOut:
+    async def whoami(credential: require, app: hive) -> WhoamiOut:
         """The calling key's standing (ADR 0030): its kind, the agent's
         name / status / trust level / home fleet, and what it may read
         and write. Any valid key may ask; not audited."""
@@ -584,7 +605,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
 
     @router.post("/agents", response_model=RegisteredAgentOut, status_code=201)
     async def register_agent(
-        payload: RegisterAgentRequest, credential: require, response: Response
+        payload: RegisterAgentRequest, credential: require, app: hive, response: Response
     ) -> RegisteredAgentOut:
         """Register (or re-register) an agent (ADR 0012, ADR 0039). Gated on
         the org or admin key; creates a ``pending`` agent (level 0, no
@@ -625,6 +646,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
     @router.get("/portal/entries", response_model=list[EntryOut])
     async def portal_list_entries(
         credential: require,
+        app: hive,
         kind: Annotated[Kind | None, Query()] = None,
         tags: Annotated[list[str] | None, Query()] = None,
         scope: Annotated[str | None, Query()] = None,
@@ -656,17 +678,24 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
 
     @router.post("/portal/search", response_model=list[HitOut])
     async def portal_search(
-        request: PortalSearchRequest, credential: require, response: Response
+        request: PortalSearchRequest,
+        credential: require,
+        app: hive,
+        prometheus: prom,
+        response: Response,
     ) -> list[HitOut]:
         """``POST /v1/search`` for a person holding an agent key (ADR 0095),
         with a ``fleet_id`` filter. Not counted in the search counters, so
         a person browsing does not move the agents' search numbers."""
         _require_agent(credential, "the agent portal")
-        return await _search(request, credential, response, fleet_id=request.fleet_id, count=False)
+        return await _search(
+            app, prometheus, request, credential, response, fleet_id=request.fleet_id, count=False
+        )
 
     @router.get("/portal/feedback", response_model=list[FeedbackLogItemOut])
     async def portal_feedback(
         credential: require,
+        app: hive,
         direction: Annotated[Literal["given", "received"], Query()],
         verdict: Annotated[Verdict | None, Query()] = None,
         entry_id: IdQuery = None,
@@ -691,7 +720,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
 
     @router.post("/portal/entries/{entry_id}/withdraw", response_model=EntryOut)
     async def portal_withdraw(
-        entry_id: str, request: PortalWithdrawRequest, credential: require
+        entry_id: str, request: PortalWithdrawRequest, credential: require, app: hive
     ) -> EntryOut:
         """Withdraw one of the agent's own entries from the portal (ADR
         0095): a reason is required and the withdrawal is audited as
@@ -710,6 +739,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
     @router.get("/admin/entries", response_model=list[EntryOut])
     async def admin_list_entries(
         credential: require,
+        app: hive,
         kind: Annotated[Kind | None, Query()] = None,
         tags: Annotated[list[str] | None, Query()] = None,
         entities: Annotated[list[str] | None, Query()] = None,
@@ -754,25 +784,31 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         return [EntryOut.from_entry(e) for e in entries]
 
     @router.get("/admin/entries/{entry_id}", response_model=EntryOut)
-    async def admin_get_entry(entry_id: str, credential: require) -> EntryOut:
+    async def admin_get_entry(entry_id: str, credential: require, app: hive) -> EntryOut:
         """One entry with its feedback, links and history always filled
         (ADR 0080): ``GET /v1/entries/{id}?history=true`` for the admin."""
         _require_admin(credential, "the admin entry read")
-        return await _entry_detail(entry_id, credential, history=True)
+        return await _entry_detail(app, entry_id, credential, history=True)
 
     @router.post("/admin/search", response_model=list[HitOut])
     async def admin_search(
-        request: AdminSearchRequest, credential: require, response: Response
+        request: AdminSearchRequest,
+        credential: require,
+        app: hive,
+        prometheus: prom,
+        response: Response,
     ) -> list[HitOut]:
         """``POST /v1/search`` for the admin, with a ``fleet_id`` filter
         (ADR 0080). Not counted in the search counters (ADR 0056); a
         degraded answer still counts for ``GET /metrics``."""
         _require_admin(credential, "the admin search")
-        return await _search(request, credential, response, fleet_id=request.fleet_id, count=False)
+        return await _search(
+            app, prometheus, request, credential, response, fleet_id=request.fleet_id, count=False
+        )
 
     @router.post("/admin/entries/{entry_id}/withdraw", response_model=EntryOut)
     async def admin_withdraw(
-        entry_id: str, request: WithdrawRequest, credential: require
+        entry_id: str, request: WithdrawRequest, credential: require, app: hive
     ) -> EntryOut:
         """Withdraw an entry as the admin (ADR 0080): the same call as
         ``POST /v1/entries/{id}/withdraw``, audited as ``entry.withdraw``."""
@@ -784,6 +820,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
     @router.get("/admin/activity", response_model=ActivityOut)
     async def admin_activity(
         credential: require,
+        app: hive,
         days: Annotated[int, Query(ge=MIN_ACTIVITY_DAYS, le=MAX_ACTIVITY_DAYS)] = 30,
     ) -> ActivityOut:
         """Who wrote and who reported, per agent, fleet and UTC day over
@@ -794,6 +831,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
     @router.get("/admin/feedback", response_model=list[FeedbackLogItemOut])
     async def admin_feedback(
         credential: require,
+        app: hive,
         reporter: ActorQuery = None,
         verdict: Annotated[Verdict | None, Query()] = None,
         author: ActorQuery = None,
@@ -821,6 +859,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
     @router.get("/admin/flagged", response_model=list[FlaggedEntryOut])
     async def admin_flagged(
         credential: require,
+        app: hive,
         fleet_id: IdQuery = None,
         older_than_days: Annotated[int, Query(ge=0, le=MAX_FLAG_AGE_DAYS)] = 0,
         orphaned: bool = False,
@@ -844,7 +883,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         return [FlaggedEntryOut.from_flagged(i) for i in items]
 
     @router.get("/admin/fleets/{fleet_id}/pins", response_model=PinsOut)
-    async def admin_fleet_pins(fleet_id: NameParam, credential: require) -> PinsOut:
+    async def admin_fleet_pins(fleet_id: NameParam, credential: require, app: hive) -> PinsOut:
         """One fleet's pinned entries as the admin sees them: ``GET /v1/pins``
         for any fleet, newest pin first, each with why it changed since it
         was pinned. 404 for a fleet that does not exist."""
@@ -855,7 +894,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         return PinsOut(fleet_id=fleet_id, pins=[PinnedOut.from_pinned(p) for p in pinned])
 
     @router.post("/admin/fleets", response_model=FleetOut, status_code=201)
-    async def create_fleet(payload: CreateFleetRequest, credential: require) -> FleetOut:
+    async def create_fleet(payload: CreateFleetRequest, credential: require, app: hive) -> FleetOut:
         """Create a named fleet (admin-gated, ADR 0012)."""
         try:
             fleet = await app.access_service.create_fleet(payload.name, credential)
@@ -868,7 +907,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         return FleetOut.from_fleet(fleet)
 
     @router.get("/admin/fleets", response_model=list[FleetOut])
-    async def list_fleets(credential: require) -> list[FleetOut]:
+    async def list_fleets(credential: require, app: hive) -> list[FleetOut]:
         """List fleets (admin-gated, ADR 0012)."""
         try:
             fleets = await app.access_service.list_fleets(credential)
@@ -877,7 +916,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         return [FleetOut.from_fleet(f) for f in fleets]
 
     @router.get("/admin/agents", response_model=list[AgentOut])
-    async def list_agents(credential: require) -> list[AgentOut]:
+    async def list_agents(credential: require, app: hive) -> list[AgentOut]:
         """List registered agents (admin-gated, ADR 0012)."""
         try:
             agents = await app.access_service.list_agents(credential)
@@ -887,7 +926,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
 
     @router.post("/admin/agents/{name}/activate", response_model=KeyIssuedOut)
     async def activate_agent(
-        name: NameParam, payload: ActivateAgentRequest, credential: require
+        name: NameParam, payload: ActivateAgentRequest, credential: require, app: hive
     ) -> KeyIssuedOut:
         """Activate a pending agent (admin-gated, ADR 0012): set trust
         level + home fleet, flip to ``active``, and issue the agent key
@@ -910,7 +949,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
 
     @router.patch("/admin/agents/{name}", response_model=AgentOut)
     async def update_agent(
-        name: NameParam, payload: UpdateAgentRequest, credential: require
+        name: NameParam, payload: UpdateAgentRequest, credential: require, app: hive
     ) -> AgentOut:
         """Change an agent's trust level and/or home fleet (admin-gated,
         ADR 0011 — SPEC §5.1 ``PATCH /v1/admin/agents/{name}``).
@@ -919,6 +958,8 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         Re-parenting never moves the agent's earlier ``fleet``-scoped
         entries (they stay in the fleet they were written into).
         """
+        # The key first: a non-admin must not learn whether a fleet exists.
+        _require_admin(credential, "changing an agent")
         if payload.trust_level is None and payload.home_fleet_id is None:
             raise api_error(422, "update_required", "supply trust_level and/or home_fleet_id")
         try:
@@ -950,7 +991,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         return AgentOut.from_agent(agent)
 
     @router.post("/admin/agents/{name}/revoke")
-    async def revoke_agent(name: NameParam, credential: require) -> None:
+    async def revoke_agent(name: NameParam, credential: require, app: hive) -> None:
         """Revoke an agent (admin-gated, ADRs 0012, 0028 — SPEC §5.1
         ``POST /v1/admin/agents/{name}/revoke``): the key is dead and the
         status is ``revoked``; on a pending agent this rejects the
@@ -968,6 +1009,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
     @router.get("/admin/audit-log", response_model=list[AuditRecordOut])
     async def audit_log(
         credential: require,
+        app: hive,
         actor: ActorQuery = None,
         action: Annotated[AuditAction | None, Query()] = None,
         since: Annotated[datetime | None, Query()] = None,
@@ -1001,7 +1043,7 @@ def build_router(app: HivemindApp, prometheus: PrometheusMetrics | None = None) 
         return [AuditRecordOut.from_record(r) for r in records]
 
     @router.post("/admin/org-key/rotate", response_model=KeyIssuedOut)
-    async def rotate_org_key(credential: require) -> KeyIssuedOut:
+    async def rotate_org_key(credential: require, app: hive) -> KeyIssuedOut:
         """Rotate the shared org key — closes registration to every
         prior org key; active agents are unaffected (ADR 0031).
         All prior org keys stop working; the new key is returned once.

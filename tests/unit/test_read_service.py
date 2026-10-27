@@ -13,6 +13,7 @@ import pytest
 
 from hivemind.domain.access import TrustLevel
 from hivemind.domain.entry import EntryDraft, EntryFilters, Kind
+from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.domain.validation import MAX_GET_IDS, InvalidInput
 from hivemind.ports import Credential
 from hivemind.services.read import EntryDetail, ReadService
@@ -42,6 +43,7 @@ async def _write(
     summary: str = "s",
     *,
     supersedes: tuple[str, ...] = (),
+    see_also: tuple[str, ...] = (),
 ) -> str:
     draft = EntryDraft(
         kind=Kind.FACT,
@@ -51,6 +53,7 @@ async def _write(
         scope="fleet",
         fleet_id=credential.home_fleet_id,
         supersedes=supersedes,
+        see_also=see_also,
     )
     written = await WriteService(store, make_embedder()).write_and_relate(
         draft, writer=credential.visibility()
@@ -81,16 +84,23 @@ async def test_entry_is_none_for_an_invisible_entry() -> None:
 async def test_entry_carries_feedback_and_links() -> None:
     store = make_store()
     entry_id = await _write(store, WRITER)
+    pointer_id = await _write(store, WRITER, see_also=(entry_id,))
+    await store.record_feedback(Feedback(entry_id, "bob", "b", Verdict.HELPFUL, "worked for me"))
     from hivemind.services.governance import GovernanceService
 
     service = _service(store, GovernanceService(store))
     detail = await service.entry(entry_id, visibility=ADMIN.visibility())
     assert isinstance(detail, EntryDetail)
     assert detail.entry.id == entry_id
-    assert detail.feedback is not None
-    assert detail.links is not None
+    assert (detail.feedback.helpful, detail.feedback.stale, detail.feedback.wrong) == (1, 0, 0)
+    assert [(f.user, f.note) for f in detail.feedback.recent] == [("bob", "worked for me")]
+    assert [e.id for e in detail.links.linked_from] == [pointer_id]
+    assert detail.links.see_also == ()
     assert detail.successors == ()
     assert detail.superseded == ()
+    pointer = await service.entry(pointer_id, visibility=ADMIN.visibility())
+    assert pointer is not None
+    assert [e.id for e in pointer.links.see_also] == [entry_id]
 
 
 async def test_entry_history_fills_the_chain() -> None:
@@ -168,14 +178,14 @@ async def test_list_validates_the_filters() -> None:
 
 async def test_list_applies_the_default_limit_when_omitted() -> None:
     store = make_store()
-    for i in range(7):
+    config = make_search_config()
+    for i in range(config.default_limit + 1):
         await _write(store, WRITER, summary=f"s{i}")
     service = _service(store, None)
-    # make_search_config()'s default_limit is 5; 7 entries do not all fit.
     entries = await service.list(
         EntryFilters(), limit=None, offset=0, visibility=ADMIN.visibility()
     )
-    assert len(entries) == 5
+    assert len(entries) == config.default_limit
 
 
 async def test_list_respects_an_explicit_limit_and_offset() -> None:
@@ -183,5 +193,8 @@ async def test_list_respects_an_explicit_limit_and_offset() -> None:
     for i in range(5):
         await _write(store, WRITER, summary=f"s{i}")
     service = _service(store, None)
-    entries = await service.list(EntryFilters(), limit=2, offset=1, visibility=ADMIN.visibility())
-    assert len(entries) == 2
+    everything = await service.list(
+        EntryFilters(), limit=5, offset=0, visibility=ADMIN.visibility()
+    )
+    page = await service.list(EntryFilters(), limit=2, offset=1, visibility=ADMIN.visibility())
+    assert [e.id for e in page] == [e.id for e in everything][1:3]

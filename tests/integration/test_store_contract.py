@@ -316,6 +316,22 @@ async def test_filters_combine_with_and(adapter: Adapter) -> None:
     assert await adapter.store.count_entries(EntryFilters(kind=Kind.FACT)) == 1
 
 
+async def test_occurred_range_includes_both_bounds(adapter: Adapter) -> None:
+    before = await write(adapter, "before", occurred_at=T0 - timedelta(days=1))
+    at_start = await write(adapter, "at the start", occurred_at=T0)
+    inside = await write(adapter, "inside", occurred_at=T0 + timedelta(days=1))
+    at_end = await write(adapter, "at the end", occurred_at=T0 + timedelta(days=2))
+    after = await write(adapter, "after", occurred_at=T0 + timedelta(days=3))
+    filters = EntryFilters(occurred_from=T0, occurred_to=T0 + timedelta(days=2))
+    assert {e.id for e in await adapter.store.list_entries(filters)} == {
+        at_start.id,
+        inside.id,
+        at_end.id,
+    }
+    assert await adapter.store.count_entries(filters) == 3
+    assert {before.id, after.id}.isdisjoint(e.id for e in await adapter.store.list_entries(filters))
+
+
 async def test_inactive_entries_are_hidden_unless_asked(adapter: Adapter) -> None:
     old = await write(adapter, "v1")
     new = await write(adapter, "v2", supersedes=(old.id,))
@@ -599,9 +615,11 @@ async def test_similar_entries_exclude_the_entry_and_inactive_ones(adapter: Adap
 async def test_similar_entries_without_an_excluded_id_returns_every_active_match(
     adapter: Adapter,
 ) -> None:
-    first = await write(adapter, "first", hot=3)
+    old = await write(adapter, "old", hot=3)
+    new = await write(adapter, "new", hot=3, supersedes=(old.id,))
+    other = await write(adapter, "other", hot=3)
     pairs = await adapter.store.similar_entries(adapter.vec(3), 5)
-    assert [eid for eid, _ in pairs] == [first.id]
+    assert {eid for eid, _ in pairs} == {new.id, other.id}
 
 
 async def test_keyword_ties_break_newest_first(adapter: Adapter) -> None:
