@@ -1,5 +1,7 @@
 # An author cannot rate its own entry
 
+> **Amended by [ADR 0113](0113-retire-an-agent-with-a-successor.md):** the refusal covers every entry the caller owns, including those of agents retired in its favour.
+
 > Amends [ADR 0053](0053-feedback-on-several-entries-at-once.md) (a batch is also refused when
 > it names the caller's own entry).
 

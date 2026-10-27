@@ -156,7 +156,7 @@ DESC_WHOAMI = (
     "Returns this key's kind (agent/org/admin/legacy), the "
     "agent's name, status (pending/active/revoked), trust level and home "
     "fleet, and what it may read (can_read) and which scopes it may write "
-    "(can_write_scopes). An empty "
+    "(can_write_scopes), plus inherits_from: agents whose memories you own. An empty "
     "can_write_scopes means you cannot write yet; an empty can_read means "
     "searches come back empty."
 )

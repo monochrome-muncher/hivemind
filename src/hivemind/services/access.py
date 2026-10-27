@@ -44,6 +44,7 @@ from hivemind.services.audit import actor_kind_of, record_admin_action
 from hivemind.services.errors import NameTaken as NameTaken  # re-exported: defined in errors
 from hivemind.services.errors import PermissionDenied
 from hivemind.services.fleet_merge import FleetMergeService
+from hivemind.services.successions import SuccessionService
 
 _NAME_TAKEN = "agent name is already taken (names are never reused; pick another name)"
 
@@ -104,6 +105,8 @@ class AccessService:
         self._authenticator = authenticator
         # Merging fleets and undoing it (ADR 0107): admin-gated there.
         self.merges = FleetMergeService(store)
+        # Retiring an agent with a successor and undoing it (ADR 0113).
+        self.successions = SuccessionService(store, self._require_authenticator)
 
     def _require_authenticator(self) -> Authenticator:
         """The authenticator for key management (absent in dev mode)."""
@@ -351,6 +354,7 @@ class AccessService:
             home_fleet_name=fleet_name,
             can_read=_readable(key_kind, credential),
             can_write_scopes=_writable_scopes(key_kind, credential),
+            inherits_from=credential.inherits_from if key_kind == "agent" else (),
         )
 
     # -- audit (ADR 0027) ------------------------------------------------------

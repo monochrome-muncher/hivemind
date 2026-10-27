@@ -56,6 +56,7 @@ def pin_refusal(
     limit: int,
     agent_limit: int | None,
     replaces: Sequence[str],
+    also_owned_by: Sequence[str] = (),
 ) -> PinRefusal | None:
     """The cap a pin would break, given the fleet's current ``pins``, or
     ``None``. Shared by both stores so they agree (ADR 0096).
@@ -65,7 +66,10 @@ def pin_refusal(
     count. The per-agent cap counts the pins ``pinned_by`` would hold
     afterwards: its other pins, less those ``replaces`` removes, plus this
     one, since pinning stamps ``pinned_by`` even on a refresh. ``None``
-    ``agent_limit`` (an admin) is exempt."""
+    ``agent_limit`` (an admin) is exempt. Pins by the agents in
+    ``also_owned_by`` (those that handed down to ``pinned_by``, ADR 0113)
+    count as ``pinned_by``'s own: they are never dropped, but they use up
+    its share."""
     current = list(pins)
     replaced = {old for old in replaces if old != entry_id}
     existing = any(p.entry_id == entry_id for p in current)
@@ -73,10 +77,11 @@ def pin_refusal(
     if not existing and not removed and len(current) >= limit:
         return PinRefusal.FLEET
     if agent_limit is not None:
+        owners = {pinned_by, *also_owned_by}
         kept = sum(
             1
             for p in current
-            if p.pinned_by == pinned_by and p.entry_id != entry_id and p.entry_id not in removed
+            if p.pinned_by in owners and p.entry_id != entry_id and p.entry_id not in removed
         )
         if kept + 1 > agent_limit:
             return PinRefusal.AGENT

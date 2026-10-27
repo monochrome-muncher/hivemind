@@ -103,9 +103,17 @@ from hivemind.domain.health import (
     TagDispersion,
 )
 from hivemind.domain.pin import Pin, PinRefusal, PinWrite, pin_refusal
+from hivemind.domain.succession import (
+    AgentRetired,
+    HandedDown,
+    Succession,
+    SuccessionRefused,
+    UnknownSuccession,
+)
 from hivemind.domain.upstream import UpstreamLink
 from hivemind.domain.validation import InvalidInput, canonical_uuid, is_valid_uuid
 from hivemind.ports import SupersedeConflict
+from hivemind.store.inheritance import INHERITED_FROM
 from hivemind.store.pool import PoolTimeouts, make_pool
 
 logger = logging.getLogger(__name__)
@@ -372,6 +380,31 @@ REVOKE_AGENT = (
     "UPDATE agents SET status = 'revoked' "
     "WHERE name = $1 AND status IN ('pending', 'active') RETURNING *"
 )
+# --- Successions SQL (ADR 0113) -------------------------------------------------
+
+LOCK_AGENT_ROWS = (
+    "SELECT name, status FROM agents WHERE name = ANY($1::text[]) ORDER BY name FOR UPDATE"
+)
+_SUCCESSION_COLUMNS = 'retired_agent, successor, "by", at'
+GET_SUCCESSION = f"SELECT {_SUCCESSION_COLUMNS} FROM successions WHERE retired_agent = $1"
+LIST_SUCCESSIONS = f"SELECT {_SUCCESSION_COLUMNS} FROM successions ORDER BY at DESC, retired_agent"
+INSERT_SUCCESSION = (
+    'INSERT INTO successions (retired_agent, successor, "by") VALUES ($1, $2, $3) '
+    f"RETURNING {_SUCCESSION_COLUMNS}"
+)
+DELETE_SUCCESSION = (
+    f"DELETE FROM successions WHERE retired_agent = $1 RETURNING {_SUCCESSION_COLUMNS}"
+)
+REVOKE_ACTIVE_AGENT = "UPDATE agents SET status = 'revoked' WHERE name = $1 AND status = 'active'"
+HANDED_DOWN = """
+SELECT count(*) FILTER (WHERE e.scope = 'self') AS self_notes,
+       count(*) FILTER (WHERE e.scope = 'fleet') AS fleet_memories,
+       count(*) FILTER (WHERE e.scope = 'fleet'
+                          AND e.fleet_id IS DISTINCT FROM $2::uuid) AS fleet_elsewhere
+  FROM entries e WHERE e.state = 'active' AND e.author = ANY($1::text[])
+"""
+HANDED_DOWN_PINS = "SELECT count(*) FROM pins WHERE pinned_by = ANY($1::text[])"
+
 SET_AGENT_LEVEL = "UPDATE agents SET trust_level = $2 WHERE name = $1 RETURNING *"
 SET_AGENT_FLEET = "UPDATE agents SET home_fleet_id = $2 WHERE name = $1 RETURNING *"
 
@@ -973,6 +1006,8 @@ def _filter_conditions(
             clauses.append("FALSE")  # no such fleet, so no entry (as MemoryStore)
     if filters.author is not None:
         add("author = ?", filters.author)
+    if filters.authors:
+        add("author = ANY(?::text[])", list(filters.authors))
     if filters.agent is not None:
         add("agent = ?", filters.agent)
     if filters.occurred_from is not None:
@@ -1041,19 +1076,22 @@ def _visibility_clause(
         params.append(value)
         return f"${len(params)}"
 
-    name_p = _p(visibility.name)
+    if visibility.inherited:
+        # ADR 0113: own = the caller's name or an agent that handed down to it.
+        own = f"{table}author = ANY({_p(list(visibility.owned))}::text[])"
+    else:
+        own = f"{table}author = {_p(visibility.name)}"
     if visibility.level == TrustLevel.PRIVILEGED:
         # L3 reads every fleet's entries.
         return (
-            f"({table}scope = 'org' OR ({table}scope = 'self' AND {table}author = {name_p}) "
-            f"OR {table}scope = 'fleet')"
+            f"({table}scope = 'org' OR ({table}scope = 'self' AND {own}) OR {table}scope = 'fleet')"
         )
     # L1/L2: fleet entries only if own or in the home fleet.
     home_p = _p(visibility.home_fleet_id)
     return (
         f"({table}scope = 'org' "
-        f"OR ({table}scope = 'self' AND {table}author = {name_p}) "
-        f"OR ({table}scope = 'fleet' AND ({table}author = {name_p} OR {table}fleet_id = {home_p})))"
+        f"OR ({table}scope = 'self' AND {own}) "
+        f"OR ({table}scope = 'fleet' AND ({own} OR {table}fleet_id = {home_p})))"
     )
 
 
@@ -1306,6 +1344,7 @@ class PgStore:
         limit: int,
         replaces: Sequence[str] = (),
         agent_limit: int | None = None,
+        also_owned_by: Sequence[str] = (),
     ) -> PinWrite | PinRefusal:
         if not is_valid_uuid(entry_id):
             return PinRefusal.FLEET
@@ -1316,7 +1355,9 @@ class PgStore:
             # Decide before deleting anything: a refusal must leave the
             # pins as they were.
             fleet_pins = [_row_to_pin(r) for r in await conn.fetch(LIST_PINS, fleet_id)]
-            refusal = pin_refusal(fleet_pins, entry_id, pinned_by, limit, agent_limit, replaces)
+            refusal = pin_refusal(
+                fleet_pins, entry_id, pinned_by, limit, agent_limit, replaces, also_owned_by
+            )
             if refusal is not None:
                 return refusal
             replaced = [
@@ -1838,6 +1879,8 @@ class PgStore:
             add("f.verdict = ?", filters.verdict.value)
         if filters.author is not None:
             add("e.author = ?", filters.author)
+        if filters.authors:
+            add("e.author = ANY(?::text[])", list(filters.authors))
         vis = _visibility_clause(visibility, params, "e.")
         if vis is not None:
             clauses.append(vis)
@@ -2251,6 +2294,12 @@ class PgStore:
         """
         async with self._transaction() as conn:
             await _refuse_merged(conn, home_fleet_id)
+            # Under the row lock a concurrent retirement holds, so a retired
+            # agent cannot slip back to active (ADR 0113).
+            await conn.fetchrow(LOCK_AGENT_ROWS, [name])
+            retired = await conn.fetchrow(GET_SUCCESSION, name)
+            if retired is not None:
+                raise AgentRetired(name, retired["successor"])
             row = await conn.fetchrow(ACTIVATE_AGENT, name, trust_level.value, home_fleet_id)
             if row is None:
                 await self._raise_for_status(conn, name, "activate")
@@ -2306,6 +2355,76 @@ class PgStore:
         if row is None:
             raise RuntimeError(f"agent {name!r} vanished between check and update")
         return _row_to_agent(row)
+
+    # -- successions (ADR 0113) ------------------------------------------------
+
+    async def retire_agent(self, retired: str, successor: str, by: str) -> Succession:
+        if retired == successor:
+            raise InvalidInput("an agent cannot be its own successor")
+        async with self._transaction() as conn:
+            # Both rows, in name order: two opposite retirements cannot deadlock.
+            status = {
+                r["name"]: AgentStatus(r["status"])
+                for r in await conn.fetch(LOCK_AGENT_ROWS, [retired, successor])
+            }
+            for name in (retired, successor):
+                if name not in status:
+                    raise UnknownAgent(f"unknown agent: {name}")
+            if status[retired] is AgentStatus.PENDING:
+                raise InvalidAgentStatus(retired, status[retired], "retire")
+            if status[successor] is not AgentStatus.ACTIVE:
+                raise InvalidAgentStatus(successor, status[successor], "make a successor of")
+            standing = await conn.fetchrow(GET_SUCCESSION, retired)
+            if standing is not None:
+                raise SuccessionRefused(
+                    f"agent {retired!r} is already retired in favour of {standing['successor']!r}"
+                )
+            if successor in await conn.fetchval(INHERITED_FROM, retired):
+                raise SuccessionRefused(
+                    f"{successor!r} already hands its memories down to {retired!r}, "
+                    "directly or through others: that would be a cycle"
+                )
+            row = await conn.fetchrow(INSERT_SUCCESSION, retired, successor, by)
+            await conn.execute(REVOKE_ACTIVE_AGENT, retired)
+        if row is None:
+            raise RuntimeError("succession row vanished between insert and read")
+        return replace(_row_to_succession(row), was=status[retired])
+
+    async def undo_succession(self, retired: str) -> Succession:
+        async with self._connection() as conn:
+            row = await conn.fetchrow(DELETE_SUCCESSION, retired)
+        if row is None:
+            raise UnknownSuccession(f"no succession retires {retired!r}")
+        return _row_to_succession(row)
+
+    async def get_succession(self, retired: str) -> Succession | None:
+        async with self._connection() as conn:
+            row = await conn.fetchrow(GET_SUCCESSION, retired)
+        return _row_to_succession(row) if row is not None else None
+
+    async def list_successions(self) -> list[Succession]:
+        async with self._connection() as conn:
+            rows = await conn.fetch(LIST_SUCCESSIONS)
+        return [_row_to_succession(r) for r in rows]
+
+    async def inherited_authors(self, name: str) -> tuple[str, ...]:
+        async with self._connection() as conn:
+            return tuple(await conn.fetchval(INHERITED_FROM, name))
+
+    async def handed_down(self, authors: Sequence[str], home_fleet_id: str | None) -> HandedDown:
+        names = list(authors)
+        home = home_fleet_id if home_fleet_id and is_valid_uuid(home_fleet_id) else None
+        async with self._connection() as conn:
+            counts = await conn.fetchrow(HANDED_DOWN, names, home)
+            pins = await conn.fetchval(HANDED_DOWN_PINS, names)
+        assert counts is not None  # an aggregate always returns a row
+        return HandedDown(
+            authors=tuple(names),
+            self_notes=int(counts["self_notes"]),
+            fleet_memories=int(counts["fleet_memories"]),
+            fleet_memories_elsewhere=int(counts["fleet_elsewhere"]),
+            pins=int(pins),
+        )
 
     # -- audit log (ADR 0027) -------------------------------------------------
 
@@ -2494,6 +2613,15 @@ def _row_to_merge(row: asyncpg.Record) -> FleetMergeRecord:
             for d in dropped
         ),
         undone_at=row["undone_at"],
+    )
+
+
+def _row_to_succession(row: asyncpg.Record) -> Succession:
+    return Succession(
+        retired_agent=row["retired_agent"],
+        successor=row["successor"],
+        by=row["by"],
+        at=row["at"],
     )
 
 

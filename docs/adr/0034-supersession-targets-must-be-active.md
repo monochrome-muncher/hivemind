@@ -1,5 +1,7 @@
 # A supersession target must be active
 
+> **Amended by [ADR 0113](0113-retire-an-agent-with-a-successor.md):** who may supersede follows ownership (the agents retired in the writer's favour count as the author); the active-target rule stands.
+
 ## Context
 
 ADR 0033 made supersession a claim within the audience the writer can

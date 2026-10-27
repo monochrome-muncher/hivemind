@@ -1,5 +1,7 @@
 # The admin key writes `self` or `org` entries
 
+> **Amended by [ADR 0113](0113-retire-an-agent-with-a-successor.md):** ownership by `author` (the admin's own notes) uses the same owned set; the admin has none inherited.
+
 > Amends [ADR 0033](0033-server-enforced-reads-provenance-and-supersession-scope.md)
 > (an admin supersedes anything).
 >

@@ -24,6 +24,7 @@ from hivemind.domain.feedback import (
 from hivemind.domain.fleet_merge import DroppedPin
 from hivemind.domain.pin import ChangeReason, Pin, PinnedEntry
 from hivemind.domain.recency import RecencyHint
+from hivemind.domain.succession import Succession
 from hivemind.domain.upstream import UpstreamChangeKind
 from hivemind.domain.validation import (
     MAX_FEEDBACK_IDS,
@@ -36,6 +37,7 @@ from hivemind.domain.validation import (
 from hivemind.services.chain import EntryLinks
 from hivemind.services.fleet_merge import MergePreview, MergeView
 from hivemind.services.search import Hit
+from hivemind.services.successions import RetirePreview
 from hivemind.services.write import RelatedEntry
 from hivemind.services.write_warnings import WriteWarning
 from hivemind.wire import round_score
@@ -860,6 +862,73 @@ class FleetMergeRecordOut(BaseModel):
         )
 
 
+class RetireRequest(BaseModel):
+    """``POST /v1/admin/agents/{name}/retire`` (ADR 0113). ``dry_run`` is
+    required, so a retirement is never started by leaving it out."""
+
+    successor: RefStr
+    dry_run: bool
+
+
+class SuccessionOut(BaseModel):
+    """One standing succession: ``retired_agent`` hands its memories to
+    ``successor``."""
+
+    retired_agent: str
+    successor: str
+    by: str
+    at: datetime
+
+    @classmethod
+    def from_succession(cls, succession: Succession) -> SuccessionOut:
+        return cls(
+            retired_agent=succession.retired_agent,
+            successor=succession.successor,
+            by=succession.by,
+            at=succession.at,
+        )
+
+
+class RetirePreviewOut(BaseModel):
+    """What a retirement would do (``dry_run: true``): the memories that
+    pass over, counted for the retired agent and every agent that already
+    hands down to it, and what the successor would own in all."""
+
+    dry_run: Literal[True] = True
+    retired_agent: str
+    successor: str
+    retired_status: str
+    revokes_retired: bool
+    passes_over_from: list[str]
+    self_notes: int
+    fleet_memories: int
+    fleet_memories_elsewhere: int
+    pins: int
+    successor_owns: list[str]
+
+    @classmethod
+    def from_preview(cls, preview: RetirePreview) -> RetirePreviewOut:
+        facts = preview.handed_down
+        return cls(
+            retired_agent=preview.retired.name,
+            successor=preview.successor.name,
+            retired_status=preview.retired.status.value,
+            revokes_retired=preview.revokes,
+            passes_over_from=list(facts.authors),
+            self_notes=facts.self_notes,
+            fleet_memories=facts.fleet_memories,
+            fleet_memories_elsewhere=facts.fleet_memories_elsewhere,
+            pins=facts.pins,
+            successor_owns=list(preview.successor_owns),
+        )
+
+
+class RetiredOut(SuccessionOut):
+    """A retirement that happened."""
+
+    dry_run: Literal[False] = False
+
+
 class WhoamiOut(BaseModel):
     """The calling key's standing (``GET /v1/whoami``)."""
 
@@ -872,6 +941,7 @@ class WhoamiOut(BaseModel):
     home_fleet_name: str | None
     can_read: list[str]
     can_write_scopes: list[str]
+    inherits_from: list[str]
 
     @classmethod
     def from_standing(cls, standing: Standing) -> WhoamiOut:

@@ -9,11 +9,12 @@ import {
 import { openEntry } from "./drawer.js";
 import { PIN_HEADERS, pinRow } from "./lists.js";
 import { mergeDialog, mergesCard } from "./merge.js";
+import { retireDialog, successionsCard } from "./retire.js";
 
 const AUDIT_ACTIONS = [
   "agent.register", "agent.activate", "agent.trust_level_set", "agent.home_fleet_set", "agent.revoke",
   "fleet.create", "fleet.rename", "fleet.merge", "fleet.unmerge", "org_key.rotate", "entry.withdraw", "entry.pin", "entry.unpin",
-  "admin_key.issue", "admin_key.revoke", "agent_key.issue", "agent_key.replace",
+  "admin_key.issue", "admin_key.revoke", "agent_key.issue", "agent_key.replace", "agent.retire", "agent.retire_undo",
 ];
 const AUDIT_PAGE = 50;
 
@@ -210,8 +211,10 @@ export function agentButtons(agent, refresh) {
     buttons.push(h("button", { type: "button", class: "btn btn-sm", text: "Edit", onclick: () => editDialog(agent, refresh) }));
     buttons.push(h("button", { type: "button", class: "btn btn-sm", text: "Replace key", onclick: () => replaceKeyDialog(agent, refresh) }));
     buttons.push(h("button", { type: "button", class: "btn btn-danger btn-sm", text: "Revoke", onclick: () => revokeDialog(agent, refresh) }));
+    buttons.push(h("button", { type: "button", class: "btn btn-danger btn-sm", text: "Retire…", title: "Hand its memories to a successor and revoke it", onclick: () => retireDialog(agent, refresh) }));
   } else if (agent.status === "revoked") {
     buttons.push(h("button", { type: "button", class: "btn btn-sm", text: "Re-activate", onclick: () => activateDialog(agent, refresh) }));
+    buttons.push(h("button", { type: "button", class: "btn btn-sm", text: "Retire…", title: "Hand its memories to a successor", onclick: () => retireDialog(agent, refresh) }));
   }
   return buttons;
 }
@@ -395,7 +398,9 @@ export async function viewKeys(root) {
 // --- agents ---------------------------------------------------------------------------------
 
 export async function viewAgents(root) {
-  const [, metrics, activity] = await Promise.all([loadAgentsAndFleets(), fetchMetrics(), fetchActivity(state.days)]);
+  const [, metrics, activity, successions] = await Promise.all([
+    loadAgentsAndFleets(), fetchMetrics(), fetchActivity(state.days), optional(() => api("GET", "admin/successions")),
+  ]);
   // ADR 0068: stale/wrong reports and how many a later supersession confirmed.
   const flagged = (metrics && metrics.feedback && metrics.feedback.by_agent) || {};
   const act = new Map(((activity && activity.agents) || []).map((a) => [a.name, a]));
@@ -434,6 +439,7 @@ export async function viewAgents(root) {
   fill(root, 
     pageHead("Agents", `${state.agents.length} registered`, refreshButton()),
     card(null, holder, { head: [h("div", { class: "filters" }, search, statusFilter)], flush: true }),
+    successions && successions.length ? successionsCard(successions) : null,
     activity ? null : unavailable("Per-agent activity"));
 }
 

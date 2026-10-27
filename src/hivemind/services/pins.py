@@ -44,7 +44,8 @@ class PinService:
         """Pin an active fleet entry to its own fleet. A contributor or
         privileged agent of that fleet or an admin may; a fleet holds at most
         ``MAX_PINS_PER_FLEET`` pins and an agent at most
-        ``MAX_PINS_PER_AGENT`` of them (an admin is exempt from the latter).
+        ``MAX_PINS_PER_AGENT`` of them (an admin is exempt from the latter;
+        the pins of agents that handed down to the caller count as its own, ADR 0113).
         Pinning stamps a fresh ``pinned_at`` and ``pinned_by``, so
         re-pinning a pinned entry refreshes its pin, and re-pinning the
         version an older pin now shows moves that pin to it; either way the
@@ -68,6 +69,7 @@ class PinService:
             MAX_PINS_PER_FLEET,
             [p.entry_id for p in shown],
             None if credential.is_admin else MAX_PINS_PER_AGENT,
+            credential.inherits_from,
         )
         if written is PinRefusal.AGENT:
             raise InvalidInput(

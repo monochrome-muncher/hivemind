@@ -1,5 +1,7 @@
 # `hive_whoami`: an agent can read its own standing
 
+> **Amended by [ADR 0113](0113-retire-an-agent-with-a-successor.md):** `whoami` also returns `inherits_from`, the agents whose memories the caller owns after they were retired in its favour.
+
 ## Context
 
 An agent could not find out what it is allowed to do. Its trust level

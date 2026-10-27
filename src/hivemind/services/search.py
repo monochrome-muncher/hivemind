@@ -37,6 +37,7 @@ from hivemind.ports import Embedder, Store
 from hivemind.retrieval.mmr import mmr_order
 from hivemind.retrieval.rrf import rrf_fuse
 from hivemind.retrieval.scoring import entry_score, feedback_quality
+from hivemind.services.ownership import own_author_filter
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,6 +217,8 @@ class SearchService:
         check_pagination(limit, offset)
         filters = filters or EntryFilters()
         filters.validate()
+        if visibility is not None:
+            filters = own_author_filter(filters, visibility)
         limit = limit if limit is not None else self._config.default_limit
         offset = offset or 0
         top_k = self._config.candidate_top_k

@@ -61,6 +61,10 @@ _ALLOWED = allowlist(
         ("PATCH", r"admin/fleets/[^/]+"),
         ("GET", r"admin/fleet-merges"),
         ("POST", r"admin/fleet-merges/[^/]+/undo"),
+        # Retiring an agent with a successor, and undoing it (admin-key only on the API side).
+        ("POST", r"admin/agents/[^/]+/retire"),
+        ("GET", r"admin/successions"),
+        ("POST", r"admin/successions/[^/]+/undo"),
     )
 )
 

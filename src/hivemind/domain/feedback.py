@@ -164,6 +164,8 @@ class FeedbackLogFilters:
     reporter: str | None = None
     verdict: Verdict | None = None
     author: str | None = None
+    # ADR 0113: any of these authors (see ``EntryFilters.authors``).
+    authors: tuple[str, ...] = ()
     fleet_id: str | None = None
     entry_id: str | None = None
 

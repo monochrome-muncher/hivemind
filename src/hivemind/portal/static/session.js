@@ -48,7 +48,9 @@ export function refusal(standing) {
   return "That key does not belong to a registered agent.";
 }
 
-export const isMine = (entry) => Boolean(state.me && entry && entry.author === state.me.name);
+// Its own memories are the ones it wrote and the ones agents it succeeded wrote (ADR 0113).
+export const isMine = (entry) => Boolean(state.me && entry
+  && (entry.author === state.me.name || (state.me.inherits_from || []).includes(entry.author)));
 
 /** A fleet's name as this agent can know it: its home fleet by name, any other by a short id. */
 export function fleetName(id) {

@@ -76,8 +76,12 @@ from hivemind.api.schemas import (
     RegisteredAgentOut,
     RelatedOut,
     RenameFleetRequest,
+    RetiredOut,
+    RetirePreviewOut,
+    RetireRequest,
     SearchesMetrics,
     SearchRequest,
+    SuccessionOut,
     UnpinOut,
     UpdateAgentRequest,
     WarningOut,
@@ -98,6 +102,7 @@ from hivemind.domain.entry import Entry, EntryFilters, Kind, Source
 from hivemind.domain.feedback import FeedbackLogFilters, Verdict
 from hivemind.domain.fleet_merge import FleetMergeRefused, UnknownFleetMerge
 from hivemind.domain.recency import RecencyHint
+from hivemind.domain.succession import AgentRetired, SuccessionRefused, UnknownSuccession
 from hivemind.domain.validation import (
     MAX_ID_CHARS,
     MAX_IDENTITY_CHARS,
@@ -1080,6 +1085,8 @@ def build_router() -> APIRouter:
             raise api_error(409, "invalid_status", str(exc)) from exc
         except FleetMerged as exc:  # ADR 0107
             raise api_error(409, "fleet_merged", str(exc)) from exc
+        except AgentRetired as exc:  # ADR 0113
+            raise api_error(409, "agent_retired", str(exc)) from exc
         return KeyIssuedOut(key=key)
 
     @router.post("/admin/agents/{name}/key", response_model=KeyIssuedOut)
@@ -1158,6 +1165,63 @@ def build_router() -> APIRouter:
             raise api_error(404, "not_found", str(exc)) from exc
         except InvalidAgentStatus as exc:
             raise api_error(409, "invalid_status", str(exc)) from exc
+
+    @router.post(
+        "/admin/agents/{name}/retire",
+        response_model=RetirePreviewOut | RetiredOut,
+    )
+    async def retire_agent(
+        name: NameParam, payload: RetireRequest, credential: require, app: hive
+    ) -> RetirePreviewOut | RetiredOut:
+        """Retire an agent in favour of a successor (admin-gated, audited
+        ``agent.retire``, ADR 0113): the successor owns every memory the agent
+        wrote (reads, supersedes and withdraws them, cannot rate them) and the
+        agent is revoked in the same step. ``author`` on the memories stays
+        the retired agent. ``dry_run: true`` changes nothing and answers the
+        preview (counts that pass over, what the successor would own).
+        404 unknown agent, 409 ``invalid_status`` (the successor is not
+        active, the agent is pending) / ``succession_refused`` (already
+        retired, or a cycle), 422 the same agent twice."""
+        _require_admin(credential, "retiring an agent")
+        successions = app.access_service.successions
+        try:
+            if payload.dry_run:
+                preview = await successions.preview(name, payload.successor, credential)
+                return RetirePreviewOut.from_preview(preview)
+            succession = await successions.retire(name, payload.successor, credential)
+        except PermissionDenied as exc:
+            raise api_error(403, "forbidden", str(exc)) from exc
+        except InvalidInput as exc:
+            raise api_error(422, "invalid_input", str(exc)) from exc
+        except UnknownAgent as exc:
+            raise api_error(404, "not_found", str(exc)) from exc
+        except InvalidAgentStatus as exc:
+            raise api_error(409, "invalid_status", str(exc)) from exc
+        except SuccessionRefused as exc:
+            raise api_error(409, "succession_refused", str(exc)) from exc
+        return RetiredOut.model_validate(SuccessionOut.from_succession(succession).model_dump())
+
+    @router.get("/admin/successions", response_model=list[SuccessionOut])
+    async def list_successions(credential: require, app: hive) -> list[SuccessionOut]:
+        """Standing successions, newest first (admin-gated, ADR 0113)."""
+        _require_admin(credential, "the successions")
+        rows = await app.access_service.successions.list_successions(credential)
+        return [SuccessionOut.from_succession(s) for s in rows]
+
+    @router.post("/admin/successions/{retired}/undo", response_model=SuccessionOut)
+    async def undo_succession(retired: NameParam, credential: require, app: hive) -> SuccessionOut:
+        """Undo a retirement (admin-gated, audited ``agent.retire_undo``, ADR
+        0113): the successor stops owning the memories. The retired agent
+        stays revoked; activating it again issues a new key. 404 when no
+        succession retires that agent."""
+        _require_admin(credential, "undoing a retirement")
+        try:
+            succession = await app.access_service.successions.undo(retired, credential)
+        except PermissionDenied as exc:
+            raise api_error(403, "forbidden", str(exc)) from exc
+        except UnknownSuccession as exc:
+            raise api_error(404, "not_found", str(exc)) from exc
+        return SuccessionOut.from_succession(succession)
 
     @router.get("/admin/audit-log", response_model=list[AuditRecordOut])
     async def audit_log(
