@@ -815,6 +815,10 @@ def test_grafana_dashboard_ships_with_the_monitoring_tree() -> None:
     )
     exprs = [t["expr"] for p in dashboard["panels"] for t in p.get("targets", [])]
     assert exprs
+    # One installation at a time: the pool-wide gauges are read with max(), so
+    # an "All" choice would show whichever namespace has the larger value.
+    (ns,) = [v for v in dashboard["templating"]["list"] if v["name"] == "namespace"]
+    assert ns["includeAll"] is False and ns["multi"] is False and "allValue" not in ns
     # Every query is scoped by the namespace variable and reads a Hivemind series.
     assert all('namespace=~"$namespace"' in e and "hivemind_" in e for e in exprs)
     # The pool-wide counters repeat on every api replica: never summed raw.
