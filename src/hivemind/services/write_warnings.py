@@ -29,7 +29,7 @@ _IDS_IN_MESSAGE = 3
 # (ADR 0087). Measured on Qwen3-Embedding-8B: 0.90 catches most versions of
 # one fact and almost no distinct same-system facts, which 0.85 still
 # catches. Tuned for Qwen3; advisory only, the writer judges.
-_NEAR_DUPLICATE_SIMILARITY = 0.90
+NEAR_DUPLICATE_SIMILARITY = 0.90
 
 # A related open question or anomaly at or above this similarity may be
 # answered by the new entry (ADR 0099). Provisional: to be checked against
@@ -82,7 +82,7 @@ def near_duplicate_warning(
     if not candidates:
         return ()
     top = max(candidates, key=lambda r: r.similarity)
-    if top.similarity < _NEAR_DUPLICATE_SIMILARITY:
+    if top.similarity < NEAR_DUPLICATE_SIMILARITY:
         return ()
     return (
         WriteWarning(

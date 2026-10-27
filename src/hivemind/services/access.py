@@ -24,6 +24,7 @@ from hivemind.domain.access import (
     Agent,
     AgentStatus,
     Fleet,
+    FleetMerged,
     InvalidAgentStatus,
     Standing,
     TrustLevel,
@@ -42,6 +43,7 @@ from hivemind.ports import Authenticator, Credential, Store
 from hivemind.services.audit import record_admin_action
 from hivemind.services.errors import NameTaken as NameTaken  # re-exported: defined in errors
 from hivemind.services.errors import PermissionDenied
+from hivemind.services.fleet_merge import FleetMergeService
 
 _NAME_TAKEN = "agent name is already taken (names are never reused; pick another name)"
 
@@ -100,6 +102,8 @@ class AccessService:
     def __init__(self, store: Store, authenticator: Authenticator | None = None) -> None:
         self._store = store
         self._authenticator = authenticator
+        # Merging fleets and undoing it (ADR 0107): admin-gated there.
+        self.merges = FleetMergeService(store)
 
     def _require_authenticator(self) -> Authenticator:
         """The authenticator for key management (absent in dev mode)."""
@@ -158,9 +162,14 @@ class AccessService:
 
     async def _require_fleet(self, fleet_id: str) -> None:
         """A home-fleet reference must name a real fleet (SPEC §12.1);
-        checked before any mutation so a typo is a typed 404."""
-        if await self._store.get_fleet(fleet_id) is None:
+        checked before any mutation so a typo is a typed 404. A merged fleet
+        takes no members (ADR 0107): ``FleetMerged``."""
+        fleet = await self._store.get_fleet(fleet_id)
+        if fleet is None:
             raise UnknownFleet(f"unknown fleet: {fleet_id}")
+        if fleet.merged_into is not None:
+            target = await self._store.get_fleet(fleet.merged_into)
+            raise FleetMerged(fleet.id, fleet.merged_into, target.name if target else None)
 
     async def activate(
         self,
@@ -260,9 +269,14 @@ class AccessService:
         self._require_admin(credential)
         return await self._store.list_agents()
 
-    async def list_fleets(self, credential: Credential) -> list[Fleet]:
+    async def list_fleets(
+        self, credential: Credential, *, include_merged: bool = False
+    ) -> list[Fleet]:
+        """Fleets (admin-gated); merged ones only with ``include_merged``
+        (ADR 0107)."""
         self._require_admin(credential)
-        return await self._store.list_fleets()
+        fleets = await self._store.list_fleets()
+        return fleets if include_merged else [f for f in fleets if f.merged_into is None]
 
     async def list_audit(
         self, credential: Credential, filters: AuditFilters, limit: int

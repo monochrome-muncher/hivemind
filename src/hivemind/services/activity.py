@@ -61,6 +61,11 @@ class ActivityService:
         self._lock = asyncio.Lock()
         self._cache: dict[tuple[int, date], tuple[float, datetime, Activity]] = {}
 
+    def invalidate(self) -> None:
+        """Drop the cached scans, so the next report scans again (after a
+        fleet merge or undo moved the entries)."""
+        self._cache.clear()
+
     async def _activity(self, days: int) -> tuple[datetime, Activity]:
         """The grouped scans for ``days``, reused within the TTL. One scan
         at a time; concurrent callers wait and reuse its result. A store
@@ -84,7 +89,7 @@ class ActivityService:
         """The report: zero-filled ``daily``, ``totals``, one row per agent
         name and one per fleet (see ``ActivityOut``)."""
         agents = await self._store.list_agents()
-        fleets = await self._store.list_fleets()
+        fleets = [f for f in await self._store.list_fleets() if f.merged_into is None]
         since, activity = await self._activity(days)
 
         by_day = {d.day: d for d in activity.days}

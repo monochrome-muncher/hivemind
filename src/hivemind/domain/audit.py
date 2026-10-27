@@ -46,7 +46,7 @@ class ActorKind(StrEnum):
 
 class AuditAction(StrEnum):
     """The audited action vocabulary (the ``audit_log_action_check``
-    constraint, migrations ``0005``, ``0009`` and ``0014``)."""
+    constraint, migrations ``0005``, ``0009``, ``0014`` and ``0017``)."""
 
     AGENT_REGISTER = "agent.register"  # ADR 0046
     AGENT_ACTIVATE = "agent.activate"
@@ -61,6 +61,8 @@ class AuditAction(StrEnum):
     AGENT_KEY_ISSUE = "agent_key.issue"
     ENTRY_PIN = "entry.pin"  # ADR 0076
     ENTRY_UNPIN = "entry.unpin"  # ADR 0076
+    FLEET_MERGE = "fleet.merge"  # ADR 0107
+    FLEET_UNMERGE = "fleet.unmerge"  # ADR 0107
 
 
 # The key fingerprint is the first 12 hex chars of the stored SHA-256

@@ -46,6 +46,13 @@ from hivemind.domain.feedback import (
     FlagCount,
     FlaggedEntry,
 )
+from hivemind.domain.fleet_merge import (
+    DuplicateScan,
+    FleetFacts,
+    FleetMergeRecord,
+    MergeOutcome,
+    UnmergeOutcome,
+)
 from hivemind.domain.health import Convergence, FleetHealth
 from hivemind.domain.pin import Pin, PinRefusal, PinWrite
 from hivemind.domain.upstream import UpstreamLink
@@ -82,7 +89,9 @@ class Store(Protocol):
         target is unknown or no longer active, nothing is written and
         ``SupersedeConflict`` is raised. ``draft.see_also`` links (ADR
         0057) go in the same transaction; the caller has checked read
-        access, and ids naming no entry are dropped.
+        access, and ids naming no entry are dropped. A fleet-scoped draft
+        aimed at a merged fleet raises ``FleetMerged`` and writes nothing
+        (ADR 0107).
         """
         ...
 
@@ -156,6 +165,7 @@ class Store(Protocol):
         afterwards (a refresh restamps ``pinned_by``, so it counts; ``None``
         is exempt). Both are checked atomically (ADR 0096; ``pin_refusal``).
         A malformed ``entry_id`` is refused as ``FLEET`` too, writing nothing.
+        A merged ``fleet_id`` raises ``FleetMerged`` (ADR 0107).
         The caller has checked the entry and the permission."""
         ...
 
@@ -290,9 +300,67 @@ class Store(Protocol):
         """Create a named fleet. ``FleetExists`` if the name already exists."""
         ...
 
-    async def list_fleets(self) -> list[Fleet]: ...
+    async def list_fleets(self) -> list[Fleet]:
+        """Every fleet, merged ones included (``Fleet.merged_into``)."""
+        ...
 
     async def get_fleet(self, fleet_id: str) -> Fleet | None: ...
+
+    # -- fleet merge (ADR 0107) ------------------------------------------------
+
+    async def fleet_facts(self, fleet_id: str) -> FleetFacts:
+        """The agents whose home fleet is ``fleet_id`` and its entries by
+        state (a state with none is absent)."""
+        ...
+
+    async def duplicate_pairs(
+        self, fleet_id: str, other_id: str, threshold: float, cap: int
+    ) -> DuplicateScan:
+        """For the newest ``cap`` active entries of ``fleet_id`` that have a
+        vector, the nearest active entry of ``other_id`` when its cosine
+        similarity is at least ``threshold``, highest similarity first.
+        ``truncated`` when ``fleet_id`` had more such entries than ``cap``.
+        Approximate on Postgres, like ``search_vector`` (ADR 0025)."""
+        ...
+
+    async def merge_fleets(
+        self,
+        source_id: str,
+        *,
+        target_fleet_id: str | None = None,
+        new_fleet_name: str | None = None,
+        keep_pin_ids: Sequence[str] | None = None,
+        expected_pin_ids: Sequence[str] | None = None,
+        merged_by: str,
+    ) -> MergeOutcome:
+        """Merge ``source_id`` into an existing target or a new fleet, in one
+        transaction (ADR 0107): re-file its entries (any state), move its
+        agents, re-key the kept pins and unpin the rest, add its search
+        counters to the target's and mark it merged. Records everything
+        moved so ``unmerge_fleet`` can reverse it. ``UnknownFleet`` for an
+        unknown side, ``FleetMerged`` when either is already merged,
+        ``FleetMergeRefused`` for the same fleet on both sides,
+        ``FleetExists`` for a taken new name, ``InvalidInput`` for exactly
+        neither or both targets, or a pin choice that ``choose_pins``
+        refuses. ``expected_pin_ids`` (all pins the preview showed): the
+        merge is refused (``FleetMergeRefused``) when the pins now differ.
+        A write into a fleet being merged waits briefly, then raises
+        ``FleetBusy`` (retryable). Nothing changes on a refusal."""
+        ...
+
+    async def unmerge_fleet(self, merge_id: str) -> UnmergeOutcome:
+        """Undo a merge (ADR 0107): the recorded entries still in the target
+        go back to the source, as do the recorded agents still there, the
+        pins on those entries and the dropped pins that fit. Search counters
+        stay summed. ``UnknownFleetMerge`` for an unknown id,
+        ``FleetMergeRefused`` when ``undo_refusal`` says no."""
+        ...
+
+    async def list_fleet_merges(self, limit: int) -> list[FleetMergeRecord]:
+        """Recorded merges, newest first, at most ``limit`` of them."""
+        ...
+
+    async def get_fleet_merge(self, merge_id: str) -> FleetMergeRecord | None: ...
 
     # -- agent registration / activation (ADR 0012) ----------------------------
 
@@ -312,7 +380,8 @@ class Store(Protocol):
     ) -> Agent:
         """Atomically flip a pending or revoked agent to ``active`` with a
         trust level and home fleet (ADRs 0012, 0028). ``UnknownAgent`` if
-        unknown; ``InvalidAgentStatus`` if already ``active``."""
+        unknown; ``InvalidAgentStatus`` if already ``active``;
+        ``FleetMerged`` if the home fleet was merged (ADR 0107)."""
         ...
 
     async def revoke_agent(self, name: str) -> Agent:
@@ -331,7 +400,8 @@ class Store(Protocol):
     async def set_agent_home_fleet(self, name: str, fleet_id: str) -> Agent:
         """Re-parent an agent to a new home fleet. The agent's
         earlier ``fleet``-scoped entries stay in the fleet they were written
-        into (never re-parented). ``UnknownAgent`` if unknown."""
+        into (never re-parented). ``UnknownAgent`` if unknown;
+        ``FleetMerged`` if the fleet was merged (ADR 0107)."""
         ...
 
     # -- audit log (ADR 0027, SPEC §12.5) ------------------------------------

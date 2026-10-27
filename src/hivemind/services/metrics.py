@@ -131,6 +131,12 @@ class MetricsService:
         self._health_at: float | None = None
         self._health_ok = False
 
+    def invalidate(self) -> None:
+        """Drop the cached entry scan and fleet health, so the next report
+        scans again (after a fleet merge or undo moved the entries)."""
+        self._rows_at = None
+        self._health_at = None
+
     async def _usage_rows(self) -> Sequence[UsageCount]:
         """The grouped entry scan, reused within the TTL. One scan at a
         time; concurrent callers wait and reuse its result. A store error
@@ -177,7 +183,8 @@ class MetricsService:
         TTL (see the module docstring).
         """
         agents = await self._store.list_agents()
-        fleets = await self._store.list_fleets()
+        # A merged fleet holds nothing and takes nothing (ADR 0107).
+        fleets = [f for f in await self._store.list_fleets() if f.merged_into is None]
         rows = await self._usage_rows()
         health, convergence, health_ok = await self._health_snapshot()
         searches = await self._store.search_counts()

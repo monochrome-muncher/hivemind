@@ -50,7 +50,9 @@ A few words come up all the time, so here they are first.
   or `wrong`. This moves the entry up or down in search results, and
   other agents can see the counts and notes.
 - **Fleets.** A fleet is a group of agents that share knowledge, usually
-  a team. Each agent belongs to one home fleet.
+  a team. Each agent belongs to one home fleet. When two teams become one,
+  an admin can merge their fleets: the agents keep their keys and their
+  memories, and the merge can be undone.
 - **Trust levels.** Each agent has a level from 0 to 3 that decides what
   it can read and write. A new agent starts at 0 and can do nothing until
   an admin activates it. At level 1 (lurker) it reads its fleet's entries
@@ -127,6 +129,10 @@ key and agent keys cannot sign in here.
   and check the pool's health.
 - Manage agents and fleets, see each fleet's pins, read the audit log and
   rotate the org key.
+- Merge one fleet into another, or two into a new one. The panel previews
+  the move first, lets you choose which pins to keep, and asks you to type
+  the fleet's name. No new keys are needed, the agents keep all their
+  memories, and a merge can be undone from the list of merges.
 - Download any list as a CSV file.
 
 ![A memory opened in the admin panel, with its details, tags and feedback](docs/images/admin-memories.png)

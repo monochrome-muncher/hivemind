@@ -28,9 +28,11 @@ from hivemind.config import Settings
 from hivemind.domain.access import (
     AgentStatus,
     FleetExists,
+    FleetMerged,
     InvalidAgentStatus,
     TrustLevel,
     UnknownAgent,
+    UnknownFleet,
     Visibility,
 )
 from hivemind.domain.audit import ActorKind, AuditAction, AuditEvent, AuditFilters
@@ -55,8 +57,10 @@ from hivemind.domain.feedback import (
     Verdict,
     is_contested,
 )
+from hivemind.domain.fleet_merge import FleetMergeRefused, UnknownFleetMerge
 from hivemind.domain.health import HealthCounts
 from hivemind.domain.pin import PinRefusal, PinWrite
+from hivemind.domain.validation import InvalidInput
 from hivemind.memstore import MemoryStore, cosine_similarity
 from hivemind.ports import Store, SupersedeConflict
 from hivemind.store import PgStore
@@ -66,7 +70,7 @@ NO_SUCH_ID = "00000000-0000-4000-8000-00000000dead"
 
 _TABLES = (
     "TRUNCATE audit_log, credentials, agents, fleets, entries, feedbacks, "
-    "search_counts, entry_links, pins"
+    "search_counts, entry_links, pins, fleet_merges, fleet_merge_entries"
 )
 
 
@@ -2231,3 +2235,308 @@ async def test_activity_aggregates_hand_computed(adapter: Adapter) -> None:
 async def test_activity_of_an_empty_pool(adapter: Adapter) -> None:
     got = await adapter.store.activity(T0)
     assert got.authors == got.reporters == got.received == got.days == ()
+
+
+# -- fleet merge (ADR 0107) -------------------------------------------------------------
+
+
+async def _two_fleets(adapter: Adapter) -> tuple[str, str]:
+    return (await adapter.store.create_fleet("a")).id, (await adapter.store.create_fleet("b")).id
+
+
+async def _fleet_entry(adapter: Adapter, summary: str, fleet_id: str, hot: int = 0) -> Entry:
+    return await write(adapter, summary, hot=hot, scope="fleet", fleet_id=fleet_id)
+
+
+async def _pinned(
+    adapter: Adapter, summary: str, fleet_id: str, hot: int = 0, by: str | None = None
+) -> str:
+    """Pin a new entry, each by its own agent unless ``by`` names one."""
+    entry = await _fleet_entry(adapter, summary, fleet_id, hot)
+    written = await adapter.store.pin_entry(fleet_id, entry.id, by or f"by-{summary}", limit=99)
+    assert isinstance(written, PinWrite)
+    return entry.id
+
+
+async def test_fleet_facts_count_agents_and_entries_by_state(adapter: Adapter) -> None:
+    store = adapter.store
+    a, b = await _two_fleets(adapter)
+    await _fleet_entry(adapter, "live", a)
+    gone = await _fleet_entry(adapter, "gone", a)
+    await store.withdraw_entry(gone.id, "x", by_user="alice")
+    await _fleet_entry(adapter, "theirs", b)
+    await store.register_agent("amy")
+    await store.activate_agent("amy", trust_level=TrustLevel.LURKER, home_fleet_id=a)
+    facts = await store.fleet_facts(a)
+    assert (facts.agents, dict(facts.entries)) == (1, {"active": 1, "withdrawn": 1})
+    empty = await store.fleet_facts(NO_SUCH_ID)
+    assert (empty.agents, dict(empty.entries)) == (0, {})
+    assert (await store.fleet_facts("not-a-uuid")).agents == 0
+
+
+async def test_duplicate_pairs_pair_each_entry_with_its_nearest_in_the_other_fleet(
+    adapter: Adapter,
+) -> None:
+    store = adapter.store
+    a, b = await _two_fleets(adapter)
+    mine = await _fleet_entry(adapter, "mine", a, hot=1)
+    await _fleet_entry(adapter, "unmatched", a, hot=5)
+    twin = await _fleet_entry(adapter, "twin", b, hot=1)
+    await _fleet_entry(adapter, "other", b, hot=9)
+    gone = await _fleet_entry(adapter, "withdrawn twin", b, hot=5)
+    await store.withdraw_entry(gone.id, None, by_user="alice")
+    scan = await store.duplicate_pairs(a, b, 0.9, 100)
+    assert [(p.entry_id, p.match_id) for p in scan.pairs] == [(mine.id, twin.id)]
+    assert scan.pairs[0].similarity == pytest.approx(1.0, abs=1e-4)
+    assert (scan.looked_up, scan.truncated) == (2, False)
+    capped = await store.duplicate_pairs(a, b, 0.9, 1)
+    assert (capped.looked_up, capped.truncated) == (1, True)
+    assert (await store.duplicate_pairs(a, NO_SUCH_ID, 0.9, 10)).pairs == ()
+    assert (await store.duplicate_pairs("not-a-uuid", b, 0.9, 10)).pairs == ()
+
+
+async def test_merge_fleets_moves_what_the_design_says(adapter: Adapter) -> None:
+    store = adapter.store
+    a, b = await _two_fleets(adapter)
+    live = await _fleet_entry(adapter, "live", a)
+    old = await _fleet_entry(adapter, "old", a)
+    newer = await store.create_entry(
+        draft("newer", scope="fleet", fleet_id=a, supersedes=(old.id,)), adapter.vec(0), "m"
+    )
+    gone = await _fleet_entry(adapter, "gone", a)
+    await store.withdraw_entry(gone.id, None, by_user="alice")
+    theirs = await _fleet_entry(adapter, "theirs", b)
+    org = await write(adapter, "org entry")
+    await store.register_agent("amy")
+    await store.activate_agent("amy", trust_level=TrustLevel.PRIVILEGED, home_fleet_id=a)
+    pin_a = await _pinned(adapter, "pinned a", a)
+    pin_b = await _pinned(adapter, "pinned b", b)
+    await store.record_search(a, empty=True)
+    await store.record_search(a, empty=False, explore=True)
+    await store.record_search(b, empty=False)
+
+    out = await store.merge_fleets(a, target_fleet_id=b, merged_by="admin:1")
+
+    assert (out.entries_moved, out.agents_moved, out.target_created) == (5, 1, False)
+    assert out.target.id == b and out.record.source_fleet_id == a
+    assert (out.record.merged_by, out.record.moved_agents) == ("admin:1", ("amy",))
+    for e in (live, old, newer, gone, theirs):
+        got = await store.get_entry(e.id)
+        assert got is not None and got.fleet_id == b
+    assert (await store.get_entry(org.id)).fleet_id is None  # type: ignore[union-attr]
+    amy = await store.get_agent("amy")
+    assert amy is not None and amy.home_fleet_id == b and amy.trust_level is TrustLevel.PRIVILEGED
+    assert {p.entry_id for p in await store.list_pins(b)} == {pin_a, pin_b}
+    assert await store.list_pins(a) == []
+    source = await store.get_fleet(a)
+    assert source is not None and source.merged_into == b and source.merged_at is not None
+    target = await store.get_fleet(b)
+    assert target is not None and target.merged_into is None
+    assert {f.id: f.merged_into for f in await store.list_fleets()} == {a: b, b: None}
+    counts = {c.fleet_id: (c.searches, c.empty, c.explore) for c in await store.search_counts()}
+    assert counts == {b: (3, 1, 1)}
+    assert await store.get_fleet_merge(out.record.id) == out.record
+    assert [m.id for m in await store.list_fleet_merges(10)] == [out.record.id]
+
+
+async def test_merge_into_a_new_fleet(adapter: Adapter) -> None:
+    store = adapter.store
+    a = (await store.create_fleet("a")).id
+    e = await _fleet_entry(adapter, "e", a)
+    out = await store.merge_fleets(a, new_fleet_name="c", merged_by="admin:1")
+    assert out.target_created and out.target.name == "c" and out.entries_moved == 1
+    got = await store.get_entry(e.id)
+    assert got is not None and got.fleet_id == out.target.id
+    assert {f.name for f in await store.list_fleets()} == {"a", "c"}
+    with pytest.raises(FleetExists):
+        await store.merge_fleets(out.target.id, new_fleet_name="a", merged_by="admin:1")
+    assert (await store.get_fleet(out.target.id)).merged_into is None  # type: ignore[union-attr]
+
+
+async def test_merge_refusals_change_nothing(adapter: Adapter) -> None:
+    store = adapter.store
+    a, b = await _two_fleets(adapter)
+    c = (await store.create_fleet("c")).id
+    e = await _fleet_entry(adapter, "e", a)
+    with pytest.raises(FleetMergeRefused):
+        await store.merge_fleets(a, target_fleet_id=a, merged_by="x")
+    for source, target in ((NO_SUCH_ID, a), (a, NO_SUCH_ID), ("not-a-uuid", a), (a, "not-a-uuid")):
+        with pytest.raises(UnknownFleet):
+            await store.merge_fleets(source, target_fleet_id=target, merged_by="x")
+    with pytest.raises(InvalidInput):
+        await store.merge_fleets(a, merged_by="x")
+    with pytest.raises(InvalidInput):
+        await store.merge_fleets(a, target_fleet_id=b, new_fleet_name="n", merged_by="x")
+    pins = [await _pinned(adapter, f"p{i}", a) for i in range(11)]
+    with pytest.raises(InvalidInput):  # over the cap with no choice
+        await store.merge_fleets(a, target_fleet_id=b, merged_by="x")
+    with pytest.raises(InvalidInput):
+        await store.merge_fleets(a, target_fleet_id=b, keep_pin_ids=pins, merged_by="x")
+    with pytest.raises(InvalidInput):
+        await store.merge_fleets(a, target_fleet_id=b, keep_pin_ids=[NO_SUCH_ID], merged_by="x")
+    got = await store.get_entry(e.id)
+    assert got is not None and got.fleet_id == a
+    assert len(await store.list_pins(a)) == 11
+    assert await store.list_fleet_merges(10) == []
+    await store.merge_fleets(a, target_fleet_id=b, keep_pin_ids=pins[1:], merged_by="x")
+    with pytest.raises(FleetMerged) as gone:
+        await store.merge_fleets(a, target_fleet_id=c, merged_by="x")
+    assert (gone.value.target_id, gone.value.target_name) == (b, "b")
+    with pytest.raises(FleetMerged):
+        await store.merge_fleets(c, target_fleet_id=a, merged_by="x")
+
+
+async def test_a_merged_fleet_refuses_entries_pins_and_members(adapter: Adapter) -> None:
+    store = adapter.store
+    a, b = await _two_fleets(adapter)
+    e = await _fleet_entry(adapter, "e", a)
+    await store.register_agent("amy")
+    await store.register_agent("bob")
+    await store.activate_agent("bob", trust_level=TrustLevel.LURKER, home_fleet_id=b)
+    await store.merge_fleets(a, target_fleet_id=b, merged_by="x")
+    with pytest.raises(FleetMerged, match="'b'"):
+        await store.create_entry(
+            draft("late", scope="fleet", fleet_id=a), adapter.vec(0), "test-model"
+        )
+    with pytest.raises(FleetMerged):
+        await store.pin_entry(a, e.id, "lead", limit=10)
+    with pytest.raises(FleetMerged):
+        await store.activate_agent("amy", trust_level=TrustLevel.LURKER, home_fleet_id=a)
+    with pytest.raises(FleetMerged):
+        await store.set_agent_home_fleet("bob", a)
+    assert (await store.get_agent("amy")).status is AgentStatus.PENDING  # type: ignore[union-attr]
+    assert (await store.get_agent("bob")).home_fleet_id == b  # type: ignore[union-attr]
+    # Org entries, and the target, are unaffected.
+    await write(adapter, "org")
+    await write(adapter, "ok", scope="fleet", fleet_id=b)
+
+
+async def test_unmerge_restores_what_moved_and_leaves_what_came_after(adapter: Adapter) -> None:
+    store = adapter.store
+    a, b = await _two_fleets(adapter)
+    mine = await _fleet_entry(adapter, "mine", a)
+    theirs = await _fleet_entry(adapter, "theirs", b)
+    await store.register_agent("amy")
+    await store.activate_agent("amy", trust_level=TrustLevel.CONTRIBUTOR, home_fleet_id=a)
+    await store.register_agent("ann")
+    await store.activate_agent("ann", trust_level=TrustLevel.LURKER, home_fleet_id=a)
+    pin_a = await _pinned(adapter, "pa", a)
+    pins_b = [await _pinned(adapter, f"pb{i}", b) for i in range(10)]
+    out = await store.merge_fleets(
+        a, target_fleet_id=b, keep_pin_ids=[pin_a, *pins_b[1:]], merged_by="x"
+    )
+    assert [p.entry_id for p in out.pins_dropped] == [pins_b[0]]
+    late = await _fleet_entry(adapter, "late", b)
+    other = (await store.create_fleet("c")).id
+    await store.set_agent_home_fleet("ann", other)
+
+    undone = await store.unmerge_fleet(out.record.id)
+
+    assert undone.entries_restored == 2  # mine and pa's entry
+    for e, home in ((mine.id, a), (pin_a, a), (theirs.id, b), (late.id, b)):
+        got = await store.get_entry(e)
+        assert got is not None and got.fleet_id == home
+    assert undone.agents_restored == ("amy",)
+    assert (await store.get_agent("amy")).home_fleet_id == a  # type: ignore[union-attr]
+    assert (await store.get_agent("ann")).home_fleet_id == other  # type: ignore[union-attr]
+    assert undone.pins_returned == 1
+    assert [p.entry_id for p in await store.list_pins(a)] == [pin_a]
+    assert {p.entry_id for p in await store.list_pins(b)} == set(pins_b)
+    assert [p.entry_id for p in undone.pins_restored] == [pins_b[0]]
+    assert undone.pins_skipped == () and undone.record.undone_at is not None
+    source = await store.get_fleet(a)
+    assert source is not None and source.merged_into is None and source.merged_at is None
+    stored = await store.get_fleet_merge(out.record.id)
+    assert stored is not None and stored.undone_at is not None
+    # The source takes members and entries again.
+    await store.set_agent_home_fleet("ann", a)
+    await _fleet_entry(adapter, "again", a)
+
+
+async def test_unmerge_refusals(adapter: Adapter) -> None:
+    store = adapter.store
+    a, b = await _two_fleets(adapter)
+    c = (await store.create_fleet("c")).id
+    first = await store.merge_fleets(a, target_fleet_id=c, merged_by="x")
+    second = await store.merge_fleets(b, target_fleet_id=c, merged_by="x")
+    assert [m.id for m in await store.list_fleet_merges(10)] == [second.record.id, first.record.id]
+    with pytest.raises(FleetMergeRefused, match="newer"):
+        await store.unmerge_fleet(first.record.id)
+    await store.unmerge_fleet(second.record.id)
+    with pytest.raises(FleetMergeRefused, match="already undone"):
+        await store.unmerge_fleet(second.record.id)
+    chained = await store.merge_fleets(c, target_fleet_id=b, merged_by="x")  # c -> b
+    with pytest.raises(FleetMergeRefused):
+        await store.unmerge_fleet(first.record.id)  # its target c is merged now
+    await store.unmerge_fleet(chained.record.id)
+    await store.unmerge_fleet(first.record.id)
+    for bad in (NO_SUCH_ID, "not-a-uuid"):
+        with pytest.raises(UnknownFleetMerge):
+            await store.unmerge_fleet(bad)
+    assert await store.get_fleet_merge(NO_SUCH_ID) is None
+    assert await store.get_fleet_merge("not-a-uuid") is None
+
+
+async def test_unmerge_skips_the_oldest_dropped_pins_that_do_not_fit(adapter: Adapter) -> None:
+    store = adapter.store
+    a, b = await _two_fleets(adapter)
+    mine = [await _pinned(adapter, f"a{i}", a) for i in range(2)]
+    theirs = [await _pinned(adapter, f"b{i}", b) for i in range(10)]
+    out = await store.merge_fleets(
+        a, target_fleet_id=b, keep_pin_ids=[*mine, *theirs[2:]], merged_by="x"
+    )
+    assert {p.entry_id for p in out.pins_dropped} == set(theirs[:2])
+    for entry_id in mine:
+        assert await store.unpin_entry(b, entry_id)
+    fresh = await _pinned(adapter, "fresh", b)
+    undone = await store.unmerge_fleet(out.record.id)
+    assert [p.entry_id for p in undone.pins_restored] == [theirs[1]]
+    assert [p.entry_id for p in undone.pins_skipped] == [theirs[0]]
+    assert {p.entry_id for p in await store.list_pins(b)} == {*theirs[1:], fresh}
+
+
+async def test_merge_is_refused_when_the_pins_changed_since_the_preview(adapter: Adapter) -> None:
+    store = adapter.store
+    a, b = await _two_fleets(adapter)
+    seen = [await _pinned(adapter, "seen", a)]
+    late = await _pinned(adapter, "late", b)  # pinned after the preview was taken
+    with pytest.raises(FleetMergeRefused, match="preview again"):
+        await store.merge_fleets(a, target_fleet_id=b, expected_pin_ids=seen, merged_by="x")
+    with pytest.raises(FleetMergeRefused, match="preview again"):
+        await store.merge_fleets(
+            a, target_fleet_id=b, expected_pin_ids=[*seen, late, NO_SUCH_ID], merged_by="x"
+        )
+    assert await store.list_fleet_merges(10) == []
+    assert (await store.get_fleet(a)).merged_into is None  # type: ignore[union-attr]
+    out = await store.merge_fleets(
+        a, target_fleet_id=b, expected_pin_ids=[late, *seen], merged_by="x"
+    )
+    assert (len(out.pins_kept), out.pins_dropped) == (2, ())
+
+
+async def test_merge_reads_ids_the_same_on_both_adapters(adapter: Adapter) -> None:
+    store = adapter.store
+    a, b = await _two_fleets(adapter)
+    with pytest.raises(UnknownFleet):  # an unknown source wins over a taken new name
+        await store.merge_fleets(NO_SUCH_ID, new_fleet_name="a", merged_by="x")
+    with pytest.raises(FleetExists):
+        await store.merge_fleets(a, new_fleet_name="b", merged_by="x")
+    out = await store.merge_fleets(a.upper(), target_fleet_id=b.upper(), merged_by="x")
+    assert (out.record.source_fleet_id, out.record.target_fleet_id) == (a, b)
+    with pytest.raises(UnknownFleetMerge):
+        await store.unmerge_fleet("not-a-uuid")
+    undone = await store.unmerge_fleet(out.record.id.upper())
+    assert undone.record.id == out.record.id
+
+
+async def test_unmerge_keeps_to_three_restored_pins_per_agent(adapter: Adapter) -> None:
+    store = adapter.store
+    a, b = await _two_fleets(adapter)
+    pins = [await _pinned(adapter, f"p{i}", a, by="lead") for i in range(4)]
+    out = await store.merge_fleets(a, target_fleet_id=b, keep_pin_ids=[pins[3]], merged_by="x")
+    assert {p.entry_id for p in out.pins_dropped} == set(pins[:3])
+    undone = await store.unmerge_fleet(out.record.id)
+    # pins[3] came back with its entry; "lead" may hold two more, so the oldest is skipped.
+    assert [p.entry_id for p in undone.pins_restored] == [pins[2], pins[1]]
+    assert [p.entry_id for p in undone.pins_skipped] == [pins[0]]
+    assert {p.entry_id for p in await store.list_pins(a)} == set(pins[1:])

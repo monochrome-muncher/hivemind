@@ -71,6 +71,9 @@ def _panel(transport: httpx.AsyncBaseTransport) -> httpx.AsyncClient:
         ("GET", "admin/feedback"),
         ("GET", "admin/fleets/abc/pins"),
         ("GET", "admin/flagged"),
+        ("POST", "admin/fleets/abc/merge"),
+        ("GET", "admin/fleet-merges"),
+        ("POST", "admin/fleet-merges/abc/undo"),
     ],
 )
 def test_the_admin_surface_is_forwarded(method: str, path: str) -> None:
@@ -106,6 +109,14 @@ def test_the_admin_surface_is_forwarded(method: str, path: str) -> None:
         ("GET", "admin/flagged/x"),
         ("GET", "admin/entries/x/extra"),
         ("GET", "admin/entries/"),
+        ("GET", "admin/fleets/abc/merge"),  # right path, wrong method
+        ("POST", "admin/fleets//merge"),
+        ("POST", "admin/fleets/abc/merge/x"),
+        ("POST", "admin/fleet-merges"),
+        ("GET", "admin/fleet-merges/abc"),
+        ("GET", "admin/fleet-merges/abc/undo"),
+        ("DELETE", "admin/fleet-merges/abc"),
+        ("POST", "admin/fleet-merges//undo"),
     ],
 )
 def test_everything_else_is_refused(method: str, path: str) -> None:

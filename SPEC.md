@@ -142,8 +142,11 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | `GET /v1/whoami` | The calling key's standing: kind (`agent`/`org`/`admin`/`legacy`), agent name, status, trust level, home fleet, `can_read`, `can_write_scopes` (any valid key; not audited — ADR 0030) |
 | `POST /v1/agents` | Register an agent (org key or admin key; `{name, owner_alias?}`) → pending agent, 201 (§12, ADR 0012); the same name + alias again → 200 with the current status; another alias → 409 (§12.3, ADR 0039) |
 | `GET /v1/admin/agents` | List agents: status, trust level, home fleet, owner alias (admin key) |
-| `GET /v1/admin/fleets` | List fleets (admin key) |
+| `GET /v1/admin/fleets` | List fleets (admin key); fleets merged into another are left out unless `?include_merged=true`, which adds `merged_into` and `merged_at` (§12.1, ADR 0107) |
 | `POST /v1/admin/fleets` | Create a fleet (admin key; no deletion in this increment — ADR 0011) |
+| `POST /v1/admin/fleets/{source_id}/merge` | Merge a fleet into another or into a new one: `{target_fleet_id \| new_fleet_name, keep_pin_ids?, expected_pin_ids?, dry_run}`. `dry_run: true` answers the preview and changes nothing; otherwise it moves the source's entries, agents and kept pins in one transaction (admin key; audited `fleet.merge`; §12.1, ADR 0107). 404 unknown fleet, 409 `fleet_merged` / `merge_refused` / `fleet_exists`, 422 for a pin choice over 10 |
+| `GET /v1/admin/fleet-merges` | The recorded fleet merges, newest first, each with `undoable` (admin key; ADR 0107) |
+| `POST /v1/admin/fleet-merges/{merge_id}/undo` | Undo a merge: what it moved goes back where it is still in the target (admin key; audited `fleet.unmerge`; 409 `merge_refused` unless it is the newest standing merge involving the target; ADR 0107) |
 | `POST /v1/admin/agents/{name}/activate` | Set trust level (default `lurker`) + home fleet; **returns the generated agent key once** (admin key; §12.3). Only from `pending` or `revoked`; `active` → 409 (ADR 0028) |
 | `PATCH /v1/admin/agents/{name}` | Change trust level / home fleet — demotion to `untrusted` = dormant (admin key) |
 | `POST /v1/admin/agents/{name}/revoke` | Kill the agent's key and set it `revoked`; on a `pending` agent this rejects the registration (admin key; the name stays reserved — ADRs 0012, 0028) |
@@ -376,10 +379,11 @@ This section supersedes the flat-pool commitment of §1 and the "no trust tiers"
 
 ### 12.1 Fleets and scope
 
-* A **fleet** is a named group of agents. The admin creates fleets (`POST /v1/admin/fleets`); **no fleet deletion in this increment** (ADR 0011).
+* A **fleet** is a named group of agents. The admin creates fleets (`POST /v1/admin/fleets`); **no fleet deletion in this increment** (ADR 0011). An admin can **merge** a fleet into another (below).
 * Every active agent belongs to exactly **one home fleet** — admin-assigned, re-assignable at any time via `PATCH /v1/admin/agents/{name}`. One home fleet per agent in this increment; multi-fleet membership is a §10 extension.
-* An entry is written into exactly one scope: `self` (the author agent only) or `fleet` (the home fleet it was written into). **An entry's fleet membership is fixed at write time** — when an agent moves fleets, its earlier entries stay in the old fleet (ADR 0011).
+* An entry is written into exactly one scope: `self` (the author agent only) or `fleet` (the home fleet it was written into). **An entry's fleet membership is fixed at write time** — when an agent moves fleets, its earlier entries stay in the old fleet (ADR 0011) — **except that an admin fleet merge re-files a whole fleet** (ADR 0107).
 * Legacy `scope='org'` entries are **read-only for agent keys**: an agent key may not write `org` (the sanctioned `org` writers are the admin key; pre-v2 `user` keys no longer authenticate, ADR 0039); they remain readable at trust level 1+. The admin key writes `self` or `org` only: it has no fleet, so a `fleet` write from it is refused (ADR 0060).
+* **Merging fleets (ADR 0107).** `POST /v1/admin/fleets/{source_id}/merge` re-files every entry of the source fleet (any state) to a target fleet, an existing one or a new one, moves the source's agents (trust levels unchanged; no key changes, since the home fleet is read on every request) and re-keys its pins, in one transaction that locks both fleet rows. A merge writes no memory. More than 10 pins across the two fleets need a `keep_pin_ids` choice of at most 10; the rest are unpinned. The source keeps its row, marked `merged_into` and `merged_at`: it is left out of the fleet list unless asked for, takes no new members or memories, and cannot be a merge source or target again. A fleet write (an entry, a pin, an activation or home-fleet change, `issue-agent`) that resolved the source before the merge committed is refused with 409 `fleet_merged` naming the target, and the client retries against the agent's new home fleet; a fleet write that waits more than 3 seconds for the merge's lock gets 503 `fleet_busy` with `Retry-After` (REST and MCP). `expected_pin_ids` (the pins the preview showed) makes the merge answer 409 `merge_refused` when the pins changed since. `dry_run: true` previews counts, the pins of both fleets and likely duplicate pairs (cosine 0.90 or more, looked up for at most 2,000 entries of the smaller fleet); nothing is superseded. `POST /v1/admin/fleet-merges/{merge_id}/undo` moves back what the merge moved and is still in the target, restores dropped pins where they fit and clears the mark; it is allowed only for the newest standing merge involving the target, while the target is not itself merged. Search counters stay summed.
 * **Default scope**: an omitted scope resolves to the **highest value the writer's trust level permits** (`lurker` → `self`; `contributor`/`privileged` → `fleet`). An *explicit* out-of-permission scope (e.g. `fleet` at `lurker`) is a permission error naming the required level.
 
 ### 12.2 Trust levels (cumulative)
@@ -414,6 +418,8 @@ This section supersedes the flat-pool commitment of §1 and the "no trust tiers"
 |---|---|
 | `GET /v1/admin/agents` / `GET /v1/admin/fleets` | List agents (status, level, home fleet, alias) / fleets |
 | `POST /v1/admin/fleets` | Create a fleet (ADR 0011: no deletion in this increment) |
+| `POST /v1/admin/fleets/{source_id}/merge` | Merge a fleet into another or a new one, or preview it with `dry_run` (ADR 0107) |
+| `GET /v1/admin/fleet-merges` / `POST /v1/admin/fleet-merges/{merge_id}/undo` | The recorded merges / undo one (ADR 0107) |
 | `POST /v1/admin/agents/{name}/activate` | Set level + home fleet; **returns the agent key once** (§12.3) |
 | `PATCH /v1/admin/agents/{name}` | Change level / home fleet (demotion to `untrusted` = dormant) |
 | `POST /v1/admin/agents/{name}/revoke` | Kill the key, status → `revoked` (name stays reserved; re-activation issues a *new* key). On a pending agent: reject the registration |
@@ -441,12 +447,14 @@ Every admin-surface action, every agent pin or unpin (ADR 0076) and every withdr
 | `agent.home_fleet_set` | `PATCH /v1/admin/agents/{name}` | agent name | `{from, to}` |
 | `agent.revoke` | `POST /v1/admin/agents/{name}/revoke`, `hivemind-keys revoke` | agent name | `{"from": "pending"\|"active"}` (ADR 0028; a revoke from `pending` is a rejected registration) |
 | `fleet.create` | `POST /v1/admin/fleets` | fleet id | `{name}` |
+| `fleet.merge` | `POST /v1/admin/fleets/{source_id}/merge`, not a `dry_run` (ADR 0107); a new target is also recorded as `fleet.create` | source fleet id | `{merge_id, target_fleet_id, target_fleet_name, created_target, entries, agents, pins_kept, pins_dropped}` |
+| `fleet.unmerge` | `POST /v1/admin/fleet-merges/{merge_id}/undo` (ADR 0107) | source fleet id | `{merge_id, target_fleet_id, entries, agents, pins_returned, pins_restored, pins_skipped}` (the skipped pins' entry ids) |
 | `org_key.rotate` | `POST /v1/admin/org-key/rotate`, `hivemind-keys rotate-org` | — | `{}` |
 | `entry.withdraw` | `POST /v1/entries/{id}/withdraw` or `POST /v1/admin/entries/{id}/withdraw`, **only** when the admin key withdraws another agent's entry (§4.1); and every withdrawal through the agent portal, `POST /v1/portal/entries/{id}/withdraw` (ADR 0095) | entry id | `{author, reason}`, plus `"via": "portal"` from the portal |
 | `admin_key.issue` | `hivemind-keys issue-admin` | key fingerprint | `{}` |
 | `admin_key.revoke` | `hivemind-keys revoke-admin` (a successful revocation only) | key fingerprint | `{}` |
 | `entry.pin` | `PUT /v1/entries/{id}/pin`, `hive_pin` — every stored pin, a re-pin included (ADR 0076) | entry id | `{fleet_id}`, plus `from` (the replaced pin id, or a list) when a re-pin moved older pins |
-| `entry.unpin` | `DELETE /v1/entries/{id}/pin`, `hive_pin` with `unpin`, or a withdrawal of a pinned entry — a pin actually removed (ADRs 0076, 0096) | entry id | `{fleet_id, pin_ids}` (the removed pins), plus `reason: "withdrawn"` when the withdrawal of the pinned entry removed them (ADR 0096; the withdrawer is the actor) |
+| `entry.unpin` | `DELETE /v1/entries/{id}/pin`, `hive_pin` with `unpin`, or a withdrawal of a pinned entry — a pin actually removed (ADRs 0076, 0096) | entry id | `{fleet_id, pin_ids}` (the removed pins), plus `reason: "withdrawn"` when the withdrawal of the pinned entry removed them (ADR 0096; the withdrawer is the actor), or `reason: "fleet_merge"` with the `merge_id` for a pin a fleet merge did not keep (ADR 0107) |
 | `agent_key.issue` | `hivemind-keys issue-agent` | agent name | `{}`, or `{"from", "trust_level", "home_fleet_id"}` when it activated a pending/revoked agent (ADR 0039) |
 
 **Actors.** `actor_kind` is `admin_key` for the REST admin surface — `actor` is `admin:<fingerprint>` of the verified admin key — `agent_key` for a contributor's or privileged agent's pin or unpin (ADRs 0076, 0096) or a withdrawal through the agent portal (ADR 0095) — `actor` is the verified agent name — `org_key` for a registration made with the org key — `actor` is `org:<fingerprint>`, which identifies the key, not who used it (ADR 0046) — or `cli` for `hivemind-keys`, whose `actor` is the operator-supplied `--actor` (default: the OS user) and is **unverified**. A key **fingerprint** is the first 12 hex characters of the key's stored SHA-256 hash (what `hivemind-keys list` shows).

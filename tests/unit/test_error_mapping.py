@@ -8,6 +8,7 @@ exception types or the mapping cannot change what a client sees.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
@@ -19,9 +20,10 @@ from fastapi import FastAPI
 from hivemind.api.deps import create_app
 from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
-from hivemind.domain.access import TrustLevel
+from hivemind.domain.access import FleetBusy, TrustLevel
 from hivemind.mcp import app as mcp
 from hivemind.mcp.app import McpHivemind
+from hivemind.mcp.server import build_server
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
@@ -32,6 +34,8 @@ from hivemind.services.write import WriteService
 from tests.fakes import FakeAuthenticator, make_clock, make_embedder, make_search_config
 
 NO_SUCH = "00000000-0000-4000-8000-00000000dead"
+ADMIN_CREDENTIAL = Credential(user_id="admin", is_admin=True)
+MERGED = "fleet {merged_fleet} was merged into 'new' (id {target_fleet}); retry against that fleet"
 
 
 def _agent(name: str, level: TrustLevel, fleet: str = "fleet-a") -> Credential:
@@ -63,6 +67,8 @@ class World:
     withdrawn: str  # a withdrawn fleet entry written by dev
     fleet_id: str  # the id of the existing fleet "alpha"
     app: FastAPI  # the REST app, for the services it holds
+    merged_fleet: str = ""  # a fleet "old" merged into "new" (ADR 0107)
+    target_fleet: str = ""
 
     def mcp(self, key: str) -> McpHivemind:
         embedder, config = make_embedder(), make_search_config()
@@ -108,8 +114,21 @@ async def world() -> World:
     assert resp.status_code == 200, resp.text
     await store.register_agent("taken", "first-owner")
     fleet = await store.create_fleet("alpha")
+    old = await store.create_fleet("old")
+    new = await store.create_fleet("new")
+    await AccessService(store).merges.merge(old.id, ADMIN_CREDENTIAL, target_fleet_id=new.id)
+    authenticator._by_key["k-stale"] = _agent("stale", TrustLevel.CONTRIBUTOR, old.id)
     return World(
-        client, store, authenticator, fleet_entry, org_entry, withdrawn, fleet.id, fastapi_app
+        client,
+        store,
+        authenticator,
+        fleet_entry,
+        org_entry,
+        withdrawn,
+        fleet.id,
+        fastapi_app,
+        merged_fleet=old.id,
+        target_fleet=new.id,
     )
 
 
@@ -446,6 +465,37 @@ CASES: list[tuple[str, Rest, tuple[int, str, str], Mcp, tuple[str, str]]] = [
         None,
     ),
     (
+        "write into a fleet that was merged away",
+        lambda w: w.client.post(
+            "/v1/entries",
+            json={"kind": "fact", "summary": "late", "scope": "fleet"},
+            headers=_h("k-stale"),
+        ),
+        (409, "fleet_merged", MERGED),
+        lambda w: mcp.hive_write(w.mcp("k-stale"), "fact", "late", scope="fleet"),
+        ("fleet_merged", MERGED),
+    ),
+    (
+        "activate an agent into a merged fleet",
+        lambda w: w.client.post(
+            "/v1/admin/agents/taken/activate",
+            json={"trust_level": 2, "home_fleet_id": w.merged_fleet},
+            headers=_h("hm_admin"),
+        ),
+        (409, "fleet_merged", MERGED),
+        None,
+        None,
+    ),
+    (
+        "move an agent into a merged fleet",
+        lambda w: w.client.patch(
+            "/v1/admin/agents/taken", json={"home_fleet_id": w.merged_fleet}, headers=_h("hm_admin")
+        ),
+        (409, "fleet_merged", MERGED),
+        None,
+        None,
+    ),
+    (
         "register a reserved name",
         lambda w: w.client.post("/v1/agents", json={"name": "admin"}, headers=_h("hm_org")),
         (
@@ -484,7 +534,12 @@ async def test_each_failure_reads_the_same_on_the_wire(
     tool: Mcp | None,
     tool_expected: tuple[str, str] | None,
 ) -> None:
-    fill = {"withdrawn": world.withdrawn, "fleet_entry": world.fleet_entry}
+    fill = {
+        "withdrawn": world.withdrawn,
+        "fleet_entry": world.fleet_entry,
+        "merged_fleet": world.merged_fleet,
+        "target_fleet": world.target_fleet,
+    }
     if rest_expected is not None:
         status, code, message = rest_expected
         assert _err(await rest(world)) == (status, code, message.format(**fill))
@@ -773,3 +828,31 @@ async def test_a_store_race_on_withdraw_becomes_the_typed_errors(
         "not_active",
         text,
     )
+
+
+# ADR 0107: a write that waits too long for a merge's fleet lock is a retryable
+# 503 naming the fleet, not a 500 and not the generic database message.
+BUSY = f"fleet {NO_SUCH} is being merged, retry in a few seconds"
+
+
+async def _busy(*_args: object, **_kwargs: object) -> object:
+    raise FleetBusy(NO_SUCH)
+
+
+async def test_a_write_waiting_on_a_merge_is_a_retryable_503_on_rest(world: World) -> None:
+    world.store.create_entry = _busy  # type: ignore[method-assign]
+    resp = await world.client.post(
+        "/v1/entries",
+        json={"kind": "fact", "summary": "late", "scope": "fleet"},
+        headers=_h("k-dev"),
+    )
+    assert _err(resp) == (503, "fleet_busy", BUSY)
+    assert resp.headers["Retry-After"] == "2"
+
+
+async def test_a_write_waiting_on_a_merge_is_fleet_busy_on_mcp(world: World) -> None:
+    world.store.create_entry = _busy  # type: ignore[method-assign]
+    result = await build_server(world.mcp("k-dev")).call_tool(
+        "hive_write", {"kind": "fact", "summary": "late", "scope": "fleet"}
+    )
+    assert json.loads(result.content[0].text)["error"] == {"code": "fleet_busy", "message": BUSY}

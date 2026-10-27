@@ -21,8 +21,10 @@ from mcp.types import TextContent
 from mcp.types import Tool as MCPTool
 from pydantic_core import to_json
 
+from hivemind.domain.access import FleetBusy
 from hivemind.mcp import contract
 from hivemind.mcp.app import (
+    ERR_FLEET_BUSY,
     ERR_STORE_UNAVAILABLE,
     ERR_UNAUTHENTICATED,
     STORE_UNAVAILABLE_MESSAGE,
@@ -193,6 +195,8 @@ def build_server(
                     "this key is no longer valid (revoked or unknown); ask your admin",
                 )
             return await verb(acting, **kwargs)
+        except FleetBusy as exc:  # ADR 0107: a fleet write waited for a merge
+            return _error(ERR_FLEET_BUSY, str(exc))
         except TimeoutError:
             # A pool acquire or statement timed out: the database is busy,
             # not the call wrong (ROADMAP 3.13; the REST surface answers 503).

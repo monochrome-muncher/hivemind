@@ -59,15 +59,20 @@ def build_services(
     governance_service = GovernanceService(
         store, search_config, require_stored_keys=require_stored_keys
     )
+    access_service = AccessService(store, authenticator)
+    metrics_service = MetricsService(store, entry_counts_ttl=metrics_entry_counts_ttl)
+    activity_service = ActivityService(store, ttl=metrics_entry_counts_ttl)
+    # A merge or undo moves entries between fleets: drop the cached scans (ADR 0107).
+    access_service.merges.on_change += [metrics_service.invalidate, activity_service.invalidate]
     return Services(
         search_config=search_config,
         write_service=WriteService(store, embedder, extractor),
         governance_service=governance_service,
         read_service=ReadService(store, governance_service, search_config),
         search_service=SearchService(store, embedder, search_config),
-        access_service=AccessService(store, authenticator),
-        metrics_service=MetricsService(store, entry_counts_ttl=metrics_entry_counts_ttl),
-        activity_service=ActivityService(store, ttl=metrics_entry_counts_ttl),
+        access_service=access_service,
+        metrics_service=metrics_service,
+        activity_service=activity_service,
     )
 
 

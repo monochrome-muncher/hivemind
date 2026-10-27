@@ -665,7 +665,8 @@ subjects:
 
 A browser front end for the admin surface: the pending-agent queue
 (grouped by owner alias), activation with the key shown once, agents,
-fleets, the audit log, and org-key rotation. It also shows daily activity,
+fleets (including merging one fleet into another and undoing it, ADR 0107;
+see the ops runbook), the audit log, and org-key rotation. It also shows daily activity,
 stats per fleet, agent and owner alias, the fleet health metrics, and a
 browser for the memories with search and withdrawal (ADR 0080), who
 rated what in a feedback log (ADR 0090), one page per agent, each

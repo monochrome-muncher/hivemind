@@ -161,6 +161,8 @@ th, td { text-align: left; padding: 10px 18px; border-top: 1px solid var(--borde
 th { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; background: var(--surface-2); border-top: 0; }
 tbody tr:hover { background: var(--surface-2); }
 td.actions { text-align: right; white-space: nowrap; }
+/* The Fleets table has ten columns (with merged rows): tighter cells keep it inside its card. */
+.fleets-table th, .fleets-table td { padding-left: 10px; padding-right: 10px; }
 td.actions .btn + .btn { margin-left: 6px; }
 .empty { padding: 28px 18px; text-align: center; color: var(--muted); }
 .group-row td { background: var(--surface-2); font-weight: 600; font-size: 12.5px; padding-top: 6px; padding-bottom: 6px; }
@@ -215,10 +217,23 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible { outline: 2px sol
   width: min(460px, calc(100vw - 32px)); background: var(--surface); color: var(--text);
   box-shadow: 0 20px 50px rgb(0 0 0 / 25%);
 }
+.modal.modal-wide { width: min(760px, calc(100vw - 32px)); }
 .modal::backdrop { background: rgb(15 19 24 / 55%); }
 .modal form { padding: 22px; display: grid; gap: 12px; }
 .modal h2 { margin: 0; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.modal-scroll { max-height: min(46vh, 380px); overflow-y: auto; }
+
+/* --- fleet merge ------------------------------------------------------- */
+.merge-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.merge-side { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+.merge-side h3 { margin: 0 0 4px; font-size: 14px; }
+.merge-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.merge-list li { display: flex; gap: 8px; align-items: baseline; font-size: 13px; }
+.merge-list .check { white-space: normal; align-items: baseline; }
+.merge-list .sim { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+tr.merged-fleet td { color: var(--muted); }
+@media (max-width: 640px) { .merge-sides { grid-template-columns: 1fr; } }
 
 .key-box {
   font-family: var(--mono); font-size: 13px; word-break: break-all;

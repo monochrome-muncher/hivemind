@@ -44,6 +44,7 @@ from hivemind.api.schemas import (
     CheckOut,
     CreateEntryRequest,
     CreateFleetRequest,
+    DroppedPinOut,
     EntriesMetrics,
     EntriesOut,
     EntryOut,
@@ -53,8 +54,13 @@ from hivemind.api.schemas import (
     FeedbackRequest,
     FeedbackSummaryOut,
     FlaggedEntryOut,
+    FleetMergeOut,
+    FleetMergePreviewOut,
+    FleetMergeRecordOut,
+    FleetMergeRequest,
     FleetOut,
     FleetsMetrics,
+    FleetUnmergeOut,
     GetEntriesRequest,
     HealthMetrics,
     HealthOut,
@@ -80,6 +86,7 @@ from hivemind.api.schemas import (
 from hivemind.domain.access import (
     Agent,
     FleetExists,
+    FleetMerged,
     InvalidAgentStatus,
     TrustLevel,
     UnknownAgent,
@@ -88,6 +95,7 @@ from hivemind.domain.access import (
 from hivemind.domain.audit import AuditAction, AuditFilters
 from hivemind.domain.entry import Entry, EntryFilters, Kind, Source
 from hivemind.domain.feedback import FeedbackLogFilters, Verdict
+from hivemind.domain.fleet_merge import FleetMergeRefused, UnknownFleetMerge
 from hivemind.domain.recency import RecencyHint
 from hivemind.domain.validation import (
     MAX_ID_CHARS,
@@ -361,6 +369,8 @@ def build_router() -> APIRouter:
         except SupersedeDenied as exc:
             # ADR 0033: a supersession target out of the writer's reach.
             raise api_error(403, "supersede_denied", str(exc)) from exc
+        except FleetMerged as exc:  # ADR 0107: the home fleet was merged away
+            raise api_error(409, "fleet_merged", str(exc)) from exc
         except EmbeddingError as exc:
             raise _embedding_unavailable(exc) from exc
         except InvalidInput as exc:  # e.g. an unknown see_also entry
@@ -502,6 +512,8 @@ def build_router() -> APIRouter:
             raise api_error(422, "invalid_input", str(exc)) from exc
         except EntryNotActive as exc:
             raise api_error(409, "conflict", str(exc)) from exc
+        except FleetMerged as exc:  # ADR 0107
+            raise api_error(409, "fleet_merged", str(exc)) from exc
         return PinOut.from_pin(pin)
 
     @router.delete("/entries/{entry_id}/pin", response_model=UnpinOut)
@@ -907,13 +919,112 @@ def build_router() -> APIRouter:
         return FleetOut.from_fleet(fleet)
 
     @router.get("/admin/fleets", response_model=list[FleetOut])
-    async def list_fleets(credential: require, app: hive) -> list[FleetOut]:
-        """List fleets (admin-gated, ADR 0012)."""
+    async def list_fleets(
+        credential: require, app: hive, include_merged: bool = False
+    ) -> list[FleetOut]:
+        """List fleets (admin-gated, ADR 0012). Fleets merged into another
+        are left out unless ``?include_merged=true`` (ADR 0107)."""
         try:
-            fleets = await app.access_service.list_fleets(credential)
+            fleets = await app.access_service.list_fleets(credential, include_merged=include_merged)
         except PermissionDenied as exc:
             raise api_error(403, "forbidden", str(exc)) from exc
         return [FleetOut.from_fleet(f) for f in fleets]
+
+    @router.post(
+        "/admin/fleets/{source_id}/merge",
+        response_model=FleetMergePreviewOut | FleetMergeOut,
+    )
+    async def merge_fleet(
+        source_id: NameParam, payload: FleetMergeRequest, credential: require, app: hive
+    ) -> FleetMergePreviewOut | FleetMergeOut:
+        """Merge a fleet into another or into a new one (admin-gated, audited
+        ``fleet.merge``, ADR 0107): its memories, agents and kept pins move
+        in one transaction, with no key change. Name exactly one of
+        ``target_fleet_id`` and ``new_fleet_name``. ``dry_run: true`` changes
+        nothing and answers the preview (counts, both fleets' pins, likely
+        duplicate pairs). More than 10 pins across the two fleets need
+        ``keep_pin_ids`` (422); ``expected_pin_ids`` (the pins the preview showed)
+        refuses the merge when they changed since (409 ``merge_refused``). 404 unknown fleet, 409 ``fleet_merged`` /
+        ``merge_refused`` / ``fleet_exists``."""
+        _require_admin(credential, "merging fleets")
+        merges = app.access_service.merges
+        try:
+            if payload.dry_run:
+                preview = await merges.preview(
+                    source_id,
+                    credential,
+                    target_fleet_id=payload.target_fleet_id,
+                    new_fleet_name=payload.new_fleet_name,
+                )
+                return FleetMergePreviewOut.from_preview(preview)
+            outcome = await merges.merge(
+                source_id,
+                credential,
+                target_fleet_id=payload.target_fleet_id,
+                new_fleet_name=payload.new_fleet_name,
+                keep_pin_ids=payload.keep_pin_ids,
+                expected_pin_ids=payload.expected_pin_ids,
+            )
+        except PermissionDenied as exc:
+            raise api_error(403, "forbidden", str(exc)) from exc
+        except InvalidInput as exc:
+            raise api_error(422, "invalid_input", str(exc)) from exc
+        except UnknownFleet as exc:
+            raise api_error(404, "not_found", str(exc)) from exc
+        except FleetMerged as exc:
+            raise api_error(409, "fleet_merged", str(exc)) from exc
+        except FleetMergeRefused as exc:
+            raise api_error(409, "merge_refused", str(exc)) from exc
+        except FleetExists as exc:
+            raise api_error(409, "fleet_exists", str(exc)) from exc
+        record = outcome.record
+        return FleetMergeOut(
+            merge_id=record.id,
+            source_fleet_id=record.source_fleet_id,
+            target=FleetOut.from_fleet(outcome.target),
+            target_created=outcome.target_created,
+            entries_moved=outcome.entries_moved,
+            agents_moved=list(record.moved_agents),
+            pins_kept=len(outcome.pins_kept),
+            pins_dropped=[DroppedPinOut.from_dropped(p) for p in outcome.pins_dropped],
+        )
+
+    @router.get("/admin/fleet-merges", response_model=list[FleetMergeRecordOut])
+    async def list_fleet_merges(credential: require, app: hive) -> list[FleetMergeRecordOut]:
+        """Recorded fleet merges, newest first (admin-gated, ADR 0107), each
+        with whether it can be undone now."""
+        _require_admin(credential, "the fleet merges")
+        views = await app.access_service.merges.list_merges(credential)
+        return [FleetMergeRecordOut.from_view(v) for v in views]
+
+    @router.post("/admin/fleet-merges/{merge_id}/undo", response_model=FleetUnmergeOut)
+    async def undo_fleet_merge(
+        merge_id: NameParam, credential: require, app: hive
+    ) -> FleetUnmergeOut:
+        """Undo a fleet merge (admin-gated, audited ``fleet.unmerge``, ADR
+        0107): the recorded entries and agents still in the target go back,
+        dropped pins are restored where they fit. Only the newest standing
+        merge involving the target can be undone (409 ``merge_refused``)."""
+        _require_admin(credential, "undoing a fleet merge")
+        try:
+            outcome = await app.access_service.merges.undo(merge_id, credential)
+        except PermissionDenied as exc:
+            raise api_error(403, "forbidden", str(exc)) from exc
+        except UnknownFleetMerge as exc:
+            raise api_error(404, "not_found", str(exc)) from exc
+        except FleetMergeRefused as exc:
+            raise api_error(409, "merge_refused", str(exc)) from exc
+        record = outcome.record
+        return FleetUnmergeOut(
+            merge_id=record.id,
+            source_fleet_id=record.source_fleet_id,
+            target_fleet_id=record.target_fleet_id,
+            entries_restored=outcome.entries_restored,
+            agents_restored=list(outcome.agents_restored),
+            pins_returned=outcome.pins_returned,
+            pins_restored=[DroppedPinOut.from_dropped(p) for p in outcome.pins_restored],
+            pins_skipped=[DroppedPinOut.from_dropped(p) for p in outcome.pins_skipped],
+        )
 
     @router.get("/admin/agents", response_model=list[AgentOut])
     async def list_agents(credential: require, app: hive) -> list[AgentOut]:
@@ -945,6 +1056,8 @@ def build_router() -> APIRouter:
             raise api_error(404, "not_found", str(exc)) from exc
         except InvalidAgentStatus as exc:
             raise api_error(409, "invalid_status", str(exc)) from exc
+        except FleetMerged as exc:  # ADR 0107
+            raise api_error(409, "fleet_merged", str(exc)) from exc
         return KeyIssuedOut(key=key)
 
     @router.patch("/admin/agents/{name}", response_model=AgentOut)
@@ -988,6 +1101,8 @@ def build_router() -> APIRouter:
             raise api_error(403, "forbidden", str(exc)) from exc
         except (UnknownAgent, UnknownFleet) as exc:
             raise api_error(404, "not_found", str(exc)) from exc
+        except FleetMerged as exc:  # ADR 0107
+            raise api_error(409, "fleet_merged", str(exc)) from exc
         return AgentOut.from_agent(agent)
 
     @router.post("/admin/agents/{name}/revoke")
