@@ -81,7 +81,10 @@ test:
     # The full suite, as `make test`: unit, integration and the tests/eval
     # quality gate (SPEC §11). The live-extractor test skips by design
     # (no HIVEMIND_EXTRACTOR_ENDPOINT, ADR 0016).
-    - uv run pytest -q
+    # In parallel, one database per xdist worker (`hivemind_gw0`, ...); at
+    # most 4 workers, so the pools stay under Postgres's max_connections on
+    # a runner with many CPUs.
+    - uv run pytest -q -n auto --maxprocesses=4 --dist loadscope
 
 # --- ADR 0020 migration gates ---------------------------------------------
 # These need a live pool (the checksum guard is a unit test in `test`).
