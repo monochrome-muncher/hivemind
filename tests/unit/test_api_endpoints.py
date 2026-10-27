@@ -759,6 +759,56 @@ class TestAccessEndpoints:
         assert denied.json()["error"]["code"] == "forbidden"
         assert [f.name for f in await app.store.list_fleets()] == ["data-eng"]
 
+    async def test_rename_fleet(self) -> None:
+        app = make_hivemind_app()
+        fleet = await app.store.create_fleet("data-eng")
+        other = await app.store.create_fleet("ml")
+        merged = await app.store.create_fleet("old-ops")
+        await app.store.merge_fleets(merged.id, target_fleet_id=other.id, merged_by="admin:1")
+        admin = {"X-API-Key": "key-admin"}
+        client = make_client(app)
+        async with client:
+            ok = await client.patch(
+                f"/v1/admin/fleets/{fleet.id}", json={"name": "data-platform"}, headers=admin
+            )
+            same = await client.patch(
+                f"/v1/admin/fleets/{fleet.id}", json={"name": "data-platform"}, headers=admin
+            )
+            clash = await client.patch(
+                f"/v1/admin/fleets/{fleet.id}", json={"name": "ml"}, headers=admin
+            )
+            blank = await client.patch(
+                f"/v1/admin/fleets/{fleet.id}", json={"name": " "}, headers=admin
+            )
+            unknown = await client.patch(
+                "/v1/admin/fleets/no-such", json={"name": "x"}, headers=admin
+            )
+            on_merged = await client.patch(
+                f"/v1/admin/fleets/{merged.id}", json={"name": "old-ops (merged)"}, headers=admin
+            )
+            denied = await client.patch(
+                f"/v1/admin/fleets/{fleet.id}",
+                json={"name": "nope"},
+                headers={"X-API-Key": "key-org"},
+            )
+            denied_unknown = await client.patch(
+                "/v1/admin/fleets/no-such", json={"name": "x"}, headers={"X-API-Key": "key-org"}
+            )
+        assert ok.status_code == 200
+        assert ok.json()["id"] == fleet.id and ok.json()["name"] == "data-platform"
+        assert same.status_code == 200 and same.json() == ok.json()
+        assert (clash.status_code, clash.json()["error"]["code"]) == (409, "fleet_exists")
+        assert (blank.status_code, blank.json()["error"]["code"]) == (422, "invalid_input")
+        assert (unknown.status_code, unknown.json()["error"]["code"]) == (404, "not_found")
+        assert on_merged.status_code == 200
+        assert on_merged.json()["merged_into"] == other.id
+        assert denied.status_code == denied_unknown.status_code == 403
+        assert {f.name for f in await app.store.list_fleets()} == {
+            "data-platform",
+            "ml",
+            "old-ops (merged)",
+        }
+
     async def test_activate_agent_issues_key_once(self) -> None:
         app = make_hivemind_app()
         # Seed: a pending agent + a home fleet.

@@ -57,6 +57,8 @@ _ALLOWED = allowlist(
         ("GET", r"admin/flagged"),
         # Merging one fleet into another, and undoing it (admin-key only on the API side).
         ("POST", r"admin/fleets/[^/]+/merge"),
+        # Renaming a fleet (admin-key only on the API side).
+        ("PATCH", r"admin/fleets/[^/]+"),
         ("GET", r"admin/fleet-merges"),
         ("POST", r"admin/fleet-merges/[^/]+/undo"),
     )

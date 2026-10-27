@@ -12,7 +12,7 @@ import { mergeDialog, mergesCard } from "./merge.js";
 
 const AUDIT_ACTIONS = [
   "agent.register", "agent.activate", "agent.trust_level_set", "agent.home_fleet_set", "agent.revoke",
-  "fleet.create", "fleet.merge", "fleet.unmerge", "org_key.rotate", "entry.withdraw", "entry.pin", "entry.unpin",
+  "fleet.create", "fleet.rename", "fleet.merge", "fleet.unmerge", "org_key.rotate", "entry.withdraw", "entry.pin", "entry.unpin",
   "admin_key.issue", "admin_key.revoke", "agent_key.issue", "agent_key.replace",
 ];
 const AUDIT_PAGE = 50;
@@ -170,6 +170,36 @@ function editDialog(agent, onDone) {
   });
 }
 
+/** Rename a fleet. Its id never changes, so memories, pins and agents stay as they are. */
+function renameFleetDialog(fleet, onDone) {
+  const input = h("input", { id: "f-fleet-rename", value: fleet.name, maxlength: 200, required: true, autocomplete: "off" });
+  openModal({
+    title: `Rename ${fleet.name}`,
+    body: [
+      h("div", { class: "field" }, h("label", { for: "f-fleet-rename", text: "New name" }), input,
+        h("span", { class: "hint", text: "Names are unique. Memories, pins and agents stay with the fleet." })),
+    ],
+    actions: [
+      { label: "Cancel" },
+      {
+        label: "Rename",
+        class: "btn-primary",
+        submit: true,
+        onClick: async () => {
+          const name = input.value.trim();
+          if (!name) throw new Error("Enter a name for the fleet.");
+          if (name === fleet.name) { closeModal(); return; }
+          await guarded(() => api("PATCH", `admin/fleets/${encodeURIComponent(fleet.id)}`, { body: { name } }));
+          closeModal();
+          toast(`Fleet renamed to “${name}”`);
+          onDone();
+        },
+      },
+    ],
+  });
+  input.select();
+}
+
 /** The buttons for what can be done to `agent` now (activate, edit, revoke…). */
 export function agentButtons(agent, refresh) {
   const buttons = [];
@@ -249,6 +279,9 @@ export async function viewAudit(root) {
   const target = (r) => {
     if (r.target && r.action === "fleet.create") {
       return h("td", { title: r.target, text: (r.detail && r.detail.name) || fleetName(r.target) });
+    }
+    if (r.target && r.action === "fleet.rename") {
+      return h("td", { title: r.target, text: (r.detail && r.detail.to) || nameOf(r.target) });
     }
     if (r.target && (r.action === "fleet.merge" || r.action === "fleet.unmerge")) {
       return h("td", { title: r.target, text: nameOf(r.target) });
@@ -465,6 +498,11 @@ export async function viewFleets(root) {
       create.disabled = false;
     }
   });
+  const renameButton = (f) => h("button", {
+    type: "button", class: "btn btn-sm", text: "Rename",
+    title: "Give this fleet a new name; its memories, pins and agents stay with it",
+    onclick: () => renameFleetDialog(f, () => hooks.refresh()),
+  });
   const rowFleets = showMerged && everyFleet ? everyFleet : state.fleets;
   const rows = rowFleets.map((f) => {
     const x = act.get(f.id);
@@ -474,7 +512,7 @@ export async function viewFleets(root) {
         h("td", { colspan: 6, class: "muted", text: "Its memories, agents and pins moved to the fleet it was merged into." }),
         h("td", { title: fmtTime(f.created_at), text: fmtAgo(f.created_at) }),
         h("td", {}, h("code", { title: f.id, text: f.id.slice(0, 8) })),
-        h("td", {}));
+        h("td", { class: "actions" }, renameButton(f)));
     }
     return h("tr", {},
       h("td", {}, x && x.entries ? link(f.name, memoriesHref({ fleet: f.id }), { class: "link strong" }) : h("strong", { text: f.name })),
@@ -486,7 +524,7 @@ export async function viewFleets(root) {
       h("td", { class: "num" }, pinCount(pins.get(f.id))),
       h("td", { title: fmtTime(f.created_at), text: fmtAgo(f.created_at) }),
       h("td", {}, h("code", { title: f.id, text: f.id.slice(0, 8) })),
-      h("td", { class: "actions" }, h("button", {
+      h("td", { class: "actions" }, renameButton(f), " ", h("button", {
         type: "button", class: "btn btn-sm", text: "Merge into…",
         title: "Move this fleet's memories and agents into another fleet",
         onclick: () => mergeDialog(f, () => hooks.refresh()),
@@ -496,7 +534,7 @@ export async function viewFleets(root) {
   mergedToggle.checked = showMerged;
   mergedToggle.addEventListener("change", () => { showMerged = mergedToggle.checked; hooks.refresh(); });
   fill(root, 
-    pageHead("Fleets", "Fleets partition the pool. They cannot be deleted, but one can be merged into another.", refreshButton()),
+    pageHead("Fleets", "Fleets partition the pool. They cannot be deleted, but one can be renamed or merged into another.", refreshButton()),
     card("New fleet", form),
     card(null, table(
       ["Fleet", "Active agents", "Entries (active / all)", "Writers", `Writes (${state.days}d)`, "Last write", "Pins", "Created", "Id", ""],

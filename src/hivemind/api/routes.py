@@ -75,6 +75,7 @@ from hivemind.api.schemas import (
     RegisterAgentRequest,
     RegisteredAgentOut,
     RelatedOut,
+    RenameFleetRequest,
     SearchesMetrics,
     SearchRequest,
     UnpinOut,
@@ -914,6 +915,27 @@ def build_router() -> APIRouter:
             raise api_error(403, "forbidden", str(exc)) from exc
         except InvalidInput as exc:
             raise api_error(422, "invalid_input", str(exc)) from exc
+        except FleetExists as exc:
+            raise api_error(409, "fleet_exists", str(exc)) from exc
+        return FleetOut.from_fleet(fleet)
+
+    @router.patch("/admin/fleets/{fleet_id}", response_model=FleetOut)
+    async def rename_fleet(
+        fleet_id: NameParam, payload: RenameFleetRequest, credential: require, app: hive
+    ) -> FleetOut:
+        """Rename a fleet (admin-gated, audited ``fleet.rename``, ADR 0109).
+        The id, pins, counters and entries are unchanged; a merged fleet can
+        be renamed; the current name again is a 200 with no audit row. 404
+        unknown fleet, 409 ``fleet_exists`` when another fleet has the name,
+        422 for a name a new fleet could not have."""
+        try:
+            fleet = await app.access_service.rename_fleet(fleet_id, payload.name, credential)
+        except PermissionDenied as exc:
+            raise api_error(403, "forbidden", str(exc)) from exc
+        except InvalidInput as exc:
+            raise api_error(422, "invalid_input", str(exc)) from exc
+        except UnknownFleet as exc:
+            raise api_error(404, "not_found", str(exc)) from exc
         except FleetExists as exc:
             raise api_error(409, "fleet_exists", str(exc)) from exc
         return FleetOut.from_fleet(fleet)

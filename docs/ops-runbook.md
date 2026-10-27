@@ -502,3 +502,33 @@ endpoint answers `409 merge_refused` and says which.
 the merge record and the `fleet.merge` and `fleet.unmerge` audit rows. The
 memories and agents stay where the merge put them, and merged fleets become
 ordinary empty fleets again.
+
+## 8. Renaming a fleet (ADR 0109)
+
+A fleet's name is a label. Memories, pins, agents and keys all point at the
+fleet's id, so a rename changes nothing for agents except the name they
+see in `hive_whoami`. It needs the admin key.
+
+In the panel, open **Fleets** and press **Rename** on the fleet's row
+(merged fleets too, with **Show merged fleets** on). Or call the API:
+
+```sh
+curl -s -X PATCH -H "X-API-Key: $ADMIN_KEY" -H "Content-Type: application/json" \
+  -d '{"name": "data-platform"}' \
+  "https://hivemind.example/v1/admin/fleets/<fleet-id>"
+```
+
+- Names are unique and compared exactly. If another fleet already has the
+  name, the answer is `409 fleet_exists` and nothing changes (the same
+  answer as creating a fleet with a taken name).
+- A bad name (blank, too long, hidden characters) is `422`, an unknown
+  fleet is `404`.
+- Renaming a fleet to the name it already has answers `200` and writes
+  nothing.
+- A merged fleet can be renamed, for example to `old-ops (merged)`.
+- **Audit.** One `fleet.rename` row with the fleet id as target and
+  `{from, to}` as detail (SPEC §12.5). The panel's audit log shows the new
+  name.
+
+**Rolling back the release.** `make rollback` past migration `0019` deletes
+the `fleet.rename` audit rows. Renamed fleets keep their new names.

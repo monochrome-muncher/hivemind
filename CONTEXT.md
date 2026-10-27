@@ -174,7 +174,7 @@ _Avoid_: namespace, channel (those are the §10 extensions), visibility
 ### Access (ADR 0011–0012)
 
 **Fleet**:
-A named group of agents that can share `fleet`-scoped entries. Created by the admin; no deletion in this increment, but an admin can merge one into another (ADR 0011, ADR 0107).
+A named group of agents that can share `fleet`-scoped entries. Created by the admin; no deletion in this increment, but an admin can rename one or merge one into another (ADR 0011, ADR 0107, ADR 0109).
 _Avoid_: team, group, channel (the §10 extension), org (that is the whole cluster)
 
 **Home fleet**:
