@@ -16,11 +16,12 @@ import pytest
 from pydantic import ValidationError
 
 from hivemind.config import SearchConfig, Settings
+from hivemind.domain.access import TrustLevel, Visibility
 from hivemind.domain.entry import EntryDraft, EntryFilters, ImportanceSource, Kind
 from hivemind.domain.feedback import Verdict
 from hivemind.memstore import MemoryStore
 from hivemind.services.search import SearchService
-from tests.fakes import FIXED_NOW, make_clock
+from tests.fakes import FIXED_NOW, make_clock, make_search_config
 
 T0 = FIXED_NOW
 HALF_LIFE = 30.0
@@ -546,3 +547,72 @@ class TestPagination:
         full = await service.search("cohort note", limit=5)
         paged = await service.search("cohort note", limit=2, offset=1)
         assert [h.entry_id for h in paged] == [h.entry_id for h in full[1:3]]
+
+    async def test_offset_past_twice_the_candidate_count_is_an_empty_page(self, embedder) -> None:
+        """SPEC.md §5.3: each stream contributes ``candidate_top_k``, so a search
+        ranks at most twice that and paging stops there, however many match."""
+        store = MemoryStore(make_clock())
+        for i in range(6):
+            await create(store, f"cohort note number {i}")
+        service = make_service(store, embedder, make_search_config(candidate_top_k=2))
+        assert await store.count_entries(EntryFilters()) == 6
+        ranked = await service.search("cohort note", limit=100)
+        assert 0 < len(ranked) <= 4
+        assert await service.search("cohort note", limit=100, offset=4) == []
+        assert await service.search("cohort note", limit=1, offset=len(ranked)) == []
+
+
+class TestVisibility:
+    """ADR 0011: a hit set holds only what the reader may read. Every entry
+    here matches the query in both streams, so a leak through either shows."""
+
+    HOME, OTHER = "fleet-home", "fleet-other"
+
+    async def _pool(self, store: MemoryStore, embedder) -> dict[str, str]:
+        ids: dict[str, str] = {}
+        for label, author, scope, fleet in (
+            ("org", "w", "org", None),
+            ("mine", "reader", "self", None),
+            ("theirs", "w", "self", None),
+            ("home", "w", "fleet", self.HOME),
+            ("other", "w", "fleet", self.OTHER),
+        ):
+            draft = EntryDraft(
+                kind=Kind.FACT,
+                summary="cohort churn report",
+                author=author,
+                agent="a",
+                scope=scope,
+                fleet_id=fleet,
+            )
+            entry = await store.create_entry(draft, await embedder.embed_entry(draft))
+            ids[entry.id] = label
+        return ids
+
+    @pytest.mark.parametrize(
+        ("level", "expected"),
+        [
+            (TrustLevel.UNTRUSTED, set()),
+            (TrustLevel.LURKER, {"org", "mine", "home"}),
+            (TrustLevel.CONTRIBUTOR, {"org", "mine", "home"}),
+            (TrustLevel.PRIVILEGED, {"org", "mine", "home", "other"}),
+        ],
+        ids=["untrusted", "lurker", "contributor", "privileged"],
+    )
+    async def test_hits_are_limited_to_what_the_reader_may_read(
+        self, embedder, search_config, level: TrustLevel, expected: set[str]
+    ) -> None:
+        store = MemoryStore(make_clock())
+        labels = await self._pool(store, embedder)
+        service = make_service(store, embedder, search_config)
+        reader = Visibility(level=level, name="reader", home_fleet_id=self.HOME)
+        hits = await service.search("cohort churn report", limit=50, visibility=reader)
+        assert {labels[h.entry_id] for h in hits} == expected
+        assert len(hits) == len(expected)
+
+    async def test_without_visibility_every_entry_is_a_hit(self, embedder, search_config) -> None:
+        store = MemoryStore(make_clock())
+        labels = await self._pool(store, embedder)
+        service = make_service(store, embedder, search_config)
+        hits = await service.search("cohort churn report", limit=50)
+        assert {labels[h.entry_id] for h in hits} == set(labels.values())

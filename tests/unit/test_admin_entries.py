@@ -77,6 +77,41 @@ async def test_every_admin_endpoint_is_403_for_non_admins(method, path, body, he
     assert resp.json()["error"]["code"] == "forbidden"
 
 
+# A valid request body for each admin route that takes one; the rest take none.
+ADMIN_BODIES = {
+    ("POST", "/v1/admin/search"): {"query": "kaniko"},
+    ("POST", "/v1/admin/entries/{entry_id}/withdraw"): {},
+    ("POST", "/v1/admin/fleets"): {"name": "blue"},
+    ("POST", "/v1/admin/agents/{name}/activate"): {"trust_level": 1, "home_fleet_id": FAKE_ID},
+    ("PATCH", "/v1/admin/agents/{name}"): {"trust_level": 1},
+}
+
+
+@pytest.mark.parametrize("headers", [ALICE, ORG], ids=["agent-key", "org-key"])
+async def test_every_registered_admin_route_is_403_for_agent_and_org_keys(headers) -> None:
+    """The route list comes from the app, so a new ``/v1/admin/*`` route is
+    covered here the day it is added (give it a body above if it needs one)."""
+    app = make_hivemind_app()
+    await app.store.register_agent("ghost")
+    async with make_client(app) as client:
+        spec = (await client.get("/openapi.json")).json()
+        routes = [
+            (method.upper(), path)
+            for path, operations in spec["paths"].items()
+            if path.startswith("/v1/admin/")
+            for method in operations
+        ]
+        assert len(routes) >= len(ROUTES)
+        for method, template in routes:
+            path = template.format(entry_id=FAKE_ID, fleet_id=FAKE_ID, name="ghost")
+            body = ADMIN_BODIES.get((method, template))
+            resp = await client.request(method, path, json=body, headers=headers)
+            assert resp.status_code == 403, (method, template, resp.text)
+            assert resp.json()["error"]["code"] == "forbidden", (method, template)
+    assert await app.store.list_fleets() == []
+    assert (await app.store.get_agent("ghost")).status.value == "pending"  # type: ignore[union-attr]
+
+
 @pytest.mark.parametrize("headers", [ALICE, ORG], ids=["agent-key", "org-key"])
 async def test_agent_patch_by_a_non_admin_is_403_before_any_lookup(headers) -> None:
     """A known fleet, an unknown fleet and an empty body all answer 403, so

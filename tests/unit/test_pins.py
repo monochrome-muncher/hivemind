@@ -200,6 +200,26 @@ async def test_only_active_fleet_entries_can_be_pinned() -> None:
     assert missing["error"]["code"] == "not_found"  # type: ignore[index]
 
 
+async def test_a_superseded_version_cannot_be_pinned_but_its_successor_can() -> None:
+    store = MemoryStore(make_clock())
+    old = await _write(store, LEAD, "rule v1")
+    new = await _write(store, LEAD, "rule v2", supersedes=[old])
+    refused = await hive_pin(_surface(store, LEAD), old)
+    assert refused["error"]["code"] == "not_active"  # type: ignore[index]
+    assert _pinned_ids(await hive_pinned(_surface(store, DEV))) == []
+    assert (await hive_pin(_surface(store, LEAD), new))["pinned"] is True
+
+
+async def test_an_org_entry_cannot_be_pinned_by_anyone() -> None:
+    store = MemoryStore(make_clock())
+    org = await _write(store, ADMIN, "org-wide note", scope="org", agent="admin-bot")
+    for cred in (LEAD, ADMIN):
+        refused = await hive_pin(_surface(store, cred), org)
+        assert refused["error"]["code"] == "invalid_input", cred.user_id  # type: ignore[index]
+        assert "only fleet entries" in refused["error"]["message"]  # type: ignore[index]
+    assert _pinned_ids(await hive_pinned(_surface(store, DEV))) == []
+
+
 async def test_a_fleet_holds_a_bounded_number_of_pins() -> None:
     store = MemoryStore(make_clock())
     lead = _surface(store, LEAD)
