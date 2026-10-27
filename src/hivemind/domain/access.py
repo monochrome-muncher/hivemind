@@ -82,6 +82,29 @@ class FleetExists(ValueError):
     """A fleet with this name already exists (409 ``fleet_exists``)."""
 
 
+class FleetMerged(Exception):
+    """The fleet was merged into another (ADR 0107), so a write, pin or
+    home-fleet assignment aimed at it is refused (409 ``fleet_merged``).
+    Names the target so the caller can retry against it."""
+
+    def __init__(self, fleet_id: str, target_id: str, target_name: str | None) -> None:
+        shown = f"{target_name!r} (id {target_id})" if target_name else f"id {target_id}"
+        super().__init__(f"fleet {fleet_id} was merged into {shown}; retry against that fleet")
+        self.fleet_id = fleet_id
+        self.target_id = target_id
+        self.target_name = target_name
+
+
+class FleetBusy(TimeoutError):
+    """A write into a fleet waited for the fleet's row lock and gave up: a
+    merge (ADR 0107) holds it. A ``TimeoutError``, so every surface already
+    answers a retryable 503; the surfaces name it ``fleet_busy``."""
+
+    def __init__(self, fleet_id: str) -> None:
+        super().__init__(f"fleet {fleet_id} is being merged, retry in a few seconds")
+        self.fleet_id = fleet_id
+
+
 class InvalidAgentStatus(Exception):
     """A lifecycle verb was applied to an agent in a status it cannot
     start from (ADR 0028) — e.g. ``activate`` on an ``active`` agent."""
@@ -127,6 +150,11 @@ class Fleet:
     id: str
     name: str
     created_at: datetime
+    # Set when an admin merged this fleet into another (ADR 0107): the
+    # target's id and the time. A merged fleet keeps its row but takes no
+    # new members or memories.
+    merged_into: str | None = None
+    merged_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -278,7 +306,9 @@ __all__ = [
     "Agent",
     "AgentStatus",
     "Fleet",
+    "FleetBusy",
     "FleetExists",
+    "FleetMerged",
     "InvalidAgentStatus",
     "Standing",
     "TrustLevel",

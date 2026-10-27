@@ -53,6 +53,9 @@ ROUTES = [
     ("GET", "/v1/admin/feedback", None),
     ("GET", f"/v1/admin/fleets/{FAKE_ID}/pins", None),
     ("GET", "/v1/admin/flagged", None),
+    ("POST", f"/v1/admin/fleets/{FAKE_ID}/merge", {"new_fleet_name": "c", "dry_run": True}),
+    ("GET", "/v1/admin/fleet-merges", None),
+    ("POST", f"/v1/admin/fleet-merges/{FAKE_ID}/undo", None),
 ]
 
 
@@ -86,6 +89,7 @@ ADMIN_BODIES = {
     ("POST", "/v1/admin/fleets"): {"name": "blue"},
     ("POST", "/v1/admin/agents/{name}/activate"): {"trust_level": 1, "home_fleet_id": FAKE_ID},
     ("PATCH", "/v1/admin/agents/{name}"): {"trust_level": 1},
+    ("POST", "/v1/admin/fleets/{source_id}/merge"): {"new_fleet_name": "c", "dry_run": False},
 }
 
 
@@ -105,7 +109,13 @@ async def test_every_registered_admin_route_is_403_for_agent_and_org_keys(header
         ]
         assert len(routes) >= len(ROUTES)
         for method, template in routes:
-            path = template.format(entry_id=FAKE_ID, fleet_id=FAKE_ID, name="ghost")
+            path = template.format(
+                entry_id=FAKE_ID,
+                fleet_id=FAKE_ID,
+                name="ghost",
+                source_id=FAKE_ID,
+                merge_id=FAKE_ID,
+            )
             body = ADMIN_BODIES.get((method, template))
             resp = await client.request(method, path, json=body, headers=headers)
             assert resp.status_code == 403, (method, template, resp.text)

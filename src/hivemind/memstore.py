@@ -30,9 +30,11 @@ from hivemind.domain.access import (
     AgentStatus,
     Fleet,
     FleetExists,
+    FleetMerged,
     InvalidAgentStatus,
     TrustLevel,
     UnknownAgent,
+    UnknownFleet,
     Visibility,
     entry_is_visible,
 )
@@ -72,6 +74,21 @@ from hivemind.domain.feedback import (
     last_confirmed,
     truncate_note,
 )
+from hivemind.domain.fleet_merge import (
+    DroppedPin,
+    DuplicatePair,
+    DuplicateScan,
+    FleetFacts,
+    FleetMergeRecord,
+    FleetMergeRefused,
+    MergeOutcome,
+    UnknownFleetMerge,
+    UnmergeOutcome,
+    check_pins_unchanged,
+    choose_pins,
+    plan_pin_restore,
+    undo_refusal,
+)
 from hivemind.domain.health import (
     DISPERSION_CAP,
     DISPERSION_MIN,
@@ -87,7 +104,7 @@ from hivemind.domain.health import (
 )
 from hivemind.domain.pin import Pin, PinRefusal, PinWrite, pin_refusal
 from hivemind.domain.upstream import UpstreamLink
-from hivemind.domain.validation import canonical_uuid, is_valid_uuid, utcnow
+from hivemind.domain.validation import InvalidInput, canonical_uuid, is_valid_uuid, utcnow
 from hivemind.ports import SupersedeConflict
 
 # Sort key for a feedback row that has no timestamp (fixtures only).
@@ -150,6 +167,9 @@ class MemoryStore:
         self._searches: dict[str | None, tuple[int, int, int]] = {}  # ADR 0056, 0078
         # (from, to) -> when the link was made, insertion-ordered (ADR 0057, 0081)
         self._links: dict[tuple[str, str], datetime] = {}
+        # Fleet merges, oldest first, and the entry ids each moved (ADR 0107)
+        self._merges: list[FleetMergeRecord] = []
+        self._merge_entries: dict[str, list[str]] = {}
 
     # -- write path -------------------------------------------------------
 
@@ -186,6 +206,7 @@ class MemoryStore:
             entities_model=entities_model,
         )
         with self._lock:
+            self._refuse_merged(draft.fleet_id)
             # Explicit supersessions (SPEC.md §4.1), atomic (ADR 0034):
             # every target must be active, or nothing is written.
             wanted = list(dict.fromkeys(draft.supersedes))
@@ -339,6 +360,7 @@ class MemoryStore:
         if not is_valid_uuid(entry_id):
             return PinRefusal.FLEET  # as on Postgres: nothing a malformed id can pin
         with self._lock:
+            self._refuse_merged(fleet_id)
             fleet_pins = [p for (f, _), p in self._pins.items() if f == fleet_id]
             refusal = pin_refusal(fleet_pins, entry_id, pinned_by, limit, agent_limit, replaces)
             if refusal is not None:
@@ -1027,6 +1049,201 @@ class MemoryStore:
         with self._lock:
             return self._fleets.get(fleet_id)
 
+    def _refuse_merged(self, fleet_id: str | None) -> None:
+        """``FleetMerged`` when ``fleet_id`` names a merged fleet (ADR 0107).
+        Caller holds the lock. An id naming no fleet passes, as on Postgres."""
+        fleet = self._fleets.get(fleet_id) if fleet_id is not None else None
+        if fleet is not None and fleet.merged_into is not None:
+            target = self._fleets.get(fleet.merged_into)
+            raise FleetMerged(fleet.id, fleet.merged_into, target.name if target else None)
+
+    # -- fleet merge (ADR 0107) ---------------------------------------------
+
+    async def fleet_facts(self, fleet_id: str) -> FleetFacts:
+        with self._lock:
+            agents = sum(1 for a in self._agents.values() if a.home_fleet_id == fleet_id)
+            states = Counter(
+                e.state.value for e in self._entries.values() if e.fleet_id == fleet_id
+            )
+        return FleetFacts(agents=agents, entries=dict(states))
+
+    async def duplicate_pairs(
+        self, fleet_id: str, other_id: str, threshold: float, cap: int
+    ) -> DuplicateScan:
+        with self._lock:
+            active = [
+                e
+                for e in self._entries.values()
+                if e.state is EntryState.ACTIVE and e.embedding is not None
+            ]
+            mine = sorted(
+                (e for e in active if e.fleet_id == fleet_id),
+                key=lambda e: (-e.created_at.timestamp(), e.id),
+            )
+            theirs = [e for e in active if e.fleet_id == other_id]
+        looked = mine[:cap]
+        pairs: list[DuplicatePair] = []
+        for e in looked:
+            best: tuple[float, datetime, str] | None = None
+            for o in theirs:
+                sim = cosine_similarity(list(e.embedding or ()), list(o.embedding or ()))
+                key = (-sim, o.created_at, o.id)
+                if best is None or key < (-best[0], best[1], best[2]):
+                    best = (sim, o.created_at, o.id)
+            if best is not None and best[0] >= threshold:
+                pairs.append(DuplicatePair(e.id, best[2], best[0]))
+        pairs.sort(key=lambda p: (-p.similarity, p.entry_id))
+        return DuplicateScan(tuple(pairs), len(looked), len(mine) > cap)
+
+    async def merge_fleets(
+        self,
+        source_id: str,
+        *,
+        target_fleet_id: str | None = None,
+        new_fleet_name: str | None = None,
+        keep_pin_ids: Sequence[str] | None = None,
+        expected_pin_ids: Sequence[str] | None = None,
+        merged_by: str,
+    ) -> MergeOutcome:
+        if (target_fleet_id is None) == (new_fleet_name is None):
+            raise InvalidInput("name exactly one of target_fleet_id and new_fleet_name")
+        for given in (source_id, target_fleet_id):
+            if given is not None and not is_valid_uuid(given):
+                raise UnknownFleet(f"unknown fleet: {given}")
+        source_id = str(uuid.UUID(source_id))
+        if target_fleet_id is not None:
+            target_fleet_id = str(uuid.UUID(target_fleet_id))
+        with self._lock:
+            source = self._fleets.get(source_id)
+            if source is None:
+                raise UnknownFleet(f"unknown fleet: {source_id}")
+            target = None
+            if target_fleet_id is not None:
+                target = self._fleets.get(target_fleet_id)
+                if target is None:
+                    raise UnknownFleet(f"unknown fleet: {target_fleet_id}")
+                if target.id == source.id:
+                    raise FleetMergeRefused("a fleet cannot be merged into itself")
+            elif any(f.name == new_fleet_name for f in self._fleets.values()):
+                raise FleetExists(f"fleet already exists: {new_fleet_name!r}")
+            for side in (source, target):
+                if side is not None and side.merged_into is not None:
+                    self._refuse_merged(side.id)
+            pins = [
+                p
+                for (f, _), p in self._pins.items()
+                if f == source.id or (target is not None and f == target.id)
+            ]
+            check_pins_unchanged(pins, expected_pin_ids)
+            kept, dropped = choose_pins(pins, keep_pin_ids)
+            # Nothing below can fail: mutate.
+            created = target is None
+            if target is None:
+                assert new_fleet_name is not None
+                target = Fleet(id=str(uuid.uuid4()), name=new_fleet_name, created_at=self._clock())
+                self._fleets[target.id] = target
+            now = self._clock()
+            moved = [e.id for e in self._entries.values() if e.fleet_id == source.id]
+            for entry_id in moved:
+                self._entries[entry_id] = replace(self._entries[entry_id], fleet_id=target.id)
+            agents = sorted(a.name for a in self._agents.values() if a.home_fleet_id == source.id)
+            for name in agents:
+                self._agents[name] = replace(self._agents[name], home_fleet_id=target.id)
+            drops = tuple(
+                DroppedPin(p.fleet_id, p.entry_id, p.pinned_by, p.pinned_at) for p in dropped
+            )
+            for p in pins:
+                self._pins.pop((p.fleet_id, p.entry_id), None)
+            rekeyed = tuple(replace(p, fleet_id=target.id) for p in kept)
+            for p in sorted(rekeyed, key=lambda p: p.pinned_at):
+                self._pins[(p.fleet_id, p.entry_id)] = p
+            if source.id in self._searches:
+                mine = self._searches.pop(source.id)
+                theirs = self._searches.get(target.id, (0, 0, 0))
+                self._searches[target.id] = tuple(a + b for a, b in zip(mine, theirs, strict=True))  # type: ignore[assignment]
+            self._fleets[source.id] = replace(source, merged_into=target.id, merged_at=now)
+            record = FleetMergeRecord(
+                id=str(uuid.uuid4()),
+                source_fleet_id=source.id,
+                target_fleet_id=target.id,
+                merged_by=merged_by,
+                merged_at=now,
+                moved_agents=tuple(agents),
+                dropped_pins=drops,
+            )
+            self._merges.append(record)
+            self._merge_entries[record.id] = moved
+            return MergeOutcome(record, target, created, len(moved), len(agents), rekeyed, drops)
+
+    async def unmerge_fleet(self, merge_id: str) -> UnmergeOutcome:
+        if not is_valid_uuid(merge_id):
+            raise UnknownFleetMerge(f"unknown fleet merge: {merge_id}")
+        merge_id = str(uuid.UUID(merge_id))
+        with self._lock:
+            record = next((m for m in self._merges if m.id == merge_id), None)
+            if record is None:
+                raise UnknownFleetMerge(f"unknown fleet merge: {merge_id}")
+            source = self._fleets[record.source_fleet_id]
+            target = self._fleets[record.target_fleet_id]
+            reason = undo_refusal(record, list(reversed(self._merges)), target)
+            if reason is not None:
+                raise FleetMergeRefused(reason)
+            moved = set(self._merge_entries[record.id])
+            back = [
+                eid
+                for eid in self._merge_entries[record.id]
+                if self._entries[eid].fleet_id == target.id
+            ]
+            for eid in back:
+                self._entries[eid] = replace(self._entries[eid], fleet_id=source.id)
+            agents = [
+                n
+                for n in record.moved_agents
+                if n in self._agents and self._agents[n].home_fleet_id == target.id
+            ]
+            for name in agents:
+                self._agents[name] = replace(self._agents[name], home_fleet_id=source.id)
+            # Pins follow their entries back.
+            returned = [key for key in list(self._pins) if key[0] == target.id and key[1] in moved]
+            for key in returned:
+                pin = self._pins.pop(key)
+                self._pins[(source.id, key[1])] = replace(pin, fleet_id=source.id)
+            restored: list[DroppedPin] = []
+            skipped: list[DroppedPin] = []
+            for fleet in (source, target):
+                mine = [d for d in record.dropped_pins if d.fleet_id == fleet.id]
+                fits = [
+                    d
+                    for d in mine
+                    if (e := self._entries.get(d.entry_id)) is not None
+                    and e.fleet_id == fleet.id
+                    and (fleet.id, d.entry_id) not in self._pins
+                ]
+                skipped.extend(d for d in mine if d not in fits)
+                held = [p.pinned_by for (f, _), p in self._pins.items() if f == fleet.id]
+                put, over = plan_pin_restore(fits, held)
+                skipped.extend(over)
+                for d in put:
+                    self._pins[(fleet.id, d.entry_id)] = Pin(
+                        fleet.id, d.entry_id, d.pinned_by, d.pinned_at
+                    )
+                restored.extend(put)
+            now = self._clock()
+            self._fleets[source.id] = replace(source, merged_into=None, merged_at=None)
+            done = replace(record, undone_at=now)
+            self._merges[self._merges.index(record)] = done
+            return UnmergeOutcome(
+                done, len(back), tuple(agents), len(returned), tuple(restored), tuple(skipped)
+            )
+
+    async def list_fleet_merges(self, limit: int) -> list[FleetMergeRecord]:
+        with self._lock:
+            return list(reversed(self._merges))[:limit]
+
+    async def get_fleet_merge(self, merge_id: str) -> FleetMergeRecord | None:
+        with self._lock:
+            return next((m for m in self._merges if m.id == merge_id), None)
+
     # -- agent registration / activation (ADR 0012) --------------------------
 
     async def register_agent(self, name: str, owner_alias: str | None = None) -> Agent:
@@ -1064,6 +1281,7 @@ class MemoryStore:
         fleet, flip to ``active`` (ADRs 0012, 0028). ``UnknownAgent`` if
         unknown; ``InvalidAgentStatus`` if already ``active``."""
         with self._lock:
+            self._refuse_merged(home_fleet_id)
             agent = self._agents.get(name)
             if agent is None:
                 raise UnknownAgent(f"unknown agent: {name}")
@@ -1110,6 +1328,7 @@ class MemoryStore:
         into (never re-parented). ``UnknownAgent`` if unknown.
         """
         with self._lock:
+            self._refuse_merged(fleet_id)
             agent = self._agents.get(name)
             if agent is None:
                 raise UnknownAgent(f"unknown agent: {name}")

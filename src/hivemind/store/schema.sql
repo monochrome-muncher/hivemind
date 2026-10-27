@@ -65,7 +65,7 @@ CREATE TABLE public.audit_log (
     action text NOT NULL,
     target text,
     detail jsonb DEFAULT '{}'::jsonb NOT NULL,
-    CONSTRAINT audit_log_action_check CHECK ((action = ANY (ARRAY['agent.register'::text, 'agent.activate'::text, 'agent.trust_level_set'::text, 'agent.home_fleet_set'::text, 'agent.revoke'::text, 'fleet.create'::text, 'org_key.rotate'::text, 'entry.withdraw'::text, 'admin_key.issue'::text, 'admin_key.revoke'::text, 'agent_key.issue'::text, 'entry.pin'::text, 'entry.unpin'::text]))),
+    CONSTRAINT audit_log_action_check CHECK ((action = ANY (ARRAY['agent.register'::text, 'agent.activate'::text, 'agent.trust_level_set'::text, 'agent.home_fleet_set'::text, 'agent.revoke'::text, 'fleet.create'::text, 'org_key.rotate'::text, 'entry.withdraw'::text, 'admin_key.issue'::text, 'admin_key.revoke'::text, 'agent_key.issue'::text, 'entry.pin'::text, 'entry.unpin'::text, 'fleet.merge'::text, 'fleet.unmerge'::text]))),
     CONSTRAINT audit_log_actor_kind_check CHECK ((actor_kind = ANY (ARRAY['admin_key'::text, 'cli'::text, 'org_key'::text, 'agent_key'::text])))
 );
 
@@ -128,10 +128,28 @@ CREATE TABLE public.feedbacks (
     CONSTRAINT feedbacks_verdict_check CHECK ((verdict = ANY (ARRAY['helpful'::text, 'stale'::text, 'wrong'::text])))
 );
 
+CREATE TABLE public.fleet_merge_entries (
+    merge_id uuid NOT NULL,
+    entry_id uuid NOT NULL
+);
+
+CREATE TABLE public.fleet_merges (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    source_fleet_id uuid NOT NULL,
+    target_fleet_id uuid NOT NULL,
+    merged_by text NOT NULL,
+    merged_at timestamp with time zone DEFAULT now() NOT NULL,
+    moved_agents text[] DEFAULT '{}'::text[] NOT NULL,
+    dropped_pins jsonb DEFAULT '[]'::jsonb NOT NULL,
+    undone_at timestamp with time zone
+);
+
 CREATE TABLE public.fleets (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     name text NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    merged_into uuid,
+    merged_at timestamp with time zone
 );
 
 CREATE TABLE public.pins (
@@ -168,6 +186,12 @@ ALTER TABLE ONLY public.entry_links
 
 ALTER TABLE ONLY public.feedbacks
     ADD CONSTRAINT feedbacks_pkey PRIMARY KEY (entry_id, "user", agent);
+
+ALTER TABLE ONLY public.fleet_merge_entries
+    ADD CONSTRAINT fleet_merge_entries_pkey PRIMARY KEY (merge_id, entry_id);
+
+ALTER TABLE ONLY public.fleet_merges
+    ADD CONSTRAINT fleet_merges_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY public.fleets
     ADD CONSTRAINT fleets_name_key UNIQUE (name);

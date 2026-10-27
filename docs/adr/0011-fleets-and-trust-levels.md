@@ -1,5 +1,7 @@
 # Fleets and trust levels: home-fleet scoping with a four-level privilege ladder
 
+> **Amended by [ADR 0107](0107-fleet-merge.md):** an admin can merge a fleet into another, which re-files the whole fleet's entries and moves its agents (undoable), so an entry's fleet is fixed at write time except for a merge. A merged fleet is kept, marked, and takes no new members or memories. The rest below stands.
+
 ADR 0002 committed Hivemind to a *flat org-wide pool*: one pool, `scope` a
 single-value `org` tag, every agent reading and writing everything. That
 commitment made per-agent privacy impossible, and SPEC §9 listed "trust

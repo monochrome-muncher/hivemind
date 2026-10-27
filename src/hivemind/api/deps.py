@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 from hivemind.api.guards import BodyTooLarge, PreAuthGuard
 from hivemind.api.schemas import ErrorBody
 from hivemind.config import SearchConfig
+from hivemind.domain.access import FleetBusy
 from hivemind.domain.validation import MAX_REQUEST_BODY_BYTES, InvalidInput
 from hivemind.ports import Authenticator, Credential, Embedder, Store
 from hivemind.services.access import AccessService
@@ -149,17 +150,16 @@ def _handle_body_too_large(_request: Request, exc: Exception) -> JSONResponse:
 STORE_RETRY_AFTER_SECONDS = 2
 
 
-def _handle_store_timeout(_request: Request, _exc: Exception) -> JSONResponse:
-    logger.warning("store call timed out (pool acquire or statement); answering 503")
+def _handle_store_timeout(_request: Request, exc: Exception) -> JSONResponse:
+    if isinstance(exc, FleetBusy):  # ADR 0107: a fleet write waited for a merge
+        code, message = "fleet_busy", str(exc)
+    else:
+        logger.warning("store call timed out (pool acquire or statement); answering 503")
+        code, message = "store_unavailable", "the database is busy or unreachable; retry shortly"
     return JSONResponse(
         status_code=503,
         headers={"Retry-After": str(STORE_RETRY_AFTER_SECONDS)},
-        content={
-            "error": ErrorBody(
-                code="store_unavailable",
-                message="the database is busy or unreachable; retry shortly",
-            ).model_dump()
-        },
+        content={"error": ErrorBody(code=code, message=message).model_dump()},
     )
 
 

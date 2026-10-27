@@ -29,13 +29,14 @@ from hivemind.store.auth import key_hash
 from hivemind.store.keys import (
     AgentKeyExists,
     AgentNeedsActivation,
+    FleetMergedError,
     _issue_admin,
     _issue_agent,
     _rotate_org,
 )
 from hivemind.store.migrate import migrate
 
-TABLES = "TRUNCATE audit_log, credentials, agents, fleets, entries, feedbacks"
+TABLES = "TRUNCATE audit_log, credentials, agents, fleets, entries, feedbacks, pins, fleet_merges, fleet_merge_entries"
 
 
 async def _exec(dsn: str, sql: str, *args: object) -> None:
@@ -410,3 +411,21 @@ async def test_cli_list_marks_dead_rows_and_migrate_warns(env, monkeypatch, caps
     with caplog.at_level(logging.WARNING, logger="hivemind.store.migrate"):
         await migrate(dsn, Settings().embedding_dim)
     assert any("3 credential row(s) are dead" in r.getMessage() for r in caplog.records)
+
+
+async def test_cli_refuses_a_home_fleet_that_was_merged(env) -> None:
+    """ADR 0107: a merged fleet takes no new agents, on the CLI path too."""
+    dsn, store, auth = env
+    admin = await _admin(dsn, auth)
+    service = AccessService(store, auth)
+    old = await service.create_fleet("old", admin)
+    new = await service.create_fleet("new", admin)
+    await service.merges.merge(old.id, admin, target_fleet_id=new.id)
+    await store.register_agent("bob")
+    with pytest.raises(FleetMergedError) as refused:
+        await _issue_agent(
+            dsn, "bob", actor="t", trust_level=TrustLevel.LURKER, home_fleet_id=old.id
+        )
+    assert refused.value.target_id == new.id
+    assert await _fetch(dsn, "SELECT 1 FROM credentials WHERE agent_name = 'bob'") == []
+    await _issue_agent(dsn, "bob", actor="t", trust_level=TrustLevel.LURKER, home_fleet_id=new.id)

@@ -170,10 +170,11 @@ export async function copyText(text) {
 /**
  * Open the shared modal. `actions` are {label, class, onClick} where
  * onClick may return a promise; a thrown error is shown in the modal and
- * keeps it open.
+ * keeps it open. `wide` is for a dialog that holds a list.
  */
-export function openModal({ title, body, actions, dismissable = true }) {
+export function openModal({ title, body, actions, dismissable = true, wide = false }) {
   const modal = $("modal");
+  modal.classList.toggle("modal-wide", wide);
   $("modal-title").textContent = title;
   $("modal-body").replaceChildren(...[].concat(body));
   const errorEl = $("modal-error");

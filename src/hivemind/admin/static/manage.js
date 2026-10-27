@@ -8,10 +8,11 @@ import {
 } from "./core.js";
 import { openEntry } from "./drawer.js";
 import { PIN_HEADERS, pinRow } from "./lists.js";
+import { mergeDialog, mergesCard } from "./merge.js";
 
 const AUDIT_ACTIONS = [
   "agent.register", "agent.activate", "agent.trust_level_set", "agent.home_fleet_set", "agent.revoke",
-  "fleet.create", "org_key.rotate", "entry.withdraw", "entry.pin", "entry.unpin",
+  "fleet.create", "fleet.merge", "fleet.unmerge", "org_key.rotate", "entry.withdraw", "entry.pin", "entry.unpin",
   "admin_key.issue", "admin_key.revoke", "agent_key.issue",
 ];
 const AUDIT_PAGE = 50;
@@ -202,6 +203,12 @@ export function pendingQueue(refresh) {
 
 export async function viewAudit(root) {
   await loadAgentsAndFleets().catch(() => undefined); // for fleet names only
+  // A merged fleet is not in state.fleets, but audit rows still name it.
+  const everyFleet = (await optional(() => api("GET", "admin/fleets", { query: { include_merged: "true" } }))) || [];
+  const nameOf = (id) => {
+    const fleet = everyFleet.find((f) => f.id === id);
+    return fleet ? fleet.name : fleetName(id);
+  };
   const actor = h("input", { type: "search", placeholder: "Actor (exact), e.g. admin:1a2b3c4d5e6f" });
   const action = h("select", {}, h("option", { value: "", text: "All actions" }), AUDIT_ACTIONS.map((a) => h("option", { value: a, text: a })));
   const since = h("input", { type: "datetime-local", title: "Since (local time)" });
@@ -217,6 +224,9 @@ export async function viewAudit(root) {
     if (r.target && r.action === "fleet.create") {
       return h("td", { title: r.target, text: (r.detail && r.detail.name) || fleetName(r.target) });
     }
+    if (r.target && (r.action === "fleet.merge" || r.action === "fleet.unmerge")) {
+      return h("td", { title: r.target, text: nameOf(r.target) });
+    }
     return h("td", { text: r.target ?? "—" });
   };
   const detail = (r) => {
@@ -227,6 +237,11 @@ export async function viewAudit(root) {
       delete d.home_fleet_id;
     }
     if (r.action === "agent.home_fleet_set") { d.from = fleetName(d.from); d.to = fleetName(d.to); }
+    if (r.action === "fleet.merge" || r.action === "fleet.unmerge") {
+      d.target_fleet = d.target_fleet_name || nameOf(d.target_fleet_id);
+      delete d.target_fleet_id;
+      delete d.target_fleet_name;
+    }
     return Object.keys(d).length ? JSON.stringify(d) : "";
   };
   const actorBadge = (kind) => {
@@ -392,8 +407,14 @@ function pinsCard(pins) {
   });
 }
 
+let showMerged = false; // the Fleets view's "Show merged fleets" filter (ADR 0107)
+
 export async function viewFleets(root) {
-  const [, metrics, activity] = await Promise.all([loadAgentsAndFleets(), fetchMetrics(), fetchActivity(state.days)]);
+  const [, metrics, activity, merges, everyFleet] = await Promise.all([
+    loadAgentsAndFleets(), fetchMetrics(), fetchActivity(state.days),
+    optional(() => api("GET", "admin/fleet-merges")),
+    showMerged ? optional(() => api("GET", "admin/fleets", { query: { include_merged: "true" } })) : null,
+  ]);
   // One read per fleet: fleets are few, and a fleet holds at most 10 pins.
   const pinLists = await Promise.all(state.fleets.map((f) =>
     optional(() => api("GET", `admin/fleets/${encodeURIComponent(f.id)}/pins`)).then((r) => [f.id, r ? r.pins : null])));
@@ -418,8 +439,17 @@ export async function viewFleets(root) {
       create.disabled = false;
     }
   });
-  const rows = state.fleets.map((f) => {
+  const rowFleets = showMerged && everyFleet ? everyFleet : state.fleets;
+  const rows = rowFleets.map((f) => {
     const x = act.get(f.id);
+    if (f.merged_into) {
+      return h("tr", { class: "merged-fleet" },
+        h("td", {}, h("strong", { text: f.name }), " ", h("span", { class: "badge badge-muted", title: fmtTime(f.merged_at), text: `merged into ${fleetName(f.merged_into)}` })),
+        h("td", { colspan: 6, class: "muted", text: "Its memories, agents and pins moved to the fleet it was merged into." }),
+        h("td", { title: fmtTime(f.created_at), text: fmtAgo(f.created_at) }),
+        h("td", {}, h("code", { title: f.id, text: f.id.slice(0, 8) })),
+        h("td", {}));
+    }
     return h("tr", {},
       h("td", {}, x && x.entries ? link(f.name, memoriesHref({ fleet: f.id }), { class: "link strong" }) : h("strong", { text: f.name })),
       h("td", { class: "num", text: state.agents.filter((a) => a.status === "active" && a.home_fleet_id === f.id).length }),
@@ -429,14 +459,26 @@ export async function viewFleets(root) {
       h("td", { title: x ? fmtTime(x.last_write_at) : "", text: x && x.last_write_at ? fmtAgo(x.last_write_at) : "—" }),
       h("td", { class: "num" }, pinCount(pins.get(f.id))),
       h("td", { title: fmtTime(f.created_at), text: fmtAgo(f.created_at) }),
-      h("td", {}, h("code", { text: f.id })));
+      h("td", {}, h("code", { title: f.id, text: f.id.slice(0, 8) })),
+      h("td", { class: "actions" }, h("button", {
+        type: "button", class: "btn btn-sm", text: "Merge into…",
+        title: "Move this fleet's memories and agents into another fleet",
+        onclick: () => mergeDialog(f, () => hooks.refresh()),
+      })));
   });
+  const mergedToggle = h("input", { type: "checkbox", id: "show-merged" });
+  mergedToggle.checked = showMerged;
+  mergedToggle.addEventListener("change", () => { showMerged = mergedToggle.checked; hooks.refresh(); });
   fill(root, 
-    pageHead("Fleets", "Fleets partition the pool. They cannot be deleted.", refreshButton()),
+    pageHead("Fleets", "Fleets partition the pool. They cannot be deleted, but one can be merged into another.", refreshButton()),
     card("New fleet", form),
     card(null, table(
-      ["Fleet", "Active agents", "Entries (active / all)", "Writers", `Writes (${state.days}d)`, "Last write", "Pins", "Created", "Id"],
-      rows, "No fleets yet. Create one before activating agents."), { flush: true }),
+      ["Fleet", "Active agents", "Entries (active / all)", "Writers", `Writes (${state.days}d)`, "Last write", "Pins", "Created", "Id", ""],
+      rows, "No fleets yet. Create one before activating agents.", { className: "fleets-table" }), {
+      flush: true,
+      head: [h("label", { class: "check", for: "show-merged" }, mergedToggle, " Show merged fleets")],
+    }),
+    mergesCard(merges),
     pinsCard(pins),
     nofleet ? h("p", { class: "muted small" }, `${fmtNum(nofleet.entries)} entries carry no fleet (${fmtNum(nofleet.active)} active).`) : null,
     activity ? null : unavailable("Per-fleet activity"));

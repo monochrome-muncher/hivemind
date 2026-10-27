@@ -20,7 +20,7 @@ from pydantic import WithJsonSchema
 
 from hivemind import wire
 from hivemind.config import SearchConfig
-from hivemind.domain.access import SCOPE_FLEET, SCOPE_ORG, SCOPE_SELF
+from hivemind.domain.access import SCOPE_FLEET, SCOPE_ORG, SCOPE_SELF, FleetMerged
 from hivemind.domain.entry import (
     EntryFilters,
     Kind,
@@ -58,6 +58,8 @@ ERR_PERMISSION_DENIED = "permission_denied"
 ERR_NOT_ACTIVE = "not_active"
 ERR_AGENT_UNRESOLVED = "agent_unresolved"
 ERR_SUPERSEDE_DENIED = "supersede_denied"
+ERR_FLEET_MERGED = "fleet_merged"
+ERR_FLEET_BUSY = "fleet_busy"  # a merge holds the fleet: retry in a few seconds
 # The embedding provider is down/misconfigured: retry later (MCP-2, PC-2).
 ERR_EMBEDDING_UNAVAILABLE = "embedding_unavailable"
 # ADR 0048: hive_search falls back to keyword-only hits when the embedder fails.
@@ -327,6 +329,8 @@ async def hive_write(
         written = await app.write_service.write_and_relate(draft, writer=cred.visibility())
     except SupersedeDenied as exc:
         return _error(ERR_SUPERSEDE_DENIED, str(exc))
+    except FleetMerged as exc:  # ADR 0107: the home fleet was merged away
+        return _error(ERR_FLEET_MERGED, str(exc))
     except EmbeddingError as exc:
         return _embedding_unavailable(exc)
     except InvalidInput as exc:  # e.g. an unknown see_also entry
@@ -614,6 +618,8 @@ async def hive_pin(app: McpHivemind, entry_id: str, unpin: bool = False) -> dict
         return _error(ERR_INVALID_INPUT, str(exc))
     except EntryNotActive as exc:
         return _error(ERR_NOT_ACTIVE, str(exc))
+    except FleetMerged as exc:  # ADR 0107
+        return _error(ERR_FLEET_MERGED, str(exc))
     return {
         "entry_id": pin.entry_id,
         "pinned": True,

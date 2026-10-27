@@ -389,3 +389,111 @@ the switch is a pool change, not a model change:
 6. **Restart the services** and verify: `GET /v1/health`, then run the
    §1.1 eval harness (golden set) at the new dim before declaring the
    switch a success.
+
+## 7. Merging fleets (ADR 0107)
+
+Two fleets that grew into the same work can be merged into one. The source
+fleet's memories (active, superseded and withdrawn), its agents and the
+pins you choose move to the target fleet. No key changes: an agent's home
+fleet is read from the database on every request, so its next request
+already lands in the target and it keeps reading everything it wrote. A
+merge writes no memory and supersedes nothing. It needs the admin key.
+
+**In the admin panel.** Open **Fleets** and press **Merge into…** on the
+source fleet.
+
+1. Pick the target: an existing fleet, or a new name (to merge two fleets
+   into a new one, merge the first into the new fleet, then the second
+   into it).
+2. Read the preview. It shows both fleets' agents, memories by state and
+   pins, which tells you how long the merge will take. Likely duplicate
+   pairs (the nearest memory of the other fleet at 0.90 similarity or more)
+   are listed for your information only; nothing is superseded, and agents
+   do that as they go. For a very large fleet only the newest 2,000
+   memories of the smaller fleet are checked, and the preview says so.
+3. Choose the pins. A fleet keeps at most 10. When the two fleets hold more
+   than 10 together, the newest 10 are ticked and you must tick no more than
+   10. The pins you leave out are unpinned and audited.
+4. Type the source fleet's name and press **Merge fleets**.
+
+**With the API.** The same steps, with the admin key:
+
+```sh
+# Preview: changes nothing.
+curl -s -H "X-API-Key: $ADMIN_KEY" -H 'Content-Type: application/json' \
+  -d '{"target_fleet_id": "<target-id>", "dry_run": true}' \
+  "https://hivemind.example/v1/admin/fleets/<source-id>/merge"
+# Merge (use "new_fleet_name": "..." instead of a target id for a new fleet).
+# keep_pin_ids is needed when the two fleets hold more than 10 pins.
+curl -s -H "X-API-Key: $ADMIN_KEY" -H 'Content-Type: application/json' \
+  -d '{"target_fleet_id": "<target-id>", "keep_pin_ids": ["<entry-id>"], "dry_run": false}' \
+  "https://hivemind.example/v1/admin/fleets/<source-id>/merge"
+# The recorded merges, newest first, each with "undoable".
+curl -s -H "X-API-Key: $ADMIN_KEY" "https://hivemind.example/v1/admin/fleet-merges"
+# Undo one.
+curl -s -X POST -H "X-API-Key: $ADMIN_KEY" \
+  "https://hivemind.example/v1/admin/fleet-merges/<merge-id>/undo"
+```
+
+**What to expect.**
+
+- **Writes to the two fleets wait briefly.** The merge locks both fleet
+  rows while it moves the memories, a few seconds per 10,000 memories, so
+  pick a quiet time. A merge and an undo run without the usual 30 second
+  database command limit, so a large fleet is not cut off halfway (the
+  work is one transaction, so a failure leaves nothing changed). A write
+  that was already on its way to the source fleet is refused with
+  `409 fleet_merged` (naming the target) and the agent retries; its next
+  attempt lands in the target. A write that has to wait more than 3 seconds
+  for the merge gets `503 fleet_busy` ("fleet is being merged, retry")
+  with a `Retry-After` header, on REST and in the MCP tools, and retrying
+  works once the merge commits. If the merge cannot get its locks within
+  5 seconds, or deadlocks with a concurrent change, it stops with
+  `409 merge_refused` and changes nothing; run it again.
+- **Do not merge during a rollout.** An older server pod does not know
+  about merged fleets. It skips the lock, so a write or pin it handles can
+  still land in the source fleet, and an agent it assigns to a merged
+  fleet gets `409 fleet_merged` until you move it. Wait until every pod
+  runs the new release.
+- **Pins changed since the preview.** The panel sends the pins it showed.
+  If someone pinned or unpinned in either fleet meanwhile, the merge
+  answers `409 merge_refused` ("preview again"). Preview again and
+  continue.
+- **A failed audit write.** The merge commits first and is audited after.
+  If the audit write fails the call answers 500 although the merge
+  happened. Look at the merges list (or `GET /v1/admin/fleet-merges`)
+  before you run it again.
+- **The source fleet stays**, marked as merged. It is hidden from the fleet
+  list unless you ask (`?include_merged=true`, or the **Show merged
+  fleets** box in the panel), cannot be picked as a home fleet and cannot
+  be merged again.
+- **Monitoring.** Grafana and Prometheus series labelled with the source
+  fleet stop at the merge and continue under the target. The entry counts
+  are cached for `HIVEMIND_METRICS_ENTRY_COUNTS_TTL` (300 s), so the old
+  split can show for up to five minutes. The replica that ran the merge
+  or undo drops its cached counts at once; other API replicas keep theirs
+  until the TTL runs out. Search counters of the source are
+  added to the target's.
+- **Audit.** `fleet.merge` (and `fleet.create` for a new target), one
+  `entry.unpin` with reason `fleet_merge` for each pin left out, and
+  `fleet.unmerge` for an undo (SPEC §12.5).
+
+**Undoing a merge.** Press **Undo** in the panel's **Merges** list, or call
+the endpoint above. The memories and agents the merge moved go back to the
+source if they are still in the target. Memories written since stay in the
+target, and an agent that was moved elsewhere in the meantime stays where
+it is. Pins on the returning memories go back with them, and the pins that
+were left out are restored where they fit under the limit of 10 (the oldest
+are skipped, and the answer lists them). Search counters stay summed. A restored pin also has to fit the
+limit of 3 pins per agent (admin pins are exempt). Undoing a merge into a
+new fleet leaves that fleet in place, empty or holding what was written
+after the merge; it is a normal fleet, so remove nothing by hand. An
+undo is allowed only for the newest merge that involves the target fleet,
+and only while the target has not itself been merged into another fleet.
+If the fleet was merged again since, undo that merge first; otherwise the
+endpoint answers `409 merge_refused` and says which.
+
+**Rolling back the release.** `make rollback` past migration `0017` deletes
+the merge record and the `fleet.merge` and `fleet.unmerge` audit rows. The
+memories and agents stay where the merge put them, and merged fleets become
+ordinary empty fleets again.

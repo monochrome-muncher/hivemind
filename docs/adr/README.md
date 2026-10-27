@@ -116,3 +116,4 @@ is unused.
 | [0104](0104-mcp-runner-serves-process-metrics.md) | The MCP HTTP runner serves per-process metrics | Accepted; amends 0050, no usage series, `sum` across api and mcp |
 | [0105](0105-mcp-hive-write-sources-schema-typed.md) | The MCP `hive_write` `sources` schema is typed, validated leniently | Accepted; schema-only, keeps structured `invalid_input` |
 | [0106](0106-confirmation-halves-older-flags.md) | A confirmation newer than every flag halves those flags | Accepted; amends 0063, 0070, 0103 (I3, new I7), `HIVEMIND_CONFIRMATION_HALVES_FLAGS=false` turns it off |
+| [0107](0107-fleet-merge.md) | Merge fleets into one home fleet | Accepted; amends 0011, touches 0058 and 0096, migration 0017, admin only, undoable |

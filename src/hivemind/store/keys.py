@@ -38,6 +38,7 @@ import asyncpg
 from hivemind.config import load_settings
 from hivemind.domain.access import TrustLevel
 from hivemind.domain.audit import ActorKind, AuditAction, key_fingerprint
+from hivemind.domain.validation import is_valid_uuid
 from hivemind.store.auth import DEAD_CREDENTIAL_PREDICATE, ORG_KEY_LOCK, key_hash
 
 _ISSUE_ADMIN = "INSERT INTO credentials (key_hash, kind, user_id) VALUES ($1, 'admin', $2)"
@@ -51,7 +52,9 @@ _LIST = (
     "SELECT c.key_hash, c.kind, c.user_id, c.agent_name, "
     f"{DEAD_CREDENTIAL_PREDICATE} AS dead FROM credentials c ORDER BY c.created_at"
 )
-_FLEET_EXISTS = "SELECT 1 FROM fleets WHERE id = $1"
+# ADR 0107: share-lock the row so a merge cannot commit between this check
+# and the activation; `merged_into` set means the fleet takes no new agents.
+_FLEET_FOR_SHARE = "SELECT merged_into FROM fleets WHERE id = $1 FOR SHARE"
 _REVOKE_AGENT = "DELETE FROM credentials WHERE kind = 'agent' AND agent_name = $1"
 _REVOKE_ADMIN = "DELETE FROM credentials WHERE kind = 'admin' AND key_hash = $1"
 _ADMIN_HASHES_BY_PREFIX = (
@@ -95,6 +98,16 @@ class ActivationFlagsNotApplicable(Exception):
 
 class UnknownFleet(Exception):
     """``issue-agent`` refused: ``--home-fleet`` is not a known fleet id."""
+
+
+class FleetMergedError(Exception):
+    """``issue-agent`` refused: ``--home-fleet`` was merged into another
+    fleet (ADR 0107)."""
+
+    def __init__(self, fleet_id: str, target_id: str) -> None:
+        super().__init__(f"fleet {fleet_id} was merged into {target_id}")
+        self.fleet_id = fleet_id
+        self.target_id = target_id
 
 
 class AgentNotRegistered(Exception):
@@ -176,6 +189,13 @@ async def _issue_agent(
     conn = await asyncpg.connect(dsn)
     try:
         async with conn.transaction():
+            # Fleet row before agent row, as PgStore.activate_agent and the
+            # merge lock them: the opposite order could deadlock with a merge.
+            fleet = (
+                await conn.fetchrow(_FLEET_FOR_SHARE, home_fleet_id)
+                if home_fleet_id is not None and is_valid_uuid(home_fleet_id)
+                else None
+            )
             status = await conn.fetchval(_AGENT_STATUS_FOR_UPDATE, name)
             if status is None:
                 raise AgentNotRegistered(name)
@@ -188,8 +208,10 @@ async def _issue_agent(
             else:
                 if trust_level is None or home_fleet_id is None:
                     raise AgentNeedsActivation(name, status)
-                if await conn.fetchval(_FLEET_EXISTS, home_fleet_id) is None:
+                if fleet is None:
                     raise UnknownFleet(home_fleet_id)
+                if fleet["merged_into"] is not None:
+                    raise FleetMergedError(home_fleet_id, str(fleet["merged_into"]))
                 await conn.execute(_DELETE_AGENT_KEYS, name)  # stale rows, if any
                 await conn.execute(_ACTIVATE, name, trust_level.value, home_fleet_id)
                 detail = {
@@ -495,6 +517,13 @@ def main() -> None:
             raise SystemExit(1) from None
         except UnknownFleet as exc:
             print(f"no fleet with id {exc}; list them with GET /v1/admin/fleets", file=sys.stderr)
+            raise SystemExit(1) from None
+        except FleetMergedError as exc:
+            print(
+                f"fleet {exc.fleet_id} was merged into fleet {exc.target_id}; "
+                "use the target as --home-fleet",
+                file=sys.stderr,
+            )
             raise SystemExit(1) from None
         except AgentKeyExists:
             print(

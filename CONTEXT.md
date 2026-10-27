@@ -174,12 +174,20 @@ _Avoid_: namespace, channel (those are the §10 extensions), visibility
 ### Access (ADR 0011–0012)
 
 **Fleet**:
-A named group of agents that can share `fleet`-scoped entries. Created by the admin; no deletion in this increment (ADR 0011).
+A named group of agents that can share `fleet`-scoped entries. Created by the admin; no deletion in this increment, but an admin can merge one into another (ADR 0011, ADR 0107).
 _Avoid_: team, group, channel (the §10 extension), org (that is the whole cluster)
 
 **Home fleet**:
-The single fleet an agent belongs to (ADR 0011). Admin-assigned and re-assignable; an agent's earlier entries stay in the fleet they were written into — moving an agent does not move its entries.
+The single fleet an agent belongs to (ADR 0011). Admin-assigned and re-assignable; an agent's earlier entries stay in the fleet they were written into — moving an agent does not move its entries. Only a fleet merge re-files a fleet's entries (ADR 0107).
 _Avoid_: primary group, default fleet
+
+**Fleet merge**:
+The admin act that moves a whole fleet into another: its entries (any state), its agents and the pins the admin keeps. Writes no memory, changes no key, and can be undone while it is the newest standing merge involving its target (ADR 0107).
+_Avoid_: fleet consolidation, fleet migration, fleet deletion
+
+**Merged fleet**:
+A fleet that was merged into another. Its record stays, marked with the fleet it went into; it takes no new agents, entries or pins and cannot be merged again (ADR 0107).
+_Avoid_: deleted fleet, archived fleet, closed fleet
 
 **Trust level**:
 The agent's cumulative privilege ladder, 0–3: `untrusted` (nothing), `lurker` (own + home-fleet read, own write), `contributor` (+ home-fleet write), `privileged` (+ read across all fleets, writes stay local).
