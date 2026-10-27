@@ -54,6 +54,11 @@ DEV_DEFAULTS += HIVEMIND_MCP_HTTP_PORT
 TEST_ENV_KEEP := HIVEMIND_DATABASE_URL HIVEMIND_EMBEDDING_DIM
 TEST_ENV = env $(foreach v,$(filter-out $(TEST_ENV_KEEP),$(DEV_DEFAULTS)),$(if $(filter file,$(origin $(v))),-u $(v)))
 PYTEST ?= uv run pytest
+# pytest-xdist: one worker per CPU (at most 8, each opens connection pools),
+# each on its own database `<name>_gw0`, ... (tests/conftest.py), grouped by
+# module (`loadscope`) so a module's fixtures are built once per worker.
+# `make test PYTEST_PARALLEL=` runs serially on the base database.
+PYTEST_PARALLEL ?= -n auto --maxprocesses=8 --dist loadscope
 
 .PHONY: help
 help: ## Show this help
@@ -146,12 +151,12 @@ standalone-reset: ## Stop the standalone stack and wipe its data volume
 	$(STANDALONE_COMPOSE) down -v
 
 .PHONY: test
-test: ## Run the full test suite (unit + integration; integration needs `make pg`), with only CI's dev settings
-	$(TEST_ENV) $(PYTEST)
+test: ## Run the full test suite in parallel (unit + integration, one database per xdist worker; integration needs `make pg`), with only CI's dev settings
+	$(TEST_ENV) $(PYTEST) $(PYTEST_PARALLEL)
 
 .PHONY: test-unit
-test-unit: ## Run unit tests only (no Postgres needed), with only CI's dev settings
-	$(TEST_ENV) $(PYTEST) tests/unit
+test-unit: ## Run unit tests only in parallel (no Postgres needed), with only CI's dev settings
+	$(TEST_ENV) $(PYTEST) $(PYTEST_PARALLEL) tests/unit
 
 .PHONY: measure-threshold
 measure-threshold: ## Measure a search similarity threshold with the configured embedder (ADR 0062; e.g. after `make vllm`; set HIVEMIND_EMBEDDING_DIM to the deployment's)
