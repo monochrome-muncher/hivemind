@@ -87,7 +87,7 @@ class World:
 @pytest.fixture
 async def world() -> World:
     store = MemoryStore(make_clock())
-    authenticator = FakeAuthenticator(agent_credentials=dict(CREDENTIALS))
+    authenticator = FakeAuthenticator(agent_credentials=dict(CREDENTIALS), store=store)
     app = create_app_for_config(
         Settings(),
         store=store,
@@ -427,6 +427,20 @@ CASES: list[tuple[str, Rest, tuple[int, str, str], Mcp, tuple[str, str]]] = [
         None,
     ),
     (
+        "replace the key of an unknown agent",
+        lambda w: w.client.post("/v1/admin/agents/ghost/key", headers=_h("hm_admin")),
+        (404, "not_found", "'unknown agent: ghost'"),
+        None,
+        None,
+    ),
+    (
+        "replace the key of a pending agent",
+        lambda w: w.client.post("/v1/admin/agents/taken/key", headers=_h("hm_admin")),
+        (409, "invalid_status", "cannot replace the key of agent 'taken': it is pending"),
+        None,
+        None,
+    ),
+    (
         "update an unknown agent in an existing fleet",
         lambda w: w.client.patch(
             "/v1/admin/agents/ghost", json={"home_fleet_id": w.fleet_id}, headers=_h("hm_admin")
@@ -757,6 +771,13 @@ UNEXPECTED: list[tuple[str, Rest, Mcp | None, str, str]] = [
         None,
         "access_service",
         "revoke",
+    ),
+    (
+        "replace an agent key",
+        lambda w: w.client.post("/v1/admin/agents/taken/key", headers=_h("hm_admin")),
+        None,
+        "access_service",
+        "replace_agent_key",
     ),
 ]
 

@@ -209,6 +209,10 @@ _Avoid_: inactive agent, dormant agent (dormant is the demoted-to-`untrusted` st
 The admin act that turns a pending (or revoked) agent into an active one: it sets the trust level and home fleet and issues the agent key, returned once. An already-active agent cannot be activated again.
 _Avoid_: approval, key issuance (a key is its output, not its name)
 
+**Key replacement**:
+The admin act that swaps an active agent's key for a new one, returned once. The old key stops working at once; the agent's name, status, level, fleet and memories do not change. Only an active agent qualifies (ADR 0108).
+_Avoid_: key reissue (issuing is activation; the org key is rotated, ADR 0031)
+
 **Registration**:
 An agent's first contact with Hivemind: a unique agent name plus the owner's alias, creating a pending record (ADR 0012). Names are durable — revocation does not release a name. The first registrant's alias owns the name; the same alias registering again is told the current status, any other alias is told the name is taken (ADR 0039).
 _Avoid_: signup, onboarding, enrollment

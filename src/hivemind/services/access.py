@@ -40,7 +40,7 @@ from hivemind.domain.validation import (
     validate_owner_alias,
 )
 from hivemind.ports import Authenticator, Credential, Store
-from hivemind.services.audit import record_admin_action
+from hivemind.services.audit import actor_kind_of, record_admin_action
 from hivemind.services.errors import NameTaken as NameTaken  # re-exported: defined in errors
 from hivemind.services.errors import PermissionDenied
 from hivemind.services.fleet_merge import FleetMergeService
@@ -196,6 +196,23 @@ class AccessService:
             {"trust_level": trust_level.value, "home_fleet_id": home_fleet_id},
         )
         return agent, key
+
+    async def replace_agent_key(self, name: str, credential: Credential) -> str:
+        """Replace an active agent's key (ADR 0108); returns the new raw key
+        **once**. The old key stops working at once; the agent's status,
+        trust level, fleet and memories are untouched. ``UnknownAgent`` if
+        unknown, ``InvalidAgentStatus`` unless ``active`` (a revoked agent
+        is re-activated instead). The audit row carries both key
+        fingerprints, never a key."""
+        self._require_admin(credential)
+        # The authenticator writes the audit row in the swap's transaction,
+        # so there is no window with a new key and no row.
+        replacement = await self._require_authenticator().replace_agent_key(
+            name,
+            audit_actor_kind=actor_kind_of(credential),
+            audit_actor=credential.audit_actor(),
+        )
+        return replacement.raw_key
 
     async def create_fleet(self, name: str, credential: Credential) -> Fleet:
         """Create a named fleet (admin-gated, ADR 0012)."""

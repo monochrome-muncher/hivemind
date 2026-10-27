@@ -16,6 +16,7 @@ Skips cleanly when Postgres is unreachable.
 from __future__ import annotations
 
 import asyncio
+import json
 
 import asyncpg
 import pytest
@@ -23,15 +24,18 @@ from tests.pg import ensure_migrated
 
 from hivemind.config import Settings
 from hivemind.domain.access import InvalidAgentStatus, TrustLevel
+from hivemind.domain.audit import ActorKind
 from hivemind.services.access import AccessService
 from hivemind.store import PgAuthenticator, PgStore
 from hivemind.store.auth import key_hash
 from hivemind.store.keys import (
     AgentKeyExists,
     AgentNeedsActivation,
+    AgentNotActive,
     FleetMergedError,
     _issue_admin,
     _issue_agent,
+    _rotate_agent,
     _rotate_org,
 )
 from hivemind.store.migrate import migrate
@@ -429,3 +433,170 @@ async def test_cli_refuses_a_home_fleet_that_was_merged(env) -> None:
     assert refused.value.target_id == new.id
     assert await _fetch(dsn, "SELECT 1 FROM credentials WHERE agent_name = 'bob'") == []
     await _issue_agent(dsn, "bob", actor="t", trust_level=TrustLevel.LURKER, home_fleet_id=new.id)
+
+
+# -- ADR 0108: replace an active agent's key ---------------------------------------
+
+
+_AUDIT = {"audit_actor_kind": ActorKind.ADMIN_KEY, "audit_actor": "admin:test"}
+
+
+async def _active_bob(dsn, store, auth):
+    admin = await _admin(dsn, auth)
+    service = AccessService(store, auth)
+    fleet = await service.create_fleet("f", admin)
+    await store.register_agent("bob")
+    _, old = await service.activate("bob", TrustLevel.CONTRIBUTOR, fleet.id, admin)
+    return service, admin, fleet, old
+
+
+async def test_replace_swaps_the_key_in_one_step_and_audits_both_fingerprints(env) -> None:
+    dsn, store, auth = env
+    service, admin, fleet, old = await _active_bob(dsn, store, auth)
+    before = await store.get_agent("bob")
+    new = await service.replace_agent_key("bob", admin)
+    assert new != old
+    assert await auth.verify(old) is None
+    credential = await auth.verify(new)
+    assert credential is not None and credential.agent_name == "bob"
+    assert credential.trust_level is TrustLevel.CONTRIBUTOR
+    assert credential.home_fleet_id == fleet.id
+    assert await store.get_agent("bob") == before
+    assert len(await _fetch(dsn, "SELECT 1 FROM credentials WHERE agent_name = 'bob'")) == 1
+    [row] = await _fetch(dsn, "SELECT * FROM audit_log WHERE action = 'agent_key.replace'")
+    assert (row["actor_kind"], row["target"]) == ("admin_key", "bob")
+    assert json.loads(row["detail"]) == {
+        "old_key": key_hash(old)[:12],
+        "new_key": key_hash(new)[:12],
+    }
+    assert old not in row["detail"] and new not in row["detail"]
+
+
+@pytest.mark.parametrize("status", ["pending", "revoked"])
+async def test_replace_refuses_a_non_active_agent_and_changes_nothing(env, status) -> None:
+    dsn, _, auth = env
+    await _exec(dsn, "INSERT INTO agents (name, status, trust_level) VALUES ('bob', $1, 1)", status)
+    with pytest.raises(InvalidAgentStatus):
+        await auth.replace_agent_key("bob", **_AUDIT)
+    assert await _fetch(dsn, "SELECT 1 FROM credentials") == []
+
+
+async def test_replace_of_an_unknown_agent_is_refused(env) -> None:
+    from hivemind.domain.access import UnknownAgent
+
+    _, _, auth = env
+    with pytest.raises(UnknownAgent):
+        await auth.replace_agent_key("ghost", **_AUDIT)
+
+
+async def test_concurrent_replacements_leave_exactly_one_live_key(env) -> None:
+    dsn, store, auth = env
+    await _active_bob(dsn, store, auth)
+    results = await asyncio.gather(*(auth.replace_agent_key("bob", **_AUDIT) for _ in range(4)))
+    live = [r.raw_key for r in results if await auth.verify(r.raw_key) is not None]
+    assert len(live) == 1
+    assert len(await _fetch(dsn, "SELECT 1 FROM credentials WHERE agent_name = 'bob'")) == 1
+
+
+async def _wait_for_lock_waiters(dsn: str, count: int) -> None:
+    """Until ``count`` backends of this database wait on a lock."""
+    for _ in range(200):
+        [row] = await _fetch(
+            dsn,
+            "SELECT count(*) AS c FROM pg_stat_activity WHERE datname = current_database() "
+            "AND wait_event_type = 'Lock' AND pid <> pg_backend_pid()",
+        )
+        if row["c"] >= count:
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError(f"fewer than {count} backends waiting on a lock")
+
+
+@pytest.mark.parametrize("first", ["replace", "revoke"])
+async def test_replace_racing_a_revoke_in_either_order_never_leaves_a_key_on_a_revoked_agent(
+    env, first
+) -> None:
+    """Both operations queue behind a held row lock on the agent, in a forced
+    order. Replace first: the key is replaced, then revoked away. Revoke first:
+    the replace sees a revoked agent and is refused. Either way the agent ends
+    revoked with no key row, neither key verifies, and each audit row exists
+    exactly when its operation succeeded."""
+    dsn, store, auth = env
+    service, admin, _, old = await _active_bob(dsn, store, auth)
+
+    async def replace() -> str:
+        return await service.replace_agent_key("bob", admin)
+
+    ops = {"replace": replace, "revoke": lambda: service.revoke("bob", admin)}
+    second = "revoke" if first == "replace" else "replace"
+
+    holder = await asyncpg.connect(dsn)
+    tx = holder.transaction()
+    await tx.start()
+    try:
+        await holder.execute("SELECT 1 FROM agents WHERE name = 'bob' FOR UPDATE")
+        task_a = asyncio.create_task(ops[first]())
+        await _wait_for_lock_waiters(dsn, 1)
+        task_b = asyncio.create_task(ops[second]())
+        await _wait_for_lock_waiters(dsn, 2)
+    finally:
+        await tx.commit()
+        await holder.close()
+    results = dict(
+        zip(
+            (first, second),
+            await asyncio.gather(task_a, task_b, return_exceptions=True),
+            strict=True,
+        )
+    )
+
+    assert results["revoke"] is None
+    replaced = results["replace"]
+    if first == "replace":
+        assert isinstance(replaced, str)
+    else:
+        assert isinstance(replaced, InvalidAgentStatus)
+    agent = await store.get_agent("bob")
+    assert agent is not None and agent.status.value == "revoked"
+    assert await _fetch(dsn, "SELECT 1 FROM credentials WHERE agent_name = 'bob'") == []
+    assert await auth.verify(old) is None
+    if isinstance(replaced, str):
+        assert await auth.verify(replaced) is None
+    actions = [r["action"] for r in await _fetch(dsn, "SELECT action FROM audit_log ORDER BY id")]
+    assert actions.count("agent.revoke") == 1
+    assert actions.count("agent_key.replace") == (1 if isinstance(replaced, str) else 0)
+
+
+async def test_cli_rotate_agent_replaces_the_key_and_audits_as_cli(
+    env, monkeypatch, capsys
+) -> None:
+    dsn, store, auth = env
+    _, _, _, old = await _active_bob(dsn, store, auth)
+    await _cli(monkeypatch, "rotate-agent", "--name", "bob")
+    new = capsys.readouterr().out.strip()
+    assert new != old
+    assert await auth.verify(old) is None
+    assert await auth.verify(new) is not None
+    [row] = await _fetch(dsn, "SELECT * FROM audit_log WHERE action = 'agent_key.replace'")
+    assert (row["actor_kind"], row["actor"], row["target"]) == ("cli", "t", "bob")
+    assert json.loads(row["detail"]) == {
+        "old_key": key_hash(old)[:12],
+        "new_key": key_hash(new)[:12],
+    }
+
+
+async def test_cli_rotate_agent_refuses_non_active_and_unknown(env, monkeypatch, capsys) -> None:
+    dsn, store, _ = env
+    await store.register_agent("bob")
+    with pytest.raises(AgentNotActive):
+        await _rotate_agent(dsn, "bob", actor="t")
+    with pytest.raises(SystemExit) as exc:
+        await _cli(monkeypatch, "rotate-agent", "--name", "bob")
+    assert exc.value.code == 1
+    assert "issue-agent" in capsys.readouterr().err
+    with pytest.raises(SystemExit) as exc:
+        await _cli(monkeypatch, "rotate-agent", "--name", "ghost")
+    assert exc.value.code == 1
+    assert "no agent registered" in capsys.readouterr().err
+    assert await _fetch(dsn, "SELECT 1 FROM credentials") == []
+    assert await _fetch(dsn, "SELECT 1 FROM audit_log WHERE action = 'agent_key.replace'") == []

@@ -118,6 +118,9 @@ key and agent keys cannot sign in here.
   named, and activate them with a fleet and a trust level. The new agent
   key is shown once, ready to paste into the agent's settings. Or reject
   them.
+- Replace an active agent's key when it leaks or its owner loses it. The
+  old key stops working at once, the new one is shown once, and the agent
+  keeps its name, level, fleet and memories.
 - Browse and search every memory in the pool, read one in full with its
   history and feedback, and withdraw it if it should not be there.
 - Read who rated which memory and why. The Health page lists the

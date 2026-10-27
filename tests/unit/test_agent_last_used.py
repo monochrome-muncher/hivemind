@@ -16,6 +16,7 @@ from hivemind.api.deps import HivemindApp, create_app
 from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
 from hivemind.domain.access import Agent, AgentStatus, TrustLevel, is_idle
+from hivemind.domain.audit import ActorKind
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
@@ -171,3 +172,19 @@ async def test_a_non_admin_cannot_list_agents() -> None:
 def test_idle_agent_days_must_be_positive(value: int) -> None:
     with pytest.raises(ValueError):
         Settings(idle_agent_days=value)
+
+
+async def test_replacing_a_key_starts_its_idle_clock_over() -> None:
+    clock_now = [NOW]
+    store = MemoryStore(make_clock(NOW - timedelta(days=90)))
+    auth = FakeAuthenticator(store=store, clock=lambda: clock_now[0])
+    service = AccessService(store, auth)
+    fleet = await service.create_fleet("f", ADMIN)
+    await service.register("alice", ORG)
+    _, key = await service.activate("alice", TrustLevel.LURKER, fleet.id, ADMIN)
+    await auth.verify(key)
+    clock_now[0] = NOW + timedelta(days=40)
+    await auth.replace_agent_key("alice", audit_actor_kind=ActorKind.ADMIN_KEY, audit_actor="a")
+    (agent,) = await store.list_agents()
+    assert agent.last_used_at is None and agent.key_created_at == clock_now[0]
+    assert not is_idle(agent, clock_now[0] + timedelta(days=5), 30)
