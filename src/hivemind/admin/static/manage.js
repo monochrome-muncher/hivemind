@@ -8,14 +8,16 @@ import {
 } from "./core.js";
 import { openEntry } from "./drawer.js";
 import { PIN_HEADERS, pinRow } from "./lists.js";
-import { mergeDialog, mergesCard } from "./merge.js";
+import { mergeDialog, mergesCard, moveDialog } from "./merge.js";
 
 const AUDIT_ACTIONS = [
   "agent.register", "agent.activate", "agent.trust_level_set", "agent.home_fleet_set", "agent.revoke",
-  "fleet.create", "fleet.rename", "fleet.merge", "fleet.unmerge", "org_key.rotate", "entry.withdraw", "entry.pin", "entry.unpin",
+  "fleet.create", "fleet.rename", "fleet.merge", "fleet.unmerge", "fleet.move_agents", "fleet.move_undo", "org_key.rotate", "entry.withdraw", "entry.pin", "entry.unpin",
   "admin_key.issue", "admin_key.revoke", "agent_key.issue", "agent_key.replace",
 ];
 const AUDIT_PAGE = 50;
+// Rows whose target is the source fleet and whose detail names a target fleet.
+const FLEET_ROW_ACTIONS = ["fleet.merge", "fleet.unmerge", "fleet.move_agents", "fleet.move_undo"];
 
 // --- shared agent actions --------------------------------------------------------
 
@@ -283,7 +285,7 @@ export async function viewAudit(root) {
     if (r.target && r.action === "fleet.rename") {
       return h("td", { title: r.target, text: (r.detail && r.detail.to) || nameOf(r.target) });
     }
-    if (r.target && (r.action === "fleet.merge" || r.action === "fleet.unmerge")) {
+    if (r.target && FLEET_ROW_ACTIONS.includes(r.action)) {
       return h("td", { title: r.target, text: nameOf(r.target) });
     }
     return h("td", { text: r.target ?? "—" });
@@ -296,7 +298,7 @@ export async function viewAudit(root) {
       delete d.home_fleet_id;
     }
     if (r.action === "agent.home_fleet_set") { d.from = fleetName(d.from); d.to = fleetName(d.to); }
-    if (r.action === "fleet.merge" || r.action === "fleet.unmerge") {
+    if (FLEET_ROW_ACTIONS.includes(r.action)) {
       d.target_fleet = d.target_fleet_name || nameOf(d.target_fleet_id);
       delete d.target_fleet_id;
       delete d.target_fleet_name;
@@ -524,17 +526,23 @@ export async function viewFleets(root) {
       h("td", { class: "num" }, pinCount(pins.get(f.id))),
       h("td", { title: fmtTime(f.created_at), text: fmtAgo(f.created_at) }),
       h("td", {}, h("code", { title: f.id, text: f.id.slice(0, 8) })),
-      h("td", { class: "actions" }, renameButton(f), " ", h("button", {
-        type: "button", class: "btn btn-sm", text: "Merge into…",
-        title: "Move this fleet's memories and agents into another fleet",
-        onclick: () => mergeDialog(f, () => hooks.refresh()),
-      })));
+      h("td", { class: "actions" }, renameButton(f), " ",
+        h("button", {
+          type: "button", class: "btn btn-sm", text: "Move agents…",
+          title: "Move some of this fleet's agents, with the fleet memories they wrote, to another fleet",
+          onclick: () => moveDialog(f, () => hooks.refresh()),
+        }), " ",
+        h("button", {
+          type: "button", class: "btn btn-sm", text: "Merge into…",
+          title: "Move this fleet's memories and agents into another fleet",
+          onclick: () => mergeDialog(f, () => hooks.refresh()),
+        })));
   });
   const mergedToggle = h("input", { type: "checkbox", id: "show-merged" });
   mergedToggle.checked = showMerged;
   mergedToggle.addEventListener("change", () => { showMerged = mergedToggle.checked; hooks.refresh(); });
   fill(root, 
-    pageHead("Fleets", "Fleets partition the pool. They cannot be deleted, but one can be renamed or merged into another.", refreshButton()),
+    pageHead("Fleets", "Fleets partition the pool. They cannot be deleted, but one can be renamed, merged into another, or split by moving some agents out.", refreshButton()),
     card("New fleet", form),
     card(null, table(
       ["Fleet", "Active agents", "Entries (active / all)", "Writers", `Writes (${state.days}d)`, "Last write", "Pins", "Created", "Id", ""],

@@ -51,6 +51,8 @@ from hivemind.domain.fleet_merge import (
     FleetFacts,
     FleetMergeRecord,
     MergeOutcome,
+    MoveOutcome,
+    MovePlan,
     UnmergeOutcome,
 )
 from hivemind.domain.health import Convergence, FleetHealth
@@ -356,12 +358,46 @@ class Store(Protocol):
         ``FleetBusy`` (retryable). Nothing changes on a refusal."""
         ...
 
+    async def plan_fleet_move(self, source_id: str, agents: Sequence[str]) -> MovePlan:
+        """Which memories moving ``agents`` out of ``source_id`` would
+        re-file (``plan_move_entries``, ADR 0112), read-only."""
+        ...
+
+    async def move_agents(
+        self,
+        source_id: str,
+        agents: Sequence[str],
+        *,
+        target_fleet_id: str | None = None,
+        new_fleet_name: str | None = None,
+        keep_pin_ids: Sequence[str] | None = None,
+        expected_pin_ids: Sequence[str] | None = None,
+        moved_by: str,
+    ) -> MoveOutcome:
+        """Move ``agents`` (all with ``source_id`` as home fleet) and the
+        ``fleet``-scoped memories they wrote there into an existing target or
+        a new fleet, in one transaction (ADR 0112): the memories
+        ``plan_move_entries`` selects are re-filed (any state), their pins
+        follow, and the target's own pins plus those that followed are
+        trimmed with ``choose_pins`` (the same pin picker as a merge). The
+        source stays a normal fleet, and search counters stay. Recorded in
+        the merge list as kind ``move`` so ``unmerge_fleet`` can reverse it.
+        ``UnknownFleet``, ``FleetMerged`` (either side), ``FleetExists``,
+        ``InvalidInput`` (no agents, not exactly one target, a bad pin
+        choice) and ``FleetMoveRefused`` (same fleet, an agent not in the
+        source, ``expected_pin_ids`` no longer the candidate pins, busy
+        locks). Writes into the two fleets wait briefly, then raise
+        ``FleetBusy``. Nothing changes on a refusal."""
+        ...
+
     async def unmerge_fleet(self, merge_id: str) -> UnmergeOutcome:
-        """Undo a merge (ADR 0107): the recorded entries still in the target
-        go back to the source, as do the recorded agents still there, the
-        pins on those entries and the dropped pins that fit. Search counters
-        stay summed. ``UnknownFleetMerge`` for an unknown id,
-        ``FleetMergeRefused`` when ``undo_refusal`` says no."""
+        """Undo a merge or a move (ADR 0107, 0112): the recorded entries
+        still in the target go back to the source, as do the recorded agents
+        still there, the pins on those entries and the dropped pins that
+        fit. Search counters stay summed. A merge also clears the source's
+        merged mark. ``UnknownFleetMerge`` for an unknown id,
+        ``FleetMergeRefused`` (``FleetMoveRefused`` for a move) when
+        ``undo_refusal`` says no."""
         ...
 
     async def list_fleet_merges(self, limit: int) -> list[FleetMergeRecord]:

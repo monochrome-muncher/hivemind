@@ -450,7 +450,7 @@ curl -s -X POST -H "X-API-Key: $ADMIN_KEY" \
   that was already on its way to the source fleet is refused with
   `409 fleet_merged` (naming the target) and the agent retries; its next
   attempt lands in the target. A write that has to wait more than 3 seconds
-  for the merge gets `503 fleet_busy` ("fleet is being merged, retry")
+  for the merge gets `503 fleet_busy` ("fleet is being merged or moved, retry")
   with a `Retry-After` header, on REST and in the MCP tools, and retrying
   works once the merge commits. If the merge cannot get its locks within
   5 seconds, or deadlocks with a concurrent change, it stops with
@@ -483,7 +483,7 @@ curl -s -X POST -H "X-API-Key: $ADMIN_KEY" \
   `entry.unpin` with reason `fleet_merge` for each pin left out, and
   `fleet.unmerge` for an undo (SPEC §12.5).
 
-**Undoing a merge.** Press **Undo** in the panel's **Merges** list, or call
+**Undoing a merge.** Press **Undo** in the panel's **Merges and moves** list, or call
 the endpoint above. The memories and agents the merge moved go back to the
 source if they are still in the target. Memories written since stay in the
 target, and an agent that was moved elsewhere in the meantime stays where
@@ -532,3 +532,101 @@ curl -s -X PATCH -H "X-API-Key: $ADMIN_KEY" -H "Content-Type: application/json" 
 
 **Rolling back the release.** `make rollback` past migration `0019` deletes
 the `fleet.rename` audit rows. Renamed fleets keep their new names.
+
+## 9. Moving agents to another fleet / splitting a fleet (ADR 0112)
+
+When one team becomes two, or a few agents change teams, move those agents
+and the memories they wrote to another fleet. The agents' home fleet changes
+and the `fleet` memories they wrote in the source fleet move with them, in
+one transaction. No key changes (the home fleet is read from the database on
+every request), a move writes no memory and supersedes nothing, and the
+source fleet stays a normal fleet. It needs the admin key.
+
+**What moves, exactly.** A memory moves when it is a fleet memory of the
+source (active, superseded or withdrawn), one of the moving agents wrote it,
+and the newest version in its chain moves too. So a moving agent's old
+version never leaves while the live version, written by an agent that
+stays, remains behind. The reverse also holds: what a staying agent wrote
+stays, even when a moving agent replaced it. Private notes (`self`), `org`
+memories and ratings are not tied to a fleet and are not touched. Pins on
+the moving memories go with them. Search counters stay with the source.
+
+**The agents that stay lose access** to every memory that leaves, because
+agents read their own home fleet. The preview says how many memories leave,
+how many of the moving agents' memories stay behind for the chain reason, and
+which agents stay. Read it before you apply.
+
+**In the admin panel.** Open **Fleets** and press **Move agents…** on the
+source fleet.
+
+1. Tick the agents to move.
+2. Pick the target, an existing fleet or a new name (it is created in the same
+   step; this is how you split a fleet), and press **Preview**.
+3. Read the counts. If the target's pins plus the pins that move are more
+   than 10, tick the 10 to keep; the newest 10 are ticked. The others are
+   unpinned and audited.
+4. Type the source fleet's name and press **Move agents**.
+
+**With the API.**
+
+```sh
+# Preview: changes nothing.
+curl -s -H "X-API-Key: $ADMIN_KEY" -H 'Content-Type: application/json' \
+  -d '{"agents": ["amy", "ann"], "target_fleet_id": "<target-id>", "dry_run": true}' \
+  "https://hivemind.example/v1/admin/fleets/<source-id>/move"
+# Move (use "new_fleet_name": "..." instead of a target id for a new fleet).
+# keep_pin_ids is needed when the pins in play are more than 10.
+curl -s -H "X-API-Key: $ADMIN_KEY" -H 'Content-Type: application/json' \
+  -d '{"agents": ["amy", "ann"], "new_fleet_name": "team-b", "dry_run": false}' \
+  "https://hivemind.example/v1/admin/fleets/<source-id>/move"
+# The merges and moves, newest first, each with "kind" and "undoable".
+curl -s -H "X-API-Key: $ADMIN_KEY" "https://hivemind.example/v1/admin/fleet-merges"
+# Undo one (the same route as a merge).
+curl -s -X POST -H "X-API-Key: $ADMIN_KEY" \
+  "https://hivemind.example/v1/admin/fleet-merges/<id>/undo"
+```
+
+**What to expect.**
+
+- **Every named agent must have the source as home fleet.** Otherwise the
+  answer is `409 move_refused` and names the agents that do not (an unknown
+  name is listed too). The target must be another fleet that has not been
+  merged away (`409 fleet_merged`).
+- **Writes to the two fleets wait briefly**, as for a merge (section 7): a
+  few seconds per 10,000 memories, `503 fleet_busy` for a write that waits
+  more than 3 seconds, and `409 move_refused` with no change when the move
+  cannot get its locks within 5 seconds or deadlocks. Run it again. A write
+  by a moving agent that was already on its way to the old fleet when the
+  move committed is answered `503 fleet_busy` too ("home fleet changed,
+  retry"), and the retry lands in the new fleet.
+- **Do not move agents during a rollout.** An older pod does not do that
+  home-fleet check, so such a write can land in the old fleet.
+- **Pins changed since the preview** answers `409 move_refused` ("preview
+  again"), as for a merge.
+- **A failed audit write.** The move commits first and is audited after. If
+  the audit write fails the call answers 500 although the move happened;
+  check the list of merges and moves before you run it again.
+- **Moving every agent** is allowed. The source fleet is not marked as merged
+  and stays usable, empty of those agents.
+- **Audit.** `fleet.move_agents` (and `fleet.create` for a new target), one
+  `entry.unpin` with reason `fleet_move` for each pin left out, and
+  `fleet.move_undo` for an undo (SPEC §12.5).
+
+**Undoing a move.** Press **Undo** in the panel's **Merges and moves** list,
+or call the endpoint above. The memories and agents the move recorded go back
+to the source when they are still in the target; memories written since stay
+where they are, and an agent moved elsewhere in the meantime stays there.
+Pins follow their memories back, and the pins that were left out are restored
+where they fit under the limit of 10 per fleet and 3 per pinning agent: the
+pins on returning memories count too, so a source that refilled its briefing
+after the move may not take them all back (the ones that do not fit are
+unpinned, audited as `fleet_move_undo`, and listed in the answer). An undo is
+allowed only for the newest merge or move that involves the target or the
+source, and while neither fleet has been merged away; otherwise the answer is
+`409 move_refused` and says which.
+
+**Rolling back the release.** `make rollback` past migration `0023` deletes
+the move records and the `fleet.move_agents` and `fleet.move_undo` audit rows.
+The memories and agents stay where the move put them. Merge records are kept.
+After that a move can no longer be undone, and an older merge's undo no longer
+sees the moves that followed it, so undo any moves you want to reverse first.

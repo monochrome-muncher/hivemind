@@ -138,6 +138,10 @@ key and agent keys cannot sign in here.
   memories, and a merge can be undone from the list of merges.
 - Rename a fleet from the Fleets list. Its memories, pins and agents stay
   with it.
+- Move some agents of a fleet to another fleet, or to a new one, to split a
+  team. They take the fleet memories they wrote, and the agents that stay
+  no longer see those memories. The panel shows how many memories leave,
+  then asks you to confirm. A move can be undone from the same list.
 - Download any list as a CSV file.
 
 ![A memory opened in the admin panel, with its details, tags and feedback](docs/images/admin-memories.png)

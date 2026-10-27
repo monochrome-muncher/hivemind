@@ -58,6 +58,9 @@ from hivemind.api.schemas import (
     FleetMergePreviewOut,
     FleetMergeRecordOut,
     FleetMergeRequest,
+    FleetMoveOut,
+    FleetMovePreviewOut,
+    FleetMoveRequest,
     FleetOut,
     FleetsMetrics,
     FleetUnmergeOut,
@@ -96,7 +99,11 @@ from hivemind.domain.access import (
 from hivemind.domain.audit import AuditAction, AuditFilters
 from hivemind.domain.entry import Entry, EntryFilters, Kind, Source
 from hivemind.domain.feedback import FeedbackLogFilters, Verdict
-from hivemind.domain.fleet_merge import FleetMergeRefused, UnknownFleetMerge
+from hivemind.domain.fleet_merge import (
+    FleetMergeRefused,
+    FleetMoveRefused,
+    UnknownFleetMerge,
+)
 from hivemind.domain.recency import RecencyHint
 from hivemind.domain.validation import (
     MAX_ID_CHARS,
@@ -1011,10 +1018,75 @@ def build_router() -> APIRouter:
             pins_dropped=[DroppedPinOut.from_dropped(p) for p in outcome.pins_dropped],
         )
 
+    @router.post(
+        "/admin/fleets/{source_id}/move",
+        response_model=FleetMovePreviewOut | FleetMoveOut,
+    )
+    async def move_fleet_agents(
+        source_id: NameParam, payload: FleetMoveRequest, credential: require, app: hive
+    ) -> FleetMovePreviewOut | FleetMoveOut:
+        """Move agents and the ``fleet`` memories they wrote there to another
+        fleet or a new one (admin-gated, audited ``fleet.move_agents``, ADR
+        0112), in one transaction and with no key change. Name exactly one of
+        ``target_fleet_id`` and ``new_fleet_name``. A memory moves when its
+        author is a mover and the head of its supersession chain moves too;
+        its pins follow. ``dry_run: true`` changes nothing and answers how
+        many memories leave, who stays and loses access, and the pins in play.
+        The pin fields work as in a merge (422 over 10 pins without
+        ``keep_pin_ids``; ``expected_pin_ids`` refuses when they changed).
+        404 unknown fleet, 409 ``fleet_merged`` / ``move_refused`` (also an
+        agent that is not in the fleet, named in the message) /
+        ``fleet_exists``. Undo is the merge undo route."""
+        _require_admin(credential, "moving agents between fleets")
+        merges = app.access_service.merges
+        try:
+            if payload.dry_run:
+                preview = await merges.preview_move(
+                    source_id,
+                    payload.agents,
+                    credential,
+                    target_fleet_id=payload.target_fleet_id,
+                    new_fleet_name=payload.new_fleet_name,
+                )
+                return FleetMovePreviewOut.from_preview(preview)
+            outcome = await merges.move(
+                source_id,
+                payload.agents,
+                credential,
+                target_fleet_id=payload.target_fleet_id,
+                new_fleet_name=payload.new_fleet_name,
+                keep_pin_ids=payload.keep_pin_ids,
+                expected_pin_ids=payload.expected_pin_ids,
+            )
+        except PermissionDenied as exc:
+            raise api_error(403, "forbidden", str(exc)) from exc
+        except InvalidInput as exc:
+            raise api_error(422, "invalid_input", str(exc)) from exc
+        except UnknownFleet as exc:
+            raise api_error(404, "not_found", str(exc)) from exc
+        except FleetMerged as exc:
+            raise api_error(409, "fleet_merged", str(exc)) from exc
+        except FleetMoveRefused as exc:
+            raise api_error(409, "move_refused", str(exc)) from exc
+        except FleetExists as exc:
+            raise api_error(409, "fleet_exists", str(exc)) from exc
+        record = outcome.record
+        return FleetMoveOut(
+            merge_id=record.id,
+            source_fleet_id=record.source_fleet_id,
+            target=FleetOut.from_fleet(outcome.target),
+            target_created=outcome.target_created,
+            entries_moved=outcome.entries_moved,
+            entries_held_back=outcome.entries_held_back,
+            agents_moved=list(record.moved_agents),
+            pins_kept=len(outcome.pins_kept),
+            pins_dropped=[DroppedPinOut.from_dropped(p) for p in outcome.pins_dropped],
+        )
+
     @router.get("/admin/fleet-merges", response_model=list[FleetMergeRecordOut])
     async def list_fleet_merges(credential: require, app: hive) -> list[FleetMergeRecordOut]:
-        """Recorded fleet merges, newest first (admin-gated, ADR 0107), each
-        with whether it can be undone now."""
+        """Recorded fleet merges and moves (``kind``), newest first
+        (admin-gated, ADR 0107, 0112), each with whether it can be undone now."""
         _require_admin(credential, "the fleet merges")
         views = await app.access_service.merges.list_merges(credential)
         return [FleetMergeRecordOut.from_view(v) for v in views]
@@ -1023,10 +1095,12 @@ def build_router() -> APIRouter:
     async def undo_fleet_merge(
         merge_id: NameParam, credential: require, app: hive
     ) -> FleetUnmergeOut:
-        """Undo a fleet merge (admin-gated, audited ``fleet.unmerge``, ADR
-        0107): the recorded entries and agents still in the target go back,
-        dropped pins are restored where they fit. Only the newest standing
-        merge involving the target can be undone (409 ``merge_refused``)."""
+        """Undo a fleet merge or move (admin-gated, audited ``fleet.unmerge`` /
+        ``fleet.move_undo``, ADR 0107, 0112): the recorded entries and agents
+        still in the target go back, dropped pins are restored where they fit.
+        Only the newest standing merge or move involving the target (and, for
+        a move, its source) can be undone (409 ``merge_refused`` /
+        ``move_refused``)."""
         _require_admin(credential, "undoing a fleet merge")
         try:
             outcome = await app.access_service.merges.undo(merge_id, credential)
@@ -1034,10 +1108,13 @@ def build_router() -> APIRouter:
             raise api_error(403, "forbidden", str(exc)) from exc
         except UnknownFleetMerge as exc:
             raise api_error(404, "not_found", str(exc)) from exc
+        except FleetMoveRefused as exc:
+            raise api_error(409, "move_refused", str(exc)) from exc
         except FleetMergeRefused as exc:
             raise api_error(409, "merge_refused", str(exc)) from exc
         record = outcome.record
         return FleetUnmergeOut(
+            kind=record.kind,
             merge_id=record.id,
             source_fleet_id=record.source_fleet_id,
             target_fleet_id=record.target_fleet_id,
@@ -1107,7 +1184,8 @@ def build_router() -> APIRouter:
         Demotion to ``untrusted`` (level 0) is *dormant* (key still
         valid, no access) — distinct from revocation (ADR 0012).
         Re-parenting never moves the agent's earlier ``fleet``-scoped
-        entries (they stay in the fleet they were written into).
+        entries (they stay in the fleet they were written into; a fleet
+        move, ADR 0112, takes them along).
         """
         # The key first: a non-admin must not learn whether a fleet exists.
         _require_admin(credential, "changing an agent")
