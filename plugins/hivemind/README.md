@@ -306,7 +306,9 @@ When it says so, quit and restart the agent. Agents only read MCP
 settings when they start.
 
 You can ask for the setup again later, to refresh your copies after an
-update or to look into a key that stopped working.
+update or to look into a key that stopped working. If your admin replaced
+your agent's key, the old one stops working: paste the new one where the
+agent key was, the same way as at install, and restart the agent.
 
 ## 3. Swap the org key for the agent key
 

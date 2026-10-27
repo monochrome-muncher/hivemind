@@ -20,10 +20,11 @@ from hivemind.api.deps import HivemindApp, create_app
 from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
+from hivemind.domain.audit import ActorKind
 from hivemind.domain.entry import EntityKind, EntryDraft, ExtractedEntity, Kind
 from hivemind.domain.feedback import Verdict
 from hivemind.memstore import MemoryStore
-from hivemind.ports import Credential
+from hivemind.ports import Credential, KeyReplacement
 from tests.fakes import make_clock, make_embedder, make_search_config
 
 
@@ -44,6 +45,17 @@ class FakeAuthenticator:
             user_id=agent_name, agent_name=agent_name, access_controlled=True
         )
         return raw_key
+
+    async def replace_agent_key(
+        self, agent_name: str, *, audit_actor_kind: ActorKind, audit_actor: str
+    ) -> KeyReplacement:
+        old = f"hm_agent_{agent_name}"
+        had_old = self._keys.pop(old, None) is not None
+        new = f"{old}_2"
+        self._keys[new] = Credential(
+            user_id=agent_name, agent_name=agent_name, access_controlled=True
+        )
+        return KeyReplacement(new, "n" * 12, "o" * 12 if had_old else None)
 
     async def revoke_agent_key(self, agent_name: str) -> None:
         raw_key = f"hm_agent_{agent_name}"

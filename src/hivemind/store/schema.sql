@@ -65,7 +65,7 @@ CREATE TABLE public.audit_log (
     action text NOT NULL,
     target text,
     detail jsonb DEFAULT '{}'::jsonb NOT NULL,
-    CONSTRAINT audit_log_action_check CHECK ((action = ANY (ARRAY['agent.register'::text, 'agent.activate'::text, 'agent.trust_level_set'::text, 'agent.home_fleet_set'::text, 'agent.revoke'::text, 'fleet.create'::text, 'org_key.rotate'::text, 'entry.withdraw'::text, 'admin_key.issue'::text, 'admin_key.revoke'::text, 'agent_key.issue'::text, 'entry.pin'::text, 'entry.unpin'::text, 'fleet.merge'::text, 'fleet.unmerge'::text]))),
+    CONSTRAINT audit_log_action_check CHECK ((action = ANY (ARRAY['agent.register'::text, 'agent.activate'::text, 'agent.trust_level_set'::text, 'agent.home_fleet_set'::text, 'agent.revoke'::text, 'fleet.create'::text, 'org_key.rotate'::text, 'entry.withdraw'::text, 'admin_key.issue'::text, 'admin_key.revoke'::text, 'agent_key.issue'::text, 'entry.pin'::text, 'entry.unpin'::text, 'fleet.merge'::text, 'fleet.unmerge'::text, 'agent_key.replace'::text]))),
     CONSTRAINT audit_log_actor_kind_check CHECK ((actor_kind = ANY (ARRAY['admin_key'::text, 'cli'::text, 'org_key'::text, 'agent_key'::text])))
 );
 

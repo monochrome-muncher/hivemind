@@ -239,6 +239,7 @@ async def test_rest_write_refuses_bad_entries_with_422_and_no_embedding(
         ("POST", "/v1/admin/agents/x/activate", {"home_fleet_id": "f\x00"}),
         ("PATCH", "/v1/admin/agents/a%00b", {"trust_level": 1}),
         ("POST", "/v1/admin/agents/a%00b/revoke", None),
+        ("POST", "/v1/admin/agents/a%00b/key", None),
     ],
 )
 async def test_rest_refuses_bad_reads_and_governance_input_with_422(

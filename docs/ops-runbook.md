@@ -246,6 +246,10 @@ uv run hivemind-keys issue-agent --name alice
 # activated exactly as REST activate does; ADR 0039):
 uv run hivemind-keys issue-agent --name alice --trust-level 1 --home-fleet <fleet-id>
 
+# Replace an active agent's key (a leak, or the owner lost it; ADR 0108).
+# The old key stops working at once; the new one is printed once:
+uv run hivemind-keys rotate-agent --name alice
+
 # Dead credentials (ADR 0039): pre-v2 `user` keys, name-less agent keys, and
 # agent keys of agents that are missing, pending or revoked never
 # authenticate. `hivemind-keys list` marks them [dead] and `migrate` logs a
@@ -268,6 +272,7 @@ hash is stored (a leaked database never leaks usable keys, SPEC §8.1).
 | Action | Command / endpoint | Effect |
 |---|---|---|
 | Rotate the org key (close registration) | `hivemind-keys rotate-org` / `POST /v1/admin/org-key/rotate` | all prior org keys stop working on the next request; active agents are unaffected |
+| Replace an agent's key | `hivemind-keys rotate-agent --name alice` / `POST /v1/admin/agents/alice/key` / the admin panel's "Replace key" | the old key stops working on the agent's next request and the new key is shown **once**; status, level, fleet and memories stay as they are; only for an `active` agent (a revoked one is re-activated instead; ADR 0108) |
 | Revoke an agent key | `hivemind-keys revoke --name alice` / `POST /v1/admin/agents/alice/revoke` | the agent's key is dead and its status is `revoked`; the **name stays reserved**; on a `pending` agent this rejects the registration (ADRs 0012, 0028) |
 | Demote an agent | `PATCH /v1/admin/agents/{name}` (trust level → 0) | the agent is *dormant* (key still valid, no access) — distinct from revocation |
 
@@ -280,7 +285,7 @@ hash is stored (a leaked database never leaks usable keys, SPEC §8.1).
 ### Audit trail of key and admin actions (ADR 0027)
 
 Every mutating `hivemind-keys` command (`issue-admin`, `revoke-admin`,
-`rotate-org`, `issue-agent`, `revoke` — not `list`) and every admin REST
+`rotate-org`, `rotate-agent`, `issue-agent`, `revoke`; not `list`) and every admin REST
 action writes a row to the audit log (SPEC §12.5). Read it with the
 admin key:
 

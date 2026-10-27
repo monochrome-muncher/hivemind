@@ -156,7 +156,7 @@ def create_proxy_app(
             status_code=upstream.status_code,
             media_type=upstream.headers.get("content-type"),
         )
-        # Some of these bodies are raw keys (admin activate, org-key rotate).
+        # Some of these bodies are raw keys (admin activate, agent key replace, org-key rotate).
         response.headers["Cache-Control"] = "no-store"
         return response
 

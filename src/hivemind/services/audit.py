@@ -15,7 +15,7 @@ from hivemind.domain.audit import ActorKind, AuditAction, AuditEvent, AuditRecor
 from hivemind.ports import Credential, Store
 
 
-def _actor_kind(credential: Credential) -> ActorKind:
+def actor_kind_of(credential: Credential) -> ActorKind:
     if credential.is_org:
         return ActorKind.ORG_KEY
     return ActorKind.ADMIN_KEY if credential.is_admin else ActorKind.AGENT_KEY
@@ -36,7 +36,7 @@ async def record_admin_action(
     here propagates — it is never swallowed (ADR 0027)."""
     return await store.record_audit(
         AuditEvent(
-            actor_kind=_actor_kind(credential),
+            actor_kind=actor_kind_of(credential),
             actor=credential.audit_actor(),
             action=action,
             target=target,

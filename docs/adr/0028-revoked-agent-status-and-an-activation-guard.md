@@ -1,5 +1,7 @@
 # A `revoked` agent status, and activation only from `pending` or `revoked`
 
+> **Note:** [ADR 0108](0108-replace-an-agent-key.md) adds a second way to change an active agent's key: an admin replaces it in one step (`POST /v1/admin/agents/{name}/key`, `hivemind-keys rotate-agent`), so revoking first is no longer the only route. Activating an `active` agent is still refused.
+
 > **Note:** the CLI clause (`issue-agent` restoring a revoked agent) is refined by [ADR 0039](0039-key-lifecycle-is-atomic-and-registration-is-owned.md): it now needs an explicit `--trust-level` and `--home-fleet`. Everything else stands.
 
 ## Context

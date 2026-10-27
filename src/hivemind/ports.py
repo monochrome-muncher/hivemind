@@ -12,7 +12,7 @@ Tests live at these seams and nowhere inside them.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol, runtime_checkable
 
@@ -26,7 +26,7 @@ from hivemind.domain.access import (
     write_scopes_for,
 )
 from hivemind.domain.activity import Activity
-from hivemind.domain.audit import AuditEvent, AuditFilters, AuditRecord
+from hivemind.domain.audit import ActorKind, AuditEvent, AuditFilters, AuditRecord
 from hivemind.domain.entry import (
     Entry,
     EntryDraft,
@@ -588,6 +588,17 @@ class Authenticator(Protocol):
         (ADR 0039); replaces any stale key row, so one live key per agent."""
         ...
 
+    async def replace_agent_key(
+        self, agent_name: str, *, audit_actor_kind: ActorKind, audit_actor: str
+    ) -> KeyReplacement:
+        """Swap an active agent's key for a new one in one transaction
+        (ADR 0108): the old key stops authenticating at once. The
+        ``agent_key.replace`` audit row (both key fingerprints, never a key)
+        is written in that same transaction, under the given actor. Raises
+        ``UnknownAgent`` if the agent is unknown and ``InvalidAgentStatus``
+        unless it is ``active``. The raw key is returned once."""
+        ...
+
     async def revoke_agent_key(self, agent_name: str) -> None:
         """Retire the agent's key (the name stays reserved, ADR 0012)."""
         ...
@@ -600,6 +611,18 @@ class Authenticator(Protocol):
     async def issue_admin_key(self) -> str:
         """Issue an admin key; return the raw secret once."""
         ...
+
+
+@dataclass(frozen=True, slots=True)
+class KeyReplacement:
+    """The outcome of ``Authenticator.replace_agent_key`` (ADR 0108): the
+    new raw key (shown once) and the non-secret fingerprints of the old
+    and the new key, for the audit log. ``old_key_id`` is ``None`` if the
+    agent held no key."""
+
+    raw_key: str = field(repr=False)
+    new_key_id: str
+    old_key_id: str | None
 
 
 @dataclass(frozen=True, slots=True)

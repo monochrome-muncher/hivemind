@@ -117,3 +117,4 @@ is unused.
 | [0105](0105-mcp-hive-write-sources-schema-typed.md) | The MCP `hive_write` `sources` schema is typed, validated leniently | Accepted; schema-only, keeps structured `invalid_input` |
 | [0106](0106-confirmation-halves-older-flags.md) | A confirmation newer than every flag halves those flags | Accepted; amends 0063, 0070, 0103 (I3, new I7), `HIVEMIND_CONFIRMATION_HALVES_FLAGS=false` turns it off |
 | [0107](0107-fleet-merge.md) | Merge fleets into one home fleet | Accepted; amends 0011, touches 0058 and 0096, migration 0017, admin only, undoable |
+| [0108](0108-replace-an-agent-key.md) | Replace an agent's key | Accepted; amends 0028, touches 0012, 0027 and 0039, migration 0018, admin only, old key dies at once |

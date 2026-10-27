@@ -61,6 +61,7 @@ def _panel(transport: httpx.AsyncBaseTransport) -> httpx.AsyncClient:
         ("GET", "admin/audit-log"),
         ("POST", "admin/agents/alice/activate"),
         ("POST", "admin/agents/alice/revoke"),
+        ("POST", "admin/agents/alice/key"),
         ("PATCH", "admin/agents/alice"),
         ("POST", "admin/org-key/rotate"),
         ("GET", "admin/entries"),

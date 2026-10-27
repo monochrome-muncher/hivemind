@@ -13,7 +13,7 @@ import { mergeDialog, mergesCard } from "./merge.js";
 const AUDIT_ACTIONS = [
   "agent.register", "agent.activate", "agent.trust_level_set", "agent.home_fleet_set", "agent.revoke",
   "fleet.create", "fleet.merge", "fleet.unmerge", "org_key.rotate", "entry.withdraw", "entry.pin", "entry.unpin",
-  "admin_key.issue", "admin_key.revoke", "agent_key.issue",
+  "admin_key.issue", "admin_key.revoke", "agent_key.issue", "agent_key.replace",
 ];
 const AUDIT_PAGE = 50;
 
@@ -112,6 +112,31 @@ function revokeDialog(agent, onDone) {
   });
 }
 
+function replaceKeyDialog(agent, onDone) {
+  openModal({
+    title: `Replace the key of ${agent.name}?`,
+    body: [
+      h("p", { class: "callout callout-danger", text: "The current key stops working on the agent's next request. The agent has to be given the new key before it can reach Hivemind again." }),
+      h("p", { class: "muted small", text: "Its name, trust level, fleet and memories do not change." }),
+    ],
+    actions: [
+      { label: "Cancel" },
+      {
+        label: "Replace key",
+        class: "btn-danger-solid",
+        submit: true,
+        onClick: async () => {
+          const result = await guarded(() => api("POST", `admin/agents/${encodeURIComponent(agent.name)}/key`));
+          if (!result) return;
+          showKeyOnce(`New agent key for ${agent.name}`, result.key,
+            "The previous key has stopped working. Give this one to the agent's owner now: it cannot be shown again.");
+          onDone();
+        },
+      },
+    ],
+  });
+}
+
 function editDialog(agent, onDone) {
   const level = levelSelect(agent.trust_level);
   const fleet = fleetPicker(agent.home_fleet_id);
@@ -153,6 +178,7 @@ export function agentButtons(agent, refresh) {
     buttons.push(h("button", { type: "button", class: "btn btn-danger btn-sm", text: "Reject", onclick: () => revokeDialog(agent, refresh) }));
   } else if (agent.status === "active") {
     buttons.push(h("button", { type: "button", class: "btn btn-sm", text: "Edit", onclick: () => editDialog(agent, refresh) }));
+    buttons.push(h("button", { type: "button", class: "btn btn-sm", text: "Replace key", onclick: () => replaceKeyDialog(agent, refresh) }));
     buttons.push(h("button", { type: "button", class: "btn btn-danger btn-sm", text: "Revoke", onclick: () => revokeDialog(agent, refresh) }));
   } else if (agent.status === "revoked") {
     buttons.push(h("button", { type: "button", class: "btn btn-sm", text: "Re-activate", onclick: () => activateDialog(agent, refresh) }));

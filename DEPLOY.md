@@ -230,7 +230,7 @@ first-run bootstrap Job records itself as `ci-bootstrap`.
 |---|---|---|
 | Org key | `hivemind-keys rotate-org` | suspected org-key leak; periodic hardening |
 | Admin key | `hivemind-keys issue-admin` + `hivemind-keys revoke-admin` | suspected admin-key leak; operator turnover |
-| Agent key | `hivemind-keys revoke --name <agent>` | agent compromise; key leak |
+| Agent key | `hivemind-keys rotate-agent --name <agent>` (replaces the key, the agent stays active) or `hivemind-keys revoke --name <agent>` | agent compromise; key leak; owner lost the key |
 | DSN (DB password) | change the password at the Postgres provider | suspected DSN leak; provider policy |
 | Embedding API key | rotate at the embedding provider | provider policy; suspected leak |
 | Extractor API key | rotate at the chat provider | provider policy; suspected leak |
@@ -265,7 +265,13 @@ first-run bootstrap Job records itself as `ci-bootstrap`.
 
 ### 4.3 Agent keys
 
-- **How** — `hivemind-keys revoke --name <agent>` (the agent becomes
+- **How, replacing the key**: `hivemind-keys rotate-agent --name <agent>`
+  (or "Replace key" in the admin panel, or
+  `POST /v1/admin/agents/{name}/key`). The old key stops working on the
+  agent's next request, the new one is shown **once**, and the agent
+  stays `active` with the same level, fleet and memories (ADR 0108). Give
+  the new key to the owner out of band. Only for an `active` agent.
+- **How, cutting the agent off**: `hivemind-keys revoke --name <agent>` (the agent becomes
   `revoked` and the name **stays reserved**; re-activation issues a NEW
   key — ADRs 0012, 0028). Re-issue via the admin surface
   `POST /v1/admin/agents/{name}/activate` (or the admin panel). Activating

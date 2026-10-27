@@ -14,6 +14,7 @@ fingerprint.
 Usage:
     hivemind-keys [--actor NAME] issue-admin
     hivemind-keys issue-agent --name alice [--trust-level N --home-fleet ID]
+    hivemind-keys rotate-agent --name alice   (replace an active agent's key, ADR 0108)
     hivemind-keys rotate-org
     hivemind-keys bootstrap-secret [--secret hivemind-keys]   (in-cluster, ADR 0044)
     hivemind-keys revoke --name alice
@@ -31,6 +32,7 @@ import os
 import secrets
 import sys
 import uuid
+from collections.abc import Mapping
 from typing import Protocol
 
 import asyncpg
@@ -72,6 +74,7 @@ _ACTIVATE = (
     "activated_at = now() WHERE name = $1"
 )
 _DELETE_AGENT_KEYS = "DELETE FROM credentials WHERE kind = 'agent' AND agent_name = $1"
+_DELETE_AGENT_KEYS_RETURNING = _DELETE_AGENT_KEYS + " RETURNING key_hash"
 _SET_REVOKED = "UPDATE agents SET status = 'revoked' WHERE name = $1"
 
 
@@ -110,6 +113,16 @@ class FleetMergedError(Exception):
         self.target_id = target_id
 
 
+class AgentNotActive(Exception):
+    """``rotate-agent`` refused: only an ``active`` agent's key is replaced
+    (ADR 0108); a pending or revoked agent goes through ``issue-agent``."""
+
+    def __init__(self, name: str, status: str) -> None:
+        super().__init__(f"agent {name!r} is {status}, not active")
+        self.name = name
+        self.status = status
+
+
 class AgentNotRegistered(Exception):
     """``issue-agent`` refused: the name has no agent record (keys are
     bound to registered names, ADR 0012)."""
@@ -135,7 +148,7 @@ async def _audit(
     actor: str,
     action: AuditAction,
     target: str | None,
-    detail: dict[str, str] | None = None,
+    detail: Mapping[str, str | None] | None = None,
 ) -> None:
     """Append a ``cli`` audit row in the mutation's transaction (ADR
     0027). Takes no key: ``target`` is a name or a key fingerprint."""
@@ -221,6 +234,37 @@ async def _issue_agent(
                 }
             await conn.execute(_ISSUE_AGENT, key_hash(raw_key), name)
             await _audit(conn, actor or default_actor(), AuditAction.AGENT_KEY_ISSUE, name, detail)
+    finally:
+        await conn.close()
+    return raw_key
+
+
+async def _rotate_agent(dsn: str, name: str, *, actor: str | None = None) -> str:
+    """Replace an active agent's key (ADR 0108): the old row is deleted and
+    the new one inserted in one transaction, so the old key dies at once.
+    Audited as ``agent_key.replace`` with both key fingerprints."""
+    raw_key = _raw_key()
+    new_hash = key_hash(raw_key)
+    conn = await asyncpg.connect(dsn)
+    try:
+        async with conn.transaction():
+            status = await conn.fetchval(_AGENT_STATUS_FOR_UPDATE, name)
+            if status is None:
+                raise AgentNotRegistered(name)
+            if status != "active":
+                raise AgentNotActive(name, status)
+            old = await conn.fetch(_DELETE_AGENT_KEYS_RETURNING, name)
+            await conn.execute(_ISSUE_AGENT, new_hash, name)
+            await _audit(
+                conn,
+                actor or default_actor(),
+                AuditAction.AGENT_KEY_REPLACE,
+                name,
+                {
+                    "old_key": key_fingerprint(old[0]["key_hash"]) if old else None,
+                    "new_key": key_fingerprint(new_hash),
+                },
+            )
     finally:
         await conn.close()
     return raw_key
@@ -435,6 +479,12 @@ def main() -> None:
         help="required for a pending/revoked agent: the home fleet id to activate it into",
     )
 
+    rotate_agent = sub.add_parser(
+        "rotate-agent",
+        help="replace an active agent's key; the old key stops working at once (ADR 0108)",
+    )
+    rotate_agent.add_argument("--name", required=True)
+
     sub.add_parser(
         "rotate-org",
         help="rotate the shared org key (closes registration; active agents unaffected)",
@@ -537,6 +587,22 @@ def main() -> None:
                 f"no agent registered as {args.name!r}; register it first "
                 "(POST /v1/agents, then activate it) — keys are bound to "
                 "registered names (ADR 0012)",
+                file=sys.stderr,
+            )
+            raise SystemExit(1) from None
+    elif args.cmd == "rotate-agent":
+        try:
+            print_key(
+                f"New agent key for {args.name} (the previous one stops working)",
+                asyncio.run(_rotate_agent(dsn, args.name, actor=actor)),
+            )
+        except AgentNotRegistered:
+            print(f"no agent registered as {args.name!r}", file=sys.stderr)
+            raise SystemExit(1) from None
+        except AgentNotActive as exc:
+            print(
+                f"agent {args.name} is {exc.status}: only an active agent's key is replaced. "
+                "Use `issue-agent --trust-level ... --home-fleet ...` to activate it again",
                 file=sys.stderr,
             )
             raise SystemExit(1) from None
