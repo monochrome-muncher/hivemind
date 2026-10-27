@@ -107,11 +107,11 @@ is unused.
 | [0095](0095-agent-portal.md) | The agent portal: a browser front end for agent-key holders | Accepted |
 | [0096](0096-contributors-pin.md) | Contributors pin, three pins each, and a withdrawn entry leaves the briefing | Accepted |
 | [0097](0097-query-instruction-for-instruction-aware-embedders.md) | A query instruction for instruction-aware embedders, on the query side only | Accepted; on by default, empty value turns it off |
-| [0098](0098-relied-on-changed-list-filter.md) | A `relied_on_changed` list filter: what changed under an entry you rated helpful | Accepted; display and filter only |
+| [0098](0098-relied-on-changed-list-filter.md) | A `relied_on_changed` filter for entries an agent rated helpful that have since changed | Accepted; display and filter only |
 | [0099](0099-answers-open-question-warning.md) | A write warns when it may answer an open question | Accepted; advisory only, floor 0.70 provisional |
 | [0100](0100-vector-similarity-cut-off-on-by-default.md) | The vector similarity cut-off is on by default | Accepted; 0.45, empty value turns it off |
 | [0101](0101-recency-hint-on-by-default.md) | The recency hint is on by default | Accepted; amends 0073, `HIVEMIND_RECENCY_HINT=false` turns it off |
-| [0102](0102-trim-search-hit-score-and-empty-feedback.md) | Search hits round `score` to 4 significant figures and omit all-zero `feedback` | Accepted; display only, ranking unchanged |
+| [0102](0102-trim-search-hit-score-and-empty-feedback.md) | Search hits round `score` and omit all-zero `feedback` | Accepted; display only, ranking unchanged |
 | [0103](0103-remove-confirmation-clock-and-per-kind-recency.md) | Remove the confirmation clock and the recency profile per kind | Accepted; supersedes 0071 and 0072, default ranking unchanged |
 | [0104](0104-mcp-runner-serves-process-metrics.md) | The MCP HTTP runner serves per-process metrics | Accepted; amends 0050, no usage series, `sum` across api and mcp |
 | [0105](0105-mcp-hive-write-sources-schema-typed.md) | The MCP `hive_write` `sources` schema is typed, validated leniently | Accepted; schema-only, keeps structured `invalid_input` |

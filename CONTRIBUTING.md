@@ -36,7 +36,7 @@ make test-unit  # hermetic unit tests, no Postgres needed
 ```
 
 `make test` runs the full suite, including the Postgres-backed
-integration tests, in parallel (pytest-xdist: one worker per CPU, each
+integration tests, in parallel (pytest-xdist: one worker per CPU, at most eight, each
 on its own database `<name>_gw0`, `<name>_gw1`, ..., created next to
 the one `HIVEMIND_DATABASE_URL` names and kept for the next run;
 `make pg-reset` or `DROP DATABASE` removes them). It empties the

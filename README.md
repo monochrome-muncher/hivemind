@@ -474,8 +474,10 @@ make format      # fixes formatting
 ```
 
 `make test` empties and drops tables in the database that
-`HIVEMIND_DATABASE_URL` points to. Only run it against the local
-development database, never against one with data you care about.
+`HIVEMIND_DATABASE_URL` points to, and in the `<name>_gw0`, `<name>_gw1`,
+... databases it creates next to it for its parallel workers. Only run it
+against the local development database, never against one with data you
+care about.
 
 The code is split into layers: `domain` (plain data, no I/O), `ports`
 (the interfaces), `services` (all the logic) and the adapters around them
