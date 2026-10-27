@@ -169,7 +169,8 @@ def build_server(
         """The acting ``McpHivemind`` for this dispatch, or ``None`` when
         the provider yields no credential (fail closed, ADR 0042)."""
         if credential_provider is None:
-            return app
+            fixed = app.credential.effective(require_stored_keys)  # ADR 0082, as below
+            return app if fixed == app.credential else replace(app, credential=fixed)
         resolved = credential_provider()
         credential = await resolved if isinstance(resolved, Awaitable) else resolved
         if credential is None:

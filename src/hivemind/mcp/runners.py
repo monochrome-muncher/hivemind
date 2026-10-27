@@ -46,7 +46,7 @@ def main() -> None:
             settings.require_stored_keys
         ),
     )
-    server = build_server(app)
+    server = build_server(app, require_stored_keys=settings.require_stored_keys)
     asyncio.run(server.run_stdio_async())
 
 

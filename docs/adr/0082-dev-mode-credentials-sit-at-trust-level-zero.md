@@ -36,10 +36,16 @@ that builds a `Credential` by hand.
    get): reads return empty / not-found, writes are `permission_denied`, and
    feedback, pins and withdrawal follow readability. No new error codes. The
    admin surface is unchanged (it already requires `is_admin`).
-3. **Enforced at the service seam** (`build_services`), not in the runners:
-   every surface (REST, both stdio MCP runners, the HTTP MCP runner) and every
-   script that goes through the services layer is covered, wherever its
-   credential was constructed. Runners keep building the same credentials.
+3. **Enforced where each surface resolves its credential**, not left to the
+   runners' choice of credential: the REST dependency and `build_server`
+   (with or without a credential provider, so every MCP runner) apply
+   `Credential.effective`, and `build_services` passes the flag to the
+   feedback and pin services, which apply it again. Every surface (REST,
+   both stdio MCP runners, the HTTP MCP runner) is covered. A script that
+   calls the other services directly (reads, writes, search, withdrawal) is
+   not, and must apply `Credential.effective` itself. (Corrected 2026-10-27: this said "at the
+   service seam (`build_services`)", which only the feedback and pin
+   services do.)
 4. **Off by default**, so the keyless dev runner, local scripts and the test
    fakes (which construct credentials directly) are unchanged; production
    deployments (k8s ConfigMap) set it `true`.

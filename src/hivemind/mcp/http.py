@@ -327,7 +327,12 @@ def build_http_app(
     search_config = settings.search_config()
     extractor = build_extractor(settings)  # optional (ADR 0016): None when the endpoint is unset
     services = build_services(
-        store, embedder, search_config, extractor=extractor, authenticator=authenticator
+        store,
+        embedder,
+        search_config,
+        extractor=extractor,
+        authenticator=authenticator,
+        require_stored_keys=settings.require_stored_keys,
     )
     template = McpHivemind.from_services(
         store,
