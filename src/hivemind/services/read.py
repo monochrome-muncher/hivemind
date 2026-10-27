@@ -112,7 +112,9 @@ class ReadService:
         if len(ids) > MAX_GET_IDS:
             raise InvalidInput(f"entry_ids may name at most {MAX_GET_IDS} entries")
         found = await get_visible_entries(self._store, ids, visibility)
-        entries = [found[eid] for eid in ids if eid in found]
+        # Keyed by entry id, not by the id as asked: two spellings of one
+        # uuid (case) name the same entry, which comes back once.
+        entries = list({found[eid].id: found[eid] for eid in ids if eid in found}.values())
         entry_ids = [e.id for e in entries]
         summaries, links = await asyncio.gather(
             self._feedback_summaries(entry_ids),

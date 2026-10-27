@@ -71,6 +71,14 @@ async def test_mcp_reads_several_entries_in_the_order_asked() -> None:
     assert result["not_found"] == []
 
 
+async def test_two_spellings_of_one_id_return_the_entry_once() -> None:
+    store = MemoryStore(make_clock())
+    a = await _write(store, WRITER, "first fact")
+    result = await hive_get(_surface(store, READER), entry_ids=[a, a.upper()])
+    assert [e["id"] for e in result["entries"]] == [a]  # type: ignore[index]
+    assert result["not_found"] == []
+
+
 async def test_unreadable_and_unknown_ids_are_not_found_not_errors() -> None:
     store = MemoryStore(make_clock())
     ours = await _write(store, READER, "our fact")
