@@ -306,7 +306,7 @@ wheels = [
 
 [[package]]
 name = "hivemind"
-version = "2.12.1"
+version = "2.12.2"
 source = { editable = "." }
 dependencies = [
     { name = "asyncpg" },
