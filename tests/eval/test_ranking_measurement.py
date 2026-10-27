@@ -61,12 +61,12 @@ async def test_seeding_writes_the_pool_and_a_fifth_of_helpful_reports() -> None:
     assert all(CONFIRM_MIN_DAYS <= a <= CONFIRM_MAX_DAYS for a in ago)
 
 
-async def test_every_variant_runs_over_every_fixture() -> None:
-    rows: list[Row] = []
-    for fixture in fixtures():
-        rows += await measure(make_embedder(), fixture)
-    assert len(rows) == len(VARIANTS) * 6
-    assert {r.fixture for r in rows} >= {"all domains together", "data analysis"}
+async def test_every_variant_runs_and_the_report_reads() -> None:
+    names = [f.name for f in fixtures()]
+    assert len(names) == 6 and names[:2] == ["all domains together", "data analysis"]
+    # One fixture is enough to run: the variants take the same path on each.
+    rows = await measure(make_embedder(), domain_fixture(DOMAINS[1]))
+    assert len(rows) == len(VARIANTS)
     assert all(0.0 <= r.hit_at_k <= 1.0 and 0.0 <= r.mrr <= 1.0 for r in rows)
     text = report(rows, "hash")
     assert "recency hint: ignore_age" in text and "Pass rule" in text

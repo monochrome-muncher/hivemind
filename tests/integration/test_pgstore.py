@@ -25,6 +25,7 @@ from datetime import UTC, datetime, timedelta
 import asyncpg
 import pytest
 from tests.fakes import FakeEmbedder
+from tests.pg import ensure_migrated
 
 from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel, Visibility
@@ -43,7 +44,6 @@ from hivemind.services.pins import PinService
 from hivemind.services.write import WriteService
 from hivemind.store import PgAuthenticator, PgStore
 from hivemind.store.auth import key_hash
-from hivemind.store.migrate import migrate
 
 # --- helpers -------------------------------------------------------------------
 
@@ -92,7 +92,8 @@ async def _truncate(dsn: str) -> None:
     conn = await asyncpg.connect(dsn)
     try:
         await conn.execute(
-            "TRUNCATE credentials, feedbacks, entries, search_counts, entry_links, pins"
+            "TRUNCATE credentials, feedbacks, entries, search_counts, entry_links, pins, "
+            "agents, fleets, audit_log"
         )
     finally:
         await conn.close()
@@ -108,20 +109,7 @@ async def pg():
     """
     dsn = _dsn()
     dim = _dim()
-    try:
-        probe = await asyncpg.connect(dsn, timeout=5)
-    except Exception as exc:  # connection refused / timeout / auth
-        pytest.skip(f"Postgres unreachable at {dsn}: {exc}")
-    await probe.close()
-
-    try:
-        vector_ok = await _vector_extension_available(dsn)
-    except Exception:
-        pytest.skip("could not verify the 'vector' extension on the dev database")
-    if not vector_ok:
-        pytest.skip("'vector' extension is not available on the dev database")
-
-    await migrate(dsn, dim)
+    await ensure_migrated(dsn, dim)
     await _truncate(dsn)
 
     store = PgStore(dsn)
@@ -132,15 +120,6 @@ async def pg():
         await _truncate(dsn)
         await store.close()
         await auth.close()
-
-
-async def _vector_extension_available(dsn: str) -> bool:
-    conn = await asyncpg.connect(dsn)
-    try:
-        count = await conn.fetchval("SELECT count(*) FROM pg_extension WHERE extname = 'vector'")
-        return count > 0
-    finally:
-        await conn.close()
 
 
 # --- write path -----------------------------------------------------------------

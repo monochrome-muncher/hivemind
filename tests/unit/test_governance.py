@@ -7,7 +7,6 @@ Seams under test: ``WriteService`` (embed-then-persist) and
 from __future__ import annotations
 
 import asyncio
-import time
 
 import pytest
 
@@ -139,16 +138,19 @@ class TestWriteServiceAtomicSupersede:
         head = await store.create_entry(make_draft("head"))
         writer = Visibility(level=TrustLevel.UNTRUSTED, name="root", is_admin=True)
 
+        writers = 6
+        all_embedding = asyncio.Barrier(writers)  # every pre-check passed before any flip
+
         class SlowEmbedder(FakeEmbedder):
             async def embed_entry(self, draft):
-                await asyncio.sleep(0.05)
+                await all_embedding.wait()
                 return await super().embed_entry(draft)
 
         service = WriteService(store, SlowEmbedder())
         results = await asyncio.gather(
             *(
                 service.write(make_draft(f"v{i}", supersedes=(head.id,)), writer=writer)
-                for i in range(6)
+                for i in range(writers)
             ),
             return_exceptions=True,
         )
@@ -162,49 +164,66 @@ class TestWriteServiceConcurrency:
     """PERF-3: embedder and extractor run concurrently."""
 
     async def test_embedder_and_extractor_overlap(self) -> None:
-        delay = 0.2
+        """Each waits for the other to have started: run one after the other
+        they would wait forever (the timeout turns that into a failure)."""
+        embedding = asyncio.Event()
+        extracting = asyncio.Event()
 
         class SlowEmbedder(FakeEmbedder):
             async def embed_entry(self, draft):
-                await asyncio.sleep(delay)
+                embedding.set()
+                await extracting.wait()
                 return await super().embed_entry(draft)
 
         class SlowExtractor(FakeExtractor):
             async def extract_entry(self, draft):
-                await asyncio.sleep(delay)
+                extracting.set()
+                await embedding.wait()
                 return await super().extract_entry(draft)
 
         service = WriteService(MemoryStore(make_clock()), SlowEmbedder(), SlowExtractor())
-        start = time.perf_counter()
-        entry = await service.write(make_draft("Postgres connection pool exhausted"))
-        elapsed = time.perf_counter() - start
-        assert elapsed < delay * 1.8  # sequential would be >= 2 * delay
+        entry = await asyncio.wait_for(
+            service.write(make_draft("Postgres connection pool exhausted")), timeout=10
+        )
         assert entry.entities and entry.entities_model == "fake-extractor"
 
     async def test_extractor_failure_does_not_block_slow_embed(self) -> None:
+        extractor_failed = asyncio.Event()
+
+        class FailingExtractor(FakeExtractor):
+            async def extract_entry(self, draft):
+                try:
+                    return await super().extract_entry(draft)
+                finally:
+                    extractor_failed.set()
+
         class SlowEmbedder(FakeEmbedder):
             async def embed_entry(self, draft):
-                await asyncio.sleep(0.05)
+                await extractor_failed.wait()  # the embed outlasts the failure
                 return await super().embed_entry(draft)
 
-        service = WriteService(MemoryStore(make_clock()), SlowEmbedder(), FakeExtractor(fail=True))
-        entry = await service.write(make_draft("still lands"))
+        service = WriteService(
+            MemoryStore(make_clock()), SlowEmbedder(), FailingExtractor(fail=True)
+        )
+        entry = await asyncio.wait_for(service.write(make_draft("still lands")), timeout=10)
         assert entry.embedding is not None
         assert entry.entities == ()
         assert entry.entities_model is None
 
     async def test_embedder_failure_fails_write_and_cancels_extractor(self) -> None:
+        extracting = asyncio.Event()
         cancelled = asyncio.Event()
 
         class BoomEmbedder(FakeEmbedder):
             async def embed_entry(self, draft):
-                await asyncio.sleep(0.01)
+                await extracting.wait()  # fail while the extractor is in flight
                 raise RuntimeError("embed down")
 
         class HangingExtractor(FakeExtractor):
             async def extract_entry(self, draft):
+                extracting.set()
                 try:
-                    await asyncio.sleep(30)
+                    await asyncio.Event().wait()
                 except asyncio.CancelledError:
                     cancelled.set()
                     raise

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncpg
 import pytest
+from tests.pg import ensure_migrated
 
 from hivemind.config import Settings
 from hivemind.store import PgAuthenticator
@@ -26,7 +27,6 @@ from hivemind.store.keys import (
     _revoke_admin,
     _rotate_org,
 )
-from hivemind.store.migrate import migrate
 
 
 def _dsn() -> str:
@@ -46,12 +46,7 @@ async def pg():
     """A clean dev DB for the keys table (skips when Postgres is down)."""
     dsn = _dsn()
     dim = Settings().embedding_dim
-    try:
-        probe = await asyncpg.connect(dsn, timeout=5)
-    except Exception as exc:  # connection refused / timeout / auth
-        pytest.skip(f"Postgres unreachable at {dsn}: {exc}")
-    await probe.close()
-    await migrate(dsn, dim)
+    await ensure_migrated(dsn, dim)
     await _truncate_credentials(dsn)
     auth = PgAuthenticator(dsn)
     try:

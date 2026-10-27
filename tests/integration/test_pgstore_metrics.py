@@ -12,12 +12,12 @@ from __future__ import annotations
 
 import asyncpg
 import pytest
+from tests.pg import ensure_migrated
 
 from hivemind.config import Settings
 from hivemind.domain.access import Visibility
 from hivemind.domain.entry import EntryDraft, EntryFilters, ImportanceSource, Kind
 from hivemind.store import PgStore
-from hivemind.store.migrate import migrate
 
 VEC_DIM = Settings().embedding_dim
 VEC = [0.01] * VEC_DIM
@@ -41,12 +41,7 @@ async def pg() -> PgStore:
     """A ready ``PgStore`` on a clean dev DB (skips when Postgres is down)."""
     dsn = _dsn()
     dim = Settings().embedding_dim
-    try:
-        probe = await asyncpg.connect(dsn, timeout=5)
-    except Exception as exc:  # connection refused / timeout / auth
-        pytest.skip(f"Postgres unreachable at {dsn}: {exc}")
-    await probe.close()
-    await migrate(dsn, dim)
+    await ensure_migrated(dsn, dim)
     await _truncate(dsn)
     store = PgStore(dsn)
     try:

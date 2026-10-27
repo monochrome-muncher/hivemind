@@ -14,6 +14,7 @@ import asyncpg
 import httpx
 import pytest
 from tests.fakes import FakeEmbedder, make_search_config
+from tests.pg import ensure_migrated
 from tests.unit.test_api_endpoints import FakeAuthenticator
 
 from hivemind.api.deps import create_app
@@ -22,21 +23,15 @@ from hivemind.config import Settings
 from hivemind.domain.validation import MAX_BODY_CHARS
 from hivemind.ports import Credential
 from hivemind.store import PgStore
-from hivemind.store.migrate import migrate
 
 KEY = {"X-API-Key": "key-alice"}
 
 
 @pytest.fixture
 async def client():
-    dsn = Settings().database_url
-    try:
-        probe = await asyncpg.connect(dsn, timeout=5)
-    except Exception as exc:
-        pytest.skip(f"Postgres unreachable at {dsn}: {exc}")
-    await probe.close()
     settings = Settings()
-    await migrate(dsn, settings.embedding_dim)
+    dsn = settings.database_url
+    await ensure_migrated(dsn, settings.embedding_dim)
     conn = await asyncpg.connect(dsn)
     try:
         await conn.execute("TRUNCATE entries, audit_log CASCADE")

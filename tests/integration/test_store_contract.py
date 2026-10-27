@@ -22,6 +22,7 @@ from datetime import UTC, datetime, timedelta
 
 import asyncpg
 import pytest
+from tests.pg import ensure_migrated
 
 from hivemind.config import Settings
 from hivemind.domain.access import (
@@ -57,7 +58,6 @@ from hivemind.domain.pin import PinRefusal, PinWrite
 from hivemind.memstore import MemoryStore, cosine_similarity
 from hivemind.ports import Store, SupersedeConflict
 from hivemind.store import PgStore
-from hivemind.store.migrate import migrate
 
 T0 = datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC)
 NO_SUCH_ID = "00000000-0000-4000-8000-00000000dead"
@@ -95,19 +95,7 @@ class Adapter:
 async def _pg_adapter() -> AsyncIterator[Adapter]:
     settings = Settings()
     dsn, dim = settings.database_url, settings.embedding_dim
-    try:
-        probe = await asyncpg.connect(dsn, timeout=5)
-    except Exception as exc:
-        pytest.skip(f"Postgres unreachable at {dsn}: {exc}")
-    try:
-        has_vector = await probe.fetchval(
-            "SELECT count(*) FROM pg_available_extensions WHERE name = 'vector'"
-        )
-    finally:
-        await probe.close()
-    if not has_vector:
-        pytest.skip("'vector' extension is not available on the dev database")
-    await migrate(dsn, dim)
+    await ensure_migrated(dsn, dim)
 
     async def truncate() -> None:
         conn = await asyncpg.connect(dsn)
