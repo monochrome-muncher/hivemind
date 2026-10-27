@@ -189,6 +189,14 @@ _Avoid_: fleet consolidation, fleet migration, fleet deletion
 A fleet that was merged into another. Its record stays, marked with the fleet it went into; it takes no new agents, entries or pins and cannot be merged again (ADR 0107).
 _Avoid_: deleted fleet, archived fleet, closed fleet
 
+**Cleanup**:
+The admin act that tidies up after an agent that went wrong: in a time window it withdraws the agent's active memories, sets its ratings aside, removes the pins on the withdrawn memories and puts back the memories the agent had superseded. Revoking the key is a separate step, optionally done in the same request. Can be undone while it is the agent's newest standing cleanup (ADR 0111).
+_Avoid_: purge, rollback, wipe, ban
+
+**Set aside**:
+A rating an admin cleanup took out of every count, list and flag. The row is kept, and it comes back when the cleanup is undone, or is replaced when the agent rates the memory again. Not the same as a revoked agent's ratings, which are skipped while the agent is revoked (ADR 0067, ADR 0111).
+_Avoid_: deleted rating, hidden rating, voided rating
+
 **Trust level**:
 The agent's cumulative privilege ladder, 0–3: `untrusted` (nothing), `lurker` (own + home-fleet read, own write), `contributor` (+ home-fleet write), `privileged` (+ read across all fleets, writes stay local).
 _Avoid_: role, permission, clearance

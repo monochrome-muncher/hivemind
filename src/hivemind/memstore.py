@@ -45,6 +45,22 @@ from hivemind.domain.activity import (
     ReceivedFeedback,
     ReporterActivity,
 )
+from hivemind.domain.agent_cleanup import (
+    PREVIEW_RESTORE_LIMIT,
+    PREVIEW_WITHDRAW_LIMIT,
+    AgentCleanupRecord,
+    AgentCleanupRefused,
+    CleanupOutcome,
+    CleanupScan,
+    CleanupUndoOutcome,
+    RestoredEntry,
+    UnknownAgentCleanup,
+    check_counts_unchanged,
+    check_restore_ids,
+    check_window,
+    cleanup_reason,
+)
+from hivemind.domain.agent_cleanup import undo_refusal as cleanup_undo_refusal
 from hivemind.domain.audit import AuditEvent, AuditFilters, AuditRecord
 from hivemind.domain.entry import (
     Entry,
@@ -159,6 +175,9 @@ class MemoryStore:
         self._lock = threading.RLock()
         self._entries: dict[str, Entry] = {}
         self._feedback: dict[tuple[str, str, str], Feedback] = {}
+        # Ratings an admin cleanup set aside -> its id (ADR 0111);
+        # Postgres: feedbacks.set_aside_by
+        self._set_aside: dict[tuple[str, str, str], str] = {}
         self._withdrawn_at: dict[str, datetime] = {}  # ADR 0098; Postgres: entries.withdrawn_at
         self._fleets: dict[str, Fleet] = {}
         self._agents: dict[str, Agent] = {}
@@ -170,6 +189,8 @@ class MemoryStore:
         # Fleet merges, oldest first, and the entry ids each moved (ADR 0107)
         self._merges: list[FleetMergeRecord] = []
         self._merge_entries: dict[str, list[str]] = {}
+        # Agent cleanups, oldest first (ADR 0111)
+        self._cleanups: list[AgentCleanupRecord] = []
 
     # -- write path -------------------------------------------------------
 
@@ -313,7 +334,9 @@ class MemoryStore:
             now = self._clock()  # one stamp per call, like a transaction's now()
             stored = [replace(fb, updated_at=fb.updated_at or now) for fb in feedbacks]
             for fb in stored:
-                self._feedback[(fb.entry_id, fb.user, fb.agent)] = fb
+                key = (fb.entry_id, fb.user, fb.agent)
+                self._feedback[key] = fb
+                self._set_aside.pop(key, None)  # rating again clears the mark (ADR 0111)
             return stored
 
     # -- read path --------------------------------------------------------
@@ -813,8 +836,14 @@ class MemoryStore:
         counts, as in PgStore. Callers hold the lock."""
         if reporter is None:
             return False
-        own = self._feedback.get((entry.id, *reporter))
-        if own is None or own.verdict is not Verdict.HELPFUL or own.updated_at is None:
+        key = (entry.id, *reporter)
+        own = self._feedback.get(key)
+        if (
+            own is None
+            or key in self._set_aside
+            or own.verdict is not Verdict.HELPFUL
+            or own.updated_at is None
+        ):
             return False
         since = own.updated_at
         if entry.state is EntryState.WITHDRAWN:
@@ -864,12 +893,16 @@ class MemoryStore:
         return visibility is None or entry_is_visible(entry, visibility)
 
     def _live_feedback(self) -> dict[tuple[str, str, str], Feedback]:
-        """The feedback rows whose reporter is not a revoked agent (ADR 0067).
-        Callers hold the lock."""
+        """The feedback rows whose reporter is not a revoked agent (ADR 0067)
+        and that no cleanup set aside (ADR 0111). Callers hold the lock."""
         revoked = {n for n, a in self._agents.items() if a.status is AgentStatus.REVOKED}
-        if not revoked:
+        if not revoked and not self._set_aside:
             return self._feedback
-        return {k: fb for k, fb in self._feedback.items() if fb.user not in revoked}
+        return {
+            k: fb
+            for k, fb in self._feedback.items()
+            if fb.user not in revoked and k not in self._set_aside
+        }
 
     async def feedback_counts(self, entry_id: str) -> FeedbackCounts:
         with self._lock:
@@ -1258,6 +1291,256 @@ class MemoryStore:
         with self._lock:
             return next((m for m in self._merges if m.id == merge_id), None)
 
+    # -- agent cleanup (ADR 0111) -------------------------------------------
+
+    def _chain_end(self, entry_id: str, stop: frozenset[str] = frozenset()) -> str:
+        """The id a pin on ``entry_id`` shows: the end of its supersession
+        chain, or the first memory in ``stop`` on the way (a memory being
+        restored). Callers hold the lock."""
+        seen = {entry_id}
+        current = self._entries.get(entry_id)
+        while (
+            current is not None
+            and current.id not in stop
+            and current.state is EntryState.SUPERSEDED
+            and current.superseded_by is not None
+            and current.superseded_by not in seen
+        ):
+            seen.add(current.superseded_by)
+            nxt = self._entries.get(current.superseded_by)
+            if nxt is None:
+                return current.superseded_by
+            current = nxt
+        return current.id if current is not None else entry_id
+
+    def _cleanup_sets(
+        self, agent: str, since: datetime, until: datetime
+    ) -> tuple[list[Entry], list[tuple[Entry, str, str]], list[tuple[str, str, str]]]:
+        """The memories to withdraw (newest first), the memories to offer for
+        restoring (newest first) with the memory that replaced each and the end
+        of that chain, and the keys of the ratings to set aside. A restorable
+        memory is superseded, is not the agent's own window memory, and its
+        chain passes only through the agent's own window memories to an
+        active one. Callers hold the lock."""
+        withdraw = sorted(
+            (
+                e
+                for e in self._entries.values()
+                if e.author == agent
+                and e.state is EntryState.ACTIVE
+                and since <= e.created_at < until
+            ),
+            key=lambda e: (e.created_at, e.id),
+            reverse=True,
+        )
+        own = {
+            e.id: e
+            for e in self._entries.values()
+            if e.author == agent and since <= e.created_at < until
+        }
+        found: list[tuple[Entry, str, str]] = []
+        for e in self._entries.values():
+            if e.id in own or e.state is not EntryState.SUPERSEDED or e.superseded_by not in own:
+                continue
+            first = e.superseded_by
+            cur = own[first]
+            hops = 0
+            while (
+                cur.state is EntryState.SUPERSEDED and cur.superseded_by in own and hops <= len(own)
+            ):
+                cur = own[cur.superseded_by]
+                hops += 1
+            if cur.state is EntryState.ACTIVE:
+                found.append((e, first, cur.id))
+        restorable = sorted(found, key=lambda t: (t[0].created_at, t[0].id), reverse=True)
+        ratings = [
+            key
+            for key, fb in self._feedback.items()
+            if fb.user == agent
+            and key not in self._set_aside
+            and fb.updated_at is not None
+            and since <= fb.updated_at < until
+        ]
+        return withdraw, restorable, ratings
+
+    async def scan_agent_cleanup(self, agent: str, since: datetime, until: datetime) -> CleanupScan:
+        with self._lock:
+            withdraw, restorable, ratings = self._cleanup_sets(agent, since, until)
+            by_verdict = Counter(self._feedback[k].verdict.value for k in ratings)
+            ids = {e.id for e in withdraw}
+            offered = {t[0].id for t in restorable}
+            pins = sum(
+                1
+                for (_, eid) in self._pins
+                if eid not in offered and self._chain_end(eid, frozenset(offered)) in ids
+            )
+            return CleanupScan(
+                since=since,
+                until=until,
+                withdraw=tuple(_copy(e) for e in withdraw[:PREVIEW_WITHDRAW_LIMIT]),
+                withdraw_total=len(withdraw),
+                ratings_total=len(ratings),
+                ratings_by_verdict=dict(by_verdict),
+                pins_total=pins,
+                restorable=tuple(_copy(t[0]) for t in restorable[:PREVIEW_RESTORE_LIMIT]),
+                restorable_total=len(restorable),
+            )
+
+    async def cleanup_agent(
+        self,
+        agent: str,
+        since: datetime,
+        until: datetime,
+        *,
+        restore_ids: Sequence[str] | None = None,
+        expected_withdraw: int | None = None,
+        expected_ratings: int | None = None,
+        cleaned_by: str,
+    ) -> CleanupOutcome:
+        check_window(since, until)
+        # Spelled as the store reads ids back; a malformed one is simply not restorable.
+        wanted = [
+            str(uuid.UUID(r)) if is_valid_uuid(r) else r for r in dict.fromkeys(restore_ids or ())
+        ]
+        with self._lock:
+            withdraw, restorable, ratings = self._cleanup_sets(agent, since, until)
+            restore = check_restore_ids([t[0].id for t in restorable], wanted)
+            check_counts_unchanged(len(withdraw), len(ratings), expected_withdraw, expected_ratings)
+            if not withdraw and not ratings:
+                return CleanupOutcome(None)
+            # Nothing below can fail: mutate.
+            cleanup_id = str(uuid.uuid4())
+            now = self._clock()
+            reason = cleanup_reason(cleanup_id)
+            withdraw_ids = [e.id for e in sorted(withdraw, key=lambda e: e.id)]
+            for entry in withdraw:
+                self._entries[entry.id] = replace(
+                    entry, state=EntryState.WITHDRAWN, withdrawn_reason=reason
+                )
+                self._withdrawn_at[entry.id] = now
+            gone = set(withdraw_ids)
+            keep = set(restore)
+            unpinned = tuple(
+                DroppedPin(p.fleet_id, p.entry_id, p.pinned_by, p.pinned_at)
+                for (_, eid), p in sorted(self._pins.items(), key=lambda kv: kv[0])
+                if eid not in keep and self._chain_end(eid, frozenset(keep)) in gone
+            )
+            for d in unpinned:
+                del self._pins[(d.fleet_id, d.entry_id)]
+            by_id = {t[0].id: t for t in restorable}
+            restored = tuple(RestoredEntry(e, by_id[e][1], by_id[e][2]) for e in restore)
+            for item in restored:
+                self._entries[item.entry_id] = replace(
+                    self._entries[item.entry_id], state=EntryState.ACTIVE, superseded_by=None
+                )
+            for key in ratings:
+                self._set_aside[key] = cleanup_id
+            record = AgentCleanupRecord(
+                id=cleanup_id,
+                agent=agent,
+                since=since,
+                until=until,
+                cleaned_by=cleaned_by,
+                cleaned_at=now,
+                withdrawn_ids=tuple(withdraw_ids),
+                restored=restored,
+                ratings_set_aside=len(ratings),
+                unpinned_pins=unpinned,
+            )
+            self._cleanups.append(record)
+            return CleanupOutcome(record, len(withdraw_ids), len(ratings), len(restored), unpinned)
+
+    async def mark_cleanup_revoked(self, cleanup_id: str) -> None:
+        cleanup_id = _canonical_or_same(cleanup_id)
+        with self._lock:
+            for i, record in enumerate(self._cleanups):
+                if record.id == cleanup_id:
+                    self._cleanups[i] = replace(record, revoked=True)
+
+    async def undo_agent_cleanup(self, cleanup_id: str) -> CleanupUndoOutcome:
+        cleanup_id = _canonical_or_same(cleanup_id)
+        with self._lock:
+            record = next((c for c in self._cleanups if c.id == cleanup_id), None)
+            if record is None:
+                raise UnknownAgentCleanup(f"unknown agent cleanup: {cleanup_id}")
+            reason = cleanup_undo_refusal(record, list(reversed(self._cleanups)))
+            if reason is not None:
+                raise AgentCleanupRefused(reason)
+            why = cleanup_reason(record.id)
+            back = [
+                eid
+                for eid in record.withdrawn_ids
+                if (e := self._entries.get(eid)) is not None
+                and e.state is EntryState.WITHDRAWN
+                and e.withdrawn_reason == why
+            ]
+            for eid in back:
+                self._entries[eid] = replace(
+                    self._entries[eid],
+                    state=EntryState.ACTIVE,
+                    withdrawn_reason=None,
+                )
+                self._withdrawn_at.pop(eid, None)
+            again = []
+            for item in record.restored:
+                entry = self._entries.get(item.entry_id)
+                head = self._entries.get(item.head or item.superseded_by)
+                if (
+                    entry is not None
+                    and entry.state is EntryState.ACTIVE
+                    and head is not None
+                    and head.state is EntryState.ACTIVE
+                ):
+                    self._entries[item.entry_id] = replace(
+                        entry, state=EntryState.SUPERSEDED, superseded_by=item.superseded_by
+                    )
+                    again.append(item.entry_id)
+            marked = [k for k, cid in self._set_aside.items() if cid == record.id]
+            for key in marked:
+                del self._set_aside[key]
+            restored_pins: list[DroppedPin] = []
+            skipped_pins: list[DroppedPin] = []
+            for fleet_id in sorted({d.fleet_id for d in record.unpinned_pins}):
+                mine = [d for d in record.unpinned_pins if d.fleet_id == fleet_id]
+                fits = [
+                    d
+                    for d in mine
+                    if (e := self._entries.get(d.entry_id)) is not None
+                    and e.fleet_id == fleet_id
+                    and e.state in (EntryState.ACTIVE, EntryState.SUPERSEDED)
+                    and (fleet_id, d.entry_id) not in self._pins
+                ]
+                skipped_pins.extend(d for d in mine if d not in fits)
+                held = [p.pinned_by for (f, _), p in self._pins.items() if f == fleet_id]
+                put, over = plan_pin_restore(fits, held)
+                skipped_pins.extend(over)
+                for d in put:
+                    self._pins[(fleet_id, d.entry_id)] = Pin(
+                        fleet_id, d.entry_id, d.pinned_by, d.pinned_at
+                    )
+                restored_pins.extend(put)
+            done = replace(record, undone_at=self._clock())
+            self._cleanups[self._cleanups.index(record)] = done
+            return CleanupUndoOutcome(
+                done,
+                reactivated=len(back),
+                reactivate_skipped=len(record.withdrawn_ids) - len(back),
+                resuperseded=len(again),
+                resupersede_skipped=len(record.restored) - len(again),
+                ratings_cleared=len(marked),
+                pins_restored=tuple(restored_pins),
+                pins_skipped=tuple(skipped_pins),
+            )
+
+    async def list_agent_cleanups(self, limit: int) -> list[AgentCleanupRecord]:
+        with self._lock:
+            return list(reversed(self._cleanups))[:limit]
+
+    async def get_agent_cleanup(self, cleanup_id: str) -> AgentCleanupRecord | None:
+        cleanup_id = _canonical_or_same(cleanup_id)
+        with self._lock:
+            return next((c for c in self._cleanups if c.id == cleanup_id), None)
+
     # -- agent registration / activation (ADR 0012) --------------------------
 
     async def register_agent(self, name: str, owner_alias: str | None = None) -> Agent:
@@ -1441,6 +1724,11 @@ def _signals_for(feedback: dict[tuple[str, str, str], Feedback], entry_id: str) 
             (fb.updated_at for fb in flagged if fb.updated_at is not None), default=None
         ),
     )
+
+
+def _canonical_or_same(value: str) -> str:
+    """``value`` in the spelling ids are stored in, or unchanged when it is no uuid."""
+    return str(uuid.UUID(value)) if is_valid_uuid(value) else value
 
 
 def _with_state(

@@ -33,6 +33,7 @@ from hivemind.domain.validation import (
     MAX_OFFSET,
     check_no_nul,
 )
+from hivemind.services.agent_cleanup import CleanupPreview, CleanupView
 from hivemind.services.chain import EntryLinks
 from hivemind.services.fleet_merge import MergePreview, MergeView
 from hivemind.services.search import Hit
@@ -855,6 +856,181 @@ class FleetMergeRecordOut(BaseModel):
             moved_agents=list(r.moved_agents),
             dropped_pins=len(r.dropped_pins),
             undone_at=r.undone_at.isoformat() if r.undone_at is not None else None,
+            undoable=view.undoable,
+            undo_blocked=view.blocked,
+        )
+
+
+# --- Agent cleanup (ADR 0111) --------------------------------------------------
+
+
+class AgentCleanupRequest(BaseModel):
+    """``POST /v1/admin/agents/{name}/cleanup``. ``since`` is required;
+    ``until`` defaults to now. The window is on a memory's ``created_at``
+    (write time) and a rating's ``updated_at``, ``since`` inclusive and
+    ``until`` exclusive. ``dry_run`` is required, so a cleanup is never
+    started by leaving it out. ``restore_ids`` are the superseded memories to
+    put back (none when omitted); the ``expected_*`` counts are what the
+    preview showed, and the apply is refused (409) when they changed."""
+
+    since: datetime
+    until: datetime | None = None
+    dry_run: bool
+    restore_ids: list[RefStr] | None = Field(default=None, max_length=1000)
+    expected_withdraw: int | None = Field(default=None, ge=0)
+    expected_ratings: int | None = Field(default=None, ge=0)
+    also_revoke: bool = False
+
+    @field_validator("since", "until")
+    @classmethod
+    def _window_utc(cls, v: datetime | None) -> datetime | None:
+        """A naive bound is assumed UTC, as for ``occurred_at``."""
+        return _to_utc(v)
+
+
+class CleanupEntryOut(BaseModel):
+    """A memory a cleanup lists: one to withdraw, or one to restore (then
+    ``superseded_by`` is the junk memory that replaced it, which may be one
+    link of a chain ending at a memory the cleanup withdraws)."""
+
+    id: str
+    kind: Kind
+    summary: str
+    author: str
+    scope: str
+    fleet_id: str | None
+    created_at: datetime
+    state: EntryState
+    superseded_by: str | None
+
+    @classmethod
+    def from_entry(cls, entry: Entry) -> CleanupEntryOut:
+        return cls(
+            id=entry.id,
+            kind=entry.kind,
+            summary=entry.summary,
+            author=entry.author,
+            scope=entry.scope,
+            fleet_id=entry.fleet_id,
+            created_at=entry.created_at,
+            state=entry.state,
+            superseded_by=entry.superseded_by,
+        )
+
+
+class AgentCleanupPreviewOut(BaseModel):
+    """The ``dry_run`` answer: nothing was changed. The lists are cut (newest
+    first) and say so; the totals are exact. ``until`` is the window's end as
+    resolved, to send back with the apply."""
+
+    dry_run: Literal[True] = True
+    agent: str
+    agent_status: str
+    since: datetime
+    until: datetime
+    withdraw: list[CleanupEntryOut]
+    withdraw_total: int
+    withdraw_truncated: bool
+    ratings_total: int
+    ratings_by_verdict: dict[str, int]
+    pins_total: int
+    restorable: list[CleanupEntryOut]
+    restorable_total: int
+    restorable_truncated: bool
+    nothing_to_clean: bool
+
+    @classmethod
+    def from_preview(cls, preview: CleanupPreview) -> AgentCleanupPreviewOut:
+        scan = preview.scan
+        return cls(
+            agent=preview.agent.name,
+            agent_status=preview.agent.status.value,
+            since=preview.since,
+            until=preview.until,
+            withdraw=[CleanupEntryOut.from_entry(e) for e in scan.withdraw],
+            withdraw_total=scan.withdraw_total,
+            withdraw_truncated=scan.withdraw_total > len(scan.withdraw),
+            ratings_total=scan.ratings_total,
+            ratings_by_verdict=dict(scan.ratings_by_verdict),
+            pins_total=scan.pins_total,
+            restorable=[CleanupEntryOut.from_entry(e) for e in scan.restorable],
+            restorable_total=scan.restorable_total,
+            restorable_truncated=scan.restorable_total > len(scan.restorable),
+            nothing_to_clean=scan.withdraw_total == 0 and scan.ratings_total == 0,
+        )
+
+
+class AgentCleanupOut(BaseModel):
+    """A cleanup that happened. ``cleanup_id`` is ``None`` (and
+    ``nothing_to_clean`` true) when there was nothing to change: no record was
+    kept. ``revoked`` is true when ``also_revoke`` revoked the agent."""
+
+    dry_run: Literal[False] = False
+    cleanup_id: str | None
+    agent: str
+    since: datetime
+    until: datetime
+    withdrawn: int
+    ratings_set_aside: int
+    restored: int
+    pins_removed: list[DroppedPinOut]
+    revoked: bool
+    already_revoked: bool
+    revoke_error: str | None = None
+    nothing_to_clean: bool
+
+
+class AgentCleanupUndoOut(BaseModel):
+    """An undone cleanup. It never un-revokes the agent; ``note`` says so when
+    the cleanup had revoked it."""
+
+    cleanup_id: str
+    agent: str
+    reactivated: int
+    reactivate_skipped: int
+    resuperseded: int
+    resupersede_skipped: int
+    ratings_cleared: int
+    pins_restored: list[DroppedPinOut]
+    pins_skipped: list[DroppedPinOut]
+    note: str | None
+
+
+class AgentCleanupRecordOut(BaseModel):
+    """One recorded cleanup; ``undoable`` says whether an undo is allowed now
+    (``undo_blocked`` says why not)."""
+
+    id: str
+    agent: str
+    since: datetime
+    until: datetime
+    cleaned_by: str
+    cleaned_at: datetime
+    withdrawn: int
+    ratings_set_aside: int
+    restored: int
+    pins_removed: int
+    revoked: bool
+    undone_at: datetime | None
+    undoable: bool
+    undo_blocked: str | None
+
+    @classmethod
+    def from_view(cls, view: CleanupView) -> AgentCleanupRecordOut:
+        r = view.record
+        return cls(
+            id=r.id,
+            agent=r.agent,
+            since=r.since,
+            until=r.until,
+            cleaned_by=r.cleaned_by,
+            cleaned_at=r.cleaned_at,
+            withdrawn=len(r.withdrawn_ids),
+            ratings_set_aside=r.ratings_set_aside,
+            restored=len(r.restored),
+            pins_removed=len(r.unpinned_pins),
+            revoked=r.revoked,
+            undone_at=r.undone_at,
             undoable=view.undoable,
             undo_blocked=view.blocked,
         )

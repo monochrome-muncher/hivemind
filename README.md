@@ -138,6 +138,11 @@ key and agent keys cannot sign in here.
   memories, and a merge can be undone from the list of merges.
 - Rename a fleet from the Fleets list. Its memories, pins and agents stay
   with it.
+- Clean up after an agent that went wrong. Pick a time window and the panel
+  previews what changes: the memories it wrote are withdrawn, its ratings
+  from then stop counting, and the memories it replaced come back (you can
+  untick any). Revoking its key is a separate box, off by default. A
+  cleanup can be undone from the list of cleanups.
 - Download any list as a CSV file.
 
 ![A memory opened in the admin panel, with its details, tags and feedback](docs/images/admin-memories.png)

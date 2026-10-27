@@ -28,7 +28,7 @@ from hivemind.store.keys import _issue_admin
 
 TABLES = (
     "TRUNCATE audit_log, credentials, agents, fleets, entries, feedbacks, search_counts, "
-    "entry_links, pins, fleet_merges, fleet_merge_entries"
+    "entry_links, pins, fleet_merges, fleet_merge_entries, agent_cleanups"
 )
 
 

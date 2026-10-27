@@ -61,6 +61,10 @@ _ALLOWED = allowlist(
         ("PATCH", r"admin/fleets/[^/]+"),
         ("GET", r"admin/fleet-merges"),
         ("POST", r"admin/fleet-merges/[^/]+/undo"),
+        # Cleaning up after a bad agent, and undoing it (admin-key only on the API side).
+        ("POST", r"admin/agents/[^/]+/cleanup"),
+        ("GET", r"admin/agent-cleanups"),
+        ("POST", r"admin/agent-cleanups/[^/]+/undo"),
     )
 )
 

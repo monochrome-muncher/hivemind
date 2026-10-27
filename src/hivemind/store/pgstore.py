@@ -41,6 +41,22 @@ from hivemind.domain.activity import (
     ReceivedFeedback,
     ReporterActivity,
 )
+from hivemind.domain.agent_cleanup import (
+    PREVIEW_RESTORE_LIMIT,
+    PREVIEW_WITHDRAW_LIMIT,
+    AgentCleanupRecord,
+    AgentCleanupRefused,
+    CleanupOutcome,
+    CleanupScan,
+    CleanupUndoOutcome,
+    RestoredEntry,
+    UnknownAgentCleanup,
+    check_counts_unchanged,
+    check_restore_ids,
+    check_window,
+    cleanup_reason,
+)
+from hivemind.domain.agent_cleanup import undo_refusal as cleanup_undo_refusal
 from hivemind.domain.audit import (
     ActorKind,
     AuditAction,
@@ -315,6 +331,183 @@ COUNT_DUPLICATE_CANDIDATES = (
     "WHERE fleet_id = $1 AND state = 'active' AND embedding IS NOT NULL"
 )
 
+# --- Agent cleanup SQL (ADR 0111) --------------------------------------------
+
+# The memories a cleanup withdraws: active, authored by $1, written in the
+# window [$2, $3) (``created_at``: write time, not the memory date).
+_CLEANUP_WITHDRAW_WHERE = (
+    "author = $1 AND state = 'active' AND created_at >= $2 AND created_at < $3"
+)
+CLEANUP_WITHDRAW_LIST = (
+    "SELECT "
+    + _ENTRY_COLUMNS
+    + " FROM entries WHERE "
+    + _CLEANUP_WITHDRAW_WHERE
+    + " ORDER BY created_at DESC, id DESC LIMIT $4"
+)
+CLEANUP_WITHDRAW_COUNT = "SELECT count(*) FROM entries WHERE " + _CLEANUP_WITHDRAW_WHERE
+CLEANUP_WITHDRAW_LOCK = (
+    "SELECT id, fleet_id FROM entries WHERE " + _CLEANUP_WITHDRAW_WHERE + " ORDER BY id FOR UPDATE"
+)
+CLEANUP_FLEETS = (
+    "SELECT DISTINCT fleet_id FROM entries WHERE "
+    + _CLEANUP_WITHDRAW_WHERE
+    + " AND fleet_id IS NOT NULL"
+)
+# The ratings a cleanup sets aside: the agent's, last written in the window,
+# and not already set aside by an earlier cleanup.
+_CLEANUP_RATINGS_WHERE = (
+    'f."user" = $1 AND f.updated_at >= $2 AND f.updated_at < $3 AND f.set_aside_by IS NULL'
+)
+CLEANUP_RATINGS_BY_VERDICT = (
+    "SELECT f.verdict, count(*) AS n FROM feedbacks f WHERE "
+    + _CLEANUP_RATINGS_WHERE
+    + " GROUP BY f.verdict"
+)
+CLEANUP_SET_ASIDE = (
+    "UPDATE feedbacks f SET set_aside_by = $4 WHERE " + _CLEANUP_RATINGS_WHERE + " RETURNING 1"
+)
+# The agent's own memories written in the window, in any state ($1 agent, $2
+# since, $3 until).
+_CLEANUP_OWN = "SELECT id, state, superseded_by FROM entries WHERE author = $1 AND created_at >= $2 AND created_at < $3"
+# Memories the agent's memories replaced (ADR 0111): superseded, not the
+# agent's own window memories, and the ``superseded_by`` chain from them passes
+# only through the agent's own window memories and ends at one that is still
+# active (a memory the cleanup withdraws). ``first`` is the memory that
+# replaced it, ``head`` the end of the chain. Nobody else's memory is in the
+# chain, so a replacement made by another agent since is never undone.
+_CLEANUP_RESTORABLE_CTES = f"""
+own AS ({_CLEANUP_OWN}),
+chain(root, first, cur) AS (
+    SELECT e.id, e.superseded_by, e.superseded_by FROM entries e
+     WHERE e.state = 'superseded' AND e.superseded_by IN (SELECT id FROM own)
+       AND e.id NOT IN (SELECT id FROM own)
+    UNION
+    SELECT c.root, c.first, o.superseded_by FROM chain c JOIN own o ON o.id = c.cur
+     WHERE o.state = 'superseded' AND o.superseded_by IN (SELECT id FROM own)
+),
+restorable AS (
+    SELECT c.root AS id, c.first, c.cur AS head
+      FROM chain c JOIN own h ON h.id = c.cur AND h.state = 'active'
+)
+"""
+CLEANUP_RESTORABLE_LIST = (
+    "WITH RECURSIVE "
+    + _CLEANUP_RESTORABLE_CTES
+    + "SELECT "
+    + _ENTRY_COLUMNS
+    + " FROM entries WHERE id IN (SELECT id FROM restorable)"
+    " ORDER BY created_at DESC, id DESC LIMIT $4"
+)
+CLEANUP_RESTORABLE_COUNT = (
+    "WITH RECURSIVE " + _CLEANUP_RESTORABLE_CTES + "SELECT count(*) FROM restorable"
+)
+CLEANUP_AGENT_LOCK = "SELECT pg_advisory_xact_lock(hashtextextended('hivemind.cleanup:' || $1, 0))"
+CLEANUP_WITHDRAW = """
+UPDATE entries SET state = 'withdrawn', withdrawn_reason = $2, withdrawn_at = now()
+ WHERE id = ANY($1::uuid[]) AND state = 'active'
+"""
+CLEANUP_RESTORABLE_LOCK = (
+    "WITH RECURSIVE "
+    + _CLEANUP_RESTORABLE_CTES
+    + "SELECT e.id, r.first, r.head FROM entries e JOIN restorable r ON r.id = e.id"
+    " ORDER BY e.id FOR UPDATE OF e"
+)
+CLEANUP_RESTORE = """
+UPDATE entries SET state = 'active', superseded_by = NULL
+ WHERE id = ANY($1::uuid[]) AND state = 'superseded'
+"""
+
+
+# A pin shows the end of its entry's supersession chain, so a pin on an older
+# version of a withdrawn memory comes off with it (as ``PinService`` does for
+# a withdrawal), except on the memories being restored.
+def _pin_walk(stop: str) -> str:
+    """The recursive ``walk(pinned, cur)``: where each pin's entry leads along
+    ``superseded_by``. ``stop`` is a condition on ``w.cur`` that ends the walk,
+    so a pin on an older version of a memory being restored is not followed
+    past it (it shows that restored memory, which stays)."""
+    return (
+        "walk(pinned, cur) AS ("
+        " SELECT entry_id, entry_id FROM pins"
+        " UNION"
+        " SELECT w.pinned, e.superseded_by FROM walk w JOIN entries e ON e.id = w.cur"
+        " WHERE e.state = 'superseded' AND e.superseded_by IS NOT NULL AND " + stop + ") "
+    )
+
+
+CLEANUP_PINS_COUNT = (
+    "WITH RECURSIVE "
+    + _CLEANUP_RESTORABLE_CTES
+    + ", "
+    + _pin_walk("w.cur NOT IN (SELECT id FROM restorable)")
+    + "SELECT count(DISTINCT pinned) FROM walk"
+    " WHERE cur IN (SELECT id FROM own WHERE state = 'active')"
+    " AND pinned NOT IN (SELECT id FROM restorable)"
+)
+# The fleets of every pin a cleanup of the window could remove (supersession
+# can cross fleets, e.g. an admin's org successor), locked before the entries.
+CLEANUP_PIN_FLEETS = (
+    "WITH RECURSIVE "
+    + _pin_walk("TRUE")
+    + "SELECT DISTINCT p.fleet_id FROM pins p WHERE p.entry_id IN ("
+    "SELECT pinned FROM walk WHERE cur IN (SELECT id FROM entries WHERE "
+    + _CLEANUP_WITHDRAW_WHERE
+    + "))"
+)
+CLEANUP_UNPIN = (
+    "WITH RECURSIVE "
+    + _pin_walk("NOT (w.cur = ANY($2::uuid[]))")
+    + "DELETE FROM pins WHERE entry_id IN (SELECT pinned FROM walk WHERE cur = ANY($1::uuid[]))"
+    " AND NOT (entry_id = ANY($2::uuid[]))"
+    " RETURNING fleet_id, entry_id, pinned_by, pinned_at"
+)
+CLEANUP_INSERT = """
+INSERT INTO agent_cleanups (id, agent, since, until, cleaned_by, cleaned_at, withdrawn_ids,
+                            restored, ratings_set_aside, unpinned_pins)
+VALUES ($1, $2, $3, $4, $5, clock_timestamp(), $6, $7, $8, $9)
+RETURNING cleaned_at
+"""
+_CLEANUP_COLUMNS = (
+    "id, agent, since, until, cleaned_by, cleaned_at, withdrawn_ids, restored, "
+    "ratings_set_aside, unpinned_pins, revoked, undone_at"
+)
+CLEANUP_GET = f"SELECT {_CLEANUP_COLUMNS} FROM agent_cleanups WHERE id = $1"
+CLEANUP_LIST = (
+    f"SELECT {_CLEANUP_COLUMNS} FROM agent_cleanups ORDER BY cleaned_at DESC, id DESC LIMIT $1"
+)
+CLEANUP_OF_AGENT = (
+    f"SELECT {_CLEANUP_COLUMNS} FROM agent_cleanups WHERE agent = $1"
+    " ORDER BY cleaned_at DESC, id DESC"
+)
+CLEANUP_MARK_REVOKED = "UPDATE agent_cleanups SET revoked = true WHERE id = $1"
+CLEANUP_MARK_UNDONE = (
+    "UPDATE agent_cleanups SET undone_at = clock_timestamp() WHERE id = $1 RETURNING undone_at"
+)
+CLEANUP_FLEETS_OF = (
+    "SELECT DISTINCT fleet_id FROM entries WHERE id = ANY($1::uuid[]) AND fleet_id IS NOT NULL"
+)
+CLEANUP_LOCK_ENTRIES = "SELECT id FROM entries WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE"
+CLEANUP_REACTIVATE = """
+UPDATE entries SET state = 'active', withdrawn_reason = NULL, withdrawn_at = NULL
+ WHERE id = ANY($1::uuid[]) AND state = 'withdrawn' AND withdrawn_reason = $2
+RETURNING id
+"""
+CLEANUP_RESUPERSEDE = """
+UPDATE entries e SET state = 'superseded', superseded_by = r.successor
+  FROM unnest($1::uuid[], $2::uuid[], $3::uuid[]) AS r(id, successor, head)
+ WHERE e.id = r.id AND e.state = 'active'
+   AND EXISTS (SELECT 1 FROM entries s WHERE s.id = r.head AND s.state = 'active')
+RETURNING e.id
+"""
+CLEANUP_CLEAR_SET_ASIDE = (
+    "UPDATE feedbacks SET set_aside_by = NULL WHERE set_aside_by = $1 RETURNING 1"
+)
+CLEANUP_PINNABLE = (
+    "SELECT id FROM entries WHERE id = ANY($1::uuid[]) AND fleet_id = $2"
+    " AND state IN ('active', 'superseded')"
+)
+
 # --- Fleet / agent access-control SQL (ADRs 0011-0012) ---------------------
 
 SELECT_FLEET_BY_NAME = "SELECT 1 FROM fleets WHERE name = $1"
@@ -438,7 +631,10 @@ stated explicitly; untuned for now (ADR 0025).
 # ADR 0067: a revoked agent's reports are left out of every feedback read
 # (the rows stay, so re-activation brings them back). ``agents.name`` is
 # unique, so this is an index probe; a reporter with no agent record counts.
-_REPORTER_NOT_REVOKED = (
+# ADR 0111: so are the rows an admin cleanup set aside (``set_aside_by``).
+# Every read of ``feedbacks`` as ``f`` uses this one condition.
+_RATING_COUNTS = (
+    "f.set_aside_by IS NULL AND "
     "NOT EXISTS (SELECT 1 FROM agents a WHERE a.name = f.\"user\" AND a.status = 'revoked')"
 )
 
@@ -462,7 +658,7 @@ SELECT l.from_id, l.to_id, l.created_at AS linked_at, t.state,
                   WHERE f.verdict = 'helpful' AND coalesce(f.note, '') ~ '\\S'
               ) AS newest_noted_helpful_at
          FROM feedbacks f
-        WHERE f.entry_id = t.id AND {_REPORTER_NOT_REVOKED}) fb ON true
+        WHERE f.entry_id = t.id AND {_RATING_COUNTS}) fb ON true
  WHERE l.from_id = ANY($1::uuid[])
  ORDER BY l.from_id, l.created_at, l.to_id
 """
@@ -483,7 +679,7 @@ SELECT f."user" AS reporter, count(*) AS verdicts,
        count(*) FILTER (WHERE f.verdict = 'stale') AS stale,
        count(*) FILTER (WHERE f.verdict = 'wrong') AS wrong,
        max(f.updated_at) AS last_at
-  FROM feedbacks f WHERE {_REPORTER_NOT_REVOKED}
+  FROM feedbacks f WHERE {_RATING_COUNTS}
  GROUP BY f."user"
 """
 ACTIVITY_RECEIVED = f"""
@@ -491,7 +687,7 @@ SELECT e.author, count(*) FILTER (WHERE f.verdict = 'helpful') AS helpful,
        count(*) FILTER (WHERE f.verdict = 'stale') AS stale,
        count(*) FILTER (WHERE f.verdict = 'wrong') AS wrong
   FROM feedbacks f JOIN entries e ON e.id = f.entry_id
- WHERE {_REPORTER_NOT_REVOKED}
+ WHERE {_RATING_COUNTS}
  GROUP BY e.author
 """
 ACTIVITY_DAYS = f"""
@@ -504,7 +700,7 @@ SELECT day, sum(writes)::int AS writes, sum(helpful)::int AS helpful,
     UNION ALL
     SELECT (f.updated_at AT TIME ZONE 'UTC')::date, 0,
            (f.verdict = 'helpful')::int, (f.verdict = 'stale')::int, (f.verdict = 'wrong')::int
-      FROM feedbacks f WHERE f.updated_at >= $1 AND {_REPORTER_NOT_REVOKED}
+      FROM feedbacks f WHERE f.updated_at >= $1 AND {_RATING_COUNTS}
   ) t
  GROUP BY day ORDER BY day
 """
@@ -517,7 +713,8 @@ VALUES ($1, $2, $3, $4, $5, COALESCE($6, now()))
 ON CONFLICT (entry_id, "user", agent) DO UPDATE
 SET verdict = EXCLUDED.verdict,
     note = EXCLUDED.note,
-    updated_at = EXCLUDED.updated_at
+    updated_at = EXCLUDED.updated_at,
+    set_aside_by = NULL
 RETURNING updated_at
 """
 
@@ -530,13 +727,13 @@ COUNT_FEEDBACK = f"""
 SELECT
     {_VERDICT_COUNTS}
 FROM feedbacks f
-WHERE entry_id = $1 AND {_REPORTER_NOT_REVOKED}
+WHERE entry_id = $1 AND {_RATING_COUNTS}
 """
 
 LIST_FEEDBACK = f"""
 SELECT entry_id, "user", agent, verdict, note, updated_at
 FROM feedbacks f
-WHERE entry_id = $1 AND {_REPORTER_NOT_REVOKED}
+WHERE entry_id = $1 AND {_RATING_COUNTS}
 ORDER BY (verdict = 'helpful' AND COALESCE(note, '') = ''), updated_at DESC, "user", agent
 LIMIT $2
 """
@@ -549,7 +746,7 @@ SELECT entry_id, "user", agent, verdict, note, updated_at FROM (
                PARTITION BY entry_id
                ORDER BY (verdict = 'helpful' AND COALESCE(note, '') = ''), updated_at DESC, "user", agent) AS rn
       FROM feedbacks f
-     WHERE entry_id = ANY($1::uuid[]) AND {_REPORTER_NOT_REVOKED}
+     WHERE entry_id = ANY($1::uuid[]) AND {_RATING_COUNTS}
 ) AS ranked
 WHERE rn <= $2
 ORDER BY entry_id, (verdict = 'helpful' AND COALESCE(note, '') = ''), updated_at DESC, "user", agent
@@ -578,7 +775,7 @@ WITH flagged AS (
            max(f.updated_at) FILTER (WHERE f.verdict IN ('stale', 'wrong')) AS last_flag,
            {_VERDICT_COUNTS}
       FROM feedbacks f
-     WHERE {_REPORTER_NOT_REVOKED}
+     WHERE {_RATING_COUNTS}
      GROUP BY f.entry_id
     HAVING count(*) FILTER (WHERE f.verdict IN ('stale', 'wrong')) > 0
 ), backlog AS (
@@ -605,7 +802,7 @@ SELECT
     entry_id,
     {_VERDICT_COUNTS}
 FROM feedbacks f
-WHERE entry_id = ANY($1) AND {_REPORTER_NOT_REVOKED}
+WHERE entry_id = ANY($1) AND {_RATING_COUNTS}
 GROUP BY entry_id
 """
 
@@ -624,7 +821,7 @@ FROM (
         ) AS newest_noted_helpful_at,
         MAX(updated_at) FILTER (WHERE verdict IN ('stale', 'wrong')) AS newest_flag_at
     FROM feedbacks f
-    WHERE entry_id = ANY($1) AND {_REPORTER_NOT_REVOKED}
+    WHERE entry_id = ANY($1) AND {_RATING_COUNTS}
     GROUP BY entry_id
 ) g
 LEFT JOIN LATERAL (
@@ -633,7 +830,7 @@ LEFT JOIN LATERAL (
      WHERE f.entry_id = g.entry_id
        AND f.verdict IN ('stale', 'wrong')
        AND coalesce(f.note, '') ~ '\\S'
-       AND {_REPORTER_NOT_REVOKED}
+       AND {_RATING_COUNTS}
      ORDER BY f.updated_at DESC, f."user", f.agent
      LIMIT 1
 ) corr ON true
@@ -663,7 +860,7 @@ JOIN entries e ON e.id = f.entry_id
 LEFT JOIN entries s ON s.id = e.superseded_by AND e.state = 'superseded'
 WHERE f.verdict IN ('stale', 'wrong')
   AND (s.id IS NULL OR s.created_at > f.updated_at)
-  AND {_REPORTER_NOT_REVOKED}
+  AND {_RATING_COUNTS}
 GROUP BY f."user"
 """
 
@@ -683,7 +880,7 @@ HEALTH_BY_FLEET = f"""
 WITH flagged AS (
     SELECT e.id, e.fleet_id, e.author, min(f.updated_at) AS first_flag
       FROM feedbacks f JOIN entries e ON e.id = f.entry_id
-     WHERE f.verdict IN ('stale', 'wrong') AND e.state = 'active' AND {_REPORTER_NOT_REVOKED}
+     WHERE f.verdict IN ('stale', 'wrong') AND e.state = 'active' AND {_RATING_COUNTS}
      GROUP BY e.id
 ), last_write AS (
     SELECT fa.author,
@@ -692,7 +889,7 @@ WITH flagged AS (
 ), fresh AS (
     SELECT DISTINCT f.entry_id FROM feedbacks f
      WHERE f.updated_at BETWEEN $1::timestamptz - interval '2160 hours' AND $1::timestamptz
-       AND {_REPORTER_NOT_REVOKED}
+       AND {_RATING_COUNTS}
 ), linking AS (
     SELECT from_id FROM entry_links GROUP BY from_id HAVING count(*) >= 2
 ), parts AS (
@@ -757,7 +954,7 @@ WITH writes AS (
 ), verdicts AS (
     SELECT f."user" AS reporter, count(*) AS n FROM feedbacks f
      WHERE f.updated_at BETWEEN $1::timestamptz - interval '2160 hours' AND $1::timestamptz
-       AND {_REPORTER_NOT_REVOKED}
+       AND {_RATING_COUNTS}
      GROUP BY f."user"
 ), owners AS (
     SELECT CASE WHEN o.key IS NOT NULL THEN 'o:' || o.key ELSE 'r:' || f."user" END AS owner,
@@ -766,7 +963,7 @@ WITH writes AS (
       LEFT JOIN LATERAL (SELECT {_owner_key("a.owner_alias")} AS key
                            FROM agents a WHERE a.name = f."user") o ON true
      WHERE f.updated_at BETWEEN $1::timestamptz - interval '2160 hours' AND $1::timestamptz
-       AND {_REPORTER_NOT_REVOKED}
+       AND {_RATING_COUNTS}
      GROUP BY 1
 ), siblings AS (
     SELECT count(*) AS n
@@ -775,12 +972,12 @@ WITH writes AS (
       JOIN agents ra ON ra.name = f."user"
       JOIN agents ea ON ea.name = e.author
      WHERE f.updated_at BETWEEN $1::timestamptz - interval '2160 hours' AND $1::timestamptz
-       AND {_REPORTER_NOT_REVOKED}
+       AND {_RATING_COUNTS}
        AND ra.name <> ea.name
        AND {_owner_key("ra.owner_alias")} = {_owner_key("ea.owner_alias")}
 ), helpful AS (
     SELECT count(*) AS n, count(*) FILTER (WHERE f.note ~ '\\S') AS noted
-      FROM feedbacks f WHERE f.verdict = 'helpful' AND {_REPORTER_NOT_REVOKED}
+      FROM feedbacks f WHERE f.verdict = 'helpful' AND {_RATING_COUNTS}
 ), grounding AS (
     SELECT count(*) AS n,
            count(*) FILTER (WHERE EXISTS (
@@ -797,7 +994,7 @@ WITH writes AS (
 ), verdicts30 AS (
     SELECT f.agent, count(*) AS n FROM feedbacks f
      WHERE f.updated_at BETWEEN $1::timestamptz - interval '720 hours' AND $1::timestamptz
-       AND f.agent ~ '\\S' AND {_REPORTER_NOT_REVOKED}
+       AND f.agent ~ '\\S' AND {_RATING_COUNTS}
      GROUP BY f.agent
 ), chains AS (
     SELECT count(*) AS supersessions,
@@ -841,7 +1038,7 @@ UNION ALL
 SELECT 'contested', extract(epoch FROM ($1::timestamptz - e.created_at))::float8
   FROM entries e
  WHERE e.state = 'active'
-   AND e.id IN (SELECT f.entry_id FROM feedbacks f WHERE {_REPORTER_NOT_REVOKED}
+   AND e.id IN (SELECT f.entry_id FROM feedbacks f WHERE {_RATING_COUNTS}
                  GROUP BY f.entry_id
                 HAVING bool_or(f.verdict = 'helpful') AND bool_or(f.verdict <> 'helpful'))
 """
@@ -923,7 +1120,7 @@ SELECT extract(epoch FROM (n.created_at - min(f.updated_at)))::float8 AS seconds
   JOIN feedbacks f ON f.entry_id = s.id
                   AND f.verdict IN ('stale', 'wrong')
                   AND f.updated_at < n.created_at
-                  AND {_REPORTER_NOT_REVOKED}
+                  AND {_RATING_COUNTS}
  WHERE n.created_at BETWEEN $1::timestamptz - interval '2160 hours' AND $1::timestamptz
  GROUP BY s.id, n.created_at
 """
@@ -989,7 +1186,7 @@ def _filter_conditions(
         # key (entry_id, "user", agent) serves the per-entry probe.
         clauses.append(
             "EXISTS (SELECT 1 FROM feedbacks f WHERE f.entry_id = entries.id"
-            " AND f.verdict IN ('stale', 'wrong') AND " + _REPORTER_NOT_REVOKED + ")"
+            " AND f.verdict IN ('stale', 'wrong') AND " + _RATING_COUNTS + ")"
         )
 
     if filters.relied_on_changed:
@@ -1005,6 +1202,7 @@ def _filter_conditions(
             clauses.append(
                 "EXISTS (SELECT 1 FROM feedbacks h WHERE h.entry_id = entries.id"
                 f" AND h.\"user\" = {user_p} AND h.agent = {agent_p} AND h.verdict = 'helpful'"
+                " AND h.set_aside_by IS NULL"
                 " AND (entries.state = 'withdrawn'"
                 " AND coalesce(entries.withdrawn_at > h.updated_at, TRUE)"
                 " OR entries.state = 'superseded' AND EXISTS (SELECT 1 FROM entries s"
@@ -1013,7 +1211,7 @@ def _filter_conditions(
                 " OR EXISTS (SELECT 1 FROM feedbacks f WHERE f.entry_id = entries.id"
                 " AND f.verdict IN ('stale', 'wrong') AND f.updated_at > h.updated_at"
                 ' AND f."user" <> h."user"'
-                " AND " + _REPORTER_NOT_REVOKED + ")))"
+                " AND " + _RATING_COUNTS + ")))"
             )
 
     vis_clause = _visibility_clause(visibility, params)
@@ -1815,7 +2013,7 @@ class PgStore:
         """Feedback rows across entries, newest first. No index serves the
         order: a scan of ``feedbacks`` and a top-N sort, read by the admin
         panel only."""
-        clauses = [_REPORTER_NOT_REVOKED]
+        clauses = [_RATING_COUNTS]
         params: list[Any] = []
 
         def add(fragment: str, value: Any) -> None:
@@ -2207,6 +2405,278 @@ class PgStore:
             row = await conn.fetchrow(GET_MERGE, merge_id)
         return _row_to_merge(row) if row is not None else None
 
+    # -- agent cleanup (ADR 0111) -------------------------------------------------
+
+    async def scan_agent_cleanup(self, agent: str, since: datetime, until: datetime) -> CleanupScan:
+        async with self._connection() as conn:
+            withdraw = await conn.fetch(
+                CLEANUP_WITHDRAW_LIST, agent, since, until, PREVIEW_WITHDRAW_LIMIT
+            )
+            withdraw_total = int(await conn.fetchval(CLEANUP_WITHDRAW_COUNT, agent, since, until))
+            verdicts = await conn.fetch(CLEANUP_RATINGS_BY_VERDICT, agent, since, until)
+            pins_total = int(
+                await conn.fetchval(
+                    CLEANUP_PINS_COUNT, agent, since, until, timeout=LONG_OP_TIMEOUT
+                )
+            )
+            restorable = await conn.fetch(
+                CLEANUP_RESTORABLE_LIST,
+                agent,
+                since,
+                until,
+                PREVIEW_RESTORE_LIMIT,
+                timeout=LONG_OP_TIMEOUT,
+            )
+            restorable_total = int(
+                await conn.fetchval(
+                    CLEANUP_RESTORABLE_COUNT, agent, since, until, timeout=LONG_OP_TIMEOUT
+                )
+            )
+        by_verdict = {r["verdict"]: int(r["n"]) for r in verdicts}
+        return CleanupScan(
+            since=since,
+            until=until,
+            withdraw=tuple(_row_to_entry(r) for r in withdraw),
+            withdraw_total=withdraw_total,
+            ratings_total=sum(by_verdict.values()),
+            ratings_by_verdict=by_verdict,
+            pins_total=pins_total,
+            restorable=tuple(_row_to_entry(r) for r in restorable),
+            restorable_total=restorable_total,
+        )
+
+    async def cleanup_agent(
+        self,
+        agent: str,
+        since: datetime,
+        until: datetime,
+        *,
+        restore_ids: Sequence[str] | None = None,
+        expected_withdraw: int | None = None,
+        expected_ratings: int | None = None,
+        cleaned_by: str,
+    ) -> CleanupOutcome:
+        check_window(since, until)
+        wanted = list(dict.fromkeys(restore_ids or ()))
+        if any(not is_valid_uuid(w) for w in wanted):
+            raise AgentCleanupRefused("restore_ids names memories that cannot be restored")
+        wanted = [str(uuid.UUID(w)) for w in wanted]
+        cleanup_id = str(uuid.uuid4())
+        try:
+            async with self._transaction() as conn:
+                await conn.execute(MERGE_SETTINGS)
+                # One cleanup or undo per agent at a time.
+                await conn.execute(CLEANUP_AGENT_LOCK, agent)
+                # Pin locks first, in fleet order (a merge takes the fleet rows,
+                # then these), then the memory rows: a concurrent supersede or
+                # withdraw of one waits for this commit, then sees its new state.
+                fleets = sorted(
+                    {
+                        str(r["fleet_id"])
+                        for r in await conn.fetch(CLEANUP_FLEETS, agent, since, until)
+                    }
+                    | {
+                        str(r["fleet_id"])
+                        for r in await conn.fetch(
+                            CLEANUP_PIN_FLEETS, agent, since, until, timeout=LONG_OP_TIMEOUT
+                        )
+                    }
+                )
+                for fid in fleets:
+                    await conn.execute(LOCK_FLEET_PINS, fid)
+                locked = await conn.fetch(
+                    CLEANUP_WITHDRAW_LOCK, agent, since, until, timeout=LONG_OP_TIMEOUT
+                )
+                withdraw_ids = [str(r["id"]) for r in locked]
+                restorable = {
+                    str(r["id"]): (str(r["first"]), str(r["head"]))
+                    for r in await conn.fetch(
+                        CLEANUP_RESTORABLE_LOCK, agent, since, until, timeout=LONG_OP_TIMEOUT
+                    )
+                }
+                restore = check_restore_ids(list(restorable), wanted)
+                # The agent's own upserts of these rows wait for the commit and
+                # then clear the mark (UPSERT_FEEDBACK).
+                set_aside = len(
+                    await conn.fetch(
+                        CLEANUP_SET_ASIDE, agent, since, until, cleanup_id, timeout=LONG_OP_TIMEOUT
+                    )
+                )
+                check_counts_unchanged(
+                    len(withdraw_ids), set_aside, expected_withdraw, expected_ratings
+                )
+                if not withdraw_ids and not set_aside:
+                    return CleanupOutcome(None)
+                unpinned: tuple[DroppedPin, ...] = ()
+                if withdraw_ids:
+                    await conn.execute(
+                        CLEANUP_WITHDRAW,
+                        withdraw_ids,
+                        cleanup_reason(cleanup_id),
+                        timeout=LONG_OP_TIMEOUT,
+                    )
+                    unpinned = tuple(
+                        DroppedPin(
+                            r["fleet_id"], str(r["entry_id"]), r["pinned_by"], r["pinned_at"]
+                        )
+                        for r in await conn.fetch(
+                            CLEANUP_UNPIN, withdraw_ids, restore, timeout=LONG_OP_TIMEOUT
+                        )
+                    )
+                if restore:
+                    await conn.execute(CLEANUP_RESTORE, restore, timeout=LONG_OP_TIMEOUT)
+                restored = tuple(RestoredEntry(e, *restorable[e]) for e in restore)
+                cleaned_at = await conn.fetchval(
+                    CLEANUP_INSERT,
+                    cleanup_id,
+                    agent,
+                    since,
+                    until,
+                    cleaned_by,
+                    withdraw_ids,
+                    json.dumps(
+                        [
+                            {
+                                "entry_id": r.entry_id,
+                                "superseded_by": r.superseded_by,
+                                "head": r.head,
+                            }
+                            for r in restored
+                        ]
+                    ),
+                    set_aside,
+                    json.dumps(_pins_to_json(unpinned)),
+                )
+        except asyncpg.exceptions.LockNotAvailableError:
+            raise AgentCleanupRefused(
+                "the agent's memories are busy with writes or another cleanup; try again in a moment"
+            ) from None
+        except asyncpg.exceptions.DeadlockDetectedError:
+            raise AgentCleanupRefused(
+                "the cleanup deadlocked with a concurrent change; try it again"
+            ) from None
+        record = AgentCleanupRecord(
+            cleanup_id,
+            agent,
+            since,
+            until,
+            cleaned_by,
+            cleaned_at,
+            tuple(withdraw_ids),
+            restored,
+            set_aside,
+            unpinned,
+        )
+        return CleanupOutcome(record, len(withdraw_ids), set_aside, len(restored), unpinned)
+
+    async def mark_cleanup_revoked(self, cleanup_id: str) -> None:
+        if is_valid_uuid(cleanup_id):
+            async with self._connection() as conn:
+                await conn.execute(CLEANUP_MARK_REVOKED, cleanup_id)
+
+    async def undo_agent_cleanup(self, cleanup_id: str) -> CleanupUndoOutcome:
+        if not is_valid_uuid(cleanup_id):
+            raise UnknownAgentCleanup(f"unknown agent cleanup: {cleanup_id}")
+        cleanup_id = str(uuid.UUID(cleanup_id))
+        try:
+            async with self._transaction() as conn:
+                await conn.execute(MERGE_SETTINGS)
+                row = await conn.fetchrow(CLEANUP_GET, cleanup_id)
+                if row is None:
+                    raise UnknownAgentCleanup(f"unknown agent cleanup: {cleanup_id}")
+                await conn.execute(CLEANUP_AGENT_LOCK, row["agent"])
+                # Re-read under the lock: a racing cleanup or undo has finished by now.
+                mine = [
+                    _row_to_cleanup(r) for r in await conn.fetch(CLEANUP_OF_AGENT, row["agent"])
+                ]
+                record = next(m for m in mine if m.id == cleanup_id)
+                reason = cleanup_undo_refusal(record, mine)
+                if reason is not None:
+                    raise AgentCleanupRefused(reason)
+                touched = list(
+                    dict.fromkeys(
+                        [
+                            *record.withdrawn_ids,
+                            *(r.entry_id for r in record.restored),
+                            *(r.superseded_by for r in record.restored),
+                            *(r.head for r in record.restored if r.head),
+                        ]
+                    )
+                )
+                fleets = sorted(
+                    {str(r["fleet_id"]) for r in await conn.fetch(CLEANUP_FLEETS_OF, touched)}
+                    | {d.fleet_id for d in record.unpinned_pins}
+                )
+                for fid in fleets:
+                    await conn.execute(LOCK_FLEET_PINS, fid)
+                await conn.execute(CLEANUP_LOCK_ENTRIES, touched, timeout=LONG_OP_TIMEOUT)
+                back = await conn.fetch(
+                    CLEANUP_REACTIVATE,
+                    list(record.withdrawn_ids),
+                    cleanup_reason(cleanup_id),
+                    timeout=LONG_OP_TIMEOUT,
+                )
+                again = await conn.fetch(
+                    CLEANUP_RESUPERSEDE,
+                    [r.entry_id for r in record.restored],
+                    [r.superseded_by for r in record.restored],
+                    [r.head or r.superseded_by for r in record.restored],
+                    timeout=LONG_OP_TIMEOUT,
+                )
+                cleared = await conn.fetch(
+                    CLEANUP_CLEAR_SET_ASIDE, cleanup_id, timeout=LONG_OP_TIMEOUT
+                )
+                restored_pins: list[DroppedPin] = []
+                skipped_pins: list[DroppedPin] = []
+                for fid in sorted({d.fleet_id for d in record.unpinned_pins}):
+                    mine_pins = [d for d in record.unpinned_pins if d.fleet_id == fid]
+                    home = {
+                        str(r["id"])
+                        for r in await conn.fetch(
+                            CLEANUP_PINNABLE, [d.entry_id for d in mine_pins], fid
+                        )
+                    }
+                    held = await conn.fetch(PINNED_ENTRY_IDS, fid)
+                    pinned = {str(r["entry_id"]) for r in held}
+                    fits = [d for d in mine_pins if d.entry_id in home and d.entry_id not in pinned]
+                    skipped_pins.extend(d for d in mine_pins if d not in fits)
+                    put, over = plan_pin_restore(fits, [r["pinned_by"] for r in held])
+                    skipped_pins.extend(over)
+                    for d in put:
+                        await conn.execute(RESTORE_PIN, fid, d.entry_id, d.pinned_by, d.pinned_at)
+                    restored_pins.extend(put)
+                undone_at = await conn.fetchval(CLEANUP_MARK_UNDONE, cleanup_id)
+        except asyncpg.exceptions.LockNotAvailableError:
+            raise AgentCleanupRefused(
+                "the agent's memories are busy with writes or another cleanup; try again in a moment"
+            ) from None
+        except asyncpg.exceptions.DeadlockDetectedError:
+            raise AgentCleanupRefused(
+                "the undo deadlocked with a concurrent change; try it again"
+            ) from None
+        return CleanupUndoOutcome(
+            replace(record, undone_at=undone_at),
+            reactivated=len(back),
+            reactivate_skipped=len(record.withdrawn_ids) - len(back),
+            resuperseded=len(again),
+            resupersede_skipped=len(record.restored) - len(again),
+            ratings_cleared=len(cleared),
+            pins_restored=tuple(restored_pins),
+            pins_skipped=tuple(skipped_pins),
+        )
+
+    async def list_agent_cleanups(self, limit: int) -> list[AgentCleanupRecord]:
+        async with self._connection() as conn:
+            rows = await conn.fetch(CLEANUP_LIST, limit)
+        return [_row_to_cleanup(r) for r in rows]
+
+    async def get_agent_cleanup(self, cleanup_id: str) -> AgentCleanupRecord | None:
+        if not is_valid_uuid(cleanup_id):
+            return None
+        async with self._connection() as conn:
+            row = await conn.fetchrow(CLEANUP_GET, cleanup_id)
+        return _row_to_cleanup(row) if row is not None else None
+
     # -- agent registration / activation (ADR 0012) ----------------------------
 
     async def register_agent(self, name: str, owner_alias: str | None = None) -> Agent:
@@ -2493,6 +2963,48 @@ def _row_to_merge(row: asyncpg.Record) -> FleetMergeRecord:
             )
             for d in dropped
         ),
+        undone_at=row["undone_at"],
+    )
+
+
+def _pins_to_json(pins: Sequence[DroppedPin]) -> list[dict[str, str]]:
+    return [
+        {
+            "fleet_id": d.fleet_id,
+            "entry_id": d.entry_id,
+            "pinned_by": d.pinned_by,
+            "pinned_at": d.pinned_at.isoformat(),
+        }
+        for d in pins
+    ]
+
+
+def _row_to_cleanup(row: asyncpg.Record) -> AgentCleanupRecord:
+    """Map an ``agent_cleanups`` row to the domain record."""
+
+    def loaded(raw: Any) -> list[dict[str, str]]:
+        return raw if isinstance(raw, list) else json.loads(raw)
+
+    return AgentCleanupRecord(
+        id=str(row["id"]),
+        agent=row["agent"],
+        since=row["since"],
+        until=row["until"],
+        cleaned_by=row["cleaned_by"],
+        cleaned_at=row["cleaned_at"],
+        withdrawn_ids=tuple(str(i) for i in row["withdrawn_ids"]),
+        restored=tuple(
+            RestoredEntry(r["entry_id"], r["superseded_by"], r.get("head", ""))
+            for r in loaded(row["restored"])
+        ),
+        ratings_set_aside=int(row["ratings_set_aside"]),
+        unpinned_pins=tuple(
+            DroppedPin(
+                d["fleet_id"], d["entry_id"], d["pinned_by"], datetime.fromisoformat(d["pinned_at"])
+            )
+            for d in loaded(row["unpinned_pins"])
+        ),
+        revoked=bool(row["revoked"]),
         undone_at=row["undone_at"],
     )
 
