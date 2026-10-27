@@ -137,6 +137,23 @@ def test_a_substantial_codex_session_is_blocked(tmp_path: Path) -> None:
     assert json.loads(out.stdout)["decision"] == "block"
 
 
+@pytest.mark.parametrize("item_type", ["function_call", "custom_tool_call", "local_shell_call"])
+def test_every_codex_call_item_type_counts_as_a_tool_use(tmp_path: Path, item_type: str) -> None:
+    def rollout(calls: int) -> Path:
+        path = tmp_path / f"{item_type}-{calls}.jsonl"
+        items = [{"type": item_type, "call_id": f"c{i}"} for i in range(calls)]
+        items += [{"type": f"{item_type}_output", "call_id": f"c{i}"} for i in range(calls)]
+        path.write_text(
+            "\n".join(json.dumps({"type": "response_item", "payload": i}) for i in items) + "\n"
+        )
+        return path
+
+    blocked = _stop(tmp_path, rollout(25))
+    assert json.loads(blocked.stdout)["decision"] == "block"
+    quiet = _stop(tmp_path, rollout(15), session_id="s2")
+    assert (quiet.returncode, quiet.stdout) == (0, "")
+
+
 def test_codex_call_outputs_are_not_counted_as_calls(tmp_path: Path) -> None:
     out = _stop(tmp_path, _codex_transcript(tmp_path, 15))
     assert (out.returncode, out.stdout) == (0, "")

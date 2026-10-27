@@ -18,12 +18,14 @@ from pathlib import Path
 import httpx
 import pytest
 
+from hivemind.admin import app as admin_module
 from hivemind.admin.app import CONTENT_SECURITY_POLICY, STATIC_DIR, create_admin_app, is_allowed
 from hivemind.api.deps import create_app
 from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
 from hivemind.memstore import MemoryStore
+from hivemind.portal import app as portal_module
 from tests.fakes import FakeAuthenticator, make_clock, make_embedder, make_search_config
 
 ADMIN = {"X-API-Key": "hm_admin"}
@@ -170,6 +172,58 @@ async def test_patching_bob_hash_through_the_panel_does_not_touch_bob() -> None:
     assert resp.json()["name"] == "bob#"
     assert (await hivemind.store.get_agent("bob")).trust_level is TrustLevel.LURKER
     assert (await hivemind.store.get_agent("bob#")).trust_level is TrustLevel.PRIVILEGED
+
+
+# -- the allowlists name real API routes ----------------------------------------------
+
+
+def _api_routes_from(spec: dict) -> set[tuple[str, str]]:
+    """The API's (METHOD, path after /v1/) pairs, ``{id}`` as the allowlist's ``[^/]+``."""
+    return {
+        (method.upper(), re.sub(r"\{[^}]+\}", "[^/]+", path.removeprefix("/v1/")))
+        for path, operations in spec["paths"].items()
+        if path.startswith("/v1/")
+        for method in operations
+    }
+
+
+@pytest.mark.parametrize("front_end", ["admin", "portal"])
+async def test_every_allowlisted_call_names_a_real_api_route(front_end: str) -> None:
+    """A renamed API route would otherwise turn into a silent 404 at the proxy."""
+    allowed = {"admin": admin_module._ALLOWED, "portal": portal_module._ALLOWED}[front_end]
+    _, api_app = _api()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=api_app), base_url="http://api.test"
+    ) as api:
+        routes = _api_routes_from((await api.get("/openapi.json")).json())
+    assert allowed
+    for method, pattern in allowed:
+        assert (method, pattern.pattern) in routes, (method, pattern.pattern)
+
+
+STATIC_TRAVERSALS = [
+    "/static/../webapp.py",
+    "/static/%2e%2e/webapp.py",
+    "/static/%2E%2E/webapp.py",
+    "/static/..%2Fwebapp.py",
+    "/static/%2e%2e%2fwebapp.py",
+    "/static/..%2F..%2Fapi%2Fdeps.py",
+    "/static/%2e%2e/admin/app.py",
+    "/static//etc/passwd",
+]
+
+
+@pytest.mark.parametrize("front_end", ["admin", "portal"])
+@pytest.mark.parametrize("path", STATIC_TRAVERSALS)
+async def test_static_never_serves_a_file_outside_its_folder(front_end: str, path: str) -> None:
+    create = {"admin": create_admin_app, "portal": portal_module.create_portal_app}[front_end]
+    app = create("http://hivemind-api.test")
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://panel.test"
+    ) as panel:
+        resp = await panel.get(path)
+    assert resp.status_code in (400, 404)
+    assert "import " not in resp.text and "root:" not in resp.text
 
 
 # -- what crosses the proxy ----------------------------------------------------

@@ -678,6 +678,78 @@ def test_portal_ingress_example_is_internal_and_fails_closed() -> None:
                 assert path["backend"]["service"]["name"] != "hivemind-portal"
 
 
+DEPLOYMENTS = {
+    "api": K8S / "hivemind-api-deployment.yaml",
+    "mcp": K8S / "hivemind-mcp-deployment.yaml",
+    "admin": K8S / "admin" / "hivemind-admin-deployment.yaml",
+    "portal": K8S / "portal" / "hivemind-portal-deployment.yaml",
+}
+
+
+def _pod_labels(component: str) -> dict[str, str]:
+    return _load(DEPLOYMENTS[component])["spec"]["template"]["metadata"]["labels"]  # type: ignore[no-any-return]
+
+
+def _container_ports(component: str) -> set[int]:
+    return {
+        p["containerPort"]
+        for c in _pod_spec(_load(DEPLOYMENTS[component]))["containers"]
+        for p in c.get("ports", [])
+    }
+
+
+def test_network_policies_select_the_pods_and_ports_the_deployments_declare() -> None:
+    """A typo in a selector makes a policy select nothing and fail open, silently."""
+    path = K8S / "optional" / "networkpolicy" / "networkpolicy.yaml"
+    policies = {d["metadata"]["name"]: d for d in yaml.safe_load_all(path.read_text())}
+    assert set(policies) == {f"hivemind-{c}" for c in DEPLOYMENTS}
+    for component, labels in ((c, _pod_labels(c)) for c in DEPLOYMENTS):
+        policy = policies[f"hivemind-{component}"]["spec"]
+        assert policy["podSelector"]["matchLabels"].items() <= labels.items(), component
+        assert policy["podSelector"]["matchLabels"]["app.kubernetes.io/component"] == component
+        for rule in policy["ingress"]:
+            assert {p["port"] for p in rule["ports"]} <= _container_ports(component), component
+            for peer in rule["from"]:
+                if "podSelector" in peer:
+                    source = peer["podSelector"]["matchLabels"]
+                    assert any(source.items() <= _pod_labels(c).items() for c in DEPLOYMENTS), peer
+
+
+# (liveness, readiness) probe paths; every probe targets the container's own port.
+PROBES = {
+    "api": ("/v1/liveness", "/v1/health"),
+    "mcp": ("/mcp/liveness", "/mcp/health"),
+    "admin": ("/healthz", "/healthz"),
+    "portal": ("/healthz", "/healthz"),
+}
+
+
+@pytest.mark.parametrize("component", PROBES)
+def test_probes_hit_the_documented_paths_on_the_container_port(component: str) -> None:
+    (container,) = _pod_spec(_load(DEPLOYMENTS[component]))["containers"]
+    (port,) = _container_ports(component)
+    liveness, readiness = PROBES[component]
+    assert container["livenessProbe"]["httpGet"] == {"path": liveness, "port": port}
+    assert container["readinessProbe"]["httpGet"] == {"path": readiness, "port": port}
+    if "startupProbe" in container:
+        assert container["startupProbe"]["httpGet"] == {"path": liveness, "port": port}
+
+
+@pytest.mark.parametrize(
+    ("component", "pdb"),
+    [
+        ("api", K8S / "hivemind-api-pdb.yaml"),
+        ("mcp", K8S / "hivemind-mcp-pdb.yaml"),
+        ("portal", K8S / "portal" / "hivemind-portal-pdb.yaml"),
+    ],
+)
+def test_a_pdb_selects_its_deployments_pods(component: str, pdb: Path) -> None:
+    deployment = _load(DEPLOYMENTS[component])
+    selector = _load(pdb)["spec"]["selector"]["matchLabels"]
+    assert selector.items() <= _pod_labels(component).items()
+    assert selector == deployment["spec"]["selector"]["matchLabels"]
+
+
 def test_portal_network_policy_admits_the_ingress_and_lets_it_reach_the_api() -> None:
     docs = yaml.safe_load_all(
         (K8S / "optional" / "networkpolicy" / "networkpolicy.yaml").read_text()

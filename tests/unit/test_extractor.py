@@ -467,6 +467,26 @@ class TestFactoryAndProtocol:
         finally:
             await extractor.aclose()  # the extractor owns the client it built
 
+    async def test_from_settings_sends_the_configured_key_as_a_bearer_header(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        env = MockEnv()
+        client = env.client()  # built before httpx.AsyncClient is swapped out
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **_: client)
+        extractor = OpenAICompatExtractor.from_settings(
+            Settings(
+                extractor_endpoint="http://e.test/v1",
+                extractor_api_key="sk-from-settings\n",
+                extractor_model="model-x",
+            )
+        )
+        try:
+            await extractor.extract_entry(make_draft())
+        finally:
+            await extractor.aclose()
+        assert env.requests[-1].headers["Authorization"] == "Bearer sk-from-settings"
+        assert str(env.requests[-1].url) == "http://e.test/v1/chat/completions"
+
     async def test_satisfies_the_extractor_port(self) -> None:
         env = MockEnv()
         extractor = make_extractor(env)

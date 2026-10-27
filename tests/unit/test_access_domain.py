@@ -235,6 +235,46 @@ class TestAdminSupersession:
             assert may_supersede(note, new_scope=scope, new_fleet_id=None, writer=self.ADMIN)
 
 
+class TestAgentSupersession:
+    """The successor must reach at least the predecessor's audience, so an
+    agent never hides an entry behind a narrower one (ADR 0033)."""
+
+    @pytest.mark.parametrize("level", [2, 3])
+    @pytest.mark.parametrize("new_scope", ["self", "org"])
+    def test_a_fleet_entry_is_not_superseded_by_a_self_or_org_successor(
+        self, level: int, new_scope: str
+    ) -> None:
+        # Not even by its author: a self successor would hide it from the
+        # fleet, and agents cannot write org.
+        target = make_entry(scope="fleet", author="alice", fleet_id=FL_A)
+        writer = vis(level, "alice", home=FL_A)
+        assert not may_supersede(target, new_scope=new_scope, new_fleet_id=FL_A, writer=writer)
+
+    def test_a_fleet_entry_is_not_superseded_into_another_fleet(self) -> None:
+        target = make_entry(scope="fleet", author="alice", fleet_id=FL_A)
+        writer = vis(3, "alice", home=FL_B)
+        assert not may_supersede(target, new_scope="fleet", new_fleet_id=FL_B, writer=writer)
+        assert may_supersede(target, new_scope="fleet", new_fleet_id=FL_A, writer=writer)
+
+    @pytest.mark.parametrize("level", [1, 2, 3])
+    @pytest.mark.parametrize("new_scope", ["self", "fleet", "org"])
+    def test_a_legacy_org_entry_is_admin_only(self, level: int, new_scope: str) -> None:
+        target = make_entry(scope="org", author="alice")
+        writer = vis(level, "alice", home=FL_A)
+        assert entry_is_visible(target, writer)
+        assert not may_supersede(target, new_scope=new_scope, new_fleet_id=FL_A, writer=writer)
+
+    @pytest.mark.parametrize("new_scope", ["self", "fleet", "org"])
+    def test_a_self_entry_takes_any_successor_from_its_author_only(self, new_scope: str) -> None:
+        target = make_entry(scope="self", author="alice")
+        assert may_supersede(
+            target, new_scope=new_scope, new_fleet_id=FL_A, writer=vis(2, "alice", home=FL_A)
+        )
+        assert not may_supersede(
+            target, new_scope=new_scope, new_fleet_id=FL_A, writer=vis(3, "bob", home=FL_A)
+        )
+
+
 class TestVisibilityWrapper:
     def test_wrapper_delegates(self) -> None:
         v = vis(1, "alice", home=FL_A)

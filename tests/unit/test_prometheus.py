@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+import httpx
+from fastapi import FastAPI
 from prometheus_client.parser import text_string_to_metric_families
 
 from hivemind.api.prometheus import PrometheusMetrics
@@ -128,6 +130,38 @@ async def test_degraded_searches_are_counted() -> None:
             )
         got = samples((await client.get("/metrics")).text)
     assert got[("hivemind_search_degraded_total", ())] == 2
+
+
+async def test_a_first_refresh_that_fails_still_answers_200_with_success_zero() -> None:
+    """No snapshot yet: the scrape answers, flags the failure and has no entry families."""
+    pool = make_hivemind_app()
+    await pool.store.create_entry(
+        EntryDraft(kind="fact", summary="s1", author="alice", agent="a1"), [0.1, 0.1, 0.1, 0.1]
+    )
+    fail = [True]
+    now = [0.0]
+
+    async def report():  # type: ignore[no-untyped-def]
+        if fail[0]:
+            raise TimeoutError
+        return await pool.metrics_service.usage_report()
+
+    metrics = PrometheusMetrics(report, ttl=30.0, clock=lambda: now[0])
+    app = FastAPI()
+    app.include_router(metrics.router())
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://t"
+    ) as client:
+        first = await client.get("/metrics")
+        failed = samples(first.text)
+        fail[0] = False
+        now[0] = 31.0
+        recovered = samples((await client.get("/metrics")).text)
+    assert first.status_code == 200
+    assert failed[("hivemind_usage_report_success", ())] == 0.0
+    assert not any(name.startswith("hivemind_entries") for name, _ in failed)
+    assert recovered[("hivemind_usage_report_success", ())] == 1.0
+    assert recovered[("hivemind_entries", (("state", "active"),))] == 1.0
 
 
 async def test_degraded_searches_are_counted_per_app() -> None:

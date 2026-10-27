@@ -493,6 +493,17 @@ async def test_each_failure_reads_the_same_on_the_wire(
         assert _mcp_err(await tool(world)) == (code, message.format(**fill))
 
 
+@pytest.mark.parametrize("key", ["k-dev", "k-lurker", "hm_admin"])
+async def test_mcp_register_refuses_every_key_but_the_org_key(world: World, key: str) -> None:
+    refused = await mcp.hive_register(world.mcp(key), "newcomer")
+    assert _mcp_err(refused) == (
+        "permission_denied",
+        "hive_register is gated on the org key (SPEC §5.2)",
+    )
+    assert await world.store.get_agent("newcomer") is None
+    assert "error" not in await mcp.hive_register(world.mcp("hm_org"), "newcomer")
+
+
 # The agent portal's withdraw (ADR 0095) has no MCP twin: REST only.
 PORTAL_WITHDRAW_CASES: list[tuple[str, str, str, dict[str, str], tuple[int, str, str]]] = [
     (
