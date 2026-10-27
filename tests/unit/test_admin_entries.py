@@ -77,6 +77,24 @@ async def test_every_admin_endpoint_is_403_for_non_admins(method, path, body, he
     assert resp.json()["error"]["code"] == "forbidden"
 
 
+@pytest.mark.parametrize("headers", [ALICE, ORG], ids=["agent-key", "org-key"])
+async def test_agent_patch_by_a_non_admin_is_403_before_any_lookup(headers) -> None:
+    """A known fleet, an unknown fleet and an empty body all answer 403, so
+    a non-admin key cannot probe which fleet ids exist."""
+    app = make_hivemind_app()
+    known = await app.store.create_fleet("blue")
+    async with make_client(app) as client:
+        known_fleet = await client.patch(
+            "/v1/admin/agents/ghost", json={"home_fleet_id": known.id}, headers=headers
+        )
+        unknown_fleet = await client.patch(
+            "/v1/admin/agents/ghost", json={"home_fleet_id": FAKE_ID}, headers=headers
+        )
+        empty = await client.patch("/v1/admin/agents/ghost", json={}, headers=headers)
+    assert known_fleet.status_code == unknown_fleet.status_code == empty.status_code == 403
+    assert known_fleet.json() == unknown_fleet.json() == empty.json()
+
+
 async def test_admin_list_sees_self_and_fleet_entries_of_any_fleet() -> None:
     app, *_ = await _seed()
     async with make_client(app) as client:

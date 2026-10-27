@@ -958,6 +958,8 @@ def build_router() -> APIRouter:
         Re-parenting never moves the agent's earlier ``fleet``-scoped
         entries (they stay in the fleet they were written into).
         """
+        # The key first: a non-admin must not learn whether a fleet exists.
+        _require_admin(credential, "changing an agent")
         if payload.trust_level is None and payload.home_fleet_id is None:
             raise api_error(422, "update_required", "supply trust_level and/or home_fleet_id")
         try:
