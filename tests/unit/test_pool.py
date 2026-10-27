@@ -13,8 +13,13 @@ These tests spy on ``asyncpg.create_pool`` — no live Postgres needed.
 
 from __future__ import annotations
 
+import inspect
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
+from hivemind.config import Settings
 from hivemind.store.pool import make_pool
 
 
@@ -31,6 +36,20 @@ async def test_default_pool_sizes_reach_create_pool() -> None:
         await make_pool("postgresql://example/db")
     assert create_pool.call_args.kwargs["min_size"] == 1
     assert create_pool.call_args.kwargs["max_size"] == 10
+
+
+def test_a_bare_settings_gives_the_shipped_pool_sizes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The per-pod pool a deployment gets when it sets nothing, and the same
+    sizes ``make_pool`` falls back to."""
+    for name in ("HIVEMIND_POOL_MIN_SIZE", "HIVEMIND_POOL_MAX_SIZE"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.chdir(tmp_path)  # no .env.local to read
+    settings = Settings()
+    assert (settings.pool_min_size, settings.pool_max_size) == (1, 10)
+    defaults = inspect.signature(make_pool).parameters
+    assert (defaults["min_size"].default, defaults["max_size"].default) == (1, 10)
 
 
 async def test_configured_pool_sizes_reach_create_pool() -> None:

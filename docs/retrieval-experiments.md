@@ -5,6 +5,9 @@ the ROADMAP so it can stay a plan. They are point-in-time results on a
 synthetic, age-varied fixture (`tests/eval/temporal.py`, 16 entries, 10
 queries, a 4-dimension hash embedder), not pinned gates. The decision
 they led to is [ADR 0022](adr/0022-recency-floor-so-match-quality-is-the-sort-key.md).
+`make measure-experiments` re-runs the decay, recency-floor and `rrf_k`
+sweeps below and prints their tables; the default test run keeps only their
+guards.
 
 ## §4.4 Gate the recency term to temporal queries
 

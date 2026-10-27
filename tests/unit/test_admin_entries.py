@@ -12,7 +12,9 @@ from hivemind.domain.access import TrustLevel
 from hivemind.domain.audit import AuditAction, AuditFilters
 from hivemind.domain.entry import EntryDraft, EntryState, Kind
 from hivemind.domain.feedback import Feedback, FeedbackLogFilters, Verdict
+from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
+from hivemind.services.feedback import FeedbackService
 from tests.fakes import FIXED_NOW, FixedClock, make_embedder
 from tests.unit.test_api_endpoints import make_app_with_clock, make_client, make_hivemind_app
 
@@ -437,6 +439,25 @@ async def test_the_orphan_filter_keeps_out_authors_who_wrote_recently() -> None:
         active.id: False,
     }
     assert [r["id"] for r in orphans.json()] == [long_gone.id]
+
+
+async def test_the_orphan_judgement_follows_the_services_clock() -> None:
+    """The store and the service share one fixed clock, so silence is counted
+    from it and not from the real time: erin has been quiet 40 days, dave
+    wrote today."""
+    clock = FixedClock(FIXED_NOW)
+    store = MemoryStore(clock)
+    erin = await store.create_entry(EntryDraft(Kind.FACT, "erin wrote first", "erin", "a"))
+    clock.advance_days(40)
+    dave = await store.create_entry(EntryDraft(Kind.FACT, "dave wrote later", "dave", "a"))
+    for entry in (erin, dave):
+        await store.record_feedback(Feedback(entry.id, "zed", "zed", Verdict.STALE))
+    service = FeedbackService(store, now_fn=clock)
+    admin = Credential(user_id="root", is_admin=True)
+    rows = await service.flag_backlog(admin, limit=10)
+    assert {r.entry_id: r.orphaned for r in rows} == {erin.id: True, dave.id: False}
+    only = await service.flag_backlog(admin, orphaned=True, limit=10)
+    assert [r.entry_id for r in only] == [erin.id]
 
 
 async def test_the_flag_backlog_service_follows_the_callers_visibility() -> None:

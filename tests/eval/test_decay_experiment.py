@@ -52,10 +52,14 @@ The seeding and ranking machinery is shared with the §4.6 ``rrf_k``
 sweep (``tests/eval/temporal_runner.py``), so the two experiments cannot
 drift apart on how the fixture is loaded or scored.
 
-Run ``uv run pytest tests/eval/test_decay_experiment.py -s`` to print the
-measured tables: the §4.4 A/B/C table (reproduced in ROADMAP §4.4 and in
-docs/retrieval-experiments.md §4.4) and the §4.6-(a) floor table (reproduced
-in ROADMAP §4.6).
+Both experiments are settled, so re-running them is a measurement, not a
+gate: ``make measure-experiments`` runs the tests marked ``measurement``
+(deselected from the default run) and prints the tables: the §4.4 A/B/C table
+(reproduced in ROADMAP §4.4 and in docs/retrieval-experiments.md §4.4) and
+the §4.6-(a) floor table (reproduced in ROADMAP §4.6). What stays in the
+default run guards the harness (the golden set is blind to decay, the fixture
+and the floor knob change rankings, the baseline is floor-off explicitly) and
+the shipped floor, which must still win both weak slices.
 """
 
 from __future__ import annotations
@@ -119,8 +123,8 @@ async def measure_floors() -> dict[str, SliceReports]:
     }
 
 
-class TestDecayExperiment:
-    """ROADMAP §4.4 — measure, then decide."""
+class TestDecayHarness:
+    """What keeps the §4.4 harness honest; stays in the default run."""
 
     async def test_the_golden_set_is_blind_to_decay(self) -> None:
         """Why this second fixture exists at all.
@@ -170,6 +174,11 @@ class TestDecayExperiment:
         """Variant B must be "no recency term", not "a weak one"."""
         oldest_age = max(aged.age_days for aged in temporal_corpus())
         assert 0.5 ** (oldest_age / DECAY_OFF) == 1.0
+
+
+@pytest.mark.measurement
+class TestDecayExperiment:
+    """ROADMAP §4.4 — measure, then decide. ``make measure-experiments`` runs it."""
 
     async def test_always_on_decay_costs_non_temporal_ranking(self) -> None:
         """The §4.4 hypothesis, measured: the unconditional term depresses
@@ -253,8 +262,11 @@ class TestDecayExperiment:
         }
 
 
-class TestRecencyFloorSweep:
-    """ROADMAP §4.6 direction (a) — bound the unbounded factor, then decide.
+class TestRecencyFloorGuards:
+    """What keeps the §4.6-(a) harness honest and the shipped floor winning;
+    stays in the default run. The sweep itself is ``TestRecencyFloorSweep``.
+
+    ROADMAP §4.6 direction (a) — bound the unbounded factor, then decide.
 
     The §4.6 ``rrf_k`` sweep failed because widening the *fused* range is
     capped at 40x (~5.3 half-lives) against entries 12.7 to 14 half-lives
@@ -296,15 +308,20 @@ class TestRecencyFloorSweep:
             "the sweep must straddle the predicted threshold or it cannot test the prediction"
         )
 
-    async def test_an_unset_floor_reproduces_variant_a_exactly(self) -> None:
-        """The seam is behaviour-preserving at the eval level too, not just
-        in the unit test: ``recency_floor=None`` must reproduce today's
-        numbers bit for bit, or every comparison below is against a moved
-        baseline."""
-        unfloored = aggregate_slices(
-            await measure_slices(VARIANTS["A_always_on"], recency_floor=None)
+    async def test_the_shipped_floor_beats_both_extremes_on_their_weak_slices(self) -> None:
+        """The sweep's verdict, pinned on the config the service ships: the
+        default ``recency_floor`` recovers the ``old_exact`` cases always-on
+        scores zero on and keeps ``currency_pair`` ahead of decay off. If the
+        shipped floor or half-life moves and stops winning, this says so."""
+        shipped = aggregate_slices(
+            await measure_slices(
+                VARIANTS["A_always_on"], recency_floor=SearchConfig().recency_floor
+            )
         )
-        assert unfloored == (await measure_all())["A_always_on"]
+        baseline = await measure_all()
+        assert shipped["old_exact"]["hit_at_k"] == 1.0
+        assert shipped["old_exact"]["mrr"] > baseline["A_always_on"]["old_exact"]["mrr"]
+        assert shipped["currency_pair"]["mrr"] > baseline["B_off"]["currency_pair"]["mrr"]
 
     async def test_the_floor_is_reached_at_all_by_this_harness(self) -> None:
         """A knob that changes no ranking would make the whole table a
@@ -317,6 +334,21 @@ class TestRecencyFloorSweep:
             != await ranked_ids(store, now_clock, labelled.query, DECAY_ON, recency_floor=0.8)
         ]
         assert differing, "the floor changed no ranking — the sweep cannot measure §4.6-(a)"
+
+
+@pytest.mark.measurement
+class TestRecencyFloorSweep:
+    """The §4.6-(a) floor sweep itself. ``make measure-experiments`` runs it."""
+
+    async def test_an_unset_floor_reproduces_variant_a_exactly(self) -> None:
+        """The seam is behaviour-preserving at the eval level too, not just
+        in the unit test: ``recency_floor=None`` must reproduce today's
+        numbers bit for bit, or every comparison below is against a moved
+        baseline."""
+        unfloored = aggregate_slices(
+            await measure_slices(VARIANTS["A_always_on"], recency_floor=None)
+        )
+        assert unfloored == (await measure_all())["A_always_on"]
 
     async def test_a_floor_below_the_predicted_threshold_does_not_recover_old_exact(
         self,

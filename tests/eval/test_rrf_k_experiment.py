@@ -32,8 +32,10 @@ show a direction but cannot justify changing a shipped default. So this
 module does **not** change `SearchConfig.rrf_k`, and the §1.1 gate
 (`tests/eval/golden.py`, `tests/eval/test_eval_gate.py`) is untouched.
 
-Run `uv run pytest tests/eval/test_rrf_k_experiment.py -s` to print the
-measured table (reproduced in ROADMAP §4.6).
+The sweep is settled, so re-running it is a measurement, not a gate:
+`make measure-experiments` runs the tests marked `measurement` (deselected
+from the default run) and prints the measured table (reproduced in ROADMAP
+§4.6). The arithmetic tests and the harness guards stay in the default run.
 """
 
 from __future__ import annotations
@@ -50,6 +52,7 @@ from tests.eval.temporal_runner import (
     CANDIDATE_TOP_K,
     DECAY_OFF,
     DECAY_ON,
+    DEFAULT_RRF_K,
     SLICES,
     SliceReports,
     aggregate_slices,
@@ -153,8 +156,10 @@ class TestFusedRangeArithmetic:
             )
 
 
+@pytest.mark.measurement
 class TestRrfKSweep:
-    """Measured on the age-varied fixture, decay held ON (variant A)."""
+    """Measured on the age-varied fixture, decay held ON (variant A).
+    ``make measure-experiments`` runs it."""
 
     async def test_lowering_rrf_k_does_not_recover_the_old_exact_cases(self) -> None:
         """**The answer to the question this experiment asks: no.**
@@ -231,8 +236,22 @@ class TestRrfKSweep:
             "all": 10.0,
         }
 
+
+class TestSweepHarness:
+    def test_the_sweeps_first_row_is_the_shipped_rrf_k(self) -> None:
+        """The docstring's "k=60 row" is today's behaviour only while the
+        sweep starts at the shipped ``rrf_k``: `measure_sweep` labels its
+        first row as the baseline the others are read against."""
+        assert RRF_KS[0] == DEFAULT_RRF_K == SearchConfig().rrf_k == 60
+
+    def test_make_search_config_mirrors_the_production_rrf_k(self) -> None:
+        """The sweep's baseline must be the shipped default, not a fake one:
+        if ``SearchConfig.rrf_k`` ever changes, the ``k=60`` row stops being
+        "today's behaviour" and this says so."""
+        assert make_search_config().rrf_k == SearchConfig().rrf_k == 60
+
     async def test_rrf_k_is_reached_at_all_by_this_harness(self) -> None:
-        """A knob that changes no ranking would make every number above a
+        """A knob that changes no ranking would make every number in the sweep a
         constant — exactly the bug ADR 0021 found on the *prefix* knob. This
         asserts the sweep is not measuring one."""
         store, _entry_ids, now_clock = await seed_temporal_corpus()
@@ -243,11 +262,3 @@ class TestRrfKSweep:
             != await ranked_ids(store, now_clock, labelled.query, ALWAYS_ON, rrf_k=5)
         ]
         assert differing, "rrf_k changed no ranking — the sweep cannot measure §4.6"
-
-
-class TestSweepHarness:
-    def test_make_search_config_mirrors_the_production_rrf_k(self) -> None:
-        """The sweep's baseline must be the shipped default, not a fake one:
-        if ``SearchConfig.rrf_k`` ever changes, the ``k=60`` row stops being
-        "today's behaviour" and this says so."""
-        assert make_search_config().rrf_k == SearchConfig().rrf_k == 60

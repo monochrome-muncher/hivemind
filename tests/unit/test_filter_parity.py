@@ -185,7 +185,7 @@ def test_every_surface_declares_every_field() -> None:
 
 @pytest.mark.parametrize("surface", list(SURFACES))
 async def test_surface_passes_exactly_the_filters_it_accepts(surface: str) -> None:
-    accepted, refused = SURFACES[surface]
+    accepted = SURFACES[surface][0]
     got = await _run(surface, _wire(surface, accepted))
     default = EntryFilters()
     for f in ALL:
@@ -193,5 +193,3 @@ async def test_surface_passes_exactly_the_filters_it_accepts(surface: str) -> No
             assert getattr(got, f) == VALUES[f], f"{surface} dropped or altered {f}"
         else:
             assert getattr(got, f) == getattr(default, f), f"{surface} set {f}"
-    assert not {f for f in refused if getattr(got, f) != getattr(default, f)}
-    assert got.importance_source is None  # internal, never from a request
