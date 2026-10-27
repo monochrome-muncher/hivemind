@@ -60,6 +60,7 @@
         "name": "namespace",
         "label": "Namespace",
         "type": "query",
+        "description": "One Hivemind installation at a time: the pool-wide gauges are the same on every replica and are read with max(), so mixing installations would show the larger one's value.",
         "datasource": {
           "type": "prometheus",
           "uid": "${datasource}"
@@ -69,8 +70,7 @@
           "refId": "ns"
         },
         "definition": "label_values(hivemind_usage_report_success, namespace)",
-        "includeAll": true,
-        "allValue": ".*",
+        "includeAll": false,
         "multi": false,
         "refresh": 2,
         "current": {}
