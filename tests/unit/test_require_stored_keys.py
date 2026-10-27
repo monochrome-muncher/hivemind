@@ -281,6 +281,21 @@ async def test_mcp_dev_credential_reads_and_writes_when_the_flag_is_off() -> Non
     assert "id" in json.loads(wrote.content[0].text)
 
 
+async def test_build_server_without_a_provider_still_applies_the_flag() -> None:
+    """The fixed-credential form (no provider) must not skip ADR 0082."""
+    store, _own, fleet = await _pool()
+    services = build_services(
+        store, make_embedder(), make_search_config(), require_stored_keys=True
+    )
+    app = McpHivemind.from_services(store, services, credential=dev_credential())
+    server = build_server(app, require_stored_keys=True)
+    got = await server.call_tool("hive_get", {"entry_id": fleet})
+    wrote = await server.call_tool("hive_write", {"kind": "fact", "summary": "new note"})
+    assert json.loads(got.content[0].text)["error"]["code"] == "not_found"
+    assert json.loads(wrote.content[0].text)["error"]["code"] == "permission_denied"
+    assert await store.count_entries(EntryFilters()) == 2
+
+
 async def test_build_services_downgrades_pins_too() -> None:
     store, _own, fleet = await _pool()
     services = build_services(

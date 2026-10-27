@@ -51,8 +51,11 @@ def build_services(
     extraction off); without ``authenticator`` key management is refused
     (the in-memory dev runner). ``metrics_entry_counts_ttl`` is
     ``Settings.metrics_entry_counts_ttl`` (ADR 0069). ``require_stored_keys``
-    is ``Settings.require_stored_keys`` (ADR 0082): when true, a dev-mode
-    credential is downgraded to trust level 0 at the service seam."""
+    is ``Settings.require_stored_keys`` (ADR 0082): when true, feedback and
+    pins downgrade a dev-mode credential to trust level 0 here. Every other
+    service takes it where each surface resolves its credential (the REST
+    dependency and ``build_server``), so a script calling those services
+    directly must apply ``Credential.effective`` itself."""
     governance_service = GovernanceService(
         store, search_config, require_stored_keys=require_stored_keys
     )
