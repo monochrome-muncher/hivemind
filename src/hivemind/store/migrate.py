@@ -155,9 +155,14 @@ async def _with_migration_lock(dsn: str, dim: int, work: str, count: int = 0) ->
                     raise RuntimeError(_LOCK_LOST_MESSAGE)
                 await _require_valid_hnsw_index(dsn)
                 return []
-            return await asyncio.to_thread(_rollback_chain, dsn, dim, count)
+            rolled = await asyncio.to_thread(_rollback_chain, dsn, dim, count)
+            if not await _lock_still_held(conn):
+                raise RuntimeError(
+                    _ROLLBACK_LOCK_LOST_MESSAGE.format(rolled=", ".join(rolled) or "none")
+                )
+            return rolled
         finally:
-            await _release_lock(conn)
+            await _release_lock(conn, work)
     finally:
         if not conn.is_closed():
             try:
@@ -170,6 +175,14 @@ _LOCK_LOST_MESSAGE = (
     "the migration lock connection was lost during the run, so the advisory lock "
     "was released early and another replica may have run the chain concurrently. "
     "Re-run `hivemind-migrate` to confirm the head."
+)
+
+
+_ROLLBACK_LOCK_LOST_MESSAGE = (
+    "the migration lock connection was lost during the rollback (rolled back: "
+    "{rolled}), so the advisory lock was released early and another replica may "
+    "have applied the chain while it ran. Check the latest `migration_id` in "
+    "`_yoyo_migration` before relying on the rollback."
 )
 
 
@@ -188,17 +201,24 @@ async def _lock_still_held(conn: asyncpg.Connection) -> bool:
     return bool(held)
 
 
-async def _release_lock(conn: asyncpg.Connection) -> None:
+async def _release_lock(conn: asyncpg.Connection, work: str) -> None:
     """Best-effort unlock (closing the connection releases it anyway). A
     dead connection means the lock was already lost: warn rather than
-    mask the migration's result."""
+    mask the migration's result. After a rollback the warning must not
+    advise re-applying, which would undo it."""
     try:
         await conn.execute("SELECT pg_advisory_unlock($1)", MIGRATION_LOCK_KEY)
     except Exception:  # any dead-session shape (see _lock_still_held)
+        if work == "apply":
+            advice = "Re-run `hivemind-migrate` to confirm the head."
+        else:
+            advice = "Check the latest `migration_id` in `_yoyo_migration`."
         logger.warning(
-            "the migration lock connection was lost during the run; the advisory "
+            "the migration lock connection was lost during the %s; the advisory "
             "lock was released early, so another replica may have run the chain "
-            "concurrently. Re-run `hivemind-migrate` to confirm the head."
+            "concurrently. %s",
+            "run" if work == "apply" else "rollback",
+            advice,
         )
 
 

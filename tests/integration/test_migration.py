@@ -738,6 +738,41 @@ async def test_lost_lock_connection_does_not_mask_the_migration_result(monkeypat
     assert await current_schema_version(dsn) == HEAD
 
 
+async def test_a_rollback_that_lost_its_lock_says_so(monkeypatch, caplog) -> None:
+    """As for apply: without the lock another replica may have applied the
+    chain during the rollback, so success cannot be reported. The error
+    names what was rolled back, and nothing advises re-applying it."""
+    from hivemind.store import migrate as m
+
+    dsn, dim = _dsn(), Settings().embedding_dim
+    await _require_postgres(dsn)
+    await _reset_chain(dsn)
+    await migrate(dsn, dim)
+
+    real_rollback = m._rollback_chain
+
+    def rollback_then_kill_lock(dsn_: str, dim_: int, count_: int) -> list[str]:
+        rolled = real_rollback(dsn_, dim_, count_)
+        import psycopg
+
+        with psycopg.connect(dsn_, autocommit=True) as c:
+            c.execute(
+                "SELECT pg_terminate_backend(pid) FROM pg_locks WHERE locktype = 'advisory' "
+                "AND database = (SELECT oid FROM pg_database WHERE datname = current_database()) "
+                "AND pid <> pg_backend_pid()"
+            )
+        return rolled
+
+    monkeypatch.setattr(m, "_rollback_chain", rollback_then_kill_lock)
+    with pytest.raises(RuntimeError, match="lost during the rollback") as exc:
+        await rollback(dsn, dim, count=1)
+    assert HEAD in str(exc.value)
+    assert "Re-run `hivemind-migrate`" not in caplog.text
+    monkeypatch.undo()
+    await migrate(dsn, dim)
+    assert await current_schema_version(dsn) == HEAD
+
+
 async def test_0016_backfills_withdrawn_entries_and_rolls_back_without_loss() -> None:
     """ADR 0098: an entry withdrawn before 0016 gets the migration's time (so a
     helpful rating older than that lists it once); active and superseded
