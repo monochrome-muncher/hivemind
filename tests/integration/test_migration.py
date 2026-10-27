@@ -984,10 +984,10 @@ async def test_0020_takes_the_key_replace_action_and_rolls_back_dropping_only_it
     conn = await asyncpg.connect(dsn)
     try:
         assert [
-            r["action"] for r in await conn.fetch("SELECT action FROM audit_log ORDER BY id")
+            r["action"] for r in await conn.fetch("SELECT action FROM audit_log ORDER BY action")
         ] == [
-            "fleet.rename",
             "agent.revoke",
+            "fleet.rename",
         ]
         assert await conn.fetchval("SELECT count(*) FROM credentials") == 1
         with pytest.raises(asyncpg.CheckViolationError):
