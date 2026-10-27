@@ -115,3 +115,4 @@ is unused.
 | [0103](0103-remove-confirmation-clock-and-per-kind-recency.md) | Remove the confirmation clock and the recency profile per kind | Accepted; supersedes 0071 and 0072, default ranking unchanged |
 | [0104](0104-mcp-runner-serves-process-metrics.md) | The MCP HTTP runner serves per-process metrics | Accepted; amends 0050, no usage series, `sum` across api and mcp |
 | [0105](0105-mcp-hive-write-sources-schema-typed.md) | The MCP `hive_write` `sources` schema is typed, validated leniently | Accepted; schema-only, keeps structured `invalid_input` |
+| [0106](0106-confirmation-halves-older-flags.md) | A confirmation newer than every flag halves those flags | Accepted; amends 0063, 0070, 0103 (I3, new I7), `HIVEMIND_CONFIRMATION_HALVES_FLAGS=false` turns it off |

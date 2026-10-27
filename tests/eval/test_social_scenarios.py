@@ -24,6 +24,7 @@ from tests.eval.social import (
     S2,
     S3,
     S4,
+    S5,
     SCENARIOS,
     fused_at,
     score,
@@ -83,3 +84,15 @@ def test_s4_importance_5_at_rank_16_loses_to_importance_3_at_rank_1() -> None:
 def test_s4_flips_back_with_the_wide_importance_factor() -> None:
     """The flip comes from ADR 0088's narrow factor, not from elsewhere."""
     assert winner(S4, replace(CONFIG, narrow_importance=False)) == "important_loose_match"
+
+
+def test_s5_three_confirmations_answer_one_wrong() -> None:
+    """S5: one wrong, then 3 noted helpful. The confirmation is newer than the
+    flag, so it counts half (ADR 0106): quality 1 + (0.6 - 0.5) / 5.5 = 1.018,
+    0.815 vs 0.80. Counted in full it is 1 + (0.6 - 1.0) / 6 = 0.933, 0.747,
+    and five helpful reports are needed to cancel one wrong."""
+    assert score(S5.first) == pytest.approx(0.8 * (1 + 0.1 / 5.5))
+    assert score(S5.second) == pytest.approx(0.80)
+    full = replace(CONFIG, confirmation_halves_flags=False)
+    assert score(S5.first, full) == pytest.approx(0.8 * (1 - 0.4 / 6))
+    assert winner(S5, full) == "unrated_rival"

@@ -56,7 +56,9 @@ async def test_the_quality_weights_of_the_config_reach_the_quality_multiplier() 
         config = replace(make_search_config(), quality_stale_weight=stale_weight)
         services = build_services(store, make_embedder(), config)
         quality = await services.governance_service.quality(entry.id)
-        assert quality == pytest.approx(feedback_quality(1, 1, 0, **config.quality_kwargs()))
+        assert quality == pytest.approx(
+            feedback_quality(1, 1, 0, **config.quality_kwargs(confirmed=False))
+        )
         qualities.append(quality)
     assert qualities[0] < qualities[1]  # a heavier stale weight lowers the multiplier
 

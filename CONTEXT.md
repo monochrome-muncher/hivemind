@@ -93,7 +93,7 @@ A reporting agent's verdict that an entry its work tested was `helpful`, `stale`
 _Avoid_: rating, review
 
 **Last confirmed**:
-The date of an entry's newest `helpful` report that carries a note, when no `stale` or `wrong` report is as new or newer; shown with the entry; display only, it enters no score (ADR 0103).
+The date of an entry's newest `helpful` report that carries a note, when no `stale` or `wrong` report is as new or newer; shown with the entry; its date enters no score (ADR 0103), but while it is set the entry's flags count at half weight in quality (ADR 0106).
 _Avoid_: verified, endorsed, freshness (the entry's age is its memory date)
 
 **Contested**:

@@ -1489,3 +1489,16 @@ The 8B shipped row is the baseline for later ranking work.
 Of the 18,064 session texts, 3 overflowed in fp16 and were embedded in
 fp32, and 10 were too long for the GPU and were embedded from their first
 half; none of the 10 is an answer session.
+
+## A confirmation halves older flags (ADR 0106, 2026-10-27)
+
+Not a retrieval measurement: the corpora and LongMemEval have no feedback
+that builds up over time. `make measure-flags` (`tests/eval/flag_dynamics.py`)
+simulates three near-equal rivals over 60 days through the shipped
+`feedback_quality` and `entry_score`, with flags counted in full and halved
+once a noted helpful is newer than all of them. With agents that only use the
+top hit nothing changes (nobody re-tries a flagged entry). With 20% of uses
+on another hit, a falsely flagged best entry gets 22% of uses instead of 16%
+after a false `wrong`, and 35% instead of 32% after a false `stale`; a true
+`wrong` on a bad entry raises failed uses by at most 0.2 points. The table is
+in [ADR 0106](adr/0106-confirmation-halves-older-flags.md#measurement).

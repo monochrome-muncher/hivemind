@@ -1,6 +1,7 @@
 """Last confirmed (SPEC §4.2): search hits and reads by id carry the date of
 an entry's newest noted ``helpful`` report with no flag since, on both
-surfaces, and it never changes a score."""
+surfaces, and its date never changes a score (whether it is newer than every
+flag does, ADR 0106: ``tests/unit/test_confirmation_halves_flags.py``)."""
 
 from __future__ import annotations
 
@@ -125,7 +126,7 @@ def test_rest_feedback_summary_carries_the_date() -> None:
 
 
 async def test_a_confirmation_date_never_changes_a_score() -> None:
-    """Same helpful count, one with a note and one without: equal scores."""
+    """Same helpful count, one with a note and one without, no flags: equal scores."""
 
     async def score_of(note: str | None) -> tuple[float, datetime | None]:
         store = MemoryStore(make_clock())

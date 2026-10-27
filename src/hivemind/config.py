@@ -28,6 +28,7 @@ from hivemind.domain.entry import DEFAULT_PREFIX_TOKENS
 from hivemind.domain.recency import RecencyHint
 from hivemind.domain.validation import check_query_instruction
 from hivemind.providers import clean_api_key, clean_endpoint
+from hivemind.retrieval.scoring import CONFIRMED_FLAG_SCALE
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +113,10 @@ class SearchConfig:
     # ``social_max``) instead of 0.6..1.0 (ADR 0088). On by default since
     # the measurement with the Qwen3 embedders; false restores 0.6..1.0.
     narrow_importance: bool = True
+    # Once a noted helpful report is newer than every stale or wrong report
+    # on an entry (its "last confirmed" date is set), those flags count at
+    # half weight in quality (ADR 0106). False counts them in full.
+    confirmation_halves_flags: bool = True
     # For an instruction-aware embedder (Qwen3-Embedding, ADR 0097): the task
     # line put before the search query as ``Instruct: {task}\nQuery:{query}``
     # on the vector stream only. Entries are never embedded with it. On by
@@ -206,8 +211,13 @@ class SearchConfig:
         """The hint ``recency_terms`` honours: ``DEFAULT`` while the setting is off."""
         return hint if self.recency_hint_enabled else RecencyHint.DEFAULT
 
-    def quality_kwargs(self) -> dict[str, float]:
-        """Keyword args for ``retrieval.scoring.feedback_quality``."""
+    def quality_kwargs(self, *, confirmed: bool) -> dict[str, float]:
+        """Keyword args for ``retrieval.scoring.feedback_quality``.
+
+        ``confirmed``: the entry has a "last confirmed" date, so a
+        confirmation is newer than every flag. Required, so a caller states
+        whether it knows (ADR 0106)."""
+        halve = confirmed and self.confirmation_halves_flags
         return {
             "helpful_weight": self.quality_helpful_weight,
             "stale_weight": self.quality_stale_weight,
@@ -215,6 +225,7 @@ class SearchConfig:
             "prior": self.quality_prior,
             "min_quality": self.quality_min,
             "max_quality": self.quality_max,
+            "flag_scale": CONFIRMED_FLAG_SCALE if halve else 1.0,
         }
 
 
@@ -362,6 +373,8 @@ class Settings(BaseSettings):
     recency_hint: bool = True
     # See SearchConfig.narrow_importance (ADR 0088).
     narrow_importance: bool = True
+    # See SearchConfig.confirmation_halves_flags (ADR 0106).
+    confirmation_halves_flags: bool = True
     # See SearchConfig.query_instruction (ADR 0097). Defaults to
     # DEFAULT_QUERY_INSTRUCTION; an explicitly empty value means off;
     # surrounding whitespace is stripped.
@@ -481,6 +494,7 @@ class Settings(BaseSettings):
             explore_lambda=self.explore_lambda,
             recency_hint_enabled=self.recency_hint,
             narrow_importance=self.narrow_importance,
+            confirmation_halves_flags=self.confirmation_halves_flags,
             query_instruction=self.query_instruction,
         )
 

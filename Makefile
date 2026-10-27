@@ -162,7 +162,7 @@ test-unit: ## Run unit tests only in parallel (no Postgres needed), with only CI
 measure-threshold: ## Measure a search similarity threshold with the configured embedder (ADR 0062; e.g. after `make vllm`; set HIVEMIND_EMBEDDING_DIM to the deployment's)
 	uv run python -m tests.eval.threshold
 
-.PHONY: measure-ranking measure-versions measure-importance measure-query-instruction measure-longmemeval measure-vector-index measure-experiments
+.PHONY: measure-ranking measure-versions measure-importance measure-query-instruction measure-longmemeval measure-vector-index measure-experiments measure-flags
 measure-ranking: ## Measure the per-search recency hint variants (ADR 0073) against the shipped ranking with the configured embedder (e.g. after `make vllm`; set HIVEMIND_EMBEDDING_DIM to the deployment's)
 	uv run python -m tests.eval.ranking
 
@@ -180,6 +180,9 @@ measure-longmemeval: ## Measure search-only recall on LongMemEval_S with the con
 
 measure-vector-index: ## Measure the HNSW index against an exact scan on the golden set (ADR 0025; needs `make pg`; hash embedder, so no vLLM; TRUNCATEs HIVEMIND_DATABASE_URL's database like `make test`; VECTOR_INDEX_EVAL_FILLER=N sets the distractor count)
 	$(TEST_ENV) $(PYTEST) tests/integration/test_vector_index_recall.py -m measurement -s
+
+measure-flags: ## Simulate feedback over time with confirmed flags halved and in full (ADR 0106; pure arithmetic, about 30 s, no Postgres, no embedder)
+	uv run python -m tests.eval.flag_dynamics
 
 measure-experiments: ## Re-run the settled decay, recency-floor and rrf_k experiments on the age-varied fixture and print their tables (ROADMAP §4.4, §4.6; no Postgres, no embedder; the default run keeps their guards)
 	$(TEST_ENV) $(PYTEST) tests/eval/test_decay_experiment.py tests/eval/test_rrf_k_experiment.py -m measurement -s

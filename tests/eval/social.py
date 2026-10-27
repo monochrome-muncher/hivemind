@@ -32,6 +32,8 @@ class Candidate:
     counts: tuple[int, int, int] = (0, 0, 0)
     fused: float = 1.0
     importance: int = 3
+    # A noted helpful report is newer than every flag ("last confirmed" set).
+    confirmed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,7 +46,9 @@ class Scenario:
 
 def score(candidate: Candidate, config: SearchConfig = CONFIG) -> float:
     """The final score of one candidate under ``config`` (the service's call)."""
-    quality = feedback_quality(*candidate.counts, **config.quality_kwargs())
+    helpful, stale, wrong = candidate.counts
+    kwargs = config.quality_kwargs(confirmed=candidate.confirmed)
+    quality = feedback_quality(helpful, stale, wrong, **kwargs)
     return entry_score(
         candidate.fused,
         candidate.importance,
@@ -100,7 +104,14 @@ S4 = Scenario(
     Candidate("exact_match", 5.0, fused=fused_at(1, 1), importance=3),
 )
 
-SCENARIOS: tuple[Scenario, ...] = (S1, S2, S3, S4)
+S5 = Scenario(
+    "S5",
+    "one wrong, then 3 noted helpful on an entry vs an unrated rival of the same age",
+    Candidate("rebutted_flag", 60.0, (3, 0, 1), confirmed=True),
+    Candidate("unrated_rival", 60.0),
+)
+
+SCENARIOS: tuple[Scenario, ...] = (S1, S2, S3, S4, S5)
 
 # Who wins today. A later ranking change that flips one edits this table in
 # the same change (and its ADR says why); nothing else should move it.
@@ -109,9 +120,12 @@ SCENARIOS: tuple[Scenario, ...] = (S1, S2, S3, S4)
 #   S3  reserve "helpful evaporation" (helpfuls fade when a fresh stale lands)
 #   S4  flipped by the narrowed importance factor (ADR 0088); the wide factor
 #       it replaced had the loose match winning
+#   S5  flipped by halving confirmed flags (ADR 0106); counted in full, it
+#       takes five helpful reports to cancel one wrong
 EXPECTED_WINNER: dict[str, str] = {
     "S1": "old_with_helpful",
     "S2": "rechecked_fact",
     "S3": "flagged_old_entry",
     "S4": "exact_match",
+    "S5": "rebutted_flag",
 }

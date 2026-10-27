@@ -1,5 +1,7 @@
 # Remove the confirmation clock and the recency profile per kind
 
+> **Amended by [ADR 0106](0106-confirmation-halves-older-flags.md):** `last_confirmed_at` is no longer display only. Its date still enters no score, but whether it is set halves the entry's flags in quality (on by default).
+
 Supersedes [ADR 0071](0071-a-confirmation-can-restart-the-recency-clock.md) and [ADR 0072](0072-recency-profile-per-kind.md). Amends [ADR 0022](0022-recency-floor-so-match-quality-is-the-sort-key.md), [ADR 0070](0070-one-capped-budget-for-social-signals.md) (invariants I3 and I4), SPEC §4.2 and §6.4, and [ADR 0073](0073-a-recency-hint-on-search.md) (the hint no longer has a kind half-life or a confirmation restart to keep or drop).
 
 Status: Accepted. Both options are removed; the default ranking is unchanged because both were off by default.
