@@ -1,6 +1,6 @@
 [project]
 name = "hivemind"
-version = "2.12.2"
+version = "2.13.0"
 description = "Hivemind — a shared memory service for an organization's AI agents, backed by PostgreSQL + pgvector"
 license = "MIT"
 readme = "README.md"
