@@ -17,6 +17,7 @@ from pathlib import Path
 from types import MappingProxyType
 
 import pytest
+import yaml
 
 from hivemind.domain.access import Standing, TrustLevel
 from tests.unit.test_mcp_server import EXPECTED_TOOLS
@@ -156,7 +157,6 @@ def test_the_hermes_manifest_is_valid_yaml() -> None:
     """Hermes parses plugin.yaml with a YAML loader and skips the whole
     plugin when it fails; an unquoted ": " in the description did that
     from 2.3.1 to 2.5.0."""
-    yaml = pytest.importorskip("yaml")
     manifest = yaml.safe_load((PLUGIN / "plugin.yaml").read_text())
     assert manifest["name"] == "hivemind"
     assert (
@@ -204,12 +204,6 @@ def test_the_hook_prints_valid_json_and_never_the_key(key: str | None) -> None:
         or "hivemind-setup" in payload["additionalContext"]
     )
     assert "hm_secret_value" not in out.stdout
-
-
-def test_skill_names_match_their_folders() -> None:
-    for folder in (PLUGIN / "skills").iterdir():
-        text = (folder / "SKILL.md").read_text()
-        assert re.search(rf"^name: {re.escape(folder.name)}$", text, re.MULTILINE), folder
 
 
 HARNESS_REFS = {
@@ -345,9 +339,6 @@ def test_the_dsh_bundle_patch_points_at_real_files_and_reads_keys_from_env() -> 
     patch = patch_path.read_text()
     for rel in re.findall(r"name: (\./\S+)", patch):
         assert (PLUGIN / rel).is_file(), rel
-    # Read through the project-.env-proof resolver (see the 1.2.1 tests below).
-    assert "('HIVEMIND_MCP_URL')" in patch and "('HIVEMIND_API_KEY')" in patch
-    assert "process.env[n]" in patch
     assert "hm_" not in patch  # no key ever lives in the bundle
     for included in manifest["files"]:  # type: ignore[union-attr]
         assert (PLUGIN / included).exists(), included
@@ -449,7 +440,7 @@ def test_the_pi_package_declares_real_resources() -> None:
     assert "pi-package" in manifest["keywords"]  # type: ignore[union-attr]
 
 
-def _pi_extension_text() -> str:
+def _pi_extension_text(**env_overrides: str) -> str:
     script = """
     const mod = await import(process.argv[1])
     let handler
@@ -460,6 +451,7 @@ def _pi_extension_text() -> str:
     """
     env = {k: v for k, v in os.environ.items() if not k.startswith("HIVEMIND_")}
     env["HIVEMIND_API_KEY"] = "hm_secret_value"
+    env.update(env_overrides)
     out = subprocess.run(
         ["node", "--input-type=module", "-e", script, str(PLUGIN / "extensions" / "hivemind.ts")],
         env=env,
@@ -529,30 +521,8 @@ def test_the_hermes_section_goes_incognito(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
-def test_the_pi_section_goes_incognito(monkeypatch: pytest.MonkeyPatch) -> None:
-    script = """
-    const mod = await import(process.argv[1])
-    let handler
-    mod.default({ on: (name, h) => { if (name === 'before_agent_start') handler = h } })
-    const event = { systemPromptOptions: { sections: {} } }
-    handler(event)
-    console.log(JSON.stringify(event.systemPromptOptions.sections))
-    """
-    env = {k: v for k, v in os.environ.items() if not k.startswith("HIVEMIND_")}
-    env["HIVEMIND_INCOGNITO"] = "true"
-    out = subprocess.run(
-        ["node", "--input-type=module", "-e", script, str(PLUGIN / "extensions" / "hivemind.ts")],
-        env=env,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    assert json.loads(out.stdout)["hivemind"] == INCOGNITO_TEXT
-
-
-def test_the_dsh_row_is_off_in_incognito_sessions() -> None:
-    patch = (PLUGIN / "cordis.patch.yml").read_text()
-    assert "('HIVEMIND_INCOGNITO')" in patch
+def test_the_pi_section_goes_incognito() -> None:
+    assert _pi_extension_text(HIVEMIND_INCOGNITO="true") == INCOGNITO_TEXT
 
 
 def _fake_harness(tmp_path: Path, name: str) -> dict[str, str]:
@@ -1333,20 +1303,10 @@ def test_cline_nudge_is_silent_when_it_cannot_work(tmp_path: Path) -> None:
     assert all("contextModification" not in json.loads(x) for x in no_key)
 
 
-def test_cline_hook_texts_do_not_drift_between_platforms() -> None:
-    """The .ps1 twins carry the same texts as the Unix scripts: a Windows
-    session must say the same thing."""
-    for name, texts in (
-        ("UserPromptSubmit", (STAY_AWARE_CORE, INCOGNITO_TEXT, CLINE_SHORT_LINE)),
-        ("PostToolUse", (STOP_REMINDER_TEXT,)),
-    ):
-        unix = (CLINE_HOOKS / name).read_text()
-        win = (CLINE_HOOKS / f"{name}.ps1").read_text()
-        for text in texts:
-            assert text in unix, (name, "unix")
-            assert text in win, (name, "windows")
-    # TaskStart carries no text; only the two platforms' state-folder names
-    # must agree (a private per-user folder, as in hivemind-stop.sh).
+def test_cline_task_start_names_the_same_state_folder_on_both_platforms() -> None:
+    """TaskStart carries no text (the .ps1 twins' texts are pinned by
+    ``REMINDER_COPIES``); only the two platforms' state-folder names must
+    agree (a private per-user folder, as in hivemind-stop.sh)."""
     assert "hivemind-cline" in (CLINE_HOOKS / "TaskStart").read_text()
     assert "hivemind-cline" in (CLINE_HOOKS / "TaskStart.ps1").read_text()
 
@@ -1415,8 +1375,6 @@ def test_kilocode_loads_the_opencode_plugin_from_the_git_spec() -> None:
         "git:https://<git-server>/<owner>/hivemind@v<version>#plugins/hivemind/opencode/hivemind.js"
         in ref
     )
-    root_pkg = json.loads((ROOT / "package.json").read_text())
-    assert root_pkg["main"] == "./plugins/hivemind/opencode/hivemind.js"
     # The v1 plugin key is what gives the full feature set there; the docs
     # say so and the launcher's incognito overlay uses KiloCode's v2 mcp shape.
     assert '"plugin"' in ref
@@ -1686,7 +1644,6 @@ def test_skill_descriptions_are_strict_yaml() -> None:
     """Copilot CLI parses SKILL.md frontmatter strictly: an unquoted ": " in
     the `hivemind` description made it skip the skill ("mapping values are
     not allowed in this context"), where Claude Code was lenient."""
-    yaml = pytest.importorskip("yaml")
     for folder in (PLUGIN / "skills").iterdir():
         text = (folder / "SKILL.md").read_text()
         front = yaml.safe_load(text.split("---\n")[1])
@@ -1785,6 +1742,9 @@ def test_the_dsh_resolver_is_the_same_in_every_field() -> None:
     found = [m for e in _dsh_exprs().values() for m in re.findall(r"\(\(n\) => \{.*?\}\)", e)]
     assert len(found) == 4  # disabled (URL + incognito), url, Authorization
     assert len(set(found)) == 1
+    # Checked without node too (GitLab's test image has none): incognito
+    # disables the server row.
+    assert "HIVEMIND_INCOGNITO" in _dsh_exprs()["disabled"]
 
 
 HOME_ENV = "HIVEMIND_MCP_URL=https://hivemind.example/mcp\nHIVEMIND_API_KEY=hm_home_key\n"

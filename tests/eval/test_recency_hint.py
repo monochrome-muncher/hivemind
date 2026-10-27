@@ -46,10 +46,6 @@ def oracle(q: LabelledQuery) -> RecencyHint:
     return PREFER if q.temporal else IGNORE
 
 
-async def test_the_default_hint_is_the_shipped_pipeline() -> None:
-    assert await mrr(lambda _q: DEFAULT) == await mrr(None)
-
-
 async def test_ignore_age_on_every_query_matches_a_floor_of_one() -> None:
     """ignore_age is the study's floor-1.0 scratch run, without its confirmation
     side effects: timeless MRR 0.617 -> 0.900, currency pairs 0.778 -> 0.611."""

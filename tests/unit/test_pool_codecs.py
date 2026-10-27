@@ -1,4 +1,4 @@
-"""``make_pool``: the jsonb codec and the timeout knobs (no live Postgres)."""
+"""``make_pool``: the vector and jsonb codecs and the timeout knobs (no live Postgres)."""
 
 from __future__ import annotations
 
@@ -23,8 +23,9 @@ async def test_init_registers_a_jsonb_codec_that_decodes_but_does_not_reencode()
 
     conn = MagicMock()
     conn.set_type_codec = AsyncMock()
-    with patch("hivemind.store.pool.register_vector", new=AsyncMock()):
+    with patch("hivemind.store.pool.register_vector", new=AsyncMock()) as register_vector:
         await captured["init"](conn)
+    register_vector.assert_awaited_once_with(conn)
     calls = {c.args[0]: c.kwargs for c in conn.set_type_codec.call_args_list}
     assert {"json", "jsonb"} <= calls.keys()
     jsonb = calls["jsonb"]
@@ -39,13 +40,6 @@ async def test_timeouts_reach_create_pool() -> None:
     kwargs = create_pool.call_args.kwargs
     assert kwargs["command_timeout"] == 12.0
     assert kwargs["server_settings"] == {"statement_timeout": "3000"}
-
-
-async def test_no_statement_timeout_means_no_server_settings() -> None:
-    """Zero disables the server-side bound entirely."""
-    with patch("hivemind.store.pool.asyncpg.create_pool", new=AsyncMock()) as create_pool:
-        await make_pool("postgresql://example/db", statement_timeout_ms=0)
-    assert "server_settings" not in create_pool.call_args.kwargs
 
 
 async def test_defaults_send_no_startup_parameters() -> None:

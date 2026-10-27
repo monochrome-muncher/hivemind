@@ -4,6 +4,7 @@ fleet-name characters and the embedded-character ceiling."""
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from datetime import UTC, datetime
 
@@ -152,6 +153,29 @@ def test_lone_surrogates_are_refused_like_nul(bad: str) -> None:
         EntryFilters(author=bad).validate()
 
 
+@pytest.mark.parametrize(
+    ("url", "body"),
+    [
+        ("/v1/search", {"query": "a\ud800"}),
+        ("/v1/search", {"query": "q", "tags": ["\ud800"]}),
+        ("/v1/entries/some-id/feedback", {"verdict": "helpful", "note": "\ud800"}),
+        ("/v1/entries/some-id/withdraw", {"reason": "\udfff"}),
+    ],
+)
+async def test_lone_surrogates_in_search_feedback_and_withdraw_are_422(
+    url: str, body: object
+) -> None:
+    # `ensure_ascii` escapes carry the surrogate to the server; httpx's own
+    # JSON encoder refuses to send one.
+    async with make_client(make_hivemind_app()) as client:
+        resp = await client.post(
+            url,
+            content=json.dumps(body).encode(),
+            headers={**KEY, "Content-Type": "application/json"},
+        )
+    assert resp.status_code == 422, resp.text
+
+
 # -- F4: datetime range --------------------------------------------------------------
 
 BAD_DATES = ["0001-01-01T00:00:00+23:00", "0001-01-01T00:00:00", "9999-12-31T23:59:59-23:00"]
@@ -208,6 +232,7 @@ async def test_a_body_of_exactly_the_cap_is_accepted_and_one_more_byte_is_not() 
         )
     assert ok.status_code == ok_chunked.status_code == 201, (ok.text, ok_chunked.text)
     assert over.status_code == over_chunked.status_code == 413
+    assert over.json()["error"]["code"] == "payload_too_large"
 
 
 async def test_probes_need_no_key_with_or_without_a_trailing_slash() -> None:

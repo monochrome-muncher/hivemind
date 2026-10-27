@@ -54,8 +54,8 @@ drift apart on how the fixture is loaded or scored.
 
 Run ``uv run pytest tests/eval/test_decay_experiment.py -s`` to print the
 measured tables: the §4.4 A/B/C table (reproduced in ROADMAP §4.4 and in
-``.superpowers/sdd/tier4-provenance-and-decay/task-2-report.md``) and the
-§4.6-(a) floor table (reproduced in ROADMAP §4.6).
+docs/retrieval-experiments.md §4.4) and the §4.6-(a) floor table (reproduced
+in ROADMAP §4.6).
 """
 
 from __future__ import annotations
@@ -203,32 +203,6 @@ class TestDecayExperiment:
             "if always-on now wins the whole temporal slice, the §4.4 "
             "conclusion (time sense is the wrong gating axis) needs rechecking"
         )
-
-    async def test_measure_all_is_deterministic_across_variants(self) -> None:
-        """This is a determinism check, not a §4.4 finding.
-
-        C is *defined* as A on temporal queries and B on the rest
-        (``VARIANTS["C_gated"]``), and ``measure_slices`` buckets each query's
-        metrics into its labelled slice — so
-        ``measured["C_gated"]["temporal"] == measured["A_always_on"]["temporal"]``
-        is true by construction, for any pipeline, correct or not; it is
-        NOT evidence about retrieval quality (that's
-        ``test_gating_does_not_fix_the_old_exact_failure`` and the MRR
-        comparisons above).
-
-        What this test actually exercises: ``measure_all`` reseeds a fresh
-        store per variant (fresh ``FixedClock``, fresh writes) and the hash
-        embedder + retrieval pipeline have no randomness, so two
-        independently-seeded runs of the *same effective config* (A's
-        temporal-query runs vs. C's temporal-query runs) must reproduce
-        bit-identical aggregate metrics. A prior version of this test's
-        docstring called the equality itself the finding; it was the
-        wiring, not the finding, that was worth asserting — this version
-        says so.
-        """
-        measured = await measure_all()
-        assert measured["C_gated"]["temporal"] == measured["A_always_on"]["temporal"]
-        assert measured["C_gated"]["non_temporal"] == measured["B_off"]["non_temporal"]
 
     async def test_gating_does_not_fix_the_old_exact_failure(self) -> None:
         """The finding that decides §4.4.

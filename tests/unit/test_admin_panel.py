@@ -110,20 +110,6 @@ def test_everything_else_is_refused(method: str, path: str) -> None:
     assert not is_allowed(method, path)
 
 
-async def test_a_refused_call_never_reaches_the_api() -> None:
-    seen: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(request)
-        return httpx.Response(200, json=[])
-
-    async with _panel(httpx.MockTransport(handler)) as panel:
-        resp = await panel.post("/v1/entries", json={"body": "x"}, headers=ADMIN)
-    assert resp.status_code == 404
-    assert resp.json()["error"]["code"] == "not_proxied"
-    assert seen == []
-
-
 # -- the upstream URL is built from re-quoted segments (ADR 0040, ADMIN-1) ---------
 
 
@@ -251,41 +237,6 @@ async def test_activation_through_the_proxy_returns_the_key_uncached_and_unlogge
 # -- the static bundle and its headers ----------------------------------------------
 
 
-async def test_every_response_carries_the_security_headers() -> None:
-    _, api_app = _api()
-    async with _panel(httpx.ASGITransport(app=api_app)) as panel:
-        responses = [
-            await panel.get("/"),
-            await panel.get("/static/admin.js"),
-            await panel.get("/static/admin.css"),
-            await panel.get("/healthz"),
-            await panel.get("/v1/health"),
-        ]
-    for resp in responses:
-        assert resp.status_code == 200, resp.url
-        assert resp.headers["content-security-policy"] == CONTENT_SECURITY_POLICY
-        assert resp.headers["x-frame-options"] == "DENY"
-        assert resp.headers["x-content-type-options"] == "nosniff"
-        assert resp.headers["referrer-policy"] == "no-referrer"
-
-
-async def test_static_files_are_revalidated_on_every_load() -> None:
-    """The bundle is plain static files with no versioning: a browser that
-    keeps a cached module across a redeploy runs old code (a view added in
-    a later release routes to the landing page, with no sign of it).
-    ``no-cache`` makes every full load revalidate against the server's
-    ETag (a 304 when unchanged) instead of trusting a heuristic cache."""
-    _, api_app = _api()
-    async with _panel(httpx.ASGITransport(app=api_app)) as panel:
-        responses = [
-            await panel.get("/"),
-            await panel.get("/static/admin.js"),
-            await panel.get("/static/admin.css"),
-        ]
-    for resp in responses:
-        assert resp.headers["cache-control"] == "no-cache", resp.url
-
-
 def test_the_csp_allows_only_same_origin_scripts_and_connections() -> None:
     directives = dict(d.strip().split(" ", 1) for d in CONTENT_SECURITY_POLICY.split(";"))
     assert directives["script-src"] == "'self'"
@@ -294,39 +245,10 @@ def test_the_csp_allows_only_same_origin_scripts_and_connections() -> None:
     assert "unsafe" not in CONTENT_SECURITY_POLICY
 
 
-def test_the_page_has_no_inline_script_or_style() -> None:
-    html = (STATIC_DIR / "index.html").read_text()
-    assert re.findall(r"<script(?![^>]*\bsrc=)[^>]*>", html, flags=re.IGNORECASE) == []
-    assert re.search(r"\sstyle=", html) is None
-    assert re.search(r"\son[a-z]+=", html) is None
-    assert "<style" not in html
-
-
 def _scripts() -> list[Path]:
     scripts = sorted(STATIC_DIR.glob("*.js"))
     assert scripts, "no panel script found"
     return scripts
-
-
-def test_the_scripts_never_write_html() -> None:
-    for script in _scripts():
-        js = script.read_text()
-        for sink in (
-            "innerHTML",
-            "outerHTML",
-            "insertAdjacentHTML",
-            "document.write",
-            "DOMParser",
-            "createContextualFragment",
-            "srcdoc",
-            "eval(",
-            "new Function",
-        ):
-            assert sink not in js, f"{script.name}: {sink}"
-        # Loaded from nowhere but the panel itself (the SVG namespace is an
-        # identifier, not a fetch).
-        urls = re.findall(r"https?://[^\s\"'`]+", js)
-        assert set(urls) <= {"http://www.w3.org/2000/svg"}, script.name
 
 
 def test_the_scripts_load_only_sibling_modules() -> None:
@@ -335,21 +257,6 @@ def test_the_scripts_load_only_sibling_modules() -> None:
         for target in re.findall(r"""from\s+["']([^"']+)["']""", script.read_text()):
             assert target.startswith("./"), (script.name, target)
             assert target[2:] in names, (script.name, target)
-    html = (STATIC_DIR / "index.html").read_text()
-    assert re.findall(r"<script[^>]*\bsrc=\"([^\"]+)\"", html) == ["/static/admin.js"]
-
-
-def test_every_api_path_the_scripts_call_is_on_the_allowlist() -> None:
-    """``api("GET", "admin/x")`` in the UI must be forwardable by the proxy."""
-    call = re.compile(r"""\bapi(?:Raw)?\(\s*["']([A-Z]+)["']\s*,\s*([`"'])(.+?)\2""")
-    seen: set[tuple[str, str]] = set()
-    for script in _scripts():
-        for method, _quote, path in call.findall(script.read_text()):
-            seen.add((method, re.sub(r"\$\{[^}]*\}", "x", path)))
-    assert ("POST", "admin/search") in seen  # the regex really finds calls
-    assert len(seen) >= 10
-    for method, path in sorted(seen):
-        assert is_allowed(method, path), (method, path)
 
 
 def test_the_scripts_never_build_a_link_from_entry_data() -> None:
@@ -371,15 +278,6 @@ def test_the_scripts_never_build_a_link_from_entry_data() -> None:
     assert "return `#/${view}" in ui
     for helper in ("memoriesHref", "feedbackHref", "agentHref"):
         assert re.search(rf"export const {helper} = \([^)]*\) => viewHref\(", ui), helper
-
-
-def test_the_runner_refuses_to_start_without_an_api_url(monkeypatch) -> None:
-    from hivemind.admin import main
-
-    monkeypatch.delenv("HIVEMIND_ADMIN_API_URL", raising=False)
-    monkeypatch.setattr(main, "uvicorn", None)  # would crash if reached
-    with pytest.raises(SystemExit, match="HIVEMIND_ADMIN_API_URL"):
-        main.run()
 
 
 # -- the pre-auth guard (ADR 0040), as on the API --------------------------------

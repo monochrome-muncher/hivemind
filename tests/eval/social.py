@@ -54,8 +54,7 @@ def score(candidate: Candidate, config: SearchConfig = CONFIG) -> float:
         config.half_life_days,
         recency_floor=config.recency_floor,
         social_max=config.social_max,
-        # The wide factor: these baselines (ADR 0070) predate ADR 0088 and quote its numbers.
-        narrow_importance=False,
+        narrow_importance=config.narrow_importance,
     )
 
 
@@ -105,13 +104,14 @@ SCENARIOS: tuple[Scenario, ...] = (S1, S2, S3, S4)
 
 # Who wins today. A later ranking change that flips one edits this table in
 # the same change (and its ADR says why); nothing else should move it.
-#   S1  version grouping / supersession of the older version
+#   S1  supersession of the older version
 #   S2  a stronger social signal for a re-checked old fact
 #   S3  reserve "helpful evaporation" (helpfuls fade when a fresh stale lands)
-#   S4  a narrowed importance factor
+#   S4  flipped by the narrowed importance factor (ADR 0088); the wide factor
+#       it replaced had the loose match winning
 EXPECTED_WINNER: dict[str, str] = {
     "S1": "old_with_helpful",
     "S2": "rechecked_fact",
     "S3": "flagged_old_entry",
-    "S4": "important_loose_match",
+    "S4": "exact_match",
 }

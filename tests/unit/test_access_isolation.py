@@ -90,21 +90,16 @@ async def _write(pool: Pool, cred: Credential, summary: str, **kw: object) -> di
 # -- 1. reads by id ------------------------------------------------------------
 
 
-async def test_a_contributor_cannot_get_another_contributors_self_entry() -> None:
-    """The reported bug: separate keys, both contributors."""
-    pool = Pool()
-    secret = await _write(pool, ALICE, "alice private note", scope="self")
-    got = await hive_get(pool.as_(BOB), entry_id=str(secret["id"]))
-    assert got["error"]["code"] == "not_found"  # type: ignore[index]
-    assert "alice private note" not in str(got)
-
-
-@pytest.mark.parametrize("reader", [ORG, LURKER, OUTSIDER], ids=["org-key", "lurker", "privileged"])
+@pytest.mark.parametrize(
+    "reader", [BOB, ORG, LURKER, OUTSIDER], ids=["contributor", "org-key", "lurker", "privileged"]
+)
 async def test_nobody_else_gets_a_self_entry_by_id(reader: Credential) -> None:
+    """The reported bug was two contributors on separate keys."""
     pool = Pool()
     secret = await _write(pool, ALICE, "alice private note", scope="self")
     got = await hive_get(pool.as_(reader), entry_id=str(secret["id"]))
     assert got["error"]["code"] == "not_found"  # type: ignore[index]
+    assert "alice private note" not in str(got)
 
 
 async def test_invisible_and_nonexistent_ids_answer_identically() -> None:
@@ -154,8 +149,6 @@ async def test_an_agent_key_stamps_author_and_agent_whatever_is_supplied() -> No
     pool = Pool()
     entry = await _write(pool, ALICE, "note", scope="self", agent="bob")
     assert (entry["author"], entry["agent"]) == ("alice", "alice")
-    got = await hive_get(pool.as_(BOB), entry_id=str(entry["id"]))
-    assert got["error"]["code"] == "not_found"  # type: ignore[index]
 
 
 # -- 3. supersession scope ------------------------------------------------------
@@ -280,16 +273,6 @@ async def test_feedback_and_withdraw_on_an_invisible_entry_are_not_found() -> No
     shared = await _write(pool, ALICE, "fleet fact")
     wd2 = await hive_withdraw(pool.as_(BOB), entry_id=str(shared["id"]))
     assert wd2["error"]["code"] == "permission_denied"  # type: ignore[index]
-
-
-# -- 5. reserved names ----------------------------------------------------------
-
-
-@pytest.mark.parametrize("name", ["admin", "org", "dev", "shared"])
-async def test_built_in_identity_names_cannot_be_registered(name: str) -> None:
-    service = AccessService(MemoryStore(make_clock()), FakeAuthenticator())
-    with pytest.raises(ValueError, match="reserved"):
-        await service.register(name, ORG)
 
 
 # -- REST mirrors MCP ------------------------------------------------------------

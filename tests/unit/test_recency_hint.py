@@ -219,9 +219,10 @@ async def test_pages_of_one_hint_add_up_to_the_whole_ranking(hint: RecencyHint) 
     assert paged == whole
 
 
-async def test_i1_old_never_beats_new_by_default_even_with_the_setting_on() -> None:
-    """I1: the default hint, setting on, a 400-day entry with 200 helpful
-    votes and a confirmation does not outrank a 1-day unrated one."""
+@pytest.mark.parametrize("hint", [None, RecencyHint.DEFAULT, RecencyHint.PREFER_RECENT])
+async def test_i1_old_never_beats_new_even_with_the_setting_on(hint: RecencyHint | None) -> None:
+    """I1: the default or prefer_recent hint, setting on, a 400-day entry with
+    200 helpful votes and a confirmation does not outrank a 1-day unrated one."""
     store = MemoryStore(make_clock())
     old = await store.create_entry(_draft(QUERY, 400), [0.1] * 4)
     new = await store.create_entry(_draft(QUERY, 1), [0.1] * 4)
@@ -236,28 +237,8 @@ async def test_i1_old_never_beats_new_by_default_even_with_the_setting_on() -> N
                 updated_at=NOW - timedelta(hours=1),
             )
         )
-    for hint in (None, RecencyHint.DEFAULT):
-        kw = {} if hint is None else {"recency": hint}
-        hits = await _service(store, ON).search(QUERY, limit=5, **kw)  # type: ignore[arg-type]
-        assert [h.entry_id for h in hits] == [new.id, old.id]
-
-
-async def test_i1_holds_under_prefer_recent() -> None:
-    store = MemoryStore(make_clock())
-    old = await store.create_entry(_draft(QUERY, 400), [0.1] * 4)
-    new = await store.create_entry(_draft(QUERY, 1), [0.1] * 4)
-    for i in range(200):
-        await store.record_feedback(
-            Feedback(
-                old.id,
-                f"r{i}",
-                "a",
-                Verdict.HELPFUL,
-                note="ok",
-                updated_at=NOW - timedelta(hours=1),
-            )
-        )
-    hits = await _service(store, ON).search(QUERY, limit=5, recency=RecencyHint.PREFER_RECENT)
+    kw = {} if hint is None else {"recency": hint}
+    hits = await _service(store, ON).search(QUERY, limit=5, **kw)  # type: ignore[arg-type]
     assert [h.entry_id for h in hits] == [new.id, old.id]
 
 

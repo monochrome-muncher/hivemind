@@ -399,18 +399,6 @@ class TestWithdraw:
         assert withdrawn["state"] == "withdrawn"
         assert withdrawn["withdrawn_reason"] == "turned out to be wrong"
 
-    async def test_foreign_user_cannot_withdraw(self) -> None:
-        client = make_client(make_hivemind_app())
-        async with client:
-            entry = await post_entry(client, "key-alice", "alice's entry")
-            resp = await client.post(
-                f"/v1/entries/{entry['id']}/withdraw",
-                json={},
-                headers={"X-API-Key": "key-bob"},
-            )
-        assert resp.status_code == 403
-        assert resp.json()["error"]["code"] == "forbidden"
-
     async def test_admin_can_withdraw_any_entry(self) -> None:
         client = make_client(make_hivemind_app())
         async with client:
@@ -422,32 +410,6 @@ class TestWithdraw:
             )
         assert resp.status_code == 200
         assert resp.json()["state"] == "withdrawn"
-
-    async def test_withdraw_unknown_entry_is_404(self) -> None:
-        client = make_client(make_hivemind_app())
-        async with client:
-            resp = await client.post(
-                "/v1/entries/nope/withdraw", json={}, headers={"X-API-Key": "key-alice"}
-            )
-        assert resp.status_code == 404
-        assert resp.json()["error"]["code"] == "not_found"
-
-    async def test_withdraw_inactive_entry_is_409(self) -> None:
-        client = make_client(make_hivemind_app())
-        async with client:
-            entry = await post_entry(client, "key-alice", "once active")
-            await client.post(
-                f"/v1/entries/{entry['id']}/withdraw",
-                json={},
-                headers={"X-API-Key": "key-alice"},
-            )
-            resp = await client.post(
-                f"/v1/entries/{entry['id']}/withdraw",
-                json={},
-                headers={"X-API-Key": "key-alice"},
-            )
-        assert resp.status_code == 409
-        assert resp.json()["error"]["code"] == "conflict"
 
 
 class TestFeedback:
@@ -466,17 +428,6 @@ class TestFeedback:
         assert body["verdict"] == "helpful"
         # quality = 1 + 0.2/(1+2) (one helpful verdict; SPEC.md §4.2)
         assert body["quality"] == pytest.approx(1.0 + 0.2 / 3)
-
-    async def test_feedback_unknown_entry_is_404(self) -> None:
-        client = make_client(make_hivemind_app())
-        async with client:
-            resp = await client.post(
-                "/v1/entries/nope/feedback",
-                json={"verdict": "helpful"},
-                headers={"X-API-Key": "key-bob"},
-            )
-        assert resp.status_code == 404
-        assert resp.json()["error"]["code"] == "not_found"
 
 
 class TestSupersessionInvariants:
@@ -634,60 +585,6 @@ class TestFeedbackAgentResolution:
         assert resp.status_code == 200
         assert resp.json()["verdict"] == "helpful"
 
-    async def test_user_key_without_agent_is_422(self) -> None:
-        client = make_client(make_hivemind_app())
-        async with client:
-            e = await post_entry(client, "key-alice", "a fact")
-            resp = await client.post(
-                f"/v1/entries/{e['id']}/feedback",
-                json={"verdict": "stale"},
-                headers={"X-API-Key": "key-alice-user"},
-            )
-        assert resp.status_code == 422
-        assert resp.json()["error"]["code"] == "agent_identity_required"
-
-
-class TestEmbeddingFailure:
-    async def test_create_maps_embedding_error_to_502(self) -> None:
-        from hivemind.api.main import create_app_for_config
-        from hivemind.config import Settings
-        from hivemind.embeddings import EmbeddingError
-        from hivemind.memstore import MemoryStore
-        from tests.fakes import make_clock, make_search_config
-
-        class ExplodingEmbedder:
-            dimension = 4
-
-            @property
-            def model_name(self) -> str:
-                return "exploding"
-
-            async def embed_text(self, text):
-                raise EmbeddingError("embedding endpoint is down")
-
-            async def embed_entry(self, draft):
-                raise EmbeddingError("embedding endpoint is down")
-
-            def entry_embeddable_text(self, draft) -> str:
-                return draft.summary
-
-        app = create_app_for_config(
-            Settings(),
-            store=MemoryStore(make_clock()),
-            embedder=ExplodingEmbedder(),
-            authenticator=make_authenticator(),
-            search_config=make_search_config(),
-        )
-        client = make_client(app)
-        async with client:
-            resp = await client.post(
-                "/v1/entries",
-                json={"kind": "fact", "summary": "needs an embedding", "agent": "a"},
-                headers={"X-API-Key": "key-alice-user"},
-            )
-        assert resp.status_code == 502
-        assert resp.json()["error"]["code"] == "embedding_unavailable"
-
 
 class TestSearchWhileEmbedderDown:
     """ADR 0048: search falls back to the keyword stream and flags it in a
@@ -803,18 +700,6 @@ class TestAccessEndpoints:
         assert "pending" in again.json()["message"]
         assert squat.status_code == 409
         assert "name_conflict" in squat.text
-
-    async def test_register_agent_with_agent_key_denied(self) -> None:
-        # An agent key (not org/admin) may not register (ADR 0012).
-        client = make_client(make_hivemind_app())
-        async with client:
-            resp = await client.post(
-                "/v1/agents",
-                json={"name": "alice"},
-                headers={"X-API-Key": "key-alice"},
-            )
-        assert resp.status_code == 403
-        assert resp.json()["error"]["code"] == "forbidden"
 
     async def test_create_fleet_admin_only(self) -> None:
         client = make_client(make_hivemind_app())

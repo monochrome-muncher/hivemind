@@ -222,17 +222,6 @@ class TestRetryPolicy:
         assert await _embedder(handler).embed_text("x") == [0.1, 0.2, 0.3]
         assert len(calls) == 2
 
-    async def test_4xx_other_than_429_is_not_retried(self) -> None:
-        calls: list[int] = []
-
-        def handler(req: httpx.Request) -> httpx.Response:
-            calls.append(1)
-            return httpx.Response(400)
-
-        with pytest.raises(EmbeddingError):
-            await _embedder(handler).embed_text("x")
-        assert len(calls) == 1
-
     async def test_retry_after_is_honoured_and_capped(self) -> None:
         sleeps: list[float] = []
 

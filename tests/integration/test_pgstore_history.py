@@ -1,10 +1,10 @@
 """Postgres-backed tests for the chain / list / usage reads (PERF-1, PERF-2,
 STORE-2, STORE-3; migration 0008).
 
-``list_predecessors`` and ``usage_counts`` must agree with the in-memory
-reference store, and the two 0008 indexes must actually be *used* by the
-queries they were added for (EXPLAIN), not merely exist. Skips cleanly when
-the DB is unreachable.
+The two 0008 indexes must actually be *used* by the queries they were added
+for (EXPLAIN), not merely exist; ``list_predecessors`` and ``usage_counts``
+agree with the in-memory store in ``test_store_contract.py``. Skips cleanly
+when the DB is unreachable.
 """
 
 from __future__ import annotations
@@ -13,8 +13,7 @@ import asyncpg
 import pytest
 
 from hivemind.config import Settings
-from hivemind.domain.entry import EntryDraft, ImportanceSource, Kind
-from hivemind.memstore import MemoryStore
+from hivemind.domain.entry import EntryDraft, Kind
 from hivemind.store import PgStore
 from hivemind.store.migrate import migrate
 from hivemind.store.pgstore import SELECT_PREDECESSORS
@@ -75,38 +74,6 @@ async def _chain(store, n: int = 4) -> list[str]:
     return ids
 
 
-async def test_list_predecessors_returns_entries_superseded_by_the_ids(pg: PgStore) -> None:
-    ids = await _chain(pg)
-    await pg.create_entry(_draft("bystander"), VEC, embedding_model="fake")
-    preds = await pg.list_predecessors([ids[2]])
-    assert [e.id for e in preds] == [ids[1]]
-    both = await pg.list_predecessors([ids[1], ids[3]])
-    assert {e.id for e in both} == {ids[0], ids[2]}
-    assert await pg.list_predecessors([]) == []
-    assert await pg.list_predecessors(["not-a-uuid", ids[0]]) == []  # the tail has none
-
-
-async def test_list_predecessors_matches_the_reference_store(pg: PgStore) -> None:
-    mem = MemoryStore()
-    pg_ids = await _chain(pg)
-    mem_ids = await _chain(mem)
-    for i in range(1, len(pg_ids)):
-        pg_preds = await pg.list_predecessors([pg_ids[i]])
-        mem_preds = await mem.list_predecessors([mem_ids[i]])
-        # Same contents (by position in the chain), not merely the same count.
-        assert [pg_ids.index(e.id) for e in pg_preds] == [mem_ids.index(e.id) for e in mem_preds]
-        assert [(e.summary, e.state, e.superseded_by is not None) for e in pg_preds] == [
-            (e.summary, e.state, e.superseded_by is not None) for e in mem_preds
-        ]
-    # A merge: two entries superseded by one successor come back together.
-    a = await pg.create_entry(_draft("ma"), VEC, embedding_model="fake")
-    b = await pg.create_entry(_draft("mb"), VEC, embedding_model="fake")
-    merged = await pg.create_entry(
-        _draft("merged", supersedes=(a.id, b.id)), VEC, embedding_model="fake"
-    )
-    assert {e.id for e in await pg.list_predecessors([merged.id])} == {a.id, b.id}
-
-
 async def test_chain_walk_on_postgres_hides_an_invisible_middle_version(pg: PgStore) -> None:
     """ADR 0033 on the real store: v1 (org, alice) <- v2 (self, bob) <- v3
     (self, bob). alice must see v1 through the invisible v2 without ever
@@ -138,41 +105,6 @@ async def test_chain_walk_on_postgres_hides_an_invisible_middle_version(pg: PgSt
     assert tail is not None
     successors, _ = await supersession_chain(pg, tail, visibility=alice)
     assert successors == []
-
-
-async def test_usage_counts_group_like_the_reference_store(pg: PgStore) -> None:
-    fleet = await pg.create_fleet("data-eng")
-    mem = MemoryStore()
-    mem_fleet = await mem.create_fleet("data-eng")
-    for store, fid in ((pg, fleet.id), (mem, mem_fleet.id)):
-        await store.create_entry(_draft("a", scope="org"), VEC, embedding_model="f")
-        await store.create_entry(
-            _draft("b", scope="fleet", fleet_id=fid, kind=Kind.INSIGHT, author="bob"),
-            VEC,
-            embedding_model="f",
-        )
-        withdrawn = await store.create_entry(
-            _draft("c", importance_source=ImportanceSource.CALLER), VEC, embedding_model="f"
-        )
-        await store.withdraw_entry(withdrawn.id, "x", "admin")
-
-    def norm(rows, fid):
-        return sorted(
-            (
-                r.scope,
-                r.kind.value,
-                r.importance_source.value,
-                r.author,
-                r.fleet_id == fid,
-                r.fleet_id is None,
-                r.active,
-                r.count,
-            )
-            for r in rows
-        )
-
-    assert norm(await pg.usage_counts(), fleet.id) == norm(await mem.usage_counts(), mem_fleet.id)
-    assert sum(r.count for r in await pg.usage_counts()) == 3
 
 
 async def test_the_partial_index_serves_the_predecessor_query(pg: PgStore) -> None:

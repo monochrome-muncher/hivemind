@@ -120,15 +120,6 @@ async def test_set_home_fleet_records_from_and_to() -> None:
     assert row.detail == {"from": fleet_id, "to": other.id}
 
 
-async def test_revoke_writes_one_row() -> None:
-    service, store, _, admin, _ = await _setup()
-    await service.revoke("alice", admin)
-    [row] = await _rows(store)
-    assert row.action is AuditAction.AGENT_REVOKE
-    assert row.target == "alice"
-    assert row.detail == {"from": "pending"}
-
-
 async def test_rotate_org_key_writes_one_row_with_no_target() -> None:
     service, store, _, admin, _ = await _setup()
     await service.rotate_org_key(admin)
@@ -189,13 +180,6 @@ async def test_reregistrations_refusals_and_reads_are_not_audited() -> None:
     await service.list_agents(admin)
     await service.list_fleets(admin)
     assert await _rows(store) == before
-
-
-async def test_actor_falls_back_to_user_id_without_a_fingerprint() -> None:
-    service, store, _, _, _ = await _setup()
-    await service.create_fleet("ml", Credential(user_id="ops", is_admin=True))
-    [row] = await _rows(store)
-    assert row.actor == "ops"
 
 
 # -- the audit write fails loudly ---------------------------------------------

@@ -30,8 +30,6 @@ from hivemind.store import PgAuthenticator, PgStore
 from hivemind.store import keys as keys_cli
 from hivemind.store.auth import key_hash
 from hivemind.store.keys import (
-    AgentKeyExists,
-    AgentNeedsActivation,
     _issue_admin,
     _issue_agent,
     _list,
@@ -271,49 +269,3 @@ async def test_cli_revoke_sets_revoked_and_records_the_prior_status(dsn: str) ->
     revoke_row = (await _audit_rows(dsn))[-1]
     assert revoke_row["action"] == "agent.revoke"
     assert json.loads(revoke_row["detail"]) == {"from": "active"}
-
-
-async def test_cli_issue_agent_refuses_a_second_key(dsn: str) -> None:
-    await _register_agent(dsn, "alice")
-    await _issue_agent(dsn, "alice", actor="john")
-    with pytest.raises(AgentKeyExists):
-        await _issue_agent(dsn, "alice", actor="john")
-    assert len(await _fetch(dsn, "SELECT 1 FROM credentials WHERE agent_name = 'alice'")) == 1
-    assert len(await _audit_rows(dsn)) == 1  # the refusal recorded nothing
-
-
-async def test_cli_issue_agent_reactivates_a_revoked_agent_only_with_explicit_level(
-    dsn: str,
-) -> None:
-    await _exec(
-        dsn, "INSERT INTO agents (name, status, trust_level) VALUES ('alice', 'revoked', 3)"
-    )
-    [fleet] = await _fetch(dsn, "INSERT INTO fleets (name) VALUES ('f') RETURNING id")
-    with pytest.raises(AgentNeedsActivation):  # ADR 0039: no silent restore of stale trust
-        await _issue_agent(dsn, "alice", actor="john")
-    await _issue_agent(
-        dsn, "alice", actor="john", trust_level=TrustLevel.LURKER, home_fleet_id=str(fleet["id"])
-    )
-    [row] = await _fetch(dsn, "SELECT status, trust_level FROM agents WHERE name = 'alice'")
-    assert (row["status"], row["trust_level"]) == ("active", 1)
-
-
-async def test_app_reactivation_issues_a_fresh_key_and_the_old_one_stays_dead(
-    dsn: str,
-) -> None:
-    store, auth = PgStore(dsn), PgAuthenticator(dsn)
-    try:
-        admin = await auth.verify(await _issue_admin(dsn, actor="john"))
-        assert admin is not None
-        service = AccessService(store, auth)
-        fleet = await service.create_fleet("data-eng", admin)
-        await store.register_agent("alice")
-        _, old = await service.activate("alice", TrustLevel.LURKER, fleet.id, admin)
-        await service.revoke("alice", admin)
-        _, new = await service.activate("alice", TrustLevel.LURKER, fleet.id, admin)
-        assert new != old
-        assert await auth.verify(old) is None
-        assert await auth.verify(new) is not None
-    finally:
-        await store.close()
-        await auth.close()

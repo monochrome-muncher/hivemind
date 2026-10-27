@@ -6,17 +6,19 @@ names the later change meant to flip the outcome; that change edits
 ``EXPECTED_WINNER`` in ``tests/eval/social.py`` on purpose.
 
 Scores include the importance factor and the recency factor. In S1-S3 both
-candidates sit past the recency floor, so the floor (0.8) is shared and the
-figures quoted in the docs, importance x social factor, are the scores
-divided by it.
+candidates have importance 3, which the narrowed factor (ADR 0088) leaves at
+1.0, and sit past the recency floor, so each score is the floor (0.8) times
+the social factor.
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
-from hivemind.config import SearchConfig
 from tests.eval.social import (
+    CONFIG,
     EXPECTED_WINNER,
     S1,
     S2,
@@ -28,17 +30,6 @@ from tests.eval.social import (
     winner,
 )
 
-FLOOR = SearchConfig().recency_floor
-assert FLOOR is not None
-
-
-DEFAULT = SearchConfig()
-
-
-def _relative(scenario, config: SearchConfig = DEFAULT) -> tuple[float, float]:
-    """Both scores with the shared recency floor divided out (S1-S3)."""
-    return score(scenario.first, config) / FLOOR, score(scenario.second, config) / FLOOR
-
 
 @pytest.mark.parametrize("scenario", SCENARIOS, ids=lambda s: s.id)
 def test_the_winner_today(scenario) -> None:
@@ -48,42 +39,47 @@ def test_the_winner_today(scenario) -> None:
 
 def test_s1_old_favourite_beats_a_newer_unlinked_correction() -> None:
     """S1: both are past the recency floor, so 3 helpful on the 400-day entry
-    decide it: 0.8 x 1.12 = 0.896 vs 0.80. Meant to flip with version
-    grouping / supersession."""
-    first, second = _relative(S1)
-    assert first == pytest.approx(0.896)
-    assert second == pytest.approx(0.80)
+    decide it: 0.8 x 1.12 = 0.896 vs 0.80. Meant to flip with supersession
+    of the older version."""
+    assert score(S1.first) == pytest.approx(0.896)
+    assert score(S1.second) == pytest.approx(0.80)
 
 
 def test_s2_a_recheck_yesterday_barely_separates_old_facts() -> None:
     """S2: one helpful, however recent, is worth 1.0667 on a two-year-old fact:
     0.853 vs 0.80. The confirmation date does not restart the recency clock
     (ADR 0103)."""
-    first, second = _relative(S2)
+    first = score(S2.first)
     assert first == pytest.approx(0.8 * (1 + 0.2 / 3))
     assert round(first, 3) == 0.853
-    assert second == pytest.approx(0.80)
+    assert score(S2.second) == pytest.approx(0.80)
 
 
 def test_s3_a_fresh_stale_does_not_sink_an_entry_below_an_unrated_one() -> None:
     """S3: 4 helpful and 1 fresh stale still leave quality at 1.057: 0.846 vs
     0.80, so the flagged entry wins. Meant to flip with the reserve 'helpful
     evaporation' change."""
-    first, second = _relative(S3)
+    first = score(S3.first)
     assert first == pytest.approx(0.8 * (1 + 0.4 / 7))
     assert round(first, 3) == 0.846
-    assert second == pytest.approx(0.80)
+    assert score(S3.second) == pytest.approx(0.80)
 
 
-def test_s4_importance_5_at_rank_16_beats_importance_3_at_rank_1() -> None:
-    """S4: fused 0.013158 (16th in both streams) x 1.0 vs 0.016393 (1st in both)
-    x 0.8 = 0.013115, so the loose match wins on importance alone. Meant to
-    flip with a narrowed importance factor."""
+def test_s4_importance_5_at_rank_16_loses_to_importance_3_at_rank_1() -> None:
+    """S4: fused 0.013158 (16th in both streams) x 1.10 = 0.014474 vs 0.016393
+    (1st in both) x 1.00, so the exact match wins. The wide importance factor
+    ADR 0088 replaced gave the loose match the win, 0.013158 vs 0.013115."""
     loose = fused_at(16, 16)
     exact = fused_at(1, 1)
     assert loose == pytest.approx(0.013158, abs=5e-7)
-    assert exact * 0.8 == pytest.approx(0.013115, abs=5e-7)
+    assert loose * 1.10 == pytest.approx(0.014474, abs=5e-7)
+    assert exact == pytest.approx(0.016393, abs=5e-7)
     # Both are 5 days old, so recency is the same factor and the scores
     # compare as fused x importance factor.
-    assert score(S4.first) > score(S4.second)
-    assert score(S4.first) / score(S4.second) == pytest.approx(loose / (exact * 0.8))
+    assert score(S4.second) > score(S4.first)
+    assert score(S4.second) / score(S4.first) == pytest.approx(exact / (loose * 1.10))
+
+
+def test_s4_flips_back_with_the_wide_importance_factor() -> None:
+    """The flip comes from ADR 0088's narrow factor, not from elsewhere."""
+    assert winner(S4, replace(CONFIG, narrow_importance=False)) == "important_loose_match"

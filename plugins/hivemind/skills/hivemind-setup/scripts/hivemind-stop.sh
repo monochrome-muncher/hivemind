@@ -3,7 +3,7 @@
 # AfterAgent hook):
 # at most once per session, blocks the stop once with a short reminder to
 # write what another agent could reuse and to rate the entries the work
-# tested. Registered in hooks/hooks.json (Gemini CLI: by hand, hivemind-setup).
+# tested. Registered in hooks/hooks.json (Gemini CLI: the extension's AfterAgent hook).
 #
 # It only nudges a substantial session (at least HIVEMIND_STOP_MIN_TOOLS tool
 # uses, default 20) that has not called hive_write or hive_feedback yet, or

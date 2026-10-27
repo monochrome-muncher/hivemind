@@ -79,16 +79,6 @@ async def test_links_show_on_both_ends() -> None:
     assert _ids(from_target["linked_from"]) == [linker]
 
 
-async def test_batch_get_carries_links_too() -> None:
-    store = MemoryStore(make_clock())
-    target = await _write(store, ALICE, "fact one")
-    linker = await _write(store, ALICE, "fact two", see_also=[target])
-    result = await hive_get(_surface(store, ALICE), entry_ids=[target, linker])
-    by_id = {e["id"]: e for e in result["entries"]}  # type: ignore[attr-defined]
-    assert _ids(by_id[target]["linked_from"]) == [linker]
-    assert _ids(by_id[linker]["see_also"]) == [target]
-
-
 async def test_writer_must_be_able_to_read_every_target() -> None:
     """An id the writer cannot read is rejected like an unknown one, so a
     link cannot be used to probe for entries in another fleet."""

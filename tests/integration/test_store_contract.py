@@ -8,15 +8,15 @@ wrong thing.
 
 ``memory`` always runs; ``pg`` needs the dev Postgres (it skips when the
 database is down, and CI's ``HM_TEST_REQUIRE_PG=1`` turns that skip into
-a failure). The divergences known today are marked ``xfail(strict=True)``
-on the adapter that differs, so fixing one turns the mark into a failure
-that asks for the mark to be removed.
+a failure). A divergence between the adapters would be marked
+``xfail(strict=True)`` on the one that differs, so fixing it turns the mark
+into a failure that asks for the mark to be removed; none is open today.
 """
 
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 
@@ -38,6 +38,7 @@ from hivemind.domain.entry import (
     EntryDraft,
     EntryFilters,
     EntryState,
+    ImportanceSource,
     Kind,
     Source,
     SourceType,
@@ -133,17 +134,6 @@ async def adapter(request: pytest.FixtureRequest) -> AsyncIterator[Adapter]:
         yield pg
 
 
-def diverges_on(kind: str, reason: str) -> Callable[[pytest.FixtureRequest], None]:
-    """Mark the current test xfail (strict) for one adapter: a divergence
-    known today, kept visible rather than hidden."""
-
-    def apply(request: pytest.FixtureRequest) -> None:
-        if request.node.callspec.params["adapter"] == kind:
-            request.node.add_marker(pytest.mark.xfail(strict=True, reason=reason))
-
-    return apply
-
-
 def draft(
     summary: str,
     *,
@@ -199,6 +189,7 @@ async def test_create_entry_round_trips(adapter: Adapter) -> None:
     for field in ("id", "kind", "summary", "body", "tags", "author", "agent", "scope"):
         assert getattr(got, field) == getattr(created, field)
     assert got.occurred_at == T0
+    assert got.embedding_model == "test-model"
 
 
 async def test_unknown_and_malformed_ids_read_as_absent(adapter: Adapter) -> None:
@@ -268,19 +259,52 @@ async def test_supersede_flips_the_target(adapter: Adapter) -> None:
     assert [p.id for p in preds] == [old.id]
 
 
+async def test_predecessors_are_the_entries_a_write_superseded(adapter: Adapter) -> None:
+    v0 = await write(adapter, "v0")
+    v1 = await write(adapter, "v1", supersedes=(v0.id,))
+    v2 = await write(adapter, "v2", supersedes=(v1.id,))
+    v3 = await write(adapter, "v3", supersedes=(v2.id,))
+    await write(adapter, "bystander")
+    store = adapter.store
+    assert [e.id for e in await store.list_predecessors([v2.id])] == [v1.id]
+    assert {e.id for e in await store.list_predecessors([v1.id, v3.id])} == {v0.id, v2.id}
+    assert await store.list_predecessors([]) == []
+    assert await store.list_predecessors(["not-a-uuid", v0.id]) == []  # the tail has none
+    [pred] = await store.list_predecessors([v1.id])
+    assert (pred.summary, pred.state, pred.superseded_by) == ("v0", EntryState.SUPERSEDED, v1.id)
+    a = await write(adapter, "ma")
+    b = await write(adapter, "mb")
+    merged = await write(adapter, "merged", supersedes=(a.id, b.id))
+    assert {e.id for e in await store.list_predecessors([merged.id])} == {a.id, b.id}
+
+
 async def test_supersede_of_an_inactive_target_writes_nothing(adapter: Adapter) -> None:
     old = await write(adapter, "v1")
-    await write(adapter, "v2", supersedes=(old.id,))
+    head = await write(adapter, "v2", supersedes=(old.id,))
+    gone = await write(adapter, "withdrawn")
+    await adapter.store.withdraw_entry(gone.id, None, by_user="alice")
     before = await adapter.store.count_entries(EntryFilters(include_inactive=True))
     with pytest.raises(SupersedeConflict) as exc:
         await write(adapter, "v3", supersedes=(old.id,))
     assert exc.value.ids == [old.id]
+    with pytest.raises(SupersedeConflict) as exc:
+        await write(adapter, "v3", supersedes=(gone.id,))
+    assert exc.value.ids == [gone.id]
+    # A valid target beside the inactive one is not flipped either.
+    with pytest.raises(SupersedeConflict) as exc:
+        await write(adapter, "v3", supersedes=(old.id, head.id))
+    assert exc.value.ids == [old.id]
+    untouched = await adapter.store.get_entry(head.id)
+    assert untouched is not None
+    assert untouched.state is EntryState.ACTIVE
     assert await adapter.store.count_entries(EntryFilters(include_inactive=True)) == before
 
 
 async def test_supersede_of_an_unknown_target_writes_nothing(adapter: Adapter) -> None:
-    with pytest.raises(SupersedeConflict):
-        await write(adapter, "orphan", supersedes=(NO_SUCH_ID,))
+    # A malformed id is unknown too, not a database error.
+    with pytest.raises(SupersedeConflict) as exc:
+        await write(adapter, "orphan", supersedes=(NO_SUCH_ID, "not-a-uuid"))
+    assert sorted(exc.value.ids) == sorted([NO_SUCH_ID, "not-a-uuid"])
     assert await adapter.store.count_entries(EntryFilters(include_inactive=True)) == 0
 
 
@@ -301,6 +325,7 @@ async def test_filters_combine_with_and(adapter: Adapter) -> None:
     filters = EntryFilters(kind=Kind.DECISION, tags=("x", "y"), author="bob")
     assert [e.id for e in await adapter.store.list_entries(filters)] == [hit.id]
     assert await adapter.store.count_entries(filters) == 1
+    assert await adapter.store.count_entries(EntryFilters(kind=Kind.FACT)) == 1
 
 
 async def test_inactive_entries_are_hidden_unless_asked(adapter: Adapter) -> None:
@@ -310,6 +335,10 @@ async def test_inactive_entries_are_hidden_unless_asked(adapter: Adapter) -> Non
     assert [e.id for e in active] == [new.id]
     every = await adapter.store.list_entries(EntryFilters(include_inactive=True))
     assert {e.id for e in every} == {old.id, new.id}
+    gone = await write(adapter, "v3")
+    await adapter.store.withdraw_entry(gone.id, "no longer relevant", by_user="alice")
+    assert await adapter.store.count_entries(EntryFilters()) == 1
+    assert await adapter.store.count_entries(EntryFilters(include_inactive=True)) == 3
 
 
 async def test_flagged_keeps_entries_reported_stale_or_wrong(adapter: Adapter) -> None:
@@ -542,7 +571,32 @@ async def test_vector_search_ranks_nearest_first(adapter: Adapter) -> None:
     far = await write(adapter, "far", hot=2)
     probe = adapter.vec(1)
     probe[2] = 0.5
+    await adapter.store.create_entry(draft("no vector"), None, None)  # never a vector hit
     assert await adapter.store.search_vector(probe, EntryFilters(), 10) == [near.id, far.id]
+
+
+async def test_both_search_streams_apply_visibility(adapter: Adapter) -> None:
+    """Every entry matches the query on both streams, so only visibility can
+    leave one out."""
+    home, other = str(uuid.uuid4()), str(uuid.uuid4())
+    org = await write(adapter, "cohort churn org", scope="org", author="w")
+    mine = await write(adapter, "cohort churn mine", scope="self", author="reader")
+    await write(adapter, "cohort churn theirs", scope="self", author="w")
+    in_home = await write(adapter, "cohort churn home", scope="fleet", fleet_id=home, author="w")
+    in_other = await write(adapter, "cohort churn other", scope="fleet", fleet_id=other, author="w")
+
+    async def seen(v: Visibility) -> tuple[set[str], set[str]]:
+        keyword = await adapter.store.search_keyword("cohort", EntryFilters(), 10, visibility=v)
+        vector = await adapter.store.search_vector(adapter.vec(0), EntryFilters(), 10, visibility=v)
+        return set(keyword), set(vector)
+
+    member = {org.id, mine.id, in_home.id}
+    assert await seen(_vis(TrustLevel.UNTRUSTED, fleet=home)) == (set(), set())
+    assert await seen(_vis(TrustLevel.LURKER, fleet=home)) == (member, member)
+    assert await seen(_vis(TrustLevel.PRIVILEGED, fleet=home)) == (
+        member | {in_other.id},
+        member | {in_other.id},
+    )
 
 
 async def test_similar_entries_exclude_the_entry_and_inactive_ones(adapter: Adapter) -> None:
@@ -630,11 +684,12 @@ async def test_links_read_from_both_ends(adapter: Adapter) -> None:
     assert (sorted(outgoing), incoming) == (sorted([a.id, b.id]), [])
     assert await adapter.store.entry_links(a.id, 10) == ([], [d.id, c.id])
     assert await adapter.store.entry_links(a.id, 1) == ([], [d.id])
-    many = await adapter.store.entry_links_many([a.id, c.id, NO_SUCH_ID], 10)
+    many = await adapter.store.entry_links_many([a.id, c.id, NO_SUCH_ID, "not-a-uuid"], 10)
     assert many[a.id] == ([], [d.id, c.id])
     assert sorted(many[c.id][0]) == sorted([a.id, b.id]) and many[c.id][1] == []
     assert many[NO_SUCH_ID] == ([], [])
-    assert list(many) == [a.id, c.id, NO_SUCH_ID]
+    assert many["not-a-uuid"] == ([], [])
+    assert list(many) == [a.id, c.id, NO_SUCH_ID, "not-a-uuid"]
 
 
 async def test_links_of_one_write_read_in_id_order(adapter: Adapter) -> None:
@@ -882,6 +937,12 @@ async def test_feedback_upserts_per_reporter_and_lists_newest_first(adapter: Ada
     assert many[other.id] == []
     counts = await store.quality_counts([entry.id, other.id])
     assert counts == {entry.id: (0, 1, 1), other.id: (0, 0, 0)}
+    # Keyed by (user, agent): the same user's second agent adds a verdict
+    # instead of overwriting the first agent's.
+    await store.record_feedback(
+        Feedback(entry.id, "u1", "b", Verdict.HELPFUL, None, T0 + timedelta(minutes=2))
+    )
+    assert await store.feedback_counts(entry.id) == (1, 1, 1)
 
 
 async def test_a_revoked_reporters_feedback_does_not_count_until_reactivated(
@@ -1765,6 +1826,28 @@ async def test_usage_counts_group_every_state(adapter: Adapter) -> None:
     assert by_active == {True: 1, False: 1}
 
 
+async def test_usage_counts_group_by_scope_kind_provenance_author_and_fleet(
+    adapter: Adapter,
+) -> None:
+    fleet = await adapter.store.create_fleet("blue")
+    await write(adapter, "a", author="alice")
+    await write(adapter, "a2", author="alice")
+    await write(adapter, "b", author="bob", kind=Kind.INSIGHT, scope="fleet", fleet_id=fleet.id)
+    caller = replace(draft("c"), importance=5, importance_source=ImportanceSource.CALLER)
+    withdrawn = await adapter.store.create_entry(caller, adapter.vec(0), "test-model")
+    await adapter.store.withdraw_entry(withdrawn.id, "x", by_user="admin")
+    got = {
+        (r.scope, r.kind, r.importance_source, r.author, r.fleet_id, r.active): r.count
+        for r in await adapter.store.usage_counts()
+    }
+    default = ImportanceSource.DEFAULT
+    assert got == {
+        ("org", Kind.FACT, default, "alice", None, True): 2,
+        ("fleet", Kind.INSIGHT, default, "bob", fleet.id, True): 1,
+        ("org", Kind.FACT, ImportanceSource.CALLER, "alice", None, False): 1,
+    }
+
+
 # -- fleets and agents (ADRs 0011, 0012, 0028, 0045) -------------------------------------
 
 
@@ -1786,22 +1869,37 @@ async def test_agent_lifecycle(adapter: Adapter) -> None:
         TrustLevel.UNTRUSTED,
         None,
     )
+    assert agent.owner_alias == "owner"
     assert await store.register_agent("Scout", "someone else") == agent  # never overwritten
     assert (await store.register_agent("scout")).name == "Scout"  # case variant (ADR 0045)
+    assert [a.name for a in await store.list_agents()] == ["Scout"]
+    await store.register_agent("Bare")
+    assert (await store.register_agent("Bare", "mallory")).owner_alias is None  # no back-fill
     active = await store.activate_agent(
         "Scout", trust_level=TrustLevel.CONTRIBUTOR, home_fleet_id=fleet.id
     )
     assert active.status is AgentStatus.ACTIVE and active.home_fleet_id == fleet.id
+    assert active.activated_at is not None
+    assert await store.get_agent("Scout") == active
     with pytest.raises(InvalidAgentStatus):
         await store.activate_agent(
             "Scout", trust_level=TrustLevel.CONTRIBUTOR, home_fleet_id=fleet.id
         )
     promoted = await store.set_agent_trust_level("Scout", TrustLevel.PRIVILEGED)
     assert promoted.trust_level is TrustLevel.PRIVILEGED
+    demoted = await store.set_agent_trust_level("Scout", TrustLevel.UNTRUSTED)
+    assert (demoted.trust_level, demoted.status) == (TrustLevel.UNTRUSTED, AgentStatus.ACTIVE)
+    other = await store.create_fleet("red")
+    assert (await store.set_agent_home_fleet("Scout", other.id)).home_fleet_id == other.id
     revoked = await store.revoke_agent("Scout")
     assert revoked.status is AgentStatus.REVOKED
     with pytest.raises(InvalidAgentStatus):
         await store.revoke_agent("Scout")
+    again = await store.activate_agent(
+        "Scout", trust_level=TrustLevel.PRIVILEGED, home_fleet_id=fleet.id
+    )
+    assert (again.status, again.trust_level) == (AgentStatus.ACTIVE, TrustLevel.PRIVILEGED)
+    assert (await store.revoke_agent("Bare")).status is AgentStatus.REVOKED  # even while pending
     for call in (
         store.revoke_agent("ghost"),
         store.set_agent_trust_level("ghost", TrustLevel.LURKER),
@@ -1831,17 +1929,33 @@ async def test_audit_log_is_newest_first_and_filters(adapter: Adapter) -> None:
     first = await store.record_audit(event("admin:a", "f1"))
     second = await store.record_audit(event("admin:b", "f2"))
     third = await store.record_audit(event("admin:a", "f3"))
-    assert second.detail == {"n": 1}
+    revoke = await store.record_audit(
+        AuditEvent(ActorKind.CLI, "ops", AuditAction.AGENT_REVOKE, "alice")
+    )
+    assert (first.actor_kind, first.action, first.target) == (
+        ActorKind.ADMIN_KEY,
+        AuditAction.FLEET_CREATE,
+        "f1",
+    )
+    assert second.detail == {"n": 1} and revoke.detail == {}
+    assert await store.list_audit(AuditFilters(), 1) == [revoke]
     assert [r.id for r in await store.list_audit(AuditFilters(), 10)] == [
+        revoke.id,
         third.id,
         second.id,
         first.id,
     ]
     by_actor = await store.list_audit(AuditFilters(actor="admin:a"), 10)
     assert [r.target for r in by_actor] == ["f3", "f1"]
+    by_action = await store.list_audit(AuditFilters(action=AuditAction.AGENT_REVOKE), 10)
+    assert by_action == [revoke]
+    since = AuditFilters(since=second.occurred_at)
+    assert [r.id for r in await store.list_audit(since, 10)] == [revoke.id, third.id, second.id]
+    both = AuditFilters(actor="admin:a", since=second.occurred_at)
+    assert [r.id for r in await store.list_audit(both, 10)] == [third.id]
     older = await store.list_audit(AuditFilters(before=third.id), 10)
     assert [r.id for r in older] == [second.id, first.id]
-    assert len(await store.list_audit(AuditFilters(), 1)) == 1
+    assert await store.list_audit(AuditFilters(before=NO_SUCH_ID), 10) == []
 
 
 async def test_record_feedback_many_upserts_each_row_in_one_call(adapter: Adapter) -> None:

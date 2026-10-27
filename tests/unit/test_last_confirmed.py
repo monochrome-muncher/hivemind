@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from hivemind.api.schemas import FeedbackSummaryOut, HitOut
+from hivemind.api.schemas import FeedbackSummaryOut
 from hivemind.domain.entry import EntryDraft, Kind
 from hivemind.domain.feedback import (
     Feedback,
@@ -115,9 +115,7 @@ async def test_rest_get_and_batch_get_carry_last_confirmed() -> None:
     assert many["entries"][0]["feedback"] == one["feedback"]
 
 
-def test_rest_schemas_default_to_none_and_carry_the_date() -> None:
-    assert HitOut.model_fields["last_confirmed_at"].default is None
-    assert FeedbackSummaryOut.model_fields["last_confirmed_at"].default is None
+def test_rest_feedback_summary_carries_the_date() -> None:
     out = FeedbackSummaryOut.from_summary(FeedbackSummary(1, 0, 0, (), _min(2)))
     assert out.last_confirmed_at == _min(2)
     assert FeedbackSummaryOut.from_summary(FeedbackSummary(0, 0, 0)).last_confirmed_at is None

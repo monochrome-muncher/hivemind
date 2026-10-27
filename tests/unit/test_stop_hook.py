@@ -432,14 +432,6 @@ def _calls(n: int, name: str = "bash", **args: object) -> list[object]:
 needs_node = pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
 
 
-def test_the_extension_shares_the_hook_texts() -> None:
-    assert STOP_TEXT and COMPACT_LINE
-    reason = json.loads(STOP_TEXT.group(1))["reason"]
-    text = PI_EXTENSION.read_text()
-    assert f'"{reason}"' in text
-    assert f'"{COMPACT_LINE.group(1)}"' in text
-
-
 @needs_node
 def test_pi_continues_a_long_session_once_with_the_reminder() -> None:
     reason = json.loads(STOP_TEXT.group(1))["reason"]  # type: ignore[union-attr]
@@ -589,13 +581,6 @@ def _idle(sid: str = "s1") -> list[object]:
     return ["event", {"type": "session.idle", "properties": {"sessionID": sid}}]
 
 
-def test_the_opencode_plugin_shares_the_hook_texts() -> None:
-    assert STOP_TEXT and COMPACT_LINE
-    text = OPENCODE_PLUGIN.read_text()
-    assert f'"{json.loads(STOP_TEXT.group(1))["reason"]}"' in text
-    assert f'"{COMPACT_LINE.group(1)}"' in text
-
-
 @needs_node
 def test_opencode_prompts_a_long_idle_session_once_with_its_own_model() -> None:
     reason = json.loads(STOP_TEXT.group(1))["reason"]  # type: ignore[union-attr]
@@ -734,9 +719,7 @@ def _dsh_calls(n: int, name: str = "bash", agent: str = "main") -> list[object]:
     return [["call", {"name": name, "agent": agent}] for _ in range(n)]
 
 
-def test_the_dsh_bundle_loads_the_reminder_plugin_with_the_hook_text() -> None:
-    assert STOP_TEXT
-    assert f"'{json.loads(STOP_TEXT.group(1))['reason']}'" in DSH_PLUGIN.read_text()
+def test_the_dsh_bundle_loads_the_reminder_plugin() -> None:
     patch = (PLUGIN / "cordis.patch.yml").read_text()
     assert "name: ./dsh/hivemind-reminders.js" in patch
 

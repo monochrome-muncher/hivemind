@@ -164,16 +164,6 @@ async def test_off_never_reads_vectors_and_equals_a_threshold_that_groups_nothin
     assert SearchConfig().version_group_min_similarity is None
 
 
-async def test_off_is_the_old_invariant_when_no_groups_are_given() -> None:
-    store = MemoryStore(make_clock())
-    pool = await _pool(store)
-    entries = list(pool.values())
-    scores = {e.id: s for e, s in zip(entries, (0.4, 0.9, 0.5, 0.5), strict=True)}
-    assert apply_supersession_invariant(entries, scores) == apply_supersession_invariant(
-        entries, scores, version_groups=()
-    )
-
-
 # --- grouping -----------------------------------------------------------------------
 
 

@@ -51,7 +51,6 @@ from tests.eval.temporal_runner import (
     DECAY_OFF,
     DECAY_ON,
     SLICES,
-    K,
     SliceReports,
     aggregate_slices,
     measure_slices,
@@ -252,7 +251,3 @@ class TestSweepHarness:
         if ``SearchConfig.rrf_k`` ever changes, the ``k=60`` row stops being
         "today's behaviour" and this says so."""
         assert make_search_config().rrf_k == SearchConfig().rrf_k == 60
-
-    def test_the_sweep_starts_from_todays_default(self) -> None:
-        assert RRF_KS[0] == SearchConfig().rrf_k
-        assert K == 5

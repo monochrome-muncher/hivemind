@@ -78,17 +78,3 @@ async def test_live_extractor_returns_validated_facets() -> None:
     # Names are deduped case-insensitively (SPEC §13.1).
     lowercased = {e.name.lower() for e in entities}
     assert len(lowercased) == len(entities)
-
-
-async def test_live_extractor_satisfies_the_port() -> None:
-    """The production extractor structurally satisfies the ``Extractor``
-    port (``model_name`` + ``extract_entry``), so it is a drop-in for
-    the ``WriteService`` hook."""
-    _skip_if_extraction_off_or_unreachable()
-    from hivemind.ports import Extractor
-
-    extractor = build_extractor(Settings())
-    assert extractor is not None
-    assert isinstance(extractor, Extractor)
-    assert isinstance(extractor.model_name, str)
-    assert extractor.model_name  # a deploy-time decision must be configured

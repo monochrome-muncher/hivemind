@@ -261,22 +261,32 @@ async def test_cli_activation_then_rest_activate_is_a_conflict_not_a_second_key(
     )
     with pytest.raises(InvalidAgentStatus):
         await service.activate("bob", TrustLevel.CONTRIBUTOR, fleet.id, admin)
+    audited = len(await _fetch(dsn, "SELECT 1 FROM audit_log"))
     with pytest.raises(AgentKeyExists):
         await _issue_agent(dsn, "bob", actor="t")
     assert len(await _fetch(dsn, "SELECT 1 FROM credentials WHERE agent_name = 'bob'")) == 1
+    assert len(await _fetch(dsn, "SELECT 1 FROM audit_log")) == audited  # a refusal records nothing
 
 
-async def test_reactivation_replaces_a_stale_key_row(env) -> None:
-    """A crash between revoke's status flip and its key delete leaves a
-    dead key row; re-activation must still work (and replace it)."""
+@pytest.mark.parametrize("revoke_by", ["service", "store"])
+async def test_reactivation_issues_a_fresh_key_and_replaces_a_stale_key_row(
+    env, revoke_by: str
+) -> None:
+    """The old key stays dead. A crash between revoke's status flip and its
+    key delete (``store``) leaves a dead key row; re-activation must still
+    work (and replace it)."""
     dsn, store, auth = env
     admin = await _admin(dsn, auth)
     service = AccessService(store, auth)
     fleet = await service.create_fleet("f", admin)
     await store.register_agent("bob")
     _, old = await service.activate("bob", TrustLevel.LURKER, fleet.id, admin)
-    await store.revoke_agent("bob")  # status flipped, key row left behind
+    if revoke_by == "service":
+        await service.revoke("bob", admin)
+    else:
+        await store.revoke_agent("bob")  # status flipped, key row left behind
     _, new = await service.activate("bob", TrustLevel.LURKER, fleet.id, admin)
+    assert new != old
     assert await auth.verify(old) is None
     assert await auth.verify(new) is not None
     assert len(await _fetch(dsn, "SELECT 1 FROM credentials WHERE agent_name = 'bob'")) == 1

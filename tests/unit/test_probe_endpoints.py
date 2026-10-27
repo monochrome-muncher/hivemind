@@ -3,8 +3,9 @@
 Seams under test (all hermetic — no network, no Postgres):
 
 * ``ProbeRouter`` (``mcp/http.py``): a thin ASGI router that serves
-  ``/mcp/liveness`` (shallow 200) and ``/mcp/health`` (deep: 200 iff
-  the ``Store.health_check`` answers, else 503) OUTSIDE the auth
+  ``/mcp/liveness`` and ``/mcp/health`` (shallow 200) and
+  ``/mcp/health/database`` (deep: 200 iff the ``Store.health_check``
+  answers, else 503) OUTSIDE the auth
   middleware — probes carry no credential (k8s probes have no key).
 * The wiring in ``build_http_app``: the probe paths are answered
   without any API key, while the MCP transport surface (``/mcp``)
