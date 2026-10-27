@@ -1001,6 +1001,7 @@ async def test_pins_are_refreshed_capped_and_newest_first(adapter: Adapter) -> N
     assert first.pin.entry_id == a.id and first.pin.pinned_by == "boss"
     assert await adapter.store.pin_entry(fleet, b.id, "boss", limit=2) is not None
     assert await adapter.store.pin_entry(fleet, c.id, "boss", limit=2) is PinRefusal.FLEET
+    assert await adapter.store.pin_entry(fleet, "not-a-uuid", "boss", limit=9) is PinRefusal.FLEET
     assert [p.entry_id for p in await adapter.store.list_pins(fleet)] == [b.id, a.id]
     # Pinning a pinned entry refreshes it (ADR 0076): same row, new pinner,
     # back to the front, and a full fleet still accepts it.
