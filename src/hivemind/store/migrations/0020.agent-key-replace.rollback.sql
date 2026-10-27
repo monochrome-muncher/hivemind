@@ -1,10 +1,8 @@
--- ADR 0108: an admin can replace an active agent's key in one step. The audit
--- CHECK is widened the 0017 way for one new action, `agent_key.replace`.
---
--- ADR 0020 expand-and-contract: a widened CHECK is additive. An older sibling
--- pod never writes the new action. The ALTER takes a brief lock; give up
--- rather than queue behind a long read (the migration then fails and is
--- retried).
+-- Rollback (ADR 0020): the 0019 schema has no representation for an
+-- `agent_key.replace` audit row, so those rows are removed before the
+-- narrower CHECK is restored. The replacement keys themselves stay valid.
+DELETE FROM audit_log WHERE action = 'agent_key.replace';
+
 SET LOCAL lock_timeout = '5s';
 ALTER TABLE audit_log DROP CONSTRAINT IF EXISTS audit_log_action_check;
 ALTER TABLE audit_log
@@ -25,5 +23,5 @@ ALTER TABLE audit_log
         'entry.unpin',
         'fleet.merge',
         'fleet.unmerge',
-        'agent_key.replace'
+        'fleet.rename'
     ));

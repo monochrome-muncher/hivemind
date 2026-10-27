@@ -42,7 +42,7 @@ The response body is a raw key. The admin panel's proxy already marks every resp
 
 ## Migration
 
-`0018.agent-key-replace` widens `audit_log_action_check` with `agent_key.replace`, the way 0017 did. It is additive (ADR 0020): an older pod never writes the action. The rollback deletes the `agent_key.replace` rows and restores the 0017 constraint. Replaced keys stay as they are.
+`0020.agent-key-replace` widens `audit_log_action_check` with `agent_key.replace`, the way 0017 and 0019 did. It is additive (ADR 0020): an older pod never writes the action. The rollback deletes the `agent_key.replace` rows and restores the 0019 constraint. Replaced keys stay as they are.
 
 ## Consequences
 
