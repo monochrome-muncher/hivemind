@@ -337,13 +337,13 @@ is neutral under the narrowed factor (ADR 0088).
 | id | candidates | today | winner | meant to flip with |
 |---|---|---|---|---|
 | S1 | 400-day entry, 3 helpful vs unlinked 20-day correction, no feedback | 0.896 vs 0.800 | old entry | supersession of the older version |
-| S2 | two-year-old fact, 1 helpful re-checked yesterday vs never checked | 0.853 vs 0.800 | re-checked | confirmation date as the recency clock |
+| S2 | two-year-old fact, 1 helpful re-checked yesterday vs never checked | 0.853 vs 0.800 | re-checked | a stronger social signal for a re-checked old fact (the confirmation clock was removed, ADR 0103) |
 | S3 | four-year-old entry, 4 helpful + 1 fresh stale vs unrated, same age | 0.846 vs 0.800 | flagged entry | reserve "helpful evaporation" |
 | S4 | importance 5, 16th in both streams vs importance 3, 1st in both | 0.012895 vs 0.014605 (score at 5 days old) | exact match | flipped by narrowed importance (ADR 0088); the wide factor gave the loose match, 0.013158 vs 0.013115 (fused × importance factor) |
 
 S2 is barely separated: a recheck yesterday is worth the same 1.067 as
-one made two years ago (with the confirmation clock on it is 0.960 against
-0.800, see the next section). S4's fused scores are `Σ 0.5 / (60 + rank)` over
+one made two years ago (the removed confirmation clock made it 0.960
+against 0.800, see the next section). S4's fused scores are `Σ 0.5 / (60 + rank)` over
 the two streams.
 
 **Aged currency pairs** (`tests/eval/test_aged_currency.py`). The fixture's
