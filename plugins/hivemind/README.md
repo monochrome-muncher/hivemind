@@ -546,7 +546,7 @@ way):
 ```
 
 It also takes `codex`, `copilot`, `dsh`, `gemini`, `hermes`, `pi`, `omp`,
-`opencode`, `cline` and `kilocode`. To make it shorter to type, link it into a folder on your
+`opencode`, `cline` and `kilocode` (or `kilo`). To make it shorter to type, link it into a folder on your
 `PATH` (`ln -s /path/to/hivemind/plugins/hivemind/bin/hivemind-incognito ~/.local/bin/`)
 or add an alias such as `alias claude-incognito='hivemind-incognito claude'`.
 
@@ -563,7 +563,8 @@ How well it works depends on the agent:
   variables, so the references stay unexpanded and the server never
   connects. The hooks say the incognito line; the skills stay installed.
 - **Codex**: the tools aren't loaded, as long as the connection is in
-  `~/.codex/config.toml` as described above.
+  `~/.codex/config.toml` (or the project's `.codex/config.toml`) as
+  described above.
 - **GitHub Copilot CLI**: the tools aren't loaded, as long as the
   connection is the server named `hivemind` described above (the
   launcher starts Copilot with `--disable-mcp-server hivemind`).

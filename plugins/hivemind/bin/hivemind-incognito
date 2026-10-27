@@ -18,10 +18,11 @@
 # Where the server is kept from loading (claude, codex, copilot, cline, dsh, gemini with the
 # extension, pi, omp) the
 # launcher also removes HIVEMIND_API_KEY and HIVEMIND_MCP_URL from the
-# child's environment, so an agent with a shell cannot read the key or call
-# the REST API with it. Where the session is incognito by restraint only
-# (hermes, opencode, kilocode, other launchers) the variables are left in place: the
-# harness may still need them, and the README says so.
+# child's environment (codex: the key only), so an agent with a shell cannot
+# read the key or call the REST API with it. Hermes, OpenCode and KiloCode
+# keep the variables (their switch or the plugin may still need them), and so
+# does any other launcher, where the session is incognito by restraint only;
+# the README says so.
 set -eu
 
 if [ "$#" -lt 1 ]; then

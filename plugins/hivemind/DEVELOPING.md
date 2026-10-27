@@ -359,9 +359,9 @@ whose server entry does not use `${env:…}`, any other
 command), the session is incognito **by restraint**: the tools are
 loaded, the key and URL stay in the environment, and an agent with a
 shell could still call the REST API. The launcher unsets the key and URL
-only where the server is kept from loading (Claude Code, Codex, Copilot CLI,
-DeepSeek Harness, Pi, Oh My Pi, Gemini CLI, Cline), because the other harnesses may still need them
-(ADR 0035). A DeepSeek Harness session also stays incognito when a
+only where the server is kept from loading (Claude Code, Copilot CLI,
+DeepSeek Harness, Pi, Oh My Pi, Gemini CLI, Cline; for Codex, the key only),
+because the other harnesses may still need them (ADR 0035). A DeepSeek Harness session also stays incognito when a
 project `.env` names `HIVEMIND_*` variables: incognito is on if the
 process environment or `~/.dsh/.env` says so, and no project `.env` can
 turn it off. A key set in the `env` block of `~/.claude/settings.json` is
