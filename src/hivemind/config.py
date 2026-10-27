@@ -664,6 +664,10 @@ def configure_logging(level: str = "INFO") -> None:
         level=numeric_level,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    # basicConfig does nothing when the root logger already has a handler
+    # (one installed before startup); the level must apply regardless. The
+    # existing handlers stay as they are.
+    logging.getLogger().setLevel(numeric_level)
     # httpx logs every outbound request URL at INFO (userinfo included):
     # noise per write/search and a credential leak for a URL with a
     # password. Keep the libraries at WARNING whatever the root level.

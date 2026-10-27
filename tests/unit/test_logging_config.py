@@ -49,17 +49,14 @@ class TestConfigureLogging:
         configure_logging()
         assert root.level == logging.INFO
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="logging.basicConfig is a no-op when the root logger already has a handler, "
-        "so configure_logging leaves the level alone (src/hivemind/config.py, basicConfig call)",
-    )
     def test_sets_the_level_when_the_root_logger_already_has_a_handler(self) -> None:
         root = logging.getLogger()
-        root.handlers[:] = [logging.NullHandler()]
+        existing = logging.NullHandler()
+        root.handlers[:] = [existing]
         root.setLevel(logging.WARNING)
         configure_logging("DEBUG")
         assert root.level == logging.DEBUG
+        assert root.handlers == [existing]  # left as installed, not replaced
 
     def test_an_unknown_level_name_raises_loudly(self) -> None:
         """Not a silent fallback to WARNING: a typo'd HIVEMIND_LOG_LEVEL
