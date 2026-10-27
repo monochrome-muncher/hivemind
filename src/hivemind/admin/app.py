@@ -42,6 +42,7 @@ _ALLOWED = allowlist(
         ("GET", r"admin/audit-log"),
         ("POST", r"admin/agents/[^/]+/activate"),
         ("POST", r"admin/agents/[^/]+/revoke"),
+        ("POST", r"admin/agents/[^/]+/key"),
         ("PATCH", r"admin/agents/[^/]+"),
         ("POST", r"admin/org-key/rotate"),
         # Browsing memories as the operator (admin-key only on the API side).

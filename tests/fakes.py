@@ -17,6 +17,7 @@ from typing import Any
 
 from hivemind.config import SearchConfig
 from hivemind.domain.access import AgentStatus, InvalidAgentStatus, UnknownAgent
+from hivemind.domain.audit import ActorKind, AuditAction, AuditEvent
 from hivemind.domain.entry import (
     EntityKind,
     EntryDraft,
@@ -24,7 +25,7 @@ from hivemind.domain.entry import (
     embeddable_text,
 )
 from hivemind.memstore import MemoryStore
-from hivemind.ports import Credential, Store, entry_embeddable_text
+from hivemind.ports import Credential, KeyReplacement, Store, entry_embeddable_text
 
 FIXED_NOW = datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC)
 
@@ -249,6 +250,7 @@ class FakeAuthenticator:
         }
         self._issued_agent_keys: dict[str, str] = {}
         self._rotations = 0
+        self._replacements = 0
 
     async def verify(self, key: str) -> Credential | None:
         credential = self._by_key.get(key)
@@ -275,6 +277,41 @@ class FakeAuthenticator:
         self._issued_agent_keys[agent_name] = raw
         self._by_key[raw] = Credential(user_id=agent_name, agent_name=agent_name)
         return raw
+
+    async def replace_agent_key(
+        self, agent_name: str, *, audit_actor_kind: ActorKind, audit_actor: str
+    ) -> KeyReplacement:
+        """Swap the agent's key: the old one stops verifying at once."""
+        old_raw = self._issued_agent_keys.get(agent_name)
+        if self._store is not None:
+            agent = await self._store.get_agent(agent_name)
+            if agent is None:
+                raise UnknownAgent(f"unknown agent: {agent_name}")
+            if agent.status is not AgentStatus.ACTIVE:
+                raise InvalidAgentStatus(agent_name, agent.status, "replace the key of")
+        self._replacements += 1
+        raw = f"hm_agent_{agent_name}_{self._replacements}"
+        if old_raw is not None:
+            self._by_key.pop(old_raw, None)
+        self._issued_agent_keys[agent_name] = raw
+        self._by_key[raw] = Credential(user_id=agent_name, agent_name=agent_name)
+        replacement = KeyReplacement(
+            raw, fake_key_id(raw), fake_key_id(old_raw) if old_raw is not None else None
+        )
+        if self._store is not None:
+            await self._store.record_audit(
+                AuditEvent(
+                    actor_kind=audit_actor_kind,
+                    actor=audit_actor,
+                    action=AuditAction.AGENT_KEY_REPLACE,
+                    target=agent_name,
+                    detail={
+                        "old_key": replacement.old_key_id,
+                        "new_key": replacement.new_key_id,
+                    },
+                )
+            )
+        return replacement
 
     async def revoke_agent_key(self, agent_name: str) -> None:
         raw = self._issued_agent_keys.pop(agent_name, None)

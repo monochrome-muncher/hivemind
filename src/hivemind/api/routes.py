@@ -1082,6 +1082,22 @@ def build_router() -> APIRouter:
             raise api_error(409, "fleet_merged", str(exc)) from exc
         return KeyIssuedOut(key=key)
 
+    @router.post("/admin/agents/{name}/key", response_model=KeyIssuedOut)
+    async def replace_agent_key(name: NameParam, credential: require, app: hive) -> KeyIssuedOut:
+        """Replace an active agent's key (admin-gated, ADR 0108): the old
+        key stops working at once and the new one is returned **once**.
+        Status, trust level, fleet and memories are untouched. 404 for an
+        unknown name, 409 ``invalid_status`` unless the agent is active."""
+        try:
+            key = await app.access_service.replace_agent_key(name, credential)
+        except PermissionDenied as exc:
+            raise api_error(403, "forbidden", str(exc)) from exc
+        except UnknownAgent as exc:
+            raise api_error(404, "not_found", str(exc)) from exc
+        except InvalidAgentStatus as exc:
+            raise api_error(409, "invalid_status", str(exc)) from exc
+        return KeyIssuedOut(key=key)
+
     @router.patch("/admin/agents/{name}", response_model=AgentOut)
     async def update_agent(
         name: NameParam, payload: UpdateAgentRequest, credential: require, app: hive
