@@ -336,6 +336,8 @@ class MemoryStore:
         replaces: Sequence[str] = (),
         agent_limit: int | None = None,
     ) -> PinWrite | PinRefusal:
+        if not is_valid_uuid(entry_id):
+            return PinRefusal.FLEET  # as on Postgres: nothing a malformed id can pin
         with self._lock:
             fleet_pins = [p for (f, _), p in self._pins.items() if f == fleet_id]
             refusal = pin_refusal(fleet_pins, entry_id, pinned_by, limit, agent_limit, replaces)

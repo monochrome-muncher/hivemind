@@ -155,6 +155,7 @@ class Store(Protocol):
         ``pinned_by`` would hold more than that many of the fleet's pins
         afterwards (a refresh restamps ``pinned_by``, so it counts; ``None``
         is exempt). Both are checked atomically (ADR 0096; ``pin_refusal``).
+        A malformed ``entry_id`` is refused as ``FLEET`` too, writing nothing.
         The caller has checked the entry and the permission."""
         ...
 
