@@ -157,26 +157,29 @@ def test_lone_surrogates_are_refused_like_nul(bad: str) -> None:
 BAD_DATES = ["0001-01-01T00:00:00+23:00", "0001-01-01T00:00:00", "9999-12-31T23:59:59-23:00"]
 
 
-@pytest.mark.parametrize("value", BAD_DATES)
-async def test_out_of_range_datetimes_are_422_on_rest_and_invalid_input_on_mcp(value: str) -> None:
+async def test_out_of_range_datetimes_are_422_on_rest_and_invalid_input_on_mcp() -> None:
+    # One app for every value: building the router costs about 0.2 s, and
+    # these refusals touch no state.
     async with make_client(make_hivemind_app()) as client:
-        listing = await client.get("/v1/entries", params={"created_from": value}, headers=KEY)
-        search = await client.post(
-            "/v1/search", json={"query": "q", "occurred_to": value}, headers=KEY
-        )
-        write = await client.post(
-            "/v1/entries",
-            json={"kind": "fact", "summary": "s", "occurred_at": value},
-            headers=KEY,
-        )
-    assert listing.status_code == search.status_code == write.status_code == 422
+        for value in BAD_DATES:
+            listing = await client.get("/v1/entries", params={"created_from": value}, headers=KEY)
+            search = await client.post(
+                "/v1/search", json={"query": "q", "occurred_to": value}, headers=KEY
+            )
+            write = await client.post(
+                "/v1/entries",
+                json={"kind": "fact", "summary": "s", "occurred_at": value},
+                headers=KEY,
+            )
+            assert listing.status_code == search.status_code == write.status_code == 422, value
     mcp = build_app(MemoryStore(make_clock()), ALICE, make_clock())
-    for result in (
-        await hive_search(mcp, "q", occurred_from=value),
-        await hive_list(mcp, created_to=value),
-        await hive_write(mcp, "fact", "s", occurred_at=value),
-    ):
-        assert result["error"]["code"] == "invalid_input", result  # type: ignore[index]
+    for value in BAD_DATES:
+        for result in (
+            await hive_search(mcp, "q", occurred_from=value),
+            await hive_list(mcp, created_to=value),
+            await hive_write(mcp, "fact", "s", occurred_at=value),
+        ):
+            assert result["error"]["code"] == "invalid_input", (value, result)  # type: ignore[index]
 
 
 def test_sane_datetimes_are_accepted() -> None:

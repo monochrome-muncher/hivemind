@@ -157,7 +157,7 @@ test-unit: ## Run unit tests only (no Postgres needed), with only CI's dev setti
 measure-threshold: ## Measure a search similarity threshold with the configured embedder (ADR 0062; e.g. after `make vllm`; set HIVEMIND_EMBEDDING_DIM to the deployment's)
 	uv run python -m tests.eval.threshold
 
-.PHONY: measure-ranking measure-versions measure-importance measure-query-instruction measure-longmemeval
+.PHONY: measure-ranking measure-versions measure-importance measure-query-instruction measure-longmemeval measure-vector-index
 measure-ranking: ## Measure the per-search recency hint variants (ADR 0073) against the shipped ranking with the configured embedder (e.g. after `make vllm`; set HIVEMIND_EMBEDDING_DIM to the deployment's)
 	uv run python -m tests.eval.ranking
 
@@ -172,6 +172,9 @@ measure-query-instruction: ## Measure the Qwen3 query instruction (ADR 0097) wit
 
 measure-longmemeval: ## Measure search-only recall on LongMemEval_S with the configured embedder (e.g. after `make vllm`; set HIVEMIND_EMBEDDING_DIM to the deployment's; EVAL_LONGMEMEVAL_PATH=file or a one-time download; EVAL_LONGMEMEVAL_PER_TYPE=N samples N per question type; EVAL_EMBED_CACHE=dir caches vectors on disk and resumes; EVAL_LONGMEMEVAL_JSON=path also writes JSON)
 	uv run python -m tests.eval.longmemeval
+
+measure-vector-index: ## Measure the HNSW index against an exact scan on the golden set (ADR 0025; needs `make pg`; hash embedder, so no vLLM; TRUNCATEs HIVEMIND_DATABASE_URL's database like `make test`; VECTOR_INDEX_EVAL_FILLER=N sets the distractor count)
+	$(TEST_ENV) $(PYTEST) tests/integration/test_vector_index_recall.py -m measurement -s
 
 .PHONY: check
 check: ## Type-check + lint (mypy strict + ruff)

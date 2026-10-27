@@ -1,7 +1,9 @@
 """Exact vs. HNSW on the golden set — the ADR 0025 measurement.
 
 **A measurement, not a gate** (the `tests/eval/` experiment idiom, moved
-to Postgres). Run it with ``-s`` to see the tables.
+to Postgres). ``make measure-vector-index`` prints the tables: the
+measurements carry the ``measurement`` marker, which the default run
+deselects. The guards below it stay in the default run.
 
 The ROADMAP §1.1 harness runs the golden set against ``MemoryStore`` —
 no Postgres, no index, no ``<=>`` operator — so it is structurally
@@ -45,9 +47,11 @@ So the equality assertions this module would like to make are not
 written: they were measured to be false, and a permanently-red test
 teaches nothing. What *is* asserted is what held on every run: the two
 arms really execute different plans, the exact arm reproduces the golden
-ordering (so a failure here is the harness, not the index), the HNSW arm
-never beats ground truth, and — the property ``strict_order`` was chosen
-for — the filtered vector stream is never starved.
+ordering (so a failure here is the harness, not the index), and — the
+property ``strict_order`` was chosen for — the filtered vector stream is
+never starved. That last test seeds withdrawn entries nearest to every
+golden query and first checks that ``iterative_scan = off`` does starve on
+them, so it cannot pass vacuously.
 
 **How the two arms are forced.** Not by dropping and recreating the
 index (that mutates a shipped schema object mid-suite and leaves the
@@ -72,7 +76,7 @@ index has a real graph to get lost in (8 rows would be vacuous — HNSW
 would return everything) and so insertion order is not adversarial by
 construction. ``VECTOR_INDEX_EVAL_FILLER`` overrides the count —
 deliberately *not* a ``HIVEMIND_*`` name, so ADR 0024's unknown-variable
-check never sees it.
+check never sees it. Seeded once per module, in one transaction.
 
 Skips cleanly when Postgres is unreachable (the ``tests/integration/``
 convention).
@@ -84,21 +88,26 @@ import hashlib
 import os
 import random
 import statistics
+import uuid
 
 import asyncpg
 import pytest
+import pytest_asyncio
+from pgvector.asyncpg import register_vector
 from tests.eval.golden import golden_corpus, golden_queries
 from tests.fakes import make_search_config
+from tests.pg import ensure_migrated
 
 from hivemind.config import Settings
 from hivemind.domain.entry import EntryDraft, EntryFilters, Kind, embeddable_text
 from hivemind.ports import entry_embeddable_text
 from hivemind.retrieval.eval import aggregate_report, evaluate_query
 from hivemind.services.search import SearchService
-from hivemind.services.write import WriteService
 from hivemind.store import PgStore
 from hivemind.store import pgstore as pgstore_module
-from hivemind.store.migrate import migrate
+
+# The corpus is seeded once per module, on the module's event loop.
+pytestmark = pytest.mark.asyncio(loop_scope="module")
 
 INDEX_NAME = "entries_embedding_hnsw_idx"
 
@@ -282,33 +291,67 @@ def _seed_drafts() -> tuple[list[EntryDraft], list[int]]:
     return drafts, positions
 
 
-@pytest.fixture
+async def _insert(
+    dsn: str, rows: list[tuple[str, EntryDraft, list[float]]], state: str = "active"
+) -> None:
+    """Insert ``(id, draft, vector)`` rows in one transaction, in order.
+
+    Not through ``WriteService``: this module measures the index, and a
+    commit per row made seeding three times slower for the same rows in the
+    same insertion order (so the same graph-building input).
+    """
+    conn = await asyncpg.connect(dsn)
+    try:
+        await register_vector(conn)
+        async with conn.transaction():
+            await conn.executemany(
+                "INSERT INTO entries (id, kind, summary, author, agent, tags, embedding, "
+                "embedding_model, occurred_at, state, withdrawn_at) "
+                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now(), $9, "
+                "CASE WHEN $9 = 'withdrawn' THEN now() END)",
+                [
+                    (
+                        uuid.UUID(entry_id),
+                        d.kind.value,
+                        d.summary,
+                        d.author,
+                        d.agent,
+                        list(d.tags),
+                        vector,
+                        "hash-embedder",
+                        state,
+                    )
+                    for entry_id, d, vector in rows
+                ],
+            )
+    finally:
+        await conn.close()
+
+
+@pytest_asyncio.fixture(scope="module", loop_scope="module")
 async def corpus():
     """A seeded ``PgStore``: the golden corpus interleaved with distractors.
 
     Yields ``(store, embedder, golden_ids)``, where ``golden_ids`` is the
     golden corpus's entry ids in *corpus* order, so a golden query's
-    relevant indices map straight to ids.
+    relevant indices map straight to ids. Seeded once for the module: every
+    test only reads it (the pool is bound to the module's event loop, hence
+    ``loop_scope``).
     """
     settings = Settings()
     dsn, dim = settings.database_url, settings.embedding_dim
-    try:
-        probe = await asyncpg.connect(dsn, timeout=5)
-    except Exception as exc:  # connection refused / timeout / auth
-        pytest.skip(f"Postgres unreachable at {dsn}: {exc}")
-    await probe.close()
-
-    await migrate(dsn, dim)
+    await ensure_migrated(dsn, dim)
     if not await _index_exists(dsn):
         pytest.skip(f"{INDEX_NAME} is absent — migration 0004 has not been applied")
     await _truncate(dsn)
 
     store = PgStore(dsn)
     embedder = HashEmbedder(dim)
-    writer = WriteService(store, embedder)
     try:
         drafts, positions = _seed_drafts()
-        ids = [(await writer.write(draft)).id for draft in drafts]
+        ids = [str(uuid.uuid4()) for _ in drafts]
+        vectors = [await embedder.embed_entry(draft) for draft in drafts]
+        await _insert(dsn, list(zip(ids, drafts, vectors, strict=True)))
         await _analyze(dsn)
         yield store, embedder, [ids[at] for at in positions]
     finally:
@@ -362,19 +405,97 @@ def _metric_table(exact: dict[str, float], hnsw: dict[str, float]) -> str:
     return _render(rows)
 
 
-class TestExactVersusHnsw:
-    """The ADR 0025 evidence."""
+# More than ``hnsw.ef_search`` (40), so the index's first candidates for a
+# golden query are all withdrawn.
+NOISE_PER_QUERY = 60
+
+
+@pytest_asyncio.fixture(loop_scope="module")
+async def withdrawn_noise(corpus):
+    """Per golden query, ``NOISE_PER_QUERY`` withdrawn entries that sit
+    closer to it than anything active, removed again afterwards.
+
+    They are the ordinary way a filter empties an index's candidates: the
+    entries a pool withdraws or supersedes stay in the graph. They are kept
+    out of the module corpus because they would change the graph the
+    measurement reads; deleting them leaves dead index tuples until a
+    vacuum, so do not mix this test into a ``measurement`` run.
+    """
+    _store, embedder, _golden_ids = corpus
+    dsn = Settings().database_url
+    rng = random.Random(20252)
+    rows = []
+    for query, _ in golden_queries():
+        for _ in range(NOISE_PER_QUERY):
+            draft = EntryDraft(
+                kind=Kind.FACT,
+                summary=f"{query} {' '.join(rng.sample(_VOCABULARY, 2))}",
+                author="eval",
+                agent="eval-agent",
+                tags=("noise",),
+            )
+            rows.append((str(uuid.uuid4()), draft, await embedder.embed_entry(draft)))
+    await _insert(dsn, rows, state="withdrawn")
+    try:
+        yield
+    finally:
+        conn = await asyncpg.connect(dsn)
+        try:
+            await conn.execute("DELETE FROM entries WHERE tags @> ARRAY['noise']")
+        finally:
+            await conn.close()
+
+
+class TestTheIndexIsSound:
+    """What is asserted (the measurement itself is ``TestMeasurement``)."""
+
+    async def test_the_exact_arm_reproduces_the_golden_ordering(self, monkeypatch, corpus) -> None:
+        """So a failure of the comparison is the harness, not the index."""
+        store, embedder, golden_ids = corpus
+        _, exact, _ = await _run_arm(monkeypatch, store, embedder, golden_ids, EXACT_ARM)
+        for key in ("hit_at_k", "mrr", f"ndcg_at_{K}"):
+            assert exact[key] == 1.0, (
+                f"the exact arm did not reproduce the golden ordering ({key}="
+                f"{exact[key]:.4f}). That is a harness fault, not an index one."
+            )
+
+    async def test_strict_order_never_starves_the_filtered_vector_stream(
+        self, monkeypatch, corpus, withdrawn_noise
+    ) -> None:
+        """The property ``hnsw.iterative_scan = strict_order`` was chosen for.
+
+        Every query here carries ``state = 'active'`` (and production adds
+        the ADR 0011 visibility matrix on top). Without iterative scan HNSW
+        fetches ``ef_search`` candidates and filters *afterwards*, so a
+        narrow reader can get back far fewer than ``candidate_top_k`` rows
+        and RRF fuses against a short second list. With it, the scan resumes
+        until the limit is met.
+
+        The withdrawn entries make that bite: the same corpus under
+        ``iterative_scan = off`` must come back short, or this test could
+        not fail.
+        """
+        store, embedder, golden_ids = corpus
+        top_k = make_search_config().candidate_top_k
+        off = f"{HNSW_ARM} SET LOCAL hnsw.iterative_scan = off;"
+        _, _, starved = await _run_arm(monkeypatch, store, embedder, golden_ids, off)
+        assert any(len(ids) < top_k for ids in starved.values()), (
+            "the withdrawn entries no longer starve an unfiltered-after scan, "
+            "so this test proves nothing"
+        )
+        _, _, stream = await _run_arm(monkeypatch, store, embedder, golden_ids, HNSW_ARM)
+        short = {q: len(ids) for q, ids in stream.items() if len(ids) != top_k}
+        assert not short, f"the HNSW vector stream came back short of {top_k}: {short}"
+
+
+@pytest.mark.measurement
+class TestMeasurement:
+    """The ADR 0025 evidence. Prints; ``make measure-vector-index`` runs it."""
 
     async def test_measure_the_golden_set_under_both_plans(self, monkeypatch, corpus) -> None:
         """Report hit@k / MRR / nDCG for both arms, and the vector stream's
-        set-recall.
-
-        Equality is **not** asserted — it was measured to be false (see the
-        module docstring). What is asserted is that the exact arm is sound
-        (it reproduces the golden ordering, so a failure here indicts the
-        harness rather than the index) and that the approximation never
-        *beats* ground truth, which would mean the arms were mislabelled.
-        """
+        set-recall. Equality is **not** asserted: it was measured to be
+        false (see the module docstring)."""
         store, embedder, golden_ids = corpus
         _, exact, exact_stream = await _run_arm(monkeypatch, store, embedder, golden_ids, EXACT_ARM)
         _, hnsw, hnsw_stream = await _run_arm(monkeypatch, store, embedder, golden_ids, HNSW_ARM)
@@ -389,33 +510,6 @@ class TestExactVersusHnsw:
             f"{sum(1 for q in exact_stream if exact_stream[q] == hnsw_stream[q])}"
             f"/{len(exact_stream)} queries)\n"
         )
-        for key in ("hit_at_k", "mrr", f"ndcg_at_{K}"):
-            assert exact[key] == 1.0, (
-                f"the exact arm did not reproduce the golden ordering ({key}="
-                f"{exact[key]:.4f}). That is a harness fault, not an index one."
-            )
-            assert hnsw[key] <= exact[key], (
-                f"the approximate arm beat the exact one on {key} — the arms are "
-                f"mislabelled, or the 'exact' arm is not running a sequential scan."
-            )
-
-    async def test_strict_order_never_starves_the_filtered_vector_stream(
-        self, monkeypatch, corpus
-    ) -> None:
-        """The property ``hnsw.iterative_scan = strict_order`` was chosen for.
-
-        Every query here carries ``state = 'active'`` (and production adds
-        the ADR 0011 visibility matrix on top). Without iterative scan HNSW
-        fetches ``ef_search`` candidates and filters *afterwards*, so a
-        narrow reader can get back far fewer than ``candidate_top_k`` rows
-        and RRF fuses against a short second list. With it, the scan resumes
-        until the limit is met.
-        """
-        store, embedder, golden_ids = corpus
-        _, _, stream = await _run_arm(monkeypatch, store, embedder, golden_ids, HNSW_ARM)
-        top_k = make_search_config().candidate_top_k
-        short = {q: len(ids) for q, ids in stream.items() if len(ids) != top_k}
-        assert not short, f"the HNSW vector stream came back short of {top_k}: {short}"
 
     async def test_raising_ef_search_does_not_buy_back_the_exact_ranking(
         self, monkeypatch, corpus
@@ -432,16 +526,13 @@ class TestExactVersusHnsw:
         _, _, exact_stream = await _run_arm(monkeypatch, store, embedder, golden_ids, EXACT_ARM)
 
         rows: list[tuple[str, ...]] = [("ef_search", "set-recall@top_k")]
-        recalls: dict[int, float] = {}
         for ef_search in (40, 100, 200, 400, 800):
             arm = f"{HNSW_ARM} SET LOCAL hnsw.ef_search = {ef_search};"
             _, _, stream = await _run_arm(monkeypatch, store, embedder, golden_ids, arm)
-            recalls[ef_search] = _set_recall(exact_stream, stream)
-            rows.append((str(ef_search), f"{recalls[ef_search]:.3f}"))
+            rows.append((str(ef_search), f"{_set_recall(exact_stream, stream):.3f}"))
         print("\nef_search sweep (the shipped value is 40)\n")
         print(_render(rows))
         print()
-        assert set(recalls) == {40, 100, 200, 400, 800}
 
 
 class TestTheArmsAreReal:
@@ -457,8 +548,6 @@ class TestTheArmsAreReal:
         )
         conn = await asyncpg.connect(dsn)
         try:
-            from pgvector.asyncpg import register_vector
-
             await register_vector(conn)
             plans: dict[str, str] = {}
             for label, arm in (("exact", EXACT_ARM), ("hnsw", HNSW_ARM)):

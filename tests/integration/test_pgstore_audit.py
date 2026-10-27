@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import asyncpg
 import pytest
+from tests.pg import ensure_migrated
 
 from hivemind.config import Settings
 from hivemind.domain import ActorKind, AuditAction, AuditEvent, AuditFilters
 from hivemind.store import PgStore
-from hivemind.store.migrate import migrate
 
 
 def _dsn() -> str:
@@ -32,12 +32,7 @@ async def _truncate(dsn: str) -> None:
 @pytest.fixture
 async def pg():
     dsn = _dsn()
-    try:
-        probe = await asyncpg.connect(dsn, timeout=5)
-    except Exception as exc:  # connection refused / timeout / auth
-        pytest.skip(f"Postgres unreachable at {dsn}: {exc}")
-    await probe.close()
-    await migrate(dsn, Settings().embedding_dim)
+    await ensure_migrated(dsn, Settings().embedding_dim)
     await _truncate(dsn)
     store = PgStore(dsn)
     try:

@@ -459,6 +459,19 @@ def _entrypoint_env(tmp_path: Path, migrate_body: str, runner_body: str) -> dict
     return {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}"}
 
 
+def _started_stub(tmp_path: Path) -> tuple[str, Path]:
+    """A migrate stub body that touches a marker once it runs, then sleeps."""
+    marker = tmp_path / "migrate-started"
+    return f'touch "{marker}"; exec sleep 60', marker
+
+
+def _wait_until_started(marker: Path) -> None:
+    deadline = time.monotonic() + 5.0
+    while not marker.exists():
+        assert time.monotonic() < deadline, "the migrate stub never started"
+        time.sleep(0.01)
+
+
 def test_entrypoint_migrates_then_execs_the_runner(tmp_path: Path) -> None:
     env = _entrypoint_env(tmp_path, "echo migrated", 'echo "runner $*"')
     proc = subprocess.run(
@@ -478,11 +491,12 @@ def test_entrypoint_aborts_when_migration_fails(tmp_path: Path) -> None:
 
 
 def test_entrypoint_sigterm_during_migration_exits_promptly(tmp_path: Path) -> None:
-    env = _entrypoint_env(tmp_path, "exec sleep 60", "echo SHOULD-NOT-RUN")
+    body, started = _started_stub(tmp_path)
+    env = _entrypoint_env(tmp_path, body, "echo SHOULD-NOT-RUN")
     proc = subprocess.Popen(
         ["sh", str(ROOT / "entrypoint.sh")], env=env, text=True, stdout=subprocess.PIPE
     )
-    time.sleep(1.0)  # let the migrate stub start
+    _wait_until_started(started)
     proc.send_signal(signal.SIGTERM)
     try:
         rc = proc.wait(timeout=10)
@@ -508,10 +522,11 @@ def test_entrypoint_migrate_runner_passes_args_and_status(tmp_path: Path) -> Non
 
 
 def test_entrypoint_migrate_runner_sigterm_exits_promptly(tmp_path: Path) -> None:
-    env = _entrypoint_env(tmp_path, "exec sleep 60", "echo SHOULD-NOT-RUN")
+    body, started = _started_stub(tmp_path)
+    env = _entrypoint_env(tmp_path, body, "echo SHOULD-NOT-RUN")
     env["HIVEMIND_RUNNER"] = "migrate"
     proc = subprocess.Popen(["sh", str(ROOT / "entrypoint.sh")], env=env, text=True)
-    time.sleep(1.0)
+    _wait_until_started(started)
     proc.send_signal(signal.SIGTERM)
     try:
         assert proc.wait(timeout=10) == 143

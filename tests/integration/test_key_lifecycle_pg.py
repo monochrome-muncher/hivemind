@@ -19,6 +19,7 @@ import asyncio
 
 import asyncpg
 import pytest
+from tests.pg import ensure_migrated
 
 from hivemind.config import Settings
 from hivemind.domain.access import InvalidAgentStatus, TrustLevel
@@ -56,12 +57,7 @@ async def _fetch(dsn: str, sql: str, *args: object) -> list[asyncpg.Record]:
 @pytest.fixture
 async def env():
     dsn = Settings().database_url
-    try:
-        probe = await asyncpg.connect(dsn, timeout=5)
-    except Exception as exc:
-        pytest.skip(f"Postgres unreachable at {dsn}: {exc}")
-    await probe.close()
-    await migrate(dsn, Settings().embedding_dim)
+    await ensure_migrated(dsn, Settings().embedding_dim)
     await _exec(dsn, TABLES)
     store, auth = PgStore(dsn), PgAuthenticator(dsn)
     try:

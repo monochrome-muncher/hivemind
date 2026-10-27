@@ -105,6 +105,14 @@ def make_draft(summary: str = "Postgres pool exhausted", body: str | None = None
     )
 
 
+async def _no_sleep(_: float) -> None:
+    """The default backoff sleep: tests that assert the delays pass a recorder."""
+
+
+def _full_backoff() -> float:
+    return 1.0
+
+
 def make_extractor(
     env: MockEnv,
     base_url: str = BASE_URL,
@@ -113,8 +121,8 @@ def make_extractor(
     prefix_tokens: int = DEFAULT_PREFIX_TOKENS,
     retries: int = 2,
     backoff: float = 0.5,
-    sleep=None,
-    jitter=None,
+    sleep=_no_sleep,
+    jitter=_full_backoff,
     deadline: float = 45.0,
 ) -> OpenAICompatExtractor:
     return OpenAICompatExtractor(
