@@ -17,19 +17,24 @@ from tests.pg import ensure_migrated
 
 from hivemind.config import Settings
 from hivemind.store import PgAuthenticator
-from hivemind.store.keys import _bootstrap_secret, _rotate_org
+from hivemind.store.keys import SecretLeftBehind, _bootstrap_secret, _rotate_org
 from hivemind.store.kube_secret import KubeApiError
 
 TABLES = "TRUNCATE audit_log, credentials"
 
 
 class FakeSecrets:
-    def __init__(self, *, existing: bool = False, fail_create: bool = False) -> None:
+    namespace = "hivemind"
+
+    def __init__(
+        self, *, existing: bool = False, fail_create: bool = False, fail_delete: bool = False
+    ) -> None:
         self.data: dict[str, dict[str, str]] = {}
         self.labels: dict[str, str] = {}
         if existing:
             self.data["hivemind-keys"] = {}
         self._fail_create = fail_create
+        self._fail_delete = fail_delete
         self.deleted: list[str] = []
 
     def exists(self, name: str) -> bool:
@@ -42,6 +47,8 @@ class FakeSecrets:
         self.labels = labels
 
     def delete(self, name: str) -> None:
+        if self._fail_delete:
+            raise KubeApiError("delete secret", 503, "unavailable")
         self.deleted.append(name)
         self.data.pop(name, None)
 
@@ -126,3 +133,44 @@ async def test_a_failed_secret_create_rolls_the_keys_back(dsn: str) -> None:
         assert await auth.verify(old_org) is not None
     finally:
         await auth.close()
+
+
+class _CommitLost(ConnectionError):
+    pass
+
+
+@pytest.fixture
+def failing_commit(dsn: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Patched after ``dsn`` has set the database up, so only the bootstrap's
+    own commit fails."""
+
+    async def commit(self: asyncpg.transaction.Transaction) -> None:
+        await self.rollback()
+        raise _CommitLost("connection lost during commit")
+
+    monkeypatch.setattr(asyncpg.transaction.Transaction, "commit", commit)
+
+
+@pytest.mark.usefixtures("failing_commit")
+async def test_a_failed_commit_deletes_the_secret_again(dsn: str) -> None:
+    secrets = FakeSecrets()
+    with pytest.raises(_CommitLost):
+        await _bootstrap_secret(dsn, secrets, "hivemind-keys", actor="t")
+    assert secrets.deleted == ["hivemind-keys"] and secrets.data == {}
+    assert await _rows(dsn, "SELECT 1 FROM credentials") == []
+
+
+@pytest.mark.usefixtures("failing_commit")
+async def test_a_secret_that_cannot_be_deleted_after_a_failed_commit_is_named(dsn: str) -> None:
+    """Left silently, the Secret would make every later run report that it
+    exists and issue nothing, while its keys never authenticate."""
+    secrets = FakeSecrets(fail_delete=True)
+    with pytest.raises(
+        SecretLeftBehind, match="kubectl delete secret hivemind-keys -n hivemind"
+    ) as exc:
+        await _bootstrap_secret(dsn, secrets, "hivemind-keys", actor="t")
+    assert isinstance(exc.value.__cause__, _CommitLost)
+    assert "hivemind-keys" in secrets.data  # still there, hence the message
+    message = f"{exc.value} {exc.value.__cause__}"
+    assert all(raw not in message for raw in secrets.data["hivemind-keys"].values())
+    assert await _rows(dsn, "SELECT 1 FROM credentials") == []

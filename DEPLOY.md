@@ -95,7 +95,10 @@ The 6-step operator flow:
    the `hivemind-keys` Secret. No key is printed, so the Job log and your
    log shipper never hold one. The keys are committed only after the Secret
    was created, so a failed run leaves nothing behind: fix the cause (the
-   script prints the Job log) and re-run the pipeline. The script deletes
+   script prints the Job log) and re-run the pipeline. One exception: if the
+   Job log says the commit failed and the Secret could not be deleted, follow
+   its steps and delete that Secret first. Otherwise the re-run sees the
+   Secret, skips the bootstrap and goes green with keys that do not work. The script deletes
    the Job and the RBAC objects when it is done; the deploy identity needs
    permission to create that Role and RoleBinding. If you bootstrapped
    before ADR 0044, the old Job printed the keys: treat your log store as
