@@ -554,7 +554,13 @@ INSERT_AGENT = (
     "INSERT INTO agents (name, owner_alias, status, trust_level) "
     "VALUES ($1, $2, 'pending', 0) ON CONFLICT (name) DO NOTHING RETURNING *"
 )
-LIST_AGENTS = "SELECT * FROM agents ORDER BY name"
+# The agent's key use (ADR 0110) rides along; an agent has at most one key
+# (unique index, ADR 0039), so the join adds no rows.
+LIST_AGENTS = (
+    "SELECT a.*, c.last_used_at, c.created_at AS key_created_at FROM agents a "
+    "LEFT JOIN credentials c ON c.kind = 'agent' AND c.agent_name = a.name "
+    "ORDER BY a.name"
+)
 # ADR 0028: the status guard lives in the WHERE, so check-and-flip is one
 # atomic statement (no second key from two racing activations).
 ACTIVATE_AGENT = (
@@ -3019,6 +3025,9 @@ def _row_to_agent(row: asyncpg.Record) -> Agent:
         owner_alias=row["owner_alias"],
         created_at=row["created_at"],
         activated_at=row["activated_at"],
+        # Only the agent list selects these; the other agent queries do not.
+        last_used_at=row.get("last_used_at"),
+        key_created_at=row.get("key_created_at"),
     )
 
 

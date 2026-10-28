@@ -36,6 +36,7 @@ from hivemind.api.prometheus import PrometheusMetrics
 from hivemind.api.schemas import (
     ActivateAgentRequest,
     ActivityOut,
+    AdminAgentOut,
     AdminSearchRequest,
     AgentCleanupOut,
     AgentCleanupPreviewOut,
@@ -1167,14 +1168,19 @@ def build_router() -> APIRouter:
             ),
         )
 
-    @router.get("/admin/agents", response_model=list[AgentOut])
-    async def list_agents(credential: require, app: hive) -> list[AgentOut]:
-        """List registered agents (admin-gated, ADR 0012)."""
+    @router.get("/admin/agents", response_model=list[AdminAgentOut])
+    async def list_agents(credential: require, app: hive) -> list[AdminAgentOut]:
+        """List registered agents with their key's last use and whether
+        they are idle (admin-gated, ADRs 0012, 0110)."""
         try:
             agents = await app.access_service.list_agents(credential)
         except PermissionDenied as exc:
             raise api_error(403, "forbidden", str(exc)) from exc
-        return [AgentOut.from_agent(a) for a in agents]
+        now = datetime.now(UTC)
+        return [
+            AdminAgentOut.from_admin_agent(a, now=now, idle_days=app.idle_agent_days)
+            for a in agents
+        ]
 
     @router.post("/admin/agents/{name}/activate", response_model=KeyIssuedOut)
     async def activate_agent(

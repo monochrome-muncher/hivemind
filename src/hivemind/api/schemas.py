@@ -11,7 +11,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import AfterValidator, BaseModel, Field, field_validator
 
-from hivemind.domain.access import Agent, Fleet, Standing
+from hivemind.domain.access import Agent, Fleet, Standing, is_idle
 from hivemind.domain.audit import AuditRecord
 from hivemind.domain.entry import EntityKind, Entry, EntryState, ImportanceSource, Kind, SourceType
 from hivemind.domain.feedback import (
@@ -635,6 +635,25 @@ class AgentOut(BaseModel):
             owner_alias=agent.owner_alias,
             created_at=agent.created_at.isoformat() if agent.created_at else None,
             activated_at=agent.activated_at.isoformat() if agent.activated_at else None,
+        )
+
+
+class AdminAgentOut(AgentOut):
+    """A row of ``GET /v1/admin/agents``: the agent plus when its key last
+    worked and whether that makes it idle (ADR 0110). ``idle_after_days``
+    is ``HIVEMIND_IDLE_AGENT_DAYS``, repeated so a panel can say it."""
+
+    last_used_at: str | None = None
+    idle: bool = False
+    idle_after_days: int = 30
+
+    @classmethod
+    def from_admin_agent(cls, agent: Agent, *, now: datetime, idle_days: int) -> AdminAgentOut:
+        return cls(
+            **AgentOut.from_agent(agent).model_dump(),
+            last_used_at=agent.last_used_at.isoformat() if agent.last_used_at else None,
+            idle=is_idle(agent, now, idle_days),
+            idle_after_days=idle_days,
         )
 
 

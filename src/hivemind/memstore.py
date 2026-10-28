@@ -181,6 +181,10 @@ class MemoryStore:
         self._withdrawn_at: dict[str, datetime] = {}  # ADR 0098; Postgres: entries.withdrawn_at
         self._fleets: dict[str, Fleet] = {}
         self._agents: dict[str, Agent] = {}
+        # The agent's key facts (ADR 0110), kept apart from the agent record
+        # and merged only into ``list_agents``, as the real adapter joins them.
+        self._key_last_used: dict[str, datetime] = {}
+        self._key_created: dict[str, datetime] = {}
         self._audit: list[AuditRecord] = []  # append-only (ADR 0027)
         self._pins: dict[tuple[str, str], Pin] = {}  # (fleet, entry), ADR 0058
         self._searches: dict[str | None, tuple[int, int, int]] = {}  # ADR 0056, 0078
@@ -1569,7 +1573,32 @@ class MemoryStore:
 
     async def list_agents(self) -> list[Agent]:
         with self._lock:
-            return sorted(self._agents.values(), key=lambda a: a.name)
+            return [
+                replace(
+                    a,
+                    last_used_at=self._key_last_used.get(a.name),
+                    key_created_at=self._key_created.get(a.name),
+                )
+                for a in sorted(self._agents.values(), key=lambda a: a.name)
+            ]
+
+    def record_key_issued(self, name: str, at: datetime) -> None:
+        """A new key for the agent, made at ``at``, unused so far (ADR 0110).
+        The in-memory authenticator fake calls this; the real adapter's key
+        row carries it. Not on the ``Store`` port: nothing else writes it."""
+        with self._lock:
+            self._key_created[name] = at
+            self._key_last_used.pop(name, None)
+
+    def record_key_use(self, name: str, at: datetime) -> None:
+        """Stamp the agent's key as used at ``at`` (ADR 0110); the real
+        adapter writes ``credentials.last_used_at``. Not on the port."""
+        with self._lock:
+            self._key_last_used[name] = at
+
+    def _drop_key_facts(self, name: str) -> None:
+        self._key_last_used.pop(name, None)
+        self._key_created.pop(name, None)
 
     async def activate_agent(
         self, name: str, *, trust_level: TrustLevel, home_fleet_id: str
@@ -1591,6 +1620,7 @@ class MemoryStore:
                 home_fleet_id=home_fleet_id,
                 activated_at=self._clock(),
             )
+            self._drop_key_facts(name)  # the next key starts unused
             self._agents[name] = activated
             return activated
 
@@ -1604,6 +1634,7 @@ class MemoryStore:
             if agent.status not in REVOCABLE:
                 raise InvalidAgentStatus(name, agent.status, "revoke")
             revoked = replace(agent, status=AgentStatus.REVOKED)
+            self._drop_key_facts(name)  # the key is deleted
             self._agents[name] = revoked
             return revoked
 

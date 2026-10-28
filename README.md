@@ -143,6 +143,8 @@ key and agent keys cannot sign in here.
   from then stop counting, and the memories it replaced come back (you can
   untick any). Revoking its key is a separate box, off by default. A
   cleanup can be undone from the list of cleanups.
+- See when each agent last used its key and filter for agents that have
+  gone quiet, then revoke the ones nobody needs.
 - Download any list as a CSV file.
 
 ![A memory opened in the admin panel, with its details, tags and feedback](docs/images/admin-memories.png)

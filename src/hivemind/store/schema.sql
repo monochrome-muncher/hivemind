@@ -91,6 +91,7 @@ CREATE TABLE public.credentials (
     agent_id text,
     agent_name text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_used_at timestamp with time zone,
     CONSTRAINT credentials_kind_check CHECK ((kind = ANY (ARRAY['org'::text, 'user'::text, 'agent'::text, 'admin'::text])))
 );
 
