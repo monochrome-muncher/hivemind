@@ -4,7 +4,7 @@
 
 > **Amended by [ADR 0109](0109-rename-a-fleet.md):** an admin can rename a fleet (`PATCH /v1/admin/fleets/{id}`); the "rename/disable is the later story" line below is settled for rename. Fleet deletion and disabling are still not built.
 >
-> **Amended by [ADR 0107](0107-fleet-merge.md):** an admin can merge a fleet into another, which re-files the whole fleet's entries and moves its agents (undoable), so an entry's fleet is fixed at write time except for a merge. A merged fleet is kept, marked, and takes no new members or memories. The rest below stands.
+> **Amended by [ADR 0107](0107-fleet-merge.md):** an admin can merge a fleet into another, which re-files the whole fleet's entries and moves its agents (undoable), so an entry's fleet is fixed at write time except for a merge. A merged fleet is kept, marked, and takes no new members or memories. The same applies to an admin fleet move ([ADR 0112](0112-move-agents-with-their-memories.md)), which takes the moved agents' own `fleet` memories with them. The rest below stands.
 
 ADR 0002 committed Hivemind to a *flat org-wide pool*: one pool, `scope` a
 single-value `org` tag, every agent reading and writing everything. That

@@ -74,11 +74,15 @@ def _panel(transport: httpx.AsyncBaseTransport) -> httpx.AsyncClient:
         ("GET", "admin/flagged"),
         ("POST", "admin/fleets/abc/merge"),
         ("PATCH", "admin/fleets/abc"),
+        ("POST", "admin/fleets/abc/move"),
         ("GET", "admin/fleet-merges"),
         ("POST", "admin/fleet-merges/abc/undo"),
         ("POST", "admin/agents/alice/retire"),
         ("GET", "admin/successions"),
         ("POST", "admin/successions/alice/undo"),
+        ("POST", "admin/agents/bob/cleanup"),
+        ("GET", "admin/agent-cleanups"),
+        ("POST", "admin/agent-cleanups/abc/undo"),
     ],
 )
 def test_the_admin_surface_is_forwarded(method: str, path: str) -> None:
@@ -116,6 +120,9 @@ def test_the_admin_surface_is_forwarded(method: str, path: str) -> None:
         ("GET", "admin/entries/"),
         ("GET", "admin/fleets/abc/merge"),  # right path, wrong method
         ("POST", "admin/fleets//merge"),
+        ("GET", "admin/fleets/abc/move"),  # right path, wrong method
+        ("POST", "admin/fleets//move"),
+        ("POST", "admin/fleets/abc/move/x"),
         ("POST", "admin/fleets/abc/merge/x"),
         ("POST", "admin/fleet-merges"),
         ("GET", "admin/fleet-merges/abc"),
@@ -130,6 +137,14 @@ def test_the_admin_surface_is_forwarded(method: str, path: str) -> None:
         ("GET", "admin/successions/alice/undo"),
         ("DELETE", "admin/successions/alice"),
         ("POST", "admin/successions//undo"),
+        ("GET", "admin/agents/bob/cleanup"),  # right path, wrong method
+        ("POST", "admin/agents//cleanup"),
+        ("POST", "admin/agents/bob/cleanup/x"),
+        ("POST", "admin/agent-cleanups"),
+        ("GET", "admin/agent-cleanups/abc"),
+        ("GET", "admin/agent-cleanups/abc/undo"),
+        ("DELETE", "admin/agent-cleanups/abc"),
+        ("POST", "admin/agent-cleanups//undo"),
     ],
 )
 def test_everything_else_is_refused(method: str, path: str) -> None:

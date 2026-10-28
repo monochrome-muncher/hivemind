@@ -119,4 +119,7 @@ is unused.
 | [0107](0107-fleet-merge.md) | Merge fleets into one home fleet | Accepted; amends 0011, touches 0058 and 0096, migration 0017, admin only, undoable |
 | [0108](0108-replace-an-agent-key.md) | Replace an agent's key | Accepted; amends 0028, touches 0012, 0027 and 0039, migration 0020, admin only, old key dies at once |
 | [0109](0109-rename-a-fleet.md) | Rename a fleet | Accepted; amends 0011 (no rename), migration 0019, admin only, audited `fleet.rename` |
+| [0110](0110-agent-key-last-use.md) | An agent key records its last use, at most hourly | Accepted; migration 0021, `credentials.last_used_at`, `HIVEMIND_IDLE_AGENT_DAYS`, observation only |
+| [0111](0111-agent-cleanup.md) | Clean up after a bad agent | Accepted; extends 0067, follows 0107, migration 0022, admin only, undoable |
+| [0112](0112-move-agents-with-their-memories.md) | Move agents with their memories (fleet split) | Accepted; amends 0011, builds on 0107, migration 0023, admin only, undoable |
 | [0113](0113-retire-an-agent-with-a-successor.md) | Retire an agent with a successor | Accepted; amends 0011, 0030, 0033, 0034, 0060, 0065, 0095, 0096, migration 0024, admin only, undoable |

@@ -11,7 +11,7 @@
 -- keeps working. The index serves the key check, which walks the chain from
 -- successor to retired agent.
 --
--- The audit CHECK is widened the 0014, 0017 and 0020 way, for `agent.retire` and
+-- The audit CHECK is widened the 0014, 0017, 0020, 0022 and 0023 way, for `agent.retire` and
 -- `agent.retire_undo`.
 --
 -- ADR 0020 expand-and-contract: a new table and a widened CHECK are additive.
@@ -52,6 +52,10 @@ ALTER TABLE audit_log
         'fleet.unmerge',
         'fleet.rename',
         'agent_key.replace',
+        'agent.cleanup',
+        'agent.cleanup_undo',
+        'fleet.move_agents',
+        'fleet.move_undo',
         'agent.retire',
         'agent.retire_undo'
     ));

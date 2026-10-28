@@ -63,6 +63,7 @@ def create_app_for_config(
         metrics_service=services.metrics_service,
         activity_service=services.activity_service,
         require_stored_keys=settings.require_stored_keys,
+        idle_agent_days=settings.idle_agent_days,
     )
 
 

@@ -11,7 +11,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import AfterValidator, BaseModel, Field, field_validator
 
-from hivemind.domain.access import Agent, Fleet, Standing
+from hivemind.domain.access import Agent, Fleet, Standing, is_idle
 from hivemind.domain.audit import AuditRecord
 from hivemind.domain.entry import EntityKind, Entry, EntryState, ImportanceSource, Kind, SourceType
 from hivemind.domain.feedback import (
@@ -34,8 +34,9 @@ from hivemind.domain.validation import (
     MAX_OFFSET,
     check_no_nul,
 )
+from hivemind.services.agent_cleanup import CleanupPreview, CleanupView
 from hivemind.services.chain import EntryLinks
-from hivemind.services.fleet_merge import MergePreview, MergeView
+from hivemind.services.fleet_merge import MergePreview, MergeView, MovePreview
 from hivemind.services.search import Hit
 from hivemind.services.successions import RetirePreview
 from hivemind.services.write import RelatedEntry
@@ -639,6 +640,25 @@ class AgentOut(BaseModel):
         )
 
 
+class AdminAgentOut(AgentOut):
+    """A row of ``GET /v1/admin/agents``: the agent plus when its key last
+    worked and whether that makes it idle (ADR 0110). ``idle_after_days``
+    is ``HIVEMIND_IDLE_AGENT_DAYS``, repeated so a panel can say it."""
+
+    last_used_at: str | None = None
+    idle: bool = False
+    idle_after_days: int = 30
+
+    @classmethod
+    def from_admin_agent(cls, agent: Agent, *, now: datetime, idle_days: int) -> AdminAgentOut:
+        return cls(
+            **AgentOut.from_agent(agent).model_dump(),
+            last_used_at=agent.last_used_at.isoformat() if agent.last_used_at else None,
+            idle=is_idle(agent, now, idle_days),
+            idle_after_days=idle_days,
+        )
+
+
 class RegisteredAgentOut(AgentOut):
     """The answer to ``POST /v1/agents``: the agent record plus
     whether this caller had already registered the name (same alias) and
@@ -781,6 +801,64 @@ class FleetMergePreviewOut(BaseModel):
         )
 
 
+class FleetMoveRequest(BaseModel):
+    """``POST /v1/admin/fleets/{source_id}/move`` (ADR 0112): the agents to
+    move (each must have the source as home fleet) and exactly one of
+    ``target_fleet_id`` and ``new_fleet_name``. ``dry_run`` is required, so a
+    move is never started by leaving it out. The pin fields work as in a merge."""
+
+    agents: list[RefStr] = Field(min_length=1, max_length=200)
+    target_fleet_id: RefStr | None = None
+    new_fleet_name: str | None = None
+    keep_pin_ids: list[RefStr] | None = Field(default=None, max_length=50)
+    expected_pin_ids: list[RefStr] | None = Field(default=None, max_length=200)
+    dry_run: bool
+
+
+class FleetMovePreviewOut(BaseModel):
+    """The move ``dry_run`` answer: nothing was changed. ``leaving`` memories
+    go with the agents; the ``staying_agents`` lose access to them."""
+
+    dry_run: Literal[True] = True
+    source: MergeSideOut
+    target: MergeSideOut
+    agents: list[str]
+    staying_agents: list[str]
+    leaving: int
+    leaving_by_state: dict[str, int]
+    held_back: int
+    pins: list[MergePinOut]
+    pin_limit: int
+    needs_pin_choice: bool
+
+    @classmethod
+    def from_preview(cls, preview: MovePreview) -> FleetMovePreviewOut:
+        shared = FleetMergePreviewOut.from_preview(
+            MergePreview(
+                source=preview.source,
+                target=preview.target,
+                pins=preview.pins,
+                pin_limit=preview.pin_limit,
+                needs_pin_choice=preview.needs_pin_choice,
+                duplicates=(),
+                duplicates_looked_up=0,
+                duplicates_truncated=False,
+            )
+        )
+        return cls(
+            source=shared.source,
+            target=shared.target,
+            agents=list(preview.agents),
+            staying_agents=list(preview.staying_agents),
+            leaving=preview.leaving,
+            leaving_by_state=dict(preview.leaving_by_state),
+            held_back=preview.held_back,
+            pins=shared.pins,
+            pin_limit=preview.pin_limit,
+            needs_pin_choice=preview.needs_pin_choice,
+        )
+
+
 class DroppedPinOut(BaseModel):
     """A pin a merge unpinned (or an undo could not restore)."""
 
@@ -813,9 +891,26 @@ class FleetMergeOut(BaseModel):
     pins_dropped: list[DroppedPinOut]
 
 
-class FleetUnmergeOut(BaseModel):
-    """An undone merge. Search counters stay summed."""
+class FleetMoveOut(BaseModel):
+    """A move that happened. ``merge_id`` is the history id (the undo takes
+    it); the source fleet stays a normal fleet."""
 
+    dry_run: Literal[False] = False
+    merge_id: str
+    source_fleet_id: str
+    target: FleetOut
+    target_created: bool
+    entries_moved: int
+    entries_held_back: int
+    agents_moved: list[str]
+    pins_kept: int
+    pins_dropped: list[DroppedPinOut]
+
+
+class FleetUnmergeOut(BaseModel):
+    """An undone merge or move. Search counters stay summed."""
+
+    kind: str = "merge"
     merge_id: str
     source_fleet_id: str
     target_fleet_id: str
@@ -827,10 +922,11 @@ class FleetUnmergeOut(BaseModel):
 
 
 class FleetMergeRecordOut(BaseModel):
-    """One recorded merge; ``undoable`` says whether an undo is allowed now
+    """One recorded merge or move; ``undoable`` says whether an undo is allowed now
     (``undo_blocked`` says why not)."""
 
     id: str
+    kind: str  # "merge" or "move" (ADR 0112)
     source_fleet_id: str
     source_fleet_name: str | None
     target_fleet_id: str
@@ -848,6 +944,7 @@ class FleetMergeRecordOut(BaseModel):
         r = view.record
         return cls(
             id=r.id,
+            kind=r.kind,
             source_fleet_id=r.source_fleet_id,
             source_fleet_name=view.source_name,
             target_fleet_id=r.target_fleet_id,
@@ -927,6 +1024,181 @@ class RetiredOut(SuccessionOut):
     """A retirement that happened."""
 
     dry_run: Literal[False] = False
+
+
+# --- Agent cleanup (ADR 0111) --------------------------------------------------
+
+
+class AgentCleanupRequest(BaseModel):
+    """``POST /v1/admin/agents/{name}/cleanup``. ``since`` is required;
+    ``until`` defaults to now. The window is on a memory's ``created_at``
+    (write time) and a rating's ``updated_at``, ``since`` inclusive and
+    ``until`` exclusive. ``dry_run`` is required, so a cleanup is never
+    started by leaving it out. ``restore_ids`` are the superseded memories to
+    put back (none when omitted); the ``expected_*`` counts are what the
+    preview showed, and the apply is refused (409) when they changed."""
+
+    since: datetime
+    until: datetime | None = None
+    dry_run: bool
+    restore_ids: list[RefStr] | None = Field(default=None, max_length=1000)
+    expected_withdraw: int | None = Field(default=None, ge=0)
+    expected_ratings: int | None = Field(default=None, ge=0)
+    also_revoke: bool = False
+
+    @field_validator("since", "until")
+    @classmethod
+    def _window_utc(cls, v: datetime | None) -> datetime | None:
+        """A naive bound is assumed UTC, as for ``occurred_at``."""
+        return _to_utc(v)
+
+
+class CleanupEntryOut(BaseModel):
+    """A memory a cleanup lists: one to withdraw, or one to restore (then
+    ``superseded_by`` is the junk memory that replaced it, which may be one
+    link of a chain ending at a memory the cleanup withdraws)."""
+
+    id: str
+    kind: Kind
+    summary: str
+    author: str
+    scope: str
+    fleet_id: str | None
+    created_at: datetime
+    state: EntryState
+    superseded_by: str | None
+
+    @classmethod
+    def from_entry(cls, entry: Entry) -> CleanupEntryOut:
+        return cls(
+            id=entry.id,
+            kind=entry.kind,
+            summary=entry.summary,
+            author=entry.author,
+            scope=entry.scope,
+            fleet_id=entry.fleet_id,
+            created_at=entry.created_at,
+            state=entry.state,
+            superseded_by=entry.superseded_by,
+        )
+
+
+class AgentCleanupPreviewOut(BaseModel):
+    """The ``dry_run`` answer: nothing was changed. The lists are cut (newest
+    first) and say so; the totals are exact. ``until`` is the window's end as
+    resolved, to send back with the apply."""
+
+    dry_run: Literal[True] = True
+    agent: str
+    agent_status: str
+    since: datetime
+    until: datetime
+    withdraw: list[CleanupEntryOut]
+    withdraw_total: int
+    withdraw_truncated: bool
+    ratings_total: int
+    ratings_by_verdict: dict[str, int]
+    pins_total: int
+    restorable: list[CleanupEntryOut]
+    restorable_total: int
+    restorable_truncated: bool
+    nothing_to_clean: bool
+
+    @classmethod
+    def from_preview(cls, preview: CleanupPreview) -> AgentCleanupPreviewOut:
+        scan = preview.scan
+        return cls(
+            agent=preview.agent.name,
+            agent_status=preview.agent.status.value,
+            since=preview.since,
+            until=preview.until,
+            withdraw=[CleanupEntryOut.from_entry(e) for e in scan.withdraw],
+            withdraw_total=scan.withdraw_total,
+            withdraw_truncated=scan.withdraw_total > len(scan.withdraw),
+            ratings_total=scan.ratings_total,
+            ratings_by_verdict=dict(scan.ratings_by_verdict),
+            pins_total=scan.pins_total,
+            restorable=[CleanupEntryOut.from_entry(e) for e in scan.restorable],
+            restorable_total=scan.restorable_total,
+            restorable_truncated=scan.restorable_total > len(scan.restorable),
+            nothing_to_clean=scan.withdraw_total == 0 and scan.ratings_total == 0,
+        )
+
+
+class AgentCleanupOut(BaseModel):
+    """A cleanup that happened. ``cleanup_id`` is ``None`` (and
+    ``nothing_to_clean`` true) when there was nothing to change: no record was
+    kept. ``revoked`` is true when ``also_revoke`` revoked the agent."""
+
+    dry_run: Literal[False] = False
+    cleanup_id: str | None
+    agent: str
+    since: datetime
+    until: datetime
+    withdrawn: int
+    ratings_set_aside: int
+    restored: int
+    pins_removed: list[DroppedPinOut]
+    revoked: bool
+    already_revoked: bool
+    revoke_error: str | None = None
+    nothing_to_clean: bool
+
+
+class AgentCleanupUndoOut(BaseModel):
+    """An undone cleanup. It never un-revokes the agent; ``note`` says so when
+    the cleanup had revoked it."""
+
+    cleanup_id: str
+    agent: str
+    reactivated: int
+    reactivate_skipped: int
+    resuperseded: int
+    resupersede_skipped: int
+    ratings_cleared: int
+    pins_restored: list[DroppedPinOut]
+    pins_skipped: list[DroppedPinOut]
+    note: str | None
+
+
+class AgentCleanupRecordOut(BaseModel):
+    """One recorded cleanup; ``undoable`` says whether an undo is allowed now
+    (``undo_blocked`` says why not)."""
+
+    id: str
+    agent: str
+    since: datetime
+    until: datetime
+    cleaned_by: str
+    cleaned_at: datetime
+    withdrawn: int
+    ratings_set_aside: int
+    restored: int
+    pins_removed: int
+    revoked: bool
+    undone_at: datetime | None
+    undoable: bool
+    undo_blocked: str | None
+
+    @classmethod
+    def from_view(cls, view: CleanupView) -> AgentCleanupRecordOut:
+        r = view.record
+        return cls(
+            id=r.id,
+            agent=r.agent,
+            since=r.since,
+            until=r.until,
+            cleaned_by=r.cleaned_by,
+            cleaned_at=r.cleaned_at,
+            withdrawn=len(r.withdrawn_ids),
+            ratings_set_aside=r.ratings_set_aside,
+            restored=len(r.restored),
+            pins_removed=len(r.unpinned_pins),
+            revoked=r.revoked,
+            undone_at=r.undone_at,
+            undoable=view.undoable,
+            undo_blocked=view.blocked,
+        )
 
 
 class WhoamiOut(BaseModel):

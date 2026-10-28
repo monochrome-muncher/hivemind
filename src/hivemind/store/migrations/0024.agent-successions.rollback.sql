@@ -1,4 +1,4 @@
--- Rollback (ADR 0020): the 0020 schema has no representation for an
+-- Rollback (ADR 0020): the 0023 schema has no representation for an
 -- `agent.retire` / `agent.retire_undo` audit row, so those rows are removed
 -- before the narrower CHECK is restored, and the successions go with their
 -- table. A successor loses the memories it inherited (only an admin reads
@@ -28,7 +28,11 @@ ALTER TABLE audit_log
         'fleet.merge',
         'fleet.unmerge',
         'fleet.rename',
-        'agent_key.replace'
+        'agent_key.replace',
+        'agent.cleanup',
+        'agent.cleanup_undo',
+        'fleet.move_agents',
+        'fleet.move_undo'
     ));
 
 DROP TABLE IF EXISTS successions;

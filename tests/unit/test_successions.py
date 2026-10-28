@@ -583,8 +583,12 @@ async def test_whoami_lists_the_agents_that_hand_down_to_the_caller(w: World) ->
 async def test_the_preview_counts_what_passes_over_and_changes_nothing(w: World) -> None:
     await w.entry("old", "private one")
     await w.entry("old", "private two")
-    in_red = await w.entry("old", "red fact", scope="fleet", fleet=w.red)
+    # A fleet write must be in the author's home fleet (ADR 0112): old wrote in
+    # blue while blue was its home, then moved to red.
+    await w.store.set_agent_home_fleet("old", w.blue)
     await w.entry("old", "blue fact", scope="fleet", fleet=w.blue)
+    await w.store.set_agent_home_fleet("old", w.red)
+    in_red = await w.entry("old", "red fact", scope="fleet", fleet=w.red)
     done = await w.entry("old", "withdrawn private")
     await w.store.withdraw_entry(done.id, "gone", by_user="old")
     await w.store.pin_entry(w.red, in_red.id, "old", 10)

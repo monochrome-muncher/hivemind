@@ -29,6 +29,7 @@ from hivemind.domain.access import (
     Agent,
     AgentStatus,
     Fleet,
+    FleetBusy,
     FleetExists,
     FleetMerged,
     InvalidAgentStatus,
@@ -45,6 +46,22 @@ from hivemind.domain.activity import (
     ReceivedFeedback,
     ReporterActivity,
 )
+from hivemind.domain.agent_cleanup import (
+    PREVIEW_RESTORE_LIMIT,
+    PREVIEW_WITHDRAW_LIMIT,
+    AgentCleanupRecord,
+    AgentCleanupRefused,
+    CleanupOutcome,
+    CleanupScan,
+    CleanupUndoOutcome,
+    RestoredEntry,
+    UnknownAgentCleanup,
+    check_counts_unchanged,
+    check_restore_ids,
+    check_window,
+    cleanup_reason,
+)
+from hivemind.domain.agent_cleanup import undo_refusal as cleanup_undo_refusal
 from hivemind.domain.audit import AuditEvent, AuditFilters, AuditRecord
 from hivemind.domain.entry import (
     Entry,
@@ -75,17 +92,22 @@ from hivemind.domain.feedback import (
     truncate_note,
 )
 from hivemind.domain.fleet_merge import (
+    KIND_MOVE,
     DroppedPin,
     DuplicatePair,
     DuplicateScan,
     FleetFacts,
     FleetMergeRecord,
     FleetMergeRefused,
+    FleetMoveRefused,
     MergeOutcome,
+    MoveOutcome,
+    MovePlan,
     UnknownFleetMerge,
     UnmergeOutcome,
     check_pins_unchanged,
     choose_pins,
+    plan_move_entries,
     plan_pin_restore,
     undo_refusal,
 )
@@ -166,9 +188,16 @@ class MemoryStore:
         self._lock = threading.RLock()
         self._entries: dict[str, Entry] = {}
         self._feedback: dict[tuple[str, str, str], Feedback] = {}
+        # Ratings an admin cleanup set aside -> its id (ADR 0111);
+        # Postgres: feedbacks.set_aside_by
+        self._set_aside: dict[tuple[str, str, str], str] = {}
         self._withdrawn_at: dict[str, datetime] = {}  # ADR 0098; Postgres: entries.withdrawn_at
         self._fleets: dict[str, Fleet] = {}
         self._agents: dict[str, Agent] = {}
+        # The agent's key facts (ADR 0110), kept apart from the agent record
+        # and merged only into ``list_agents``, as the real adapter joins them.
+        self._key_last_used: dict[str, datetime] = {}
+        self._key_created: dict[str, datetime] = {}
         self._audit: list[AuditRecord] = []  # append-only (ADR 0027)
         self._pins: dict[tuple[str, str], Pin] = {}  # (fleet, entry), ADR 0058
         self._successions: dict[str, Succession] = {}  # retired agent, ADR 0113
@@ -178,6 +207,8 @@ class MemoryStore:
         # Fleet merges, oldest first, and the entry ids each moved (ADR 0107)
         self._merges: list[FleetMergeRecord] = []
         self._merge_entries: dict[str, list[str]] = {}
+        # Agent cleanups, oldest first (ADR 0111)
+        self._cleanups: list[AgentCleanupRecord] = []
 
     # -- write path -------------------------------------------------------
 
@@ -215,6 +246,8 @@ class MemoryStore:
         )
         with self._lock:
             self._refuse_merged(draft.fleet_id)
+            if draft.scope == "fleet":
+                self._refuse_stale_home(draft.fleet_id, draft.author)
             # Explicit supersessions (SPEC.md §4.1), atomic (ADR 0034):
             # every target must be active, or nothing is written.
             wanted = list(dict.fromkeys(draft.supersedes))
@@ -321,7 +354,9 @@ class MemoryStore:
             now = self._clock()  # one stamp per call, like a transaction's now()
             stored = [replace(fb, updated_at=fb.updated_at or now) for fb in feedbacks]
             for fb in stored:
-                self._feedback[(fb.entry_id, fb.user, fb.agent)] = fb
+                key = (fb.entry_id, fb.user, fb.agent)
+                self._feedback[key] = fb
+                self._set_aside.pop(key, None)  # rating again clears the mark (ADR 0111)
             return stored
 
     # -- read path --------------------------------------------------------
@@ -370,6 +405,7 @@ class MemoryStore:
             return PinRefusal.FLEET  # as on Postgres: nothing a malformed id can pin
         with self._lock:
             self._refuse_merged(fleet_id)
+            self._refuse_stale_home(fleet_id, pinned_by)
             fleet_pins = [p for (f, _), p in self._pins.items() if f == fleet_id]
             refusal = pin_refusal(
                 fleet_pins, entry_id, pinned_by, limit, agent_limit, replaces, also_owned_by
@@ -824,8 +860,14 @@ class MemoryStore:
         counts, as in PgStore. Callers hold the lock."""
         if reporter is None:
             return False
-        own = self._feedback.get((entry.id, *reporter))
-        if own is None or own.verdict is not Verdict.HELPFUL or own.updated_at is None:
+        key = (entry.id, *reporter)
+        own = self._feedback.get(key)
+        if (
+            own is None
+            or key in self._set_aside
+            or own.verdict is not Verdict.HELPFUL
+            or own.updated_at is None
+        ):
             return False
         since = own.updated_at
         if entry.state is EntryState.WITHDRAWN:
@@ -875,12 +917,16 @@ class MemoryStore:
         return visibility is None or entry_is_visible(entry, visibility)
 
     def _live_feedback(self) -> dict[tuple[str, str, str], Feedback]:
-        """The feedback rows whose reporter is not a revoked agent (ADR 0067).
-        Callers hold the lock."""
+        """The feedback rows whose reporter is not a revoked agent (ADR 0067)
+        and that no cleanup set aside (ADR 0111). Callers hold the lock."""
         revoked = {n for n, a in self._agents.items() if a.status is AgentStatus.REVOKED}
-        if not revoked:
+        if not revoked and not self._set_aside:
             return self._feedback
-        return {k: fb for k, fb in self._feedback.items() if fb.user not in revoked}
+        return {
+            k: fb
+            for k, fb in self._feedback.items()
+            if fb.user not in revoked and k not in self._set_aside
+        }
 
     async def feedback_counts(self, entry_id: str) -> FeedbackCounts:
         with self._lock:
@@ -1083,6 +1129,22 @@ class MemoryStore:
             target = self._fleets.get(fleet.merged_into)
             raise FleetMerged(fleet.id, fleet.merged_into, target.name if target else None)
 
+    def _refuse_stale_home(self, fleet_id: str | None, author: str) -> None:
+        """``FleetBusy`` when ``author`` is a registered agent whose home fleet is
+        no longer ``fleet_id`` (ADR 0112: a move changed it mid-write). Caller
+        holds the lock."""
+        agent = self._agents.get(author)
+        if (
+            fleet_id is not None
+            and agent is not None
+            and agent.home_fleet_id is not None
+            and agent.home_fleet_id != fleet_id
+        ):
+            raise FleetBusy(
+                fleet_id,
+                f"the home fleet of {author} changed during this write, retry in a few seconds",
+            )
+
     # -- fleet merge (ADR 0107) ---------------------------------------------
 
     async def fleet_facts(self, fleet_id: str) -> FleetFacts:
@@ -1201,6 +1263,109 @@ class MemoryStore:
             self._merge_entries[record.id] = moved
             return MergeOutcome(record, target, created, len(moved), len(agents), rekeyed, drops)
 
+    # -- fleet move (ADR 0112) -----------------------------------------------
+
+    def _move_entries(self, source_id: str, agents: Sequence[str]) -> tuple[list[Entry], int]:
+        return plan_move_entries(self._entries.values(), source_id, agents)
+
+    async def plan_fleet_move(self, source_id: str, agents: Sequence[str]) -> MovePlan:
+        with self._lock:
+            moved, held = self._move_entries(source_id, agents)
+        return MovePlan(
+            tuple(e.id for e in moved), dict(Counter(e.state.value for e in moved)), held
+        )
+
+    async def move_agents(
+        self,
+        source_id: str,
+        agents: Sequence[str],
+        *,
+        target_fleet_id: str | None = None,
+        new_fleet_name: str | None = None,
+        keep_pin_ids: Sequence[str] | None = None,
+        expected_pin_ids: Sequence[str] | None = None,
+        moved_by: str,
+    ) -> MoveOutcome:
+        if (target_fleet_id is None) == (new_fleet_name is None):
+            raise InvalidInput("name exactly one of target_fleet_id and new_fleet_name")
+        names = sorted(set(agents))
+        if not names:
+            raise InvalidInput("name at least one agent to move")
+        for given in (source_id, target_fleet_id):
+            if given is not None and not is_valid_uuid(given):
+                raise UnknownFleet(f"unknown fleet: {given}")
+        source_id = str(uuid.UUID(source_id))
+        if target_fleet_id is not None:
+            target_fleet_id = str(uuid.UUID(target_fleet_id))
+        with self._lock:
+            source = self._fleets.get(source_id)
+            if source is None:
+                raise UnknownFleet(f"unknown fleet: {source_id}")
+            target = None
+            if target_fleet_id is not None:
+                target = self._fleets.get(target_fleet_id)
+                if target is None:
+                    raise UnknownFleet(f"unknown fleet: {target_fleet_id}")
+                if target.id == source.id:
+                    raise FleetMoveRefused("agents cannot be moved into the fleet they are in")
+            elif any(f.name == new_fleet_name for f in self._fleets.values()):
+                raise FleetExists(f"fleet already exists: {new_fleet_name!r}")
+            for side in (source, target):
+                if side is not None and side.merged_into is not None:
+                    self._refuse_merged(side.id)
+            away = [
+                n
+                for n in names
+                if n not in self._agents or self._agents[n].home_fleet_id != source.id
+            ]
+            if away:
+                raise FleetMoveRefused(
+                    f"not agents of fleet {source.name!r} (or unknown): " + ", ".join(away)
+                )
+            moving, held = self._move_entries(source.id, names)
+            moving_ids = {e.id for e in moving}
+            pins = [
+                p
+                for (f, eid), p in self._pins.items()
+                if (f == source.id and eid in moving_ids) or (target is not None and f == target.id)
+            ]
+            check_pins_unchanged(pins, expected_pin_ids, FleetMoveRefused)
+            kept, dropped = choose_pins(pins, keep_pin_ids)
+            # Nothing below can fail: mutate.
+            created = target is None
+            if target is None:
+                assert new_fleet_name is not None
+                target = Fleet(id=str(uuid.uuid4()), name=new_fleet_name, created_at=self._clock())
+                self._fleets[target.id] = target
+            now = self._clock()
+            for e in moving:
+                self._entries[e.id] = replace(e, fleet_id=target.id)
+            for name in names:
+                self._agents[name] = replace(self._agents[name], home_fleet_id=target.id)
+            drops = tuple(
+                DroppedPin(p.fleet_id, p.entry_id, p.pinned_by, p.pinned_at) for p in dropped
+            )
+            for p in pins:
+                self._pins.pop((p.fleet_id, p.entry_id), None)
+            rekeyed = tuple(replace(p, fleet_id=target.id) for p in kept)
+            for p in sorted(rekeyed, key=lambda p: p.pinned_at):
+                self._pins[(p.fleet_id, p.entry_id)] = p
+            record = FleetMergeRecord(
+                id=str(uuid.uuid4()),
+                source_fleet_id=source.id,
+                target_fleet_id=target.id,
+                merged_by=moved_by,
+                merged_at=now,
+                moved_agents=tuple(names),
+                dropped_pins=drops,
+                kind=KIND_MOVE,
+            )
+            self._merges.append(record)
+            self._merge_entries[record.id] = [e.id for e in moving]
+            return MoveOutcome(
+                record, target, created, len(moving), held, len(names), rekeyed, drops
+            )
+
     async def unmerge_fleet(self, merge_id: str) -> UnmergeOutcome:
         if not is_valid_uuid(merge_id):
             raise UnknownFleetMerge(f"unknown fleet merge: {merge_id}")
@@ -1211,9 +1376,9 @@ class MemoryStore:
                 raise UnknownFleetMerge(f"unknown fleet merge: {merge_id}")
             source = self._fleets[record.source_fleet_id]
             target = self._fleets[record.target_fleet_id]
-            reason = undo_refusal(record, list(reversed(self._merges)), target)
+            reason = undo_refusal(record, list(reversed(self._merges)), target, source)
             if reason is not None:
-                raise FleetMergeRefused(reason)
+                raise (FleetMoveRefused if record.kind == KIND_MOVE else FleetMergeRefused)(reason)
             moved = set(self._merge_entries[record.id])
             back = [
                 eid
@@ -1230,13 +1395,54 @@ class MemoryStore:
             for name in agents:
                 self._agents[name] = replace(self._agents[name], home_fleet_id=source.id)
             # Pins follow their entries back.
-            returned = [key for key in list(self._pins) if key[0] == target.id and key[1] in moved]
-            for key in returned:
-                pin = self._pins.pop(key)
-                self._pins[(source.id, key[1])] = replace(pin, fleet_id=source.id)
             restored: list[DroppedPin] = []
             skipped: list[DroppedPin] = []
-            for fleet in (source, target):
+            unpinned: list[DroppedPin] = []
+            is_move = record.kind == KIND_MOVE
+            if is_move:
+                # A move's pins that come back face the source's cap like any
+                # restored pin (the source may have refilled its briefing).
+                returning = [
+                    DroppedPin(target.id, key[1], pin.pinned_by, pin.pinned_at)
+                    for key, pin in self._pins.items()
+                    if key[0] == target.id and key[1] in back
+                ]
+                mine = [d for d in record.dropped_pins if d.fleet_id == source.id]
+                back_pinned = {d.entry_id for d in returning}  # already coming back
+                fits = [
+                    d
+                    for d in mine
+                    if (e := self._entries.get(d.entry_id)) is not None
+                    and e.fleet_id == source.id
+                    and (source.id, d.entry_id) not in self._pins
+                    and d.entry_id not in back_pinned
+                ]
+                skipped.extend(d for d in mine if d not in fits and d.entry_id not in back_pinned)
+                held = [p.pinned_by for (f, _), p in self._pins.items() if f == source.id]
+                put, over = plan_pin_restore([*returning, *fits], held)
+                for d in sorted(put, key=lambda d: d.pinned_at):
+                    if d in returning:
+                        self._pins.pop((target.id, d.entry_id))
+                    else:
+                        restored.append(d)
+                    self._pins[(source.id, d.entry_id)] = Pin(
+                        source.id, d.entry_id, d.pinned_by, d.pinned_at
+                    )
+                for d in over:
+                    if d in returning:
+                        self._pins.pop((target.id, d.entry_id))
+                        unpinned.append(d)
+                    skipped.append(d)
+                returned_count = sum(1 for d in put if d in returning)
+            else:
+                returned_keys = [
+                    key for key in list(self._pins) if key[0] == target.id and key[1] in moved
+                ]
+                for key in returned_keys:
+                    pin = self._pins.pop(key)
+                    self._pins[(source.id, key[1])] = replace(pin, fleet_id=source.id)
+                returned_count = len(returned_keys)
+            for fleet in (target,) if is_move else (source, target):
                 mine = [d for d in record.dropped_pins if d.fleet_id == fleet.id]
                 fits = [
                     d
@@ -1255,11 +1461,18 @@ class MemoryStore:
                     )
                 restored.extend(put)
             now = self._clock()
-            self._fleets[source.id] = replace(source, merged_into=None, merged_at=None)
+            if record.kind != KIND_MOVE:  # a move never marked its source
+                self._fleets[source.id] = replace(source, merged_into=None, merged_at=None)
             done = replace(record, undone_at=now)
             self._merges[self._merges.index(record)] = done
             return UnmergeOutcome(
-                done, len(back), tuple(agents), len(returned), tuple(restored), tuple(skipped)
+                done,
+                len(back),
+                tuple(agents),
+                returned_count,
+                tuple(restored),
+                tuple(skipped),
+                tuple(unpinned),
             )
 
     async def list_fleet_merges(self, limit: int) -> list[FleetMergeRecord]:
@@ -1269,6 +1482,256 @@ class MemoryStore:
     async def get_fleet_merge(self, merge_id: str) -> FleetMergeRecord | None:
         with self._lock:
             return next((m for m in self._merges if m.id == merge_id), None)
+
+    # -- agent cleanup (ADR 0111) -------------------------------------------
+
+    def _chain_end(self, entry_id: str, stop: frozenset[str] = frozenset()) -> str:
+        """The id a pin on ``entry_id`` shows: the end of its supersession
+        chain, or the first memory in ``stop`` on the way (a memory being
+        restored). Callers hold the lock."""
+        seen = {entry_id}
+        current = self._entries.get(entry_id)
+        while (
+            current is not None
+            and current.id not in stop
+            and current.state is EntryState.SUPERSEDED
+            and current.superseded_by is not None
+            and current.superseded_by not in seen
+        ):
+            seen.add(current.superseded_by)
+            nxt = self._entries.get(current.superseded_by)
+            if nxt is None:
+                return current.superseded_by
+            current = nxt
+        return current.id if current is not None else entry_id
+
+    def _cleanup_sets(
+        self, agent: str, since: datetime, until: datetime
+    ) -> tuple[list[Entry], list[tuple[Entry, str, str]], list[tuple[str, str, str]]]:
+        """The memories to withdraw (newest first), the memories to offer for
+        restoring (newest first) with the memory that replaced each and the end
+        of that chain, and the keys of the ratings to set aside. A restorable
+        memory is superseded, is not the agent's own window memory, and its
+        chain passes only through the agent's own window memories to an
+        active one. Callers hold the lock."""
+        withdraw = sorted(
+            (
+                e
+                for e in self._entries.values()
+                if e.author == agent
+                and e.state is EntryState.ACTIVE
+                and since <= e.created_at < until
+            ),
+            key=lambda e: (e.created_at, e.id),
+            reverse=True,
+        )
+        own = {
+            e.id: e
+            for e in self._entries.values()
+            if e.author == agent and since <= e.created_at < until
+        }
+        found: list[tuple[Entry, str, str]] = []
+        for e in self._entries.values():
+            if e.id in own or e.state is not EntryState.SUPERSEDED or e.superseded_by not in own:
+                continue
+            first = e.superseded_by
+            cur = own[first]
+            hops = 0
+            while (
+                cur.state is EntryState.SUPERSEDED and cur.superseded_by in own and hops <= len(own)
+            ):
+                cur = own[cur.superseded_by]
+                hops += 1
+            if cur.state is EntryState.ACTIVE:
+                found.append((e, first, cur.id))
+        restorable = sorted(found, key=lambda t: (t[0].created_at, t[0].id), reverse=True)
+        ratings = [
+            key
+            for key, fb in self._feedback.items()
+            if fb.user == agent
+            and key not in self._set_aside
+            and fb.updated_at is not None
+            and since <= fb.updated_at < until
+        ]
+        return withdraw, restorable, ratings
+
+    async def scan_agent_cleanup(self, agent: str, since: datetime, until: datetime) -> CleanupScan:
+        with self._lock:
+            withdraw, restorable, ratings = self._cleanup_sets(agent, since, until)
+            by_verdict = Counter(self._feedback[k].verdict.value for k in ratings)
+            ids = {e.id for e in withdraw}
+            offered = {t[0].id for t in restorable}
+            pins = sum(
+                1
+                for (_, eid) in self._pins
+                if eid not in offered and self._chain_end(eid, frozenset(offered)) in ids
+            )
+            return CleanupScan(
+                since=since,
+                until=until,
+                withdraw=tuple(_copy(e) for e in withdraw[:PREVIEW_WITHDRAW_LIMIT]),
+                withdraw_total=len(withdraw),
+                ratings_total=len(ratings),
+                ratings_by_verdict=dict(by_verdict),
+                pins_total=pins,
+                restorable=tuple(_copy(t[0]) for t in restorable[:PREVIEW_RESTORE_LIMIT]),
+                restorable_total=len(restorable),
+            )
+
+    async def cleanup_agent(
+        self,
+        agent: str,
+        since: datetime,
+        until: datetime,
+        *,
+        restore_ids: Sequence[str] | None = None,
+        expected_withdraw: int | None = None,
+        expected_ratings: int | None = None,
+        cleaned_by: str,
+    ) -> CleanupOutcome:
+        check_window(since, until)
+        # Spelled as the store reads ids back; a malformed one is simply not restorable.
+        wanted = [
+            str(uuid.UUID(r)) if is_valid_uuid(r) else r for r in dict.fromkeys(restore_ids or ())
+        ]
+        with self._lock:
+            withdraw, restorable, ratings = self._cleanup_sets(agent, since, until)
+            restore = check_restore_ids([t[0].id for t in restorable], wanted)
+            check_counts_unchanged(len(withdraw), len(ratings), expected_withdraw, expected_ratings)
+            if not withdraw and not ratings:
+                return CleanupOutcome(None)
+            # Nothing below can fail: mutate.
+            cleanup_id = str(uuid.uuid4())
+            now = self._clock()
+            reason = cleanup_reason(cleanup_id)
+            withdraw_ids = [e.id for e in sorted(withdraw, key=lambda e: e.id)]
+            for entry in withdraw:
+                self._entries[entry.id] = replace(
+                    entry, state=EntryState.WITHDRAWN, withdrawn_reason=reason
+                )
+                self._withdrawn_at[entry.id] = now
+            gone = set(withdraw_ids)
+            keep = set(restore)
+            unpinned = tuple(
+                DroppedPin(p.fleet_id, p.entry_id, p.pinned_by, p.pinned_at)
+                for (_, eid), p in sorted(self._pins.items(), key=lambda kv: kv[0])
+                if eid not in keep and self._chain_end(eid, frozenset(keep)) in gone
+            )
+            for d in unpinned:
+                del self._pins[(d.fleet_id, d.entry_id)]
+            by_id = {t[0].id: t for t in restorable}
+            restored = tuple(RestoredEntry(e, by_id[e][1], by_id[e][2]) for e in restore)
+            for item in restored:
+                self._entries[item.entry_id] = replace(
+                    self._entries[item.entry_id], state=EntryState.ACTIVE, superseded_by=None
+                )
+            for key in ratings:
+                self._set_aside[key] = cleanup_id
+            record = AgentCleanupRecord(
+                id=cleanup_id,
+                agent=agent,
+                since=since,
+                until=until,
+                cleaned_by=cleaned_by,
+                cleaned_at=now,
+                withdrawn_ids=tuple(withdraw_ids),
+                restored=restored,
+                ratings_set_aside=len(ratings),
+                unpinned_pins=unpinned,
+            )
+            self._cleanups.append(record)
+            return CleanupOutcome(record, len(withdraw_ids), len(ratings), len(restored), unpinned)
+
+    async def mark_cleanup_revoked(self, cleanup_id: str) -> None:
+        cleanup_id = _canonical_or_same(cleanup_id)
+        with self._lock:
+            for i, record in enumerate(self._cleanups):
+                if record.id == cleanup_id:
+                    self._cleanups[i] = replace(record, revoked=True)
+
+    async def undo_agent_cleanup(self, cleanup_id: str) -> CleanupUndoOutcome:
+        cleanup_id = _canonical_or_same(cleanup_id)
+        with self._lock:
+            record = next((c for c in self._cleanups if c.id == cleanup_id), None)
+            if record is None:
+                raise UnknownAgentCleanup(f"unknown agent cleanup: {cleanup_id}")
+            reason = cleanup_undo_refusal(record, list(reversed(self._cleanups)))
+            if reason is not None:
+                raise AgentCleanupRefused(reason)
+            why = cleanup_reason(record.id)
+            back = [
+                eid
+                for eid in record.withdrawn_ids
+                if (e := self._entries.get(eid)) is not None
+                and e.state is EntryState.WITHDRAWN
+                and e.withdrawn_reason == why
+            ]
+            for eid in back:
+                self._entries[eid] = replace(
+                    self._entries[eid],
+                    state=EntryState.ACTIVE,
+                    withdrawn_reason=None,
+                )
+                self._withdrawn_at.pop(eid, None)
+            again = []
+            for item in record.restored:
+                entry = self._entries.get(item.entry_id)
+                head = self._entries.get(item.head or item.superseded_by)
+                if (
+                    entry is not None
+                    and entry.state is EntryState.ACTIVE
+                    and head is not None
+                    and head.state is EntryState.ACTIVE
+                ):
+                    self._entries[item.entry_id] = replace(
+                        entry, state=EntryState.SUPERSEDED, superseded_by=item.superseded_by
+                    )
+                    again.append(item.entry_id)
+            marked = [k for k, cid in self._set_aside.items() if cid == record.id]
+            for key in marked:
+                del self._set_aside[key]
+            restored_pins: list[DroppedPin] = []
+            skipped_pins: list[DroppedPin] = []
+            for fleet_id in sorted({d.fleet_id for d in record.unpinned_pins}):
+                mine = [d for d in record.unpinned_pins if d.fleet_id == fleet_id]
+                fits = [
+                    d
+                    for d in mine
+                    if (e := self._entries.get(d.entry_id)) is not None
+                    and e.fleet_id == fleet_id
+                    and e.state in (EntryState.ACTIVE, EntryState.SUPERSEDED)
+                    and (fleet_id, d.entry_id) not in self._pins
+                ]
+                skipped_pins.extend(d for d in mine if d not in fits)
+                held = [p.pinned_by for (f, _), p in self._pins.items() if f == fleet_id]
+                put, over = plan_pin_restore(fits, held)
+                skipped_pins.extend(over)
+                for d in put:
+                    self._pins[(fleet_id, d.entry_id)] = Pin(
+                        fleet_id, d.entry_id, d.pinned_by, d.pinned_at
+                    )
+                restored_pins.extend(put)
+            done = replace(record, undone_at=self._clock())
+            self._cleanups[self._cleanups.index(record)] = done
+            return CleanupUndoOutcome(
+                done,
+                reactivated=len(back),
+                reactivate_skipped=len(record.withdrawn_ids) - len(back),
+                resuperseded=len(again),
+                resupersede_skipped=len(record.restored) - len(again),
+                ratings_cleared=len(marked),
+                pins_restored=tuple(restored_pins),
+                pins_skipped=tuple(skipped_pins),
+            )
+
+    async def list_agent_cleanups(self, limit: int) -> list[AgentCleanupRecord]:
+        with self._lock:
+            return list(reversed(self._cleanups))[:limit]
+
+    async def get_agent_cleanup(self, cleanup_id: str) -> AgentCleanupRecord | None:
+        cleanup_id = _canonical_or_same(cleanup_id)
+        with self._lock:
+            return next((c for c in self._cleanups if c.id == cleanup_id), None)
 
     # -- agent registration / activation (ADR 0012) --------------------------
 
@@ -1298,7 +1761,32 @@ class MemoryStore:
 
     async def list_agents(self) -> list[Agent]:
         with self._lock:
-            return sorted(self._agents.values(), key=lambda a: a.name)
+            return [
+                replace(
+                    a,
+                    last_used_at=self._key_last_used.get(a.name),
+                    key_created_at=self._key_created.get(a.name),
+                )
+                for a in sorted(self._agents.values(), key=lambda a: a.name)
+            ]
+
+    def record_key_issued(self, name: str, at: datetime) -> None:
+        """A new key for the agent, made at ``at``, unused so far (ADR 0110).
+        The in-memory authenticator fake calls this; the real adapter's key
+        row carries it. Not on the ``Store`` port: nothing else writes it."""
+        with self._lock:
+            self._key_created[name] = at
+            self._key_last_used.pop(name, None)
+
+    def record_key_use(self, name: str, at: datetime) -> None:
+        """Stamp the agent's key as used at ``at`` (ADR 0110); the real
+        adapter writes ``credentials.last_used_at``. Not on the port."""
+        with self._lock:
+            self._key_last_used[name] = at
+
+    def _drop_key_facts(self, name: str) -> None:
+        self._key_last_used.pop(name, None)
+        self._key_created.pop(name, None)
 
     async def activate_agent(
         self, name: str, *, trust_level: TrustLevel, home_fleet_id: str
@@ -1322,6 +1810,7 @@ class MemoryStore:
                 home_fleet_id=home_fleet_id,
                 activated_at=self._clock(),
             )
+            self._drop_key_facts(name)  # the next key starts unused
             self._agents[name] = activated
             return activated
 
@@ -1335,6 +1824,7 @@ class MemoryStore:
             if agent.status not in REVOCABLE:
                 raise InvalidAgentStatus(name, agent.status, "revoke")
             revoked = replace(agent, status=AgentStatus.REVOKED)
+            self._drop_key_facts(name)  # the key is deleted
             self._agents[name] = revoked
             return revoked
 
@@ -1536,6 +2026,11 @@ def _signals_for(feedback: dict[tuple[str, str, str], Feedback], entry_id: str) 
             (fb.updated_at for fb in flagged if fb.updated_at is not None), default=None
         ),
     )
+
+
+def _canonical_or_same(value: str) -> str:
+    """``value`` in the spelling ids are stored in, or unchanged when it is no uuid."""
+    return str(uuid.UUID(value)) if is_valid_uuid(value) else value
 
 
 def _with_state(

@@ -54,12 +54,24 @@ ROUTES = [
     ("GET", f"/v1/admin/fleets/{FAKE_ID}/pins", None),
     ("GET", "/v1/admin/flagged", None),
     ("POST", f"/v1/admin/fleets/{FAKE_ID}/merge", {"new_fleet_name": "c", "dry_run": True}),
+    (
+        "POST",
+        f"/v1/admin/fleets/{FAKE_ID}/move",
+        {"agents": ["a"], "new_fleet_name": "c", "dry_run": True},
+    ),
     ("GET", "/v1/admin/fleet-merges", None),
     ("POST", f"/v1/admin/fleet-merges/{FAKE_ID}/undo", None),
     ("PATCH", f"/v1/admin/fleets/{FAKE_ID}", {"name": "renamed"}),
     ("POST", "/v1/admin/agents/ghost/retire", {"successor": "alice", "dry_run": True}),
     ("GET", "/v1/admin/successions", None),
     ("POST", "/v1/admin/successions/ghost/undo", None),
+    (
+        "POST",
+        "/v1/admin/agents/ghost/cleanup",
+        {"since": "2026-01-01T00:00:00Z", "dry_run": True},
+    ),
+    ("GET", "/v1/admin/agent-cleanups", None),
+    ("POST", f"/v1/admin/agent-cleanups/{FAKE_ID}/undo", None),
 ]
 
 
@@ -96,6 +108,15 @@ ADMIN_BODIES = {
     ("POST", "/v1/admin/fleets/{source_id}/merge"): {"new_fleet_name": "c", "dry_run": False},
     ("PATCH", "/v1/admin/fleets/{fleet_id}"): {"name": "renamed"},
     ("POST", "/v1/admin/agents/{name}/retire"): {"successor": "alice", "dry_run": False},
+    ("POST", "/v1/admin/fleets/{source_id}/move"): {
+        "agents": ["a"],
+        "new_fleet_name": "c",
+        "dry_run": False,
+    },
+    ("POST", "/v1/admin/agents/{name}/cleanup"): {
+        "since": "2026-01-01T00:00:00Z",
+        "dry_run": False,
+    },
 }
 
 
@@ -122,6 +143,7 @@ async def test_every_registered_admin_route_is_403_for_agent_and_org_keys(header
                 source_id=FAKE_ID,
                 merge_id=FAKE_ID,
                 retired="ghost",
+                cleanup_id=FAKE_ID,
             )
             body = ADMIN_BODIES.get((method, template))
             resp = await client.request(method, path, json=body, headers=headers)

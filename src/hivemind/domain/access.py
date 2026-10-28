@@ -19,7 +19,7 @@ readable at any level >= 1 (grandfathered read-only, ADR 0011).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import IntEnum, StrEnum
 
 from hivemind.domain.entry import Entry, EntryState
@@ -97,11 +97,14 @@ class FleetMerged(Exception):
 
 class FleetBusy(TimeoutError):
     """A write into a fleet waited for the fleet's row lock and gave up: a
-    merge (ADR 0107) holds it. A ``TimeoutError``, so every surface already
+    merge (ADR 0107) holds it, or an agent's write found its home fleet
+    changed under it by a fleet move (ADR 0112). A ``TimeoutError``, so every surface already
     answers a retryable 503; the surfaces name it ``fleet_busy``."""
 
-    def __init__(self, fleet_id: str) -> None:
-        super().__init__(f"fleet {fleet_id} is being merged, retry in a few seconds")
+    def __init__(self, fleet_id: str, detail: str | None = None) -> None:
+        super().__init__(
+            detail or f"fleet {fleet_id} is being merged or moved, retry in a few seconds"
+        )
         self.fleet_id = fleet_id
 
 
@@ -173,6 +176,25 @@ class Agent:
     owner_alias: str | None = None
     created_at: datetime | None = None
     activated_at: datetime | None = None
+    # Key facts for the idle list (ADR 0110). Only ``Store.list_agents`` (the
+    # admin agent list) fills them; every other read leaves them ``None``.
+    # ``last_used_at``: when the key last authenticated, to the hour (``None``
+    # = not since the column shipped, or no key). ``key_created_at``: when
+    # the current key row was made. Nothing ranks or permits on either.
+    last_used_at: datetime | None = None
+    key_created_at: datetime | None = None
+
+
+def is_idle(agent: Agent, now: datetime, idle_days: int) -> bool:
+    """Whether an active agent's key has not been used for ``idle_days``
+    (ADR 0110). A key never used counts from when it was issued (so a fresh
+    or replaced key is not idle on day one), then from the agent's
+    activation. Pending and revoked agents have no live key and are never
+    idle."""
+    if agent.status is not AgentStatus.ACTIVE:
+        return False
+    since = agent.last_used_at or agent.key_created_at or agent.activated_at or agent.created_at
+    return since is not None and now - since >= timedelta(days=idle_days)
 
 
 @dataclass(frozen=True, slots=True)
@@ -332,5 +354,6 @@ __all__ = [
     "UnknownFleet",
     "Visibility",
     "entry_is_visible",
+    "is_idle",
     "may_supersede",
 ]

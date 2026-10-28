@@ -28,7 +28,7 @@ from hivemind.store.keys import _issue_admin
 
 TABLES = (
     "TRUNCATE audit_log, credentials, agents, fleets, entries, feedbacks, search_counts, "
-    "entry_links, pins, fleet_merges, fleet_merge_entries, successions"
+    "entry_links, pins, fleet_merges, fleet_merge_entries, agent_cleanups, successions"
 )
 
 
@@ -133,7 +133,7 @@ async def test_a_write_gives_up_with_a_retryable_error_when_a_merge_holds_the_fl
     await merge.execute("SELECT 1 FROM fleets WHERE id = $1 FOR UPDATE", source)
     try:
         started = asyncio.get_running_loop().time()
-        with pytest.raises(FleetBusy, match="being merged, retry"):
+        with pytest.raises(FleetBusy, match="being merged or moved, retry"):
             await store.create_entry(_draft(source, "waits too long"), None)
         assert 2 < asyncio.get_running_loop().time() - started < 10
         with pytest.raises(TimeoutError):  # a 503 on every surface

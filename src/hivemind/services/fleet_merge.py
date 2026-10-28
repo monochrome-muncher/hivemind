@@ -1,15 +1,17 @@
-"""Fleet merge (ADR 0107): preview, merge, undo and the merge list.
+"""Fleet merge (ADR 0107) and fleet move (ADR 0112): preview, apply, undo and
+the shared history list.
 
 Admin only (ADR 0012). The data move is one store transaction
-(``Store.merge_fleets``); this layer validates, builds the preview and
-audits afterwards (ADR 0027), as ``AccessService`` does. A merge writes no
-memory.
+(``Store.merge_fleets`` / ``Store.move_agents``); this layer validates,
+builds the preview and audits afterwards (ADR 0027), as ``AccessService``
+does. Neither writes a memory. A move is recorded like a merge and undone
+by the same call, so the undo and the list serve both.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from hivemind.domain.access import Fleet, FleetExists, FleetMerged, UnknownFleet
@@ -17,11 +19,14 @@ from hivemind.domain.audit import AuditAction
 from hivemind.domain.entry import Entry
 from hivemind.domain.fleet_merge import (
     DUPLICATE_LOOKUP_CAP,
+    KIND_MOVE,
     MERGE_PIN_LIMIT,
     FleetFacts,
     FleetMergeRecord,
     FleetMergeRefused,
+    FleetMoveRefused,
     MergeOutcome,
+    MoveOutcome,
     UnmergeOutcome,
     default_kept,
     newest_first,
@@ -88,8 +93,29 @@ class MergePreview:
 
 
 @dataclass(frozen=True, slots=True)
+class MovePreview:
+    """What ``dry_run`` reports for a move. ``leaving`` memories (by state)
+    go with ``agents``; ``held_back`` of their fleet memories stay because
+    the head of their supersession chain does. The ``staying_agents`` lose
+    access to everything that leaves. ``pins`` are the target's pins plus
+    those on memories that leave (the pin picker's pool)."""
+
+    source: PreviewSide
+    target: PreviewSide
+    agents: tuple[str, ...]
+    staying_agents: tuple[str, ...]
+    leaving: int
+    leaving_by_state: Mapping[str, int]
+    held_back: int
+    pins: tuple[PreviewPin, ...]
+    pin_limit: int
+    needs_pin_choice: bool
+
+
+@dataclass(frozen=True, slots=True)
 class MergeView:
-    """A recorded merge as listed: names, and whether it can be undone now."""
+    """A recorded merge or move as listed: names, and whether it can be
+    undone now (``record.kind`` says which)."""
 
     record: FleetMergeRecord
     source_name: str | None
@@ -99,7 +125,8 @@ class MergeView:
 
 
 class FleetMergeService:
-    """Merge a fleet into another and undo it (ADR 0107)."""
+    """Merge a fleet into another, or move some of its agents with their
+    memories, and undo either (ADR 0107, 0112)."""
 
     def __init__(self, store: Store) -> None:
         self._store = store
@@ -279,22 +306,196 @@ class FleetMergeService:
         )
         return outcome
 
+    # -- move agents (ADR 0112) -----------------------------------------------
+
+    async def _move_sides(
+        self,
+        source_id: str,
+        agents: Sequence[str],
+        target_fleet_id: str | None,
+        new_fleet_name: str | None,
+    ) -> tuple[Fleet, Fleet | None, list[str], list[str]]:
+        """Validate a move the way the store will: (source, target or ``None``
+        for a new fleet, movers, the agents that stay)."""
+        self._check_target(target_fleet_id, new_fleet_name)
+        names = sorted(set(agents))
+        if not names:
+            raise InvalidInput("name at least one agent to move")
+        source = await self._existing(source_id)
+        target: Fleet | None = None
+        if target_fleet_id is not None:
+            target = await self._existing(target_fleet_id)
+            if target.id == source.id:
+                raise FleetMoveRefused("agents cannot be moved into the fleet they are in")
+        elif any(f.name == new_fleet_name for f in await self._store.list_fleets()):
+            raise FleetExists(f"fleet already exists: {new_fleet_name!r}")
+        homed = {a.name for a in await self._store.list_agents() if a.home_fleet_id == source.id}
+        away = [n for n in names if n not in homed]
+        if away:
+            raise FleetMoveRefused(
+                f"not agents of fleet {source.name!r} (or unknown): " + ", ".join(away)
+            )
+        return source, target, names, sorted(homed - set(names))
+
+    async def preview_move(
+        self,
+        source_id: str,
+        agents: Sequence[str],
+        credential: Credential,
+        *,
+        target_fleet_id: str | None = None,
+        new_fleet_name: str | None = None,
+    ) -> MovePreview:
+        """What moving ``agents`` out of ``source_id`` would do, changing
+        nothing: how many memories leave (and how many stay behind with a
+        chain head that stays), who loses access, and the pin picker's pool.
+        Refuses what the move would refuse."""
+        self._require_admin(credential)
+        source, target, names, staying = await self._move_sides(
+            source_id, agents, target_fleet_id, new_fleet_name
+        )
+        plan = await self._store.plan_fleet_move(source.id, names)
+        leaving = set(plan.entry_ids)
+        source_pins = await self._store.list_pins(source.id)
+        source_facts = await self._store.fleet_facts(source.id)
+        if target is None:
+            assert new_fleet_name is not None
+            target_side = PreviewSide(new_fleet_name, None, FleetFacts(0, {}), 0)
+            target_pins: list[Pin] = []
+        else:
+            target_pins = await self._store.list_pins(target.id)
+            target_side = PreviewSide(
+                target.name, target, await self._store.fleet_facts(target.id), len(target_pins)
+            )
+        candidates = newest_first(
+            [*(p for p in source_pins if p.entry_id in leaving), *target_pins]
+        )
+        ticked = {p.entry_id for p in default_kept(candidates)}
+        entries = await self._store.get_entries([p.entry_id for p in candidates])
+        return MovePreview(
+            source=PreviewSide(source.name, source, source_facts, len(source_pins)),
+            target=target_side,
+            agents=tuple(names),
+            staying_agents=tuple(staying),
+            leaving=len(leaving),
+            leaving_by_state=dict(plan.states or {}),
+            held_back=plan.held_back,
+            pins=tuple(
+                PreviewPin(p, entries.get(p.entry_id), p.entry_id in ticked) for p in candidates
+            ),
+            pin_limit=MERGE_PIN_LIMIT,
+            needs_pin_choice=len(candidates) > MERGE_PIN_LIMIT,
+        )
+
+    async def move(
+        self,
+        source_id: str,
+        agents: Sequence[str],
+        credential: Credential,
+        *,
+        target_fleet_id: str | None = None,
+        new_fleet_name: str | None = None,
+        keep_pin_ids: Sequence[str] | None = None,
+        expected_pin_ids: Sequence[str] | None = None,
+    ) -> MoveOutcome:
+        """Move ``agents`` and the fleet memories they wrote into the target
+        (admin-gated), then audit: ``fleet.create`` for a new target, one
+        ``entry.unpin`` (reason ``fleet_move``) per dropped pin and
+        ``fleet.move_agents``. The pin choice works as in ``merge``, over
+        the target's pins plus those that follow the memories. The store's
+        refusals (same fleet, an agent not in the source, changed pins, busy
+        locks) are ``FleetMoveRefused`` (409 ``move_refused``); a merged side
+        is ``FleetMerged`` and a taken name ``FleetExists``. A failed audit
+        write is raised, never swallowed."""
+        self._require_admin(credential)
+        self._check_target(target_fleet_id, new_fleet_name)
+        try:
+            outcome = await self._store.move_agents(
+                source_id,
+                agents,
+                target_fleet_id=target_fleet_id,
+                new_fleet_name=new_fleet_name,
+                keep_pin_ids=keep_pin_ids,
+                expected_pin_ids=expected_pin_ids,
+                moved_by=credential.audit_actor(),
+            )
+        except FleetMoveRefused:
+            raise
+        except FleetMergeRefused as exc:  # the pins check shared with a merge
+            raise FleetMoveRefused(str(exc)) from exc
+        self._changed()
+        record = outcome.record
+        if outcome.target_created:
+            await record_admin_action(
+                self._store,
+                credential,
+                AuditAction.FLEET_CREATE,
+                outcome.target.id,
+                {"name": outcome.target.name, "via": "fleet_move", "move_id": record.id},
+            )
+        for pin in outcome.pins_dropped:
+            await record_admin_action(
+                self._store,
+                credential,
+                AuditAction.ENTRY_UNPIN,
+                pin.entry_id,
+                {
+                    "fleet_id": pin.fleet_id,
+                    "pin_ids": [pin.entry_id],
+                    "reason": "fleet_move",
+                    "move_id": record.id,
+                },
+            )
+        await record_admin_action(
+            self._store,
+            credential,
+            AuditAction.FLEET_MOVE_AGENTS,
+            record.source_fleet_id,
+            {
+                "move_id": record.id,
+                "target_fleet_id": record.target_fleet_id,
+                "target_fleet_name": outcome.target.name,
+                "created_target": outcome.target_created,
+                "agents": list(record.moved_agents),
+                "entries": outcome.entries_moved,
+                "entries_held_back": outcome.entries_held_back,
+                "pins_kept": len(outcome.pins_kept),
+                "pins_dropped": len(outcome.pins_dropped),
+            },
+        )
+        return outcome
+
     # -- undo and the list ---------------------------------------------------
 
     async def undo(self, merge_id: str, credential: Credential) -> UnmergeOutcome:
-        """Undo a merge (admin-gated) and audit it as ``fleet.unmerge``.
-        ``UnknownFleetMerge`` / ``FleetMergeRefused`` per the store."""
+        """Undo a merge or a move (admin-gated) and audit it as
+        ``fleet.unmerge`` or ``fleet.move_undo``. ``UnknownFleetMerge`` /
+        ``FleetMergeRefused`` (``FleetMoveRefused`` for a move) per the store."""
         self._require_admin(credential)
         outcome = await self._store.unmerge_fleet(merge_id)
         self._changed()
         record = outcome.record
+        is_move = record.kind == KIND_MOVE
+        for pin in outcome.pins_unpinned:  # returning pins that did not fit the source
+            await record_admin_action(
+                self._store,
+                credential,
+                AuditAction.ENTRY_UNPIN,
+                pin.entry_id,
+                {
+                    "fleet_id": pin.fleet_id,
+                    "pin_ids": [pin.entry_id],
+                    "reason": "fleet_move_undo",
+                    "move_id": record.id,
+                },
+            )
         await record_admin_action(
             self._store,
             credential,
-            AuditAction.FLEET_UNMERGE,
+            AuditAction.FLEET_MOVE_UNDO if is_move else AuditAction.FLEET_UNMERGE,
             record.source_fleet_id,
             {
-                "merge_id": record.id,
+                "move_id" if is_move else "merge_id": record.id,
                 "target_fleet_id": record.target_fleet_id,
                 "entries": outcome.entries_restored,
                 "agents": len(outcome.agents_restored),
@@ -313,8 +514,8 @@ class FleetMergeService:
         fleets = {f.id: f for f in await self._store.list_fleets()}
         views = []
         for record in records:
-            blocked = undo_refusal(record, records, fleets.get(record.target_fleet_id))
             source, target = fleets.get(record.source_fleet_id), fleets.get(record.target_fleet_id)
+            blocked = undo_refusal(record, records, target, source)
             views.append(
                 MergeView(
                     record,

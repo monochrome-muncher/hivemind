@@ -27,6 +27,7 @@ from tests.pg import ensure_migrated
 from hivemind.config import Settings
 from hivemind.domain.access import (
     AgentStatus,
+    FleetBusy,
     FleetExists,
     FleetMerged,
     InvalidAgentStatus,
@@ -34,6 +35,11 @@ from hivemind.domain.access import (
     UnknownAgent,
     UnknownFleet,
     Visibility,
+)
+from hivemind.domain.agent_cleanup import (
+    AgentCleanupRefused,
+    UnknownAgentCleanup,
+    cleanup_reason,
 )
 from hivemind.domain.audit import ActorKind, AuditAction, AuditEvent, AuditFilters
 from hivemind.domain.entry import (
@@ -57,7 +63,7 @@ from hivemind.domain.feedback import (
     Verdict,
     is_contested,
 )
-from hivemind.domain.fleet_merge import FleetMergeRefused, UnknownFleetMerge
+from hivemind.domain.fleet_merge import FleetMergeRefused, FleetMoveRefused, UnknownFleetMerge
 from hivemind.domain.health import HealthCounts
 from hivemind.domain.pin import PinRefusal, PinWrite
 from hivemind.domain.succession import (
@@ -75,7 +81,7 @@ NO_SUCH_ID = "00000000-0000-4000-8000-00000000dead"
 
 _TABLES = (
     "TRUNCATE audit_log, credentials, agents, fleets, entries, feedbacks, "
-    "search_counts, entry_links, pins, fleet_merges, fleet_merge_entries, successions"
+    "search_counts, entry_links, pins, fleet_merges, fleet_merge_entries, agent_cleanups, successions"
 )
 
 
@@ -2114,6 +2120,17 @@ async def test_agents_list_by_name(adapter: Adapter) -> None:
     assert [a.name for a in await adapter.store.list_agents()] == ["amy", "zed"]
 
 
+async def test_agents_list_shows_no_key_use_for_an_agent_that_never_authenticated(
+    adapter: Adapter,
+) -> None:
+    """ADR 0110: the agent list carries ``last_used_at``; the key check (the
+    authenticator) is what stamps it, so a fresh or keyless agent shows none."""
+    await adapter.store.register_agent("amy")
+    assert [a.last_used_at for a in await adapter.store.list_agents()] == [None]
+    got = await adapter.store.get_agent("amy")
+    assert got is not None and got.last_used_at is None  # only the list fills it
+
+
 # -- audit log (ADR 0027) ---------------------------------------------------------------
 
 
@@ -2579,6 +2596,737 @@ async def test_unmerge_keeps_to_three_restored_pins_per_agent(adapter: Adapter) 
     assert {p.entry_id for p in await store.list_pins(a)} == set(pins[1:])
 
 
+# -- fleet move (ADR 0112) --------------------------------------------------------------
+
+
+async def _agent_in(adapter: Adapter, name: str, fleet_id: str) -> None:
+    await adapter.store.register_agent(name)
+    await adapter.store.activate_agent(
+        name, trust_level=TrustLevel.CONTRIBUTOR, home_fleet_id=fleet_id
+    )
+
+
+async def _authored(
+    adapter: Adapter, summary: str, fleet_id: str, author: str, supersedes: tuple[str, ...] = ()
+) -> Entry:
+    return await write(
+        adapter, summary, scope="fleet", fleet_id=fleet_id, author=author, supersedes=supersedes
+    )
+
+
+async def test_move_agents_moves_the_agents_and_their_fleet_memories(adapter: Adapter) -> None:
+    store = adapter.store
+    a, b = await _two_fleets(adapter)
+    for name in ("amy", "ann", "bob"):
+        await _agent_in(adapter, name, a)
+    live = await _authored(adapter, "live", a, "amy")
+    gone = await _authored(adapter, "gone", a, "ann")
+    await store.withdraw_entry(gone.id, "x", by_user="alice")
+    bobs = await _authored(adapter, "bobs", a, "bob")
+    own = await write(adapter, "self note", author="amy", scope="self")
+    org = await write(adapter, "org note", author="amy", scope="org")
+    theirs = await _authored(adapter, "theirs", b, "bea")
+    await store.record_search(a, empty=True)
+
+    plan = await store.plan_fleet_move(a, ["amy", "ann", "amy"])
+    assert (set(plan.entry_ids), plan.held_back) == ({live.id, gone.id}, 0)
+    assert dict(plan.states or {}) == {"active": 1, "withdrawn": 1}
+
+    out = await store.move_agents(a, ["amy", "ann"], target_fleet_id=b, moved_by="admin:1")
+
+    assert (out.entries_moved, out.entries_held_back, out.agents_moved) == (2, 0, 2)
+    assert out.record.kind == "move" and out.record.moved_agents == ("amy", "ann")
+    assert (out.record.source_fleet_id, out.record.target_fleet_id) == (a, b)
+    assert out.record.merged_by == "admin:1" and not out.target_created
+    found = await store.get_entries([live.id, gone.id, bobs.id, own.id, org.id, theirs.id])
+    fleets = {e.id: e.fleet_id for e in found.values()}
+    assert fleets == {
+        live.id: b,
+        gone.id: b,
+        bobs.id: a,
+        own.id: None,
+        org.id: None,
+        theirs.id: b,
+    }
+    homes = {n: (await store.get_agent(n)).home_fleet_id for n in ("amy", "ann", "bob")}  # type: ignore[union-attr]
+    assert homes == {"amy": b, "ann": b, "bob": a}
+    assert {f.id: f.merged_into for f in await store.list_fleets()} == {a: None, b: None}
+    assert {c.fleet_id: c.searches for c in await store.search_counts()} == {a: 1}
+    assert await store.get_fleet_merge(out.record.id) == out.record
+    assert [m.kind for m in await store.list_fleet_merges(10)] == ["move"]
+
+
+async def test_move_agents_into_a_new_fleet(adapter: Adapter) -> None:
+    store = adapter.store
+    a, _ = await _two_fleets(adapter)
+    await _agent_in(adapter, "amy", a)
+    mine = await _authored(adapter, "mine", a, "amy")
+    out = await store.move_agents(a, ["amy"], new_fleet_name="c", moved_by="admin:1")
+    assert out.target_created and out.target.name == "c" and out.entries_moved == 1
+    assert (await store.get_entry(mine.id)).fleet_id == out.target.id  # type: ignore[union-attr]
+    with pytest.raises(FleetExists):
+        await store.move_agents(a, ["amy"], new_fleet_name="a", moved_by="x")
+    await store.move_agents(out.target.id, ["amy"], target_fleet_id=a, moved_by="x")
+
+
+async def test_move_follows_the_chain_rule(adapter: Adapter) -> None:
+    store = adapter.store
+    a, b = await _two_fleets(adapter)
+    for name in ("amy", "bob"):
+        await _agent_in(adapter, name, a)
+    v1 = await _authored(adapter, "v1", a, "amy")
+    v2 = await _authored(adapter, "v2", a, "bob", (v1.id,))  # a stayer's head: v1 stays
+    c1 = await _authored(adapter, "c1", a, "amy")
+    c2 = await _authored(adapter, "c2", a, "bob", (c1.id,))
+    c3 = await _authored(adapter, "c3", a, "amy", (c2.id,))  # amy's head: c1 moves, c2 stays
+    d1 = await _authored(adapter, "d1", a, "amy")
+    d2 = await _authored(adapter, "d2", a, "amy", (d1.id,))
+    plan = await store.plan_fleet_move(a, ["amy"])
+    assert (set(plan.entry_ids), plan.held_back) == ({c1.id, c3.id, d1.id, d2.id}, 1)
+    out = await store.move_agents(a, ["amy"], target_fleet_id=b, moved_by="x")
+    assert (out.entries_moved, out.entries_held_back) == (4, 1)
+    now = {
+        e.id: e.fleet_id
+        for e in (await store.get_entries([x.id for x in (v1, v2, c1, c2, c3, d1, d2)])).values()
+    }
+    assert now == {v1.id: a, v2.id: a, c1.id: b, c2.id: a, c3.id: b, d1.id: b, d2.id: b}
+
+
+async def test_move_pins_follow_and_the_picker_applies(adapter: Adapter) -> None:
+    store = adapter.store
+    a, b = await _two_fleets(adapter)
+    await _agent_in(adapter, "amy", a)
+    mine = []
+    for i in range(6):
+        e = await _authored(adapter, f"m{i}", a, "amy")
+        assert isinstance(await store.pin_entry(a, e.id, f"p{i}", limit=99), PinWrite)
+        mine.append(e.id)
+    stays = await _pinned(adapter, "stays", a)  # an author who is not moving
+    theirs = [await _pinned(adapter, f"t{i}", b) for i in range(6)]
+    with pytest.raises(InvalidInput):
+        await store.move_agents(a, ["amy"], target_fleet_id=b, moved_by="x")  # 12 > 10
+    shown = [*mine, *theirs]
+    with pytest.raises(FleetMoveRefused, match="preview again"):
+        await store.move_agents(
+            a, ["amy"], target_fleet_id=b, expected_pin_ids=shown[1:], moved_by="x"
+        )
+    assert await store.list_fleet_merges(10) == []
+    keep = [*mine[1:], *theirs[1:]]
+    out = await store.move_agents(
+        a, ["amy"], target_fleet_id=b, keep_pin_ids=keep, expected_pin_ids=shown, moved_by="x"
+    )
+    assert {p.entry_id for p in out.pins_dropped} == {mine[0], theirs[0]}
+    assert {p.entry_id for p in await store.list_pins(b)} == set(keep)
+    assert {p.entry_id for p in await store.list_pins(a)} == {stays}
+
+    undone = await store.unmerge_fleet(out.record.id)
+    assert undone.record.kind == "move" and undone.agents_restored == ("amy",)
+    assert undone.pins_returned == 5
+    assert {p.entry_id for p in await store.list_pins(a)} == {stays, *mine[1:], mine[0]}
+    assert {p.entry_id for p in await store.list_pins(b)} == set(theirs)
+
+
+async def test_move_refusals_change_nothing(adapter: Adapter) -> None:
+    store = adapter.store
+    a, b = await _two_fleets(adapter)
+    c = (await store.create_fleet("c")).id
+    await _agent_in(adapter, "amy", a)
+    await _agent_in(adapter, "cy", c)
+    mine = await _authored(adapter, "mine", a, "amy")
+    with pytest.raises(FleetMoveRefused, match="cy, ghost"):
+        await store.move_agents(a, ["amy", "ghost", "cy"], target_fleet_id=b, moved_by="x")
+    with pytest.raises(FleetMoveRefused):
+        await store.move_agents(a, ["amy"], target_fleet_id=a, moved_by="x")
+    with pytest.raises(InvalidInput):
+        await store.move_agents(a, [], target_fleet_id=b, moved_by="x")
+    with pytest.raises(InvalidInput):
+        await store.move_agents(a, ["amy"], moved_by="x")
+    with pytest.raises(InvalidInput):
+        await store.move_agents(a, ["amy"], target_fleet_id=b, new_fleet_name="n", moved_by="x")
+    with pytest.raises(UnknownFleet):
+        await store.move_agents(NO_SUCH_ID, ["amy"], target_fleet_id=b, moved_by="x")
+    with pytest.raises(UnknownFleet):
+        await store.move_agents(a, ["amy"], target_fleet_id=NO_SUCH_ID, moved_by="x")
+    with pytest.raises(UnknownFleet):
+        await store.move_agents("not-a-uuid", ["amy"], target_fleet_id=b, moved_by="x")
+    with pytest.raises(UnknownFleet):  # an unknown source wins over a taken new name
+        await store.move_agents(NO_SUCH_ID, ["amy"], new_fleet_name="a", moved_by="x")
+    with pytest.raises(FleetExists):
+        await store.move_agents(a, ["amy"], new_fleet_name="b", moved_by="x")
+    await store.merge_fleets(c, target_fleet_id=b, merged_by="x")
+    with pytest.raises(FleetMerged):
+        await store.move_agents(a, ["amy"], target_fleet_id=c, moved_by="x")
+    with pytest.raises(FleetMerged):
+        await store.move_agents(c, ["cy"], target_fleet_id=a, moved_by="x")
+    assert (await store.get_agent("amy")).home_fleet_id == a  # type: ignore[union-attr]
+    assert (await store.get_entry(mine.id)).fleet_id == a  # type: ignore[union-attr]
+    assert [m.kind for m in await store.list_fleet_merges(10)] == ["merge"]
+    assert {f.name for f in await store.list_fleets()} == {"a", "b", "c"}  # no stray new fleet
+
+
+async def test_move_ids_are_read_the_same_on_both_adapters(adapter: Adapter) -> None:
+    store = adapter.store
+    a, b = await _two_fleets(adapter)
+    await _agent_in(adapter, "amy", a)
+    out = await store.move_agents(a.upper(), ["amy"], target_fleet_id=b.upper(), moved_by="x")
+    assert (out.record.source_fleet_id, out.record.target_fleet_id) == (a, b)
+    assert (await store.plan_fleet_move("not-a-uuid", ["amy"])).entry_ids == ()
+
+
+async def test_a_write_by_a_moved_author_for_the_old_fleet_is_refused_as_busy(
+    adapter: Adapter,
+) -> None:
+    store = adapter.store
+    a, b = await _two_fleets(adapter)
+    await _agent_in(adapter, "amy", a)
+    await store.move_agents(a, ["amy"], target_fleet_id=b, moved_by="x")
+    with pytest.raises(FleetBusy, match="home fleet of amy changed"):
+        await _authored(adapter, "late", a, "amy")
+    assert (await _authored(adapter, "now", b, "amy")).fleet_id == b
+
+
+async def test_undo_of_a_move_follows_the_newest_standing_rule(adapter: Adapter) -> None:
+    store = adapter.store
+    a, b = await _two_fleets(adapter)
+    c = (await store.create_fleet("c")).id
+    for name in ("amy", "ann"):
+        await _agent_in(adapter, name, a)
+    mine = await _authored(adapter, "mine", a, "amy")
+    first = await store.move_agents(a, ["amy"], target_fleet_id=b, moved_by="x")
+    second = await store.move_agents(a, ["ann"], target_fleet_id=c, moved_by="x")  # same source
+    with pytest.raises(FleetMoveRefused, match="newer"):
+        await store.unmerge_fleet(first.record.id)
+    await store.unmerge_fleet(second.record.id)
+    merged = await store.merge_fleets(b, target_fleet_id=c, merged_by="x")  # the target merged away
+    with pytest.raises(FleetMoveRefused):
+        await store.unmerge_fleet(first.record.id)
+    await store.unmerge_fleet(merged.record.id)
+    undone = await store.unmerge_fleet(first.record.id)
+    assert (undone.entries_restored, undone.agents_restored) == (1, ("amy",))
+    assert (await store.get_entry(mine.id)).fleet_id == a  # type: ignore[union-attr]
+    source = await store.get_fleet(a)
+    assert source is not None and source.merged_into is None
+    with pytest.raises(FleetMoveRefused, match="already undone"):
+        await store.unmerge_fleet(first.record.id)
+    # A merge refusal stays a plain merge refusal.
+    older = await store.merge_fleets(c, new_fleet_name="d", merged_by="x")
+    await store.move_agents(a, ["amy"], target_fleet_id=older.target.id, moved_by="x")
+    with pytest.raises(FleetMergeRefused, match="newer") as caught:
+        await store.unmerge_fleet(older.record.id)
+    assert not isinstance(caught.value, FleetMoveRefused)
+
+
+async def test_undo_of_a_move_applies_the_source_pin_cap_to_returning_pins(
+    adapter: Adapter,
+) -> None:
+    store = adapter.store
+    a, b = await _two_fleets(adapter)
+    await _agent_in(adapter, "amy", a)
+    mine = []
+    for i in range(4):
+        e = await _authored(adapter, f"m{i}", a, "amy")
+        assert isinstance(await store.pin_entry(a, e.id, f"p{i}", limit=99), PinWrite)
+        mine.append(e.id)
+    out = await store.move_agents(a, ["amy"], target_fleet_id=b, moved_by="x")
+    for i in range(8):
+        await _pinned(adapter, f"s{i}", a)
+    undone = await store.unmerge_fleet(out.record.id)
+    assert undone.pins_returned == 2
+    assert {p.entry_id for p in undone.pins_unpinned} == set(mine[:2])
+    assert {p.entry_id for p in undone.pins_skipped} == set(mine[:2])
+    assert len(await store.list_pins(a)) == 10
+    assert await store.list_pins(b) == []
+    assert (await store.get_entry(mine[0])).fleet_id == a  # type: ignore[union-attr]
+
+
+async def test_the_home_fleet_guard_ignores_unregistered_authors_and_private_notes(
+    adapter: Adapter,
+) -> None:
+    store = adapter.store
+    a, b = await _two_fleets(adapter)
+    await _agent_in(adapter, "amy", a)
+    await store.move_agents(a, ["amy"], target_fleet_id=b, moved_by="x")
+    assert (await _authored(adapter, "unregistered", a, "ghost")).fleet_id == a
+    note = await write(adapter, "private", author="amy", scope="self")
+    assert note.fleet_id is None
+    stale_pin = await _authored(adapter, "to pin", a, "ghost")
+    with pytest.raises(FleetBusy):  # a pin by the moved agent for the old fleet is refused
+        await store.pin_entry(a, stale_pin.id, "amy", limit=10)
+    assert isinstance(await store.pin_entry(a, stale_pin.id, "ghost", limit=10), PinWrite)
+
+
+# -- agent cleanup (ADR 0111) -----------------------------------------------------------------
+
+WIDE_SINCE = datetime(2020, 1, 1, tzinfo=UTC)
+WIDE_UNTIL = datetime(2100, 1, 1, tzinfo=UTC)
+CLEAN = {"cleaned_by": "admin:1"}
+
+
+async def _junk(adapter: Adapter, summary: str, **kwargs: object) -> Entry:
+    return await write(adapter, summary, author="bad", **kwargs)
+
+
+async def _rate(
+    adapter: Adapter,
+    entry_id: str,
+    user: str = "bad",
+    verdict: Verdict = Verdict.WRONG,
+    note: str | None = "n",
+    at: datetime | None = T0,
+) -> None:
+    await adapter.store.record_feedback(Feedback(entry_id, user, "a", verdict, note, updated_at=at))
+
+
+async def _clean(adapter: Adapter, **kwargs: object):  # type: ignore[no-untyped-def]
+    return await adapter.store.cleanup_agent("bad", WIDE_SINCE, WIDE_UNTIL, **CLEAN, **kwargs)  # type: ignore[arg-type]
+
+
+async def _state(adapter: Adapter, entry_id: str) -> Entry:
+    entry = await adapter.store.get_entry(entry_id)
+    assert entry is not None
+    return entry
+
+
+async def test_cleanup_withdraws_ratings_pins_and_restores_in_one_go(adapter: Adapter) -> None:
+    store = adapter.store
+    fleet = (await store.create_fleet("alpha")).id
+    good = await write(adapter, "good fact", author="good", scope="fleet", fleet_id=fleet)
+    other = await write(adapter, "other good fact", author="good", scope="fleet", fleet_id=fleet)
+    junk = await _junk(
+        adapter, "junk over good", scope="fleet", fleet_id=fleet, supersedes=(good.id,)
+    )
+    plain = await _junk(adapter, "plain junk", scope="org")
+    mine = await _junk(adapter, "self junk", scope="self")
+    theirs = await write(adapter, "someone else's", author="good")
+    written = await store.pin_entry(fleet, junk.id, "bad", 10)
+    assert isinstance(written, PinWrite)
+    await _rate(adapter, other.id, "bad", Verdict.WRONG)
+    await _rate(adapter, other.id, "good", Verdict.HELPFUL)
+
+    scan = await store.scan_agent_cleanup("bad", WIDE_SINCE, WIDE_UNTIL)
+    assert scan.withdraw_total == 3
+    assert {e.id for e in scan.withdraw} == {junk.id, plain.id, mine.id}
+    assert [e.summary for e in scan.withdraw] == ["self junk", "plain junk", "junk over good"]
+    assert (scan.ratings_total, dict(scan.ratings_by_verdict), scan.pins_total) == (
+        1,
+        {"wrong": 1},
+        1,
+    )
+    assert [(e.id, e.superseded_by) for e in scan.restorable] == [(good.id, junk.id)]
+    assert scan.restorable_total == 1
+    # The scan changed nothing.
+    assert (await _state(adapter, junk.id)).state is EntryState.ACTIVE
+    assert await store.feedback_counts(other.id) == (1, 0, 1)
+
+    out = await _clean(adapter, restore_ids=[good.id])
+
+    assert out.record is not None
+    assert (out.withdrawn, out.ratings_set_aside, out.restored) == (3, 1, 1)
+    assert sorted(out.record.withdrawn_ids) == sorted([junk.id, plain.id, mine.id])
+    assert [(r.entry_id, r.superseded_by) for r in out.record.restored] == [(good.id, junk.id)]
+    assert [(p.fleet_id, p.entry_id, p.pinned_by) for p in out.unpinned] == [
+        (fleet, junk.id, "bad")
+    ]
+    assert out.record.unpinned_pins == out.unpinned and out.record.ratings_set_aside == 1
+    assert (out.record.agent, out.record.cleaned_by, out.record.revoked) == (
+        "bad",
+        "admin:1",
+        False,
+    )
+    for entry_id in (junk.id, plain.id, mine.id):
+        entry = await _state(adapter, entry_id)
+        assert entry.state is EntryState.WITHDRAWN
+        assert entry.withdrawn_reason == cleanup_reason(out.record.id)
+    restored = await _state(adapter, good.id)
+    assert restored.state is EntryState.ACTIVE and restored.superseded_by is None
+    assert (await _state(adapter, theirs.id)).state is EntryState.ACTIVE
+    assert await store.list_pins(fleet) == []
+    assert await store.feedback_counts(other.id) == (1, 0, 0)
+    assert await store.get_agent_cleanup(out.record.id) == out.record
+    assert [c.id for c in await store.list_agent_cleanups(10)] == [out.record.id]
+    assert await store.get_agent_cleanup(NO_SUCH_ID) is None
+    assert await store.get_agent_cleanup("not-a-uuid") is None
+
+
+async def test_cleanup_walks_the_agents_own_chain_and_unpins_older_versions(
+    adapter: Adapter,
+) -> None:
+    """junk1 over good, junk2 over junk1: `good` is offered and junk1 is not.
+    A chain through another author's memory is not offered. A pin on an older
+    version whose chain ends at a withdrawn memory comes off unless restored,
+    and an undo puts it back and replaces the restored memory behind the chain."""
+    store = adapter.store
+    fleet = (await store.create_fleet("alpha")).id
+    good = await write(adapter, "good", author="good", scope="fleet", fleet_id=fleet)
+    other = await write(adapter, "other good", author="good", scope="fleet", fleet_id=fleet)
+    junk1 = await _junk(adapter, "junk1", scope="fleet", fleet_id=fleet, supersedes=(good.id,))
+    junk2 = await _junk(adapter, "junk2", scope="fleet", fleet_id=fleet, supersedes=(junk1.id,))
+    under_other = await write(adapter, "mid", author="good", scope="fleet", fleet_id=fleet)
+    mixed = await _junk(
+        adapter, "mixed", scope="fleet", fleet_id=fleet, supersedes=(under_other.id,)
+    )
+    await write(
+        adapter,
+        "good over mixed",
+        author="good",
+        scope="fleet",
+        fleet_id=fleet,
+        supersedes=(mixed.id,),
+    )
+    pinned_old = await write(adapter, "old pinned", author="good", scope="fleet", fleet_id=fleet)
+    await _junk(adapter, "junk3", scope="fleet", fleet_id=fleet, supersedes=(pinned_old.id,))
+    for entry_id, by in ((good.id, "good"), (pinned_old.id, "good")):
+        assert isinstance(await store.pin_entry(fleet, entry_id, by, 10), PinWrite)
+    assert other.id
+
+    scan = await store.scan_agent_cleanup("bad", WIDE_SINCE, WIDE_UNTIL)
+    assert {e.id for e in scan.restorable} == {good.id, pinned_old.id}
+    assert scan.restorable_total == 2 and junk1.id not in {e.id for e in scan.restorable}
+    assert scan.pins_total == 0  # both pinned memories are offered, ticked
+
+    out = await _clean(adapter, restore_ids=[good.id])
+    assert out.record is not None and out.restored == 1
+    assert [(r.entry_id, r.superseded_by, r.head) for r in out.record.restored] == [
+        (good.id, junk1.id, junk2.id)
+    ]
+    assert {p.entry_id for p in out.unpinned} == {pinned_old.id}
+    assert {p.entry_id for p in await store.list_pins(fleet)} == {good.id}
+    assert (await _state(adapter, junk1.id)).state is EntryState.SUPERSEDED
+
+    undone = await store.undo_agent_cleanup(out.record.id)
+    assert (undone.resuperseded, undone.resupersede_skipped) == (1, 0)
+    assert {p.entry_id for p in undone.pins_restored} == {pinned_old.id}
+    assert (await _state(adapter, good.id)).superseded_by == junk1.id
+    assert {p.entry_id for p in await store.list_pins(fleet)} == {good.id, pinned_old.id}
+
+
+async def test_a_pin_on_an_older_version_of_a_restored_memory_stays(adapter: Adapter) -> None:
+    """P -> X -> junk, P pinned, X restored: the pin shows X, so it stays. With
+    X not restored it comes off."""
+    store = adapter.store
+    fleet = (await store.create_fleet("alpha")).id
+    p = await write(adapter, "P", author="good", scope="fleet", fleet_id=fleet)
+    x = await write(adapter, "X", author="good", scope="fleet", fleet_id=fleet, supersedes=(p.id,))
+    await _junk(adapter, "junk", scope="fleet", fleet_id=fleet, supersedes=(x.id,))
+    assert isinstance(await store.pin_entry(fleet, p.id, "good", 10), PinWrite)
+    scan = await store.scan_agent_cleanup("bad", WIDE_SINCE, WIDE_UNTIL)
+    assert [e.id for e in scan.restorable] == [x.id] and scan.pins_total == 0
+
+    out = await _clean(adapter, restore_ids=[x.id])
+    assert out.unpinned == ()
+    assert {q.entry_id for q in await store.list_pins(fleet)} == {p.id}
+
+
+async def test_cleanup_sets_withdrawn_at_so_a_relied_on_listing_reads_it(
+    adapter: Adapter,
+) -> None:
+    """A withdrawal by cleanup sets ``withdrawn_at`` like a normal one (ADR 0098):
+    a helpful rating older than it lists the memory as changed."""
+    store = adapter.store
+    junk = await _junk(adapter, "junk")
+    await _rate(adapter, junk.id, "good", Verdict.HELPFUL, at=T0)
+    filters = EntryFilters(relied_on_changed=True, reporter=("good", "a"))
+    assert await store.list_entries(filters) == []
+    await _clean(adapter)
+    assert [e.id for e in await store.list_entries(filters)] == [junk.id]
+
+
+async def test_nothing_to_clean_keeps_no_record(adapter: Adapter) -> None:
+    store = adapter.store
+    await write(adapter, "good", author="good")
+    out = await _clean(adapter)
+    assert out.record is None and (out.withdrawn, out.ratings_set_aside, out.restored) == (0, 0, 0)
+    assert await store.list_agent_cleanups(10) == []
+    assert (await store.scan_agent_cleanup("bad", WIDE_SINCE, WIDE_UNTIL)).withdraw_total == 0
+
+
+async def test_the_window_is_on_the_write_time_for_memories_and_the_update_time_for_ratings(
+    adapter: Adapter,
+) -> None:
+    store = adapter.store
+    first = await _junk(adapter, "first")
+    second = await _junk(adapter, "second")
+    third = await _junk(adapter, "third")
+    since, until = second.created_at, third.created_at
+    scan = await store.scan_agent_cleanup("bad", since, until)
+    assert [e.id for e in scan.withdraw] == [second.id]  # since inclusive, until exclusive
+    old = await write(adapter, "old target", author="good")
+    for i, at in enumerate((T0, T0 + timedelta(hours=1), T0 + timedelta(hours=2))):
+        target = await write(adapter, f"target {i}", author="good")
+        await _rate(adapter, target.id, "bad", at=at)
+    window = await store.scan_agent_cleanup("bad", T0 + timedelta(hours=1), T0 + timedelta(hours=2))
+    assert window.ratings_total == 1  # one hour in: since inclusive, until exclusive
+    out = await store.cleanup_agent("bad", since, until, **CLEAN)
+    assert out.record is not None and out.record.withdrawn_ids == (second.id,)
+    assert (await _state(adapter, first.id)).state is EntryState.ACTIVE
+    assert (await _state(adapter, third.id)).state is EntryState.ACTIVE
+    assert (await _state(adapter, old.id)).state is EntryState.ACTIVE
+    with pytest.raises(InvalidInput):
+        await store.cleanup_agent("bad", until, since, **CLEAN)
+    with pytest.raises(InvalidInput):
+        await store.cleanup_agent("bad", since, since, **CLEAN)
+
+
+async def test_every_feedback_read_skips_set_aside_ratings(adapter: Adapter) -> None:
+    store = adapter.store
+    fleet = (await store.create_fleet("alpha")).id
+    target = await write(adapter, "target", author="good", scope="fleet", fleet_id=fleet)
+    other = await write(adapter, "other", author="good", scope="fleet", fleet_id=fleet)
+    now = T0 + timedelta(days=1)
+    await _rate(adapter, target.id, "bad", Verdict.WRONG, "it is wrong")
+    await _rate(adapter, other.id, "bad", Verdict.HELPFUL, "worked")
+    await _rate(adapter, other.id, "good", Verdict.STALE, "old")
+    link = await write(adapter, "links to target", author="good", see_also=(target.id,))
+    flagged = EntryFilters(flagged=True)
+    assert {e.id for e in await store.list_entries(flagged)} == {target.id, other.id}
+    before = await store.fleet_health(now)
+    assert (before.helpful, before.verdicts_90d) == (1, 3)
+    assert [i.newest_flag_at for i in (await store.upstream_links([link.id]))[link.id]] == [T0]
+
+    out = await _clean(adapter)
+    assert out.record is not None and out.ratings_set_aside == 2
+
+    assert await store.feedback_counts(target.id) == (0, 0, 0)
+    assert await store.feedback_counts(other.id) == (0, 1, 0)
+    assert await store.quality_counts([target.id, other.id]) == {
+        target.id: (0, 0, 0),
+        other.id: (0, 1, 0),
+    }
+    signals = await store.feedback_signals([target.id, other.id])
+    assert signals[target.id].correction is None and signals[target.id].newest_flag_at is None
+    assert signals[other.id].last_confirmed_at is None and signals[other.id].stale == 1
+    assert await store.list_feedback(target.id, 10) == []
+    assert [fb.user for fb in await store.list_feedback(other.id, 10)] == ["good"]
+    many = await store.list_feedback_many([target.id, other.id], 10)
+    assert many[target.id] == [] and [fb.user for fb in many[other.id]] == ["good"]
+    log = await store.list_feedback_log(FeedbackLogFilters(), 10)
+    assert [(i.feedback.user, i.feedback.entry_id) for i in log] == [("good", other.id)]
+    assert await store.list_feedback_log(FeedbackLogFilters(reporter="bad"), 10) == []
+    assert [e.id for e in await store.list_entries(flagged)] == [other.id]
+    assert await store.count_entries(flagged) == 1
+    backlog = await store.list_flag_backlog(FlagBacklogFilters(), now, 10)
+    assert [f.entry_id for f in backlog] == [other.id]
+    assert [f.user for f in await store.flag_counts()] == ["good"]
+    health = await store.fleet_health(now)
+    assert (health.helpful, health.verdicts_90d) == (0, 1)
+    activity = await store.activity(T0 - timedelta(days=1))
+    assert [r.reporter for r in activity.reporters] == ["good"]
+    assert [i.newest_flag_at for i in (await store.upstream_links([link.id]))[link.id]] == [None]
+    # The rows are kept: the same two ratings count again once the cleanup is undone.
+    await store.undo_agent_cleanup(out.record.id)
+    assert await store.feedback_counts(target.id) == (0, 0, 1)
+    assert await store.feedback_counts(other.id) == (1, 1, 0)
+    assert len(await store.list_feedback_log(FeedbackLogFilters(), 10)) == 3
+
+
+async def test_a_set_aside_helpful_rating_does_not_list_a_changed_memory(adapter: Adapter) -> None:
+    store = adapter.store
+    liked = await write(adapter, "relied on", author="good")
+    await _rate(adapter, liked.id, "bad", Verdict.HELPFUL, "worked")
+    await store.withdraw_entry(liked.id, "gone", "good")
+    filters = EntryFilters(relied_on_changed=True, reporter=("bad", "a"))
+    assert [e.id for e in await store.list_entries(filters)] == [liked.id]
+    await _clean(adapter)
+    assert await store.list_entries(filters) == []
+
+
+async def test_rating_again_clears_the_mark_and_only_that_row(adapter: Adapter) -> None:
+    store = adapter.store
+    one = await write(adapter, "one", author="good")
+    two = await write(adapter, "two", author="good")
+    await _rate(adapter, one.id, "bad", Verdict.WRONG)
+    await _rate(adapter, two.id, "bad", Verdict.WRONG)
+    out = await _clean(adapter)
+    assert out.record is not None and out.ratings_set_aside == 2
+    await _rate(adapter, one.id, "bad", Verdict.STALE, "again", at=None)
+    assert await store.feedback_counts(one.id) == (0, 1, 0)
+    assert await store.feedback_counts(two.id) == (0, 0, 0)
+    await store.record_feedback_many([Feedback(two.id, "bad", "a", Verdict.HELPFUL, None)])
+    assert await store.feedback_counts(two.id) == (1, 0, 0)
+    undone = await store.undo_agent_cleanup(out.record.id)
+    assert undone.ratings_cleared == 0  # both rows were already cleared by the agent itself
+
+
+async def test_ratings_already_set_aside_are_left_to_the_first_cleanup(adapter: Adapter) -> None:
+    store = adapter.store
+    target = await write(adapter, "target", author="good")
+    await _rate(adapter, target.id, "bad", Verdict.WRONG)
+    first = await _clean(adapter)
+    again = await store.scan_agent_cleanup("bad", WIDE_SINCE, WIDE_UNTIL)
+    assert again.ratings_total == 0
+    assert (await _clean(adapter)).record is None
+    assert first.record is not None
+
+
+async def test_only_memories_still_superseded_by_a_withdrawn_memory_are_restorable(
+    adapter: Adapter,
+) -> None:
+    store = adapter.store
+    a = await write(adapter, "fact a", author="good")
+    b = await write(adapter, "fact b", author="good")
+    c = await write(adapter, "fact c", author="good")
+    junk_a = await _junk(adapter, "junk over a", supersedes=(a.id,))
+    junk_b = await _junk(adapter, "junk over b", supersedes=(b.id,))
+    await _junk(adapter, "junk over c", supersedes=(c.id,))
+    rewrite = await write(adapter, "good rewrite", author="good", supersedes=(junk_b.id,))
+    scan = await store.scan_agent_cleanup("bad", WIDE_SINCE, WIDE_UNTIL)
+    assert {e.id for e in scan.restorable} == {a.id, c.id}
+    assert junk_b.id not in {e.id for e in scan.withdraw}  # not active: not the agent's to clean
+    for bad_id in (b.id, junk_a.id, rewrite.id, NO_SUCH_ID, "not-a-uuid"):
+        with pytest.raises(AgentCleanupRefused):
+            await _clean(adapter, restore_ids=[bad_id])
+    assert await store.list_agent_cleanups(10) == []
+    assert (await _state(adapter, junk_a.id)).state is EntryState.ACTIVE  # nothing changed
+    out = await _clean(adapter, restore_ids=[a.id, a.id.upper()])
+    assert out.restored == 1 and (await _state(adapter, a.id)).state is EntryState.ACTIVE
+    assert (await _state(adapter, c.id)).state is EntryState.SUPERSEDED  # not ticked
+
+
+async def test_the_apply_is_refused_when_the_counts_differ_from_the_preview(
+    adapter: Adapter,
+) -> None:
+    store = adapter.store
+    target = await write(adapter, "target", author="good")
+    junk = await _junk(adapter, "junk")
+    await _rate(adapter, target.id, "bad")
+    for expected in ({"expected_withdraw": 2}, {"expected_ratings": 0}):
+        with pytest.raises(AgentCleanupRefused, match="preview again"):
+            await _clean(adapter, **expected)
+    assert (await _state(adapter, junk.id)).state is EntryState.ACTIVE
+    assert await store.feedback_counts(target.id) == (0, 0, 1)
+    out = await _clean(adapter, expected_withdraw=1, expected_ratings=1)
+    assert (out.withdrawn, out.ratings_set_aside) == (1, 1)
+
+
+async def test_cleanup_ids_are_read_the_same_on_both_adapters(adapter: Adapter) -> None:
+    store = adapter.store
+    junk = await _junk(adapter, "junk")
+    out = await _clean(adapter)
+    assert out.record is not None
+    undone = await store.undo_agent_cleanup(out.record.id.upper())
+    assert undone.record.id == out.record.id
+    for bad in (NO_SUCH_ID, "not-a-uuid"):
+        with pytest.raises(UnknownAgentCleanup):
+            await store.undo_agent_cleanup(bad)
+    assert (await _state(adapter, junk.id)).state is EntryState.ACTIVE
+
+
+async def test_undo_restores_exactly_what_the_cleanup_changed(adapter: Adapter) -> None:
+    store = adapter.store
+    fleet = (await store.create_fleet("alpha")).id
+    good = await write(adapter, "good fact", author="good", scope="fleet", fleet_id=fleet)
+    junk = await _junk(adapter, "pinned junk", scope="fleet", fleet_id=fleet, supersedes=(good.id,))
+    plain = await _junk(adapter, "plain junk")
+    rated = await write(adapter, "rated", author="good")
+    await store.pin_entry(fleet, junk.id, "bad", 10)
+    await _rate(adapter, rated.id, "bad", Verdict.WRONG)
+    out = await _clean(adapter, restore_ids=[good.id])
+    assert out.record is not None
+
+    undone = await store.undo_agent_cleanup(out.record.id)
+
+    assert (undone.reactivated, undone.reactivate_skipped) == (2, 0)
+    assert (undone.resuperseded, undone.resupersede_skipped) == (1, 0)
+    assert undone.ratings_cleared == 1 and undone.record.undone_at is not None
+    for entry_id in (junk.id, plain.id):
+        entry = await _state(adapter, entry_id)
+        assert (entry.state, entry.withdrawn_reason) == (EntryState.ACTIVE, None)
+    back = await _state(adapter, good.id)
+    assert (back.state, back.superseded_by) == (EntryState.SUPERSEDED, junk.id)
+    assert await store.feedback_counts(rated.id) == (0, 0, 1)
+    assert [(p.entry_id, p.pinned_by) for p in await store.list_pins(fleet)] == [(junk.id, "bad")]
+    assert [p.entry_id for p in undone.pins_restored] == [junk.id] and undone.pins_skipped == ()
+    stored = await store.get_agent_cleanup(out.record.id)
+    assert stored is not None and stored.undone_at is not None
+    again = await _clean(adapter)  # a second cleanup works after the undo
+    assert again.withdrawn == 2 and again.record is not None
+
+
+async def test_undo_leaves_what_changed_since_the_cleanup(adapter: Adapter) -> None:
+    store = adapter.store
+    good = await write(adapter, "good fact", author="good")
+    other = await write(adapter, "other fact", author="good")
+    junk = await _junk(adapter, "junk", supersedes=(good.id, other.id))
+    out = await _clean(adapter, restore_ids=[good.id, other.id])
+    assert out.record is not None
+    # Someone supersedes one restored memory with a better one meanwhile.
+    later = await write(adapter, "a better fact", author="good", supersedes=(good.id,))
+    undone = await store.undo_agent_cleanup(out.record.id)
+    assert (undone.reactivated, undone.resuperseded, undone.resupersede_skipped) == (1, 1, 1)
+    assert (await _state(adapter, junk.id)).state is EntryState.ACTIVE
+    skipped = await _state(adapter, good.id)
+    assert (skipped.state, skipped.superseded_by) == (EntryState.SUPERSEDED, later.id)
+    back = await _state(adapter, other.id)
+    assert (back.state, back.superseded_by) == (EntryState.SUPERSEDED, junk.id)
+
+
+async def test_undo_only_the_newest_standing_cleanup_of_an_agent(adapter: Adapter) -> None:
+    store = adapter.store
+    await _junk(adapter, "one")
+    first = await _clean(adapter)
+    await _junk(adapter, "two")
+    second = await _clean(adapter)
+    await write(adapter, "good's junk", author="good")
+    other = await store.cleanup_agent("good", WIDE_SINCE, WIDE_UNTIL, **CLEAN)
+    assert first.record and second.record and other.record
+    assert [c.id for c in await store.list_agent_cleanups(10)] == [
+        other.record.id,
+        second.record.id,
+        first.record.id,
+    ]
+    with pytest.raises(AgentCleanupRefused, match="newer"):
+        await store.undo_agent_cleanup(first.record.id)
+    await store.undo_agent_cleanup(second.record.id)
+    with pytest.raises(AgentCleanupRefused, match="already undone"):
+        await store.undo_agent_cleanup(second.record.id)
+    await store.undo_agent_cleanup(first.record.id)  # the newest standing one of "bad" now
+    await store.undo_agent_cleanup(other.record.id)  # another agent's never blocked it
+
+
+async def test_undo_repins_the_newest_that_fit_and_reports_the_rest(adapter: Adapter) -> None:
+    store = adapter.store
+    fleet = (await store.create_fleet("alpha")).id
+    junk = [await _junk(adapter, f"junk {i}", scope="fleet", fleet_id=fleet) for i in range(3)]
+    for i, entry in enumerate(junk):
+        written = await store.pin_entry(fleet, entry.id, f"pinner-{i}", 10)
+        assert isinstance(written, PinWrite)
+    out = await _clean(adapter)
+    assert out.record is not None and len(out.unpinned) == 3
+    for i in range(8):
+        fresh = await write(adapter, f"fresh {i}", author="good", scope="fleet", fleet_id=fleet)
+        assert isinstance(await store.pin_entry(fleet, fresh.id, f"other-{i}", 10), PinWrite)
+    undone = await store.undo_agent_cleanup(out.record.id)
+    assert [p.entry_id for p in undone.pins_restored] == [junk[2].id, junk[1].id]
+    assert [p.entry_id for p in undone.pins_skipped] == [junk[0].id]
+    assert len(await store.list_pins(fleet)) == 10
+
+
+async def test_a_repeated_cleanup_records_its_pins_again(adapter: Adapter) -> None:
+    store = adapter.store
+    fleet = (await store.create_fleet("alpha")).id
+    junk = await _junk(adapter, "junk", scope="fleet", fleet_id=fleet)
+    await store.pin_entry(fleet, junk.id, "bad", 10)
+    out = await _clean(adapter)
+    assert out.record is not None
+    undone = await store.undo_agent_cleanup(out.record.id)
+    assert [p.entry_id for p in undone.pins_restored] == [junk.id]
+    second = await _clean(adapter)
+    assert second.record is not None and [p.entry_id for p in second.unpinned] == [junk.id]
+
+
+async def test_mark_cleanup_revoked_is_recorded(adapter: Adapter) -> None:
+    store = adapter.store
+    await _junk(adapter, "junk")
+    out = await _clean(adapter)
+    assert out.record is not None and out.record.revoked is False
+    await store.mark_cleanup_revoked(out.record.id)
+    await store.mark_cleanup_revoked("not-a-uuid")
+    stored = await store.get_agent_cleanup(out.record.id)
+    assert stored is not None and stored.revoked is True
+    undone = await store.undo_agent_cleanup(out.record.id)
+    assert undone.record.revoked is True  # an undo never un-revokes
+
+
 # -- successions (ADR 0113) -----------------------------------------------------------
 
 
@@ -2719,8 +3467,12 @@ async def test_handed_down_counts_active_notes_fleet_memories_and_pins(adapter: 
     await write(adapter, "n2", author="old", scope="self", hot=1)
     gone = await write(adapter, "gone", author="old", scope="self", hot=2)
     await store.withdraw_entry(gone.id, "x", by_user="old")
-    pinned = await write(adapter, "in red", author="old", scope="fleet", fleet_id=red, hot=3)
+    # A fleet write must be in the author's home fleet (ADR 0112): old wrote in
+    # blue while blue was its home, then moved to red.
+    await store.set_agent_home_fleet("old", blue)
     await write(adapter, "in blue", author="old", scope="fleet", fleet_id=blue, hot=4)
+    await store.set_agent_home_fleet("old", red)
+    pinned = await write(adapter, "in red", author="old", scope="fleet", fleet_id=red, hot=3)
     await write(adapter, "other's", author="heir", scope="self", hot=5)
     await store.pin_entry(red, pinned.id, "old", 10)
     facts = await store.handed_down(("old",), blue)
@@ -2778,6 +3530,7 @@ async def test_inherited_authors_filter_the_feedback_log(adapter: Adapter) -> No
 async def test_inherited_pins_count_toward_the_agent_cap(adapter: Adapter) -> None:
     store = adapter.store
     red, _ = await _people(adapter)
+    await store.set_agent_home_fleet("heir", red)  # a pin is in the pinner's home fleet (ADR 0112)
     es = [
         await write(adapter, f"p{i}", author="old", scope="fleet", fleet_id=red, hot=i)
         for i in range(4)

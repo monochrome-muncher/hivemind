@@ -45,6 +45,21 @@ SET default_tablespace = '';
 
 SET default_table_access_method = heap;
 
+CREATE TABLE public.agent_cleanups (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    agent text NOT NULL,
+    since timestamp with time zone NOT NULL,
+    until timestamp with time zone NOT NULL,
+    cleaned_by text NOT NULL,
+    cleaned_at timestamp with time zone DEFAULT now() NOT NULL,
+    withdrawn_ids uuid[] DEFAULT '{}'::uuid[] NOT NULL,
+    restored jsonb DEFAULT '[]'::jsonb NOT NULL,
+    ratings_set_aside integer DEFAULT 0 NOT NULL,
+    unpinned_pins jsonb DEFAULT '[]'::jsonb NOT NULL,
+    revoked boolean DEFAULT false NOT NULL,
+    undone_at timestamp with time zone
+);
+
 CREATE TABLE public.agents (
     name text NOT NULL,
     status text DEFAULT 'pending'::text NOT NULL,
@@ -65,7 +80,7 @@ CREATE TABLE public.audit_log (
     action text NOT NULL,
     target text,
     detail jsonb DEFAULT '{}'::jsonb NOT NULL,
-    CONSTRAINT audit_log_action_check CHECK ((action = ANY (ARRAY['agent.register'::text, 'agent.activate'::text, 'agent.trust_level_set'::text, 'agent.home_fleet_set'::text, 'agent.revoke'::text, 'fleet.create'::text, 'org_key.rotate'::text, 'entry.withdraw'::text, 'admin_key.issue'::text, 'admin_key.revoke'::text, 'agent_key.issue'::text, 'entry.pin'::text, 'entry.unpin'::text, 'fleet.merge'::text, 'fleet.unmerge'::text, 'fleet.rename'::text, 'agent_key.replace'::text, 'agent.retire'::text, 'agent.retire_undo'::text]))),
+    CONSTRAINT audit_log_action_check CHECK ((action = ANY (ARRAY['agent.register'::text, 'agent.activate'::text, 'agent.trust_level_set'::text, 'agent.home_fleet_set'::text, 'agent.revoke'::text, 'fleet.create'::text, 'org_key.rotate'::text, 'entry.withdraw'::text, 'admin_key.issue'::text, 'admin_key.revoke'::text, 'agent_key.issue'::text, 'entry.pin'::text, 'entry.unpin'::text, 'fleet.merge'::text, 'fleet.unmerge'::text, 'fleet.rename'::text, 'agent_key.replace'::text, 'agent.cleanup'::text, 'agent.cleanup_undo'::text, 'fleet.move_agents'::text, 'fleet.move_undo'::text, 'agent.retire'::text, 'agent.retire_undo'::text]))),
     CONSTRAINT audit_log_actor_kind_check CHECK ((actor_kind = ANY (ARRAY['admin_key'::text, 'cli'::text, 'org_key'::text, 'agent_key'::text])))
 );
 
@@ -76,6 +91,7 @@ CREATE TABLE public.credentials (
     agent_id text,
     agent_name text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_used_at timestamp with time zone,
     CONSTRAINT credentials_kind_check CHECK ((kind = ANY (ARRAY['org'::text, 'user'::text, 'agent'::text, 'admin'::text])))
 );
 
@@ -125,6 +141,7 @@ CREATE TABLE public.feedbacks (
     verdict text NOT NULL,
     note text,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    set_aside_by uuid,
     CONSTRAINT feedbacks_verdict_check CHECK ((verdict = ANY (ARRAY['helpful'::text, 'stale'::text, 'wrong'::text])))
 );
 
@@ -141,7 +158,9 @@ CREATE TABLE public.fleet_merges (
     merged_at timestamp with time zone DEFAULT now() NOT NULL,
     moved_agents text[] DEFAULT '{}'::text[] NOT NULL,
     dropped_pins jsonb DEFAULT '[]'::jsonb NOT NULL,
-    undone_at timestamp with time zone
+    undone_at timestamp with time zone,
+    kind text DEFAULT 'merge'::text NOT NULL,
+    CONSTRAINT fleet_merges_kind_check CHECK ((kind = ANY (ARRAY['merge'::text, 'move'::text])))
 );
 
 CREATE TABLE public.fleets (
@@ -176,6 +195,9 @@ CREATE TABLE public.successions (
     at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT successions_not_self CHECK ((retired_agent <> successor))
 );
+
+ALTER TABLE ONLY public.agent_cleanups
+    ADD CONSTRAINT agent_cleanups_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY public.agents
     ADD CONSTRAINT agents_pkey PRIMARY KEY (name);
@@ -215,6 +237,8 @@ ALTER TABLE ONLY public.search_counts
 
 ALTER TABLE ONLY public.successions
     ADD CONSTRAINT successions_pkey PRIMARY KEY (retired_agent);
+
+CREATE INDEX agent_cleanups_agent_idx ON public.agent_cleanups USING btree (agent, cleaned_at DESC);
 
 CREATE INDEX agents_fleet_idx ON public.agents USING btree (home_fleet_id);
 

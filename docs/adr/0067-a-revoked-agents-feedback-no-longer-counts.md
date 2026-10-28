@@ -1,5 +1,7 @@
 # A revoked agent's feedback no longer counts
 
+Status: Accepted. [ADR 0111](0111-agent-cleanup.md) adds a second reason to skip a rating: an admin cleanup can set an agent's ratings from a time window aside, whether or not the agent is revoked. The rule here is unchanged.
+
 ## Context
 
 Revoking an agent (ADRs 0012, 0028) deletes its key and sets it `revoked`,
