@@ -7,6 +7,7 @@ agrees with what the data plane actually enforces.
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 
 import httpx
 import pytest
@@ -147,6 +148,7 @@ async def test_rest_whoami_for_org_and_admin_keys_and_401_without_one() -> None:
         "can_read": [],
         "can_write_scopes": [],
         "inherits_from": [],
+        "key_last_used_at": None,
     }
     assert admin.json()["key_kind"] == "admin"
     assert missing.status_code == 401
@@ -178,3 +180,54 @@ async def test_mcp_whoami_tool_returns_the_standing() -> None:
     result = await build_server(app).call_tool("hive_whoami", {})
     assert result.is_error is False
     assert json.loads(result.content[0].text) == direct
+
+
+# -- the key's last use (ADR 0114) -------------------------------------------
+
+
+async def test_an_agent_key_reports_when_it_was_last_used() -> None:
+    store = make_store()
+    service = AccessService(store, FakeAuthenticator())
+    fleet = await service.create_fleet("platform", ADMIN)
+    await service.register("alice", ORG)
+    await service.activate("alice", TrustLevel.CONTRIBUTOR, fleet.id, ADMIN)
+    cred = agent(TrustLevel.CONTRIBUTOR, fleet.id)
+
+    first = await service.whoami(cred)
+    assert first.key_last_used_at is None
+    assert first.as_dict()["key_last_used_at"] is None
+
+    assert isinstance(store, MemoryStore)
+    used = datetime(2026, 10, 27, 9, 0, tzinfo=UTC)
+    store.record_key_use("alice", used)
+    standing = await service.whoami(cred)
+    assert standing.key_last_used_at == used
+    assert standing.as_dict()["key_last_used_at"] == used.isoformat()
+
+
+async def test_admin_org_and_legacy_keys_report_no_last_use() -> None:
+    service, _ = await _service()
+    for cred in (ADMIN, ORG, Credential(user_id="dev", agent_id="hivemind-mcp")):
+        assert (await service.whoami(cred)).key_last_used_at is None
+
+
+async def test_rest_and_mcp_whoami_carry_the_agent_keys_last_use() -> None:
+    """ADR 0114: any agent key sees its own last-use time, over both surfaces."""
+    store = MemoryStore(make_clock())
+    fleet = await store.create_fleet("platform")
+    hivemind = create_app_for_config(
+        Settings(),
+        store=store,
+        embedder=make_embedder(),
+        authenticator=FakeAuthenticator({"hm_alice": agent(TrustLevel.LURKER, fleet.id)}),
+        search_config=make_search_config(),
+    )
+    await store.register_agent("alice")
+    await store.activate_agent("alice", trust_level=TrustLevel.LURKER, home_fleet_id=fleet.id)
+    used = datetime(2026, 10, 27, 9, 0, tzinfo=UTC)
+    store.record_key_use("alice", used)
+    transport = httpx.ASGITransport(app=create_app(hivemind))
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
+        resp = await client.get("/v1/whoami", headers={"X-API-Key": "hm_alice"})
+    assert resp.status_code == 200
+    assert resp.json()["key_last_used_at"] == used.isoformat()

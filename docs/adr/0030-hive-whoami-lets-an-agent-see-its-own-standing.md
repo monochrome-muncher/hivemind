@@ -2,6 +2,8 @@
 
 > **Amended by [ADR 0113](0113-retire-an-agent-with-a-successor.md):** `whoami` also returns `inherits_from`, the agents whose memories the caller owns after they were retired in its favour.
 
+> **Amended by [ADR 0114](0114-key-last-used-in-whoami-and-the-portal-home.md):** `whoami` also returns `key_last_used_at`.
+
 ## Context
 
 An agent could not find out what it is allowed to do. Its trust level

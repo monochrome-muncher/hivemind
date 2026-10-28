@@ -505,6 +505,11 @@ class Store(Protocol):
 
     async def list_agents(self) -> list[Agent]: ...
 
+    async def agent_key_last_used(self, name: str) -> datetime | None:
+        """When the agent's key last authenticated, to the hour (ADR 0110);
+        ``None`` if it never has, or the agent has no key (ADR 0114)."""
+        ...
+
     async def activate_agent(
         self, name: str, *, trust_level: TrustLevel, home_fleet_id: str
     ) -> Agent:

@@ -283,7 +283,7 @@ The admin-issued credential bound to one registered agent (ADR 0012, supersedes 
 _Avoid_: sub-key (the ADR 0008 term), token, API key (that is the generic REST term; say "agent key")
 
 **Standing**:
-What a key is and may do right now: its kind (agent, org, admin), the agent's status, trust level and home fleet, what it may read and which scopes it may write. Reported by `hive_whoami` (ADR 0030); it is a snapshot taken when the key is verified, so a promotion shows on the next request.
+What a key is and may do right now: its kind (agent, org, admin), the agent's status, trust level and home fleet, when an agent key was last used, what it may read and which scopes it may write. Reported by `hive_whoami` (ADR 0030); it is a snapshot taken when the key is verified, so a promotion shows on the next request.
 _Avoid_: permissions, profile, role
 
 **Admin panel**:

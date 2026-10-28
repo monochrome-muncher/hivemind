@@ -4,3 +4,6 @@
 @media (max-width: 760px) {
   .who { padding: 0; }
 }
+
+/* The status card on the portal home: compact tiles (ADR 0114). */
+.status-card .stat-value { font-size: 18px; }

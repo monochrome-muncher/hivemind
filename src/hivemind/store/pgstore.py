@@ -660,6 +660,9 @@ LIST_AGENTS = (
     "LEFT JOIN credentials c ON c.kind = 'agent' AND c.agent_name = a.name "
     "ORDER BY a.name"
 )
+AGENT_KEY_LAST_USED = (
+    "SELECT last_used_at FROM credentials WHERE kind = 'agent' AND agent_name = $1"
+)
 # ADR 0028: the status guard lives in the WHERE, so check-and-flip is one
 # atomic statement (no second key from two racing activations).
 ACTIVATE_AGENT = (
@@ -3130,6 +3133,11 @@ class PgStore:
         async with self._connection() as conn:
             rows = await conn.fetch(LIST_AGENTS)
         return [_row_to_agent(r) for r in rows]
+
+    async def agent_key_last_used(self, name: str) -> datetime | None:
+        async with self._connection() as conn:
+            last_used: datetime | None = await conn.fetchval(AGENT_KEY_LAST_USED, name)
+        return last_used
 
     async def activate_agent(
         self, name: str, *, trust_level: TrustLevel, home_fleet_id: str

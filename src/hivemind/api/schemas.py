@@ -1284,6 +1284,7 @@ class WhoamiOut(BaseModel):
     can_read: list[str]
     can_write_scopes: list[str]
     inherits_from: list[str]
+    key_last_used_at: str | None = None
 
     @classmethod
     def from_standing(cls, standing: Standing) -> WhoamiOut:
