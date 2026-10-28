@@ -23,8 +23,12 @@ function syncHash(root, view, filters) {
 // --- its memories ----------------------------------------------------------------------
 
 // What a successor also owns: the memories of the agents it took over from (ADR 0113).
-const inherited = (me) => (me.inherits_from && me.inherits_from.length
-  ? `, plus what ${me.inherits_from.join(", ")} wrote before it was retired` : "");
+const inherited = (me) => {
+  const names = me.inherits_from || [];
+  if (!names.length) return "";
+  const who = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  return `, plus what ${who} wrote before ${names.length === 1 ? "it was" : "they were"} retired`;
+};
 
 export async function viewMemories(root) {
   const me = state.me;
