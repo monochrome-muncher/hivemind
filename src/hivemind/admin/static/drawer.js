@@ -9,6 +9,8 @@
 // entry, whether and how one may be withdrawn, and where the author, fleet
 // and feedback links go (configureDrawer). Without a withdraw function there
 // is no Withdraw button; without an href function that item is plain text.
+// Likewise the pin hooks (pinStatus, pinEntry, unpinEntry): without pinStatus
+// the drawer shows no pin controls (ADR 0116).
 
 import {
   $, h, toast, openModal, closeModal, fmtTime, fmtAgo, kindBadge, stateBadge, copyText, link, verdictBadge,
@@ -19,6 +21,10 @@ const config = {
   withdrawEntry: null, // (id, reason) => truthy when done
   canWithdraw: () => true, // (entry) => whether to offer Withdraw
   reasonRequired: false, // whether a withdrawal needs a reason
+  pinStatus: null, // async (entry) => "pinnable" | "pinned" | null (no pin controls)
+  pinEntry: null, // (id) => truthy when pinned
+  unpinEntry: null, // (id) => the answer ({removed}) when done
+  pinNote: "", // a line shown under the pin button
   fleetName: (id) => id,
   authorHref: () => null,
   fleetHref: () => null,
@@ -176,10 +182,49 @@ function render(e) {
     hist.successors && hist.successors.length ? related("Successors", hist.successors, "") : null,
     hist.superseded && hist.superseded.length ? related("Superseded versions", hist.superseded, "") : null,
 
+    pinSection(e),
+
     withdraw ? h("section", { class: "drawer-sec drawer-danger" },
       h("h3", { text: "Withdraw" }),
       h("p", { class: "muted small", text: "Withdrawing removes this memory from every agent's search. It stays here and in the audit log." }),
       withdraw) : null);
+}
+
+// The pin controls fill in once the app says whether this entry is pinned.
+function pinSection(e) {
+  if (!config.pinStatus || !config.pinEntry || !config.unpinEntry) return null;
+  const sec = h("section", { class: "drawer-sec", hidden: true });
+  const mine = showToken;
+  Promise.resolve(config.pinStatus(e)).then((status) => {
+    if (mine !== showToken || !status) return;
+    const pinned = status === "pinned";
+    const error = h("p", { class: "form-error small", hidden: true });
+    const button = h("button", {
+      type: "button", class: "btn", text: pinned ? "Unpin" : "Pin to the fleet",
+      onclick: async () => {
+        button.disabled = true;
+        error.hidden = true;
+        try {
+          const done = await (pinned ? config.unpinEntry(e.id) : config.pinEntry(e.id));
+          if (!done) return;
+          toast(!pinned ? "Memory pinned" : done.removed === false ? "It was already unpinned" : "Memory unpinned");
+          await show(e.id);
+          onChange();
+        } catch (err) {
+          error.textContent = err.message;
+          error.hidden = false;
+        } finally {
+          button.disabled = false;
+        }
+      },
+    });
+    sec.append(
+      h("h3", { text: "Pin" }),
+      h("p", { class: "muted small", text: pinned ? "This memory is pinned: every member of the fleet reads it first." : config.pinNote }),
+      button, error);
+    sec.hidden = false;
+  }).catch(() => {});
+  return sec;
 }
 
 function withdrawDialog(e) {

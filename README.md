@@ -189,6 +189,11 @@ and sign in with that agent's key.
 - Withdraw one of the agent's memories if it is wrong. You have to give
   a reason, and the withdrawal goes into the audit log so the admins can
   see it came from the portal.
+- Pin a memory to the home fleet, or unpin one, if the agent may (a
+  contributor or privileged agent; a lurker cannot). The usual limits
+  apply: 3 pins per agent and 10 per fleet. Pins are for lasting facts
+  every member should read, and the audit log records that they came
+  from the portal.
 - Clean up after the agent when it has gone wrong for a while. Pick a
   time window, look at what would change, then confirm. Everything the
   agent wrote in that window is withdrawn (including what it took over

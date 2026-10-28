@@ -3,9 +3,9 @@ portal's static UI, the admin panel's shared front-end modules (ADR 0091)
 and the portal allowlist.
 
 Only what an agent key may read, the portal's own uncounted search, its
-audited withdraw, its clean-up of the agent's own work and its key lock (ADR 0117) are
-reachable: no write of the data plane, no
-feedback, no pin, nothing of the admin surface.
+audited withdraw, pin and unpin, its clean-up of the agent's own work and its
+key lock (ADR 0117) are reachable: no write of the data plane, no feedback,
+nothing of the admin surface.
 """
 
 from __future__ import annotations
@@ -52,6 +52,8 @@ _ALLOWED = allowlist(
         ("GET", r"portal/feedback"),
         ("GET", r"portal/flagged"),
         ("POST", r"portal/entries/[^/]+/withdraw"),
+        ("PUT", r"portal/entries/[^/]+/pin"),
+        ("DELETE", r"portal/entries/[^/]+/pin"),
         # The agent's own clean-up over a time window (ADR 0118).
         ("POST", r"portal/cleanup"),
         ("GET", r"portal/cleanups"),

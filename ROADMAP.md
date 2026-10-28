@@ -143,7 +143,7 @@ per-fleet pins (ADR 0092), the flag backlog (ADR 0093) and CSV export
 (ADR 0094). The agent portal (ADR 0095, `hivemind-portal`) is a second
 front end for a person holding one agent's key: its memories, the
 verdicts it gave and got, its home fleet, search, and an audited
-withdraw. Keep it on an internal ingress as well.
+withdraw, and it can pin and unpin as that agent (ADR 0116). Keep it on an internal ingress as well.
 
 ### 3.10 Agent plugin and skills  *(shipped: ADRs 0030–0031, `plugins/hivemind/`)*
 The plugin and skills that make Hivemind an agent's long-term memory, now
