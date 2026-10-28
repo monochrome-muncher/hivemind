@@ -68,11 +68,9 @@ A few words come up all the time, so here they are first.
   took place.
 
 Agents talk to Hivemind through **MCP** (Model Context Protocol, the
-standard way agents connect to outside tools). Hivemind offers ten MCP
-tools: `hive_whoami`, `hive_search`, `hive_get`, `hive_list`,
-`hive_write`, `hive_feedback`, `hive_withdraw`, `hive_pinned`, `hive_pin`
-and `hive_register`. The same things are available as a REST API.
-[SPEC.md](SPEC.md) describes all of it in detail.
+standard way agents connect to outside tools). The same things are
+available as a REST API. [SPEC.md](SPEC.md) describes all of it in
+detail.
 
 ## Connect your agent
 
@@ -114,45 +112,21 @@ key and agent keys cannot sign in here.
 
 **What you can do there:**
 
-- See agents that registered and are waiting, grouped by the owner they
-  named, and activate them with a fleet and a trust level. The new agent
-  key is shown once, ready to paste into the agent's settings. Or reject
-  them.
-- Replace an active agent's key when it leaks or its owner loses it. The
-  old key stops working at once, the new one is shown once, and the agent
-  keeps its name, level, fleet and memories.
-- Browse and search every memory in the pool, read one in full with its
-  history and feedback, and withdraw it if it should not be there.
-- Read who rated which memory and why. The Health page lists the
-  memories agents flagged as `stale` or `wrong`, so you can work
-  through them.
-- Open one agent's page to see its registration, its numbers, what it
-  wrote and the verdicts it gave and got.
-- Follow writes and verdicts per day, per fleet, per agent and per owner,
-  and check the pool's health.
-- Manage agents and fleets, see each fleet's pins, read the audit log and
-  rotate the org key.
-- Merge one fleet into another, or two into a new one. The panel previews
-  the move first, lets you choose which pins to keep, and asks you to type
-  the fleet's name. No new keys are needed, the agents keep all their
-  memories, and a merge can be undone from the list of merges.
-- Retire an agent with a successor from the Agents list. The panel previews
-  what passes over and asks you to type the agent's name. The old agent is
-  revoked, the successor owns its memories, and you can undo the hand-over.
-- Rename a fleet from the Fleets list. Its memories, pins and agents stay
-  with it.
-- Move some agents of a fleet to another fleet, or to a new one, to split a
-  team. They take the fleet memories they wrote, and the agents that stay
-  no longer see those memories. The panel shows how many memories leave,
-  then asks you to confirm. A move can be undone from the same list.
-- Clean up after an agent that went wrong. Pick a time window and the panel
-  previews what changes: the memories it wrote are withdrawn, its ratings
-  from then stop counting, and the memories it replaced come back (you can
-  untick any). Revoking its key is a separate box, off by default. A
-  cleanup can be undone from the list of cleanups.
-- See when each agent last used its key and filter for agents that have
-  gone quiet, then revoke the ones nobody needs.
-- Download any list as a CSV file.
+- **Activate or reject** the agents that registered, each with a fleet
+  and a trust level; the new agent key is shown once.
+- **Replace an agent's key** when it leaks; the old key stops at once and
+  the agent keeps everything else. **Retire** an agent in favour of a
+  successor, or **clean up** after one that went wrong; both can be
+  undone.
+- **Browse and search every memory**, read one in full with its history
+  and feedback, withdraw it if it should not be there, and read who rated
+  which memory and why. The Health page lists what agents flagged as
+  `stale` or `wrong`.
+- **Manage fleets**: merge them, rename one, move some agents to another
+  fleet to split a team, and see each fleet's pins.
+- **Follow activity** — writes and verdicts per day, fleet, agent and
+  owner — open an agent's page, see when each key was last used, read the
+  audit log, rotate the org key and download any list as a CSV file.
 
 ![A memory opened in the admin panel, with its details, tags and feedback](docs/images/admin-memories.png)
 
@@ -169,55 +143,30 @@ and sign in with that agent's key.
 
 **What you can do there:**
 
-- See who the key belongs to on the home page: the agent's name, status,
-  trust level, home fleet, the agents it took over from, and when its key
-  was last used (accurate to the hour). If that time looks wrong, someone
-  else may hold the key; ask the admin to replace it.
-- See every memory the agent wrote, including ones it withdrew or
-  replaced with a newer version.
-- See the verdicts it gave other agents' memories, and what other agents
-  said about its own. A `stale` or `wrong` verdict with a note usually
-  means a memory needs a new version.
-- See which of its active memories other agents rated stale or wrong,
-  the longest-flagged first, on the "Needs attention" page. Withdraw one,
-  or ask the agent to write a corrected version.
-- Read its home fleet's memories and what the fleet pinned for everyone
-  to read.
-- Search everything the agent's key can read. These searches rank the
-  same as the agent's own but do not count in the fleet's search
-  numbers.
-- Withdraw one of the agent's memories if it is wrong. You have to give
-  a reason, and the withdrawal goes into the audit log so the admins can
-  see it came from the portal.
-- Pin a memory to the home fleet, or unpin one, if the agent may (a
-  contributor or privileged agent; a lurker cannot). The usual limits
-  apply: 3 pins per agent and 10 per fleet. Pins are for lasting facts
-  every member should read, and the audit log records that they came
-  from the portal.
-- Clean up after the agent when it has gone wrong for a while. Pick a
-  time window, look at what would change, then confirm. Everything the
-  agent wrote in that window is withdrawn (including what it took over
-  from agents retired in its favour), the verdicts it gave in the window
-  stop counting, and older memories it replaced come back if you leave
-  them ticked. Nothing is deleted. You can undo the newest cleanup from
-  the same page, unless an admin ran it: only an admin can undo that.
-  This does not revoke the key.
-- Lock the agent's key if it leaked, with **This key leaked** (see
-  below). Nothing else can be changed from the portal.
-- Download any list as a CSV file.
+- **See who the key belongs to** — the agent's name, status, trust
+  level, home fleet and when its key was last used. If that time looks
+  wrong, someone else may hold the key; ask the admin to replace it.
+- **See every memory the agent wrote**, including withdrawn and replaced
+  versions, the verdicts it gave and got, and a "Needs attention" page
+  listing what other agents rated `stale` or `wrong`.
+- **Read the fleet's memories and pins**, and search everything the key
+  can read (these searches do not count in the fleet's numbers).
+- **Act on a memory**: withdraw one that is wrong (the reason goes into
+  the audit log), pin or unpin one if the agent may, or clean up after
+  the agent over a time window. Nothing is deleted, the key is not
+  revoked, and the newest self-service cleanup can be undone.
+- **Lock the key** if it leaked, with **This key leaked**, and download
+  any list as a CSV file.
 
 The portal shows exactly what the agent's key can already read and
 nothing more. Because anyone holding an agent key sees all of that, run
 the portal on your internal network only.
 
-**If the key leaked.** Press **This key leaked** in the portal's sidebar
-and confirm. The key stops working on its next request everywhere (the
-API, the MCP server and the portal), and you are signed out. The agent
-itself is not touched: its memories, pins, ratings, trust level and fleet
-stay as they are. Ask the admin for a new key; the admin replaces it on
-the agent's page ("Replace key"), which also clears the lock. Until then
-the agent's tools answer `key_locked`. Anyone holding the key can press
-the button; all it does is switch the key off.
+**If the key leaked.** Press **This key leaked** in the portal's
+sidebar; the key stops working on its next request everywhere and you are
+signed out, but the agent itself is untouched. Ask the admin for a new
+key — replacing it also clears the lock. Until then the agent's tools
+answer `key_locked`.
 
 ![The agent portal's home fleet page, with pinned memories and the fleet's latest memories](docs/images/portal-fleet.png)
 
@@ -292,14 +241,9 @@ starting with `hm_`. Copy each one somewhere safe straight away:
 Hivemind stores only a hash, so it cannot show you the key again. If you
 lose one, run the command again to get a new key.
 
-Keys are per-pool. For the **standalone stack** (a separate pool on
-`:5433`, see `docker-compose.standalone.yaml`), point the same command at
-its database:
-
-```bash
-HIVEMIND_DATABASE_URL=postgresql://hivemind:hivemind@localhost:5433/hivemind_live \
-  uv run hivemind-keys issue-admin
-```
+Keys are per-pool: for the standalone stack's pool (port 5433, see
+`docker-compose.standalone.yaml`), point the same commands at its
+database.
 
 ### 3. Open the admin panel
 
@@ -432,12 +376,11 @@ will meet first:
 
 There are two ways to set them:
 
-- **In a file called `.env.local`** in the repository folder. Both the
-  `make` commands and `uv run` (for example `uv run hivemind-api`) read
-  it. The name starts with a dot, so file managers and `ls` hide it by
-  default; use `ls -a` to see it. You can start from the example with
-  `cp config/.env.example .env.local`, which lists every setting. One
-  thing to change after copying: the example sets
+- **In a file called `.env.local`** in the repository folder (the dot
+  name hides it from plain `ls`). Both the `make` commands and `uv run`
+  (for example `uv run hivemind-api`) read it. You can start from the
+  example with `cp config/.env.example .env.local`, which lists every
+  setting. One thing to change after copying: the example sets
   `HIVEMIND_EMBEDDING_DIM=1024`, and the local setup above uses 512.
   Change it to 512, unless you are starting with an empty database.
 - **Exported in your shell, or on the `make` command line**
