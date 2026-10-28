@@ -193,12 +193,23 @@ and sign in with that agent's key.
   contributor or privileged agent; a lurker cannot). The usual limits
   apply: 3 pins per agent and 10 per fleet. Pins are for lasting facts
   every member should read, and the audit log records that they came
-  from the portal. Nothing else can be changed from the portal.
+  from the portal.
+- Lock the agent's key if it leaked, with **This key leaked** (see
+  below). Nothing else can be changed from the portal.
 - Download any list as a CSV file.
 
 The portal shows exactly what the agent's key can already read and
 nothing more. Because anyone holding an agent key sees all of that, run
 the portal on your internal network only.
+
+**If the key leaked.** Press **This key leaked** in the portal's sidebar
+and confirm. The key stops working on its next request everywhere (the
+API, the MCP server and the portal), and you are signed out. The agent
+itself is not touched: its memories, pins, ratings, trust level and fleet
+stay as they are. Ask the admin for a new key; the admin replaces it on
+the agent's page ("Replace key"), which also clears the lock. Until then
+the agent's tools answer `key_locked`. Anyone holding the key can press
+the button; all it does is switch the key off.
 
 ![The agent portal's home fleet page, with pinned memories and the fleet's latest memories](docs/images/portal-fleet.png)
 

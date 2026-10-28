@@ -29,7 +29,7 @@ STARTED = time.time()
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 # Runs the harness's code to list the (cache key, text) pairs one model needs.
-DUMP = r'''
+DUMP = r"""
 import json, os, sqlite3, sys
 from hivemind.config import load_settings
 from hivemind.embeddings import build_embedder
@@ -57,7 +57,7 @@ with open(sys.argv[1], "w") as out:
                 seen.add(key)
                 out.write(json.dumps({"key": key, "text": text}) + "\n")
 print(len(questions), "questions,", len(seen), "texts to embed,", len(done), "already cached")
-'''
+"""
 
 
 def harness_env(run, cache_dir):
@@ -108,7 +108,9 @@ def tokenize(tokenizer, texts, max_len):
     ids = []
     for start in range(0, len(texts), 256):
         chunk = texts[start : start + 256]
-        for x in tokenizer(chunk, add_special_tokens=True, truncation=True, max_length=max_len - 1)["input_ids"]:
+        for x in tokenizer(chunk, add_special_tokens=True, truncation=True, max_length=max_len - 1)[
+            "input_ids"
+        ]:
             if not x or x[-1] != eos:  # Qwen3-Embedding pools the final <|endoftext|> token
                 x = [*x, eos]
             ids.append(np.asarray(x, dtype=np.int32))
@@ -124,7 +126,7 @@ def memory():
         with open("/proc/meminfo") as f:
             info = dict(line.split(":", 1) for line in f)
         available = int(info["MemAvailable"].split()[0]) / 2**20
-    except (OSError, KeyError, ValueError):
+    except OSError, KeyError, ValueError:
         return f"peak RAM {peak:.1f} GiB"
     return f"peak RAM {peak:.1f} GiB, {available:.1f} GiB available"
 
@@ -158,15 +160,23 @@ def embed_batch(tokenizer, model, ids, dim):
                 out = forward(model, input_ids=torch.tensor(ids, device=device))
             else:
                 batch = tokenizer.pad({"input_ids": ids}, padding=True, return_tensors="pt")
-                out = forward(model, input_ids=batch["input_ids"].to(device), attention_mask=batch["attention_mask"].to(device))
-            last = out.last_hidden_state[:, -1].float()  # left padding: the last position is each text's EOS
+                out = forward(
+                    model,
+                    input_ids=batch["input_ids"].to(device),
+                    attention_mask=batch["attention_mask"].to(device),
+                )
+            last = out.last_hidden_state[
+                :, -1
+            ].float()  # left padding: the last position is each text's EOS
     except torch.OutOfMemoryError:
         if len(ids) == 1:
             raise
         out = None
         torch.cuda.empty_cache()
         half = len(ids) // 2  # out of memory: embed the batch in two halves
-        return embed_batch(tokenizer, model, ids[:half], dim) + embed_batch(tokenizer, model, ids[half:], dim)
+        return embed_batch(tokenizer, model, ids[:half], dim) + embed_batch(
+            tokenizer, model, ids[half:], dim
+        )
     finite = torch.isfinite(last).all(dim=-1)
     if not finite.all():
         # fp16 overflows on some texts, whatever their length. Redo a bad row
@@ -174,7 +184,10 @@ def embed_batch(tokenizer, model, ids, dim):
         if len(ids) == 1:
             return [None]
         good = torch.nn.functional.normalize(last[:, :dim], dim=-1).cpu().tolist()
-        return [g if ok else embed_batch(tokenizer, model, [x], dim)[0] for x, g, ok in zip(ids, good, finite.tolist())]
+        return [
+            g if ok else embed_batch(tokenizer, model, [x], dim)[0]
+            for x, g, ok in zip(ids, good, finite.tolist())
+        ]
     vec = torch.nn.functional.normalize(last[:, :dim], dim=-1)
     return vec.cpu().tolist()
 
@@ -256,7 +269,9 @@ def run_one(run):
     texts_file = WORK / f"texts-{tag}.jsonl"
     dump_file = WORK / "dump.py"
     dump_file.write_text(DUMP)
-    subprocess.run(["uv", "run", "python", str(dump_file), str(texts_file)], cwd=REPO, env=env, check=True)
+    subprocess.run(
+        ["uv", "run", "python", str(dump_file), str(texts_file)], cwd=REPO, env=env, check=True
+    )
 
     keys, texts = [], []
     for line in texts_file.open():
@@ -295,12 +310,16 @@ def run_one(run):
             n = 1
             while pos + n < len(order):
                 longest = len(ids[order[pos + n]])
-                if longest * (n + 1) > run["batch_tokens"] or longest * longest * (n + 1) > run.get("attn_budget", 2**24):
+                if longest * (n + 1) > run["batch_tokens"] or longest * longest * (n + 1) > run.get(
+                    "attn_budget", 2**24
+                ):
                     break
                 n += 1
             chunk = order[pos : pos + n]
             try:
-                vectors = embed_batch(tokenizer, model, [ids[i].tolist() for i in chunk], run["dim"])
+                vectors = embed_batch(
+                    tokenizer, model, [ids[i].tolist() for i in chunk], run["dim"]
+                )
             except torch.OutOfMemoryError:  # a single text too long for the GPU
                 free_gpu()
                 too_long += chunk
@@ -316,11 +335,16 @@ def run_one(run):
             if pos == len(order) or pos % 500 < n:
                 rate = done_tokens / max(time.time() - started, 1e-9)
                 left = (total - done_tokens) / max(rate, 1e-9)
-                print(f"[{tag}] {pos}/{len(order)} texts, {rate:,.0f} tok/s, about {left / 60:.0f} min left; {memory()}", flush=True)
+                print(
+                    f"[{tag}] {pos}/{len(order)} texts, {rate:,.0f} tok/s, about {left / 60:.0f} min left; {memory()}",
+                    flush=True,
+                )
         if pos < len(order) or over_budget(run):
             return stop_for_time(
-                tag, db, f"{pos} of {len(order)} texts ({done_tokens:,} of {total:,} tokens) done this run, "
-                f"{len(deferred) + len(too_long)} of them held back for a later pass"
+                tag,
+                db,
+                f"{pos} of {len(order)} texts ({done_tokens:,} of {total:,} tokens) done this run, "
+                f"{len(deferred) + len(too_long)} of them held back for a later pass",
             )
         # The passes below are slow but short; they get an hour past the budget.
         for i in too_long:
@@ -333,12 +357,18 @@ def run_one(run):
                 ids[i] = np.asarray(text, dtype=np.int32)
                 deferred.append(i)
             else:
-                db.execute("INSERT OR REPLACE INTO vectors (key, vector) VALUES (?, ?)", (keys[i], json.dumps(vector)))
+                db.execute(
+                    "INSERT OR REPLACE INTO vectors (key, vector) VALUES (?, ?)",
+                    (keys[i], json.dumps(vector)),
+                )
                 db.commit()
         del model
         free_gpu()
         if deferred:
-            print(f"[{tag}] {len(deferred)} texts overflowed in fp16; embedding them in fp32", flush=True)
+            print(
+                f"[{tag}] {len(deferred)} texts overflowed in fp16; embedding them in fp32",
+                flush=True,
+            )
             tokenizer, model = load_model(run["model"], fp32=True)
             for i in deferred:
                 if over_budget(run, grace=1.0):
@@ -348,15 +378,22 @@ def run_one(run):
                     shortened.append((len(ids[i]), len(text)))
                 if vector is None:
                     raise RuntimeError(f"non-finite embedding in fp32 too ({len(ids[i])} tokens)")
-                db.execute("INSERT OR REPLACE INTO vectors (key, vector) VALUES (?, ?)", (keys[i], json.dumps(vector)))
+                db.execute(
+                    "INSERT OR REPLACE INTO vectors (key, vector) VALUES (?, ?)",
+                    (keys[i], json.dumps(vector)),
+                )
                 db.commit()
             del model
             free_gpu()
         notes = []
         if deferred:
-            notes.append(f"{len(deferred)} of {len(keys)} texts embedded in fp32 after an fp16 overflow")
+            notes.append(
+                f"{len(deferred)} of {len(keys)} texts embedded in fp32 after an fp16 overflow"
+            )
         if shortened:
-            notes.append(f"{len(shortened)} texts too long for the GPU, shortened (tokens before, after): {shortened}")
+            notes.append(
+                f"{len(shortened)} texts too long for the GPU, shortened (tokens before, after): {shortened}"
+            )
         if notes:
             OUT.mkdir(parents=True, exist_ok=True)
             (OUT / f"longmemeval-{tag}-notes.txt").write_text("\n".join(notes) + "\n")
@@ -368,7 +405,13 @@ def run_one(run):
     (OUT / f"longmemeval-{tag}-progress.txt").unlink(missing_ok=True)
     env["EVAL_LONGMEMEVAL_JSON"] = str(OUT / f"longmemeval-{tag}.json")
     with (OUT / f"longmemeval-{tag}.md").open("w") as md:
-        subprocess.run(["uv", "run", "python", "-m", "tests.eval.longmemeval"], cwd=REPO, env=env, stdout=md, check=True)
+        subprocess.run(
+            ["uv", "run", "python", "-m", "tests.eval.longmemeval"],
+            cwd=REPO,
+            env=env,
+            stdout=md,
+            check=True,
+        )
     print((OUT / f"longmemeval-{tag}.md").read_text())
     return True
 

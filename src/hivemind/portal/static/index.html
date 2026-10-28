@@ -37,6 +37,7 @@
       </nav>
       <div class="sidebar-foot">
         <span id="api-status" class="muted small"></span>
+        <button id="leaked" type="button" class="btn btn-danger btn-sm btn-block">This key leaked</button>
         <button id="logout" type="button" class="btn btn-ghost btn-block">Sign out</button>
       </div>
     </aside>
@@ -56,7 +57,7 @@
     <div id="drawer-body" class="drawer-body"></div>
   </aside>
 
-  <!-- One reusable modal (the withdraw dialog). -->
+  <!-- One reusable modal (the withdraw and key-lock dialogs). -->
   <dialog id="modal" class="modal">
     <form id="modal-form" method="dialog">
       <h2 id="modal-title"></h2>

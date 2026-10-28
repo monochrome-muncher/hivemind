@@ -75,6 +75,7 @@ from hivemind.api.schemas import (
     HealthOut,
     HitOut,
     KeyIssuedOut,
+    KeyLockedOut,
     MetricsOut,
     PinnedOut,
     PinOut,
@@ -802,6 +803,25 @@ def build_router() -> APIRouter:
         """Unpin an entry from the portal (ADR 0116), audited ``via: "portal"``."""
         _require_agent(credential, "the agent portal")
         return await _unpin(app, credential, entry_id, via="portal")
+
+    @router.post("/portal/key/lock", response_model=KeyLockedOut)
+    async def portal_lock_key(credential: require, app: hive) -> KeyLockedOut:
+        """Lock the calling agent's own key ("this key leaked", ADR 0117):
+        it fails every request from the next one on, with 401 ``key_locked``,
+        until an admin replaces it. The agent stays active; memories, pins,
+        ratings, trust and fleet are untouched. 409 ``key_not_locked`` if the key
+        was replaced or locked in the meantime. Audited ``agent_key.lock``
+        with ``via: "portal"``. Agent keys only."""
+        _require_agent(credential, "locking a key")
+        try:
+            locked = await app.access_service.lock_own_key(credential)
+        except PermissionDenied as exc:  # a dev-mode identity has no key to lock
+            raise api_error(403, "forbidden", str(exc)) from exc
+        if not locked:  # replaced or locked between the key check and the lock
+            raise api_error(
+                409, "key_not_locked", "this key was already replaced or locked; nothing changed"
+            )
+        return KeyLockedOut(key_id=str(credential.key_id))
 
     # --- Admin console reads (ADR 0080): admin key only ------------------
 

@@ -21,6 +21,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from hivemind.config import Settings, configure_logging, load_settings
+from hivemind.domain.access import KEY_LOCKED_MESSAGE, KeyLocked
 from hivemind.http_metrics import UNMATCHED_ROUTE, RequestMetrics
 from hivemind.mcp.app import McpHivemind
 from hivemind.mcp.metrics import McpMetrics
@@ -60,14 +61,14 @@ def _extract_key(scope: Scope) -> str | None:
     return api_key.decode("latin-1").strip() if api_key else None
 
 
-async def _send_unauthorized(send: Send) -> None:
-    """Send a minimal 401 JSON response (no body needed on the MCP path)."""
-    body = json.dumps(
-        {
-            "error": "unauthorized",
-            "detail": "a valid API key is required (Authorization: Bearer <key> or X-Api-Key)",
-        }
-    ).encode()
+async def _send_unauthorized(
+    send: Send,
+    error: str = "unauthorized",
+    detail: str = "a valid API key is required (Authorization: Bearer <key> or X-Api-Key)",
+) -> None:
+    """Send a minimal 401 JSON response (no body needed on the MCP path). A
+    locked key says so (``key_locked``) instead of calling itself unknown."""
+    body = json.dumps({"error": error, "detail": detail}).encode()
     await send(
         {
             "type": "http.response.start",
@@ -142,6 +143,9 @@ class BearerAuthMiddleware:
         key = _extract_key(scope)
         try:
             credential = await self._authenticator.verify(key) if key else None
+        except KeyLocked:
+            await _send_unauthorized(send, "key_locked", KEY_LOCKED_MESSAGE)
+            return
         except TimeoutError:
             logger.warning("key verification timed out on the store; answering 503")
             await _send_store_unavailable(send)

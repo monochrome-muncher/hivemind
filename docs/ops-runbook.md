@@ -274,6 +274,7 @@ hash is stored (a leaked database never leaks usable keys, SPEC §8.1).
 |---|---|---|
 | Rotate the org key (close registration) | `hivemind-keys rotate-org` / `POST /v1/admin/org-key/rotate` | all prior org keys stop working on the next request; active agents are unaffected |
 | Replace an agent's key | `hivemind-keys rotate-agent --name alice` / `POST /v1/admin/agents/alice/key` / the admin panel's "Replace key" | the old key stops working on the agent's next request and the new key is shown **once**; status, level, fleet and memories stay as they are; only for an `active` agent (a revoked one is re-activated instead; ADR 0108) |
+| A locked key (the person behind the agent pressed **This key leaked** in the portal, ADR 0117) | the Agents page shows a "key locked" badge; `GET /v1/admin/agents` has `key_locked`; `hivemind-keys list` marks the key | the key fails every request with `key_locked` while the agent stays `active`. Replace the key (row above) to let the agent back in; revoking works too. The lock is audited `agent_key.lock` (actor: the agent's name, `via: "portal"`) |
 | Revoke an agent key | `hivemind-keys revoke --name alice` / `POST /v1/admin/agents/alice/revoke` | the agent's key is dead and its status is `revoked`; the **name stays reserved**; on a `pending` agent this rejects the registration (ADRs 0012, 0028) |
 | Demote an agent | `PATCH /v1/admin/agents/{name}` (trust level → 0) | the agent is *dormant* (key still valid, no access) — distinct from revocation |
 
@@ -319,6 +320,13 @@ curl -s -H "X-API-Key: $ADMIN_KEY" \
   with `actor_kind = agent_key`, the agent's name as actor and
   `via: "portal"` in `detail`. An agent withdrawing its own entry through
   the API or `hive_withdraw` is not audited.
+- **Key locks are audited** (ADR 0117, migration `0025`): an agent locking
+  its own key from the portal writes `agent_key.lock` with
+  `actor_kind = agent_key`, the agent's name as actor and the key
+  fingerprint plus `via: "portal"` in `detail`. Rolling back past `0025`
+  deletes those rows and makes a locked key usable again; replace the key
+  first if it must stay dead. During a rolling deploy an older pod still
+  accepts a key locked meanwhile.
 - **Raw SQL bypasses it.** A hand-run `DELETE FROM credentials …` is not
   audited; prefer the CLI even for break-glass work.
 

@@ -11,7 +11,7 @@
 // (h()) and never through an HTML-parsing sink; the agent key lives in
 // sessionStorage for this tab only, in its own slot; one key at a time.
 
-import { $, h, api, hooks, hasKey, setKey, clearKey, closeModal, guarded, parseHash, state, refusal, isMine, fleetName, levelName, viewHref, canPin, PIN_REMINDER } from "./session.js";
+import { $, h, api, hooks, hasKey, setKey, clearKey, closeModal, openModal, guarded, refusedMessage, parseHash, state, refusal, isMine, fleetName, levelName, viewHref, canPin, PIN_REMINDER } from "./session.js";
 import { closeDrawer, configureDrawer, initDrawer } from "./drawer.js";
 import { viewMemories, viewAttention, viewGiven, viewReceived, viewFleet, viewSearch } from "./views.js";
 
@@ -59,7 +59,7 @@ async function loadMe(mine) {
     standing = await api("GET", "whoami");
   } catch (err) {
     if (mine !== renderToken) return false;
-    if (err.status === 401) { signOut("Your agent key is no longer valid (the agent may have been revoked). Sign in again."); return false; }
+    if (err.status === 401) { signOut(refusedMessage(err)); return false; }
     $("view").replaceChildren(h("p", { class: "form-error", text: `Could not check the key: ${err.message}` }));
     return false;
   }
@@ -124,11 +124,40 @@ async function signIn(event) {
     await route();
   } catch (err) {
     showLogin(err.status === 401
-      ? "That key is not recognised. A pending or revoked agent's key cannot sign in."
+      ? refusedMessage(err, "That key is not recognised. A pending or revoked agent's key cannot sign in.")
       : err.message);
   } finally {
     button.disabled = false;
   }
+}
+
+/** "This key leaked": confirm, lock the signed-in key, sign out and say what to do next. */
+function leakedDialog() {
+  const name = state.me ? state.me.name : "this agent";
+  openModal({
+    title: "Lock this key?",
+    body: [
+      h("p", { text: `Use this if the key for ${name} has leaked or may be in the wrong hands. The key stops working on its next request, everywhere: the API, the MCP server and this portal. You will be signed out now, and this cannot be undone from the portal.` }),
+      h("p", { text: `${name} itself is not touched: its memories, pins, ratings, trust level and fleet stay as they are. To get back in, ask the admin to replace the key. The admin issues a new one and the locked key stays dead.` }),
+    ],
+    actions: [
+      { label: "Cancel", class: "btn-ghost" },
+      {
+        label: "Lock this key",
+        class: "btn-danger-solid",
+        onClick: async () => {
+          try {
+            await api("POST", "portal/key/lock");
+          } catch (err) {
+            // Another tab locked it, or the admin replaced it first: this key is no longer usable either way.
+            if (err.code === "key_locked" || err.code === "key_not_locked") { signOut(err.message); return; }
+            throw err;
+          }
+          signOut(`The key for ${name} is locked and no longer works anywhere. Ask the admin for a new key for ${name}. Its memories, pins, ratings, trust level and fleet are unchanged.`);
+        },
+      },
+    ],
+  });
 }
 
 async function checkApi() {
@@ -169,6 +198,7 @@ hooks.signOut = signOut;
 document.addEventListener("DOMContentLoaded", () => {
   $("login-form").addEventListener("submit", signIn);
   $("logout").addEventListener("click", () => signOut());
+  $("leaked").addEventListener("click", leakedDialog);
   $("modal").addEventListener("close", () => $("modal-body").replaceChildren());
   initDrawer();
   window.addEventListener("hashchange", () => { closeDrawer(); route(); });

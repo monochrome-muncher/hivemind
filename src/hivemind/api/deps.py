@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from hivemind.api.guards import BodyTooLarge, PreAuthGuard
 from hivemind.api.schemas import ErrorBody
 from hivemind.config import SearchConfig
-from hivemind.domain.access import FleetBusy
+from hivemind.domain.access import KEY_LOCKED_MESSAGE, FleetBusy, KeyLocked
 from hivemind.domain.validation import MAX_REQUEST_BODY_BYTES, InvalidInput
 from hivemind.ports import Authenticator, Credential, Embedder, Store
 from hivemind.services.access import AccessService
@@ -91,14 +91,18 @@ async def require_credential(request: Request) -> Credential:
     """The auth dependency: verify the X-API-Key header (SPEC.md §8.1).
 
     Missing header -> 401 ``missing_api_key``; unknown key -> 401
-    ``unknown_api_key``. The verified Credential is attached to
+    ``unknown_api_key``; a key locked from the portal -> 401 ``key_locked``
+    (ADR 0117). The verified Credential is attached to
     ``request.state`` for downstream use.
     """
     app = await get_app(request)
     key = request.headers.get("X-API-Key")
     if key is None:
         raise api_error(401, "missing_api_key", "the X-API-Key header is required")
-    credential = await app.authenticator.verify(key)
+    try:
+        credential = await app.authenticator.verify(key)
+    except KeyLocked as exc:  # say what to do, not "unknown"
+        raise api_error(401, "key_locked", KEY_LOCKED_MESSAGE) from exc
     if credential is None:
         raise api_error(401, "unknown_api_key", "the API key is unknown or revoked")
     # ADR 0082: a dev-mode credential sits at trust level 0 when the

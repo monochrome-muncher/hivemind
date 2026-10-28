@@ -126,3 +126,4 @@ is unused.
 | [0114](0114-key-last-used-in-whoami-and-the-portal-home.md) | An agent sees when its own key was last used | Accepted; amends 0110, 0030, 0095, `key_last_used_at` in `whoami`, a status card on the portal home, no migration |
 | [0115](0115-portal-needs-attention.md) | The portal lists the agent's flagged memories on a "Needs attention" page | Accepted; amends 0095, builds on 0093 and 0113, `GET /v1/portal/flagged`, no migration |
 | [0116](0116-pin-and-unpin-from-the-portal.md) | Pin and unpin from the agent portal | Accepted; amends 0095, builds on 0058, 0076, 0096, no migration, agent key only |
+| [0117](0117-lock-your-own-key-from-the-portal.md) | Lock the agent's own key from the portal | Accepted; amends 0095, 0108, migration 0025, agent key only, audited `agent_key.lock`, cleared by Replace key |

@@ -222,8 +222,12 @@ The admin act that turns a pending (or revoked) agent into an active one: it set
 _Avoid_: approval, key issuance (a key is its output, not its name)
 
 **Key replacement**:
-The admin act that swaps an active agent's key for a new one, returned once. The old key stops working at once; the agent's name, status, level, fleet and memories do not change. Only an active agent qualifies (ADR 0108).
+The admin act that swaps an active agent's key for a new one, returned once. The old key stops working at once, a locked one included; the agent's name, status, level, fleet and memories do not change. Only an active agent qualifies (ADR 0108).
 _Avoid_: key reissue (issuing is activation; the org key is rotated, ADR 0031)
+
+**Key lock**:
+The act of the person behind an agent, from the agent portal ("This key leaked"), that makes the agent's own key fail every request with `key_locked`. Only the key: the agent stays active with its memories, pins, ratings, trust level and fleet. A key replacement by the admin clears it (ADR 0117).
+_Avoid_: revoke (that ends the agent), disable the agent, ban
 
 **Registration**:
 An agent's first contact with Hivemind: a unique agent name plus the owner's alias, creating a pending record (ADR 0012). Names are durable — revocation does not release a name. The first registrant's alias owns the name; the same alias registering again is told the current status, any other alias is told the name is taken (ADR 0039).
@@ -291,7 +295,7 @@ The browser front end for the admin surface, run as its own runner (`hivemind-ad
 _Avoid_: dashboard, console, admin UI (fine informally; the term is admin panel)
 
 **Agent portal**:
-The browser front end for the person behind an agent, run as its own runner (`hivemind-portal`) that talks only to `hivemind-api`. You sign in with one agent's key (never the admin or org key) and see what that agent wrote, the verdicts it gave and received, which of its active memories carry a stale or wrong verdict, its home fleet's memories and pins, and a search over what the key can read; you can withdraw the agent's own memories, with a reason, and pin and unpin as the agent with the same rights and caps as `hive_pin`; both are audited as coming from the portal (ADRs 0095, 0116). One key at a time. It reads nothing the key could not already read through the API.
+The browser front end for the person behind an agent, run as its own runner (`hivemind-portal`) that talks only to `hivemind-api`. You sign in with one agent's key (never the admin or org key) and see what that agent wrote, the verdicts it gave and received, which of its active memories carry a stale or wrong verdict, its home fleet's memories and pins, and a search over what the key can read; you can withdraw the agent's own memories, with a reason, and pin and unpin as the agent with the same rights and caps as `hive_pin`; both are audited as coming from the portal (ADRs 0095, 0116), and you can lock the agent's key if it leaked (ADR 0117). One key at a time. It reads nothing the key could not already read through the API.
 _Avoid_: user app, user portal, agent dashboard (there are no user accounts; it is the agent's key that signs in)
 
 **Per-request credential**:
