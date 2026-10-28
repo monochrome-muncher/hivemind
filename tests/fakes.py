@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from hivemind.config import SearchConfig
-from hivemind.domain.access import AgentStatus, InvalidAgentStatus, UnknownAgent
+from hivemind.domain.access import AgentStatus, InvalidAgentStatus, KeyLocked, UnknownAgent
 from hivemind.domain.audit import ActorKind, AuditAction, AuditEvent
 from hivemind.domain.entry import (
     EntityKind,
@@ -257,6 +257,7 @@ class FakeAuthenticator:
         self.use_writes = 0
         self._clock: Callable[[], datetime] = clock or (lambda: datetime.now(UTC))
         self._replacements = 0
+        self._locked: set[str] = set()  # raw keys locked from the portal
 
     async def verify(self, key: str) -> Credential | None:
         credential = self._by_key.get(key)
@@ -269,6 +270,8 @@ class FakeAuthenticator:
             agent = await self._store.get_agent(credential.agent_name)
             if agent is None or agent.status is not AgentStatus.ACTIVE:
                 return None
+        if credential is not None and key in self._locked:
+            raise KeyLocked
         if credential is not None:
             self._record_use(key, credential)
         return credential
@@ -294,9 +297,12 @@ class FakeAuthenticator:
                 raise InvalidAgentStatus(agent_name, agent.status, "issue a key for")
         raw = f"hm_agent_{agent_name}"
         self._issued_agent_keys[agent_name] = raw
+        self._locked.discard(raw)
         if isinstance(self._store, MemoryStore):
             self._store.record_key_issued(agent_name, self._clock())
-        self._by_key[raw] = Credential(user_id=agent_name, agent_name=agent_name)
+        self._by_key[raw] = Credential(
+            user_id=agent_name, agent_name=agent_name, key_id=fake_key_id(raw)
+        )
         return raw
 
     async def replace_agent_key(
@@ -315,7 +321,9 @@ class FakeAuthenticator:
         if old_raw is not None:
             self._by_key.pop(old_raw, None)
         self._issued_agent_keys[agent_name] = raw
-        self._by_key[raw] = Credential(user_id=agent_name, agent_name=agent_name)
+        self._by_key[raw] = Credential(
+            user_id=agent_name, agent_name=agent_name, key_id=fake_key_id(raw)
+        )
         if isinstance(self._store, MemoryStore):
             self._store.record_key_issued(agent_name, self._clock())  # a new key starts unused
         replacement = KeyReplacement(
@@ -335,6 +343,26 @@ class FakeAuthenticator:
                 )
             )
         return replacement
+
+    async def lock_agent_key(self, agent_name: str, *, key_id: str) -> bool:
+        """Lock the agent's key if its fingerprint is ``key_id`` (ADR 0117)."""
+        raw = self._issued_agent_keys.get(agent_name)
+        if raw is None or fake_key_id(raw) != key_id or raw in self._locked:
+            return False
+        self._locked.add(raw)
+        if isinstance(self._store, MemoryStore):
+            self._store.record_key_locked(agent_name, self._clock())
+        if self._store is not None:
+            await self._store.record_audit(
+                AuditEvent(
+                    actor_kind=ActorKind.AGENT_KEY,
+                    actor=agent_name,
+                    action=AuditAction.AGENT_KEY_LOCK,
+                    target=agent_name,
+                    detail={"key": key_id, "via": "portal"},
+                )
+            )
+        return True
 
     async def revoke_agent_key(self, agent_name: str) -> None:
         raw = self._issued_agent_keys.pop(agent_name, None)

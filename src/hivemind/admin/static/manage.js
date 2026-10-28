@@ -15,7 +15,7 @@ import { retireDialog, successionsCard } from "./retire.js";
 const AUDIT_ACTIONS = [
   "agent.register", "agent.activate", "agent.trust_level_set", "agent.home_fleet_set", "agent.revoke",
   "fleet.create", "fleet.rename", "fleet.merge", "fleet.unmerge", "fleet.move_agents", "fleet.move_undo", "org_key.rotate", "entry.withdraw", "entry.pin", "entry.unpin",
-  "admin_key.issue", "admin_key.revoke", "agent_key.issue", "agent_key.replace",
+  "admin_key.issue", "admin_key.revoke", "agent_key.issue", "agent_key.replace", "agent_key.lock",
   "agent.cleanup", "agent.cleanup_undo", "agent.retire", "agent.retire_undo",
 ];
 const AUDIT_PAGE = 50;
@@ -117,10 +117,18 @@ function revokeDialog(agent, onDone) {
   });
 }
 
+/** The agent's key was locked from the portal; the fix is Replace key. */
+const lockedBadge = (agent) => h("span", {
+  class: "badge badge-revoked",
+  title: `Its key was locked from the agent portal${agent.key_locked_at ? ` ${fmtTime(agent.key_locked_at)}` : ""} (a leak was reported). It fails every request until you replace it.`,
+  text: "key locked",
+});
+
 function replaceKeyDialog(agent, onDone) {
   openModal({
     title: `Replace the key of ${agent.name}?`,
     body: [
+      agent.key_locked ? h("p", { class: "callout", text: "This key was locked from the agent portal after a leak was reported. Replacing it is how the agent gets back in." }) : null,
       h("p", { class: "callout callout-danger", text: "The current key stops working on the agent's next request. The agent has to be given the new key before it can reach Hivemind again." }),
       h("p", { class: "muted small", text: "Its name, trust level, fleet and memories do not change." }),
     ],
@@ -419,15 +427,17 @@ export async function viewAgents(root) {
   // ADR 0110: the server says which agents are idle and for how many days.
   const idleDays = (state.agents[0] && state.agents[0].idle_after_days) || 30;
   const idleCount = state.agents.filter((a) => a.idle).length;
+  const lockedCount = state.agents.filter((a) => a.key_locked && a.status === "active").length;
   const idleFilter = h("select", { "aria-label": "Activity" },
     h("option", { value: "all", text: "Any activity" }),
+    h("option", { value: "locked", text: `Key locked (${lockedCount})` }),
     h("option", { value: "idle", text: `Idle ${idleDays}+ days (${idleCount})` }));
   const holder = h("div");
   const render = () => {
     const q = search.value.trim().toLowerCase();
     const shown = state.agents.filter((a) =>
       (statusFilter.value === "all" || a.status === statusFilter.value) &&
-      (idleFilter.value === "all" || a.idle) &&
+      (idleFilter.value === "all" || (idleFilter.value === "locked" ? a.key_locked && a.status === "active" : a.idle)) &&
       (!q || [a.name, a.owner_alias || "", fleetName(a.home_fleet_id)].some((v) => v.toLowerCase().includes(q))));
     holder.replaceChildren(table(
       ["Agent", "Status", "Trust level", "Home fleet", "Owner", "Entries", `Writes (${state.days}d)`, "Last write", "Flags confirmed", "Activated", "Last active", ""],
@@ -435,7 +445,7 @@ export async function viewAgents(root) {
         const x = act.get(a.name);
         return h("tr", {},
           h("td", {}, link(a.name, agentHref(a.name), { class: "link strong" })),
-          h("td", {}, statusBadge(a.status)),
+          h("td", {}, statusBadge(a.status), a.key_locked && a.status === "active" ? [" ", lockedBadge(a)] : null),
           h("td", {}, a.status === "pending" ? h("span", { class: "muted", text: "—" }) : levelBadge(a.trust_level)),
           h("td", { text: fleetName(a.home_fleet_id) }),
           h("td", { text: a.owner_alias || "—" }),

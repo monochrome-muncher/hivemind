@@ -656,7 +656,8 @@ INSERT_AGENT = (
 # The agent's key use (ADR 0110) rides along; an agent has at most one key
 # (unique index, ADR 0039), so the join adds no rows.
 LIST_AGENTS = (
-    "SELECT a.*, c.last_used_at, c.created_at AS key_created_at FROM agents a "
+    "SELECT a.*, c.last_used_at, c.created_at AS key_created_at, "
+    "c.locked_at AS key_locked_at FROM agents a "
     "LEFT JOIN credentials c ON c.kind = 'agent' AND c.agent_name = a.name "
     "ORDER BY a.name"
 )
@@ -3551,6 +3552,7 @@ def _row_to_agent(row: asyncpg.Record) -> Agent:
         # Only the agent list selects these; the other agent queries do not.
         last_used_at=row.get("last_used_at"),
         key_created_at=row.get("key_created_at"),
+        key_locked_at=row.get("key_locked_at"),
     )
 
 

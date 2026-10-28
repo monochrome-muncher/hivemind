@@ -197,6 +197,7 @@ class MemoryStore:
         # The agent's key facts (ADR 0110), kept apart from the agent record
         # and merged only into ``list_agents``, as the real adapter joins them.
         self._key_last_used: dict[str, datetime] = {}
+        self._key_locked: dict[str, datetime] = {}
         self._key_created: dict[str, datetime] = {}
         self._audit: list[AuditRecord] = []  # append-only (ADR 0027)
         self._pins: dict[tuple[str, str], Pin] = {}  # (fleet, entry), ADR 0058
@@ -1793,6 +1794,7 @@ class MemoryStore:
                     a,
                     last_used_at=self._key_last_used.get(a.name),
                     key_created_at=self._key_created.get(a.name),
+                    key_locked_at=self._key_locked.get(a.name),
                 )
                 for a in sorted(self._agents.values(), key=lambda a: a.name)
             ]
@@ -1808,6 +1810,13 @@ class MemoryStore:
         with self._lock:
             self._key_created[name] = at
             self._key_last_used.pop(name, None)
+            self._key_locked.pop(name, None)  # a new key row carries no lock
+
+    def record_key_locked(self, name: str, at: datetime) -> None:
+        """The agent's key was locked from the portal at ``at`` (ADR 0117);
+        the real adapter writes ``credentials.locked_at``. Not on the port."""
+        with self._lock:
+            self._key_locked[name] = at
 
     def record_key_use(self, name: str, at: datetime) -> None:
         """Stamp the agent's key as used at ``at`` (ADR 0110); the real
@@ -1818,6 +1827,7 @@ class MemoryStore:
     def _drop_key_facts(self, name: str) -> None:
         self._key_last_used.pop(name, None)
         self._key_created.pop(name, None)
+        self._key_locked.pop(name, None)
 
     async def activate_agent(
         self, name: str, *, trust_level: TrustLevel, home_fleet_id: str

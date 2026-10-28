@@ -72,6 +72,7 @@ def _portal(transport: httpx.AsyncBaseTransport) -> httpx.AsyncClient:
         ("POST", "portal/cleanup"),
         ("GET", "portal/cleanups"),
         ("POST", "portal/cleanups/abc123/undo"),
+        ("POST", "portal/key/lock"),
     ],
 )
 def test_the_portal_routes_are_forwarded(method: str, path: str) -> None:
@@ -114,6 +115,10 @@ def test_the_portal_routes_are_forwarded(method: str, path: str) -> None:
         ("POST", "admin/agents/x/cleanup"),
         ("GET", "admin/agent-cleanups"),
         ("POST", "admin/agent-cleanups/x/undo"),
+        ("GET", "portal/key/lock"),
+        ("DELETE", "portal/key/lock"),
+        ("POST", "portal/key/lock/x"),
+        ("POST", "portal/key"),
         ("GET", "entries/x/extra"),
         ("GET", "entries/"),
         ("GET", "pins/x"),

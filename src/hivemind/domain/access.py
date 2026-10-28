@@ -74,6 +74,22 @@ class UnknownAgent(KeyError):
     """No agent has this name (404 ``not_found``). A ``KeyError``, so ``str(exc)`` is quoted."""
 
 
+class KeyLocked(Exception):
+    """The key was locked from the agent portal (ADR 0117): it belongs to an
+    active agent but fails every request (401 ``key_locked``) until an admin
+    replaces it. Raised by ``Authenticator.verify``, so a surface can say what
+    to do instead of calling the key unknown."""
+
+    def __init__(self) -> None:
+        super().__init__(KEY_LOCKED_MESSAGE)
+
+
+# What every surface tells the holder of a locked key.
+KEY_LOCKED_MESSAGE = (
+    "this API key was locked because it may have leaked; ask the admin for a new key"
+)
+
+
 class UnknownFleet(KeyError):
     """No fleet has this id (404 ``not_found``). A ``KeyError``, so ``str(exc)`` is quoted."""
 
@@ -183,6 +199,9 @@ class Agent:
     # the current key row was made. Nothing ranks or permits on either.
     last_used_at: datetime | None = None
     key_created_at: datetime | None = None
+    # When the agent's key was locked from the portal; ``None`` =
+    # usable or no key. Filled by ``Store.list_agents`` only, like the two above.
+    key_locked_at: datetime | None = None
 
 
 def is_idle(agent: Agent, now: datetime, idle_days: int) -> bool:
@@ -345,6 +364,7 @@ def may_supersede(
 
 
 __all__ = [
+    "KEY_LOCKED_MESSAGE",
     "SCOPE_FLEET",
     "SCOPE_ORG",
     "SCOPE_SELF",
@@ -355,6 +375,7 @@ __all__ = [
     "FleetExists",
     "FleetMerged",
     "InvalidAgentStatus",
+    "KeyLocked",
     "Standing",
     "TrustLevel",
     "UnknownAgent",

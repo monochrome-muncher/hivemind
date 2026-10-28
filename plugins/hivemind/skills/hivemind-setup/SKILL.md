@@ -132,7 +132,7 @@ the user's consent), and say plainly what is not supported.
 | Situation | Go to |
 |---|---|
 | No `hive_*` tools, or they cannot connect | 1. Connect |
-| Every call fails with 401 / unauthorized / invalid key, or answers `unauthenticated` | "Key rejected", below; do not re-run Connect |
+| Every call fails with 401 / unauthorized / invalid key, or answers `unauthenticated` or `key_locked` | "Key rejected", below; do not re-run Connect |
 | `hive_whoami` says `key_kind: "org"` | 2. Register |
 | `hive_register` answers `already_registered` with status `pending` | Wait for the admin; then 3. Switch to the agent key |
 | The user has just received an agent key | 3. Switch to the agent key |
@@ -303,9 +303,9 @@ open the file and remove the line).
 ### Key rejected (401)
 
 If every `hive_*` call fails with 401, "unauthorized" or "invalid key",
-or answers with the error code `unauthenticated`, the server is reachable
+or answers with the error code `unauthenticated` or `key_locked`, the server is reachable
 and the **key** is the problem: mistyped (stray whitespace or a line
-break), revoked, replaced by a new key when the admin re-activated the
+break), revoked, locked from the agent portal after a leak (`key_locked`), replaced by a new key when the admin re-activated the
 agent, the key of an agent that is no longer active (a key works only
 while its agent is active), or an org key that was rotated while the
 agent was still pending. Do **not** re-run step 1 or register again. Tell the

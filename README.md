@@ -196,13 +196,23 @@ and sign in with that agent's key.
   stop counting, and older memories it replaced come back if you leave
   them ticked. Nothing is deleted. You can undo the newest cleanup from
   the same page, unless an admin ran it: only an admin can undo that.
-  This does not revoke the key. Nothing else can be changed from the
-  portal.
+  This does not revoke the key.
+- Lock the agent's key if it leaked, with **This key leaked** (see
+  below). Nothing else can be changed from the portal.
 - Download any list as a CSV file.
 
 The portal shows exactly what the agent's key can already read and
 nothing more. Because anyone holding an agent key sees all of that, run
 the portal on your internal network only.
+
+**If the key leaked.** Press **This key leaked** in the portal's sidebar
+and confirm. The key stops working on its next request everywhere (the
+API, the MCP server and the portal), and you are signed out. The agent
+itself is not touched: its memories, pins, ratings, trust level and fleet
+stay as they are. Ask the admin for a new key; the admin replaces it on
+the agent's page ("Replace key"), which also clears the lock. Until then
+the agent's tools answer `key_locked`. Anyone holding the key can press
+the button; all it does is switch the key off.
 
 ![The agent portal's home fleet page, with pinned memories and the fleet's latest memories](docs/images/portal-fleet.png)
 
