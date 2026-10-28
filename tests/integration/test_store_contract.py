@@ -3176,6 +3176,114 @@ async def test_ratings_already_set_aside_are_left_to_the_first_cleanup(adapter: 
     assert first.record is not None
 
 
+async def test_cleanup_reaches_every_owned_author_but_only_the_agents_own_ratings(
+    adapter: Adapter,
+) -> None:
+    """ADR 0118: the portal passes every author the agent owns; the ratings
+    stay the one agent's, and the author-only default is unchanged."""
+    store = adapter.store
+    good = await write(adapter, "good fact", author="good")
+    target = await write(adapter, "target", author="good")
+    mine = await _junk(adapter, "junk of the agent")
+    theirs = await write(adapter, "junk of the retired one", author="old", supersedes=(good.id,))
+    await _rate(adapter, target.id, "bad", Verdict.WRONG)
+    await _rate(adapter, target.id, "old", Verdict.STALE)
+
+    alone = await store.scan_agent_cleanup("bad", WIDE_SINCE, WIDE_UNTIL)
+    assert {e.id for e in alone.withdraw} == {mine.id}
+    assert alone.restorable_total == 0
+
+    both = await store.scan_agent_cleanup("bad", WIDE_SINCE, WIDE_UNTIL, authors=["bad", "old"])
+    assert {e.id for e in both.withdraw} == {mine.id, theirs.id}
+    assert (both.ratings_total, dict(both.ratings_by_verdict)) == (1, {"wrong": 1})
+    assert [(e.id, e.superseded_by) for e in both.restorable] == [(good.id, theirs.id)]
+
+    out = await _clean(
+        adapter,
+        authors=["bad", "old"],
+        self_service=True,
+        restore_ids=[good.id],
+        expected_withdraw=2,
+        expected_ratings=1,
+    )
+    assert out.record is not None and out.record.self_service is True
+    assert (out.withdrawn, out.ratings_set_aside, out.restored) == (2, 1, 1)
+    assert out.record.agent == "bad"
+    reason = cleanup_reason(out.record.id)
+    for entry_id in (mine.id, theirs.id):
+        entry = await _state(adapter, entry_id)
+        assert entry.state is EntryState.WITHDRAWN and entry.withdrawn_reason == reason
+    assert (await _state(adapter, good.id)).state is EntryState.ACTIVE
+    assert await store.feedback_counts(target.id) == (0, 1, 0)  # old's stale still counts
+    assert (await store.get_agent_cleanup(out.record.id)) == out.record
+
+    undone = await store.undo_agent_cleanup(out.record.id)
+    assert (undone.reactivated, undone.resuperseded, undone.ratings_cleared) == (2, 1, 1)
+    assert (await _state(adapter, theirs.id)).state is EntryState.ACTIVE
+    assert (await _state(adapter, good.id)).state is EntryState.SUPERSEDED
+    assert undone.record.self_service is True
+
+
+async def test_cleanup_with_a_visibility_never_offers_or_restores_what_the_reader_cannot_read(
+    adapter: Adapter,
+) -> None:
+    """ADR 0118: a retired agent may have replaced a memory in a fleet the
+    successor cannot read. The self-service path drops it entirely."""
+    store = adapter.store
+    blue = (await store.create_fleet("blue")).id
+    red = (await store.create_fleet("red")).id
+    secret = await write(adapter, "red secret", author="peer", scope="fleet", fleet_id=red)
+    open_ = await write(adapter, "org fact", author="peer", scope="org")
+    await write(
+        adapter,
+        "old junk over secret",
+        author="old",
+        scope="fleet",
+        fleet_id=red,
+        supersedes=(secret.id,),
+    )
+    await write(adapter, "old junk over org", author="old", scope="org", supersedes=(open_.id,))
+    reader = Visibility(
+        level=TrustLevel.CONTRIBUTOR, name="bad", home_fleet_id=blue, inherited=("old",)
+    )
+    authors = ["bad", "old"]
+
+    everything = await store.scan_agent_cleanup("bad", WIDE_SINCE, WIDE_UNTIL, authors=authors)
+    assert {e.id for e in everything.restorable} == {secret.id, open_.id}
+    scan = await store.scan_agent_cleanup(
+        "bad", WIDE_SINCE, WIDE_UNTIL, authors=authors, visibility=reader
+    )
+    assert [e.id for e in scan.restorable] == [open_.id] and scan.restorable_total == 1
+    assert scan.withdraw_total == 2  # what the agent owns is withdrawn either way
+
+    with pytest.raises(AgentCleanupRefused):
+        await _clean(adapter, authors=authors, visibility=reader, restore_ids=[secret.id])
+    out = await _clean(adapter, authors=authors, visibility=reader, restore_ids=[open_.id])
+    assert out.restored == 1
+    assert (await _state(adapter, open_.id)).state is EntryState.ACTIVE
+    assert (await _state(adapter, secret.id)).state is EntryState.SUPERSEDED
+
+
+async def test_list_agent_cleanups_can_be_limited_to_one_agent(adapter: Adapter) -> None:
+    store = adapter.store
+    await write(adapter, "junk a", author="bad")
+    await write(adapter, "junk b", author="worse")
+    mine = await _clean(adapter)
+    other = await store.cleanup_agent("worse", WIDE_SINCE, WIDE_UNTIL, **CLEAN)
+    assert mine.record is not None and other.record is not None
+    assert [c.id for c in await store.list_agent_cleanups(10)] == [other.record.id, mine.record.id]
+    assert [c.id for c in await store.list_agent_cleanups(10, agent="bad")] == [mine.record.id]
+    assert await store.list_agent_cleanups(10, agent="nobody") == []
+
+
+async def test_an_admin_cleanup_is_not_marked_self_service(adapter: Adapter) -> None:
+    await _junk(adapter, "junk")
+    out = await _clean(adapter)
+    assert out.record is not None and out.record.self_service is False
+    entry = await _state(adapter, out.record.withdrawn_ids[0])
+    assert entry.withdrawn_reason == cleanup_reason(out.record.id)
+
+
 async def test_only_memories_still_superseded_by_a_withdrawn_memory_are_restorable(
     adapter: Adapter,
 ) -> None:

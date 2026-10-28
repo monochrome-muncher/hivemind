@@ -350,3 +350,130 @@ async def test_through_the_services_with_the_revoke_and_the_audit_rows(pool) -> 
         r.target
         for r in await store.list_audit(AuditFilters(action=AuditAction.AGENT_CLEANUP_UNDO), 10)
     ] == ["bad"]
+
+
+# -- the agent cleans up its own work from the portal (ADR 0118) ------------------------
+
+
+async def test_a_self_service_and_an_admin_cleanup_of_an_owned_author_never_overlap(pool) -> None:
+    """The portal cleanup of the successor takes the lock of every author it
+    owns, so it waits for an admin cleanup of the retired agent: each memory is
+    withdrawn by exactly one of the two records."""
+    _, store = pool
+    ids = {await _entry(store, f"old junk {i}", "old") for i in range(20)}
+    ids |= {await _entry(store, f"successor junk {i}", "successor") for i in range(20)}
+    own, admin = await asyncio.gather(
+        store.cleanup_agent(
+            "successor",
+            SINCE,
+            UNTIL,
+            cleaned_by="successor",
+            authors=["successor", "old"],
+            self_service=True,
+        ),
+        store.cleanup_agent("old", SINCE, UNTIL, cleaned_by="admin:1"),
+    )
+    withdrawn = [i for o in (own, admin) if o.record for i in o.record.withdrawn_ids]
+    assert len(withdrawn) == len(set(withdrawn)) == 40 and set(withdrawn) == ids
+    for out in (own, admin):
+        if out.record is None:  # the other one went first and found it all
+            continue
+        reason = cleanup_reason(out.record.id)
+        for entry_id in out.record.withdrawn_ids:
+            assert (await store.get_entry(entry_id)).withdrawn_reason == reason  # type: ignore[union-attr]
+
+
+async def test_the_portal_cleanup_through_the_services(pool) -> None:
+    _, store = pool
+    access = AccessService(store, FakeAuthenticator(store=store))
+    fleet = await store.create_fleet("alpha")
+    for name in ("successor", "old", "good"):
+        await store.register_agent(name)
+        await store.activate_agent(name, trust_level=TrustLevel.CONTRIBUTOR, home_fleet_id=fleet.id)
+    agent = Credential(
+        user_id="successor",
+        agent_name="successor",
+        access_controlled=True,
+        trust_level=TrustLevel.CONTRIBUTOR,
+        home_fleet_id=fleet.id,
+        inherits_from=("old",),
+    )
+    good = await _entry(store, "good fact", "good")
+    mine = await _entry(store, "successor junk", "successor")
+    inherited = await _entry(store, "old junk", "old", supersedes=(good,))
+    await store.record_feedback(Feedback(good, "successor", "a", Verdict.WRONG, "n"))
+    await store.record_feedback(Feedback(good, "good", "a", Verdict.HELPFUL, "n"))
+
+    preview = await access.cleanups.preview_own(agent, since=SINCE, until=UNTIL)
+    assert preview.scan.withdraw_total == 2 and preview.scan.ratings_total == 1
+    assert preview.scan.restorable_total == 1
+    out = await access.cleanups.cleanup_own(
+        agent,
+        since=SINCE,
+        until=UNTIL,
+        restore_ids=[good],
+        expected_withdraw=2,
+        expected_ratings=1,
+    )
+
+    assert out.record is not None and out.record.self_service and out.record.agent == "successor"
+    for entry_id in (mine, inherited):
+        entry = await store.get_entry(entry_id)
+        assert entry is not None and entry.state is EntryState.WITHDRAWN
+        assert entry.withdrawn_reason == cleanup_reason(out.record.id)
+    assert (await store.get_entry(good)).state is EntryState.ACTIVE  # type: ignore[union-attr]
+    assert await store.feedback_counts(good) == (1, 0, 0)  # only good's helpful still counts
+    stored = await store.get_agent_cleanup(out.record.id)
+    assert stored == out.record
+    (row,) = await store.list_audit(AuditFilters(action=AuditAction.AGENT_CLEANUP), 10)
+    assert (row.actor_kind.value, row.actor, row.detail["via"]) == (
+        "agent_key",
+        "successor",
+        "portal",
+    )
+
+    admin_out = await access.cleanups.cleanup(
+        "good", ADMIN, since=SINCE, until=UNTIL, expected_withdraw=1, expected_ratings=1
+    )
+    assert admin_out.record is not None and not admin_out.record.self_service
+    views = await access.cleanups.list_own(agent)
+    assert [(v.record.id, v.undoable) for v in views] == [(out.record.id, True)]
+
+    undone = await access.cleanups.undo_own(out.record.id, agent)
+    # `good` was withdrawn by the admin's cleanup of its author meanwhile: it is
+    # not put back under the old junk, and the undo says it skipped it.
+    assert (undone.reactivated, undone.resupersede_skipped, undone.ratings_cleared) == (2, 1, 1)
+    assert (await store.get_entry(inherited)).state is EntryState.ACTIVE  # type: ignore[union-attr]
+    assert (await store.get_entry(good)).state is EntryState.WITHDRAWN  # type: ignore[union-attr]
+    (undo_row,) = await store.list_audit(AuditFilters(action=AuditAction.AGENT_CLEANUP_UNDO), 10)
+    assert undo_row.detail["via"] == "portal" and undo_row.actor == "successor"
+
+
+async def test_an_undo_waits_for_the_cleanup_lock_of_each_author_it_withdrew(pool) -> None:
+    """Undoing a self-service cleanup takes the lock of every author whose
+    memories it withdrew, so it cannot interleave with an admin cleanup of the
+    retired agent: whatever the order, nothing is left half-way."""
+    _, store = pool
+    ids = [await _entry(store, f"old junk {i}", "old") for i in range(10)]
+    ids += [await _entry(store, f"successor junk {i}", "successor") for i in range(10)]
+    own = await store.cleanup_agent(
+        "successor",
+        SINCE,
+        UNTIL,
+        cleaned_by="successor",
+        authors=["successor", "old"],
+        self_service=True,
+    )
+    assert own.record is not None
+    undone, admin = await asyncio.gather(
+        store.undo_agent_cleanup(own.record.id),
+        store.cleanup_agent("old", SINCE, UNTIL, cleaned_by="admin:1"),
+    )
+    assert undone.reactivated == 20
+    states = [(await store.get_entry(i)).state for i in ids]  # type: ignore[union-attr]
+    old_ids = set(ids[:10])
+    for entry_id, state in zip(ids, states, strict=True):
+        if entry_id in old_ids:
+            assert state is (EntryState.WITHDRAWN if admin.record else EntryState.ACTIVE)
+        else:
+            assert state is EntryState.ACTIVE

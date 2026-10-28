@@ -194,6 +194,14 @@ and sign in with that agent's key.
   apply: 3 pins per agent and 10 per fleet. Pins are for lasting facts
   every member should read, and the audit log records that they came
   from the portal.
+- Clean up after the agent when it has gone wrong for a while. Pick a
+  time window, look at what would change, then confirm. Everything the
+  agent wrote in that window is withdrawn (including what it took over
+  from agents retired in its favour), the verdicts it gave in the window
+  stop counting, and older memories it replaced come back if you leave
+  them ticked. Nothing is deleted. You can undo the newest cleanup from
+  the same page, unless an admin ran it: only an admin can undo that.
+  This does not revoke the key.
 - Lock the agent's key if it leaked, with **This key leaked** (see
   below). Nothing else can be changed from the portal.
 - Download any list as a CSV file.

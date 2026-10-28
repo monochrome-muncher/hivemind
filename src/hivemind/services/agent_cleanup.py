@@ -1,6 +1,8 @@
 """Clean up after a bad agent (ADR 0111): preview, apply, undo and the list.
 
-Admin only (ADR 0012). The data change is one store transaction
+The admin runs it on any agent (ADR 0012); an agent runs the same operation
+on its own work from the portal (ADR 0118, the ``*_own`` methods), through
+the same code. The data change is one store transaction
 (``Store.cleanup_agent``); this layer validates, builds the preview, performs
 the optional revoke and audits afterwards (ADR 0027), as ``FleetMergeService``
 does. A cleanup writes no memory.
@@ -13,13 +15,14 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 
-from hivemind.domain.access import Agent, InvalidAgentStatus, UnknownAgent
+from hivemind.domain.access import Agent, InvalidAgentStatus, UnknownAgent, Visibility
 from hivemind.domain.agent_cleanup import (
     CLEANUP_LIST_LIMIT,
     AgentCleanupRecord,
     CleanupOutcome,
     CleanupScan,
     CleanupUndoOutcome,
+    UnknownAgentCleanup,
     check_window,
     undo_refusal,
 )
@@ -49,6 +52,10 @@ class CleanupView:
     record: AgentCleanupRecord
     undoable: bool
     blocked: str | None
+
+
+# Why a cleanup an admin ran cannot be undone from the portal (ADR 0118).
+ADMIN_RUN_BLOCK = "an admin ran this cleanup; only an admin can undo it"
 
 
 class AgentCleanupService:
@@ -86,6 +93,13 @@ class AgentCleanupService:
         if not credential.is_admin:
             raise PermissionDenied("this action requires an admin key (ADR 0012)")
 
+    @staticmethod
+    def _require_agent(credential: Credential) -> str:
+        """The signed-in agent's name; the admin and org keys have none (ADR 0095)."""
+        if credential.is_admin or credential.is_org or credential.agent_name is None:
+            raise PermissionDenied("cleaning up your own work requires an agent key")
+        return credential.agent_name
+
     async def _agent(self, name: str) -> Agent:
         agent = await self._store.get_agent(name)
         if agent is None:
@@ -106,10 +120,33 @@ class AgentCleanupService:
         changing nothing. ``until`` defaults to now and is returned resolved,
         so the apply can name the same window."""
         self._require_admin(credential)
+        return await self._preview(agent_name, (agent_name,), since, until)
+
+    async def preview_own(
+        self, credential: Credential, *, since: datetime, until: datetime | None = None
+    ) -> CleanupPreview:
+        """``preview`` for the signed-in agent's own work (ADR 0118): the
+        memories of every author it owns (itself and the agents retired in its
+        favour, ADR 0113) and its own ratings."""
+        name = self._require_agent(credential)
+        return await self._preview(
+            name, credential.owned_authors, since, until, credential.visibility()
+        )
+
+    async def _preview(
+        self,
+        agent_name: str,
+        authors: Sequence[str],
+        since: datetime,
+        until: datetime | None,
+        visibility: Visibility | None = None,
+    ) -> CleanupPreview:
         agent = await self._agent(agent_name)
         until = until if until is not None else self._clock()
         check_window(since, until)
-        scan = await self._store.scan_agent_cleanup(agent.name, since, until)
+        scan = await self._store.scan_agent_cleanup(
+            agent.name, since, until, authors=authors, visibility=visibility
+        )
         return CleanupPreview(agent, since, until, scan)
 
     # -- apply --------------------------------------------------------------
@@ -136,9 +173,66 @@ class AgentCleanupService:
         are what the preview showed. A failed audit write is raised, never
         swallowed; a failed revoke is not: the outcome carries ``revoke_error``."""
         self._require_admin(credential)
+        return await self._apply(
+            agent_name,
+            credential,
+            authors=(agent_name,),
+            self_service=False,
+            since=since,
+            until=until,
+            restore_ids=restore_ids,
+            expected_withdraw=expected_withdraw,
+            expected_ratings=expected_ratings,
+            also_revoke=also_revoke,
+        )
+
+    async def cleanup_own(
+        self,
+        credential: Credential,
+        *,
+        since: datetime,
+        until: datetime | None = None,
+        restore_ids: Sequence[str] | None = None,
+        expected_withdraw: int | None = None,
+        expected_ratings: int | None = None,
+    ) -> CleanupOutcome:
+        """``cleanup`` for the signed-in agent's own work (ADR 0118): the same
+        operation and record, marked ``self_service``, audited as the agent's
+        own act with ``via: "portal"``. There is no revoke."""
+        name = self._require_agent(credential)
+        return await self._apply(
+            name,
+            credential,
+            authors=credential.owned_authors,
+            self_service=True,
+            visibility=credential.visibility(),
+            since=since,
+            until=until,
+            restore_ids=restore_ids,
+            expected_withdraw=expected_withdraw,
+            expected_ratings=expected_ratings,
+            also_revoke=False,
+        )
+
+    async def _apply(
+        self,
+        agent_name: str,
+        credential: Credential,
+        *,
+        authors: Sequence[str],
+        self_service: bool,
+        visibility: Visibility | None = None,
+        since: datetime,
+        until: datetime | None,
+        restore_ids: Sequence[str] | None,
+        expected_withdraw: int | None,
+        expected_ratings: int | None,
+        also_revoke: bool,
+    ) -> CleanupOutcome:
         agent = await self._agent(agent_name)
         until = until if until is not None else self._clock()
         check_window(since, until)
+        via = {"via": "portal"} if self_service else {}
         will_revoke = False
         if also_revoke:
             # Refuse before anything changes (no authenticator, unknown agent).
@@ -151,6 +245,9 @@ class AgentCleanupService:
             expected_withdraw=expected_withdraw,
             expected_ratings=expected_ratings,
             cleaned_by=credential.audit_actor(),
+            authors=authors,
+            self_service=self_service,
+            visibility=visibility,
         )
         record = outcome.record
         if record is not None:
@@ -166,6 +263,7 @@ class AgentCleanupService:
                         "pin_ids": [pin.entry_id],
                         "reason": "agent_cleanup",
                         "cleanup_id": record.id,
+                        **via,
                     },
                 )
             await record_admin_action(
@@ -182,6 +280,7 @@ class AgentCleanupService:
                     "restored": outcome.restored,
                     "pins_removed": len(outcome.unpinned),
                     "also_revoke": also_revoke,
+                    **via,
                 },
             )
         if also_revoke and not will_revoke:
@@ -213,6 +312,26 @@ class AgentCleanupService:
         ``UnknownAgentCleanup`` / ``AgentCleanupRefused`` per the store. An
         agent the cleanup revoked stays revoked."""
         self._require_admin(credential)
+        return await self._undo(cleanup_id, credential, via={})
+
+    async def undo_own(self, cleanup_id: str, credential: Credential) -> CleanupUndoOutcome:
+        """Undo one of the signed-in agent's own cleanups from the portal
+        (ADR 0118), audited with ``via: "portal"``. Only a cleanup of this
+        agent that it ran itself: another agent's is an ``UnknownAgentCleanup``
+        (the portal says nothing of it), one an admin ran is a
+        ``PermissionDenied``. The newest-standing rule is the store's, so an
+        admin cleanup of the agent that is newer blocks this one."""
+        name = self._require_agent(credential)
+        record = await self._store.get_agent_cleanup(cleanup_id)
+        if record is None or record.agent != name:
+            raise UnknownAgentCleanup(f"unknown agent cleanup: {cleanup_id}")
+        if not record.self_service:
+            raise PermissionDenied(ADMIN_RUN_BLOCK)
+        return await self._undo(cleanup_id, credential, via={"via": "portal"})
+
+    async def _undo(
+        self, cleanup_id: str, credential: Credential, *, via: dict[str, str]
+    ) -> CleanupUndoOutcome:
         outcome = await self._store.undo_agent_cleanup(cleanup_id)
         self._changed()
         record = outcome.record
@@ -222,7 +341,12 @@ class AgentCleanupService:
                 credential,
                 AuditAction.ENTRY_PIN,
                 pin.entry_id,
-                {"fleet_id": pin.fleet_id, "reason": "agent_cleanup_undo", "cleanup_id": record.id},
+                {
+                    "fleet_id": pin.fleet_id,
+                    "reason": "agent_cleanup_undo",
+                    "cleanup_id": record.id,
+                    **via,
+                },
             )
         await record_admin_action(
             self._store,
@@ -238,6 +362,7 @@ class AgentCleanupService:
                 "ratings_cleared": outcome.ratings_cleared,
                 "pins_restored": len(outcome.pins_restored),
                 "pins_skipped": len(outcome.pins_skipped),
+                **via,
             },
         )
         return outcome
@@ -250,5 +375,21 @@ class AgentCleanupService:
         views = []
         for record in records:
             blocked = undo_refusal(record, records)
+            views.append(CleanupView(record, blocked is None, blocked))
+        return views
+
+    async def list_own(self, credential: Credential) -> list[CleanupView]:
+        """The signed-in agent's own cleanups, newest first, admin-run ones
+        too (they explain why memories went and block an older undo), each
+        with whether it can be undone from the portal now (ADR 0118): the
+        newest-standing rule over every cleanup of the agent, and only one
+        the agent ran itself."""
+        name = self._require_agent(credential)
+        records = await self._store.list_agent_cleanups(CLEANUP_LIST_LIMIT, agent=name)
+        views = []
+        for record in records:
+            blocked = undo_refusal(record, records)
+            if blocked is None and not record.self_service:
+                blocked = ADMIN_RUN_BLOCK
             views.append(CleanupView(record, blocked is None, blocked))
         return views

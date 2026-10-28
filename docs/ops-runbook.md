@@ -700,9 +700,13 @@ has not been undone can be undone, so undo in the order they were made.
 Otherwise the endpoint answers `409 cleanup_refused` and says which cleanup
 comes first.
 
+**When the agent cleans up for itself.** The person behind an agent can run the same cleanup from the agent portal (**Clean up**, ADR 0118), on that agent's own work and without the revoke. It shows in the **Cleanups** card marked "self-service", with the agent as the one who ran it. In the audit log it is `agent.cleanup` with actor kind `agent_key` and `via: "portal"` in the detail. An admin can undo it from the card as usual. A cleanup you ran cannot be undone from the portal; the person sees it in their list marked "an admin" and has to ask you. The newest cleanup of an agent, yours or theirs, is the only one that can be undone. A successor's cleanup also reaches the memories it inherited from the agents retired in its favour, which your own cleanup of the successor does not.
+
 **Rolling back the release.** `make rollback` past migration `0022` deletes
 the cleanup records and the `agent.cleanup` and `agent.cleanup_undo` audit
 rows. Withdrawn memories stay withdrawn. The ratings are kept and count again. Memories still carry `admin cleanup <id>` as their withdrawal reason, naming a record that no longer exists, and a roll-forward starts with no cleanups to undo.
+
+Rolling back migration `0026` only drops the mark that says an agent ran a cleanup itself. Afterwards its cleanups read as admin cleanups; they can still be undone from the admin panel, since their withdrawals carry the same `admin cleanup <id>` reason.
 
 
 ## 11. Moving agents to another fleet / splitting a fleet (ADR 0112)

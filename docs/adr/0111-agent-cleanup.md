@@ -2,7 +2,7 @@
 
 Extends [ADR 0067](0067-a-revoked-agents-feedback-no-longer-counts.md) (a revoked agent's feedback no longer counts) with a second reason to skip a rating, and follows the shape of [ADR 0107](0107-fleet-merge.md) (preview, guard, record, undo). Builds on [ADR 0098](0098-relied-on-changed-list-filter.md) (`withdrawn_at`) and [ADR 0096](0096-contributors-pin.md) (the pin caps). Amends SPEC §4.2, §12.4 and §12.5.
 
-Status: Accepted. Design from the 2026-10-27 session with Monochrome.
+Status: Accepted. Design from the 2026-10-27 session with Monochrome. Amended by [ADR 0118](0118-agent-cleans-up-its-own-work.md): an agent can run the same cleanup on its own work from the portal.
 
 ## Context
 

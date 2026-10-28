@@ -80,6 +80,9 @@ from hivemind.api.schemas import (
     PinnedOut,
     PinOut,
     PinsOut,
+    PortalCleanupOut,
+    PortalCleanupRecordOut,
+    PortalCleanupRequest,
     PortalSearchRequest,
     PortalWithdrawRequest,
     RegisterAgentRequest,
@@ -803,6 +806,101 @@ def build_router() -> APIRouter:
         """Unpin an entry from the portal (ADR 0116), audited ``via: "portal"``."""
         _require_agent(credential, "the agent portal")
         return await _unpin(app, credential, entry_id, via="portal")
+
+    @router.post(
+        "/portal/cleanup",
+        response_model=AgentCleanupPreviewOut | PortalCleanupOut,
+    )
+    async def portal_cleanup(
+        payload: PortalCleanupRequest, credential: require, app: hive
+    ) -> AgentCleanupPreviewOut | PortalCleanupOut:
+        """The admin agent cleanup for the signed-in agent's own work (ADR
+        0118; ``POST /v1/admin/agents/{name}/cleanup`` with the agent fixed to
+        the key and no revoke). Withdraws the active memories of every author
+        the agent owns written in the window, sets aside its own ratings,
+        restores the ``restore_ids`` it superseded; ``dry_run`` first, the
+        ``expected_*`` totals on the apply. Audited ``agent.cleanup`` with
+        ``via: "portal"``."""
+        _require_agent(credential, "the agent portal")
+        cleanups = app.access_service.cleanups
+        try:
+            if payload.dry_run:
+                preview = await cleanups.preview_own(
+                    credential, since=payload.since, until=payload.until
+                )
+                return AgentCleanupPreviewOut.from_preview(preview)
+            if payload.expected_withdraw is None or payload.expected_ratings is None:
+                raise InvalidInput(
+                    "expected_withdraw and expected_ratings (the preview's totals) are required "
+                    "when dry_run is false; preview first"
+                )
+            until = payload.until if payload.until is not None else utcnow()
+            outcome = await cleanups.cleanup_own(
+                credential,
+                since=payload.since,
+                until=until,
+                restore_ids=payload.restore_ids,
+                expected_withdraw=payload.expected_withdraw,
+                expected_ratings=payload.expected_ratings,
+            )
+        except PermissionDenied as exc:
+            raise api_error(403, "forbidden", str(exc)) from exc
+        except InvalidInput as exc:
+            raise api_error(422, "invalid_input", str(exc)) from exc
+        except UnknownAgent as exc:
+            raise api_error(404, "not_found", str(exc)) from exc
+        except AgentCleanupRefused as exc:
+            raise api_error(409, "cleanup_refused", str(exc)) from exc
+        return PortalCleanupOut(
+            cleanup_id=outcome.record.id if outcome.record is not None else None,
+            since=payload.since,
+            until=until,
+            withdrawn=outcome.withdrawn,
+            ratings_set_aside=outcome.ratings_set_aside,
+            restored=outcome.restored,
+            pins_removed=[DroppedPinOut.from_dropped(p) for p in outcome.unpinned],
+            nothing_to_clean=outcome.record is None,
+        )
+
+    @router.get("/portal/cleanups", response_model=list[PortalCleanupRecordOut])
+    async def portal_cleanups(credential: require, app: hive) -> list[PortalCleanupRecordOut]:
+        """The signed-in agent's cleanups, newest first, the admin's too (ADR
+        0118), each with whether the agent can undo it now."""
+        _require_agent(credential, "the agent portal")
+        views = await app.access_service.cleanups.list_own(credential)
+        return [PortalCleanupRecordOut.from_view(v) for v in views]
+
+    @router.post("/portal/cleanups/{cleanup_id}/undo", response_model=AgentCleanupUndoOut)
+    async def portal_undo_cleanup(
+        cleanup_id: NameParam, credential: require, app: hive
+    ) -> AgentCleanupUndoOut:
+        """Undo one of the agent's own cleanups (ADR 0118): only the newest
+        standing cleanup of the agent, and only one the agent ran itself (403
+        for an admin's, 404 for any other agent's, 409 ``cleanup_refused``
+        when a newer one stands). Audited ``agent.cleanup_undo`` with
+        ``via: "portal"``."""
+        _require_agent(credential, "the agent portal")
+        try:
+            outcome = await app.access_service.cleanups.undo_own(cleanup_id, credential)
+        except PermissionDenied as exc:
+            raise api_error(403, "forbidden", str(exc)) from exc
+        except UnknownAgentCleanup as exc:
+            raise api_error(404, "not_found", str(exc)) from exc
+        except AgentCleanupRefused as exc:
+            raise api_error(409, "cleanup_refused", str(exc)) from exc
+        record = outcome.record
+        return AgentCleanupUndoOut(
+            cleanup_id=record.id,
+            agent=record.agent,
+            reactivated=outcome.reactivated,
+            reactivate_skipped=outcome.reactivate_skipped,
+            resuperseded=outcome.resuperseded,
+            resupersede_skipped=outcome.resupersede_skipped,
+            ratings_cleared=outcome.ratings_cleared,
+            pins_restored=[DroppedPinOut.from_dropped(p) for p in outcome.pins_restored],
+            pins_skipped=[DroppedPinOut.from_dropped(p) for p in outcome.pins_skipped],
+            note=None,
+        )
 
     @router.post("/portal/key/lock", response_model=KeyLockedOut)
     async def portal_lock_key(credential: require, app: hive) -> KeyLockedOut:

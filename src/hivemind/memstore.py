@@ -16,7 +16,7 @@ import math
 import threading
 import uuid
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 
@@ -1508,7 +1508,12 @@ class MemoryStore:
         return current.id if current is not None else entry_id
 
     def _cleanup_sets(
-        self, agent: str, since: datetime, until: datetime
+        self,
+        agent: str,
+        since: datetime,
+        until: datetime,
+        authors: Collection[str],
+        visibility: Visibility | None = None,
     ) -> tuple[list[Entry], list[tuple[Entry, str, str]], list[tuple[str, str, str]]]:
         """The memories to withdraw (newest first), the memories to offer for
         restoring (newest first) with the memory that replaced each and the end
@@ -1520,7 +1525,7 @@ class MemoryStore:
             (
                 e
                 for e in self._entries.values()
-                if e.author == agent
+                if e.author in authors
                 and e.state is EntryState.ACTIVE
                 and since <= e.created_at < until
             ),
@@ -1530,7 +1535,7 @@ class MemoryStore:
         own = {
             e.id: e
             for e in self._entries.values()
-            if e.author == agent and since <= e.created_at < until
+            if e.author in authors and since <= e.created_at < until
         }
         found: list[tuple[Entry, str, str]] = []
         for e in self._entries.values():
@@ -1544,7 +1549,9 @@ class MemoryStore:
             ):
                 cur = own[cur.superseded_by]
                 hops += 1
-            if cur.state is EntryState.ACTIVE:
+            if cur.state is EntryState.ACTIVE and (
+                visibility is None or entry_is_visible(e, visibility)
+            ):
                 found.append((e, first, cur.id))
         restorable = sorted(found, key=lambda t: (t[0].created_at, t[0].id), reverse=True)
         ratings = [
@@ -1557,9 +1564,19 @@ class MemoryStore:
         ]
         return withdraw, restorable, ratings
 
-    async def scan_agent_cleanup(self, agent: str, since: datetime, until: datetime) -> CleanupScan:
+    async def scan_agent_cleanup(
+        self,
+        agent: str,
+        since: datetime,
+        until: datetime,
+        *,
+        authors: Sequence[str] | None = None,
+        visibility: Visibility | None = None,
+    ) -> CleanupScan:
         with self._lock:
-            withdraw, restorable, ratings = self._cleanup_sets(agent, since, until)
+            withdraw, restorable, ratings = self._cleanup_sets(
+                agent, since, until, sorted(set(authors or ()) | {agent}), visibility
+            )
             by_verdict = Counter(self._feedback[k].verdict.value for k in ratings)
             ids = {e.id for e in withdraw}
             offered = {t[0].id for t in restorable}
@@ -1590,6 +1607,9 @@ class MemoryStore:
         expected_withdraw: int | None = None,
         expected_ratings: int | None = None,
         cleaned_by: str,
+        authors: Sequence[str] | None = None,
+        self_service: bool = False,
+        visibility: Visibility | None = None,
     ) -> CleanupOutcome:
         check_window(since, until)
         # Spelled as the store reads ids back; a malformed one is simply not restorable.
@@ -1597,7 +1617,9 @@ class MemoryStore:
             str(uuid.UUID(r)) if is_valid_uuid(r) else r for r in dict.fromkeys(restore_ids or ())
         ]
         with self._lock:
-            withdraw, restorable, ratings = self._cleanup_sets(agent, since, until)
+            withdraw, restorable, ratings = self._cleanup_sets(
+                agent, since, until, sorted(set(authors or ()) | {agent}), visibility
+            )
             restore = check_restore_ids([t[0].id for t in restorable], wanted)
             check_counts_unchanged(len(withdraw), len(ratings), expected_withdraw, expected_ratings)
             if not withdraw and not ratings:
@@ -1640,6 +1662,7 @@ class MemoryStore:
                 restored=restored,
                 ratings_set_aside=len(ratings),
                 unpinned_pins=unpinned,
+                self_service=self_service,
             )
             self._cleanups.append(record)
             return CleanupOutcome(record, len(withdraw_ids), len(ratings), len(restored), unpinned)
@@ -1726,9 +1749,12 @@ class MemoryStore:
                 pins_skipped=tuple(skipped_pins),
             )
 
-    async def list_agent_cleanups(self, limit: int) -> list[AgentCleanupRecord]:
+    async def list_agent_cleanups(
+        self, limit: int, *, agent: str | None = None
+    ) -> list[AgentCleanupRecord]:
         with self._lock:
-            return list(reversed(self._cleanups))[:limit]
+            mine = [c for c in reversed(self._cleanups) if agent is None or c.agent == agent]
+            return mine[:limit]
 
     async def get_agent_cleanup(self, cleanup_id: str) -> AgentCleanupRecord | None:
         cleanup_id = _canonical_or_same(cleanup_id)
