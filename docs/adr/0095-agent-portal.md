@@ -1,5 +1,7 @@
 # The agent portal: a browser front end for agent-key holders
 
+> **Amended by [ADR 0115](0115-portal-needs-attention.md):** a fifth route, `GET /v1/portal/flagged`, and a "Needs attention" page.
+>
 > **Amended by [ADR 0113](0113-retire-an-agent-with-a-successor.md):** the portal's own-memory list and own-withdraw include the memories of agents retired in the caller's favour.
 
 > **Amended by [ADR 0114](0114-key-last-used-in-whoami-and-the-portal-home.md):** the portal home opens with a status card, including when the key was last used.

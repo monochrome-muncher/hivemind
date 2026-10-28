@@ -254,14 +254,14 @@ export function pinRow(pin, { onOpen, agentHref = noHref } = {}) {
 export const FLAGGED_HEADERS = ["Memory", "Kind", "Scope", "Author", "First flagged", "Last flagged", "Verdicts"];
 
 /** One memory with a standing stale or wrong verdict (ADR 0093 shape), oldest flag first. */
-export function flaggedRow(row, { onOpen, fleetName = sameName, agentHref = noHref } = {}) {
+export function flaggedRow(row, { onOpen, fleetName = sameName, agentHref = noHref, owners = true } = {}) {
   return h("tr", {},
     h("td", { class: "cell-summary" },
       h("button", { type: "button", class: "linklike summary-text", text: row.summary, onclick: () => onOpen(row.id) })),
     h("td", {}, kindBadge(row.kind)),
     h("td", { class: "nowrap", text: scopeText(row.scope, row.fleet_id, fleetName) }),
     h("td", { class: "nowrap" }, nameCell(row.author, agentHref),
-      row.orphaned ? h("div", {}, h("span", { class: "badge badge-revoked", title: "The author is revoked or has not written for 30 days: nobody is likely to fix it", text: "no owner" })) : null),
+      owners && row.orphaned ? h("div", {}, h("span", { class: "badge badge-revoked", title: "The author is revoked or has not written for 30 days: nobody is likely to fix it", text: "no owner" })) : null),
     h("td", { class: "nowrap", title: fmtTime(row.first_flag_at), text: fmtAgo(row.first_flag_at) }),
     h("td", { class: "nowrap", title: fmtTime(row.last_flag_at), text: fmtAgo(row.last_flag_at) }),
     h("td", { class: "nowrap" },
@@ -271,19 +271,19 @@ export function flaggedRow(row, { onOpen, fleetName = sameName, agentHref = noHr
 }
 
 /** CSV columns for the flag backlog (rows in the ADR 0093 shape). */
-export const flaggedCsvColumns = (fleetName = sameName) => [
+export const flaggedCsvColumns = (fleetName = sameName, { owners = true } = {}) => [
   column("id"), column("kind"), column("summary"), column("scope"), ...fleetColumns(fleetName), column("author"),
-  column("orphaned"), column("first_flag_at"), column("last_flag_at"), ...countColumns((r) => r),
+  ...(owners ? [column("orphaned")] : []), column("first_flag_at"), column("last_flag_at"), ...countColumns((r) => r),
 ];
 
-/** A paged list of flagged memories over `fetchPage`, oldest first flag first; `csvName` adds an export. */
-export function flaggedTable({ fetchPage, onOpen, fleetName = sameName, agentHref = noHref, emptyText = "No flagged memory matches.", csvName: name = null }) {
+/** A paged list of flagged memories over `fetchPage`, oldest first flag first; `csvName` adds an export. `owners: false` leaves out the "no owner" mark (a list of one agent's own memories). */
+export function flaggedTable({ fetchPage, onOpen, fleetName = sameName, agentHref = noHref, emptyText = "No flagged memory matches.", csvName: name = null, owners = true }) {
   return pagedTable({
     headers: FLAGGED_HEADERS,
     fetchPage,
-    renderRow: (row) => flaggedRow(row, { onOpen, fleetName, agentHref }),
+    renderRow: (row) => flaggedRow(row, { onOpen, fleetName, agentHref, owners }),
     emptyText,
     statusText: (n) => `${n} shown, oldest flag first`,
-    csv: name ? { columns: flaggedCsvColumns(fleetName), name, key: (r) => r.id } : null,
+    csv: name ? { columns: flaggedCsvColumns(fleetName, { owners }), name, key: (r) => r.id } : null,
   });
 }
