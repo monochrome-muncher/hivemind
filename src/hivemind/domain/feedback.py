@@ -194,11 +194,14 @@ class FlagBacklogFilters:
     """What a flag backlog read narrows by (ADR 0093). ``flagged_before``
     keeps entries whose first standing flag is older than it; ``orphaned``
     keeps entries whose author is revoked or has not written for
-    ``ORPHAN_SILENCE_DAYS``. ``None`` and ``False`` leave a field open."""
+    ``ORPHAN_SILENCE_DAYS``; ``authors`` keeps entries written by any of
+    those names (the agent portal's own and inherited ones, ADR 0115).
+    ``None``, ``False`` and empty leave a field open."""
 
     fleet_id: str | None = None
     flagged_before: datetime | None = None
     orphaned: bool = False
+    authors: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

@@ -2209,6 +2209,9 @@ class PgStore:
                 inner.append(f"e.fleet_id = ${len(params)}")
             else:
                 inner.append("FALSE")
+        if filters.authors:
+            params.append(list(filters.authors))
+            inner.append(f"e.author = ANY(${len(params)}::text[])")
         vis = _visibility_clause(visibility, params, "e.")
         if vis is not None:
             inner.append(vis)
