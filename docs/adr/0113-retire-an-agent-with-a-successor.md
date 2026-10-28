@@ -60,6 +60,7 @@ An active or revoked agent's row gets **Retire…**: pick the successor, read th
 - `author` stays the original agent, so provenance, the audit trail and "who wrote this" are exact. A successor's supersession is a new entry authored by the successor.
 - A successor's withdrawal of an inherited memory is audited as `entry.withdraw` with `{author, reason, via: "succession"}`, so the hand-over leaves a trail.
 - The successor's earlier ratings on memories it now owns keep counting; only new ratings are refused. `upstream_changed` and the `same_author` related-entry flag still compare the literal `author`.
+- An agent cleanup (ADR 0111) still goes by the literal `author`: cleaning up the retired agent withdraws what it wrote even though the successor owns it, and cleaning up the successor does not touch what it inherited.
 - Undo takes everything back at the next request: nothing cached, the chain is read on every key check.
 - Admin analytics (flag backlog, orphaned-author counts, activity) still group by `author`, so a retired author's flagged memories still show as orphaned. They are the admin's view of who wrote what, not an access decision.
 - Rolling deploy: an older pod ignores successions, so a successor reads less there (fail closed), and it does not refuse activating a retired agent. Do not retire an agent during a rollout.
