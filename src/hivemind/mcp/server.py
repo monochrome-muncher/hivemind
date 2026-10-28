@@ -21,10 +21,11 @@ from mcp.types import TextContent
 from mcp.types import Tool as MCPTool
 from pydantic_core import to_json
 
-from hivemind.domain.access import FleetBusy
+from hivemind.domain.access import KEY_LOCKED_MESSAGE, FleetBusy, KeyLocked
 from hivemind.mcp import contract
 from hivemind.mcp.app import (
     ERR_FLEET_BUSY,
+    ERR_KEY_LOCKED,
     ERR_STORE_UNAVAILABLE,
     ERR_UNAUTHENTICATED,
     STORE_UNAVAILABLE_MESSAGE,
@@ -195,6 +196,8 @@ def build_server(
                     "this key is no longer valid (revoked or unknown); ask your admin",
                 )
             return await verb(acting, **kwargs)
+        except KeyLocked:  # raised by the per-call re-verification
+            return _error(ERR_KEY_LOCKED, KEY_LOCKED_MESSAGE)
         except FleetBusy as exc:  # ADR 0107: a fleet write waited for a merge
             return _error(ERR_FLEET_BUSY, str(exc))
         except TimeoutError:

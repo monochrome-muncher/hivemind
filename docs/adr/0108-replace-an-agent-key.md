@@ -1,5 +1,7 @@
 # Replace an agent's key
 
+> **Amended by [ADR 0117](0117-lock-your-own-key-from-the-portal.md):** the portal can lock the agent's own key (it cannot replace it), and a replacement also clears that lock.
+
 Amends [ADR 0028](0028-revoked-agent-status-and-an-activation-guard.md) (a key is replaced only by revoking and re-activating) and touches [ADR 0012](0012-shared-org-key-with-admin-issued-agent-keys.md), [ADR 0027](0027-audit-log-of-admin-actions.md) and [ADR 0039](0039-key-lifecycle-is-atomic-and-registration-is-owned.md). Amends SPEC §5.1, §12.3, §12.4 and §12.5.
 
 Status: Accepted. Design from the 2026-10-27 session with Monochrome.

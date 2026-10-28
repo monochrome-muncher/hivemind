@@ -22,6 +22,11 @@ export const hooks = {
   signOut: () => {},
 };
 
+const GONE = "Your agent key is no longer valid (the agent may have been revoked). Sign in again.";
+
+/** What to tell a person whose key was refused: the server's own words for a locked key, else the usual. */
+export const refusedMessage = (err, fallback = GONE) => (err.code === "key_locked" ? err.message : fallback);
+
 /** Run an API call; on 401 sign out (unless the key changed meanwhile), otherwise surface the error. */
 export async function guarded(fn) {
   const key = getKey();
@@ -30,7 +35,7 @@ export async function guarded(fn) {
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       if (getKey() !== key) return undefined; // an earlier key's answer: not this session's
-      hooks.signOut("Your agent key is no longer valid (the agent may have been revoked). Sign in again.");
+      hooks.signOut(refusedMessage(err));
       return undefined;
     }
     throw err;

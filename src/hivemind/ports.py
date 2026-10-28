@@ -728,7 +728,9 @@ class Authenticator(Protocol):
 
         An agent key resolves only while its agent is ``active`` (ADR 0039):
         a key of a pending / revoked / missing agent, a pre-v2 ``user`` key
-        and a name-less agent key all give ``None``."""
+        and a name-less agent key all give ``None``. The key of an active
+        agent that was locked from the portal raises ``KeyLocked`` (ADR 0117)
+        instead, so a surface can say what to do."""
         ...
 
     async def issue_agent_key(self, agent_name: str) -> str:
@@ -747,6 +749,16 @@ class Authenticator(Protocol):
         is written in that same transaction, under the given actor. Raises
         ``UnknownAgent`` if the agent is unknown and ``InvalidAgentStatus``
         unless it is ``active``. The raw key is returned once."""
+        ...
+
+    async def lock_agent_key(self, agent_name: str, *, key_id: str) -> bool:
+        """Lock the agent's own key from the portal (ADR 0117): from its next
+        request on, ``verify`` raises ``KeyLocked`` for it. Only the key with
+        fingerprint ``key_id`` is locked, so a key replaced in the meantime is
+        left alone. Writes the ``agent_key.lock`` audit row (actor kind
+        ``agent_key``, the agent's name, the fingerprint and ``via: "portal"``,
+        never a key) in the same transaction. Returns ``False``, writing
+        nothing, when that key is already locked or no longer exists."""
         ...
 
     async def revoke_agent_key(self, agent_name: str) -> None:

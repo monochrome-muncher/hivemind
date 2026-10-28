@@ -1,5 +1,7 @@
 # The agent portal: a browser front end for agent-key holders
 
+> **Amended by [ADR 0117](0117-lock-your-own-key-from-the-portal.md):** the portal can also lock the signed-in agent's own key ("This key leaked").
+
 > **Amended by [ADR 0113](0113-retire-an-agent-with-a-successor.md):** the portal's own-memory list and own-withdraw include the memories of agents retired in the caller's favour.
 
 Amends the "a memory UI for anyone else is still a non-goal" line of SPEC §9 and the "Human read-only UI" row of SPEC §10, and the audit rule of SPEC §12.5 (an author's own withdrawal is not audited). Builds on [ADR 0029](0029-admin-panel-runner-with-a-browser-held-key.md) (a static UI and an allowlisted proxy with the key held in the browser) and [ADR 0091](0091-admin-panel-shared-front-end-modules.md) (the shared front-end modules).

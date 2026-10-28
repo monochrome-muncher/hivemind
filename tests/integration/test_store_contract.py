@@ -2131,6 +2131,18 @@ async def test_agents_list_shows_no_key_use_for_an_agent_that_never_authenticate
     assert got is not None and got.last_used_at is None  # only the list fills it
 
 
+async def test_agents_list_shows_no_key_lock_for_an_agent_whose_key_was_never_locked(
+    adapter: Adapter,
+) -> None:
+    """ADR 0117: the agent list carries ``key_locked_at`` (the key lock itself
+    is the authenticator's); a fresh or keyless agent shows none, and only the
+    list fills it."""
+    await adapter.store.register_agent("amy")
+    assert [a.key_locked_at for a in await adapter.store.list_agents()] == [None]
+    got = await adapter.store.get_agent("amy")
+    assert got is not None and got.key_locked_at is None
+
+
 # -- audit log (ADR 0027) ---------------------------------------------------------------
 
 

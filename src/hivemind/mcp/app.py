@@ -69,6 +69,7 @@ DEGRADED_NOTE = (
     "so related entries that share no words with the query may be missing"
 )
 ERR_UNAUTHENTICATED = "unauthenticated"  # ADR 0042: the key is gone / not resolvable
+ERR_KEY_LOCKED = "key_locked"  # locked from the portal; ask the admin for a new key
 ERR_INVALID_VERDICT = "invalid_verdict"
 ERR_NAME_CONFLICT = "name_conflict"
 ERR_STORE_UNAVAILABLE = "store_unavailable"  # a store call timed out: retry shortly

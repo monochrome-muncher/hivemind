@@ -11,7 +11,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import AfterValidator, BaseModel, Field, field_validator
 
-from hivemind.domain.access import Agent, Fleet, Standing, is_idle
+from hivemind.domain.access import KEY_LOCKED_MESSAGE, Agent, Fleet, Standing, is_idle
 from hivemind.domain.audit import AuditRecord
 from hivemind.domain.entry import EntityKind, Entry, EntryState, ImportanceSource, Kind, SourceType
 from hivemind.domain.feedback import (
@@ -646,6 +646,8 @@ class AdminAgentOut(AgentOut):
     is ``HIVEMIND_IDLE_AGENT_DAYS``, repeated so a panel can say it."""
 
     last_used_at: str | None = None
+    key_locked: bool = False  # locked from the portal; replace the key
+    key_locked_at: str | None = None
     idle: bool = False
     idle_after_days: int = 30
 
@@ -654,6 +656,8 @@ class AdminAgentOut(AgentOut):
         return cls(
             **AgentOut.from_agent(agent).model_dump(),
             last_used_at=agent.last_used_at.isoformat() if agent.last_used_at else None,
+            key_locked=agent.key_locked_at is not None,
+            key_locked_at=agent.key_locked_at.isoformat() if agent.key_locked_at else None,
             idle=is_idle(agent, now, idle_days),
             idle_after_days=idle_days,
         )
@@ -1433,6 +1437,15 @@ class PortalWithdrawRequest(BaseModel):
     """A withdrawal from the agent portal (ADR 0095): the reason is required."""
 
     reason: str
+
+
+class KeyLockedOut(BaseModel):
+    """The answer to ``POST /v1/portal/key/lock`` (ADR 0117): the key is
+    locked and what to do next. ``key_id`` is the non-secret fingerprint."""
+
+    locked: bool = True
+    key_id: str
+    message: str = KEY_LOCKED_MESSAGE
 
 
 class DayActivityOut(BaseModel):

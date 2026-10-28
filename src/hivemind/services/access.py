@@ -220,6 +220,25 @@ class AccessService:
         )
         return replacement.raw_key
 
+    async def lock_own_key(self, credential: Credential) -> bool:
+        """Lock the calling agent's own key (the portal's "this key
+        leaked"). Only the key; the agent stays ``active`` with its memories,
+        pins, trust and fleet. The key fails from its next request and an
+        admin's key replacement (ADR 0108) clears the lock. Agent keys only;
+        the audit row (``agent_key.lock``, ``via: "portal"``, the key
+        fingerprint) is written with the lock. ``False`` (nothing changed or
+        audited) when the key was replaced or locked meanwhile."""
+        if (
+            credential.is_admin
+            or credential.is_org
+            or credential.agent_name is None
+            or credential.key_id is None
+        ):
+            raise PermissionDenied("locking a key requires an agent key")
+        return await self._require_authenticator().lock_agent_key(
+            credential.agent_name, key_id=credential.key_id
+        )
+
     async def create_fleet(self, name: str, credential: Credential) -> Fleet:
         """Create a named fleet (admin-gated, ADR 0012)."""
         self._require_admin(credential)

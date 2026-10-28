@@ -123,3 +123,4 @@ is unused.
 | [0111](0111-agent-cleanup.md) | Clean up after a bad agent | Accepted; extends 0067, follows 0107, migration 0022, admin only, undoable |
 | [0112](0112-move-agents-with-their-memories.md) | Move agents with their memories (fleet split) | Accepted; amends 0011, builds on 0107, migration 0023, admin only, undoable |
 | [0113](0113-retire-an-agent-with-a-successor.md) | Retire an agent with a successor | Accepted; amends 0011, 0030, 0033, 0034, 0060, 0065, 0095, 0096, migration 0024, admin only, undoable |
+| [0117](0117-lock-your-own-key-from-the-portal.md) | Lock the agent's own key from the portal | Accepted; amends 0095, 0108, migration 0025, agent key only, audited `agent_key.lock`, cleared by Replace key |

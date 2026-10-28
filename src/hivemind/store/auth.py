@@ -16,7 +16,13 @@ import time
 
 import asyncpg
 
-from hivemind.domain.access import AgentStatus, InvalidAgentStatus, TrustLevel, UnknownAgent
+from hivemind.domain.access import (
+    AgentStatus,
+    InvalidAgentStatus,
+    KeyLocked,
+    TrustLevel,
+    UnknownAgent,
+)
 from hivemind.domain.audit import ActorKind, AuditAction, key_fingerprint
 from hivemind.ports import Credential, KeyReplacement
 from hivemind.store.inheritance import INHERITED_FROM_AGENT_ROW
@@ -37,6 +43,7 @@ _last_warned: float | None = None
 _SELECT_CREDENTIAL = (
     "SELECT c.kind, c.user_id, c.agent_id, c.agent_name, "
     "a.status AS agent_status, a.trust_level, a.home_fleet_id, "
+    "(c.locked_at IS NOT NULL) AS key_locked, "
     "(c.last_used_at IS NULL OR c.last_used_at < now() - interval '1 hour') AS use_stale, "
     f"{INHERITED_FROM_AGENT_ROW} AS inherits_from "
     "FROM credentials c LEFT JOIN agents a ON a.name = c.agent_name "
@@ -47,6 +54,12 @@ _SELECT_CREDENTIAL = (
 _TOUCH_CREDENTIAL = (
     "UPDATE credentials SET last_used_at = now() WHERE key_hash = $1 "
     "AND (last_used_at IS NULL OR last_used_at < now() - interval '1 hour')"
+)
+# Lock one key: by agent and fingerprint, only while unlocked, so a
+# second press or a key replaced meanwhile changes nothing and audits nothing.
+_LOCK_AGENT_KEY = (
+    "UPDATE credentials SET locked_at = now() WHERE kind = 'agent' AND agent_name = $1 "
+    "AND starts_with(key_hash, $2) AND locked_at IS NULL RETURNING key_hash"
 )
 # Rows ``verify`` can never resolve (ADR 0039). Inert, but they would live
 # again on a rollback to a release that does not join ``agents``.
@@ -128,6 +141,8 @@ def _credential_from_row(row: asyncpg.Record, key_id: str) -> Credential | None:
             # A name-less (pre-v2) key, a key with no agent record, or a
             # key whose agent is pending / revoked: not an identity.
             return None
+        if row["key_locked"]:
+            raise KeyLocked
         return Credential(
             user_id=agent_name,
             agent_id=row["agent_id"],
@@ -189,7 +204,8 @@ class PgAuthenticator:
 
         By ``kind`` (ADR 0012): ``admin`` → full access; ``org`` →
         registration + health only; ``agent`` → name, trust level and home
-        fleet from ``agents`` (ADR 0011), only while active; ``user`` →
+        fleet from ``agents`` (ADR 0011), only while active, and ``KeyLocked``
+        if the key was locked from the portal (ADR 0117); ``user`` →
         retired, ``None`` (ADR 0039). ``key_id`` is the key fingerprint
         for the audit log (ADR 0027).
         """
@@ -259,6 +275,24 @@ class PgAuthenticator:
                 json.dumps({"old_key": replacement.old_key_id, "new_key": replacement.new_key_id}),
             )
         return replacement
+
+    async def lock_agent_key(self, agent_name: str, *, key_id: str) -> bool:
+        """Lock the agent's own key (ADR 0117). The lock and its audit row
+        share one transaction, so there is no locked key without a row."""
+        pool = await self._ensure_pool()
+        async with pool.acquire(timeout=self._acquire_timeout) as conn, conn.transaction():
+            locked = await conn.fetchrow(_LOCK_AGENT_KEY, agent_name, key_id)
+            if locked is None:
+                return False
+            await conn.execute(
+                _INSERT_AUDIT,
+                ActorKind.AGENT_KEY.value,
+                agent_name,
+                AuditAction.AGENT_KEY_LOCK.value,
+                agent_name,
+                json.dumps({"key": key_fingerprint(locked["key_hash"]), "via": "portal"}),
+            )
+        return True
 
     async def revoke_agent_key(self, agent_name: str) -> None:
         """Retire the agent's key; call after the status flipped to
