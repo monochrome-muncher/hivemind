@@ -1,5 +1,7 @@
 # An agent key records its last use
 
+> **Amended by [ADR 0114](0114-key-last-used-in-whoami-and-the-portal-home.md):** last use is no longer admin-only; an agent sees its own key's value in `whoami` and on the portal home.
+
 Touches [ADR 0012](0012-shared-org-key-with-admin-issued-agent-keys.md) (the credential model) and [ADR 0029](0029-admin-panel-runner-with-a-browser-held-key.md) (the admin panel), and adds a field to SPEC §5.1 `GET /v1/admin/agents` and a sentence to §8.1.
 
 Status: Accepted. Design from the 2026-10-27 session with Monochrome.

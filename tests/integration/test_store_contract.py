@@ -2129,6 +2129,8 @@ async def test_agents_list_shows_no_key_use_for_an_agent_that_never_authenticate
     assert [a.last_used_at for a in await adapter.store.list_agents()] == [None]
     got = await adapter.store.get_agent("amy")
     assert got is not None and got.last_used_at is None  # only the list fills it
+    assert await adapter.store.agent_key_last_used("amy") is None
+    assert await adapter.store.agent_key_last_used("ghost") is None
 
 
 # -- audit log (ADR 0027) ---------------------------------------------------------------

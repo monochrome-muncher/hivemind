@@ -3,7 +3,8 @@
 // tables (lists.js) and memory drawer (drawer.js).
 
 import {
-  api, apiRaw, h, state, guarded, parseHash, fleetName, pageHead, refreshButton, card, fill, table, toast, link, viewHref,
+  api, apiRaw, h, state, guarded, parseHash, fleetName, levelName, pageHead, refreshButton, card, fill, table, toast, link, viewHref,
+  stat, fmtAgo, fmtTime,
   KINDS, SCOPES, VERDICTS,
 } from "./session.js";
 import { openEntry } from "./drawer.js";
@@ -29,6 +30,31 @@ const inherited = (me) => {
   const who = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
   return `, plus what ${who} wrote before ${names.length === 1 ? "it was" : "they were"} retired`;
 };
+
+/** When the key was last used. The stamp is written at most once an hour, so it is only good to the hour. */
+const keyLastUsed = (iso) => {
+  if (!iso) return { value: "Not recorded", hint: "No use of this key has been recorded yet." };
+  const minutes = (Date.now() - new Date(iso).getTime()) / 60000;
+  return {
+    value: minutes < 60 ? "Within the last hour" : fmtAgo(iso),
+    hint: `${fmtTime(iso)}. Recorded at most once an hour.`,
+  };
+};
+
+/** Who this key is: the agent behind it, how far it is trusted, and when the key last worked. */
+function statusCard(me) {
+  const used = keyLastUsed(me.key_last_used_at);
+  const inheritedFrom = me.inherits_from || [];
+  return card("This agent", [
+    h("div", { class: "stats" },
+      stat("Agent", me.name),
+      stat("Status", me.status || "unknown"),
+      stat("Trust level", levelName(me.trust_level)),
+      stat("Home fleet", me.home_fleet_id ? fleetName(me.home_fleet_id) : "None"),
+      stat("Key last used", used.value, { hint: used.hint }),
+      inheritedFrom.length ? stat("Also owns the memories of", inheritedFrom.join(", ")) : null),
+    h("p", { class: "muted small", text: "If the last-used time looks wrong, for example the key was used when this agent was idle, someone else may hold the key. Ask your admin to replace it." })], { className: "status-card" });
+}
 
 export async function viewMemories(root) {
   const me = state.me;
@@ -60,6 +86,7 @@ export async function viewMemories(root) {
   form.addEventListener("submit", (event) => { event.preventDefault(); memories.load(true); });
 
   fill(root,
+    statusCard(me),
     pageHead("Its memories", `Everything ${me.name} wrote${inherited(me)}, newest first, withdrawn and superseded ones included. Open one to read it in full or withdraw it.`, refreshButton()),
     card(null, form, { className: "card-filters" }),
     memories.el);
