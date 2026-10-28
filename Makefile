@@ -142,6 +142,10 @@ STANDALONE_COMPOSE ?= docker compose -f docker-compose.standalone.yaml
 standalone: ## Start the standalone local stack (pg :5433 db hivemind_live, vllm :8101, api :8100, admin :8189, portal :8190, mcp-http :8188; survives `make test`)
 	$(STANDALONE_COMPOSE) up -d
 
+.PHONY: standalone-rebuild
+standalone-rebuild: ## Rebuild the standalone images from the current source and recreate the services that changed (code changes do not reach the running stack with `make standalone`)
+	$(STANDALONE_COMPOSE) up -d --build
+
 .PHONY: standalone-down
 standalone-down: ## Stop the standalone stack
 	$(STANDALONE_COMPOSE) down
