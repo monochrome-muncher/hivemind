@@ -14,10 +14,10 @@
 
 import { $, h, api, hooks, hasKey, setKey, clearKey, closeModal, guarded, parseHash, state, refusal, isMine, fleetName, levelName, viewHref } from "./session.js";
 import { closeDrawer, configureDrawer, initDrawer } from "./drawer.js";
-import { viewMemories, viewGiven, viewReceived, viewFleet, viewSearch } from "./views.js";
+import { viewMemories, viewAttention, viewGiven, viewReceived, viewFleet, viewSearch } from "./views.js";
 import { viewCleanup } from "./cleanup.js";
 
-const VIEWS = { memories: viewMemories, given: viewGiven, received: viewReceived, fleet: viewFleet, search: viewSearch, cleanup: viewCleanup };
+const VIEWS = { memories: viewMemories, attention: viewAttention, given: viewGiven, received: viewReceived, fleet: viewFleet, search: viewSearch, cleanup: viewCleanup };
 
 let renderToken = 0;
 let currentContainer = null;

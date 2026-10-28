@@ -1,5 +1,6 @@
 # The agent portal: a browser front end for agent-key holders
 
+> **Amended by [ADR 0115](0115-portal-needs-attention.md):** a fifth route, `GET /v1/portal/flagged`, and a "Needs attention" page.
 > **Amended by [ADR 0118](0118-agent-cleans-up-its-own-work.md):** the portal can also clean up the agent's own work over a time window and undo it (`/v1/portal/cleanup`, `/v1/portal/cleanups`).
 >
 > **Amended by [ADR 0113](0113-retire-an-agent-with-a-successor.md):** the portal's own-memory list and own-withdraw include the memories of agents retired in the caller's favour.

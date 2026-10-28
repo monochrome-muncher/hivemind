@@ -766,6 +766,23 @@ def build_router() -> APIRouter:
             entry_id, app.governance_service.withdraw_own(credential, entry_id, request.reason)
         )
 
+    @router.get("/portal/flagged", response_model=list[FlaggedEntryOut])
+    async def portal_flagged(
+        credential: require,
+        app: hive,
+        limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = PORTAL_DEFAULT_LIMIT,
+        offset: Annotated[int, Query(ge=0, le=MAX_OFFSET)] = 0,
+    ) -> list[FlaggedEntryOut]:
+        """The agent's own and inherited active memories that carry a
+        standing ``stale`` or ``wrong`` verdict, oldest flag first (ADR
+        0115): ``GET /v1/admin/flagged`` narrowed to what the agent owns,
+        on entries its key can read."""
+        _require_agent(credential, "the agent portal")
+        items = await app.governance_service.flag_backlog(
+            credential, own=True, limit=limit, offset=offset
+        )
+        return [FlaggedEntryOut.from_flagged(i) for i in items]
+
     @router.post(
         "/portal/cleanup",
         response_model=AgentCleanupPreviewOut | PortalCleanupOut,
