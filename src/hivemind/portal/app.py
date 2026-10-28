@@ -2,8 +2,8 @@
 portal's static UI, the admin panel's shared front-end modules (ADR 0091)
 and the portal allowlist.
 
-Only what an agent key may read, the portal's own uncounted search and
-its audited withdraw are reachable: no write of the data plane, no
+Only what an agent key may read, the portal's own uncounted search, its
+audited withdraw and its clean-up of the agent's own work are reachable: no write of the data plane, no
 feedback, no pin, nothing of the admin surface.
 """
 
@@ -50,6 +50,10 @@ _ALLOWED = allowlist(
         ("POST", r"portal/search"),
         ("GET", r"portal/feedback"),
         ("POST", r"portal/entries/[^/]+/withdraw"),
+        # The agent's own clean-up over a time window (ADR 0118).
+        ("POST", r"portal/cleanup"),
+        ("GET", r"portal/cleanups"),
+        ("POST", r"portal/cleanups/[^/]+/undo"),
     )
 )
 

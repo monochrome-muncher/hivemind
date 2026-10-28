@@ -400,10 +400,12 @@ COUNT_DUPLICATE_CANDIDATES = (
 
 # --- Agent cleanup SQL (ADR 0111) --------------------------------------------
 
-# The memories a cleanup withdraws: active, authored by $1, written in the
-# window [$2, $3) (``created_at``: write time, not the memory date).
+# The memories a cleanup withdraws: active, authored by one of $1 (a text[]:
+# the agent, or every author it owns, ADR 0118), written in the window
+# [$2, $3) (``created_at``: write time, not the memory date). The rating
+# statements below take $1 as the one agent whose ratings they are.
 _CLEANUP_WITHDRAW_WHERE = (
-    "author = $1 AND state = 'active' AND created_at >= $2 AND created_at < $3"
+    "author = ANY($1::text[]) AND state = 'active' AND created_at >= $2 AND created_at < $3"
 )
 CLEANUP_WITHDRAW_LIST = (
     "SELECT "
@@ -436,19 +438,26 @@ CLEANUP_SET_ASIDE = (
 )
 # The agent's own memories written in the window, in any state ($1 agent, $2
 # since, $3 until).
-_CLEANUP_OWN = "SELECT id, state, superseded_by FROM entries WHERE author = $1 AND created_at >= $2 AND created_at < $3"
+_CLEANUP_OWN = "SELECT id, state, superseded_by FROM entries WHERE author = ANY($1::text[]) AND created_at >= $2 AND created_at < $3"
+
+
 # Memories the agent's memories replaced (ADR 0111): superseded, not the
 # agent's own window memories, and the ``superseded_by`` chain from them passes
 # only through the agent's own window memories and ends at one that is still
 # active (a memory the cleanup withdraws). ``first`` is the memory that
 # replaced it, ``head`` the end of the chain. Nobody else's memory is in the
 # chain, so a replacement made by another agent since is never undone.
-_CLEANUP_RESTORABLE_CTES = f"""
+def _restorable_ctes(readable: str | None = None) -> str:
+    """The CTEs this describes. ``readable`` is an extra condition on a candidate ``e``
+    (a visibility clause, ADR 0118): memories the reader may not read are
+    never offered, so never restored."""
+    extra = f" AND {readable}" if readable else ""
+    return f"""
 own AS ({_CLEANUP_OWN}),
 chain(root, first, cur) AS (
     SELECT e.id, e.superseded_by, e.superseded_by FROM entries e
      WHERE e.state = 'superseded' AND e.superseded_by IN (SELECT id FROM own)
-       AND e.id NOT IN (SELECT id FROM own)
+       AND e.id NOT IN (SELECT id FROM own){extra}
     UNION
     SELECT c.root, c.first, o.superseded_by FROM chain c JOIN own o ON o.id = c.cur
      WHERE o.state = 'superseded' AND o.superseded_by IN (SELECT id FROM own)
@@ -458,28 +467,47 @@ restorable AS (
       FROM chain c JOIN own h ON h.id = c.cur AND h.state = 'active'
 )
 """
-CLEANUP_RESTORABLE_LIST = (
-    "WITH RECURSIVE "
-    + _CLEANUP_RESTORABLE_CTES
-    + "SELECT "
-    + _ENTRY_COLUMNS
-    + " FROM entries WHERE id IN (SELECT id FROM restorable)"
-    " ORDER BY created_at DESC, id DESC LIMIT $4"
-)
-CLEANUP_RESTORABLE_COUNT = (
-    "WITH RECURSIVE " + _CLEANUP_RESTORABLE_CTES + "SELECT count(*) FROM restorable"
-)
+
+
+def _cleanup_restorable_list(readable: str | None = None) -> str:
+    return (
+        "WITH RECURSIVE "
+        + _restorable_ctes(readable)
+        + "SELECT "
+        + _ENTRY_COLUMNS
+        + " FROM entries WHERE id IN (SELECT id FROM restorable)"
+        " ORDER BY created_at DESC, id DESC LIMIT $4"
+    )
+
+
+def _cleanup_restorable_count(readable: str | None = None) -> str:
+    return "WITH RECURSIVE " + _restorable_ctes(readable) + "SELECT count(*) FROM restorable"
+
+
+def _readable_clause(visibility: Visibility | None, taken: int) -> tuple[str | None, list[Any]]:
+    """The visibility condition on a candidate ``e`` and its parameters,
+    numbered after the ``taken`` the statement already binds."""
+    params: list[Any] = [None] * taken
+    clause = _visibility_clause(visibility, params, "e.")
+    return clause, params[taken:]
+
+
 CLEANUP_AGENT_LOCK = "SELECT pg_advisory_xact_lock(hashtextextended('hivemind.cleanup:' || $1, 0))"
 CLEANUP_WITHDRAW = """
 UPDATE entries SET state = 'withdrawn', withdrawn_reason = $2, withdrawn_at = now()
  WHERE id = ANY($1::uuid[]) AND state = 'active'
 """
-CLEANUP_RESTORABLE_LOCK = (
-    "WITH RECURSIVE "
-    + _CLEANUP_RESTORABLE_CTES
-    + "SELECT e.id, r.first, r.head FROM entries e JOIN restorable r ON r.id = e.id"
-    " ORDER BY e.id FOR UPDATE OF e"
-)
+
+
+def _cleanup_restorable_lock(readable: str | None = None) -> str:
+    return (
+        "WITH RECURSIVE "
+        + _restorable_ctes(readable)
+        + "SELECT e.id, r.first, r.head FROM entries e JOIN restorable r ON r.id = e.id"
+        " ORDER BY e.id FOR UPDATE OF e"
+    )
+
+
 CLEANUP_RESTORE = """
 UPDATE entries SET state = 'active', superseded_by = NULL
  WHERE id = ANY($1::uuid[]) AND state = 'superseded'
@@ -503,15 +531,18 @@ def _pin_walk(stop: str) -> str:
     )
 
 
-CLEANUP_PINS_COUNT = (
-    "WITH RECURSIVE "
-    + _CLEANUP_RESTORABLE_CTES
-    + ", "
-    + _pin_walk("w.cur NOT IN (SELECT id FROM restorable)")
-    + "SELECT count(DISTINCT pinned) FROM walk"
-    " WHERE cur IN (SELECT id FROM own WHERE state = 'active')"
-    " AND pinned NOT IN (SELECT id FROM restorable)"
-)
+def _cleanup_pins_count(readable: str | None = None) -> str:
+    return (
+        "WITH RECURSIVE "
+        + _restorable_ctes(readable)
+        + ", "
+        + _pin_walk("w.cur NOT IN (SELECT id FROM restorable)")
+        + "SELECT count(DISTINCT pinned) FROM walk"
+        " WHERE cur IN (SELECT id FROM own WHERE state = 'active')"
+        " AND pinned NOT IN (SELECT id FROM restorable)"
+    )
+
+
 # The fleets of every pin a cleanup of the window could remove (supersession
 # can cross fleets, e.g. an admin's org successor), locked before the entries.
 CLEANUP_PIN_FLEETS = (
@@ -531,13 +562,13 @@ CLEANUP_UNPIN = (
 )
 CLEANUP_INSERT = """
 INSERT INTO agent_cleanups (id, agent, since, until, cleaned_by, cleaned_at, withdrawn_ids,
-                            restored, ratings_set_aside, unpinned_pins)
-VALUES ($1, $2, $3, $4, $5, clock_timestamp(), $6, $7, $8, $9)
+                            restored, ratings_set_aside, unpinned_pins, self_service)
+VALUES ($1, $2, $3, $4, $5, clock_timestamp(), $6, $7, $8, $9, $10)
 RETURNING cleaned_at
 """
 _CLEANUP_COLUMNS = (
     "id, agent, since, until, cleaned_by, cleaned_at, withdrawn_ids, restored, "
-    "ratings_set_aside, unpinned_pins, revoked, undone_at"
+    "ratings_set_aside, unpinned_pins, revoked, undone_at, self_service"
 )
 CLEANUP_GET = f"SELECT {_CLEANUP_COLUMNS} FROM agent_cleanups WHERE id = $1"
 CLEANUP_LIST = (
@@ -554,6 +585,7 @@ CLEANUP_MARK_UNDONE = (
 CLEANUP_FLEETS_OF = (
     "SELECT DISTINCT fleet_id FROM entries WHERE id = ANY($1::uuid[]) AND fleet_id IS NOT NULL"
 )
+CLEANUP_AUTHORS_OF = "SELECT DISTINCT author FROM entries WHERE id = ANY($1::uuid[])"
 CLEANUP_LOCK_ENTRIES = "SELECT id FROM entries WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE"
 CLEANUP_REACTIVATE = """
 UPDATE entries SET state = 'active', withdrawn_reason = NULL, withdrawn_at = NULL
@@ -2740,29 +2772,53 @@ class PgStore:
 
     # -- agent cleanup (ADR 0111) -------------------------------------------------
 
-    async def scan_agent_cleanup(self, agent: str, since: datetime, until: datetime) -> CleanupScan:
+    async def scan_agent_cleanup(
+        self,
+        agent: str,
+        since: datetime,
+        until: datetime,
+        *,
+        authors: Sequence[str] | None = None,
+        visibility: Visibility | None = None,
+    ) -> CleanupScan:
+        names = sorted(set(authors or ()) | {agent})
+        # The restorable statements bind $1 to $3 (list: $4 too); the
+        # visibility parameters follow.
+        vis3, extra3 = _readable_clause(visibility, 3)
+        vis4, extra4 = _readable_clause(visibility, 4)
         async with self._connection() as conn:
             withdraw = await conn.fetch(
-                CLEANUP_WITHDRAW_LIST, agent, since, until, PREVIEW_WITHDRAW_LIMIT
+                CLEANUP_WITHDRAW_LIST, names, since, until, PREVIEW_WITHDRAW_LIMIT
             )
-            withdraw_total = int(await conn.fetchval(CLEANUP_WITHDRAW_COUNT, agent, since, until))
+            withdraw_total = int(await conn.fetchval(CLEANUP_WITHDRAW_COUNT, names, since, until))
             verdicts = await conn.fetch(CLEANUP_RATINGS_BY_VERDICT, agent, since, until)
             pins_total = int(
                 await conn.fetchval(
-                    CLEANUP_PINS_COUNT, agent, since, until, timeout=LONG_OP_TIMEOUT
+                    _cleanup_pins_count(vis3),
+                    names,
+                    since,
+                    until,
+                    *extra3,
+                    timeout=LONG_OP_TIMEOUT,
                 )
             )
             restorable = await conn.fetch(
-                CLEANUP_RESTORABLE_LIST,
-                agent,
+                _cleanup_restorable_list(vis4),
+                names,
                 since,
                 until,
                 PREVIEW_RESTORE_LIMIT,
+                *extra4,
                 timeout=LONG_OP_TIMEOUT,
             )
             restorable_total = int(
                 await conn.fetchval(
-                    CLEANUP_RESTORABLE_COUNT, agent, since, until, timeout=LONG_OP_TIMEOUT
+                    _cleanup_restorable_count(vis3),
+                    names,
+                    since,
+                    until,
+                    *extra3,
+                    timeout=LONG_OP_TIMEOUT,
                 )
             )
         by_verdict = {r["verdict"]: int(r["n"]) for r in verdicts}
@@ -2788,8 +2844,13 @@ class PgStore:
         expected_withdraw: int | None = None,
         expected_ratings: int | None = None,
         cleaned_by: str,
+        authors: Sequence[str] | None = None,
+        self_service: bool = False,
+        visibility: Visibility | None = None,
     ) -> CleanupOutcome:
         check_window(since, until)
+        names = sorted(set(authors or ()) | {agent})
+        vis3, extra3 = _readable_clause(visibility, 3)
         wanted = list(dict.fromkeys(restore_ids or ()))
         if any(not is_valid_uuid(w) for w in wanted):
             raise AgentCleanupRefused("restore_ids names memories that cannot be restored")
@@ -2798,33 +2859,41 @@ class PgStore:
         try:
             async with self._transaction() as conn:
                 await conn.execute(MERGE_SETTINGS)
-                # One cleanup or undo per agent at a time.
-                await conn.execute(CLEANUP_AGENT_LOCK, agent)
+                # One cleanup or undo per agent at a time. A cleanup of several
+                # owned authors (ADR 0118) takes each one's lock, in name order,
+                # so it also waits for an admin cleanup of a retired agent.
+                for name in names:
+                    await conn.execute(CLEANUP_AGENT_LOCK, name)
                 # Pin locks first, in fleet order (a merge takes the fleet rows,
                 # then these), then the memory rows: a concurrent supersede or
                 # withdraw of one waits for this commit, then sees its new state.
                 fleets = sorted(
                     {
                         str(r["fleet_id"])
-                        for r in await conn.fetch(CLEANUP_FLEETS, agent, since, until)
+                        for r in await conn.fetch(CLEANUP_FLEETS, names, since, until)
                     }
                     | {
                         str(r["fleet_id"])
                         for r in await conn.fetch(
-                            CLEANUP_PIN_FLEETS, agent, since, until, timeout=LONG_OP_TIMEOUT
+                            CLEANUP_PIN_FLEETS, names, since, until, timeout=LONG_OP_TIMEOUT
                         )
                     }
                 )
                 for fid in fleets:
                     await conn.execute(LOCK_FLEET_PINS, fid)
                 locked = await conn.fetch(
-                    CLEANUP_WITHDRAW_LOCK, agent, since, until, timeout=LONG_OP_TIMEOUT
+                    CLEANUP_WITHDRAW_LOCK, names, since, until, timeout=LONG_OP_TIMEOUT
                 )
                 withdraw_ids = [str(r["id"]) for r in locked]
                 restorable = {
                     str(r["id"]): (str(r["first"]), str(r["head"]))
                     for r in await conn.fetch(
-                        CLEANUP_RESTORABLE_LOCK, agent, since, until, timeout=LONG_OP_TIMEOUT
+                        _cleanup_restorable_lock(vis3),
+                        names,
+                        since,
+                        until,
+                        *extra3,
+                        timeout=LONG_OP_TIMEOUT,
                     )
                 }
                 restore = check_restore_ids(list(restorable), wanted)
@@ -2879,6 +2948,7 @@ class PgStore:
                     ),
                     set_aside,
                     json.dumps(_pins_to_json(unpinned)),
+                    self_service,
                 )
         except asyncpg.exceptions.LockNotAvailableError:
             raise AgentCleanupRefused(
@@ -2899,6 +2969,7 @@ class PgStore:
             restored,
             set_aside,
             unpinned,
+            self_service=self_service,
         )
         return CleanupOutcome(record, len(withdraw_ids), set_aside, len(restored), unpinned)
 
@@ -2917,7 +2988,14 @@ class PgStore:
                 row = await conn.fetchrow(CLEANUP_GET, cleanup_id)
                 if row is None:
                     raise UnknownAgentCleanup(f"unknown agent cleanup: {cleanup_id}")
-                await conn.execute(CLEANUP_AGENT_LOCK, row["agent"])
+                # The agent's lock, and that of every author whose memories it
+                # withdrew, in name order as the apply takes them.
+                authors = {
+                    r["author"]
+                    for r in await conn.fetch(CLEANUP_AUTHORS_OF, list(row["withdrawn_ids"]))
+                }
+                for name in sorted(authors | {row["agent"]}):
+                    await conn.execute(CLEANUP_AGENT_LOCK, name)
                 # Re-read under the lock: a racing cleanup or undo has finished by now.
                 mine = [
                     _row_to_cleanup(r) for r in await conn.fetch(CLEANUP_OF_AGENT, row["agent"])
@@ -2998,9 +3076,14 @@ class PgStore:
             pins_skipped=tuple(skipped_pins),
         )
 
-    async def list_agent_cleanups(self, limit: int) -> list[AgentCleanupRecord]:
+    async def list_agent_cleanups(
+        self, limit: int, *, agent: str | None = None
+    ) -> list[AgentCleanupRecord]:
         async with self._connection() as conn:
-            rows = await conn.fetch(CLEANUP_LIST, limit)
+            if agent is None:
+                rows = await conn.fetch(CLEANUP_LIST, limit)
+            else:
+                rows = await conn.fetch(CLEANUP_OF_AGENT + " LIMIT $2", agent, limit)
         return [_row_to_cleanup(r) for r in rows]
 
     async def get_agent_cleanup(self, cleanup_id: str) -> AgentCleanupRecord | None:
@@ -3430,6 +3513,7 @@ def _row_to_cleanup(row: asyncpg.Record) -> AgentCleanupRecord:
             for d in loaded(row["unpinned_pins"])
         ),
         revoked=bool(row["revoked"]),
+        self_service=bool(row["self_service"]),
         undone_at=row["undone_at"],
     )
 

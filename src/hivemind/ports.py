@@ -418,11 +418,23 @@ class Store(Protocol):
 
     # -- agent cleanup (ADR 0111) ------------------------------------------------
 
-    async def scan_agent_cleanup(self, agent: str, since: datetime, until: datetime) -> CleanupScan:
+    async def scan_agent_cleanup(
+        self,
+        agent: str,
+        since: datetime,
+        until: datetime,
+        *,
+        authors: Sequence[str] | None = None,
+        visibility: Visibility | None = None,
+    ) -> CleanupScan:
         """What cleaning up ``agent`` over ``[since, until)`` would change,
-        changing nothing: its active memories whose ``created_at`` is in the
-        window (any scope), its ratings whose ``updated_at`` is in the
-        window and are not already set aside, the pins on those memories,
+        changing nothing. ``authors`` are the names whose memories count
+        (``[agent]`` when omitted; the portal passes every author the agent
+        owns, ADR 0118); ``visibility`` limits the restorable memories to ones
+        that reader may read; the ratings are always ``agent``'s own. The scan
+        holds the active memories of those authors whose ``created_at`` is
+        in the window (any scope), the agent's ratings whose ``updated_at``
+        is in the window and are not already set aside, the pins on those memories,
         and the memories those superseded (still ``superseded``, their
         ``superseded_by`` one of the memories to withdraw). Lists are cut
         to the preview limits, newest first; the totals are exact."""
@@ -438,6 +450,9 @@ class Store(Protocol):
         expected_withdraw: int | None = None,
         expected_ratings: int | None = None,
         cleaned_by: str,
+        authors: Sequence[str] | None = None,
+        self_service: bool = False,
+        visibility: Visibility | None = None,
     ) -> CleanupOutcome:
         """Clean up ``agent`` in one transaction (ADR 0111): withdraw the
         memories ``scan_agent_cleanup`` lists (reason ``cleanup_reason``),
@@ -449,7 +464,10 @@ class Store(Protocol):
         differ from ``expected_*`` (what the preview showed) or when another
         cleanup of the agent is running; ``InvalidInput`` for an empty
         window. Nothing changes on a refusal. The agent's own writes and
-        ratings wait for the row locks, never interleave."""
+        ratings wait for the row locks, never interleave. ``authors`` as for
+        ``scan_agent_cleanup``; ``self_service`` records that the agent ran
+        it itself (ADR 0118); ``visibility`` (the self-service path) limits the
+        memories that may be offered and restored to what that reader may read."""
         ...
 
     async def mark_cleanup_revoked(self, cleanup_id: str) -> None:
@@ -465,8 +483,11 @@ class Store(Protocol):
         ``AgentCleanupRefused`` when ``undo_refusal`` says no."""
         ...
 
-    async def list_agent_cleanups(self, limit: int) -> list[AgentCleanupRecord]:
-        """Recorded cleanups, newest first, at most ``limit`` of them."""
+    async def list_agent_cleanups(
+        self, limit: int, *, agent: str | None = None
+    ) -> list[AgentCleanupRecord]:
+        """Recorded cleanups, newest first, at most ``limit`` of them; only
+        ``agent``'s when given."""
         ...
 
     async def get_agent_cleanup(self, cleanup_id: str) -> AgentCleanupRecord | None: ...

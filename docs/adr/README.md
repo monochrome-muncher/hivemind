@@ -104,7 +104,7 @@ is unused.
 | [0092](0092-admin-fleet-pins.md) | The admin panel shows each fleet's pins | Accepted; admin-only, read-only; withdrawn pins left out per 0096 |
 | [0093](0093-admin-flag-backlog.md) | The admin panel lists the flag backlog, oldest flag first | Accepted; admin-only, observation-only |
 | [0094](0094-admin-csv-export.md) | The admin panel exports its lists as CSV | Accepted; front end only |
-| [0095](0095-agent-portal.md) | The agent portal: a browser front end for agent-key holders | Accepted |
+| [0095](0095-agent-portal.md) | The agent portal: a browser front end for agent-key holders | Accepted; amended by 0113, 0118 |
 | [0096](0096-contributors-pin.md) | Contributors pin, three pins each, and a withdrawn entry leaves the briefing | Accepted |
 | [0097](0097-query-instruction-for-instruction-aware-embedders.md) | A query instruction for instruction-aware embedders, on the query side only | Accepted; on by default, empty value turns it off |
 | [0098](0098-relied-on-changed-list-filter.md) | A `relied_on_changed` filter for entries an agent rated helpful that have since changed | Accepted; display and filter only |
@@ -120,6 +120,7 @@ is unused.
 | [0108](0108-replace-an-agent-key.md) | Replace an agent's key | Accepted; amends 0028, touches 0012, 0027 and 0039, migration 0020, admin only, old key dies at once |
 | [0109](0109-rename-a-fleet.md) | Rename a fleet | Accepted; amends 0011 (no rename), migration 0019, admin only, audited `fleet.rename` |
 | [0110](0110-agent-key-last-use.md) | An agent key records its last use, at most hourly | Accepted; migration 0021, `credentials.last_used_at`, `HIVEMIND_IDLE_AGENT_DAYS`, observation only |
-| [0111](0111-agent-cleanup.md) | Clean up after a bad agent | Accepted; extends 0067, follows 0107, migration 0022, admin only, undoable |
+| [0111](0111-agent-cleanup.md) | Clean up after a bad agent | Accepted; extends 0067, follows 0107, migration 0022, admin only, undoable; amended by 0118 |
 | [0112](0112-move-agents-with-their-memories.md) | Move agents with their memories (fleet split) | Accepted; amends 0011, builds on 0107, migration 0023, admin only, undoable |
 | [0113](0113-retire-an-agent-with-a-successor.md) | Retire an agent with a successor | Accepted; amends 0011, 0030, 0033, 0034, 0060, 0065, 0095, 0096, migration 0024, admin only, undoable |
+| [0118](0118-agent-cleans-up-its-own-work.md) | An agent cleans up its own work from the portal | Accepted; amends 0095, 0111, builds on 0113, migration 0026, agent key only, undoable |

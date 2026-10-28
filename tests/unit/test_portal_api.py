@@ -28,6 +28,9 @@ ROUTES = [
     ("POST", "/v1/portal/search", {"query": "kaniko"}),
     ("GET", "/v1/portal/feedback?direction=given", None),
     ("POST", f"/v1/portal/entries/{FAKE_ID}/withdraw", {"reason": "old"}),
+    ("POST", "/v1/portal/cleanup", {"since": "2026-10-01T00:00:00Z", "dry_run": True}),
+    ("GET", "/v1/portal/cleanups", None),
+    ("POST", f"/v1/portal/cleanups/{FAKE_ID}/undo", None),
 ]
 
 

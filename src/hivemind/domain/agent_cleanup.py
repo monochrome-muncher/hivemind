@@ -28,8 +28,10 @@ _REASON_PREFIX = "admin cleanup "
 
 
 def cleanup_reason(cleanup_id: str) -> str:
-    """The ``withdrawn_reason`` a cleanup gives every memory it withdraws.
-    An undo re-activates only memories still withdrawn with this reason."""
+    """The ``withdrawn_reason`` a cleanup gives every memory it withdraws, the
+    same whoever ran it (``AgentCleanupRecord.self_service`` tells them apart,
+    ADR 0118). An undo re-activates only memories still withdrawn with this
+    reason."""
     return _REASON_PREFIX + cleanup_id
 
 
@@ -73,6 +75,8 @@ class AgentCleanupRecord:
     unpinned_pins: tuple[DroppedPin, ...] = ()
     revoked: bool = False
     undone_at: datetime | None = None
+    # Run by the agent itself from the portal (ADR 0118), not by an admin.
+    self_service: bool = False
 
 
 @dataclass(frozen=True, slots=True)

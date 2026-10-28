@@ -57,7 +57,8 @@ CREATE TABLE public.agent_cleanups (
     ratings_set_aside integer DEFAULT 0 NOT NULL,
     unpinned_pins jsonb DEFAULT '[]'::jsonb NOT NULL,
     revoked boolean DEFAULT false NOT NULL,
-    undone_at timestamp with time zone
+    undone_at timestamp with time zone,
+    self_service boolean DEFAULT false NOT NULL
 );
 
 CREATE TABLE public.agents (

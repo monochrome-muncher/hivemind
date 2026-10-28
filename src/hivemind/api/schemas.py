@@ -1179,6 +1179,7 @@ class AgentCleanupRecordOut(BaseModel):
     undone_at: datetime | None
     undoable: bool
     undo_blocked: str | None
+    self_service: bool = False  # the agent ran it from the portal (ADR 0118)
 
     @classmethod
     def from_view(cls, view: CleanupView) -> AgentCleanupRecordOut:
@@ -1195,6 +1196,75 @@ class AgentCleanupRecordOut(BaseModel):
             restored=len(r.restored),
             pins_removed=len(r.unpinned_pins),
             revoked=r.revoked,
+            undone_at=r.undone_at,
+            undoable=view.undoable,
+            undo_blocked=view.blocked,
+            self_service=r.self_service,
+        )
+
+
+class PortalCleanupRequest(BaseModel):
+    """``POST /v1/portal/cleanup`` (ADR 0118): the admin request without
+    ``also_revoke``; the agent is whoever the key is."""
+
+    since: datetime
+    until: datetime | None = None
+    dry_run: bool
+    restore_ids: list[RefStr] | None = Field(default=None, max_length=1000)
+    expected_withdraw: int | None = Field(default=None, ge=0)
+    expected_ratings: int | None = Field(default=None, ge=0)
+
+    @field_validator("since", "until")
+    @classmethod
+    def _window_utc(cls, v: datetime | None) -> datetime | None:
+        return _to_utc(v)
+
+
+class PortalCleanupOut(BaseModel):
+    """A portal cleanup that happened; ``cleanup_id`` is ``None`` (and
+    ``nothing_to_clean`` true) when there was nothing to change."""
+
+    dry_run: Literal[False] = False
+    cleanup_id: str | None
+    since: datetime
+    until: datetime
+    withdrawn: int
+    ratings_set_aside: int
+    restored: int
+    pins_removed: list[DroppedPinOut]
+    nothing_to_clean: bool
+
+
+class PortalCleanupRecordOut(BaseModel):
+    """One of the agent's cleanups as the portal lists it. ``run_by`` is
+    ``agent`` or ``admin``; an admin's can be undone only by an admin."""
+
+    id: str
+    since: datetime
+    until: datetime
+    cleaned_at: datetime
+    run_by: Literal["agent", "admin"]
+    withdrawn: int
+    ratings_set_aside: int
+    restored: int
+    pins_removed: int
+    undone_at: datetime | None
+    undoable: bool
+    undo_blocked: str | None
+
+    @classmethod
+    def from_view(cls, view: CleanupView) -> PortalCleanupRecordOut:
+        r = view.record
+        return cls(
+            id=r.id,
+            since=r.since,
+            until=r.until,
+            cleaned_at=r.cleaned_at,
+            run_by="agent" if r.self_service else "admin",
+            withdrawn=len(r.withdrawn_ids),
+            ratings_set_aside=r.ratings_set_aside,
+            restored=len(r.restored),
+            pins_removed=len(r.unpinned_pins),
             undone_at=r.undone_at,
             undoable=view.undoable,
             undo_blocked=view.blocked,

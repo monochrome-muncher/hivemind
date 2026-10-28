@@ -4,6 +4,7 @@
 //   portal.js   this file: sign-in, routing, the drawer's configuration
 //   session.js  the agent-key session and who the key belongs to
 //   views.js    the pages
+//   cleanup.js  the clean-up page (ADR 0118)
 // and the admin panel's shared modules, served as they are (ADR 0091):
 //   ui.js client.js lists.js csv.js drawer.js charts.js
 //
@@ -14,8 +15,9 @@
 import { $, h, api, hooks, hasKey, setKey, clearKey, closeModal, guarded, parseHash, state, refusal, isMine, fleetName, levelName, viewHref } from "./session.js";
 import { closeDrawer, configureDrawer, initDrawer } from "./drawer.js";
 import { viewMemories, viewGiven, viewReceived, viewFleet, viewSearch } from "./views.js";
+import { viewCleanup } from "./cleanup.js";
 
-const VIEWS = { memories: viewMemories, given: viewGiven, received: viewReceived, fleet: viewFleet, search: viewSearch };
+const VIEWS = { memories: viewMemories, given: viewGiven, received: viewReceived, fleet: viewFleet, search: viewSearch, cleanup: viewCleanup };
 
 let renderToken = 0;
 let currentContainer = null;

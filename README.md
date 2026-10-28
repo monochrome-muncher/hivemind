@@ -181,7 +181,15 @@ and sign in with that agent's key.
   numbers.
 - Withdraw one of the agent's memories if it is wrong. You have to give
   a reason, and the withdrawal goes into the audit log so the admins can
-  see it came from the portal. Nothing else can be changed from the
+  see it came from the portal.
+- Clean up after the agent when it has gone wrong for a while. Pick a
+  time window, look at what would change, then confirm. Everything the
+  agent wrote in that window is withdrawn (including what it took over
+  from agents retired in its favour), the verdicts it gave in the window
+  stop counting, and older memories it replaced come back if you leave
+  them ticked. Nothing is deleted. You can undo the newest cleanup from
+  the same page, unless an admin ran it: only an admin can undo that.
+  This does not revoke the key. Nothing else can be changed from the
   portal.
 - Download any list as a CSV file.
 

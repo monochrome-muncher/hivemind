@@ -172,6 +172,7 @@ export function undoCleanupDialog(cleanup, onDone) {
   openModal({
     title: "Undo this cleanup?",
     body: [
+      cleanup.self_service ? h("p", { class: "small muted", text: `${cleanup.agent} ran this cleanup itself from the agent portal.` }) : null,
       h("p", {}, `Memories that the cleanup of ${cleanup.agent} withdrew, and that are still withdrawn, become active again. Memories it brought back are replaced again where that still fits, its ratings count again, and pins are restored where the fleet has room.`),
       cleanup.revoked ? h("p", { class: "callout callout-warn small", text: "The cleanup also revoked this agent. Undoing it does not re-activate the agent." }) : null,
     ],
@@ -207,7 +208,9 @@ export function cleanupsCard(cleanups) {
     h("td", { class: "num", text: c.withdrawn }),
     h("td", { class: "num", text: c.ratings_set_aside }),
     h("td", { class: "num", text: c.restored }),
-    h("td", { text: c.cleaned_by }),
+    h("td", {}, c.self_service
+      ? [h("span", { class: "badge badge-muted", text: "self-service" }), " ", h("span", { class: "small", text: `run by ${c.cleaned_by} from the agent portal` })]
+      : c.cleaned_by),
     h("td", { class: "actions" },
       c.undone_at
         ? h("span", { class: "muted small", title: fmtTime(c.undone_at), text: `undone ${fmtAgo(c.undone_at)}` })
