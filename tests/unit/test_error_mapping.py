@@ -862,7 +862,7 @@ async def test_a_store_race_on_withdraw_becomes_the_typed_errors(
 
 # ADR 0107: a write that waits too long for a merge's fleet lock is a retryable
 # 503 naming the fleet, not a 500 and not the generic database message.
-BUSY = f"fleet {NO_SUCH} is being merged, retry in a few seconds"
+BUSY = f"fleet {NO_SUCH} is being merged or moved, retry in a few seconds"
 
 
 async def _busy(*_args: object, **_kwargs: object) -> object:

@@ -1,7 +1,10 @@
-"""Fleet merge: the records, the pin choice and the undo rule (ADR 0107).
+"""Fleet merge and fleet move: the records, the pin choice and the undo rule
+(ADR 0107, ADR 0112).
 
-Pure data and rules, no I/O. Both stores apply ``choose_pins`` and
-``undo_refusal`` so they agree.
+Pure data and rules, no I/O. Both stores apply ``choose_pins``,
+``plan_move_entries`` and ``undo_refusal`` so they agree. A fleet move is
+recorded in the same table and list as a merge (``FleetMergeRecord.kind``),
+so one undo rule covers both.
 """
 
 from __future__ import annotations
@@ -10,7 +13,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
-from hivemind.domain.access import Fleet
+from hivemind.domain.access import SCOPE_FLEET, Fleet
+from hivemind.domain.entry import Entry
 from hivemind.domain.pin import Pin
 from hivemind.domain.validation import MAX_PINS_PER_AGENT, MAX_PINS_PER_FLEET, InvalidInput
 
@@ -31,8 +35,20 @@ class FleetMergeRefused(Exception):
     would cross a newer merge."""
 
 
+class FleetMoveRefused(FleetMergeRefused):
+    """The move or its undo is not allowed right now (409 ``move_refused``):
+    an agent that is not in the source fleet, the same fleet on both sides,
+    pins or fleets that changed since the preview, or an undo that would
+    cross a newer merge or move."""
+
+
 class UnknownFleetMerge(KeyError):
     """No merge has this id (404 ``not_found``). A ``KeyError``, so ``str(exc)`` is quoted."""
+
+
+# ``FleetMergeRecord.kind``
+KIND_MERGE = "merge"
+KIND_MOVE = "move"
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +75,9 @@ class FleetMergeRecord:
     moved_agents: tuple[str, ...] = ()
     dropped_pins: tuple[DroppedPin, ...] = ()
     undone_at: datetime | None = None
+    # ``merge`` (the whole source fleet) or ``move`` (some agents and their
+    # fleet memories; the source stays a normal fleet).
+    kind: str = KIND_MERGE
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +132,71 @@ class UnmergeOutcome:
     pins_returned: int
     pins_restored: tuple[DroppedPin, ...]
     pins_skipped: tuple[DroppedPin, ...]
+    # A move's undo only: pins that were on a returning memory and did not fit
+    # the source's cap, so they were removed from the target (their memory is
+    # no longer there). Also listed in ``pins_skipped``.
+    pins_unpinned: tuple[DroppedPin, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class MovePlan:
+    """What moving some agents out of a fleet would re-file: the ids of the
+    memories that leave (``states`` counts them by state) and how many of the
+    movers' fleet memories stay behind because the head of their
+    supersession chain does (``held_back``)."""
+
+    entry_ids: tuple[str, ...] = ()
+    states: Mapping[str, int] | None = None
+    held_back: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class MoveOutcome:
+    """What a move did."""
+
+    record: FleetMergeRecord
+    target: Fleet
+    target_created: bool
+    entries_moved: int
+    entries_held_back: int
+    agents_moved: int
+    pins_kept: tuple[Pin, ...]
+    pins_dropped: tuple[DroppedPin, ...]
+
+
+def plan_move_entries(
+    entries: Iterable[Entry], source_fleet_id: str, movers: Iterable[str]
+) -> tuple[list[Entry], int]:
+    """Which entries a move re-files, and how many movers' memories stay.
+
+    The rule (ADR 0112): an entry moves when it is a ``fleet``-scoped entry
+    of the source fleet whose author is a mover (a candidate) AND the head
+    of its supersession chain is a candidate too. The head is the entry at
+    the end of the ``superseded_by`` links (the entry itself when nothing
+    supersedes it). A candidate whose head is not a candidate (a stayer
+    superseded it, or the chain ends in another fleet) stays, so a mover's
+    old version never leaves while the live one remains. ``entries`` must
+    hold every entry the chains pass through. Returns (moved, held back)."""
+    names = set(movers)
+    by_id = {e.id: e for e in entries}
+    candidates = {
+        e.id
+        for e in by_id.values()
+        if e.scope == SCOPE_FLEET and e.fleet_id == source_fleet_id and e.author in names
+    }
+    moved: list[Entry] = []
+    held = 0
+    for entry_id in candidates:
+        seen = {entry_id}
+        head = entry_id
+        while (nxt := by_id[head].superseded_by) is not None and nxt in by_id and nxt not in seen:
+            head = nxt
+            seen.add(head)
+        if head in candidates and by_id[head].superseded_by is None:
+            moved.append(by_id[entry_id])
+        else:
+            held += 1
+    return moved, held
 
 
 def newest_first(pins: Iterable[Pin]) -> list[Pin]:
@@ -126,15 +210,19 @@ def default_kept(pins: Iterable[Pin]) -> list[Pin]:
     return newest_first(pins)[:MERGE_PIN_LIMIT]
 
 
-def check_pins_unchanged(pins: Iterable[Pin], expected_pin_ids: Sequence[str] | None) -> None:
-    """``FleetMergeRefused`` when the two fleets' current ``pins`` are not
+def check_pins_unchanged(
+    pins: Iterable[Pin],
+    expected_pin_ids: Sequence[str] | None,
+    refusal: type[FleetMergeRefused] = FleetMergeRefused,
+) -> None:
+    """``refusal`` (``FleetMoveRefused`` for a move) when the two fleets' current ``pins`` are not
     exactly the ones the preview showed (``expected_pin_ids``): a pin added
     or removed since would otherwise be kept or dropped unseen. ``None``
     skips the check."""
     if expected_pin_ids is None:
         return
     if {p.entry_id for p in pins} != set(expected_pin_ids):
-        raise FleetMergeRefused("pins changed since the preview, preview again")
+        raise refusal("pins changed since the preview, preview again")
 
 
 def choose_pins(
@@ -199,20 +287,31 @@ def undo_refusal(
     record: FleetMergeRecord,
     records_newest_first: Sequence[FleetMergeRecord],
     target: Fleet | None,
+    source: Fleet | None = None,
 ) -> str | None:
     """Why ``record`` cannot be undone now, or ``None`` when it can.
 
-    Only the newest standing merge involving the target (as target or as
-    source) may be undone, and only while the target is not itself merged,
-    so each moved entry has one unambiguous origin (ADR 0107)."""
+    Only the newest standing merge or move involving the target (as target
+    or as source) may be undone, and only while the target is not itself
+    merged, so each moved entry has one unambiguous origin (ADR 0107). A
+    move also keeps its source in the rule: the entries go back there, so
+    nothing newer may have touched it either (ADR 0112)."""
+    what = "move" if record.kind == KIND_MOVE else "merge"
     if record.undone_at is not None:
-        return "this merge was already undone"
+        return f"this {what} was already undone"
     fleets = {record.target_fleet_id}
+    if record.kind == KIND_MOVE:
+        fleets.add(record.source_fleet_id)
     for other in records_newest_first:
         if other.id == record.id:
             break
         if other.undone_at is None and fleets & {other.source_fleet_id, other.target_fleet_id}:
-            return f"merge {other.id} is newer and involves the same target fleet: undo it first"
-    if target is not None and target.merged_into is not None:
-        return "the target fleet has since been merged into another fleet: undo that merge first"
+            kind = "move" if other.kind == KIND_MOVE else "merge"
+            return f"{kind} {other.id} is newer and involves the same fleet: undo it first"
+    for fleet in (target, source if record.kind == KIND_MOVE else None):
+        if fleet is not None and fleet.merged_into is not None:
+            return (
+                f"the fleet {fleet.name!r} has since been merged into another fleet: "
+                "undo that merge first"
+            )
     return None

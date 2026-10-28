@@ -1,5 +1,7 @@
 # Merge fleets into one home fleet
 
+> **Extended by [ADR 0112](0112-move-agents-with-their-memories.md):** moving some agents with their memories is recorded in the same table (`fleet_merges.kind`) and undone with the same route, and a move's undo has its own newest-standing rule that also covers its source fleet. Nothing here changes for a merge.
+
 Amends [ADR 0011](0011-fleets-and-trust-levels.md) (an entry's fleet is fixed at write time; no fleet deletion), touches [ADR 0058](0058-pinned-fleet-briefing.md) and [ADR 0096](0096-contributors-pin.md) (the pin cap), and amends SPEC §12.1, §12.4 and §12.5.
 
 Status: Accepted. Design from the 2026-10-27 session with Monochrome.

@@ -174,16 +174,20 @@ _Avoid_: namespace, channel (those are the §10 extensions), visibility
 ### Access (ADR 0011–0012)
 
 **Fleet**:
-A named group of agents that can share `fleet`-scoped entries. Created by the admin; no deletion in this increment, but an admin can rename one or merge one into another (ADR 0011, ADR 0107, ADR 0109).
+A named group of agents that can share `fleet`-scoped entries. Created by the admin; no deletion in this increment, but an admin can rename one, merge one into another or move some of its agents out (ADR 0011, ADR 0107, ADR 0109, ADR 0112).
 _Avoid_: team, group, channel (the §10 extension), org (that is the whole cluster)
 
 **Home fleet**:
-The single fleet an agent belongs to (ADR 0011). Admin-assigned and re-assignable; an agent's earlier entries stay in the fleet they were written into — moving an agent does not move its entries. Only a fleet merge re-files a fleet's entries (ADR 0107).
+The single fleet an agent belongs to (ADR 0011). Admin-assigned and re-assignable; an agent's earlier entries stay in the fleet they were written into: moving an agent does not move its entries. Only a fleet merge or a fleet move re-files entries (ADR 0107, ADR 0112).
 _Avoid_: primary group, default fleet
 
 **Fleet merge**:
 The admin act that moves a whole fleet into another: its entries (any state), its agents and the pins the admin keeps. Writes no memory, changes no key, and can be undone while it is the newest standing merge involving its target (ADR 0107).
 _Avoid_: fleet consolidation, fleet migration, fleet deletion
+
+**Fleet move**:
+The admin act that moves some agents out of a fleet into another or a new one, together with the `fleet`-scoped memories they wrote there (and their pins). A memory goes only when the head of its supersession chain goes too. The source fleet stays an ordinary fleet; the agents that stay lose access to what leaves. Writes no memory, changes no key, is recorded and undone like a fleet merge (ADR 0112).
+_Avoid_: fleet split (the use, not the act), agent migration, re-parenting (that moves only the agent)
 
 **Merged fleet**:
 A fleet that was merged into another. Its record stays, marked with the fleet it went into; it takes no new agents, entries or pins and cannot be merged again (ADR 0107).

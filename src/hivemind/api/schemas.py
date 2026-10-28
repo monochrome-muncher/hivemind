@@ -35,7 +35,7 @@ from hivemind.domain.validation import (
 )
 from hivemind.services.agent_cleanup import CleanupPreview, CleanupView
 from hivemind.services.chain import EntryLinks
-from hivemind.services.fleet_merge import MergePreview, MergeView
+from hivemind.services.fleet_merge import MergePreview, MergeView, MovePreview
 from hivemind.services.search import Hit
 from hivemind.services.write import RelatedEntry
 from hivemind.services.write_warnings import WriteWarning
@@ -799,6 +799,64 @@ class FleetMergePreviewOut(BaseModel):
         )
 
 
+class FleetMoveRequest(BaseModel):
+    """``POST /v1/admin/fleets/{source_id}/move`` (ADR 0112): the agents to
+    move (each must have the source as home fleet) and exactly one of
+    ``target_fleet_id`` and ``new_fleet_name``. ``dry_run`` is required, so a
+    move is never started by leaving it out. The pin fields work as in a merge."""
+
+    agents: list[RefStr] = Field(min_length=1, max_length=200)
+    target_fleet_id: RefStr | None = None
+    new_fleet_name: str | None = None
+    keep_pin_ids: list[RefStr] | None = Field(default=None, max_length=50)
+    expected_pin_ids: list[RefStr] | None = Field(default=None, max_length=200)
+    dry_run: bool
+
+
+class FleetMovePreviewOut(BaseModel):
+    """The move ``dry_run`` answer: nothing was changed. ``leaving`` memories
+    go with the agents; the ``staying_agents`` lose access to them."""
+
+    dry_run: Literal[True] = True
+    source: MergeSideOut
+    target: MergeSideOut
+    agents: list[str]
+    staying_agents: list[str]
+    leaving: int
+    leaving_by_state: dict[str, int]
+    held_back: int
+    pins: list[MergePinOut]
+    pin_limit: int
+    needs_pin_choice: bool
+
+    @classmethod
+    def from_preview(cls, preview: MovePreview) -> FleetMovePreviewOut:
+        shared = FleetMergePreviewOut.from_preview(
+            MergePreview(
+                source=preview.source,
+                target=preview.target,
+                pins=preview.pins,
+                pin_limit=preview.pin_limit,
+                needs_pin_choice=preview.needs_pin_choice,
+                duplicates=(),
+                duplicates_looked_up=0,
+                duplicates_truncated=False,
+            )
+        )
+        return cls(
+            source=shared.source,
+            target=shared.target,
+            agents=list(preview.agents),
+            staying_agents=list(preview.staying_agents),
+            leaving=preview.leaving,
+            leaving_by_state=dict(preview.leaving_by_state),
+            held_back=preview.held_back,
+            pins=shared.pins,
+            pin_limit=preview.pin_limit,
+            needs_pin_choice=preview.needs_pin_choice,
+        )
+
+
 class DroppedPinOut(BaseModel):
     """A pin a merge unpinned (or an undo could not restore)."""
 
@@ -831,9 +889,26 @@ class FleetMergeOut(BaseModel):
     pins_dropped: list[DroppedPinOut]
 
 
-class FleetUnmergeOut(BaseModel):
-    """An undone merge. Search counters stay summed."""
+class FleetMoveOut(BaseModel):
+    """A move that happened. ``merge_id`` is the history id (the undo takes
+    it); the source fleet stays a normal fleet."""
 
+    dry_run: Literal[False] = False
+    merge_id: str
+    source_fleet_id: str
+    target: FleetOut
+    target_created: bool
+    entries_moved: int
+    entries_held_back: int
+    agents_moved: list[str]
+    pins_kept: int
+    pins_dropped: list[DroppedPinOut]
+
+
+class FleetUnmergeOut(BaseModel):
+    """An undone merge or move. Search counters stay summed."""
+
+    kind: str = "merge"
     merge_id: str
     source_fleet_id: str
     target_fleet_id: str
@@ -845,10 +920,11 @@ class FleetUnmergeOut(BaseModel):
 
 
 class FleetMergeRecordOut(BaseModel):
-    """One recorded merge; ``undoable`` says whether an undo is allowed now
+    """One recorded merge or move; ``undoable`` says whether an undo is allowed now
     (``undo_blocked`` says why not)."""
 
     id: str
+    kind: str  # "merge" or "move" (ADR 0112)
     source_fleet_id: str
     source_fleet_name: str | None
     target_fleet_id: str
@@ -866,6 +942,7 @@ class FleetMergeRecordOut(BaseModel):
         r = view.record
         return cls(
             id=r.id,
+            kind=r.kind,
             source_fleet_id=r.source_fleet_id,
             source_fleet_name=view.source_name,
             target_fleet_id=r.target_fleet_id,

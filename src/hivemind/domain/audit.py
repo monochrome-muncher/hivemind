@@ -65,6 +65,8 @@ class AuditAction(StrEnum):
     FLEET_UNMERGE = "fleet.unmerge"  # ADR 0107
     AGENT_KEY_REPLACE = "agent_key.replace"  # ADR 0108
     FLEET_RENAME = "fleet.rename"  # ADR 0109
+    FLEET_MOVE_AGENTS = "fleet.move_agents"  # ADR 0112
+    FLEET_MOVE_UNDO = "fleet.move_undo"  # ADR 0112
     AGENT_CLEANUP = "agent.cleanup"  # ADR 0111
     AGENT_CLEANUP_UNDO = "agent.cleanup_undo"  # ADR 0111
 

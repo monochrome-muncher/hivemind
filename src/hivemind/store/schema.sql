@@ -80,7 +80,7 @@ CREATE TABLE public.audit_log (
     action text NOT NULL,
     target text,
     detail jsonb DEFAULT '{}'::jsonb NOT NULL,
-    CONSTRAINT audit_log_action_check CHECK ((action = ANY (ARRAY['agent.register'::text, 'agent.activate'::text, 'agent.trust_level_set'::text, 'agent.home_fleet_set'::text, 'agent.revoke'::text, 'fleet.create'::text, 'org_key.rotate'::text, 'entry.withdraw'::text, 'admin_key.issue'::text, 'admin_key.revoke'::text, 'agent_key.issue'::text, 'entry.pin'::text, 'entry.unpin'::text, 'fleet.merge'::text, 'fleet.unmerge'::text, 'fleet.rename'::text, 'agent_key.replace'::text, 'agent.cleanup'::text, 'agent.cleanup_undo'::text]))),
+    CONSTRAINT audit_log_action_check CHECK ((action = ANY (ARRAY['agent.register'::text, 'agent.activate'::text, 'agent.trust_level_set'::text, 'agent.home_fleet_set'::text, 'agent.revoke'::text, 'fleet.create'::text, 'org_key.rotate'::text, 'entry.withdraw'::text, 'admin_key.issue'::text, 'admin_key.revoke'::text, 'agent_key.issue'::text, 'entry.pin'::text, 'entry.unpin'::text, 'fleet.merge'::text, 'fleet.unmerge'::text, 'fleet.rename'::text, 'agent_key.replace'::text, 'agent.cleanup'::text, 'agent.cleanup_undo'::text, 'fleet.move_agents'::text, 'fleet.move_undo'::text]))),
     CONSTRAINT audit_log_actor_kind_check CHECK ((actor_kind = ANY (ARRAY['admin_key'::text, 'cli'::text, 'org_key'::text, 'agent_key'::text])))
 );
 
@@ -158,7 +158,9 @@ CREATE TABLE public.fleet_merges (
     merged_at timestamp with time zone DEFAULT now() NOT NULL,
     moved_agents text[] DEFAULT '{}'::text[] NOT NULL,
     dropped_pins jsonb DEFAULT '[]'::jsonb NOT NULL,
-    undone_at timestamp with time zone
+    undone_at timestamp with time zone,
+    kind text DEFAULT 'merge'::text NOT NULL,
+    CONSTRAINT fleet_merges_kind_check CHECK ((kind = ANY (ARRAY['merge'::text, 'move'::text])))
 );
 
 CREATE TABLE public.fleets (
