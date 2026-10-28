@@ -256,22 +256,26 @@ class FeedbackService:
         fleet_id: str | None = None,
         older_than: timedelta | None = None,
         orphaned: bool = False,
+        own: bool = False,
         limit: int,
         offset: int = 0,
     ) -> list[FlaggedEntry]:
         """Active entries with a standing ``stale`` or ``wrong`` verdict,
         oldest first flag first (ADR 0093), each with whether its author
         is still around; only entries the caller can read. ``older_than``
-        keeps entries first flagged more than that long ago."""
+        keeps entries first flagged more than that long ago; ``own`` keeps
+        the caller's own entries and those it inherited (ADR 0115)."""
         credential = credential.effective(self._require_stored_keys)
         now = self._now_fn()
+        visibility = credential.visibility()
         filters = FlagBacklogFilters(
             fleet_id=fleet_id,
             flagged_before=now - older_than if older_than else None,
             orphaned=orphaned,
+            authors=visibility.owned if own else (),
         )
         return await self._store.list_flag_backlog(
-            filters, now, limit, offset, visibility=credential.visibility()
+            filters, now, limit, offset, visibility=visibility
         )
 
     async def quality(self, entry_id: str) -> float:

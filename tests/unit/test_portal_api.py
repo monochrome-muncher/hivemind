@@ -27,6 +27,7 @@ ROUTES = [
     ("GET", "/v1/portal/entries", None),
     ("POST", "/v1/portal/search", {"query": "kaniko"}),
     ("GET", "/v1/portal/feedback?direction=given", None),
+    ("GET", "/v1/portal/flagged", None),
     ("POST", f"/v1/portal/entries/{FAKE_ID}/withdraw", {"reason": "old"}),
 ]
 
@@ -115,6 +116,48 @@ async def test_portal_search_ranks_like_search_but_is_not_counted() -> None:
     assert {h["entry_id"] for h in hits.json()} == {mine.id, in_blue.id, by_bob.id}
     assert [h["entry_id"] for h in home.json()] == [by_bob.id]
     assert sum(c.searches for c in await app.store.search_counts()) == 1
+
+
+async def test_portal_flagged_lists_the_agents_own_and_inherited_flagged_memories() -> None:
+    """ADR 0115: only active entries the caller owns (its name plus the
+    agents it inherits from), oldest flag first, bounded by what it reads."""
+    app, blue, _red, mine, in_blue, by_bob, in_red = await _seed()
+    old = await _add(app, "carol predecessor note", scope="fleet", fleet_id=blue.id, author="old")
+    gone = await _add(app, "carol withdrawn note", scope="fleet", fleet_id=blue.id)
+    await app.store.withdraw_entry(gone.id, None, by_user="carol")
+    now = datetime.now(UTC)
+    for entry, days, verdict in (
+        (in_blue, 2, Verdict.STALE),
+        (mine, 9, Verdict.WRONG),
+        (by_bob, 30, Verdict.WRONG),
+        (in_red, 30, Verdict.WRONG),
+        (old, 5, Verdict.STALE),
+        (gone, 40, Verdict.WRONG),
+    ):
+        await app.store.record_feedback(
+            Feedback(entry.id, "zed", "zed", verdict, None, now - timedelta(days=days))
+        )
+    heir = Credential(
+        user_id="carol",
+        agent_name="carol",
+        access_controlled=True,
+        trust_level=TrustLevel.CONTRIBUTOR,
+        home_fleet_id=blue.id,
+        inherits_from=("old",),
+    )
+    app.authenticator.add_key("key-heir", heir)  # type: ignore[attr-defined]
+    async with make_client(app) as client:
+        plain = await client.get("/v1/portal/flagged", headers=CAROL)
+        inheriting = await client.get("/v1/portal/flagged", headers={"X-API-Key": "key-heir"})
+        paged = await client.get("/v1/portal/flagged", params={"limit": 1}, headers=CAROL)
+        pat = await client.get("/v1/portal/flagged", headers=PAT)
+    assert plain.status_code == 200
+    assert [r["id"] for r in plain.json()] == [mine.id, in_blue.id]
+    assert [r["id"] for r in inheriting.json()] == [mine.id, old.id, in_blue.id]
+    first = plain.json()[0]
+    assert (first["stale"], first["wrong"], first["author"]) == (0, 1, "carol")
+    assert [r["id"] for r in paged.json()] == [mine.id]
+    assert pat.json() == []  # pat owns nothing, though it reads the fleet
 
 
 async def test_portal_feedback_lists_the_verdicts_given_and_received() -> None:
