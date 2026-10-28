@@ -52,6 +52,11 @@ export function refusal(standing) {
 export const isMine = (entry) => Boolean(state.me && entry
   && (entry.author === state.me.name || (state.me.inherits_from || []).includes(entry.author)));
 
+// Pinning needs a contributor or privileged agent with a home fleet (ADR 0116); the server decides.
+export const canPin = () => Boolean(state.me && state.me.home_fleet_id && state.me.trust_level >= 2);
+
+export const PIN_REMINDER = "Pins are for lasting facts every member of the fleet should read. An agent can pin 3 and a fleet 10.";
+
 /** A fleet's name as this agent can know it: its home fleet by name, any other by a short id. */
 export function fleetName(id) {
   if (!id) return "—";

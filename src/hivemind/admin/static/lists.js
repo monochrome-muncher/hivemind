@@ -234,8 +234,9 @@ export function feedbackTable({ fetchPage, onOpen, fleetName = sameName, agentHr
 export const PIN_HEADERS = ["Memory", "Kind", "Author", "Pinned by", "Pinned", "Since pinned"];
 const CHANGE_TEXT = { superseded: "superseded", flagged: "flagged" };
 
-/** One pinned memory (GET /v1/pins shape): the current version, who pinned it, and what changed since. */
-export function pinRow(pin, { onOpen, agentHref = noHref } = {}) {
+/** One pinned memory (GET /v1/pins shape): the current version, who pinned it, and what changed since.
+ * `extra(pin)` may add a last cell (the portal's Unpin button). */
+export function pinRow(pin, { onOpen, agentHref = noHref, extra = null } = {}) {
   return h("tr", {},
     h("td", { class: "cell-summary" },
       h("button", { type: "button", class: "linklike summary-text", text: pin.summary, onclick: () => onOpen(pin.id) }),
@@ -246,7 +247,8 @@ export function pinRow(pin, { onOpen, agentHref = noHref } = {}) {
     h("td", { class: "nowrap", title: fmtTime(pin.pinned_at), text: fmtAgo(pin.pinned_at) }),
     h("td", {}, pin.changed_since_pin
       ? h("span", { class: "badge badge-pending", title: "A fleet member should re-pin or unpin it", text: CHANGE_TEXT[pin.change_reason] || "changed" })
-      : h("span", { class: "muted", text: "unchanged" })));
+      : h("span", { class: "muted", text: "unchanged" })),
+    extra ? h("td", { class: "nowrap" }, extra(pin)) : null);
 }
 
 // --- flagged memories ------------------------------------------------------------------

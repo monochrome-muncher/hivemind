@@ -515,16 +515,11 @@ def build_router() -> APIRouter:
             entry_id, app.governance_service.withdraw(credential, entry_id, request.reason)
         )
 
-    @router.put("/entries/{entry_id}/pin", response_model=PinOut)
-    async def pin(entry_id: str, credential: require, app: hive) -> PinOut:
-        """Pin an active fleet entry to its fleet's briefing (ADR 0058): a
-        contributor or privileged agent of that fleet or an admin. Idempotent.
-
-        404 unknown entry, 403 not allowed, 409 inactive, 422 not a fleet
-        entry, the fleet already has 10 pins or the agent 3.
-        """
+    async def _pin(
+        app: HivemindApp, credential: Credential, entry_id: str, via: str | None = None
+    ) -> PinOut:
         try:
-            pin = await app.governance_service.pin(credential, entry_id)
+            pin = await app.governance_service.pin(credential, entry_id, via)
         except EntryNotFound:
             raise api_error(404, "not_found", f"unknown entry: {entry_id}") from None
         except PermissionDenied as exc:
@@ -537,11 +532,11 @@ def build_router() -> APIRouter:
             raise api_error(409, "fleet_merged", str(exc)) from exc
         return PinOut.from_pin(pin)
 
-    @router.delete("/entries/{entry_id}/pin", response_model=UnpinOut)
-    async def unpin(entry_id: str, credential: require, app: hive) -> UnpinOut:
-        """Unpin an entry (ADR 0058); ``removed`` says whether it was pinned."""
+    async def _unpin(
+        app: HivemindApp, credential: Credential, entry_id: str, via: str | None = None
+    ) -> UnpinOut:
         try:
-            removed = await app.governance_service.unpin(credential, entry_id)
+            removed = await app.governance_service.unpin(credential, entry_id, via)
         except EntryNotFound:
             raise api_error(404, "not_found", f"unknown entry: {entry_id}") from None
         except PermissionDenied as exc:
@@ -549,6 +544,21 @@ def build_router() -> APIRouter:
         except InvalidInput as exc:
             raise api_error(422, "invalid_input", str(exc)) from exc
         return UnpinOut(entry_id=entry_id, removed=removed)
+
+    @router.put("/entries/{entry_id}/pin", response_model=PinOut)
+    async def pin(entry_id: str, credential: require, app: hive) -> PinOut:
+        """Pin an active fleet entry to its fleet's briefing (ADR 0058): a
+        contributor or privileged agent of that fleet or an admin. Idempotent.
+
+        404 unknown entry, 403 not allowed, 409 inactive, 422 not a fleet
+        entry, the fleet already has 10 pins or the agent 3.
+        """
+        return await _pin(app, credential, entry_id)
+
+    @router.delete("/entries/{entry_id}/pin", response_model=UnpinOut)
+    async def unpin(entry_id: str, credential: require, app: hive) -> UnpinOut:
+        """Unpin an entry (ADR 0058); ``removed`` says whether it was pinned."""
+        return await _unpin(app, credential, entry_id)
 
     @router.get("/pins", response_model=PinsOut)
     async def pins(
@@ -762,6 +772,19 @@ def build_router() -> APIRouter:
         return await _withdraw(
             entry_id, app.governance_service.withdraw_own(credential, entry_id, request.reason)
         )
+
+    @router.put("/portal/entries/{entry_id}/pin", response_model=PinOut)
+    async def portal_pin(entry_id: str, credential: require, app: hive) -> PinOut:
+        """Pin an entry from the portal with ``PUT /v1/entries/{id}/pin``'s
+        rights, caps and errors (ADR 0116); the audit row says ``via: "portal"``."""
+        _require_agent(credential, "the agent portal")
+        return await _pin(app, credential, entry_id, via="portal")
+
+    @router.delete("/portal/entries/{entry_id}/pin", response_model=UnpinOut)
+    async def portal_unpin(entry_id: str, credential: require, app: hive) -> UnpinOut:
+        """Unpin an entry from the portal (ADR 0116), audited ``via: "portal"``."""
+        _require_agent(credential, "the agent portal")
+        return await _unpin(app, credential, entry_id, via="portal")
 
     # --- Admin console reads (ADR 0080): admin key only ------------------
 

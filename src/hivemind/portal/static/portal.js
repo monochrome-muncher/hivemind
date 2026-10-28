@@ -11,7 +11,7 @@
 // (h()) and never through an HTML-parsing sink; the agent key lives in
 // sessionStorage for this tab only, in its own slot; one key at a time.
 
-import { $, h, api, hooks, hasKey, setKey, clearKey, closeModal, guarded, parseHash, state, refusal, isMine, fleetName, levelName, viewHref } from "./session.js";
+import { $, h, api, hooks, hasKey, setKey, clearKey, closeModal, guarded, parseHash, state, refusal, isMine, fleetName, levelName, viewHref, canPin, PIN_REMINDER } from "./session.js";
 import { closeDrawer, configureDrawer, initDrawer } from "./drawer.js";
 import { viewMemories, viewGiven, viewReceived, viewFleet, viewSearch } from "./views.js";
 
@@ -140,11 +140,23 @@ async function checkApi() {
   }
 }
 
+// Pinning is the agent's own right (ADR 0116): a contributor or privileged agent, in its home fleet.
+async function pinStatus(entry) {
+  if (!canPin() || entry.state !== "active" || entry.scope !== "fleet" || entry.fleet_id !== state.me.home_fleet_id) return null;
+  const pins = await guarded(() => api("GET", "pins"));
+  if (!pins) return null;
+  return pins.pins.some((p) => p.id === entry.id) ? "pinned" : "pinnable";
+}
+
 // The drawer as an agent sees it: what its key can read, its own memories withdrawable with a reason.
 configureDrawer({
   fetchEntry: (id) => guarded(() => api("GET", `entries/${encodeURIComponent(id)}`, { query: { history: "true" } })),
   withdrawEntry: (id, reason) => guarded(() => api("POST", `portal/entries/${encodeURIComponent(id)}/withdraw`, { body: { reason } })),
   canWithdraw: isMine,
+  pinStatus: pinStatus,
+  pinEntry: (id) => guarded(() => api("PUT", `portal/entries/${encodeURIComponent(id)}/pin`)),
+  unpinEntry: (id) => guarded(() => api("DELETE", `portal/entries/${encodeURIComponent(id)}/pin`)),
+  pinNote: PIN_REMINDER,
   reasonRequired: true,
   fleetName,
   fleetHref: (fleet) => (state.me && fleet === state.me.home_fleet_id ? viewHref("fleet") : null),

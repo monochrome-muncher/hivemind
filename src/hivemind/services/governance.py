@@ -190,11 +190,11 @@ class GovernanceService:
 
     # -- pinned entries (services.pins) ---------------------------------------
 
-    async def pin(self, credential: Credential, entry_id: str) -> Pin:
-        return await self._pins.pin(credential, entry_id)
+    async def pin(self, credential: Credential, entry_id: str, via: str | None = None) -> Pin:
+        return await self._pins.pin(credential, entry_id, via)
 
-    async def unpin(self, credential: Credential, entry_id: str) -> bool:
-        return await self._pins.unpin(credential, entry_id)
+    async def unpin(self, credential: Credential, entry_id: str, via: str | None = None) -> bool:
+        return await self._pins.unpin(credential, entry_id, via)
 
     async def pinned(
         self, credential: Credential, fleet_id: str | None = None
