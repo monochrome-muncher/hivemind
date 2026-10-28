@@ -40,6 +40,7 @@ from hivemind.domain.validation import (
     validate_owner_alias,
 )
 from hivemind.ports import Authenticator, Credential, Store
+from hivemind.services.agent_cleanup import AgentCleanupService
 from hivemind.services.audit import actor_kind_of, record_admin_action
 from hivemind.services.errors import NameTaken as NameTaken  # re-exported: defined in errors
 from hivemind.services.errors import PermissionDenied
@@ -104,6 +105,8 @@ class AccessService:
         self._authenticator = authenticator
         # Merging fleets and undoing it (ADR 0107): admin-gated there.
         self.merges = FleetMergeService(store)
+        # Cleaning up after a bad agent and undoing it (ADR 0111): admin-gated there.
+        self.cleanups = AgentCleanupService(store, revoke=self.revoke, revocable=self.revocable)
 
     def _require_authenticator(self) -> Authenticator:
         """The authenticator for key management (absent in dev mode)."""
@@ -287,6 +290,20 @@ class AccessService:
         await self._store.revoke_agent(name)
         await authenticator.revoke_agent_key(name)
         await self._audit(credential, AuditAction.AGENT_REVOKE, name, {"from": before.status.value})
+
+    async def revocable(self, name: str, credential: Credential) -> bool:
+        """Whether ``revoke`` would revoke ``name`` now: ``False`` when it is
+        already revoked. ``UnknownAgent`` if unknown; ``PermissionDenied``
+        without an admin key or an authenticator. Changes nothing, so a caller
+        can refuse before it changes anything else."""
+        self._require_admin(credential)
+        agent = await self._store.get_agent(name)
+        if agent is None:
+            raise UnknownAgent(f"unknown agent: {name}")
+        if agent.status not in REVOCABLE:
+            return False
+        self._require_authenticator()
+        return True
 
     async def rotate_org_key(self, credential: Credential) -> str:
         """Rotate the shared org key (ADR 0031): every prior org key stops

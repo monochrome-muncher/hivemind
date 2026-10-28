@@ -6,7 +6,7 @@
 -- ids a move re-filed, and `moved_agents` the agents.
 --
 -- The audit CHECK is widened the 0017 way for two new actions,
--- `fleet.move_agents` and `fleet.move_undo`.
+-- `fleet.move_agents` and `fleet.move_undo`, on top of 0022's list.
 --
 -- ADR 0020 expand-and-contract: a NOT NULL column with a constant default
 -- (no table rewrite) and a widened CHECK are additive. An older sibling pod
@@ -42,6 +42,8 @@ ALTER TABLE audit_log
         'fleet.unmerge',
         'fleet.rename',
         'agent_key.replace',
+        'agent.cleanup',
+        'agent.cleanup_undo',
         'fleet.move_agents',
         'fleet.move_undo'
     ));

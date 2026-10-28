@@ -223,6 +223,7 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible { outline: 2px sol
 .modal h2 { margin: 0; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .modal-scroll { max-height: min(46vh, 380px); overflow-y: auto; }
+.modal-scroll.cleanup-list { max-height: min(22vh, 180px); }
 
 /* --- fleet merge ------------------------------------------------------- */
 .merge-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }

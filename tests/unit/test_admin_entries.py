@@ -62,6 +62,13 @@ ROUTES = [
     ("GET", "/v1/admin/fleet-merges", None),
     ("POST", f"/v1/admin/fleet-merges/{FAKE_ID}/undo", None),
     ("PATCH", f"/v1/admin/fleets/{FAKE_ID}", {"name": "renamed"}),
+    (
+        "POST",
+        "/v1/admin/agents/ghost/cleanup",
+        {"since": "2026-01-01T00:00:00Z", "dry_run": True},
+    ),
+    ("GET", "/v1/admin/agent-cleanups", None),
+    ("POST", f"/v1/admin/agent-cleanups/{FAKE_ID}/undo", None),
 ]
 
 
@@ -102,6 +109,10 @@ ADMIN_BODIES = {
         "new_fleet_name": "c",
         "dry_run": False,
     },
+    ("POST", "/v1/admin/agents/{name}/cleanup"): {
+        "since": "2026-01-01T00:00:00Z",
+        "dry_run": False,
+    },
 }
 
 
@@ -127,6 +138,7 @@ async def test_every_registered_admin_route_is_403_for_agent_and_org_keys(header
                 name="ghost",
                 source_id=FAKE_ID,
                 merge_id=FAKE_ID,
+                cleanup_id=FAKE_ID,
             )
             body = ADMIN_BODIES.get((method, template))
             resp = await client.request(method, path, json=body, headers=headers)

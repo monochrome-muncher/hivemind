@@ -8,12 +8,14 @@ import {
 } from "./core.js";
 import { openEntry } from "./drawer.js";
 import { PIN_HEADERS, pinRow } from "./lists.js";
+import { cleanupDialog, cleanupsCard } from "./cleanup.js";
 import { mergeDialog, mergesCard, moveDialog } from "./merge.js";
 
 const AUDIT_ACTIONS = [
   "agent.register", "agent.activate", "agent.trust_level_set", "agent.home_fleet_set", "agent.revoke",
   "fleet.create", "fleet.rename", "fleet.merge", "fleet.unmerge", "fleet.move_agents", "fleet.move_undo", "org_key.rotate", "entry.withdraw", "entry.pin", "entry.unpin",
   "admin_key.issue", "admin_key.revoke", "agent_key.issue", "agent_key.replace",
+  "agent.cleanup", "agent.cleanup_undo",
 ];
 const AUDIT_PAGE = 50;
 // Rows whose target is the source fleet and whose detail names a target fleet.
@@ -211,8 +213,10 @@ export function agentButtons(agent, refresh) {
   } else if (agent.status === "active") {
     buttons.push(h("button", { type: "button", class: "btn btn-sm", text: "Edit", onclick: () => editDialog(agent, refresh) }));
     buttons.push(h("button", { type: "button", class: "btn btn-sm", text: "Replace key", onclick: () => replaceKeyDialog(agent, refresh) }));
+    buttons.push(h("button", { type: "button", class: "btn btn-sm", text: "Clean up…", title: "Withdraw what this agent wrote in a time window and set its ratings aside", onclick: () => cleanupDialog(agent, refresh) }));
     buttons.push(h("button", { type: "button", class: "btn btn-danger btn-sm", text: "Revoke", onclick: () => revokeDialog(agent, refresh) }));
   } else if (agent.status === "revoked") {
+    buttons.push(h("button", { type: "button", class: "btn btn-sm", text: "Clean up…", title: "Withdraw what this agent wrote in a time window and set its ratings aside", onclick: () => cleanupDialog(agent, refresh) }));
     buttons.push(h("button", { type: "button", class: "btn btn-sm", text: "Re-activate", onclick: () => activateDialog(agent, refresh) }));
   }
   return buttons;
@@ -397,7 +401,10 @@ export async function viewKeys(root) {
 // --- agents ---------------------------------------------------------------------------------
 
 export async function viewAgents(root) {
-  const [, metrics, activity] = await Promise.all([loadAgentsAndFleets(), fetchMetrics(), fetchActivity(state.days)]);
+  const [, metrics, activity, cleanups] = await Promise.all([
+    loadAgentsAndFleets(), fetchMetrics(), fetchActivity(state.days),
+    optional(() => api("GET", "admin/agent-cleanups")),
+  ]);
   // ADR 0068: stale/wrong reports and how many a later supersession confirmed.
   const flagged = (metrics && metrics.feedback && metrics.feedback.by_agent) || {};
   const act = new Map(((activity && activity.agents) || []).map((a) => [a.name, a]));
@@ -405,14 +412,21 @@ export async function viewAgents(root) {
   const refresh = () => hooks.refresh();
   const search = h("input", { type: "search", placeholder: "Filter by name, owner or fleet…", "aria-label": "Filter agents" });
   const statusFilter = h("select", { "aria-label": "Status" }, ["all", "pending", "active", "revoked"].map((s) => h("option", { value: s, text: s === "all" ? "All statuses" : s })));
+  // ADR 0110: the server says which agents are idle and for how many days.
+  const idleDays = (state.agents[0] && state.agents[0].idle_after_days) || 30;
+  const idleCount = state.agents.filter((a) => a.idle).length;
+  const idleFilter = h("select", { "aria-label": "Activity" },
+    h("option", { value: "all", text: "Any activity" }),
+    h("option", { value: "idle", text: `Idle ${idleDays}+ days (${idleCount})` }));
   const holder = h("div");
   const render = () => {
     const q = search.value.trim().toLowerCase();
     const shown = state.agents.filter((a) =>
       (statusFilter.value === "all" || a.status === statusFilter.value) &&
+      (idleFilter.value === "all" || a.idle) &&
       (!q || [a.name, a.owner_alias || "", fleetName(a.home_fleet_id)].some((v) => v.toLowerCase().includes(q))));
     holder.replaceChildren(table(
-      ["Agent", "Status", "Trust level", "Home fleet", "Owner", "Entries", `Writes (${state.days}d)`, "Last write", "Flags confirmed", "Activated", ""],
+      ["Agent", "Status", "Trust level", "Home fleet", "Owner", "Entries", `Writes (${state.days}d)`, "Last write", "Flags confirmed", "Activated", "Last active", ""],
       shown.map((a) => {
         const x = act.get(a.name);
         return h("tr", {},
@@ -426,16 +440,20 @@ export async function viewAgents(root) {
           h("td", { title: x ? fmtTime(x.last_write_at) : "", text: x && x.last_write_at ? fmtAgo(x.last_write_at) : "—" }),
           h("td", { title: "Stale or wrong reports later confirmed by a supersession", text: flagged[a.name] ? `${flagged[a.name].confirmed} of ${flagged[a.name].flags}` : "—" }),
           h("td", { title: fmtTime(a.activated_at), text: a.activated_at ? fmtAgo(a.activated_at) : "—" }),
+          h("td", { title: a.last_used_at ? fmtTime(a.last_used_at) : "Its key has not been used since last-use tracking started", text: a.last_used_at ? fmtAgo(a.last_used_at) : (a.status === "active" ? "never" : "—") },
+            a.idle ? [" ", h("span", { class: "badge badge-pending", title: `No request for ${idleDays}+ days`, text: "idle" })] : null),
           agentActions(a, refresh));
       }),
       state.agents.length ? "No agents match the filter." : "No agents have registered yet."));
   };
   search.addEventListener("input", render);
   statusFilter.addEventListener("change", render);
+  idleFilter.addEventListener("change", render);
   render();
   fill(root, 
     pageHead("Agents", `${state.agents.length} registered`, refreshButton()),
-    card(null, holder, { head: [h("div", { class: "filters" }, search, statusFilter)], flush: true }),
+    card(null, holder, { head: [h("div", { class: "filters" }, search, statusFilter, idleFilter)], flush: true }),
+    cleanupsCard(cleanups),
     activity ? null : unavailable("Per-agent activity"));
 }
 

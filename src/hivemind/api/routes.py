@@ -36,7 +36,13 @@ from hivemind.api.prometheus import PrometheusMetrics
 from hivemind.api.schemas import (
     ActivateAgentRequest,
     ActivityOut,
+    AdminAgentOut,
     AdminSearchRequest,
+    AgentCleanupOut,
+    AgentCleanupPreviewOut,
+    AgentCleanupRecordOut,
+    AgentCleanupRequest,
+    AgentCleanupUndoOut,
     AgentOut,
     AgentsMetrics,
     AuditRecordOut,
@@ -96,6 +102,7 @@ from hivemind.domain.access import (
     UnknownAgent,
     UnknownFleet,
 )
+from hivemind.domain.agent_cleanup import AgentCleanupRefused, UnknownAgentCleanup
 from hivemind.domain.audit import AuditAction, AuditFilters
 from hivemind.domain.entry import Entry, EntryFilters, Kind, Source
 from hivemind.domain.feedback import FeedbackLogFilters, Verdict
@@ -112,6 +119,7 @@ from hivemind.domain.validation import (
     MAX_OFFSET,
     InvalidInput,
     check_no_nul,
+    utcnow,
 )
 from hivemind.embeddings import EmbeddingError
 from hivemind.ports import Credential
@@ -1125,14 +1133,131 @@ def build_router() -> APIRouter:
             pins_skipped=[DroppedPinOut.from_dropped(p) for p in outcome.pins_skipped],
         )
 
-    @router.get("/admin/agents", response_model=list[AgentOut])
-    async def list_agents(credential: require, app: hive) -> list[AgentOut]:
-        """List registered agents (admin-gated, ADR 0012)."""
+    @router.post(
+        "/admin/agents/{name}/cleanup",
+        response_model=AgentCleanupPreviewOut | AgentCleanupOut,
+    )
+    async def cleanup_agent(
+        name: NameParam, payload: AgentCleanupRequest, credential: require, app: hive
+    ) -> AgentCleanupPreviewOut | AgentCleanupOut:
+        """Clean up after a bad agent (admin-gated, audited ``agent.cleanup``,
+        ADR 0111): withdraw the active memories it wrote in the window
+        (``created_at`` in ``[since, until)``, any scope), set aside its ratings
+        last written in the window, and put back the memories it superseded
+        that ``restore_ids`` names. ``dry_run: true`` changes nothing and
+        answers the preview. ``also_revoke`` revokes the agent after the
+        cleanup (its own ``agent.revoke``). ``expected_withdraw`` /
+        ``expected_ratings`` (the preview's totals) refuse the apply when they
+        changed (409 ``cleanup_refused``), as does a ``restore_ids`` memory
+        that is not restorable. With nothing to clean the answer is 200 with
+        zero counts and no ``cleanup_id``. 404 unknown agent, 422 empty window or
+        a missing ``expected_*`` count on an apply."""
+        _require_admin(credential, "cleaning up after an agent")
+        cleanups = app.access_service.cleanups
+        try:
+            if payload.dry_run:
+                preview = await cleanups.preview(
+                    name, credential, since=payload.since, until=payload.until
+                )
+                return AgentCleanupPreviewOut.from_preview(preview)
+            if payload.expected_withdraw is None or payload.expected_ratings is None:
+                raise InvalidInput(
+                    "expected_withdraw and expected_ratings (the preview's totals) are required "
+                    "when dry_run is false; preview first"
+                )
+            until = payload.until if payload.until is not None else utcnow()
+            outcome = await cleanups.cleanup(
+                name,
+                credential,
+                since=payload.since,
+                until=until,
+                restore_ids=payload.restore_ids,
+                expected_withdraw=payload.expected_withdraw,
+                expected_ratings=payload.expected_ratings,
+                also_revoke=payload.also_revoke,
+            )
+        except PermissionDenied as exc:
+            raise api_error(403, "forbidden", str(exc)) from exc
+        except InvalidInput as exc:
+            raise api_error(422, "invalid_input", str(exc)) from exc
+        except UnknownAgent as exc:
+            raise api_error(404, "not_found", str(exc)) from exc
+        except AgentCleanupRefused as exc:
+            raise api_error(409, "cleanup_refused", str(exc)) from exc
+        return AgentCleanupOut(
+            cleanup_id=outcome.record.id if outcome.record is not None else None,
+            agent=name,
+            since=payload.since,
+            until=until,
+            withdrawn=outcome.withdrawn,
+            ratings_set_aside=outcome.ratings_set_aside,
+            restored=outcome.restored,
+            pins_removed=[DroppedPinOut.from_dropped(p) for p in outcome.unpinned],
+            revoked=outcome.revoked,
+            already_revoked=outcome.already_revoked,
+            revoke_error=outcome.revoke_error,
+            nothing_to_clean=outcome.record is None,
+        )
+
+    @router.get("/admin/agent-cleanups", response_model=list[AgentCleanupRecordOut])
+    async def list_agent_cleanups(credential: require, app: hive) -> list[AgentCleanupRecordOut]:
+        """Recorded agent cleanups, newest first (admin-gated, ADR 0111), each
+        with whether it can be undone now."""
+        _require_admin(credential, "the agent cleanups")
+        views = await app.access_service.cleanups.list_cleanups(credential)
+        return [AgentCleanupRecordOut.from_view(v) for v in views]
+
+    @router.post("/admin/agent-cleanups/{cleanup_id}/undo", response_model=AgentCleanupUndoOut)
+    async def undo_agent_cleanup(
+        cleanup_id: NameParam, credential: require, app: hive
+    ) -> AgentCleanupUndoOut:
+        """Undo an agent cleanup (admin-gated, audited ``agent.cleanup_undo``,
+        ADR 0111): the memories still withdrawn by it are active again, the
+        restored ones are superseded again where that still fits, its rating
+        marks are cleared and its pins are restored where the fleet has room.
+        It does not un-revoke the agent. Only the newest standing cleanup of
+        an agent can be undone (409 ``cleanup_refused``)."""
+        _require_admin(credential, "undoing an agent cleanup")
+        try:
+            outcome = await app.access_service.cleanups.undo(cleanup_id, credential)
+        except PermissionDenied as exc:
+            raise api_error(403, "forbidden", str(exc)) from exc
+        except UnknownAgentCleanup as exc:
+            raise api_error(404, "not_found", str(exc)) from exc
+        except AgentCleanupRefused as exc:
+            raise api_error(409, "cleanup_refused", str(exc)) from exc
+        record = outcome.record
+        return AgentCleanupUndoOut(
+            cleanup_id=record.id,
+            agent=record.agent,
+            reactivated=outcome.reactivated,
+            reactivate_skipped=outcome.reactivate_skipped,
+            resuperseded=outcome.resuperseded,
+            resupersede_skipped=outcome.resupersede_skipped,
+            ratings_cleared=outcome.ratings_cleared,
+            pins_restored=[DroppedPinOut.from_dropped(p) for p in outcome.pins_restored],
+            pins_skipped=[DroppedPinOut.from_dropped(p) for p in outcome.pins_skipped],
+            note=(
+                "the agent was revoked by this cleanup and stays revoked; "
+                "re-activate it separately if it should work again"
+                if record.revoked
+                else None
+            ),
+        )
+
+    @router.get("/admin/agents", response_model=list[AdminAgentOut])
+    async def list_agents(credential: require, app: hive) -> list[AdminAgentOut]:
+        """List registered agents with their key's last use and whether
+        they are idle (admin-gated, ADRs 0012, 0110)."""
         try:
             agents = await app.access_service.list_agents(credential)
         except PermissionDenied as exc:
             raise api_error(403, "forbidden", str(exc)) from exc
-        return [AgentOut.from_agent(a) for a in agents]
+        now = datetime.now(UTC)
+        return [
+            AdminAgentOut.from_admin_agent(a, now=now, idle_days=app.idle_agent_days)
+            for a in agents
+        ]
 
     @router.post("/admin/agents/{name}/activate", response_model=KeyIssuedOut)
     async def activate_agent(

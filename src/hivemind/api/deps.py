@@ -51,6 +51,8 @@ class HivemindApp:
     activity_service: ActivityService
     # ADR 0082: downgrade dev-mode credentials to trust level 0.
     require_stored_keys: bool = False
+    # ADR 0110: days without a key use before the admin list calls an agent idle.
+    idle_agent_days: int = 30
 
 
 class ApiError(Exception):
