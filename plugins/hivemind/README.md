@@ -36,6 +36,7 @@ read the [main README](../../README.md) instead.
 - [Reminders to write and rate](#reminders-to-write-and-rate)
 - [Incognito sessions](#incognito-sessions)
 - [Updating](#updating)
+- [When an agent is replaced](#when-an-agent-is-replaced)
 - [Removing](#removing)
 - [For maintainers](#for-maintainers)
 - [CHANGELOG.md](CHANGELOG.md): what changed in each release
@@ -641,6 +642,10 @@ All of these go in a terminal:
 - **Oh My Pi**: `omp plugin marketplace update hivemind`, then
   `omp plugin upgrade` (or `omp plugin install hivemind@hivemind --force`).
 - **Any other agent**: copy both `skills/` folders over your old copies.
+
+## When an agent is replaced
+
+If your admin retires an agent in favour of a new one, its key stops working and the new agent owns what it wrote (SPEC §12.1); `hive_whoami` lists them as `inherits_from`.
 
 ## Removing
 

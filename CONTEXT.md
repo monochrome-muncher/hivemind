@@ -229,6 +229,18 @@ _Avoid_: key reissue (issuing is activation; the org key is rotated, ADR 0031)
 An agent's first contact with Hivemind: a unique agent name plus the owner's alias, creating a pending record (ADR 0012). Names are durable — revocation does not release a name. The first registrant's alias owns the name; the same alias registering again is told the current status, any other alias is told the name is taken (ADR 0039).
 _Avoid_: signup, onboarding, enrollment
 
+**Successor**:
+The active agent an admin names when retiring another agent. It owns every memory the retired agent wrote (its `self` notes, its fleet memories and its pins): it reads, supersedes and withdraws them, sees them in its portal and cannot rate them. `author` stays the retired agent. Chains are allowed, cycles are not, and an undo ends the ownership but does not bring the retired agent back (ADR 0113).
+_Avoid_: heir, new owner (owner alias is the human contact), replacement
+
+**Retired agent**:
+A revoked agent whose memories were handed to a successor. It cannot be activated again until the retirement is undone (ADR 0113).
+_Avoid_: deleted agent, archived agent
+
+**Inherited memories**:
+The memories of the agents that handed down to an agent, directly or through a chain. Together with its own they are the memories it owns (ADR 0113).
+_Avoid_: transferred memories (nothing is rewritten), migrated memories
+
 **Agent name**:
 The unique, durable name chosen at registration and used as an agent's author: 1–63 ASCII letters, digits, `.`, `_` or `-`, starting with a letter or digit, and never a reserved identity (`admin`, `org`, `dev`, `shared`) in any case (ADR 0040).
 _Avoid_: username, handle, agent id (the agent id is part of the key's record)

@@ -63,6 +63,7 @@ from hivemind.domain.fleet_merge import (
 )
 from hivemind.domain.health import Convergence, FleetHealth
 from hivemind.domain.pin import Pin, PinRefusal, PinWrite
+from hivemind.domain.succession import HandedDown, Succession, owned_authors
 from hivemind.domain.upstream import UpstreamLink
 
 
@@ -161,6 +162,7 @@ class Store(Protocol):
         limit: int,
         replaces: Sequence[str] = (),
         agent_limit: int | None = None,
+        also_owned_by: Sequence[str] = (),
     ) -> PinWrite | PinRefusal:
         """Pin ``entry_id`` to ``fleet_id`` with a fresh
         ``pinned_at`` / ``pinned_by``: a new row, or the existing one
@@ -171,7 +173,9 @@ class Store(Protocol):
         or refresh never grows the count) or, with ``agent_limit``, when
         ``pinned_by`` would hold more than that many of the fleet's pins
         afterwards (a refresh restamps ``pinned_by``, so it counts; ``None``
-        is exempt). Both are checked atomically (ADR 0096; ``pin_refusal``).
+        is exempt); the pins of the agents in ``also_owned_by`` (the ones that
+        handed down to ``pinned_by``, ADR 0113) count as its own. Both are
+        checked atomically (ADR 0096; ``pin_refusal``).
         A malformed ``entry_id`` is refused as ``FLEET`` too, writing nothing.
         A merged ``fleet_id`` raises ``FleetMerged`` (ADR 0107).
         The caller has checked the entry and the permission."""
@@ -509,6 +513,44 @@ class Store(Protocol):
         ``FleetMerged`` if the fleet was merged (ADR 0107)."""
         ...
 
+    # -- successions (ADR 0113) ------------------------------------------------
+
+    async def retire_agent(self, retired: str, successor: str, by: str) -> Succession:
+        """Record that ``retired`` hands every memory it wrote to ``successor``
+        and revoke ``retired`` (when active), in one transaction. The
+        credential row is the ``Authenticator``'s: the key stops working
+        with the status. ``UnknownAgent`` for an unknown name;
+        ``InvalidAgentStatus`` when ``retired`` is pending or ``successor`` is
+        not active; ``SuccessionRefused`` when ``retired`` already hands down
+        or ``successor`` hands down to it, directly or through a chain (a
+        cycle). The result's ``was`` is the retired agent's status seen under
+        the lock. Nothing changes on a refusal."""
+        ...
+
+    async def undo_succession(self, retired: str) -> Succession:
+        """Delete the succession of ``retired``: its memories are no longer
+        owned by the successor. The agent stays revoked. ``UnknownSuccession``
+        when none stands."""
+        ...
+
+    async def get_succession(self, retired: str) -> Succession | None: ...
+
+    async def list_successions(self) -> list[Succession]:
+        """Every standing succession, newest first."""
+        ...
+
+    async def inherited_authors(self, name: str) -> tuple[str, ...]:
+        """The agents that hand down to ``name``, transitively, sorted: the
+        names whose memories ``name`` owns besides its own (what a key check
+        puts on ``Credential.inherits_from``). Empty when none."""
+        ...
+
+    async def handed_down(self, authors: Sequence[str], home_fleet_id: str | None) -> HandedDown:
+        """What owning ``authors`` brings: their active ``self`` notes and
+        ``fleet`` memories (and how many of those sit outside
+        ``home_fleet_id``) and their pins."""
+        ...
+
     # -- audit log (ADR 0027, SPEC §12.5) ------------------------------------
 
     async def record_audit(self, event: AuditEvent) -> AuditRecord:
@@ -758,6 +800,20 @@ class Credential:
     home_fleet_id: str | None = None
     agent_name: str | None = None
     key_id: str | None = None  # ADR 0027: key fingerprint, never the key
+    # ADR 0113: the agents that hand down to this one, transitively. Their
+    # memories are this agent's to read, supersede and withdraw, and it cannot
+    # rate them; ``author`` on them stays the original name.
+    inherits_from: tuple[str, ...] = ()
+
+    @property
+    def owned_authors(self) -> tuple[str, ...]:
+        """The authors whose memories this caller owns: its own name, then
+        every agent that hands down to it (ADR 0113)."""
+        return owned_authors(self.agent_name or self.user_id, self.inherits_from)
+
+    def owns(self, author: str) -> bool:
+        """Whether a memory by ``author`` is this caller's own."""
+        return author == (self.agent_name or self.user_id) or author in self.inherits_from
 
     def audit_actor(self) -> str:
         """The audit-log ``actor`` (ADR 0027): ``admin:<fingerprint>``
@@ -785,6 +841,7 @@ class Credential:
             level=self.trust_level,
             name=name,
             home_fleet_id=self.home_fleet_id,
+            inherited=self.inherits_from,
         )
 
     def max_write_scope(self) -> str:

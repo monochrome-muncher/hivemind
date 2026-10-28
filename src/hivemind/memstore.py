@@ -125,6 +125,13 @@ from hivemind.domain.health import (
     owner_key,
 )
 from hivemind.domain.pin import Pin, PinRefusal, PinWrite, pin_refusal
+from hivemind.domain.succession import (
+    AgentRetired,
+    HandedDown,
+    Succession,
+    SuccessionRefused,
+    UnknownSuccession,
+)
 from hivemind.domain.upstream import UpstreamLink
 from hivemind.domain.validation import InvalidInput, canonical_uuid, is_valid_uuid, utcnow
 from hivemind.ports import SupersedeConflict
@@ -193,6 +200,7 @@ class MemoryStore:
         self._key_created: dict[str, datetime] = {}
         self._audit: list[AuditRecord] = []  # append-only (ADR 0027)
         self._pins: dict[tuple[str, str], Pin] = {}  # (fleet, entry), ADR 0058
+        self._successions: dict[str, Succession] = {}  # retired agent, ADR 0113
         self._searches: dict[str | None, tuple[int, int, int]] = {}  # ADR 0056, 0078
         # (from, to) -> when the link was made, insertion-ordered (ADR 0057, 0081)
         self._links: dict[tuple[str, str], datetime] = {}
@@ -391,6 +399,7 @@ class MemoryStore:
         limit: int,
         replaces: Sequence[str] = (),
         agent_limit: int | None = None,
+        also_owned_by: Sequence[str] = (),
     ) -> PinWrite | PinRefusal:
         if not is_valid_uuid(entry_id):
             return PinRefusal.FLEET  # as on Postgres: nothing a malformed id can pin
@@ -398,7 +407,9 @@ class MemoryStore:
             self._refuse_merged(fleet_id)
             self._refuse_stale_home(fleet_id, pinned_by)
             fleet_pins = [p for (f, _), p in self._pins.items() if f == fleet_id]
-            refusal = pin_refusal(fleet_pins, entry_id, pinned_by, limit, agent_limit, replaces)
+            refusal = pin_refusal(
+                fleet_pins, entry_id, pinned_by, limit, agent_limit, replaces, also_owned_by
+            )
             if refusal is not None:
                 return refusal
             existing = self._pins.get((fleet_id, entry_id))
@@ -990,6 +1001,7 @@ class MemoryStore:
                 and (filters.reporter is None or fb.user == filters.reporter)
                 and (filters.verdict is None or fb.verdict is filters.verdict)
                 and (filters.author is None or entry.author == filters.author)
+                and (not filters.authors or entry.author in filters.authors)
                 and self._visible(entry, visibility)
             ]
         # Newest first, then entry id, reporter and agent, as on Postgres.
@@ -1787,6 +1799,8 @@ class MemoryStore:
             agent = self._agents.get(name)
             if agent is None:
                 raise UnknownAgent(f"unknown agent: {name}")
+            if (standing := self._successions.get(name)) is not None:
+                raise AgentRetired(name, standing.successor)  # ADR 0113
             if agent.status not in ACTIVATABLE:
                 raise InvalidAgentStatus(name, agent.status, "activate")
             activated = replace(
@@ -1813,6 +1827,87 @@ class MemoryStore:
             self._drop_key_facts(name)  # the key is deleted
             self._agents[name] = revoked
             return revoked
+
+    # -- successions (ADR 0113) ------------------------------------------------
+
+    def _inherited(self, name: str) -> tuple[str, ...]:
+        """The agents handing down to ``name``, transitively. Callers hold the lock."""
+        found: set[str] = set()
+        frontier = [name]
+        while frontier:
+            current = frontier.pop()
+            for s in self._successions.values():
+                if s.successor == current and s.retired_agent not in found:
+                    found.add(s.retired_agent)
+                    frontier.append(s.retired_agent)
+        return tuple(sorted(found))
+
+    async def retire_agent(self, retired: str, successor: str, by: str) -> Succession:
+        if retired == successor:
+            raise InvalidInput("an agent cannot be its own successor")
+        with self._lock:
+            for name in (retired, successor):
+                if name not in self._agents:
+                    raise UnknownAgent(f"unknown agent: {name}")
+            old, new = self._agents[retired], self._agents[successor]
+            if old.status is AgentStatus.PENDING:
+                raise InvalidAgentStatus(retired, old.status, "retire")
+            if new.status is not AgentStatus.ACTIVE:
+                raise InvalidAgentStatus(successor, new.status, "make a successor of")
+            if (standing := self._successions.get(retired)) is not None:
+                raise SuccessionRefused(
+                    f"agent {retired!r} is already retired in favour of {standing.successor!r}"
+                )
+            if successor in self._inherited(retired):
+                raise SuccessionRefused(
+                    f"{successor!r} already hands its memories down to {retired!r}, "
+                    "directly or through others: that would be a cycle"
+                )
+            succession = Succession(retired, successor, by, self._clock(), was=old.status)
+            self._successions[retired] = succession
+            if old.status is AgentStatus.ACTIVE:
+                self._agents[retired] = replace(old, status=AgentStatus.REVOKED)
+            return succession
+
+    async def undo_succession(self, retired: str) -> Succession:
+        with self._lock:
+            succession = self._successions.pop(retired, None)
+        if succession is None:
+            raise UnknownSuccession(f"no succession retires {retired!r}")
+        return succession
+
+    async def get_succession(self, retired: str) -> Succession | None:
+        with self._lock:
+            return self._successions.get(retired)
+
+    async def list_successions(self) -> list[Succession]:
+        with self._lock:
+            rows = list(self._successions.values())
+        rows.sort(key=lambda s: s.retired_agent)
+        rows.sort(key=lambda s: s.at, reverse=True)
+        return rows
+
+    async def inherited_authors(self, name: str) -> tuple[str, ...]:
+        with self._lock:
+            return self._inherited(name)
+
+    async def handed_down(self, authors: Sequence[str], home_fleet_id: str | None) -> HandedDown:
+        names = set(authors)
+        with self._lock:
+            mine = [
+                e
+                for e in self._entries.values()
+                if e.state is EntryState.ACTIVE and e.author in names
+            ]
+            pins = sum(1 for p in self._pins.values() if p.pinned_by in names)
+        fleet = [e for e in mine if e.scope == SCOPE_FLEET]
+        return HandedDown(
+            authors=tuple(authors),
+            self_notes=sum(1 for e in mine if e.scope == SCOPE_SELF),
+            fleet_memories=len(fleet),
+            fleet_memories_elsewhere=sum(1 for e in fleet if e.fleet_id != home_fleet_id),
+            pins=pins,
+        )
 
     async def set_agent_trust_level(self, name: str, level: TrustLevel) -> Agent:
         """Promote/demote an agent's trust level (ADR 0011). ``UnknownAgent`` if

@@ -80,7 +80,7 @@ CREATE TABLE public.audit_log (
     action text NOT NULL,
     target text,
     detail jsonb DEFAULT '{}'::jsonb NOT NULL,
-    CONSTRAINT audit_log_action_check CHECK ((action = ANY (ARRAY['agent.register'::text, 'agent.activate'::text, 'agent.trust_level_set'::text, 'agent.home_fleet_set'::text, 'agent.revoke'::text, 'fleet.create'::text, 'org_key.rotate'::text, 'entry.withdraw'::text, 'admin_key.issue'::text, 'admin_key.revoke'::text, 'agent_key.issue'::text, 'entry.pin'::text, 'entry.unpin'::text, 'fleet.merge'::text, 'fleet.unmerge'::text, 'fleet.rename'::text, 'agent_key.replace'::text, 'agent.cleanup'::text, 'agent.cleanup_undo'::text, 'fleet.move_agents'::text, 'fleet.move_undo'::text]))),
+    CONSTRAINT audit_log_action_check CHECK ((action = ANY (ARRAY['agent.register'::text, 'agent.activate'::text, 'agent.trust_level_set'::text, 'agent.home_fleet_set'::text, 'agent.revoke'::text, 'fleet.create'::text, 'org_key.rotate'::text, 'entry.withdraw'::text, 'admin_key.issue'::text, 'admin_key.revoke'::text, 'agent_key.issue'::text, 'entry.pin'::text, 'entry.unpin'::text, 'fleet.merge'::text, 'fleet.unmerge'::text, 'fleet.rename'::text, 'agent_key.replace'::text, 'agent.cleanup'::text, 'agent.cleanup_undo'::text, 'fleet.move_agents'::text, 'fleet.move_undo'::text, 'agent.retire'::text, 'agent.retire_undo'::text]))),
     CONSTRAINT audit_log_actor_kind_check CHECK ((actor_kind = ANY (ARRAY['admin_key'::text, 'cli'::text, 'org_key'::text, 'agent_key'::text])))
 );
 
@@ -188,6 +188,14 @@ CREATE TABLE public.search_counts (
     CONSTRAINT search_counts_searches_check CHECK ((searches >= 0))
 );
 
+CREATE TABLE public.successions (
+    retired_agent text NOT NULL,
+    successor text NOT NULL,
+    by text NOT NULL,
+    at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT successions_not_self CHECK ((retired_agent <> successor))
+);
+
 ALTER TABLE ONLY public.agent_cleanups
     ADD CONSTRAINT agent_cleanups_pkey PRIMARY KEY (id);
 
@@ -226,6 +234,9 @@ ALTER TABLE ONLY public.pins
 
 ALTER TABLE ONLY public.search_counts
     ADD CONSTRAINT search_counts_pkey PRIMARY KEY (fleet_id);
+
+ALTER TABLE ONLY public.successions
+    ADD CONSTRAINT successions_pkey PRIMARY KEY (retired_agent);
 
 CREATE INDEX agent_cleanups_agent_idx ON public.agent_cleanups USING btree (agent, cleaned_at DESC);
 
@@ -266,6 +277,8 @@ CREATE INDEX entries_superseded_by_idx ON public.entries USING btree (superseded
 CREATE INDEX entries_tags_gin_idx ON public.entries USING gin (tags);
 
 CREATE INDEX entry_links_to_created_idx ON public.entry_links USING btree (to_id, created_at DESC, from_id);
+
+CREATE INDEX successions_successor_idx ON public.successions USING btree (successor);
 
 CREATE TRIGGER entries_search_tsv_trigger BEFORE INSERT OR UPDATE OF summary, body ON public.entries FOR EACH ROW EXECUTE FUNCTION public.entries_search_tsv_update();
 

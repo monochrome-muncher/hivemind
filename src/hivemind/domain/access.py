@@ -217,6 +217,8 @@ class Standing:
     home_fleet_name: str | None
     can_read: tuple[str, ...]
     can_write_scopes: tuple[str, ...]
+    # ADR 0113: the agents that hand down to this one; their memories are its own.
+    inherits_from: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, object]:
         """The JSON shape both surfaces return (REST and MCP, ADR 0030)."""
@@ -230,6 +232,7 @@ class Standing:
             "home_fleet_name": self.home_fleet_name,
             "can_read": list(self.can_read),
             "can_write_scopes": list(self.can_write_scopes),
+            "inherits_from": list(self.inherits_from),
         }
 
 
@@ -245,6 +248,18 @@ class Visibility:
     name: str
     home_fleet_id: str | None = None
     is_admin: bool = False
+    # ADR 0113: the agents that hand down to ``name``. Entries by them count
+    # as ``name``'s own wherever ``author == name`` once did.
+    inherited: tuple[str, ...] = ()
+
+    @property
+    def owned(self) -> tuple[str, ...]:
+        """The authors this reader owns: ``name`` first, then ``inherited``."""
+        return (self.name, *self.inherited)
+
+    def owns(self, author: str) -> bool:
+        """Whether an entry by ``author`` is this reader's own."""
+        return author == self.name or author in self.inherited
 
     def entry_visible(self, entry: Entry) -> bool:
         """Whether ``entry`` is visible to this caller (the matrix in
@@ -259,7 +274,8 @@ def entry_is_visible(entry: Entry, v: Visibility) -> bool:
     (``PgStore`` in SQL). Rules:
       * admin  -> everything.
       * level 0 (untrusted) -> nothing.
-      * ``self``  -> only the entry's own author (private even at L3).
+      * ``self``  -> only the entry's own author (private even at L3), or an
+        agent the author handed its memories to (ADR 0113).
       * ``org``   -> readable at any level >= 1 (legacy flat-pool value).
       * ``fleet`` -> the reader's own fleet-scoped entries (wherever they
         ended up), OR entries in the reader's home fleet, OR all fleets
@@ -272,13 +288,13 @@ def entry_is_visible(entry: Entry, v: Visibility) -> bool:
 
     scope = entry.scope
     if scope == SCOPE_SELF:
-        return entry.author == v.name
+        return v.owns(entry.author)
 
     if scope == SCOPE_ORG:
         return True
 
     # scope == SCOPE_FLEET. Own entries stay visible after a fleet move.
-    if entry.author == v.name:
+    if v.owns(entry.author):
         return True
     if v.level == TrustLevel.PRIVILEGED:
         return True
@@ -310,7 +326,7 @@ def may_supersede(
     if target.state is not EntryState.ACTIVE:
         return False
     if writer.is_admin:
-        own_note = target.scope == SCOPE_SELF and target.author == writer.name
+        own_note = target.scope == SCOPE_SELF and writer.owns(target.author)
         return own_note or new_scope == SCOPE_ORG
     if not entry_is_visible(target, writer):
         return False

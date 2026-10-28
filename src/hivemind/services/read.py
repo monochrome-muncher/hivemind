@@ -31,6 +31,7 @@ from hivemind.services.chain import (
 from hivemind.services.errors import AgentIdentityRequired
 from hivemind.services.feedback import reporter_agent
 from hivemind.services.governance import GovernanceService
+from hivemind.services.ownership import own_author_filter
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +152,7 @@ class ReadService:
                     "relied_on_changed needs the caller's agent identity (an agent or admin key)"
                 )
             filters = replace(filters, reporter=(credential.user_id, agent))
+        filters = own_author_filter(filters, visibility)
         effective_limit = limit if limit is not None else self._search_config.default_limit
         return await self._store.list_entries(
             filters, limit=effective_limit, offset=offset, visibility=visibility

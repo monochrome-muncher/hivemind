@@ -34,6 +34,7 @@ from hivemind.ports import Credential, Store
 from hivemind.retrieval.scoring import feedback_quality
 from hivemind.services.chain import get_visible_entries, get_visible_entry
 from hivemind.services.errors import AgentIdentityRequired, EntryNotFound, PermissionDenied
+from hivemind.services.ownership import own_author_filter
 
 
 def _own_entry_message(ids: list[str]) -> str:
@@ -127,7 +128,7 @@ class FeedbackService:
         entry = await get_visible_entry(self._store, entry_id, credential.visibility())
         if entry is None:  # feedback follows readability (SPEC §12.2, ADR 0033)
             raise EntryNotFound(f"unknown entry: {entry_id}")
-        if entry.author == credential.user_id:  # ADR 0065
+        if credential.owns(entry.author):  # ADR 0065, 0113
             raise PermissionDenied(_own_entry_message([entry_id]))
         feedback = Feedback(
             entry_id=entry.id,  # the canonical id, not the caller's spelling
@@ -177,7 +178,7 @@ class FeedbackService:
         missing = [eid for eid in ids if eid not in found]
         if missing:  # feedback follows readability (SPEC §12.2, ADR 0033)
             raise EntryNotFound(f"unknown entries: {', '.join(missing)}")
-        own = [eid for eid in ids if found[eid].author == credential.user_id]
+        own = [eid for eid in ids if credential.owns(found[eid].author)]  # ADR 0113
         if own:  # ADR 0065: after readability, so an unreadable id stays not_found
             raise PermissionDenied(_own_entry_message(own))
         canonical = list(dict.fromkeys(found[eid].id for eid in ids))
@@ -243,8 +244,9 @@ class FeedbackService:
         reads them all; an agent key reads the rows on its own, org and
         home-fleet entries, so the same call can serve an agent's own view."""
         credential = credential.effective(self._require_stored_keys)
+        visibility = credential.visibility()
         return await self._store.list_feedback_log(
-            filters, limit, offset, visibility=credential.visibility()
+            own_author_filter(filters, visibility), limit, offset, visibility=visibility
         )
 
     async def flag_backlog(

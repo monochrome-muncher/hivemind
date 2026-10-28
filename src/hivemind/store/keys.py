@@ -40,6 +40,7 @@ import asyncpg
 from hivemind.config import load_settings
 from hivemind.domain.access import TrustLevel
 from hivemind.domain.audit import ActorKind, AuditAction, key_fingerprint
+from hivemind.domain.succession import AgentRetired
 from hivemind.domain.validation import is_valid_uuid
 from hivemind.store.auth import DEAD_CREDENTIAL_PREDICATE, ORG_KEY_LOCK, key_hash
 
@@ -73,6 +74,7 @@ _ACTIVATE = (
     "UPDATE agents SET status = 'active', trust_level = $2, home_fleet_id = $3, "
     "activated_at = now() WHERE name = $1"
 )
+_SUCCESSOR_OF = "SELECT successor FROM successions WHERE retired_agent = $1"
 _DELETE_AGENT_KEYS = "DELETE FROM credentials WHERE kind = 'agent' AND agent_name = $1"
 _DELETE_AGENT_KEYS_RETURNING = _DELETE_AGENT_KEYS + " RETURNING key_hash"
 _SET_REVOKED = "UPDATE agents SET status = 'revoked' WHERE name = $1"
@@ -212,6 +214,8 @@ async def _issue_agent(
             status = await conn.fetchval(_AGENT_STATUS_FOR_UPDATE, name)
             if status is None:
                 raise AgentNotRegistered(name)
+            if (successor := await conn.fetchval(_SUCCESSOR_OF, name)) is not None:
+                raise AgentRetired(name, successor)  # ADR 0113: undo the retirement first
             detail: dict[str, str] | None = None
             if status == "active":
                 if trust_level is not None or home_fleet_id is not None:
@@ -567,6 +571,12 @@ def main() -> None:
             raise SystemExit(1) from None
         except UnknownFleet as exc:
             print(f"no fleet with id {exc}; list them with GET /v1/admin/fleets", file=sys.stderr)
+            raise SystemExit(1) from None
+        except AgentRetired as exc:
+            print(
+                f"{exc} (POST /v1/admin/successions/{exc.name}/undo)",
+                file=sys.stderr,
+            )
             raise SystemExit(1) from None
         except FleetMergedError as exc:
             print(

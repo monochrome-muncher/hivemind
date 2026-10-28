@@ -40,7 +40,7 @@ from hivemind.store.keys import (
 )
 from hivemind.store.migrate import migrate
 
-TABLES = "TRUNCATE audit_log, credentials, agents, fleets, entries, feedbacks, pins, fleet_merges, fleet_merge_entries, agent_cleanups"
+TABLES = "TRUNCATE audit_log, credentials, agents, fleets, entries, feedbacks, pins, fleet_merges, fleet_merge_entries, agent_cleanups, successions"
 
 
 async def _exec(dsn: str, sql: str, *args: object) -> None:

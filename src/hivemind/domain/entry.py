@@ -312,6 +312,9 @@ class EntryFilters:
     scope: str | None = None
     fleet_id: str | None = None
     author: str | None = None
+    # ADR 0113: any of these authors. Set by the services when ``author``
+    # names the caller (everything the caller owns), never from caller input.
+    authors: tuple[str, ...] = ()
     agent: str | None = None
     occurred_from: datetime | None = None
     occurred_to: datetime | None = None
@@ -371,6 +374,8 @@ class EntryFilters:
         if self.fleet_id is not None and entry.fleet_id != self.fleet_id:
             return False
         if self.author is not None and entry.author != self.author:
+            return False
+        if self.authors and entry.author not in self.authors:
             return False
         if self.agent is not None and entry.agent != self.agent:
             return False

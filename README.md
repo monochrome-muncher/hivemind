@@ -136,6 +136,9 @@ key and agent keys cannot sign in here.
   the move first, lets you choose which pins to keep, and asks you to type
   the fleet's name. No new keys are needed, the agents keep all their
   memories, and a merge can be undone from the list of merges.
+- Retire an agent with a successor from the Agents list. The panel previews
+  what passes over and asks you to type the agent's name. The old agent is
+  revoked, the successor owns its memories, and you can undo the hand-over.
 - Rename a fleet from the Fleets list. Its memories, pins and agents stay
   with it.
 - Move some agents of a fleet to another fleet, or to a new one, to split a

@@ -785,3 +785,64 @@ the move records and the `fleet.move_agents` and `fleet.move_undo` audit rows.
 The memories and agents stay where the move put them. Merge records are kept.
 After that a move can no longer be undone, and an older merge's undo no longer
 sees the moves that followed it, so undo any moves you want to reverse first.
+
+## 12. Retiring an agent with a successor (ADR 0113)
+
+When an agent is replaced (a new model, a new machine), its memories should
+not be stranded. Retiring it hands every memory it wrote to a successor and
+revokes the old agent in the same step. The successor reads, supersedes and
+withdraws them, sees them in its agent portal, and cannot rate them (they
+count as its own). Nothing is rewritten: `author` stays the old agent's
+name. It needs the admin key.
+
+In the panel, open **Agents** and press **Retire…** on an active or revoked
+agent's row. Pick the successor (it must be active), read the preview (the private
+notes, fleet memories and pins that pass over), type the agent's name and
+confirm. The **Retired agents** list on the same page has an **Undo** per
+row. Or call the API:
+
+```sh
+# Preview: counts only, nothing changes.
+curl -s -X POST -H "X-API-Key: $ADMIN_KEY" -H "Content-Type: application/json" \
+  -d '{"successor": "new-bot", "dry_run": true}' \
+  "https://hivemind.example/v1/admin/agents/old-bot/retire"
+# Retire.
+curl -s -X POST -H "X-API-Key: $ADMIN_KEY" -H "Content-Type: application/json" \
+  -d '{"successor": "new-bot", "dry_run": false}' \
+  "https://hivemind.example/v1/admin/agents/old-bot/retire"
+# The standing retirements, and an undo.
+curl -s -H "X-API-Key: $ADMIN_KEY" "https://hivemind.example/v1/admin/successions"
+curl -s -X POST -H "X-API-Key: $ADMIN_KEY" \
+  "https://hivemind.example/v1/admin/successions/old-bot/undo"
+```
+
+- **What the successor gets.** Exactly what authorship gave: it reads the old
+  agent's `self` notes and fleet memories (in whatever fleet they sit), and
+  withdraws them. It supersedes a fleet memory only by writing into that same
+  fleet, so a successor in another fleet can read and withdraw such a memory
+  but not supersede it; the preview counts these. Its trust level and home
+  fleet do not change.
+- **Pins** stay where they are and none is dropped. In the successor's fleet
+  they count toward its limit of 3 pins.
+- **Chains** work: retire A to B, later B to C, and C owns both. A cycle is
+  refused (`409 succession_refused`), as is retiring an agent twice. The
+  successor must be active (`409 invalid_status`); the agent to retire may be
+  active or already revoked, not pending.
+- **Undo** ends the ownership at the next request. It does not bring the old
+  agent back: it stays revoked, and activating it needs a new key. While a
+  retirement stands, activating the old agent (API or `hivemind-keys
+  issue-agent`) is refused with `409 agent_retired`.
+- **Audit.** A successor's withdrawal of an inherited memory is audited as
+  `entry.withdraw` with `via: "succession"`. `agent.retire` (target the old agent, detail `{successor, was}`)
+  and, for an active agent, the usual `agent.revoke` with `via: "retire"`.
+  An undo is `agent.retire_undo` (SPEC §12.5).
+- **Do not retire during a rollout.** An older pod ignores the new table: the
+  successor reads less there until it is replaced, and it would not refuse
+  activating the retired agent.
+
+**Rolling back the release.** Deploy the previous release first, then run
+`make rollback`: this release reads `successions` in every key check, so
+rolling back the migration under it would fail every agent request. The
+rollback past migration `0024` drops the `successions` table and the two
+audit actions' rows. Retired agents stay revoked and successors lose the
+memories they inherited.

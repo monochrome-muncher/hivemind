@@ -1,5 +1,7 @@
 # Contributors pin, three pins each, and a withdrawn entry leaves the briefing
 
+> **Amended by [ADR 0113](0113-retire-an-agent-with-a-successor.md):** pins of agents handed down to a successor count toward its cap of 3; none is dropped.
+
 > **Status:** Accepted. Amends [ADR 0058](0058-pinned-fleet-briefing.md) (items 2 and 4) and [ADR 0076](0076-pin-integrity.md) (the actor of a pin and the withdrawn-pin line under Consequences); touches [ADR 0092](0092-admin-fleet-pins.md) (its listing); touched by [ADR 0107](0107-fleet-merge.md) (a fleet merge keeps at most 10 pins, chosen by the admin; the caps of 10 and 3 stand).
 
 ## Context

@@ -22,6 +22,10 @@ function syncHash(root, view, filters) {
 
 // --- its memories ----------------------------------------------------------------------
 
+// What a successor also owns: the memories of the agents it took over from (ADR 0113).
+const inherited = (me) => (me.inherits_from && me.inherits_from.length
+  ? `, plus what ${me.inherits_from.join(", ")} wrote before it was retired` : "");
+
 export async function viewMemories(root) {
   const me = state.me;
   const { params } = parseHash();
@@ -52,7 +56,7 @@ export async function viewMemories(root) {
   form.addEventListener("submit", (event) => { event.preventDefault(); memories.load(true); });
 
   fill(root,
-    pageHead("Its memories", `Everything ${me.name} wrote, newest first, withdrawn and superseded ones included. Open one to read it in full or withdraw it.`, refreshButton()),
+    pageHead("Its memories", `Everything ${me.name} wrote${inherited(me)}, newest first, withdrawn and superseded ones included. Open one to read it in full or withdraw it.`, refreshButton()),
     card(null, form, { className: "card-filters" }),
     memories.el);
   await memories.load(true);
@@ -101,7 +105,7 @@ function feedbackView(direction) {
       pageHead(given ? "Verdicts it gave" : "Verdicts on its memories",
         given
           ? `Every helpful, stale or wrong verdict ${me.name} gave, newest first, on memories it can still read. A later verdict on the same memory replaces the earlier one.`
-          : `What other agents said about ${me.name}'s memories, newest first. A stale or wrong verdict usually means the memory needs a new version.`,
+          : `What other agents said about ${me.name}'s memories${inherited(me)}, newest first. A stale or wrong verdict usually means the memory needs a new version.`,
         refreshButton()),
       card(null, form, { className: "card-filters" }),
       list.el,

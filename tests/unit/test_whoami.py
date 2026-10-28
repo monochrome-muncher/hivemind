@@ -146,6 +146,7 @@ async def test_rest_whoami_for_org_and_admin_keys_and_401_without_one() -> None:
         "home_fleet_name": None,
         "can_read": [],
         "can_write_scopes": [],
+        "inherits_from": [],
     }
     assert admin.json()["key_kind"] == "admin"
     assert missing.status_code == 401

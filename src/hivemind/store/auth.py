@@ -19,6 +19,7 @@ import asyncpg
 from hivemind.domain.access import AgentStatus, InvalidAgentStatus, TrustLevel, UnknownAgent
 from hivemind.domain.audit import ActorKind, AuditAction, key_fingerprint
 from hivemind.ports import Credential, KeyReplacement
+from hivemind.store.inheritance import INHERITED_FROM_AGENT_ROW
 from hivemind.store.pool import PoolTimeouts, make_pool
 
 logger = logging.getLogger(__name__)
@@ -30,12 +31,14 @@ _STAMP_TIMEOUT_S = 1.0
 _WARN_EVERY_S = 60.0
 _last_warned: float | None = None
 
-# Key and agent in one query: an agent key authenticates only while its
-# agent is active (ADR 0039).
+# Key, agent and the agents that hand down to it in one query: an agent key
+# authenticates only while its agent is active (ADR 0039); the succession walk
+# (ADR 0113) costs no extra round trip and is empty for nearly every agent.
 _SELECT_CREDENTIAL = (
     "SELECT c.kind, c.user_id, c.agent_id, c.agent_name, "
     "a.status AS agent_status, a.trust_level, a.home_fleet_id, "
-    "(c.last_used_at IS NULL OR c.last_used_at < now() - interval '1 hour') AS use_stale "
+    "(c.last_used_at IS NULL OR c.last_used_at < now() - interval '1 hour') AS use_stale, "
+    f"{INHERITED_FROM_AGENT_ROW} AS inherits_from "
     "FROM credentials c LEFT JOIN agents a ON a.name = c.agent_name "
     "WHERE c.key_hash = $1"
 )
@@ -133,6 +136,7 @@ def _credential_from_row(row: asyncpg.Record, key_id: str) -> Credential | None:
             trust_level=TrustLevel(row["trust_level"]),
             home_fleet_id=str(row["home_fleet_id"]) if row["home_fleet_id"] else None,
             key_id=key_id,
+            inherits_from=tuple(row["inherits_from"] or ()),
         )
     # kind == "user" (pre-v2, retired by ADR 0012): dead since ADR 0039.
     return None

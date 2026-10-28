@@ -31,7 +31,8 @@ from hivemind.services.pins import PinService
 
 class GovernanceService:
     """Withdrawal (SPEC.md §4.1, §8.1): the author may withdraw their own
-    entries, an admin may withdraw any. Feedback and pins are handled by
+    entries (so may the agent the author handed them to, ADR 0113), an admin
+    may withdraw any. Feedback and pins are handled by
     ``FeedbackService`` and ``PinService``; this class hands those calls
     on, so the REST and MCP surfaces keep one governance object.
 
@@ -54,10 +55,11 @@ class GovernanceService:
     ) -> Entry:
         check_text(reason, "reason", MAX_REASON_CHARS)  # ADR 0040
         entry = await self._visible(credential, entry_id)
-        if not (credential.is_admin or entry.author == credential.user_id):
+        owns = credential.owns(entry.author)
+        if not (credential.is_admin or owns):
             raise PermissionDenied("only the author or an admin may withdraw an entry")
         withdrawn = await self._withdraw(credential, entry, reason)
-        if credential.is_admin and entry.author != credential.user_id:
+        if credential.is_admin and not owns:
             # An admin withdrawing someone else's entry is audited (ADR 0027).
             await record_admin_action(
                 self._store,
@@ -65,6 +67,15 @@ class GovernanceService:
                 AuditAction.ENTRY_WITHDRAW,
                 entry_id,
                 {"author": entry.author, "reason": reason},
+            )
+        elif owns and entry.author != (credential.agent_name or credential.user_id):
+            # A successor withdrawing a memory it inherited is audited (ADR 0113).
+            await record_admin_action(
+                self._store,
+                credential,
+                AuditAction.ENTRY_WITHDRAW,
+                entry_id,
+                {"author": entry.author, "reason": reason, "via": "succession"},
             )
         await self._pins.unpin_withdrawn(credential, entry)
         return withdrawn
@@ -78,7 +89,7 @@ class GovernanceService:
         if not reason.strip():
             raise InvalidInput("reason is required")
         entry = await self._visible(credential, entry_id)
-        if entry.author != credential.user_id:
+        if not credential.owns(entry.author):
             raise PermissionDenied("only the author may withdraw an entry from the agent portal")
         withdrawn = await self._withdraw(credential, entry, reason)
         await record_admin_action(

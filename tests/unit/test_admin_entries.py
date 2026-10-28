@@ -62,6 +62,9 @@ ROUTES = [
     ("GET", "/v1/admin/fleet-merges", None),
     ("POST", f"/v1/admin/fleet-merges/{FAKE_ID}/undo", None),
     ("PATCH", f"/v1/admin/fleets/{FAKE_ID}", {"name": "renamed"}),
+    ("POST", "/v1/admin/agents/ghost/retire", {"successor": "alice", "dry_run": True}),
+    ("GET", "/v1/admin/successions", None),
+    ("POST", "/v1/admin/successions/ghost/undo", None),
     (
         "POST",
         "/v1/admin/agents/ghost/cleanup",
@@ -104,6 +107,7 @@ ADMIN_BODIES = {
     ("PATCH", "/v1/admin/agents/{name}"): {"trust_level": 1},
     ("POST", "/v1/admin/fleets/{source_id}/merge"): {"new_fleet_name": "c", "dry_run": False},
     ("PATCH", "/v1/admin/fleets/{fleet_id}"): {"name": "renamed"},
+    ("POST", "/v1/admin/agents/{name}/retire"): {"successor": "alice", "dry_run": False},
     ("POST", "/v1/admin/fleets/{source_id}/move"): {
         "agents": ["a"],
         "new_fleet_name": "c",
@@ -138,6 +142,7 @@ async def test_every_registered_admin_route_is_403_for_agent_and_org_keys(header
                 name="ghost",
                 source_id=FAKE_ID,
                 merge_id=FAKE_ID,
+                retired="ghost",
                 cleanup_id=FAKE_ID,
             )
             body = ADMIN_BODIES.get((method, template))
