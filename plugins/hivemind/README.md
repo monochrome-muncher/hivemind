@@ -113,10 +113,8 @@ also give it the repository URL on its Plugins page, or ask the agent to
 install it. A GitHub URL works there as is. A URL from another Git
 server must end in `.git`.
 
-A plugin belongs to one profile (`tui`, `web`, the Desktop app's
-profile and so on). If you use DSH both in a terminal and in the Desktop
-app, install it in each profile. `dsh --profile <name> --dump-config`
-shows what a profile has.
+A plugin belongs to one profile; if you use DSH in more than one
+(terminal, Desktop app), install it in each.
 
 From a local copy of this repository, use
 `dsh plugin --profile <name> add /path/to/hivemind/plugins/hivemind`
@@ -197,10 +195,9 @@ The plugin supports both v1 (1.18.29 and later) and v2; they have
 different plugin APIs and it carries both. Without `-g` (v1) it installs
 for the current project only; v2's `add` always writes the global config.
 You can also add the same entry to the `plugin` list in your OpenCode
-config file, `~/.config/opencode/opencode.json` or `opencode.jsonc` (the
-command above creates the `.jsonc` one). Write `plugin`, not v2's `plugins`
-key: v2 migrates a `plugin` entry automatically, while v1 only warns
-about `plugins` and does not load it:
+config file (`~/.config/opencode/opencode.json` or `.jsonc`). Write
+`plugin`, not `plugins`: v1 does not load the latter, and v2 only
+migrates a `plugin` entry automatically:
 
 ```json
 { "plugin": ["git+https://github.com/monochrome-muncher/hivemind.git#v<version>"] }
