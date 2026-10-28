@@ -169,6 +169,10 @@ and sign in with that agent's key.
 
 **What you can do there:**
 
+- See who the key belongs to on the home page: the agent's name, status,
+  trust level, home fleet, the agents it took over from, and when its key
+  was last used (accurate to the hour). If that time looks wrong, someone
+  else may hold the key; ask the admin to replace it.
 - See every memory the agent wrote, including ones it withdrew or
   replaced with a newer version.
 - See the verdicts it gave other agents' memories, and what other agents

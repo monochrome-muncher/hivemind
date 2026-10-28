@@ -219,6 +219,10 @@ class Standing:
     can_write_scopes: tuple[str, ...]
     # ADR 0113: the agents that hand down to this one; their memories are its own.
     inherits_from: tuple[str, ...] = ()
+    # ADR 0114: when this agent key last authenticated, to the hour; ``None``
+    # for any other kind of key, and for an agent key not used since the
+    # column shipped.
+    key_last_used_at: datetime | None = None
 
     def as_dict(self) -> dict[str, object]:
         """The JSON shape both surfaces return (REST and MCP, ADR 0030)."""
@@ -233,6 +237,9 @@ class Standing:
             "can_read": list(self.can_read),
             "can_write_scopes": list(self.can_write_scopes),
             "inherits_from": list(self.inherits_from),
+            "key_last_used_at": self.key_last_used_at.isoformat()
+            if self.key_last_used_at
+            else None,
         }
 
 
