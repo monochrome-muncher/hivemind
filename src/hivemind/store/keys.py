@@ -52,7 +52,7 @@ _ISSUE_AGENT = (
 _ISSUE_ORG = "INSERT INTO credentials (key_hash, kind, user_id) VALUES ($1, 'org', $2)"
 _DELETE_ORG = "DELETE FROM credentials WHERE kind = 'org'"
 _LIST = (
-    "SELECT c.key_hash, c.kind, c.user_id, c.agent_name, "
+    "SELECT c.key_hash, c.kind, c.user_id, c.agent_name, (c.locked_at IS NOT NULL) AS locked, "
     f"{DEAD_CREDENTIAL_PREDICATE} AS dead FROM credentials c ORDER BY c.created_at"
 )
 # ADR 0107: share-lock the row so a merge cannot commit between this check
@@ -388,6 +388,8 @@ async def _list(dsn: str) -> None:
     for row in rows:
         name = row["agent_name"] or row["user_id"] or "-"
         mark = "  [dead: never authenticates, ADR 0039]" if row["dead"] else ""
+        if row["locked"]:
+            mark += "  [locked from the portal: replace it with rotate-agent, ADR 0117]"
         print(f"{key_fingerprint(row['key_hash'])}…  {row['kind']:<6} {name}{mark}")
 
 

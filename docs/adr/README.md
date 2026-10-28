@@ -125,3 +125,4 @@ is unused.
 | [0113](0113-retire-an-agent-with-a-successor.md) | Retire an agent with a successor | Accepted; amends 0011, 0030, 0033, 0034, 0060, 0065, 0095, 0096, migration 0024, admin only, undoable |
 | [0114](0114-key-last-used-in-whoami-and-the-portal-home.md) | An agent sees when its own key was last used | Accepted; amends 0110, 0030, 0095, `key_last_used_at` in `whoami`, a status card on the portal home, no migration |
 | [0115](0115-portal-needs-attention.md) | The portal lists the agent's flagged memories on a "Needs attention" page | Accepted; amends 0095, builds on 0093 and 0113, `GET /v1/portal/flagged`, no migration |
+| [0117](0117-lock-your-own-key-from-the-portal.md) | Lock the agent's own key from the portal | Accepted; amends 0095, 0108, migration 0025, agent key only, audited `agent_key.lock`, cleared by Replace key |

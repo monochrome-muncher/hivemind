@@ -22,7 +22,10 @@ function profile(agent) {
     return card("Registration", h("p", { class: "muted", text: "Not a registered agent. This name wrote or rated memories without an agent record (the admin key, or a key from before agent registration)." }));
   }
   const pairs = [
-    ["Status", statusBadge(agent.status)],
+    ["Status", h("span", {}, statusBadge(agent.status),
+      agent.key_locked && agent.status === "active"
+        ? [" ", h("span", { class: "badge badge-revoked", title: "Its key was locked from the agent portal; replace the key", text: "key locked" })]
+        : null)],
     ["Trust level", agent.status === "pending" ? h("span", { class: "muted", text: "—" }) : levelBadge(agent.trust_level)],
     ["Home fleet", agent.home_fleet_id ? link(fleetName(agent.home_fleet_id), memoriesHref({ fleet: agent.home_fleet_id })) : "—"],
     ["Owner", agent.owner_alias || "—"],

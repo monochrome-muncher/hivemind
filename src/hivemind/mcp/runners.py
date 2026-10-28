@@ -12,6 +12,7 @@ import logging
 import os
 
 from hivemind.config import configure_logging, load_settings
+from hivemind.domain.access import KEY_LOCKED_MESSAGE, KeyLocked
 from hivemind.extractor import build_extractor
 from hivemind.mcp.app import McpHivemind
 from hivemind.mcp.local_embedder import LocalEmbedder
@@ -94,7 +95,12 @@ def main_pg() -> None:
     extractor = build_extractor(settings)  # optional (ADR 0016): None when the endpoint is unset
 
     async def _run() -> None:
-        credential = await authenticator.verify(raw_key)  # fail fast; re-verified per call below
+        try:
+            credential = await authenticator.verify(
+                raw_key
+            )  # fail fast; re-verified per call below
+        except KeyLocked:
+            raise SystemExit(KEY_LOCKED_MESSAGE) from None
         if credential is None:
             raise SystemExit(_mcp_key_unknown_hint())
         services = build_services(

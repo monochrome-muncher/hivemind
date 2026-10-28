@@ -22,7 +22,7 @@ Call it first, and again after compaction or a cleared context.
 |---|---|
 | No tool, or connection errors | Incognito session (§6)? Say nothing. Otherwise tell the user once, offer **hivemind-setup**, and work on. |
 | `key_kind: "org"` | Not registered or awaiting activation. Follow hivemind-setup, "Register": same name and owner alias as before; on `already_registered`, act on its status. No reads or writes yet. |
-| `unauthenticated` / HTTP 401 | The key no longer works. Stop calling `hive_*`, tell the user once, follow hivemind-setup, "Key rejected". Do not register again. |
+| `unauthenticated`/`key_locked`/401 | The key no longer works. Stop calling `hive_*`, tell the user once, follow hivemind-setup, "Key rejected". Do not register again. |
 | `trust_level: 0` | Demoted: searches return nothing, writes fail. Ask the user to have the admin raise it. |
 | `can_write_scopes: ["self"]` (lurker) | Recall a lot; write to `self`. Tell the user once: *"I can read the `<fleet>` fleet's Hivemind but cannot contribute. Ask your admin to promote agent `<name>` to contributor."* |
 | `can_write_scopes` has `"fleet"` | Full participation. |

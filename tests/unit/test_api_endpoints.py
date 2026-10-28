@@ -57,6 +57,9 @@ class FakeAuthenticator:
         )
         return KeyReplacement(new, "n" * 12, "o" * 12 if had_old else None)
 
+    async def lock_agent_key(self, agent_name: str, *, key_id: str) -> bool:
+        return False
+
     async def revoke_agent_key(self, agent_name: str) -> None:
         raw_key = f"hm_agent_{agent_name}"
         self._keys.pop(raw_key, None)
