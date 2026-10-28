@@ -26,6 +26,12 @@ from hivemind.domain.access import (
     write_scopes_for,
 )
 from hivemind.domain.activity import Activity
+from hivemind.domain.agent_cleanup import (
+    AgentCleanupRecord,
+    CleanupOutcome,
+    CleanupScan,
+    CleanupUndoOutcome,
+)
 from hivemind.domain.audit import ActorKind, AuditEvent, AuditFilters, AuditRecord
 from hivemind.domain.entry import (
     Entry,
@@ -187,14 +193,14 @@ class Store(Protocol):
         """Per reporter (the ``"user"`` column), the ``stale``/``wrong`` rows
         written while their entry was still current, and how many of those
         entries were superseded after the row (ADR 0068). Rows on entries
-        already superseded when written, and revoked reporters (ADR 0067),
-        are left out; a reporter with no flags has no row; any order."""
+        already superseded when written, and revoked reporters (ADR 0067)
+        and set-aside ratings (ADR 0111), are left out; a reporter with no flags has no row; any order."""
         ...
 
     async def fleet_health(self, now: datetime) -> FleetHealth:
         """The fleet health aggregates as of ``now``: counts the
         service turns into the ``health`` report. Verdicts of revoked
-        reporters are left out (ADR 0067); a flag is a standing
+        reporters (ADR 0067) and set-aside ones (ADR 0111) are left out; a flag is a standing
         ``stale``/``wrong`` row, its age its ``updated_at``. Observation
         only: no ranking input. Both adapters must agree."""
         ...
@@ -205,8 +211,8 @@ class Store(Protocol):
         verdict counts, the verdicts received per author, and per UTC day
         the writes (``created_at``) and verdicts (``updated_at``) from
         ``since`` on (days with no activity have no row). ``recent`` is
-        ``>= since``. Verdicts of revoked reporters are left out
-        (ADR 0067). Observation only: no ranking input. Both adapters
+        ``>= since``. Verdicts of revoked reporters (ADR 0067)
+        and set-aside ones (ADR 0111) are left out. Observation only: no ranking input. Both adapters
         must agree."""
         ...
 
@@ -370,6 +376,61 @@ class Store(Protocol):
 
     async def get_fleet_merge(self, merge_id: str) -> FleetMergeRecord | None: ...
 
+    # -- agent cleanup (ADR 0111) ------------------------------------------------
+
+    async def scan_agent_cleanup(self, agent: str, since: datetime, until: datetime) -> CleanupScan:
+        """What cleaning up ``agent`` over ``[since, until)`` would change,
+        changing nothing: its active memories whose ``created_at`` is in the
+        window (any scope), its ratings whose ``updated_at`` is in the
+        window and are not already set aside, the pins on those memories,
+        and the memories those superseded (still ``superseded``, their
+        ``superseded_by`` one of the memories to withdraw). Lists are cut
+        to the preview limits, newest first; the totals are exact."""
+        ...
+
+    async def cleanup_agent(
+        self,
+        agent: str,
+        since: datetime,
+        until: datetime,
+        *,
+        restore_ids: Sequence[str] | None = None,
+        expected_withdraw: int | None = None,
+        expected_ratings: int | None = None,
+        cleaned_by: str,
+    ) -> CleanupOutcome:
+        """Clean up ``agent`` in one transaction (ADR 0111): withdraw the
+        memories ``scan_agent_cleanup`` lists (reason ``cleanup_reason``),
+        take the pins off them, set the window's ratings aside and put the
+        ``restore_ids`` back to ``active``. Records what changed so
+        ``undo_agent_cleanup`` can reverse it; with nothing to change no
+        record is kept (``record`` is ``None``). ``AgentCleanupRefused``
+        when a ``restore_ids`` memory is not restorable now, when the counts
+        differ from ``expected_*`` (what the preview showed) or when another
+        cleanup of the agent is running; ``InvalidInput`` for an empty
+        window. Nothing changes on a refusal. The agent's own writes and
+        ratings wait for the row locks, never interleave."""
+        ...
+
+    async def mark_cleanup_revoked(self, cleanup_id: str) -> None:
+        """Note on the record that the cleanup also revoked the agent."""
+        ...
+
+    async def undo_agent_cleanup(self, cleanup_id: str) -> CleanupUndoOutcome:
+        """Undo a cleanup (ADR 0111): re-activate the memories still
+        withdrawn with its reason, supersede the restored ones again (only if
+        still active and their former successor is active), clear its rating
+        marks and re-pin where the fleet is under the caps. It does not
+        un-revoke. ``UnknownAgentCleanup`` for an unknown id,
+        ``AgentCleanupRefused`` when ``undo_refusal`` says no."""
+        ...
+
+    async def list_agent_cleanups(self, limit: int) -> list[AgentCleanupRecord]:
+        """Recorded cleanups, newest first, at most ``limit`` of them."""
+        ...
+
+    async def get_agent_cleanup(self, cleanup_id: str) -> AgentCleanupRecord | None: ...
+
     # -- agent registration / activation (ADR 0012) ----------------------------
 
     async def register_agent(self, name: str, owner_alias: str | None = None) -> Agent:
@@ -428,7 +489,8 @@ class Store(Protocol):
         """Upsert a feedback verdict (one row per entry+user+agent) and
         return the row as stored. A row without ``updated_at`` is stamped
         with the store's clock, the one ``pinned_at`` and ``created_at``
-        use."""
+        use. Rating again a memory whose rating an admin cleanup set aside
+        clears the mark (ADR 0111): the row counts again."""
         ...
 
     async def record_feedback_many(self, feedbacks: list[Feedback]) -> list[Feedback]:
@@ -439,7 +501,9 @@ class Store(Protocol):
         ...
 
     async def feedback_counts(self, entry_id: str) -> FeedbackCounts:
-        """(helpful, stale, wrong) counts for one entry."""
+        """(helpful, stale, wrong) counts for one entry. Every feedback read
+        leaves out revoked reporters' rows (ADR 0067) and set-aside ones
+        (ADR 0111)."""
         ...
 
     async def quality_counts(self, entry_ids: list[str]) -> dict[str, FeedbackCounts]:
@@ -497,7 +561,7 @@ class Store(Protocol):
         entry it is about: newest first (``updated_at`` DESC), then entry
         id, reporter and agent. Only rows whose entry is readable under
         ``visibility`` (``None`` = all, as in ``list_entries``); revoked
-        reporters are left out (ADR 0067). A malformed ``entry_id`` or
+        reporters (ADR 0067) and set-aside ratings (ADR 0111) are left out. A malformed ``entry_id`` or
         ``fleet_id`` matches nothing."""
         ...
 
@@ -512,7 +576,7 @@ class Store(Protocol):
     ) -> list[FlaggedEntry]:
         """Active entries with a standing ``stale`` or ``wrong`` verdict
         (ADR 0093), oldest first flag first, then entry id. Revoked
-        reporters' rows are left out (ADR 0067), so an entry only they
+        reporters' rows (ADR 0067) and set-aside ones (ADR 0111) are left out, so an entry only they
         flagged is not listed. ``orphaned`` is judged at ``now``: the
         author is a revoked agent, or wrote nothing in the
         ``ORPHAN_SILENCE_DAYS`` before it (as ``fleet_health`` counts).

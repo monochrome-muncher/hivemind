@@ -204,7 +204,7 @@ class FlaggedEntry:
     """An active entry with at least one standing ``stale`` or ``wrong``
     verdict, as the flag backlog lists it (ADR 0093). The flag dates are
     the oldest and newest standing flag; the counts leave revoked
-    reporters out (ADR 0067), as every count does."""
+    reporters (ADR 0067) and set-aside ratings (ADR 0111) out, as every count does."""
 
     entry_id: str
     kind: Kind

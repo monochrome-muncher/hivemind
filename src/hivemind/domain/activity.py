@@ -65,7 +65,8 @@ class DayActivity:
 @dataclass(frozen=True, slots=True)
 class Activity:
     """What ``Store.activity`` returns. Verdicts of revoked reporters are
-    left out everywhere (ADR 0067)."""
+    left out everywhere (ADR 0067), as are ratings an admin cleanup
+    set aside (ADR 0111)."""
 
     authors: tuple[AuthorActivity, ...] = ()
     reporters: tuple[ReporterActivity, ...] = ()

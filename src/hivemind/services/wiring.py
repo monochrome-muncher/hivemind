@@ -64,6 +64,8 @@ def build_services(
     activity_service = ActivityService(store, ttl=metrics_entry_counts_ttl)
     # A merge or undo moves entries between fleets: drop the cached scans (ADR 0107).
     access_service.merges.on_change += [metrics_service.invalidate, activity_service.invalidate]
+    # So does a cleanup (withdrawn memories, set-aside ratings) and its undo (ADR 0111).
+    access_service.cleanups.on_change += [metrics_service.invalidate, activity_service.invalidate]
     return Services(
         search_config=search_config,
         write_service=WriteService(store, embedder, extractor),
