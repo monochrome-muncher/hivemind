@@ -789,6 +789,7 @@ def build_router() -> APIRouter:
             credential, own=True, limit=limit, offset=offset
         )
         return [FlaggedEntryOut.from_flagged(i) for i in items]
+
     @router.put("/portal/entries/{entry_id}/pin", response_model=PinOut)
     async def portal_pin(entry_id: str, credential: require, app: hive) -> PinOut:
         """Pin an entry from the portal with ``PUT /v1/entries/{id}/pin``'s
