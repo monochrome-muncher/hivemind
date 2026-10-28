@@ -3,7 +3,7 @@
 // tables (lists.js) and memory drawer (drawer.js).
 
 import {
-  api, apiRaw, h, state, guarded, parseHash, fleetName, levelName, pageHead, refreshButton, card, fill, table, toast, link, viewHref,
+  api, apiRaw, h, state, guarded, parseHash, fleetName, levelName, pageHead, refreshButton, card, fill, table, toast, link, viewHref, canPin, PIN_REMINDER,
   stat, fmtAgo, fmtTime,
   KINDS, SCOPES, VERDICTS,
 } from "./session.js";
@@ -182,9 +182,34 @@ export async function viewFleet(root) {
     const pins = await guarded(() => api("GET", "pins"));
     if (!pins) return;
     const open = (id) => openEntry(id, () => { loadPins(); memories.load(true); });
+    // One call, then reload the list; a refusal (the caps) shows as a toast in the service's words.
+    const act = (label, method, done) => (pin) => h("button", {
+      type: "button", class: "btn btn-sm", text: label,
+      onclick: async (event) => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+          const answer = await guarded(() => api(method, `portal/entries/${encodeURIComponent(pin.id)}/pin`));
+          if (answer) {
+            toast(done(answer));
+            await loadPins();
+          }
+        } catch (err) {
+          toast(err.message, true);
+          button.disabled = false;
+        }
+      },
+    });
+    const unpin = act("Unpin", "DELETE", (a) => (a.removed === false ? "It was already unpinned" : "Memory unpinned"));
+    const repin = act("Re-pin", "PUT", () => "Memory pinned again");
+    const actions = (pin) => h("span", { class: "row tight" }, pin.changed_since_pin ? repin(pin) : null, unpin(pin));
+    const mayPin = canPin();
     pinsCard.replaceChildren(card(`Pinned (${pins.pins.length})`,
-      table(PIN_HEADERS, pins.pins.map((p) => pinRow(p, { onOpen: open })), "Nothing is pinned in this fleet.", { className: "entries" }),
-      { flush: true }));
+      table(mayPin ? [...PIN_HEADERS, ""] : PIN_HEADERS,
+        pins.pins.map((p) => pinRow(p, { onOpen: open, extra: mayPin ? actions : null })),
+        "Nothing is pinned in this fleet.", { className: "entries" }),
+      { flush: true }),
+      h("p", { class: "muted small", text: mayPin ? `${PIN_REMINDER} Open a memory below to pin it.` : PIN_REMINDER }));
   };
   const memories = entryTable({
     fetchPage: ({ limit, offset }) => guarded(() => api("GET", "portal/entries", {

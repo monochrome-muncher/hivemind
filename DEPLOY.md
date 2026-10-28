@@ -735,8 +735,10 @@ superseded included), the verdicts it gave, the verdicts on its memories,
 its home fleet's memories and pins, and a search over everything the key
 can read. They can withdraw the agent's own memories, with a reason, and
 each such withdrawal is in the audit log as `entry.withdraw` with
-`via: "portal"`. Nothing else is written: no new memories, no verdicts, no
-pins. Admin and org keys are turned away (the admin panel, §8, is for the
+`via: "portal"`. They can also pin and unpin entries as the agent, with the
+same rights and limits as `hive_pin`; those show up as `entry.pin` and
+`entry.unpin` with `via: "portal"`. Nothing else is written: no new
+memories, no verdicts. Admin and org keys are turned away (the admin panel, §8, is for the
 admin key). Searches made in the portal are left out of the search
 counters.
 

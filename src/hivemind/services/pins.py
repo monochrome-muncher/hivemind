@@ -40,7 +40,7 @@ class PinService:
         # when the deployment requires stored keys.
         self._require_stored_keys = require_stored_keys
 
-    async def pin(self, credential: Credential, entry_id: str) -> Pin:
+    async def pin(self, credential: Credential, entry_id: str, via: str | None = None) -> Pin:
         """Pin an active fleet entry to its own fleet. A contributor or
         privileged agent of that fleet or an admin may; a fleet holds at most
         ``MAX_PINS_PER_FLEET`` pins and an agent at most
@@ -51,7 +51,8 @@ class PinService:
         version an older pin now shows moves that pin to it; either way the
         pin is no longer ``changed_since_pin`` (ADR 0076). Neither adds a
         row, but both make the caller the pinner, so the agent cap counts
-        them (ADR 0096). Every pin is audited, naming the pin it replaced."""
+        them (ADR 0096). Every pin is audited, naming the pin it replaced; ``via``
+        (``"portal"``, ADR 0116) is recorded in the audit detail when given."""
         credential = credential.effective(self._require_stored_keys)
         entry, fleet_id = await self._pinnable(credential, entry_id)
         if entry.state is not EntryState.ACTIVE:
@@ -82,18 +83,23 @@ class PinService:
         detail: dict[str, object] = {"fleet_id": fleet_id}
         if written.replaced:
             detail["from"] = written.replaced[0] if len(written.replaced) == 1 else written.replaced
+        if via is not None:
+            detail["via"] = via
         await record_admin_action(self._store, credential, AuditAction.ENTRY_PIN, entry.id, detail)
         return written.pin
 
-    async def unpin(self, credential: Credential, entry_id: str) -> bool:
+    async def unpin(self, credential: Credential, entry_id: str, via: str | None = None) -> bool:
         """Remove an entry's pin (any state); whether it was pinned. The
         version a pin shows unpins it too, since that is the id readers
         see once the pinned entry is superseded. An unpin that removed a pin
         is audited once, with the removed pin ids (ADR 0076). Anyone who may
-        pin may unpin, someone else's pin included (ADR 0096)."""
+        pin may unpin, someone else's pin included (ADR 0096). ``via`` is
+        recorded in the audit detail when given (ADR 0116)."""
         credential = credential.effective(self._require_stored_keys)
         entry, fleet_id = await self._pinnable(credential, entry_id)
-        return bool(await self._unpin_shown(credential, entry, fleet_id, credential.visibility()))
+        return bool(
+            await self._unpin_shown(credential, entry, fleet_id, credential.visibility(), via=via)
+        )
 
     async def unpin_withdrawn(self, credential: Credential, entry: Entry) -> list[str]:
         """Take a just-withdrawn fleet ``entry`` out of its fleet's briefing:
@@ -140,6 +146,7 @@ class PinService:
         fleet_id: str,
         visibility: Visibility,
         reason: str | None = None,
+        via: str | None = None,
     ) -> list[str]:
         removed_ids: list[str] = []
         if await self._store.unpin_entry(fleet_id, entry.id):
@@ -151,6 +158,8 @@ class PinService:
             detail: dict[str, object] = {"fleet_id": fleet_id, "pin_ids": removed_ids}
             if reason is not None:
                 detail["reason"] = reason
+            if via is not None:
+                detail["via"] = via
             await record_admin_action(
                 self._store, credential, AuditAction.ENTRY_UNPIN, entry.id, detail
             )
