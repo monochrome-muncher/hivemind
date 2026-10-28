@@ -7,7 +7,7 @@ import {
   KINDS, SCOPES, VERDICTS,
 } from "./session.js";
 import { openEntry } from "./drawer.js";
-import { PIN_HEADERS, entryTable, feedbackTable, pinRow } from "./lists.js";
+import { PIN_HEADERS, entryTable, feedbackTable, flaggedTable, pinRow } from "./lists.js";
 
 const select = (label, values, selected, anyText) => h("select", { "aria-label": label },
   h("option", { value: "", text: anyText }),
@@ -120,6 +120,26 @@ function feedbackView(direction) {
 
 export const viewGiven = feedbackView("given");
 export const viewReceived = feedbackView("received");
+
+// --- memories that need attention -----------------------------------------------------------
+
+export async function viewAttention(root) {
+  const me = state.me;
+  const list = flaggedTable({
+    fetchPage: ({ limit, offset }) => guarded(() => api("GET", "portal/flagged", { query: { limit, offset } })),
+    onOpen: (id) => openEntry(id, () => list.load(true)),
+    fleetName,
+    emptyText: "Nothing needs attention: none of its active memories carries a stale or wrong verdict.",
+    csvName: `${me.name}-needs-attention`,
+    owners: false,
+  });
+  fill(root,
+    pageHead("Needs attention",
+      `Active memories of ${me.name}${inherited(me)} that another agent rated stale or wrong, the longest-flagged first. Open one to read the verdicts. If it is out of date, withdraw it with a reason, or ask the agent to supersede it with a corrected memory.`,
+      refreshButton()),
+    list.el);
+  await list.load(true);
+}
 
 // --- home fleet ---------------------------------------------------------------------------
 

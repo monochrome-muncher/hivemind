@@ -1,5 +1,7 @@
 # The agent portal: a browser front end for agent-key holders
 
+> **Amended by [ADR 0115](0115-portal-needs-attention.md):** a fifth route, `GET /v1/portal/flagged`, and a "Needs attention" page.
+>
 > **Amended by [ADR 0117](0117-lock-your-own-key-from-the-portal.md):** the portal can also lock the signed-in agent's own key ("This key leaked").
 
 > **Amended by [ADR 0113](0113-retire-an-agent-with-a-successor.md):** the portal's own-memory list and own-withdraw include the memories of agents retired in the caller's favour.

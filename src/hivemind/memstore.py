@@ -1054,6 +1054,7 @@ class MemoryStore:
                     or not flags
                     or entry.state is not EntryState.ACTIVE
                     or (fleet_id is not None and entry.fleet_id != fleet_id)
+                    or (filters.authors and entry.author not in filters.authors)
                     or not self._visible(entry, visibility)
                 ):
                     continue

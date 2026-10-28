@@ -1285,6 +1285,10 @@ async def test_flag_backlog_lists_flagged_active_entries_oldest_flag_first(
     assert await backlog(flagged_before=now - 5 * day) == ["old flag"]  # strictly older
     assert await backlog(orphaned=True) == ["gone author"]  # its author is revoked
     assert await backlog(fleet_id=blue.id) == ["old flag"]
+    # The authors filter (ADR 0115): any of the names, none = no narrowing.
+    assert await backlog(authors=("bob",)) == ["old flag"]
+    assert await backlog(authors=("carol", "Gone")) == ["gone author", "recent flag"]
+    assert await backlog(authors=("nobody",)) == []
     assert await backlog(fleet_id=blue.id.upper()) == ["old flag"]
     assert await backlog(fleet_id="not-a-uuid") == []
     assert await backlog(fleet_id="{" + blue.id + "}") == []
