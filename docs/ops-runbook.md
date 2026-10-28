@@ -73,6 +73,7 @@ lists every one with its default, and `src/hivemind/config.py` is the source.
 | `HIVEMIND_METRICS_ENTRY_COUNTS_TTL` | seconds the usage report reuses its one grouped scan of `entries` and the fleet health aggregates (ADRs 0069, 0075), default 300, `0` = scan on every report. Shared by `GET /v1/metrics` and `GET /metrics`, so the entry counts (and writes per fleet) can be up to this old; agents, fleets and searches are read on every report |
 | `HIVEMIND_MCP_METRICS_ENABLED` | off by default; when `true`, `hivemind-mcp-http` serves an unauthenticated `GET /metrics` with its own request, tool-call and degraded-search series (ADR 0104). When off, `/metrics` is a 404 and nothing is collected. The Kubernetes Deployment sets it `true`; leave it off in the compose files, which publish the MCP port on every interface |
 | `HIVEMIND_REQUIRE_STORED_KEYS` | off by default; when `true`, a dev-mode credential (not an admin, org or active agent key) is treated as trust level 0 on the data plane: reads come back empty and writes are refused (ADR 0082, SPEC §12.2). The Kubernetes ConfigMap sets it `true` |
+| `HIVEMIND_IDLE_AGENT_DAYS` | default 30, a positive whole number: days without a request before the admin agent list marks an active agent idle (ADR 0110, [section 9](#9-finding-idle-agents-adr-0110)). A list only; nothing is revoked on it |
 | `HIVEMIND_POOL_MIN_SIZE` / `HIVEMIND_POOL_MAX_SIZE` | the asyncpg connection pool's min/max size, per process (default 1 / 10) — the operator knob for per-pod concurrency |
 
 > **Behind a transaction-mode PgBouncer (or any transaction-pooling
@@ -532,3 +533,49 @@ curl -s -X PATCH -H "X-API-Key: $ADMIN_KEY" -H "Content-Type: application/json" 
 
 **Rolling back the release.** `make rollback` past migration `0019` deletes
 the `fleet.rename` audit rows. Renamed fleets keep their new names.
+## 9. Finding idle agents (ADR 0110)
+
+Each key records when it last worked, at most once an hour. The admin
+agent list shows that as **Last active**, and marks an active agent
+**idle** when its key has been quiet for `HIVEMIND_IDLE_AGENT_DAYS` days
+(30 unless you set it). Use it to find keys nobody uses any more and
+revoke them. Nothing is revoked for you, and nothing ranks or limits an
+agent on it.
+
+**In the admin panel.** Open **Agents**, choose **Idle 30+ days** (the
+number follows your setting) in the activity filter, and press **Revoke**
+on the rows you no longer want. Revoking kills the key on its next request
+and keeps the name reserved; activating the agent again issues a new key.
+
+**With the API.** Each row of `GET /v1/admin/agents` has `last_used_at`
+(null if never), `idle` and `idle_after_days`:
+
+```sh
+curl -s -H "X-API-Key: $ADMIN_KEY" "https://hivemind.example/v1/admin/agents" \
+  | jq -r '.[] | select(.idle) | "\(.name)\t\(.last_used_at // "never")"'
+# Then, for each agent you decide to drop:
+curl -s -X POST -H "X-API-Key: $ADMIN_KEY" \
+  "https://hivemind.example/v1/admin/agents/<name>/revoke"
+```
+
+**What to expect.**
+
+- **Existing agents start from the upgrade time.** Use before the release
+  that added this was not recorded, so the upgrade stamps every active
+  agent's key with its own time. An agent that went quiet earlier shows as
+  idle `HIVEMIND_IDLE_AGENT_DAYS` days after the upgrade, not before. A key
+  issued later and never used (a new agent, or a replaced key) is counted
+  from the day it was issued.
+- **Rolling back: image first, then the migration.** The server reads the
+  new column on every key check. Run `make rollback` only after the old
+  image is serving; the other order makes every key check fail.
+- **The time is accurate to the hour.** A busy key is written once an hour,
+  not on every request, so the check adds no database write to a normal
+  request. The stamp is best effort: if the write fails, the request still
+  succeeds and the next one tries again.
+- **It covers every route.** The REST API, the MCP server and the agent
+  portal all check keys the same way. Admin and org keys are stamped too,
+  but only agents are listed.
+- **Pending and revoked agents are never idle**; they have no live key.
+  Re-activating an agent starts its last-use time over.
+

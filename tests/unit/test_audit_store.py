@@ -52,7 +52,15 @@ class _FakePool:
 
 async def test_verify_threads_the_key_fingerprint_into_the_credential() -> None:
     raw_key = "hm_some_admin_secret"
-    conn = _FakeConn({"kind": "admin", "user_id": "admin", "agent_id": None, "agent_name": None})
+    conn = _FakeConn(
+        {
+            "kind": "admin",
+            "user_id": "admin",
+            "agent_id": None,
+            "agent_name": None,
+            "use_stale": False,
+        }
+    )
     auth = PgAuthenticator("postgresql://example/db")
     with patch("hivemind.store.auth.make_pool", new=AsyncMock(return_value=_FakePool(conn))):
         credential = await auth.verify(raw_key)

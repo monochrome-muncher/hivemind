@@ -201,6 +201,10 @@ _Avoid_: registered agent (ambiguous with active), queued agent, provisional age
 An agent whose agent key an admin has killed. Its record and name stay reserved (names are durable), it has no data-plane access, and re-activating it issues a fresh key. Its feedback no longer counts while it is revoked. Distinct from an agent demoted to `untrusted`, which still holds a valid key.
 _Avoid_: deleted agent, disabled agent, dormant agent (dormant is the demoted-to-`untrusted` state)
 
+**Idle agent**:
+An active agent whose key has not been used for a configured number of days. Shown in the admin agent list only; it has no effect on access.
+_Avoid_: inactive agent, dormant agent (dormant is the demoted-to-`untrusted` state), stale agent
+
 **Activation**:
 The admin act that turns a pending (or revoked) agent into an active one: it sets the trust level and home fleet and issues the agent key, returned once. An already-active agent cannot be activated again.
 _Avoid_: approval, key issuance (a key is its output, not its name)
