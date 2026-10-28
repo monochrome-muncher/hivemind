@@ -173,6 +173,7 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | `GET /v1/portal/entries` | List what the agent's key can read, newest first, with the `GET /v1/entries` filters `kind`, `tags`, `scope`, `author`, `include_inactive`, `flagged` plus `fleet_id` (agent key only: 403 for the admin and org keys; ADR 0095) |
 | `POST /v1/portal/search` | `POST /v1/search` plus `fleet_id`, over what the agent's key can read; not counted in the search counters (agent key only; ADR 0095) |
 | `GET /v1/portal/feedback` | The agent's verdicts (`direction=given`) or the verdicts on its own entries (`direction=received`), newest first, on entries its key can read; filters `verdict`, `entry_id`, `limit`, `offset` (agent key only; ADR 0095) |
+| `GET /v1/portal/flagged` | The caller's own and inherited active entries with a standing `stale` or `wrong` verdict, oldest standing flag first, each with its flag dates and verdict counts, on entries its key can read; `limit`, `offset` (agent key only; ADR 0115) |
 | `POST /v1/portal/entries/{id}/withdraw` | Withdraw the caller's own entry with a required `reason`; audited as `entry.withdraw` with `via: "portal"` (agent key only; ADR 0095) |
 | `PUT /v1/portal/entries/{id}/pin`, `DELETE /v1/portal/entries/{id}/pin` | Pin or unpin an entry with the rights, caps and errors of `PUT`/`DELETE /v1/entries/{id}/pin` (§12.2); audited as `entry.pin` / `entry.unpin` with `via: "portal"` (agent key only; ADR 0116) |
 

@@ -176,6 +176,7 @@ class GovernanceService:
         fleet_id: str | None = None,
         older_than: timedelta | None = None,
         orphaned: bool = False,
+        own: bool = False,
         limit: int,
         offset: int = 0,
     ) -> list[FlaggedEntry]:
@@ -184,6 +185,7 @@ class GovernanceService:
             fleet_id=fleet_id,
             older_than=older_than,
             orphaned=orphaned,
+            own=own,
             limit=limit,
             offset=offset,
         )

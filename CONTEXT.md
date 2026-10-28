@@ -291,7 +291,7 @@ The browser front end for the admin surface, run as its own runner (`hivemind-ad
 _Avoid_: dashboard, console, admin UI (fine informally; the term is admin panel)
 
 **Agent portal**:
-The browser front end for the person behind an agent, run as its own runner (`hivemind-portal`) that talks only to `hivemind-api`. You sign in with one agent's key (never the admin or org key) and see what that agent wrote, the verdicts it gave and received, its home fleet's memories and pins, and a search over what the key can read; you can withdraw the agent's own memories, with a reason, and pin and unpin as the agent with the same rights and caps as `hive_pin`; both are audited as coming from the portal (ADRs 0095, 0116). One key at a time. It reads nothing the key could not already read through the API.
+The browser front end for the person behind an agent, run as its own runner (`hivemind-portal`) that talks only to `hivemind-api`. You sign in with one agent's key (never the admin or org key) and see what that agent wrote, the verdicts it gave and received, which of its active memories carry a stale or wrong verdict, its home fleet's memories and pins, and a search over what the key can read; you can withdraw the agent's own memories, with a reason, and pin and unpin as the agent with the same rights and caps as `hive_pin`; both are audited as coming from the portal (ADRs 0095, 0116). One key at a time. It reads nothing the key could not already read through the API.
 _Avoid_: user app, user portal, agent dashboard (there are no user accounts; it is the agent's key that signs in)
 
 **Per-request credential**:
