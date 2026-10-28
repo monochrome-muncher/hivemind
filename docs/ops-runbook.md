@@ -629,6 +629,10 @@ admin key, and it can be undone.
   with reason `agent_cleanup`.
 - Writes no memory and changes no key. Agents see withdrawn memories
   disappear and restored ones come back.
+- Goes by who wrote a memory, not who owns it now (ADR 0113). Cleaning up
+  a retired agent still withdraws what it wrote in the window, even though
+  its successor owns those memories. Cleaning up a successor leaves the
+  memories it inherited alone, because it did not write them.
 
 **With the API.**
 
@@ -836,6 +840,9 @@ curl -s -X POST -H "X-API-Key: $ADMIN_KEY" \
   `entry.withdraw` with `via: "succession"`. `agent.retire` (target the old agent, detail `{successor, was}`)
   and, for an active agent, the usual `agent.revoke` with `via: "retire"`.
   An undo is `agent.retire_undo` (SPEC §12.5).
+- **Cleanups go by author.** A cleanup of the old agent (section 10) still
+  withdraws what it wrote, even after the hand-over. A cleanup of the
+  successor covers only what the successor wrote itself.
 - **Do not retire during a rollout.** An older pod ignores the new table: the
   successor reads less there until it is replaced, and it would not refuse
   activating the retired agent.

@@ -90,6 +90,7 @@ No key is issued or rotated by a cleanup, and no memory is written. There is no 
 - During a rolling deploy, an older pod does not know `set_aside_by`: it still counts a set-aside rating and its upsert does not clear the mark. Do not run a cleanup during a rollout.
 - The revoke after a cleanup is a second step. If it fails, the cleanup stands and the answer says the revoke did not happen (`revoke_error`); run the revoke from the agents list. An agent revoked by someone else in the meantime counts as already revoked.
 - A failed audit write after the commit answers 500 although the cleanup happened. Check the cleanups list before running it again; the apply guard also makes a repeat harmless, since the window then holds nothing to withdraw.
+- A cleanup selects memories and ratings by `author` and reporter, the name that wrote them, not by who owns them after a retirement (ADR 0113). The bad output belongs to the agent that wrote it: cleaning up a retired agent still reaches the memories its successor now owns, and cleaning up a successor leaves its inherited memories alone.
 - Risk class: data change across entries and feedback, migration, permissions and locking. Tested on Postgres: row-lock races against concurrent writes, two cleanups of one agent at once, the lock timeout, undo after later changes, the pin caps on undo, the migration and its rollback, and the same contract on `MemoryStore`.
 
 ## Considered options
