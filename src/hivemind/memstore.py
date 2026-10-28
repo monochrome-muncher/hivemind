@@ -1771,6 +1771,10 @@ class MemoryStore:
                 for a in sorted(self._agents.values(), key=lambda a: a.name)
             ]
 
+    async def agent_key_last_used(self, name: str) -> datetime | None:
+        with self._lock:
+            return self._key_last_used.get(name)
+
     def record_key_issued(self, name: str, at: datetime) -> None:
         """A new key for the agent, made at ``at``, unused so far (ADR 0110).
         The in-memory authenticator fake calls this; the real adapter's key

@@ -123,5 +123,6 @@ is unused.
 | [0111](0111-agent-cleanup.md) | Clean up after a bad agent | Accepted; extends 0067, follows 0107, migration 0022, admin only, undoable |
 | [0112](0112-move-agents-with-their-memories.md) | Move agents with their memories (fleet split) | Accepted; amends 0011, builds on 0107, migration 0023, admin only, undoable |
 | [0113](0113-retire-an-agent-with-a-successor.md) | Retire an agent with a successor | Accepted; amends 0011, 0030, 0033, 0034, 0060, 0065, 0095, 0096, migration 0024, admin only, undoable |
+| [0114](0114-key-last-used-in-whoami-and-the-portal-home.md) | An agent sees when its own key was last used | Accepted; amends 0110, 0030, 0095, `key_last_used_at` in `whoami`, a status card on the portal home, no migration |
 | [0115](0115-portal-needs-attention.md) | The portal lists the agent's flagged memories on a "Needs attention" page | Accepted; amends 0095, builds on 0093 and 0113, `GET /v1/portal/flagged`, no migration |
 | [0116](0116-pin-and-unpin-from-the-portal.md) | Pin and unpin from the agent portal | Accepted; amends 0095, builds on 0058, 0076, 0096, no migration, agent key only |

@@ -645,7 +645,7 @@ All of these go in a terminal:
 
 ## When an agent is replaced
 
-If your admin retires an agent in favour of a new one, its key stops working and the new agent owns what it wrote (SPEC §12.1); `hive_whoami` lists them as `inherits_from`.
+If your admin retires an agent in favour of a new one, its key stops working and the new agent owns what it wrote (SPEC §12.1); `hive_whoami` lists them as `inherits_from`. `hive_whoami` also shows `key_last_used_at`, when your key last worked (to the hour; `null` if not recorded yet).
 
 ## Removing
 

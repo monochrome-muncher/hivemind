@@ -361,6 +361,9 @@ class AccessService:
         if credential.home_fleet_id is not None:
             fleet = await self._store.get_fleet(credential.home_fleet_id)
             fleet_name = fleet.name if fleet is not None else None
+        key_last_used = None
+        if agent is not None:
+            key_last_used = await self._store.agent_key_last_used(agent.name)
 
         return Standing(
             key_kind=key_kind,
@@ -372,6 +375,7 @@ class AccessService:
             can_read=_readable(key_kind, credential),
             can_write_scopes=_writable_scopes(key_kind, credential),
             inherits_from=credential.inherits_from if key_kind == "agent" else (),
+            key_last_used_at=key_last_used,
         )
 
     # -- audit (ADR 0027) ------------------------------------------------------

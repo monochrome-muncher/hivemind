@@ -139,7 +139,7 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | `POST /v1/feedback` | One verdict (+note) on up to 16 entries at once, `{entry_ids, verdict, note?}`; all must be readable and none the caller's own, or nothing is recorded (ADRs 0053, 0065) |
 | `GET /v1/health` | Static health answer (no database check) |
 | `GET /v1/liveness` | Unauthenticated orchestrator liveness probe (ADR 0019) |
-| `GET /v1/whoami` | The calling key's standing: kind (`agent`/`org`/`admin`/`legacy`), agent name, status, trust level, home fleet, `can_read`, `can_write_scopes`, `inherits_from` (the agents retired in the caller's favour, §12.1; any valid key; not audited — ADR 0030) |
+| `GET /v1/whoami` | The calling key's standing: kind (`agent`/`org`/`admin`/`legacy`), agent name, status, trust level, home fleet, `can_read`, `can_write_scopes`, `inherits_from` (the agents retired in the caller's favour, §12.1), `key_last_used_at` (when the caller's agent key last authenticated, to the hour, ISO 8601; `null` for an agent key not used since the column shipped and for every other kind of key; ADR 0114); any valid key; not audited — ADR 0030 |
 | `POST /v1/agents` | Register an agent (org key or admin key; `{name, owner_alias?}`) → pending agent, 201 (§12, ADR 0012); the same name + alias again → 200 with the current status; another alias → 409 (§12.3, ADR 0039) |
 | `GET /v1/admin/agents` | List agents: status, trust level, home fleet, owner alias, `last_used_at` (when the agent's key last authenticated, to the hour; null if never since the field shipped or no key), `idle` (an active agent whose key has been unused for `idle_after_days`; a key never used counts from when it was issued, so a new or replaced key is not idle) and `idle_after_days` (`HIVEMIND_IDLE_AGENT_DAYS`, default 30) (admin key; ADR 0110) |
 | `GET /v1/admin/fleets` | List fleets (admin key); fleets merged into another are left out unless `?include_merged=true`, which adds `merged_into` and `merged_at` (§12.1, ADR 0107) |
@@ -194,7 +194,7 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | `hive_pinned` | `GET /v1/pins` (the fleet's pinned briefing — ADR 0058) |
 | `hive_pin` | `PUT /v1/entries/{id}/pin`; with `unpin: true`, `DELETE /v1/entries/{id}/pin` (ADR 0058) |
 | `hive_register` | `POST /v1/agents` (org key only — the agent's first contact with Hivemind; §12.3) |
-| `hive_whoami` | `GET /v1/whoami` (any valid key — the key's kind, the agent's status, trust level and home fleet, and what it may read and write; ADR 0030) |
+| `hive_whoami` | `GET /v1/whoami` (any valid key — the key's kind, the agent's status, trust level and home fleet, when its key was last used, and what it may read and write; ADRs 0030, 0114) |
 
 **`hive_write` `sources` schema (ADR 0105).** The MCP `tools/list` schema for `hive_write`'s `sources` is typed to the entry model (§4.1): an array of `{type, ref}` with `type` constrained to `path|url|session|other`, `ref` required, and no additional properties — matching the REST surface's shape. It is a schema-only constraint: the runtime still accepts a loose object and a malformed source answers the structured `invalid_input` (not a raw SDK `is_error`), so the self-correcting error messages are unchanged.
 
@@ -290,7 +290,7 @@ A search may pass `explore: true` (REST body field; `hive_search` argument; defa
 | **agent key** | one registered agent | Carries the agent's trust level + home fleet; `author` is server-filled with the agent's registered name (§12, ADR 0012) |
 | **admin key** | the operator | The admin surface: activate / promote / demote / revoke, fleets, org-key rotation (§12.4). Its entries have author `admin` (ADR 0060) and its feedback is reported as `admin` (ADR 0066) |
 
-Every key that authenticates records `credentials.last_used_at`, at most once an hour (ADR 0110). The write is best effort and outside the request; it only feeds the admin agent list and changes no access.
+Every key that authenticates records `credentials.last_used_at`, at most once an hour (ADR 0110); an agent sees its own key's value in `whoami` and the portal home (ADR 0114). The write is best effort and outside the request; it only feeds the admin agent list and changes no access.
 
 No OAuth/SSO; keys are issued by the org operator via the admin surface (§12.4). (An org with an IdP is a later story.) This table supersedes ADR 0008's key kinds (`user`/`agent`/`admin`) — ADR 0012. The agent key is now the credential the MCP runners verify (ADRs 0009–0010).
 

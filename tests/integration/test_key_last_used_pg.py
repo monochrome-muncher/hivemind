@@ -148,6 +148,9 @@ async def test_list_agents_carries_the_keys_last_use(env: Env) -> None:
     await auth.verify(key)
     by_name = {a.name: a.last_used_at for a in await store.list_agents()}
     assert by_name["alice"] is not None and by_name["bob"] is None
+    # ADR 0114: the same value, for one agent, is what whoami reports.
+    assert await store.agent_key_last_used("alice") == by_name["alice"]
+    assert await store.agent_key_last_used("bob") is None
 
 
 async def test_a_locked_row_delays_the_check_by_about_a_second_not_longer(env: Env) -> None:
