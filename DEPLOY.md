@@ -1,36 +1,30 @@
 # Hivemind — Production Deployment (Kubernetes + GitLab CI/CD)
 
 Single source of truth for **deploying Hivemind to a Kubernetes cluster**
-via GitLab CI/CD (ADR 0026: **2 replicas** of the API and 2 of the MCP
-runner — for availability, not throughput — against **one** Postgres
-node, which ADR 0007 decided and ADR 0026 leaves unchanged). The
-single-node **docker** ops story lives in
+via GitLab CI/CD: **2 replicas** of the API and 2 of the MCP runner
+(ADR 0026, for availability) against **one** Postgres node (ADR 0007).
+The single-node **docker** ops story lives in
 [docs/ops-runbook.md](docs/ops-runbook.md) — this file is the k8s story
 and the two do not overlap.
 
 Layout:
 
-- [`deploy/kubernetes/`](deploy/kubernetes/) — the kustomize tree
-  (namespace, ConfigMap, two 2-replica Deployments with a
+- [`deploy/kubernetes/`](deploy/kubernetes/) — the kustomize tree:
+  namespace, ConfigMap, two 2-replica Deployments with a
   `maxSurge: 1` / `maxUnavailable: 0` rollout, two ClusterIP Services,
-  two `minAvailable: 1` PodDisruptionBudgets — ADR 0026;
-  `secret-template.yaml` documents the CI-rendered Secret; every pod runs
-  as non-root UID 10001 with a read-only root filesystem, dropped
-  capabilities, `RuntimeDefault` seccomp and no ServiceAccount token, and
-  the api/mcp Deployments carry modest resource requests/limits and prefer
-  different nodes (`topologySpreadConstraints`, `ScheduleAnyway`);
-  the image installs the dependency set locked in `uv.lock`;
+  two `minAvailable: 1` PodDisruptionBudgets (ADR 0026), and
+  `secret-template.yaml`, which documents the CI-rendered Secret.
   `optional/` is the opt-in nginx Ingress + cert-manager Certificate,
-  with two more opt-in trees under it: `optional/networkpolicy/` (§2
-  step 6) and `optional/monitoring/`, the Prometheus Operator
-  ServiceMonitors and the Grafana dashboard (§2 steps 7 and 8);
-  `admin/` and `portal/` are the admin panel and the agent portal, each
-  its own kustomization, §8 and §9)
-- [`.gitlab-ci.yml`](.gitlab-ci.yml) — the pipeline (test → build → deploy);
-  the first-run key bootstrap is
+  with `optional/networkpolicy/` (§2 step 6) and `optional/monitoring/`
+  (the Prometheus Operator ServiceMonitors and the Grafana dashboard,
+  §2 steps 7 and 8) under it; `admin/` and `portal/` are the admin panel
+  and the agent portal, each its own kustomization (§8 and §9). Every
+  pod runs as non-root with a read-only root filesystem and a locked-down
+  security context.
+- [`.gitlab-ci.yml`](.gitlab-ci.yml) — the pipeline (test → build →
+  deploy); the first-run key bootstrap is
   [`scripts/ci-bootstrap-keys.sh`](scripts/ci-bootstrap-keys.sh) +
-  [`deploy/kubernetes/bootstrap/keys-job.yaml`](deploy/kubernetes/bootstrap/keys-job.yaml) +
-  [`deploy/kubernetes/bootstrap/rbac.yaml`](deploy/kubernetes/bootstrap/rbac.yaml) (ADR 0044)
+  [`deploy/kubernetes/bootstrap/`](deploy/kubernetes/bootstrap/) (ADR 0044)
 
 ---
 
@@ -75,7 +69,7 @@ is the single source of truth for secrets).
 
 ## 2. Quickstart
 
-The 6-step operator flow:
+The operator flow (steps 1–4 are required, 5–8 optional):
 
 1. **Local dev** — `cp config/.env.example .env.local` (the master
    template is `config/.env.example`; the profile files — `.env.local`,
@@ -324,21 +318,9 @@ first-run bootstrap Job records itself as `ci-bootstrap`.
 - **Does a release carry a migration?** Compare the chain between the two
   tags: `git diff --stat v<old> v<new> -- src/hivemind/store/migrations/`.
   No output means no schema change. Even when there is one, there is no
-  manual step: the entrypoint applies it. The current chain ends at
-  `0016`. 2.11.0 adds `0016` (`withdrawn_at` on entries, ADR 0098; one
-  nullable column plus a backfill of the withdrawn rows, so an older pod
-  ignores it, and a withdrawal an older pod writes during a rolling deploy
-  leaves it empty, which the `relied_on_changed` filter reads as "withdrawn
-  after any rating"). 2.6.0 adds `0014` (pin audit, ADR 0076;
-  widens the audit-log CHECKs; rolling the image back after it without
-  `make rollback` breaks the audit view on `entry.pin` rows) and `0015` (an
-  `explore` column on the search counters, ADR 0078; additive, an older pod
-  keeps working and just does not count explore searches); 2.5.0 adds
-  `0013` (indexes for the see-also and agent-filter reads); 2.3.0 adds `0010` (search counters, ADR 0056),
-  `0011` (see-also links, ADR 0057) and `0012` (pins, ADR 0058);
-  2.1.0 adds `0009`
-  (registration audit, ADR 0046); 2.0.0 adds `0007` (credential
-  uniqueness, ADR 0039) and `0008` (history and list indexes).
+  manual step: the entrypoint applies it. What each migration adds is in
+  the `Server` column of the release's row in
+  [plugins/hivemind/CHANGELOG.md](plugins/hivemind/CHANGELOG.md).
 - **Agents pick up server-side changes on their own.** Tool descriptions,
   the MCP server instructions and `hive_whoami` come from the server, so
   upgrading the server updates what every agent sees. The agent plugin's
@@ -401,57 +383,19 @@ first-run bootstrap Job records itself as `ci-bootstrap`.
 
 ### Upgrading from 1.2.x to 2.0.0
 
-2.0.0 is the security, correctness and performance review release (ADRs
-0039–0043, migrations `0007`–`0008`). The entrypoint still migrates on its
-own, but several changes need an operator's attention. Do these **before**
-the first 2.0.0 pod starts, in this order:
-
-1. **Find credentials that stop working** (ADR 0039). Pre-v2 `user` keys,
-   agent keys without a registered name, and keys of pending or revoked
-   agents no longer authenticate; `0007` also deletes all but the newest
-   key of any agent that holds several, and all but the newest org key.
-   Run the "Dead credentials" SQL in `docs/ops-runbook.md` §4 first and
-   re-issue anything a live client still uses. After the upgrade,
-   `hivemind-keys list` marks such rows `[dead]` and `hivemind-migrate`
-   logs their count.
-2. **Postgres**: pgvector **0.8+** and `HIVEMIND_EMBEDDING_DIM` **≤ 2000**
-   (§1); `hivemind-migrate` now refuses anything else before any DDL.
-3. **Configuration** is validated at startup: a value 1.2.x tolerated
-   (negative retries, a non-http endpoint, an API key with control or
-   non-ASCII characters, an explicit provider deadline below its timeout,
-   …) now stops the pod with a message naming the variable. New optional
-   variables: `HIVEMIND_POOL_*_TIMEOUT*` (app-pool bounds; the server-side
-   statement timeout stays off unless you connect to Postgres directly),
-   `HIVEMIND_EMBEDDING_DEADLINE` / `HIVEMIND_EXTRACTOR_DEADLINE` (ADR 0041)
-   and `HIVEMIND_MCP_ALLOWED_HOSTS` / `_ORIGINS` (ADR 0042); see
-   `config/.env.example`. App-pool queries longer than
-   `HIVEMIND_POOL_COMMAND_TIMEOUT` (30 s) now fail.
-4. **Kubernetes / GitLab** (only if you deploy with this repository's
-   pipeline): mark the `K8S_SECRET_*` CI variables **Protected**, apply the
-   updated deployer RBAC and create the namespace once (both §7). The image
-   now runs as UID 10001 with a read-only root filesystem (`/tmp` is an
-   `emptyDir`); derived images must switch user around system-wide
-   installs (above). The optional NetworkPolicies moved to
-   `deploy/kubernetes/optional/networkpolicy/`.
-5. **Ingress**: keep request bodies at or below 2 MiB (the API answers 413
-   above that) and expect the MCP 401 to carry `WWW-Authenticate`.
-6. **Key CLI**: `hivemind-keys issue-agent` for a pending or revoked agent
-   now needs `--trust-level` and `--home-fleet` (it activates the agent);
-   `revoke-admin --hash` accepts the 12-character fingerprint that `list`
-   prints.
-7. **Clients**: the REST/MCP contract tightened (ADR 0040: `limit` ≤ 100,
-   `offset` ≤ 10 000, field size caps, agent-name rule; ADR 0039:
-   re-registering answers 200 with the current status; new MCP error codes
-   `unauthenticated` and `embedding_unavailable`). Agents using the plugin
-   pick this up from the server; update the plugin to 2.0.0 for the
-   matching skill text (`plugins/hivemind/CHANGELOG.md`).
-
-Rolling back to 1.2.x after `0007`/`0008` ran is safe for the schema (both
-only add indexes, and an older image never rolls the chain back), but the
-duplicate keys `0007` deleted stay deleted, the 1.2.x pods accept the dead
-credentials again, and an old pod's concurrent org-key rotations or
-re-activation of an agent that still holds a key row can hit the new unique
-indexes (ADR 0039).
+Historical — today's upgrades follow the bullets above, and each
+release's row in [plugins/hivemind/CHANGELOG.md](plugins/hivemind/CHANGELOG.md)
+(the `Server` column) names what operators must do. If you are still
+upgrading from 1.2.x, do these before the first 2.0.0 pod starts: find
+credentials that stop working with the "Dead credentials" SQL in
+`docs/ops-runbook.md` §4 (pre-v2 `user` keys, name-less agent keys and
+keys of pending or revoked agents no longer authenticate, ADR 0039) and
+re-issue anything a live client still uses; ensure pgvector 0.8+ and
+`HIVEMIND_EMBEDDING_DIM` ≤ 2000 (§1); mark the `K8S_SECRET_*` variables
+Protected and apply the RBAC in §7. Rolling back to 1.2.x after
+migrations `0007`/`0008` ran is schema-safe, but the duplicate keys
+`0007` deleted stay deleted, and the 1.2.x pods accept the dead
+credentials again.
 
 ### Graceful shutdown (`terminationGracePeriodSeconds`)
 
@@ -460,75 +404,38 @@ Both Deployments set **`terminationGracePeriodSeconds: 150`** plus a
 deploy terminates pods routinely, so these are ordinary-path settings,
 not edge-case insurance.
 
-- **What the grace period actually governs.** uvicorn handles SIGTERM
-  itself — stop accepting, drain the in-flight requests, *then* run the
-  lifespan shutdown. Nothing sets uvicorn's
-  `timeout_graceful_shutdown`, so its own wait is **unbounded**:
-  `terminationGracePeriodSeconds` is the only real deadline, and when
-  it expires the container is SIGKILLed with whatever is still in
-  flight.
-- **Where 150 comes from.** The slowest single request is a write
-  (`hive_write` / `POST /v1/entries`): `WriteService.write` embeds and
-  **then** extracts, in sequence, each with its own bounded retry
-  budget (ADR 0014).
+uvicorn handles SIGTERM itself — stop accepting, drain the in-flight
+requests, then shut down — and nothing bounds that drain, so the grace
+period is the only real deadline: when it expires the container is
+SIGKILLed with whatever is still in flight. 150s covers the slowest
+single request, a write (`hive_write` / `POST /v1/entries`), which
+embeds and then extracts in sequence, each under its own bounded retry
+budget (ADR 0014):
 
-  | leg | attempts | timeout | backoff | worst case |
-  |---|---|---|---|---|
-  | embedder | 1 + `HIVEMIND_EMBEDDING_RETRIES` (2) = 3 | `HIVEMIND_EMBEDDING_TIMEOUT` (10s) | 0.5s + 1.0s | 31.5s |
-  | extractor | 1 + `HIVEMIND_EXTRACTOR_RETRIES` (2) = 3 | `HIVEMIND_EXTRACTOR_TIMEOUT` (30s) | 0.5s + 1.0s | 91.5s |
-  | **worst-case write path** | | | | **123.0s** |
+| leg | attempts | timeout | backoff | worst case |
+|---|---|---|---|---|
+| embedder | 1 + `HIVEMIND_EMBEDDING_RETRIES` (2) = 3 | `HIVEMIND_EMBEDDING_TIMEOUT` (10s) | 0.5s + 1.0s | 31.5s |
+| extractor | 1 + `HIVEMIND_EXTRACTOR_RETRIES` (2) = 3 | `HIVEMIND_EXTRACTOR_TIMEOUT` (30s) | 0.5s + 1.0s | 91.5s |
+| **worst-case write path** | | | | **123.0s** |
 
-  Plus the 5s `preStop` sleep and two pooled Postgres round-trips (auth
-  verify + INSERT), rounded up to **150s** for margin — httpx applies
-  its timeout **per I/O phase** (connect / read / write), so a single
-  attempt can overshoot it. Reads (`hive_search`, `GET /v1/entries`)
-  embed the query only and never extract, so they finish well inside
-  the embedder's 31.5s.
-- **The overall deadline (ADR 0041).** Each leg also runs under
-  `HIVEMIND_EMBEDDING_DEADLINE` / `HIVEMIND_EXTRACTOR_DEADLINE`. Unset,
-  it is derived as the leg's worst case in the table above (so the
-  table and the grace period stay correct when you change a
-  timeout or retry budget); it only bites when httpx's per-phase timeout
-  lets a slow-drip response overshoot, or a provider's `Retry-After`
-  (capped at 10s) pushes a sleep past the backoff. Jitter only shortens
-  sleeps. Setting it lower shortens the worst case; below the matching
-  `_TIMEOUT` is a startup error.
-- **If you raise a retry budget, raise this.** Each leg costs
-  `(retries + 1) x timeout + 0.5 x (2^retries - 1)` seconds; sum the two
-  legs, add the 5s `preStop`, then round up. Worked example: setting
-  `HIVEMIND_EXTRACTOR_RETRIES=4` makes the extractor leg
-  `5 x 30 + 0.5 x 15 = 157.5s` and the write path `189s`, so the grace
-  period needs to go to **~240s** in *both*
-  `deploy/kubernetes/*-deployment.yaml`. The same applies to
-  `HIVEMIND_EXTRACTOR_TIMEOUT`, `HIVEMIND_EMBEDDING_RETRIES` and
-  `HIVEMIND_EMBEDDING_TIMEOUT`. Leaving it stale is not a crash — it is
-  a SIGKILL that drops a write the caller was told nothing about.
-- **Why `preStop` as well.** On pod deletion the kubelet's SIGTERM and
-  the EndpointSlice removal happen **concurrently**, so for as long as
-  that removal takes to reach kube-proxy — and the nginx ingress
-  controller, which routes straight to pod IPs, bypassing the Service —
-  a terminating pod can still be handed **new** requests, which it would
-  refuse because uvicorn has already closed its listener. The sleep lets
-  deregistration win the race; the process serves normally throughout.
-  It is `/bin/sleep` from the image's `python:3.14-slim` base, not the
-  native `sleep` lifecycle handler (GA only in k8s 1.30+), so it works
-  on older clusters.
-- **What this deliberately does NOT do.** The MCP transport is
-  **stateless** streamable-HTTP (ADR 0010, SPEC §8.5: one request = one
-  self-contained exchange; the server holds no session registry), so a
-  terminating pod's blast radius is at most **one in-flight tool call**,
-  never a client session. There is no session-draining step and none is
-  needed. The `PgStore` pool is likewise not closed on a shutdown path —
-  it dies with the process, *after* uvicorn has drained — so an
-  in-flight request can never outlive its own connection pool. Nothing
-  is left half-written either: entries are immutable (ADR 0001), so a
-  severed write simply does not land.
-- **Dev compose gets a smaller version of the same setting.** The
-  `mcp-http` compose service sets `stop_grace_period: 35s` (compose's
-  default is 10s — shorter than a *single* embedder attempt). It runs
-  with extraction off by default (opt in via `.env`), so its worst case
-  is the embedder leg alone; with extraction on, lengthen it per the
-  table above.
+Plus the 5s `preStop` sleep and two pooled Postgres round-trips,
+rounded up to **150s** for margin. The `preStop` sleep exists because on
+pod deletion the SIGTERM and the EndpointSlice removal happen
+concurrently: until deregistration reaches kube-proxy — and the nginx
+ingress controller, which routes straight to pod IPs — a terminating pod
+can still be handed new requests it would refuse.
+
+**If you raise a retry budget or timeout, raise this.** Each leg costs
+`(retries + 1) x timeout + 0.5 x (2^retries - 1)` seconds; sum the two
+legs, add the 5s `preStop`, then round up — in *both*
+`deploy/kubernetes/*-deployment.yaml`. Worked example:
+`HIVEMIND_EXTRACTOR_RETRIES=4` makes the extractor leg 157.5s and the
+write path 189s, so the grace period needs to go to **~240s**. Leaving
+it stale is not a crash — it is a SIGKILL that drops a write the caller
+was told nothing about. (Each leg also runs under
+`HIVEMIND_EMBEDDING_DEADLINE` / `HIVEMIND_EXTRACTOR_DEADLINE`, ADR 0041;
+setting one lower shortens the worst case, and a value below the
+matching `_TIMEOUT` is a startup error.)
 
 ### Probe endpoints (ADR 0019)
 
@@ -618,6 +525,14 @@ rules:
   - apiGroups: ["policy"]
     resources: ["poddisruptionbudgets"]
     verbs: ["get", "list", "watch", "create", "patch"]
+  # The first-run bootstrap applies, and later deletes, its own
+  # ServiceAccount/Role/RoleBinding (deploy/kubernetes/bootstrap/rbac.yaml):
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["get", "create", "patch", "delete"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["get", "create", "patch", "delete"]
   # Only if you apply the optional/ trees (Ingress, example NetworkPolicies)
   # with the same ServiceAccount:
   # - apiGroups: ["networking.k8s.io"]
@@ -669,16 +584,16 @@ subjects:
 
 ## 8. Admin panel (`hivemind-admin`, ADR 0029)
 
-A browser front end for the admin surface: the pending-agent queue
-(grouped by owner alias), activation with the key shown once, agents,
-fleets (including merging one fleet into another and undoing it, ADR 0107;
-see the ops runbook), the audit log, and org-key rotation. It also shows daily activity,
-stats per fleet, agent and owner alias, the fleet health metrics, and a
-browser for the memories with search and withdrawal (ADR 0080), who
-rated what in a feedback log (ADR 0090), one page per agent, each
-fleet's pins (ADR 0092), the flag backlog, oldest flag first (ADR 0093),
-and CSV export of its lists, made in the browser (ADR 0094).
-Admin keys stay CLI-only.
+A browser front end for the admin surface: the pending-agent queue,
+activation with the key shown once, agents (replace a key, ADR 0108; see
+who is idle, ADR 0110; clean up after a bad one, ADR 0111; retire one in
+favour of a successor, ADR 0113), fleets (merge, ADR 0107; rename; move
+agents to split a team, ADR 0112), the audit log and org-key rotation,
+plus daily activity and stats, the fleet health metrics, a memory browser
+with search and withdrawal (ADR 0080), the feedback log (ADR 0090), each
+fleet's pins (ADR 0092), the flag backlog (ADR 0093) and CSV export
+(ADR 0094). The root [README](README.md) describes it from a user's point
+of view. Admin keys stay CLI-only.
 
 **What it needs.** One env var: `HIVEMIND_ADMIN_API_URL`, the base URL of
 the hivemind-api deployment (in-cluster: `http://hivemind-api:8000`). For
@@ -710,17 +625,14 @@ The panel holds the admin key in the browser tab's `sessionStorage`
 (cleared on sign-out or when the tab closes), so serve it over TLS
 wherever it is not `localhost`.
 
-**Locally:** `make up` brings the whole compose stack up — the API on
-`http://localhost:8000` and the panel on `http://localhost:8089` (sign in
-with an admin key from `hivemind-keys issue-admin`). The uv-process path
-works too: `make api` in one shell, `make admin` in another, then open
-`http://localhost:8080`. One path at a time — both put the API on :8000.
+**Locally:** `make up` (panel on `:8089`) or `make api` + `make admin`
+(`:8080`) — the docker story is in [docs/ops-runbook.md](docs/ops-runbook.md)
+§1 and the root [README](README.md), "Try it on your computer".
 
-**What it forwards.** Only the admin endpoints (the memory browser uses
-the admin-only `/v1/admin/entries`, `/v1/admin/search`,
-`/v1/admin/activity`, `/v1/admin/feedback`,
-`/v1/admin/fleets/{id}/pins` and `/v1/admin/flagged`, never the data plane),
-`GET /v1/metrics` and `GET /v1/health`. Anything else is a 404 from the panel itself. It
+**What it forwards.** The admin endpoints the panel uses (a subset of
+`/v1/admin/*` — browsing memories, activity, the audit log, fleet and
+agent management, key rotation; never the data plane), `GET /v1/metrics`
+and `GET /v1/health`. Anything else is a 404 from the panel itself. It
 forwards `X-API-Key`, `Content-Type` and `Accept` and nothing else, marks
 every forwarded response `Cache-Control: no-store`, and never logs a
 header or a body. `GET /healthz` is its own probe and does not call the
@@ -731,16 +643,16 @@ API.
 
 A browser front end for the people behind the agents. Someone signs in
 with one agent's key and sees what that agent wrote (withdrawn and
-superseded included), the verdicts it gave, the verdicts on its memories,
-its home fleet's memories and pins, and a search over everything the key
-can read. They can withdraw the agent's own memories, with a reason, and
-each such withdrawal is in the audit log as `entry.withdraw` with
-`via: "portal"`. They can also pin and unpin entries as the agent, with the
-same rights and limits as `hive_pin`; those show up as `entry.pin` and
-`entry.unpin` with `via: "portal"`. Nothing else is written: no new
-memories, no verdicts. Admin and org keys are turned away (the admin panel, §8, is for the
-admin key). Searches made in the portal are left out of the search
-counters.
+superseded included), the verdicts it gave and got, when the key was last
+used, its home fleet's memories and pins, a "Needs attention" page of the
+agent's flagged memories (ADR 0115), and a search over everything the key
+can read. They can withdraw the agent's own memories, pin or unpin
+entries as the agent (same rights and limits as `hive_pin`), lock a
+leaked key, and clean up the agent's own work over a time window with
+undo (ADR 0118); all of it is audited with `via: "portal"`. Admin and
+org keys are turned away (§8 is for the admin key), and portal searches
+are left out of the search counters. The root [README](README.md)
+describes it from a user's point of view.
 
 **What it needs.** One env var: `HIVEMIND_PORTAL_API_URL`, the base URL of
 the hivemind-api deployment (in-cluster: `http://hivemind-api:8000`). For
@@ -786,17 +698,20 @@ tab's `sessionStorage` under its own name, separate from the admin
 panel's, and holds one key at a time: to look at another agent, sign out
 and sign in with that agent's key.
 
-**Locally:** `make up` starts it on `http://localhost:8090` (the
-standalone stack: `:8190`). The uv-process path: `make api` in one shell,
-`make portal` in another, then open `http://localhost:8081`.
+**Locally:** `make up` (portal on `:8090`) or `make api` + `make portal`
+(`:8081`) — the docker story is in [docs/ops-runbook.md](docs/ops-runbook.md)
+§1 and the root [README](README.md), "Try it on your computer".
 
 **What it forwards.** `GET /v1/whoami`, `GET /v1/entries/{id}` (the
-drawer, with `?history=true`), `GET /v1/pins`, the portal routes
-(`GET /v1/portal/entries`, `POST /v1/portal/search`,
-`GET /v1/portal/feedback`, `POST /v1/portal/entries/{id}/withdraw`) and
-`GET /v1/health`. Anything else, the data plane's writes and its counted
-search included, is a 404 from the portal itself. Headers, caching and
-logging are as for the panel: `X-API-Key`, `Content-Type` and `Accept`
-only, `Cache-Control: no-store`, no header or body logged, and
-`GET /healthz` as its own probe. The portal serves the panel's shared
+drawer, with `?history=true`), `GET /v1/pins`, `GET /v1/health` and the
+portal's own routes: `GET /v1/portal/entries`, `POST /v1/portal/search`,
+`GET /v1/portal/feedback`, `GET /v1/portal/flagged`,
+`POST /v1/portal/entries/{id}/withdraw`,
+`PUT`/`DELETE /v1/portal/entries/{id}/pin`, `POST /v1/portal/cleanup`,
+`GET /v1/portal/cleanups`, `POST /v1/portal/cleanups/{id}/undo` and
+`POST /v1/portal/key/lock`. Anything else, the data plane's writes and
+its counted search included, is a 404 from the portal itself. Headers,
+caching and logging are as for the panel: `X-API-Key`, `Content-Type`
+and `Accept` only, `Cache-Control: no-store`, no header or body logged,
+and `GET /healthz` as its own probe. The portal serves the panel's shared
 front-end modules (ADR 0091) by exact name and none of its other files.
