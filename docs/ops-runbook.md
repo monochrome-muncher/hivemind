@@ -62,14 +62,14 @@ lists every one with its default, and `src/hivemind/config.py` is the source.
 | `HIVEMIND_EMBEDDING_DEADLINE` / `HIVEMIND_EXTRACTOR_DEADLINE` | overall per-call budget in seconds, retries and backoff included (ADR 0041). Unset (default) = derived: `(retries+1) x timeout + 0.5 x (2^retries - 1)`, i.e. the DEPLOY.md §5 worst case; set lower to cap a write's wait; must be >= the matching `_TIMEOUT` |
 | `HIVEMIND_EXTRACTOR_ENDPOINT` / `_MODEL` / `_API_KEY` | the entity-extraction extractor (ADR 0016, SPEC §13): **optional + best-effort** — unset = extraction off (entries land with empty `entities`, zero LLM cost); an extraction failure **never** blocks a write (the entry lands without facets). Dev/test: `http://localhost:8080/v1` (`qwen3.8-27b`, key `dummy`) |
 | `HIVEMIND_EXTRACTOR_RETRIES` / `_TIMEOUT` | retry budget + call timeout for transient extractor failures (ADR 0014 pattern) — default 2 retries / 30 s; deterministic 4xx + schema-validation failures fail fast, no retry |
-| `HIVEMIND_HOST` / `HIVEMIND_PORT` | the mcp-http bind host/port (ADR 0010) |
+| `HIVEMIND_HOST` / `HIVEMIND_PORT` | the bind host/port of the HTTP runners (api, mcp-http, admin, portal; ADR 0010) |
 | `HIVEMIND_EXPLORE_LAMBDA` | relevance weight of an opt-in `explore: true` search's MMR re-ordering, `(0, 1]`, default 0.7; 1 = relevance order (ADR 0078). Searches without `explore` ignore it |
 | `HIVEMIND_RECENCY_FLOOR` | lower bound on the SPEC §6.4 recency factor, `(0, 1]`, default 0.8 (ADR 0022) — set it to an empty value or `none` (case-insensitive) to revert to the pre-ADR-0022 unbounded behaviour (ADR 0023), not a negligible number |
 | `HIVEMIND_RECENCY_HINT` | on by default (ADR 0101): a search may carry a `recency` hint (`prefer_recent`, `ignore_age`; ADR 0073) and it changes that search's ranking; a search with no hint ranks as before. Set `false` to accept and ignore the hint |
 | `HIVEMIND_CONFIRMATION_HALVES_FLAGS` | on by default (ADR 0106): once a noted helpful report is newer than every stale or wrong report on an entry, those flags count at half weight in its quality multiplier, so a rebutted flag weighs less in ranking. Counts, the flag backlog and the shown correction are unchanged. Set `false` to count every flag in full |
-| `HIVEMIND_VECTOR_MIN_SIMILARITY` | the search similarity threshold (ADRs 0062, 0100), `[0, 1)`, 0.45 when unset (measured for the Qwen3-Embedding family; empty or `none` turns it off). The vector stream keeps only entries above it, so a search with nothing relevant can come back empty; the keyword stream is not cut. Depends on the embedding model and dimension: with another embedder, measure it with `make measure-threshold` ([retrieval experiments](retrieval-experiments.md#similarity-threshold)) and re-measure after changing either |
-| `HIVEMIND_QUERY_INSTRUCTION` | a one-line task instruction for an instruction-aware embedder such as Qwen3-Embedding (ADR 0097), at most 500 characters. On by default with `Given an agent's task or question, retrieve shared memory entries that answer it`; set it empty to turn it off. Only the search query sent to the vector stream is embedded as `Instruct: {instruction}\nQuery:{query}`; entries are never embedded with it and the keyword stream keeps the raw query. The format is Qwen3's, so with a different embedder run `make measure-query-instruction` and turn it off if it does not help. It moves query vectors: re-check `HIVEMIND_VECTOR_MIN_SIMILARITY` after changing it |
-| `HIVEMIND_VERSION_GROUP_MIN_SIMILARITY` | read-time grouping of unlinked versions of one fact (ADR 0074), `(0, 1)`, off by default (unset, empty or `none`). When set, two active search candidates whose stored vectors are at least this similar (same fleet, or both org-scoped) are shown next to each other, newest first, each naming the other in `similar`; nothing is hidden or re-scored. Depends on the embedding model: measure with `make measure-versions` ([retrieval experiments](retrieval-experiments.md#version-grouping)) before setting it |
+| `HIVEMIND_VECTOR_MIN_SIMILARITY` | the search similarity threshold (ADRs 0062, 0100), `[0, 1)`, 0.45 when unset (measured for Qwen3-Embedding; empty or `none` turns it off). The vector stream keeps only entries above it — a search with nothing relevant can come back empty; the keyword stream is not cut. With another embedder or dimension, re-measure with `make measure-threshold` ([retrieval experiments](retrieval-experiments.md#similarity-threshold)) |
+| `HIVEMIND_QUERY_INSTRUCTION` | a one-line task instruction for an instruction-aware embedder such as Qwen3-Embedding (ADR 0097), at most 500 characters; on by default, set it empty to turn it off. Only the search query is prefixed (entries and the keyword stream are not). The format is Qwen3's: with a different embedder run `make measure-query-instruction` and turn it off if it does not help. It moves query vectors: re-check `HIVEMIND_VECTOR_MIN_SIMILARITY` after changing it |
+| `HIVEMIND_VERSION_GROUP_MIN_SIMILARITY` | read-time grouping of unlinked versions of one fact (ADR 0074), `(0, 1)`, off by default (unset, empty or `none`). When set, near-identical active candidates are shown next to each other, newest first, each naming the other in `similar`; nothing is hidden or re-scored. Measure with `make measure-versions` ([retrieval experiments](retrieval-experiments.md#version-grouping)) before setting it |
 | `HIVEMIND_METRICS_ENTRY_COUNTS_TTL` | seconds the usage report reuses its one grouped scan of `entries` and the fleet health aggregates (ADRs 0069, 0075), default 300, `0` = scan on every report. Shared by `GET /v1/metrics` and `GET /metrics`, so the entry counts (and writes per fleet) can be up to this old; agents, fleets and searches are read on every report |
 | `HIVEMIND_MCP_METRICS_ENABLED` | off by default; when `true`, `hivemind-mcp-http` serves an unauthenticated `GET /metrics` with its own request, tool-call and degraded-search series (ADR 0104). When off, `/metrics` is a 404 and nothing is collected. The Kubernetes Deployment sets it `true`; leave it off in the compose files, which publish the MCP port on every interface |
 | `HIVEMIND_REQUIRE_STORED_KEYS` | off by default; when `true`, a dev-mode credential (not an admin, org or active agent key) is treated as trust level 0 on the data plane: reads come back empty and writes are refused (ADR 0082, SPEC §12.2). The Kubernetes ConfigMap sets it `true` |
@@ -173,9 +173,13 @@ make migrate
 ```
 
 > **Drift check:** after a restore, confirm the pool is on the expected
-> migration (ADR 0020): `uv run python -c "import asyncio; from hivemind.store.migrate import current_schema_version; ..."`
-> or read `_yoyo_migration` directly. If it lags, run `make migrate`
-> (safe to re-run; an up-to-date pool is a no-op).
+> migration (ADR 0020):
+>
+> ```sh
+> docker compose exec postgres psql -U hivemind -c "SELECT max(id) FROM _yoyo_migration"
+> ```
+>
+> If it lags, run `make migrate` (safe to re-run; an up-to-date pool is a no-op).
 
 ## 3. Monitoring / health
 
@@ -183,7 +187,7 @@ make migrate
 |---|---|
 | Liveness / readiness | Unauthenticated probe endpoints (ADR 0019), all public: `GET /v1/liveness` (shallow — 200 whenever the process answers), `GET /v1/health` (static 200, public by design — SPEC §5.1), `GET /mcp/liveness` (shallow), `GET /mcp/health` (shallow, the readiness probe — ADR 0037), `GET /mcp/health/database` (deep — 200 only when the Postgres pool answers within 5 s, else 503; the pod log names the cause: `database health check failing: …`) |
 | Usage / counters | `GET /v1/metrics` (admin-gated) — entries / fleets / agents / searches / feedback counters and the `health` section (ROADMAP §3.3, ADRs 0056, 0068, 0075) |
-| Prometheus | `GET /metrics` on each `hivemind-api` pod (no key; ADR 0050; each `hivemind-mcp` pod serves its own per-process series too when `HIVEMIND_MCP_METRICS_ENABLED=true`, as the Kubernetes manifest sets (ADR 0104): requests, `hivemind_search_degraded_total`, `hivemind_mcp_tool_calls_total{tool,outcome}`, `hivemind_mcp_tool_duration_seconds{tool}`, no usage gauges, so `sum` the process counters across the api and mcp jobs; Operator users: `deploy/kubernetes/optional/monitoring/`, DEPLOY.md §2 step 7): usage gauges (`max` across replicas), `hivemind_http_requests_total`, `hivemind_http_request_duration_seconds`, `hivemind_search_degraded_total` (alert on its rate: the embedder is down), `hivemind_searches_total` / `hivemind_searches_empty_total` / `hivemind_searches_explore_total` per fleet (every runner, read from the pool, `max` across replicas; ADRs 0056, 0078), `hivemind_feedback_flags` / `hivemind_feedback_flags_confirmed` per agent (ADR 0068), `hivemind_health_*` fleet health gauges (admin-facing observations, never an agent signal; a ratio with no denominator has no series; per-fleet ones carry `fleet`; `hivemind_health_success` is 0 while a refresh fails and the gauges are stale; ADR 0075) |
+| Prometheus | `GET /metrics` on each `hivemind-api` pod, no key (ADR 0050): usage gauges (`max` across replicas), `hivemind_http_requests_total` / `hivemind_http_request_duration_seconds`, `hivemind_search_degraded_total` (alert on its rate: the embedder is down), `hivemind_searches_total` / `_empty_total` / `_explore_total` per fleet (ADRs 0056, 0078), `hivemind_feedback_flags` / `_confirmed` per agent (ADR 0068) and the `hivemind_health_*` fleet health gauges — admin-facing observations, never an agent signal; `hivemind_health_success` is 0 while a refresh fails and the gauges are stale (ADR 0075). Each `hivemind-mcp` pod serves its own request, tool-call and degraded-search series when `HIVEMIND_MCP_METRICS_ENABLED=true` (as the Kubernetes manifest sets, ADR 0104); it has no usage gauges, so `sum` the process counters across the api and mcp jobs. Operator users: `deploy/kubernetes/optional/monitoring/` (DEPLOY.md §2 step 7) |
 | Grafana | `deploy/kubernetes/optional/monitoring/hivemind-dashboard.json` (DEPLOY.md §2 step 8): search health, traffic, MCP tools and fleet health over time, from the series above |
 | Schema drift | the latest id in `_yoyo_migration` (ADR 0020) — the applied migration |
 | Postgres health | the `postgres` service healthcheck (`pg_isready`); `docker compose ps` |
@@ -191,15 +195,12 @@ make migrate
 | Extractor health | entries landing with **empty `entities`** while extraction is expected (ADR 0016) — check `HIVEMIND_EXTRACTOR_ENDPOINT` / model reachability; note this is *by design* silent (best-effort: the write never fails over extraction), so watch for the symptom, not an error. All-or-nothing validation: if the model wraps its JSON in a code fence (or any schema violation — >10 entities, bad kind, name >128 chars) the whole extraction fails and the entry lands without facets — monitor facet coverage in the dogfood |
 | MCP runner | `docker compose ps mcp-http` (ADR 0010); the streamable-HTTP endpoint `:8088` |
 
-Watch for: the Postgres healthcheck failing, the `mcp-http` container
-restarting, the pool's applied migration lagging the deployed chain
-(drift → run `make migrate`), and writes failing with
-`EmbeddingError` after the retry budget (ADR 0014) — a dead embedder
-fails writes once its `HIVEMIND_EMBEDDING_RETRIES` budget is
-exhausted; a transient blip is retried automatically and needs no
-action. (The extractor, ADR 0016, is deliberately the opposite: its
-failures are best-effort and never block a write — the observable
-symptom is an entry with empty `entities`, not a failed write.)
+Watch for the signals in the table above. A transient embedder blip is
+retried automatically and needs no action; a dead one fails writes once
+the `HIVEMIND_EMBEDDING_RETRIES` budget is exhausted. The extractor is
+deliberately the opposite: its failures are best-effort and never block
+a write — the observable symptom is an entry with empty `entities`,
+not a failed write.
 
 > **A crashed `CREATE INDEX CONCURRENTLY` leaves an INVALID index**
 > (ADR 0025, migrations `0004`, `0008` and `0013`). This is inherent to
@@ -287,8 +288,9 @@ hash is stored (a leaked database never leaks usable keys, SPEC §8.1).
 ### Audit trail of key and admin actions (ADR 0027)
 
 Every mutating `hivemind-keys` command (`issue-admin`, `revoke-admin`,
-`rotate-org`, `rotate-agent`, `issue-agent`, `revoke`; not `list`) and every admin REST
-action writes a row to the audit log (SPEC §12.5). Read it with the
+`rotate-org`, `rotate-agent`, `issue-agent`, `revoke`, `bootstrap-secret`;
+not `list`) and every admin REST action writes a row to the audit log
+(SPEC §12.5). Read it with the
 admin key:
 
 ```sh
@@ -306,10 +308,9 @@ curl -s -H "X-API-Key: $ADMIN_KEY" \
   after an admin-key rotation you can tell the old key's actions from
   the new one's. No raw key is ever written to the log.
 - **Pins are audited too** (ADR 0076, migration `0014`): `entry.pin` and
-  `entry.unpin` rows, with `actor_kind = agent_key` and the agent's name
-  when a contributor or privileged agent pinned, `admin:<fingerprint>` for the admin key.
-  Rolling the image back past `0014` without `make rollback` breaks the audit
-  view on those rows (the rollback deletes them).
+  `entry.unpin` rows, with `actor_kind = agent_key` and the agent's name,
+  or `admin:<fingerprint>` for the admin key. Rolling back past `0014`
+  deletes those rows.
 - **Portal pins and unpins are audited too** (ADR 0116): a pin or unpin
   made from the agent portal writes the usual `entry.pin` or
   `entry.unpin` row with `actor_kind = agent_key`, the agent's name as
@@ -322,11 +323,10 @@ curl -s -H "X-API-Key: $ADMIN_KEY" \
   the API or `hive_withdraw` is not audited.
 - **Key locks are audited** (ADR 0117, migration `0025`): an agent locking
   its own key from the portal writes `agent_key.lock` with
-  `actor_kind = agent_key`, the agent's name as actor and the key
-  fingerprint plus `via: "portal"` in `detail`. Rolling back past `0025`
-  deletes those rows and makes a locked key usable again; replace the key
-  first if it must stay dead. During a rolling deploy an older pod still
-  accepts a key locked meanwhile.
+  `actor_kind = agent_key`, the agent's name, the key fingerprint and
+  `via: "portal"` in `detail`. Rolling back past `0025` deletes those
+  rows and makes a locked key usable again; replace the key first if it
+  must stay dead.
 - **Raw SQL bypasses it.** A hand-run `DELETE FROM credentials …` is not
   audited; prefer the CLI even for break-glass work.
 
@@ -373,9 +373,7 @@ requires a fresh pool (a re-embed of every entry), not an in-place
 change. The **default dim is 1024** (ADR 0015 — we never assume 1536;
 that is one provider's native dim), and the dev Makefile pins **512**
 for fast local vLLM embedding. Choose the dimension to match the
-embedding provider (ADR 0005: self-hosted) at deploy time; the
-ROADMAP §4.2 tuning (prefix length / dimension) uses the §1.1 eval
-harness to pick the value before it is pinned.
+embedding provider (ADR 0005: self-hosted) at deploy time.
 
 **A dim mismatch is loud, never silent (ADR 0015):** `hivemind-migrate`
 (checks `current_embedding_dim` before applying anything) and the
@@ -392,7 +390,7 @@ the switch is a pool change, not a model change:
 
 1. **Stop writes** — drain the `mcp-http` / API replicas so no new
    entries land at the old dim.
-2. **Back up** the data (see §3) — the old-dim pool is your source of
+2. **Back up** the data (see §2) — the old-dim pool is your source of
    truth until the new one is verified.
 3. **Set the dim** — `HIVEMIND_EMBEDDING_DIM=1024` (the code default is
    now 1024, ADR 0015; the dev Makefile defaults to 512 unless the profile file sets it,
@@ -406,8 +404,8 @@ the switch is a pool change, not a model change:
    (entries embed at write time, ADR 0005; a stored 512-dim vector
    cannot be re-used in a 1024-dim pool).
 6. **Restart the services** and verify: `GET /v1/health`, then run the
-   §1.1 eval harness (golden set) at the new dim before declaring the
-   switch a success.
+   eval harness (the golden set in `tests/eval/`) at the new dim before
+   declaring the switch a success.
 
 ## 7. Merging fleets (ADR 0107)
 
