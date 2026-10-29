@@ -305,7 +305,7 @@ Explore search is opt-in per search (ADR 0078). Results are in
   rejected, no code change.)* The always-on recency term did depress
   non-temporal recall (MRR 0.208 with it vs. 0.917 without), but an
   oracle-gated variant still lost to decay-off on every aggregate. The
-  root cause is arithmetic: at the §6.2 defaults the fused RRF score
+  root cause is arithmetic: at the SPEC §6.2 defaults the fused RRF score
   spans at most 2.62x while recency halves every 30 days, so age became
   the sort key. Carried forward as §4.6. Tables and method:
   [docs/retrieval-experiments.md](docs/retrieval-experiments.md#44-gate-the-recency-term-to-temporal-queries).
