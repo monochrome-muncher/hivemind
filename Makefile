@@ -166,7 +166,7 @@ test-unit: ## Run unit tests only in parallel (no Postgres needed), with only CI
 measure-threshold: ## Measure a search similarity threshold with the configured embedder (ADR 0062; e.g. after `make vllm`; set HIVEMIND_EMBEDDING_DIM to the deployment's)
 	uv run python -m tests.eval.threshold
 
-.PHONY: measure-ranking measure-versions measure-importance measure-query-instruction measure-longmemeval measure-vector-index measure-experiments measure-flags
+.PHONY: measure-ranking measure-versions measure-importance measure-query-instruction measure-embed-text measure-longmemeval measure-vector-index measure-experiments measure-flags
 measure-ranking: ## Measure the per-search recency hint variants (ADR 0073) against the shipped ranking with the configured embedder (e.g. after `make vllm`; set HIVEMIND_EMBEDDING_DIM to the deployment's)
 	uv run python -m tests.eval.ranking
 
@@ -178,6 +178,9 @@ measure-importance: ## Measure the narrow importance factor (ADR 0088) with the 
 
 measure-query-instruction: ## Measure the Qwen3 query instruction (ADR 0097) with the configured embedder (e.g. after `make vllm`; set HIVEMIND_EMBEDDING_DIM to the deployment's; EVAL_QUERY_INSTRUCTIONS='["..."]' adds variants; EVAL_QUERY_INSTRUCTION_JSON=path also writes JSON)
 	uv run python -m tests.eval.query_instruction
+
+measure-embed-text: ## Measure what goes into the embedded text (ROADMAP 4.2(a)): baseline summary+body vs +kind, +tags (the entity-name proxy) and both, with the configured embedder (e.g. after `make vllm`; set HIVEMIND_EMBEDDING_DIM to the deployment's; EVAL_EMBED_TEXT_VARIANTS='["..."]' adds variants; EVAL_EMBED_TEXT_JSON=path also writes JSON)
+	uv run python -m tests.eval.embed_text
 
 measure-longmemeval: ## Measure search-only recall on LongMemEval_S with the configured embedder (e.g. after `make vllm`; set HIVEMIND_EMBEDDING_DIM to the deployment's; EVAL_LONGMEMEVAL_PATH=file or a one-time download; EVAL_LONGMEMEVAL_PER_TYPE=N samples N per question type; EVAL_EMBED_CACHE=dir caches vectors on disk and resumes; EVAL_LONGMEMEVAL_JSON=path also writes JSON)
 	uv run python -m tests.eval.longmemeval

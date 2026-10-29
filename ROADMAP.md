@@ -53,8 +53,6 @@ The SPEC §10 extensions (Tier 5) stay held until their triggers fire.
   ingress), unverified owner aliases, structural markers on returned
   entries, the remaining performance items, a contract step for
   `credentials_kind_check`, and the next harnesses.
-- **§4.2 (a)**: what goes into the embedded text (tags, kind, entity
-  names), to be measured with the eval harness on real long-form entries.
 - **Re-measure triggers** on the first real corpus: the recency floor's
   value (§4.6), the HNSW recall cost (§3.6, ADR 0025), and any `rrf_k`
   change. The off-by-default ranking settings (§3.15) are turned on only
@@ -300,12 +298,16 @@ Explore search is opt-in per search (ADR 0078). Results are in
 - **4.2 What goes into the embedded text.** *(rescoped — this item was
   one knob standing in for three separable questions)*
 
-  **(a) WHAT is embedded — still open.** Today: `summary` + a bounded
-  `body` prefix (SPEC §7). Not included: `tags`, `kind`, the extracted
-  entity names (ADR 0016). Whether adding any of them helps or just
-  adds noise to one shared vector is unmeasured, and it is the part of
-  this item that still needs the §1.1 harness on real long-form
-  entries.
+  **(a) WHAT is embedded — measured, no change (2026-10-29).** Today:
+  `summary` + a bounded `body` prefix (SPEC §7). Measured against
+  Qwen3-Embedding-0.6B on the sixteen-domain corpus (`make
+  measure-embed-text`, `tests/eval/embed_text.py`, in
+  [docs/retrieval-experiments.md](docs/retrieval-experiments.md)): adding
+  `tags` (the corpus's proxy for the extracted entity names, ADR 0016) is a
+  small domain-specific wash (pooled hit@1 +0.022 / MRR +0.009, hit@5
+  -0.003; helps 7 of 16 domains, hurts 9), and adding `kind` is neutral
+  (helps 5 of 16, hurts 11). No field is a consistent win, so the current
+  text stands; no code change.
 
   **(b) HOW MUCH, and in what unit — settled by ADR 0021.** The budget
   is **2000 whitespace-delimited words** (`EMBEDDING_PREFIX_TOKENS`),
