@@ -24,6 +24,26 @@ path, the wire mappers and the MCP package into their own modules
 (ADR 0088), added the `near_duplicate` write warning (ADR 0087) and the agent
 portal (ADR 0095), and gave the admin panel a feedback log, an agent page,
 fleet pins, a flag backlog and CSV export (ADRs 0089–0094).
+2.11.0 changed ranking with no config change: the Qwen3 query
+instruction on by default (ADR 0097), the 0.45 similarity cut-off
+(ADR 0100), the recency hint honoured (ADR 0101), the
+`relied_on_changed` catch-up filter (ADR 0098), the
+`answers_open_question` write warning (ADR 0099), contributor
+pinning (ADR 0096) and compact MCP replies (ADR 0102). 2.12.0
+removed the twice-measured-worse recency settings (ADR 0103) and
+gave the MCP runner its own `GET /metrics` (ADR 0104); 2.12.1 typed
+`hive_write` sources (ADR 0105); 2.12.2 fixed an admin
+authentication-order bug. 2.13.0 counts a superseded flag at half
+weight once a noted helpful report is newer (ADR 0106). 2.14.0
+added the admin fleet-and-agent lifecycle: merging and undoing
+fleets (ADR 0107), replacing an agent key (ADR 0108), renaming
+fleets (ADR 0109), idle agents (ADR 0110), cleaning up after a bad
+agent (ADR 0111), moving agents to split a fleet (ADR 0112) and
+retiring an agent with a successor (ADR 0113). 2.15.0 gave the
+people behind an agent the same self-service in the portal: key
+last-use (ADR 0114), a "Needs attention" page (ADR 0115), pinning
+(ADR 0116), locking a leaked key (ADR 0117) and cleaning up their
+own agent's work (ADR 0118).
 Tier 4's measurement items are closed or deferred with their reasons.
 The SPEC §10 extensions (Tier 5) stay held until their triggers fire.
 
@@ -45,7 +65,7 @@ The SPEC §10 extensions (Tier 5) stay held until their triggers fire.
 - **Discovery and learning ideas** ([docs/proposals/2026-10-20-discovery-and-learning-ideas.md](docs/proposals/2026-10-20-discovery-and-learning-ideas.md)):
   a re-check queue and a librarian skill, searchable tags, a tag
   directory, "used together" trails and an ambient-recall pilot, kept as
-  candidates; its first three ideas are being built.
+  candidates; its first three ideas shipped in 2.11.0 (ADRs 0097–0099).
 - **The hive-mind study** ([docs/proposals/2026-10-10-hive-mind-ideas.md](docs/proposals/2026-10-10-hive-mind-ideas.md)):
   ideas for distillation, ranking evidence and sharing without
   converging, with each item's status. Its unbuilt items are candidates,
@@ -140,10 +160,18 @@ lives in the tab's `sessionStorage` behind a strict CSP; keep the panel
 on an internal ingress. Later increments added the feedback log
 (ADR 0090), the shared front-end modules and the agent page (ADR 0091),
 per-fleet pins (ADR 0092), the flag backlog (ADR 0093) and CSV export
-(ADR 0094). The agent portal (ADR 0095, `hivemind-portal`) is a second
-front end for a person holding one agent's key: its memories, the
-verdicts it gave and got, its home fleet, search, and an audited
-withdraw, and it can pin and unpin as that agent (ADR 0116). Keep it on an internal ingress as well.
+(ADR 0094), and the fleet-and-agent lifecycle: merging and undoing
+fleets (ADR 0107), renaming fleets (ADR 0109), replacing an agent key
+(ADR 0108), the idle filter (ADR 0110), cleanups with undo (ADR 0111),
+moving agents (ADR 0112), retiring with a successor (ADR 0113) and the
+key-locked badge (ADR 0117). The agent portal (ADR 0095,
+`hivemind-portal`) is a second front end for a person holding one
+agent's key: its memories, the verdicts it gave and got, its home
+fleet, search, an audited withdraw, pin and unpin as that agent
+(ADR 0116), the key's last use (ADR 0114), a "Needs attention" page of
+flagged memories (ADR 0115), locking a leaked key (ADR 0117) and a
+self-service cleanup with undo (ADR 0118). Keep it on an internal
+ingress as well.
 
 ### 3.10 Agent plugin and skills  *(shipped: ADRs 0030–0031, `plugins/hivemind/`)*
 The plugin and skills that make Hivemind an agent's long-term memory, now
@@ -190,13 +218,15 @@ or its own trigger):
   drop `user` once no deployment has such rows.
 - **Harnesses**: GitHub Copilot CLI is done (plugin from the existing
   Claude marketplace, `sessionStart` and `Stop` hooks; its MCP server is a
-  user entry because Copilot refuses a whole-variable `url`). Next Cursor
-  (re-test `${env:}` in remote headers first), then Kiro and Amp as
-  reference-only; Qwen Code is a Gemini CLI variant.
-  Still unconfirmed: whether Claude Code's `deniedMcpServers` matches the
-  plugin-scoped server name, Gemini CLI's SessionStart context injection,
-  and whether DeepSeek Harness keeps the server instructions after
-  compaction.
+  user entry because Copilot refuses a whole-variable `url`); Cline and
+  KiloCode followed in 2.10.0 (their MCP `${env:}` expansion in URLs and
+  headers is what the incognito launcher works around). The earlier
+  "Cursor next, then Kiro and Amp" plan is dropped: none is wired, and
+  Qwen Code remains a Gemini CLI variant. The three earlier
+  "unconfirmed" behaviours are all confirmed: Claude Code's
+  `deniedMcpServers` matches the plugin-scoped server name (2.3.1),
+  Gemini CLI's `SessionStart` injects the reminder, and DeepSeek
+  Harness keeps the server instructions through compaction.
 
 ### 3.14 Retrieval and knowledge sharing  *(shipped in 2.1.0–2.3.0: ADRs 0047–0058, migrations `0010`–`0012`)*
 The keyword stream matches any term (ADR 0047), at most 16 on Postgres
@@ -219,7 +249,9 @@ health and convergence metrics, admin-only (ADR 0075), with owner-level sibling-
 until measured, version grouping (ADR 0074). The confirmation clock (ADR
 0071) and per-kind recency (ADR 0072) were measured twice, worse each time,
 and removed (ADR 0103). The recency hint (ADR 0073) is on by default since
-the Qwen3-Embedding run (ADR 0101).
+the Qwen3-Embedding run (ADR 0101). The Qwen3 query instruction is on by
+default (ADR 0097), and a noted helpful report newer than every flag
+counts those flags at half weight (ADR 0106).
 Explore search is opt-in per search (ADR 0078). Results are in
 [docs/retrieval-experiments.md](docs/retrieval-experiments.md).
 

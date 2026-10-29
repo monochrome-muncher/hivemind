@@ -4,13 +4,13 @@
 
 *Proposal, 2026-10-20. Checked against `main` at a0cebb7 (2.10.0 plus the fleet pin permissions change).*
 
-### Status (2026-10-20)
+### Status (updated 2026-10-29)
 
 | Idea | State |
 |---|---|
-| §1 query instruction | Approved, in progress (off by default until measured) |
-| §2 "what changed under you" filter | Approved, in progress |
-| §3 answers-an-open-question warning | Approved, in progress |
+| §1 query instruction | Shipped in 2.11.0 (ADR 0097; on by default, pooled MRR 0.835 → 0.881) |
+| §2 "what changed under you" filter | Shipped in 2.11.0 (ADR 0098, `relied_on_changed`) |
+| §3 answers-an-open-question warning | Shipped in 2.11.0 (ADR 0099) |
 | §4-§9 | Kept as candidates, not approved |
 
 ## The question
