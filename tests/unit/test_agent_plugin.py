@@ -680,120 +680,10 @@ def test_launcher_warns_when_the_hermes_env_file_would_override_it(tmp_path: Pat
 
 
 @pytest.mark.skipif(shutil.which("python3") is None, reason="python3 is not installed")
-def test_launcher_gives_pi_an_mcp_config_without_hivemind(tmp_path: Path) -> None:
-    env = _fake_harness(tmp_path, "pi")
-    (tmp_path / ".pi" / "agent").mkdir(parents=True)
-    (tmp_path / ".pi" / "agent" / "settings.json").write_text(
-        json.dumps({"packages": ["npm:pi-mcp-adapter"]})
-    )
-    (tmp_path / ".config" / "mcp").mkdir(parents=True)
-    (tmp_path / ".config" / "mcp" / "mcp.json").write_text(
-        json.dumps({"mcpServers": {"hivemind": {"url": "x"}, "github": {"url": "y"}}})
-    )
-    # The fake harness reads the merged config while it runs; the launcher
-    # must delete it afterwards (it holds other servers' tokens), and hand
-    # the harness neither the key nor the URL.
-    script = tmp_path / "bin" / "pi"
-    script.write_text(
-        '#!/bin/sh\nprintf "%s\\n" "MODE=$PI_MCP_CONFIG_MODE" "KEY=${HIVEMIND_API_KEY:-unset}"\n'
-        'cat "$2"; echo\n'
-    )
-    env["HIVEMIND_API_KEY"] = "hm_x"
-    env["TMPDIR"] = str(tmp_path / "tmp")
-    (tmp_path / "tmp").mkdir()
-    lines = _launch(tmp_path, env, "pi")
-    assert "MODE=exclusive" in lines and "KEY=unset" in lines
-    config = json.loads(lines[-1])
-    assert set(config["mcpServers"]) == {"github"}
-    assert list((tmp_path / "tmp").iterdir()) == []  # temp file removed
-
-
-def _adapter_pi(tmp_path: Path) -> dict[str, str]:
-    """A fake Pi with pi-mcp-adapter installed that prints the merged config."""
-    env = _fake_harness(tmp_path, "pi")
-    (tmp_path / ".pi" / "agent").mkdir(parents=True, exist_ok=True)
-    (tmp_path / ".pi" / "agent" / "settings.json").write_text(
-        json.dumps({"packages": ["npm:pi-mcp-adapter"]})
-    )
-    (tmp_path / "bin" / "pi").write_text('#!/bin/sh\ncat "$2"; echo\n')
-    return env
-
-
-def _write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
-
-
-@pytest.mark.skipif(shutil.which("python3") is None, reason="python3 is not installed")
-@pytest.mark.parametrize("text", ["[1, 2]", "null", '"x"', '{"mcpServers": [1]}', "{not json"])
-def test_launcher_starts_pi_despite_a_malformed_mcp_config(tmp_path: Path, text: str) -> None:
-    """A config whose root (or mcpServers) is not an object used to raise
-    AttributeError and, under set -eu, stop Pi from starting. Such a file
-    is skipped; the other files still count."""
-    env = _adapter_pi(tmp_path)
-    _write(tmp_path / ".config" / "mcp" / "mcp.json", text)
-    _write(
-        tmp_path / ".agents" / "mcp.json",
-        json.dumps({"mcpServers": {"github": {"url": "y"}, "x": 1}}),
-    )
-    config = json.loads(_launch(tmp_path, env, "pi")[-1])
-    assert config == {"mcpServers": {"github": {"url": "y"}}}
-
-
-@pytest.mark.skipif(shutil.which("python3") is None, reason="python3 is not installed")
-def test_launcher_merges_the_adapter_5_global_configs_but_no_project_servers(
-    tmp_path: Path,
-) -> None:
-    """pi-mcp-adapter 5 also reads ~/.agents/mcp/mcp.json, Pi's own
-    ~/.pi/agent/mcp.json (translated) and ~/.pi/agent/mcp-adapter.json.
-    Project servers stay out: the adapter runs the exclusive config's
-    servers without the approval it asks for project servers."""
-    env = _adapter_pi(tmp_path)
-    _write(
-        tmp_path / ".agents" / "mcp" / "mcp.json", json.dumps({"mcpServers": {"a": {"url": "a"}}})
-    )
-    _write(
-        tmp_path / ".pi" / "agent" / "mcp.json",
-        json.dumps(
-            {
-                "mcpServers": {
-                    "hivemind": {"url": "h"},
-                    "off": {"url": "o", "enabled": False},
-                    "hidden": {"url": "h2", "exposure": "hidden"},
-                    "named": {"type": "http", "url": "n", "exposure": "direct", "timeout": 5},
-                    "old": {"type": "sse", "url": "s"},
-                }
-            }
-        ),
-    )
-    _write(
-        tmp_path / ".pi" / "agent" / "mcp-adapter.json",
-        json.dumps({"mcpServers": {"a": {"url": "a2"}}}),
-    )
-    _write(tmp_path / ".mcp.json", json.dumps({"mcpServers": {"evil": {"command": "sh"}}}))
-    _write(tmp_path / ".pi" / "mcp.json", json.dumps({"mcpServers": {"evil2": {"command": "sh"}}}))
-    out = subprocess.run(
-        ["sh", str(LAUNCHER), "pi"],
-        env=env,
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    assert json.loads(out.stdout.splitlines()[-1])["mcpServers"] == {
-        "a": {"url": "a2"},  # mcp-adapter.json wins over ~/.agents
-        "off": {"url": "o", "disabled": True},
-        "hidden": {"url": "h2", "disabled": True},
-        "named": {"url": "n", "directTools": True, "requestTimeoutMs": 5000},
-    }
-    assert "this project's MCP servers are not loaded" in out.stderr
-
-
-@pytest.mark.skipif(shutil.which("python3") is None, reason="python3 is not installed")
 def test_launcher_starts_a_built_in_mcp_pi_without_the_adapter_flag(tmp_path: Path) -> None:
-    """Pi 0.99+ without pi-mcp-adapter refuses --mcp-config ("Unknown
-    option"): there the launcher only unsets the key and URL, so the
-    package's extension registers no server."""
+    """Pi 0.99+ has a built-in MCP client: the launcher only unsets the key
+    and URL (the extension registers no server in an incognito session) and
+    passes no --mcp-config."""
     env = _fake_harness(tmp_path, "pi")
     script = tmp_path / "bin" / "pi"
     script.write_text(
@@ -1465,10 +1355,7 @@ _CALLS = [
     {"toolName": "write", "input": {"path": "xd://mcp__hivemind_hive_whoami", "content": "{}"}},
     {"toolName": "write", "input": {"path": "notes/hive_search.md"}},
     {"toolName": "bash", "input": {"command": "ls"}},
-    # pi-mcp-adapter's proxy tool, and xd:// route spellings with a suffix.
-    {"toolName": "mcp", "input": {"tool": "hivemind_hive_search", "args": {}}},
-    {"toolName": "mcp", "input": {"server": "hivemind", "connect": True}},
-    {"toolName": "mcp", "input": {"tool": "github_list_issues"}},
+    # xd:// route spellings with a suffix.
     {"toolName": "write", "input": {"path": "xd://mcp__hivemind_hive_write/"}},
     {"toolName": "write", "input": {"path": "xd://mcp__hivemind_hive_search?x=1#f"}},
     # The ADR 0058 tools, under Pi's built-in MCP names.
@@ -1499,9 +1386,6 @@ def test_the_extension_blocks_hivemind_calls_only_in_incognito() -> None:
         False,
         True,
         True,
-        False,
-        True,
-        True,
         True,
         True,
     ]
@@ -1521,8 +1405,7 @@ console.log(JSON.stringify({ registered }))
 @needs_node
 def test_the_extension_registers_the_server_with_pi_built_in_mcp(tmp_path: Path) -> None:
     """Pi 0.99+: the package registers the server; not in incognito, not
-    without a key, not when the pi-mcp-adapter config defines it, and not
-    in a Pi (or Oh My Pi) without registerMcpServer."""
+    without a key, and not in a Pi (or Oh My Pi) without registerMcpServer."""
     env = {
         "HAS_API": "1",
         "HIVEMIND_MCP_URL": "https://hm.example/mcp",
@@ -1537,47 +1420,6 @@ def test_the_extension_registers_the_server_with_pi_built_in_mcp(tmp_path: Path)
     assert server["config"]["exposure"] == "direct"
     for override in ({"HIVEMIND_INCOGNITO": "1"}, {"HAS_API": ""}, {"HIVEMIND_API_KEY": ""}):
         assert _node(_REGISTER_SCRIPT, PI_EXTENSION, **{**env, **override}) == {"registered": []}
-    (tmp_path / ".config" / "mcp").mkdir(parents=True)
-    (tmp_path / ".config" / "mcp" / "mcp.json").write_text('{"mcpServers": {"hivemind": {}}}')
-    assert _node(_REGISTER_SCRIPT, PI_EXTENSION, **env) == {"registered": []}
-
-
-@needs_node
-@pytest.mark.parametrize(
-    "rel", [".agents/mcp/mcp.json", ".pi/agent/mcp.json", ".pi/agent/mcp-adapter.json"]
-)
-def test_the_extension_leaves_a_configured_server_alone(tmp_path: Path, rel: str) -> None:
-    """pi-mcp-adapter 5 also reads these files (Pi's own mcp.json among
-    them): a hivemind entry there wins, so nothing is registered."""
-    env = {
-        "HAS_API": "1",
-        "HIVEMIND_MCP_URL": "u",
-        "HIVEMIND_API_KEY": "hm_x",
-        "HOME": str(tmp_path),
-    }
-    (tmp_path / rel).parent.mkdir(parents=True)
-    (tmp_path / rel).write_text('{"mcpServers": {"hivemind": {"url": "x"}}}')
-    assert _node(_REGISTER_SCRIPT, PI_EXTENSION, **env) == {"registered": []}
-
-
-@needs_node
-def test_the_extension_sends_no_exposure_to_pi_mcp_adapter(tmp_path: Path) -> None:
-    """pi-mcp-adapter 5 connects registered servers behind its proxy and
-    warns at every start about an `exposure` it ignores (checked live with
-    adapter 5.0.0 on Pi 1.0.0)."""
-    env = {
-        "HAS_API": "1",
-        "HIVEMIND_MCP_URL": "u",
-        "HIVEMIND_API_KEY": "hm_x",
-        "HOME": str(tmp_path),
-    }
-    (tmp_path / ".pi" / "agent").mkdir(parents=True)
-    (tmp_path / ".pi" / "agent" / "settings.json").write_text(
-        '{"packages": ["npm:pi-mcp-adapter"]}'
-    )
-    [server] = _node(_REGISTER_SCRIPT, PI_EXTENSION, **env)["registered"]  # type: ignore[index]
-    assert "exposure" not in server["config"]
-    assert server["config"]["url"] == "u"
 
 
 @pytest.mark.parametrize("harness", ["omp", "gemini"])
@@ -1981,9 +1823,8 @@ def test_the_gemini_reference_is_complete() -> None:
     assert "hm_" not in text.replace("hm_…", "")
 
 
-def test_the_pi_reference_does_not_call_lazy_tools_missing() -> None:
+def test_the_pi_reference_tells_how_to_check_for_missing_tools() -> None:
     text = " ".join((SETUP_REFS / "pi.md").read_text().split())
-    assert '"lifecycle": "eager"' in text and '"directTools": true' in text
     assert "Do not conclude the tools are missing" in text
     flat = " ".join(SETUP.split())
     assert "before concluding the tools are missing, try calling `hive_whoami`" in flat
@@ -1996,67 +1837,6 @@ def test_the_launcher_and_readme_admit_incognito_by_restraint() -> None:
     assert "incognito **by restraint**" in developing
     assert "plugin:hivemind:hivemind" in developing
     assert "(DEVELOPING.md)" in readme
-
-
-def test_the_pi_launcher_does_not_leak_a_umask_or_die_on_a_stale_xdg_dir(tmp_path: Path) -> None:
-    """The temp file is 0600 from mktemp (no umask change for the harness), and
-    an unusable XDG_RUNTIME_DIR falls through to TMPDIR."""
-    env = _fake_harness(tmp_path, "pi")
-    (tmp_path / ".pi" / "agent").mkdir(parents=True)  # the adapter route
-    (tmp_path / ".pi" / "agent" / "settings.json").write_text(
-        '{"packages": ["npm:pi-mcp-adapter"]}'
-    )
-    (tmp_path / "bin" / "pi").write_text('#!/bin/sh\numask\nls "$2" >/dev/null && echo CONFIG_OK\n')
-    (tmp_path / "tmp").mkdir()
-    env.update(XDG_RUNTIME_DIR=str(tmp_path / "gone"), TMPDIR=str(tmp_path / "tmp"))
-    lines = _launch(tmp_path, env, "pi")
-    assert lines[-1] == "CONFIG_OK"
-    assert lines[0] != "0077"  # the harness keeps the caller's umask
-    env.pop("HOME")
-    out = subprocess.run(
-        ["sh", str(LAUNCHER), "pi"], env=env, cwd=tmp_path, capture_output=True, text=True
-    )
-    assert out.returncode == 0 and "HOME is not set" in out.stderr
-
-
-_CALLS_NEGATIVE = [
-    {"toolName": "mcp", "input": {"tool": "github_search_code", "args": {"q": "hivemind"}}},
-    {
-        "toolName": "mcp",
-        "input": {"tool": "fs_read", "args": {"path": "/home/u/hivemind/README.md"}},
-    },
-    {
-        "toolName": "mcp",
-        "input": {"tool": "gh_create_issue", "args": {"title": "Fix Hivemind plugin"}},
-    },
-    {
-        "toolName": "mcpScript",
-        "input": {"code": "return await tools.github_search({q: 'hivemind'})"},
-    },
-]
-_CALLS_SURFACES = [
-    {"toolName": "mcp__hivemind", "input": {"tool": "hive_search"}},
-    {"toolName": "mcp", "input": {"server": "hivemind"}},
-    {"toolName": "mcp", "input": {"describe": "hivemind_hive_get"}},
-    {"toolName": "mcp", "input": {"tool": "hive_whoami"}},
-    {
-        "toolName": "mcpScript",
-        "input": {"code": "return await tools.hivemind_hive_search({query: 'x'})"},
-    },
-    {"toolName": "mcpScript", "input": {"code": "await tools['hivemind_hive_write']({})"}},
-]
-
-
-@needs_node
-def test_the_extension_inspects_routing_fields_only_and_covers_the_other_surfaces() -> None:
-    incognito = _node(
-        _EXTENSION_SCRIPT,
-        PI_EXTENSION,
-        CALLS=json.dumps(_CALLS_NEGATIVE + _CALLS_SURFACES),
-        HIVEMIND_INCOGNITO="1",
-    )
-    blocked = [bool(b and b.get("block")) for b in incognito["blocked"]]
-    assert blocked == [False] * len(_CALLS_NEGATIVE) + [True] * len(_CALLS_SURFACES)
 
 
 # -- Reminder texts: every copy, as its runtime sees it, is the canonical one ---

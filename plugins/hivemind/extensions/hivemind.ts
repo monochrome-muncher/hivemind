@@ -10,20 +10,11 @@
  * Deliberately offline: no network call of its own, so it cannot fail or
  * slow a session down. It never prints the key.
  *
- * The MCP server, two ways (both supported for now):
- * - Pi 0.99 and later have a built-in MCP client. This extension
- *   registers the Hivemind server with it (pi.registerMcpServer) from
- *   HIVEMIND_MCP_URL and HIVEMIND_API_KEY, with direct exposure so the
- *   hive_* tools are declared by name. A "hivemind" entry in Pi's own
- *   mcp.json takes precedence over the registration (Pi's rule).
- * - Older Pi, or Pi with pi-mcp-adapter installed (which replaces the
- *   built-in client): the server comes from the adapter's config
- *   (~/.config/mcp/mcp.json, ~/.agents/mcp.json or a project .mcp.json).
- *   When one of those defines "hivemind", nothing is registered, so the
- *   adapter route keeps working unchanged. pi-mcp-adapter 5 connects a
- *   registered server itself, behind its `mcp` proxy tool; it reports
- *   `exposure` as an ignored setting at every start, so none is sent when
- *   the adapter is installed.
+ * The MCP server: Pi 0.99 and later have a built-in MCP client. This
+ * extension registers the Hivemind server with it (pi.registerMcpServer)
+ * from HIVEMIND_MCP_URL and HIVEMIND_API_KEY, with direct exposure so the
+ * hive_* tools are declared by name. A "hivemind" entry in Pi's own
+ * mcp.json takes precedence over the registration (Pi's rule).
  * Oh My Pi has no registerMcpServer (it configures MCP itself), so nothing
  * is registered there either.
  *
@@ -35,9 +26,6 @@
  * Oh My Pi: session_stop), and after a compaction the next system-prompt
  * section carries one extra sentence.
  */
-import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 // The common core is shared, byte for byte, with the Claude Code/Codex
@@ -80,7 +68,7 @@ function incognito(): boolean {
 }
 
 // The Hivemind MCP tools, whatever prefix the MCP bridge gives them
-// (pi-mcp-adapter in Pi, the built-in client in Oh My Pi).
+// (the built-in client in Pi, the route in Oh My Pi).
 const HIVE_TOOL =
 	/(^|[^a-z])hive_(whoami|search|get|list|pinned|pin|write|feedback|withdraw|register)$/;
 
@@ -88,38 +76,11 @@ const HIVE_TOOL =
 // (prefixed) names; Oh My Pi mounts them as routes that the model calls by
 // writing JSON to a path such as xd://mcp__hivemind_hive_whoami (possibly
 // with a trailing slash or a ?query / #fragment), so there the call arrives
-// as a `write` whose path names the Hivemind tool. In pi-mcp-adapter's
-// default mode the tools sit behind ONE `mcp` proxy tool whose arguments
-// name the server and tool ({server: "hivemind"}, {tool:
-// "hivemind_hive_search"}), so for that tool the ROUTING fields are
-// inspected. Never `args`: a search for "hivemind" on another server, or a
-// file that mentions it, is not a Hivemind call.
-const ROUTING_FIELDS = ["server", "connect", "instructions", "tool", "describe"];
-
-function isHivemindRoute(value: unknown): boolean {
-	if (typeof value !== "string") return false;
-	const v = value.trim();
-	return /^hivemind$/i.test(v) || /^hivemind[_-]/i.test(v) || HIVE_TOOL.test(v);
-}
-
-// pi-mcp-adapter's other surfaces: the per-server `mcp__<server>` wrapper
-// namespace, and `mcpScript`, whose `code` calls tools as `tools.<name>(…)`.
-// The script scan is best effort (code can build a name at run time); the
-// launcher's exclusive config, which drops the server, is the real control.
-const SCRIPT_CALL =
-	/tools\s*(\.|\[\s*["'`])hivemind|\bhive_(whoami|search|get|list|pinned|pin|write|feedback|withdraw|register)\b/i;
-
-function isProxyCallToHivemind(name: string, input: any): boolean {
-	if (name === "mcp") return ROUTING_FIELDS.some((f) => isHivemindRoute(input?.[f]));
-	if (/^mcp__hivemind(_|$)/i.test(name)) return true;
-	if (name === "mcpScript") return SCRIPT_CALL.test(String(input?.code ?? ""));
-	return false;
-}
-
+// as a `write` whose path names the Hivemind tool.
 function isHivemindCall(event: any): boolean {
 	const name = String(event.toolName ?? "");
 	if (HIVE_TOOL.test(name)) return true;
-	if (isProxyCallToHivemind(name, event.input)) return true;
+	if (/^mcp__hivemind(_|$)/i.test(name)) return true;
 	const path = String(event.input?.path ?? "").trim();
 	if (!/^xd:\/\//i.test(path)) return false;
 	const route = path.slice("xd://".length).replace(/[?#].*$/, "").replace(/\/+$/, "");
@@ -127,21 +88,14 @@ function isHivemindCall(event: any): boolean {
 }
 
 // Does this call name one of these tools (a write, a rating, a read of
-// entries), by any of the routes above? A script counts when its code names
-// the tool: each tool has an exact pattern for a name and a code pattern
-// for a mention in a script's code.
-type Tool = { exact: RegExp; code: RegExp };
-const WROTE: Tool = { exact: /(^|[^a-z])hive_write$/, code: /(^|[^a-z])hive_write\b/ };
-const RATED: Tool = { exact: /(^|[^a-z])hive_feedback$/, code: /(^|[^a-z])hive_feedback\b/ };
-const READ: Tool = { exact: /(^|[^a-z])hive_(search|get)$/, code: /(^|[^a-z])hive_(search|get)\b/ };
+// entries), by any of the routes above?
+type Tool = { exact: RegExp };
+const WROTE: Tool = { exact: /(^|[^a-z])hive_write$/ };
+const RATED: Tool = { exact: /(^|[^a-z])hive_feedback$/ };
+const READ: Tool = { exact: /(^|[^a-z])hive_(search|get)$/ };
 
 function names(tool: Tool, name: string, input: any): boolean {
 	if (tool.exact.test(name)) return true;
-	if (name === "mcp") {
-		return ROUTING_FIELDS.some((f) => typeof input?.[f] === "string" && tool.exact.test(input[f].trim()));
-	}
-	const code = input?.code;
-	if (typeof code === "string" && tool.code.test(code)) return true;
 	const path = String(input?.path ?? "").trim();
 	if (!/^xd:\/\//i.test(path)) return false;
 	return tool.exact.test(path.slice("xd://".length).replace(/[?#].*$/, "").replace(/\/+$/, ""));
@@ -172,71 +126,20 @@ function section(): string {
 	return `${CORE} ${state}${extra}`;
 }
 
-function piAgentDir(): string | undefined {
-	if (process.env.PI_CODING_AGENT_DIR) return process.env.PI_CODING_AGENT_DIR;
-	try {
-		return join(homedir(), ".pi", "agent");
-	} catch {
-		return undefined;
-	}
-}
-
-function readJson(path: string): any {
-	try {
-		return JSON.parse(readFileSync(path, "utf8"));
-	} catch {
-		return undefined;
-	}
-}
-
-// Is pi-mcp-adapter installed? The same test as the incognito launcher's:
-// Pi's settings name it.
-function adapterInstalled(): boolean {
-	const dir = piAgentDir();
-	const paths = [join(".pi", "settings.json"), ...(dir ? [join(dir, "settings.json")] : [])];
-	return paths.some((path) => {
-		try {
-			return readFileSync(path, "utf8").includes("pi-mcp-adapter");
-		} catch {
-			return false;
-		}
-	});
-}
-
-// The MCP config files pi-mcp-adapter 5 reads (Pi's own mcp.json among
-// them). A "hivemind" entry in one of them means the user configured the
-// server by hand, the pre-0.99 way: leave it to that entry.
-function configuresHivemind(): boolean {
-	const paths = [".mcp.json", join(".pi", "mcp.json"), join(".pi", "mcp-adapter.json")];
-	const dir = piAgentDir();
-	if (dir) paths.push(join(dir, "mcp.json"), join(dir, "mcp-adapter.json"));
-	try {
-		const home = homedir();
-		paths.push(
-			join(home, ".config", "mcp", "mcp.json"),
-			join(home, ".agents", "mcp.json"),
-			join(home, ".agents", "mcp", "mcp.json"),
-		);
-	} catch {
-		// No home directory: only the other files are checked.
-	}
-	return paths.some((path) => Boolean(readJson(path)?.mcpServers?.hivemind));
-}
-
 // Pi 0.99+: register the Hivemind server with the built-in MCP client.
-// Not in an incognito session, not without a URL and key (an empty
-// `Bearer ` header would only produce a 401 loop), and not when the
-// adapter route already defines the server.
+// Not in an incognito session, and not without a URL and key (an empty
+// `Bearer ` header would only produce a 401 loop). A "hivemind" entry in
+// Pi's own mcp.json takes precedence over this registration (Pi's rule).
 function registerServer(pi: any): void {
 	if (typeof pi.registerMcpServer !== "function" || incognito()) return;
 	const url = process.env.HIVEMIND_MCP_URL;
 	const key = process.env.HIVEMIND_API_KEY;
-	if (!url || !key || configuresHivemind()) return;
+	if (!url || !key) return;
 	try {
 		pi.registerMcpServer("hivemind", {
 			url,
 			headers: { Authorization: `Bearer ${key}` },
-			...(adapterInstalled() ? {} : { exposure: "direct" }),
+			exposure: "direct",
 			description: "Your organization's shared long-term memory (the hive_* tools)",
 		});
 	} catch {

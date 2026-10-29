@@ -218,11 +218,7 @@ pi install git:github.com/monochrome-muncher/hivemind
 Add `@v<version>` to stay on one release. From a local copy, use
 `pi install /path/to/hivemind/plugins/hivemind`.
 
-On Pi 0.99 and later the plugin also sets up the MCP connection. On older
-Pi, or if you use
-[pi-mcp-adapter](https://www.npmjs.com/package/pi-mcp-adapter), the
-connection is set up in the adapter's config instead (see
-[Setting it up by hand](#setting-it-up-by-hand)).
+On Pi 0.99 and later the plugin sets up the MCP connection.
 
 ### Oh My Pi
 
@@ -433,23 +429,7 @@ export HIVEMIND_API_KEY="hm_…"   # the org key at first, the agent key once ac
   ```
 
 - **Pi**: the shell that starts `pi`. On Pi 0.99 and later nothing else is
-  needed. With pi-mcp-adapter, the connection goes in
-  `~/.config/mcp/mcp.json` (all projects) or a project's `.mcp.json`. The
-  last two settings make the tools load at startup under their own names:
-
-  ```json
-  {
-    "mcpServers": {
-      "hivemind": {
-        "type": "http",
-        "url": "${HIVEMIND_MCP_URL}",
-        "headers": { "Authorization": "Bearer ${HIVEMIND_API_KEY}" },
-        "lifecycle": "eager",
-        "directTools": true
-      }
-    }
-  }
-  ```
+  needed.
 
 - **Oh My Pi**: the shell that starts `omp`. The plugin sets up the
   connection from both variables. Nothing goes in
@@ -554,10 +534,7 @@ How well it works depends on the agent:
 
 - **Claude Code, DeepSeek Harness, Gemini CLI (installed as an
   extension), Pi, Oh My Pi, OpenCode and KiloCode**: the Hivemind tools
-  aren't loaded at all, and there is nothing to set up. Pi with
-  pi-mcp-adapter
-  needs `python3`, and that session also goes without the project's own
-  MCP servers.
+  aren't loaded at all, and there is nothing to set up.
 - **Cline**: the tools aren't loaded as long as the connection uses the
   `${env:…}` references described above. The launcher unsets the two
   variables, so the references stay unexpanded and the server never
