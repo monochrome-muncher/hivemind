@@ -1502,3 +1502,50 @@ on another hit, a falsely flagged best entry gets 22% of uses instead of 16%
 after a false `wrong`, and 35% instead of 32% after a false `stale`; a true
 `wrong` on a bad entry raises failed uses by at most 0.2 points. The table is
 in [ADR 0106](adr/0106-confirmation-halves-older-flags.md#measurement).
+
+## What goes into the embedded text (ROADMAP §4.2(a), 2026-10-29)
+
+*(tool: `tests/eval/embed_text.py`, `make measure-embed-text`)*
+Today an entry is embedded from `summary` + a bounded `body` prefix
+(`embeddable_text`, SPEC §7). This measures whether adding the other fields an
+entry carries to that text — its `kind` and its `tags` (the corpus's proxy for
+the extracted entity names, ADR 0016) — helps retrieval or just adds noise to
+one shared vector. Chunking (several vectors per entry) is out of scope (SPEC
+§4.1 commits to one embedding per entry). The query side is unchanged, so the
+entry text is the only thing that differs between runs.
+
+**Setup.** Qwen3-Embedding through vLLM on CPU (`make vllm`): the 0.6B at 512
+dimensions and the 8B at its native 1024. The sixteen domain fixtures, 646
+answerable queries pooled. Each variant re-embeds every entry; the known labels
+are `baseline` (today's text), `+kind`, `+tags` and `+kind+tags`.
+
+**Ranking.** Pooled hit@1 / hit@5 / MRR, baseline then each variant, per model.
+
+| 0.6B (512 dim) | hit@1 / hit@5 / MRR | Δ vs baseline (hit@1 / hit@5 / MRR) |
+|---|---|---|
+| `baseline` | 0.718 / 0.941 / 0.808 | baseline |
+| `+kind` | 0.731 / 0.935 / 0.809 | +0.012 / -0.006 / +0.001 |
+| `+tags` | 0.740 / 0.938 / 0.817 | +0.022 / -0.003 / +0.009 |
+| `+kind+tags` | 0.738 / 0.933 / 0.817 | +0.020 / -0.008 / +0.009 |
+
+| 8B (1024 dim) | hit@1 / hit@5 / MRR | Δ vs baseline (hit@1 / hit@5 / MRR) |
+|---|---|---|
+| `baseline` | 0.752 / 0.958 / 0.835 | baseline |
+| `+kind` | 0.726 / 0.954 / 0.819 | -0.026 / -0.005 / -0.016 |
+| `+tags` | 0.741 / 0.958 / 0.827 | -0.011 / +0.000 / -0.008 |
+| `+kind+tags` | 0.741 / 0.955 / 0.828 | -0.011 / -0.003 / -0.007 |
+
+The pooled MRR move **flips sign between the two models**: `+tags` is +0.009
+on the 0.6B and -0.008 on the 8B; `+kind` is +0.001 and -0.016. Per domain the
+effect is uneven in both directions on both models — `+tags` raises MRR in 7 of
+16 domains on the 0.6B (finance +0.043, intelligence +0.060, red team +0.027,
+legal +0.035, database +0.030) and in 6 of 16 on the 8B (intelligence +0.023,
+red team +0.052, system administration +0.016, data analysis +0.012, legal
++0.015), and lowers it in the rest; the domains it helps are not the same in
+both models. `+kind` is essentially neutral on the 0.6B (raises MRR in 5 of 16,
+lowers it in 11) and mildly negative on the 8B (6 of 16, 10 of 16).
+`+kind+tags` gains nothing over `+tags` on either model. So the small pooled
+moves are within noise, not a signal: **no field is a consistent win across
+models**, and the current `summary` + bounded `body` text stands — **no code
+change**. (Real extracted entity names, ADR 0016, were not measured: the eval
+corpus carries no extractor output, so tags stand in for them.)
