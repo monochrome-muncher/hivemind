@@ -21,6 +21,7 @@ The dev environment is `uv`-managed (Python 3.14); Postgres (with pgvector) runs
 | Install deps (creates `.venv`) | `make install` (or `uv sync`) |
 | Start Postgres (pgvector, `localhost:5432`, db `hivemind`) | `make pg` |
 | Start the full local stack in docker (API :8000, admin :8089, portal :8090, MCP :8088) | `make up` (or `docker compose up -d`) |
+| Start the local vLLM embedding server (CPU; Qwen3-Embedding on `localhost:8001`, ADR 0005) | `make vllm` (or `docker compose up -d vllm`) |
 | Start the standalone stack (API :8100, admin :8189, portal :8190, MCP :8188, pg :5433 db `hivemind_live`) — survives `make test` | `make standalone` / `make standalone-rebuild` / `make standalone-down` / `make standalone-reset` |
 | Issue an admin key for the standalone pool (keys are per-pool) | `HIVEMIND_DATABASE_URL=postgresql://hivemind:hivemind@localhost:5433/hivemind_live uv run hivemind-keys issue-admin` |
 | Apply DB migrations (ordered chain, advisory-locked; ADR 0020) | `make migrate` (or `uv run hivemind-migrate`) |

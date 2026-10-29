@@ -269,7 +269,7 @@ The first 12 hex characters of a key's stored SHA-256 hash — what `hivemind-ke
 _Avoid_: key id, key prefix (it is a prefix of the hash, never of the key)
 
 **Dead credential**:
-A stored key that no longer authenticates although its row remains: a pre-v2 `user` key, an agent key without a registered name, or the key of an agent that is not active (ADR 0039). `hivemind-keys list` marks it `[dead]`.
+A stored key that no longer authenticates although its row remains: a pre-v2 `user` key, an agent key without a registered name, or the key of an agent that is not active (ADR 0039). `hivemind-keys list` marks it `[dead: …]`.
 _Avoid_: expired key (keys do not expire), revoked key (revocation deletes the key)
 
 **Dev-mode credential**:
