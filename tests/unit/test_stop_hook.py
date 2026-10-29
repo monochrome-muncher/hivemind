@@ -488,8 +488,6 @@ def test_oh_my_pi_blocks_a_long_session_once() -> None:
     [
         {"toolName": "mcp__hivemind__hive_write", "args": {}},
         {"toolName": "hivemind_hive_feedback", "args": {}},
-        {"toolName": "mcp", "args": {"tool": "hivemind_hive_write", "args": {}}},
-        {"toolName": "mcpScript", "args": {"code": "await tools.hivemind_hive_write({})"}},
         {"toolName": "write", "args": {"path": "xd://mcp__hivemind_hive_feedback/"}},
         {"toolName": "hive_write", "args": {}, "parentToolCallId": "c1"},
     ],
@@ -505,7 +503,6 @@ def test_a_session_that_wrote_or_rated_is_not_reminded(call: dict[str, object]) 
     [
         ({"toolName": "mcp__hivemind__hive_search", "args": {}}, "hive_write"),
         ({"toolName": "hivemind_hive_get", "args": {}}, "hive_write"),
-        ({"toolName": "mcp", "args": {"tool": "hivemind_hive_get", "args": {}}}, "hive_write"),
     ],
 )
 def test_a_pi_session_that_wrote_but_read_and_never_rated_is_reminded(

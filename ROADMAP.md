@@ -60,8 +60,9 @@ The SPEC §10 extensions (Tier 5) stay held until their triggers fire.
   change. The off-by-default ranking settings (§3.15) are turned on only
   after their measurement passes with the deployment's embedder.
 - **Parked ideas**: a `question` entry kind (wait for the empty-search
-  counters of ADR 0056 to show demand). The legacy `pi-mcp-adapter` route in the Pi plugin is to be
-  dropped once Pi's built-in MCP (0.99+) is the norm.
+  counters of ADR 0056 to show demand). The legacy `pi-mcp-adapter` route in
+  the Pi plugin was dropped once Pi's built-in MCP (0.99+) became the norm
+  (2.16.0).
 - **Discovery and learning ideas** ([docs/proposals/2026-10-20-discovery-and-learning-ideas.md](docs/proposals/2026-10-20-discovery-and-learning-ideas.md)):
   a re-check queue and a librarian skill, searchable tags, a tag
   directory, "used together" trails and an ambient-recall pilot, kept as

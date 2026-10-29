@@ -44,7 +44,7 @@ reminder that survives compaction and new sessions.
 | Codex | the user's `~/.codex/config.toml` (plugin MCP config cannot read the URL and key from the environment) | the plugin | `SessionStart` hook, which the user must trust in `/hooks` |
 | DeepSeek Harness | the bundle's row in `cordis.patch.yml` | `dsh/hivemind-skills.js` | none needed: DSH keeps the server's instructions in the system prompt |
 | Hermes | the user's `~/.hermes/config.yaml` | the plugin | the plugin's system-prompt section (Hermes 0.21.5+), else the `SOUL.md` instruction block (see below) |
-| Pi | the extension registers it with Pi 0.99+ built-in MCP; with pi-mcp-adapter, the adapter's config | the package | the extension's system-prompt section |
+| Pi | the extension registers it with the built-in MCP client (Pi 0.99+) | the package | the extension's system-prompt section |
 | Oh My Pi | the plugin's `.mcp.json` (server `hivemind:hivemind`; a hand `hivemind` entry in `~/.omp/agent/mcp.json` replaces it) | the plugin | the extension's system-prompt section |
 | OpenCode | `opencode/hivemind.js` (skipped if a hand-configured `hivemind` server exists or no key is set; supports v1 and v2) | the plugin | added to every model request |
 | KiloCode | `opencode/hivemind.js` via the `plugin` key (KiloCode is an OpenCode fork; the v1 key gives the full feature set, the v2 `plugins` key only the skills) | the plugin | added to every model request |
@@ -78,13 +78,10 @@ itself names no harness-specific paths, and a test enforces this.
   both skills register and the section renders. Hermes also loads
   `~/.hermes/.env` over the process environment, which matters for
   incognito.
-- **Pi** supports two MCP routes for now: the built-in client (Pi 0.99+),
-  where the extension registers the server unless an adapter config
-  already defines `hivemind`, and the older pi-mcp-adapter. pi-mcp-adapter
-  5 also connects servers that extensions register (behind its `mcp`
-  proxy, ignoring `exposure`), so the extension sends no `exposure` when
-  the adapter is installed. Checked live with Pi 1.0.0 and pi-mcp-adapter
-  5.0.0. The adapter route can be dropped later.
+- **Pi** uses the built-in MCP client (Pi 0.99+): the extension registers
+  the server with it, with direct exposure, unless a hand-written
+  `hivemind` entry in `~/.pi/agent/mcp.json` takes precedence (Pi's rule).
+  Checked live with Pi 1.0.0.
 - **Oh My Pi** loads the plugin's `.mcp.json` as the server
   `hivemind:hivemind`, expanding `${VAR}` in the URL and the header, and
   mounts MCP tools as routes (`xd://mcp__hivemind_hivemind_hive_*`, or
@@ -345,7 +342,7 @@ does two things:
 | Codex | `-c mcp_servers.hivemind.enabled=false`; the launcher also unsets the key | the `mcp_servers.hivemind` entry in `~/.codex/config.toml` or `.codex/config.toml` |
 | DeepSeek Harness | the bundle's server row switches itself off | nothing |
 | Hermes | `HIVEMIND_ENABLED=false` | `enabled: ${HIVEMIND_ENABLED}` in the hivemind server entry in `~/.hermes/config.yaml`, and **no** `HIVEMIND_ENABLED` in `~/.hermes/.env` (Hermes loads it over the environment, so it would override the launcher); for normal sessions leave it unset or export `HIVEMIND_ENABLED=true` in the shell profile |
-| Pi | Pi 0.99+ built-in MCP: the package registers no server, and the key and URL are unset. With pi-mcp-adapter: an exclusive MCP config, the servers of your global MCP config files minus hivemind (project servers are left out: the adapter would start them without its approval prompt). Either way the extension also blocks `mcp__hivemind…` calls (codemode scripts included), the adapter's `mcp` proxy and `mcpScript` calls that name Hivemind (the `mcpScript` scan is best effort) | the hivemind package; `python3` with the adapter |
+| Pi | the package registers no server, and the key and URL are unset; a hand-written `mcp.json` entry that reads `${HIVEMIND_MCP_URL}` has no URL. The extension also blocks `mcp__hivemind…` calls (codemode scripts included) and the Oh My Pi `xd://` routes | the hivemind package |
 | Oh My Pi | `HIVEMIND_MCP_URL`/`HIVEMIND_API_KEY` unset, so the server is never contacted (Oh My Pi warns once that it is unavailable); the extension also blocks any Hivemind call | the hivemind plugin |
 | GitHub Copilot CLI | `--disable-mcp-server hivemind` for the session (it never contacts the server); the launcher also unsets the key and URL | the server named `hivemind` in `~/.copilot/mcp-config.json` |
 | Gemini CLI | `HIVEMIND_MCP_URL`/`HIVEMIND_API_KEY` unset, so the extension's server is never contacted (Gemini notes an MCP issue) | the hivemind extension, and no hand entry in `settings.json` |
