@@ -901,7 +901,10 @@ SELECT f.entry_id, f."user", f.agent, f.verdict, f.note, f.updated_at,
 # verdict, oldest first flag first. $1 is now; "orphaned" is
 # HEALTH_BY_FLEET's rule (author revoked, or no write in the 720 hours
 # before now). {inner} filters the entry (visibility, fleet), {outer} the
-# listed row (first flag age, orphaned).
+# listed row (first flag age, orphaned). {narrow} is empty or limits the
+# grouped ratings to the fleet's or authors' entries: without it, every
+# rating in the pool is grouped on each read, which the portal's per-agent
+# list cannot afford.
 FLAG_BACKLOG = f"""
 WITH flagged AS (
     SELECT f.entry_id,
@@ -909,7 +912,7 @@ WITH flagged AS (
            max(f.updated_at) FILTER (WHERE f.verdict IN ('stale', 'wrong')) AS last_flag,
            {_VERDICT_COUNTS}
       FROM feedbacks f
-     WHERE {_RATING_COUNTS}
+     WHERE {_RATING_COUNTS}{{narrow}}
      GROUP BY f.entry_id
     HAVING count(*) FILTER (WHERE f.verdict IN ('stale', 'wrong')) > 0
 ), backlog AS (
@@ -2234,20 +2237,27 @@ class PgStore:
         visibility: Visibility | None = None,
     ) -> list[FlaggedEntry]:
         """The flag backlog, oldest first flag first. Every standing flag is
-        grouped before the page is cut: flagged entries are few, and only
-        the admin panel reads this."""
+        grouped before the page is cut: flagged entries are few. A fleet or
+        author filter narrows the grouped ratings to those entries first."""
         params: list[Any] = [now]
         inner = ["TRUE"]
         outer = ["TRUE"]
+        entry_filter: list[str] = []
         if filters.fleet_id is not None:
             if is_valid_uuid(filters.fleet_id):
                 params.append(filters.fleet_id)
-                inner.append(f"e.fleet_id = ${len(params)}")
+                entry_filter.append(f"fleet_id = ${len(params)}")
             else:
                 inner.append("FALSE")
         if filters.authors:
             params.append(list(filters.authors))
-            inner.append(f"e.author = ANY(${len(params)}::text[])")
+            entry_filter.append(f"author = ANY(${len(params)}::text[])")
+        inner += [f"e.{c}" for c in entry_filter]
+        narrow = (
+            " AND f.entry_id IN (SELECT id FROM entries WHERE " + " AND ".join(entry_filter) + ")"
+            if entry_filter
+            else ""
+        )
         vis = _visibility_clause(visibility, params, "e.")
         if vis is not None:
             inner.append(vis)
@@ -2257,6 +2267,7 @@ class PgStore:
         if filters.orphaned:
             outer.append("orphaned")
         sql = FLAG_BACKLOG.format(
+            narrow=narrow,
             inner=" AND ".join(inner),
             outer=" AND ".join(outer),
             limit=len(params) + 1,
