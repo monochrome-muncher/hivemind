@@ -300,14 +300,13 @@ Explore search is opt-in per search (ADR 0078). Results are in
 
   **(a) WHAT is embedded — measured, no change (2026-10-29).** Today:
   `summary` + a bounded `body` prefix (SPEC §7). Measured against
-  Qwen3-Embedding-0.6B on the sixteen-domain corpus (`make
+  Qwen3-Embedding-0.6B and -8B on the sixteen-domain corpus (`make
   measure-embed-text`, `tests/eval/embed_text.py`, in
-  [docs/retrieval-experiments.md](docs/retrieval-experiments.md)): adding
-  `tags` (the corpus's proxy for the extracted entity names, ADR 0016) is a
-  small domain-specific wash (pooled hit@1 +0.022 / MRR +0.009, hit@5
-  -0.003; helps 7 of 16 domains, hurts 9), and adding `kind` is neutral
-  (helps 5 of 16, hurts 11). No field is a consistent win, so the current
-  text stands; no code change.
+  [docs/retrieval-experiments.md](docs/retrieval-experiments.md)): the pooled
+  MRR move flips sign between the models (`+tags` +0.009 on the 0.6B, -0.008
+  on the 8B; `+kind` +0.001, -0.016), and per-domain the effect is
+  domain-specific and not the same in both. No field is a consistent win, so
+  the current text stands; no code change.
 
   **(b) HOW MUCH, and in what unit — settled by ADR 0021.** The budget
   is **2000 whitespace-delimited words** (`EMBEDDING_PREFIX_TOKENS`),
