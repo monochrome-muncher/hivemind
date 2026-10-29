@@ -454,9 +454,14 @@ curl -s -X POST -H "X-API-Key: $ADMIN_KEY" \
 
 **What to expect.**
 
-- **Writes to the two fleets wait briefly.** The merge locks both fleet
-  rows while it moves the memories, a few seconds per 10,000 memories, so
-  pick a quiet time. A merge and an undo run without the usual 30 second
+- **Writes to the two fleets pause, possibly for minutes.** The merge
+  locks both fleet rows while it moves the memories. Each moved memory is
+  rewritten and its vector re-inserted into the search index, which took
+  about 12 ms per memory on a 200k-memory test pool: roughly a minute per
+  5,000 memories, and the undo as long. The panel's preview shows the
+  estimate for the fleets you picked. Merge large fleets at a quiet time,
+  since fleet writes are refused (below) until it finishes. A merge and an
+  undo run without the usual 30 second
   database command limit, so a large fleet is not cut off halfway (the
   work is one transaction, so a failure leaves nothing changed). A write
   that was already on its way to the source fleet is refused with
@@ -766,8 +771,8 @@ curl -s -X POST -H "X-API-Key: $ADMIN_KEY" \
   answer is `409 move_refused` and names the agents that do not (an unknown
   name is listed too). The target must be another fleet that has not been
   merged away (`409 fleet_merged`).
-- **Writes to the two fleets wait briefly**, as for a merge (section 7): a
-  few seconds per 10,000 memories, `503 fleet_busy` for a write that waits
+- **Writes to the two fleets pause**, as for a merge (section 7): about a
+  minute per 5,000 moving memories, `503 fleet_busy` for a write that waits
   more than 3 seconds, and `409 move_refused` with no change when the move
   cannot get its locks within 5 seconds or deadlocks. Run it again. A write
   by a moving agent that was already on its way to the old fleet when the
