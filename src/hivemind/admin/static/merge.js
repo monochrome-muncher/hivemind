@@ -12,10 +12,23 @@ import { openEntry } from "./drawer.js";
 const NEW = "__new__";
 const ENTRY_STATES = ["active", "superseded", "withdrawn"];
 
+const totalOf = (entries) => Object.values(entries || {}).reduce((a, b) => a + b, 0);
+
 const entryCounts = (entries) => {
-  const total = Object.values(entries || {}).reduce((a, b) => a + b, 0);
+  const total = totalOf(entries);
   const parts = ENTRY_STATES.filter((s) => entries && entries[s]).map((s) => `${fmtNum(entries[s])} ${s}`);
   return `${fmtNum(total)} memories${parts.length ? ` (${parts.join(", ")})` : ""}`;
+};
+
+// Re-filing a memory rewrites its row and re-inserts its vector into the search
+// index: about 12 ms each on a 200k-memory bench (2026-10-29 perf check). Fleet
+// writes are refused with 503 fleet_busy until it commits, so say how long.
+const MS_PER_MEMORY = 12;
+const lockNote = (memories) => {
+  const seconds = Math.ceil((memories * MS_PER_MEMORY) / 1000);
+  if (seconds < 5) return "Writes to either fleet wait a moment while it runs.";
+  const about = seconds < 90 ? `${seconds} seconds` : `${Math.round(seconds / 60)} minutes`;
+  return `Re-filing ${fmtNum(memories)} memories can take up to about ${about}, and the undo as long. Until it finishes, writes to either fleet are refused with "fleet busy, retry", so pick a quiet time.`;
 };
 
 const side = (s) => h("div", { class: "merge-side" },
@@ -118,7 +131,7 @@ export function mergeDialog(source, onDone) {
       holder.replaceChildren(
         h("div", { class: "merge-sides" }, side(preview.source), side(preview.target)),
         h("p", { class: "callout callout-warn small" },
-          `${source.name} gives up all its memories and agents to ${preview.target.name}. Agents keep their keys and read the merged pool from their next request. Writes to either fleet wait a moment while it runs. You can undo it from the list of merges.`),
+          `${source.name} gives up all its memories and agents to ${preview.target.name}. Agents keep their keys and read the merged pool from their next request. ${lockNote(totalOf(preview.source.entries))} You can undo it from the list of merges.`),
         ...[checklist && checklist.el, duplicatesBlock(preview)].filter(Boolean));
       confirmField.hidden = false;
     } catch (err) {
@@ -242,7 +255,7 @@ export function moveDialog(source, onDone) {
           stay.length
             ? ` ${stay.join(", ")} stay${stay.length === 1 ? "s" : ""} in ${source.name} and lose access to ${preview.leaving === 1 ? "the memory that leaves" : `the ${fmtNum(preview.leaving)} memories that leave`} (privileged agents can still read them as foreign entries).`
             : ` No agent stays in ${source.name}.`,
-          ` Keys do not change. Writes to either fleet wait a moment while it runs. You can undo it from the list below the fleets.`),
+          ` Keys do not change. ${lockNote(preview.leaving)} You can undo it from the list below the fleets.`),
         checklist && checklist.el);
       confirmField.hidden = false;
     } catch (err) {
