@@ -89,7 +89,7 @@ async def entry_links(store: Store, entry_id: str, visibility: Visibility) -> En
     entry the reader may not see is left out, as if the link did not
     exist; ``linked_from`` holds at most ``MAX_LINKED_FROM``, newest link
     first."""
-    outgoing, incoming = await store.entry_links(entry_id, MAX_LINKED_FROM)
+    outgoing, incoming = await store.entry_links(entry_id, MAX_LINKED_FROM, visibility=visibility)
     if not outgoing and not incoming:
         return EntryLinks()
     found = await get_visible_entries(store, list(dict.fromkeys(outgoing + incoming)), visibility)
@@ -103,7 +103,7 @@ async def entries_links(
     many there are (ADR 0059), keyed by ``entry_ids``."""
     if not entry_ids:
         return {}
-    raw = await store.entry_links_many(entry_ids, MAX_LINKED_FROM)
+    raw = await store.entry_links_many(entry_ids, MAX_LINKED_FROM, visibility=visibility)
     linked = list(dict.fromkeys(i for out, inc in raw.values() for i in out + inc))
     found = await get_visible_entries(store, linked, visibility) if linked else {}
     return {eid: _links_of(outgoing, incoming, found) for eid, (outgoing, incoming) in raw.items()}

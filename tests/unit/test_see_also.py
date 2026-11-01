@@ -156,6 +156,26 @@ async def test_linked_from_is_capped_newest_first() -> None:
     assert _ids(result["linked_from"]) == list(reversed(linkers))[:MAX_LINKED_FROM]
 
 
+async def test_unreadable_and_withdrawn_links_do_not_crowd_out_a_visible_one() -> None:
+    """The cap counts only links the reader can see, so newer links from
+    another fleet or from withdrawn entries leave the visible one in."""
+    store = MemoryStore(make_clock())
+    target = await store.create_entry(
+        EntryDraft(kind="fact", summary="org-wide fact", author="admin", agent="admin", scope="org")
+    )
+    visible = await _write(store, ALICE, "visible linker", see_also=[target.id])
+    for i in range(MAX_LINKED_FROM):
+        await _write(store, CAROL, f"fleet-b linker {i}", see_also=[target.id])
+    withdrawn = await _write(store, ALICE, "withdrawn linker", see_also=[target.id])
+    await hive_withdraw(_surface(store, ALICE), withdrawn, reason="wrong")
+    for i in range(MAX_LINKED_FROM):
+        await _write(store, CAROL, f"carol self {i}", see_also=[target.id], scope="self")
+    alice = _surface(store, ALICE)
+    assert _ids((await hive_get(alice, target.id))["linked_from"])[-1] == visible
+    batch = await hive_get(alice, entry_ids=[target.id])
+    assert visible in _ids(batch["entries"][0]["linked_from"])  # type: ignore[index]
+
+
 async def test_rest_write_and_reads_carry_links() -> None:
     store = MemoryStore(make_clock())
     app = create_app_for_config(

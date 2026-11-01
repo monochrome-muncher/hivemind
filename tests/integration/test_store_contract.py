@@ -955,6 +955,31 @@ async def test_links_read_from_both_ends(adapter: Adapter) -> None:
     assert list(many) == [a.id, c.id, NO_SUCH_ID, "not-a-uuid"]
 
 
+async def test_incoming_links_cap_counts_only_active_readable_sources(adapter: Adapter) -> None:
+    store = adapter.store
+    blue = (await store.create_fleet("blue")).id
+    red = (await store.create_fleet("red")).id
+    target = await write(adapter, "target", author="t", scope="org")
+    mine = await write(
+        adapter, "mine", author="me", scope="fleet", fleet_id=blue, see_also=(target.id,)
+    )
+    gone = await write(adapter, "gone", author="me", scope="org", see_also=(target.id,))
+    await store.withdraw_entry(gone.id, None, by_user="me")
+    # Newer links from another fleet and from someone's self entries.
+    for i in range(3):
+        await write(
+            adapter, f"red {i}", author="r", scope="fleet", fleet_id=red, see_also=(target.id,)
+        )
+        await write(adapter, f"self {i}", author="r", scope="self", see_also=(target.id,))
+    reader = _vis(TrustLevel.CONTRIBUTOR, "me", blue)
+    assert await store.entry_links(target.id, 2, visibility=reader) == ([], [mine.id])
+    many = await store.entry_links_many([target.id], 2, visibility=reader)
+    assert many[target.id] == ([], [mine.id])
+    # Without a visibility only the state filter applies.
+    _, unrestricted = await store.entry_links(target.id, 100)
+    assert gone.id not in unrestricted and len(unrestricted) == 7
+
+
 async def test_links_of_one_write_read_in_id_order(adapter: Adapter) -> None:
     a = await write(adapter, "a")
     b = await write(adapter, "b")

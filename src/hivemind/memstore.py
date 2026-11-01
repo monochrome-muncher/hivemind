@@ -276,7 +276,9 @@ class MemoryStore:
                     self._links[(entry.id, target_id)] = now
         return entry
 
-    async def entry_links(self, entry_id: str, limit: int) -> tuple[list[str], list[str]]:
+    async def entry_links(
+        self, entry_id: str, limit: int, *, visibility: Visibility | None = None
+    ) -> tuple[list[str], list[str]]:
         if not is_valid_uuid(entry_id):
             return [], []
         key = str(uuid.UUID(entry_id))
@@ -284,15 +286,22 @@ class MemoryStore:
             # PgStore's ``ORDER BY created_at, to_id`` and
             # ``created_at DESC, from_id``.
             out_rows = sorted((at, to) for (frm, to), at in self._links.items() if frm == key)
-            in_rows = [(at, frm) for (frm, to), at in self._links.items() if to == key]
+            in_rows = [
+                (at, frm)
+                for (frm, to), at in self._links.items()
+                if to == key
+                and (src := self._entries.get(frm)) is not None
+                and src.state is EntryState.ACTIVE
+                and self._visible(src, visibility)
+            ]
         in_rows.sort(key=lambda r: r[1])
         in_rows.sort(key=lambda r: r[0], reverse=True)
         return [to for _, to in out_rows], [frm for _, frm in in_rows[:limit]]
 
     async def entry_links_many(
-        self, entry_ids: list[str], limit: int
+        self, entry_ids: list[str], limit: int, *, visibility: Visibility | None = None
     ) -> dict[str, tuple[list[str], list[str]]]:
-        return {eid: await self.entry_links(eid, limit) for eid in entry_ids}
+        return {eid: await self.entry_links(eid, limit, visibility=visibility) for eid in entry_ids}
 
     async def upstream_links(
         self, entry_ids: list[str], *, visibility: Visibility | None = None
