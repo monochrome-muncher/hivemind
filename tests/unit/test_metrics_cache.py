@@ -152,3 +152,66 @@ async def test_agents_fleets_and_searches_are_read_on_every_report() -> None:
     assert second.agents.total == 1
     assert second.fleets.total == 1
     assert asdict(second.searches.by_fleet["ml"]) == {"total": 1, "empty": 1, "explore": 0}
+
+
+class _GatedStore(_CountingStore):
+    """``usage_counts`` and ``fleet_health`` park on events once armed, so a
+    test can invalidate while a scan is in flight."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.gate = False
+
+    async def usage_counts(self) -> list[UsageCount]:
+        rows = await super().usage_counts()  # the rows as of the scan start
+        if self.gate:
+            self.gate = False
+            self.started.set()
+            await self.release.wait()
+        return rows
+
+
+async def test_invalidate_mid_scan_keeps_the_stale_scan_out_of_the_cache() -> None:
+    store, clock = _GatedStore(), _Tick()
+    service = _service(store, clock)
+    store.gate = True
+    first = asyncio.create_task(service.usage_report())
+    await store.started.wait()
+    service.invalidate()  # e.g. a fleet merge lands while the scan runs
+    store.release.set()
+    await first  # the in-flight caller still gets its own result
+    assert store.calls["usage"] == 1
+    await service.usage_report()
+    assert store.calls["usage"] == 2  # rescanned, not served the stale scan
+    await service.usage_report()
+    assert store.calls["usage"] == 2  # and the fresh scan is cached
+
+
+async def test_invalidate_mid_health_scan_keeps_it_out_of_the_cache() -> None:
+    store, clock = _GatedStore(), _Tick()
+    started, release = asyncio.Event(), asyncio.Event()
+    calls = 0
+    real = store.fleet_health
+
+    async def gated(wall):  # type: ignore[no-untyped-def]
+        nonlocal calls
+        calls += 1
+        result = await real(wall)
+        if calls == 1:
+            started.set()
+            await release.wait()
+        return result
+
+    store.fleet_health = gated  # type: ignore[method-assign]
+    service = _service(store, clock)
+    first = asyncio.create_task(service.usage_report())
+    await started.wait()
+    service.invalidate()
+    release.set()
+    await first
+    await service.usage_report()
+    assert calls == 2
+    await service.usage_report()
+    assert calls == 2

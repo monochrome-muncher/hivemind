@@ -130,10 +130,14 @@ class MetricsService:
         self._convergence: Convergence | None = None
         self._health_at: float | None = None
         self._health_ok = False
+        # Bumped by invalidate(): a scan that started before it must not
+        # store its (stale) result, though it still returns it to its caller.
+        self._generation = 0
 
     def invalidate(self) -> None:
         """Drop the cached entry scan and fleet health, so the next report
         scans again (after a fleet merge or undo moved the entries)."""
+        self._generation += 1
         self._rows_at = None
         self._health_at = None
 
@@ -145,9 +149,13 @@ class MetricsService:
             now = self._clock()
             if self._rows_at is not None and now - self._rows_at < self._ttl:
                 return self._rows
-            self._rows = await self._store.usage_counts()
+            generation = self._generation
+            rows = await self._store.usage_counts()
+            if generation != self._generation:
+                return rows  # invalidated mid-scan: serve it, do not cache it
+            self._rows = rows
             self._rows_at = now
-            return self._rows
+            return rows
 
     async def _health_snapshot(self) -> tuple[FleetHealth | None, Convergence | None, bool]:
         """The fleet health aggregates, reused within the TTL, and whether
@@ -159,21 +167,26 @@ class MetricsService:
             if self._health_at is not None and now - self._health_at < self._ttl:
                 return self._health, self._convergence, self._health_ok
             wall = self._wall_clock()
+            generation = self._generation
+            health, convergence = self._health, self._convergence
             ok = True
             try:
-                self._health = await self._store.fleet_health(wall)
+                health = await self._store.fleet_health(wall)
             except Exception:  # health must not take the usage report down
                 logger.warning("fleet health aggregates failed", exc_info=True)
                 ok = False
             try:
-                self._convergence = await self._store.fleet_convergence(wall)
+                convergence = await self._store.fleet_convergence(wall)
             except Exception:
                 logger.warning("fleet convergence figures failed", exc_info=True)
                 ok = False
+            if generation != self._generation:
+                return health, convergence, ok  # invalidated mid-scan: do not cache
+            self._health, self._convergence = health, convergence
             self._health_ok = ok
             if ok:
                 self._health_at = now
-            return self._health, self._convergence, ok
+            return health, convergence, ok
 
     async def usage_report(self) -> usage.UsageReport:
         """The full usage report (entries / fleets / agents).
