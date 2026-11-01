@@ -15,7 +15,7 @@ both). Add the Hivemind repository's Git URL to the plugin list in
 `opencode.json`, then export the two variables and restart OpenCode:
 
 OpenCode v1 uses the `plugin` key; v2 uses `plugins` and migrates a `plugin`
-entry automatically. Write `plugin` — it works on both (v1 does not read
+entry automatically. Write `plugin`: it works on both (v1 does not read
 `plugins`; an entry under it is only warned about, not loaded):
 
 ```json
@@ -69,7 +69,7 @@ of other harnesses.
 ## Stay aware
 
 - **No hook needed.** The plugin adds the reminder to every model request.
-  It also asks you once, when a long session that rated nothing and wrote nothing or read entries goes
+  It also asks you once, when a long session that rated nothing and either wrote nothing or read entries goes
   idle, to write and rate before finishing (not in `opencode run`), and
   after a compaction to write what you learned before it.
 - **Instruction block:** `~/.config/opencode/AGENTS.md`. OpenCode also

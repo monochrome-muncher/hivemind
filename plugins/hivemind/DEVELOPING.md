@@ -8,6 +8,7 @@ to install or use it, read [README.md](README.md) instead.
 - [What is in the plugin](#what-is-in-the-plugin)
 - [How each harness gets each piece](#how-each-harness-gets-each-piece)
 - [Harness quirks](#harness-quirks)
+- [The Stop hook and the post-compaction line](#the-stop-hook-and-the-post-compaction-line)
 - [Incognito](#incognito)
 - [Tests](#tests)
 - [Releasing](#releasing)
@@ -96,15 +97,15 @@ itself names no harness-specific paths, and a test enforces this.
   plain object that carries both: v1 calls `server()` (an object default
   export is supported from 1.18.29; older v1 releases expect a function
   export) and v2 validates the default export as `{ id, setup }` and
-  ignores `server()`. The two implementations are separate — nothing
+  ignores `server()`. The two implementations are separate, and nothing
   translates hooks: v1's `config` hook / `experimental.chat.system.transform`
   / `chat.message` / `tool.execute.after` / `event` become v2's
   `ctx.mcp.transform` + `ctx.skill.transform` / `ctx.session.hook("context")`
-  (`event.system` takes `{type, text}` parts) / — / `ctx.tool.hook(
+  (`event.system` takes `{type, text}` parts) / nothing / `ctx.tool.hook(
   "execute.after")` / `ctx.event.subscribe`. v2 MCP servers use `disabled`
   (v1 `enabled`); v2 config uses the `plugins` key and migrates a v1
   `plugin` entry, while v1 only warns about `plugins` and does not load
-  it; v2 has no `session.idle` — an execution ends with
+  it; v2 has no `session.idle`: an execution ends with
   `session.execution.succeeded` / `failed` / `interrupted` (v1's idle
   fired on each of them) and compaction ends with
   `session.compaction.ended`. Verified against the v2 source (`@opencode`
@@ -114,11 +115,11 @@ itself names no harness-specific paths, and a test enforces this.
   (same hooks; the `plugin` config key). Its v1 `event` hook receives v2
   events (`session.execution.*`, `session.compaction.ended`), which is why
   the stop and post-compaction nudges work there. KiloCode has its own
-  `git:` plugin spec — `git:<repo>[@ref][#subpath]` — that clones the
+  `git:` plugin spec, `git:<repo>[@ref][#subpath]`, that clones the
   repository and loads the file at `#subpath`; a pinned ref is never
   refreshed, a branch ref is re-checked about hourly. The v2 `plugins`
   key loads a reduced plugin context (no `mcp`, `session`, `tool` or
-  `event` domains — only `skill`, `agent`, `command` and `integration`
+  `event` domains; only `skill`, `agent`, `command` and `integration`
   transforms), so the same file's `setup` registers only the skills there.
   Its MCP config is the OpenCode v2 shape (`mcp.servers`, `disabled`), and
   `KILO_CONFIG_CONTENT` is the highest-precedence inline config overlay
@@ -147,10 +148,10 @@ itself names no harness-specific paths, and a test enforces this.
   `{ cancel, contextModification, errorMessage }` on stdout; hooks are
   enabled by default. `UserPromptSubmit` fires on every prompt: the
   first prompt of a task gets the full stay-aware line and later prompts a
-  90-byte form (a sixth "full line sent" field in the per-task state file
+  96-byte form (a sixth "full line sent" field in the per-task state file
   `TaskStart` resets and `PostToolUse` keeps; 3- and 5-field files from
   older releases still read). No hook signals a compaction (`PreCompact`
-  output is not injected — it is wired as a deferred hook in the
+  output is not injected: it is wired as a deferred hook in the
   extension's hooks adapter), so the full line does not return after one. Verified against `cline/cline`
   main (extension source: `envExpansion.ts`, `skill-directories.ts`,
   `hooks-adapter.ts`, `disk.ts`, `name-transform.ts`).
@@ -198,6 +199,11 @@ itself names no harness-specific paths, and a test enforces this.
     message before the first prompt. `source` is `new`, `resume` or
     `startup`: no compaction source, hence no post-compaction line, and
     nothing re-injects the text after a compaction.
+  - *Stop.* The hook gets `transcript_path` (the session's
+    `events.jsonl`). In `copilot -p` it runs before the session's tool
+    calls are written there (checked with 1.0.104 and 1.0.105: three lines
+    and no `tool.execution_start` at hook time), so the stop reminder never
+    fires headless. The interactive check was with 1.0.95.
   - *Skills.* Copilot parses `SKILL.md` frontmatter with a strict YAML
     parser: an unquoted `: ` in `description` skipped the `hivemind` skill
     entirely until the fix after 2.7.0 (`copilot skill list` reports
@@ -282,8 +288,8 @@ The script counts four transcript formats:
   incognito, a key set, `HIVEMIND_STOP_MIN_TOOLS`), counting the calls
   the model made in `tool_execution_start` (a call a script made for it,
   with a `parentToolCallId`, is not counted) and noting a `hive_write`,
-  `hive_feedback`, `hive_search` or `hive_get` by any route (named tool, the adapter's `mcp` proxy, a
-  script's code, an Oh My Pi `xd://` route). Once per session (reset on
+  `hive_feedback`, `hive_search` or `hive_get` by any route (named tool, a
+  codemode script's call, an Oh My Pi `xd://` route). Once per session (reset on
   `session_start`), Pi's `agent_before_settle` appends the reminder as a
   visible `custom_message` and asks for one more model request; Oh My
   Pi's `session_stop` returns the Claude Code-style block. After

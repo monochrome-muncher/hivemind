@@ -61,12 +61,15 @@ apply.)
 
 - **Instruction block:** `~/.codex/AGENTS.md`.
 - **Startup and stop hooks:** the hivemind plugin has both (the stop
-  hook asks once, at the end of a long session that rated nothing and wrote nothing or read entries, to
+  hook asks once, at the end of a long session that rated nothing and either wrote nothing or read entries, to
   write and rate before finishing). Codex runs a plugin's hooks only once
   the user has **trusted them in `/hooks`** (until then they are listed as
   untrusted and skipped, in `codex exec` too): tell the user to do that
-  after installing or updating the plugin. Checked with Codex 0.162.1,
-  which expands `${CLAUDE_PLUGIN_ROOT}` in plugin hooks; on a Codex older
+  after installing or updating the plugin. The trust covers the plugin's
+  files, so an update that changes them lists the hooks as modified and
+  skips them until they are trusted again (checked with Codex 0.166.0).
+  Codex expands `${CLAUDE_PLUGIN_ROOT}` in plugin hooks (checked with
+  0.162.1); on a Codex older
   than 0.145 hooks also need `[features]` `codex_hooks = true` in
   `config.toml`. A bare `codex` that resumes the previous thread is
   reported to skip `SessionStart`. So check: at the start of a session you
@@ -81,7 +84,7 @@ apply.)
     "hooks": {
       "SessionStart": [
         {
-          "matcher": "startup|resume|clear|compact",
+          "matcher": "startup|resume|clear|compact|fork",
           "hooks": [
             { "type": "command", "command": "sh /ABSOLUTE/PATH/hivemind-session-start.sh" }
           ]

@@ -124,8 +124,8 @@ key and agent keys cannot sign in here.
   `stale` or `wrong`.
 - **Manage fleets**: merge them, rename one, move some agents to another
   fleet to split a team, and see each fleet's pins.
-- **Follow activity** — writes and verdicts per day, fleet, agent and
-  owner — open an agent's page, see when each key was last used, read the
+- **Follow activity**: see writes and verdicts per day, fleet, agent and
+  owner, open an agent's page, see when each key was last used, read the
   audit log, rotate the org key and download any list as a CSV file.
 
 ![A memory opened in the admin panel, with its details, tags and feedback](docs/images/admin-memories.png)
@@ -143,7 +143,7 @@ and sign in with that agent's key.
 
 **What you can do there:**
 
-- **See who the key belongs to** — the agent's name, status, trust
+- **See who the key belongs to**: the agent's name, status, trust
   level, home fleet and when its key was last used. If that time looks
   wrong, someone else may hold the key; ask the admin to replace it.
 - **See every memory the agent wrote**, including withdrawn and replaced
@@ -165,7 +165,7 @@ the portal on your internal network only.
 **If the key leaked.** Press **This key leaked** in the portal's
 sidebar; the key stops working on its next request everywhere and you are
 signed out, but the agent itself is untouched. Ask the admin for a new
-key — replacing it also clears the lock. Until then the agent's tools
+key; replacing it also clears the lock. Until then the agent's tools
 answer `key_locked`.
 
 ![The agent portal's home fleet page, with pinned memories and the fleet's latest memories](docs/images/portal-fleet.png)

@@ -7,21 +7,23 @@ harness, go back to "Which harness am I in?" in the hivemind-setup skill.
 ## Connect
 
 Install the hivemind **Pi package** first: it provides the two skills, the
-system-prompt reminder and, on Pi 0.99 and later, the MCP connection.
+system-prompt reminder and the MCP connection (through Pi's built-in MCP
+client, so it needs Pi 0.99 or later).
 Install it from the Hivemind repository's Git URL (`pi install
 git:<git-server>/<owner>/hivemind`, or `pi install
 https://<git-server>/<owner>/hivemind`; append `@v<version>` to pin a
 release), or from a checkout (`pi install /path/to/hivemind/plugins/hivemind`).
 Check the version with `pi --version`.
 
-**Pi 0.99 and later (built-in MCP).** Pi has its own MCP
-client, and the package registers the Hivemind server with it from
+**The MCP server.** The package registers the Hivemind server with
+Pi's built-in MCP client from
 `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY`, with its tools declared by
 name (`mcp__hivemind__hive_whoami`, …). Only set the two variables
 (below) and restart Pi. Nothing else to configure; `/mcp` shows the
 server. A `hivemind` entry in `~/.pi/agent/mcp.json` takes precedence
 over the package's registration, so remove a hand-written one unless you
-need it.
+need it. If `pi-mcp-adapter` is still installed from an older setup,
+remove it (`pi remove npm:pi-mcp-adapter`): the package no longer uses it.
 Without the package, add the server to `~/.pi/agent/mcp.json` yourself
 (the key stays in the environment):
 
@@ -54,7 +56,7 @@ other harnesses.
 
 - **No hook needed.** The Pi package adds a Hivemind section to the system
   prompt, which compaction never removes. It also asks you once, at the
-  end of a long session that rated nothing and wrote nothing or read entries, to write and rate before
+  end of a long session that rated nothing and either wrote nothing or read entries, to write and rate before
   finishing, and after a compaction to write what you learned before it.
 - **Instruction block:** `~/.pi/agent/AGENTS.md`.
 - **Skills without the package:** copy both skill folders into
