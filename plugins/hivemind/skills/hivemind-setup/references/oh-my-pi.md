@@ -20,8 +20,8 @@ reminder. The server comes from the plugin's `.mcp.json` and is named
 `${HIVEMIND_API_KEY}` at startup, so the key never lands in a file. Its
 tools are routes (`xd://mcp__hivemind_hivemind_hive_*`), listed in your
 system prompt. (Checked with Oh My Pi 18.9.1. A plain `omp install
-<git-url>` is not enough: Oh My Pi only finds a package's skills in a
-top-level `skills/` folder.)
+<git-url>` is not enough: it brings the skills and the reminder but not
+the MCP server; checked with 18.15.0.)
 
 **No `hivemind` entry in `~/.omp/agent/mcp.json` is needed.** One from an
 older setup still works: Oh My Pi then connects that one instead of the
