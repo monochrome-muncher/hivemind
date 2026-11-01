@@ -10,16 +10,16 @@
 #   HIVEMIND_RUNNER=migrate    idempotent schema migration (ADR 0013)
 #   HIVEMIND_RUNNER=keys       key-management CLI (SPEC §8.1, ADR 0012)
 #
-# Base image pinned by digest (DEP-3; python:3.14-slim as of 2026-09-30).
+# Base image pinned by digest (DEP-3; python:3.14.10-slim as of 2026-11-01).
 # Bump deliberately for security updates
 # (`docker buildx imagetools inspect python:3.14-slim`).
-ARG PYTHON_IMAGE=python:3.14-slim@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d
+ARG PYTHON_IMAGE=python:3.14-slim@sha256:cd89c30eda26ee911a4611b18680086e0ea42e6f5f8cbe653d07fa7958c9cec8
 
 # --- build stage: install the LOCKED runtime dependencies (DEP-3) -------------
 # `uv sync --locked` installs exactly uv.lock (hash-checked) and fails if it
 # disagrees with pyproject.toml, so the image ships what CI tested. No dev deps.
 FROM ${PYTHON_IMAGE} AS builder
-RUN pip install --no-cache-dir uv==0.12.21
+RUN pip install --no-cache-dir uv==0.12.24
 WORKDIR /app
 ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
     UV_COMPILE_BYTECODE=1 \
