@@ -27,12 +27,17 @@ _MAX_HISTORY_VERSIONS = MAX_LIMIT
 MAX_LINKED_FROM = 20
 
 
+def _can_name_entry(entry_id: str) -> bool:
+    """Whether ``entry_id`` could name an entry (Postgres cannot hold a NUL)."""
+    return "\x00" not in entry_id and len(entry_id) <= MAX_ID_CHARS
+
+
 async def get_visible_entry(store: Store, entry_id: str, visibility: Visibility) -> Entry | None:
     """The entry with ``entry_id`` if ``visibility`` may read it, else
     ``None`` (ADR 0033). "Not visible" and "does not exist" are the same
     answer, so an id reveals nothing, not even existence."""
-    if "\x00" in entry_id or len(entry_id) > MAX_ID_CHARS:
-        return None  # cannot name an entry (and Postgres cannot hold a NUL)
+    if not _can_name_entry(entry_id):
+        return None
     entry = await store.get_entry(entry_id)
     if entry is None or not entry_is_visible(entry, visibility):
         return None
@@ -45,7 +50,7 @@ async def get_visible_entries(
     """``get_visible_entry`` for several ids in one store read (ADR 0055):
     the readable entries by id. An id that names nothing readable is simply
     absent, the same answer for "invisible" and "does not exist"."""
-    ids = [eid for eid in entry_ids if "\x00" not in eid and len(eid) <= MAX_ID_CHARS]
+    ids = [eid for eid in entry_ids if _can_name_entry(eid)]
     if not ids:
         return {}
     found = await store.get_entries(ids)
@@ -67,6 +72,17 @@ class EntryLinks:
     linked_from: tuple[Entry, ...] = ()
 
 
+def _links_of(outgoing: list[str], incoming: list[str], found: dict[str, Entry]) -> EntryLinks:
+    """The links among ``found`` (the readable ones): outgoing in order,
+    incoming only while active."""
+    return EntryLinks(
+        see_also=tuple(found[i] for i in outgoing if i in found),
+        linked_from=tuple(
+            found[i] for i in incoming if i in found and found[i].state is EntryState.ACTIVE
+        ),
+    )
+
+
 async def entry_links(store: Store, entry_id: str, visibility: Visibility) -> EntryLinks:
     """The entries ``entry_id`` links to and the active entries that link
     to it, limited to what ``visibility`` may read (ADR 0057). A linked
@@ -77,12 +93,7 @@ async def entry_links(store: Store, entry_id: str, visibility: Visibility) -> En
     if not outgoing and not incoming:
         return EntryLinks()
     found = await get_visible_entries(store, list(dict.fromkeys(outgoing + incoming)), visibility)
-    return EntryLinks(
-        see_also=tuple(found[i] for i in outgoing if i in found),
-        linked_from=tuple(
-            found[i] for i in incoming if i in found and found[i].state is EntryState.ACTIVE
-        ),
-    )
+    return _links_of(outgoing, incoming, found)
 
 
 async def entries_links(
@@ -95,15 +106,7 @@ async def entries_links(
     raw = await store.entry_links_many(entry_ids, MAX_LINKED_FROM)
     linked = list(dict.fromkeys(i for out, inc in raw.values() for i in out + inc))
     found = await get_visible_entries(store, linked, visibility) if linked else {}
-    return {
-        eid: EntryLinks(
-            see_also=tuple(found[i] for i in outgoing if i in found),
-            linked_from=tuple(
-                found[i] for i in incoming if i in found and found[i].state is EntryState.ACTIVE
-            ),
-        )
-        for eid, (outgoing, incoming) in raw.items()
-    }
+    return {eid: _links_of(outgoing, incoming, found) for eid, (outgoing, incoming) in raw.items()}
 
 
 async def supersession_chain(

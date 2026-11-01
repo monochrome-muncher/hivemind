@@ -247,7 +247,7 @@ class MemoryStore:
         )
         with self._lock:
             self._refuse_merged(draft.fleet_id)
-            if draft.scope == "fleet":
+            if draft.scope == SCOPE_FLEET:
                 self._refuse_stale_home(draft.fleet_id, draft.author)
             # Explicit supersessions (SPEC.md §4.1), atomic (ADR 0034):
             # every target must be active, or nothing is written.

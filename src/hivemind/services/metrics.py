@@ -393,7 +393,7 @@ class MetricsService:
         by_trust_level: dict[str, int] = {}
         for level in _TRUST_LEVELS:
             count = sum(1 for agent in agents if agent.trust_level is level)
-            by_trust_level[level.name.lower()] = count
+            by_trust_level[level.label] = count
         return usage.AgentsUsage(
             total=len(agents),
             pending=pending,

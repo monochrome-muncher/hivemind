@@ -61,7 +61,7 @@ MAX_ALIAS_CHARS = 128
 # -- names (ADR 0040) ---------------------------------------------------------
 MAX_AGENT_NAME_CHARS = 63
 MAX_FLEET_NAME_CHARS = 128
-AGENT_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}")
+AGENT_NAME_RE = re.compile(rf"[A-Za-z0-9][A-Za-z0-9._-]{{0,{MAX_AGENT_NAME_CHARS - 1}}}")
 # ADR 0033: the identities built-in keys and runners write under (admin
 # keys, the org key, the dev runner, the mcp-http template credential).
 # An agent registered under one would read that identity's ``self`` entries.

@@ -17,7 +17,7 @@ from hivemind.domain.validation import (
     check_text,
 )
 from hivemind.ports import Credential, Store
-from hivemind.services.audit import record_admin_action
+from hivemind.services.audit import audit_unpins, record_admin_action
 from hivemind.services.chain import get_visible_entries, get_visible_entry
 from hivemind.services.errors import EntryNotActive, EntryNotFound, PermissionDenied
 
@@ -131,12 +131,13 @@ class PinService:
             if current.state is EntryState.WITHDRAWN and await self._store.unpin_entry(
                 fleet_id, pin.entry_id
             ):
-                await record_admin_action(
+                await audit_unpins(
                     self._store,
                     credential,
-                    AuditAction.ENTRY_UNPIN,
                     current.id,
-                    {"fleet_id": fleet_id, "pin_ids": [pin.entry_id], "reason": "withdrawn"},
+                    fleet_id,
+                    [pin.entry_id],
+                    reason="withdrawn",
                 )
 
     async def _unpin_shown(
@@ -155,13 +156,8 @@ class PinService:
             if await self._store.unpin_entry(fleet_id, pin.entry_id):
                 removed_ids.append(pin.entry_id)
         if removed_ids:
-            detail: dict[str, object] = {"fleet_id": fleet_id, "pin_ids": removed_ids}
-            if reason is not None:
-                detail["reason"] = reason
-            if via is not None:
-                detail["via"] = via
-            await record_admin_action(
-                self._store, credential, AuditAction.ENTRY_UNPIN, entry.id, detail
+            await audit_unpins(
+                self._store, credential, entry.id, fleet_id, removed_ids, reason=reason, via=via
             )
         return removed_ids
 
