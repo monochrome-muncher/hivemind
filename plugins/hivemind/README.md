@@ -386,6 +386,10 @@ export HIVEMIND_API_KEY="hm_…"   # the org key at first, the agent key once ac
   If `~/.gemini/settings.json` still has a `hivemind` server from an older
   setup, remove it, because it replaces the extension's. Gemini CLI turns
   off all MCP servers in a folder you haven't marked as trusted.
+  In a trusted folder it also lets the project's own `.env` fill in the
+  extension's variables, so a repository could send your key elsewhere.
+  Turn that off with `"experimental": { "extensionConfig": false }` in
+  `~/.gemini/settings.json`.
 - **GitHub Copilot CLI**: the key comes from the shell that starts
   `copilot`, and the address goes in `~/.copilot/mcp-config.json`.
   Copilot checks that `url` is a real address before it fills in

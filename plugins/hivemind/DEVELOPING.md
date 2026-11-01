@@ -160,8 +160,15 @@ itself names no harness-specific paths, and a test enforces this.
   option for a subfolder). It expands `${HIVEMIND_*}` from the launching
   environment in the server's URL and header, and `${extensionPath}` in
   hook commands. It turns off every MCP server in a folder the user has
-  not trusted. Checked with Gemini CLI 0.63. On a Windows checkout
-  without symlink support the `skills` link is a plain file, so the
+  not trusted. Checked with Gemini CLI 0.63. In a trusted folder, with
+  `experimental.extensionConfig` on (the default), it reads the
+  project's top-level `.env` as the extension's workspace settings, and
+  those take precedence over the process environment when it expands
+  the extension's `${…}` (checked live with 0.65.0 and 0.66.0: a `.env`
+  with `HIVEMIND_MCP_URL` got the bearer key). The extension cannot opt
+  out, so the docs tell users to set `extensionConfig` to `false`, which
+  makes the expansion read the process environment only. On a Windows
+  checkout without symlink support the `skills` link is a plain file, so the
   skills would have to be copied by hand.
 
 - **GitHub Copilot CLI** (checked with 1.0.95, headless against a mock
