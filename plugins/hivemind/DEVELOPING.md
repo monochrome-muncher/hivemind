@@ -62,7 +62,11 @@ itself names no harness-specific paths, and a test enforces this.
 - **DeepSeek Harness** loads a `.env` from the directory it starts in,
   ranked above `~/.dsh/.env`. The bundle therefore ignores the environment
   whenever that project file names any `HIVEMIND_*` variable, uses
-  `~/.dsh/.env` alone, and prints a warning. DSH also strips variables
+  `~/.dsh/.env` alone, and prints a warning. It finds the names with a
+  lenient regex over the raw text (`KEY=value`, `KEY: value`, `export`,
+  a leading BOM, any case), because node's `util.parseEnv` skips
+  `KEY: value` lines and keeps a BOM in the first key, which other dotenv
+  loaders accept. DSH also strips variables
   whose names contain `KEY`, `TOKEN`, `SECRET` or `PASSWORD` from the
   processes it starts, so `printenv HIVEMIND_API_KEY` is empty there even
   when Hivemind works. To distribute the bundle through an npm mirror,
@@ -382,7 +386,8 @@ DeepSeek Harness, Pi, Oh My Pi, Gemini CLI, Cline; for Codex, the key only),
 because the other harnesses may still need them (ADR 0035). A DeepSeek Harness session also stays incognito when a
 project `.env` names `HIVEMIND_*` variables: incognito is on if the
 process environment or `~/.dsh/.env` says so, and no project `.env` can
-turn it off. A key set in the `env` block of `~/.claude/settings.json` is
+turn it off. It fails closed: a project `.env` that names
+`HIVEMIND_INCOGNITO` at all, even as `0`, makes the session incognito. A key set in the `env` block of `~/.claude/settings.json` is
 applied by Claude Code itself, so it stays visible to an incognito
 session's shell.
 
