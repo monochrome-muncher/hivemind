@@ -60,10 +60,14 @@ class ActivityService:
         self._wall_clock = wall_clock
         self._lock = asyncio.Lock()
         self._cache: dict[tuple[int, date], tuple[float, datetime, Activity]] = {}
+        # Bumped by invalidate(): a scan that started before it must not
+        # store its (stale) result, though it still returns it to its caller.
+        self._generation = 0
 
     def invalidate(self) -> None:
         """Drop the cached scans, so the next report scans again (after a
         fleet merge or undo moved the entries)."""
+        self._generation += 1
         self._cache.clear()
 
     async def _activity(self, days: int) -> tuple[datetime, Activity]:
@@ -81,8 +85,10 @@ class ActivityService:
             if hit is not None and now - hit[0] < self._ttl:
                 return hit[1], hit[2]
             since = window_start(wall, days)
+            generation = self._generation
             activity = await self._store.activity(since)
-            self._cache[(days, today)] = (now, since, activity)
+            if generation == self._generation:
+                self._cache[(days, today)] = (now, since, activity)
             return since, activity
 
     async def report(self, days: int = DEFAULT_DAYS) -> dict[str, Any]:
