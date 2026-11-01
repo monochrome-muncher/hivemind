@@ -65,7 +65,11 @@ jobs:
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 #v4.1.2
         with:
-          cosign-release: 'v2.2.4'
+          # cosign v3 signs in the Sigstore bundle format and stores the
+          # signature as an OCI 1.1 referring artifact (on GHCR, under the
+          # `sha256-<digest>` referrers tag) instead of the old `.sig` tag.
+          # Verify with cosign v3 (or v2.6+ with --new-bundle-format).
+          cosign-release: 'v3.1.4'
 
       # Set up BuildKit Docker container builder to be able to build
       # multi-platform images and export cache
@@ -107,10 +111,10 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Sign the resulting Docker image digest.
-      # This will only write to the public Rekor transparency log when the Docker
-      # repository is public to avoid leaking data.  If you would like to publish
-      # transparency data even for private images, pass --force to cosign below.
+      # Sign the resulting Docker image digest, keyless. The signing
+      # certificate and the signature are recorded in the public Rekor
+      # transparency log; cosign v3 takes the Fulcio and Rekor URLs from the
+      # public-good instance's TUF signing config.
       # https://github.com/sigstore/cosign
       - name: Sign the published Docker image
         env:
