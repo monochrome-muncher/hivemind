@@ -1549,7 +1549,7 @@ def _valid_uuids(ids: list[str] | tuple[str, ...]) -> list[str]:
 
 def _canonical_uuids(ids: list[str]) -> list[str]:
     """The distinct well-formed IDs in Postgres's canonical text form, in order
-    (upper case, no hyphens: spellings it reads as the same uuid)."""
+    (Postgres reads upper-case and hyphen-less spellings as the same uuid)."""
     return list(dict.fromkeys(c for i in ids if (c := canonical_uuid(i)) is not None))
 
 
