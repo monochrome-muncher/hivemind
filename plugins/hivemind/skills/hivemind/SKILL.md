@@ -28,8 +28,7 @@ Call it first, and again after compaction or a cleared context.
 | `can_write_scopes` has `"fleet"` | Full participation. |
 | `key_kind: "admin"` or `"legacy"` | Not an agent key: warn that writes are not attributed to an agent. |
 
-If `can_read` is empty, an empty search means "not allowed", not
-"nothing there": say so.
+Empty `can_read`: an empty search means "not allowed"; say so.
 
 **Catch up once per session** (not after compaction, not for a quick
 question), if you can read:
@@ -53,11 +52,11 @@ you, and before writing.
   exact error or identifier; not an entry's or your draft's text. Add
   `kind`, `tags` (AND), `entities` or dates only when sure.
 - No relevant hits after one rephrase: a gap; don't keep searching.
-- `hive_get` the promising hits in one call. A hit's `correction` is
-  its newest `stale`/`wrong` note: read it, and the notes in `feedback`,
-  before relying on it; they often say what is true now. Open `see_also` and `linked_from` entries that bear on the
-  task. A hit with `upstream_changed` rests on a changed entry: re-check
-  it before relying on it.
+- `hive_get` the promising hits in one call. Read a hit's `correction`
+  and `feedback` notes before relying on it. Open `see_also` and
+  `linked_from` entries that bear on the task. A hit with
+  `upstream_changed` rests on a changed entry: re-check it before
+  relying on it.
 - `score` is findability, not truth. Before a consequential step, check
   an old, unconfirmed or single-source entry against the system when
   that is cheap.
@@ -110,8 +109,7 @@ A good entry:
   version or date. `sources` a reader can walk back to.
 - `occurred_at` = when observed (ranking ages by it), not today unless
   you re-checked today. `importance` per the tool description.
-- **Omit `scope`**: it lands at the widest audience you may write.
-  `scope: "self"` only for what concerns you alone.
+- **Omit `scope`** (`"self"` only for what concerns you alone).
 - **No local paths in fleet entries** (`/home/…`, `~/…`, `C:\Users\…`):
   make them repo-relative; put local specifics in a `self` note whose
   `see_also` names the fleet entry.
@@ -136,11 +134,9 @@ security work are allowed: tag `security-finding` and say where.
 ## 4. Feedback, conflicts and fixing
 
 - At task end, `hive_feedback` each entry your work tested (`entry_ids`
-  for several). `helpful` = you used it and it held; note `verified:`
-  and what you checked. Reading and agreeing is no test: no verdict.
-  Judge by your outcome, not the counts. `stale`/`wrong`: note what is
-  true now and how you saw it. Verdicts move ranking. Never rate your
-  own: supersede or withdraw.
+  for several), noting `verified:` or what is true now and how you saw
+  it. Reading and agreeing is no test: no verdict. Judge by your
+  outcome, not the counts. Never rate your own: supersede or withdraw.
 - Two active entries conflict: don't pick silently. Supersede the wrong
   one if you may, else flag it `wrong` naming the right id; if you
   can't tell, write a `fact` "Conflict: A vs B; check with …" with

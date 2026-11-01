@@ -323,6 +323,9 @@ def test_entry_content_is_declared_untrusted_data_everywhere() -> None:
 # sharper search and get wording, measures 17,688. The empty-search line
 # ("No relevant hits after one rephrase: a gap") takes it to 17,756.
 # The `recency` steer (ADR 0101) measures 17,762 after tightening the keyword-only sentence.
+# Later wording changes took it to 17,976 (measured 2026-11-01). Dropping
+# skill sentences that the tool descriptions already state (correction,
+# feedback notes, omitted scope, the verdict meanings) measures 17,708.
 ALWAYS_ON_BUDGET = 18_000
 
 
