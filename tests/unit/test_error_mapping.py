@@ -827,7 +827,7 @@ async def test_a_store_race_on_withdraw_becomes_the_typed_errors(
 ) -> None:
     """The store can still refuse after the service's pre-checks (a concurrent
     withdraw): its KeyError / ValueError become EntryNotFound / EntryNotActive,
-    messages preserved."""
+    the unknown-entry message is the usual one."""
     from hivemind.services.errors import EntryNotActive, EntryNotFound
 
     service = GovernanceService(world.store, make_search_config())
@@ -848,7 +848,9 @@ async def test_a_store_race_on_withdraw_becomes_the_typed_errors(
     monkeypatch.setattr(world.store, "withdraw_entry", unknown)
     with pytest.raises(EntryNotFound) as missing:
         await service.withdraw(credential, world.fleet_entry)
-    assert str(missing.value) == str(KeyError("unknown entry: gone"))
+    # The store's KeyError text is quoted; the service words it as every other
+    # unknown entry, which is what REST has always sent.
+    assert str(missing.value) == f"unknown entry: {world.fleet_entry}"
 
     # Wire results of the ValueError race: REST 409 conflict, MCP not_active.
     monkeypatch.setattr(world.store, "withdraw_entry", not_active)

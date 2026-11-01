@@ -1,9 +1,9 @@
 """The failures the services raise, by meaning.
 
-Each surface maps these to its own answer (REST: a status and an error
-code; MCP: an error code), and catches these specific classes only. An
-exception outside them is a bug: it surfaces as a REST 500 or an MCP
-tool error, never as a friendly one. The specific classes subclass the
+Each surface maps these to its own answer in one table (REST: a status
+and an error code, ``api/errors.py``; MCP: an error code), and catches
+these specific classes only. An exception outside them is a bug: it
+surfaces as a REST 500 or an MCP tool error, never as a friendly one. The specific classes subclass the
 builtin they replace (``LookupError``, ``ValueError``), so an ``except``
 written against the builtin still matches; new code should raise and
 catch the specific class. Raised below the services, so defined with the

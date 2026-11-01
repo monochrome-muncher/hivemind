@@ -1,8 +1,10 @@
 """The Hivemind REST routes (SPEC.md §5.1).
 
-Routes stay thin: pydantic validation, service calls, and
-exception -> ApiError mapping. No business rules live here — those
-are in the service layer (SPEC.md §5, ADR 0001).
+Routes stay thin: pydantic validation and service calls. No business
+rules live here — those are in the service layer (SPEC.md §5, ADR 0001).
+Typed service errors propagate to the handlers ``create_app`` registers from
+the table in ``errors.py``; a route catches one only where its answer differs
+(``create_entry`` answers a malformed draft as ``invalid_entry``).
 
 Error codes: ``missing_api_key``/``unknown_api_key`` (401),
 ``forbidden`` (403), ``not_found`` (404), ``conflict`` (409),
@@ -13,7 +15,6 @@ Error codes: ``missing_api_key``/``unknown_api_key`` (401),
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from functools import cache
@@ -25,7 +26,6 @@ from fastapi.responses import JSONResponse
 from pydantic import AfterValidator
 
 from hivemind.api.deps import (
-    ApiError,
     HivemindApp,
     api_error,
     get_app,
@@ -50,7 +50,6 @@ from hivemind.api.schemas import (
     CheckOut,
     CreateEntryRequest,
     CreateFleetRequest,
-    DroppedPinOut,
     EntriesMetrics,
     EntriesOut,
     EntryOut,
@@ -58,7 +57,6 @@ from hivemind.api.schemas import (
     FeedbackMetrics,
     FeedbackOut,
     FeedbackRequest,
-    FeedbackSummaryOut,
     FlaggedEntryOut,
     FleetMergeOut,
     FleetMergePreviewOut,
@@ -103,24 +101,14 @@ from hivemind.api.schemas import (
 )
 from hivemind.domain.access import (
     Agent,
-    FleetExists,
-    FleetMerged,
-    InvalidAgentStatus,
     TrustLevel,
     UnknownAgent,
     UnknownFleet,
 )
-from hivemind.domain.agent_cleanup import AgentCleanupRefused, UnknownAgentCleanup
 from hivemind.domain.audit import AuditAction, AuditFilters
-from hivemind.domain.entry import Entry, EntryFilters, Kind, Source
+from hivemind.domain.entry import EntryFilters, Kind, Source
 from hivemind.domain.feedback import FeedbackLogFilters, Verdict
-from hivemind.domain.fleet_merge import (
-    FleetMergeRefused,
-    FleetMoveRefused,
-    UnknownFleetMerge,
-)
 from hivemind.domain.recency import RecencyHint
-from hivemind.domain.succession import AgentRetired, SuccessionRefused, UnknownSuccession
 from hivemind.domain.validation import (
     MAX_ID_CHARS,
     MAX_IDENTITY_CHARS,
@@ -130,18 +118,9 @@ from hivemind.domain.validation import (
     check_no_nul,
     utcnow,
 )
-from hivemind.embeddings import EmbeddingError
 from hivemind.ports import Credential
 from hivemind.services.access import resolve_write_scope
 from hivemind.services.drafts import entry_draft
-from hivemind.services.errors import (
-    AgentIdentityRequired,
-    EntryNotActive,
-    EntryNotFound,
-    NameTaken,
-    PermissionDenied,
-    SupersedeDenied,
-)
 
 require = Annotated[Credential, Depends(require_credential)]
 hive = Annotated[HivemindApp, Depends(get_app)]
@@ -186,11 +165,13 @@ RECENCY_HEADER = "X-Hivemind-Recency"
 logger = logging.getLogger(__name__)
 
 
-def _embedding_unavailable(exc: EmbeddingError) -> ApiError:
-    """An embedding failure is a 502 (SPEC.md §7, ADR 0005) with a fixed
-    message; the detail is logged, never returned (PC-1)."""
-    logger.warning("embedding unavailable: %s", exc)
-    return api_error(502, "embedding_unavailable", "the embedding service is unavailable")
+def _check_cleanup_expectations(payload: AgentCleanupRequest | PortalCleanupRequest) -> None:
+    """An apply names the preview's totals (``InvalidInput`` otherwise)."""
+    if payload.expected_withdraw is None or payload.expected_ratings is None:
+        raise InvalidInput(
+            "expected_withdraw and expected_ratings (the preview's totals) are required "
+            "when dry_run is false; preview first"
+        )
 
 
 def _to_utc(value: datetime | None) -> datetime | None:
@@ -238,9 +219,7 @@ def build_router() -> APIRouter:
         )
         if detail is None:
             raise api_error(404, "not_found", f"unknown entry: {entry_id}")
-        out = EntryOut.from_entry(detail.entry)
-        out.feedback = FeedbackSummaryOut.from_summary(detail.feedback)
-        out.set_links(detail.links)
+        out = EntryOut.from_detail(detail)
         if history:
             out.history = {
                 "successors": [EntryOut.from_entry(e) for e in detail.successors],
@@ -291,21 +270,6 @@ def build_router() -> APIRouter:
             response.headers[DEGRADED_HEADER] = DEGRADED_KEYWORD_ONLY
             prometheus.degraded_searches.inc()
         return [HitOut.from_hit(h) for h in result.hits]
-
-    async def _withdraw(entry_id: str, withdrawal: Awaitable[Entry]) -> EntryOut:
-        """Await a governance withdrawal (audited there as ``entry.withdraw``
-        when it should be) and map its typed errors."""
-        try:
-            entry = await withdrawal
-        except EntryNotFound:
-            raise api_error(404, "not_found", f"unknown entry: {entry_id}") from None
-        except PermissionDenied as exc:
-            raise api_error(403, "forbidden", str(exc)) from exc
-        except InvalidInput as exc:
-            raise api_error(422, "invalid_input", str(exc)) from exc
-        except EntryNotActive as exc:
-            raise api_error(409, "conflict", str(exc)) from exc
-        return EntryOut.from_entry(entry)
 
     @router.get("/metrics", response_model=MetricsOut)
     async def metrics(credential: require, app: hive) -> MetricsOut:
@@ -375,8 +339,6 @@ def build_router() -> APIRouter:
                 supersedes=payload.supersedes,
                 see_also=payload.see_also,
             )
-        except PermissionDenied as exc:
-            raise api_error(403, "forbidden", str(exc)) from exc
         except ValueError as exc:
             raise api_error(422, "invalid_entry", str(exc)) from exc
         try:
@@ -391,13 +353,6 @@ def build_router() -> APIRouter:
             written = await app.write_service.write_and_relate(
                 draft, writer=credential.visibility()
             )
-        except SupersedeDenied as exc:
-            # ADR 0033: a supersession target out of the writer's reach.
-            raise api_error(403, "supersede_denied", str(exc)) from exc
-        except FleetMerged as exc:  # ADR 0107: the home fleet was merged away
-            raise api_error(409, "fleet_merged", str(exc)) from exc
-        except EmbeddingError as exc:
-            raise _embedding_unavailable(exc) from exc
         except InvalidInput as exc:  # e.g. an unknown see_also entry
             raise api_error(422, "invalid_entry", str(exc)) from exc
         out = EntryOut.from_entry(written.entry)
@@ -430,13 +385,10 @@ def build_router() -> APIRouter:
         batch = await app.read_service.entries(
             request.entry_ids, visibility=credential.visibility()
         )
-        outs = []
-        for detail in batch.entries:
-            out = EntryOut.from_entry(detail.entry)
-            out.feedback = FeedbackSummaryOut.from_summary(detail.feedback)
-            out.set_links(detail.links)
-            outs.append(out)
-        return EntriesOut(entries=outs, not_found=list(batch.not_found))
+        return EntriesOut(
+            entries=[EntryOut.from_detail(d) for d in batch.entries],
+            not_found=list(batch.not_found),
+        )
 
     @router.get("/entries", response_model=list[EntryOut])
     async def list_entries(
@@ -481,16 +433,13 @@ def build_router() -> APIRouter:
             flagged=flagged,
             relied_on_changed=relied_on_changed,
         )
-        try:
-            entries = await app.read_service.list(
-                filters,
-                limit=limit,
-                offset=offset if offset is not None else 0,
-                visibility=credential.visibility(),
-                credential=credential,
-            )
-        except AgentIdentityRequired as exc:
-            raise api_error(422, "agent_identity_required", str(exc)) from exc
+        entries = await app.read_service.list(
+            filters,
+            limit=limit,
+            offset=offset if offset is not None else 0,
+            visibility=credential.visibility(),
+            credential=credential,
+        )
         return [EntryOut.from_entry(e) for e in entries]
 
     @router.post("/search", response_model=list[HitOut])
@@ -515,38 +464,20 @@ def build_router() -> APIRouter:
 
         404 unknown entry, 403 non-author, 409 already inactive.
         """
-        return await _withdraw(
-            entry_id, app.governance_service.withdraw(credential, entry_id, request.reason)
+        return EntryOut.from_entry(
+            await app.governance_service.withdraw(credential, entry_id, request.reason)
         )
 
     async def _pin(
         app: HivemindApp, credential: Credential, entry_id: str, via: str | None = None
     ) -> PinOut:
-        try:
-            pin = await app.governance_service.pin(credential, entry_id, via)
-        except EntryNotFound:
-            raise api_error(404, "not_found", f"unknown entry: {entry_id}") from None
-        except PermissionDenied as exc:
-            raise api_error(403, "forbidden", str(exc)) from exc
-        except InvalidInput as exc:
-            raise api_error(422, "invalid_input", str(exc)) from exc
-        except EntryNotActive as exc:
-            raise api_error(409, "conflict", str(exc)) from exc
-        except FleetMerged as exc:  # ADR 0107
-            raise api_error(409, "fleet_merged", str(exc)) from exc
+        pin = await app.governance_service.pin(credential, entry_id, via)
         return PinOut.from_pin(pin)
 
     async def _unpin(
         app: HivemindApp, credential: Credential, entry_id: str, via: str | None = None
     ) -> UnpinOut:
-        try:
-            removed = await app.governance_service.unpin(credential, entry_id, via)
-        except EntryNotFound:
-            raise api_error(404, "not_found", f"unknown entry: {entry_id}") from None
-        except PermissionDenied as exc:
-            raise api_error(403, "forbidden", str(exc)) from exc
-        except InvalidInput as exc:
-            raise api_error(422, "invalid_input", str(exc)) from exc
+        removed = await app.governance_service.unpin(credential, entry_id, via)
         return UnpinOut(entry_id=entry_id, removed=removed)
 
     @router.put("/entries/{entry_id}/pin", response_model=PinOut)
@@ -571,10 +502,7 @@ def build_router() -> APIRouter:
         """A fleet's pinned entries, newest pin first (ADR 0058): the
         caller's home fleet unless ``fleet_id`` names another. Entries the
         caller may not read are left out."""
-        try:
-            pinned = await app.governance_service.pinned(credential, fleet_id)
-        except InvalidInput as exc:
-            raise api_error(422, "invalid_input", str(exc)) from exc
+        pinned = await app.governance_service.pinned(credential, fleet_id)
         return PinsOut(
             fleet_id=fleet_id or credential.home_fleet_id,
             pins=[PinnedOut.from_pinned(p) for p in pinned],
@@ -589,26 +517,14 @@ def build_router() -> APIRouter:
         All or nothing: an id the caller may not read is a 404 naming it,
         and one of the caller's own is a 403 (ADR 0065); nothing is recorded.
         """
-        try:
-            outcomes = await app.governance_service.record_feedback_many(
-                credential,
-                request.entry_ids,
-                request.verdict,
-                request.note,
-                agent=request.agent,
-            )
-        except EntryNotFound as exc:
-            raise api_error(404, "not_found", str(exc)) from None
-        except PermissionDenied as exc:  # ADR 0065: the caller's own entry
-            raise api_error(403, "forbidden", str(exc)) from exc
-        except InvalidInput as exc:
-            raise api_error(422, "invalid_input", str(exc)) from exc
-        except AgentIdentityRequired as exc:
-            raise api_error(422, "agent_identity_required", str(exc)) from exc
-        return [
-            FeedbackOut(entry_id=o.feedback.entry_id, verdict=o.feedback.verdict, quality=o.quality)
-            for o in outcomes
-        ]
+        outcomes = await app.governance_service.record_feedback_many(
+            credential,
+            request.entry_ids,
+            request.verdict,
+            request.note,
+            agent=request.agent,
+        )
+        return [FeedbackOut.from_outcome(o) for o in outcomes]
 
     @router.post("/entries/{entry_id}/feedback", response_model=FeedbackOut)
     async def feedback(
@@ -619,27 +535,14 @@ def build_router() -> APIRouter:
         A plain user key self-reports the agent instance via ``agent``
         (SPEC.md §8.1); an agent sub-key's credential agent wins.
         """
-        try:
-            outcome = await app.governance_service.record_feedback(
-                credential,
-                entry_id,
-                request.verdict,
-                request.note,
-                agent=request.agent,
-            )
-        except EntryNotFound:
-            raise api_error(404, "not_found", f"unknown entry: {entry_id}") from None
-        except PermissionDenied as exc:  # ADR 0065: the caller's own entry
-            raise api_error(403, "forbidden", str(exc)) from exc
-        except InvalidInput as exc:
-            raise api_error(422, "invalid_input", str(exc)) from exc
-        except AgentIdentityRequired as exc:
-            raise api_error(422, "agent_identity_required", str(exc)) from exc
-        return FeedbackOut(
-            entry_id=outcome.feedback.entry_id,
-            verdict=outcome.feedback.verdict,
-            quality=outcome.quality,
+        outcome = await app.governance_service.record_feedback(
+            credential,
+            entry_id,
+            request.verdict,
+            request.note,
+            agent=request.agent,
         )
+        return FeedbackOut.from_outcome(outcome)
 
     @router.get("/whoami", response_model=WhoamiOut)
     async def whoami(credential: require, app: hive) -> WhoamiOut:
@@ -660,16 +563,9 @@ def build_router() -> APIRouter:
         with the current status and what to do next; a name owned by
         another alias is a 409 ``name_conflict`` that says nothing more.
         """
-        try:
-            registration = await app.access_service.register(
-                payload.name, credential, owner_alias=payload.owner_alias
-            )
-        except PermissionDenied as exc:
-            raise api_error(403, "forbidden", str(exc)) from exc
-        except InvalidInput as exc:  # a bad or reserved name is not a conflict (ADR 0040)
-            raise api_error(422, "invalid_input", str(exc)) from exc
-        except NameTaken as exc:
-            raise api_error(409, "name_conflict", str(exc)) from exc
+        registration = await app.access_service.register(
+            payload.name, credential, owner_alias=payload.owner_alias
+        )
         if registration.already_registered:
             response.status_code = 200
         return RegisteredAgentOut(
@@ -773,8 +669,8 @@ def build_router() -> APIRouter:
         0095): a reason is required and the withdrawal is audited as
         ``entry.withdraw`` with ``via: "portal"``."""
         _require_agent(credential, "the agent portal")
-        return await _withdraw(
-            entry_id, app.governance_service.withdraw_own(credential, entry_id, request.reason)
+        return EntryOut.from_entry(
+            await app.governance_service.withdraw_own(credential, entry_id, request.reason)
         )
 
     @router.get("/portal/flagged", response_model=list[FlaggedEntryOut])
@@ -823,44 +719,22 @@ def build_router() -> APIRouter:
         ``via: "portal"``."""
         _require_agent(credential, "the agent portal")
         cleanups = app.access_service.cleanups
-        try:
-            if payload.dry_run:
-                preview = await cleanups.preview_own(
-                    credential, since=payload.since, until=payload.until
-                )
-                return AgentCleanupPreviewOut.from_preview(preview)
-            if payload.expected_withdraw is None or payload.expected_ratings is None:
-                raise InvalidInput(
-                    "expected_withdraw and expected_ratings (the preview's totals) are required "
-                    "when dry_run is false; preview first"
-                )
-            until = payload.until if payload.until is not None else utcnow()
-            outcome = await cleanups.cleanup_own(
-                credential,
-                since=payload.since,
-                until=until,
-                restore_ids=payload.restore_ids,
-                expected_withdraw=payload.expected_withdraw,
-                expected_ratings=payload.expected_ratings,
+        if payload.dry_run:
+            preview = await cleanups.preview_own(
+                credential, since=payload.since, until=payload.until
             )
-        except PermissionDenied as exc:
-            raise api_error(403, "forbidden", str(exc)) from exc
-        except InvalidInput as exc:
-            raise api_error(422, "invalid_input", str(exc)) from exc
-        except UnknownAgent as exc:
-            raise api_error(404, "not_found", str(exc)) from exc
-        except AgentCleanupRefused as exc:
-            raise api_error(409, "cleanup_refused", str(exc)) from exc
-        return PortalCleanupOut(
-            cleanup_id=outcome.record.id if outcome.record is not None else None,
+            return AgentCleanupPreviewOut.from_preview(preview)
+        _check_cleanup_expectations(payload)
+        until = payload.until if payload.until is not None else utcnow()
+        outcome = await cleanups.cleanup_own(
+            credential,
             since=payload.since,
             until=until,
-            withdrawn=outcome.withdrawn,
-            ratings_set_aside=outcome.ratings_set_aside,
-            restored=outcome.restored,
-            pins_removed=[DroppedPinOut.from_dropped(p) for p in outcome.unpinned],
-            nothing_to_clean=outcome.record is None,
+            restore_ids=payload.restore_ids,
+            expected_withdraw=payload.expected_withdraw,
+            expected_ratings=payload.expected_ratings,
         )
+        return PortalCleanupOut.from_outcome(outcome, since=payload.since, until=until)
 
     @router.get("/portal/cleanups", response_model=list[PortalCleanupRecordOut])
     async def portal_cleanups(credential: require, app: hive) -> list[PortalCleanupRecordOut]:
@@ -880,27 +754,8 @@ def build_router() -> APIRouter:
         when a newer one stands). Audited ``agent.cleanup_undo`` with
         ``via: "portal"``."""
         _require_agent(credential, "the agent portal")
-        try:
-            outcome = await app.access_service.cleanups.undo_own(cleanup_id, credential)
-        except PermissionDenied as exc:
-            raise api_error(403, "forbidden", str(exc)) from exc
-        except UnknownAgentCleanup as exc:
-            raise api_error(404, "not_found", str(exc)) from exc
-        except AgentCleanupRefused as exc:
-            raise api_error(409, "cleanup_refused", str(exc)) from exc
-        record = outcome.record
-        return AgentCleanupUndoOut(
-            cleanup_id=record.id,
-            agent=record.agent,
-            reactivated=outcome.reactivated,
-            reactivate_skipped=outcome.reactivate_skipped,
-            resuperseded=outcome.resuperseded,
-            resupersede_skipped=outcome.resupersede_skipped,
-            ratings_cleared=outcome.ratings_cleared,
-            pins_restored=[DroppedPinOut.from_dropped(p) for p in outcome.pins_restored],
-            pins_skipped=[DroppedPinOut.from_dropped(p) for p in outcome.pins_skipped],
-            note=None,
-        )
+        outcome = await app.access_service.cleanups.undo_own(cleanup_id, credential)
+        return AgentCleanupUndoOut.from_outcome(outcome, note=None)
 
     @router.post("/portal/key/lock", response_model=KeyLockedOut)
     async def portal_lock_key(credential: require, app: hive) -> KeyLockedOut:
@@ -911,10 +766,7 @@ def build_router() -> APIRouter:
         was replaced or locked in the meantime. Audited ``agent_key.lock``
         with ``via: "portal"``. Agent keys only."""
         _require_agent(credential, "locking a key")
-        try:
-            locked = await app.access_service.lock_own_key(credential)
-        except PermissionDenied as exc:  # a dev-mode identity has no key to lock
-            raise api_error(403, "forbidden", str(exc)) from exc
+        locked = await app.access_service.lock_own_key(credential)
         if not locked:  # replaced or locked between the key check and the lock
             raise api_error(
                 409, "key_not_locked", "this key was already replaced or locked; nothing changed"
@@ -1004,8 +856,8 @@ def build_router() -> APIRouter:
         """Withdraw an entry as the admin (ADR 0080): the same call as
         ``POST /v1/entries/{id}/withdraw``, audited as ``entry.withdraw``."""
         _require_admin(credential, "the admin withdraw")
-        return await _withdraw(
-            entry_id, app.governance_service.withdraw(credential, entry_id, request.reason)
+        return EntryOut.from_entry(
+            await app.governance_service.withdraw(credential, entry_id, request.reason)
         )
 
     @router.get("/admin/activity", response_model=ActivityOut)
@@ -1087,14 +939,7 @@ def build_router() -> APIRouter:
     @router.post("/admin/fleets", response_model=FleetOut, status_code=201)
     async def create_fleet(payload: CreateFleetRequest, credential: require, app: hive) -> FleetOut:
         """Create a named fleet (admin-gated, ADR 0012)."""
-        try:
-            fleet = await app.access_service.create_fleet(payload.name, credential)
-        except PermissionDenied as exc:
-            raise api_error(403, "forbidden", str(exc)) from exc
-        except InvalidInput as exc:
-            raise api_error(422, "invalid_input", str(exc)) from exc
-        except FleetExists as exc:
-            raise api_error(409, "fleet_exists", str(exc)) from exc
+        fleet = await app.access_service.create_fleet(payload.name, credential)
         return FleetOut.from_fleet(fleet)
 
     @router.patch("/admin/fleets/{fleet_id}", response_model=FleetOut)
@@ -1106,16 +951,7 @@ def build_router() -> APIRouter:
         be renamed; the current name again is a 200 with no audit row. 404
         unknown fleet, 409 ``fleet_exists`` when another fleet has the name,
         422 for a name a new fleet could not have."""
-        try:
-            fleet = await app.access_service.rename_fleet(fleet_id, payload.name, credential)
-        except PermissionDenied as exc:
-            raise api_error(403, "forbidden", str(exc)) from exc
-        except InvalidInput as exc:
-            raise api_error(422, "invalid_input", str(exc)) from exc
-        except UnknownFleet as exc:
-            raise api_error(404, "not_found", str(exc)) from exc
-        except FleetExists as exc:
-            raise api_error(409, "fleet_exists", str(exc)) from exc
+        fleet = await app.access_service.rename_fleet(fleet_id, payload.name, credential)
         return FleetOut.from_fleet(fleet)
 
     @router.get("/admin/fleets", response_model=list[FleetOut])
@@ -1124,10 +960,7 @@ def build_router() -> APIRouter:
     ) -> list[FleetOut]:
         """List fleets (admin-gated, ADR 0012). Fleets merged into another
         are left out unless ``?include_merged=true`` (ADR 0107)."""
-        try:
-            fleets = await app.access_service.list_fleets(credential, include_merged=include_merged)
-        except PermissionDenied as exc:
-            raise api_error(403, "forbidden", str(exc)) from exc
+        fleets = await app.access_service.list_fleets(credential, include_merged=include_merged)
         return [FleetOut.from_fleet(f) for f in fleets]
 
     @router.post(
@@ -1148,46 +981,23 @@ def build_router() -> APIRouter:
         ``merge_refused`` / ``fleet_exists``."""
         _require_admin(credential, "merging fleets")
         merges = app.access_service.merges
-        try:
-            if payload.dry_run:
-                preview = await merges.preview(
-                    source_id,
-                    credential,
-                    target_fleet_id=payload.target_fleet_id,
-                    new_fleet_name=payload.new_fleet_name,
-                )
-                return FleetMergePreviewOut.from_preview(preview)
-            outcome = await merges.merge(
+        if payload.dry_run:
+            preview = await merges.preview(
                 source_id,
                 credential,
                 target_fleet_id=payload.target_fleet_id,
                 new_fleet_name=payload.new_fleet_name,
-                keep_pin_ids=payload.keep_pin_ids,
-                expected_pin_ids=payload.expected_pin_ids,
             )
-        except PermissionDenied as exc:
-            raise api_error(403, "forbidden", str(exc)) from exc
-        except InvalidInput as exc:
-            raise api_error(422, "invalid_input", str(exc)) from exc
-        except UnknownFleet as exc:
-            raise api_error(404, "not_found", str(exc)) from exc
-        except FleetMerged as exc:
-            raise api_error(409, "fleet_merged", str(exc)) from exc
-        except FleetMergeRefused as exc:
-            raise api_error(409, "merge_refused", str(exc)) from exc
-        except FleetExists as exc:
-            raise api_error(409, "fleet_exists", str(exc)) from exc
-        record = outcome.record
-        return FleetMergeOut(
-            merge_id=record.id,
-            source_fleet_id=record.source_fleet_id,
-            target=FleetOut.from_fleet(outcome.target),
-            target_created=outcome.target_created,
-            entries_moved=outcome.entries_moved,
-            agents_moved=list(record.moved_agents),
-            pins_kept=len(outcome.pins_kept),
-            pins_dropped=[DroppedPinOut.from_dropped(p) for p in outcome.pins_dropped],
+            return FleetMergePreviewOut.from_preview(preview)
+        outcome = await merges.merge(
+            source_id,
+            credential,
+            target_fleet_id=payload.target_fleet_id,
+            new_fleet_name=payload.new_fleet_name,
+            keep_pin_ids=payload.keep_pin_ids,
+            expected_pin_ids=payload.expected_pin_ids,
         )
+        return FleetMergeOut.from_outcome(outcome)
 
     @router.post(
         "/admin/fleets/{source_id}/move",
@@ -1210,49 +1020,25 @@ def build_router() -> APIRouter:
         ``fleet_exists``. Undo is the merge undo route."""
         _require_admin(credential, "moving agents between fleets")
         merges = app.access_service.merges
-        try:
-            if payload.dry_run:
-                preview = await merges.preview_move(
-                    source_id,
-                    payload.agents,
-                    credential,
-                    target_fleet_id=payload.target_fleet_id,
-                    new_fleet_name=payload.new_fleet_name,
-                )
-                return FleetMovePreviewOut.from_preview(preview)
-            outcome = await merges.move(
+        if payload.dry_run:
+            preview = await merges.preview_move(
                 source_id,
                 payload.agents,
                 credential,
                 target_fleet_id=payload.target_fleet_id,
                 new_fleet_name=payload.new_fleet_name,
-                keep_pin_ids=payload.keep_pin_ids,
-                expected_pin_ids=payload.expected_pin_ids,
             )
-        except PermissionDenied as exc:
-            raise api_error(403, "forbidden", str(exc)) from exc
-        except InvalidInput as exc:
-            raise api_error(422, "invalid_input", str(exc)) from exc
-        except UnknownFleet as exc:
-            raise api_error(404, "not_found", str(exc)) from exc
-        except FleetMerged as exc:
-            raise api_error(409, "fleet_merged", str(exc)) from exc
-        except FleetMoveRefused as exc:
-            raise api_error(409, "move_refused", str(exc)) from exc
-        except FleetExists as exc:
-            raise api_error(409, "fleet_exists", str(exc)) from exc
-        record = outcome.record
-        return FleetMoveOut(
-            merge_id=record.id,
-            source_fleet_id=record.source_fleet_id,
-            target=FleetOut.from_fleet(outcome.target),
-            target_created=outcome.target_created,
-            entries_moved=outcome.entries_moved,
-            entries_held_back=outcome.entries_held_back,
-            agents_moved=list(record.moved_agents),
-            pins_kept=len(outcome.pins_kept),
-            pins_dropped=[DroppedPinOut.from_dropped(p) for p in outcome.pins_dropped],
+            return FleetMovePreviewOut.from_preview(preview)
+        outcome = await merges.move(
+            source_id,
+            payload.agents,
+            credential,
+            target_fleet_id=payload.target_fleet_id,
+            new_fleet_name=payload.new_fleet_name,
+            keep_pin_ids=payload.keep_pin_ids,
+            expected_pin_ids=payload.expected_pin_ids,
         )
+        return FleetMoveOut.from_outcome(outcome)
 
     @router.get("/admin/fleet-merges", response_model=list[FleetMergeRecordOut])
     async def list_fleet_merges(credential: require, app: hive) -> list[FleetMergeRecordOut]:
@@ -1273,28 +1059,8 @@ def build_router() -> APIRouter:
         a move, its source) can be undone (409 ``merge_refused`` /
         ``move_refused``)."""
         _require_admin(credential, "undoing a fleet merge")
-        try:
-            outcome = await app.access_service.merges.undo(merge_id, credential)
-        except PermissionDenied as exc:
-            raise api_error(403, "forbidden", str(exc)) from exc
-        except UnknownFleetMerge as exc:
-            raise api_error(404, "not_found", str(exc)) from exc
-        except FleetMoveRefused as exc:
-            raise api_error(409, "move_refused", str(exc)) from exc
-        except FleetMergeRefused as exc:
-            raise api_error(409, "merge_refused", str(exc)) from exc
-        record = outcome.record
-        return FleetUnmergeOut(
-            kind=record.kind,
-            merge_id=record.id,
-            source_fleet_id=record.source_fleet_id,
-            target_fleet_id=record.target_fleet_id,
-            entries_restored=outcome.entries_restored,
-            agents_restored=list(outcome.agents_restored),
-            pins_returned=outcome.pins_returned,
-            pins_restored=[DroppedPinOut.from_dropped(p) for p in outcome.pins_restored],
-            pins_skipped=[DroppedPinOut.from_dropped(p) for p in outcome.pins_skipped],
-        )
+        outcome = await app.access_service.merges.undo(merge_id, credential)
+        return FleetUnmergeOut.from_outcome(outcome)
 
     @router.post(
         "/admin/agents/{name}/cleanup",
@@ -1317,50 +1083,24 @@ def build_router() -> APIRouter:
         a missing ``expected_*`` count on an apply."""
         _require_admin(credential, "cleaning up after an agent")
         cleanups = app.access_service.cleanups
-        try:
-            if payload.dry_run:
-                preview = await cleanups.preview(
-                    name, credential, since=payload.since, until=payload.until
-                )
-                return AgentCleanupPreviewOut.from_preview(preview)
-            if payload.expected_withdraw is None or payload.expected_ratings is None:
-                raise InvalidInput(
-                    "expected_withdraw and expected_ratings (the preview's totals) are required "
-                    "when dry_run is false; preview first"
-                )
-            until = payload.until if payload.until is not None else utcnow()
-            outcome = await cleanups.cleanup(
-                name,
-                credential,
-                since=payload.since,
-                until=until,
-                restore_ids=payload.restore_ids,
-                expected_withdraw=payload.expected_withdraw,
-                expected_ratings=payload.expected_ratings,
-                also_revoke=payload.also_revoke,
+        if payload.dry_run:
+            preview = await cleanups.preview(
+                name, credential, since=payload.since, until=payload.until
             )
-        except PermissionDenied as exc:
-            raise api_error(403, "forbidden", str(exc)) from exc
-        except InvalidInput as exc:
-            raise api_error(422, "invalid_input", str(exc)) from exc
-        except UnknownAgent as exc:
-            raise api_error(404, "not_found", str(exc)) from exc
-        except AgentCleanupRefused as exc:
-            raise api_error(409, "cleanup_refused", str(exc)) from exc
-        return AgentCleanupOut(
-            cleanup_id=outcome.record.id if outcome.record is not None else None,
-            agent=name,
+            return AgentCleanupPreviewOut.from_preview(preview)
+        _check_cleanup_expectations(payload)
+        until = payload.until if payload.until is not None else utcnow()
+        outcome = await cleanups.cleanup(
+            name,
+            credential,
             since=payload.since,
             until=until,
-            withdrawn=outcome.withdrawn,
-            ratings_set_aside=outcome.ratings_set_aside,
-            restored=outcome.restored,
-            pins_removed=[DroppedPinOut.from_dropped(p) for p in outcome.unpinned],
-            revoked=outcome.revoked,
-            already_revoked=outcome.already_revoked,
-            revoke_error=outcome.revoke_error,
-            nothing_to_clean=outcome.record is None,
+            restore_ids=payload.restore_ids,
+            expected_withdraw=payload.expected_withdraw,
+            expected_ratings=payload.expected_ratings,
+            also_revoke=payload.also_revoke,
         )
+        return AgentCleanupOut.from_outcome(outcome, agent=name, since=payload.since, until=until)
 
     @router.get("/admin/agent-cleanups", response_model=list[AgentCleanupRecordOut])
     async def list_agent_cleanups(credential: require, app: hive) -> list[AgentCleanupRecordOut]:
@@ -1381,29 +1121,13 @@ def build_router() -> APIRouter:
         It does not un-revoke the agent. Only the newest standing cleanup of
         an agent can be undone (409 ``cleanup_refused``)."""
         _require_admin(credential, "undoing an agent cleanup")
-        try:
-            outcome = await app.access_service.cleanups.undo(cleanup_id, credential)
-        except PermissionDenied as exc:
-            raise api_error(403, "forbidden", str(exc)) from exc
-        except UnknownAgentCleanup as exc:
-            raise api_error(404, "not_found", str(exc)) from exc
-        except AgentCleanupRefused as exc:
-            raise api_error(409, "cleanup_refused", str(exc)) from exc
-        record = outcome.record
-        return AgentCleanupUndoOut(
-            cleanup_id=record.id,
-            agent=record.agent,
-            reactivated=outcome.reactivated,
-            reactivate_skipped=outcome.reactivate_skipped,
-            resuperseded=outcome.resuperseded,
-            resupersede_skipped=outcome.resupersede_skipped,
-            ratings_cleared=outcome.ratings_cleared,
-            pins_restored=[DroppedPinOut.from_dropped(p) for p in outcome.pins_restored],
-            pins_skipped=[DroppedPinOut.from_dropped(p) for p in outcome.pins_skipped],
+        outcome = await app.access_service.cleanups.undo(cleanup_id, credential)
+        return AgentCleanupUndoOut.from_outcome(
+            outcome,
             note=(
                 "the agent was revoked by this cleanup and stays revoked; "
                 "re-activate it separately if it should work again"
-                if record.revoked
+                if outcome.record.revoked
                 else None
             ),
         )
@@ -1412,10 +1136,7 @@ def build_router() -> APIRouter:
     async def list_agents(credential: require, app: hive) -> list[AdminAgentOut]:
         """List registered agents with their key's last use and whether
         they are idle (admin-gated, ADRs 0012, 0110)."""
-        try:
-            agents = await app.access_service.list_agents(credential)
-        except PermissionDenied as exc:
-            raise api_error(403, "forbidden", str(exc)) from exc
+        agents = await app.access_service.list_agents(credential)
         now = datetime.now(UTC)
         return [
             AdminAgentOut.from_admin_agent(a, now=now, idle_days=app.idle_agent_days)
@@ -1430,23 +1151,12 @@ def build_router() -> APIRouter:
         level + home fleet, flip to ``active``, and issue the agent key
         **once** (returned here, never stored again).
         """
-        try:
-            _agent, key = await app.access_service.activate(
-                name,
-                TrustLevel(payload.trust_level),
-                payload.home_fleet_id,
-                credential,
-            )
-        except PermissionDenied as exc:
-            raise api_error(403, "forbidden", str(exc)) from exc
-        except (UnknownAgent, UnknownFleet) as exc:
-            raise api_error(404, "not_found", str(exc)) from exc
-        except InvalidAgentStatus as exc:
-            raise api_error(409, "invalid_status", str(exc)) from exc
-        except FleetMerged as exc:  # ADR 0107
-            raise api_error(409, "fleet_merged", str(exc)) from exc
-        except AgentRetired as exc:  # ADR 0113
-            raise api_error(409, "agent_retired", str(exc)) from exc
+        _agent, key = await app.access_service.activate(
+            name,
+            TrustLevel(payload.trust_level),
+            payload.home_fleet_id,
+            credential,
+        )
         return KeyIssuedOut(key=key)
 
     @router.post("/admin/agents/{name}/key", response_model=KeyIssuedOut)
@@ -1455,14 +1165,7 @@ def build_router() -> APIRouter:
         key stops working at once and the new one is returned **once**.
         Status, trust level, fleet and memories are untouched. 404 for an
         unknown name, 409 ``invalid_status`` unless the agent is active."""
-        try:
-            key = await app.access_service.replace_agent_key(name, credential)
-        except PermissionDenied as exc:
-            raise api_error(403, "forbidden", str(exc)) from exc
-        except UnknownAgent as exc:
-            raise api_error(404, "not_found", str(exc)) from exc
-        except InvalidAgentStatus as exc:
-            raise api_error(409, "invalid_status", str(exc)) from exc
+        key = await app.access_service.replace_agent_key(name, credential)
         return KeyIssuedOut(key=key)
 
     @router.patch("/admin/agents/{name}", response_model=AgentOut)
@@ -1481,34 +1184,25 @@ def build_router() -> APIRouter:
         _require_admin(credential, "changing an agent")
         if payload.trust_level is None and payload.home_fleet_id is None:
             raise api_error(422, "update_required", "supply trust_level and/or home_fleet_id")
-        try:
-            # Resolve the fleet BEFORE any mutation so a PATCH cannot half-apply.
-            if (
-                payload.home_fleet_id is not None
-                and await app.store.get_fleet(payload.home_fleet_id) is None
-            ):
-                raise UnknownFleet(f"unknown fleet: {payload.home_fleet_id}")
-            agent: Agent | None = None
-            if payload.trust_level is not None:
-                agent = await app.access_service.set_trust_level(
-                    name, TrustLevel(payload.trust_level), credential
-                )
-            if payload.home_fleet_id is not None:
-                agent = await app.access_service.set_home_fleet(
-                    name, payload.home_fleet_id, credential
-                )
+        # Resolve the fleet BEFORE any mutation so a PATCH cannot half-apply.
+        if (
+            payload.home_fleet_id is not None
+            and await app.store.get_fleet(payload.home_fleet_id) is None
+        ):
+            raise UnknownFleet(f"unknown fleet: {payload.home_fleet_id}")
+        agent: Agent | None = None
+        if payload.trust_level is not None:
+            agent = await app.access_service.set_trust_level(
+                name, TrustLevel(payload.trust_level), credential
+            )
+        if payload.home_fleet_id is not None:
+            agent = await app.access_service.set_home_fleet(name, payload.home_fleet_id, credential)
+        if agent is None:
+            # Neither field changed anything; still resolve the agent
+            # (404 for an unknown name, SPEC §5.1).
+            agent = await app.store.get_agent(name)
             if agent is None:
-                # Neither field changed anything; still resolve the agent
-                # (404 for an unknown name, SPEC §5.1).
-                agent = await app.store.get_agent(name)
-                if agent is None:
-                    raise UnknownAgent(f"unknown agent: {name}")
-        except PermissionDenied as exc:
-            raise api_error(403, "forbidden", str(exc)) from exc
-        except (UnknownAgent, UnknownFleet) as exc:
-            raise api_error(404, "not_found", str(exc)) from exc
-        except FleetMerged as exc:  # ADR 0107
-            raise api_error(409, "fleet_merged", str(exc)) from exc
+                raise UnknownAgent(f"unknown agent: {name}")
         return AgentOut.from_agent(agent)
 
     @router.post("/admin/agents/{name}/revoke")
@@ -1518,14 +1212,7 @@ def build_router() -> APIRouter:
         status is ``revoked``; on a pending agent this rejects the
         registration. The record + name stay reserved. 404 for an
         unknown name, 409 if already revoked."""
-        try:
-            await app.access_service.revoke(name, credential)
-        except PermissionDenied as exc:
-            raise api_error(403, "forbidden", str(exc)) from exc
-        except UnknownAgent as exc:
-            raise api_error(404, "not_found", str(exc)) from exc
-        except InvalidAgentStatus as exc:
-            raise api_error(409, "invalid_status", str(exc)) from exc
+        await app.access_service.revoke(name, credential)
 
     @router.post(
         "/admin/agents/{name}/retire",
@@ -1545,21 +1232,10 @@ def build_router() -> APIRouter:
         retired, or a cycle), 422 the same agent twice."""
         _require_admin(credential, "retiring an agent")
         successions = app.access_service.successions
-        try:
-            if payload.dry_run:
-                preview = await successions.preview(name, payload.successor, credential)
-                return RetirePreviewOut.from_preview(preview)
-            succession = await successions.retire(name, payload.successor, credential)
-        except PermissionDenied as exc:
-            raise api_error(403, "forbidden", str(exc)) from exc
-        except InvalidInput as exc:
-            raise api_error(422, "invalid_input", str(exc)) from exc
-        except UnknownAgent as exc:
-            raise api_error(404, "not_found", str(exc)) from exc
-        except InvalidAgentStatus as exc:
-            raise api_error(409, "invalid_status", str(exc)) from exc
-        except SuccessionRefused as exc:
-            raise api_error(409, "succession_refused", str(exc)) from exc
+        if payload.dry_run:
+            preview = await successions.preview(name, payload.successor, credential)
+            return RetirePreviewOut.from_preview(preview)
+        succession = await successions.retire(name, payload.successor, credential)
         return RetiredOut.model_validate(SuccessionOut.from_succession(succession).model_dump())
 
     @router.get("/admin/successions", response_model=list[SuccessionOut])
@@ -1576,12 +1252,7 @@ def build_router() -> APIRouter:
         stays revoked; activating it again issues a new key. 404 when no
         succession retires that agent."""
         _require_admin(credential, "undoing a retirement")
-        try:
-            succession = await app.access_service.successions.undo(retired, credential)
-        except PermissionDenied as exc:
-            raise api_error(403, "forbidden", str(exc)) from exc
-        except UnknownSuccession as exc:
-            raise api_error(404, "not_found", str(exc)) from exc
+        succession = await app.access_service.successions.undo(retired, credential)
         return SuccessionOut.from_succession(succession)
 
     @router.get("/admin/audit-log", response_model=list[AuditRecordOut])
@@ -1614,10 +1285,7 @@ def build_router() -> APIRouter:
             since=since,
             before=str(before) if before is not None else None,
         )
-        try:
-            records = await app.access_service.list_audit(credential, filters, limit)
-        except PermissionDenied as exc:
-            raise api_error(403, "forbidden", str(exc)) from exc
+        records = await app.access_service.list_audit(credential, filters, limit)
         return [AuditRecordOut.from_record(r) for r in records]
 
     @router.post("/admin/org-key/rotate", response_model=KeyIssuedOut)
@@ -1626,10 +1294,7 @@ def build_router() -> APIRouter:
         prior org key; active agents are unaffected (ADR 0031).
         All prior org keys stop working; the new key is returned once.
         """
-        try:
-            key = await app.access_service.rotate_org_key(credential)
-        except PermissionDenied as exc:
-            raise api_error(403, "forbidden", str(exc)) from exc
+        key = await app.access_service.rotate_org_key(credential)
         return KeyIssuedOut(key=key)
 
     return router

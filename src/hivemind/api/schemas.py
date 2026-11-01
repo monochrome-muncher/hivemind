@@ -12,6 +12,7 @@ from typing import Annotated, Any, Literal
 from pydantic import AfterValidator, BaseModel, Field, field_validator
 
 from hivemind.domain.access import KEY_LOCKED_MESSAGE, Agent, Fleet, Standing, is_idle
+from hivemind.domain.agent_cleanup import CleanupOutcome, CleanupUndoOutcome
 from hivemind.domain.audit import AuditRecord
 from hivemind.domain.entry import EntityKind, Entry, EntryState, ImportanceSource, Kind, SourceType
 from hivemind.domain.feedback import (
@@ -21,7 +22,12 @@ from hivemind.domain.feedback import (
     FlaggedEntry,
     Verdict,
 )
-from hivemind.domain.fleet_merge import DroppedPin
+from hivemind.domain.fleet_merge import (
+    DroppedPin,
+    MergeOutcome,
+    MoveOutcome,
+    UnmergeOutcome,
+)
 from hivemind.domain.pin import ChangeReason, Pin, PinnedEntry
 from hivemind.domain.recency import RecencyHint
 from hivemind.domain.succession import Succession
@@ -36,7 +42,9 @@ from hivemind.domain.validation import (
 )
 from hivemind.services.agent_cleanup import CleanupPreview, CleanupView
 from hivemind.services.chain import EntryLinks
+from hivemind.services.feedback import FeedbackOutcome
 from hivemind.services.fleet_merge import MergePreview, MergeView, MovePreview
+from hivemind.services.read import EntryDetail
 from hivemind.services.search import Hit
 from hivemind.services.successions import RetirePreview
 from hivemind.services.write import RelatedEntry
@@ -305,6 +313,14 @@ class EntryOut(BaseModel):
         self.linked_from = [LinkOut.from_entry(e) for e in links.linked_from]
 
     @classmethod
+    def from_detail(cls, detail: EntryDetail) -> EntryOut:
+        """An entry as a read by id answers it: with its feedback and links."""
+        out = cls.from_entry(detail.entry)
+        out.feedback = FeedbackSummaryOut.from_summary(detail.feedback)
+        out.set_links(detail.links)
+        return out
+
+    @classmethod
     def from_entry(cls, entry: Entry) -> EntryOut:
         """Serialize a stored entry (the get/withdraw/withdraw responses)."""
         return cls(
@@ -559,6 +575,14 @@ class FeedbackOut(BaseModel):
     entry_id: str
     verdict: Verdict
     quality: float
+
+    @classmethod
+    def from_outcome(cls, outcome: FeedbackOutcome) -> FeedbackOut:
+        return cls(
+            entry_id=outcome.feedback.entry_id,
+            verdict=outcome.feedback.verdict,
+            quality=outcome.quality,
+        )
 
 
 class HealthOut(BaseModel):
@@ -894,6 +918,20 @@ class FleetMergeOut(BaseModel):
     pins_kept: int
     pins_dropped: list[DroppedPinOut]
 
+    @classmethod
+    def from_outcome(cls, outcome: MergeOutcome) -> FleetMergeOut:
+        record = outcome.record
+        return cls(
+            merge_id=record.id,
+            source_fleet_id=record.source_fleet_id,
+            target=FleetOut.from_fleet(outcome.target),
+            target_created=outcome.target_created,
+            entries_moved=outcome.entries_moved,
+            agents_moved=list(record.moved_agents),
+            pins_kept=len(outcome.pins_kept),
+            pins_dropped=[DroppedPinOut.from_dropped(p) for p in outcome.pins_dropped],
+        )
+
 
 class FleetMoveOut(BaseModel):
     """A move that happened. ``merge_id`` is the history id (the undo takes
@@ -910,6 +948,21 @@ class FleetMoveOut(BaseModel):
     pins_kept: int
     pins_dropped: list[DroppedPinOut]
 
+    @classmethod
+    def from_outcome(cls, outcome: MoveOutcome) -> FleetMoveOut:
+        record = outcome.record
+        return cls(
+            merge_id=record.id,
+            source_fleet_id=record.source_fleet_id,
+            target=FleetOut.from_fleet(outcome.target),
+            target_created=outcome.target_created,
+            entries_moved=outcome.entries_moved,
+            entries_held_back=outcome.entries_held_back,
+            agents_moved=list(record.moved_agents),
+            pins_kept=len(outcome.pins_kept),
+            pins_dropped=[DroppedPinOut.from_dropped(p) for p in outcome.pins_dropped],
+        )
+
 
 class FleetUnmergeOut(BaseModel):
     """An undone merge or move. Search counters stay summed."""
@@ -923,6 +976,21 @@ class FleetUnmergeOut(BaseModel):
     pins_returned: int
     pins_restored: list[DroppedPinOut]
     pins_skipped: list[DroppedPinOut]
+
+    @classmethod
+    def from_outcome(cls, outcome: UnmergeOutcome) -> FleetUnmergeOut:
+        record = outcome.record
+        return cls(
+            kind=record.kind,
+            merge_id=record.id,
+            source_fleet_id=record.source_fleet_id,
+            target_fleet_id=record.target_fleet_id,
+            entries_restored=outcome.entries_restored,
+            agents_restored=list(outcome.agents_restored),
+            pins_returned=outcome.pins_returned,
+            pins_restored=[DroppedPinOut.from_dropped(p) for p in outcome.pins_restored],
+            pins_skipped=[DroppedPinOut.from_dropped(p) for p in outcome.pins_skipped],
+        )
 
 
 class FleetMergeRecordOut(BaseModel):
@@ -1148,6 +1216,25 @@ class AgentCleanupOut(BaseModel):
     revoke_error: str | None = None
     nothing_to_clean: bool
 
+    @classmethod
+    def from_outcome(
+        cls, outcome: CleanupOutcome, *, agent: str, since: datetime, until: datetime
+    ) -> AgentCleanupOut:
+        return cls(
+            cleanup_id=outcome.record.id if outcome.record is not None else None,
+            agent=agent,
+            since=since,
+            until=until,
+            withdrawn=outcome.withdrawn,
+            ratings_set_aside=outcome.ratings_set_aside,
+            restored=outcome.restored,
+            pins_removed=[DroppedPinOut.from_dropped(p) for p in outcome.unpinned],
+            revoked=outcome.revoked,
+            already_revoked=outcome.already_revoked,
+            revoke_error=outcome.revoke_error,
+            nothing_to_clean=outcome.record is None,
+        )
+
 
 class AgentCleanupUndoOut(BaseModel):
     """An undone cleanup. It never un-revokes the agent; ``note`` says so when
@@ -1163,6 +1250,21 @@ class AgentCleanupUndoOut(BaseModel):
     pins_restored: list[DroppedPinOut]
     pins_skipped: list[DroppedPinOut]
     note: str | None
+
+    @classmethod
+    def from_outcome(cls, outcome: CleanupUndoOutcome, *, note: str | None) -> AgentCleanupUndoOut:
+        return cls(
+            cleanup_id=outcome.record.id,
+            agent=outcome.record.agent,
+            reactivated=outcome.reactivated,
+            reactivate_skipped=outcome.reactivate_skipped,
+            resuperseded=outcome.resuperseded,
+            resupersede_skipped=outcome.resupersede_skipped,
+            ratings_cleared=outcome.ratings_cleared,
+            pins_restored=[DroppedPinOut.from_dropped(p) for p in outcome.pins_restored],
+            pins_skipped=[DroppedPinOut.from_dropped(p) for p in outcome.pins_skipped],
+            note=note,
+        )
 
 
 class AgentCleanupRecordOut(BaseModel):
@@ -1237,6 +1339,21 @@ class PortalCleanupOut(BaseModel):
     restored: int
     pins_removed: list[DroppedPinOut]
     nothing_to_clean: bool
+
+    @classmethod
+    def from_outcome(
+        cls, outcome: CleanupOutcome, *, since: datetime, until: datetime
+    ) -> PortalCleanupOut:
+        return cls(
+            cleanup_id=outcome.record.id if outcome.record is not None else None,
+            since=since,
+            until=until,
+            withdrawn=outcome.withdrawn,
+            ratings_set_aside=outcome.ratings_set_aside,
+            restored=outcome.restored,
+            pins_removed=[DroppedPinOut.from_dropped(p) for p in outcome.unpinned],
+            nothing_to_clean=outcome.record is None,
+        )
 
 
 class PortalCleanupRecordOut(BaseModel):

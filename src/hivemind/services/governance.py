@@ -122,7 +122,7 @@ class GovernanceService:
         try:
             return await self._store.withdraw_entry(entry.id, reason, by_user=credential.user_id)
         except KeyError as exc:  # the store's "unknown entry"
-            raise EntryNotFound(str(exc)) from exc
+            raise EntryNotFound(f"unknown entry: {entry.id}") from exc
         except ValueError as exc:  # the store's "not active": a concurrent withdraw won the race
             raise EntryNotActive(str(exc)) from exc
 
