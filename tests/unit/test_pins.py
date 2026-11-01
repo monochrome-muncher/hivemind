@@ -291,7 +291,13 @@ async def test_another_fleets_pins_are_empty_to_a_contributor() -> None:
 
 
 async def test_pins_are_newest_first() -> None:
-    store = MemoryStore(make_clock())
+    clock = make_clock()
+
+    def ticking() -> datetime:  # distinct pin times, as in real time
+        clock.advance_days(1 / 86400)
+        return clock()
+
+    store = MemoryStore(ticking)
     lead = _surface(store, LEAD)
     first = await _write(store, LEAD, "first")
     second = await _write(store, LEAD, "second")
