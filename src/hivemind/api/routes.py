@@ -117,6 +117,7 @@ from hivemind.domain.validation import (
 )
 from hivemind.ports import Credential
 from hivemind.services.access import resolve_write_scope
+from hivemind.services.activity import DEFAULT_DAYS, MAX_DAYS, MIN_DAYS
 from hivemind.services.drafts import entry_draft
 
 require = Annotated[Credential, Depends(require_credential)]
@@ -148,8 +149,6 @@ ADMIN_FEEDBACK_DEFAULT_LIMIT = 50
 ADMIN_FLAGGED_DEFAULT_LIMIT = 50
 PORTAL_DEFAULT_LIMIT = 50
 MAX_FLAG_AGE_DAYS = 3650  # the flag backlog's age filter: ten years
-MIN_ACTIVITY_DAYS = 1
-MAX_ACTIVITY_DAYS = 365
 
 # ADR 0048: a search answered by the keyword stream alone because the
 # embedding service failed says so in this response header.
@@ -861,7 +860,7 @@ def build_router() -> APIRouter:
     async def admin_activity(
         credential: require,
         app: hive,
-        days: Annotated[int, Query(ge=MIN_ACTIVITY_DAYS, le=MAX_ACTIVITY_DAYS)] = 30,
+        days: Annotated[int, Query(ge=MIN_DAYS, le=MAX_DAYS)] = DEFAULT_DAYS,
     ) -> ActivityOut:
         """Who wrote and who reported, per agent, fleet and UTC day over
         the last ``days`` days (ADR 0080). Observation only."""

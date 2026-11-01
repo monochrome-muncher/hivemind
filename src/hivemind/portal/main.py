@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import logging
-import os
 
 import uvicorn
 
-from hivemind.config import configure_logging, load_settings
+from hivemind.config import bind_host, bind_port, configure_logging, load_settings
 from hivemind.portal.app import create_portal_app
 
 logger = logging.getLogger(__name__)
@@ -30,6 +29,6 @@ def run() -> None:
     )
     uvicorn.run(
         create_portal_app(settings.portal_api_url, verify=verify),
-        host=os.environ.get("HIVEMIND_HOST", "0.0.0.0"),
-        port=int(os.environ.get("HIVEMIND_PORT", "8080")),
+        host=bind_host(),
+        port=bind_port(8080),
     )

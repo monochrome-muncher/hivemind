@@ -7,14 +7,20 @@ The store and embeddings modules are imported lazily, so the unit suite
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any, cast
 
 import uvicorn
 from fastapi import FastAPI
 
 from hivemind.api.deps import HivemindApp, create_app
-from hivemind.config import SearchConfig, Settings, configure_logging, load_settings
+from hivemind.config import (
+    SearchConfig,
+    Settings,
+    bind_host,
+    bind_port,
+    configure_logging,
+    load_settings,
+)
 from hivemind.ports import Authenticator, Embedder, Extractor, Store
 from hivemind.services.wiring import build_services, log_startup
 
@@ -97,8 +103,8 @@ def run() -> None:
     fastapi_app = create_app_from_settings(settings)
     uvicorn.run(
         fastapi_app,
-        host=os.environ.get("HIVEMIND_HOST", "0.0.0.0"),
-        port=int(os.environ.get("HIVEMIND_PORT", "8000")),
+        host=bind_host(),
+        port=bind_port(8000),
     )
 
 
