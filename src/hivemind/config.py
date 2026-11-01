@@ -563,6 +563,19 @@ def env_file_for(environment: str | None) -> str:
     return _ENV_FILES.get(key, _DEFAULT_ENV_FILE)
 
 
+def bind_host() -> str:
+    """The ``HIVEMIND_HOST`` bind host every HTTP runner reads (default all interfaces)."""
+    return os.environ.get("HIVEMIND_HOST", "0.0.0.0")
+
+
+def bind_port(default: int) -> int:
+    """The ``HIVEMIND_PORT`` bind port; ``default`` is the runner's own.
+
+    A non-numeric value raises ``ValueError`` from ``int()``.
+    """
+    return int(os.environ.get("HIVEMIND_PORT", str(default)))
+
+
 # ``HIVEMIND_*`` variables that are deliberately NOT ``Settings`` fields
 # (read from ``os.environ`` or by non-Python code) and so must not be
 # reported as unknown (ADR 0024). ``extra="forbid"`` on the model is not
@@ -571,14 +584,8 @@ def env_file_for(environment: str | None) -> str:
 # HIVEMIND_STRICT_ENV (ADR 0032).
 _ALLOWED_EXTRA_ENV_VARS: dict[str, str] = {
     "HIVEMIND_RUNNER": "selects the runner in entrypoint.sh",
-    "HIVEMIND_HOST": (
-        "REST/MCP-HTTP/admin/portal bind host, read via os.environ in api/main.py, "
-        "mcp/http.py, admin/main.py and portal/main.py"
-    ),
-    "HIVEMIND_PORT": (
-        "REST/MCP-HTTP/admin/portal bind port, read via os.environ in api/main.py, "
-        "mcp/http.py, admin/main.py and portal/main.py"
-    ),
+    "HIVEMIND_HOST": ("REST/MCP-HTTP/admin/portal bind host, read by bind_host()"),
+    "HIVEMIND_PORT": ("REST/MCP-HTTP/admin/portal bind port, read by bind_port()"),
     # Per-process identity (ADR 0009), so deliberately outside Settings.
     "HIVEMIND_MCP_KEY": "per-agent hivemind-mcp-pg credential, read via os.environ in mcp/runners.py",
     "HIVEMIND_MCP_HTTP_PORT": "mcp-http port for docker compose and `make mcp-http-dev`; the app never reads it",

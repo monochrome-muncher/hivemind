@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import time
 from collections.abc import Callable
 from contextvars import ContextVar
@@ -20,7 +19,7 @@ from contextvars import ContextVar
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from hivemind.config import Settings, configure_logging, load_settings
+from hivemind.config import Settings, bind_host, bind_port, configure_logging, load_settings
 from hivemind.domain.access import KEY_LOCKED_MESSAGE, KeyLocked
 from hivemind.http_metrics import UNMATCHED_ROUTE, RequestMetrics
 from hivemind.mcp.app import McpHivemind
@@ -61,6 +60,30 @@ def _extract_key(scope: Scope) -> str | None:
     return api_key.decode("latin-1").strip() if api_key else None
 
 
+async def _send_response(
+    send: Send,
+    status: int,
+    body: bytes,
+    content_type: bytes = b"application/json",
+    extra_headers: tuple[tuple[bytes, bytes], ...] = (),
+) -> None:
+    """One minimal ASGI response: the start message (content-type, content-length,
+    then ``extra_headers``) and the body. The MCP path and the probes are
+    fire-and-forget, so nothing streams."""
+    await send(
+        {
+            "type": "http.response.start",
+            "status": status,
+            "headers": [
+                (b"content-type", content_type),
+                (b"content-length", str(len(body)).encode()),
+                *extra_headers,
+            ],
+        }
+    )
+    await send({"type": "http.response.body", "body": body})
+
+
 async def _send_unauthorized(
     send: Send,
     error: str = "unauthorized",
@@ -68,40 +91,24 @@ async def _send_unauthorized(
 ) -> None:
     """Send a minimal 401 JSON response (no body needed on the MCP path). A
     locked key says so (``key_locked``) instead of calling itself unknown."""
-    body = json.dumps({"error": error, "detail": detail}).encode()
-    await send(
-        {
-            "type": "http.response.start",
-            "status": 401,
-            "headers": [
-                (b"content-type", b"application/json"),
-                (b"content-length", str(len(body)).encode()),
-                # Tells a client this is a plain bearer-key API (ONB-8).
-                (b"www-authenticate", b'Bearer realm="hivemind"'),
-            ],
-        }
+    await _send_json(
+        send,
+        401,
+        {"error": error, "detail": detail},
+        # Tells a client this is a plain bearer-key API (ONB-8).
+        extra_headers=((b"www-authenticate", b'Bearer realm="hivemind"'),),
     )
-    await send({"type": "http.response.body", "body": body})
 
 
 async def _send_store_unavailable(send: Send) -> None:
     """503 + Retry-After when key verification timed out on the store: the
     key may be fine, so a 401 would mislead (ROADMAP 3.13)."""
-    body = json.dumps(
-        {"error": "store_unavailable", "detail": "the database is busy; retry shortly"}
-    ).encode()
-    await send(
-        {
-            "type": "http.response.start",
-            "status": 503,
-            "headers": [
-                (b"content-type", b"application/json"),
-                (b"content-length", str(len(body)).encode()),
-                (b"retry-after", b"2"),
-            ],
-        }
+    await _send_json(
+        send,
+        503,
+        {"error": "store_unavailable", "detail": "the database is busy; retry shortly"},
+        extra_headers=((b"retry-after", b"2"),),
     )
-    await send({"type": "http.response.body", "body": body})
 
 
 # No OAuth here: MCP clients probe these after a 401, and anything but a
@@ -110,18 +117,7 @@ _OAUTH_DISCOVERY_PREFIX = "/.well-known/oauth-"
 
 
 async def _send_not_found(send: Send) -> None:
-    body = json.dumps({"error": "not_found"}).encode()
-    await send(
-        {
-            "type": "http.response.start",
-            "status": 404,
-            "headers": [
-                (b"content-type", b"application/json"),
-                (b"content-length", str(len(body)).encode()),
-            ],
-        }
-    )
-    await send({"type": "http.response.body", "body": body})
+    await _send_json(send, 404, {"error": "not_found"})
 
 
 class BearerAuthMiddleware:
@@ -255,34 +251,17 @@ class ProbeRouter:
 
 
 async def _send_metrics(send: Send, metrics: McpMetrics) -> None:
-    body = metrics.render()
-    await send(
-        {
-            "type": "http.response.start",
-            "status": 200,
-            "headers": [
-                (b"content-type", metrics.content_type.encode()),
-                (b"content-length", str(len(body)).encode()),
-            ],
-        }
-    )
-    await send({"type": "http.response.body", "body": body})
+    await _send_response(send, 200, metrics.render(), metrics.content_type.encode())
 
 
-async def _send_json(send: Send, status: int, payload: dict[str, str]) -> None:
-    """A minimal ASGI JSON response (the probe endpoints are fire-and-forget)."""
-    body = json.dumps(payload).encode()
-    await send(
-        {
-            "type": "http.response.start",
-            "status": status,
-            "headers": [
-                (b"content-type", b"application/json"),
-                (b"content-length", str(len(body)).encode()),
-            ],
-        }
-    )
-    await send({"type": "http.response.body", "body": body})
+async def _send_json(
+    send: Send,
+    status: int,
+    payload: dict[str, str],
+    extra_headers: tuple[tuple[bytes, bytes], ...] = (),
+) -> None:
+    """A minimal ASGI JSON response."""
+    await _send_response(send, status, json.dumps(payload).encode(), extra_headers=extra_headers)
 
 
 def _split_csv(value: str) -> list[str]:
@@ -355,7 +334,7 @@ def build_http_app(
         require_stored_keys=settings.require_stored_keys,
         metrics=metrics,
     )
-    host = os.environ.get("HIVEMIND_HOST", "0.0.0.0")
+    host = bind_host()
     mcp_app = server.streamable_http_app(
         stateless_http=True, host=host, transport_security=build_transport_security(settings, host)
     )
@@ -381,6 +360,6 @@ def main_http() -> None:
     embedder = build_embedder(settings)
     authenticator = build_authenticator(settings)
     app = build_http_app(settings, store, embedder, authenticator)
-    host = os.environ.get("HIVEMIND_HOST", "0.0.0.0")
-    port = int(os.environ.get("HIVEMIND_PORT", "8000"))
+    host = bind_host()
+    port = bind_port(8000)
     uvicorn.run(app, host=host, port=port)

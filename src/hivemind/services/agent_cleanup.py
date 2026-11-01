@@ -287,8 +287,13 @@ class AgentCleanupService:
                 )
                 return replace(outcome, revoke_error=note)
             if record is not None:
-                await self._store.mark_cleanup_revoked(record.id)
-                record = replace(record, revoked=True)
+                # The agent is revoked for real; a failed mark only leaves the
+                # record's badge off, and must not become an error either.
+                try:
+                    await self._store.mark_cleanup_revoked(record.id)
+                    record = replace(record, revoked=True)
+                except Exception:
+                    logger.exception("marking cleanup %s as revoked failed", record.id)
             outcome = replace(outcome, record=record, revoked=True)
         return outcome
 

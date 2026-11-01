@@ -617,6 +617,24 @@ async def test_a_failed_revoke_after_the_commit_is_reported_not_raised(w: World)
     assert len(await w.audit(AuditAction.AGENT_CLEANUP)) == 1
 
 
+async def test_a_failed_revoked_mark_after_the_revoke_still_reports_revoked(
+    w: World, caplog: pytest.LogCaptureFixture
+) -> None:
+    junk = await w.entry("junk")
+
+    async def broken(cleanup_id: str) -> None:
+        raise RuntimeError("store write failed")
+
+    w.store.mark_cleanup_revoked = broken  # type: ignore[method-assign]
+    with caplog.at_level("ERROR"):
+        out = await w.clean(also_revoke=True)
+    assert out.revoked and out.revoke_error is None
+    assert out.record is not None and not out.record.revoked  # the mark failed
+    assert (await w.store.get_agent("bad")).status is AgentStatus.REVOKED  # type: ignore[union-attr]
+    assert await w.state(junk) is EntryState.WITHDRAWN
+    assert "marking cleanup" in caplog.text and "store write failed" in caplog.text
+
+
 async def test_a_revoke_that_loses_a_race_to_another_revoke_counts_as_already_revoked(
     w: World,
 ) -> None:

@@ -3,6 +3,7 @@ revoked-reporter rule, the TTL cache and the "observation only" rule."""
 
 from __future__ import annotations
 
+import asyncio
 import pathlib
 import re
 from datetime import UTC, datetime, timedelta
@@ -135,6 +136,32 @@ async def test_cache_honours_the_ttl_and_is_keyed_by_days() -> None:
     tick.now += 2
     await service.report(7)
     assert len(store.calls) == 3
+
+
+async def test_invalidate_mid_scan_keeps_the_stale_scan_out_of_the_cache() -> None:
+    store = await _seeded()
+    started, release = asyncio.Event(), asyncio.Event()
+    real = store.activity
+
+    async def gated(since: datetime) -> Activity:
+        result = await real(since)  # the data as of the scan start
+        if len(store.calls) == 1:
+            started.set()
+            await release.wait()
+        return result
+
+    store.activity = gated  # type: ignore[method-assign]
+    service = _service(store)
+    first = asyncio.create_task(service.report(7))
+    await started.wait()
+    service.invalidate()  # e.g. a fleet merge lands while the scan runs
+    release.set()
+    await first  # the in-flight caller still gets its own result
+    assert len(store.calls) == 1
+    await service.report(7)
+    assert len(store.calls) == 2  # rescanned, not served the stale scan
+    await service.report(7)
+    assert len(store.calls) == 2  # and the fresh scan is cached
 
 
 async def test_cache_does_not_straddle_utc_midnight() -> None:

@@ -966,11 +966,9 @@ class MemoryStore:
 
     async def quality_counts(self, entry_ids: list[str]) -> dict[str, FeedbackCounts]:
         with self._lock:
-            # Every well-formed id, known or not, as on PgStore.
+            # Every well-formed id, known or not, keyed canonically, as on PgStore.
             live = self._live_feedback()
-            return {
-                key: _count_for(live, key) for eid in entry_ids if (key := _canon(eid)) is not None
-            }
+            return {eid: _count_for(live, eid) for eid in _canonical_ids(entry_ids)}
 
     async def feedback_signals(
         self,
@@ -981,11 +979,7 @@ class MemoryStore:
     ) -> dict[str, FeedbackSignals]:
         with self._lock:
             live = self._live_feedback()
-            out = {
-                key: _signals_for(live, key)
-                for eid in entry_ids
-                if (key := _canon(eid)) is not None
-            }
+            out = {eid: _signals_for(live, eid) for eid in _canonical_ids(entry_ids)}
             if count_supersedes:
                 counts: dict[str, int] = {}
                 for entry in self._entries.values():
@@ -2049,6 +2043,11 @@ class MemoryStore:
                     return []
                 ordered = ordered[ids.index(filters.before) + 1 :]
             return [r for r in ordered if filters.matches(r)][:limit]
+
+
+def _canonical_ids(ids: list[str]) -> list[str]:
+    """The distinct well-formed ids in canonical form, in order, as PgStore keys them."""
+    return list(dict.fromkeys(c for i in ids if (c := canonical_uuid(i)) is not None))
 
 
 def _count_for(feedback: dict[tuple[str, str, str], Feedback], entry_id: str) -> FeedbackCounts:
