@@ -13,6 +13,7 @@ tuning retrieval is a config change, not a code change.
 from __future__ import annotations
 
 import difflib
+import ipaddress
 import logging
 import math
 import os
@@ -531,7 +532,14 @@ def endpoint_label(url: str) -> str:
 
 
 def _is_loopback(host: str) -> bool:
-    return host == "localhost" or host.startswith("127.") or host in ("::1", "[::1]")
+    """``localhost`` or a loopback address; a hostname that merely starts
+    with ``127.`` (``127.example.com``) is a remote host."""
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host.strip("[]")).is_loopback
+    except ValueError:
+        return False
 
 
 # Environment profile files (ADR 0017), selected by ``ENVIRONMENT``.
