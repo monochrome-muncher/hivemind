@@ -86,6 +86,7 @@ jobs:
 
       # One xdist worker per CPU (at most 4, so the pools stay under the
       # service's max_connections), each on its own database (`hivemind_gw0`,
-      # ...) created next to the service database; module-grouped.
+      # ...) created next to the service database; idle workers steal
+      # queued tests from busy ones (`worksteal`).
       - name: Run the test suite
-        run: uv run pytest -rs -n auto --maxprocesses=4 --dist loadscope
+        run: uv run pytest -rs -n auto --maxprocesses=4 --dist worksteal
