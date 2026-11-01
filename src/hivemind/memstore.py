@@ -1185,6 +1185,34 @@ class MemoryStore:
         pairs.sort(key=lambda p: (-p.similarity, p.entry_id))
         return DuplicateScan(tuple(pairs), len(looked), len(mine) > cap)
 
+    def _resolve_sides(
+        self,
+        source_id: str,
+        target_fleet_id: str | None,
+        new_fleet_name: str | None,
+        into_itself: Exception,
+    ) -> tuple[Fleet, Fleet | None]:
+        """The source and the existing target (``None`` when ``new_fleet_name``
+        names a fleet to create) of a merge or move, refusing an unknown or
+        merged side, a taken name, and a target that is the source
+        (``into_itself``). Call with ``self._lock`` held."""
+        source = self._fleets.get(source_id)
+        if source is None:
+            raise UnknownFleet(f"unknown fleet: {source_id}")
+        target = None
+        if target_fleet_id is not None:
+            target = self._fleets.get(target_fleet_id)
+            if target is None:
+                raise UnknownFleet(f"unknown fleet: {target_fleet_id}")
+            if target.id == source.id:
+                raise into_itself
+        elif any(f.name == new_fleet_name for f in self._fleets.values()):
+            raise FleetExists(f"fleet already exists: {new_fleet_name!r}")
+        for side in (source, target):
+            if side is not None and side.merged_into is not None:
+                self._refuse_merged(side.id)
+        return source, target
+
     async def merge_fleets(
         self,
         source_id: str,
@@ -1195,30 +1223,15 @@ class MemoryStore:
         expected_pin_ids: Sequence[str] | None = None,
         merged_by: str,
     ) -> MergeOutcome:
-        if (target_fleet_id is None) == (new_fleet_name is None):
-            raise InvalidInput("name exactly one of target_fleet_id and new_fleet_name")
-        for given in (source_id, target_fleet_id):
-            if given is not None and not is_valid_uuid(given):
-                raise UnknownFleet(f"unknown fleet: {given}")
-        source_id = str(uuid.UUID(source_id))
-        if target_fleet_id is not None:
-            target_fleet_id = str(uuid.UUID(target_fleet_id))
+        _require_one_target(target_fleet_id, new_fleet_name)
+        source_id, target_fleet_id = _canonical_fleet_ids(source_id, target_fleet_id)
         with self._lock:
-            source = self._fleets.get(source_id)
-            if source is None:
-                raise UnknownFleet(f"unknown fleet: {source_id}")
-            target = None
-            if target_fleet_id is not None:
-                target = self._fleets.get(target_fleet_id)
-                if target is None:
-                    raise UnknownFleet(f"unknown fleet: {target_fleet_id}")
-                if target.id == source.id:
-                    raise FleetMergeRefused("a fleet cannot be merged into itself")
-            elif any(f.name == new_fleet_name for f in self._fleets.values()):
-                raise FleetExists(f"fleet already exists: {new_fleet_name!r}")
-            for side in (source, target):
-                if side is not None and side.merged_into is not None:
-                    self._refuse_merged(side.id)
+            source, target = self._resolve_sides(
+                source_id,
+                target_fleet_id,
+                new_fleet_name,
+                FleetMergeRefused("a fleet cannot be merged into itself"),
+            )
             pins = [
                 p
                 for (f, _), p in self._pins.items()
@@ -1265,6 +1278,28 @@ class MemoryStore:
             self._merge_entries[record.id] = moved
             return MergeOutcome(record, target, created, len(moved), len(agents), rekeyed, drops)
 
+    def _restore_pins(
+        self, fleet_id: str, pins: Sequence[DroppedPin], may_pin: Callable[[Entry], bool]
+    ) -> tuple[list[DroppedPin], list[DroppedPin]]:
+        """Put ``pins`` back on ``fleet_id`` where the entry is still in the fleet,
+        ``may_pin`` accepts it, it is not pinned, and the fleet's cap has room.
+        Returns ``(restored, skipped)``. Call with ``self._lock`` held."""
+        fits = [
+            d
+            for d in pins
+            if (e := self._entries.get(d.entry_id)) is not None
+            and e.fleet_id == fleet_id
+            and may_pin(e)
+            and (fleet_id, d.entry_id) not in self._pins
+        ]
+        skipped = [d for d in pins if d not in fits]
+        held = [p.pinned_by for (f, _), p in self._pins.items() if f == fleet_id]
+        put, over = plan_pin_restore(fits, held)
+        skipped.extend(over)
+        for d in put:
+            self._pins[(fleet_id, d.entry_id)] = Pin(fleet_id, d.entry_id, d.pinned_by, d.pinned_at)
+        return list(put), skipped
+
     # -- fleet move (ADR 0112) -----------------------------------------------
 
     def _move_entries(self, source_id: str, agents: Sequence[str]) -> tuple[list[Entry], int]:
@@ -1288,33 +1323,18 @@ class MemoryStore:
         expected_pin_ids: Sequence[str] | None = None,
         moved_by: str,
     ) -> MoveOutcome:
-        if (target_fleet_id is None) == (new_fleet_name is None):
-            raise InvalidInput("name exactly one of target_fleet_id and new_fleet_name")
+        _require_one_target(target_fleet_id, new_fleet_name)
         names = sorted(set(agents))
         if not names:
             raise InvalidInput("name at least one agent to move")
-        for given in (source_id, target_fleet_id):
-            if given is not None and not is_valid_uuid(given):
-                raise UnknownFleet(f"unknown fleet: {given}")
-        source_id = str(uuid.UUID(source_id))
-        if target_fleet_id is not None:
-            target_fleet_id = str(uuid.UUID(target_fleet_id))
+        source_id, target_fleet_id = _canonical_fleet_ids(source_id, target_fleet_id)
         with self._lock:
-            source = self._fleets.get(source_id)
-            if source is None:
-                raise UnknownFleet(f"unknown fleet: {source_id}")
-            target = None
-            if target_fleet_id is not None:
-                target = self._fleets.get(target_fleet_id)
-                if target is None:
-                    raise UnknownFleet(f"unknown fleet: {target_fleet_id}")
-                if target.id == source.id:
-                    raise FleetMoveRefused("agents cannot be moved into the fleet they are in")
-            elif any(f.name == new_fleet_name for f in self._fleets.values()):
-                raise FleetExists(f"fleet already exists: {new_fleet_name!r}")
-            for side in (source, target):
-                if side is not None and side.merged_into is not None:
-                    self._refuse_merged(side.id)
+            source, target = self._resolve_sides(
+                source_id,
+                target_fleet_id,
+                new_fleet_name,
+                FleetMoveRefused("agents cannot be moved into the fleet they are in"),
+            )
             away = [
                 n
                 for n in names
@@ -1446,22 +1466,9 @@ class MemoryStore:
                 returned_count = len(returned_keys)
             for fleet in (target,) if is_move else (source, target):
                 mine = [d for d in record.dropped_pins if d.fleet_id == fleet.id]
-                fits = [
-                    d
-                    for d in mine
-                    if (e := self._entries.get(d.entry_id)) is not None
-                    and e.fleet_id == fleet.id
-                    and (fleet.id, d.entry_id) not in self._pins
-                ]
-                skipped.extend(d for d in mine if d not in fits)
-                held = [p.pinned_by for (f, _), p in self._pins.items() if f == fleet.id]
-                put, over = plan_pin_restore(fits, held)
-                skipped.extend(over)
-                for d in put:
-                    self._pins[(fleet.id, d.entry_id)] = Pin(
-                        fleet.id, d.entry_id, d.pinned_by, d.pinned_at
-                    )
+                put, left = self._restore_pins(fleet.id, mine, lambda e: True)
                 restored.extend(put)
+                skipped.extend(left)
             now = self._clock()
             if record.kind != KIND_MOVE:  # a move never marked its source
                 self._fleets[source.id] = replace(source, merged_into=None, merged_at=None)
@@ -1719,23 +1726,13 @@ class MemoryStore:
             skipped_pins: list[DroppedPin] = []
             for fleet_id in sorted({d.fleet_id for d in record.unpinned_pins}):
                 mine = [d for d in record.unpinned_pins if d.fleet_id == fleet_id]
-                fits = [
-                    d
-                    for d in mine
-                    if (e := self._entries.get(d.entry_id)) is not None
-                    and e.fleet_id == fleet_id
-                    and e.state in (EntryState.ACTIVE, EntryState.SUPERSEDED)
-                    and (fleet_id, d.entry_id) not in self._pins
-                ]
-                skipped_pins.extend(d for d in mine if d not in fits)
-                held = [p.pinned_by for (f, _), p in self._pins.items() if f == fleet_id]
-                put, over = plan_pin_restore(fits, held)
-                skipped_pins.extend(over)
-                for d in put:
-                    self._pins[(fleet_id, d.entry_id)] = Pin(
-                        fleet_id, d.entry_id, d.pinned_by, d.pinned_at
-                    )
+                put, left = self._restore_pins(
+                    fleet_id,
+                    mine,
+                    lambda e: e.state in (EntryState.ACTIVE, EntryState.SUPERSEDED),
+                )
                 restored_pins.extend(put)
+                skipped_pins.extend(left)
             done = replace(record, undone_at=self._clock())
             self._cleanups[self._cleanups.index(record)] = done
             return CleanupUndoOutcome(
@@ -2081,59 +2078,36 @@ def _with_state(
     superseded_by: str | None = None,
     withdrawn_reason: str | None = None,
 ) -> Entry:
-    return Entry(
-        id=entry.id,
-        kind=entry.kind,
-        summary=entry.summary,
-        author=entry.author,
-        agent=entry.agent,
-        occurred_at=entry.occurred_at,
-        created_at=entry.created_at,
-        body=entry.body,
-        payload=entry.payload,
-        sources=entry.sources,
-        tags=entry.tags,
-        importance=entry.importance,
-        importance_source=entry.importance_source,
-        scope=entry.scope,
-        fleet_id=entry.fleet_id,
-        embedding=entry.embedding,
-        embedding_model=entry.embedding_model,
+    return replace(
+        entry,
         state=state,
         superseded_by=superseded_by or entry.superseded_by,
         withdrawn_reason=withdrawn_reason or entry.withdrawn_reason,
-        entities=entry.entities,  # ADR 0016
-        entities_model=entry.entities_model,
     )
 
 
 def _copy(entry: Entry) -> Entry:
     """Return a fresh Entry with copied containers (defensive copy)."""
-    return Entry(
-        id=entry.id,
-        kind=entry.kind,
-        summary=entry.summary,
-        author=entry.author,
-        agent=entry.agent,
-        occurred_at=entry.occurred_at,
-        created_at=entry.created_at,
-        body=entry.body,
+    return replace(
+        entry,
         payload=dict(entry.payload) if entry.payload is not None else None,
         sources=tuple(entry.sources),
         tags=tuple(entry.tags),
-        importance=entry.importance,
-        importance_source=entry.importance_source,
-        scope=entry.scope,
-        fleet_id=entry.fleet_id,
         embedding=tuple(entry.embedding) if entry.embedding is not None else None,
-        embedding_model=entry.embedding_model,
-        state=entry.state,
-        superseded_by=entry.superseded_by,
-        withdrawn_reason=entry.withdrawn_reason,
-        entities=tuple(entry.entities),  # ADR 0016
-        entities_model=entry.entities_model,
+        entities=tuple(entry.entities),
     )
 
 
-# EntryDraft is used only for the create_entry signature type.
-_ = EntryDraft
+def _require_one_target(target_fleet_id: str | None, new_fleet_name: str | None) -> None:
+    if (target_fleet_id is None) == (new_fleet_name is None):
+        raise InvalidInput("name exactly one of target_fleet_id and new_fleet_name")
+
+
+def _canonical_fleet_ids(source_id: str, target_fleet_id: str | None) -> tuple[str, str | None]:
+    """The merge or move's fleet ids as canonical uuid text (``UnknownFleet`` for a non-uuid)."""
+    for given in (source_id, target_fleet_id):
+        if given is not None and not is_valid_uuid(given):
+            raise UnknownFleet(f"unknown fleet: {given}")
+    return str(uuid.UUID(source_id)), (
+        str(uuid.UUID(target_fleet_id)) if target_fleet_id is not None else None
+    )
