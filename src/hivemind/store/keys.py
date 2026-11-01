@@ -38,7 +38,7 @@ from typing import Protocol
 import asyncpg
 
 from hivemind.config import load_settings
-from hivemind.domain.access import TrustLevel
+from hivemind.domain.access import AgentStatus, TrustLevel
 from hivemind.domain.audit import ActorKind, AuditAction, key_fingerprint
 from hivemind.domain.succession import AgentRetired
 from hivemind.domain.validation import is_valid_uuid
@@ -217,7 +217,7 @@ async def _issue_agent(
             if (successor := await conn.fetchval(_SUCCESSOR_OF, name)) is not None:
                 raise AgentRetired(name, successor)  # ADR 0113: undo the retirement first
             detail: dict[str, str] | None = None
-            if status == "active":
+            if status == AgentStatus.ACTIVE:
                 if trust_level is not None or home_fleet_id is not None:
                     raise ActivationFlagsNotApplicable(name)
                 if await conn.fetchval(_HAS_AGENT_KEY, name) is not None:
@@ -255,7 +255,7 @@ async def _rotate_agent(dsn: str, name: str, *, actor: str | None = None) -> str
             status = await conn.fetchval(_AGENT_STATUS_FOR_UPDATE, name)
             if status is None:
                 raise AgentNotRegistered(name)
-            if status != "active":
+            if status != AgentStatus.ACTIVE:
                 raise AgentNotActive(name, status)
             old = await conn.fetch(_DELETE_AGENT_KEYS_RETURNING, name)
             await conn.execute(_ISSUE_AGENT, new_hash, name)

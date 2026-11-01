@@ -397,10 +397,19 @@ class TestSettingsValidation:
             Settings(embedding_endpoint="http://api.example.com/v1", embedding_api_key=KEY)
         assert "plain http" in caplog.text and KEY not in caplog.text
 
-    def test_loopback_http_with_key_does_not_warn(self, caplog) -> None:
+    @pytest.mark.parametrize(
+        "host", ["localhost:8001", "127.0.0.1:8001", "127.1.2.3", "[::1]:8001"]
+    )
+    def test_loopback_http_with_key_does_not_warn(self, caplog, host) -> None:
         with caplog.at_level(logging.WARNING):
-            Settings(embedding_endpoint="http://localhost:8001/v1", embedding_api_key=KEY)
+            Settings(embedding_endpoint=f"http://{host}/v1", embedding_api_key=KEY)
         assert "plain http" not in caplog.text
+
+    def test_hostname_starting_with_127_is_remote(self, caplog) -> None:
+        """``127.example.com`` is a DNS name, not the loopback network."""
+        with caplog.at_level(logging.WARNING):
+            Settings(embedding_endpoint="http://127.example.com/v1", embedding_api_key=KEY)
+        assert "plain http" in caplog.text
 
 
 class TestLogging:

@@ -458,6 +458,22 @@ async def test_hive_feedback_records_verdict(app: McpHivemind) -> None:
     assert await app.store.feedback_counts(entry["id"]) == (1, 0, 0)
 
 
+async def test_hive_feedback_echoes_the_note_as_stored(app: McpHivemind) -> None:
+    """The reply's ``note`` is the stored note (trimmed; ``None`` when only
+    whitespace), the same as its ``feedback.note``, on one id and on many."""
+    bob = build_app(app.store, BOB, make_clock())
+    first = await hive_write(bob, kind="fact", summary="a fact")
+    second = await hive_write(bob, kind="fact", summary="another fact")
+    one = await hive_feedback(app, first["id"], verdict="stale", note="  moved  ")
+    assert one["note"] == one["feedback"]["note"] == "moved"  # type: ignore[index]
+    blank = await hive_feedback(app, first["id"], verdict="helpful", note="\u00a0 ")
+    assert blank["note"] is None and blank["feedback"]["note"] is None  # type: ignore[index]
+    many = await hive_feedback(
+        app, entry_ids=[first["id"], second["id"]], verdict="stale", note=" moved "
+    )
+    assert many["note"] == "moved"
+
+
 async def test_hive_feedback_rejects_unknown_verdict(app: McpHivemind) -> None:
     entry = await hive_write(app, kind="fact", summary="a fact")
     result = await hive_feedback(app, entry["id"], verdict="maybe")
