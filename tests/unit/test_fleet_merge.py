@@ -322,6 +322,35 @@ def test_restoring_pins_respects_the_per_agent_cap_and_exempts_the_admin() -> No
     assert [d.entry_id for d in put] == ["adm4", "adm3"]
 
 
+async def test_preview_refuses_a_fleet_merged_into_itself(w: World) -> None:
+    a, _ = await two_fleets(w)
+    with pytest.raises(FleetMergeRefused, match="itself"):
+        await w.merges.preview(a, ADMIN, target_fleet_id=a)
+
+
+async def test_a_failing_change_hook_never_fails_a_merge_or_undo_that_committed(
+    w: World, caplog: pytest.LogCaptureFixture
+) -> None:
+    a, b = await two_fleets(w)
+    calls: list[str] = []
+
+    def broken() -> None:
+        calls.append("hook")
+        raise RuntimeError("cache backend down")
+
+    w.merges.on_change.append(broken)
+    with caplog.at_level("WARNING"):
+        out = await w.merges.merge(a, ADMIN, target_fleet_id=b)
+        source = await w.store.get_fleet(a)
+        assert source is not None and source.merged_into == b  # committed
+        undone = await w.merges.undo(out.record.id, ADMIN)
+    assert undone.record.id == out.record.id and undone.record.undone_at is not None
+    source = await w.store.get_fleet(a)
+    assert source is not None and source.merged_into is None
+    assert calls == ["hook", "hook"]
+    assert "fleet merge change hook failed" in caplog.text
+
+
 async def two_fleets_named(w: World, x: str, y: str) -> tuple[str, str]:
     return await w.fleet(x), await w.fleet(y)
 
@@ -578,6 +607,16 @@ async def test_rest_preview_merge_list_and_undo(rest) -> None:  # type: ignore[n
     assert resp.json()["agents_restored"] == ["amy"]
     resp = await client.post(f"/v1/admin/fleet-merges/{done['merge_id']}/undo", headers=ADMIN_H)
     assert (resp.status_code, resp.json()["error"]["code"]) == (409, "merge_refused")
+
+
+async def test_rest_preview_refuses_a_fleet_merged_into_itself(rest) -> None:  # type: ignore[no-untyped-def]
+    client, store = rest
+    a = (await store.create_fleet("a")).id
+    resp = await client.post(
+        f"/v1/admin/fleets/{a}/merge", json={"target_fleet_id": a, "dry_run": True}, headers=ADMIN_H
+    )
+    assert (resp.status_code, resp.json()["error"]["code"]) == (409, "merge_refused")
+    assert "itself" in resp.json()["error"]["message"]
 
 
 async def test_rest_errors(rest) -> None:  # type: ignore[no-untyped-def]

@@ -877,6 +877,70 @@ def test_restore_ids_must_all_be_restorable() -> None:
 # -- caches -----------------------------------------------------------------------------------
 
 
+async def test_a_failing_change_hook_never_fails_a_cleanup_or_undo_that_committed(
+    w: World, caplog: pytest.LogCaptureFixture
+) -> None:
+    junk = await w.entry("junk")
+    calls: list[str] = []
+
+    def broken() -> None:
+        calls.append("hook")
+        raise RuntimeError("cache backend down")
+
+    w.cleanups.on_change.append(broken)
+    with caplog.at_level("WARNING"):
+        out = await w.clean()
+        assert out.record is not None and out.withdrawn == 1
+        assert await w.state(junk) is EntryState.WITHDRAWN  # committed
+        undone = await w.cleanups.undo(out.record.id, ADMIN)
+    assert undone.record.id == out.record.id
+    assert await w.state(junk) is EntryState.ACTIVE
+    assert calls == ["hook", "hook"]
+    assert "agent cleanup change hook failed" in caplog.text
+
+
+_NOT_AN_AGENT_KEY = [
+    pytest.param(Credential(user_id="admin", is_admin=True, key_id="abcdef012345"), id="admin"),
+    pytest.param(Credential(user_id="org", is_org=True, access_controlled=True), id="org"),
+    pytest.param(Credential(user_id="dev", access_controlled=True), id="no-agent-name"),
+    # Each kind is refused on its own, even carrying the name of a real agent.
+    pytest.param(
+        Credential(user_id="admin", agent_name="bad", is_admin=True, key_id="abcdef012345"),
+        id="admin-named",
+    ),
+    pytest.param(
+        Credential(user_id="org", agent_name="bad", is_org=True, access_controlled=True),
+        id="org-named",
+    ),
+]
+
+
+@pytest.mark.parametrize("credential", _NOT_AN_AGENT_KEY)
+@pytest.mark.parametrize("method", ["preview_own", "cleanup_own", "undo_own", "list_own"])
+async def test_the_self_service_methods_refuse_a_key_that_is_not_an_agents(
+    w: World, credential: Credential, method: str
+) -> None:
+    junk = await w.entry("junk")
+    done = await w.clean()  # a real cleanup of "bad" that nothing below may touch
+    assert done.record is not None
+    cleanup_id = done.record.id
+    window = {"since": T0, "until": FAR}
+    calls = {
+        "preview_own": lambda: w.cleanups.preview_own(credential, **window),
+        "cleanup_own": lambda: w.cleanups.cleanup_own(
+            credential, **window, expected_withdraw=0, expected_ratings=0
+        ),
+        "undo_own": lambda: w.cleanups.undo_own(cleanup_id, credential),
+        "list_own": lambda: w.cleanups.list_own(credential),
+    }
+    with pytest.raises(PermissionDenied, match="agent key"):
+        await calls[method]()
+    assert await w.state(junk) is EntryState.WITHDRAWN  # only the admin's cleanup acted
+    assert len(await w.store.list_agent_cleanups(10)) == 1
+    stored = await w.store.get_agent_cleanup(cleanup_id)
+    assert stored is not None and stored.undone_at is None
+
+
 async def test_a_cleanup_and_an_undo_drop_the_cached_metrics_and_activity_scans() -> None:
     from hivemind.services.wiring import build_services
 
@@ -1080,13 +1144,24 @@ async def test_rest_errors(rest) -> None:  # type: ignore[no-untyped-def]
 
 async def test_rest_a_naive_window_is_read_as_utc(rest) -> None:  # type: ignore[no-untyped-def]
     client, store = rest
-    await _junk(store, "junk")
-    resp = await client.post(
-        _url(),
-        json={"since": "2026-10-01T00:00:00", "dry_run": True, "until": "2027-01-01T00:00:00"},
-        headers=ADMIN_H,
-    )
-    assert resp.status_code == 200 and resp.json()["withdraw_total"] == 1
+    junk = await _junk(store, "junk")
+    created = (await store.get_entry(junk)).created_at  # type: ignore[union-attr]
+    assert created.utcoffset() == timedelta(0)
+    # The entry was written within a minute of 09:00 UTC on 2026-10-01 (the test clock).
+    assert T0 < created < T0 + timedelta(minutes=1)
+
+    async def preview(since: str, until: str) -> int:
+        resp = await client.post(
+            _url(), json={"since": since, "until": until, "dry_run": True}, headers=ADMIN_H
+        )
+        assert resp.status_code == 200, resp.text
+        return resp.json()["withdraw_total"]
+
+    # The same wall-clock window: read as UTC it holds the entry, with an
+    # explicit +02:00 it is two hours earlier in UTC and does not.
+    assert await preview("2026-10-01T09:00:00", "2026-10-01T09:30:00") == 1
+    assert await preview("2026-10-01T09:00:00+02:00", "2026-10-01T09:30:00+02:00") == 0
+    assert await preview("2026-10-01T09:00:00Z", "2026-10-01T09:30:00Z") == 1
 
 
 async def test_rest_non_admin_keys_get_403_before_anything_is_looked_at(rest) -> None:  # type: ignore[no-untyped-def]

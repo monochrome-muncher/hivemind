@@ -231,3 +231,19 @@ async def test_rest_and_mcp_whoami_carry_the_agent_keys_last_use() -> None:
         resp = await client.get("/v1/whoami", headers={"X-API-Key": "hm_alice"})
     assert resp.status_code == 200
     assert resp.json()["key_last_used_at"] == used.isoformat()
+
+    clock = make_clock()
+    config = make_search_config()
+    mcp_app = McpHivemind(
+        store=store,
+        write_service=WriteService(store, make_embedder()),
+        search_service=SearchService(store, make_embedder(), config, now_fn=clock),
+        governance_service=GovernanceService(store),
+        read_service=ReadService(store, GovernanceService(store), config),
+        access_service=AccessService(store, FakeAuthenticator()),
+        search_config=config,
+        credential=agent(TrustLevel.LURKER, fleet.id),
+    )
+    assert (await hive_whoami(mcp_app))["key_last_used_at"] == used.isoformat()
+    result = await build_server(mcp_app).call_tool("hive_whoami", {})
+    assert json.loads(result.content[0].text)["key_last_used_at"] == used.isoformat()

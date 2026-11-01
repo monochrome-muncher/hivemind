@@ -11,7 +11,14 @@ from __future__ import annotations
 import pytest
 
 from hivemind.domain.access import TrustLevel
-from hivemind.domain.entry import EntityKind, EntryDraft, EntryState, ExtractedEntity, Kind
+from hivemind.domain.entry import (
+    EntityKind,
+    EntryDraft,
+    EntryFilters,
+    EntryState,
+    ExtractedEntity,
+    Kind,
+)
 from hivemind.mcp.app import (
     ERR_AGENT_UNRESOLVED,
     ERR_INVALID_INPUT,
@@ -91,6 +98,17 @@ async def test_hive_write_persists_entry(app: McpHivemind) -> None:
     assert stored.summary == "Auth uses JWT"
     assert stored.body == "Tokens expire in 15 min"
     assert stored.kind.value == "fact"
+
+
+async def test_hive_write_refuses_the_org_key(store: MemoryStore, clock) -> None:  # type: ignore[no-untyped-def]
+    org_app = build_app(store, ORG, clock)  # access-controlled, trust level 0: writes nothing
+    # The org key carries no agent identity: a write names one to reach the trust
+    # check, and without it is refused earlier.
+    result = await hive_write(org_app, kind="fact", summary="from the org key", agent="someone")
+    assert result.get("error", {}).get("code") == "permission_denied"
+    nameless = await hive_write(org_app, kind="fact", summary="from the org key")
+    assert nameless.get("error", {}).get("code") == "agent_unresolved"
+    assert await store.list_entries(EntryFilters(include_inactive=True), 10) == []
 
 
 async def test_hive_write_supersedes_target(app: McpHivemind) -> None:

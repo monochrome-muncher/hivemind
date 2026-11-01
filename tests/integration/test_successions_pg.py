@@ -310,28 +310,34 @@ async def test_two_retirements_to_the_same_agent_race_to_one(world) -> None:
     assert len(await w.store.list_successions()) == 1
 
 
-async def test_the_key_check_uses_one_query(world) -> None:
+async def test_the_key_check_uses_one_query(world, monkeypatch: pytest.MonkeyPatch) -> None:
     """The chain rides the key lookup: one round trip, no extra query."""
     w = world
     await w.retire("old", "heir")
     await w.retire("heir", "other")
-    pool = await w.auth._ensure_pool()
-    seen: list[str] = []
-    real = asyncpg.Connection.fetchrow
+    # The first use of a key also records its last use (a second statement, ADR 0110);
+    # the one-query claim is about every check after that, so use the key once first.
+    assert await w.auth.verify(w.keys["other"]) is not None
+    seen: list[tuple[str, str]] = []
 
-    async def spy(self, query, *args, **kwargs):  # type: ignore[no-untyped-def]
-        seen.append(query)
-        return await real(self, query, *args, **kwargs)
+    def spy(method: str):  # type: ignore[no-untyped-def]
+        real = getattr(asyncpg.Connection, method)
 
-    asyncpg.Connection.fetchrow = spy  # type: ignore[method-assign]
-    try:
-        cred = await w.auth.verify(w.keys["other"])
-    finally:
-        asyncpg.Connection.fetchrow = real  # type: ignore[method-assign]
+        async def wrapped(self, query, *args, **kwargs):  # type: ignore[no-untyped-def]
+            seen.append((method, str(query)))
+            return await real(self, query, *args, **kwargs)
+
+        return wrapped
+
+    for method in ("fetch", "fetchrow", "fetchval", "execute", "executemany"):
+        monkeypatch.setattr(asyncpg.Connection, method, spy(method))
+    cred = await w.auth.verify(w.keys["other"])
     assert cred is not None and cred.inherits_from == ("heir", "old")
     assert cred.owned_authors == ("other", "heir", "old")
-    assert len(seen) == 1 and "successions" in seen[0]
-    assert pool is not None
+    # The pool's own reset on release is not the authenticator's query.
+    queries = [(m, q) for m, q in seen if "pg_advisory_unlock_all" not in q]
+    assert len(queries) == 1, seen
+    assert "successions" in queries[0][1]
 
 
 async def test_opposite_retirements_race_to_exactly_one_winner(world) -> None:
