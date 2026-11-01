@@ -20,6 +20,7 @@ import os
 
 import asyncpg
 import pytest
+from tests.pg import ensure_migrated
 
 from hivemind.config import Settings
 from hivemind.store.migrate import (
@@ -84,6 +85,28 @@ async def _reset_chain(dsn: str) -> None:
     conn = await asyncpg.connect(dsn)
     try:
         await conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public")
+    finally:
+        await conn.close()
+
+
+async def _start_at_head(dsn: str, dim: int) -> None:
+    """Leave the pool at the head with every application table empty.
+
+    The per-migration tests need "at head, no rows" as their start, not a
+    cold schema: migrating from nothing costs about a second per test, and
+    `ensure_migrated` only does that when the pool is not already at head
+    (an earlier test may have left it at another revision). Tests that are
+    about the cold start itself still call `_reset_chain`.
+    """
+    await ensure_migrated(dsn, dim)
+    conn = await asyncpg.connect(dsn)
+    try:
+        tables = await conn.fetch(
+            "SELECT quote_ident(tablename) AS t FROM pg_tables "
+            "WHERE schemaname = 'public' AND tablename NOT LIKE '\\_yoyo\\_%' "
+            "AND tablename <> 'yoyo_lock'"
+        )
+        await conn.execute("TRUNCATE " + ", ".join(r["t"] for r in tables) + " RESTART IDENTITY")
     finally:
         await conn.close()
 
@@ -216,9 +239,7 @@ async def test_rollback_removes_the_latest_migration() -> None:
     `0002` (and the `importance_source` column itself) in place.
     """
     dsn, dim = _dsn(), Settings().embedding_dim
-    await _require_postgres(dsn)
-    await _reset_chain(dsn)
-    await migrate(dsn, dim)
+    await _start_at_head(dsn, dim)
 
     conn = await asyncpg.connect(dsn)
     try:
@@ -677,9 +698,7 @@ async def test_rollback_refuses_to_drop_the_initial_schema() -> None:
     the same refusal, exercised from both approaches.
     """
     dsn, dim = _dsn(), Settings().embedding_dim
-    await _require_postgres(dsn)
-    await _reset_chain(dsn)
-    await migrate(dsn, dim)
+    await _start_at_head(dsn, dim)
 
     with pytest.raises(RuntimeError) as excinfo:
         await rollback(dsn, dim, count=len(CHAIN))
@@ -745,9 +764,7 @@ async def test_0015_adds_the_explore_counter_over_existing_search_counts() -> No
     """ADR 0078: rows counted before 0015 keep their searches and empty
     counts and start at zero explore searches; the CHECK is in force."""
     dsn, dim = _dsn(), Settings().embedding_dim
-    await _require_postgres(dsn)
-    await _reset_chain(dsn)
-    await migrate(dsn, dim)
+    await _start_at_head(dsn, dim)
     await rollback(dsn, dim, count=11)
     assert await current_schema_version(dsn) == "0014.pin-audit"
 
@@ -780,9 +797,7 @@ async def test_0006_backfills_revoked_and_rolls_back_without_loss() -> None:
     key stays `active`. The rollback maps `revoked` back to the pre-0006
     shape (`active`, no key) and destroys no row."""
     dsn, dim = _dsn(), Settings().embedding_dim
-    await _require_postgres(dsn)
-    await _reset_chain(dsn)
-    await migrate(dsn, dim)
+    await _start_at_head(dsn, dim)
     await rollback(dsn, dim, count=20)  # 0026, 0025, 0024 down to 0006
     assert await current_schema_version(dsn) == "0005.audit-log"
 
@@ -837,9 +852,7 @@ async def test_0007_dedupes_keeping_the_newest_then_enforces_uniqueness() -> Non
     Legacy ``user`` / name-less rows are untouched. The rollback drops only
     the indexes."""
     dsn, dim = _dsn(), Settings().embedding_dim
-    await _require_postgres(dsn)
-    await _reset_chain(dsn)
-    await migrate(dsn, dim)
+    await _start_at_head(dsn, dim)
     await rollback(
         dsn, dim, count=19
     )  # 0026, 0025, 0024, 0023, 0022, 0021, 0020, 0019, 0017, 0016, 0015, 0014, 0013, 0012, 0011, 0010, 0009, 0008 (indexes) then 0007
@@ -998,9 +1011,7 @@ async def test_a_rollback_that_lost_its_lock_says_so(monkeypatch, caplog) -> Non
     from hivemind.store import migrate as m
 
     dsn, dim = _dsn(), Settings().embedding_dim
-    await _require_postgres(dsn)
-    await _reset_chain(dsn)
-    await migrate(dsn, dim)
+    await _start_at_head(dsn, dim)
 
     real_rollback = m._rollback_chain
 
@@ -1031,9 +1042,7 @@ async def test_0016_backfills_withdrawn_entries_and_rolls_back_without_loss() ->
     helpful rating older than that lists it once); active and superseded
     entries stay NULL; the rollback drops only the column."""
     dsn, dim = _dsn(), Settings().embedding_dim
-    await _require_postgres(dsn)
-    await _reset_chain(dsn)
-    await migrate(dsn, dim)
+    await _start_at_head(dsn, dim)
     await rollback(
         dsn, dim, count=10
     )  # 0026, 0025, 0024, 0023, 0022, 0021, 0020, 0019, 0017, then 0016
@@ -1078,9 +1087,7 @@ async def test_0017_adds_the_merge_columns_and_tables_and_rolls_back_without_los
     merged); the audit CHECK takes the two new actions; the rollback drops
     the columns and the record tables and keeps every fleet and entry."""
     dsn, dim = _dsn(), Settings().embedding_dim
-    await _require_postgres(dsn)
-    await _reset_chain(dsn)
-    await migrate(dsn, dim)
+    await _start_at_head(dsn, dim)
     await rollback(dsn, dim, count=9)  # 0026, 0025, 0024, 0023, 0022, 0021, 0020, 0019, then 0017
     assert await current_schema_version(dsn) == "0016.entry-withdrawn-at"
 
@@ -1142,9 +1149,7 @@ async def test_0020_takes_the_key_replace_action_and_rolls_back_dropping_only_it
     0019 allowed; the rollback deletes those rows, keeps every other audit row
     and credential, and narrows the CHECK to 0019's list (`fleet.rename` stays)."""
     dsn, dim = _dsn(), Settings().embedding_dim
-    await _require_postgres(dsn)
-    await _reset_chain(dsn)
-    await migrate(dsn, dim)
+    await _start_at_head(dsn, dim)
     await rollback(dsn, dim, count=6)  # 0026, 0025, 0024, 0023, 0022, then 0021
     assert await current_schema_version(dsn) == "0020.agent-key-replace"
 
@@ -1193,9 +1198,7 @@ async def test_0022_adds_the_set_aside_mark_and_the_cleanup_table_and_rolls_back
     keep counting; the audit CHECK takes the two new actions; the rollback drops
     the mark and the record table and keeps every rating."""
     dsn, dim = _dsn(), Settings().embedding_dim
-    await _require_postgres(dsn)
-    await _reset_chain(dsn)
-    await migrate(dsn, dim)
+    await _start_at_head(dsn, dim)
     await rollback(dsn, dim, count=5)  # 0026, 0025, 0024, 0023, then 0022
     assert await current_schema_version(dsn) == "0021.credential-last-used"
 
@@ -1265,9 +1268,7 @@ async def test_0021_adds_a_nullable_last_use_and_rolls_back_without_touching_key
     ``last_used_at`` (a grace period); other keys stay NULL; the rollback
     drops only the column and keeps every key."""
     dsn, dim = _dsn(), Settings().embedding_dim
-    await _require_postgres(dsn)
-    await _reset_chain(dsn)
-    await migrate(dsn, dim)
+    await _start_at_head(dsn, dim)
     await rollback(dsn, dim, count=6)  # 0026, 0025, 0024, 0023, 0022, then 0021
     assert await current_schema_version(dsn) == "0020.agent-key-replace"
 
@@ -1291,7 +1292,7 @@ async def test_0021_adds_a_nullable_last_use_and_rolls_back_without_touching_key
     finally:
         await conn.close()
 
-    await migrate(dsn, dim)  # applies 0021, 0022, 0023, then 0024
+    await migrate(dsn, dim)  # applies 0021 up to the head
     assert await current_schema_version(dsn) == HEAD
     conn = await asyncpg.connect(dsn)
     try:
@@ -1332,9 +1333,7 @@ async def test_0023_adds_the_move_kind_and_rolls_back_keeping_merge_records() ->
     lists) and the two move audit actions and keeps every merge record, the
     cleanup records and the earlier audit actions."""
     dsn, dim = _dsn(), Settings().embedding_dim
-    await _require_postgres(dsn)
-    await _reset_chain(dsn)
-    await migrate(dsn, dim)
+    await _start_at_head(dsn, dim)
     await rollback(dsn, dim, count=4)  # 0026, 0025, 0024, then 0023
     assert await current_schema_version(dsn) == "0022.agent-cleanup"
 
@@ -1422,9 +1421,7 @@ async def test_0024_adds_successions_and_the_retire_audit_actions() -> None:
     other audit row (the cleanup and move actions of 0022 and 0023 stay), and
     narrows the CHECK back to 0023's list."""
     dsn, dim = _dsn(), Settings().embedding_dim
-    await _require_postgres(dsn)
-    await _reset_chain(dsn)
-    await migrate(dsn, dim)
+    await _start_at_head(dsn, dim)
     assert await current_schema_version(dsn) == HEAD
     conn = await asyncpg.connect(dsn)
     try:
@@ -1489,9 +1486,7 @@ async def test_0025_adds_a_nullable_lock_time_and_rolls_back_without_touching_ke
     ``agent_key.lock`` and keeps the earlier actions; the rollback drops only the
     column and the lock audit rows and keeps every key."""
     dsn, dim = _dsn(), Settings().embedding_dim
-    await _require_postgres(dsn)
-    await _reset_chain(dsn)
-    await migrate(dsn, dim)
+    await _start_at_head(dsn, dim)
     assert await rollback(dsn, dim, count=2) == [HEAD, ID_0025]
     assert await current_schema_version(dsn) == PREV
 
