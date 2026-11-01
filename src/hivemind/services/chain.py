@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from hivemind.domain.access import Visibility, entry_is_visible
 from hivemind.domain.entry import Entry, EntryState
-from hivemind.domain.validation import MAX_ID_CHARS, MAX_LIMIT, MAX_SUPERSEDES
+from hivemind.domain.validation import MAX_ID_CHARS, MAX_LIMIT, MAX_SUPERSEDES, canonical_uuid
 from hivemind.ports import Store
 
 # Bound on a single forward/reverse chain walk (SPEC.md §6.3: chains are
@@ -51,9 +51,9 @@ async def get_visible_entries(
     found = await store.get_entries(ids)
     result: dict[str, Entry] = {}
     for eid in ids:
-        # Postgres answers with canonical (lower-case) uuids; key the result
-        # by the id as asked, so a caller's spelling still finds its entry.
-        entry = found.get(eid) or found.get(eid.lower())
+        # The store answers with canonical ids (lower case, hyphens); key the
+        # result by the id as asked, so any spelling still finds its entry.
+        entry = found.get(canonical_uuid(eid) or eid)
         if entry is not None and entry_is_visible(entry, visibility):
             result[eid] = entry
     return result

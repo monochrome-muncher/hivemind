@@ -144,9 +144,9 @@ _UUID_TEXT_RE = re.compile(r"[0-9A-Fa-f-]{32,36}")
 def is_valid_uuid(value: str) -> bool:
     """Whether ``value`` is a UUID spelling the ``uuid`` columns accept.
 
-    Both store adapters use this one check, so a non-canonical spelling
-    (braces, ``urn:uuid:``, no hyphens) is "no such entry" in every
-    store, never a 500.
+    Both store adapters use this one check, so a spelling the columns
+    refuse (braces, ``urn:uuid:``, too many hyphens) is "no such entry" in
+    every store, never a 500; upper case and no hyphens name the entry.
     """
     if not isinstance(value, str) or not _UUID_TEXT_RE.fullmatch(value):
         return False
