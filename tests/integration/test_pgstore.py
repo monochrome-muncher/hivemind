@@ -8,7 +8,7 @@ Hermetic-by-construction:
 - The module skips cleanly (``pytest.skip``) when the DB is
   unreachable or the ``vector`` extension is unavailable — so
   ``uv run pytest`` stays green on a machine without Postgres.
-- Each test starts from a TRUNCATEd table set (re-runnable, no
+- Each test starts with every table emptied (re-runnable, no
   leftover state between runs or between the unit and integration
   suites).
 - The schema is applied idempotently (``migrate``) before each test,

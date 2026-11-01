@@ -2,7 +2,7 @@
 
 Runs against the dev Postgres (docker, ``pgvector/pgvector:pg16``) like
 the rest of the integration suite: self-contained fixture (skip
-cleanly when the DB is unreachable, ``migrate`` + ``TRUNCATE`` before
+cleanly when the DB is unreachable, ``migrate`` + ``reset_tables`` before
 each test) so ``uv run pytest`` stays green on a machine without a
 database.
 

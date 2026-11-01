@@ -22,7 +22,7 @@ from datetime import UTC, datetime, timedelta
 import asyncpg
 import pytest
 from tests.fakes import FakeAuthenticator
-from tests.pg import ensure_migrated
+from tests.pg import ensure_migrated, reset_tables
 
 from hivemind.config import Settings
 from hivemind.domain.access import (
@@ -39,10 +39,6 @@ from hivemind.store import PgAuthenticator, PgStore
 
 T0 = datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC)
 
-_TABLES = (
-    "TRUNCATE audit_log, credentials, agents, fleets, entries, feedbacks, "
-    "search_counts, entry_links, pins, fleet_merges, fleet_merge_entries, agent_cleanups, successions"
-)
 _REPLACE = {"audit_actor_kind": ActorKind.ADMIN_KEY, "audit_actor": "adminfinger1"}
 
 
@@ -111,14 +107,13 @@ async def _pg_adapter() -> AsyncIterator[Adapter]:
             minutes,
         )
 
-    await sql(_TABLES)
+    await reset_tables(dsn)
     store, auth = PgStore(dsn), PgAuthenticator(dsn)
     try:
         yield Adapter("pg", auth, store, age_stamp)
     finally:
         await store.close()
         await auth.close()
-        await sql(_TABLES)
 
 
 @pytest.fixture(params=["fake", "pg"])
