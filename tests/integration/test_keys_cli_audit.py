@@ -31,6 +31,8 @@ from hivemind.store import PgAuthenticator, PgStore
 from hivemind.store import keys as keys_cli
 from hivemind.store.auth import key_hash
 from hivemind.store.keys import (
+    AgentAlreadyRevoked,
+    AgentNotRegistered,
     _issue_admin,
     _issue_agent,
     _list,
@@ -122,6 +124,57 @@ async def test_revoke_records_the_agent_name(dsn: str) -> None:
         ("john", "agent_key.issue", "alice"),
         ("ops", "agent.revoke", "alice"),
     ]
+
+
+async def test_revoke_of_an_unknown_agent_is_refused_and_records_nothing(dsn: str) -> None:
+    with pytest.raises(AgentNotRegistered):
+        await _revoke(dsn, "alcie", actor="ops")  # a typo
+    assert await _audit_rows(dsn) == []
+
+
+async def test_revoke_of_an_already_revoked_agent_records_nothing_more(dsn: str) -> None:
+    await _register_agent(dsn, "alice")
+    await _revoke(dsn, "alice", actor="ops")
+    with pytest.raises(AgentAlreadyRevoked):
+        await _revoke(dsn, "alice", actor="ops")
+    assert [r["action"] for r in await _audit_rows(dsn)] == ["agent.revoke"]
+
+
+def test_revoke_cli_reports_unknown_and_already_revoked(
+    monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    dsn = _dsn()
+    asyncio.run(_prepare(dsn))
+    asyncio.run(_register_agent(dsn, "alice"))
+
+    monkeypatch.setattr(sys, "argv", ["hivemind-keys", "revoke", "--name", "alcie"])
+    with pytest.raises(SystemExit) as exit_info:
+        keys_cli.main()
+    assert exit_info.value.code == 1
+    assert "no agent registered as 'alcie'" in capsys.readouterr().err
+
+    monkeypatch.setattr(sys, "argv", ["hivemind-keys", "revoke", "--name", "alice"])
+    keys_cli.main()
+    assert "revoked the key for agent alice" in capsys.readouterr().out
+    keys_cli.main()  # again: exit 0, said plainly, no second row
+    assert "already revoked" in capsys.readouterr().out
+    assert [r["action"] for r in asyncio.run(_audit_rows(dsn))] == ["agent.revoke"]
+
+
+def test_issue_agent_on_a_keyed_agent_points_at_rotate_agent(
+    monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    dsn = _dsn()
+    asyncio.run(_prepare(dsn))
+    asyncio.run(_register_agent(dsn, "alice"))
+    asyncio.run(_issue_agent(dsn, "alice", actor="john"))
+    monkeypatch.setattr(sys, "argv", ["hivemind-keys", "issue-agent", "--name", "alice"])
+    with pytest.raises(SystemExit) as exit_info:
+        keys_cli.main()
+    assert exit_info.value.code == 1
+    err = capsys.readouterr().err
+    assert "rotate-agent --name" in err
+    assert "revoke" not in err
 
 
 @pytest.mark.parametrize("by", ["raw_key", "stored_hash"])

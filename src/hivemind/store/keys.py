@@ -82,7 +82,7 @@ _SET_REVOKED = "UPDATE agents SET status = 'revoked' WHERE name = $1"
 
 class AgentKeyExists(Exception):
     """``issue-agent`` refused: the agent already holds a key (ADR 0028 —
-    one key per agent; revoke first to replace it)."""
+    one key per agent; ``rotate-agent`` replaces it)."""
 
 
 class AgentNeedsActivation(Exception):
@@ -126,8 +126,13 @@ class AgentNotActive(Exception):
 
 
 class AgentNotRegistered(Exception):
-    """``issue-agent`` refused: the name has no agent record (keys are
-    bound to registered names, ADR 0012)."""
+    """``issue-agent`` or ``revoke`` refused: the name has no agent record
+    (keys are bound to registered names, ADR 0012)."""
+
+
+class AgentAlreadyRevoked(Exception):
+    """``revoke`` found the agent already ``revoked``: nothing to do, and no
+    audit row (the API refuses the same call as ``InvalidAgentStatus``)."""
 
 
 def _raw_key() -> str:
@@ -400,9 +405,13 @@ async def _revoke(dsn: str, name: str, *, actor: str | None = None) -> None:
     try:
         async with conn.transaction():
             prior = await conn.fetchval(_AGENT_STATUS_FOR_UPDATE, name)
+            if prior is None:
+                raise AgentNotRegistered(name)
+            if prior == AgentStatus.REVOKED:
+                raise AgentAlreadyRevoked(name)
             await conn.execute(_REVOKE_AGENT, name)
             await conn.execute(_SET_REVOKED, name)
-            detail = {"from": prior} if prior is not None else None
+            detail = {"from": prior}
             await _audit(conn, actor or default_actor(), AuditAction.AGENT_REVOKE, name, detail)
     finally:
         await conn.close()
@@ -589,8 +598,9 @@ def main() -> None:
             raise SystemExit(1) from None
         except AgentKeyExists:
             print(
-                f"agent {args.name} already holds a key; revoke it first "
-                "(`hivemind-keys revoke --name ...`) to issue a replacement",
+                f"agent {args.name} already holds a key; replace it with "
+                "`hivemind-keys rotate-agent --name ...` (it also replaces a key locked "
+                "from the portal)",
                 file=sys.stderr,
             )
             raise SystemExit(1) from None
@@ -661,7 +671,14 @@ def main() -> None:
             )
             raise SystemExit(1)
     elif args.cmd == "revoke":
-        asyncio.run(_revoke(dsn, args.name, actor=actor))
+        try:
+            asyncio.run(_revoke(dsn, args.name, actor=actor))
+        except AgentNotRegistered:
+            print(f"no agent registered as {args.name!r}; nothing revoked", file=sys.stderr)
+            raise SystemExit(1) from None
+        except AgentAlreadyRevoked:
+            print(f"agent {args.name} is already revoked; nothing to do")
+            return
         print(f"revoked the key for agent {args.name} (name stays reserved)")
 
 
