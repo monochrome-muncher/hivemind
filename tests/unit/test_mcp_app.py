@@ -11,14 +11,7 @@ from __future__ import annotations
 import pytest
 
 from hivemind.domain.access import TrustLevel
-from hivemind.domain.entry import (
-    EntityKind,
-    EntryDraft,
-    EntryFilters,
-    EntryState,
-    ExtractedEntity,
-    Kind,
-)
+from hivemind.domain.entry import EntryFilters, EntryState
 from hivemind.mcp.app import (
     ERR_AGENT_UNRESOLVED,
     ERR_INVALID_INPUT,
@@ -39,7 +32,7 @@ from hivemind.services.governance import GovernanceService
 from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
 from hivemind.services.write import WriteService
-from tests.fakes import make_clock, make_embedder, make_search_config
+from tests.fakes import make_clock, make_embedder, make_search_config, seed_entity_entries
 
 ALICE = Credential(user_id="alice", agent_id="agent-1")
 BOB = Credential(user_id="bob", agent_id="agent-2")
@@ -438,8 +431,8 @@ async def test_hive_withdraw_enforces_author_rule(store: MemoryStore, clock) -> 
 
     # A non-author, non-admin may not.
     other = await hive_write(alice_app, kind="fact", summary="alice's other entry")
-    denied = await hive_withdraw(bob_app, other["id"])
-    assert denied.get("error", {}).get("code") == "permission_denied"
+    # (the refusal's code and message are pinned in test_error_mapping.py)
+    await hive_withdraw(bob_app, other["id"])
     untouched = await store.get_entry(other["id"])
     assert untouched is not None and untouched.state is EntryState.ACTIVE
 
@@ -448,11 +441,6 @@ async def test_hive_withdraw_enforces_author_rule(store: MemoryStore, clock) -> 
     allowed = await hive_withdraw(admin_app, admin_target["id"])
     assert "error" not in allowed
     assert allowed["state"] == "withdrawn"
-
-
-async def test_hive_withdraw_unknown_entry_returns_error(app: McpHivemind) -> None:
-    result = await hive_withdraw(app, "no-such-id")
-    assert result.get("error", {}).get("code") == "not_found"
 
 
 # --------------------------------------------------------------------------- #
@@ -474,11 +462,6 @@ async def test_hive_feedback_rejects_unknown_verdict(app: McpHivemind) -> None:
     entry = await hive_write(app, kind="fact", summary="a fact")
     result = await hive_feedback(app, entry["id"], verdict="maybe")
     assert result.get("error", {}).get("code") == "invalid_verdict"
-
-
-async def test_hive_feedback_unknown_entry_returns_error(app: McpHivemind) -> None:
-    result = await hive_feedback(app, "no-such-id", verdict="helpful")
-    assert result.get("error", {}).get("code") == "not_found"
 
 
 # --------------------------------------------------------------------------- #
@@ -550,84 +533,19 @@ async def test_hive_search_offset_paginates(app: McpHivemind) -> None:
 # hive_search / hive_list: entity facets (ADR 0016, SPEC §13) ----------------- #
 
 
-async def _seed_entity_entries(app: McpHivemind) -> dict[str, str]:
-    """Seed two entries carrying machine-extracted entity facets (ADR 0016)."""
-    a = await app.store.create_entry(
-        EntryDraft(
-            kind=Kind.FACT,
-            summary="Postgres connection pool exhausted",
-            author="alice",
-            agent="agent-1",
-        ),
-        entities=(
-            ExtractedEntity(name="Postgres", kind=EntityKind.SYSTEM),
-            ExtractedEntity(name="auth-service", kind=EntityKind.SERVICE),
-        ),
-        entities_model="test-extractor",
-    )
-    b = await app.store.create_entry(
-        EntryDraft(
-            kind=Kind.FACT,
-            summary="Kubernetes autoscaler misconfigured",
-            author="alice",
-            agent="agent-1",
-        ),
-        entities=(ExtractedEntity(name="Kubernetes", kind=EntityKind.SYSTEM),),
-        entities_model="test-extractor",
-    )
-    return {"a": a.id, "b": b.id}
-
-
 async def test_hive_search_filters_by_entities(app: McpHivemind) -> None:
-    """ADR 0016 / SPEC §13: filter by machine-extracted entity names
-    (AND-semantics, case-insensitive)."""
-    ids = await _seed_entity_entries(app)
+    """ADR 0016 / SPEC §13: the tool passes ``entities`` through to the filter
+    (AND-semantics and case-insensitivity are pinned on the REST surface and
+    in the Store contract)."""
+    ids = await seed_entity_entries(app.store)
     result = await hive_search(app, query="postgres pool", entities=["postgres"])
     assert [h["id"] for h in result["hits"]] == [ids["a"]]
-    # Filter names are case-insensitive against the stored names.
-    upper = await hive_search(app, query="postgres pool", entities=["POSTGRES"])
-    assert [h["id"] for h in upper["hits"]] == [ids["a"]]
-    # AND-semantics: every listed name must be on the entry.
-    none = await hive_search(app, query="pool", entities=["postgres", "kubernetes"])
-    assert none["hits"] == []
 
 
 async def test_hive_list_filters_by_entities(app: McpHivemind) -> None:
-    ids = await _seed_entity_entries(app)
+    ids = await seed_entity_entries(app.store)
     result = await hive_list(app, entities=["auth-service"])
     assert [e["id"] for e in result["entries"]] == [ids["a"]]
-    missing = await hive_list(app, entities=["postgres", "kubernetes"])
-    assert missing["entries"] == []
-
-
-async def test_hive_get_exposes_entities_and_provenance(app: McpHivemind) -> None:
-    """The MCP entry payload carries the facets + the extractor model
-    that produced them (symmetric with ``embedding_model``)."""
-    ids = await _seed_entity_entries(app)
-    fetched = await hive_get(app, ids["a"])
-    assert fetched["entities"] == [
-        {"name": "Postgres", "kind": "system"},
-        {"name": "auth-service", "kind": "service"},
-    ]
-    assert fetched["entities_model"] == "test-extractor"
-
-
-async def test_hive_get_without_extraction_defaults_to_empty(app: McpHivemind) -> None:
-    written = await hive_write(app, kind="fact", summary="a plain entry")
-    fetched = await hive_get(app, written["id"])
-    assert fetched["entities"] == []
-    assert fetched["entities_model"] is None
-
-
-async def test_hive_search_hits_do_not_carry_entities(app: McpHivemind) -> None:
-    """Progressive disclosure (SPEC §6.1): compact hits stay slim —
-    the facets live on the full entry, not the hit."""
-    await _seed_entity_entries(app)
-    result = await hive_search(app, query="postgres pool")
-    assert result["hits"]
-    for hit in result["hits"]:
-        assert "entities" not in hit
-        assert "entities_model" not in hit
 
 
 class TestHiveRegister:

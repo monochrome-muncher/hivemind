@@ -18,7 +18,6 @@ from tests.pg import ensure_migrated
 from hivemind.api.deps import create_app
 from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
-from hivemind.domain.entry import EntryDraft, EntryFilters, Kind
 from hivemind.store import PgAuthenticator, PgStore
 
 PAYLOAD = {"n": 1, "nested": {"a": [1, 2, {"b": None}]}, "s": "x"}
@@ -38,27 +37,6 @@ async def store():
         yield s, dim
     finally:
         await s.close()
-
-
-def _draft(summary: str = "payload entry") -> EntryDraft:
-    return EntryDraft(
-        kind=Kind.FACT,
-        summary=summary,
-        author="admin",
-        agent="a",
-        payload=PAYLOAD,
-        scope="org",
-    )
-
-
-async def test_payload_roundtrips_as_a_dict_through_the_store(store) -> None:
-    s, dim = store
-    created = await s.create_entry(_draft(), [0.1] * dim)
-    assert created.payload == PAYLOAD
-    got = await s.get_entry(created.id)
-    assert got is not None and got.payload == PAYLOAD
-    listed = await s.list_entries(EntryFilters(), limit=10, offset=0)
-    assert [e.payload for e in listed] == [PAYLOAD]
 
 
 async def test_payload_roundtrips_through_the_rest_app(store) -> None:

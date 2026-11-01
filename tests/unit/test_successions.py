@@ -711,14 +711,15 @@ async def test_undo_deletes_the_succession_audits_and_allows_a_new_one(w: World)
 async def test_a_retired_agent_cannot_be_activated_until_the_retirement_is_undone(
     w: World,
 ) -> None:
+    """The store half (refusal, status, undo, re-activate) is pinned by the Store
+    contract; this is the service-level activation."""
     await retire(w)
-    with pytest.raises(AgentRetired, match="undo the retirement"):
-        await w.store.activate_agent("old", trust_level=TrustLevel.LURKER, home_fleet_id=w.red)
     with pytest.raises(AgentRetired):
         await w.app.access_service.activate("old", TrustLevel.LURKER, w.red, ADMIN)
     assert (await w.store.get_agent("old")).status is AgentStatus.REVOKED  # type: ignore[union-attr]
     await w.successions.undo("old", ADMIN)
-    await w.store.activate_agent("old", trust_level=TrustLevel.LURKER, home_fleet_id=w.red)
+    await w.app.access_service.activate("old", TrustLevel.LURKER, w.red, ADMIN)
+    assert (await w.store.get_agent("old")).status is AgentStatus.ACTIVE  # type: ignore[union-attr]
 
 
 async def test_listing_is_newest_first(w: World) -> None:
