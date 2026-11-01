@@ -25,7 +25,7 @@ from datetime import UTC, datetime, timedelta
 import asyncpg
 import pytest
 from tests.fakes import FakeEmbedder
-from tests.pg import ensure_migrated
+from tests.pg import ensure_migrated, reset_tables
 
 from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel, Visibility
@@ -88,17 +88,6 @@ def draft(
     )
 
 
-async def _truncate(dsn: str) -> None:
-    conn = await asyncpg.connect(dsn)
-    try:
-        await conn.execute(
-            "TRUNCATE credentials, feedbacks, entries, search_counts, entry_links, pins, "
-            "agents, fleets, audit_log"
-        )
-    finally:
-        await conn.close()
-
-
 @pytest.fixture
 async def pg():
     """A ready ``PgStore`` + ``PgAuthenticator`` on a clean dev database.
@@ -110,14 +99,13 @@ async def pg():
     dsn = _dsn()
     dim = _dim()
     await ensure_migrated(dsn, dim)
-    await _truncate(dsn)
+    await reset_tables(dsn)
 
     store = PgStore(dsn)
     auth = PgAuthenticator(dsn)
     try:
         yield store, auth, dim
     finally:
-        await _truncate(dsn)
         await store.close()
         await auth.close()
 

@@ -16,9 +16,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-import asyncpg
 import pytest
-from tests.pg import ensure_migrated
+from tests.pg import ensure_migrated, reset_tables
 
 from hivemind.config import Settings
 from hivemind.domain.entry import (
@@ -54,27 +53,18 @@ def make_draft(summary: str, body: str | None = None) -> EntryDraft:
     )
 
 
-async def _truncate(dsn: str) -> None:
-    conn = await asyncpg.connect(dsn)
-    try:
-        await conn.execute("TRUNCATE credentials, feedbacks, entries")
-    finally:
-        await conn.close()
-
-
 @pytest.fixture
 async def pg():
     """A ready ``PgStore`` on a clean dev database (skip when unreachable)."""
     dsn = _dsn()
     dim = _dim()
     await ensure_migrated(dsn, dim)
-    await _truncate(dsn)
+    await reset_tables(dsn)
 
     store = PgStore(dsn)
     try:
         yield store
     finally:
-        await _truncate(dsn)
         await store.close()
 
 

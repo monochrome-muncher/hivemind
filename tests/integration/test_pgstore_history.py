@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncpg
 import pytest
 import pytest_asyncio
-from tests.pg import ensure_migrated
+from tests.pg import ensure_migrated, reset_tables
 
 from hivemind.config import Settings
 from hivemind.domain.entry import EntryDraft, Kind
@@ -40,12 +40,11 @@ async def _truncate(dsn: str) -> None:
 async def pg() -> PgStore:
     dsn = _dsn()
     await ensure_migrated(dsn, VEC_DIM)
-    await _truncate(dsn)
+    await reset_tables(dsn)
     store = PgStore(dsn)
     try:
         yield store
     finally:
-        await _truncate(dsn)
         await store.close()
 
 

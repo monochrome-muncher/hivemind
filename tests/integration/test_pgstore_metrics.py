@@ -10,9 +10,8 @@ unreachable.
 
 from __future__ import annotations
 
-import asyncpg
 import pytest
-from tests.pg import ensure_migrated
+from tests.pg import ensure_migrated, reset_tables
 
 from hivemind.config import Settings
 from hivemind.domain.access import Visibility
@@ -28,26 +27,17 @@ def _dsn() -> str:
     return Settings().database_url
 
 
-async def _truncate(dsn: str) -> None:
-    conn = await asyncpg.connect(dsn)
-    try:
-        await conn.execute("TRUNCATE entries, fleets, agents, feedbacks CASCADE")
-    finally:
-        await conn.close()
-
-
 @pytest.fixture
 async def pg() -> PgStore:
     """A ready ``PgStore`` on a clean dev DB (skips when Postgres is down)."""
     dsn = _dsn()
     dim = Settings().embedding_dim
     await ensure_migrated(dsn, dim)
-    await _truncate(dsn)
+    await reset_tables(dsn)
     store = PgStore(dsn)
     try:
         yield store
     finally:
-        await _truncate(dsn)
         await store.close()
 
 

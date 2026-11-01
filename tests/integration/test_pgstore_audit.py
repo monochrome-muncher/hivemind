@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncpg
 import pytest
-from tests.pg import ensure_migrated
+from tests.pg import ensure_migrated, reset_tables
 
 from hivemind.config import Settings
 from hivemind.domain import ActorKind, AuditAction, AuditEvent, AuditFilters
@@ -21,25 +21,16 @@ def _dsn() -> str:
     return Settings().database_url
 
 
-async def _truncate(dsn: str) -> None:
-    conn = await asyncpg.connect(dsn)
-    try:
-        await conn.execute("TRUNCATE audit_log")
-    finally:
-        await conn.close()
-
-
 @pytest.fixture
 async def pg():
     dsn = _dsn()
     await ensure_migrated(dsn, Settings().embedding_dim)
-    await _truncate(dsn)
+    await reset_tables(dsn)
     store = PgStore(dsn)
     try:
         yield store
     finally:
         await store.close()
-        await _truncate(dsn)
 
 
 async def test_record_and_list_audit_round_trip(pg) -> None:

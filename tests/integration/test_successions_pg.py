@@ -14,7 +14,7 @@ import asyncpg
 import httpx
 import pytest
 from tests.fakes import FakeEmbedder, make_search_config
-from tests.pg import ensure_migrated
+from tests.pg import ensure_migrated, reset_tables
 
 from hivemind.api.deps import create_app
 from hivemind.api.main import create_app_for_config
@@ -26,19 +26,12 @@ from hivemind.services.access import AccessService
 from hivemind.store import PgAuthenticator, PgStore
 from hivemind.store.keys import _issue_admin
 
-TABLES = (
-    "TRUNCATE audit_log, credentials, agents, fleets, entries, feedbacks, pins, "
-    "entry_links, search_counts, successions"
-)
-
 
 @pytest.fixture
 async def world():
     dsn = Settings().database_url
     await ensure_migrated(dsn, Settings().embedding_dim)
-    conn = await asyncpg.connect(dsn)
-    await conn.execute(TABLES)
-    await conn.close()
+    await reset_tables(dsn)
     store, auth = PgStore(dsn), PgAuthenticator(dsn)
     app = create_app_for_config(
         Settings(),
@@ -59,9 +52,6 @@ async def world():
         await client.aclose()
         await store.close()
         await auth.close()
-        conn = await asyncpg.connect(dsn)
-        await conn.execute(TABLES)
-        await conn.close()
 
 
 class World:
