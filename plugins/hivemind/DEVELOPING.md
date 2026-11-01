@@ -120,9 +120,13 @@ itself names no harness-specific paths, and a test enforces this.
   key loads a reduced plugin context (no `mcp`, `session`, `tool` or
   `event` domains — only `skill`, `agent`, `command` and `integration`
   transforms), so the same file's `setup` registers only the skills there.
-  Its MCP config is the OpenCode v2 shape (`mcp.servers`, `disabled`), and
-  `KILO_CONFIG_CONTENT` is the highest-precedence inline config overlay
-  (the incognito launcher uses it). Global config is `~/.config/kilo/`
+  It accepts a hand-configured server in either OpenCode shape (v1
+  `mcp.hivemind` with `enabled`, v2 `mcp.servers` with `disabled`), and
+  `KILO_CONFIG_CONTENT` is the
+  highest-precedence inline config overlay. The incognito launcher's
+  overlay sets both forms: on KiloCode 7.8.18 the v2 form alone left a
+  hand-configured server of either shape on (checked live). Global
+  config is `~/.config/kilo/`
   (`kilo.jsonc`, `AGENTS.md`), and it also reads `opencode.json(c)`
   config files. Verified against `Kilo-Org/kilocode` 7.8.12.
 - **Cline** has no package plugin for the VS Code extension (the SDK
@@ -347,7 +351,7 @@ does two things:
 | GitHub Copilot CLI | `--disable-mcp-server hivemind` for the session (it never contacts the server); the launcher also unsets the key and URL | the server named `hivemind` in `~/.copilot/mcp-config.json` |
 | Gemini CLI | `HIVEMIND_MCP_URL`/`HIVEMIND_API_KEY` unset, so the extension's server is never contacted (Gemini notes an MCP issue) | the hivemind extension, and no hand entry in `settings.json` |
 | OpenCode | the plugin skips the server; a hand-configured one is disabled with `OPENCODE_CONFIG_CONTENT` | nothing |
-| KiloCode | the plugin (the OpenCode one) skips the server; a hand-configured one is disabled with `KILO_CONFIG_CONTENT` (`mcp.servers.hivemind.disabled`) | nothing |
+| KiloCode | the plugin (the OpenCode one) skips the server; a hand-configured one is disabled with `KILO_CONFIG_CONTENT` (`mcp.hivemind.enabled: false` and `mcp.servers.hivemind.disabled`) | nothing |
 | Cline | `HIVEMIND_MCP_URL`/`HIVEMIND_API_KEY` unset, so the `${env:…}` references in `cline_mcp_settings.json` stay unexpanded and the server never connects; the hooks see `HIVEMIND_INCOGNITO` and say the incognito line (the skills stay installed) | the server entry with `${env:…}` references |
 
 Where the switch is missing or not configured (the Hermes entry without
