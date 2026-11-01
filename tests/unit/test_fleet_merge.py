@@ -454,6 +454,13 @@ async def test_undo_restores_exactly_what_the_merge_moved(w: World) -> None:
     assert ann is not None and ann.home_fleet_id == c  # moved again since: left alone
     assert [p.entry_id for p in await w.store.list_pins(a)] == [pa]  # the pin went back
     assert {p.entry_id for p in await w.store.list_pins(b)} == set(ids)  # dropped pin restored
+    (pin_row,) = await w.audit(AuditAction.ENTRY_PIN)  # the restored pin is audited
+    assert pin_row.target == ids[0]
+    assert pin_row.detail == {
+        "fleet_id": b,
+        "reason": "fleet_merge_undo",
+        "merge_id": out.record.id,
+    }
     assert undone.pins_skipped == () and [p.entry_id for p in undone.pins_restored] == [ids[0]]
     source = await w.store.get_fleet(a)
     assert source is not None and source.merged_into is None and source.merged_at is None

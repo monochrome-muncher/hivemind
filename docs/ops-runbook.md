@@ -498,7 +498,8 @@ curl -s -X POST -H "X-API-Key: $ADMIN_KEY" \
   added to the target's.
 - **Audit.** `fleet.merge` (and `fleet.create` for a new target), one
   `entry.unpin` with reason `fleet_merge` for each pin left out, and
-  `fleet.unmerge` for an undo (SPEC §12.5).
+  `fleet.unmerge` for an undo, with one `entry.pin` (reason
+  `fleet_merge_undo`) for each pin it puts back (SPEC §12.5).
 
 **Undoing a merge.** Press **Undo** in the panel's **Merges and moves** list, or call
 the endpoint above. The memories and agents the merge moved go back to the
@@ -789,7 +790,8 @@ curl -s -X POST -H "X-API-Key: $ADMIN_KEY" \
   and stays usable, empty of those agents.
 - **Audit.** `fleet.move_agents` (and `fleet.create` for a new target), one
   `entry.unpin` with reason `fleet_move` for each pin left out, and
-  `fleet.move_undo` for an undo (SPEC §12.5).
+  `fleet.move_undo` for an undo, with one `entry.pin` (reason
+  `fleet_move_undo`) for each pin it puts back (SPEC §12.5).
 
 **Undoing a move.** Press **Undo** in the panel's **Merges and moves** list,
 or call the endpoint above. The memories and agents the move recorded go back

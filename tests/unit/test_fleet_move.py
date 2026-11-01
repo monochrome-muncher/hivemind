@@ -445,6 +445,13 @@ async def test_undo_restores_exactly_what_the_move_moved(w: World) -> None:
     assert await w.home_of("amy") == a and await w.home_of("ann") == c  # ann moved since
     assert {p.entry_id for p in await w.store.list_pins(a)} == {pa}  # the pin went back
     assert {p.entry_id for p in await w.store.list_pins(b)} == set(ids)  # dropped pin restored
+    (pin_row,) = await w.audit(AuditAction.ENTRY_PIN)  # the restored pin is audited
+    assert pin_row.target == ids[0]
+    assert pin_row.detail == {
+        "fleet_id": b,
+        "reason": "fleet_move_undo",
+        "move_id": out.record.id,
+    }
     source = await w.store.get_fleet(a)
     assert source is not None and source.merged_into is None
     (row,) = await w.audit(AuditAction.FLEET_MOVE_UNDO)

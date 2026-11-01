@@ -457,6 +457,16 @@ class FleetMergeService:
         self._changed()
         record = outcome.record
         is_move = record.kind == KIND_MOVE
+        reason = "fleet_move_undo" if is_move else "fleet_merge_undo"
+        id_key = "move_id" if is_move else "merge_id"
+        for pin in outcome.pins_restored:  # dropped pins put back
+            await record_admin_action(
+                self._store,
+                credential,
+                AuditAction.ENTRY_PIN,
+                pin.entry_id,
+                {"fleet_id": pin.fleet_id, "reason": reason, id_key: record.id},
+            )
         for pin in outcome.pins_unpinned:  # returning pins that did not fit the source
             await audit_unpins(
                 self._store,
