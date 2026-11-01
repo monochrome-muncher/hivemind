@@ -13,7 +13,7 @@ import json
 import logging
 import math
 import uuid
-from collections.abc import AsyncIterator, Iterator, Sequence
+from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 from contextlib import AbstractContextManager, asynccontextmanager, contextmanager
 from dataclasses import replace
 from datetime import datetime
@@ -1406,7 +1406,7 @@ def _add_clause(clauses: list[str], params: list[Any], fragment: str, value: Any
 
 @contextmanager
 def _refuse_on_contention(
-    refusal: type[Exception], busy_message: str, deadlock_message: str
+    refusal: Callable[[str], Exception], busy_message: str, deadlock_message: str
 ) -> Iterator[None]:
     """Turn a lock timeout or a deadlock in the block into ``refusal`` (retryable)."""
     try:
@@ -1415,6 +1415,19 @@ def _refuse_on_contention(
         raise refusal(busy_message) from None
     except asyncpg.exceptions.DeadlockDetectedError:
         raise refusal(deadlock_message) from None
+
+
+def _write_contention(fleet_id: str | None) -> AbstractContextManager[None]:
+    """``_refuse_on_contention`` for a transaction that ran ``_refuse_merged``:
+    its ``lock_timeout`` outlives the fleet fetch, so any later lock wait in
+    the transaction (a pin lock, a target row, an agent row) times out as
+    ``FleetBusy`` (retryable), not as a raw driver error."""
+    return _refuse_on_contention(
+        partial(FleetBusy, fleet_id or ""),
+        "the write waited too long for a lock held by a fleet change or an agent cleanup; "
+        "retry in a few seconds",
+        "the write deadlocked with a concurrent change; retry in a few seconds",
+    )
 
 
 def _fleets_contention(refusal: type[Exception], verb: str) -> AbstractContextManager[None]:
@@ -1612,6 +1625,14 @@ class PgStore:
         async with self._connection() as conn, conn.transaction():
             yield conn
 
+    @asynccontextmanager
+    async def _write_transaction(self, fleet_id: str | None) -> AsyncIterator[asyncpg.Connection]:
+        """``_transaction`` for a block that runs ``_refuse_merged``: a lock
+        timeout or deadlock anywhere in it is ``FleetBusy``."""
+        with _write_contention(fleet_id):
+            async with self._transaction() as conn:
+                yield conn
+
     async def close(self) -> None:
         """Tear down the pool (process-exit cleanup)."""
         if self._pool is not None:
@@ -1635,7 +1656,7 @@ class PgStore:
         entry_id = str(uuid.uuid4())
         occurred_at = draft.resolved_occurred_at()
 
-        async with self._transaction() as conn:
+        async with self._write_transaction(draft.fleet_id) as conn:
             await _refuse_merged(conn, draft.fleet_id)
             if draft.scope == SCOPE_FLEET:
                 await _refuse_stale_home(conn, draft.fleet_id, draft.author)
@@ -1786,7 +1807,7 @@ class PgStore:
     ) -> PinWrite | PinRefusal:
         if not is_valid_uuid(entry_id):
             return PinRefusal.FLEET
-        async with self._transaction() as conn:
+        async with self._write_transaction(fleet_id) as conn:
             # The fleet row first, then the pin lock: the order a merge takes them.
             await _refuse_merged(conn, fleet_id)
             await _refuse_stale_home(conn, fleet_id, pinned_by)
@@ -3173,7 +3194,7 @@ class PgStore:
         fleet, flip to ``active`` (ADRs 0012, 0028). ``UnknownAgent`` if
         unknown; ``InvalidAgentStatus`` if already ``active``.
         """
-        async with self._transaction() as conn:
+        async with self._write_transaction(home_fleet_id) as conn:
             await _refuse_merged(conn, home_fleet_id)
             # Under the row lock a concurrent retirement holds, so a retired
             # agent cannot slip back to active (ADR 0113).
@@ -3227,7 +3248,7 @@ class PgStore:
         earlier ``fleet``-scoped entries stay in the fleet they were written
         into (never re-parented). ``UnknownAgent`` if unknown.
         """
-        async with self._transaction() as conn:
+        async with self._write_transaction(fleet_id) as conn:
             await _refuse_merged(conn, fleet_id)
             existing = await conn.fetchrow(GET_AGENT, name)
             if existing is None:
