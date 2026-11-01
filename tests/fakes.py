@@ -22,6 +22,7 @@ from hivemind.domain.entry import (
     EntityKind,
     EntryDraft,
     ExtractedEntity,
+    Kind,
     embeddable_text,
 )
 from hivemind.memstore import MemoryStore
@@ -90,6 +91,43 @@ class FakeEmbedder:
         return embeddable_text(draft.summary, draft.body)
 
 
+class RecordingEmbedder(FakeEmbedder):
+    """The hash embedder, remembering every text it was asked to embed."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.texts: list[str] = []
+
+    async def embed_text(self, text: str) -> list[float]:
+        self.texts.append(text)
+        return await super().embed_text(text)
+
+
+class CountingEmbedder:
+    """Wraps the fake embedder and counts calls."""
+
+    dimension = 4
+    model_name = "fake-embedder"
+
+    def __init__(self) -> None:
+        self.inner = make_embedder()
+        self.calls = 0
+
+    async def embed_text(self, text: str) -> list[float]:
+        self.calls += 1
+        return await self.inner.embed_text(text)
+
+    async def embed_entry(self, d: EntryDraft) -> list[float]:
+        self.calls += 1
+        return await self.inner.embed_entry(d)
+
+
+def minimal_draft(**over: object) -> EntryDraft:
+    """A valid one-field-per-need fact draft; keyword overrides replace fields."""
+    base: dict[str, object] = {"kind": Kind.FACT, "summary": "s", "author": "a", "agent": "g"}
+    return EntryDraft(**{**base, **over})  # type: ignore[arg-type]
+
+
 class FakeExtractor:
     """Deterministic Extractor fake (ADR 0016): no live LLM needed.
 
@@ -151,6 +189,35 @@ def make_embedder() -> FakeEmbedder:
 
 def make_store(clock: FixedClock | None = None) -> MemoryStore:
     return MemoryStore(clock or make_clock())
+
+
+async def seed_entity_entries(store: Store) -> dict[str, str]:
+    """Seed two entries carrying machine-extracted entity facets (ADR 0016);
+    ``a`` has Postgres and auth-service, ``b`` has Kubernetes."""
+    a = await store.create_entry(
+        EntryDraft(
+            kind=Kind.FACT,
+            summary="Postgres connection pool exhausted",
+            author="alice",
+            agent="a1",
+        ),
+        entities=(
+            ExtractedEntity(name="Postgres", kind=EntityKind.SYSTEM),
+            ExtractedEntity(name="auth-service", kind=EntityKind.SERVICE),
+        ),
+        entities_model="test-extractor",
+    )
+    b = await store.create_entry(
+        EntryDraft(
+            kind=Kind.FACT,
+            summary="Kubernetes autoscaler misconfigured",
+            author="alice",
+            agent="a1",
+        ),
+        entities=(ExtractedEntity(name="Kubernetes", kind=EntityKind.SYSTEM),),
+        entities_model="test-extractor",
+    )
+    return {"a": a.id, "b": b.id}
 
 
 class RecordingStore(MemoryStore):

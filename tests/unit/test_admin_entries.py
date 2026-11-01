@@ -44,60 +44,6 @@ async def _seed():  # type: ignore[no-untyped-def]
     return app, blue, red, mine, in_blue, in_red
 
 
-ROUTES = [
-    ("GET", "/v1/admin/entries", None),
-    ("GET", f"/v1/admin/entries/{FAKE_ID}", None),
-    ("POST", "/v1/admin/search", {"query": "kaniko"}),
-    ("POST", f"/v1/admin/entries/{FAKE_ID}/withdraw", {}),
-    ("GET", "/v1/admin/activity", None),
-    ("GET", "/v1/admin/feedback", None),
-    ("GET", f"/v1/admin/fleets/{FAKE_ID}/pins", None),
-    ("GET", "/v1/admin/flagged", None),
-    ("POST", f"/v1/admin/fleets/{FAKE_ID}/merge", {"new_fleet_name": "c", "dry_run": True}),
-    (
-        "POST",
-        f"/v1/admin/fleets/{FAKE_ID}/move",
-        {"agents": ["a"], "new_fleet_name": "c", "dry_run": True},
-    ),
-    ("GET", "/v1/admin/fleet-merges", None),
-    ("POST", f"/v1/admin/fleet-merges/{FAKE_ID}/undo", None),
-    ("PATCH", f"/v1/admin/fleets/{FAKE_ID}", {"name": "renamed"}),
-    ("POST", "/v1/admin/agents/ghost/retire", {"successor": "alice", "dry_run": True}),
-    ("GET", "/v1/admin/successions", None),
-    ("POST", "/v1/admin/successions/ghost/undo", None),
-    (
-        "POST",
-        "/v1/admin/agents/ghost/cleanup",
-        {"since": "2026-01-01T00:00:00Z", "dry_run": True},
-    ),
-    ("GET", "/v1/admin/agent-cleanups", None),
-    ("POST", f"/v1/admin/agent-cleanups/{FAKE_ID}/undo", None),
-]
-
-
-@pytest.mark.parametrize(
-    "headers", [ALICE, ORG, PRIVILEGED], ids=["agent-key", "org-key", "privileged-agent-key"]
-)
-@pytest.mark.parametrize(("method", "path", "body"), ROUTES)
-async def test_every_admin_endpoint_is_403_for_non_admins(method, path, body, headers) -> None:
-    app = make_hivemind_app()
-    app.authenticator.add_key(  # type: ignore[attr-defined]
-        "key-privileged",
-        Credential(
-            user_id="pat",
-            agent_name="pat",
-            access_controlled=True,
-            trust_level=TrustLevel.PRIVILEGED,
-            home_fleet_id="fleet-a",
-        ),
-    )
-    client = make_client(app)
-    async with client:
-        resp = await client.request(method, path, json=body, headers=headers)
-    assert resp.status_code == 403
-    assert resp.json()["error"]["code"] == "forbidden"
-
-
 # A valid request body for each admin route that takes one; the rest take none.
 ADMIN_BODIES = {
     ("POST", "/v1/admin/search"): {"query": "kaniko"},
@@ -120,11 +66,23 @@ ADMIN_BODIES = {
 }
 
 
-@pytest.mark.parametrize("headers", [ALICE, ORG], ids=["agent-key", "org-key"])
-async def test_every_registered_admin_route_is_403_for_agent_and_org_keys(headers) -> None:
+@pytest.mark.parametrize(
+    "headers", [ALICE, ORG, PRIVILEGED], ids=["agent-key", "org-key", "privileged-agent-key"]
+)
+async def test_every_registered_admin_route_is_403_for_non_admin_keys(headers) -> None:
     """The route list comes from the app, so a new ``/v1/admin/*`` route is
     covered here the day it is added (give it a body above if it needs one)."""
     app = make_hivemind_app()
+    app.authenticator.add_key(  # type: ignore[attr-defined]
+        "key-privileged",
+        Credential(
+            user_id="pat",
+            agent_name="pat",
+            access_controlled=True,
+            trust_level=TrustLevel.PRIVILEGED,
+            home_fleet_id="fleet-a",
+        ),
+    )
     await app.store.register_agent("ghost")
     async with make_client(app) as client:
         spec = (await client.get("/openapi.json")).json()
@@ -134,7 +92,18 @@ async def test_every_registered_admin_route_is_403_for_agent_and_org_keys(header
             if path.startswith("/v1/admin/")
             for method in operations
         ]
-        assert len(routes) >= len(ROUTES)
+        # A sanity floor so an empty or shrunken walk cannot pass vacuously.
+        assert len(routes) >= 28
+        assert {
+            ("GET", "/v1/admin/entries"),
+            ("POST", "/v1/admin/search"),
+            ("POST", "/v1/admin/entries/{entry_id}/withdraw"),
+            ("GET", "/v1/admin/activity"),
+            ("GET", "/v1/admin/feedback"),
+            ("GET", "/v1/admin/flagged"),
+            ("POST", "/v1/admin/agents/{name}/retire"),
+            ("GET", "/v1/admin/successions"),
+        } <= set(routes)
         for method, template in routes:
             path = template.format(
                 entry_id=FAKE_ID,

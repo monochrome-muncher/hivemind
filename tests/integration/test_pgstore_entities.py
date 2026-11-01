@@ -23,7 +23,6 @@ from hivemind.config import Settings
 from hivemind.domain.entry import (
     EntityKind,
     EntryDraft,
-    EntryFilters,
     ExtractedEntity,
     Kind,
 )
@@ -93,26 +92,3 @@ async def test_pgstore_entry_without_extraction_carries_defaults(pg) -> None:
     assert stored is not None
     assert stored.entities == ()
     assert stored.entities_model is None
-
-
-async def test_pgstore_entity_filter_is_and_case_insensitive(pg) -> None:
-    a = await pg.create_entry(
-        make_draft("Postgres pool exhausted"),
-        entities=(
-            ExtractedEntity(name="Postgres", kind=EntityKind.SYSTEM),
-            ExtractedEntity(name="auth-service", kind=EntityKind.SERVICE),
-        ),
-    )
-    b = await pg.create_entry(
-        make_draft("Kubernetes autoscaler misconfigured"),
-        entities=(ExtractedEntity(name="Kubernetes", kind=EntityKind.SYSTEM),),
-    )
-    # AND-semantics: both names required.
-    assert await pg.list_entries(EntryFilters(entities=("postgres", "auth-service"))) == [a]
-    assert await pg.list_entries(EntryFilters(entities=("postgres", "etcd"))) == []
-    # Case-insensitive: filter names are lower-cased against the column.
-    assert await pg.list_entries(EntryFilters(entities=("POSTGRES",))) == [a]
-    assert await pg.list_entries(EntryFilters(entities=("KUBERNETES",))) == [b]
-    # search_keyword respects the filter too (the same WHERE builder).
-    assert await pg.search_keyword("pool", EntryFilters(entities=("postgres",)), 10) == [a.id]
-    assert await pg.search_keyword("pool", EntryFilters(entities=("kubernetes",)), 10) == []

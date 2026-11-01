@@ -182,6 +182,23 @@ async def test_create_entry_round_trips(adapter: Adapter) -> None:
         assert getattr(got, field) == getattr(created, field)
     assert got.occurred_at == T0
     assert got.embedding_model == "test-model"
+    assert created.id
+    assert created.created_at is not None
+    assert created.embedding is not None and len(created.embedding) == len(adapter.vec(0))
+    # The returned entry matches a re-read (a reader may or may not carry the vector).
+    assert replace(got, embedding=None) == replace(created, embedding=None)
+
+
+async def test_payload_round_trips_as_a_dict(adapter: Adapter) -> None:
+    payload = {"n": 1, "nested": {"a": [1, 2, {"b": None}]}, "s": "x"}
+    created = await adapter.store.create_entry(
+        replace(draft("payload entry"), payload=payload), adapter.vec(0), "test-model"
+    )
+    assert created.payload == payload
+    got = await adapter.store.get_entry(created.id)
+    assert got is not None and got.payload == payload
+    listed = await adapter.store.list_entries(EntryFilters(), limit=10, offset=0)
+    assert [e.payload for e in listed] == [payload]
 
 
 async def test_unknown_and_malformed_ids_read_as_absent(adapter: Adapter) -> None:
@@ -362,6 +379,16 @@ async def test_scope_fleet_importance_source_and_entity_filters(adapter: Adapter
     in_a = await put("fleet a", scope="fleet", fleet_id=fleet_a)
     in_b = await put("fleet b", scope="fleet", fleet_id=fleet_b)
     plain = await adapter.store.create_entry(draft("no entities"), adapter.vec(0), "test-model")
+    private = await put("private note", scope="self")
+    both = await adapter.store.create_entry(
+        draft("pool exhausted"),
+        adapter.vec(0),
+        "test-model",
+        (
+            ExtractedEntity("Postgres", EntityKind.SYSTEM),
+            ExtractedEntity("auth-service", EntityKind.SERVICE),
+        ),
+    )
 
     async def listed(**kwargs: object) -> set[str]:
         filters = EntryFilters(**kwargs)  # type: ignore[arg-type]
@@ -369,11 +396,29 @@ async def test_scope_fleet_importance_source_and_entity_filters(adapter: Adapter
         assert await adapter.store.count_entries(filters) == len(ids)
         return ids
 
+    everything = {caller.id, in_a.id, in_b.id, plain.id, private.id, both.id}
+    assert await listed() == everything
+    assert await adapter.store.count_entries(EntryFilters()) == len(everything)
     assert await listed(scope="fleet") == {in_a.id, in_b.id}
-    assert await listed(scope="org") == {caller.id, plain.id}
+    assert await listed(scope="org") == {caller.id, plain.id, both.id}
+    assert await listed(scope="self") == {private.id}
     assert await listed(fleet_id=fleet_a) == {in_a.id}
+    assert await listed(fleet_id=fleet_b) == {in_b.id}
     assert await listed(importance_source=ImportanceSource.CALLER) == {caller.id}
-    assert await listed(entities=("postgres",)) == {caller.id, in_a.id, in_b.id}
+    assert await listed(importance_source=ImportanceSource.DEFAULT) == everything - {caller.id}
+    assert await listed(entities=("postgres",)) == {
+        caller.id,
+        in_a.id,
+        in_b.id,
+        private.id,
+        both.id,
+    }
+    assert await listed(entities=("postgres", "auth-service")) == {both.id}  # AND, not OR
+    assert await listed(entities=("postgres", "etcd")) == set()
+    assert await adapter.store.search_keyword("pool", EntryFilters(entities=("postgres",)), 10) == [
+        both.id
+    ]
+    assert await adapter.store.search_keyword("pool", EntryFilters(entities=("etcd",)), 10) == []
     assert await listed(scope="fleet", entities=("POSTGRES",), fleet_id=fleet_b) == {in_b.id}
 
 
@@ -390,6 +435,8 @@ async def test_occurred_range_includes_both_bounds(adapter: Adapter) -> None:
         at_end.id,
     }
     assert await adapter.store.count_entries(filters) == 3
+    point = EntryFilters(occurred_from=T0, occurred_to=T0)  # equal bounds keep that instant only
+    assert [e.id for e in await adapter.store.list_entries(point)] == [at_start.id]
     assert {before.id, after.id}.isdisjoint(e.id for e in await adapter.store.list_entries(filters))
 
 
@@ -407,12 +454,25 @@ async def test_inactive_entries_are_hidden_unless_asked(adapter: Adapter) -> Non
 
 
 async def test_flagged_keeps_entries_reported_stale_or_wrong(adapter: Adapter) -> None:
-    good = await write(adapter, "good")
-    stale = await write(adapter, "stale")
-    for entry, verdict in ((good, Verdict.HELPFUL), (stale, Verdict.STALE)):
-        await adapter.store.record_feedback(Feedback(entry.id, "u", "a", verdict, updated_at=T0))
-    flagged = await adapter.store.list_entries(EntryFilters(flagged=True))
-    assert [e.id for e in flagged] == [stale.id]
+    """ADR 0054: ``flagged`` keeps entries with a stale or wrong report, on
+    list, count and both search streams; two reports do not duplicate a row."""
+    good = await write(adapter, "billing good fact")
+    stale = await write(adapter, "billing stale fact")
+    wrong = await write(adapter, "billing wrong fact")
+    await write(adapter, "billing untouched fact")
+    await adapter.store.record_feedback(Feedback(good.id, "u", "a", Verdict.HELPFUL, updated_at=T0))
+    for entry, verdict in ((stale, Verdict.STALE), (wrong, Verdict.WRONG)):
+        for reporter in ("u", "v"):
+            await adapter.store.record_feedback(
+                Feedback(entry.id, reporter, "a", verdict, updated_at=T0)
+            )
+    flagged = EntryFilters(flagged=True)
+    expected = {stale.id, wrong.id}
+    listed = await adapter.store.list_entries(flagged)
+    assert sorted(e.id for e in listed) == sorted(expected)
+    assert await adapter.store.count_entries(flagged) == 2
+    assert set(await adapter.store.search_keyword("billing", flagged, 10)) == expected
+    assert set(await adapter.store.search_vector(adapter.vec(0), flagged, 10)) == expected
 
 
 ME = ("u-me", "me")  # the (user, agent) a feedback row is keyed by
@@ -605,6 +665,12 @@ async def test_visibility_matrix(adapter: Adapter) -> None:
         EntryFilters(), visibility=_vis(TrustLevel.LURKER, fleet=home)
     )
     assert count == len(member)
+    assert (
+        await adapter.store.count_entries(
+            EntryFilters(), visibility=_vis(TrustLevel.UNTRUSTED, fleet=home)
+        )
+        == 0
+    )
 
 
 async def test_own_fleet_entries_stay_visible_after_a_fleet_move(adapter: Adapter) -> None:
@@ -687,6 +753,21 @@ async def test_both_search_streams_apply_visibility(adapter: Adapter) -> None:
         member | {in_other.id},
         member | {in_other.id},
     )
+
+
+async def test_similar_entries_rank_nearest_first_with_cosine_similarity(
+    adapter: Adapter,
+) -> None:
+    """ADR 0052: nearest active entries first, each with its cosine similarity
+    (an identical vector scores 1.0), cut to ``limit``."""
+    same = await write(adapter, "Auth uses JWT", hot=0)
+    far = await write(adapter, "Cookies", hot=3)
+    pairs = await adapter.store.similar_entries(adapter.vec(0), 10)
+    ids = [eid for eid, _ in pairs]
+    assert ids == [same.id, far.id]
+    assert pairs[0][1] == pytest.approx(1.0, abs=1e-4)
+    assert pairs[1][1] < pairs[0][1]
+    assert len(await adapter.store.similar_entries(adapter.vec(0), 1)) == 1
 
 
 async def test_similar_entries_exclude_the_entry_and_inactive_ones(adapter: Adapter) -> None:
@@ -1101,6 +1182,38 @@ async def test_feedback_upserts_per_reporter_and_lists_newest_first(adapter: Ada
         Feedback(entry.id, "u1", "b", Verdict.HELPFUL, None, T0 + timedelta(minutes=2))
     )
     assert await store.feedback_counts(entry.id) == (1, 1, 1)
+
+
+async def test_feedback_ties_break_on_the_reporter_and_limit_keeps_the_newest(
+    adapter: Adapter,
+) -> None:
+    """ADR 0051: newest first, equal times ordered by reporter, notes included,
+    at most ``limit`` rows; the batched read (ADR 0059) answers the same."""
+    entry = await write(adapter, "A fact")
+    other = await write(adapter, "Another fact")
+    store = adapter.store
+    for user, at, note in (
+        ("b", T0, "old b"),
+        ("a", T0, "old a"),
+        ("c", T0 + timedelta(seconds=1), "newest"),
+    ):
+        await store.record_feedback(Feedback(entry.id, user, user, Verdict.STALE, note, at))
+    await store.record_feedback(Feedback(other.id, "d", "d", Verdict.WRONG, None, T0))
+    rows = await store.list_feedback(entry.id, 10)
+    assert [(r.user, r.note, r.verdict) for r in rows] == [
+        ("c", "newest", Verdict.STALE),
+        ("a", "old a", Verdict.STALE),
+        ("b", "old b", Verdict.STALE),
+    ]
+    assert rows[0].entry_id == entry.id
+    assert rows[0].updated_at == T0 + timedelta(seconds=1)
+    assert [r.user for r in await store.list_feedback(entry.id, 1)] == ["c"]
+    assert await store.list_feedback("not-a-uuid", 10) == []
+    many = await store.list_feedback_many([entry.id, other.id, "not-a-uuid"], 2)
+    assert list(many) == [entry.id, other.id, "not-a-uuid"]
+    assert many[entry.id] == rows[:2]
+    assert [r.user for r in many[other.id]] == ["d"]
+    assert many["not-a-uuid"] == []
 
 
 async def test_a_revoked_reporters_feedback_does_not_count_until_reactivated(
@@ -3556,7 +3669,7 @@ async def test_a_retired_agent_cannot_be_activated_until_undone(adapter: Adapter
     store = adapter.store
     red, _ = await _people(adapter)
     await store.retire_agent("old", "heir", "x")
-    with pytest.raises(AgentRetired) as refused:
+    with pytest.raises(AgentRetired, match="undo the retirement") as refused:
         await store.activate_agent("old", trust_level=TrustLevel.LURKER, home_fleet_id=red)
     assert refused.value.successor == "heir"
     assert (await store.get_agent("old")).status is AgentStatus.REVOKED  # type: ignore[union-attr]

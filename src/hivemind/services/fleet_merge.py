@@ -409,20 +409,15 @@ class FleetMergeService:
         write is raised, never swallowed."""
         self._require_admin(credential)
         self._check_target(target_fleet_id, new_fleet_name)
-        try:
-            outcome = await self._store.move_agents(
-                source_id,
-                agents,
-                target_fleet_id=target_fleet_id,
-                new_fleet_name=new_fleet_name,
-                keep_pin_ids=keep_pin_ids,
-                expected_pin_ids=expected_pin_ids,
-                moved_by=credential.audit_actor(),
-            )
-        except FleetMoveRefused:
-            raise
-        except FleetMergeRefused as exc:  # the pins check shared with a merge
-            raise FleetMoveRefused(str(exc)) from exc
+        outcome = await self._store.move_agents(
+            source_id,
+            agents,
+            target_fleet_id=target_fleet_id,
+            new_fleet_name=new_fleet_name,
+            keep_pin_ids=keep_pin_ids,
+            expected_pin_ids=expected_pin_ids,
+            moved_by=credential.audit_actor(),
+        )
         self._changed()
         record = outcome.record
         if outcome.target_created:

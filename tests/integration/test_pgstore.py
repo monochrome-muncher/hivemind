@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import asyncpg
 import pytest
@@ -111,20 +111,6 @@ async def pg():
 
 
 # --- write path -----------------------------------------------------------------
-
-
-async def test_create_entry_assigns_id_and_created_at(pg) -> None:
-    store, _, dim = pg
-    entry = await store.create_entry(draft("Auth service uses JWT"), make_vec(dim, 0))
-    assert entry.id
-    assert entry.created_at is not None
-    assert entry.state is EntryState.ACTIVE
-    assert entry.embedding is not None and len(entry.embedding) == dim  # embedding round-trips
-    reloaded = await store.get_entry(entry.id)
-    assert reloaded is not None
-    assert reloaded.id == entry.id
-    assert reloaded.summary == "Auth service uses JWT"
-    assert reloaded == replace(entry, embedding=None)  # RETURNING matches a re-read
 
 
 async def test_reads_do_not_fetch_the_stored_vector(pg) -> None:
@@ -268,74 +254,6 @@ async def test_concurrent_fleet_create_raises_typed_error(pg) -> None:
 # --- feedback -------------------------------------------------------------------
 
 
-async def test_list_feedback_newest_first_with_notes(pg) -> None:
-    """ADR 0051: an entry's feedback rows come back newest first (ties on
-    the reporter), notes included, at most ``limit`` of them."""
-    store, _, _ = pg
-    entry = await store.create_entry(draft("A fact"))
-    other = await store.create_entry(draft("Another fact"))
-    t0 = datetime(2026, 9, 1, tzinfo=UTC)
-    for user, at, note in (
-        ("b", t0, "old b"),
-        ("a", t0, "old a"),
-        ("c", t0 + timedelta(seconds=1), "newest"),
-    ):
-        await store.record_feedback(
-            Feedback(
-                entry_id=entry.id,
-                user=user,
-                agent=user,
-                verdict=Verdict.STALE,
-                note=note,
-                updated_at=at,
-            )
-        )
-    await store.record_feedback(
-        Feedback(entry_id=other.id, user="d", agent="d", verdict=Verdict.WRONG, updated_at=t0)
-    )
-    rows = await store.list_feedback(entry.id, 10)
-    assert [(r.user, r.note, r.verdict) for r in rows] == [
-        ("c", "newest", Verdict.STALE),
-        ("a", "old a", Verdict.STALE),
-        ("b", "old b", Verdict.STALE),
-    ]
-    assert rows[0].entry_id == entry.id
-    assert rows[0].updated_at == t0 + timedelta(seconds=1)
-    assert [r.user for r in await store.list_feedback(entry.id, 1)] == ["c"]
-    assert await store.list_feedback("not-a-uuid", 10) == []
-    # ADR 0059: the batched read answers the same, per requested id.
-    many = await store.list_feedback_many([entry.id, other.id, "not-a-uuid"], 2)
-    assert list(many) == [entry.id, other.id, "not-a-uuid"]
-    assert many[entry.id] == (await store.list_feedback(entry.id, 10))[:2]
-    assert [r.user for r in many[other.id]] == ["d"]
-    assert many["not-a-uuid"] == []
-
-
-async def test_flagged_filter_keeps_stale_or_wrong_entries(pg) -> None:
-    """ADR 0054: ``flagged`` keeps entries with a stale or wrong report, on
-    list, count and both search streams."""
-    store, _, dim = pg
-    stale = await store.create_entry(draft("billing stale fact"), make_vec(dim, 0))
-    wrong = await store.create_entry(draft("billing wrong fact"), make_vec(dim, 0))
-    helpful = await store.create_entry(draft("billing helpful fact"), make_vec(dim, 0))
-    await store.create_entry(draft("billing untouched fact"), make_vec(dim, 0))
-    for entry, verdict in ((stale, Verdict.STALE), (wrong, Verdict.WRONG)):
-        for reporter in ("a", "b"):  # two reports must not duplicate a row
-            await store.record_feedback(
-                Feedback(entry_id=entry.id, user=reporter, agent=reporter, verdict=verdict)
-            )
-    await store.record_feedback(
-        Feedback(entry_id=helpful.id, user="a", agent="a", verdict=Verdict.HELPFUL)
-    )
-    flagged = EntryFilters(flagged=True)
-    expected = {stale.id, wrong.id}
-    listed = await store.list_entries(flagged, limit=10)
-    assert sorted(e.id for e in listed) == sorted(expected)
-    assert await store.count_entries(flagged) == 2
-    assert set(await store.search_keyword("billing", flagged, 10)) == expected
-    assert set(await store.search_vector(make_vec(dim, 0), flagged, 10)) == expected
-
-
 # --- read path ------------------------------------------------------------------
 
 
@@ -450,38 +368,7 @@ async def test_keyword_search_respects_filters(pg) -> None:
     assert fact.id not in results
 
 
-async def test_similar_entries_returns_nearest_active_with_similarity(pg) -> None:
-    """ADR 0052: nearest active entries with their cosine similarity,
-    leaving out the excluded id and inactive entries."""
-    store, _, dim = pg
-    same = await store.create_entry(draft("Auth uses JWT"), make_vec(dim, 0))
-    far = await store.create_entry(draft("Cookies"), make_vec(dim, 3))
-    old = await store.create_entry(draft("Auth used sessions"), make_vec(dim, 0))
-    await store.create_entry(draft("Auth uses JWT now", supersedes=(old.id,)), make_vec(dim, 1))
-    new = await store.create_entry(draft("Auth uses JWT tokens"), make_vec(dim, 0))
-
-    pairs = await store.similar_entries(make_vec(dim, 0), 10, exclude_id=new.id)
-    ids = [eid for eid, _ in pairs]
-    assert new.id not in ids
-    assert old.id not in ids  # superseded
-    assert ids[0] == same.id
-    assert pairs[0][1] == pytest.approx(1.0, abs=1e-4)
-    assert far.id in ids
-    assert pairs[ids.index(far.id)][1] < pairs[0][1]
-    assert len(await store.similar_entries(make_vec(dim, 0), 1, exclude_id=new.id)) == 1
-
-
 # --- list -------------------------------------------------------------------------
-
-
-async def test_list_entries_occurred_range(pg) -> None:
-    store, _, _ = pg
-    base = datetime(2026, 6, 1, tzinfo=UTC)
-    early = await store.create_entry(draft("early", occurred_at=base))
-    late = await store.create_entry(draft("late", occurred_at=base + timedelta(days=1)))
-    got = await store.list_entries(EntryFilters(occurred_from=base, occurred_to=base), limit=10)
-    assert {e.id for e in got} == {early.id}
-    assert late.id not in {e.id for e in got}
 
 
 # --- authenticator -----------------------------------------------------------------

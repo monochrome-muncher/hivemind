@@ -21,11 +21,11 @@ from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
 from hivemind.domain.audit import ActorKind
-from hivemind.domain.entry import EntityKind, EntryDraft, ExtractedEntity, Kind
+from hivemind.domain.entry import EntryDraft, EntryFilters
 from hivemind.domain.feedback import Verdict
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential, KeyReplacement
-from tests.fakes import make_clock, make_embedder, make_search_config
+from tests.fakes import make_clock, make_embedder, make_search_config, seed_entity_entries
 
 
 class FakeAuthenticator:
@@ -287,6 +287,30 @@ class TestCreateEntry:
             )
         assert resp.status_code == 422
         assert resp.json()["error"]["code"] == "invalid_entry"
+
+    async def test_the_org_key_cannot_write(self) -> None:
+        # An org key is access-controlled at trust level 0: it may register agents
+        # but not write (ADR 0011).
+        app = make_hivemind_app()
+        client = make_client(app)
+        async with client:
+            # The org key carries no agent identity, so a write must name one to
+            # get as far as the trust check; without it the write is refused earlier.
+            resp = await client.post(
+                "/v1/entries",
+                json={"kind": "fact", "summary": "from the org key", "agent": "someone"},
+                headers={"X-API-Key": "key-org"},
+            )
+            nameless = await client.post(
+                "/v1/entries",
+                json={"kind": "fact", "summary": "from the org key"},
+                headers={"X-API-Key": "key-org"},
+            )
+        assert resp.status_code == 403
+        assert resp.json()["error"]["code"] == "forbidden"
+        assert nameless.status_code == 422
+        assert nameless.json()["error"]["code"] == "agent_identity_required"
+        assert await app.store.list_entries(EntryFilters(include_inactive=True), 10) == []
 
 
 class TestGetEntry:
@@ -1148,34 +1172,6 @@ class TestMetricsEndpoint:
 # Entity facets (ADR 0016, SPEC §13) ------------------------------------------ #
 
 
-async def _seed_entity_entries(app: HivemindApp) -> dict[str, str]:
-    """Seed two entries carrying machine-extracted entity facets (ADR 0016)."""
-    a = await app.store.create_entry(
-        EntryDraft(
-            kind=Kind.FACT,
-            summary="Postgres connection pool exhausted",
-            author="alice",
-            agent="a1",
-        ),
-        entities=(
-            ExtractedEntity(name="Postgres", kind=EntityKind.SYSTEM),
-            ExtractedEntity(name="auth-service", kind=EntityKind.SERVICE),
-        ),
-        entities_model="test-extractor",
-    )
-    b = await app.store.create_entry(
-        EntryDraft(
-            kind=Kind.FACT,
-            summary="Kubernetes autoscaler misconfigured",
-            author="alice",
-            agent="a1",
-        ),
-        entities=(ExtractedEntity(name="Kubernetes", kind=EntityKind.SYSTEM),),
-        entities_model="test-extractor",
-    )
-    return {"a": a.id, "b": b.id}
-
-
 class TestEntitiesSurface:
     """Entity facets (ADR 0016, SPEC §13): machine-extracted entities
     are filterable by name (AND-semantics, case-insensitive) and exposed
@@ -1184,7 +1180,7 @@ class TestEntitiesSurface:
 
     async def test_list_filters_by_entities_and_case_insensitively(self) -> None:
         app = make_hivemind_app()
-        ids = await _seed_entity_entries(app)
+        ids = await seed_entity_entries(app.store)
         client = make_client(app)
         async with client:
             # Filter names are case-insensitive against the stored names.
@@ -1210,7 +1206,7 @@ class TestEntitiesSurface:
 
     async def test_search_filters_by_entities(self) -> None:
         app = make_hivemind_app()
-        ids = await _seed_entity_entries(app)
+        ids = await seed_entity_entries(app.store)
         client = make_client(app)
         async with client:
             resp = await client.post(
@@ -1229,7 +1225,7 @@ class TestEntitiesSurface:
 
     async def test_get_entry_exposes_entities_and_provenance(self) -> None:
         app = make_hivemind_app()
-        ids = await _seed_entity_entries(app)
+        ids = await seed_entity_entries(app.store)
         client = make_client(app)
         async with client:
             resp = await client.get(f"/v1/entries/{ids['a']}", headers={"X-API-Key": "key-alice"})
@@ -1254,7 +1250,7 @@ class TestEntitiesSurface:
     async def test_search_hits_do_not_carry_entities(self) -> None:
         """Progressive disclosure (SPEC §6.1): compact hits stay slim."""
         app = make_hivemind_app()
-        await _seed_entity_entries(app)
+        await seed_entity_entries(app.store)
         client = make_client(app)
         async with client:
             resp = await client.post(
