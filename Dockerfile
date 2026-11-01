@@ -19,7 +19,7 @@ ARG PYTHON_IMAGE=python:3.14-slim@sha256:cd89c30eda26ee911a4611b18680086e0ea42e6
 # `uv sync --locked` installs exactly uv.lock (hash-checked) and fails if it
 # disagrees with pyproject.toml, so the image ships what CI tested. No dev deps.
 FROM ${PYTHON_IMAGE} AS builder
-RUN pip install --no-cache-dir uv==0.12.24
+RUN pip install --no-cache-dir uv==0.13.6
 WORKDIR /app
 ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
     UV_COMPILE_BYTECODE=1 \
