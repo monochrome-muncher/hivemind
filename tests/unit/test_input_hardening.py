@@ -13,9 +13,7 @@ from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
 from hivemind.domain.entry import (
-    EntryDraft,
     EntryFilters,
-    Kind,
     Source,
     SourceType,
 )
@@ -41,37 +39,20 @@ from hivemind.ports import Credential
 from hivemind.services.access import AccessService
 from hivemind.services.search import SearchService
 from hivemind.services.write import WriteService
-from tests.fakes import RecordingStore, make_clock, make_embedder, make_search_config
+from tests.fakes import (
+    CountingEmbedder,
+    RecordingStore,
+    make_clock,
+    make_embedder,
+    make_search_config,
+    minimal_draft,
+)
 from tests.unit.test_api_endpoints import make_authenticator, make_client, make_hivemind_app
 from tests.unit.test_mcp_app import ALICE, ORG, build_app
 
 KEY = {"X-API-Key": "key-alice"}
 ADMIN = {"X-API-Key": "key-admin"}
 ORG_KEY = {"X-API-Key": "key-org"}
-
-
-def draft(**over: object) -> EntryDraft:
-    base: dict[str, object] = {"kind": Kind.FACT, "summary": "s", "author": "a", "agent": "g"}
-    return EntryDraft(**{**base, **over})  # type: ignore[arg-type]
-
-
-class CountingEmbedder:
-    """Wraps the fake embedder and counts calls."""
-
-    dimension = 4
-    model_name = "fake-embedder"
-
-    def __init__(self) -> None:
-        self.inner = make_embedder()
-        self.calls = 0
-
-    async def embed_text(self, text: str) -> list[float]:
-        self.calls += 1
-        return await self.inner.embed_text(text)
-
-    async def embed_entry(self, d: EntryDraft) -> list[float]:
-        self.calls += 1
-        return await self.inner.embed_entry(d)
 
 
 # -- the domain ---------------------------------------------------------------
@@ -100,11 +81,11 @@ BAD_DRAFTS = {
 @pytest.mark.parametrize("fields", BAD_DRAFTS.values(), ids=BAD_DRAFTS.keys())
 def test_a_bad_draft_is_refused(fields: dict[str, object]) -> None:
     with pytest.raises(InvalidInput):
-        draft(**fields)
+        minimal_draft(**fields)
 
 
 def test_a_draft_at_the_caps_is_accepted() -> None:
-    draft(
+    minimal_draft(
         body="x" * MAX_BODY_CHARS,
         tags=tuple("t" * 64 for _ in range(32)),
         payload={"a": "x" * 60_000},

@@ -19,7 +19,7 @@ from tests.eval.threshold import (
     report,
     suggest,
 )
-from tests.fakes import FakeEmbedder, make_embedder
+from tests.fakes import RecordingEmbedder, make_embedder
 
 
 async def test_the_sweep_reports_every_threshold() -> None:
@@ -70,23 +70,11 @@ async def test_a_domain_alone_counts_other_domains_queries_as_off_topic() -> Non
     assert (m.answerable, m.off_topic) == (19, 6 + 4 * 24 + 5)
 
 
-class _RecordingEmbedder(FakeEmbedder):
-    """The hash embedder, remembering every text it was asked to embed."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.texts: list[str] = []
-
-    async def embed_text(self, text: str) -> list[float]:
-        self.texts.append(text)
-        return await super().embed_text(text)
-
-
 async def test_a_query_instruction_reaches_the_embedder_and_the_statistics() -> None:
     fixture, sweep = domain_fixture(DOMAINS[0]), (0.0, 0.5)  # the wiring needs no more
     plain = await measure(make_embedder(), fixture, sweep)
     instruction = "Retrieve the entry that answers this question"
-    recorder = _RecordingEmbedder()
+    recorder = RecordingEmbedder()
     m = await measure(recorder, fixture, sweep, query_instruction=instruction)
     wrapped = f"Instruct: {instruction}\nQuery:"
     assert any(t.startswith(wrapped) for t in recorder.texts)

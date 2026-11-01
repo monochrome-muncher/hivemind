@@ -11,9 +11,7 @@ from datetime import UTC, datetime
 import pytest
 
 from hivemind.domain.entry import (
-    EntryDraft,
     EntryFilters,
-    Kind,
     Source,
     SourceType,
     embeddable_text,
@@ -27,35 +25,13 @@ from hivemind.mcp.app import hive_list, hive_search, hive_write
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.write import WriteService
-from tests.fakes import make_clock, make_embedder
+from tests.fakes import CountingEmbedder, make_clock, minimal_draft
 from tests.unit.test_api_endpoints import make_client, make_hivemind_app
 from tests.unit.test_mcp_app import ALICE, build_app
 
 KEY = {"X-API-Key": "key-alice"}
 ADMIN = {"X-API-Key": "key-admin"}
 LEGACY = "L" * 300  # registered before ADR 0040, when names were unbounded
-
-
-def draft(**over: object) -> EntryDraft:
-    base: dict[str, object] = {"kind": Kind.FACT, "summary": "s", "author": "a", "agent": "g"}
-    return EntryDraft(**{**base, **over})  # type: ignore[arg-type]
-
-
-class CountingEmbedder:
-    dimension = 4
-    model_name = "fake-embedder"
-
-    def __init__(self) -> None:
-        self.inner = make_embedder()
-        self.calls = 0
-
-    async def embed_text(self, text: str) -> list[float]:
-        self.calls += 1
-        return await self.inner.embed_text(text)
-
-    async def embed_entry(self, d: EntryDraft) -> list[float]:
-        self.calls += 1
-        return await self.inner.embed_entry(d)
 
 
 # -- F1: a legacy name must stay manageable ------------------------------------
@@ -107,14 +83,14 @@ def _nested(depth: int) -> dict:
 
 
 def test_payload_nesting_is_capped_and_compact_size_is_measured() -> None:
-    draft(payload=_nested(30))
+    minimal_draft(payload=_nested(30))
     with pytest.raises(InvalidInput):
-        draft(payload=_nested(40))
+        minimal_draft(payload=_nested(40))
     with pytest.raises(InvalidInput):
-        draft(payload=_nested(300))
-    draft(payload={"a": "x" * (65_536 - 8)})  # {"a":"..."} is 8 bytes of overhead
+        minimal_draft(payload=_nested(300))
+    minimal_draft(payload={"a": "x" * (65_536 - 8)})  # {"a":"..."} is 8 bytes of overhead
     with pytest.raises(InvalidInput):
-        draft(payload={"a": "x" * (65_536 - 7)})
+        minimal_draft(payload={"a": "x" * (65_536 - 7)})
 
 
 async def test_a_deep_payload_is_refused_on_rest_and_mcp_before_embedding() -> None:
@@ -142,13 +118,13 @@ async def test_a_deep_payload_is_refused_on_rest_and_mcp_before_embedding() -> N
 @pytest.mark.parametrize("bad", ["a\ud800b", "\udfff"])
 def test_lone_surrogates_are_refused_like_nul(bad: str) -> None:
     with pytest.raises(InvalidInput):
-        draft(tags=(bad,))
+        minimal_draft(tags=(bad,))
     with pytest.raises(InvalidInput):
-        draft(summary=bad)
+        minimal_draft(summary=bad)
     with pytest.raises(InvalidInput):
-        draft(payload={"a": bad})
+        minimal_draft(payload={"a": bad})
     with pytest.raises(InvalidInput):
-        draft(sources=(Source(SourceType.URL, bad),))
+        minimal_draft(sources=(Source(SourceType.URL, bad),))
     with pytest.raises(InvalidInput):
         EntryFilters(author=bad).validate()
 
@@ -210,7 +186,7 @@ def test_sane_datetimes_are_accepted() -> None:
     EntryFilters(
         occurred_from=datetime(1999, 1, 1, tzinfo=UTC), created_to=datetime(2100, 1, 1)
     ).validate()
-    draft(occurred_at=datetime(1950, 6, 1, tzinfo=UTC))
+    minimal_draft(occurred_at=datetime(1950, 6, 1, tzinfo=UTC))
 
 
 # -- F5 / F6: the body cap and the probes ---------------------------------------------
