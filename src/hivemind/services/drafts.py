@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Any
 
 from hivemind.domain.entry import EntryDraft, ImportanceSource, Kind, Source
+from hivemind.domain.validation import MAX_IDENTITY_CHARS, check_text
 from hivemind.ports import Credential
 from hivemind.services.access import WriteResolution
 
@@ -45,6 +46,10 @@ def entry_draft(
     with ``caller`` (its 1..5 range is checked by ``EntryDraft``). Raises
     ``ValueError`` / ``InvalidInput`` for an invalid draft (SPEC §4.1).
     """
+    if credential.agent_id is None:
+        # A self-reported agent is free text every reader sees; a key's own
+        # agent identity may be a legacy name and is left as it is.
+        check_text(agent, "agent", MAX_IDENTITY_CHARS)
     if importance is None:
         importance, importance_source = DEFAULT_IMPORTANCE, ImportanceSource.DEFAULT
     else:
