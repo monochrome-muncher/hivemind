@@ -14,7 +14,8 @@
 // * the two write nudges of the Claude Code/Codex hooks (DEVELOPING.md,
 //   "The Stop hook and the post-compaction line"): once per session, when
 //   a long top-level session (HIVEMIND_STOP_MIN_TOOLS tool calls, default
-//   20) goes idle without a hive_write or hive_feedback call, the plugin
+//   20) that rated nothing and either wrote nothing or read entries goes
+//   idle, the plugin
 //   sends the reminder as the next prompt, with the session's own agent
 //   and model; after a compaction the next request's reminder carries one
 //   more sentence.

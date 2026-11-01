@@ -59,6 +59,9 @@ harness, go back to "Which harness am I in?" in the hivemind-setup skill.
   ```
 
   and copy both skill folders into `~/.agents/skills/` (DSH scans it).
+  This row has none of the bundle's guards: it reads `HIVEMIND_MCP_URL`
+  from a project `.env` too (so a repository could redirect the key),
+  and it connects in incognito sessions. Prefer the bundle.
 
 **Identity:** name this agent `<user>-dsh`, distinct from the agents of
 other harnesses; `~/.dsh/.env` is specific to DSH, so it does not collide
@@ -68,7 +71,7 @@ with another harness's key.
 
 - **No hook needed.** DSH puts the Hivemind MCP server's instructions into
   the system prompt, which compaction never removes. With the bundle, a
-  long turn that rated nothing and wrote nothing or read entries also gets one reminder to write and rate
+  long turn that rated nothing and either wrote nothing or read entries also gets one reminder to write and rate
   before it ends (`HIVEMIND_STOP_MIN_TOOLS`, default 20 tool calls). Do not
   wire the Claude Code plugin's hooks through DSH's hooks bridge (not
   installed by default since 0.2.1): its `SessionStart` text does not

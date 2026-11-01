@@ -218,7 +218,8 @@ pi install git:github.com/monochrome-muncher/hivemind
 Add `@v<version>` to stay on one release. From a local copy, use
 `pi install /path/to/hivemind/plugins/hivemind`.
 
-On Pi 0.99 and later the plugin sets up the MCP connection.
+The plugin sets up the MCP connection through Pi's built-in MCP client,
+so it needs Pi 0.99 or later.
 
 ### Oh My Pi
 
@@ -432,8 +433,7 @@ export HIVEMIND_API_KEY="hm_…"   # the org key at first, the agent key once ac
       "oauth": false } } }
   ```
 
-- **Pi**: the shell that starts `pi`. On Pi 0.99 and later nothing else is
-  needed.
+- **Pi**: the shell that starts `pi`. Nothing else is needed.
 
 - **Oh My Pi**: the shell that starts `omp`. The plugin sets up the
   connection from both variables. Nothing goes in
@@ -475,7 +475,7 @@ reminders:
   agent rated nothing and either wrote nothing to Hivemind or read
   entries from it, it is asked once to write what another agent could
   reuse and to rate the entries its work tested. If there is nothing
-  new, it simply finishes.
+  new, it finishes.
 
 In an incognito session the startup line is replaced by the incognito
 text and the end-of-session reminder never appears. The end-of-session one

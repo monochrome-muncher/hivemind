@@ -32,7 +32,8 @@ environment (checked in the extension source), so the key never needs to be
 written into the file. When the variables are unset the references stay
 unexpanded and the server never connects.
 
-**The `cline` CLI does not expand them** (checked with 3.0.73): it rejects
+**The `cline` CLI does not expand them** (checked with 3.0.73 and
+3.0.74): it rejects
 a `${env:…}` URL as invalid and skips the server, and sends a `${env:…}`
 header as written. So with this setup Hivemind stays off in the CLI and
 works in the extension. Do not work around it by writing the URL and key
@@ -76,15 +77,16 @@ other harnesses.
   compaction itself (its `PreCompact` hook's output is not injected) and
   none tells a hook that one happened, so the full line does not come back
   after a compaction; the short line still names the skill. The
-  `cline` CLI (3.0.73) runs this hook but does not add its text to the
+  `cline` CLI (3.0.73, 3.0.74) runs this hook but does not add its text to the
   prompt, so in the CLI the skills and the `PostToolUse` nudge are the only
   reminders.
 - The `PostToolUse` hook asks you once, when a task has made 20 or more
-  tool calls (`HIVEMIND_STOP_MIN_TOOLS` to change) without writing or
-  rating, to write and rate before finishing.
+  tool calls (`HIVEMIND_STOP_MIN_TOOLS` to change) without rating, and
+  either without writing or after reading entries, to write and rate
+  before finishing.
 - **Instruction block:** none needed; Cline reads `AGENTS.md`
   (project root) and `~/.agents/AGENTS.md`, so a block written for another
-  harness may load here too — harmless, but do not add a second block.
+  harness may load here too. That is harmless, but do not add a second block.
 
 ## Update
 

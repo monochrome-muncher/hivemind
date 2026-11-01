@@ -679,11 +679,10 @@ def test_launcher_warns_when_the_hermes_env_file_would_override_it(tmp_path: Pat
         assert "HIVEMIND_ENABLED=true` in `~/.hermes/.env`" not in flat
 
 
-@pytest.mark.skipif(shutil.which("python3") is None, reason="python3 is not installed")
-def test_launcher_starts_a_built_in_mcp_pi_without_the_adapter_flag(tmp_path: Path) -> None:
-    """Pi 0.99+ has a built-in MCP client: the launcher only unsets the key
-    and URL (the extension registers no server in an incognito session) and
-    passes no --mcp-config."""
+def test_launcher_starts_pi_with_the_key_and_url_unset(tmp_path: Path) -> None:
+    """Pi connects through its built-in MCP client: the launcher only unsets
+    the key and URL (the extension registers no server in an incognito
+    session), passes the arguments through unchanged and needs no python3."""
     env = _fake_harness(tmp_path, "pi")
     script = tmp_path / "bin" / "pi"
     script.write_text(

@@ -16,14 +16,15 @@
  * hive_* tools are declared by name. A "hivemind" entry in Pi's own
  * mcp.json takes precedence over the registration (Pi's rule).
  * Oh My Pi has no registerMcpServer (it configures MCP itself), so nothing
- * is registered there either.
+ * is registered there.
  *
  * Two nudges, as the Claude Code/Codex hooks give (plugins/hivemind/
  * DEVELOPING.md, "The Stop hook and the post-compaction line"): once per
  * session, a long session (HIVEMIND_STOP_MIN_TOOLS tool calls, default 20)
- * that has not called hive_write or hive_feedback is kept going for one
- * more turn with a reminder to write and rate (Pi: agent_before_settle;
- * Oh My Pi: session_stop), and after a compaction the next system-prompt
+ * that rated nothing (hive_feedback) and either wrote nothing (hive_write)
+ * or read entries (hive_search, hive_get) is kept going for one more turn
+ * with a reminder to write and rate (Pi: agent_before_settle; Oh My Pi:
+ * session_stop), and after a compaction the next system-prompt
  * section carries one extra sentence.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
