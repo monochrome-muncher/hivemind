@@ -20,6 +20,7 @@ from hivemind.domain.access import (
     AgentStatus,
     InvalidAgentStatus,
     KeyLocked,
+    StoreUnavailable,
     TrustLevel,
     UnknownAgent,
 )
@@ -119,6 +120,20 @@ async def _record_use(conn: asyncpg.Connection, stored_hash: str, key_id: str) -
             logger.warning("could not record last use of key %s: %s", key_id, type(exc).__name__)
 
 
+# Transient, connection-level failures only: refused or reset sockets, a
+# dropped connection (SQLSTATE class 08), the server starting up or shutting
+# down (57P01-57P03) and a full server (53300).
+_TRANSIENT_STORE_ERRORS = (
+    OSError,
+    asyncpg.InterfaceError,
+    asyncpg.PostgresConnectionError,
+    asyncpg.CannotConnectNowError,
+    asyncpg.AdminShutdownError,
+    asyncpg.CrashShutdownError,
+    asyncpg.TooManyConnectionsError,
+)
+
+
 def _credential_from_row(row: asyncpg.Record, key_id: str) -> Credential | None:
     """The ``Credential`` a looked-up key row stands for, by ``kind`` (ADR
     0012), or ``None`` when it is not an identity (ADR 0039)."""
@@ -211,14 +226,22 @@ class PgAuthenticator:
         """
         stored_hash = key_hash(key)
         key_id = key_fingerprint(stored_hash)
-        pool = await self._ensure_pool()
-        async with pool.acquire(timeout=self._acquire_timeout) as conn:
-            row = await conn.fetchrow(_SELECT_CREDENTIAL, stored_hash)
-            if row is None:
-                return None
-            credential = _credential_from_row(row, key_id)
-            if credential is not None and row["use_stale"]:
-                await _record_use(conn, stored_hash, key_id)
+        try:
+            pool = await self._ensure_pool()
+            async with pool.acquire(timeout=self._acquire_timeout) as conn:
+                row = await conn.fetchrow(_SELECT_CREDENTIAL, stored_hash)
+                if row is None:
+                    return None
+                credential = _credential_from_row(row, key_id)
+                if credential is not None and row["use_stale"]:
+                    await _record_use(conn, stored_hash, key_id)
+        except _TRANSIENT_STORE_ERRORS as exc:
+            # A connection-level failure says nothing about the key: a typed
+            # retryable error, so no surface answers a 500 or a 401. Only
+            # the exception type is kept, never its text. Permanent faults (a
+            # wrong password, an unmigrated pool) are not in the tuple and
+            # keep surfacing loudly.
+            raise StoreUnavailable(type(exc).__name__) from None
         return credential
 
     # -- key management (ADR 0012) ------------------------------------------

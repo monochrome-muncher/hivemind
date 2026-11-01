@@ -18,7 +18,7 @@ from hivemind.api.errors import error_handlers
 from hivemind.api.guards import BodyTooLarge, PreAuthGuard
 from hivemind.api.schemas import ErrorBody
 from hivemind.config import SearchConfig
-from hivemind.domain.access import KEY_LOCKED_MESSAGE, FleetBusy, KeyLocked
+from hivemind.domain.access import KEY_LOCKED_MESSAGE, FleetBusy, KeyLocked, StoreUnavailable
 from hivemind.domain.validation import MAX_REQUEST_BODY_BYTES, InvalidInput
 from hivemind.ports import Authenticator, Credential, Embedder, Store
 from hivemind.services.access import AccessService
@@ -161,6 +161,9 @@ STORE_RETRY_AFTER_SECONDS = 2
 def _handle_store_timeout(_request: Request, exc: Exception) -> JSONResponse:
     if isinstance(exc, FleetBusy):  # ADR 0107: a fleet write waited for a merge
         code, message = "fleet_busy", str(exc)
+    elif isinstance(exc, StoreUnavailable):
+        logger.warning("store unreachable (%s); answering 503", exc.cause)
+        code, message = "store_unavailable", "the database is busy or unreachable; retry shortly"
     else:
         logger.warning("store call timed out (pool acquire or statement); answering 503")
         code, message = "store_unavailable", "the database is busy or unreachable; retry shortly"

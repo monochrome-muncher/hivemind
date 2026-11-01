@@ -124,6 +124,18 @@ class FleetBusy(TimeoutError):
         self.fleet_id = fleet_id
 
 
+class StoreUnavailable(TimeoutError):
+    """The store could not be reached or failed while serving a request that
+    must not answer 401 (key verification): a database error, a dropped
+    connection or a refused one. A ``TimeoutError``, so every surface already
+    answers a retryable 503 ``store_unavailable``. The message never carries
+    the driver's text (it can name the host or the key hash)."""
+
+    def __init__(self, cause: str) -> None:
+        super().__init__(f"the store is unavailable ({cause})")
+        self.cause = cause
+
+
 class InvalidAgentStatus(Exception):
     """A lifecycle verb was applied to an agent in a status it cannot
     start from (ADR 0028) — e.g. ``activate`` on an ``active`` agent."""
@@ -377,6 +389,7 @@ __all__ = [
     "InvalidAgentStatus",
     "KeyLocked",
     "Standing",
+    "StoreUnavailable",
     "TrustLevel",
     "UnknownAgent",
     "UnknownFleet",

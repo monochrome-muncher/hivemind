@@ -711,6 +711,39 @@ class TestStoreTimeout:
         assert resp.status_code == 503
         assert resp.json()["error"]["code"] == "store_unavailable"
 
+    async def test_a_key_check_store_failure_logs_the_cause_not_a_timeout(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        from hivemind.domain.access import StoreUnavailable
+
+        app = make_hivemind_app()
+
+        async def down(_key: str) -> object:
+            raise StoreUnavailable("ConnectionRefusedError")
+
+        app.authenticator.verify = down  # type: ignore[method-assign]
+        with caplog.at_level("WARNING"):
+            async with make_client(app) as client:
+                await client.get("/v1/entries", headers={"X-API-Key": "key-secret"})
+        assert "ConnectionRefusedError" in caplog.text
+        assert "timed out" not in caplog.text
+        assert "key-secret" not in caplog.text
+
+    async def test_a_key_check_store_failure_is_503_with_retry_after(self) -> None:
+        from hivemind.domain.access import StoreUnavailable
+
+        app = make_hivemind_app()
+
+        async def down(_key: str) -> object:
+            raise StoreUnavailable("OSError")
+
+        app.authenticator.verify = down  # type: ignore[method-assign]
+        async with make_client(app) as client:
+            resp = await client.get("/v1/entries", headers={"X-API-Key": "key-alice"})
+        assert resp.status_code == 503
+        assert resp.headers["Retry-After"] == "2"
+        assert resp.json()["error"]["code"] == "store_unavailable"
+
 
 class TestNaiveDatetimeNormalization:
     async def test_naive_occurred_at_normalized_to_utc(self) -> None:

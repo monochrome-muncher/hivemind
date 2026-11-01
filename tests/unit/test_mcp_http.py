@@ -24,7 +24,7 @@ from typing import Any
 import pytest
 
 from hivemind.config import Settings
-from hivemind.domain.access import TrustLevel
+from hivemind.domain.access import StoreUnavailable, TrustLevel
 from hivemind.domain.entry import EntryFilters
 from hivemind.mcp.app import McpHivemind
 from hivemind.mcp.http import (
@@ -451,6 +451,30 @@ async def test_key_verification_timeout_answers_503_with_retry_after() -> None:
     assert sent[0]["status"] == 503
     assert dict(sent[0]["headers"])[b"retry-after"] == b"2"
     assert json.loads(sent[1]["body"])["error"] == "store_unavailable"
+
+
+async def test_key_verification_store_failure_answers_503_and_logs_only_the_type(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class DownAuth(FakeAuthenticator):
+        async def verify(self, key: str) -> Credential | None:
+            raise StoreUnavailable("ConnectionRefusedError")
+
+    inner = _RecordingApp()
+    mw = BearerAuthMiddleware(inner, DownAuth({}))
+    sent: list[dict[str, Any]] = []
+
+    async def send(msg: dict[str, Any]) -> None:
+        sent.append(msg)
+
+    with caplog.at_level("WARNING"):
+        await mw(_scope([(b"authorization", b"Bearer key-secret")]), _noop_receive, send)
+    assert not inner.called
+    assert sent[0]["status"] == 503
+    assert dict(sent[0]["headers"])[b"retry-after"] == b"2"
+    assert json.loads(sent[1]["body"])["error"] == "store_unavailable"
+    assert "ConnectionRefusedError" in caplog.text
+    assert "key-secret" not in caplog.text
 
 
 async def test_a_store_timeout_inside_a_tool_is_store_unavailable() -> None:
