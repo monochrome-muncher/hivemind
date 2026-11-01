@@ -45,6 +45,7 @@ from hivemind.services.audit import actor_kind_of, record_admin_action
 from hivemind.services.errors import NameTaken as NameTaken  # re-exported: defined in errors
 from hivemind.services.errors import PermissionDenied
 from hivemind.services.fleet_merge import FleetMergeService
+from hivemind.services.guards import require_admin
 from hivemind.services.successions import SuccessionService
 
 _NAME_TAKEN = "agent name is already taken (names are never reused; pick another name)"
@@ -189,7 +190,7 @@ class AccessService:
         (ADR 0028). The status flips first and the key is issued last,
         only while still ``active`` (ADR 0039), so a race or failure
         leaves the agent less privileged, never more."""
-        self._require_admin(credential)
+        require_admin(credential)
         await self._require_fleet(home_fleet_id)
         agent = await self._store.activate_agent(
             name, trust_level=trust_level, home_fleet_id=home_fleet_id
@@ -210,7 +211,7 @@ class AccessService:
         unknown, ``InvalidAgentStatus`` unless ``active`` (a revoked agent
         is re-activated instead). The audit row carries both key
         fingerprints, never a key."""
-        self._require_admin(credential)
+        require_admin(credential)
         # The authenticator writes the audit row in the swap's transaction,
         # so there is no window with a new key and no row.
         replacement = await self._require_authenticator().replace_agent_key(
@@ -241,7 +242,7 @@ class AccessService:
 
     async def create_fleet(self, name: str, credential: Credential) -> Fleet:
         """Create a named fleet (admin-gated, ADR 0012)."""
-        self._require_admin(credential)
+        require_admin(credential)
         validate_fleet_name(name)  # ADR 0040
         fleet = await self._store.create_fleet(name)
         await self._audit(credential, AuditAction.FLEET_CREATE, fleet.id, {"name": name})
@@ -251,7 +252,7 @@ class AccessService:
         """Rename a fleet (admin-gated, audited ``fleet.rename``, ADR 0109).
         Merged fleets can be renamed. Renaming to the current name changes
         nothing and writes no audit row."""
-        self._require_admin(credential)
+        require_admin(credential)
         validate_fleet_name(name)  # same bounds as a new fleet's name (ADR 0040)
         before, after = await self._store.rename_fleet(fleet_id, name)
         if before.name != after.name:
@@ -267,7 +268,7 @@ class AccessService:
         """Promote/demote an agent's trust level (admin-gated, ADR 0011).
         Demotion to level 0 is *dormant* (key still valid, no access) —
         distinct from revocation (ADR 0012)."""
-        self._require_admin(credential)
+        require_admin(credential)
         before = await self._store.get_agent(name)
         agent = await self._store.set_agent_trust_level(name, level)
         await self._audit(
@@ -285,7 +286,7 @@ class AccessService:
         """Re-parent an agent to a new home fleet (admin-gated, ADR 0011).
         The agent's earlier ``fleet``-scoped entries stay in the fleet
         they were written into (never re-parented)."""
-        self._require_admin(credential)
+        require_admin(credential)
         await self._require_fleet(fleet_id)
         before = await self._store.get_agent(name)
         agent = await self._store.set_agent_home_fleet(name, fleet_id)
@@ -310,7 +311,7 @@ class AccessService:
         (``UnknownFleet``, or ``FleetMerged`` for a merged one), so a refused
         fleet changes nothing, not even a trust level sent with it. With
         neither, the agent as it is (``UnknownAgent`` if unknown)."""
-        self._require_admin(credential)
+        require_admin(credential)
         if home_fleet_id is not None:
             await self._require_fleet(home_fleet_id)
         agent: Agent | None = None
@@ -329,7 +330,7 @@ class AccessService:
         authenticating, ADR 0039), then delete the key row. On a pending
         agent this rejects the registration; the name stays reserved.
         ``UnknownAgent`` if unknown; ``InvalidAgentStatus`` if already revoked."""
-        self._require_admin(credential)
+        require_admin(credential)
         before = await self._store.get_agent(name)
         if before is None:
             raise UnknownAgent(f"unknown agent: {name}")
@@ -345,7 +346,7 @@ class AccessService:
         already revoked. ``UnknownAgent`` if unknown; ``PermissionDenied``
         without an admin key or an authenticator. Changes nothing, so a caller
         can refuse before it changes anything else."""
-        self._require_admin(credential)
+        require_admin(credential)
         agent = await self._store.get_agent(name)
         if agent is None:
             raise UnknownAgent(f"unknown agent: {name}")
@@ -357,7 +358,7 @@ class AccessService:
     async def rotate_org_key(self, credential: Credential) -> str:
         """Rotate the shared org key (ADR 0031): every prior org key stops
         working, active agents are unaffected; the new key is returned once."""
-        self._require_admin(credential)
+        require_admin(credential)
         key = await self._require_authenticator().rotate_org_key()
         await self._audit(credential, AuditAction.ORG_KEY_ROTATE, None)
         return key
@@ -365,7 +366,7 @@ class AccessService:
     # -- read (admin-gated listing) ------------------------------------------
 
     async def list_agents(self, credential: Credential) -> list[Agent]:
-        self._require_admin(credential)
+        require_admin(credential)
         return await self._store.list_agents()
 
     async def list_fleets(
@@ -373,7 +374,7 @@ class AccessService:
     ) -> list[Fleet]:
         """Fleets (admin-gated); merged ones only with ``include_merged``
         (ADR 0107)."""
-        self._require_admin(credential)
+        require_admin(credential)
         fleets = await self._store.list_fleets()
         return fleets if include_merged else [f for f in fleets if f.merged_into is None]
 
@@ -381,7 +382,7 @@ class AccessService:
         self, credential: Credential, filters: AuditFilters, limit: int
     ) -> list[AuditRecord]:
         """The audit log, newest first (admin-gated, ADR 0027)."""
-        self._require_admin(credential)
+        require_admin(credential)
         return await self._store.list_audit(filters, limit)
 
     # -- the caller's own standing (ADR 0030) -------------------------------
@@ -445,10 +446,6 @@ class AccessService:
     def _require_org(self, credential: Credential) -> None:
         if not credential.is_org:
             raise PermissionDenied("hive_register is gated on the org key (SPEC §5.2)")
-
-    def _require_admin(self, credential: Credential) -> None:
-        if not credential.is_admin:
-            raise PermissionDenied("this action requires an admin key (ADR 0012)")
 
 
 # -- write-scope resolution (ADR 0011) ---------------------------------------

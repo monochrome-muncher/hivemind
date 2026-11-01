@@ -137,7 +137,7 @@ def _credential_from_row(row: asyncpg.Record, key_id: str) -> Credential | None:
         )
     if kind == "agent":
         agent_name = row["agent_name"]
-        if agent_name is None or row["agent_status"] != "active":
+        if agent_name is None or row["agent_status"] != AgentStatus.ACTIVE:
             # A name-less (pre-v2) key, a key with no agent record, or a
             # key whose agent is pending / revoked: not an identity.
             return None
@@ -235,7 +235,7 @@ class PgAuthenticator:
             status = await conn.fetchval(_LOCK_AGENT, agent_name)
             if status is None:
                 raise UnknownAgent(f"unknown agent: {agent_name}")
-            if status != "active":
+            if status != AgentStatus.ACTIVE:
                 raise InvalidAgentStatus(agent_name, AgentStatus(status), "issue a key for")
             await conn.execute(_DELETE_AGENT_KEYS, agent_name)
             await conn.execute(_ISSUE_AGENT_KEY, key_hash(raw_key), agent_name)
@@ -257,7 +257,7 @@ class PgAuthenticator:
             status = await conn.fetchval(_LOCK_AGENT, agent_name)
             if status is None:
                 raise UnknownAgent(f"unknown agent: {agent_name}")
-            if status != "active":
+            if status != AgentStatus.ACTIVE:
                 raise InvalidAgentStatus(agent_name, AgentStatus(status), "replace the key of")
             old = await conn.fetch(_DELETE_AGENT_KEYS_RETURNING, agent_name)
             await conn.execute(_ISSUE_AGENT_KEY, new_hash, agent_name)

@@ -61,7 +61,7 @@ MAX_ALIAS_CHARS = 128
 # -- names (ADR 0040) ---------------------------------------------------------
 MAX_AGENT_NAME_CHARS = 63
 MAX_FLEET_NAME_CHARS = 128
-AGENT_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}")
+AGENT_NAME_RE = re.compile(rf"[A-Za-z0-9][A-Za-z0-9._-]{{0,{MAX_AGENT_NAME_CHARS - 1}}}")
 # ADR 0033: the identities built-in keys and runners write under (admin
 # keys, the org key, the dev runner, the mcp-http template credential).
 # An agent registered under one would read that identity's ``self`` entries.
@@ -144,9 +144,9 @@ _UUID_TEXT_RE = re.compile(r"[0-9A-Fa-f-]{32,36}")
 def is_valid_uuid(value: str) -> bool:
     """Whether ``value`` is a UUID spelling the ``uuid`` columns accept.
 
-    Both store adapters use this one check, so a non-canonical spelling
-    (braces, ``urn:uuid:``, no hyphens) is "no such entry" in every
-    store, never a 500.
+    Both store adapters use this one check, so a spelling the columns
+    refuse (braces, ``urn:uuid:``, too many hyphens) is "no such entry" in
+    every store, never a 500; upper case and no hyphens name the entry.
     """
     if not isinstance(value, str) or not _UUID_TEXT_RE.fullmatch(value):
         return False

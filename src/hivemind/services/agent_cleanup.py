@@ -15,7 +15,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 
-from hivemind.domain.access import Agent, InvalidAgentStatus, UnknownAgent, Visibility
+from hivemind.domain.access import Agent, InvalidAgentStatus, Visibility
 from hivemind.domain.agent_cleanup import (
     CLEANUP_LIST_LIMIT,
     AgentCleanupRecord,
@@ -29,8 +29,9 @@ from hivemind.domain.agent_cleanup import (
 from hivemind.domain.audit import AuditAction
 from hivemind.domain.validation import utcnow
 from hivemind.ports import Credential, Store
-from hivemind.services.audit import record_admin_action
+from hivemind.services.audit import audit_unpins, record_admin_action
 from hivemind.services.errors import PermissionDenied
+from hivemind.services.guards import require_admin, require_agent
 
 logger = logging.getLogger(__name__)
 
@@ -89,22 +90,11 @@ class AgentCleanupService:
                 logger.warning("agent cleanup change hook failed", exc_info=True)
 
     @staticmethod
-    def _require_admin(credential: Credential) -> None:
-        if not credential.is_admin:
-            raise PermissionDenied("this action requires an admin key (ADR 0012)")
-
-    @staticmethod
     def _require_agent(credential: Credential) -> str:
         """The signed-in agent's name; the admin and org keys have none (ADR 0095)."""
         if credential.is_admin or credential.is_org or credential.agent_name is None:
             raise PermissionDenied("cleaning up your own work requires an agent key")
         return credential.agent_name
-
-    async def _agent(self, name: str) -> Agent:
-        agent = await self._store.get_agent(name)
-        if agent is None:
-            raise UnknownAgent(f"unknown agent: {name}")
-        return agent
 
     # -- preview ------------------------------------------------------------
 
@@ -119,7 +109,7 @@ class AgentCleanupService:
         """What cleaning up ``agent_name`` over ``[since, until)`` would do,
         changing nothing. ``until`` defaults to now and is returned resolved,
         so the apply can name the same window."""
-        self._require_admin(credential)
+        require_admin(credential)
         return await self._preview(agent_name, (agent_name,), since, until)
 
     async def preview_own(
@@ -141,7 +131,7 @@ class AgentCleanupService:
         until: datetime | None,
         visibility: Visibility | None = None,
     ) -> CleanupPreview:
-        agent = await self._agent(agent_name)
+        agent = await require_agent(self._store, agent_name)
         until = until if until is not None else self._clock()
         check_window(since, until)
         scan = await self._store.scan_agent_cleanup(
@@ -172,7 +162,7 @@ class AgentCleanupService:
         memories to put back (none when omitted); the ``expected_*`` counts
         are what the preview showed. A failed audit write is raised, never
         swallowed; a failed revoke is not: the outcome carries ``revoke_error``."""
-        self._require_admin(credential)
+        require_admin(credential)
         return await self._apply(
             agent_name,
             credential,
@@ -229,7 +219,7 @@ class AgentCleanupService:
         expected_ratings: int | None,
         also_revoke: bool,
     ) -> CleanupOutcome:
-        agent = await self._agent(agent_name)
+        agent = await require_agent(self._store, agent_name)
         until = until if until is not None else self._clock()
         check_window(since, until)
         via = {"via": "portal"} if self_service else {}
@@ -253,18 +243,15 @@ class AgentCleanupService:
         if record is not None:
             self._changed()
             for pin in outcome.unpinned:
-                await record_admin_action(
+                await audit_unpins(
                     self._store,
                     credential,
-                    AuditAction.ENTRY_UNPIN,
                     pin.entry_id,
-                    {
-                        "fleet_id": pin.fleet_id,
-                        "pin_ids": [pin.entry_id],
-                        "reason": "agent_cleanup",
-                        "cleanup_id": record.id,
-                        **via,
-                    },
+                    pin.fleet_id,
+                    [pin.entry_id],
+                    reason="agent_cleanup",
+                    cleanup_id=record.id,
+                    via="portal" if self_service else None,
                 )
             await record_admin_action(
                 self._store,
@@ -311,7 +298,7 @@ class AgentCleanupService:
         """Undo a cleanup (admin-gated) and audit it as ``agent.cleanup_undo``.
         ``UnknownAgentCleanup`` / ``AgentCleanupRefused`` per the store. An
         agent the cleanup revoked stays revoked."""
-        self._require_admin(credential)
+        require_admin(credential)
         return await self._undo(cleanup_id, credential, via={})
 
     async def undo_own(self, cleanup_id: str, credential: Credential) -> CleanupUndoOutcome:
@@ -370,7 +357,7 @@ class AgentCleanupService:
     async def list_cleanups(self, credential: Credential) -> list[CleanupView]:
         """Recorded cleanups, newest first, each with whether it can be undone
         now (``undo_refusal`` over the same list the store re-checks)."""
-        self._require_admin(credential)
+        require_admin(credential)
         records = await self._store.list_agent_cleanups(CLEANUP_LIST_LIMIT)
         views = []
         for record in records:
