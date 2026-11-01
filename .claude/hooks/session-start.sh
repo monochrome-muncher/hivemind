@@ -16,8 +16,8 @@ if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
 fi
 
 # Keep in step with .github/workflows/tests.yml.
-UV_VERSION="0.12.24"
-PYTHON_VERSION="3.14.8"
+UV_VERSION="0.13.6"
+PYTHON_VERSION="3.14.10"
 PGVECTOR_VERSION="0.8.7"
 PG_MAJOR="16"
 PG_DATA="/var/lib/postgresql/hivemind-data"

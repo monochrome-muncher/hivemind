@@ -20,9 +20,9 @@ concurrency:
 env:
   # Same uv as the Dockerfile. Python is pinned to a stable release: an old
   # uv once resolved "3.14" to a release candidate that breaks pydantic.
-  UV_VERSION: "0.12.24"
-  PYTHON_VERSION: "3.14.8"
-  UV_PYTHON: "3.14.8"
+  UV_VERSION: "0.13.6"
+  PYTHON_VERSION: "3.14.10"
+  UV_PYTHON: "3.14.10"
   UV_PYTHON_PREFERENCE: only-managed
 
 jobs:
