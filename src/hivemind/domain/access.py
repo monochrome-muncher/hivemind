@@ -250,7 +250,7 @@ class Standing:
             "name": self.name,
             "status": self.status.value if self.status is not None else None,
             "trust_level": self.trust_level.value,
-            "trust_level_name": self.trust_level.name.lower(),
+            "trust_level_name": self.trust_level.label,
             "home_fleet_id": self.home_fleet_id,
             "home_fleet_name": self.home_fleet_name,
             "can_read": list(self.can_read),

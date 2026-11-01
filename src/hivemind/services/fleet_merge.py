@@ -16,7 +16,7 @@ from dataclasses import dataclass
 
 from hivemind.domain.access import Fleet, FleetExists, FleetMerged, UnknownFleet
 from hivemind.domain.audit import AuditAction
-from hivemind.domain.entry import Entry
+from hivemind.domain.entry import Entry, EntryState
 from hivemind.domain.fleet_merge import (
     DUPLICATE_LOOKUP_CAP,
     KIND_MOVE,
@@ -35,8 +35,8 @@ from hivemind.domain.fleet_merge import (
 from hivemind.domain.pin import Pin
 from hivemind.domain.validation import InvalidInput, validate_fleet_name
 from hivemind.ports import Credential, Store
-from hivemind.services.audit import record_admin_action
-from hivemind.services.errors import PermissionDenied
+from hivemind.services.audit import audit_unpins, record_admin_action
+from hivemind.services.guards import require_admin
 from hivemind.services.write_warnings import NEAR_DUPLICATE_SIMILARITY
 
 logger = logging.getLogger(__name__)
@@ -142,11 +142,6 @@ class FleetMergeService:
                 logger.warning("fleet merge change hook failed", exc_info=True)
 
     @staticmethod
-    def _require_admin(credential: Credential) -> None:
-        if not credential.is_admin:
-            raise PermissionDenied("this action requires an admin key (ADR 0012)")
-
-    @staticmethod
     def _check_target(target_fleet_id: str | None, new_fleet_name: str | None) -> None:
         if (target_fleet_id is None) == (new_fleet_name is None):
             raise InvalidInput("name exactly one of target_fleet_id and new_fleet_name")
@@ -162,6 +157,53 @@ class FleetMergeService:
             raise FleetMerged(fleet.id, fleet.merged_into, target.name if target else None)
         return fleet
 
+    async def _require_name_free(self, new_fleet_name: str | None) -> None:
+        if any(f.name == new_fleet_name for f in await self._store.list_fleets()):
+            raise FleetExists(f"fleet already exists: {new_fleet_name!r}")
+
+    async def _target_side(
+        self, target: Fleet | None, new_fleet_name: str | None
+    ) -> tuple[PreviewSide, list[Pin]]:
+        """The preview's target side and the target's pins; a new fleet has none."""
+        if target is None:
+            assert new_fleet_name is not None
+            return PreviewSide(new_fleet_name, None, FleetFacts(0, {}), 0), []
+        target_pins = await self._store.list_pins(target.id)
+        side = PreviewSide(
+            target.name, target, await self._store.fleet_facts(target.id), len(target_pins)
+        )
+        return side, target_pins
+
+    async def _audit_applied(
+        self,
+        credential: Credential,
+        outcome: MergeOutcome | MoveOutcome,
+        *,
+        via: str,
+        id_key: str,
+    ) -> None:
+        """The audit rows a merge and a move share, in order: ``fleet.create``
+        for a new target, then one ``entry.unpin`` per dropped pin."""
+        record_id = outcome.record.id
+        if outcome.target_created:
+            await record_admin_action(
+                self._store,
+                credential,
+                AuditAction.FLEET_CREATE,
+                outcome.target.id,
+                {"name": outcome.target.name, "via": via, id_key: record_id},
+            )
+        for pin in outcome.pins_dropped:
+            await audit_unpins(
+                self._store,
+                credential,
+                pin.entry_id,
+                pin.fleet_id,
+                [pin.entry_id],
+                reason=via,
+                **{id_key: record_id},
+            )
+
     # -- preview ------------------------------------------------------------
 
     async def preview(
@@ -175,7 +217,7 @@ class FleetMergeService:
         """What merging ``source_id`` would do, changing nothing: counts,
         the pins of both fleets (the newest ``MERGE_PIN_LIMIT`` ticked) and
         the likely duplicate pairs. Refuses what the merge would refuse."""
-        self._require_admin(credential)
+        require_admin(credential)
         self._check_target(target_fleet_id, new_fleet_name)
         source = await self._existing(source_id)
         target: Fleet | None = None
@@ -183,20 +225,12 @@ class FleetMergeService:
             target = await self._existing(target_fleet_id)
             if target.id == source.id:
                 raise FleetMergeRefused("a fleet cannot be merged into itself")
-        elif any(f.name == new_fleet_name for f in await self._store.list_fleets()):
-            raise FleetExists(f"fleet already exists: {new_fleet_name!r}")
+        else:
+            await self._require_name_free(new_fleet_name)
 
         source_facts = await self._store.fleet_facts(source.id)
         source_pins = await self._store.list_pins(source.id)
-        if target is None:
-            assert new_fleet_name is not None
-            target_side = PreviewSide(new_fleet_name, None, FleetFacts(0, {}), 0)
-            target_pins: list[Pin] = []
-        else:
-            target_pins = await self._store.list_pins(target.id)
-            target_side = PreviewSide(
-                target.name, target, await self._store.fleet_facts(target.id), len(target_pins)
-            )
+        target_side, target_pins = await self._target_side(target, new_fleet_name)
 
         all_pins = newest_first([*source_pins, *target_pins])
         ticked = {p.entry_id for p in default_kept(all_pins)}
@@ -207,8 +241,8 @@ class FleetMergeService:
         looked_up, truncated = 0, False
         if target is not None:
             # The smaller fleet is the one looked up, so the cap bites less.
-            mine = source_facts.entries.get("active", 0)
-            theirs = target_side.facts.entries.get("active", 0)
+            mine = source_facts.entries.get(EntryState.ACTIVE, 0)
+            theirs = target_side.facts.entries.get(EntryState.ACTIVE, 0)
             small, other = (source, target) if mine <= theirs else (target, source)
             scan = await self._store.duplicate_pairs(
                 small.id, other.id, NEAR_DUPLICATE_SIMILARITY, DUPLICATE_LOOKUP_CAP
@@ -255,7 +289,7 @@ class FleetMergeService:
         ``MERGE_PIN_LIMIT`` pins in the two fleets need ``keep_pin_ids``
         (``InvalidInput``). ``expected_pin_ids`` (the pins the preview showed)
         makes a merge refuse when a pin was added or removed since. A failed audit write is raised, never swallowed."""
-        self._require_admin(credential)
+        require_admin(credential)
         self._check_target(target_fleet_id, new_fleet_name)
         outcome = await self._store.merge_fleets(
             source_id,
@@ -267,27 +301,7 @@ class FleetMergeService:
         )
         self._changed()
         record = outcome.record
-        if outcome.target_created:
-            await record_admin_action(
-                self._store,
-                credential,
-                AuditAction.FLEET_CREATE,
-                outcome.target.id,
-                {"name": outcome.target.name, "via": "fleet_merge", "merge_id": record.id},
-            )
-        for pin in outcome.pins_dropped:
-            await record_admin_action(
-                self._store,
-                credential,
-                AuditAction.ENTRY_UNPIN,
-                pin.entry_id,
-                {
-                    "fleet_id": pin.fleet_id,
-                    "pin_ids": [pin.entry_id],
-                    "reason": "fleet_merge",
-                    "merge_id": record.id,
-                },
-            )
+        await self._audit_applied(credential, outcome, via="fleet_merge", id_key="merge_id")
         await record_admin_action(
             self._store,
             credential,
@@ -327,8 +341,8 @@ class FleetMergeService:
             target = await self._existing(target_fleet_id)
             if target.id == source.id:
                 raise FleetMoveRefused("agents cannot be moved into the fleet they are in")
-        elif any(f.name == new_fleet_name for f in await self._store.list_fleets()):
-            raise FleetExists(f"fleet already exists: {new_fleet_name!r}")
+        else:
+            await self._require_name_free(new_fleet_name)
         homed = {a.name for a in await self._store.list_agents() if a.home_fleet_id == source.id}
         away = [n for n in names if n not in homed]
         if away:
@@ -350,7 +364,7 @@ class FleetMergeService:
         nothing: how many memories leave (and how many stay behind with a
         chain head that stays), who loses access, and the pin picker's pool.
         Refuses what the move would refuse."""
-        self._require_admin(credential)
+        require_admin(credential)
         source, target, names, staying = await self._move_sides(
             source_id, agents, target_fleet_id, new_fleet_name
         )
@@ -358,15 +372,7 @@ class FleetMergeService:
         leaving = set(plan.entry_ids)
         source_pins = await self._store.list_pins(source.id)
         source_facts = await self._store.fleet_facts(source.id)
-        if target is None:
-            assert new_fleet_name is not None
-            target_side = PreviewSide(new_fleet_name, None, FleetFacts(0, {}), 0)
-            target_pins: list[Pin] = []
-        else:
-            target_pins = await self._store.list_pins(target.id)
-            target_side = PreviewSide(
-                target.name, target, await self._store.fleet_facts(target.id), len(target_pins)
-            )
+        target_side, target_pins = await self._target_side(target, new_fleet_name)
         candidates = newest_first(
             [*(p for p in source_pins if p.entry_id in leaving), *target_pins]
         )
@@ -407,7 +413,7 @@ class FleetMergeService:
         locks) are ``FleetMoveRefused`` (409 ``move_refused``); a merged side
         is ``FleetMerged`` and a taken name ``FleetExists``. A failed audit
         write is raised, never swallowed."""
-        self._require_admin(credential)
+        require_admin(credential)
         self._check_target(target_fleet_id, new_fleet_name)
         outcome = await self._store.move_agents(
             source_id,
@@ -420,27 +426,7 @@ class FleetMergeService:
         )
         self._changed()
         record = outcome.record
-        if outcome.target_created:
-            await record_admin_action(
-                self._store,
-                credential,
-                AuditAction.FLEET_CREATE,
-                outcome.target.id,
-                {"name": outcome.target.name, "via": "fleet_move", "move_id": record.id},
-            )
-        for pin in outcome.pins_dropped:
-            await record_admin_action(
-                self._store,
-                credential,
-                AuditAction.ENTRY_UNPIN,
-                pin.entry_id,
-                {
-                    "fleet_id": pin.fleet_id,
-                    "pin_ids": [pin.entry_id],
-                    "reason": "fleet_move",
-                    "move_id": record.id,
-                },
-            )
+        await self._audit_applied(credential, outcome, via="fleet_move", id_key="move_id")
         await record_admin_action(
             self._store,
             credential,
@@ -466,23 +452,20 @@ class FleetMergeService:
         """Undo a merge or a move (admin-gated) and audit it as
         ``fleet.unmerge`` or ``fleet.move_undo``. ``UnknownFleetMerge`` /
         ``FleetMergeRefused`` (``FleetMoveRefused`` for a move) per the store."""
-        self._require_admin(credential)
+        require_admin(credential)
         outcome = await self._store.unmerge_fleet(merge_id)
         self._changed()
         record = outcome.record
         is_move = record.kind == KIND_MOVE
         for pin in outcome.pins_unpinned:  # returning pins that did not fit the source
-            await record_admin_action(
+            await audit_unpins(
                 self._store,
                 credential,
-                AuditAction.ENTRY_UNPIN,
                 pin.entry_id,
-                {
-                    "fleet_id": pin.fleet_id,
-                    "pin_ids": [pin.entry_id],
-                    "reason": "fleet_move_undo",
-                    "move_id": record.id,
-                },
+                pin.fleet_id,
+                [pin.entry_id],
+                reason="fleet_move_undo",
+                move_id=record.id,
             )
         await record_admin_action(
             self._store,
@@ -504,7 +487,7 @@ class FleetMergeService:
     async def list_merges(self, credential: Credential) -> list[MergeView]:
         """Recorded merges, newest first, each with whether it can be
         undone now (``undo_refusal`` over the same list the store re-checks)."""
-        self._require_admin(credential)
+        require_admin(credential)
         records = await self._store.list_fleet_merges(MERGE_LIST_LIMIT)
         fleets = {f.id: f for f in await self._store.list_fleets()}
         views = []

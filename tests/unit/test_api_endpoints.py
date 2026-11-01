@@ -20,7 +20,7 @@ from hivemind.api.deps import HivemindApp, create_app
 from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
-from hivemind.domain.audit import ActorKind
+from hivemind.domain.audit import ActorKind, AuditAction, AuditFilters
 from hivemind.domain.entry import EntryDraft, EntryFilters
 from hivemind.domain.feedback import Verdict
 from hivemind.memstore import MemoryStore
@@ -904,6 +904,36 @@ class TestAccessEndpoints:
             )
         assert resp.status_code == 200
         assert resp.json()["home_fleet_id"] == fb.id
+
+    async def test_patch_to_merged_fleet_changes_nothing(self) -> None:
+        """A merged home fleet is refused before the trust level sent with it
+        is applied: the PATCH used to answer 409 with the level already set
+        and audited."""
+        app = make_hivemind_app()
+        await app.store.register_agent("alice")
+        fa = await app.store.create_fleet("data-eng")
+        fb = await app.store.create_fleet("ml")
+        await app.store.activate_agent(
+            "alice", trust_level=TrustLevel.CONTRIBUTOR, home_fleet_id=fa.id
+        )
+        admin = Credential(user_id="admin", is_admin=True)
+        await app.access_service.merges.merge(fb.id, admin, target_fleet_id=fa.id)
+        client = make_client(app)
+        async with client:
+            resp = await client.patch(
+                "/v1/admin/agents/alice",
+                json={"trust_level": 3, "home_fleet_id": fb.id},
+                headers={"X-API-Key": "key-admin"},
+            )
+        assert resp.status_code == 409
+        assert resp.json()["error"]["code"] == "fleet_merged"
+        agent = await app.store.get_agent("alice")
+        assert agent is not None
+        assert agent.trust_level is TrustLevel.CONTRIBUTOR
+        assert agent.home_fleet_id == fa.id
+        actions = [r.action for r in await app.store.list_audit(AuditFilters(), 50)]
+        assert AuditAction.FLEET_MERGE in actions
+        assert AuditAction.AGENT_TRUST_LEVEL_SET not in actions
 
     async def test_patch_empty_body_is_422(self) -> None:
         app = make_hivemind_app()
