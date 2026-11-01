@@ -712,7 +712,7 @@ async def hive_feedback(
     return {
         "entry_id": entry_id,
         "verdict": parsed_verdict.value,
-        "note": note,
+        "note": fb.note,  # as stored: trimmed, None when only whitespace
         "quality": outcome.quality,
         "feedback": {
             "entry_id": fb.entry_id,
@@ -755,7 +755,7 @@ async def _hive_feedback_many(
         return _error(ERR_AGENT_UNRESOLVED, str(exc))
     return {
         "verdict": parsed_verdict.value,
-        "note": note,
+        "note": outcomes[0].feedback.note,  # as stored (one note for every row)
         "results": [{"entry_id": o.feedback.entry_id, "quality": o.quality} for o in outcomes],
     }
 
