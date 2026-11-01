@@ -3,6 +3,8 @@ both ends of a read, limited to what the reader may see."""
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import httpx
 
 from hivemind.api.deps import create_app
@@ -137,7 +139,14 @@ async def test_see_also_is_bounded_and_deduplicated() -> None:
 
 
 async def test_linked_from_is_capped_newest_first() -> None:
-    store = MemoryStore(make_clock())
+    # Distinct write times, as in real time; one-instant ties order by id.
+    clock = make_clock()
+
+    def ticking() -> datetime:
+        clock.advance_days(1 / 86400)
+        return clock()
+
+    store = MemoryStore(ticking)
     target = await _write(store, ALICE, "popular")
     linkers = [
         await _write(store, ALICE, f"linker {i}", see_also=[target])
