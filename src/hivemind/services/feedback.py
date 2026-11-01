@@ -100,6 +100,23 @@ class FeedbackService:
         # when the deployment requires stored keys.
         self._require_stored_keys = require_stored_keys
 
+    def _reporter(
+        self, credential: Credential, note: str | None, agent: str | None
+    ) -> tuple[Credential, str | None, str]:
+        """Validate the note and agent, then resolve who is reporting: the
+        effective credential, the cleaned note and the agent identity."""
+        check_text(note, "note", MAX_NOTE_CHARS)  # ADR 0040
+        note = _clean_note(note)
+        check_text(agent, "agent", MAX_IDENTITY_CHARS)
+        credential = credential.effective(self._require_stored_keys)
+        effective_agent = reporter_agent(credential, agent)
+        if effective_agent is None:
+            raise AgentIdentityRequired(
+                "the caller's agent identity must be resolved before "
+                "recording feedback (SPEC.md §8.1)"
+            )
+        return credential, note, effective_agent
+
     async def record_feedback(
         self,
         credential: Credential,
@@ -115,16 +132,7 @@ class FeedbackService:
         the acting sub-key's agent, or the ``agent`` self-reported by a
         plain user key (SPEC.md §8.1).
         """
-        check_text(note, "note", MAX_NOTE_CHARS)  # ADR 0040
-        note = _clean_note(note)
-        check_text(agent, "agent", MAX_IDENTITY_CHARS)
-        credential = credential.effective(self._require_stored_keys)
-        effective_agent = reporter_agent(credential, agent)
-        if effective_agent is None:
-            raise AgentIdentityRequired(
-                "the caller's agent identity must be resolved before "
-                "recording feedback (SPEC.md §8.1)"
-            )
+        credential, note, effective_agent = self._reporter(credential, note, agent)
         entry = await get_visible_entry(self._store, entry_id, credential.visibility())
         if entry is None:  # feedback follows readability (SPEC §12.2, ADR 0033)
             raise EntryNotFound(f"unknown entry: {entry_id}")
@@ -159,16 +167,7 @@ class FeedbackService:
         once. A fixed number of store calls however many ids: one read,
         one transactional upsert, one feedback read.
         """
-        check_text(note, "note", MAX_NOTE_CHARS)  # ADR 0040
-        note = _clean_note(note)
-        check_text(agent, "agent", MAX_IDENTITY_CHARS)
-        credential = credential.effective(self._require_stored_keys)
-        effective_agent = reporter_agent(credential, agent)
-        if effective_agent is None:
-            raise AgentIdentityRequired(
-                "the caller's agent identity must be resolved before "
-                "recording feedback (SPEC.md §8.1)"
-            )
+        credential, note, effective_agent = self._reporter(credential, note, agent)
         ids = list(dict.fromkeys(entry_ids))
         if not ids:
             raise InvalidInput("entry_ids must name at least one entry")

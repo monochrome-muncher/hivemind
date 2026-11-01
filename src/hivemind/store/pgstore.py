@@ -22,6 +22,7 @@ from typing import Any
 import asyncpg
 
 from hivemind.domain.access import (
+    SCOPE_FLEET,
     Agent,
     AgentStatus,
     Fleet,
@@ -1523,7 +1524,7 @@ class PgStore:
 
         async with self._transaction() as conn:
             await _refuse_merged(conn, draft.fleet_id)
-            if draft.scope == "fleet":
+            if draft.scope == SCOPE_FLEET:
                 await _refuse_stale_home(conn, draft.fleet_id, draft.author)
             # RETURNING, not a re-read: the supersession flip below
             # never touches the new row, so this is its final state.

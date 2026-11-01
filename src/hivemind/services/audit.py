@@ -8,7 +8,7 @@ reach an audit column by construction.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from hivemind.domain.audit import ActorKind, AuditAction, AuditEvent, AuditRecord
@@ -43,3 +43,26 @@ async def record_admin_action(
             detail=dict(detail or {}),
         )
     )
+
+
+async def audit_unpins(
+    store: Store,
+    credential: Credential,
+    target: str,
+    fleet_id: str,
+    pin_ids: Sequence[str],
+    *,
+    reason: str | None = None,
+    via: str | None = None,
+    **ids: str,
+) -> AuditRecord:
+    """Append one ``entry.unpin`` row. The detail keys come in a fixed order:
+    ``fleet_id``, ``pin_ids``, ``reason``, any ``ids`` (a merge, move or
+    cleanup id), then ``via``; ``reason`` and ``via`` are left out when ``None``."""
+    detail: dict[str, Any] = {"fleet_id": fleet_id, "pin_ids": list(pin_ids)}
+    if reason is not None:
+        detail["reason"] = reason
+    detail.update(ids)
+    if via is not None:
+        detail["via"] = via
+    return await record_admin_action(store, credential, AuditAction.ENTRY_UNPIN, target, detail)
