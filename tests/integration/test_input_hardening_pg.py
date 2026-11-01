@@ -75,9 +75,15 @@ async def test_the_largest_allowed_body_of_distinct_words_is_stored(
         "/v1/entries", json={"kind": "fact", "summary": "big", "body": body}, headers=KEY
     )
     assert resp.status_code == 201, resp.text
+    stored = await client.get(f"/v1/entries/{resp.json()['id']}", headers=KEY)
+    assert stored.status_code == 200, stored.text
+    assert stored.json()["body"] == body  # every character, not a truncation
     over = await client.post(
         "/v1/entries",
         json={"kind": "fact", "summary": "big", "body": body + "x"},
         headers=KEY,
     )
     assert over.status_code == 422
+    error = over.json()["error"]
+    assert error["code"] == "invalid_entry"
+    assert f"body must be at most {MAX_BODY_CHARS} characters" in error["message"]

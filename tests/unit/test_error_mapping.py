@@ -811,7 +811,9 @@ async def test_an_unexpected_builtin_error_is_never_disguised_as_a_friendly_one(
         transport=httpx.ASGITransport(app=world.app, raise_app_exceptions=False),
         base_url="http://t",
     )
-    assert (await rest(world)).status_code == 500
+    resp = await rest(world)
+    assert resp.status_code == 500
+    assert "boom" not in resp.text  # the exception's message never reaches the client
     if tool is not None:
         with pytest.raises(type(exc), match="boom"):
             await tool(world)

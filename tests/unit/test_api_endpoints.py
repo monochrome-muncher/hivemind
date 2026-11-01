@@ -21,7 +21,7 @@ from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
 from hivemind.domain.audit import ActorKind
-from hivemind.domain.entry import EntryDraft
+from hivemind.domain.entry import EntryDraft, EntryFilters
 from hivemind.domain.feedback import Verdict
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential, KeyReplacement
@@ -287,6 +287,30 @@ class TestCreateEntry:
             )
         assert resp.status_code == 422
         assert resp.json()["error"]["code"] == "invalid_entry"
+
+    async def test_the_org_key_cannot_write(self) -> None:
+        # An org key is access-controlled at trust level 0: it may register agents
+        # but not write (ADR 0011).
+        app = make_hivemind_app()
+        client = make_client(app)
+        async with client:
+            # The org key carries no agent identity, so a write must name one to
+            # get as far as the trust check; without it the write is refused earlier.
+            resp = await client.post(
+                "/v1/entries",
+                json={"kind": "fact", "summary": "from the org key", "agent": "someone"},
+                headers={"X-API-Key": "key-org"},
+            )
+            nameless = await client.post(
+                "/v1/entries",
+                json={"kind": "fact", "summary": "from the org key"},
+                headers={"X-API-Key": "key-org"},
+            )
+        assert resp.status_code == 403
+        assert resp.json()["error"]["code"] == "forbidden"
+        assert nameless.status_code == 422
+        assert nameless.json()["error"]["code"] == "agent_identity_required"
+        assert await app.store.list_entries(EntryFilters(include_inactive=True), 10) == []
 
 
 class TestGetEntry:

@@ -250,3 +250,28 @@ async def test_undo_after_post_merge_writes_and_the_chained_refusal(pool) -> Non
     assert len(listing) == 2 and not any(v.undoable for v in listing)  # both are undone
     audits = {r.action.value for r in await store.list_audit(AuditFilters(), 100)}
     assert {"fleet.merge", "fleet.unmerge", "fleet.create"} <= audits
+
+
+async def test_a_duplicate_scan_the_server_cancels_is_reported_incomplete(
+    pool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hivemind.store import pgstore
+
+    _dsn, store, _auth = pool
+    a, b = await store.create_fleet("alpha"), await store.create_fleet("beta")
+    vec = [1.0] + [0.0] * (Settings().embedding_dim - 1)
+    await store.create_entry(_draft(a.id, "in alpha"), vec)
+    await store.create_entry(_draft(b.id, "in beta"), vec)
+    whole = await store.duplicate_pairs(a.id, b.id, 0.9, 100)
+    assert (len(whole.pairs), whole.looked_up, whole.truncated) == (1, 1, False)
+
+    # A 1 ms timeout against a statement that sleeps 200 ms: the server cancels
+    # it every time, so the scan (and its smaller retry) cannot finish.
+    monkeypatch.setattr(pgstore, "DUPLICATE_SCAN_SETTINGS", "SET LOCAL statement_timeout = '1ms';")
+    monkeypatch.setattr(
+        pgstore,
+        "COUNT_DUPLICATE_CANDIDATES",
+        "SELECT count(*) FROM (SELECT pg_sleep(0.2)) s WHERE $1::text IS NOT NULL",
+    )
+    scan = await store.duplicate_pairs(a.id, b.id, 0.9, 100)
+    assert (scan.pairs, scan.looked_up, scan.truncated) == ((), 0, True)
