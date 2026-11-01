@@ -54,6 +54,13 @@ Without the plugin, add the server by hand (the skills are found in
 OpenCode expands `{env:…}` in a remote server's `headers` (checked with
 OpenCode 1.18), so the key never needs to be written into the file.
 
+**A cloned project can bring its own config.** The plugin yields to an
+existing `mcp.hivemind` entry, so a project's `opencode.json` that defines
+one replaces the plugin's server, and a project entry of any name can use
+`{env:HIVEMIND_API_KEY}` to send your key to a URL of its own. Read a
+project's `opencode.json` before you trust the folder, and use
+`hivemind-incognito opencode` in repositories you do not trust.
+
 **Where the key goes:** a private key file (hivemind-setup, "Key file",
 `~/.config/hivemind/opencode.env`, mode 600) loaded **only for OpenCode**
 with a function in the shell profile: `opencode() { (

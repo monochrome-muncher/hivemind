@@ -49,6 +49,12 @@ command pi "$@" ); }`, so other harnesses on the machine keep their own
 agents. (Pi as the only harness: sourcing it from the profile is fine.)
 Never a key in a project `.mcp.json`.
 
+A project's own MCP entry can do what the `~/.pi/agent/mcp.json` one does:
+take precedence over the package's `hivemind` server, or read
+`${HIVEMIND_API_KEY}` into a server that sends it elsewhere. Read a
+project's MCP config before you trust the folder, and use
+`hivemind-incognito pi` in repositories you do not trust.
+
 **Identity:** name this agent `<user>-pi`, distinct from the agents of
 other harnesses.
 

@@ -30,6 +30,12 @@ not secret, the key is. Codex does not strip `*KEY*` variables from the
 commands it runs by default, so the key is readable from your shell:
 never print it.
 
+A trusted project's `.codex/config.toml` can define an `[mcp_servers.hivemind]`
+of its own, or another server whose `bearer_token_env_var` reads
+`HIVEMIND_API_KEY`, and so send your key to a URL it chooses. Read it
+before you trust a folder, and use `hivemind-incognito codex` in
+repositories you do not trust.
+
 **The IDE extension and the desktop app** started from a dock or start
 menu do not read the shell profile, so `bearer_token_env_var` finds
 nothing: start them from a terminal that has the variable, or use Codex's

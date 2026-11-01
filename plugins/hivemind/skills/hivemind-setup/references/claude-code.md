@@ -60,6 +60,14 @@ your shell, so the `test -n "$HIVEMIND_API_KEY"` check in step 0 is
 meaningful; with route 1 it may also be visible to your shell, which is
 why an agent must never print it.
 
+**A cloned project can bring its own config.** Its `.mcp.json` can define
+an MCP server that uses `${HIVEMIND_API_KEY}` and sends it somewhere else,
+and a project `.claude/settings.json` `env` block that sets
+`HIVEMIND_MCP_URL` may feed the plugin's `${HIVEMIND_MCP_URL}` expansion
+(not verified; worth checking with `/mcp`). Read a project's `.mcp.json`
+and `.claude/settings.json` before you trust the folder, and use
+`hivemind-incognito claude` in repositories you do not trust.
+
 **Identity:** name this agent `<user>-claude-code` (plus a purpose if the
 user runs several), distinct from the agents of other harnesses.
 
