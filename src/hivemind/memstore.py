@@ -251,16 +251,19 @@ class MemoryStore:
                 self._refuse_stale_home(draft.fleet_id, draft.author)
             # Explicit supersessions (SPEC.md §4.1), atomic (ADR 0034):
             # every target must be active, or nothing is written.
+            # Any spelling of a uuid names its entry, as in Postgres; a
+            # malformed id names none and is denied.
             wanted = list(dict.fromkeys(draft.supersedes))
             denied = [
                 t
                 for t in wanted
-                if (e := self._entries.get(t)) is None or e.state is not EntryState.ACTIVE
+                if (e := self._entries.get(_canonical_or_same(t))) is None
+                or e.state is not EntryState.ACTIVE
             ]
             if denied:
                 raise SupersedeConflict(denied)
             self._entries[entry.id] = entry
-            for target_id in wanted:
+            for target_id in dict.fromkeys(_canonical_or_same(t) for t in wanted):
                 self._entries[target_id] = _with_state(
                     self._entries[target_id],
                     EntryState.SUPERSEDED,
@@ -268,16 +271,23 @@ class MemoryStore:
                 )
             # One write's links in id order, as PgStore reads them back
             # (same ``created_at``, then ``to_id``).
-            for target_id in sorted(draft.see_also):
+            for target_id in sorted({c for t in draft.see_also if (c := _canon(t))}):
                 if target_id in self._entries and target_id != entry.id:
                     self._links[(entry.id, target_id)] = now
         return entry
 
     async def entry_links(self, entry_id: str, limit: int) -> tuple[list[str], list[str]]:
+        if not is_valid_uuid(entry_id):
+            return [], []
+        key = str(uuid.UUID(entry_id))
         with self._lock:
-            outgoing = [to for (frm, to) in self._links if frm == entry_id]
-            incoming = [frm for (frm, to) in reversed(self._links) if to == entry_id]
-        return outgoing, incoming[:limit]
+            # PgStore's ``ORDER BY created_at, to_id`` and
+            # ``created_at DESC, from_id``.
+            out_rows = sorted((at, to) for (frm, to), at in self._links.items() if frm == key)
+            in_rows = [(at, frm) for (frm, to), at in self._links.items() if to == key]
+        in_rows.sort(key=lambda r: r[1])
+        in_rows.sort(key=lambda r: r[0], reverse=True)
+        return [to for _, to in out_rows], [frm for _, frm in in_rows[:limit]]
 
     async def entry_links_many(
         self, entry_ids: list[str], limit: int
@@ -331,8 +341,11 @@ class MemoryStore:
         return out
 
     async def withdraw_entry(self, entry_id: str, reason: str | None, by_user: str) -> Entry:
+        if not is_valid_uuid(entry_id):
+            raise KeyError(entry_id)
+        key = str(uuid.UUID(entry_id))
         with self._lock:
-            entry = self._entries.get(entry_id)
+            entry = self._entries.get(key)
             if entry is None:
                 raise KeyError(entry_id)
             if entry.state is not EntryState.ACTIVE:
@@ -342,8 +355,8 @@ class MemoryStore:
                 EntryState.WITHDRAWN,
                 withdrawn_reason=reason,
             )
-            self._entries[entry_id] = updated
-            self._withdrawn_at[entry_id] = self._clock()
+            self._entries[key] = updated
+            self._withdrawn_at[key] = self._clock()
             return updated
 
     async def record_feedback(self, feedback: Feedback) -> Feedback:
@@ -355,8 +368,11 @@ class MemoryStore:
             now = self._clock()  # one stamp per call, like a transaction's now()
             stored = [replace(fb, updated_at=fb.updated_at or now) for fb in feedbacks]
             for fb in stored:
-                key = (fb.entry_id, fb.user, fb.agent)
-                self._feedback[key] = fb
+                # Kept under the canonical id, as Postgres's uuid column reads
+                # back; the caller gets its own spelling returned.
+                canonical = _canonical_or_same(fb.entry_id)
+                key = (canonical, fb.user, fb.agent)
+                self._feedback[key] = replace(fb, entry_id=canonical)
                 self._set_aside.pop(key, None)  # rating again clears the mark (ADR 0111)
             return stored
 
@@ -383,14 +399,17 @@ class MemoryStore:
     async def pairwise_similarity(self, entry_ids: list[str]) -> dict[tuple[str, str], float]:
         with self._lock:
             vectors = {
-                eid: list(entry.embedding)
-                for eid in dict.fromkeys(entry_ids)
-                if (entry := self._entries.get(eid)) is not None and entry.embedding is not None
+                key: list(entry.embedding)
+                for eid in entry_ids
+                if is_valid_uuid(eid)
+                and (key := str(uuid.UUID(eid))) is not None
+                and (entry := self._entries.get(key)) is not None
+                and entry.embedding is not None
             }
         return _all_pairs_cosine(sorted(vectors), vectors)
 
     async def list_predecessors(self, entry_ids: list[str]) -> list[Entry]:
-        wanted = set(entry_ids)
+        wanted = {str(uuid.UUID(eid)) for eid in entry_ids if is_valid_uuid(eid)}
         with self._lock:
             return [
                 _copy(entry) for entry in self._entries.values() if entry.superseded_by in wanted
@@ -408,6 +427,9 @@ class MemoryStore:
     ) -> PinWrite | PinRefusal:
         if not is_valid_uuid(entry_id):
             return PinRefusal.FLEET  # as on Postgres: nothing a malformed id can pin
+        entry_id = str(uuid.UUID(entry_id))
+        asked = list(dict.fromkeys(replaces))  # reported in the caller's spelling
+        replaces = [_canonical_or_same(r) for r in replaces]
         with self._lock:
             self._refuse_merged(fleet_id)
             self._refuse_stale_home(fleet_id, pinned_by)
@@ -420,26 +442,28 @@ class MemoryStore:
             existing = self._pins.get((fleet_id, entry_id))
             replaced = [
                 old
-                for old in dict.fromkeys(replaces)
-                if old != entry_id and self._pins.pop((fleet_id, old), None) is not None
+                for old in asked
+                if (key := _canonical_or_same(old)) != entry_id
+                and self._pins.pop((fleet_id, key), None) is not None
             ]
-            # Re-inserting moves the pin to the end: insertion order breaks
-            # ``list_pins`` ties, as ``entry_id`` does on Postgres.
             self._pins.pop((fleet_id, entry_id), None)
             pin = Pin(fleet_id, entry_id, pinned_by, self._clock())
             self._pins[(fleet_id, entry_id)] = pin
             return PinWrite(pin, existing is None, tuple(replaced))
 
     async def unpin_entry(self, fleet_id: str, entry_id: str) -> bool:
+        if not is_valid_uuid(entry_id):
+            return False
         with self._lock:
-            return self._pins.pop((fleet_id, entry_id), None) is not None
+            return self._pins.pop((fleet_id, str(uuid.UUID(entry_id))), None) is not None
 
     async def list_pins(self, fleet_id: str) -> list[Pin]:
         with self._lock:
             pins = [p for (f, _), p in self._pins.items() if f == fleet_id]
-        # Newest first; insertion order breaks ties (the clock may not move).
-        order = {id(p): i for i, p in enumerate(pins)}
-        return sorted(pins, key=lambda p: (p.pinned_at, order[id(p)]), reverse=True)
+        # PgStore's ``ORDER BY pinned_at DESC, entry_id``.
+        pins.sort(key=lambda p: p.entry_id)
+        pins.sort(key=lambda p: p.pinned_at, reverse=True)
+        return pins
 
     async def usage_counts(self) -> list[UsageCount]:
         with self._lock:
@@ -905,10 +929,11 @@ class MemoryStore:
         visibility: Visibility | None = None,
     ) -> list[tuple[str, float]]:
         active = EntryFilters()
+        excluded = _canon(exclude_id) if exclude_id is not None else None
         with self._lock:
             rows: list[tuple[float, datetime, str]] = []
             for entry in self._entries.values():
-                if (exclude_id is not None and entry.id == exclude_id) or entry.embedding is None:
+                if (excluded is not None and entry.id == excluded) or entry.embedding is None:
                     continue
                 if not active.matches(entry) or not self._visible(entry, visibility):
                     continue
@@ -934,14 +959,18 @@ class MemoryStore:
         }
 
     async def feedback_counts(self, entry_id: str) -> FeedbackCounts:
+        if not is_valid_uuid(entry_id):
+            return (0, 0, 0)
         with self._lock:
-            return _count_for(self._live_feedback(), entry_id)
+            return _count_for(self._live_feedback(), str(uuid.UUID(entry_id)))
 
     async def quality_counts(self, entry_ids: list[str]) -> dict[str, FeedbackCounts]:
         with self._lock:
             # Every well-formed id, known or not, as on PgStore.
             live = self._live_feedback()
-            return {eid: _count_for(live, eid) for eid in entry_ids if is_valid_uuid(eid)}
+            return {
+                key: _count_for(live, key) for eid in entry_ids if (key := _canon(eid)) is not None
+            }
 
     async def feedback_signals(
         self,
@@ -952,7 +981,11 @@ class MemoryStore:
     ) -> dict[str, FeedbackSignals]:
         with self._lock:
             live = self._live_feedback()
-            out = {eid: _signals_for(live, eid) for eid in entry_ids if is_valid_uuid(eid)}
+            out = {
+                key: _signals_for(live, key)
+                for eid in entry_ids
+                if (key := _canon(eid)) is not None
+            }
             if count_supersedes:
                 counts: dict[str, int] = {}
                 for entry in self._entries.values():
@@ -962,8 +995,11 @@ class MemoryStore:
             return out
 
     async def list_feedback(self, entry_id: str, limit: int) -> list[Feedback]:
+        if not is_valid_uuid(entry_id):
+            return []
+        key = str(uuid.UUID(entry_id))
         with self._lock:
-            rows = [fb for fb in self._live_feedback().values() if fb.entry_id == entry_id]
+            rows = [fb for fb in self._live_feedback().values() if fb.entry_id == key]
         # Informative rows (stale, wrong, or with a note) before bare helpful
         # ones (ADR 0064), each group newest first; ties (same timestamp)
         # break on the reporter, as on Postgres, so the order is deterministic.
@@ -2068,6 +2104,11 @@ def _signals_for(feedback: dict[tuple[str, str, str], Feedback], entry_id: str) 
             (fb.updated_at for fb in flagged if fb.updated_at is not None), default=None
         ),
     )
+
+
+def _canon(value: str) -> str | None:
+    """``value`` as Postgres reads a ``uuid``, or ``None`` if the column would refuse it."""
+    return canonical_uuid(value) if is_valid_uuid(value) else None
 
 
 def _canonical_or_same(value: str) -> str:

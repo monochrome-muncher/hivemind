@@ -627,7 +627,13 @@ async def test_a_portal_withdrawal_unpins_too() -> None:
 async def test_the_briefing_skips_a_withdrawn_entry_left_from_before() -> None:
     """A pin row left from before withdrawing unpinned (or after a failed
     unpin) is not shown."""
-    store = MemoryStore(make_clock())
+    clock = make_clock()
+
+    def ticking() -> datetime:  # distinct pin times, as in real time
+        clock.advance_days(1 / 86400)
+        return clock()
+
+    store = MemoryStore(ticking)
     entry = await _write(store, DEV, "retracted rule")
     keep = await _write(store, DEV, "lasting rule")
     await store.pin_entry("fleet-a", entry, "lead", 10)
