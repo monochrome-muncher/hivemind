@@ -14,6 +14,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from hivemind.api.errors import error_handlers
 from hivemind.api.guards import BodyTooLarge, PreAuthGuard
 from hivemind.api.schemas import ErrorBody
 from hivemind.config import SearchConfig
@@ -58,9 +59,10 @@ class HivemindApp:
 class ApiError(Exception):
     """An expected API failure: an HTTP status + a stable error code.
 
-    Raised by the auth dependency (401) and by routes (from service
-    exceptions); a single exception handler turns it into the JSON
-    envelope ``{"error": {"code", "message"}}``.
+    Raised by the auth dependency (401) and by routes for their own
+    checks; a single exception handler turns it into the JSON envelope
+    ``{"error": {"code", "message"}}``. The typed service errors are
+    answered by the table in ``api/errors.py``.
     """
 
     def __init__(self, status_code: int, code: str, message: str) -> None:
@@ -184,6 +186,8 @@ def create_app(app: HivemindApp) -> FastAPI:
     fastapi_app.state.prometheus = prometheus
     fastapi_app.add_exception_handler(ApiError, _handle_api_error)
     fastapi_app.add_exception_handler(InvalidInput, _handle_invalid_input)
+    for error, handler in error_handlers().items():
+        fastapi_app.add_exception_handler(error, handler)
     fastapi_app.add_exception_handler(BodyTooLarge, _handle_body_too_large)
     fastapi_app.add_exception_handler(RequestValidationError, _handle_request_validation)
     fastapi_app.add_exception_handler(TimeoutError, _handle_store_timeout)
