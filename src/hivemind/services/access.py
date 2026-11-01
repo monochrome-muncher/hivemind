@@ -311,7 +311,7 @@ class AccessService:
         (``UnknownFleet``, or ``FleetMerged`` for a merged one), so a refused
         fleet changes nothing, not even a trust level sent with it. With
         neither, the agent as it is (``UnknownAgent`` if unknown)."""
-        self._require_admin(credential)
+        require_admin(credential)
         if home_fleet_id is not None:
             await self._require_fleet(home_fleet_id)
         agent: Agent | None = None
