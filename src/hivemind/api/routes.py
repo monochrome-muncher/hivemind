@@ -102,7 +102,6 @@ from hivemind.api.schemas import (
     WithdrawRequest,
 )
 from hivemind.domain.access import (
-    Agent,
     FleetExists,
     FleetMerged,
     InvalidAgentStatus,
@@ -1482,27 +1481,14 @@ def build_router() -> APIRouter:
         if payload.trust_level is None and payload.home_fleet_id is None:
             raise api_error(422, "update_required", "supply trust_level and/or home_fleet_id")
         try:
-            # Resolve the fleet BEFORE any mutation so a PATCH cannot half-apply.
-            if (
-                payload.home_fleet_id is not None
-                and await app.store.get_fleet(payload.home_fleet_id) is None
-            ):
-                raise UnknownFleet(f"unknown fleet: {payload.home_fleet_id}")
-            agent: Agent | None = None
-            if payload.trust_level is not None:
-                agent = await app.access_service.set_trust_level(
-                    name, TrustLevel(payload.trust_level), credential
-                )
-            if payload.home_fleet_id is not None:
-                agent = await app.access_service.set_home_fleet(
-                    name, payload.home_fleet_id, credential
-                )
-            if agent is None:
-                # Neither field changed anything; still resolve the agent
-                # (404 for an unknown name, SPEC §5.1).
-                agent = await app.store.get_agent(name)
-                if agent is None:
-                    raise UnknownAgent(f"unknown agent: {name}")
+            agent = await app.access_service.update_agent(
+                name,
+                credential,
+                trust_level=(
+                    TrustLevel(payload.trust_level) if payload.trust_level is not None else None
+                ),
+                home_fleet_id=payload.home_fleet_id,
+            )
         except PermissionDenied as exc:
             raise api_error(403, "forbidden", str(exc)) from exc
         except (UnknownAgent, UnknownFleet) as exc:

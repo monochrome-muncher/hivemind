@@ -297,6 +297,33 @@ class AccessService:
         )
         return agent
 
+    async def update_agent(
+        self,
+        name: str,
+        credential: Credential,
+        *,
+        trust_level: TrustLevel | None = None,
+        home_fleet_id: str | None = None,
+    ) -> Agent:
+        """``PATCH /v1/admin/agents/{name}``: the trust level and/or the home
+        fleet, each audited as its own change. The fleet is checked first
+        (``UnknownFleet``, or ``FleetMerged`` for a merged one), so a refused
+        fleet changes nothing, not even a trust level sent with it. With
+        neither, the agent as it is (``UnknownAgent`` if unknown)."""
+        self._require_admin(credential)
+        if home_fleet_id is not None:
+            await self._require_fleet(home_fleet_id)
+        agent: Agent | None = None
+        if trust_level is not None:
+            agent = await self.set_trust_level(name, trust_level, credential)
+        if home_fleet_id is not None:
+            agent = await self.set_home_fleet(name, home_fleet_id, credential)
+        if agent is None:
+            agent = await self._store.get_agent(name)
+            if agent is None:
+                raise UnknownAgent(f"unknown agent: {name}")
+        return agent
+
     async def revoke(self, name: str, credential: Credential) -> None:
         """Revoke an agent (ADRs 0012, 0028): status first (its key stops
         authenticating, ADR 0039), then delete the key row. On a pending
