@@ -13,10 +13,11 @@ import json
 import logging
 import math
 import uuid
-from collections.abc import AsyncIterator, Sequence
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Iterator, Sequence
+from contextlib import AbstractContextManager, asynccontextmanager, contextmanager
 from dataclasses import replace
 from datetime import datetime
+from functools import partial
 from typing import Any
 
 import asyncpg
@@ -244,9 +245,11 @@ ON CONFLICT (fleet_id, entry_id) DO UPDATE SET pinned_by = EXCLUDED.pinned_by, p
 RETURNING fleet_id, entry_id, pinned_by, pinned_at, (xmax = 0) AS created
 """
 DELETE_PIN = "DELETE FROM pins WHERE fleet_id = $1 AND entry_id = $2"
-LIST_PINS = """
-SELECT fleet_id, entry_id, pinned_by, pinned_at FROM pins WHERE fleet_id = $1
- ORDER BY pinned_at DESC, entry_id
+_PIN_COLUMNS = "fleet_id, entry_id, pinned_by, pinned_at"
+_PIN_ORDER = "pinned_at DESC, entry_id"
+LIST_PINS = f"""
+SELECT {_PIN_COLUMNS} FROM pins WHERE fleet_id = $1
+ ORDER BY {_PIN_ORDER}
 """
 
 # --- Fleet merge SQL (ADR 0107) ---------------------------------------------
@@ -256,9 +259,9 @@ SELECT f.id, f.name, f.created_at, f.merged_into, f.merged_at, t.name AS target_
   FROM fleets f LEFT JOIN fleets t ON t.id = f.merged_into
  WHERE f.id = ANY($1::uuid[]) ORDER BY f.id FOR UPDATE OF f
 """
-PINS_OF_FLEETS = """
-SELECT fleet_id, entry_id, pinned_by, pinned_at FROM pins WHERE fleet_id = ANY($1::text[])
- ORDER BY pinned_at DESC, entry_id
+PINS_OF_FLEETS = f"""
+SELECT {_PIN_COLUMNS} FROM pins WHERE fleet_id = ANY($1::text[])
+ ORDER BY {_PIN_ORDER}
 """
 MOVE_ENTRIES = "UPDATE entries SET fleet_id = $2 WHERE fleet_id = $1 RETURNING id"
 RECORD_MERGED_ENTRIES = """
@@ -312,8 +315,8 @@ RETURNING entry_id
 """
 ENTRIES_IN_FLEET = "SELECT id FROM entries WHERE id = ANY($1::uuid[]) AND fleet_id = $2"
 PINNED_ENTRY_IDS = "SELECT entry_id, pinned_by FROM pins WHERE fleet_id = $1"
-MOVE_RETURNING_PINS = """
-SELECT fleet_id, entry_id, pinned_by, pinned_at FROM pins
+MOVE_RETURNING_PINS = f"""
+SELECT {_PIN_COLUMNS} FROM pins
  WHERE fleet_id = $1 AND entry_id = ANY($2::uuid[])
 """
 MOVE_PIN_HOME = "UPDATE pins SET fleet_id = $2 WHERE fleet_id = $1 AND entry_id = $3"
@@ -365,10 +368,10 @@ MOVE_THESE_AGENTS = (
     "UPDATE agents SET home_fleet_id = $2 WHERE name = ANY($1::text[]) AND home_fleet_id = $3 "
     "RETURNING name"
 )
-MOVE_PIN_CANDIDATES = """
-SELECT fleet_id, entry_id, pinned_by, pinned_at FROM pins
+MOVE_PIN_CANDIDATES = f"""
+SELECT {_PIN_COLUMNS} FROM pins
  WHERE (fleet_id = $1 AND entry_id = ANY($3::uuid[])) OR fleet_id = $2
- ORDER BY pinned_at DESC, entry_id
+ ORDER BY {_PIN_ORDER}
 """
 REKEY_THESE_PINS = (
     "UPDATE pins SET fleet_id = $2 WHERE fleet_id = $1 AND entry_id = ANY($3::uuid[])"
@@ -611,19 +614,15 @@ CLEANUP_PINNABLE = (
 # --- Fleet / agent access-control SQL (ADRs 0011-0012) ---------------------
 
 SELECT_FLEET_BY_NAME = "SELECT 1 FROM fleets WHERE name = $1"
+_FLEET_COLUMNS = "id, name, created_at, merged_into, merged_at"
 INSERT_FLEET = (
     "INSERT INTO fleets (name) VALUES ($1) "
-    "ON CONFLICT (name) DO NOTHING RETURNING id, name, created_at, merged_into, merged_at"
+    f"ON CONFLICT (name) DO NOTHING RETURNING {_FLEET_COLUMNS}"
 )
-RENAME_FLEET = (
-    "UPDATE fleets SET name = $2 WHERE id = $1 "
-    "RETURNING id, name, created_at, merged_into, merged_at"
-)
-GET_FLEET_FOR_UPDATE = (
-    "SELECT id, name, created_at, merged_into, merged_at FROM fleets WHERE id = $1 FOR UPDATE"
-)
-GET_FLEET = "SELECT id, name, created_at, merged_into, merged_at FROM fleets WHERE id = $1"
-LIST_FLEETS = "SELECT id, name, created_at, merged_into, merged_at FROM fleets ORDER BY created_at"
+RENAME_FLEET = f"UPDATE fleets SET name = $2 WHERE id = $1 RETURNING {_FLEET_COLUMNS}"
+GET_FLEET_FOR_UPDATE = f"SELECT {_FLEET_COLUMNS} FROM fleets WHERE id = $1 FOR UPDATE"
+GET_FLEET = f"SELECT {_FLEET_COLUMNS} FROM fleets WHERE id = $1"
+LIST_FLEETS = f"SELECT {_FLEET_COLUMNS} FROM fleets ORDER BY created_at"
 # ADR 0107: a write into a fleet holds a share lock on its row for the rest of
 # its transaction, so a merge (FOR UPDATE) waits for it and, once committed,
 # the next write sees `merged_into` and is refused.
@@ -853,6 +852,10 @@ SET verdict = EXCLUDED.verdict,
 RETURNING updated_at
 """
 
+# Informative rows before bare helpful ones (ADR 0064), newest first.
+_FEEDBACK_ORDER = (
+    """(verdict = 'helpful' AND COALESCE(note, '') = ''), updated_at DESC, "user", agent"""
+)
 # The verdict counts, spelled once for every counting statement below.
 _VERDICT_COUNTS = """COUNT(*) FILTER (WHERE verdict = 'helpful') AS helpful,
     COUNT(*) FILTER (WHERE verdict = 'stale') AS stale,
@@ -869,7 +872,7 @@ LIST_FEEDBACK = f"""
 SELECT entry_id, "user", agent, verdict, note, updated_at
 FROM feedbacks f
 WHERE entry_id = $1 AND {_RATING_COUNTS}
-ORDER BY (verdict = 'helpful' AND COALESCE(note, '') = ''), updated_at DESC, "user", agent
+ORDER BY {_FEEDBACK_ORDER}
 LIMIT $2
 """
 
@@ -879,12 +882,12 @@ LIST_FEEDBACK_MANY = f"""
 SELECT entry_id, "user", agent, verdict, note, updated_at FROM (
     SELECT f.*, row_number() OVER (
                PARTITION BY entry_id
-               ORDER BY (verdict = 'helpful' AND COALESCE(note, '') = ''), updated_at DESC, "user", agent) AS rn
+               ORDER BY {_FEEDBACK_ORDER}) AS rn
       FROM feedbacks f
      WHERE entry_id = ANY($1::uuid[]) AND {_RATING_COUNTS}
 ) AS ranked
 WHERE rn <= $2
-ORDER BY entry_id, (verdict = 'helpful' AND COALESCE(note, '') = ''), updated_at DESC, "user", agent
+ORDER BY entry_id, {_FEEDBACK_ORDER}
 """
 
 # The feedback log: rows across entries with the rated entry's list fields.
@@ -1283,10 +1286,7 @@ def _filter_conditions(
     """
     clauses: list[str] = []
     params: list[Any] = []
-
-    def add(fragment: str, value: Any) -> None:
-        params.append(value)
-        clauses.append(fragment.replace("?", f"${len(params)}"))
+    add = partial(_add_clause, clauses, params)
 
     if not filters.include_inactive and not filters.relied_on_changed:
         clauses.append("state = 'active'")
@@ -1396,6 +1396,113 @@ def _visibility_clause(
         f"OR ({table}scope = 'self' AND {own}) "
         f"OR ({table}scope = 'fleet' AND ({own} OR {table}fleet_id = {home_p})))"
     )
+
+
+def _add_clause(clauses: list[str], params: list[Any], fragment: str, value: Any) -> None:
+    """Append ``fragment`` to ``clauses``, its ``?`` bound to a new parameter of ``value``."""
+    params.append(value)
+    clauses.append(fragment.replace("?", f"${len(params)}"))
+
+
+@contextmanager
+def _refuse_on_contention(
+    refusal: type[Exception], busy_message: str, deadlock_message: str
+) -> Iterator[None]:
+    """Turn a lock timeout or a deadlock in the block into ``refusal`` (retryable)."""
+    try:
+        yield
+    except asyncpg.exceptions.LockNotAvailableError:
+        raise refusal(busy_message) from None
+    except asyncpg.exceptions.DeadlockDetectedError:
+        raise refusal(deadlock_message) from None
+
+
+def _fleets_contention(refusal: type[Exception], verb: str) -> AbstractContextManager[None]:
+    """``_refuse_on_contention`` with the fleet merge, move and undo messages."""
+    return _refuse_on_contention(
+        refusal,
+        f"the fleets are busy with writes; try the {verb} again in a moment",
+        f"the {verb} deadlocked with a concurrent change; try it again",
+    )
+
+
+def _cleanup_contention(verb: str) -> AbstractContextManager[None]:
+    """``_refuse_on_contention`` with the agent cleanup and undo messages."""
+    return _refuse_on_contention(
+        AgentCleanupRefused,
+        "the agent's memories are busy with writes or another cleanup; try again in a moment",
+        f"the {verb} deadlocked with a concurrent change; try it again",
+    )
+
+
+async def _restore_fleet_pins(
+    conn: asyncpg.Connection, fleet_id: str, pins: Sequence[DroppedPin], home_sql: str
+) -> tuple[list[DroppedPin], list[DroppedPin]]:
+    """Put ``pins`` back on ``fleet_id`` where ``home_sql`` (entry ids in $1, the
+    fleet in $2) still finds the entry, it is not pinned, and the fleet's cap
+    has room. Returns ``(restored, skipped)``."""
+    home = {str(r["id"]) for r in await conn.fetch(home_sql, [d.entry_id for d in pins], fleet_id)}
+    held = await conn.fetch(PINNED_ENTRY_IDS, fleet_id)
+    pinned = {str(r["entry_id"]) for r in held}
+    fits = [d for d in pins if d.entry_id in home and d.entry_id not in pinned]
+    skipped = [d for d in pins if d not in fits]
+    put, over = plan_pin_restore(fits, [r["pinned_by"] for r in held])
+    skipped.extend(over)
+    for d in put:
+        await conn.execute(RESTORE_PIN, fleet_id, d.entry_id, d.pinned_by, d.pinned_at)
+    return list(put), skipped
+
+
+def _require_one_target(target_fleet_id: str | None, new_fleet_name: str | None) -> None:
+    if (target_fleet_id is None) == (new_fleet_name is None):
+        raise InvalidInput("name exactly one of target_fleet_id and new_fleet_name")
+
+
+def _canonical_fleet_ids(
+    source_id: str, target_fleet_id: str | None, into_itself: Exception
+) -> tuple[str, str | None]:
+    """The merge or move's fleet ids as canonical uuid text; ``into_itself`` is
+    raised when the target is the source."""
+    for given in (source_id, target_fleet_id):
+        if given is not None and not is_valid_uuid(given):
+            raise UnknownFleet(f"unknown fleet: {given}")
+    source_id = str(uuid.UUID(source_id))
+    if target_fleet_id is not None:
+        target_fleet_id = str(uuid.UUID(target_fleet_id))
+        if target_fleet_id == source_id:
+            raise into_itself
+    return source_id, target_fleet_id
+
+
+async def _create_target_fleet(
+    conn: asyncpg.Connection, source_id: str, new_fleet_name: str | None
+) -> str:
+    """Create the new fleet a merge or move targets; an unknown source wins over a
+    taken name (as in MemoryStore)."""
+    if await conn.fetchrow(GET_FLEET, source_id) is None:
+        raise UnknownFleet(f"unknown fleet: {source_id}")
+    if await conn.fetchrow(SELECT_FLEET_BY_NAME, new_fleet_name) is not None:
+        raise FleetExists(f"fleet already exists: {new_fleet_name!r}")
+    made = await conn.fetchrow(INSERT_FLEET, new_fleet_name)
+    if made is None:
+        raise FleetExists(f"fleet already exists: {new_fleet_name!r}")
+    return str(made["id"])
+
+
+async def _lock_unmerged_fleets(
+    conn: asyncpg.Connection, source_id: str, target_fleet_id: str
+) -> dict[str, asyncpg.Record]:
+    """Both fleet rows FOR UPDATE, in id order; ``UnknownFleet`` for a missing one,
+    ``FleetMerged`` for one already merged. Returns the rows by id."""
+    locked = {str(r["id"]): r for r in await conn.fetch(LOCK_FLEETS, [source_id, target_fleet_id])}
+    for fid in (source_id, target_fleet_id):
+        if fid not in locked:
+            raise UnknownFleet(f"unknown fleet: {fid}")
+    for fid in (source_id, target_fleet_id):
+        row = locked[fid]
+        if row["merged_into"] is not None:
+            raise FleetMerged(fid, str(row["merged_into"]), row["target_name"])
+    return locked
 
 
 async def _refuse_merged(conn: asyncpg.Connection, fleet_id: str | None) -> None:
@@ -2184,10 +2291,7 @@ class PgStore:
         panel only."""
         clauses = [_RATING_COUNTS]
         params: list[Any] = []
-
-        def add(fragment: str, value: Any) -> None:
-            params.append(value)
-            clauses.append(fragment.replace("?", f"${len(params)}"))
+        add = partial(_add_clause, clauses, params)
 
         for value, fragment in (
             (filters.entry_id, "f.entry_id = ?"),
@@ -2387,42 +2491,18 @@ class PgStore:
         expected_pin_ids: Sequence[str] | None = None,
         merged_by: str,
     ) -> MergeOutcome:
-        if (target_fleet_id is None) == (new_fleet_name is None):
-            raise InvalidInput("name exactly one of target_fleet_id and new_fleet_name")
-        for given in (source_id, target_fleet_id):
-            if given is not None and not is_valid_uuid(given):
-                raise UnknownFleet(f"unknown fleet: {given}")
-        source_id = str(uuid.UUID(source_id))
-        if target_fleet_id is not None:
-            target_fleet_id = str(uuid.UUID(target_fleet_id))
-            if target_fleet_id == source_id:
-                raise FleetMergeRefused("a fleet cannot be merged into itself")
-        try:
+        _require_one_target(target_fleet_id, new_fleet_name)
+        source_id, target_fleet_id = _canonical_fleet_ids(
+            source_id, target_fleet_id, FleetMergeRefused("a fleet cannot be merged into itself")
+        )
+        with _fleets_contention(FleetMergeRefused, "merge"):
             async with self._transaction() as conn:
                 # Give up rather than queue behind in-flight writes (the migrations' pattern).
                 await conn.execute(MERGE_SETTINGS)
                 created = target_fleet_id is None
                 if target_fleet_id is None:
-                    # An unknown source wins over a taken name (as in MemoryStore).
-                    if await conn.fetchrow(GET_FLEET, source_id) is None:
-                        raise UnknownFleet(f"unknown fleet: {source_id}")
-                    if await conn.fetchrow(SELECT_FLEET_BY_NAME, new_fleet_name) is not None:
-                        raise FleetExists(f"fleet already exists: {new_fleet_name!r}")
-                    made = await conn.fetchrow(INSERT_FLEET, new_fleet_name)
-                    if made is None:
-                        raise FleetExists(f"fleet already exists: {new_fleet_name!r}")
-                    target_fleet_id = str(made["id"])
-                locked = {
-                    str(r["id"]): r
-                    for r in await conn.fetch(LOCK_FLEETS, [source_id, target_fleet_id])
-                }
-                for fid in (source_id, target_fleet_id):
-                    if fid not in locked:
-                        raise UnknownFleet(f"unknown fleet: {fid}")
-                for fid in (source_id, target_fleet_id):
-                    row = locked[fid]
-                    if row["merged_into"] is not None:
-                        raise FleetMerged(fid, str(row["merged_into"]), row["target_name"])
+                    target_fleet_id = await _create_target_fleet(conn, source_id, new_fleet_name)
+                locked = await _lock_unmerged_fleets(conn, source_id, target_fleet_id)
                 # Pins last-but-one in the lock order: fleet rows, then pin locks.
                 for fid in sorted((source_id, target_fleet_id)):
                     await conn.execute(LOCK_FLEET_PINS, fid)
@@ -2470,14 +2550,6 @@ class PgStore:
                     KIND_MERGE,
                 )
                 target_row = locked[target_fleet_id]
-        except asyncpg.exceptions.LockNotAvailableError:
-            raise FleetMergeRefused(
-                "the fleets are busy with writes; try the merge again in a moment"
-            ) from None
-        except asyncpg.exceptions.DeadlockDetectedError:
-            raise FleetMergeRefused(
-                "the merge deadlocked with a concurrent change; try it again"
-            ) from None
         record = FleetMergeRecord(
             merge_id, source_id, target_fleet_id, merged_by, merged_at, tuple(agents), drops
         )
@@ -2520,45 +2592,23 @@ class PgStore:
         expected_pin_ids: Sequence[str] | None = None,
         moved_by: str,
     ) -> MoveOutcome:
-        if (target_fleet_id is None) == (new_fleet_name is None):
-            raise InvalidInput("name exactly one of target_fleet_id and new_fleet_name")
+        _require_one_target(target_fleet_id, new_fleet_name)
         names = sorted(set(agents))
         if not names:
             raise InvalidInput("name at least one agent to move")
-        for given in (source_id, target_fleet_id):
-            if given is not None and not is_valid_uuid(given):
-                raise UnknownFleet(f"unknown fleet: {given}")
-        source_id = str(uuid.UUID(source_id))
-        if target_fleet_id is not None:
-            target_fleet_id = str(uuid.UUID(target_fleet_id))
-            if target_fleet_id == source_id:
-                raise FleetMoveRefused("agents cannot be moved into the fleet they are in")
-        try:
+        source_id, target_fleet_id = _canonical_fleet_ids(
+            source_id,
+            target_fleet_id,
+            FleetMoveRefused("agents cannot be moved into the fleet they are in"),
+        )
+        with _fleets_contention(FleetMoveRefused, "move"):
             async with self._transaction() as conn:
                 await conn.execute(MERGE_SETTINGS)
                 created = target_fleet_id is None
                 if target_fleet_id is None:
-                    if await conn.fetchrow(GET_FLEET, source_id) is None:
-                        raise UnknownFleet(f"unknown fleet: {source_id}")
-                    if await conn.fetchrow(SELECT_FLEET_BY_NAME, new_fleet_name) is not None:
-                        raise FleetExists(f"fleet already exists: {new_fleet_name!r}")
-                    made = await conn.fetchrow(INSERT_FLEET, new_fleet_name)
-                    if made is None:
-                        raise FleetExists(f"fleet already exists: {new_fleet_name!r}")
-                    target_fleet_id = str(made["id"])
-                # Both fleet rows FOR UPDATE, in id order, as a merge does: a fleet
-                # write waits, so no entry can land in the source after the list below.
-                locked = {
-                    str(r["id"]): r
-                    for r in await conn.fetch(LOCK_FLEETS, [source_id, target_fleet_id])
-                }
-                for fid in (source_id, target_fleet_id):
-                    if fid not in locked:
-                        raise UnknownFleet(f"unknown fleet: {fid}")
-                for fid in (source_id, target_fleet_id):
-                    row = locked[fid]
-                    if row["merged_into"] is not None:
-                        raise FleetMerged(fid, str(row["merged_into"]), row["target_name"])
+                    target_fleet_id = await _create_target_fleet(conn, source_id, new_fleet_name)
+                # No entry can land in the source after the list below: a fleet write waits.
+                locked = await _lock_unmerged_fleets(conn, source_id, target_fleet_id)
                 homes = {
                     r["name"]: r["home_fleet_id"] for r in await conn.fetch(LOCK_AGENTS, names)
                 }
@@ -2620,14 +2670,6 @@ class PgStore:
                     KIND_MOVE,
                 )
                 target_row = locked[target_fleet_id]
-        except asyncpg.exceptions.LockNotAvailableError:
-            raise FleetMoveRefused(
-                "the fleets are busy with writes; try the move again in a moment"
-            ) from None
-        except asyncpg.exceptions.DeadlockDetectedError:
-            raise FleetMoveRefused(
-                "the move deadlocked with a concurrent change; try it again"
-            ) from None
         record = FleetMergeRecord(
             move_id,
             source_id,
@@ -2653,7 +2695,7 @@ class PgStore:
         if not is_valid_uuid(merge_id):
             raise UnknownFleetMerge(f"unknown fleet merge: {merge_id}")
         merge_id = str(uuid.UUID(merge_id))
-        try:
+        with _fleets_contention(FleetMergeRefused, "undo"):
             async with self._transaction() as conn:
                 await conn.execute(MERGE_SETTINGS)
                 row = await conn.fetchrow(GET_MERGE, merge_id)
@@ -2743,30 +2785,12 @@ class PgStore:
                     mine = [d for d in record.dropped_pins if d.fleet_id == fid]
                     if not mine:
                         continue
-                    home = {
-                        str(r["id"])
-                        for r in await conn.fetch(ENTRIES_IN_FLEET, [d.entry_id for d in mine], fid)
-                    }
-                    held = await conn.fetch(PINNED_ENTRY_IDS, fid)
-                    pinned = {str(r["entry_id"]) for r in held}
-                    fits = [d for d in mine if d.entry_id in home and d.entry_id not in pinned]
-                    skipped.extend(d for d in mine if d not in fits)
-                    put, over = plan_pin_restore(fits, [r["pinned_by"] for r in held])
-                    skipped.extend(over)
-                    for d in put:
-                        await conn.execute(RESTORE_PIN, fid, d.entry_id, d.pinned_by, d.pinned_at)
+                    put, left = await _restore_fleet_pins(conn, fid, mine, ENTRIES_IN_FLEET)
                     restored.extend(put)
+                    skipped.extend(left)
                 if record.kind != KIND_MOVE:  # a move never marked its source
                     await conn.execute(CLEAR_MERGED, src)
                 undone_at = await conn.fetchval(MARK_UNDONE, merge_id)
-        except asyncpg.exceptions.LockNotAvailableError:
-            raise FleetMergeRefused(
-                "the fleets are busy with writes; try the undo again in a moment"
-            ) from None
-        except asyncpg.exceptions.DeadlockDetectedError:
-            raise FleetMergeRefused(
-                "the undo deadlocked with a concurrent change; try it again"
-            ) from None
         return UnmergeOutcome(
             replace(record, undone_at=undone_at),
             len(back),
@@ -2875,7 +2899,7 @@ class PgStore:
             raise AgentCleanupRefused("restore_ids names memories that cannot be restored")
         wanted = [str(uuid.UUID(w)) for w in wanted]
         cleanup_id = str(uuid.uuid4())
-        try:
+        with _cleanup_contention("cleanup"):
             async with self._transaction() as conn:
                 await conn.execute(MERGE_SETTINGS)
                 # One cleanup or undo per agent at a time. A cleanup of several
@@ -2966,17 +2990,9 @@ class PgStore:
                         ]
                     ),
                     set_aside,
-                    json.dumps(_pins_to_json(unpinned)),
+                    _dropped_json(unpinned),
                     self_service,
                 )
-        except asyncpg.exceptions.LockNotAvailableError:
-            raise AgentCleanupRefused(
-                "the agent's memories are busy with writes or another cleanup; try again in a moment"
-            ) from None
-        except asyncpg.exceptions.DeadlockDetectedError:
-            raise AgentCleanupRefused(
-                "the cleanup deadlocked with a concurrent change; try it again"
-            ) from None
         record = AgentCleanupRecord(
             cleanup_id,
             agent,
@@ -3001,7 +3017,7 @@ class PgStore:
         if not is_valid_uuid(cleanup_id):
             raise UnknownAgentCleanup(f"unknown agent cleanup: {cleanup_id}")
         cleanup_id = str(uuid.UUID(cleanup_id))
-        try:
+        with _cleanup_contention("undo"):
             async with self._transaction() as conn:
                 await conn.execute(MERGE_SETTINGS)
                 row = await conn.fetchrow(CLEANUP_GET, cleanup_id)
@@ -3060,30 +3076,10 @@ class PgStore:
                 skipped_pins: list[DroppedPin] = []
                 for fid in sorted({d.fleet_id for d in record.unpinned_pins}):
                     mine_pins = [d for d in record.unpinned_pins if d.fleet_id == fid]
-                    home = {
-                        str(r["id"])
-                        for r in await conn.fetch(
-                            CLEANUP_PINNABLE, [d.entry_id for d in mine_pins], fid
-                        )
-                    }
-                    held = await conn.fetch(PINNED_ENTRY_IDS, fid)
-                    pinned = {str(r["entry_id"]) for r in held}
-                    fits = [d for d in mine_pins if d.entry_id in home and d.entry_id not in pinned]
-                    skipped_pins.extend(d for d in mine_pins if d not in fits)
-                    put, over = plan_pin_restore(fits, [r["pinned_by"] for r in held])
-                    skipped_pins.extend(over)
-                    for d in put:
-                        await conn.execute(RESTORE_PIN, fid, d.entry_id, d.pinned_by, d.pinned_at)
+                    put, left = await _restore_fleet_pins(conn, fid, mine_pins, CLEANUP_PINNABLE)
                     restored_pins.extend(put)
+                    skipped_pins.extend(left)
                 undone_at = await conn.fetchval(CLEANUP_MARK_UNDONE, cleanup_id)
-        except asyncpg.exceptions.LockNotAvailableError:
-            raise AgentCleanupRefused(
-                "the agent's memories are busy with writes or another cleanup; try again in a moment"
-            ) from None
-        except asyncpg.exceptions.DeadlockDetectedError:
-            raise AgentCleanupRefused(
-                "the undo deadlocked with a concurrent change; try it again"
-            ) from None
         return CleanupUndoOutcome(
             replace(record, undone_at=undone_at),
             reactivated=len(back),
@@ -3410,7 +3406,7 @@ def _decode_sources(raw: Any) -> tuple[Source, ...]:
     """
     if not raw:
         return ()
-    items = raw if isinstance(raw, list) else json.loads(raw)
+    items = _jsonb_value(raw)
     return tuple(Source(type=SourceType(item["type"]), ref=item["ref"]) for item in items)
 
 
@@ -3418,7 +3414,7 @@ def _decode_entities(raw: Any) -> tuple[ExtractedEntity, ...]:
     """Decode the jsonb ``entities`` column (native or JSON text)."""
     if not raw:
         return ()
-    items = raw if isinstance(raw, list) else json.loads(raw)
+    items = _jsonb_value(raw)
     return tuple(
         ExtractedEntity(name=item["name"], kind=EntityKind(item["kind"])) for item in items
     )
@@ -3462,8 +3458,25 @@ def _row_to_fleet(row: asyncpg.Record) -> Fleet:
     )
 
 
+def _jsonb_value(raw: Any, expected: type[list[Any]] | type[dict[str, Any]] = list) -> Any:
+    """A jsonb column of the ``expected`` type as native Python: asyncpg
+    decodes it already, the JSON-text branch is kept for raw-text drivers."""
+    return raw if isinstance(raw, expected) else json.loads(raw)
+
+
+def _decode_dropped(raw: Any) -> tuple[DroppedPin, ...]:
+    """Decode a jsonb list written by ``_dropped_json``."""
+    return tuple(
+        DroppedPin(
+            d["fleet_id"], d["entry_id"], d["pinned_by"], datetime.fromisoformat(d["pinned_at"])
+        )
+        for d in _jsonb_value(raw)
+    )
+
+
 def _dropped_json(drops: Sequence[DroppedPin]) -> str:
-    """The ``fleet_merges.dropped_pins`` jsonb for the pins a merge or move unpinned."""
+    """The jsonb for pins a merge, move or cleanup unpinned (``fleet_merges.dropped_pins``,
+    ``agent_cleanups.unpinned_pins``)."""
     return json.dumps(
         [
             {
@@ -3479,8 +3492,6 @@ def _dropped_json(drops: Sequence[DroppedPin]) -> str:
 
 def _row_to_merge(row: asyncpg.Record) -> FleetMergeRecord:
     """Map a ``fleet_merges`` row to the domain record."""
-    raw = row["dropped_pins"]
-    dropped = raw if isinstance(raw, list) else json.loads(raw)
     return FleetMergeRecord(
         id=str(row["id"]),
         source_fleet_id=str(row["source_fleet_id"]),
@@ -3488,34 +3499,14 @@ def _row_to_merge(row: asyncpg.Record) -> FleetMergeRecord:
         merged_by=row["merged_by"],
         merged_at=row["merged_at"],
         moved_agents=tuple(row["moved_agents"]),
-        dropped_pins=tuple(
-            DroppedPin(
-                d["fleet_id"], d["entry_id"], d["pinned_by"], datetime.fromisoformat(d["pinned_at"])
-            )
-            for d in dropped
-        ),
+        dropped_pins=_decode_dropped(row["dropped_pins"]),
         undone_at=row["undone_at"],
         kind=row["kind"],
     )
 
 
-def _pins_to_json(pins: Sequence[DroppedPin]) -> list[dict[str, str]]:
-    return [
-        {
-            "fleet_id": d.fleet_id,
-            "entry_id": d.entry_id,
-            "pinned_by": d.pinned_by,
-            "pinned_at": d.pinned_at.isoformat(),
-        }
-        for d in pins
-    ]
-
-
 def _row_to_cleanup(row: asyncpg.Record) -> AgentCleanupRecord:
     """Map an ``agent_cleanups`` row to the domain record."""
-
-    def loaded(raw: Any) -> list[dict[str, str]]:
-        return raw if isinstance(raw, list) else json.loads(raw)
 
     return AgentCleanupRecord(
         id=str(row["id"]),
@@ -3527,15 +3518,10 @@ def _row_to_cleanup(row: asyncpg.Record) -> AgentCleanupRecord:
         withdrawn_ids=tuple(str(i) for i in row["withdrawn_ids"]),
         restored=tuple(
             RestoredEntry(r["entry_id"], r["superseded_by"], r.get("head", ""))
-            for r in loaded(row["restored"])
+            for r in _jsonb_value(row["restored"])
         ),
         ratings_set_aside=int(row["ratings_set_aside"]),
-        unpinned_pins=tuple(
-            DroppedPin(
-                d["fleet_id"], d["entry_id"], d["pinned_by"], datetime.fromisoformat(d["pinned_at"])
-            )
-            for d in loaded(row["unpinned_pins"])
-        ),
+        unpinned_pins=_decode_dropped(row["unpinned_pins"]),
         revoked=bool(row["revoked"]),
         self_service=bool(row["self_service"]),
         undone_at=row["undone_at"],
@@ -3579,5 +3565,5 @@ def _row_to_audit(row: asyncpg.Record) -> AuditRecord:
         actor=row["actor"],
         action=AuditAction(row["action"]),
         target=row["target"],
-        detail=detail if isinstance(detail, dict) else json.loads(detail),
+        detail=_jsonb_value(detail, dict),
     )
