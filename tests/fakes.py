@@ -12,6 +12,7 @@ import hashlib
 import inspect
 import re
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -272,6 +273,17 @@ class FakeAuthenticator:
                 return None
         if credential is not None and key in self._locked:
             raise KeyLocked
+        if (
+            credential is not None
+            and isinstance(self._store, MemoryStore)
+            and credential.agent_name is not None
+            and key in self._issued_agent_keys.values()
+        ):
+            # The successions an agent hands down are read per request, as the
+            # real adapter's one-query key check does (ADR 0113).
+            credential = replace(
+                credential, inherits_from=await self._store.inherited_authors(credential.agent_name)
+            )
         if credential is not None:
             self._record_use(key, credential)
         return credential
@@ -295,7 +307,14 @@ class FakeAuthenticator:
                 raise UnknownAgent(f"unknown agent: {agent_name}")
             if agent.status is not AgentStatus.ACTIVE:
                 raise InvalidAgentStatus(agent_name, agent.status, "issue a key for")
+        # One live key per agent: issuing again kills the old one, so the new
+        # raw key must differ from it (the first stays ``hm_agent_<name>``).
+        old_raw = self._issued_agent_keys.get(agent_name)
         raw = f"hm_agent_{agent_name}"
+        if old_raw is not None:
+            self._by_key.pop(old_raw, None)
+            self._replacements += 1
+            raw = f"hm_agent_{agent_name}_{self._replacements}"
         self._issued_agent_keys[agent_name] = raw
         self._locked.discard(raw)
         if isinstance(self._store, MemoryStore):
@@ -370,9 +389,8 @@ class FakeAuthenticator:
             self._by_key.pop(raw, None)
 
     async def rotate_org_key(self) -> str:
-        self._by_key.pop(
-            "hm_org" if self._rotations == 0 else f"hm_org_{self._rotations - 1}", None
-        )
+        for old in [k for k, c in self._by_key.items() if c.is_org]:  # all prior org keys die
+            del self._by_key[old]
         self._rotations += 1
         new_key = f"hm_org_{self._rotations}"
         self._by_key[new_key] = Credential(user_id="org", is_org=True)

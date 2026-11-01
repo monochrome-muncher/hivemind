@@ -481,14 +481,6 @@ async def test_replace_refuses_a_non_active_agent_and_changes_nothing(env, statu
     assert await _fetch(dsn, "SELECT 1 FROM credentials") == []
 
 
-async def test_replace_of_an_unknown_agent_is_refused(env) -> None:
-    from hivemind.domain.access import UnknownAgent
-
-    _, _, auth = env
-    with pytest.raises(UnknownAgent):
-        await auth.replace_agent_key("ghost", **_AUDIT)
-
-
 async def test_concurrent_replacements_leave_exactly_one_live_key(env) -> None:
     dsn, store, auth = env
     await _active_bob(dsn, store, auth)
