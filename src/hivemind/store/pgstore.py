@@ -541,9 +541,9 @@ def _cleanup_pins_count(readable: str | None = None) -> str:
         + _restorable_ctes(readable)
         + ", "
         + _pin_walk("w.cur NOT IN (SELECT id FROM restorable)")
-        + "SELECT count(DISTINCT pinned) FROM walk"
-        " WHERE cur IN (SELECT id FROM own WHERE state = 'active')"
-        " AND pinned NOT IN (SELECT id FROM restorable)"
+        + "SELECT count(*) FROM pins WHERE entry_id IN ("
+        "SELECT pinned FROM walk WHERE cur IN (SELECT id FROM own WHERE state = 'active'))"
+        " AND entry_id NOT IN (SELECT id FROM restorable)"
     )
 
 
@@ -1547,6 +1547,12 @@ def _valid_uuids(ids: list[str] | tuple[str, ...]) -> list[str]:
     return [i for i in ids if is_valid_uuid(i)]
 
 
+def _canonical_uuids(ids: list[str]) -> list[str]:
+    """The distinct well-formed IDs in Postgres's canonical text form, in order
+    (upper case, no hyphens: spellings it reads as the same uuid)."""
+    return list(dict.fromkeys(c for i in ids if (c := canonical_uuid(i)) is not None))
+
+
 class PgStore:
     """A ``Store`` backed by PostgreSQL + pgvector (ADR 0007).
 
@@ -2155,7 +2161,10 @@ class PgStore:
         async with self._transaction() as conn:
             await conn.execute(VECTOR_SEARCH_SETTINGS)
             rows = await conn.fetch(sql, *params, embedding, limit)
-        return [(str(r["id"]), float(r["similarity"])) for r in rows]
+        # pgvector gives NaN for a zero vector; MemoryStore says 0.0.
+        return [
+            (str(r["id"]), s if math.isfinite(s := float(r["similarity"])) else 0.0) for r in rows
+        ]
 
     # -- feedback -----------------------------------------------------------------
 
@@ -2199,8 +2208,9 @@ class PgStore:
         return (row["helpful"], row["stale"], row["wrong"]) if row else (0, 0, 0)
 
     async def quality_counts(self, entry_ids: list[str]) -> dict[str, tuple[int, int, int]]:
-        """Batched feedback counts; every valid requested ID is present."""
-        ids = _valid_uuids(entry_ids)
+        """Batched feedback counts; every valid requested ID is present, keyed
+        by its canonical form whatever the caller's spelling."""
+        ids = _canonical_uuids(entry_ids)
         if not ids:
             return {}
         async with self._connection() as conn:
@@ -2220,8 +2230,8 @@ class PgStore:
         """Batched counts, last-confirmed dates and corrections (one
         statement), plus the visibility-aware ``supersedes`` counts (a second
         statement on the same connection) when asked; every valid requested ID
-        is present."""
-        ids = _valid_uuids(entry_ids)
+        is present, keyed by its canonical form whatever the caller's spelling."""
+        ids = _canonical_uuids(entry_ids)
         if not ids:
             return {}
         supersedes: dict[str, int] = {}
@@ -2452,7 +2462,11 @@ class PgStore:
     async def fleet_facts(self, fleet_id: str) -> FleetFacts:
         if not is_valid_uuid(fleet_id):
             return FleetFacts(agents=0, entries={})
-        async with self._connection() as conn:
+        # One snapshot, so the agent count and the entry states agree.
+        async with (
+            self._connection() as conn,
+            conn.transaction(isolation="repeatable_read", readonly=True),
+        ):
             agents = await conn.fetchval(FLEET_AGENT_COUNT, fleet_id)
             rows = await conn.fetch(FLEET_ENTRY_STATES, fleet_id)
         return FleetFacts(agents=int(agents), entries={r["state"]: int(r["n"]) for r in rows})
@@ -2829,7 +2843,11 @@ class PgStore:
         # visibility parameters follow.
         vis3, extra3 = _readable_clause(visibility, 3)
         vis4, extra4 = _readable_clause(visibility, 4)
-        async with self._connection() as conn:
+        # One snapshot, so the totals, the lists and the pin count agree.
+        async with (
+            self._connection() as conn,
+            conn.transaction(isolation="repeatable_read", readonly=True),
+        ):
             withdraw = await conn.fetch(
                 CLEANUP_WITHDRAW_LIST, names, since, until, PREVIEW_WITHDRAW_LIMIT
             )

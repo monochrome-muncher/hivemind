@@ -15,6 +15,7 @@ into a failure that asks for the mark to be removed; none is open today.
 
 from __future__ import annotations
 
+import math
 import uuid
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, replace
@@ -783,6 +784,17 @@ async def test_similar_entries_rank_nearest_first_with_cosine_similarity(
     assert len(await adapter.store.similar_entries(adapter.vec(0), 1)) == 1
 
 
+async def test_similar_entries_score_a_zero_vector_as_zero_not_nan(adapter: Adapter) -> None:
+    """Cosine to a zero vector is NaN in pgvector; both stores say 0.0, as
+    ``pairwise_similarity`` does."""
+    near = await write(adapter, "near", hot=0)
+    zero = await adapter.store.create_entry(draft("zero norm"), [0.0] * adapter.dim, "test-model")
+    pairs = await adapter.store.similar_entries(adapter.vec(0), 10)
+    assert [eid for eid, _ in pairs] == [near.id, zero.id]
+    assert pairs[1][1] == 0.0
+    assert all(math.isfinite(sim) for _, sim in pairs)
+
+
 async def test_similar_entries_exclude_the_entry_and_inactive_ones(adapter: Adapter) -> None:
     old = await write(adapter, "v1", hot=3)
     new = await write(adapter, "v2", hot=3, supersedes=(old.id,))
@@ -1480,6 +1492,16 @@ async def test_quality_counts_cover_every_well_formed_id(adapter: Adapter) -> No
     assert counts == {NO_SUCH_ID: (0, 0, 0)}
 
 
+@pytest.mark.parametrize("respell", [str.upper, lambda i: i.replace("-", "")])
+async def test_quality_counts_key_by_the_canonical_id_whatever_the_spelling(
+    adapter: Adapter, respell: Callable[[str], str]
+) -> None:
+    entry = await write(adapter, "rated")
+    await adapter.store.record_feedback(Feedback(entry.id, "u", "a", Verdict.WRONG, "n", _min(1)))
+    counts = await adapter.store.quality_counts([respell(entry.id), entry.id])
+    assert counts == {entry.id: (0, 0, 1)}
+
+
 # -- last confirmed (SPEC §4.2) --------------------------------------------------------
 
 
@@ -1597,6 +1619,20 @@ async def test_feedback_signals_cover_every_well_formed_id(adapter: Adapter) -> 
     }
     assert signals[entry.id].counts == (await adapter.store.quality_counts([entry.id]))[entry.id]
     assert await adapter.store.feedback_signals([]) == {}
+
+
+@pytest.mark.parametrize("respell", [str.upper, lambda i: i.replace("-", "")])
+async def test_feedback_signals_key_by_the_canonical_id_whatever_the_spelling(
+    adapter: Adapter, respell: Callable[[str], str]
+) -> None:
+    entry = await write(adapter, "rated")
+    await adapter.store.record_feedback(Feedback(entry.id, "u", "a", Verdict.WRONG, "n", _min(1)))
+    for supersedes in (False, True):
+        signals = await adapter.store.feedback_signals(
+            [respell(entry.id), entry.id], count_supersedes=supersedes
+        )
+        assert list(signals) == [entry.id]
+        assert signals[entry.id].counts == (0, 0, 1)
 
 
 # -- evidence on a hit: correction and supersedes (SPEC §6.1) -------------------------
@@ -3016,6 +3052,20 @@ async def _state(adapter: Adapter, entry_id: str) -> Entry:
     entry = await adapter.store.get_entry(entry_id)
     assert entry is not None
     return entry
+
+
+async def test_cleanup_preview_counts_the_pin_rows_the_cleanup_removes(adapter: Adapter) -> None:
+    """One memory pinned in two fleets is two pin rows: the preview says two,
+    and the cleanup removes two."""
+    store = adapter.store
+    one = (await store.create_fleet("alpha")).id
+    two = (await store.create_fleet("beta")).id
+    junk = await _junk(adapter, "pinned twice", scope="org")
+    for fleet in (one, two):
+        assert isinstance(await store.pin_entry(fleet, junk.id, "bad", 10), PinWrite)
+    scan = await store.scan_agent_cleanup("bad", WIDE_SINCE, WIDE_UNTIL)
+    out = await _clean(adapter)
+    assert scan.pins_total == len(out.unpinned) == 2
 
 
 async def test_cleanup_withdraws_ratings_pins_and_restores_in_one_go(adapter: Adapter) -> None:
