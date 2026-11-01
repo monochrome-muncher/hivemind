@@ -63,4 +63,8 @@ hourly.
 disabled for the run via `KILO_CONFIG_CONTENT`, and the plugin skips the
 server it would register. The launcher leaves `HIVEMIND_API_KEY` in the
 environment (the session is incognito because the server is off, not
-because the key is gone).
+because the key is gone). If `KILO_CONFIG_CONTENT` is already set, the
+launcher does not merge into it, so the overlay is skipped: it unsets
+`HIVEMIND_API_KEY` and `HIVEMIND_MCP_URL`, so an `{env:...}` entry has
+nothing to send, and says so on stderr. A server with a literal key in
+config may still load; unset the variable or switch that entry off yourself.
