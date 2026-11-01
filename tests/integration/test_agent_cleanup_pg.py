@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 import asyncpg
 import pytest
 from tests.fakes import FakeAuthenticator
-from tests.pg import ensure_migrated
+from tests.pg import ensure_migrated, reset_tables
 
 from hivemind.config import Settings
 from hivemind.domain.access import AgentStatus, TrustLevel
@@ -24,10 +24,6 @@ from hivemind.services.access import AccessService
 from hivemind.store import PgStore
 from hivemind.store import pgstore as pgstore_module
 
-TABLES = (
-    "TRUNCATE audit_log, credentials, agents, fleets, entries, feedbacks, search_counts, "
-    "entry_links, pins, fleet_merges, fleet_merge_entries, agent_cleanups"
-)
 SINCE = datetime(2020, 1, 1, tzinfo=UTC)
 UNTIL = datetime(2100, 1, 1, tzinfo=UTC)
 ADMIN = Credential(user_id="admin", is_admin=True, key_id="abcdef012345")
@@ -37,17 +33,12 @@ ADMIN = Credential(user_id="admin", is_admin=True, key_id="abcdef012345")
 async def pool():
     dsn = Settings().database_url
     await ensure_migrated(dsn, Settings().embedding_dim)
-    conn = await asyncpg.connect(dsn)
-    await conn.execute(TABLES)
-    await conn.close()
+    await reset_tables(dsn)
     store = PgStore(dsn)
     try:
         yield dsn, store
     finally:
         await store.close()
-        conn = await asyncpg.connect(dsn)
-        await conn.execute(TABLES)
-        await conn.close()
 
 
 def _draft(summary: str, author: str = "bad", **kwargs: object) -> EntryDraft:

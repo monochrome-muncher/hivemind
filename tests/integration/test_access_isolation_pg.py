@@ -8,10 +8,9 @@ working. Skips when Postgres is down, like the rest of the suite.
 
 from __future__ import annotations
 
-import asyncpg
 import pytest
 from tests.fakes import FakeEmbedder, make_search_config
-from tests.pg import ensure_migrated
+from tests.pg import ensure_migrated, reset_tables
 
 from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
@@ -25,25 +24,18 @@ from hivemind.services.write import WriteService
 from hivemind.store import PgAuthenticator, PgStore
 from hivemind.store.keys import _issue_admin
 
-TABLES = "TRUNCATE audit_log, credentials, agents, fleets, entries, feedbacks"
-
 
 @pytest.fixture
 async def pool():
     dsn = Settings().database_url
     await ensure_migrated(dsn, Settings().embedding_dim)
-    conn = await asyncpg.connect(dsn)
-    await conn.execute(TABLES)
-    await conn.close()
+    await reset_tables(dsn)
     store, auth = PgStore(dsn), PgAuthenticator(dsn)
     try:
         yield dsn, store, auth
     finally:
         await store.close()
         await auth.close()
-        conn = await asyncpg.connect(dsn)
-        await conn.execute(TABLES)
-        await conn.close()
 
 
 def _surface(store: PgStore, credential: Credential) -> McpHivemind:

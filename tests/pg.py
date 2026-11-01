@@ -25,6 +25,7 @@ import pytest
 from hivemind.store import migrate as migrate_module
 
 _migrated: set[tuple[str, int]] = set()
+_tables: dict[str, list[str]] = {}
 
 
 def _chain_ids() -> set[str]:
@@ -67,3 +68,62 @@ async def ensure_migrated(dsn: str, dim: int) -> None:
     if not current:
         await migrate_module.migrate(dsn, dim)
         _migrated.add((dsn, dim))
+        _tables.pop(dsn, None)  # the schema may have been rebuilt
+
+
+async def reset_tables(dsn: str) -> None:
+    """Empty every application table, in one round trip. Call it once per
+    test, before the test, after ``ensure_migrated``.
+
+    The list comes from the schema (tables in ``public`` except yoyo's
+    ``_yoyo_*`` and ``yoyo_lock``), so a table a later migration adds is
+    never forgotten, and it is cached per ``dsn`` for the process. Rows are
+    removed with ``DELETE``, children before the tables their foreign keys
+    point at, in one transaction.
+
+    Why ``DELETE`` and not ``TRUNCATE``: with fsync on (CI's default) a
+    TRUNCATE of the 13 tables costs about 40 ms, because it rewrites the
+    relation files and syncs them; the same tables emptied with DELETE cost
+    about 1 ms. Over the suite's ~1000 fixtures (each used to truncate
+    before and after) that is most of the Postgres tests' time. Sequences
+    are not reset: TRUNCATE without ``RESTART IDENTITY`` did not reset them
+    either. Dead tuples stay until autovacuum; the vector-index recall
+    module, which measures the HNSW graph, keeps its own TRUNCATE.
+    """
+    conn = await asyncpg.connect(dsn)
+    try:
+        names = _tables.get(dsn)
+        if names is None:
+            names = await _fk_ordered_tables(conn)
+            _tables[dsn] = names
+        async with conn.transaction():
+            await conn.execute("".join(f'DELETE FROM "{name}"; ' for name in names))
+    finally:
+        await conn.close()
+
+
+async def _fk_ordered_tables(conn: asyncpg.Connection) -> list[str]:
+    """Application tables, each before every table it references."""
+    rows = await conn.fetch(
+        "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') "
+        "AND c.relname NOT LIKE '\\_yoyo\\_%' AND c.relname <> 'yoyo_lock' "
+        "ORDER BY c.relname"
+    )
+    remaining = {r["relname"] for r in rows}
+    refs = await conn.fetch(
+        "SELECT conrelid::regclass::text AS child, confrelid::regclass::text AS parent "
+        "FROM pg_constraint WHERE contype = 'f' AND conrelid <> confrelid"
+    )
+    parents: dict[str, set[str]] = {name: set() for name in remaining}
+    for r in refs:
+        if r["child"] in parents and r["parent"] in remaining:
+            parents[r["parent"]].add(r["child"])  # parent waits for its children
+    ordered: list[str] = []
+    while remaining:
+        ready = sorted(n for n in remaining if not (parents[n] & remaining))
+        if not ready:
+            raise RuntimeError(f"foreign-key cycle among {sorted(remaining)}")
+        ordered += ready
+        remaining -= set(ready)
+    return ordered

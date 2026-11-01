@@ -447,7 +447,12 @@ async def withdrawn_noise(corpus):
 
 
 class TestTheIndexIsSound:
-    """What is asserted (the measurement itself is ``TestMeasurement``)."""
+    """What is asserted (the measurement itself is ``TestMeasurement``).
+
+    One class on purpose: ``--dist loadscope`` groups methods by class, and
+    every class that reads ``corpus`` makes the worker it lands on seed the
+    6 s module corpus, so a second class would seed it a second time.
+    """
 
     async def test_the_exact_arm_reproduces_the_golden_ordering(self, monkeypatch, corpus) -> None:
         """So a failure of the comparison is the harness, not the index."""
@@ -486,6 +491,38 @@ class TestTheIndexIsSound:
         _, _, stream = await _run_arm(monkeypatch, store, embedder, golden_ids, HNSW_ARM)
         short = {q: len(ids) for q, ids in stream.items() if len(ids) != top_k}
         assert not short, f"the HNSW vector stream came back short of {top_k}: {short}"
+
+    async def test_the_two_arms_really_run_different_plans(self, corpus) -> None:
+        """Without this, both arms could be the same plan and every
+        comparison above would be a tautology."""
+        _store, embedder, _golden_ids = corpus
+        dsn = Settings().database_url
+        vector = await embedder.embed_text("database connection pooling pgbouncer")
+        sql = (
+            "EXPLAIN SELECT id FROM entries WHERE state = 'active' AND embedding IS NOT NULL "
+            "ORDER BY embedding <=> $1 LIMIT 20"
+        )
+        conn = await asyncpg.connect(dsn)
+        try:
+            await register_vector(conn)
+            plans: dict[str, str] = {}
+            for label, arm in (("exact", EXACT_ARM), ("hnsw", HNSW_ARM)):
+                transaction = conn.transaction()
+                await transaction.start()
+                await conn.execute(BASE_SETTINGS + arm)
+                rows = await conn.fetch(sql, vector)
+                await transaction.commit()
+                # Node names only: a plan line carries the whole 1024-dim
+                # query vector, which makes an assertion message unreadable.
+                plans[label] = "\n".join(
+                    r[0].split("  (cost")[0].strip() for r in rows if "(cost=" in r[0]
+                )
+        finally:
+            await conn.close()
+
+        assert "Seq Scan on entries" in plans["exact"], plans["exact"]
+        assert INDEX_NAME not in plans["exact"], plans["exact"]
+        assert f"Index Scan using {INDEX_NAME}" in plans["hnsw"], plans["hnsw"]
 
 
 @pytest.mark.measurement
@@ -533,37 +570,3 @@ class TestMeasurement:
         print("\nef_search sweep (the shipped value is 40)\n")
         print(_render(rows))
         print()
-
-
-class TestTheArmsAreReal:
-    async def test_the_two_arms_really_run_different_plans(self, corpus) -> None:
-        """Without this, both arms could be the same plan and every
-        comparison above would be a tautology."""
-        _store, embedder, _golden_ids = corpus
-        dsn = Settings().database_url
-        vector = await embedder.embed_text("database connection pooling pgbouncer")
-        sql = (
-            "EXPLAIN SELECT id FROM entries WHERE state = 'active' AND embedding IS NOT NULL "
-            "ORDER BY embedding <=> $1 LIMIT 20"
-        )
-        conn = await asyncpg.connect(dsn)
-        try:
-            await register_vector(conn)
-            plans: dict[str, str] = {}
-            for label, arm in (("exact", EXACT_ARM), ("hnsw", HNSW_ARM)):
-                transaction = conn.transaction()
-                await transaction.start()
-                await conn.execute(BASE_SETTINGS + arm)
-                rows = await conn.fetch(sql, vector)
-                await transaction.commit()
-                # Node names only: a plan line carries the whole 1024-dim
-                # query vector, which makes an assertion message unreadable.
-                plans[label] = "\n".join(
-                    r[0].split("  (cost")[0].strip() for r in rows if "(cost=" in r[0]
-                )
-        finally:
-            await conn.close()
-
-        assert "Seq Scan on entries" in plans["exact"], plans["exact"]
-        assert INDEX_NAME not in plans["exact"], plans["exact"]
-        assert f"Index Scan using {INDEX_NAME}" in plans["hnsw"], plans["hnsw"]

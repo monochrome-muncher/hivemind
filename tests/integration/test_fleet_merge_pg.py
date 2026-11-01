@@ -9,7 +9,7 @@ import asyncio
 import asyncpg
 import pytest
 from tests.fakes import FakeEmbedder, make_search_config
-from tests.pg import ensure_migrated
+from tests.pg import ensure_migrated, reset_tables
 
 from hivemind.config import Settings
 from hivemind.domain.access import FleetBusy, FleetMerged, TrustLevel
@@ -24,30 +24,21 @@ from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
 from hivemind.services.write import WriteService
 from hivemind.store import PgAuthenticator, PgStore
+from hivemind.store import pgstore as pgstore_module
 from hivemind.store.keys import _issue_admin
-
-TABLES = (
-    "TRUNCATE audit_log, credentials, agents, fleets, entries, feedbacks, search_counts, "
-    "entry_links, pins, fleet_merges, fleet_merge_entries, agent_cleanups, successions"
-)
 
 
 @pytest.fixture
 async def pool():
     dsn = Settings().database_url
     await ensure_migrated(dsn, Settings().embedding_dim)
-    conn = await asyncpg.connect(dsn)
-    await conn.execute(TABLES)
-    await conn.close()
+    await reset_tables(dsn)
     store, auth = PgStore(dsn), PgAuthenticator(dsn)
     try:
         yield dsn, store, auth
     finally:
         await store.close()
         await auth.close()
-        conn = await asyncpg.connect(dsn)
-        await conn.execute(TABLES)
-        await conn.close()
 
 
 def _draft(fleet_id: str, summary: str, author: str = "amy") -> EntryDraft:
@@ -123,9 +114,10 @@ async def test_a_write_in_flight_across_the_merge_waits_and_is_then_refused(pool
 
 
 async def test_a_write_gives_up_with_a_retryable_error_when_a_merge_holds_the_fleet_too_long(
-    pool,
+    pool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     dsn, store, _ = pool
+    monkeypatch.setattr(pgstore_module, "WRITE_LOCK_TIMEOUT", "300ms")  # not the shipped 3s
     source, target = (await store.create_fleet("a")).id, (await store.create_fleet("b")).id
     merge = await asyncpg.connect(dsn)
     tx = merge.transaction()
@@ -135,7 +127,9 @@ async def test_a_write_gives_up_with_a_retryable_error_when_a_merge_holds_the_fl
         started = asyncio.get_running_loop().time()
         with pytest.raises(FleetBusy, match="being merged or moved, retry"):
             await store.create_entry(_draft(source, "waits too long"), None)
-        assert 2 < asyncio.get_running_loop().time() - started < 10
+        # It waited out the lock timeout (not a fast failure), then gave up
+        # well before the shipped 3 s.
+        assert 0.25 <= asyncio.get_running_loop().time() - started < 2
         with pytest.raises(TimeoutError):  # a 503 on every surface
             await store.pin_entry(source, target, "lead", 10)
     finally:

@@ -13,14 +13,12 @@ from __future__ import annotations
 
 import asyncpg
 import pytest
-from tests.pg import ensure_migrated
+from tests.pg import ensure_migrated, reset_tables
 
 from hivemind.config import Settings
 from hivemind.store import PgAuthenticator
 from hivemind.store.keys import SecretLeftBehind, _bootstrap_secret, _rotate_org
 from hivemind.store.kube_secret import KubeApiError
-
-TABLES = "TRUNCATE audit_log, credentials"
 
 
 class FakeSecrets:
@@ -77,11 +75,8 @@ async def _rows(dsn: str, sql: str) -> list[asyncpg.Record]:
 async def dsn():
     dsn = _dsn()
     await ensure_migrated(dsn, Settings().embedding_dim)
-    await _exec(dsn, TABLES)
-    try:
-        yield dsn
-    finally:
-        await _exec(dsn, TABLES)
+    await reset_tables(dsn)
+    yield dsn
 
 
 async def test_bootstrap_stores_working_keys_in_the_secret(dsn: str) -> None:

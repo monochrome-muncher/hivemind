@@ -9,11 +9,10 @@ path, on real Postgres. Skips cleanly when Postgres is unreachable.
 
 from __future__ import annotations
 
-import asyncpg
 import httpx
 import pytest
 from tests.fakes import FakeEmbedder, make_search_config
-from tests.pg import ensure_migrated
+from tests.pg import ensure_migrated, reset_tables
 
 from hivemind.api.deps import create_app
 from hivemind.api.main import create_app_for_config
@@ -27,11 +26,7 @@ PAYLOAD = {"n": 1, "nested": {"a": [1, 2, {"b": None}]}, "s": "x"}
 async def store():
     dsn, dim = Settings().database_url, Settings().embedding_dim
     await ensure_migrated(dsn, dim)
-    conn = await asyncpg.connect(dsn)
-    try:
-        await conn.execute("TRUNCATE credentials, feedbacks, entries")
-    finally:
-        await conn.close()
+    await reset_tables(dsn)
     s = PgStore(dsn)
     try:
         yield s, dim

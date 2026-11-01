@@ -10,11 +10,10 @@ Skips cleanly when Postgres is unreachable.
 
 from __future__ import annotations
 
-import asyncpg
 import httpx
 import pytest
 from tests.fakes import FakeEmbedder, make_search_config
-from tests.pg import ensure_migrated
+from tests.pg import ensure_migrated, reset_tables
 from tests.unit.test_api_endpoints import FakeAuthenticator
 
 from hivemind.api.deps import create_app
@@ -32,11 +31,7 @@ async def client():
     settings = Settings()
     dsn = settings.database_url
     await ensure_migrated(dsn, settings.embedding_dim)
-    conn = await asyncpg.connect(dsn)
-    try:
-        await conn.execute("TRUNCATE entries, audit_log CASCADE")
-    finally:
-        await conn.close()
+    await reset_tables(dsn)
     store = PgStore(dsn)
     authenticator = FakeAuthenticator(
         {

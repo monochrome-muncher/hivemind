@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncpg
 import pytest
-from tests.pg import ensure_migrated
+from tests.pg import ensure_migrated, reset_tables
 
 from hivemind.config import Settings
 from hivemind.store import PgAuthenticator
@@ -33,26 +33,17 @@ def _dsn() -> str:
     return Settings().database_url
 
 
-async def _truncate_credentials(dsn: str) -> None:
-    conn = await asyncpg.connect(dsn)
-    try:
-        await conn.execute("TRUNCATE credentials")
-    finally:
-        await conn.close()
-
-
 @pytest.fixture
 async def pg():
     """A clean dev DB for the keys table (skips when Postgres is down)."""
     dsn = _dsn()
     dim = Settings().embedding_dim
     await ensure_migrated(dsn, dim)
-    await _truncate_credentials(dsn)
+    await reset_tables(dsn)
     auth = PgAuthenticator(dsn)
     try:
         yield auth
     finally:
-        await _truncate_credentials(dsn)
         await auth.close()
 
 

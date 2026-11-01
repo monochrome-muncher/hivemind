@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator
 
 import asyncpg
 import pytest
-from tests.pg import ensure_migrated
+from tests.pg import ensure_migrated, reset_tables
 
 from hivemind.config import Settings
 from hivemind.domain.access import KeyLocked, TrustLevel
@@ -27,7 +27,6 @@ from hivemind.store import PgAuthenticator, PgStore
 from hivemind.store.auth import key_hash
 from hivemind.store.keys import _rotate_agent
 
-TABLES = "TRUNCATE audit_log, credentials, agents, fleets, entries, feedbacks, pins, fleet_merges, fleet_merge_entries"
 ADMIN = Credential(user_id="admin", is_admin=True, key_id="adminfinger1")
 
 Env = tuple[str, PgStore, PgAuthenticator, AccessService]
@@ -45,14 +44,13 @@ async def _exec(dsn: str, sql: str, *args: object) -> None:
 async def env() -> AsyncIterator[Env]:
     dsn = Settings().database_url
     await ensure_migrated(dsn, Settings().embedding_dim)
-    await _exec(dsn, TABLES)
+    await reset_tables(dsn)
     store, auth = PgStore(dsn), PgAuthenticator(dsn)
     try:
         yield dsn, store, auth, AccessService(store, auth)
     finally:
         await store.close()
         await auth.close()
-        await _exec(dsn, TABLES)
 
 
 async def _agent_key(service: AccessService, store: PgStore, name: str = "alice") -> str:

@@ -9,7 +9,7 @@ import asyncio
 import asyncpg
 import pytest
 from tests.fakes import FakeEmbedder, make_search_config
-from tests.pg import ensure_migrated
+from tests.pg import ensure_migrated, reset_tables
 
 from hivemind.config import Settings
 from hivemind.domain.access import FleetBusy, TrustLevel
@@ -24,30 +24,21 @@ from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
 from hivemind.services.write import WriteService
 from hivemind.store import PgAuthenticator, PgStore
+from hivemind.store import pgstore as pgstore_module
 from hivemind.store.keys import _issue_admin
-
-TABLES = (
-    "TRUNCATE audit_log, credentials, agents, fleets, entries, feedbacks, search_counts, "
-    "entry_links, pins, fleet_merges, fleet_merge_entries"
-)
 
 
 @pytest.fixture
 async def pool():
     dsn = Settings().database_url
     await ensure_migrated(dsn, Settings().embedding_dim)
-    conn = await asyncpg.connect(dsn)
-    await conn.execute(TABLES)
-    await conn.close()
+    await reset_tables(dsn)
     store, auth = PgStore(dsn), PgAuthenticator(dsn)
     try:
         yield dsn, store, auth
     finally:
         await store.close()
         await auth.close()
-        conn = await asyncpg.connect(dsn)
-        await conn.execute(TABLES)
-        await conn.close()
 
 
 def _draft(fleet_id: str, summary: str, author: str) -> EntryDraft:
@@ -140,8 +131,11 @@ async def test_a_write_in_flight_across_the_move_waits_and_is_then_refused(pool)
     assert await _count(dsn, source, "amy") == 0 and await _count(dsn, source, "bob") == 1
 
 
-async def test_a_write_into_the_target_waits_for_the_move_too(pool) -> None:
+async def test_a_write_into_the_target_waits_for_the_move_too(
+    pool, monkeypatch: pytest.MonkeyPatch
+) -> None:
     dsn, store, _ = pool
+    monkeypatch.setattr(pgstore_module, "WRITE_LOCK_TIMEOUT", "300ms")  # not the shipped 3s
     _, target = await _fleets_and_agents(store)
     await store.register_agent("cat")
     await store.activate_agent("cat", trust_level=TrustLevel.CONTRIBUTOR, home_fleet_id=target)
@@ -150,8 +144,11 @@ async def test_a_write_into_the_target_waits_for_the_move_too(pool) -> None:
     await tx.start()
     await move.execute("SELECT 1 FROM fleets WHERE id = $1 FOR UPDATE", target)
     try:
+        started = asyncio.get_running_loop().time()
         with pytest.raises(FleetBusy):
             await store.create_entry(_draft(target, "waits too long", "cat"), None)
+        # It waited out the lock timeout (not a fast failure), then gave up.
+        assert 0.25 <= asyncio.get_running_loop().time() - started < 2
     finally:
         await tx.rollback()
         await move.close()

@@ -22,7 +22,7 @@ import sys
 
 import asyncpg
 import pytest
-from tests.pg import ensure_migrated
+from tests.pg import ensure_migrated, reset_tables
 
 from hivemind.config import Settings
 from hivemind.domain import TrustLevel
@@ -39,8 +39,6 @@ from hivemind.store.keys import (
     _rotate_org,
 )
 
-TABLES = "TRUNCATE audit_log, credentials, agents, fleets, entries, feedbacks"
-
 
 def _dsn() -> str:
     return Settings().database_url
@@ -48,7 +46,7 @@ def _dsn() -> str:
 
 async def _prepare(dsn: str) -> None:
     await ensure_migrated(dsn, Settings().embedding_dim)
-    await _exec(dsn, TABLES)
+    await reset_tables(dsn)
 
 
 async def _exec(dsn: str, sql: str) -> None:
@@ -89,10 +87,7 @@ async def _audit_rows(dsn: str) -> list[asyncpg.Record]:
 async def dsn():
     dsn = _dsn()
     await _prepare(dsn)
-    try:
-        yield dsn
-    finally:
-        await _exec(dsn, TABLES)
+    yield dsn
 
 
 # -- one row per CLI command, in the mutation's transaction ------------------
@@ -176,22 +171,19 @@ def test_actor_defaults_to_the_os_user(monkeypatch: pytest.MonkeyPatch, capsys) 
     """Through ``main()`` — the real argparse surface, no ``--actor``."""
     dsn = _dsn()
     asyncio.run(_prepare(dsn))
-    try:
-        monkeypatch.setattr(sys, "argv", ["hivemind-keys", "rotate-org"])
-        keys_cli.main()
-        printed = capsys.readouterr()
-        # stdout is the bare key (scriptable); the label is on stderr.
-        assert printed.out.startswith("hm_") and len(printed.out.splitlines()) == 1
-        assert "New org key" in printed.err and "shown once" in printed.err
-        [row] = asyncio.run(_audit_rows(dsn))
-        assert row["actor"] == getpass.getuser()
-        assert row["actor_kind"] == "cli"
+    monkeypatch.setattr(sys, "argv", ["hivemind-keys", "rotate-org"])
+    keys_cli.main()
+    printed = capsys.readouterr()
+    # stdout is the bare key (scriptable); the label is on stderr.
+    assert printed.out.startswith("hm_") and len(printed.out.splitlines()) == 1
+    assert "New org key" in printed.err and "shown once" in printed.err
+    [row] = asyncio.run(_audit_rows(dsn))
+    assert row["actor"] == getpass.getuser()
+    assert row["actor_kind"] == "cli"
 
-        monkeypatch.setattr(sys, "argv", ["hivemind-keys", "--actor", "break-glass", "rotate-org"])
-        keys_cli.main()
-        assert asyncio.run(_audit_rows(dsn))[-1]["actor"] == "break-glass"
-    finally:
-        asyncio.run(_exec(dsn, TABLES))
+    monkeypatch.setattr(sys, "argv", ["hivemind-keys", "--actor", "break-glass", "rotate-org"])
+    keys_cli.main()
+    assert asyncio.run(_audit_rows(dsn))[-1]["actor"] == "break-glass"
 
 
 # -- no raw key in any audit row, across BOTH paths ---------------------------

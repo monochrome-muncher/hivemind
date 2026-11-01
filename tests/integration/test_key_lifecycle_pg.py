@@ -20,7 +20,7 @@ import json
 
 import asyncpg
 import pytest
-from tests.pg import ensure_migrated
+from tests.pg import ensure_migrated, reset_tables
 
 from hivemind.config import Settings
 from hivemind.domain.access import InvalidAgentStatus, TrustLevel
@@ -39,8 +39,6 @@ from hivemind.store.keys import (
     _rotate_org,
 )
 from hivemind.store.migrate import migrate
-
-TABLES = "TRUNCATE audit_log, credentials, agents, fleets, entries, feedbacks, pins, fleet_merges, fleet_merge_entries, agent_cleanups, successions"
 
 
 async def _exec(dsn: str, sql: str, *args: object) -> None:
@@ -63,14 +61,13 @@ async def _fetch(dsn: str, sql: str, *args: object) -> list[asyncpg.Record]:
 async def env():
     dsn = Settings().database_url
     await ensure_migrated(dsn, Settings().embedding_dim)
-    await _exec(dsn, TABLES)
+    await reset_tables(dsn)
     store, auth = PgStore(dsn), PgAuthenticator(dsn)
     try:
         yield dsn, store, auth
     finally:
         await store.close()
         await auth.close()
-        await _exec(dsn, TABLES)
 
 
 async def _admin(dsn: str, auth: PgAuthenticator):
@@ -165,6 +162,8 @@ async def test_revoke_landing_between_activate_flip_and_key_issue(env) -> None:
         if agent is not None and agent.status.value == "active":
             break
         await asyncio.sleep(0.01)
+    else:
+        pytest.fail("mallory never became active, so the revoke never raced the activation")
     await service.revoke("mallory", admin)
     gate.set()
     with pytest.raises(InvalidAgentStatus):

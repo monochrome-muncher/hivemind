@@ -22,7 +22,7 @@ from datetime import UTC, datetime, timedelta
 
 import asyncpg
 import pytest
-from tests.pg import ensure_migrated
+from tests.pg import ensure_migrated, reset_tables
 
 from hivemind.config import Settings
 from hivemind.domain.access import (
@@ -79,11 +79,6 @@ from hivemind.store import PgStore
 T0 = datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC)
 NO_SUCH_ID = "00000000-0000-4000-8000-00000000dead"
 
-_TABLES = (
-    "TRUNCATE audit_log, credentials, agents, fleets, entries, feedbacks, "
-    "search_counts, entry_links, pins, fleet_merges, fleet_merge_entries, agent_cleanups, successions"
-)
-
 
 class TickingClock:
     """Every reading is 1 ms later, so ``created_at`` orders writes the way
@@ -114,19 +109,11 @@ async def _pg_adapter() -> AsyncIterator[Adapter]:
     dsn, dim = settings.database_url, settings.embedding_dim
     await ensure_migrated(dsn, dim)
 
-    async def truncate() -> None:
-        conn = await asyncpg.connect(dsn)
-        try:
-            await conn.execute(_TABLES)
-        finally:
-            await conn.close()
-
-    await truncate()
+    await reset_tables(dsn)
     store = PgStore(dsn)
     try:
         yield Adapter("pg", store, dim)
     finally:
-        await truncate()
         await store.close()
 
 
