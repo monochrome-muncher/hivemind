@@ -230,8 +230,8 @@ omp plugin marketplace add https://github.com/monochrome-muncher/hivemind
 omp plugin install hivemind@hivemind
 ```
 
-Use the marketplace as shown. A plain `omp install <url>` leaves out the
-skills.
+Use the marketplace as shown. A plain `omp install <url>` brings the
+skills and the reminder but not the MCP connection.
 
 ### Cline
 

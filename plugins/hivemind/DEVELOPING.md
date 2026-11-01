@@ -89,8 +89,12 @@ itself names no harness-specific paths, and a test enforces this.
   `xd://mcp__hivemind_hive_*` for a hand entry, which then replaces the
   plugin's) rather than as named tools; the agent finds them in its system
   prompt. Checked with Oh My Pi 18.9.1.
-  A plain `omp install <git-url>` misses the skills, so it installs
-  through the marketplace.
+  A plain `omp install` of the repository installs the root package: the
+  extension and, through the root `skills` link, both skills, but no MCP
+  server (the package route has no `.mcp.json`, and Oh My Pi has no
+  `registerMcpServer`), so it installs through the marketplace. Checked
+  with 18.15.0 from a local copy of the repository root; a GitHub URL
+  could not be fetched from the test container.
 - **OpenCode** caches a Git plugin on first use and never refreshes an
   unpinned entry, so users pin a release tag. v1 (1.18.29+) and v2 have
   different plugin APIs, so `opencode/hivemind.js` default-exports one
