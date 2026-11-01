@@ -35,7 +35,7 @@ test:
   services:
     # alias: GitLab otherwise derives the hostname from the image name
     # (`pgvector-pgvector`), so `postgres` in the DSN would not resolve.
-    - name: pgvector/pgvector:0.8.1-pg16
+    - name: pgvector/pgvector:0.8.7-pg16
       alias: postgres
   variables:
     # The service DB user IS a superuser so the probe can CREATE EXTENSION.
@@ -46,7 +46,7 @@ test:
     HIVEMIND_DATABASE_URL: postgresql://hivemind:hivemind@postgres:5432/hivemind
     HIVEMIND_EMBEDDING_DIM: "512"
   script:
-    - pip install uv==0.12.21
+    - pip install uv==0.12.24
     # The image build uses `uv sync --locked`: fail here, early, when uv.lock
     # is out of date with pyproject.toml.
     - uv lock --check
@@ -94,7 +94,7 @@ migrations:
     name: python:3.14
   services:
     # alias: see the `test` job.
-    - name: pgvector/pgvector:0.8.1-pg16
+    - name: pgvector/pgvector:0.8.7-pg16
       alias: postgres
   variables:
     POSTGRES_USER: hivemind
@@ -109,7 +109,7 @@ migrations:
     COMPAT_RELEASES: "3"
   script:
     - apt-get update -qq && apt-get install -y -qq postgresql-client
-    - pip install uv==0.12.21
+    - pip install uv==0.12.24
     - uv sync
     # 1. The generated schema.sql (a review aid, never applied; ADR 0020)
     #    must be current.
