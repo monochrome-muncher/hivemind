@@ -131,6 +131,32 @@ def _error(code: str, message: str) -> dict[str, object]:
     return {"error": {"code": code, "message": message}}
 
 
+# The one table from the typed service errors to MCP error codes. A subclass
+# is looked up before its base (``SupersedeDenied`` before ``PermissionDenied``)
+# by walking the exception's MRO, so the order here does not matter.
+_SERVICE_ERROR_CODES: dict[type[Exception], str] = {
+    PermissionDenied: ERR_PERMISSION_DENIED,
+    SupersedeDenied: ERR_SUPERSEDE_DENIED,
+    EntryNotFound: ERR_NOT_FOUND,
+    EntryNotActive: ERR_NOT_ACTIVE,
+    InvalidInput: ERR_INVALID_INPUT,
+    AgentIdentityRequired: ERR_AGENT_UNRESOLVED,
+    FleetMerged: ERR_FLEET_MERGED,  # ADR 0107: the fleet was merged away
+    NameTaken: ERR_NAME_CONFLICT,
+}
+_SERVICE_ERRORS = tuple(_SERVICE_ERROR_CODES)
+
+
+def _service_error(exc: Exception) -> dict[str, object]:
+    """The error envelope for a typed service error: the most specific class
+    in ``_SERVICE_ERROR_CODES`` names the code, the message is ``str(exc)``."""
+    for cls in type(exc).__mro__:
+        code = _SERVICE_ERROR_CODES.get(cls)
+        if code is not None:
+            return _error(code, str(exc))
+    raise exc  # not a service error: the caller caught too much
+
+
 def _parse_dt(value: str | None, field_name: str) -> datetime | None:
     """Parse an optional ISO-8601 timestamp; naive values are treated as UTC."""
     if value is None:
@@ -227,6 +253,24 @@ def _build_filters(
     return filters
 
 
+def _feedback_precheck(
+    app: McpHivemind, verdict: str, agent: str | None
+) -> Verdict | dict[str, object]:
+    """Parse the verdict and check the reporter's agent identity (SPEC §8.1)
+    before any service call: the ``Verdict``, or the error reply to return."""
+    try:
+        parsed = Verdict(verdict)
+    except ValueError:
+        return _error(ERR_INVALID_VERDICT, f"verdict must be helpful|stale|wrong, got {verdict!r}")
+    if reporter_agent(app.credential, agent) is None:
+        # The service's AgentIdentityRequired condition, checked up front.
+        return _error(
+            ERR_AGENT_UNRESOLVED,
+            "the caller's agent identity must be resolved before recording feedback",
+        )
+    return parsed
+
+
 # --------------------------------------------------------------------------- #
 # Tool functions (SPEC §5.2)
 # --------------------------------------------------------------------------- #
@@ -315,8 +359,8 @@ async def hive_write(
             supersedes=supersedes or (),
             see_also=see_also or (),
         )
-    except PermissionDenied as exc:
-        return _error(ERR_PERMISSION_DENIED, str(exc))
+    except _SERVICE_ERRORS as exc:
+        return _service_error(exc)
     except ValueError as exc:
         return _error(ERR_INVALID_INPUT, str(exc))
     try:
@@ -328,14 +372,10 @@ async def hive_write(
                 "warnings": [wire.warning_dict(w) for w in checked.warnings],
             }
         written = await app.write_service.write_and_relate(draft, writer=cred.visibility())
-    except SupersedeDenied as exc:
-        return _error(ERR_SUPERSEDE_DENIED, str(exc))
-    except FleetMerged as exc:  # ADR 0107: the home fleet was merged away
-        return _error(ERR_FLEET_MERGED, str(exc))
+    except _SERVICE_ERRORS as exc:  # incl. InvalidInput, e.g. an unknown see_also entry
+        return _service_error(exc)
     except EmbeddingError as exc:
         return _embedding_unavailable(exc)
-    except InvalidInput as exc:  # e.g. an unknown see_also entry
-        return _error(ERR_INVALID_INPUT, str(exc))
     result = wire.entry_dict(written.entry)
     result["related"] = [wire.related_dict(r) for r in written.related]
     result["warnings"] = [wire.warning_dict(w) for w in written.warnings]
@@ -418,8 +458,8 @@ async def hive_search(
             explore=explore,
             recency=hint,
         )
-    except InvalidInput as exc:
-        return _error(ERR_INVALID_INPUT, str(exc))
+    except _SERVICE_ERRORS as exc:
+        return _service_error(exc)
     response: dict[str, object] = {
         "count": len(result.hits),
         "hits": [wire.hit_dict(h) for h in result.hits],
@@ -469,11 +509,14 @@ async def hive_get(
         return await _hive_get_many(app, entry_ids)
     if not entry_id or not entry_id.strip():
         return _error(ERR_INVALID_INPUT, "entry_id is required (pass a hit's id)")
-    detail = await app.read_service.entry(
-        entry_id,
-        visibility=app.credential.visibility(),
-        include_history=include_history,
-    )
+    try:
+        detail = await app.read_service.entry(
+            entry_id,
+            visibility=app.credential.visibility(),
+            include_history=include_history,
+        )
+    except _SERVICE_ERRORS as exc:
+        return _service_error(exc)
     if detail is None:
         return _error(ERR_NOT_FOUND, f"unknown entry: {entry_id}")
     result = wire.entry_dict(detail.entry)
@@ -488,8 +531,8 @@ async def hive_get(
 async def _hive_get_many(app: McpHivemind, entry_ids: list[str]) -> dict[str, object]:
     try:
         batch = await app.read_service.entries(entry_ids, visibility=app.credential.visibility())
-    except InvalidInput as exc:
-        return _error(ERR_INVALID_INPUT, str(exc))
+    except _SERVICE_ERRORS as exc:
+        return _service_error(exc)
     return {
         "entries": [
             {
@@ -567,8 +610,8 @@ async def hive_list(
             visibility=app.credential.visibility(),
             credential=app.credential,
         )
-    except AgentIdentityRequired as exc:
-        return _error(ERR_AGENT_UNRESOLVED, str(exc))
+    except _SERVICE_ERRORS as exc:
+        return _service_error(exc)
     to_dict = wire.entry_dict if include_body else wire.list_item_dict
     items = [to_dict(e) for e in entries]
     if relied_on_changed and entries:  # why each is listed: its state and the reports
@@ -590,14 +633,8 @@ async def hive_withdraw(
     """
     try:
         entry = await app.governance_service.withdraw(app.credential, entry_id, reason)
-    except PermissionDenied as exc:
-        return _error(ERR_PERMISSION_DENIED, str(exc))
-    except EntryNotFound as exc:
-        return _error(ERR_NOT_FOUND, str(exc))
-    except InvalidInput as exc:
-        return _error(ERR_INVALID_INPUT, str(exc))
-    except EntryNotActive as exc:
-        return _error(ERR_NOT_ACTIVE, str(exc))
+    except _SERVICE_ERRORS as exc:
+        return _service_error(exc)
     return wire.entry_dict(entry)
 
 
@@ -611,16 +648,8 @@ async def hive_pin(app: McpHivemind, entry_id: str, unpin: bool = False) -> dict
             removed = await app.governance_service.unpin(app.credential, entry_id)
             return {"entry_id": entry_id, "pinned": False, "removed": removed}
         pin = await app.governance_service.pin(app.credential, entry_id)
-    except PermissionDenied as exc:
-        return _error(ERR_PERMISSION_DENIED, str(exc))
-    except EntryNotFound as exc:
-        return _error(ERR_NOT_FOUND, str(exc))
-    except InvalidInput as exc:
-        return _error(ERR_INVALID_INPUT, str(exc))
-    except EntryNotActive as exc:
-        return _error(ERR_NOT_ACTIVE, str(exc))
-    except FleetMerged as exc:  # ADR 0107
-        return _error(ERR_FLEET_MERGED, str(exc))
+    except _SERVICE_ERRORS as exc:
+        return _service_error(exc)
     return {
         "entry_id": pin.entry_id,
         "pinned": True,
@@ -640,8 +669,8 @@ async def hive_pinned(app: McpHivemind, fleet_id: str | None = None) -> dict[str
     acknowledges the change (ADR 0076)."""
     try:
         pinned = await app.governance_service.pinned(app.credential, fleet_id)
-    except InvalidInput as exc:
-        return _error(ERR_INVALID_INPUT, str(exc))
+    except _SERVICE_ERRORS as exc:
+        return _service_error(exc)
     return {
         "fleet_id": fleet_id or app.credential.home_fleet_id,
         "pins": [
@@ -686,28 +715,15 @@ async def hive_feedback(
         return await _hive_feedback_many(app, entry_ids, verdict, note, agent)
     if not entry_id or not entry_id.strip():
         return _error(ERR_INVALID_INPUT, "entry_id is required (pass a hit's id)")
-    try:
-        parsed_verdict = Verdict(verdict)
-    except ValueError:
-        return _error(ERR_INVALID_VERDICT, f"verdict must be helpful|stale|wrong, got {verdict!r}")
-    if reporter_agent(app.credential, agent) is None:
-        # The service's AgentIdentityRequired condition (SPEC §8.1), checked up front.
-        return _error(
-            ERR_AGENT_UNRESOLVED,
-            "the caller's agent identity must be resolved before recording feedback",
-        )
+    parsed_verdict = _feedback_precheck(app, verdict, agent)
+    if not isinstance(parsed_verdict, Verdict):
+        return parsed_verdict
     try:
         outcome = await app.governance_service.record_feedback(
             app.credential, entry_id, parsed_verdict, note, agent=agent
         )
-    except EntryNotFound as exc:
-        return _error(ERR_NOT_FOUND, str(exc))
-    except PermissionDenied as exc:  # ADR 0065: the caller's own entry
-        return _error(ERR_PERMISSION_DENIED, str(exc))
-    except InvalidInput as exc:
-        return _error(ERR_INVALID_INPUT, str(exc))
-    except AgentIdentityRequired as exc:  # unreachable past the pre-check above
-        return _error(ERR_AGENT_UNRESOLVED, str(exc))
+    except _SERVICE_ERRORS as exc:  # PermissionDenied: ADR 0065, the caller's own entry
+        return _service_error(exc)
     fb: Feedback = outcome.feedback
     return {
         "entry_id": entry_id,
@@ -732,27 +748,15 @@ async def _hive_feedback_many(
     note: str | None,
     agent: str | None,
 ) -> dict[str, object]:
-    try:
-        parsed_verdict = Verdict(verdict)
-    except ValueError:
-        return _error(ERR_INVALID_VERDICT, f"verdict must be helpful|stale|wrong, got {verdict!r}")
-    if reporter_agent(app.credential, agent) is None:
-        return _error(
-            ERR_AGENT_UNRESOLVED,
-            "the caller's agent identity must be resolved before recording feedback",
-        )
+    parsed_verdict = _feedback_precheck(app, verdict, agent)
+    if not isinstance(parsed_verdict, Verdict):
+        return parsed_verdict
     try:
         outcomes = await app.governance_service.record_feedback_many(
             app.credential, entry_ids, parsed_verdict, note, agent=agent
         )
-    except EntryNotFound as exc:
-        return _error(ERR_NOT_FOUND, str(exc))
-    except PermissionDenied as exc:  # ADR 0065: the caller's own entry
-        return _error(ERR_PERMISSION_DENIED, str(exc))
-    except InvalidInput as exc:
-        return _error(ERR_INVALID_INPUT, str(exc))
-    except AgentIdentityRequired as exc:  # unreachable past the pre-check above
-        return _error(ERR_AGENT_UNRESOLVED, str(exc))
+    except _SERVICE_ERRORS as exc:  # PermissionDenied: ADR 0065, the caller's own entry
+        return _service_error(exc)
     return {
         "verdict": parsed_verdict.value,
         "note": outcomes[0].feedback.note,  # as stored (one note for every row)
@@ -781,12 +785,8 @@ async def hive_register(
         registration = await app.access_service.register(
             name, app.credential, owner_alias=owner_alias, org_only=True
         )
-    except PermissionDenied as exc:
-        return _error(ERR_PERMISSION_DENIED, str(exc))
-    except InvalidInput as exc:  # a bad or reserved name is not a conflict (ADR 0040)
-        return _error(ERR_INVALID_INPUT, str(exc))
-    except NameTaken as exc:
-        return _error(ERR_NAME_CONFLICT, str(exc))
+    except _SERVICE_ERRORS as exc:  # a bad or reserved name is InvalidInput, not a conflict
+        return _service_error(exc)
     agent = registration.agent
     return {
         "name": agent.name,
@@ -803,5 +803,8 @@ async def hive_whoami(app: McpHivemind) -> dict[str, object]:
     agent's name, status, trust level and home fleet, and what it may
     read and write. Any valid key may ask — the org key included, which
     is how an agent learns it still has to register."""
-    standing = await app.access_service.whoami(app.credential)
+    try:
+        standing = await app.access_service.whoami(app.credential)
+    except _SERVICE_ERRORS as exc:
+        return _service_error(exc)
     return standing.as_dict()
