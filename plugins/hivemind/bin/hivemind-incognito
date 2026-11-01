@@ -174,9 +174,11 @@ PY
     # KiloCode is an OpenCode fork, so the hivemind OpenCode plugin runs in
     # it and skips the server when HIVEMIND_INCOGNITO is set. A server added
     # by hand in kilo.jsonc is disabled for this run through KiloCode's
-    # highest-precedence config overlay (v2 form: mcp.servers, disabled).
+    # highest-precedence config overlay. The overlay carries both shapes:
+    # KiloCode 7.8 lowers a hand entry to the v1 shape (mcp.hivemind,
+    # enabled), and the v2 form (mcp.servers, disabled) alone left it on.
     if [ -z "${KILO_CONFIG_CONTENT:-}" ]; then
-      export KILO_CONFIG_CONTENT='{"mcp":{"servers":{"hivemind":{"disabled":true}}}}'
+      export KILO_CONFIG_CONTENT='{"mcp":{"hivemind":{"enabled":false},"servers":{"hivemind":{"disabled":true}}}}'
     fi
     exec "$harness" "$@"
     ;;

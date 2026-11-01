@@ -1290,10 +1290,16 @@ def test_kilocode_loads_the_opencode_plugin_from_the_git_spec() -> None:
         in ref
     )
     # The v1 plugin key is what gives the full feature set there; the docs
-    # say so and the launcher's incognito overlay uses KiloCode's v2 mcp shape.
+    # say so. The launcher's incognito overlay carries both mcp shapes:
+    # KiloCode 7.8.18 kept a hand-configured server on with the v2 form
+    # alone (checked live), and the v1 form switches it off.
     assert '"plugin"' in ref
     launcher = LAUNCHER.read_text()
-    assert "KILO_CONFIG_CONTENT" in launcher and '"disabled":true' in launcher
+    overlay = (
+        """KILO_CONFIG_CONTENT='{"mcp":{"hivemind":{"enabled":false},"""
+        """"servers":{"hivemind":{"disabled":true}}}}'"""
+    )
+    assert overlay in launcher
 
 
 _KILOCODE_V2_SCRIPT = """
