@@ -55,10 +55,11 @@ TEST_ENV_KEEP := HIVEMIND_DATABASE_URL HIVEMIND_EMBEDDING_DIM
 TEST_ENV = env $(foreach v,$(filter-out $(TEST_ENV_KEEP),$(DEV_DEFAULTS)),$(if $(filter file,$(origin $(v))),-u $(v)))
 PYTEST ?= uv run pytest
 # pytest-xdist: one worker per CPU (at most 8, each opens connection pools),
-# each on its own database `<name>_gw0`, ... (tests/conftest.py), grouped by
-# module (`loadscope`) so a module's fixtures are built once per worker.
+# each on its own database `<name>_gw0`, ... (tests/conftest.py). `worksteal`
+# hands each worker a contiguous run of tests (so a module's fixtures are
+# mostly built once) and lets an idle worker take the tail of a busy one.
 # `make test PYTEST_PARALLEL=` runs serially on the base database.
-PYTEST_PARALLEL ?= -n auto --maxprocesses=8 --dist loadscope
+PYTEST_PARALLEL ?= -n auto --maxprocesses=8 --dist worksteal
 
 .PHONY: help
 help: ## Show this help

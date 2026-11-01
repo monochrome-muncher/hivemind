@@ -449,9 +449,10 @@ async def withdrawn_noise(corpus):
 class TestTheIndexIsSound:
     """What is asserted (the measurement itself is ``TestMeasurement``).
 
-    One class on purpose: ``--dist loadscope`` groups methods by class, and
-    every class that reads ``corpus`` makes the worker it lands on seed the
-    6 s module corpus, so a second class would seed it a second time.
+    One class, kept small, on purpose: every worker that runs a test reading
+    ``corpus`` seeds the 6 s module corpus. ``--dist worksteal`` gives a
+    worker a contiguous run of tests, so these few stay together; splitting
+    them over more classes or between slow tests would invite a second seed.
     """
 
     async def test_the_exact_arm_reproduces_the_golden_ordering(self, monkeypatch, corpus) -> None:
