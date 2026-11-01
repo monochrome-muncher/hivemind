@@ -16,7 +16,7 @@ into a failure that asks for the mark to be removed; none is open today.
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 
@@ -252,6 +252,19 @@ async def test_uuid_spellings_postgres_rejects_read_as_absent(
     assert await store.get_fleet(odd) is None
     with pytest.raises(KeyError):
         await store.withdraw_entry(odd, None, by_user="alice")
+
+
+@pytest.mark.parametrize("spell", [str.upper, lambda i: i.replace("-", "")])
+async def test_uuid_spellings_postgres_reads_find_the_entry(
+    adapter: Adapter, spell: Callable[[str], str]
+) -> None:
+    """Upper case and no hyphens are spellings Postgres's ``uuid`` reads:
+    both adapters find the entry, and ``get_entries`` keys it by its id."""
+    entry = await write(adapter, "present")
+    odd = spell(entry.id)
+    found = await adapter.store.get_entry(odd)
+    assert found is not None and found.id == entry.id
+    assert await adapter.store.get_entries([odd]) == {entry.id: found}
 
 
 # -- supersession (ADR 0034) --------------------------------------------------------

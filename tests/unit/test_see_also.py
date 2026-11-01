@@ -175,3 +175,19 @@ async def test_rest_write_and_reads_carry_links() -> None:
     assert bad.status_code == 422
     assert [link["id"] for link in one["linked_from"]] == [linker.json()["id"]]
     assert [link["id"] for link in many["entries"][0]["see_also"]] == [target["id"]]
+
+
+async def test_any_uuid_spelling_names_the_target() -> None:
+    """Upper case and no hyphens name an entry for ``see_also`` and a batch
+    read as they do for a single read and ``supersedes`` (a hyphen-less id
+    used to be "unknown see_also entries")."""
+    store = MemoryStore(make_clock())
+    target = await _write(store, ALICE, "billing deploys need the kaniko image")
+    bare = target.replace("-", "")
+    linker = await _write(store, BOB, "billing runner moved", see_also=[bare, target.upper()])
+    alice = _surface(store, ALICE)
+    assert _ids((await hive_get(alice, linker))["see_also"]) == [target]
+    assert _ids((await hive_get(alice, bare))["linked_from"]) == [linker]
+    batch = await hive_get(alice, entry_ids=[bare, target.upper()])
+    assert batch["not_found"] == []
+    assert [e["id"] for e in batch["entries"]] == [target]  # type: ignore[index]

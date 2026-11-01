@@ -363,17 +363,21 @@ class MemoryStore:
     # -- read path --------------------------------------------------------
 
     async def get_entry(self, entry_id: str) -> Entry | None:
+        # Any spelling Postgres's uuid type reads (upper case, no hyphens).
+        key = canonical_uuid(entry_id) if is_valid_uuid(entry_id) else None
         with self._lock:
-            entry = self._entries.get(entry_id)
+            entry = self._entries.get(key) if key is not None else None
             return _copy(entry) if entry is not None else None
 
     async def get_entries(self, entry_ids: list[str]) -> dict[str, Entry]:
+        # Keyed by the canonical id, as Postgres answers, whatever the spelling.
         with self._lock:
             result: dict[str, Entry] = {}
             for eid in entry_ids:
-                entry = self._entries.get(eid)
+                key = canonical_uuid(eid) if is_valid_uuid(eid) else None
+                entry = self._entries.get(key) if key is not None else None
                 if entry is not None:
-                    result[eid] = _copy(entry)
+                    result[entry.id] = _copy(entry)
             return result
 
     async def pairwise_similarity(self, entry_ids: list[str]) -> dict[tuple[str, str], float]:
