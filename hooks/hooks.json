@@ -8,7 +8,7 @@
           {
             "name": "hivemind",
             "type": "command",
-            "command": "sh ${extensionPath}/plugins/hivemind/skills/hivemind-setup/scripts/hivemind-session-start.sh",
+            "command": "sh \"${extensionPath}/plugins/hivemind/skills/hivemind-setup/scripts/hivemind-session-start.sh\"",
             "timeout": 5000
           }
         ]
@@ -21,7 +21,7 @@
           {
             "name": "hivemind-stop",
             "type": "command",
-            "command": "sh ${extensionPath}/plugins/hivemind/skills/hivemind-setup/scripts/hivemind-stop.sh",
+            "command": "sh \"${extensionPath}/plugins/hivemind/skills/hivemind-setup/scripts/hivemind-stop.sh\"",
             "timeout": 5000
           }
         ]
