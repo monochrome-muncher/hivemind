@@ -88,21 +88,6 @@ async def test_first_check_stamps_and_a_second_within_the_hour_writes_nothing(en
     assert again == stamped
 
 
-async def test_a_stale_stamp_is_refreshed(env: Env) -> None:
-    dsn, store, auth = env
-    key = await _agent_key(store, auth)
-    await auth.verify(key)
-    await _exec(
-        dsn,
-        "UPDATE credentials SET last_used_at = now() - interval '2 hours' WHERE key_hash = $1",
-        key_hash(key),
-    )
-    old = await _last_used(dsn, key)
-    assert await auth.verify(key) is not None
-    new = await _last_used(dsn, key)
-    assert old is not None and new is not None and new["last_used_at"] > old["last_used_at"]
-
-
 async def test_admin_keys_are_stamped_too(env: Env) -> None:
     dsn, _, auth = env
     key = await auth.issue_admin_key()

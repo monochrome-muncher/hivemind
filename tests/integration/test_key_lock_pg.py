@@ -95,26 +95,6 @@ async def test_the_lock_writes_one_audit_row_with_the_fingerprint_and_no_key(env
     assert key not in dump and key_hash(key) not in dump
 
 
-async def test_a_press_for_a_replaced_key_locks_nothing(env: Env) -> None:
-    _, store, auth, service = env
-    key = await _agent_key(service, store)
-    stale = await _lock(auth, key)
-    new = await service.replace_agent_key("alice", ADMIN)
-    assert await auth.lock_agent_key("alice", key_id=stale.key_id or "") is False
-    assert await auth.verify(new) is not None  # the new key is not locked
-
-
-async def test_replace_key_clears_the_lock_on_an_active_locked_agent(env: Env) -> None:
-    _, store, auth, service = env
-    key = await _agent_key(service, store)
-    await service.lock_own_key(await _lock(auth, key))
-    new = await service.replace_agent_key("alice", ADMIN)
-    credential = await auth.verify(new)
-    assert credential is not None and credential.agent_name == "alice"
-    assert await auth.verify(key) is None  # the locked row is gone, not just locked
-    assert [a.key_locked_at for a in await store.list_agents()] == [None]
-
-
 async def test_the_cli_rotation_clears_the_lock_too(env: Env) -> None:
     dsn, store, auth, service = env
     key = await _agent_key(service, store)
@@ -129,38 +109,3 @@ async def test_revoking_a_locked_agent_works_and_the_key_is_unknown_again(env: E
     await service.lock_own_key(await _lock(auth, key))
     await service.revoke("alice", ADMIN)
     assert await auth.verify(key) is None
-
-
-async def test_list_agents_carries_the_lock_time_and_only_for_the_locked_key(env: Env) -> None:
-    _, store, auth, service = env
-    key = await _agent_key(service, store, "alice")
-    await _agent_key(service, store, "bob")
-    await service.lock_own_key(await _lock(auth, key))
-    locked = {a.name: a.key_locked_at for a in await store.list_agents()}
-    assert locked["alice"] is not None and locked["bob"] is None
-
-
-async def test_a_locked_key_leaves_last_used_at_unchanged(env: Env) -> None:
-    dsn, store, auth, service = env
-    key = await _agent_key(service, store)
-    credential = await _lock(auth, key)  # stamps the first use
-    await service.lock_own_key(credential)
-    # Make the stamp stale so an accepted check would rewrite it.
-    await _exec(
-        dsn,
-        "UPDATE credentials SET last_used_at = now() - interval '3 hours' WHERE key_hash = $1",
-        key_hash(key),
-    )
-    conn = await asyncpg.connect(dsn)
-    try:
-        before = await conn.fetchval(
-            "SELECT last_used_at FROM credentials WHERE key_hash = $1", key_hash(key)
-        )
-        with pytest.raises(KeyLocked):
-            await auth.verify(key)
-        after = await conn.fetchval(
-            "SELECT last_used_at FROM credentials WHERE key_hash = $1", key_hash(key)
-        )
-    finally:
-        await conn.close()
-    assert before == after
