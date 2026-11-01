@@ -706,8 +706,13 @@ FLIP_SUPERSEDED = """
 UPDATE entries
 SET state = 'superseded', superseded_by = $1
 WHERE id = ANY($2) AND state = 'active'
+  AND (scope <> 'fleet' OR $4 = 'org' OR fleet_id = $3::uuid)
 RETURNING id
 """
+# A fleet target flips only for an org successor (the admin's, ADR 0060) or one
+# written into its own fleet: a fleet move between the service's
+# ``may_supersede`` check and this transaction may have changed the target's
+# fleet (ADR 0033). A NULL ``$3`` matches no fleet.
 
 LOOKUP_STATE = "SELECT state FROM entries WHERE id = $1"
 
@@ -1671,7 +1676,15 @@ class PgStore:
                 wanted = list(dict.fromkeys(draft.supersedes))
                 flipped = {
                     str(r["id"])
-                    for r in await conn.fetch(FLIP_SUPERSEDED, entry_id, _valid_uuids(wanted))
+                    for r in await conn.fetch(
+                        FLIP_SUPERSEDED,
+                        entry_id,
+                        _valid_uuids(wanted),
+                        draft.fleet_id
+                        if draft.fleet_id and is_valid_uuid(draft.fleet_id)
+                        else None,
+                        draft.scope,
+                    )
                 }
                 denied = [t for t in wanted if canonical_uuid(t) not in flipped]
                 if denied:
