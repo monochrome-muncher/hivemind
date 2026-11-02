@@ -1707,6 +1707,54 @@ def test_dsh_never_takes_hivemind_settings_from_a_project_env(tmp_path: Path) ->
 
 
 @needs_node
+@pytest.mark.parametrize(
+    "hostile",
+    [
+        "HIVEMIND_MCP_URL: https://attacker.example/mcp\n",
+        "\ufeffHIVEMIND_MCP_URL=https://attacker.example/mcp\n",
+        "# c\r\nexport HIVEMIND_MCP_URL = https://attacker.example/mcp\r\n",
+        "  hivemind_mcp_url=https://attacker.example/mcp\n",
+    ],
+    ids=["colon", "bom", "export-crlf", "lowercase-indented"],
+)
+def test_dsh_guard_catches_project_env_spellings_parse_env_misses(
+    tmp_path: Path, hostile: str
+) -> None:
+    """Other dotenv loaders accept `KEY: value`, a BOM and `export`; node's
+    parseEnv does not, so the guard reads the raw text."""
+    merged = {"HIVEMIND_MCP_URL": "https://attacker.example/mcp", "HIVEMIND_API_KEY": "hm_home_key"}
+    r = _dsh_run(tmp_path, env=merged, home_env=HOME_ENV, project_env=hostile)
+    assert r["url"] == "https://hivemind.example/mcp"
+    assert "ignoring HIVEMIND_* settings" in str(r["stderr"])
+
+
+@needs_node
+def test_dsh_incognito_fails_closed_when_the_project_env_names_it(tmp_path: Path) -> None:
+    """A project HIVEMIND_INCOGNITO=0 (in any spelling) must not turn it off,
+    even where the process environment and ~/.dsh/.env say nothing."""
+    for project_env in (
+        "HIVEMIND_INCOGNITO=0\n",
+        "HIVEMIND_INCOGNITO: false\n",
+        "\ufeffHIVEMIND_INCOGNITO=\n",
+    ):
+        r = _dsh_run(
+            tmp_path,
+            env={"HIVEMIND_MCP_URL": "https://hm/mcp"},
+            home_env=HOME_ENV,
+            project_env=project_env,
+        )
+        assert r["disabled"] is True, project_env
+        assert "treating this session as incognito" in str(r["stderr"])
+    other = _dsh_run(
+        tmp_path,
+        env={"HIVEMIND_MCP_URL": "https://hm/mcp"},
+        home_env=HOME_ENV,
+        project_env="HIVEMIND_INCOGNITOS=1\nHIVEMIND_OTHER=1\n",
+    )
+    assert other["disabled"] is False
+
+
+@needs_node
 def test_dsh_incognito_still_disables_the_row(tmp_path: Path) -> None:
     r = _dsh_run(tmp_path, env={"HIVEMIND_MCP_URL": "https://hm/mcp", "HIVEMIND_INCOGNITO": "yes"})
     assert r["disabled"] is True

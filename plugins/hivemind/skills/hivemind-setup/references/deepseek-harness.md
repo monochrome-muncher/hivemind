@@ -93,6 +93,6 @@ the plugin again.
 
 `hivemind-incognito dsh`: the bundle's server row switches itself off
 when `HIVEMIND_INCOGNITO` is set in the environment or in `~/.dsh/.env`.
-A project `.env` can never turn incognito off (it is the one setting the
-project-`.env` guard does not discard). The launcher also removes the key
+A project `.env` can never turn incognito off, and one that names
+`HIVEMIND_INCOGNITO` at all (even as `0`) makes the session incognito. The launcher also removes the key
 and URL from the session's environment.
