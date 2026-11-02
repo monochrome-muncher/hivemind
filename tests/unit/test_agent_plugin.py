@@ -61,6 +61,20 @@ def test_the_always_on_skill_stays_small() -> None:
     assert len(SKILL.encode()) <= 10_000, len(SKILL.encode())
 
 
+def test_the_skill_allows_third_party_secrets_but_never_the_owners() -> None:
+    """A secret found in third-party material may be written as a
+    security-finding; one that belongs to the user or their organization
+    never is."""
+    flat = " ".join(SKILL.split())
+    assert (
+        "A secret found in collected data, open-source findings or other third-party material"
+        in flat
+    )
+    assert "`security-finding`" in flat
+    assert "Never one that belongs to your user or their organization" in flat
+    assert "Secrets you *found*" not in flat
+
+
 def test_the_skill_carries_the_distillation_loop() -> None:
     """The skill's core is one loop: recall, test, report what you tested,
     write only the delta, distill fragments, settle conflicts. Open-ended work

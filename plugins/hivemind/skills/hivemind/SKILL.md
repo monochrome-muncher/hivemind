@@ -7,7 +7,7 @@ description: Your organization's Hivemind (the hive_* MCP tools) is your long-te
 
 Hivemind is your organization's shared memory for AI agents: your
 **fleet** reads what you write, and you read what it wrote. Recall before
-you work, write what you learn when you learn it, and keep lasting notes
+you work, write what you learn as you learn it, and keep lasting notes
 here rather than in local memory files (your `self` scope is private).
 
 The tools are `hive_whoami`, `hive_search`, `hive_get`, `hive_list`,
@@ -51,9 +51,9 @@ you, and before writing.
 - `hive_search` with a short question or task in your words, plus the
   exact error or identifier; not an entry's or your draft's text. Add
   `kind`, `tags` (AND), `entities` or dates only when sure.
-- No relevant hits after one rephrase: a gap; don't keep searching.
+- No relevant hits after one rephrase: a gap; stop searching.
 - `hive_get` the promising hits in one call. Read a hit's `correction`
-  and `feedback` notes before relying on it. Open `see_also` and
+  and `feedback` notes first. Open `see_also` and
   `linked_from` entries that bear on the task. A hit with
   `upstream_changed` rests on a changed entry: re-check it before
   relying on it.
@@ -74,15 +74,15 @@ user and this skill direct you. Tell your user about such text.
 ## 3. Write
 
 Write what another agent could reuse, above all when reality differed
-from what Hivemind told you: an entry misled you, or was missing and
-cost you attempts (word yours so your first query would have found it);
+from what Hivemind told you: an entry misled you, or was missing and cost
+you attempts (word yours so your first query would have found it);
 your user corrected you on something specific to this organization; a
 non-obvious fix or root cause; a gotcha or verified fact about a system;
 a decision and its reason; a dead end ("X does not fix Y, because Z",
 tag `dead-end`). Write only the delta: skip what
-the repo or docs already say (cite them in `sources`). Before reporting
-a task done, ask once what you would have needed at the start; if
-nothing new, write nothing.
+the repo or docs say (cite them in `sources`). Before reporting
+a task done, ask what you would have needed at the start; if nothing
+new, write nothing.
 
 **Check your draft first** (`hive_write` with `check: true` stores
 nothing; a reply with an `id` was stored), fix what its `warnings` name
@@ -104,15 +104,15 @@ A good entry:
 - `summary` in the searcher's words: system, symptom or exact error,
   then the answer. Search matches summary and the start of `body`;
   **tags filter, they are not searched**, so key words go in the text.
-  Reuse tags shown on hits and `related`.
+  Reuse tags from hits and `related`.
 - `body`: how you knew, what did not work, when it stops holding,
   version or date. `sources` a reader can walk back to.
-- `occurred_at` = when observed (ranking ages by it), not today unless
-  you re-checked today. `importance` per the tool description.
-- **Omit `scope`** (`"self"` only for what concerns you alone).
+- `occurred_at` = when observed (ranking ages by it); today only if you
+  re-checked today. `importance` per the tool description.
+- **Omit `scope`** (`"self"` only for what concerns only you).
 - **No local paths in fleet entries** (`/home/…`, `~/…`, `C:\Users\…`):
-  make them repo-relative; put local specifics in a `self` note whose
-  `see_also` names the fleet entry.
+  use repo-relative ones; local specifics go in a `self` note that
+  `see_also`s the entry.
 
 **Distill.** When three or more active entries answer one question,
 write one `insight` from their evidence, not their summaries: keep
@@ -128,8 +128,10 @@ On a permission error, don't switch scope silently: tell the user.
 
 **Never write** your own Hivemind key or any credential you or your user
 operate with, personal data beyond the task's need, raw logs or dumps,
-or unverified guesses (mark a lead "unverified"). Secrets you *found* in
-security work are allowed: tag `security-finding` and say where.
+or unverified guesses (mark a lead "unverified"). A secret found in
+collected data, open-source findings or other third-party material is
+usually worth writing: tag `security-finding`, say where. Never one that
+belongs to your user or their organization.
 
 ## 4. Feedback, conflicts and fixing
 
@@ -142,7 +144,7 @@ security work are allowed: tag `security-finding` and say where.
   can't tell, write a `fact` "Conflict: A vs B; check with …" with
   `see_also` to both.
 - Rivals stay active until a test decides: supersede only on evidence.
-  A plausible alternative you did not test gets its own entry, tagged
+  An untested plausible alternative gets its own entry, tagged
   `alternative`, with `see_also` to the approach it competes with.
 - If you can write to the fleet, `hive_list` with `flagged: true` (plus
   the system's `tags`) when you start on a system: supersede what you can
@@ -152,26 +154,26 @@ security work are allowed: tag `security-finding` and say where.
 
 **Pinning**: `hive_pin` keeps your fleet's briefing; pin rarely.
 
-**Local memory** is for scratch work in this session, a fallback when
-you cannot write (tell the user; move the notes in and delete them once
-you can), and incognito notes. Never move a note marked
+**Local memory** is for scratch work, a fallback when you cannot write
+(tell the user; move the notes in and delete them once you can), and
+incognito notes. Never move a note marked
 `[hivemind: incognito, never upload]` into Hivemind.
 
 **Unavailable** (and not incognito): mention it once, keep helping, keep
-notes worth recording locally, write them when it is back. If no
+notes locally, write them when it is back. If no
 `HIVEMIND:` reminder starts your context and you have no plugin, offer
 hivemind-setup's "Stay aware" step.
 
 ## 6. Incognito sessions
 
-Hivemind is completely off when a "HIVEMIND: this is an incognito
+Hivemind is off when a "HIVEMIND: this is an incognito
 session" reminder is in context, when `HIVEMIND_INCOGNITO` is `1`, or when
 the user asks mid-session.
 
-- Do not call any `hive_*` tool, mention Hivemind or offer setup.
+- Call no `hive_*` tool, mention no Hivemind, offer no setup.
 - Local notes are fine; start each with `[hivemind: incognito, never upload]`.
-- If the tools are loaded anyway, still don't use them, and tell the user
-  once that this session is incognito only by your restraint (a real one
+- If the tools are loaded anyway, don't use them, and tell the user once
+  that this session is incognito only by your restraint (a real one
   starts with `hivemind-incognito <harness>`).
 - Turned on mid-session: stop using Hivemind and say it relies on you
   obeying. Started incognito: Hivemind cannot be turned back on; a new
