@@ -217,9 +217,12 @@ SELECT $1, e.id FROM entries e WHERE e.id = ANY($2::uuid[]) AND e.id <> $1
 ON CONFLICT DO NOTHING
 """
 SELECT_LINKS_OUT = "SELECT to_id FROM entry_links WHERE from_id = $1 ORDER BY created_at, to_id"
+# Incoming links are cut to $2 after keeping only active sources the reader
+# may see (``{vis}``, on ``e``), so entries it cannot read never use up the cap.
 SELECT_LINKS_IN = """
-SELECT from_id FROM entry_links WHERE to_id = $1
- ORDER BY created_at DESC, from_id LIMIT $2
+SELECT l.from_id FROM entry_links l JOIN entries e ON e.id = l.from_id
+ WHERE l.to_id = $1 AND e.state = 'active'{vis}
+ ORDER BY l.created_at DESC, l.from_id LIMIT $2
 """
 # The same reads for several entries at once (ADR 0059): one statement
 # each, the incoming side still at most $2 links per entry.
@@ -231,8 +234,9 @@ SELECT_LINKS_IN_MANY = """
 SELECT t.id AS to_id, l.from_id
   FROM unnest($1::uuid[]) AS t(id)
  CROSS JOIN LATERAL (
-       SELECT from_id, created_at FROM entry_links WHERE to_id = t.id
-        ORDER BY created_at DESC, from_id LIMIT $2) AS l
+       SELECT k.from_id, k.created_at FROM entry_links k JOIN entries e ON e.id = k.from_id
+        WHERE k.to_id = t.id AND e.state = 'active'{vis}
+        ORDER BY k.created_at DESC, k.from_id LIMIT $2) AS l
  ORDER BY t.id, l.created_at DESC, l.from_id
 """
 
@@ -1736,24 +1740,30 @@ class PgStore:
             rows = await conn.fetch(SELECT_PREDECESSORS, ids)
         return [_row_to_entry(row) for row in rows]
 
-    async def entry_links(self, entry_id: str, limit: int) -> tuple[list[str], list[str]]:
+    async def entry_links(
+        self, entry_id: str, limit: int, *, visibility: Visibility | None = None
+    ) -> tuple[list[str], list[str]]:
         if not is_valid_uuid(entry_id):
             return [], []
+        vis, vis_params = _readable_clause(visibility, 2)
+        sql = SELECT_LINKS_IN.format(vis=f" AND {vis}" if vis else "")
         async with self._connection() as conn:
             outgoing = await conn.fetch(SELECT_LINKS_OUT, entry_id)
-            incoming = await conn.fetch(SELECT_LINKS_IN, entry_id, limit)
+            incoming = await conn.fetch(sql, entry_id, limit, *vis_params)
         return [str(r["to_id"]) for r in outgoing], [str(r["from_id"]) for r in incoming]
 
     async def entry_links_many(
-        self, entry_ids: list[str], limit: int
+        self, entry_ids: list[str], limit: int, *, visibility: Visibility | None = None
     ) -> dict[str, tuple[list[str], list[str]]]:
         canonical = {eid: canonical_uuid(eid) for eid in entry_ids}
         ids = list(dict.fromkeys(c for c in canonical.values() if c is not None))
         links: dict[str, tuple[list[str], list[str]]] = {c: ([], []) for c in ids}
         if ids:
+            vis, vis_params = _readable_clause(visibility, 2)
+            sql = SELECT_LINKS_IN_MANY.format(vis=f" AND {vis}" if vis else "")
             async with self._connection() as conn:
                 outgoing = await conn.fetch(SELECT_LINKS_OUT_MANY, ids)
-                incoming = await conn.fetch(SELECT_LINKS_IN_MANY, ids, limit)
+                incoming = await conn.fetch(sql, ids, limit, *vis_params)
             for r in outgoing:
                 links[str(r["from_id"])][0].append(str(r["to_id"]))
             for r in incoming:

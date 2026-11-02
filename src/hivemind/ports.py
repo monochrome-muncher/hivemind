@@ -126,15 +126,19 @@ class Store(Protocol):
         visibility: the chain walk filters what it returns (ADR 0033)."""
         ...
 
-    async def entry_links(self, entry_id: str, limit: int) -> tuple[list[str], list[str]]:
+    async def entry_links(
+        self, entry_id: str, limit: int, *, visibility: Visibility | None = None
+    ) -> tuple[list[str], list[str]]:
         """The "see also" links of one entry: the ids it links
-        to (oldest link first), and the ids of at most ``limit`` entries
-        that link to it (newest link first). Unfiltered by state or
-        visibility (the caller filters)."""
+        to (oldest link first; unfiltered, the caller filters), and the
+        ids of at most ``limit`` entries that link to it (newest link
+        first). Only active sources that ``visibility`` may read count
+        toward the incoming ``limit`` (``None``: no visibility
+        restriction)."""
         ...
 
     async def entry_links_many(
-        self, entry_ids: list[str], limit: int
+        self, entry_ids: list[str], limit: int, *, visibility: Visibility | None = None
     ) -> dict[str, tuple[list[str], list[str]]]:
         """``entry_links`` for several entries in one read (ADR 0059),
         keyed by every requested id; an id with no links (or naming no

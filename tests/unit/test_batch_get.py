@@ -7,7 +7,7 @@ import httpx
 from hivemind.api.deps import create_app
 from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
-from hivemind.domain.access import TrustLevel
+from hivemind.domain.access import TrustLevel, Visibility
 from hivemind.domain.entry import Entry
 from hivemind.domain.feedback import Feedback, FeedbackCounts
 from hivemind.domain.validation import MAX_GET_IDS
@@ -165,10 +165,10 @@ class _CountingStore(MemoryStore):
         return await super().list_feedback_many(entry_ids, limit)
 
     async def entry_links_many(
-        self, entry_ids: list[str], limit: int
+        self, entry_ids: list[str], limit: int, *, visibility: Visibility | None = None
     ) -> dict[str, tuple[list[str], list[str]]]:
         self.calls += 1
-        return await super().entry_links_many(entry_ids, limit)
+        return await super().entry_links_many(entry_ids, limit, visibility=visibility)
 
 
 async def test_a_batch_read_costs_the_same_store_reads_for_one_or_ten_entries() -> None:
