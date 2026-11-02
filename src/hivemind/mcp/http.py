@@ -20,7 +20,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from hivemind.config import Settings, bind_host, bind_port, configure_logging, load_settings
-from hivemind.domain.access import KEY_LOCKED_MESSAGE, KeyLocked
+from hivemind.domain.access import KEY_LOCKED_MESSAGE, KeyLocked, StoreUnavailable
 from hivemind.http_metrics import UNMATCHED_ROUTE, RequestMetrics
 from hivemind.mcp.app import McpHivemind
 from hivemind.mcp.metrics import McpMetrics
@@ -141,6 +141,10 @@ class BearerAuthMiddleware:
             credential = await self._authenticator.verify(key) if key else None
         except KeyLocked:
             await _send_unauthorized(send, "key_locked", KEY_LOCKED_MESSAGE)
+            return
+        except StoreUnavailable as exc:
+            logger.warning("key verification failed on the store (%s); answering 503", exc.cause)
+            await _send_store_unavailable(send)
             return
         except TimeoutError:
             logger.warning("key verification timed out on the store; answering 503")

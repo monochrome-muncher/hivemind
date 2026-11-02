@@ -29,6 +29,7 @@ from hivemind.domain.access import (
     AgentStatus,
     InvalidAgentStatus,
     KeyLocked,
+    StoreUnavailable,
     TrustLevel,
     UnknownAgent,
 )
@@ -385,3 +386,47 @@ async def test_the_successor_inherits_the_retired_agents_authorship(adapter: Ada
     assert credential is not None
     assert credential.inherits_from == ("old",)
     assert credential.owned_authors == ("new", "old")
+
+
+async def test_pg_verify_on_an_unreachable_database_raises_store_unavailable() -> None:
+    """A refused connection is a retryable store failure, never a raw driver
+    error (a 500) and never ``None`` (a 401)."""
+    auth = PgAuthenticator("postgresql://hivemind:hivemind@127.0.0.1:1/hivemind")
+    try:
+        with pytest.raises(StoreUnavailable) as excinfo:
+            await auth.verify("hm_whatever")
+    finally:
+        await auth.close()
+    assert "hm_whatever" not in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    ("error", "transient"),
+    [
+        (asyncpg.exceptions.ConnectionDoesNotExistError(), True),
+        (asyncpg.exceptions.CannotConnectNowError(), True),
+        (asyncpg.exceptions.TooManyConnectionsError(), True),
+        (asyncpg.InterfaceError("closed"), True),
+        (ConnectionResetError(), True),
+        (asyncpg.exceptions.InvalidPasswordError(), False),
+        (asyncpg.exceptions.UndefinedTableError(), False),
+        (asyncpg.exceptions.InvalidCatalogNameError(), False),
+    ],
+)
+async def test_pg_verify_maps_only_transient_failures_to_store_unavailable(
+    error: BaseException, transient: bool
+) -> None:
+    """A permanent fault (wrong password, unmigrated pool, missing database)
+    keeps surfacing as itself; only a connection-level failure is retryable."""
+
+    class _Boom:
+        def acquire(self, **_kwargs: object) -> object:
+            raise error
+
+    auth = PgAuthenticator("postgresql://unused")
+    auth._pool = _Boom()  # type: ignore[assignment]
+    expected = StoreUnavailable if transient else type(error)
+    with pytest.raises(expected) as excinfo:
+        await auth.verify("hm_whatever")
+    if not transient:
+        assert not isinstance(excinfo.value, StoreUnavailable)

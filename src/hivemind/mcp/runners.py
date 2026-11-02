@@ -12,7 +12,7 @@ import logging
 import os
 
 from hivemind.config import configure_logging, load_settings
-from hivemind.domain.access import KEY_LOCKED_MESSAGE, KeyLocked
+from hivemind.domain.access import KEY_LOCKED_MESSAGE, KeyLocked, StoreUnavailable
 from hivemind.extractor import build_extractor
 from hivemind.mcp.app import McpHivemind
 from hivemind.mcp.local_embedder import LocalEmbedder
@@ -101,6 +101,11 @@ def main_pg() -> None:
             )  # fail fast; re-verified per call below
         except KeyLocked:
             raise SystemExit(KEY_LOCKED_MESSAGE) from None
+        except StoreUnavailable as exc:
+            raise SystemExit(
+                f"cannot verify HIVEMIND_MCP_KEY: the database is unreachable ({exc.cause}); "
+                "check HIVEMIND_DATABASE_URL and that Postgres is up"
+            ) from None
         if credential is None:
             raise SystemExit(_mcp_key_unknown_hint())
         services = build_services(
