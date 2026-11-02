@@ -1489,9 +1489,14 @@ def test_the_gemini_extension_serves_the_plugin() -> None:
     ):
         [group] = hooks[event]
         [hook] = group["hooks"]
-        prefix = "sh ${extensionPath}/"
+        # Quoted, so an install path with a space is not word-split; Gemini
+        # replaces ${extensionPath} as plain text, so the quotes are safe.
+        prefix = 'sh "${extensionPath}/'
         assert hook["command"].startswith(prefix)
-        assert (ROOT / hook["command"].removeprefix(prefix)).resolve() == script.resolve()
+        assert hook["command"].endswith('"')
+        assert (
+            ROOT / hook["command"].removeprefix(prefix).removesuffix('"')
+        ).resolve() == script.resolve()
 
 
 def test_launcher_switches_the_copilot_cli_server_off_by_name(tmp_path: Path) -> None:
