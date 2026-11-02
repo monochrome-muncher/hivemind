@@ -269,3 +269,44 @@ async def test_a_duplicate_scan_the_server_cancels_is_reported_incomplete(
     )
     scan = await store.duplicate_pairs(a.id, b.id, 0.9, 100)
     assert (scan.pairs, scan.looked_up, scan.truncated) == ((), 0, True)
+
+
+async def test_a_lock_wait_after_the_fleet_guard_is_fleet_busy_too(
+    pool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The guard's lock_timeout stays set for the rest of the transaction, so a
+    # later wait (the pin lock, a supersede target's row) must be as retryable.
+    dsn, store, _ = pool
+    monkeypatch.setattr(pgstore_module, "WRITE_LOCK_TIMEOUT", "300ms")
+    fleet = (await store.create_fleet("a")).id
+    old = await store.create_entry(_draft(fleet, "old"), None)
+    holder = await asyncpg.connect(dsn)
+    tx = holder.transaction()
+    await tx.start()
+    try:
+        await holder.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended('hivemind.pins:' || $1, 0))", fleet
+        )
+        with pytest.raises(FleetBusy):
+            await store.pin_entry(fleet, old.id, "lead", 10)
+    finally:
+        await tx.rollback()
+    tx = holder.transaction()
+    await tx.start()
+    try:
+        await holder.execute("SELECT 1 FROM entries WHERE id = $1 FOR UPDATE", old.id)
+        successor = EntryDraft(
+            kind=Kind.FACT,
+            summary="new",
+            author="lead",
+            agent="lead",
+            scope="fleet",
+            fleet_id=fleet,
+            supersedes=(old.id,),
+        )
+        with pytest.raises(FleetBusy):
+            await store.create_entry(successor, None)
+    finally:
+        await tx.rollback()
+        await holder.close()
+    assert (await store.get_entry(old.id)).state.value == "active"  # type: ignore[union-attr]
