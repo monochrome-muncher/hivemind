@@ -24,7 +24,7 @@ $payload = [Console]::In.ReadToEnd()
 
 function Field {
     param([string]$Name)
-    $m = [regex]::Match($payload, '"' + $Name + '":"([^"]*)"')
+    $m = [regex]::Match($payload, '"' + $Name + '"\s*:\s*"([^"]*)"')
     if ($m.Success) { $m.Groups[1].Value } else { "" }
 }
 
@@ -51,19 +51,28 @@ $reminded = 0
 $rated = 0
 $seen = 0
 $prompted = 0
+# Each field is a non-negative integer; anything else reads as 0, like the
+# sh twin, and a bad state file never throws.
+function Num {
+    param($Value)
+    $n = 0
+    if ([int]::TryParse([string]$Value, [ref]$n) -and $n -ge 0) { return $n }
+    return 0
+}
+
 if (Test-Path $state) {
-    $parts = (Get-Content $state -Raw -ErrorAction SilentlyContinue) -split '\s+'
+    $parts = @((Get-Content $state -Raw -ErrorAction SilentlyContinue) -split '\s+' | Where-Object { $_ -ne "" })
     if ($parts.Count -ge 3) {
-        $calls = [int]$parts[0]
-        $contributed = [int]$parts[1]
-        $reminded = [int]$parts[2]
+        $calls = Num $parts[0]
+        $contributed = Num $parts[1]
+        $reminded = Num $parts[2]
     }
     if ($parts.Count -ge 5) {
-        $rated = [int]$parts[3]
-        $seen = [int]$parts[4]
+        $rated = Num $parts[3]
+        $seen = Num $parts[4]
     }
     if ($parts.Count -ge 6) {
-        $prompted = [int]$parts[5]
+        $prompted = Num $parts[5]
     }
 }
 
@@ -80,7 +89,8 @@ $calls++
 $threshold = 20
 if ($env:HIVEMIND_STOP_MIN_TOOLS) {
     $parsed = 0
-    if ([int]::TryParse($env:HIVEMIND_STOP_MIN_TOOLS, [ref]$parsed)) { $threshold = $parsed }
+    # A negative or non-numeric value keeps the default, as in the sh twin.
+    if ([int]::TryParse($env:HIVEMIND_STOP_MIN_TOOLS, [ref]$parsed) -and $parsed -ge 0) { $threshold = $parsed }
 }
 
 $incognito = if ($env:HIVEMIND_INCOGNITO) { $env:HIVEMIND_INCOGNITO.ToLower() } else { "" }

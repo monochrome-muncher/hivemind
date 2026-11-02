@@ -7,7 +7,7 @@
 # Extensionless TaskStart is the Unix twin (Cline ignores .ps1 on Unix).
 
 $payload = [Console]::In.ReadToEnd()
-$taskMatch = [regex]::Match($payload, '"taskId":"([^"]*)"')
+$taskMatch = [regex]::Match($payload, '"taskId"\s*:\s*"([^"]*)"')
 $taskId = if ($taskMatch.Success) { $taskMatch.Groups[1].Value } else { "" }
 $safe = if ($taskId -ne "") { $taskId -replace '[^a-zA-Z0-9]', '_' } else { "none" }
 $stateDir = Join-Path $env:TEMP "hivemind-cline"

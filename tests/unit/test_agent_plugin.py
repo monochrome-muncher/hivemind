@@ -1227,6 +1227,21 @@ def test_cline_task_start_names_the_same_state_folder_on_both_platforms() -> Non
     assert "hivemind-cline" in (CLINE_HOOKS / "TaskStart.ps1").read_text()
 
 
+def test_cline_ps1_hooks_read_the_payload_and_numbers_like_the_sh_twins() -> None:
+    """There is no PowerShell here, so this is a static check. The sh twins
+    allow whitespace around the colon (Cline's serializers differ), reject a
+    negative HIVEMIND_STOP_MIN_TOOLS, and treat a non-numeric state file as
+    zeros; the .ps1 files must do the same without throwing."""
+    for name in ("PostToolUse.ps1", "TaskStart.ps1", "UserPromptSubmit.ps1"):
+        text = (CLINE_HOOKS / name).read_text()
+        assert '":"(' not in text, name
+        assert '"\\s*:\\s*"([^"]*)"' in text, name
+    post = (CLINE_HOOKS / "PostToolUse.ps1").read_text()
+    assert "[int]$" not in post  # a bare cast throws on a bad state file
+    assert "[int]::TryParse($env:HIVEMIND_STOP_MIN_TOOLS, [ref]$parsed) -and $parsed -ge 0" in post
+    assert "$n -ge 0" in post
+
+
 def test_cline_hooks_refuse_a_symlinked_state_folder(tmp_path: Path) -> None:
     """The counter must not be written through a pre-created symlink: on a
     multi-user host another local user could plant `hivemind-cline` as a
