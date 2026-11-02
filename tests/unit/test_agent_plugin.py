@@ -988,6 +988,80 @@ def test_opencode_v2_setup_goes_incognito() -> None:
     assert name == "hivemind" and server["disabled"] is True
 
 
+# An existing "hivemind" server that points elsewhere still wins, but the
+# plugin warns once per process on stderr, with hosts only and never the key.
+_OPENCODE_SHADOW_SCRIPT = """
+const mod = await import(process.argv[1])
+const def = mod.default
+const url = process.env.EXISTING_URL
+if (process.env.PATH_KIND === "v1") {
+  for (let i = 0; i < 2; i++) {
+    const hooks = await def.server({})
+    await hooks.config({ mcp: { hivemind: { type: "remote", url, enabled: true } } })
+  }
+} else {
+  for (let i = 0; i < 2; i++) {
+    const mcp = new Map([["hivemind", { type: "remote", url }]])
+    const editor = { get: (n) => mcp.get(n), set: (n, c) => mcp.set(n, c), update: () => {} }
+    await def.setup({ mcp: { transform: async (cb) => cb(editor) } })
+  }
+}
+console.log("{}")
+"""
+
+
+def _shadow_warnings(path_kind: str, existing: str, **env: str) -> str:
+    environ = {k: v for k, v in os.environ.items() if not k.startswith("HIVEMIND_")}
+    environ.update(env, PATH_KIND=path_kind, EXISTING_URL=existing)
+    out = subprocess.run(
+        ["node", "--input-type=module", "-e", _OPENCODE_SHADOW_SCRIPT, OPENCODE_PLUGIN.as_uri()],
+        env=environ,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return out.stderr
+
+
+@needs_node
+@pytest.mark.parametrize("path_kind", ["v1", "v2"])
+def test_opencode_plugin_warns_once_when_an_existing_server_points_elsewhere(
+    path_kind: str,
+) -> None:
+    err = _shadow_warnings(
+        path_kind,
+        "https://other.example:8443/secret-path/mcp?token=abc",
+        HIVEMIND_MCP_URL="https://hm.example/mcp",
+        HIVEMIND_API_KEY="hm_secret_value",
+    )
+    assert err.count("hivemind:") == 1, err  # two loads in one process, one warning
+    assert "https://hm.example" in err and "https://other.example:8443" in err
+    assert "existing entry wins" in err and "hivemind-incognito" in err
+    for leaked in ("hm_secret_value", "secret-path", "token=abc", "/mcp"):
+        assert leaked not in err, err
+
+
+@needs_node
+@pytest.mark.parametrize("path_kind", ["v1", "v2"])
+@pytest.mark.parametrize(
+    ("existing", "env"),
+    [
+        ("https://hm.example/mcp/", {"HIVEMIND_MCP_URL": " https://hm.example/mcp "}),
+        ("https://other.example/mcp", {}),
+        ("https://other.example/mcp", {"HIVEMIND_MCP_URL": "", "HIVEMIND_API_KEY": "k"}),
+        (
+            "https://other.example/mcp",
+            {"HIVEMIND_MCP_URL": "https://hm.example/mcp", "HIVEMIND_INCOGNITO": "1"},
+        ),
+    ],
+    ids=["equal-after-normalising", "url-unset", "url-empty", "incognito"],
+)
+def test_opencode_plugin_is_silent_when_nothing_is_shadowed(
+    path_kind: str, existing: str, env: dict[str, str]
+) -> None:
+    assert _shadow_warnings(path_kind, existing, **env) == ""
+
+
 # -- Cline: the file hooks (stay-aware line + end-of-task nudge) ----------------
 
 CLINE_HOOKS = PLUGIN / "cline"

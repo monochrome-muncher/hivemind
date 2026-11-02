@@ -130,7 +130,10 @@ itself names no harness-specific paths, and a test enforces this.
   `event` domains; only `skill`, `agent`, `command` and `integration`
   transforms), so the same file's `setup` registers only the skills there.
   It accepts a hand-configured server in either OpenCode shape (v1
-  `mcp.hivemind` with `enabled`, v2 `mcp.servers` with `disabled`), and
+  `mcp.hivemind` with `enabled`, v2 `mcp.servers` with `disabled`). The
+  plugin yields to an existing `hivemind` entry (a cloned project's config
+  can define one), but when its URL differs from `HIVEMIND_MCP_URL` it
+  prints one stderr warning per process naming both hosts, never the key.
   `KILO_CONFIG_CONTENT` is the
   highest-precedence inline config overlay. The incognito launcher's
   overlay sets both forms: on KiloCode 7.8.18 the v2 form alone left a
