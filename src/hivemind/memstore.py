@@ -259,6 +259,13 @@ class MemoryStore:
                 for t in wanted
                 if (e := self._entries.get(_canonical_or_same(t))) is None
                 or e.state is not EntryState.ACTIVE
+                # A fleet target moves only under a successor in its own fleet
+                # (or an org one), as PgStore's guarded flip.
+                or (
+                    e.scope == SCOPE_FLEET
+                    and draft.scope != SCOPE_ORG
+                    and (e.fleet_id is None or e.fleet_id != draft.fleet_id)
+                )
             ]
             if denied:
                 raise SupersedeConflict(denied)

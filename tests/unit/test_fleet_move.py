@@ -240,7 +240,8 @@ async def test_a_chain_that_ends_in_another_fleet_stays(w: World) -> None:
     a, b = await fleet_with_agents(w)
     c = await w.fleet("c")
     old = await w.entry(a, "v1", "amy")
-    head = await w.entry(c, "v2", "cal", supersedes=(old,))  # the head lives in c
+    head = await w.entry(a, "v2", "bob", supersedes=(old,))
+    await w.merges.move(a, ["bob"], ADMIN, target_fleet_id=c)  # the head moves on to c
     out = await w.merges.move(a, ["amy"], ADMIN, target_fleet_id=b)
     assert (out.entries_moved, out.entries_held_back) == (0, 1)
     assert await w.fleet_of(old) == a and await w.fleet_of(head) == c

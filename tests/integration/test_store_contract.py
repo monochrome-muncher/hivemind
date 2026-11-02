@@ -3969,3 +3969,43 @@ async def test_links_with_one_timestamp_list_by_the_other_end_id(adapter: Adapte
     assert await adapter.store.entry_links(target.id, 2) == ([], ids[:2])
     out, _ = await adapter.store.entry_links(sources[0].id, 10)
     assert out == sorted([target.id, other.id])
+
+
+async def test_supersede_of_a_fleet_target_from_another_fleet_is_refused(
+    adapter: Adapter,
+) -> None:
+    # The target's fleet changed after the service's may_supersede check.
+    old_fleet, other_fleet = str(uuid.uuid4()), str(uuid.uuid4())
+    target = await write(adapter, "fleet fact", scope="fleet", fleet_id=old_fleet)
+    before = await adapter.store.count_entries(EntryFilters(include_inactive=True))
+    for scope, fleet in (("fleet", other_fleet), ("fleet", None), ("self", None)):
+        with pytest.raises(SupersedeConflict) as exc:
+            await write(adapter, "successor", scope=scope, fleet_id=fleet, supersedes=(target.id,))
+        assert exc.value.ids == [target.id]
+    untouched = await adapter.store.get_entry(target.id)
+    assert untouched is not None and untouched.state is EntryState.ACTIVE
+    assert await adapter.store.count_entries(EntryFilters(include_inactive=True)) == before
+    # Its own fleet, and an org successor (the admin's), still supersede.
+    same = await write(adapter, "v2", scope="fleet", fleet_id=old_fleet, supersedes=(target.id,))
+    assert same.id
+    other = await write(adapter, "other", scope="fleet", fleet_id=other_fleet)
+    await write(adapter, "org v2", scope="org", supersedes=(other.id,))
+    flipped = await adapter.store.get_entry(other.id)
+    assert flipped is not None and flipped.state is EntryState.SUPERSEDED
+
+
+async def test_supersede_of_self_and_org_targets_ignores_the_successor_fleet(
+    adapter: Adapter,
+) -> None:
+    mine = await write(adapter, "note", scope="self")
+    org = await write(adapter, "org fact", scope="org")
+    await write(
+        adapter,
+        "v2",
+        scope="fleet",
+        fleet_id=str(uuid.uuid4()),
+        supersedes=(mine.id, org.id),
+    )
+    for e in (mine, org):
+        got = await adapter.store.get_entry(e.id)
+        assert got is not None and got.state is EntryState.SUPERSEDED
