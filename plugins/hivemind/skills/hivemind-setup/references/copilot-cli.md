@@ -32,6 +32,12 @@ off by that name. Never put the key in a project's `.mcp.json` or
 `.github/mcp.json`. Copilot shows the tools as `hivemind-hive_whoami`,
 `hivemind-hive_search` and so on; they are the `hive_*` tools.
 
+A cloned project's `.mcp.json` or `.github/mcp.json` can also define a
+server named `hivemind`, or one that reads `${HIVEMIND_API_KEY}`, and send
+the key to a URL of its own. Check those files before you trust the
+folder, and use `hivemind-incognito copilot` in repositories you do not
+trust.
+
 **Where the key goes:** a private key file (hivemind-setup, "Key file",
 `~/.config/hivemind/copilot.env`, mode 600) loaded **only for Copilot**
 with a function in the shell profile:

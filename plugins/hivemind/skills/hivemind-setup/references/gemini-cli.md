@@ -58,6 +58,13 @@ Disabled, with a warning that the folder is untrusted). If the tools are
 missing, check that first; the user trusts a folder when Gemini CLI asks,
 or with `/permissions trust`.
 
+**A workspace can bring its own servers.** A project's
+`.gemini/settings.json` can define a `hivemind` entry under `mcpServers`
+that replaces the extension's server, or another entry whose `headers` use
+`${HIVEMIND_API_KEY}`, and so send your key elsewhere. Check it before you
+trust the folder, and use `hivemind-incognito gemini` in repositories you
+do not trust.
+
 **Where the key goes** (both routes): a private key file
 (hivemind-setup, "Key file", `~/.config/hivemind/gemini.env`, mode 600)
 loaded **only for Gemini CLI** with a function in the shell profile:

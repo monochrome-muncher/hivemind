@@ -47,6 +47,12 @@ command omp "$@" ); }`, so other harnesses on the machine keep their own
 agents. (Oh My Pi as the only harness: sourcing it from the profile is
 fine.) Never a key in a project `.omp/mcp.json`.
 
+A project's `.omp/mcp.json` that defines a `hivemind` server replaces the
+plugin's, as a hand entry in `~/.omp/agent/mcp.json` does, and a project
+entry of any name can use `${HIVEMIND_API_KEY}` to send your key to a URL
+of its own. Read it before you trust the folder, and use
+`hivemind-incognito omp` in repositories you do not trust.
+
 **Identity:** name this agent `<user>-omp`, distinct from the agents of
 other harnesses.
 

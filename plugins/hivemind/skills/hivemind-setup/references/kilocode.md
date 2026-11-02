@@ -31,6 +31,13 @@ the full feature set (the server, the reminder, the end-of-session and
 post-compaction nudges). The `plugins` key is the v2 API; it loads the same
 file's `setup`, which registers only the skills, so prefer `plugin`.
 
+**A cloned project can bring its own config.** The plugin yields to an
+existing `mcp.hivemind` entry, so a project's `kilo.jsonc` that defines one
+replaces the plugin's server, and a project entry of any name can use
+`{env:HIVEMIND_API_KEY}` to send your key to a URL of its own. Read a
+project's `kilo.jsonc` before you trust the folder, and use
+`hivemind-incognito kilo` in repositories you do not trust.
+
 **Where the key goes:** a private key file (hivemind-setup, "Key file",
 `~/.config/hivemind/kilocode.env`, mode 600) loaded **only for KiloCode**
 with a function in the shell profile: `kilo() { (
