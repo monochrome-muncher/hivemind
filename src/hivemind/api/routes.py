@@ -712,7 +712,8 @@ def build_router() -> APIRouter:
         the agent owns written in the window, sets aside its own ratings,
         restores the ``restore_ids`` it superseded; ``dry_run`` first, the
         ``expected_*`` totals on the apply. Audited ``agent.cleanup`` with
-        ``via: "portal"``."""
+        ``via: "portal"``. 403 ``forbidden`` for a dormant (level 0) agent
+        (SPEC §12.2)."""
         _require_agent(credential, "the agent portal")
         cleanups = app.access_service.cleanups
         if payload.dry_run:
@@ -735,7 +736,8 @@ def build_router() -> APIRouter:
     @router.get("/portal/cleanups", response_model=list[PortalCleanupRecordOut])
     async def portal_cleanups(credential: require, app: hive) -> list[PortalCleanupRecordOut]:
         """The signed-in agent's cleanups, newest first, the admin's too (ADR
-        0118), each with whether the agent can undo it now."""
+        0118), each with whether the agent can undo it now. 403 ``forbidden``
+        for a dormant (level 0) agent (SPEC §12.2)."""
         _require_agent(credential, "the agent portal")
         views = await app.access_service.cleanups.list_own(credential)
         return [PortalCleanupRecordOut.from_view(v) for v in views]
@@ -747,8 +749,8 @@ def build_router() -> APIRouter:
         """Undo one of the agent's own cleanups (ADR 0118): only the newest
         standing cleanup of the agent, and only one the agent ran itself (403
         for an admin's, 404 for any other agent's, 409 ``cleanup_refused``
-        when a newer one stands). Audited ``agent.cleanup_undo`` with
-        ``via: "portal"``."""
+        when a newer one stands; also 403 for a dormant, level 0 agent, SPEC
+        §12.2). Audited ``agent.cleanup_undo`` with ``via: "portal"``."""
         _require_agent(credential, "the agent portal")
         outcome = await app.access_service.cleanups.undo_own(cleanup_id, credential)
         return AgentCleanupUndoOut.from_outcome(outcome, note=None)

@@ -21,6 +21,7 @@ from hivemind.domain.entry import EntryDraft, EntryState, Kind
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
+from hivemind.services.errors import PermissionDenied
 from hivemind.store import PgStore
 from hivemind.store import pgstore as pgstore_module
 
@@ -438,6 +439,37 @@ async def test_the_portal_cleanup_through_the_services(pool) -> None:
     assert (await store.get_entry(good)).state is EntryState.WITHDRAWN  # type: ignore[union-attr]
     (undo_row,) = await store.list_audit(AuditFilters(action=AuditAction.AGENT_CLEANUP_UNDO), 10)
     assert undo_row.detail["via"] == "portal" and undo_row.actor == "successor"
+
+
+async def test_a_dormant_level_0_agent_cannot_use_the_portal_cleanup(pool) -> None:
+    """SPEC §12.2: at level 0 the agent can do nothing, so the preview does not
+    list its memories and the apply and undo change nothing."""
+    _, store = pool
+    access = AccessService(store, FakeAuthenticator(store=store))
+    fleet = await store.create_fleet("alpha")
+    await store.register_agent("dormant")
+    await store.activate_agent(
+        "dormant", trust_level=TrustLevel.CONTRIBUTOR, home_fleet_id=fleet.id
+    )
+    mine = await _entry(store, "dormant note", "dormant")
+    agent = Credential(
+        user_id="dormant",
+        agent_name="dormant",
+        access_controlled=True,
+        trust_level=TrustLevel.UNTRUSTED,
+        home_fleet_id=fleet.id,
+    )
+    with pytest.raises(PermissionDenied):
+        await access.cleanups.preview_own(agent, since=SINCE, until=UNTIL)
+    with pytest.raises(PermissionDenied):
+        await access.cleanups.cleanup_own(
+            agent, since=SINCE, until=UNTIL, expected_withdraw=1, expected_ratings=0
+        )
+    with pytest.raises(PermissionDenied):
+        await access.cleanups.list_own(agent)
+    with pytest.raises(PermissionDenied):
+        await access.cleanups.undo_own("00000000-0000-4000-8000-000000000001", agent)
+    assert (await store.get_entry(mine)).state is EntryState.ACTIVE  # type: ignore[union-attr]
 
 
 async def test_an_undo_waits_for_the_cleanup_lock_of_each_author_it_withdrew(pool) -> None:

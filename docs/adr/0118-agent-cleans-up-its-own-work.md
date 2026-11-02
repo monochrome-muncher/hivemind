@@ -31,7 +31,9 @@ The code is the admin service (`AgentCleanupService`) and the admin store transa
 
 The store takes the cleanup lock of each owned author, in name order (the set is always the agent plus its owned authors, sorted), so a portal cleanup of a successor waits for an admin cleanup of the retired agent (and the other way round) instead of racing it. An undo takes the agent's lock and that of every author whose memories the cleanup withdrew, in the same order. Row locks already keep a memory from being withdrawn twice. When both ran over the same memory, the second finds it no longer active and skips it.
 
-Lurkers (trust level 1) and agents that cannot write at all can run it: it only withdraws, sets aside and restores the agent's own work, and nothing in it needs a write scope. A pending or revoked agent has no working key and cannot sign in.
+Lurkers (trust level 1), which have no write scope, can run it: it only withdraws, sets aside and restores the agent's own work, and nothing in it needs a write scope. A pending or revoked agent has no working key and cannot sign in.
+
+**Amendment (level 0).** A dormant agent (trust level 0, `untrusted`) is the exception: SPEC §12.2 says it can do nothing, so `POST /v1/portal/cleanup` (preview and apply), `GET /v1/portal/cleanups` and `POST /v1/portal/cleanups/{id}/undo` answer 403 `forbidden` for it and change and list nothing. Without this the preview listed its own and inherited memories in full, though its reads return nothing, and the apply withdrew them. A dev-mode identity (ADR 0082) has no agent key, so it was already refused. The admin cleanup is unchanged.
 
 ### 3. Who ran it
 
