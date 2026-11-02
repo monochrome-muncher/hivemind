@@ -9,7 +9,8 @@ build a legal tree of thousands of large predecessors for every
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, replace
 
 from hivemind.domain.access import Visibility, entry_is_visible
 from hivemind.domain.entry import Entry, EntryState
@@ -62,6 +63,33 @@ async def get_visible_entries(
         if entry is not None and entry_is_visible(entry, visibility):
             result[eid] = entry
     return result
+
+
+async def hide_unseen_successors(
+    store: Store, entries: Sequence[Entry], visibility: Visibility
+) -> list[Entry]:
+    """``entries`` with ``superseded_by`` cleared wherever the successor is
+    not readable by ``visibility`` (ADR 0033: invisible reads as unknown,
+    so a reader never gets an id it cannot open). The entry keeps its
+    ``superseded`` state. One batched store read however many entries."""
+    wanted = list(
+        dict.fromkeys(
+            e.superseded_by
+            for e in entries
+            if e.state is EntryState.SUPERSEDED and e.superseded_by is not None
+        )
+    )
+    if not wanted:
+        return list(entries)
+    seen = await get_visible_entries(store, wanted, visibility)
+    return [
+        replace(e, superseded_by=None)
+        if e.state is EntryState.SUPERSEDED
+        and e.superseded_by is not None
+        and e.superseded_by not in seen
+        else e
+        for e in entries
+    ]
 
 
 @dataclass(frozen=True, slots=True)

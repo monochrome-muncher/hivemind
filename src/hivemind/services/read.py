@@ -1,5 +1,8 @@
 """The entry-read path, composed in one place (ADR 0083).
 
+Every entry it returns names a successor only if the reader can read it
+(``hide_unseen_successors``, ADR 0033).
+
 ``ReadService`` is the service the surfaces' read paths delegate to: the
 visibility-checked read by id (ADR 0033), the batch read (ADRs 0055, 0059)
 and the filtered list (SPEC §5.3), each with its feedback summary and
@@ -26,6 +29,7 @@ from hivemind.services.chain import (
     entry_links,
     get_visible_entries,
     get_visible_entry,
+    hide_unseen_successors,
     supersession_chain,
 )
 from hivemind.services.errors import AgentIdentityRequired
@@ -88,19 +92,23 @@ class ReadService:
             self._feedback_summary(entry.id),
             entry_links(self._store, entry.id, visibility),
         )
-        detail = EntryDetail(entry=entry, feedback=summary, links=links)
+        successors: list[Entry] = []
+        superseded: list[Entry] = []
         if include_history:
             successors, superseded = await supersession_chain(
                 self._store, entry, visibility=visibility
             )
-            detail = EntryDetail(
-                entry=entry,
-                feedback=summary,
-                links=links,
-                successors=tuple(successors),
-                superseded=tuple(superseded),
-            )
-        return detail
+        # Every version shown, the entry among them, in one lookup.
+        shown = await hide_unseen_successors(
+            self._store, [entry, *successors, *superseded], visibility
+        )
+        return EntryDetail(
+            entry=shown[0],
+            feedback=summary,
+            links=links,
+            successors=tuple(shown[1 : 1 + len(successors)]),
+            superseded=tuple(shown[1 + len(successors) :]),
+        )
 
     async def entries(self, entry_ids: Sequence[str], *, visibility: Visibility) -> EntryBatch:
         """Up to ``MAX_GET_IDS`` entries by id in one call (ADR 0055), each
@@ -115,7 +123,11 @@ class ReadService:
         found = await get_visible_entries(self._store, ids, visibility)
         # Keyed by entry id, not by the id as asked: two spellings of one
         # uuid (case) name the same entry, which comes back once.
-        entries = list({found[eid].id: found[eid] for eid in ids if eid in found}.values())
+        entries = await hide_unseen_successors(
+            self._store,
+            list({found[eid].id: found[eid] for eid in ids if eid in found}.values()),
+            visibility,
+        )
         entry_ids = [e.id for e in entries]
         summaries, links = await asyncio.gather(
             self._feedback_summaries(entry_ids),
@@ -154,9 +166,10 @@ class ReadService:
             filters = replace(filters, reporter=(credential.user_id, agent))
         filters = own_author_filter(filters, visibility)
         effective_limit = limit if limit is not None else self._search_config.default_limit
-        return await self._store.list_entries(
+        listed = await self._store.list_entries(
             filters, limit=effective_limit, offset=offset, visibility=visibility
         )
+        return await hide_unseen_successors(self._store, listed, visibility)
 
     async def feedback_counts(self, entries: Sequence[Entry]) -> dict[str, FeedbackCounts]:
         """Live feedback counts per entry, one store read (the counts a
