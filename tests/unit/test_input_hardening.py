@@ -19,6 +19,7 @@ from hivemind.domain.entry import (
 )
 from hivemind.domain.validation import (
     MAX_BODY_CHARS,
+    MAX_IDENTITY_CHARS,
     MAX_LIMIT,
     MAX_OFFSET,
     MAX_REQUEST_BODY_BYTES,
@@ -51,6 +52,7 @@ from tests.unit.test_api_endpoints import make_authenticator, make_client, make_
 from tests.unit.test_mcp_app import ALICE, ORG, build_app
 
 KEY = {"X-API-Key": "key-alice"}
+USER_KEY = {"X-API-Key": "key-alice-user"}  # no agent identity: self-reports it
 ADMIN = {"X-API-Key": "key-admin"}
 ORG_KEY = {"X-API-Key": "key-org"}
 
@@ -192,6 +194,23 @@ async def test_rest_write_refuses_bad_entries_with_422_and_no_embedding(
     assert embedder.calls == 0
 
 
+async def test_rest_caps_a_self_reported_agent() -> None:
+    async with make_client(make_hivemind_app()) as client:
+        over = await client.post(
+            "/v1/entries",
+            json={"kind": "fact", "summary": "s", "agent": "g" * (MAX_IDENTITY_CHARS + 1)},
+            headers=USER_KEY,
+        )
+        resp = await client.post(
+            "/v1/entries",
+            json={"kind": "fact", "summary": "s", "agent": "g" * MAX_IDENTITY_CHARS},
+            headers=USER_KEY,
+        )
+    assert over.status_code == 422, over.text
+    assert over.json()["error"]["code"] == "invalid_entry"
+    assert resp.status_code == 201, resp.text
+
+
 @pytest.mark.parametrize(
     ("method", "url", "body"),
     [
@@ -319,6 +338,22 @@ async def test_no_key_wins_over_a_malformed_body() -> None:
 
 
 # -- MCP ------------------------------------------------------------------------
+
+
+async def test_mcp_caps_a_self_reported_agent() -> None:
+    app = build_app(MemoryStore(make_clock()), Credential(user_id="alice"), make_clock())
+    over = await hive_write(app, "fact", "s", agent="g" * (MAX_IDENTITY_CHARS + 1))
+    assert over["error"]["code"] == "invalid_input", over  # type: ignore[index]
+    ok = await hive_write(app, "fact", "s", agent="g" * MAX_IDENTITY_CHARS)
+    assert "error" not in ok, ok
+
+
+async def test_a_long_agent_id_from_the_key_still_writes() -> None:
+    """Only the self-reported agent is capped; a key's own (legacy) agent
+    identity is not (ADR 0040)."""
+    legacy = Credential(user_id="alice", agent_id="g" * (MAX_IDENTITY_CHARS + 50))
+    app = build_app(MemoryStore(make_clock()), legacy, make_clock())
+    assert "error" not in await hive_write(app, "fact", "s")
 
 
 async def test_mcp_refuses_bad_input_with_invalid_input() -> None:
