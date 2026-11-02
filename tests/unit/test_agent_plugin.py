@@ -1035,7 +1035,8 @@ def test_opencode_plugin_warns_once_when_an_existing_server_points_elsewhere(
         HIVEMIND_API_KEY="hm_secret_value",
     )
     assert err.count("hivemind:") == 1, err  # two loads in one process, one warning
-    assert "https://hm.example" in err and "https://other.example:8443" in err
+    origins = re.findall(r"points at (\S+?)[,.]\s", err)
+    assert origins == ["https://hm.example", "https://other.example:8443"], err
     assert "existing entry wins" in err and "hivemind-incognito" in err
     for leaked in ("hm_secret_value", "secret-path", "token=abc", "/mcp"):
         assert leaked not in err, err
