@@ -30,14 +30,14 @@ is unused.
 | [0017](0017-environment-profile-dotenv-files-selected-by-environment.md) | Environment-profile dotenv files, selected by ENVIRONMENT | Accepted |
 | [0018](0018-entrypoint-owned-idempotent-migration.md) | Entrypoint-owned idempotent migration (replaces the k8s initContainer) | Mechanism now 0020 |
 | [0019](0019-unauthenticated-orchestrator-probe-endpoints.md) | Unauthenticated orchestrator probe endpoints | Partly superseded by 0037 |
-| [0020](0020-versioned-migrations-with-rollback-and-an-advisory-lock.md) | Versioned migrations with rollback, guarded by a Postgres advisory lock | Amended by 0025; dim guard note |
+| [0020](0020-versioned-migrations-with-rollback-and-an-advisory-lock.md) | Versioned migrations with rollback, guarded by a Postgres advisory lock | Amended by 0025, 0119; dim guard note |
 | [0021](0021-embedded-text-budget-in-whitespace-words-not-model-tokens.md) | The embedded-text budget is counted in whitespace words, not model tokens | Amended by 0040 |
 | [0022](0022-recency-floor-so-match-quality-is-the-sort-key.md) | A floor under the recency factor, so match quality is the sort key | Amended by 0023, 0070, 0071, 0072, 0073, 0088, 0103 |
 | [0023](0023-recency-floor-gets-a-spelling-for-no-floor.md) | `HIVEMIND_RECENCY_FLOOR` gets an explicit spelling for "no floor" | Accepted |
 | [0024](0024-reject-unknown-hivemind-env-vars.md) | Reject unknown `HIVEMIND_*` environment variables | Partly superseded by 0032 |
 | [0025](0025-hnsw-vector-index-approximate-nearest-neighbours.md) | An HNSW index on `entries.embedding`: approximate, not exact, nearest neighbours | Accepted |
 | [0026](0026-two-app-tier-replicas-for-availability.md) | Two app-tier replicas per runner, for availability — not throughput | Accepted |
-| [0027](0027-audit-log-of-admin-actions.md) | An append-only audit log of admin actions, with two actor kinds | Amended by 0028, 0046, 0076, 0095 |
+| [0027](0027-audit-log-of-admin-actions.md) | An append-only audit log of admin actions, with two actor kinds | Amended by 0028, 0046, 0076, 0095, 0119 |
 | [0028](0028-revoked-agent-status-and-an-activation-guard.md) | A `revoked` agent status, and activation only from `pending` or `revoked` | Refined by 0039 |
 | [0029](0029-admin-panel-runner-with-a-browser-held-key.md) | The admin panel: a static UI and an allowlisted proxy, with the key held in the browser | Amended by 0080, 0091; the agent portal (0095) is built the same way |
 | [0030](0030-hive-whoami-lets-an-agent-see-its-own-standing.md) | `hive_whoami`: an agent can read its own standing | Accepted |
@@ -128,3 +128,4 @@ is unused.
 | [0116](0116-pin-and-unpin-from-the-portal.md) | Pin and unpin from the agent portal | Accepted; amends 0095, builds on 0058, 0076, 0096, no migration, agent key only |
 | [0117](0117-lock-your-own-key-from-the-portal.md) | Lock the agent's own key from the portal | Accepted; amends 0095, 0108, migration 0025, agent key only, audited `agent_key.lock`, cleared by Replace key |
 | [0118](0118-agent-cleans-up-its-own-work.md) | An agent cleans up its own work from the portal | Accepted; amends 0095, 0111, builds on 0113, migration 0026, agent key only, undoable |
+| [0119](0119-rollbacks-do-not-silently-erase-the-audit-log.md) | Rollbacks do not silently erase the audit log | Accepted; amends 0020, 0027, migration 0027, `hivemind-migrate --rollback` refuses without `--discard-audit-rows` / `--revive-revoked-keys`, audited `schema.rollback` |

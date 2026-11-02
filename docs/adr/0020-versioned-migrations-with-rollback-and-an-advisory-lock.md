@@ -1,5 +1,7 @@
 # Versioned migrations with rollback, guarded by a Postgres advisory lock
 
+> **Amended by [ADR 0119](0119-rollbacks-do-not-silently-erase-the-audit-log.md):** `hivemind-migrate --rollback` counts the audit rows (and revived keys) a rollback would destroy and refuses without an explicit flag; a rollback is audited as `schema.rollback`.
+
 **Supersedes ADR 0013** (forward-migration path: idempotent re-apply +
 `schema_migrations` tracking).
 
