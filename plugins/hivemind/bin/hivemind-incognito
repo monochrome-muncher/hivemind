@@ -20,8 +20,10 @@
 # launcher also removes HIVEMIND_API_KEY and HIVEMIND_MCP_URL from the
 # child's environment (codex: the key only), so an agent with a shell cannot
 # read the key or call the REST API with it. Hermes, OpenCode and KiloCode
-# keep the variables (their switch or the plugin may still need them), and so
-# does any other launcher, where the session is incognito by restraint only;
+# keep the variables (their switch or the plugin may still need them), except
+# that OpenCode and KiloCode drop them when OPENCODE_CONFIG_CONTENT or
+# KILO_CONFIG_CONTENT is already set and the overlay cannot be applied. Any
+# other launcher keeps them too, where the session is incognito by restraint only;
 # the README says so.
 set -eu
 
@@ -148,6 +150,11 @@ PY
     # run through OpenCode's highest-precedence config overlay.
     if [ -z "${OPENCODE_CONFIG_CONTENT:-}" ]; then
       export OPENCODE_CONFIG_CONTENT='{"mcp":{"hivemind":{"enabled":false}}}'
+    else
+      # Not merged here (no JSON editing in sh). Without the key and URL an
+      # `{env:...}` hand entry has nothing to send.
+      unset HIVEMIND_API_KEY HIVEMIND_MCP_URL
+      note "OPENCODE_CONFIG_CONTENT is already set, so the disable overlay was not applied; the key and URL are unset, but a server with a literal key in config may still load"
     fi
     exec "$harness" "$@"
     ;;
@@ -179,6 +186,10 @@ PY
     # enabled), and the v2 form (mcp.servers, disabled) alone left it on.
     if [ -z "${KILO_CONFIG_CONTENT:-}" ]; then
       export KILO_CONFIG_CONTENT='{"mcp":{"hivemind":{"enabled":false},"servers":{"hivemind":{"disabled":true}}}}'
+    else
+      # Not merged here (no JSON editing in sh); see the opencode branch.
+      unset HIVEMIND_API_KEY HIVEMIND_MCP_URL
+      note "KILO_CONFIG_CONTENT is already set, so the disable overlay was not applied; the key and URL are unset, but a server with a literal key in config may still load"
     fi
     exec "$harness" "$@"
     ;;

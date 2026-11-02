@@ -371,8 +371,8 @@ does two things:
 | Oh My Pi | `HIVEMIND_MCP_URL`/`HIVEMIND_API_KEY` unset, so the server is never contacted (Oh My Pi warns once that it is unavailable); the extension also blocks any Hivemind call | the hivemind plugin |
 | GitHub Copilot CLI | `--disable-mcp-server hivemind` for the session (it never contacts the server); the launcher also unsets the key and URL | the server named `hivemind` in `~/.copilot/mcp-config.json` |
 | Gemini CLI | `HIVEMIND_MCP_URL`/`HIVEMIND_API_KEY` unset, so the extension's server is never contacted (Gemini notes an MCP issue) | the hivemind extension, and no hand entry in `settings.json` |
-| OpenCode | the plugin skips the server; a hand-configured one is disabled with `OPENCODE_CONFIG_CONTENT` | nothing |
-| KiloCode | the plugin (the OpenCode one) skips the server; a hand-configured one is disabled with `KILO_CONFIG_CONTENT` (`mcp.hivemind.enabled: false` and `mcp.servers.hivemind.disabled`) | nothing |
+| OpenCode | the plugin skips the server; a hand-configured one is disabled with `OPENCODE_CONFIG_CONTENT`, or, when that variable is already set (never merged in sh), the key and URL are unset and a note is printed | nothing |
+| KiloCode | the plugin (the OpenCode one) skips the server; a hand-configured one is disabled with `KILO_CONFIG_CONTENT` (`mcp.hivemind.enabled: false` and `mcp.servers.hivemind.disabled`), or, when that variable is already set, the key and URL are unset and a note is printed | nothing |
 | Cline | `HIVEMIND_MCP_URL`/`HIVEMIND_API_KEY` unset, so the `${env:…}` references in `cline_mcp_settings.json` stay unexpanded and the server never connects; the hooks see `HIVEMIND_INCOGNITO` and say the incognito line (the skills stay installed) | the server entry with `${env:…}` references |
 
 Where the switch is missing or not configured (the Hermes entry without
@@ -382,7 +382,7 @@ command), the session is incognito **by restraint**: the tools are
 loaded, the key and URL stay in the environment, and an agent with a
 shell could still call the REST API. The launcher unsets the key and URL
 only where the server is kept from loading (Claude Code, Copilot CLI,
-DeepSeek Harness, Pi, Oh My Pi, Gemini CLI, Cline; for Codex, the key only),
+DeepSeek Harness, Pi, Oh My Pi, Gemini CLI, Cline; for Codex, the key only; for OpenCode and KiloCode only when their config overlay variable is already set),
 because the other harnesses may still need them (ADR 0035). A DeepSeek Harness session also stays incognito when a
 project `.env` names `HIVEMIND_*` variables: incognito is on if the
 process environment or `~/.dsh/.env` says so, and no project `.env` can

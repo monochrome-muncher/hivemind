@@ -1595,6 +1595,34 @@ def test_launcher_disables_a_hand_configured_opencode_server(tmp_path: Path) -> 
     assert json.loads(lines[1]) == {"mcp": {"hivemind": {"enabled": False}}}
 
 
+@pytest.mark.parametrize(
+    ("harness", "var"), [("opencode", "OPENCODE_CONFIG_CONTENT"), ("kilo", "KILO_CONFIG_CONTENT")]
+)
+def test_launcher_keeps_an_existing_config_overlay_but_drops_the_key(
+    tmp_path: Path, harness: str, var: str
+) -> None:
+    """The overlay is not merged in sh. When the variable is already set the
+    launcher leaves it as is, unsets the key and URL so an `{env:...}` entry
+    has nothing to send, and says so on stderr."""
+    env = _fake_harness(tmp_path, harness)
+    script = tmp_path / "bin" / harness
+    script.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "KEY=${HIVEMIND_API_KEY:-unset}" '
+        f'"URL=${{HIVEMIND_MCP_URL:-unset}}" "OVERLAY=${var}"\n'
+    )
+    env.update(HIVEMIND_API_KEY="hm_x", HIVEMIND_MCP_URL="https://hm/mcp", **{var: '{"a":1}'})
+    out = subprocess.run(
+        ["sh", str(LAUNCHER), harness], env=env, cwd=tmp_path, capture_output=True, text=True
+    )
+    assert out.stdout.splitlines() == ["KEY=unset", "URL=unset", 'OVERLAY={"a":1}']
+    assert f"{var} is already set" in out.stderr and "literal key" in out.stderr
+    assert "hm_x" not in out.stderr
+    # Unset: the overlay is applied and the key stays (the plugin may need it).
+    del env[var]
+    fresh = _launch(tmp_path, env, harness)
+    assert fresh[0] == "KEY=hm_x" and "enabled" in fresh[2]
+
+
 def test_the_root_package_also_serves_pi_and_opencode() -> None:
     root = _json(ROOT / "package.json")
     shipped = [ROOT / f.rstrip("/") for f in root["files"]]  # type: ignore[union-attr]
