@@ -12,7 +12,9 @@ the two skills, and puts the reminder into every model request. It supports
 both OpenCode v1 and v2 (the two plugin APIs differ; the plugin carries
 both). Add the Hivemind repository's Git URL to the plugin list in
 `~/.config/opencode/opencode.json` (all projects) or a project's
-`opencode.json`, then export the two variables and restart OpenCode:
+`opencode.json`, then export the two variables and restart OpenCode. If a
+`hivemind` server is already defined in your config, it wins; when its URL
+differs from `HIVEMIND_MCP_URL` the plugin prints one warning on stderr.
 
 OpenCode v1 uses the `plugin` key; v2 uses `plugins` and migrates a `plugin`
 entry automatically. Write `plugin`: it works on both (v1 does not read

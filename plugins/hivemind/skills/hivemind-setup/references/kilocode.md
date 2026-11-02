@@ -11,7 +11,9 @@ works in it unchanged. The plugin registers the Hivemind MCP server from
 `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY`, adds the two skills, and puts
 the reminder into every model request. Add the Hivemind repository to the
 `plugin` list in `~/.config/kilo/kilo.jsonc` (all projects) or a project's
-`kilo.jsonc`, then export the two variables and restart KiloCode:
+`kilo.jsonc`, then export the two variables and restart KiloCode. If a
+`hivemind` server is already defined in your config, it wins; when its URL
+differs from `HIVEMIND_MCP_URL` the plugin prints one warning on stderr.
 
 ```jsonc
 {

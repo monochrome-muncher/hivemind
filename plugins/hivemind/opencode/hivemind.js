@@ -4,8 +4,9 @@
 // files (plugins/hivemind/README.md, "OpenCode"):
 //
 // * registers the Hivemind MCP server from HIVEMIND_MCP_URL and
-//   HIVEMIND_API_KEY (unless opencode.json already defines "hivemind"), and
-//   adds this plugin's skills;
+//   HIVEMIND_API_KEY (unless opencode.json already defines "hivemind", in
+//   which case that entry wins and a differing url draws one stderr warning),
+//   and adds this plugin's skills;
 // * adds the Hivemind reminder to every model request, so it survives
 //   compaction;
 // * incognito sessions (ADR 0035): with HIVEMIND_INCOGNITO set, the server
@@ -64,6 +65,36 @@ function note(s, tool) {
 function incognito() {
   const value = (process.env.HIVEMIND_INCOGNITO ?? "").trim().toLowerCase();
   return ["1", "true", "yes", "on"].includes(value);
+}
+
+// A project's opencode.json / kilo.jsonc can define a "hivemind" server that
+// points somewhere other than HIVEMIND_MCP_URL. The existing entry still wins
+// (right for hand setups), but say so once per process. Only scheme://host[:port]
+// is printed, never paths, queries or headers.
+let warnedShadowed = false;
+
+function origin(url) {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return "an unreadable URL";
+  }
+}
+
+function sameUrl(a, b) {
+  const norm = (u) => String(u).trim().replace(/\/$/, "");
+  return norm(a) === norm(b);
+}
+
+function warnIfShadowed(existingUrl) {
+  const wanted = process.env.HIVEMIND_MCP_URL;
+  if (warnedShadowed || incognito() || !wanted || typeof existingUrl !== "string") return;
+  if (sameUrl(existingUrl, wanted)) return;
+  warnedShadowed = true;
+  console.warn(
+    `hivemind: HIVEMIND_MCP_URL points at ${origin(wanted)}, but an existing "hivemind" MCP entry points at ${origin(existingUrl)}. ` +
+      "The existing entry wins. Check the project's opencode.json or kilo.jsonc, or use hivemind-incognito.",
+  );
 }
 
 function reminder() {
@@ -155,6 +186,7 @@ async function server({ client } = {}) {
       const key = process.env.HIVEMIND_API_KEY;
       // No key: do not register the server. An empty `Bearer ` header would
       // only produce a 401 loop; the reminder already says "not connected".
+      if (cfg.mcp.hivemind) warnIfShadowed(cfg.mcp.hivemind.url);
       if (!cfg.mcp.hivemind && url && key) {
         cfg.mcp.hivemind = {
           type: "remote",
@@ -235,7 +267,9 @@ async function setup(ctx) {
     }
     const url = process.env.HIVEMIND_MCP_URL;
     const key = process.env.HIVEMIND_API_KEY;
-    if (!editor.get("hivemind") && url && key) {
+    const existing = editor.get("hivemind");
+    if (existing) warnIfShadowed(existing.url);
+    if (!existing && url && key) {
       editor.set("hivemind", {
         type: "remote",
         url,
