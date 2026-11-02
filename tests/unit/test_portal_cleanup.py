@@ -375,6 +375,34 @@ async def test_the_cleanup_routes_refuse_the_admin_and_org_keys(w: World) -> Non
             assert resp.status_code == 403, (path, resp.text)
 
 
+async def test_a_dormant_level_0_agent_can_do_nothing_here_either(w: World) -> None:
+    """SPEC §12.2: at trust level 0 every read is empty and every write a
+    permission error, so the portal cleanup (which lists and withdraws) is 403."""
+    mine = await w.entry("peer", "peer note")
+    await w.rate(mine, "peer")
+    done = (await w.clean("peer")).json()["cleanup_id"]
+    again = await w.entry("peer", "peer note two")
+    await w.store.set_agent_trust_level("peer", TrustLevel.UNTRUSTED)
+    window = {**WINDOW, "dry_run": True}
+    for method, path, body in (
+        ("POST", "/v1/portal/cleanup", window),
+        (
+            "POST",
+            "/v1/portal/cleanup",
+            {**WINDOW, "dry_run": False, "expected_withdraw": 1, "expected_ratings": 0},
+        ),
+        ("GET", "/v1/portal/cleanups", None),
+        ("POST", f"/v1/portal/cleanups/{done}/undo", None),
+    ):
+        resp = await w.client.request(method, path, json=body, headers=w.h("peer"))
+        assert resp.status_code == 403, (path, resp.text)
+        assert resp.json()["error"]["code"] == "forbidden", resp.text
+    assert await w.state(again) is EntryState.ACTIVE
+    assert await w.state(mine) is EntryState.WITHDRAWN
+    record = await w.store.get_agent_cleanup(done)
+    assert record is not None and record.undone_at is None
+
+
 async def test_a_memory_in_a_fleet_the_key_cannot_read_is_never_offered_or_restored(
     w: World,
 ) -> None:

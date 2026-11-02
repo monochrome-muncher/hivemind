@@ -15,7 +15,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 
-from hivemind.domain.access import Agent, InvalidAgentStatus, Visibility
+from hivemind.domain.access import Agent, InvalidAgentStatus, TrustLevel, Visibility
 from hivemind.domain.agent_cleanup import (
     CLEANUP_LIST_LIMIT,
     AgentCleanupRecord,
@@ -91,9 +91,15 @@ class AgentCleanupService:
 
     @staticmethod
     def _require_agent(credential: Credential) -> str:
-        """The signed-in agent's name; the admin and org keys have none (ADR 0095)."""
+        """The signed-in agent's name; the admin and org keys have none (ADR 0095).
+        A dormant (level 0) agent can do nothing (SPEC §12.2): its reads are empty
+        and its writes refused, so the cleanup, which lists and withdraws, is too."""
         if credential.is_admin or credential.is_org or credential.agent_name is None:
             raise PermissionDenied("cleaning up your own work requires an agent key")
+        if credential.trust_level is TrustLevel.UNTRUSTED:
+            raise PermissionDenied(
+                "a dormant (untrusted, level 0) agent can do nothing; ask your admin"
+            )
         return credential.agent_name
 
     # -- preview ------------------------------------------------------------
