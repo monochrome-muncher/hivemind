@@ -327,6 +327,32 @@ curl -s -H "X-API-Key: $ADMIN_KEY" \
   `via: "portal"` in `detail`. Rolling back past `0025` deletes those
   rows and makes a locked key usable again; replace the key first if it
   must stay dead.
+- **Rollbacks are audited and guarded** (ADR 0119, migration `0027`).
+  Several shipped rollbacks (`0009`, `0014`, `0017`, `0019`, `0020`,
+  `0022`, `0023`, `0024`, `0025`, `0027`) delete the audit rows whose
+  action needs a wider `CHECK`, `0006`'s sets revoked agents back to
+  `active` (reviving their key rows), and `0025`'s drops the lock mark, so
+  locked keys work again. `make rollback` (`hivemind-migrate --rollback N`)
+  counts all three under the migration lock before any DDL and, when a
+  count is not zero, exits non-zero naming each migration, its actions and
+  the count, and changes nothing. Dump the log first
+  (`pg_dump --table=audit_log`), then confirm on the make command line:
+  `make rollback N=3 DISCARD_AUDIT_ROWS=1` for audit rows,
+  `REVIVE_REVOKED_KEYS=1` for the keys of revoked agents (delete those
+  keys instead if they must stay dead; see dead credentials above) and
+  `UNLOCK_LOCKED_KEYS=1` for locked keys (replace them first if they must
+  stay dead). Directly: `hivemind-migrate --rollback 3
+  --discard-audit-rows`, with exactly one number and only those flags.
+  **Stop the app tier first.** The counts do not block live writes, so a
+  row written between the count and the DDL is deleted uncounted;
+  `discarded_audit_rows` is the count taken before the rollback.
+  Once a migration above `0027` exists and `0027` stays applied, each
+  successful rollback writes one `schema.rollback` row (`actor_kind = cli`,
+  the OS user, the most recent migration id as target, `{rolled_back,
+  discarded_audit_rows}` as detail). Until then `0027` is the head, every
+  rollback takes it along, and the WARNING on stderr is the only record;
+  rolling back `0027` deletes any such rows (so it needs
+  `--discard-audit-rows` once they exist).
 - **Raw SQL bypasses it.** A hand-run `DELETE FROM credentials …` is not
   audited; prefer the CLI even for break-glass work.
 

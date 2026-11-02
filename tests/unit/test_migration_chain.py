@@ -22,6 +22,7 @@ which is exactly when they are impossible to notice by eye:
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
 
 import pytest
@@ -132,3 +133,106 @@ class TestChainIsWellFormed:
             "Add the rollback, or state 'no rollback' and the reason in a leading "
             "comment (ADR 0020: destructive rollbacks are not written)."
         )
+
+
+_AUDIT = r'(?:public\s*\.\s*)?"?audit_log"?'
+# Any statement that removes audit rows or the table, wherever it sits.
+_AUDIT_DESTROYER = re.compile(
+    rf"\b(?:DELETE\s+FROM\s+(?:ONLY\s+)?{_AUDIT}|TRUNCATE\b[^;]*?{_AUDIT}"
+    rf"|DROP\s+TABLE\b[^;]*?{_AUDIT})[^;]*;",
+    re.I | re.S,
+)
+_STRICT_DELETE = re.compile(rf"DELETE\s+FROM\s+{_AUDIT}\s+WHERE\s+(.+?);", re.I | re.S)
+_STRICT_CLAUSE = re.compile(
+    r"(action|actor_kind)\s*(?:=\s*('[^']+')|IN\s*\(\s*('[^']+'(?:\s*,\s*'[^']+')*)\s*\))",
+    re.I,
+)
+# The one rollback allowed to destroy the audit log by other means: it
+# refuses to run while the log holds a row (ADR 0027).
+_AUDIT_DROP_ALLOWLIST = {"0005.audit-log.rollback.sql"}
+
+
+def _strip_sql_comments(sql: str) -> str:
+    return re.sub(r"--[^\n]*", "", sql)
+
+
+def _audit_deletions_in_sql(name: str, sql: str) -> tuple[set[str], set[str]]:
+    """The actions and actor kinds named by a rollback's audit DELETEs.
+
+    Every statement that deletes, truncates or drops `audit_log` must be
+    `DELETE FROM audit_log WHERE (action|actor_kind) (= 'x' | IN ('x', ...))`
+    joined by OR, or sit in a rollback on the allowlist; anything else (a
+    bare DELETE, `<>`, `NOT IN`, AND, a subquery, TRUNCATE) fails, because
+    the guard's table could not describe it."""
+    actions: set[str] = set()
+    kinds: set[str] = set()
+    for match in _AUDIT_DESTROYER.finditer(_strip_sql_comments(sql)):
+        statement = match.group(0)
+        if name in _AUDIT_DROP_ALLOWLIST:
+            continue
+        strict = _STRICT_DELETE.fullmatch(statement.strip())
+        assert strict is not None, f"{name}: unsupported audit_log statement: {statement!r}"
+        clauses = re.split(r"\s+OR\s+", strict.group(1), flags=re.I)
+        for clause in clauses:
+            m = _STRICT_CLAUSE.fullmatch(clause.strip())
+            assert m is not None, f"{name}: unsupported audit_log predicate: {clause!r}"
+            values = set(re.findall(r"'([^']+)'", m.group(2) or m.group(3)))
+            (actions if m.group(1).lower() == "action" else kinds).update(values)
+    return actions, kinds
+
+
+def test_rollback_audit_table_matches_the_shipped_rollback_files() -> None:
+    """ADR 0119: `ROLLBACK_AUDIT_DELETES` is what the rollback guard counts,
+    so it must name exactly what each frozen `.rollback.sql` deletes, and
+    every rollback that deletes audit rows must be in it."""
+    from hivemind.store.migrate import ROLLBACK_AUDIT_DELETES
+
+    found: dict[str, tuple[set[str], set[str]]] = {}
+    for path in MIGRATIONS_DIR.glob("*.rollback.sql"):
+        deleted = _audit_deletions_in_sql(path.name, path.read_text())
+        if deleted[0] or deleted[1]:
+            found[path.name.removesuffix(".rollback.sql")] = deleted
+    assert found, "the parser found no audit DELETE at all"
+    assert set(found) == set(ROLLBACK_AUDIT_DELETES)
+    for migration_id, (actions, kinds) in found.items():
+        entry = ROLLBACK_AUDIT_DELETES[migration_id]
+        assert set(entry.actions) == actions, migration_id
+        assert set(entry.actor_kinds) == kinds, migration_id
+
+
+def test_every_audit_action_is_in_the_latest_check_constraint() -> None:
+    """The widest `audit_log_action_check` (the newest migration that
+    sets it) lists exactly the `AuditAction` vocabulary."""
+    from hivemind.domain.audit import AuditAction
+
+    newest = max(
+        p
+        for p in MIGRATIONS_DIR.glob("*.sql")
+        if not p.name.endswith(".rollback.sql") and "audit_log_action_check" in p.read_text()
+    )
+    listed = set(
+        re.findall(r"'([a-z_]+\.[a-z_]+)'", newest.read_text().split("CHECK (action", 1)[1])
+    )
+    assert listed == {a.value for a in AuditAction}
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "DELETE FROM audit_log;",
+        "DELETE FROM public.audit_log WHERE action <> 'a';",
+        "DELETE FROM audit_log WHERE action NOT IN ('a');",
+        "DELETE FROM audit_log WHERE action = 'a' AND actor = 'b';",
+        "DELETE FROM audit_log WHERE action IN (SELECT 'a');",
+        "TRUNCATE audit_log;",
+        "DROP TABLE public.audit_log;",
+    ],
+)
+def test_the_audit_drift_check_rejects_forms_the_table_cannot_describe(sql: str) -> None:
+    with pytest.raises(AssertionError):
+        _audit_deletions_in_sql("9999.x.rollback.sql", sql)
+
+
+def test_the_audit_drift_check_ignores_comments_and_reads_the_strict_form() -> None:
+    sql = "-- DELETE FROM audit_log;\nDELETE FROM public.audit_log WHERE action IN ('a', 'b') OR actor_kind = 'k';"
+    assert _audit_deletions_in_sql("9999.x.rollback.sql", sql) == ({"a", "b"}, {"k"})
