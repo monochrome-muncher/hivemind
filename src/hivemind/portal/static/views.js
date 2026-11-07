@@ -8,7 +8,8 @@ import {
   KINDS, SCOPES, VERDICTS,
 } from "./session.js";
 import { openEntry } from "./drawer.js";
-import { PIN_HEADERS, entryTable, feedbackTable, flaggedTable, pinRow } from "./lists.js";
+import { PIN_HEADERS, cursorPages, entryTable, feedbackTable, flaggedTable, pagedTable, pinRow } from "./lists.js";
+import { column } from "./csv.js";
 
 const select = (label, values, selected, anyText) => h("select", { "aria-label": label },
   h("option", { value: "", text: anyText }),
@@ -165,6 +166,58 @@ export async function viewAttention(root) {
       `Active memories of ${me.name}${inherited(me)} that another agent rated stale or wrong, the longest-flagged first. Open one to read the verdicts. If it is out of date, withdraw it with a reason, or ask the agent to supersede it with a corrected memory.`,
       refreshButton()),
     list.el);
+  await list.load(true);
+}
+
+// --- history (ADR 0123) --------------------------------------------------------------------
+
+const HISTORY_HEADERS = ["When", "By", "What happened", "Reason", "Memory"];
+
+/** Who did it: "an admin" (never named), "this agent", or a predecessor by name. */
+const historyBy = (row, me) => {
+  if (row.by === "admin") return "an admin";
+  if (row.by !== "agent" || !row.agent) return "another agent";
+  return row.agent === me.name ? "this agent" : row.agent;
+};
+
+/** What the history says happened to the agent and the agents it took over from (ADR 0113), newest first. */
+export async function viewHistory(root) {
+  const me = state.me;
+  const open = (id) => openEntry(id, () => list.load(true));
+  const renderRow = (row) => h("tr", {},
+    h("td", { class: "nowrap", title: fmtTime(row.occurred_at), text: fmtAgo(row.occurred_at) }),
+    h("td", { class: "nowrap", text: historyBy(row, me) }),
+    h("td", {}, row.summary,
+      row.about && row.about !== me.name ? h("div", { class: "muted small", text: `about ${row.about}, which it took over from` }) : null),
+    h("td", { class: "cell-note" }, row.reason ? h("div", { class: "plain", text: row.reason }) : h("span", { class: "muted", text: "—" })),
+    h("td", { class: "nowrap" }, row.entry_id
+      ? h("button", { type: "button", class: "linklike", text: "Open memory", onclick: () => open(row.entry_id) })
+      : h("span", { class: "muted", text: "—" })));
+  // The table and the CSV export each keep their own cursors, so an export never shifts the table's paging.
+  const pages = () => cursorPages(({ limit, before }) => guarded(() => api("GET", "portal/history", { query: { limit, before } })));
+  const list = pagedTable({
+    headers: HISTORY_HEADERS,
+    className: "entries history-log",
+    fetchPage: pages(),
+    renderRow,
+    emptyText: "Nothing has been recorded about this agent yet.",
+    statusText: (n) => `${n} shown, newest first`,
+    csv: {
+      columns: [
+        column("occurred_at"), column("by", (r) => historyBy(r, me)), column("about"), column("action"),
+        column("summary"), column("reason"), column("entry_id"),
+      ],
+      name: `${me.name}-history`,
+      key: (r) => r.id,
+      fetchPage: pages(),
+    },
+  });
+  fill(root,
+    pageHead("History",
+      `What happened to ${me.name}${inherited(me)}, newest first: what it did itself and what an admin did to it. An admin is never named. A fleet is named only if this key can read it, and a memory opens only if this key can still read it.`,
+      refreshButton()),
+    list.el,
+    h("p", { class: "muted small note", text: "Withdrawal reasons are written by whoever withdrew the memory: shown as plain text, not checked by anyone." }));
   await list.load(true);
 }
 

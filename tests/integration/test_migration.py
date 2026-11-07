@@ -35,7 +35,8 @@ from hivemind.store.migrate import (
     rollback as _guarded_rollback,
 )
 
-HEAD = "0027.schema-rollback-audit"
+HEAD = "0030.audit-target-index"  # 0028 and 0029 are numbered on other branches
+ID_0027 = "0027.schema-rollback-audit"  # the head before 0030
 ID_0026 = "0026.cleanup-self-service"  # the head before 0027
 ID_0025 = "0025.key-lock"  # the head before 0026
 PREV = "0024.agent-successions"  # the head before 0025
@@ -70,18 +71,19 @@ CHAIN = [
     PREV,
     ID_0025,
     ID_0026,
+    ID_0027,
     HEAD,
 ]
 
 
 async def rollback(dsn: str, dim: int, count: int = 1, **confirm: bool) -> list[str]:
     """The per-migration tests below exercise what each older rollback does
-    to its own schema, so they step over `0027` first, which has its own
-    tests at the end of the file. A test that seeds rows a guard counts
-    passes the matching confirmation flag (ADR 0119); the returned ids are
-    those of the requested `count` migrations below `0027`."""
+    to its own schema, so they step over `0030` and `0027` first, which have
+    their own tests at the end of the file. A test that seeds rows a guard
+    counts passes the matching confirmation flag (ADR 0119); the returned ids
+    are those of the requested `count` migrations below `0027`."""
     if await current_schema_version(dsn) == HEAD:
-        await _guarded_rollback(dsn, dim, 1)
+        await _guarded_rollback(dsn, dim, 2)
     return await _guarded_rollback(dsn, dim, count, **confirm)
 
 
@@ -1587,9 +1589,9 @@ async def test_rollback_refuses_to_delete_audit_rows_without_the_flag() -> None:
     await _start_at_head(dsn, dim)
     await _insert_audit(dsn, "agent_key.lock", "agent_key.lock", "fleet.merge")
 
-    # 0027, 0026, 0025: 0025's rollback would delete the two key-lock rows.
+    # 0030, 0027, 0026, 0025: 0025's rollback would delete the two key-lock rows.
     with pytest.raises(RollbackRefused) as exc:
-        await _guarded_rollback(dsn, dim, count=3)
+        await _guarded_rollback(dsn, dim, count=4)
     message = str(exc.value)
     assert ID_0025 in message
     assert "agent_key.lock" in message
@@ -1602,7 +1604,7 @@ async def test_rollback_refuses_to_delete_audit_rows_without_the_flag() -> None:
     assert await _audit_actions(dsn) == ["agent_key.lock", "agent_key.lock", "fleet.merge"]
 
     # A chain that deletes nothing is not refused.
-    assert await _guarded_rollback(dsn, dim, count=2) == [HEAD, ID_0026]
+    assert await _guarded_rollback(dsn, dim, count=3) == [HEAD, ID_0027, ID_0026]
     assert await current_schema_version(dsn) == ID_0025
 
 
@@ -1614,8 +1616,8 @@ async def test_rollback_with_the_flag_discards_the_rows_and_warns_past_0027(
     await _insert_audit(dsn, "agent_key.lock", "agent_key.lock", "fleet.merge")
 
     with caplog.at_level(logging.WARNING, logger="hivemind.store.migrate"):
-        rolled = await _guarded_rollback(dsn, dim, count=3, discard_audit_rows=True)
-    assert rolled == [HEAD, ID_0026, ID_0025]
+        rolled = await _guarded_rollback(dsn, dim, count=4, discard_audit_rows=True)
+    assert rolled == [HEAD, ID_0027, ID_0026, ID_0025]
     assert await current_schema_version(dsn) == PREV
     # Only the rolled-back actions went; 0027 itself is gone, so no audit row.
     assert await _audit_actions(dsn) == ["fleet.merge"]
@@ -1623,16 +1625,27 @@ async def test_rollback_with_the_flag_discards_the_rows_and_warns_past_0027(
     assert '"discarded_audit_rows": 2' in caplog.text
 
 
+async def _start_at_0027(dsn: str, dim: int) -> None:
+    """The head before 0030, with an empty audit log (the step over 0030 audits itself)."""
+    await _start_at_head(dsn, dim)
+    assert await _guarded_rollback(dsn, dim, count=1) == [HEAD]
+    conn = await asyncpg.connect(dsn)
+    try:
+        await conn.execute("DELETE FROM audit_log")
+    finally:
+        await conn.close()
+
+
 async def test_rolling_back_0027_is_guarded_by_its_own_rows() -> None:
     dsn, dim = _dsn(), Settings().embedding_dim
-    await _start_at_head(dsn, dim)
+    await _start_at_0027(dsn, dim)
     await _insert_audit(dsn, "schema.rollback")
 
     with pytest.raises(RollbackRefused, match=r"schema\.rollback"):
         await _guarded_rollback(dsn, dim, count=1)
-    assert await current_schema_version(dsn) == HEAD
+    assert await current_schema_version(dsn) == ID_0027
 
-    assert await _guarded_rollback(dsn, dim, count=1, discard_audit_rows=True) == [HEAD]
+    assert await _guarded_rollback(dsn, dim, count=1, discard_audit_rows=True) == [ID_0027]
     assert await _audit_actions(dsn) == []
     conn = await asyncpg.connect(dsn)
     try:
@@ -1645,21 +1658,42 @@ async def test_rolling_back_0027_is_guarded_by_its_own_rows() -> None:
         await conn.close()
 
 
-async def test_a_rollback_that_leaves_0027_applied_writes_a_schema_rollback_row(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Today `0027` is the head, so a real rollback always takes it along; the
-    row is for the first release that ships a migration above it. Stand in for
-    that by stubbing the chain to report `0026` as the one rolled back."""
-    from hivemind.store import migrate as m
+async def test_0030_builds_the_audit_indexes_and_its_rollback_drops_them() -> None:
+    """ADR 0123: four concurrent indexes, all valid; the rollback removes them."""
+    dsn, dim = _dsn(), Settings().embedding_dim
+    await _start_at_head(dsn, dim)
+    names = [
+        "audit_log_target_idx",
+        "audit_log_withdraw_author_idx",
+        "audit_log_move_agents_idx",
+        "audit_log_successor_idx",
+    ]
+    sql = (
+        "SELECT c.relname FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
+        "WHERE i.indisvalid AND c.relname = ANY($1::text[]) ORDER BY c.relname"
+    )
+    conn = await asyncpg.connect(dsn)
+    try:
+        assert [r[0] for r in await conn.fetch(sql, names)] == sorted(names)
+        assert await _guarded_rollback(dsn, dim, count=1) == [HEAD]
+        assert await conn.fetch(sql, names) == []
+        await migrate(dsn, dim)
+        assert [r[0] for r in await conn.fetch(sql, names)] == sorted(names)
+    finally:
+        await conn.close()
+
+
+async def test_a_rollback_that_leaves_0027_applied_writes_a_schema_rollback_row() -> None:
+    """`0030` sits above `0027`, so rolling it back leaves the audit vocabulary in
+    place and the rollback is recorded."""
+    import json
 
     dsn, dim = _dsn(), Settings().embedding_dim
     await _start_at_head(dsn, dim)
-    monkeypatch.setattr(m, "_rollback_plan", lambda dsn, count: [ID_0026])
-    monkeypatch.setattr(m, "_rollback_chain", lambda dsn, dim, count: [ID_0026])
 
-    assert await rollback_via_runner(dsn, dim) == [ID_0026]
-    assert await rollback_via_runner(dsn, dim, discard=True) == [ID_0026]
+    assert await rollback_via_runner(dsn, dim) == [HEAD]
+    await migrate(dsn, dim)
+    assert await rollback_via_runner(dsn, dim, discard=True) == [HEAD]
 
     conn = await asyncpg.connect(dsn)
     try:
@@ -1669,14 +1703,12 @@ async def test_a_rollback_that_leaves_0027_applied_writes_a_schema_rollback_row(
     finally:
         await conn.close()
     assert [r["action"] for r in rows] == ["schema.rollback", "schema.rollback"]
-    assert {(r["actor_kind"], r["target"]) for r in rows} == {("cli", ID_0026)}
+    assert {(r["actor_kind"], r["target"]) for r in rows} == {("cli", HEAD)}
     assert all(r["actor"] for r in rows)
-    import json
-
     details = sorted((json.loads(r["detail"]) for r in rows), key=len)
     assert details == [
-        {"rolled_back": [ID_0026]},
-        {"rolled_back": [ID_0026], "discarded_audit_rows": 0},
+        {"rolled_back": [HEAD]},
+        {"rolled_back": [HEAD], "discarded_audit_rows": 0},
     ]
 
 
@@ -1741,14 +1773,14 @@ async def test_rollback_refuses_to_unlock_locked_keys_without_the_flag() -> None
         await conn.close()
 
     with pytest.raises(RollbackRefused) as exc:
-        await _guarded_rollback(dsn, dim, count=3)  # 0027, 0026, 0025
+        await _guarded_rollback(dsn, dim, count=4)  # 0030, 0027, 0026, 0025
     assert ID_0025 in str(exc.value)
     assert "1 locked key" in str(exc.value)
     assert "--unlock-locked-keys" in str(exc.value)
     assert await current_schema_version(dsn) == HEAD
 
     # A chain that stops above 0025 does not count them.
-    assert await _guarded_rollback(dsn, dim, count=2) == [HEAD, ID_0026]
+    assert await _guarded_rollback(dsn, dim, count=3) == [HEAD, ID_0027, ID_0026]
     assert await _guarded_rollback(dsn, dim, count=1, unlock_locked_keys=True) == [ID_0025]
     conn = await asyncpg.connect(dsn)
     try:

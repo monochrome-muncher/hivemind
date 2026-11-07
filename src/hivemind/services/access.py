@@ -42,6 +42,7 @@ from hivemind.domain.validation import (
 )
 from hivemind.ports import Authenticator, Credential, Store
 from hivemind.services.agent_cleanup import AgentCleanupService
+from hivemind.services.agent_history import AgentHistoryService
 from hivemind.services.audit import actor_kind_of, record_admin_action
 from hivemind.services.errors import NameTaken as NameTaken  # re-exported: defined in errors
 from hivemind.services.errors import PermissionDenied
@@ -110,6 +111,8 @@ class AccessService:
         self.merges = FleetMergeService(store)
         # Retiring an agent with a successor and undoing it (ADR 0113).
         self.successions = SuccessionService(store, self._require_authenticator)
+        # An agent's own history for the portal (ADR 0123).
+        self.history = AgentHistoryService(store)
         # Cleaning up after a bad agent and undoing it (ADR 0111): admin-gated there.
         self.cleanups = AgentCleanupService(store, revoke=self.revoke, revocable=self.revocable)
 

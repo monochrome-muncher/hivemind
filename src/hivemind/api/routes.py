@@ -83,6 +83,7 @@ from hivemind.api.schemas import (
     PortalCleanupOut,
     PortalCleanupRecordOut,
     PortalCleanupRequest,
+    PortalHistoryItemOut,
     PortalSearchRequest,
     PortalWithdrawRequest,
     RegisterAgentRequest,
@@ -744,6 +745,26 @@ def build_router() -> APIRouter:
         views = await app.access_service.cleanups.list_own(credential)
         return [PortalCleanupRecordOut.from_view(v) for v in views]
 
+    @router.get("/portal/history", response_model=list[PortalHistoryItemOut])
+    async def portal_history(
+        credential: require,
+        app: hive,
+        before: Annotated[UUID | None, Query()] = None,
+        limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = PORTAL_DEFAULT_LIMIT,
+    ) -> list[PortalHistoryItemOut]:
+        """What happened to the signed-in agent and to the agents it inherits
+        from (ADR 0113), newest first, from the audit log (ADR 0123): its own
+        actions and the admin's, the admin as "an admin" with no identity, only
+        allowlisted detail, a fleet named only if the key can read it, an entry
+        id only if it can still read the entry. ``before`` is the last row's
+        ``id`` for the next page. 403 ``forbidden`` for a dormant (level 0)
+        agent (SPEC §12.2). Agent keys only."""
+        _require_agent(credential, "the agent portal")
+        items = await app.access_service.history.list_own(
+            credential, before=str(before) if before is not None else None, limit=limit
+        )
+        return [PortalHistoryItemOut.from_item(i) for i in items]
+
     @router.post("/portal/cleanups/{cleanup_id}/undo", response_model=AgentCleanupUndoOut)
     async def portal_undo_cleanup(
         cleanup_id: NameParam, credential: require, app: hive
@@ -1268,14 +1289,17 @@ def build_router() -> APIRouter:
         app: hive,
         actor: ActorQuery = None,
         action: Annotated[AuditAction | None, Query()] = None,
+        target: IdQuery = None,
+        subject: ActorQuery = None,
         since: Annotated[datetime | None, Query()] = None,
         before: Annotated[UUID | None, Query()] = None,
         limit: Annotated[int, Query(ge=1, le=AUDIT_LOG_MAX_LIMIT)] = AUDIT_LOG_DEFAULT_LIMIT,
     ) -> list[AuditRecordOut]:
         """The audit log of admin-surface actions, newest first (admin-
         gated, ADR 0027 — SPEC §12.5). Filters AND together: ``actor``
-        (exact), ``action`` (the audited vocabulary), ``since`` (inclusive;
-        a naive timestamp is UTC), ``before`` (a row id: only strictly
+        (exact), ``action`` (the audited vocabulary), ``target`` (exact),
+        ``subject`` (an agent name: the rows about that agent, ADR 0123),
+        ``since`` (inclusive; a naive timestamp is UTC), ``before`` (a row id: only strictly
         older rows, for paging back — ADR 0028), ``limit`` (1..1000,
         default 100)."""
         since = _to_utc(since)
@@ -1289,6 +1313,8 @@ def build_router() -> APIRouter:
         filters = AuditFilters(
             actor=actor,
             action=action,
+            target=target,
+            subjects=(subject,) if subject is not None else (),
             since=since,
             before=str(before) if before is not None else None,
         )
