@@ -1,5 +1,7 @@
 # Move agents with their memories (fleet split)
 
+> **Speed amended by [ADR 0126](0126-no-index-on-entries-fleet-id-so-fleet-moves-are-hot.md):** `entries_fleet_idx` is gone and `entries` has a fillfactor of 50, so re-filing is a HOT update. A memory written before that release is slow on its first merge or move only; after that, and for its undo, it is fast (`VACUUM FULL entries` is optional and an outage). The Speed consequence below describes the time before that.
+
 Amends [ADR 0011](0011-fleets-and-trust-levels.md) (re-parenting never moves entries) and builds on [ADR 0107](0107-fleet-merge.md) (the fleet merge machinery, its locking and its undo). Touches [ADR 0058](0058-pinned-fleet-briefing.md) and [ADR 0096](0096-contributors-pin.md) (the pin cap).
 
 Status: Accepted. Design from the 2026-10-27 session with Monochrome.
