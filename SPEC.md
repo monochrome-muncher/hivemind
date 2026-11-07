@@ -461,7 +461,7 @@ This section supersedes the flat-pool commitment of §1 and the "no trust tiers"
 | `GET /v1/admin/fleets/{fleet_id}/pins` | A fleet's pins and what changed since they were pinned (ADR 0092) |
 | `GET /v1/admin/flagged` | The flag backlog, oldest flag first (ADR 0093) |
 
-The single admin key gates this surface; admin-issued entries use the reserved name `admin` (ADR 0012). The admin panel (ADR 0029) is a browser front end over exactly this table plus the audit log and the usage counters; issuing and revoking admin keys stays with `hivemind-keys`.
+The single admin key gates this surface; admin-issued entries use the reserved name `admin` (ADR 0012). The admin panel (ADR 0029) is a browser front end over exactly this table plus the audit log and the usage counters; issuing and revoking admin keys stays with `hivemind-keys`. Its Overview opens with a "Needs you" row (ADR 0121): a tile for each of locked agent keys, pending agents, idle agents and flagged memories older than 14 days, shown only above zero and linking to the filtered list; computed from the agent list and the metrics, with no endpoint of its own.
 
 ### 12.5 Audit log
 
