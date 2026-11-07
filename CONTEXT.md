@@ -84,6 +84,9 @@ _Avoid_: duplicate, cluster, merge
 Marking an entry no longer valid without replacing it (retraction, or admin correction). Withdrawn entries are retained, never deleted.
 _Avoid_: delete, purge
 
+**Redaction**:
+The admin's irreversible wipe of a withdrawn or superseded memory that holds a secret or personal data: its text, embedding and keyword index are replaced by a stub; author, dates, supersession links, feedback and the audit trail stay. An active memory needs a withdrawal first, and nothing can bring the memory back (ADR 0125).
+_Avoid_: delete, purge, scrub
 **Restore**:
 The admin putting one withdrawn entry back to active, with a reason. Pins are not restored; an entry withdrawn by a standing agent cleanup comes back by undoing the cleanup (ADR 0124).
 _Avoid_: undelete, reinstate, undo (an undo reverses a cleanup, merge or move)

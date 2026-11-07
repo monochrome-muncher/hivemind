@@ -11,7 +11,7 @@ is unused.
 
 | ADR | Decision | Status |
 |---|---|---|
-| [0001](0001-append-only-entries-with-explicit-supersession.md) | Append-only entries with explicit supersession | Accepted |
+| [0001](0001-append-only-entries-with-explicit-supersession.md) | Append-only entries with explicit supersession | Accepted; amended by 0125 (an admin can redact a withdrawn memory) |
 | [0002](0002-flat-org-wide-pool-with-scope-tag.md) | Flat org-wide pool with a scope tag | Superseded by 0011 |
 | [0003](0003-kill-switch-is-client-side.md) | The kill switch is client-side | Amended by 0035 |
 | [0004](0004-explicit-writes-only-no-passive-capture.md) | Explicit writes only (no passive capture in v1) | Accepted |
@@ -134,4 +134,5 @@ is unused.
 | [0122](0122-admin-corrects-an-agents-owner-alias.md) | An admin corrects an agent's owner alias | Accepted; amends 0011, 0120, `PATCH /v1/admin/agents/{name}` gains `owner_alias`, migration 0029, audited `agent.owner_set`, stats follow because the alias lives only on the agent row |
 | [0123](0123-agent-history.md) | One agent's history, in the admin panel and in the agent portal | Accepted; builds on 0027, 0095, 0113, 0118, migration 0030 (audit-log indexes), audit-log `target` and `subject` filters, `GET /v1/portal/history`, agent key only, the admin is never named |
 | [0124](0124-admin-restores-a-withdrawn-memory.md) | The admin restores one withdrawn memory | Accepted; amends 0001, 0080, migration 0031, `POST /v1/admin/entries/{id}/restore`, audited `entry.restore`, pins not restored, refuses cleanup withdrawals and chain conflicts |
+| [0125](0125-redact-a-withdrawn-memory.md) | Redact a withdrawn or superseded memory that holds a secret | Accepted; amends 0001, migration 0032, `POST /v1/admin/entries/{id}/redact`, admin only, irreversible, audited `entry.redact`, no undo path may reactivate a redacted memory |
 | [0126](0126-no-index-on-entries-fleet-id-so-fleet-moves-are-hot.md) | No index on `entries.fleet_id`, so fleet moves are HOT updates | Accepted; amends 0107 and 0112, migration 0028, `entries` fillfactor 50, optional `VACUUM FULL entries` in the runbook |

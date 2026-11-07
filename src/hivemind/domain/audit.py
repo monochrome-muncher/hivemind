@@ -46,7 +46,7 @@ class ActorKind(StrEnum):
 
 class AuditAction(StrEnum):
     """The audited action vocabulary (the ``audit_log_action_check``
-    constraint, migrations ``0005``, ``0009``, ``0014``, ``0017``, ``0019``, ``0020``, ``0022``, ``0023``, ``0024``, ``0025``, ``0027``, ``0029`` and ``0031``)."""
+    constraint, migrations ``0005``, ``0009``, ``0014``, ``0017``, ``0019``, ``0020``, ``0022``, ``0023``, ``0024``, ``0025``, ``0027``, ``0029``, ``0031`` and ``0032``)."""
 
     AGENT_REGISTER = "agent.register"  # ADR 0046
     AGENT_ACTIVATE = "agent.activate"
@@ -74,6 +74,7 @@ class AuditAction(StrEnum):
     AGENT_RETIRE_UNDO = "agent.retire_undo"  # ADR 0113
     AGENT_KEY_LOCK = "agent_key.lock"
     SCHEMA_ROLLBACK = "schema.rollback"  # ADR 0119
+    ENTRY_REDACT = "entry.redact"  # ADR 0125
     ENTRY_RESTORE = "entry.restore"  # ADR 0124
 
 
@@ -186,7 +187,8 @@ class AuditFilters:
         if action in AGENT_TARGET_ACTIONS and record.target in names:
             return True
         if (
-            action in (AuditAction.ENTRY_WITHDRAW, AuditAction.ENTRY_RESTORE)
+            action
+            in (AuditAction.ENTRY_WITHDRAW, AuditAction.ENTRY_RESTORE, AuditAction.ENTRY_REDACT)
             and detail.get("author") in names
         ):
             return True

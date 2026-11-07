@@ -23,10 +23,12 @@ from hivemind.domain.access import (
 from hivemind.domain.agent_cleanup import AgentCleanupRefused, UnknownAgentCleanup
 from hivemind.domain.entry_restore import (
     EntryNotWithdrawn,
+    EntryRedacted,
     RestoreChainConflict,
     RestoreViaCleanup,
 )
 from hivemind.domain.fleet_merge import FleetMergeRefused, FleetMoveRefused, UnknownFleetMerge
+from hivemind.domain.redaction import RedactRefused
 from hivemind.domain.succession import AgentRetired, SuccessionRefused, UnknownSuccession
 from hivemind.embeddings import EmbeddingError
 from hivemind.services.errors import (
@@ -51,7 +53,9 @@ BUILDERS: dict[type[Exception], Callable[[], Exception]] = {
     UnknownAgentCleanup: lambda: UnknownAgentCleanup("unknown cleanup: c"),
     UnknownSuccession: lambda: UnknownSuccession("unknown succession: s"),
     EntryNotActive: lambda: EntryNotActive("entry e1 is already withdrawn"),
+    RedactRefused: lambda: RedactRefused("entry e1 is already redacted"),
     EntryNotWithdrawn: lambda: EntryNotWithdrawn("entry e1 is active, not withdrawn"),
+    EntryRedacted: lambda: EntryRedacted("entry e1 was redacted"),
     RestoreViaCleanup: lambda: RestoreViaCleanup("withdrawn by cleanup c1; undo it"),
     RestoreChainConflict: lambda: RestoreChainConflict("two current versions"),
     FleetMerged: lambda: FleetMerged("f1", "f2", "other"),

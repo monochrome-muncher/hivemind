@@ -62,7 +62,7 @@ from hivemind.domain.agent_cleanup import (
     cleanup_reason,
 )
 from hivemind.domain.agent_cleanup import undo_refusal as cleanup_undo_refusal
-from hivemind.domain.audit import AuditEvent, AuditFilters, AuditRecord
+from hivemind.domain.audit import AuditAction, AuditEvent, AuditFilters, AuditRecord
 from hivemind.domain.entry import (
     Entry,
     EntryDraft,
@@ -126,6 +126,7 @@ from hivemind.domain.health import (
     owner_key,
 )
 from hivemind.domain.pin import Pin, PinRefusal, PinWrite, pin_refusal
+from hivemind.domain.redaction import REDACTED_SUMMARY, RedactOutcome, RedactRefused
 from hivemind.domain.succession import (
     AgentRetired,
     HandedDown,
@@ -395,7 +396,12 @@ class MemoryStore:
                 None,
             )
             refusal = restore_refusal(
-                key, entry.state.value, entry.withdrawn_reason, standing, self._chain_conflict(key)
+                key,
+                entry.state.value,
+                entry.withdrawn_reason,
+                standing,
+                self._chain_conflict(key),
+                entry.redacted_at is not None,
             )
             if refusal is not None:
                 raise refusal
@@ -435,6 +441,55 @@ class MemoryStore:
                     node = self._entries.get(cur)
                     cur = node.superseded_by if node else None
         return chain_conflict_message(key, was_cut, linked, instead)
+
+    async def redact_entry(self, entry_id: str) -> RedactOutcome:
+        if not is_valid_uuid(entry_id):
+            raise KeyError(entry_id)
+        key = str(uuid.UUID(entry_id))
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is None:
+                raise KeyError(entry_id)
+            if entry.redacted_at is not None:
+                raise RedactRefused(f"entry {entry_id} is already redacted")
+            if entry.state is EntryState.ACTIVE:
+                raise RedactRefused(
+                    f"entry {entry_id} is active: withdraw it first "
+                    "(a superseded or withdrawn memory can be redacted)"
+                )
+            wiped = replace(
+                entry,
+                summary=REDACTED_SUMMARY,
+                body=None,
+                payload=None,
+                sources=(),
+                tags=(),
+                entities=(),
+                entities_model=None,
+                embedding=None,
+                embedding_model=None,
+                withdrawn_reason=(
+                    REDACTED_SUMMARY if entry.state is EntryState.WITHDRAWN else None
+                ),
+                redacted_at=self._clock(),
+            )
+            self._entries[key] = wiped
+            for link in [k for k in self._links if k[0] == key]:
+                del self._links[link]
+            notes = [
+                fb
+                for fb in self._feedback.values()
+                if fb.entry_id == key and (fb.note or "").strip()
+            ]
+            flags = [fb for fb in notes if fb.verdict in (Verdict.STALE, Verdict.WRONG)]
+            reasons = sum(
+                1
+                for rec in self._audit
+                if rec.action is AuditAction.ENTRY_WITHDRAW
+                and rec.target == key
+                and str(rec.detail.get("reason") or "").strip()
+            )
+            return RedactOutcome(wiped, len(notes), len(flags), reasons)
 
     async def record_feedback(self, feedback: Feedback) -> Feedback:
         (stored,) = await self.record_feedback_many([feedback])
@@ -907,6 +962,8 @@ class MemoryStore:
             rows: list[tuple[float, datetime, str]] = []
             for entry in self._entries.values():
                 if not self._matches(entry, filters) or not self._visible(entry, visibility):
+                    continue
+                if entry.redacted_at is not None:  # no keyword index left (ADR 0125)
                     continue
                 # Same text the vector stream sees, at the default budget
                 # (ADR 0021; this store has no Settings).
@@ -1657,7 +1714,12 @@ class MemoryStore:
         }
         found: list[tuple[Entry, str, str]] = []
         for e in self._entries.values():
-            if e.id in own or e.state is not EntryState.SUPERSEDED or e.superseded_by not in own:
+            if (
+                e.id in own
+                or e.state is not EntryState.SUPERSEDED
+                or e.superseded_by not in own
+                or e.redacted_at is not None
+            ):
                 continue
             first = e.superseded_by
             cur = own[first]
@@ -1808,6 +1870,7 @@ class MemoryStore:
                 if (e := self._entries.get(eid)) is not None
                 and e.state is EntryState.WITHDRAWN
                 and e.withdrawn_reason == why
+                and e.redacted_at is None  # a redacted memory never comes back (ADR 0125)
             ]
             for eid in back:
                 self._entries[eid] = replace(

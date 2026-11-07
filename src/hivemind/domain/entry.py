@@ -261,6 +261,8 @@ class Entry:
     state: EntryState = EntryState.ACTIVE
     superseded_by: str | None = None
     withdrawn_reason: str | None = None
+    # Set when an admin wiped the text of this withdrawn memory (ADR 0125).
+    redacted_at: datetime | None = None
     # When it was withdrawn (ADR 0098); ``None`` while it is not withdrawn,
     # and for a withdrawal recorded before the column existed.
     withdrawn_at: datetime | None = None

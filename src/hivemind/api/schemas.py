@@ -31,6 +31,7 @@ from hivemind.domain.fleet_merge import (
 from hivemind.domain.history import HistoryItem
 from hivemind.domain.pin import ChangeReason, Pin, PinnedEntry
 from hivemind.domain.recency import RecencyHint
+from hivemind.domain.redaction import RedactOutcome
 from hivemind.domain.succession import Succession
 from hivemind.domain.upstream import UpstreamChangeKind
 from hivemind.domain.validation import (
@@ -347,6 +348,55 @@ class EntryOut(BaseModel):
             withdrawn_at=entry.withdrawn_at,
             entities=[EntityOut(name=e.name, kind=e.kind) for e in entry.entities],
             entities_model=entry.entities_model,
+        )
+
+
+class AdminEntryOut(EntryOut):
+    """An entry as the admin panel reads it (ADR 0125): ``EntryOut`` plus
+    whether and when an admin redacted it. Agents never get these fields, so
+    the agent-facing entry shape (``tests/unit/test_wire_contract.py``) is
+    unchanged."""
+
+    redacted: bool = False
+    redacted_at: datetime | None = None
+    history: dict[str, list[AdminEntryOut]] | None = None  # type: ignore[assignment]
+
+    @classmethod
+    def from_entry(cls, entry: Entry) -> AdminEntryOut:
+        out = super().from_entry(entry)
+        assert isinstance(out, AdminEntryOut)
+        out.redacted = entry.redacted_at is not None
+        out.redacted_at = entry.redacted_at
+        return out
+
+
+class RedactRequest(BaseModel):
+    """A redaction of a withdrawn memory (ADR 0125): ``confirm`` is the
+    memory's id typed back."""
+
+    # Both default to empty so the admin check answers first (403 before
+    # any 422); the service refuses an empty one.
+    reason: str = ""
+    confirm: str = ""
+
+
+class RedactOut(BaseModel):
+    """What a redaction left behind for the admin to review: the feedback
+    notes (flag notes among them) other agents wrote on the memory, which may
+    quote the wiped text and were not edited."""
+
+    entry: AdminEntryOut
+    feedback_notes: int
+    flag_notes: int
+    withdraw_reasons: int
+
+    @classmethod
+    def from_outcome(cls, outcome: RedactOutcome) -> RedactOut:
+        return cls(
+            entry=AdminEntryOut.from_entry(outcome.entry),
+            feedback_notes=outcome.feedback_notes,
+            flag_notes=outcome.flag_notes,
+            withdraw_reasons=outcome.withdraw_reasons,
         )
 
 

@@ -102,6 +102,7 @@ def test_the_portal_routes_are_forwarded(method: str, path: str) -> None:
         ("GET", "admin/entries"),
         ("GET", "admin/feedback"),
         ("POST", "admin/entries/x/withdraw"),
+        ("POST", "admin/entries/x/redact"),
         ("POST", "admin/entries/x/restore"),  # restoring is the admin's (ADR 0124)
         ("GET", "admin/agents"),
         # Right path, wrong method, or one segment too many.

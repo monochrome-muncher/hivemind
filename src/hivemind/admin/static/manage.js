@@ -15,14 +15,14 @@ import { retireDialog, successionsCard } from "./retire.js";
 
 const AUDIT_ACTIONS = [
   "agent.register", "agent.activate", "agent.trust_level_set", "agent.home_fleet_set", "agent.owner_set", "agent.revoke",
-  "fleet.create", "fleet.rename", "fleet.merge", "fleet.unmerge", "fleet.move_agents", "fleet.move_undo", "org_key.rotate", "entry.withdraw", "entry.restore", "entry.pin", "entry.unpin",
+  "fleet.create", "fleet.rename", "fleet.merge", "fleet.unmerge", "fleet.move_agents", "fleet.move_undo", "org_key.rotate", "entry.withdraw", "entry.restore", "entry.redact", "entry.pin", "entry.unpin",
   "admin_key.issue", "admin_key.revoke", "agent_key.issue", "agent_key.replace", "agent_key.lock",
   "agent.cleanup", "agent.cleanup_undo", "agent.retire", "agent.retire_undo",
   "schema.rollback",
 ];
 const AUDIT_PAGE = 50;
 // Rows whose target is a memory: the id opens it in the drawer.
-const ENTRY_ROW_ACTIONS = ["entry.withdraw", "entry.restore"];
+const ENTRY_ROW_ACTIONS = ["entry.withdraw", "entry.restore", "entry.redact"];
 // Rows whose target is the source fleet and whose detail names a target fleet.
 const FLEET_ROW_ACTIONS = ["fleet.merge", "fleet.unmerge", "fleet.move_agents", "fleet.move_undo"];
 
@@ -385,6 +385,13 @@ export function auditRow(nameOf) {
   };
   const detail = (r) => {
     const d = { ...(r.detail || {}) };
+    if (r.action === "entry.redact") {
+      // The audit row never holds the wiped text: author, the admin's reason, and what to review.
+      const n = d.feedback_notes || 0;
+      const w = d.withdraw_reasons || 0;
+      return `Redacted a memory by ${d.author || "unknown"}. Reason: ${d.reason || "none given"}. ` +
+        `Left to review: ${n} feedback ${n === 1 ? "note" : "notes"}, ${w} withdrawal ${w === 1 ? "reason" : "reasons"}.`;
+    }
     if (r.action === "fleet.create") delete d.name;
     if (d.home_fleet_id) {
       d.home_fleet = fleetName(d.home_fleet_id);

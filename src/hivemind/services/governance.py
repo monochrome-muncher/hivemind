@@ -20,6 +20,7 @@ from hivemind.domain.feedback import (
     Verdict,
 )
 from hivemind.domain.pin import Pin, PinnedEntry
+from hivemind.domain.redaction import RedactOutcome
 from hivemind.domain.validation import MAX_REASON_CHARS, InvalidInput, check_text
 from hivemind.ports import Credential, Store
 from hivemind.services.audit import record_admin_action
@@ -128,6 +129,41 @@ class GovernanceService:
             },
         )
         return restoration.entry
+
+    async def redact(
+        self, credential: Credential, entry_id: str, reason: str, confirm: str
+    ) -> RedactOutcome:
+        """Wipe a withdrawn memory's text for good (ADR 0125): admin only,
+        checked first. ``confirm`` must be the memory's id typed back
+        (``InvalidInput`` otherwise). Audited as ``entry.redact`` with the
+        author, the reason and the count of feedback notes left to review,
+        never the old text. A memory that is still active, or is already
+        redacted, is ``EntryNotActive``-style 409 (``RedactRefused``)."""
+        if not credential.is_admin:
+            raise PermissionDenied("only an admin may redact a memory")
+        check_text(reason, "reason", MAX_REASON_CHARS)  # ADR 0040
+        if not reason.strip():
+            raise InvalidInput("reason is required")
+        entry = await self._visible(credential, entry_id)
+        if confirm.strip().lower() != entry.id:
+            raise InvalidInput("confirm must be the id of the memory being redacted")
+        try:
+            outcome = await self._store.redact_entry(entry.id)
+        except KeyError as exc:
+            raise EntryNotFound(f"unknown entry: {entry.id}") from exc
+        await record_admin_action(
+            self._store,
+            credential,
+            AuditAction.ENTRY_REDACT,
+            entry.id,
+            {
+                "author": entry.author,
+                "reason": reason.strip(),
+                "feedback_notes": outcome.feedback_notes,
+                "withdraw_reasons": outcome.withdraw_reasons,
+            },
+        )
+        return outcome
 
     async def _visible(self, credential: Credential, entry_id: str) -> Entry:
         entry = await get_visible_entry(self._store, entry_id, credential.visibility())

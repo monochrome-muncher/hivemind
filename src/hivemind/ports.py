@@ -64,6 +64,7 @@ from hivemind.domain.fleet_merge import (
 )
 from hivemind.domain.health import Convergence, FleetHealth
 from hivemind.domain.pin import Pin, PinRefusal, PinWrite
+from hivemind.domain.redaction import RedactOutcome
 from hivemind.domain.succession import HandedDown, Succession, owned_authors
 from hivemind.domain.upstream import UpstreamLink
 
@@ -264,6 +265,20 @@ class Store(Protocol):
         subclass says why) if the entry is not withdrawn, a standing agent
         cleanup withdrew it, or it would leave two active heads in a chain.
         """
+        ...
+
+    async def redact_entry(self, entry_id: str) -> RedactOutcome:
+        """Wipe the text of a withdrawn memory for good (ADR 0125), in one
+        transaction: summary, body, payload, tags, sources, extracted
+        entities, outgoing see-also links, the withdrawal reason, the
+        embedding and the keyword index. Sets ``redacted_at``; kind, scope,
+        author, fleet, dates, supersession, feedback and the audit log stay.
+        Returns the memory as it is now and the count of feedback notes (and of
+        stale/wrong flag notes among them) left unedited, and of its
+        ``entry.withdraw`` audit rows with a reason. Allowed on a ``withdrawn``
+        or a ``superseded`` memory. ``KeyError`` if unknown; ``RedactRefused``
+        if active or already redacted. Every
+        path that sets a withdrawn memory active again skips a redacted one."""
         ...
 
     async def list_entries(

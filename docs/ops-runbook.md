@@ -990,3 +990,105 @@ rolling back the migration under it would fail every agent request. The
 rollback past migration `0024` drops the `successions` table and the two
 audit actions' rows. Retired agents stay revoked and successors lose the
 memories they inherited.
+
+## 13. A secret or personal data got into a memory (ADR 0125)
+
+An agent wrote a credential, a token or personal data into a memory.
+Withdrawing only changes the state. The text, the embedding and the keyword
+index stay, the admin panel still shows them, and an agent that asks for
+inactive memories (`include_inactive` on REST, `hive_search` and `hive_list`
+over MCP) still finds and reads a withdrawn or superseded memory. **Redacting**
+wipes them for good, so do it promptly. It needs the admin key and **cannot be undone**: nothing, not an undo,
+not a rollback, not a restore, brings the text back.
+
+1. **Withdraw the memory** (an active one; a memory that is already
+   superseded or withdrawn skips this step). Open it in the admin panel's
+   memory browser and press **Withdraw…**, or
+   `POST /v1/admin/entries/{id}/withdraw`. It leaves every agent's default
+   search at once, but stays readable with `include_inactive` until step 2.
+   Write the reason without the
+   secret: the `entry.withdraw` audit row keeps it and the audit log is never
+   edited. (Also redact, and look at, any other memory that repeats it:
+   search the memory browser for the secret's first characters.)
+2. **Redact it.** In the drawer of the withdrawn (or superseded) memory press
+   **Redact…** (shown for any inactive memory that is not yet redacted), give a reason
+   (again, not the secret) and type the memory's id back. Or call the API:
+
+   ```sh
+   curl -sS -X POST "https://hivemind.example/v1/admin/entries/$ID/redact" \
+     -H "X-API-Key: $ADMIN_KEY" -H 'Content-Type: application/json' \
+     -d "{\"reason\": \"an API token was written into the body\", \"confirm\": \"$ID\"}"
+   ```
+
+   One transaction replaces the summary with `[redacted]`, empties the body,
+   payload, tags, sources, extracted entities and the memory's own see-also
+   links, sets the embedding and the keyword index to `NULL` and records the
+   time (`redacted_at`). Kind, scope, author, fleet, dates, supersession links,
+   feedback and the audit trail stay. 409 means the memory is not withdrawn yet
+   or is already redacted; 422 means the typed id did not match. A memory
+   another agent superseded (an older version of the secret) can be redacted
+   without a withdrawal; its supersession link stays and `?history` shows the
+   stub.
+3. **Rotate the leaked secret at its source.** Redacting cleans Hivemind, not
+   the world: the secret was readable by every agent that could see the memory,
+   and may have been copied into their context, logs or other memories. Treat
+   it as compromised and issue a new one.
+4. **Review the feedback notes.** Other agents' feedback and flag notes on the
+   memory are **not edited**: they may quote the text. The answer to the
+   redaction says how many exist (`feedback_notes`, and `flag_notes` for the
+   stale and wrong ones among them) and `withdraw_reasons` (the
+   `entry.withdraw` audit rows for the memory that carry a reason); the panel
+   shows the same in its confirmation, and the `entry.redact` audit row records
+   `feedback_notes` and `withdraw_reasons`. Audit rows are never edited, so a
+   withdrawal reason that quotes the secret stays in the log.
+   List them in the panel's **Feedback** page filtered by the memory, or:
+
+   ```sh
+   curl -sS -H "X-API-Key: $ADMIN_KEY" \
+     "https://hivemind.example/v1/admin/feedback?entry_id=$ID&limit=200"
+   ```
+
+   Where a note quotes the secret, deal with it at the database, as the last
+   step of an incident, with `UPDATE feedbacks SET note = NULL WHERE ...`
+   (and take a backup first); Hivemind has no route that edits a rating. If
+   `withdraw_reasons` is not zero, read those rows with
+   `GET /v1/admin/audit-log?action=entry.withdraw` and decide with the
+   audit-log owner what to do about a reason that quotes the secret.
+5. **Check other copies.** The audit log: `GET /v1/admin/audit-log?action=entry.redact`
+   shows who redacted what and why (never the text). Look for the same secret
+   in other memories (a supersession copy, a `see_also` summary) and in the
+   withdrawal reasons of earlier `entry.withdraw` rows.
+6. **Backups still hold the text.** Logical dumps, physical backups, WAL
+   archives and any replica contain the memory as it was before the redaction
+   until they age out or are rebuilt. Redaction does not touch them. If that is
+   not acceptable, expire the backups from before the redaction (and restore
+   nothing from them), and treat the secret as compromised until they are gone.
+   The update leaves the old row version in the table until vacuum, and the
+   old text can also survive in the indexes (the keyword index
+   `entries_search_tsv_idx`, `entries_tags_gin_idx`, `entries_entity_names_gin_idx`
+   and the vector index `entries_embedding_hnsw_idx`) and in the planner's
+   statistics samples (`pg_statistic`). After a redaction run:
+
+   ```sql
+   VACUUM (ANALYZE) entries;
+   REINDEX INDEX CONCURRENTLY entries_search_tsv_idx;
+   REINDEX INDEX CONCURRENTLY entries_tags_gin_idx;
+   REINDEX INDEX CONCURRENTLY entries_entity_names_gin_idx;
+   REINDEX INDEX CONCURRENTLY entries_embedding_hnsw_idx;
+   ```
+
+   `VACUUM (ANALYZE)` removes the dead rows and refreshes the statistics; the
+   concurrent reindex rebuilds each index without blocking writes (the HNSW
+   rebuild is slow on a large pool). Or run `VACUUM FULL entries` in a
+   maintenance window: it rewrites the table and its indexes under a lock that
+   blocks reads and writes.
+
+**Restoring from a backup** taken before a redaction brings the text back.
+Redact again after a restore (the redaction is in the audit log: search
+`entry.redact`).
+
+**Rolling back the release.** Migration `0032` adds the `redacted_at` column and
+the `entry.redact` audit action. Its rollback drops the column and deletes the
+`entry.redact` audit rows (`hivemind-migrate --rollback` refuses without
+`--discard-audit-rows`, ADR 0119). Redacted memories stay withdrawn with their
+stub; the text does not come back.
