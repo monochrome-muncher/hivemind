@@ -263,6 +263,9 @@ class Entry:
     withdrawn_reason: str | None = None
     # Set when an admin wiped the text of this withdrawn memory (ADR 0125).
     redacted_at: datetime | None = None
+    # When it was withdrawn (ADR 0098); ``None`` while it is not withdrawn,
+    # and for a withdrawal recorded before the column existed.
+    withdrawn_at: datetime | None = None
     # Extracted at write time (ADR 0016, SPEC §13).
     entities: tuple[ExtractedEntity, ...] = ()
     entities_model: str | None = None

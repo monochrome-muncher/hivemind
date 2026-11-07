@@ -91,6 +91,7 @@ ROLLBACK_AUDIT_DELETES: dict[str, AuditDeletion] = {
     _SCHEMA_ROLLBACK_MIGRATION: AuditDeletion(("schema.rollback",)),
     "0029.agent-owner-set": AuditDeletion(("agent.owner_set",)),
     "0032.entry-redact": AuditDeletion(("entry.redact",)),
+    "0031.entry-restore": AuditDeletion(("entry.restore",)),
 }
 
 _COUNT_AUDIT_ROWS = (

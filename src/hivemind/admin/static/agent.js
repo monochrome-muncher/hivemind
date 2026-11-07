@@ -5,17 +5,18 @@
 // got. A name that wrote or rated but is not registered (the admin key, a
 // legacy user) gets the same page without the registration part.
 //
-// The three lists are lists.js tables over admin routes. The agent portal
+// The memory and verdict lists are lists.js tables over admin routes; the
+// history is the audit log narrowed to rows about the agent (ADR 0123). The agent portal
 // shows the same lists for its own agent over the portal routes.
 
 import {
   api, h, state, guarded, parseHash, loadAgentsAndFleets, fetchMetrics, fetchActivity, fleetName, pageHead, refreshButton,
   card, stat, statusBadge, levelBadge, fmtNum, fmtAgo, fmtTime, link, memoriesHref, feedbackHref, agentHref, hooks,
-  windowSelector, fill,
+  windowSelector, fill, auditHref, optional,
 } from "./core.js";
 import { openEntry } from "./drawer.js";
-import { entryTable, feedbackTable } from "./lists.js";
-import { agentButtons } from "./manage.js";
+import { cursorPages, entryTable, feedbackTable, pagedTable } from "./lists.js";
+import { AUDIT_HEADERS, agentButtons, auditCsvColumns, auditRow } from "./manage.js";
 
 function profile(agent) {
   if (!agent) {
@@ -84,6 +85,26 @@ export async function viewAgent(root) {
     csvName: `agent-${name}-verdicts-received`,
   });
 
+  // Newest first, every row about the agent: its own key as actor, admin actions
+  // on it, withdrawals of its memories, fleet moves and retirements naming it.
+  // Merged fleets are not in the cache but their rows name them: ask for them, as the audit page does.
+  const everyFleet = (await optional(() => api("GET", "admin/fleets", { query: { include_merged: "true" } }))) || [];
+  const nameOf = (id) => {
+    const fleet = everyFleet.find((f) => f.id === id);
+    return fleet ? fleet.name : fleetName(id);
+  };
+  // The table and the CSV export each keep their own cursors.
+  const pages = () => cursorPages(({ limit, before }) => guarded(() => api("GET", "admin/audit-log", { query: { subject: name, limit, before } })));
+  const history = pagedTable({
+    headers: AUDIT_HEADERS,
+    className: "entries audit-log",
+    fetchPage: pages(),
+    renderRow: auditRow(nameOf),
+    emptyText: "Nothing has been recorded about it.",
+    statusText: (n) => `${n} shown, newest first`,
+    csv: { columns: auditCsvColumns, name: `agent-${name}-history`, key: (r) => r.id, fetchPage: pages() },
+  });
+
   const section = (title, table, href) => h("section", { class: "agent-sec" },
     h("div", { class: "section-head" }, h("h2", { text: title }), link("Open with filters", href, { class: "link small" })),
     table.el);
@@ -95,7 +116,8 @@ export async function viewAgent(root) {
     profile(agent),
     section("Memories it wrote", memories, memoriesHref({ author: name, all: "1" })),
     section("Verdicts it gave", given, feedbackHref({ reporter: name })),
-    section("Verdicts on its memories", received, feedbackHref({ author: name })));
-  await Promise.all([memories.load(true), given.load(true), received.load(true)]);
+    section("Verdicts on its memories", received, feedbackHref({ author: name })),
+    section("History", history, auditHref({ subject: name })));
+  await Promise.all([memories.load(true), given.load(true), received.load(true), history.load(true)]);
 }
 

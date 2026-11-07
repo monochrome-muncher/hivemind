@@ -29,6 +29,12 @@ from hivemind.domain.access import (
     UnknownFleet,
 )
 from hivemind.domain.agent_cleanup import AgentCleanupRefused, UnknownAgentCleanup
+from hivemind.domain.entry_restore import (
+    EntryNotWithdrawn,
+    EntryRedacted,
+    RestoreChainConflict,
+    RestoreViaCleanup,
+)
 from hivemind.domain.fleet_merge import FleetMergeRefused, FleetMoveRefused, UnknownFleetMerge
 from hivemind.domain.redaction import RedactRefused
 from hivemind.domain.succession import AgentRetired, SuccessionRefused, UnknownSuccession
@@ -57,6 +63,10 @@ ERROR_ANSWERS: Final[dict[type[Exception], tuple[int, str]]] = {
     UnknownSuccession: (404, "not_found"),
     EntryNotActive: (409, "conflict"),
     RedactRefused: (409, "conflict"),  # ADR 0125
+    EntryNotWithdrawn: (409, "entry_not_withdrawn"),  # ADR 0124
+    EntryRedacted: (409, "entry_redacted"),  # ADR 0125
+    RestoreViaCleanup: (409, "restore_via_cleanup"),
+    RestoreChainConflict: (409, "restore_chain_conflict"),
     FleetMerged: (409, "fleet_merged"),  # ADR 0107
     FleetExists: (409, "fleet_exists"),
     FleetMoveRefused: (409, "move_refused"),

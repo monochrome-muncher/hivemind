@@ -103,6 +103,33 @@ class GovernanceService:
         await self._pins.unpin_withdrawn(credential, entry)
         return withdrawn
 
+    async def restore(self, credential: Credential, entry_id: str, reason: str) -> Entry:
+        """Put a withdrawn memory back as the admin (ADR 0124). The caller
+        checks the admin key; the store refuses what the chain or a cleanup
+        forbids. Pins are not restored. Audited as ``entry.restore``."""
+        if not credential.is_admin:
+            raise PermissionDenied("only an admin may restore a withdrawn entry")
+        check_text(reason, "reason", MAX_REASON_CHARS)  # ADR 0040
+        if not reason.strip():
+            raise InvalidInput("reason is required")
+        entry = await self._visible(credential, entry_id)
+        try:
+            restoration = await self._store.restore_entry(entry.id)
+        except KeyError as exc:
+            raise EntryNotFound(f"unknown entry: {entry.id}") from exc
+        await record_admin_action(
+            self._store,
+            credential,
+            AuditAction.ENTRY_RESTORE,
+            entry.id,
+            {
+                "author": entry.author,
+                "previous_reason": restoration.previous_reason,
+                "reason": reason,
+            },
+        )
+        return restoration.entry
+
     async def redact(
         self, credential: Credential, entry_id: str, reason: str, confirm: str
     ) -> RedactOutcome:

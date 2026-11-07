@@ -81,7 +81,7 @@ CREATE TABLE public.audit_log (
     action text NOT NULL,
     target text,
     detail jsonb DEFAULT '{}'::jsonb NOT NULL,
-    CONSTRAINT audit_log_action_check CHECK ((action = ANY (ARRAY['agent.register'::text, 'agent.activate'::text, 'agent.trust_level_set'::text, 'agent.home_fleet_set'::text, 'agent.revoke'::text, 'fleet.create'::text, 'org_key.rotate'::text, 'entry.withdraw'::text, 'admin_key.issue'::text, 'admin_key.revoke'::text, 'agent_key.issue'::text, 'entry.pin'::text, 'entry.unpin'::text, 'fleet.merge'::text, 'fleet.unmerge'::text, 'fleet.rename'::text, 'agent_key.replace'::text, 'agent.cleanup'::text, 'agent.cleanup_undo'::text, 'fleet.move_agents'::text, 'fleet.move_undo'::text, 'agent.retire'::text, 'agent.retire_undo'::text, 'agent_key.lock'::text, 'schema.rollback'::text, 'agent.owner_set'::text, 'entry.redact'::text]))),
+    CONSTRAINT audit_log_action_check CHECK ((action = ANY (ARRAY['agent.register'::text, 'agent.activate'::text, 'agent.trust_level_set'::text, 'agent.home_fleet_set'::text, 'agent.revoke'::text, 'fleet.create'::text, 'org_key.rotate'::text, 'entry.withdraw'::text, 'admin_key.issue'::text, 'admin_key.revoke'::text, 'agent_key.issue'::text, 'entry.pin'::text, 'entry.unpin'::text, 'fleet.merge'::text, 'fleet.unmerge'::text, 'fleet.rename'::text, 'agent_key.replace'::text, 'agent.cleanup'::text, 'agent.cleanup_undo'::text, 'fleet.move_agents'::text, 'fleet.move_undo'::text, 'agent.retire'::text, 'agent.retire_undo'::text, 'agent_key.lock'::text, 'schema.rollback'::text, 'agent.owner_set'::text, 'entry.restore'::text, 'entry.redact'::text]))),
     CONSTRAINT audit_log_actor_kind_check CHECK ((actor_kind = ANY (ARRAY['admin_key'::text, 'cli'::text, 'org_key'::text, 'agent_key'::text])))
 );
 
@@ -248,7 +248,19 @@ CREATE INDEX agents_fleet_idx ON public.agents USING btree (home_fleet_id);
 
 CREATE INDEX audit_log_actor_idx ON public.audit_log USING btree (actor);
 
+CREATE INDEX audit_log_move_agents_idx ON public.audit_log USING gin (((detail -> 'agents'::text))) WHERE (action = 'fleet.move_agents'::text);
+
 CREATE INDEX audit_log_occurred_at_idx ON public.audit_log USING btree (occurred_at);
+
+CREATE INDEX audit_log_redact_author_idx ON public.audit_log USING btree (((detail ->> 'author'::text)), occurred_at) WHERE (action = 'entry.redact'::text);
+
+CREATE INDEX audit_log_restore_author_idx ON public.audit_log USING btree (((detail ->> 'author'::text)), occurred_at) WHERE (action = 'entry.restore'::text);
+
+CREATE INDEX audit_log_successor_idx ON public.audit_log USING btree (((detail ->> 'successor'::text))) WHERE (action = ANY (ARRAY['agent.retire'::text, 'agent.retire_undo'::text]));
+
+CREATE INDEX audit_log_target_idx ON public.audit_log USING btree (target, occurred_at);
+
+CREATE INDEX audit_log_withdraw_author_idx ON public.audit_log USING btree (((detail ->> 'author'::text)), occurred_at) WHERE (action = 'entry.withdraw'::text);
 
 CREATE UNIQUE INDEX credentials_one_agent_key ON public.credentials USING btree (agent_name) WHERE ((kind = 'agent'::text) AND (agent_name IS NOT NULL));
 

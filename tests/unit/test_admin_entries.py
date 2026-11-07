@@ -12,8 +12,10 @@ from hivemind.domain.access import TrustLevel
 from hivemind.domain.audit import AuditAction, AuditFilters
 from hivemind.domain.entry import EntryDraft, EntryState, Kind
 from hivemind.domain.feedback import Feedback, FeedbackLogFilters, Verdict
+from hivemind.domain.pin import PinWrite
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
+from hivemind.services.errors import PermissionDenied
 from hivemind.services.feedback import FeedbackService
 from tests.fakes import FIXED_NOW, FixedClock, make_embedder
 from tests.unit.test_api_endpoints import make_app_with_clock, make_client, make_hivemind_app
@@ -49,6 +51,7 @@ ADMIN_BODIES = {
     ("POST", "/v1/admin/search"): {"query": "kaniko"},
     ("POST", "/v1/admin/entries/{entry_id}/withdraw"): {},
     ("POST", "/v1/admin/entries/{entry_id}/redact"): {"reason": "leak", "confirm": FAKE_ID},
+    ("POST", "/v1/admin/entries/{entry_id}/restore"): {"reason": "put back"},
     ("POST", "/v1/admin/fleets"): {"name": "blue"},
     ("POST", "/v1/admin/agents"): {"name": "x", "owner_alias": "o", "home_fleet_id": FAKE_ID},
     ("POST", "/v1/admin/agents/{name}/activate"): {"trust_level": 1, "home_fleet_id": FAKE_ID},
@@ -100,6 +103,7 @@ async def test_every_registered_admin_route_is_403_for_non_admin_keys(headers) -
             ("GET", "/v1/admin/entries"),
             ("POST", "/v1/admin/search"),
             ("POST", "/v1/admin/entries/{entry_id}/withdraw"),
+            ("POST", "/v1/admin/entries/{entry_id}/restore"),
             ("GET", "/v1/admin/activity"),
             ("GET", "/v1/admin/feedback"),
             ("GET", "/v1/admin/flagged"),
@@ -255,6 +259,102 @@ async def test_admin_withdraw_works_is_audited_and_conflicts_the_second_time() -
         assert untouched is not None and untouched.state is EntryState.ACTIVE
     records = await app.store.list_audit(AuditFilters(action=AuditAction.ENTRY_WITHDRAW), 10)
     assert [r.target for r in records] == [in_blue.id]
+
+
+async def test_admin_restore_puts_the_memory_back_and_is_audited() -> None:
+    app, _, _, _, in_blue, in_red = await _seed()
+    async with make_client(app) as client:
+        await client.post(
+            f"/v1/admin/entries/{in_blue.id}/withdraw", json={"reason": "wrong"}, headers=ADMIN
+        )
+        done = await client.post(
+            f"/v1/admin/entries/{in_blue.id}/restore",
+            json={"reason": "it was right"},
+            headers=ADMIN,
+        )
+        again = await client.post(
+            f"/v1/admin/entries/{in_blue.id}/restore", json={"reason": "twice"}, headers=ADMIN
+        )
+        never = await client.post(
+            f"/v1/admin/entries/{in_red.id}/restore",
+            json={"reason": "not withdrawn"},
+            headers=ADMIN,
+        )
+        unknown = await client.post(
+            f"/v1/admin/entries/{FAKE_ID}/restore", json={"reason": "x"}, headers=ADMIN
+        )
+        got = await client.get(f"/v1/admin/entries/{in_blue.id}", headers=ADMIN)
+    assert done.status_code == 200
+    body = done.json()
+    assert body["state"] == "active"
+    assert body["withdrawn_reason"] is None and body["withdrawn_at"] is None
+    assert got.json()["state"] == "active"
+    for refused in (again, never):
+        assert refused.status_code == 409
+        assert refused.json()["error"]["code"] == "entry_not_withdrawn"
+    assert unknown.status_code == 404
+    [record] = await app.store.list_audit(AuditFilters(action=AuditAction.ENTRY_RESTORE), 10)
+    assert record.target == in_blue.id
+    assert record.detail == {
+        "author": in_blue.author,
+        "previous_reason": "wrong",
+        "reason": "it was right",
+    }
+
+
+async def test_restore_service_refuses_a_non_admin_itself() -> None:
+    app, _, _, mine, _, _ = await _seed()
+    await app.store.withdraw_entry(mine.id, "r", by_user="alice")
+    owner = Credential(user_id="alice", agent_name="alice", access_controlled=True)
+    with pytest.raises(PermissionDenied):
+        await app.governance_service.restore(owner, mine.id, "back")
+    stored = await app.store.get_entry(mine.id)
+    assert stored is not None and stored.state is EntryState.WITHDRAWN
+
+
+@pytest.mark.parametrize("body", [{}, {"reason": ""}, {"reason": "   "}, {"reason": "x" * 2001}])
+async def test_admin_restore_needs_a_reason_within_the_withdraw_cap(body) -> None:
+    app, _, _, _, in_blue, _ = await _seed()
+    async with make_client(app) as client:
+        await client.post(f"/v1/admin/entries/{in_blue.id}/withdraw", json={}, headers=ADMIN)
+        resp = await client.post(
+            f"/v1/admin/entries/{in_blue.id}/restore", json=body, headers=ADMIN
+        )
+    assert resp.status_code == 422
+    stored = await app.store.get_entry(in_blue.id)
+    assert stored is not None and stored.state is EntryState.WITHDRAWN
+    assert await app.store.list_audit(AuditFilters(action=AuditAction.ENTRY_RESTORE), 10) == []
+
+
+async def test_admin_restore_of_a_standing_cleanups_memory_points_to_the_undo() -> None:
+    app, *_ = await _seed()
+    junk = await _add(app, "junk note", author="badagent")
+    out = await app.store.cleanup_agent(
+        "badagent",
+        datetime(2020, 1, 1, tzinfo=UTC),
+        datetime(2100, 1, 1, tzinfo=UTC),
+        cleaned_by="admin:1",
+    )
+    assert out.record is not None
+    async with make_client(app) as client:
+        resp = await client.post(
+            f"/v1/admin/entries/{junk.id}/restore", json={"reason": "x"}, headers=ADMIN
+        )
+    assert resp.status_code == 409
+    error = resp.json()["error"]
+    assert error["code"] == "restore_via_cleanup"
+    assert out.record.id in error["message"] and "undo" in error["message"]
+
+
+async def test_admin_restore_does_not_bring_pins_back() -> None:
+    app, blue, _, _, in_blue, _ = await _seed()
+    async with make_client(app) as client:
+        assert isinstance(await app.store.pin_entry(blue.id, in_blue.id, "alice", 10), PinWrite)
+        await client.post(f"/v1/admin/entries/{in_blue.id}/withdraw", json={}, headers=ADMIN)
+        await client.post(
+            f"/v1/admin/entries/{in_blue.id}/restore", json={"reason": "back"}, headers=ADMIN
+        )
+    assert await app.store.list_pins(blue.id) == []
 
 
 async def test_admin_feedback_lists_who_rated_what_across_fleets() -> None:

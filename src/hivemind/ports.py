@@ -42,6 +42,7 @@ from hivemind.domain.entry import (
     UsageCount,
     embeddable_text,
 )
+from hivemind.domain.entry_restore import Restoration
 from hivemind.domain.feedback import (
     Feedback,
     FeedbackCounts,
@@ -253,6 +254,16 @@ class Store(Protocol):
         """Flip an active entry to ``withdrawn`` (SPEC.md §4.1). Only the
         reason is persisted, not ``by_user``. ``KeyError`` if unknown,
         ``ValueError`` if not active.
+        """
+        ...
+
+    async def restore_entry(self, entry_id: str) -> Restoration:
+        """Put a withdrawn entry back to ``active`` and clear its withdrawal
+        reason and time (ADR 0124); pins are not restored. The state check and
+        the update are one atomic step, so a concurrent withdraw or supersede
+        cannot race it. ``KeyError`` if unknown; ``RestoreRefused`` (a
+        subclass says why) if the entry is not withdrawn, a standing agent
+        cleanup withdrew it, or it would leave two active heads in a chain.
         """
         ...
 

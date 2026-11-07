@@ -76,6 +76,7 @@ def _portal(transport: httpx.AsyncBaseTransport) -> httpx.AsyncClient:
         ("GET", "portal/cleanups"),
         ("POST", "portal/cleanups/abc123/undo"),
         ("POST", "portal/key/lock"),
+        ("GET", "portal/history"),
     ],
 )
 def test_the_portal_routes_are_forwarded(method: str, path: str) -> None:
@@ -102,6 +103,7 @@ def test_the_portal_routes_are_forwarded(method: str, path: str) -> None:
         ("GET", "admin/feedback"),
         ("POST", "admin/entries/x/withdraw"),
         ("POST", "admin/entries/x/redact"),
+        ("POST", "admin/entries/x/restore"),  # restoring is the admin's (ADR 0124)
         ("GET", "admin/agents"),
         # Right path, wrong method, or one segment too many.
         ("GET", "portal/search"),
@@ -119,6 +121,9 @@ def test_the_portal_routes_are_forwarded(method: str, path: str) -> None:
         ("POST", "admin/agents/x/cleanup"),
         ("GET", "admin/agent-cleanups"),
         ("POST", "admin/agent-cleanups/x/undo"),
+        ("POST", "portal/history"),
+        ("GET", "portal/history/x"),
+        ("GET", "admin/audit-log"),
         ("GET", "portal/key/lock"),
         ("DELETE", "portal/key/lock"),
         ("POST", "portal/key/lock/x"),
@@ -395,3 +400,10 @@ async def test_a_data_plane_pin_is_audited_without_via() -> None:
         ).status_code == 200
     (row,) = await store.list_audit(AuditFilters(), 50)
     assert "via" not in row.detail
+
+
+def test_the_portal_never_hands_the_drawer_a_restore_action() -> None:
+    """The drawer is shared (ADR 0091); only the admin side passes
+    ``restoreEntry``, so the portal shows no Restore button (ADR 0124)."""
+    for page in STATIC_DIR.glob("*.js"):
+        assert "restoreEntry" not in page.read_text(encoding="utf-8"), page.name

@@ -91,6 +91,9 @@ export const memoriesHref = (filters = {}) => viewHref("memories", filters);
 /** An in-panel hash link to the Feedback log (reporter, verdict, author, fleet, entry). */
 export const feedbackHref = (filters = {}) => viewHref("feedback", filters);
 
+/** An in-panel hash link to the Audit log (actor, action, target, subject). */
+export const auditHref = (filters = {}) => viewHref("audit", filters);
+
 /** An in-panel hash link to one agent's page. */
 export const agentHref = (name) => viewHref("agent", { name });
 

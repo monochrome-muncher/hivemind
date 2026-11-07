@@ -326,6 +326,11 @@ curl -s -H "X-API-Key: $ADMIN_KEY" \
   with `actor_kind = agent_key`, the agent's name as actor and
   `via: "portal"` in `detail`. An agent withdrawing its own entry through
   the API or `hive_withdraw` is not audited.
+- **Restores are audited** (ADR 0124, migration `0031`): the admin putting
+  a withdrawn memory back writes `entry.restore` (target: the entry id,
+  detail `{author, previous_reason, reason}`). Rolling back `0031` deletes
+  those rows (it needs `--discard-audit-rows`); the restored memories stay
+  active.
 - **Key locks are audited** (ADR 0117, migration `0025`): an agent locking
   its own key from the portal writes `agent_key.lock` with
   `actor_kind = agent_key`, the agent's name, the key fingerprint and
@@ -334,7 +339,7 @@ curl -s -H "X-API-Key: $ADMIN_KEY" \
   must stay dead.
 - **Rollbacks are audited and guarded** (ADR 0119, migration `0027`).
   Several shipped rollbacks (`0009`, `0014`, `0017`, `0019`, `0020`,
-  `0022`, `0023`, `0024`, `0025`, `0027`) delete the audit rows whose
+  `0022`, `0023`, `0024`, `0025`, `0027`, `0031`) delete the audit rows whose
   action needs a wider `CHECK`, `0006`'s sets revoked agents back to
   `active` (reviving their key rows), and `0025`'s drops the lock mark, so
   locked keys work again. `make rollback` (`hivemind-migrate --rollback N`)
@@ -351,13 +356,32 @@ curl -s -H "X-API-Key: $ADMIN_KEY" \
   **Stop the app tier first.** The counts do not block live writes, so a
   row written between the count and the DDL is deleted uncounted;
   `discarded_audit_rows` is the count taken before the rollback.
-  Once a migration above `0027` exists and `0027` stays applied, each
+  While `0027` stays applied (a rollback of `0030` alone, say), each
   successful rollback writes one `schema.rollback` row (`actor_kind = cli`,
   the OS user, the most recent migration id as target, `{rolled_back,
-  discarded_audit_rows}` as detail). Until then `0027` is the head, every
-  rollback takes it along, and the WARNING on stderr is the only record;
-  rolling back `0027` deletes any such rows (so it needs
-  `--discard-audit-rows` once they exist).
+  discarded_audit_rows}` as detail). A rollback that takes `0027` along
+  leaves the WARNING on stderr as the only record; rolling back `0027`
+  deletes any such rows (so it needs `--discard-audit-rows` once they
+  exist).
+- **Reading one agent's history** (ADR 0123, migration `0030`).
+  `GET /v1/admin/audit-log?subject=<agent>` returns the rows about that
+  agent, newest first: its own key as actor, admin actions on it,
+  withdrawals of its memories, fleet moves and retirements that name it.
+  `target=<exact>` filters on the row's target alone. The admin panel
+  shows the same list on the agent's page ("History", with a CSV export)
+  and as two filter fields on the Audit log page. The agent portal's
+  "History" page shows the same for the agent (and the agents it
+  inherits from) without naming the admin; nothing about it needs
+  configuration. Migration `0030` builds four indexes `CONCURRENTLY`
+  (`audit_log_target_idx`, `audit_log_withdraw_author_idx`,
+  `audit_log_move_agents_idx`, `audit_log_successor_idx`); if a build is
+  cancelled it leaves an `INVALID` index, which you drop and re-run
+  (`DROP INDEX CONCURRENTLY <name>`, then `make migrate`). The
+  `subject` query reads through a BitmapOr of these and the existing
+  `audit_log_actor_idx`; it runs with a custom plan (`SET LOCAL
+  plan_cache_mode`), because a generic plan walks `occurred_at` backwards
+  and filters the whole log. Rolling `0030` back only drops the indexes
+  and writes a `schema.rollback` row.
 - **Raw SQL bypasses it.** A hand-run `DELETE FROM credentials …` is not
   audited; prefer the CLI even for break-glass work.
 
@@ -385,6 +409,30 @@ ORDER BY e.created_at;
 For each row that should not be readable by its current author, withdraw
 it with the admin key (`POST /v1/entries/{id}/withdraw` with a `reason`);
 the withdrawal is recorded in the audit log.
+
+### Restoring a mistaken withdrawal (ADR 0124)
+
+One memory withdrawn by mistake can be put back by the admin: open it in
+the panel's **Memories** page and press **Restore** (it asks for a reason),
+or `POST /v1/admin/entries/{id}/restore` with `{"reason": "..."}` and the
+admin key. The memory is `active` again, findable by search, and its
+withdrawal reason and time are cleared (the audit row `entry.restore` keeps
+the old reason). **Pins are not restored**: pin it again if the fleet
+should see it in its briefing.
+
+The call answers 409 when it should not go ahead:
+
+- `entry_not_withdrawn`: the memory is active or superseded already.
+- `restore_via_cleanup`: an agent cleanup that still stands withdrew it.
+  Undo that cleanup (section 10), which brings back everything it changed
+  together. Once the cleanup is undone the memory is already active.
+- `restore_chain_conflict`: an agent cleanup once put this memory back over
+  a newer one, so restoring it could leave two current versions of one fact
+  (the newer one may come back later). Write a new memory with the content
+  you want instead, or undo the cleanup.
+
+A fleet merge, a move or a retirement never withdraws memories, so their
+undos have no say here.
 
 ## 5. Disaster recovery (full)
 

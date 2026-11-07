@@ -28,6 +28,7 @@ from hivemind.domain.fleet_merge import (
     MoveOutcome,
     UnmergeOutcome,
 )
+from hivemind.domain.history import HistoryItem
 from hivemind.domain.pin import ChangeReason, Pin, PinnedEntry
 from hivemind.domain.recency import RecencyHint
 from hivemind.domain.redaction import RedactOutcome
@@ -291,6 +292,7 @@ class EntryOut(BaseModel):
     state: str
     superseded_by: str | None = None
     withdrawn_reason: str | None = None
+    withdrawn_at: datetime | None = None
     # Extracted at write time (ADR 0016, SPEC §13); empty when extraction
     # was off or failed (SPEC §13.4).
     entities: list[EntityOut] = []
@@ -343,6 +345,7 @@ class EntryOut(BaseModel):
             state=entry.state.value,
             superseded_by=entry.superseded_by,
             withdrawn_reason=entry.withdrawn_reason,
+            withdrawn_at=entry.withdrawn_at,
             entities=[EntityOut(name=e.name, kind=e.kind) for e in entry.entities],
             entities_model=entry.entities_model,
         )
@@ -533,6 +536,14 @@ class WithdrawRequest(BaseModel):
     """A withdrawal of an entry (SPEC.md §4.1)."""
 
     reason: str | None = None
+
+
+class RestoreRequest(BaseModel):
+    """Putting a withdrawn memory back (ADR 0124). The reason is required; it
+    defaults to empty so the service refuses a missing one after the admin
+    check (a non-admin gets 403, never 422)."""
+
+    reason: str = ""
 
 
 class FeedbackRequest(BaseModel):
@@ -1460,6 +1471,37 @@ class PortalCleanupRecordOut(BaseModel):
             undone_at=r.undone_at,
             undoable=view.undoable,
             undo_blocked=view.blocked,
+        )
+
+
+class PortalHistoryItemOut(BaseModel):
+    """One line of the agent's history in the portal (ADR 0123). ``by`` is
+    ``agent`` (the agent or one it inherits from, named in ``agent``), ``another_agent`` (an agent the key does not own, never named) or ``admin`` (never identified). ``agent`` names
+    which of the agent and its predecessors acted; ``about`` the one the row
+    concerns. ``entry_id`` is set only when the key can still read the entry."""
+
+    id: str
+    occurred_at: datetime
+    action: str
+    by: Literal["agent", "another_agent", "admin"]
+    agent: str | None
+    about: str | None
+    summary: str
+    reason: str | None
+    entry_id: str | None
+
+    @classmethod
+    def from_item(cls, item: HistoryItem) -> PortalHistoryItemOut:
+        return cls(
+            id=item.id,
+            occurred_at=item.occurred_at,
+            action=item.action,
+            by=item.by,
+            agent=item.agent,
+            about=item.about,
+            summary=item.summary,
+            reason=item.reason,
+            entry_id=item.entry_id,
         )
 
 

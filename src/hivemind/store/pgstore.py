@@ -60,6 +60,7 @@ from hivemind.domain.agent_cleanup import (
 )
 from hivemind.domain.agent_cleanup import undo_refusal as cleanup_undo_refusal
 from hivemind.domain.audit import (
+    AGENT_TARGET_ACTIONS,
     ActorKind,
     AuditAction,
     AuditEvent,
@@ -80,6 +81,7 @@ from hivemind.domain.entry import (
     SourceType,
     UsageCount,
 )
+from hivemind.domain.entry_restore import Restoration, chain_conflict_message, restore_refusal
 from hivemind.domain.feedback import (
     Correction,
     Feedback,
@@ -164,7 +166,7 @@ INSERT INTO entries (
 _ENTRY_COLUMNS = """
     id, kind, summary, body, payload, sources, tags, occurred_at,
     created_at, author, agent, importance, importance_source, scope, fleet_id,
-    embedding_model, state, superseded_by, withdrawn_reason, redacted_at,
+    embedding_model, state, superseded_by, withdrawn_reason, withdrawn_at, redacted_at,
     entities, entity_names, entities_model
 """
 
@@ -750,6 +752,49 @@ LOOKUP_STATE = "SELECT state FROM entries WHERE id = $1"
 WITHDRAW = (
     "UPDATE entries SET state = 'withdrawn', withdrawn_reason = $2, withdrawn_at = now() "
     "WHERE id = $1 AND state = 'active' RETURNING " + _ENTRY_COLUMNS
+)
+
+# Restoring one withdrawn memory (ADR 0124). The row is locked first, so a
+# concurrent withdraw or supersede of it waits and then sees the new state;
+# the transaction advisory lock serialises two restores, whose chain checks
+# would otherwise not see each other.
+RESTORE_LOCK = "SELECT pg_advisory_xact_lock(hashtext('entry.restore'))"
+RESTORE_LOCK_ROW = (
+    "SELECT state, withdrawn_reason, redacted_at FROM entries WHERE id = $1 FOR UPDATE"
+)
+# A not-undone cleanup that withdrew the memory (its reason is the cleanup's).
+RESTORE_STANDING_CLEANUP = """
+SELECT id FROM agent_cleanups
+ WHERE undone_at IS NULL AND $1::uuid = ANY(withdrawn_ids)
+   AND 'admin cleanup ' || id::text = $2
+ LIMIT 1
+"""
+# The chain rules (ADR 0124). A cleanup that put the memory back cut its link to
+# the memory that replaced it: any such record makes the restore refuse.
+RESTORE_WAS_CUT = """
+SELECT 1 FROM agent_cleanups c, jsonb_array_elements(c.restored) r
+ WHERE r ->> 'entry_id' = $1::text LIMIT 1
+"""
+# An active memory that names it as its successor (never produced by the state
+# rules), or an active memory a cleanup put back whose recorded successor chain
+# leads to it.
+RESTORE_LINKED_BY = (
+    "SELECT id FROM entries WHERE superseded_by = $1::uuid AND state = 'active' LIMIT 1"
+)
+RESTORE_PUT_BACK_INSTEAD = """
+WITH RECURSIVE walk(root, cur) AS (
+    SELECT (r ->> 'entry_id')::uuid, (r ->> 'superseded_by')::uuid
+      FROM agent_cleanups c, jsonb_array_elements(c.restored) r
+      JOIN entries g ON g.id = (r ->> 'entry_id')::uuid AND g.state = 'active'
+    UNION
+    SELECT w.root, e.superseded_by FROM walk w JOIN entries e ON e.id = w.cur
+     WHERE e.superseded_by IS NOT NULL
+)
+SELECT root FROM walk WHERE cur = $1::uuid LIMIT 1
+"""
+RESTORE = (
+    "UPDATE entries SET state = 'active', withdrawn_reason = NULL, withdrawn_at = NULL "
+    "WHERE id = $1 AND state = 'withdrawn' AND redacted_at IS NULL RETURNING " + _ENTRY_COLUMNS
 )
 
 # ADR 0125: wipe every free-text field of a withdrawn memory in one UPDATE (the
@@ -2204,6 +2249,42 @@ class PgStore:
             int(reasons or 0),
         )
 
+    async def restore_entry(self, entry_id: str) -> Restoration:
+        """Put a withdrawn entry back (ADR 0124), in one transaction that
+        locks the row, checks the refusals and updates it."""
+        if not is_valid_uuid(entry_id):
+            raise KeyError(f"unknown entry: {entry_id}")
+        async with self._transaction() as conn:
+            await conn.execute(RESTORE_LOCK)
+            existing = await conn.fetchrow(RESTORE_LOCK_ROW, entry_id)
+            if existing is None:
+                raise KeyError(f"unknown entry: {entry_id}")
+            reason = existing["withdrawn_reason"]
+            standing = None
+            chain = None
+            redacted = existing["redacted_at"] is not None
+            if existing["state"] == "withdrawn" and not redacted:
+                found = await conn.fetchval(RESTORE_STANDING_CLEANUP, entry_id, reason)
+                standing = str(found) if found is not None else None
+                cut = await conn.fetchval(RESTORE_WAS_CUT, entry_id) is not None
+                linked = await conn.fetchval(RESTORE_LINKED_BY, entry_id)
+                instead = await conn.fetchval(RESTORE_PUT_BACK_INSTEAD, entry_id)
+                chain = chain_conflict_message(
+                    entry_id,
+                    cut,
+                    str(linked) if linked is not None else None,
+                    str(instead) if instead is not None else None,
+                )
+            refusal = restore_refusal(
+                entry_id, existing["state"], reason, standing, chain, redacted
+            )
+            if refusal is not None:
+                raise refusal
+            row = await conn.fetchrow(RESTORE, entry_id)
+            if row is None:  # unreachable under the row lock
+                raise RuntimeError(f"restore of entry {entry_id} updated no row")
+        return Restoration(_row_to_entry(row), reason)
+
     # -- search -------------------------------------------------------------------
 
     async def search_keyword(
@@ -3482,33 +3563,19 @@ class PgStore:
 
     async def list_audit(self, filters: AuditFilters, limit: int) -> list[AuditRecord]:
         """Matching audit rows, newest first, at most ``limit``."""
-        conditions: list[str] = []
-        params: list[Any] = []
-        if filters.actor is not None:
-            params.append(filters.actor)
-            conditions.append(f"actor = ${len(params)}")
-        if filters.action is not None:
-            params.append(filters.action.value)
-            conditions.append(f"action = ${len(params)}")
-        if filters.since is not None:
-            params.append(filters.since)
-            conditions.append(f"occurred_at >= ${len(params)}")
-        if filters.before is not None:
-            # Row-value comparison against the cursor row (ADR 0028); an
-            # unknown id yields a NULL row, which compares to nothing.
-            params.append(filters.before)
-            conditions.append(
-                f"(occurred_at, id) < (SELECT occurred_at, id FROM audit_log "
-                f"WHERE id = ${len(params)}::uuid)"
-            )
-        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-        params.append(limit)
-        sql = (
-            f"SELECT {_AUDIT_COLUMNS} FROM audit_log {where} "
-            f"ORDER BY occurred_at DESC, id DESC LIMIT ${len(params)}"
-        )
+        sql, params = audit_query(filters, limit)
         async with self._connection() as conn:
-            rows = await conn.fetch(sql, *params)
+            if not filters.subjects:
+                rows = await conn.fetch(sql, *params)
+            else:
+                # A generic plan cannot see how rare one agent's rows are and
+                # walks ``occurred_at`` backwards filtering the whole log
+                # (78 ms on 600k rows against 0.7 ms with the BitmapOr), and
+                # asyncpg switches a cached statement to one after a few runs.
+                # ``SET LOCAL``, as the search does: a pooler discards session state.
+                async with conn.transaction():
+                    await conn.execute("SET LOCAL plan_cache_mode = force_custom_plan")
+                    rows = await conn.fetch(sql, *params)
         return [_row_to_audit(r) for r in rows]
 
     # -- orchestrator probes (ADR 0019) ---------------------------------------
@@ -3616,6 +3683,7 @@ def _row_to_entry(row: asyncpg.Record) -> Entry:
         superseded_by=str(row["superseded_by"]) if row["superseded_by"] else None,
         withdrawn_reason=row["withdrawn_reason"],
         redacted_at=row["redacted_at"],
+        withdrawn_at=row["withdrawn_at"],
         entities=_decode_entities(row["entities"]),
         entities_model=row["entities_model"],
     )
@@ -3726,6 +3794,62 @@ def _row_to_agent(row: asyncpg.Record) -> Agent:
         key_created_at=row.get("key_created_at"),
         key_locked_at=row.get("key_locked_at"),
     )
+
+
+def audit_query(filters: AuditFilters, limit: int) -> tuple[str, list[Any]]:
+    """The SQL and parameters of ``PgStore.list_audit``."""
+    conditions: list[str] = []
+    params: list[Any] = []
+    if filters.actor is not None:
+        params.append(filters.actor)
+        conditions.append(f"actor = ${len(params)}")
+    if filters.action is not None:
+        params.append(filters.action.value)
+        conditions.append(f"action = ${len(params)}")
+    if filters.target is not None:
+        params.append(filters.target)
+        conditions.append(f"target = ${len(params)}")
+    if filters.since is not None:
+        params.append(filters.since)
+        conditions.append(f"occurred_at >= ${len(params)}")
+    subject_condition = ""
+    if filters.subjects:
+        params.append(list(filters.subjects))
+        names = f"${len(params)}::text[]"
+        params.append([a.value for a in AGENT_TARGET_ACTIONS])
+        target_actions = f"${len(params)}::text[]"
+        # One OR arm per shape, each on its own index (migration 0030), so
+        # the planner can BitmapOr them. The literals match the partial
+        # indexes' predicates.
+        subject_condition = (
+            f"((actor_kind = 'agent_key' AND actor = ANY({names})) "
+            f"OR (target = ANY({names}) AND action = ANY({target_actions})) "
+            f"OR (action = 'entry.withdraw' AND detail->>'author' = ANY({names})) "
+            # Its own partial index (migration 0031), so the BitmapOr stays.
+            f"OR (action = 'entry.restore' AND detail->>'author' = ANY({names})) "
+            # And 0032's, for a redaction.
+            f"OR (action = 'entry.redact' AND detail->>'author' = ANY({names})) "
+            f"OR (action = 'fleet.move_agents' AND detail->'agents' ?| {names}) "
+            f"OR (action IN ('agent.retire', 'agent.retire_undo') "
+            f"AND detail->>'successor' = ANY({names})))"
+        )
+        conditions.append(subject_condition)
+    if filters.before is not None:
+        # Row-value comparison against the cursor row (ADR 0028); an unknown
+        # id yields a NULL row, which compares to nothing. With a subject the
+        # cursor row must be about it too, else nothing matches.
+        params.append(filters.before)
+        cursor_row = f"SELECT occurred_at, id FROM audit_log WHERE id = ${len(params)}::uuid"
+        if subject_condition:
+            cursor_row += f" AND {subject_condition}"
+        conditions.append(f"(occurred_at, id) < ({cursor_row})")
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    params.append(limit)
+    sql = (
+        f"SELECT {_AUDIT_COLUMNS} FROM audit_log {where} "
+        f"ORDER BY occurred_at DESC, id DESC LIMIT ${len(params)}"
+    )
+    return sql, params
 
 
 def _row_to_audit(row: asyncpg.Record) -> AuditRecord:

@@ -46,7 +46,7 @@ class ActorKind(StrEnum):
 
 class AuditAction(StrEnum):
     """The audited action vocabulary (the ``audit_log_action_check``
-    constraint, migrations ``0005``, ``0009``, ``0014``, ``0017``, ``0019``, ``0020``, ``0022``, ``0023``, ``0024``, ``0025``, ``0027``, ``0029`` and ``0032``)."""
+    constraint, migrations ``0005``, ``0009``, ``0014``, ``0017``, ``0019``, ``0020``, ``0022``, ``0023``, ``0024``, ``0025``, ``0027``, ``0029``, ``0031`` and ``0032``)."""
 
     AGENT_REGISTER = "agent.register"  # ADR 0046
     AGENT_ACTIVATE = "agent.activate"
@@ -75,6 +75,7 @@ class AuditAction(StrEnum):
     AGENT_KEY_LOCK = "agent_key.lock"
     SCHEMA_ROLLBACK = "schema.rollback"  # ADR 0119
     ENTRY_REDACT = "entry.redact"  # ADR 0125
+    ENTRY_RESTORE = "entry.restore"  # ADR 0124
 
 
 # The key fingerprint is the first 12 hex chars of the stored SHA-256
@@ -112,13 +113,54 @@ class AuditRecord:
     detail: Mapping[str, Any]
 
 
+# The actions whose ``target`` is an agent's name (every other target is a
+# fleet id, an entry id or a key fingerprint). A ``subjects`` match on the
+# target is limited to these, so a fleet named like an agent is not that
+# agent's history.
+AGENT_TARGET_ACTIONS: tuple[AuditAction, ...] = (
+    AuditAction.AGENT_REGISTER,
+    AuditAction.AGENT_ACTIVATE,
+    AuditAction.AGENT_TRUST_LEVEL_SET,
+    AuditAction.AGENT_HOME_FLEET_SET,
+    AuditAction.AGENT_OWNER_SET,
+    AuditAction.AGENT_REVOKE,
+    AuditAction.AGENT_KEY_ISSUE,
+    AuditAction.AGENT_KEY_REPLACE,
+    AuditAction.AGENT_KEY_LOCK,
+    AuditAction.AGENT_CLEANUP,
+    AuditAction.AGENT_CLEANUP_UNDO,
+    AuditAction.AGENT_RETIRE,
+    AuditAction.AGENT_RETIRE_UNDO,
+)
+# Retirements name the successor in ``detail.successor``.
+SUCCESSOR_ACTIONS: tuple[AuditAction, ...] = (
+    AuditAction.AGENT_RETIRE,
+    AuditAction.AGENT_RETIRE_UNDO,
+)
+
+
+def _names_in(detail_value: Any, names: tuple[str, ...]) -> bool:
+    return isinstance(detail_value, list) and any(
+        isinstance(n, str) and n in names for n in detail_value
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class AuditFilters:
-    """Read-side filters for the audit log (all optional, AND-ed)."""
+    """Read-side filters for the audit log (all optional, AND-ed).
+
+    ``subjects`` (ADR 0123) keeps the rows *about* any of the named agents:
+    the agent's own key as actor, an agent-named ``target`` (``AGENT_TARGET_ACTIONS``),
+    a withdrawal or restore of its memory (``detail.author``), a fleet move that lists it
+    (``detail.agents``) and a retirement that names it successor
+    (``detail.successor``). The admin API passes one name; the agent portal
+    passes the agent and the agents it inherits from."""
 
     actor: str | None = None
     action: AuditAction | None = None
     since: datetime | None = None  # inclusive lower bound on occurred_at
+    target: str | None = None  # exact
+    subjects: tuple[str, ...] = ()
     # Paging cursor (ADR 0028): a row id; only rows strictly older than it
     # (by occurred_at, then id) match. An unknown id matches nothing. It is
     # positional, so the store applies it — ``matches`` does not.
@@ -130,4 +172,26 @@ class AuditFilters:
             return False
         if self.action is not None and record.action is not self.action:
             return False
-        return not (self.since is not None and record.occurred_at < self.since)
+        if self.target is not None and record.target != self.target:
+            return False
+        if self.since is not None and record.occurred_at < self.since:
+            return False
+        return not self.subjects or self._about_a_subject(record)
+
+    def _about_a_subject(self, record: AuditRecord) -> bool:
+        names = self.subjects
+        action = record.action
+        detail = record.detail
+        if record.actor_kind is ActorKind.AGENT_KEY and record.actor in names:
+            return True
+        if action in AGENT_TARGET_ACTIONS and record.target in names:
+            return True
+        if (
+            action
+            in (AuditAction.ENTRY_WITHDRAW, AuditAction.ENTRY_RESTORE, AuditAction.ENTRY_REDACT)
+            and detail.get("author") in names
+        ):
+            return True
+        if action is AuditAction.FLEET_MOVE_AGENTS and _names_in(detail.get("agents"), names):
+            return True
+        return action in SUCCESSOR_ACTIONS and detail.get("successor") in names
