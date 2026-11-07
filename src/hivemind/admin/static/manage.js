@@ -4,7 +4,7 @@
 import {
   api, guarded, h, LEVELS, hooks, state, toast, openModal, closeModal, showKeyOnce, fleetName, fmtAgo, fmtTime, fmtNum,
   levelBadge, statusBadge, loadAgentsAndFleets, pageHead, refreshButton, table, card, link, memoriesHref,
-  fetchActivity, fetchMetrics, miniBar, unavailable, agentHref, optional, fill,
+  fetchActivity, fetchMetrics, miniBar, parseHash, viewHref, unavailable, agentHref, optional, fill,
 } from "./core.js";
 import { openEntry } from "./drawer.js";
 import { PIN_HEADERS, pinRow } from "./lists.js";
@@ -504,7 +504,10 @@ export async function viewAgents(root) {
   const maxWrites = Math.max(1, ...[...act.values()].map((a) => a.recent_writes || 0));
   const refresh = () => hooks.refresh();
   const search = h("input", { type: "search", placeholder: "Filter by name, owner or fleet…", "aria-label": "Filter agents" });
+  // Filters live in the hash (#/agents?status=pending&activity=locked) so the Overview can link to them.
+  const { params } = parseHash();
   const statusFilter = h("select", { "aria-label": "Status" }, ["all", "pending", "active", "revoked"].map((s) => h("option", { value: s, text: s === "all" ? "All statuses" : s })));
+  if (["pending", "active", "revoked"].includes(params.get("status"))) statusFilter.value = params.get("status");
   // ADR 0110: the server says which agents are idle and for how many days.
   const idleDays = (state.agents[0] && state.agents[0].idle_after_days) || 30;
   const idleCount = state.agents.filter((a) => a.idle).length;
@@ -513,7 +516,15 @@ export async function viewAgents(root) {
     h("option", { value: "all", text: "Any activity" }),
     h("option", { value: "locked", text: `Key locked (${lockedCount})` }),
     h("option", { value: "idle", text: `Idle ${idleDays}+ days (${idleCount})` }));
+  if (["locked", "idle"].includes(params.get("activity"))) idleFilter.value = params.get("activity");
   const holder = h("div");
+  const syncHash = () => {
+    const next = viewHref("agents", {
+      status: statusFilter.value === "all" ? "" : statusFilter.value, activity: idleFilter.value === "all" ? "" : idleFilter.value,
+    });
+    if (root.dataset.superseded) return; // the user navigated away while this view loaded
+    if (window.location.hash !== next) history.replaceState(null, "", next);
+  };
   const render = () => {
     const q = search.value.trim().toLowerCase();
     const shown = state.agents.filter((a) =>
@@ -542,8 +553,8 @@ export async function viewAgents(root) {
       state.agents.length ? "No agents match the filter." : "No agents have registered yet."));
   };
   search.addEventListener("input", render);
-  statusFilter.addEventListener("change", render);
-  idleFilter.addEventListener("change", render);
+  statusFilter.addEventListener("change", () => { render(); syncHash(); });
+  idleFilter.addEventListener("change", () => { render(); syncHash(); });
   render();
   fill(root, 
     pageHead("Agents", `${state.agents.length} registered`,

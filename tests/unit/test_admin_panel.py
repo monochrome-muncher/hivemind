@@ -504,3 +504,40 @@ def test_csv_export_quotes_cells_defuses_formulas_and_pages_to_the_end() -> None
     assert result["deduped"] == [199, 199]
     assert result["stopped"] is None and result["signedOut"] is None
     assert result["name"] == "hivemind-agent-a_b_c-2026-10-18.csv"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_needs_you_row_lists_only_what_is_above_zero_locked_keys_first() -> None:
+    """ADR 0121: needs.js run as it ships, on the data the Overview loaded."""
+    script = r"""
+    const { needsYouItems } = await import(process.argv[1])
+    const agent = (o) => ({ status: "active", key_locked: false, idle: false, idle_after_days: 14, ...o })
+    const quiet = needsYouItems([agent({}), agent({ status: "revoked", key_locked: true })], { health: { flagged_backlog_14d: 0 } })
+    const noMetrics = needsYouItems([], null)
+    const busy = needsYouItems([
+      agent({ idle: true }), agent({ key_locked: true }), agent({ status: "pending" }), agent({ status: "pending" }),
+    ], { health: { flagged_backlog_14d: 3 } })
+    console.log(JSON.stringify({ quiet, noMetrics, busy: busy.map((i) => [i.id, i.count, i.href, Boolean(i.urgent), i.hint]) }))
+    """
+    out = subprocess.run(
+        ["node", "--input-type=module", "-e", script, (STATIC_DIR / "needs.js").as_uri()],
+        capture_output=True, text=True, check=True,
+    )  # fmt: skip
+    got = json.loads(out.stdout)
+    assert got["quiet"] == [] and got["noMetrics"] == []
+    assert got["busy"] == [
+        ["locked", 1, "#/agents?activity=locked", True, "A leak was reported"],
+        ["pending", 2, "#/agents?status=pending", False, "Waiting for activation"],
+        ["idle", 1, "#/agents?activity=idle", False, "No request for 14+ days"],
+        ["flags", 3, "#/health?flags=old", False, "Flagged over 14 days ago, still active"],
+    ]
+
+
+def test_the_agents_page_and_health_page_read_the_filters_the_needs_row_links_to() -> None:
+    manage = (STATIC_DIR / "manage.js").read_text()
+    assert 'params.get("status")' in manage and 'params.get("activity")' in manage
+    health = (STATIC_DIR / "health.js").read_text()
+    # The tile counts what the Health row counts, and its link is that row's filter.
+    assert "flagged_backlog_14d" in health and "older_than_days: 14" in health
+    assert "flagged_backlog_14d" in (STATIC_DIR / "needs.js").read_text()
+    assert "needsYou(state.agents, metrics)" in (STATIC_DIR / "overview.js").read_text()
