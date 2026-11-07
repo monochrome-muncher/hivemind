@@ -2292,6 +2292,38 @@ async def test_agent_lifecycle(adapter: Adapter) -> None:
     assert await store.get_agent("ghost") is None
 
 
+async def test_set_agent_owner_alias_returns_before_and_after(adapter: Adapter) -> None:
+    """ADR 0122: any status; (before, after) is read under one lock; the alias
+    lives on the agent row only, and nothing else about the agent moves."""
+    store = adapter.store
+    fleet = await store.create_fleet("blue")
+    await store.register_agent("Scout", "jane.doe")
+    await store.register_agent("Bare")
+    pending_before, pending_after = await store.set_agent_owner_alias("Scout", "jane.d")
+    assert (pending_before.owner_alias, pending_after.owner_alias) == ("jane.doe", "jane.d")
+    assert pending_after.status is AgentStatus.PENDING
+    assert await store.get_agent("Scout") == pending_after
+    await store.activate_agent("Scout", trust_level=TrustLevel.CONTRIBUTOR, home_fleet_id=fleet.id)
+    active_before, active_after = await store.set_agent_owner_alias("Scout", "Jane.D")  # case only
+    assert (active_before.owner_alias, active_after.owner_alias) == ("jane.d", "Jane.D")
+    assert (active_after.status, active_after.trust_level, active_after.home_fleet_id) == (
+        AgentStatus.ACTIVE,
+        TrustLevel.CONTRIBUTOR,
+        fleet.id,
+    )
+    same_before, same_after = await store.set_agent_owner_alias("Scout", "Jane.D")
+    assert same_before == same_after
+    await store.revoke_agent("Scout")  # a revoked agent can be corrected too
+    assert (await store.set_agent_owner_alias("Scout", "jane"))[1].owner_alias == "jane"
+    assert (await store.set_agent_owner_alias("Bare", "mallory"))[0].owner_alias is None
+    assert [(a.name, a.owner_alias) for a in await store.list_agents()] == [
+        ("Bare", "mallory"),
+        ("Scout", "jane"),
+    ]
+    with pytest.raises(UnknownAgent, match="unknown agent: ghost"):
+        await store.set_agent_owner_alias("ghost", "x")
+
+
 async def test_agents_list_by_name(adapter: Adapter) -> None:
     for name in ("zed", "amy"):
         await adapter.store.register_agent(name)

@@ -13,7 +13,7 @@ import { mergeDialog, mergesCard, moveDialog } from "./merge.js";
 import { retireDialog, successionsCard } from "./retire.js";
 
 const AUDIT_ACTIONS = [
-  "agent.register", "agent.activate", "agent.trust_level_set", "agent.home_fleet_set", "agent.revoke",
+  "agent.register", "agent.activate", "agent.trust_level_set", "agent.home_fleet_set", "agent.owner_set", "agent.revoke",
   "fleet.create", "fleet.rename", "fleet.merge", "fleet.unmerge", "fleet.move_agents", "fleet.move_undo", "org_key.rotate", "entry.withdraw", "entry.pin", "entry.unpin",
   "admin_key.issue", "admin_key.revoke", "agent_key.issue", "agent_key.replace", "agent_key.lock",
   "agent.cleanup", "agent.cleanup_undo", "agent.retire", "agent.retire_undo",
@@ -263,6 +263,36 @@ function renameFleetDialog(fleet, onDone) {
   input.select();
 }
 
+/** Fix the owner alias of any agent (ADR 0122): the Stats "users" tab groups by it. */
+function ownerDialog(agent, onDone) {
+  const owner = h("input", { id: "f-owner-edit", maxlength: 128, autocomplete: "off", value: agent.owner_alias || "", placeholder: "e.g. jane.doe" });
+  openModal({
+    title: `Owner of ${agent.name}`,
+    body: [
+      h("div", { class: "field" }, h("label", { for: "f-owner-edit", text: "Owner alias" }), owner,
+        h("span", { class: "hint", text: "Fixes a typo or a changed alias. The agent and its memories stay as they are; only the grouping by owner (Stats, Agents) follows the new alias." })),
+    ],
+    actions: [
+      { label: "Cancel" },
+      {
+        label: "Save",
+        class: "btn-primary",
+        submit: true,
+        onClick: async () => {
+          const ownerAlias = owner.value.trim();
+          if (!ownerAlias) throw new Error("Enter the owner alias.");
+          if (ownerAlias === (agent.owner_alias || "")) { closeModal(); return; }
+          await guarded(() => api("PATCH", `admin/agents/${encodeURIComponent(agent.name)}`, { body: { owner_alias: ownerAlias } }));
+          closeModal();
+          toast(`${agent.name} now belongs to ${ownerAlias}`);
+          onDone();
+        },
+      },
+    ],
+  });
+  owner.select();
+}
+
 /** The buttons for what can be done to `agent` now (activate, edit, revoke…). */
 export function agentButtons(agent, refresh) {
   const buttons = [];
@@ -280,6 +310,7 @@ export function agentButtons(agent, refresh) {
     buttons.push(h("button", { type: "button", class: "btn btn-sm", text: "Re-activate", onclick: () => activateDialog(agent, refresh) }));
     buttons.push(h("button", { type: "button", class: "btn btn-sm", text: "Retire…", title: "Hand its memories to a successor", onclick: () => retireDialog(agent, refresh) }));
   }
+  buttons.push(h("button", { type: "button", class: "btn btn-sm", text: "Edit owner", title: "Correct the owner alias", onclick: () => ownerDialog(agent, refresh) }));
   return buttons;
 }
 
