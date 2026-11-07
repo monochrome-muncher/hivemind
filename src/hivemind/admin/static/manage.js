@@ -4,7 +4,7 @@
 import {
   api, guarded, h, LEVELS, hooks, state, toast, openModal, closeModal, showKeyOnce, fleetName, fmtAgo, fmtTime, fmtNum,
   levelBadge, statusBadge, loadAgentsAndFleets, pageHead, refreshButton, table, card, link, memoriesHref,
-  fetchActivity, fetchMetrics, miniBar, unavailable, agentHref, optional, fill,
+  fetchActivity, fetchMetrics, miniBar, parseHash, viewHref, unavailable, agentHref, optional, fill,
 } from "./core.js";
 import { openEntry } from "./drawer.js";
 import { PIN_HEADERS, pinRow } from "./lists.js";
@@ -13,7 +13,7 @@ import { mergeDialog, mergesCard, moveDialog } from "./merge.js";
 import { retireDialog, successionsCard } from "./retire.js";
 
 const AUDIT_ACTIONS = [
-  "agent.register", "agent.activate", "agent.trust_level_set", "agent.home_fleet_set", "agent.revoke",
+  "agent.register", "agent.activate", "agent.trust_level_set", "agent.home_fleet_set", "agent.owner_set", "agent.revoke",
   "fleet.create", "fleet.rename", "fleet.merge", "fleet.unmerge", "fleet.move_agents", "fleet.move_undo", "org_key.rotate", "entry.withdraw", "entry.pin", "entry.unpin",
   "admin_key.issue", "admin_key.revoke", "agent_key.issue", "agent_key.replace", "agent_key.lock",
   "agent.cleanup", "agent.cleanup_undo", "agent.retire", "agent.retire_undo",
@@ -263,6 +263,36 @@ function renameFleetDialog(fleet, onDone) {
   input.select();
 }
 
+/** Fix the owner alias of any agent (ADR 0122): the Stats "users" tab groups by it. */
+function ownerDialog(agent, onDone) {
+  const owner = h("input", { id: "f-owner-edit", maxlength: 128, autocomplete: "off", value: agent.owner_alias || "", placeholder: "e.g. jane.doe" });
+  openModal({
+    title: `Owner of ${agent.name}`,
+    body: [
+      h("div", { class: "field" }, h("label", { for: "f-owner-edit", text: "Owner alias" }), owner,
+        h("span", { class: "hint", text: "Fixes a typo or a changed alias. The agent and its memories stay as they are; only the grouping by owner (Stats, Agents) follows the new alias." })),
+    ],
+    actions: [
+      { label: "Cancel" },
+      {
+        label: "Save",
+        class: "btn-primary",
+        submit: true,
+        onClick: async () => {
+          const ownerAlias = owner.value.trim();
+          if (!ownerAlias) throw new Error("Enter the owner alias.");
+          if (ownerAlias === (agent.owner_alias || "")) { closeModal(); return; }
+          await guarded(() => api("PATCH", `admin/agents/${encodeURIComponent(agent.name)}`, { body: { owner_alias: ownerAlias } }));
+          closeModal();
+          toast(`${agent.name} now belongs to ${ownerAlias}`);
+          onDone();
+        },
+      },
+    ],
+  });
+  owner.select();
+}
+
 /** The buttons for what can be done to `agent` now (activate, edit, revoke…). */
 export function agentButtons(agent, refresh) {
   const buttons = [];
@@ -280,6 +310,7 @@ export function agentButtons(agent, refresh) {
     buttons.push(h("button", { type: "button", class: "btn btn-sm", text: "Re-activate", onclick: () => activateDialog(agent, refresh) }));
     buttons.push(h("button", { type: "button", class: "btn btn-sm", text: "Retire…", title: "Hand its memories to a successor", onclick: () => retireDialog(agent, refresh) }));
   }
+  buttons.push(h("button", { type: "button", class: "btn btn-sm", text: "Edit owner", title: "Correct the owner alias", onclick: () => ownerDialog(agent, refresh) }));
   return buttons;
 }
 
@@ -473,7 +504,10 @@ export async function viewAgents(root) {
   const maxWrites = Math.max(1, ...[...act.values()].map((a) => a.recent_writes || 0));
   const refresh = () => hooks.refresh();
   const search = h("input", { type: "search", placeholder: "Filter by name, owner or fleet…", "aria-label": "Filter agents" });
+  // Filters live in the hash (#/agents?status=pending&activity=locked) so the Overview can link to them.
+  const { params } = parseHash();
   const statusFilter = h("select", { "aria-label": "Status" }, ["all", "pending", "active", "revoked"].map((s) => h("option", { value: s, text: s === "all" ? "All statuses" : s })));
+  if (["pending", "active", "revoked"].includes(params.get("status"))) statusFilter.value = params.get("status");
   // ADR 0110: the server says which agents are idle and for how many days.
   const idleDays = (state.agents[0] && state.agents[0].idle_after_days) || 30;
   const idleCount = state.agents.filter((a) => a.idle).length;
@@ -482,7 +516,15 @@ export async function viewAgents(root) {
     h("option", { value: "all", text: "Any activity" }),
     h("option", { value: "locked", text: `Key locked (${lockedCount})` }),
     h("option", { value: "idle", text: `Idle ${idleDays}+ days (${idleCount})` }));
+  if (["locked", "idle"].includes(params.get("activity"))) idleFilter.value = params.get("activity");
   const holder = h("div");
+  const syncHash = () => {
+    const next = viewHref("agents", {
+      status: statusFilter.value === "all" ? "" : statusFilter.value, activity: idleFilter.value === "all" ? "" : idleFilter.value,
+    });
+    if (root.dataset.superseded) return; // the user navigated away while this view loaded
+    if (window.location.hash !== next) history.replaceState(null, "", next);
+  };
   const render = () => {
     const q = search.value.trim().toLowerCase();
     const shown = state.agents.filter((a) =>
@@ -511,8 +553,8 @@ export async function viewAgents(root) {
       state.agents.length ? "No agents match the filter." : "No agents have registered yet."));
   };
   search.addEventListener("input", render);
-  statusFilter.addEventListener("change", render);
-  idleFilter.addEventListener("change", render);
+  statusFilter.addEventListener("change", () => { render(); syncHash(); });
+  idleFilter.addEventListener("change", () => { render(); syncHash(); });
   render();
   fill(root, 
     pageHead("Agents", `${state.agents.length} registered`,

@@ -1190,8 +1190,8 @@ def build_router() -> APIRouter:
     async def update_agent(
         name: NameParam, payload: UpdateAgentRequest, credential: require, app: hive
     ) -> AgentOut:
-        """Change an agent's trust level and/or home fleet (admin-gated,
-        ADR 0011 — SPEC §5.1 ``PATCH /v1/admin/agents/{name}``).
+        """Change an agent's trust level, home fleet and/or owner alias
+        (admin-gated, ADRs 0011, 0122 — SPEC §5.1 ``PATCH /v1/admin/agents/{name}``).
         Demotion to ``untrusted`` (level 0) is *dormant* (key still
         valid, no access) — distinct from revocation (ADR 0012).
         Re-parenting never moves the agent's earlier ``fleet``-scoped
@@ -1200,8 +1200,14 @@ def build_router() -> APIRouter:
         """
         # The key first: a non-admin must not learn whether a fleet exists.
         _require_admin(credential, "changing an agent")
-        if payload.trust_level is None and payload.home_fleet_id is None:
-            raise api_error(422, "update_required", "supply trust_level and/or home_fleet_id")
+        if (
+            payload.trust_level is None
+            and payload.home_fleet_id is None
+            and payload.owner_alias is None
+        ):
+            raise api_error(
+                422, "update_required", "supply trust_level, home_fleet_id and/or owner_alias"
+            )
         agent = await app.access_service.update_agent(
             name,
             credential,
@@ -1209,6 +1215,7 @@ def build_router() -> APIRouter:
                 TrustLevel(payload.trust_level) if payload.trust_level is not None else None
             ),
             home_fleet_id=payload.home_fleet_id,
+            owner_alias=payload.owner_alias,
         )
         return AgentOut.from_agent(agent)
 

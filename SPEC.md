@@ -154,7 +154,7 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | `POST /v1/admin/agent-cleanups/{cleanup_id}/undo` | Undo a cleanup: what it changed goes back where it is unchanged since; never un-revokes the agent (admin key; audited `agent.cleanup_undo`; 409 `cleanup_refused` unless it is the agent's newest standing cleanup; ADR 0111) |
 | `POST /v1/admin/agents` | Register and activate an agent for its owner in one call: `{name, owner_alias, trust_level?, home_fleet_id}` → 201 with the agent and its key, **returned once** (admin key; §12.3; audited as `agent.register` + `agent.activate`; 422 `invalid_input` for a bad name or blank owner alias, 409 `name_conflict` for an existing name of any status, 404 unknown fleet, 409 `fleet_merged`, 409 `invalid_status` if a concurrent call activated it first; ADR 0120) |
 | `POST /v1/admin/agents/{name}/activate` | Set trust level (default `lurker`) + home fleet; **returns the generated agent key once** (admin key; §12.3). Only from `pending` or `revoked`; `active` → 409 (ADR 0028); an agent retired with a successor → 409 `agent_retired` until the retirement is undone (ADR 0113) |
-| `PATCH /v1/admin/agents/{name}` | Change trust level / home fleet — demotion to `untrusted` = dormant (admin key) |
+| `PATCH /v1/admin/agents/{name}` | Change trust level, home fleet and/or owner alias — body `{trust_level?, home_fleet_id?, owner_alias?}`, at least one (422 `update_required`); demotion to `untrusted` = dormant; the owner alias is checked like the one on creation (422 `invalid_input` for a blank or hidden-character alias), works on an agent of any status, and the same value is a no-op without an audit row (admin key; ADR 0122) |
 | `POST /v1/admin/agents/{name}/key` | Replace an `active` agent's key: the old key stops working at once and the new one is **returned once** (admin key; §12.3; audited `agent_key.replace`; 404 unknown, 409 `invalid_status` unless `active`; works on an `active` agent whose key is locked and clears the lock; ADR 0108, ADR 0117) |
 | `POST /v1/admin/agents/{name}/retire` | Retire an agent in favour of a successor: `{successor, dry_run}`. `dry_run: true` answers the preview (counts of active private notes, fleet memories and pins that pass over, the agents they come from, what the successor would own) and changes nothing; otherwise the successor owns every memory the agent wrote and the agent is revoked, in one transaction (admin key; audited `agent.retire` and `agent.revoke`; 404 unknown agent, 409 `invalid_status` when the successor is not active or the agent is pending, 409 `succession_refused` when already retired or the successor hands down to it (a cycle), 422 the same agent twice; ADR 0113) |
 | `GET /v1/admin/successions` | The standing retirements, newest first: `{retired_agent, successor, by, at}` (admin key; ADR 0113) |
@@ -450,7 +450,7 @@ This section supersedes the flat-pool commitment of §1 and the "no trust tiers"
 | `GET /v1/admin/agent-cleanups` / `POST /v1/admin/agent-cleanups/{cleanup_id}/undo` | The recorded cleanups / undo one (ADR 0111) |
 | `POST /v1/admin/agents` | Register and activate an agent for its owner; **returns the agent key once** (§12.3, ADR 0120) |
 | `POST /v1/admin/agents/{name}/activate` | Set level + home fleet; **returns the agent key once** (§12.3) |
-| `PATCH /v1/admin/agents/{name}` | Change level / home fleet (demotion to `untrusted` = dormant) |
+| `PATCH /v1/admin/agents/{name}` | Change level / home fleet / owner alias (demotion to `untrusted` = dormant; ADR 0122) |
 | `POST /v1/admin/agents/{name}/key` | Replace an active agent's key; **returns the new key once** (§12.3, ADR 0108) |
 | `POST /v1/admin/agents/{name}/revoke` | Kill the key, status → `revoked` (name stays reserved; re-activation issues a *new* key). On a pending agent: reject the registration |
 | `POST /v1/admin/org-key/rotate` | Rotate the org key — closes registration to every prior copy (ADR 0031) |
@@ -461,7 +461,7 @@ This section supersedes the flat-pool commitment of §1 and the "no trust tiers"
 | `GET /v1/admin/fleets/{fleet_id}/pins` | A fleet's pins and what changed since they were pinned (ADR 0092) |
 | `GET /v1/admin/flagged` | The flag backlog, oldest flag first (ADR 0093) |
 
-The single admin key gates this surface; admin-issued entries use the reserved name `admin` (ADR 0012). The admin panel (ADR 0029) is a browser front end over exactly this table plus the audit log and the usage counters; issuing and revoking admin keys stays with `hivemind-keys`.
+The single admin key gates this surface; admin-issued entries use the reserved name `admin` (ADR 0012). The admin panel (ADR 0029) is a browser front end over exactly this table plus the audit log and the usage counters; issuing and revoking admin keys stays with `hivemind-keys`. Its Overview opens with a "Needs you" row (ADR 0121): a tile for each of locked agent keys, pending agents, idle agents and flagged memories older than 14 days, shown only above zero and linking to the filtered list; computed from the agent list and the metrics, with no endpoint of its own.
 
 ### 12.5 Audit log
 
@@ -475,6 +475,7 @@ Every admin-surface action, every agent pin or unpin (ADR 0076, from the portal 
 | `agent.activate` | `POST /v1/admin/agents/{name}/activate`, `POST /v1/admin/agents` (ADR 0120) | agent name | `{trust_level, home_fleet_id}` |
 | `agent.trust_level_set` | `PATCH /v1/admin/agents/{name}` | agent name | `{from, to}` |
 | `agent.home_fleet_set` | `PATCH /v1/admin/agents/{name}` | agent name | `{from, to}` |
+| `agent.owner_set` | `PATCH /v1/admin/agents/{name}`, only when the alias changes (ADR 0122) | agent name | `{from, to}` (`from` is `null` for an agent registered without one) |
 | `agent.revoke` | `POST /v1/admin/agents/{name}/revoke`, `hivemind-keys revoke`, and a retirement of an active agent | agent name | `{"from": "pending"\|"active"}`, plus `{"via": "retire", "successor"}` from a retirement (ADR 0028; a revoke from `pending` is a rejected registration) |
 | `agent.retire` | `POST /v1/admin/agents/{name}/retire`, not a `dry_run` (ADR 0113); the revoke it makes is also recorded as `agent.revoke` | retired agent name | `{successor, was}` (`was` is the agent's status before) |
 | `agent.retire_undo` | `POST /v1/admin/successions/{retired}/undo` (ADR 0113) | retired agent name | `{successor}` |

@@ -543,6 +543,15 @@ class Store(Protocol):
         ``FleetMerged`` if the fleet was merged (ADR 0107)."""
         ...
 
+    async def set_agent_owner_alias(self, name: str, owner_alias: str) -> tuple[Agent, Agent]:
+        """Set an agent's owner alias (ADR 0122), any status. Returns the agent
+        before and after, read under one row lock so the audit row's ``from``
+        is the value actually replaced; an alias equal to the stored one
+        changes nothing. The alias lives only on the agent row: stats and
+        activity derive it from there, so they follow at once.
+        ``UnknownAgent`` if unknown."""
+        ...
+
     # -- successions (ADR 0113) ------------------------------------------------
 
     async def retire_agent(self, retired: str, successor: str, by: str) -> Succession:

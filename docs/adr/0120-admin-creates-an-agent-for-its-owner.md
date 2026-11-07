@@ -1,5 +1,7 @@
 # An admin creates an agent for its owner
 
+> **Amended by [ADR 0122](0122-admin-corrects-an-agents-owner-alias.md):** the owner alias typed here can be corrected afterwards from the panel.
+
 Touches [ADR 0012](0012-shared-org-key-with-admin-issued-agent-keys.md), [ADR 0029](0029-admin-panel-runner-with-a-browser-held-key.md), [ADR 0039](0039-key-lifecycle-is-atomic-and-registration-is-owned.md) and [ADR 0046](0046-registrations-are-audited.md). Amends SPEC §5.1 and §12.3.
 
 Status: Accepted. Asked for by Monochrome on 2026-11-07.

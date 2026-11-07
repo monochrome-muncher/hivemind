@@ -981,6 +981,65 @@ class TestAccessEndpoints:
         assert resp.status_code == 422
         assert resp.json()["error"]["code"] == "update_required"
 
+    async def test_patch_owner_alias_corrects_it_and_audits(self) -> None:
+        app = make_hivemind_app()
+        await app.store.register_agent("alice", "jnae.doe")
+        client = make_client(app)
+        async with client:
+            resp = await client.patch(
+                "/v1/admin/agents/alice",
+                json={"owner_alias": "jane.doe"},
+                headers={"X-API-Key": "key-admin"},
+            )
+            same = await client.patch(
+                "/v1/admin/agents/alice",
+                json={"owner_alias": "jane.doe"},
+                headers={"X-API-Key": "key-admin"},
+            )
+            listed = await client.get("/v1/admin/agents", headers={"X-API-Key": "key-admin"})
+        assert resp.status_code == 200 and same.status_code == 200
+        assert resp.json()["owner_alias"] == "jane.doe"
+        assert resp.json()["status"] == "pending"
+        assert [a["owner_alias"] for a in listed.json()] == ["jane.doe"]
+        rows = await app.store.list_audit(AuditFilters(), 50)
+        assert [(r.action, r.target, r.detail) for r in rows] == [
+            (AuditAction.AGENT_OWNER_SET, "alice", {"from": "jnae.doe", "to": "jane.doe"})
+        ]
+
+    @pytest.mark.parametrize("bad", ["", "   ", "jane\u200bdoe", "x" * 1000])
+    async def test_patch_bad_owner_alias_is_422_and_changes_nothing(self, bad: str) -> None:
+        app = make_hivemind_app()
+        await app.store.register_agent("alice", "jane")
+        fleet = await app.store.create_fleet("data-eng")
+        client = make_client(app)
+        async with client:
+            resp = await client.patch(
+                "/v1/admin/agents/alice",
+                json={"owner_alias": bad, "home_fleet_id": fleet.id},
+                headers={"X-API-Key": "key-admin"},
+            )
+        assert resp.status_code == 422
+        agent = await app.store.get_agent("alice")
+        assert agent is not None and agent.owner_alias == "jane" and agent.home_fleet_id is None
+        assert await app.store.list_audit(AuditFilters(), 50) == []
+
+    async def test_patch_owner_alias_needs_the_admin_key_and_a_known_agent(self) -> None:
+        app = make_hivemind_app()
+        client = make_client(app)
+        async with client:
+            ghost = await client.patch(
+                "/v1/admin/agents/ghost",
+                json={"owner_alias": "jane"},
+                headers={"X-API-Key": "key-admin"},
+            )
+            org = await client.patch(
+                "/v1/admin/agents/ghost",
+                json={"owner_alias": "jane"},
+                headers={"X-API-Key": "key-org"},
+            )
+        assert ghost.status_code == 404
+        assert org.status_code == 403
+
     @pytest.mark.parametrize("bad_level", [4, -1, 99])
     async def test_activate_out_of_range_trust_level_is_422(self, bad_level: int) -> None:
         """A typo'd trust level is a typed 422, not a 500 (TrustLevel(4)
