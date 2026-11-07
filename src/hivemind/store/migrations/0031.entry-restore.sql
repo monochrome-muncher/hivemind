@@ -2,7 +2,8 @@
 -- audited as `entry.restore` (target: the entry id; detail: author, the
 -- reason it was withdrawn with, the restore reason).
 --
--- The audit CHECK is widened the 0014 ... 0027 way, for `entry.restore`.
+-- The audit CHECK is widened the 0014 ... 0029 way, for `entry.restore` (the list
+-- keeps 0029's `agent.owner_set`).
 --
 -- ADR 0020 expand-and-contract: a widened CHECK is additive; an older pod
 -- never writes the action.
@@ -36,5 +37,6 @@ ALTER TABLE audit_log
         'agent.retire_undo',
         'agent_key.lock',
         'schema.rollback',
+        'agent.owner_set',
         'entry.restore'
     ));

@@ -2085,6 +2085,16 @@ class MemoryStore:
             self._agents[name] = updated
             return updated
 
+    async def set_agent_owner_alias(self, name: str, owner_alias: str) -> tuple[Agent, Agent]:
+        """Set an agent's owner alias (ADR 0122); returns (before, after)."""
+        with self._lock:
+            agent = self._agents.get(name)
+            if agent is None:
+                raise UnknownAgent(f"unknown agent: {name}")
+            updated = replace(agent, owner_alias=owner_alias)
+            self._agents[name] = updated
+            return agent, updated
+
     # -- audit log (ADR 0027) -------------------------------------------------
 
     async def record_audit(self, event: AuditEvent) -> AuditRecord:

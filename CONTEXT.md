@@ -254,7 +254,7 @@ The unique, durable name chosen at registration and used as an agent's author: 1
 _Avoid_: username, handle, agent id (the agent id is part of the key's record)
 
 **Owner alias**:
-The human name or address (username or email) an agent self-reports at registration, or the admin gives when creating the agent for its owner (ADR 0120), so the admin can deliver its agent key out-of-band (ADR 0012). A contact field on the agent record, not a per-entry provenance claim.
+The human name or address (username or email) an agent self-reports at registration, or the admin gives when creating the agent for its owner (ADR 0120), so the admin can deliver its agent key out-of-band (ADR 0012). The admin can correct it later (ADR 0122). A contact field on the agent record, kept nowhere else, and not a per-entry provenance claim.
 _Avoid_: author (that is the entry's verified writer), user, account
 
 **Org key**:

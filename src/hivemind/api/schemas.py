@@ -641,12 +641,14 @@ class CreateAgentRequest(BaseModel):
 
 
 class UpdateAgentRequest(BaseModel):
-    """Change an agent's trust level and/or home fleet (the SPEC §5.1
-    ``PATCH /v1/admin/agents/{name}`` body; ADR 0011). At least one
-    field must be supplied. Out-of-range trust levels are a 422, not a 500."""
+    """Change an agent's trust level, home fleet and/or owner alias (the
+    SPEC §5.1 ``PATCH /v1/admin/agents/{name}`` body; ADRs 0011, 0122). At
+    least one field must be supplied. Out-of-range trust levels are a 422,
+    not a 500."""
 
     trust_level: int | None = Field(default=None, ge=0, le=3)
     home_fleet_id: RefStr | None = None
+    owner_alias: str | None = None
 
 
 class CreateFleetRequest(BaseModel):

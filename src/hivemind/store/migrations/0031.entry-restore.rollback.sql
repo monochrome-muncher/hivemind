@@ -1,4 +1,4 @@
--- Rollback (ADR 0020): the 0027 schema cannot hold an `entry.restore` row, so
+-- Rollback (ADR 0020): the 0029 schema cannot hold an `entry.restore` row, so
 -- those rows are removed before the narrower CHECK is restored. The restored
 -- memories stay active; only the record of who restored them goes.
 -- `hivemind-migrate` refuses this rollback while such rows exist unless
@@ -34,5 +34,6 @@ ALTER TABLE audit_log
         'agent.retire',
         'agent.retire_undo',
         'agent_key.lock',
-        'schema.rollback'
+        'schema.rollback',
+        'agent.owner_set'
     ));
