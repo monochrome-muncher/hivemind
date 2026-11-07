@@ -11,7 +11,7 @@ is unused.
 
 | ADR | Decision | Status |
 |---|---|---|
-| [0001](0001-append-only-entries-with-explicit-supersession.md) | Append-only entries with explicit supersession | Accepted |
+| [0001](0001-append-only-entries-with-explicit-supersession.md) | Append-only entries with explicit supersession | Accepted; amended by 0125 (an admin can redact a withdrawn memory) |
 | [0002](0002-flat-org-wide-pool-with-scope-tag.md) | Flat org-wide pool with a scope tag | Superseded by 0011 |
 | [0003](0003-kill-switch-is-client-side.md) | The kill switch is client-side | Amended by 0035 |
 | [0004](0004-explicit-writes-only-no-passive-capture.md) | Explicit writes only (no passive capture in v1) | Accepted |
@@ -132,3 +132,4 @@ is unused.
 | [0120](0120-admin-creates-an-agent-for-its-owner.md) | An admin creates an agent for its owner | Accepted; touches 0012, 0029, 0039, 0046, `POST /v1/admin/agents` and the panel's New agent, no migration, audited as `agent.register` + `agent.activate` |
 | [0121](0121-overview-needs-you-row.md) | The Overview opens with a "Needs you" row | Accepted; touches 0029, 0093, 0110, 0117, admin panel only (new `needs.js`, Agents page filters in the hash), no new endpoint, no migration |
 | [0122](0122-admin-corrects-an-agents-owner-alias.md) | An admin corrects an agent's owner alias | Accepted; amends 0011, 0120, `PATCH /v1/admin/agents/{name}` gains `owner_alias`, migration 0029, audited `agent.owner_set`, stats follow because the alias lives only on the agent row |
+| [0125](0125-redact-a-withdrawn-memory.md) | Redact a withdrawn or superseded memory that holds a secret | Accepted; amends 0001, migration 0032, `POST /v1/admin/entries/{id}/redact`, admin only, irreversible, audited `entry.redact`, no undo path may reactivate a redacted memory |

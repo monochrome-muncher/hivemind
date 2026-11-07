@@ -37,6 +37,7 @@ from hivemind.api.schemas import (
     ActivateAgentRequest,
     ActivityOut,
     AdminAgentOut,
+    AdminEntryOut,
     AdminSearchRequest,
     AgentCleanupOut,
     AgentCleanupPreviewOut,
@@ -85,6 +86,8 @@ from hivemind.api.schemas import (
     PortalCleanupRequest,
     PortalSearchRequest,
     PortalWithdrawRequest,
+    RedactOut,
+    RedactRequest,
     RegisterAgentRequest,
     RegisteredAgentOut,
     RelatedOut,
@@ -203,7 +206,12 @@ def build_router() -> APIRouter:
         return HealthOut(status="ok")
 
     async def _entry_detail(
-        app: HivemindApp, entry_id: str, credential: Credential, *, history: bool
+        app: HivemindApp,
+        entry_id: str,
+        credential: Credential,
+        *,
+        history: bool,
+        model: type[EntryOut] = EntryOut,
     ) -> EntryOut:
         """The full entry with its feedback and links, and (``history``) the
         supersession chain: shared by ``GET /v1/entries/{id}`` and the admin
@@ -217,11 +225,11 @@ def build_router() -> APIRouter:
         )
         if detail is None:
             raise api_error(404, "not_found", f"unknown entry: {entry_id}")
-        out = EntryOut.from_detail(detail)
+        out = model.from_detail(detail)
         if history:
             out.history = {
-                "successors": [EntryOut.from_entry(e) for e in detail.successors],
-                "superseded": [EntryOut.from_entry(e) for e in detail.superseded],
+                "successors": [model.from_entry(e) for e in detail.successors],
+                "superseded": [model.from_entry(e) for e in detail.superseded],
             }
         return out
 
@@ -779,7 +787,7 @@ def build_router() -> APIRouter:
         if not credential.is_admin:
             raise api_error(403, "forbidden", f"{what} requires an admin key")
 
-    @router.get("/admin/entries", response_model=list[EntryOut])
+    @router.get("/admin/entries", response_model=list[AdminEntryOut])
     async def admin_list_entries(
         credential: require,
         app: hive,
@@ -798,7 +806,7 @@ def build_router() -> APIRouter:
         flagged: bool = False,
         limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = ADMIN_ENTRIES_DEFAULT_LIMIT,
         offset: Annotated[int | None, Query(ge=0, le=MAX_OFFSET)] = 0,
-    ) -> list[EntryOut]:
+    ) -> list[AdminEntryOut]:
         """List/filter entries as the admin sees them (ADR 0080): every
         scope of every fleet, newest first, with the ``GET /v1/entries``
         filters plus ``fleet_id``."""
@@ -824,14 +832,14 @@ def build_router() -> APIRouter:
             offset=offset if offset is not None else 0,
             visibility=credential.visibility(),
         )
-        return [EntryOut.from_entry(e) for e in entries]
+        return [AdminEntryOut.from_entry(e) for e in entries]
 
-    @router.get("/admin/entries/{entry_id}", response_model=EntryOut)
+    @router.get("/admin/entries/{entry_id}", response_model=AdminEntryOut)
     async def admin_get_entry(entry_id: str, credential: require, app: hive) -> EntryOut:
         """One entry with its feedback, links and history always filled
         (ADR 0080): ``GET /v1/entries/{id}?history=true`` for the admin."""
         _require_admin(credential, "the admin entry read")
-        return await _entry_detail(app, entry_id, credential, history=True)
+        return await _entry_detail(app, entry_id, credential, history=True, model=AdminEntryOut)
 
     @router.post("/admin/search", response_model=list[HitOut])
     async def admin_search(
@@ -858,6 +866,21 @@ def build_router() -> APIRouter:
         _require_admin(credential, "the admin withdraw")
         return EntryOut.from_entry(
             await app.governance_service.withdraw(credential, entry_id, request.reason)
+        )
+
+    @router.post("/admin/entries/{entry_id}/redact", response_model=RedactOut)
+    async def admin_redact(
+        entry_id: str, request: RedactRequest, credential: require, app: hive
+    ) -> RedactOut:
+        """Wipe a withdrawn memory's text for good (ADR 0125): admin only,
+        ``confirm`` is the memory id typed back (422 otherwise). 404 unknown,
+        409 active (withdraw it first) or already redacted. Audited as ``entry.redact``;
+        the answer counts the feedback notes left to review."""
+        _require_admin(credential, "the admin redact")
+        return RedactOut.from_outcome(
+            await app.governance_service.redact(
+                credential, entry_id, request.reason, request.confirm
+            )
         )
 
     @router.get("/admin/activity", response_model=ActivityOut)

@@ -14,7 +14,7 @@ import { retireDialog, successionsCard } from "./retire.js";
 
 const AUDIT_ACTIONS = [
   "agent.register", "agent.activate", "agent.trust_level_set", "agent.home_fleet_set", "agent.owner_set", "agent.revoke",
-  "fleet.create", "fleet.rename", "fleet.merge", "fleet.unmerge", "fleet.move_agents", "fleet.move_undo", "org_key.rotate", "entry.withdraw", "entry.pin", "entry.unpin",
+  "fleet.create", "fleet.rename", "fleet.merge", "fleet.unmerge", "fleet.move_agents", "fleet.move_undo", "org_key.rotate", "entry.withdraw", "entry.redact", "entry.pin", "entry.unpin",
   "admin_key.issue", "admin_key.revoke", "agent_key.issue", "agent_key.replace", "agent_key.lock",
   "agent.cleanup", "agent.cleanup_undo", "agent.retire", "agent.retire_undo",
   "schema.rollback",
@@ -388,6 +388,13 @@ export async function viewAudit(root) {
   };
   const detail = (r) => {
     const d = { ...(r.detail || {}) };
+    if (r.action === "entry.redact") {
+      // The audit row never holds the wiped text: author, the admin's reason, and what to review.
+      const n = d.feedback_notes || 0;
+      const w = d.withdraw_reasons || 0;
+      return `Redacted a memory by ${d.author || "unknown"}. Reason: ${d.reason || "none given"}. ` +
+        `Left to review: ${n} feedback ${n === 1 ? "note" : "notes"}, ${w} withdrawal ${w === 1 ? "reason" : "reasons"}.`;
+    }
     if (r.action === "fleet.create") delete d.name;
     if (d.home_fleet_id) {
       d.home_fleet = fleetName(d.home_fleet_id);

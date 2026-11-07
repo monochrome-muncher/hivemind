@@ -126,6 +126,7 @@ from hivemind.domain.health import (
     TagDispersion,
 )
 from hivemind.domain.pin import Pin, PinRefusal, PinWrite, pin_refusal
+from hivemind.domain.redaction import REDACTED_SUMMARY, RedactOutcome, RedactRefused
 from hivemind.domain.succession import (
     AgentRetired,
     HandedDown,
@@ -162,7 +163,7 @@ INSERT INTO entries (
 _ENTRY_COLUMNS = """
     id, kind, summary, body, payload, sources, tags, occurred_at,
     created_at, author, agent, importance, importance_source, scope, fleet_id,
-    embedding_model, state, superseded_by, withdrawn_reason,
+    embedding_model, state, superseded_by, withdrawn_reason, redacted_at,
     entities, entity_names, entities_model
 """
 
@@ -465,7 +466,7 @@ own AS ({_CLEANUP_OWN}),
 chain(root, first, cur) AS (
     SELECT e.id, e.superseded_by, e.superseded_by FROM entries e
      WHERE e.state = 'superseded' AND e.superseded_by IN (SELECT id FROM own)
-       AND e.id NOT IN (SELECT id FROM own){extra}
+       AND e.id NOT IN (SELECT id FROM own) AND e.redacted_at IS NULL{extra}
     UNION
     SELECT c.root, c.first, o.superseded_by FROM chain c JOIN own o ON o.id = c.cur
      WHERE o.state = 'superseded' AND o.superseded_by IN (SELECT id FROM own)
@@ -518,7 +519,7 @@ def _cleanup_restorable_lock(readable: str | None = None) -> str:
 
 CLEANUP_RESTORE = """
 UPDATE entries SET state = 'active', superseded_by = NULL
- WHERE id = ANY($1::uuid[]) AND state = 'superseded'
+ WHERE id = ANY($1::uuid[]) AND state = 'superseded' AND redacted_at IS NULL
 """
 
 
@@ -598,6 +599,7 @@ CLEANUP_LOCK_ENTRIES = "SELECT id FROM entries WHERE id = ANY($1::uuid[]) ORDER 
 CLEANUP_REACTIVATE = """
 UPDATE entries SET state = 'active', withdrawn_reason = NULL, withdrawn_at = NULL
  WHERE id = ANY($1::uuid[]) AND state = 'withdrawn' AND withdrawn_reason = $2
+   AND redacted_at IS NULL
 RETURNING id
 """
 CLEANUP_RESUPERSEDE = """
@@ -725,6 +727,34 @@ LOOKUP_STATE = "SELECT state FROM entries WHERE id = $1"
 WITHDRAW = (
     "UPDATE entries SET state = 'withdrawn', withdrawn_reason = $2, withdrawn_at = now() "
     "WHERE id = $1 AND state = 'active' RETURNING " + _ENTRY_COLUMNS
+)
+
+# ADR 0125: wipe every free-text field of a withdrawn memory in one UPDATE (the
+# keyword column is cleared by ``REDACT_CLEAR_TSV``: its trigger refills it on
+# any write to ``summary``). Kind, scope, author, fleet, dates, importance,
+# supersession and the feedback stay. Outgoing see-also links are derived from
+# the text and go (``REDACT_DROP_LINKS``); links pointing at the memory stay, so
+# the linking memories still learn their target changed.
+REDACT_LOCK = "SELECT state, redacted_at FROM entries WHERE id = $1 FOR NO KEY UPDATE"
+REDACT = (
+    "UPDATE entries SET summary = $2, body = NULL, payload = NULL, sources = '[]'::jsonb, "
+    "tags = '{}', entities = '[]'::jsonb, entity_names = '{}', entities_model = NULL, "
+    "embedding = NULL, embedding_model = NULL, "
+    "withdrawn_reason = CASE WHEN state = 'withdrawn' THEN $2 END, redacted_at = now() "
+    "WHERE id = $1 AND state IN ('withdrawn', 'superseded') AND redacted_at IS NULL "
+    "RETURNING " + _ENTRY_COLUMNS
+)
+REDACT_CLEAR_TSV = "UPDATE entries SET search_tsv = NULL WHERE id = $1"
+# Withdrawal audit rows of this memory with a non-empty reason: the audit log is
+# never edited, so these are counted for the admin to review by hand.
+REDACT_COUNT_WITHDRAW_REASONS = (
+    "SELECT count(*) FROM audit_log WHERE action = 'entry.withdraw' AND target = $1::text "
+    "AND btrim(coalesce(detail->>'reason', '')) <> ''"
+)
+REDACT_DROP_LINKS = "DELETE FROM entry_links WHERE from_id = $1"
+REDACT_COUNT_NOTES = (
+    "SELECT count(*) AS notes, count(*) FILTER (WHERE verdict IN ('stale', 'wrong')) AS flags "
+    "FROM feedbacks WHERE entry_id = $1 AND note IS NOT NULL AND btrim(note) <> ''"
 )
 
 # --- Keyword-stream query (ADR 0047) ------------------------------------------
@@ -2118,6 +2148,38 @@ class PgStore:
                     raise KeyError(f"unknown entry: {entry_id}")
                 raise ValueError(f"entry {entry_id} is {state['state']}, not active")
         return _row_to_entry(row)
+
+    async def redact_entry(self, entry_id: str) -> RedactOutcome:
+        """Wipe the text of a withdrawn memory for good (ADR 0125): one
+        transaction, every free-text field, the embedding and the keyword
+        column. ``KeyError`` if unknown; ``RedactRefused`` if active or
+        already redacted."""
+        if not is_valid_uuid(entry_id):
+            raise KeyError(f"unknown entry: {entry_id}")
+        async with self._transaction() as conn:
+            existing = await conn.fetchrow(REDACT_LOCK, entry_id)
+            if existing is None:
+                raise KeyError(f"unknown entry: {entry_id}")
+            if existing["redacted_at"] is not None:
+                raise RedactRefused(f"entry {entry_id} is already redacted")
+            if existing["state"] == "active":
+                raise RedactRefused(
+                    f"entry {entry_id} is active: withdraw it first "
+                    "(a superseded or withdrawn memory can be redacted)"
+                )
+            row = await conn.fetchrow(REDACT, entry_id, REDACTED_SUMMARY)
+            if row is None:  # unreachable under the row lock; never report success on a miss
+                raise RedactRefused(f"entry {entry_id} could not be redacted")
+            await conn.execute(REDACT_CLEAR_TSV, entry_id)
+            await conn.execute(REDACT_DROP_LINKS, entry_id)
+            counts = await conn.fetchrow(REDACT_COUNT_NOTES, entry_id)
+            reasons = await conn.fetchval(REDACT_COUNT_WITHDRAW_REASONS, entry_id)
+        return RedactOutcome(
+            _row_to_entry(row),
+            int(counts["notes"]) if counts else 0,
+            int(counts["flags"]) if counts else 0,
+            int(reasons or 0),
+        )
 
     # -- search -------------------------------------------------------------------
 
@@ -3518,6 +3580,7 @@ def _row_to_entry(row: asyncpg.Record) -> Entry:
         state=EntryState(row["state"]),
         superseded_by=str(row["superseded_by"]) if row["superseded_by"] else None,
         withdrawn_reason=row["withdrawn_reason"],
+        redacted_at=row["redacted_at"],
         entities=_decode_entities(row["entities"]),
         entities_model=row["entities_model"],
     )

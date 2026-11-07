@@ -47,10 +47,11 @@ _ALLOWED = allowlist(
         ("PATCH", r"admin/agents/[^/]+"),
         ("POST", r"admin/org-key/rotate"),
         # Browsing memories as the operator (admin-key only on the API side).
-        # Reads and one withdraw: never the data plane's own entry routes.
+        # Reads, one withdraw and one redact: never the data plane's own entry routes.
         ("GET", r"admin/entries"),
         ("GET", r"admin/entries/[^/]+"),
         ("POST", r"admin/entries/[^/]+/withdraw"),
+        ("POST", r"admin/entries/[^/]+/redact"),  # ADR 0125
         ("POST", r"admin/search"),
         ("GET", r"admin/activity"),
         ("GET", r"admin/feedback"),

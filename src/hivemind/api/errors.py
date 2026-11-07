@@ -30,6 +30,7 @@ from hivemind.domain.access import (
 )
 from hivemind.domain.agent_cleanup import AgentCleanupRefused, UnknownAgentCleanup
 from hivemind.domain.fleet_merge import FleetMergeRefused, FleetMoveRefused, UnknownFleetMerge
+from hivemind.domain.redaction import RedactRefused
 from hivemind.domain.succession import AgentRetired, SuccessionRefused, UnknownSuccession
 from hivemind.embeddings import EmbeddingError
 from hivemind.services.errors import (
@@ -55,6 +56,7 @@ ERROR_ANSWERS: Final[dict[type[Exception], tuple[int, str]]] = {
     UnknownAgentCleanup: (404, "not_found"),
     UnknownSuccession: (404, "not_found"),
     EntryNotActive: (409, "conflict"),
+    RedactRefused: (409, "conflict"),  # ADR 0125
     FleetMerged: (409, "fleet_merged"),  # ADR 0107
     FleetExists: (409, "fleet_exists"),
     FleetMoveRefused: (409, "move_refused"),

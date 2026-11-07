@@ -10,7 +10,9 @@
 // and feedback links go (configureDrawer). Without a withdraw function there
 // is no Withdraw button; without an href function that item is plain text.
 // Likewise the pin hooks (pinStatus, pinEntry, unpinEntry): without pinStatus
-// the drawer shows no pin controls (ADR 0116).
+// the drawer shows no pin controls (ADR 0116). Redacting a withdrawn memory
+// (ADR 0125) is likewise offered only when the app passes redactEntry: the
+// admin panel does, the agent portal never does.
 
 import {
   $, h, toast, openModal, closeModal, fmtTime, fmtAgo, kindBadge, stateBadge, copyText, link, verdictBadge,
@@ -21,6 +23,7 @@ const config = {
   withdrawEntry: null, // (id, reason) => truthy when done
   canWithdraw: () => true, // (entry) => whether to offer Withdraw
   reasonRequired: false, // whether a withdrawal needs a reason
+  redactEntry: null, // (id, reason, confirm) => the answer ({feedback_notes, flag_notes}) when done (ADR 0125)
   pinStatus: null, // async (entry) => "pinnable" | "pinned" | null (no pin controls)
   pinEntry: null, // (id) => truthy when pinned
   unpinEntry: null, // (id) => the answer ({removed}) when done
@@ -125,8 +128,13 @@ function render(e) {
     ? h("button", { type: "button", class: "btn btn-danger", text: "Withdraw…", onclick: () => withdrawDialog(e) })
     : null;
 
+  const redact = e.state !== "active" && !e.redacted_at && config.redactEntry
+    ? h("button", { type: "button", class: "btn btn-danger", text: "Redact…", onclick: () => redactDialog(e) })
+    : null;
+
   return h("div", { class: "entry" },
     h("div", { class: "row entry-top" }, back, kindBadge(e.kind), stateBadge(e.state),
+      e.redacted_at ? h("span", { class: "badge badge-muted", title: e.redacted_at, text: `Redacted ${fmtAgo(e.redacted_at)}` }) : null,
       h("span", { class: "badge badge-muted", text: e.scope }),
       e.fleet_id ? h("span", { class: "badge badge-muted", text: config.fleetName(e.fleet_id) }) : null),
     h("h2", { class: "entry-summary", text: e.summary }),
@@ -187,7 +195,12 @@ function render(e) {
     withdraw ? h("section", { class: "drawer-sec drawer-danger" },
       h("h3", { text: "Withdraw" }),
       h("p", { class: "muted small", text: "Withdrawing removes this memory from every agent's search. It stays here and in the audit log." }),
-      withdraw) : null);
+      withdraw) : null,
+
+    redact ? h("section", { class: "drawer-sec drawer-danger" },
+      h("h3", { text: "Redact" }),
+      h("p", { class: "muted small", text: "Wipes the text of this withdrawn or superseded memory for good, for a leaked secret or personal data. It cannot be undone." }),
+      redact) : null);
 }
 
 // The pin controls fill in once the app says whether this entry is pinned.
@@ -225,6 +238,48 @@ function pinSection(e) {
     sec.hidden = false;
   }).catch(() => {});
   return sec;
+}
+
+function redactDialog(e) {
+  const reason = h("textarea", {
+    id: "f-redact-reason", rows: "3", maxlength: "500", required: true,
+    placeholder: "What did this memory hold? Do not repeat the secret here.",
+  });
+  const typed = h("input", { id: "f-redact-confirm", autocomplete: "off", spellcheck: "false", placeholder: e.id });
+  openModal({
+    title: "Redact this memory?",
+    body: [
+      h("p", { class: "plain", text: "This wipes the summary, body, tags, sources, payload, extracted entities and links of this memory, and its embedding and keyword index. It cannot be undone and the text cannot be brought back." }),
+      h("p", { class: "muted small", text: "The author, scope, fleet, dates, feedback and the audit log stay. Feedback notes written by agents and withdrawal reasons in the audit log are not edited: they may quote the text, and the confirmation says how many to review. Backups still hold the text until they age out." }),
+      h("div", { class: "field" }, h("label", { for: "f-redact-reason", text: "Reason (kept in the audit log, so do not repeat the secret)" }), reason),
+      h("div", { class: "field" }, h("label", { for: "f-redact-confirm", text: "Type the memory id to confirm" }),
+        h("div", { class: "row tight" }, h("code", { text: e.id })), typed),
+    ],
+    actions: [
+      { label: "Cancel" },
+      {
+        label: "Redact for good",
+        class: "btn-danger-solid",
+        submit: true,
+        onClick: async () => {
+          const text = reason.value.trim();
+          if (!text) throw new Error("Say why it is being redacted: the reason is kept in the audit log.");
+          if (typed.value.trim() !== e.id) throw new Error("Type the memory id exactly to confirm.");
+          const done = await config.redactEntry(e.id, text, typed.value.trim());
+          if (!done) return;
+          closeModal();
+          const n = done.feedback_notes || 0;
+          const w = done.withdraw_reasons || 0;
+          const todo = [];
+          if (n) todo.push(`${n} feedback ${n === 1 ? "note" : "notes"} (${done.flag_notes || 0} flag notes)`);
+          if (w) todo.push(`${w} withdrawal ${w === 1 ? "reason" : "reasons"} in the audit log`);
+          toast(todo.length ? `Memory redacted. Review ${todo.join(" and ")}: they may quote the text.` : "Memory redacted");
+          await show(e.id);
+          onChange();
+        },
+      },
+    ],
+  });
 }
 
 function withdrawDialog(e) {

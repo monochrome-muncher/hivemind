@@ -84,6 +84,7 @@ def _panel(transport: httpx.AsyncBaseTransport) -> httpx.AsyncClient:
         ("POST", "admin/agents/bob/cleanup"),
         ("GET", "admin/agent-cleanups"),
         ("POST", "admin/agent-cleanups/abc/undo"),
+        ("POST", "admin/entries/abc/redact"),
     ],
 )
 def test_the_admin_surface_is_forwarded(method: str, path: str) -> None:

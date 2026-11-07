@@ -84,6 +84,10 @@ _Avoid_: duplicate, cluster, merge
 Marking an entry no longer valid without replacing it (retraction, or admin correction). Withdrawn entries are retained, never deleted.
 _Avoid_: delete, purge
 
+**Redaction**:
+The admin's irreversible wipe of a withdrawn or superseded memory that holds a secret or personal data: its text, embedding and keyword index are replaced by a stub; author, dates, supersession links, feedback and the audit trail stay. An active memory needs a withdrawal first, and nothing can bring the memory back (ADR 0125).
+_Avoid_: delete, purge, scrub
+
 **Quality**:
 The bounded re-scoring signal derived from feedback on an entry; it affects retrieval, not governance.
 _Avoid_: score (in specs, "score" always means the retrieval score; "quality" is the feedback-derived factor)

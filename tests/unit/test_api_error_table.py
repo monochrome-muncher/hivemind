@@ -22,6 +22,7 @@ from hivemind.domain.access import (
 )
 from hivemind.domain.agent_cleanup import AgentCleanupRefused, UnknownAgentCleanup
 from hivemind.domain.fleet_merge import FleetMergeRefused, FleetMoveRefused, UnknownFleetMerge
+from hivemind.domain.redaction import RedactRefused
 from hivemind.domain.succession import AgentRetired, SuccessionRefused, UnknownSuccession
 from hivemind.embeddings import EmbeddingError
 from hivemind.services.errors import (
@@ -46,6 +47,7 @@ BUILDERS: dict[type[Exception], Callable[[], Exception]] = {
     UnknownAgentCleanup: lambda: UnknownAgentCleanup("unknown cleanup: c"),
     UnknownSuccession: lambda: UnknownSuccession("unknown succession: s"),
     EntryNotActive: lambda: EntryNotActive("entry e1 is already withdrawn"),
+    RedactRefused: lambda: RedactRefused("entry e1 is already redacted"),
     FleetMerged: lambda: FleetMerged("f1", "f2", "other"),
     FleetExists: lambda: FleetExists("fleet exists"),
     FleetMoveRefused: lambda: FleetMoveRefused("move refused"),

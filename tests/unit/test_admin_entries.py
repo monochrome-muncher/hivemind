@@ -48,6 +48,7 @@ async def _seed():  # type: ignore[no-untyped-def]
 ADMIN_BODIES = {
     ("POST", "/v1/admin/search"): {"query": "kaniko"},
     ("POST", "/v1/admin/entries/{entry_id}/withdraw"): {},
+    ("POST", "/v1/admin/entries/{entry_id}/redact"): {"reason": "leak", "confirm": FAKE_ID},
     ("POST", "/v1/admin/fleets"): {"name": "blue"},
     ("POST", "/v1/admin/agents"): {"name": "x", "owner_alias": "o", "home_fleet_id": FAKE_ID},
     ("POST", "/v1/admin/agents/{name}/activate"): {"trust_level": 1, "home_fleet_id": FAKE_ID},
