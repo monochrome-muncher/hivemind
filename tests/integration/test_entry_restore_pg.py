@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 
+import asyncpg
 import pytest
 from tests.integration.test_store_contract import (
     WIDE_SINCE,
@@ -18,6 +19,7 @@ from tests.integration.test_store_contract import (
     write,
 )
 
+from hivemind.config import Settings
 from hivemind.domain.entry import EntryState
 from hivemind.domain.entry_restore import EntryNotWithdrawn, RestoreChainConflict
 from hivemind.ports import SupersedeConflict
@@ -114,3 +116,28 @@ async def test_concurrent_restores_in_one_cleaned_chain_leave_one_head(pg: Adapt
     assert all(isinstance(r, RestoreChainConflict) for r in results)
     for entry in (a, b):
         assert (await _state(pg, entry.id)).state is EntryState.WITHDRAWN
+
+
+async def test_a_restore_waits_for_a_cleanup_of_the_author(pg: Adapter) -> None:
+    """A restore takes the author's cleanup lock before the row, so a cleanup
+    running at that moment never reads the memory as withdrawn and then misses
+    it once the restore commits."""
+    entry = await write(pg, "held back")
+    await pg.store.withdraw_entry(entry.id, "r", by_user="alice")
+    conn = await asyncpg.connect(Settings().database_url)
+    try:
+        tx = conn.transaction()
+        await tx.start()
+        await conn.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended('hivemind.cleanup:' || $1, 0))",
+            entry.author,
+        )
+        restore = asyncio.ensure_future(pg.store.restore_entry(entry.id))
+        await asyncio.sleep(0.5)
+        assert not restore.done()
+        assert (await _state(pg, entry.id)).state is EntryState.WITHDRAWN
+        await tx.rollback()
+        restored = await asyncio.wait_for(restore, 10)
+    finally:
+        await conn.close()
+    assert restored.entry.state is EntryState.ACTIVE

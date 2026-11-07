@@ -126,7 +126,12 @@ from hivemind.domain.health import (
     owner_key,
 )
 from hivemind.domain.pin import Pin, PinRefusal, PinWrite, pin_refusal
-from hivemind.domain.redaction import REDACTED_SUMMARY, RedactOutcome, RedactRefused
+from hivemind.domain.redaction import (
+    REDACTED_SUMMARY,
+    RedactOutcome,
+    RedactRefused,
+    is_redaction_stub,
+)
 from hivemind.domain.succession import (
     AgentRetired,
     HandedDown,
@@ -401,7 +406,10 @@ class MemoryStore:
                 entry.withdrawn_reason,
                 standing,
                 self._chain_conflict(key),
-                entry.redacted_at is not None,
+                entry.redacted_at is not None
+                or is_redaction_stub(
+                    entry.summary, entry.body, entry.withdrawn_reason, entry.embedding is not None
+                ),
             )
             if refusal is not None:
                 raise refusal

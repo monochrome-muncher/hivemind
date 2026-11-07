@@ -47,7 +47,7 @@ Every path that sets a withdrawn memory active again refuses or skips a redacted
 - withdrawing again and superseding already refuse a non-active memory.
 - the agent-cleanup restore sets `superseded` memories active. A redacted superseded memory is neither offered by the preview nor restored (`redacted_at IS NULL` in the restorable set and in the update).
 
-**A separate planned feature will add an admin "restore" route. It must refuse redacted memories**, with the same 409 as everywhere else.
+**A separate planned feature will add an admin "restore" route. It must refuse redacted memories**, with the same 409 as everywhere else. (It does, ADR 0124: `entry_redacted`. It also refuses a stub that has lost its `redacted_at`, which happens when `0032` is rolled back and applied again: summary and withdrawal reason `[redacted]`, no body and no embedding. A real memory always has an embedding, so the test never matches one.)
 
 ### Reads
 

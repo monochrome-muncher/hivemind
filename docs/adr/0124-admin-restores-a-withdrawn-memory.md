@@ -16,7 +16,7 @@ It puts the memory back to `active` and clears `withdrawn_reason` and `withdrawn
 
 It is audited as `entry.restore` (target: the entry id; detail `{author, previous_reason, reason}`). Migration `0031` widens `audit_log_action_check`.
 
-The state check and the update run in one transaction that locks the memory's row first, so a withdraw, supersede or second restore of the same memory waits and then sees the new state. Two restores also take one transaction-scoped advisory lock between them, because the chain check below reads other rows.
+The state check and the update run in one transaction that locks the memory's row first, so a withdraw, supersede or second restore of the same memory waits and then sees the new state. Two restores also take one transaction-scoped advisory lock between them, because the chain check below reads other rows. Before the row, a restore also takes the author's agent-cleanup lock, the one a cleanup and its undo take for each author they touch (ADRs 0111, 0118): otherwise a cleanup of the author that read the window while the restore was in flight would see the memory as withdrawn and leave it active once the restore committed. The restore reason is stored trimmed, as a redaction's is.
 
 ### Refusals (409)
 

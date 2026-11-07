@@ -125,7 +125,7 @@ class GovernanceService:
             {
                 "author": entry.author,
                 "previous_reason": restoration.previous_reason,
-                "reason": reason,
+                "reason": reason.strip(),
             },
         )
         return restoration.entry

@@ -129,7 +129,12 @@ from hivemind.domain.health import (
     TagDispersion,
 )
 from hivemind.domain.pin import Pin, PinRefusal, PinWrite, pin_refusal
-from hivemind.domain.redaction import REDACTED_SUMMARY, RedactOutcome, RedactRefused
+from hivemind.domain.redaction import (
+    REDACTED_SUMMARY,
+    RedactOutcome,
+    RedactRefused,
+    is_redaction_stub,
+)
 from hivemind.domain.succession import (
     AgentRetired,
     HandedDown,
@@ -759,8 +764,14 @@ WITHDRAW = (
 # the transaction advisory lock serialises two restores, whose chain checks
 # would otherwise not see each other.
 RESTORE_LOCK = "SELECT pg_advisory_xact_lock(hashtext('entry.restore'))"
+# The author never changes, so it is read before any lock: the restore then takes
+# that author's cleanup lock (``CLEANUP_AGENT_LOCK``) before the row, as a
+# cleanup and its undo do, so a cleanup of the author never misses a memory a
+# restore is putting back.
+RESTORE_AUTHOR = "SELECT author FROM entries WHERE id = $1"
 RESTORE_LOCK_ROW = (
-    "SELECT state, withdrawn_reason, redacted_at FROM entries WHERE id = $1 FOR UPDATE"
+    "SELECT state, withdrawn_reason, redacted_at, summary, body, "
+    "embedding IS NOT NULL AS has_embedding FROM entries WHERE id = $1 FOR UPDATE"
 )
 # A not-undone cleanup that withdrew the memory (its reason is the cleanup's).
 RESTORE_STANDING_CLEANUP = """
@@ -2259,13 +2270,19 @@ class PgStore:
             raise KeyError(f"unknown entry: {entry_id}")
         async with self._transaction() as conn:
             await conn.execute(RESTORE_LOCK)
+            author = await conn.fetchval(RESTORE_AUTHOR, entry_id)
+            if author is None:
+                raise KeyError(f"unknown entry: {entry_id}")
+            await conn.execute(CLEANUP_AGENT_LOCK, author)
             existing = await conn.fetchrow(RESTORE_LOCK_ROW, entry_id)
             if existing is None:
                 raise KeyError(f"unknown entry: {entry_id}")
             reason = existing["withdrawn_reason"]
             standing = None
             chain = None
-            redacted = existing["redacted_at"] is not None
+            redacted = existing["redacted_at"] is not None or is_redaction_stub(
+                existing["summary"], existing["body"], reason, existing["has_embedding"]
+            )
             if existing["state"] == "withdrawn" and not redacted:
                 found = await conn.fetchval(RESTORE_STANDING_CLEANUP, entry_id, reason)
                 standing = str(found) if found is not None else None

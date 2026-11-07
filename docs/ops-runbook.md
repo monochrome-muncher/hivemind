@@ -1094,4 +1094,7 @@ Redact again after a restore (the redaction is in the audit log: search
 the `entry.redact` audit action. Its rollback drops the column and deletes the
 `entry.redact` audit rows (`hivemind-migrate --rollback` refuses without
 `--discard-audit-rows`, ADR 0119). Redacted memories stay withdrawn with their
-stub; the text does not come back.
+stub; the text does not come back. If `0032` is applied again later, the stubs
+have `redacted_at` NULL; the admin restore still recognises them (summary and
+reason `[redacted]`, no body, no embedding) and refuses with `entry_redacted`,
+but the panel no longer shows them as redacted.

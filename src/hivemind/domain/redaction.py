@@ -15,6 +15,23 @@ from hivemind.domain.entry import Entry
 # links are emptied.
 REDACTED_SUMMARY = "[redacted]"
 
+
+def is_redaction_stub(
+    summary: str, body: str | None, withdrawn_reason: str | None, has_embedding: bool
+) -> bool:
+    """Whether a memory is what a redaction left behind, even with no
+    ``redacted_at``: rolling back migration ``0032`` drops that column and
+    applying it again brings it back NULL, while the stub (summary and reason
+    ``[redacted]``, no body, no embedding) stays. Such a memory must never be
+    restored. A real memory has an embedding, so this never matches one."""
+    return (
+        summary == REDACTED_SUMMARY
+        and withdrawn_reason == REDACTED_SUMMARY
+        and body is None
+        and not has_embedding
+    )
+
+
 # Feedback and flag notes written by other agents may quote the text. They are
 # never edited, only counted, so an admin can go and review them.
 
