@@ -2406,6 +2406,76 @@ async def test_audit_log_is_newest_first_and_filters(adapter: Adapter) -> None:
     assert await store.list_audit(AuditFilters(before=NO_SUCH_ID), 10) == []
 
 
+async def test_audit_log_target_and_subject_filters(adapter: Adapter) -> None:
+    """ADR 0123: ``target`` is exact; ``subjects`` keeps the rows about an
+    agent in every shape that names it, and nothing that merely spells like it."""
+    store = adapter.store
+    admin, agent = ActorKind.ADMIN_KEY, ActorKind.AGENT_KEY
+
+    async def row(kind, actor, action, target, detail=None):  # type: ignore[no-untyped-def]
+        return await store.record_audit(AuditEvent(kind, actor, action, target, detail or {}))
+
+    trust = await row(admin, "admin:a", AuditAction.AGENT_TRUST_LEVEL_SET, "amy", {"to": 2})
+    other = await row(admin, "admin:a", AuditAction.AGENT_TRUST_LEVEL_SET, "bob", {"to": 2})
+    pin = await row(agent, "amy", AuditAction.ENTRY_PIN, "entry-1", {"fleet_id": "f1"})
+    withdraw = await row(admin, "admin:a", AuditAction.ENTRY_WITHDRAW, "entry-2", {"author": "amy"})
+    restored = await row(admin, "admin:a", AuditAction.ENTRY_RESTORE, "entry-2", {"author": "amy"})
+    moved = await row(
+        admin, "admin:a", AuditAction.FLEET_MOVE_AGENTS, "f1", {"agents": ["bob", "amy"]}
+    )
+    not_moved = await row(
+        admin, "admin:a", AuditAction.FLEET_MOVE_AGENTS, "f1", {"agents": ["bob"]}
+    )
+    retire = await row(admin, "admin:a", AuditAction.AGENT_RETIRE, "old", {"successor": "amy"})
+    # Spelled like the agent but not about it: a fleet and an entry with its name as
+    # target, a cli actor with its name, a count in `agents`.
+    await row(admin, "admin:a", AuditAction.FLEET_RENAME, "amy", {"from": "a", "to": "b"})
+    await row(admin, "admin:a", AuditAction.ENTRY_UNPIN, "amy", {"fleet_id": "f1"})
+    await row(ActorKind.CLI, "amy", AuditAction.AGENT_REVOKE, "bob", {})
+    await row(admin, "admin:a", AuditAction.FLEET_MOVE_UNDO, "f1", {"agents": 1})
+    await row(admin, "admin:a", AuditAction.ENTRY_WITHDRAW, "entry-3", {"author": "bob"})
+
+    async def ids(**kw):  # type: ignore[no-untyped-def]
+        return [r.id for r in await store.list_audit(AuditFilters(**kw), 50)]
+
+    assert await ids(target="amy") == [
+        r.id for r in await store.list_audit(AuditFilters(target="amy"), 50)
+    ]
+    assert len(await ids(target="amy")) == 3  # trust, rename, unpin
+    assert await ids(target="nobody") == []
+    assert await ids(subjects=("amy",)) == [
+        retire.id,
+        moved.id,
+        restored.id,
+        withdraw.id,
+        pin.id,
+        trust.id,
+    ]
+    assert not_moved.id not in await ids(subjects=("amy",))
+    both = await ids(subjects=("amy", "old"))
+    assert (
+        retire.id in both and trust.id in both and restored.id in both and len(both) == 6
+    )  # + the retire names old as target
+    assert other.id in await ids(subjects=("bob",))
+    # AND-ed with the other filters and the paging cursor.
+    assert await ids(subjects=("amy",), action=AuditAction.ENTRY_PIN) == [pin.id]
+    assert await ids(subjects=("amy",), before=moved.id) == [
+        restored.id,
+        withdraw.id,
+        pin.id,
+        trust.id,
+    ]
+    assert await ids(subjects=("amy",), target="entry-2") == [restored.id, withdraw.id]
+    # A cursor row that is not about the subject matches nothing.
+    assert await ids(subjects=("amy",), before=other.id) == []
+    assert await ids(subjects=("amy",), actor="admin:a", since=withdraw.occurred_at) == [
+        retire.id,
+        moved.id,
+        restored.id,
+        withdraw.id,
+    ]
+
+
 async def test_record_feedback_many_upserts_each_row_in_one_call(adapter: Adapter) -> None:
     first = await write(adapter, "first")
     second = await write(adapter, "second")
