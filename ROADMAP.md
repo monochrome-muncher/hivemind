@@ -58,7 +58,8 @@ The SPEC §10 extensions (Tier 5) stay held until their triggers fire.
   entries, the remaining performance items, a contract step for
   `credentials_kind_check`, and the next harnesses.
 - **Re-measure triggers** on the first real corpus: the recency floor's
-  value (§4.6), the HNSW recall cost (§3.6, ADR 0025), and any `rrf_k`
+  value (§4.6), the HNSW recall cost (§3.6, ADR 0025), fleet-filtered
+  read latency once the pool passes ~200k entries (§4.7), and any `rrf_k`
   change. The off-by-default ranking settings (§3.15) are turned on only
   after their measurement passes with the deployment's embedder.
 - **Parked ideas**: a `question` entry kind (wait for the empty-search
@@ -365,6 +366,20 @@ Explore search is opt-in per search (ADR 0078). Results are in
   spread; sweep 0.5–0.9 and expect to move the value, not the form.
   Tables and method:
   [docs/retrieval-experiments.md](docs/retrieval-experiments.md#46-the-form-of-the-recency-term-is-mismatched-to-rrfs-range).
+
+- **4.7 Reads that filter on `fleet_id` scan the table.** *(a cost taken
+  on purpose: ADR 0126, migration 0028.)* With `entries_fleet_idx` gone so
+  that fleet merges, undos and moves are HOT updates, the agent portal's
+  fleet view and CSV export, portal search with `fleet_id`, the admin
+  memory list with a fleet filter, the merge preview counts and the move
+  statement itself are seq scans. At 200k entries (figures in the
+  ADR): a 20-entry fleet's portal list 0.08 ms to 35 ms, its count 0.04 ms
+  to 32 ms, `MOVE_ENTRIES` 268 ms. The cost grows with the pool, not the
+  fleet. **Re-measure trigger:** the pool passes ~200k entries, or the
+  portal's fleet view feels slow; re-run the portal list, count and a
+  merge on a copy. If it matters, the options are a fleet-scoped side
+  table (the read path gets an index, the entries keep HOT updates) or
+  accepting slower merges (a new ADR restoring the index).
 
 ## Tier 5 — explicitly held: the §10 extensions
 

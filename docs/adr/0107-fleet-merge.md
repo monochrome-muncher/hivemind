@@ -1,5 +1,7 @@
 # Merge fleets into one home fleet
 
+> **Speed amended by [ADR 0126](0126-no-index-on-entries-fleet-id-so-fleet-moves-are-hot.md):** the `entries_fleet_idx` index is gone and `entries` has a fillfactor of 50, so re-filing is a HOT update and skips the HNSW re-insert. A memory written before that release is slow on its first merge or move only; after that, and for its undo, it is fast (`VACUUM FULL entries` is optional and an outage). The Speed consequence below describes the time before that.
+>
 > **Extended by [ADR 0112](0112-move-agents-with-their-memories.md):** moving some agents with their memories is recorded in the same table (`fleet_merges.kind`) and undone with the same route, and a move's undo has its own newest-standing rule that also covers its source fleet. Nothing here changes for a merge.
 
 Amends [ADR 0011](0011-fleets-and-trust-levels.md) (an entry's fleet is fixed at write time; no fleet deletion), touches [ADR 0058](0058-pinned-fleet-briefing.md) and [ADR 0096](0096-contributors-pin.md) (the pin cap), and amends SPEC §12.1, §12.4 and §12.5.

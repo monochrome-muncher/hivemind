@@ -127,7 +127,8 @@ CREATE TABLE public.entries (
     CONSTRAINT entries_importance_source_check CHECK ((importance_source = ANY (ARRAY['caller'::text, 'default'::text]))),
     CONSTRAINT entries_kind_check CHECK ((kind = ANY (ARRAY['fact'::text, 'insight'::text, 'decision'::text]))),
     CONSTRAINT entries_state_check CHECK ((state = ANY (ARRAY['active'::text, 'superseded'::text, 'withdrawn'::text])))
-);
+)
+WITH (fillfactor='50');
 
 CREATE TABLE public.entry_links (
     from_id uuid NOT NULL,
@@ -271,8 +272,6 @@ CREATE INDEX entries_created_at_id_idx ON public.entries USING btree (created_at
 CREATE INDEX entries_embedding_hnsw_idx ON public.entries USING hnsw (embedding public.vector_cosine_ops) WITH (m='16', ef_construction='64');
 
 CREATE INDEX entries_entity_names_gin_idx ON public.entries USING gin (entity_names);
-
-CREATE INDEX entries_fleet_idx ON public.entries USING btree (fleet_id);
 
 CREATE INDEX entries_kind_idx ON public.entries USING btree (kind);
 

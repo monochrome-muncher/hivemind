@@ -25,6 +25,15 @@ MERGE_PIN_LIMIT = MAX_PINS_PER_FLEET
 # preview; past it the preview says so (``DuplicateScan.truncated``).
 DUPLICATE_LOOKUP_CAP = 2_000
 
+# At most this many active entries with a vector in the fleet being looked
+# *into*, and the preview finds its nearest neighbours by an exact scan of
+# that fleet instead of the filtered HNSW index. `entries.fleet_id` has no
+# index (ADR 0126), so a filtered HNSW scan of a small fleet in a big pool
+# walks the graph until `hnsw.max_scan_tuples` (1,156 ms for two 20-entry
+# fleets at 200k entries), while the exact scan reads just that fleet. Past
+# the threshold the exact scan costs more than the bounded graph walk.
+EXACT_DUPLICATE_LOOKUP_MAX = 5_000
+
 # ``pinned_by`` of a pin the admin key placed: exempt from the per-agent cap.
 ADMIN_PINNER = "admin"
 
