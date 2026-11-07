@@ -973,6 +973,10 @@ async def test_migrate_and_rollback_leave_no_connection_open() -> None:
     integration fixture) leaks one connection until the process exits."""
     plain, dim = _dsn(), Settings().embedding_dim
     await _require_postgres(plain)
+    # Empty tables first: an earlier test on this worker's database can leave a
+    # `schema.rollback` row, and the rollback below (which steps over 0027)
+    # would then be refused without --discard-audit-rows.
+    await _start_at_head(plain, dim)
     application = f"hm-migration-test-{os.getpid()}"
     dsn = f"{plain}{'&' if '?' in plain else '?'}application_name={application}"
     for _ in range(3):
