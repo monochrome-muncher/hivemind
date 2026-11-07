@@ -360,7 +360,8 @@ async def test_pins_and_unpins_by_the_agent_and_a_cleanup_by_an_admin() -> None:
         "Cleanup of 2026-10-01 00:00 UTC to 2026-10-02 12:30 UTC: "
         "1 memory withdrawn, 2 ratings set aside, 0 memories restored, 1 pin removed"
     )
-    assert "c1" not in json.dumps(cleanup)
+    # The row's own random id may contain "c1"; the cleanup id must not leak anywhere else.
+    assert "c1" not in json.dumps({k: v for k, v in cleanup.items() if k != "id"})
 
 
 async def test_a_retirement_that_was_undone_names_no_agent_the_key_does_not_own() -> None:
@@ -466,7 +467,8 @@ async def test_another_agents_withdrawal_after_an_undone_retirement_is_not_this_
     assert row["by"] == "another_agent" and row["agent"] is None
     assert row["summary"] == "A memory by old was withdrawn"
     assert row["reason"] is None
-    assert "bee" not in json.dumps(row)
+    # "bee" is all hex letters, so a random id can contain it: check the rest of the row.
+    assert "bee" not in json.dumps({k: v for k, v in row.items() if k not in ("id", "entry_id")})
 
 
 async def test_a_cli_operator_named_like_an_inherited_agent_is_not_named() -> None:
