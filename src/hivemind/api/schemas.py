@@ -290,6 +290,7 @@ class EntryOut(BaseModel):
     state: str
     superseded_by: str | None = None
     withdrawn_reason: str | None = None
+    withdrawn_at: datetime | None = None
     # Extracted at write time (ADR 0016, SPEC §13); empty when extraction
     # was off or failed (SPEC §13.4).
     entities: list[EntityOut] = []
@@ -342,6 +343,7 @@ class EntryOut(BaseModel):
             state=entry.state.value,
             superseded_by=entry.superseded_by,
             withdrawn_reason=entry.withdrawn_reason,
+            withdrawn_at=entry.withdrawn_at,
             entities=[EntityOut(name=e.name, kind=e.kind) for e in entry.entities],
             entities_model=entry.entities_model,
         )
@@ -483,6 +485,14 @@ class WithdrawRequest(BaseModel):
     """A withdrawal of an entry (SPEC.md §4.1)."""
 
     reason: str | None = None
+
+
+class RestoreRequest(BaseModel):
+    """Putting a withdrawn memory back (ADR 0124). The reason is required; it
+    defaults to empty so the service refuses a missing one after the admin
+    check (a non-admin gets 403, never 422)."""
+
+    reason: str = ""
 
 
 class FeedbackRequest(BaseModel):

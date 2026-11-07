@@ -68,6 +68,7 @@ def _panel(transport: httpx.AsyncBaseTransport) -> httpx.AsyncClient:
         ("GET", "admin/entries"),
         ("GET", "admin/entries/abc123"),
         ("POST", "admin/entries/abc123/withdraw"),
+        ("POST", "admin/entries/abc123/restore"),
         ("POST", "admin/search"),
         ("GET", "admin/activity"),
         ("GET", "admin/feedback"),
@@ -108,6 +109,8 @@ def test_the_admin_surface_is_forwarded(method: str, path: str) -> None:
         ("PATCH", "admin/entries/x"),
         ("POST", "admin/entries"),
         ("PUT", "admin/entries/x/withdraw"),
+        ("GET", "admin/entries/x/restore"),  # right path, wrong method
+        ("POST", "admin/entries//restore"),
         ("GET", "admin/search"),
         ("POST", "admin/activity"),
         ("POST", "admin/feedback"),

@@ -131,6 +131,7 @@ async function checkApi() {
 configureDrawer({
   fetchEntry: (id) => guarded(() => api("GET", `admin/entries/${encodeURIComponent(id)}`)),
   withdrawEntry: (id, reason) => guarded(() => api("POST", `admin/entries/${encodeURIComponent(id)}/withdraw`, { body: reason ? { reason } : {} })),
+  restoreEntry: (id, reason) => guarded(() => api("POST", `admin/entries/${encodeURIComponent(id)}/restore`, { body: { reason } })),
   fleetName,
   authorHref: (author) => agentHref(author),
   fleetHref: (fleet) => memoriesHref({ fleet }),
