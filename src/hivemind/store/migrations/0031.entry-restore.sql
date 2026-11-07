@@ -5,9 +5,20 @@
 -- The audit CHECK is widened the 0014 ... 0029 way, for `entry.restore` (the list
 -- keeps 0029's `agent.owner_set`).
 --
--- ADR 0020 expand-and-contract: a widened CHECK is additive; an older pod
--- never writes the action.
+-- A partial index serves the agent history (ADR 0123): `entry.restore` names the
+-- memory's author in `detail.author`, as `entry.withdraw` does, and the subject
+-- query needs an index on every arm to stay a BitmapOr. Not `CONCURRENTLY`
+-- (that would make the whole file non-transactional, and the CHECK change
+-- below wants its lock timeout): the index is partial on an action that has no
+-- rows yet, so the build is one quick scan of `audit_log`.
+--
+-- ADR 0020 expand-and-contract: a widened CHECK and a new index are additive;
+-- an older pod never writes the action.
 SET LOCAL lock_timeout = '5s';
+CREATE INDEX IF NOT EXISTS audit_log_restore_author_idx
+    ON audit_log ((detail->>'author'), occurred_at)
+    WHERE action = 'entry.restore';
+
 ALTER TABLE audit_log DROP CONSTRAINT IF EXISTS audit_log_action_check;
 ALTER TABLE audit_log
     ADD CONSTRAINT audit_log_action_check

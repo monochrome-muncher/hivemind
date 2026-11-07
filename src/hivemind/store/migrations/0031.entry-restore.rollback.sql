@@ -4,6 +4,7 @@
 -- `hivemind-migrate` refuses this rollback while such rows exist unless
 -- `--discard-audit-rows` is given (ADR 0119).
 DELETE FROM audit_log WHERE action = 'entry.restore';
+DROP INDEX IF EXISTS audit_log_restore_author_idx;
 
 SET LOCAL lock_timeout = '5s';
 ALTER TABLE audit_log DROP CONSTRAINT IF EXISTS audit_log_action_check;

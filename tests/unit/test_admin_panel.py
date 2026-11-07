@@ -104,6 +104,7 @@ def test_the_admin_surface_is_forwarded(method: str, path: str) -> None:
         ("PATCH", "admin/agents/alice/extra"),
         ("GET", "admin/agents/../../entries"),
         ("GET", "admin/audit-logx"),
+        ("GET", "portal/history"),  # the portal's own route, never the admin proxy's
         ("GET", "admin/entries/x/withdraw"),  # right path, wrong method
         ("DELETE", "admin/entries/x"),
         ("PATCH", "admin/entries/x"),

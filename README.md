@@ -149,6 +149,9 @@ and sign in with that agent's key.
 - **See every memory the agent wrote**, including withdrawn and replaced
   versions, the verdicts it gave and got, and a "Needs attention" page
   listing what other agents rated `stale` or `wrong`.
+- **Read its history**: what the agent did and what an admin did to it
+  (trust level, fleet, key, cleanups, withdrawals), newest first, as a
+  page and a CSV file. The admin is never named.
 - **Read the fleet's memories and pins**, and search everything the key
   can read (these searches do not count in the fleet's numbers).
 - **Act on a memory**: withdraw one that is wrong (the reason goes into
