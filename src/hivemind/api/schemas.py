@@ -619,6 +619,17 @@ class ActivateAgentRequest(BaseModel):
     home_fleet_id: RefStr
 
 
+class CreateAgentRequest(BaseModel):
+    """Register and activate an agent for its owner in one admin call
+    : the owner alias is required, the trust level defaults to
+    `lurker` (1) as on activation."""
+
+    name: str
+    owner_alias: str
+    trust_level: int = Field(default=1, ge=0, le=3)
+    home_fleet_id: RefStr
+
+
 class UpdateAgentRequest(BaseModel):
     """Change an agent's trust level and/or home fleet (the SPEC §5.1
     ``PATCH /v1/admin/agents/{name}`` body; ADR 0011). At least one
@@ -695,6 +706,14 @@ class RegisteredAgentOut(AgentOut):
 
     already_registered: bool
     message: str
+
+
+class CreatedAgentOut(AgentOut):
+    """The answer to ``POST /v1/admin/agents``: the new active
+    agent plus its key, returned **once**."""
+
+    key: str
+    note: str = "store this key now; it is shown only once"
 
 
 class FleetOut(BaseModel):

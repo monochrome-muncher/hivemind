@@ -48,6 +48,8 @@ from hivemind.api.schemas import (
     AuditRecordOut,
     BatchFeedbackRequest,
     CheckOut,
+    CreateAgentRequest,
+    CreatedAgentOut,
     CreateEntryRequest,
     CreateFleetRequest,
     EntriesMetrics,
@@ -1140,6 +1142,24 @@ def build_router() -> APIRouter:
             AdminAgentOut.from_admin_agent(a, now=now, idle_days=app.idle_agent_days)
             for a in agents
         ]
+
+    @router.post("/admin/agents", response_model=CreatedAgentOut, status_code=201)
+    async def create_agent(
+        payload: CreateAgentRequest, credential: require, app: hive
+    ) -> CreatedAgentOut:
+        """Register and activate an agent for its owner in one call
+        (admin-gated, ADR 0120): the same registration and activation as
+        ``POST /v1/agents`` followed by ``activate``, audited the same way.
+        The key is returned **once**. An existing name is a 409
+        ``name_conflict``; an unknown fleet a 404."""
+        agent, key = await app.access_service.create_agent(
+            payload.name,
+            payload.owner_alias,
+            TrustLevel(payload.trust_level),
+            payload.home_fleet_id,
+            credential,
+        )
+        return CreatedAgentOut(**AgentOut.from_agent(agent).model_dump(), key=key)
 
     @router.post("/admin/agents/{name}/activate", response_model=KeyIssuedOut)
     async def activate_agent(

@@ -37,6 +37,7 @@ _ALLOWED = allowlist(
         ("GET", r"health"),
         ("GET", r"metrics"),
         ("GET", r"admin/agents"),
+        ("POST", r"admin/agents"),
         ("GET", r"admin/fleets"),
         ("POST", r"admin/fleets"),
         ("GET", r"admin/audit-log"),

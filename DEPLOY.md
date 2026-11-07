@@ -110,7 +110,11 @@ The operator flow (steps 1–4 are required, 5–8 optional):
    / `POST /v1/agents`); **agent keys** are issued per agent, either via
    `hivemind-keys issue-agent --name <agent>` (an active agent with no key; for a pending or revoked one add `--trust-level N --home-fleet <fleet-id>`, ADR 0039), the admin REST surface
    `POST /v1/admin/agents/{name}/activate` (returns the key **once**), or
-   the **admin panel** (§8), which the same pipeline deploys.
+   the **admin panel** (§8), which the same pipeline deploys. For an owner
+   who has not registered, the admin can create the agent directly with
+   **New agent** on the panel's Agents page or `POST /v1/admin/agents`
+   (owner alias, agent name, trust level, home fleet; the key is shown
+   **once**, ADR 0120).
 5. **(Optional)** external reachability — apply the opt-in Ingress:
 
    ```bash

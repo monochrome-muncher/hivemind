@@ -56,6 +56,7 @@ def _panel(transport: httpx.AsyncBaseTransport) -> httpx.AsyncClient:
         ("GET", "health"),
         ("GET", "metrics"),
         ("GET", "admin/agents"),
+        ("POST", "admin/agents"),
         ("GET", "admin/fleets"),
         ("POST", "admin/fleets"),
         ("GET", "admin/audit-log"),

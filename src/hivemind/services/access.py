@@ -35,6 +35,7 @@ from hivemind.domain.access import (
 from hivemind.domain.audit import AuditAction, AuditFilters, AuditRecord
 from hivemind.domain.validation import (
     RESERVED_AGENT_NAMES,  # noqa: F401  (re-exported: ADR 0033 names, ADR 0040 rules)
+    InvalidInput,
     validate_agent_name,
     validate_fleet_name,
     validate_owner_alias,
@@ -203,6 +204,47 @@ class AccessService:
             {"trust_level": trust_level.value, "home_fleet_id": home_fleet_id},
         )
         return agent, key
+
+    async def create_agent(
+        self,
+        name: str,
+        owner_alias: str,
+        trust_level: TrustLevel,
+        home_fleet_id: str,
+        credential: Credential,
+    ) -> tuple[Agent, str]:
+        """Register and activate an agent in one admin call (ADR 0120), for
+        an owner who did not self-register; returns (agent, raw_key) and
+        the key is shown **once**. It runs the same two steps as
+        self-registration followed by activation, so it writes the same
+        ``agent.register`` and ``agent.activate`` audit rows.
+
+        Admin key only. The owner alias is required (it says who gets the
+        key). Everything is checked before the record is created: the
+        name and alias, the fleet, and that the name is new. An existing
+        name of any status, or a case variant of one, is ``NameTaken``:
+        the admin activates, re-activates or replaces the key of an
+        existing agent instead. If activation fails after the
+        registration, the agent stays ``pending`` and can be activated
+        from the panel."""
+        require_admin(credential)
+        validate_agent_name(name)
+        validate_owner_alias(owner_alias)
+        if not owner_alias.strip():
+            raise InvalidInput("owner_alias is required")
+        self._require_authenticator()  # dev mode has no keys to issue: fail before any write
+        await self._require_fleet(home_fleet_id)
+        existing = await self._store.get_agent(name)
+        if existing is not None:
+            raise NameTaken(
+                f"an agent named {existing.name!r} already exists ({existing.status.value}); "
+                "activate it, re-activate it or replace its key instead, or pick another name"
+            )
+        registration = await self.register(name, credential, owner_alias)
+        if registration.already_registered:
+            # Registered by someone else between the check and the insert.
+            raise NameTaken(_NAME_TAKEN)
+        return await self.activate(name, trust_level, home_fleet_id, credential)
 
     async def replace_agent_key(self, name: str, credential: Credential) -> str:
         """Replace an active agent's key (ADR 0108); returns the new raw key

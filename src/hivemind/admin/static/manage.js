@@ -53,6 +53,11 @@ function fleetPicker(selectedId) {
       if (!name) throw new Error("Enter a name for the new fleet.");
       const fleet = await api("POST", "admin/fleets", { body: { name } });
       state.fleets.push(fleet);
+      // Pick the new fleet, so a retry after a later failure reuses it instead of creating it again.
+      select.insertBefore(h("option", { value: fleet.id, text: fleet.name }), select.lastElementChild);
+      select.value = fleet.id;
+      newName.value = "";
+      sync();
       toast(`Fleet “${fleet.name}” created`);
       return fleet.id;
     },
@@ -86,6 +91,50 @@ function activateDialog(agent, onDone) {
           if (!result) return;
           showKeyOnce(`Agent key for ${agent.name}`, result.key,
             agent.owner_alias ? `Send it to ${agent.owner_alias}. The agent presents it as its MCP key.` : null);
+          onDone();
+        },
+      },
+    ],
+  });
+}
+
+/** Register and activate an agent for an owner who did not self-register (ADR 0120). */
+function newAgentDialog(onDone) {
+  const owner = h("input", { id: "f-owner", maxlength: 128, autocomplete: "off", placeholder: "e.g. jane.doe" });
+  const name = h("input", { id: "f-name", maxlength: 63, autocomplete: "off", spellcheck: false, placeholder: "e.g. jane-laptop" });
+  const level = levelSelect(1);
+  const fleet = fleetPicker(null);
+  openModal({
+    title: "New agent",
+    body: [
+      h("p", { class: "muted", text: "For an owner who has not registered their agent themselves. This registers the agent and activates it at once; the key is shown once, so deliver it to the owner out of band." }),
+      h("div", { class: "field" }, h("label", { for: "f-owner", text: "Owner alias" }), owner,
+        h("span", { class: "hint", text: "Who the agent belongs to and who gets the key." })),
+      h("div", { class: "field" }, h("label", { for: "f-name", text: "Agent name" }), name,
+        h("span", { class: "hint", text: "Its identity in the hive: the author of everything it writes. Names are never reused." })),
+      h("div", { class: "field" }, h("label", { for: "f-level", text: "Trust level" }), level),
+      fleet.el,
+    ],
+    actions: [
+      { label: "Cancel" },
+      {
+        label: "Create and issue key",
+        class: "btn-primary",
+        submit: true,
+        onClick: async () => {
+          const ownerAlias = owner.value.trim();
+          const agentName = name.value.trim();
+          if (!ownerAlias) throw new Error("Enter the owner alias.");
+          if (!agentName) throw new Error("Enter the agent name.");
+          const taken = state.agents.find((a) => a.name.toLowerCase() === agentName.toLowerCase());
+          if (taken) throw new Error(`An agent named ${taken.name} already exists (${taken.status}). Use its Activate, Re-activate or Replace key instead, or pick another name.`);
+          const homeFleetId = await fleet.resolve();
+          const result = await guarded(() => api("POST", "admin/agents", {
+            body: { name: agentName, owner_alias: ownerAlias, trust_level: Number(level.value), home_fleet_id: homeFleetId },
+          }));
+          if (!result) return;
+          showKeyOnce(`Agent key for ${result.name}`, result.key,
+            `Send it to ${result.owner_alias}. The agent presents it as its MCP key.`);
           onDone();
         },
       },
@@ -466,7 +515,9 @@ export async function viewAgents(root) {
   idleFilter.addEventListener("change", render);
   render();
   fill(root, 
-    pageHead("Agents", `${state.agents.length} registered`, refreshButton()),
+    pageHead("Agents", `${state.agents.length} registered`,
+      h("button", { type: "button", class: "btn btn-primary btn-sm", text: "New agent", onclick: () => newAgentDialog(refresh) }),
+      refreshButton()),
     card(null, holder, { head: [h("div", { class: "filters" }, search, statusFilter, idleFilter)], flush: true }),
     cleanupsCard(cleanups),
     successions && successions.length ? successionsCard(successions) : null,
