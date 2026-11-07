@@ -84,6 +84,10 @@ _Avoid_: duplicate, cluster, merge
 Marking an entry no longer valid without replacing it (retraction, or admin correction). Withdrawn entries are retained, never deleted.
 _Avoid_: delete, purge
 
+**Restore**:
+The admin putting one withdrawn entry back to active, with a reason. Pins are not restored; an entry withdrawn by a standing agent cleanup comes back by undoing the cleanup (ADR 0124).
+_Avoid_: undelete, reinstate, undo (an undo reverses a cleanup, merge or move)
+
 **Quality**:
 The bounded re-scoring signal derived from feedback on an entry; it affects retrieval, not governance.
 _Avoid_: score (in specs, "score" always means the retrieval score; "quality" is the feedback-derived factor)

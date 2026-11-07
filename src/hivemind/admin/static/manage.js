@@ -15,12 +15,14 @@ import { retireDialog, successionsCard } from "./retire.js";
 
 const AUDIT_ACTIONS = [
   "agent.register", "agent.activate", "agent.trust_level_set", "agent.home_fleet_set", "agent.owner_set", "agent.revoke",
-  "fleet.create", "fleet.rename", "fleet.merge", "fleet.unmerge", "fleet.move_agents", "fleet.move_undo", "org_key.rotate", "entry.withdraw", "entry.pin", "entry.unpin",
+  "fleet.create", "fleet.rename", "fleet.merge", "fleet.unmerge", "fleet.move_agents", "fleet.move_undo", "org_key.rotate", "entry.withdraw", "entry.restore", "entry.pin", "entry.unpin",
   "admin_key.issue", "admin_key.revoke", "agent_key.issue", "agent_key.replace", "agent_key.lock",
   "agent.cleanup", "agent.cleanup_undo", "agent.retire", "agent.retire_undo",
   "schema.rollback",
 ];
 const AUDIT_PAGE = 50;
+// Rows whose target is a memory: the id opens it in the drawer.
+const ENTRY_ROW_ACTIONS = ["entry.withdraw", "entry.restore"];
 // Rows whose target is the source fleet and whose detail names a target fleet.
 const FLEET_ROW_ACTIONS = ["fleet.merge", "fleet.unmerge", "fleet.move_agents", "fleet.move_undo"];
 
@@ -375,6 +377,9 @@ export function auditRow(nameOf) {
     }
     if (r.target && FLEET_ROW_ACTIONS.includes(r.action)) {
       return h("td", { title: r.target, text: nameOf(r.target) });
+    }
+    if (r.target && ENTRY_ROW_ACTIONS.includes(r.action)) {
+      return h("td", {}, h("button", { type: "button", class: "linklike", title: "Open this memory", text: r.target, onclick: () => openEntry(r.target) }));
     }
     return h("td", { text: r.target ?? "—" });
   };

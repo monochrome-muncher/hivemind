@@ -90,6 +90,7 @@ from hivemind.api.schemas import (
     RegisteredAgentOut,
     RelatedOut,
     RenameFleetRequest,
+    RestoreRequest,
     RetiredOut,
     RetirePreviewOut,
     RetireRequest,
@@ -879,6 +880,19 @@ def build_router() -> APIRouter:
         _require_admin(credential, "the admin withdraw")
         return EntryOut.from_entry(
             await app.governance_service.withdraw(credential, entry_id, request.reason)
+        )
+
+    @router.post("/admin/entries/{entry_id}/restore", response_model=EntryOut)
+    async def admin_restore(
+        entry_id: str, request: RestoreRequest, credential: require, app: hive
+    ) -> EntryOut:
+        """Put a withdrawn memory back to ``active`` (ADR 0124). The reason
+        is required; pins are not restored; 409 for a memory that is not
+        withdrawn, was withdrawn by a standing agent cleanup, or would leave
+        two current versions in a chain. Audited as ``entry.restore``."""
+        _require_admin(credential, "the admin restore")
+        return EntryOut.from_entry(
+            await app.governance_service.restore(credential, entry_id, request.reason)
         )
 
     @router.get("/admin/activity", response_model=ActivityOut)

@@ -37,6 +37,7 @@ def entry_dict(entry: Entry) -> dict[str, object]:
         "state": entry.state.value,
         "superseded_by": entry.superseded_by,
         "withdrawn_reason": entry.withdrawn_reason,
+        "withdrawn_at": entry.withdrawn_at.isoformat() if entry.withdrawn_at else None,
         "entities": [{"name": e.name, "kind": e.kind.value} for e in entry.entities],
         "entities_model": entry.entities_model,
         "occurred_at": entry.occurred_at.isoformat(),

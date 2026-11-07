@@ -76,6 +76,7 @@ from hivemind.domain.entry import (
     embeddable_text,
     new_entry_id,
 )
+from hivemind.domain.entry_restore import Restoration, chain_conflict_message, restore_refusal
 from hivemind.domain.feedback import (
     ORPHAN_SILENCE_DAYS,
     Correction,
@@ -366,14 +367,74 @@ class MemoryStore:
                 raise KeyError(entry_id)
             if entry.state is not EntryState.ACTIVE:
                 raise ValueError(f"entry {entry_id} is not active (state={entry.state.value})")
-            updated = _with_state(
-                entry,
-                EntryState.WITHDRAWN,
-                withdrawn_reason=reason,
+            now = self._clock()
+            updated = replace(
+                _with_state(entry, EntryState.WITHDRAWN, withdrawn_reason=reason),
+                withdrawn_at=now,
             )
             self._entries[key] = updated
-            self._withdrawn_at[key] = self._clock()
+            self._withdrawn_at[key] = now
             return updated
+
+    async def restore_entry(self, entry_id: str) -> Restoration:
+        if not is_valid_uuid(entry_id):
+            raise KeyError(entry_id)
+        key = str(uuid.UUID(entry_id))
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is None:
+                raise KeyError(entry_id)
+            standing = next(
+                (
+                    c.id
+                    for c in self._cleanups
+                    if c.undone_at is None
+                    and key in c.withdrawn_ids
+                    and entry.withdrawn_reason == cleanup_reason(c.id)
+                ),
+                None,
+            )
+            refusal = restore_refusal(
+                key, entry.state.value, entry.withdrawn_reason, standing, self._chain_conflict(key)
+            )
+            if refusal is not None:
+                raise refusal
+            restored = replace(
+                entry,
+                state=EntryState.ACTIVE,
+                withdrawn_reason=None,
+                withdrawn_at=None,
+            )
+            self._entries[key] = restored
+            self._withdrawn_at.pop(key, None)
+            return Restoration(_copy(restored), entry.withdrawn_reason)
+
+    def _chain_conflict(self, key: str) -> str | None:
+        """The chain rules (ADR 0124), as PgStore's queries answer them."""
+        was_cut = any(item.entry_id == key for rec in self._cleanups for item in rec.restored)
+        linked = next(
+            (
+                e.id
+                for e in self._entries.values()
+                if e.superseded_by == key and e.state is EntryState.ACTIVE
+            ),
+            None,
+        )
+        instead = None
+        for rec in self._cleanups:
+            for item in rec.restored:
+                root = self._entries.get(item.entry_id)
+                if root is None or root.state is not EntryState.ACTIVE:
+                    continue
+                seen: set[str] = set()
+                cur: str | None = item.superseded_by
+                while cur and cur not in seen:
+                    if cur == key:
+                        instead = root.id
+                    seen.add(cur)
+                    node = self._entries.get(cur)
+                    cur = node.superseded_by if node else None
+        return chain_conflict_message(key, was_cut, linked, instead)
 
     async def record_feedback(self, feedback: Feedback) -> Feedback:
         (stored,) = await self.record_feedback_many([feedback])
@@ -1688,7 +1749,7 @@ class MemoryStore:
             withdraw_ids = [e.id for e in sorted(withdraw, key=lambda e: e.id)]
             for entry in withdraw:
                 self._entries[entry.id] = replace(
-                    entry, state=EntryState.WITHDRAWN, withdrawn_reason=reason
+                    entry, state=EntryState.WITHDRAWN, withdrawn_reason=reason, withdrawn_at=now
                 )
                 self._withdrawn_at[entry.id] = now
             gone = set(withdraw_ids)
@@ -1753,6 +1814,7 @@ class MemoryStore:
                     self._entries[eid],
                     state=EntryState.ACTIVE,
                     withdrawn_reason=None,
+                    withdrawn_at=None,
                 )
                 self._withdrawn_at.pop(eid, None)
             again = []

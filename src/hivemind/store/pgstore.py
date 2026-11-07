@@ -81,6 +81,7 @@ from hivemind.domain.entry import (
     SourceType,
     UsageCount,
 )
+from hivemind.domain.entry_restore import Restoration, chain_conflict_message, restore_refusal
 from hivemind.domain.feedback import (
     Correction,
     Feedback,
@@ -164,7 +165,7 @@ INSERT INTO entries (
 _ENTRY_COLUMNS = """
     id, kind, summary, body, payload, sources, tags, occurred_at,
     created_at, author, agent, importance, importance_source, scope, fleet_id,
-    embedding_model, state, superseded_by, withdrawn_reason,
+    embedding_model, state, superseded_by, withdrawn_reason, withdrawn_at,
     entities, entity_names, entities_model
 """
 
@@ -749,6 +750,47 @@ LOOKUP_STATE = "SELECT state FROM entries WHERE id = $1"
 WITHDRAW = (
     "UPDATE entries SET state = 'withdrawn', withdrawn_reason = $2, withdrawn_at = now() "
     "WHERE id = $1 AND state = 'active' RETURNING " + _ENTRY_COLUMNS
+)
+
+# Restoring one withdrawn memory (ADR 0124). The row is locked first, so a
+# concurrent withdraw or supersede of it waits and then sees the new state;
+# the transaction advisory lock serialises two restores, whose chain checks
+# would otherwise not see each other.
+RESTORE_LOCK = "SELECT pg_advisory_xact_lock(hashtext('entry.restore'))"
+RESTORE_LOCK_ROW = "SELECT state, withdrawn_reason FROM entries WHERE id = $1 FOR UPDATE"
+# A not-undone cleanup that withdrew the memory (its reason is the cleanup's).
+RESTORE_STANDING_CLEANUP = """
+SELECT id FROM agent_cleanups
+ WHERE undone_at IS NULL AND $1::uuid = ANY(withdrawn_ids)
+   AND 'admin cleanup ' || id::text = $2
+ LIMIT 1
+"""
+# The chain rules (ADR 0124). A cleanup that put the memory back cut its link to
+# the memory that replaced it: any such record makes the restore refuse.
+RESTORE_WAS_CUT = """
+SELECT 1 FROM agent_cleanups c, jsonb_array_elements(c.restored) r
+ WHERE r ->> 'entry_id' = $1::text LIMIT 1
+"""
+# An active memory that names it as its successor (never produced by the state
+# rules), or an active memory a cleanup put back whose recorded successor chain
+# leads to it.
+RESTORE_LINKED_BY = (
+    "SELECT id FROM entries WHERE superseded_by = $1::uuid AND state = 'active' LIMIT 1"
+)
+RESTORE_PUT_BACK_INSTEAD = """
+WITH RECURSIVE walk(root, cur) AS (
+    SELECT (r ->> 'entry_id')::uuid, (r ->> 'superseded_by')::uuid
+      FROM agent_cleanups c, jsonb_array_elements(c.restored) r
+      JOIN entries g ON g.id = (r ->> 'entry_id')::uuid AND g.state = 'active'
+    UNION
+    SELECT w.root, e.superseded_by FROM walk w JOIN entries e ON e.id = w.cur
+     WHERE e.superseded_by IS NOT NULL
+)
+SELECT root FROM walk WHERE cur = $1::uuid LIMIT 1
+"""
+RESTORE = (
+    "UPDATE entries SET state = 'active', withdrawn_reason = NULL, withdrawn_at = NULL "
+    "WHERE id = $1 AND state = 'withdrawn' RETURNING " + _ENTRY_COLUMNS
 )
 
 # --- Keyword-stream query (ADR 0047) ------------------------------------------
@@ -2142,6 +2184,39 @@ class PgStore:
                     raise KeyError(f"unknown entry: {entry_id}")
                 raise ValueError(f"entry {entry_id} is {state['state']}, not active")
         return _row_to_entry(row)
+
+    async def restore_entry(self, entry_id: str) -> Restoration:
+        """Put a withdrawn entry back (ADR 0124), in one transaction that
+        locks the row, checks the refusals and updates it."""
+        if not is_valid_uuid(entry_id):
+            raise KeyError(f"unknown entry: {entry_id}")
+        async with self._transaction() as conn:
+            await conn.execute(RESTORE_LOCK)
+            existing = await conn.fetchrow(RESTORE_LOCK_ROW, entry_id)
+            if existing is None:
+                raise KeyError(f"unknown entry: {entry_id}")
+            reason = existing["withdrawn_reason"]
+            standing = None
+            chain = None
+            if existing["state"] == "withdrawn":
+                found = await conn.fetchval(RESTORE_STANDING_CLEANUP, entry_id, reason)
+                standing = str(found) if found is not None else None
+                cut = await conn.fetchval(RESTORE_WAS_CUT, entry_id) is not None
+                linked = await conn.fetchval(RESTORE_LINKED_BY, entry_id)
+                instead = await conn.fetchval(RESTORE_PUT_BACK_INSTEAD, entry_id)
+                chain = chain_conflict_message(
+                    entry_id,
+                    cut,
+                    str(linked) if linked is not None else None,
+                    str(instead) if instead is not None else None,
+                )
+            refusal = restore_refusal(entry_id, existing["state"], reason, standing, chain)
+            if refusal is not None:
+                raise refusal
+            row = await conn.fetchrow(RESTORE, entry_id)
+            if row is None:  # unreachable under the row lock
+                raise RuntimeError(f"restore of entry {entry_id} updated no row")
+        return Restoration(_row_to_entry(row), reason)
 
     # -- search -------------------------------------------------------------------
 
@@ -3540,6 +3615,7 @@ def _row_to_entry(row: asyncpg.Record) -> Entry:
         state=EntryState(row["state"]),
         superseded_by=str(row["superseded_by"]) if row["superseded_by"] else None,
         withdrawn_reason=row["withdrawn_reason"],
+        withdrawn_at=row["withdrawn_at"],
         entities=_decode_entities(row["entities"]),
         entities_model=row["entities_model"],
     )
@@ -3681,6 +3757,8 @@ def audit_query(filters: AuditFilters, limit: int) -> tuple[str, list[Any]]:
             f"((actor_kind = 'agent_key' AND actor = ANY({names})) "
             f"OR (target = ANY({names}) AND action = ANY({target_actions})) "
             f"OR (action = 'entry.withdraw' AND detail->>'author' = ANY({names})) "
+            # Its own partial index (migration 0031), so the BitmapOr stays.
+            f"OR (action = 'entry.restore' AND detail->>'author' = ANY({names})) "
             f"OR (action = 'fleet.move_agents' AND detail->'agents' ?| {names}) "
             f"OR (action IN ('agent.retire', 'agent.retire_undo') "
             f"AND detail->>'successor' = ANY({names})))"

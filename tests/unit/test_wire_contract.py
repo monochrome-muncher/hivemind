@@ -97,6 +97,7 @@ ENTRY_TABLE: dict[str, object] = {
     "state": "active",
     "superseded_by": None,
     "withdrawn_reason": None,
+    "withdrawn_at": None,
     "entities": [{"name": "Entity E", "kind": "person"}],
     "entities_model": "model-x",
     "occurred_at": "2026-10-01T12:00:00+00:00",

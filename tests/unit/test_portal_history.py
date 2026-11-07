@@ -306,6 +306,38 @@ async def test_withdrawals_show_the_reason_never_the_admin_and_link_only_readabl
     assert ADMIN_ACTOR not in json.dumps(rows)
 
 
+async def test_a_restore_shows_as_an_admin_restoring_a_memory_without_naming_the_admin() -> None:
+    app, blue, _red = await _seed()
+    visible = await _entry(app, "carol fleet note", scope="fleet", fleet_id=blue.id)
+    elsewhere = await _entry(
+        app,
+        "bob note in another fleet",
+        author="bob",
+        scope="fleet",
+        fleet_id=(await app.store.create_fleet("green")).id,
+    )
+    for entry, author, reason in (
+        (visible, "carol", "it was right"),
+        (elsewhere, "carol", "also right"),
+    ):
+        await _row(
+            app,
+            ActorKind.ADMIN_KEY,
+            ADMIN_ACTOR,
+            AuditAction.ENTRY_RESTORE,
+            entry.id,
+            {"author": author, "previous_reason": "secret old reason", "reason": reason},
+        )
+    rows = await _history(app)
+    mine = {r["reason"]: r for r in rows if r["action"] == "entry.restore" and r["reason"]}
+    assert mine["it was right"]["summary"] == "An admin restored a memory by this agent"
+    assert mine["it was right"]["by"] == "admin" and mine["it was right"]["agent"] is None
+    assert mine["it was right"]["entry_id"] == visible.id
+    assert mine["also right"]["entry_id"] is None  # carol cannot read it
+    text = json.dumps(rows)
+    assert ADMIN_ACTOR not in text and "secret old reason" not in text
+
+
 async def test_a_withdrawn_entry_that_is_gone_from_sight_loses_its_link() -> None:
     app, _blue, _red = await _seed()
     await _row(

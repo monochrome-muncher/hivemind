@@ -9,6 +9,8 @@
 // entry, whether and how one may be withdrawn, and where the author, fleet
 // and feedback links go (configureDrawer). Without a withdraw function there
 // is no Withdraw button; without an href function that item is plain text.
+// Restoring a withdrawn memory is the same: only the admin side passes
+// restoreEntry, so the agent portal never shows it (ADR 0124).
 // Likewise the pin hooks (pinStatus, pinEntry, unpinEntry): without pinStatus
 // the drawer shows no pin controls (ADR 0116).
 
@@ -21,6 +23,7 @@ const config = {
   withdrawEntry: null, // (id, reason) => truthy when done
   canWithdraw: () => true, // (entry) => whether to offer Withdraw
   reasonRequired: false, // whether a withdrawal needs a reason
+  restoreEntry: null, // (id, reason) => truthy when restored; without it there is no Restore button
   pinStatus: null, // async (entry) => "pinnable" | "pinned" | null (no pin controls)
   pinEntry: null, // (id) => truthy when pinned
   unpinEntry: null, // (id) => the answer ({removed}) when done
@@ -125,6 +128,10 @@ function render(e) {
     ? h("button", { type: "button", class: "btn btn-danger", text: "Withdraw…", onclick: () => withdrawDialog(e) })
     : null;
 
+  const restore = e.state === "withdrawn" && config.restoreEntry
+    ? h("button", { type: "button", class: "btn", text: "Restore…", onclick: () => restoreDialog(e) })
+    : null;
+
   return h("div", { class: "entry" },
     h("div", { class: "row entry-top" }, back, kindBadge(e.kind), stateBadge(e.state),
       h("span", { class: "badge badge-muted", text: e.scope }),
@@ -150,6 +157,8 @@ function render(e) {
       h("h3", { text: "State" }),
       h("p", {}, stateBadge(e.state)),
       e.superseded_by ? h("p", {}, "Superseded by ", entryButton({ id: e.superseded_by }, e.superseded_by)) : null,
+      e.withdrawn_at ? h("p", {}, h("span", { class: "muted", text: "Withdrawn " }),
+        h("span", { title: e.withdrawn_at, text: `${fmtTime(e.withdrawn_at)} · ${fmtAgo(e.withdrawn_at)}` })) : null,
       e.withdrawn_reason ? h("p", {}, h("span", { class: "muted", text: "Withdrawn: " }), h("span", { class: "plain", text: e.withdrawn_reason })) : null) : null,
 
     e.tags && e.tags.length ? h("section", { class: "drawer-sec" }, h("h3", { text: "Tags" }),
@@ -187,7 +196,12 @@ function render(e) {
     withdraw ? h("section", { class: "drawer-sec drawer-danger" },
       h("h3", { text: "Withdraw" }),
       h("p", { class: "muted small", text: "Withdrawing removes this memory from every agent's search. It stays here and in the audit log." }),
-      withdraw) : null);
+      withdraw) : null,
+
+    restore ? h("section", { class: "drawer-sec" },
+      h("h3", { text: "Restore" }),
+      h("p", { class: "muted small", text: "Restoring makes this memory active again, so agents can find it. Pins are not restored. If an agent cleanup withdrew it, undo that cleanup instead." }),
+      restore) : null);
 }
 
 // The pin controls fill in once the app says whether this entry is pinned.
@@ -227,6 +241,39 @@ function pinSection(e) {
   return sec;
 }
 
+function restoreDialog(e) {
+  const reason = h("textarea", {
+    id: "f-restore-reason", rows: "3", maxlength: "500", required: true,
+    placeholder: "Why is this being restored?",
+  });
+  openModal({
+    title: "Restore this memory?",
+    body: [
+      h("p", { class: "plain", text: e.summary }),
+      h("p", { class: "muted small", text: "It becomes active again and every agent can find it. Pins it had are not restored. The reason is kept in the audit log." }),
+      h("div", { class: "field" }, h("label", { for: "f-restore-reason", text: "Reason" }), reason),
+    ],
+    actions: [
+      { label: "Cancel" },
+      {
+        label: "Restore",
+        class: "btn-primary",
+        submit: true,
+        onClick: async () => {
+          const text = reason.value.trim();
+          if (!text) throw new Error("Say why it is being restored: the reason is kept in the audit log.");
+          const done = await config.restoreEntry(e.id, text);
+          if (!done) return;
+          closeModal();
+          toast("Memory restored");
+          await show(e.id);
+          onChange();
+        },
+      },
+    ],
+  });
+}
+
 function withdrawDialog(e) {
   const required = config.reasonRequired;
   const reason = h("textarea", {
@@ -237,7 +284,7 @@ function withdrawDialog(e) {
     title: "Withdraw this memory?",
     body: [
       h("p", { class: "plain", text: e.summary }),
-      h("p", { class: "muted small", text: "It disappears from every agent's search and cannot be restored. The reason is kept with the entry." }),
+      h("p", { class: "muted small", text: "It disappears from every agent's search. The reason is kept with the entry, and only an admin can restore it." }),
       h("div", { class: "field" }, h("label", { for: "f-reason", text: "Reason" }), reason),
     ],
     actions: [

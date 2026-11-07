@@ -103,6 +103,7 @@ def referenced_entry_id(record: AuditRecord) -> str | None:
     """The entry a row is about (its target), for the actions that name one."""
     if record.action in (
         AuditAction.ENTRY_WITHDRAW,
+        AuditAction.ENTRY_RESTORE,
         AuditAction.ENTRY_PIN,
         AuditAction.ENTRY_UNPIN,
     ):
@@ -266,6 +267,13 @@ def _summary(
                 text = "Withdrew a memory"
             else:
                 text = f"A memory by {ctx.agent(author)} was withdrawn"
+        case AuditAction.ENTRY_RESTORE:
+            # Only an admin restores (ADR 0124). The reason is shown only for
+            # a memory of this agent (or one it inherits), like any admin note.
+            author = d.get("author")
+            if author in ctx.agents:
+                reason = _text(d.get("reason"))
+            text = f"An admin restored a memory by {ctx.agent(author)}"
         case AuditAction.ENTRY_PIN:
             text = "Pinned a memory"
             if isinstance(d.get("fleet_id"), str):

@@ -57,6 +57,7 @@ async def test_the_subject_query_is_a_bitmap_or_over_the_new_indexes() -> None:
             "audit_log_actor_idx",
             "audit_log_target_idx",
             "audit_log_withdraw_author_idx",
+            "audit_log_restore_author_idx",
             "audit_log_move_agents_idx",
             "audit_log_successor_idx",
         ):
