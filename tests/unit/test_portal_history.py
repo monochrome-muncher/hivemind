@@ -338,6 +338,43 @@ async def test_a_restore_shows_as_an_admin_restoring_a_memory_without_naming_the
     assert ADMIN_ACTOR not in text and "secret old reason" not in text
 
 
+async def test_a_redaction_shows_as_an_admin_redacting_a_memory_with_no_counts() -> None:
+    app, blue, _red = await _seed()
+    mine = await _entry(app, "carol fleet note", scope="fleet", fleet_id=blue.id)
+    elsewhere = await _entry(
+        app,
+        "bob note in another fleet",
+        author="bob",
+        scope="fleet",
+        fleet_id=(await app.store.create_fleet("green")).id,
+    )
+    for entry, author, reason in ((mine, "carol", "token in body"), (elsewhere, "bob", "bobs")):
+        await _row(
+            app,
+            ActorKind.ADMIN_KEY,
+            ADMIN_ACTOR,
+            AuditAction.ENTRY_REDACT,
+            entry.id,
+            {
+                "author": author,
+                "reason": reason,
+                "feedback_notes": 7,
+                "withdraw_reasons": 5,
+            },
+        )
+    rows = await _history(app)
+    redactions = [r for r in rows if r["action"] == "entry.redact"]
+    # Only the rows about this agent: bob's redaction is not in carol's history.
+    assert len(redactions) == 1
+    (row,) = redactions
+    assert row["summary"] == "An admin redacted a memory by this agent"
+    assert row["reason"] == "token in body"
+    assert row["by"] == "admin" and row["agent"] is None and row["entry_id"] == mine.id
+    text = json.dumps(rows)
+    assert ADMIN_ACTOR not in text
+    assert "feedback" not in text and "withdraw_reasons" not in text and " 7 " not in text
+
+
 async def test_a_withdrawn_entry_that_is_gone_from_sight_loses_its_link() -> None:
     app, _blue, _red = await _seed()
     await _row(

@@ -1,5 +1,5 @@
 -- Rollback (ADR 0020): drops the redaction marker and removes the
--- `entry.redact` audit rows the 0029 CHECK cannot hold (`hivemind-migrate`
+-- `entry.redact` audit rows the 0031 CHECK cannot hold (`hivemind-migrate`
 -- refuses this unless `--discard-audit-rows` is given, ADR 0119).
 --
 -- This does NOT bring any redacted text back: the text, the embedding and
@@ -7,6 +7,7 @@
 -- withdrawn with their stub, and a withdrawal reason of `[redacted]` keeps
 -- an older release's cleanup undo from reactivating them.
 DELETE FROM audit_log WHERE action = 'entry.redact';
+DROP INDEX IF EXISTS audit_log_redact_author_idx;
 
 SET LOCAL lock_timeout = '5s';
 ALTER TABLE entries DROP COLUMN IF EXISTS redacted_at;
@@ -39,5 +40,6 @@ ALTER TABLE audit_log
         'agent.retire_undo',
         'agent_key.lock',
         'schema.rollback',
-        'agent.owner_set'
+        'agent.owner_set',
+        'entry.restore'
     ));

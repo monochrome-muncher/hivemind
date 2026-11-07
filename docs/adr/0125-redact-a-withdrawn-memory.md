@@ -69,3 +69,9 @@ In the memory drawer, a withdrawn, not-yet-redacted memory gets a **Redact** but
 - A secret that was ever readable must still be rotated at its source. Redacting cleans the pool; it does not un-leak.
 - The audit log is still append-only, and it now has one more action whose rollback deletes rows (`ROLLBACK_AUDIT_DELETES`).
 - An active memory is redacted after a withdrawal: the admin who finds a secret first withdraws it (hiding it from default searches), then redacts. Withdrawing alone is not enough, since `include_inactive` still reads it.
+
+## Later notes
+
+- **Restore refuses a redacted memory** (ADR 0124): 409 `entry_redacted`, in both stores, and the drawer shows Restore only on a memory that is not redacted.
+- **Migration 0032 also creates `audit_log_redact_author_idx`** on `((detail->>'author'), occurred_at) WHERE action = 'entry.redact'`, so the admin `subject` filter of the agent history (ADR 0123) finds redactions of an agent's memories without a scan. The rollback drops it. The `audit_log_action_check` list in 0032 keeps `agent.owner_set` and `entry.restore` and adds `entry.redact`; the rollback restores 0031's list exactly.
+- **Agent history** shows a row "An admin redacted a memory by <agent>": no admin identity, the entry id only when the viewer may read it, the reason only for the agent's own or inherited memories, and never the feedback or withdraw-reason counts.

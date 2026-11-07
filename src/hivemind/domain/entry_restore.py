@@ -18,6 +18,13 @@ class RestoreRefused(Exception):
     code = "restore_refused"
 
 
+class EntryRedacted(RestoreRefused):
+    """An admin redacted the memory (ADR 0125): its text is gone for good, and
+    an empty memory must never become active."""
+
+    code = "entry_redacted"
+
+
 class EntryNotWithdrawn(RestoreRefused):
     """The memory is active or superseded: there is nothing to restore."""
 
@@ -48,6 +55,13 @@ class Restoration:
 
 def not_withdrawn_message(entry_id: str, state: str) -> str:
     return f"entry {entry_id} is {state}, not withdrawn; only a withdrawn memory can be restored"
+
+
+def redacted_message(entry_id: str) -> str:
+    return (
+        f"entry {entry_id} was redacted and its text is gone for good; "
+        "a redacted memory cannot be restored. Write a new memory instead"
+    )
 
 
 def cleanup_message(entry_id: str, cleanup_id: str) -> str:
@@ -101,6 +115,7 @@ def restore_refusal(
     reason: str | None,
     standing_cleanup: str | None,
     chain_conflict: str | None,
+    redacted: bool = False,
 ) -> RestoreRefused | None:
     """Why ``entry_id`` cannot be restored, or ``None`` when it can.
 
@@ -108,10 +123,12 @@ def restore_refusal(
     memory (the store looks it up); ``chain_conflict`` is the message from
     ``chain_conflict_message`` (the chain rules in ADR 0124).
 
-    Where a later "redacted" state (a withdrawn memory whose text was blanked)
-    arrives, it must refuse here too: a blanked memory has nothing left to
-    bring back, and an empty memory must never become active.
+    A redacted memory (``redacted``, ADR 0125) is refused first: its text was
+    blanked, there is nothing left to bring back, and an empty memory must
+    never become active.
     """
+    if redacted:
+        return EntryRedacted(redacted_message(entry_id))
     if state != "withdrawn":
         return EntryNotWithdrawn(not_withdrawn_message(entry_id, state))
     if standing_cleanup is not None:

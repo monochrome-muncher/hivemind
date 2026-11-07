@@ -48,7 +48,7 @@ What stays allowed is the plain case of rule 3, and a successor or head that a c
 
 ### Redaction
 
-A planned feature will blank the text of a withdrawn memory. A redacted memory has nothing left to bring back and must never become active. The refusal check in `domain/entry_restore.py` carries a comment where that state must also refuse; it is not implemented here.
+Redaction (ADR 0125) blanks the text of a withdrawn memory, which then has nothing left to bring back. Restore refuses a redacted memory with 409 `entry_redacted`, checked first in `restore_refusal` (`domain/entry_restore.py`), in the Postgres update (`AND redacted_at IS NULL`) and in the memory store. The drawer shows no Restore button on a redacted memory.
 
 ### Panel
 

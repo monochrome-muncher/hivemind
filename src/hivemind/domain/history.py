@@ -104,6 +104,7 @@ def referenced_entry_id(record: AuditRecord) -> str | None:
     if record.action in (
         AuditAction.ENTRY_WITHDRAW,
         AuditAction.ENTRY_RESTORE,
+        AuditAction.ENTRY_REDACT,
         AuditAction.ENTRY_PIN,
         AuditAction.ENTRY_UNPIN,
     ):
@@ -274,6 +275,14 @@ def _summary(
             if author in ctx.agents:
                 reason = _text(d.get("reason"))
             text = f"An admin restored a memory by {ctx.agent(author)}"
+        case AuditAction.ENTRY_REDACT:
+            # Only an admin redacts (ADR 0125). Same rule as a restore: the
+            # reason only for a memory of this agent (or one it inherits), and
+            # never the counts of other agents' notes the detail holds.
+            author = d.get("author")
+            if author in ctx.agents:
+                reason = _text(d.get("reason"))
+            text = f"An admin redacted a memory by {ctx.agent(author)}"
         case AuditAction.ENTRY_PIN:
             text = "Pinned a memory"
             if isinstance(d.get("fleet_id"), str):

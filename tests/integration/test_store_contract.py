@@ -57,6 +57,7 @@ from hivemind.domain.entry import (
 )
 from hivemind.domain.entry_restore import (
     EntryNotWithdrawn,
+    EntryRedacted,
     RestoreChainConflict,
     RestoreViaCleanup,
 )
@@ -1075,6 +1076,28 @@ async def test_cleanup_does_not_offer_a_redacted_superseded_memory_for_restore(
     assert (await _state(adapter, junk.id)).state is EntryState.WITHDRAWN
     stub = await _state(adapter, good.id)
     assert stub.state is EntryState.SUPERSEDED and stub.redacted_at is not None
+
+
+async def test_restore_refuses_a_redacted_memory_and_keeps_it_withdrawn(adapter: Adapter) -> None:
+    store = adapter.store
+    secret = await _secret_entry(adapter)
+    await store.withdraw_entry(secret.id, "leak", by_user="alice")
+    await store.redact_entry(secret.id)
+    with pytest.raises(EntryRedacted, match="redacted"):
+        await store.restore_entry(secret.id)
+    got = await store.get_entry(secret.id)
+    assert got is not None and got.state is EntryState.WITHDRAWN
+    assert got.summary == REDACTED_SUMMARY and got.redacted_at is not None
+    # Also a superseded one: the redaction is reported, not "not withdrawn".
+    old = await write(adapter, "old version")
+    await store.create_entry(draft("new version", supersedes=(old.id,)), adapter.vec(0), "m")
+    await store.redact_entry(old.id)
+    with pytest.raises(EntryRedacted):
+        await store.restore_entry(old.id)
+    # A memory that was not redacted still restores.
+    plain = await write(adapter, "plain")
+    await store.withdraw_entry(plain.id, None, by_user="alice")
+    assert (await store.restore_entry(plain.id)).entry.state is EntryState.ACTIVE
 
 
 async def test_a_redacted_memory_cannot_be_withdrawn_or_superseded_back(adapter: Adapter) -> None:
@@ -2666,6 +2689,10 @@ async def test_audit_log_target_and_subject_filters(adapter: Adapter) -> None:
     pin = await row(agent, "amy", AuditAction.ENTRY_PIN, "entry-1", {"fleet_id": "f1"})
     withdraw = await row(admin, "admin:a", AuditAction.ENTRY_WITHDRAW, "entry-2", {"author": "amy"})
     restored = await row(admin, "admin:a", AuditAction.ENTRY_RESTORE, "entry-2", {"author": "amy"})
+    redacted = await row(
+        admin, "admin:a", AuditAction.ENTRY_REDACT, "entry-4", {"author": "amy", "reason": "x"}
+    )
+    await row(admin, "admin:a", AuditAction.ENTRY_REDACT, "entry-5", {"author": "bob"})
     moved = await row(
         admin, "admin:a", AuditAction.FLEET_MOVE_AGENTS, "f1", {"agents": ["bob", "amy"]}
     )
@@ -2692,6 +2719,7 @@ async def test_audit_log_target_and_subject_filters(adapter: Adapter) -> None:
     assert await ids(subjects=("amy",)) == [
         retire.id,
         moved.id,
+        redacted.id,
         restored.id,
         withdraw.id,
         pin.id,
@@ -2700,12 +2728,13 @@ async def test_audit_log_target_and_subject_filters(adapter: Adapter) -> None:
     assert not_moved.id not in await ids(subjects=("amy",))
     both = await ids(subjects=("amy", "old"))
     assert (
-        retire.id in both and trust.id in both and restored.id in both and len(both) == 6
+        retire.id in both and trust.id in both and redacted.id in both and len(both) == 7
     )  # + the retire names old as target
     assert other.id in await ids(subjects=("bob",))
     # AND-ed with the other filters and the paging cursor.
     assert await ids(subjects=("amy",), action=AuditAction.ENTRY_PIN) == [pin.id]
     assert await ids(subjects=("amy",), before=moved.id) == [
+        redacted.id,
         restored.id,
         withdraw.id,
         pin.id,
@@ -2717,6 +2746,7 @@ async def test_audit_log_target_and_subject_filters(adapter: Adapter) -> None:
     assert await ids(subjects=("amy",), actor="admin:a", since=withdraw.occurred_at) == [
         retire.id,
         moved.id,
+        redacted.id,
         restored.id,
         withdraw.id,
     ]

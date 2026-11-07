@@ -216,3 +216,26 @@ def test_the_redact_action_is_passed_in_by_the_admin_panel_and_never_reaches_the
 @pytest.mark.parametrize("action", ["entry.redact"])
 def test_the_audit_page_filters_by_the_new_action(action: str) -> None:
     assert f'"{action}"' in (ADMIN_STATIC / "manage.js").read_text()
+
+
+async def test_restore_refuses_a_redacted_memory_with_its_own_code() -> None:
+    app = make_hivemind_app()
+    entry = await _secret(app)
+    async with make_client(app) as client:
+        await client.post(f"/v1/admin/entries/{entry.id}/withdraw", json={}, headers=ADMIN)
+        await client.post(
+            f"/v1/admin/entries/{entry.id}/redact", json=_body(entry.id), headers=ADMIN
+        )
+        resp = await client.post(
+            f"/v1/admin/entries/{entry.id}/restore", json={"reason": "oops"}, headers=ADMIN
+        )
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "entry_redacted"
+    got = await app.store.get_entry(entry.id)
+    assert got is not None and got.state.value == "withdrawn" and got.redacted_at is not None
+    assert await app.store.list_audit(AuditFilters(action=AuditAction.ENTRY_RESTORE), 10) == []
+
+
+def test_the_drawer_offers_restore_only_on_a_memory_that_is_not_redacted() -> None:
+    drawer = (ADMIN_STATIC / "drawer.js").read_text()
+    assert 'e.state === "withdrawn" && !e.redacted_at && config.restoreEntry' in drawer
