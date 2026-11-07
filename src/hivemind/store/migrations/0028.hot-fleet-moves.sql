@@ -1,0 +1,65 @@
+-- transactional: false
+--
+-- Make a fleet merge, a merge undo and a fleet move fast: let the
+-- `UPDATE entries SET fleet_id = ...` they run be a HOT (heap-only) update.
+--
+-- `MOVE_ENTRIES`, `RESTORE_ENTRIES` and the fleet-move statement change
+-- `entries.fleet_id`. While `entries_fleet_idx` (0001) covers that column,
+-- Postgres cannot make the update HOT, so every moved row is re-inserted
+-- into all 14 indexes on `entries`, including the HNSW vector index (0004),
+-- which is almost all of the time. Measured on 13,334 entries with random
+-- vector(1024) values, moving 6,667 (Postgres 16, pgvector 0.8.7):
+--
+--   today (index kept, fillfactor 100)       11.2 s     0 HOT updates
+--   index dropped, fillfactor 100            11.3 s    45 (pages are full)
+--   index dropped, fillfactor 70              1.09 s 6,145
+--   index dropped, fillfactor 50              0.034 s 6,667 (all)
+--
+-- At fillfactor 50 three merge-and-undo rounds in a row stayed fully HOT:
+-- Postgres prunes the dead versions in the page itself. The main heap
+-- doubles (10 MB -> 21 MB at 13k entries); vectors live in TOAST and are not
+-- affected, so the table with TOAST and indexes grows about 6% (188 -> 199 MB).
+--
+-- The price of dropping the index is that every read that filters on
+-- `fleet_id` alone now scans the table, and the cost grows with the whole
+-- pool, not with the fleet. Measured at 200k entries (EXPLAIN ANALYZE):
+--
+--   * the agent portal's fleet view and its CSV export
+--     (`GET /v1/portal/entries?fleet_id=`) and portal search with a fleet
+--     filter, via `_filter_conditions`: a 20-entry fleet 0.08 ms -> 35 ms
+--     (parallel seq scan); a 1.9k-entry fleet at offset 500 7 -> 34 ms;
+--     the count behind the list 0.04 -> 32 ms;
+--   * the admin memory list with a fleet filter and the merge preview
+--     counts: a seq scan too (10 ms against 7 ms at 13k entries);
+--   * `MOVE_ENTRIES` itself is now a seq scan: 268 ms at 200k entries
+--     (the 34 ms above is at 13k);
+--   * the merge preview's duplicate scan: the code now looks up a small
+--     fleet exactly instead of through the HNSW index (see
+--     `EXACT_DUPLICATE_LOOKUP_MAX` in domain/fleet_merge.py), because the
+--     filtered HNSW scan cost 1,156 ms for two 20-entry fleets.
+--
+-- Agent searches never used the index (the visibility clause is an OR).
+-- No index may cover `fleet_id` again, or the moves stop being HOT;
+-- ADR 0126, and a Postgres test pins it.
+--
+-- `fillfactor` applies only to pages written from now on. A row already in
+-- a full page pays the slow path (every index, the HNSW one included) on its
+-- FIRST move only: the new version lands on a page that respects the
+-- fillfactor, and from then on, and for its undo, the update is HOT
+-- (measured: the move back was 10,000 of 10,000 HOT). So no rewrite is
+-- needed. `VACUUM FULL entries` is optional and an outage: it rebuilds
+-- every index under ACCESS EXCLUSIVE, the HNSW one most of all (80 s at 200k
+-- rows of 32-dim vectors; many minutes at 1024 dims, with a new HNSW graph,
+-- ADR 0025). Only worth it if that first merge would cost more than the
+-- outage (docs/ops-runbook.md, "Merging fleets").
+--
+-- `CONCURRENTLY` (hence `-- transactional: false`, ADR 0020 §6 / ADR 0025)
+-- so the drop takes no long lock while sibling replicas serve traffic;
+-- `IF EXISTS` so a re-run after a partial apply is a no-op.
+--
+-- Expand-and-contract (ADR 0020): an older sibling pod never needs the
+-- index. It runs the same queries, which only get a seq scan where they used
+-- to use it, and the storage parameter changes nothing it can see.
+ALTER TABLE entries SET (fillfactor = 50);
+
+DROP INDEX CONCURRENTLY IF EXISTS entries_fleet_idx;

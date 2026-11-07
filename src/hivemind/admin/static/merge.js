@@ -20,9 +20,11 @@ const entryCounts = (entries) => {
   return `${fmtNum(total)} memories${parts.length ? ` (${parts.join(", ")})` : ""}`;
 };
 
-// Re-filing a memory rewrites its row and re-inserts its vector into the search
-// index: about 12 ms each on a 200k-memory bench (2026-10-29 perf check). Fleet
-// writes are refused with 503 fleet_busy until it commits, so say how long.
+// Re-filing a memory that was never moved since the upgrade (ADR 0126) rewrites
+// its row and re-inserts its vector into the search index: about 12 ms each on a
+// 200k-memory bench (2026-10-29 perf check). That is a ceiling: a memory moved
+// before, or written after the upgrade, is rewritten in place in milliseconds.
+// Fleet writes are refused with 503 fleet_busy until it commits, so say how long.
 const MS_PER_MEMORY = 12;
 const lockNote = (memories) => {
   const seconds = Math.ceil((memories * MS_PER_MEMORY) / 1000);
