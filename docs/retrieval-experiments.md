@@ -374,7 +374,7 @@ improve.
 
 > **Removed (ADR 0103).** The confirmation clock was re-measured on 2026-10-21 with the Qwen3 embedders, came out worse, and was taken out. The results below are kept as history; `tests/eval/confirmation.py` is now `tests/eval/ranking.py` and no longer measures it.
 
-*(tools: `tests/eval/confirmation.py`, `make measure-confirmation`; the
+*(tools at the time: `tests/eval/confirmation.py`, `make measure-confirmation`, both since removed; the
 embedding-free slices in `test_social_scenarios.py` and
 `test_aged_currency.py`)* `HIVEMIND_RECENCY_FROM_CONFIRMATION` is off by
 default. With it on, the social factor is `min(social_max, quality ×
@@ -430,7 +430,7 @@ this fixture the pass rule is **not** met; it says nothing yet about the
 real embedders, whose match scores separate more, which is why the setting
 stays off.
 
-**The measurement entry point.** `make measure-confirmation` seeds each
+**The measurement entry point.** `make measure-confirmation` (since removed) seeded each
 domain of `tests/eval/domains.py` and the pool of all five with entries aged
 0 to 400 days (a deterministic golden-ratio spread), sprinkles
 confirmations on the 20% with the smallest summary hash (helpful with a

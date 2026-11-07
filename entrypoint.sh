@@ -14,7 +14,7 @@
 #   HIVEMIND_RUNNER=mcp-http  hostable multi-agent MCP runner (ADR 0010)
 #   HIVEMIND_RUNNER=admin     admin panel UI + proxy to hivemind-api (ADR 0029)
 #   HIVEMIND_RUNNER=portal    agent portal UI + proxy to hivemind-api (ADR 0095)
-#   HIVEMIND_RUNNER=migrate   idempotent schema migration (ADR 0013)
+#   HIVEMIND_RUNNER=migrate   idempotent schema migration (ADR 0020)
 #   HIVEMIND_RUNNER=keys      key-management CLI (SPEC §8.1, ADR 0012)
 #
 # Default: mcp-http (the compose service sets no HIVEMIND_RUNNER).

@@ -43,7 +43,11 @@ retiring an agent with a successor (ADR 0113). 2.15.0 gave the
 people behind an agent the same self-service in the portal: key
 last-use (ADR 0114), a "Needs attention" page (ADR 0115), pinning
 (ADR 0116), locking a leaked key (ADR 0117) and cleaning up their
-own agent's work (ADR 0118).
+own agent's work (ADR 0118). 2.16.0 was bug fixes and a faster flag
+backlog, and dropped the legacy Pi adapter route. 2.17.0 was bug and security
+fixes and safer migration rollbacks: `hivemind-migrate --rollback` no longer
+erases audit rows, revives revoked keys or unlocks locked keys unless asked
+(ADR 0119, migration 0027).
 Tier 4's measurement items are closed or deferred with their reasons.
 The SPEC §10 extensions (Tier 5) stay held until their triggers fire.
 
