@@ -94,6 +94,7 @@ from hivemind.domain.feedback import (
     truncate_note,
 )
 from hivemind.domain.fleet_merge import (
+    EXACT_DUPLICATE_LOOKUP_MAX,
     KIND_MERGE,
     KIND_MOVE,
     DroppedPin,
@@ -395,6 +396,23 @@ SELECT a.id AS entry_id, n.id AS match_id, n.sim
  WHERE n.sim >= $4
  ORDER BY n.sim DESC, a.id
 """
+# The same pairs when the fleet looked into ($2) is small: its vectors are
+# read once (no fleet_id index, ADR 0126, so the HNSW scan would be filtered)
+# and each lookup is an exact distance sort over them.
+DUPLICATE_PAIRS_EXACT = """
+WITH b AS MATERIALIZED (
+       SELECT id, embedding FROM entries
+        WHERE fleet_id = $2 AND state = 'active' AND embedding IS NOT NULL)
+SELECT a.id AS entry_id, n.id AS match_id, n.sim
+  FROM (SELECT id, embedding FROM entries
+         WHERE fleet_id = $1 AND state = 'active' AND embedding IS NOT NULL
+         ORDER BY created_at DESC, id LIMIT $3) a
+ CROSS JOIN LATERAL (
+       SELECT b.id, 1 - (b.embedding <=> a.embedding) AS sim FROM b
+        ORDER BY b.embedding <=> a.embedding LIMIT 1) n
+ WHERE n.sim >= $4
+ ORDER BY n.sim DESC, a.id
+"""
 # A preview's lookups stay under the pool's command timeout (30 s): the
 # server cancels the scan first, and each lookup visits a bounded graph part.
 DUPLICATE_SCAN_SETTINGS = """
@@ -404,6 +422,11 @@ SET LOCAL hnsw.max_scan_tuples = 20000;
 COUNT_DUPLICATE_CANDIDATES = (
     "SELECT count(*) FROM entries "
     "WHERE fleet_id = $1 AND state = 'active' AND embedding IS NOT NULL"
+)
+# Counts up to $2 + 1 of the same rows, so a big fleet is not counted whole.
+COUNT_DUPLICATE_CANDIDATES_UPTO = (
+    "SELECT count(*) FROM (SELECT 1 FROM entries "
+    "WHERE fleet_id = $1 AND state = 'active' AND embedding IS NOT NULL LIMIT $2 + 1) c"
 )
 
 # --- Agent cleanup SQL (ADR 0111) --------------------------------------------
@@ -2532,7 +2555,19 @@ class PgStore:
                     await conn.execute(VECTOR_SEARCH_SETTINGS)
                     await conn.execute(DUPLICATE_SCAN_SETTINGS)
                     total = int(await conn.fetchval(COUNT_DUPLICATE_CANDIDATES, fleet_id))
-                    rows = await conn.fetch(DUPLICATE_PAIRS, fleet_id, other_id, looked, threshold)
+                    # A small fleet looked into is scanned exactly (no fleet_id
+                    # index, so the HNSW scan would be filtered; ADR 0126).
+                    into = int(
+                        await conn.fetchval(
+                            COUNT_DUPLICATE_CANDIDATES_UPTO, other_id, EXACT_DUPLICATE_LOOKUP_MAX
+                        )
+                    )
+                    sql = (
+                        DUPLICATE_PAIRS_EXACT
+                        if into <= EXACT_DUPLICATE_LOOKUP_MAX
+                        else DUPLICATE_PAIRS
+                    )
+                    rows = await conn.fetch(sql, fleet_id, other_id, looked, threshold)
             except asyncpg.exceptions.QueryCanceledError:
                 continue
             pairs = tuple(

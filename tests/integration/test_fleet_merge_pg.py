@@ -271,6 +271,45 @@ async def test_a_duplicate_scan_the_server_cancels_is_reported_incomplete(
     assert (scan.pairs, scan.looked_up, scan.truncated) == ((), 0, True)
 
 
+async def test_a_small_fleet_is_scanned_exactly_and_agrees_with_the_index_path(
+    pool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fleet ``fleet_id`` has no index (ADR 0126), so a small fleet looked
+    into is read exactly. Both statements must return the same pairs."""
+    _dsn, store, _auth = pool
+    a, b = await store.create_fleet("alpha"), await store.create_fleet("beta")
+    dim = Settings().embedding_dim
+
+    def vec(hot: int) -> list[float]:
+        v = [0.0] * dim
+        v[hot] = 1.0
+        return v
+
+    for i in range(3):
+        await store.create_entry(_draft(a.id, f"mine {i}"), vec(i))
+        await store.create_entry(_draft(b.id, f"theirs {i}"), vec(i))
+    await store.create_entry(_draft(a.id, "unmatched"), vec(7))
+
+    # Break the statement the other path would use, so each run proves its own.
+    with monkeypatch.context() as m:
+        m.setattr(pgstore_module, "DUPLICATE_PAIRS", "SELECT broken")
+        exact = await store.duplicate_pairs(a.id, b.id, 0.9, 100)
+    with monkeypatch.context() as m:
+        m.setattr(pgstore_module, "EXACT_DUPLICATE_LOOKUP_MAX", 0)
+        m.setattr(pgstore_module, "DUPLICATE_PAIRS_EXACT", "SELECT broken")
+        indexed = await store.duplicate_pairs(a.id, b.id, 0.9, 100)
+    assert len(exact.pairs) == 3
+    assert [(p.entry_id, p.match_id) for p in exact.pairs] == [
+        (p.entry_id, p.match_id) for p in indexed.pairs
+    ]
+    assert [round(p.similarity, 4) for p in exact.pairs] == [
+        round(p.similarity, 4) for p in indexed.pairs
+    ]
+    assert (
+        (exact.looked_up, exact.truncated) == (indexed.looked_up, indexed.truncated) == (4, False)
+    )
+
+
 async def test_a_lock_wait_after_the_fleet_guard_is_fleet_busy_too(
     pool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
