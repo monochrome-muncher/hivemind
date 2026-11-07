@@ -129,3 +129,4 @@ is unused.
 | [0117](0117-lock-your-own-key-from-the-portal.md) | Lock the agent's own key from the portal | Accepted; amends 0095, 0108, migration 0025, agent key only, audited `agent_key.lock`, cleared by Replace key |
 | [0118](0118-agent-cleans-up-its-own-work.md) | An agent cleans up its own work from the portal | Accepted; amends 0095, 0111, builds on 0113, migration 0026, agent key only, undoable |
 | [0119](0119-rollbacks-do-not-silently-erase-the-audit-log.md) | Rollbacks do not silently erase the audit log | Accepted; amends 0020, 0027, migration 0027, `hivemind-migrate --rollback` refuses without `--discard-audit-rows` / `--revive-revoked-keys` / `--unlock-locked-keys`, audited `schema.rollback` |
+| [0120](0120-admin-creates-an-agent-for-its-owner.md) | An admin creates an agent for its owner | Accepted; touches 0012, 0029, 0039, 0046, `POST /v1/admin/agents` and the panel's New agent, no migration, audited as `agent.register` + `agent.activate` |

@@ -266,7 +266,10 @@ uv run hivemind-keys rotate-agent --name alice
 
 The admin REST surface does the same (`POST /v1/admin/agents/{name}/activate`
 returns the generated agent key **once** — the only moment a key is ever
-shown). Raw keys are random 32-byte secrets shown once; only the SHA-256
+shown). For an owner who has not registered, **New agent** on the admin
+panel's Agents page (or `POST /v1/admin/agents` with `name`, `owner_alias`,
+`trust_level` and `home_fleet_id`) registers and activates the agent in one
+step and shows the key once; an existing name is refused (ADR 0120). Raw keys are random 32-byte secrets shown once; only the SHA-256
 hash is stored (a leaked database never leaks usable keys, SPEC §8.1).
 
 ### Rotation / revocation
