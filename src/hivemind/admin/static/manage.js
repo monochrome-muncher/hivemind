@@ -8,6 +8,7 @@ import {
 } from "./core.js";
 import { openEntry } from "./drawer.js";
 import { PIN_HEADERS, pinRow } from "./lists.js";
+import { column } from "./csv.js";
 import { cleanupDialog, cleanupsCard } from "./cleanup.js";
 import { mergeDialog, mergesCard, moveDialog } from "./merge.js";
 import { retireDialog, successionsCard } from "./retire.js";
@@ -355,25 +356,16 @@ export function pendingQueue(refresh) {
       tbody)));
 }
 
-export async function viewAudit(root) {
-  await loadAgentsAndFleets().catch(() => undefined); // for fleet names only
-  // A merged fleet is not in state.fleets, but audit rows still name it.
-  const everyFleet = (await optional(() => api("GET", "admin/fleets", { query: { include_merged: "true" } }))) || [];
-  const nameOf = (id) => {
-    const fleet = everyFleet.find((f) => f.id === id);
-    return fleet ? fleet.name : fleetName(id);
-  };
-  const actor = h("input", { type: "search", placeholder: "Actor (exact), e.g. admin:1a2b3c4d5e6f" });
-  const action = h("select", {}, h("option", { value: "", text: "All actions" }), AUDIT_ACTIONS.map((a) => h("option", { value: a, text: a })));
-  const since = h("input", { type: "datetime-local", title: "Since (local time)" });
-  const apply = h("button", { type: "submit", class: "btn", text: "Apply" });
-  const form = h("form", { class: "filters" }, actor, action, since, apply);
-  const tbody = h("tbody");
-  const more = h("button", { type: "button", class: "btn", text: "Load older" });
-  const moreWrap = h("div", { class: "load-more" }, more);
-  let cursor = null;
+export const AUDIT_HEADERS = ["When", "Kind", "Actor", "Action", "Target", "Detail"];
 
-  // Fleet ids read better as names; the id stays in the tooltip.
+/** CSV columns for audit rows (the ADR 0027 shape; `detail` as JSON). */
+export const auditCsvColumns = [
+  column("occurred_at"), column("actor_kind"), column("actor"), column("action"), column("target"),
+  column("detail", (r) => (r.detail && Object.keys(r.detail).length ? JSON.stringify(r.detail) : "")),
+];
+
+/** Builds the <tr> for one audit row; `nameOf(fleetId)` names a fleet (merged ones too). Fleet ids read better as names; the id stays in the tooltip. */
+export function auditRow(nameOf) {
   const target = (r) => {
     if (r.target && r.action === "fleet.create") {
       return h("td", { title: r.target, text: (r.detail && r.detail.name) || fleetName(r.target) });
@@ -420,10 +412,39 @@ export async function viewAudit(root) {
     h("td", { text: r.action }),
     target(r),
     h("td", { class: "detail", text: detail(r) }));
+  return row;
+}
+
+export async function viewAudit(root) {
+  await loadAgentsAndFleets().catch(() => undefined); // for fleet names only
+  // A merged fleet is not in state.fleets, but audit rows still name it.
+  const everyFleet = (await optional(() => api("GET", "admin/fleets", { query: { include_merged: "true" } }))) || [];
+  const nameOf = (id) => {
+    const fleet = everyFleet.find((f) => f.id === id);
+    return fleet ? fleet.name : fleetName(id);
+  };
+  const preset = parseHash().params;
+  const actor = h("input", { type: "search", placeholder: "Actor (exact), e.g. admin:1a2b3c4d5e6f", value: preset.get("actor") || "" });
+  const subject = h("input", { type: "search", placeholder: "About agent (exact name)", value: preset.get("subject") || "",
+    title: "Rows about this agent: its own actions, admin actions on it, withdrawals of its memories, fleet moves and retirements that name it" });
+  const target = h("input", { type: "search", placeholder: "Target (exact), e.g. an agent name or entry id", value: preset.get("target") || "" });
+  const action = h("select", {}, h("option", { value: "", text: "All actions" }), AUDIT_ACTIONS.map((a) => h("option", { value: a, text: a })));
+  if (AUDIT_ACTIONS.includes(preset.get("action"))) action.value = preset.get("action");
+  const since = h("input", { type: "datetime-local", title: "Since (local time)" });
+  const apply = h("button", { type: "submit", class: "btn", text: "Apply" });
+  const form = h("form", { class: "filters" }, subject, actor, target, action, since, apply);
+  const tbody = h("tbody");
+  const more = h("button", { type: "button", class: "btn", text: "Load older" });
+  const moreWrap = h("div", { class: "load-more" }, more);
+  let cursor = null;
+
+  const row = auditRow(nameOf);
 
   const load = async (append) => {
     const query = {
       actor: actor.value.trim(),
+      subject: subject.value.trim(),
+      target: target.value.trim(),
       action: action.value,
       since: since.value ? new Date(since.value).toISOString() : "",
       limit: AUDIT_PAGE,

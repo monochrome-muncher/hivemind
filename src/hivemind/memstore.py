@@ -2067,6 +2067,9 @@ class MemoryStore:
                 ids = [r.id for r in ordered]
                 if filters.before not in ids:
                     return []
+                cursor = ordered[ids.index(filters.before)]
+                if filters.subjects and not AuditFilters(subjects=filters.subjects).matches(cursor):
+                    return []  # the cursor row must be about the subject too
                 ordered = ordered[ids.index(filters.before) + 1 :]
             return [r for r in ordered if filters.matches(r)][:limit]
 

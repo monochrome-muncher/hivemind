@@ -58,6 +58,8 @@ _ALLOWED = allowlist(
         ("POST", r"portal/cleanup"),
         ("GET", r"portal/cleanups"),
         ("POST", r"portal/cleanups/[^/]+/undo"),
+        # What happened to the agent and its predecessors (ADR 0123).
+        ("GET", r"portal/history"),
         # "This key leaked": locks the signed-in key, nothing else.
         ("POST", r"portal/key/lock"),
     )

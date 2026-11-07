@@ -351,13 +351,32 @@ curl -s -H "X-API-Key: $ADMIN_KEY" \
   **Stop the app tier first.** The counts do not block live writes, so a
   row written between the count and the DDL is deleted uncounted;
   `discarded_audit_rows` is the count taken before the rollback.
-  Once a migration above `0027` exists and `0027` stays applied, each
+  While `0027` stays applied (a rollback of `0030` alone, say), each
   successful rollback writes one `schema.rollback` row (`actor_kind = cli`,
   the OS user, the most recent migration id as target, `{rolled_back,
-  discarded_audit_rows}` as detail). Until then `0027` is the head, every
-  rollback takes it along, and the WARNING on stderr is the only record;
-  rolling back `0027` deletes any such rows (so it needs
-  `--discard-audit-rows` once they exist).
+  discarded_audit_rows}` as detail). A rollback that takes `0027` along
+  leaves the WARNING on stderr as the only record; rolling back `0027`
+  deletes any such rows (so it needs `--discard-audit-rows` once they
+  exist).
+- **Reading one agent's history** (ADR 0123, migration `0030`).
+  `GET /v1/admin/audit-log?subject=<agent>` returns the rows about that
+  agent, newest first: its own key as actor, admin actions on it,
+  withdrawals of its memories, fleet moves and retirements that name it.
+  `target=<exact>` filters on the row's target alone. The admin panel
+  shows the same list on the agent's page ("History", with a CSV export)
+  and as two filter fields on the Audit log page. The agent portal's
+  "History" page shows the same for the agent (and the agents it
+  inherits from) without naming the admin; nothing about it needs
+  configuration. Migration `0030` builds four indexes `CONCURRENTLY`
+  (`audit_log_target_idx`, `audit_log_withdraw_author_idx`,
+  `audit_log_move_agents_idx`, `audit_log_successor_idx`); if a build is
+  cancelled it leaves an `INVALID` index, which you drop and re-run
+  (`DROP INDEX CONCURRENTLY <name>`, then `make migrate`). The
+  `subject` query reads through a BitmapOr of these and the existing
+  `audit_log_actor_idx`; it runs with a custom plan (`SET LOCAL
+  plan_cache_mode`), because a generic plan walks `occurred_at` backwards
+  and filters the whole log. Rolling `0030` back only drops the indexes
+  and writes a `schema.rollback` row.
 - **Raw SQL bypasses it.** A hand-run `DELETE FROM credentials …` is not
   audited; prefer the CLI even for break-glass work.
 

@@ -78,6 +78,24 @@ export function pagedTable({ headers, className = "entries", fetchPage, renderRo
 }
 
 /**
+ * Adapts a list the API pages by cursor (newest first, `before=<id of the last
+ * row>`) to the {limit, offset} pages `pagedTable` and the CSV export ask for.
+ * `fetchPage({limit, before})` resolves to rows or undefined. The id that ends
+ * each position is remembered, so a page at offset N finds its cursor; pages
+ * are always asked for in order from offset 0, which re-reads the filters.
+ */
+export function cursorPages(fetchPage, idOf = (row) => row.id) {
+  const cursors = new Map([[0, ""]]);
+  return async ({ limit, offset, fresh }) => {
+    const before = cursors.get(offset);
+    if (before === undefined) throw new Error("That page is no longer available. Reload the list.");
+    const rows = await fetchPage({ limit, before, fresh });
+    if (rows && rows.length) cursors.set(offset + rows.length, idOf(rows[rows.length - 1]));
+    return rows;
+  };
+}
+
+/**
  * An "Export CSV" button: fetches every row `fetchPage` gives (up to
  * EXPORT_MAX) and saves them under `columns` as hivemind-<name>-<date>.csv.
  * `generation()` changes whenever the list reloads from the top; an export

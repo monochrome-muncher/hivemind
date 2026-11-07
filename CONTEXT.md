@@ -264,6 +264,9 @@ _Avoid_: operator key, root key, superuser
 **Audit log**:
 The append-only record of admin-surface actions (agent registration, activation, trust-level and home-fleet changes, revocation, key issuance, org-key rotation, an admin's withdrawal of another agent's entry) — distinct from an entry's provenance and its supersession chain, neither of which this term describes.
 
+**Agent history**:
+The audit-log rows about one agent: its own actions, the admin's actions on it, withdrawals of its memories and the fleet moves and retirements that name it. The admin panel shows them in full; the agent portal shows its agent's, and those of the agents it inherits from, without naming the admin (ADR 0123).
+
 **Key fingerprint**:
 The first 12 hex characters of a key's stored SHA-256 hash — what `hivemind-keys list` shows and what the audit log records to identify a key (ADR 0027). Non-secret: it names a key without being usable as one.
 _Avoid_: key id, key prefix (it is a prefix of the hash, never of the key)
