@@ -25,6 +25,7 @@ from hivemind.domain.entry import (
     Source,
     SourceType,
 )
+from hivemind.domain.entry_restore import EntryRedacted
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.domain.redaction import RedactRefused
 from hivemind.ports import Credential
@@ -275,3 +276,21 @@ async def test_only_one_of_two_simultaneous_redactions_succeeds(pool) -> None:
         store.redact_entry(entry.id), store.redact_entry(entry.id), return_exceptions=True
     )
     assert sorted(type(r).__name__ for r in results) == ["RedactOutcome", "RedactRefused"]
+
+
+async def test_restore_refuses_a_stub_after_0032_is_rolled_back_and_reapplied(pool) -> None:
+    """The rollback drops ``redacted_at``; applying 0032 again brings it back
+    NULL. The stub must still never be restored as an empty active memory."""
+    dsn, dim, store = pool
+    entry = await _leaky(store, dim)
+    await store.withdraw_entry(entry.id, "leaked", by_user="admin")
+    await store.redact_entry(entry.id)
+    conn = await asyncpg.connect(dsn)
+    try:
+        await conn.execute("UPDATE entries SET redacted_at = NULL WHERE id = $1", entry.id)
+    finally:
+        await conn.close()
+    with pytest.raises(EntryRedacted):
+        await store.restore_entry(entry.id)
+    got = await store.get_entry(entry.id)
+    assert got is not None and got.state is EntryState.WITHDRAWN

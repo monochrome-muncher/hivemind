@@ -21,6 +21,7 @@ from tests.fakes import FIXED_NOW, FixedClock, make_embedder
 from tests.unit.test_api_endpoints import make_app_with_clock, make_client, make_hivemind_app
 
 ADMIN = {"X-API-Key": "key-admin"}
+ADMIN_CRED = Credential(user_id="admin", is_admin=True, key_id="abcdef012345")
 ALICE = {"X-API-Key": "key-alice"}
 ORG = {"X-API-Key": "key-org"}
 PRIVILEGED = {"X-API-Key": "key-privileged"}
@@ -300,6 +301,33 @@ async def test_admin_restore_puts_the_memory_back_and_is_audited() -> None:
         "previous_reason": "wrong",
         "reason": "it was right",
     }
+
+
+async def test_restore_audits_the_reason_trimmed_like_a_redaction() -> None:
+    app, _, _, _, in_blue, _ = await _seed()
+    await app.store.withdraw_entry(in_blue.id, "wrong", by_user="admin")
+    await app.governance_service.restore(ADMIN_CRED, in_blue.id, "  it was right \n")
+    [record] = await app.store.list_audit(AuditFilters(action=AuditAction.ENTRY_RESTORE), 10)
+    assert record.detail["reason"] == "it was right"
+
+
+async def test_restore_refuses_a_redaction_stub_without_its_marker() -> None:
+    """Rolling back migration 0032 and applying it again leaves the stub with
+    ``redacted_at`` NULL; it must still never come back (ADR 0125)."""
+    from dataclasses import replace
+
+    from hivemind.domain.entry_restore import EntryRedacted
+
+    app, _, _, _, in_blue, _ = await _seed()
+    store = app.store
+    assert isinstance(store, MemoryStore)
+    await store.withdraw_entry(in_blue.id, "leaked", by_user="admin")
+    await store.redact_entry(in_blue.id)
+    store._entries[in_blue.id] = replace(store._entries[in_blue.id], redacted_at=None)
+    with pytest.raises(EntryRedacted):
+        await store.restore_entry(in_blue.id)
+    stored = await store.get_entry(in_blue.id)
+    assert stored is not None and stored.state is EntryState.WITHDRAWN
 
 
 async def test_restore_service_refuses_a_non_admin_itself() -> None:

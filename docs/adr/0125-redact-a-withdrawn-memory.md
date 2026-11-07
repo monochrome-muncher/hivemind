@@ -34,7 +34,7 @@ An admin can **redact** a memory that is already inactive: `withdrawn`, or `supe
 
 Kept: kind, scope, author, agent, fleet, importance, `occurred_at`, `created_at`, `state` (still `withdrawn` or `superseded`), `superseded_by`, the memories it superseded, the feedback rows and the audit trail. Links from other memories to it also stay, so a memory that linked to it still learns the target changed (ADR 0081).
 
-**Feedback notes and flag notes are not edited.** They belong to other agents and may quote the text, but editing a rating changes its author's record and the flag counts. The response and the audit row count them (`feedback_notes`, and in the response `flag_notes`, the stale and wrong ones among them) so the admin can review them by hand; the runbook says how. The same goes for the `entry.withdraw` audit rows of the memory: the audit log is never edited, so the response and the `entry.redact` detail count those with a non-empty reason (`withdraw_reasons`).
+**Feedback notes and flag notes are not edited.** They belong to other agents and may quote the text, but editing a rating changes its author's record and the flag counts. The response and the audit row count them (`feedback_notes`, and in the response `flag_notes`, the stale and wrong ones among them) so the admin can review them by hand; the runbook says how. The same goes for the audit rows of the memory that hold a withdrawal reason: the audit log is never edited, so the response and the `entry.redact` detail count them (`withdraw_reasons`): each `entry.withdraw` row with a non-empty `reason`, and each `entry.restore` row (ADR 0124) with a non-empty `previous_reason`, the withdrawal reason the restore copied from the memory.
 
 The wipe is one `UPDATE` plus the keyword and link clean-up in one transaction under a row lock, so the memory is never half redacted and two redactions cannot both succeed.
 
@@ -47,7 +47,7 @@ Every path that sets a withdrawn memory active again refuses or skips a redacted
 - withdrawing again and superseding already refuse a non-active memory.
 - the agent-cleanup restore sets `superseded` memories active. A redacted superseded memory is neither offered by the preview nor restored (`redacted_at IS NULL` in the restorable set and in the update).
 
-**A separate planned feature will add an admin "restore" route. It must refuse redacted memories**, with the same 409 as everywhere else.
+**A separate planned feature will add an admin "restore" route. It must refuse redacted memories**, with the same 409 as everywhere else. (It does, ADR 0124: `entry_redacted`. It also refuses a stub that has lost its `redacted_at`, which happens when `0032` is rolled back and applied again: summary and withdrawal reason `[redacted]`, no body and no embedding. A real memory always has an embedding, so the test never matches one.)
 
 ### Reads
 

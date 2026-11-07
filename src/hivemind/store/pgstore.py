@@ -129,7 +129,12 @@ from hivemind.domain.health import (
     TagDispersion,
 )
 from hivemind.domain.pin import Pin, PinRefusal, PinWrite, pin_refusal
-from hivemind.domain.redaction import REDACTED_SUMMARY, RedactOutcome, RedactRefused
+from hivemind.domain.redaction import (
+    REDACTED_SUMMARY,
+    RedactOutcome,
+    RedactRefused,
+    is_redaction_stub,
+)
 from hivemind.domain.succession import (
     AgentRetired,
     HandedDown,
@@ -759,8 +764,14 @@ WITHDRAW = (
 # the transaction advisory lock serialises two restores, whose chain checks
 # would otherwise not see each other.
 RESTORE_LOCK = "SELECT pg_advisory_xact_lock(hashtext('entry.restore'))"
+# The author never changes, so it is read before any lock: the restore then takes
+# that author's cleanup lock (``CLEANUP_AGENT_LOCK``) before the row, as a
+# cleanup and its undo do, so a cleanup of the author never misses a memory a
+# restore is putting back.
+RESTORE_AUTHOR = "SELECT author FROM entries WHERE id = $1"
 RESTORE_LOCK_ROW = (
-    "SELECT state, withdrawn_reason, redacted_at FROM entries WHERE id = $1 FOR UPDATE"
+    "SELECT state, withdrawn_reason, redacted_at, summary, body, "
+    "embedding IS NOT NULL AS has_embedding FROM entries WHERE id = $1 FOR UPDATE"
 )
 # A not-undone cleanup that withdrew the memory (its reason is the cleanup's).
 RESTORE_STANDING_CLEANUP = """
@@ -813,11 +824,14 @@ REDACT = (
     "RETURNING " + _ENTRY_COLUMNS
 )
 REDACT_CLEAR_TSV = "UPDATE entries SET search_tsv = NULL WHERE id = $1"
-# Withdrawal audit rows of this memory with a non-empty reason: the audit log is
-# never edited, so these are counted for the admin to review by hand.
+# Audit rows of this memory that hold a withdrawal reason: an `entry.withdraw`
+# row's `reason`, and the `previous_reason` an `entry.restore` row copied from
+# the memory (ADR 0124). The audit log is never edited, so these are counted for
+# the admin to review by hand.
 REDACT_COUNT_WITHDRAW_REASONS = (
-    "SELECT count(*) FROM audit_log WHERE action = 'entry.withdraw' AND target = $1::text "
-    "AND btrim(coalesce(detail->>'reason', '')) <> ''"
+    "SELECT count(*) FROM audit_log WHERE target = $1::text AND ("
+    "(action = 'entry.withdraw' AND btrim(coalesce(detail->>'reason', '')) <> '') "
+    "OR (action = 'entry.restore' AND btrim(coalesce(detail->>'previous_reason', '')) <> ''))"
 )
 REDACT_DROP_LINKS = "DELETE FROM entry_links WHERE from_id = $1"
 REDACT_COUNT_NOTES = (
@@ -2256,13 +2270,19 @@ class PgStore:
             raise KeyError(f"unknown entry: {entry_id}")
         async with self._transaction() as conn:
             await conn.execute(RESTORE_LOCK)
+            author = await conn.fetchval(RESTORE_AUTHOR, entry_id)
+            if author is None:
+                raise KeyError(f"unknown entry: {entry_id}")
+            await conn.execute(CLEANUP_AGENT_LOCK, author)
             existing = await conn.fetchrow(RESTORE_LOCK_ROW, entry_id)
             if existing is None:
                 raise KeyError(f"unknown entry: {entry_id}")
             reason = existing["withdrawn_reason"]
             standing = None
             chain = None
-            redacted = existing["redacted_at"] is not None
+            redacted = existing["redacted_at"] is not None or is_redaction_stub(
+                existing["summary"], existing["body"], reason, existing["has_embedding"]
+            )
             if existing["state"] == "withdrawn" and not redacted:
                 found = await conn.fetchval(RESTORE_STANDING_CLEANUP, entry_id, reason)
                 standing = str(found) if found is not None else None

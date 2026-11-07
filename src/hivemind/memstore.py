@@ -126,7 +126,12 @@ from hivemind.domain.health import (
     owner_key,
 )
 from hivemind.domain.pin import Pin, PinRefusal, PinWrite, pin_refusal
-from hivemind.domain.redaction import REDACTED_SUMMARY, RedactOutcome, RedactRefused
+from hivemind.domain.redaction import (
+    REDACTED_SUMMARY,
+    RedactOutcome,
+    RedactRefused,
+    is_redaction_stub,
+)
 from hivemind.domain.succession import (
     AgentRetired,
     HandedDown,
@@ -401,7 +406,10 @@ class MemoryStore:
                 entry.withdrawn_reason,
                 standing,
                 self._chain_conflict(key),
-                entry.redacted_at is not None,
+                entry.redacted_at is not None
+                or is_redaction_stub(
+                    entry.summary, entry.body, entry.withdrawn_reason, entry.embedding is not None
+                ),
             )
             if refusal is not None:
                 raise refusal
@@ -482,12 +490,16 @@ class MemoryStore:
                 if fb.entry_id == key and (fb.note or "").strip()
             ]
             flags = [fb for fb in notes if fb.verdict in (Verdict.STALE, Verdict.WRONG)]
+            reason_field = {
+                AuditAction.ENTRY_WITHDRAW: "reason",
+                AuditAction.ENTRY_RESTORE: "previous_reason",  # copied from the memory
+            }
             reasons = sum(
                 1
                 for rec in self._audit
-                if rec.action is AuditAction.ENTRY_WITHDRAW
-                and rec.target == key
-                and str(rec.detail.get("reason") or "").strip()
+                if rec.target == key
+                and (field := reason_field.get(rec.action)) is not None
+                and str(rec.detail.get(field) or "").strip()
             )
             return RedactOutcome(wiped, len(notes), len(flags), reasons)
 

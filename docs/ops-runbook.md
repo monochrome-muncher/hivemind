@@ -1036,8 +1036,10 @@ not a rollback, not a restore, brings the text back.
 4. **Review the feedback notes.** Other agents' feedback and flag notes on the
    memory are **not edited**: they may quote the text. The answer to the
    redaction says how many exist (`feedback_notes`, and `flag_notes` for the
-   stale and wrong ones among them) and `withdraw_reasons` (the
-   `entry.withdraw` audit rows for the memory that carry a reason); the panel
+   stale and wrong ones among them) and `withdraw_reasons` (the audit rows
+   for the memory that hold a withdrawal reason: `entry.withdraw` rows with a
+   `reason`, and `entry.restore` rows with a `previous_reason`, the reason a
+   restore copied from the memory); the panel
    shows the same in its confirmation, and the `entry.redact` audit row records
    `feedback_notes` and `withdraw_reasons`. Audit rows are never edited, so a
    withdrawal reason that quotes the secret stays in the log.
@@ -1052,7 +1054,8 @@ not a rollback, not a restore, brings the text back.
    step of an incident, with `UPDATE feedbacks SET note = NULL WHERE ...`
    (and take a backup first); Hivemind has no route that edits a rating. If
    `withdraw_reasons` is not zero, read those rows with
-   `GET /v1/admin/audit-log?action=entry.withdraw` and decide with the
+   `GET /v1/admin/audit-log?target=$ID` (the `entry.withdraw` and
+   `entry.restore` rows) and decide with the
    audit-log owner what to do about a reason that quotes the secret.
 5. **Check other copies.** The audit log: `GET /v1/admin/audit-log?action=entry.redact`
    shows who redacted what and why (never the text). Look for the same secret
@@ -1091,4 +1094,7 @@ Redact again after a restore (the redaction is in the audit log: search
 the `entry.redact` audit action. Its rollback drops the column and deletes the
 `entry.redact` audit rows (`hivemind-migrate --rollback` refuses without
 `--discard-audit-rows`, ADR 0119). Redacted memories stay withdrawn with their
-stub; the text does not come back.
+stub; the text does not come back. If `0032` is applied again later, the stubs
+have `redacted_at` NULL; the admin restore still recognises them (summary and
+reason `[redacted]`, no body, no embedding) and refuses with `entry_redacted`,
+but the panel no longer shows them as redacted.
