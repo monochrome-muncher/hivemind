@@ -512,14 +512,49 @@ curl -s -X POST -H "X-API-Key: $ADMIN_KEY" \
   "https://hivemind.example/v1/admin/fleet-merges/<merge-id>/undo"
 ```
 
+**After upgrading.** Memories written from the release with migration 0028
+on merge and move fast. A memory written before it is slow on its first
+merge or move only (the new version of its row lands on a page with room,
+and the search index has to take it once). After that, and for its undo, it
+is fast. You do not have to do anything.
+
+`VACUUM FULL entries;` would make the old rows fast up front, but it is
+optional and it is an outage. It rebuilds every index under an exclusive
+lock, the vector index most of all: 80 seconds at 200,000 memories with
+32-dimension vectors, many minutes at 1024 dimensions. Every read and write
+of memories waits, and with the 30 second command timeout the API is
+effectively down. If the command has to wait for its lock, it blocks every
+query that arrives behind it too. Run it only if that first slow merge would
+cost more than the outage. If you do, in psql as the database owner, in a
+quiet window:
+
+```sql
+SET lock_timeout = '5s';             -- give up rather than queue everyone behind it
+SET maintenance_work_mem = '2GB';    -- at least the size of entries_embedding_hnsw_idx
+VACUUM FULL entries;
+```
+
+You need disk for a second copy of the table and all its indexes. The time
+is dominated by rebuilding the vector index, about as long as migration
+0004's build took, and it builds a new HNSW graph (ADR 0025), so search
+results can differ slightly afterwards.
+
+If you roll migration 0028 back and the rollback is cancelled, it can leave
+an invalid `entries_fleet_idx`. Drop it (`DROP INDEX CONCURRENTLY IF EXISTS
+entries_fleet_idx;`): while it exists, merges and moves cannot be fast.
+
 **What to expect.**
 
-- **Writes to the two fleets pause, possibly for minutes.** The merge
-  locks both fleet rows while it moves the memories. Each moved memory is
-  rewritten and its vector re-inserted into the search index, which took
-  about 12 ms per memory on a 200k-memory test pool: roughly a minute per
-  5,000 memories, and the undo as long. The panel's preview shows the
-  estimate for the fleets you picked. Merge large fleets at a quiet time,
+- **Writes to the two fleets pause while the memories move.** The merge
+  locks both fleet rows meanwhile. A memory that is being moved for the
+  first time since the upgrade is rewritten and its vector re-inserted into
+  the search index, which took about 12 ms per memory on a 200k-memory test
+  pool: roughly a minute per 5,000 memories. Once a memory has moved, or if
+  it was written after the upgrade, its row is rewritten in place and the
+  search index is left alone, which takes milliseconds, and so does the
+  undo of a memory's first move. The panel's preview shows the slower
+  estimate for the fleets you picked, so read it as a ceiling. Merge large
+  fleets at a quiet time,
   since fleet writes are refused (below) until it finishes. A merge and an
   undo run without the usual 30 second
   database command limit, so a large fleet is not cut off halfway (the
@@ -832,8 +867,9 @@ curl -s -X POST -H "X-API-Key: $ADMIN_KEY" \
   answer is `409 move_refused` and names the agents that do not (an unknown
   name is listed too). The target must be another fleet that has not been
   merged away (`409 fleet_merged`).
-- **Writes to the two fleets pause**, as for a merge (section 7): about a
-  minute per 5,000 moving memories, `503 fleet_busy` for a write that waits
+- **Writes to the two fleets pause**, as for a merge (section 7): up to about a
+  minute per 5,000 memories on their first move since the upgrade,
+  milliseconds after that, `503 fleet_busy` for a write that waits
   more than 3 seconds, and `409 move_refused` with no change when the move
   cannot get its locks within 5 seconds or deadlocks. Run it again. A write
   by a moving agent that was already on its way to the old fleet when the
