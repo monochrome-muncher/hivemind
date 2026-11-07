@@ -813,11 +813,14 @@ REDACT = (
     "RETURNING " + _ENTRY_COLUMNS
 )
 REDACT_CLEAR_TSV = "UPDATE entries SET search_tsv = NULL WHERE id = $1"
-# Withdrawal audit rows of this memory with a non-empty reason: the audit log is
-# never edited, so these are counted for the admin to review by hand.
+# Audit rows of this memory that hold a withdrawal reason: an `entry.withdraw`
+# row's `reason`, and the `previous_reason` an `entry.restore` row copied from
+# the memory (ADR 0124). The audit log is never edited, so these are counted for
+# the admin to review by hand.
 REDACT_COUNT_WITHDRAW_REASONS = (
-    "SELECT count(*) FROM audit_log WHERE action = 'entry.withdraw' AND target = $1::text "
-    "AND btrim(coalesce(detail->>'reason', '')) <> ''"
+    "SELECT count(*) FROM audit_log WHERE target = $1::text AND ("
+    "(action = 'entry.withdraw' AND btrim(coalesce(detail->>'reason', '')) <> '') "
+    "OR (action = 'entry.restore' AND btrim(coalesce(detail->>'previous_reason', '')) <> ''))"
 )
 REDACT_DROP_LINKS = "DELETE FROM entry_links WHERE from_id = $1"
 REDACT_COUNT_NOTES = (

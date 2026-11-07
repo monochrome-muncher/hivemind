@@ -24,8 +24,10 @@ class RedactOutcome:
     """A finished redaction: the memory as it is now (the stub), and how many
     feedback notes on it (``feedback_notes``, flag notes included) and how many
     of those are stale or wrong flags (``flag_notes``) were left untouched, and
-    how many ``entry.withdraw`` audit rows for it carry a non-empty reason
-    (``withdraw_reasons``; the audit log is never edited)."""
+    how many audit rows for it hold a non-empty withdrawal reason
+    (``withdraw_reasons``: the ``reason`` of an ``entry.withdraw`` row and the
+    ``previous_reason`` of an ``entry.restore`` row; the audit log is never
+    edited)."""
 
     entry: Entry
     feedback_notes: int

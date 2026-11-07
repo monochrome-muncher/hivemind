@@ -1062,6 +1062,37 @@ async def test_redact_counts_the_withdrawal_reasons_in_the_audit_log(adapter: Ad
     ]
 
 
+async def test_redact_counts_the_withdrawal_reasons_a_restore_copied(adapter: Adapter) -> None:
+    # A restore copies the withdrawal reason into its audit row as
+    # `previous_reason` (ADR 0124), so a redaction counts those rows too.
+    store = adapter.store
+    entry = await write(adapter, "withdrawn, restored, withdrawn again")
+    await store.withdraw_entry(entry.id, "again", by_user="admin")
+
+    def restore_row(previous_reason: str | None) -> AuditEvent:
+        return AuditEvent(
+            ActorKind.ADMIN_KEY,
+            "admin:1",
+            AuditAction.ENTRY_RESTORE,
+            entry.id,
+            {"author": "alice", "previous_reason": previous_reason, "reason": "fine after all"},
+        )
+
+    await store.record_audit(restore_row("holds sk-canary"))
+    await store.record_audit(restore_row(None))
+    await store.record_audit(restore_row(" "))
+    await store.record_audit(
+        AuditEvent(
+            ActorKind.ADMIN_KEY,
+            "admin:1",
+            AuditAction.ENTRY_WITHDRAW,
+            entry.id,
+            {"author": "alice", "reason": "again"},
+        )
+    )
+    assert (await store.redact_entry(entry.id)).withdraw_reasons == 2
+
+
 async def test_cleanup_does_not_offer_a_redacted_superseded_memory_for_restore(
     adapter: Adapter,
 ) -> None:

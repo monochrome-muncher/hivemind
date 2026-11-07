@@ -275,7 +275,8 @@ class Store(Protocol):
         author, fleet, dates, supersession, feedback and the audit log stay.
         Returns the memory as it is now and the count of feedback notes (and of
         stale/wrong flag notes among them) left unedited, and of its
-        ``entry.withdraw`` audit rows with a reason. Allowed on a ``withdrawn``
+        audit rows that hold a withdrawal reason (``entry.withdraw`` with a
+        ``reason``, ``entry.restore`` with a ``previous_reason``). Allowed on a ``withdrawn``
         or a ``superseded`` memory. ``KeyError`` if unknown; ``RedactRefused``
         if active or already redacted. Every
         path that sets a withdrawn memory active again skips a redacted one."""

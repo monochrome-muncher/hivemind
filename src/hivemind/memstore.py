@@ -482,12 +482,16 @@ class MemoryStore:
                 if fb.entry_id == key and (fb.note or "").strip()
             ]
             flags = [fb for fb in notes if fb.verdict in (Verdict.STALE, Verdict.WRONG)]
+            reason_field = {
+                AuditAction.ENTRY_WITHDRAW: "reason",
+                AuditAction.ENTRY_RESTORE: "previous_reason",  # copied from the memory
+            }
             reasons = sum(
                 1
                 for rec in self._audit
-                if rec.action is AuditAction.ENTRY_WITHDRAW
-                and rec.target == key
-                and str(rec.detail.get("reason") or "").strip()
+                if rec.target == key
+                and (field := reason_field.get(rec.action)) is not None
+                and str(rec.detail.get(field) or "").strip()
             )
             return RedactOutcome(wiped, len(notes), len(flags), reasons)
 
