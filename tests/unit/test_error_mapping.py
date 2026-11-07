@@ -766,6 +766,15 @@ UNEXPECTED: list[tuple[str, Rest, Mcp | None, str, str]] = [
         "set_trust_level",
     ),
     (
+        "update owner alias",
+        lambda w: w.client.patch(
+            "/v1/admin/agents/taken", json={"owner_alias": "jane.doe"}, headers=_h("hm_admin")
+        ),
+        None,
+        "access_service",
+        "set_owner_alias",
+    ),
+    (
         "revoke",
         lambda w: w.client.post("/v1/admin/agents/taken/revoke", headers=_h("hm_admin")),
         None,

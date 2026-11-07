@@ -647,6 +647,7 @@ SELECT f.merged_into, t.name AS target_name
 """
 
 GET_AGENT = "SELECT * FROM agents WHERE name = $1"
+GET_AGENT_FOR_UPDATE = "SELECT * FROM agents WHERE name = $1 FOR UPDATE"
 # Agent names are ASCII (ADR 0040), so lower() is their case fold. The oldest
 # holder wins when legacy case variants already coexist (ADR 0045).
 GET_AGENT_FOLDED = "SELECT * FROM agents WHERE lower(name) = lower($1) ORDER BY created_at LIMIT 1"
@@ -704,6 +705,7 @@ SELECT count(*) FILTER (WHERE e.scope = 'self') AS self_notes,
 HANDED_DOWN_PINS = "SELECT count(*) FROM pins WHERE pinned_by = ANY($1::text[])"
 
 SET_AGENT_LEVEL = "UPDATE agents SET trust_level = $2 WHERE name = $1 RETURNING *"
+SET_AGENT_OWNER = "UPDATE agents SET owner_alias = $2 WHERE name = $1"
 SET_AGENT_FLEET = "UPDATE agents SET home_fleet_id = $2 WHERE name = $1 RETURNING *"
 
 FLIP_SUPERSEDED = """
@@ -3280,6 +3282,18 @@ class PgStore:
         if row is None:
             raise RuntimeError(f"agent {name!r} vanished between check and update")
         return _row_to_agent(row)
+
+    async def set_agent_owner_alias(self, name: str, owner_alias: str) -> tuple[Agent, Agent]:
+        """Set an agent's owner alias (ADR 0122); returns (before, after)."""
+        async with self._transaction() as conn:
+            existing = await conn.fetchrow(GET_AGENT_FOR_UPDATE, name)
+            if existing is None:
+                raise UnknownAgent(f"unknown agent: {name}")
+            await conn.execute(SET_AGENT_OWNER, name, owner_alias)
+            row = await conn.fetchrow(GET_AGENT, name)
+        if row is None:
+            raise RuntimeError(f"agent {name!r} vanished between check and update")
+        return _row_to_agent(existing), _row_to_agent(row)
 
     # -- successions (ADR 0113) ------------------------------------------------
 

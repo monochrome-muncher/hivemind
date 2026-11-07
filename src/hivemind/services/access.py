@@ -11,7 +11,7 @@ takes no key argument, so a raw key cannot reach an audit column.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -112,6 +112,9 @@ class AccessService:
         self.successions = SuccessionService(store, self._require_authenticator)
         # Cleaning up after a bad agent and undoing it (ADR 0111): admin-gated there.
         self.cleanups = AgentCleanupService(store, revoke=self.revoke, revocable=self.revocable)
+        # Called after an owner alias changes, so the cached owner-level
+        # figures are dropped (ADR 0122).
+        self.on_owner_change: list[Callable[[], None]] = []
 
     def _require_authenticator(self) -> Authenticator:
         """The authenticator for key management (absent in dev mode)."""
@@ -340,6 +343,27 @@ class AccessService:
         )
         return agent
 
+    async def set_owner_alias(self, name: str, owner_alias: str, credential: Credential) -> Agent:
+        """Correct an agent's owner alias (admin-gated, ADR 0122), in any
+        status. The alias is checked like the one on creation (ADR 0040,
+        non-blank). Setting the value it already has changes nothing and
+        writes no audit row; a change that is only in letter case is a change."""
+        require_admin(credential)
+        validate_owner_alias(owner_alias)
+        if not owner_alias.strip():
+            raise InvalidInput("owner_alias must not be blank")
+        before, agent = await self._store.set_agent_owner_alias(name, owner_alias)
+        if before.owner_alias != owner_alias:
+            await self._audit(
+                credential,
+                AuditAction.AGENT_OWNER_SET,
+                name,
+                {"from": before.owner_alias, "to": owner_alias},
+            )
+            for hook in self.on_owner_change:
+                hook()
+        return agent
+
     async def update_agent(
         self,
         name: str,
@@ -347,13 +371,19 @@ class AccessService:
         *,
         trust_level: TrustLevel | None = None,
         home_fleet_id: str | None = None,
+        owner_alias: str | None = None,
     ) -> Agent:
-        """``PATCH /v1/admin/agents/{name}``: the trust level and/or the home
-        fleet, each audited as its own change. The fleet is checked first
+        """``PATCH /v1/admin/agents/{name}``: the trust level, the home
+        fleet and/or the owner alias, each audited as its own change. The fleet is checked first
         (``UnknownFleet``, or ``FleetMerged`` for a merged one), so a refused
         fleet changes nothing, not even a trust level sent with it. With
-        neither, the agent as it is (``UnknownAgent`` if unknown)."""
+        none, the agent as it is (``UnknownAgent`` if unknown). A bad owner
+        alias is refused before anything changes."""
         require_admin(credential)
+        if owner_alias is not None:
+            validate_owner_alias(owner_alias)
+            if not owner_alias.strip():
+                raise InvalidInput("owner_alias must not be blank")
         if home_fleet_id is not None:
             await self._require_fleet(home_fleet_id)
         agent: Agent | None = None
@@ -361,6 +391,8 @@ class AccessService:
             agent = await self.set_trust_level(name, trust_level, credential)
         if home_fleet_id is not None:
             agent = await self.set_home_fleet(name, home_fleet_id, credential)
+        if owner_alias is not None:
+            agent = await self.set_owner_alias(name, owner_alias, credential)
         if agent is None:
             agent = await self._store.get_agent(name)
             if agent is None:

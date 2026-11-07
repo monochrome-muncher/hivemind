@@ -46,12 +46,13 @@ class ActorKind(StrEnum):
 
 class AuditAction(StrEnum):
     """The audited action vocabulary (the ``audit_log_action_check``
-    constraint, migrations ``0005``, ``0009``, ``0014``, ``0017``, ``0019``, ``0020``, ``0022``, ``0023``, ``0024``, ``0025`` and ``0027``)."""
+    constraint, migrations ``0005``, ``0009``, ``0014``, ``0017``, ``0019``, ``0020``, ``0022``, ``0023``, ``0024``, ``0025``, ``0027`` and ``0029``)."""
 
     AGENT_REGISTER = "agent.register"  # ADR 0046
     AGENT_ACTIVATE = "agent.activate"
     AGENT_TRUST_LEVEL_SET = "agent.trust_level_set"
     AGENT_HOME_FLEET_SET = "agent.home_fleet_set"
+    AGENT_OWNER_SET = "agent.owner_set"  # ADR 0122
     AGENT_REVOKE = "agent.revoke"
     FLEET_CREATE = "fleet.create"
     ORG_KEY_ROTATE = "org_key.rotate"
