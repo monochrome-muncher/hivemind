@@ -483,3 +483,18 @@ async def test_a_cli_operator_named_like_an_inherited_agent_is_not_named() -> No
     retire = next(r for r in rows if r["action"] == "agent.retire")
     assert retire["about"] == "carol"  # the successor, never the operator
     assert retire["by"] == "admin"
+
+
+async def test_an_owner_change_shows_no_alias() -> None:
+    app, _blue, _red = await _seed()
+    await _row(
+        app,
+        ActorKind.ADMIN_KEY,
+        ADMIN_ACTOR,
+        AuditAction.AGENT_OWNER_SET,
+        "carol",
+        {"from": "jane.doe", "to": "secret-owner"},
+    )
+    (row,) = await _history(app)
+    assert row["summary"] == "The owner recorded for it was changed"
+    assert "jane.doe" not in json.dumps(row) and "secret-owner" not in json.dumps(row)

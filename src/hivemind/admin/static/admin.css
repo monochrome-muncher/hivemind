@@ -410,3 +410,10 @@ body.drawer-open { overflow: hidden; }
 .agent-sec { margin-top: 18px; }
 .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 0 2px 8px; flex-wrap: wrap; }
 .section-head h2 { margin: 0; font-size: 16px; }
+
+/* ADR 0121: the Overview's Needs you row. */
+.needs-you { margin-bottom: 20px; }
+.needs-you-title { font-size: 14px; font-weight: 600; margin: 0 0 8px; }
+.stat-link { display: block; color: inherit; text-decoration: none; }
+.stat-link:hover .stat, .stat-link:focus-visible .stat { border-color: var(--accent-strong); }
+.stat-urgent .stat { border-width: 2px; }

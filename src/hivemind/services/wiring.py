@@ -66,6 +66,8 @@ def build_services(
     access_service.merges.on_change += [metrics_service.invalidate, activity_service.invalidate]
     # So does a cleanup (withdrawn memories, set-aside ratings) and its undo (ADR 0111).
     access_service.cleanups.on_change += [metrics_service.invalidate, activity_service.invalidate]
+    # A corrected owner alias regroups the owner-level health figures (ADR 0122).
+    access_service.on_owner_change += [metrics_service.invalidate, activity_service.invalidate]
     return Services(
         search_config=search_config,
         write_service=WriteService(store, embedder, extractor),

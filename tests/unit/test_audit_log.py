@@ -31,7 +31,7 @@ from hivemind.domain import (
     Kind,
     TrustLevel,
 )
-from hivemind.domain.access import FleetExists, UnknownFleet
+from hivemind.domain.access import FleetExists, UnknownAgent, UnknownFleet
 from hivemind.domain.validation import InvalidInput
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
@@ -133,6 +133,33 @@ async def test_set_trust_level_records_from_and_to() -> None:
     assert row.action is AuditAction.AGENT_TRUST_LEVEL_SET
     assert row.target == "alice"
     assert row.detail == {"from": 1, "to": 3}
+
+
+async def test_set_owner_alias_records_from_and_to_and_skips_a_no_op() -> None:
+    service, store, _, admin, _ = await _setup()
+    await store.register_agent("bob", "jnae")
+    await service.set_owner_alias("bob", "jane", admin)
+    await service.set_owner_alias("bob", "jane", admin)  # the same value: no second row
+    await service.set_owner_alias("bob", "Jane", admin)  # a case-only fix is a change
+    rows = list(reversed(await _rows(store)))  # newest first
+    assert [(r.action, r.target, r.detail) for r in rows] == [
+        (AuditAction.AGENT_OWNER_SET, "bob", {"from": "jnae", "to": "jane"}),
+        (AuditAction.AGENT_OWNER_SET, "bob", {"from": "jane", "to": "Jane"}),
+    ]
+    assert rows[0].actor_kind.value == "admin_key"
+
+
+async def test_set_owner_alias_refuses_a_blank_alias_a_non_admin_and_an_unknown_agent() -> None:
+    service, store, _, admin, _ = await _setup()
+    await store.register_agent("bob", "jane")
+    with pytest.raises(InvalidInput):
+        await service.set_owner_alias("bob", "  ", admin)
+    org = Credential(user_id="org", is_org=True, access_controlled=True)
+    with pytest.raises(PermissionDenied):
+        await service.set_owner_alias("bob", "x", org)
+    with pytest.raises(UnknownAgent):
+        await service.set_owner_alias("ghost", "x", admin)
+    assert await _rows(store) == []
 
 
 async def test_set_home_fleet_records_from_and_to() -> None:
@@ -395,3 +422,27 @@ async def test_since_out_of_range_after_its_offset_is_a_422() -> None:
         )
     assert resp.status_code == 422
     assert resp.json()["error"]["code"] == "invalid_input"
+
+
+async def test_a_changed_owner_alias_drops_the_cached_activity_and_health_scans() -> None:
+    """ADR 0122: the owner-level figures group by the alias, so a correction
+    must not wait out the cache TTL; a no-op leaves the cache alone."""
+    from hivemind.services.wiring import build_services
+    from tests.fakes import make_embedder, make_search_config
+
+    store = MemoryStore(make_clock())
+    services = build_services(
+        store, make_embedder(), make_search_config(), metrics_entry_counts_ttl=3600.0
+    )
+    auth = FakeAuthenticator()
+    admin = await _admin(auth)
+    access = services.access_service
+    await store.register_agent("bob", "jnae")
+    await services.activity_service.report()
+    assert services.activity_service._cache  # warm
+    await access.set_owner_alias("bob", "jnae", admin)  # same value
+    assert services.activity_service._cache
+    await access.set_owner_alias("bob", "jane", admin)
+    assert not services.activity_service._cache
+    report = await services.activity_service.report()
+    assert [a["owner_alias"] for a in report["agents"]] == ["jane"]

@@ -12,7 +12,7 @@ What was checked in the code, per writer:
 
 | Action | Target | Where the agent is named |
 |---|---|---|
-| `agent.register`, `agent.activate`, `agent.trust_level_set`, `agent.home_fleet_set`, `agent.revoke`, `agent.cleanup`, `agent.cleanup_undo`, `agent.retire`, `agent.retire_undo`, `agent_key.issue`, `agent_key.replace`, `agent_key.lock` | the agent's name | target; also the actor for `agent_key.lock` and a portal cleanup |
+| `agent.register`, `agent.activate`, `agent.trust_level_set`, `agent.home_fleet_set`, `agent.owner_set`, `agent.revoke`, `agent.cleanup`, `agent.cleanup_undo`, `agent.retire`, `agent.retire_undo`, `agent_key.issue`, `agent_key.replace`, `agent_key.lock` | the agent's name | target; also the actor for `agent_key.lock` and a portal cleanup |
 | `agent.retire`, `agent.retire_undo` | the retired agent | also `detail.successor` |
 | `entry.withdraw` | the entry id | `detail.author`; the actor when the agent or its successor withdrew |
 | `entry.pin`, `entry.unpin` | the entry id | only as the actor (an agent's own key); there is no `author` in the detail |
@@ -85,6 +85,7 @@ Per action, the line and what is read from `detail`:
 | `agent.revoke` | Revoked; or "Revoked when it was retired in favour of `<agent>`" | `via`, `successor` |
 | `agent.retire` | Retired; its memories now belong to `<agent>` | `successor` |
 | `agent.retire_undo` | Retirement undone; its memories no longer belong to `<agent>` | `successor` |
+| `agent.owner_set` | The owner recorded for it was changed | none (the aliases are dropped) |
 | `agent_key.issue` | A key was issued | none |
 | `agent_key.replace` | The key was replaced | none (fingerprints dropped) |
 | `agent_key.lock` | The key was locked from the portal | none |

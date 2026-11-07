@@ -1,5 +1,7 @@
 # Fleets and trust levels: home-fleet scoping with a four-level privilege ladder
 
+> **Amended by [ADR 0122](0122-admin-corrects-an-agents-owner-alias.md):** `PATCH /v1/admin/agents/{name}` also takes `owner_alias`, so the admin can correct an agent's owner alias. Trust levels and the home fleet work as below.
+
 > **Amended by [ADR 0113](0113-retire-an-agent-with-a-successor.md):** `self` entries are private to their author and to the agents that own them after the admin retires the author with a successor; "own entries" in the read rules means owned ones. The rest below stands.
 
 > **Amended by [ADR 0109](0109-rename-a-fleet.md):** an admin can rename a fleet (`PATCH /v1/admin/fleets/{id}`); the "rename/disable is the later story" line below is settled for rename. Fleet deletion and disabling are still not built.

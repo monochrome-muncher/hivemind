@@ -219,6 +219,8 @@ def _summary(
                     f"Home fleet changed from {ctx.fleet(d.get('from'))} "
                     f"to {ctx.fleet(d.get('to'))}"
                 )
+        case AuditAction.AGENT_OWNER_SET:
+            text = "The owner recorded for it was changed"  # the aliases are not shown
         case AuditAction.AGENT_REVOKE:
             if d.get("via") == "retire":
                 text = f"Revoked when it was retired in favour of {ctx.agent(d.get('successor'))}"

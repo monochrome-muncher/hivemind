@@ -1,10 +1,11 @@
 // Hivemind admin panel: the Overview landing view (ADR 0029).
-// Pending queue first, KPI tiles, the activity chart, and short leaderboards.
+// The Needs you row first, then the pending queue, KPI tiles, the activity chart, and short leaderboards.
 
 import {
   api, h, state, loadAgentsAndFleets, fetchMetrics, fetchActivity, optional, pageHead, refreshButton, windowSelector,
   card, stat, unavailable, fmtNum, fmtPct, fmtAgo, fmtTime, link, memoriesHref, feedbackHref, hooks, miniBar, fleetName, agentHref, fill,
 } from "./core.js";
+import { needsYouItems } from "./needs.js";
 import { pendingQueue } from "./manage.js";
 import { stackedBars } from "./charts.js";
 import { openEntry } from "./drawer.js";
@@ -59,6 +60,18 @@ function recentActions(rows) {
   { head: [link("Audit log", "#/audit", { class: "link small" })] });
 }
 
+function needsYou(agents, metrics) {
+  const items = needsYouItems(agents, metrics);
+  if (!items.length) {
+    return h("p", { class: "quiet-line" }, h("span", { class: "dot dot-ok", "aria-hidden": "true" }), " Nothing needs you right now.");
+  }
+  return h("section", { class: "needs-you", "aria-label": "Needs you" },
+    h("h2", { class: "needs-you-title", text: "Needs you" }),
+    h("div", { class: "stats" }, items.map(({ id, href, urgent, label, count, hint }) => h("a", {
+      href, class: urgent ? "stat-link stat-urgent" : "stat-link", "data-need": id,
+    }, stat(label, fmtNum(count), { warn: true, hint })))));
+}
+
 export async function viewOverview(root) {
   const [, metrics, activity, entries, audit] = await Promise.all([
     loadAgentsAndFleets(),
@@ -74,14 +87,14 @@ export async function viewOverview(root) {
 
   const queue = pending > 0
     ? pendingQueue(() => hooks.refresh())
-    : h("p", { class: "quiet-line" }, h("span", { class: "dot dot-ok", "aria-hidden": "true" }), " Nobody is waiting for activation.");
+    : null;
 
   fill(root, 
     pageHead("Overview", "Registrations waiting on you, and how the agents are using the pool.",
       windowSelector(() => hooks.refresh()), refreshButton()),
+    needsYou(state.agents, metrics),
     queue,
     h("div", { class: "stats" },
-      stat("Pending agents", fmtNum(pending), { warn: pending > 0 }),
       stat("Active agents", fmtNum(active)),
       stat("Fleets", fmtNum(state.fleets.length)),
       stat("Active entries", metrics ? fmtNum(metrics.entries.active) : "—"),
