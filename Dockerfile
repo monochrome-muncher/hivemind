@@ -50,5 +50,8 @@ ENV PATH=/opt/venv/bin:$PATH \
 # (HIVEMIND_PORT), not the image.
 ENV HIVEMIND_HOST=0.0.0.0
 
+# The MCP Registry checks this label against the name in server.json.
+LABEL io.modelcontextprotocol.server.name="io.github.monochrome-muncher/hivemind"
+
 USER 10001:10001
 ENTRYPOINT ["/app/entrypoint.sh"]

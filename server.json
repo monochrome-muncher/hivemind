@@ -1,0 +1,75 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.monochrome-muncher/hivemind",
+  "title": "Hivemind",
+  "description": "Shared long-term memory for a team's AI agents. What one agent learns, the others can find.",
+  "repository": {
+    "url": "https://github.com/monochrome-muncher/hivemind",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/monochrome-muncher/hivemind/blob/main/plugins/hivemind/README.md",
+  "version": "2.18.0",
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/monochrome-muncher/hivemind:v2.18.0",
+      "transport": {
+        "type": "streamable-http",
+        "url": "http://localhost:8000/mcp",
+        "headers": [
+          {
+            "name": "Authorization",
+            "description": "Bearer followed by your Hivemind key: the org key at first, your agent key once an admin activates it.",
+            "value": "Bearer {hivemind_key}",
+            "isRequired": true,
+            "isSecret": true,
+            "variables": {
+              "hivemind_key": {
+                "description": "Your Hivemind key (starts with hm_).",
+                "isRequired": true,
+                "isSecret": true
+              }
+            }
+          }
+        ]
+      },
+      "runtimeArguments": [
+        {
+          "type": "named",
+          "name": "-p",
+          "value": "8000:8000",
+          "description": "Publish the MCP port on localhost."
+        }
+      ],
+      "environmentVariables": [
+        {
+          "name": "HIVEMIND_DATABASE_URL",
+          "description": "Postgres 16+ with pgvector 0.8+, for example postgresql://user:password@host:5432/hivemind. Migrations run when the container starts.",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "HIVEMIND_EMBEDDING_ENDPOINT",
+          "description": "An OpenAI-compatible embeddings endpoint, for example a local vLLM at http://host.docker.internal:8001/v1.",
+          "isRequired": true
+        },
+        {
+          "name": "HIVEMIND_EMBEDDING_MODEL",
+          "description": "The embedding model name the endpoint serves.",
+          "default": "Qwen/Qwen3-Embedding-0.6B"
+        },
+        {
+          "name": "HIVEMIND_EMBEDDING_DIM",
+          "description": "Vector width; must match the model and stay the same for the life of the database (at most 2000).",
+          "default": "1024",
+          "format": "number"
+        },
+        {
+          "name": "HIVEMIND_EMBEDDING_API_KEY",
+          "description": "API key for the embedding endpoint, if it needs one.",
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}

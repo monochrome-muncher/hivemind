@@ -160,11 +160,23 @@ def test_manifests_agree_on_name_and_version() -> None:
     root = _json(ROOT / "package.json")  # the Git-URL install (DeepSeek Harness, Pi, OpenCode)
     assert (root["name"], root["version"]) == (dsh["name"], semver)
     assert _json(ROOT / "gemini-extension.json")["version"] == semver
+    registry = _json(ROOT / "server.json")  # the MCP Registry entry
+    [image] = registry["packages"]  # type: ignore[misc]
+    assert registry["version"] == semver
+    assert image["identifier"] == f"ghcr.io/monochrome-muncher/hivemind:v{semver}"
     assert _yaml_scalar(PLUGIN / "plugin.yaml", "name") == "hivemind"
     assert _yaml_scalar(PLUGIN / "plugin.yaml", "version") == semver
     [codex_entry] = _json(ROOT / ".agents" / "plugins" / "marketplace.json")["plugins"]  # type: ignore[misc]
     assert (ROOT / codex_entry["source"]["path"]).resolve() == PLUGIN
     assert (ROOT / entry["source"]).resolve() == PLUGIN
+
+
+def test_the_image_label_names_the_registry_entry() -> None:
+    """The MCP Registry only lists the image if this label matches server.json."""
+    name = _json(ROOT / "server.json")["name"]
+    assert (
+        f'LABEL io.modelcontextprotocol.server.name="{name}"' in (ROOT / "Dockerfile").read_text()
+    )
 
 
 def test_the_hermes_manifest_is_valid_yaml() -> None:
