@@ -16,7 +16,7 @@
 #      the agent honouring layer 1 ("by restraint").
 #
 # Where the server is kept from loading (claude, codex, copilot, cline, dsh, gemini with the
-# extension, pi, omp) the
+# extension, junie, pi, omp) the
 # launcher also removes HIVEMIND_API_KEY and HIVEMIND_MCP_URL from the
 # child's environment (codex: the key only; gemini: both set empty; omp: the
 # URL set to "off"), so an agent with a shell cannot read the key or call the
@@ -29,7 +29,7 @@
 set -eu
 
 if [ "$#" -lt 1 ]; then
-  echo "usage: hivemind-incognito <claude|codex|copilot|dsh|gemini|hermes|pi|omp|opencode|cline|kilocode|kilo|other-command> [args...]" >&2
+  echo "usage: hivemind-incognito <claude|codex|copilot|dsh|gemini|hermes|junie|pi|omp|opencode|cline|kilocode|kilo|other-command> [args...]" >&2
   exit 2
 fi
 harness=$1
@@ -139,6 +139,24 @@ PY
       note "$envfile sets HIVEMIND_ENABLED, which overrides this launcher: remove that line, or the tools will load (see the plugin README, Incognito sessions)"
     fi
     exec "$harness" "$@"
+    ;;
+  junie)
+    # Junie CLI (checked with 26.9.7): --mcp-default-locations=false skips
+    # ~/.junie/mcp/mcp.json and the project's .junie/mcp/mcp.json, so the
+    # hand-written hivemind entry (it holds the literal key) is not read. The
+    # extension's own .mcp.json still names ${HIVEMIND_MCP_URL}, which Junie
+    # does not expand, so that server cannot connect either. It also turns off
+    # the user's other MCP servers for the session. --ide-guidelines prepends
+    # junie/incognito.md, the incognito text, to the guidelines, because
+    # Junie ignores a SessionStart hook's output.
+    self=$0
+    while [ -L "$self" ]; do
+      target=$(readlink "$self") || break
+      case "$target" in /*) self=$target ;; *) self="$(dirname "$self")/$target" ;; esac
+    done
+    plugin_dir=$(cd "$(dirname "$self")/.." && pwd)
+    unset HIVEMIND_API_KEY HIVEMIND_MCP_URL
+    exec "$harness" --mcp-default-locations=false --ide-guidelines="$plugin_dir/junie/incognito.md" "$@"
     ;;
   omp)
     # Oh My Pi has no per-session MCP switch, and its mcp.json resolves
