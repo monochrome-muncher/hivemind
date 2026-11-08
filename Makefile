@@ -96,9 +96,9 @@ migrate: ## Apply outstanding migrations (ADR 0020; provisions the embedding col
 .PHONY: rollback
 rollback: ## Roll back the most recent migration (ADR 0020; refuses 0001 — that direction is `make pg-reset` or a restore)
 	uv run hivemind-migrate --rollback $(or $(N),1) \
-		$(if $(filter command line,$(origin DISCARD_AUDIT_ROWS)),--discard-audit-rows) \
-		$(if $(filter command line,$(origin REVIVE_REVOKED_KEYS)),--revive-revoked-keys) \
-		$(if $(filter command line,$(origin UNLOCK_LOCKED_KEYS)),--unlock-locked-keys)
+		$(if $(and $(filter command line,$(origin DISCARD_AUDIT_ROWS)),$(filter 1,$(DISCARD_AUDIT_ROWS))),--discard-audit-rows) \
+		$(if $(and $(filter command line,$(origin REVIVE_REVOKED_KEYS)),$(filter 1,$(REVIVE_REVOKED_KEYS))),--revive-revoked-keys) \
+		$(if $(and $(filter command line,$(origin UNLOCK_LOCKED_KEYS)),$(filter 1,$(UNLOCK_LOCKED_KEYS))),--unlock-locked-keys)
 
 .PHONY: schema-ref
 schema-ref: ## Regenerate the schema.sql reference from the migrated pool (ADR 0020; generated, never applied)
