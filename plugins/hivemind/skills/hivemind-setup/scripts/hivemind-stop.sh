@@ -1,5 +1,6 @@
 #!/bin/sh
-# Hivemind Stop hook (Claude Code, Codex, GitHub Copilot CLI, Junie, Cursor;
+# Hivemind Stop hook (Claude Code, Codex, GitHub Copilot CLI, Junie, Cursor,
+# Antigravity;
 # Gemini CLI as an AfterAgent hook):
 # at most once per session, blocks the stop once with a short reminder to
 # write what another agent could reuse and to rate the entries the work
@@ -16,18 +17,24 @@
 # $HOME/.junie/sessions/<session_id>/events.jsonl.
 # Cursor's hook passes --cursor; its input has loop_count (0 unless a hook's
 # follow-up started this turn) instead of stop_hook_active.
+# Antigravity's hook passes --antigravity; its input is camelCase
+# (conversationId, transcriptPath), and it takes the same block output as
+# "continue" (checked with 1.5.3).
 # Block output: {"decision":"block","reason":"..."} on stdout, exit 0; for
 # Cursor {"followup_message":"..."}, which Cursor sends as the next message.
 cursor=0
 [ "${1:-}" = "--cursor" ] && cursor=1
+antigravity=0
+[ "${1:-}" = "--antigravity" ] && antigravity=1
 
 # (c) Incognito (ADR 0035), detected as hivemind-session-start.sh does.
 case "$(printf '%s' "${HIVEMIND_INCOGNITO:-}" | tr '[:upper:]' '[:lower:]')" in
   1|true|yes|on) exit 0 ;;
 esac
 
-# (d) Hivemind is not configured for this session.
-[ -n "${HIVEMIND_API_KEY:-}" ] || exit 0
+# (d) Hivemind is not configured for this session. Antigravity keeps the key
+# in its plugin settings and turns the plugin on only once it is filled in.
+[ -n "${HIVEMIND_API_KEY:-}" ] || [ "$antigravity" = 1 ] || exit 0
 
 [ -t 0 ] && exit 0
 input="$(cat 2>/dev/null)" || exit 0
@@ -40,8 +47,11 @@ field() {
   printf '%s' "$input" | grep -o "\"$1\" *: *\"[^\"]*\"" | head -n 1 \
     | sed 's/^[^:]*: *"//; s/"$//'
 }
-sid="$(field session_id | tr -c 'A-Za-z0-9_-' '_')"
+sid="$(field session_id)"
+[ -n "$sid" ] || sid="$(field conversationId)"
+sid="$(printf '%s' "$sid" | tr -c 'A-Za-z0-9_-' '_')"
 transcript="$(field transcript_path)"
+[ -n "$transcript" ] || transcript="$(field transcriptPath)"
 junie=0
 if [ -z "$transcript" ] && [ -n "$sid" ] && [ -n "${HOME:-}" ] \
   && printf '%s' "$input" | grep -q '"project_path" *:'; then
@@ -84,10 +94,12 @@ calls() {
 }
 # Junie names a call as "toolName":"hivemind/hive_write"; Cursor as a
 # CallMcpTool (local-model CLI) or CallDynamicTool (signed in) tool_use whose
-# input has "toolName":"hive_write"; the others as "name".
+# input has "toolName":"hive_write"; Antigravity calls a lazily loaded tool
+# through call_mcp_tool with "ToolName":"hive_write"; the others as "name".
 key='"name"'
 [ "$junie" = 1 ] && key='"toolName"'
 [ "$cursor" = 1 ] && key='"name" *: *"Call(Mcp|Dynamic)Tool" *, *"input" *: *\{[^}]*"toolName"'
+[ "$antigravity" = 1 ] && key='"(name|ToolName)"'
 calls | grep -Eq "$key *: *\"[^\"]*hive_feedback\"" && exit 0
 if calls | grep -Eq "$key *: *\"[^\"]*hive_write\""; then
   calls | grep -Eq "$key *: *\"[^\"]*hive_(search|get)\"" || exit 0
@@ -111,6 +123,11 @@ if [ "$junie" = 1 ]; then
     | grep -c '"status" *: *"COMPLETED"')" || jn=0
   uses=$((uses + jn))
 fi
+# Antigravity writes one transcript line per step, with that step's calls
+# in "tool_calls":[{"name":...,"args":...},...].
+agy="$(calls | grep '"tool_calls" *: *\[' \
+  | grep -Eo '\{"name" *: *"[^"]*" *, *"args"' | wc -l)" || exit 0
+uses=$((uses + agy))
 [ "${uses:-0}" -ge "$min" ] 2>/dev/null || exit 0
 
 private && (umask 077; : > "$dir/$sid") 2>/dev/null || exit 0

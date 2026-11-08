@@ -1,0 +1,19 @@
+{
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "name": "hivemind",
+  "displayName": "Hivemind",
+  "version": "2.18.2",
+  "description": "Use your organization's Hivemind as the agent's long-term memory: recall before you work, contribute what you learn to your fleet, and stay aware of it across sessions.",
+  "logo": "assets/logo.svg",
+  "author": {
+    "name": "Hivemind"
+  },
+  "repository": "https://github.com/monochrome-muncher/hivemind",
+  "license": "MIT",
+  "keywords": [
+    "memory",
+    "knowledge",
+    "mcp",
+    "hivemind"
+  ]
+}

@@ -36,6 +36,7 @@ to install or use it, read [README.md](README.md) instead.
 | `CHANGELOG.md` | What changed for agents in each release |
 | `../../package.json` (repository root) | Same package name as `plugins/hivemind/package.json`. Lets DeepSeek Harness, Pi and OpenCode install the plugin from the repository's Git URL (OpenCode loads `exports["./server"]`, else `main`) |
 | `../../gemini-extension.json`, `../../skills`, `../../hooks/hooks.json` (repository root) | The Gemini CLI extension, installed with `gemini extensions install <git-url>`: Gemini reads these three at the root of what it installs. `skills` is a link to `skills/` here; the hooks run the two scripts above as `SessionStart` and `AfterAgent` hooks |
+| `../antigravity/` | The Antigravity plugin, a folder of its own (it installs as `hivemind`): `plugin.json`, `mcp_config.json` (the server, with the URL and key as install-time variables), `hooks.json` (the two scripts above, with `--antigravity`), `rules/AGENTS.md` (the instruction block's text, always on), `assets/logo.svg`, and `skills`, a link to `skills/` here. It lives apart because Antigravity reads `hooks.json` at the plugin root, a name GitHub Copilot CLI also reads in this folder |
 | `../../.claude-plugin/`, `../../.agents/plugins/` (repository root) | The marketplaces Claude Code, Codex and Oh My Pi install from. GitHub Copilot CLI reads the root `.claude-plugin/marketplace.json` and the plugin's `.claude-plugin/plugin.json` too, so it needs no manifest of its own. Cursor reads the root `.cursor-plugin/marketplace.json` and the plugin's `.cursor-plugin/plugin.json` |
 
 ## How each harness gets each piece
@@ -55,6 +56,7 @@ reminder that survives compaction and new sessions.
 | KiloCode | `opencode/hivemind.js` via the `plugin` key (KiloCode is an OpenCode fork; the v1 key gives the full feature set, the v2 `plugins` key only the skills) | the plugin | added to every model request |
 | Cline | the user's `~/.cline/data/settings/cline_mcp_settings.json` with `${env:…}` references (Cline has no package plugin) | copied to `~/.cline/skills/` | the `UserPromptSubmit` hook in `~/Documents/Cline/Hooks/`, plus the `PostToolUse` end-of-task nudge |
 | Gemini CLI | the extension's `gemini-extension.json` (a `hivemind` entry in `~/.gemini/settings.json` replaces it) | the extension | the `GEMINI.md` instruction block, plus the extension's `SessionStart` hook |
+| Antigravity | `../antigravity/mcp_config.json`, with the URL and key filled in when the user turns the plugin on (stored in `~/.gemini/config/config.json`) | the plugin | the plugin's always-on rule, plus its `SessionStart` hook |
 | GitHub Copilot CLI | the user's `~/.copilot/mcp-config.json` (the whole `url` cannot come from the environment; the key can) | the plugin | the plugin's `SessionStart` hook, plus the `~/.copilot/copilot-instructions.md` instruction block |
 | Cursor | the user's `~/.cursor/mcp.json` with `${env:…}` references (plugin MCP variables are set by team admins, so the plugin ships none) | the plugin (a local plugin in `~/.cursor/plugins/local/hivemind`) | the plugin's always-on rule `cursor/rules/hivemind.mdc`, plus its `sessionStart` hook |
 | Junie | the user's `~/.junie/mcp/mcp.json` with the literal URL and key (Junie expands no `${VAR}`) | the plugin (installed from the Claude Code marketplace) | the plugin's `guidelines/hivemind.md` (always in the guidelines), plus the `Stop` hook |
@@ -193,6 +195,56 @@ itself names no harness-specific paths, and a test enforces this.
   checkout without symlink support the `skills` link is a plain file, so the
   skills would have to be copied by hand.
 
+- **Antigravity** (checked live with the CLI, `agy` 1.5.3, headless
+  against a mock Gemini model: `modelProvider: "gemini"` in
+  `~/.gemini/antigravity-cli/settings.json`, `GEMINI_API_KEY` and
+  `GOOGLE_GEMINI_BASE_URL`; no Google sign-in is needed there).
+  - *Install.* `agy plugin install <github-url>/tree/<ref>/plugins/antigravity`
+    clones the repository and installs that folder at that ref, into
+    `~/.gemini/config/plugins/hivemind` (the App and the IDE read the same
+    folder), copying the `skills` link as a real folder. Without the
+    subfolder it installs the repository root, converting the Gemini CLI
+    extension there, and from `plugins/hivemind` it converts the Claude
+    Code plugin; both conversions keep the Claude and Gemini hook shapes,
+    which Antigravity reads as two broken hook groups, so the docs name
+    the full link. `agy plugin validate --strict plugins/antigravity`
+    passes. On a Windows checkout without symlink support the `skills`
+    link is a plain file, so install from a Linux or macOS clone or the
+    GitHub link.
+  - *MCP server.* A server that declares `variables` installs the plugin
+    turned off. Turning it on in `/plugin` (or the App) asks for each
+    variable and stores the values in plain text in
+    `~/.gemini/config/config.json` (mode 600) under
+    `plugins.hivemind.mcp.hivemind_hivemind.variables`; `agy plugin enable`
+    refuses until then. Reinstalling keeps them, uninstalling deletes
+    them. The server is `hivemind_hivemind`. Its tools are lazy: the
+    system prompt lists their names, the schemas and the server's
+    `instructions` go to files under `~/.gemini/antigravity-cli/mcp/`,
+    and the model calls `call_mcp_tool` with `ServerName`, `ToolName` and
+    an `Arguments` object (a JSON string is sent as is and the server
+    answers 400). So the server's instructions do not reach the model,
+    which is why the plugin ships the rule.
+  - *Workspace plugins.* Antigravity also loads plugins from a trusted
+    workspace's `.agents/plugins/`, and fills one named `hivemind` with the
+    stored variables: a test plugin there whose `serverUrl` pointed at a
+    local listener received `Authorization: Bearer hm_…`. Nothing in the
+    plugin can prevent that, so the README and the setup notes tell users
+    to check that folder before trusting a project.
+  - *Hooks.* `hooks.json` at the plugin root, one named group with flat
+    handler arrays for `SessionStart` and `Stop`. Hooks run with the plugin
+    root as working directory and get `PLUGIN_ROOT`, `PLUGIN_DATA` and
+    `ANTIGRAVITY_CONVERSATION_ID`, but not the plugin's variables, so
+    `HIVEMIND_API_KEY` is unset there; `--antigravity` makes both scripts
+    skip that check (the plugin is off until the key is filled in). Input
+    is camelCase (`conversationId`, `transcriptPath`). `SessionStart`
+    takes `{"injectSteps":[{"systemMessage":{"systemMessage":...}}]}`,
+    which reaches the model as a system message before the first turn.
+    `Stop` takes `{"decision":"block","reason":...}` (the hooks reference
+    says `"continue"`; 1.5.3 re-enters the loop with either) and sends the
+    reason as a system message. Both fire in `agy -p`. There is no
+    compaction event.
+  - *Rule.* `rules/AGENTS.md` is put into every system prompt as a user
+    rule while the plugin is on.
 - **Junie** (JetBrains' coding agent; checked with Junie CLI 26.9.7 on
   Linux against a mock OpenAI-compatible model and a local
   `hivemind-mcp-http`).
@@ -374,6 +426,8 @@ and Codex from `hooks/hooks.json`, in Pi and Oh My Pi from the extension
 and the OpenCode plugin (which KiloCode runs as well), in DeepSeek
 Harness the Stop reminder from `dsh/hivemind-reminders.js` (below). Gemini CLI gets the Stop reminder
 from the extension's `AfterAgent` hook (`../../hooks/hooks.json`).
+Antigravity gets the Stop reminder from `../antigravity/hooks.json`,
+and no post-compaction line.
 Hermes does not have them. Cursor gets the Stop reminder from a user `stop` hook that setup adds (its plugin hooks never see a stop), and no post-compaction line. Junie gets the Stop reminder from the same plugin hook. GitHub Copilot CLI gets the Stop reminder from
 the plugin's `Stop` hook (the shared `hooks/hooks.json`), and no
 post-compaction line. Cline gets the end-of-task nudge from the
@@ -381,7 +435,7 @@ post-compaction line. Cline gets the end-of-task nudge from the
 file, reset by `TaskStart`, and never nudges a subagent task); it has no
 post-compaction line.
 
-The script counts six transcript formats:
+The script counts seven transcript formats:
 
 - Claude Code's `"type": "tool_use"` records.
 - Codex's `function_call`, `custom_tool_call` and `local_shell_call`
@@ -398,6 +452,13 @@ The script counts six transcript formats:
   and sends the reason as the next prompt, and `mcp_hivemind_hive_write`
   keeps it quiet. Gemini's `SessionStart` has no compaction source, so it
   gets no post-compaction line.
+
+- Antigravity's `transcript_full.jsonl`, one line per step, with a step's
+  calls in `"tool_calls":[{"name":...,"args":...}]`; a lazily loaded
+  Hivemind tool shows as `"name":"call_mcp_tool"` with
+  `"ToolName":"hive_write"`, so the checks also match `ToolName`. Checked
+  with 1.5.3 against a mock model: the hook blocks once, and three
+  `hive_feedback` calls keep it quiet.
 
 - Copilot CLI's `events.jsonl`, with one `tool.execution_start` event per
   call; a Hivemind write shows as `"name":"hivemind-hive_write"`.
@@ -441,7 +502,8 @@ The script counts six transcript formats:
   `session_id`, `transcript_path`, `stop_hook_active`). It exits 0 with no
   output, so the stop goes through, unless all of these hold:
   1. not incognito (same test as the session-start script);
-  2. `HIVEMIND_API_KEY` is set (same test as the session-start script);
+  2. `HIVEMIND_API_KEY` is set (same test as the session-start script;
+     skipped with `--antigravity`, whose hooks never see the key);
   3. `stop_hook_active` is not true;
   4. no marker for this `session_id` in `$XDG_RUNTIME_DIR/hivemind-stop-reminder/`
      (when that variable names a real directory the user owns), else
@@ -531,6 +593,7 @@ does two things:
 | Gemini CLI | `HIVEMIND_MCP_URL`/`HIVEMIND_API_KEY` set empty (not unset: Gemini fills unset variables from the project's `.env`), so the extension's server is never contacted (Gemini notes an MCP issue) | the hivemind extension, no hand entry in `settings.json`, and `"experimental": {"extensionConfig": false}` (otherwise a trusted project's `.env` still wins) |
 | OpenCode | the plugin skips the server; a hand-configured one is disabled with `OPENCODE_CONFIG_CONTENT`, or, when that variable is already set (never merged in sh), the key and URL are unset and a note is printed | nothing |
 | KiloCode | the plugin (the OpenCode one) skips the server; a hand-configured one is disabled with `KILO_CONFIG_CONTENT` (`mcp.hivemind.enabled: false` and `mcp.servers.hivemind.disabled`), or, when that variable is already set, the key and URL are unset and a note is printed | nothing |
+| Antigravity (`agy`) | `--settings '{"permissions":{"deny":["mcp(hivemind_hivemind/*)"]}}'`, a session-only rule that refuses every Hivemind call (checked with 1.5.3: six `call_mcp_tool` calls refused, no stop reminder). The server still connects at startup with the stored key, so the server sees a connection; Antigravity has no per-session switch for one plugin | the hivemind plugin |
 | Junie | `--mcp-default-locations=false` (skips the user's and the project's `mcp.json`, so the hand `hivemind` entry is not read; the extension's own `.mcp.json` then tries `${HIVEMIND_MCP_URL}` literally and cannot connect) and `--ide-guidelines=<plugin>/junie/incognito.md`; the launcher also unsets the key and URL. The flag also turns off the user's other MCP servers for the session | the plugin installed, the server in `~/.junie/mcp/mcp.json` |
 | Cline | `HIVEMIND_MCP_URL`/`HIVEMIND_API_KEY` unset, so the `${env:…}` references in `cline_mcp_settings.json` stay unexpanded and the server never connects; the hooks see `HIVEMIND_INCOGNITO` and say the incognito line (the skills stay installed) | the server entry with `${env:…}` references |
 

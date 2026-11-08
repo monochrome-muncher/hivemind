@@ -1,0 +1,18 @@
+{
+  "hivemind": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "sh ./skills/hivemind-setup/scripts/hivemind-session-start.sh --antigravity",
+        "timeout": 5
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "sh ./skills/hivemind-setup/scripts/hivemind-stop.sh --antigravity",
+        "timeout": 5
+      }
+    ]
+  }
+}

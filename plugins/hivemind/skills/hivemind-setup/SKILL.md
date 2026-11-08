@@ -38,7 +38,7 @@ you stand.
 ## Which harness am I in?
 
 The **harness** is the program that runs you and gives you your tools:
-Claude Code, Codex, GitHub Copilot CLI, Cursor, Gemini CLI, DeepSeek Harness, Hermes, Junie, Pi, Oh My Pi,
+Claude Code, Codex, GitHub Copilot CLI, Cursor, Gemini CLI, Antigravity, DeepSeek Harness, Hermes, Junie, Pi, Oh My Pi,
 OpenCode, Cline, KiloCode or another. The **model** is what you are. They are independent: any model
 can run in any harness.
 
@@ -49,7 +49,7 @@ can run in any harness.
 - **Decide from evidence**, strongest first:
   1. **Your system prompt**: most harnesses name themselves there ("You
      are Claude Code…", "You are opencode…", "You are the GitHub Copilot CLI…", "…Cursor…", "You are DeepSeek
-     Harness…", "You are Junie, an autonomous programmer developed by JetBrains", "…operating inside pi…"). Oh My Pi is a fork of Pi and
+     Harness…", "You are Junie, an autonomous programmer developed by JetBrains", "You are Antigravity…", "…operating inside pi…"). Oh My Pi is a fork of Pi and
      its prompt may say the same: if anything else points to Oh My Pi
      (below), it is Oh My Pi, not Pi.
   2. **Your tools**: MCP tools reached as `xd://mcp__…` routes are Oh My
@@ -65,7 +65,7 @@ can run in any harness.
      ```
 
      Match the **program name** (the basename of the first word) exactly
-     against `claude`, `codex`, `copilot`, `cursor`, `cursor-agent`, `gemini`, `dsh`, `hermes`, `junie`, `pi`, `omp`, `opencode`,
+     against `claude`, `codex`, `copilot`, `cursor`, `cursor-agent`, `gemini`, `agy`, `dsh`, `hermes`, `junie`, `pi`, `omp`, `opencode`,
      `cline` or `kilo`; do not match substrings (`pip`, `pipx`, a path that
      happens to contain `pi`). **The nearest ancestor that matches wins**:
      a harness started from another harness's shell sees both. Pi and Oh My
@@ -94,6 +94,7 @@ can run in any harness.
 | GitHub Copilot CLI (`copilot`) | `references/copilot-cli.md` |
 | Cursor (`cursor`, `cursor-agent`) | `references/cursor.md` |
 | Gemini CLI | `references/gemini-cli.md` |
+| Antigravity (`agy`, the App or the IDE) | `references/antigravity.md` |
 | DeepSeek Harness (`dsh`) | `references/deepseek-harness.md` |
 | Hermes | `references/hermes.md` |
 | Junie (`junie`) | `references/junie.md` |
