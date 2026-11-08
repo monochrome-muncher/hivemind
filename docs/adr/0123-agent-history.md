@@ -93,7 +93,7 @@ Per action, the line and what is read from `detail`:
 | `agent.cleanup_undo` | Cleanup undone: N memories reactivated, N ratings put back, N pins restored | `reactivated`, `ratings_cleared`, `pins_restored` |
 | `entry.withdraw` | Withdrew a memory; "A memory by `<agent>` was withdrawn" when an admin did; "Withdrew a memory inherited from `<agent>`" for a succession withdrawal | `reason` (shown as `reason`), `author`, `via` |
 | `entry.pin` | Pinned a memory, in `<fleet>` | `fleet_id` |
-| `entry.unpin` | Unpinned a memory, with the reason when it is one of the known codes (withdrawn, cleanup, fleet move or merge undo) | `fleet_id`, `reason` |
+| `entry.unpin` | Unpinned a memory, with the reason when it is one of the known codes (withdrawn, cleanup, fleet move or merge undo) | `reason` |
 | `fleet.move_agents` | Moved from `<fleet>` to `<fleet>` | the row's target and `target_fleet_id` (as fleet names) |
 | anything else | Something changed | none |
 

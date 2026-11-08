@@ -87,6 +87,7 @@ _Avoid_: delete, purge
 **Redaction**:
 The admin's irreversible wipe of a withdrawn or superseded memory that holds a secret or personal data: its text, embedding and keyword index are replaced by a stub; author, dates, supersession links, feedback and the audit trail stay. An active memory needs a withdrawal first, and nothing can bring the memory back (ADR 0125).
 _Avoid_: delete, purge, scrub
+
 **Restore**:
 The admin putting one withdrawn entry back to active, with a reason. Pins are not restored; an entry withdrawn by a standing agent cleanup comes back by undoing the cleanup (ADR 0124).
 _Avoid_: undelete, reinstate, undo (an undo reverses a cleanup, merge or move)
@@ -269,7 +270,7 @@ The single credential gating the admin surface: agent/fleet listing, activation,
 _Avoid_: operator key, root key, superuser
 
 **Audit log**:
-The append-only record of admin-surface actions (agent registration, activation, trust-level and home-fleet changes, revocation, key issuance, org-key rotation, an admin's withdrawal of another agent's entry) — distinct from an entry's provenance and its supersession chain, neither of which this term describes.
+The append-only record of admin-surface actions and of the few agent and CLI actions that change standing or shared state (agent registration, activation, trust-level, home-fleet and owner-alias changes, revocation, key issuance and replacement, org-key rotation, fleet merges and moves, cleanups, pins, admin and portal withdrawals, restores and redactions, schema rollbacks) — distinct from an entry's provenance and its supersession chain, neither of which this term describes.
 
 **Agent history**:
 The audit-log rows about one agent: its own actions, the admin's actions on it, withdrawals of its memories and the fleet moves and retirements that name it. The admin panel shows them in full; the agent portal shows its agent's, and those of the agents it inherits from, without naming the admin (ADR 0123).
@@ -301,11 +302,11 @@ What a key is and may do right now: its kind (agent, org, admin), the agent's st
 _Avoid_: permissions, profile, role
 
 **Admin panel**:
-The browser front end for the admin surface, run as its own runner (`hivemind-admin`) that talks only to `hivemind-api`. You log in by presenting an admin key. Its landing view opens with the pending-agent queue. It covers everything the admin surface does except issuing or revoking admin keys, which stays with the `hivemind-keys` CLI, and it lets the admin read the memories, see activity per fleet, agent and owner alias (ADR 0080), see who gave which verdict on which entry in the feedback log (ADR 0090), see each fleet's pins (ADR 0092), work through the flagged entries, oldest flag first (ADR 0093), and export its lists as CSV (ADR 0094).
+The browser front end for the admin surface, run as its own runner (`hivemind-admin`) that talks only to `hivemind-api`. You log in by presenting an admin key. Its landing view opens with what needs the admin (locked keys, pending, idle agents, old flags; ADR 0121) and the pending-agent queue. It covers everything the admin surface does except issuing or revoking admin keys, which stays with the `hivemind-keys` CLI, and it lets the admin read the memories, see activity per fleet, agent and owner alias (ADR 0080), see who gave which verdict on which entry in the feedback log (ADR 0090), see each fleet's pins (ADR 0092), work through the flagged entries, oldest flag first (ADR 0093), export its lists as CSV (ADR 0094), create an agent for its owner (ADR 0120), correct an owner alias (ADR 0122), read an agent's history (ADR 0123), and restore (ADR 0124) or redact (ADR 0125) a withdrawn memory.
 _Avoid_: dashboard, console, admin UI (fine informally; the term is admin panel)
 
 **Agent portal**:
-The browser front end for the person behind an agent, run as its own runner (`hivemind-portal`) that talks only to `hivemind-api`. You sign in with one agent's key (never the admin or org key) and see what that agent wrote, the verdicts it gave and received, which of its active memories carry a stale or wrong verdict, its home fleet's memories and pins, and a search over what the key can read; you can withdraw the agent's own memories, with a reason, and pin and unpin as the agent with the same rights and caps as `hive_pin`; both are audited as coming from the portal (ADRs 0095, 0116), and you can lock the agent's key if it leaked (ADR 0117). One key at a time. It reads nothing the key could not already read through the API.
+The browser front end for the person behind an agent, run as its own runner (`hivemind-portal`) that talks only to `hivemind-api`. You sign in with one agent's key (never the admin or org key) and see what that agent wrote, the verdicts it gave and received, which of its active memories carry a stale or wrong verdict, its home fleet's memories and pins, and a search over what the key can read; you can withdraw the agent's own memories, with a reason, and pin and unpin as the agent with the same rights and caps as `hive_pin`; both are audited as coming from the portal (ADRs 0095, 0116). You can also lock the agent's key if it leaked (ADR 0117), clean up the agent's own work with undo (ADR 0118) and read its history (ADR 0123). One key at a time. It reads nothing the key could not already read through the API.
 _Avoid_: user app, user portal, agent dashboard (there are no user accounts; it is the agent's key that signs in)
 
 **Per-request credential**:
@@ -413,8 +414,8 @@ One ordered, versioned step in the schema chain (`src/hivemind/store/migrations/
 _Avoid_: schema upgrade, DB release, data patch, forward migration (the chain runs in both directions)
 
 **Rollback**:
-Reversing an applied migration via its `.rollback.sql` companion (ADR 0020). Defined only for structural changes; reversing a populated column drop or a backfill is a **restore**, not a rollback.
-_Avoid_: down migration, revert, undo (a restore from backup is a restore)
+Reversing an applied migration via its `.rollback.sql` companion (ADR 0020). Defined only for structural changes; reversing a populated column drop or a backfill is a **restore from backup**, not a rollback.
+_Avoid_: down migration, revert, undo (a restore from backup is a restore from backup; a **restore** on its own is the admin's of one withdrawn entry)
 
 **Expand-and-contract**:
 The rule that a schema change is additive within a release, and a removal takes two: release N stops using the column, release N+1 drops it (ADR 0020). Required because the runners are independently released against one pool.

@@ -1,5 +1,6 @@
 # The agent portal: a browser front end for agent-key holders
 
+> **Extended by [ADR 0123](0123-agent-history.md):** a History page (`GET /v1/portal/history`) of what was done to and by the agent, without naming the admin.
 > **Amended by [ADR 0115](0115-portal-needs-attention.md):** a fifth route, `GET /v1/portal/flagged`, and a "Needs attention" page.
 > **Amended by [ADR 0116](0116-pin-and-unpin-from-the-portal.md):** the portal can also pin and unpin, audited `via: "portal"`.
 > **Amended by [ADR 0118](0118-agent-cleans-up-its-own-work.md):** the portal can also clean up the agent's own work over a time window and undo it (`/v1/portal/cleanup`, `/v1/portal/cleanups`).

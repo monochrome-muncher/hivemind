@@ -1,6 +1,6 @@
 # An admin corrects an agent's owner alias
 
-Amends [ADR 0011](0011-fleets-and-trust-levels-home-fleet-scoping-with-a-four-level-privilege-ladder.md) and [ADR 0120](0120-admin-creates-an-agent-for-its-owner.md). Touches [ADR 0027](0027-audit-log-of-admin-actions.md) and [ADR 0119](0119-rollbacks-do-not-silently-erase-the-audit-log.md). Amends SPEC §5.1 and §12.5.
+Amends [ADR 0011](0011-fleets-and-trust-levels.md) and [ADR 0120](0120-admin-creates-an-agent-for-its-owner.md). Touches [ADR 0027](0027-audit-log-of-admin-actions.md) and [ADR 0119](0119-rollbacks-do-not-silently-erase-the-audit-log.md). Amends SPEC §5.1 and §12.5.
 
 Status: Accepted. Asked for by Monochrome on 2026-11-07.
 

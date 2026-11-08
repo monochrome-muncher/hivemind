@@ -11,7 +11,7 @@ is unused.
 
 | ADR | Decision | Status |
 |---|---|---|
-| [0001](0001-append-only-entries-with-explicit-supersession.md) | Append-only entries with explicit supersession | Accepted; amended by 0125 (an admin can redact a withdrawn memory) |
+| [0001](0001-append-only-entries-with-explicit-supersession.md) | Append-only entries with explicit supersession | Accepted; amended by 0124 (an admin can restore a withdrawn memory) and 0125 (an admin can redact a withdrawn memory) |
 | [0002](0002-flat-org-wide-pool-with-scope-tag.md) | Flat org-wide pool with a scope tag | Superseded by 0011 |
 | [0003](0003-kill-switch-is-client-side.md) | The kill switch is client-side | Amended by 0035 |
 | [0004](0004-explicit-writes-only-no-passive-capture.md) | Explicit writes only (no passive capture in v1) | Accepted |
@@ -21,7 +21,7 @@ is unused.
 | [0008](0008-per-user-keys-plus-agent-scoped-sub-keys.md) | Per-user keys plus agent-scoped sub-keys, no OAuth in v1 | Superseded by 0012 |
 | [0009](0009-pg-backed-mcp-runner-with-per-agent-credentials.md) | Postgres-backed MCP runner with per-agent credentials | Amended by 0012, 0042 |
 | [0010](0010-hostable-multi-agent-streamable-http-mcp-runner-with-per-request-credentials.md) | Hostable, multi-agent streamable-HTTP MCP runner with per-request credentials | Amended by 0026, 0042 |
-| [0011](0011-fleets-and-trust-levels.md) | Fleets and trust levels: home-fleet scoping with a four-level privilege ladder | Accepted; amended by 0107, 0109, 0113 |
+| [0011](0011-fleets-and-trust-levels.md) | Fleets and trust levels: home-fleet scoping with a four-level privilege ladder | Accepted; amended by 0107, 0109, 0112, 0113, 0122 |
 | [0012](0012-shared-org-key-with-admin-issued-agent-keys.md) | Shared org key with admin-issued agent keys | Partly superseded by 0031, 0039 |
 | [0013](0013-forward-migration-path-with-schema-migrations-tracking.md) | Forward-migration path: idempotent re-apply + schema_migrations tracking | Superseded by 0020 |
 | [0014](0014-bounded-retries-on-the-embedder-call.md) | Bounded retries on the embedder call | Amended by 0041 |
@@ -38,7 +38,7 @@ is unused.
 | [0025](0025-hnsw-vector-index-approximate-nearest-neighbours.md) | An HNSW index on `entries.embedding`: approximate, not exact, nearest neighbours | Accepted |
 | [0026](0026-two-app-tier-replicas-for-availability.md) | Two app-tier replicas per runner, for availability — not throughput | Accepted |
 | [0027](0027-audit-log-of-admin-actions.md) | An append-only audit log of admin actions, with two actor kinds | Amended by 0028, 0046, 0076, 0095, 0119 |
-| [0028](0028-revoked-agent-status-and-an-activation-guard.md) | A `revoked` agent status, and activation only from `pending` or `revoked` | Refined by 0039 |
+| [0028](0028-revoked-agent-status-and-an-activation-guard.md) | A `revoked` agent status, and activation only from `pending` or `revoked` | Refined by 0039; note on 0108 (replace a key in one step) |
 | [0029](0029-admin-panel-runner-with-a-browser-held-key.md) | The admin panel: a static UI and an allowlisted proxy, with the key held in the browser | Amended by 0080, 0091; the agent portal (0095) is built the same way |
 | [0030](0030-hive-whoami-lets-an-agent-see-its-own-standing.md) | `hive_whoami`: an agent can read its own standing | Accepted; amended by 0113, 0114 |
 | [0031](0031-one-key-per-request-and-what-org-key-rotation-stops.md) | One key per request; rotating the org key closes registration, nothing more | Refined by 0039 |
@@ -67,7 +67,7 @@ is unused.
 | [0055](0055-read-several-entries-in-one-call.md) | Read several entries in one call | Amended by 0059 |
 | [0056](0056-count-searches-that-find-nothing.md) | Count searches that find nothing | Accepted |
 | [0057](0057-see-also-links-between-entries.md) | "See also" links between entries | Accepted |
-| [0058](0058-pinned-fleet-briefing.md) | A pinned briefing per fleet | Amended by 0076, 0096 |
+| [0058](0058-pinned-fleet-briefing.md) | A pinned briefing per fleet | Amended by 0076, 0096; touched by 0107 |
 | [0059](0059-batch-reads-use-a-fixed-number-of-store-reads.md) | Batch reads use a fixed number of store reads | Accepted |
 | [0060](0060-the-admin-key-writes-self-or-org-entries.md) | The admin key writes `self` or `org` entries | Amended by 0066, 0113 |
 | [0061](0061-vector-search-needs-positive-similarity.md) | Vector search needs a positive similarity | Amended by 0062 |
@@ -76,7 +76,7 @@ is unused.
 | [0064](0064-corrections-stay-visible-in-recent-feedback.md) | Corrections stay visible in an entry's recent feedback | Accepted |
 | [0065](0065-an-author-cannot-rate-its-own-entry.md) | An author cannot rate its own entry | Accepted; amended by 0113 |
 | [0066](0066-the-admin-key-has-one-feedback-vote.md) | The admin key has one feedback vote per entry | Accepted |
-| [0067](0067-a-revoked-agents-feedback-no-longer-counts.md) | A revoked agent's feedback no longer counts | Accepted |
+| [0067](0067-a-revoked-agents-feedback-no-longer-counts.md) | A revoked agent's feedback no longer counts | Accepted; extended by 0111 (a cleanup sets ratings aside) |
 | [0068](0068-rater-flag-confirmation-metric.md) | Count the flags a later supersession confirmed | Extended by 0075 |
 | [0069](0069-cache-the-entry-scan-behind-the-usage-report.md) | Cache the entry scan behind the usage report | Extended by 0075 |
 | [0070](0070-one-capped-budget-for-social-signals.md) | One capped budget for social signals | Amended by 0071, 0072, 0073, 0088, 0103, 0106 |
@@ -89,7 +89,7 @@ is unused.
 | [0077](0077-write-check-mode-and-warnings.md) | Writes can be checked first, and answer with advisory warnings | Amended by 0087, 0099 |
 | [0078](0078-explore-search.md) | Opt-in explore search | Accepted |
 | [0079](0079-feedback-dates-on-the-database-clock.md) | Feedback is dated by the store's clock | Accepted |
-| [0080](0080-admin-memory-browser-and-activity.md) | The admin panel can read memories and show activity | Extended by 0090, 0092, 0093 |
+| [0080](0080-admin-memory-browser-and-activity.md) | The admin panel can read memories and show activity | Extended by 0090, 0092, 0093; amended by 0124 (restore) |
 | [0081](0081-upstream-changed-on-hits.md) | A hit shows when an entry it links to changed | Accepted |
 | [0082](0082-dev-mode-credentials-sit-at-trust-level-zero.md) | Dev-mode credentials sit at trust level 0 when the pool requires stored keys | Accepted (off by default) |
 | [0083](0083-the-entry-read-path-is-serviced.md) | The entry-read path is serviced | Accepted |
@@ -104,8 +104,8 @@ is unused.
 | [0092](0092-admin-fleet-pins.md) | The admin panel shows each fleet's pins | Accepted; admin-only, read-only; withdrawn pins left out per 0096 |
 | [0093](0093-admin-flag-backlog.md) | The admin panel lists the flag backlog, oldest flag first | Accepted; admin-only, observation-only |
 | [0094](0094-admin-csv-export.md) | The admin panel exports its lists as CSV | Accepted; front end only |
-| [0095](0095-agent-portal.md) | The agent portal: a browser front end for agent-key holders | Accepted; amended by 0113, 0114, 0115, 0116, 0117, 0118 |
-| [0096](0096-contributors-pin.md) | Contributors pin, three pins each, and a withdrawn entry leaves the briefing | Accepted; amended by 0113 |
+| [0095](0095-agent-portal.md) | The agent portal: a browser front end for agent-key holders | Accepted; amended by 0113, 0114, 0115, 0116, 0117, 0118; extended by 0123 (history) |
+| [0096](0096-contributors-pin.md) | Contributors pin, three pins each, and a withdrawn entry leaves the briefing | Accepted; amended by 0113; touched by 0107 |
 | [0097](0097-query-instruction-for-instruction-aware-embedders.md) | A query instruction for instruction-aware embedders, on the query side only | Accepted; on by default, empty value turns it off |
 | [0098](0098-relied-on-changed-list-filter.md) | A `relied_on_changed` filter for entries an agent rated helpful that have since changed | Accepted; display and filter only |
 | [0099](0099-answers-open-question-warning.md) | A write warns when it may answer an open question | Accepted; advisory only, floor 0.70 provisional |
@@ -116,12 +116,12 @@ is unused.
 | [0104](0104-mcp-runner-serves-process-metrics.md) | The MCP HTTP runner serves per-process metrics | Accepted; amends 0050, no usage series, `sum` across api and mcp |
 | [0105](0105-mcp-hive-write-sources-schema-typed.md) | The MCP `hive_write` `sources` schema is typed, validated leniently | Accepted; schema-only, keeps structured `invalid_input` |
 | [0106](0106-confirmation-halves-older-flags.md) | A confirmation newer than every flag halves those flags | Accepted; amends 0063, 0070, 0103 (I3, new I7), `HIVEMIND_CONFIRMATION_HALVES_FLAGS=false` turns it off |
-| [0107](0107-fleet-merge.md) | Merge fleets into one home fleet | Accepted; amends 0011, touches 0058 and 0096, migration 0017, admin only, undoable |
+| [0107](0107-fleet-merge.md) | Merge fleets into one home fleet | Accepted; amends 0011, touches 0058 and 0096, migration 0017, admin only, undoable; extended by 0112, speed amended by 0126 |
 | [0108](0108-replace-an-agent-key.md) | Replace an agent's key | Accepted; amends 0028, touches 0012, 0027 and 0039, amended by 0117, migration 0020, admin only, old key dies at once |
 | [0109](0109-rename-a-fleet.md) | Rename a fleet | Accepted; amends 0011 (no rename), migration 0019, admin only, audited `fleet.rename` |
 | [0110](0110-agent-key-last-use.md) | An agent key records its last use | Accepted; amended by 0114, migration 0021, `credentials.last_used_at` (written at most hourly), `HIVEMIND_IDLE_AGENT_DAYS`, observation only |
 | [0111](0111-agent-cleanup.md) | Clean up after a bad agent | Accepted; extends 0067, follows 0107, migration 0022, admin only, undoable; amended by 0118 |
-| [0112](0112-move-agents-with-their-memories.md) | Move agents with their memories (fleet split) | Accepted; amends 0011, builds on 0107, migration 0023, admin only, undoable |
+| [0112](0112-move-agents-with-their-memories.md) | Move agents with their memories (fleet split) | Accepted; amends 0011, builds on 0107, migration 0023, admin only, undoable; speed amended by 0126 |
 | [0113](0113-retire-an-agent-with-a-successor.md) | Retire an agent with a successor | Accepted; amends 0011, 0030, 0033, 0034, 0060, 0065, 0095, 0096, migration 0024, admin only, undoable |
 | [0114](0114-key-last-used-in-whoami-and-the-portal-home.md) | An agent sees when its own key was last used | Accepted; amends 0110, 0030, 0095, `key_last_used_at` in `whoami`, a status card on the portal home, no migration |
 | [0115](0115-portal-needs-attention.md) | The portal lists the agent's flagged memories on a "Needs attention" page | Accepted; amends 0095, builds on 0093 and 0113, `GET /v1/portal/flagged`, no migration |
@@ -129,7 +129,7 @@ is unused.
 | [0117](0117-lock-your-own-key-from-the-portal.md) | Lock the agent's own key from the portal | Accepted; amends 0095, 0108, migration 0025, agent key only, audited `agent_key.lock`, cleared by Replace key |
 | [0118](0118-agent-cleans-up-its-own-work.md) | An agent cleans up its own work from the portal | Accepted; amends 0095, 0111, builds on 0113, migration 0026, agent key only, undoable |
 | [0119](0119-rollbacks-do-not-silently-erase-the-audit-log.md) | Rollbacks do not silently erase the audit log | Accepted; amends 0020, 0027, migration 0027, `hivemind-migrate --rollback` refuses without `--discard-audit-rows` / `--revive-revoked-keys` / `--unlock-locked-keys`, audited `schema.rollback` |
-| [0120](0120-admin-creates-an-agent-for-its-owner.md) | An admin creates an agent for its owner | Accepted; touches 0012, 0029, 0039, 0046, `POST /v1/admin/agents` and the panel's New agent, no migration, audited as `agent.register` + `agent.activate` |
+| [0120](0120-admin-creates-an-agent-for-its-owner.md) | An admin creates an agent for its owner | Accepted; amended by 0122; touches 0012, 0029, 0039, 0046, `POST /v1/admin/agents` and the panel's New agent, no migration, audited as `agent.register` + `agent.activate` |
 | [0121](0121-overview-needs-you-row.md) | The Overview opens with a "Needs you" row | Accepted; touches 0029, 0093, 0110, 0117, admin panel only (new `needs.js`, Agents page filters in the hash), no new endpoint, no migration |
 | [0122](0122-admin-corrects-an-agents-owner-alias.md) | An admin corrects an agent's owner alias | Accepted; amends 0011, 0120, `PATCH /v1/admin/agents/{name}` gains `owner_alias`, migration 0029, audited `agent.owner_set`, stats follow because the alias lives only on the agent row |
 | [0123](0123-agent-history.md) | One agent's history, in the admin panel and in the agent portal | Accepted; builds on 0027, 0095, 0113, 0118, migration 0030 (audit-log indexes), audit-log `target` and `subject` filters, `GET /v1/portal/history`, agent key only, the admin is never named |

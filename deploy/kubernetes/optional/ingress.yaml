@@ -4,7 +4,7 @@
 #
 # Before applying, replace the placeholder host (hivemind.example.org) and
 # point the issuer at the org's existing cert-manager issuer (it MUST exist;
-# a ClusterIssuer if the name is not a namespace-scoped Issuer).
+# for a ClusterIssuer, also change the Certificate's issuerRef kind below).
 #
 # WHY the SSE annotations: /mcp is a long-lived SSE stream (ADR 0010), and
 # nginx's default 60s proxy-read-timeout kills it after a 60s idle gap;

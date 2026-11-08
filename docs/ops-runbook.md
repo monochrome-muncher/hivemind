@@ -176,7 +176,7 @@ make migrate
 > migration (ADR 0020):
 >
 > ```sh
-> docker compose exec postgres psql -U hivemind -c "SELECT max(id) FROM _yoyo_migration"
+> docker compose exec postgres psql -U hivemind -c "SELECT migration_id FROM _yoyo_migration ORDER BY applied_at_utc DESC, migration_id DESC LIMIT 1"
 > ```
 >
 > If it lags, run `make migrate` (safe to re-run; an up-to-date pool is a no-op).
@@ -305,7 +305,7 @@ curl -s -H "X-API-Key: $ADMIN_KEY" \
 
 - **Name yourself on the CLI.** Pass `--actor` before the subcommand —
   `uv run hivemind-keys --actor alice.ops rotate-org`. It defaults to the
-  OS user, which inside a container is usually `root` and says nothing.
+  OS user, which inside the image is `hivemind` and says nothing.
   The value is **unverified** (anyone with database access can type
   anything); CLI rows are marked `actor_kind = cli` for that reason.
 - **Admin keys appear by fingerprint**, the 12 hex characters
@@ -339,7 +339,7 @@ curl -s -H "X-API-Key: $ADMIN_KEY" \
   must stay dead.
 - **Rollbacks are audited and guarded** (ADR 0119, migration `0027`).
   Several shipped rollbacks (`0009`, `0014`, `0017`, `0019`, `0020`,
-  `0022`, `0023`, `0024`, `0025`, `0027`, `0031`) delete the audit rows whose
+  `0022`, `0023`, `0024`, `0025`, `0027`, `0029`, `0031`, `0032`) delete the audit rows whose
   action needs a wider `CHECK`, `0006`'s sets revoked agents back to
   `active` (reviving their key rows), and `0025`'s drops the lock mark, so
   locked keys work again. `make rollback` (`hivemind-migrate --rollback N`)
@@ -532,7 +532,7 @@ curl -s -X POST -H "X-API-Key: $ADMIN_KEY" \
 ```
 
 **After upgrading.** Memories written from the release with migration 0028
-on merge and move fast. A memory written before it is slow on its first
+onwards merge and move fast. A memory written before it is slow on its first
 merge or move only (the new version of its row lands on a page with room,
 and the search index has to take it once). After that, and for its undo, it
 is fast. You do not have to do anything.
@@ -581,8 +581,9 @@ entries_fleet_idx;`): while it exists, merges and moves cannot be fast.
   that was already on its way to the source fleet is refused with
   `409 fleet_merged` (naming the target) and the agent retries; its next
   attempt lands in the target. A write that has to wait more than 3 seconds
-  for the merge gets `503 fleet_busy` ("fleet is being merged or moved, retry")
-  with a `Retry-After` header, on REST and in the MCP tools, and retrying
+  for the merge gets `503 fleet_busy` ("fleet is being merged or moved, retry"):
+  on REST with a `Retry-After` header, in the MCP tools as a `fleet_busy`
+  tool error without one. Retrying
   works once the merge commits. If the merge cannot get its locks within
   5 seconds, or deadlocks with a concurrent change, it stops with
   `409 merge_refused` and changes nothing; run it again.

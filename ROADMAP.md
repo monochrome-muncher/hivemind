@@ -47,7 +47,13 @@ own agent's work (ADR 0118). 2.16.0 was bug fixes and a faster flag
 backlog, and dropped the legacy Pi adapter route. 2.17.0 was bug and security
 fixes and safer migration rollbacks: `hivemind-migrate --rollback` no longer
 erases audit rows, revives revoked keys or unlocks locked keys unless asked
-(ADR 0119, migration 0027).
+(ADR 0119, migration 0027). 2.18.0 added admin and portal features: the
+admin creates an agent for its owner (ADR 0120), a "Needs you" row on the
+Overview (ADR 0121), owner alias correction (ADR 0122), an agent's history in
+the panel and the portal (ADR 0123), restoring a withdrawn memory (ADR 0124)
+and redacting one that holds a secret (ADR 0125), and made fleet merges and
+moves fast (ADR 0126). 2.18.1 listed Hivemind in the MCP Registry, and
+2.18.2 gave the admin panel and the portal the Hivemind icon and look.
 Tier 4's measurement items are closed or deferred with their reasons.
 The SPEC §10 extensions (Tier 5) stay held until their triggers fire.
 
@@ -62,10 +68,10 @@ The SPEC §10 extensions (Tier 5) stay held until their triggers fire.
   read latency once the pool passes ~200k entries (§4.7), and any `rrf_k`
   change. The off-by-default ranking settings (§3.15) are turned on only
   after their measurement passes with the deployment's embedder.
-- **Parked ideas**: a `question` entry kind (wait for the empty-search
-  counters of ADR 0056 to show demand). The legacy `pi-mcp-adapter` route in
-  the Pi plugin was dropped once Pi's built-in MCP (0.99+) became the norm
-  (2.16.0).
+- **Dropped ideas**: a `question` entry kind was considered and dropped. The
+  legacy `pi-mcp-adapter` route in the Pi plugin was dropped once Pi's
+  built-in MCP (0.99+) became the norm (2.16.0). Agent key switching is
+  parked ([docs/proposals/2026-10-12-agent-key-switching.md](docs/proposals/2026-10-12-agent-key-switching.md)).
 - **Discovery and learning ideas** ([docs/proposals/2026-10-20-discovery-and-learning-ideas.md](docs/proposals/2026-10-20-discovery-and-learning-ideas.md)):
   a re-check queue and a librarian skill, searchable tags, a tag
   directory, "used together" trails and an ambient-recall pilot, kept as
@@ -157,7 +163,7 @@ An insert-only audit log written by the REST admin surface (actor: the
 admin key's fingerprint) and the CLI (an unverified `--actor`), read at
 `GET /v1/admin/audit-log`. Registrations are audited since ADR 0046.
 
-### 3.9 Admin panel and agent portal  *(shipped: ADRs 0028–0029, 0080, 0090–0095, migration `0006`, DEPLOY.md §8–§9)*
+### 3.9 Admin panel and agent portal  *(shipped: ADRs 0028–0029, 0080, 0090–0095, 0107–0125, migrations `0006` and later, DEPLOY.md §8–§9)*
 A browser front end for the admin surface, with a pending-agent queue.
 It needed the `revoked` agent status first (ADR 0028). The admin key
 lives in the tab's `sessionStorage` behind a strict CSP; keep the panel
@@ -167,14 +173,18 @@ per-fleet pins (ADR 0092), the flag backlog (ADR 0093) and CSV export
 (ADR 0094), and the fleet-and-agent lifecycle: merging and undoing
 fleets (ADR 0107), renaming fleets (ADR 0109), replacing an agent key
 (ADR 0108), the idle filter (ADR 0110), cleanups with undo (ADR 0111),
-moving agents (ADR 0112), retiring with a successor (ADR 0113) and the
-key-locked badge (ADR 0117). The agent portal (ADR 0095,
+moving agents (ADR 0112), retiring with a successor (ADR 0113), the
+key-locked badge (ADR 0117), creating an agent for its owner (ADR 0120),
+the "Needs you" row (ADR 0121), correcting an owner alias (ADR 0122), an
+agent's history (ADR 0123), restoring a withdrawn memory (ADR 0124) and
+redacting one (ADR 0125). The agent portal (ADR 0095,
 `hivemind-portal`) is a second front end for a person holding one
 agent's key: its memories, the verdicts it gave and got, its home
 fleet, search, an audited withdraw, pin and unpin as that agent
 (ADR 0116), the key's last use (ADR 0114), a "Needs attention" page of
-flagged memories (ADR 0115), locking a leaked key (ADR 0117) and a
-self-service cleanup with undo (ADR 0118). Keep it on an internal
+flagged memories (ADR 0115), locking a leaked key (ADR 0117), a
+self-service cleanup with undo (ADR 0118) and the agent's history
+(ADR 0123). Keep it on an internal
 ingress as well.
 
 ### 3.10 Agent plugin and skills  *(shipped: ADRs 0030–0031, `plugins/hivemind/`)*
