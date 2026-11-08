@@ -4,7 +4,9 @@
 # Gemini CLI as an AfterAgent hook):
 # at most once per session, blocks the stop once with a short reminder to
 # write what another agent could reuse and to rate the entries the work
-# tested. Registered in hooks/hooks.json (Gemini CLI: the extension's AfterAgent hook).
+# tested. Registered in hooks/hooks.json (Gemini CLI: the extension's AfterAgent
+# hook; Antigravity: plugins/antigravity/hooks.json; Cursor: a user stop hook in
+# ~/.cursor/hooks.json that the setup adds).
 #
 # It only nudges a substantial session (at least HIVEMIND_STOP_MIN_TOOLS tool
 # uses, default 20) that has not called hive_write or hive_feedback yet, or

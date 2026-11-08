@@ -20,7 +20,8 @@
 # launcher also removes HIVEMIND_API_KEY and HIVEMIND_MCP_URL from the
 # child's environment (codex: the key only; gemini: both set empty; omp: the
 # URL set to "off"), so an agent with a shell cannot read the key or call the
-# REST API with it. Hermes, OpenCode and KiloCode
+# REST API with it. Antigravity keeps its key in its own config (agy: every
+# Hivemind call is denied instead). Hermes, OpenCode and KiloCode
 # keep the variables (their switch or the plugin may still need them), except
 # that OpenCode and KiloCode drop them when OPENCODE_CONFIG_CONTENT or
 # KILO_CONFIG_CONTENT is already set and the overlay cannot be applied. Any

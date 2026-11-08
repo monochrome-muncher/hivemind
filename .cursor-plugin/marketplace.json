@@ -7,7 +7,7 @@
   "plugins": [
     {
       "name": "hivemind",
-      "description": "Recall from and contribute to your organization's Hivemind in every session; includes a SessionStart reminder, an always-on rule that survives compaction, and the hivemind / hivemind-setup skills.",
+      "description": "Recall from and contribute to your organization's Hivemind in every session; includes a sessionStart reminder, an always-on rule and the hivemind / hivemind-setup skills.",
       "source": "plugins/hivemind"
     }
   ]
