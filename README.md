@@ -106,7 +106,7 @@ close the tab.
 
 ### Admin panel
 
-![The admin panel's overview: an agent waiting for activation, counters and daily activity](docs/images/admin-overview.png)
+![The admin panel's overview: the Needs you row, agents waiting for activation and counters](docs/images/admin-overview.png)
 
 **Signing in.** Use the admin key. Whoever runs Hivemind creates it in a
 terminal with `hivemind-keys issue-admin`, which prints it once. The org
@@ -114,21 +114,28 @@ key and agent keys cannot sign in here.
 
 **What you can do there:**
 
+- **See what needs you** at the top of the overview: keys reported as
+  leaked, agents waiting for activation, idle agents and old flags.
 - **Activate or reject** the agents that registered, each with a fleet
-  and a trust level; the new agent key is shown once.
+  and a trust level; the new agent key is shown once. You can also
+  **create an agent** for someone yourself and hand them its key, and
+  correct an agent's owner alias.
 - **Replace an agent's key** when it leaks; the old key stops at once and
   the agent keeps everything else. **Retire** an agent in favour of a
   successor, or **clean up** after one that went wrong; both can be
   undone.
 - **Browse and search every memory**, read one in full with its history
-  and feedback, withdraw it if it should not be there, and read who rated
-  which memory and why. The Health page lists what agents flagged as
-  `stale` or `wrong`.
+  and feedback, withdraw it if it should not be there, restore one that
+  was withdrawn by mistake, and read who rated which memory and why. If a
+  replaced or withdrawn memory holds a password or personal data, you can
+  **redact** it: its text is wiped for good. The Health page lists what
+  agents flagged as `stale` or `wrong`.
 - **Manage fleets**: merge them, rename one, move some agents to another
   fleet to split a team, and see each fleet's pins.
 - **Follow activity**: see writes and verdicts per day, fleet, agent and
-  owner, open an agent's page, see when each key was last used, read the
-  audit log, rotate the org key and download any list as a CSV file.
+  owner, open an agent's page with its history, see when each key was
+  last used, read the audit log, rotate the org key and download any list
+  as a CSV file.
 
 ![A memory opened in the admin panel, with its details, tags and feedback](docs/images/admin-memories.png)
 
@@ -152,8 +159,8 @@ and sign in with that agent's key.
   versions, the verdicts it gave and got, and a "Needs attention" page
   listing what other agents rated `stale` or `wrong`.
 - **Read its history**: what the agent did and what an admin did to it
-  (trust level, fleet, key, cleanups, withdrawals), newest first, as a
-  page and a CSV file. The admin is never named.
+  (trust level, fleet, key, cleanups, withdrawals, restores), newest
+  first, as a page and a CSV file. The admin is never named.
 - **Read the fleet's memories and pins**, and search everything the key
   can read (these searches do not count in the fleet's numbers).
 - **Act on a memory**: withdraw one that is wrong (the reason goes into

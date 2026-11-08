@@ -50,7 +50,7 @@ What the **org provides** (the app itself needs nothing else):
 | `K8S_SECRET_EXTRACTOR_API_KEY` | **yes / yes** | The extractor credential. **May be empty** (extraction off, ADR 0016 — safe). |
 | `K8S_SECRET_MIGRATE_DATABASE_URL` | **yes / yes** (optional) | A direct Postgres DSN for `hivemind-migrate` only, needed when `K8S_SECRET_DATABASE_URL` points at a transaction-mode PgBouncer (the migration's session advisory lock cannot live there; `docs/ops-runbook.md`). Unset = migrate through `K8S_SECRET_DATABASE_URL`. |
 
-**Mark all three `K8S_SECRET_*` variables _Protected_ as well as Masked,
+**Mark every `K8S_SECRET_*` variable _Protected_ as well as Masked,
 and protect the default branch and the `production` environment.** An
 unprotected variable is injected into every pipeline, including merge-request
 pipelines from unprotected branches — and an MR author controls
@@ -59,7 +59,7 @@ branch are no barrier; masking is easy to evade. A protected variable is only
 exposed to protected branches/tags. (The empty-allowed variables still need
 to exist, empty, for the same reason.)
 
-All three `K8S_SECRET_*` values are rendered by the deploy job into the
+All `K8S_SECRET_*` values (three, plus the optional migrate DSN) are rendered by the deploy job into the
 `hivemind-secrets` Secret (the in-tree
 [`deploy/kubernetes/secret-template.yaml`](deploy/kubernetes/secret-template.yaml)
 documents the shape — it is deliberately NOT in the kustomization, so CI
@@ -78,7 +78,8 @@ The operator flow (steps 1–4 are required, 5–8 optional):
    win over file values). Production/k8s never reads a profile file —
    values come from the ConfigMap + Secret.
 2. **Set the three masked GitLab variables** (`K8S_SECRET_DATABASE_URL`,
-   `K8S_SECRET_EMBEDDING_API_KEY`, `K8S_SECRET_EXTRACTOR_API_KEY`) + the
+   `K8S_SECRET_EMBEDDING_API_KEY`, `K8S_SECRET_EXTRACTOR_API_KEY`; plus
+   `K8S_SECRET_MIGRATE_DATABASE_URL` behind a transaction-mode PgBouncer) + the
    `K8S_IMAGE` variable (GitLab → Settings → CI/CD → Variables).
 3. **First `git push`** — the pipeline builds + deploys + **boots the
    keys automatically** (the deploy job's idempotent first-run bootstrap,
@@ -140,7 +141,8 @@ The operator flow (steps 1–4 are required, 5–8 optional):
    The stricter **default-deny egress** policy is its own tree,
    `deploy/kubernetes/optional/networkpolicy/egress/`: it lets the api, mcp,
    admin and portal pods reach only DNS, Postgres, the embedding/extractor
-   endpoints and (for the panel and the portal) `hivemind-api`. Replace its placeholder
+   endpoints and `hivemind-api` (needed by the panel and the portal; the
+   rule admits all four, which is harmless). Replace its placeholder
    `192.0.2.x` addresses with yours first; unedited, it fails closed and the
    pods cannot reach Postgres.
 7. **(Optional)** Prometheus scraping (ADRs 0050, 0104). `GET /metrics` is
@@ -369,9 +371,14 @@ first-run bootstrap Job records itself as `ci-bootstrap`.
 - Changing the embedding **model/dim** is an operator migration (new
   pool or re-embedding — ADR 0005), never a config flip.
 - To **roll back** an incremental schema change, use the migration's
-  `.rollback.sql` (ADR 0020). Rollbacks are defined for structural
+  `.rollback.sql` through `hivemind-migrate --rollback N` (ADR 0020). It
+  refuses to erase audit rows, revive revoked keys or unlock locked keys
+  unless you pass `--discard-audit-rows`, `--revive-revoked-keys` or
+  `--unlock-locked-keys`; stop the app tier first (ADR 0119,
+  `docs/ops-runbook.md` §4). Rollbacks are defined for structural
   changes only; reversing a populated column drop or a backfill is a
-  restore from backup (`docs/ops-runbook.md`).
+  restore from backup (`docs/ops-runbook.md`). Rolling back `0032` does
+  not bring redacted text back (ADR 0125).
 - If the pool lags the deployed chain (e.g. pods were added before a
   migration ran), run the migration one-off:
 
@@ -443,7 +450,7 @@ matching `_TIMEOUT` is a startup error.)
 
 ### Probe endpoints (ADR 0019)
 
-Four **unauthenticated** orchestrator endpoints (served outside the
+Five **unauthenticated** orchestrator endpoints (served outside the
 auth middleware — k8s probes carry no credential):
 
 | Endpoint | Depth | Semantics |
@@ -472,7 +479,7 @@ auth middleware — k8s probes carry no credential):
 | `hivemind-secrets` missing values | CI variable changed but no redeploy yet | re-run the pipeline (the deploy job re-renders the Secret every deploy) |
 
 **Two-Secret ownership rule (do not cross the boundary):** CI owns
-`hivemind-secrets` (the three `K8S_SECRET_*` values, re-rendered on
+`hivemind-secrets` (the `K8S_SECRET_*` values, re-rendered on
 every deploy); the first-run bootstrap owns `hivemind-keys` (the
 generated ADMIN_KEY / ORG_KEY). The bootstrap step (`scripts/ci-bootstrap-keys.sh`)
 deliberately skips when `hivemind-keys` exists, so a secret re-render
@@ -514,6 +521,12 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["get", "create", "patch"]
+  # The bootstrap Role below grants delete on `hivemind-keys`; RBAC lets
+  # the deployer create that Role only if it holds the same permission.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["hivemind-keys"]
+    verbs: ["delete"]
   - apiGroups: [""]
     resources: ["pods", "pods/log"]
     verbs: ["get", "list", "watch"]
@@ -588,13 +601,16 @@ subjects:
 
 ## 8. Admin panel (`hivemind-admin`, ADR 0029)
 
-A browser front end for the admin surface: the pending-agent queue,
-activation with the key shown once, agents (replace a key, ADR 0108; see
-who is idle, ADR 0110; clean up after a bad one, ADR 0111; retire one in
-favour of a successor, ADR 0113), fleets (merge, ADR 0107; rename; move
-agents to split a team, ADR 0112), the audit log and org-key rotation,
-plus daily activity and stats, the fleet health metrics, a memory browser
-with search and withdrawal (ADR 0080), the feedback log (ADR 0090), each
+A browser front end for the admin surface: a "Needs you" row on the
+Overview (ADR 0121), the pending-agent queue, activation with the key
+shown once, creating an agent for its owner (ADR 0120), agents (replace a
+key, ADR 0108; see who is idle, ADR 0110; clean up after a bad one,
+ADR 0111; retire one in favour of a successor, ADR 0113; correct the
+owner alias, ADR 0122; read its history, ADR 0123), fleets (merge,
+ADR 0107; rename; move agents to split a team, ADR 0112), the audit log
+and org-key rotation, plus daily activity and stats, the fleet health
+metrics, a memory browser with search, withdrawal (ADR 0080), restore
+(ADR 0124) and redaction (ADR 0125), the feedback log (ADR 0090), each
 fleet's pins (ADR 0092), the flag backlog (ADR 0093) and CSV export
 (ADR 0094). The root [README](README.md) describes it from a user's point
 of view. Admin keys stay CLI-only.
@@ -649,8 +665,9 @@ A browser front end for the people behind the agents. Someone signs in
 with one agent's key and sees what that agent wrote (withdrawn and
 superseded included), the verdicts it gave and got, when the key was last
 used, its home fleet's memories and pins, a "Needs attention" page of the
-agent's flagged memories (ADR 0115), and a search over everything the key
-can read. They can withdraw the agent's own memories, pin or unpin
+agent's flagged memories (ADR 0115), a History page of what was done to
+and by the agent (ADR 0123), and a search over everything the key can
+read. They can withdraw the agent's own memories, pin or unpin
 entries as the agent (same rights and limits as `hive_pin`), lock a
 leaked key, and clean up the agent's own work over a time window with
 undo (ADR 0118); all of it is audited with `via: "portal"`. Admin and

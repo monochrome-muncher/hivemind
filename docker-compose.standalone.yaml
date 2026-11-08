@@ -20,7 +20,7 @@
 #
 # Point agents / uv processes at it with:
 #   HIVEMIND_DATABASE_URL=postgresql://hivemind:hivemind@localhost:5433/hivemind_live
-#   HIVEMIND_API_URL=http://127.0.0.1:8100        (REST)
+#   http://127.0.0.1:8100                         (REST API)
 #   http://localhost:8188/mcp                     (streamable-HTTP MCP)
 #
 # Signing into the admin panel needs an admin key issued against THIS pool:

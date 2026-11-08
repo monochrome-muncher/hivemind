@@ -1,5 +1,7 @@
 Status note: amended by [ADR 0125](0125-redact-a-withdrawn-memory.md). The rule stands for every use but one: an admin can redact a withdrawn memory that holds a leaked secret or personal data, which wipes its text, embedding and keyword index for good while the author, dates, supersession links, feedback and audit trail stay. It is admin-only, audited and irreversible.
 
+Status note: amended by [ADR 0124](0124-admin-restores-a-withdrawn-memory.md). A withdrawal is no longer one-way: the admin can put one withdrawn memory back to active, with a reason (audited; pins are not restored).
+
 # Append-only entries with explicit supersession
 
 Entries are immutable after creation: no in-place edits, ever. Corrections happen only via explicit supersession (a new entry names the ones it replaces) or withdrawal. There is no automatic contradiction detection or arbitration in v1 — a supersession is a claim, and the reading agent judges it.
