@@ -76,8 +76,9 @@ in `enabledProviders`; check that setting.
 
 ## Incognito
 
-`hivemind-incognito omp` unsets `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY`,
-so the server is never contacted (Oh My Pi warns once that it is
-unavailable); the extension also blocks any Hivemind call, including the
+`hivemind-incognito omp` unsets `HIVEMIND_API_KEY` and sets
+`HIVEMIND_MCP_URL=off` (Oh My Pi would fill an unset one from the
+project's `.env`), so the server is never contacted (Oh My Pi warns once
+that it is unavailable); the extension also blocks any Hivemind call, including the
 `xd://` routes with a trailing slash or a `?query`. It needs the hivemind
 plugin.

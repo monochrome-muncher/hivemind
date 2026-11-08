@@ -325,6 +325,97 @@ def test_antigravity_incognito_never_blocks(tmp_path: Path) -> None:
     assert (out.returncode, out.stdout) == (0, "")
 
 
+JUNIE_SID = "session-261108-043543-1i6y"
+
+
+def _junie_session(
+    tmp_path: Path, calls: int, *names: str, sid: str = JUNIE_SID
+) -> tuple[Path, dict[str, str]]:
+    """A Junie 26.9.7 session: `$HOME/.junie/sessions/<id>/events.jsonl`, one
+    `<X>BlockUpdatedEvent` line with `IN_PROGRESS` and one with `COMPLETED`
+    per tool use (X: `Terminal`, `Mcp`; an MCP call carries
+    `toolName: <server>/<tool>`), and a final `ResultBlockUpdatedEvent` with
+    no status. Returns the file and an environment whose HOME holds it."""
+    home = tmp_path / "home"
+    path = home / ".junie" / "sessions" / sid / "events.jsonl"
+    path.parent.mkdir(parents=True)
+
+    def event(kind: str, status: str | None, **agent: str) -> str:
+        body: dict[str, object] = {"kind": kind, "agent": {"id": "a"}, "stepId": "4ce1", **agent}
+        if status:
+            body["status"] = status
+        line = {
+            "kind": "SessionA2uxEvent",
+            "event": {"state": "IN_PROGRESS", "agentEvent": body},
+            "timestampMs": 1794112548502,
+        }
+        return json.dumps(line, separators=(",", ":"))
+
+    lines = []
+    for name in ["Terminal"] * calls + list(names):
+        mcp = name != "Terminal"
+        kind = "McpBlockUpdatedEvent" if mcp else "TerminalBlockUpdatedEvent"
+        extra = {"toolName": f"hivemind/{name}"} if mcp else {"command": "ls"}
+        lines.append(event(kind, "IN_PROGRESS", **extra))
+        lines.append(event(kind, "COMPLETED", **extra))
+    lines.append(event("ResultBlockUpdatedEvent", None))
+    path.write_text("\n".join(lines) + "\n")
+    return path, _env(tmp_path, HOME=str(home))
+
+
+def _junie_stop(
+    tmp_path: Path, env: dict[str, str], sid: str = JUNIE_SID
+) -> subprocess.CompletedProcess[str]:
+    """Junie's Stop input: no `transcript_path`, but a `project_path`."""
+    payload = {
+        "hook_event_name": "Stop",
+        "session_id": sid,
+        "cwd": str(tmp_path / "home" / ".junie"),
+        "project_path": str(tmp_path / "project"),
+        "stop_hook_active": False,
+        "last_assistant_message": "done",
+    }
+    return subprocess.run(
+        ["sh", str(STOP)], input=json.dumps(payload), env=env, capture_output=True, text=True
+    )
+
+
+def test_a_substantial_junie_session_is_blocked_counting_each_call_once(tmp_path: Path) -> None:
+    _, env = _junie_session(tmp_path, 20)
+    first = _junie_stop(tmp_path, env)
+    assert first.returncode == 0
+    assert json.loads(first.stdout)["decision"] == "block"
+    assert (_junie_stop(tmp_path, env).stdout) == ""  # once per session
+    # 19 calls are 38 BlockUpdatedEvent lines: the IN_PROGRESS ones do not count.
+    short_sid = "session-short"
+    _, env = _junie_session(tmp_path / "s2", 19, sid=short_sid)
+    short = _junie_stop(tmp_path / "s2", env, sid=short_sid)
+    assert (short.returncode, short.stdout) == (0, "")
+
+
+def test_a_junie_session_that_wrote_but_did_not_read_is_not_blocked(tmp_path: Path) -> None:
+    _, env = _junie_session(tmp_path, 25, "hive_write")
+    out = _junie_stop(tmp_path, env)
+    assert (out.returncode, out.stdout) == (0, "")
+
+
+def test_a_junie_session_that_wrote_and_read_without_rating_is_blocked(tmp_path: Path) -> None:
+    _, env = _junie_session(tmp_path, 25, "hive_write", "hive_search")
+    assert json.loads(_junie_stop(tmp_path, env).stdout)["decision"] == "block"
+    _, env = _junie_session(tmp_path / "s2", 25, "hive_write", "hive_get", "hive_feedback")
+    assert _junie_stop(tmp_path / "s2", env).stdout == ""
+
+
+def test_a_junie_session_with_no_log_fails_open(tmp_path: Path) -> None:
+    env = _env(tmp_path, HOME=str(tmp_path / "empty-home"))
+    out = _junie_stop(tmp_path, env)
+    assert (out.returncode, out.stdout) == (0, "")
+    # A directory where the log should be is not a readable regular file.
+    (tmp_path / "home" / ".junie" / "sessions" / JUNIE_SID / "events.jsonl").mkdir(parents=True)
+    out = _junie_stop(tmp_path, _env(tmp_path, HOME=str(tmp_path / "home")))
+    assert (out.returncode, out.stdout) == (0, "")
+
+
 def test_a_short_session_is_not_blocked(tmp_path: Path) -> None:
     out = _stop(tmp_path, _transcript(tmp_path, 5))
     assert (out.returncode, out.stdout) == (0, "")
@@ -508,7 +599,7 @@ def test_incognito_compact_stays_incognito(tmp_path: Path) -> None:
 # -- Pi and Oh My Pi: the same two nudges from the extension ----------------------
 
 PI_EXTENSION = PLUGIN / "extensions" / "hivemind.ts"
-STOP_TEXT = re.search(r"'(\{\"decision\":\"block\".*\})'", STOP.read_text())
+STOP_TEXT = re.search(r"^text='(HIVEMIND: [^']*)'$", STOP.read_text(), re.M)
 COMPACT_LINE = re.search(r'extra="( Context was just compacted:[^"]*)"', START.read_text())
 
 _PI_SCRIPT = """
@@ -551,7 +642,7 @@ needs_node = pytest.mark.skipif(shutil.which("node") is None, reason="node is no
 
 @needs_node
 def test_pi_continues_a_long_session_once_with_the_reminder() -> None:
-    reason = json.loads(STOP_TEXT.group(1))["reason"]  # type: ignore[union-attr]
+    reason = STOP_TEXT.group(1)  # type: ignore[union-attr]
     r = _pi([*_calls(20), ["settle", {}], ["settle", {}]])
     first, second = r["settle"]
     assert first == {
@@ -697,7 +788,7 @@ def _idle(sid: str = "s1") -> list[object]:
 
 @needs_node
 def test_opencode_prompts_a_long_idle_session_once_with_its_own_model() -> None:
-    reason = json.loads(STOP_TEXT.group(1))["reason"]  # type: ignore[union-attr]
+    reason = STOP_TEXT.group(1)  # type: ignore[union-attr]
     model = {"providerID": "p", "modelID": "m"}
     r = _opencode(
         [
@@ -840,7 +931,7 @@ def test_the_dsh_bundle_loads_the_reminder_plugin() -> None:
 
 @needs_node
 def test_dsh_steers_a_long_turn_once_with_a_user_message() -> None:
-    reason = json.loads(STOP_TEXT.group(1))["reason"]  # type: ignore[union-attr]
+    reason = STOP_TEXT.group(1)  # type: ignore[union-attr]
     [steer] = _dsh([*_dsh_calls(20), ["stop", None], *_dsh_calls(3), ["stop", None]])
     m = steer["m"]
     assert isinstance(m, dict)
@@ -875,3 +966,81 @@ def test_dsh_leaves_short_subagent_and_disconnected_sessions_alone() -> None:
     # Incognito or no URL: the server row is off, so hive_write is not visible.
     assert _dsh([*_dsh_calls(25), ["stop", None]], VISIBLE="[]") == []
     assert _dsh([*_dsh_calls(4), ["stop", None]], HIVEMIND_STOP_MIN_TOOLS="3") != []
+
+
+def _cursor_transcript(tmp_path: Path, shell_calls: int, *hive: str, lookups: str = "") -> Path:
+    """A Cursor CLI 2026.11.05 transcript: Claude-like `tool_use` records; a
+    Hivemind call is `CallDynamicTool` (signed in) or `CallMcpTool` (local
+    model) with `toolName`, and a `GetDynamicTools` lookup names a tool too."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    path = tmp_path / "cursor.jsonl"
+
+    def line(*content: dict[str, object]) -> str:
+        return json.dumps({"role": "assistant", "message": {"content": list(content)}})
+
+    shell = {"type": "tool_use", "name": "Shell", "input": {"command": "ls"}}
+    lines = [line(shell) for _ in range(shell_calls)]
+    if lookups:
+        lookup = {"namespace": "hivemind", "toolName": lookups}
+        lines.append(line({"type": "tool_use", "name": "GetDynamicTools", "input": lookup}))
+    for i, tool in enumerate(hive):
+        name, where = ("CallDynamicTool", "namespace") if i % 2 == 0 else ("CallMcpTool", "server")
+        call = {where: "hivemind", "toolName": tool, "arguments": {}}
+        lines.append(line({"type": "tool_use", "name": name, "input": call}))
+    lines.append(json.dumps({"type": "turn_ended", "status": "success"}))
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
+def _cursor_stop(
+    tmp_path: Path, transcript: Path, loop_count: int = 0, sid: str = "c1"
+) -> subprocess.CompletedProcess[str]:
+    payload = {
+        "conversation_id": sid,
+        "session_id": sid,
+        "hook_event_name": "stop",
+        "status": "completed",
+        "loop_count": loop_count,
+        "cursor_version": "2026.11.05-86047df",
+        "transcript_path": str(transcript),
+    }
+    return subprocess.run(
+        ["sh", str(STOP), "--cursor"],
+        input=json.dumps(payload),
+        env=_env(tmp_path),
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_a_substantial_cursor_session_gets_one_followup_message(tmp_path: Path) -> None:
+    transcript = _cursor_transcript(tmp_path, 20)
+    first = _cursor_stop(tmp_path, transcript)
+    assert first.returncode == 0
+    assert set(json.loads(first.stdout)) == {"followup_message"}
+    assert json.loads(first.stdout)["followup_message"].startswith("HIVEMIND: before finishing")
+    assert _cursor_stop(tmp_path, transcript).stdout == ""  # once per session
+    short = _cursor_stop(tmp_path, _cursor_transcript(tmp_path / "s2", 19), sid="c2")
+    assert (short.returncode, short.stdout) == (0, "")
+
+
+def test_a_cursor_stop_after_a_followup_is_left_alone(tmp_path: Path) -> None:
+    out = _cursor_stop(tmp_path, _cursor_transcript(tmp_path, 30), loop_count=1)
+    assert (out.returncode, out.stdout) == (0, "")
+
+
+def test_cursor_hivemind_calls_are_read_from_the_call_records(tmp_path: Path) -> None:
+    wrote = _cursor_stop(tmp_path, _cursor_transcript(tmp_path, 25, "hive_write"), sid="w")
+    assert wrote.stdout == ""
+    rated = _cursor_transcript(tmp_path / "r", 25, "hive_search", "hive_feedback")
+    assert _cursor_stop(tmp_path, rated, sid="r").stdout == ""
+    unrated = _cursor_transcript(tmp_path / "u", 25, "hive_write", "hive_get")
+    assert "followup_message" in json.loads(_cursor_stop(tmp_path, unrated, sid="u").stdout)
+    # Looking a tool up is not calling it.
+    looked = _cursor_transcript(tmp_path / "l", 25, lookups="hive_write")
+    assert "followup_message" in json.loads(_cursor_stop(tmp_path, looked, sid="l").stdout)
+
+
+def test_without_the_cursor_argument_the_claude_shape_stays(tmp_path: Path) -> None:
+    out = _stop(tmp_path, _cursor_transcript(tmp_path, 20), loop_count=0)
+    assert json.loads(out.stdout)["decision"] == "block"

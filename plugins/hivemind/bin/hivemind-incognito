@@ -15,11 +15,12 @@
 #      such switch configured, this prints a note and the session relies on
 #      the agent honouring layer 1 ("by restraint").
 #
-# Where the server is kept from loading (claude, codex, copilot, cline, dsh, gemini with the
-# extension, pi, omp) the
+# Where the server is kept from loading (claude, codex, copilot, cline, cursor, dsh, gemini with the
+# extension, junie, pi, omp) the
 # launcher also removes HIVEMIND_API_KEY and HIVEMIND_MCP_URL from the
-# child's environment (codex: the key only), so an agent with a shell cannot
-# read the key or call the REST API with it. Hermes, OpenCode and KiloCode
+# child's environment (codex: the key only; gemini: both set empty; omp: the
+# URL set to "off"), so an agent with a shell cannot read the key or call the
+# REST API with it. Hermes, OpenCode and KiloCode
 # keep the variables (their switch or the plugin may still need them), except
 # that OpenCode and KiloCode drop them when OPENCODE_CONFIG_CONTENT or
 # KILO_CONFIG_CONTENT is already set and the overlay cannot be applied. Any
@@ -28,7 +29,7 @@
 set -eu
 
 if [ "$#" -lt 1 ]; then
-  echo "usage: hivemind-incognito <claude|codex|copilot|dsh|gemini|agy|hermes|pi|omp|opencode|cline|kilocode|kilo|other-command> [args...]" >&2
+  echo "usage: hivemind-incognito <claude|codex|copilot|cursor|cursor-agent|dsh|gemini|agy|hermes|junie|pi|omp|opencode|cline|kilocode|kilo|other-command> [args...]" >&2
   exit 2
 fi
 harness=$1
@@ -104,6 +105,18 @@ PY
     unset HIVEMIND_API_KEY HIVEMIND_MCP_URL
     exec "$harness" --disable-mcp-server hivemind "$@"
     ;;
+  cursor|cursor-agent)
+    # Cursor has no documented per-session MCP switch. Its mcp.json reads
+    # ${env:HIVEMIND_MCP_URL} and ${env:HIVEMIND_API_KEY}; with both unset
+    # they resolve empty and the server cannot authenticate (built from
+    # Cursor's documentation, not yet checked live). The hooks see
+    # HIVEMIND_INCOGNITO and say the incognito line, but the plugin's
+    # always-on rule still loads, and a server configured another way keeps
+    # working, so that setup is incognito by restraint.
+    unset HIVEMIND_API_KEY HIVEMIND_MCP_URL
+    note "Cursor has no per-session MCP switch: the key and URL are unset, so a server that reads \${env:...} cannot connect, but the always-on Hivemind rule still loads, and a server configured another way keeps working (incognito by restraint)"
+    exec "$harness" "$@"
+    ;;
   dsh)
     # The hivemind bundle disables its own server row when
     # HIVEMIND_INCOGNITO is set (from the environment or ~/.dsh/.env, never
@@ -113,11 +126,14 @@ PY
     ;;
   gemini)
     # The hivemind Gemini CLI extension resolves ${HIVEMIND_MCP_URL} and
-    # ${HIVEMIND_API_KEY} at startup: without them its server is never
-    # contacted (Gemini notes an MCP issue). A server added by hand in
-    # settings.json keeps its literal URL, so that setup stays incognito
-    # by restraint.
-    unset HIVEMIND_MCP_URL HIVEMIND_API_KEY
+    # ${HIVEMIND_API_KEY} at startup: when they are empty its server is never
+    # contacted (Gemini notes an MCP issue). They are set empty, not unset:
+    # Gemini fills unset variables from the project's .env, which could
+    # name a server of its own. (With "experimental.extensionConfig" on, a
+    # trusted project's .env wins anyway; the setup notes turn it off.) A
+    # server added by hand in settings.json keeps its literal URL, so that
+    # setup stays incognito by restraint.
+    export HIVEMIND_MCP_URL= HIVEMIND_API_KEY=
     exec "$harness" "$@"
     ;;
   hermes)
@@ -136,12 +152,33 @@ PY
     fi
     exec "$harness" "$@"
     ;;
+  junie)
+    # Junie CLI (checked with 26.9.7): --mcp-default-locations=false skips
+    # ~/.junie/mcp/mcp.json and the project's .junie/mcp/mcp.json, so the
+    # hand-written hivemind entry (it holds the literal key) is not read. The
+    # extension's own .mcp.json still names ${HIVEMIND_MCP_URL}, which Junie
+    # does not expand, so that server cannot connect either. It also turns off
+    # the user's other MCP servers for the session. --ide-guidelines prepends
+    # junie/incognito.md, the incognito text, to the guidelines, because
+    # Junie ignores a SessionStart hook's output.
+    self=$0
+    while [ -L "$self" ]; do
+      target=$(readlink "$self") || break
+      case "$target" in /*) self=$target ;; *) self="$(dirname "$self")/$target" ;; esac
+    done
+    plugin_dir=$(cd "$(dirname "$self")/.." && pwd)
+    unset HIVEMIND_API_KEY HIVEMIND_MCP_URL
+    exec "$harness" --mcp-default-locations=false --ide-guidelines="$plugin_dir/junie/incognito.md" "$@"
+    ;;
   omp)
     # Oh My Pi has no per-session MCP switch, and its mcp.json resolves
-    # ${HIVEMIND_MCP_URL}/${HIVEMIND_API_KEY} at startup: without them the
-    # server is never contacted (OMP warns once that it is unavailable).
-    # The hivemind extension also blocks any Hivemind call it sees.
-    unset HIVEMIND_MCP_URL HIVEMIND_API_KEY
+    # ${HIVEMIND_MCP_URL}/${HIVEMIND_API_KEY} at startup. Oh My Pi runs on
+    # Bun, which fills an unset or empty variable from the project's .env,
+    # so the URL is set to a value that is not a URL: the server is never
+    # contacted (OMP warns once that it is unavailable), whatever that .env
+    # says. The hivemind extension also blocks any Hivemind call it sees.
+    unset HIVEMIND_API_KEY
+    export HIVEMIND_MCP_URL=off
     exec "$harness" "$@"
     ;;
   opencode)

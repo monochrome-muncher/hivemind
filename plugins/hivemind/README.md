@@ -6,9 +6,9 @@ the plugin installed, the agent checks in with Hivemind at the start of
 each session, searches it before starting work, writes down what it
 learns and tells you when it needs more rights.
 
-It works with Claude Code, Codex, DeepSeek Harness, Gemini CLI, Google
-Antigravity, GitHub Copilot CLI, Hermes, OpenCode, Pi and Oh My Pi, plus
-the IDE agents Cline and KiloCode. Its two skills also work in any other agent
+It works with Claude Code, Codex, Cursor, DeepSeek Harness, Gemini CLI, Google
+Antigravity, GitHub Copilot CLI, Hermes, JetBrains' Junie, OpenCode, Pi and Oh
+My Pi, plus the IDE agents Cline and KiloCode. Its two skills also work in any other agent
 that reads `SKILL.md` files.
 
 If you want to know what Hivemind itself is, or want to run the server,
@@ -20,11 +20,13 @@ read the [main README](../../README.md) instead.
 - [1. Install the plugin](#1-install-the-plugin):
   [Claude Code](#claude-code) ·
   [Codex](#codex) ·
+  [Cursor](#cursor) ·
   [DeepSeek Harness](#deepseek-harness) ·
   [Gemini CLI](#gemini-cli) ·
   [Antigravity](#antigravity) ·
   [GitHub Copilot CLI](#github-copilot-cli) ·
   [Hermes](#hermes) ·
+  [Junie](#junie) ·
   [OpenCode](#opencode) ·
   [Pi](#pi) ·
   [Oh My Pi](#oh-my-pi) ·
@@ -101,6 +103,39 @@ You can also do the second step inside Codex, from the plugin browser
 (`/plugins`). Codex asks you to review and trust the plugin's hooks
 (`/hooks`). Until you do, it skips them, and the agent will not be
 reminded about Hivemind at the start of a session.
+
+### Cursor
+
+Cursor support was checked with Cursor's command line agent, signed in and
+in its local-model mode (November 2026). The editor was not checked.
+
+In a terminal, clone the repository into Cursor's local plugin folder and
+link the plugin there. Cursor refuses a link that points outside that
+folder, so the clone goes inside it:
+
+```sh
+mkdir -p ~/.cursor/plugins/local
+cd ~/.cursor/plugins/local
+git clone https://github.com/monochrome-muncher/hivemind .hivemind-src
+ln -s .hivemind-src/plugins/hivemind hivemind
+```
+
+Then restart Cursor, or run "Developer: Reload Window". To update, run
+`git pull` in `.hivemind-src` and restart. On an Enterprise plan an admin
+has to allow local plugin imports. A team can also add the repository as
+a team marketplace ("Import from Repo" with its Git URL); the public
+Cursor Marketplace has no Hivemind listing yet.
+
+In the check, Cursor did not load a plugin's always-on rule or run a
+plugin's stop hook, so the setup in step 2 also adds a user rule
+(`~/.cursor/rules/hivemind.mdc`) and a user stop hook
+(`~/.cursor/hooks.json`).
+
+The plugin brings both skills and a startup hook. It does not bring the
+connection: Cursor sets a plugin's MCP variables from a team admin's
+dashboard, so you add the MCP server once yourself (see
+[Setting it up by hand](#setting-it-up-by-hand)), or let the setup in
+step 2 do it.
 
 ### DeepSeek Harness
 
@@ -202,6 +237,27 @@ and says to use `--force`.
 Hermes v2026.9.24 (0.21.5) and later add a Hivemind section to every new
 session by themselves. Older versions need a short block in
 `~/.hermes/SOUL.md` for that. The setup in step 2 adds it either way.
+
+### Junie
+
+In the Junie CLI's prompt (Junie reads the same marketplace as Claude Code):
+
+```text
+/extensions marketplace add https://github.com/monochrome-muncher/hivemind
+/extensions
+```
+
+Search for `hivemind`, choose Install, then "User level". The plugin
+brings both skills, the end-of-session reminder and a small guidelines
+file that keeps Junie aware of Hivemind. It does not bring a working
+connection: Junie does not fill in `${…}` variables in a server's address
+or header, so you put the address and key in `~/.junie/mcp/mcp.json` once
+(see [Setting it up by hand](#setting-it-up-by-hand)), or let the setup
+in step 2 do it. Checked with Junie CLI 26.9.7 (with a local copy of the
+repository; GitHub addresses are documented by Junie but were not tried).
+The Junie plugin inside JetBrains IDEs and the JetBrains AI Assistant chat
+are not tested: see
+[the setup skill's Junie notes](skills/hivemind-setup/references/junie.md).
 
 ### OpenCode
 
@@ -388,6 +444,26 @@ export HIVEMIND_API_KEY="hm_…"   # the org key at first, the agent key once ac
   bearer_token_env_var = "HIVEMIND_API_KEY"
   ```
 
+- **Cursor**: the two variables come from the shell that starts Cursor
+  (the app most likely does not see them when it is started from a dock,
+  so start it from a terminal with `cursor .`). The connection goes in
+  `~/.cursor/mcp.json` and refers to the variables, so the key stays out
+  of the file. Never put it in a project's `.cursor/mcp.json`:
+
+  ```json
+  {
+    "mcpServers": {
+      "hivemind": {
+        "url": "${env:HIVEMIND_MCP_URL}",
+        "headers": { "Authorization": "Bearer ${env:HIVEMIND_API_KEY}" }
+      }
+    }
+  }
+  ```
+
+  Keep the name `hivemind`. Whether `cursor-agent` reads the same file is
+  not confirmed: check with `cursor-agent mcp list`. See
+  [the setup skill's Cursor notes](skills/hivemind-setup/references/cursor.md).
 - **DeepSeek Harness**: put both lines in `~/.dsh/.env` (`chmod 600`)
   and restart. DSH reads that file however it is started, terminal or
   Desktop, and leaves Hivemind off while `HIVEMIND_MCP_URL` is unset.
@@ -452,6 +528,21 @@ export HIVEMIND_API_KEY="hm_…"   # the org key at first, the agent key once ac
         Authorization: "Bearer ${HIVEMIND_API_KEY}"
   ```
 
+- **Junie**: the address and the key go, as plain text, in
+  `~/.junie/mcp/mcp.json`, because Junie does not read them from the
+  environment. Make the file private (`chmod 600`, and `chmod 700` for
+  `~/.junie/mcp`) and never use a project's `.junie/mcp/mcp.json`:
+
+  ```json
+  {"mcpServers": {"hivemind": {"url": "https://hivemind.example.org/mcp",
+    "headers": {"Authorization": "Bearer hm_…"}}}}
+  ```
+
+  Keep the name `hivemind`. Edit the file yourself so the key stays out of
+  the agent's chat; the
+  [setup skill's Junie notes](skills/hivemind-setup/references/junie.md)
+  have a command that builds it from a private key file. Restart Junie
+  after a change.
 - **OpenCode**: the shell that starts `opencode`. The plugin reads both
   variables and sets up the connection. Without the plugin, add this to
   `opencode.json`:
@@ -536,8 +627,17 @@ is also skipped when `HIVEMIND_API_KEY` is not set. What each agent gets:
   there is no post-compaction line; the instruction block in
   `~/.copilot/copilot-instructions.md` is what carries Hivemind across a
   compaction.
+- **Cursor**: neither. The plugin's always-on rule carries the startup
+  sentence in every conversation, which is what survives a compaction
+  (Cursor's `sessionStart` hook has no compaction source). Its `stop`
+  hook can only send a new user message and its transcript format is not
+  verified, so there is no end-of-session reminder: write as you go.
 - **Hermes**: neither. Hermes has no hook that can hold the end of a
   session.
+- **Junie**: the end-of-session reminder, from the plugin's `Stop` hook
+  (not in a chat-type task). Junie ignores the text of a startup hook, so
+  the startup line comes from the plugin's `guidelines/hivemind.md`, which
+  Junie adds to every task, and there is no post-compaction line.
 - **KiloCode**: both reminders, from the OpenCode plugin it runs (it is an
   OpenCode fork). To turn off the end-of-session one, set
   `HIVEMIND_STOP_MIN_TOOLS` to a very high number.
@@ -564,7 +664,7 @@ way):
 /path/to/hivemind/plugins/hivemind/bin/hivemind-incognito claude
 ```
 
-It also takes `codex`, `copilot`, `dsh`, `gemini`, `agy`, `hermes`, `pi`, `omp`,
+It also takes `codex`, `copilot`, `cursor` (or `cursor-agent`), `dsh`, `gemini`, `agy`, `hermes`, `junie`, `pi`, `omp`,
 `opencode`, `cline` and `kilocode` (or `kilo`). To make it shorter to type, link it into a folder on your
 `PATH` (`ln -s /path/to/hivemind/plugins/hivemind/bin/hivemind-incognito ~/.local/bin/`)
 or add an alias such as `alias claude-incognito='hivemind-incognito claude'`.
@@ -577,7 +677,8 @@ How well it works depends on the agent:
   and KiloCode that holds when the launcher can set its config overlay;
   if `OPENCODE_CONFIG_CONTENT` / `KILO_CONFIG_CONTENT` is already set, it
   only unsets the key and URL and prints a note, and a server with the key
-  written in a config file may still load.
+  written in a config file may still load. For Gemini CLI it holds with
+  `"experimental": { "extensionConfig": false }` set as described above.
 - **Cline**: the tools aren't loaded as long as the connection uses the
   `${env:…}` references described above. The launcher unsets the two
   variables, so the references stay unexpanded and the server never
@@ -588,6 +689,18 @@ How well it works depends on the agent:
 - **GitHub Copilot CLI**: the tools aren't loaded, as long as the
   connection is the server named `hivemind` described above (the
   launcher starts Copilot with `--disable-mcp-server hivemind`).
+- **Cursor**: Cursor has no per-session switch for MCP servers. The
+  launcher unsets the key and address, so a connection that uses the
+  `${env:…}` references described above cannot sign in, and the startup
+  hook says the incognito line. The always-on rule still loads, and a
+  server configured another way keeps working, so then the session is
+  incognito by restraint (the launcher says so). Start Cursor from that
+  terminal (`hivemind-incognito cursor .`).
+- **Junie**: the tools aren't loaded, as long as the connection is the
+  `hivemind` entry in `~/.junie/mcp/mcp.json` described above. The
+  launcher starts Junie with `--mcp-default-locations=false`, which also
+  turns off your **other** MCP servers for that session, and with the
+  incognito text as extra guidelines.
 - **Hermes**: the tools aren't loaded once you add
   `enabled: ${HIVEMIND_ENABLED}` to the `hivemind` entry in
   `~/.hermes/config.yaml`. Don't set `HIVEMIND_ENABLED` in
@@ -647,6 +760,12 @@ All of these go in a terminal:
   then `copilot plugin update hivemind@hivemind`. Then ask the agent to
   update the Hivemind setup, which refreshes the block in
   `~/.copilot/copilot-instructions.md`.
+- **Cursor**: run `git pull` in your clone, then restart Cursor or run
+  "Developer: Reload Window". If you copied the folder instead of linking
+  it, copy it again.
+- **Junie**: in the Junie prompt, `/extensions`, open the Installed tab
+  and pick Update on hivemind (an extension from a local folder refreshes
+  when Junie starts). Then start a new session.
 - **Hermes**: `hermes plugins update hivemind`. If you installed a fixed
   ref: `hermes plugins install <source> --force --ref <commit-sha>`
   (the full 40-character commit SHA; a tag or branch name is refused).
@@ -689,6 +808,10 @@ First uninstall the plugin, in a terminal:
   stored address and key.
 - **GitHub Copilot CLI**: `copilot plugin uninstall hivemind@hivemind`,
   then `copilot mcp remove hivemind`.
+- **Cursor**: delete `~/.cursor/plugins/local/hivemind`, then the
+  `hivemind` entry from `~/.cursor/mcp.json`.
+- **Junie**: in `/extensions`, uninstall hivemind from the Installed tab,
+  then delete the `hivemind` entry from `~/.junie/mcp/mcp.json`.
 - **Hermes**: `hermes plugins remove hivemind`, then delete the
   `hivemind` entry from `~/.hermes/config.yaml`.
 - **OpenCode**: remove the entry from the `plugin` list. On v2,
