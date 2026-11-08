@@ -542,7 +542,8 @@ How well it works depends on the agent:
   and KiloCode that holds when the launcher can set its config overlay;
   if `OPENCODE_CONFIG_CONTENT` / `KILO_CONFIG_CONTENT` is already set, it
   only unsets the key and URL and prints a note, and a server with the key
-  written in a config file may still load.
+  written in a config file may still load. For Gemini CLI it holds with
+  `"experimental": { "extensionConfig": false }` set as described above.
 - **Cline**: the tools aren't loaded as long as the connection uses the
   `${env:…}` references described above. The launcher unsets the two
   variables, so the references stay unexpanded and the server never
