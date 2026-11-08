@@ -18,8 +18,9 @@
 # Where the server is kept from loading (claude, codex, copilot, cline, cursor, dsh, gemini
 # with the extension, pi, omp) the
 # launcher also removes HIVEMIND_API_KEY and HIVEMIND_MCP_URL from the
-# child's environment (codex: the key only), so an agent with a shell cannot
-# read the key or call the REST API with it. Hermes, OpenCode and KiloCode
+# child's environment (codex: the key only; gemini: both set empty; omp: the
+# URL set to "off"), so an agent with a shell cannot read the key or call the
+# REST API with it. Hermes, OpenCode and KiloCode
 # keep the variables (their switch or the plugin may still need them), except
 # that OpenCode and KiloCode drop them when OPENCODE_CONFIG_CONTENT or
 # KILO_CONFIG_CONTENT is already set and the overlay cannot be applied. Any
@@ -125,11 +126,14 @@ PY
     ;;
   gemini)
     # The hivemind Gemini CLI extension resolves ${HIVEMIND_MCP_URL} and
-    # ${HIVEMIND_API_KEY} at startup: without them its server is never
-    # contacted (Gemini notes an MCP issue). A server added by hand in
-    # settings.json keeps its literal URL, so that setup stays incognito
-    # by restraint.
-    unset HIVEMIND_MCP_URL HIVEMIND_API_KEY
+    # ${HIVEMIND_API_KEY} at startup: when they are empty its server is never
+    # contacted (Gemini notes an MCP issue). They are set empty, not unset:
+    # Gemini fills unset variables from the project's .env, which could
+    # name a server of its own. (With "experimental.extensionConfig" on, a
+    # trusted project's .env wins anyway; the setup notes turn it off.) A
+    # server added by hand in settings.json keeps its literal URL, so that
+    # setup stays incognito by restraint.
+    export HIVEMIND_MCP_URL= HIVEMIND_API_KEY=
     exec "$harness" "$@"
     ;;
   hermes)
@@ -150,10 +154,13 @@ PY
     ;;
   omp)
     # Oh My Pi has no per-session MCP switch, and its mcp.json resolves
-    # ${HIVEMIND_MCP_URL}/${HIVEMIND_API_KEY} at startup: without them the
-    # server is never contacted (OMP warns once that it is unavailable).
-    # The hivemind extension also blocks any Hivemind call it sees.
-    unset HIVEMIND_MCP_URL HIVEMIND_API_KEY
+    # ${HIVEMIND_MCP_URL}/${HIVEMIND_API_KEY} at startup. Oh My Pi runs on
+    # Bun, which fills an unset or empty variable from the project's .env,
+    # so the URL is set to a value that is not a URL: the server is never
+    # contacted (OMP warns once that it is unavailable), whatever that .env
+    # says. The hivemind extension also blocks any Hivemind call it sees.
+    unset HIVEMIND_API_KEY
+    export HIVEMIND_MCP_URL=off
     exec "$harness" "$@"
     ;;
   opencode)
