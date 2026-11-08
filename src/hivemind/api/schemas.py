@@ -636,6 +636,9 @@ class FeedbackOut(BaseModel):
     entry_id: str
     verdict: Verdict
     quality: float
+    # The caller could supersede the entry with a write at its default scope;
+    # only ever true for ``stale`` or ``wrong`` (ADR 0128).
+    may_supersede: bool = False
 
     @classmethod
     def from_outcome(cls, outcome: FeedbackOutcome) -> FeedbackOut:
@@ -643,6 +646,7 @@ class FeedbackOut(BaseModel):
             entry_id=outcome.feedback.entry_id,
             verdict=outcome.feedback.verdict,
             quality=outcome.quality,
+            may_supersede=outcome.may_supersede,
         )
 
 

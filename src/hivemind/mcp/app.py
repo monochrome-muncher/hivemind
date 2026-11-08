@@ -725,7 +725,7 @@ async def hive_feedback(
     except _SERVICE_ERRORS as exc:  # PermissionDenied: ADR 0065, the caller's own entry
         return _service_error(exc)
     fb: Feedback = outcome.feedback
-    return {
+    reply: dict[str, object] = {
         "entry_id": entry_id,
         "verdict": parsed_verdict.value,
         "note": fb.note,  # as stored: trimmed, None when only whitespace
@@ -739,6 +739,12 @@ async def hive_feedback(
             "updated_at": fb.updated_at.isoformat() if fb.updated_at else None,
         },
     }
+    if outcome.may_supersede:  # fixed text; only the id is interpolated (ADR 0128)
+        reply["fix"] = (
+            "You may supersede this entry: hive_write the correction "
+            f'with supersedes: ["{fb.entry_id}"] and no scope.'
+        )
+    return reply
 
 
 async def _hive_feedback_many(
@@ -757,11 +763,18 @@ async def _hive_feedback_many(
         )
     except _SERVICE_ERRORS as exc:  # PermissionDenied: ADR 0065, the caller's own entry
         return _service_error(exc)
-    return {
+    reply: dict[str, object] = {
         "verdict": parsed_verdict.value,
         "note": outcomes[0].feedback.note,  # as stored (one note for every row)
         "results": [{"entry_id": o.feedback.entry_id, "quality": o.quality} for o in outcomes],
     }
+    fixable = [o.feedback.entry_id for o in outcomes if o.may_supersede]
+    if fixable:
+        reply["fix"] = {
+            "may_supersede": fixable,
+            "how": "hive_write each correction with supersedes: [<id>] and no scope.",
+        }
+    return reply
 
 
 async def hive_register(
