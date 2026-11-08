@@ -151,11 +151,13 @@ def test_manifests_agree_on_name_and_version() -> None:
     semver = re.sub(r"(\d)(a|b|rc)(\d+)$", r"\1-\2.\3", project)
     claude = _json(PLUGIN / ".claude-plugin" / "plugin.json")
     codex = _json(PLUGIN / ".codex-plugin" / "plugin.json")
+    cursor = _json(PLUGIN / ".cursor-plugin" / "plugin.json")
     market = _json(ROOT / ".claude-plugin" / "marketplace.json")
     [entry] = market["plugins"]  # type: ignore[misc]
-    assert claude["name"] == codex["name"] == entry["name"] == "hivemind"
+    assert claude["name"] == codex["name"] == cursor["name"] == entry["name"] == "hivemind"
     dsh = _json(PLUGIN / "package.json")
-    assert claude["version"] == codex["version"] == entry["version"] == dsh["version"] == semver
+    assert claude["version"] == codex["version"] == cursor["version"] == semver
+    assert entry["version"] == dsh["version"] == semver
     assert dsh["name"] == "hivemind-agent-plugin"
     root = _json(ROOT / "package.json")  # the Git-URL install (DeepSeek Harness, Pi, OpenCode)
     assert (root["name"], root["version"]) == (dsh["name"], semver)
@@ -169,6 +171,8 @@ def test_manifests_agree_on_name_and_version() -> None:
     [codex_entry] = _json(ROOT / ".agents" / "plugins" / "marketplace.json")["plugins"]  # type: ignore[misc]
     assert (ROOT / codex_entry["source"]["path"]).resolve() == PLUGIN
     assert (ROOT / entry["source"]).resolve() == PLUGIN
+    [cursor_entry] = _json(ROOT / ".cursor-plugin" / "marketplace.json")["plugins"]  # type: ignore[misc]
+    assert (ROOT / cursor_entry["source"]).resolve() == PLUGIN
 
 
 def test_the_image_label_names_the_registry_entry() -> None:
@@ -246,6 +250,7 @@ HARNESS_REFS = {
     "Codex": "codex.md",
     "Gemini CLI": "gemini-cli.md",
     "GitHub Copilot CLI": "copilot-cli.md",
+    "Cursor": "cursor.md",
     "DeepSeek Harness": "deepseek-harness.md",
     "Hermes": "hermes.md",
     "Pi": "pi.md",
@@ -1615,6 +1620,115 @@ def test_the_gemini_extension_serves_the_plugin() -> None:
         ).resolve() == script.resolve()
 
 
+def _cursor_hook(**extra: str) -> dict[str, str]:
+    env = {k: v for k, v in os.environ.items() if not k.startswith("HIVEMIND_")}
+    env.pop("COPILOT_CLI", None)
+    env.update(**extra)
+    out = subprocess.run(
+        ["sh", str(HOOK), "--cursor"],
+        env=env,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "hm_secret_value" not in out.stdout
+    payload: dict[str, str] = json.loads(out.stdout)
+    return payload
+
+
+@pytest.mark.parametrize("key", ["hm_secret_value", None])
+def test_the_hook_prints_cursors_additional_context(key: str | None) -> None:
+    """The Cursor hook passes --cursor and Cursor reads a top-level
+    `additional_context` from `sessionStart` (Cursor's docs, not yet checked
+    live); the nested Claude form and Copilot's camelCase are not it."""
+    payload = _cursor_hook(**({"HIVEMIND_API_KEY": key} if key else {}))
+    assert set(payload) == {"additional_context"}
+    text = payload["additional_context"]
+    assert STAY_AWARE_CORE in text
+    if key:
+        assert "call hive_whoami" in text
+    else:
+        assert "offer to run the hivemind-setup skill" in text
+
+
+def test_the_hook_goes_incognito_in_cursors_shape() -> None:
+    payload = _cursor_hook(HIVEMIND_INCOGNITO="1", HIVEMIND_API_KEY="hm_secret_value")
+    assert payload == {"additional_context": INCOGNITO_TEXT}
+
+
+def test_the_cursor_plugin_route_is_cursor_only() -> None:
+    """The manifest must not let Cursor parse the Claude-format hooks file,
+    and every path it names must exist (built from Cursor's docs)."""
+    kebab = re.compile(r"^[a-z0-9][a-z0-9.-]*$")
+    manifest = _json(PLUGIN / ".cursor-plugin" / "plugin.json")
+    assert kebab.match(manifest["name"])  # type: ignore[arg-type]
+    assert manifest["hooks"] == "./cursor/hooks.json"
+    assert manifest["rules"] == "./cursor/rules/" and manifest["skills"] == "./skills/"
+    assert "mcpServers" not in manifest and not (PLUGIN / "mcp.json").exists()
+    for field in ("hooks", "rules", "skills"):
+        assert (PLUGIN / str(manifest[field])).exists(), field
+    market = _json(ROOT / ".cursor-plugin" / "marketplace.json")
+    assert kebab.match(market["name"]) and market["owner"]["name"]  # type: ignore[index,call-overload,arg-type]
+    [entry] = market["plugins"]  # type: ignore[misc]
+    assert (ROOT / entry["source"] / ".cursor-plugin" / "plugin.json").is_file()
+    hooks = _json(PLUGIN / "cursor" / "hooks.json")
+    assert hooks["version"] == 1 and set(hooks["hooks"]) == {"sessionStart"}  # type: ignore[arg-type]
+    [hook] = hooks["hooks"]["sessionStart"]  # type: ignore[index]
+    assert hook["command"] == (
+        'sh "${CURSOR_PLUGIN_ROOT}/skills/hivemind-setup/scripts/hivemind-session-start.sh" --cursor'
+    )
+
+
+def test_cursor_variables_alone_keep_the_claude_shape() -> None:
+    """A Claude Code started in Cursor's terminal may inherit CURSOR_VERSION:
+    only the Cursor hook's --cursor argument switches the shape."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("HIVEMIND_")}
+    env.pop("COPILOT_CLI", None)
+    env["CURSOR_VERSION"] = "2.0.0"
+    out = subprocess.run(
+        ["sh", str(HOOK)],
+        env=env,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "hookSpecificOutput" in json.loads(out.stdout)
+    rule = (PLUGIN / "cursor" / "rules" / "hivemind.mdc").read_text()
+    assert rule.startswith("---\n") and "alwaysApply: true" in rule.split("---\n")[1]
+
+
+@pytest.mark.parametrize("name", ["cursor", "cursor-agent"])
+def test_launcher_unsets_the_key_and_url_for_cursor(tmp_path: Path, name: str) -> None:
+    """No per-session MCP switch: the `${env:...}` references resolve empty,
+    and the launcher says the rest is incognito by restraint."""
+    env = _fake_harness(tmp_path, name)
+    (tmp_path / "bin" / name).write_text(
+        '#!/bin/sh\nprintf "%s\\n" "URL=${HIVEMIND_MCP_URL:-unset}" "KEY=${HIVEMIND_API_KEY:-unset}" '
+        '"INCOGNITO=$HIVEMIND_INCOGNITO" "$@"\n'
+    )
+    env.update(HIVEMIND_MCP_URL="https://hm.example/mcp", HIVEMIND_API_KEY="hm_x")
+    out = subprocess.run(
+        ["sh", str(LAUNCHER), name, "."], env=env, cwd=tmp_path, capture_output=True, text=True
+    )
+    assert out.stdout.splitlines() == ["URL=unset", "KEY=unset", "INCOGNITO=1", "."]
+    assert "by restraint" in out.stderr and "hm_x" not in out.stderr
+
+
+def test_the_cursor_reference_is_complete() -> None:
+    text = (SETUP_REFS / "cursor.md").read_text()
+    flat = " ".join(text.split())
+    assert "built from Cursor's documentation (November 2026), not yet checked live" in flat
+    assert "~/.cursor/mcp.json" in text and "must be named `hivemind`" in flat
+    assert '"url": "${env:HIVEMIND_MCP_URL}"' in text
+    assert '"Authorization": "Bearer ${env:HIVEMIND_API_KEY}"' in text
+    assert "~/.cursor/plugins/local/hivemind" in text and "~/.cursor/skills/" in text
+    assert "cursor/rules/hivemind.mdc" in text and "additional_context" in text
+    assert "No stop reminder" in flat and "hivemind-incognito" in text
+    assert "hm_" not in text.replace("hm_…", "")
+
+
 def test_launcher_switches_the_copilot_cli_server_off_by_name(tmp_path: Path) -> None:
     """`--disable-mcp-server hivemind` keeps Copilot CLI 1.0.95 from loading
     or contacting the server (checked live); the key and URL are not needed."""
@@ -1994,6 +2108,7 @@ def test_every_reference_that_holds_a_key_says_chmod_600_and_never_a_project_fil
         "deepseek-harness",
         "gemini-cli",
         "copilot-cli",
+        "cursor",
     ):
         text = " ".join((SETUP_REFS / f"{name}.md").read_text().split())
         assert "chmod 600" in text or "mode 600" in text, name
@@ -2154,6 +2269,13 @@ def _js_literals(src: str) -> list[str]:
     return out
 
 
+def _mdc_literals(src: str) -> list[str]:
+    """A Cursor rule (.mdc): the text after the frontmatter is the one literal."""
+    _, front, body = src.split("---\n", 2)
+    assert "alwaysApply: true" in front
+    return [body.strip()]
+
+
 def _sh_literals(src: str) -> list[str]:
     """POSIX shell: single quotes are verbatim; double quotes drop the
     backslash before $ ` " \\; `$( )` bodies are scanned for nested strings.
@@ -2253,6 +2375,7 @@ def _runtime_texts(path: Path) -> list[str]:
         ".ts": _js_literals,
         ".ps1": _ps_literals,
         ".sh": _sh_literals,
+        ".mdc": _mdc_literals,
         "": _sh_literals,  # the Cline Unix hooks have no extension
     }[path.suffix]
     texts: list[str] = []
@@ -2281,6 +2404,7 @@ REMINDER_COPIES: dict[str, tuple[str, str, tuple[Path, ...]]] = {
             _SKILL_SCRIPTS / "hivemind-session-start.sh",
             Path("cline", "UserPromptSubmit"),
             Path("cline", "UserPromptSubmit.ps1"),
+            Path("cursor", "rules", "hivemind.mdc"),
         ),
     ),
     "incognito line": (

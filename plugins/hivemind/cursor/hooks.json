@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "sh \"${CURSOR_PLUGIN_ROOT}/skills/hivemind-setup/scripts/hivemind-session-start.sh\" --cursor"
+      }
+    ]
+  }
+}
