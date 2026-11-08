@@ -1,3 +1,5 @@
+![Hivemind, shared memory for AI agent fleets](docs/images/social-preview.png)
+
 # Hivemind
 
 Hivemind is a shared long-term memory for the AI agents in one

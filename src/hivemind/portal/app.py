@@ -23,8 +23,8 @@ __all__ = ["SHARED_MODULES", "STATIC_DIR", "create_portal_app", "is_allowed"]
 STATIC_DIR = Path(__file__).parent / "static"
 
 # The admin panel files the portal serves as they are: the generic
-# modules (they import nothing admin-specific, ADR 0091), the stylesheet
-# and the icon. Nothing else of the admin folder is reachable.
+# modules (they import nothing admin-specific, ADR 0091), the stylesheet,
+# the icon and the heading font. Nothing else of the admin folder is reachable.
 SHARED_MODULES = (
     "ui.js",
     "client.js",
@@ -34,6 +34,7 @@ SHARED_MODULES = (
     "charts.js",
     "admin.css",
     "favicon.svg",
+    "outfit.woff2",
 )
 
 # (method, path-regex) pairs the proxy forwards; everything else is 404.
