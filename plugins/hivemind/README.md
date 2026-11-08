@@ -6,7 +6,7 @@ the plugin installed, the agent checks in with Hivemind at the start of
 each session, searches it before starting work, writes down what it
 learns and tells you when it needs more rights.
 
-It works with Claude Code, Codex, DeepSeek Harness, Gemini CLI, GitHub
+It works with Claude Code, Codex, Cursor, DeepSeek Harness, Gemini CLI, GitHub
 Copilot CLI, Hermes, JetBrains' Junie, OpenCode, Pi and Oh My Pi, plus the IDE
 agents Cline and KiloCode. Its two skills also work in any other agent
 that reads `SKILL.md` files.
@@ -20,6 +20,7 @@ read the [main README](../../README.md) instead.
 - [1. Install the plugin](#1-install-the-plugin):
   [Claude Code](#claude-code) ·
   [Codex](#codex) ·
+  [Cursor](#cursor) ·
   [DeepSeek Harness](#deepseek-harness) ·
   [Gemini CLI](#gemini-cli) ·
   [GitHub Copilot CLI](#github-copilot-cli) ·
@@ -100,6 +101,39 @@ You can also do the second step inside Codex, from the plugin browser
 (`/plugins`). Codex asks you to review and trust the plugin's hooks
 (`/hooks`). Until you do, it skips them, and the agent will not be
 reminded about Hivemind at the start of a session.
+
+### Cursor
+
+Cursor support was checked with Cursor's command line agent, signed in and
+in its local-model mode (November 2026). The editor was not checked.
+
+In a terminal, clone the repository into Cursor's local plugin folder and
+link the plugin there. Cursor refuses a link that points outside that
+folder, so the clone goes inside it:
+
+```sh
+mkdir -p ~/.cursor/plugins/local
+cd ~/.cursor/plugins/local
+git clone https://github.com/monochrome-muncher/hivemind .hivemind-src
+ln -s .hivemind-src/plugins/hivemind hivemind
+```
+
+Then restart Cursor, or run "Developer: Reload Window". To update, run
+`git pull` in `.hivemind-src` and restart. On an Enterprise plan an admin
+has to allow local plugin imports. A team can also add the repository as
+a team marketplace ("Import from Repo" with its Git URL); the public
+Cursor Marketplace has no Hivemind listing yet.
+
+In the check, Cursor did not load a plugin's always-on rule or run a
+plugin's stop hook, so the setup in step 2 also adds a user rule
+(`~/.cursor/rules/hivemind.mdc`) and a user stop hook
+(`~/.cursor/hooks.json`).
+
+The plugin brings both skills and a startup hook. It does not bring the
+connection: Cursor sets a plugin's MCP variables from a team admin's
+dashboard, so you add the MCP server once yourself (see
+[Setting it up by hand](#setting-it-up-by-hand)), or let the setup in
+step 2 do it.
 
 ### DeepSeek Harness
 
@@ -386,6 +420,26 @@ export HIVEMIND_API_KEY="hm_…"   # the org key at first, the agent key once ac
   bearer_token_env_var = "HIVEMIND_API_KEY"
   ```
 
+- **Cursor**: the two variables come from the shell that starts Cursor
+  (the app most likely does not see them when it is started from a dock,
+  so start it from a terminal with `cursor .`). The connection goes in
+  `~/.cursor/mcp.json` and refers to the variables, so the key stays out
+  of the file. Never put it in a project's `.cursor/mcp.json`:
+
+  ```json
+  {
+    "mcpServers": {
+      "hivemind": {
+        "url": "${env:HIVEMIND_MCP_URL}",
+        "headers": { "Authorization": "Bearer ${env:HIVEMIND_API_KEY}" }
+      }
+    }
+  }
+  ```
+
+  Keep the name `hivemind`. Whether `cursor-agent` reads the same file is
+  not confirmed: check with `cursor-agent mcp list`. See
+  [the setup skill's Cursor notes](skills/hivemind-setup/references/cursor.md).
 - **DeepSeek Harness**: put both lines in `~/.dsh/.env` (`chmod 600`)
   and restart. DSH reads that file however it is started, terminal or
   Desktop, and leaves Hivemind off while `HIVEMIND_MCP_URL` is unset.
@@ -538,6 +592,11 @@ is also skipped when `HIVEMIND_API_KEY` is not set. What each agent gets:
   there is no post-compaction line; the instruction block in
   `~/.copilot/copilot-instructions.md` is what carries Hivemind across a
   compaction.
+- **Cursor**: neither. The plugin's always-on rule carries the startup
+  sentence in every conversation, which is what survives a compaction
+  (Cursor's `sessionStart` hook has no compaction source). Its `stop`
+  hook can only send a new user message and its transcript format is not
+  verified, so there is no end-of-session reminder: write as you go.
 - **Hermes**: neither. Hermes has no hook that can hold the end of a
   session.
 - **Junie**: the end-of-session reminder, from the plugin's `Stop` hook
@@ -570,7 +629,7 @@ way):
 /path/to/hivemind/plugins/hivemind/bin/hivemind-incognito claude
 ```
 
-It also takes `codex`, `copilot`, `dsh`, `gemini`, `hermes`, `junie`, `pi`, `omp`,
+It also takes `codex`, `copilot`, `cursor` (or `cursor-agent`), `dsh`, `gemini`, `hermes`, `junie`, `pi`, `omp`,
 `opencode`, `cline` and `kilocode` (or `kilo`). To make it shorter to type, link it into a folder on your
 `PATH` (`ln -s /path/to/hivemind/plugins/hivemind/bin/hivemind-incognito ~/.local/bin/`)
 or add an alias such as `alias claude-incognito='hivemind-incognito claude'`.
@@ -595,6 +654,13 @@ How well it works depends on the agent:
 - **GitHub Copilot CLI**: the tools aren't loaded, as long as the
   connection is the server named `hivemind` described above (the
   launcher starts Copilot with `--disable-mcp-server hivemind`).
+- **Cursor**: Cursor has no per-session switch for MCP servers. The
+  launcher unsets the key and address, so a connection that uses the
+  `${env:…}` references described above cannot sign in, and the startup
+  hook says the incognito line. The always-on rule still loads, and a
+  server configured another way keeps working, so then the session is
+  incognito by restraint (the launcher says so). Start Cursor from that
+  terminal (`hivemind-incognito cursor .`).
 - **Junie**: the tools aren't loaded, as long as the connection is the
   `hivemind` entry in `~/.junie/mcp/mcp.json` described above. The
   launcher starts Junie with `--mcp-default-locations=false`, which also
@@ -652,6 +718,9 @@ All of these go in a terminal:
   then `copilot plugin update hivemind@hivemind`. Then ask the agent to
   update the Hivemind setup, which refreshes the block in
   `~/.copilot/copilot-instructions.md`.
+- **Cursor**: run `git pull` in your clone, then restart Cursor or run
+  "Developer: Reload Window". If you copied the folder instead of linking
+  it, copy it again.
 - **Junie**: in the Junie prompt, `/extensions`, open the Installed tab
   and pick Update on hivemind (an extension from a local folder refreshes
   when Junie starts). Then start a new session.
@@ -695,6 +764,8 @@ First uninstall the plugin, in a terminal:
   `~/.gemini/settings.json`.
 - **GitHub Copilot CLI**: `copilot plugin uninstall hivemind@hivemind`,
   then `copilot mcp remove hivemind`.
+- **Cursor**: delete `~/.cursor/plugins/local/hivemind`, then the
+  `hivemind` entry from `~/.cursor/mcp.json`.
 - **Junie**: in `/extensions`, uninstall hivemind from the Installed tab,
   then delete the `hivemind` entry from `~/.junie/mcp/mcp.json`.
 - **Hermes**: `hermes plugins remove hivemind`, then delete the

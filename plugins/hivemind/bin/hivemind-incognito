@@ -15,7 +15,7 @@
 #      such switch configured, this prints a note and the session relies on
 #      the agent honouring layer 1 ("by restraint").
 #
-# Where the server is kept from loading (claude, codex, copilot, cline, dsh, gemini with the
+# Where the server is kept from loading (claude, codex, copilot, cline, cursor, dsh, gemini with the
 # extension, junie, pi, omp) the
 # launcher also removes HIVEMIND_API_KEY and HIVEMIND_MCP_URL from the
 # child's environment (codex: the key only; gemini: both set empty; omp: the
@@ -29,7 +29,7 @@
 set -eu
 
 if [ "$#" -lt 1 ]; then
-  echo "usage: hivemind-incognito <claude|codex|copilot|dsh|gemini|hermes|junie|pi|omp|opencode|cline|kilocode|kilo|other-command> [args...]" >&2
+  echo "usage: hivemind-incognito <claude|codex|copilot|cursor|cursor-agent|dsh|gemini|hermes|junie|pi|omp|opencode|cline|kilocode|kilo|other-command> [args...]" >&2
   exit 2
 fi
 harness=$1
@@ -104,6 +104,18 @@ PY
     # plugin's hooks see HIVEMIND_INCOGNITO and stay silent.
     unset HIVEMIND_API_KEY HIVEMIND_MCP_URL
     exec "$harness" --disable-mcp-server hivemind "$@"
+    ;;
+  cursor|cursor-agent)
+    # Cursor has no documented per-session MCP switch. Its mcp.json reads
+    # ${env:HIVEMIND_MCP_URL} and ${env:HIVEMIND_API_KEY}; with both unset
+    # they resolve empty and the server cannot authenticate (built from
+    # Cursor's documentation, not yet checked live). The hooks see
+    # HIVEMIND_INCOGNITO and say the incognito line, but the plugin's
+    # always-on rule still loads, and a server configured another way keeps
+    # working, so that setup is incognito by restraint.
+    unset HIVEMIND_API_KEY HIVEMIND_MCP_URL
+    note "Cursor has no per-session MCP switch: the key and URL are unset, so a server that reads \${env:...} cannot connect, but the always-on Hivemind rule still loads, and a server configured another way keeps working (incognito by restraint)"
+    exec "$harness" "$@"
     ;;
   dsh)
     # The hivemind bundle disables its own server row when

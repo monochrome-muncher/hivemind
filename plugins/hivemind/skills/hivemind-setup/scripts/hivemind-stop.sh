@@ -1,6 +1,6 @@
 #!/bin/sh
-# Hivemind Stop hook (Claude Code, Codex, GitHub Copilot CLI, Junie; Gemini CLI
-# as an AfterAgent hook):
+# Hivemind Stop hook (Claude Code, Codex, GitHub Copilot CLI, Junie, Cursor;
+# Gemini CLI as an AfterAgent hook):
 # at most once per session, blocks the stop once with a short reminder to
 # write what another agent could reuse and to rate the entries the work
 # tested. Registered in hooks/hooks.json (Gemini CLI: the extension's AfterAgent hook).
@@ -14,7 +14,12 @@
 # Stop input (stdin JSON): session_id, transcript_path, stop_hook_active.
 # Junie sends no transcript_path: it sends project_path, and its session log is
 # $HOME/.junie/sessions/<session_id>/events.jsonl.
-# Block output: {"decision":"block","reason":"..."} on stdout, exit 0.
+# Cursor's hook passes --cursor; its input has loop_count (0 unless a hook's
+# follow-up started this turn) instead of stop_hook_active.
+# Block output: {"decision":"block","reason":"..."} on stdout, exit 0; for
+# Cursor {"followup_message":"..."}, which Cursor sends as the next message.
+cursor=0
+[ "${1:-}" = "--cursor" ] && cursor=1
 
 # (c) Incognito (ADR 0035), detected as hivemind-session-start.sh does.
 case "$(printf '%s' "${HIVEMIND_INCOGNITO:-}" | tr '[:upper:]' '[:lower:]')" in
@@ -29,6 +34,7 @@ input="$(cat 2>/dev/null)" || exit 0
 
 # (b) Already continuing because of a stop hook.
 printf '%s' "$input" | grep -q '"stop_hook_active" *: *true' && exit 0
+[ "$cursor" = 1 ] && printf '%s' "$input" | grep -Eq '"loop_count" *: *[1-9]' && exit 0
 
 field() {
   printf '%s' "$input" | grep -o "\"$1\" *: *\"[^\"]*\"" | head -n 1 \
@@ -76,9 +82,12 @@ calls() {
   grep -Ev '"(input_schema|inputSchema|schema|parameters)" *: *\{|"type" *: *"(prompt_snapshot|deferred_tools_record)"' \
     "$transcript" 2>/dev/null
 }
-# Junie names a call as "toolName":"hivemind/hive_write"; the others as "name".
+# Junie names a call as "toolName":"hivemind/hive_write"; Cursor as a
+# CallMcpTool (local-model CLI) or CallDynamicTool (signed in) tool_use whose
+# input has "toolName":"hive_write"; the others as "name".
 key='"name"'
 [ "$junie" = 1 ] && key='"toolName"'
+[ "$cursor" = 1 ] && key='"name" *: *"Call(Mcp|Dynamic)Tool" *, *"input" *: *\{[^}]*"toolName"'
 calls | grep -Eq "$key *: *\"[^\"]*hive_feedback\"" && exit 0
 if calls | grep -Eq "$key *: *\"[^\"]*hive_write\""; then
   calls | grep -Eq "$key *: *\"[^\"]*hive_(search|get)\"" || exit 0
@@ -106,5 +115,10 @@ fi
 
 private && (umask 077; : > "$dir/$sid") 2>/dev/null || exit 0
 
-printf '%s\n' '{"decision":"block","reason":"HIVEMIND: before finishing, write to Hivemind (hive_write) what another agent could reuse from this task, and rate the entries your work tested (hive_feedback). If nothing is new, write nothing and just finish."}'
+text='HIVEMIND: before finishing, write to Hivemind (hive_write) what another agent could reuse from this task, and rate the entries your work tested (hive_feedback). If nothing is new, write nothing and just finish.'
+if [ "$cursor" = 1 ]; then
+  printf '{"followup_message":"%s"}\n' "$text"
+else
+  printf '{"decision":"block","reason":"%s"}\n' "$text"
+fi
 exit 0

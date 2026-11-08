@@ -12,10 +12,17 @@
 # backslashes, so it needs no escaping. Claude Code, Codex and Gemini CLI
 # read hookSpecificOutput.additionalContext; GitHub Copilot CLI (which sets
 # COPILOT_CLI=1 for its hooks) reads only a top-level additionalContext and
-# silently drops the nested form.
+# silently drops the nested form. Cursor reads a top-level
+# additional_context; its plugin hook passes --cursor, because Cursor's
+# variables (CURSOR_VERSION and others) may also reach a Claude Code that
+# runs in Cursor's terminal.
+shape=default
+[ "${1:-}" = "--cursor" ] && shape=cursor
 emit() {
   if [ -n "${COPILOT_CLI:-}" ]; then
     printf '{"additionalContext":"%s"}\n' "$1"
+  elif [ "$shape" = cursor ]; then
+    printf '{"additional_context":"%s"}\n' "$1"
   else
     printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$1"
   fi

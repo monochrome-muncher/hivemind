@@ -31,11 +31,12 @@ to install or use it, read [README.md](README.md) instead.
 | `junie/incognito.md` | The incognito text (`INCOGNITO_TEXT`) that `hivemind-incognito junie` passes to Junie as extra guidelines |
 | `cline/` | The Cline hooks: `UserPromptSubmit` (the stay-aware line: in full on a task's first prompt, short on later ones), `TaskStart` and `PostToolUse` (the end-of-task write-and-rate nudge), each with a `.ps1` twin for Windows |
 | `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json` | The plugin manifests for Claude Code (also read by GitHub Copilot CLI and Junie) and Codex, which point Codex at `skills/` and `hooks/hooks.json` |
+| `.cursor-plugin/plugin.json`, `cursor/hooks.json`, `cursor/rules/hivemind.mdc` | The Cursor plugin: the manifest points Cursor at `skills/`, at the Cursor-only hooks file (so it never parses the Claude-format `hooks/hooks.json`) and at the rules folder; the hook runs the startup script on `sessionStart`; the always-on rule holds the startup sentence. No `mcp.json`: the user configures the server |
 | `bin/hivemind-incognito` | The incognito launcher ([below](#incognito)) |
 | `CHANGELOG.md` | What changed for agents in each release |
 | `../../package.json` (repository root) | Same package name as `plugins/hivemind/package.json`. Lets DeepSeek Harness, Pi and OpenCode install the plugin from the repository's Git URL (OpenCode loads `exports["./server"]`, else `main`) |
 | `../../gemini-extension.json`, `../../skills`, `../../hooks/hooks.json` (repository root) | The Gemini CLI extension, installed with `gemini extensions install <git-url>`: Gemini reads these three at the root of what it installs. `skills` is a link to `skills/` here; the hooks run the two scripts above as `SessionStart` and `AfterAgent` hooks |
-| `../../.claude-plugin/`, `../../.agents/plugins/` (repository root) | The marketplaces Claude Code, Codex and Oh My Pi install from. GitHub Copilot CLI reads the root `.claude-plugin/marketplace.json` and the plugin's `.claude-plugin/plugin.json` too, so it needs no manifest of its own |
+| `../../.claude-plugin/`, `../../.agents/plugins/` (repository root) | The marketplaces Claude Code, Codex and Oh My Pi install from. GitHub Copilot CLI reads the root `.claude-plugin/marketplace.json` and the plugin's `.claude-plugin/plugin.json` too, so it needs no manifest of its own. Cursor reads the root `.cursor-plugin/marketplace.json` and the plugin's `.cursor-plugin/plugin.json` |
 
 ## How each harness gets each piece
 
@@ -55,6 +56,7 @@ reminder that survives compaction and new sessions.
 | Cline | the user's `~/.cline/data/settings/cline_mcp_settings.json` with `${env:…}` references (Cline has no package plugin) | copied to `~/.cline/skills/` | the `UserPromptSubmit` hook in `~/Documents/Cline/Hooks/`, plus the `PostToolUse` end-of-task nudge |
 | Gemini CLI | the extension's `gemini-extension.json` (a `hivemind` entry in `~/.gemini/settings.json` replaces it) | the extension | the `GEMINI.md` instruction block, plus the extension's `SessionStart` hook |
 | GitHub Copilot CLI | the user's `~/.copilot/mcp-config.json` (the whole `url` cannot come from the environment; the key can) | the plugin | the plugin's `SessionStart` hook, plus the `~/.copilot/copilot-instructions.md` instruction block |
+| Cursor | the user's `~/.cursor/mcp.json` with `${env:…}` references (plugin MCP variables are set by team admins, so the plugin ships none) | the plugin (a local plugin in `~/.cursor/plugins/local/hivemind`) | the plugin's always-on rule `cursor/rules/hivemind.mdc`, plus its `sessionStart` hook |
 | Junie | the user's `~/.junie/mcp/mcp.json` with the literal URL and key (Junie expands no `${VAR}`) | the plugin (installed from the Claude Code marketplace) | the plugin's `guidelines/hivemind.md` (always in the guidelines), plus the `Stop` hook |
 
 Everything the setup skill tells an agent to do for one harness lives in
@@ -307,6 +309,64 @@ itself names no harness-specific paths, and a test enforces this.
     "failed to parse YAML frontmatter"). `test_skill_descriptions_are_strict_yaml`
     pins it.
 
+- **Cursor** (checked live with the CLI 2026.11.05, signed in with a free
+  account and in local-model mode: `cursor-agent-local --authless` from
+  `downloads.cursor.com/lab/<version>/linux/x64/agent-cli-local-package.tar.gz`
+  with `CURSOR_LOCAL_AGENT_BASE_URL` and `CURSOR_LOCAL_AGENT_API_KEY`
+  pointing at the mock model. Signing in needs `cursor.com` and
+  `*.cursor.sh`. The editor was not checked. Cursor's session log, with a
+  `cli.hook.executed` event per hook run, is under
+  `$TMPDIR/cursor-agent-logs-<uid>/`).
+  - *Install.* Signed in, Cursor loads `~/.cursor/plugins/local/<name>/`
+    and rejects a symlink whose target is outside that folder, so the
+    clone goes in `~/.cursor/plugins/local/.hivemind-src` (dot folders are
+    skipped) with a relative link `hivemind -> .hivemind-src/plugins/hivemind`.
+    The authless profile turns user-local plugins (and `--plugin-dir`)
+    off and the local marketplace file on:
+    `~/.cursor/plugins/local-marketplaces.json`
+    (`{"version":1,"marketplaces":[{"name","gitUrl","gitRef","plugins":[{"name","enabled":true}]}]}`),
+    cloned at each start and cached by commit under
+    `~/.cursor/plugins/cache/`. Signed in, that file is ignored. The root
+    `.cursor-plugin/marketplace.json` (`name`, `owner`, `plugins[].source`
+    as a path) serves both it and team marketplaces; Cursor looks for
+    `<source>/.cursor-plugin/plugin.json`, then `.claude-plugin/plugin.json`.
+    A public Marketplace listing is reviewed and Hivemind has none.
+  - *Manifest.* A path field replaces folder discovery for that
+    component. Cursor would parse `hooks/hooks.json` by default (it
+    converts the Claude format), so the manifest sets `hooks` to
+    `./cursor/hooks.json`, `rules` to `./cursor/rules/` and `skills` to
+    `./skills/`. There is no `mcp.json`.
+  - *MCP server.* The user's `~/.cursor/mcp.json` entry reads
+    `${env:HIVEMIND_MCP_URL}` and `${env:HIVEMIND_API_KEY}`; the CLI
+    expands both (checked live). Tools are called through a meta tool:
+    `CallDynamicTool` `{namespace, toolName, arguments}` signed in,
+    `CallMcpTool` `{server, toolName, arguments}` in local-model mode.
+    Not confirmed: whether the app, started from a dock, sees shell
+    variables (probably not, so users start it with `cursor .`).
+  - *SessionStart.* Cursor's `sessionStart` takes
+    `{"additional_context": "..."}`; `hivemind-session-start.sh` prints
+    that when the plugin's hook passes `--cursor`. It does not go by
+    `CURSOR_VERSION` (set for every Cursor hook), because Cursor's
+    variables may reach a Claude Code started in Cursor's terminal.
+    Checked live: the text arrives in the first user message inside
+    `<hooks_context>`. The hook input has `transcript_path: null`. There
+    is no compaction source, so the always-on rule is the layer that
+    survives a compaction.
+  - *Rules.* The plugin's rule (through the `rules` field or the default
+    `rules/` folder) never reached the model, signed in or not, while a
+    user rule in `~/.cursor/rules/` did, so setup writes
+    `~/.cursor/rules/hivemind.mdc`. The plugin's rule stays in case the
+    editor or a later version loads it.
+  - *Stop.* A plugin `stop` hook never ran (no `cli.hook.executed` event),
+    so the plugin has none. A user `stop` hook in `~/.cursor/hooks.json`
+    runs in an interactive session when signed in (not with `-p`, not in
+    local-model mode), with `transcript_path`
+    (`~/.cursor/projects/<slug>/agent-transcripts/<id>/<id>.jsonl`, Claude-like
+    `tool_use` records) and `loop_count`. Setup points it at
+    `hivemind-stop.sh --cursor` in the local plugin folder, which answers
+    `{"followup_message": ...}`; Cursor sends that as the next message and
+    the following stop has `loop_count: 1`, which the script skips.
+
 ## The Stop hook and the post-compaction line
 
 Two nudges that get knowledge written before it is lost: in Claude Code
@@ -314,14 +374,14 @@ and Codex from `hooks/hooks.json`, in Pi and Oh My Pi from the extension
 and the OpenCode plugin (which KiloCode runs as well), in DeepSeek
 Harness the Stop reminder from `dsh/hivemind-reminders.js` (below). Gemini CLI gets the Stop reminder
 from the extension's `AfterAgent` hook (`../../hooks/hooks.json`).
-Hermes does not have them. Junie gets the Stop reminder from the same plugin hook. GitHub Copilot CLI gets the Stop reminder from
+Hermes does not have them. Cursor gets the Stop reminder from a user `stop` hook that setup adds (its plugin hooks never see a stop), and no post-compaction line. Junie gets the Stop reminder from the same plugin hook. GitHub Copilot CLI gets the Stop reminder from
 the plugin's `Stop` hook (the shared `hooks/hooks.json`), and no
 post-compaction line. Cline gets the end-of-task nudge from the
 `PostToolUse` hook in `cline/` (it counts the task's tool calls in a temp
 file, reset by `TaskStart`, and never nudges a subagent task); it has no
 post-compaction line.
 
-The script counts five transcript formats:
+The script counts six transcript formats:
 
 - Claude Code's `"type": "tool_use"` records.
 - Codex's `function_call`, `custom_tool_call` and `local_shell_call`
@@ -359,6 +419,15 @@ The script counts five transcript formats:
   `"toolName":"hivemind/hive_write"`, so `hive_write`, `hive_feedback`,
   `hive_search` and `hive_get` are matched on `toolName`. Checked with
   Junie CLI 26.9.7. `SessionStart` runs but Junie ignores its output.
+
+- Cursor's `agent-transcripts/<id>/<id>.jsonl`, counted as Claude Code's
+  `"type": "tool_use"` records. With `--cursor`, a Hivemind call is a
+  `CallDynamicTool` or `CallMcpTool` record whose `input` has
+  `"toolName":"hive_write"` (and so on), so only those records count as
+  Hivemind calls (a `GetDynamicTools` lookup names a tool too, and does
+  not). A stop with `loop_count` above 0 is skipped. Checked with Cursor
+  CLI 2026.11.05 signed in: the reminder arrives once as the next
+  message, and the agent answers it.
 
 - **Post-compaction line.** When the `SessionStart` source is `compact`
   (read from the hook's stdin JSON), `hivemind-session-start.sh` appends
@@ -458,6 +527,7 @@ does two things:
 | Pi | the package registers no server, and the key and URL are unset; a hand-written `mcp.json` entry that reads `${HIVEMIND_MCP_URL}` has no URL. The extension also blocks `mcp__hivemind…` calls (codemode scripts included) and the Oh My Pi `xd://` routes | the hivemind package |
 | Oh My Pi | `HIVEMIND_API_KEY` unset and `HIVEMIND_MCP_URL=off` (not unset: Oh My Pi runs on Bun, which fills an unset or empty variable from the project's `.env`), so the server is never contacted (Oh My Pi warns once that it is unavailable); the extension also blocks any Hivemind call | the hivemind plugin |
 | GitHub Copilot CLI | `--disable-mcp-server hivemind` for the session (it never contacts the server); the launcher also unsets the key and URL | the server named `hivemind` in `~/.copilot/mcp-config.json` |
+| Cursor | no per-session MCP switch: `HIVEMIND_MCP_URL`/`HIVEMIND_API_KEY` unset, so the `${env:…}` references in `~/.cursor/mcp.json` resolve empty and the server cannot authenticate; the hook prints the incognito line in Cursor's JSON shape, and the always-on rule still loads (the launcher prints a note) | the server entry with `${env:…}` references |
 | Gemini CLI | `HIVEMIND_MCP_URL`/`HIVEMIND_API_KEY` set empty (not unset: Gemini fills unset variables from the project's `.env`), so the extension's server is never contacted (Gemini notes an MCP issue) | the hivemind extension, no hand entry in `settings.json`, and `"experimental": {"extensionConfig": false}` (otherwise a trusted project's `.env` still wins) |
 | OpenCode | the plugin skips the server; a hand-configured one is disabled with `OPENCODE_CONFIG_CONTENT`, or, when that variable is already set (never merged in sh), the key and URL are unset and a note is printed | nothing |
 | KiloCode | the plugin (the OpenCode one) skips the server; a hand-configured one is disabled with `KILO_CONFIG_CONTENT` (`mcp.hivemind.enabled: false` and `mcp.servers.hivemind.disabled`), or, when that variable is already set, the key and URL are unset and a note is printed | nothing |
@@ -466,12 +536,12 @@ does two things:
 
 Where the switch is missing or not configured (the Hermes entry without
 `${HIVEMIND_ENABLED}`, a Codex without the entry, a hand-configured Gemini CLI, a Cline
-whose server entry does not use `${env:…}`, any other
+whose server entry does not use `${env:…}`, a Cursor server configured another way, any other
 command), the session is incognito **by restraint**: the tools are
 loaded, the key and URL stay in the environment, and an agent with a
 shell could still call the REST API. The launcher unsets the key and URL
 only where the server is kept from loading (Claude Code, Copilot CLI,
-DeepSeek Harness, Junie, Pi, Oh My Pi, Gemini CLI, Cline; for Codex, the key only; for OpenCode and KiloCode only when their config overlay variable is already set),
+DeepSeek Harness, Junie, Pi, Oh My Pi, Gemini CLI, Cline, Cursor; for Codex, the key only; for OpenCode and KiloCode only when their config overlay variable is already set),
 because the other harnesses may still need them (ADR 0035). A DeepSeek Harness session also stays incognito when a
 project `.env` names `HIVEMIND_*` variables: incognito is on if the
 process environment or `~/.dsh/.env` says so, and no project `.env` can

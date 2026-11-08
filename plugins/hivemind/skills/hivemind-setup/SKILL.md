@@ -38,7 +38,7 @@ you stand.
 ## Which harness am I in?
 
 The **harness** is the program that runs you and gives you your tools:
-Claude Code, Codex, GitHub Copilot CLI, Gemini CLI, DeepSeek Harness, Hermes, Junie, Pi, Oh My Pi,
+Claude Code, Codex, GitHub Copilot CLI, Cursor, Gemini CLI, DeepSeek Harness, Hermes, Junie, Pi, Oh My Pi,
 OpenCode, Cline, KiloCode or another. The **model** is what you are. They are independent: any model
 can run in any harness.
 
@@ -48,7 +48,7 @@ can run in any harness.
   in Codex.
 - **Decide from evidence**, strongest first:
   1. **Your system prompt**: most harnesses name themselves there ("You
-     are Claude Code…", "You are opencode…", "You are the GitHub Copilot CLI…", "You are DeepSeek
+     are Claude Code…", "You are opencode…", "You are the GitHub Copilot CLI…", "…Cursor…", "You are DeepSeek
      Harness…", "You are Junie, an autonomous programmer developed by JetBrains", "…operating inside pi…"). Oh My Pi is a fork of Pi and
      its prompt may say the same: if anything else points to Oh My Pi
      (below), it is Oh My Pi, not Pi.
@@ -65,7 +65,7 @@ can run in any harness.
      ```
 
      Match the **program name** (the basename of the first word) exactly
-     against `claude`, `codex`, `copilot`, `gemini`, `dsh`, `hermes`, `junie`, `pi`, `omp`, `opencode`,
+     against `claude`, `codex`, `copilot`, `cursor`, `cursor-agent`, `gemini`, `dsh`, `hermes`, `junie`, `pi`, `omp`, `opencode`,
      `cline` or `kilo`; do not match substrings (`pip`, `pipx`, a path that
      happens to contain `pi`). **The nearest ancestor that matches wins**:
      a harness started from another harness's shell sees both. Pi and Oh My
@@ -76,7 +76,8 @@ can run in any harness.
      ("You are Cline…", "You are Kilo Code…", "You are Junie…") is the deciding evidence.
   4. **Markers in your shell's environment** (supporting evidence only,
      never decisive): `OMPCODE=1` points to Oh My Pi; `OPENCODE=1` to
-     OpenCode; `CLAUDECODE=1` to Claude Code, but it is **inherited** by
+     OpenCode; `CURSOR_VERSION` or `CURSOR_AGENT` to Cursor (they are set
+     for its hooks, so a shell may not show them); `CLAUDECODE=1` to Claude Code, but it is **inherited** by
      anything started from a Claude Code shell, and Oh My Pi may set it
      too (unconfirmed), so it never outranks the processes or the system
      prompt. A missing marker proves nothing.
@@ -91,6 +92,7 @@ can run in any harness.
 | Claude Code | `references/claude-code.md` |
 | Codex | `references/codex.md` |
 | GitHub Copilot CLI (`copilot`) | `references/copilot-cli.md` |
+| Cursor (`cursor`, `cursor-agent`) | `references/cursor.md` |
 | Gemini CLI | `references/gemini-cli.md` |
 | DeepSeek Harness (`dsh`) | `references/deepseek-harness.md` |
 | Hermes | `references/hermes.md` |
@@ -399,7 +401,7 @@ switch to their incognito text) and adds the harness's own switch so the
 Hivemind tools do not load at all:
 
 ```sh
-hivemind-incognito <harness>     # claude, codex, copilot, dsh, gemini, hermes, junie, pi, omp, opencode, cline or kilocode (alias kilo)
+hivemind-incognito <harness>     # claude, codex, copilot, cursor, dsh, gemini, hermes, junie, pi, omp, opencode, cline or kilocode (alias kilo)
 ```
 
 Your harness's **Incognito** section says what the switch is and whether
