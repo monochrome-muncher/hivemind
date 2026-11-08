@@ -1,10 +1,11 @@
 // Hivemind admin panel: the Memories view (ADR 0029).
-// Search (POST admin/search) when there is text, otherwise the newest-first
-// listing (GET admin/entries). Filters live in the hash query so other views
+// Search (POST admin/search) when there is text, the one memory (GET
+// admin/entries/{id}) when the text is a memory id, otherwise the
+// newest-first listing (GET admin/entries). Filters live in the hash query so other views
 // can deep-link: #/memories?author=alice&fleet=<id>.
 
 import {
-  api, apiRaw, h, state, toast, guarded, parseHash, loadAgentsAndFleets, fleetName, pageHead, refreshButton, card, KINDS, SCOPES, fill,
+  api, apiRaw, h, state, entryById, entryIdIn, toast, guarded, parseHash, loadAgentsAndFleets, fleetName, pageHead, refreshButton, card, KINDS, SCOPES, fill,
 } from "./core.js";
 import { openEntry } from "./drawer.js";
 import { ENTRY_HEADERS, PAGE, entryCsvColumns, entryRow, exportButton, normaliseEntry } from "./lists.js";
@@ -14,7 +15,7 @@ export async function viewMemories(root) {
   const { params } = parseHash();
   const get = (k) => params.get(k) || "";
 
-  const q = h("input", { type: "search", id: "m-q", value: get("q"), placeholder: "Search memories…", "aria-label": "Search memories" });
+  const q = h("input", { type: "search", id: "m-q", value: get("q"), placeholder: "Search memories or paste an id…", "aria-label": "Search memories or paste an id" });
   const fleet = h("select", { "aria-label": "Fleet" }, h("option", { value: "", text: "All fleets" }),
     state.fleets.map((f) => h("option", { value: f.id, text: f.name, selected: f.id === get("fleet") })));
   const authors = h("datalist", { id: "m-authors" }, state.agents.map((a) => h("option", { value: a.name })));
@@ -49,8 +50,7 @@ export async function viewMemories(root) {
     q: q.value.trim(), fleet: fleet.value, author: author.value.trim(), kind: kind.value, scope: scope.value,
     all: stateSel.value, flagged: flagged.checked ? "1" : "",
   });
-  const syncHash = () => {
-    const f = filters();
+  const syncHash = (f) => {
     const p = new URLSearchParams();
     for (const [k, v] of Object.entries(f)) if (v) p.set(k, v);
     const next = `#/memories${p.toString() ? "?" + p.toString() : ""}`;
@@ -58,9 +58,16 @@ export async function viewMemories(root) {
     if (window.location.hash !== next) history.replaceState(null, "", next);
   };
 
-  // One page under filters `f`: search when there is text, else the listing.
-  // Resolves to {items, degraded}, or undefined after a sign-out.
+  // One page under filters `f`: the one memory when the text is an id,
+  // search when there is other text, else the listing. An id ignores the
+  // other filters. Resolves to {items, degraded}, or undefined after a sign-out.
   const fetchItems = async (f, limit, offset) => {
+    const id = entryIdIn(f.q);
+    if (id) {
+      if (offset > 0) return { items: [], degraded: false };
+      const items = await entryById(() => guarded(() => api("GET", `admin/entries/${encodeURIComponent(id)}`)));
+      return items && { items: items.map(normaliseEntry), degraded: false };
+    }
     if (f.q) {
       const body = { query: f.q, limit, offset };
       if (f.kind) body.kind = f.kind;
@@ -82,10 +89,11 @@ export async function viewMemories(root) {
   };
 
   const load = async (append) => {
-    const f = filters();
+    // Load more pages the filters the table shows, not unsent text in the form.
+    const f = append && applied ? applied : filters();
     const mine = ++ticket;
     if (!append) { generation += 1; applied = f; }
-    syncHash();
+    syncHash(f);
     more.disabled = true;
     try {
       if (!append) offset = 0;
@@ -98,10 +106,13 @@ export async function viewMemories(root) {
       const open = (id) => openEntry(id, () => load(false));
       tbody.append(...items.map((it) => entryRow(it, { onOpen: open, fleetName })));
       const count = tbody.querySelectorAll("tr.clickable").length;
+      const byId = Boolean(entryIdIn(f.q));
       if (count === 0) {
-        tbody.replaceChildren(h("tr", {}, h("td", { class: "empty", colspan: 7, text: f.q ? "No memories match this search." : "No memories match these filters." })));
+        const empty = byId ? "No memory has this id." : f.q ? "No memories match this search." : "No memories match these filters.";
+        tbody.replaceChildren(h("tr", {}, h("td", { class: "empty", colspan: 7, text: empty })));
       }
-      status.textContent = f.q ? `${count} result${count === 1 ? "" : "s"}, best match first` : `${count} shown, newest first`;
+      status.textContent = byId ? (count ? "The memory with this id (the filters do not apply to an id)" : "")
+        : f.q ? `${count} result${count === 1 ? "" : "s"}, best match first` : `${count} shown, newest first`;
       moreWrap.hidden = items.length < PAGE;
     } catch (err) {
       if (mine === ticket) toast(err.message, true);
@@ -130,7 +141,7 @@ export async function viewMemories(root) {
   more.addEventListener("click", () => load(true));
 
   fill(root, 
-    pageHead("Memories", "What the agents have written. Search ranks like an agent's search; the list is newest first.", refreshButton()),
+    pageHead("Memories", "What the agents have written. Search ranks like an agent's search, a memory id finds that memory, and the list is newest first.", refreshButton()),
     card(null, h("div", {}, form), { className: "card-filters" }),
     degraded,
     h("div", { class: "card" },

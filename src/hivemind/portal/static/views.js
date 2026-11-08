@@ -3,7 +3,7 @@
 // tables (lists.js) and memory drawer (drawer.js).
 
 import {
-  api, apiRaw, h, state, guarded, parseHash, fleetName, levelName, pageHead, refreshButton, card, fill, table, toast, link, viewHref, canPin, PIN_REMINDER,
+  api, apiRaw, h, state, guarded, entryById, entryIdIn, parseHash, fleetName, levelName, pageHead, refreshButton, card, fill, table, toast, link, viewHref, canPin, PIN_REMINDER,
   stat, fmtAgo, fmtTime,
   KINDS, SCOPES, VERDICTS,
 } from "./session.js";
@@ -287,7 +287,7 @@ export async function viewSearch(root) {
   const me = state.me;
   const { params } = parseHash();
   const get = (k) => params.get(k) || "";
-  const q = h("input", { type: "search", value: get("q"), placeholder: "Search what it can read…", "aria-label": "Search" });
+  const q = h("input", { type: "search", value: get("q"), placeholder: "Search what it can read, or paste a memory id…", "aria-label": "Search, or paste a memory id" });
   const kind = select("Kind", KINDS, get("kind"), "Any kind");
   const scope = select("Scope", SCOPES, get("scope"), "Any scope");
   const author = h("input", { type: "text", value: get("author"), placeholder: "Author (agent name)", "aria-label": "Author" });
@@ -307,6 +307,15 @@ export async function viewSearch(root) {
       }
       const f = applied;
       if (!f.q) return [];
+      // A memory id reads that memory through the drawer's own read, which
+      // the key's visibility bounds: one the key may not read is the same
+      // 404 as one that does not exist. The other filters do not apply.
+      const id = entryIdIn(f.q);
+      if (id) {
+        degraded.hidden = true;
+        if (offset > 0) return [];
+        return entryById(() => guarded(() => api("GET", `entries/${encodeURIComponent(id)}`)));
+      }
       const body = { query: f.q, limit, offset };
       if (f.kind) body.kind = f.kind;
       if (f.scope) body.scope = f.scope;
@@ -314,19 +323,24 @@ export async function viewSearch(root) {
       if (f.all) body.include_inactive = true;
       const res = await guarded(() => apiRaw("POST", "portal/search", { body }));
       if (!res) return undefined;
-      if (offset === 0) degraded.hidden = (res.headers.get("X-Hivemind-Degraded") || "") !== "keyword-only";
+      // A slow earlier search must not set the banner over a newer result.
+      if (offset === 0 && applied === f) degraded.hidden = (res.headers.get("X-Hivemind-Degraded") || "") !== "keyword-only";
       return res.payload || [];
     },
     onOpen: (id) => openEntry(id, () => results.load(true)),
     fleetName,
-    emptyText: "Type a search above, or nothing it can read matches.",
+    emptyText: "Type a search or a memory id above, or nothing it can read matches.",
     csvName: `${me.name}-search`,
-    statusText: (n) => (applied && applied.q ? `${n} result${n === 1 ? "" : "s"}, best match first` : ""),
+    statusText: (n) => {
+      if (!applied || !applied.q) return "";
+      if (entryIdIn(applied.q)) return n ? "The memory with this id (the filters do not apply to an id)" : "";
+      return `${n} result${n === 1 ? "" : "s"}, best match first`;
+    },
   });
   form.addEventListener("submit", (event) => { event.preventDefault(); results.load(true); });
 
   fill(root,
-    pageHead("Search", `Ranks like ${me.name}'s own search, over what its key can read. Searching here does not count in the fleet's search numbers.`,
+    pageHead("Search", `Ranks like ${me.name}'s own search, over what its key can read; a memory id finds that memory if the key can read it. Searching here does not count in the fleet's search numbers.`,
       link("Its memories", viewHref("memories"), { class: "link small" })),
     card(null, form, { className: "card-filters" }),
     degraded,
