@@ -20,15 +20,17 @@ to install or use it, read [README.md](README.md) instead.
 | `skills/hivemind/` | The always-on rules: `hive_whoami` first, when to search, when and how to write, what never to write, local memory only as a fallback |
 | `skills/hivemind-setup/` | The guided setup. Harness-neutral itself: it works out its harness first (never from the model), then reads only that harness's file in `references/` |
 | `skills/hivemind-setup/scripts/hivemind-session-start.sh` | The reminder text the startup hook prints, including its incognito variant |
-| `hooks/hooks.json` | A `SessionStart` hook (`startup`, `resume`, `clear`, `compact`, `fork`) that re-injects the reminder whenever the context is rebuilt (Claude Code, Codex), and a `Stop` hook (Claude Code, Codex). GitHub Copilot CLI reads the same file (its Claude-style hooks format) |
+| `hooks/hooks.json` | A `SessionStart` hook (`startup`, `resume`, `clear`, `compact`, `fork`) that re-injects the reminder whenever the context is rebuilt (Claude Code, Codex), and a `Stop` hook (Claude Code, Codex). GitHub Copilot CLI and Junie read the same file (its Claude-style hooks format) |
 | `skills/hivemind-setup/scripts/hivemind-stop.sh` | The `Stop` hook ([below](#the-stop-hook-and-the-post-compaction-line)) |
 | `.mcp.json` | The MCP server for Claude Code, built from `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY`. GitHub Copilot CLI rejects it (see its quirk below) |
 | `package.json`, `cordis.patch.yml`, `dsh/` | The DeepSeek Harness bundle: the MCP server row, a small provider (`dsh/hivemind-skills.js`) that serves `skills/`, and the Stop reminder (`dsh/hivemind-reminders.js`) |
 | `plugin.yaml`, `__init__.py` | The Hermes plugin: serves `skills/` and registers a system-prompt section |
 | `extensions/hivemind.ts` | The Pi and Oh My Pi extension: the system-prompt section, the MCP server on Pi 0.99+, and blocking Hivemind calls in incognito sessions |
 | `opencode/hivemind.js` | The OpenCode plugin (which KiloCode 7.x, an OpenCode fork, loads too): registers the MCP server, adds the skills, and puts the reminder in every model request |
+| `guidelines/hivemind.md` | The Junie guidelines file: the `STAY_AWARE_CORE` sentence plus one line telling Junie's MCP tool picker to always select the `hive_*` tools. Nothing else reads this folder |
+| `junie/incognito.md` | The incognito text (`INCOGNITO_TEXT`) that `hivemind-incognito junie` passes to Junie as extra guidelines |
 | `cline/` | The Cline hooks: `UserPromptSubmit` (the stay-aware line: in full on a task's first prompt, short on later ones), `TaskStart` and `PostToolUse` (the end-of-task write-and-rate nudge), each with a `.ps1` twin for Windows |
-| `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json` | The plugin manifests for Claude Code (also read by GitHub Copilot CLI) and Codex, which point Codex at `skills/` and `hooks/hooks.json` |
+| `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json` | The plugin manifests for Claude Code (also read by GitHub Copilot CLI and Junie) and Codex, which point Codex at `skills/` and `hooks/hooks.json` |
 | `.cursor-plugin/plugin.json`, `cursor/hooks.json`, `cursor/rules/hivemind.mdc` | The Cursor plugin: the manifest points Cursor at `skills/`, at the Cursor-only hooks file (so it never parses the Claude-format `hooks/hooks.json`) and at the rules folder; the hook runs the startup script on `sessionStart`; the always-on rule holds the startup sentence. No `mcp.json`: the user configures the server |
 | `bin/hivemind-incognito` | The incognito launcher ([below](#incognito)) |
 | `CHANGELOG.md` | What changed for agents in each release |
@@ -55,6 +57,7 @@ reminder that survives compaction and new sessions.
 | Gemini CLI | the extension's `gemini-extension.json` (a `hivemind` entry in `~/.gemini/settings.json` replaces it) | the extension | the `GEMINI.md` instruction block, plus the extension's `SessionStart` hook |
 | GitHub Copilot CLI | the user's `~/.copilot/mcp-config.json` (the whole `url` cannot come from the environment; the key can) | the plugin | the plugin's `SessionStart` hook, plus the `~/.copilot/copilot-instructions.md` instruction block |
 | Cursor | the user's `~/.cursor/mcp.json` with `${env:…}` references (plugin MCP variables are set by team admins, so the plugin ships none) | the plugin (a local plugin in `~/.cursor/plugins/local/hivemind`) | the plugin's always-on rule `cursor/rules/hivemind.mdc`, plus its `sessionStart` hook |
+| Junie | the user's `~/.junie/mcp/mcp.json` with the literal URL and key (Junie expands no `${VAR}`) | the plugin (installed from the Claude Code marketplace) | the plugin's `guidelines/hivemind.md` (always in the guidelines), plus the `Stop` hook |
 
 Everything the setup skill tells an agent to do for one harness lives in
 that harness's file under `skills/hivemind-setup/references/`. The skill
@@ -190,6 +193,77 @@ itself names no harness-specific paths, and a test enforces this.
   checkout without symlink support the `skills` link is a plain file, so the
   skills would have to be copied by hand.
 
+- **Junie** (JetBrains' coding agent; checked with Junie CLI 26.9.7 on
+  Linux against a mock OpenAI-compatible model and a local
+  `hivemind-mcp-http`).
+  - *Install.* Junie reads Claude-style marketplaces, so the root
+    `.claude-plugin/marketplace.json` works unchanged: in the TUI,
+    `/extensions marketplace add <git-url-or-path>` (an https GitHub URL,
+    `owner/repo`, SSH, other git hosts, a local path or a direct
+    `marketplace.json` URL are accepted), then `/extensions`, search
+    `hivemind`, Install, "User level". It lists the Features as "skills,
+    mcp, hooks" and copies the plugin to
+    `~/.junie/extensions/<marketplace>/hivemind/`. Checked with a local
+    path; GitHub URLs are documented but were not tried. A Git extension
+    updates only when the user picks Update in the Installed tab; a
+    local-directory one refreshes on start. No Junie manifest is needed.
+  - *MCP server.* The user config is `~/.junie/mcp/mcp.json` (a project
+    `.junie/mcp/mcp.json` must never hold the key). **Junie expands no
+    `${VAR}` in `url` or `headers`**: a `${HIVEMIND_MCP_URL}` url went to
+    localhost:80 and a `Bearer ${HIVEMIND_API_KEY}` header got 401. So the
+    file holds the literal URL and key, mode 600 in a 700 folder, and the
+    setup skill writes it with the key-hygiene rules (it shows the change
+    first and prefers that the user writes the key). The server must be
+    named `hivemind`. When a user `hivemind` entry exists the extension's
+    own `.mcp.json` is shown as "mcp (ignored due to conflict)"; without
+    one it tries localhost:80 and fails harmlessly (no key sent). The
+    model sees `mcp_hivemind_hive_whoami`; Junie's UI shows
+    `hivemind/hive_whoami`.
+  - *Capability filter.* Before each step Junie makes a separate model
+    call that picks which MCP tools the main agent gets for the task; a
+    tool it leaves out is not offered at all. The filter follows the
+    capability instructions in the guidelines, and gets the extension's
+    guidelines. So `guidelines/hivemind.md` ends with "Required MCP server:
+    hivemind. Always select all of its hive_* tools for every task."
+  - *Guidelines.* An extension may ship a `guidelines/` folder: its files
+    go into the main agent's guidelines and into the capability filter's
+    prompt. This is the always-on layer for the stay-aware text, because
+    Junie ignores `additionalContext` from `SessionStart` (the hook runs,
+    its text never reaches the model). `hivemind-session-start.sh` is left
+    as it is. The file is `STAY_AWARE_CORE` plus the filter sentence, and
+    the reminder tests check it byte for byte.
+  - *Hooks.* Junie runs the extension's `hooks/hooks.json` (Claude
+    format, `${CLAUDE_PLUGIN_ROOT}` expanded). `Stop` supports
+    `{"decision":"block","reason":"..."}` (a retry with the reason as
+    feedback) but does not run for chat-type tasks. Junie sets no
+    `JUNIE_*` or `CLAUDE_*` variable in the hook's environment.
+  - *Stop input.* No `transcript_path`: `{"hook_event_name":"Stop",
+    "session_id":"session-261108-043543-1i6y","cwd":…,"project_path":…,
+    "stop_hook_active":false,"last_assistant_message":…}`. The session log
+    is `$HOME/.junie/sessions/<session_id>/events.jsonl`; each tool use is
+    a line with `"kind":"<X>BlockUpdatedEvent"` (X seen: `Mcp`,
+    `Terminal`) and `"status":"IN_PROGRESS"`, later again with
+    `"status":"COMPLETED"`; a final `ResultBlockUpdatedEvent` has no
+    status. An MCP call carries `"toolName":"hivemind/hive_whoami"`.
+  - *Incognito.* `junie --mcp-default-locations=false` skips both
+    `mcp.json` files, so the extension's `.mcp.json` tries
+    `${HIVEMIND_MCP_URL}` literally and fails to connect, and no hive tools
+    load (the user's other MCP servers go too).
+    `--ide-guidelines=<file>` prepends the file's content to the
+    guidelines.
+  - *Not verified.* The Junie plugin inside JetBrains IDEs (it has an MCP
+    settings page in the same JSON format and reads `.junie/AGENTS.md`;
+    whether it loads CLI extensions is unknown) and the JetBrains AI
+    Assistant chat (MCP under Settings | Tools | AI Assistant | Model
+    Context Protocol, plus project rules; no plugins or hooks).
+  - *Mock model for headless runs.* A custom profile
+    `~/.junie/models/<id>.json` with `baseUrl` (the full endpoint, e.g.
+    `.../v1/chat/completions`), `apiType` (`OpenAICompletion`,
+    `OpenAIResponses`, ...), `apiKey` and `id`; then `junie --model
+    custom:<id> --output-format json "task"`. The model ends a task with
+    the `submit` tool. Junie's JVM reads `user.home`, which normally equals
+    `$HOME`.
+
 - **GitHub Copilot CLI** (checked with 1.0.95, headless against a mock
   OpenAI-compatible model: `COPILOT_PROVIDER_BASE_URL`, `COPILOT_MODEL`,
   `COPILOT_PROVIDER_API_KEY` and `copilot -p ... --allow-all-tools`; no
@@ -273,14 +347,14 @@ and Codex from `hooks/hooks.json`, in Pi and Oh My Pi from the extension
 and the OpenCode plugin (which KiloCode runs as well), in DeepSeek
 Harness the Stop reminder from `dsh/hivemind-reminders.js` (below). Gemini CLI gets the Stop reminder
 from the extension's `AfterAgent` hook (`../../hooks/hooks.json`).
-Hermes does not have them. Cursor has neither (its rule is the durable layer; see its quirk above). GitHub Copilot CLI gets the Stop reminder from
+Hermes does not have them. Cursor has neither (its rule is the durable layer; see its quirk above). Junie gets the Stop reminder from the same plugin hook. GitHub Copilot CLI gets the Stop reminder from
 the plugin's `Stop` hook (the shared `hooks/hooks.json`), and no
 post-compaction line. Cline gets the end-of-task nudge from the
 `PostToolUse` hook in `cline/` (it counts the task's tool calls in a temp
 file, reset by `TaskStart`, and never nudges a subagent task); it has no
 post-compaction line.
 
-The script counts four transcript formats:
+The script counts five transcript formats:
 
 - Claude Code's `"type": "tool_use"` records.
 - Codex's `function_call`, `custom_tool_call` and `local_shell_call`
@@ -308,6 +382,16 @@ The script counts four transcript formats:
   after the events happen (it was not there yet when a sub-second session
   stopped), so the count can trail by a call or two: fine for a 20-call
   threshold, and the script fails open when the file is missing.
+
+- Junie's `~/.junie/sessions/<session_id>/events.jsonl`. Its `Stop` input
+  has no `transcript_path` (see the Junie quirk), so the script, seeing a
+  `project_path` field and no `transcript_path`, reads that file (refusing
+  one that is not a regular file) and counts the lines whose `kind` is
+  `<X>BlockUpdatedEvent` and whose `status` is `COMPLETED` (each tool use
+  logs an `IN_PROGRESS` and a `COMPLETED` line). A Hivemind call shows as
+  `"toolName":"hivemind/hive_write"`, so `hive_write`, `hive_feedback`,
+  `hive_search` and `hive_get` are matched on `toolName`. Checked with
+  Junie CLI 26.9.7. `SessionStart` runs but Junie ignores its output.
 
 - **Post-compaction line.** When the `SessionStart` source is `compact`
   (read from the hook's stdin JSON), `hivemind-session-start.sh` appends
@@ -411,6 +495,7 @@ does two things:
 | Gemini CLI | `HIVEMIND_MCP_URL`/`HIVEMIND_API_KEY` set empty (not unset: Gemini fills unset variables from the project's `.env`), so the extension's server is never contacted (Gemini notes an MCP issue) | the hivemind extension, no hand entry in `settings.json`, and `"experimental": {"extensionConfig": false}` (otherwise a trusted project's `.env` still wins) |
 | OpenCode | the plugin skips the server; a hand-configured one is disabled with `OPENCODE_CONFIG_CONTENT`, or, when that variable is already set (never merged in sh), the key and URL are unset and a note is printed | nothing |
 | KiloCode | the plugin (the OpenCode one) skips the server; a hand-configured one is disabled with `KILO_CONFIG_CONTENT` (`mcp.hivemind.enabled: false` and `mcp.servers.hivemind.disabled`), or, when that variable is already set, the key and URL are unset and a note is printed | nothing |
+| Junie | `--mcp-default-locations=false` (skips the user's and the project's `mcp.json`, so the hand `hivemind` entry is not read; the extension's own `.mcp.json` then tries `${HIVEMIND_MCP_URL}` literally and cannot connect) and `--ide-guidelines=<plugin>/junie/incognito.md`; the launcher also unsets the key and URL. The flag also turns off the user's other MCP servers for the session | the plugin installed, the server in `~/.junie/mcp/mcp.json` |
 | Cline | `HIVEMIND_MCP_URL`/`HIVEMIND_API_KEY` unset, so the `${env:…}` references in `cline_mcp_settings.json` stay unexpanded and the server never connects; the hooks see `HIVEMIND_INCOGNITO` and say the incognito line (the skills stay installed) | the server entry with `${env:…}` references |
 
 Where the switch is missing or not configured (the Hermes entry without
@@ -420,7 +505,7 @@ command), the session is incognito **by restraint**: the tools are
 loaded, the key and URL stay in the environment, and an agent with a
 shell could still call the REST API. The launcher unsets the key and URL
 only where the server is kept from loading (Claude Code, Copilot CLI,
-DeepSeek Harness, Pi, Oh My Pi, Gemini CLI, Cline, Cursor; for Codex, the key only; for OpenCode and KiloCode only when their config overlay variable is already set),
+DeepSeek Harness, Junie, Pi, Oh My Pi, Gemini CLI, Cline, Cursor; for Codex, the key only; for OpenCode and KiloCode only when their config overlay variable is already set),
 because the other harnesses may still need them (ADR 0035). A DeepSeek Harness session also stays incognito when a
 project `.env` names `HIVEMIND_*` variables: incognito is on if the
 process environment or `~/.dsh/.env` says so, and no project `.env` can

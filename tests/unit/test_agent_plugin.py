@@ -253,6 +253,7 @@ HARNESS_REFS = {
     "Cursor": "cursor.md",
     "DeepSeek Harness": "deepseek-harness.md",
     "Hermes": "hermes.md",
+    "Junie": "junie.md",
     "Pi": "pi.md",
     "Oh My Pi": "oh-my-pi.md",
     "OpenCode": "opencode.md",
@@ -1742,6 +1743,59 @@ def test_the_cursor_reference_is_complete() -> None:
     assert "hm_" not in text.replace("hm_…", "")
 
 
+def test_launcher_starts_junie_without_its_default_mcp_files_and_with_the_incognito_text(
+    tmp_path: Path,
+) -> None:
+    """`--mcp-default-locations=false` skips the user's and the project's
+    mcp.json (checked live with Junie CLI 26.9.7), and `--ide-guidelines`
+    carries the incognito text, which Junie's ignored SessionStart hook
+    cannot. The key and URL are not needed either."""
+    env = _fake_harness(tmp_path, "junie")
+    script = tmp_path / "bin" / "junie"
+    script.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "URL=${HIVEMIND_MCP_URL:-unset}" "KEY=${HIVEMIND_API_KEY:-unset}" '
+        '"INCOGNITO=$HIVEMIND_INCOGNITO" "$@"\n'
+    )
+    env.update(HIVEMIND_MCP_URL="https://hm.example/mcp", HIVEMIND_API_KEY="hm_x")
+    lines = _launch(tmp_path, env, "junie", "--model", "m")
+    assert lines[:3] == ["URL=unset", "KEY=unset", "INCOGNITO=1"]
+    assert lines[3] == "--mcp-default-locations=false"
+    assert lines[5:] == ["--model", "m"]
+    flag = "--ide-guidelines="
+    assert lines[4].startswith(flag)
+    guidelines = Path(lines[4].removeprefix(flag))
+    assert guidelines == PLUGIN / "junie" / "incognito.md"
+    assert guidelines.read_text() == INCOGNITO_TEXT + "\n"
+
+
+def test_launcher_finds_the_junie_incognito_file_through_a_symlink(tmp_path: Path) -> None:
+    env = _fake_harness(tmp_path, "junie")
+    link = tmp_path / "linked" / "hivemind-incognito"
+    link.parent.mkdir()
+    link.symlink_to(LAUNCHER)
+    out = subprocess.run(
+        ["sh", str(link), "junie"],
+        env=env,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert f"--ide-guidelines={PLUGIN / 'junie' / 'incognito.md'}" in out.stdout.splitlines()
+
+
+def test_the_junie_guidelines_are_the_stay_aware_line_and_the_tool_picker_sentence() -> None:
+    """Junie ignores a SessionStart hook's text, so the extension's
+    guidelines/ file is its always-on layer; the same file goes to the
+    capability filter, which would otherwise leave the hive_* tools out."""
+    text = (PLUGIN / "guidelines" / "hivemind.md").read_text()
+    assert text == (
+        STAY_AWARE_CORE + "\n\nRequired MCP server: hivemind. "
+        "Always select all of its hive_* tools for every task.\n"
+    )
+    assert [p.name for p in (PLUGIN / "guidelines").iterdir()] == ["hivemind.md"]
+
+
 def test_launcher_switches_the_copilot_cli_server_off_by_name(tmp_path: Path) -> None:
     """`--disable-mcp-server hivemind` keeps Copilot CLI 1.0.95 from loading
     or contacting the server (checked live); the key and URL are not needed."""
@@ -2122,6 +2176,7 @@ def test_every_reference_that_holds_a_key_says_chmod_600_and_never_a_project_fil
         "gemini-cli",
         "copilot-cli",
         "cursor",
+        "junie",
     ):
         text = " ".join((SETUP_REFS / f"{name}.md").read_text().split())
         assert "chmod 600" in text or "mode 600" in text, name
@@ -2370,6 +2425,11 @@ def _ps_literals(src: str) -> list[str]:
     return out
 
 
+def _md_paragraphs(src: str) -> list[str]:
+    """Markdown: each paragraph is one text (the Junie files are plain prose)."""
+    return [p.strip() for p in src.split("\n\n") if p.strip()]
+
+
 def _json_leaves(value: object) -> list[str]:
     if isinstance(value, str):
         return [value]
@@ -2389,6 +2449,7 @@ def _runtime_texts(path: Path) -> list[str]:
         ".ps1": _ps_literals,
         ".sh": _sh_literals,
         ".mdc": _mdc_literals,
+        ".md": _md_paragraphs,  # the Junie guidelines and incognito files
         "": _sh_literals,  # the Cline Unix hooks have no extension
     }[path.suffix]
     texts: list[str] = []
@@ -2405,6 +2466,8 @@ def _runtime_texts(path: Path) -> list[str]:
 # reminder -> (canonical text, words every copy opens with, files holding a copy)
 _SKILL_SCRIPTS = Path("skills", "hivemind-setup", "scripts")
 _PI_TS = Path("extensions", "hivemind.ts")
+_JUNIE_GUIDELINES = Path("guidelines", "hivemind.md")
+_JUNIE_INCOGNITO = Path("junie", "incognito.md")
 _OPENCODE = Path("opencode", "hivemind.js")
 REMINDER_COPIES: dict[str, tuple[str, str, tuple[Path, ...]]] = {
     "session line": (
@@ -2418,6 +2481,7 @@ REMINDER_COPIES: dict[str, tuple[str, str, tuple[Path, ...]]] = {
             Path("cline", "UserPromptSubmit"),
             Path("cline", "UserPromptSubmit.ps1"),
             Path("cursor", "rules", "hivemind.mdc"),
+            _JUNIE_GUIDELINES,
         ),
     ),
     "incognito line": (
@@ -2430,6 +2494,7 @@ REMINDER_COPIES: dict[str, tuple[str, str, tuple[Path, ...]]] = {
             _SKILL_SCRIPTS / "hivemind-session-start.sh",
             Path("cline", "UserPromptSubmit"),
             Path("cline", "UserPromptSubmit.ps1"),
+            _JUNIE_INCOGNITO,
         ),
     ),
     "stop reminder": (
@@ -2497,12 +2562,16 @@ def test_every_copy_of_a_reminder_text_is_the_canonical_text(
 def test_no_plugin_file_holds_an_unchecked_copy_of_a_reminder_text() -> None:
     """A new file that carries a reminder's opening words must be added to
     REMINDER_COPIES, so a future copy cannot go unchecked. Markdown is prose
-    that quotes the openers, not a copy a harness shows."""
+    that quotes the openers, not a copy a harness shows, unless a harness reads
+    the whole file (the Junie guidelines), which REMINDER_COPIES then lists."""
     listed = {(opening, rel) for _, opening, files in REMINDER_COPIES.values() for rel in files}
     found = set()
     for path in PLUGIN.rglob("*"):
         parts = path.relative_to(PLUGIN).parts
-        if not path.is_file() or path.suffix == ".md" or "node_modules" in parts:
+        listed_md = path.relative_to(PLUGIN) in {rel for _, rel in listed}
+        if not path.is_file() or (path.suffix == ".md" and not listed_md):
+            continue
+        if "node_modules" in parts:
             continue
         if "__pycache__" in parts:
             continue
