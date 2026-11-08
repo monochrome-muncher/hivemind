@@ -1654,8 +1654,7 @@ def _cursor_hook(**extra: str) -> dict[str, str]:
 @pytest.mark.parametrize("key", ["hm_secret_value", None])
 def test_the_hook_prints_cursors_additional_context(key: str | None) -> None:
     """The Cursor hook passes --cursor and Cursor reads a top-level
-    `additional_context` from `sessionStart` (Cursor's docs, not yet checked
-    live); the nested Claude form and Copilot's camelCase are not it."""
+    `additional_context` from `sessionStart` (checked live with the local CLI); the nested Claude form and Copilot's camelCase are not it."""
     payload = _cursor_hook(**({"HIVEMIND_API_KEY": key} if key else {}))
     assert set(payload) == {"additional_context"}
     text = payload["additional_context"]
@@ -1673,7 +1672,7 @@ def test_the_hook_goes_incognito_in_cursors_shape() -> None:
 
 def test_the_cursor_plugin_route_is_cursor_only() -> None:
     """The manifest must not let Cursor parse the Claude-format hooks file,
-    and every path it names must exist (built from Cursor's docs)."""
+    and every path it names must exist."""
     kebab = re.compile(r"^[a-z0-9][a-z0-9.-]*$")
     manifest = _json(PLUGIN / ".cursor-plugin" / "plugin.json")
     assert kebab.match(manifest["name"])  # type: ignore[arg-type]
@@ -1733,7 +1732,9 @@ def test_launcher_unsets_the_key_and_url_for_cursor(tmp_path: Path, name: str) -
 def test_the_cursor_reference_is_complete() -> None:
     text = (SETUP_REFS / "cursor.md").read_text()
     flat = " ".join(text.split())
-    assert "built from Cursor's documentation (November 2026), not yet checked live" in flat
+    assert "Checked live in November 2026 with the Cursor CLI 2026.11.05" in flat
+    assert "~/.cursor/plugins/local-marketplaces.json" in text
+    assert "~/.cursor/rules/hivemind.mdc" in text and "alwaysApply: true" in text
     assert "~/.cursor/mcp.json" in text and "must be named `hivemind`" in flat
     assert '"url": "${env:HIVEMIND_MCP_URL}"' in text
     assert '"Authorization": "Bearer ${env:HIVEMIND_API_KEY}"' in text

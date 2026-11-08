@@ -104,22 +104,35 @@ reminded about Hivemind at the start of a session.
 
 ### Cursor
 
-Cursor support is built from Cursor's documentation (November 2026) and
-has not been checked live yet.
+Cursor support was checked with Cursor's command line agent in its
+local-model mode (November 2026). The editor was not checked.
 
-In a terminal, clone the repository and link the plugin into Cursor's
-local plugin folder:
+Tell Cursor where to fetch the plugin. Create
+`~/.cursor/plugins/local-marketplaces.json` with:
 
-```sh
-git clone https://github.com/monochrome-muncher/hivemind ~/src/hivemind
-mkdir -p ~/.cursor/plugins/local
-ln -s ~/src/hivemind/plugins/hivemind ~/.cursor/plugins/local/hivemind
+```json
+{
+  "version": 1,
+  "marketplaces": [
+    {
+      "name": "hivemind",
+      "gitUrl": "https://github.com/monochrome-muncher/hivemind.git",
+      "gitRef": "main",
+      "plugins": [{ "name": "hivemind", "enabled": true }]
+    }
+  ]
+}
 ```
 
-Then restart Cursor, or run "Developer: Reload Window". On an Enterprise
-plan an admin has to allow local plugin imports. A team can also add the
-repository as a team marketplace ("Import from Repo" with its Git URL);
-the public Cursor Marketplace has no Hivemind listing yet.
+If the file is already there, add the entry to its `marketplaces` list.
+Cursor fetches the plugin each time it starts, so a restart also updates
+it. A team can instead add the repository as a team marketplace ("Import
+from Repo" with its Git URL); the public Cursor Marketplace has no
+Hivemind listing yet.
+
+In the check, the plugin's always-on rule did not reach the model, so also
+add a user rule, `~/.cursor/rules/hivemind.mdc` (the setup in step 2
+writes it for you).
 
 The plugin brings both skills, an always-on rule and a startup hook. It
 does not bring the connection: Cursor sets a plugin's MCP variables from

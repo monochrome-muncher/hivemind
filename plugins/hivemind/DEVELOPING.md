@@ -309,16 +309,23 @@ itself names no harness-specific paths, and a test enforces this.
     "failed to parse YAML frontmatter"). `test_skill_descriptions_are_strict_yaml`
     pins it.
 
-- **Cursor** (built from Cursor's documentation, November 2026, not yet
-  checked live: Cursor needs an account and cursor.com is not reachable
-  from the build environment).
+- **Cursor** (checked live with the CLI 2026.11.05 in local-model mode,
+  `cursor-agent-local --authless` from `downloads.cursor.com/lab/<version>/linux/x64/agent-cli-local-package.tar.gz`,
+  with `CURSOR_LOCAL_AGENT_BASE_URL` and `CURSOR_LOCAL_AGENT_API_KEY`
+  pointing at the mock model; no account needed. The editor and the
+  signed-in CLI were not checked).
   - *Install.* The root `.cursor-plugin/marketplace.json` (`name`,
     `owner`, `plugins[].source` as a path) lets an admin import the
     repository as a team marketplace; Cursor looks for
-    `<source>/.cursor-plugin/plugin.json`. A single user links or copies
-    `plugins/hivemind` to `~/.cursor/plugins/local/hivemind` and reloads
-    the window. A public Marketplace listing is reviewed and Hivemind
-    has none.
+    `<source>/.cursor-plugin/plugin.json`. A single user lists the
+    repository in `~/.cursor/plugins/local-marketplaces.json`
+    (`{"version":1,"marketplaces":[{"name","gitUrl","gitRef","plugins":[{"name","enabled":true}]}]}`);
+    Cursor clones it at each start into `~/.cursor/plugins/marketplaces/`
+    and caches the plugin by commit under `~/.cursor/plugins/cache/`
+    (checked live, including a GitHub URL). The authless profile turns off
+    user-local plugins, so `~/.cursor/plugins/local/` and `--plugin-dir`
+    were not checked. A public Marketplace listing is reviewed and
+    Hivemind has none.
   - *Manifest.* A path field replaces folder discovery for that
     component. Cursor would parse `hooks/hooks.json` by default, which is
     the Claude format, so the manifest sets `hooks` to
@@ -327,18 +334,30 @@ itself names no harness-specific paths, and a test enforces this.
   - *MCP server.* The user's `~/.cursor/mcp.json` entry reads
     `${env:HIVEMIND_MCP_URL}` and `${env:HIVEMIND_API_KEY}` (Cursor
     expands `${env:NAME}` in `command`, `args`, `env`, `url` and
-    `headers`). Not confirmed: whether `cursor-agent` reads the same file,
-    and whether the app, started from a dock, sees shell variables
-    (probably not, so users start it with `cursor .`).
+    `headers`). The CLI reads the same file and expands the variables
+    (checked live); it calls MCP tools through its `CallMcpTool` meta tool
+    (`{server, toolName, arguments}`) after `GetMcpTools`. Not confirmed:
+    whether the app, started from a dock, sees shell variables (probably
+    not, so users start it with `cursor .`).
   - *SessionStart.* Cursor's `sessionStart` takes
     `{"additional_context": "..."}`; `hivemind-session-start.sh` prints
     that when the plugin's hook passes `--cursor`. It does not go by
     `CURSOR_VERSION` (set for every Cursor hook), because Cursor's
-    variables may reach a Claude Code started in Cursor's terminal. There is no compaction source, so the always-on rule is
-    the layer that survives a compaction.
-  - *Stop.* Not wired. Cursor's `stop` hook can only send a
-    `followup_message` (a new user message) and its transcript format is
-    unverified, so `hivemind-stop.sh` cannot count tool calls.
+    variables may reach a Claude Code started in Cursor's terminal.
+    Checked live: the text arrives in the first user message inside
+    `<hooks_context>`. The hook input has `transcript_path: null`. There
+    is no compaction source, so the always-on rule is the layer that
+    survives a compaction.
+  - *Rules.* In the authless CLI the plugin's rule (through the `rules`
+    field or the default `rules/` folder) never reached the model, while
+    a user rule in `~/.cursor/rules/` did, so setup also writes
+    `~/.cursor/rules/hivemind.mdc`. The plugin's rule stays for the
+    editor, unverified.
+  - *Stop.* Not wired. In the live check a `stop` hook never ran, in `-p`
+    or in the interactive TUI, and a user `~/.cursor/hooks.json` did not
+    run either. Cursor's `stop` can only send a `followup_message` (a new
+    user message). Transcripts are JSONL under
+    `~/.cursor/projects/<slug>/agent-transcripts/<id>/<id>.jsonl`.
 
 ## The Stop hook and the post-compaction line
 
