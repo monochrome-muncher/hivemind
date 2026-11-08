@@ -6,10 +6,10 @@ the plugin installed, the agent checks in with Hivemind at the start of
 each session, searches it before starting work, writes down what it
 learns and tells you when it needs more rights.
 
-It works with Claude Code, Codex, Cursor, DeepSeek Harness, Gemini CLI, Google
-Antigravity, GitHub Copilot CLI, Hermes, JetBrains' Junie, OpenCode, Pi and Oh
-My Pi, plus the IDE agents Cline and KiloCode. Its two skills also work in any other agent
-that reads `SKILL.md` files.
+It works with Claude Code, Codex, Cursor, DeepSeek Harness, Gemini CLI,
+Google Antigravity, GitHub Copilot CLI, Hermes, JetBrains' Junie, OpenCode,
+Pi and Oh My Pi, plus the IDE agents Cline and KiloCode. Its two skills
+also work in any other agent that reads `SKILL.md` files.
 
 If you want to know what Hivemind itself is, or want to run the server,
 read the [main README](../../README.md) instead.
@@ -461,8 +461,8 @@ export HIVEMIND_API_KEY="hm_…"   # the org key at first, the agent key once ac
   }
   ```
 
-  Keep the name `hivemind`. Whether `cursor-agent` reads the same file is
-  not confirmed: check with `cursor-agent mcp list`. See
+  Keep the name `hivemind`. The `cursor-agent` command line reads the same
+  file (`cursor-agent mcp list` shows the server). See
   [the setup skill's Cursor notes](skills/hivemind-setup/references/cursor.md).
 - **DeepSeek Harness**: put both lines in `~/.dsh/.env` (`chmod 600`)
   and restart. DSH reads that file however it is started, terminal or
@@ -627,11 +627,14 @@ is also skipped when `HIVEMIND_API_KEY` is not set. What each agent gets:
   there is no post-compaction line; the instruction block in
   `~/.copilot/copilot-instructions.md` is what carries Hivemind across a
   compaction.
-- **Cursor**: neither. The plugin's always-on rule carries the startup
-  sentence in every conversation, which is what survives a compaction
-  (Cursor's `sessionStart` hook has no compaction source). Its `stop`
-  hook can only send a new user message and its transcript format is not
-  verified, so there is no end-of-session reminder: write as you go.
+- **Cursor**: only the end-of-session reminder, from the user stop hook
+  that the setup adds to `~/.cursor/hooks.json`. It runs in an interactive
+  session when you are signed in, not with `-p` and not in local-model
+  mode, and Cursor sends it as your next message. To turn it off, remove
+  that entry. The plugin's `sessionStart` hook gives the startup text.
+  Cursor runs no startup hook after a compaction, so there is no
+  post-compaction line; the user rule `~/.cursor/rules/hivemind.mdc` is
+  what carries Hivemind across one.
 - **Hermes**: neither. Hermes has no hook that can hold the end of a
   session.
 - **Junie**: the end-of-session reminder, from the plugin's `Stop` hook
@@ -808,8 +811,10 @@ First uninstall the plugin, in a terminal:
   stored address and key.
 - **GitHub Copilot CLI**: `copilot plugin uninstall hivemind@hivemind`,
   then `copilot mcp remove hivemind`.
-- **Cursor**: delete `~/.cursor/plugins/local/hivemind`, then the
-  `hivemind` entry from `~/.cursor/mcp.json`.
+- **Cursor**: delete the `hivemind` link and the `.hivemind-src` clone
+  from `~/.cursor/plugins/local/`, the `hivemind` entry from
+  `~/.cursor/mcp.json`, the rule `~/.cursor/rules/hivemind.mdc` and the
+  stop hook that runs `hivemind-stop.sh` in `~/.cursor/hooks.json`.
 - **Junie**: in `/extensions`, uninstall hivemind from the Installed tab,
   then delete the `hivemind` entry from `~/.junie/mcp/mcp.json`.
 - **Hermes**: `hermes plugins remove hivemind`, then delete the

@@ -370,8 +370,9 @@ layer.
 ### Undo
 
 Delete the text between `<!-- hivemind:begin -->` and
-`<!-- hivemind:end -->` (inclusive), and remove any hook entry that runs
-`hivemind-session-start.sh`.
+`<!-- hivemind:end -->` (inclusive), remove any hook entry that runs
+`hivemind-session-start.sh` or `hivemind-stop.sh`, and delete any rule file
+your harness's **Stay aware** section had you create.
 
 ## 5. Update
 
@@ -402,7 +403,7 @@ switch to their incognito text) and adds the harness's own switch so the
 Hivemind tools do not load at all:
 
 ```sh
-hivemind-incognito <harness>     # claude, codex, copilot, cursor, dsh, gemini, hermes, junie, pi, omp, opencode, cline or kilocode (alias kilo)
+hivemind-incognito <harness>     # claude, codex, copilot, cursor (or cursor-agent), dsh, gemini, agy, hermes, junie, pi, omp, opencode, cline or kilocode (alias kilo)
 ```
 
 Your harness's **Incognito** section says what the switch is and whether

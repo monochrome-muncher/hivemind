@@ -189,8 +189,9 @@ ingress as well.
 
 ### 3.10 Agent plugin and skills  *(shipped: ADRs 0030–0031, `plugins/hivemind/`)*
 The plugin and skills that make Hivemind an agent's long-term memory, now
-for Claude Code, Codex, DeepSeek Harness, Gemini CLI, GitHub Copilot CLI,
-Hermes, Pi, Oh My Pi, OpenCode, Cline and KiloCode. It needed `hive_whoami`
+for Claude Code, Codex, Cursor, DeepSeek Harness, Gemini CLI, Google
+Antigravity, GitHub Copilot CLI, Hermes, Junie, Pi, Oh My Pi, OpenCode,
+Cline and KiloCode. It needed `hive_whoami`
 (ADR 0030) and the one-key-per-request correction (ADR 0031).
 
 ### 3.11 Server-enforced access on every entry path  *(shipped: ADR 0033)*
@@ -234,9 +235,11 @@ or its own trigger):
   Claude marketplace, `sessionStart` and `Stop` hooks; its MCP server is a
   user entry because Copilot refuses a whole-variable `url`); Cline and
   KiloCode followed in 2.10.0 (their MCP `${env:}` expansion in URLs and
-  headers is what the incognito launcher works around). The earlier
-  "Cursor next, then Kiro and Amp" plan is dropped: none is wired, and
-  Qwen Code remains a Gemini CLI variant. The three earlier
+  headers is what the incognito launcher works around). Cursor, Junie
+  and Google Antigravity followed after 2.18.2, each checked live (the
+  Cursor command line agent, the Junie CLI and the `agy` CLI; the Cursor
+  editor and Junie inside JetBrains IDEs are not checked). Kiro and Amp
+  are not wired, and Qwen Code remains a Gemini CLI variant. The three earlier
   "unconfirmed" behaviours are all confirmed: Claude Code's
   `deniedMcpServers` matches the plugin-scoped server name (2.3.1),
   Gemini CLI's `SessionStart` injects the reminder, and DeepSeek
