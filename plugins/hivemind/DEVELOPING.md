@@ -309,36 +309,40 @@ itself names no harness-specific paths, and a test enforces this.
     "failed to parse YAML frontmatter"). `test_skill_descriptions_are_strict_yaml`
     pins it.
 
-- **Cursor** (checked live with the CLI 2026.11.05 in local-model mode,
-  `cursor-agent-local --authless` from `downloads.cursor.com/lab/<version>/linux/x64/agent-cli-local-package.tar.gz`,
+- **Cursor** (checked live with the CLI 2026.11.05, signed in with a free
+  account and in local-model mode: `cursor-agent-local --authless` from
+  `downloads.cursor.com/lab/<version>/linux/x64/agent-cli-local-package.tar.gz`
   with `CURSOR_LOCAL_AGENT_BASE_URL` and `CURSOR_LOCAL_AGENT_API_KEY`
-  pointing at the mock model; no account needed. The editor and the
-  signed-in CLI were not checked).
-  - *Install.* The root `.cursor-plugin/marketplace.json` (`name`,
-    `owner`, `plugins[].source` as a path) lets an admin import the
-    repository as a team marketplace; Cursor looks for
-    `<source>/.cursor-plugin/plugin.json`. A single user lists the
-    repository in `~/.cursor/plugins/local-marketplaces.json`
-    (`{"version":1,"marketplaces":[{"name","gitUrl","gitRef","plugins":[{"name","enabled":true}]}]}`);
-    Cursor clones it at each start into `~/.cursor/plugins/marketplaces/`
-    and caches the plugin by commit under `~/.cursor/plugins/cache/`
-    (checked live, including a GitHub URL). The authless profile turns off
-    user-local plugins, so `~/.cursor/plugins/local/` and `--plugin-dir`
-    were not checked. A public Marketplace listing is reviewed and
-    Hivemind has none.
+  pointing at the mock model. Signing in needs `cursor.com` and
+  `*.cursor.sh`. The editor was not checked. Cursor's session log, with a
+  `cli.hook.executed` event per hook run, is under
+  `$TMPDIR/cursor-agent-logs-<uid>/`).
+  - *Install.* Signed in, Cursor loads `~/.cursor/plugins/local/<name>/`
+    and rejects a symlink whose target is outside that folder, so the
+    clone goes in `~/.cursor/plugins/local/.hivemind-src` (dot folders are
+    skipped) with a relative link `hivemind -> .hivemind-src/plugins/hivemind`.
+    The authless profile turns user-local plugins (and `--plugin-dir`)
+    off and the local marketplace file on:
+    `~/.cursor/plugins/local-marketplaces.json`
+    (`{"version":1,"marketplaces":[{"name","gitUrl","gitRef","plugins":[{"name","enabled":true}]}]}`),
+    cloned at each start and cached by commit under
+    `~/.cursor/plugins/cache/`. Signed in, that file is ignored. The root
+    `.cursor-plugin/marketplace.json` (`name`, `owner`, `plugins[].source`
+    as a path) serves both it and team marketplaces; Cursor looks for
+    `<source>/.cursor-plugin/plugin.json`, then `.claude-plugin/plugin.json`.
+    A public Marketplace listing is reviewed and Hivemind has none.
   - *Manifest.* A path field replaces folder discovery for that
-    component. Cursor would parse `hooks/hooks.json` by default, which is
-    the Claude format, so the manifest sets `hooks` to
+    component. Cursor would parse `hooks/hooks.json` by default (it
+    converts the Claude format), so the manifest sets `hooks` to
     `./cursor/hooks.json`, `rules` to `./cursor/rules/` and `skills` to
     `./skills/`. There is no `mcp.json`.
   - *MCP server.* The user's `~/.cursor/mcp.json` entry reads
-    `${env:HIVEMIND_MCP_URL}` and `${env:HIVEMIND_API_KEY}` (Cursor
-    expands `${env:NAME}` in `command`, `args`, `env`, `url` and
-    `headers`). The CLI reads the same file and expands the variables
-    (checked live); it calls MCP tools through its `CallMcpTool` meta tool
-    (`{server, toolName, arguments}`) after `GetMcpTools`. Not confirmed:
-    whether the app, started from a dock, sees shell variables (probably
-    not, so users start it with `cursor .`).
+    `${env:HIVEMIND_MCP_URL}` and `${env:HIVEMIND_API_KEY}`; the CLI
+    expands both (checked live). Tools are called through a meta tool:
+    `CallDynamicTool` `{namespace, toolName, arguments}` signed in,
+    `CallMcpTool` `{server, toolName, arguments}` in local-model mode.
+    Not confirmed: whether the app, started from a dock, sees shell
+    variables (probably not, so users start it with `cursor .`).
   - *SessionStart.* Cursor's `sessionStart` takes
     `{"additional_context": "..."}`; `hivemind-session-start.sh` prints
     that when the plugin's hook passes `--cursor`. It does not go by
@@ -348,16 +352,20 @@ itself names no harness-specific paths, and a test enforces this.
     `<hooks_context>`. The hook input has `transcript_path: null`. There
     is no compaction source, so the always-on rule is the layer that
     survives a compaction.
-  - *Rules.* In the authless CLI the plugin's rule (through the `rules`
-    field or the default `rules/` folder) never reached the model, while
-    a user rule in `~/.cursor/rules/` did, so setup also writes
-    `~/.cursor/rules/hivemind.mdc`. The plugin's rule stays for the
-    editor, unverified.
-  - *Stop.* Not wired. In the live check a `stop` hook never ran, in `-p`
-    or in the interactive TUI, and a user `~/.cursor/hooks.json` did not
-    run either. Cursor's `stop` can only send a `followup_message` (a new
-    user message). Transcripts are JSONL under
-    `~/.cursor/projects/<slug>/agent-transcripts/<id>/<id>.jsonl`.
+  - *Rules.* The plugin's rule (through the `rules` field or the default
+    `rules/` folder) never reached the model, signed in or not, while a
+    user rule in `~/.cursor/rules/` did, so setup writes
+    `~/.cursor/rules/hivemind.mdc`. The plugin's rule stays in case the
+    editor or a later version loads it.
+  - *Stop.* A plugin `stop` hook never ran (no `cli.hook.executed` event),
+    so the plugin has none. A user `stop` hook in `~/.cursor/hooks.json`
+    runs in an interactive session when signed in (not with `-p`, not in
+    local-model mode), with `transcript_path`
+    (`~/.cursor/projects/<slug>/agent-transcripts/<id>/<id>.jsonl`, Claude-like
+    `tool_use` records) and `loop_count`. Setup points it at
+    `hivemind-stop.sh --cursor` in the local plugin folder, which answers
+    `{"followup_message": ...}`; Cursor sends that as the next message and
+    the following stop has `loop_count: 1`, which the script skips.
 
 ## The Stop hook and the post-compaction line
 
@@ -366,14 +374,14 @@ and Codex from `hooks/hooks.json`, in Pi and Oh My Pi from the extension
 and the OpenCode plugin (which KiloCode runs as well), in DeepSeek
 Harness the Stop reminder from `dsh/hivemind-reminders.js` (below). Gemini CLI gets the Stop reminder
 from the extension's `AfterAgent` hook (`../../hooks/hooks.json`).
-Hermes does not have them. Cursor has neither (its rule is the durable layer; see its quirk above). Junie gets the Stop reminder from the same plugin hook. GitHub Copilot CLI gets the Stop reminder from
+Hermes does not have them. Cursor gets the Stop reminder from a user `stop` hook that setup adds (its plugin hooks never see a stop), and no post-compaction line. Junie gets the Stop reminder from the same plugin hook. GitHub Copilot CLI gets the Stop reminder from
 the plugin's `Stop` hook (the shared `hooks/hooks.json`), and no
 post-compaction line. Cline gets the end-of-task nudge from the
 `PostToolUse` hook in `cline/` (it counts the task's tool calls in a temp
 file, reset by `TaskStart`, and never nudges a subagent task); it has no
 post-compaction line.
 
-The script counts five transcript formats:
+The script counts six transcript formats:
 
 - Claude Code's `"type": "tool_use"` records.
 - Codex's `function_call`, `custom_tool_call` and `local_shell_call`
@@ -411,6 +419,15 @@ The script counts five transcript formats:
   `"toolName":"hivemind/hive_write"`, so `hive_write`, `hive_feedback`,
   `hive_search` and `hive_get` are matched on `toolName`. Checked with
   Junie CLI 26.9.7. `SessionStart` runs but Junie ignores its output.
+
+- Cursor's `agent-transcripts/<id>/<id>.jsonl`, counted as Claude Code's
+  `"type": "tool_use"` records. With `--cursor`, a Hivemind call is a
+  `CallDynamicTool` or `CallMcpTool` record whose `input` has
+  `"toolName":"hive_write"` (and so on), so only those records count as
+  Hivemind calls (a `GetDynamicTools` lookup names a tool too, and does
+  not). A stop with `loop_count` above 0 is skipped. Checked with Cursor
+  CLI 2026.11.05 signed in: the reminder arrives once as the next
+  message, and the agent answers it.
 
 - **Post-compaction line.** When the `SessionStart` source is `compact`
   (read from the hook's stdin JSON), `hivemind-session-start.sh` appends

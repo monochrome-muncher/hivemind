@@ -104,39 +104,34 @@ reminded about Hivemind at the start of a session.
 
 ### Cursor
 
-Cursor support was checked with Cursor's command line agent in its
-local-model mode (November 2026). The editor was not checked.
+Cursor support was checked with Cursor's command line agent, signed in and
+in its local-model mode (November 2026). The editor was not checked.
 
-Tell Cursor where to fetch the plugin. Create
-`~/.cursor/plugins/local-marketplaces.json` with:
+In a terminal, clone the repository into Cursor's local plugin folder and
+link the plugin there. Cursor refuses a link that points outside that
+folder, so the clone goes inside it:
 
-```json
-{
-  "version": 1,
-  "marketplaces": [
-    {
-      "name": "hivemind",
-      "gitUrl": "https://github.com/monochrome-muncher/hivemind.git",
-      "gitRef": "main",
-      "plugins": [{ "name": "hivemind", "enabled": true }]
-    }
-  ]
-}
+```sh
+mkdir -p ~/.cursor/plugins/local
+cd ~/.cursor/plugins/local
+git clone https://github.com/monochrome-muncher/hivemind .hivemind-src
+ln -s .hivemind-src/plugins/hivemind hivemind
 ```
 
-If the file is already there, add the entry to its `marketplaces` list.
-Cursor fetches the plugin each time it starts, so a restart also updates
-it. A team can instead add the repository as a team marketplace ("Import
-from Repo" with its Git URL); the public Cursor Marketplace has no
-Hivemind listing yet.
+Then restart Cursor, or run "Developer: Reload Window". To update, run
+`git pull` in `.hivemind-src` and restart. On an Enterprise plan an admin
+has to allow local plugin imports. A team can also add the repository as
+a team marketplace ("Import from Repo" with its Git URL); the public
+Cursor Marketplace has no Hivemind listing yet.
 
-In the check, the plugin's always-on rule did not reach the model, so also
-add a user rule, `~/.cursor/rules/hivemind.mdc` (the setup in step 2
-writes it for you).
+In the check, Cursor did not load a plugin's always-on rule or run a
+plugin's stop hook, so the setup in step 2 also adds a user rule
+(`~/.cursor/rules/hivemind.mdc`) and a user stop hook
+(`~/.cursor/hooks.json`).
 
-The plugin brings both skills, an always-on rule and a startup hook. It
-does not bring the connection: Cursor sets a plugin's MCP variables from
-a team admin's dashboard, so you add the MCP server once yourself (see
+The plugin brings both skills and a startup hook. It does not bring the
+connection: Cursor sets a plugin's MCP variables from a team admin's
+dashboard, so you add the MCP server once yourself (see
 [Setting it up by hand](#setting-it-up-by-hand)), or let the setup in
 step 2 do it.
 

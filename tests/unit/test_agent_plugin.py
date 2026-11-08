@@ -1733,14 +1733,18 @@ def test_the_cursor_reference_is_complete() -> None:
     text = (SETUP_REFS / "cursor.md").read_text()
     flat = " ".join(text.split())
     assert "Checked live in November 2026 with the Cursor CLI 2026.11.05" in flat
-    assert "~/.cursor/plugins/local-marketplaces.json" in text
-    assert "~/.cursor/rules/hivemind.mdc" in text and "alwaysApply: true" in text
     assert "~/.cursor/mcp.json" in text and "must be named `hivemind`" in flat
     assert '"url": "${env:HIVEMIND_MCP_URL}"' in text
     assert '"Authorization": "Bearer ${env:HIVEMIND_API_KEY}"' in text
-    assert "~/.cursor/plugins/local/hivemind" in text and "~/.cursor/skills/" in text
-    assert "cursor/rules/hivemind.mdc" in text and "additional_context" in text
-    assert "No stop reminder" in flat and "hivemind-incognito" in text
+    assert "git clone https://github.com/monochrome-muncher/hivemind .hivemind-src" in text
+    assert "ln -s .hivemind-src/plugins/hivemind hivemind" in text
+    assert "~/.cursor/plugins/local-marketplaces.json" in text and "~/.cursor/skills/" in text
+    assert "~/.cursor/rules/hivemind.mdc" in text and "alwaysApply: true" in text
+    assert "additional_context" in text and "hivemind-incognito" in text
+    # The user stop hook must point where the local-folder install puts the script.
+    stop = "$HOME/.cursor/plugins/local/hivemind/skills/hivemind-setup/scripts/hivemind-stop.sh"
+    assert f'"command": "sh \\"{stop}\\" --cursor"' in text
+    assert (PLUGIN / stop.split("/hivemind/", 1)[1]).is_file()
     assert "hm_" not in text.replace("hm_…", "")
 
 

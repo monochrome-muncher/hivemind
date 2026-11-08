@@ -4,15 +4,15 @@ Only for **Cursor** (the Cursor editor from Anysphere, and its
 `cursor-agent` CLI). If you have not confirmed that this is your harness,
 go back to "Which harness am I in?" in the hivemind-setup skill.
 
-Checked live in November 2026 with the Cursor CLI 2026.11.05 in its
-local-model mode (`cursor-agent-local --authless`, which needs no Cursor
-account), against a test model and a test Hivemind server. There the MCP
-server, both skills, the `sessionStart` hook, the marketplace install and
-incognito worked. The plugin's rule did not reach the model (a user rule
-did), and no `stop` hook ran. The editor and the signed-in `cursor-agent`
-were not checked; their formats are as documented. If something does not
-behave as written, check it in Cursor (`cursor-agent mcp list` for the
-server) rather than assuming.
+Checked live in November 2026 with the Cursor CLI 2026.11.05, signed in
+with a free account, and in its local-model mode (`cursor-agent-local
+--authless`, no account), against a test Hivemind server. The MCP server,
+both skills, the `sessionStart` hook and incognito worked in both. The
+plugin's own rule and `stop` hook did not run in either, so setup adds a
+user rule and a user `stop` hook (see "Stay aware"), and those worked. The
+editor was not checked; it shares the CLI's plugin, rule and hook formats.
+If something does not behave as written, check it in Cursor
+(`cursor-agent mcp list` for the server) rather than assuming.
 
 ## Connect
 
@@ -61,23 +61,39 @@ example `cursor .`. Without `HIVEMIND_API_KEY` the tools do not load and the
 session carries on. Never print the key.
 
 The CLI reads the same `~/.cursor/mcp.json` and expands `${env:...}`
-there (checked live). It reaches MCP tools through its `CallMcpTool` tool,
-with server `hivemind` and tool name `hive_whoami` and so on. After a
+there (checked live). It reaches MCP tools through a meta tool
+(`CallDynamicTool` signed in, `CallMcpTool` in local-model mode) with
+`hivemind` and a tool name such as `hive_whoami`. After a
 restart, run `cursor-agent mcp list` and check that `hivemind` is there,
 then call `hive_whoami`. In the
 editor, Settings, MCP shows the server and its tools.
 
-**The plugin** adds both skills, an always-on rule and a `sessionStart`
-hook (see "Stay aware"). Cursor installs plugins from the Cursor
-Marketplace (a public listing is reviewed, and Hivemind has none yet), from
-a team marketplace (an admin uses "Import from Repo" with the Git URL of
-the Hivemind repository, which has a `.cursor-plugin/marketplace.json`),
-from a marketplace listed in the user file
-`~/.cursor/plugins/local-marketplaces.json`, or from a local folder.
+**The plugin** adds both skills and a `sessionStart` hook (see "Stay
+aware"). Cursor installs plugins from the Cursor Marketplace (a public
+listing is reviewed, and Hivemind has none yet), from a team marketplace
+(an admin uses "Import from Repo" with the Git URL of the Hivemind
+repository, which has a `.cursor-plugin/marketplace.json`), or from the
+local folder `~/.cursor/plugins/local/`. For one user, the local folder is
+the route (checked live). Cursor refuses a symlink there that points
+outside that folder, so the clone goes inside it, in a folder starting
+with a dot (Cursor skips those), and a relative link names the plugin.
+These are shell commands for the user to run, not you:
 
-For one user, the marketplace file is the route that was checked live.
-Create `~/.cursor/plugins/local-marketplaces.json` (or add the entry to the
-`marketplaces` list if the file exists):
+```sh
+mkdir -p ~/.cursor/plugins/local
+cd ~/.cursor/plugins/local
+git clone https://github.com/monochrome-muncher/hivemind .hivemind-src
+ln -s .hivemind-src/plugins/hivemind hivemind
+```
+
+(Use the address of your organization's copy of the repository if it has
+one.) Then restart Cursor, or run "Developer: Reload Window". On an
+Enterprise plan an admin must allow local plugin imports.
+
+In local-model mode (`--authless`) Cursor ignores that folder and reads
+`~/.cursor/plugins/local-marketplaces.json` instead (signed in, it ignores
+that file). There, add the repository as a marketplace (checked live;
+Cursor fetches it again at each start):
 
 ```json
 {
@@ -92,23 +108,6 @@ Create `~/.cursor/plugins/local-marketplaces.json` (or add the entry to the
   ]
 }
 ```
-
-(Use the address of your organization's copy of the repository if it has
-one.) Cursor clones the repository at start and caches the plugin under
-`~/.cursor/plugins/cache/hivemind/`. On an Enterprise plan an admin may
-have to allow local plugins.
-
-The local folder route is documented but was not checked live (the
-local-model CLI ignores it). These are shell commands for the user to run,
-not you:
-
-```sh
-git clone https://github.com/monochrome-muncher/hivemind ~/src/hivemind
-mkdir -p ~/.cursor/plugins/local
-ln -s ~/src/hivemind/plugins/hivemind ~/.cursor/plugins/local/hivemind
-```
-
-Then restart Cursor, or run "Developer: Reload Window".
 
 **Without the plugin**, copy both skill folders into `~/.cursor/skills/`.
 Then you have no rule and no hook, so add the instruction block as under
@@ -126,15 +125,13 @@ machine.
 
 ## Stay aware
 
-- **Rule:** the plugin's `cursor/rules/hivemind.mdc` has `alwaysApply:
-  true`, so Cursor should put its one sentence in the context of every
-  conversation. This is the durable layer: Cursor's `sessionStart` has no
-  compaction source, so nothing re-runs a hook after a compaction, and the
-  rule is what carries Hivemind across one. In the live check the plugin's
-  rule did not reach the model, while a user rule in `~/.cursor/rules/`
-  did. So also create `~/.cursor/rules/hivemind.mdc` (with or without the
-  plugin) with this frontmatter and the block from step 4 of the
-  hivemind-setup skill ("The instruction block") as its body:
+- **Rule:** the plugin ships `cursor/rules/hivemind.mdc` with
+  `alwaysApply: true`, but in the live check Cursor never put a plugin's
+  rule in the model's context, while a user rule in `~/.cursor/rules/`
+  was there in every conversation. So create `~/.cursor/rules/hivemind.mdc`
+  (with or without the plugin) with this frontmatter and the block from
+  step 4 of the hivemind-setup skill ("The instruction block") as its
+  body:
 
   ```
   ---
@@ -143,9 +140,11 @@ machine.
   ---
   ```
 
-  If the plugin's rule does load too, the sentence appears twice, which
-  does no harm. In the editor, pasting the block into Cursor's User Rules
-  in Settings works as well.
+  This is the durable layer: Cursor's `sessionStart` has no compaction
+  source, so nothing re-runs a hook after a compaction, and the rule is
+  what carries Hivemind across one. If the plugin's rule does load one
+  day, the sentence appears twice, which does no harm. In the editor,
+  pasting the block into Cursor's User Rules in Settings works as well.
 - **Hook:** the plugin's `cursor/hooks.json` runs
   `hivemind-session-start.sh` on `sessionStart`. The script prints
   `{"additional_context": "..."}` when the hook passes it `--cursor`, and Cursor adds that text to the
@@ -153,18 +152,37 @@ machine.
   message). The plugin points Cursor at this Cursor-only file,
   not at `hooks/hooks.json`, which is in the Claude Code format. Check that
   a `HIVEMIND:` line appears at the start of a new conversation.
-- **No stop reminder.** In the live check Cursor never ran a `stop` hook,
-  and its hook input carries no transcript path, so `hivemind-stop.sh`
-  cannot count tool calls there. Cursor's `stop` hook could only send a
-  `followup_message`, which arrives as a new user message anyway. Nothing
-  nudges the agent to write at the end of a long session, so write as you
-  go (the hivemind skill says when).
+- **Stop reminder:** a plugin's `stop` hook never ran in the live check,
+  but a user one does, in an interactive session when signed in (not with
+  `-p`, and not in local-model mode). With the plugin in the local folder,
+  add this to the user file `~/.cursor/hooks.json` (merge it into the
+  `hooks` there if the file exists):
+
+  ```json
+  {
+    "version": 1,
+    "hooks": {
+      "stop": [
+        {
+          "command": "sh \"$HOME/.cursor/plugins/local/hivemind/skills/hivemind-setup/scripts/hivemind-stop.sh\" --cursor"
+        }
+      ]
+    }
+  }
+  ```
+
+  At most once per session, after a substantial session that wrote or
+  rated nothing, the script answers with a `followup_message`, which
+  Cursor sends as the next message: a `HIVEMIND:` reminder to write what
+  another agent could reuse. Without the plugin there is no script to
+  point at, so there is no stop reminder; write as you go (the hivemind
+  skill says when).
 
 ## Update
 
-With the marketplace file, Cursor fetches the branch again at each start
-(checked live), so restart Cursor and start a new conversation. With a
-local folder, run `git pull` in the clone first.
+Run `git -C ~/.cursor/plugins/local/.hivemind-src pull`, then restart
+Cursor or run "Developer: Reload Window" and start a new conversation.
+With the marketplace file, a restart is enough.
 Refresh the instruction block or your own rule as in step 5 of the
 hivemind-setup skill.
 
