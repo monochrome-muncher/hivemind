@@ -1546,19 +1546,32 @@ def test_the_extension_registers_the_server_with_pi_built_in_mcp(tmp_path: Path)
         assert _node(_REGISTER_SCRIPT, PI_EXTENSION, **{**env, **override}) == {"registered": []}
 
 
-@pytest.mark.parametrize("harness", ["omp", "gemini"])
+@pytest.mark.parametrize(
+    ("harness", "expected"),
+    [
+        # Bun fills an unset or empty variable from the project's .env, so
+        # Oh My Pi gets a URL that is not one.
+        ("omp", ["URL=off", "KEY=unset"]),
+        # Gemini fills only unset variables from the project's .env.
+        ("gemini", ["URL=set-empty", "KEY=set-empty"]),
+    ],
+)
 def test_launcher_keeps_oh_my_pi_and_gemini_from_contacting_the_server(
-    tmp_path: Path, harness: str
+    tmp_path: Path, harness: str, expected: list[str]
 ) -> None:
     """Both expand ${HIVEMIND_*} in the plugin's or extension's server at
-    startup, so without the variables the server is never contacted."""
+    startup, and both would fill a variable the launcher merely unset from
+    the project's .env (checked live with Oh My Pi 18.18.1 and Gemini CLI
+    0.67.0), so the launcher leaves values a project file cannot replace."""
     env = _fake_harness(tmp_path, harness)
     script = tmp_path / "bin" / harness
     script.write_text(
-        '#!/bin/sh\nprintf "%s\\n" "URL=${HIVEMIND_MCP_URL:-unset}" "KEY=${HIVEMIND_API_KEY:-unset}"\n'
+        "#!/bin/sh\n"
+        "u=${HIVEMIND_MCP_URL-unset}; k=${HIVEMIND_API_KEY-unset}\n"
+        'printf "%s\\n" "URL=${u:-set-empty}" "KEY=${k:-set-empty}"\n'
     )
     env.update(HIVEMIND_MCP_URL="https://hm.example/mcp", HIVEMIND_API_KEY="hm_x")
-    assert _launch(tmp_path, env, harness) == ["URL=unset", "KEY=unset"]
+    assert _launch(tmp_path, env, harness) == expected
 
 
 @pytest.mark.parametrize(

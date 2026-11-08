@@ -145,9 +145,11 @@ a new session.
 ## Incognito
 
 With the extension, `hivemind-incognito gemini` sets
-`HIVEMIND_INCOGNITO=1` and unsets `HIVEMIND_MCP_URL` and
-`HIVEMIND_API_KEY`, so the extension's server is never contacted (Gemini
-CLI notes an MCP issue at startup). A server added by hand keeps its URL,
+`HIVEMIND_INCOGNITO=1` and sets `HIVEMIND_MCP_URL` and
+`HIVEMIND_API_KEY` empty, so the extension's server is never contacted
+(Gemini CLI notes an MCP issue at startup). That needs
+`"experimental": {"extensionConfig": false}` (Connect, above): with it
+on, a trusted project's `.env` fills them in again. A server added by hand keeps its URL,
 so with that setup an incognito session is incognito **by restraint**:
 the tools are loaded and the agent is told not to use them. For a real
 one there, the user can run `/mcp disable hivemind` before starting work
