@@ -230,6 +230,97 @@ def test_a_copilot_session_that_already_wrote_or_rated_is_not_blocked(
     assert (out.returncode, out.stdout) == (0, "")
 
 
+JUNIE_SID = "session-261108-043543-1i6y"
+
+
+def _junie_session(
+    tmp_path: Path, calls: int, *names: str, sid: str = JUNIE_SID
+) -> tuple[Path, dict[str, str]]:
+    """A Junie 26.9.7 session: `$HOME/.junie/sessions/<id>/events.jsonl`, one
+    `<X>BlockUpdatedEvent` line with `IN_PROGRESS` and one with `COMPLETED`
+    per tool use (X: `Terminal`, `Mcp`; an MCP call carries
+    `toolName: <server>/<tool>`), and a final `ResultBlockUpdatedEvent` with
+    no status. Returns the file and an environment whose HOME holds it."""
+    home = tmp_path / "home"
+    path = home / ".junie" / "sessions" / sid / "events.jsonl"
+    path.parent.mkdir(parents=True)
+
+    def event(kind: str, status: str | None, **agent: str) -> str:
+        body: dict[str, object] = {"kind": kind, "agent": {"id": "a"}, "stepId": "4ce1", **agent}
+        if status:
+            body["status"] = status
+        line = {
+            "kind": "SessionA2uxEvent",
+            "event": {"state": "IN_PROGRESS", "agentEvent": body},
+            "timestampMs": 1794112548502,
+        }
+        return json.dumps(line, separators=(",", ":"))
+
+    lines = []
+    for name in ["Terminal"] * calls + list(names):
+        mcp = name != "Terminal"
+        kind = "McpBlockUpdatedEvent" if mcp else "TerminalBlockUpdatedEvent"
+        extra = {"toolName": f"hivemind/{name}"} if mcp else {"command": "ls"}
+        lines.append(event(kind, "IN_PROGRESS", **extra))
+        lines.append(event(kind, "COMPLETED", **extra))
+    lines.append(event("ResultBlockUpdatedEvent", None))
+    path.write_text("\n".join(lines) + "\n")
+    return path, _env(tmp_path, HOME=str(home))
+
+
+def _junie_stop(
+    tmp_path: Path, env: dict[str, str], sid: str = JUNIE_SID
+) -> subprocess.CompletedProcess[str]:
+    """Junie's Stop input: no `transcript_path`, but a `project_path`."""
+    payload = {
+        "hook_event_name": "Stop",
+        "session_id": sid,
+        "cwd": str(tmp_path / "home" / ".junie"),
+        "project_path": str(tmp_path / "project"),
+        "stop_hook_active": False,
+        "last_assistant_message": "done",
+    }
+    return subprocess.run(
+        ["sh", str(STOP)], input=json.dumps(payload), env=env, capture_output=True, text=True
+    )
+
+
+def test_a_substantial_junie_session_is_blocked_counting_each_call_once(tmp_path: Path) -> None:
+    _, env = _junie_session(tmp_path, 20)
+    first = _junie_stop(tmp_path, env)
+    assert first.returncode == 0
+    assert json.loads(first.stdout)["decision"] == "block"
+    assert (_junie_stop(tmp_path, env).stdout) == ""  # once per session
+    # 19 calls are 38 BlockUpdatedEvent lines: the IN_PROGRESS ones do not count.
+    short_sid = "session-short"
+    _, env = _junie_session(tmp_path / "s2", 19, sid=short_sid)
+    short = _junie_stop(tmp_path / "s2", env, sid=short_sid)
+    assert (short.returncode, short.stdout) == (0, "")
+
+
+def test_a_junie_session_that_wrote_but_did_not_read_is_not_blocked(tmp_path: Path) -> None:
+    _, env = _junie_session(tmp_path, 25, "hive_write")
+    out = _junie_stop(tmp_path, env)
+    assert (out.returncode, out.stdout) == (0, "")
+
+
+def test_a_junie_session_that_wrote_and_read_without_rating_is_blocked(tmp_path: Path) -> None:
+    _, env = _junie_session(tmp_path, 25, "hive_write", "hive_search")
+    assert json.loads(_junie_stop(tmp_path, env).stdout)["decision"] == "block"
+    _, env = _junie_session(tmp_path / "s2", 25, "hive_write", "hive_get", "hive_feedback")
+    assert _junie_stop(tmp_path / "s2", env).stdout == ""
+
+
+def test_a_junie_session_with_no_log_fails_open(tmp_path: Path) -> None:
+    env = _env(tmp_path, HOME=str(tmp_path / "empty-home"))
+    out = _junie_stop(tmp_path, env)
+    assert (out.returncode, out.stdout) == (0, "")
+    # A directory where the log should be is not a readable regular file.
+    (tmp_path / "home" / ".junie" / "sessions" / JUNIE_SID / "events.jsonl").mkdir(parents=True)
+    out = _junie_stop(tmp_path, _env(tmp_path, HOME=str(tmp_path / "home")))
+    assert (out.returncode, out.stdout) == (0, "")
+
+
 def test_a_short_session_is_not_blocked(tmp_path: Path) -> None:
     out = _stop(tmp_path, _transcript(tmp_path, 5))
     assert (out.returncode, out.stdout) == (0, "")

@@ -1,6 +1,6 @@
 #!/bin/sh
-# Hivemind Stop hook (Claude Code, Codex, GitHub Copilot CLI; Gemini CLI as an
-# AfterAgent hook):
+# Hivemind Stop hook (Claude Code, Codex, GitHub Copilot CLI, Junie; Gemini CLI
+# as an AfterAgent hook):
 # at most once per session, blocks the stop once with a short reminder to
 # write what another agent could reuse and to rate the entries the work
 # tested. Registered in hooks/hooks.json (Gemini CLI: the extension's AfterAgent hook).
@@ -12,6 +12,8 @@
 # output. Plain POSIX sh, grep, sed and sort: no jq, python or node. No network.
 #
 # Stop input (stdin JSON): session_id, transcript_path, stop_hook_active.
+# Junie sends no transcript_path: it sends project_path, and its session log is
+# $HOME/.junie/sessions/<session_id>/events.jsonl.
 # Block output: {"decision":"block","reason":"..."} on stdout, exit 0.
 
 # (c) Incognito (ADR 0035), detected as hivemind-session-start.sh does.
@@ -34,6 +36,14 @@ field() {
 }
 sid="$(field session_id | tr -c 'A-Za-z0-9_-' '_')"
 transcript="$(field transcript_path)"
+junie=0
+if [ -z "$transcript" ] && [ -n "$sid" ] && [ -n "${HOME:-}" ] \
+  && printf '%s' "$input" | grep -q '"project_path" *:'; then
+  junie=1
+  jsid="$(field session_id | tr -d '\n' | tr -c 'A-Za-z0-9_-' '_')"
+  transcript="$HOME/.junie/sessions/$jsid/events.jsonl"
+  [ -f "$transcript" ] || exit 0
+fi
 [ -n "$sid" ] && [ -n "$transcript" ] && [ -r "$transcript" ] || exit 0
 
 # (a) Once per session: the marker is written only when a stop is blocked. It
@@ -66,9 +76,12 @@ calls() {
   grep -Ev '"(input_schema|inputSchema|schema|parameters)" *: *\{|"type" *: *"(prompt_snapshot|deferred_tools_record)"' \
     "$transcript" 2>/dev/null
 }
-calls | grep -Eq '"name" *: *"[^"]*hive_feedback"' && exit 0
-if calls | grep -Eq '"name" *: *"[^"]*hive_write"'; then
-  calls | grep -Eq '"name" *: *"[^"]*hive_(search|get)"' || exit 0
+# Junie names a call as "toolName":"hivemind/hive_write"; the others as "name".
+key='"name"'
+[ "$junie" = 1 ] && key='"toolName"'
+calls | grep -Eq "$key *: *\"[^\"]*hive_feedback\"" && exit 0
+if calls | grep -Eq "$key *: *\"[^\"]*hive_write\""; then
+  calls | grep -Eq "$key *: *\"[^\"]*hive_(search|get)\"" || exit 0
 fi
 min="${HIVEMIND_STOP_MIN_TOOLS:-20}"
 case "$min" in ''|*[!0-9]*) min=20 ;; esac
@@ -82,6 +95,13 @@ uses="$(calls | grep -Eo '"type" *: *"(tool_use|function_call|custom_tool_call|l
 gemini="$(calls | grep -Eo '"functionResponse" *: *\{ *"id" *: *"[^"]*"' \
   | sort -u | wc -l)" || exit 0
 uses=$((uses + gemini))
+# Junie logs each tool use as a <X>BlockUpdatedEvent, first IN_PROGRESS, then
+# COMPLETED: count the completed ones.
+if [ "$junie" = 1 ]; then
+  jn="$(calls | grep -E '"kind" *: *"[A-Za-z]*BlockUpdatedEvent"' \
+    | grep -c '"status" *: *"COMPLETED"')" || jn=0
+  uses=$((uses + jn))
+fi
 [ "${uses:-0}" -ge "$min" ] 2>/dev/null || exit 0
 
 private && (umask 077; : > "$dir/$sid") 2>/dev/null || exit 0

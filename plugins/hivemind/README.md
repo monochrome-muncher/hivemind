@@ -7,7 +7,7 @@ each session, searches it before starting work, writes down what it
 learns and tells you when it needs more rights.
 
 It works with Claude Code, Codex, DeepSeek Harness, Gemini CLI, GitHub
-Copilot CLI, Hermes, OpenCode, Pi and Oh My Pi, plus the IDE
+Copilot CLI, Hermes, JetBrains' Junie, OpenCode, Pi and Oh My Pi, plus the IDE
 agents Cline and KiloCode. Its two skills also work in any other agent
 that reads `SKILL.md` files.
 
@@ -24,6 +24,7 @@ read the [main README](../../README.md) instead.
   [Gemini CLI](#gemini-cli) ·
   [GitHub Copilot CLI](#github-copilot-cli) ·
   [Hermes](#hermes) ·
+  [Junie](#junie) ·
   [OpenCode](#opencode) ·
   [Pi](#pi) ·
   [Oh My Pi](#oh-my-pi) ·
@@ -178,6 +179,27 @@ and says to use `--force`.
 Hermes v2026.9.24 (0.21.5) and later add a Hivemind section to every new
 session by themselves. Older versions need a short block in
 `~/.hermes/SOUL.md` for that. The setup in step 2 adds it either way.
+
+### Junie
+
+In the Junie CLI's prompt (Junie reads the same marketplace as Claude Code):
+
+```text
+/extensions marketplace add https://github.com/monochrome-muncher/hivemind
+/extensions
+```
+
+Search for `hivemind`, choose Install, then "User level". The plugin
+brings both skills, the end-of-session reminder and a small guidelines
+file that keeps Junie aware of Hivemind. It does not bring a working
+connection: Junie does not fill in `${…}` variables in a server's address
+or header, so you put the address and key in `~/.junie/mcp/mcp.json` once
+(see [Setting it up by hand](#setting-it-up-by-hand)), or let the setup
+in step 2 do it. Checked with Junie CLI 26.9.7 (with a local copy of the
+repository; GitHub addresses are documented by Junie but were not tried).
+The Junie plugin inside JetBrains IDEs and the JetBrains AI Assistant chat
+are not tested: see
+[the setup skill's Junie notes](skills/hivemind-setup/references/junie.md).
 
 ### OpenCode
 
@@ -421,6 +443,21 @@ export HIVEMIND_API_KEY="hm_…"   # the org key at first, the agent key once ac
         Authorization: "Bearer ${HIVEMIND_API_KEY}"
   ```
 
+- **Junie**: the address and the key go, as plain text, in
+  `~/.junie/mcp/mcp.json`, because Junie does not read them from the
+  environment. Make the file private (`chmod 600`, and `chmod 700` for
+  `~/.junie/mcp`) and never use a project's `.junie/mcp/mcp.json`:
+
+  ```json
+  {"mcpServers": {"hivemind": {"url": "https://hivemind.example.org/mcp",
+    "headers": {"Authorization": "Bearer hm_…"}}}}
+  ```
+
+  Keep the name `hivemind`. Edit the file yourself so the key stays out of
+  the agent's chat; the
+  [setup skill's Junie notes](skills/hivemind-setup/references/junie.md)
+  have a command that builds it from a private key file. Restart Junie
+  after a change.
 - **OpenCode**: the shell that starts `opencode`. The plugin reads both
   variables and sets up the connection. Without the plugin, add this to
   `opencode.json`:
@@ -503,6 +540,10 @@ is also skipped when `HIVEMIND_API_KEY` is not set. What each agent gets:
   compaction.
 - **Hermes**: neither. Hermes has no hook that can hold the end of a
   session.
+- **Junie**: the end-of-session reminder, from the plugin's `Stop` hook
+  (not in a chat-type task). Junie ignores the text of a startup hook, so
+  the startup line comes from the plugin's `guidelines/hivemind.md`, which
+  Junie adds to every task, and there is no post-compaction line.
 - **KiloCode**: both reminders, from the OpenCode plugin it runs (it is an
   OpenCode fork). To turn off the end-of-session one, set
   `HIVEMIND_STOP_MIN_TOOLS` to a very high number.
@@ -529,7 +570,7 @@ way):
 /path/to/hivemind/plugins/hivemind/bin/hivemind-incognito claude
 ```
 
-It also takes `codex`, `copilot`, `dsh`, `gemini`, `hermes`, `pi`, `omp`,
+It also takes `codex`, `copilot`, `dsh`, `gemini`, `hermes`, `junie`, `pi`, `omp`,
 `opencode`, `cline` and `kilocode` (or `kilo`). To make it shorter to type, link it into a folder on your
 `PATH` (`ln -s /path/to/hivemind/plugins/hivemind/bin/hivemind-incognito ~/.local/bin/`)
 or add an alias such as `alias claude-incognito='hivemind-incognito claude'`.
@@ -554,6 +595,11 @@ How well it works depends on the agent:
 - **GitHub Copilot CLI**: the tools aren't loaded, as long as the
   connection is the server named `hivemind` described above (the
   launcher starts Copilot with `--disable-mcp-server hivemind`).
+- **Junie**: the tools aren't loaded, as long as the connection is the
+  `hivemind` entry in `~/.junie/mcp/mcp.json` described above. The
+  launcher starts Junie with `--mcp-default-locations=false`, which also
+  turns off your **other** MCP servers for that session, and with the
+  incognito text as extra guidelines.
 - **Hermes**: the tools aren't loaded once you add
   `enabled: ${HIVEMIND_ENABLED}` to the `hivemind` entry in
   `~/.hermes/config.yaml`. Don't set `HIVEMIND_ENABLED` in
@@ -606,6 +652,9 @@ All of these go in a terminal:
   then `copilot plugin update hivemind@hivemind`. Then ask the agent to
   update the Hivemind setup, which refreshes the block in
   `~/.copilot/copilot-instructions.md`.
+- **Junie**: in the Junie prompt, `/extensions`, open the Installed tab
+  and pick Update on hivemind (an extension from a local folder refreshes
+  when Junie starts). Then start a new session.
 - **Hermes**: `hermes plugins update hivemind`. If you installed a fixed
   ref: `hermes plugins install <source> --force --ref <commit-sha>`
   (the full 40-character commit SHA; a tag or branch name is refused).
@@ -646,6 +695,8 @@ First uninstall the plugin, in a terminal:
   `~/.gemini/settings.json`.
 - **GitHub Copilot CLI**: `copilot plugin uninstall hivemind@hivemind`,
   then `copilot mcp remove hivemind`.
+- **Junie**: in `/extensions`, uninstall hivemind from the Installed tab,
+  then delete the `hivemind` entry from `~/.junie/mcp/mcp.json`.
 - **Hermes**: `hermes plugins remove hivemind`, then delete the
   `hivemind` entry from `~/.hermes/config.yaml`.
 - **OpenCode**: remove the entry from the `plugin` list. On v2,
