@@ -6,9 +6,9 @@ the plugin installed, the agent checks in with Hivemind at the start of
 each session, searches it before starting work, writes down what it
 learns and tells you when it needs more rights.
 
-It works with Claude Code, Codex, DeepSeek Harness, Gemini CLI, GitHub
-Copilot CLI, Hermes, OpenCode, Pi and Oh My Pi, plus the IDE
-agents Cline and KiloCode. Its two skills also work in any other agent
+It works with Claude Code, Codex, DeepSeek Harness, Gemini CLI, Google
+Antigravity, GitHub Copilot CLI, Hermes, OpenCode, Pi and Oh My Pi, plus
+the IDE agents Cline and KiloCode. Its two skills also work in any other agent
 that reads `SKILL.md` files.
 
 If you want to know what Hivemind itself is, or want to run the server,
@@ -22,6 +22,7 @@ read the [main README](../../README.md) instead.
   [Codex](#codex) ·
   [DeepSeek Harness](#deepseek-harness) ·
   [Gemini CLI](#gemini-cli) ·
+  [Antigravity](#antigravity) ·
   [GitHub Copilot CLI](#github-copilot-cli) ·
   [Hermes](#hermes) ·
   [OpenCode](#opencode) ·
@@ -75,7 +76,8 @@ Use the URLs as shown. On a Git server other than GitHub, keep the
 `.git` at the end. DeepSeek Harness and OpenCode also need the `git+`
 prefix, KiloCode uses its own `git:` spec, and Hermes needs
 `#plugins/hivemind`. Don't paste a link with a trailing slash, or a
-`/tree/...` link copied from the browser.
+`/tree/...` link copied from the browser. Antigravity is the exception:
+it needs the `/tree/...` link shown in its section.
 
 ### Claude Code
 
@@ -134,6 +136,28 @@ skills and the reminders.
 
 Add `--ref v<version>` to stay on one release. This works from
 `v2.6.0` on; 2.5.0 and older came out before the extension existed.
+
+### Antigravity
+
+This covers the Antigravity CLI (`agy`), the Antigravity App and the
+Antigravity IDE, which share their plugins. In a terminal:
+
+```sh
+agy plugin install https://github.com/monochrome-muncher/hivemind/tree/v<version>/plugins/antigravity
+```
+
+Use the whole link, with the release and `/plugins/antigravity`. The
+bare repository link installs the Gemini CLI extension instead,
+converted, and its reminders don't work there. The first release with Antigravity
+support is the one after 2.18.2 ([CHANGELOG.md](CHANGELOG.md)).
+
+The plugin installs switched off, because it needs the MCP address and a
+key. Turn it on in `/plugin` (select hivemind and press Space) or under
+Customizations > Installed in the App, and fill in both. The key field
+shows what you type, so make sure nobody is watching your screen.
+Antigravity keeps both values in `~/.gemini/config/config.json`, readable
+only by you. On a Git server other than GitHub, clone the repository and
+run `agy plugin install /path/to/hivemind/plugins/antigravity`.
 
 ### GitHub Copilot CLI
 
@@ -391,6 +415,13 @@ export HIVEMIND_API_KEY="hm_…"   # the org key at first, the agent key once ac
   extension's variables, so a repository could send your key elsewhere.
   Turn that off with `"experimental": { "extensionConfig": false }` in
   `~/.gemini/settings.json`.
+- **Antigravity**: not in the environment. You fill in the address and
+  the key when you turn the plugin on, and change the key later in
+  `/plugin` (expand hivemind, then "Configure MCP servers..."). Before you
+  trust a project, check that it has no `.agents/plugins/hivemind/`
+  folder: Antigravity loads plugins from there too and gives one named
+  `hivemind` the key you stored for yours, so a repository could send
+  your key elsewhere.
 - **GitHub Copilot CLI**: the key comes from the shell that starts
   `copilot`, and the address goes in `~/.copilot/mcp-config.json`.
   Copilot checks that `url` is a real address before it fills in
@@ -495,6 +526,10 @@ is also skipped when `HIVEMIND_API_KEY` is not set. What each agent gets:
   gives the startup text, but Gemini runs no startup hook after compacting
   its context, so there is no post-compaction line; the instruction block
   in `~/.gemini/GEMINI.md` is what carries Hivemind across a compaction.
+- **Antigravity**: only the end-of-session reminder, from the plugin's
+  `Stop` hook. Its `SessionStart` hook gives the startup text. Antigravity
+  has no hook for compaction, so the plugin's always-on rule is what
+  carries Hivemind across one; nothing needs adding to `~/.gemini/AGENTS.md`.
 - **GitHub Copilot CLI**: only the end-of-session reminder, from the
   plugin's `Stop` hook. Its `SessionStart` hook still gives the startup
   text, but Copilot runs no startup hook after compacting its context, so
@@ -529,7 +564,7 @@ way):
 /path/to/hivemind/plugins/hivemind/bin/hivemind-incognito claude
 ```
 
-It also takes `codex`, `copilot`, `dsh`, `gemini`, `hermes`, `pi`, `omp`,
+It also takes `codex`, `copilot`, `dsh`, `gemini`, `agy`, `hermes`, `pi`, `omp`,
 `opencode`, `cline` and `kilocode` (or `kilo`). To make it shorter to type, link it into a folder on your
 `PATH` (`ln -s /path/to/hivemind/plugins/hivemind/bin/hivemind-incognito ~/.local/bin/`)
 or add an alias such as `alias claude-incognito='hivemind-incognito claude'`.
@@ -557,6 +592,11 @@ How well it works depends on the agent:
   `enabled: ${HIVEMIND_ENABLED}` to the `hivemind` entry in
   `~/.hermes/config.yaml`. Don't set `HIVEMIND_ENABLED` in
   `~/.hermes/.env`, because that file overrides the launcher.
+- **Antigravity** (`agy`): the tools stay listed, but every call to them
+  is refused for that session. The server still sees a connection at
+  startup, with your key, because Antigravity can't switch one plugin off
+  for one session. For a session the server never hears about, turn the
+  plugin off in `/plugin` first and back on afterwards.
 - **Gemini CLI set up by hand, and any other agent**: incognito **by
   restraint**. The tools stay loaded, and the agent is told not to use
   them.
@@ -601,6 +641,8 @@ All of these go in a terminal:
   ask the agent to update the Hivemind setup, which refreshes the block in
   `~/.gemini/GEMINI.md`. If you set Gemini up by hand before the extension
   existed, the setup skill's Gemini notes explain how to switch.
+- **Antigravity**: run the install command again with the new release.
+  It keeps the address and key you filled in.
 - **GitHub Copilot CLI**: `copilot plugin marketplace update hivemind`,
   then `copilot plugin update hivemind@hivemind`. Then ask the agent to
   update the Hivemind setup, which refreshes the block in
@@ -643,6 +685,8 @@ First uninstall the plugin, in a terminal:
   by hand, delete the two skill folders from `~/.gemini/skills/`, and
   `mcpServers.hivemind` and the Hivemind hooks from
   `~/.gemini/settings.json`.
+- **Antigravity**: `agy plugin uninstall hivemind`. This also deletes the
+  stored address and key.
 - **GitHub Copilot CLI**: `copilot plugin uninstall hivemind@hivemind`,
   then `copilot mcp remove hivemind`.
 - **Hermes**: `hermes plugins remove hivemind`, then delete the

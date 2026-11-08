@@ -230,6 +230,101 @@ def test_a_copilot_session_that_already_wrote_or_rated_is_not_blocked(
     assert (out.returncode, out.stdout) == (0, "")
 
 
+def _antigravity_transcript(tmp_path: Path, calls: int, *hive_tools: str) -> Path:
+    """An Antigravity CLI 1.5.3 `transcript_full.jsonl` (captured live): one
+    line per step, a model step's calls in `tool_calls`, and a lazily loaded
+    MCP tool called through `call_mcp_tool` with its name in `ToolName`.
+    Before a call the agent may read the tool's schema file, whose path
+    names the tool."""
+    path = tmp_path / "transcript_full.jsonl"
+    schema = "/home/u/.gemini/antigravity-cli/mcp/hivemind_hivemind/hive_feedback.json"
+    steps: list[dict[str, object]] = [
+        {"step_index": 0, "source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "hi"},
+        {
+            "step_index": 1,
+            "source": "MODEL",
+            "type": "PLANNER_RESPONSE",
+            "tool_calls": [{"name": "read_file", "args": {"AbsolutePath": schema}}],
+        },
+    ]
+    for _ in range(calls):
+        call = {"name": "run_command", "args": {"CommandLine": "ls", "Cwd": "/w"}}
+        steps.append({"source": "MODEL", "type": "PLANNER_RESPONSE", "tool_calls": [call, call]})
+        steps.append({"source": "MODEL", "type": "GENERIC", "status": "DONE", "content": "ok"})
+    for tool in hive_tools:
+        args = {"Arguments": {}, "ServerName": "hivemind_hivemind", "ToolName": tool}
+        call = {"name": "call_mcp_tool", "args": args}
+        steps.append({"source": "MODEL", "type": "PLANNER_RESPONSE", "tool_calls": [call]})
+    path.write_text("\n".join(json.dumps(s, separators=(",", ":")) for s in steps) + "\n")
+    return path
+
+
+def _antigravity_stop(
+    tmp_path: Path, transcript: Path, env: dict[str, str] | None = None, cid: str = "c1"
+) -> subprocess.CompletedProcess[str]:
+    """Antigravity's Stop input is camelCase, and its hooks never see the
+    plugin's key: the plugin hook passes --antigravity instead."""
+    payload = {
+        "conversationId": cid,
+        "transcriptPath": str(transcript),
+        "executionNum": 0,
+        "terminationReason": "NO_TOOL_CALL",
+        "fullyIdle": True,
+    }
+    if env is None:
+        env = _env(tmp_path)
+        env.pop("HIVEMIND_API_KEY")
+    return subprocess.run(
+        ["sh", str(STOP), "--antigravity"],
+        input=json.dumps(payload),
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_a_substantial_antigravity_session_is_blocked_once(tmp_path: Path) -> None:
+    # 10 steps of two calls each, plus the schema read: 21 calls.
+    out = _antigravity_stop(tmp_path, _antigravity_transcript(tmp_path, 10))
+    assert json.loads(out.stdout)["decision"] == "block"
+    again = _antigravity_stop(tmp_path, _antigravity_transcript(tmp_path, 10))
+    assert (again.returncode, again.stdout) == (0, "")
+    short = _antigravity_stop(tmp_path, _antigravity_transcript(tmp_path, 9), cid="c2")
+    assert (short.returncode, short.stdout) == (0, "")
+
+
+@pytest.mark.parametrize("tool", ["hive_write", "hive_feedback"])
+def test_an_antigravity_session_that_wrote_or_rated_is_not_blocked(
+    tmp_path: Path, tool: str
+) -> None:
+    out = _antigravity_stop(tmp_path, _antigravity_transcript(tmp_path, 15, tool))
+    assert (out.returncode, out.stdout) == (0, "")
+
+
+def test_reading_a_tool_schema_is_not_calling_the_tool(tmp_path: Path) -> None:
+    # The schema read names hive_feedback.json; only a real call keeps it quiet.
+    out = _antigravity_stop(tmp_path, _antigravity_transcript(tmp_path, 15))
+    assert json.loads(out.stdout)["decision"] == "block"
+
+
+def test_without_the_flag_an_antigravity_session_needs_the_key(tmp_path: Path) -> None:
+    env = _env(tmp_path)
+    env.pop("HIVEMIND_API_KEY")
+    transcript = _antigravity_transcript(tmp_path, 15)
+    payload = {"conversationId": "c1", "transcriptPath": str(transcript)}
+    out = subprocess.run(
+        ["sh", str(STOP)], input=json.dumps(payload), env=env, capture_output=True, text=True
+    )
+    assert (out.returncode, out.stdout) == (0, "")
+
+
+def test_antigravity_incognito_never_blocks(tmp_path: Path) -> None:
+    env = _env(tmp_path, HIVEMIND_INCOGNITO="1")
+    env.pop("HIVEMIND_API_KEY")
+    out = _antigravity_stop(tmp_path, _antigravity_transcript(tmp_path, 15), env=env)
+    assert (out.returncode, out.stdout) == (0, "")
+
+
 def test_a_short_session_is_not_blocked(tmp_path: Path) -> None:
     out = _stop(tmp_path, _transcript(tmp_path, 5))
     assert (out.returncode, out.stdout) == (0, "")

@@ -29,6 +29,7 @@ SETUP = (PLUGIN / "skills" / "hivemind-setup" / "SKILL.md").read_text()
 SETUP_REFS = PLUGIN / "skills" / "hivemind-setup" / "references"
 SKILLS_DIR = PLUGIN / "skills"
 HOOK = PLUGIN / "skills" / "hivemind-setup" / "scripts" / "hivemind-session-start.sh"
+AGY = ROOT / "plugins" / "antigravity"
 
 # The one sentence every harness's stay-aware layer must carry, byte for
 # byte: the Claude Code/Codex SessionStart hook, the Hermes
@@ -160,6 +161,8 @@ def test_manifests_agree_on_name_and_version() -> None:
     root = _json(ROOT / "package.json")  # the Git-URL install (DeepSeek Harness, Pi, OpenCode)
     assert (root["name"], root["version"]) == (dsh["name"], semver)
     assert _json(ROOT / "gemini-extension.json")["version"] == semver
+    antigravity = _json(AGY / "plugin.json")
+    assert (antigravity["name"], antigravity["version"]) == ("hivemind", semver)
     registry = _json(ROOT / "server.json")  # the MCP Registry entry
     [image] = registry["packages"]  # type: ignore[misc]
     assert registry["version"] == semver
@@ -245,6 +248,7 @@ HARNESS_REFS = {
     "Claude Code": "claude-code.md",
     "Codex": "codex.md",
     "Gemini CLI": "gemini-cli.md",
+    "Antigravity": "antigravity.md",
     "GitHub Copilot CLI": "copilot-cli.md",
     "DeepSeek Harness": "deepseek-harness.md",
     "Hermes": "hermes.md",
@@ -627,6 +631,17 @@ def _claude_printer(tmp_path: Path) -> dict[str, str]:
         '#!/bin/sh\nprintf "%s\\n" "KEY=${HIVEMIND_API_KEY:-unset}" "URL=${HIVEMIND_MCP_URL:-unset}" "$@"\n'
     )
     return env
+
+
+def test_launcher_denies_every_hivemind_call_in_antigravity(tmp_path: Path) -> None:
+    """Antigravity has no per-session switch for a plugin; a session-only
+    permission rule refuses every call to the plugin's server."""
+    env = _fake_harness(tmp_path, "agy")
+    lines = _launch(tmp_path, env, "agy", "-p", "hi")
+    assert lines[0] == "INCOGNITO=1"
+    settings = json.loads(lines[lines.index("--settings") + 1])
+    assert settings == {"permissions": {"deny": ["mcp(hivemind_hivemind/*)"]}}
+    assert lines[-2:] == ["-p", "hi"]
 
 
 def test_launcher_json_escapes_the_claude_url_and_unsets_the_key(tmp_path: Path) -> None:
@@ -2374,3 +2389,75 @@ def test_no_plugin_file_holds_an_unchecked_copy_of_a_reminder_text() -> None:
             if opening in text:
                 found.add((opening, path.relative_to(PLUGIN)))
     assert found == listed
+
+
+# -- Antigravity: the plugin's own files (checked live with agy 1.5.3) ----------
+
+
+def test_the_antigravity_plugin_shares_the_skills_and_points_at_its_files() -> None:
+    """A folder of its own, because Antigravity reads hooks.json at the plugin
+    root, a name GitHub Copilot CLI also reads in plugins/hivemind."""
+    assert not (PLUGIN / "hooks.json").exists()
+    assert (AGY / "skills").is_symlink() and (AGY / "skills").resolve() == PLUGIN / "skills"
+    manifest = _json(AGY / "plugin.json")
+    assert manifest["description"] and manifest["displayName"] == "Hivemind"
+    assert (AGY / str(manifest["logo"])).is_file()
+    # The schema allows no other keys (additionalProperties: false).
+    allowed = {"$schema", "name", "displayName", "description", "version", "disabled", "logo"}
+    allowed |= {"suggestedPrompts", "skills", "author", "homepage", "repository", "license"}
+    assert set(manifest) <= allowed | {"keywords"}
+
+
+def test_the_antigravity_server_takes_the_url_and_key_as_install_variables() -> None:
+    """Antigravity fills ${NAME} only from a server's declared `variables`,
+    which it asks for when the user turns the plugin on; no key in the file."""
+    [(name, server)] = _json(AGY / "mcp_config.json")["mcpServers"].items()  # type: ignore[union-attr]
+    assert name == "hivemind"  # the incognito launcher denies hivemind_hivemind
+    assert server["serverUrl"] == "${HIVEMIND_MCP_URL}"
+    assert server["headers"] == {"Authorization": "Bearer ${HIVEMIND_API_KEY}"}
+    declared = {v["name"] for v in server["variables"]}
+    assert declared == {"HIVEMIND_MCP_URL", "HIVEMIND_API_KEY"}
+    assert "hm_" not in (AGY / "mcp_config.json").read_text()
+
+
+def test_the_antigravity_hooks_run_the_shipped_scripts_with_the_flag() -> None:
+    """Plugin hooks run from the plugin root, so the paths are relative; the
+    flag selects Antigravity's output shape and skips the key check."""
+    [group] = _json(AGY / "hooks.json").values()
+    expected = {"SessionStart": "hivemind-session-start.sh", "Stop": "hivemind-stop.sh"}
+    assert set(group) == set(expected)  # type: ignore[arg-type]
+    for event, script in expected.items():
+        [hook] = group[event]  # type: ignore[index]
+        command = hook["command"]
+        assert command == f"sh ./skills/hivemind-setup/scripts/{script} --antigravity"
+        assert (AGY / command.split()[1]).is_file()
+
+
+def test_the_antigravity_rule_is_the_instruction_block() -> None:
+    block = re.search(r"<!-- hivemind:begin -->\n(.*?)<!-- hivemind:end -->", SETUP, re.S)
+    assert block
+    assert (AGY / "rules" / "AGENTS.md").read_text() == block.group(1)
+
+
+@pytest.mark.parametrize("incognito", [False, True])
+def test_the_session_start_hook_speaks_antigravity(incognito: bool) -> None:
+    """Antigravity's hooks never see the plugin's key, and the plugin is on
+    only once the key is filled in, so the text is the configured one."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("HIVEMIND_")}
+    env.pop("COPILOT_CLI", None)
+    if incognito:
+        env["HIVEMIND_INCOGNITO"] = "1"
+    out = subprocess.run(
+        ["sh", str(HOOK), "--antigravity"],
+        env=env,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    [step] = json.loads(out.stdout)["injectSteps"]
+    text = step["systemMessage"]["systemMessage"]
+    if incognito:
+        assert text == INCOGNITO_TEXT
+    else:
+        assert text.startswith(STAY_AWARE_CORE) and text.endswith(CONFIGURED_TEXT)

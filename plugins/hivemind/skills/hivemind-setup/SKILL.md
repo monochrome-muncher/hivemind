@@ -38,7 +38,7 @@ you stand.
 ## Which harness am I in?
 
 The **harness** is the program that runs you and gives you your tools:
-Claude Code, Codex, GitHub Copilot CLI, Gemini CLI, DeepSeek Harness, Hermes, Pi, Oh My Pi,
+Claude Code, Codex, GitHub Copilot CLI, Gemini CLI, Antigravity, DeepSeek Harness, Hermes, Pi, Oh My Pi,
 OpenCode, Cline, KiloCode or another. The **model** is what you are. They are independent: any model
 can run in any harness.
 
@@ -49,7 +49,7 @@ can run in any harness.
 - **Decide from evidence**, strongest first:
   1. **Your system prompt**: most harnesses name themselves there ("You
      are Claude Code…", "You are opencode…", "You are the GitHub Copilot CLI…", "You are DeepSeek
-     Harness…", "…operating inside pi…"). Oh My Pi is a fork of Pi and
+     Harness…", "You are Antigravity…", "…operating inside pi…"). Oh My Pi is a fork of Pi and
      its prompt may say the same: if anything else points to Oh My Pi
      (below), it is Oh My Pi, not Pi.
   2. **Your tools**: MCP tools reached as `xd://mcp__…` routes are Oh My
@@ -65,7 +65,7 @@ can run in any harness.
      ```
 
      Match the **program name** (the basename of the first word) exactly
-     against `claude`, `codex`, `copilot`, `gemini`, `dsh`, `hermes`, `pi`, `omp`, `opencode`,
+     against `claude`, `codex`, `copilot`, `gemini`, `agy`, `dsh`, `hermes`, `pi`, `omp`, `opencode`,
      `cline` or `kilo`; do not match substrings (`pip`, `pipx`, a path that
      happens to contain `pi`). **The nearest ancestor that matches wins**:
      a harness started from another harness's shell sees both. Pi and Oh My
@@ -92,6 +92,7 @@ can run in any harness.
 | Codex | `references/codex.md` |
 | GitHub Copilot CLI (`copilot`) | `references/copilot-cli.md` |
 | Gemini CLI | `references/gemini-cli.md` |
+| Antigravity (`agy`, the App or the IDE) | `references/antigravity.md` |
 | DeepSeek Harness (`dsh`) | `references/deepseek-harness.md` |
 | Hermes | `references/hermes.md` |
 | Pi | `references/pi.md` |

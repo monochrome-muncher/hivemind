@@ -12,10 +12,15 @@
 # backslashes, so it needs no escaping. Claude Code, Codex and Gemini CLI
 # read hookSpecificOutput.additionalContext; GitHub Copilot CLI (which sets
 # COPILOT_CLI=1 for its hooks) reads only a top-level additionalContext and
-# silently drops the nested form.
+# silently drops the nested form. Antigravity reads injectSteps; its
+# plugin hook passes --antigravity.
+shape=default
+[ "${1:-}" = "--antigravity" ] && shape=antigravity
 emit() {
   if [ -n "${COPILOT_CLI:-}" ]; then
     printf '{"additionalContext":"%s"}\n' "$1"
+  elif [ "$shape" = antigravity ]; then
+    printf '{"injectSteps":[{"systemMessage":{"systemMessage":"%s"}}]}\n' "$1"
   else
     printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$1"
   fi
@@ -31,7 +36,9 @@ case "$(printf '%s' "${HIVEMIND_INCOGNITO:-}" | tr '[:upper:]' '[:lower:]')" in
     ;;
 esac
 
-if [ -z "${HIVEMIND_API_KEY:-}" ]; then
+# Antigravity keeps the key in its plugin settings, not in the environment,
+# and turns the plugin on only once the key is filled in.
+if [ -z "${HIVEMIND_API_KEY:-}" ] && [ "$shape" != antigravity ]; then
   state="HIVEMIND_API_KEY is not set in this environment, so Hivemind is probably not connected. If the hive_* tools are missing or fail, tell the user once and offer to run the hivemind-setup skill."
 else
   state="Hivemind is configured. Your first action this session: call hive_whoami and act on the result as the hivemind skill describes."

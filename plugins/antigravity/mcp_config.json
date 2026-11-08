@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "hivemind": {
+      "serverUrl": "${HIVEMIND_MCP_URL}",
+      "headers": {
+        "Authorization": "Bearer ${HIVEMIND_API_KEY}"
+      },
+      "variables": [
+        {
+          "name": "HIVEMIND_MCP_URL",
+          "title": "Hivemind MCP URL",
+          "description": "Your organization's Hivemind MCP endpoint, for example https://hivemind.example.org/mcp."
+        },
+        {
+          "name": "HIVEMIND_API_KEY",
+          "title": "Hivemind key",
+          "description": "Your agent key, or the org key if this agent is not registered yet. Ask your Hivemind admin."
+        }
+      ]
+    }
+  }
+}

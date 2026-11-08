@@ -1,6 +1,6 @@
 #!/bin/sh
-# Hivemind Stop hook (Claude Code, Codex, GitHub Copilot CLI; Gemini CLI as an
-# AfterAgent hook):
+# Hivemind Stop hook (Claude Code, Codex, GitHub Copilot CLI, Antigravity;
+# Gemini CLI as an AfterAgent hook):
 # at most once per session, blocks the stop once with a short reminder to
 # write what another agent could reuse and to rate the entries the work
 # tested. Registered in hooks/hooks.json (Gemini CLI: the extension's AfterAgent hook).
@@ -11,16 +11,21 @@
 # fails open: any error, missing file or unparsable input exits 0 with no
 # output. Plain POSIX sh, grep, sed and sort: no jq, python or node. No network.
 #
-# Stop input (stdin JSON): session_id, transcript_path, stop_hook_active.
-# Block output: {"decision":"block","reason":"..."} on stdout, exit 0.
+# Stop input (stdin JSON): session_id, transcript_path, stop_hook_active
+# (Antigravity: conversationId, transcriptPath; its plugin hook passes
+# --antigravity). Block output: {"decision":"block","reason":"..."} on
+# stdout, exit 0 (Antigravity 1.5.3 takes it as it takes "continue").
+antigravity=""
+[ "${1:-}" = "--antigravity" ] && antigravity=1
 
 # (c) Incognito (ADR 0035), detected as hivemind-session-start.sh does.
 case "$(printf '%s' "${HIVEMIND_INCOGNITO:-}" | tr '[:upper:]' '[:lower:]')" in
   1|true|yes|on) exit 0 ;;
 esac
 
-# (d) Hivemind is not configured for this session.
-[ -n "${HIVEMIND_API_KEY:-}" ] || exit 0
+# (d) Hivemind is not configured for this session. Antigravity keeps the key
+# in its plugin settings and turns the plugin on only once it is filled in.
+[ -n "${HIVEMIND_API_KEY:-}" ] || [ -n "$antigravity" ] || exit 0
 
 [ -t 0 ] && exit 0
 input="$(cat 2>/dev/null)" || exit 0
@@ -32,8 +37,11 @@ field() {
   printf '%s' "$input" | grep -o "\"$1\" *: *\"[^\"]*\"" | head -n 1 \
     | sed 's/^[^:]*: *"//; s/"$//'
 }
-sid="$(field session_id | tr -c 'A-Za-z0-9_-' '_')"
+sid="$(field session_id)"
+[ -n "$sid" ] || sid="$(field conversationId)"
+sid="$(printf '%s' "$sid" | tr -c 'A-Za-z0-9_-' '_')"
 transcript="$(field transcript_path)"
+[ -n "$transcript" ] || transcript="$(field transcriptPath)"
 [ -n "$sid" ] && [ -n "$transcript" ] && [ -r "$transcript" ] || exit 0
 
 # (a) Once per session: the marker is written only when a stop is blocked. It
@@ -66,9 +74,14 @@ calls() {
   grep -Ev '"(input_schema|inputSchema|schema|parameters)" *: *\{|"type" *: *"(prompt_snapshot|deferred_tools_record)"' \
     "$transcript" 2>/dev/null
 }
-calls | grep -Eq '"name" *: *"[^"]*hive_feedback"' && exit 0
-if calls | grep -Eq '"name" *: *"[^"]*hive_write"'; then
-  calls | grep -Eq '"name" *: *"[^"]*hive_(search|get)"' || exit 0
+# Antigravity calls a lazily loaded MCP tool through call_mcp_tool, with
+# the tool's name in "ToolName".
+called() {
+  calls | grep -Eq "\"(name|ToolName)\" *: *\"[^\"]*hive_$1\""
+}
+called feedback && exit 0
+if called write; then
+  called '(search|get)' || exit 0
 fi
 min="${HIVEMIND_STOP_MIN_TOOLS:-20}"
 case "$min" in ''|*[!0-9]*) min=20 ;; esac
@@ -81,7 +94,11 @@ uses="$(calls | grep -Eo '"type" *: *"(tool_use|function_call|custom_tool_call|l
 # functionResponse id once.
 gemini="$(calls | grep -Eo '"functionResponse" *: *\{ *"id" *: *"[^"]*"' \
   | sort -u | wc -l)" || exit 0
-uses=$((uses + gemini))
+# Antigravity writes one transcript line per step, with that step's calls
+# in "tool_calls":[{"name":...,"args":...},...].
+agy="$(calls | grep '"tool_calls" *: *\[' \
+  | grep -Eo '\{"name" *: *"[^"]*" *, *"args"' | wc -l)" || exit 0
+uses=$((uses + gemini + agy))
 [ "${uses:-0}" -ge "$min" ] 2>/dev/null || exit 0
 
 private && (umask 077; : > "$dir/$sid") 2>/dev/null || exit 0
