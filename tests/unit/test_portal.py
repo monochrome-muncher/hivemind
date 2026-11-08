@@ -172,6 +172,64 @@ async def test_an_agent_key_reads_and_withdraws_through_the_portal() -> None:
     assert gone.headers["cache-control"] == "no-store"
 
 
+async def test_an_id_the_key_cannot_read_looks_like_a_missing_one_through_the_portal() -> None:
+    """The portal's search box reads a memory id with ``GET /v1/entries/{id}``
+    (the drawer's read): another agent's private note answers exactly like
+    an id that names nothing, so the portal never shows that it exists."""
+    hivemind, api_app = _api()
+    summary = "dave keeps this to himself"
+    hidden = await hivemind.store.create_entry(
+        EntryDraft(kind=Kind.FACT, summary=summary, author="dave", agent="dave", scope="self"),
+        await make_embedder().embed_text(summary),
+    )
+    mine = await hivemind.store.create_entry(
+        EntryDraft(kind=Kind.FACT, summary="carol's note", author="carol", agent="c", scope="self"),
+        await make_embedder().embed_text("carol's note"),
+    )
+    elsewhere = await hivemind.store.create_entry(
+        EntryDraft(
+            kind=Kind.FACT,
+            summary="ops only",
+            author="dave",
+            agent="dave",
+            scope="fleet",
+            fleet_id="ops",
+        ),
+        await make_embedder().embed_text("ops only"),
+    )
+    missing_id = "00000000-0000-4000-8000-000000000000"
+    async with _portal(httpx.ASGITransport(app=api_app)) as portal:
+        readable = await portal.get(f"/v1/entries/{mine.id}", headers=AGENT)
+        unreadable = await portal.get(f"/v1/entries/{hidden.id}", headers=AGENT)
+        other_fleet = await portal.get(f"/v1/entries/{elsewhere.id}", headers=AGENT)
+        missing = await portal.get(f"/v1/entries/{missing_id}", headers=AGENT)
+    assert readable.status_code == 200 and readable.json()["id"] == mine.id
+    assert other_fleet.status_code == 404
+    assert other_fleet.json()["error"]["message"].replace(elsewhere.id, "ID") == missing.json()[
+        "error"
+    ]["message"].replace(missing_id, "ID")
+
+    def headers(r: httpx.Response) -> dict[str, str]:
+        return {k: v for k, v in r.headers.items() if k != "date"}
+
+    assert headers(unreadable) == headers(missing)
+    assert unreadable.status_code == missing.status_code == 404
+    assert unreadable.json()["error"]["code"] == missing.json()["error"]["code"]
+    assert unreadable.json()["error"]["message"].replace(hidden.id, "ID") == missing.json()[
+        "error"
+    ]["message"].replace(missing_id, "ID")
+    assert summary not in unreadable.text
+
+
+def test_the_portal_search_reads_an_id_through_the_key_bounded_read() -> None:
+    """An id in the portal's search box goes to ``GET entries/{id}``, which
+    the key's visibility bounds, never to an admin route."""
+    script = (STATIC_DIR / "views.js").read_text()
+    assert "entryIdIn(f.q)" in script
+    assert 'api("GET", `entries/${encodeURIComponent(id)}`)' in script
+    assert "admin/" not in script
+
+
 # -- pin and unpin (ADR 0116) ------------------------------------------------------
 
 

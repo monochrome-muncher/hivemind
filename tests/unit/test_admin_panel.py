@@ -546,3 +546,43 @@ def test_the_agents_page_and_health_page_read_the_filters_the_needs_row_links_to
     assert "flagged_backlog_14d" in health and "older_than_days: 14" in health
     assert "flagged_backlog_14d" in (STATIC_DIR / "needs.js").read_text()
     assert "needsYou(state.agents, metrics)" in (STATIC_DIR / "overview.js").read_text()
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_a_memory_id_in_the_search_box_reads_that_memory() -> None:
+    """ui.js run as it ships: only a whole memory id (any case, spaces
+    around it) counts as an id, and a 404 from the read is no rows, never
+    an error, so a missing id and an unreadable one look the same."""
+    script = r"""
+    const ui = await import(process.argv[1])
+    const id = "3f2b9c1e-8a4d-4e6f-9b0a-1c2d3e4f5a6b"
+    const ids = [id, ` ${id.toUpperCase()} `, id.slice(0, 8), `${id} kaniko`, "kaniko", "", null]
+      .map((t) => ui.entryIdIn(t))
+    const notFound = Object.assign(new Error("unknown entry"), { status: 404 })
+    const boom = Object.assign(new Error("down"), { status: 503 })
+    const found = await ui.entryById(async () => ({ id }))
+    const missing = await ui.entryById(async () => { throw notFound })
+    const signedOut = await ui.entryById(async () => undefined)
+    let other = null
+    try { await ui.entryById(async () => { throw boom }) } catch (err) { other = err.status }
+    console.log(JSON.stringify({ ids, found, missing, signedOut: signedOut === undefined, other }))
+    """
+    out = subprocess.run(
+        ["node", "--input-type=module", "-e", script, (STATIC_DIR / "ui.js").as_uri()],
+        capture_output=True, text=True, check=True,
+    )  # fmt: skip
+    got = json.loads(out.stdout)
+    entry_id = "3f2b9c1e-8a4d-4e6f-9b0a-1c2d3e4f5a6b"
+    assert got["ids"] == [entry_id, entry_id, None, None, None, None, None]
+    assert got["found"] == [{"id": entry_id}]
+    assert got["missing"] == []
+    assert got["signedOut"] is True
+    assert got["other"] == 503
+
+
+def test_the_memory_browser_reads_an_id_through_the_admin_entry_read() -> None:
+    """An id in the search box goes to ``GET admin/entries/{id}``, the
+    drawer's own read, not to the search."""
+    script = (STATIC_DIR / "memories.js").read_text()
+    assert "entryIdIn(f.q)" in script
+    assert 'api("GET", `admin/entries/${encodeURIComponent(id)}`)' in script

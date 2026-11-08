@@ -158,6 +158,31 @@ export function toast(message, isError = false) {
   toast.timer = setTimeout(() => { el.hidden = true; }, isError ? 6000 : 3500);
 }
 
+// --- memory ids -------------------------------------------------------------------------
+
+const ENTRY_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The memory id a search box holds (lowercased), or null when it holds search text. */
+export function entryIdIn(text) {
+  const t = (text || "").trim();
+  return ENTRY_ID.test(t) ? t.toLowerCase() : null;
+}
+
+/**
+ * One memory by id as a list of rows: `read` fetches it, and a 404 (no such
+ * memory, or one the key may not read: the API answers both the same) is an
+ * empty list. Undefined (a sign-out) passes through.
+ */
+export async function entryById(read) {
+  try {
+    const entry = await read();
+    return entry === undefined ? undefined : [entry];
+  } catch (err) {
+    if (err && err.status === 404) return [];
+    throw err;
+  }
+}
+
 /** Copy text to the clipboard; returns whether it worked. */
 export async function copyText(text) {
   try {
