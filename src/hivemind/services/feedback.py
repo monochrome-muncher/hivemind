@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from hivemind.config import SearchConfig
+from hivemind.domain.access import may_supersede
+from hivemind.domain.entry import Entry
 from hivemind.domain.feedback import (
     FEEDBACK_RECENT_LIMIT,
     NO_SIGNALS,
@@ -32,6 +34,7 @@ from hivemind.domain.validation import (
 )
 from hivemind.ports import Credential, Store
 from hivemind.retrieval.scoring import feedback_quality
+from hivemind.services.access import resolve_write_scope
 from hivemind.services.chain import get_visible_entries, get_visible_entry
 from hivemind.services.errors import AgentIdentityRequired, EntryNotFound, PermissionDenied
 from hivemind.services.ownership import own_author_filter
@@ -66,6 +69,9 @@ class FeedbackOutcome:
 
     feedback: Feedback
     quality: float
+    # Whether the caller could supersede the entry with a write at its default
+    # scope; only ever true for a ``stale`` or ``wrong`` verdict (ADR 0128).
+    may_supersede: bool = False
 
 
 def _clean_note(note: str | None) -> str | None:
@@ -77,6 +83,23 @@ def _clean_note(note: str | None) -> str | None:
     if note is None:
         return None
     return note.strip() or None
+
+
+def _supersede_check(credential: Credential, verdict: Verdict) -> Callable[[Entry], bool]:
+    """Whether the reporter could fix an entry it flags: ``stale`` or
+    ``wrong``, an access-controlled agent key (not the admin key, whose writes
+    are human-driven, ADR 0060, nor a legacy credential, which would widen
+    the entry to ``org``), and a default-scope write would supersede it (ADR 0128)."""
+    if verdict is Verdict.HELPFUL or credential.is_admin or not credential.access_controlled:
+        return lambda _entry: False
+    try:
+        target = resolve_write_scope(credential)
+    except PermissionDenied:
+        return lambda _entry: False
+    visibility = credential.visibility()
+    return lambda entry: may_supersede(
+        entry, new_scope=target.scope, new_fleet_id=target.fleet_id, writer=visibility
+    )
 
 
 class FeedbackService:
@@ -149,6 +172,7 @@ class FeedbackService:
         return FeedbackOutcome(
             feedback=feedback,
             quality=await self.quality(entry.id),
+            may_supersede=_supersede_check(credential, verdict)(entry),
         )
 
     async def record_feedback_many(
@@ -193,9 +217,13 @@ class FeedbackService:
         ]
         rows = await self._store.record_feedback_many(rows)  # stamped (ADR 0079)
         signals = await self._store.feedback_signals(canonical)
+        fixable = _supersede_check(credential, verdict)
+        by_id = {e.id: e for e in found.values()}
         return [
             FeedbackOutcome(
-                feedback=row, quality=self._quality(signals.get(row.entry_id, NO_SIGNALS))
+                feedback=row,
+                quality=self._quality(signals.get(row.entry_id, NO_SIGNALS)),
+                may_supersede=fixable(by_id[row.entry_id]),
             )
             for row in rows
         ]

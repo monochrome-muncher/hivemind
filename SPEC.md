@@ -100,6 +100,8 @@ A lightweight, **dumb** outcome loop (no learned tuning in v1):
 | `note` | optional free text |
 | `updated_at` | when the verdict was last set, dated by the store's clock (the one `created_at` and `pinned_at` use), never the calling pod's (ADR 0079) |
 
+**A flag says when the reporter could fix the entry (ADR 0128).** The reply to a `stale` or `wrong` report says so when a write at the reporter's default scope would supersede the entry (the `may_supersede` rule of §4.1, with the scope `resolve_write_scope` gives when none is passed). REST returns `may_supersede: true` on the feedback result (`false` otherwise); the MCP reply adds `fix`, fixed text naming the entry id and `supersedes`, and a batch reply adds `fix` once, `{"may_supersede": [ids], "how": ...}`, listing only the ids the caller may supersede. `fix` is left out otherwise. Only access-controlled agent keys get it: never for `helpful`, the admin key, a legacy credential, a caller that cannot write, a level-1 agent on a fleet entry, a legacy `org` entry or an entry of another fleet.
+
 Feedback feeds a bounded `quality` multiplier used only by retrieval scoring (§6.4):
 
 ```
