@@ -37,8 +37,8 @@
         {
           "type": "named",
           "name": "-p",
-          "value": "8000:8000",
-          "description": "Publish the MCP port on localhost."
+          "value": "127.0.0.1:8000:8000",
+          "description": "Publish the MCP port on localhost only (plain HTTP), as docker-compose.yaml does."
         }
       ],
       "environmentVariables": [
