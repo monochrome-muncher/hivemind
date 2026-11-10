@@ -23,7 +23,7 @@ from hivemind.ports import Credential
 from hivemind.services.access import AccessService
 from hivemind.services.errors import PermissionDenied
 from hivemind.store import PgStore
-from hivemind.store import pgstore as pgstore_module
+from hivemind.store.pgstore import agent_cleanup as pgstore_cleanup
 
 SINCE = datetime(2020, 1, 1, tzinfo=UTC)
 UNTIL = datetime(2100, 1, 1, tzinfo=UTC)
@@ -213,7 +213,7 @@ async def test_a_lock_that_cannot_be_had_is_refused_not_waited_for_forever(
     dsn, store = pool
     junk = await _entry(store, "junk")
     monkeypatch.setattr(
-        pgstore_module,
+        pgstore_cleanup,
         "MERGE_SETTINGS",
         "SET LOCAL lock_timeout = '300ms'; SET LOCAL statement_timeout = 0;",
     )
@@ -272,8 +272,8 @@ async def test_the_preview_cuts_its_lists_and_keeps_exact_totals(
     pool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _, store = pool
-    monkeypatch.setattr(pgstore_module, "PREVIEW_WITHDRAW_LIMIT", 3)
-    monkeypatch.setattr(pgstore_module, "PREVIEW_RESTORE_LIMIT", 2)
+    monkeypatch.setattr(pgstore_cleanup, "PREVIEW_WITHDRAW_LIMIT", 3)
+    monkeypatch.setattr(pgstore_cleanup, "PREVIEW_RESTORE_LIMIT", 2)
     kept = [await _entry(store, f"good {i}", "good") for i in range(4)]
     for i, k in enumerate(kept):
         await _entry(store, f"junk {i}", supersedes=(k,))

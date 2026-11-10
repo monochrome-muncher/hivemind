@@ -24,8 +24,9 @@ from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
 from hivemind.services.write import WriteService
 from hivemind.store import PgAuthenticator, PgStore
-from hivemind.store import pgstore as pgstore_module
 from hivemind.store.keys import _issue_admin
+from hivemind.store.pgstore import fleet_guards
+from hivemind.store.pgstore import fleet_merge as fleet_merge_sql
 
 
 @pytest.fixture
@@ -117,7 +118,7 @@ async def test_a_write_gives_up_with_a_retryable_error_when_a_merge_holds_the_fl
     pool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     dsn, store, _ = pool
-    monkeypatch.setattr(pgstore_module, "WRITE_LOCK_TIMEOUT", "300ms")  # not the shipped 3s
+    monkeypatch.setattr(fleet_guards, "WRITE_LOCK_TIMEOUT", "300ms")  # not the shipped 3s
     source, target = (await store.create_fleet("a")).id, (await store.create_fleet("b")).id
     merge = await asyncpg.connect(dsn)
     tx = merge.transaction()
@@ -249,8 +250,6 @@ async def test_undo_after_post_merge_writes_and_the_chained_refusal(pool) -> Non
 async def test_a_duplicate_scan_the_server_cancels_is_reported_incomplete(
     pool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from hivemind.store import pgstore
-
     _dsn, store, _auth = pool
     a, b = await store.create_fleet("alpha"), await store.create_fleet("beta")
     vec = [1.0] + [0.0] * (Settings().embedding_dim - 1)
@@ -261,9 +260,11 @@ async def test_a_duplicate_scan_the_server_cancels_is_reported_incomplete(
 
     # A 1 ms timeout against a statement that sleeps 200 ms: the server cancels
     # it every time, so the scan (and its smaller retry) cannot finish.
-    monkeypatch.setattr(pgstore, "DUPLICATE_SCAN_SETTINGS", "SET LOCAL statement_timeout = '1ms';")
     monkeypatch.setattr(
-        pgstore,
+        fleet_merge_sql, "DUPLICATE_SCAN_SETTINGS", "SET LOCAL statement_timeout = '1ms';"
+    )
+    monkeypatch.setattr(
+        fleet_merge_sql,
         "COUNT_DUPLICATE_CANDIDATES",
         "SELECT count(*) FROM (SELECT pg_sleep(0.2)) s WHERE $1::text IS NOT NULL",
     )
@@ -292,11 +293,11 @@ async def test_a_small_fleet_is_scanned_exactly_and_agrees_with_the_index_path(
 
     # Break the statement the other path would use, so each run proves its own.
     with monkeypatch.context() as m:
-        m.setattr(pgstore_module, "DUPLICATE_PAIRS", "SELECT broken")
+        m.setattr(fleet_merge_sql, "DUPLICATE_PAIRS", "SELECT broken")
         exact = await store.duplicate_pairs(a.id, b.id, 0.9, 100)
     with monkeypatch.context() as m:
-        m.setattr(pgstore_module, "EXACT_DUPLICATE_LOOKUP_MAX", 0)
-        m.setattr(pgstore_module, "DUPLICATE_PAIRS_EXACT", "SELECT broken")
+        m.setattr(fleet_merge_sql, "EXACT_DUPLICATE_LOOKUP_MAX", 0)
+        m.setattr(fleet_merge_sql, "DUPLICATE_PAIRS_EXACT", "SELECT broken")
         indexed = await store.duplicate_pairs(a.id, b.id, 0.9, 100)
     assert len(exact.pairs) == 3
     assert [(p.entry_id, p.match_id) for p in exact.pairs] == [
@@ -316,7 +317,7 @@ async def test_a_lock_wait_after_the_fleet_guard_is_fleet_busy_too(
     # The guard's lock_timeout stays set for the rest of the transaction, so a
     # later wait (the pin lock, a supersede target's row) must be as retryable.
     dsn, store, _ = pool
-    monkeypatch.setattr(pgstore_module, "WRITE_LOCK_TIMEOUT", "300ms")
+    monkeypatch.setattr(fleet_guards, "WRITE_LOCK_TIMEOUT", "300ms")
     fleet = (await store.create_fleet("a")).id
     old = await store.create_entry(_draft(fleet, "old"), None)
     holder = await asyncpg.connect(dsn)

@@ -14,7 +14,7 @@ from tests.pg import ensure_migrated, reset_tables, wait_until_blocked
 
 from hivemind.config import Settings
 from hivemind.store import PgStore
-from hivemind.store.pgstore import AGENT_NAME_LOCK
+from hivemind.store.pgstore.agents import AGENT_NAME_LOCK
 
 
 def _dsn() -> str:
