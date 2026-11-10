@@ -1,7 +1,7 @@
 """The canonical wire mappers (ADR 0084): domain objects -> JSON-ready
 dicts, in one neutral module (no FastAPI, no MCP).
 
-The MCP surface imports these; the REST pydantic models (api/schemas.py)
+The MCP surface imports these; the REST pydantic models (api/schemas/)
 are the HTTP response models, and ``tests/unit/test_wire_contract.py``
 pins that the two sides agree field-for-field. A wire-shape change
 touches a table in that test, this module, and the matching model.
