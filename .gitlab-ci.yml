@@ -13,6 +13,8 @@
 #   K8S_SECRET_DATABASE_URL (m,p)     Postgres DSN
 #   K8S_SECRET_EMBEDDING_API_KEY (m,p)  embedding credential (may be EMPTY)
 #   K8S_SECRET_EXTRACTOR_API_KEY (m,p)  extractor credential (may be EMPTY = off)
+#   K8S_SECRET_MIGRATE_DATABASE_URL (m,p)  optional DSN for the migrate job
+#                                   (DEPLOY.md; empty = use DATABASE_URL)
 #   (m) = Masked, (p) = PROTECTED: an unprotected variable is exposed to MR
 #   pipelines whose author controls this very file (DEPLOY.md §1).
 

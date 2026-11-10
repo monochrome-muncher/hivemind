@@ -1,7 +1,6 @@
 #!/bin/sh
 # Hivemind Stop hook (Claude Code, Codex, GitHub Copilot CLI, Junie, Cursor,
-# Antigravity;
-# Gemini CLI as an AfterAgent hook):
+# Antigravity; Gemini CLI as an AfterAgent hook):
 # at most once per session, blocks the stop once with a short reminder to
 # write what another agent could reuse and to rate the entries the work
 # tested. Registered in hooks/hooks.json (Gemini CLI: the extension's AfterAgent

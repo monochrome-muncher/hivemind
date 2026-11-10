@@ -601,7 +601,8 @@ reminders:
 
 In an incognito session the startup line is replaced by the incognito
 text and the end-of-session reminder never appears. The end-of-session one
-is also skipped when `HIVEMIND_API_KEY` is not set. What each agent gets:
+is also skipped when `HIVEMIND_API_KEY` is not set, except in Antigravity,
+which keeps the key in its own plugin settings. What each agent gets:
 
 - **Claude Code and Codex**: both reminders. To turn off the
   end-of-session one, disable the plugin's `Stop` hook in `/hooks`. Codex

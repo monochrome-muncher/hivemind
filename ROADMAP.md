@@ -163,7 +163,7 @@ An insert-only audit log written by the REST admin surface (actor: the
 admin key's fingerprint) and the CLI (an unverified `--actor`), read at
 `GET /v1/admin/audit-log`. Registrations are audited since ADR 0046.
 
-### 3.9 Admin panel and agent portal  *(shipped: ADRs 0028–0029, 0080, 0090–0095, 0107–0125, migrations `0006` and later, DEPLOY.md §8–§9)*
+### 3.9 Admin panel and agent portal  *(shipped: ADRs 0028–0029, 0080, 0090–0095, 0107–0125, 0127, migrations `0006` and later, DEPLOY.md §8–§9)*
 A browser front end for the admin surface, with a pending-agent queue.
 It needed the `revoked` agent status first (ADR 0028). The admin key
 lives in the tab's `sessionStorage` behind a strict CSP; keep the panel
