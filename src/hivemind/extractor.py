@@ -44,7 +44,7 @@ if TYPE_CHECKING:
 # SPEC §13.1 (kinds and name bounds live in the domain).
 _MAX_ENTITIES = 10
 
-# Bounds on untrusted model output (PC-11): a response larger than this
+# Bounds on untrusted model output: a response larger than this
 # is refused before parsing; logs carry at most a short snippet of it.
 _MAX_CONTENT_CHARS = 64_000
 _SNIPPET_CHARS = 80
@@ -104,7 +104,6 @@ Rules:
 
 
 async def _default_sleep(delay: float) -> None:
-    """The production backoff sleep (injectable in tests)."""
     await asyncio.sleep(delay)
 
 
@@ -176,7 +175,6 @@ class OpenAICompatExtractor:
 
     @classmethod
     def from_settings(cls, settings: Settings) -> OpenAICompatExtractor:
-        """Build an extractor from deployment settings (ADR 0016, SPEC §13)."""
         return cls(
             client=None,
             base_url=settings.extractor_endpoint,
@@ -190,7 +188,6 @@ class OpenAICompatExtractor:
 
     @property
     def retries(self) -> int:
-        """The retry budget for transient failures (ADR 0014 pattern)."""
         return self._retries
 
     @property
@@ -200,7 +197,6 @@ class OpenAICompatExtractor:
 
     @property
     def base_url(self) -> str:
-        """The endpoint base requests are sent to (e.g. ``http://h/v1``)."""
         return self._base_url
 
     async def extract_entry(self, draft: EntryDraft) -> tuple[ExtractedEntity, ...]:
@@ -215,8 +211,6 @@ class OpenAICompatExtractor:
             await self._client.aclose()
 
     async def _extract(self, text: str) -> tuple[ExtractedEntity, ...]:
-        """POST one entry's text and return its facets (retry policy: see
-        the module docstring)."""
         headers: dict[str, str] = {}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
@@ -250,8 +244,6 @@ class OpenAICompatExtractor:
         }
 
     def _parse_response(self, response: httpx.Response) -> tuple[ExtractedEntity, ...]:
-        """Parse ``choices[0].message.content`` and validate it; any
-        deviation raises ``ExtractorError``."""
         try:
             body = response.json()
         except ValueError, RecursionError:

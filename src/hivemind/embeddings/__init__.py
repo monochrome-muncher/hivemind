@@ -20,9 +20,6 @@ if TYPE_CHECKING:
 
 
 def build_embedder(settings: Settings) -> Embedder:
-    """The ``hivemind.embeddings.build_embedder(settings)`` factory that
-    the API's lazy builder (``hivemind.api.main._build_embedder``) calls
-    to obtain the production embedder from service settings."""
     return OpenAICompatEmbedder.from_settings(settings)
 
 

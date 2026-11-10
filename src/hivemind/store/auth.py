@@ -209,7 +209,6 @@ class PgAuthenticator:
         return self._pool
 
     async def close(self) -> None:
-        """Tear down the pool (process-exit cleanup)."""
         if self._pool is not None:
             await self._pool.close()
             self._pool = None
@@ -243,8 +242,6 @@ class PgAuthenticator:
             # keep surfacing loudly.
             raise StoreUnavailable(type(exc).__name__) from None
         return credential
-
-    # -- key management (ADR 0012) ------------------------------------------
 
     async def issue_agent_key(self, agent_name: str) -> str:
         """Issue an agent key; return the raw secret once.

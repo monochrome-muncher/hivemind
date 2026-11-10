@@ -58,7 +58,6 @@ class MemoryState:
         self._cleanups: list[AgentCleanupRecord] = []
 
     def _visible(self, entry: Entry, visibility: Visibility | None) -> bool:
-        """Whether ``entry`` passes the optional visibility filter (ADR 0011)."""
         return visibility is None or entry_is_visible(entry, visibility)
 
     def _live_feedback(self) -> dict[tuple[str, str, str], Feedback]:

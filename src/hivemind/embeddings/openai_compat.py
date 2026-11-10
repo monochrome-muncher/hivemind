@@ -28,7 +28,6 @@ from hivemind.providers import (
 
 
 async def _default_sleep(delay: float) -> None:
-    """The production backoff sleep (injectable in tests)."""
     await asyncio.sleep(delay)
 
 
@@ -101,7 +100,6 @@ class OpenAICompatEmbedder:
 
     @classmethod
     def from_settings(cls, settings: Settings) -> OpenAICompatEmbedder:
-        """Build an embedder from deployment settings (SPEC.md §7)."""
         return cls(
             client=None,
             base_url=settings.embedding_endpoint,
@@ -116,7 +114,6 @@ class OpenAICompatEmbedder:
 
     @property
     def retries(self) -> int:
-        """The retry budget for transient failures (ADR 0014)."""
         return self._retries
 
     @property
@@ -131,7 +128,6 @@ class OpenAICompatEmbedder:
 
     @property
     def base_url(self) -> str:
-        """The endpoint base requests are sent to (e.g. ``http://h/v1``)."""
         return self._base_url
 
     def entry_embeddable_text(self, draft: EntryDraft) -> str:
@@ -139,7 +135,6 @@ class OpenAICompatEmbedder:
         return embeddable_text(draft.summary, draft.body, self._prefix_tokens)
 
     async def embed_text(self, text: str) -> list[float]:
-        """Embed a query or a standalone text into a fixed-dim vector."""
         return await self._embed(text)
 
     async def embed_entry(self, draft: EntryDraft) -> list[float]:
@@ -153,8 +148,6 @@ class OpenAICompatEmbedder:
             await self._client.aclose()
 
     async def _embed(self, text: str) -> list[float]:
-        """POST one text and return its vector (retry policy: see the
-        module docstring)."""
         headers: dict[str, str] = {}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"

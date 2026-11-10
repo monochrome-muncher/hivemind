@@ -193,7 +193,6 @@ def _optional(name: str, doc: str, value: float | None) -> Iterator[GaugeMetricF
 
 
 def _health_families(health: HealthUsage) -> Iterator[GaugeMetricFamily]:
-    """The fleet health gauges (ADR 0075)."""
     p = "hivemind_health_"
     yield from _optional(
         p + "helpful_with_note_ratio",
@@ -394,8 +393,6 @@ class PrometheusMetrics:
 
         @router.get(METRICS_PATH, include_in_schema=False)
         async def metrics() -> Response:
-            """Prometheus scrape target (ADR 0050). Unauthenticated: keep it
-            off the public Ingress."""
             await self.refresh_usage()
             return Response(generate_latest(self.registry), media_type=CONTENT_TYPE_LATEST)
 

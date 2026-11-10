@@ -106,9 +106,9 @@ def entry_score(
     the §6.2 defaults, i.e. ``f > 0.381``), match quality is the sort
     key and recency the tie-break — SPEC §6.4's stated intent. The
     service ships ``f = 0.8`` (``SearchConfig.recency_floor``); this
-    parameter keeps ``None`` — the pre-ADR-0022 unbounded form — as its
-    own default, because the value is a configuration decision and this
-    stays a pure function of the numbers it is handed. ``SearchConfig``
+    parameter defaults to ``None`` (unbounded), because the value is a
+    configuration decision and this stays a pure function of the numbers
+    it is handed. ``SearchConfig``
     validates it; this function does not.
 
     ``social_max`` (ADR 0070) caps the upward effect of the social
@@ -132,8 +132,8 @@ def entry_score(
         importance_factor = 1.0 + _NARROW_IMPORTANCE_STEP * (importance - _NARROW_IMPORTANCE_MID)
     else:
         importance_factor = _IMPORTANCE_BASE + _IMPORTANCE_STEP * importance
-    # Half-life decay: 0.5 ** (age / half_life). Computed via exp/log so
-    # the result is a plain float (no complex-number branch).
+    # exp/log rather than ``0.5 ** x``, so the result is a plain float
+    # (no complex-number branch).
     recency = math.exp(math.log(0.5) * (age_days / half_life_days))
     if recency_floor is not None and recency_floor > recency:
         recency = recency_floor

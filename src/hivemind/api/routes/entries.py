@@ -70,10 +70,8 @@ async def create_entry(
     try:
         # Pure parsing, no service or store I/O: a ValueError here is the
         # malformed draft (domain/entry.py raises plain ValueError and InvalidInput).
-        # Scope and author come from the credential (ADRs 0011-0012);
-        # an out-of-permission scope is a 403.
+        # An out-of-permission scope is a 403.
         resolution = resolve_write_scope(credential, payload.scope)
-        # Draft validation (SPEC.md §4.1): a malformed draft is a 422.
         draft = entry_draft(
             credential,
             resolution,

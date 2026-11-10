@@ -20,7 +20,7 @@ from collections.abc import Mapping, Sequence
 def _unique(ranked_ids: Sequence[str]) -> list[str]:
     """``ranked_ids`` with repeats dropped (first occurrence wins): a
     document appears once in a ranking, so a duplicate must neither earn
-    its gain twice (nDCG > 1, EVAL-1) nor occupy a rank."""
+    its gain twice (nDCG > 1) nor occupy a rank."""
     return list(dict.fromkeys(ranked_ids))
 
 

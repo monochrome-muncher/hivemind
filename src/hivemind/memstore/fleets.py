@@ -31,7 +31,6 @@ class FleetStore(MemoryState):
             return self._fleets.get(fleet_id)
 
     async def rename_fleet(self, fleet_id: str, name: str) -> tuple[Fleet, Fleet]:
-        """Rename a fleet (ADR 0109); see ``Store.rename_fleet``."""
         with self._lock:
             before = self._fleets.get(fleet_id)
             if before is None:

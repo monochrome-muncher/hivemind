@@ -18,8 +18,7 @@ from hivemind.services.write_warnings import WriteWarning
 
 
 def entry_dict(entry: Entry) -> dict[str, object]:
-    """A full entry as a JSON-serializable dict (body included).
-    ``entities_model`` is null when extraction was off or failed."""
+    """``entities_model`` is null when extraction was off or failed."""
     return {
         "id": entry.id,
         "kind": entry.kind.value,
@@ -162,7 +161,6 @@ def counts_dict(counts: FeedbackCounts) -> dict[str, int]:
 
 
 def feedback_dict(summary: FeedbackSummary) -> dict[str, object]:
-    """An entry's feedback as a reader sees it (ADR 0051)."""
     out: dict[str, object] = {
         **counts_dict((summary.helpful, summary.stale, summary.wrong)),
         "recent": [

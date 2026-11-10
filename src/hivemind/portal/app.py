@@ -79,7 +79,6 @@ def create_portal_app(
     transport: httpx.AsyncBaseTransport | None = None,
     timeout: float = 30.0,
 ) -> Starlette:
-    """Build the agent portal app, proxying to ``api_url``."""
     return create_proxy_app(
         api_url,
         allowed=_ALLOWED,

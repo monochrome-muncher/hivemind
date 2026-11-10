@@ -10,7 +10,6 @@ from hivemind.memstore.state import MemoryState
 
 class AuditStore(MemoryState):
     async def record_audit(self, event: AuditEvent) -> AuditRecord:
-        """Append one audit row (insert-only; ADR 0027)."""
         with self._lock:
             record = AuditRecord(
                 id=str(uuid.uuid4()),
