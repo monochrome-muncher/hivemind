@@ -32,8 +32,8 @@ import os
 import secrets
 import sys
 import uuid
-from collections.abc import Mapping
-from typing import Protocol
+from collections.abc import Callable, Mapping
+from typing import NoReturn, Protocol
 
 import asyncpg
 
@@ -465,8 +465,7 @@ async def _revoke_admin(
     return revoked
 
 
-def main() -> None:
-    """Console entry point (``hivemind-keys``)."""
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Hivemind key management (ADR 0012)")
     parser.add_argument(
         "--actor",
@@ -531,155 +530,174 @@ def main() -> None:
 
     revoke = sub.add_parser("revoke", help="revoke an agent's key (name stays reserved)")
     revoke.add_argument("--name", required=True)
+    return parser
 
-    def print_key(kind: str, key: str) -> None:
-        # The bare key on stdout, so `KEY=$(hivemind-keys ...)` still works;
-        # what it is goes to stderr, for the person reading the terminal.
-        print(f"{kind} (shown once; only its hash is stored, so save it now):", file=sys.stderr)
-        sys.stderr.flush()
-        print(key)
 
-    args = parser.parse_args()
-    actor: str = args.actor if args.actor is not None else default_actor()
-    dsn = load_settings().database_url
+def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """The argument checks argparse cannot express; each exits through ``parser.error``."""
     if args.cmd == "issue-agent" and args.home_fleet is not None:
         try:
             uuid.UUID(args.home_fleet)
         except ValueError:
             parser.error(f"--home-fleet {args.home_fleet!r} is not a fleet id (a UUID)")
-    if args.cmd == "issue-admin":
-        print_key("New admin key", asyncio.run(_issue_admin(dsn, actor=actor)))
-    elif args.cmd == "issue-agent":
-        try:
-            print_key(
-                f"New agent key for {args.name}",
-                asyncio.run(
-                    _issue_agent(
-                        dsn,
-                        args.name,
-                        actor=actor,
-                        trust_level=(
-                            TrustLevel(args.trust_level) if args.trust_level is not None else None
-                        ),
-                        home_fleet_id=args.home_fleet,
-                    )
-                ),
-            )
-        except AgentNeedsActivation as exc:
-            print(
-                f"{exc}; it is activated with exactly the level and fleet you give "
-                "(a revoked agent's old ones are not restored, ADR 0039)",
-                file=sys.stderr,
-            )
-            raise SystemExit(1) from None
-        except ActivationFlagsNotApplicable:
-            print(
-                f"agent {args.name} is already active: --trust-level / --home-fleet apply only "
-                "when activating a pending or revoked agent (change an active agent with "
-                "PATCH /v1/admin/agents/{name})",
-                file=sys.stderr,
-            )
-            raise SystemExit(1) from None
-        except UnknownFleet as exc:
-            print(f"no fleet with id {exc}; list them with GET /v1/admin/fleets", file=sys.stderr)
-            raise SystemExit(1) from None
-        except AgentRetired as exc:
-            print(
-                f"{exc} (POST /v1/admin/successions/{exc.name}/undo)",
-                file=sys.stderr,
-            )
-            raise SystemExit(1) from None
-        except FleetMergedError as exc:
-            print(
-                f"fleet {exc.fleet_id} was merged into fleet {exc.target_id}; "
-                "use the target as --home-fleet",
-                file=sys.stderr,
-            )
-            raise SystemExit(1) from None
-        except AgentKeyExists:
-            print(
-                f"agent {args.name} already holds a key; replace it with "
-                "`hivemind-keys rotate-agent --name ...` (it also replaces a key locked "
-                "from the portal)",
-                file=sys.stderr,
-            )
-            raise SystemExit(1) from None
-        except AgentNotRegistered:
-            print(
-                f"no agent registered as {args.name!r}; register it first "
-                "(POST /v1/agents, then activate it) — keys are bound to "
-                "registered names (ADR 0012)",
-                file=sys.stderr,
-            )
-            raise SystemExit(1) from None
-    elif args.cmd == "rotate-agent":
-        try:
-            print_key(
-                f"New agent key for {args.name} (the previous one stops working)",
-                asyncio.run(_rotate_agent(dsn, args.name, actor=actor)),
-            )
-        except AgentNotRegistered:
-            print(f"no agent registered as {args.name!r}", file=sys.stderr)
-            raise SystemExit(1) from None
-        except AgentNotActive as exc:
-            print(
-                f"agent {args.name} is {exc.status}: only an active agent's key is replaced. "
-                "Use `issue-agent --trust-level ... --home-fleet ...` to activate it again",
-                file=sys.stderr,
-            )
-            raise SystemExit(1) from None
-    elif args.cmd == "rotate-org":
-        print_key(
-            "New org key (the previous one stops working)",
-            asyncio.run(_rotate_org(dsn, actor=actor)),
-        )
-    elif args.cmd == "bootstrap-secret":
-        from hivemind.store.kube_secret import KubeApiError, KubeSecrets
+    if args.cmd == "revoke-admin" and (args.key is None) == (args.stored_hash is None):
+        parser.error("exactly one of --key / --hash is required")
 
-        try:
-            created = asyncio.run(
-                _bootstrap_secret(dsn, KubeSecrets.in_cluster(), args.secret, actor=actor)
-            )
-        except KubeApiError as exc:
-            print(f"{exc}; no key was issued", file=sys.stderr)
-            raise SystemExit(1) from None
-        except SecretLeftBehind as exc:
-            print(str(exc), file=sys.stderr)
-            raise SystemExit(1) from None
-        if created:
-            print("issued the admin and org keys into the configured Secret (not printed)")
-        else:
-            print("target Secret already exists; nothing issued")
-    elif args.cmd == "list":
-        asyncio.run(_list(dsn))
-    elif args.cmd == "revoke-admin":
-        if (args.key is None) == (args.stored_hash is None):
-            parser.error("exactly one of --key / --hash is required")
-        try:
-            revoked = asyncio.run(
-                _revoke_admin(dsn, raw_key=args.key, stored_hash=args.stored_hash, actor=actor)
-            )
-        except ValueError as exc:
-            print(str(exc), file=sys.stderr)
-            raise SystemExit(1) from None
-        if revoked:
-            print("revoked the admin key (issue a replacement via `hivemind-keys issue-admin`)")
-        else:
-            print(
-                "no admin key matches that identifier (check `hivemind-keys list`)",
-                file=sys.stderr,
-            )
-            raise SystemExit(1)
-    elif args.cmd == "revoke":
-        try:
-            asyncio.run(_revoke(dsn, args.name, actor=actor))
-        except AgentNotRegistered:
-            print(f"no agent registered as {args.name!r}; nothing revoked", file=sys.stderr)
-            raise SystemExit(1) from None
-        except AgentAlreadyRevoked:
-            print(f"agent {args.name} is already revoked; nothing to do")
-            return
-        print(f"revoked the key for agent {args.name} (name stays reserved)")
+
+def _print_key(kind: str, key: str) -> None:
+    # The bare key on stdout, so `KEY=$(hivemind-keys ...)` still works;
+    # what it is goes to stderr, for the person reading the terminal.
+    print(f"{kind} (shown once; only its hash is stored, so save it now):", file=sys.stderr)
+    sys.stderr.flush()
+    print(key)
+
+
+def _fail(message: str) -> NoReturn:
+    print(message, file=sys.stderr)
+    raise SystemExit(1) from None
+
+
+def _run_issue_admin(args: argparse.Namespace, dsn: str, actor: str) -> None:
+    _print_key("New admin key", asyncio.run(_issue_admin(dsn, actor=actor)))
+
+
+def _run_issue_agent(args: argparse.Namespace, dsn: str, actor: str) -> None:
+    try:
+        _print_key(
+            f"New agent key for {args.name}",
+            asyncio.run(
+                _issue_agent(
+                    dsn,
+                    args.name,
+                    actor=actor,
+                    trust_level=(
+                        TrustLevel(args.trust_level) if args.trust_level is not None else None
+                    ),
+                    home_fleet_id=args.home_fleet,
+                )
+            ),
+        )
+    except AgentNeedsActivation as exc:
+        _fail(
+            f"{exc}; it is activated with exactly the level and fleet you give "
+            "(a revoked agent's old ones are not restored, ADR 0039)"
+        )
+    except ActivationFlagsNotApplicable:
+        _fail(
+            f"agent {args.name} is already active: --trust-level / --home-fleet apply only "
+            "when activating a pending or revoked agent (change an active agent with "
+            "PATCH /v1/admin/agents/{name})"
+        )
+    except UnknownFleet as exc:
+        _fail(f"no fleet with id {exc}; list them with GET /v1/admin/fleets")
+    except AgentRetired as exc:
+        _fail(f"{exc} (POST /v1/admin/successions/{exc.name}/undo)")
+    except FleetMergedError as exc:
+        _fail(
+            f"fleet {exc.fleet_id} was merged into fleet {exc.target_id}; "
+            "use the target as --home-fleet"
+        )
+    except AgentKeyExists:
+        _fail(
+            f"agent {args.name} already holds a key; replace it with "
+            "`hivemind-keys rotate-agent --name ...` (it also replaces a key locked "
+            "from the portal)"
+        )
+    except AgentNotRegistered:
+        _fail(
+            f"no agent registered as {args.name!r}; register it first "
+            "(POST /v1/agents, then activate it) — keys are bound to "
+            "registered names (ADR 0012)"
+        )
+
+
+def _run_rotate_agent(args: argparse.Namespace, dsn: str, actor: str) -> None:
+    try:
+        _print_key(
+            f"New agent key for {args.name} (the previous one stops working)",
+            asyncio.run(_rotate_agent(dsn, args.name, actor=actor)),
+        )
+    except AgentNotRegistered:
+        _fail(f"no agent registered as {args.name!r}")
+    except AgentNotActive as exc:
+        _fail(
+            f"agent {args.name} is {exc.status}: only an active agent's key is replaced. "
+            "Use `issue-agent --trust-level ... --home-fleet ...` to activate it again"
+        )
+
+
+def _run_rotate_org(args: argparse.Namespace, dsn: str, actor: str) -> None:
+    _print_key(
+        "New org key (the previous one stops working)",
+        asyncio.run(_rotate_org(dsn, actor=actor)),
+    )
+
+
+def _run_bootstrap_secret(args: argparse.Namespace, dsn: str, actor: str) -> None:
+    from hivemind.store.kube_secret import KubeApiError, KubeSecrets
+
+    try:
+        created = asyncio.run(
+            _bootstrap_secret(dsn, KubeSecrets.in_cluster(), args.secret, actor=actor)
+        )
+    except KubeApiError as exc:
+        _fail(f"{exc}; no key was issued")
+    except SecretLeftBehind as exc:
+        _fail(str(exc))
+    if created:
+        print("issued the admin and org keys into the configured Secret (not printed)")
+    else:
+        print("target Secret already exists; nothing issued")
+
+
+def _run_list(args: argparse.Namespace, dsn: str, actor: str) -> None:
+    asyncio.run(_list(dsn))
+
+
+def _run_revoke_admin(args: argparse.Namespace, dsn: str, actor: str) -> None:
+    try:
+        revoked = asyncio.run(
+            _revoke_admin(dsn, raw_key=args.key, stored_hash=args.stored_hash, actor=actor)
+        )
+    except ValueError as exc:
+        _fail(str(exc))
+    if revoked:
+        print("revoked the admin key (issue a replacement via `hivemind-keys issue-admin`)")
+    else:
+        _fail("no admin key matches that identifier (check `hivemind-keys list`)")
+
+
+def _run_revoke(args: argparse.Namespace, dsn: str, actor: str) -> None:
+    try:
+        asyncio.run(_revoke(dsn, args.name, actor=actor))
+    except AgentNotRegistered:
+        _fail(f"no agent registered as {args.name!r}; nothing revoked")
+    except AgentAlreadyRevoked:
+        print(f"agent {args.name} is already revoked; nothing to do")
+        return
+    print(f"revoked the key for agent {args.name} (name stays reserved)")
+
+
+_COMMANDS: dict[str, Callable[[argparse.Namespace, str, str], None]] = {
+    "issue-admin": _run_issue_admin,
+    "issue-agent": _run_issue_agent,
+    "rotate-agent": _run_rotate_agent,
+    "rotate-org": _run_rotate_org,
+    "bootstrap-secret": _run_bootstrap_secret,
+    "list": _run_list,
+    "revoke-admin": _run_revoke_admin,
+    "revoke": _run_revoke,
+}
+
+
+def main() -> None:
+    """Console entry point (``hivemind-keys``)."""
+    parser = _build_parser()
+    args = parser.parse_args()
+    actor: str = args.actor if args.actor is not None else default_actor()
+    dsn = load_settings().database_url
+    _validate_args(parser, args)
+    _COMMANDS[args.cmd](args, dsn, actor)
 
 
 if __name__ == "__main__":

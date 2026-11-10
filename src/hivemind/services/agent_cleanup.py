@@ -228,7 +228,6 @@ class AgentCleanupService:
         agent = await require_agent(self._store, agent_name)
         until = until if until is not None else self._clock()
         check_window(since, until)
-        via = {"via": "portal"} if self_service else {}
         will_revoke = False
         if also_revoke:
             # Refuse before anything changes (no authenticator, unknown agent).
@@ -245,63 +244,93 @@ class AgentCleanupService:
             self_service=self_service,
             visibility=visibility,
         )
-        record = outcome.record
-        if record is not None:
+        if outcome.record is not None:
             self._changed()
-            for pin in outcome.unpinned:
-                await audit_unpins(
-                    self._store,
-                    credential,
-                    pin.entry_id,
-                    pin.fleet_id,
-                    [pin.entry_id],
-                    reason="agent_cleanup",
-                    cleanup_id=record.id,
-                    via="portal" if self_service else None,
-                )
-            await record_admin_action(
-                self._store,
-                credential,
-                AuditAction.AGENT_CLEANUP,
+            await self._audit_cleanup(
                 agent.name,
-                {
-                    "cleanup_id": record.id,
-                    "since": since.isoformat(),
-                    "until": until.isoformat(),
-                    "withdrawn": outcome.withdrawn,
-                    "ratings_set_aside": outcome.ratings_set_aside,
-                    "restored": outcome.restored,
-                    "pins_removed": len(outcome.unpinned),
-                    "also_revoke": also_revoke,
-                    **via,
-                },
+                credential,
+                outcome,
+                outcome.record,
+                since=since,
+                until=until,
+                self_service=self_service,
+                also_revoke=also_revoke,
             )
         if also_revoke and not will_revoke:
             return replace(outcome, already_revoked=True)
         if will_revoke:
-            # The cleanup is committed and audited; a failed revoke must not
-            # turn that into an error the admin would answer by running it again.
-            try:
-                await self._revoke(agent.name, credential)
-            except InvalidAgentStatus:
-                return replace(outcome, already_revoked=True)  # revoked meanwhile
-            except Exception as exc:
-                logger.exception("revoke after cleanup of %s failed", agent.name)
-                note = (
-                    "the cleanup was done, but revoking the agent failed "
-                    f"({type(exc).__name__}); revoke it from the agents list"
-                )
-                return replace(outcome, revoke_error=note)
-            if record is not None:
-                # The agent is revoked for real; a failed mark only leaves the
-                # record's badge off, and must not become an error either.
-                try:
-                    await self._store.mark_cleanup_revoked(record.id)
-                    record = replace(record, revoked=True)
-                except Exception:
-                    logger.exception("marking cleanup %s as revoked failed", record.id)
-            outcome = replace(outcome, record=record, revoked=True)
+            return await self._revoke_after_cleanup(agent.name, credential, outcome)
         return outcome
+
+    async def _audit_cleanup(
+        self,
+        agent_name: str,
+        credential: Credential,
+        outcome: CleanupOutcome,
+        record: AgentCleanupRecord,
+        *,
+        since: datetime,
+        until: datetime,
+        self_service: bool,
+        also_revoke: bool,
+    ) -> None:
+        """Audit the unpins the cleanup made, then the cleanup itself."""
+        for pin in outcome.unpinned:
+            await audit_unpins(
+                self._store,
+                credential,
+                pin.entry_id,
+                pin.fleet_id,
+                [pin.entry_id],
+                reason="agent_cleanup",
+                cleanup_id=record.id,
+                via="portal" if self_service else None,
+            )
+        await record_admin_action(
+            self._store,
+            credential,
+            AuditAction.AGENT_CLEANUP,
+            agent_name,
+            {
+                "cleanup_id": record.id,
+                "since": since.isoformat(),
+                "until": until.isoformat(),
+                "withdrawn": outcome.withdrawn,
+                "ratings_set_aside": outcome.ratings_set_aside,
+                "restored": outcome.restored,
+                "pins_removed": len(outcome.unpinned),
+                "also_revoke": also_revoke,
+                **({"via": "portal"} if self_service else {}),
+            },
+        )
+
+    async def _revoke_after_cleanup(
+        self, agent_name: str, credential: Credential, outcome: CleanupOutcome
+    ) -> CleanupOutcome:
+        """Revoke the cleaned agent and report it on ``outcome``."""
+        # The cleanup is committed and audited; a failed revoke must not
+        # turn that into an error the admin would answer by running it again.
+        try:
+            await self._revoke(agent_name, credential)
+        except InvalidAgentStatus:
+            return replace(outcome, already_revoked=True)  # revoked meanwhile
+        except Exception as exc:
+            logger.exception("revoke after cleanup of %s failed", agent_name)
+            note = (
+                "the cleanup was done, but revoking the agent failed "
+                f"({type(exc).__name__}); revoke it from the agents list"
+            )
+            return replace(outcome, revoke_error=note)
+        record = outcome.record
+        if record is not None:
+            # The agent is revoked for real; a failed mark only leaves the
+            # record's badge off, and must not become an error either.
+            try:
+                await self._store.mark_cleanup_revoked(record.id)
+                record = replace(record, revoked=True)
+            except Exception:
+                logger.exception("marking cleanup %s as revoked failed", record.id)
+        return replace(outcome, record=record, revoked=True)
 
     # -- undo and the list ---------------------------------------------------
 

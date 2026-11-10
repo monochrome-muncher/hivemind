@@ -11,7 +11,7 @@ call them with fakes.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Annotated, Any
@@ -22,6 +22,7 @@ from hivemind import wire
 from hivemind.config import SearchConfig
 from hivemind.domain.access import SCOPE_FLEET, SCOPE_ORG, SCOPE_SELF, FleetMerged
 from hivemind.domain.entry import (
+    Entry,
     EntryFilters,
     Kind,
     Source,
@@ -45,9 +46,9 @@ from hivemind.services.errors import (
 from hivemind.services.feedback import reporter_agent
 from hivemind.services.governance import GovernanceService
 from hivemind.services.read import ReadService
-from hivemind.services.search import SearchService
+from hivemind.services.search import SearchResult, SearchService
 from hivemind.services.wiring import Services
-from hivemind.services.write import WriteService
+from hivemind.services.write import CheckResult, WriteResult, WriteService
 
 logger = logging.getLogger(__name__)
 
@@ -271,6 +272,53 @@ def _feedback_precheck(
     return parsed
 
 
+def _check_reply(checked: CheckResult) -> dict[str, object]:
+    return {
+        "checked": True,
+        "related": [wire.related_dict(r) for r in checked.related],
+        "warnings": [wire.warning_dict(w) for w in checked.warnings],
+    }
+
+
+def _write_reply(written: WriteResult) -> dict[str, object]:
+    result = wire.entry_dict(written.entry)
+    result["related"] = [wire.related_dict(r) for r in written.related]
+    result["warnings"] = [wire.warning_dict(w) for w in written.warnings]
+    return result
+
+
+def _search_reply(app: McpHivemind, result: SearchResult) -> dict[str, object]:
+    """The ``hive_search`` reply; counts a degraded search with the runner."""
+    response: dict[str, object] = {
+        "count": len(result.hits),
+        "hits": [wire.hit_dict(h) for h in result.hits],
+    }
+    if result.recency is not RecencyHint.DEFAULT:
+        response["recency"] = result.recency.value  # ADR 0073: only when applied
+    if result.degraded:
+        # ADR 0048: the embedding service is down; these hits are keyword
+        # matches only, so a miss here is weaker evidence than usual.
+        response["degraded"] = DEGRADED_KEYWORD_ONLY
+        response["note"] = DEGRADED_NOTE
+        if app.on_degraded_search is not None:
+            app.on_degraded_search()
+    return response
+
+
+async def _list_reply(
+    app: McpHivemind, entries: Sequence[Entry], *, include_body: bool, relied_on_changed: bool
+) -> dict[str, object]:
+    """The ``hive_list`` reply: compact items (or full entries), each with
+    its feedback counts when ``relied_on_changed`` explains why it is listed."""
+    to_dict = wire.entry_dict if include_body else wire.list_item_dict
+    items = [to_dict(e) for e in entries]
+    if relied_on_changed and entries:  # why each is listed: its state and the reports
+        counts = await app.read_service.feedback_counts(entries)
+        for item, entry in zip(items, entries, strict=True):
+            item["feedback"] = wire.counts_dict(counts.get(entry.id, (0, 0, 0)))
+    return {"count": len(entries), "entries": items}
+
+
 # --------------------------------------------------------------------------- #
 # Tool functions (SPEC §5.2)
 # --------------------------------------------------------------------------- #
@@ -366,20 +414,13 @@ async def hive_write(
     try:
         if check:
             checked = await app.write_service.check(draft, writer=cred.visibility())
-            return {
-                "checked": True,
-                "related": [wire.related_dict(r) for r in checked.related],
-                "warnings": [wire.warning_dict(w) for w in checked.warnings],
-            }
+            return _check_reply(checked)
         written = await app.write_service.write_and_relate(draft, writer=cred.visibility())
     except _SERVICE_ERRORS as exc:  # incl. InvalidInput, e.g. an unknown see_also entry
         return _service_error(exc)
     except EmbeddingError as exc:
         return _embedding_unavailable(exc)
-    result = wire.entry_dict(written.entry)
-    result["related"] = [wire.related_dict(r) for r in written.related]
-    result["warnings"] = [wire.warning_dict(w) for w in written.warnings]
-    return result
+    return _write_reply(written)
 
 
 async def hive_search(
@@ -460,20 +501,7 @@ async def hive_search(
         )
     except _SERVICE_ERRORS as exc:
         return _service_error(exc)
-    response: dict[str, object] = {
-        "count": len(result.hits),
-        "hits": [wire.hit_dict(h) for h in result.hits],
-    }
-    if result.recency is not RecencyHint.DEFAULT:
-        response["recency"] = result.recency.value  # ADR 0073: only when applied
-    if result.degraded:
-        # ADR 0048: the embedding service is down; these hits are keyword
-        # matches only, so a miss here is weaker evidence than usual.
-        response["degraded"] = DEGRADED_KEYWORD_ONLY
-        response["note"] = DEGRADED_NOTE
-        if app.on_degraded_search is not None:
-            app.on_degraded_search()
-    return response
+    return _search_reply(app, result)
 
 
 async def hive_get(
@@ -612,13 +640,9 @@ async def hive_list(
         )
     except _SERVICE_ERRORS as exc:
         return _service_error(exc)
-    to_dict = wire.entry_dict if include_body else wire.list_item_dict
-    items = [to_dict(e) for e in entries]
-    if relied_on_changed and entries:  # why each is listed: its state and the reports
-        counts = await app.read_service.feedback_counts(entries)
-        for item, entry in zip(items, entries, strict=True):
-            item["feedback"] = wire.counts_dict(counts.get(entry.id, (0, 0, 0)))
-    return {"count": len(entries), "entries": items}
+    return await _list_reply(
+        app, entries, include_body=include_body, relied_on_changed=relied_on_changed
+    )
 
 
 async def hive_withdraw(

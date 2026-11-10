@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
 from urllib.parse import quote
 
@@ -102,8 +102,17 @@ def create_proxy_app(
     base = api_url.rstrip("/")
     if not base:
         raise ValueError(f"{api_url_setting} is required")
-    refusal = f"{name} does not forward this call"
     client = httpx.AsyncClient(base_url=base, verify=verify, transport=transport, timeout=timeout)
+    proxy = _ApiProxy(client, allowed, refusal=f"{name} does not forward this call")
+    return Starlette(
+        routes=_routes(proxy, static_dir, shared_static),
+        middleware=[Middleware(SecurityHeaders), Middleware(StaticCacheHeaders)],
+        lifespan=_closing(client),
+    )
+
+
+def _closing(client: httpx.AsyncClient) -> Callable[[Starlette], AbstractAsyncContextManager[None]]:
+    """A lifespan that closes ``client`` on shutdown."""
 
     @asynccontextmanager
     async def lifespan(_app: Starlette) -> AsyncIterator[None]:
@@ -112,18 +121,61 @@ def create_proxy_app(
         finally:
             await client.aclose()
 
-    async def proxy(request: Request) -> Response:
+    return lifespan
+
+
+def _routes(
+    proxy: _ApiProxy, static_dir: Path, shared_static: tuple[Path, Iterable[str]] | None
+) -> list[BaseRoute]:
+    routes: list[BaseRoute] = [
+        Route("/", _index(static_dir), name="index"),
+        Route("/healthz", _healthz, name="healthz"),
+        Route(
+            "/v1/{path:path}",
+            proxy.forward,
+            methods=["GET", "POST", "PATCH", "PUT", "DELETE"],
+            name="proxy",
+        ),
+    ]
+    if shared_static is not None:
+        shared_dir, names = shared_static
+        for file_name in names:
+            # Exact names only: nothing else of the other folder is served.
+            routes.append(Route(f"/static/{file_name}", _file(shared_dir / file_name)))
+    routes.append(Mount("/static", StaticFiles(directory=static_dir), name="static"))
+    return routes
+
+
+def _index(static_dir: Path) -> Callable[[Request], Awaitable[Response]]:
+    """The route endpoint serving the UI's ``index.html``."""
+
+    async def index(_request: Request) -> Response:
+        return FileResponse(static_dir / "index.html", headers={"Cache-Control": "no-cache"})
+
+    return index
+
+
+async def _healthz(_request: Request) -> Response:
+    """The app's own probe — does not depend on the API being up."""
+    return JSONResponse({"status": "ok"})
+
+
+class _ApiProxy:
+    """Forwards the allowlisted ``/v1/*`` calls to ``hivemind-api`` through
+    ``client``, refusing the rest with the API's own error envelope."""
+
+    def __init__(self, client: httpx.AsyncClient, allowed: Allowlist, *, refusal: str) -> None:
+        self._client = client
+        self._allowed = allowed
+        self._refusal = refusal
+
+    async def forward(self, request: Request) -> Response:
         path = request.path_params["path"]
-        if not allows(allowed, request.method, path):
-            return _error(404, "not_proxied", refusal)
-        # ADR 0040: ``path`` is percent-DECODED by Starlette. Re-quote every
-        # segment so a name holding ``?``, ``#``, ``%`` or ``/`` reaches the
-        # resource the allowlist matched, and refuse dot segments (which
-        # httpx would collapse onto a different route).
-        segments = path.split("/")
-        if any(segment in (".", "..") for segment in segments):
-            return _error(404, "not_proxied", refusal)
-        upstream_path = "/v1/" + "/".join(quote(segment, safe="") for segment in segments)
+        if not allows(self._allowed, request.method, path):
+            return _error(404, "not_proxied", self._refusal)
+        upstream_path = _upstream_path(path)
+        if upstream_path is None:
+            return _error(404, "not_proxied", self._refusal)
         # The API's own pre-auth guard (ADR 0040), applied here too: the
         # panel would otherwise buffer any body, with no key at all, before
         # the API got the chance to refuse it.
@@ -134,55 +186,52 @@ def create_proxy_app(
             return _error(
                 413, "payload_too_large", f"request body exceeds {MAX_REQUEST_BODY_BYTES} bytes"
             )
-        headers = {
-            name: value
-            for name in _FORWARDED_REQUEST_HEADERS
-            if (value := request.headers.get(name)) is not None
-        }
         try:
-            upstream = await client.request(
+            upstream = await self._client.request(
                 request.method,
                 upstream_path,
                 params=str(request.query_params),
-                headers=headers,
+                headers=_forwarded_headers(request),
                 content=body,
             )
         except httpx.HTTPError as exc:
             # The exception type only: its message can echo the request.
             logger.warning("hivemind-api unreachable: %s", type(exc).__name__)
             return _error(502, "api_unreachable", "hivemind-api could not be reached")
-        response = Response(
-            content=upstream.content,
-            status_code=upstream.status_code,
-            media_type=upstream.headers.get("content-type"),
-        )
-        # Some of these bodies are raw keys (admin create agent, admin activate, agent key replace, org-key rotate).
-        response.headers["Cache-Control"] = "no-store"
-        return response
+        return _relay(upstream)
 
-    async def index(_request: Request) -> Response:
-        return FileResponse(static_dir / "index.html", headers={"Cache-Control": "no-cache"})
 
-    async def healthz(_request: Request) -> Response:
-        """The app's own probe — does not depend on the API being up."""
-        return JSONResponse({"status": "ok"})
+def _upstream_path(path: str) -> str | None:
+    """The API path for the (decoded) proxied ``path``, or ``None`` for one
+    with a dot segment."""
+    # ADR 0040: ``path`` is percent-DECODED by Starlette. Re-quote every
+    # segment so a name holding ``?``, ``#``, ``%`` or ``/`` reaches the
+    # resource the allowlist matched, and refuse dot segments (which
+    # httpx would collapse onto a different route).
+    segments = path.split("/")
+    if any(segment in (".", "..") for segment in segments):
+        return None
+    return "/v1/" + "/".join(quote(segment, safe="") for segment in segments)
 
-    routes: list[BaseRoute] = [
-        Route("/", index),
-        Route("/healthz", healthz),
-        Route("/v1/{path:path}", proxy, methods=["GET", "POST", "PATCH", "PUT", "DELETE"]),
-    ]
-    if shared_static is not None:
-        shared_dir, names = shared_static
-        for file_name in names:
-            # Exact names only: nothing else of the other folder is served.
-            routes.append(Route(f"/static/{file_name}", _file(shared_dir / file_name)))
-    routes.append(Mount("/static", StaticFiles(directory=static_dir), name="static"))
-    return Starlette(
-        routes=routes,
-        middleware=[Middleware(SecurityHeaders), Middleware(StaticCacheHeaders)],
-        lifespan=lifespan,
+
+def _forwarded_headers(request: Request) -> dict[str, str]:
+    return {
+        name: value
+        for name in _FORWARDED_REQUEST_HEADERS
+        if (value := request.headers.get(name)) is not None
+    }
+
+
+def _relay(upstream: httpx.Response) -> Response:
+    """The API's answer, marked uncacheable."""
+    response = Response(
+        content=upstream.content,
+        status_code=upstream.status_code,
+        media_type=upstream.headers.get("content-type"),
     )
+    # Some of these bodies are raw keys (admin create agent, admin activate, agent key replace, org-key rotate).
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 def _file(path: Path) -> Callable[[Request], Awaitable[Response]]:
