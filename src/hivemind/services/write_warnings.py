@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from hivemind.domain.access import SCOPE_FLEET, SCOPE_ORG
@@ -149,55 +149,74 @@ def write_warnings(
     """The warnings for ``draft``, given the entries it supersedes and the
     ones it links with ``see_also`` (empty when not loaded)."""
     superseded, linked = tuple(superseded), tuple(linked)
-    found: list[WriteWarning] = []
+    occurred = draft.resolved_occurred_at()
+    found = (
+        _local_path_warning(draft),
+        _foreign_link_warning(draft, linked),
+        _backdated_successor_warning(occurred, superseded),
+        _fresh_consolidation_warning(occurred, superseded),
+        _no_primary_source_warning(draft),
+        _sources_dropped_warning(draft, superseded),
+    )
+    return tuple(w for w in found if w is not None)
 
+
+def _local_path_warning(draft: EntryDraft) -> WriteWarning | None:
     if draft.scope in (SCOPE_ORG, SCOPE_FLEET) and has_local_path(
         f"{draft.summary}\n{draft.body or ''}"
     ):
-        found.append(
-            WriteWarning(
-                "local_path",
-                f"a {draft.scope} entry names a local path; make it repo-relative, "
-                "or put the local detail in a self entry that links here",
-            )
+        return WriteWarning(
+            "local_path",
+            f"a {draft.scope} entry names a local path; make it repo-relative, "
+            "or put the local detail in a self entry that links here",
         )
+    return None
 
-    if draft.scope == SCOPE_FLEET:
-        # Only see_also can reach another fleet's entry: may_supersede
-        # already refuses a foreign supersession target.
-        foreign = [e for e in linked if e.scope == SCOPE_FLEET and e.fleet_id != draft.fleet_id]
-        if foreign:
-            found.append(
-                WriteWarning(
-                    "foreign_link",
-                    f"links another fleet's entry ({_ids(foreign)}); restate what applies "
-                    "here instead of relaying it, or write it as self",
-                )
-            )
 
-    occurred = draft.resolved_occurred_at()
+def _foreign_link_warning(draft: EntryDraft, linked: Sequence[Entry]) -> WriteWarning | None:
+    if draft.scope != SCOPE_FLEET:
+        return None
+    # Only see_also can reach another fleet's entry: may_supersede
+    # already refuses a foreign supersession target.
+    foreign = [e for e in linked if e.scope == SCOPE_FLEET and e.fleet_id != draft.fleet_id]
+    if not foreign:
+        return None
+    return WriteWarning(
+        "foreign_link",
+        f"links another fleet's entry ({_ids(foreign)}); restate what applies "
+        "here instead of relaying it, or write it as self",
+    )
+
+
+def _backdated_successor_warning(
+    occurred: datetime, superseded: Sequence[Entry]
+) -> WriteWarning | None:
     backdated = [e for e in superseded if e.occurred_at > occurred]
-    if backdated:
-        found.append(
-            WriteWarning(
-                "backdated_successor",
-                f"occurred_at is earlier than the entry it supersedes ({_ids(backdated)}); "
-                "a successor should not predate its predecessor",
-            )
-        )
+    if not backdated:
+        return None
+    return WriteWarning(
+        "backdated_successor",
+        f"occurred_at is earlier than the entry it supersedes ({_ids(backdated)}); "
+        "a successor should not predate its predecessor",
+    )
 
+
+def _fresh_consolidation_warning(
+    occurred: datetime, superseded: Sequence[Entry]
+) -> WriteWarning | None:
     if len(superseded) >= 2 and occurred - max(e.occurred_at for e in superseded) > (
         _FRESH_CONSOLIDATION_GAP
     ):
-        found.append(
-            WriteWarning(
-                "fresh_consolidation",
-                "occurred_at is more than a day after the newest superseded entry; if this "
-                "restates them without new evidence, set occurred_at to the newest "
-                "observation; keep today's date only if you observed or re-checked it today",
-            )
+        return WriteWarning(
+            "fresh_consolidation",
+            "occurred_at is more than a day after the newest superseded entry; if this "
+            "restates them without new evidence, set occurred_at to the newest "
+            "observation; keep today's date only if you observed or re-checked it today",
         )
+    return None
 
+
+def _no_primary_source_warning(draft: EntryDraft) -> WriteWarning | None:
     # A synthesis grounded only in other entries: sources that all link to
     # entries, or none at all while it supersedes or links entries.
     if (
@@ -206,23 +225,22 @@ def write_warnings(
         and all(is_entry_link(src) for src in draft.sources)
         and (draft.sources or draft.supersedes or draft.see_also)
     ):
-        found.append(
-            WriteWarning(
-                "no_primary_source",
-                "no source outside Hivemind entries; add the primary source "
-                "(file, URL, session) the evidence came from, or say in 'body' how it was observed",
-            )
+        return WriteWarning(
+            "no_primary_source",
+            "no source outside Hivemind entries; add the primary source "
+            "(file, URL, session) the evidence came from, or say in 'body' how it was observed",
         )
+    return None
 
+
+def _sources_dropped_warning(draft: EntryDraft, superseded: Sequence[Entry]) -> WriteWarning | None:
     kept = {(s.type, s.ref) for s in draft.sources}
     dropped = [
         e for e in superseded if e.sources and not kept & {(s.type, s.ref) for s in e.sources}
     ]
-    if dropped:
-        found.append(
-            WriteWarning(
-                "sources_dropped",
-                f"drops the sources of {_ids(dropped)}; carry them forward in 'sources'",
-            )
-        )
-    return tuple(found)
+    if not dropped:
+        return None
+    return WriteWarning(
+        "sources_dropped",
+        f"drops the sources of {_ids(dropped)}; carry them forward in 'sources'",
+    )

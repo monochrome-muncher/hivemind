@@ -11,14 +11,14 @@ import asyncio
 import logging
 import os
 
-from hivemind.config import configure_logging, load_settings
+from hivemind.config import Settings, configure_logging, load_settings
 from hivemind.domain.access import KEY_LOCKED_MESSAGE, KeyLocked, StoreUnavailable
 from hivemind.extractor import build_extractor
 from hivemind.mcp.app import McpHivemind
 from hivemind.mcp.local_embedder import LocalEmbedder
 from hivemind.mcp.server import build_server
 from hivemind.memstore import MemoryStore
-from hivemind.ports import Credential
+from hivemind.ports import Authenticator, Credential, Embedder, Extractor, Store
 from hivemind.services.wiring import build_services, log_startup
 
 logger = logging.getLogger(__name__)
@@ -93,51 +93,72 @@ def main_pg() -> None:
     embedder = build_embedder(settings)
     authenticator = build_authenticator(settings)
     extractor = build_extractor(settings)  # optional (ADR 0016): None when the endpoint is unset
+    asyncio.run(_serve_pg(settings, raw_key, store, embedder, authenticator, extractor))
 
-    async def _run() -> None:
-        try:
-            credential = await authenticator.verify(
-                raw_key
-            )  # fail fast; re-verified per call below
-        except KeyLocked:
-            raise SystemExit(KEY_LOCKED_MESSAGE) from None
-        except StoreUnavailable as exc:
-            raise SystemExit(
-                f"cannot verify HIVEMIND_MCP_KEY: the database is unreachable ({exc.cause}); "
-                "check HIVEMIND_DATABASE_URL and that Postgres is up"
-            ) from None
-        if credential is None:
-            raise SystemExit(_mcp_key_unknown_hint())
-        services = build_services(
-            store,
-            embedder,
-            settings.search_config(),
-            extractor=extractor,
-            authenticator=authenticator,
-            require_stored_keys=settings.require_stored_keys,
-        )
-        app = McpHivemind.from_services(store, services, credential=credential)
 
-        async def current_credential() -> Credential | None:
-            # Re-verified on EVERY call (ADR 0042) so revocation, demotion
-            # or re-homing applies at once, not at the next restart.
-            return await authenticator.verify(raw_key)
+async def _serve_pg(
+    settings: Settings,
+    raw_key: str,
+    store: Store,
+    embedder: Embedder,
+    authenticator: Authenticator,
+    extractor: Extractor | None,
+) -> None:
+    """Verify the key, then serve stdio until it ends; close the pools after."""
+    credential = await _verify_startup_key(authenticator, raw_key)
+    services = build_services(
+        store,
+        embedder,
+        settings.search_config(),
+        extractor=extractor,
+        authenticator=authenticator,
+        require_stored_keys=settings.require_stored_keys,
+    )
+    app = McpHivemind.from_services(store, services, credential=credential)
 
-        server = build_server(
-            app,
-            credential_provider=current_credential,
-            require_stored_keys=settings.require_stored_keys,
-        )
-        try:
-            await server.run_stdio_async()
-        finally:
-            for closer in (
-                getattr(store, "close", None),
-                getattr(embedder, "aclose", None),
-                getattr(authenticator, "close", None),
-                getattr(extractor, "aclose", None),  # the extractor's HTTP client (when enabled)
-            ):
-                if closer is not None:
-                    await closer()
+    async def current_credential() -> Credential | None:
+        # Re-verified on EVERY call (ADR 0042) so revocation, demotion
+        # or re-homing applies at once, not at the next restart.
+        return await authenticator.verify(raw_key)
 
-    asyncio.run(_run())
+    server = build_server(
+        app,
+        credential_provider=current_credential,
+        require_stored_keys=settings.require_stored_keys,
+    )
+    try:
+        await server.run_stdio_async()
+    finally:
+        await _close_all(store, embedder, authenticator, extractor)
+
+
+async def _verify_startup_key(authenticator: Authenticator, raw_key: str) -> Credential:
+    """The credential of ``raw_key``, or exit with the reason it is unusable."""
+    try:
+        credential = await authenticator.verify(raw_key)  # fail fast; re-verified per call below
+    except KeyLocked:
+        raise SystemExit(KEY_LOCKED_MESSAGE) from None
+    except StoreUnavailable as exc:
+        raise SystemExit(
+            f"cannot verify HIVEMIND_MCP_KEY: the database is unreachable ({exc.cause}); "
+            "check HIVEMIND_DATABASE_URL and that Postgres is up"
+        ) from None
+    if credential is None:
+        raise SystemExit(_mcp_key_unknown_hint())
+    return credential
+
+
+async def _close_all(
+    store: Store,
+    embedder: Embedder,
+    authenticator: Authenticator,
+    extractor: Extractor | None,
+) -> None:
+    for closer in (
+        getattr(store, "close", None),
+        getattr(embedder, "aclose", None),
+        getattr(authenticator, "close", None),
+        getattr(extractor, "aclose", None),  # the extractor's HTTP client (when enabled)
+    ):
+        if closer is not None:
+            await closer()

@@ -140,6 +140,28 @@ def register_tool(
     server.tool(name=name, description=description, structured_output=False)(_tool)
 
 
+async def _acting_app(
+    app: McpHivemind,
+    credential_provider: Callable[[], Credential | Awaitable[Credential | None] | None] | None,
+    require_stored_keys: bool,
+) -> McpHivemind | None:
+    """The acting ``McpHivemind`` for this dispatch, or ``None`` when
+    the provider yields no credential (fail closed, ADR 0042)."""
+    if credential_provider is None:
+        fixed = app.credential.effective(require_stored_keys)  # ADR 0082, as below
+        return app if fixed == app.credential else replace(app, credential=fixed)
+    resolved = credential_provider()
+    credential = await resolved if isinstance(resolved, Awaitable) else resolved
+    if credential is None:
+        return None
+    # ADR 0082: a dev-mode credential sits at trust level 0 when the
+    # deployment requires stored keys.
+    credential = credential.effective(require_stored_keys)
+    if credential == app.credential:
+        return app
+    return replace(app, credential=credential)
+
+
 def build_server(
     app: McpHivemind,
     *,
@@ -168,28 +190,11 @@ def build_server(
         instructions=contract.INSTRUCTIONS,
     )
 
-    async def resolve_app() -> McpHivemind | None:
-        """The acting ``McpHivemind`` for this dispatch, or ``None`` when
-        the provider yields no credential (fail closed, ADR 0042)."""
-        if credential_provider is None:
-            fixed = app.credential.effective(require_stored_keys)  # ADR 0082, as below
-            return app if fixed == app.credential else replace(app, credential=fixed)
-        resolved = credential_provider()
-        credential = await resolved if isinstance(resolved, Awaitable) else resolved
-        if credential is None:
-            return None
-        # ADR 0082: a dev-mode credential sits at trust level 0 when the
-        # deployment requires stored keys.
-        credential = credential.effective(require_stored_keys)
-        if credential == app.credential:
-            return app
-        return replace(app, credential=credential)
-
     async def dispatch(
         verb: Callable[..., Awaitable[dict[str, object]]], **kwargs: Any
     ) -> dict[str, object]:
         try:
-            acting = await resolve_app()
+            acting = await _acting_app(app, credential_provider, require_stored_keys)
             if acting is None:
                 return _error(
                     ERR_UNAUTHENTICATED,

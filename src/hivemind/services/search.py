@@ -101,6 +101,16 @@ class SearchResult:
     recency: RecencyHint = RecencyHint.DEFAULT
 
 
+@dataclass(frozen=True, slots=True)
+class _ScoredCandidates:
+    """The candidates that survived the state filter, in fused-rank order,
+    with each one's score and feedback signals."""
+
+    entries: list[Entry]
+    scores: dict[str, float]
+    feedback: dict[str, FeedbackSignals]
+
+
 NowFn = Callable[[], datetime]
 
 logger = logging.getLogger(__name__)
@@ -215,49 +225,81 @@ class SearchService:
         # Validate before any embedder or store call (ADR 0040).
         check_query(query)
         check_pagination(limit, offset)
+        filters = self._validated_filters(filters, visibility)
+        limit = limit if limit is not None else self._config.default_limit
+        offset = offset or 0
+        applied = self._config.applied_hint(recency)
+
+        fused, degraded = await self._fused_candidates(query, filters, visibility)
+        if not fused:
+            return SearchResult([], degraded, applied)
+
+        entries, signals = await self._fetch_candidates(list(fused), visibility)
+        scored = self._score_candidates(entries, signals, fused, filters, recency)
+        # Run after the two concurrent reads above, never beside them (ADR 0059).
+        ordered, similar = await self._rank_versions(scored, explore)
+        page = ordered[offset : offset + limit]
+        hits = await self._page_hits(page, scored, similar, filters, visibility)
+        return SearchResult(hits, degraded, applied)
+
+    @staticmethod
+    def _validated_filters(
+        filters: EntryFilters | None, visibility: Visibility | None
+    ) -> EntryFilters:
+        """The caller's filters, validated, with the own-author filter applied."""
         filters = filters or EntryFilters()
         filters.validate()
         if visibility is not None:
             filters = own_author_filter(filters, visibility)
-        limit = limit if limit is not None else self._config.default_limit
-        offset = offset or 0
-        top_k = self._config.candidate_top_k
-        applied = self._config.applied_hint(recency)
+        return filters
 
-        # 1. Both streams concurrently (PERF-4); ``vector_ids`` is None when
+    async def _fused_candidates(
+        self, query: str, filters: EntryFilters, visibility: Visibility | None
+    ) -> tuple[dict[str, float], bool]:
+        """The RRF-fused candidate ids with their fused scores (SPEC.md §6.2,
+        configurable weights), and whether the vector stream was lost."""
+        top_k = self._config.candidate_top_k
+        # Both streams concurrently (PERF-4); ``vector_ids`` is None when
         # the embedder failed (ADR 0048).
         keyword_ids, vector_ids = await _gather(
             self._store.search_keyword(query, filters, top_k, visibility=visibility),
             self._vector_stream(query, filters, top_k, visibility),
         )
-
-        # 2. RRF fusion (configurable weights, SPEC.md §6.2).
-        degraded = vector_ids is None
         fused = rrf_fuse(
             [keyword_ids, vector_ids or []],
             k=self._config.rrf_k,
             weights=[self._config.weight_keyword, self._config.weight_vector],
         )
-        if not fused:
-            return SearchResult([], degraded, applied)
+        return fused, vector_ids is None
 
-        # 3. Fetch candidates + batched feedback signals.
-        candidate_ids = list(fused)
-        entries, signals = await _gather(
+    async def _fetch_candidates(
+        self, candidate_ids: list[str], visibility: Visibility | None
+    ) -> tuple[Mapping[str, Entry], Mapping[str, FeedbackSignals]]:
+        """The candidate entries and their batched feedback signals, read
+        concurrently."""
+        return await _gather(
             self._store.get_entries(candidate_ids),
             self._store.feedback_signals(
                 candidate_ids, count_supersedes=True, visibility=visibility
             ),
         )
 
-        # 4. Decay-aware rescore (SPEC.md §6.4).
+    def _score_candidates(
+        self,
+        entries: Mapping[str, Entry],
+        signals: Mapping[str, FeedbackSignals],
+        fused: Mapping[str, float],
+        filters: EntryFilters,
+        recency: RecencyHint,
+    ) -> _ScoredCandidates:
+        """Decay-aware rescore of the fused candidates (SPEC.md §6.4)."""
         now = self._now_fn()
         scored: list[Entry] = []
         entry_scores: dict[str, float] = {}
         entry_feedback: dict[str, FeedbackSignals] = {}
         # Fused-rank order, not row order: ties are common and the stable
         # sorts below keep this order (SP-5).
-        for entry in (entries[eid] for eid in candidate_ids if eid in entries):
+        for entry in (entries[eid] for eid in fused if eid in entries):
             if not filters.include_inactive and entry.state is not EntryState.ACTIVE:
                 continue
             entry_signals = signals.get(entry.id, NO_SIGNALS)
@@ -285,52 +327,66 @@ class SearchService:
             )
             entry_scores[entry.id] = score
             scored.append(entry)
+        return _ScoredCandidates(scored, entry_scores, entry_feedback)
 
-        # 5. Version groups (ADR 0074, off unless configured), then the
-        # supersession ranking invariant (SPEC.md §6.3). Run after the two
-        # concurrent reads above, never beside them (ADR 0059).
+    async def _rank_versions(
+        self, candidates: _ScoredCandidates, explore: bool
+    ) -> tuple[list[Entry], dict[str, tuple[SimilarEntry, ...]]]:
+        """The display order: version groups (ADR 0074, off unless
+        configured), then the supersession ranking invariant (SPEC.md §6.3),
+        then the opt-in diversity re-order (ADR 0078; never on the default
+        path). Also the similar-entry lists the groups give each hit."""
+        scored = candidates.entries
         version_groups: list[list[Entry]] = []
         threshold = self._config.version_group_min_similarity
-        # With grouping and explore both on, explore's candidates (every
-        # scored entry) are a superset of the grouped ones: read the
-        # similarities once. A failed shared read leaves each step to read
-        # (and fail) on its own, as when only one is on.
-        shared: dict[tuple[str, str], float] | None = None
-        if threshold is not None and explore and len(scored) > 1:
-            try:
-                shared = await self._store.pairwise_similarity([e.id for e in scored])
-            except Exception:
-                logger.warning("shared similarity read failed", exc_info=True)
+        shared = await self._shared_similarity(scored, explore)
         if threshold is not None:
             version_groups = await self._version_groups(
-                scored, entry_scores, entry_feedback, threshold, shared
+                scored, candidates.scores, candidates.feedback, threshold, shared
             )
-        ordered = apply_supersession_invariant(
-            scored, entry_scores, version_groups=[[m.id for m in g] for g in version_groups]
-        )
-        similar = _similar_map(version_groups)
-
-        # 5b. Opt-in diversity re-order (ADR 0078); never on the default path.
+        group_ids = [[m.id for m in g] for g in version_groups]
+        ordered = apply_supersession_invariant(scored, candidates.scores, version_groups=group_ids)
         if explore and len(ordered) > 1:
-            ordered = await self._explore_order(
-                ordered, entry_scores, [[m.id for m in g] for g in version_groups], shared
-            )
+            ordered = await self._explore_order(ordered, candidates.scores, group_ids, shared)
+        return ordered, _similar_map(version_groups)
 
-        # 6. Pagination (SPEC.md §5.3: limit/offset on search and list).
-        page = ordered[offset : offset + limit]
+    async def _shared_similarity(
+        self, scored: list[Entry], explore: bool
+    ) -> dict[tuple[str, str], float] | None:
+        """With grouping and explore both on, explore's candidates (every
+        scored entry) are a superset of the grouped ones: read the
+        similarities once. A failed shared read leaves each step to read
+        (and fail) on its own, as when only one is on."""
+        if self._config.version_group_min_similarity is None or not explore or len(scored) < 2:
+            return None
+        try:
+            return await self._store.pairwise_similarity([e.id for e in scored])
+        except Exception:
+            logger.warning("shared similarity read failed", exc_info=True)
+            return None
+
+    async def _page_hits(
+        self,
+        page: list[Entry],
+        candidates: _ScoredCandidates,
+        similar: Mapping[str, tuple[SimilarEntry, ...]],
+        filters: EntryFilters,
+        visibility: Visibility | None,
+    ) -> list[Hit]:
+        """The hits for one page (SPEC.md §5.3: limit/offset on search and
+        list), with the upstream markers read for the page only."""
         upstream = await self._upstream_changes(page, visibility)
-        hits = [
+        return [
             self._to_hit(
                 entry,
-                entry_scores[entry.id],
-                entry_feedback[entry.id],
+                candidates.scores[entry.id],
+                candidates.feedback[entry.id],
                 with_state=filters.include_inactive,
                 similar=similar.get(entry.id, ()),
                 upstream_changed=upstream.get(entry.id, ()),
             )
             for entry in page
         ]
-        return SearchResult(hits, degraded, applied)
 
     async def _upstream_changes(
         self, page: list[Entry], visibility: Visibility | None
