@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 import asyncpg
 import pytest
 from tests.fakes import FakeAuthenticator
-from tests.pg import ensure_migrated, reset_tables
+from tests.pg import ensure_migrated, reset_tables, wait_until_blocked
 
 from hivemind.config import Settings
 from hivemind.domain.access import AgentStatus, TrustLevel
@@ -85,7 +85,7 @@ async def test_a_concurrent_supersede_of_a_junk_memory_is_not_overwritten(pool) 
         taken,
     )
     task = asyncio.create_task(store.cleanup_agent("bad", SINCE, UNTIL, cleaned_by="admin:1"))
-    await asyncio.sleep(0.4)
+    await wait_until_blocked(dsn)
     assert not task.done()  # waiting on the row lock
     await tx.commit()
     await writer.close()
@@ -111,7 +111,7 @@ async def test_an_agents_rating_in_flight_waits_and_then_counts_again(pool) -> N
         "stale",
     )
     task = asyncio.create_task(store.cleanup_agent("bad", SINCE, UNTIL, cleaned_by="admin:1"))
-    await asyncio.sleep(0.4)
+    await wait_until_blocked(dsn)
     assert not task.done()
     await tx.commit()
     await rater.close()

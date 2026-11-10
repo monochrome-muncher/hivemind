@@ -19,6 +19,8 @@ probes with one connection, and skips with the messages
 
 from __future__ import annotations
 
+import asyncio
+
 import asyncpg
 import pytest
 
@@ -98,6 +100,35 @@ async def reset_tables(dsn: str) -> None:
             _tables[dsn] = names
         async with conn.transaction():
             await conn.execute("".join(f'DELETE FROM "{name}"; ' for name in names))
+    finally:
+        await conn.close()
+
+
+async def wait_until_blocked(dsn: str, count: int = 1, *, timeout: float = 10.0) -> None:
+    """Return once ``count`` sessions in this database are waiting on a lock.
+
+    For the tests that hold a lock on one connection, start the operation
+    under test as a task and assert it waits. A fixed sleep before
+    ``assert not task.done()`` passes just as well when the task has not
+    reached Postgres yet; this returns only when Postgres itself reports the
+    waiters, and fails if they never block. Each xdist worker has its own
+    database, so another worker's waiters are not counted.
+    """
+    conn = await asyncpg.connect(dsn)
+    try:
+        deadline = asyncio.get_running_loop().time() + timeout
+        while True:
+            waiting = await conn.fetchval(
+                "SELECT count(*) FROM pg_stat_activity "
+                "WHERE datname = current_database() AND wait_event_type = 'Lock'"
+            )
+            if waiting >= count:
+                return
+            if asyncio.get_running_loop().time() > deadline:
+                raise AssertionError(
+                    f"{waiting} session(s) waiting on a lock after {timeout} s, expected {count}"
+                )
+            await asyncio.sleep(0.005)
     finally:
         await conn.close()
 

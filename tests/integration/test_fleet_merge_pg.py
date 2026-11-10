@@ -9,7 +9,7 @@ import asyncio
 import asyncpg
 import pytest
 from tests.fakes import FakeEmbedder, make_search_config
-from tests.pg import ensure_migrated, reset_tables
+from tests.pg import ensure_migrated, reset_tables, wait_until_blocked
 
 from hivemind.config import Settings
 from hivemind.domain.access import FleetBusy, FleetMerged, TrustLevel
@@ -102,7 +102,7 @@ async def test_a_write_in_flight_across_the_merge_waits_and_is_then_refused(pool
     )
     write = asyncio.create_task(store.create_entry(_draft(source, "in flight"), None))
     pin = asyncio.create_task(store.pin_entry(source, target, "lead", 10))
-    await asyncio.sleep(0.4)
+    await wait_until_blocked(dsn, 2)
     assert not write.done() and not pin.done()  # both wait on the row lock
     await tx.commit()
     await merge.close()
@@ -154,7 +154,7 @@ async def test_a_merge_waits_for_a_write_in_flight_and_moves_it(pool) -> None:
     merge = asyncio.create_task(
         store.merge_fleets(source, target_fleet_id=target, merged_by="admin:1")
     )
-    await asyncio.sleep(0.4)
+    await wait_until_blocked(dsn)
     assert not merge.done()
     await tx.commit()
     await writer.close()
