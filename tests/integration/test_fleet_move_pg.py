@@ -24,8 +24,8 @@ from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
 from hivemind.services.write import WriteService
 from hivemind.store import PgAuthenticator, PgStore
-from hivemind.store import pgstore as pgstore_module
 from hivemind.store.keys import _issue_admin
+from hivemind.store.pgstore import fleet_guards
 
 
 @pytest.fixture
@@ -135,7 +135,7 @@ async def test_a_write_into_the_target_waits_for_the_move_too(
     pool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     dsn, store, _ = pool
-    monkeypatch.setattr(pgstore_module, "WRITE_LOCK_TIMEOUT", "300ms")  # not the shipped 3s
+    monkeypatch.setattr(fleet_guards, "WRITE_LOCK_TIMEOUT", "300ms")  # not the shipped 3s
     _, target = await _fleets_and_agents(store)
     await store.register_agent("cat")
     await store.activate_agent("cat", trust_level=TrustLevel.CONTRIBUTOR, home_fleet_id=target)

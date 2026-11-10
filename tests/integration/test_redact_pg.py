@@ -206,7 +206,7 @@ async def test_a_failed_redaction_changes_nothing(pool, monkeypatch) -> None:
     dsn, dim, store = pool
     entry = await _leaky(store, dim)
     await store.withdraw_entry(entry.id, None, by_user="admin")
-    from hivemind.store import pgstore as module
+    from hivemind.store.pgstore import entries as module
 
     monkeypatch.setattr(module, "REDACT_DROP_LINKS", "DELETE FROM no_such_table")
     with pytest.raises(asyncpg.PostgresError):

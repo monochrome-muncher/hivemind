@@ -16,7 +16,7 @@ from tests.pg import ensure_migrated, reset_tables
 from hivemind.config import Settings
 from hivemind.domain.entry import EntryDraft, Kind
 from hivemind.store import PgStore
-from hivemind.store import pgstore as pgstore_module
+from hivemind.store.pgstore import fleet_merge as fleet_merge_sql
 
 ENTRIES = 6
 
@@ -133,7 +133,7 @@ async def test_the_merge_undo_and_move_statements_are_hot_updates(pool) -> None:
         await tx.start()
         try:
             before = await counts(conn)
-            restored = await conn.fetch(pgstore_module.RESTORE_ENTRIES, merge_id, source, target)
+            restored = await conn.fetch(fleet_merge_sql.RESTORE_ENTRIES, merge_id, source, target)
             assert len(restored) == ENTRIES
             assert await delta(conn, before) == (ENTRIES, ENTRIES)
         finally:
@@ -145,7 +145,7 @@ async def test_the_merge_undo_and_move_statements_are_hot_updates(pool) -> None:
         await tx.start()
         try:
             before = await counts(conn)
-            moved = await conn.fetch(pgstore_module.MOVE_ENTRIES, target, source)
+            moved = await conn.fetch(fleet_merge_sql.MOVE_ENTRIES, target, source)
             assert len(moved) == ENTRIES
             assert await delta(conn, before) == (ENTRIES, ENTRIES)
         finally:
@@ -157,7 +157,9 @@ async def test_the_merge_undo_and_move_statements_are_hot_updates(pool) -> None:
         await tx.start()
         try:
             before = await counts(conn)
-            few = await conn.fetch(pgstore_module.MOVE_THESE_ENTRIES, target, source, list(ids[:2]))
+            few = await conn.fetch(
+                fleet_merge_sql.MOVE_THESE_ENTRIES, target, source, list(ids[:2])
+            )
             assert len(few) == 2
             assert await delta(conn, before) == (2, 2)
         finally:

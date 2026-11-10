@@ -21,7 +21,7 @@ from hivemind.store.pgstore import PgStore
 POOLS = pytest.mark.parametrize(
     ("make_pool_path", "cls", "build"),
     [
-        ("hivemind.store.pgstore.make_pool", PgStore, build_store),
+        ("hivemind.store.pgstore.connection.make_pool", PgStore, build_store),
         ("hivemind.store.auth.make_pool", PgAuthenticator, build_authenticator),
     ],
     ids=["PgStore", "PgAuthenticator"],

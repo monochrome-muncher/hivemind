@@ -12,7 +12,7 @@ from tests.pg import ensure_migrated, reset_tables
 
 from hivemind.config import Settings
 from hivemind.domain.audit import AuditFilters
-from hivemind.store.pgstore import audit_query
+from hivemind.store.pgstore.audit import audit_query
 
 SEED = """
 INSERT INTO audit_log (actor_kind, actor, action, target, detail, occurred_at)

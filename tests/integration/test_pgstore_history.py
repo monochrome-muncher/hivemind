@@ -17,7 +17,7 @@ from tests.pg import ensure_migrated, reset_tables
 from hivemind.config import Settings
 from hivemind.domain.entry import EntryDraft, Kind
 from hivemind.store import PgStore
-from hivemind.store.pgstore import SELECT_PREDECESSORS
+from hivemind.store.pgstore.entries import SELECT_PREDECESSORS
 
 VEC_DIM = Settings().embedding_dim
 VEC = [0.01] * VEC_DIM

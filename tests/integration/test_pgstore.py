@@ -289,7 +289,7 @@ async def test_keyword_search_matches_only_the_first_distinct_terms(pg) -> None:
     """ADR 0049: the keyword stream matches on the first
     ``MAX_KEYWORD_TERMS`` distinct query terms; later ones are ignored,
     and a repeated term takes one slot, not one per repetition."""
-    from hivemind.store.pgstore import MAX_KEYWORD_TERMS
+    from hivemind.store.pgstore.search import MAX_KEYWORD_TERMS
 
     store, _, _ = pg
     terms = [f"term{i:02d}" for i in range(MAX_KEYWORD_TERMS + 1)]

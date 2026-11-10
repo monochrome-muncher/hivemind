@@ -104,7 +104,7 @@ from hivemind.ports import entry_embeddable_text
 from hivemind.retrieval.eval import aggregate_report, evaluate_query
 from hivemind.services.search import SearchService
 from hivemind.store import PgStore
-from hivemind.store import pgstore as pgstore_module
+from hivemind.store.pgstore import search as pgstore_search
 
 # The corpus is seeded once per module, on the module's event loop.
 pytestmark = pytest.mark.asyncio(loop_scope="module")
@@ -113,7 +113,7 @@ INDEX_NAME = "entries_embedding_hnsw_idx"
 
 # The shipped settings, captured at import so an arm always composes
 # against the production value and never against another arm's patch.
-BASE_SETTINGS = pgstore_module.VECTOR_SEARCH_SETTINGS
+BASE_SETTINGS = pgstore_search.VECTOR_SEARCH_SETTINGS
 
 K = 5  # the golden set's k, mirroring tests/eval/test_eval_gate.py
 FILLER = int(os.environ.get("VECTOR_INDEX_EVAL_FILLER", "2000"))
@@ -368,7 +368,7 @@ async def _run_arm(monkeypatch, store, embedder, golden_ids, arm: str):
     an approximation actually bites (the end-to-end metrics fuse two
     streams, so a vector miss can hide behind the keyword stream).
     """
-    monkeypatch.setattr(pgstore_module, "VECTOR_SEARCH_SETTINGS", BASE_SETTINGS + arm)
+    monkeypatch.setattr(pgstore_search, "VECTOR_SEARCH_SETTINGS", BASE_SETTINGS + arm)
     config = make_search_config()
     service = SearchService(store, embedder, config)
     per_query: dict[str, dict] = {}
