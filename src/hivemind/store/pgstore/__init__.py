@@ -1,12 +1,7 @@
-"""The Postgres adapter for the ``Store`` port (asyncpg + pgvector).
+"""The Postgres adapter for the ``Store`` port (asyncpg + pgvector, ADR 0007).
 
-Mirrors ``hivemind.memstore.MemoryStore`` behavior-for-behavior
-(SPEC.md §4, §6). The pool opens lazily on first use, so synchronous
-builders can hand the adapter to a running loop (ADR 0007). One module per
-area, each holding that area's SQL constants, its store methods and its
-private helpers; ``PgStore`` is those area classes composed on the
-``connection.py`` base. Shared SQL fragments live in ``sql_common.py``,
-``pin_common.py`` and ``fleet_guards.py``, row mappers in ``rows.py``.
+Mirrors ``MemoryStore`` behavior-for-behavior (SPEC.md §4, §6). One module per
+area holds its SQL and store methods; ``PgStore`` composes them on ``connection.py``.
 """
 
 from __future__ import annotations
@@ -41,8 +36,5 @@ class PgStore(
     AuditStore,
     PgConnections,
 ):
-    """A ``Store`` backed by PostgreSQL + pgvector (ADR 0007).
-
-    The pool opens lazily on first use; ``close()`` on shutdown. Pool
-    sizes come from ``Settings.pool_min_size`` / ``pool_max_size``.
-    """
+    """A ``Store`` backed by PostgreSQL + pgvector; the pool opens lazily, ``close()`` on
+    shutdown."""

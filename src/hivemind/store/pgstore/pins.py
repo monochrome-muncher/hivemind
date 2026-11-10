@@ -39,12 +39,11 @@ class PinStore(PgConnections):
         if not is_valid_uuid(entry_id):
             return PinRefusal.FLEET
         async with self._write_transaction(fleet_id) as conn:
-            # The fleet row first, then the pin lock: the order a merge takes them.
+            # Fleet row first, then the pin lock: the order a merge takes them.
             await refuse_merged(conn, fleet_id)
             await refuse_stale_home(conn, fleet_id, pinned_by)
             await conn.execute(LOCK_FLEET_PINS, fleet_id)
-            # Decide before deleting anything: a refusal must leave the
-            # pins as they were.
+            # Decide before deleting: a refusal leaves the pins as they were.
             fleet_pins = [row_to_pin(r) for r in await conn.fetch(LIST_PINS, fleet_id)]
             refusal = pin_refusal(
                 fleet_pins, entry_id, pinned_by, limit, agent_limit, replaces, also_owned_by

@@ -1,12 +1,6 @@
-"""A self-contained, deterministic embedder for the dev stdio server.
+"""A local, deterministic token-hash embedder for the dev stdio server (no network, no model).
 
-Real deployments use the operator-configured OpenAI-compatible endpoint
-(SPEC §7, ADR 0005) — that integration lives in the embeddings lane and
-is out of scope here. For the v1 dev stdio server (``main`` in
-``server.py``) we need a fully local, dependency-free ``Embedder`` so the
-server runs with no network access and no external model. This one hashes
-tokens into a fixed-dimension vector (the same trick as the test fake),
-which is "good enough" for a dev pool and keeps the code path honest.
+Real deployments use the configured OpenAI-compatible endpoint (SPEC §7, ADR 0005).
 """
 
 from __future__ import annotations
@@ -49,6 +43,5 @@ class LocalEmbedder:
         return self._vector(self.entry_embeddable_text(draft))
 
     def entry_embeddable_text(self, draft: EntryDraft) -> str:
-        # Honor the configured prefix budget (ADR 0021): the dev pool
-        # embeds the same text a configured production pool would.
+        # Same prefix budget as production (ADR 0021).
         return embeddable_text(draft.summary, draft.body, self._prefix_tokens)

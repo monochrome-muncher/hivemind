@@ -47,16 +47,12 @@ def _own_entry_message(ids: list[str]) -> str:
     )
 
 
-ADMIN_REPORTER = "admin"  # the reserved name ADR 0060 gives the admin key's entries
+ADMIN_REPORTER = "admin"  # reserved name (ADR 0060)
 
 
 def reporter_agent(credential: Credential, agent: str | None) -> str | None:
-    """The agent a feedback row is filed under (SPEC.md §4.2, ADR 0066).
-
-    The admin key is always ``admin``, whatever it self-reports; an agent
-    sub-key's credential agent wins; otherwise the self-reported ``agent``
-    (``None`` when there is none, which the caller must refuse).
-    """
+    """The agent a feedback row is filed under (ADR 0066): ``admin`` for the admin key, else the
+    credential's agent, else the self-reported one (``None``: the caller must refuse)."""
     if credential.is_admin:
         return ADMIN_REPORTER
     return credential.agent_id or agent
@@ -64,32 +60,27 @@ def reporter_agent(credential: Credential, agent: str | None) -> str | None:
 
 @dataclass(frozen=True, slots=True)
 class FeedbackOutcome:
-    """Result of a feedback upsert: the stored row + the entry's new
-    quality multiplier (SPEC.md §4.2)."""
+    """A feedback upsert's stored row and the entry's new quality multiplier (SPEC.md §4.2)."""
 
     feedback: Feedback
     quality: float
-    # Whether the caller could supersede the entry with a write at its default
-    # scope; only ever true for a ``stale`` or ``wrong`` verdict (ADR 0128).
+    # True only for a ``stale`` or ``wrong`` verdict the caller could fix at its default scope (ADR
+    # 0128).
     may_supersede: bool = False
 
 
 def _clean_note(note: str | None) -> str | None:
-    """``note`` without surrounding whitespace; ``None`` when nothing is
-    left. Stored this way, a whitespace-only note (a no-break space, say)
-    can never count as a note: Postgres's ``\\S`` and Python's
-    ``str.strip`` disagree on some characters, and the store adapters must
-    agree on what "noted" means (SPEC §4.2)."""
+    """``note`` stripped, ``None`` when empty. Postgres's ``\\S`` and ``str.strip`` disagree on some
+    characters (a no-break space), and the adapters must agree on what "noted" means (SPEC §4.2)."""
     if note is None:
         return None
     return note.strip() or None
 
 
 def _supersede_check(credential: Credential, verdict: Verdict) -> Callable[[Entry], bool]:
-    """Whether the reporter could fix an entry it flags: ``stale`` or
-    ``wrong``, an access-controlled agent key (not the admin key, whose writes
-    are human-driven, ADR 0060, nor a legacy credential, which would widen
-    the entry to ``org``), and a default-scope write would supersede it (ADR 0128)."""
+    """Whether the reporter could fix an entry it flags (ADR 0128): a ``stale`` or ``wrong``
+    verdict, an access-controlled agent key (not admin, ADR 0060; not legacy, which would widen
+    to ``org``) and a default-scope write that would supersede it."""
     if verdict is Verdict.HELPFUL or credential.is_admin or not credential.access_controlled:
         return lambda _entry: False
     try:
@@ -103,11 +94,8 @@ def _supersede_check(credential: Credential, verdict: Verdict) -> Callable[[Entr
 
 
 class FeedbackService:
-    """Feedback is open to any authenticated caller who can read the
-    entry (SPEC.md §8.1, §12.2). ``config`` supplies the quality-formula
-    weights (SPEC.md §6.4), so the reported quality matches what search
-    uses.
-    """
+    """Feedback, open to any caller who can read the entry (SPEC.md §8.1, §12.2). ``config``
+    gives the quality weights (SPEC.md §6.4) so the quality matches search."""
 
     def __init__(
         self,
@@ -119,16 +107,14 @@ class FeedbackService:
         self._store = store
         self._config = config or SearchConfig()
         self._now_fn: Callable[[], datetime] = now_fn or utcnow
-        # ADR 0082: a dev-mode credential is downgraded to trust level 0
-        # when the deployment requires stored keys.
+        # A dev-mode credential drops to trust level 0 when stored keys are required (ADR 0082).
         self._require_stored_keys = require_stored_keys
 
     def _reporter(
         self, credential: Credential, note: str | None, agent: str | None
     ) -> tuple[Credential, str | None, str]:
-        """Validate the note and agent, then resolve who is reporting: the
-        effective credential, the cleaned note and the agent identity."""
-        check_text(note, "note", MAX_NOTE_CHARS)  # ADR 0040
+        """Validate, then resolve the effective credential, cleaned note and agent identity."""
+        check_text(note, "note", MAX_NOTE_CHARS)
         note = _clean_note(note)
         check_text(agent, "agent", MAX_IDENTITY_CHARS)
         credential = credential.effective(self._require_stored_keys)
@@ -148,18 +134,13 @@ class FeedbackService:
         note: str | None = None,
         agent: str | None = None,
     ) -> FeedbackOutcome:
-        """Upsert the caller's verdict for an entry (SPEC.md §4.2).
-
-        One row per (entry, user, agent): the reporter's latest verdict
-        wins. The agent identity is ``admin`` for the admin key (ADR 0066),
-        the acting sub-key's agent, or the ``agent`` self-reported by a
-        plain user key (SPEC.md §8.1).
-        """
+        """Upsert the caller's verdict (SPEC.md §4.2): one row per (entry, user, agent), the
+        latest wins."""
         credential, note, effective_agent = self._reporter(credential, note, agent)
         entry = await get_visible_entry(self._store, entry_id, credential.visibility())
-        if entry is None:  # feedback follows readability (SPEC §12.2, ADR 0033)
+        if entry is None:  # feedback follows readability (SPEC §12.2)
             raise EntryNotFound(f"unknown entry: {entry_id}")
-        if credential.owns(entry.author):  # ADR 0065, 0113
+        if credential.owns(entry.author):  # ADR 0065
             raise PermissionDenied(_own_entry_message([entry_id]))
         feedback = Feedback(
             entry_id=entry.id,  # the canonical id, not the caller's spelling
@@ -167,7 +148,7 @@ class FeedbackService:
             agent=effective_agent,
             verdict=verdict,
             note=note,
-        )  # the store stamps ``updated_at`` with its clock (ADR 0079)
+        )  # the store stamps ``updated_at`` (ADR 0079)
         feedback = await self._store.record_feedback(feedback)
         return FeedbackOutcome(
             feedback=feedback,
@@ -183,14 +164,8 @@ class FeedbackService:
         note: str | None = None,
         agent: str | None = None,
     ) -> list[FeedbackOutcome]:
-        """One verdict (and note) on several entries at once (ADR 0053).
-
-        All or nothing: if any id is unreadable (``EntryNotFound``) or the
-        caller's own entry (``PermissionDenied``, ADR 0065), nothing is
-        recorded and the error names them. Spellings of one entry count
-        once. A fixed number of store calls however many ids: one read,
-        one transactional upsert, one feedback read.
-        """
+        """One verdict on several entries at once (ADR 0053), all or nothing: an unreadable or own
+        entry (ADR 0065) records nothing and the error names them. A fixed number of store calls."""
         credential, note, effective_agent = self._reporter(credential, note, agent)
         ids = list(dict.fromkeys(entry_ids))
         if not ids:
@@ -199,10 +174,10 @@ class FeedbackService:
             raise InvalidInput(f"entry_ids may name at most {MAX_FEEDBACK_IDS} entries")
         found = await get_visible_entries(self._store, ids, credential.visibility())
         missing = [eid for eid in ids if eid not in found]
-        if missing:  # feedback follows readability (SPEC §12.2, ADR 0033)
+        if missing:  # feedback follows readability (SPEC §12.2)
             raise EntryNotFound(f"unknown entries: {', '.join(missing)}")
-        own = [eid for eid in ids if credential.owns(found[eid].author)]  # ADR 0113
-        if own:  # ADR 0065: after readability, so an unreadable id stays not_found
+        own = [eid for eid in ids if credential.owns(found[eid].author)]
+        if own:  # after readability, so an unreadable id stays not_found
             raise PermissionDenied(_own_entry_message(own))
         canonical = list(dict.fromkeys(found[eid].id for eid in ids))
         rows = [
@@ -215,7 +190,7 @@ class FeedbackService:
             )
             for eid in canonical
         ]
-        rows = await self._store.record_feedback_many(rows)  # stamped (ADR 0079)
+        rows = await self._store.record_feedback_many(rows)
         signals = await self._store.feedback_signals(canonical)
         fixable = _supersede_check(credential, verdict)
         by_id = {e.id: e for e in found.values()}
@@ -229,12 +204,8 @@ class FeedbackService:
         ]
 
     async def feedback_summary(self, entry_id: str) -> FeedbackSummary:
-        """What a reader of an entry sees of its feedback (ADR 0051): the
-        verdict counts plus the newest rows, notes included.
-
-        No visibility check here: the caller must already have read the
-        entry with ``get_visible_entry``.
-        """
+        """Verdict counts plus the newest rows, notes included (ADR 0051). No visibility check: the
+        caller must already have read the entry with ``get_visible_entry``."""
         signals, recent = await asyncio.gather(
             self._store.feedback_signals([entry_id]),
             self._store.list_feedback(entry_id, FEEDBACK_RECENT_LIMIT),
@@ -243,8 +214,8 @@ class FeedbackService:
         return FeedbackSummary(s.helpful, s.stale, s.wrong, tuple(recent), s.last_confirmed_at)
 
     async def feedback_summaries(self, entry_ids: list[str]) -> dict[str, FeedbackSummary]:
-        """``feedback_summary`` for several entries, two store reads in all
-        however many there are (ADR 0059). Same caveat: no visibility check."""
+        """``feedback_summary`` for several entries, two store reads (ADR 0059); no visibility
+        check."""
         signals, recent = await asyncio.gather(
             self._store.feedback_signals(entry_ids),
             self._store.list_feedback_many(entry_ids, FEEDBACK_RECENT_LIMIT),
@@ -266,10 +237,8 @@ class FeedbackService:
         limit: int,
         offset: int = 0,
     ) -> list[FeedbackLogItem]:
-        """Feedback rows across entries, newest first, each with the entry
-        it rates: only rows on entries the caller can read. The admin key
-        reads them all; an agent key reads the rows on its own, org and
-        home-fleet entries, so the same call can serve an agent's own view."""
+        """Feedback rows across entries, newest first, only on entries the caller can read (admin:
+        all; an agent: its own, org and home-fleet entries)."""
         credential = credential.effective(self._require_stored_keys)
         visibility = credential.visibility()
         return await self._store.list_feedback_log(
@@ -287,11 +256,9 @@ class FeedbackService:
         limit: int,
         offset: int = 0,
     ) -> list[FlaggedEntry]:
-        """Active entries with a standing ``stale`` or ``wrong`` verdict,
-        oldest first flag first (ADR 0093), each with whether its author
-        is still around; only entries the caller can read. ``older_than``
-        keeps entries first flagged more than that long ago; ``own`` keeps
-        the caller's own entries and those it inherited (ADR 0115)."""
+        """Active entries with a standing ``stale`` or ``wrong`` verdict, oldest flag first
+        (ADR 0093), that the caller can read. ``older_than`` keeps entries first flagged longer ago;
+        ``own`` keeps the caller's and inherited ones (ADR 0115)."""
         credential = credential.effective(self._require_stored_keys)
         now = self._now_fn()
         visibility = credential.visibility()
@@ -306,7 +273,7 @@ class FeedbackService:
         )
 
     async def quality(self, entry_id: str) -> float:
-        """An entry's current quality multiplier (SPEC.md §6.4)."""
+        """An entry's current quality multiplier."""
         signals = await self._store.feedback_signals([entry_id])
         return self._quality(signals.get(entry_id, NO_SIGNALS))
 

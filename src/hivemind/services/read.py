@@ -1,14 +1,7 @@
-"""The entry-read path, composed in one place (ADR 0083).
+"""The entry-read path (ADR 0083): read by id, batch read (ADRs 0055, 0059) and filtered list
+(SPEC §5.3), each with feedback summary and see-also links; the surfaces only serialize.
 
-Every entry it returns names a successor only if the reader can read it
-(``hide_unseen_successors``, ADR 0033).
-
-``ReadService`` is the service the surfaces' read paths delegate to: the
-visibility-checked read by id (ADR 0033), the batch read (ADRs 0055, 0059)
-and the filtered list (SPEC §5.3), each with its feedback summary and
-see-also links. It composes ``chain.py``'s building blocks (the
-visibility-checked reads, the links, the supersession chain) with the
-``GovernanceService``'s feedback summaries; the surfaces serialize only.
+An entry names a successor only if the reader can read it (ADR 0033).
 """
 
 from __future__ import annotations
@@ -40,8 +33,7 @@ from hivemind.services.ownership import own_author_filter
 
 @dataclass(frozen=True, slots=True)
 class EntryDetail:
-    """One entry as a read answers it: the entry, its feedback summary,
-    its see-also links, and (with history) the supersession chain."""
+    """One entry as a read answers it, with the supersession chain when history is asked for."""
 
     entry: Entry
     feedback: FeedbackSummary
@@ -52,9 +44,8 @@ class EntryDetail:
 
 @dataclass(frozen=True, slots=True)
 class EntryBatch:
-    """A batch read's answer (ADR 0055): the readable entries in the order
-    asked, and the ids that name nothing readable (invisible ≡ unknown,
-    ADR 0033)."""
+    """A batch read's answer (ADR 0055): readable entries in the order asked, and the ids that name
+    nothing readable."""
 
     entries: tuple[EntryDetail, ...]
     not_found: tuple[str, ...]
@@ -80,11 +71,8 @@ class ReadService:
         visibility: Visibility,
         include_history: bool = False,
     ) -> EntryDetail | None:
-        """The entry if ``visibility`` may read it, else ``None`` (ADR
-        0033: the same answer for "invisible" and "does not exist"), with
-        its feedback summary and see-also links, and — with
-        ``include_history`` — the supersession chain, which leaves out
-        versions the caller may not see."""
+        """The entry if ``visibility`` may read it, else ``None`` (ADR 0033), with feedback and
+        links; ``include_history`` adds the chain, without versions the caller may not see."""
         entry = await get_visible_entry(self._store, entry_id, visibility)
         if entry is None:
             return None
@@ -98,7 +86,7 @@ class ReadService:
             successors, superseded = await supersession_chain(
                 self._store, entry, visibility=visibility
             )
-        # Every version shown, the entry among them, in one lookup.
+        # One lookup for every version shown.
         shown = await hide_unseen_successors(
             self._store, [entry, *successors, *superseded], visibility
         )
@@ -111,18 +99,15 @@ class ReadService:
         )
 
     async def entries(self, entry_ids: Sequence[str], *, visibility: Visibility) -> EntryBatch:
-        """Up to ``MAX_GET_IDS`` entries by id in one call (ADR 0055), each
-        with its feedback and links; a fixed number of store reads for the
-        whole batch (ADR 0059). Ids that name nothing readable are listed
-        in ``not_found``. Empty or over-cap is ``InvalidInput``."""
+        """Up to ``MAX_GET_IDS`` entries by id (ADR 0055) in a fixed number of store reads
+        (ADR 0059); unreadable ids go to ``not_found``. Empty or over-cap is ``InvalidInput``."""
         ids = list(dict.fromkeys(entry_ids))
         if not ids:
             raise InvalidInput("entry_ids must name at least one entry")
         if len(ids) > MAX_GET_IDS:
             raise InvalidInput(f"entry_ids may name at most {MAX_GET_IDS} entries")
         found = await get_visible_entries(self._store, ids, visibility)
-        # Keyed by entry id, not by the id as asked: two spellings of one
-        # uuid (case) name the same entry, which comes back once.
+        # Keyed by entry id: two spellings of one uuid name the same entry, returned once.
         entries = await hide_unseen_successors(
             self._store,
             list({found[eid].id: found[eid] for eid in ids if eid in found}.values()),
@@ -149,13 +134,9 @@ class ReadService:
         visibility: Visibility,
         credential: Credential | None = None,
     ) -> Sequence[Entry]:
-        """The filtered list (SPEC §5.3): validates the filters (ADR 0040)
-        and applies ``search_config.default_limit`` when ``limit`` is
-        omitted; a surface with its own default passes it explicitly.
-
-        ``relied_on_changed`` (ADR 0098) needs the caller's feedback
-        identity, the one ``record_feedback`` files rows under; a
-        credential without one is ``AgentIdentityRequired``."""
+        """The filtered list (SPEC §5.3); ``search_config.default_limit`` applies when ``limit`` is
+        omitted. ``relied_on_changed`` (ADR 0098) needs the caller's feedback identity, else
+        ``AgentIdentityRequired``."""
         filters.validate()
         if filters.relied_on_changed:
             agent = reporter_agent(credential, None) if credential is not None else None
@@ -172,8 +153,8 @@ class ReadService:
         return await hide_unseen_successors(self._store, listed, visibility)
 
     async def feedback_counts(self, entries: Sequence[Entry]) -> dict[str, FeedbackCounts]:
-        """Live feedback counts per entry, one store read (the counts a
-        compact list item carries when ``relied_on_changed`` is on)."""
+        """Live feedback counts per entry in one store read (for ``relied_on_changed`` list
+        items)."""
         return await self._store.quality_counts([e.id for e in entries])
 
     async def _feedback_summary(self, entry_id: str) -> FeedbackSummary:

@@ -21,8 +21,7 @@ GET_AGENT_FOR_UPDATE = "SELECT * FROM agents WHERE name = $1 FOR UPDATE"
 # holder wins when legacy case variants already coexist (ADR 0045).
 GET_AGENT_FOLDED = "SELECT * FROM agents WHERE lower(name) = lower($1) ORDER BY created_at LIMIT 1"
 
-# Serialises registrations of one case-folded name, so two concurrent
-# registrations of `Bob` and `bob` cannot both pass the folded check.
+# Serialises registrations of one case-folded name (`Bob` and `bob` cannot both pass the check).
 AGENT_NAME_LOCK = "SELECT pg_advisory_xact_lock(hashtext('hivemind:agent-name:' || lower($1)))"
 
 INSERT_AGENT = (
@@ -30,8 +29,7 @@ INSERT_AGENT = (
     "VALUES ($1, $2, 'pending', 0) ON CONFLICT (name) DO NOTHING RETURNING *"
 )
 
-# The agent's key use (ADR 0110) rides along; an agent has at most one key
-# (unique index, ADR 0039), so the join adds no rows.
+# Key use (ADR 0110) rides along; one key per agent (ADR 0039), so the join adds no rows.
 LIST_AGENTS = (
     "SELECT a.*, c.last_used_at, c.created_at AS key_created_at, "
     "c.locked_at AS key_locked_at FROM agents a "
@@ -43,8 +41,7 @@ AGENT_KEY_LAST_USED = (
     "SELECT last_used_at FROM credentials WHERE kind = 'agent' AND agent_name = $1"
 )
 
-# ADR 0028: the status guard lives in the WHERE, so check-and-flip is one
-# atomic statement (no second key from two racing activations).
+# ADR 0028: the status guard is in the WHERE, so check-and-flip is one atomic statement.
 ACTIVATE_AGENT = (
     "UPDATE agents SET status = 'active', trust_level = $2, home_fleet_id = $3, "
     "activated_at = now() WHERE name = $1 AND status IN ('pending', 'revoked') RETURNING *"
@@ -64,13 +61,8 @@ SET_AGENT_FLEET = "UPDATE agents SET home_fleet_id = $2 WHERE name = $1 RETURNIN
 
 class AgentStore(PgConnections):
     async def register_agent(self, name: str, owner_alias: str | None = None) -> Agent:
-        """Register an agent idempotently (SPEC §12.3).
-
-        An existing record comes back unchanged (``owner_alias`` never
-        overwritten, ADR 0039), including a racing duplicate or a
-        case-only variant (ADR 0045, under a per-folded-name lock); a new
-        one is ``pending`` (level 0, no fleet).
-        """
+        """Register an agent idempotently (SPEC §12.3): an existing record, a racing duplicate
+        or a case-only variant comes back unchanged (ADRs 0039, 0045); a new one is ``pending``."""
         async with self._connection() as conn:
             row = await conn.fetchrow(GET_AGENT, name)
             if row is None:
@@ -104,14 +96,12 @@ class AgentStore(PgConnections):
     async def activate_agent(
         self, name: str, *, trust_level: TrustLevel, home_fleet_id: str
     ) -> Agent:
-        """Activate a pending or revoked agent: set trust level + home
-        fleet, flip to ``active`` (ADRs 0012, 0028). ``UnknownAgent`` if
-        unknown; ``InvalidAgentStatus`` if already ``active``.
-        """
+        """Activate a pending or revoked agent (ADRs 0012, 0028); ``InvalidAgentStatus`` if
+        active."""
         async with self._write_transaction(home_fleet_id) as conn:
             await refuse_merged(conn, home_fleet_id)
-            # Under the row lock a concurrent retirement holds, so a retired
-            # agent cannot slip back to active (ADR 0113).
+            # Under the row lock a retirement holds, so a retired agent cannot reactivate (ADR
+            # 0113).
             await conn.fetchrow(LOCK_AGENT_ROWS, [name])
             retired = await conn.fetchrow(GET_SUCCESSION, name)
             if retired is not None:
@@ -124,9 +114,8 @@ class AgentStore(PgConnections):
         return row_to_agent(row)
 
     async def revoke_agent(self, name: str) -> Agent:
-        """Flip a pending or active agent to ``revoked``.
-        ``UnknownAgent`` if unknown; ``InvalidAgentStatus`` if already revoked.
-        """
+        """Flip a pending or active agent to ``revoked``; ``InvalidAgentStatus`` if already
+        revoked."""
         async with self._connection() as conn:
             row = await conn.fetchrow(REVOKE_AGENT, name)
             if row is None:
@@ -144,10 +133,7 @@ class AgentStore(PgConnections):
         raise InvalidAgentStatus(name, AgentStatus(existing["status"]), verb)
 
     async def set_agent_trust_level(self, name: str, level: TrustLevel) -> Agent:
-        """Promote/demote an agent's trust level. ``UnknownAgent``
-        if unknown. Demotion to level 0 is *dormant* (still active, no
-        access) — distinct from revocation (ADR 0012).
-        """
+        """Level 0 is *dormant* (active, no access), distinct from revocation (ADR 0012)."""
         async with self._connection() as conn:
             existing = await conn.fetchrow(GET_AGENT, name)
             if existing is None:
@@ -158,10 +144,7 @@ class AgentStore(PgConnections):
         return row_to_agent(row)
 
     async def set_agent_home_fleet(self, name: str, fleet_id: str) -> Agent:
-        """Re-parent an agent to a new home fleet. The agent's
-        earlier ``fleet``-scoped entries stay in the fleet they were written
-        into (never re-parented). ``UnknownAgent`` if unknown.
-        """
+        """Re-parent an agent; its earlier ``fleet``-scoped entries stay where they were written."""
         async with self._write_transaction(fleet_id) as conn:
             await refuse_merged(conn, fleet_id)
             existing = await conn.fetchrow(GET_AGENT, name)

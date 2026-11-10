@@ -1,9 +1,5 @@
-"""Governance (SPEC.md §4.1, §8): withdrawal, plus the one service object
-the surfaces hold for feedback and pins.
-
-The write path lives in ``services.write``, feedback in
-``services.feedback`` and pins in ``services.pins``; import their names from those modules.
-"""
+"""Governance (SPEC.md §4.1, §8): withdrawal, restore and redaction, plus the one service object the
+surfaces hold; import feedback, pin and write names from their own modules."""
 
 from __future__ import annotations
 
@@ -31,15 +27,8 @@ from hivemind.services.pins import PinService
 
 
 class GovernanceService:
-    """Withdrawal (SPEC.md §4.1, §8.1): the author may withdraw their own
-    entries (so may the agent the author handed them to, ADR 0113), an admin
-    may withdraw any. Feedback and pins are handled by
-    ``FeedbackService`` and ``PinService``; this class hands those calls
-    on, so the REST and MCP surfaces keep one governance object.
-
-    ``config`` supplies the quality-formula weights (SPEC.md §6.4), so
-    the reported quality matches what search uses.
-    """
+    """Withdrawal (SPEC.md §8.1): the author, a successor (ADR 0113) or an admin. Feedback and pin
+    calls are handed on to ``FeedbackService`` and ``PinService``."""
 
     def __init__(
         self,
@@ -54,14 +43,14 @@ class GovernanceService:
     async def withdraw(
         self, credential: Credential, entry_id: str, reason: str | None = None
     ) -> Entry:
-        check_text(reason, "reason", MAX_REASON_CHARS)  # ADR 0040
+        check_text(reason, "reason", MAX_REASON_CHARS)
         entry = await self._visible(credential, entry_id)
         owns = credential.owns(entry.author)
         if not (credential.is_admin or owns):
             raise PermissionDenied("only the author or an admin may withdraw an entry")
         withdrawn = await self._withdraw(credential, entry, reason)
         if credential.is_admin and not owns:
-            # An admin withdrawing someone else's entry is audited (ADR 0027).
+            # An admin withdrawing someone else's entry is audited.
             await record_admin_action(
                 self._store,
                 credential,
@@ -70,7 +59,7 @@ class GovernanceService:
                 {"author": entry.author, "reason": reason},
             )
         elif owns and entry.author != (credential.agent_name or credential.user_id):
-            # A successor withdrawing a memory it inherited is audited (ADR 0113).
+            # So is a successor withdrawing an inherited memory.
             await record_admin_action(
                 self._store,
                 credential,
@@ -82,11 +71,9 @@ class GovernanceService:
         return withdrawn
 
     async def withdraw_own(self, credential: Credential, entry_id: str, reason: str) -> Entry:
-        """A withdrawal from the agent portal (ADR 0095): the caller's own
-        entry only, with a reason, audited as ``entry.withdraw`` with
-        ``via: "portal"`` so an operator can tell it from an agent's own
-        call. Not even the admin key may withdraw someone else's entry here."""
-        check_text(reason, "reason", MAX_REASON_CHARS)  # ADR 0040
+        """A portal withdrawal (ADR 0095): the caller's own entry only, even for the admin key,
+        with a reason, audited with ``via: "portal"``."""
+        check_text(reason, "reason", MAX_REASON_CHARS)
         if not reason.strip():
             raise InvalidInput("reason is required")
         entry = await self._visible(credential, entry_id)
@@ -104,12 +91,11 @@ class GovernanceService:
         return withdrawn
 
     async def restore(self, credential: Credential, entry_id: str, reason: str) -> Entry:
-        """Put a withdrawn memory back as the admin (ADR 0124). The caller
-        checks the admin key; the store refuses what the chain or a cleanup
-        forbids. Pins are not restored. Audited as ``entry.restore``."""
+        """Put a withdrawn memory back, admin only (ADR 0124); the store refuses what the chain or
+        a cleanup forbids. Pins are not restored."""
         if not credential.is_admin:
             raise PermissionDenied("only an admin may restore a withdrawn entry")
-        check_text(reason, "reason", MAX_REASON_CHARS)  # ADR 0040
+        check_text(reason, "reason", MAX_REASON_CHARS)
         if not reason.strip():
             raise InvalidInput("reason is required")
         entry = await self._visible(credential, entry_id)
@@ -133,15 +119,12 @@ class GovernanceService:
     async def redact(
         self, credential: Credential, entry_id: str, reason: str, confirm: str
     ) -> RedactOutcome:
-        """Wipe a withdrawn memory's text for good (ADR 0125): admin only,
-        checked first. ``confirm`` must be the memory's id typed back
-        (``InvalidInput`` otherwise). Audited as ``entry.redact`` with the
-        author, the reason and the count of feedback notes left to review,
-        never the old text. A memory that is still active, or is already
-        redacted, is ``EntryNotActive``-style 409 (``RedactRefused``)."""
+        """Wipe a withdrawn memory's text for good (ADR 0125), admin only; ``confirm`` is the id
+        typed back. The audit row never holds the old text. An active or already redacted memory is
+        a 409 (``RedactRefused``)."""
         if not credential.is_admin:
             raise PermissionDenied("only an admin may redact a memory")
-        check_text(reason, "reason", MAX_REASON_CHARS)  # ADR 0040
+        check_text(reason, "reason", MAX_REASON_CHARS)
         if not reason.strip():
             raise InvalidInput("reason is required")
         entry = await self._visible(credential, entry_id)
@@ -167,16 +150,14 @@ class GovernanceService:
 
     async def _visible(self, credential: Credential, entry_id: str) -> Entry:
         entry = await get_visible_entry(self._store, entry_id, credential.visibility())
-        if entry is None:  # unknown, or not visible to the caller (ADR 0033)
+        if entry is None:  # unknown, or not visible (ADR 0033)
             raise EntryNotFound(f"unknown entry: {entry_id}")
         return entry
 
     async def _withdraw(self, credential: Credential, entry: Entry, reason: str | None) -> Entry:
-        """Withdraw ``entry`` once the caller's right to has been checked.
-        Callers then take it out of the fleet briefing (``unpin_withdrawn``,
-        ADR 0096) after the withdrawal and its audit row: a failure there
-        propagates but leaves the withdrawal in place, and the briefing
-        already leaves withdrawn entries out."""
+        """Withdraw ``entry`` once the caller's right is checked. Callers then run
+        ``unpin_withdrawn`` (ADR 0096) after the audit row: its failure propagates but leaves the
+        withdrawal in place."""
         if entry.state.value != "active":
             raise EntryNotActive(
                 f"entry {entry.id} is already {entry.state.value}; "
@@ -188,8 +169,6 @@ class GovernanceService:
             raise EntryNotFound(f"unknown entry: {entry.id}") from exc
         except ValueError as exc:  # the store's "not active": a concurrent withdraw won the race
             raise EntryNotActive(str(exc)) from exc
-
-    # -- feedback (services.feedback) -----------------------------------------
 
     async def record_feedback(
         self,
@@ -252,8 +231,6 @@ class GovernanceService:
             limit=limit,
             offset=offset,
         )
-
-    # -- pinned entries (services.pins) ---------------------------------------
 
     async def pin(self, credential: Credential, entry_id: str, via: str | None = None) -> Pin:
         return await self._pins.pin(credential, entry_id, via)

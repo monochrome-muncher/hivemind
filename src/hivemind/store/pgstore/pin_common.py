@@ -8,8 +8,7 @@ import asyncpg
 
 from hivemind.domain.fleet_merge import DroppedPin, plan_pin_restore
 
-# Pinned entries (ADR 0058). The per-fleet advisory lock serialises
-# pinners of one fleet, so the count check and the insert are atomic.
+# ADR 0058: the per-fleet advisory lock makes the pin cap check and the insert atomic.
 LOCK_FLEET_PINS = "SELECT pg_advisory_xact_lock(hashtextextended('hivemind.pins:' || $1, 0))"
 
 _PIN_COLUMNS = "fleet_id, entry_id, pinned_by, pinned_at"
@@ -27,9 +26,8 @@ ON CONFLICT (fleet_id, entry_id) DO NOTHING
 async def restore_fleet_pins(
     conn: asyncpg.Connection, fleet_id: str, pins: Sequence[DroppedPin], home_sql: str
 ) -> tuple[list[DroppedPin], list[DroppedPin]]:
-    """Put ``pins`` back on ``fleet_id`` where ``home_sql`` (entry ids in $1, the
-    fleet in $2) still finds the entry, it is not pinned, and the fleet's cap
-    has room. Returns ``(restored, skipped)``."""
+    """Re-pin where ``home_sql`` (entry ids $1, fleet $2) finds the entry, it is unpinned
+    and the cap has room; returns ``(restored, skipped)``."""
     home = {str(r["id"]) for r in await conn.fetch(home_sql, [d.entry_id for d in pins], fleet_id)}
     held = await conn.fetch(PINNED_ENTRY_IDS, fleet_id)
     pinned = {str(r["entry_id"]) for r in held}

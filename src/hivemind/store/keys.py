@@ -1,15 +1,8 @@
-"""Issue, rotate, and revoke API keys for the credential model (ADRs 0008, 0012).
+"""Issue, rotate, and revoke API keys (ADRs 0008, 0012); console entry point ``hivemind-keys``.
 
-Console entry point (``hivemind-keys``). Raw keys are printed **once**;
-only their SHA-256 hash is stored (SPEC.md §8.1). Three kinds (ADR
-0012): the shared **org** key (registration + health only; ``rotate-org``
-closes registration to prior copies, ADR 0031), one **agent** key per
-registered agent, and **admin** keys.
-
-Every mutating command audits a ``cli`` row in the same transaction
-(ADR 0027). Its actor (``--actor``, default the OS user) is
-**unverified**, hence ``actor_kind`` ``cli``. Keys appear only by
-fingerprint.
+Raw keys are printed **once**; only their SHA-256 hash is stored (SPEC.md §8.1). Every mutating
+command audits a ``cli`` row in the same transaction (ADR 0027); its ``--actor`` is **unverified**.
+Keys appear only by fingerprint.
 
 Usage:
     hivemind-keys [--actor NAME] issue-admin
@@ -55,8 +48,7 @@ _LIST = (
     "SELECT c.key_hash, c.kind, c.user_id, c.agent_name, (c.locked_at IS NOT NULL) AS locked, "
     f"{DEAD_CREDENTIAL_PREDICATE} AS dead FROM credentials c ORDER BY c.created_at"
 )
-# ADR 0107: share-lock the row so a merge cannot commit between this check
-# and the activation; `merged_into` set means the fleet takes no new agents.
+# Share-lock the row so a merge cannot commit between this check and the activation (ADR 0107).
 _FLEET_FOR_SHARE = "SELECT merged_into FROM fleets WHERE id = $1 FOR SHARE"
 _REVOKE_AGENT = "DELETE FROM credentials WHERE kind = 'agent' AND agent_name = $1"
 _REVOKE_ADMIN = "DELETE FROM credentials WHERE kind = 'admin' AND key_hash = $1"
@@ -81,14 +73,12 @@ _SET_REVOKED = "UPDATE agents SET status = 'revoked' WHERE name = $1"
 
 
 class AgentKeyExists(Exception):
-    """``issue-agent`` refused: the agent already holds a key (ADR 0028 —
-    one key per agent; ``rotate-agent`` replaces it)."""
+    """``issue-agent`` refused: one key per agent (ADR 0028); ``rotate-agent`` replaces it."""
 
 
 class AgentNeedsActivation(Exception):
-    """``issue-agent`` refused: a ``pending`` or ``revoked`` agent needs an
-    activation with an explicit trust level and home fleet (ADR 0039),
-    never a silent restore of stale values."""
+    """``issue-agent`` refused: a ``pending`` or ``revoked`` agent needs an explicit trust level
+    and home fleet (ADR 0039), never a silent restore of stale values."""
 
     def __init__(self, name: str, status: str) -> None:
         super().__init__(f"agent {name!r} is {status}: pass --trust-level and --home-fleet")
@@ -97,8 +87,8 @@ class AgentNeedsActivation(Exception):
 
 
 class ActivationFlagsNotApplicable(Exception):
-    """``issue-agent`` refused: activation flags given for an ``active``
-    agent (changing those is the admin PATCH; ADR 0039)."""
+    """``issue-agent`` refused: activation flags for an ``active`` agent (the admin PATCH changes
+    those, ADR 0039)."""
 
 
 class UnknownFleet(Exception):
@@ -106,8 +96,7 @@ class UnknownFleet(Exception):
 
 
 class FleetMergedError(Exception):
-    """``issue-agent`` refused: ``--home-fleet`` was merged into another
-    fleet (ADR 0107)."""
+    """``issue-agent`` refused: ``--home-fleet`` was merged away (ADR 0107)."""
 
     def __init__(self, fleet_id: str, target_id: str) -> None:
         super().__init__(f"fleet {fleet_id} was merged into {target_id}")
@@ -116,8 +105,7 @@ class FleetMergedError(Exception):
 
 
 class AgentNotActive(Exception):
-    """``rotate-agent`` refused: only an ``active`` agent's key is replaced
-    (ADR 0108); a pending or revoked agent goes through ``issue-agent``."""
+    """``rotate-agent`` refused: only an ``active`` agent's key is replaced (ADR 0108)."""
 
     def __init__(self, name: str, status: str) -> None:
         super().__init__(f"agent {name!r} is {status}, not active")
@@ -126,13 +114,11 @@ class AgentNotActive(Exception):
 
 
 class AgentNotRegistered(Exception):
-    """``issue-agent`` or ``revoke`` refused: the name has no agent record
-    (keys are bound to registered names, ADR 0012)."""
+    """``issue-agent`` or ``revoke`` refused: keys bind to registered names (ADR 0012)."""
 
 
 class AgentAlreadyRevoked(Exception):
-    """``revoke`` found the agent already ``revoked``: nothing to do, and no
-    audit row (the API refuses the same call as ``InvalidAgentStatus``)."""
+    """``revoke`` found the agent already ``revoked``: nothing to do, no audit row."""
 
 
 def _raw_key() -> str:
@@ -141,9 +127,8 @@ def _raw_key() -> str:
 
 
 def default_actor() -> str:
-    """The ``--actor`` default: the OS user (ADR 0027), unverified. Falls
-    back to the numeric uid when there is no passwd entry, since this
-    break-glass tool must still work in such containers."""
+    """The ``--actor`` default: the OS user, unverified; the numeric uid when there is no passwd
+    entry, since this break-glass tool must still work in such containers."""
     try:
         return getpass.getuser()
     except OSError, KeyError:
@@ -157,8 +142,7 @@ async def _audit(
     target: str | None,
     detail: Mapping[str, str | None] | None = None,
 ) -> None:
-    """Append a ``cli`` audit row in the mutation's transaction (ADR
-    0027). Takes no key: ``target`` is a name or a key fingerprint."""
+    """Append a ``cli`` audit row in the mutation's transaction (ADR 0027). Takes no key."""
     await conn.execute(
         _INSERT_AUDIT,
         ActorKind.CLI.value,
@@ -198,19 +182,17 @@ async def _issue_agent(
     trust_level: TrustLevel | None = None,
     home_fleet_id: str | None = None,
 ) -> str:
-    """Issue an agent key bound to the registered agent name (ADR 0012).
-    Audited as ``agent_key.issue`` with the agent name as target.
+    """Issue an agent key bound to the registered name (ADR 0012), audited as ``agent_key.issue``.
 
-    Consistent with REST activate (ADR 0039): an active agent with no key
-    gets one; one that has a key is refused (ADR 0028). A pending or
-    revoked agent needs ``trust_level`` and ``home_fleet_id`` and is
+    As REST activate (ADR 0039): an active agent without a key gets one, with a key is refused
+    (ADR 0028); a pending or revoked agent needs ``trust_level`` and ``home_fleet_id`` and is
     activated with them in the same transaction."""
     raw_key = _raw_key()
     conn = await asyncpg.connect(dsn)
     try:
         async with conn.transaction():
-            # Fleet row before agent row, as PgStore.activate_agent and the
-            # merge lock them: the opposite order could deadlock with a merge.
+            # Fleet row before agent row, as PgStore.activate_agent and the merge lock them: the
+            # opposite order could deadlock with a merge.
             fleet = (
                 await conn.fetchrow(_FLEET_FOR_SHARE, home_fleet_id)
                 if home_fleet_id is not None and is_valid_uuid(home_fleet_id)
@@ -249,9 +231,8 @@ async def _issue_agent(
 
 
 async def _rotate_agent(dsn: str, name: str, *, actor: str | None = None) -> str:
-    """Replace an active agent's key (ADR 0108): the old row is deleted and
-    the new one inserted in one transaction, so the old key dies at once.
-    Audited as ``agent_key.replace`` with both key fingerprints."""
+    """Replace an active agent's key (ADR 0108) in one transaction, so the old key dies at once;
+    audited as ``agent_key.replace`` with both fingerprints."""
     raw_key = _raw_key()
     new_hash = key_hash(raw_key)
     conn = await asyncpg.connect(dsn)
@@ -280,8 +261,7 @@ async def _rotate_agent(dsn: str, name: str, *, actor: str | None = None) -> str
 
 
 async def _rotate_org(dsn: str, *, actor: str | None = None) -> str:
-    """Rotate the shared org key (closes registration, ADR 0031).
-    Audited as ``org_key.rotate`` (no target)."""
+    """Rotate the shared org key (ADR 0031), audited as ``org_key.rotate``."""
     raw_key = _raw_key()
     conn = await asyncpg.connect(dsn)
     try:
@@ -302,8 +282,7 @@ async def _replace_org(conn: asyncpg.Connection, raw_key: str, actor: str) -> No
 
 
 class SecretWriter(Protocol):
-    """The slice of the Kubernetes API the bootstrap needs (ADR 0044);
-    ``kube_secret.KubeSecrets`` in a cluster, a fake in tests."""
+    """The slice of the Kubernetes API the bootstrap needs (ADR 0044)."""
 
     @property
     def namespace(self) -> str: ...
@@ -335,15 +314,12 @@ class SecretLeftBehind(RuntimeError):
 async def _bootstrap_secret(
     dsn: str, secrets_api: SecretWriter, name: str, *, actor: str | None = None
 ) -> bool:
-    """First-run key bootstrap (ADR 0044): issue an admin key and rotate the
-    org key, and store both raw keys in the Kubernetes Secret ``name``.
+    """First-run key bootstrap (ADR 0044): issue an admin key, rotate the org key and store both in
+    the Kubernetes Secret ``name``; ``False`` if it exists. Keys are never printed.
 
-    Returns ``False`` if the Secret exists. The keys are never printed.
-    The Secret is created inside the transaction, so a failed create
-    rolls the keys back and the run can be repeated; a failed commit
-    deletes the Secret again, and if that fails too raises
-    ``SecretLeftBehind`` naming it, rather than leaving it quietly. (A
-    pod killed between the create and the commit can still leave it.)"""
+    The Secret is created inside the transaction, so a failed create rolls the keys back; a failed
+    commit deletes it, and if that fails too ``SecretLeftBehind`` is raised. (A pod killed between
+    create and commit can still leave it.)"""
     if await asyncio.to_thread(secrets_api.exists, name):
         return False
     who = actor or default_actor()
@@ -370,9 +346,8 @@ async def _bootstrap_secret(
             try:
                 await asyncio.to_thread(secrets_api.delete, name)
             except Exception as delete_error:
-                # The Secret holds keys that were never committed. Left in
-                # place, every later run would see it, report it exists and
-                # issue nothing, so the operator must remove it by hand.
+                # Left in place the Secret would make every later run issue nothing, so the
+                # operator must remove it by hand.
                 raise SecretLeftBehind(name, secrets_api.namespace, delete_error) from commit_error
             raise
     finally:
@@ -424,11 +399,9 @@ async def _revoke_admin(
     stored_hash: str | None = None,
     actor: str | None = None,
 ) -> bool:
-    """Revoke a specific admin key — the second half of admin-key rotation.
-
-    Targets the row by raw secret or by the stored hash (or its listed
-    fingerprint prefix). Returns whether a row was deleted; the CLI exits
-    non-zero on a no-op (DEPLOY.md §5). Only a deletion is audited."""
+    """Revoke one admin key (the second half of rotation), by raw secret, hash or fingerprint
+    prefix. Returns whether a row was deleted (the CLI exits non-zero on a no-op, DEPLOY.md §5);
+    only a deletion is audited."""
     if stored_hash is not None:
         target = stored_hash.strip().lower()
         if len(target) < _MIN_HASH_PREFIX or any(c not in "0123456789abcdef" for c in target):

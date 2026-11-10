@@ -1,12 +1,9 @@
-"""Access-control service (ADRs 0011-0012, SPEC §12).
+"""Access-control service (ADRs 0011-0012, SPEC §12): permission gates, registration, activation,
+write scope.
 
-Permission gating (ADR 0012), registration and activation (the key is
-issued **once**), and write-scope resolution (ADR 0011).
-
-Every admin mutation is audited **after** it succeeds (ADR 0027). The
-two writes share no transaction, so an audit failure is raised, never
-swallowed: the caller must see the action went unaudited. ``_audit``
-takes no key argument, so a raw key cannot reach an audit column.
+Admin mutations are audited **after** they succeed (ADR 0027). The two writes share no transaction,
+so an audit failure is raised, never swallowed. ``_audit`` takes no key, so a raw key cannot reach
+an audit column.
 """
 
 from __future__ import annotations
@@ -55,9 +52,7 @@ _NAME_TAKEN = "agent name is already taken (names are never reused; pick another
 
 @dataclass(frozen=True, slots=True)
 class Registration:
-    """The answer to a registration (ADR 0039): the agent record, whether
-    the caller had already registered this name (same alias), and a
-    plain-language ``message`` saying what the status means for the caller."""
+    """The answer to a registration (ADR 0039), with a plain-language ``message`` for the caller."""
 
     agent: Agent
     already_registered: bool
@@ -65,8 +60,7 @@ class Registration:
 
 
 def _same_owner(stored: str | None, given: str | None) -> bool:
-    """Alias equality for re-registration: trimmed, case-insensitive, and a
-    missing alias equals only a missing alias."""
+    """Alias equality: trimmed, case-insensitive; a missing alias equals only a missing alias."""
 
     def norm(alias: str | None) -> str | None:
         alias = alias.strip().casefold() if alias is not None else None
@@ -98,25 +92,17 @@ def _status_message(status: AgentStatus, *, new: bool = False) -> str:
 
 
 class AccessService:
-    """Registration + fleet + trust-level management (ADRs 0011-0012).
-
-    Every method enforces the permission gate (ADR 0012): registration
-    needs the org or admin key; everything else needs the admin key.
-    """
+    """Registration, fleets and trust levels (ADRs 0011-0012). Registration needs the org or admin
+    key; everything else the admin key."""
 
     def __init__(self, store: Store, authenticator: Authenticator | None = None) -> None:
         self._store = store
         self._authenticator = authenticator
-        # Merging fleets and undoing it (ADR 0107): admin-gated there.
         self.merges = FleetMergeService(store)
-        # Retiring an agent with a successor and undoing it (ADR 0113).
         self.successions = SuccessionService(store, self._require_authenticator)
-        # An agent's own history for the portal (ADR 0123).
         self.history = AgentHistoryService(store)
-        # Cleaning up after a bad agent and undoing it (ADR 0111): admin-gated there.
         self.cleanups = AgentCleanupService(store, revoke=self.revoke, revocable=self.revocable)
-        # Called after an owner alias changes, so the cached owner-level
-        # figures are dropped (ADR 0122).
+        # Called after an owner alias changes, to drop cached owner-level figures (ADR 0122).
         self.on_owner_change: list[Callable[[], None]] = []
 
     def _require_authenticator(self) -> Authenticator:
@@ -127,8 +113,6 @@ class AccessService:
             )
         return self._authenticator
 
-    # -- registration (gated: org or admin key, ADR 0012) ------------------
-
     async def register(
         self,
         name: str,
@@ -137,14 +121,11 @@ class AccessService:
         *,
         org_only: bool = False,
     ) -> Registration:
-        """Register (or re-register) an agent (ADR 0012, refined by ADR 0039).
+        """Register (or re-register) an agent (ADRs 0012, 0039); ``org_only`` for MCP (SPEC §5.2).
 
-        Org or admin key (REST, SPEC §5.1); ``org_only=True`` for MCP
-        ``hive_register`` (SPEC §5.2). A new name becomes ``pending``.
-        Re-registering by the same alias returns the current status; by a
-        different alias raises ``NameTaken``, worded identically for every
-        status so nothing leaks. The first alias is never overwritten, so
-        a key cannot be delivered to a squatter.
+        A new name is ``pending``. The same alias gets the current status; a different one raises
+        ``NameTaken``, worded the same for every status so nothing leaks, so a key cannot reach a
+        squatter.
         """
         if org_only:
             self._require_org(credential)
@@ -158,12 +139,11 @@ class AccessService:
                 raise NameTaken(_NAME_TAKEN)
             return Registration(existing, True, _status_message(existing.status))
         agent = await self._store.register_agent(name, owner_alias)
-        # A racing registrant may have won, or ``name`` is a case variant of
-        # an existing agent's, refused whoever owns it (ADR 0045).
+        # A racing registrant won, or ``name`` is a case variant of an existing one (ADR 0045).
         if agent.name != name or not _same_owner(agent.owner_alias, owner_alias):
             raise NameTaken(_NAME_TAKEN)
-        # Only new registrations are audited (ADR 0046); the alias is the
-        # registrant's claim, not a verified identity.
+        # Only new registrations are audited (ADR 0046); the alias is a claim, not a verified
+        # identity.
         await self._audit(
             credential,
             AuditAction.AGENT_REGISTER,
@@ -172,12 +152,9 @@ class AccessService:
         )
         return Registration(agent, False, _status_message(agent.status, new=True))
 
-    # -- admin-gated operations (ADR 0012) ----------------------------------
-
     async def _require_fleet(self, fleet_id: str) -> None:
-        """A home-fleet reference must name a real fleet (SPEC §12.1);
-        checked before any mutation so a typo is a typed 404. A merged fleet
-        takes no members (ADR 0107): ``FleetMerged``."""
+        """A home-fleet reference must name a real fleet (SPEC §12.1), checked before any mutation.
+        A merged fleet takes no members (ADR 0107): ``FleetMerged``."""
         fleet = await self._store.get_fleet(fleet_id)
         if fleet is None:
             raise UnknownFleet(f"unknown fleet: {fleet_id}")
@@ -192,11 +169,11 @@ class AccessService:
         home_fleet_id: str,
         credential: Credential,
     ) -> tuple[Agent, str]:
-        """Activate a pending or revoked agent and issue its key **once**;
-        returns (agent, raw_key). ``InvalidAgentStatus`` if already active
-        (ADR 0028). The status flips first and the key is issued last,
-        only while still ``active`` (ADR 0039), so a race or failure
-        leaves the agent less privileged, never more."""
+        """Activate a pending or revoked agent and issue its key **once**: (agent, raw_key).
+
+        The status flips first and the key is issued last, so a race or failure leaves the agent
+        less privileged, never more (ADRs 0028, 0039). ``InvalidAgentStatus`` if already active.
+        """
         require_admin(credential)
         await self._require_fleet(home_fleet_id)
         agent = await self._store.activate_agent(
@@ -219,20 +196,12 @@ class AccessService:
         home_fleet_id: str,
         credential: Credential,
     ) -> tuple[Agent, str]:
-        """Register and activate an agent in one admin call (ADR 0120), for
-        an owner who did not self-register; returns (agent, raw_key) and
-        the key is shown **once**. It runs the same two steps as
-        self-registration followed by activation, so it writes the same
-        ``agent.register`` and ``agent.activate`` audit rows.
+        """Register and activate in one admin call (ADR 0120): (agent, raw_key), key shown **once**.
 
-        Admin key only. The owner alias is required (it says who gets the
-        key). Everything is checked before the record is created: the
-        name and alias, the fleet, and that the name is new. An existing
-        name of any status, or a case variant of one, is ``NameTaken``:
-        the admin activates, re-activates or replaces the key of an
-        existing agent instead. If activation fails after the
-        registration, the agent stays ``pending`` and can be activated
-        from the panel."""
+        Same two steps and audit rows as self-registration plus activation. Everything is checked
+        before the record is created; an existing name (any status, any case) is ``NameTaken``. If
+        activation fails, the agent stays ``pending``.
+        """
         require_admin(credential)
         validate_agent_name(name)
         validate_owner_alias(owner_alias)
@@ -253,15 +222,10 @@ class AccessService:
         return await self.activate(name, trust_level, home_fleet_id, credential)
 
     async def replace_agent_key(self, name: str, credential: Credential) -> str:
-        """Replace an active agent's key (ADR 0108); returns the new raw key
-        **once**. The old key stops working at once; the agent's status,
-        trust level, fleet and memories are untouched. ``UnknownAgent`` if
-        unknown, ``InvalidAgentStatus`` unless ``active`` (a revoked agent
-        is re-activated instead). The audit row carries both key
-        fingerprints, never a key."""
+        """Replace an active agent's key (ADR 0108): the new raw key, **once**. The old key stops
+        at once; ``InvalidAgentStatus`` unless ``active``. The audit row has both fingerprints."""
         require_admin(credential)
-        # The authenticator writes the audit row in the swap's transaction,
-        # so there is no window with a new key and no row.
+        # The authenticator audits in the swap's transaction: no window with a new key and no row.
         replacement = await self._require_authenticator().replace_agent_key(
             name,
             audit_actor_kind=actor_kind_of(credential),
@@ -270,13 +234,10 @@ class AccessService:
         return replacement.raw_key
 
     async def lock_own_key(self, credential: Credential) -> bool:
-        """Lock the calling agent's own key (the portal's "this key
-        leaked"). Only the key; the agent stays ``active`` with its memories,
-        pins, trust and fleet. The key fails from its next request and an
-        admin's key replacement (ADR 0108) clears the lock. Agent keys only;
-        the audit row (``agent_key.lock``, ``via: "portal"``, the key
-        fingerprint) is written with the lock. ``False`` (nothing changed or
-        audited) when the key was replaced or locked meanwhile."""
+        """Lock the calling agent's own key (the portal's "this key leaked"); the agent stays
+        ``active``. An admin's key replacement (ADR 0108) clears the lock. Agent keys only; the
+        audit row is written with the lock. ``False``, nothing changed, if the key was replaced
+        or locked meanwhile."""
         if (
             credential.is_admin
             or credential.is_org
@@ -289,19 +250,17 @@ class AccessService:
         )
 
     async def create_fleet(self, name: str, credential: Credential) -> Fleet:
-        """Create a named fleet (admin-gated, ADR 0012)."""
+        """Create a named fleet."""
         require_admin(credential)
-        validate_fleet_name(name)  # ADR 0040
+        validate_fleet_name(name)
         fleet = await self._store.create_fleet(name)
         await self._audit(credential, AuditAction.FLEET_CREATE, fleet.id, {"name": name})
         return fleet
 
     async def rename_fleet(self, fleet_id: str, name: str, credential: Credential) -> Fleet:
-        """Rename a fleet (admin-gated, audited ``fleet.rename``, ADR 0109).
-        Merged fleets can be renamed. Renaming to the current name changes
-        nothing and writes no audit row."""
+        """Rename a fleet, merged ones included (ADR 0109). The current name writes no audit row."""
         require_admin(credential)
-        validate_fleet_name(name)  # same bounds as a new fleet's name (ADR 0040)
+        validate_fleet_name(name)
         before, after = await self._store.rename_fleet(fleet_id, name)
         if before.name != after.name:
             await self._audit(
@@ -313,9 +272,8 @@ class AccessService:
         return after
 
     async def set_trust_level(self, name: str, level: TrustLevel, credential: Credential) -> Agent:
-        """Promote/demote an agent's trust level (admin-gated, ADR 0011).
-        Demotion to level 0 is *dormant* (key still valid, no access) —
-        distinct from revocation (ADR 0012)."""
+        """Promote or demote a trust level (ADR 0011). Level 0 is *dormant* (key valid, no access),
+        not revoked (ADR 0012)."""
         require_admin(credential)
         before = await self._store.get_agent(name)
         agent = await self._store.set_agent_trust_level(name, level)
@@ -331,9 +289,8 @@ class AccessService:
         return agent
 
     async def set_home_fleet(self, name: str, fleet_id: str, credential: Credential) -> Agent:
-        """Re-parent an agent to a new home fleet (admin-gated, ADR 0011).
-        The agent's earlier ``fleet``-scoped entries stay in the fleet
-        they were written into (never re-parented)."""
+        """Re-parent an agent to a new home fleet (ADR 0011); its earlier ``fleet`` entries stay
+        in the fleet they were written into."""
         require_admin(credential)
         await self._require_fleet(fleet_id)
         before = await self._store.get_agent(name)
@@ -347,10 +304,8 @@ class AccessService:
         return agent
 
     async def set_owner_alias(self, name: str, owner_alias: str, credential: Credential) -> Agent:
-        """Correct an agent's owner alias (admin-gated, ADR 0122), in any
-        status. The alias is checked like the one on creation (ADR 0040,
-        non-blank). Setting the value it already has changes nothing and
-        writes no audit row; a change that is only in letter case is a change."""
+        """Correct an agent's owner alias, any status (ADR 0122). An unchanged value writes no
+        audit row; a case-only change is a change."""
         require_admin(credential)
         validate_owner_alias(owner_alias)
         if not owner_alias.strip():
@@ -376,12 +331,9 @@ class AccessService:
         home_fleet_id: str | None = None,
         owner_alias: str | None = None,
     ) -> Agent:
-        """``PATCH /v1/admin/agents/{name}``: the trust level, the home
-        fleet and/or the owner alias, each audited as its own change. The fleet is checked first
-        (``UnknownFleet``, or ``FleetMerged`` for a merged one), so a refused
-        fleet changes nothing, not even a trust level sent with it. With
-        none, the agent as it is (``UnknownAgent`` if unknown). A bad owner
-        alias is refused before anything changes."""
+        """``PATCH /v1/admin/agents/{name}``: trust level, home fleet and/or owner alias, each
+        audited on its own. The fleet and alias are checked first, so a refused one changes
+        nothing."""
         require_admin(credential)
         if owner_alias is not None:
             validate_owner_alias(owner_alias)
@@ -403,10 +355,8 @@ class AccessService:
         return agent
 
     async def revoke(self, name: str, credential: Credential) -> None:
-        """Revoke an agent (ADRs 0012, 0028): status first (its key stops
-        authenticating, ADR 0039), then delete the key row. On a pending
-        agent this rejects the registration; the name stays reserved.
-        ``UnknownAgent`` if unknown; ``InvalidAgentStatus`` if already revoked."""
+        """Revoke an agent (ADRs 0012, 0028): status first (its key stops authenticating, ADR 0039),
+        then the key row. A pending agent's registration is rejected; the name stays reserved."""
         require_admin(credential)
         before = await self._store.get_agent(name)
         if before is None:
@@ -419,10 +369,8 @@ class AccessService:
         await self._audit(credential, AuditAction.AGENT_REVOKE, name, {"from": before.status.value})
 
     async def revocable(self, name: str, credential: Credential) -> bool:
-        """Whether ``revoke`` would revoke ``name`` now: ``False`` when it is
-        already revoked. ``UnknownAgent`` if unknown; ``PermissionDenied``
-        without an admin key or an authenticator. Changes nothing, so a caller
-        can refuse before it changes anything else."""
+        """Whether ``revoke`` would revoke ``name`` now. Changes nothing, so a caller can refuse
+        before changing anything else."""
         require_admin(credential)
         agent = await self._store.get_agent(name)
         if agent is None:
@@ -433,14 +381,12 @@ class AccessService:
         return True
 
     async def rotate_org_key(self, credential: Credential) -> str:
-        """Rotate the shared org key (ADR 0031): every prior org key stops
-        working, active agents are unaffected; the new key is returned once."""
+        """Rotate the shared org key (ADR 0031): prior org keys stop; the new key is returned
+        once."""
         require_admin(credential)
         key = await self._require_authenticator().rotate_org_key()
         await self._audit(credential, AuditAction.ORG_KEY_ROTATE, None)
         return key
-
-    # -- read (admin-gated listing) ------------------------------------------
 
     async def list_agents(self, credential: Credential) -> list[Agent]:
         require_admin(credential)
@@ -449,8 +395,7 @@ class AccessService:
     async def list_fleets(
         self, credential: Credential, *, include_merged: bool = False
     ) -> list[Fleet]:
-        """Fleets (admin-gated); merged ones only with ``include_merged``
-        (ADR 0107)."""
+        """Fleets; merged ones only with ``include_merged`` (ADR 0107)."""
         require_admin(credential)
         fleets = await self._store.list_fleets()
         return fleets if include_merged else [f for f in fleets if f.merged_into is None]
@@ -458,17 +403,13 @@ class AccessService:
     async def list_audit(
         self, credential: Credential, filters: AuditFilters, limit: int
     ) -> list[AuditRecord]:
-        """The audit log, newest first (admin-gated, ADR 0027)."""
+        """The audit log, newest first (ADR 0027)."""
         require_admin(credential)
         return await self._store.list_audit(filters, limit)
 
-    # -- the caller's own standing (ADR 0030) -------------------------------
-
     async def whoami(self, credential: Credential) -> Standing:
-        """What the calling key is and may do (``hive_whoami``, ADR 0030).
-
-        Any valid key may ask. Derived from the rules the data plane
-        enforces, so the answer cannot drift from actual behaviour."""
+        """What the calling key is and may do (``hive_whoami``, ADR 0030), derived from the rules
+        the data plane enforces so it cannot drift."""
         if credential.is_admin:
             key_kind = "admin"
         elif credential.is_org:
@@ -502,8 +443,6 @@ class AccessService:
             key_last_used_at=key_last_used,
         )
 
-    # -- audit (ADR 0027) ------------------------------------------------------
-
     async def _audit(
         self,
         credential: Credential,
@@ -514,8 +453,6 @@ class AccessService:
         """Record a succeeded admin action. Takes no key on purpose."""
         await record_admin_action(self._store, credential, action, target, detail)
 
-    # -- permission gates (ADR 0012) -----------------------------------------
-
     def _require_org_or_admin(self, credential: Credential) -> None:
         if not (credential.is_org or credential.is_admin):
             raise PermissionDenied("registration requires an org or admin key (ADR 0012)")
@@ -525,20 +462,16 @@ class AccessService:
             raise PermissionDenied("hive_register is gated on the org key (SPEC §5.2)")
 
 
-# -- write-scope resolution (ADR 0011) ---------------------------------------
-
-
 @dataclass(frozen=True, slots=True)
 class WriteResolution:
-    """The resolved write scope + fleet for a write (ADR 0011)."""
+    """The resolved write scope and fleet (ADR 0011)."""
 
     scope: str
     fleet_id: str | None
 
 
-# Scope ranks: a writer may not write a scope higher than its level allows.
 def _readable(key_kind: str, credential: Credential) -> tuple[str, ...]:
-    """``can_read`` for ``whoami`` (ADR 0030) — mirrors ``entry_is_visible``."""
+    """``can_read`` for ``whoami``; mirrors ``entry_is_visible``."""
     if key_kind in ("admin", "legacy"):
         return ("everything",)
     if key_kind == "org" or credential.trust_level is TrustLevel.UNTRUSTED:
@@ -548,9 +481,8 @@ def _readable(key_kind: str, credential: Credential) -> tuple[str, ...]:
 
 
 def _writable_scopes(key_kind: str, credential: Credential) -> tuple[str, ...]:
-    """``can_write_scopes`` for ``whoami`` (ADR 0030) — every scope up to
-    ``max_write_scope``, minus ``fleet`` for an agent with no home fleet
-    (``resolve_write_scope`` would reject it)."""
+    """``can_write_scopes`` for ``whoami``: up to ``max_write_scope``, minus ``fleet`` where
+    ``resolve_write_scope`` would reject it."""
     if key_kind == "org" or not credential.can_write():
         return ()
     if credential.is_admin or not credential.access_controlled:
@@ -566,13 +498,9 @@ def _writable_scopes(key_kind: str, credential: Credential) -> tuple[str, ...]:
 def resolve_write_scope(
     credential: Credential, requested_scope: str | None = None
 ) -> WriteResolution:
-    """Resolve + validate the write scope for this credential (ADR 0011).
-
-    Omitted → the level's maximum (L1 ``self``, L2/L3 ``fleet``, admin
-    ``org``). An explicit scope may not exceed it; level 0 may not write;
-    ``fleet`` needs a home fleet, so the admin key may not write it (ADR
-    0060). ``PermissionDenied`` otherwise.
-    """
+    """Resolve and validate the write scope (ADR 0011). Omitted gives the level's maximum (L1
+    ``self``, L2/L3 ``fleet``, admin ``org``); an explicit scope may not exceed it. ``fleet`` needs
+    a home fleet, so the admin key may not write it (ADR 0060)."""
     if not credential.can_write():
         raise PermissionDenied("level 0 (untrusted) agents may not write (ADR 0011)")
     max_scope = credential.max_write_scope()

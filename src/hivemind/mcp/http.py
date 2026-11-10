@@ -1,11 +1,6 @@
-"""The hostable, multi-agent streamable-HTTP MCP runner (ADR 0010).
-
-One process serves any number of agents, each authenticating **per
-request** with its own key (ADR 0008) over shared pools.
-:class:`BearerAuthMiddleware` verifies the key and stashes the
-``Credential`` in a context var; ``build_server`` re-binds the stateless
-services to it on every dispatch, so revocation is immediate.
-"""
+"""The hostable streamable-HTTP MCP runner (ADR 0010): each agent authenticates **per request**
+with its own key (ADR 0008). The credential goes in a context var and ``build_server`` re-binds
+the services to it on every dispatch, so revocation is immediate."""
 
 from __future__ import annotations
 
@@ -30,15 +25,14 @@ from hivemind.services.wiring import build_services, log_startup
 
 logger = logging.getLogger(__name__)
 
-# The acting credential for the current request (one ASGI request = one
-# task), set by the auth middleware and read on each tool dispatch.
+# The acting credential for the current request, set by the auth middleware.
 _current_credential: ContextVar[Credential | None] = ContextVar(
     "hivemind_mcp_credential", default=None
 )
 
 
 def current_credential() -> Credential | None:
-    """The acting credential for the current request (or ``None``)."""
+    """The acting credential for the current request, or ``None``."""
     return _current_credential.get()
 
 
@@ -67,9 +61,7 @@ async def _send_response(
     content_type: bytes = b"application/json",
     extra_headers: tuple[tuple[bytes, bytes], ...] = (),
 ) -> None:
-    """One minimal ASGI response: the start message (content-type, content-length,
-    then ``extra_headers``) and the body. The MCP path and the probes are
-    fire-and-forget, so nothing streams."""
+    """One minimal ASGI response (nothing streams)."""
     await send(
         {
             "type": "http.response.start",
@@ -89,20 +81,19 @@ async def _send_unauthorized(
     error: str = "unauthorized",
     detail: str = "a valid API key is required (Authorization: Bearer <key> or X-Api-Key)",
 ) -> None:
-    """Send a minimal 401 JSON response (no body needed on the MCP path). A
-    locked key says so (``key_locked``) instead of calling itself unknown."""
+    """A minimal 401; a locked key says ``key_locked`` rather than unknown."""
     await _send_json(
         send,
         401,
         {"error": error, "detail": detail},
-        # Tells a client this is a plain bearer-key API (ONB-8).
+        # Tells a client this is a plain bearer-key API.
         extra_headers=((b"www-authenticate", b'Bearer realm="hivemind"'),),
     )
 
 
 async def _send_store_unavailable(send: Send) -> None:
-    """503 + Retry-After when key verification timed out on the store: the
-    key may be fine, so a 401 would mislead (ROADMAP 3.13)."""
+    """503 + Retry-After when key verification timed out on the store: the key may be fine, so a
+    401 would mislead (ROADMAP 3.13)."""
     await _send_json(
         send,
         503,
@@ -111,8 +102,8 @@ async def _send_store_unavailable(send: Send) -> None:
     )
 
 
-# No OAuth here: MCP clients probe these after a 401, and anything but a
-# 404 starts a confusing OAuth flow (ONB-8, ADR 0042).
+# No OAuth here: MCP clients probe these after a 401, and anything but a 404 starts a confusing
+# OAuth flow (ADR 0042).
 _OAUTH_DISCOVERY_PREFIX = "/.well-known/oauth-"
 
 
@@ -121,9 +112,8 @@ async def _send_not_found(send: Send) -> None:
 
 
 class BearerAuthMiddleware:
-    """Verify the request's API key; stash the credential and dispatch,
-    or send a 401. Non-HTTP scopes (``lifespan``) pass straight through.
-    """
+    """Verify the request's API key, stash the credential and dispatch, or send a 401. Non-HTTP
+    scopes pass through."""
 
     def __init__(self, app: ASGIApp, authenticator: Authenticator) -> None:
         self._app = app
@@ -160,13 +150,11 @@ class BearerAuthMiddleware:
             _current_credential.reset(token)
 
 
-# Unauthenticated probe paths (ADR 0019), served outside the auth
-# middleware because orchestrator probes carry no API key.
+# Unauthenticated probe paths (ADR 0019), served outside the auth middleware: probes carry no key.
 _PROBE_LIVENESS = "/mcp/liveness"
 _PROBE_HEALTH = "/mcp/health"
 _PROBE_DATABASE = "/mcp/health/database"
 _METRICS_PATH = "/metrics"
-# The MCP SDK's streamable-HTTP route (its default path).
 _MCP_PATH = "/mcp"
 # The paths the runner serves; any other path is one label, ``unmatched``.
 _KNOWN_PATHS = frozenset(
@@ -174,26 +162,20 @@ _KNOWN_PATHS = frozenset(
 )
 # A deep probe stuck on the pool answers 503 in time (ADR 0037).
 _DATABASE_PROBE_TIMEOUT = 5.0
-# The deep probe's answer is reused this long, so a flood of
-# unauthenticated GETs costs one query per window (MCP-10).
+# The deep probe's answer is reused this long, so unauthenticated GETs cost one query per window.
 _DATABASE_PROBE_CACHE_SECONDS = 2.0
 
 
 class ProbeRouter:
-    """Unauthenticated orchestrator probe endpoints (ADRs 0019, 0037).
+    """Unauthenticated probe endpoints before the auth middleware (ADRs 0019, 0037); all else is
+    delegated untouched.
 
-    Answers three GET paths before the auth middleware; everything else
-    is delegated untouched:
+    * ``/mcp/liveness`` and ``/mcp/health``: shallow, so a database outage does not pull every
+      replica out at once.
+    * ``/mcp/health/database``: deep, 200 or 503; the cause is logged, never returned.
 
-    * ``/mcp/liveness`` — shallow, 200 whenever the process answers.
-    * ``/mcp/health`` — the readiness probe, also shallow (ADR 0037): a
-      database outage must not pull every replica out at once.
-    * ``/mcp/health/database`` — deep, for people and monitoring: 200 or
-      503; the cause is logged, never returned.
-
-    With ``metrics`` it also answers ``GET /metrics`` (ADR 0104): this
-    process's own series, no agent, fleet or key in any label. Without, that
-    path is a 404.
+    With ``metrics``, ``GET /metrics`` serves this process's series (ADR 0104), no agent, fleet or
+    key in any label; without, a 404.
     """
 
     def __init__(self, app: ASGIApp, store: Store, metrics: McpMetrics | None = None) -> None:
@@ -219,9 +201,8 @@ class ProbeRouter:
         await self._app(scope, receive, send)
 
     async def _database_healthy(self) -> bool:
-        """The deep check, reused for ``_DATABASE_PROBE_CACHE_SECONDS`` and
-        single-flight, so this unauthenticated endpoint cannot be used to
-        amplify load onto the shared pool."""
+        """The deep check, cached and single-flight so this unauthenticated endpoint cannot amplify
+        load onto the shared pool."""
         async with self._db_probe_lock:
             cached = self._db_probe_result
             if cached is not None and time.monotonic() - cached[0] < _DATABASE_PROBE_CACHE_SECONDS:
@@ -273,12 +254,9 @@ def _split_csv(value: str) -> list[str]:
 
 
 def build_transport_security(settings: Settings, host: str) -> TransportSecuritySettings | None:
-    """The MCP SDK's DNS-rebinding (Host/Origin) protection settings.
-
-    ``None`` (the SDK default: loopback binds only) when no hosts are set
-    (ADR 0042); see ``Settings.mcp_allowed_hosts``. Origins without hosts
-    is a configuration error.
-    """
+    """The MCP SDK's DNS-rebinding (Host/Origin) protection (ADR 0042,
+    ``Settings.mcp_allowed_hosts``); ``None`` (SDK default, loopback binds only) when no hosts are
+    set. Origins without hosts is a configuration error."""
     hosts = _split_csv(settings.mcp_allowed_hosts)
     origins = _split_csv(settings.mcp_allowed_origins)
     if not hosts:
@@ -305,14 +283,13 @@ def build_http_app(
     embedder: Embedder,
     authenticator: Authenticator,
 ) -> ASGIApp:
-    """Build the streamable-HTTP ASGI app: shared stateless services,
-    credential per request (ADR 0010)."""
+    """Build the streamable-HTTP ASGI app: shared services, credential per request."""
     from hivemind.extractor import build_extractor
 
-    # Opt-in (ADR 0104): nothing is collected or served when off.
+    # Opt-in (ADR 0104).
     metrics = McpMetrics() if settings.mcp_metrics_enabled else None
     search_config = settings.search_config()
-    extractor = build_extractor(settings)  # optional (ADR 0016): None when the endpoint is unset
+    extractor = build_extractor(settings)
     services = build_services(
         store,
         embedder,
@@ -324,9 +301,8 @@ def build_http_app(
     template = McpHivemind.from_services(
         store,
         services,
-        # Never used to act: the provider fails closed (ADR 0042). Should
-        # that ever regress, this is level 0 and access-controlled, not the
-        # legacy full-access identity.
+        # Never used to act: the provider fails closed (ADR 0042). Should that regress, this is
+        # level 0 and access-controlled, not the legacy full-access identity.
         credential=Credential(
             user_id="shared", agent_id="hivemind-mcp-http", access_controlled=True
         ),
@@ -342,8 +318,8 @@ def build_http_app(
     mcp_app = server.streamable_http_app(
         stateless_http=True, host=host, transport_security=build_transport_security(settings, host)
     )
-    # Probes and /metrics (ADR 0019, 0104) answer without a key, MCP stays
-    # protected; request counting is outermost so 401s and probes are counted.
+    # Probes and /metrics answer without a key, MCP stays protected; request counting is outermost
+    # so 401s and probes are counted.
     router = ProbeRouter(BearerAuthMiddleware(mcp_app, authenticator), store, metrics)
     if metrics is None:
         return router

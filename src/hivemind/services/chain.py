@@ -1,10 +1,9 @@
-"""The supersession-chain walk (SPEC.md §5.1 ``?history``, §5.2 ``hive_get``).
+"""The supersession-chain walk (SPEC.md §5.1 ``?history``, §5.2 ``hive_get``), the
+visibility-checked reads by id (ADR 0033) and "see also" links.
 
-Also the visibility-checked reads by id (ADR 0033) and "see also" links.
-The walk has a version budget (``_MAX_HISTORY_VERSIONS``): since a write
-may supersede up to ``MAX_SUPERSEDES`` entries, an agent could otherwise
-build a legal tree of thousands of large predecessors for every
-``?history`` call to load.
+The walk has a version budget (``_MAX_HISTORY_VERSIONS``): a write may supersede up to
+``MAX_SUPERSEDES`` entries, so an agent could otherwise build a legal tree of thousands of large
+predecessors for every ``?history`` call to load.
 """
 
 from __future__ import annotations
@@ -17,14 +16,11 @@ from hivemind.domain.entry import Entry, EntryState
 from hivemind.domain.validation import MAX_ID_CHARS, MAX_LIMIT, MAX_SUPERSEDES, canonical_uuid
 from hivemind.ports import Store
 
-# Bound on a single forward/reverse chain walk (SPEC.md §6.3: chains are
-# short in practice; this is a defensive cap against corrupt data).
+# Defensive cap on one chain walk against corrupt data (chains are short, SPEC.md §6.3).
 _MAX_SUPERSEDE_HOPS = 256
-# Bound on the versions one walk loads, both directions together, visible
-# or not: never more than one list page (``limit`` <= MAX_LIMIT).
+# Versions one walk loads, both directions, visible or not: one list page.
 _MAX_HISTORY_VERSIONS = MAX_LIMIT
-# Incoming "see also" links shown on one read (ADR 0057): a popular entry
-# can be linked from many, and the newest links matter most.
+# Incoming "see also" links shown on one read, newest first (ADR 0057).
 MAX_LINKED_FROM = 20
 
 
@@ -34,9 +30,8 @@ def _can_name_entry(entry_id: str) -> bool:
 
 
 async def get_visible_entry(store: Store, entry_id: str, visibility: Visibility) -> Entry | None:
-    """The entry with ``entry_id`` if ``visibility`` may read it, else
-    ``None`` (ADR 0033). "Not visible" and "does not exist" are the same
-    answer, so an id reveals nothing, not even existence."""
+    """The entry if ``visibility`` may read it, else ``None`` (ADR 0033): "not visible" and "does
+    not exist" are the same answer, so an id reveals nothing, not even existence."""
     if not _can_name_entry(entry_id):
         return None
     entry = await store.get_entry(entry_id)
@@ -48,17 +43,15 @@ async def get_visible_entry(store: Store, entry_id: str, visibility: Visibility)
 async def get_visible_entries(
     store: Store, entry_ids: list[str], visibility: Visibility
 ) -> dict[str, Entry]:
-    """``get_visible_entry`` for several ids in one store read (ADR 0055):
-    the readable entries by id. An id that names nothing readable is simply
-    absent, the same answer for "invisible" and "does not exist"."""
+    """``get_visible_entry`` for several ids in one store read (ADR 0055); unreadable ids are
+    absent."""
     ids = [eid for eid in entry_ids if _can_name_entry(eid)]
     if not ids:
         return {}
     found = await store.get_entries(ids)
     result: dict[str, Entry] = {}
     for eid in ids:
-        # The store answers with canonical ids (lower case, hyphens); key the
-        # result by the id as asked, so any spelling still finds its entry.
+        # The store answers with canonical ids; key by the id as asked so any spelling finds it.
         entry = found.get(canonical_uuid(eid) or eid)
         if entry is not None and entry_is_visible(entry, visibility):
             result[eid] = entry
@@ -68,10 +61,8 @@ async def get_visible_entries(
 async def hide_unseen_successors(
     store: Store, entries: Sequence[Entry], visibility: Visibility
 ) -> list[Entry]:
-    """``entries`` with ``superseded_by`` cleared wherever the successor is
-    not readable by ``visibility`` (ADR 0033: invisible reads as unknown,
-    so a reader never gets an id it cannot open). The entry keeps its
-    ``superseded`` state. One batched store read however many entries."""
+    """``entries`` with ``superseded_by`` cleared where the successor is unreadable (ADR 0033), so
+    a reader never gets an id it cannot open. One batched store read."""
     wanted = list(
         dict.fromkeys(
             e.superseded_by
@@ -101,8 +92,7 @@ class EntryLinks:
 
 
 def _links_of(outgoing: list[str], incoming: list[str], found: dict[str, Entry]) -> EntryLinks:
-    """The links among ``found`` (the readable ones): outgoing in order,
-    incoming only while active."""
+    """The links among ``found`` (the readable ones); incoming only while active."""
     return EntryLinks(
         see_also=tuple(found[i] for i in outgoing if i in found),
         linked_from=tuple(
@@ -112,11 +102,9 @@ def _links_of(outgoing: list[str], incoming: list[str], found: dict[str, Entry])
 
 
 async def entry_links(store: Store, entry_id: str, visibility: Visibility) -> EntryLinks:
-    """The entries ``entry_id`` links to and the active entries that link
-    to it, limited to what ``visibility`` may read (ADR 0057). A linked
-    entry the reader may not see is left out, as if the link did not
-    exist; ``linked_from`` holds at most ``MAX_LINKED_FROM``, newest link
-    first."""
+    """The entries ``entry_id`` links to and the active ones linking to it, limited to what
+    ``visibility`` may read (ADR 0057); an unreadable one is left out as if the link did not
+    exist."""
     outgoing, incoming = await store.entry_links(entry_id, MAX_LINKED_FROM, visibility=visibility)
     if not outgoing and not incoming:
         return EntryLinks()
@@ -127,8 +115,7 @@ async def entry_links(store: Store, entry_id: str, visibility: Visibility) -> En
 async def entries_links(
     store: Store, entry_ids: list[str], visibility: Visibility
 ) -> dict[str, EntryLinks]:
-    """``entry_links`` for several entries, two store reads in all however
-    many there are (ADR 0059), keyed by ``entry_ids``."""
+    """``entry_links`` for several entries, two store reads however many (ADR 0059)."""
     if not entry_ids:
         return {}
     raw = await store.entry_links_many(entry_ids, MAX_LINKED_FROM, visibility=visibility)
@@ -145,15 +132,12 @@ async def supersession_chain(
     max_hops: int = _MAX_SUPERSEDE_HOPS,
     max_versions: int = _MAX_HISTORY_VERSIONS,
 ) -> tuple[list[Entry], list[Entry]]:
-    """Return ``(successors, superseded)`` for an entry's chain.
+    """``(successors, superseded)`` for an entry's chain: newer and older versions.
 
-    ``successors`` are the newer versions, ``superseded`` the older ones.
-    Both walks are bounded by ``max_hops``. At most ``max_versions`` are
-    loaded in all, successors first, then predecessors breadth-first; a
-    longer chain comes back truncated.
-
-    With ``visibility``, unreadable versions are walked through but not
-    returned (ADR 0033); ``None`` returns everything (internal callers only).
+    Walks are bounded by ``max_hops``; at most ``max_versions`` load in all, successors first, then
+    predecessors breadth-first, so a longer chain comes back truncated. With ``visibility``,
+    unreadable versions are walked through but not returned (ADR 0033); ``None`` returns everything
+    (internal callers only).
     """
     successors: list[Entry] = []
     cursor = entry
@@ -166,16 +150,14 @@ async def supersession_chain(
         if nxt is None:
             break
         if nxt.id in seen:
-            # A corrupt cycle: stop (the reverse walk dedups the same way).
+            # A corrupt cycle.
             break
         successors.append(nxt)
         seen.add(nxt.id)
         cursor = nxt
 
-    # Reverse walk, frontier by frontier: one indexed ``list_predecessors``
-    # call per hop (migration 0008), so cost follows the chain, not the
-    # pool. A version has at most MAX_SUPERSEDES predecessors, so batches
-    # of ``budget // MAX_SUPERSEDES`` never load much more than the budget.
+    # Reverse walk, one indexed ``list_predecessors`` call per hop. A version has at most
+    # MAX_SUPERSEDES predecessors, so batches of ``budget // MAX_SUPERSEDES`` stay near the budget.
     superseded: list[Entry] = []
     frontier = [entry]
     seen = {entry.id}
@@ -188,7 +170,7 @@ async def supersession_chain(
             batch_size = max(1, (budget - len(preds)) // MAX_SUPERSEDES)
             batch, frontier = frontier[:batch_size], frontier[batch_size:]
             preds.extend(await store.list_predecessors([node.id for node in batch]))
-        # Stable order regardless of the store's row order.
+        # Stable regardless of the store's row order.
         preds.sort(key=lambda e: (e.created_at, e.id), reverse=True)
         frontier = []
         for pred in preds:

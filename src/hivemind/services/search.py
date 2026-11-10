@@ -1,9 +1,5 @@
-"""Search service — the retrieval pipeline (SPEC.md §6).
-
-Keyword + vector streams, RRF fusion, decay-aware rescoring and the
-supersession ranking invariant. Orchestration only: the math lives in
-``hivemind.retrieval``.
-"""
+"""Search service: the retrieval pipeline (SPEC.md §6). Orchestration only; the math is in
+``hivemind.retrieval``."""
 
 from __future__ import annotations
 
@@ -42,8 +38,7 @@ from hivemind.services.ownership import own_author_filter
 
 @dataclass(frozen=True, slots=True)
 class SimilarEntry:
-    """Another member of a hit's version group (ADR 0074): an id the caller
-    can already read, and when its memory happened."""
+    """Another member of a hit's version group (ADR 0074)."""
 
     entry_id: str
     occurred_at: datetime
@@ -51,8 +46,7 @@ class SimilarEntry:
 
 @dataclass(frozen=True, slots=True)
 class Hit:
-    """A compact search hit, no ``body`` (SPEC.md §6.1: progressive
-    disclosure)."""
+    """A compact search hit, no ``body`` (SPEC.md §6.1)."""
 
     entry_id: str
     kind: Kind
@@ -67,44 +61,32 @@ class Hit:
     fleet_id: str | None = None
     # (helpful, stale, wrong) over every reporter (ADR 0051).
     feedback: FeedbackCounts = (0, 0, 0)
-    # When someone other than the author last used the entry and said what
-    # they checked, with no flag since (SPEC §4.2); display only, never ranked.
+    # Last confirmation by a non-author with no flag since (SPEC §4.2); display only, never ranked.
     last_confirmed_at: datetime | None = None
-    # The evidence on the hit (SPEC §6.1), display only: readers disagree
-    # (a helpful and a stale or wrong report), the newest stale or wrong
-    # report with a note when no confirmation is newer, and how many entries
-    # the hit replaced that the caller may read. ``state`` only under
-    # ``include_inactive``.
+    # Evidence on the hit (SPEC §6.1), display only. ``state`` only under ``include_inactive``.
     contested: bool = False
     correction: Correction | None = None
     supersedes: int = 0
     state: EntryState | None = None
-    # Unlinked near-copies of this entry among the same search's candidates,
-    # newest first (ADR 0074); empty unless version grouping is on and found
-    # some. Display only.
+    # Unlinked near-copies among the candidates, newest first (ADR 0074); display only.
     similar: tuple[SimilarEntry, ...] = ()
-    # Entries this insight or decision links to (see_also) that were
-    # withdrawn, superseded by someone else or flagged since the link was
-    # made, at most 3 (ADR 0081). Display only.
+    # see_also targets changed since the link, at most 3 (ADR 0081); display only.
     upstream_changed: tuple[UpstreamChange, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class SearchResult:
-    """A page of hits; ``degraded`` when the embedder failed and the page
-    is keyword-only (ADR 0048)."""
+    """A page of hits; ``degraded`` when the page is keyword-only (ADR 0048)."""
 
     hits: list[Hit]
     degraded: bool = False
-    # The hint the scores were computed under (ADR 0073): ``DEFAULT`` unless
-    # the server setting is on and the caller asked for another.
+    # The hint the scores were computed under (ADR 0073).
     recency: RecencyHint = RecencyHint.DEFAULT
 
 
 @dataclass(frozen=True, slots=True)
 class _ScoredCandidates:
-    """The candidates that survived the state filter, in fused-rank order,
-    with each one's score and feedback signals."""
+    """State-filtered candidates in fused-rank order, with scores and feedback signals."""
 
     entries: list[Entry]
     scores: dict[str, float]
@@ -133,7 +115,7 @@ async def _gather[A, B](first: Awaitable[A], second: Awaitable[B]) -> tuple[A, B
 
 
 class SearchService:
-    """Orchestrates hybrid search over the store (SPEC.md §6.2/§6.3/§6.4)."""
+    """Hybrid search over the store (SPEC.md §6.2 to §6.4)."""
 
     def __init__(
         self,
@@ -183,17 +165,9 @@ class SearchService:
         explore: bool = False,
         count: bool = True,
     ) -> SearchResult:
-        """Run a hybrid query and return compact hits, best first.
-
-        If the embedder fails the result is keyword-only and ``degraded``
-        (ADR 0048), not an error. A caller's first-page search is counted
-        per home fleet (ADR 0056). ``recency`` is a per-call hint (ADR 0073):
-        it changes the scoring only while ``recency_hint_enabled`` is on, and
-        the result says which hint was applied. Send the same hint on every
-        page of one search. ``explore`` re-orders the ranked candidates for
-        diversity (ADR 0078) and is counted too; off, the ranking is
-        untouched. ``count=False`` leaves the search out of the counters
-        (the admin search, ADR 0080).
+        """Hybrid query, compact hits best first. Embedder failure gives a keyword-only ``degraded``
+        result (ADR 0048); first pages are counted per home fleet (ADR 0056), ``count=False`` skips
+        that (ADR 0080); ``recency`` (ADR 0073) and ``explore`` (ADR 0078) are per-call hints.
         """
         result = await self._ranked(query, filters, limit, offset, visibility, recency, explore)
         if count and visibility is not None and not offset:
@@ -221,7 +195,7 @@ class SearchService:
         recency: RecencyHint,
         explore: bool = False,
     ) -> SearchResult:
-        """The search itself (``search_result`` without the counting)."""
+        """``search_result`` without the counting."""
         # Validate before any embedder or store call (ADR 0040).
         check_query(query)
         check_pagination(limit, offset)
@@ -256,11 +230,10 @@ class SearchService:
     async def _fused_candidates(
         self, query: str, filters: EntryFilters, visibility: Visibility | None
     ) -> tuple[dict[str, float], bool]:
-        """The RRF-fused candidate ids with their fused scores (SPEC.md §6.2,
-        configurable weights), and whether the vector stream was lost."""
+        """RRF-fused candidate ids with scores (SPEC.md §6.2), and whether the vector stream was
+        lost."""
         top_k = self._config.candidate_top_k
-        # Both streams concurrently (PERF-4); ``vector_ids`` is None when
-        # the embedder failed (ADR 0048).
+        # ``vector_ids`` is None when the embedder failed (ADR 0048).
         keyword_ids, vector_ids = await _gather(
             self._store.search_keyword(query, filters, top_k, visibility=visibility),
             self._vector_stream(query, filters, top_k, visibility),
@@ -275,8 +248,7 @@ class SearchService:
     async def _fetch_candidates(
         self, candidate_ids: list[str], visibility: Visibility | None
     ) -> tuple[Mapping[str, Entry], Mapping[str, FeedbackSignals]]:
-        """The candidate entries and their batched feedback signals, read
-        concurrently."""
+        """The candidate entries and their batched feedback signals."""
         return await _gather(
             self._store.get_entries(candidate_ids),
             self._store.feedback_signals(
@@ -297,8 +269,7 @@ class SearchService:
         scored: list[Entry] = []
         entry_scores: dict[str, float] = {}
         entry_feedback: dict[str, FeedbackSignals] = {}
-        # Fused-rank order, not row order: ties are common and the stable
-        # sorts below keep this order (SP-5).
+        # Fused-rank order, not row order: ties are common and the stable sorts below keep it.
         for entry in (entries[eid] for eid in fused if eid in entries):
             if not filters.include_inactive and entry.state is not EntryState.ACTIVE:
                 continue
@@ -332,10 +303,8 @@ class SearchService:
     async def _rank_versions(
         self, candidates: _ScoredCandidates, explore: bool
     ) -> tuple[list[Entry], dict[str, tuple[SimilarEntry, ...]]]:
-        """The display order: version groups (ADR 0074, off unless
-        configured), then the supersession ranking invariant (SPEC.md §6.3),
-        then the opt-in diversity re-order (ADR 0078; never on the default
-        path). Also the similar-entry lists the groups give each hit."""
+        """Display order: version groups (ADR 0074), supersession invariant (SPEC.md §6.3), opt-in
+        explore re-order (ADR 0078); also each hit's similar-entry list."""
         scored = candidates.entries
         version_groups: list[list[Entry]] = []
         threshold = self._config.version_group_min_similarity
@@ -353,10 +322,8 @@ class SearchService:
     async def _shared_similarity(
         self, scored: list[Entry], explore: bool
     ) -> dict[tuple[str, str], float] | None:
-        """With grouping and explore both on, explore's candidates (every
-        scored entry) are a superset of the grouped ones: read the
-        similarities once. A failed shared read leaves each step to read
-        (and fail) on its own, as when only one is on."""
+        """With grouping and explore both on, read the similarities once; a failed shared read
+        leaves each step to read (and fail) on its own."""
         if self._config.version_group_min_similarity is None or not explore or len(scored) < 2:
             return None
         try:
@@ -373,8 +340,7 @@ class SearchService:
         filters: EntryFilters,
         visibility: Visibility | None,
     ) -> list[Hit]:
-        """The hits for one page (SPEC.md §5.3: limit/offset on search and
-        list), with the upstream markers read for the page only."""
+        """The hits for one page, with the upstream markers read for the page only."""
         upstream = await self._upstream_changes(page, visibility)
         return [
             self._to_hit(
@@ -391,10 +357,8 @@ class SearchService:
     async def _upstream_changes(
         self, page: list[Entry], visibility: Visibility | None
     ) -> dict[str, tuple[UpstreamChange, ...]]:
-        """The ``upstream_changed`` marker of each insight or decision on
-        the page (ADR 0081): one batched read after the gathered ones, only
-        for the page. Best-effort like version grouping: a display nicety,
-        so a failed read means no marker, never a failed search."""
+        """``upstream_changed`` markers for the page (ADR 0081): one batched read after the gathered
+        ones. Best-effort: a failed read means no marker, never a failed search."""
         wanted = [e for e in page if e.kind in UPSTREAM_KINDS]
         if not wanted:
             return {}
@@ -413,10 +377,8 @@ class SearchService:
         threshold: float,
         similarity: Mapping[tuple[str, str], float] | None = None,
     ) -> list[list[Entry]]:
-        """The version groups among the best candidates (ADR 0074), each
-        ordered for display. Best-effort: grouping is a display nicety, so a
-        failed read means no groups, never a failed search. ``similarity``, when
-        given, covers at least the candidates and spares the read."""
+        """Version groups among the best candidates (ADR 0074). Best-effort: a failed read means no
+        groups, never a failed search. ``similarity``, when given, spares the read."""
         ranked = sorted(
             (e for e in scored if e.state is EntryState.ACTIVE),
             key=lambda e: scores[e.id],
@@ -441,12 +403,9 @@ class SearchService:
         version_groups: Sequence[Sequence[str]] = (),
         similarity: Mapping[tuple[str, str], float] | None = None,
     ) -> list[Entry]:
-        """``ordered`` re-ordered by MMR over the stored vectors (ADR 0078).
-
-        Runs after the gathered reads (ADR 0059), so a search never has more
-        than two store calls in flight. Best-effort: a failed similarity read
-        keeps the normal order. ``similarity``, when given, covers ``ordered``
-        and spares the read.
+        """``ordered`` re-ordered by MMR (ADR 0078). Runs after the gathered reads (ADR 0059), so a
+        search never has more than two store calls in flight. Best-effort: a failed read keeps the
+        normal order. ``similarity``, when given, spares the read.
         """
         try:
             if similarity is None:
@@ -465,9 +424,8 @@ class SearchService:
         top_k: int,
         visibility: Visibility | None,
     ) -> list[str] | None:
-        """The vector stream, or None on an ``EmbeddingError`` (ADR 0048);
-        store failures propagate. The query carries the configured
-        instruction, if any (ADR 0097); the keyword stream never does."""
+        """The vector stream, or None on an ``EmbeddingError`` (ADR 0048); store failures propagate.
+        Only this stream carries the query instruction (ADR 0097)."""
         try:
             query_vector = await self._embedder.embed_text(self._config.embedded_query(query))
         except EmbeddingError as exc:
@@ -515,9 +473,9 @@ class SearchService:
 
 
 def chain_heads(entries: list[Entry]) -> dict[str, str]:
-    """The chain head of each candidate id: follow ``superseded_by`` until
-    the link leaves the candidate set."""
-    # The candidates by id (the first one, should an id repeat).
+    """The chain head of each candidate id: follow ``superseded_by`` until the link leaves the
+    set."""
+    # The first one, should an id repeat.
     by_id: dict[str, Entry] = {}
     for entry in entries:
         by_id.setdefault(entry.id, entry)
@@ -542,18 +500,12 @@ def explore_reorder(
     lam: float,
     version_groups: Sequence[Sequence[str]] = (),
 ) -> list[Entry]:
-    """Re-order the output of ``apply_supersession_invariant`` by MMR for
-    diversity (ADR 0078). Only the order changes: nothing is dropped or
-    re-scored.
+    """MMR re-order of ``apply_supersession_invariant``'s output (ADR 0078): order only, nothing
+    dropped or re-scored.
 
-    An entry's unit is its supersession chain, joined with the chains of its
-    version group (ADR 0074) when it has one. Relevance is the best score in
-    the unit (the key the invariant ranks units by), so ``lam == 1``
-    reproduces ``ordered``. After MMR each unit's members are put back, in
-    the order ``ordered`` had them (chains newest first, a version group in
-    its display order), into the slots the unit holds, so the supersession
-    invariant still holds (SPEC §6.3). Members of one version group are
-    not kept adjacent: spreading near-copies is what MMR is for.
+    A unit is a supersession chain joined with its version group's chains (ADR 0074); its relevance
+    is its best score, so ``lam == 1`` reproduces ``ordered``. Each unit's members go back into the
+    unit's slots in their old order, so the supersession invariant holds (SPEC §6.3).
     """
     heads = chain_heads(ordered)
     unit_of = dict(heads)
@@ -583,15 +535,12 @@ def explore_reorder(
     return result
 
 
-# Version grouping looks at no more than the two streams' default candidates.
 MAX_GROUPED_CANDIDATES = 40
-# A group of unlinked versions is a pair or a triple, never a cluster.
-MAX_GROUP_SIZE = 3
+MAX_GROUP_SIZE = 3  # a pair or a triple, never a cluster
 
 
 def _group_key(entry: Entry) -> str | None:
-    """Who may be grouped with whom (ADR 0074): entries of one fleet, or
-    org-scoped entries. ``None``: with nobody."""
+    """Grouping key (ADR 0074): one fleet, or org-scoped; ``None`` groups with nobody."""
     if entry.scope == SCOPE_ORG:
         return "org"
     return f"fleet:{entry.fleet_id}" if entry.fleet_id else None
@@ -603,18 +552,12 @@ def group_versions(
     threshold: float,
     feedback: Mapping[str, FeedbackSignals],
 ) -> list[list[Entry]]:
-    """Group unlinked near-copies among ``ranked`` (active candidates, best
-    score first), ADR 0074.
+    """Group unlinked near-copies among ``ranked`` (active, best first), ADR 0074.
 
-    Walking down the ranking, the best ungrouped candidate is a group's
-    anchor; a later ungrouped candidate joins when its similarity to the
-    anchor is at least ``threshold``, the group has fewer than
-    ``MAX_GROUP_SIZE`` members and both belong to one fleet or are both
-    org-scoped. Only groups of two or more are returned, each ordered for
-    display: newest first by the later of ``occurred_at`` and
-    ``last_confirmed_at``, except that a member with a stale or wrong
-    report (contested included) never precedes an unflagged one. Pure: it
-    changes no score and hides nothing.
+    The best ungrouped candidate anchors a group; later ones join at similarity >= ``threshold``
+    within ``MAX_GROUP_SIZE`` and one ``_group_key``. Groups of two or more are returned, newest
+    first by the later of ``occurred_at`` and ``last_confirmed_at``, flagged members (stale, wrong,
+    contested) never before an unflagged one. Pure: no score changes, nothing hidden.
     """
 
     def newest(entry: Entry) -> datetime:
@@ -650,8 +593,7 @@ def group_versions(
 
 
 def _similar_map(groups: list[list[Entry]]) -> dict[str, tuple[SimilarEntry, ...]]:
-    """For each grouped entry, its group's other members, newest first by
-    ``occurred_at``."""
+    """Each grouped entry's other group members, newest first by ``occurred_at``."""
     out: dict[str, tuple[SimilarEntry, ...]] = {}
     for group in groups:
         for entry in group:
@@ -668,17 +610,11 @@ def apply_supersession_invariant(
     *,
     version_groups: Sequence[Sequence[str]] = (),
 ) -> list[Entry]:
-    """Enforce: within a supersession chain, the newest entry outranks all
-    predecessors (SPEC.md §6.3).
+    """Within a supersession chain the newest entry outranks its predecessors (SPEC.md §6.3).
 
-    Group by chain head, order groups by their best score, and within a
-    group newest ``created_at`` first. Ties keep the order of ``entries``
-    (stable sorts; SP-5).
-
-    ``version_groups`` (ADR 0074; ids, already in display order) add edges
-    between chains: the chains of one group are placed together, in the
-    group's order, at the position of the best-scoring member, each chain
-    keeping its own order. Every entry keeps a slot and no score changes.
+    Groups by chain head, best score first, newest ``created_at`` first within a group; ties keep
+    the order of ``entries`` (stable sorts). ``version_groups`` (ADR 0074; ids in display order)
+    place their chains together at the best member's position. Every entry keeps a slot.
     """
     head_of = chain_heads(entries)
     groups: dict[str, list[Entry]] = {}

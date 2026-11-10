@@ -1,15 +1,8 @@
-"""The admin activity view (ADR 0080): who wrote, who reported, per day.
+"""The admin activity view (ADR 0080), served at ``GET /v1/admin/activity``.
 
-A read-only report folded from ``Store.activity`` plus the agent and fleet
-rosters, served at ``GET /v1/admin/activity``. The grouped scans are the
-expensive read, so the service caches them per ``days`` value and UTC date for ``ttl``
-seconds (single-flight; the ``metrics_entry_counts_ttl`` setting, no new
-variable); the rosters are small and read on every call. A failed read is
-never cached.
-
-Observation only, like the feedback counters (ADR 0068) and the fleet
-health metrics (ADR 0075): nothing in search, ranking, scoring, quality
-or the briefing reads it, and no agent-facing surface exposes it.
+The grouped scans are cached per ``days`` and UTC date for ``ttl`` seconds (single-flight, the
+``metrics_entry_counts_ttl`` setting); a failed read is never cached. Observation only (ADRs 0068,
+0075): nothing in ranking reads it and no agent-facing surface exposes it.
 """
 
 from __future__ import annotations
@@ -44,7 +37,7 @@ def _later(a: datetime | None, b: datetime | None) -> datetime | None:
 
 
 class ActivityService:
-    """Compute the activity report from the ``Store`` (ADR 0080)."""
+    """Compute the activity report from the ``Store``."""
 
     def __init__(
         self,
@@ -60,26 +53,22 @@ class ActivityService:
         self._wall_clock = wall_clock
         self._lock = asyncio.Lock()
         self._cache: dict[tuple[int, date], tuple[float, datetime, Activity]] = {}
-        # Bumped by invalidate(): a scan that started before it must not
-        # store its (stale) result, though it still returns it to its caller.
+        # Bumped by invalidate(): a scan that started before it must not cache its stale result.
         self._generation = 0
 
     def invalidate(self) -> None:
-        """Drop the cached scans, so the next report scans again (after a
-        fleet merge or undo moved the entries)."""
+        """Drop the cached scans (after a fleet merge or undo moved entries)."""
         self._generation += 1
         self._cache.clear()
 
     async def _activity(self, days: int) -> tuple[datetime, Activity]:
-        """The grouped scans for ``days``, reused within the TTL. One scan
-        at a time; concurrent callers wait and reuse its result. A store
-        error propagates and caches nothing."""
+        """The grouped scans for ``days``, reused within the TTL; one scan at a time, concurrent
+        callers reuse its result."""
         async with self._lock:
             now = self._clock()
             wall = self._wall_clock()
             today = wall.astimezone(UTC).date()
-            # Keyed by the UTC date, so the window never straddles midnight;
-            # entries of other dates are dropped to keep the cache bounded.
+            # Keyed by UTC date so the window never straddles midnight; other dates are dropped.
             self._cache = {k: v for k, v in self._cache.items() if k[1] == today}
             hit = self._cache.get((days, today))
             if hit is not None and now - hit[0] < self._ttl:
@@ -92,8 +81,8 @@ class ActivityService:
             return since, activity
 
     async def report(self, days: int = DEFAULT_DAYS) -> dict[str, Any]:
-        """The report: zero-filled ``daily``, ``totals``, one row per agent
-        name and one per fleet (see ``ActivityOut``)."""
+        """Zero-filled ``daily``, ``totals``, one row per agent name and per fleet
+        (``ActivityOut``)."""
         agents = await self._store.list_agents()
         fleets = [f for f in await self._store.list_fleets() if f.merged_into is None]
         since, activity = await self._activity(days)
@@ -162,8 +151,7 @@ def _agent_row(name: str, agent: Agent | None, fleet_name: Mapping[str, str]) ->
 def _agent_rows(
     activity: Activity, agents: Sequence[Agent], fleets: Sequence[Fleet]
 ) -> list[dict[str, Any]]:
-    """One row per registered agent and per unregistered name that wrote or
-    reported, busiest writers first."""
+    """One row per registered agent and per unregistered name that wrote or reported."""
     fleet_name = {f.id: f.name for f in fleets}
     registered = {a.name: a for a in agents}
     rows: dict[str, dict[str, Any]] = {}

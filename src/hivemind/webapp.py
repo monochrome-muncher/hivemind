@@ -1,19 +1,9 @@
-"""A same-origin web app over ``hivemind-api``: static UI, allowlisted
-proxy, strict security headers (ADR 0029).
+"""A same-origin web app over ``hivemind-api`` (ADR 0029), the base of the admin panel and the agent
+portal: static UI, an **allowlisted** ``/v1/*`` proxy (no CORS on the API) and strict security
+headers. The key lives in ``sessionStorage``, so the Content-Security-Policy is what keeps an
+injected script from using it.
 
-The admin panel (``hivemind.admin``) and the agent portal
-(``hivemind.portal``) are both one of these, each with its own static
-files and its own allowlist. Three jobs, nothing else:
-
-1. Serve the static UI at ``/`` and ``/static/``.
-2. Forward an **allowlisted** set of ``/v1/*`` calls to ``hivemind-api``
-   so the browser stays same-origin (no CORS on the API).
-3. Put strict security headers on every response. The key lives in the
-   browser's ``sessionStorage``, so the Content-Security-Policy is what
-   keeps an injected script from running or phoning home with it.
-
-The proxy forwards ``X-API-Key`` and never logs a header or a body: some
-responses carry a raw key.
+The proxy forwards ``X-API-Key`` and never logs a header or a body: some responses carry a raw key.
 """
 
 from __future__ import annotations
@@ -41,7 +31,6 @@ logger = logging.getLogger(__name__)
 
 Allowlist = tuple[tuple[str, re.Pattern[str]], ...]
 
-# Request headers passed through to the API; nothing else crosses.
 _FORWARDED_REQUEST_HEADERS = ("x-api-key", "content-type", "accept")
 # The one allowlisted call the API answers without a key (SPEC §5.1).
 _PUBLIC_PATHS = frozenset({"health"})
@@ -61,8 +50,7 @@ SECURITY_HEADERS = {
 
 
 def allowlist(pairs: Iterable[tuple[str, str]]) -> Allowlist:
-    """Compile (method, path-regex) pairs; each regex matches the whole
-    path after ``/v1/``."""
+    """Compile (method, path-regex) pairs; each regex matches the whole path after ``/v1/``."""
     return tuple((method, re.compile(pattern)) for method, pattern in pairs)
 
 
@@ -88,16 +76,11 @@ def create_proxy_app(
     transport: httpx.AsyncBaseTransport | None = None,
     timeout: float = 30.0,
 ) -> Starlette:
-    """Build a web app serving ``static_dir`` and proxying ``allowed``
-    calls to ``api_url``.
+    """Build a web app serving ``static_dir`` and proxying ``allowed`` calls to ``api_url``.
 
-    ``shared_static`` serves the named files of another static folder at
-    ``/static/<name>`` too (the shared front-end modules, ADR 0091).
-    ``name`` is the app's name in refusals ("the admin panel");
-    ``api_url_setting`` names its URL setting in the startup error.
-    ``verify`` is passed to httpx (a CA bundle path for an internal CA);
-    ``transport`` lets tests route the proxy straight into an in-process
-    API app.
+    ``shared_static`` also serves the named files of another folder (ADR 0091). ``name`` appears in
+    refusals, ``api_url_setting`` in the startup error. ``verify`` and ``transport`` go to httpx
+    (a CA bundle path; tests route straight into an API app).
     """
     base = api_url.rstrip("/")
     if not base:
@@ -176,9 +159,8 @@ class _ApiProxy:
         upstream_path = _upstream_path(path)
         if upstream_path is None:
             return _error(404, "not_proxied", self._refusal)
-        # The API's own pre-auth guard (ADR 0040), applied here too: the
-        # panel would otherwise buffer any body, with no key at all, before
-        # the API got the chance to refuse it.
+        # The API's pre-auth guard (ADR 0040) applies here too: otherwise any body would be
+        # buffered, with no key at all, before the API could refuse it.
         if path not in _PUBLIC_PATHS and "x-api-key" not in request.headers:
             return _error(401, "missing_api_key", "the X-API-Key header is required")
         body = await _read_body(request, MAX_REQUEST_BODY_BYTES)
@@ -195,19 +177,17 @@ class _ApiProxy:
                 content=body,
             )
         except httpx.HTTPError as exc:
-            # The exception type only: its message can echo the request.
+            # Type only: the message can echo the request.
             logger.warning("hivemind-api unreachable: %s", type(exc).__name__)
             return _error(502, "api_unreachable", "hivemind-api could not be reached")
         return _relay(upstream)
 
 
 def _upstream_path(path: str) -> str | None:
-    """The API path for the (decoded) proxied ``path``, or ``None`` for one
-    with a dot segment."""
-    # ADR 0040: ``path`` is percent-DECODED by Starlette. Re-quote every
-    # segment so a name holding ``?``, ``#``, ``%`` or ``/`` reaches the
-    # resource the allowlist matched, and refuse dot segments (which
-    # httpx would collapse onto a different route).
+    """The API path for the decoded proxied ``path``, or ``None`` for one with a dot segment."""
+    # Starlette percent-DECODES ``path`` (ADR 0040). Re-quote every segment so a name holding ``?``,
+    # ``#``, ``%`` or ``/`` reaches the resource the allowlist matched, and refuse dot segments
+    # (httpx would collapse them onto a different route).
     segments = path.split("/")
     if any(segment in (".", "..") for segment in segments):
         return None
@@ -229,7 +209,7 @@ def _relay(upstream: httpx.Response) -> Response:
         status_code=upstream.status_code,
         media_type=upstream.headers.get("content-type"),
     )
-    # Some of these bodies are raw keys (admin create agent, admin activate, agent key replace, org-key rotate).
+    # Some bodies are raw keys (agent create or activate, key replace, org-key rotate).
     response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -244,8 +224,7 @@ def _file(path: Path) -> Callable[[Request], Awaitable[Response]]:
 
 
 async def _read_body(request: Request, limit: int) -> bytes | None:
-    """The request body, or ``None`` once it exceeds ``limit`` bytes (by
-    ``Content-Length`` up front, then by counting the streamed chunks)."""
+    """The request body, or ``None`` once it exceeds ``limit`` bytes (declared, then streamed)."""
     declared = request.headers.get("content-length")
     if declared is not None and declared.isdigit() and int(declared) > limit:
         return None
@@ -260,8 +239,7 @@ async def _read_body(request: Request, limit: int) -> bytes | None:
 
 
 class SecurityHeaders:
-    """Pure-ASGI middleware: add ``SECURITY_HEADERS`` to every HTTP
-    response (static files, the proxy, errors alike)."""
+    """Pure-ASGI middleware: add ``SECURITY_HEADERS`` to every HTTP response."""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -282,13 +260,9 @@ class SecurityHeaders:
 
 
 class StaticCacheHeaders:
-    """Pure-ASGI middleware: put ``Cache-Control: no-cache`` on every
-    ``/static/`` response. The bundle is unversioned static files, and a
-    browser that keeps a cached module across a redeploy runs old code
-    with no sign of it (a view added in a later release routes to the
-    landing page). ``no-cache`` makes every full load revalidate against
-    the ETag ``StaticFiles`` already sends — a 304 when unchanged —
-    instead of trusting a heuristic cache."""
+    """Pure-ASGI middleware: ``Cache-Control: no-cache`` on every ``/static/`` response. The bundle
+    is unversioned, and a browser caching a module across a redeploy runs old code unnoticed;
+    ``no-cache`` revalidates against the ETag ``StaticFiles`` sends (a 304 when unchanged)."""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app

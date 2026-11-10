@@ -1,9 +1,6 @@
-"""The stdio MCP runners (ADR 0085): the console-script entry points.
-
-``hivemind-mcp`` (main) — the self-contained in-memory dev server.
-``hivemind-mcp-pg`` (main_pg) — one process per agent, each with its own
-``HIVEMIND_MCP_KEY`` (ADR 0009), re-verified per call (ADR 0042).
-"""
+"""The stdio MCP runners (ADR 0085): ``hivemind-mcp`` (in-memory dev server) and ``hivemind-mcp-pg``
+(one process per agent with its own ``HIVEMIND_MCP_KEY``, ADR 0009, re-verified per call, ADR
+0042)."""
 
 from __future__ import annotations
 
@@ -25,14 +22,14 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
-    """Build a self-contained dev stdio server and run the transport."""
+    """Run the self-contained dev stdio server."""
     settings = load_settings()
     configure_logging(settings.log_level)
     store = MemoryStore()
     embedder = LocalEmbedder(
         dimension=settings.embedding_dim, prefix_tokens=settings.embedding_prefix_tokens
     )
-    extractor = build_extractor(settings)  # optional (ADR 0016): None when the endpoint is unset
+    extractor = build_extractor(settings)
     services = build_services(
         store,
         embedder,
@@ -52,7 +49,7 @@ def main() -> None:
 
 
 def _mcp_key_missing_hint() -> str:
-    """The error text when ``HIVEMIND_MCP_KEY`` is unset."""
+    """The text when ``HIVEMIND_MCP_KEY`` is unset."""
     return (
         "HIVEMIND_MCP_KEY is required to run hivemind-mcp-pg. Issue an "
         "agent-scoped key, then set it in the agent's MCP config:\n"
@@ -63,7 +60,7 @@ def _mcp_key_missing_hint() -> str:
 
 
 def _mcp_key_unknown_hint() -> str:
-    """The error text when the key is set but is not a known credential."""
+    """The text when the key is not a known credential."""
     return (
         "HIVEMIND_MCP_KEY is not a known credential. Issue it first, then retry:\n"
         "  uv run hivemind-keys issue-agent --name <agent>  (the agent must be registered and active)\n"
@@ -72,12 +69,8 @@ def _mcp_key_unknown_hint() -> str:
 
 
 def main_pg() -> None:
-    """Build a Postgres-backed stdio server and run the transport.
-
-    One process per agent, each with its own ``HIVEMIND_MCP_KEY``
-    (ADR 0009), so every write carries verified provenance (SPEC §8.1,
-    ADR 0008). Pools are closed on exit.
-    """
+    """Run the Postgres-backed stdio server, one process per agent, so every write carries verified
+    provenance (SPEC §8.1, ADR 0008). Pools are closed on exit."""
     from hivemind.embeddings import build_embedder
     from hivemind.extractor import build_extractor
     from hivemind.store import build_authenticator, build_store
@@ -92,7 +85,7 @@ def main_pg() -> None:
     store = build_store(settings)
     embedder = build_embedder(settings)
     authenticator = build_authenticator(settings)
-    extractor = build_extractor(settings)  # optional (ADR 0016): None when the endpoint is unset
+    extractor = build_extractor(settings)
     asyncio.run(_serve_pg(settings, raw_key, store, embedder, authenticator, extractor))
 
 
@@ -117,8 +110,7 @@ async def _serve_pg(
     app = McpHivemind.from_services(store, services, credential=credential)
 
     async def current_credential() -> Credential | None:
-        # Re-verified on EVERY call (ADR 0042) so revocation, demotion
-        # or re-homing applies at once, not at the next restart.
+        # Re-verified on EVERY call (ADR 0042): revocation, demotion or re-homing applies at once.
         return await authenticator.verify(raw_key)
 
     server = build_server(
@@ -135,7 +127,7 @@ async def _serve_pg(
 async def _verify_startup_key(authenticator: Authenticator, raw_key: str) -> Credential:
     """The credential of ``raw_key``, or exit with the reason it is unusable."""
     try:
-        credential = await authenticator.verify(raw_key)  # fail fast; re-verified per call below
+        credential = await authenticator.verify(raw_key)  # fail fast
     except KeyLocked:
         raise SystemExit(KEY_LOCKED_MESSAGE) from None
     except StoreUnavailable as exc:
@@ -158,7 +150,7 @@ async def _close_all(
         getattr(store, "close", None),
         getattr(embedder, "aclose", None),
         getattr(authenticator, "close", None),
-        getattr(extractor, "aclose", None),  # the extractor's HTTP client (when enabled)
+        getattr(extractor, "aclose", None),
     ):
         if closer is not None:
             await closer()

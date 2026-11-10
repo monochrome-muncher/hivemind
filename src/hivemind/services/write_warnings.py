@@ -1,7 +1,5 @@
-"""Advisory warnings on a write (SPEC.md §4.1): things a writer probably
-did not mean, computed from the draft and the targets the write path has
-already loaded. They never block a write.
-"""
+"""Advisory warnings on a write (SPEC.md §4.1), computed from the draft and the targets already
+loaded. They never block a write."""
 
 from __future__ import annotations
 
@@ -18,25 +16,21 @@ from hivemind.domain.health import is_entry_ref
 if TYPE_CHECKING:
     from hivemind.services.write import RelatedEntry
 
-# Consolidating entries whose newest observation is older than this, under
-# a fresh ``occurred_at``, ranks the result as newer than its evidence.
+# A fresh ``occurred_at`` this long after the newest superseded observation ranks a consolidation
+# as newer than its evidence.
 _FRESH_CONSOLIDATION_GAP = timedelta(days=1)
 
-# Ids named in one message, so a long supersedes list stays short.
+# Ids named in one message.
 _IDS_IN_MESSAGE = 3
 
-# A related entry at or above this similarity is a near-duplicate signal
-# (ADR 0087). Measured on Qwen3-Embedding-8B: 0.90 catches most versions of
-# one fact and almost no distinct same-system facts, which 0.85 still
-# catches. Tuned for Qwen3; advisory only, the writer judges.
+# Near-duplicate threshold (ADR 0087). Measured on Qwen3-Embedding-8B: 0.90 catches most versions
+# of one fact and almost no distinct same-system facts, which 0.85 still catches. Tuned for Qwen3.
 NEAR_DUPLICATE_SIMILARITY = 0.90
 
-# A related open question or anomaly at or above this similarity may be
-# answered by the new entry (ADR 0099). Provisional: to be checked against
-# Qwen3 measurements. Advisory only, the writer judges.
+# Open-question threshold (ADR 0099). Provisional: to be checked against Qwen3 measurements.
 _OPEN_QUESTION_SIMILARITY = 0.70
 
-# The tags that mark a gap or an unexplained surprise waiting for an answer.
+# Tags that mark a gap or surprise waiting for an answer.
 _OPEN_TAGS = frozenset({"open-question", "anomaly"})
 
 # A local path: a home directory (/home/x, /Users/x, ~/x) or a Windows
@@ -75,9 +69,7 @@ def is_entry_link(source: Source) -> bool:
 def near_duplicate_warning(
     related: Sequence[RelatedEntry], linked: Collection[str] = ()
 ) -> tuple[WriteWarning, ...]:
-    """A near-duplicate signal: a related entry at or above the threshold.
-    Entries in ``linked`` (the draft's ``see_also``) are skipped: the writer
-    already said how they relate."""
+    """A related entry at or above the threshold; ``linked`` entries (``see_also``) are skipped."""
     candidates = [r for r in related if r.entry.id not in linked]
     if not candidates:
         return ()
@@ -104,12 +96,9 @@ def answers_open_question_warning(
     draft_tags: Collection[str] = (),
     linked: Collection[str] = (),
 ) -> tuple[WriteWarning, ...]:
-    """A signal that the write may answer an open question: an active
-    ``related`` entry tagged ``open-question`` or ``anomaly`` at or above the
-    similarity floor. Entries in ``linked`` (the draft's ``supersedes`` and
-    ``see_also``) are skipped, and a draft that is itself tagged
-    ``open-question`` or ``anomaly`` gets none: two questions are not an
-    answer. At most one warning, naming the closest."""
+    """The write may answer an active ``related`` ``open-question`` or ``anomaly`` entry at or above
+    the floor. ``linked`` entries are skipped, and a draft tagged so itself gets none (two questions
+    are not an answer). At most one warning, naming the closest."""
     if _OPEN_TAGS & set(draft_tags):
         return ()
     skip = {_id_key(i) for i in linked}
@@ -146,8 +135,8 @@ def write_warnings(
     superseded: Iterable[Entry] = (),
     linked: Iterable[Entry] = (),
 ) -> tuple[WriteWarning, ...]:
-    """The warnings for ``draft``, given the entries it supersedes and the
-    ones it links with ``see_also`` (empty when not loaded)."""
+    """The warnings for ``draft``, given the entries it supersedes and links (empty if not
+    loaded)."""
     superseded, linked = tuple(superseded), tuple(linked)
     occurred = draft.resolved_occurred_at()
     found = (
@@ -176,8 +165,7 @@ def _local_path_warning(draft: EntryDraft) -> WriteWarning | None:
 def _foreign_link_warning(draft: EntryDraft, linked: Sequence[Entry]) -> WriteWarning | None:
     if draft.scope != SCOPE_FLEET:
         return None
-    # Only see_also can reach another fleet's entry: may_supersede
-    # already refuses a foreign supersession target.
+    # Only see_also can reach another fleet's entry: ``may_supersede`` refuses a foreign target.
     foreign = [e for e in linked if e.scope == SCOPE_FLEET and e.fleet_id != draft.fleet_id]
     if not foreign:
         return None
@@ -217,8 +205,7 @@ def _fresh_consolidation_warning(
 
 
 def _no_primary_source_warning(draft: EntryDraft) -> WriteWarning | None:
-    # A synthesis grounded only in other entries: sources that all link to
-    # entries, or none at all while it supersedes or links entries.
+    # A synthesis grounded only in other entries.
     if (
         draft.scope in (SCOPE_ORG, SCOPE_FLEET)
         and draft.kind.value in ("insight", "decision")

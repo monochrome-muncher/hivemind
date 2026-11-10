@@ -1,12 +1,7 @@
-"""MCP tool adapters for Hivemind (SPEC §5.2).
-
-Each ``hive_*`` function is a thin adapter over the services layer:
-parse arguments into the domain, call the service, return a JSON-ready
-dict. Errors come back as an ``{"error": {"code", "message"}}`` envelope,
-not raised, so a failed call is a readable tool result. The functions
-take ``McpHivemind`` first so ``server.py`` can bind them and tests can
-call them with fakes.
-"""
+"""MCP tool adapters (SPEC §5.2): thin ``hive_*`` functions that parse arguments, call a service and
+return a JSON-ready dict. Errors come back as an ``{"error": {"code", "message"}}`` envelope, not
+raised. ``McpHivemind`` is the first argument so ``server.py`` can bind them and tests can fake
+it."""
 
 from __future__ import annotations
 
@@ -52,7 +47,6 @@ from hivemind.services.write import CheckResult, WriteResult, WriteService
 
 logger = logging.getLogger(__name__)
 
-# Error codes returned in the tool-result error envelope (SPEC §5).
 ERR_INVALID_INPUT = "invalid_input"
 ERR_NOT_FOUND = "not_found"
 ERR_PERMISSION_DENIED = "permission_denied"
@@ -61,9 +55,7 @@ ERR_AGENT_UNRESOLVED = "agent_unresolved"
 ERR_SUPERSEDE_DENIED = "supersede_denied"
 ERR_FLEET_MERGED = "fleet_merged"
 ERR_FLEET_BUSY = "fleet_busy"  # a merge holds the fleet: retry in a few seconds
-# The embedding provider is down/misconfigured: retry later (MCP-2, PC-2).
-ERR_EMBEDDING_UNAVAILABLE = "embedding_unavailable"
-# ADR 0048: hive_search falls back to keyword-only hits when the embedder fails.
+ERR_EMBEDDING_UNAVAILABLE = "embedding_unavailable"  # provider down or misconfigured: retry later
 DEGRADED_KEYWORD_ONLY = "keyword_only"
 DEGRADED_NOTE = (
     "the embedding service is unavailable; these hits are keyword matches only, "
@@ -79,10 +71,8 @@ STORE_UNAVAILABLE_MESSAGE = "the database is busy or unreachable; retry shortly"
 
 @dataclass(frozen=True, slots=True)
 class McpHivemind:
-    """The object the tool functions operate on: the services, the store
-    (for reads the services do not expose), and the acting ``credential``
-    (SPEC §8.1, ADR 0008).
-    """
+    """What the tool functions operate on: the services, the store (for reads the services do not
+    expose) and the acting ``credential`` (SPEC §8.1, ADR 0008)."""
 
     store: Store
     write_service: WriteService
@@ -92,7 +82,7 @@ class McpHivemind:
     access_service: AccessService
     search_config: SearchConfig
     credential: Credential
-    # Called once per degraded search; the HTTP runner counts them.
+    # Called once per degraded search, so the HTTP runner can count them.
     on_degraded_search: Callable[[], None] | None = None
 
     @classmethod
@@ -103,7 +93,7 @@ class McpHivemind:
         credential: Credential,
         on_degraded_search: Callable[[], None] | None = None,
     ) -> McpHivemind:
-        """Bind the shared services (``build_services``) to ``credential``."""
+        """Bind the shared services to ``credential``."""
         return cls(
             store=store,
             write_service=services.write_service,
@@ -117,13 +107,8 @@ class McpHivemind:
         )
 
 
-# --------------------------------------------------------------------------- #
-# (de)serialization + parsing helpers
-# --------------------------------------------------------------------------- #
-
-
 def _embedding_unavailable(exc: EmbeddingError) -> dict[str, object]:
-    """A fixed message; the (sanitized) detail is logged server-side."""
+    """A fixed message; the sanitized detail is logged server-side."""
     logger.warning("embedding unavailable: %s", exc)
     return _error(ERR_EMBEDDING_UNAVAILABLE, "the embedding service is unavailable; retry later")
 
@@ -132,9 +117,8 @@ def _error(code: str, message: str) -> dict[str, object]:
     return {"error": {"code": code, "message": message}}
 
 
-# The one table from the typed service errors to MCP error codes. A subclass
-# is looked up before its base (``SupersedeDenied`` before ``PermissionDenied``)
-# by walking the exception's MRO, so the order here does not matter.
+# Typed service errors to MCP error codes, looked up by walking the exception's MRO, so a subclass
+# (``SupersedeDenied``) wins over its base and the order here does not matter.
 _SERVICE_ERROR_CODES: dict[type[Exception], str] = {
     PermissionDenied: ERR_PERMISSION_DENIED,
     SupersedeDenied: ERR_SUPERSEDE_DENIED,
@@ -142,15 +126,14 @@ _SERVICE_ERROR_CODES: dict[type[Exception], str] = {
     EntryNotActive: ERR_NOT_ACTIVE,
     InvalidInput: ERR_INVALID_INPUT,
     AgentIdentityRequired: ERR_AGENT_UNRESOLVED,
-    FleetMerged: ERR_FLEET_MERGED,  # ADR 0107: the fleet was merged away
+    FleetMerged: ERR_FLEET_MERGED,
     NameTaken: ERR_NAME_CONFLICT,
 }
 _SERVICE_ERRORS = tuple(_SERVICE_ERROR_CODES)
 
 
 def _service_error(exc: Exception) -> dict[str, object]:
-    """The error envelope for a typed service error: the most specific class
-    in ``_SERVICE_ERROR_CODES`` names the code, the message is ``str(exc)``."""
+    """The error envelope for a typed service error."""
     for cls in type(exc).__mro__:
         code = _SERVICE_ERROR_CODES.get(cls)
         if code is not None:
@@ -180,12 +163,9 @@ def _parse_kind(value: str | None) -> Kind | None:
         raise ValueError(f"kind must be one of fact|insight|decision, got {value!r}") from exc
 
 
-# The exposed MCP schema for ``hive_write`` ``sources`` (ADR 0105): typed
-# from the domain ``Source`` shape so ``tools/list`` shows ``{ref, type}``
-# with the ``type`` enum instead of an open map. The runtime type stays a
-# loose ``dict[str, str]`` so a malformed source still reaches
-# ``_parse_sources`` and answers the structured ``invalid_input`` envelope
-# (not a raw SDK ``is_error``).
+# The exposed ``hive_write`` ``sources`` schema (ADR 0105). The runtime type stays a loose
+# ``dict[str, str]`` so a malformed source reaches ``_parse_sources`` and answers ``invalid_input``,
+# not a raw SDK ``is_error``.
 _SOURCES_ITEMS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -234,7 +214,7 @@ def _build_filters(
     flagged: bool = False,
     relied_on_changed: bool = False,
 ) -> EntryFilters:
-    """Parse the shared filter parameters into an ``EntryFilters`` (SPEC §5.3)."""
+    """Parse the shared filter parameters into ``EntryFilters`` (SPEC §5.3)."""
     filters = EntryFilters(
         kind=_parse_kind(kind),
         tags=tuple(tags or ()),
@@ -250,15 +230,15 @@ def _build_filters(
         flagged=flagged,
         relied_on_changed=relied_on_changed,
     )
-    filters.validate()  # ADR 0040: caller input, unlike service-built filters
+    filters.validate()  # caller input, unlike service-built filters
     return filters
 
 
 def _feedback_precheck(
     app: McpHivemind, verdict: str, agent: str | None
 ) -> Verdict | dict[str, object]:
-    """Parse the verdict and check the reporter's agent identity (SPEC §8.1)
-    before any service call: the ``Verdict``, or the error reply to return."""
+    """The ``Verdict``, or the error reply, after checking the reporter's agent identity (SPEC
+    §8.1)."""
     try:
         parsed = Verdict(verdict)
     except ValueError:
@@ -288,16 +268,15 @@ def _write_reply(written: WriteResult) -> dict[str, object]:
 
 
 def _search_reply(app: McpHivemind, result: SearchResult) -> dict[str, object]:
-    """The ``hive_search`` reply; counts a degraded search with the runner."""
+    """The ``hive_search`` reply; reports a degraded search to the runner."""
     response: dict[str, object] = {
         "count": len(result.hits),
         "hits": [wire.hit_dict(h) for h in result.hits],
     }
     if result.recency is not RecencyHint.DEFAULT:
-        response["recency"] = result.recency.value  # ADR 0073: only when applied
+        response["recency"] = result.recency.value  # only when applied (ADR 0073)
     if result.degraded:
-        # ADR 0048: the embedding service is down; these hits are keyword
-        # matches only, so a miss here is weaker evidence than usual.
+        # Keyword matches only (ADR 0048): a miss is weaker evidence than usual.
         response["degraded"] = DEGRADED_KEYWORD_ONLY
         response["note"] = DEGRADED_NOTE
         if app.on_degraded_search is not None:
@@ -308,20 +287,15 @@ def _search_reply(app: McpHivemind, result: SearchResult) -> dict[str, object]:
 async def _list_reply(
     app: McpHivemind, entries: Sequence[Entry], *, include_body: bool, relied_on_changed: bool
 ) -> dict[str, object]:
-    """The ``hive_list`` reply: compact items (or full entries), each with
-    its feedback counts when ``relied_on_changed`` explains why it is listed."""
+    """The ``hive_list`` reply: compact items or full entries, with feedback counts under
+    ``relied_on_changed``."""
     to_dict = wire.entry_dict if include_body else wire.list_item_dict
     items = [to_dict(e) for e in entries]
-    if relied_on_changed and entries:  # why each is listed: its state and the reports
+    if relied_on_changed and entries:
         counts = await app.read_service.feedback_counts(entries)
         for item, entry in zip(items, entries, strict=True):
             item["feedback"] = wire.counts_dict(counts.get(entry.id, (0, 0, 0)))
     return {"count": len(entries), "entries": items}
-
-
-# --------------------------------------------------------------------------- #
-# Tool functions (SPEC §5.2)
-# --------------------------------------------------------------------------- #
 
 
 async def hive_write(
@@ -386,11 +360,10 @@ async def hive_write(
             "agent identity is required: use an agent sub-key or pass 'agent'",
         )
     try:
-        # Pure parsing, no service or store I/O: a ValueError here is the
-        # malformed input (Kind(), sources, dates, draft validation).
+        # Pure parsing, no I/O: a ValueError here is malformed input.
         parsed_kind = Kind(kind)
         parsed_sources = _parse_sources(sources)
-        # Scope and author come from the credential (ADRs 0011-0012).
+        # Scope and author come from the credential.
         resolution = resolve_write_scope(cred, scope)
         draft = entry_draft(
             cred,
@@ -416,7 +389,7 @@ async def hive_write(
             checked = await app.write_service.check(draft, writer=cred.visibility())
             return _check_reply(checked)
         written = await app.write_service.write_and_relate(draft, writer=cred.visibility())
-    except _SERVICE_ERRORS as exc:  # incl. InvalidInput, e.g. an unknown see_also entry
+    except _SERVICE_ERRORS as exc:  # incl. InvalidInput for an unknown see_also entry
         return _service_error(exc)
     except EmbeddingError as exc:
         return _embedding_unavailable(exc)
@@ -746,13 +719,13 @@ async def hive_feedback(
         outcome = await app.governance_service.record_feedback(
             app.credential, entry_id, parsed_verdict, note, agent=agent
         )
-    except _SERVICE_ERRORS as exc:  # PermissionDenied: ADR 0065, the caller's own entry
+    except _SERVICE_ERRORS as exc:  # incl. PermissionDenied for the caller's own entry (ADR 0065)
         return _service_error(exc)
     fb: Feedback = outcome.feedback
     reply: dict[str, object] = {
         "entry_id": entry_id,
         "verdict": parsed_verdict.value,
-        "note": fb.note,  # as stored: trimmed, None when only whitespace
+        "note": fb.note,  # as stored
         "quality": outcome.quality,
         "feedback": {
             "entry_id": fb.entry_id,
@@ -763,7 +736,7 @@ async def hive_feedback(
             "updated_at": fb.updated_at.isoformat() if fb.updated_at else None,
         },
     }
-    if outcome.may_supersede:  # fixed text; only the id is interpolated (ADR 0128)
+    if outcome.may_supersede:  # fixed text; only the id is interpolated
         reply["fix"] = (
             "You may supersede this entry: hive_write the correction "
             f'with supersedes: ["{fb.entry_id}"] and no scope.'
@@ -785,11 +758,11 @@ async def _hive_feedback_many(
         outcomes = await app.governance_service.record_feedback_many(
             app.credential, entry_ids, parsed_verdict, note, agent=agent
         )
-    except _SERVICE_ERRORS as exc:  # PermissionDenied: ADR 0065, the caller's own entry
+    except _SERVICE_ERRORS as exc:  # incl. PermissionDenied for the caller's own entry (ADR 0065)
         return _service_error(exc)
     reply: dict[str, object] = {
         "verdict": parsed_verdict.value,
-        "note": outcomes[0].feedback.note,  # as stored (one note for every row)
+        "note": outcomes[0].feedback.note,  # as stored, one for every row
         "results": [{"entry_id": o.feedback.entry_id, "quality": o.quality} for o in outcomes],
     }
     fixable = [o.feedback.entry_id for o in outcomes if o.may_supersede]

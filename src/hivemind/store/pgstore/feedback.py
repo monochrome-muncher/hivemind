@@ -28,8 +28,7 @@ from hivemind.store.pgstore.rows import row_to_feedback
 from hivemind.store.pgstore.sql_common import _RATING_COUNTS, add_clause, visibility_clause
 from hivemind.store.pgstore.uuids import canonical_uuids
 
-# ``updated_at`` defaults to the database clock, like ``pinned_at`` and
-# ``created_at``, so feedback compares truthfully with them (ADR 0079).
+# ``updated_at`` defaults to the database clock, like ``created_at`` (ADR 0079).
 UPSERT_FEEDBACK = """
 INSERT INTO feedbacks (entry_id, "user", agent, verdict, note, updated_at)
 VALUES ($1, $2, $3, $4, $5, COALESCE($6, now()))
@@ -46,7 +45,7 @@ _FEEDBACK_ORDER = (
     """(verdict = 'helpful' AND COALESCE(note, '') = ''), updated_at DESC, "user", agent"""
 )
 
-# The verdict counts, spelled once for every counting statement below.
+# The verdict counts shared by every counting statement.
 _VERDICT_COUNTS = """COUNT(*) FILTER (WHERE verdict = 'helpful') AS helpful,
     COUNT(*) FILTER (WHERE verdict = 'stale') AS stale,
     COUNT(*) FILTER (WHERE verdict = 'wrong') AS wrong"""
@@ -91,14 +90,10 @@ SELECT f.entry_id, f."user", f.agent, f.verdict, f.note, f.updated_at,
  LIMIT ${limit} OFFSET ${offset}
 """
 
-# The flag backlog (ADR 0093): active entries with a standing stale/wrong
-# verdict, oldest first flag first. $1 is now; "orphaned" is
-# HEALTH_BY_FLEET's rule (author revoked, or no write in the 720 hours
-# before now). {inner} filters the entry (visibility, fleet), {outer} the
-# listed row (first flag age, orphaned). {narrow} is empty or limits the
-# grouped ratings to the fleet's or authors' entries: without it, every
-# rating in the pool is grouped on each read, which the portal's per-agent
-# list cannot afford.
+# The flag backlog (ADR 0093). $1 is now; "orphaned" is HEALTH_BY_FLEET's rule.
+# {inner} filters the entry, {outer} the listed row. {narrow} limits the grouped
+# ratings to the fleet's or authors' entries: without it every rating in the pool
+# is grouped on each read, which the portal's per-agent list cannot afford.
 FLAG_BACKLOG = f"""
 WITH flagged AS (
     SELECT f.entry_id,
@@ -137,9 +132,8 @@ WHERE entry_id = ANY($1) AND {_RATING_COUNTS}
 GROUP BY entry_id
 """
 
-# BATCH_FEEDBACK's counts plus the two newest dates "last confirmed" is made
-# of (SPEC §4.2): the newest helpful row with a note, the newest flag (also
-# what a pin's flagged check reads, ADR 0076).
+# BATCH_FEEDBACK's counts plus the two dates "last confirmed" is made of (SPEC §4.2):
+# the newest noted helpful row and the newest flag (also read by a pin's flagged check, ADR 0076).
 BATCH_FEEDBACK_SIGNALS = f"""
 SELECT g.*, corr.verdict AS corr_verdict, corr.note AS corr_note,
        corr."user" AS corr_user, corr.updated_at AS corr_updated_at
@@ -167,10 +161,8 @@ LEFT JOIN LATERAL (
 ) corr ON true
 """
 
-# Per entry in $1, how many entries it replaced (the reverse supersession
-# link, served by ``entries_superseded_by_idx``), counting only those the
-# reader may read: ``{vis}`` is the visibility clause, whose columns resolve
-# to ``entries`` here (ADR 0011, ADR 0033).
+# Per entry in $1, how many entries it replaced (``entries_superseded_by_idx``), counting
+# only those the reader may read: ``{vis}`` is the visibility clause (ADRs 0011, 0033).
 COUNT_SUPERSEDES = """
 SELECT superseded_by AS entry_id, COUNT(*) AS n
 FROM entries
@@ -178,10 +170,8 @@ WHERE superseded_by = ANY($1) AND superseded_by IS NOT NULL{vis}
 GROUP BY superseded_by
 """
 
-# ADR 0068: per reporter, the stale/wrong rows written while the entry was
-# still current, and the ones whose entry was superseded after the row.
-# Entries carry no superseded_at, so the successor's created_at stands in.
-# Both joins are primary-key probes.
+# ADR 0068: per reporter, flags written while the entry was current and those whose entry
+# was superseded after. No superseded_at exists, so the successor's created_at stands in.
 FLAG_COUNTS = f"""
 SELECT f."user" AS reporter,
        COUNT(*) AS flags,
@@ -222,13 +212,11 @@ class FeedbackStore(PgConnections):
         return replace(feedback, updated_at=updated_at)
 
     async def record_feedback_many(self, feedbacks: list[Feedback]) -> list[Feedback]:
-        """Upsert several feedback rows in one transaction: all land or
-        none do."""
+        """Upsert several feedback rows in one transaction."""
         if not feedbacks:
             return []
         async with self._transaction() as conn:
-            # ``now()`` is the transaction's start time, so this is the
-            # stamp every row without its own ``updated_at`` gets.
+            # The transaction's start time: the stamp for rows without their own ``updated_at``.
             now = await conn.fetchval("SELECT now()")
             await conn.executemany(
                 UPSERT_FEEDBACK,
@@ -247,8 +235,7 @@ class FeedbackStore(PgConnections):
         return (row["helpful"], row["stale"], row["wrong"]) if row else (0, 0, 0)
 
     async def quality_counts(self, entry_ids: list[str]) -> dict[str, tuple[int, int, int]]:
-        """Batched feedback counts; every valid requested ID is present, keyed
-        by its canonical form whatever the caller's spelling."""
+        """Batched counts; every valid ID is present, keyed by its canonical form."""
         ids = canonical_uuids(entry_ids)
         if not ids:
             return {}
@@ -266,10 +253,8 @@ class FeedbackStore(PgConnections):
         count_supersedes: bool = False,
         visibility: Visibility | None = None,
     ) -> dict[str, FeedbackSignals]:
-        """Batched counts, last-confirmed dates and corrections (one
-        statement), plus the visibility-aware ``supersedes`` counts (a second
-        statement on the same connection) when asked; every valid requested ID
-        is present, keyed by its canonical form whatever the caller's spelling."""
+        """Batched counts, last-confirmed dates and corrections, plus the visibility-aware
+        ``supersedes`` counts when asked; every valid ID is present, keyed canonically."""
         ids = canonical_uuids(entry_ids)
         if not ids:
             return {}
@@ -306,8 +291,7 @@ class FeedbackStore(PgConnections):
         return signals
 
     async def list_feedback(self, entry_id: str, limit: int) -> list[Feedback]:
-        """An entry's newest feedback rows. The primary key
-        ``(entry_id, "user", agent)`` narrows the scan to one entry's rows."""
+        """An entry's newest feedback rows (the primary key narrows the scan to the entry)."""
         if not is_valid_uuid(entry_id):
             return []
         async with self._connection() as conn:
@@ -335,9 +319,7 @@ class FeedbackStore(PgConnections):
         *,
         visibility: Visibility | None = None,
     ) -> list[FeedbackLogItem]:
-        """Feedback rows across entries, newest first. No index serves the
-        order: a scan of ``feedbacks`` and a top-N sort, read by the admin
-        panel only."""
+        """Feedback rows across entries, newest first (a scan and top-N sort: admin panel only)."""
         clauses = [_RATING_COUNTS]
         params: list[Any] = []
         add = partial(add_clause, clauses, params)
@@ -390,9 +372,8 @@ class FeedbackStore(PgConnections):
         *,
         visibility: Visibility | None = None,
     ) -> list[FlaggedEntry]:
-        """The flag backlog, oldest first flag first. Every standing flag is
-        grouped before the page is cut: flagged entries are few. A fleet or
-        author filter narrows the grouped ratings to those entries first."""
+        """The flag backlog, oldest flag first; all standing flags are grouped before the page is
+        cut."""
         params: list[Any] = [now]
         inner = ["TRUE"]
         outer = ["TRUE"]

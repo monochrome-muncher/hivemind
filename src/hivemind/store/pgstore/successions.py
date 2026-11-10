@@ -49,7 +49,7 @@ class SuccessionStore(PgConnections):
         if retired == successor:
             raise InvalidInput("an agent cannot be its own successor")
         async with self._transaction() as conn:
-            # Both rows, in name order: two opposite retirements cannot deadlock.
+            # Both rows in name order, so two opposite retirements cannot deadlock.
             status = {
                 r["name"]: AgentStatus(r["status"])
                 for r in await conn.fetch(LOCK_AGENT_ROWS, [retired, successor])
