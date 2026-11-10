@@ -226,7 +226,7 @@ def test_nothing_agent_facing_reads_the_activity_aggregates() -> None:
     }
     assert readers <= {
         "ports.py",
-        "memstore.py",
+        "memstore/metrics.py",
         "store/pgstore.py",
         "services/activity.py",
         "services/wiring.py",
