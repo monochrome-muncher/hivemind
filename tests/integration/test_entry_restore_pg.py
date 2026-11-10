@@ -18,6 +18,7 @@ from tests.integration.test_store_contract import (
     _state,
     write,
 )
+from tests.pg import wait_until_blocked
 
 from hivemind.config import Settings
 from hivemind.domain.entry import EntryState
@@ -133,7 +134,7 @@ async def test_a_restore_waits_for_a_cleanup_of_the_author(pg: Adapter) -> None:
             entry.author,
         )
         restore = asyncio.ensure_future(pg.store.restore_entry(entry.id))
-        await asyncio.sleep(0.5)
+        await wait_until_blocked(Settings().database_url)
         assert not restore.done()
         assert (await _state(pg, entry.id)).state is EntryState.WITHDRAWN
         await tx.rollback()

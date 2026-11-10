@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from tests.pg import ensure_migrated, reset_tables
+from tests.pg import ensure_migrated, reset_tables, wait_until_blocked
 
 from hivemind.config import Settings
 from hivemind.store import PgStore
@@ -47,7 +47,7 @@ async def test_case_variant_registrations_are_serialised(pg) -> None:
             "INSERT INTO agents (name, status, trust_level) VALUES ('bob', 'pending', 0)"
         )
         racing = asyncio.create_task(pg.register_agent("Bob"))
-        await asyncio.sleep(0.3)
+        await wait_until_blocked(Settings().database_url)
         assert not racing.done()  # blocked on the folded-name lock
         await tx.commit()
     holder = await asyncio.wait_for(racing, 5)

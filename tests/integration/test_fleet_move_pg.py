@@ -9,7 +9,7 @@ import asyncio
 import asyncpg
 import pytest
 from tests.fakes import FakeEmbedder, make_search_config
-from tests.pg import ensure_migrated, reset_tables
+from tests.pg import ensure_migrated, reset_tables, wait_until_blocked
 
 from hivemind.config import Settings
 from hivemind.domain.access import FleetBusy, TrustLevel
@@ -121,7 +121,7 @@ async def test_a_write_in_flight_across_the_move_waits_and_is_then_refused(pool)
     await move.execute("UPDATE agents SET home_fleet_id = $1 WHERE name = 'amy'", target)
     write = asyncio.create_task(store.create_entry(_draft(source, "in flight", "amy"), None))
     stayer = asyncio.create_task(store.create_entry(_draft(source, "bob in flight", "bob"), None))
-    await asyncio.sleep(0.4)
+    await wait_until_blocked(dsn, 2)
     assert not write.done() and not stayer.done()  # both wait on the source row
     await tx.commit()
     await move.close()
@@ -170,7 +170,7 @@ async def test_a_move_waits_for_a_write_in_flight_and_moves_it(pool) -> None:
     move = asyncio.create_task(
         store.move_agents(source, ["amy"], target_fleet_id=target, moved_by="admin:1")
     )
-    await asyncio.sleep(0.4)
+    await wait_until_blocked(dsn)
     assert not move.done()
     await tx.commit()
     await writer.close()
