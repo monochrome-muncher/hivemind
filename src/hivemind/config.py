@@ -1,13 +1,7 @@
-"""Configuration knobs for Hivemind (SPEC.md §6.2, §6.4, §7).
+"""Configuration knobs (SPEC §6.2, §6.4, §7; ADR 0006).
 
-``SearchConfig`` is a plain frozen dataclass — pure values, no env
-parsing — so the search pipeline is testable with explicit numbers.
-``Settings`` layers pydantic-settings on top to load the same knobs
-from the environment (HIVEMIND_* prefix) for the deployable service.
-
-Fusion weights, RRF k, decay half-life, and the quality formula are
-deliberately config, not code constants (ADR 0006, SPEC.md §11):
-tuning retrieval is a config change, not a code change.
+``SearchConfig`` is pure values for the search pipeline; ``Settings`` loads the same knobs from
+HIVEMIND_* env vars.
 """
 
 from __future__ import annotations
@@ -37,16 +31,12 @@ logger = logging.getLogger(__name__)
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
 
 
-# The floor under ``prefer_recent`` (ADR 0073); see docs/retrieval-experiments.md.
+# Floor under ``prefer_recent`` (ADR 0073; docs/retrieval-experiments.md).
 PREFER_RECENT_FLOOR: float | None = 0.5
-# The vector stream's similarity cut-off (ADR 0100): measured for the
-# Qwen3-Embedding family. Another embedder should re-measure
-# (``make measure-threshold``). ``HIVEMIND_VECTOR_MIN_SIMILARITY=""`` turns it off.
+# Vector similarity cut-off (ADR 0100), measured for Qwen3-Embedding: re-measure
+# (``make measure-threshold``) for another embedder. Empty env value = off.
 DEFAULT_VECTOR_MIN_SIMILARITY: float = 0.45
-# The task line put before the search query for an instruction-aware embedder
-# (ADR 0097). On by default: measured to help the Qwen3-Embedding family.
-# ``HIVEMIND_QUERY_INSTRUCTION=""`` turns it off. tests/eval/query_instruction.py
-# measures this same text.
+# Task line before the search query (ADR 0097); tests/eval/query_instruction.py measures this text.
 DEFAULT_QUERY_INSTRUCTION = (
     "Given an agent's task or question, retrieve shared memory entries that answer it"
 )
@@ -70,63 +60,45 @@ class SearchConfig:
     candidate_top_k: int = 20
     default_limit: int = 10
     half_life_days: float = 30.0
-    # Lower bound on the recency factor so it cannot dominate RRF's fused
-    # range (ADR 0022, SPEC §6.4). A band, not a slider: 0.9 scores worse
-    # than off, 1.0 is off. Do not tune it up. ``None`` = no floor.
+    # Floor on the recency factor (ADR 0022): a band, not a slider (0.9 scores worse than off,
+    # 1.0 is off), so do not tune it up. ``None`` = no floor.
     recency_floor: float | None = 0.8
-    # The vector stream keeps only entries whose cosine similarity to the
-    # query is above this (ADR 0062, default per ADR 0100). Model-specific.
-    # ``None`` = off, which keeps ADR 0061's floor of 0. In [0, 1).
+    # Vector stream cut-off (ADR 0062, 0100): model-specific, in [0, 1). ``None`` = off (floor of 0,
+    # ADR 0061).
     vector_min_similarity: float | None = DEFAULT_VECTOR_MIN_SIMILARITY
-    # Read-time grouping of unlinked versions of one fact (ADR 0074): two
-    # active candidates whose stored vectors are at least this similar are
-    # shown adjacent, newest first, each naming the other. Nothing is hidden
-    # or merged and no score changes. Model-specific, so off by default:
-    # ``None`` = today's behaviour. In (0, 1) when set.
+    # Version grouping threshold (ADR 0074): off when ``None``, else in (0, 1); model-specific.
     version_group_min_similarity: float | None = None
-    # Consensus-share feedback quality (ADR 0063): each weight is where
-    # quality heads when every report gives that verdict; the prior counts
-    # imaginary neutral reports (> 0).
+    # Feedback quality (ADR 0063): each weight is where quality heads when every report gives
+    # that verdict; the prior counts imaginary neutral reports (> 0).
     quality_helpful_weight: float = 0.2
     quality_stale_weight: float = 0.4
     quality_wrong_weight: float = 1.0
     quality_prior: float = 2.0
     quality_min: float = 0.5
     quality_max: float = 1.2
-    # Ceiling on the upward effect of all social signals together (ADR
-    # 0070). Finite and >= 1: below 1 it would penalise unrated entries.
+    # Ceiling on all social signals together (ADR 0070): finite and >= 1, since below 1 it would
+    # penalise unrated entries.
     social_max: float = 1.2
-    # Weight of relevance against novelty in an ``explore`` search's MMR
-    # re-ordering (ADR 0078): 1 is plain relevance order, lower pushes
-    # near-copies of a higher hit down. In (0, 1].
+    # Relevance against novelty in ``explore`` MMR re-ordering (ADR 0078): in (0, 1], 1 is plain
+    # relevance order.
     explore_lambda: float = 0.7
-    # A search may carry a ``recency`` hint (ADR 0073). Off: the hint is
-    # accepted and ignored, every search scores as the default. On (the
-    # default, ADR 0101): ``prefer_recent`` and ``ignore_age`` change that one
-    # search's scoring; a search with no hint scores as the default.
+    # Off: a ``recency`` hint is accepted and ignored (ADR 0073, 0101).
     recency_hint_enabled: bool = True
-    # The floor ``prefer_recent`` scores under (ADR 0073): lower than
-    # ``recency_floor`` so age counts for more, or ``None`` for no floor. Not
-    # an environment setting; a search config built by a test or the
-    # measurement harness can vary it.
+    # Floor under ``prefer_recent`` (ADR 0073), or ``None`` for none. Not an env setting; tests
+    # and the measurement harness vary it.
     prefer_recent_floor: float | None = PREFER_RECENT_FLOOR
-    # The importance factor spans 0.9..1.1 (one step about 1.05x, below
-    # ``social_max``) instead of 0.6..1.0 (ADR 0088). On by default since
-    # the measurement with the Qwen3 embedders; false restores 0.6..1.0.
+    # Importance factor spans 0.9..1.1 (ADR 0088); false restores 0.6..1.0.
     narrow_importance: bool = True
-    # Once a noted helpful report is newer than every stale or wrong report
-    # on an entry (its "last confirmed" date is set), those flags count at
-    # half weight in quality (ADR 0106). False counts them in full.
+    # A confirmed entry's stale and wrong flags count at half weight (ADR 0106); false counts them
+    # in full.
     confirmation_halves_flags: bool = True
-    # For an instruction-aware embedder (Qwen3-Embedding, ADR 0097): the task
-    # line put before the search query as ``Instruct: {task}\nQuery:{query}``
-    # on the vector stream only. Entries are never embedded with it. On by
-    # default; empty turns it off.
+    # Task line sent as ``Instruct: {task}\nQuery:{query}`` on the vector stream only (ADR 0097);
+    # entries are never embedded with it. Empty = off.
     query_instruction: str = DEFAULT_QUERY_INSTRUCTION
 
     def __post_init__(self) -> None:
-        # Fail at config time (ADR 0024), not per request as a
-        # ZeroDivisionError, a negative LIMIT, empty results or NaN scores.
+        # Fail at config time (ADR 0024), not per request (ZeroDivisionError, negative LIMIT, NaN
+        # scores).
         if self.rrf_k < 0:
             raise ValueError(f"rrf_k must be >= 0, got {self.rrf_k}")
         if self.candidate_top_k < 1:
@@ -154,8 +126,7 @@ class SearchConfig:
         if not math.isfinite(self.social_max) or self.social_max < 1.0:
             raise ValueError(f"social_max must be a finite number >= 1, got {self.social_max}")
         if not math.isfinite(self.half_life_days) or self.half_life_days <= 0:
-            # A zero/negative half life would divide by zero (or silently
-            # invert decay) inside ``entry_score``; inf silently turns it off.
+            # Zero or negative divides by zero or inverts decay; inf silently turns decay off.
             raise ValueError(f"half_life_days must be finite and > 0, got {self.half_life_days}")
         if self.recency_floor is not None and not 0.0 < self.recency_floor <= 1.0:
             raise ValueError(f"recency_floor must be in (0, 1] or None, got {self.recency_floor}")
@@ -178,24 +149,18 @@ class SearchConfig:
             )
 
     def embedded_query(self, query: str) -> str:
-        """The text the vector stream embeds for ``query`` (ADR 0097): the
-        query itself, or with the instruction in front when one is set. The
-        keyword stream always gets the raw query."""
+        """The vector stream's text for ``query`` (ADR 0097); the keyword stream gets the raw
+        query."""
         if not self.query_instruction:
             return query
         return f"Instruct: {self.query_instruction}\nQuery:{query}"
 
     def recency_terms(self, hint: RecencyHint) -> RecencyTerms:
-        """How age enters the score of an entry under ``hint``.
-
-        Pure: nothing is stored, so one search's hint cannot reach another.
-        With ``recency_hint_enabled`` off every hint scores as ``DEFAULT``
-        (ADR 0073).
-        """
+        """How age enters an entry's score under ``hint`` (ADR 0073); ``DEFAULT`` for every hint
+        when disabled."""
         if self.recency_hint_enabled:
             if hint is RecencyHint.IGNORE_AGE:
-                # 0.5 ** (age / inf) is exactly 1.0 for every finite age; no
-                # floor.
+                # 0.5 ** (age / inf) is exactly 1.0 for every finite age.
                 return RecencyTerms(math.inf, None)
             if hint is RecencyHint.PREFER_RECENT:
                 # Never weaker than the default: a deployment with a lower
@@ -213,11 +178,8 @@ class SearchConfig:
         return hint if self.recency_hint_enabled else RecencyHint.DEFAULT
 
     def quality_kwargs(self, *, confirmed: bool) -> dict[str, float]:
-        """Keyword args for ``retrieval.scoring.feedback_quality``.
-
-        ``confirmed``: the entry has a "last confirmed" date, so a
-        confirmation is newer than every flag. Required, so a caller states
-        whether it knows (ADR 0106)."""
+        """Keyword args for ``retrieval.scoring.feedback_quality``; ``confirmed`` is required so a
+        caller must say (ADR 0106)."""
         halve = confirmed and self.confirmation_halves_flags
         return {
             "helpful_weight": self.quality_helpful_weight,
@@ -231,12 +193,8 @@ class SearchConfig:
 
 
 class Settings(BaseSettings):
-    """Environment-driven service settings (HIVEMIND_* env vars).
-
-    The class default reads ``.env.local`` (the fallback profile, ADR
-    0017); ``load_settings()`` picks the profile from ``ENVIRONMENT``.
-    Real env vars win over file values and a missing file is ignored.
-    """
+    """Service settings from HIVEMIND_* env vars; ``load_settings()`` picks the profile file (ADR
+    0017)."""
 
     model_config = SettingsConfigDict(
         env_prefix="HIVEMIND_",
@@ -246,60 +204,46 @@ class Settings(BaseSettings):
         hide_input_in_errors=True,
     )
 
-    # ``repr=False`` on every secret-bearing field: a stray ``%r`` of the
-    # settings object must not print a password or key.
+    # ``repr=False`` on every secret-bearing field, so a stray ``%r`` cannot print a password or
+    # key.
     database_url: str = Field(
         default="postgresql://hivemind:hivemind@localhost:5432/hivemind", repr=False
     )
-    # Optional DIRECT (non-pooled) DSN for `hivemind-migrate` only: its
-    # session advisory lock (ADR 0020) cannot be held through a
-    # transaction-mode PgBouncer. Empty = migrate through `database_url`.
+    # Direct (non-pooled) DSN for `hivemind-migrate`: its advisory lock (ADR 0020) cannot be held
+    # through transaction-mode PgBouncer. Empty = use `database_url`.
     migrate_database_url: str = Field(default="", repr=False)
     # Root logger level (DEBUG/INFO/WARNING/ERROR/CRITICAL, case-insensitive).
     log_level: str = "INFO"
-    # Read only by `hivemind-admin` (ADR 0029). `admin_api_url`: base URL
-    # of the hivemind-api it proxies to (e.g. `http://hivemind-api:8000`);
-    # empty is a startup error for that runner. `admin_api_ca_bundle`: PEM
-    # file to verify an https API URL against; empty = system trust store.
+    # `hivemind-admin` only (ADR 0029): the API base URL it proxies to (empty is a startup error)
+    # and a PEM file for an https API URL (empty = system trust store).
     admin_api_url: str = ""
     admin_api_ca_bundle: str = ""
-    # Read only by `hivemind-portal` (ADR 0095), with the same meaning as
-    # the two admin settings above.
+    # `hivemind-portal` only (ADR 0095): same meaning as the admin pair.
     portal_api_url: str = ""
     portal_api_ca_bundle: str = ""
-    # MCP-HTTP DNS-rebinding guard (ADR 0042): comma-separated accepted
-    # Host values (``name`` or ``name:*``) and browser Origins. Empty hosts
-    # = the MCP SDK default (guard only on a loopback bind), which keeps an
-    # ingress-fronted 0.0.0.0 deployment working.
+    # MCP-HTTP DNS-rebinding guard (ADR 0042): comma-separated Host (``name`` or ``name:*``) and
+    # Origin values. Empty hosts = SDK default (loopback bind only), which keeps an ingress-fronted
+    # 0.0.0.0 deployment working.
     mcp_allowed_hosts: str = ""
     mcp_allowed_origins: str = ""
-    # Unknown HIVEMIND_* variables are logged by default, since platforms
-    # inject prefixed variables; True makes them a startup failure (ADR
-    # 0032, for CI and dev). Read by load_settings() BEFORE Settings is built.
+    # True makes an unknown HIVEMIND_* variable a startup failure (ADR 0032); read by
+    # load_settings() BEFORE Settings is built.
     strict_env: bool = False
-    # ADR 0082: when true, a dev-mode credential (one that is not an admin
-    # key, an org key, or an active agent's key) sits at trust level 0 on
-    # the data plane. Off by default, so the keyless dev runner and local
-    # scripts are unchanged; production deployments set it true.
+    # True puts a dev-mode credential (not an admin, org or active agent key) at trust level 0
+    # (ADR 0082). Production sets it.
     require_stored_keys: bool = False
-    # ADR 0110: an active agent whose key has not been used for this many
-    # days shows as idle in the admin agent list. A list only: nothing is
-    # revoked or ranked on it.
+    # Days without key use before the admin list shows an agent as idle (ADR 0110); display only.
     idle_agent_days: int = Field(default=30, ge=1)
-    # ADR 0104: serve an unauthenticated GET /metrics from hivemind-mcp-http.
-    # Off by default, since the compose files publish the MCP port on every
-    # interface; the Kubernetes manifest turns it on (the Ingress routes only
-    # /mcp). When off, /metrics is a 404 and nothing is collected.
+    # Serve an unauthenticated GET /metrics from hivemind-mcp-http (ADR 0104). Off by default:
+    # compose publishes the MCP port on every interface. Off = 404, nothing collected.
     mcp_metrics_enabled: bool = False
     # asyncpg pool size, per pod (same defaults as ``make_pool``).
     pool_min_size: int = Field(default=1, ge=0)
     pool_max_size: int = Field(default=10, ge=1)
-    # Bounds on Postgres calls from the app pools (never `hivemind-migrate`,
-    # whose CREATE INDEX CONCURRENTLY must run unbounded). Seconds; 0
-    # disables the command/acquire bound. `pool_statement_timeout_ms` is an
-    # OPT-IN server-side bound sent as a startup parameter; a
-    # transaction-mode PgBouncer rejects or ignores it, so leave it 0 (off)
-    # unless the pool connects to Postgres directly.
+    # Bounds on app-pool Postgres calls, never `hivemind-migrate` (CREATE INDEX CONCURRENTLY must
+    # run unbounded). Seconds; 0 disables. `pool_statement_timeout_ms` is a server-side startup
+    # parameter that transaction-mode PgBouncer rejects or ignores: keep 0 unless connecting
+    # directly.
     pool_command_timeout: float = Field(default=30.0, ge=0, allow_inf_nan=False)
     pool_statement_timeout_ms: int = Field(default=0, ge=0)
     pool_acquire_timeout: float = Field(default=10.0, ge=0, allow_inf_nan=False)
@@ -307,61 +251,48 @@ class Settings(BaseSettings):
     embedding_endpoint: str = "http://localhost:8001/v1"
     embedding_api_key: str = Field(default="", repr=False)
     embedding_model: str = "text-embedding-3-small"
-    # Per-request timeout (seconds) when the embedder builds its own client.
-    # Feeds the k8s `terminationGracePeriodSeconds` arithmetic
-    # (`deploy/kubernetes/*.yaml`, DEPLOY.md §5): raise both together.
+    # Per-request timeout (seconds). Feeds the k8s `terminationGracePeriodSeconds` arithmetic
+    # (DEPLOY.md §5): raise both together.
     embedding_timeout: float = Field(default=10.0, gt=0, allow_inf_nan=False)
-    # Wall-clock budget for ONE embed call, retries and backoff included
-    # (httpx's timeout is per phase; ADR 0041). Unset = every attempt at
-    # full timeout plus backoff (``providers.default_deadline``, the
-    # DEPLOY.md §5 worst case). A value below the timeout is a startup error.
+    # Wall-clock budget for one embed call, retries included (ADR 0041). Unset =
+    # ``providers.default_deadline``. Below the timeout is a startup error.
     embedding_deadline: float | None = Field(default=None, gt=0, allow_inf_nan=False)
-    # Default when HIVEMIND_EMBEDDING_DIM is unset (ADR 0015): 1024, which
-    # OpenAI-compatible endpoints (``dimensions``) and Matryoshka servers
-    # can both serve, not one provider's native 1536. The dev Makefile pins 512.
+    # Default 1024 (ADR 0015); the dev Makefile pins 512.
     embedding_dim: int = Field(default=1024, ge=1, le=2000)  # pgvector HNSW cap
-    # Embedded-text body budget in whitespace-delimited words, NOT
-    # tokenizer tokens (ADR 0021); shared with the extractor (SPEC §13.1).
+    # Embedded-text body budget in words, not tokens (ADR 0021); shared with the extractor (SPEC
+    # §13.1).
     embedding_prefix_tokens: int = Field(default=DEFAULT_PREFIX_TOKENS, ge=0)  # 0 = summary only
-    # Retry budget for transient embedder failures (timeouts, connection
-    # errors, 429, 5xx) — ADR 0014; 0 disables retrying.
+    # Retries for transient embedder failures (ADR 0014); 0 disables.
     embedding_retries: int = Field(default=2, ge=0)
 
-    # Entity extractor (ADR 0016, SPEC §13): an OpenAI-compatible *chat*
-    # endpoint. Empty disables extraction: entries land with empty
-    # `entities` and no LLM cost.
+    # Entity extractor (ADR 0016, SPEC §13): an OpenAI-compatible chat endpoint. Empty disables
+    # extraction (entries get empty `entities`).
     extractor_endpoint: str = ""
     extractor_api_key: str = Field(default="", repr=False)
     extractor_model: str = ""
     extractor_timeout: float = Field(default=30.0, gt=0, allow_inf_nan=False)
-    # The overall wall-clock budget for ONE extraction, retries included.
+    # Wall-clock budget for one extraction, retries included.
     extractor_deadline: float | None = Field(default=None, gt=0, allow_inf_nan=False)
-    # Retry budget for transient extractor failures (ADR 0014 pattern);
-    # 0 disables retrying. A failure never blocks the write (best-effort).
+    # Retries for transient extractor failures (ADR 0014); 0 disables. A failure never blocks the
+    # write.
     extractor_retries: int = Field(default=2, ge=0)
 
-    # How long (seconds) MetricsService reuses the grouped scan of the
-    # entries behind /v1/metrics and /metrics (ADR 0069); 0 scans on every
-    # report. The entry counts can lag by up to this long.
+    # Seconds MetricsService reuses the entry-count scan (ADR 0069); 0 = every report. Counts can
+    # lag this long.
     metrics_entry_counts_ttl: float = Field(default=300.0, ge=0, allow_inf_nan=False)
 
-    # Retrieval knobs, mirroring SearchConfig (whose __post_init__ holds
-    # the value rules, run at load time by ``_check_consistency``).
+    # Retrieval knobs mirroring SearchConfig, whose __post_init__ holds the value rules.
     rrf_k: int = 60
     weight_keyword: float = 0.5
     weight_vector: float = 0.5
     candidate_top_k: int = 20
     default_limit: int = 10
     half_life_days: float = 30.0
-    # See SearchConfig.recency_floor (ADR 0022). In (0, 1]; empty or "none"
-    # (case-insensitive) means no floor (ADR 0023).
+    # See SearchConfig (ADR 0022). Empty or "none" (case-insensitive) = no floor (ADR 0023).
     recency_floor: float | None = 0.8
-    # See SearchConfig.vector_min_similarity (ADR 0062, 0100). Unset means
-    # DEFAULT_VECTOR_MIN_SIMILARITY; empty or "none" (case-insensitive)
-    # means off.
+    # See SearchConfig (ADR 0062, 0100). Unset = the default; empty or "none" = off.
     vector_min_similarity: float | None = DEFAULT_VECTOR_MIN_SIMILARITY
-    # See SearchConfig.version_group_min_similarity (ADR 0074). Same
-    # spellings for off.
+    # See SearchConfig (ADR 0074). Empty or "none" = off.
     version_group_min_similarity: float | None = None
     # See SearchConfig (ADR 0063).
     quality_helpful_weight: float = 0.2
@@ -380,9 +311,7 @@ class Settings(BaseSettings):
     narrow_importance: bool = True
     # See SearchConfig.confirmation_halves_flags (ADR 0106).
     confirmation_halves_flags: bool = True
-    # See SearchConfig.query_instruction (ADR 0097). Defaults to
-    # DEFAULT_QUERY_INSTRUCTION; an explicitly empty value means off;
-    # surrounding whitespace is stripped.
+    # See SearchConfig (ADR 0097). Empty = off; whitespace is stripped.
     query_instruction: str = DEFAULT_QUERY_INSTRUCTION
 
     @field_validator("query_instruction")
@@ -393,23 +322,20 @@ class Settings(BaseSettings):
     @field_validator("embedding_api_key", "extractor_api_key")
     @classmethod
     def _clean_api_key(cls, value: str) -> str:
-        """Strip whitespace (a k8s Secret / ``--from-file`` value usually
-        ends in a newline, which makes httpx refuse the header) and
-        reject control characters. Never echoes the value."""
+        """Strip whitespace (a k8s Secret value ends in a newline, which httpx rejects) and reject
+        control characters."""
         return clean_api_key(value)
 
     @field_validator("embedding_endpoint", "extractor_endpoint")
     @classmethod
     def _clean_endpoint(cls, value: str) -> str:
-        """Strip surrounding whitespace (a trailing newline otherwise
-        surfaces as a raw InvalidURL at the first request); reject inner
-        whitespace. Never echoes the value (it may carry userinfo)."""
+        """Strip whitespace, reject inner whitespace. Never echoes the value (it may carry
+        userinfo)."""
         return clean_endpoint(value)
 
     @property
     def migration_dsn(self) -> str:
-        """The DSN ``hivemind-migrate`` uses: ``migrate_database_url`` when
-        set, else ``database_url`` (ROADMAP 3.13)."""
+        """The DSN ``hivemind-migrate`` uses (ROADMAP 3.13)."""
         return self.migrate_database_url.strip() or self.database_url
 
     @model_validator(mode="after")
@@ -457,12 +383,7 @@ class Settings(BaseSettings):
     )
     @classmethod
     def _parse_recency_floor(cls, value: object) -> object:
-        """Map empty / "none" (case-insensitive) to ``None``: no floor (ADR
-        0023), no similarity threshold (ADR 0062).
-
-        Anything else is left to pydantic's float parsing and the range
-        checks in ``SearchConfig.__post_init__``.
-        """
+        """Map empty / "none" to ``None``: no floor (ADR 0023), no threshold (ADR 0062)."""
         if isinstance(value, str) and value.strip().lower() in ("", "none"):
             return None
         return value
@@ -470,10 +391,7 @@ class Settings(BaseSettings):
     @field_validator("strict_env", mode="before")
     @classmethod
     def _parse_strict_env(cls, value: object) -> object:
-        """Parse ``HIVEMIND_STRICT_ENV`` exactly as ``load_settings``'s
-        pre-check does (ADR 0032): the ``_TRUTHY`` spellings are true and
-        any other string (empty included) is false, so the two readings
-        can never disagree."""
+        """Parse as the ``load_settings`` pre-check does (ADR 0032), so the two readings agree."""
         if isinstance(value, str):
             return value.strip().lower() in _TRUTHY
         return value
@@ -505,13 +423,8 @@ class Settings(BaseSettings):
 
 
 def redact_url(url: str) -> str:
-    """``url`` with any userinfo removed, for logging.
-
-    Deliberately blunt: everything up to the last ``@`` (scheme kept) is
-    dropped, so ``http://user:pa/ss@host`` and a scheme-less
-    ``user:secret@host:8001/v1`` are both cleaned, at the price of
-    trimming a path that legitimately contains ``@``.
-    """
+    """``url`` without userinfo, for logging. Blunt: drops everything up to the last ``@``, even in
+    a path."""
     scheme, sep, rest = url.partition("://")
     if not sep:
         scheme, rest = "", url
@@ -521,8 +434,7 @@ def redact_url(url: str) -> str:
 
 
 def endpoint_label(url: str) -> str:
-    """Scheme + host[:port] only, for error messages: never the path,
-    query or userinfo of a configured endpoint."""
+    """Scheme and host[:port] only, for error messages: never path, query or userinfo."""
     cleaned = redact_url(url)
     scheme, sep, rest = cleaned.partition("://")
     if not sep:
@@ -532,8 +444,7 @@ def endpoint_label(url: str) -> str:
 
 
 def _is_loopback(host: str) -> bool:
-    """``localhost`` or a loopback address; a hostname that merely starts
-    with ``127.`` (``127.example.com``) is a remote host."""
+    """``localhost`` or a loopback address (``127.example.com`` is remote)."""
     if host == "localhost":
         return True
     try:
@@ -553,8 +464,7 @@ _DEFAULT_ENV_FILE = ".env.local"
 
 
 def env_file_for(environment: str | None) -> str:
-    """The profile file for an ``ENVIRONMENT`` value (ADR 0017); anything unmapped,
-    unset or empty falls back to ``.env.local``. Case- and whitespace-insensitive."""
+    """The profile file for an ``ENVIRONMENT`` value (ADR 0017); anything else is ``.env.local``."""
     key = (environment or "").strip().lower()
     return _ENV_FILES.get(key, _DEFAULT_ENV_FILE)
 
@@ -572,12 +482,8 @@ def bind_port(default: int) -> int:
     return int(os.environ.get("HIVEMIND_PORT", str(default)))
 
 
-# ``HIVEMIND_*`` variables that are deliberately NOT ``Settings`` fields
-# (read from ``os.environ`` or by non-Python code) and so must not be
-# reported as unknown (ADR 0024). ``extra="forbid"`` on the model is not
-# an option: RUNNER, HOST and PORT are set on every pod. Anything neither
-# here nor a field is reported: a warning, or a failure with
-# HIVEMIND_STRICT_ENV (ADR 0032).
+# ``HIVEMIND_*`` variables that are not ``Settings`` fields and must not be reported as unknown
+# (ADR 0024, 0032). ``extra="forbid"`` is no option: RUNNER, HOST and PORT are set on every pod.
 _ALLOWED_EXTRA_ENV_VARS: dict[str, str] = {
     "HIVEMIND_RUNNER": "selects the runner in entrypoint.sh",
     "HIVEMIND_HOST": ("REST/MCP-HTTP/admin/portal bind host, read by bind_host()"),
@@ -587,9 +493,7 @@ _ALLOWED_EXTRA_ENV_VARS: dict[str, str] = {
     "HIVEMIND_MCP_HTTP_PORT": "mcp-http port for docker compose and `make mcp-http-dev`; the app never reads it",
 }
 
-# Variables that once were ``Settings`` fields and are now ignored. Setting one
-# is not an error, even under HIVEMIND_STRICT_ENV, so a deployment can upgrade
-# before it edits its config; startup logs one warning naming them (ADR 0103).
+# Removed settings: ignored with one warning, never an error even under strict env (ADR 0103).
 _RETIRED_ENV_VARS: dict[str, str] = {
     "HIVEMIND_RECENCY_FROM_CONFIRMATION": "ADR 0071, removed by ADR 0103",
     "HIVEMIND_RECENCY_BY_KIND": "ADR 0072, removed by ADR 0103",
@@ -602,11 +506,8 @@ def _known_hivemind_env_vars() -> set[str]:
 
 
 def _strict_env(env_file: str) -> bool:
-    """Whether ``HIVEMIND_STRICT_ENV`` asks for a hard failure (ADR 0032).
-
-    Read by hand because it decides how the check before ``Settings`` is
-    built behaves. A real environment variable wins over the profile
-    file, as everywhere else (ADR 0017)."""
+    """Whether ``HIVEMIND_STRICT_ENV`` is on (ADR 0032); read by hand because it runs before
+    ``Settings`` exists."""
     raw = os.environ.get("HIVEMIND_STRICT_ENV")
     if raw is None:
         file_path = Path(env_file)
@@ -616,13 +517,11 @@ def _strict_env(env_file: str) -> bool:
 
 
 def _check_unknown_hivemind_env_vars(env_file: str) -> None:
-    """Report a ``HIVEMIND_*`` variable ``Settings`` would ignore.
+    """Warn about a ``HIVEMIND_*`` variable ``Settings`` would ignore, or raise under strict env
+    (ADR 0024, 0032).
 
-    One WARNING by default, since platforms inject prefixed variables
-    (ADR 0032); raises with ``HIVEMIND_STRICT_ENV=true`` (ADR 0024).
-    Checks both process env vars and the active profile file. Runs in
-    ``load_settings()`` rather than on the model so tests constructing
-    ``Settings(...)`` directly are unaffected.
+    Runs in ``load_settings()``, not on the model, so tests building ``Settings(...)`` are
+    unaffected.
     """
     known = _known_hivemind_env_vars() | _ALLOWED_EXTRA_ENV_VARS.keys()
     present = {name for name in os.environ if name.startswith("HIVEMIND_")}
@@ -641,8 +540,7 @@ def _check_unknown_hivemind_env_vars(env_file: str) -> None:
     unknown = sorted(present - known - _RETIRED_ENV_VARS.keys())
     if not unknown:
         return
-    # Match on the part after "HIVEMIND_": the shared prefix would
-    # otherwise dominate the similarity ratio and suggest nonsense.
+    # Match without the shared prefix, which would dominate the similarity ratio.
     suffix_to_known = {name.removeprefix("HIVEMIND_"): name for name in known}
     lines = []
     for name in unknown:
@@ -663,12 +561,8 @@ def _check_unknown_hivemind_env_vars(env_file: str) -> None:
 
 
 def load_settings() -> Settings:
-    """Build ``Settings`` for the active environment profile (ADR 0017).
-
-    The profile file comes from ``env_file_for(ENVIRONMENT)``; real env
-    vars win over it and a missing file is ignored. Unknown
-    ``HIVEMIND_*`` variables are reported first (ADR 0024, ADR 0032).
-    """
+    """Build ``Settings`` from the ``ENVIRONMENT`` profile (ADR 0017); real env vars win, a missing
+    file is ignored."""
     env_file = env_file_for(os.environ.get("ENVIRONMENT"))
     _check_unknown_hivemind_env_vars(env_file)
     # `_env_file` is a documented init parameter missing from the mypy stubs.
@@ -676,12 +570,8 @@ def load_settings() -> Settings:
 
 
 def configure_logging(level: str = "INFO") -> None:
-    """Configure the root logger once, at process startup.
-
-    Every runner calls this first; without a handler INFO lines are lost
-    and formats differ. An invalid ``level`` name raises rather than
-    silently falling back to WARNING.
-    """
+    """Configure the root logger at process startup; an invalid ``level`` raises instead of falling
+    back to WARNING."""
     numeric_level = logging.getLevelName(level.upper())
     if not isinstance(numeric_level, int):
         raise ValueError(
@@ -692,12 +582,8 @@ def configure_logging(level: str = "INFO") -> None:
         level=numeric_level,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    # basicConfig does nothing when the root logger already has a handler
-    # (one installed before startup); the level must apply regardless. The
-    # existing handlers stay as they are.
+    # basicConfig is a no-op when a handler already exists; the level must apply regardless.
     logging.getLogger().setLevel(numeric_level)
-    # httpx logs every outbound request URL at INFO (userinfo included):
-    # noise per write/search and a credential leak for a URL with a
-    # password. Keep the libraries at WARNING whatever the root level.
+    # httpx logs every request URL at INFO, userinfo included (a credential leak): keep at WARNING.
     for noisy in ("httpx", "httpcore"):
         logging.getLogger(noisy).setLevel(max(numeric_level, logging.WARNING))

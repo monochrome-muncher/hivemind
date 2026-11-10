@@ -1,10 +1,7 @@
-"""The canonical wire mappers (ADR 0084): domain objects -> JSON-ready
-dicts, in one neutral module (no FastAPI, no MCP).
+"""Canonical wire mappers (ADR 0084): domain objects to JSON-ready dicts, no FastAPI or MCP.
 
-The MCP surface imports these; the REST pydantic models (api/schemas/)
-are the HTTP response models, and ``tests/unit/test_wire_contract.py``
-pins that the two sides agree field-for-field. A wire-shape change
-touches a table in that test, this module, and the matching model.
+``tests/unit/test_wire_contract.py`` pins them field-for-field against the REST models in
+``api/schemas/``.
 """
 
 from __future__ import annotations
@@ -45,9 +42,8 @@ def entry_dict(entry: Entry) -> dict[str, object]:
 
 
 def list_item_dict(entry: Entry) -> dict[str, object]:
-    """A compact ``hive_list`` item (no body, payload or sources; open it with
-    ``hive_get``). No feedback counts: listing does not load them, except
-    when ``relied_on_changed`` is on, where ``hive_list`` adds them (ADR 0098)."""
+    """A compact ``hive_list`` item: no body, payload, sources or feedback counts (ADR 0098 adds
+    them)."""
     return {
         "id": entry.id,
         "kind": entry.kind.value,
@@ -65,14 +61,14 @@ def list_item_dict(entry: Entry) -> dict[str, object]:
 
 
 def round_score(score: float) -> float:
-    """A hit's score as shown: 4 significant figures (SPEC §6.1). Applied at
-    serialisation only; ranking uses the unrounded value."""
+    """A hit's score as shown, 4 significant figures (SPEC §6.1); ranking uses the unrounded
+    value."""
     return float(f"{score:.4g}")
 
 
 def hit_dict(hit: Hit) -> dict[str, object]:
-    """A compact search hit (no body — progressive disclosure, SPEC §6.1).
-    ``feedback`` is left out when all three counts are zero."""
+    """A compact search hit, no body (SPEC §6.1); ``feedback`` is left out when all counts are
+    zero."""
     out: dict[str, object] = {
         "id": hit.entry_id,
         "kind": hit.kind.value,
@@ -114,8 +110,7 @@ def hit_dict(hit: Hit) -> dict[str, object]:
 
 
 def related_dict(related: RelatedEntry) -> dict[str, object]:
-    """A nearby existing entry in a write's reply (ADR 0052): compact, like a hit,
-    with its tags, feedback counts and whether the writer wrote it."""
+    """A nearby existing entry in a write's reply (ADR 0052)."""
     entry = related.entry
     return {
         "id": entry.id,

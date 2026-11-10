@@ -1,9 +1,4 @@
-"""Hivemind domain entities (SPEC.md §4).
-
-Pure data, no I/O: this layer is shared by every adapter (in-memory
-store, Postgres store, API schemas, MCP tools). Identity is a UUID
-string so the domain stays storage-agnostic.
-"""
+"""Hivemind domain entities (SPEC §4): pure data, no I/O. Identity is a UUID string."""
 
 from __future__ import annotations
 
@@ -39,25 +34,22 @@ def new_entry_id() -> str:
     return str(uuid.uuid4())
 
 
-# SPEC.md §4.1: the summary is a short blurb (≤ ~280 chars), not a body.
+# SPEC §4.1: the summary is a short blurb, not a body.
 _SUMMARY_MAX_CHARS = 280
 
-# ADR 0016 / SPEC §13: extracted entity names are bounded display strings.
+# Extracted entity names are bounded display strings (ADR 0016).
 _ENTITY_NAME_MAX_CHARS = 128
 
-# Embedded-text body budget in whitespace-delimited words, never tokenizer
-# tokens (ADR 0021). It bounds dilution and cost, not a model limit. The
-# single default for ``Settings``, the embedder and the extractor.
+# Embedded-text body budget in whitespace-delimited words, not tokenizer tokens (ADR 0021);
+# the one default for ``Settings``, the embedder and the extractor.
 DEFAULT_PREFIX_TOKENS = 2000
 
-# A "prefix token" is one run of non-whitespace characters (ADR 0021).
+# A "prefix token" is one run of non-whitespace characters.
 _WORD_RE = re.compile(r"\S+")
 
-# Character ceiling beside the word budget (ADR 0040): a body with no
-# whitespace (base64, minified JSON, CJK) is "one word" of any length.
+# Character ceiling beside the word budget (ADR 0040): a body with no whitespace is one "word".
 EMBED_BODY_MAX_CHARS = 20_000
-# The ceiling scales with a raised word budget so the knob is not
-# silently capped.
+# Scales with a raised word budget so the knob is not silently capped.
 EMBED_CHARS_PER_PREFIX_TOKEN = 10
 
 
@@ -120,8 +112,7 @@ class Source:
 
 @dataclass(frozen=True, slots=True)
 class ExtractedEntity:
-    """A machine-extracted entity facet (ADR 0016, SPEC §13); ``name`` is
-    trimmed, non-empty and bounded."""
+    """A machine-extracted entity facet (ADR 0016); ``name`` is trimmed, non-empty and bounded."""
 
     name: str
     kind: EntityKind
@@ -139,11 +130,8 @@ class ExtractedEntity:
 
 @dataclass(frozen=True, slots=True)
 class EntryDraft:
-    """A write request: everything the writer supplies for a new entry.
-
-    ``occurred_at`` defaults to now but is backdatable (the "memory
-    date"); ``created_at`` is assigned by the store at insert time.
-    """
+    """A write request. ``occurred_at`` (the memory date) is backdatable; the store assigns
+    ``created_at``."""
 
     kind: Kind
     summary: str
@@ -159,13 +147,11 @@ class EntryDraft:
     scope: str = "org"
     fleet_id: str | None = None
     supersedes: tuple[str, ...] = ()
-    # "See also" links to other entries (ADR 0057): stored beside the
-    # entry, not on it, and readable from both ends.
+    # Links to other entries (ADR 0057): stored beside the entry, readable from both ends.
     see_also: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        # Normalise raw strings ("fact") to enum members: ``matches``
-        # compares by identity and serialisers read ``.value``.
+        # Raw strings become enum members: ``matches`` compares by identity.
         object.__setattr__(self, "kind", Kind(self.kind))
         object.__setattr__(self, "importance_source", ImportanceSource(self.importance_source))
         if not 1 <= self.importance <= 5:
@@ -188,11 +174,9 @@ class EntryDraft:
         self._validate_bounds()
 
     def _validate_bounds(self) -> None:
-        """NUL + size bounds (ADR 0040): runs at construction, so every
-        surface rejects the same inputs before the embedder is called."""
+        """NUL and size bounds (ADR 0040), checked before the embedder is called."""
         check_no_nul(self.summary, "summary")
-        # author/agent can be a legacy registered name (unbounded before
-        # ADR 0040), so only what Postgres cannot store is refused here.
+        # author/agent may be a legacy name unbounded before ADR 0040: refuse only NUL.
         check_no_nul(self.author, "author")
         check_no_nul(self.agent, "agent")
         check_datetime(self.occurred_at, "occurred_at")
@@ -216,12 +200,7 @@ class EntryDraft:
             check_text(self.fleet_id, "fleet_id", MAX_ID_CHARS)
 
     def resolved_occurred_at(self) -> datetime:
-        """The entry's memory date: the supplied value, or now.
-
-        A naive value means UTC (check_datetime's contract); normalising
-        here means every store receives aware datetimes, so retrieval
-        math never mixes naive and aware.
-        """
+        """The memory date: the supplied value (naive means UTC) or now, always aware."""
         value = self.occurred_at
         if value is None:
             return utcnow()
@@ -234,10 +213,8 @@ class EntryDraft:
 
 @dataclass(frozen=True, slots=True)
 class Entry:
-    """A stored unit of memory (SPEC.md §4.1).
-
-    Immutable (ADR 0001): corrected only by supersession or withdrawal.
-    """
+    """A stored unit of memory (SPEC §4.1), immutable (ADR 0001): corrected by supersession or
+    withdrawal."""
 
     id: str
     kind: Kind
@@ -254,8 +231,7 @@ class Entry:
     importance_source: ImportanceSource = ImportanceSource.DEFAULT
     scope: str = "org"
     fleet_id: str | None = None
-    # Set on the entry ``create_entry`` returns; ``PgStore`` reads leave it
-    # ``None`` (nothing reads a stored vector back; search ranks it in SQL).
+    # Set only on what ``create_entry`` returns; ``PgStore`` reads leave it ``None``.
     embedding: tuple[float, ...] | None = None
     embedding_model: str | None = None
     state: EntryState = EntryState.ACTIVE
@@ -263,8 +239,7 @@ class Entry:
     withdrawn_reason: str | None = None
     # Set when an admin wiped the text of this withdrawn memory (ADR 0125).
     redacted_at: datetime | None = None
-    # When it was withdrawn (ADR 0098); ``None`` while it is not withdrawn,
-    # and for a withdrawal recorded before the column existed.
+    # ADR 0098: ``None`` while not withdrawn, or for a withdrawal that predates the column.
     withdrawn_at: datetime | None = None
     # Extracted at write time (ADR 0016, SPEC §13).
     entities: tuple[ExtractedEntity, ...] = ()
@@ -273,9 +248,8 @@ class Entry:
 
 @dataclass(frozen=True, slots=True)
 class UsageCount:
-    """One grouped row of the usage counters (ROADMAP §3.3): how many
-    entries share this (scope, kind, importance_source, author, fleet_id)
-    and whether they are still ``active`` (any other state is inactive)."""
+    """One usage-counter row (ROADMAP §3.3): entries sharing these keys; ``active`` is False for any
+    other state."""
 
     scope: str
     kind: Kind
@@ -288,37 +262,31 @@ class UsageCount:
 
 @dataclass(frozen=True, slots=True)
 class SearchCount:
-    """Searches made from one home fleet (ADR 0056): how many first-page
-    searches its agents ran and how many of them found nothing.
-    ``fleet_id`` is ``None`` for callers without a home fleet (admin keys,
-    fleetless agents)."""
+    """First-page searches from one home fleet and how many found nothing (ADR 0056);
+    ``fleet_id`` is ``None`` for callers without one."""
 
     fleet_id: str | None
     searches: int
     empty: int
-    # How many of ``searches`` were opt-in explore searches (ADR 0078).
+    # Of ``searches``, the explore ones (ADR 0078).
     explore: int = 0
 
 
 @dataclass(frozen=True, slots=True)
 class EntryFilters:
-    """Filter set shared by search and list (SPEC.md §5.3).
-
-    ``tags`` and ``entities`` (names, case-insensitive; ADR 0016) are AND.
-    Only ``active`` entries match unless ``include_inactive`` (SPEC.md §6.3).
-    """
+    """Filter set shared by search and list (SPEC §5.3). ``tags`` and ``entities``
+    (case-insensitive names) are AND; only active entries match unless ``include_inactive``."""
 
     kind: Kind | None = None
     tags: tuple[str, ...] = ()
     entities: tuple[str, ...] = ()
-    # Internal-only (MetricsService, ROADMAP §4.5): not a public SPEC §5.3
-    # filter. Do not expose it on REST or MCP without updating SPEC §5.3.
+    # Internal-only (MetricsService): not a SPEC §5.3 filter; do not expose it without updating
+    # SPEC.
     importance_source: ImportanceSource | None = None
     scope: str | None = None
     fleet_id: str | None = None
     author: str | None = None
-    # ADR 0113: any of these authors. Set by the services when ``author``
-    # names the caller (everything the caller owns), never from caller input.
+    # ADR 0113: any of these authors. Set by services for what the caller owns, never from input.
     authors: tuple[str, ...] = ()
     agent: str | None = None
     occurred_from: datetime | None = None
@@ -326,22 +294,17 @@ class EntryFilters:
     created_from: datetime | None = None
     created_to: datetime | None = None
     include_inactive: bool = False
-    # At least one stale/wrong report (ADR 0054). Not evaluated by
-    # ``matches`` (feedback is not on ``Entry``); each store applies it.
+    # At least one stale/wrong report (ADR 0054). ``matches`` ignores it; each store applies it.
     flagged: bool = False
-    # Entries the ``reporter`` rated helpful that changed since (ADR 0098):
-    # superseded or withdrawn, or reported stale or wrong by someone else
-    # later. Implies inactive entries are listed. ``reporter`` is the
-    # (user, agent) a feedback row is keyed by; the read service fills it
-    # from the credential. Not evaluated by ``matches`` beyond the state;
-    # each store applies it.
+    # Entries the ``reporter`` rated helpful that changed since (ADR 0098); implies inactive
+    # entries are listed. ``reporter`` is the (user, agent) feedback key, filled from the
+    # credential. ``matches`` only relaxes the state check; each store applies the rest.
     relied_on_changed: bool = False
     reporter: tuple[str, str] | None = None
 
     def validate(self) -> None:
-        """Bounds for filters built from **caller input** (ADR 0040).
-        Service-built filters skip this, so a legacy stored value can never
-        make an internal query fail."""
+        """Bounds for filters from caller input (ADR 0040); service-built filters skip it,
+        so a legacy stored value never fails an internal query."""
         check_filter_values(self.tags, "tags")
         check_filter_values(self.entities, "entities")
         for field, value in (
@@ -360,7 +323,7 @@ class EntryFilters:
             check_datetime(moment, field)
 
     def matches(self, entry: Entry) -> bool:
-        """Pure filter evaluation — shared by every store adapter."""
+        """Pure filter evaluation shared by every store adapter."""
         if (
             not self.include_inactive
             and not self.relied_on_changed
@@ -403,12 +366,8 @@ class EntryFilters:
 
 
 def _body_prefix(body: str, prefix_tokens: int) -> str:
-    """The first ``prefix_tokens`` whitespace-delimited words of ``body``,
-    with the original spacing between them preserved (ADR 0021).
-
-    Cut at the end of the last word in budget, so paragraph structure
-    survives. A body within budget is returned unchanged.
-    """
+    """The first ``prefix_tokens`` words of ``body`` with spacing preserved, cut at a word end (ADR
+    0021)."""
     if prefix_tokens < 0:
         raise ValueError(f"prefix_tokens must be non-negative, got {prefix_tokens}")
     cut = 0
@@ -424,12 +383,8 @@ def embeddable_text(
     body: str | None,
     prefix_tokens: int = DEFAULT_PREFIX_TOKENS,
 ) -> str:
-    """The text an entry is embedded from (SPEC.md §7): the summary whole,
-    plus a bounded prefix of the body.
-
-    The bound is in whitespace-delimited words (ADR 0021). The extractor
-    reads the same text (SPEC §13.1).
-    """
+    """The text an entry is embedded from (SPEC §7): the summary plus a bounded body prefix
+    (ADR 0021). The extractor reads the same text (SPEC §13.1)."""
     text = summary
     if body:
         prefix = _body_prefix(body, prefix_tokens)[: embed_body_char_ceiling(prefix_tokens)]

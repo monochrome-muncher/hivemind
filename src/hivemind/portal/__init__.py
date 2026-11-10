@@ -1,10 +1,7 @@
-"""The agent portal runner (``hivemind-portal``, ADR 0095).
+"""The agent portal runner (``hivemind-portal``, ADR 0095): a static UI and an allowlisted proxy to
+``hivemind-api``.
 
-A static single-page UI plus a same-origin, allowlisted proxy to
-``hivemind-api``, for a person holding an agent key: the agent's
-memories, its verdicts, its home fleet and search. The browser holds the
-key; this process never stores it, never logs it, and never talks to
-Postgres.
+The browser holds the agent key; this process never stores or logs it and never talks to Postgres.
 """
 
 from hivemind.portal.app import create_portal_app

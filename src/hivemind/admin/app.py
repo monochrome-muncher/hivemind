@@ -1,8 +1,6 @@
-"""The admin panel ASGI app (ADR 0029): a ``hivemind.webapp`` with the
-admin static UI and the admin allowlist.
+"""The admin panel ASGI app (ADR 0029): ``hivemind.webapp`` with the admin UI and allowlist.
 
-Only the admin surface, the metrics counters and the health probe are
-reachable: the panel is never a relay onto the data plane.
+Only the admin surface, metrics and health are reachable: never a relay onto the data plane.
 """
 
 from __future__ import annotations
@@ -30,8 +28,7 @@ __all__ = [
 
 STATIC_DIR = Path(__file__).parent / "static"
 
-# (method, path-regex) pairs the proxy forwards; everything else is 404.
-# Anchored: the path is matched whole, after the `/v1/` prefix.
+# (method, path-regex) pairs forwarded; everything else is 404. Matched whole, after `/v1/`.
 _ALLOWED = allowlist(
     (
         ("GET", r"health"),
@@ -46,8 +43,7 @@ _ALLOWED = allowlist(
         ("POST", r"admin/agents/[^/]+/key"),
         ("PATCH", r"admin/agents/[^/]+"),
         ("POST", r"admin/org-key/rotate"),
-        # Browsing memories as the operator (admin-key only on the API side).
-        # Reads, a withdraw, a restore and a redact: never the data plane's own entry routes.
+        # Memory browser: reads, withdraw, restore, redact; never the data plane's entry routes.
         ("GET", r"admin/entries"),
         ("GET", r"admin/entries/[^/]+"),
         ("POST", r"admin/entries/[^/]+/withdraw"),
@@ -58,18 +54,17 @@ _ALLOWED = allowlist(
         ("GET", r"admin/feedback"),
         ("GET", r"admin/fleets/[^/]+/pins"),
         ("GET", r"admin/flagged"),
-        # Merging one fleet into another, and undoing it (admin-key only on the API side).
+        # Fleet merge and move (ADR 0107, 0112).
         ("POST", r"admin/fleets/[^/]+/merge"),
-        # Renaming a fleet (admin-key only on the API side).
         ("PATCH", r"admin/fleets/[^/]+"),
         ("POST", r"admin/fleets/[^/]+/move"),
         ("GET", r"admin/fleet-merges"),
         ("POST", r"admin/fleet-merges/[^/]+/undo"),
-        # Retiring an agent with a successor, and undoing it (admin-key only on the API side).
+        # Successions (ADR 0113).
         ("POST", r"admin/agents/[^/]+/retire"),
         ("GET", r"admin/successions"),
         ("POST", r"admin/successions/[^/]+/undo"),
-        # Cleaning up after a bad agent, and undoing it (admin-key only on the API side).
+        # Agent cleanups (ADR 0111).
         ("POST", r"admin/agents/[^/]+/cleanup"),
         ("GET", r"admin/agent-cleanups"),
         ("POST", r"admin/agent-cleanups/[^/]+/undo"),

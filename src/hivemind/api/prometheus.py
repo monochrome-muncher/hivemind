@@ -1,43 +1,21 @@
 """The Prometheus scrape endpoint of the REST runner (ADR 0050).
 
-``GET /metrics`` answers in the Prometheus text format, unauthenticated
-like every scrape target, so it must stay inside the cluster: the
-optional Ingress sends it to the source-allowlisted ``hivemind-admin-api``
-Ingress (deny by default), never to the public one.
+``GET /metrics`` is unauthenticated, so it must stay inside the cluster: the optional Ingress sends
+it to the source-allowlisted ``hivemind-admin-api`` Ingress, never the public one.
 
-Three groups of series:
+Series:
 
-* **Usage gauges** from ``MetricsService.usage_report`` (the same counts
-  ``GET /v1/metrics`` returns). The whole report is cached here for
-  ``USAGE_TTL_SECONDS`` and refreshed by at most one scrape at a time.
-  Its expensive part, the grouped scan of the entries, is cached again
-  inside ``MetricsService`` for ``HIVEMIND_METRICS_ENTRY_COUNTS_TTL``
-  (default 300 s), so the entry gauges can lag by up to that long; the
-  agent, fleet and search gauges are as fresh as this layer's TTL. Every
-  replica reports the same pool, so aggregate them with ``max``, not
-  ``sum``.
-* **HTTP request metrics** of this process: a counter and a latency
-  histogram per method and route *template* (``/v1/entries/{entry_id}``,
-  never the raw path, so the label set stays bounded).
-* **Degraded searches** (ADR 0048): searches answered by the keyword
-  stream alone because the embedder failed.
-* **Search counters** (ADR 0056): first-page searches and the ones that
-  found nothing or were explore searches (ADR 0078), per fleet, read from
-  the pool with the usage report, so they cover every runner (MCP
-  included). Aggregate them with ``max``.
-* **Flag confirmation** (ADR 0068): `hivemind_feedback_flags` and
-  `hivemind_feedback_flags_confirmed` per registered agent, the
-  stale/wrong reports and the ones a later supersession confirmed. An
-  observation, never a ranking input; agents with no flags have no series.
+* Usage gauges from ``MetricsService.usage_report``, cached for ``USAGE_TTL_SECONDS`` with one
+  refresh at a time. The entry scan is cached again in ``MetricsService``
+  (``HIVEMIND_METRICS_ENTRY_COUNTS_TTL``, ADR 0069), so entry gauges can lag that long. Every
+  replica reports the same pool: aggregate with ``max``, not ``sum``.
+* HTTP request metrics of this process, per method and route template (bounded labels).
+* Degraded searches (ADR 0048), search counters per fleet (ADR 0056, 0078; read from the pool, so
+  MCP is included), flag confirmation per agent (ADR 0068) and fleet health gauges (ADR 0075). All
+  are observations, never ranking inputs; no denominator means no series.
 
-* **Fleet health** (ADR 0075): the `hivemind_health_*` gauges, admin-facing
-  observations of the pool (verdict notes, sources, correction speed,
-  orphaned flags, concentration, synthesis, gap tags) with a few per-fleet
-  series. Never a ranking input. Cached with the entry scan; a share with
-  no denominator has no series.
-
-A failed usage refresh keeps the last snapshot and sets
-``hivemind_usage_report_success`` to 0; the scrape itself still answers.
+A failed usage refresh keeps the last snapshot and sets ``hivemind_usage_report_success`` to 0; the
+scrape still answers.
 """
 
 from __future__ import annotations
@@ -296,8 +274,7 @@ def _health_families(health: HealthUsage) -> Iterator[GaugeMetricFamily]:
             if ages.median_age_seconds is not None
         },
     )
-    # Tag strings are user data and /metrics has no key: only the mean change
-    # across the measured tags leaves the process (the tags are in the admin JSON).
+    # Tags are user data and /metrics has no key: only the mean change leaves the process.
     dispersion = health.topic_dispersion
     yield _gauge(
         p + "topic_tags_measured",
@@ -374,8 +351,7 @@ class PrometheusMetrics:
         self.registry.register(_UsageCollector(self))
 
     async def refresh_usage(self) -> None:
-        """Refresh the usage snapshot when it is older than the TTL. One
-        refresh at a time; concurrent scrapes wait and reuse its result."""
+        """Refresh the snapshot when older than the TTL; concurrent scrapes wait and reuse it."""
         async with self._lock:
             now = self._clock()
             if self._refreshed_at is not None and now - self._refreshed_at < self._ttl:

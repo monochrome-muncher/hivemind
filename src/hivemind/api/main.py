@@ -1,7 +1,6 @@
 """Production entry point: build the app from settings and serve it.
 
-The store and embeddings modules are imported lazily, so the unit suite
-(which injects fakes via ``create_app_for_config``) never imports them.
+Store and embeddings are imported lazily, so unit tests injecting fakes never import them.
 """
 
 from __future__ import annotations
@@ -36,12 +35,8 @@ def create_app_for_config(
     extractor: Extractor | None = None,
     search_config: SearchConfig | None = None,
 ) -> HivemindApp:
-    """Build a HivemindApp from settings, with optional fake overrides.
-
-    Tests pass fakes; anything left unset is built from settings
-    (SPEC.md §8.2, ADR 0007). The built extractor is ``None`` when its
-    endpoint is unset (ADR 0016).
-    """
+    """Build a HivemindApp from settings; tests pass fakes, anything unset is built (SPEC §8.2, ADR
+    0007)."""
     store = store if store is not None else _build_store(settings)
     embedder = embedder if embedder is not None else _build_embedder(settings)
     authenticator = authenticator if authenticator is not None else _build_authenticator(settings)
@@ -136,7 +131,7 @@ def _build_embedder(settings: Settings) -> Embedder:
 
 
 def _build_authenticator(settings: Settings) -> Authenticator:
-    """Build the production Authenticator (keys live in the credentials table, ADR 0008)."""
+    """The production Authenticator (ADR 0008)."""
     module = _lazy_module("hivemind.store", "pass an explicit authenticator")
     builder = getattr(module, "build_authenticator", None)
     if builder is None:
@@ -147,8 +142,7 @@ def _build_authenticator(settings: Settings) -> Authenticator:
 
 
 def _build_extractor(settings: Settings) -> Extractor | None:
-    """Build the production Extractor, or ``None`` when its endpoint is unset (extraction off,
-    ADR 0016)."""
+    """The production Extractor, or ``None`` when its endpoint is unset (ADR 0016)."""
     module = _lazy_module("hivemind.extractor", "pass an explicit extractor")
     builder = getattr(module, "build_extractor", None)
     if builder is None:

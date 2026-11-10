@@ -50,8 +50,7 @@ async def audit_log(
     since = to_utc(since)
     if since is not None:
         try:
-            # An offset that moves the value outside year 1..9999 cannot
-            # be sent to Postgres (asyncpg answers a DataError: a 500).
+            # Outside year 1..9999 cannot be sent to Postgres (asyncpg DataError: a 500).
             since.astimezone(UTC)
         except OverflowError:
             raise InvalidInput("since is out of range") from None

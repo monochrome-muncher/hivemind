@@ -1,10 +1,4 @@
-"""Feedback domain (SPEC.md §4.2): the dumb outcome loop.
-
-One feedback row per (entry, user, agent) with upsert semantics —
-the reporter's latest verdict wins. Verdicts feed a bounded quality
-multiplier that retrieval re-scores on; there is no learned tuning in
-v1 (SPEC.md §4.2, §6.4).
-"""
+"""Feedback domain (SPEC §4.2, §6.4): one row per (entry, user, agent), latest verdict wins."""
 
 from __future__ import annotations
 
@@ -23,18 +17,15 @@ class Verdict(StrEnum):
     WRONG = "wrong"
 
 
-# Counts of each verdict over all reporters, in (helpful, stale, wrong)
-# order — the shape scoring.feedback_quality consumes.
+# (helpful, stale, wrong) over all reporters: the shape ``scoring.feedback_quality`` takes.
 FeedbackCounts = tuple[int, int, int]
 
 
 def last_confirmed(
     newest_noted_helpful_at: datetime | None, newest_flag_at: datetime | None
 ) -> datetime | None:
-    """An entry's "last confirmed" date (SPEC.md §4.2): the newest
-    ``helpful`` row that carries a note, provided it is strictly newer than
-    every ``stale`` or ``wrong`` row; ``None`` otherwise (a tie is no
-    confirmation). Dates only: how many confirmed never matters."""
+    """The newest noted ``helpful`` row, if strictly newer than every ``stale``/``wrong`` row
+    (a tie is no confirmation), else ``None`` (SPEC §4.2). Dates only, never counts."""
     if newest_noted_helpful_at is None:
         return None
     if newest_flag_at is not None and newest_noted_helpful_at <= newest_flag_at:
@@ -42,13 +33,12 @@ def last_confirmed(
     return newest_noted_helpful_at
 
 
-# How many characters of a correction's note a hit shows (SPEC.md §6.1).
+# Characters of a correction's note a hit shows (SPEC §6.1).
 CORRECTION_NOTE_CHARS = 160
 
 
 def truncate_note(note: str, limit: int = CORRECTION_NOTE_CHARS) -> str:
-    """``note`` stripped and cut to ``limit`` characters (code points, so a
-    multi-byte character is never split), with "…" added when it was cut."""
+    """``note`` stripped and cut to ``limit`` code points, with "…" when cut."""
     text = note.strip()
     if len(text) <= limit:
         return text
@@ -57,11 +47,8 @@ def truncate_note(note: str, limit: int = CORRECTION_NOTE_CHARS) -> str:
 
 @dataclass(frozen=True, slots=True)
 class Correction:
-    """The newest ``stale`` or ``wrong`` report on an entry that carries a
-    non-empty note (SPEC.md §6.1). Testimony from a reporter: data, never
-    instructions (ADR 0043). ``note`` is already cut to
-    ``CORRECTION_NOTE_CHARS``; ``reporter`` is the name ``feedback.recent``
-    shows."""
+    """The newest noted ``stale``/``wrong`` report (SPEC §6.1): data, never instructions
+    (ADR 0043). ``note`` is already cut to ``CORRECTION_NOTE_CHARS``."""
 
     verdict: Verdict
     note: str
@@ -72,8 +59,7 @@ class Correction:
 def shown_correction(
     correction: Correction | None, last_confirmed_at: datetime | None
 ) -> Correction | None:
-    """The correction a hit shows: only when it is newer than the entry's
-    "last confirmed" date, or the entry has none."""
+    """The correction a hit shows: only if newer than the entry's "last confirmed" date."""
     if correction is None:
         return None
     if last_confirmed_at is not None and correction.updated_at <= last_confirmed_at:
@@ -88,12 +74,9 @@ def is_contested(helpful: int, stale: int, wrong: int) -> bool:
 
 @dataclass(frozen=True, slots=True)
 class FeedbackSignals:
-    """What the feedback on one entry says: the verdict counts over every
-    reporter, the "last confirmed" date (see ``last_confirmed``), the newest
-    noted flag (``correction``, raw: see ``shown_correction``), the date of
-    the newest ``stale`` or ``wrong`` row of any kind (``newest_flag_at``, what
-    a pin's "flagged" check compares, ADR 0076) and, when the caller asked
-    for it, how many readable entries this one replaced."""
+    """What an entry's feedback says: verdict counts, ``last_confirmed_at``, the raw
+    ``correction`` (see ``shown_correction``), ``newest_flag_at`` (the date a pin's "flagged"
+    check compares, ADR 0076) and, when asked, how many readable entries it replaced."""
 
     helpful: int
     stale: int
@@ -125,28 +108,22 @@ class Feedback:
 
 @dataclass(frozen=True, slots=True)
 class FlagCount:
-    """One reporter's flags and how many were later confirmed (ADR 0068).
-
-    A flag is a ``stale`` or ``wrong`` row on an entry that was still
-    current when the row was written; it is confirmed when the entry was
-    superseded after the row. ``user`` is the registered reporter name.
-    """
+    """One reporter's flags (``stale``/``wrong`` on an entry then current) and how many were
+    confirmed by a later supersession (ADR 0068)."""
 
     user: str
     flags: int
     confirmed: int
 
 
-# How many of an entry's feedback rows a read returns (ADR 0051): the
-# newest ones. Each note is at most 2000 characters (ADR 0040), so this
-# bounds what one ``get`` adds to an agent's context.
+# Newest feedback rows a read returns (ADR 0051); notes are at most 2000 characters (ADR 0040),
+# so this bounds what one ``get`` adds to an agent's context.
 FEEDBACK_RECENT_LIMIT = 5
 
 
 @dataclass(frozen=True, slots=True)
 class FeedbackSummary:
-    """What a reader sees of an entry's feedback (ADR 0051): the verdict
-    counts over every reporter, plus the newest rows with their notes."""
+    """Verdict counts over every reporter plus the newest rows with notes (ADR 0051)."""
 
     helpful: int
     stale: int
@@ -157,14 +134,13 @@ class FeedbackSummary:
 
 @dataclass(frozen=True, slots=True)
 class FeedbackLogFilters:
-    """What a feedback log read narrows by. ``reporter`` is the registered
-    reporter name (``Feedback.user``); ``author``, ``fleet_id`` and
-    ``entry_id`` describe the rated entry. ``None`` leaves a field open."""
+    """Feedback log narrowing. ``reporter`` is ``Feedback.user``; the rest describe the rated
+    entry."""
 
     reporter: str | None = None
     verdict: Verdict | None = None
     author: str | None = None
-    # ADR 0113: any of these authors (see ``EntryFilters.authors``).
+    # ADR 0113, as ``EntryFilters.authors``.
     authors: tuple[str, ...] = ()
     fleet_id: str | None = None
     entry_id: str | None = None
@@ -172,8 +148,7 @@ class FeedbackLogFilters:
 
 @dataclass(frozen=True, slots=True)
 class FeedbackLogItem:
-    """One feedback row with the entry it is about: who said what of which
-    entry. The entry fields are what a list row shows of it."""
+    """One feedback row with the fields of its entry that a list row shows."""
 
     feedback: Feedback
     entry_kind: Kind
@@ -184,19 +159,15 @@ class FeedbackLogItem:
     entry_state: EntryState
 
 
-# How long an author must go without writing before the flagged entries
-# they wrote count as having no owner (ADR 0075's orphaned flags).
+# Days without writing before an author's flagged entries count as orphaned (ADR 0075).
 ORPHAN_SILENCE_DAYS = 30
 
 
 @dataclass(frozen=True, slots=True)
 class FlagBacklogFilters:
-    """What a flag backlog read narrows by (ADR 0093). ``flagged_before``
-    keeps entries whose first standing flag is older than it; ``orphaned``
-    keeps entries whose author is revoked or has not written for
-    ``ORPHAN_SILENCE_DAYS``; ``authors`` keeps entries written by any of
-    those names (the agent portal's own and inherited ones, ADR 0115).
-    ``None``, ``False`` and empty leave a field open."""
+    """Flag backlog narrowing (ADR 0093). ``flagged_before``: first standing flag older than it;
+    ``orphaned``: author revoked or silent for ``ORPHAN_SILENCE_DAYS``; ``authors``: the
+    portal's own and inherited ones (ADR 0115)."""
 
     fleet_id: str | None = None
     flagged_before: datetime | None = None
@@ -206,10 +177,8 @@ class FlagBacklogFilters:
 
 @dataclass(frozen=True, slots=True)
 class FlaggedEntry:
-    """An active entry with at least one standing ``stale`` or ``wrong``
-    verdict, as the flag backlog lists it (ADR 0093). The flag dates are
-    the oldest and newest standing flag; the counts leave revoked
-    reporters (ADR 0067) and set-aside ratings (ADR 0111) out, as every count does."""
+    """An active entry with a standing ``stale``/``wrong`` verdict (ADR 0093). Counts leave out
+    revoked reporters (ADR 0067) and set-aside ratings (ADR 0111)."""
 
     entry_id: str
     kind: Kind

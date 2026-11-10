@@ -1,9 +1,4 @@
-"""Clean up after a bad agent: the records, the reason text and the undo
-rule (ADR 0111).
-
-Pure data and rules, no I/O. Both stores apply ``undo_refusal`` and
-``check_restore_ids`` so they agree.
-"""
+"""Agent cleanup (ADR 0111): records, reason text and the undo rule, shared by both stores."""
 
 from __future__ import annotations
 
@@ -15,31 +10,25 @@ from hivemind.domain.entry import Entry
 from hivemind.domain.fleet_merge import DroppedPin
 from hivemind.domain.validation import InvalidInput
 
-# The most memories (to withdraw) and restorable memories one preview lists.
-# The counts are always exact; the lists are cut and say so.
+# Most memories one preview lists; the counts stay exact.
 PREVIEW_WITHDRAW_LIMIT = 200
 PREVIEW_RESTORE_LIMIT = 500
 
-# The most cleanups one listing returns; the undo rule needs every newer
-# cleanup of an agent in view.
+# The undo rule needs every newer cleanup of an agent in view.
 CLEANUP_LIST_LIMIT = 500
 
 _REASON_PREFIX = "admin cleanup "
 
 
 def cleanup_reason(cleanup_id: str) -> str:
-    """The ``withdrawn_reason`` a cleanup gives every memory it withdraws, the
-    same whoever ran it (``AgentCleanupRecord.self_service`` tells them apart,
-    ADR 0118). An undo re-activates only memories still withdrawn with this
-    reason."""
+    """The ``withdrawn_reason`` of every memory a cleanup withdraws, whoever ran it (ADR 0118).
+    An undo re-activates only memories still withdrawn with it."""
     return _REASON_PREFIX + cleanup_id
 
 
 class AgentCleanupRefused(Exception):
-    """The cleanup or undo is not allowed in the current state (409
-    ``cleanup_refused``): the preview is stale, ``restore_ids`` names a
-    memory that is not restorable, a cleanup of the same agent is running,
-    or the undo is not for the newest standing cleanup."""
+    """The cleanup or undo is not allowed now (409 ``cleanup_refused``): stale preview,
+    unrestorable ``restore_ids``, a cleanup running, or not the newest standing cleanup."""
 
 
 class UnknownAgentCleanup(KeyError):
@@ -48,10 +37,8 @@ class UnknownAgentCleanup(KeyError):
 
 @dataclass(frozen=True, slots=True)
 class RestoredEntry:
-    """A memory a cleanup put back to ``active``, with the memory that had
-    superseded it (a junk memory of the agent) and the head of that chain (the
-    agent's memory the cleanup withdrew), kept so an undo can supersede it
-    again. ``head`` is empty in a record written without one."""
+    """A memory a cleanup put back to ``active``, kept with its former successor and that
+    chain's head so an undo can supersede it again. ``head`` is empty in an older record."""
 
     entry_id: str
     superseded_by: str
@@ -60,8 +47,7 @@ class RestoredEntry:
 
 @dataclass(frozen=True, slots=True)
 class AgentCleanupRecord:
-    """One recorded cleanup. The ratings it set aside carry its id in
-    ``feedbacks.set_aside_by``; ``ratings_set_aside`` is their number."""
+    """One recorded cleanup; the ratings it set aside carry its id in ``feedbacks.set_aside_by``."""
 
     id: str
     agent: str
@@ -75,19 +61,16 @@ class AgentCleanupRecord:
     unpinned_pins: tuple[DroppedPin, ...] = ()
     revoked: bool = False
     undone_at: datetime | None = None
-    # Run by the agent itself from the portal (ADR 0118), not by an admin.
+    # Run by the agent from the portal (ADR 0118).
     self_service: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class CleanupScan:
-    """What a cleanup of ``agent`` over ``[since, until)`` would change.
-
-    ``withdraw`` and ``restorable`` are cut to the preview limits (newest
-    first); the ``*_total`` counts are exact. A ``restorable`` entry is
-    ``superseded``, is not one of the agent's own window memories, and its
-    ``superseded_by`` chain passes only through the agent's own window
-    memories and ends at a memory the cleanup would withdraw."""
+    """What a cleanup over ``[since, until)`` would change. The lists are cut to the preview
+    limits (newest first), the ``*_total`` counts are exact. A ``restorable`` entry is
+    superseded, outside the window, and its chain runs only through the agent's window
+    memories to one the cleanup would withdraw."""
 
     since: datetime
     until: datetime
@@ -102,8 +85,8 @@ class CleanupScan:
 
 @dataclass(frozen=True, slots=True)
 class CleanupOutcome:
-    """What a cleanup did. ``record`` is ``None`` when there was nothing to
-    clean (no record is kept, so it never blocks an undo of an older one)."""
+    """What a cleanup did. ``record`` is ``None`` when nothing needed cleaning (so it never
+    blocks an undo of an older one)."""
 
     record: AgentCleanupRecord | None
     withdrawn: int = 0
@@ -154,9 +137,8 @@ def check_restore_ids(restorable: Sequence[str], restore_ids: Sequence[str] | No
 def check_counts_unchanged(
     withdraw: int, ratings: int, expected_withdraw: int | None, expected_ratings: int | None
 ) -> None:
-    """``AgentCleanupRefused`` when what the cleanup would change is not what
-    the preview showed (``expected_*``): a write or a rating in the window
-    since would otherwise be cleaned unseen. ``None`` skips a check."""
+    """``AgentCleanupRefused`` when the counts differ from the preview's ``expected_*``, so
+    nothing is cleaned unseen. ``None`` skips a check."""
     if (expected_withdraw is not None and expected_withdraw != withdraw) or (
         expected_ratings is not None and expected_ratings != ratings
     ):
@@ -168,10 +150,8 @@ def check_counts_unchanged(
 def undo_refusal(
     record: AgentCleanupRecord, records_newest_first: Sequence[AgentCleanupRecord]
 ) -> str | None:
-    """Why ``record`` cannot be undone now, or ``None`` when it can.
-
-    Only the newest standing (not undone) cleanup of an agent may be undone,
-    so each memory has one unambiguous origin (ADR 0111)."""
+    """Why ``record`` cannot be undone now, or ``None``. Only the newest standing cleanup of an
+    agent may be undone, so each memory has one origin (ADR 0111)."""
     if record.undone_at is not None:
         return "this cleanup was already undone"
     for other in records_newest_first:

@@ -1,10 +1,7 @@
-"""OpenAI-compatible embedder: the real ``Embedder`` port implementation.
+"""OpenAI-compatible embedder (ADR 0005, 0014).
 
-Requests send ``dimensions`` = the deploy-time dim (ADR 0005), which
-Matryoshka-capable providers truncate to; every response length is
-validated, and an endpoint that cannot honour it fails as
-``EmbeddingError``. Transient failures (timeouts, connection errors,
-429, 5xx) are retried with backoff (ADR 0014); others fail fast.
+Requests send ``dimensions`` = the deploy-time dim; every response length is validated, and an
+endpoint that cannot honour it fails as ``EmbeddingError``. Retries as in ``providers``.
 """
 
 from __future__ import annotations
@@ -32,10 +29,7 @@ async def _default_sleep(delay: float) -> None:
 
 
 class EmbeddingError(Exception):
-    """The embeddings endpoint could not produce a vector.
-
-    ``status`` is the HTTP status, or ``None`` for validation failures.
-    """
+    """No vector; ``status`` is the HTTP status, ``None`` for validation failures."""
 
     def __init__(self, message: str, status: int | None = None) -> None:
         super().__init__(message)
@@ -63,23 +57,10 @@ class OpenAICompatEmbedder:
     ) -> None:
         """Create an embedder.
 
-        Args:
-            client: An injected ``httpx.AsyncClient``; ``None`` builds
-                one owned by the embedder (closed by ``aclose``).
-            base_url: Requests go to ``{base_url}/embeddings``.
-            api_key: Bearer credential; empty sends no auth header.
-            model_name: Recorded per entry (ADR 0005).
-            dim: The fixed vector dimension (ADR 0005).
-            prefix_tokens: Body prefix bound in words (SPEC §7, ADR 0021).
-            timeout: Used only when building the client.
-            retries: Retries after the first attempt for transient
-                failures; ``0`` disables.
-            backoff: Base backoff; retry *i* sleeps ``backoff * 2**i``.
-            sleep: Backoff sleep (tests inject a recorder).
-            deadline: Wall-clock budget for one embed call, retries
-                included (ADR 0041); ``None`` derives it.
-            jitter: Returns [0, 1), scaling each backoff to [0.5x, 1x];
-                defaults to ``random.random``.
+        ``client=None`` builds one the embedder owns (``aclose`` closes it; ``timeout`` applies only
+        then). An empty ``api_key`` sends no auth header. ``prefix_tokens`` is a word bound (SPEC
+        §7, ADR 0021). Retry *i* sleeps ``backoff * 2**i`` scaled by ``jitter`` ([0, 1) to [0.5x,
+        1x]). ``deadline=None`` derives it (ADR 0041).
         """
         self._owns_client = client is None
         if client is None:
@@ -175,9 +156,8 @@ class OpenAICompatEmbedder:
         return vector
 
     def _parse_response(self, response: httpx.Response) -> list[float]:
-        """Extract and validate ``data[0].embedding`` from an OpenAI-shaped
-        response: JSON, exactly one item (one input text), every value a
-        finite number (no bool / str / NaN / Inf)."""
+        """Validate an OpenAI-shaped response: exactly one item, every value a finite number (no
+        bool, str, NaN, Inf)."""
         try:
             body: Any = response.json()
         except ValueError, RecursionError:
@@ -199,9 +179,8 @@ class OpenAICompatEmbedder:
             if isinstance(v, bool) or not isinstance(v, int | float) or not math.isfinite(v):
                 raise EmbeddingError("embeddings response holds a non-finite or non-numeric value")
             values.append(float(v))
-        # pgvector stores float32 (ROADMAP 3.13): an out-of-range value
-        # fails the write in Postgres, and an all-zero vector has NaN cosine
-        # distances. Both are deterministic provider faults: fail fast.
+        # pgvector stores float32 (ROADMAP 3.13): an out-of-range value fails the Postgres write and
+        # an all-zero vector has NaN cosine distances. Deterministic provider faults: fail fast.
         as_stored = array("f", values)
         if any(math.isinf(v) for v in as_stored):
             raise EmbeddingError("embeddings response holds a value outside the float32 range")

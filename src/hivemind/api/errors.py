@@ -1,14 +1,8 @@
-"""How the REST surface answers each typed service error.
+"""The table mapping each typed service error to an HTTP status and error code; the message is
+``str(exc)``.
 
-One table maps an error class to its HTTP status and stable error code; the
-message is always ``str(exc)``, in the standard envelope
-``{"error": {"code", "message"}}``. ``create_app`` registers every entry as an
-exception handler, so a route lets a typed error propagate and writes
-``try``/``except`` only where its answer differs from this table.
-
-Starlette resolves a handler by walking the exception's MRO, so the most
-specific class wins: ``SupersedeDenied`` before ``PermissionDenied``,
-``FleetMoveRefused`` before ``FleetMergeRefused``.
+``create_app`` registers every entry, so a route catches only where its answer differs. Starlette
+walks the MRO, so the most specific class wins (``SupersedeDenied`` over ``PermissionDenied``).
 """
 
 from __future__ import annotations
@@ -50,8 +44,8 @@ from hivemind.services.errors import (
 
 logger = logging.getLogger(__name__)
 
-# error class -> (HTTP status, error code). ``EmbeddingError`` is answered
-# separately (a fixed message), see ``EMBEDDING_UNAVAILABLE``.
+# error class -> (status, code). ``EmbeddingError`` has its own fixed message
+# (``EMBEDDING_UNAVAILABLE``).
 ERROR_ANSWERS: Final[dict[type[Exception], tuple[int, str]]] = {
     SupersedeDenied: (403, "supersede_denied"),  # ADR 0033
     PermissionDenied: (403, "forbidden"),
@@ -79,8 +73,7 @@ ERROR_ANSWERS: Final[dict[type[Exception], tuple[int, str]]] = {
     AgentIdentityRequired: (422, "agent_identity_required"),
 }
 
-# An embedding failure is a 502 (SPEC.md §7, ADR 0005) with a fixed message;
-# the detail is logged, never returned.
+# 502 with a fixed message (SPEC §7, ADR 0005); the detail is logged, never returned.
 EMBEDDING_UNAVAILABLE: Final = (502, "embedding_unavailable")
 EMBEDDING_UNAVAILABLE_MESSAGE: Final = "the embedding service is unavailable"
 

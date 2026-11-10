@@ -1,14 +1,10 @@
 """One agent's history as the agent portal shows it (ADR 0123). No I/O.
 
-The audit log (ADR 0027) holds rows *about* an agent. The portal turns each
-into a ``HistoryItem`` through an allowlist: the fields below are the only
-ones read from a row's ``detail``, and the row's own ``actor`` is never
-passed on. An admin, org or CLI actor becomes ``by="admin"`` ("an admin");
-the agent's own key becomes ``by="agent"``. Key fingerprints, agent names
-other than the agent's own and the agents it inherits from (ADR 0113), ids
-of fleets and rows, and the owner alias never reach a ``HistoryItem``. A
-fleet is named only if the key can read it, an entry id is kept only if the
-key can still read the entry.
+Audit rows (ADR 0027) become ``HistoryItem`` through an allowlist: only the ``detail`` fields
+read below pass, and the row's ``actor`` never does (admin, org or CLI becomes ``by="admin"``).
+Key fingerprints, other agents' names (own and inherited ones excepted, ADR 0113), fleet and
+row ids and the owner alias never reach a ``HistoryItem``. A fleet is named only if the key can
+read it; an entry id is kept only if the key can still read the entry.
 """
 
 from __future__ import annotations
@@ -28,8 +24,7 @@ AN_ADMIN = "an admin"
 
 
 def fleet_readable(visibility: Visibility, fleet_id: str) -> bool:
-    """Whether the key may know the fleet's name: its home fleet, or any
-    fleet for a privileged agent (the same reach as its memory reads, ADR 0011)."""
+    """Whether the key may know the fleet's name: the same reach as its memory reads (ADR 0011)."""
     return (
         visibility.is_admin
         or visibility.level is TrustLevel.PRIVILEGED
@@ -39,8 +34,7 @@ def fleet_readable(visibility: Visibility, fleet_id: str) -> bool:
 
 @dataclass(frozen=True, slots=True)
 class HistoryContext:
-    """What the mapper may name: the agent, the agents it inherits from, the
-    readable fleets' names by id and the ids of entries the key can read."""
+    """What the mapper may name: the agent, its predecessors, readable fleets and entries."""
 
     me: str
     inherited: tuple[str, ...]
@@ -52,8 +46,7 @@ class HistoryContext:
         return (self.me, *self.inherited)
 
     def agent(self, name: object) -> str:
-        """``name`` if it is the agent or one it inherits from (``this
-        agent`` for the agent itself), else a generic phrase."""
+        """``this agent`` for the agent itself, a predecessor's name, else a generic phrase."""
         if name == self.me:
             return THIS_AGENT
         if isinstance(name, str) and name in self.inherited:
@@ -68,9 +61,8 @@ class HistoryContext:
 
 @dataclass(frozen=True, slots=True)
 class HistoryItem:
-    """One history line. ``by`` is ``agent`` (``agent`` names which of the
-    agent or its predecessors) or ``admin``; ``about`` is the agent or
-    predecessor the row concerns."""
+    """One history line. ``agent`` names which of the agent or its predecessors acted;
+    ``about`` is the one the row concerns."""
 
     id: str
     occurred_at: datetime
@@ -115,9 +107,8 @@ def referenced_entry_id(record: AuditRecord) -> str | None:
 def describe(record: AuditRecord, ctx: HistoryContext) -> HistoryItem:
     """The portal's line for ``record``: only allowlisted detail, no actor identity."""
     agent_acted = record.actor_kind is ActorKind.AGENT_KEY
-    # An agent key outside the caller's own set (itself and the agents it
-    # inherits from) acted on a row that still matches, say after an undone
-    # retirement: that is another agent, never "this agent".
+    # An agent key outside the caller's own set (say, after an undone retirement) is
+    # another agent, never "this agent".
     actor_name = record.actor if agent_acted and record.actor in ctx.agents else None
     by: Literal["agent", "another_agent", "admin"] = (
         "admin" if not agent_acted else ("agent" if actor_name is not None else "another_agent")
@@ -269,16 +260,13 @@ def _summary(
             else:
                 text = f"A memory by {ctx.agent(author)} was withdrawn"
         case AuditAction.ENTRY_RESTORE:
-            # Only an admin restores (ADR 0124). The reason is shown only for
-            # a memory of this agent (or one it inherits), like any admin note.
+            # ADR 0124: the reason is shown only for this agent's own (or inherited) memory.
             author = d.get("author")
             if author in ctx.agents:
                 reason = _text(d.get("reason"))
             text = f"An admin restored a memory by {ctx.agent(author)}"
         case AuditAction.ENTRY_REDACT:
-            # Only an admin redacts (ADR 0125). Same rule as a restore: the
-            # reason only for a memory of this agent (or one it inherits), and
-            # never the counts of other agents' notes the detail holds.
+            # ADR 0125: as a restore; never the counts of other agents' notes in the detail.
             author = d.get("author")
             if author in ctx.agents:
                 reason = _text(d.get("reason"))

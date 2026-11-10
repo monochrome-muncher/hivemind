@@ -1,33 +1,22 @@
 """Migration runner: apply the ordered migration chain (ADR 0020).
 
-``migrate`` applies, via yoyo, every migration under ``migrations/`` not
-yet recorded in ``_yoyo_migration``; an up-to-date pool is a no-op, so
-the entrypoint runs it on every start (ADR 0018).
+Applies via yoyo every migration not yet recorded; an up-to-date pool is a no-op, so the entrypoint
+runs it on every start (ADR 0018).
 
-**Concurrency.** A session-scoped Postgres advisory lock is held for the
-whole run, so exactly one replica migrates and a pod killed mid-run
-releases it by dying. yoyo's ``backend.lock()`` is NOT used: it is a
-table row with no stale detection, so a killed pod would wedge every
-later one. The lock is taken by polling (see ``_acquire_migration_lock``).
+**Concurrency.** One session-scoped Postgres advisory lock is held for the whole run, so one replica
+migrates and a killed pod releases it by dying. yoyo's ``backend.lock()`` is NOT used: a table row
+with no stale detection would wedge every later pod. The lock is taken by polling.
 
-**Rollback** reverses the latest migration(s) via ``.rollback.sql``
-files, written for structural changes only; data loss is a restore from
-backup (``docs/ops-runbook.md``). ``0001.initial-schema`` is never
-rolled back.
+**Rollback** runs ``.rollback.sql`` files (structural changes only; data loss is a restore,
+``docs/ops-runbook.md``); ``0001`` is never rolled back. **Rollback guard** (ADR 0119): some frozen
+rollbacks ``DELETE FROM audit_log`` and ``0006``'s revives revoked agents' keys, so under the lock,
+before any DDL, ``rollback`` counts that impact and refuses unless ``discard_audit_rows`` /
+``revive_revoked_keys`` / ``unlock_locked_keys`` is given. A rollback leaving ``0027`` applied
+writes a ``schema.rollback`` audit row; one undoing it logs a WARNING.
 
-**Rollback guard** (ADR 0119). The shipped ``.rollback.sql`` files are
-frozen and several of them ``DELETE FROM audit_log`` (the older CHECK
-cannot hold the newer actions); ``0006``'s revives the keys of revoked
-agents. Before any DDL, under the lock, ``rollback`` counts what the
-chosen chain would erase or revive (``ROLLBACK_AUDIT_DELETES``) and
-refuses unless ``discard_audit_rows`` / ``revive_revoked_keys`` /
-``unlock_locked_keys`` is given. A rollback that leaves ``0027`` applied writes one
-``schema.rollback`` audit row; one that undoes ``0027`` logs a WARNING.
-
-**Pre-flight**, under the lock and before any DDL: the dim guard (ADR
-0015, so two replicas at different dims cannot both pass), pgvector >=
-0.8 and ``dim <= 2000``. After the chain, an INVALID HNSW index (a
-crashed ``CONCURRENTLY`` build) fails the run.
+**Pre-flight**, under the lock before any DDL: the dim guard (ADR 0015; under the lock so replicas
+at different dims cannot both pass), pgvector >= 0.8, ``dim <= 2000``. After the chain, an INVALID
+HNSW index (a crashed ``CONCURRENTLY`` build) fails the run.
 """
 
 from __future__ import annotations
@@ -48,16 +37,15 @@ from hivemind.store import migration_context
 
 logger = logging.getLogger(__name__)
 
-# pgvector's `hnsw.iterative_scan` (used by every vector search) exists
-# from 0.8.0; HNSW cannot index more than 2000 dimensions.
+# `hnsw.iterative_scan` (every vector search) needs pgvector 0.8.0; HNSW indexes at most 2000
+# dimensions.
 _MIN_PGVECTOR = (0, 8, 0)
 _MAX_HNSW_DIM = 2000
 _HNSW_INDEX = "entries_embedding_hnsw_idx"
 
 _MIGRATIONS_DIR = Path(__file__).with_name("migrations")
 
-# The advisory-lock key (ADR 0020): arbitrary but FIXED. ASCII "HIVEMIND"
-# as a big-endian int64, so it is recognisable in `pg_locks`.
+# Advisory-lock key (ADR 0020): fixed; ASCII "HIVEMIND" as an int64, recognisable in `pg_locks`.
 MIGRATION_LOCK_KEY = 0x484956454D494E44
 
 _SCHEMA_ROLLBACK_MIGRATION = "0027.schema-rollback-audit"
@@ -67,17 +55,14 @@ _KEY_LOCK_MIGRATION = "0025.key-lock"
 
 @dataclass(frozen=True, slots=True)
 class AuditDeletion:
-    """The audit rows one ``.rollback.sql`` deletes: those with one of
-    ``actions``, or written by one of ``actor_kinds``."""
+    """Audit rows one ``.rollback.sql`` deletes: by ``actions`` or ``actor_kinds``."""
 
     actions: tuple[str, ...]
     actor_kinds: tuple[str, ...] = ()
 
 
-# Which audit rows each shipped rollback deletes (ADR 0119). Explicit rather
-# than parsed from the SQL; ``tests/unit/test_migration_chain.py`` cross-checks
-# it against the ``DELETE FROM audit_log`` statements so it cannot drift. A new
-# migration whose rollback deletes audit rows gets an entry here.
+# Audit rows each shipped rollback deletes (ADR 0119); ``tests/unit/test_migration_chain.py``
+# cross-checks it against the SQL. A new rollback that deletes audit rows needs an entry.
 ROLLBACK_AUDIT_DELETES: dict[str, AuditDeletion] = {
     "0009.audit-register": AuditDeletion(("agent.register",), ("org_key",)),
     "0014.pin-audit": AuditDeletion(("entry.pin", "entry.unpin"), ("agent_key",)),
@@ -109,8 +94,7 @@ _INSERT_ROLLBACK_AUDIT = (
 
 
 class RollbackRefused(RuntimeError):
-    """A rollback that would erase audit rows or revive keys was not
-    confirmed with its flag (ADR 0119)."""
+    """A rollback that would erase audit rows or revive keys lacked its flag (ADR 0119)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,14 +107,11 @@ class RollbackImpact:
     unlocked_keys: int = 0  # locked key rows that 0025's rollback makes usable again
 
 
-# Poll interval for the lock: short delay, no busy-spin.
 _LOCK_POLL_SECONDS = 0.25
 
 
 def _yoyo_dsn(dsn: str) -> str:
-    """Rewrite an asyncpg DSN to yoyo's psycopg3 scheme
-    (``postgresql+psycopg://``); an explicit ``+driver`` is left alone.
-    """
+    """Rewrite an asyncpg DSN to yoyo's ``postgresql+psycopg://``; an explicit ``+driver`` stays."""
     for prefix in ("postgresql://", "postgres://"):
         if dsn.startswith(prefix):
             return "postgresql+psycopg://" + dsn[len(prefix) :]
@@ -138,9 +119,7 @@ def _yoyo_dsn(dsn: str) -> str:
 
 
 def _apply_chain(dsn: str, dim: int) -> None:
-    """Apply every outstanding migration (sync; run in a thread while the
-    caller holds the advisory lock).
-    """
+    """Apply every outstanding migration (sync; the caller holds the advisory lock)."""
     from yoyo import get_backend, read_migrations
 
     migration_context.embedding_dim = dim
@@ -153,9 +132,8 @@ def _apply_chain(dsn: str, dim: int) -> None:
 
 
 def _rollback_plan(dsn: str, count: int) -> list[str]:
-    """The ids the ``count`` most recent migrations would roll back, most
-    recent first (sync; read-only). Refuses ``0001`` (yoyo would unmark a
-    migration with no ``.rollback.sql`` without running DDL)."""
+    """Ids the ``count`` latest migrations would roll back, newest first (read-only). Refuses
+    ``0001``: with no ``.rollback.sql`` yoyo would unmark it without running DDL."""
     from yoyo import get_backend, read_migrations
 
     backend = get_backend(_yoyo_dsn(dsn))
@@ -175,10 +153,7 @@ def _rollback_plan(dsn: str, count: int) -> list[str]:
 
 
 def _rollback_chain(dsn: str, dim: int, count: int) -> list[str]:
-    """Roll back the ``count`` most recently applied migrations.
-
-    Returns the ids rolled back, most recent first.
-    """
+    """Roll back the ``count`` latest migrations; returns their ids, newest first."""
     from yoyo import get_backend, read_migrations
 
     migration_context.embedding_dim = dim
@@ -197,8 +172,8 @@ def _rollback_chain(dsn: str, dim: int, count: int) -> list[str]:
 
 
 async def rollback_impact(conn: asyncpg.Connection, ids: list[str]) -> RollbackImpact:
-    """Count, without changing anything, the audit rows the rollbacks of
-    ``ids`` would delete and the revoked agents' keys ``0006`` would revive."""
+    """Count, read-only, the audit rows the rollbacks of ``ids`` would delete and the keys ``0006``
+    would revive."""
     per_migration: dict[str, int] = {}
     actions: set[str] = set()
     kinds: set[str] = set()
@@ -234,8 +209,8 @@ def rollback_refusal_message(
     revive_revoked_keys: bool,
     unlock_locked_keys: bool = False,
 ) -> str | None:
-    """The refusal naming what the rollback would destroy, or ``None`` when
-    every non-zero count has its flag (ADR 0119)."""
+    """The refusal naming what the rollback would destroy, or ``None`` if each non-zero count has
+    its flag (ADR 0119)."""
     parts: list[str] = []
     if impact.audit_rows and not discard_audit_rows:
         lines = []
@@ -270,8 +245,7 @@ def rollback_refusal_message(
 async def _record_rollback(
     conn: asyncpg.Connection, rolled: list[str], discarded: int | None
 ) -> None:
-    """Audit a finished rollback while the schema still has ``0027``;
-    otherwise log it, since the audit log can no longer hold the row."""
+    """Audit a finished rollback if ``0027`` is still applied, else log it."""
     from hivemind.store.keys import default_actor
 
     if not rolled:
@@ -302,29 +276,16 @@ async def _record_rollback(
 
 
 def _close_backend(backend: object) -> None:
-    """Close the connection a yoyo backend opened in its constructor.
-
-    yoyo's ``DatabaseBackend`` has no ``close()``, so each call would
-    otherwise leak a connection for the life of the process."""
+    """Close the connection a yoyo backend opened; ``DatabaseBackend`` has no ``close()``."""
     connection = getattr(backend, "connection", None)
     if connection is not None:
         connection.close()
 
 
 async def _acquire_migration_lock(conn: asyncpg.Connection) -> None:
-    """Take the migration advisory lock by **polling**, never by blocking
-    inside ``pg_advisory_lock``.
-
-    A blocking wait deadlocks against ``CREATE INDEX CONCURRENTLY`` (ADR
-    0020 §6) invisibly to Postgres: the winner holds the lock on this
-    connection and runs the chain on a separate one; the index build
-    waits for every older transaction, including a sibling parked in
-    ``pg_advisory_lock``, which in turn waits on the winner. The holder
-    is idle, so the cycle never shows in the wait graph.
-
-    Polling keeps each waiter's transaction short. The wait stays
-    unbounded; the orchestrator's ``startupProbe`` is the timeout.
-    """
+    """Take the advisory lock by **polling**, never blocking in ``pg_advisory_lock``: a parked
+    sibling would deadlock ``CREATE INDEX CONCURRENTLY`` invisibly to Postgres (ADR 0020 §6).
+    The wait is unbounded; the orchestrator's ``startupProbe`` is the timeout."""
     while not await conn.fetchval("SELECT pg_try_advisory_lock($1)", MIGRATION_LOCK_KEY):
         await asyncio.sleep(_LOCK_POLL_SECONDS)
 
@@ -404,10 +365,8 @@ _ROLLBACK_LOCK_LOST_MESSAGE = (
 
 
 async def _lock_still_held(conn: asyncpg.Connection) -> bool:
-    """Whether the lock connection is alive and still holds the lock.
-
-    Any failure counts as lost: asyncpg reports a dead session as one of
-    several exception types depending on timing."""
+    """Whether the lock connection still holds the lock; any failure counts as lost (asyncpg
+    reports a dead session as several exception types)."""
     try:
         held = await conn.fetchval(
             "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' "
@@ -419,10 +378,8 @@ async def _lock_still_held(conn: asyncpg.Connection) -> bool:
 
 
 async def _release_lock(conn: asyncpg.Connection, work: str) -> None:
-    """Best-effort unlock (closing the connection releases it anyway). A
-    dead connection means the lock was already lost: warn rather than
-    mask the migration's result. After a rollback the warning must not
-    advise re-applying, which would undo it."""
+    """Best-effort unlock. A dead connection means the lock was lost: warn, never mask the result.
+    After a rollback the warning must not advise re-applying, which would undo it."""
     try:
         await conn.execute("SELECT pg_advisory_unlock($1)", MIGRATION_LOCK_KEY)
     except Exception:  # any dead-session shape (see _lock_still_held)
@@ -440,12 +397,8 @@ async def _release_lock(conn: asyncpg.Connection, work: str) -> None:
 
 
 async def migrate(dsn: str, dim: int = 1024) -> None:
-    """Apply every outstanding migration; idempotent and safe to run
-    concurrently.
-
-    Raises:
-        RuntimeError: on a pre-flight failure, e.g. a dim mismatch (ADR 0015).
-    """
+    """Apply every outstanding migration; idempotent, safe to run concurrently.
+    ``RuntimeError`` on a pre-flight failure such as a dim mismatch (ADR 0015)."""
     await _with_migration_lock(dsn, dim, "apply")
     await _warn_dead_credentials(dsn)
 
@@ -483,18 +436,9 @@ async def rollback(
     revive_revoked_keys: bool = False,
     unlock_locked_keys: bool = False,
 ) -> list[str]:
-    """Roll back the ``count`` most recently applied migrations.
-
-    Returns the migration ids rolled back, most recent first. Refuses to
-    roll back ``0001.initial-schema`` (ADR 0020: a rollback that would
-    destroy data is not written).
-
-    Raises:
-        RollbackRefused: the chain would delete audit rows (unless
-            ``discard_audit_rows``) or revive revoked agents' keys (unless
-            ``revive_revoked_keys``) or unlock locked keys (unless
-            ``unlock_locked_keys``); nothing was changed (ADR 0119).
-    """
+    """Roll back the ``count`` latest migrations; returns their ids, newest first. Refuses ``0001``
+    (ADR 0020). ``RollbackRefused``, with nothing changed, unless the matching flag allows
+    deleting audit rows, reviving revoked keys or unlocking locked keys (ADR 0119)."""
     if count < 1:
         raise ValueError(f"count must be at least 1, got {count}")
     return await _with_migration_lock(
@@ -509,10 +453,8 @@ async def rollback(
 
 
 def dim_mismatch_message(actual_dim: int, configured_dim: int) -> str | None:
-    """The dim-mismatch error (ADR 0015) naming both dims and both
-    remedies, or ``None`` when they match. A dim change is a pool reset,
-    never in place (ADR 0005).
-    """
+    """The dim-mismatch error naming both dims and both remedies (ADR 0015), or ``None``. A dim
+    change is a pool reset, never in place (ADR 0005)."""
     if actual_dim == configured_dim:
         return None
     return (
@@ -525,12 +467,8 @@ def dim_mismatch_message(actual_dim: int, configured_dim: int) -> str | None:
 
 
 def pgvector_requirement_message(version: str | None, dim: int) -> str | None:
-    """The pgvector pre-flight error, or ``None`` when satisfied.
-
-    Requires pgvector >= 0.8 (``hnsw.iterative_scan``, ADR 0025; older
-    servers migrate fine but fail every search) and ``dim <= 2000``
-    (HNSW's limit). An unparseable version passes.
-    """
+    """The pgvector pre-flight error, or ``None``: needs >= 0.8 (older servers migrate but fail
+    every search, ADR 0025) and ``dim <= 2000``. An unparseable version passes."""
     if dim > _MAX_HNSW_DIM:
         return (
             f"HIVEMIND_EMBEDDING_DIM={dim} exceeds the {_MAX_HNSW_DIM}-dimension limit of "
@@ -580,8 +518,7 @@ async def _pgvector_version(conn: asyncpg.Connection) -> str | None:
 
 
 async def _require_valid_hnsw_index(dsn: str) -> None:
-    """After the chain: fail loudly if the HNSW index is INVALID. Runs on
-    its own connection, independent of the lock connection's health."""
+    """Fail loudly if the HNSW index is INVALID, on its own connection."""
     conn = await asyncpg.connect(dsn)
     try:
         valid = await conn.fetchval(
@@ -599,9 +536,8 @@ async def _require_valid_hnsw_index(dsn: str) -> None:
 
 
 async def _existing_embedding_dim(conn: asyncpg.Connection) -> int | None:
-    """The ``entries.embedding`` dim from its typmod (works on an empty
-    pool), or ``None`` when the pool has never been migrated.
-    """
+    """The ``entries.embedding`` dim from its typmod (works on an empty pool), or ``None`` if never
+    migrated."""
     try:
         row = await conn.fetchrow(
             "SELECT atttypmod FROM pg_attribute "
@@ -622,9 +558,7 @@ async def current_embedding_dim(dsn: str) -> int | None:
 
 
 async def current_schema_version(dsn: str) -> str | None:
-    """The most recently applied migration id from yoyo's table (ADR
-    0020), or ``None`` if the pool has never been migrated.
-    """
+    """The latest applied migration id (ADR 0020), or ``None`` if never migrated."""
     conn = await asyncpg.connect(dsn)
     try:
         try:
@@ -640,13 +574,9 @@ async def current_schema_version(dsn: str) -> str | None:
 
 
 def main() -> None:
-    """Console entry point: ``hivemind-migrate`` applies the chain;
-    ``--rollback N`` reverses the N latest, refusing when that
-    would delete audit rows (``--discard-audit-rows``) or revive revoked
-    agents' keys (``--revive-revoked-keys``) or unlock locked keys
-    (``--unlock-locked-keys``; ADR 0119). Uses
-    ``Settings.migration_dsn``.
-    """
+    """``hivemind-migrate`` applies the chain; ``--rollback N`` reverses the N latest, refusing
+    unless ``--discard-audit-rows``, ``--revive-revoked-keys`` or ``--unlock-locked-keys``
+    allows what it would do (ADR 0119). Uses ``Settings.migration_dsn``."""
     settings = load_settings()
     argv = sys.argv[1:]
     try:

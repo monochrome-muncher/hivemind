@@ -1,14 +1,8 @@
 """Retrieval quality metrics (ROADMAP §1.1: hit@k, MRR, nDCG).
 
-Pure functions over a ranked list of entry ids + a per-query relevance
-map, so the retrieval pipeline can be measured — not guessed at — as
-the ~10 spec-default config knobs are calibrated. No I/O: these run on
-the ranked ids ``SearchService`` returns and the golden expected-relevant
-set, and feed the eval runner + CI gate.
-
-Relevance is a mapping ``entry_id -> grade`` (0/1 for the golden set;
-graded is supported for nDCG). A "relevant" hit is any entry with a
-grade > 0.
+Pure functions over ranked entry ids and a per-query relevance map ``entry_id -> grade``
+(0/1 for the golden set; graded for nDCG). Relevant means grade > 0. They feed the eval
+runner and CI gate.
 """
 
 from __future__ import annotations
@@ -18,14 +12,13 @@ from collections.abc import Mapping, Sequence
 
 
 def _unique(ranked_ids: Sequence[str]) -> list[str]:
-    """``ranked_ids`` with repeats dropped (first occurrence wins): a
-    document appears once in a ranking, so a duplicate must neither earn
-    its gain twice (nDCG > 1) nor occupy a rank."""
+    """``ranked_ids`` without repeats (first wins), so a duplicate neither earns gain twice
+    (nDCG > 1) nor occupies a rank."""
     return list(dict.fromkeys(ranked_ids))
 
 
 def _top_k(ranked_ids: Sequence[str], k: int) -> list[str]:
-    """The first ``k`` distinct ranked ids (or fewer if the list is shorter)."""
+    """The first ``k`` distinct ranked ids."""
     return _unique(ranked_ids)[: max(k, 0)]
 
 
@@ -38,12 +31,8 @@ def hit_at_k(ranked_ids: Sequence[str], relevant: Mapping[str, int], k: int) -> 
 
 
 def reciprocal_rank(ranked_ids: Sequence[str], relevant: Mapping[str, int]) -> float:
-    """The reciprocal rank of the first relevant entry (1-based).
-
-    ``1/rank`` where rank is the 1-based position of the first
-    relevant hit; ``0.0`` when no relevant entry is ranked at all. This
-    is the per-query MRR summand (averaged over queries -> MRR).
-    """
+    """``1/rank`` of the first relevant entry (1-based), ``0.0`` if none: the per-query MRR
+    summand."""
     relevant_ids = {eid for eid, grade in relevant.items() if grade > 0}
     for rank, eid in enumerate(_unique(ranked_ids), start=1):
         if eid in relevant_ids:
@@ -52,11 +41,7 @@ def reciprocal_rank(ranked_ids: Sequence[str], relevant: Mapping[str, int]) -> f
 
 
 def dcg_at_k(ranked_ids: Sequence[str], relevant: Mapping[str, int], k: int) -> float:
-    """Discounted cumulative gain at ``k`` (binary or graded relevance).
-
-    ``DCG@k = sum_{i=1..k} grade_i / log2(i + 1)`` (0-based discount on
-    the 1-based position). Entries not in ``relevant`` grade 0.
-    """
+    """``DCG@k = sum_{i=1..k} grade_i / log2(i + 1)``; entries not in ``relevant`` grade 0."""
     if k <= 0:
         return 0.0
     total = 0.0
@@ -68,12 +53,7 @@ def dcg_at_k(ranked_ids: Sequence[str], relevant: Mapping[str, int], k: int) -> 
 
 
 def ndcg_at_k(ranked_ids: Sequence[str], relevant: Mapping[str, int], k: int) -> float:
-    """Normalized DCG at ``k`` (1.0 = perfect ranking of the relevant).
-
-    ``nDCG@k = DCG@k / IDCG@k``; the ideal DCG places every relevant
-    entry at the top (highest grades first). ``0.0`` when nothing is
-    relevant (IDCG is 0).
-    """
+    """``DCG@k / IDCG@k`` (ideal: highest grades first); ``0.0`` when nothing is relevant."""
     if k <= 0:
         return 0.0
     ideal_grades = sorted((grade for grade in relevant.values() if grade > 0), reverse=True)
@@ -92,7 +72,7 @@ def evaluate_query(
     relevant: Mapping[str, int],
     k: int,
 ) -> dict[str, float | bool]:
-    """Per-query metrics (the building block of the aggregate report)."""
+    """Per-query metrics for ``aggregate_report``."""
     return {
         "hit_at_k": hit_at_k(ranked_ids, relevant, k),
         "reciprocal_rank": reciprocal_rank(ranked_ids, relevant),
@@ -101,13 +81,7 @@ def evaluate_query(
 
 
 def aggregate_report(per_query: Mapping[str, dict[str, float | bool]], k: int) -> dict[str, float]:
-    """Aggregate the per-query metrics over a query set (averaged).
-
-    ``per_query`` maps a query (label) to its ``evaluate_query`` result.
-    Reports mean ``hit@k`` (fraction of queries with a relevant hit in
-    the top-``k``), mean ``MRR``, and mean ``nDCG@k`` — the three
-    signals the eval runner + CI gate watch.
-    """
+    """Mean hit@k, MRR and nDCG@k over ``per_query`` (query label to ``evaluate_query`` result)."""
     if not per_query:
         return {"hit_at_k": 0.0, "mrr": 0.0, f"ndcg_at_{k}": 0.0, "queries": 0.0}
     n = len(per_query)

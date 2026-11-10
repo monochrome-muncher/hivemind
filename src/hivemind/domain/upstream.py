@@ -1,11 +1,6 @@
-"""Upstream changes (SPEC.md §6.1, ADR 0081): the ``upstream_changed`` marker
-on a search hit.
-
-An insight or decision that links to an entry via ``see_also`` is built on
-it. When that entry is later withdrawn, superseded by someone else or
-flagged, the linking entry deserves a second look. Display only: nothing
-here ranks. Pure rule over facts the store reads; no I/O.
-"""
+"""The ``upstream_changed`` marker on a search hit (SPEC §6.1, ADR 0081): an insight or decision
+whose ``see_also`` target was withdrawn, superseded by someone else or flagged. Display only, never
+ranks."""
 
 from __future__ import annotations
 
@@ -16,7 +11,7 @@ from enum import StrEnum
 from hivemind.domain.entry import EntryState, Kind
 from hivemind.domain.feedback import last_confirmed
 
-# How many changed targets a hit lists (SPEC §6.1).
+# Changed targets a hit lists (SPEC §6.1).
 MAX_UPSTREAM_CHANGED = 3
 
 # Only these kinds are built on what they link to; a fact is observed.
@@ -31,16 +26,10 @@ class UpstreamChangeKind(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class UpstreamLink:
-    """What the store knows about one outgoing ``see_also`` link and the
-    entry it points at (a target the reader may read, any state).
-
-    ``superseded_at`` and ``superseded_author`` describe the successor
-    (its creation time and author) when the target is superseded.
-    ``newest_flag_at`` is the newest ``stale`` / ``wrong`` report on the
-    target and ``newest_noted_helpful_at`` its newest ``helpful`` report
-    with a note (revoked reporters left out), the two dates "last
-    confirmed" is made of (SPEC §4.2).
-    """
+    """One outgoing ``see_also`` link and its readable target, in any state.
+    ``superseded_at``/``superseded_author`` describe the successor. ``newest_flag_at`` and
+    ``newest_noted_helpful_at`` (revoked reporters left out) are the two dates "last confirmed"
+    is made of (SPEC §4.2)."""
 
     from_id: str
     to_id: str
@@ -63,11 +52,10 @@ class UpstreamChange:
 def _change_of(
     link: UpstreamLink, author: str
 ) -> tuple[UpstreamChangeKind, datetime | None] | None:
-    """The change on ``link``'s target since the link was made, with its
-    date (``None`` for a withdrawal, which the store does not date)."""
+    """The change on the target since the link was made, with its date (``None`` for a
+    withdrawal)."""
     if link.state is EntryState.WITHDRAWN:
-        # Entries carry no withdrawal date, so a withdrawn target always
-        # counts, even one that was withdrawn before the link was made.
+        # Withdrawals are undated here, so a withdrawn target always counts.
         return UpstreamChangeKind.WITHDRAWN, None
     if (
         link.state is EntryState.SUPERSEDED
@@ -88,9 +76,8 @@ def _change_of(
 def upstream_changed(
     kind: Kind, author: str, links: list[UpstreamLink]
 ) -> tuple[UpstreamChange, ...]:
-    """The changed targets of an entry of ``kind`` by ``author`` (ADR 0081):
-    at most ``MAX_UPSTREAM_CHANGED``, withdrawn first (undated), then newest
-    change first, ties by id. Empty for any kind but insight or decision."""
+    """The changed targets of an entry (ADR 0081): at most ``MAX_UPSTREAM_CHANGED``, withdrawn
+    first, then newest first, ties by id. Empty unless insight or decision."""
     if kind not in UPSTREAM_KINDS:
         return ()
     found: list[tuple[UpstreamChange, datetime | None]] = []

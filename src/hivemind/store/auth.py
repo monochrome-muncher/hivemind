@@ -1,9 +1,5 @@
-"""The Postgres-backed ``Authenticator`` (ADR 0008 credential model).
-
-Keys are stored only as SHA-256 hashes (SPEC.md §8.1); see ``verify``
-for how a row's ``kind`` maps to a ``Credential``. Like ``PgStore``, the
-pool opens lazily (ADR 0007).
-"""
+"""The Postgres-backed ``Authenticator`` (ADR 0008). Keys are stored only as SHA-256 hashes
+(SPEC §8.1); the pool opens lazily (ADR 0007)."""
 
 from __future__ import annotations
 
@@ -31,16 +27,15 @@ from hivemind.store.pool import PoolTimeouts, make_pool
 
 logger = logging.getLogger(__name__)
 
-# The stamp is best effort, so it gets a short budget of its own: a row lock
-# held by someone else must not stall a request for the pool's command timeout.
+# The stamp is best effort: a row lock held elsewhere must not stall a request for the command
+# timeout.
 _STAMP_TIMEOUT_S = 1.0
 # A broken stamp fails every stale key check; log it once a minute per process.
 _WARN_EVERY_S = 60.0
 _last_warned: float | None = None
 
-# Key, agent and the agents that hand down to it in one query: an agent key
-# authenticates only while its agent is active (ADR 0039); the succession walk
-# (ADR 0113) costs no extra round trip and is empty for nearly every agent.
+# Key, agent and its heirs in one query: an agent key authenticates only while its agent is
+# active (ADR 0039); the succession walk (ADR 0113) adds no round trip.
 _SELECT_CREDENTIAL = (
     "SELECT c.kind, c.user_id, c.agent_id, c.agent_name, "
     "a.status AS agent_status, a.trust_level, a.home_fleet_id, "
@@ -50,20 +45,18 @@ _SELECT_CREDENTIAL = (
     "FROM credentials c LEFT JOIN agents a ON a.name = c.agent_name "
     "WHERE c.key_hash = $1"
 )
-# Record that a key was used (ADR 0110). The WHERE repeats the staleness test,
-# so two requests racing on one stale key write once.
+# ADR 0110. The WHERE repeats the staleness test, so racing requests write once.
 _TOUCH_CREDENTIAL = (
     "UPDATE credentials SET last_used_at = now() WHERE key_hash = $1 "
     "AND (last_used_at IS NULL OR last_used_at < now() - interval '1 hour')"
 )
-# Lock one key: by agent and fingerprint, only while unlocked, so a
-# second press or a key replaced meanwhile changes nothing and audits nothing.
+# By agent and fingerprint, only while unlocked: a second press or a replaced key does nothing.
 _LOCK_AGENT_KEY = (
     "UPDATE credentials SET locked_at = now() WHERE kind = 'agent' AND agent_name = $1 "
     "AND starts_with(key_hash, $2) AND locked_at IS NULL RETURNING key_hash"
 )
-# Rows ``verify`` can never resolve (ADR 0039). Inert, but they would live
-# again on a rollback to a release that does not join ``agents``.
+# Rows ``verify`` can never resolve (ADR 0039): inert, but live again on a rollback to a release
+# that does not join ``agents``.
 DEAD_CREDENTIAL_PREDICATE = (
     "(c.kind = 'user' OR (c.kind = 'agent' AND (c.agent_name IS NULL OR NOT EXISTS "
     "(SELECT 1 FROM agents a WHERE a.name = c.agent_name AND a.status = 'active'))))"
@@ -76,8 +69,7 @@ _INSERT_AUDIT = (
     "VALUES ($1, $2, $3, $4, $5::jsonb)"
 )
 _DELETE_AGENT_KEYS_RETURNING = _DELETE_AGENT_KEYS + " RETURNING key_hash"
-# Serialises org-key rotation (API + CLI share the key): the second rotation
-# waits, then deletes the first's row. The unique index is the backstop.
+# Serialises org-key rotation (API and CLI): the second waits, then deletes the first's row.
 ORG_KEY_LOCK = "SELECT pg_advisory_xact_lock(hashtext('hivemind:org-key'))"
 
 # Key management (ADR 0012).
@@ -92,24 +84,19 @@ _DELETE_ORG_KEY = "DELETE FROM credentials WHERE kind = 'org'"
 
 
 def _generate_key() -> str:
-    """A fresh random API key (32 bytes, URL-safe). The raw secret is
-    returned to the caller exactly once; only its hash is persisted."""
+    """A fresh API key, returned to the caller once; only its hash is persisted."""
     return "hm_" + secrets.token_urlsafe(32)
 
 
 def key_hash(key: str) -> str:
-    """The SHA-256 hex digest of a raw API key (the stored identifier)."""
+    """The SHA-256 hex digest of a raw API key: the stored identifier."""
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
 async def _record_use(conn: asyncpg.Connection, stored_hash: str, key_id: str) -> None:
-    """Stamp the key's last use, at most once an hour per key (ADR 0110).
-
-    Runs on the connection ``verify`` already holds, outside any request
-    transaction, and never fails the request: a database error, a dropped
-    connection or a timeout is logged (by key fingerprint) and swallowed,
-    and the next request tries again. Only these errors are caught, so a
-    bug in the statement itself still surfaces in tests."""
+    """Stamp the key's last use, at most hourly (ADR 0110), on ``verify``'s connection. Never fails
+    the request: database, connection and timeout errors are logged by fingerprint and swallowed.
+    Only those are caught, so a bug in the statement still surfaces in tests."""
     global _last_warned
     try:
         await conn.execute(_TOUCH_CREDENTIAL, stored_hash, timeout=_STAMP_TIMEOUT_S)
@@ -120,9 +107,7 @@ async def _record_use(conn: asyncpg.Connection, stored_hash: str, key_id: str) -
             logger.warning("could not record last use of key %s: %s", key_id, type(exc).__name__)
 
 
-# Transient, connection-level failures only: refused or reset sockets, a
-# dropped connection (SQLSTATE class 08), the server starting up or shutting
-# down (57P01-57P03) and a full server (53300).
+# Transient connection-level failures only: sockets, SQLSTATE class 08, 57P01-57P03, 53300.
 _TRANSIENT_STORE_ERRORS = (
     OSError,
     asyncpg.InterfaceError,
@@ -135,8 +120,8 @@ _TRANSIENT_STORE_ERRORS = (
 
 
 def _credential_from_row(row: asyncpg.Record, key_id: str) -> Credential | None:
-    """The ``Credential`` a looked-up key row stands for, by ``kind`` (ADR
-    0012), or ``None`` when it is not an identity (ADR 0039)."""
+    """The ``Credential`` a key row stands for by ``kind`` (ADR 0012), or ``None`` if not an
+    identity (ADR 0039)."""
     kind = row["kind"]
     if kind == "admin":
         return Credential(
@@ -153,8 +138,7 @@ def _credential_from_row(row: asyncpg.Record, key_id: str) -> Credential | None:
     if kind == "agent":
         agent_name = row["agent_name"]
         if agent_name is None or row["agent_status"] != AgentStatus.ACTIVE:
-            # A name-less (pre-v2) key, a key with no agent record, or a
-            # key whose agent is pending / revoked: not an identity.
+            # Name-less, agent-less, pending or revoked: not an identity.
             return None
         if row["key_locked"]:
             raise KeyLocked
@@ -189,12 +173,11 @@ class PgAuthenticator:
         self._timeouts = timeouts or PoolTimeouts()
         self._acquire_timeout = self._timeouts.acquire
         self._pool: asyncpg.Pool | None = None
-        # Serialises lazy creation so concurrent first calls share one pool.
+        # Concurrent first calls share one pool.
         self._pool_lock = asyncio.Lock()
 
     async def _ensure_pool(self) -> asyncpg.Pool:
-        """Lazily open (and cache) the connection pool — exactly once, even
-        when the first calls arrive concurrently."""
+        """Open the pool once, even for concurrent first calls."""
         if self._pool is None:
             async with self._pool_lock:
                 if self._pool is None:
@@ -214,15 +197,9 @@ class PgAuthenticator:
             self._pool = None
 
     async def verify(self, key: str) -> Credential | None:
-        """Resolve a key to its credential, or ``None`` if unknown.
-
-        By ``kind`` (ADR 0012): ``admin`` → full access; ``org`` →
-        registration + health only; ``agent`` → name, trust level and home
-        fleet from ``agents`` (ADR 0011), only while active, and ``KeyLocked``
-        if the key was locked from the portal (ADR 0117); ``user`` →
-        retired, ``None`` (ADR 0039). ``key_id`` is the key fingerprint
-        for the audit log (ADR 0027).
-        """
+        """Resolve a key to its credential by ``kind`` (ADR 0012), or ``None`` if unknown. ``agent``
+        keys resolve only while the agent is active and raise ``KeyLocked`` if locked (ADR 0117);
+        ``user`` keys are retired (ADR 0039). ``key_id`` is the fingerprint (ADR 0027)."""
         stored_hash = key_hash(key)
         key_id = key_fingerprint(stored_hash)
         try:
@@ -235,20 +212,14 @@ class PgAuthenticator:
                 if credential is not None and row["use_stale"]:
                     await _record_use(conn, stored_hash, key_id)
         except _TRANSIENT_STORE_ERRORS as exc:
-            # A connection-level failure says nothing about the key: a typed
-            # retryable error, so no surface answers a 500 or a 401. Only
-            # the exception type is kept, never its text. Permanent faults (a
-            # wrong password, an unmigrated pool) are not in the tuple and
-            # keep surfacing loudly.
+            # A connection failure says nothing about the key: retryable, never a 500 or 401. Keep
+            # only the type, never its text. Permanent faults are not in the tuple and stay loud.
             raise StoreUnavailable(type(exc).__name__) from None
         return credential
 
     async def issue_agent_key(self, agent_name: str) -> str:
-        """Issue an agent key; return the raw secret once.
-
-        Under the agent row's lock and only while ``active``, so a racing
-        revoke cannot leave a revoked agent with a key (ADR 0039). Any
-        stale key row is replaced: one live key per agent."""
+        """Issue an agent key, returning the raw secret once. Under the agent row's lock and only
+        while ``active``, so a racing revoke leaves no key (ADR 0039); one live key per agent."""
         pool = await self._ensure_pool()
         raw_key = _generate_key()
         async with pool.acquire(timeout=self._acquire_timeout) as conn, conn.transaction():
@@ -264,12 +235,9 @@ class PgAuthenticator:
     async def replace_agent_key(
         self, agent_name: str, *, audit_actor_kind: ActorKind, audit_actor: str
     ) -> KeyReplacement:
-        """Swap an active agent's key for a new one (ADR 0108).
-
-        The delete, the insert and the audit row share one transaction
-        under the agent row's lock, so the agent never holds zero or two
-        key rows (the old key fails on its next request) and a racing
-        revoke cannot leave a revoked agent with a key (ADR 0039)."""
+        """Swap an active agent's key (ADR 0108). Delete, insert and audit row share one transaction
+        under the agent row's lock: never zero or two keys, and a racing revoke leaves none (ADR
+        0039)."""
         pool = await self._ensure_pool()
         raw_key = _generate_key()
         new_hash = key_hash(raw_key)
@@ -297,8 +265,7 @@ class PgAuthenticator:
         return replacement
 
     async def lock_agent_key(self, agent_name: str, *, key_id: str) -> bool:
-        """Lock the agent's own key (ADR 0117). The lock and its audit row
-        share one transaction, so there is no locked key without a row."""
+        """Lock the agent's own key (ADR 0117); the lock and its audit row share a transaction."""
         pool = await self._ensure_pool()
         async with pool.acquire(timeout=self._acquire_timeout) as conn, conn.transaction():
             locked = await conn.fetchrow(_LOCK_AGENT_KEY, agent_name, key_id)
@@ -315,19 +282,17 @@ class PgAuthenticator:
         return True
 
     async def revoke_agent_key(self, agent_name: str) -> None:
-        """Retire the agent's key; call after the status flipped to
-        ``revoked`` (the name stays reserved, ADR 0012)."""
+        """Retire the agent's key; call after the status flipped to ``revoked`` (ADR 0012)."""
         pool = await self._ensure_pool()
         async with pool.acquire(timeout=self._acquire_timeout) as conn, conn.transaction():
-            # Same row lock as issuance (ADR 0039). If a racing activation
-            # re-activated the agent, its fresh key is valid: keep it.
+            # Same row lock as issuance (ADR 0039): a racing re-activation's fresh key stays.
             status = await conn.fetchval(_LOCK_AGENT, agent_name)
             if status is None or status == "revoked":
                 await conn.execute(_REVOKE_AGENT_KEY, agent_name)
 
     async def rotate_org_key(self) -> str:
-        """Rotate the shared org key (closes registration, ADR 0031);
-        returns the new raw secret once. All prior org keys stop working."""
+        """Rotate the org key (ADR 0031), returning the new secret once; prior org keys stop
+        working."""
         pool = await self._ensure_pool()
         raw_key = _generate_key()
         async with pool.acquire(timeout=self._acquire_timeout) as conn, conn.transaction():

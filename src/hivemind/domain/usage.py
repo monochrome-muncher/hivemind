@@ -1,10 +1,5 @@
-"""The typed usage report (ADR 0084): the shape of
-``MetricsService.usage_report()``.
-
-One dataclass per report section; ``metrics.py`` owns the values and the
-cache, this module owns the shape. A renamed field is a type error at the
-service/route/prometheus seam, not a 500 at scrape time.
-"""
+"""The typed shape of ``MetricsService.usage_report()`` (ADR 0084), so a renamed field is a type
+error at the seam, not a 500 at scrape time."""
 
 from __future__ import annotations
 
@@ -112,8 +107,7 @@ class FleetHealthUsage:
 
 @dataclass(frozen=True, slots=True)
 class EntriesUsage:
-    """Entry usage counters (ROADMAP §3.3, §4.5). Zero counts are omitted;
-    keys follow vocabulary order."""
+    """Entry usage counters (ROADMAP §3.3, §4.5); zero counts are omitted."""
 
     total: int
     active: int
@@ -134,8 +128,7 @@ class FleetsUsage:
 
 @dataclass(frozen=True, slots=True)
 class AgentsUsage:
-    """Agent usage counters (the §12 counters: trust-level distribution,
-    pending-agent count, ADR 0012)."""
+    """Agent usage counters (SPEC §12, ADR 0012)."""
 
     total: int
     pending: int
@@ -155,8 +148,8 @@ class FleetSearchCounts:
 
 @dataclass(frozen=True, slots=True)
 class SearchesUsage:
-    """Search counters in total and per fleet name (ADRs 0056, 0078).
-    Searches from callers without a home fleet count in the totals only."""
+    """Search counters in total and per fleet name (ADRs 0056, 0078); callers without a home
+    fleet count in the totals only."""
 
     total: int
     empty: int
@@ -174,9 +167,8 @@ class AgentFlagCounts:
 
 @dataclass(frozen=True, slots=True)
 class FeedbackUsage:
-    """Flag counters (ADR 0068). The totals cover every reporter that is
-    not revoked, the admin key included; ``by_agent`` is keyed by the
-    registered roster only and leaves out agents with no flags."""
+    """Flag counters (ADR 0068). Totals cover every non-revoked reporter, the admin key included;
+    ``by_agent`` covers the registered roster, minus agents with no flags."""
 
     flags: int
     confirmed: int
@@ -185,8 +177,7 @@ class FeedbackUsage:
 
 @dataclass(frozen=True, slots=True)
 class HealthUsage:
-    """Fleet health metrics (ADR 0075). A share is ``None`` while its
-    denominator is 0; ``by_fleet`` lists every fleet (zeros included)."""
+    """Fleet health metrics (ADR 0075); a share is ``None`` while its denominator is 0."""
 
     helpful_with_note_share: Share
     sourced_share: Share
@@ -214,8 +205,7 @@ class HealthUsage:
 
 @dataclass(frozen=True, slots=True)
 class HealthStatus:
-    """Whether the health snapshot was fully available (a degraded scrape
-    reports ``ok=False``; the usage sections still answer)."""
+    """``ok=False`` on a degraded scrape; the usage sections still answer."""
 
     ok: bool
 

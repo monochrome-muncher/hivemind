@@ -1,11 +1,8 @@
-"""The agent portal ASGI app (ADR 0095): a ``hivemind.webapp`` with the
-portal's static UI, the admin panel's shared front-end modules (ADR 0091)
-and the portal allowlist.
+"""The agent portal ASGI app (ADR 0095): ``hivemind.webapp`` with the portal UI, the admin panel's
+shared modules (ADR 0091) and the portal allowlist.
 
-Only what an agent key may read, the portal's own uncounted search, its
-audited withdraw, pin and unpin, its clean-up of the agent's own work and its
-key lock (ADR 0117) are reachable: no write of the data plane, no feedback,
-nothing of the admin surface.
+Reachable: what an agent key may read, the portal's own routes and the key lock (ADR 0117). No
+data-plane write, no feedback, nothing of the admin surface.
 """
 
 from __future__ import annotations
@@ -22,9 +19,8 @@ __all__ = ["SHARED_MODULES", "STATIC_DIR", "create_portal_app", "is_allowed"]
 
 STATIC_DIR = Path(__file__).parent / "static"
 
-# The admin panel files the portal serves as they are: the generic
-# modules (they import nothing admin-specific, ADR 0091), the stylesheet,
-# the icon and the heading font. Nothing else of the admin folder is reachable.
+# Admin panel files served as they are (generic modules, ADR 0091, plus stylesheet, icon, font);
+# nothing else of that folder.
 SHARED_MODULES = (
     "ui.js",
     "client.js",
@@ -37,17 +33,16 @@ SHARED_MODULES = (
     "outfit.woff2",
 )
 
-# (method, path-regex) pairs the proxy forwards; everything else is 404.
-# Anchored: the path is matched whole, after the `/v1/` prefix.
+# (method, path-regex) pairs forwarded; everything else is 404. Matched whole, after `/v1/`.
 _ALLOWED = allowlist(
     (
         ("GET", r"health"),
         ("GET", r"whoami"),
-        # One entry in full (with ?history=true) and the home fleet's pins:
-        # the data plane's own reads, which the key's visibility bounds.
+        # The data plane's own reads (one entry with ?history, the fleet's pins), bounded by the
+        # key's visibility.
         ("GET", r"entries/[^/]+"),
         ("GET", r"pins"),
-        # The portal's own routes (agent keys only on the API side).
+        # The portal's own routes.
         ("GET", r"portal/entries"),
         ("POST", r"portal/search"),
         ("GET", r"portal/feedback"),
@@ -55,13 +50,13 @@ _ALLOWED = allowlist(
         ("POST", r"portal/entries/[^/]+/withdraw"),
         ("PUT", r"portal/entries/[^/]+/pin"),
         ("DELETE", r"portal/entries/[^/]+/pin"),
-        # The agent's own clean-up over a time window (ADR 0118).
+        # Agent self-service cleanup (ADR 0118).
         ("POST", r"portal/cleanup"),
         ("GET", r"portal/cleanups"),
         ("POST", r"portal/cleanups/[^/]+/undo"),
-        # What happened to the agent and its predecessors (ADR 0123).
+        # History page (ADR 0123).
         ("GET", r"portal/history"),
-        # "This key leaked": locks the signed-in key, nothing else.
+        # Locks the signed-in key, nothing else.
         ("POST", r"portal/key/lock"),
     )
 )

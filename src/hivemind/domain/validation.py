@@ -1,10 +1,6 @@
-"""Input bounds and text rules shared by every surface (ADR 0040).
-
-One validator set for the domain, services and REST schemas, so REST and
-MCP reject the same inputs **before** any embedder or store call. Needed
-because Postgres ``text`` cannot hold U+0000 and a ``tsvector`` tops out
-at 1 MB.
-"""
+"""Input bounds and text rules shared by every surface (ADR 0040), so REST and MCP reject the same
+inputs before any embedder or store call. Postgres ``text`` cannot hold U+0000; a ``tsvector`` tops
+out at 1 MB."""
 
 from __future__ import annotations
 
@@ -18,10 +14,8 @@ from typing import Any
 
 
 class InvalidInput(ValueError):
-    """An input the service refuses by rule (422 on REST, ``invalid_input``
-    on MCP). A ``ValueError`` so a parse-block ``except ValueError`` (pure
-    parsing, no service call) still maps it; around a service call surfaces
-    catch ``InvalidInput`` itself, never the builtin."""
+    """An input refused by rule (422 on REST, ``invalid_input`` on MCP). A ``ValueError`` so pure
+    parse blocks still map it; around a service call surfaces catch ``InvalidInput`` itself."""
 
 
 # -- pagination (SPEC §5.3) ---------------------------------------------------
@@ -36,8 +30,7 @@ MAX_SOURCES = 32
 MAX_SOURCE_REF_CHARS = 2_048
 MAX_PAYLOAD_BYTES = 65_536
 MAX_PAYLOAD_DEPTH = 32
-# Sane bounds for caller-supplied timestamps (Postgres' own range is far
-# wider, but asyncpg overflows on offsets that push a value out of it).
+# Caller timestamps stay in this range: asyncpg overflows on offsets that leave Postgres' own.
 MIN_DATETIME = datetime(1900, 1, 1, tzinfo=UTC)
 MAX_DATETIME = datetime(2200, 1, 1, tzinfo=UTC)
 MAX_SUPERSEDES = 16
@@ -62,13 +55,11 @@ MAX_ALIAS_CHARS = 128
 MAX_AGENT_NAME_CHARS = 63
 MAX_FLEET_NAME_CHARS = 128
 AGENT_NAME_RE = re.compile(rf"[A-Za-z0-9][A-Za-z0-9._-]{{0,{MAX_AGENT_NAME_CHARS - 1}}}")
-# ADR 0033: the identities built-in keys and runners write under (admin
-# keys, the org key, the dev runner, the mcp-http template credential).
-# An agent registered under one would read that identity's ``self`` entries.
+# ADR 0033: identities built-in keys and runners write under; an agent registered as one would
+# read that identity's ``self`` entries.
 RESERVED_AGENT_NAMES = frozenset({"admin", "org", "dev", "shared"})
 
-# A whole REST request body (bytes, JSON escapes included): above the worst
-# legitimate write (body + payload + sources at their caps, escaped).
+# A whole REST body in bytes: above the worst legitimate write (all caps hit, escaped).
 MAX_REQUEST_BODY_BYTES = 2 * 1024 * 1024
 
 
@@ -76,8 +67,7 @@ _SURROGATE_RE = re.compile("[\ud800-\udfff]")
 
 
 def check_no_nul(value: str, field: str) -> str:
-    """Reject what Postgres cannot store in ``text``/``jsonb``: U+0000 and
-    lone surrogates (U+D800-U+DFFF, which cannot be encoded as UTF-8)."""
+    """Reject what Postgres cannot store in ``text``/``jsonb``: U+0000 and lone surrogates."""
     if "\x00" in value:
         raise InvalidInput(f"{field} must not contain NUL (U+0000)")
     if _SURROGATE_RE.search(value):
@@ -101,8 +91,8 @@ def check_query(query: str) -> str:
 
 
 def check_query_instruction(instruction: str) -> str:
-    """The task line put before a search query for an instruction-aware
-    embedder (ADR 0097): one line, at most ``MAX_QUERY_INSTRUCTION_CHARS``."""
+    """The task line before a search query for an instruction-aware embedder (ADR 0097): one
+    line."""
     check_text(instruction, "query_instruction", MAX_QUERY_INSTRUCTION_CHARS)
     if "\n" in instruction or "\r" in instruction:
         raise InvalidInput("query_instruction must be a single line (no newlines)")
@@ -118,8 +108,7 @@ def check_pagination(limit: int | None, offset: int | None) -> None:
 
 
 def check_datetime(value: datetime | None, field: str) -> None:
-    """A caller-supplied timestamp must fall in ``[1900, 2200)`` UTC (a
-    naive value is UTC); out-of-range values overflow asyncpg."""
+    """A caller timestamp must fall in ``[1900, 2200)`` UTC (naive means UTC)."""
     if value is None:
         return
     try:
@@ -134,19 +123,14 @@ def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-# What asyncpg's ``uuid`` codec accepts: 32 hex digits, hyphens anywhere,
-# at most 36 characters. ``uuid.UUID`` is laxer (braces, ``urn:uuid:``,
-# any number of hyphens), and asyncpg answers those with a ``DataError``.
+# What asyncpg's ``uuid`` codec accepts; ``uuid.UUID`` is laxer and asyncpg answers the extras
+# with a ``DataError``.
 _UUID_TEXT_RE = re.compile(r"[0-9A-Fa-f-]{32,36}")
 
 
 def is_valid_uuid(value: str) -> bool:
-    """Whether ``value`` is a UUID spelling the ``uuid`` columns accept.
-
-    Both store adapters use this one check, so a spelling the columns
-    refuse (braces, ``urn:uuid:``, too many hyphens) is "no such entry" in
-    every store, never a 500; upper case and no hyphens name the entry.
-    """
+    """Whether ``value`` is a spelling the ``uuid`` columns accept. Both stores use it, so a refused
+    spelling is "no such entry", never a 500; upper case and no hyphens name the entry."""
     if not isinstance(value, str) or not _UUID_TEXT_RE.fullmatch(value):
         return False
     try:
@@ -157,11 +141,8 @@ def is_valid_uuid(value: str) -> bool:
 
 
 def canonical_uuid(value: str) -> str | None:
-    """``value`` in Postgres's canonical ``uuid`` text form, or ``None``.
-
-    Both ``uuid.UUID`` and Postgres accept non-canonical spellings
-    (upper case, no hyphens, braces); comparisons against ids read back
-    from the database must use the canonical form."""
+    """``value`` in Postgres's canonical ``uuid`` text form, or ``None``; compare ids read back
+    from the database in this form."""
     try:
         return str(uuid.UUID(value))
     except ValueError, TypeError:
@@ -192,8 +173,7 @@ def check_tags(tags: Iterable[str]) -> None:
 
 
 def check_payload(payload: dict[str, Any] | None) -> None:
-    """No NUL in any string (keys and values, nested), no NaN/Infinity,
-    and at most ``MAX_PAYLOAD_BYTES`` of serialised JSON."""
+    """No NUL in any nested string, no NaN/Infinity, at most ``MAX_PAYLOAD_BYTES`` of JSON."""
     if payload is None:
         return
     stack: list[tuple[Any, int]] = [(payload, 1)]
@@ -221,10 +201,9 @@ def check_payload(payload: dict[str, Any] | None) -> None:
         raise InvalidInput(f"payload must be at most {MAX_PAYLOAD_BYTES} bytes of JSON")
 
 
-# Invisible or display-deceiving format characters (Cf) banned in names:
-# zero-width space, bidi marks / overrides / isolates, word joiner and the
-# invisible operators, BOM, soft hyphen. ZWNJ (U+200C) and ZWJ (U+200D) are
-# deliberately allowed: Persian, Indic scripts and emoji sequences need them.
+# Invisible or display-deceiving format characters (Cf) banned in names: zero-width space, bidi
+# controls, word joiner, BOM, soft hyphen. ZWNJ and ZWJ stay allowed: Persian, Indic and emoji need
+# them.
 _BANNED_FORMAT_CHARS = frozenset(
     "\u00ad\u061c\u180e\u200b\u200e\u200f\u2060\u2061\u2062\u2063\u2064\ufeff"
     + "".join(chr(c) for c in (*range(0x202A, 0x202F), *range(0x2066, 0x206A)))
@@ -232,8 +211,8 @@ _BANNED_FORMAT_CHARS = frozenset(
 
 
 def _has_hidden_chars(value: str) -> bool:
-    """Control (Cc), surrogate, private-use and line/paragraph-separator
-    characters, plus the invisible format characters above."""
+    """Control, surrogate, private-use and separator characters, plus the format characters
+    above."""
     for ch in value:
         category = unicodedata.category(ch)
         if category in ("Cc", "Cs", "Co", "Zl", "Zp") or ch in _BANNED_FORMAT_CHARS:
@@ -242,10 +221,8 @@ def _has_hidden_chars(value: str) -> bool:
 
 
 def validate_agent_name(name: str) -> str:
-    """An agent name (ADR 0040): ASCII ``[A-Za-z0-9][A-Za-z0-9._-]{0,62}``,
-    taken **as given** (no normalisation, so a lookalike is rejected, never
-    silently mapped onto another name), and not reserved under a
-    case-insensitive comparison. Returns ``name``."""
+    """An agent name (ADR 0040): ASCII, taken as given (no normalisation, so a lookalike is
+    rejected, never mapped onto another name), and not reserved (case-insensitive)."""
     if not AGENT_NAME_RE.fullmatch(name):
         raise InvalidInput(
             "agent name must be 1-63 ASCII characters: letters, digits, '.', '_' or '-', "
@@ -259,8 +236,8 @@ def validate_agent_name(name: str) -> str:
 
 
 def validate_fleet_name(name: str) -> str:
-    """A fleet name is free-form display text: non-blank, at most
-    ``MAX_FLEET_NAME_CHARS``, with no control, zero-width or NUL characters."""
+    """A fleet name: non-blank display text within ``MAX_FLEET_NAME_CHARS``, no hidden
+    characters."""
     if not name.strip():
         raise InvalidInput("fleet name must be non-blank")
     if len(name) > MAX_FLEET_NAME_CHARS:

@@ -61,8 +61,8 @@ class MemoryState:
         return visibility is None or entry_is_visible(entry, visibility)
 
     def _live_feedback(self) -> dict[tuple[str, str, str], Feedback]:
-        """The feedback rows whose reporter is not a revoked agent (ADR 0067)
-        and that no cleanup set aside (ADR 0111). Callers hold the lock."""
+        """Feedback rows of non-revoked reporters (ADR 0067) not set aside (ADR 0111). Callers hold
+        the lock."""
         revoked = {n for n, a in self._agents.items() if a.status is AgentStatus.REVOKED}
         if not revoked and not self._set_aside:
             return self._feedback
@@ -73,10 +73,8 @@ class MemoryState:
         }
 
     def _matches(self, entry: Entry, filters: EntryFilters) -> bool:
-        """``filters.matches`` plus the one filter it cannot evaluate:
-        ``flagged`` (ADR 0054) and ``relied_on_changed`` (ADR 0098), which
-        read this store's feedback rows.
-        Callers hold the lock."""
+        """``filters.matches`` plus ``flagged`` (ADR 0054) and ``relied_on_changed`` (ADR 0098),
+        which read feedback rows. Callers hold the lock."""
         if not filters.matches(copy_entry(entry)):
             return False
         if filters.flagged:
@@ -86,11 +84,9 @@ class MemoryState:
         return not filters.relied_on_changed or self._relied_on_changed(entry, filters.reporter)
 
     def _relied_on_changed(self, entry: Entry, reporter: tuple[str, str] | None) -> bool:
-        """ADR 0098, as PgStore's clause: the reporter's helpful row on
-        ``entry``, and since its ``updated_at`` the entry was withdrawn, or
-        superseded by another user's successor, or another user's live
-        stale/wrong report is newer. A withdrawal with no recorded time
-        counts, as in PgStore. Callers hold the lock."""
+        """ADR 0098, as PgStore's clause: the reporter's helpful row, then since it a withdrawal
+        (undated counts), another user's successor, or another user's newer live stale/wrong
+        report. Callers hold the lock."""
         if reporter is None:
             return False
         key = (entry.id, *reporter)
@@ -125,16 +121,15 @@ class MemoryState:
         )
 
     def _refuse_merged(self, fleet_id: str | None) -> None:
-        """``FleetMerged`` when ``fleet_id`` names a merged fleet (ADR 0107).
-        Caller holds the lock. An id naming no fleet passes, as on Postgres."""
+        """``FleetMerged`` for a merged fleet (ADR 0107); an unknown id passes, as on Postgres.
+        Caller holds the lock."""
         fleet = self._fleets.get(fleet_id) if fleet_id is not None else None
         if fleet is not None and fleet.merged_into is not None:
             target = self._fleets.get(fleet.merged_into)
             raise FleetMerged(fleet.id, fleet.merged_into, target.name if target else None)
 
     def _refuse_stale_home(self, fleet_id: str | None, author: str) -> None:
-        """``FleetBusy`` when ``author`` is a registered agent whose home fleet is
-        no longer ``fleet_id`` (ADR 0112: a move changed it mid-write). Caller
+        """``FleetBusy`` when a move changed the author's home fleet mid-write (ADR 0112). Caller
         holds the lock."""
         agent = self._agents.get(author)
         if (
