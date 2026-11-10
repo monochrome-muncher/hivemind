@@ -113,35 +113,39 @@ def filter_conditions(
         )
 
     if filters.relied_on_changed:
-        # ADR 0098: the reporter's helpful row, and since its updated_at the
-        # entry was withdrawn or superseded by someone else, or another
-        # reporter filed stale/wrong. A withdrawal with no recorded time
-        # (written by a pre-0016 pod) counts.
-        if filters.reporter is None:
-            clauses.append("FALSE")
-        else:
-            params.extend(filters.reporter)
-            user_p, agent_p = f"${len(params) - 1}", f"${len(params)}"
-            clauses.append(
-                "EXISTS (SELECT 1 FROM feedbacks h WHERE h.entry_id = entries.id"
-                f" AND h.\"user\" = {user_p} AND h.agent = {agent_p} AND h.verdict = 'helpful'"
-                " AND h.set_aside_by IS NULL"
-                " AND (entries.state = 'withdrawn'"
-                " AND coalesce(entries.withdrawn_at > h.updated_at, TRUE)"
-                " OR entries.state = 'superseded' AND EXISTS (SELECT 1 FROM entries s"
-                ' WHERE s.id = entries.superseded_by AND s.author <> h."user"'
-                " AND s.created_at > h.updated_at)"
-                " OR EXISTS (SELECT 1 FROM feedbacks f WHERE f.entry_id = entries.id"
-                " AND f.verdict IN ('stale', 'wrong') AND f.updated_at > h.updated_at"
-                ' AND f."user" <> h."user"'
-                " AND " + _RATING_COUNTS + ")))"
-            )
+        clauses.append(_relied_on_changed_clause(filters.reporter, params))
 
     vis_clause = visibility_clause(visibility, params)
     if vis_clause is not None:
         clauses.append(vis_clause)
 
     return clauses, params
+
+
+def _relied_on_changed_clause(reporter: tuple[str, str] | None, params: list[Any]) -> str:
+    """The ``relied_on_changed`` condition for ``reporter``; appends its parameters."""
+    # ADR 0098: the reporter's helpful row, and since its updated_at the
+    # entry was withdrawn or superseded by someone else, or another
+    # reporter filed stale/wrong. A withdrawal with no recorded time
+    # (written by a pre-0016 pod) counts.
+    if reporter is None:
+        return "FALSE"
+    params.extend(reporter)
+    user_p, agent_p = f"${len(params) - 1}", f"${len(params)}"
+    return (
+        "EXISTS (SELECT 1 FROM feedbacks h WHERE h.entry_id = entries.id"
+        f" AND h.\"user\" = {user_p} AND h.agent = {agent_p} AND h.verdict = 'helpful'"
+        " AND h.set_aside_by IS NULL"
+        " AND (entries.state = 'withdrawn'"
+        " AND coalesce(entries.withdrawn_at > h.updated_at, TRUE)"
+        " OR entries.state = 'superseded' AND EXISTS (SELECT 1 FROM entries s"
+        ' WHERE s.id = entries.superseded_by AND s.author <> h."user"'
+        " AND s.created_at > h.updated_at)"
+        " OR EXISTS (SELECT 1 FROM feedbacks f WHERE f.entry_id = entries.id"
+        " AND f.verdict IN ('stale', 'wrong') AND f.updated_at > h.updated_at"
+        ' AND f."user" <> h."user"'
+        " AND " + _RATING_COUNTS + ")))"
+    )
 
 
 def visibility_clause(
