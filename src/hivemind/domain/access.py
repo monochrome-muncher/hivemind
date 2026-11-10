@@ -296,12 +296,9 @@ class Visibility:
         return (self.name, *self.inherited)
 
     def owns(self, author: str) -> bool:
-        """Whether an entry by ``author`` is this reader's own."""
         return author == self.name or author in self.inherited
 
     def entry_visible(self, entry: Entry) -> bool:
-        """Whether ``entry`` is visible to this caller (the matrix in
-        SPEC §12.2 / ADR 0011)."""
         return entry_is_visible(entry, self)
 
 

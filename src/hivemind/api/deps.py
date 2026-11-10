@@ -1,8 +1,5 @@
-"""FastAPI wiring for the Hivemind REST surface (SPEC.md §5, §8.1).
-
-``HivemindApp`` bundles the ports and services; ``create_app`` turns it
-into a FastAPI app with the ``X-API-Key`` auth dependency wired up.
-"""
+"""FastAPI wiring for the REST surface (SPEC.md §5, §8.1): the ``HivemindApp`` bundle, the app
+factory and the ``X-API-Key`` auth dependency."""
 
 from __future__ import annotations
 
@@ -80,12 +77,10 @@ def api_error(status_code: int, code: str, message: str) -> ApiError:
 # The accessors are ``async`` so FastAPI runs them inline as dependencies
 # instead of hopping to a worker thread on every request.
 async def get_app(request: Request) -> HivemindApp:
-    """The HivemindApp bundle, attached by ``create_app``."""
     return cast(HivemindApp, request.app.state.hivemind)
 
 
 async def get_prometheus(request: Request) -> PrometheusMetrics:
-    """The app's Prometheus metrics, attached by ``create_app``."""
     return cast("PrometheusMetrics", request.app.state.prometheus)
 
 
@@ -115,7 +110,6 @@ async def require_credential(request: Request) -> Credential:
 
 
 def _handle_api_error(_request: Request, exc: Exception) -> JSONResponse:
-    """Turn an ApiError into the standard error envelope."""
     api_exc = cast(ApiError, exc)
     return JSONResponse(
         status_code=api_exc.status_code,
@@ -179,7 +173,6 @@ def create_app(app: HivemindApp) -> FastAPI:
     from hivemind.api.prometheus import PrometheusMetrics, RequestMetrics
     from hivemind.api.routes import build_router
 
-    # ADR 0050: the Prometheus scrape target and per-process request metrics.
     prometheus = PrometheusMetrics(app.metrics_service.usage_report)
     # The shared /v1 route objects, not include_router, which would rebuild
     # every route on the app's first request. Routes passed this way skip

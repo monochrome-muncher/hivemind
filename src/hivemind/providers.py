@@ -1,7 +1,6 @@
 """Shared plumbing for the outbound provider clients (embedder, extractor).
 
-What both OpenAI-compatible clients must do identically (ADR 0014,
-PC-1/PC-3/PC-5/PC-12):
+What both OpenAI-compatible clients must do identically (ADR 0014):
 
 * **Never leak secrets through errors.** httpx messages can carry the
   ``Authorization`` header or a URL with userinfo, so failures are
@@ -143,7 +142,7 @@ async def _attempts[E: Exception](
         try:
             response = await client.post(url, json=payload, headers=headers)
         except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
-            # Transient. Class name only: never the message (PC-1).
+            # Transient. Class name only: never the message.
             last = error(f"{label} failed ({type(exc).__name__})", None)
         except (httpx.HTTPError, httpx.InvalidURL, UnicodeError) as exc:
             # Client-side / configuration failure: fail fast, class name only.

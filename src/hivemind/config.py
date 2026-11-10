@@ -103,7 +103,7 @@ class SearchConfig:
     # A search may carry a ``recency`` hint (ADR 0073). Off: the hint is
     # accepted and ignored, every search scores as the default. On (the
     # default, ADR 0101): ``prefer_recent`` and ``ignore_age`` change that one
-    # search's scoring; a search with no hint scores as before.
+    # search's scoring; a search with no hint scores as the default.
     recency_hint_enabled: bool = True
     # The floor ``prefer_recent`` scores under (ADR 0073): lower than
     # ``recency_floor`` so age counts for more, or ``None`` for no floor. Not
@@ -190,7 +190,7 @@ class SearchConfig:
 
         Pure: nothing is stored, so one search's hint cannot reach another.
         With ``recency_hint_enabled`` off every hint scores as ``DEFAULT``
-        (ADR 0073), exactly as before the hint existed.
+        (ADR 0073).
         """
         if self.recency_hint_enabled:
             if hint is RecencyHint.IGNORE_AGE:
@@ -553,12 +553,8 @@ _DEFAULT_ENV_FILE = ".env.local"
 
 
 def env_file_for(environment: str | None) -> str:
-    """The profile file for an ``ENVIRONMENT`` value (ADR 0017).
-
-    ``production`` / ``staging`` / ``test`` map to their profile file;
-    anything else (including unset / empty) maps to the ``.local``
-    fallback. Case- and whitespace-insensitive.
-    """
+    """The profile file for an ``ENVIRONMENT`` value (ADR 0017); anything unmapped,
+    unset or empty falls back to ``.env.local``. Case- and whitespace-insensitive."""
     key = (environment or "").strip().lower()
     return _ENV_FILES.get(key, _DEFAULT_ENV_FILE)
 
@@ -601,7 +597,6 @@ _RETIRED_ENV_VARS: dict[str, str] = {
 
 
 def _known_hivemind_env_vars() -> set[str]:
-    """Every ``HIVEMIND_*`` name ``Settings`` itself understands."""
     prefix = Settings.model_config.get("env_prefix", "")
     return {f"{prefix}{name}".upper() for name in Settings.model_fields}
 

@@ -237,7 +237,6 @@ class EntryStore(MemoryState):
     async def count_entries(
         self, filters: EntryFilters, *, visibility: Visibility | None = None
     ) -> int:
-        """Count entries matching ``filters`` (ROADMAP §3.3)."""
         with self._lock:
             return sum(
                 1

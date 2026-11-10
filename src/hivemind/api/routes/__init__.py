@@ -5,11 +5,6 @@ rules live here — those are in the service layer (SPEC.md §5, ADR 0001).
 Typed service errors propagate to the handlers ``create_app`` registers from
 the table in ``errors.py``; a route catches one only where its answer differs
 (``create_entry`` answers a malformed draft as ``invalid_entry``).
-
-Error codes: ``missing_api_key``/``unknown_api_key`` (401),
-``forbidden`` (403), ``not_found`` (404), ``conflict`` (409),
-``embedding_unavailable`` (502), and ``invalid_entry``/
-``agent_identity_required`` (422).
 """
 
 from __future__ import annotations

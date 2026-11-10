@@ -131,7 +131,6 @@ def check_datetime(value: datetime | None, field: str) -> None:
 
 
 def utcnow() -> datetime:
-    """The current UTC time (aware)."""
     return datetime.now(UTC)
 
 

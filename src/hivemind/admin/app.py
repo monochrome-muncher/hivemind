@@ -89,7 +89,6 @@ def create_admin_app(
     transport: httpx.AsyncBaseTransport | None = None,
     timeout: float = 30.0,
 ) -> Starlette:
-    """Build the admin panel app, proxying to ``api_url``."""
     return create_proxy_app(
         api_url,
         allowed=_ALLOWED,

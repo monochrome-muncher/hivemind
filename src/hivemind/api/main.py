@@ -109,7 +109,6 @@ def run() -> None:
 
 
 def _lazy_module(name: str, missing_hint: str) -> Any:
-    """Import a sibling lane's module at call time (lazy by design)."""
     import importlib
 
     try:
@@ -119,7 +118,6 @@ def _lazy_module(name: str, missing_hint: str) -> Any:
 
 
 def _build_store(settings: Settings) -> Store:
-    """Build the production Store (the store lane, ADR 0007)."""
     module = _lazy_module("hivemind.store", "pass an explicit store")
     builder = getattr(module, "build_store", None)
     if builder is None:
@@ -128,7 +126,6 @@ def _build_store(settings: Settings) -> Store:
 
 
 def _build_embedder(settings: Settings) -> Embedder:
-    """Build the production Embedder (the embeddings lane, ADR 0005)."""
     module = _lazy_module("hivemind.embeddings", "pass an explicit embedder")
     builder = getattr(module, "build_embedder", None)
     if builder is None:
@@ -139,8 +136,7 @@ def _build_embedder(settings: Settings) -> Embedder:
 
 
 def _build_authenticator(settings: Settings) -> Authenticator:
-    """Build the production Authenticator (ADR 0008: keys live in the
-    store lane's credentials table)."""
+    """Build the production Authenticator (keys live in the credentials table, ADR 0008)."""
     module = _lazy_module("hivemind.store", "pass an explicit authenticator")
     builder = getattr(module, "build_authenticator", None)
     if builder is None:
@@ -151,9 +147,8 @@ def _build_authenticator(settings: Settings) -> Authenticator:
 
 
 def _build_extractor(settings: Settings) -> Extractor | None:
-    """Build the production Extractor (the extractor lane, ADR 0016, SPEC §13) —
-    or ``None`` when the extractor endpoint is unset (extraction off:
-    zero LLM-extraction cost, ADR 0016's optional stance)."""
+    """Build the production Extractor, or ``None`` when its endpoint is unset (extraction off,
+    ADR 0016)."""
     module = _lazy_module("hivemind.extractor", "pass an explicit extractor")
     builder = getattr(module, "build_extractor", None)
     if builder is None:

@@ -167,7 +167,6 @@ class AuditFilters:
     before: str | None = None
 
     def matches(self, record: AuditRecord) -> bool:
-        """Whether ``record`` passes every set filter."""
         if self.actor is not None and record.actor != self.actor:
             return False
         if self.action is not None and record.action is not self.action:

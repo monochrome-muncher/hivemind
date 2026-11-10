@@ -80,7 +80,7 @@ ERROR_ANSWERS: Final[dict[type[Exception], tuple[int, str]]] = {
 }
 
 # An embedding failure is a 502 (SPEC.md §7, ADR 0005) with a fixed message;
-# the detail is logged, never returned (PC-1).
+# the detail is logged, never returned.
 EMBEDDING_UNAVAILABLE: Final = (502, "embedding_unavailable")
 EMBEDDING_UNAVAILABLE_MESSAGE: Final = "the embedding service is unavailable"
 

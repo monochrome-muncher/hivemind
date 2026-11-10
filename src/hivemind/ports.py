@@ -929,9 +929,7 @@ class Credential:
         at all (enforced at the write seam)."""
         if self.is_admin or not self.access_controlled:
             return SCOPE_ORG
-        # ADR 0011 ladder, single-sourced in the domain: the level's
-        # highest writable scope (level 0 keeps `self`; it writes nothing,
-        # gated by `can_write`).
+        # Level 0 keeps `self` here but writes nothing: `can_write` gates it.
         scopes = write_scopes_for(self.trust_level)
         return scopes[-1] if scopes else SCOPE_SELF
 

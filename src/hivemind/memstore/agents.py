@@ -20,7 +20,6 @@ from hivemind.memstore.state import MemoryState
 
 class AgentStore(MemoryState):
     async def register_agent(self, name: str, owner_alias: str | None = None) -> Agent:
-        """Register an agent idempotently (see ``Store.register_agent``)."""
         with self._lock:
             existing = self._agents.get(name)
             if existing is not None:
