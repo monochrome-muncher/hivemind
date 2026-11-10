@@ -458,7 +458,7 @@ async def test_the_preview_changes_nothing_and_reports_counts(w: World) -> None:
 async def test_the_preview_cuts_its_lists_and_keeps_exact_totals(
     w: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import hivemind.memstore as memstore
+    import hivemind.memstore.agent_cleanup as memstore
 
     monkeypatch.setattr(memstore, "PREVIEW_WITHDRAW_LIMIT", 2)
     for i in range(5):

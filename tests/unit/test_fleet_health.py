@@ -204,7 +204,7 @@ async def test_prometheus_exposes_the_health_gauges() -> None:
 
 _ALLOWED = {
     "ports.py",
-    "memstore.py",
+    "memstore/metrics.py",
     "store/pgstore/metrics.py",
     "services/metrics.py",
     "domain/health.py",
@@ -230,7 +230,7 @@ def test_nothing_but_the_metrics_report_reads_the_health_aggregates() -> None:
         for path in root.rglob("*.py")
         if re.search(r"""\[["']health["']\]""", path.read_text())
     }
-    assert consumers <= {"api/routes.py", "services/metrics.py"}
+    assert consumers <= {"api/routes/health.py", "services/metrics.py"}
 
 
 class _FailingHealthStore(MemoryStore):
