@@ -15,8 +15,8 @@
 #      such switch configured, this prints a note and the session relies on
 #      the agent honouring layer 1 ("by restraint").
 #
-# Where the server is kept from loading (claude, codex, copilot, cline, cursor, dsh, gemini with the
-# extension, junie, pi, omp) the
+# Where the server is kept from loading (claude, codex, copilot, cline, dsh, gemini with the
+# extension, junie, pi, omp), and for cursor, where unsetting them is the whole switch, the
 # launcher also removes HIVEMIND_API_KEY and HIVEMIND_MCP_URL from the
 # child's environment (codex: the key only; gemini: both set empty; omp: the
 # URL set to "off"), so an agent with a shell cannot read the key or call the
