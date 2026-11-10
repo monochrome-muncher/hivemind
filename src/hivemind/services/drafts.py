@@ -1,9 +1,7 @@
 """The parts of a new entry that come from the caller's key, not its request.
 
-REST ``POST /v1/entries`` and MCP ``hive_write`` both turn a write request
-into an ``EntryDraft``; this is the one place that stamps the author,
-applies the resolved scope and records the importance provenance, so the
-two surfaces cannot drift apart.
+The one place REST ``POST /v1/entries`` and MCP ``hive_write`` stamp the author, scope and
+importance provenance, so the two surfaces cannot drift apart.
 """
 
 from __future__ import annotations
@@ -37,18 +35,12 @@ def entry_draft(
     supersedes: Sequence[str],
     see_also: Sequence[str],
 ) -> EntryDraft:
-    """A validated draft for ``credential``'s write.
-
-    ``author`` is the key's registered name (ADRs 0012, 0033), never the
-    caller's say; ``agent`` is the resolved agent identity; ``resolution``
-    comes from ``resolve_write_scope``. Omitted importance lands at the
-    default with ``importance_source=default``, a supplied one is kept
-    with ``caller`` (its 1..5 range is checked by ``EntryDraft``). Raises
-    ``ValueError`` / ``InvalidInput`` for an invalid draft (SPEC §4.1).
-    """
+    """A validated draft for ``credential``'s write (SPEC §4.1). ``author`` is the key's
+    registered name (ADRs 0012, 0033), never the caller's say; omitted importance gets the default
+    with ``importance_source=default``."""
     if credential.agent_id is None:
-        # A self-reported agent is free text every reader sees; a key's own
-        # agent identity may be a legacy name and is left as it is.
+        # A self-reported agent is free text every reader sees; a key's own identity may be a legacy
+        # name.
         check_text(agent, "agent", MAX_IDENTITY_CHARS)
     if importance is None:
         importance, importance_source = DEFAULT_IMPORTANCE, ImportanceSource.DEFAULT

@@ -1,29 +1,9 @@
-"""The minimal usage-counters surface (ROADMAP §3.3, Tier 3).
+"""The usage-counters report (ROADMAP §3.3): entries, fleets, agents, searches (ADRs 0056, 0078),
+feedback (ADR 0068) and fleet health (ADR 0075).
 
-A read-only usage report that makes the SPEC §10 usage-based triggers
-measurable, from one grouped scan plus the fleet/agent listings.
-
-The grouped scan of ``entries`` is the one expensive read, so the service
-caches its rows for ``entry_counts_ttl`` seconds (single-flight), shared by
-``GET /v1/metrics`` and the Prometheus gauges: the entry and per-fleet
-write counts can lag by up to the TTL. The agent, fleet, search and flag
-counts are smaller reads and run on every call.
-
-Counters (ROADMAP §3.3 and §4.5):
-- entries: total, active, by_scope, by_kind, by_importance_source,
-  by_author_kind, inactive.
-- fleets: total + per-fleet writes (``entries.fleet_id``).
-- agents: total, pending, active, trust-level distribution.
-- searches (ADR 0056): first-page searches and how many found nothing,
-  in total and per home fleet of the searching agent, and how many were
-  opt-in ``explore`` searches (ADR 0078).
-- feedback (ADR 0068): stale/wrong flags and how many were later confirmed
-  by a supersession, in total and per registered reporter. Observation
-  only: nothing here feeds ranking, scoring or quality.
-- health (ADR 0075): fleet health metrics for the admin, from
-  ``Store.fleet_health``, cached with the entry scan under the same TTL.
-  Observation only, like the feedback counters: nothing agent-facing and
-  nothing in search, ranking, scoring, quality or the briefing reads it.
+The grouped scan of ``entries`` is the one expensive read, cached for ``entry_counts_ttl`` seconds
+(single-flight) and shared by ``GET /v1/metrics`` and the Prometheus gauges, so entry and per-fleet
+write counts can lag by the TTL. Observation only: nothing in ranking reads these.
 """
 
 from __future__ import annotations
@@ -54,12 +34,9 @@ from hivemind.ports import Store
 
 logger = logging.getLogger(__name__)
 
-# The canonical scopes / kinds (the "distinct tags in use" signal).
 _SCOPES = (SCOPE_ORG, SCOPE_FLEET, SCOPE_SELF)
 _KINDS = (Kind.FACT, Kind.INSIGHT, Kind.DECISION)
 _IMPORTANCE_SOURCES = (ImportanceSource.CALLER, ImportanceSource.DEFAULT)
-# Default lifetime (seconds) of the cached entry scan; the
-# ``HIVEMIND_METRICS_ENTRY_COUNTS_TTL`` setting overrides it.
 DEFAULT_ENTRY_COUNTS_TTL = 300.0
 _TRUST_LEVELS = (
     TrustLevel.UNTRUSTED,
@@ -100,13 +77,9 @@ def _gap_tags(counts: dict[str, int]) -> dict[str, int]:
 
 
 class MetricsService:
-    """Compute the usage report from the ``Store`` (ROADMAP §3.3).
-
-    ``entry_counts_ttl`` is how long the grouped entry scan is reused, in
-    seconds; 0 scans on every report. A failed scan is never cached. The
-    fleet health aggregates (ADR 0075) are read and cached with it.
-    ``wall_clock`` is "now" for their windows.
-    """
+    """Compute the usage report from the ``Store``. ``entry_counts_ttl`` (seconds, 0 = every report)
+    also covers the fleet health aggregates; a failed scan is never cached; ``wall_clock`` is "now"
+    for health windows."""
 
     def __init__(
         self,
@@ -123,27 +96,23 @@ class MetricsService:
         self._lock = asyncio.Lock()
         self._rows: Sequence[UsageCount] = ()
         self._rows_at: float | None = None
-        # The fleet health aggregates are cached on their own (ADR 0075): a
-        # failure serves the last good values and is retried on the next
-        # report, and never fails the rest of the report.
+        # Health is cached on its own (ADR 0075): a failure serves the last good values, is retried
+        # on the next report and never fails the rest of the report.
         self._health: FleetHealth | None = None
         self._convergence: Convergence | None = None
         self._health_at: float | None = None
         self._health_ok = False
-        # Bumped by invalidate(): a scan that started before it must not
-        # store its (stale) result, though it still returns it to its caller.
+        # Bumped by invalidate(): a scan that started before it must not cache its stale result.
         self._generation = 0
 
     def invalidate(self) -> None:
-        """Drop the cached entry scan and fleet health, so the next report
-        scans again (after a fleet merge or undo moved the entries)."""
+        """Drop the cached entry scan and fleet health (after a fleet merge or undo)."""
         self._generation += 1
         self._rows_at = None
         self._health_at = None
 
     async def _usage_rows(self) -> Sequence[UsageCount]:
-        """The grouped entry scan, reused within the TTL. One scan at a
-        time; concurrent callers wait and reuse its result. A store error
+        """The grouped entry scan, reused within the TTL; one scan at a time. A store error
         propagates and leaves the previous rows' age untouched."""
         async with self._lock:
             now = self._clock()
@@ -158,10 +127,8 @@ class MetricsService:
             return rows
 
     async def _health_snapshot(self) -> tuple[FleetHealth | None, Convergence | None, bool]:
-        """The fleet health aggregates, reused within the TTL, and whether
-        the last refresh succeeded. Each of the two store reads fails on its
-        own: its last good value is kept and the refresh is retried on the
-        next report."""
+        """The fleet health aggregates, reused within the TTL, and whether the last refresh
+        succeeded. Each read fails on its own: its last good value is kept and retried."""
         async with self._lock:
             now = self._clock()
             if self._health_at is not None and now - self._health_at < self._ttl:
@@ -189,14 +156,9 @@ class MetricsService:
             return health, convergence, ok
 
     async def usage_report(self) -> usage.UsageReport:
-        """The full usage report (entries / fleets / agents).
-
-        A fixed handful of queries however large the pool: every entry
-        counter is folded from one grouped scan (PERF-2), cached for the
-        TTL (see the module docstring).
-        """
+        """The full usage report: a fixed handful of queries however large the pool."""
         agents = await self._store.list_agents()
-        # A merged fleet holds nothing and takes nothing (ADR 0107).
+        # A merged fleet holds nothing (ADR 0107).
         fleets = [f for f in await self._store.list_fleets() if f.merged_into is None]
         rows = await self._usage_rows()
         health, convergence, health_ok = await self._health_snapshot()
@@ -219,12 +181,9 @@ class MetricsService:
     def _entries_report(
         self, agents: Sequence[Agent], rows: Sequence[UsageCount]
     ) -> usage.EntriesUsage:
-        """Entry counters (ROADMAP §3.3, §4.5).
-
-        ``by_author_kind`` is keyed by the registered agent roster, so an
-        author with no entries maps to {} and an unregistered author is
-        left out. Zero counts are omitted; keys follow vocabulary order.
-        """
+        """Entry counters (ROADMAP §4.5). ``by_author_kind`` is keyed by the registered roster:
+        an author with no entries maps to {}, an unregistered author is left out. Zero counts are
+        omitted."""
         total = sum(r.count for r in rows)
         active = sum(r.count for r in rows if r.active)
         scope_n: Counter[str] = Counter()
@@ -258,7 +217,7 @@ class MetricsService:
     def _fleets_report(
         self, fleets: Sequence[Fleet], rows: Sequence[UsageCount]
     ) -> usage.FleetsUsage:
-        """Fleet counters: total + writes per fleet (``entries.fleet_id``)."""
+        """Fleet counters: total and writes per fleet."""
         writes: Counter[str] = Counter()
         for r in rows:
             if r.fleet_id is not None:
@@ -271,10 +230,8 @@ class MetricsService:
     def _searches_report(
         self, fleets: Sequence[Fleet], rows: Sequence[SearchCount]
     ) -> usage.SearchesUsage:
-        """Search counters (ADR 0056): first-page searches, the ones that
-        found nothing and the explore ones (ADR 0078), in total and per fleet
-        name. Searches from callers without a home fleet count in the totals
-        only."""
+        """Search counters (ADR 0056), in total and per fleet name; callers without a home fleet
+        count in the totals only."""
         by_id = {r.fleet_id: r for r in rows}
         return usage.SearchesUsage(
             total=sum(r.searches for r in rows),
@@ -292,10 +249,8 @@ class MetricsService:
     def _feedback_report(
         self, agents: Sequence[Agent], rows: Sequence[FlagCount]
     ) -> usage.FeedbackUsage:
-        """Flag counters (ADR 0068). The totals cover every reporter that
-        is not revoked, the admin key (``admin``) included; ``by_agent`` is
-        keyed by the registered roster only, so its labels stay bounded,
-        and leaves out agents with no flags."""
+        """Flag counters (ADR 0068). Totals cover every reporter that is not revoked, ``admin``
+        included; ``by_agent`` uses the registered roster only, to keep labels bounded."""
         by_user = {r.user: r for r in rows}
         return usage.FeedbackUsage(
             flags=sum(r.flags for r in rows),
@@ -310,8 +265,7 @@ class MetricsService:
     def _health_report(
         self, fleets: Sequence[Fleet], health: FleetHealth, convergence: Convergence
     ) -> usage.HealthUsage:
-        """Fleet health metrics (ADR 0075). A share is ``None`` while its
-        denominator is 0. ``by_fleet`` lists every fleet (zeros included);
+        """Fleet health metrics (ADR 0075). A share is ``None`` while its denominator is 0;
         entries with no fleet count in the fleet-wide numbers only."""
         total = {field: sum(getattr(r, field) for r in health.by_fleet) for field in _HEALTH_FIELDS}
         latencies = health.correction_latencies
@@ -398,8 +352,7 @@ class MetricsService:
         )
 
     def _agents_report(self, agents: Sequence[Agent]) -> usage.AgentsUsage:
-        """Agent counters: total / pending / active / revoked + trust-level
-        distribution (the §12 counters, ROADMAP §3.3)."""
+        """Agent counters: status totals and the trust-level distribution."""
         pending = sum(1 for agent in agents if agent.status is AgentStatus.PENDING)
         active = sum(1 for agent in agents if agent.status is AgentStatus.ACTIVE)
         revoked = sum(1 for agent in agents if agent.status is AgentStatus.REVOKED)

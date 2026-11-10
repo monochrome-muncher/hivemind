@@ -1,6 +1,5 @@
-"""Pinned fleet entries (ADR 0058, 0096): pin, unpin and the fleet briefing.
-A pin follows supersession to the version readers now see.
-"""
+"""Pinned fleet entries (ADRs 0058, 0096): pin, unpin and the fleet briefing; a pin follows
+supersession."""
 
 from __future__ import annotations
 
@@ -21,46 +20,36 @@ from hivemind.services.audit import audit_unpins, record_admin_action
 from hivemind.services.chain import get_visible_entries, get_visible_entry
 from hivemind.services.errors import EntryNotActive, EntryNotFound, PermissionDenied
 
-# Reads every entry: the walk that finds pins of withdrawn entries must not
-# depend on who is acting (ADR 0096).
+# Reads every entry: the walk that finds pins of withdrawn entries must not depend on the actor (ADR
+# 0096).
 _ANYONE = Visibility(level=TrustLevel.PRIVILEGED, name="pins", is_admin=True)
 
-# How far a pin follows supersession to the current version (ADR 0058).
 _PIN_FOLLOW_HOPS = 16
 
 
 class PinService:
-    """A contributor or privileged agent of an entry's fleet, or an admin,
-    pins and unpins; any reader sees the pins they may read (ADR 0058,
-    0096)."""
+    """Pins and unpins by a contributor or privileged agent of the fleet, or an admin; readers see
+    the pins they may read (ADRs 0058, 0096)."""
 
     def __init__(self, store: Store, require_stored_keys: bool = False) -> None:
         self._store = store
-        # ADR 0082: a dev-mode credential is downgraded to trust level 0
-        # when the deployment requires stored keys.
+        # A dev-mode credential drops to trust level 0 when stored keys are required (ADR 0082).
         self._require_stored_keys = require_stored_keys
 
     async def pin(self, credential: Credential, entry_id: str, via: str | None = None) -> Pin:
-        """Pin an active fleet entry to its own fleet. A contributor or
-        privileged agent of that fleet or an admin may; a fleet holds at most
-        ``MAX_PINS_PER_FLEET`` pins and an agent at most
-        ``MAX_PINS_PER_AGENT`` of them (an admin is exempt from the latter;
-        the pins of agents that handed down to the caller count as its own, ADR 0113).
-        Pinning stamps a fresh ``pinned_at`` and ``pinned_by``, so
-        re-pinning a pinned entry refreshes its pin, and re-pinning the
-        version an older pin now shows moves that pin to it; either way the
-        pin is no longer ``changed_since_pin`` (ADR 0076). Neither adds a
-        row, but both make the caller the pinner, so the agent cap counts
-        them (ADR 0096). Every pin is audited, naming the pin it replaced; ``via``
-        (``"portal"``, ADR 0116) is recorded in the audit detail when given."""
+        """Pin an active fleet entry to its own fleet (ADR 0058). A fleet holds at most
+        ``MAX_PINS_PER_FLEET`` pins and an agent ``MAX_PINS_PER_AGENT`` (admin exempt; inherited
+        pins count as its own, ADR 0113). Re-pinning, or pinning the version an older pin now
+        shows, restamps ``pinned_at`` and ``pinned_by`` (ADR 0076) and counts toward the agent cap
+        (ADR 0096). Every pin is audited, naming the pin it replaced; ``via`` (ADR 0116) goes into
+        the audit detail."""
         credential = credential.effective(self._require_stored_keys)
         entry, fleet_id = await self._pinnable(credential, entry_id)
         if entry.state is not EntryState.ACTIVE:
             raise EntryNotActive(
                 f"entry {entry_id} is {entry.state.value}; only active entries can be pinned"
             )
-        # Pins left on withdrawn entries (from before withdrawing unpinned, or
-        # a pin that raced a withdrawal) would count toward the caps: sweep.
+        # Pins left on withdrawn entries (older ones, or a race) would count toward the caps.
         await self._sweep_withdrawn(credential, fleet_id)
         shown = await self._pins_shown_as(fleet_id, entry, credential.visibility())
         written = await self._store.pin_entry(
@@ -89,12 +78,9 @@ class PinService:
         return written.pin
 
     async def unpin(self, credential: Credential, entry_id: str, via: str | None = None) -> bool:
-        """Remove an entry's pin (any state); whether it was pinned. The
-        version a pin shows unpins it too, since that is the id readers
-        see once the pinned entry is superseded. An unpin that removed a pin
-        is audited once, with the removed pin ids (ADR 0076). Anyone who may
-        pin may unpin, someone else's pin included (ADR 0096). ``via`` is
-        recorded in the audit detail when given (ADR 0116)."""
+        """Remove an entry's pin (any state) and the pins that now show it; whether any was
+        removed. Audited once with the removed pin ids (ADR 0076). Anyone who may pin may unpin,
+        someone else's pin included (ADR 0096); ``via`` as in ``pin``."""
         credential = credential.effective(self._require_stored_keys)
         entry, fleet_id = await self._pinnable(credential, entry_id)
         return bool(
@@ -102,13 +88,10 @@ class PinService:
         )
 
     async def unpin_withdrawn(self, credential: Credential, entry: Entry) -> list[str]:
-        """Take a just-withdrawn fleet ``entry`` out of its fleet's briefing:
-        remove the pin on it and the pins that now show it, audited as one
-        ``entry.unpin`` by the withdrawer with ``reason: "withdrawn"``
-        (ADR 0096). No permission check beyond the withdrawal's own; the walk
-        reads as anyone, so a withdrawer who has since left the fleet still
-        finds other authors' older pinned versions. The
-        removed pin ids; empty when the entry was not pinned."""
+        """Take a just-withdrawn fleet ``entry`` out of its briefing (ADR 0096): its pins, audited
+        as one ``entry.unpin`` with ``reason: "withdrawn"``. No permission check beyond the
+        withdrawal's own; the walk reads as anyone, so a withdrawer who left the fleet still finds
+        older pinned versions. Returns the removed pin ids."""
         if entry.scope != SCOPE_FLEET or entry.fleet_id is None:
             return []
         return await self._unpin_shown(
@@ -116,9 +99,8 @@ class PinService:
         )
 
     async def _sweep_withdrawn(self, credential: Credential, fleet_id: str) -> None:
-        """Remove the fleet's pins whose current version is withdrawn, one
-        audited ``entry.unpin`` (``reason: "withdrawn"``, the caller as actor)
-        per pin. The walk reads as anyone, so no caller's visibility hides one."""
+        """Remove the fleet's pins whose current version is withdrawn, one audited ``entry.unpin``
+        each. Reads as anyone, so no caller's visibility hides one."""
         pins = await self._store.list_pins(fleet_id)
         if not pins:
             return
@@ -164,15 +146,10 @@ class PinService:
     async def pinned(
         self, credential: Credential, fleet_id: str | None = None
     ) -> list[PinnedEntry]:
-        """A fleet's pinned entries as ``credential`` sees them, newest pin
-        first (the caller's home fleet unless ``fleet_id`` names another).
-
-        A pin follows supersession to the current version. Unreadable
-        entries are left out, and so are those whose current version is
-        withdrawn (withdrawing unpins, ADR 0096; this covers pins left from
-        before, which the next pin of the fleet sweeps). A version two pins lead to is shown once (newest pin).
-        Each carries why it changed since it was pinned, if it did (ADR 0076).
-        """
+        """A fleet's pinned entries as ``credential`` sees them, newest pin first (home fleet unless
+        ``fleet_id``). A pin shows its current version; unreadable and withdrawn ones are left out
+        (ADR 0096); a version two pins lead to shows once. Each carries why it changed (ADR
+        0076)."""
         credential = credential.effective(self._require_stored_keys)
         fleet = fleet_id or credential.home_fleet_id
         if fleet is None:
@@ -195,7 +172,7 @@ class PinService:
             if current.id not in shown:
                 shown.add(current.id)
                 shown_pins.append((pin, current))
-        # One batched read of the shown entries' feedback signals, not one per pin.
+        # One batched read, not one per pin.
         signals = await self._store.feedback_signals([current.id for _, current in shown_pins])
         return [
             PinnedEntry(
@@ -207,8 +184,7 @@ class PinService:
     async def _pins_shown_as(
         self, fleet_id: str, entry: Entry, visibility: Visibility
     ) -> list[Pin]:
-        """The fleet's pins of other versions that now show as ``entry``
-        (pins follow supersession), newest first."""
+        """The fleet's pins of other versions that now show as ``entry``, newest first."""
         pins = [p for p in await self._store.list_pins(fleet_id) if p.entry_id != entry.id]
         if not pins:
             return []
@@ -232,10 +208,9 @@ class PinService:
         return entry
 
     async def _pinnable(self, credential: Credential, entry_id: str) -> tuple[Entry, str]:
-        """The entry to pin or unpin and its fleet, if ``credential`` may
-        (ADR 0058)."""
+        """The entry to pin or unpin and its fleet, if ``credential`` may."""
         entry = await get_visible_entry(self._store, entry_id, credential.visibility())
-        if entry is None:  # unknown, or not visible to the caller (ADR 0033)
+        if entry is None:  # unknown, or not visible (ADR 0033)
             raise EntryNotFound(f"unknown entry: {entry_id}")
         if entry.scope != SCOPE_FLEET or entry.fleet_id is None:
             raise InvalidInput("only fleet entries can be pinned, to their own fleet")
@@ -252,9 +227,8 @@ class PinService:
 
 
 def _change_reason(pin: Pin, current: Entry, signals: FeedbackSignals) -> ChangeReason | None:
-    """Why the briefing no longer shows what was pinned (ADR 0076):
-    ``superseded`` (a later version), else ``flagged`` (a stale or wrong
-    verdict newer than the pin), else ``None``."""
+    """Why the briefing no longer shows what was pinned (ADR 0076): ``superseded``, else
+    ``flagged`` (a stale or wrong verdict newer than the pin), else ``None``."""
     if current.id != pin.entry_id:
         return "superseded"
     if signals.newest_flag_at is not None and signals.newest_flag_at > pin.pinned_at:

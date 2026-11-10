@@ -19,13 +19,11 @@ SELECT f.merged_into, t.name AS target_name
 
 
 async def refuse_merged(conn: asyncpg.Connection, fleet_id: str | None) -> None:
-    """Share-lock ``fleet_id``'s row until the transaction ends and raise
-    ``FleetMerged`` when the fleet was merged (ADR 0107). A fleet id that
-    names no fleet passes, as before (``entries.fleet_id`` has no FK)."""
+    """Share-lock ``fleet_id``'s row until the transaction ends; ``FleetMerged`` if merged
+    (ADR 0107). An id naming no fleet passes (``entries.fleet_id`` has no FK)."""
     if fleet_id is None or not is_valid_uuid(fleet_id):
         return
-    # A merge holds the row for as long as it runs; give up after a few
-    # seconds with a retryable answer rather than hold a connection.
+    # A merge holds the row while it runs: give up with a retryable answer, not a held connection.
     await conn.execute(f"SET LOCAL lock_timeout = '{WRITE_LOCK_TIMEOUT}'")
     try:
         row = await conn.fetchrow(GUARD_FLEET, fleet_id)
@@ -36,11 +34,9 @@ async def refuse_merged(conn: asyncpg.Connection, fleet_id: str | None) -> None:
 
 
 async def refuse_stale_home(conn: asyncpg.Connection, fleet_id: str | None, author: str) -> None:
-    """ADR 0112: a fleet move changes an agent's home fleet while it holds the
-    fleets' rows, so a fleet write by ``author`` that resolved the old home
-    before the move committed must not land in it now (``FleetBusy``, retry).
-    Call after taking the fleet's share lock. An author that is no registered
-    agent (the admin, a script) is not checked."""
+    """ADR 0112: a fleet write by ``author`` that resolved its home before a move committed
+    must not land in the old home (``FleetBusy``). Call after the fleet's share lock;
+    an author that is no registered agent is not checked."""
     if fleet_id is None:
         return
     home = await conn.fetchrow(AGENT_HOME, author)

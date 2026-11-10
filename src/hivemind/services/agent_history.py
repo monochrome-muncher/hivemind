@@ -1,10 +1,7 @@
-"""The agent portal's history page (ADR 0123): the audit rows about the
-signed-in agent and the agents it inherits from, newest first, mapped
-through the privacy allowlist in ``domain.history``.
+"""The agent portal's history page (ADR 0123): audit rows about the agent and the agents it
+inherits from, through the privacy allowlist in ``domain.history``.
 
-Reads only: the rows are fetched with the ``subjects`` audit filter, the
-fleets and entries they name are looked up once per page, and a fleet name
-or an entry id reaches the answer only if the key can read it.
+A fleet name or an entry id reaches the answer only if the key can read it.
 """
 
 from __future__ import annotations
@@ -31,9 +28,8 @@ class AgentHistoryService:
     async def list_own(
         self, credential: Credential, *, before: str | None, limit: int
     ) -> list[HistoryItem]:
-        """The agent's history, newest first, at most ``limit``; ``before`` is
-        the id of the last row of the previous page. A dormant (level 0) agent
-        is refused like its other portal reads (SPEC §12.2)."""
+        """The agent's history, newest first; ``before`` is the last row id of the previous page.
+        A dormant (level 0) agent is refused (SPEC §12.2)."""
         name = credential.agent_name
         if credential.is_admin or credential.is_org or name is None:
             raise PermissionDenied("reading an agent's own history requires an agent key")

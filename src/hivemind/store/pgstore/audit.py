@@ -41,9 +41,8 @@ def audit_query(filters: AuditFilters, limit: int) -> tuple[str, list[Any]]:
         names = f"${len(params)}::text[]"
         params.append([a.value for a in AGENT_TARGET_ACTIONS])
         target_actions = f"${len(params)}::text[]"
-        # One OR arm per shape, each on its own index (migration 0030), so
-        # the planner can BitmapOr them. The literals match the partial
-        # indexes' predicates.
+        # One OR arm per shape, each on its own partial index (migration 0030) so the
+        # planner can BitmapOr them; the literals must match the index predicates.
         subject_condition = (
             f"((actor_kind = 'agent_key' AND actor = ANY({names})) "
             f"OR (target = ANY({names}) AND action = ANY({target_actions})) "
@@ -58,9 +57,8 @@ def audit_query(filters: AuditFilters, limit: int) -> tuple[str, list[Any]]:
         )
         conditions.append(subject_condition)
     if filters.before is not None:
-        # Row-value comparison against the cursor row (ADR 0028); an unknown
-        # id yields a NULL row, which compares to nothing. With a subject the
-        # cursor row must be about it too, else nothing matches.
+        # Keyset against the cursor row (ADR 0028); an unknown id compares to nothing.
+        # With a subject the cursor row must match it too.
         params.append(filters.before)
         cursor_row = f"SELECT occurred_at, id FROM audit_log WHERE id = ${len(params)}::uuid"
         if subject_condition:
@@ -77,8 +75,7 @@ def audit_query(filters: AuditFilters, limit: int) -> tuple[str, list[Any]]:
 
 class AuditStore(PgConnections):
     async def record_audit(self, event: AuditEvent) -> AuditRecord:
-        """Append one audit row (insert-only). Failures propagate — an
-        audit write is never swallowed (ADR 0027)."""
+        """Append one audit row; a failure propagates, never swallowed (ADR 0027)."""
         async with self._connection() as conn:
             row = await conn.fetchrow(
                 INSERT_AUDIT,
@@ -99,11 +96,9 @@ class AuditStore(PgConnections):
             if not filters.subjects:
                 rows = await conn.fetch(sql, *params)
             else:
-                # A generic plan cannot see how rare one agent's rows are and
-                # walks ``occurred_at`` backwards filtering the whole log
-                # (78 ms on 600k rows against 0.7 ms with the BitmapOr), and
-                # asyncpg switches a cached statement to one after a few runs.
-                # ``SET LOCAL``, as the search does: a pooler discards session state.
+                # A generic plan walks ``occurred_at`` backwards over the whole log (78 ms on
+                # 600k rows against 0.7 ms with the BitmapOr), and asyncpg switches to one after
+                # a few runs. ``SET LOCAL``: a transaction-mode pooler discards session state.
                 async with conn.transaction():
                     await conn.execute("SET LOCAL plan_cache_mode = force_custom_plan")
                     rows = await conn.fetch(sql, *params)

@@ -1,10 +1,7 @@
-"""Retire an agent with a successor, undo it, and list them (ADR 0113).
+"""Retire an agent with a successor, undo it, and list them (ADR 0113). Admin only (ADR 0012).
 
-Admin only (ADR 0012). The ownership change is one store transaction
-(``Store.retire_agent``: the succession row and the revoke of the retired
-agent); this layer validates, builds the preview, deletes the retired agent's
-key row and audits afterwards (ADR 0027), as ``AccessService`` does. Nothing
-is rewritten: ``author`` stays the original agent on every memory.
+One store transaction records the succession and revokes the agent; this layer validates, deletes
+the key row and audits afterwards (ADR 0027). Nothing is rewritten: ``author`` stays the original.
 """
 
 from __future__ import annotations
@@ -33,10 +30,9 @@ class RetirePreview:
     retired: Agent
     successor: Agent
     handed_down: HandedDown
-    # Everything the successor would own afterwards (its own name, the agents
-    # that already hand down to it, then the retired agent's chain).
+    # The successor's own name, agents already handing down to it, then the retired chain.
     successor_owns: tuple[str, ...]
-    # Whether the retired agent's key is revoked by this step (it is active).
+    # True when the retired agent is active, so this step revokes its key.
     revokes: bool
 
 
@@ -47,14 +43,9 @@ class SuccessionService:
         self._store = store
         self._get_authenticator = get_authenticator
 
-    # -- preview ------------------------------------------------------------
-
     async def preview(self, retired: str, successor: str, credential: Credential) -> RetirePreview:
-        """What retiring ``retired`` in favour of ``successor`` would do,
-        changing nothing: the memories that pass over (active ``self`` notes,
-        ``fleet`` memories, pins) and the chain. Refuses what the retirement
-        would refuse (``InvalidInput`` for the same agent, ``UnknownAgent``,
-        ``InvalidAgentStatus``, ``SuccessionRefused``)."""
+        """What retiring ``retired`` in favour of ``successor`` would do, changing nothing; refuses
+        what the retirement would refuse."""
         require_admin(credential)
         old, new = await self._check(retired, successor)
         chain = owned_authors(retired, await self._store.inherited_authors(retired))
@@ -92,15 +83,11 @@ class SuccessionService:
             )
         return old, new
 
-    # -- retire and undo ------------------------------------------------------
-
     async def retire(self, retired: str, successor: str, credential: Credential) -> Succession:
-        """Retire ``retired`` in favour of ``successor`` (admin-gated): one
-        store transaction records the succession and revokes the agent (its
-        key stops authenticating with the status), then its key row is
-        deleted and the action audited: ``agent.revoke`` (as for any revoke,
-        with ``via: "retire"``) when the agent was active, then ``agent.retire``.
-        A failed audit write is raised, never swallowed."""
+        """Retire ``retired`` in favour of ``successor``: one store transaction records the
+        succession and revokes the agent (its key stops authenticating), then the key row is
+        deleted and audited: ``agent.revoke`` (``via: "retire"``) if it was active, then
+        ``agent.retire``. A failed audit write is raised, never swallowed."""
         require_admin(credential)
         authenticator = self._get_authenticator()  # before any change
         if retired == successor:
@@ -126,10 +113,8 @@ class SuccessionService:
         return succession
 
     async def undo(self, retired: str, credential: Credential) -> Succession:
-        """Delete the succession of ``retired`` (admin-gated), audited as
-        ``agent.retire_undo``. The successor stops owning the memories; the
-        agent stays revoked (activating it needs a new key, as for any revoked
-        agent). ``UnknownSuccession`` when none stands."""
+        """Delete the succession of ``retired``, audited as ``agent.retire_undo``. The successor
+        stops owning the memories; the agent stays revoked."""
         require_admin(credential)
         succession = await self._store.undo_succession(retired)
         await record_admin_action(
@@ -142,6 +127,6 @@ class SuccessionService:
         return succession
 
     async def list_successions(self, credential: Credential) -> list[Succession]:
-        """Every standing succession, newest first (admin-gated)."""
+        """Every standing succession, newest first."""
         require_admin(credential)
         return await self._store.list_successions()

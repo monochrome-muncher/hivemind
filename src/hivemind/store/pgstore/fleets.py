@@ -34,8 +34,7 @@ LIST_FLEETS = f"SELECT {_FLEET_COLUMNS} FROM fleets ORDER BY created_at"
 
 class FleetStore(PgConnections):
     async def create_fleet(self, name: str) -> Fleet:
-        """Create a named fleet. ``FleetExists`` if the name
-        exists, including a racing duplicate (conflict-guarded insert)."""
+        """``FleetExists`` if the name exists, including a racing duplicate."""
         async with self._connection() as conn:
             dup = await conn.fetchrow(SELECT_FLEET_BY_NAME, name)
             if dup is not None:
@@ -59,9 +58,8 @@ class FleetStore(PgConnections):
         return row_to_fleet(row) if row is not None else None
 
     async def rename_fleet(self, fleet_id: str, name: str) -> tuple[Fleet, Fleet]:
-        """Rename a fleet (ADR 0109); see ``Store.rename_fleet``. The row is
-        locked so the returned ``before`` is the name the audit row reports;
-        a racing rename to the same name loses on the unique index."""
+        """Rename a fleet (ADR 0109). The row lock makes ``before`` the name the audit row
+        reports."""
         if not is_valid_uuid(fleet_id):
             raise UnknownFleet(f"unknown fleet: {fleet_id}")
         try:

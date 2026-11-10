@@ -11,8 +11,8 @@ from hivemind.store.pgstore.connection import PgConnections
 from hivemind.store.pgstore.sql_common import VECTOR_SEARCH_SETTINGS, filter_conditions
 from hivemind.store.pgstore.uuids import valid_uuids
 
-# ADR 0074: every pair among the candidates, from the stored vectors (one
-# self-join, no embedder call). Rows without a vector drop out of the join.
+# ADR 0074: every candidate pair from the stored vectors (no embedder call); rows without one drop
+# out.
 PAIRWISE_SIMILARITY = (
     "SELECT a.id AS a, b.id AS b, 1 - (a.embedding <=> b.embedding) AS similarity "
     "FROM entries a JOIN entries b ON a.id < b.id "
@@ -20,8 +20,8 @@ PAIRWISE_SIMILARITY = (
     "AND a.embedding IS NOT NULL AND b.embedding IS NOT NULL"
 )
 
-# One row per home fleet ('' = none), bumped once per first-page search
-# (ADR 0056). Counts only: no query text, no agent name.
+# One row per home fleet ('' = none), bumped per first-page search (ADR 0056); counts only, no query
+# text.
 RECORD_SEARCH = """
 INSERT INTO search_counts (fleet_id, searches, empty, explore) VALUES ($1, 1, $2, $3)
 ON CONFLICT (fleet_id) DO UPDATE
@@ -98,8 +98,7 @@ class SearchStore(PgConnections):
         *,
         visibility: Visibility | None = None,
     ) -> list[str]:
-        """Ranked entry IDs by ``ts_rank`` (SPEC.md §6.2 keyword stream).
-        Any query term matches; see ``ANY_TERM_TSQUERY``."""
+        """Ranked entry IDs by ``ts_rank`` (SPEC.md §6.2 keyword stream; ``ANY_TERM_TSQUERY``)."""
         clauses, params = filter_conditions(filters, visibility)
         query_idx = len(params) + 1
         tsquery = ANY_TERM_TSQUERY.format(param=f"${query_idx}")
@@ -126,15 +125,9 @@ class SearchStore(PgConnections):
         visibility: Visibility | None = None,
         min_similarity: float = 0.0,
     ) -> list[str]:
-        """Ranked entry IDs by cosine distance (SPEC.md §6.2 vector stream).
-
-        Approximate: served by the HNSW index (ADR 0025), under
-        ``VECTOR_SEARCH_SETTINGS`` applied in the same transaction.
-        Entries with similarity <= ``min_similarity`` are left out (ADRs
-        0061, 0062). They sort last, so dropping them from the top
-        ``limit`` rows equals dropping them first, and the index scan is
-        the same as without the cut-off.
-        """
+        """Ranked entry IDs by cosine distance (SPEC.md §6.2), approximate via the HNSW index (ADR
+        0025) under ``VECTOR_SEARCH_SETTINGS``. Entries at or below ``min_similarity`` are dropped
+        after the index scan: they sort last, so the result is the same (ADRs 0061, 0062)."""
         clauses, params = filter_conditions(filters, visibility)
         clauses.append("embedding IS NOT NULL")
         vec_idx = len(params) + 1
@@ -158,9 +151,8 @@ class SearchStore(PgConnections):
         exclude_id: str | None = None,
         visibility: Visibility | None = None,
     ) -> list[tuple[str, float]]:
-        """The active entries nearest to ``embedding`` with their cosine
-        similarity (ADR 0052). The same index, filters and ``SET LOCAL``
-        settings as ``search_vector``, so it is approximate too (ADR 0025)."""
+        """The active entries nearest to ``embedding`` with their cosine similarity (ADR 0052);
+        approximate like ``search_vector`` (ADR 0025)."""
         clauses, params = filter_conditions(EntryFilters(), visibility)
         clauses.append("embedding IS NOT NULL")
         if exclude_id is not None and is_valid_uuid(exclude_id):

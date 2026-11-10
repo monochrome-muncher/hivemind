@@ -28,8 +28,7 @@ from hivemind.store.pgstore.connection import PgConnections
 from hivemind.store.pgstore.rows import ages
 from hivemind.store.pgstore.sql_common import _RATING_COUNTS, VECTOR_SEARCH_SETTINGS
 
-# The grouped usage counters (PERF-2): one scan instead of 10 + 3*agents +
-# fleets COUNTs.
+# The grouped usage counters: one scan instead of one COUNT per figure.
 USAGE_COUNTS = """
 SELECT scope, kind, importance_source, author, fleet_id,
        (state = 'active') AS active, count(*) AS n
@@ -37,8 +36,8 @@ SELECT scope, kind, importance_source, author, fleet_id,
  GROUP BY scope, kind, importance_source, author, fleet_id, (state = 'active')
 """
 
-# The admin activity view (ADR 0080): plain grouped scans, one per figure.
-# ``$1`` is the window start. Revoked reporters are left out (ADR 0067).
+# The admin activity view (ADR 0080): one grouped scan per figure; ``$1`` is the window start.
+# Revoked reporters are left out (ADR 0067).
 ACTIVITY_AUTHORS = """
 SELECT author, fleet_id, count(*) AS entries,
        count(*) FILTER (WHERE state = 'active') AS active,
@@ -82,18 +81,14 @@ SELECT day, sum(writes)::int AS writes, sum(helpful)::int AS helpful,
  GROUP BY day ORDER BY day
 """
 
-# Fleet health metrics. $1 is "now"; the windows are read off it.
-# Four statements run one after the other in one read-only REPEATABLE READ
-# transaction, so they share a snapshot. Each is dominated by a pass over
-# the wide ``entries`` heap; fusing them through a materialised CTE spills
-# past work_mem and is slower than the passes it saves. Windows are
-# hour-based so they do not depend on the server TimeZone.
+# Fleet health metrics; $1 is "now". Four statements share one snapshot (see
+# ``fleet_health``), each dominated by a pass over the wide ``entries`` heap: fusing
+# them through a materialised CTE spills past work_mem and is slower. Windows are
+# hour-based so they ignore the server TimeZone.
 #
-# The per-fleet entry counters are two passes, summed per fleet: one over
-# the active entries (sources, kind, tags, joined to the small sets of
-# entries with recent feedback and insights linking >= 2 entries), and one
-# from the standing stale/wrong verdicts to their active entries (the last
-# write of each flagged entry's author is one index probe per author).
+# The per-fleet counters are two passes summed per fleet: the active entries, and the
+# standing stale/wrong verdicts joined to their entries (one index probe per author
+# for the last write).
 HEALTH_BY_FLEET = f"""
 WITH flagged AS (
     SELECT e.id, e.fleet_id, e.author, min(f.updated_at) AS first_flag
@@ -151,19 +146,16 @@ SELECT fleet_id, sum(sourceable) AS sourceable, sum(sourced) AS sourced,
 """
 
 
-# An owner alias as the sibling and owner metrics compare it (ADR 0089):
-# trimmed of ASCII whitespace, lower-cased, blank = none. ``owner_key`` in
-# ``domain/health.py`` is the same rule for ``MemoryStore``.
+# An owner alias as ADR 0089 compares it (trimmed, lower-cased, blank = none);
+# ``owner_key`` in ``domain/health.py`` is the same rule for ``MemoryStore``.
 def _owner_key(column: str) -> str:
     return f"nullif(lower(btrim({column}, E' \\t\\r\\n\\f\\v')), '')"
 
 
-# Fleet-wide scalars in one round trip: helpful verdicts, the 90-day writes
-# and verdicts with their top-3 concentration, the 30-day writes and
-# verdicts by agent label, grounding of the 30-day insights and decisions
-# ($2 is the pattern of a source ref that only names an entry),
-# supersessions (counted when the successor was written) and self -> fleet
-# promotions; and the owner-level verdict figures (ADR 0089).
+# Fleet-wide scalars in one round trip: 90-day writes and verdicts with top-3
+# concentration, 30-day figures by agent label, insight grounding ($2 is the pattern
+# of a source ref that only names an entry), supersessions (counted when the successor
+# was written), self -> fleet promotions, and the owner-level verdicts (ADR 0089).
 HEALTH_SCALARS = f"""
 WITH writes AS (
     SELECT author, count(*) AS n FROM entries
@@ -243,9 +235,8 @@ SELECT (SELECT n FROM helpful) AS helpful,
        (SELECT count(*) FROM verdicts30) AS verdict_labels
 """
 
-# Ages in seconds of the active entries that show rivals alive:
-# tagged ``alternative``, a summary starting "Conflict:", and contested ones
-# (a live helpful verdict beside a live stale/wrong one).
+# Ages in seconds of active entries showing live rivals: tagged ``alternative``,
+# a summary starting "Conflict:", or contested (helpful beside stale/wrong).
 HEALTH_RIVALS = f"""
 SELECT 'alternative' AS kind, extract(epoch FROM ($1::timestamptz - e.created_at))::float8 AS age
   FROM entries e WHERE e.state = 'active' AND 'alternative' = ANY(e.tags)
@@ -261,9 +252,8 @@ SELECT 'contested', extract(epoch FROM ($1::timestamptz - e.created_at))::float8
                 HAVING bool_or(f.verdict = 'helpful') AND bool_or(f.verdict <> 'helpful'))
 """
 
-# Echo rate: for each of the newest $2 writes of the last 30 days, the
-# nearest earlier active entry (one HNSW lookup each, the same settings as
-# search); an echo when its similarity is >= $3.
+# Echo rate: for each of the newest $2 writes of 30 days, the nearest earlier active
+# entry (one HNSW lookup, search's settings); an echo when similarity >= $3.
 CONVERGENCE_ECHO = """
 WITH w AS (
     SELECT id, embedding, created_at FROM entries
@@ -280,13 +270,11 @@ SELECT count(*) AS sampled, count(*) FILTER (WHERE nn.sim >= $3::float8 AND nn.s
        ORDER BY e.embedding <=> w.embedding LIMIT 1) nn ON true
 """
 
-# Topic dispersion: the $3 busiest tags (distinct tags of org- and
-# fleet-scope entries) with >= $4 entries in both 30-day windows, chosen
-# from tags and counts alone (no vectors read); the $2 newest entries per
-# tag and window; then the embeddings of just those ids, and the mean
-# pairwise cosine inside each window (a zero-norm vector counts as 0). The
-# vectors are normalised once as they are fetched (cosine is unchanged):
-# the column is TOASTed, and detoasting it for every pair was most of the cost.
+# Topic dispersion: the $3 busiest org/fleet tags with >= $4 entries in both 30-day
+# windows (chosen without reading vectors), the $2 newest entries per tag and window,
+# then the mean pairwise cosine per window (a zero-norm vector counts as 0). Vectors
+# are normalised once on fetch: the column is TOASTed and detoasting it per pair was
+# most of the cost.
 CONVERGENCE_DISPERSION = """
 WITH tagged AS (
     SELECT DISTINCT t.tag, e.id, e.created_at,
@@ -327,10 +315,8 @@ SELECT b.tag, least(b.n_recent, $2) AS n_recent, least(b.n_before, $2) AS n_befo
  ORDER BY b.n DESC, b.tag COLLATE "C"
 """
 
-# One row per superseded entry that was flagged before its successor
-# (written in the last 90 days) existed: seconds from its first standing
-# stale/wrong verdict to the successor's ``created_at`` (ADR 0068's
-# convention: a verdict written after the successor predicted nothing).
+# Per superseded entry flagged before its successor (written in the last 90 days)
+# existed: seconds from its first flag to the successor's ``created_at`` (ADR 0068).
 HEALTH_CORRECTIONS = f"""
 SELECT extract(epoch FROM (n.created_at - min(f.updated_at)))::float8 AS seconds
   FROM entries n
@@ -362,10 +348,8 @@ class MetricsStore(PgConnections):
         ]
 
     async def fleet_health(self, now: datetime) -> FleetHealth:
-        # One read-only REPEATABLE READ transaction: the four statements share
-        # a snapshot, so the figures agree with each other. They run one after
-        # the other (a connection runs one statement at a time); JIT is off, as
-        # compiling these short queries costs more than it saves.
+        # One REPEATABLE READ snapshot so the figures agree; JIT is off (compiling costs more
+        # than these queries save).
         async with (
             self._connection() as conn,
             conn.transaction(isolation="repeatable_read", readonly=True),
@@ -421,8 +405,7 @@ class MetricsStore(PgConnections):
         )
 
     async def activity(self, since: datetime) -> Activity:
-        # One read-only REPEATABLE READ transaction, like ``fleet_health``:
-        # the four scans share a snapshot, so the figures agree.
+        # One snapshot, like ``fleet_health``.
         async with (
             self._connection() as conn,
             conn.transaction(isolation="repeatable_read", readonly=True),

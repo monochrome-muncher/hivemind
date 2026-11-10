@@ -1,11 +1,5 @@
-"""The stdio MCP server exposing the Hivemind tools (SPEC §5.2).
-
-``build_server`` binds the ``app.py`` tool functions into an mcp 2.x
-``MCPServer`` (not ``FastMCP``). ``main`` is the in-memory dev server;
-``main_pg`` (``hivemind-mcp-pg``) is the per-agent Postgres runner keyed
-by ``HIVEMIND_MCP_KEY`` (ADR 0009). The hostable streamable-HTTP runner
-lives in ``hivemind.mcp.http`` (ADR 0010).
-"""
+"""The MCP server assembly (SPEC §5.2): ``build_server`` binds the ``app.py`` tool functions into an
+mcp 2.x ``MCPServer`` (not ``FastMCP``). The runners are in ``runners.py`` and ``http.py``."""
 
 from __future__ import annotations
 
@@ -49,13 +43,9 @@ logger = logging.getLogger(__name__)
 
 
 def compact_schema(schema: Any) -> Any:
-    """A JSON schema without what pydantic adds for nothing: every
-    ``title`` (the property name again, or ``hive_writeArguments``) and the
-    ``anyOf [T, null]`` / ``default: null`` of an optional argument, which
-    becomes plain ``T`` (it is not in ``required``, so it can be left out).
-    Clients load these schemas into every session's context; the server
-    still validates arguments with its own model, so a client that sends
-    ``null`` keeps working."""
+    """A JSON schema without pydantic's ``title`` keys and the ``anyOf [T, null]`` / ``default:
+    null`` of an optional argument (plain ``T``). Clients load these into every session's context;
+    the server still validates with its own model, so a client that sends ``null`` keeps working."""
     if isinstance(schema, list):
         return [compact_schema(item) for item in schema]
     if not isinstance(schema, dict):
@@ -96,18 +86,13 @@ def register_tool(
     dispatch: Callable[..., Awaitable[dict[str, object]]],
     metrics: McpMetrics | None = None,
 ) -> None:
-    """Bind one app tool to the server (ADR 0085). The closure carries
-    ``verb``'s signature — the MCP schema is generated from it — and every
-    call resolves the acting app first; the identity never leaves the
+    """Bind one app tool to the server (ADR 0085). The closure carries ``verb``'s signature, which
+    generates the MCP schema, and resolves the acting app per call; the identity never leaves the
     server.
 
-    The reply is one compact JSON ``TextContent`` and the tool declares no
-    output schema. The SDK's default is indent-2 text, a duplicate
-    ``structuredContent`` and a schema (``{"result": object}``) that tells
-    a client nothing, all of which land in the agent's context.
-
-    With ``metrics``, each call is counted by tool name and outcome: an
-    error reply or a raise is ``error`` (the raise propagates)."""
+    The reply is one compact JSON ``TextContent`` with no output schema: the SDK default (indent-2
+    text, duplicate ``structuredContent``, an empty schema) would all land in the agent's context.
+    With ``metrics``, an error reply or a raise counts as ``error`` (the raise propagates)."""
 
     async def _tool(*args: Any, **kwargs: Any) -> list[TextContent]:
         started = time.perf_counter()
@@ -122,12 +107,9 @@ def register_tool(
             metrics.record_tool(name, outcome, time.perf_counter() - started)
         return [TextContent(type="text", text=to_json(result).decode())]
 
-    # The MCP schema is generated from the closure's signature at decoration
-    # time: the verb's, minus its ``app`` parameter (bound here, never
-    # exposed). Set before the decorator snapshots it. The SDK reads this
-    # ``__signature__`` without re-evaluating its string annotations, so
-    # resolve them in the verb's own namespace (where annotation names such
-    # as schema constants are defined) and store concrete types.
+    # The schema comes from the closure's signature at decoration time: the verb's minus ``app``,
+    # set before the decorator snapshots it. The SDK does not re-evaluate string annotations, so
+    # resolve them in the verb's namespace and store concrete types.
     _tool.__name__ = verb.__name__
     _tool.__doc__ = verb.__doc__
     setattr(_tool, "__wrapped__", verb)  # noqa: B010 (mypy: dynamic attr)
@@ -145,17 +127,16 @@ async def _acting_app(
     credential_provider: Callable[[], Credential | Awaitable[Credential | None] | None] | None,
     require_stored_keys: bool,
 ) -> McpHivemind | None:
-    """The acting ``McpHivemind`` for this dispatch, or ``None`` when
-    the provider yields no credential (fail closed, ADR 0042)."""
+    """The acting ``McpHivemind`` for this dispatch, or ``None`` when the provider yields no
+    credential (fail closed, ADR 0042)."""
     if credential_provider is None:
-        fixed = app.credential.effective(require_stored_keys)  # ADR 0082, as below
+        fixed = app.credential.effective(require_stored_keys)
         return app if fixed == app.credential else replace(app, credential=fixed)
     resolved = credential_provider()
     credential = await resolved if isinstance(resolved, Awaitable) else resolved
     if credential is None:
         return None
-    # ADR 0082: a dev-mode credential sits at trust level 0 when the
-    # deployment requires stored keys.
+    # A dev-mode credential sits at trust level 0 when stored keys are required (ADR 0082).
     credential = credential.effective(require_stored_keys)
     if credential == app.credential:
         return app
@@ -170,19 +151,12 @@ def build_server(
     require_stored_keys: bool = False,
     metrics: McpMetrics | None = None,
 ) -> MCPServer:
-    """Build an ``MCPServer`` exposing exactly the ten Hivemind tools.
+    """Build an ``MCPServer`` exposing exactly the ten Hivemind tools, closures over ``app`` so
+    identity is never an argument.
 
-    Tools are closures over ``app``, so identity and services are bound,
-    never exposed as arguments.
-
-    With ``credential_provider`` (sync or async), each dispatch re-binds
-    ``app``'s stateless services to the provider's credential (per
-    request over HTTP, ADR 0010; re-verified per call for
-    ``hivemind-mcp-pg``). A provider yielding ``None`` fails closed with
-    ``unauthenticated``, never falling back to ``app.credential`` (ADR 0042).
-
-    With ``metrics`` every tool call is counted (ADR 0104); the stdio
-    runners pass none.
+    With ``credential_provider`` each dispatch re-binds the services to its credential (ADR 0010).
+    A provider yielding ``None`` fails closed with ``unauthenticated``, never falling back to
+    ``app.credential`` (ADR 0042). With ``metrics`` every call is counted (ADR 0104).
     """
     server = _CompactSchemaServer(
         name="hivemind",
@@ -203,16 +177,14 @@ def build_server(
             return await verb(acting, **kwargs)
         except KeyLocked:  # raised by the per-call re-verification
             return _error(ERR_KEY_LOCKED, KEY_LOCKED_MESSAGE)
-        except FleetBusy as exc:  # ADR 0107: a fleet write waited for a merge
+        except FleetBusy as exc:  # a fleet write waited for a merge (ADR 0107)
             return _error(ERR_FLEET_BUSY, str(exc))
         except TimeoutError:
-            # A pool acquire or statement timed out: the database is busy,
-            # not the call wrong (ROADMAP 3.13; the REST surface answers 503).
+            # The database is busy, not the call wrong (ROADMAP 3.13).
             logger.warning("store call timed out during an MCP tool call")
             return _error(ERR_STORE_UNAVAILABLE, STORE_UNAVAILABLE_MESSAGE)
 
-    # The ten tools, registered explicitly (ADR 0085): one line each; the
-    # helper binds the signature and the per-call app resolution.
+    # The ten tools, registered explicitly (ADR 0085).
     register_tool(server, "hive_write", contract.DESC_WRITE, hive_write, dispatch, metrics)
     register_tool(server, "hive_search", contract.DESC_SEARCH, hive_search, dispatch, metrics)
     register_tool(server, "hive_get", contract.DESC_GET, hive_get, dispatch, metrics)

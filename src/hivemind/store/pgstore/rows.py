@@ -34,8 +34,7 @@ def encode_sources(sources: tuple[Source, ...]) -> list[dict[str, str]]:
 
 
 def encode_entities(entities: tuple[ExtractedEntity, ...]) -> list[dict[str, str]]:
-    """``entities`` is a jsonb list of {name, kind}; the
-    lower-cased names go separately on ``entity_names``."""
+    """``entities`` is a jsonb list of {name, kind}; lower-cased names go on ``entity_names``."""
     return [{"name": e.name, "kind": e.kind.value} for e in entities]
 
 
@@ -64,11 +63,7 @@ def row_to_pin(row: asyncpg.Record) -> Pin:
 
 
 def _decode_sources(raw: Any) -> tuple[Source, ...]:
-    """Decode the jsonb ``sources`` column back into ``Source`` objects.
-
-    asyncpg decodes ``jsonb`` to native Python, so ``raw`` is a list (or
-    None); the JSON-string branch is kept for raw-text drivers.
-    """
+    """Decode the jsonb ``sources`` column into ``Source`` objects."""
     if not raw:
         return ()
     items = _jsonb_value(raw)
@@ -76,7 +71,7 @@ def _decode_sources(raw: Any) -> tuple[Source, ...]:
 
 
 def _decode_entities(raw: Any) -> tuple[ExtractedEntity, ...]:
-    """Decode the jsonb ``entities`` column (native or JSON text)."""
+    """Decode the jsonb ``entities`` column."""
     if not raw:
         return ()
     items = _jsonb_value(raw)
@@ -126,8 +121,8 @@ def row_to_fleet(row: asyncpg.Record) -> Fleet:
 
 
 def _jsonb_value(raw: Any, expected: type[list[Any]] | type[dict[str, Any]] = list) -> Any:
-    """A jsonb column of the ``expected`` type as native Python: asyncpg
-    decodes it already, the JSON-text branch is kept for raw-text drivers."""
+    """A jsonb column as native Python (asyncpg decodes it; the text branch is for raw-text
+    drivers)."""
     return raw if isinstance(raw, expected) else json.loads(raw)
 
 
@@ -142,8 +137,7 @@ def _decode_dropped(raw: Any) -> tuple[DroppedPin, ...]:
 
 
 def dropped_json(drops: Sequence[DroppedPin]) -> str:
-    """The jsonb for pins a merge, move or cleanup unpinned (``fleet_merges.dropped_pins``,
-    ``agent_cleanups.unpinned_pins``)."""
+    """The jsonb for pins a merge, move or cleanup unpinned."""
     return json.dumps(
         [
             {
@@ -174,7 +168,6 @@ def row_to_merge(row: asyncpg.Record) -> FleetMergeRecord:
 
 def row_to_cleanup(row: asyncpg.Record) -> AgentCleanupRecord:
     """Map an ``agent_cleanups`` row to the domain record."""
-
     return AgentCleanupRecord(
         id=str(row["id"]),
         agent=row["agent"],
@@ -222,8 +215,7 @@ def row_to_agent(row: asyncpg.Record) -> Agent:
 
 
 def row_to_audit(row: asyncpg.Record) -> AuditRecord:
-    """Map an ``audit_log`` row to the domain ``AuditRecord``.
-    ``detail`` is jsonb: native dict or raw JSON text, per the codec."""
+    """Map an ``audit_log`` row to the domain ``AuditRecord``."""
     detail = row["detail"]
     return AuditRecord(
         id=str(row["id"]),
