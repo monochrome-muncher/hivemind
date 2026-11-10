@@ -68,9 +68,7 @@ async def create_entry(
             "agent identity is required: use an agent sub-key or pass 'agent'",
         )
     try:
-        # Pure parsing, no service or store I/O: a ValueError here is the
-        # malformed draft (domain/entry.py raises plain ValueError and InvalidInput).
-        # An out-of-permission scope is a 403.
+        # Pure parsing: a ValueError here is a malformed draft; an out-of-permission scope is a 403.
         resolution = resolve_write_scope(credential, payload.scope)
         draft = entry_draft(
             credential,

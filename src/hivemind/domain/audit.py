@@ -1,29 +1,13 @@
 """The audit log of admin-surface actions (ADR 0027, SPEC §12.5).
 
-Pure data — no I/O. An ``AuditEvent`` is what a writer hands the
-``Store`` port (``record_audit``); an ``AuditRecord`` is the stored row
-(server-assigned ``id`` + ``occurred_at``). The log is **append-only**:
-there is no update or delete, and ``target`` is a bare string (no
-foreign key), so a revoked agent's history outlives its record.
+Pure data. The log is append-only and ``target`` is a bare string (no foreign key), so a
+revoked agent's history outlives its record. No field ever carries a raw API key: key
+actions record a fingerprint or nothing.
 
-Four actor kinds (ADR 0027, ADR 0046, ADR 0076):
-
-* ``admin_key`` — the app admin surface (``AccessService`` /
-  ``GovernanceService``). The actor is ``admin:<key fingerprint>``, a
-  server-verified identity.
-* ``org_key`` — a registration made with the shared org key (ADR 0046).
-  The actor is ``org:<key fingerprint>``: verified as *an* org-key holder,
-  which identifies no person (every agent shares that key).
-* ``agent_key`` — a contributor or privileged agent acting inside its
-  own fleet (a pin or unpin, ADRs 0076, 0096; the unpin a withdrawal
-  triggers is the withdrawer's). The actor is the server-verified agent name.
-* ``cli`` — the ``hivemind-keys`` bootstrap / break-glass CLI. The
-  actor is the operator-supplied ``--actor`` (default: the OS user) and
-  is **unverified** — anyone with database access can type anything.
-
-No field of either type ever carries a raw API key: key-producing
-actions record a key *fingerprint* (the first 12 hex chars of the
-stored SHA-256 hash) or nothing (ADR 0027).
+Actor kinds (ADRs 0027, 0046, 0076): ``admin_key`` (actor ``admin:<fingerprint>``, verified),
+``org_key`` (``org:<fingerprint>``, identifies no person: every agent shares the key),
+``agent_key`` (the verified agent name: a pin, unpin, or the unpin a withdrawal triggers) and
+``cli`` (the operator-typed ``--actor``, **unverified**).
 """
 
 from __future__ import annotations
@@ -38,10 +22,10 @@ from typing import Any
 class ActorKind(StrEnum):
     """Who performed an audited action, and how far to trust the name."""
 
-    ADMIN_KEY = "admin_key"  # the app admin surface: a verified admin key
-    ORG_KEY = "org_key"  # a registration with the shared org key (ADR 0046)
-    AGENT_KEY = "agent_key"  # a contributor's or privileged agent's own key: pin, unpin (ADR 0096)
-    CLI = "cli"  # the hivemind-keys CLI: an unverified, operator-typed name
+    ADMIN_KEY = "admin_key"
+    ORG_KEY = "org_key"
+    AGENT_KEY = "agent_key"
+    CLI = "cli"
 
 
 class AuditAction(StrEnum):
@@ -78,9 +62,7 @@ class AuditAction(StrEnum):
     ENTRY_RESTORE = "entry.restore"  # ADR 0124
 
 
-# The key fingerprint is the first 12 hex chars of the stored SHA-256
-# key hash — exactly what `hivemind-keys list` displays. Non-secret: it
-# identifies a key without being usable as one.
+# First 12 hex chars of the stored SHA-256 key hash, as `hivemind-keys list` shows. Non-secret.
 KEY_FINGERPRINT_LENGTH = 12
 
 
@@ -113,10 +95,8 @@ class AuditRecord:
     detail: Mapping[str, Any]
 
 
-# The actions whose ``target`` is an agent's name (every other target is a
-# fleet id, an entry id or a key fingerprint). A ``subjects`` match on the
-# target is limited to these, so a fleet named like an agent is not that
-# agent's history.
+# Actions whose ``target`` is an agent name; a ``subjects`` match on the target is limited
+# to these, so a fleet named like an agent is not that agent's history.
 AGENT_TARGET_ACTIONS: tuple[AuditAction, ...] = (
     AuditAction.AGENT_REGISTER,
     AuditAction.AGENT_ACTIVATE,
@@ -149,21 +129,17 @@ def _names_in(detail_value: Any, names: tuple[str, ...]) -> bool:
 class AuditFilters:
     """Read-side filters for the audit log (all optional, AND-ed).
 
-    ``subjects`` (ADR 0123) keeps the rows *about* any of the named agents:
-    the agent's own key as actor, an agent-named ``target`` (``AGENT_TARGET_ACTIONS``),
-    a withdrawal or restore of its memory (``detail.author``), a fleet move that lists it
-    (``detail.agents``) and a retirement that names it successor
-    (``detail.successor``). The admin API passes one name; the agent portal
-    passes the agent and the agents it inherits from."""
+    ``subjects`` (ADR 0123) keeps rows *about* any named agent: as actor, as ``target``
+    (``AGENT_TARGET_ACTIONS``), as ``detail.author``, in ``detail.agents`` of a fleet move
+    or as ``detail.successor``."""
 
     actor: str | None = None
     action: AuditAction | None = None
     since: datetime | None = None  # inclusive lower bound on occurred_at
     target: str | None = None  # exact
     subjects: tuple[str, ...] = ()
-    # Paging cursor (ADR 0028): a row id; only rows strictly older than it
-    # (by occurred_at, then id) match. An unknown id matches nothing. It is
-    # positional, so the store applies it — ``matches`` does not.
+    # Paging cursor (ADR 0028): rows strictly older than this id (occurred_at, then id); an
+    # unknown id matches nothing. Positional, so the store applies it, not ``matches``.
     before: str | None = None
 
     def matches(self, record: AuditRecord) -> bool:

@@ -1,10 +1,7 @@
-"""The Hivemind REST routes (SPEC.md §5.1).
+"""The REST routes (SPEC §5.1): thin, validation and service calls only (ADR 0001).
 
-Routes stay thin: pydantic validation and service calls. No business
-rules live here — those are in the service layer (SPEC.md §5, ADR 0001).
-Typed service errors propagate to the handlers ``create_app`` registers from
-the table in ``errors.py``; a route catches one only where its answer differs
-(``create_entry`` answers a malformed draft as ``invalid_entry``).
+Typed service errors propagate to the table in ``errors.py``; a route catches one only where its
+answer differs (``create_entry``: ``invalid_entry``).
 """
 
 from __future__ import annotations
@@ -45,14 +42,10 @@ _AREAS_IN_ROUTE_ORDER = (
 
 @cache
 def build_router() -> APIRouter:
-    """The /v1 router (SPEC.md §5.1), built once per process and shared by
-    every app: it holds no app state, and the handlers take the
-    ``HivemindApp`` and the Prometheus metrics from the request. Building it
-    is the costly part of ``create_app``, and the tests build hundreds of
-    apps."""
+    """The /v1 router (SPEC §5.1), built once per process: it holds no app state, and building it is
+    the costly part of ``create_app`` (tests build hundreds of apps)."""
     router = APIRouter(prefix=API_PREFIX)
     for area in _AREAS_IN_ROUTE_ORDER:
-        # The area's route objects themselves, not include_router: ``create_app``
-        # hands them to every app, and an include would nest them lazily.
+        # Route objects, not include_router, which would nest them lazily.
         router.routes.extend(area.router.routes)
     return router

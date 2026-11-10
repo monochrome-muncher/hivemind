@@ -24,9 +24,7 @@ class AuditStore(MemoryState):
             return record
 
     async def list_audit(self, filters: AuditFilters, limit: int) -> list[AuditRecord]:
-        """Matching audit rows, newest first (insertion order breaks
-        ``occurred_at`` ties, so a fixed test clock still reads newest
-        first)."""
+        """Matching rows, newest first; insertion order breaks ``occurred_at`` ties."""
         with self._lock:
             ordered = [
                 r

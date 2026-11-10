@@ -1,9 +1,4 @@
-"""Maximal marginal relevance (ADR 0078): a greedy re-ordering that trades
-relevance against similarity to what is already picked.
-
-Pure and deterministic: no I/O, no clock. Used only by an opt-in ``explore``
-search; the default ranking never calls it.
-"""
+"""Maximal marginal relevance (ADR 0078), used only by the opt-in ``explore`` search."""
 
 from __future__ import annotations
 
@@ -16,22 +11,15 @@ def mmr_order(
     similarity: Mapping[tuple[str, str], float],
     lam: float,
 ) -> list[str]:
-    """``ids`` re-ordered by MMR: each step picks the id maximising
-    ``lam * rel - (1 - lam) * max_sim`` where ``rel`` is its relevance
-    scaled to [0, 1] by the best relevance and ``max_sim`` its highest
-    similarity (floored at 0) to an id already picked.
-
-    ``similarity`` is keyed ``(a, b)`` with ``a < b``; a missing pair counts
-    as 0 (no penalty). Ties keep the order of ``ids``. With ``lam == 1`` the
-    result is ``ids`` ordered by relevance (stable), and nothing is dropped
-    at any ``lam``.
-    """
+    """``ids`` re-ordered greedily by ``lam * rel - (1 - lam) * max_sim``: ``rel`` scaled to [0, 1]
+    by the best, ``max_sim`` the highest similarity (floored at 0) to a picked id.
+    ``similarity`` is keyed ``(a, b)`` with ``a < b``; a missing pair is 0. Ties keep ``ids``
+    order; nothing is dropped."""
     remaining = list(dict.fromkeys(ids))
     top = max((relevance[i] for i in remaining), default=0.0)
     scale = top if top > 0 else 1.0
     picked: list[str] = []
-    # Highest similarity of each remaining id to any picked id, kept
-    # incrementally so the whole pass is O(n^2).
+    # Kept incrementally so the pass is O(n^2).
     closest = dict.fromkeys(remaining, 0.0)
     while remaining:
         best = max(

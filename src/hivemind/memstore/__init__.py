@@ -1,18 +1,8 @@
-"""In-memory Store implementation (SPEC.md §4).
+"""In-memory reference ``Store`` for tests and dev mode (SPEC §4): one mixin per area over
+``MemoryState``.
 
-The dependency-free reference ``Store``, for tests and local dev mode.
-
-One module per area, each a mixin over the shared ``MemoryState`` (``state.py``):
-``entries``, ``search``, ``pins``, ``feedback``, ``metrics``, ``fleets``,
-``fleet_merge``, ``agent_cleanup``, ``agents``, ``successions`` and ``audit``;
-``helpers`` holds the pure functions they share. ``MemoryStore`` composes them.
-
-Determinism notes (for test stability):
-* Keyword scoring: number of *distinct* query tokens present in the
-  entry's embeddable text, tie-broken by ``created_at`` then ``id``.
-* Vector scoring: cosine similarity, tie-broken by ``created_at`` then
-  ``id``.
-* ``created_at`` is caller-supplied via ``clock`` (defaults to now).
+Keyword score is the count of distinct query tokens in the embeddable text, vector score is cosine;
+both tie-break on ``created_at`` then ``id``. ``created_at`` comes from the injected ``clock``.
 """
 
 from __future__ import annotations

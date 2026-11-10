@@ -1,17 +1,9 @@
-"""Pure-ASGI guards that run before FastAPI reads a request body (ADR 0040).
+"""Pure-ASGI guard that runs before FastAPI reads a body (ADR 0040).
 
-``PreAuthGuard`` does two cheap things so an unauthenticated caller cannot
-make the server buffer and parse a large body:
-
-1. A protected ``/v1`` route with **no** ``X-API-Key`` header is answered
-   ``401`` before the body is read (FastAPI would otherwise parse the JSON
-   first, so a malformed body got a 422 instead of the 401).
-2. A body over ``max_body_bytes`` is answered ``413`` — by ``Content-Length``
-   up front, and by counting streamed bytes for chunked uploads.
-
-What it deliberately does **not** do: verify the key (that is a store
-round trip; ``require_credential`` still does it). A present-but-unknown
-key with a body under the cap is parsed, then refused 401 — bounded work.
+``PreAuthGuard`` answers 401 to a protected ``/v1`` route with no ``X-API-Key`` before the body is
+read (else a malformed body got a 422), and 413 to a body over ``max_body_bytes`` (by
+``Content-Length``, or by counting streamed bytes). It does not verify the key (a store round trip):
+a present but unknown key is parsed, then refused by ``require_credential``.
 """
 
 from __future__ import annotations
@@ -26,8 +18,8 @@ _PUBLIC_PATHS = frozenset({"/v1/health", "/v1/liveness"})
 
 
 class BodyTooLarge(HTTPException):
-    """Raised from the wrapped ``receive`` when a streamed body is too big;
-    an ``HTTPException`` so FastAPI's body parsing re-raises it untouched."""
+    """A streamed body is too big; an ``HTTPException`` so FastAPI's body parsing re-raises it
+    untouched."""
 
     def __init__(self, limit: int) -> None:
         super().__init__(status_code=413, detail=f"request body exceeds {limit} bytes")

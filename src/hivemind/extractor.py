@@ -1,11 +1,8 @@
 """OpenAI-compatible entity extractor: the real ``Extractor`` port (ADR 0016, SPEC §13).
 
-One zero-temperature ``/chat/completions`` call with a fixed system
-prompt; the user message is the same bounded text the embedder sees
-(SPEC §13.1). The output is validated **all-or-nothing** (see
-``_validate``). Transient failures (timeouts, connection errors, 429,
-5xx) are retried with backoff (ADR 0014 pattern); other failures fail
-fast. The write path treats any failure as "no facets" (ADR 0016).
+One zero-temperature ``/chat/completions`` call over the embedder's bounded text (SPEC §13.1),
+output validated all-or-nothing. Retries as in ``providers`` (ADR 0014); the write path treats any
+failure as "no facets" (ADR 0016).
 """
 
 from __future__ import annotations
@@ -44,8 +41,7 @@ if TYPE_CHECKING:
 # SPEC §13.1 (kinds and name bounds live in the domain).
 _MAX_ENTITIES = 10
 
-# Bounds on untrusted model output: a response larger than this
-# is refused before parsing; logs carry at most a short snippet of it.
+# Bounds on untrusted model output: larger is refused before parsing; logs carry a short snippet.
 _MAX_CONTENT_CHARS = 64_000
 _SNIPPET_CHARS = 80
 
@@ -53,11 +49,9 @@ _FENCE_OPEN_RE = re.compile(r"[A-Za-z0-9_-]*[ \t]*\r?\n")
 
 
 def _unwrap(content: str) -> str:
-    """Strip one leading ``<think>...</think>`` block and one markdown
-    code fence around the JSON; nothing else is salvaged.
+    """Strip one leading ``<think>`` block and one markdown code fence; nothing else is salvaged.
 
-    No backtracking regex: model output is untrusted and could stall the
-    event loop."""
+    No backtracking regex: untrusted output could stall the event loop."""
     text = content.lstrip()
     if text.startswith("<think>"):
         end = text.find("</think>")
@@ -73,16 +67,15 @@ def _unwrap(content: str) -> str:
 
 
 def _clean_name(name: str) -> str:
-    """Replace C0/C1 control characters (NUL, newlines, ...) and lone
-    surrogates with a space and collapse whitespace: facet names are
-    untrusted model output, stored in Postgres and shown to other agents.
-    Format characters (ZWJ/ZWNJ, soft hyphen) are legitimate text and kept."""
+    """Replace control characters and lone surrogates with a space and collapse whitespace.
+
+    Names are untrusted output stored in Postgres and shown to agents. Format characters (ZWJ, soft
+    hyphen) are kept."""
     kept = (" " if unicodedata.category(ch) in ("Cc", "Cs") else ch for ch in name)
     return " ".join("".join(kept).split())
 
 
-# The fixed prompt (ADR 0016), committing the model to the shape
-# ``_parse_response`` validates.
+# Fixed prompt (ADR 0016); the shape it commits the model to is what ``_validate`` checks.
 _SYSTEM_PROMPT = """\
 You are an entity-extraction tool for an organization's shared memory \
 pool. You receive the text of one memory entry and identify the \
@@ -108,10 +101,7 @@ async def _default_sleep(delay: float) -> None:
 
 
 class ExtractorError(Exception):
-    """The extractor endpoint could not produce validated facets.
-
-    ``status`` is the HTTP status, or ``None`` for validation failures.
-    """
+    """No validated facets; ``status`` is the HTTP status, ``None`` for validation failures."""
 
     def __init__(self, message: str, status: int | None = None) -> None:
         super().__init__(message)
@@ -119,8 +109,7 @@ class ExtractorError(Exception):
 
 
 class OpenAICompatExtractor:
-    """An ``Extractor`` backed by an OpenAI-compatible ``/chat/completions``
-    endpoint."""
+    """An ``Extractor`` over an OpenAI-compatible ``/chat/completions`` endpoint."""
 
     def __init__(
         self,
@@ -139,23 +128,11 @@ class OpenAICompatExtractor:
     ) -> None:
         """Create an extractor.
 
-        Args:
-            client: An injected ``httpx.AsyncClient``; ``None`` builds
-                one owned by the extractor (closed by ``aclose``).
-            base_url: Requests go to ``{base_url}/chat/completions``.
-            api_key: Bearer credential; empty sends no auth header.
-            model_name: Recorded per entry as ``entities_model``.
-            prefix_tokens: Body prefix bound in words, as the embedder's
-                (ADR 0021).
-            timeout: Used only when building the client.
-            retries: Retries after the first attempt for transient
-                failures; ``0`` disables.
-            backoff: Base backoff; retry *i* sleeps ``backoff * 2**i``.
-            sleep: Backoff sleep (tests inject a recorder).
-            deadline: Wall-clock budget for one extraction, retries
-                included (ADR 0041); ``None`` derives it.
-            jitter: Returns [0, 1), scaling each backoff to [0.5x, 1x];
-                defaults to ``random.random``.
+        ``client=None`` builds one the extractor owns (``aclose`` closes it; ``timeout`` applies
+        only then). An empty ``api_key`` sends no auth header. ``model_name`` is recorded as
+        ``entities_model``. ``prefix_tokens`` is a word bound as the embedder's (ADR 0021). Retry
+        *i* sleeps ``backoff * 2**i`` scaled by ``jitter`` ([0, 1) to [0.5x, 1x]). ``deadline=None``
+        derives it (ADR 0041).
         """
         self._owns_client = client is None
         if client is None:
@@ -233,7 +210,7 @@ class OpenAICompatExtractor:
         return self._parse_response(response)
 
     def _payload(self, text: str) -> dict[str, Any]:
-        """The chat-completions body (zero temperature for stable output)."""
+        """The chat-completions body; zero temperature for stable output."""
         return {
             "model": self._model_name,
             "messages": [
@@ -268,9 +245,8 @@ class OpenAICompatExtractor:
         return self._validate(items)
 
     def _validate(self, items: Any) -> tuple[ExtractedEntity, ...]:
-        """All-or-nothing (SPEC §13.1): a JSON array of at most 10
-        ``{name, kind}`` objects within the domain's bounds, deduped
-        case-insensitively by name."""
+        """All-or-nothing (SPEC §13.1): at most 10 ``{name, kind}`` objects within the domain's
+        bounds, deduped by name."""
         if not isinstance(items, list):
             raise ExtractorError("extractor output must be a JSON array of {name, kind} objects")
         if len(items) > _MAX_ENTITIES:
@@ -302,8 +278,7 @@ class OpenAICompatExtractor:
 
 
 def build_extractor(settings: Settings) -> Extractor | None:
-    """The production extractor, or ``None`` (extraction off) when the
-    endpoint is unset (ADR 0016)."""
+    """The production extractor, or ``None`` (off) when the endpoint is unset (ADR 0016)."""
     if not settings.extractor_endpoint:
         return None
     return OpenAICompatExtractor.from_settings(settings)

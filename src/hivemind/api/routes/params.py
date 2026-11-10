@@ -25,9 +25,8 @@ def _no_nul(value: str | None) -> str | None:
     return check_no_nul(value, "value") if value is not None else None
 
 
-# Strings that may name a stored record are NUL-checked, not re-validated
-# (ADR 0040). No length cap on a path name, so a legacy agent registered
-# before ADR 0040 stays manageable.
+# Names of stored records are NUL-checked only (ADR 0040), with no length cap, so a legacy agent
+# stays manageable.
 NameParam = Annotated[str, Path(), AfterValidator(_no_nul)]
 ActorQuery = Annotated[str | None, Query(max_length=MAX_IDENTITY_CHARS), AfterValidator(_no_nul)]
 IdQuery = Annotated[str | None, Query(max_length=MAX_ID_CHARS), AfterValidator(_no_nul)]

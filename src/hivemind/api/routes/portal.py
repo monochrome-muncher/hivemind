@@ -55,8 +55,7 @@ PORTAL_DEFAULT_LIMIT = 50
 
 
 def require_agent(credential: Credential, what: str) -> None:
-    # An active agent's own key: not the admin or org key, and not a
-    # dev-mode identity (which has no agent name).
+    # An active agent's own key: not admin, org or a dev-mode identity (no agent name).
     if credential.is_admin or credential.is_org or credential.agent_name is None:
         raise api_error(
             403,

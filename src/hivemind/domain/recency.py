@@ -19,11 +19,8 @@ class RecencyHint(StrEnum):
 
 
 def parse_recency_hint(value: str | None) -> RecencyHint:
-    """A surface's raw value as a hint; ``None`` is ``DEFAULT``.
-
-    Raises ``ValueError`` (surfaces map it to invalid_input) on an unknown
-    value, whether or not the server setting is on.
-    """
+    """A raw value as a hint; ``None`` is ``DEFAULT``. ``ValueError`` on an unknown value, even
+    with the setting off."""
     if value is None:
         return RecencyHint.DEFAULT
     try:

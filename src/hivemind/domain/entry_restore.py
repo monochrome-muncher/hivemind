@@ -1,8 +1,4 @@
-"""Restoring one withdrawn memory (ADR 0124).
-
-Pure data and rules, no I/O. Both stores apply ``restore_refusal`` so they
-agree on which restore is refused and with what words.
-"""
+"""Restoring one withdrawn memory (ADR 0124); both stores apply ``restore_refusal``."""
 
 from __future__ import annotations
 
@@ -12,15 +8,14 @@ from hivemind.domain.entry import Entry
 
 
 class RestoreRefused(Exception):
-    """A restore the current state does not allow (409). ``code`` is the
-    machine-readable error code; ``str(exc)`` tells the admin what to do."""
+    """A restore the current state does not allow (409); ``code`` is the error code."""
 
     code = "restore_refused"
 
 
 class EntryRedacted(RestoreRefused):
-    """An admin redacted the memory (ADR 0125): its text is gone for good, and
-    an empty memory must never become active."""
+    """The memory was redacted (ADR 0125): its text is gone and an empty memory must never be
+    active."""
 
     code = "entry_redacted"
 
@@ -32,8 +27,7 @@ class EntryNotWithdrawn(RestoreRefused):
 
 
 class RestoreViaCleanup(RestoreRefused):
-    """A standing agent cleanup withdrew the memory: its undo puts it back
-    together with the rest of that cleanup."""
+    """A standing agent cleanup withdrew the memory; undo that cleanup instead."""
 
     code = "restore_via_cleanup"
 
@@ -46,8 +40,7 @@ class RestoreChainConflict(RestoreRefused):
 
 @dataclass(frozen=True, slots=True)
 class Restoration:
-    """What a restore did: the memory, active again, and the reason it was
-    withdrawn with (kept for the audit row; the entry no longer holds it)."""
+    """The memory, active again, and its former withdrawal reason (for the audit row)."""
 
     entry: Entry
     previous_reason: str | None
@@ -91,15 +84,12 @@ def chain_message_reverse(entry_id: str, active_id: str) -> str:
 def chain_conflict_message(
     entry_id: str, was_cut: bool, still_linked_by: str | None, put_back_instead: str | None
 ) -> str | None:
-    """The chain rule a restore of ``entry_id`` would break, or ``None``.
+    """The chain rule a restore of ``entry_id`` would break, or ``None`` (ADR 0124).
 
-    ``was_cut``: some cleanup record lists the memory as one it put back (a
-    cleanup cut its link to the memory that replaced it, and no later state can
-    tell whether that replacement or the memory would be the head, since either
-    can be withdrawn and restored again). ``still_linked_by``: an active memory
-    that names it as its successor (the state rules never produce one).
-    ``put_back_instead``: an active memory a cleanup put back whose recorded
-    successor chain leads to ``entry_id``."""
+    ``was_cut``: a cleanup record lists it as put back, so its link to its replacement was
+    cut and no later state says which should be head. ``still_linked_by``: an active memory
+    naming it as successor. ``put_back_instead``: an active memory a cleanup put back whose
+    recorded chain leads to ``entry_id``."""
     if was_cut:
         return chain_message_cut(entry_id)
     if put_back_instead is not None:
@@ -117,16 +107,9 @@ def restore_refusal(
     chain_conflict: str | None,
     redacted: bool = False,
 ) -> RestoreRefused | None:
-    """Why ``entry_id`` cannot be restored, or ``None`` when it can.
-
-    ``standing_cleanup`` is the id of a not-undone cleanup that withdrew the
-    memory (the store looks it up); ``chain_conflict`` is the message from
-    ``chain_conflict_message`` (the chain rules in ADR 0124).
-
-    A redacted memory (``redacted``, ADR 0125) is refused first: its text was
-    blanked, there is nothing left to bring back, and an empty memory must
-    never become active.
-    """
+    """Why ``entry_id`` cannot be restored, or ``None``. ``standing_cleanup`` is the id of a
+    not-undone cleanup that withdrew it; ``chain_conflict`` comes from ``chain_conflict_message``.
+    A redacted memory (ADR 0125) is refused first."""
     if redacted:
         return EntryRedacted(redacted_message(entry_id))
     if state != "withdrawn":

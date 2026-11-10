@@ -1,14 +1,7 @@
-"""A minimal in-cluster client for one Kubernetes Secret (ADR 0044).
+"""A minimal in-cluster Kubernetes Secret client (ADR 0044): the first-run bootstrap writes the raw
+keys into the Secret, not the pod log. Stdlib ``urllib`` with the pod's ServiceAccount token.
 
-The first-run key bootstrap (``hivemind-keys bootstrap-secret``) writes the
-raw admin and org keys straight into the ``hivemind-keys`` Secret instead
-of printing them to its pod log, where a cluster log shipper would keep
-them. This module is the only Kubernetes API code in the image: stdlib
-``urllib`` against the API server, authenticated by the pod's projected
-ServiceAccount token, so the image gains no client library.
-
-It deliberately never puts a Secret's data in an exception or a log line:
-errors carry the HTTP status and the API's ``reason`` only.
+Secret data never enters an exception or log line: errors carry only the HTTP status and ``reason``.
 """
 
 from __future__ import annotations
@@ -56,9 +49,8 @@ class KubeSecrets:
 
     @classmethod
     def in_cluster(cls, sa_dir: Path = SERVICE_ACCOUNT_DIR) -> KubeSecrets:
-        """Build from the pod's mounted ServiceAccount (token, namespace,
-        cluster CA) and the ``KUBERNETES_SERVICE_*`` variables the kubelet
-        always injects (``enableServiceLinks: false`` does not remove them)."""
+        """Build from the pod's ServiceAccount mount and the ``KUBERNETES_SERVICE_*`` variables the
+        kubelet always injects."""
         token_file = sa_dir / "token"
         if not token_file.is_file():
             raise KubeApiError(
@@ -100,8 +92,8 @@ class KubeSecrets:
             raise KubeApiError(action, None, type(reason).__name__) from None
 
     def exists(self, name: str) -> bool:
-        """``True`` for 200, ``False`` for 404; anything else raises, so an
-        API or RBAC error never reads as "absent" (which would re-issue keys)."""
+        """``True`` for 200, ``False`` for 404; else raises, so an RBAC error never reads as
+        "absent" and re-issues keys."""
         status = self._call("get secret", "GET", self._url(name), None)
         if status == 200:
             return True

@@ -34,9 +34,8 @@ from hivemind.memstore.state import MemoryState
 
 class AgentCleanupStore(MemoryState):
     def _chain_end(self, entry_id: str, stop: frozenset[str] = frozenset()) -> str:
-        """The id a pin on ``entry_id`` shows: the end of its supersession
-        chain, or the first memory in ``stop`` on the way (a memory being
-        restored). Callers hold the lock."""
+        """The id a pin on ``entry_id`` shows: its chain's end, or the first ``stop`` memory on
+        the way. Callers hold the lock."""
         seen = {entry_id}
         current = self._entries.get(entry_id)
         while (
@@ -61,12 +60,9 @@ class AgentCleanupStore(MemoryState):
         authors: Collection[str],
         visibility: Visibility | None = None,
     ) -> tuple[list[Entry], list[tuple[Entry, str, str]], list[tuple[str, str, str]]]:
-        """The memories to withdraw (newest first), the memories to offer for
-        restoring (newest first) with the memory that replaced each and the end
-        of that chain, and the keys of the ratings to set aside. A restorable
-        memory is superseded, is not the agent's own window memory, and its
-        chain passes only through the agent's own window memories to an
-        active one. Callers hold the lock."""
+        """The memories to withdraw, the restorable ones (each with its replacement and chain end),
+        both newest first, and the rating keys to set aside; restorable as in ``CleanupScan``.
+        Callers hold the lock."""
         withdraw = sorted(
             (
                 e

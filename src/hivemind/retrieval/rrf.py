@@ -1,17 +1,9 @@
-"""Reciprocal Rank Fusion (RRF) over ranked result lists.
-
-RRF definition (Cormack et al., 2009):
+"""Reciprocal Rank Fusion (Cormack et al., 2009; SPEC §6.2, ADR 0006):
 
     fused(d) = sum_i  w_i / (k + rank_i(d))
 
-where ``rank_i`` is the 1-based rank of d in ranked list i, and d only
-contributes from lists where it appears.
-
-RRF is chosen over score-averaging because the two retrieval streams
-(keyword rank and vector cosine distance) produce incommensurable
-scores; ranks are the only quantity comparable across them. Weights
-and k are plain arguments so fusion tuning stays a config change
-(see SPEC.md §6.2 and docs/adr/0006).
+with ``rank_i`` the 1-based rank in list i; d counts only in lists where it appears. Ranks, not
+scores, because keyword rank and vector distance are incommensurable.
 """
 
 from __future__ import annotations
@@ -24,20 +16,10 @@ def rrf_fuse(
     k: int = 60,
     weights: Sequence[float] | None = None,
 ) -> dict[str, float]:
-    """Fuse one or more ranked ID lists into a single fused-score mapping.
+    """Fuse ranked ID lists (best first) into ``{id: fused score}``, higher is better.
 
-    Args:
-        ranked_lists: Each inner sequence is a list of entry IDs in
-            descending relevance (rank 0-based in the input, 1-based in
-            the formula). Duplicates within a list are allowed and each
-            occurrence contributes at its own rank.
-        k: Rank-damping constant (default 60, the classic RRF value).
-        weights: Per-list fusion weights. ``None`` means uniform weights
-            of 1.0. Must match ``len(ranked_lists)`` when given.
-
-    Returns:
-        Mapping of entry ID to fused score, where higher is better.
-        IDs appearing in no list are absent.
+    A duplicate within a list counts at each of its ranks. ``k`` is the damping constant;
+    ``weights`` default to 1.0 and must match ``len(ranked_lists)``.
     """
     if weights is None:
         weights = [1.0] * len(ranked_lists)

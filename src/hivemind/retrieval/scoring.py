@@ -1,19 +1,13 @@
-"""Decay-aware entry scoring and feedback-quality computation.
-
-Both functions are pure and parameterized by their time/quality inputs
-so callers (and tests) pin down exactly which "now" and which feedback
-counts are being used. Formulas follow SPEC.md §4.2 and §6.4.
-"""
+"""Decay-aware entry scoring and feedback quality (SPEC §4.2, §6.4). Pure: "now" and the counts are
+arguments."""
 
 from __future__ import annotations
 
 import math
 from datetime import datetime
 
-# Constants for the feedback quality formula (SPEC.md §4.2, ADR 0063).
-# Defaults are config-overridable at the service layer; the pure function
-# takes them explicitly so it has no hidden state. Each weight is where
-# quality heads when every report gives that verdict (before the prior).
+# Feedback quality defaults (ADR 0063), overridable at the service layer. Each weight is where
+# quality heads when every report gives that verdict.
 HELPFUL_WEIGHT = 0.2
 STALE_WEIGHT = 0.4
 WRONG_WEIGHT = 1.0
@@ -22,8 +16,7 @@ QUALITY_MIN = 0.5
 QUALITY_MAX = 1.2
 # Ceiling on the combined upward effect of all social signals (ADR 0070).
 SOCIAL_MAX = 1.2
-# What each stale or wrong report counts as once a confirmation is newer
-# than all of them (ADR 0106).
+# What a stale or wrong report counts as once a confirmation is newer than all (ADR 0106).
 CONFIRMED_FLAG_SCALE = 0.5
 
 # Importance factor: 0.5 + 0.1 * importance (importance in 1..5 -> 0.6..1.0).
@@ -47,26 +40,13 @@ def feedback_quality(
     max_quality: float = QUALITY_MAX,
     flag_scale: float = 1.0,
 ) -> float:
-    """Bounded quality multiplier derived from an entry's feedback.
-
-    Consensus share (ADR 0063), with ``n = helpful + stale + wrong``::
+    """Bounded quality multiplier from feedback (ADR 0063), ``n = helpful + stale + wrong``::
 
         quality = clamp(1 + (wh*h - ws*s - ww*w) / (n + prior), min, max)
 
-    Each weight is where quality heads when every report gives that
-    verdict (helpful 1.2, stale 0.6, wrong 0 with the defaults, the
-    last clamped to ``min_quality``). ``prior`` counts imaginary neutral
-    reports, so one report cannot swing the result far and more reports
-    move it toward the weight of the majority verdict. The sum is a
-    share, not a running total, so helpful reports cannot be banked to
-    cancel later wrong ones. No feedback -> exactly 1.0 (neutral). The
-    result is clamped to [min_quality, max_quality].
-
-    ``flag_scale`` is what each ``stale`` and ``wrong`` report counts as,
-    in the share and in ``n``: 1.0 normally, ``CONFIRMED_FLAG_SCALE`` when
-    the caller knows a confirmation is newer than every flag (ADR 0106).
-    Any scale in [0, 1] keeps the result between the unscaled quality and
-    the quality of the helpful reports alone.
+    A share, not a running total, so helpful reports cannot be banked against later wrong ones.
+    No feedback gives exactly 1.0. ``flag_scale`` scales each stale/wrong report, in the share
+    and in ``n``: ``CONFIRMED_FLAG_SCALE`` when a confirmation is newer than every flag (ADR 0106).
     """
     s, w = stale * flag_scale, wrong * flag_scale
     n = helpful + s + w
@@ -86,44 +66,18 @@ def entry_score(
     social_max: float | None = None,
     narrow_importance: bool,
 ) -> float:
-    """Decay-aware final score for one entry (SPEC.md §6.4).
+    """Decay-aware final score for one entry (SPEC §6.4).
 
     final = fused
           * (0.5 + 0.1 * importance)     # or 1 + 0.05 * (importance - 3), see narrow_importance
           * max(recency_floor, 0.5 ** (age_days / half_life_days))
           * min(social_max, quality)
 
-    ``age_days`` is derived from the entry's *occurrence* time (the
-    "memory date"), not its ingest time, so a backdated entry decays
-    from when the observation happened. Future occurrence times are
-    clamped to age zero.
-
-    ``recency_floor`` (ADR 0022) bounds the one factor in the product
-    that is unbounded below. With a floor ``f`` in ``(0, 1]`` the
-    recency factor spans at most ``1/f`` across any candidate list
-    instead of ``2 ** (age spread / half_life)``. Once ``1/f`` is
-    narrower than the fused RRF range (``2(k+20)/(k+1)`` = 2.6230x at
-    the §6.2 defaults, i.e. ``f > 0.381``), match quality is the sort
-    key and recency the tie-break — SPEC §6.4's stated intent. The
-    service ships ``f = 0.8`` (``SearchConfig.recency_floor``); this
-    parameter defaults to ``None`` (unbounded), because the value is a
-    configuration decision and this stays a pure function of the numbers
-    it is handed. ``SearchConfig``
-    validates it; this function does not.
-
-    ``social_max`` (ADR 0070) caps the upward effect of the social
-    signals, today only feedback ``quality``: ``social = min(social_max,
-    quality)``. Penalties (``quality < 1``) pass through unchanged, and
-    ``None`` means no cap. The service ships ``1.2``
-    (``SearchConfig.social_max``), equal to the default ``quality_max``,
-    so the cap changes no ranking at the shipped defaults.
-
-    ``narrow_importance`` (ADR 0088) swaps the importance factor for
-    ``1 + 0.05 * (importance - 3)`` (0.9..1.1, one step about 1.05x), so
-    one importance step stays below ``social_max``; ``False`` is the
-    ``0.5 + 0.1 * importance`` form above. Required, so a caller states which
-    one it scores with; the setting ``HIVEMIND_NARROW_IMPORTANCE`` is on by
-    default.
+    ``age_days`` runs from ``occurred_at`` (the memory date), clamped at zero for the future.
+    ``recency_floor`` (ADR 0022) bounds the recency factor; ``None`` is unbounded and
+    ``SearchConfig`` validates and ships 0.8. ``social_max`` (ADR 0070) caps only the upward
+    effect of ``quality``; ``None`` is no cap. ``narrow_importance`` (ADR 0088) selects the
+    1 + 0.05 * (importance - 3) form; it is required so a caller states its form.
     """
     age_days = (now - occurred_at).total_seconds() / 86_400.0
     if age_days < 0:
@@ -132,8 +86,7 @@ def entry_score(
         importance_factor = 1.0 + _NARROW_IMPORTANCE_STEP * (importance - _NARROW_IMPORTANCE_MID)
     else:
         importance_factor = _IMPORTANCE_BASE + _IMPORTANCE_STEP * importance
-    # exp/log rather than ``0.5 ** x``, so the result is a plain float
-    # (no complex-number branch).
+    # exp/log, not ``0.5 ** x``, which has a complex-number branch.
     recency = math.exp(math.log(0.5) * (age_days / half_life_days))
     if recency_floor is not None and recency_floor > recency:
         recency = recency_floor

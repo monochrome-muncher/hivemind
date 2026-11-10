@@ -22,12 +22,11 @@ from hivemind.domain.recency import RecencyHint
 from hivemind.domain.validation import InvalidInput
 from hivemind.ports import Credential
 
-# ADR 0048: a search answered by the keyword stream alone because the
-# embedding service failed says so in this response header.
+# Set when a search was answered by the keyword stream alone (ADR 0048).
 DEGRADED_HEADER = "X-Hivemind-Degraded"
 DEGRADED_KEYWORD_ONLY = "keyword-only"
 
-# ADR 0073: a search scored under a non-default recency hint says which one.
+# Names a non-default recency hint (ADR 0073).
 RECENCY_HEADER = "X-Hivemind-Recency"
 
 
@@ -63,8 +62,7 @@ async def entry_detail(
     """The full entry with its feedback and links, and (``history``) the
     supersession chain: shared by ``GET /v1/entries/{id}`` and the admin
     read (ADR 0080)."""
-    # ADR 0033: follows readability; an invisible entry is a 404 like
-    # an unknown one, and the chain leaves out invisible versions.
+    # ADR 0033: an invisible entry is a 404, and the chain leaves out invisible versions.
     detail = await app.read_service.entry(
         entry_id,
         visibility=credential.visibility(),

@@ -1,14 +1,10 @@
-"""Shared plumbing for the outbound provider clients (embedder, extractor).
+"""Shared plumbing for the embedder and extractor clients (ADR 0014, 0041).
 
-What both OpenAI-compatible clients must do identically (ADR 0014):
-
-* **Never leak secrets through errors.** httpx messages can carry the
-  ``Authorization`` header or a URL with userinfo, so failures are
-  reported by exception *class name only*.
-* **Retry transient failures** (timeouts, network errors, a dropped
-  keep-alive, 429, 5xx) with jittered backoff, honouring a capped
+* Errors carry the exception class name only: httpx messages can hold the ``Authorization`` header
+  or URL userinfo.
+* Transient failures (timeouts, network errors, 429, 5xx) retry with jittered backoff and a capped
   ``Retry-After``; other 4xx, redirects and config errors fail fast.
-* **An overall deadline** per call, retries included (ADR 0041).
+* One overall deadline per call, retries included.
 """
 
 from __future__ import annotations
@@ -32,15 +28,12 @@ Sleep = Callable[[float], Awaitable[None]]
 
 
 def clean_api_key(key: str) -> str:
-    """Strip surrounding whitespace from an API key and reject any
-    remaining control character (an HTTP header value cannot hold one).
-
-    The error never includes the key itself.
-    """
+    """Strip whitespace from an API key and reject control characters (not valid in a header).
+    Errors never include the key."""
     key = key.strip()
     if not key.isascii():
-        # httpx encodes header values as ASCII; a non-ASCII character
-        # would raise UnicodeEncodeError (echoing the character).
+        # httpx encodes headers as ASCII: a non-ASCII character would raise UnicodeEncodeError,
+        # echoing it.
         raise ValueError("API key contains a non-ASCII character")
     if any(unicodedata.category(ch).startswith("C") for ch in key):
         raise ValueError("API key contains a control character")
@@ -48,10 +41,10 @@ def clean_api_key(key: str) -> str:
 
 
 def clean_endpoint(url: str) -> str:
-    """Strip surrounding whitespace from an endpoint URL and reject any
-    inner whitespace / control character (a trailing newline from a
-    mounted Secret or ConfigMap otherwise surfaces as a raw InvalidURL).
-    The error never includes the URL (it may carry userinfo)."""
+    """Strip whitespace from an endpoint URL and reject inner whitespace or control characters.
+
+    A mounted Secret's trailing newline otherwise surfaces as a raw InvalidURL. Errors never include
+    the URL (userinfo)."""
     url = url.strip()
     if any(ch.isspace() or unicodedata.category(ch).startswith("C") for ch in url):
         raise ValueError("endpoint URL contains whitespace or a control character")
@@ -59,10 +52,8 @@ def clean_endpoint(url: str) -> str:
 
 
 def default_deadline(timeout: float, retries: int, backoff: float = 0.5) -> float:
-    """The per-call budget when none is configured: every attempt at full
-    timeout plus every un-jittered backoff (the DEPLOY.md §5 worst case).
-    It then bites only on a slow-drip response or a long ``Retry-After``.
-    """
+    """The default per-call budget: every attempt at full timeout plus every un-jittered backoff
+    (DEPLOY.md §5 worst case)."""
     retries = max(0, retries)
     return float((retries + 1) * timeout + backoff * (2**retries - 1))
 
@@ -95,11 +86,10 @@ async def post_with_retries[E: Exception](
     give_up_level: int = logging.ERROR,
     jitter: Callable[[], float] | None = None,
 ) -> httpx.Response:
-    """POST ``payload`` and return the successful (2xx) response.
+    """POST ``payload`` and return the 2xx response; every failure raises the caller's
+    ``error(message, status)``.
 
-    Raises ``error(message, status)`` — the caller's typed error — for
-    every failure; messages are safe to log and to show (no headers, no
-    URLs, no provider text).
+    Messages are safe to log and show: no headers, URLs or provider text.
     """
     rand = jitter if jitter is not None else random.random
     try:

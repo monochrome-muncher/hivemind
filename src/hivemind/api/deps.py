@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class HivemindApp:
-    """Everything a FastAPI app needs: ports, config, and services."""
+    """The ports, config and services a FastAPI app needs."""
 
     store: Store
     embedder: Embedder
@@ -47,19 +47,17 @@ class HivemindApp:
     access_service: AccessService
     metrics_service: MetricsService
     activity_service: ActivityService
-    # ADR 0082: downgrade dev-mode credentials to trust level 0.
+    # Dev-mode credentials sit at trust level 0 (ADR 0082).
     require_stored_keys: bool = False
-    # ADR 0110: days without a key use before the admin list calls an agent idle.
+    # Days without key use before an agent shows as idle (ADR 0110).
     idle_agent_days: int = 30
 
 
 class ApiError(Exception):
-    """An expected API failure: an HTTP status + a stable error code.
+    """An expected API failure (status and stable code), answered as ``{"error": {"code",
+    "message"}}``.
 
-    Raised by the auth dependency (401) and by routes for their own
-    checks; a single exception handler turns it into the JSON envelope
-    ``{"error": {"code", "message"}}``. The typed service errors are
-    answered by the table in ``api/errors.py``.
+    Typed service errors are answered by the table in ``api/errors.py``.
     """
 
     def __init__(self, status_code: int, code: str, message: str) -> None:
@@ -70,12 +68,11 @@ class ApiError(Exception):
 
 
 def api_error(status_code: int, code: str, message: str) -> ApiError:
-    """Build an ApiError (keeps routes to one-line raises)."""
+    """Build an ApiError."""
     return ApiError(status_code, code, message)
 
 
-# The accessors are ``async`` so FastAPI runs them inline as dependencies
-# instead of hopping to a worker thread on every request.
+# ``async`` so FastAPI runs the dependencies inline, not in a worker thread.
 async def get_app(request: Request) -> HivemindApp:
     return cast(HivemindApp, request.app.state.hivemind)
 
@@ -85,12 +82,10 @@ async def get_prometheus(request: Request) -> PrometheusMetrics:
 
 
 async def require_credential(request: Request) -> Credential:
-    """The auth dependency: verify the X-API-Key header (SPEC.md §8.1).
+    """Verify the X-API-Key header (SPEC §8.1): 401 ``missing_api_key``, ``unknown_api_key`` or
+    ``key_locked`` (ADR 0117).
 
-    Missing header -> 401 ``missing_api_key``; unknown key -> 401
-    ``unknown_api_key``; a key locked from the portal -> 401 ``key_locked``
-    (ADR 0117). The verified Credential is attached to
-    ``request.state`` for downstream use.
+    The credential is attached to ``request.state``.
     """
     app = await get_app(request)
     key = request.headers.get("X-API-Key")
@@ -102,8 +97,7 @@ async def require_credential(request: Request) -> Credential:
         raise api_error(401, "key_locked", KEY_LOCKED_MESSAGE) from exc
     if credential is None:
         raise api_error(401, "unknown_api_key", "the API key is unknown or revoked")
-    # ADR 0082: a dev-mode credential sits at trust level 0 when the
-    # deployment requires stored keys.
+    # ADR 0082.
     credential = credential.effective(app.require_stored_keys)
     request.state.credential = credential
     return credential
@@ -126,10 +120,8 @@ def _handle_invalid_input(_request: Request, exc: Exception) -> JSONResponse:
 
 
 def _handle_request_validation(_request: Request, exc: Exception) -> JSONResponse:
-    """FastAPI's 422 without the "input" echo: the echoed value can be huge
-    and can itself be unencodable (a lone surrogate crashed the default
-    handler while rendering: a 500). Shape otherwise unchanged:
-    {"detail": [{"type", "loc", "msg"}]}."""
+    """FastAPI's 422 without the "input" echo: it can be huge or unencodable (a lone surrogate made
+    the default handler 500)."""
     errors = [
         {"type": e["type"], "loc": list(e["loc"]), "msg": e["msg"]}
         for e in cast(RequestValidationError, exc).errors()
@@ -144,16 +136,13 @@ def _handle_body_too_large(_request: Request, exc: Exception) -> JSONResponse:
     )
 
 
-# A pool acquire (or a statement) that times out means the database is
-# saturated or unreachable for now, not that the request was wrong: 503 with
-# a short Retry-After so clients back off and retry (ROADMAP 3.13). The
-# provider calls never surface a bare TimeoutError (they raise typed errors,
-# ADR 0041), so on this surface a TimeoutError is the store's.
+# A pool acquire or statement timeout is the store's (ROADMAP 3.13; provider calls raise typed
+# errors, ADR 0041): 503 with a short Retry-After.
 STORE_RETRY_AFTER_SECONDS = 2
 
 
 def _handle_store_timeout(_request: Request, exc: Exception) -> JSONResponse:
-    if isinstance(exc, FleetBusy):  # ADR 0107: a fleet write waited for a merge
+    if isinstance(exc, FleetBusy):  # ADR 0107
         code, message = "fleet_busy", str(exc)
     elif isinstance(exc, StoreUnavailable):
         logger.warning("store unreachable (%s); answering 503", exc.cause)
@@ -169,14 +158,13 @@ def _handle_store_timeout(_request: Request, exc: Exception) -> JSONResponse:
 
 
 def create_app(app: HivemindApp) -> FastAPI:
-    """Build the FastAPI app over a HivemindApp (SPEC.md §5)."""
+    """Build the FastAPI app over a HivemindApp (SPEC §5)."""
     from hivemind.api.prometheus import PrometheusMetrics, RequestMetrics
     from hivemind.api.routes import build_router
 
     prometheus = PrometheusMetrics(app.metrics_service.usage_report)
-    # The shared /v1 route objects, not include_router, which would rebuild
-    # every route on the app's first request. Routes passed this way skip
-    # the app's ``dependency_overrides``.
+    # Shared route objects, not include_router (it rebuilds every route on the first request);
+    # routes passed this way skip ``dependency_overrides``.
     fastapi_app = FastAPI(title="Hivemind", routes=build_router().routes)
     fastapi_app.state.hivemind = app
     fastapi_app.state.prometheus = prometheus
@@ -188,7 +176,7 @@ def create_app(app: HivemindApp) -> FastAPI:
     fastapi_app.add_exception_handler(RequestValidationError, _handle_request_validation)
     fastapi_app.add_exception_handler(TimeoutError, _handle_store_timeout)
     fastapi_app.add_middleware(PreAuthGuard, max_body_bytes=MAX_REQUEST_BODY_BYTES)
-    # Added last, so outermost: the guards' 401 / 413 answers are counted too.
+    # Outermost, so guard 401/413 answers are counted.
     fastapi_app.add_middleware(RequestMetrics, metrics=prometheus.process)
     fastapi_app.include_router(prometheus.router())
     return fastapi_app

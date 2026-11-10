@@ -59,23 +59,20 @@ class AgentStore(MemoryState):
             return self._key_last_used.get(name)
 
     def record_key_issued(self, name: str, at: datetime) -> None:
-        """A new key for the agent, made at ``at``, unused so far (ADR 0110).
-        The in-memory authenticator fake calls this; the real adapter's key
-        row carries it. Not on the ``Store`` port: nothing else writes it."""
+        """A new, unused key made at ``at`` (ADR 0110). Called by the authenticator fake; not on
+        the ``Store`` port."""
         with self._lock:
             self._key_created[name] = at
             self._key_last_used.pop(name, None)
             self._key_locked.pop(name, None)  # a new key row carries no lock
 
     def record_key_locked(self, name: str, at: datetime) -> None:
-        """The agent's key was locked from the portal at ``at`` (ADR 0117);
-        the real adapter writes ``credentials.locked_at``. Not on the port."""
+        """The key was locked from the portal at ``at`` (ADR 0117). Not on the port."""
         with self._lock:
             self._key_locked[name] = at
 
     def record_key_use(self, name: str, at: datetime) -> None:
-        """Stamp the agent's key as used at ``at`` (ADR 0110); the real
-        adapter writes ``credentials.last_used_at``. Not on the port."""
+        """Stamp the key as used at ``at`` (ADR 0110). Not on the port."""
         with self._lock:
             self._key_last_used[name] = at
 
@@ -125,9 +122,7 @@ class AgentStore(MemoryState):
             return revoked
 
     async def set_agent_trust_level(self, name: str, level: TrustLevel) -> Agent:
-        """Promote/demote an agent's trust level (ADR 0011). ``UnknownAgent`` if
-        unknown. Demotion to level 0 is *dormant* (still active, no access).
-        """
+        """Set the trust level (ADR 0011); level 0 is dormant: still active, no access."""
         with self._lock:
             agent = self._agents.get(name)
             if agent is None:
@@ -137,10 +132,7 @@ class AgentStore(MemoryState):
             return updated
 
     async def set_agent_home_fleet(self, name: str, fleet_id: str) -> Agent:
-        """Re-parent an agent to a new home fleet (ADR 0011). The agent's
-        earlier ``fleet``-scoped entries stay in the fleet they were written
-        into (never re-parented). ``UnknownAgent`` if unknown.
-        """
+        """Re-parent an agent; its earlier ``fleet`` entries stay where written (ADR 0011)."""
         with self._lock:
             self._refuse_merged(fleet_id)
             agent = self._agents.get(name)
