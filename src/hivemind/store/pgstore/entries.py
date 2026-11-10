@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import replace
+from datetime import datetime
 from typing import Any
+
+import asyncpg
 
 from hivemind.domain.access import SCOPE_FLEET, Visibility
 from hivemind.domain.entry import Entry, EntryDraft, EntryFilters, EntryState, ExtractedEntity
@@ -231,6 +234,61 @@ SELECT l.from_id, l.to_id, l.created_at AS linked_at, t.state,
 """
 
 
+async def _insert_entry(
+    conn: asyncpg.Connection,
+    entry_id: str,
+    draft: EntryDraft,
+    occurred_at: datetime,
+    embedding: list[float] | None,
+    embedding_model: str | None,
+    entities: tuple[ExtractedEntity, ...],
+    entities_model: str | None,
+) -> asyncpg.Record | None:
+    # RETURNING, not a re-read: the supersession flip that follows in
+    # ``create_entry`` never touches the new row, so this is its final state.
+    return await conn.fetchrow(
+        INSERT_ENTRY_RETURNING,
+        entry_id,
+        draft.kind.value,
+        draft.summary,
+        draft.body,
+        json.dumps(draft.payload) if draft.payload is not None else None,  # jsonb
+        json.dumps(encode_sources(draft.sources)),  # jsonb
+        list(draft.tags),
+        occurred_at,
+        draft.author,
+        draft.agent,
+        draft.importance,
+        draft.importance_source.value,
+        draft.scope,
+        draft.fleet_id,
+        embedding,
+        embedding_model,  # SPEC.md §7: model that produced the vector
+        json.dumps(encode_entities(entities)),  # jsonb
+        [e.name.lower() for e in entities],  # lower-cased names: the filter column
+        entities_model,  # ADR 0016: extractor model (provenance)
+    )
+
+
+async def _flip_superseded(conn: asyncpg.Connection, entry_id: str, draft: EntryDraft) -> None:
+    # ADR 0034: any target the guarded UPDATE did not flip
+    # aborts the whole transaction, insert included.
+    wanted = list(dict.fromkeys(draft.supersedes))
+    flipped = {
+        str(r["id"])
+        for r in await conn.fetch(
+            FLIP_SUPERSEDED,
+            entry_id,
+            valid_uuids(wanted),
+            draft.fleet_id if draft.fleet_id and is_valid_uuid(draft.fleet_id) else None,
+            draft.scope,
+        )
+    }
+    denied = [t for t in wanted if canonical_uuid(t) not in flipped]
+    if denied:
+        raise SupersedeConflict(denied)
+
+
 class EntryStore(PgConnections):
     async def create_entry(
         self,
@@ -251,51 +309,20 @@ class EntryStore(PgConnections):
             await refuse_merged(conn, draft.fleet_id)
             if draft.scope == SCOPE_FLEET:
                 await refuse_stale_home(conn, draft.fleet_id, draft.author)
-            # RETURNING, not a re-read: the supersession flip below
-            # never touches the new row, so this is its final state.
-            row = await conn.fetchrow(
-                INSERT_ENTRY_RETURNING,
+            row = await _insert_entry(
+                conn,
                 entry_id,
-                draft.kind.value,
-                draft.summary,
-                draft.body,
-                json.dumps(draft.payload) if draft.payload is not None else None,  # jsonb
-                json.dumps(encode_sources(draft.sources)),  # jsonb
-                list(draft.tags),
+                draft,
                 occurred_at,
-                draft.author,
-                draft.agent,
-                draft.importance,
-                draft.importance_source.value,
-                draft.scope,
-                draft.fleet_id,
                 embedding,
-                embedding_model,  # SPEC.md §7: model that produced the vector
-                json.dumps(encode_entities(entities)),  # jsonb
-                [e.name.lower() for e in entities],  # lower-cased names: the filter column
-                entities_model,  # ADR 0016: extractor model (provenance)
+                embedding_model,
+                entities,
+                entities_model,
             )
             if draft.see_also:
                 await conn.execute(INSERT_LINKS, entry_id, valid_uuids(list(draft.see_also)))
             if draft.supersedes:
-                # ADR 0034: any target the guarded UPDATE did not flip
-                # aborts the whole transaction, insert included.
-                wanted = list(dict.fromkeys(draft.supersedes))
-                flipped = {
-                    str(r["id"])
-                    for r in await conn.fetch(
-                        FLIP_SUPERSEDED,
-                        entry_id,
-                        valid_uuids(wanted),
-                        draft.fleet_id
-                        if draft.fleet_id and is_valid_uuid(draft.fleet_id)
-                        else None,
-                        draft.scope,
-                    )
-                }
-                denied = [t for t in wanted if canonical_uuid(t) not in flipped]
-                if denied:
-                    raise SupersedeConflict(denied)
+                await _flip_superseded(conn, entry_id, draft)
         if row is None:
             raise RuntimeError(f"insert of entry {entry_id} returned no row")
         entry = row_to_entry(row)

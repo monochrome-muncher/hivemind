@@ -8,6 +8,9 @@ from collections.abc import Sequence
 from contextlib import AbstractContextManager
 from dataclasses import replace
 from datetime import datetime
+from typing import cast
+
+import asyncpg
 
 from hivemind.domain.access import Visibility
 from hivemind.domain.agent_cleanup import (
@@ -272,6 +275,197 @@ def _cleanup_contention(verb: str) -> AbstractContextManager[None]:
     )
 
 
+def _canonical_restore_ids(restore_ids: Sequence[str] | None) -> list[str]:
+    wanted = list(dict.fromkeys(restore_ids or ()))
+    if any(not is_valid_uuid(w) for w in wanted):
+        raise AgentCleanupRefused("restore_ids names memories that cannot be restored")
+    return [str(uuid.UUID(w)) for w in wanted]
+
+
+async def _lock_withdrawal_scope(
+    conn: asyncpg.Connection, names: Sequence[str], since: datetime, until: datetime
+) -> list[str]:
+    """The agents' cleanup locks, then the pin locks of every fleet the window touches,
+    then the window's memory rows FOR UPDATE. Returns the ids of those memories."""
+    # One cleanup or undo per agent at a time. A cleanup of several
+    # owned authors (ADR 0118) takes each one's lock, in name order,
+    # so it also waits for an admin cleanup of a retired agent.
+    for name in names:
+        await conn.execute(CLEANUP_AGENT_LOCK, name)
+    # Pin locks first, in fleet order (a merge takes the fleet rows,
+    # then these), then the memory rows: a concurrent supersede or
+    # withdraw of one waits for this commit, then sees its new state.
+    fleets = sorted(
+        {str(r["fleet_id"]) for r in await conn.fetch(CLEANUP_FLEETS, names, since, until)}
+        | {
+            str(r["fleet_id"])
+            for r in await conn.fetch(
+                CLEANUP_PIN_FLEETS, names, since, until, timeout=LONG_OP_TIMEOUT
+            )
+        }
+    )
+    for fid in fleets:
+        await conn.execute(LOCK_FLEET_PINS, fid)
+    locked = await conn.fetch(CLEANUP_WITHDRAW_LOCK, names, since, until, timeout=LONG_OP_TIMEOUT)
+    return [str(r["id"]) for r in locked]
+
+
+async def _lock_restorable(
+    conn: asyncpg.Connection,
+    names: Sequence[str],
+    since: datetime,
+    until: datetime,
+    readable: str | None,
+    readable_args: Sequence[object],
+) -> dict[str, tuple[str, str]]:
+    """The restorable memories, locked, by id: (the memory that replaced it, the chain's head)."""
+    return {
+        str(r["id"]): (str(r["first"]), str(r["head"]))
+        for r in await conn.fetch(
+            _cleanup_restorable_lock(readable),
+            names,
+            since,
+            until,
+            *readable_args,
+            timeout=LONG_OP_TIMEOUT,
+        )
+    }
+
+
+async def _set_aside_ratings(
+    conn: asyncpg.Connection, agent: str, since: datetime, until: datetime, cleanup_id: str
+) -> int:
+    # The agent's own upserts of these rows wait for the commit and
+    # then clear the mark (UPSERT_FEEDBACK).
+    return len(
+        await conn.fetch(
+            CLEANUP_SET_ASIDE, agent, since, until, cleanup_id, timeout=LONG_OP_TIMEOUT
+        )
+    )
+
+
+async def _withdraw_and_unpin(
+    conn: asyncpg.Connection, cleanup_id: str, withdraw_ids: list[str], restore: list[str]
+) -> tuple[DroppedPin, ...]:
+    """Withdraw the memories and unpin what shows them (not the restored ones);
+    returns the dropped pins."""
+    if not withdraw_ids:
+        return ()
+    await conn.execute(
+        CLEANUP_WITHDRAW,
+        withdraw_ids,
+        cleanup_reason(cleanup_id),
+        timeout=LONG_OP_TIMEOUT,
+    )
+    return tuple(
+        DroppedPin(r["fleet_id"], str(r["entry_id"]), r["pinned_by"], r["pinned_at"])
+        for r in await conn.fetch(CLEANUP_UNPIN, withdraw_ids, restore, timeout=LONG_OP_TIMEOUT)
+    )
+
+
+async def _restore_replaced(
+    conn: asyncpg.Connection, restore: list[str], restorable: dict[str, tuple[str, str]]
+) -> tuple[RestoredEntry, ...]:
+    if restore:
+        await conn.execute(CLEANUP_RESTORE, restore, timeout=LONG_OP_TIMEOUT)
+    return tuple(RestoredEntry(e, *restorable[e]) for e in restore)
+
+
+async def _record_cleanup(
+    conn: asyncpg.Connection,
+    *,
+    cleanup_id: str,
+    agent: str,
+    since: datetime,
+    until: datetime,
+    cleaned_by: str,
+    withdraw_ids: list[str],
+    restored: tuple[RestoredEntry, ...],
+    set_aside: int,
+    unpinned: tuple[DroppedPin, ...],
+    self_service: bool,
+) -> datetime:
+    """Insert the cleanup's record; returns its ``cleaned_at``."""
+    restored_json = json.dumps(
+        [
+            {"entry_id": r.entry_id, "superseded_by": r.superseded_by, "head": r.head}
+            for r in restored
+        ]
+    )
+    cleaned_at = await conn.fetchval(
+        CLEANUP_INSERT,
+        cleanup_id,
+        agent,
+        since,
+        until,
+        cleaned_by,
+        withdraw_ids,
+        restored_json,
+        set_aside,
+        dropped_json(unpinned),
+        self_service,
+    )
+    return cast(datetime, cleaned_at)
+
+
+async def _lock_undo_agents(conn: asyncpg.Connection, row: asyncpg.Record) -> None:
+    # The agent's lock, and that of every author whose memories it
+    # withdrew, in name order as the apply takes them.
+    authors = {
+        r["author"] for r in await conn.fetch(CLEANUP_AUTHORS_OF, list(row["withdrawn_ids"]))
+    }
+    for name in sorted(authors | {row["agent"]}):
+        await conn.execute(CLEANUP_AGENT_LOCK, name)
+
+
+async def _undoable_record(
+    conn: asyncpg.Connection, row: asyncpg.Record, cleanup_id: str
+) -> AgentCleanupRecord:
+    """The cleanup's record, re-read under the locks; refused when it cannot be undone."""
+    # Re-read under the lock: a racing cleanup or undo has finished by now.
+    mine = [row_to_cleanup(r) for r in await conn.fetch(CLEANUP_OF_AGENT, row["agent"])]
+    record = next(m for m in mine if m.id == cleanup_id)
+    reason = cleanup_undo_refusal(record, mine)
+    if reason is not None:
+        raise AgentCleanupRefused(reason)
+    return record
+
+
+async def _lock_undo_targets(conn: asyncpg.Connection, record: AgentCleanupRecord) -> None:
+    """The pin locks of the fleets the undo touches, then the entry rows FOR UPDATE."""
+    touched = list(
+        dict.fromkeys(
+            [
+                *record.withdrawn_ids,
+                *(r.entry_id for r in record.restored),
+                *(r.superseded_by for r in record.restored),
+                *(r.head for r in record.restored if r.head),
+            ]
+        )
+    )
+    fleets = sorted(
+        {str(r["fleet_id"]) for r in await conn.fetch(CLEANUP_FLEETS_OF, touched)}
+        | {d.fleet_id for d in record.unpinned_pins}
+    )
+    for fid in fleets:
+        await conn.execute(LOCK_FLEET_PINS, fid)
+    await conn.execute(CLEANUP_LOCK_ENTRIES, touched, timeout=LONG_OP_TIMEOUT)
+
+
+async def _restore_unpinned(
+    conn: asyncpg.Connection, record: AgentCleanupRecord
+) -> tuple[list[DroppedPin], list[DroppedPin]]:
+    """Re-pin what the cleanup unpinned, fleet by fleet; returns (restored, skipped)."""
+    restored_pins: list[DroppedPin] = []
+    skipped_pins: list[DroppedPin] = []
+    for fid in sorted({d.fleet_id for d in record.unpinned_pins}):
+        mine_pins = [d for d in record.unpinned_pins if d.fleet_id == fid]
+        put, left = await restore_fleet_pins(conn, fid, mine_pins, CLEANUP_PINNABLE)
+        restored_pins.extend(put)
+        skipped_pins.extend(left)
+    return restored_pins, skipped_pins
+
+
 class AgentCleanupStore(PgConnections):
     async def scan_agent_cleanup(
         self,
@@ -356,104 +550,34 @@ class AgentCleanupStore(PgConnections):
         check_window(since, until)
         names = sorted(set(authors or ()) | {agent})
         vis3, extra3 = readable_clause(visibility, 3)
-        wanted = list(dict.fromkeys(restore_ids or ()))
-        if any(not is_valid_uuid(w) for w in wanted):
-            raise AgentCleanupRefused("restore_ids names memories that cannot be restored")
-        wanted = [str(uuid.UUID(w)) for w in wanted]
+        wanted = _canonical_restore_ids(restore_ids)
         cleanup_id = str(uuid.uuid4())
         with _cleanup_contention("cleanup"):
             async with self._transaction() as conn:
                 await conn.execute(MERGE_SETTINGS)
-                # One cleanup or undo per agent at a time. A cleanup of several
-                # owned authors (ADR 0118) takes each one's lock, in name order,
-                # so it also waits for an admin cleanup of a retired agent.
-                for name in names:
-                    await conn.execute(CLEANUP_AGENT_LOCK, name)
-                # Pin locks first, in fleet order (a merge takes the fleet rows,
-                # then these), then the memory rows: a concurrent supersede or
-                # withdraw of one waits for this commit, then sees its new state.
-                fleets = sorted(
-                    {
-                        str(r["fleet_id"])
-                        for r in await conn.fetch(CLEANUP_FLEETS, names, since, until)
-                    }
-                    | {
-                        str(r["fleet_id"])
-                        for r in await conn.fetch(
-                            CLEANUP_PIN_FLEETS, names, since, until, timeout=LONG_OP_TIMEOUT
-                        )
-                    }
-                )
-                for fid in fleets:
-                    await conn.execute(LOCK_FLEET_PINS, fid)
-                locked = await conn.fetch(
-                    CLEANUP_WITHDRAW_LOCK, names, since, until, timeout=LONG_OP_TIMEOUT
-                )
-                withdraw_ids = [str(r["id"]) for r in locked]
-                restorable = {
-                    str(r["id"]): (str(r["first"]), str(r["head"]))
-                    for r in await conn.fetch(
-                        _cleanup_restorable_lock(vis3),
-                        names,
-                        since,
-                        until,
-                        *extra3,
-                        timeout=LONG_OP_TIMEOUT,
-                    )
-                }
+                withdraw_ids = await _lock_withdrawal_scope(conn, names, since, until)
+                restorable = await _lock_restorable(conn, names, since, until, vis3, extra3)
                 restore = check_restore_ids(list(restorable), wanted)
-                # The agent's own upserts of these rows wait for the commit and
-                # then clear the mark (UPSERT_FEEDBACK).
-                set_aside = len(
-                    await conn.fetch(
-                        CLEANUP_SET_ASIDE, agent, since, until, cleanup_id, timeout=LONG_OP_TIMEOUT
-                    )
-                )
+                set_aside = await _set_aside_ratings(conn, agent, since, until, cleanup_id)
                 check_counts_unchanged(
                     len(withdraw_ids), set_aside, expected_withdraw, expected_ratings
                 )
                 if not withdraw_ids and not set_aside:
                     return CleanupOutcome(None)
-                unpinned: tuple[DroppedPin, ...] = ()
-                if withdraw_ids:
-                    await conn.execute(
-                        CLEANUP_WITHDRAW,
-                        withdraw_ids,
-                        cleanup_reason(cleanup_id),
-                        timeout=LONG_OP_TIMEOUT,
-                    )
-                    unpinned = tuple(
-                        DroppedPin(
-                            r["fleet_id"], str(r["entry_id"]), r["pinned_by"], r["pinned_at"]
-                        )
-                        for r in await conn.fetch(
-                            CLEANUP_UNPIN, withdraw_ids, restore, timeout=LONG_OP_TIMEOUT
-                        )
-                    )
-                if restore:
-                    await conn.execute(CLEANUP_RESTORE, restore, timeout=LONG_OP_TIMEOUT)
-                restored = tuple(RestoredEntry(e, *restorable[e]) for e in restore)
-                cleaned_at = await conn.fetchval(
-                    CLEANUP_INSERT,
-                    cleanup_id,
-                    agent,
-                    since,
-                    until,
-                    cleaned_by,
-                    withdraw_ids,
-                    json.dumps(
-                        [
-                            {
-                                "entry_id": r.entry_id,
-                                "superseded_by": r.superseded_by,
-                                "head": r.head,
-                            }
-                            for r in restored
-                        ]
-                    ),
-                    set_aside,
-                    dropped_json(unpinned),
-                    self_service,
+                unpinned = await _withdraw_and_unpin(conn, cleanup_id, withdraw_ids, restore)
+                restored = await _restore_replaced(conn, restore, restorable)
+                cleaned_at = await _record_cleanup(
+                    conn,
+                    cleanup_id=cleanup_id,
+                    agent=agent,
+                    since=since,
+                    until=until,
+                    cleaned_by=cleaned_by,
+                    withdraw_ids=withdraw_ids,
+                    restored=restored,
+                    set_aside=set_aside,
+                    unpinned=unpinned,
+                    self_service=self_service,
                 )
         record = AgentCleanupRecord(
             cleanup_id,
@@ -485,37 +609,9 @@ class AgentCleanupStore(PgConnections):
                 row = await conn.fetchrow(CLEANUP_GET, cleanup_id)
                 if row is None:
                     raise UnknownAgentCleanup(f"unknown agent cleanup: {cleanup_id}")
-                # The agent's lock, and that of every author whose memories it
-                # withdrew, in name order as the apply takes them.
-                authors = {
-                    r["author"]
-                    for r in await conn.fetch(CLEANUP_AUTHORS_OF, list(row["withdrawn_ids"]))
-                }
-                for name in sorted(authors | {row["agent"]}):
-                    await conn.execute(CLEANUP_AGENT_LOCK, name)
-                # Re-read under the lock: a racing cleanup or undo has finished by now.
-                mine = [row_to_cleanup(r) for r in await conn.fetch(CLEANUP_OF_AGENT, row["agent"])]
-                record = next(m for m in mine if m.id == cleanup_id)
-                reason = cleanup_undo_refusal(record, mine)
-                if reason is not None:
-                    raise AgentCleanupRefused(reason)
-                touched = list(
-                    dict.fromkeys(
-                        [
-                            *record.withdrawn_ids,
-                            *(r.entry_id for r in record.restored),
-                            *(r.superseded_by for r in record.restored),
-                            *(r.head for r in record.restored if r.head),
-                        ]
-                    )
-                )
-                fleets = sorted(
-                    {str(r["fleet_id"]) for r in await conn.fetch(CLEANUP_FLEETS_OF, touched)}
-                    | {d.fleet_id for d in record.unpinned_pins}
-                )
-                for fid in fleets:
-                    await conn.execute(LOCK_FLEET_PINS, fid)
-                await conn.execute(CLEANUP_LOCK_ENTRIES, touched, timeout=LONG_OP_TIMEOUT)
+                await _lock_undo_agents(conn, row)
+                record = await _undoable_record(conn, row, cleanup_id)
+                await _lock_undo_targets(conn, record)
                 back = await conn.fetch(
                     CLEANUP_REACTIVATE,
                     list(record.withdrawn_ids),
@@ -532,13 +628,7 @@ class AgentCleanupStore(PgConnections):
                 cleared = await conn.fetch(
                     CLEANUP_CLEAR_SET_ASIDE, cleanup_id, timeout=LONG_OP_TIMEOUT
                 )
-                restored_pins: list[DroppedPin] = []
-                skipped_pins: list[DroppedPin] = []
-                for fid in sorted({d.fleet_id for d in record.unpinned_pins}):
-                    mine_pins = [d for d in record.unpinned_pins if d.fleet_id == fid]
-                    put, left = await restore_fleet_pins(conn, fid, mine_pins, CLEANUP_PINNABLE)
-                    restored_pins.extend(put)
-                    skipped_pins.extend(left)
+                restored_pins, skipped_pins = await _restore_unpinned(conn, record)
                 undone_at = await conn.fetchval(CLEANUP_MARK_UNDONE, cleanup_id)
         return CleanupUndoOutcome(
             replace(record, undone_at=undone_at),
