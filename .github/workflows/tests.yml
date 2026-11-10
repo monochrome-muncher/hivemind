@@ -81,6 +81,17 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked
 
+      # The service database is thrown away with the job, so it does not need
+      # to survive a crash: without the WAL flushes, DDL and commits (the
+      # migration tests are mostly DDL) no longer wait on the runner's disk.
+      - name: Turn off durability on the throwaway database
+        run: |
+          docker exec "${{ job.services.postgres.id }}" psql -U hivemind -d hivemind -v ON_ERROR_STOP=1 \
+            -c "ALTER SYSTEM SET fsync = off" \
+            -c "ALTER SYSTEM SET synchronous_commit = off" \
+            -c "ALTER SYSTEM SET full_page_writes = off" \
+            -c "SELECT pg_reload_conf()"
+
       - name: Apply migrations
         run: uv run hivemind-migrate
 
