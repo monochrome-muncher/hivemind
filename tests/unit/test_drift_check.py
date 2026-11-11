@@ -282,21 +282,59 @@ def test_the_source_is_read_from_a_harness_install_record(
     assert f"(from ~/{record})" in out.stdout.splitlines()[0]
 
 
-def test_a_record_without_a_hivemind_address_is_refused(tmp_path: Path) -> None:
+@needs_git
+def test_a_record_that_also_names_the_mcp_server_uses_the_repository(tmp_path: Path) -> None:
+    mirror = _mirror(tmp_path / "hivemind")
     record = tmp_path / "config.toml"
-    record.write_text('source = "https://example.org/other.git"\n')
+    record.write_text(
+        '[mcp_servers.hivemind]\nurl = "http://127.0.0.1:9/hivemind"\n\n'
+        f'[marketplaces.hivemind]\nsource = "{mirror.as_uri()}"\n'
+    )
     out = _drift(tmp_path, _install(tmp_path / "i"), "--source-from", record)
-    assert out.returncode == 2 and "found no Hivemind git address" in out.stderr
+    assert out.returncode == 0, out.stderr
+    assert f"of {mirror.as_uri()} (from ~/config.toml)" in out.stdout
 
 
 @needs_git
-def test_a_failed_fetch_never_prints_credentials(tmp_path: Path) -> None:
+def test_a_record_without_a_hivemind_address_falls_back_and_says_so(tmp_path: Path) -> None:
+    mirror = _mirror(tmp_path / "mirror")
+    source = tmp_path / ".config" / "hivemind" / "plugin-source"
+    source.parent.mkdir(parents=True)
+    source.write_text(f"{mirror.as_uri()}\n")
+    record = tmp_path / "marketplaces.json"
+    record.write_text('{"hivemind": {"sourceUri": "monochrome-muncher/hivemind"}}\n')
+    out = _drift(tmp_path, _install(tmp_path / "i"), "--source-from", record)
+    assert out.returncode == 0, out.stderr
+    assert (
+        f"of {mirror.as_uri()} (from ~/.config/hivemind/plugin-source; "
+        "no Hivemind git address in ~/marketplaces.json)"
+    ) in out.stdout.splitlines()[0]
+
+
+@needs_git
+@pytest.mark.parametrize("password", ["s3cret", "s3c@ret"])
+def test_a_failed_fetch_never_prints_credentials(tmp_path: Path, password: str) -> None:
     installed = _install(tmp_path / "installed")
-    out = _drift(tmp_path, installed, "--repo", "https://agent:s3cret@127.0.0.1:9/hivemind.git")
+    out = _drift(
+        tmp_path, installed, "--repo", f"https://agent:{password}@127.0.0.1:9/hivemind.git"
+    )
     assert out.returncode == 2
-    assert "s3cret" not in out.stdout + out.stderr
+    assert "s3c" not in out.stdout + out.stderr and "ret@" not in out.stdout + out.stderr
     assert "https://127.0.0.1:9/hivemind.git (--repo)" in out.stderr
     assert "--ref <branch>" in out.stderr
+
+
+@needs_git
+def test_a_source_that_looks_like_an_option_is_never_run(tmp_path: Path) -> None:
+    ran = tmp_path / "ran"
+    source = tmp_path / ".config" / "hivemind" / "plugin-source"
+    source.parent.mkdir(parents=True)
+    source.write_text(f"--upload-pack=touch {ran};\n")
+    out = _drift(tmp_path, _install(tmp_path / "i"))
+    assert out.returncode == 2
+    out = _drift(tmp_path, _install(tmp_path / "j"), "--ref", "main")
+    assert out.returncode == 2
+    assert not ran.exists()
 
 
 @needs_git

@@ -107,7 +107,7 @@ compare_versions() {
 
 # A URL without any user:password@ part, for printing.
 without_credentials() {
-  printf '%s' "$1" | sed 's#^\([a-zA-Z][a-zA-Z0-9+.-]*://\)[^/@]*@#\1#'
+  printf '%s' "$1" | sed 's#^\([a-zA-Z][a-zA-Z0-9+.-]*://\)[^/]*@#\1#'
 }
 
 # The remote of a clone of the Hivemind repository that holds $1, if any.
@@ -129,23 +129,48 @@ marketplace_of() {
     printf '%s' "$plugins/marketplaces/$marketplace"
 }
 
-# The first git address in file $1 whose repository name contains
-# "hivemind", without a git+ or git: prefix, a #fragment or an @ref.
-address_in() {
+# The git addresses in file $1 whose repository name contains "hivemind",
+# without a git+ or git: prefix, a #fragment or an @ref.
+addresses_in() {
   grep -oE "(git\+|git:)?([A-Za-z][A-Za-z0-9+.-]*://|git@)[^\"' ,;<>]+" "$1" 2>/dev/null |
     sed -e 's/^git+//' -e 's/^git:\([A-Za-z][A-Za-z0-9+.-]*:\/\/\)/\1/' -e 's/#.*//' \
       -e 's/\(\/[^/@]*\)@[^/]*$/\1/' -e 's/\/*$//' |
-    grep -E '[/:][^/:]*hivemind[^/]*$' | head -n 1
+    grep -E '[/:][^/:]*hivemind[^/]*$'
 }
 
+# The first of those addresses that git can reach, else the first: the same
+# file can also name the Hivemind MCP server, which is not a repository.
+address_in() {
+  addresses_in "$1" >"$scratch/addresses"
+  if [ "$(grep -c . "$scratch/addresses")" -gt 1 ]; then
+    while IFS= read -r address; do
+      GIT_TERMINAL_PROMPT=0 git ls-remote -- "$address" HEAD >/dev/null 2>&1 &&
+        printf '%s' "$address" && return
+    done <"$scratch/addresses"
+  fi
+  head -n 1 "$scratch/addresses"
+}
+
+# A record can hold no usable address (a GitHub owner/name shorthand, a
+# local folder), so the search goes on and the source line says so.
 choose_repo() {
   [ -n "$repo" ] && return
   if [ -n "$source_from" ]; then
     [ -r "$source_from" ] || die "cannot read $source_from"
     repo=$(address_in "$source_from")
-    [ -n "$repo" ] || die "found no Hivemind git address in $(shown "$source_from"); pass --repo"
-    repo_from=$(shown "$source_from")
-  elif [ -n "$installed" ] && repo=$(own_remote "$installed") && [ -n "$repo" ]; then
+    if [ -n "$repo" ]; then
+      repo_from=$(shown "$source_from")
+      return
+    fi
+  fi
+  pick_fallback_repo
+  if [ -n "$source_from" ]; then
+    repo_from="$repo_from; no Hivemind git address in $(shown "$source_from")"
+  fi
+}
+
+pick_fallback_repo() {
+  if [ -n "$installed" ] && repo=$(own_remote "$installed") && [ -n "$repo" ]; then
     repo_from="the installed plugin's git remote"
   elif [ -n "$installed" ] && clone=$(marketplace_of "$installed") &&
     repo=$(own_remote "$clone") && [ -n "$repo" ]; then
@@ -161,7 +186,7 @@ choose_repo() {
 }
 
 newest_release_tag() {
-  GIT_TERMINAL_PROMPT=0 git ls-remote --tags --refs "$repo" 'v*' 2>/dev/null |
+  GIT_TERMINAL_PROMPT=0 git ls-remote --tags --refs -- "$repo" 'v*' 2>/dev/null |
     sed -n 's#^.*refs/tags/v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$#\1#p' |
     awk -F. '{ printf "%09d.%09d.%09d v%s\n", $1, $2, $3, $0 }' |
     sort | tail -n 1 | cut -d' ' -f2
@@ -176,7 +201,7 @@ fetch_latest() {
     [ -n "$ref" ] || die "found no vX.Y.Z tag at $shown_repo ($repo_from): it is unreachable, a mirror without tags (pass --ref <branch>), or not the right address (pass --repo, or --latest with a checkout)"
   fi
   GIT_TERMINAL_PROMPT=0 git -c advice.detachedHead=false clone --quiet --depth 1 \
-    --branch "$ref" "$repo" "$1" 2>/dev/null || die "could not fetch $ref from $shown_repo ($repo_from)"
+    --branch "$ref" -- "$repo" "$1" 2>/dev/null || die "could not fetch $ref from $shown_repo ($repo_from)"
 }
 
 # The marked blocks of a file, without carriage returns or trailing blanks.
