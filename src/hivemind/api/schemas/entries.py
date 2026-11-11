@@ -562,7 +562,8 @@ class FleetSearchRequest(SearchRequest):
 
 class AdminSearchRequest(FleetSearchRequest):
     """``POST /v1/admin/search``: the fleet search, optionally run as one agent (``as_agent``,
-    ADR 0136) and with its ranking explained (``explain``, ADR 0137). Admin only: the portal's request has no such field."""
+    ADR 0136) and with its ranking explained (``explain``, ADR 0137). Admin only: the portal's
+    request has neither field."""
 
     as_agent: str | None = Field(default=None, max_length=MAX_AGENT_NAME_CHARS)
     # Each hit carries the parts of its score (ADR 0137).
