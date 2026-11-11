@@ -131,7 +131,7 @@ def _build_embedder(settings: Settings) -> Embedder:
 
 
 def _build_authenticator(settings: Settings) -> Authenticator:
-    """The production Authenticator (ADR 0008)."""
+    """The production Authenticator; keys live in the credentials table (ADR 0012)."""
     module = _lazy_module("hivemind.store", "pass an explicit authenticator")
     builder = getattr(module, "build_authenticator", None)
     if builder is None:

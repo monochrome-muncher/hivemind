@@ -45,7 +45,7 @@ def build_store(settings: Settings) -> Store:
 
 
 def build_authenticator(settings: Settings) -> Authenticator:
-    """Build an ``Authenticator`` (ADR 0008) with its own pool, sized like the store's, so a
+    """Build an ``Authenticator`` (ADR 0012) with its own pool, sized like the store's, so a
     pod's connections are the sum of both."""
     return PgAuthenticator(
         settings.database_url,

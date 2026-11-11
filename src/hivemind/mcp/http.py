@@ -1,5 +1,5 @@
 """The hostable streamable-HTTP MCP runner (ADR 0010): each agent authenticates **per request**
-with its own key (ADR 0008). The credential goes in a context var and ``build_server`` re-binds
+with its own agent key (ADR 0012). The credential goes in a context var and ``build_server`` re-binds
 the services to it on every dispatch, so revocation is immediate."""
 
 from __future__ import annotations
@@ -155,6 +155,7 @@ _PROBE_LIVENESS = "/mcp/liveness"
 _PROBE_HEALTH = "/mcp/health"
 _PROBE_DATABASE = "/mcp/health/database"
 _METRICS_PATH = "/metrics"
+# The MCP SDK's default streamable-HTTP route; not set here, only used as a metrics label.
 _MCP_PATH = "/mcp"
 # The paths the runner serves; any other path is one label, ``unmatched``.
 _KNOWN_PATHS = frozenset(

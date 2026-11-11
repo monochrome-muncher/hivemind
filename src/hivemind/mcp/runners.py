@@ -70,7 +70,7 @@ def _mcp_key_unknown_hint() -> str:
 
 def main_pg() -> None:
     """Run the Postgres-backed stdio server, one process per agent, so every write carries verified
-    provenance (SPEC §8.1, ADR 0008). Pools are closed on exit."""
+    provenance (SPEC §8.1, ADR 0012). Pools are closed on exit."""
     from hivemind.embeddings import build_embedder
     from hivemind.extractor import build_extractor
     from hivemind.store import build_authenticator, build_store

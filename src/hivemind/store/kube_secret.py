@@ -50,7 +50,8 @@ class KubeSecrets:
     @classmethod
     def in_cluster(cls, sa_dir: Path = SERVICE_ACCOUNT_DIR) -> KubeSecrets:
         """Build from the pod's ServiceAccount mount and the ``KUBERNETES_SERVICE_*`` variables the
-        kubelet always injects."""
+        kubelet always injects (``enableServiceLinks: false``, as the bootstrap Job sets, does not
+        remove them)."""
         token_file = sa_dir / "token"
         if not token_file.is_file():
             raise KubeApiError(
