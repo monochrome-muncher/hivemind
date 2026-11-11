@@ -57,6 +57,11 @@ class MemoryState:
         # Agent cleanups, oldest first (ADR 0111)
         self._cleanups: list[AgentCleanupRecord] = []
 
+    def _drop_key_facts(self, name: str) -> None:
+        self._key_last_used.pop(name, None)
+        self._key_created.pop(name, None)
+        self._key_locked.pop(name, None)
+
     def _visible(self, entry: Entry, visibility: Visibility | None) -> bool:
         return visibility is None or entry_is_visible(entry, visibility)
 

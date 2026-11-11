@@ -30,6 +30,7 @@ from hivemind.domain.entry_restore import (
     RestoreViaCleanup,
 )
 from hivemind.domain.fleet_merge import FleetMergeRefused, FleetMoveRefused, UnknownFleetMerge
+from hivemind.domain.offboarding import OffboardChanged, UnknownOwner
 from hivemind.domain.redaction import RedactRefused
 from hivemind.domain.succession import AgentRetired, SuccessionRefused, UnknownSuccession
 from hivemind.embeddings import EmbeddingError
@@ -55,6 +56,7 @@ ERROR_ANSWERS: Final[dict[type[Exception], tuple[int, str]]] = {
     UnknownFleetMerge: (404, "not_found"),
     UnknownAgentCleanup: (404, "not_found"),
     UnknownSuccession: (404, "not_found"),
+    UnknownOwner: (404, "unknown_owner"),  # ADR 0135
     EntryNotActive: (409, "conflict"),
     RedactRefused: (409, "conflict"),  # ADR 0125
     EntryNotWithdrawn: (409, "entry_not_withdrawn"),  # ADR 0124
@@ -67,6 +69,7 @@ ERROR_ANSWERS: Final[dict[type[Exception], tuple[int, str]]] = {
     FleetMergeRefused: (409, "merge_refused"),
     AgentCleanupRefused: (409, "cleanup_refused"),
     SuccessionRefused: (409, "succession_refused"),
+    OffboardChanged: (409, "offboard_changed"),  # ADR 0135
     InvalidAgentStatus: (409, "invalid_status"),
     AgentRetired: (409, "agent_retired"),  # ADR 0113
     NameTaken: (409, "name_conflict"),

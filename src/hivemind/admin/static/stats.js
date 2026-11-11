@@ -4,7 +4,7 @@
 
 import {
   h, state, loadAgentsAndFleets, fetchMetrics, fetchActivity, pageHead, refreshButton, windowSelector, card, unavailable,
-  fmtNum, fmtAgo, fmtTime, fmtOf, link, memoriesHref, feedbackHref, hooks, miniBar, agentHref, fill,
+  fmtNum, fmtAgo, fmtTime, fmtOf, link, memoriesHref, feedbackHref, hooks, miniBar, agentHref, ownerHref, fill,
 } from "./core.js";
 
 let tab = "fleets";
@@ -46,7 +46,7 @@ function userRows(activity) {
   for (const a of activity.agents || []) {
     const owner = a.owner_alias || NONE;
     if (!users.has(owner)) {
-      users.set(owner, { name: owner, href: null, agents: 0, active_agents: 0, entries: 0, recent_writes: 0, verdicts_given: 0, last_activity: null });
+      users.set(owner, { name: owner, href: a.owner_alias ? ownerHref(owner) : null, agents: 0, active_agents: 0, entries: 0, recent_writes: 0, verdicts_given: 0, last_activity: null });
     }
     const u = users.get(owner);
     u.agents += 1;

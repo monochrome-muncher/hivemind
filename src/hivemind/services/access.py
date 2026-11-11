@@ -45,6 +45,7 @@ from hivemind.services.errors import NameTaken as NameTaken  # re-exported: defi
 from hivemind.services.errors import PermissionDenied
 from hivemind.services.fleet_merge import FleetMergeService
 from hivemind.services.guards import require_admin
+from hivemind.services.offboarding import OffboardingService
 from hivemind.services.successions import SuccessionService
 
 _NAME_TAKEN = "agent name is already taken (names are never reused; pick another name)"
@@ -100,6 +101,7 @@ class AccessService:
         self._authenticator = authenticator
         self.merges = FleetMergeService(store)
         self.successions = SuccessionService(store, self._require_authenticator)
+        self.offboarding = OffboardingService(store, self._require_authenticator)
         self.history = AgentHistoryService(store)
         self.cleanups = AgentCleanupService(store, revoke=self.revoke, revocable=self.revocable)
         # Called after an owner alias changes, to drop cached owner-level figures (ADR 0122).

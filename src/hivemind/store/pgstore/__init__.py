@@ -15,6 +15,7 @@ from hivemind.store.pgstore.feedback import FeedbackStore
 from hivemind.store.pgstore.fleet_merge import FleetMergeStore
 from hivemind.store.pgstore.fleets import FleetStore
 from hivemind.store.pgstore.metrics import MetricsStore
+from hivemind.store.pgstore.offboarding import OffboardingStore
 from hivemind.store.pgstore.pins import PinStore
 from hivemind.store.pgstore.search import SearchStore
 from hivemind.store.pgstore.successions import SuccessionStore
@@ -33,6 +34,7 @@ class PgStore(
     AgentCleanupStore,
     AgentStore,
     SuccessionStore,
+    OffboardingStore,
     AuditStore,
     PgConnections,
 ):

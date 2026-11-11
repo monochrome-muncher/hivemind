@@ -28,6 +28,7 @@ from hivemind.domain.entry_restore import (
     RestoreViaCleanup,
 )
 from hivemind.domain.fleet_merge import FleetMergeRefused, FleetMoveRefused, UnknownFleetMerge
+from hivemind.domain.offboarding import OffboardChanged, UnknownOwner
 from hivemind.domain.redaction import RedactRefused
 from hivemind.domain.succession import AgentRetired, SuccessionRefused, UnknownSuccession
 from hivemind.embeddings import EmbeddingError
@@ -52,6 +53,8 @@ BUILDERS: dict[type[Exception], Callable[[], Exception]] = {
     UnknownFleetMerge: lambda: UnknownFleetMerge("unknown merge: m"),
     UnknownAgentCleanup: lambda: UnknownAgentCleanup("unknown cleanup: c"),
     UnknownSuccession: lambda: UnknownSuccession("unknown succession: s"),
+    OffboardChanged: lambda: OffboardChanged("the agents changed since the preview (a)"),
+    UnknownOwner: lambda: UnknownOwner("no agent has the owner alias 'x'"),
     EntryNotActive: lambda: EntryNotActive("entry e1 is already withdrawn"),
     RedactRefused: lambda: RedactRefused("entry e1 is already redacted"),
     EntryNotWithdrawn: lambda: EntryNotWithdrawn("entry e1 is active, not withdrawn"),

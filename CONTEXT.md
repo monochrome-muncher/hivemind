@@ -245,6 +245,10 @@ _Avoid_: signup, onboarding, enrollment
 The active agent an admin names when retiring another agent. It owns every memory the retired agent wrote (its `self` notes, its fleet memories and its pins): it reads, supersedes and withdraws them, sees them in its portal and cannot rate them. `author` stays the retired agent. Chains are allowed, cycles are not, and an undo ends the ownership but does not bring the retired agent back (ADR 0113).
 _Avoid_: heir, new owner (owner alias is the human contact), replacement
 
+**Offboarding**:
+Retiring or revoking every agent of one owner alias in one step, when the person behind them leaves. The alias matches exactly as stored, and each retirement stays individually undoable (ADR 0135).
+_Avoid_: deprovisioning, deleting a user
+
 **Retired agent**:
 A revoked agent whose memories were handed to a successor. It cannot be activated again until the retirement is undone (ADR 0113).
 _Avoid_: deleted agent, archived agent

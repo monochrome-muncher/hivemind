@@ -110,6 +110,12 @@ from hivemind.api.schemas.metrics import (
     SupersessionRate,
     TopicDispersion,
 )
+from hivemind.api.schemas.offboarding import (
+    ExpectedAgent,
+    OffboardedAgentOut,
+    OffboardingOut,
+    OffboardRequest,
+)
 from hivemind.api.schemas.pins import PinnedOut, PinOut, PinsOut, UnpinOut
 from hivemind.api.schemas.portal import (
     PortalHistoryItemOut,
@@ -156,6 +162,7 @@ __all__ = [
     "EntriesOut",
     "EntryOut",
     "ErrorBody",
+    "ExpectedAgent",
     "FeedbackCountsOut",
     "FeedbackLogEntryOut",
     "FeedbackLogItemOut",
@@ -190,6 +197,9 @@ __all__ = [
     "MergePinOut",
     "MergeSideOut",
     "MetricsOut",
+    "OffboardRequest",
+    "OffboardedAgentOut",
+    "OffboardingOut",
     "OwnerShare",
     "PinOut",
     "PinnedOut",

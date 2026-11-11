@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol, runtime_checkable
@@ -56,6 +56,7 @@ from hivemind.domain.fleet_merge import (
     UnmergeOutcome,
 )
 from hivemind.domain.health import Convergence, FleetHealth
+from hivemind.domain.offboarding import OffboardMode, OffboardStep
 from hivemind.domain.pin import Pin, PinRefusal, PinWrite
 from hivemind.domain.redaction import RedactOutcome
 from hivemind.domain.succession import HandedDown, Succession, owned_authors
@@ -543,6 +544,29 @@ class Store(Protocol):
         ``successor`` not active); ``SuccessionRefused`` (``retired`` already hands down, or
         ``successor`` hands down to it directly or through a chain). ``was`` is ``retired``'s
         status seen under the lock."""
+        ...
+
+    async def offboard_owner(
+        self,
+        alias: str,
+        mode: OffboardMode,
+        successor: str | None,
+        by: str,
+        expected: Mapping[str, str] | None = None,
+    ) -> list[OffboardStep]:
+        """Offboard every agent whose owner alias is exactly ``alias`` (ADR 0135), in one
+        transaction with their rows (and the successor's) locked, so states are re-checked here
+        and the plan is applied whole or not at all.
+
+        ``mode`` ``retire``: each active or revoked agent is retired to ``successor`` as
+        ``retire_agent`` does, a pending one is rejected. ``revoke``: active agents are revoked,
+        pending ones rejected, ``successor`` is ``None``. Agents already revoked (or retired) are
+        skipped. An agent that is retired yet active (an older pod re-activated it) is revoked under its
+        succession in both modes. Returns one step per agent, by name. ``UnknownOwner``; ``UnknownAgent``
+        (successor); ``InvalidAgentStatus`` (successor not active); ``SuccessionRefused``
+        (successor of the same owner, or a cycle); ``InvalidInput`` (mode and successor do not go
+        together, checked first). ``expected`` (agent name to action, the preview's) refuses with
+        ``OffboardChanged`` when the plan under the locks differs. Every refusal changes nothing."""
         ...
 
     async def undo_succession(self, retired: str) -> Succession:

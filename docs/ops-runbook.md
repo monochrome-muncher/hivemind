@@ -1181,3 +1181,52 @@ The Job uses the API's ConfigMap and Secret and sets
 destinations. Like every runner it migrates first, which is why
 it must use the image the Deployments run. If the Job stops, add
 `"--after", "<id>"` from its log to `args` and apply it again.
+
+## 15. When someone leaves (ADR 0135)
+
+A person's agents should not outlive their access. **Offboarding** retires
+or revokes every agent registered under their owner alias in one step. It
+needs the admin key. Owner aliases are self-reported labels, so read the
+list before you confirm.
+
+In the panel, open the owner (Stats, **Users** tab; the **Owner** column of
+**Agents**; or "Owned by" on an agent's page) and press **Offboard this
+owner…**. Choose:
+
+- **Retire to a successor** (the default). Pick an active agent of another
+  owner. Their memories keep an owner: it reads, supersedes and withdraws
+  them (section 12). Every agent of the owner is retired in the same step.
+- **Revoke all.** The keys stop and the memories keep no owner.
+
+The preview lists each agent and what happens to it (retire, revoke, reject
+a pending registration, or skip one that is already revoked or retired).
+Type the alias to apply. Or call the API:
+
+```sh
+# Preview: nothing changes.
+curl -s -X POST -H "X-API-Key: $ADMIN_KEY" -H "Content-Type: application/json" \
+  -d '{"mode": "retire", "successor": "team-bot", "dry_run": true}' \
+  "https://hivemind.example/v1/admin/owners/jane.doe/offboard"
+# Apply (all agents or none).
+curl -s -X POST -H "X-API-Key: $ADMIN_KEY" -H "Content-Type: application/json" \
+  -d '{"mode": "retire", "successor": "team-bot", "dry_run": false,
+       "expected_agents": [{"name": "jane-bot", "action": "retire"}]}' \
+  "https://hivemind.example/v1/admin/owners/jane.doe/offboard"
+```
+
+- **The alias matches exactly**, capitals included: `Jane.Doe` and `jane.doe`
+  are two owners. `404 unknown_owner` means no agent has that alias.
+- **Applying sends the preview's agents** (`expected_agents`, the `{name, action}` list). If an agent changed since, nothing is applied (`409 offboard_changed`): preview again.
+- **Refusals** change nothing: the successor must be active
+  (`409 invalid_status`) and must not belong to the same owner
+  (`409 succession_refused`); a cycle for any one agent refuses the whole
+  request. `retire` needs a successor and `revoke` takes none (`422`).
+- **Undo.** Each retirement is an ordinary succession: undo one from the
+  **Retired agents** list on the Agents page or with
+  `POST /v1/admin/successions/{retired}/undo`. A revoke cannot be undone; an
+  agent revoked this way needs a new key to come back.
+- **Audit.** The rows are the ones a retire or revoke writes (`agent.retire`,
+  `agent.revoke`), one set per agent, each with `offboarded_owner` in its
+  detail. Filter the audit log by action and look for it.
+- **An alias with a slash** cannot be addressed by this route. Retire or
+  revoke that owner's agents one by one (section 12).

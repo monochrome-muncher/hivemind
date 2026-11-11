@@ -11,7 +11,7 @@
 
 import {
   api, h, state, guarded, parseHash, loadAgentsAndFleets, fetchMetrics, fetchActivity, fleetName, pageHead, refreshButton,
-  card, stat, statusBadge, levelBadge, fmtNum, fmtAgo, fmtTime, link, memoriesHref, feedbackHref, agentHref, hooks,
+  card, stat, statusBadge, levelBadge, fmtNum, fmtAgo, fmtTime, link, memoriesHref, feedbackHref, agentHref, ownerHref, hooks,
   windowSelector, fill, auditHref, optional,
 } from "./core.js";
 import { openEntry } from "./drawer.js";
@@ -29,7 +29,7 @@ function profile(agent) {
         : null)],
     ["Trust level", agent.status === "pending" ? h("span", { class: "muted", text: "—" }) : levelBadge(agent.trust_level)],
     ["Home fleet", agent.home_fleet_id ? link(fleetName(agent.home_fleet_id), memoriesHref({ fleet: agent.home_fleet_id })) : "—"],
-    ["Owner", agent.owner_alias || "—"],
+    ["Owner", agent.owner_alias ? link(agent.owner_alias, ownerHref(agent.owner_alias)) : "—"],
     ["Registered", h("span", { title: fmtTime(agent.created_at), text: agent.created_at ? fmtAgo(agent.created_at) : "—" })],
     ["Activated", h("span", { title: fmtTime(agent.activated_at), text: agent.activated_at ? fmtAgo(agent.activated_at) : "—" })],
   ];
@@ -110,7 +110,7 @@ export async function viewAgent(root) {
     table.el);
 
   fill(root, 
-    pageHead(name, agent && agent.owner_alias ? `Owned by ${agent.owner_alias}` : null,
+    pageHead(name, agent && agent.owner_alias ? h("span", {}, "Owned by ", link(agent.owner_alias, ownerHref(agent.owner_alias))) : null,
       link("All agents", "#/agents", { class: "link small" }), windowSelector(() => hooks.refresh()), refreshButton()),
     numbers(row, flags, state.days),
     profile(agent),

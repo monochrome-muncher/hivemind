@@ -60,6 +60,11 @@ ADMIN_BODIES = {
     ("POST", "/v1/admin/fleets/{source_id}/merge"): {"new_fleet_name": "c", "dry_run": False},
     ("PATCH", "/v1/admin/fleets/{fleet_id}"): {"name": "renamed"},
     ("POST", "/v1/admin/agents/{name}/retire"): {"successor": "alice", "dry_run": False},
+    ("POST", "/v1/admin/owners/{alias}/offboard"): {
+        "mode": "revoke",
+        "dry_run": False,
+        "expected_agents": [],
+    },
     ("POST", "/v1/admin/fleets/{source_id}/move"): {
         "agents": ["a"],
         "new_fleet_name": "c",
@@ -109,6 +114,7 @@ async def test_every_registered_admin_route_is_403_for_non_admin_keys(headers) -
             ("GET", "/v1/admin/feedback"),
             ("GET", "/v1/admin/flagged"),
             ("POST", "/v1/admin/agents/{name}/retire"),
+            ("POST", "/v1/admin/owners/{alias}/offboard"),
             ("GET", "/v1/admin/successions"),
         } <= set(routes)
         for method, template in routes:
@@ -119,6 +125,7 @@ async def test_every_registered_admin_route_is_403_for_non_admin_keys(headers) -
                 source_id=FAKE_ID,
                 merge_id=FAKE_ID,
                 retired="ghost",
+                alias="ghost",
                 cleanup_id=FAKE_ID,
             )
             body = ADMIN_BODIES.get((method, template))
