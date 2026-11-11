@@ -18,7 +18,7 @@ from hivemind.domain.access import (
 from hivemind.domain.agent_cleanup import AgentCleanupRecord
 from hivemind.domain.audit import AuditRecord
 from hivemind.domain.entry import Entry, EntryFilters, EntryState
-from hivemind.domain.feedback import Feedback, Verdict
+from hivemind.domain.feedback import Feedback, ReliedOnChange, Verdict
 from hivemind.domain.fleet_merge import DroppedPin, FleetMergeRecord, plan_pin_restore
 from hivemind.domain.pin import Pin
 from hivemind.domain.succession import Succession
@@ -84,41 +84,69 @@ class MemoryState:
         return not filters.relied_on_changed or self._relied_on_changed(entry, filters.reporter)
 
     def _relied_on_changed(self, entry: Entry, reporter: tuple[str, str] | None) -> bool:
-        """ADR 0098, as PgStore's clause: the reporter's helpful row, then since it a withdrawal
-        (undated counts), another user's successor, or another user's newer live stale/wrong
-        report. Callers hold the lock."""
+        """ADR 0098, as PgStore's clause: something changed since the reporter's helpful row.
+        Callers hold the lock."""
         if reporter is None:
             return False
-        key = (entry.id, *reporter)
+        change = self._relied_on_change(entry.id, reporter, count_flags=False)
+        return change is not None and (
+            change.withdrawn or change.superseded or change.stale + change.wrong > 0
+        )
+
+    def _relied_on_change(
+        self, entry_id: str, reporter: tuple[str, str], *, count_flags: bool = True
+    ) -> ReliedOnChange | None:
+        """What changed on ``entry_id`` since the reporter's helpful row: a withdrawal (undated
+        counts), another user's successor, another user's newer live stale/wrong reports; ``None``
+        without that row. ``count_flags=False`` skips the feedback scan once a withdrawal or
+        supersession already qualifies (the filter's yes/no). Callers hold the lock."""
+        entry = self._entries.get(entry_id)
+        key = (entry_id, *reporter)
         own = self._feedback.get(key)
         if (
-            own is None
+            entry is None
+            or own is None
             or key in self._set_aside
             or own.verdict is not Verdict.HELPFUL
             or own.updated_at is None
         ):
-            return False
+            return None
         since = own.updated_at
-        if entry.state is EntryState.WITHDRAWN:
-            at = self._withdrawn_at.get(entry.id)
-            if at is None or at > since:
-                return True
-        if entry.state is EntryState.SUPERSEDED:
-            successor = self._entries.get(entry.superseded_by or "")
-            if (
-                successor is not None
-                and successor.author != reporter[0]
-                and successor.created_at > since
-            ):
-                return True
-        return any(
-            fb.entry_id == entry.id
+        withdrawn_at = self._withdrawn_at.get(entry_id)
+        successor = self._entries.get(entry.superseded_by or "")
+        superseded = (
+            entry.state is EntryState.SUPERSEDED
+            and successor is not None
+            and successor.author != reporter[0]
+            and successor.created_at > since
+        )
+        withdrawn = entry.state is EntryState.WITHDRAWN and (
+            withdrawn_at is None or withdrawn_at > since
+        )
+        newer = (
+            self._newer_flags(entry_id, reporter[0], since)
+            if count_flags or not (superseded or withdrawn)
+            else []
+        )
+        return ReliedOnChange(
+            rated_helpful_at=since,
+            superseded=superseded,
+            withdrawn=withdrawn,
+            stale=newer.count(Verdict.STALE),
+            wrong=newer.count(Verdict.WRONG),
+        )
+
+    def _newer_flags(self, entry_id: str, own_user: str, since: datetime) -> list[Verdict]:
+        """The live stale/wrong verdicts other users filed after ``since``. Callers hold the lock."""
+        return [
+            fb.verdict
+            for fb in self._live_feedback().values()
+            if fb.entry_id == entry_id
             and fb.verdict is not Verdict.HELPFUL
-            and fb.user != reporter[0]
+            and fb.user != own_user
             and fb.updated_at is not None
             and fb.updated_at > since
-            for fb in self._live_feedback().values()
-        )
+        ]
 
     def _refuse_merged(self, fleet_id: str | None) -> None:
         """``FleetMerged`` for a merged fleet (ADR 0107); an unknown id passes, as on Postgres.

@@ -37,6 +37,7 @@ from hivemind.api.schemas import (
     PortalCleanupRecordOut,
     PortalCleanupRequest,
     PortalHistoryItemOut,
+    PortalReliedOnOut,
     PortalSearchRequest,
     PortalWithdrawRequest,
     UnpinOut,
@@ -172,6 +173,26 @@ async def portal_flagged(
         credential, own=True, limit=limit, offset=offset
     )
     return [FlaggedEntryOut.from_flagged(i) for i in items]
+
+
+@router.get("/portal/relied-on", response_model=list[PortalReliedOnOut])
+async def portal_relied_on(
+    credential: CredentialDep,
+    app: AppDep,
+    kind: Annotated[Kind | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = PORTAL_DEFAULT_LIMIT,
+    offset: Annotated[int, Query(ge=0, le=MAX_OFFSET)] = 0,
+) -> list[PortalReliedOnOut]:
+    """The memories the agent rated helpful that were superseded, withdrawn or flagged since (ADR
+    0138): the rows ``GET /v1/entries?relied_on_changed=true`` gives this key (ADR 0098), newest
+    memory first, each with its verdict counts and what changed. The successor's id shows only
+    if the key can read it. Agent keys only."""
+    require_agent(credential, "the agent portal")
+    items = await app.read_service.relied_on_changed(
+        credential, kind=kind, limit=limit, offset=offset
+    )
+    rows = await listed_with_counts(app, [i.entry for i in items], EntryOut)
+    return [PortalReliedOnOut.from_item(i, r) for i, r in zip(items, rows, strict=True)]
 
 
 @router.put("/portal/entries/{entry_id}/pin", response_model=PinOut)

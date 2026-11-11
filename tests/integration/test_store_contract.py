@@ -67,6 +67,7 @@ from hivemind.domain.feedback import (
     FeedbackLogFilters,
     FeedbackSignals,
     FlagBacklogFilters,
+    ReliedOnChange,
     Verdict,
     is_contested,
 )
@@ -648,6 +649,102 @@ async def test_relied_on_changed_ignores_the_callers_own_changes(adapter: Adapte
     await _fb(adapter, flagged, ME, Verdict.HELPFUL, T0)
     await _fb(adapter, flagged, (ME[0], "other-instance"), Verdict.STALE, T0 + timedelta(hours=1))
     assert await _relied(adapter) == []
+
+
+async def test_relied_on_changes_say_what_changed_since_the_rating(adapter: Adapter) -> None:
+    store = adapter.store
+    old = await write(adapter, "old", author="ann")
+    gone = await write(adapter, "gone", author="ann")
+    flagged = await write(adapter, "flagged", author="ann")
+    quiet = await write(adapter, "quiet", author="ann")
+    for entry in (old, gone, flagged, quiet):
+        await _fb(adapter, entry, ME, Verdict.HELPFUL, T0 - timedelta(days=1))
+    await write(adapter, "new", author="ann", supersedes=(old.id,))
+    await store.withdraw_entry(gone.id, "obsolete", by_user="ann")
+    for who, verdict in ((("u-a", "a"), Verdict.STALE), (("u-b", "b"), Verdict.WRONG)):
+        await _fb(adapter, flagged, who, verdict, T0)
+    await _fb(adapter, flagged, ("u-c", "c"), Verdict.STALE, T0 - timedelta(days=2))  # before
+    ids = [old.id, gone.id, flagged.id, quiet.id, NO_SUCH_ID]
+    changes = await store.relied_on_changes(ids, ME)
+    rated = T0 - timedelta(days=1)
+    assert changes[old.id] == ReliedOnChange(rated, superseded=True, withdrawn=False)
+    assert changes[gone.id] == ReliedOnChange(rated, superseded=False, withdrawn=True)
+    assert changes[flagged.id] == ReliedOnChange(rated, False, False, stale=1, wrong=1)
+    assert changes[quiet.id] == ReliedOnChange(rated, False, False)
+    assert NO_SUCH_ID not in changes
+
+
+async def test_relied_on_changes_skip_what_the_caller_did_not_rate_helpful(
+    adapter: Adapter,
+) -> None:
+    entry = await write(adapter, "rated stale", author="ann")
+    await _fb(adapter, entry, ME, Verdict.STALE, T0)
+    other = await write(adapter, "rated by another", author="ann")
+    await _fb(adapter, other, ("u-other", "other"), Verdict.HELPFUL, T0)
+    assert await adapter.store.relied_on_changes([entry.id, other.id], ME) == {}
+    assert await adapter.store.relied_on_changes([], ME) == {}
+
+
+async def test_relied_on_changes_ignore_revoked_and_own_flags(adapter: Adapter) -> None:
+    store = adapter.store
+    fleet = await store.create_fleet("blue")
+    await store.register_agent("Scout")
+    entry = await write(adapter, "flags", author="ann")
+    await _fb(adapter, entry, ME, Verdict.HELPFUL, T0)
+    await _fb(adapter, entry, ("Scout", "Scout"), Verdict.WRONG, T0 + timedelta(hours=1))
+    await _fb(adapter, entry, (ME[0], "twin"), Verdict.STALE, T0 + timedelta(hours=1))
+    await store.activate_agent("Scout", trust_level=TrustLevel.LURKER, home_fleet_id=fleet.id)
+    seen = (await store.relied_on_changes([entry.id], ME))[entry.id]
+    assert (seen.stale, seen.wrong) == (0, 1)  # the caller's own user's flag is not counted
+    await store.revoke_agent("Scout")
+    gone = (await store.relied_on_changes([entry.id], ME))[entry.id]
+    assert (gone.stale, gone.wrong) == (0, 0)
+
+
+async def _assert_changes_match_the_list(adapter: Adapter, ids: list[str]) -> None:
+    changes = await adapter.store.relied_on_changes(ids, ME)
+    changed = {i for i, c in changes.items() if c.superseded or c.withdrawn or c.stale + c.wrong}
+    assert changed == set(await _relied(adapter))
+
+
+async def test_relied_on_changes_ignore_set_aside_ratings(adapter: Adapter) -> None:
+    """ADR 0111: a cleanup sets aside the caller's helpful row, or another user's flag."""
+    store = adapter.store
+    mine = await write(adapter, "my rating set aside", author="good")
+    await _rate(adapter, mine.id, "bad", Verdict.HELPFUL, "worked", at=T0)
+    await store.withdraw_entry(mine.id, "gone", "good")
+    flagged = await write(adapter, "their flag set aside", author="good")
+    await _fb(adapter, flagged, ME, Verdict.HELPFUL, T0)
+    await _rate(adapter, flagged.id, "bad", Verdict.WRONG, "n", at=T0 + timedelta(hours=1))
+    bad = ("bad", "a")
+    before = await store.relied_on_changes([mine.id], bad)
+    assert before[mine.id].withdrawn
+    assert (await store.relied_on_changes([flagged.id], ME))[flagged.id].wrong == 1
+    await _clean(adapter)
+    assert await store.relied_on_changes([mine.id], bad) == {}
+    assert (await store.relied_on_changes([flagged.id], ME))[flagged.id].wrong == 0
+    await _assert_changes_match_the_list(adapter, [flagged.id])
+
+
+async def test_relied_on_changes_ignore_a_supersession_that_is_not_news(adapter: Adapter) -> None:
+    own = await write(adapter, "superseded by me", author="ann")
+    await _fb(adapter, own, ME, Verdict.HELPFUL, T0 - timedelta(days=1))
+    await write(adapter, "my successor", author=ME[0], supersedes=(own.id,))
+    early = await write(adapter, "replaced before I rated", author="ann")
+    await write(adapter, "their successor", author="ann", supersedes=(early.id,))
+    await _fb(adapter, early, ME, Verdict.HELPFUL, datetime.now(UTC) + timedelta(days=1))
+    changes = await adapter.store.relied_on_changes([own.id, early.id], ME)
+    assert not changes[own.id].superseded
+    assert not changes[early.id].superseded
+    await _assert_changes_match_the_list(adapter, [own.id, early.id])
+
+
+async def test_relied_on_changes_ignore_a_withdrawal_before_the_rating(adapter: Adapter) -> None:
+    gone = await write(adapter, "gone first", author="ann")
+    await adapter.store.withdraw_entry(gone.id, "obsolete", by_user="ann")
+    await _fb(adapter, gone, ME, Verdict.HELPFUL, datetime.now(UTC) + timedelta(days=1))
+    assert not (await adapter.store.relied_on_changes([gone.id], ME))[gone.id].withdrawn
+    await _assert_changes_match_the_list(adapter, [gone.id])
 
 
 async def test_malformed_fleet_filter_matches_nothing(adapter: Adapter) -> None:
