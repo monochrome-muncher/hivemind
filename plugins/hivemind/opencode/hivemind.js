@@ -176,6 +176,13 @@ async function server({ client } = {}) {
     config: async (cfg) => {
       cfg.skills = cfg.skills ?? {};
       cfg.skills.paths = [...(cfg.skills.paths ?? []), SKILLS_DIR];
+      if (process.env.KILO === "1") {
+        // KiloCode only trusts skill paths whose config source it knows.
+        cfg.skill_path_origins = {
+          ...(cfg.skill_path_origins ?? {}),
+          [SKILLS_DIR]: { trusted: true, source: fileURLToPath(import.meta.url) },
+        };
+      }
       cfg.mcp = cfg.mcp ?? {};
       if (incognito()) {
         // Hand-configured in opencode.json? Keep it from loading this session.

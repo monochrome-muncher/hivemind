@@ -132,8 +132,15 @@ itself names no harness-specific paths, and a test enforces this.
   events (`session.execution.*`, `session.compaction.ended`), which is why
   the stop and post-compaction nudges work there. KiloCode has its own
   `git:` plugin spec, `git:<repo>[@ref][#subpath]`, that clones the
-  repository and loads the file at `#subpath`; a pinned ref is never
-  refreshed, a branch ref is re-checked about hourly. The v2 `plugins`
+  repository and loads its package entry point (the root `package.json`
+  `exports["./server"]`); a `#subpath` must be a folder with its own
+  `package.json`, so the documented spec has none. Only a full commit SHA
+  is never re-fetched; a tag or branch is re-checked about hourly. Skills
+  from a plugin outside the project load only when `skill_path_origins`
+  marks their folder trusted, which the plugin's `config` hook does when
+  `KILO=1` (KiloCode sets it; OpenCode does not), so a `SKILL.md` must not
+  contain `{env:`, `{file:` or `` !` `` tokens, which KiloCode expands or
+  runs in trusted skills. The v2 `plugins`
   key loads a reduced plugin context (no `mcp`, `session`, `tool` or
   `event` domains; only `skill`, `agent`, `command` and `integration`
   transforms), so the same file's `setup` registers only the skills there.

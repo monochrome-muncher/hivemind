@@ -341,12 +341,14 @@ unchanged. Add the Hivemind repository to the `plugin` list in
 then export the two variables and restart KiloCode:
 
 ```jsonc
-{ "plugin": ["git:https://github.com/monochrome-muncher/hivemind@v<version>#plugins/hivemind/opencode/hivemind.js"] }
+{ "plugin": ["git:https://github.com/monochrome-muncher/hivemind@v<version>"] }
 ```
 
-KiloCode's `git:` spec is `git:<repo>[@ref][#subpath]`: it clones the
-repository and loads the file at `#subpath`. Pin the release tag as shown:
-a pinned ref is never refreshed, so changing the tag is how it updates.
+KiloCode's `git:` spec is `git:<repo>[@ref][#subpath]`. It clones the
+repository and loads its package entry point (the root `package.json`).
+Leave out `#subpath`: it must name a folder with its own `package.json`, so
+the plugin file can't be the subpath. Pin the release tag as shown. A tag
+doesn't move, so changing it is how you update.
 
 ### Any other agent
 
@@ -777,9 +779,9 @@ All of these go in a terminal:
   entry without a version never updates: add one, or delete the cached
   copy under `~/.cache/opencode/` and restart.
 - **KiloCode**: change the tag in the `plugin` entry
-  (`git:…/hivemind@v<version>#…`) and restart. A pinned entry is never
-  refreshed, so the tag change is the update; a branch entry updates on
-  its own about hourly.
+  (`git:…/hivemind@v<version>`) and restart. A tag doesn't move, so the
+  tag change is the update; a branch entry updates on its own about
+  hourly.
 - **Cline**: copy the new plugin's `cline/` hook scripts over the old
   ones in `~/Documents/Cline/Hooks/` and the new `skills/` folders over
   the old copies in `~/.cline/skills/`. The MCP entry does not change
