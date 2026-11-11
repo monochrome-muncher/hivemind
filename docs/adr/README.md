@@ -26,7 +26,7 @@ is unused.
 | [0013](0013-forward-migration-path-with-schema-migrations-tracking.md) | Forward-migration path: idempotent re-apply + schema_migrations tracking | Superseded by 0020 |
 | [0014](0014-bounded-retries-on-the-embedder-call.md) | Bounded retries on the embedder call | Amended by 0041 |
 | [0015](0015-default-embedding-dimension-1024-with-loud-dim-mismatch-guard.md) | Default embedding dimension 1024, with a loud dim-mismatch guard | Accepted |
-| [0016](0016-write-time-entity-extraction-facets-best-effort-optional-extractor.md) | Write-time entity extraction: best-effort, optional, schema-validated | Amended by 0021, 0041 |
+| [0016](0016-write-time-entity-extraction-facets-best-effort-optional-extractor.md) | Write-time entity extraction: best-effort, optional, schema-validated | Amended by 0021, 0041, 0130 |
 | [0017](0017-environment-profile-dotenv-files-selected-by-environment.md) | Environment-profile dotenv files, selected by ENVIRONMENT | Accepted |
 | [0018](0018-entrypoint-owned-idempotent-migration.md) | Entrypoint-owned idempotent migration (replaces the k8s initContainer) | Mechanism now 0020 |
 | [0019](0019-unauthenticated-orchestrator-probe-endpoints.md) | Unauthenticated orchestrator probe endpoints | Partly superseded by 0037 |
@@ -139,3 +139,4 @@ is unused.
 | [0127](0127-find-a-memory-by-id.md) | Find a memory by id in the admin panel and the agent portal | Accepted; builds on 0033, 0080, 0095, front end only, the portal reads with the agent key's visibility, a missing and an unreadable id look the same |
 | [0128](0128-feedback-reply-hints-when-the-reporter-may-supersede.md) | The feedback reply says when the reporter may supersede the entry | Accepted; builds on 0033, 0053, 0060, `FeedbackOutcome.may_supersede`, REST `may_supersede`, MCP `fix` only when true, never for `helpful` or the admin key, no always-on text |
 | [0129](0129-entries-in-english-replies-in-the-users-language.md) | Entries are written in English; replies stay in the user's language | Accepted; builds on 0043, 0085, `hive_write` description, server `instructions` and skill text only, no server-side language check, paid for inside the 18,000 B always-on budget |
+| [0130](0130-extractor-prompt-defines-kinds-and-name-rules-with-worked-examples.md) | The extractor prompt defines the kinds and how to write names, with worked examples | Accepted; amends 0016, builds on 0043, prompt and examples in `extractor.py` only, no schema or response change, no backfill |

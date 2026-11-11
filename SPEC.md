@@ -529,7 +529,7 @@ This section supersedes the "no entity extraction" non-goal of §9 **for the fac
 ### 13.1 What is extracted
 
 * **At write time**, server-side, over the same text the embedder sees: `summary` + a bounded body prefix (`HIVEMIND_EMBEDDING_PREFIX_TOKENS` — whitespace-delimited words, ADR 0021). One budget feeds both consumers, so raising it raises the extractor's LLM input per write in step (§7).
-* A fixed-prompt LLM call (`HIVEMIND_EXTRACTOR_MODEL` — a deploy-time decision, ADR 0016; e.g. a Qwen3-27B-class chat model on a *separate service* from the embeddings server).
+* A fixed-prompt LLM call with worked examples (ADR 0130: which entities, how to write their names, one line per kind; the entry text is data) (`HIVEMIND_EXTRACTOR_MODEL` — a deploy-time decision, ADR 0016; e.g. a Qwen3-27B-class chat model on a *separate service* from the embeddings server).
 * **All-or-nothing, schema-validated output:** `entities` is a list of `{name, kind}` where `name` is open vocabulary (trimmed, non-empty, ≤ 128 chars) and `kind` is a **closed** vocabulary (`person | organization | system | service | artifact | concept`); ≤ 10 entities per entry, deduped. Any malformed output fails the call — no partial salvage; the only tolerated wrapping is one leading `<think>…</think>` block and one markdown code fence around the JSON. C0/C1 control characters in names (NUL, newlines) are replaced by a space and whitespace collapsed before validation; format characters are kept; dedupe is on the lower-cased collapsed name.
 
 ### 13.2 Storage and immutability

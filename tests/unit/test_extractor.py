@@ -173,7 +173,7 @@ class TestEmbedderExtractorLockstep:
             if request.url.path.endswith("/embeddings"):
                 sent["embedder"] = body["input"]
                 return httpx.Response(200, json={"data": [{"embedding": [0.1, 0.2, 0.3, 0.4]}]})
-            sent["extractor"] = body["messages"][1]["content"]
+            sent["extractor"] = body["messages"][-1]["content"]
             return httpx.Response(200, json={"choices": [{"message": {"content": "[]"}}]})
 
         shared = httpx.AsyncClient(transport=httpx.MockTransport(handler))
@@ -220,6 +220,30 @@ class TestBuildExtractor:
         assert extractor.model_name == "m"
 
 
+class TestPrompt:
+    async def _messages(self) -> list[dict[str, str]]:
+        env = MockEnv()
+        await make_extractor(env).extract_entry(make_draft())
+        messages: list[dict[str, str]] = env.last_body["messages"]
+        return messages
+
+    async def test_defines_every_entity_kind(self) -> None:
+        system = (await self._messages())[0]
+        assert system["role"] == "system"
+        for kind in EntityKind:
+            assert f"\n- {kind.value}: " in system["content"]
+
+    async def test_worked_examples_precede_the_entry_and_pass_validation(self) -> None:
+        examples = (await self._messages())[1:-1]
+        assert examples
+        assert [m["role"] for m in examples] == ["user", "assistant"] * (len(examples) // 2)
+        for answer in examples[1::2]:
+            env = MockEnv()
+            env.handler = lambda request, content=answer["content"]: _chat_response(content)
+            entities = await make_extractor(env).extract_entry(make_draft())
+            assert len(entities) == len(json.loads(answer["content"]))
+
+
 class TestExtractEntry:
     async def test_happy_path_returns_validated_facets(self) -> None:
         env = MockEnv()
@@ -250,7 +274,7 @@ class TestExtractEntry:
         assert body["temperature"] == 0
         messages = body["messages"]
         assert messages[0]["role"] == "system"
-        assert messages[1]["role"] == "user"
+        assert messages[-1]["role"] == "user"
 
     async def test_user_message_is_the_bounded_embeddable_text(self) -> None:
         """SPEC §13.1: the extractor sees the same text the embedder does
@@ -260,7 +284,7 @@ class TestExtractEntry:
         extractor = make_extractor(env, prefix_tokens=3)
         draft = make_draft("pool exhausted", body="one two three four five six")
         await extractor.extract_entry(draft)
-        user_message = env.last_body["messages"][1]["content"]
+        user_message = env.last_body["messages"][-1]["content"]
         assert user_message == "pool exhausted\none two three"  # 3-word prefix bound
 
     async def test_auth_header_present_when_key_configured(self) -> None:
