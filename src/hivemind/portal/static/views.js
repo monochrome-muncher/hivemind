@@ -4,7 +4,7 @@
 
 import {
   api, apiRaw, h, state, guarded, entryById, entryIdIn, parseHash, fleetName, levelName, pageHead, refreshButton, card, fill, table, toast, link, viewHref, canPin, PIN_REMINDER,
-  stat, fmtAgo, fmtTime,
+  stat, fmtAgo, fmtTime, kindBadge, stateBadge, verdictBadge,
   KINDS, SCOPES, VERDICTS,
 } from "./session.js";
 import { openEntry } from "./drawer.js";
@@ -166,6 +166,81 @@ export async function viewAttention(root) {
       `Active memories of ${me.name}${inherited(me)} that another agent rated stale or wrong, the longest-flagged first. Open one to read the verdicts. If it is out of date, withdraw it with a reason, or ask the agent to supersede it with a corrected memory.`,
       refreshButton()),
     list.el);
+  await list.load(true);
+}
+
+// --- memories it relied on that changed (ADR 0138) ---------------------------------------------
+
+const RELIED_HEADERS = ["Memory", "Kind", "Author", "What changed", "Rated helpful", "Verdicts now"];
+
+/** The change as plain sentences, one per thing that happened since the agent rated the memory. */
+export function changeSentences(row) {
+  const change = row.change;
+  const out = [];
+  if (change.superseded) out.push({ text: "Superseded by a newer version", successor: change.superseded_by });
+  if (change.withdrawn) {
+    const when = change.withdrawn_at ? ` ${fmtAgo(change.withdrawn_at)}` : "";
+    out.push({ text: row.withdrawn_reason ? `Withdrawn${when}: ${row.withdrawn_reason}` : `Withdrawn${when}` });
+  }
+  if (change.flagged_since) {
+    const { stale, wrong } = change.flagged_since;
+    const parts = [stale ? `stale ${stale}` : null, wrong ? `wrong ${wrong}` : null].filter(Boolean);
+    out.push({ text: `Rated ${parts.join(", ")} since` });
+  }
+  if (!out.length) out.push({ text: "Changed since it was rated" });
+  return out;
+}
+
+const reliedChangeCell = (row, open) => h("td", { class: "cell-note" },
+  changeSentences(row).map((c) => h("div", {},
+    h("span", { class: "plain", text: c.text }),
+    c.successor ? [" ", h("button", { type: "button", class: "linklike", text: "Open the newer version", onclick: () => open(c.successor) })] : null)));
+
+const reliedRow = (row, open) => h("tr", {},
+  h("td", { class: "cell-summary" },
+    h("button", { type: "button", class: "linklike summary-text", text: row.summary, onclick: () => open(row.id) }),
+    row.state !== "active" ? h("div", {}, stateBadge(row.state)) : null),
+  h("td", {}, kindBadge(row.kind)),
+  h("td", { class: "nowrap", text: row.author }),
+  reliedChangeCell(row, open),
+  row.change.rated_helpful_at
+    ? h("td", { class: "nowrap", title: fmtTime(row.change.rated_helpful_at), text: fmtAgo(row.change.rated_helpful_at) })
+    : h("td", { class: "muted", text: "—" }),
+  h("td", { class: "nowrap" },
+    ...["helpful", "stale", "wrong"].map((v) => (row.feedback && row.feedback[v] ? [verdictBadge(v, row.feedback[v]), " "] : [])).flat()));
+
+/** The memories the agent rated helpful that were superseded, withdrawn or flagged since. */
+export async function viewRelied(root) {
+  const me = state.me;
+  const open = (id) => openEntry(id, () => list.load(true));
+  const list = pagedTable({
+    headers: RELIED_HEADERS,
+    className: "entries",
+    fetchPage: ({ limit, offset }) => guarded(() => api("GET", "portal/relied-on", { query: { limit, offset } })),
+    renderRow: (row) => reliedRow(row, open),
+    emptyText: "Nothing it rated helpful has changed since.",
+    statusText: (n) => `${n} shown, newest memory first`,
+    csv: {
+      columns: [
+        column("id"), column("kind"), column("summary"), column("author"),
+        column("changed", (r) => changeSentences(r).map((c) => c.text).join("; ")),
+        column("superseded_by", (r) => r.change.superseded_by),
+        column("rated_helpful_at", (r) => r.change.rated_helpful_at),
+        column("helpful", (r) => (r.feedback || {}).helpful || 0),
+        column("stale", (r) => (r.feedback || {}).stale || 0),
+        column("wrong", (r) => (r.feedback || {}).wrong || 0),
+      ],
+      name: `${me.name}-relied-on`,
+      key: (r) => r.id,
+      fetchPage: ({ limit, offset }) => guarded(() => api("GET", "portal/relied-on", { query: { limit, offset } })),
+    },
+  });
+  fill(root,
+    pageHead("Relied on, since changed",
+      `Memories ${me.name} rated helpful that have changed since: replaced by someone else's newer version, withdrawn, or rated stale or wrong by someone else. Its own work may rest on something out of date. Read what changed, tell the agent to re-check it, or have it rate the memory again: helpful if it still holds, stale or wrong if not, and it leaves this list.`,
+      refreshButton()),
+    list.el,
+    h("p", { class: "muted small note", text: "Withdrawal reasons are written by whoever withdrew the memory: shown as plain text, not checked by anyone." }));
   await list.load(true);
 }
 

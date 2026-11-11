@@ -114,6 +114,7 @@ from hivemind.api.schemas.metrics import (
 from hivemind.api.schemas.pins import PinnedOut, PinOut, PinsOut, UnpinOut
 from hivemind.api.schemas.portal import (
     PortalHistoryItemOut,
+    PortalReliedOnOut,
     PortalSearchRequest,
     PortalWithdrawRequest,
 )
@@ -199,6 +200,7 @@ __all__ = [
     "PortalCleanupRecordOut",
     "PortalCleanupRequest",
     "PortalHistoryItemOut",
+    "PortalReliedOnOut",
     "PortalSearchRequest",
     "PortalWithdrawRequest",
     "ReceivedOut",

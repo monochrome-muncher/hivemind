@@ -1,5 +1,6 @@
 # The agent portal: a browser front end for agent-key holders
 
+> **Amended by [ADR 0138](0138-portal-relied-on-page.md):** a "Relied on" page (`GET /v1/portal/relied-on`) of the memories the agent rated helpful that changed since.
 > **Extended by [ADR 0123](0123-agent-history.md):** a History page (`GET /v1/portal/history`) of what was done to and by the agent, without naming the admin.
 > **Amended by [ADR 0115](0115-portal-needs-attention.md):** a fifth route, `GET /v1/portal/flagged`, and a "Needs attention" page.
 > **Amended by [ADR 0116](0116-pin-and-unpin-from-the-portal.md):** the portal can also pin and unpin, audited `via: "portal"`.

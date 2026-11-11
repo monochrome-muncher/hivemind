@@ -20,6 +20,7 @@ from hivemind.domain.feedback import (
     FlagBacklogFilters,
     FlagCount,
     FlaggedEntry,
+    ReliedOnChange,
     Verdict,
     last_confirmed,
     truncate_note,
@@ -104,6 +105,16 @@ class FeedbackStore(MemoryState):
             # Every well-formed id, known or not, keyed canonically, as on PgStore.
             live = self._live_feedback()
             return {eid: count_for(live, eid) for eid in _canonical_ids(entry_ids)}
+
+    async def relied_on_changes(
+        self, entry_ids: list[str], reporter: tuple[str, str]
+    ) -> dict[str, ReliedOnChange]:
+        with self._lock:
+            return {
+                eid: change
+                for eid in _canonical_ids(entry_ids)
+                if (change := self._relied_on_change(eid, reporter)) is not None
+            }
 
     async def feedback_signals(
         self,

@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -13,7 +14,7 @@ from hivemind.domain.audit import ActorKind, AuditAction, AuditFilters
 from hivemind.domain.entry import EntryDraft, EntryState, Kind
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.ports import Credential
-from tests.fakes import make_embedder
+from tests.fakes import FIXED_NOW, make_embedder
 from tests.unit.test_api_endpoints import make_client, make_hivemind_app
 
 ADMIN = {"X-API-Key": "key-admin"}
@@ -28,6 +29,7 @@ ROUTES = [
     ("POST", "/v1/portal/search", {"query": "kaniko"}),
     ("GET", "/v1/portal/feedback?direction=given", None),
     ("GET", "/v1/portal/flagged", None),
+    ("GET", "/v1/portal/relied-on", None),
     ("POST", f"/v1/portal/entries/{FAKE_ID}/withdraw", {"reason": "old"}),
     ("POST", "/v1/portal/cleanup", {"since": "2026-10-01T00:00:00Z", "dry_run": True}),
     ("GET", "/v1/portal/cleanups", None),
@@ -266,3 +268,108 @@ async def test_portal_withdraw_takes_own_entries_with_a_reason_and_audits_them()
             {"author": "carol", "reason": "the port moved", "via": "portal"},
         )
     ]
+
+
+async def _relied_seed():  # type: ignore[no-untyped-def]
+    """Carol (blue contributor, agent id set as a real key has) rated entries helpful two days ago;
+    since then one was superseded by bob, one withdrawn, one flagged by zed; one is unchanged and
+    one she rated stale."""
+    app = make_hivemind_app()
+    blue = await app.store.create_fleet("blue")
+    red = await app.store.create_fleet("red")
+    carol = Credential(
+        user_id="carol",
+        agent_id="carol",
+        agent_name="carol",
+        access_controlled=True,
+        trust_level=TrustLevel.CONTRIBUTOR,
+        home_fleet_id=blue.id,
+    )
+    app.authenticator.add_key("key-carol", carol)  # type: ignore[attr-defined]
+    app.authenticator.add_key(  # type: ignore[attr-defined]
+        "key-pat", replace(carol, user_id="pat", agent_id="pat", agent_name="pat")
+    )
+    then = FIXED_NOW - timedelta(days=2)
+    seeded = {}
+    for name in ("replaced", "gone", "flagged", "quiet", "rated_stale"):
+        entry = await _add(app, f"{name} kaniko", scope="fleet", fleet_id=blue.id, author="bob")
+        verdict = Verdict.STALE if name == "rated_stale" else Verdict.HELPFUL
+        await app.store.record_feedback(Feedback(entry.id, "carol", "carol", verdict, None, then))
+        seeded[name] = entry
+    successor = await _add(
+        app,
+        "replaced kaniko v2",
+        scope="fleet",
+        fleet_id=blue.id,
+        author="bob",
+        supersedes=(seeded["replaced"].id,),
+    )
+    await app.store.withdraw_entry(seeded["gone"].id, "obsolete", by_user="bob")
+    flag_at = FIXED_NOW - timedelta(days=1)
+    for who, verdict in (("zed", Verdict.STALE), ("yan", Verdict.WRONG), ("xia", Verdict.WRONG)):
+        await app.store.record_feedback(
+            Feedback(seeded["flagged"].id, who, who, verdict, None, flag_at)
+        )
+    return app, seeded, successor, red
+
+
+async def test_portal_relied_on_lists_what_the_agent_rated_helpful_that_changed() -> None:
+    app, seeded, successor, _red = await _relied_seed()
+    async with make_client(app) as client:
+        response = await client.get("/v1/portal/relied-on", headers=CAROL)
+        entries = await client.get("/v1/entries", params={"relied_on_changed": True}, headers=CAROL)
+    assert response.status_code == 200
+    rows = {r["id"]: r for r in response.json()}
+    assert set(rows) == {seeded[n].id for n in ("replaced", "gone", "flagged")}
+    assert set(rows) == {r["id"] for r in entries.json()}  # the same rows as the entries filter
+    replaced = rows[seeded["replaced"].id]["change"]
+    assert replaced["superseded"] and replaced["superseded_by"] == successor.id
+    assert replaced["withdrawn"] is False and replaced["flagged_since"] is None
+    assert replaced["rated_helpful_at"]
+    gone = rows[seeded["gone"].id]
+    assert gone["change"]["withdrawn"] and gone["change"]["withdrawn_at"]
+    assert gone["withdrawn_reason"] == "obsolete" and gone["state"] == "withdrawn"
+    flagged = rows[seeded["flagged"].id]
+    assert flagged["change"]["flagged_since"] == {"stale": 1, "wrong": 2}
+    assert flagged["change"]["superseded_by"] is None
+    assert [flagged["feedback"][v] for v in ("helpful", "stale", "wrong")] == [1, 1, 2]
+
+
+async def test_portal_relied_on_hides_a_successor_the_key_cannot_read() -> None:
+    app, _seeded, _successor, red = await _relied_seed()
+    old = await _add(app, "ports kaniko", scope="org", author="bob")
+    rated = FIXED_NOW - timedelta(days=2)
+    await app.store.record_feedback(
+        Feedback(old.id, "carol", "carol", Verdict.HELPFUL, None, rated)
+    )
+    await _add(
+        app, "ports kaniko v2", scope="fleet", fleet_id=red.id, author="bob", supersedes=(old.id,)
+    )
+    async with make_client(app) as client:
+        rows = {
+            r["id"]: r for r in (await client.get("/v1/portal/relied-on", headers=CAROL)).json()
+        }
+    change = rows[old.id]["change"]
+    assert change["superseded"] is True and change["superseded_by"] is None
+
+
+async def test_portal_relied_on_pages_and_filters_by_kind() -> None:
+    app, _seeded, _successor, _red = await _relied_seed()
+    async with make_client(app) as client:
+        everything = (await client.get("/v1/portal/relied-on", headers=CAROL)).json()
+        first = await client.get("/v1/portal/relied-on", params={"limit": 2}, headers=CAROL)
+        rest = await client.get(
+            "/v1/portal/relied-on", params={"limit": 2, "offset": 2}, headers=CAROL
+        )
+        decisions = await client.get(
+            "/v1/portal/relied-on", params={"kind": "decision"}, headers=CAROL
+        )
+        facts = await client.get("/v1/portal/relied-on", params={"kind": "fact"}, headers=CAROL)
+        nothing = await client.get("/v1/portal/relied-on", headers=PAT)
+        bad = await client.get("/v1/portal/relied-on", params={"limit": 0}, headers=CAROL)
+    assert [r["id"] for r in first.json() + rest.json()] == [r["id"] for r in everything]
+    assert len(first.json()) == 2 and len(rest.json()) == 1
+    assert decisions.json() == []
+    assert len(facts.json()) == 3
+    assert nothing.json() == []  # pat rated nothing
+    assert bad.status_code == 422

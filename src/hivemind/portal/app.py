@@ -47,6 +47,7 @@ _ALLOWED = allowlist(
         ("POST", r"portal/search"),
         ("GET", r"portal/feedback"),
         ("GET", r"portal/flagged"),
+        ("GET", r"portal/relied-on"),
         ("POST", r"portal/entries/[^/]+/withdraw"),
         ("PUT", r"portal/entries/[^/]+/pin"),
         ("DELETE", r"portal/entries/[^/]+/pin"),

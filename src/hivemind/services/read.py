@@ -12,8 +12,13 @@ from dataclasses import dataclass, replace
 
 from hivemind.config import SearchConfig
 from hivemind.domain.access import Visibility
-from hivemind.domain.entry import Entry, EntryFilters
-from hivemind.domain.feedback import FeedbackCounts, FeedbackSummary
+from hivemind.domain.entry import Entry, EntryFilters, Kind
+from hivemind.domain.feedback import (
+    NO_CHANGE_FOUND,
+    FeedbackCounts,
+    FeedbackSummary,
+    ReliedOnChange,
+)
 from hivemind.domain.validation import MAX_GET_IDS, InvalidInput
 from hivemind.ports import Credential, Store
 from hivemind.services.chain import (
@@ -40,6 +45,14 @@ class EntryDetail:
     links: EntryLinks
     successors: tuple[Entry, ...] = ()
     superseded: tuple[Entry, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ReliedOnItem:
+    """An entry the caller rated helpful and what changed on it since (ADR 0138)."""
+
+    entry: Entry
+    change: ReliedOnChange
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +164,32 @@ class ReadService:
             filters, limit=effective_limit, offset=offset, visibility=visibility
         )
         return await hide_unseen_successors(self._store, listed, visibility)
+
+    async def relied_on_changed(
+        self,
+        credential: Credential,
+        *,
+        kind: Kind | None = None,
+        limit: int,
+        offset: int = 0,
+    ) -> Sequence[ReliedOnItem]:
+        """The ``relied_on_changed`` list (ADR 0098) for ``credential``, each entry with what
+        changed on it (ADR 0138), in the list's order (newest entry first). The change facts
+        come in one store read; a successor id shows only if the caller may read it. A listed entry
+        is never dropped: one with no change found keeps ``NO_CHANGE_FOUND`` so paging holds."""
+        entries = await self.list(
+            EntryFilters(relied_on_changed=True, kind=kind),
+            limit=limit,
+            offset=offset,
+            visibility=credential.visibility(),
+            credential=credential,
+        )
+        agent = reporter_agent(credential, None)
+        assert agent is not None  # ``list`` refused a caller without one
+        changes = await self._store.relied_on_changes(
+            [e.id for e in entries], (credential.user_id, agent)
+        )
+        return tuple(ReliedOnItem(e, changes.get(e.id, NO_CHANGE_FOUND)) for e in entries)
 
     async def feedback_counts(self, entries: Sequence[Entry]) -> dict[str, FeedbackCounts]:
         """Live feedback counts per entry in one store read (for ``relied_on_changed`` list
