@@ -97,8 +97,8 @@ class SearchConfig:
     query_instruction: str = DEFAULT_QUERY_INSTRUCTION
 
     def __post_init__(self) -> None:
-        # Fail at config time (ADR 0024), not per request (ZeroDivisionError, negative LIMIT, NaN
-        # scores).
+        # Reject bad values when the config is built, not per request (ZeroDivisionError, negative
+        # LIMIT, NaN scores).
         if self.rrf_k < 0:
             raise ValueError(f"rrf_k must be >= 0, got {self.rrf_k}")
         if self.candidate_top_k < 1:

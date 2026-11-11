@@ -36,5 +36,5 @@ class PgStore(
     AuditStore,
     PgConnections,
 ):
-    """A ``Store`` backed by PostgreSQL + pgvector; the pool opens lazily, ``close()`` on
-    shutdown."""
+    """A ``Store`` backed by PostgreSQL + pgvector. The pool opens on first use, so synchronous
+    builders can hand the store to a running loop; ``close()`` on shutdown."""

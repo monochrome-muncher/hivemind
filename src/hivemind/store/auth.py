@@ -1,5 +1,5 @@
-"""The Postgres-backed ``Authenticator`` (ADR 0008). Keys are stored only as SHA-256 hashes
-(SPEC §8.1); the pool opens lazily (ADR 0007)."""
+"""The Postgres-backed ``Authenticator`` (ADRs 0012, 0039). Keys are stored only as SHA-256
+hashes (SPEC §8.1); the pool opens lazily, like ``PgStore``'s."""
 
 from __future__ import annotations
 

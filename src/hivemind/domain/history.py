@@ -260,7 +260,8 @@ def _summary(
             else:
                 text = f"A memory by {ctx.agent(author)} was withdrawn"
         case AuditAction.ENTRY_RESTORE:
-            # ADR 0124: the reason is shown only for this agent's own (or inherited) memory.
+            # Only an admin restores (ADR 0124); as with a redact, the reason is shown only for
+            # this agent's own or inherited memory.
             author = d.get("author")
             if author in ctx.agents:
                 reason = _text(d.get("reason"))

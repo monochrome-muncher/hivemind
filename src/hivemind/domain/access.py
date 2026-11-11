@@ -88,8 +88,9 @@ class FleetMerged(Exception):
 
 
 class FleetBusy(TimeoutError):
-    """A write waited on the fleet's row lock and gave up: a merge (ADR 0107) or fleet move
-    (ADR 0112) holds it. A ``TimeoutError``, so surfaces answer a retryable 503 ``fleet_busy``."""
+    """A fleet write gave up: it timed out on the fleet's row lock (a merge or move holds it, ADRs
+    0107, 0112), or its author's home fleet changed during the write (ADR 0112). A
+    ``TimeoutError``, so surfaces answer a retryable 503 ``fleet_busy``."""
 
     def __init__(self, fleet_id: str, detail: str | None = None) -> None:
         super().__init__(

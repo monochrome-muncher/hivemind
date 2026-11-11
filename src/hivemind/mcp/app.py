@@ -72,7 +72,7 @@ STORE_UNAVAILABLE_MESSAGE = "the database is busy or unreachable; retry shortly"
 @dataclass(frozen=True, slots=True)
 class McpHivemind:
     """What the tool functions operate on: the services, the store (for reads the services do not
-    expose) and the acting ``credential`` (SPEC §8.1, ADR 0008)."""
+    expose) and the acting ``credential`` (SPEC §8.1, ADR 0012)."""
 
     store: Store
     write_service: WriteService
