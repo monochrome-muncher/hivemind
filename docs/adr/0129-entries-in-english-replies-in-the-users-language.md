@@ -4,6 +4,8 @@ Builds on [ADR 0043](0043-entries-are-untrusted-data.md) (entries are data) and 
 
 Status: Accepted.
 
+> **Amended by [ADR 0134](0134-not-english-write-warning.md):** a live check showed the text rule alone is not enough on a 14B model, so a write now warns (`not_english`) when the entry is not in English.
+
 ## Context
 
 Agents have been writing entries in their user's native language. That has two costs. An entry in another language is harder to find for an agent that searches in English: keyword search matches words, and a cross-language vector match likely scores lower (not measured). And an agent that reads such entries can drift into answering its user in the entries' language instead of the one the user spoke.

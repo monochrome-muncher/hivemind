@@ -48,6 +48,38 @@ _LOCAL_PATH = re.compile(
 )
 
 
+# Common function words of English and of the languages agents most often write in instead, minus
+# any that are also English words, abbreviations, commands or locale codes ("die", "per", "du", "de").
+# A text needs several of them, outnumbering English ones two to one, so terse English summaries
+# full of names and English text quoting a foreign error stay quiet.
+_FUNCTION_WORDS = {
+    "english": "the and is are was were of to in on for with by from that this it not be has have "
+    "a an when after before because but or",
+    "german": "der das und nicht ist mit auf für eine einen einem dem des sich wird wurde werden auch "
+    "oder aber wenn nach bei durch zwischen statt über sind weil dass noch kein keine zum zur vom "
+    "beim wir nur",
+    "french": "le la les une est avec dans sur qui que sont au aux mais cette pas parce très sans "
+    "être nous ces leur été",
+    "spanish": "el los las una para por pero como está porque también muy cuando fue",
+    "italian": "il gli della delle che sono nel alla è",
+    "portuguese": "uma não são",
+    "dutch": "het een niet voor zijn wordt werd maar ook dat",
+    "scandinavian": "og ikke er på av til som det den med ble har etter jeg fordi nå når fra også "
+    "eller hvis blir være denne dette vår efter och inte är att för ett från när också",
+}
+_ENGLISH_FUNCTION_WORDS = frozenset(_FUNCTION_WORDS["english"].split())
+_FOREIGN_FUNCTION_WORDS = frozenset(
+    word
+    for language, words in _FUNCTION_WORDS.items()
+    if language != "english"
+    for word in words.split()
+)
+_MIN_FOREIGN_WORDS = 3
+_MIN_NON_LATIN_LETTERS = 20
+_LATIN_END = "\u0250"
+_WORDS = re.compile(r"[^\W\d_]+")
+
+
 @dataclass(frozen=True, slots=True)
 class WriteWarning:
     """An advisory note on a write: a stable ``code`` and a short action."""
@@ -59,6 +91,19 @@ class WriteWarning:
 def has_local_path(text: str) -> bool:
     """Whether ``text`` contains a machine-local path."""
     return _LOCAL_PATH.search(text) is not None
+
+
+def looks_non_english(text: str) -> bool:
+    """Whether ``text`` is written in another language than English: mostly non-Latin letters, or
+    another language's function words outnumbering English ones."""
+    words = [w.lower() for w in _WORDS.findall(text)]
+    letters = sum(len(w) for w in words)
+    latin = sum(ch < _LATIN_END for w in words for ch in w)
+    if letters >= _MIN_NON_LATIN_LETTERS and latin * 2 < letters:
+        return True
+    foreign = sum(w in _FOREIGN_FUNCTION_WORDS for w in words)
+    english = sum(w in _ENGLISH_FUNCTION_WORDS for w in words)
+    return foreign >= _MIN_FOREIGN_WORDS and foreign > 2 * english
 
 
 def is_entry_link(source: Source) -> bool:
@@ -141,6 +186,7 @@ def write_warnings(
     occurred = draft.resolved_occurred_at()
     found = (
         _local_path_warning(draft),
+        _not_english_warning(draft),
         _foreign_link_warning(draft, linked),
         _backdated_successor_warning(occurred, superseded),
         _fresh_consolidation_warning(occurred, superseded),
@@ -160,6 +206,17 @@ def _local_path_warning(draft: EntryDraft) -> WriteWarning | None:
             "or put the local detail in a self entry that links here",
         )
     return None
+
+
+def _not_english_warning(draft: EntryDraft) -> WriteWarning | None:
+    if not looks_non_english(f"{draft.summary}\n{draft.body or ''}"):
+        return None
+    return WriteWarning(
+        "not_english",
+        "not in English: write it again in English (names, quotes and errors stay as they are), "
+        "with 'supersedes' naming this entry if it was stored. "
+        "Keep answering your user in the language they wrote in",
+    )
 
 
 def _foreign_link_warning(draft: EntryDraft, linked: Sequence[Entry]) -> WriteWarning | None:
