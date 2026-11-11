@@ -8,8 +8,8 @@ in the hivemind-setup skill.
 
 - **With the hivemind plugin** (`hermes plugins install
   <owner>/hivemind/plugins/hivemind`, then `hermes plugins enable
-  hivemind`): the plugin serves both skills (as `hivemind:hivemind` and
-  `hivemind:hivemind-setup`; namespaced plugin skills are not in the
+  hivemind`): the plugin serves the skills (as `hivemind:hivemind`,
+  `hivemind:hivemind-setup` and `hivemind:hivemind-update`; namespaced plugin skills are not in the
   skill index) and registers a Hivemind system-prompt section, which
   Hermes v2026.9.24 (0.21.5) and later put in every new session's system
   prompt. **Do not rely on that section on an older Hermes** (`hermes
@@ -46,7 +46,7 @@ in the hivemind-setup skill.
   same `read` command, appending `HIVEMIND_API_KEY=…` lines without
   `export`), then `chmod 600` the file. Never a project-level file.
 - **Skills without the plugin, or so they appear in the skill index:**
-  copy both skill folders into `~/.hermes/skills/` (in addition to, or
+  copy the three skill folders into `~/.hermes/skills/` (in addition to, or
   instead of, the namespaced plugin skills).
 - After editing the MCP config or the env file, `/reload-mcp` reloads the
   servers without a full restart; if `hive_whoami` still shows the old
@@ -69,13 +69,6 @@ other harnesses.
   is in your system prompt before relying on it. Hermes has no hook that
   can hold a stop, so there is no write-and-rate reminder at the end of a
   session.
-
-## Update
-
-`hermes plugins update hivemind` (a `git pull` of the installed plugin). A
-plugin installed at a pinned ref needs `hermes plugins install <source>
---force --ref <commit-sha>` instead; the ref must be the full 40-character
-commit SHA (a tag or branch name is refused).
 
 ## Incognito
 

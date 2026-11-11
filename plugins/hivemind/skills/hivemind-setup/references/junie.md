@@ -24,7 +24,7 @@ plugin as Claude Code. The user installs it, in the Junie TUI, not you:
 Then search `hivemind`, choose Install and "User level". (A local path to
 a clone of the repository and an `owner/repo` shorthand work too.) The
 plugin is copied to `~/.junie/extensions/<marketplace>/hivemind/`. It
-brings both skills and the two hooks under "Stay aware", and a
+brings the skills and the two hooks under "Stay aware", and a
 `guidelines/` file. Its `.mcp.json` is the Claude Code one, which reads
 `${HIVEMIND_MCP_URL}`: **Junie does not expand `${VAR}` in a server's
 `url` or `headers`**, so that server cannot connect (it tries
@@ -79,9 +79,9 @@ os.chmod(path, 0o600)
 PY
 ```
 
-To switch to the agent key later, run the same command again after
-updating the key file. Restart Junie after any change. Without a restart
-the old key stays loaded; without a key the server answers 401, the
+To switch to the agent key later, or when the Hivemind address changes,
+run the same command again after updating the key file. Restart Junie
+after any change. Without a restart the old key stays loaded; without a key the server answers 401, the
 tools do not load, and the session carries on.
 
 Junie shows the tools as `hivemind/hive_whoami` and so on; the model sees
@@ -119,14 +119,6 @@ other harnesses.
   project's `.junie/AGENTS.md`; do not put a key in it.
 
 Check that your guidelines show the `HIVEMIND:` line.
-
-## Update
-
-A Git extension is updated only when the user picks Update in the
-Installed tab of `/extensions` (an extension from a local directory
-refreshes when Junie starts). Then start a new session. If the Hivemind
-address or key changed, edit `~/.junie/mcp/mcp.json` (or run the command
-above again) and restart.
 
 ## Incognito
 

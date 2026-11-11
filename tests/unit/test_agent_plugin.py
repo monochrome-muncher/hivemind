@@ -27,7 +27,10 @@ PLUGIN = ROOT / "plugins" / "hivemind"
 SKILL = (PLUGIN / "skills" / "hivemind" / "SKILL.md").read_text()
 SETUP = (PLUGIN / "skills" / "hivemind-setup" / "SKILL.md").read_text()
 SETUP_REFS = PLUGIN / "skills" / "hivemind-setup" / "references"
+UPDATE = (PLUGIN / "skills" / "hivemind-update" / "SKILL.md").read_text()
+UPDATE_REFS = PLUGIN / "skills" / "hivemind-update" / "references"
 SKILLS_DIR = PLUGIN / "skills"
+SKILL_NAMES = ["hivemind", "hivemind-setup", "hivemind-update"]
 HOOK = PLUGIN / "skills" / "hivemind-setup" / "scripts" / "hivemind-session-start.sh"
 AGY = ROOT / "plugins" / "antigravity"
 
@@ -280,9 +283,57 @@ def test_the_setup_skill_and_readme_cover_every_harness() -> None:
         flat = " ".join(text.split())
         assert f"Only for **{harness}**" in flat, ref
         assert "Which harness am I in?" in flat, ref
-        for section in ("## Connect", "## Stay aware", "## Update", "## Incognito"):
+        for section in ("## Connect", "## Stay aware", "## Incognito"):
             assert section in text, (ref, section)
         assert harness in readme, harness
+
+
+def test_the_update_skill_routes_every_harness_to_its_own_steps() -> None:
+    """Harnesses install, and so update, the plugin differently: each gets its
+    own update file, routed from the update skill, with a drift check."""
+    assert {f.name for f in UPDATE_REFS.glob("*.md")} == set(HARNESS_REFS.values())
+    for harness, ref in HARNESS_REFS.items():
+        assert re.search(rf"^\| {re.escape(harness)}\b.*`references/{ref}` \|$", UPDATE, re.M), (
+            harness
+        )
+        text = (UPDATE_REFS / ref).read_text()
+        assert text.startswith(f"# Hivemind update: {harness}\n"), ref
+        flat = " ".join(text.split())
+        assert f"Only for **{harness}**" in flat and "Which harness am I in?" in flat, ref
+        for section in ("## Check", "## Update", "## Your copies"):
+            assert section in text, (ref, section)
+        assert "sh <skill>/scripts/hivemind-drift.sh" in text, ref
+
+
+def test_the_update_check_covers_every_copy_setup_writes() -> None:
+    """Every instruction block and skills folder a setup file has the agent
+    write outside the plugin is one the update file checks for drift."""
+    for ref in HARNESS_REFS.values():
+        setup = (SETUP_REFS / ref).read_text()
+        update = " ".join((UPDATE_REFS / ref).read_text().split())
+        for path in re.findall(r"\*\*Instruction block[^*]*:\*\* `([^`]+)`", setup):
+            assert f"--block {path}" in update, (ref, path)
+        for path in re.findall(r"skill folders\s+into\s+`([^`]+)/`", setup):
+            assert f"--skills {path}" in update, (ref, path)
+    # Copies the setup files name in other words.
+    for ref, path, flag in (
+        ("cursor.md", "~/.cursor/rules/hivemind.mdc", "--block"),
+        ("hermes.md", "~/.hermes/SOUL.md", "--block"),
+        ("cline.md", "~/.cline/skills", "--skills"),
+        ("cline.md", "~/Documents/Cline/Hooks/", "--copy"),
+    ):
+        assert path in (SETUP_REFS / ref).read_text(), (ref, path)
+        assert f"{flag} {path}" in (UPDATE_REFS / ref).read_text(), (ref, path)
+
+
+def test_the_update_skill_itself_is_harness_neutral() -> None:
+    for local in ("~/.claude", "~/.codex", "~/.copilot", "~/.cursor", "~/.gemini", "~/.dsh"):
+        assert local not in UPDATE, local
+    body = UPDATE[UPDATE.index("## 2. Check for drift") :]
+    for harness in ("Claude Code", "Codex", "Cursor", "Antigravity", "Hermes", "OpenCode"):
+        assert harness not in body, harness
+    flat = " ".join(UPDATE.split())
+    assert "never from your model" in flat and "Use only your own harness's instructions" in flat
 
 
 def test_the_setup_skill_itself_is_harness_neutral() -> None:
@@ -414,7 +465,7 @@ def test_the_dsh_bundle_patch_points_at_real_files_and_reads_keys_from_env() -> 
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
-def test_the_dsh_skill_provider_serves_both_skills_without_frontmatter() -> None:
+def test_the_dsh_skill_provider_serves_every_skill_without_frontmatter() -> None:
     """Run the real provider module against a stand-in ``ctx.skills``."""
     script = """
     const mod = await import(process.argv[1])
@@ -432,7 +483,7 @@ def test_the_dsh_skill_provider_serves_both_skills_without_frontmatter() -> None
         check=True,
     )
     result = json.loads(out.stdout)
-    assert result["names"] == ["hivemind", "hivemind-setup"]
+    assert result["names"] == SKILL_NAMES
     assert result["body"].lstrip().startswith("# Hivemind")
 
 
@@ -470,11 +521,11 @@ def _load_hermes_plugin() -> object:
     return module
 
 
-def test_the_hermes_plugin_serves_both_skills_and_the_stay_aware_section() -> None:
+def test_the_hermes_plugin_serves_every_skill_and_the_stay_aware_section() -> None:
     """Run the real ``register(ctx)`` against a stand-in Hermes ctx."""
     ctx = _HermesCtx()
     _load_hermes_plugin().register(ctx)
-    assert set(ctx.skills) == {"hivemind", "hivemind-setup"}
+    assert sorted(ctx.skills) == SKILL_NAMES
     for name, skill_md in ctx.skills.items():
         assert skill_md.is_file() and skill_md.name == "SKILL.md", name
         assert f"description: {ctx.descriptions[name]}\n" in skill_md.read_text()
@@ -784,7 +835,9 @@ def test_the_root_package_installs_the_dsh_bundle_from_a_git_url() -> None:
         patch,
         PLUGIN / "skills" / "hivemind" / "SKILL.md",
         PLUGIN / "skills" / "hivemind-setup" / "SKILL.md",
+        PLUGIN / "skills" / "hivemind-update" / "scripts" / "hivemind-drift.sh",
         *SETUP_REFS.glob("*.md"),
+        *UPDATE_REFS.glob("*.md"),
     ]
     needed += [patch.parent / rel for rel in re.findall(r"name: (\./\S+)", patch.read_text())]
     for path in needed:
@@ -1004,14 +1057,14 @@ def test_opencode_v2_setup_registers_server_skills_and_hooks() -> None:
         False,
     )
     assert server["headers"] == {"Authorization": "Bearer hm_secret_value"}
-    # Skills: both, by id, with the frontmatter name and description.
+    # Skills: every one, by id, with the frontmatter name and description.
     by_id = {s["id"]: s for s in r["skills"]}
-    assert set(by_id) == {"hivemind", "hivemind-setup"}
-    for name, folder in (("hivemind", "hivemind"), ("hivemind-setup", "hivemind-setup")):
+    assert sorted(by_id) == SKILL_NAMES
+    for name in SKILL_NAMES:
         skill = by_id[name]
         assert skill["name"] == name
         assert skill["description"] and skill["contentLen"] > 0
-        assert Path(skill["path"]).resolve() == (PLUGIN / "skills" / folder / "SKILL.md").resolve()
+        assert Path(skill["path"]).resolve() == (PLUGIN / "skills" / name / "SKILL.md").resolve()
     # The reminder is a {type, text} part; the compaction line rides the
     # request right after session.compaction.ended, and no later one.
     [first] = r["system"][0]
@@ -1544,7 +1597,7 @@ def test_skills_have_no_config_substitution_tokens() -> None:
     """KiloCode expands {env:NAME} and {file:path} in trusted skills, which
     could put a key into the model context, and runs !`cmd` after one prompt."""
     skills = sorted(SKILLS_DIR.rglob("SKILL.md"))
-    assert len(skills) == 2
+    assert [skill.parent.name for skill in skills] == SKILL_NAMES
     for skill in skills:
         text = skill.read_text()
         assert "{env:" not in text and "{file:" not in text and "!`" not in text, skill

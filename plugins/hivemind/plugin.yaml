@@ -2,7 +2,7 @@
 #
 # A directory plugin for ~/.hermes/plugins/, installed with
 # `hermes plugins install <owner>/hivemind/plugins/hivemind`. It serves
-# the two skills in skills/ and adds a system-prompt section that keeps
+# the skills in skills/ and adds a system-prompt section that keeps
 # the agent Hivemind-aware across sessions and compaction.
 #
 # The Hivemind MCP server is deliberately NOT part of this plugin: it is

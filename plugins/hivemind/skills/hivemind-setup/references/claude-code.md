@@ -133,14 +133,8 @@ So here:
   `${CLAUDE_PLUGIN_ROOT}` not being substituted in plugin hooks there: if
   no `HIVEMIND:` line appears at session start, the hook did not run, so
   use the instruction block.
-- **Skills without the plugin:** copy both skill folders into
+- **Skills without the plugin:** copy the three skill folders into
   `~/.claude/skills/`.
-
-## Update
-
-`claude plugin marketplace update hivemind`, then `claude plugin update
-hivemind@hivemind`, then restart. (Updating the marketplace alone only
-refreshes the catalog.)
 
 ## Incognito
 

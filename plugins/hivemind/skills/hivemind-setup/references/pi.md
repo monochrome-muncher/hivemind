@@ -6,7 +6,7 @@ harness, go back to "Which harness am I in?" in the hivemind-setup skill.
 
 ## Connect
 
-Install the hivemind **Pi package** first: it provides the two skills, the
+Install the hivemind **Pi package** first: it provides the skills, the
 system-prompt reminder and the MCP connection (through Pi's built-in MCP
 client, so it needs Pi 0.99 or later).
 Install it from the Hivemind repository's Git URL (`pi install
@@ -65,14 +65,8 @@ other harnesses.
   end of a long session that rated nothing and either wrote nothing or read entries, to write and rate before
   finishing, and after a compaction to write what you learned before it.
 - **Instruction block:** `~/.pi/agent/AGENTS.md`.
-- **Skills without the package:** copy both skill folders into
+- **Skills without the package:** copy the three skill folders into
   `~/.pi/agent/skills/`.
-
-## Update
-
-Installed from a local path: `git pull` in that checkout (Pi loads it in
-place). Installed from git or npm: `pi update --extensions`; a pinned tag
-stays put, so reinstall at the new tag.
 
 ## Incognito
 

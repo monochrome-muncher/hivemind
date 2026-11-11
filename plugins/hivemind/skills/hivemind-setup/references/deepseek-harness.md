@@ -15,7 +15,7 @@ harness, go back to "Which harness am I in?" in the hivemind-setup skill.
   gitlab.com or bitbucket.org, and must not end in a slash);
   a local checkout also works (`dsh plugin --profile <name> add
   <path>/plugins/hivemind`). The bundle defines the MCP server from
-  `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY` and serves both skills. The
+  `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY` and serves the skills. The
   server stays off while `HIVEMIND_MCP_URL` is unset. A plugin belongs to
   one profile (every project and session of that profile gets it): ask
   the user which profiles they use, for example the CLI's `tui` and the
@@ -58,7 +58,7 @@ harness, go back to "Which harness am I in?" in the hivemind-setup skill.
             Authorization: !!js '`Bearer ${process.env.HIVEMIND_API_KEY}`'
   ```
 
-  and copy both skill folders into `~/.agents/skills/` (DSH scans it).
+  and copy the three skill folders into `~/.agents/skills/` (DSH scans it).
   This row has none of the bundle's guards: it reads `HIVEMIND_MCP_URL`
   from a project `.env` too (so a repository could redirect the key),
   and it connects in incognito sessions. Prefer the bundle.
@@ -78,16 +78,6 @@ with another harness's key.
   survive compaction, and its `Stop` hook never fires there.
 - **Instruction block:** `~/.dsh/AGENTS.md`, which DSH keeps as a durable
   baseline.
-
-## Update
-
-Installed from the Git URL or npm: `dsh plugin --profile <name> update
-hivemind-agent-plugin`; a Git URL pinned with `#v<version>` stays put, so
-run `add` again with the new tag. Installed from a checkout: `git pull` in
-the checkout (the profile links it). Then restart `dsh`. Installed before
-2.0.1, the package is named `hivemind-dsh-plugin`: remove it under that
-name (`dsh plugin --profile <name> remove hivemind-dsh-plugin`) and add
-the plugin again.
 
 ## Incognito
 

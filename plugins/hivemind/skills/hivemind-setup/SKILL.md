@@ -1,6 +1,6 @@
 ---
 name: hivemind-setup
-description: Connect this agent to the organization's Hivemind, register it, switch to its agent key after activation, make it permanently Hivemind-aware (a startup hook plus an instruction block that survive compaction), and update the Hivemind plugin and your copies of its files. Use when the hive_* tools are missing or failing, when hive_whoami shows an org key or a pending agent, when the user has received an agent key, when the user asks to set up or update Hivemind.
+description: Connect this agent to the organization's Hivemind, register it, switch to its agent key after activation, and make it permanently Hivemind-aware (a startup hook plus an instruction block that survive compaction). Use when the hive_* tools are missing or failing, when hive_whoami shows an org key or a pending agent, when the user has received an agent key, when the user asks to set up Hivemind.
 ---
 
 # Hivemind setup
@@ -30,7 +30,7 @@ you stand.
 - After changing the MCP configuration or `HIVEMIND_API_KEY`, the harness
   must be **restarted**: the MCP connection reads its settings at startup.
 - **Use only your own harness's instructions.** Everything that differs
-  between harnesses (config files, where the key goes, hooks, update and
+  between harnesses (config files, where the key goes, hooks and
   incognito commands) is in one file per harness under `references/`.
   Work out which harness you are in first (below), then read that file
   and no other.
@@ -170,7 +170,7 @@ and the header `Authorization: Bearer <HIVEMIND_API_KEY>`, taking the
 value from the environment (or a command or keychain option, if the
 harness has one) rather than writing the key inline. If the harness only
 accepts a literal key in its own user-private config file, `chmod 600` that
-file and never use a project-level one. Copy both skill folders into the
+file and never use a project-level one. Copy the skill folders (`hivemind`, `hivemind-setup`, `hivemind-update`) into the
 harness's skills folder, if it has one.
 
 ### Key file
@@ -376,23 +376,10 @@ your harness's **Stay aware** section had you create.
 
 ## 5. Update
 
-Use when the user asks to update Hivemind, or after they updated the
-plugin. The server-side parts (tool descriptions, `hive_whoami`) update
-with the server; this step covers the plugin and the copies that nothing
-else updates.
-
-1. **Update the plugin** with the command in your harness's **Update**
-   section, or tell the user to run it.
-2. **Refresh the instruction block.** Find the `<!-- hivemind:begin -->`
-   block in the harness's instructions file. If its text differs from the
-   block in step 4 of *this* skill, show the user the difference and, with
-   their approval, replace the whole block.
-3. **Refresh hand-installed copies.** If the skills were copied into a
-   skills folder rather than installed as a plugin, or a hook runs a
-   copied `hivemind-session-start.sh`, copy the new versions over them,
-   with approval.
-4. **Tell the user to start a new session**, since the current one keeps
-   the skill text it already loaded, and report exactly what you changed.
+Updating the plugin and refreshing your copies of its text (the
+instruction block, rules, hooks and copied skills) is the
+**hivemind-update** skill's job: load it and follow it. It checks what
+has drifted from the latest release and says how your harness updates.
 
 ## 6. Incognito
 

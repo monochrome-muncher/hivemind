@@ -46,8 +46,8 @@ const STOP_REMINDER = "HIVEMIND: before finishing, write to Hivemind (hive_write
 const COMPACTED = " Context was just compacted: before continuing, write now (hive_write) anything learned earlier that another agent could reuse, and rate the entries your work tested (hive_feedback).";
 
 const SKILLS_DIR = fileURLToPath(new URL("../skills/", import.meta.url));
-// The two skills this plugin provides, by folder name.
-const SKILLS = ["hivemind", "hivemind-setup"];
+// The skills this plugin provides, by folder name.
+const SKILLS = ["hivemind", "hivemind-setup", "hivemind-update"];
 
 // OpenCode names an MCP tool <server>_<tool>, e.g. hivemind_hive_write.
 const WROTE = /(^|[^a-z])hive_write$/;

@@ -103,14 +103,8 @@ apply.)
   Codex asks the user to review and trust a new hook: tell them to
   approve it with `/hooks`. Hooks on Windows are reported as unsupported
   in some Codex releases; there the instruction block is the layer.
-- **Skills without the plugin:** copy both skill folders into
+- **Skills without the plugin:** copy the three skill folders into
   `~/.agents/skills/`.
-
-## Update
-
-`codex plugin marketplace upgrade hivemind`, then reinstall with `codex
-plugin add hivemind@hivemind` (Codex runs a cached copy), check with
-`codex plugin list --marketplace hivemind`, then start a new session.
 
 ## Incognito
 

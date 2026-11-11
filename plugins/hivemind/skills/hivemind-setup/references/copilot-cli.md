@@ -53,7 +53,7 @@ dock or start menu does not read the shell profile: start it from a
 terminal that has the variable. Without `HIVEMIND_API_KEY` the server
 answers 401, the tools do not load, and the session carries on.
 
-**The plugin** adds both skills and the two hooks under "Stay aware"; it
+**The plugin** adds the skills and the two hooks under "Stay aware"; it
 does not add the server. The user installs it, a shell command for them to
 run, not you:
 
@@ -66,7 +66,7 @@ Copilot lists the Hivemind repository's `.claude-plugin/marketplace.json`.
 Do not use `copilot plugin install <owner>/<repo>` or the `:path` form:
 Copilot calls direct installs deprecated, and the repository root is not
 a plugin. `copilot plugin list` and `copilot skill list` show the result.
-**Without the plugin**, copy both skill folders into `~/.copilot/skills/`
+**Without the plugin**, copy the three skill folders into `~/.copilot/skills/`
 (or `~/.agents/skills/`).
 
 Only some servers' own `instructions` text reaches Copilot's system
@@ -112,13 +112,6 @@ agents of other harnesses.
   (`transcriptPath`), which `hivemind-stop.sh` does not read, so without
   the plugin there is no stop reminder. Check that a `HIVEMIND:` line
   appears at the start of the next session.
-
-## Update
-
-`copilot plugin marketplace update hivemind`, then `copilot plugin update
-hivemind@hivemind`. Refresh the instruction block in
-`~/.copilot/copilot-instructions.md` as in step 5 of the hivemind-setup
-skill, and start a new session.
 
 ## Incognito
 

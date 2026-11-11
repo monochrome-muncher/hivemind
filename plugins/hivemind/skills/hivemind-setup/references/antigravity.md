@@ -72,11 +72,6 @@ agents of other harnesses.
   Antigravity has no compaction event, so there is no post-compaction line;
   the rule carries that.
 
-## Update
-
-The user runs the install command again with the new tag. It replaces the
-plugin and keeps the stored URL and key. Start a new session.
-
 ## Incognito
 
 `hivemind-incognito agy` sets `HIVEMIND_INCOGNITO=1` (the hooks switch to

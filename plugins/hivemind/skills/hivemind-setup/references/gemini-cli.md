@@ -25,7 +25,8 @@ shows it. Checked with Gemini CLI 0.63.
 **Moving from a setup by hand:** remove the `hivemind` entry under
 `mcpServers` in `~/.gemini/settings.json` (it would replace the
 extension's server), the two Hivemind hooks there, and the copied
-`hivemind` and `hivemind-setup` folders in `~/.gemini/skills/`. Show the
+`hivemind`, `hivemind-setup` and `hivemind-update` folders in
+`~/.gemini/skills/`. Show the
 user each change and get approval first.
 
 **Without the extension:** Gemini CLI reads MCP servers from `mcpServers`
@@ -48,7 +49,7 @@ the SSE transport: do not use it). Merge into the existing file:
 `${HIVEMIND_API_KEY}` in `headers` is expanded from the environment
 (checked with Gemini CLI 0.63), so the key never lands in the file. Do not
 use `gemini mcp add --header "Authorization: Bearer …"`: it stores the
-literal key. Copy both skill folders into `~/.gemini/skills/` (or
+literal key. Copy the three skill folders into `~/.gemini/skills/` (or
 `~/.agents/skills/`, which Gemini CLI also scans).
 
 **Trusted folders only.** Gemini CLI turns off **every** MCP server,
@@ -132,15 +133,6 @@ agents of other harnesses.
   Check that a `HIVEMIND:` line appears at the start of the next session.
   There is no post-compaction reminder here: Gemini CLI's `SessionStart`
   does not fire after a compression, so `GEMINI.md` carries that.
-
-## Update
-
-With the extension: `gemini extensions update hivemind` (an install
-pinned with `--ref` needs `gemini extensions uninstall hivemind` and an
-install with the new ref). Without it: copy the new skill folders over
-`~/.gemini/skills/`. Either way, refresh the instruction block in
-`~/.gemini/GEMINI.md` as in step 5 of the hivemind-setup skill, and start
-a new session.
 
 ## Incognito
 

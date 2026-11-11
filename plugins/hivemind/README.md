@@ -8,7 +8,7 @@ learns and tells you when it needs more rights.
 
 It works with Claude Code, Codex, Cursor, DeepSeek Harness, Gemini CLI,
 Google Antigravity, GitHub Copilot CLI, Hermes, JetBrains' Junie, OpenCode,
-Pi and Oh My Pi, plus the IDE agents Cline and KiloCode. Its two skills
+Pi and Oh My Pi, plus the IDE agents Cline and KiloCode. Its skills
 also work in any other agent that reads `SKILL.md` files.
 
 If you want to know what Hivemind itself is, or want to run the server,
@@ -131,7 +131,7 @@ plugin's stop hook, so the setup in step 2 also adds a user rule
 (`~/.cursor/rules/hivemind.mdc`) and a user stop hook
 (`~/.cursor/hooks.json`).
 
-The plugin brings both skills and a startup hook. It does not bring the
+The plugin brings the skills and a startup hook. It does not bring the
 connection: Cursor sets a plugin's MCP variables from a team admin's
 dashboard, so you add the MCP server once yourself (see
 [Setting it up by hand](#setting-it-up-by-hand)), or let the setup in
@@ -203,7 +203,7 @@ copilot plugin marketplace add https://github.com/monochrome-muncher/hivemind
 copilot plugin install hivemind@hivemind
 ```
 
-The plugin brings both skills and the reminders. It does not bring the
+The plugin brings the skills and the reminders. It does not bring the
 connection: Copilot CLI cannot read the whole address from an
 environment variable, so you add the MCP server once yourself (see
 [Setting it up by hand](#setting-it-up-by-hand)), or let the setup in
@@ -248,7 +248,7 @@ In the Junie CLI's prompt (Junie reads the same marketplace as Claude Code):
 ```
 
 Search for `hivemind`, choose Install, then "User level". The plugin
-brings both skills, the end-of-session reminder and a small guidelines
+brings the skills, the end-of-session reminder and a small guidelines
 file that keeps Junie aware of Hivemind. It does not bring a working
 connection: Junie does not fill in `${…}` variables in a server's address
 or header, so you put the address and key in `~/.junie/mcp/mcp.json` once
@@ -323,7 +323,7 @@ them in step 2, or do them by hand):
    them from the environment; the key is never written into the file).
    The `cline` CLI (3.0.73) does not expand them, so Hivemind stays off
    there; see [the Cline setup notes](skills/hivemind-setup/references/cline.md).
-2. Copy both skill folders from [`skills/`](skills/) to
+2. Copy the three skill folders from [`skills/`](skills/) to
    `~/.cline/skills/`.
 3. Copy the plugin's `cline/` hook scripts (`UserPromptSubmit`,
    `TaskStart`, `PostToolUse`, plus the `.ps1` twins on Windows) to
@@ -352,7 +352,7 @@ doesn't move, so changing it is how you update.
 
 ### Any other agent
 
-The two skills work in any agent that reads `SKILL.md` files. Copy both
+The skills work in any agent that reads `SKILL.md` files. Copy the three
 folders from [`skills/`](skills/) into the agent's skills folder (for
 example `~/.claude/skills/`, `~/.agents/skills/`, `~/.hermes/skills/` or
 `~/.pi/agent/skills/`), then go on to step 2. You will also have to add
@@ -737,11 +737,27 @@ release, so you can tell whether an update matters to you.
 Two things don't update with the plugin. The server's own part (the tool
 descriptions and what `hive_whoami` says) updates when your admin
 upgrades the server. Anything copied into your own files, such as the
-`<!-- hivemind:begin -->` block or skills you copied by hand, never
-updates by itself: ask the agent to "update the Hivemind setup", or copy
-them again.
+`<!-- hivemind:begin -->` block, the Cursor rule, or skills and hooks you
+copied by hand, never updates by itself.
 
-All of these go in a terminal:
+The simplest way is to ask the agent to "update Hivemind". Its
+`hivemind-update` skill first checks for drift: whether the installed
+plugin is older than the latest release, and whether your copies differ
+from the latest text. It then gives you the update steps for your agent
+(they differ a lot between agents), and refreshes your copies once you
+approve each change. You can run the same check yourself; it only reads,
+and fetches the newest release with `git` to compare:
+
+```sh
+sh <plugin folder>/skills/hivemind-update/scripts/hivemind-drift.sh --block ~/.claude/CLAUDE.md
+```
+
+`--help` lists the options, and the skill's
+[per-agent notes](skills/hivemind-update/references/) say which files to
+pass for each agent. Use `--repo` if you installed from your
+organization's copy of the repository.
+
+The update commands, all in a terminal:
 
 - **Claude Code**: `claude plugin marketplace update hivemind`, then
   `claude plugin update hivemind@hivemind`, then restart Claude Code.
@@ -749,6 +765,8 @@ All of these go in a terminal:
 - **Codex**: `codex plugin marketplace upgrade hivemind`, then install it
   again with `codex plugin add hivemind@hivemind` (Codex runs a cached
   copy). `codex plugin list --marketplace hivemind` shows the version.
+  Then trust the plugin's hooks again in `/hooks`: Codex skips changed
+  hooks until you do.
 - **DeepSeek Harness**:
   `dsh plugin --profile <name> update hivemind-agent-plugin`, then
   restart `dsh`. If you added it with `#v<version>`, run `add` again with
@@ -790,7 +808,7 @@ All of these go in a terminal:
   install again with the new one. From a local copy, run `git pull` in it.
 - **Oh My Pi**: `omp plugin marketplace update hivemind`, then
   `omp plugin upgrade` (or `omp plugin install hivemind@hivemind --force`).
-- **Any other agent**: copy both `skills/` folders over your old copies.
+- **Any other agent**: copy the `skills/` folders over your old copies.
 
 ## When an agent is replaced
 
@@ -807,7 +825,7 @@ First uninstall the plugin, in a terminal:
   `dsh plugin --profile <name> remove hivemind-agent-plugin` (or
   `hivemind-dsh-plugin` if you installed it before 2.0.1).
 - **Gemini CLI**: `gemini extensions uninstall hivemind`. If you set it up
-  by hand, delete the two skill folders from `~/.gemini/skills/`, and
+  by hand, delete the Hivemind skill folders from `~/.gemini/skills/`, and
   `mcpServers.hivemind` and the Hivemind hooks from
   `~/.gemini/settings.json`.
 - **Antigravity**: `agy plugin uninstall hivemind`. This also deletes the
@@ -828,12 +846,12 @@ First uninstall the plugin, in a terminal:
 - **KiloCode**: remove the entry from the `plugin` list in
   `kilo.jsonc` (edit the file).
 - **Cline**: remove the `hivemind` entry from
-  `~/.cline/data/settings/cline_mcp_settings.json`, delete the two skill
+  `~/.cline/data/settings/cline_mcp_settings.json`, delete the Hivemind skill
   folders from `~/.cline/skills/`, and the hook scripts from
   `~/Documents/Cline/Hooks/`.
 - **Pi**: `pi remove <source>`, with the same source you installed from.
 - **Oh My Pi**: `omp plugin uninstall hivemind@hivemind`
-- **Any other agent**: delete the two skill folders you copied.
+- **Any other agent**: delete the skill folders you copied.
 
 Then delete the block between `<!-- hivemind:begin -->` and
 `<!-- hivemind:end -->` from the instructions file the setup added it to.

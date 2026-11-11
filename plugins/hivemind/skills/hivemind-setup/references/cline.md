@@ -41,13 +41,12 @@ into the file: the CLI would then connect in an incognito session too,
 because the incognito launcher works by unsetting the two variables, and
 the CLI does not show the hooks' incognito line to the agent (below).
 
-**2. The skills.** Copy both skill folders (`hivemind/` and `hivemind-setup/`,
-the folder this skill sits in and its sibling in the plugin's `skills/`
-directory) to `~/.cline/skills/`, so that
-`~/.cline/skills/hivemind/SKILL.md` and
-`~/.cline/skills/hivemind-setup/SKILL.md` exist. Cline validates the
-frontmatter and drops a skill whose `name` does not match its folder name;
-both folders are named to match.
+**2. The skills.** Copy the three skill folders from the plugin's
+`skills/` directory (`hivemind/`, `hivemind-setup/`, which holds this
+skill, and `hivemind-update/`) to `~/.cline/skills/`, so that
+`~/.cline/skills/<name>/SKILL.md` exists for each. Cline validates the
+frontmatter and drops a skill whose `name` does not match its folder
+name; the folders are named to match.
 
 **3. The hooks.** Copy the three hook scripts from this plugin's `cline/`
 directory (the plugin's `cline/` folder, shipped with the plugin package)
@@ -88,13 +87,6 @@ other harnesses.
 - **Instruction block:** none needed; Cline reads `AGENTS.md`
   (project root) and `~/.agents/AGENTS.md`, so a block written for another
   harness may load here too. That is harmless, but do not add a second block.
-
-## Update
-
-Copy the new plugin's `cline/` hook scripts over the old ones in
-`~/Documents/Cline/Hooks/`, and the new `skills/` folders over the old
-copies in `~/.cline/skills/`. The MCP entry does not change between
-releases. Then restart Cline.
 
 ## Incognito
 
