@@ -11,7 +11,8 @@ sh <skill>/scripts/hivemind-drift.sh --block ~/.codex/AGENTS.md
 
 Without the plugin (skills copied into `~/.agents/skills/`), add
 `--skills ~/.agents/skills`. Pass the marketplace's address as `--repo`
-when it is not the default.
+when the
+`Latest:` line names another source.
 
 ## Update
 

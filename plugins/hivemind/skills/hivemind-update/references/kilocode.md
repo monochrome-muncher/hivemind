@@ -10,7 +10,8 @@ sh <skill>/scripts/hivemind-drift.sh --block ~/.config/kilo/AGENTS.md
 ```
 
 The `plugin` entry in `kilo.jsonc` names the address and the ref; pass the
-address as `--repo` when it is not the default.
+address as `--repo` when the
+`Latest:` line names another source.
 
 ## Update
 

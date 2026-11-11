@@ -9,7 +9,8 @@ back to "Which harness am I in?" in the hivemind-setup skill.
 sh <skill>/scripts/hivemind-drift.sh --block ~/.omp/agent/AGENTS.md
 ```
 
-Pass the marketplace's address as `--repo` when it is not the default.
+Pass the marketplace's address as `--repo` when the
+`Latest:` line names another source.
 
 ## Update
 

@@ -11,7 +11,8 @@ sh <skill>/scripts/hivemind-drift.sh --block ~/.pi/agent/AGENTS.md
 
 Without the package (skills copied into `~/.pi/agent/skills/`), add
 `--skills ~/.pi/agent/skills`. Pass the address the package came from as
-`--repo` when it is not the default.
+`--repo` when the
+`Latest:` line names another source.
 
 ## Update
 

@@ -10,9 +10,8 @@ sh <skill>/scripts/hivemind-drift.sh --block ~/.cursor/rules/hivemind.mdc
 ```
 
 The rule holds the instruction block below its frontmatter; the check
-compares only the block. `git -C ~/.cursor/plugins/local/.hivemind-src
-remote get-url origin` shows the address the plugin came from; pass it
-as `--repo` when it is not the default. Without the plugin, add
+compares only the block. The local plugin is a clone, so the check
+compares with the address it was cloned from. Without the plugin, add
 `--skills ~/.cursor/skills`.
 
 ## Update

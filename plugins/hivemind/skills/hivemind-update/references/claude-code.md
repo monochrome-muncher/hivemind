@@ -11,8 +11,8 @@ sh <skill>/scripts/hivemind-drift.sh --block ~/.claude/CLAUDE.md
 
 Without the plugin (skills copied into `~/.claude/skills/`), add
 `--skills ~/.claude/skills`. `claude plugin marketplace list` shows the
-address the plugin came from; pass it as `--repo` when it is not the
-default.
+address the plugin came from; pass it as `--repo` when the
+`Latest:` line names another source.
 
 In a cloud session (setup's "Remote and cloud sessions") the block is in
 the repository's `CLAUDE.md` or `AGENTS.md`: pass that file to `--block`

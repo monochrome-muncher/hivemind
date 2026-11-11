@@ -645,8 +645,15 @@ every request to the endpoint, while denying `hivemind` alone did not.
 and changes nothing. By default it reads the newest `vX.Y.Z` tag with
 `git ls-remote`, makes a shallow clone of it into a temporary folder
 (`--keep DIR` keeps it, `--latest DIR` uses a checkout instead) and
-removes the clone at exit. It never runs anything from the clone. It
-reports:
+removes the clone at exit. It never runs anything from the clone, and
+it uses only git, so any git server or path works. The repository is
+`--repo`; else the `origin` (or first) remote of the clone that holds
+the installed plugin, but only when that clone is the Hivemind
+repository (a plugin inside a dotfiles repository does not count); else
+the first non-comment line of `${XDG_CONFIG_HOME:-~/.config}/hivemind/plugin-source`;
+else the public GitHub URL. The `Latest:` line names the source and why,
+with any `user:password@` removed from the URL, and git's own error
+output is dropped for the same reason. It reports:
 
 - the installed plugin: the one around the script (three folders up,
   when that folder has a manifest with a version), else `--installed`.

@@ -754,8 +754,14 @@ sh <plugin folder>/skills/hivemind-update/scripts/hivemind-drift.sh --block ~/.c
 
 `--help` lists the options, and the skill's
 [per-agent notes](skills/hivemind-update/references/) say which files to
-pass for each agent. Use `--repo` if you installed from your
-organization's copy of the repository.
+pass for each agent. It works with any git server, so a self-hosted or
+internal mirror is fine as long as it has the release tags. It compares
+with, in order: `--repo URL`; the address the plugin was cloned from,
+when your install is a git clone; the first line of
+`~/.config/hivemind/plugin-source`; and otherwise the public repository
+on GitHub. Its first line says which one it used. Put your mirror's
+address in that file once if your agents install from one. Without any
+network, pass `--latest` with a copy of the repository.
 
 The update commands, all in a terminal:
 

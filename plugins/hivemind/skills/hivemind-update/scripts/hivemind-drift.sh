@@ -12,8 +12,10 @@ Usage: hivemind-drift.sh [options]
 Compares the installed Hivemind plugin and your copies of its text with the
 latest release. Changes nothing.
 
-  --repo URL        repository to compare with
-                    (default: https://github.com/monochrome-muncher/hivemind)
+  --repo URL        repository to compare with: any git URL or path. Default:
+                    the installed plugin's own git remote when it is a clone,
+                    else the first line of ~/.config/hivemind/plugin-source,
+                    else https://github.com/monochrome-muncher/hivemind
   --ref REF         tag or branch to compare with (default: the newest vX.Y.Z tag)
   --latest DIR      compare with this checkout of the repository instead of fetching
   --keep DIR        fetch into DIR (new or empty) and keep it, to copy files from
@@ -34,7 +36,10 @@ die() {
 
 nl='
 '
-repo=https://github.com/monochrome-muncher/hivemind
+public_repo=https://github.com/monochrome-muncher/hivemind
+source_file=${XDG_CONFIG_HOME:-${HOME:-}/.config}/hivemind/plugin-source
+repo=
+repo_from="--repo"
 ref=
 latest=
 keep=
@@ -93,6 +98,34 @@ compare_versions() {
   }'
 }
 
+# A URL without any user:password@ part, for printing.
+without_credentials() {
+  printf '%s' "$1" | sed 's#^\([a-zA-Z][a-zA-Z0-9+.-]*://\)[^/@]*@#\1#'
+}
+
+# The remote of a clone of the Hivemind repository that holds $1, if any.
+own_remote() {
+  top=$(git -C "$1" rev-parse --show-toplevel 2>/dev/null) || return 1
+  [ -f "$top/plugins/hivemind/skills/hivemind-setup/SKILL.md" ] ||
+    [ -f "$top/skills/hivemind-setup/SKILL.md" ] || return 1
+  git -C "$top" remote get-url origin 2>/dev/null ||
+    git -C "$top" remote get-url "$(git -C "$top" remote | head -n 1)" 2>/dev/null
+}
+
+choose_repo() {
+  [ -n "$repo" ] && return
+  if [ -n "$installed" ] && repo=$(own_remote "$installed") && [ -n "$repo" ]; then
+    repo_from="the installed plugin's git remote"
+  elif [ -r "$source_file" ] &&
+    repo=$(sed -n '/^[[:space:]]*#/d; s/^[[:space:]]*//; s/[[:space:]]*$//; /./{p;q;}' "$source_file") &&
+    [ -n "$repo" ]; then
+    repo_from=$(shown "$source_file")
+  else
+    repo=$public_repo
+    repo_from="the default"
+  fi
+}
+
 newest_release_tag() {
   GIT_TERMINAL_PROMPT=0 git ls-remote --tags --refs "$repo" 'v*' 2>/dev/null |
     sed -n 's#^.*refs/tags/v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$#\1#p' |
@@ -102,12 +135,14 @@ newest_release_tag() {
 
 fetch_latest() {
   command -v git >/dev/null 2>&1 || die "git is not installed; pass --latest with a checkout of the repository"
+  choose_repo
+  shown_repo=$(without_credentials "$repo")
   if [ -z "$ref" ]; then
     ref=$(newest_release_tag)
-    [ -n "$ref" ] || die "found no release tag at $repo (no network, or pass --repo)"
+    [ -n "$ref" ] || die "found no vX.Y.Z tag at $shown_repo ($repo_from): it is unreachable, a mirror without tags (pass --ref <branch>), or not the right address (pass --repo, or --latest with a checkout)"
   fi
   GIT_TERMINAL_PROMPT=0 git -c advice.detachedHead=false clone --quiet --depth 1 \
-    --branch "$ref" "$repo" "$1" || die "could not fetch $ref from $repo"
+    --branch "$ref" "$repo" "$1" 2>/dev/null || die "could not fetch $ref from $shown_repo ($repo_from)"
 }
 
 # The marked blocks of a file, without carriage returns or trailing blanks.
@@ -129,6 +164,11 @@ drifted() {
   report "$@"
 }
 
+if [ -z "$installed" ]; then
+  here=$(cd "$(dirname "$0")/../../.." 2>/dev/null && pwd)
+  [ -n "$here" ] && [ -n "$(version_of "$here")" ] && installed=$here
+fi
+
 if [ -n "$latest" ]; then
   latest=$(cd "$latest" 2>/dev/null && pwd) || die "no such folder: $latest"
   source_label="the checkout $(shown "$latest")"
@@ -139,7 +179,7 @@ else
     latest=$scratch/latest
   fi
   fetch_latest "$latest"
-  source_label="$ref of $repo"
+  source_label="$ref of $shown_repo (from $repo_from)"
 fi
 latest_plugin=$latest/plugins/hivemind
 [ -f "$latest_plugin/skills/hivemind-setup/SKILL.md" ] ||
@@ -209,10 +249,6 @@ compare_skills() { # folder holding the skill folders, label prefix
   done
 }
 
-if [ -z "$installed" ]; then
-  here=$(cd "$(dirname "$0")/../../.." 2>/dev/null && pwd)
-  [ -n "$here" ] && [ -n "$(version_of "$here")" ] && installed=$here
-fi
 if [ -z "$installed" ]; then
   report "Installed plugin: none around this script (for copied skills, pass --skills)"
 elif [ ! -d "$installed/skills" ]; then

@@ -11,8 +11,8 @@ sh <skill>/scripts/hivemind-drift.sh --block ~/.hermes/SOUL.md
 
 A named profile keeps its own `SOUL.md` in `~/.hermes/profiles/<name>/`:
 check the one the profile loads. Skills copied into `~/.hermes/skills/`:
-add `--skills ~/.hermes/skills`. Pass the address the plugin came from as
-`--repo` when it is not the default.
+add `--skills ~/.hermes/skills`. The installed plugin is a clone, so the
+check compares with the address it was cloned from.
 
 ## Update
 

@@ -11,7 +11,8 @@ sh <skill>/scripts/hivemind-drift.sh --block ~/.dsh/AGENTS.md
 
 Without the bundle (skills copied into `~/.agents/skills/`), add
 `--skills ~/.agents/skills`. Pass the address the bundle came from as
-`--repo` when it is not the default.
+`--repo` when the
+`Latest:` line names another source.
 
 ## Update
 

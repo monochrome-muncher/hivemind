@@ -11,7 +11,8 @@ sh <skill>/scripts/hivemind-drift.sh --block ~/.copilot/copilot-instructions.md
 
 Without the plugin, add `--skills ~/.copilot/skills` (or
 `--skills ~/.agents/skills`, wherever setup copied them). Pass the
-marketplace's address as `--repo` when it is not the default.
+marketplace's address as `--repo` when the
+`Latest:` line names another source.
 
 ## Update
 

@@ -81,11 +81,22 @@ reports:
 | `Skill copies in …` or `Copy … of …` with `differs`, `missing` or `only in your copy` | hand-copied files are old | step 4 |
 | `No drift.` | everything matches the latest release | tell the user, and stop |
 
-Exit status 2 means it could not compare: no `git`, no network, or no
-release tag. If the plugin came from another address (an organization's
-copy of the repository), pass that with `--repo URL`; your harness's
-file says where the install source is recorded. Without network, ask the
-user for a checkout of the repository and pass `--latest DIR`.
+**Where it looks.** The `Latest:` line names the repository it compared
+with and why: `--repo` if given; else the installed plugin's own git
+remote, when the plugin is a clone of the repository; else the first
+line of `~/.config/hivemind/plugin-source`; else the public repository
+on GitHub. Any git address works (a self-hosted server, an internal
+mirror, `ssh://`, `file://` or a local path). If the organization hosts
+Hivemind somewhere else and the plugin is not a clone, ask the user for
+that address and, with approval, save it in that file so later checks
+use it; your harness's file says where the install source is recorded.
+A mirror needs the release tags; without them, pass `--ref <branch>`.
+With no route to any git server, ask for a checkout or copy of the
+repository and pass `--latest DIR`.
+
+Exit status 2 means it could not compare: no `git`, the address
+unreachable, or no release tag there. The message says which source it
+tried.
 
 Show the user the report, including the differences in the blocks,
 before you change anything. The plugin's `CHANGELOG.md` (in the new

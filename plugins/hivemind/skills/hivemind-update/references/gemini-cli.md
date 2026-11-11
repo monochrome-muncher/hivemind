@@ -10,7 +10,8 @@ sh <skill>/scripts/hivemind-drift.sh --block ~/.gemini/GEMINI.md
 ```
 
 `gemini extensions list` shows the extension's source and ref; pass the
-source as `--repo` when it is not the default. Without the extension, add
+source as `--repo` when the
+`Latest:` line names another source. Without the extension, add
 `--skills ~/.gemini/skills` (or `--skills ~/.agents/skills`, wherever
 setup copied them).
 

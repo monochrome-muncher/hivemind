@@ -45,7 +45,7 @@ def _set_version(plugin: Path, version: str) -> None:
 
 
 def _drift(tmp_path: Path, installed: Path, *args: str | Path) -> subprocess.CompletedProcess[str]:
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("HIVEMIND_", "GIT_"))}
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("HIVEMIND_", "GIT_", "XDG_"))}
     env.update(HOME=str(tmp_path), TMPDIR=str(tmp_path), GIT_CONFIG_GLOBAL=os.devnull)
     return subprocess.run(
         ["sh", str(installed / DRIFT), *map(str, args)],
@@ -201,6 +201,54 @@ def _git(repo: Path, *args: str) -> None:
     )
 
 
+def _mirror(at: Path) -> Path:
+    """A release repository somewhere other than GitHub, tagged v2.22.0."""
+    repo = _release(at)
+    _git(repo, "init", "-q")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "release")
+    _git(repo, "tag", "v2.22.0")
+    return repo
+
+
+@needs_git
+def test_a_cloned_plugin_is_compared_with_the_place_it_was_cloned_from(tmp_path: Path) -> None:
+    mirror = _mirror(tmp_path / "mirror")
+    clone = tmp_path / "clone"
+    subprocess.run(["git", "clone", "-q", mirror.as_uri(), str(clone)], check=True)
+    out = _drift(tmp_path, clone / "plugins" / "hivemind")
+    assert out.returncode == 0, out.stderr
+    assert (
+        f"of {mirror.as_uri()} (from the installed plugin's git remote)"
+        in out.stdout.splitlines()[0]
+    )
+
+
+@needs_git
+def test_a_saved_source_is_used_when_the_plugin_is_not_a_hivemind_clone(tmp_path: Path) -> None:
+    mirror = _mirror(tmp_path / "mirror")
+    dotfiles = tmp_path / "dotfiles"
+    installed = _install(dotfiles / "plugin")
+    _git(dotfiles, "init", "-q")
+    _git(dotfiles, "remote", "add", "origin", "https://example.invalid/dotfiles.git")
+    source = tmp_path / ".config" / "hivemind" / "plugin-source"
+    source.parent.mkdir(parents=True)
+    source.write_text(f"# our mirror\n\n  {mirror.as_uri()}  \n")
+    out = _drift(tmp_path, installed)
+    assert out.returncode == 0, out.stderr
+    assert f"of {mirror.as_uri()} (from ~/.config/hivemind/plugin-source)" in out.stdout
+
+
+@needs_git
+def test_a_failed_fetch_never_prints_credentials(tmp_path: Path) -> None:
+    installed = _install(tmp_path / "installed")
+    out = _drift(tmp_path, installed, "--repo", "https://agent:s3cret@127.0.0.1:9/hivemind.git")
+    assert out.returncode == 2
+    assert "s3cret" not in out.stdout + out.stderr
+    assert "https://127.0.0.1:9/hivemind.git (--repo)" in out.stderr
+    assert "--ref <branch>" in out.stderr
+
+
 @needs_git
 def test_it_fetches_the_newest_release_tag_and_can_keep_it(tmp_path: Path) -> None:
     repo = _release(tmp_path / "repo")
@@ -219,7 +267,9 @@ def test_it_fetches_the_newest_release_tag_and_can_keep_it(tmp_path: Path) -> No
     kept = tmp_path / "kept"
     out = _drift(tmp_path, installed, "--repo", repo.as_uri(), "--keep", kept)
     assert out.returncode == 1, out.stderr
-    assert out.stdout.startswith(f"Latest: version 2.10.0, v2.10.0 of {repo.as_uri()}\n")
+    assert out.stdout.startswith(
+        f"Latest: version 2.10.0, v2.10.0 of {repo.as_uri()} (from --repo)\n"
+    )
     assert "version 2.9.0: behind" in out.stdout
     assert (
         json.loads((kept / "plugins" / "hivemind" / "package.json").read_text())["version"]
@@ -227,4 +277,4 @@ def test_it_fetches_the_newest_release_tag_and_can_keep_it(tmp_path: Path) -> No
     )
 
     out = _drift(tmp_path, installed, "--repo", (tmp_path / "nowhere").as_uri())
-    assert out.returncode == 2 and "found no release tag" in out.stderr
+    assert out.returncode == 2 and "found no vX.Y.Z tag" in out.stderr
