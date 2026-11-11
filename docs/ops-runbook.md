@@ -1113,10 +1113,11 @@ reads the same settings as the API (`HIVEMIND_DATABASE_URL`, the
 refuses to start when extraction is off.
 
 It is a **dry run unless you pass `--apply`**. Each entry in scope costs one
-extractor call, in the dry run too, so start small:
+extractor call, in the dry run too, so start small. To bring entries in line
+with the ADR 0130 prompt, take the time you deployed 2.21.0 as the cutoff:
 
 ```sh
-hivemind-reextract --created-before 2026-11-11 --limit 50
+hivemind-reextract --created-before <when you deployed 2.21.0> --limit 50
 ```
 
 Each change prints as `would change <id>: ["Postgres"] -> ["PostgreSQL"]`

@@ -94,7 +94,7 @@ def _hivemind_section(_session_info: object = None) -> str:
 
 def _description(skill_md: Path) -> str:
     """The SKILL.md frontmatter description, which Hermes lists the skill
-    by (it is a single line in both skills)."""
+    by (it is a single line in every skill)."""
     for line in skill_md.read_text(encoding="utf-8").splitlines()[1:]:
         if line == "---":
             break

@@ -166,7 +166,7 @@ gemini extensions install https://github.com/monochrome-muncher/hivemind.git
 ```
 
 Gemini asks you to confirm, because the extension adds skills to the
-agent's instructions. The extension brings the MCP connection, both
+agent's instructions. The extension brings the MCP connection, the
 skills and the reminders.
 
 Add `--ref v<version>` to stay on one release. This works from
@@ -900,8 +900,9 @@ Depending on the agent, that is `CLAUDE.md`, `AGENTS.md`,
 `~/.gemini/GEMINI.md`, `~/.hermes/SOUL.md`,
 `~/.config/opencode/AGENTS.md`, `~/.config/kilo/AGENTS.md`,
 `~/.pi/agent/AGENTS.md` or
-`~/.omp/agent/AGENTS.md`. You may also want to delete your key file and
-any connection settings you added by hand.
+`~/.omp/agent/AGENTS.md`. You may also want to delete your key file,
+any connection settings you added by hand, and
+`~/.config/hivemind/plugin-source` if an update saved one.
 
 ## For maintainers
 

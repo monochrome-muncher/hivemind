@@ -39,7 +39,7 @@ Antigravity keeps no record of that address, so with approval save it
 as the only line of `~/.config/hivemind/plugin-source` (folder mode 700,
 no password or token in it): the hivemind-update skill compares with it.
 
-The plugin (named `hivemind` once installed) brings the MCP server, both
+The plugin (named `hivemind` once installed) brings the MCP server, the
 skills, an always-on rule and the two hooks under "Stay aware". It installs **turned off**, because its server
 needs two values. The user turns it on in `/plugin` (CLI: select hivemind,
 press Space) or under Customizations > Installed (App), and fills in the
