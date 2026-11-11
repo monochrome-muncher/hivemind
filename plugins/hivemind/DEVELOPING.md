@@ -648,9 +648,11 @@ and changes nothing. By default it reads the newest `vX.Y.Z` tag with
 removes the clone at exit. It never runs anything from the clone, and
 it uses only git, so any git server or path works. The repository is
 `--repo`; else, with `--source-from FILE`, the first git address in
-that file whose repository name contains `hivemind` (dropping a `git+`
+that file whose repository name contains `hivemind` and that git can
+reach when there are several (a harness's config can also name the
+Hivemind MCP server), dropping a `git+`
 or `git:` prefix, a `#fragment` and an `@ref`, so OpenCode and KiloCode
-plugin entries work; each harness's update file names its record, where
+plugin entries work (each harness's update file names its record, where
 it was checked); else the `origin` (or first) remote of the clone that holds
 the installed plugin, but only when that clone is the Hivemind
 repository (a plugin inside a dotfiles repository does not count); else,
@@ -660,10 +662,12 @@ Code's layout, checked live with a Git-URL marketplace), with the same
 check; else the first non-comment line of `${XDG_CONFIG_HOME:-~/.config}/hivemind/plugin-source`;
 else the public GitHub URL. The `Latest:` line names the source and why,
 with any `user:password@` removed from the URL, and git's own error
-output is dropped for the same reason. It reports:
+output is dropped for the same reason. The address always follows `--`
+on git's command line, so one that starts with `-` is never read as an
+option. It reports:
 
-- the installed plugin: the one around the script (three folders up,
-  when that folder has a manifest with a version), else `--installed`.
+- the installed plugin: `--installed`, else the one around the script
+  (three folders up, when that folder has a manifest with a version).
   Its version against the release's, then each skill folder and the
   always-on files it has (`guidelines/hivemind.md`,
   `cursor/rules/hivemind.mdc`, Antigravity's `rules/AGENTS.md`) against
