@@ -737,27 +737,18 @@ In a session, type:
 Update Hivemind
 ```
 
-That is all. In Claude Code you can also run `/hivemind:hivemind-update`.
-Any other wording that asks to update Hivemind, or to check it for
-drift, works too. You don't pass any options: the agent works out which
-agent program it runs in and uses that program's own notes.
+(In Claude Code, `/hivemind:hivemind-update` does the same.) You don't
+need to pass anything else. The agent:
 
-The agent then:
+1. checks what is out of date: the plugin itself, and the Hivemind text
+   that setup copied into your own files (such as the block in
+   `CLAUDE.md`, `AGENTS.md` or `GEMINI.md`);
+2. updates the plugin the way your agent program needs;
+3. updates those copies, asking you before each change;
+4. asks you to start a new session, since a running one keeps its old
+   instructions.
 
-1. **Checks for drift.** It compares what you have with the latest
-   Hivemind release: whether the installed plugin is older, and whether
-   the Hivemind text it once copied into your own files (the
-   `<!-- hivemind:begin -->` block in `CLAUDE.md`, `AGENTS.md`,
-   `GEMINI.md` and the like, the Cursor rule, skills and hooks copied by
-   hand) differs from the latest text. It shows you what differs. This
-   step only reads.
-2. **Updates the plugin** the way your agent program needs. Each program
-   installs plugins differently, so the steps differ; the table below
-   says what you may have to do yourself.
-3. **Refreshes your copies**, showing you each change and asking before
-   it writes anything.
-4. **Asks you to start a new session.** A running session keeps the
-   instructions it loaded when it started.
+Some agents still need a step from you:
 
 | Agent | What you may have to do |
 |---|---|
@@ -780,20 +771,14 @@ says) updates when your admin upgrades the server, not with the plugin.
 
 ### If Hivemind is hosted somewhere else
 
-Your organization may install Hivemind from its own GitLab, an internal
-mirror or another git server instead of GitHub. The agent compares with
-the place you installed from: it reads that from your agent program's
-own records (for example the marketplace you added in Claude Code,
-Codex or Copilot CLI, or the `plugin` entry in OpenCode and KiloCode) or
-from the clone itself (Cursor, Gemini CLI, Hermes). Where it can't find
-it, it asks you once for the Git URL and, with your OK, saves it in
-`~/.config/hivemind/plugin-source` for next time. To set it up front,
-put the URL (without any password or token) on the first line of that
-file.
+If you installed Hivemind from your own GitLab, a mirror or any other git
+server, the agent finds that address where your agent program recorded
+the install. If it can't, it asks you once for the Git URL and saves it
+in `~/.config/hivemind/plugin-source`. You can also write the URL (with
+no password or token in it) on the first line of that file yourself.
 
-The mirror needs the release tags (`v2.22.0` and so on). On a network
-without access to any git server, give the agent a copy of the
-repository and it compares with that.
+The mirror needs the release tags (`v2.22.0` and so on). Without any git
+server at all, give the agent a copy of the repository instead.
 
 ### Updating by hand
 
