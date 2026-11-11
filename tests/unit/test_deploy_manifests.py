@@ -489,6 +489,19 @@ def test_github_workflow_hardening() -> None:
             assert "github.event_name != 'pull_request'" in job.get("if", ""), name
 
 
+def test_mcp_registry_publish_runs_on_release_tags_after_the_image() -> None:
+    wf = yaml.safe_load((ROOT / ".github" / "workflows" / "docker-publish.yml").read_text())
+    job = wf["jobs"]["mcp-registry"]
+    assert job["needs"] == "publish"  # the registry checks the pushed image's label
+    assert "startsWith(github.ref, 'refs/tags/v')" in job["if"]
+    assert job["permissions"] == {"contents": "read", "id-token": "write"}
+    assert re.fullmatch(r"v\d+\.\d+\.\d+", job["env"]["MCP_PUBLISHER_VERSION"])
+    steps = "\n".join(step.get("run", "") for step in job["steps"])
+    assert "cosign verify-blob" in steps
+    assert "login github-oidc" in steps
+    assert "secrets." not in str(job)
+
+
 # --- DEP-14: the entrypoint ----------------------------------------------------------
 
 

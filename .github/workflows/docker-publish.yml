@@ -124,3 +124,77 @@ jobs:
         # This step uses the identity token to provision an ephemeral certificate
         # against the sigstore community Fulcio instance.
         run: echo "${TAGS}" | xargs -I {} cosign sign --yes {}@${DIGEST}
+
+  # Release tags only (not pre-releases such as v1.2.3-rc.1): list the release
+  # in the MCP Registry once its image is pushed (the registry reads the
+  # image's io.modelcontextprotocol.server.name label). A separate job, so a
+  # registry failure never undoes or blocks the image publish. Logs in with
+  # this run's GitHub OIDC token; no stored secret.
+  mcp-registry:
+    needs: publish
+    if: github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      MCP_PUBLISHER_VERSION: v1.8.6
+      REGISTRY_URL: https://registry.modelcontextprotocol.io
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check server.json matches the tag
+        id: check
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          name="$(jq -r .name server.json)"
+          version="$(jq -r .version server.json)"
+          image="$(jq -r '.packages[0].identifier' server.json)"
+          if [ "v${version}" != "${TAG}" ] || [ "${image##*:}" != "${TAG}" ]; then
+            echo "::error::server.json has version ${version} and image ${image}, but the tag is ${TAG}"
+            exit 1
+          fi
+          status="$(curl --silent --show-error --max-time 30 --retry 3 --output /dev/null --write-out '%{http_code}' \
+            "${REGISTRY_URL}/v0.1/servers/${name/\//%2F}/versions/${version}")"
+          case "${status}" in
+            200) echo "::notice::${name} ${version} is already in the MCP Registry; nothing to publish"
+                 echo "publish=false" >> "${GITHUB_OUTPUT}" ;;
+            404) echo "publish=true" >> "${GITHUB_OUTPUT}" ;;
+            *)   echo "::error::MCP Registry lookup returned HTTP ${status}"; exit 1 ;;
+          esac
+
+      - name: Install cosign
+        if: steps.check.outputs.publish == 'true'
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 #v4.1.2
+        with:
+          cosign-release: 'v3.1.4'
+
+      # Pinned release, checked against its Sigstore bundle from the registry
+      # project's own release workflow before it runs.
+      - name: Download and verify mcp-publisher
+        if: steps.check.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          archive="mcp-publisher_linux_amd64.tar.gz"
+          base_url="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}"
+          curl --fail --location --silent --show-error --output "${archive}" "${base_url}/${archive}"
+          curl --fail --location --silent --show-error --output "${archive}.sigstore.json" "${base_url}/${archive}.sigstore.json"
+          cosign verify-blob \
+            --bundle "${archive}.sigstore.json" \
+            --certificate-identity "https://github.com/modelcontextprotocol/registry/.github/workflows/release.yml@refs/tags/${MCP_PUBLISHER_VERSION}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "${archive}"
+          tar xzf "${archive}" mcp-publisher
+          rm -f "${archive}" "${archive}.sigstore.json"
+
+      - name: Publish to the MCP Registry
+        if: steps.check.outputs.publish == 'true'
+        run: |
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish
