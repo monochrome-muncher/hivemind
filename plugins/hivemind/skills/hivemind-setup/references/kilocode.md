@@ -18,15 +18,21 @@ differs from `HIVEMIND_MCP_URL` the plugin prints one warning on stderr.
 ```jsonc
 {
   "plugin": [
-    "git:https://<git-server>/<owner>/hivemind@v<version>#plugins/hivemind/opencode/hivemind.js"
+    "git:https://<git-server>/<owner>/hivemind@v<version>"
   ]
 }
 ```
 
-KiloCode's `git:` spec is `git:<repo>[@ref][#subpath]`: it clones the
-repository and loads the file at `#subpath`. Pin a release tag (`@v<version>`)
-as shown: a pinned ref is never refreshed, so changing the tag is how it
-updates; a branch ref is re-checked about hourly.
+KiloCode's `git:` spec is `git:<repo>[@ref][#subpath]`. It clones the
+repository and loads its package entry point, the root `package.json`, which
+points at the plugin file. Leave out `#subpath`: it must name a folder with
+its own `package.json`, so the plugin file itself can't be the subpath, and
+KiloCode then loads nothing and says nothing. Pin a release tag
+(`@v<version>`) as shown. A tag doesn't move, so changing it is how you
+update; KiloCode re-checks a tag or branch about hourly and fetches a full
+commit SHA only once. If that hourly re-check can't reach the Git server,
+KiloCode starts without the plugin; pin a full commit SHA instead of the tag
+on a machine that is often offline.
 
 The `plugin` key is the v1 plugin API, which KiloCode keeps and which gives
 the full feature set (the server, the reminder, the end-of-session and
@@ -61,10 +67,9 @@ of other harnesses.
 
 ## Update
 
-Change the tag in the `plugin` entry (`git:…/hivemind@v<version>#…`) to the
-new release, then restart KiloCode. A pinned entry is never refreshed, so
-the tag change is the update; a branch entry updates on its own about
-hourly.
+Change the tag in the `plugin` entry (`git:…/hivemind@v<version>`) to the
+new release, then restart KiloCode. A tag doesn't move, so the tag change is
+the update; a branch entry updates on its own about hourly.
 
 ## Incognito
 

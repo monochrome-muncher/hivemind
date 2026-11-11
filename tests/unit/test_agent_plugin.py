@@ -778,7 +778,7 @@ PI_EXTENSION = PLUGIN / "extensions" / "hivemind.ts"
 
 
 def _node(script: str, module: Path, **env_overrides: str) -> object:
-    env = {k: v for k, v in os.environ.items() if not k.startswith("HIVEMIND_")}
+    env = {k: v for k, v in os.environ.items() if not k.startswith("HIVEMIND_") and k != "KILO"}
     env.update(env_overrides)
     out = subprocess.run(
         ["node", "--input-type=module", "-e", script, module.as_uri()],
@@ -1421,13 +1421,13 @@ def test_cline_hooks_write_the_counter_into_a_private_folder(tmp_path: Path) -> 
 
 
 def test_kilocode_loads_the_opencode_plugin_from_the_git_spec() -> None:
-    """The KiloCode reference points its git: spec's subpath at the OpenCode
-    plugin, and that file is the package entry point."""
+    """The KiloCode reference uses the bare git: spec: KiloCode loads the root
+    package.json entry point, and a #subpath must be a folder, not the file."""
     ref = (SETUP_REFS / "kilocode.md").read_text()
-    assert (
-        "git:https://<git-server>/<owner>/hivemind@v<version>#plugins/hivemind/opencode/hivemind.js"
-        in ref
-    )
+    assert '"git:https://<git-server>/<owner>/hivemind@v<version>"' in ref
+    assert "opencode/hivemind.js" not in ref
+    package = json.loads((ROOT / "package.json").read_text())
+    assert package["exports"]["./server"] == "./plugins/hivemind/opencode/hivemind.js"
     # The v1 plugin key is what gives the full feature set there; the docs
     # say so. The launcher's incognito overlay carries both mcp shapes:
     # KiloCode 7.8.18 kept a hand-configured server on with the v2 form
@@ -1484,6 +1484,49 @@ def test_opencode_v2_setup_degrades_on_the_kilocode_context() -> None:
     # is returned (no event stream to abort).
     assert r["sources"] == [{"type": "directory", "path": str(SKILLS_DIR) + "/"}]
     assert r["teardown"] == "undefined"
+
+
+_SKILL_ORIGINS_SCRIPT = """
+const mod = await import(process.argv[1])
+const hooks = await mod.default.server({})
+const cfg = JSON.parse(process.env.CFG ?? "{}")
+await hooks.config(cfg)
+console.log(JSON.stringify(cfg))
+"""
+_OTHER_ORIGIN = {"/elsewhere/skills": {"trusted": False, "source": "/elsewhere/kilo.jsonc"}}
+
+
+@needs_node
+def test_opencode_plugin_marks_its_skills_trusted_under_kilocode() -> None:
+    cfg = _node(
+        _SKILL_ORIGINS_SCRIPT,
+        OPENCODE_PLUGIN,
+        KILO="1",
+        CFG=json.dumps({"skill_path_origins": _OTHER_ORIGIN}),
+    )
+    skills_dir = str(SKILLS_DIR) + "/"
+    assert cfg["skills"]["paths"] == [skills_dir]
+    assert cfg["skill_path_origins"] == {
+        **_OTHER_ORIGIN,
+        skills_dir: {"trusted": True, "source": str(OPENCODE_PLUGIN)},
+    }
+
+
+@needs_node
+def test_opencode_plugin_leaves_skill_origins_alone_outside_kilocode() -> None:
+    cfg = _node(_SKILL_ORIGINS_SCRIPT, OPENCODE_PLUGIN)
+    assert cfg["skills"]["paths"] == [str(SKILLS_DIR) + "/"]
+    assert "skill_path_origins" not in cfg
+
+
+def test_skills_have_no_config_substitution_tokens() -> None:
+    """KiloCode expands {env:NAME} and {file:path} in trusted skills, which
+    could put a key into the model context, and runs !`cmd` after one prompt."""
+    skills = sorted(SKILLS_DIR.rglob("SKILL.md"))
+    assert len(skills) == 2
+    for skill in skills:
+        text = skill.read_text()
+        assert "{env:" not in text and "{file:" not in text and "!`" not in text, skill
 
 
 _EXTENSION_SCRIPT = """
