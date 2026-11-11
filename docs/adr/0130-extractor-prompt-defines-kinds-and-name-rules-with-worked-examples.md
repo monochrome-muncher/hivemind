@@ -2,7 +2,7 @@
 
 Amends [ADR 0016](0016-write-time-entity-extraction-facets-best-effort-optional-extractor.md) (the fixed extractor prompt). Builds on [ADR 0043](0043-entries-are-untrusted-data.md) (entries are data).
 
-Status: Accepted.
+Status: Accepted. Amended by [ADR 0131](0131-operator-run-entity-re-extraction.md): `hivemind-reextract` brings older entries to the new names.
 
 ## Context
 

@@ -70,7 +70,7 @@ def _decode_sources(raw: Any) -> tuple[Source, ...]:
     return tuple(Source(type=SourceType(item["type"]), ref=item["ref"]) for item in items)
 
 
-def _decode_entities(raw: Any) -> tuple[ExtractedEntity, ...]:
+def decode_entities(raw: Any) -> tuple[ExtractedEntity, ...]:
     """Decode the jsonb ``entities`` column."""
     if not raw:
         return ()
@@ -104,7 +104,7 @@ def row_to_entry(row: asyncpg.Record) -> Entry:
         withdrawn_reason=row["withdrawn_reason"],
         redacted_at=row["redacted_at"],
         withdrawn_at=row["withdrawn_at"],
-        entities=_decode_entities(row["entities"]),
+        entities=decode_entities(row["entities"]),
         entities_model=row["entities_model"],
     )
 

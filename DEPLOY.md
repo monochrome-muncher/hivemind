@@ -140,7 +140,7 @@ The operator flow (steps 1–4 are required, 5–8 optional):
    `kubectl kustomize deploy/kubernetes/optional/networkpolicy | kubectl -n hivemind apply -f -`.
    The stricter **default-deny egress** policy is its own tree,
    `deploy/kubernetes/optional/networkpolicy/egress/`: it lets the api, mcp,
-   admin and portal pods reach only DNS, Postgres, the embedding/extractor
+   admin and portal pods and the re-extraction Job reach only DNS, Postgres, the embedding/extractor
    endpoints and `hivemind-api` (needed by the panel and the portal; the
    rule admits all four, which is harmless). Replace its placeholder
    `192.0.2.x` addresses with yours first; unedited, it fails closed and the
@@ -311,6 +311,9 @@ first-run bootstrap Job records itself as `ci-bootstrap`.
 - **Failure mode** — a dead extractor = entries land **WITHOUT entity
   facets** (best-effort, ADR 0016). The write still succeeds; the
   observable symptom is **empty `entities`**, not an error.
+- **Older entries** — after a change of extractor model or prompt, or an
+  outage, `hivemind-reextract` fills in or renames the entities of stored
+  entries: [docs/ops-runbook.md §14](docs/ops-runbook.md) (ADR 0131).
 
 ---
 

@@ -1,0 +1,71 @@
+# ONE-OFF entity re-extraction Job (ADR 0131, docs/ops-runbook.md §14). Not
+# in any kustomization: copy it, set the image to the tag the Deployments run
+# and the arguments you want, then `kubectl apply -f` it.
+#
+# `hivemind-reextract` is a dry run unless `--apply` is in `args`. Read the
+# dry run's log first (`kubectl -n hivemind logs -f job/hivemind-reextract`),
+# then delete the Job and apply it again with `--apply`. Each batch prints a
+# `--after <id>` resume point; a stopped run is resumed by adding that.
+#
+#   * The entrypoint migrates first (cheap on an up-to-date pool), so use
+#     the image the Deployments run, never a newer one.
+#   * Same ConfigMap and Secret as the API: the database and the extractor
+#     settings come from there. It needs no service account token.
+#   * backoffLimit 0: a failed pod is not restarted from the start; resume
+#     by hand with `--after`.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hivemind-reextract
+  labels:
+    app.kubernetes.io/name: hivemind
+    app.kubernetes.io/component: reextract
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hivemind
+        app.kubernetes.io/component: reextract
+    spec:
+      restartPolicy: Never
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: reextract
+          image: hivemind:0.0.0
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: HIVEMIND_RUNNER
+              value: reextract
+          envFrom:
+            - configMapRef:
+                name: hivemind-config
+            - secretRef:
+                name: hivemind-secrets
+          # Entries written before the extractor prompt changed; add --apply to write.
+          args: ["--created-before", "2026-11-11T00:00:00Z"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi

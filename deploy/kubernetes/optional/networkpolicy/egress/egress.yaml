@@ -1,5 +1,6 @@
 # OPT-IN default-deny egress for hivemind-api, hivemind-mcp,
-# hivemind-admin and hivemind-portal (ROADMAP 3.13). Needs a CNI that
+# hivemind-admin, hivemind-portal and the re-extraction Job (ROADMAP 3.13,
+# ADR 0131). Needs a CNI that
 # enforces NetworkPolicy egress (Calico, Cilium, ...). Once applied, these
 # pods can reach ONLY:
 #
@@ -32,7 +33,7 @@ spec:
         values: ["hivemind"]
       - key: app.kubernetes.io/component
         operator: In
-        values: ["api", "mcp", "admin", "portal"]
+        values: ["api", "mcp", "admin", "portal", "reextract"]
   policyTypes: [Egress]
   egress:
     # Cluster DNS.

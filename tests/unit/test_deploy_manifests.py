@@ -30,6 +30,7 @@ WORKLOADS = [
     K8S / "admin" / "hivemind-admin-deployment.yaml",
     K8S / "portal" / "hivemind-portal-deployment.yaml",
     K8S / "bootstrap" / "keys-job.yaml",
+    K8S / "maintenance" / "reextract-job.yaml",
 ]
 
 
@@ -434,7 +435,7 @@ def test_egress_policy_is_its_own_opt_in_tree_and_fails_closed() -> None:
         for e in policy["spec"]["podSelector"]["matchExpressions"]
         if e["key"] == "app.kubernetes.io/component"
     }
-    assert selected == {("api", "mcp", "admin", "portal")}
+    assert selected == {("api", "mcp", "admin", "portal", "reextract")}
     ports = {p["port"] for rule in policy["spec"]["egress"] for p in rule["ports"]}
     assert {53, 5432, 443, 8000} <= ports
     # Placeholder addresses come from the documentation range: unedited, the
