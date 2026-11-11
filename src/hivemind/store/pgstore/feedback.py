@@ -18,6 +18,7 @@ from hivemind.domain.feedback import (
     FlagBacklogFilters,
     FlagCount,
     FlaggedEntry,
+    ReliedOnChange,
     Verdict,
     last_confirmed,
     truncate_note,
@@ -130,6 +131,25 @@ SELECT
 FROM feedbacks f
 WHERE entry_id = ANY($1) AND {_RATING_COUNTS}
 GROUP BY entry_id
+"""
+
+# What changed on the entries a reporter rated helpful (ADR 0138): the same conditions as
+# ``_relied_on_changed_clause``, kept as facts instead of one boolean.
+RELIED_ON_CHANGES = f"""
+SELECT
+    h.entry_id,
+    h.updated_at AS rated_at,
+    (e.state = 'superseded' AND EXISTS (
+        SELECT 1 FROM entries s WHERE s.id = e.superseded_by
+        AND s.author <> h."user" AND s.created_at > h.updated_at)) AS superseded,
+    (e.state = 'withdrawn' AND coalesce(e.withdrawn_at > h.updated_at, TRUE)) AS withdrawn,
+    (SELECT COUNT(*) FROM feedbacks f WHERE f.entry_id = e.id AND f.verdict = 'stale'
+        AND f.updated_at > h.updated_at AND f."user" <> h."user" AND {_RATING_COUNTS}) AS stale,
+    (SELECT COUNT(*) FROM feedbacks f WHERE f.entry_id = e.id AND f.verdict = 'wrong'
+        AND f.updated_at > h.updated_at AND f."user" <> h."user" AND {_RATING_COUNTS}) AS wrong
+FROM feedbacks h JOIN entries e ON e.id = h.entry_id
+WHERE h.entry_id = ANY($1) AND h."user" = $2 AND h.agent = $3
+    AND h.verdict = 'helpful' AND h.set_aside_by IS NULL
 """
 
 # BATCH_FEEDBACK's counts plus the two dates "last confirmed" is made of (SPEC §4.2):
@@ -245,6 +265,21 @@ class FeedbackStore(PgConnections):
         for r in rows:
             counts[str(r["entry_id"])] = (r["helpful"], r["stale"], r["wrong"])
         return counts
+
+    async def relied_on_changes(
+        self, entry_ids: list[str], reporter: tuple[str, str]
+    ) -> dict[str, ReliedOnChange]:
+        ids = canonical_uuids(entry_ids)
+        if not ids:
+            return {}
+        async with self._connection() as conn:
+            rows = await conn.fetch(RELIED_ON_CHANGES, ids, *reporter)
+        return {
+            str(r["entry_id"]): ReliedOnChange(
+                r["rated_at"], r["superseded"], r["withdrawn"], r["stale"], r["wrong"]
+            )
+            for r in rows
+        }
 
     async def feedback_signals(
         self,

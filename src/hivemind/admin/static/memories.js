@@ -9,7 +9,7 @@
 import {
   api, apiRaw, h, state, entryById, entryIdIn, toast, guarded, parseHash, loadAgentsAndFleets, fleetName, pageHead, refreshButton, card, KINDS, SCOPES, fill,
 } from "./core.js";
-import { asAgentBanner, hiddenFrom } from "./asagent.js";
+import { asAgentBanner, hiddenFrom, ownedAuthors } from "./asagent.js";
 import { explainLines } from "./explain.js";
 import { openEntry } from "./drawer.js";
 import { ENTRY_HEADERS, PAGE, entryCsvColumns, entryRow, exportButton, normaliseEntry } from "./lists.js";
@@ -115,7 +115,6 @@ export async function viewMemories(root) {
 
   const isSearch = (f) => Boolean(f.q) && !entryIdIn(f.q);
   const searchingAs = (f) => Boolean(f.as) && isSearch(f);
-  const agentNamed = (name) => state.agents.find((a) => a.name === name) || { name, trust_level: 0, home_fleet_id: null };
   const hitRow = (item) => entryRow(item, { onOpen: (id) => openEntry(id, () => load(false)), fleetName });
   // A hit's row, followed by its score parts when the search explained itself.
   const hitRows = (item) => {
@@ -131,11 +130,12 @@ export async function viewMemories(root) {
     asBanner.hidden = !searchingAs(f);
     hiddenCard.hidden = true;
     if (!searchingAs(f)) return;
-    const agent = agentNamed(f.as);
+    const agent = state.agents.find((a) => a.name === f.as);
+    if (!agent) { asBanner.textContent = `${f.as} is unknown to the panel: reload the page`; return; }
     asBanner.textContent = asAgentBanner(agent, fleetName);
-    const adminPage = await searchPage(searchBody({ ...f, explain: "" }, PAGE, 0));
-    if (!adminPage || mine !== ticket) return;
-    const hidden = hiddenFrom(agent, adminPage.items, agentItems, fleetName);
+    const [adminPage, successions] = await Promise.all([searchPage(searchBody({ ...f, explain: "" }, PAGE, 0)), guarded(() => api("GET", "admin/successions"))]);
+    if (!adminPage || !successions || mine !== ticket) return;
+    const hidden = hiddenFrom(agent, adminPage.items, agentItems, { fleetName, owned: ownedAuthors(agent.name, successions), includeInactive: Boolean(f.all) });
     hiddenBody.replaceChildren(...hidden.map(({ hit, reason }) => {
       const row = hitRow(hit);
       row.append(h("td", { class: "small", text: reason }));
@@ -172,7 +172,9 @@ export async function viewMemories(root) {
       moreWrap.hidden = items.length < PAGE;
       if (!append) await showAsAgent(f, items, mine);
     } catch (err) {
-      if (mine === ticket) toast(err.message, true);
+      if (mine !== ticket) return;
+      toast(err.message, true);
+      if (!append) { tbody.replaceChildren(); moreWrap.hidden = true; status.textContent = err.message; }
     } finally {
       more.disabled = false;
     }

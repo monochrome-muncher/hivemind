@@ -50,6 +50,7 @@ from hivemind.api.schemas.entries import (
     EntriesOut,
     EntryOut,
     ExplainOut,
+    FleetSearchRequest,
     GetEntriesRequest,
     HitOut,
     LinkOut,
@@ -115,6 +116,7 @@ from hivemind.api.schemas.metrics import (
 from hivemind.api.schemas.pins import PinnedOut, PinOut, PinsOut, UnpinOut
 from hivemind.api.schemas.portal import (
     PortalHistoryItemOut,
+    PortalReliedOnOut,
     PortalSearchRequest,
     PortalWithdrawRequest,
 )
@@ -179,6 +181,7 @@ __all__ = [
     "FleetMoveRequest",
     "FleetOut",
     "FleetSearchMetrics",
+    "FleetSearchRequest",
     "FleetUnmergeOut",
     "FleetsMetrics",
     "GetEntriesRequest",
@@ -201,6 +204,7 @@ __all__ = [
     "PortalCleanupRecordOut",
     "PortalCleanupRequest",
     "PortalHistoryItemOut",
+    "PortalReliedOnOut",
     "PortalSearchRequest",
     "PortalWithdrawRequest",
     "ReceivedOut",

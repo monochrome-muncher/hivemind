@@ -44,6 +44,7 @@ from hivemind.domain.feedback import (
     FlagBacklogFilters,
     FlagCount,
     FlaggedEntry,
+    ReliedOnChange,
 )
 from hivemind.domain.fleet_merge import (
     DuplicateScan,
@@ -596,6 +597,14 @@ class Store(Protocol):
     async def quality_counts(self, entry_ids: list[str]) -> dict[str, FeedbackCounts]:
         """Batched counts: every well-formed UUID requested is a key, ``(0, 0, 0)`` if none;
         malformed ids are left out."""
+        ...
+
+    async def relied_on_changes(
+        self, entry_ids: list[str], reporter: tuple[str, str]
+    ) -> dict[str, ReliedOnChange]:
+        """For each of ``entry_ids`` the ``reporter`` (user, agent) rated helpful, what changed
+        since (ADR 0138), judged as the ``relied_on_changed`` filter does (ADR 0098), in one
+        read. Entries it did not rate helpful, malformed ids and unknown ids are left out."""
         ...
 
     async def feedback_signals(

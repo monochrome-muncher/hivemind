@@ -33,6 +33,24 @@ def last_confirmed(
     return newest_noted_helpful_at
 
 
+@dataclass(frozen=True, slots=True)
+class ReliedOnChange:
+    """What changed on an entry since a reporter rated it helpful (ADR 0138), by the rules of the
+    ``relied_on_changed`` filter (ADR 0098): ``rated_helpful_at`` is that rating's date (``None`` only in ``NO_CHANGE_FOUND``); the
+    entry was ``superseded`` by someone else or ``withdrawn``; ``stale`` and ``wrong`` count the
+    later reports from other users."""
+
+    rated_helpful_at: datetime | None
+    superseded: bool
+    withdrawn: bool
+    stale: int = 0
+    wrong: int = 0
+
+
+# A listed entry whose change the store could not find (it moved between the two reads).
+NO_CHANGE_FOUND = ReliedOnChange(None, superseded=False, withdrawn=False)
+
+
 # Characters of a correction's note a hit shows (SPEC §6.1).
 CORRECTION_NOTE_CHARS = 160
 
