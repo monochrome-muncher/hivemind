@@ -68,7 +68,7 @@ restart, run `cursor-agent mcp list` and check that `hivemind` is there,
 then call `hive_whoami`. In the
 editor, Settings, MCP shows the server and its tools.
 
-**The plugin** adds both skills and a `sessionStart` hook (see "Stay
+**The plugin** adds the skills and a `sessionStart` hook (see "Stay
 aware"). Cursor installs plugins from the Cursor Marketplace (a public
 listing is reviewed, and Hivemind has none yet), from a team marketplace
 (an admin uses "Import from Repo" with the Git URL of the Hivemind
@@ -109,7 +109,7 @@ Cursor fetches it again at each start):
 }
 ```
 
-**Without the plugin**, copy both skill folders into `~/.cursor/skills/`.
+**Without the plugin**, copy the three skill folders into `~/.cursor/skills/`.
 Then you have no rule and no hook, so add the instruction block as under
 "Stay aware".
 
@@ -177,14 +177,6 @@ machine.
   another agent could reuse. Without the plugin there is no script to
   point at, so there is no stop reminder; write as you go (the hivemind
   skill says when).
-
-## Update
-
-Run `git -C ~/.cursor/plugins/local/.hivemind-src pull`, then restart
-Cursor or run "Developer: Reload Window" and start a new conversation.
-With the marketplace file, a restart is enough.
-Refresh the instruction block or your own rule as in step 5 of the
-hivemind-setup skill.
 
 ## Incognito
 

@@ -8,7 +8,7 @@ extension). If you have not confirmed that this is your harness, go back to
 
 KiloCode 7.x is a fork of OpenCode, so the hivemind **OpenCode plugin**
 works in it unchanged. The plugin registers the Hivemind MCP server from
-`HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY`, adds the two skills, and puts
+`HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY`, adds the skills, and puts
 the reminder into every model request. Add the Hivemind repository to the
 `plugin` list in `~/.config/kilo/kilo.jsonc` (all projects) or a project's
 `kilo.jsonc`, then export the two variables and restart KiloCode. If a
@@ -64,12 +64,6 @@ of other harnesses.
   write and rate before finishing, and after a compaction to write what you
   learned before it.
 - **Instruction block:** `~/.config/kilo/AGENTS.md`.
-
-## Update
-
-Change the tag in the `plugin` entry (`git:…/hivemind@v<version>`) to the
-new release, then restart KiloCode. A tag doesn't move, so the tag change is
-the update; a branch entry updates on its own about hourly.
 
 ## Incognito
 

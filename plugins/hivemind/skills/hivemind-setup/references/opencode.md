@@ -8,7 +8,7 @@ in?" in the hivemind-setup skill.
 
 The hivemind **OpenCode plugin** does the whole setup itself: it registers
 the Hivemind MCP server from `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY`, adds
-the two skills, and puts the reminder into every model request. It supports
+the skills, and puts the reminder into every model request. It supports
 both OpenCode v1 and v2 (the two plugin APIs differ; the plugin carries
 both). Add the Hivemind repository's Git URL to the plugin list in
 `~/.config/opencode/opencode.json` (all projects) or a project's
@@ -85,13 +85,6 @@ of other harnesses.
   reads `~/.claude/CLAUDE.md` as a fallback, so a block written for Claude
   Code may load twice; harmless, but do not add a second block to the
   same file.
-
-## Update
-
-Change the tag in the `plugin` entry (`git+https://…/hivemind.git#v<version>`,
-under `plugin` on v1 and migrated to `plugins` on v2) to the new release,
-then restart OpenCode. An unpinned entry never updates: pin it, or delete
-OpenCode's cached copy under `~/.cache/opencode/` and restart.
 
 ## Incognito
 

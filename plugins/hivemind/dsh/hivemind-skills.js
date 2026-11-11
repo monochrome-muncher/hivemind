@@ -1,5 +1,5 @@
 // DeepSeek Harness plugin: serves this bundle's skills/ folder (hivemind,
-// hivemind-setup) as a packaged skill provider, the pattern DSH's own
+// hivemind-setup, hivemind-update) as a packaged skill provider, the pattern DSH's own
 // dsh-skill-badge uses.
 //
 // Deliberately imports nothing but Node built-ins. A bundle installed with

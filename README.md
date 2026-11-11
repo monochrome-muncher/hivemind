@@ -91,7 +91,9 @@ itself (not in a terminal):
 ```
 
 The [plugin README](plugins/hivemind/README.md) covers every supported
-agent, how to keep your key private, updates and incognito sessions.
+agent, how to keep your key private, updates and incognito sessions. To
+update later, type "Update Hivemind" in a session: the agent checks what
+changed since your install and updates it the way your agent needs.
 
 ## The admin panel and the agent portal
 

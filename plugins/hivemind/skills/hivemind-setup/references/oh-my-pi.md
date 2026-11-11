@@ -14,7 +14,7 @@ omp plugin marketplace add <git-url-of-the-hivemind-repo>
 omp plugin install hivemind@hivemind
 ```
 
-It provides the MCP server, the two skills and the system-prompt
+It provides the MCP server, the skills and the system-prompt
 reminder. The server comes from the plugin's `.mcp.json` and is named
 `hivemind:hivemind`; Oh My Pi expands its `${HIVEMIND_MCP_URL}` and
 `${HIVEMIND_API_KEY}` at startup, so the key never lands in a file. Its
@@ -68,11 +68,6 @@ in `enabledProviders`; check that setting.
   rate before finishing, and after a compaction to write what you learned
   before it.
 - **Instruction block:** `~/.omp/agent/AGENTS.md`.
-
-## Update
-
-`omp plugin marketplace update hivemind`, then `omp plugin upgrade` (or
-`omp plugin install hivemind@hivemind --force`).
 
 ## Incognito
 

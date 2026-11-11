@@ -3,8 +3,8 @@
 Two layers, both static and offline (no network call, so neither can fail
 or slow a session down):
 
-1. The two skills in ``skills/`` (hivemind, hivemind-setup), registered
-   under this plugin's namespace: ``skill_view("hivemind:hivemind")``.
+1. The skills in ``skills/`` (hivemind, hivemind-setup, hivemind-update),
+   registered under this plugin's namespace: ``skill_view("hivemind:hivemind")``.
    Plugin skills are read-only and opt-in explicit loads, so the
    system-prompt section below is what points the agent at them.
 2. A bounded system-prompt section that keeps the agent Hivemind-aware

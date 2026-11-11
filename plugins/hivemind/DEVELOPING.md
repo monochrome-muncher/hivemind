@@ -10,6 +10,7 @@ to install or use it, read [README.md](README.md) instead.
 - [Harness quirks](#harness-quirks)
 - [The Stop hook and the post-compaction line](#the-stop-hook-and-the-post-compaction-line)
 - [Incognito](#incognito)
+- [The drift check](#the-drift-check)
 - [Tests](#tests)
 - [Releasing](#releasing)
 
@@ -19,6 +20,8 @@ to install or use it, read [README.md](README.md) instead.
 |---|---|
 | `skills/hivemind/` | The always-on rules: `hive_whoami` first, when to search, when and how to write, what never to write, local memory only as a fallback |
 | `skills/hivemind-setup/` | The guided setup. Harness-neutral itself: it works out its harness first (never from the model), then reads only that harness's file in `references/` |
+| `skills/hivemind-update/` | The update skill: checks for drift from the latest release, then follows its harness's file in `references/` to update the plugin and refresh the copies setup wrote outside it. Harness-neutral itself, like the setup skill |
+| `skills/hivemind-update/scripts/hivemind-drift.sh` | The drift check ([below](#the-drift-check)) |
 | `skills/hivemind-setup/scripts/hivemind-session-start.sh` | The reminder text the startup hook prints, including its incognito variant |
 | `hooks/hooks.json` | A `SessionStart` hook (`startup`, `resume`, `clear`, `compact`, `fork`) that re-injects the reminder whenever the context is rebuilt (Claude Code, Codex), and a `Stop` hook (Claude Code, Codex). GitHub Copilot CLI and Junie read the same file (its Claude-style hooks format) |
 | `skills/hivemind-setup/scripts/hivemind-stop.sh` | The `Stop` hook ([below](#the-stop-hook-and-the-post-compaction-line)) |
@@ -41,7 +44,7 @@ to install or use it, read [README.md](README.md) instead.
 
 ## How each harness gets each piece
 
-Every harness needs three things: the MCP server, the two skills, and a
+Every harness needs three things: the MCP server, the skills, and a
 reminder that survives compaction and new sessions.
 
 | Harness | MCP server | Skills | Reminder |
@@ -62,8 +65,12 @@ reminder that survives compaction and new sessions.
 | Junie | the user's `~/.junie/mcp/mcp.json` with the literal URL and key (Junie expands no `${VAR}`) | the plugin (installed from the Claude Code marketplace) | the plugin's `guidelines/hivemind.md` (always in the guidelines), plus the `Stop` hook |
 
 Everything the setup skill tells an agent to do for one harness lives in
-that harness's file under `skills/hivemind-setup/references/`. The skill
-itself names no harness-specific paths, and a test enforces this.
+that harness's file under `skills/hivemind-setup/references/`, and how
+to update it in the file of the same name under
+`skills/hivemind-update/references/`. Neither skill names
+harness-specific paths itself, and tests enforce this. A test also
+checks that every instruction block and skills folder a setup file
+writes is one its update file passes to the drift check.
 
 ## Harness quirks
 
@@ -102,7 +109,7 @@ itself names no harness-specific paths, and a test enforces this.
   plugin's) rather than as named tools; the agent finds them in its system
   prompt. Checked with Oh My Pi 18.9.1.
   A plain `omp install` of the repository installs the root package: the
-  extension and, through the root `skills` link, both skills, but no MCP
+  extension and, through the root `skills` link, the skills, but no MCP
   server (the package route has no `.mcp.json`, and Oh My Pi has no
   `registerMcpServer`), so it installs through the marketplace. Checked
   with 18.15.0 from a local copy of the repository root; a GitHub URL
@@ -330,7 +337,7 @@ itself names no harness-specific paths, and a test enforces this.
   - *Install.* `copilot plugin marketplace add <repo-url>` reads the
     root `.claude-plugin/marketplace.json`, and `copilot plugin install
     hivemind@hivemind` installs `plugins/hivemind` through
-    `.claude-plugin/plugin.json`: both skills, and the hooks from
+    `.claude-plugin/plugin.json`: the skills, and the hooks from
     `hooks/hooks.json` (Claude-style `SessionStart` and `Stop`; Copilot
     sets `CLAUDE_PLUGIN_ROOT`, `COPILOT_PLUGIN_ROOT` and `PLUGIN_ROOT`
     for them). A local-path marketplace is loaded live, not copied.
@@ -632,6 +639,49 @@ The Claude Code switch was checked live with Claude Code 2.1.287 against
 a local listener: denying `plugin:hivemind:hivemind` or the URL stopped
 every request to the endpoint, while denying `hivemind` alone did not.
 
+## The drift check
+
+`hivemind-drift.sh` compares what is installed with the latest release
+and changes nothing. By default it reads the newest `vX.Y.Z` tag with
+`git ls-remote`, makes a shallow clone of it into a temporary folder
+(`--keep DIR` keeps it, `--latest DIR` uses a checkout instead) and
+removes the clone at exit. It never runs anything from the clone, and
+it uses only git, so any git server or path works. The repository is
+`--repo`; else, with `--source-from FILE`, the first git address in
+that file whose repository name contains `hivemind` (dropping a `git+`
+or `git:` prefix, a `#fragment` and an `@ref`, so OpenCode and KiloCode
+plugin entries work; each harness's update file names its record, where
+it was checked); else the `origin` (or first) remote of the clone that holds
+the installed plugin, but only when that clone is the Hivemind
+repository (a plugin inside a dotfiles repository does not count); else,
+for a cached copy at `<plugins>/cache/<marketplace>/<plugin>/<version>`,
+the remote of the clone at `<plugins>/marketplaces/<marketplace>` (Claude
+Code's layout, checked live with a Git-URL marketplace), with the same
+check; else the first non-comment line of `${XDG_CONFIG_HOME:-~/.config}/hivemind/plugin-source`;
+else the public GitHub URL. The `Latest:` line names the source and why,
+with any `user:password@` removed from the URL, and git's own error
+output is dropped for the same reason. It reports:
+
+- the installed plugin: the one around the script (three folders up,
+  when that folder has a manifest with a version), else `--installed`.
+  Its version against the release's, then each skill folder and the
+  always-on files it has (`guidelines/hivemind.md`,
+  `cursor/rules/hivemind.mdc`, Antigravity's `rules/AGENTS.md`) against
+  the release's;
+- `--block FILE`: the marked block in that file against the block in
+  step 4 of the release's setup skill, ignoring carriage returns and
+  trailing blanks, with a unified diff when they differ. No block is
+  reported but is not drift: whether one belongs there depends on the
+  harness;
+- `--skills DIR` and `--copy FILE=PATH`: hand-copied skill folders and
+  files (Cline's hooks) against the release's.
+
+Exit status 0 means no drift, 1 drift, 2 that it could not compare.
+`--print-block` prints the release's block for the agent to write. It
+needs `sh`, `git`, `diff`, `cmp`, `sed` and `awk`; native Windows without
+Git Bash compares by hand. Tests: `tests/unit/test_drift_check.py`
+(a local checkout and a local git repository stand in for the release).
+
 ## Tests
 
 `tests/unit/test_agent_plugin.py` keeps the plugin, the server and the
@@ -639,8 +689,9 @@ docs in step. Among other things it checks that:
 
 - every MCP tool is named in the `hivemind` skill, which stays under 10 KB;
 - all manifests agree on the name and version;
-- every harness has a reference file routed from the setup skill, and a
-  mention in README.md, and the setup skill itself stays harness-neutral;
+- every harness has a reference file routed from the setup skill, an
+  update file routed from the update skill, and a mention in README.md,
+  and both skills stay harness-neutral;
 - the hook, the Hermes section, the Pi extension, the OpenCode plugin and
   the DSH row all switch to incognito, and the launcher applies each
   harness's switch;
