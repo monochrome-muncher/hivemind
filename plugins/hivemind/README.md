@@ -729,45 +729,86 @@ agent.
 
 ## Updating
 
-Update the plugin with the commands below, then **start a new session**.
-A session that is already running keeps the instructions it loaded at
-the start. [CHANGELOG.md](CHANGELOG.md) says what changed in each
-release, so you can tell whether an update matters to you.
+### The easy way: ask your agent
 
-Two things don't update with the plugin. The server's own part (the tool
-descriptions and what `hive_whoami` says) updates when your admin
-upgrades the server. Anything copied into your own files, such as the
-`<!-- hivemind:begin -->` block, the Cursor rule, or skills and hooks you
-copied by hand, never updates by itself.
+In a session, type:
 
-The simplest way is to ask the agent to "update Hivemind". Its
-`hivemind-update` skill first checks for drift: whether the installed
-plugin is older than the latest release, and whether your copies differ
-from the latest text. It then gives you the update steps for your agent
-(they differ a lot between agents), and refreshes your copies once you
-approve each change. You can run the same check yourself; it only reads,
-and fetches the newest release with `git` to compare:
+```text
+Update Hivemind
+```
+
+That is all. In Claude Code you can also run `/hivemind:hivemind-update`.
+Any other wording that asks to update Hivemind, or to check it for
+drift, works too. You don't pass any options: the agent works out which
+agent program it runs in and uses that program's own notes.
+
+The agent then:
+
+1. **Checks for drift.** It compares what you have with the latest
+   Hivemind release: whether the installed plugin is older, and whether
+   the Hivemind text it once copied into your own files (the
+   `<!-- hivemind:begin -->` block in `CLAUDE.md`, `AGENTS.md`,
+   `GEMINI.md` and the like, the Cursor rule, skills and hooks copied by
+   hand) differs from the latest text. It shows you what differs. This
+   step only reads.
+2. **Updates the plugin** the way your agent program needs. Each program
+   installs plugins differently, so the steps differ; the table below
+   says what you may have to do yourself.
+3. **Refreshes your copies**, showing you each change and asking before
+   it writes anything.
+4. **Asks you to start a new session.** A running session keeps the
+   instructions it loaded when it started.
+
+| Agent | What you may have to do |
+|---|---|
+| Claude Code | Restart Claude Code after the update commands. |
+| Codex | Trust the plugin's hooks again in `/hooks`: Codex skips changed hooks until you do. |
+| Cursor | Restart Cursor, or run "Developer: Reload Window". |
+| DeepSeek Harness | Restart `dsh`. The plugin belongs to one profile, so update each profile you use. |
+| Gemini CLI | Start a new session. |
+| Antigravity | Run the install command with the new version; don't uninstall first (that deletes your stored address and key). |
+| GitHub Copilot CLI | Start a new session. |
+| Hermes | Confirm Hermes's "Install anyway?" question if it asks; a pinned install needs the new commit's full SHA, which the agent looks up. |
+| Junie | Pick Update on hivemind in the Installed tab of `/extensions`. |
+| OpenCode, KiloCode | Approve the new version in your `plugin` entry, then restart. |
+| Pi, Oh My Pi | Restart after the update command. |
+| Cline | Approve copying the new hooks and skills, then restart Cline. |
+
+The server's own part (the tool descriptions and what `hive_whoami`
+says) updates when your admin upgrades the server, not with the plugin.
+[CHANGELOG.md](CHANGELOG.md) says what changed in each release.
+
+### If Hivemind is hosted somewhere else
+
+Your organization may install Hivemind from its own GitLab, an internal
+mirror or another git server instead of GitHub. The agent compares with
+the place you installed from: it reads that from your agent program's
+own records (for example the marketplace you added in Claude Code,
+Codex or Copilot CLI, or the `plugin` entry in OpenCode and KiloCode) or
+from the clone itself (Cursor, Gemini CLI, Hermes). Where it can't find
+it, it asks you once for the Git URL and, with your OK, saves it in
+`~/.config/hivemind/plugin-source` for next time. To set it up front,
+put the URL (without any password or token) on the first line of that
+file.
+
+The mirror needs the release tags (`v2.22.0` and so on). On a network
+without access to any git server, give the agent a copy of the
+repository and it compares with that.
+
+### Updating by hand
+
+You can skip the agent and run the update yourself. To see the drift
+first, run the check script in a terminal; it only reads.
+`--help` lists its options, and the plugin's
+[DEVELOPING.md](DEVELOPING.md#the-drift-check) explains them:
 
 ```sh
 sh <plugin folder>/skills/hivemind-update/scripts/hivemind-drift.sh --block ~/.claude/CLAUDE.md
 ```
 
-`--help` lists the options, and the skill's
-[per-agent notes](skills/hivemind-update/references/) say which files to
-pass for each agent. It works with any git server, so a self-hosted or
-internal mirror is fine as long as it has the release tags. It compares
-with, in order: `--repo URL`; the address in the file given with
-`--source-from` (where your agent records the install, such as
-`~/.codex/config.toml`); the address the plugin was cloned from,
-when your install is a git clone; the address of the marketplace your
-agent cloned (for example, Claude Code's
-`claude plugin marketplace add https://gitlab.example.org/…/hivemind.git`); the first line of
-`~/.config/hivemind/plugin-source`; and otherwise the public repository
-on GitHub. Its first line says which one it used. Put your mirror's
-address in that file once if your agents install from one. Without any
-network, pass `--latest` with a copy of the repository.
-
-The update commands, all in a terminal:
+Then refresh your copies (the
+[per-agent notes](skills/hivemind-update/references/) list them for each
+agent). The update commands, all in a terminal:
 
 - **Claude Code**: `claude plugin marketplace update hivemind`, then
   `claude plugin update hivemind@hivemind`, then restart Claude Code.
@@ -785,14 +826,14 @@ The update commands, all in a terminal:
   `hivemind-dsh-plugin`, remove it under that name and add it again.
 - **Gemini CLI**: `gemini extensions update hivemind`. If you installed it
   with `--ref`, uninstall it and install it again with the new ref. Then
-  ask the agent to update the Hivemind setup, which refreshes the block in
+  ask the agent to "Update Hivemind", which refreshes the block in
   `~/.gemini/GEMINI.md`. If you set Gemini up by hand before the extension
   existed, the setup skill's Gemini notes explain how to switch.
 - **Antigravity**: run the install command again with the new release.
   It keeps the address and key you filled in.
 - **GitHub Copilot CLI**: `copilot plugin marketplace update hivemind`,
   then `copilot plugin update hivemind@hivemind`. Then ask the agent to
-  update the Hivemind setup, which refreshes the block in
+  "Update Hivemind", which refreshes the block in
   `~/.copilot/copilot-instructions.md`.
 - **Cursor**: run `git pull` in your clone, then restart Cursor or run
   "Developer: Reload Window". If you copied the folder instead of linking

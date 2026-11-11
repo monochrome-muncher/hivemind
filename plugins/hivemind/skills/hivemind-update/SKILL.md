@@ -66,7 +66,9 @@ step 4.
 ## 2. Check for drift
 
 Run the **Check** command from your harness's file, where `<skill>` is
-this skill's folder (the one holding this `SKILL.md`). It runs
+this skill's folder (the one holding this `SKILL.md`). The user only
+asks for the update; the options come from your harness's file, not
+from them. It runs
 `scripts/hivemind-drift.sh`, which compares with the newest release tag
 of the Hivemind repository (it needs `git` and network access) and
 reports:
