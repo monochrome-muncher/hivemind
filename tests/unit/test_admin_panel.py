@@ -586,3 +586,46 @@ def test_the_memory_browser_reads_an_id_through_the_admin_entry_read() -> None:
     script = (STATIC_DIR / "memories.js").read_text()
     assert "entryIdIn(f.q)" in script
     assert 'api("GET", `admin/entries/${encodeURIComponent(id)}`)' in script
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_search_as_an_agent_says_why_each_hidden_memory_is_hidden() -> None:
+    """ADR 0136: asagent.js run as it ships: the banner, the reason for each
+    kind of hidden hit, and only the admin's hits the agent did not get."""
+    script = r"""
+    const { asAgentBanner, hiddenReason, hiddenFrom } = await import(process.argv[1])
+    const fleets = { f1: "blue", f2: "red" }
+    const name = (id) => fleets[id]
+    const amy = { name: "amy", trust_level: 2, home_fleet_id: "f1" }
+    const hit = (o) => ({ id: "e", author: "bob", scope: "fleet", fleet_id: "f1", state: "active", ...o })
+    const reasons = [
+      hit({ scope: "self" }),
+      hit({ scope: "fleet", fleet_id: "f2" }),
+      hit({ scope: "fleet", fleet_id: "f2", author: "amy" }),
+      hit({ state: "withdrawn" }),
+      hit({}),
+    ].map((h) => hiddenReason(amy, h, name))
+    const privileged = hiddenReason({ ...amy, trust_level: 3 }, hit({ fleet_id: "f2" }), name)
+    const untrusted = hiddenReason({ ...amy, trust_level: 0 }, hit({}), name)
+    const rows = hiddenFrom(amy, [hit({ id: "a" }), hit({ id: "b", scope: "self" })], [hit({ id: "a" })], name)
+    console.log(JSON.stringify({
+      banner: asAgentBanner(amy, name), reasons, privileged, untrusted,
+      rows: rows.map((r) => [r.hit.id, r.reason]),
+    }))
+    """
+    out = subprocess.run(
+        ["node", "--input-type=module", "-e", script, (STATIC_DIR / "asagent.js").as_uri()],
+        capture_output=True, text=True, check=True,
+    )  # fmt: skip
+    got = json.loads(out.stdout)
+    assert got["banner"] == "Results as amy sees them (contributor, home fleet blue)"
+    assert got["reasons"] == [
+        "a private note of bob",
+        "in fleet red, not its home fleet",
+        "ranked below the cut-off or filtered",
+        "withdrawn, so out of an ordinary search",
+        "ranked below the cut-off or filtered",
+    ]
+    assert got["privileged"] == "ranked below the cut-off or filtered"
+    assert got["untrusted"] == "untrusted agents read no memories"
+    assert got["rows"] == [["b", "a private note of bob"]]

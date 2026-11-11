@@ -443,6 +443,8 @@ class RestoreRequest(BaseModel):
 
 
 class AdminSearchRequest(SearchRequest):
-    """``POST /v1/admin/search``: a search plus a fleet filter."""
+    """``POST /v1/admin/search``: a search plus a fleet filter, optionally run as one agent
+    (``as_agent``, ADR 0136)."""
 
     fleet_id: str | None = None
+    as_agent: str | None = None

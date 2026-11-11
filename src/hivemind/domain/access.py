@@ -54,6 +54,10 @@ class UnknownAgent(KeyError):
     """No agent has this name (404 ``not_found``). A ``KeyError``, so ``str(exc)`` is quoted."""
 
 
+class UnknownSearchAgent(UnknownAgent):
+    """The admin search named an agent that does not exist (404 ``unknown_agent``, ADR 0136)."""
+
+
 class KeyLocked(Exception):
     """The key was locked from the agent portal (ADR 0117): 401 ``key_locked`` until an admin
     replaces it. Raised by ``Authenticator.verify``."""
@@ -117,6 +121,14 @@ class InvalidAgentStatus(Exception):
         self.name = name
         self.status = status
         self.verb = verb
+
+
+class AgentNotActive(InvalidAgentStatus):
+    """The admin search named an agent that cannot search: pending or revoked (409
+    ``agent_not_active``, ADR 0136)."""
+
+    def __init__(self, name: str, status: AgentStatus) -> None:
+        super().__init__(name, status, "search as")
 
 
 # Entry-scope values (SPEC §12.1).
