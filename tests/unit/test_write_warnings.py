@@ -127,6 +127,11 @@ def test_entries_in_other_languages_are_detected(text: str) -> None:
         "el8, el9 and el10 builds fail: rpm macros differ",
         "Le Monde, El País, La Nación, Il Post: scrapers need new proxies",
         "sans-serif fonts, export.dat, la.csv and /srv/den/til",
+        "Supplier contact: Zhang Wei (张伟, Chang Wei), head of procurement at Shenzhen Huaqiang",
+        "Partner: 北京中关村科技发展股份有限公司 (Zhongguancun Tech)",
+        "Contact Dmitry Ivanov (Дмитрий Иванов) at Gazprom Neft (Газпром нефть) for the data",
+        "Error from 1C: 'Ошибка при выполнении операции: недостаточно прав доступа' on locked periods",
+        "Ivanov's team is «Отдел информационной безопасности» (information security)",
     ],
 )
 def test_english_entries_are_not_flagged(text: str) -> None:

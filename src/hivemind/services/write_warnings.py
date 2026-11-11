@@ -81,6 +81,12 @@ _MIN_NON_LATIN_LETTERS = 20
 _LATIN_END = "\u0250"
 _WORDS = re.compile(r"[^\W\d_]+")
 _STANDALONE_WORDS = re.compile(r"(?<![\w./-])[^\W\d_]+(?![\w/-]|\.\w)")
+# Quoted text (an error message, a UI label, a name in its own script) is left out of the script
+# count, so English that quotes a long Russian error is still English.
+_QUOTED = re.compile(
+    r"(?<!\w)'[^'\n]+'(?!\w)|\"[^\"\n]+\"|“[^”\n]+”|\u2018[^\u2019\n]+\u2019|«[^»\n]+»|„[^“”\n]+[“”]"
+    r"|「[^」\n]+」|`[^`\n]+`"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,11 +103,12 @@ def has_local_path(text: str) -> bool:
 
 
 def looks_non_english(text: str) -> bool:
-    """Whether ``text`` is written in another language than English: mostly non-Latin letters, or
-    another language's function words outnumbering English ones."""
+    """Whether ``text`` is written in another language than English: mostly non-Latin letters
+    outside quotes, or another language's function words outnumbering English ones."""
     words = [w.lower() for w in _WORDS.findall(text)]
-    letters = sum(len(w) for w in words)
-    latin = sum(ch < _LATIN_END for w in words for ch in w)
+    unquoted = _WORDS.findall(_QUOTED.sub(" ", text))
+    letters = sum(len(w) for w in unquoted)
+    latin = sum(ch < _LATIN_END for w in unquoted for ch in w)
     if letters >= _MIN_NON_LATIN_LETTERS and latin * 2 < letters:
         return True
     standalone: list[str] = _STANDALONE_WORDS.findall(text)

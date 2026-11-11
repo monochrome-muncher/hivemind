@@ -76,7 +76,7 @@ One entry entity; a `kind` enum carries the distinction. There are no other read
 | Code | When |
 |---|---|
 | `local_path` | an `org` or `fleet` entry whose `summary` or `body` contains a local path (`/home/<name>`, `/Users/<name>`, `~/<name>`, `C:\Users\<name>` also as `C:/Users/<name>` or JSON-escaped; the POSIX roots are case-sensitive, the drive letter and `Users` are not; URLs, repo-relative paths and API routes such as `/users/42` do not match) |
-| `not_english` | `summary` and `body` together are not in English, in any scope (ADR 0134): at least 20 letters and most of them outside the Latin script, or at least three lower-case, standalone function words of another common language outnumbering the English ones two to one; the message asks for an English rewrite that supersedes the entry and for replies in the user's language |
+| `not_english` | `summary` and `body` together are not in English, in any scope (ADR 0134): at least 20 letters outside quotes and most of them outside the Latin script, or at least three lower-case, standalone function words of another common language outnumbering the English ones two to one; the message asks for an English rewrite that supersedes the entry and for replies in the user's language |
 | `foreign_link` | a `fleet` entry whose `see_also` target is a `fleet` entry of another fleet (a `supersedes` target of another fleet is already refused) |
 | `backdated_successor` | a `supersedes` target has a later `occurred_at` than the new entry |
 | `fresh_consolidation` | the entry supersedes two or more entries and its `occurred_at` is more than one day after the newest superseded one; the message asks for the newest observation unless the writer observed or re-checked it today |
