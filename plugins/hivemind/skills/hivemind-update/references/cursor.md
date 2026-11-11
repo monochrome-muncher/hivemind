@@ -14,6 +14,11 @@ compares only the block. The local plugin is a clone, so the check
 compares with the address it was cloned from. Without the plugin, add
 `--skills ~/.cursor/skills`.
 
+In local-model mode the plugin comes from
+`~/.cursor/plugins/local-marketplaces.json` and Cursor keeps a plain copy
+of it, not a clone, so add `--source-from
+~/.cursor/plugins/local-marketplaces.json` to find the address.
+
 ## Update
 
 With the local folder (the usual route): `git -C
@@ -22,11 +27,14 @@ With the local folder (the usual route): `git -C
 follows `main`, so the check may then say it is newer than the release:
 that is fine. To stay on releases instead, check out the tag from the
 `Latest:` line (`git -C ~/.cursor/plugins/local/.hivemind-src fetch
---tags` and `checkout <tag>`).
+--tags` and `checkout <tag>`). Once the clone is on a tag,
+`git pull` refuses ("not currently on a branch"): update it the same
+way with the new tag, or `checkout main` to follow `main` again.
 
 With `~/.cursor/plugins/local-marketplaces.json` (local-model mode),
 Cursor fetches the `gitRef` again at each start, so a restart is the
-update; set `gitRef` to a tag to pin a release.
+update; set `gitRef` to a tag to pin a release, and to the new tag from
+the `Latest:` line to update it.
 
 Without the plugin, copy the new skill folders over the ones in
 `~/.cursor/skills/`.

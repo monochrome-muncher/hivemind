@@ -6,8 +6,8 @@ Not Gemini CLI, which has its own file. If you have not confirmed that this
 is your harness, go back to "Which harness am I in?" in the hivemind-setup
 skill. Antigravity's system prompt starts "You are Antigravity".
 
-Checked with the Antigravity CLI 1.5.3. Check anything this file does not
-state with `agy plugin list` and `/plugin` rather than assuming.
+Checked with the Antigravity CLI 1.5.3 and 1.5.5. Check anything this
+file does not state with `agy plugin list` and `/plugin` rather than assuming.
 
 ## Connect
 
@@ -23,6 +23,21 @@ The `/tree/<tag>/plugins/antigravity` part matters. The bare repository URL
 installs the repository root, which Antigravity converts from the Gemini CLI
 extension there, with hooks that do not work. Do not use `agy plugin import`
 either: it converts the Claude Code or Gemini CLI copy the same way.
+
+`agy plugin install` takes only github.com links. If the organization
+keeps Hivemind on another Git server, the user clones the release tag
+and installs from the folder (Antigravity copies it, so the clone can go
+afterwards):
+
+```sh
+git clone --depth 1 --branch <tag> <address> /tmp/hivemind-<tag>
+agy plugin install /tmp/hivemind-<tag>/plugins/antigravity
+rm -rf /tmp/hivemind-<tag>
+```
+
+Antigravity keeps no record of that address, so with approval save it
+as the only line of `~/.config/hivemind/plugin-source` (folder mode 700,
+no password or token in it): the hivemind-update skill compares with it.
 
 The plugin (named `hivemind` once installed) brings the MCP server, both
 skills, an always-on rule and the two hooks under "Stay aware". It installs **turned off**, because its server
