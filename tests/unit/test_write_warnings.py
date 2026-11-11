@@ -124,6 +124,9 @@ def test_entries_in_other_languages_are_detected(text: str) -> None:
         "Set LANG=de_DE.UTF-8 and es_ES for the locale tests; en is the default",
         "Oslo kommune: Plan- og bygningsetaten owns the zoning register",
         "du -sh shows the van-der-merwe cache at 40 GiB on the os disk",
+        "el8, el9 and el10 builds fail: rpm macros differ",
+        "Le Monde, El País, La Nación, Il Post: scrapers need new proxies",
+        "sans-serif fonts, export.dat, la.csv and /srv/den/til",
     ],
 )
 def test_english_entries_are_not_flagged(text: str) -> None:
