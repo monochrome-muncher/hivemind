@@ -5,6 +5,8 @@
 > **Amended by [ADR 0087](0087-near-duplicate-write-warning.md):** a seventh code, `near_duplicate`, is computed from `related` (no extra round trip), not from the supersede and see-also targets as §4 says of the others.
 >
 > **Amended by [ADR 0099](0099-answers-open-question-warning.md):** an eighth code, `answers_open_question`, is also computed from `related`.
+>
+> **Amended by [ADR 0134](0134-not-english-write-warning.md):** a ninth code, `not_english`, from the draft's `summary` and `body`.
 
 ## Context
 

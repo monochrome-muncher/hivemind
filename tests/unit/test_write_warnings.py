@@ -23,8 +23,11 @@ from hivemind.services.write_warnings import (
     answers_open_question_warning,
     has_local_path,
     is_entry_link,
+    looks_non_english,
     near_duplicate_warning,
 )
+from tests.eval.domains import DOMAINS
+from tests.eval.golden import golden_corpus
 from tests.fakes import FakeAuthenticator, make_clock, make_embedder, make_search_config
 
 
@@ -97,6 +100,42 @@ def _surface(store: MemoryStore, credential: Credential, embedder: object = None
     )
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Backup-jobben i Kubernetes feilet fordi PVC-en pg-backup var full; vi økte den til 200 GiB",
+        "PgBouncer weist Clients ab, weil der Report-Job die Verbindungen nicht über den Pool öffnet",
+        "La sauvegarde échoue car le volume est plein; il faut augmenter la taille dans le chart",
+        "El export de Snowflake pierde los milisegundos, por eso la sesión se rompe para los usuarios",
+        "Kubernetes の PVC がいっぱいでバックアップが失敗した。容量を200GiBに増やした",
+        "Резервное копирование падает, потому что том pg-backup заполнен",
+    ],
+)
+def test_entries_in_other_languages_are_detected(text: str) -> None:
+    assert looks_non_english(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "pgvector HNSW recall below exact scan at ef_search 40",
+        "Postgres max_connections hit at 09:00 by the nightly report job",
+        "Importer fails with 'Die Datei ist nicht vorhanden oder nicht lesbar' when the path has umlauts",
+        "Set LANG=de_DE.UTF-8 and es_ES for the locale tests; en is the default",
+        "Oslo kommune: Plan- og bygningsetaten owns the zoning register",
+        "du -sh shows the van-der-merwe cache at 40 GiB on the os disk",
+    ],
+)
+def test_english_entries_are_not_flagged(text: str) -> None:
+    assert not looks_non_english(text)
+
+
+def test_no_entry_of_the_eval_corpora_is_flagged() -> None:
+    texts = [f"{summary} {body or ''}" for d in DOMAINS for _, summary, _, body in d.entries]
+    texts += [summary for _, summary, _ in golden_corpus()]
+    assert [t for t in texts if looks_non_english(t)] == []
+
+
 async def _write(store: MemoryStore, cred: Credential, **kw: object) -> dict[str, object]:
     kw.setdefault("summary", "billing runs on node 20")
     kw.setdefault("kind", "fact")
@@ -121,6 +160,13 @@ async def test_local_path_warns_on_fleet_entries_only() -> None:
     assert _codes(summary) == ["local_path"]
     private = await _write(store, A, body="checkout at /home/a/repo", scope="self")
     assert "local_path" not in _codes(private)  # a self note may name local paths
+
+
+async def test_not_english_warns_on_any_scope_and_in_check_mode() -> None:
+    norwegian = "backupen feilet fordi volumet var fullt, og jobben er nå flyttet til natten"
+    for extra in ({}, {"scope": "self"}, {"check": True}):
+        result = await _write(MemoryStore(make_clock()), A, summary=norwegian, **extra)
+        assert _codes(result) == ["not_english"]
 
 
 async def test_foreign_link_when_a_fleet_entry_relays_another_fleets_entry() -> None:
