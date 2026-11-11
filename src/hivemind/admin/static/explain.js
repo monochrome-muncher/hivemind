@@ -1,4 +1,4 @@
-// Hivemind admin panel: "Explain ranking" (ADR 0137). Pure: no DOM.
+// Hivemind admin panel and portal: "Explain ranking" (ADRs 0137, 0139). Pure: no DOM.
 // The parts of one hit's score, as plain lines. The server's `explain` object is the source;
 // this only words it.
 
@@ -38,7 +38,7 @@ const socialLine = ({ social: s }) =>
 
 const importanceLine = ({ importance: i }) => `Importance x${num(i.factor)} (importance ${i.value})`;
 
-/** The lines that show how `explain` (an AdminHitOut `explain`) added up to the score. */
+/** The lines that show how `explain` (an ExplainedHitOut `explain`) added up to the score. */
 export function explainLines(explain) {
   return [
     keywordLine(explain), vectorLine(explain), `Fused (RRF): ${num(explain.fused)}`,

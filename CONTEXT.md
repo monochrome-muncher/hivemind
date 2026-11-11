@@ -324,7 +324,7 @@ A compact search result: entry id, kind, summary, key metadata, and the retrieva
 _Avoid_: result, snippet, match
 
 **Ranking explanation**:
-The parts of one hit's score (stream ranks, fused value, recency, feedback, social cap, importance) that the admin search returns on request; admin only, display only (ADR 0137).
+The parts of one hit's score (stream ranks, fused value, recency, feedback, social cap, importance) that the admin search and the portal search return on request; display only, never on an agent's own search (ADRs 0137, 0139).
 _Avoid_: score breakdown, debug info
 
 **Progressive disclosure**:

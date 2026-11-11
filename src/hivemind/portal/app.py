@@ -28,6 +28,7 @@ SHARED_MODULES = (
     "csv.js",
     "drawer.js",
     "charts.js",
+    "explain.js",
     "admin.css",
     "favicon.svg",
     "outfit.woff2",

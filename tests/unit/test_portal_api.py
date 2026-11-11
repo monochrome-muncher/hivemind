@@ -136,6 +136,54 @@ async def test_portal_search_ranks_like_search_but_is_not_counted() -> None:
     assert sum(c.searches for c in await app.store.search_counts()) == 1
 
 
+async def test_portal_search_explains_its_ranking_only_when_asked() -> None:
+    app, *_ = await _seed()
+    async with make_client(app) as client:
+        plain = await client.post("/v1/portal/search", json={"query": "kaniko"}, headers=CAROL)
+        explained = await client.post(
+            "/v1/portal/search", json={"query": "kaniko", "explain": True}, headers=CAROL
+        )
+    assert all("explain" not in h for h in plain.json())
+    stripped = [{k: v for k, v in h.items() if k != "explain"} for h in explained.json()]
+    assert stripped == plain.json()
+    for hit in explained.json():
+        e = hit["explain"]
+        product = (
+            e["fused"] * e["importance"]["factor"] * e["recency"]["factor"] * e["social"]["factor"]
+        )
+        assert hit["score"] == pytest.approx(product, rel=1e-3)
+
+
+async def test_portal_explain_ranks_count_only_what_the_key_can_read() -> None:
+    app, _blue, red, *_ = await _seed()
+    # Memories the key cannot read, matching the query better than any it can.
+    for i in range(5):
+        await _add(
+            app, f"kaniko kaniko kaniko red {i}", scope="fleet", fleet_id=red.id, author="bob"
+        )
+        await _add(app, f"kaniko kaniko kaniko bob note {i}", scope="self", author="bob")
+    async with make_client(app) as client:
+        hits = await client.post(
+            "/v1/portal/search",
+            json={"query": "kaniko", "explain": True, "limit": 50},
+            headers=CAROL,
+        )
+    readable = len(hits.json())
+    assert readable == 3
+    for hit in hits.json():
+        for rank in (hit["explain"]["keyword_rank"], hit["explain"]["vector_rank"]):
+            assert rank is None or 1 <= rank <= readable
+
+
+async def test_the_data_plane_search_still_ignores_explain() -> None:
+    app, *_ = await _seed()
+    async with make_client(app) as client:
+        hits = await client.post(
+            "/v1/search", json={"query": "kaniko", "explain": True}, headers=CAROL
+        )
+    assert hits.status_code == 200 and all("explain" not in h for h in hits.json())
+
+
 async def test_portal_flagged_lists_the_agents_own_and_inherited_flagged_memories() -> None:
     """ADR 0115: only active entries the caller owns (its name plus the
     agents it inherits from), oldest flag first, bounded by what it reads."""

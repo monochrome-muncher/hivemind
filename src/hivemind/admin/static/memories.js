@@ -10,9 +10,8 @@ import {
   api, apiRaw, h, state, entryById, entryIdIn, toast, guarded, parseHash, loadAgentsAndFleets, fleetName, pageHead, refreshButton, card, KINDS, SCOPES, fill,
 } from "./core.js";
 import { asAgentBanner, hiddenFrom, ownedAuthors } from "./asagent.js";
-import { explainLines } from "./explain.js";
 import { openEntry } from "./drawer.js";
-import { ENTRY_HEADERS, PAGE, entryCsvColumns, entryRow, exportButton, normaliseEntry } from "./lists.js";
+import { ENTRY_HEADERS, PAGE, entryCsvColumns, entryRow, exportButton, normaliseEntry, withExplanation } from "./lists.js";
 
 export async function viewMemories(root) {
   await loadAgentsAndFleets();
@@ -116,13 +115,7 @@ export async function viewMemories(root) {
   const isSearch = (f) => Boolean(f.q) && !entryIdIn(f.q);
   const searchingAs = (f) => Boolean(f.as) && isSearch(f);
   const hitRow = (item) => entryRow(item, { onOpen: (id) => openEntry(id, () => load(false)), fleetName });
-  // A hit's row, followed by its score parts when the search explained itself.
-  const hitRows = (item) => {
-    const row = hitRow(item);
-    if (!item.explain) return [row];
-    const lines = explainLines(item.explain).map((line) => h("li", { text: line }));
-    return [row, h("tr", { class: "explain-row" }, h("td", { colspan: 7 }, h("ul", { class: "explain-list small muted" }, lines)))];
-  };
+  const hitRows = (item) => withExplanation(item, hitRow(item));
 
   // The agent view's extras: its banner, and what the admin finds that the agent does not.
   const showAsAgent = async (f, agentItems, mine) => {

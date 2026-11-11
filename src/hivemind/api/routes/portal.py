@@ -28,6 +28,7 @@ from hivemind.api.schemas import (
     AgentCleanupPreviewOut,
     AgentCleanupUndoOut,
     EntryOut,
+    ExplainedHitOut,
     FeedbackLogItemOut,
     FlaggedEntryOut,
     HitOut,
@@ -100,7 +101,7 @@ async def portal_list_entries(
     return await listed_with_counts(app, entries, EntryOut)
 
 
-@router.post("/portal/search", response_model=list[HitOut])
+@router.post("/portal/search", response_model=list[ExplainedHitOut])
 async def portal_search(
     request: PortalSearchRequest,
     credential: CredentialDep,
@@ -110,10 +111,19 @@ async def portal_search(
 ) -> list[HitOut]:
     """``POST /v1/search`` for a person holding an agent key (ADR 0095),
     with a ``fleet_id`` filter. Not counted in the search counters, so
-    a person browsing does not move the agents' search numbers."""
+    a person browsing does not move the agents' search numbers. With
+    ``explain`` each hit carries the parts of its score (ADR 0139)."""
     require_agent(credential, "the agent portal")
     return await run_search(
-        app, prometheus, request, credential, response, fleet_id=request.fleet_id, count=False
+        app,
+        prometheus,
+        request,
+        credential,
+        response,
+        fleet_id=request.fleet_id,
+        count=False,
+        explain=request.explain,
+        model=ExplainedHitOut,
     )
 
 

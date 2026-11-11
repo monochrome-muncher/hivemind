@@ -7,6 +7,7 @@
 
 import { h, link, toast, fmtAgo, fmtTime, kindBadge, stateBadge, verdictBadge } from "./ui.js";
 import { EXPORT_MAX, column, csvName, downloadCsv, fetchAll, toCsv } from "./csv.js";
+import { explainLines } from "./explain.js";
 
 export const PAGE = 50;
 const sameName = (id) => id;
@@ -22,7 +23,7 @@ const scopeText = (scope, fleetId, fleetName) => (fleetId ? `${scope} · ${fleet
 /**
  * A table that loads `PAGE` rows at a time. `fetchPage({limit, offset})`
  * resolves to an array of rows (or undefined to stop, e.g. after a sign-out);
- * `renderRow(row)` builds a <tr>. Returns {el, tbody, load(reset)}: load(true)
+ * `renderRow(row)` builds a <tr> (or several). Returns {el, tbody, load(reset)}: load(true)
  * starts again from the top, load(false) appends the next page; `fetchPage`
  * gets `fresh: true` on a reload from the top, the moment a caller should
  * read its filters (later pages and an export reuse them). With `csv`
@@ -54,7 +55,7 @@ export function pagedTable({ headers, className = "entries", fetchPage, renderRo
       if (reset) { tbody.replaceChildren(); offset = 0; shown = 0; }
       offset += rows.length;
       shown += rows.length;
-      tbody.append(...rows.map(renderRow));
+      tbody.append(...rows.flatMap(renderRow));
       if (shown === 0) tbody.replaceChildren(h("tr", {}, h("td", { class: "empty", colspan: headers.length, text: emptyText })));
       status.textContent = statusText(shown);
       moreWrap.hidden = rows.length < PAGE;
@@ -191,6 +192,13 @@ export const entryCsvColumns = (fleetName = sameName) => [
   ...countColumns((r) => r.feedback), column("score"),
 ];
 
+/** A memory's row, followed by its score parts when the search explained itself (ADRs 0137, 0139). */
+export function withExplanation(item, row) {
+  if (!item.explain) return [row];
+  const lines = explainLines(item.explain).map((line) => h("li", { text: line }));
+  return [row, h("tr", { class: "explain-row" }, h("td", { colspan: ENTRY_HEADERS.length }, h("ul", { class: "explain-list small muted" }, lines)))];
+}
+
 /** A paged memory list over `fetchPage` (rows as EntryOut or HitOut); `csvName` adds an export. */
 export function entryTable({ fetchPage, onOpen, fleetName = sameName, emptyText = "No memories match.", statusText, csvName: name = null }) {
   return pagedTable({
@@ -199,7 +207,7 @@ export function entryTable({ fetchPage, onOpen, fleetName = sameName, emptyText 
       const rows = await fetchPage(page);
       return rows && rows.map(normaliseEntry);
     },
-    renderRow: (item) => entryRow(item, { onOpen, fleetName }),
+    renderRow: (item) => withExplanation(item, entryRow(item, { onOpen, fleetName })),
     emptyText,
     statusText: statusText || ((n) => `${n} shown, newest first`),
     csv: name ? { columns: entryCsvColumns(fleetName), name, key: (r) => r.id } : null,
