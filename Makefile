@@ -198,6 +198,21 @@ measure-flags: ## Simulate feedback over time with confirmed flags halved and in
 measure-experiments: ## Re-run the settled decay, recency-floor and rrf_k experiments on the age-varied fixture and print their tables (ROADMAP §4.4, §4.6; no Postgres, no embedder; the default run keeps their guards)
 	$(TEST_ENV) $(PYTEST) tests/eval/test_decay_experiment.py tests/eval/test_rrf_k_experiment.py -m measurement -s
 
+# Hermes's install scan blocks a plugin it rates dangerous, even with --force.
+# The pin is Hermes v0.23.1; move it to each new Hermes release.
+HERMES_REPO ?= https://github.com/NousResearch/hermes-agent
+HERMES_REF ?= 3b421578588243f920886e6fe79a6faa87ea026e
+HERMES_SOURCE ?= .cache/hermes-agent
+
+.PHONY: hermes-scan
+hermes-scan: ## Run Hermes's install scan over the plugin and fail if Hermes would refuse it (fetches Hermes at HERMES_REF into HERMES_SOURCE; needs git and python3, no uv)
+	@if [ "$$(git -C $(HERMES_SOURCE) rev-parse HEAD 2>/dev/null)" != "$(HERMES_REF)" ]; then \
+		rm -rf $(HERMES_SOURCE) && git init -q $(HERMES_SOURCE) && \
+		git -C $(HERMES_SOURCE) fetch -q --depth 1 $(HERMES_REPO) $(HERMES_REF) && \
+		git -C $(HERMES_SOURCE) -c advice.detachedHead=false checkout -q FETCH_HEAD; \
+	fi
+	python3 -I scripts/hermes-scan.py $(HERMES_SOURCE) plugins/hivemind
+
 .PHONY: check
 check: ## Type-check + lint (mypy strict + ruff)
 	uv run mypy
