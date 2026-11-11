@@ -276,6 +276,8 @@ class Settings(BaseSettings):
     # Retries for transient extractor failures (ADR 0014); 0 disables. A failure never blocks the
     # write.
     extractor_retries: int = Field(default=2, ge=0)
+    # Ask the endpoint for schema-guided JSON (ADR 0133); an endpoint that rejects it is served plain.
+    extractor_structured_output: bool = False
 
     # Seconds MetricsService reuses the entry-count scan (ADR 0069); 0 = every report. Counts can
     # lag this long.

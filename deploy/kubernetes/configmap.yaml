@@ -41,6 +41,8 @@ data:
   # Chat-call timeout (seconds) + retry budget (ADR 0014 pattern).
   HIVEMIND_EXTRACTOR_TIMEOUT: "30.0"
   HIVEMIND_EXTRACTOR_RETRIES: "2"
+  # Schema-guided JSON; needs vLLM, llama.cpp, Ollama or OpenAI (ADR 0133).
+  HIVEMIND_EXTRACTOR_STRUCTURED_OUTPUT: "false"
   # --- retrieval knobs (mirror SearchConfig defaults, SPEC §6.2/§6.4) --------
   HIVEMIND_RRF_K: "60"
   HIVEMIND_WEIGHT_KEYWORD: "0.5"
