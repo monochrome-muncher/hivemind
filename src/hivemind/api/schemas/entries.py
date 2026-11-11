@@ -13,7 +13,7 @@ from hivemind.domain.entry import EntityKind, Entry, EntryState, ImportanceSourc
 from hivemind.domain.recency import RecencyHint
 from hivemind.domain.redaction import RedactOutcome
 from hivemind.domain.upstream import UpstreamChangeKind
-from hivemind.domain.validation import MAX_GET_IDS, MAX_LIMIT, MAX_OFFSET
+from hivemind.domain.validation import MAX_AGENT_NAME_CHARS, MAX_GET_IDS, MAX_LIMIT, MAX_OFFSET
 from hivemind.services.chain import EntryLinks
 from hivemind.services.read import EntryDetail
 from hivemind.services.search import Hit
@@ -442,9 +442,14 @@ class RestoreRequest(BaseModel):
     reason: str = ""
 
 
-class AdminSearchRequest(SearchRequest):
-    """``POST /v1/admin/search``: a search plus a fleet filter, optionally run as one agent
-    (``as_agent``, ADR 0136)."""
+class FleetSearchRequest(SearchRequest):
+    """A search plus a fleet filter: the admin search and the portal search."""
 
     fleet_id: str | None = None
-    as_agent: str | None = None
+
+
+class AdminSearchRequest(FleetSearchRequest):
+    """``POST /v1/admin/search``: the fleet search, optionally run as one agent (``as_agent``,
+    ADR 0136). Admin only: the portal's request has no such field."""
+
+    as_agent: str | None = Field(default=None, max_length=MAX_AGENT_NAME_CHARS)

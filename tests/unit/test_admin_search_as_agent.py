@@ -159,3 +159,13 @@ async def test_an_untrusted_agent_finds_nothing(w: World) -> None:
     await w.entry("unt", "unt private note kaniko cache", "self")
     assert await w.own_search("unt") == []
     assert await w.as_ids("unt") == []
+
+
+async def test_the_portal_search_has_no_as_agent_field(w: World) -> None:
+    schemas = (await w.client.get("/openapi.json")).json()["components"]["schemas"]
+    assert "as_agent" in schemas["AdminSearchRequest"]["properties"]
+    assert "as_agent" not in schemas["PortalSearchRequest"]["properties"]
+
+
+async def test_an_over_long_agent_name_is_422(w: World) -> None:
+    assert (await w.admin_search(as_agent="x" * 64)).status_code == 422

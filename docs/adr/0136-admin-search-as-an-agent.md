@@ -54,4 +54,8 @@ and the portal's single-agent sign-in cannot replace.
 - The reasons are a diagnosis from visible facts, not a trace of the query. The rule they mirror is the
   visibility matrix; a change there changes the reason function in `asagent.js` too.
 - The `Authenticator` port gains a method. Any new adapter implements it beside `verify`.
+- `as_agent` is on the admin request only; the portal search request has no such field.
+- The in-memory `FakeAuthenticator` now verifies keys it issued as the real, access-controlled credential
+  (trust level, home fleet, inherited owners from the store), not a bare name, so unit tests match
+  what `PgAuthenticator` returns.
 - Nothing is stored and no migration is needed.

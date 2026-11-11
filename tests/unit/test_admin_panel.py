@@ -593,7 +593,7 @@ def test_search_as_an_agent_says_why_each_hidden_memory_is_hidden() -> None:
     """ADR 0136: asagent.js run as it ships: the banner, the reason for each
     kind of hidden hit, and only the admin's hits the agent did not get."""
     script = r"""
-    const { asAgentBanner, hiddenReason, hiddenFrom } = await import(process.argv[1])
+    const { asAgentBanner, hiddenReason, hiddenFrom, ownedAuthors } = await import(process.argv[1])
     const fleets = { f1: "blue", f2: "red" }
     const name = (id) => fleets[id]
     const amy = { name: "amy", trust_level: 2, home_fleet_id: "f1" }
@@ -604,12 +604,21 @@ def test_search_as_an_agent_says_why_each_hidden_memory_is_hidden() -> None:
       hit({ scope: "fleet", fleet_id: "f2", author: "amy" }),
       hit({ state: "withdrawn" }),
       hit({}),
-    ].map((h) => hiddenReason(amy, h, name))
-    const privileged = hiddenReason({ ...amy, trust_level: 3 }, hit({ fleet_id: "f2" }), name)
-    const untrusted = hiddenReason({ ...amy, trust_level: 0 }, hit({}), name)
-    const rows = hiddenFrom(amy, [hit({ id: "a" }), hit({ id: "b", scope: "self" })], [hit({ id: "a" })], name)
+    ].map((h) => hiddenReason(amy, h, { fleetName: name }))
+    const privileged = hiddenReason({ ...amy, trust_level: 3 }, hit({ fleet_id: "f2" }), { fleetName: name })
+    const untrusted = hiddenReason({ ...amy, trust_level: 0 }, hit({}), { fleetName: name })
+    const rows = hiddenFrom(amy, [hit({ id: "a" }), hit({ id: "b", scope: "self" })], [hit({ id: "a" })], { fleetName: name })
+    const chain = [{ retired_agent: "old", successor: "heir" }, { retired_agent: "older", successor: "old" }]
+    const owned = ownedAuthors("heir", chain)
+    const heir = { name: "heir", trust_level: 2, home_fleet_id: "f1" }
+    const inherited = [
+      hiddenReason(heir, hit({ scope: "self", author: "older" }), { fleetName: name, owned }),
+      hiddenReason(heir, hit({ scope: "self", author: "older" }), { fleetName: name }),
+      hiddenReason(heir, hit({ fleet_id: "f2", author: "old" }), { fleetName: name, owned }),
+    ]
+    const inactive = hiddenReason(amy, hit({ state: "withdrawn" }), { fleetName: name, includeInactive: true })
     console.log(JSON.stringify({
-      banner: asAgentBanner(amy, name), reasons, privileged, untrusted,
+      owned: [...owned].sort(), inherited, inactive, banner: asAgentBanner(amy, name), reasons, privileged, untrusted,
       rows: rows.map((r) => [r.hit.id, r.reason]),
     }))
     """
@@ -626,6 +635,13 @@ def test_search_as_an_agent_says_why_each_hidden_memory_is_hidden() -> None:
         "withdrawn, so out of an ordinary search",
         "ranked below the cut-off or filtered",
     ]
+    assert got["owned"] == ["heir", "old", "older"]
+    assert got["inherited"] == [
+        "ranked below the cut-off or filtered",
+        "a private note of older",
+        "ranked below the cut-off or filtered",
+    ]
+    assert got["inactive"] == "ranked below the cut-off or filtered"
     assert got["privileged"] == "ranked below the cut-off or filtered"
     assert got["untrusted"] == "untrusted agents read no memories"
     assert got["rows"] == [["b", "a private note of bob"]]
