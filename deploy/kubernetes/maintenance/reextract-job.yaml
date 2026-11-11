@@ -54,7 +54,8 @@ spec:
                 name: hivemind-config
             - secretRef:
                 name: hivemind-secrets
-          # Entries written before the extractor prompt changed; add --apply to write.
+          # Entries written before you deployed 2.21.0, whose extractor prompt
+          # changed the names (ADR 0130): set your own date. Add --apply to write.
           args: ["--created-before", "2026-11-11T00:00:00Z"]
           resources:
             requests:

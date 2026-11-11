@@ -51,7 +51,9 @@ _LOCAL_PATH = re.compile(
 # Common function words of English and of the languages agents most often write in instead, minus
 # any that are also English words, abbreviations, commands or locale codes ("die", "per", "du", "de").
 # A text needs several of them, outnumbering English ones two to one, so terse English summaries
-# full of names and English text quoting a foreign error stay quiet.
+# full of names and English text quoting a foreign error stay quiet. A foreign one counts only as a
+# lower-case word of its own: not inside an identifier ("el9", "file.dat", "sans-serif") or a
+# capitalised name ("Le Monde", "El País").
 _FUNCTION_WORDS = {
     "english": "the and is are was were of to in on for with by from that this it not be has have "
     "a an when after before because but or",
@@ -78,6 +80,13 @@ _MIN_FOREIGN_WORDS = 3
 _MIN_NON_LATIN_LETTERS = 20
 _LATIN_END = "\u0250"
 _WORDS = re.compile(r"[^\W\d_]+")
+_STANDALONE_WORDS = re.compile(r"(?<![\w./-])[^\W\d_]+(?![\w/-]|\.\w)")
+# Quoted text (an error message, a UI label, a name in its own script) is left out of the script
+# count, so English that quotes a long Russian error is still English.
+_QUOTED = re.compile(
+    r"(?<!\w)'[^'\n]+'(?!\w)|\"[^\"\n]+\"|“[^”\n]+”|\u2018[^\u2019\n]+\u2019|«[^»\n]+»|„[^“”\n]+[“”]"
+    r"|「[^」\n]+」|`[^`\n]+`"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,14 +103,16 @@ def has_local_path(text: str) -> bool:
 
 
 def looks_non_english(text: str) -> bool:
-    """Whether ``text`` is written in another language than English: mostly non-Latin letters, or
-    another language's function words outnumbering English ones."""
+    """Whether ``text`` is written in another language than English: mostly non-Latin letters
+    outside quotes, or another language's function words outnumbering English ones."""
     words = [w.lower() for w in _WORDS.findall(text)]
-    letters = sum(len(w) for w in words)
-    latin = sum(ch < _LATIN_END for w in words for ch in w)
+    unquoted = _WORDS.findall(_QUOTED.sub(" ", text))
+    letters = sum(len(w) for w in unquoted)
+    latin = sum(ch < _LATIN_END for w in unquoted for ch in w)
     if letters >= _MIN_NON_LATIN_LETTERS and latin * 2 < letters:
         return True
-    foreign = sum(w in _FOREIGN_FUNCTION_WORDS for w in words)
+    standalone: list[str] = _STANDALONE_WORDS.findall(text)
+    foreign = sum(w.islower() and w in _FOREIGN_FUNCTION_WORDS for w in standalone)
     english = sum(w in _ENGLISH_FUNCTION_WORDS for w in words)
     return foreign >= _MIN_FOREIGN_WORDS and foreign > 2 * english
 
