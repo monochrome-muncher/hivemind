@@ -6,12 +6,13 @@ back to "Which harness am I in?" in the hivemind-setup skill.
 ## Check
 
 ```sh
-sh <skill>/scripts/hivemind-drift.sh --block ~/.config/kilo/AGENTS.md
+sh <skill>/scripts/hivemind-drift.sh --block ~/.config/kilo/AGENTS.md --source-from ~/.config/kilo/kilo.jsonc
 ```
 
-The `plugin` entry in `kilo.jsonc` names the address and the ref; pass the
-address as `--repo` when the
-`Latest:` line names another source.
+`--source-from` reads the address from the `plugin` entry
+(`git:https://<git-server>/<owner>/hivemind@v<version>`), dropping the
+`git:` prefix and the ref. If the entry is in the project's `kilo.jsonc`,
+point `--source-from` at that file.
 
 ## Update
 

@@ -10,9 +10,11 @@ sh <skill>/scripts/hivemind-drift.sh --block ~/.pi/agent/AGENTS.md
 ```
 
 Without the package (skills copied into `~/.pi/agent/skills/`), add
-`--skills ~/.pi/agent/skills`. Pass the address the package came from as
-`--repo` when the
-`Latest:` line names another source.
+`--skills ~/.pi/agent/skills`. A package installed from a local path is
+your checkout, so the check compares with its address. Where Pi records
+a Git URL install was not checked. If the `Latest:` line says `from the default` but the plugin came from
+another address, ask the user for that Git URL and save it as step 2 of
+the skill says.
 
 ## Update
 

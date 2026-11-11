@@ -13,9 +13,14 @@ Compares the installed Hivemind plugin and your copies of its text with the
 latest release. Changes nothing.
 
   --repo URL        repository to compare with: any git URL or path. Default:
-                    the installed plugin's own git remote when it is a clone,
-                    else the first line of ~/.config/hivemind/plugin-source,
-                    else https://github.com/monochrome-muncher/hivemind
+                    where the plugin was installed from when that is a git
+                    clone (the plugin itself, or the marketplace its cached
+                    copy came from), else the first line of
+                    ~/.config/hivemind/plugin-source, else
+                    https://github.com/monochrome-muncher/hivemind
+  --source-from FILE
+                    take the repository from the first Hivemind git address
+                    in FILE (a harness's record of where it installed from)
   --ref REF         tag or branch to compare with (default: the newest vX.Y.Z tag)
   --latest DIR      compare with this checkout of the repository instead of fetching
   --keep DIR        fetch into DIR (new or empty) and keep it, to copy files from
@@ -40,6 +45,7 @@ public_repo=https://github.com/monochrome-muncher/hivemind
 source_file=${XDG_CONFIG_HOME:-${HOME:-}/.config}/hivemind/plugin-source
 repo=
 repo_from="--repo"
+source_from=
 ref=
 latest=
 keep=
@@ -48,10 +54,11 @@ checks=
 print_block=0
 while [ $# -gt 0 ]; do
   case $1 in
-    --repo | --ref | --latest | --keep | --installed | --block | --skills | --copy)
+    --repo | --source-from | --ref | --latest | --keep | --installed | --block | --skills | --copy)
       [ $# -ge 2 ] || die "$1 needs a value"
       case $1 in
         --repo) repo=$2 ;;
+        --source-from) source_from=$2 ;;
         --ref) ref=$2 ;;
         --latest) latest=$2 ;;
         --keep) keep=$2 ;;
@@ -112,10 +119,37 @@ own_remote() {
     git -C "$top" remote get-url "$(git -C "$top" remote | head -n 1)" 2>/dev/null
 }
 
+# A cached copy at <plugins>/cache/<marketplace>/<plugin>/<version> came
+# from the marketplace clone at <plugins>/marketplaces/<marketplace>.
+marketplace_of() {
+  plugins=$(cd "$1/../../../.." 2>/dev/null && pwd) || return 1
+  marketplace=$(basename "$(dirname "$(dirname "$1")")")
+  [ "$(basename "$(dirname "$(dirname "$(dirname "$1")")")")" = cache ] &&
+    [ -d "$plugins/marketplaces/$marketplace" ] &&
+    printf '%s' "$plugins/marketplaces/$marketplace"
+}
+
+# The first git address in file $1 whose repository name contains
+# "hivemind", without a git+ or git: prefix, a #fragment or an @ref.
+address_in() {
+  grep -oE "(git\+|git:)?([A-Za-z][A-Za-z0-9+.-]*://|git@)[^\"' ,;<>]+" "$1" 2>/dev/null |
+    sed -e 's/^git+//' -e 's/^git:\([A-Za-z][A-Za-z0-9+.-]*:\/\/\)/\1/' -e 's/#.*//' \
+      -e 's/\(\/[^/@]*\)@[^/]*$/\1/' -e 's/\/*$//' |
+    grep -E '[/:][^/:]*hivemind[^/]*$' | head -n 1
+}
+
 choose_repo() {
   [ -n "$repo" ] && return
-  if [ -n "$installed" ] && repo=$(own_remote "$installed") && [ -n "$repo" ]; then
+  if [ -n "$source_from" ]; then
+    [ -r "$source_from" ] || die "cannot read $source_from"
+    repo=$(address_in "$source_from")
+    [ -n "$repo" ] || die "found no Hivemind git address in $(shown "$source_from"); pass --repo"
+    repo_from=$(shown "$source_from")
+  elif [ -n "$installed" ] && repo=$(own_remote "$installed") && [ -n "$repo" ]; then
     repo_from="the installed plugin's git remote"
+  elif [ -n "$installed" ] && clone=$(marketplace_of "$installed") &&
+    repo=$(own_remote "$clone") && [ -n "$repo" ]; then
+    repo_from="the git remote of the marketplace $(shown "$clone")"
   elif [ -r "$source_file" ] &&
     repo=$(sed -n '/^[[:space:]]*#/d; s/^[[:space:]]*//; s/[[:space:]]*$//; /./{p;q;}' "$source_file") &&
     [ -n "$repo" ]; then

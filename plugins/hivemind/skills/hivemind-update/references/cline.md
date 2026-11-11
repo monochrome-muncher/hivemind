@@ -15,6 +15,11 @@ sh <skill>/scripts/hivemind-drift.sh --skills ~/.cline/skills \
   --copy ~/Documents/Cline/Hooks/PostToolUse=cline/PostToolUse
 ```
 
+Nothing records where the copies came from: the check uses the saved
+address in `~/.config/hivemind/plugin-source`, else the public one. If the `Latest:` line says `from the default` but the plugin came from
+another address, ask the user for that Git URL and save it as step 2 of
+the skill says.
+
 On Windows (in Git Bash) compare the `.ps1` twins the same way
 (`--copy ~/Documents/Cline/Hooks/UserPromptSubmit.ps1=cline/UserPromptSubmit.ps1`
 and so on).

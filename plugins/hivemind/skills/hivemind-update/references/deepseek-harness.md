@@ -10,9 +10,11 @@ sh <skill>/scripts/hivemind-drift.sh --block ~/.dsh/AGENTS.md
 ```
 
 Without the bundle (skills copied into `~/.agents/skills/`), add
-`--skills ~/.agents/skills`. Pass the address the bundle came from as
-`--repo` when the
-`Latest:` line names another source.
+`--skills ~/.agents/skills`. A bundle installed from a checkout is a
+clone, so the check compares with its address. Where DSH records a Git
+URL install was not checked. If the `Latest:` line says `from the default` but the plugin came from
+another address, ask the user for that Git URL and save it as step 2 of
+the skill says.
 
 ## Update
 

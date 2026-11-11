@@ -647,10 +647,17 @@ and changes nothing. By default it reads the newest `vX.Y.Z` tag with
 (`--keep DIR` keeps it, `--latest DIR` uses a checkout instead) and
 removes the clone at exit. It never runs anything from the clone, and
 it uses only git, so any git server or path works. The repository is
-`--repo`; else the `origin` (or first) remote of the clone that holds
+`--repo`; else, with `--source-from FILE`, the first git address in
+that file whose repository name contains `hivemind` (dropping a `git+`
+or `git:` prefix, a `#fragment` and an `@ref`, so OpenCode and KiloCode
+plugin entries work; each harness's update file names its record, where
+it was checked); else the `origin` (or first) remote of the clone that holds
 the installed plugin, but only when that clone is the Hivemind
-repository (a plugin inside a dotfiles repository does not count); else
-the first non-comment line of `${XDG_CONFIG_HOME:-~/.config}/hivemind/plugin-source`;
+repository (a plugin inside a dotfiles repository does not count); else,
+for a cached copy at `<plugins>/cache/<marketplace>/<plugin>/<version>`,
+the remote of the clone at `<plugins>/marketplaces/<marketplace>` (Claude
+Code's layout, checked live with a Git-URL marketplace), with the same
+check; else the first non-comment line of `${XDG_CONFIG_HOME:-~/.config}/hivemind/plugin-source`;
 else the public GitHub URL. The `Latest:` line names the source and why,
 with any `user:password@` removed from the URL, and git's own error
 output is dropped for the same reason. It reports:

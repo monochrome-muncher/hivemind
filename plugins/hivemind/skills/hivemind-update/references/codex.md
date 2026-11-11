@@ -6,13 +6,15 @@ back to "Which harness am I in?" in the hivemind-setup skill.
 ## Check
 
 ```sh
-sh <skill>/scripts/hivemind-drift.sh --block ~/.codex/AGENTS.md
+sh <skill>/scripts/hivemind-drift.sh --block ~/.codex/AGENTS.md --source-from ~/.codex/config.toml
 ```
 
-Without the plugin (skills copied into `~/.agents/skills/`), add
-`--skills ~/.agents/skills`. Pass the marketplace's address as `--repo`
-when the
-`Latest:` line names another source.
+`--source-from` reads the marketplace's address from the
+`[marketplaces.hivemind]` table Codex writes there (checked with Codex
+0.167.1, a Git-URL marketplace). Without the plugin, drop it and add
+`--skills ~/.agents/skills`. If the `Latest:` line says `from the default` but the plugin came from
+another address, ask the user for that Git URL and save it as step 2 of
+the skill says.
 
 ## Update
 

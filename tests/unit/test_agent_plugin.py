@@ -303,6 +303,11 @@ def test_the_update_skill_routes_every_harness_to_its_own_steps() -> None:
         for section in ("## Check", "## Update", "## Your copies"):
             assert section in text, (ref, section)
         assert "sh <skill>/scripts/hivemind-drift.sh" in text, ref
+        # Hivemind may be hosted anywhere: each file says how the check finds
+        # where this harness installed it from, or to ask and save it.
+        assert any(way in flat for way in ("--source-from", "is a clone", "step 2 of the skill")), (
+            ref
+        )
 
 
 def test_the_update_check_covers_every_copy_setup_writes() -> None:

@@ -240,6 +240,56 @@ def test_a_saved_source_is_used_when_the_plugin_is_not_a_hivemind_clone(tmp_path
 
 
 @needs_git
+def test_a_cached_plugin_is_compared_with_its_marketplace_clone(tmp_path: Path) -> None:
+    """Claude Code keeps a Git-URL marketplace as a clone and installs a copy
+    from it into plugins/cache/<marketplace>/<plugin>/<version>."""
+    mirror = _mirror(tmp_path / "gitlab")
+    plugins = tmp_path / ".claude" / "plugins"
+    subprocess.run(
+        ["git", "clone", "-q", mirror.as_uri(), str(plugins / "marketplaces" / "hivemind")],
+        check=True,
+    )
+    cached = _install(plugins / "cache" / "hivemind" / "hivemind" / "2.22.0")
+    out = _drift(tmp_path, cached)
+    assert out.returncode == 0, out.stderr
+    assert (
+        f"of {mirror.as_uri()} (from the git remote of the marketplace "
+        "~/.claude/plugins/marketplaces/hivemind)"
+    ) in out.stdout
+
+
+@needs_git
+@pytest.mark.parametrize(
+    ("record", "written"),
+    [
+        ("config.toml", '[marketplaces.hivemind]\nsource_type = "git"\nsource = "{url}"\n'),
+        (
+            "settings.json",
+            '{{"extraKnownMarketplaces": {{"hivemind": {{"source": {{"url": "{url}"}}}}}}}}',
+        ),
+        ("opencode.json", '{{"plugin": ["other-plugin", "git+{url}#v2.22.0"]}}'),
+        ("kilo.jsonc", '{{\n  // pinned\n  "plugin": ["git:{url}@v2.22.0"]\n}}'),
+    ],
+)
+def test_the_source_is_read_from_a_harness_install_record(
+    tmp_path: Path, record: str, written: str
+) -> None:
+    mirror = _mirror(tmp_path / "hivemind")
+    (tmp_path / record).write_text(written.format(url=mirror.as_uri()))
+    installed = _install(tmp_path / "installed")
+    out = _drift(tmp_path, installed, "--source-from", tmp_path / record)
+    assert out.returncode == 0, out.stderr
+    assert f"(from ~/{record})" in out.stdout.splitlines()[0]
+
+
+def test_a_record_without_a_hivemind_address_is_refused(tmp_path: Path) -> None:
+    record = tmp_path / "config.toml"
+    record.write_text('source = "https://example.org/other.git"\n')
+    out = _drift(tmp_path, _install(tmp_path / "i"), "--source-from", record)
+    assert out.returncode == 2 and "found no Hivemind git address" in out.stderr
+
+
+@needs_git
 def test_a_failed_fetch_never_prints_credentials(tmp_path: Path) -> None:
     installed = _install(tmp_path / "installed")
     out = _drift(tmp_path, installed, "--repo", "https://agent:s3cret@127.0.0.1:9/hivemind.git")

@@ -756,8 +756,12 @@ sh <plugin folder>/skills/hivemind-update/scripts/hivemind-drift.sh --block ~/.c
 [per-agent notes](skills/hivemind-update/references/) say which files to
 pass for each agent. It works with any git server, so a self-hosted or
 internal mirror is fine as long as it has the release tags. It compares
-with, in order: `--repo URL`; the address the plugin was cloned from,
-when your install is a git clone; the first line of
+with, in order: `--repo URL`; the address in the file given with
+`--source-from` (where your agent records the install, such as
+`~/.codex/config.toml`); the address the plugin was cloned from,
+when your install is a git clone; the address of the marketplace your
+agent cloned (for example, Claude Code's
+`claude plugin marketplace add https://gitlab.example.org/…/hivemind.git`); the first line of
 `~/.config/hivemind/plugin-source`; and otherwise the public repository
 on GitHub. Its first line says which one it used. Put your mirror's
 address in that file once if your agents install from one. Without any

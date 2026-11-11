@@ -6,13 +6,16 @@ back to "Which harness am I in?" in the hivemind-setup skill.
 ## Check
 
 ```sh
-sh <skill>/scripts/hivemind-drift.sh --block ~/.copilot/copilot-instructions.md
+sh <skill>/scripts/hivemind-drift.sh --block ~/.copilot/copilot-instructions.md --source-from ~/.copilot/settings.json
 ```
 
-Without the plugin, add `--skills ~/.copilot/skills` (or
-`--skills ~/.agents/skills`, wherever setup copied them). Pass the
-marketplace's address as `--repo` when the
-`Latest:` line names another source.
+`--source-from` reads the marketplace's address from
+`extraKnownMarketplaces` there (checked with Copilot CLI 1.0.109, a
+Git-URL marketplace; `~/.copilot/config.json` records it too). A
+marketplace added from a local folder has no address: pass `--repo` or
+save one. Without the plugin, drop `--source-from` and add
+`--skills ~/.copilot/skills` (or `--skills ~/.agents/skills`, wherever
+setup copied them).
 
 ## Update
 

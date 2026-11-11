@@ -10,10 +10,11 @@ sh <skill>/scripts/hivemind-drift.sh --block ~/.config/opencode/AGENTS.md
 ```
 
 OpenCode also reads `~/.claude/CLAUDE.md` as a fallback: if that holds a
-block, add `--block ~/.claude/CLAUDE.md`. The `plugin` entry in
-`opencode.json` names the address and the tag; pass the address as
-`--repo` when the
-`Latest:` line names another source.
+block, add `--block ~/.claude/CLAUDE.md`. Add
+`--source-from ~/.config/opencode/opencode.json` (or the project's
+`opencode.json`, wherever the entry is): it reads the address from the
+`plugin` entry (`git+https://<git-server>/<owner>/hivemind.git#v<version>`),
+dropping the `git+` prefix and the tag.
 
 ## Update
 

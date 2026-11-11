@@ -9,8 +9,10 @@ back to "Which harness am I in?" in the hivemind-setup skill.
 sh <skill>/scripts/hivemind-drift.sh --block ~/.omp/agent/AGENTS.md
 ```
 
-Pass the marketplace's address as `--repo` when the
-`Latest:` line names another source.
+Where Oh My Pi records the marketplace's address was not checked.
+If the `Latest:` line says `from the default` but the plugin came from
+another address, ask the user for that Git URL and save it as step 2 of
+the skill says.
 
 ## Update
 

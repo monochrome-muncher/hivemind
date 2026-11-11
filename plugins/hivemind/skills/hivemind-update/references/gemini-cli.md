@@ -9,9 +9,10 @@ back to "Which harness am I in?" in the hivemind-setup skill.
 sh <skill>/scripts/hivemind-drift.sh --block ~/.gemini/GEMINI.md
 ```
 
-`gemini extensions list` shows the extension's source and ref; pass the
-source as `--repo` when the
-`Latest:` line names another source. Without the extension, add
+An extension installed from a Git URL is a clone in
+`~/.gemini/extensions/hivemind` (checked with Gemini CLI 0.68.0), and a
+linked one is your checkout, so the check compares with its address.
+Without the extension, add
 `--skills ~/.gemini/skills` (or `--skills ~/.agents/skills`, wherever
 setup copied them).
 

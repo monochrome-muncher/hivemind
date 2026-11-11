@@ -81,22 +81,32 @@ reports:
 | `Skill copies in …` or `Copy … of …` with `differs`, `missing` or `only in your copy` | hand-copied files are old | step 4 |
 | `No drift.` | everything matches the latest release | tell the user, and stop |
 
-**Where it looks.** The `Latest:` line names the repository it compared
-with and why: `--repo` if given; else the installed plugin's own git
-remote, when the plugin is a clone of the repository; else the first
-line of `~/.config/hivemind/plugin-source`; else the public repository
-on GitHub. Any git address works (a self-hosted server, an internal
-mirror, `ssh://`, `file://` or a local path). If the organization hosts
-Hivemind somewhere else and the plugin is not a clone, ask the user for
-that address and, with approval, save it in that file so later checks
-use it; your harness's file says where the install source is recorded.
-A mirror needs the release tags; without them, pass `--ref <branch>`.
-With no route to any git server, ask for a checkout or copy of the
-repository and pass `--latest DIR`.
+**Where it looks.** Hivemind may be hosted anywhere: GitHub, a
+company's GitLab, an internal mirror. The check works with any git
+address and compares with where the plugin was installed from. The
+`Latest:` line names that source and how it was found, in this order:
 
-Exit status 2 means it could not compare: no `git`, the address
-unreachable, or no release tag there. The message says which source it
-tried.
+1. `--repo URL`, if given;
+2. `--source-from FILE`: the first Hivemind git address in a file where
+   your harness records the install (your harness's file names it);
+3. the plugin's own git remote, when the installed plugin is a clone of
+   the repository;
+4. the remote of the marketplace clone that a cached plugin came from
+   (`…/plugins/cache/<marketplace>/…` and `…/plugins/marketplaces/<marketplace>`);
+5. the first line of `~/.config/hivemind/plugin-source`;
+6. the public repository on GitHub (`from the default`).
+
+**If it says `from the default`, or cannot reach its source** (exit
+status 2), do not trust the result yet. Find where the plugin was
+installed from as your harness's file says. If you cannot, ask the user
+for the Git URL they installed from. Then, with approval, save that URL
+as the only line of `~/.config/hivemind/plugin-source` (create the
+folder with mode 700; never save a URL with a password or token in it),
+so later checks use it, and run the check again.
+
+A mirror needs the release tags (`vX.Y.Z`); without them, pass
+`--ref <branch>`. With no route to any git server, ask for a checkout
+or copy of the repository and pass `--latest DIR`.
 
 Show the user the report, including the differences in the blocks,
 before you change anything. The plugin's `CHANGELOG.md` (in the new

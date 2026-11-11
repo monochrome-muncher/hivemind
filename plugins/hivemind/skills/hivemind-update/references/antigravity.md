@@ -11,7 +11,11 @@ sh <skill>/scripts/hivemind-drift.sh --block ~/.gemini/AGENTS.md
 
 The plugin is in `~/.gemini/config/plugins/hivemind` (the CLI, the App
 and the IDE share it), and the check finds it from this skill's folder.
-It compares the plugin's rule, `rules/AGENTS.md`, too.
+It compares the plugin's rule, `rules/AGENTS.md`, too. The install
+command names the address (`agy plugin install <address>/tree/<tag>/plugins/antigravity`);
+where Antigravity records it was not checked. If the `Latest:` line says `from the default` but the plugin came from
+another address, ask the user for that Git URL and save it as step 2 of
+the skill says.
 
 ## Update
 
