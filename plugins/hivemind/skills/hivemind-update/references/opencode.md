@@ -6,24 +6,26 @@ back to "Which harness am I in?" in the hivemind-setup skill.
 ## Check
 
 ```sh
-sh <skill>/scripts/hivemind-drift.sh --block ~/.config/opencode/AGENTS.md
+sh <skill>/scripts/hivemind-drift.sh --block ~/.config/opencode/AGENTS.md --source-from ~/.config/opencode/opencode.json
 ```
 
 OpenCode also reads `~/.claude/CLAUDE.md` as a fallback: if that holds a
-block, add `--block ~/.claude/CLAUDE.md`. Add
-`--source-from ~/.config/opencode/opencode.json` (or the project's
-`opencode.json`, wherever the entry is): it reads the address from the
-`plugin` entry (`git+https://<git-server>/<owner>/hivemind.git#v<version>`),
-dropping the `git+` prefix and the tag.
+block, add `--block ~/.claude/CLAUDE.md`. The plugin is a package copy
+under `~/.cache/opencode/packages/`, not a clone, so `--source-from` reads
+the address from the `plugin` entry
+(`git+https://<git-server>/<owner>/hivemind.git#v<version>`), dropping the
+`git+` prefix and the tag (checked with OpenCode 1.19.5). If the entry is
+in the project's `opencode.json`, point `--source-from` at that file.
 
 ## Update
 
 Change the tag in the `plugin` entry
 (`git+https://…/hivemind.git#v<version>`, under `plugin` on v1 and
 migrated to `plugins` on v2) to the tag from the `Latest:` line, then
-restart OpenCode. Check both `~/.config/opencode/opencode.json` and the
-project's `opencode.json`. An unpinned entry never updates: pin it, or
-delete OpenCode's cached copy under `~/.cache/opencode/` and restart.
+restart OpenCode, which fetches the new tag into a new folder. Check both
+`~/.config/opencode/opencode.json` and the project's `opencode.json`. An
+unpinned entry never updates: pin it, or delete OpenCode's cached copy
+under `~/.cache/opencode/` and restart.
 
 ## Your copies
 
