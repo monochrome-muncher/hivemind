@@ -31,5 +31,6 @@ The misfire worry is smaller than feared. A function-word check flags none of th
 ## Consequences
 
 - An agent that ignores the description sees the rule again in the write's reply, at the moment it can act on it, with no always-on text added.
-- On the 14B model the warning made the agent aware but not act within the same turn. A stronger model is expected to supersede at once, as it does for the other warnings; this was not measured (no hosted model was reachable).
+- On the 14B model the warning made the agent aware but not act within the same turn.
+- Claude Opus, Sonnet and Haiku, each given the same contract text and tools against the same seeded pool (not inside a harness), wrote the entry in English, answered in Norwegian and never drew the warning. The rule alone holds on frontier models; the warning is a net for weaker ones.
 - A false warning costs a second look. The word lists live in `write_warnings.py`; a language agents use that the lists miss is a one-line addition.
