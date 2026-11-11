@@ -1,8 +1,9 @@
 name: Tests
 
-# Lint, type-check and the full pytest suite (unit + Postgres integration)
-# on every pull request and every push to main. The Docker workflow only
-# proves the image builds; this one proves the code works.
+# Lint, type-check, the full pytest suite (unit + Postgres integration) and
+# Hermes's install scan of the plugin on every pull request and every push
+# to main. The Docker workflow only proves the image builds; this one proves
+# the code works.
 
 on:
   push:
@@ -43,6 +44,16 @@ jobs:
 
       - name: make check
         run: make check
+
+  hermes-scan:
+    name: Hermes install scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Scan the plugin as hermes plugins install does
+        run: make hermes-scan
 
   test:
     name: Unit + Postgres tests

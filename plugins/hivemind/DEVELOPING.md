@@ -710,6 +710,13 @@ docs in step. Among other things it checks that:
 Run it with `uv run pytest tests/unit/test_agent_plugin.py`. Some tests
 need `node` or `python3` and skip without them.
 
+`make hermes-scan` runs Hermes's own install scan over the plugin and
+fails when Hermes would refuse the install even with `--force`; CI runs it
+on every pull request. One line in `references/junie.md` did that from
+2.19.0 to 2.22.0 and nothing noticed. The scan fetches Hermes at the
+commit pinned in the Makefile (`HERMES_REF`); move the pin to each new
+Hermes release, since a new rule can block an unchanged plugin.
+
 ## Releasing
 
 A release bumps the version in every manifest and adds a row to

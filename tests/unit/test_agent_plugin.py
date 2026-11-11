@@ -202,7 +202,8 @@ def test_the_hermes_manifest_is_valid_yaml() -> None:
 
 # Hivemind's own key file read by a literal path in open(): Hermes's install
 # scan (tools/skills_guard.py in v2026.9.24) rates that "critical", which
-# blocks the install outright, even with --force.
+# blocks the install outright, even with --force. `make hermes-scan` runs
+# Hermes's whole scan in CI; this catches the case we hit without the network.
 HERMES_CRITICAL_READ = re.compile(
     r"\bopen\s*\(\s*(?:os\.path\.expanduser\s*\(\s*)?[\"'][^\"'\n]*\.env[\"']"
 )
