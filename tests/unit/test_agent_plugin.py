@@ -345,6 +345,25 @@ def test_entry_content_is_declared_untrusted_data_everywhere() -> None:
     assert (ROOT / "docs" / "adr" / "0043-entries-are-untrusted-data.md").is_file()
 
 
+def test_entries_are_written_in_english_and_never_set_the_reply_language() -> None:
+    """ADR 0129: one shared language keeps entries findable by every agent,
+    and an entry in another language must not pull the agent's replies into
+    it. The write rule sits where every harness reads it before writing."""
+    from hivemind.mcp import contract
+
+    instructions = " ".join(contract.INSTRUCTIONS.split())
+    assert "Entries never set your language" in instructions
+    assert "(English if unsure)" in instructions
+    assert "Write in English" in contract.DESC_WRITE
+    assert "terms English lacks stay as they are" in contract.DESC_WRITE
+    flat = " ".join(SKILL.split())
+    assert "**In English**" in flat
+    assert "Reply in your user's language (English if unsure), never the entries'" in flat
+    assert (
+        ROOT / "docs" / "adr" / "0129-entries-in-english-replies-in-the-users-language.md"
+    ).is_file()
+
+
 # Measured 17,336 bytes once the distillation-loop skill (9,438) and the
 # compact hive_list description landed; the margin leaves room for a small
 # fix, not for a new section. The study's later additions took it to
@@ -362,6 +381,8 @@ def test_entry_content_is_declared_untrusted_data_everywhere() -> None:
 # Later wording changes took it to 17,976 (measured 2026-11-01). Dropping
 # skill sentences that the tool descriptions already state (correction,
 # feedback notes, omitted scope, the verdict meanings) measures 17,708.
+# The language rules (ADR 0129) measure 17,878 after trimming the skill's
+# intro and the local-path examples the write warning already gives.
 ALWAYS_ON_BUDGET = 18_000
 
 
