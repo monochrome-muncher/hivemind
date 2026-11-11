@@ -200,6 +200,22 @@ def test_the_hermes_manifest_is_valid_yaml() -> None:
     )
 
 
+# Hivemind's own key file read by a literal path in open(): Hermes's install
+# scan (tools/skills_guard.py in v2026.9.24) rates that "critical", which
+# blocks the install outright, even with --force.
+HERMES_CRITICAL_READ = re.compile(
+    r"\bopen\s*\(\s*(?:os\.path\.expanduser\s*\(\s*)?[\"'][^\"'\n]*\.env[\"']"
+)
+
+
+def test_hermes_can_install_the_plugin() -> None:
+    """One such line in junie.md kept Hermes from installing 2.19.0 to 2.22.0."""
+    for path in PLUGIN.rglob("*"):
+        if path.is_file() and path.suffix in {".md", ".sh", ".py", ".js", ".ts"}:
+            match = HERMES_CRITICAL_READ.search(path.read_text())
+            assert not match, f"{path.relative_to(ROOT)}: {match and match.group(0)}"
+
+
 def _yaml_scalar(path: Path, key: str) -> str:
     """Read a flat top-level `key: value` from a YAML manifest.
 
@@ -838,6 +854,7 @@ def test_the_root_package_installs_the_dsh_bundle_from_a_git_url() -> None:
 
     needed = [
         patch,
+        PLUGIN / "package.json",  # the update skill's drift check reads the installed version here
         PLUGIN / "skills" / "hivemind" / "SKILL.md",
         PLUGIN / "skills" / "hivemind-setup" / "SKILL.md",
         PLUGIN / "skills" / "hivemind-update" / "scripts" / "hivemind-drift.sh",

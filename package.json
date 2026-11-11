@@ -18,6 +18,7 @@
     "./server": "./plugins/hivemind/opencode/hivemind.js"
   },
   "files": [
+    "plugins/hivemind/package.json",
     "plugins/hivemind/cordis.patch.yml",
     "plugins/hivemind/cline/",
     "plugins/hivemind/dsh/",

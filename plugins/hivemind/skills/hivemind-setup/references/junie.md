@@ -59,7 +59,8 @@ mkdir -p ~/.junie/mcp && chmod 700 ~/.junie ~/.junie/mcp
 python3 - <<'PY'
 import json, os, re, shlex
 env = {}
-for line in open(os.path.expanduser("~/.config/hivemind/junie.env")):
+key_file = os.path.expanduser("~/.config/hivemind/junie.env")
+for line in open(key_file):
     m = re.match(r"\s*(?:export\s+)?(\w+)=(.*)", line)
     if m:
         env[m[1]] = shlex.split(m[2])[0] if m[2].strip() else ""
