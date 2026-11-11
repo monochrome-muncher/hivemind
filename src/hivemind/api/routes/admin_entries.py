@@ -27,6 +27,7 @@ from hivemind.api.routes.shared import (
 from hivemind.api.schemas import (
     ActivityOut,
     AdminEntryOut,
+    AdminHitOut,
     AdminSearchRequest,
     EntryOut,
     FeedbackLogItemOut,
@@ -113,7 +114,7 @@ async def admin_get_entry(entry_id: str, credential: CredentialDep, app: AppDep)
     return await entry_detail(app, entry_id, credential, history=True, model=AdminEntryOut)
 
 
-@router.post("/admin/search", response_model=list[HitOut])
+@router.post("/admin/search", response_model=list[AdminHitOut])
 async def admin_search(
     request: AdminSearchRequest,
     credential: CredentialDep,
@@ -123,14 +124,23 @@ async def admin_search(
 ) -> list[HitOut]:
     """``POST /v1/search`` for the admin, with a ``fleet_id`` filter
     (ADR 0080). With ``as_agent`` it sees what that agent's own search
-    sees (ADR 0136). Not counted in the search counters (ADR 0056); a
+    sees (ADR 0136). With ``explain`` each hit carries the parts of its
+    score (ADR 0137). Not counted in the search counters (ADR 0056); a
     degraded answer still counts for ``GET /metrics``."""
     require_admin(credential, "the admin search")
     searcher = credential
     if request.as_agent is not None:
         searcher = await app.access_service.credential_for_agent(credential, request.as_agent)
     return await run_search(
-        app, prometheus, request, searcher, response, fleet_id=request.fleet_id, count=False
+        app,
+        prometheus,
+        request,
+        searcher,
+        response,
+        fleet_id=request.fleet_id,
+        count=False,
+        explain=request.explain,
+        model=AdminHitOut,
     )
 
 
