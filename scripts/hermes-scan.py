@@ -2,7 +2,8 @@
 
 Usage: python3 -I scripts/hermes-scan.py HERMES_SOURCE PLUGIN_DIR
 
-Prints Hermes's scan report and exits 1 when Hermes would refuse the
+Prints Hermes's scan report (whose Decision line is Hermes's policy for
+skills, not plugins) and exits 1 when Hermes would refuse the
 install even with --force, which is what a "dangerous" verdict does.
 `make hermes-scan` fetches the pinned Hermes source and runs this.
 """
@@ -19,6 +20,7 @@ def main(hermes_source: Path, plugin_dir: Path) -> int:
     print(format_scan_report(result))
     allowed, reason = should_allow_plugin_install(result, force=True)
     if allowed:
+        print(f"\nHermes installs the plugin with --force: {reason}")
         return 0
     print(f"\nHermes refuses to install the plugin, even with --force: {reason}", file=sys.stderr)
     return 1
