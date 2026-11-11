@@ -151,14 +151,26 @@ address_in() {
   head -n 1 "$scratch/addresses"
 }
 
+# A record can hold no usable address (a GitHub owner/name shorthand, a
+# local folder), so the search goes on and the source line says so.
 choose_repo() {
   [ -n "$repo" ] && return
   if [ -n "$source_from" ]; then
     [ -r "$source_from" ] || die "cannot read $source_from"
     repo=$(address_in "$source_from")
-    [ -n "$repo" ] || die "found no Hivemind git address in $(shown "$source_from"); pass --repo"
-    repo_from=$(shown "$source_from")
-  elif [ -n "$installed" ] && repo=$(own_remote "$installed") && [ -n "$repo" ]; then
+    if [ -n "$repo" ]; then
+      repo_from=$(shown "$source_from")
+      return
+    fi
+  fi
+  pick_fallback_repo
+  if [ -n "$source_from" ]; then
+    repo_from="$repo_from; no Hivemind git address in $(shown "$source_from")"
+  fi
+}
+
+pick_fallback_repo() {
+  if [ -n "$installed" ] && repo=$(own_remote "$installed") && [ -n "$repo" ]; then
     repo_from="the installed plugin's git remote"
   elif [ -n "$installed" ] && clone=$(marketplace_of "$installed") &&
     repo=$(own_remote "$clone") && [ -n "$repo" ]; then

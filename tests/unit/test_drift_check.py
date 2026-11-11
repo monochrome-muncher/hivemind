@@ -295,11 +295,20 @@ def test_a_record_that_also_names_the_mcp_server_uses_the_repository(tmp_path: P
     assert f"of {mirror.as_uri()} (from ~/config.toml)" in out.stdout
 
 
-def test_a_record_without_a_hivemind_address_is_refused(tmp_path: Path) -> None:
-    record = tmp_path / "config.toml"
-    record.write_text('source = "https://example.org/other.git"\n')
+@needs_git
+def test_a_record_without_a_hivemind_address_falls_back_and_says_so(tmp_path: Path) -> None:
+    mirror = _mirror(tmp_path / "mirror")
+    source = tmp_path / ".config" / "hivemind" / "plugin-source"
+    source.parent.mkdir(parents=True)
+    source.write_text(f"{mirror.as_uri()}\n")
+    record = tmp_path / "marketplaces.json"
+    record.write_text('{"hivemind": {"sourceUri": "monochrome-muncher/hivemind"}}\n')
     out = _drift(tmp_path, _install(tmp_path / "i"), "--source-from", record)
-    assert out.returncode == 2 and "found no Hivemind git address" in out.stderr
+    assert out.returncode == 0, out.stderr
+    assert (
+        f"of {mirror.as_uri()} (from ~/.config/hivemind/plugin-source; "
+        "no Hivemind git address in ~/marketplaces.json)"
+    ) in out.stdout.splitlines()[0]
 
 
 @needs_git

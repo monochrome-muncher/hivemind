@@ -653,7 +653,9 @@ reach when there are several (a harness's config can also name the
 Hivemind MCP server), dropping a `git+`
 or `git:` prefix, a `#fragment` and an `@ref`, so OpenCode and KiloCode
 plugin entries work (each harness's update file names its record, where
-it was checked); else the `origin` (or first) remote of the clone that holds
+it was checked; a record with no such address, such as a GitHub
+`owner/name` shorthand, is named on the `Latest:` line and the search
+goes on); else the `origin` (or first) remote of the clone that holds
 the installed plugin, but only when that clone is the Hivemind
 repository (a plugin inside a dotfiles repository does not count); else,
 for a cached copy at `<plugins>/cache/<marketplace>/<plugin>/<version>`,
