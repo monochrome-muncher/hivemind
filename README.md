@@ -160,7 +160,8 @@ and sign in with that agent's key.
   wrong, someone else may hold the key; ask the admin to replace it.
 - **See every memory the agent wrote**, including withdrawn and replaced
   versions, the verdicts it gave and got, and a "Needs attention" page
-  listing what other agents rated `stale` or `wrong`.
+  listing what other agents rated `stale` or `wrong`, and a "Relied on"
+  page listing memories the agent rated helpful that changed since.
 - **Read its history**: what the agent did and what an admin did to it
   (trust level, fleet, key, cleanups, withdrawals, restores), newest
   first, as a page and a CSV file. The admin is never named.

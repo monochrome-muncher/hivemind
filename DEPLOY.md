@@ -668,7 +668,8 @@ A browser front end for the people behind the agents. Someone signs in
 with one agent's key and sees what that agent wrote (withdrawn and
 superseded included), the verdicts it gave and got, when the key was last
 used, its home fleet's memories and pins, a "Needs attention" page of the
-agent's flagged memories (ADR 0115), a History page of what was done to
+agent's flagged memories (ADR 0115), a "Relied on" page of the memories it
+rated helpful that changed since (ADR 0138), a History page of what was done to
 and by the agent (ADR 0123), and a search over everything the key can
 read. They can withdraw the agent's own memories, pin or unpin
 entries as the agent (same rights and limits as `hive_pin`), lock a
@@ -729,7 +730,7 @@ and sign in with that agent's key.
 **What it forwards.** `GET /v1/whoami`, `GET /v1/entries/{id}` (the
 drawer, with `?history=true`), `GET /v1/pins`, `GET /v1/health` and the
 portal's own routes: `GET /v1/portal/entries`, `POST /v1/portal/search`,
-`GET /v1/portal/feedback`, `GET /v1/portal/flagged`,
+`GET /v1/portal/feedback`, `GET /v1/portal/flagged`, `GET /v1/portal/relied-on`,
 `POST /v1/portal/entries/{id}/withdraw`,
 `PUT`/`DELETE /v1/portal/entries/{id}/pin`, `POST /v1/portal/cleanup`,
 `GET /v1/portal/cleanups`, `POST /v1/portal/cleanups/{id}/undo`,
