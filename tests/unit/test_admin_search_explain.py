@@ -123,6 +123,7 @@ async def test_the_parts_say_what_the_pipeline_did(w: World) -> None:
     assert helped["feedback"]["helpful"] == 12
     assert helped["feedback"]["quality"] == pytest.approx(1 + 12 * 0.2 / 14, rel=1e-4)
     assert helped["social"]["cap"] == 1.2 and helped["social"]["cap_applied"] is False
+    assert helped["feedback"]["flags_halved"] is False  # nothing to halve without flags
     flagged = by_summary["kaniko cache flags guide"]
     assert flagged["feedback"]["wrong"] == 2 and flagged["social"]["factor"] < 1.0
     for e in by_summary.values():

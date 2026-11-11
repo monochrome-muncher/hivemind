@@ -359,7 +359,8 @@ class SearchService:
                     vector_rank=fusion.vector_ranks.get(entry.id),
                     feedback=entry_signals.counts,
                     flags_halved=self._config.confirmation_halves_flags
-                    and entry_signals.last_confirmed_at is not None,
+                    and entry_signals.last_confirmed_at is not None
+                    and any(entry_signals.counts[1:]),
                     recency=self._config.applied_hint(recency),
                     degraded=fusion.degraded,
                 )
