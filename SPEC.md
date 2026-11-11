@@ -534,8 +534,8 @@ This section supersedes the "no entity extraction" non-goal of §9 **for the fac
 
 ### 13.2 Storage and immutability
 
-* `entries.entities jsonb` + `entries.entities_model text` — symmetric with the `embedding` / `embedding_model` pair (ADR 0005): one machine writer, immutable after write (ADR 0001), provenance via `entities_model`.
-* **No backfill in v1:** pre-existing entries keep `entities: []`; an operator-run backfill is a named maintenance procedure (the ADR 0005 re-embedding-migration pattern — the one sanctioned in-place exception to ADR 0001, for machine metadata only), not an online feature.
+* `entries.entities jsonb` + `entries.entities_model text` — symmetric with the `embedding` / `embedding_model` pair (ADR 0005): one machine writer, immutable after write (ADR 0001) except by an operator's re-extraction (below), provenance via `entities_model`.
+* **Re-extraction is an operator's one-off, not an online feature (ADR 0131):** entries keep the facets they were written with until an operator runs `hivemind-reextract` (the ADR 0005 re-embedding-migration pattern, the one sanctioned in-place exception to ADR 0001, for machine metadata only). It is a dry run unless `--apply` is given, reads active entries (`--include-inactive` adds the rest; `--fleet`, `--created-after`, `--created-before` narrow it) in resumable batches (`--after <entry id>`), never touches a redacted entry, and rewrites only `entities`, `entity_names` and `entities_model`, and only where the set of names (case-insensitive) and kinds changed. A failed extraction keeps the entry's facets, and an empty result does too unless `--allow-clear` is given.
 
 ### 13.3 Query surface
 

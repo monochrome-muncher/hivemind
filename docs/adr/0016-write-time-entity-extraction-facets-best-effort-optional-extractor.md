@@ -1,6 +1,6 @@
 # Write-time entity extraction: best-effort, optional, schema-validated
 
-> **Amended by [ADR 0021](0021-embedded-text-budget-in-whitespace-words-not-model-tokens.md)** (the shared text budget is whitespace words, `HIVEMIND_EMBEDDING_PREFIX_TOKENS`) **and [ADR 0041](0041-provider-call-deadline-jitter-and-typed-embedder-errors.md)** (an overall per-call deadline, `HIVEMIND_EXTRACTOR_DEADLINE`) **and [ADR 0130](0130-extractor-prompt-defines-kinds-and-name-rules-with-worked-examples.md)** (what the fixed prompt says, and its worked examples).
+> **Amended by [ADR 0021](0021-embedded-text-budget-in-whitespace-words-not-model-tokens.md)** (the shared text budget is whitespace words, `HIVEMIND_EMBEDDING_PREFIX_TOKENS`) **and [ADR 0041](0041-provider-call-deadline-jitter-and-typed-embedder-errors.md)** (an overall per-call deadline, `HIVEMIND_EXTRACTOR_DEADLINE`) **and [ADR 0130](0130-extractor-prompt-defines-kinds-and-name-rules-with-worked-examples.md)** (what the fixed prompt says, and its worked examples) **and [ADR 0131](0131-operator-run-entity-re-extraction.md)** (the backfill ships as `hivemind-reextract`).
 
 Hivemind's knowledge-graph row (SPEC §10) has been trigger-held since
 ADR 0006 — "no knowledge graph, no entity extraction, no

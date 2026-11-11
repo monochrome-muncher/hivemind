@@ -1099,3 +1099,83 @@ stub; the text does not come back. If `0032` is applied again later, the stubs
 have `redacted_at` NULL; the admin restore still recognises them (summary and
 reason `[redacted]`, no body, no embedding) and refuses with `entry_redacted`,
 but the panel no longer shows them as redacted.
+
+## 14. Re-extracting entity names (ADR 0131)
+
+When the extractor prompt or model changes (ADR 0130 did), older entries keep
+the entity names they were written with, so an entity filter finds the old
+spelling or the new one but not both. Entries written while extraction was off
+or failing have no entities at all. `hivemind-reextract` runs the configured
+extractor over stored entries and rewrites only their extracted entities. It
+reads the same settings as the API (`HIVEMIND_DATABASE_URL`, the
+`HIVEMIND_EXTRACTOR_*` variables and `HIVEMIND_EMBEDDING_PREFIX_TOKENS`) and
+refuses to start when extraction is off.
+
+It is a **dry run unless you pass `--apply`**. Each entry in scope costs one
+extractor call, in the dry run too, so start small:
+
+```sh
+hivemind-reextract --created-before 2026-11-11 --limit 50
+```
+
+Each change prints as `would change <id>: ["Postgres"] -> ["PostgreSQL"]`
+(`changed` with `--apply`), each failure as `failed <id>`, each entry that
+would lose all its entities as `kept <id>: [...] -> [] needs --allow-clear`,
+and each batch ends
+with `resume with --after <id>`. The last line sums it up.
+
+| Option | Meaning |
+|---|---|
+| `--apply` | write the changes |
+| `--created-before T`, `--created-after T` | only entries created in that range (ISO 8601; a time without a zone is UTC) |
+| `--fleet ID` | only entries in that fleet |
+| `--include-inactive` | also superseded and withdrawn entries (default: active only) |
+| `--after ID` | resume after that entry |
+| `--limit N` | stop after N entries |
+| `--allow-clear` | also write an empty result over existing entities |
+| `--batch-size N` | entries per batch (default 50) |
+| `--concurrency N` | extractor calls in flight at once (default 4) |
+
+What it does and does not do:
+
+- It writes only `entities`, `entity_names` and `entities_model`, and only for
+  entries whose set of names and kinds changed (a new order or letter case
+  alone is not a change). Summary, body, tags, embedding and keyword index
+  stay as they are. Each batch's writes are one short transaction with a
+  5 s lock timeout, so live traffic is not held up; a batch that cannot get
+  its locks stops the run with exit code 2 and a resume point.
+- An empty result over existing entities is kept back by default. A model
+  that answers `[]` to everything is not a failure, so read the `kept` lines
+  in the dry run before you pass `--allow-clear`.
+- An entry whose summary no longer passes today's checks is reported as
+  failed and left alone.
+- It works behind a transaction-mode PgBouncer (no prepared-statement cache).
+- A failed extraction keeps the entry's current entities. Run it again over
+  the same range later; entries already done come back unchanged.
+- If every extraction in a batch fails (the extractor is down, or the model
+  name is wrong), the run stops with exit code 2 before writing that batch.
+  Fix the extractor and resume with the last `--after` it printed.
+- Redacted entries (ADR 0125) are never read or written.
+- It shares the extractor with live writes. Keep `--concurrency` low enough
+  that writes still get their extraction in time; their extraction gives up
+  after `HIVEMIND_EXTRACTOR_DEADLINE` and the write lands without entities.
+- It writes no audit row; keep the Job log if you want a record.
+
+**On Kubernetes**, copy
+[`deploy/kubernetes/maintenance/reextract-job.yaml`](../deploy/kubernetes/maintenance/reextract-job.yaml),
+set `image` to the tag your Deployments run, and set `args`:
+
+```sh
+kubectl -n hivemind apply -f reextract-job.yaml        # dry run
+kubectl -n hivemind logs -f job/hivemind-reextract
+kubectl -n hivemind delete job hivemind-reextract
+# add "--apply" to args, then
+kubectl -n hivemind apply -f reextract-job.yaml
+```
+
+The Job uses the API's ConfigMap and Secret and sets
+`HIVEMIND_RUNNER=reextract`. The opt-in egress policy
+(`deploy/kubernetes/optional/networkpolicy/egress/`) gives it the API's
+destinations. Like every runner it migrates first, which is why
+it must use the image the Deployments run. If the Job stops, add
+`"--after", "<id>"` from its log to `args` and apply it again.

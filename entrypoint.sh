@@ -16,6 +16,7 @@
 #   HIVEMIND_RUNNER=portal    agent portal UI + proxy to hivemind-api (ADR 0095)
 #   HIVEMIND_RUNNER=migrate   idempotent schema migration (ADR 0020)
 #   HIVEMIND_RUNNER=keys      key-management CLI (SPEC §8.1, ADR 0012)
+#   HIVEMIND_RUNNER=reextract one-off entity re-extraction (ADR 0131)
 #
 # Default: mcp-http (the compose service sets no HIVEMIND_RUNNER).
 set -eu

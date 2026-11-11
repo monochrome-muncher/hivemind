@@ -366,8 +366,12 @@ _Avoid_: relevance threshold, minimum score (the final score is not thresholded)
 ### Entities (ADR 0016)
 
 **Extracted entity**:
-A machine-derived `{name, kind}` facet of an entry, produced by the write-time LLM extractor (SPEC §13). `name` is open vocabulary; `kind` is a closed vocabulary (`person | organization | system | service | artifact | concept`). Set once at write time, never mutated (ADR 0001).
+A machine-derived `{name, kind}` facet of an entry, produced by the write-time LLM extractor (SPEC §13). `name` is open vocabulary; `kind` is a closed vocabulary (`person | organization | system | service | artifact | concept`). Set at write time; only an operator's re-extraction replaces it (ADR 0131).
 _Avoid_: tag (that is an agent-declared facet, not a machine-derived one), domain entity (that is a programming class in `domain/`)
+
+**Re-extraction**:
+An operator's one-off run of the current extractor over stored entries, replacing their extracted entities where the result differs (ADR 0131). The one change to an entry after its write that is not a lifecycle change, limited to machine-derived facets.
+_Avoid_: backfill job (it is not scheduled or online), re-index (the embedding and keyword index are untouched)
 
 **Entity facet**:
 The per-entry entity list as a filterable retrieval facet (AND over names, case-insensitive). A precision instrument, not a graph node — no cross-entry linking in v1.

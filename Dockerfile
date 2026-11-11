@@ -9,6 +9,7 @@
 #   HIVEMIND_RUNNER=portal     agent portal, proxies to hivemind-api (ADR 0095)
 #   HIVEMIND_RUNNER=migrate    idempotent schema migration (ADR 0013)
 #   HIVEMIND_RUNNER=keys       key-management CLI (SPEC §8.1, ADR 0012)
+#   HIVEMIND_RUNNER=reextract  one-off entity re-extraction (ADR 0131)
 #
 # Base image pinned by digest (DEP-3; python:3.14.10-slim as of 2026-11-01).
 # Bump deliberately for security updates
