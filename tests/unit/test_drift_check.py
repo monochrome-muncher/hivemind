@@ -269,6 +269,11 @@ def test_a_cached_plugin_is_compared_with_its_marketplace_clone(tmp_path: Path) 
         ),
         ("opencode.json", '{{"plugin": ["other-plugin", "git+{url}#v2.22.0"]}}'),
         ("kilo.jsonc", '{{\n  // pinned\n  "plugin": ["git:{url}@v2.22.0"]\n}}'),
+        (
+            "local-marketplaces.json",
+            '{{"version": 1, "marketplaces": [{{"name": "hivemind", "gitUrl": "{url}",'
+            ' "gitRef": "v2.22.0", "plugins": [{{"name": "hivemind", "enabled": true}}]}}]}}',
+        ),
     ],
 )
 def test_the_source_is_read_from_a_harness_install_record(

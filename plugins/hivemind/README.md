@@ -191,8 +191,10 @@ key. Turn it on in `/plugin` (select hivemind and press Space) or under
 Customizations > Installed in the App, and fill in both. The key field
 shows what you type, so make sure nobody is watching your screen.
 Antigravity keeps both values in `~/.gemini/config/config.json`, readable
-only by you. On a Git server other than GitHub, clone the repository and
-run `agy plugin install /path/to/hivemind/plugins/antigravity`.
+only by you. On a Git server other than GitHub, `agy plugin install`
+refuses the link, so clone the repository at the release tag and run
+`agy plugin install /path/to/hivemind/plugins/antigravity`. Antigravity
+copies the folder, so you can delete the clone afterwards.
 
 ### GitHub Copilot CLI
 
@@ -814,15 +816,17 @@ agent). The update commands, all in a terminal:
   ask the agent to "Update Hivemind", which refreshes the block in
   `~/.gemini/GEMINI.md`. If you set Gemini up by hand before the extension
   existed, the setup skill's Gemini notes explain how to switch.
-- **Antigravity**: run the install command again with the new release.
-  It keeps the address and key you filled in.
+- **Antigravity**: run the install command again with the new release
+  (from another Git server, clone the new tag and install from the folder
+  again). It keeps the address and key you filled in.
 - **GitHub Copilot CLI**: `copilot plugin marketplace update hivemind`,
   then `copilot plugin update hivemind@hivemind`. Then ask the agent to
   "Update Hivemind", which refreshes the block in
   `~/.copilot/copilot-instructions.md`.
-- **Cursor**: run `git pull` in your clone, then restart Cursor or run
-  "Developer: Reload Window". If you copied the folder instead of linking
-  it, copy it again.
+- **Cursor**: run `git pull` in your clone (or, if you checked out a
+  release tag, `git fetch --tags` and check out the new one), then
+  restart Cursor or run "Developer: Reload Window". If you copied the
+  folder instead of linking it, copy it again.
 - **Junie**: in the Junie prompt, `/extensions`, open the Installed tab
   and pick Update on hivemind (an extension from a local folder refreshes
   when Junie starts). Then start a new session.

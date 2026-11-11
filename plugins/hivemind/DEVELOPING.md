@@ -209,7 +209,7 @@ writes is one its update file passes to the drift check.
   checkout without symlink support the `skills` link is a plain file, so the
   skills would have to be copied by hand.
 
-- **Antigravity** (checked live with the CLI, `agy` 1.5.3, headless
+- **Antigravity** (checked live with the CLI, `agy` 1.5.3 and 1.5.5, headless
   against a mock Gemini model: `modelProvider: "gemini"` in
   `~/.gemini/antigravity-cli/settings.json`, `GEMINI_API_KEY` and
   `GOOGLE_GEMINI_BASE_URL`; no Google sign-in is needed there).
@@ -224,7 +224,12 @@ writes is one its update file passes to the drift check.
     the full link. `agy plugin validate --strict plugins/antigravity`
     passes. On a Windows checkout without symlink support the `skills`
     link is a plain file, so install from a Linux or macOS clone or the
-    GitHub link.
+    GitHub link. Only github.com links work (1.5.5: any other host fails
+    with "failed to parse GitHub URL", and a `git+` URL is taken as a
+    folder); from another Git server the docs clone the tag and install
+    the folder, which Antigravity copies. Neither route leaves a record of
+    the address (`config.json` and `import_manifest.json` hold none), so
+    the drift check relies on `~/.config/hivemind/plugin-source`.
   - *MCP server.* A server that declares `variables` installs the plugin
     turned off. Turning it on in `/plugin` (or the App) asks for each
     variable and stores the values in plain text in
@@ -392,7 +397,10 @@ writes is one its update file passes to the drift check.
     `~/.cursor/plugins/local-marketplaces.json`
     (`{"version":1,"marketplaces":[{"name","gitUrl","gitRef","plugins":[{"name","enabled":true}]}]}`),
     cloned at each start and cached by commit under
-    `~/.cursor/plugins/cache/`. Signed in, that file is ignored. The root
+    `~/.cursor/plugins/cache/<marketplace>/<plugin>/<commit>/` (a plain
+    copy, not a clone; a new `gitRef` replaces it, checked with
+    2026.11.11), so the drift check reads the address from that file.
+    Signed in, that file is ignored. The root
     `.cursor-plugin/marketplace.json` (`name`, `owner`, `plugins[].source`
     as a path) serves both it and team marketplaces; Cursor looks for
     `<source>/.cursor-plugin/plugin.json`, then `.claude-plugin/plugin.json`.
