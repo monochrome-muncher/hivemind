@@ -104,6 +104,18 @@ async def test_portal_list_reads_what_the_key_reads_and_filters_by_fleet() -> No
     assert carol_red.json() == []
 
 
+async def test_portal_list_rows_carry_their_verdict_counts() -> None:
+    """The portal's Flags column reads them; a row nobody rated has none, as a search hit."""
+    app, _blue, _red, mine, in_blue, _by_bob, _in_red = await _seed()
+    await app.store.record_feedback(Feedback(in_blue.id, "bob", "bob", Verdict.WRONG, "bad port"))
+    async with make_client(app) as client:
+        resp = await client.get("/v1/portal/entries", params={"author": "carol"}, headers=CAROL)
+    rows = {e["id"]: e for e in resp.json()}
+    counts = rows[in_blue.id]["feedback"]
+    assert (counts["helpful"], counts["stale"], counts["wrong"]) == (0, 0, 1)
+    assert rows[mine.id]["feedback"] is None
+
+
 async def test_portal_search_ranks_like_search_but_is_not_counted() -> None:
     app, blue, _red, mine, in_blue, by_bob, _in_red = await _seed()
     async with make_client(app) as client:

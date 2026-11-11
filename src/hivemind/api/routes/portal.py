@@ -19,6 +19,7 @@ from hivemind.api.routes.params import (
 )
 from hivemind.api.routes.shared import (
     check_cleanup_expectations,
+    listed_with_counts,
     pin_entry,
     run_search,
     unpin_entry,
@@ -95,7 +96,7 @@ async def portal_list_entries(
     entries = await app.read_service.list(
         filters, limit=limit, offset=offset, visibility=credential.visibility()
     )
-    return [EntryOut.from_entry(e) for e in entries]
+    return await listed_with_counts(app, entries, EntryOut)
 
 
 @router.post("/portal/search", response_model=list[HitOut])

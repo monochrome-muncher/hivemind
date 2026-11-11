@@ -219,6 +219,19 @@ async def test_admin_detail_has_feedback_links_and_history() -> None:
     assert missing.json()["error"]["code"] == "not_found"
 
 
+async def test_admin_list_rows_carry_their_verdict_counts() -> None:
+    """The panel's Flags column reads them; a row nobody rated has none, as a search hit."""
+    app, _blue, _red, mine, in_blue, _in_red = await _seed()
+    await app.store.record_feedback(Feedback(in_blue.id, "bob", "bob", Verdict.STALE, "old"))
+    await app.store.record_feedback(Feedback(in_blue.id, "carol", "carol", Verdict.HELPFUL, None))
+    async with make_client(app) as client:
+        resp = await client.get("/v1/admin/entries", headers=ADMIN)
+    rows = {e["id"]: e for e in resp.json()}
+    counts = rows[in_blue.id]["feedback"]
+    assert (counts["helpful"], counts["stale"], counts["wrong"]) == (1, 1, 0)
+    assert rows[mine.id]["feedback"] is None
+
+
 async def test_admin_search_sees_every_fleet_and_is_not_counted() -> None:
     app, _blue, red, *_ = await _seed()
     async with make_client(app) as client:
