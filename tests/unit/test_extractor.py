@@ -124,6 +124,7 @@ def make_extractor(
     sleep=_no_sleep,
     jitter=_full_backoff,
     deadline: float = 45.0,
+    structured_output: bool = False,
 ) -> OpenAICompatExtractor:
     return OpenAICompatExtractor(
         client=env.client(),
@@ -136,6 +137,7 @@ def make_extractor(
         sleep=sleep,
         jitter=jitter,
         deadline=deadline,
+        structured_output=structured_output,
     )
 
 
@@ -242,6 +244,145 @@ class TestPrompt:
             env.handler = lambda request, content=answer["content"]: _chat_response(content)
             entities = await make_extractor(env).extract_entry(make_draft())
             assert len(entities) == len(json.loads(answer["content"]))
+
+
+def _object_response(entities: list[dict[str, str]]) -> httpx.Response:
+    return _chat_response(json.dumps({"entities": entities}))
+
+
+POSTGRES = {"name": "Postgres", "kind": "system"}
+
+
+class TestStructuredOutput:
+    async def test_off_sends_no_response_format_and_asks_for_an_array(self) -> None:
+        env = MockEnv()
+        await make_extractor(env).extract_entry(make_draft())
+        assert "response_format" not in env.last_body
+        assert "Respond with ONLY a JSON array" in env.last_body["messages"][0]["content"]
+
+    async def test_on_sends_the_schema(self) -> None:
+        env = MockEnv()
+        env.handler = lambda request: _object_response([POSTGRES])
+        await make_extractor(env, structured_output=True).extract_entry(make_draft())
+        response_format = env.last_body["response_format"]
+        assert response_format["type"] == "json_schema"
+        assert response_format["json_schema"]["name"] == "entities"
+        assert response_format["json_schema"]["strict"] is True
+        schema = response_format["json_schema"]["schema"]
+        assert schema["required"] == ["entities"]
+        assert schema["additionalProperties"] is False
+        entities = schema["properties"]["entities"]
+        assert entities["maxItems"] == 10
+        assert entities["items"]["required"] == ["name", "kind"]
+        assert set(entities["items"]["properties"]["kind"]["enum"]) == {
+            kind.value for kind in EntityKind
+        }
+        assert "maxLength" not in entities["items"]["properties"]["name"]
+
+    async def test_on_asks_for_an_object_and_the_examples_answer_in_it(self) -> None:
+        env = MockEnv()
+        env.handler = lambda request: _object_response([POSTGRES])
+        await make_extractor(env, structured_output=True).extract_entry(make_draft())
+        messages = env.last_body["messages"]
+        assert "Respond with ONLY a JSON object" in messages[0]["content"]
+        assert 'respond with {"entities": []}' in messages[0]["content"]
+        answers = messages[1:-1][1::2]
+        assert answers
+        for answer in answers:
+            assert set(json.loads(answer["content"])) == {"entities"}
+            probe = MockEnv()
+            probe.handler = lambda request, content=answer["content"]: _chat_response(content)
+            entities = await make_extractor(probe, structured_output=True).extract_entry(
+                make_draft()
+            )
+            assert len(entities) == len(json.loads(answer["content"])["entities"])
+
+    async def test_on_parses_the_object(self) -> None:
+        env = MockEnv()
+        env.handler = lambda request: _object_response([POSTGRES])
+        result = await make_extractor(env, structured_output=True).extract_entry(make_draft())
+        assert result == (ExtractedEntity(name="Postgres", kind=EntityKind.SYSTEM),)
+
+    async def test_on_accepts_an_empty_object_result(self) -> None:
+        env = MockEnv()
+        env.handler = lambda request: _object_response([])
+        assert await make_extractor(env, structured_output=True).extract_entry(make_draft()) == ()
+
+    async def test_on_accepts_a_bare_array(self) -> None:
+        env = MockEnv()
+        env.handler = lambda request: _chat_response(_entities_json([POSTGRES]))
+        result = await make_extractor(env, structured_output=True).extract_entry(make_draft())
+        assert [e.name for e in result] == ["Postgres"]
+
+    @pytest.mark.parametrize(
+        "content",
+        ['{"entities": [], "extra": 1}', '{"items": []}', '{"entities": "x"}'],
+    )
+    async def test_on_rejects_other_objects(self, content: str) -> None:
+        env = MockEnv()
+        env.handler = lambda request: _chat_response(content)
+        with pytest.raises(ExtractorError):
+            await make_extractor(env, structured_output=True).extract_entry(make_draft())
+
+    async def test_off_still_rejects_an_object(self) -> None:
+        env = MockEnv()
+        env.handler = lambda request: _object_response([POSTGRES])
+        with pytest.raises(ExtractorError):
+            await make_extractor(env).extract_entry(make_draft())
+
+
+class TestStructuredOutputFallback:
+    @pytest.mark.parametrize("status", [400, 422])
+    async def test_a_rejecting_endpoint_is_served_plain_from_then_on(
+        self, status: int, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        env = MockEnv()
+        env.script(
+            [httpx.Response(status, text="secret provider text"), _object_response([POSTGRES])]
+        )
+        extractor = make_extractor(env, structured_output=True)
+        with caplog.at_level("WARNING"):
+            result = await extractor.extract_entry(make_draft())
+            await extractor.extract_entry(make_draft())
+        assert [e.name for e in result] == ["Postgres"]
+        assert ["response_format" in body for body in env.bodies] == [True, False, False]
+        assert env.bodies[1]["messages"] == env.bodies[0]["messages"]
+        warnings = [r for r in caplog.records if "structured output" in r.getMessage()]
+        assert len(warnings) == 1
+        assert str(status) in warnings[0].getMessage()
+        assert "secret provider text" not in caplog.text
+        assert BASE_URL not in warnings[0].getMessage()
+
+    async def test_a_failing_plain_retry_does_not_latch(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        env = MockEnv()
+        env.script([httpx.Response(400, text="bad")])
+        extractor = make_extractor(env, structured_output=True)
+        with caplog.at_level("WARNING"):
+            for _ in range(2):
+                with pytest.raises(ExtractorError) as exc_info:
+                    await extractor.extract_entry(make_draft())
+                assert exc_info.value.status == 400
+        assert ["response_format" in body for body in env.bodies] == [True, False, True, False]
+        assert not any("structured output" in r.getMessage() for r in caplog.records)
+
+    async def test_exhausted_5xx_does_not_trigger_the_plain_retry(self) -> None:
+        env = MockEnv()
+        env.script([httpx.Response(500, text="boom")])
+        extractor = make_extractor(env, retries=2, structured_output=True)
+        with pytest.raises(ExtractorError) as exc_info:
+            await extractor.extract_entry(make_draft())
+        assert exc_info.value.status == 500
+        assert len(env.bodies) == 3
+        assert all("response_format" in body for body in env.bodies)
+
+    async def test_a_validation_failure_does_not_trigger_the_plain_retry(self) -> None:
+        env = MockEnv()
+        env.handler = lambda request: _chat_response("not json")
+        with pytest.raises(ExtractorError):
+            await make_extractor(env, structured_output=True).extract_entry(make_draft())
+        assert len(env.bodies) == 1
 
 
 class TestExtractEntry:
@@ -490,6 +631,32 @@ class TestFactoryAndProtocol:
             assert extractor.retries == 4
         finally:
             await extractor.aclose()  # the extractor owns the client it built
+
+    async def test_from_settings_passes_structured_output(self) -> None:
+        settings = Settings(
+            extractor_endpoint="http://e.test/v1",
+            extractor_model="m",
+            extractor_structured_output=True,
+        )
+        extractor = OpenAICompatExtractor.from_settings(settings)
+        try:
+            assert extractor._structured_output is True
+            assert (
+                OpenAICompatExtractor.from_settings(
+                    Settings(extractor_endpoint="http://e.test/v1", extractor_model="m")
+                )._structured_output
+                is False
+            )
+        finally:
+            await extractor.aclose()
+
+    def test_settings_reads_structured_output_from_the_environment(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("HIVEMIND_EXTRACTOR_STRUCTURED_OUTPUT", raising=False)
+        assert Settings().extractor_structured_output is False
+        monkeypatch.setenv("HIVEMIND_EXTRACTOR_STRUCTURED_OUTPUT", "true")
+        assert Settings().extractor_structured_output is True
 
     async def test_from_settings_sends_the_configured_key_as_a_bearer_header(
         self, monkeypatch: pytest.MonkeyPatch
