@@ -194,7 +194,8 @@ class EntryOut(BaseModel):
     entities_model: str | None = None
     # Only with ``?history=true`` (SPEC.md §5.1).
     history: dict[str, list[EntryOut]] | None = None
-    # The entry's feedback: set by ``GET /v1/entries/{id}`` only.
+    # The entry's feedback: set by ``GET /v1/entries/{id}``; the admin and portal lists set the
+    # counts alone.
     feedback: FeedbackSummaryOut | None = None
     # The nearest existing entries the writer can read: set by
     # ``POST /v1/entries`` only.

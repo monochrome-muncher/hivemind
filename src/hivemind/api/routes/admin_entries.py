@@ -19,6 +19,7 @@ from hivemind.api.routes.params import (
 )
 from hivemind.api.routes.shared import (
     entry_detail,
+    listed_with_counts,
     require_admin,
     run_search,
     to_utc,
@@ -75,7 +76,7 @@ async def admin_list_entries(
     flagged: bool = False,
     limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = ADMIN_ENTRIES_DEFAULT_LIMIT,
     offset: Annotated[int | None, Query(ge=0, le=MAX_OFFSET)] = 0,
-) -> list[AdminEntryOut]:
+) -> list[EntryOut]:
     """List/filter entries as the admin sees them (ADR 0080): every
     scope of every fleet, newest first, with the ``GET /v1/entries``
     filters plus ``fleet_id``."""
@@ -101,7 +102,7 @@ async def admin_list_entries(
         offset=offset if offset is not None else 0,
         visibility=credential.visibility(),
     )
-    return [AdminEntryOut.from_entry(e) for e in entries]
+    return await listed_with_counts(app, entries, AdminEntryOut)
 
 
 @router.get("/admin/entries/{entry_id}", response_model=AdminEntryOut)
