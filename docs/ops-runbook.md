@@ -1251,7 +1251,8 @@ curl -s -X POST -H "X-API-Key: $ADMIN_KEY" -H "Content-Type: application/json" \
 ```
 
 - **The alias matches exactly**, capitals included: `Jane.Doe` and `jane.doe`
-  are two owners. `404 unknown_owner` means no agent has that alias.
+  are two owners. `404 unknown_owner` means no agent has that alias. In the
+  URL, percent-encode the alias (`%20` for a space); a `/` may stay as it is.
 - **Applying sends the preview's agents** (`expected_agents`, the `{name, action}` list). If an agent changed since, nothing is applied (`409 offboard_changed`): preview again.
 - **Refusals** change nothing: the successor must be active
   (`409 invalid_status`) and must not belong to the same owner

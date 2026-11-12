@@ -173,6 +173,15 @@ async def test_a_revoke_dry_run_lists_the_skipped_with_a_reason(w: World) -> Non
     assert await status_of(w, "jane-a") is AgentStatus.ACTIVE
 
 
+@pytest.mark.parametrize("path_alias", ["ops/jane", "ops%2Fjane"])
+async def test_an_alias_with_a_slash_can_be_offboarded(w: World, path_alias: str) -> None:
+    await w.store.set_agent_owner_alias("jane-c", "ops/jane")
+    url = f"/v1/admin/owners/{path_alias}/offboard"
+    preview = await w.client.post(url, json={"mode": "revoke", "dry_run": True}, headers=ADMIN_H)
+    assert preview.status_code == 200
+    assert (preview.json()["owner"], actions(preview)) == ("ops/jane", {"jane-c": "revoke"})
+
+
 @pytest.mark.parametrize("dry_run", [True, False])
 async def test_a_body_that_mode_and_successor_do_not_fit_is_a_422(w: World, dry_run: bool) -> None:
     for mode, successor in (("retire", None), ("revoke", "heir")):

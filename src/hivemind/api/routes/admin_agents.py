@@ -179,7 +179,7 @@ async def undo_succession(
     return SuccessionOut.from_succession(succession)
 
 
-@router.post("/admin/owners/{alias}/offboard", response_model=OffboardingOut)
+@router.post("/admin/owners/{alias:path}/offboard", response_model=OffboardingOut)
 async def offboard_owner(
     alias: NameParam, payload: OffboardRequest, credential: CredentialDep, app: AppDep
 ) -> OffboardingOut:

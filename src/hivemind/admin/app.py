@@ -65,7 +65,7 @@ _ALLOWED = allowlist(
         ("GET", r"admin/successions"),
         ("POST", r"admin/successions/[^/]+/undo"),
         # Offboarding an owner (ADR 0135).
-        ("POST", r"admin/owners/[^/]+/offboard"),
+        ("POST", r"admin/owners/[^/].*/offboard"),
         # Agent cleanups (ADR 0111).
         ("POST", r"admin/agents/[^/]+/cleanup"),
         ("GET", r"admin/agent-cleanups"),
