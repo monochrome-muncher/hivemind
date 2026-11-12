@@ -3,14 +3,20 @@ to a name, transitively. ``UNION`` (not ``UNION ALL``) drops repeats, so a cycle
 
 from __future__ import annotations
 
-# The agents handing down to ``$1`` as a text array (``'{}'`` when none).
-INHERITED_FROM = """
+
+def inherited_from(successor: str) -> str:
+    """The agents handing down to the SQL expression ``successor``, as a text array (``'{}'`` when
+    none)."""
+    return f"""
 (WITH RECURSIVE inh(name) AS (
-    SELECT s.retired_agent FROM successions s WHERE s.successor = $1
+    SELECT s.retired_agent FROM successions s WHERE s.successor = {successor}
     UNION
     SELECT s.retired_agent FROM successions s JOIN inh ON s.successor = inh.name
- ) SELECT coalesce(array_agg(name ORDER BY name), '{}'::text[]) FROM inh)
+ ) SELECT coalesce(array_agg(name ORDER BY name), '{{}}'::text[]) FROM inh)
 """
+
+
+INHERITED_FROM = inherited_from("$1")
 
 # The same for the key check, correlated to the joined agent row ``a``: one round trip.
 INHERITED_FROM_AGENT_ROW = """

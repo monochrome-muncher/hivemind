@@ -22,7 +22,7 @@ from hivemind.domain.redaction import (
 from hivemind.domain.upstream import UpstreamLink
 from hivemind.domain.validation import canonical_uuid, is_valid_uuid
 from hivemind.ports import SupersedeConflict
-from hivemind.store.inheritance import INHERITED_FROM
+from hivemind.store.inheritance import inherited_from
 from hivemind.store.pgstore.agent_cleanup import CLEANUP_AGENT_LOCK
 from hivemind.store.pgstore.connection import PgConnections
 from hivemind.store.pgstore.fleet_guards import refuse_merged, refuse_stale_home
@@ -98,18 +98,14 @@ SELECT t.id AS to_id, l.from_id
  ORDER BY t.id, l.created_at DESC, l.from_id
 """
 
-FLIP_SUPERSEDED = (
-    """
+FLIP_SUPERSEDED = f"""
 UPDATE entries
 SET state = 'superseded', superseded_by = $1
 WHERE id = ANY($2) AND state = 'active'
   AND (scope <> 'fleet' OR $4 = 'org' OR fleet_id = $3::uuid)
-  AND (scope <> 'self' OR $4 = 'org' OR author = $5 OR author = ANY("""
-    + INHERITED_FROM.replace("$1", "$5")
-    + """::text[]))
+  AND (scope <> 'self' OR $4 = 'org' OR author = $5 OR author = ANY({inherited_from("$5")}::text[]))
 RETURNING id
 """
-)
 # A fleet target flips only for an org successor (the admin's, ADR 0060) or one
 # written into its own fleet: a fleet move between the service's
 # ``may_supersede`` check and this transaction may have changed the target's
