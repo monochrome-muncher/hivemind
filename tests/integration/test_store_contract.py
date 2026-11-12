@@ -5185,6 +5185,65 @@ async def test_move_to_self_refuses_when_a_version_replaced_another_agents_memor
         assert unchanged is not None and unchanged.scope == "fleet"
 
 
+async def _old_and_heir_in_one_fleet(a: Adapter) -> str:
+    red = (await a.store.create_fleet("red")).id
+    await _active(a, "old", red)
+    await _active(a, "heir", red)
+    return red
+
+
+async def test_move_to_self_takes_the_versions_an_heir_inherited(adapter: Adapter) -> None:
+    store = adapter.store
+    red = await _old_and_heir_in_one_fleet(adapter)
+    await _active(adapter, "third", red)
+    v1 = await write(adapter, "old v1", scope="fleet", fleet_id=red, author="old")
+    await store.pin_entry(red, v1.id, "boss", limit=10)
+    await store.retire_agent("old", "heir", "admin:1")
+    v2 = await store.create_entry(
+        draft("heir v2", scope="fleet", fleet_id=red, author="heir", supersedes=(v1.id,)),
+        adapter.vec(0),
+        "m",
+    )
+    await store.retire_agent("heir", "third", "admin:1")
+    head = await store.create_entry(
+        draft("third v3", scope="fleet", fleet_id=red, author="third", supersedes=(v2.id,)),
+        adapter.vec(0),
+        "m",
+    )
+
+    move = await store.move_entry_to_self(head.id)
+
+    assert move.earlier_versions == tuple(sorted((v1.id, v2.id)))
+    assert move.unpinned == (RemovedPin(red, v1.id),)
+    for entry_id in (v1.id, v2.id, head.id):
+        moved = await store.get_entry(entry_id)
+        assert moved is not None and moved.scope == "self"
+
+
+async def test_move_to_self_still_refuses_a_predecessors_line_that_replaced_someone_else(
+    adapter: Adapter,
+) -> None:
+    store = adapter.store
+    red = await _old_and_heir_in_one_fleet(adapter)
+    bobs = await write(adapter, "bob v1", scope="fleet", fleet_id=red, author="bob")
+    olds = await store.create_entry(
+        draft("old v2", scope="fleet", fleet_id=red, author="old", supersedes=(bobs.id,)),
+        adapter.vec(0),
+        "m",
+    )
+    await store.retire_agent("old", "heir", "admin:1")
+    head = await store.create_entry(
+        draft("heir v3", scope="fleet", fleet_id=red, author="heir", supersedes=(olds.id,)),
+        adapter.vec(0),
+        "m",
+    )
+    with pytest.raises(SelfMoveRefused, match=bobs.id):
+        await store.move_entry_to_self(head.id)
+    for entry_id in (bobs.id, olds.id, head.id):
+        unchanged = await store.get_entry(entry_id)
+        assert unchanged is not None and unchanged.scope == "fleet"
+
+
 async def test_a_private_memory_is_superseded_only_by_its_owner_or_an_org_successor(
     adapter: Adapter,
 ) -> None:

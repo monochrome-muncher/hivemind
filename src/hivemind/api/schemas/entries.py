@@ -317,7 +317,7 @@ class RemovedPinOut(BaseModel):
 
 
 class MoveToSelfOut(BaseModel):
-    """The memory, now `self`, the earlier versions by its author that moved with it, and the
+    """The memory, now `self`, the earlier versions by its owners that moved with it, and the
     pins removed from them."""
 
     entry: EntryOut

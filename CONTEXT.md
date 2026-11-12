@@ -85,7 +85,7 @@ Marking an entry no longer valid without replacing it (retraction, or admin corr
 _Avoid_: delete, purge
 
 **Move to self**:
-Narrowing an active fleet entry to `self` scope, by the admin or from the agent portal by the person behind its author, with a reason: it stays active for its author (and successors) and other agents stop seeing it. Earlier versions by the same author go with it, pins on them are removed and ratings stay; an entry that replaced another agent's fleet entry cannot be moved. Only the scope changes (ADR 0145).
+Narrowing an active fleet entry to `self` scope, by the admin or from the agent portal by the person behind its author, with a reason: it stays active for its author (and successors) and other agents stop seeing it. Earlier versions by the same author, or by an agent it inherited from, go with it, pins on them are removed and ratings stay; an entry that replaced another agent's fleet entry cannot be moved. Only the scope changes (ADR 0145).
 _Avoid_: make private, unshare, rescope (say "move to self"); withdrawal (that takes it away from its author too)
 
 **Redaction**:

@@ -14,6 +14,7 @@ from hivemind.domain.self_move import (
     self_move_refusal,
 )
 from hivemind.domain.validation import is_valid_uuid
+from hivemind.store.inheritance import inherited_from
 from hivemind.store.pgstore.agent_cleanup import CLEANUP_AGENT_LOCK
 from hivemind.store.pgstore.connection import PgConnections
 from hivemind.store.pgstore.fleet_guards import refuse_merged
@@ -24,13 +25,16 @@ LOOKUP = "SELECT author, fleet_id FROM entries WHERE id = $1"
 
 LOCK_HEAD = "SELECT state, scope, author, fleet_id FROM entries WHERE id = $1 FOR UPDATE"
 
-# The memory and every fleet version by its author it replaced, through that author's versions only.
+# The author and the agents it inherited from (ADR 0113): the memory's owners.
+OWNERS = f"SELECT $1::text || {inherited_from('$1')}"
+
+# The memory and every fleet version by its owners it replaced, through their versions only.
 OWN_VERSIONS = """
 WITH RECURSIVE own(id) AS (
     SELECT $1::uuid
     UNION
     SELECT e.id FROM entries e JOIN own o ON e.superseded_by = o.id
-     WHERE e.author = $2 AND e.scope = 'fleet'
+     WHERE e.author = ANY($2::text[]) AND e.scope = 'fleet'
 )
 SELECT id FROM own
 """
@@ -38,14 +42,14 @@ SELECT id FROM own
 # Other agents' fleet versions one of those replaced: any refuses the move.
 OTHERS_REPLACED = """
 SELECT id FROM entries
- WHERE superseded_by = ANY($1::uuid[]) AND author <> $2 AND scope = 'fleet'
+ WHERE superseded_by = ANY($1::uuid[]) AND author <> ALL($2::text[]) AND scope = 'fleet'
 """
 
 LOCK_ROWS = "SELECT id FROM entries WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE"
 
 MOVE = (
     "UPDATE entries SET scope = 'self' WHERE id = ANY($1::uuid[]) AND scope = 'fleet' "
-    "AND author = $2 RETURNING id"
+    "AND author = ANY($2::text[]) RETURNING id"
 )
 
 UNPIN = "DELETE FROM pins WHERE entry_id = ANY($1::uuid[]) RETURNING fleet_id, entry_id"
@@ -75,13 +79,14 @@ class SelfMoveStore(PgConnections):
             current_fleet = str(head["fleet_id"]) if head["fleet_id"] is not None else None
             if current_fleet != fleet_id:
                 raise FleetBusy(fleet_id or "", "the memory changed fleet during the move, retry")
-            own = [r["id"] for r in await conn.fetch(OWN_VERSIONS, entry_id, author)]
+            owners = await conn.fetchval(OWNERS, author)
+            own = [r["id"] for r in await conn.fetch(OWN_VERSIONS, entry_id, owners)]
             await conn.execute(LOCK_ROWS, own)
-            others = [str(r["id"]) for r in await conn.fetch(OTHERS_REPLACED, own, author)]
+            others = [str(r["id"]) for r in await conn.fetch(OTHERS_REPLACED, own, owners)]
             refusal = replaced_others_refusal(entry_id, others)
             if refusal is not None:
                 raise refusal
-            moved = {str(r["id"]) for r in await conn.fetch(MOVE, own, author)}
+            moved = {str(r["id"]) for r in await conn.fetch(MOVE, own, owners)}
             unpinned = sorted(
                 RemovedPin(str(r["fleet_id"]), str(r["entry_id"]))
                 for r in await conn.fetch(UNPIN, own)
