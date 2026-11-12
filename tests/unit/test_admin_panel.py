@@ -483,6 +483,102 @@ def test_the_fleet_page_picks_its_members_and_merges() -> None:
     assert got["members"] == ["amy", "zed"]
 
 
+def _since(script: str) -> object:
+    out = subprocess.run(
+        ["node", "--input-type=module", "-e", script, (STATIC_DIR / "since.js").as_uri()],
+        capture_output=True, text=True, check=True,
+    )  # fmt: skip
+    return json.loads(out.stdout)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_since_keeps_the_visit_and_falls_back_when_storage_is_blocked() -> None:
+    """since.js run as it ships: the last visit is read once, a refresh keeps it, a blocked store falls back."""
+    got = _since(r"""
+    const m = await import(process.argv[1])
+    const store = () => { const d = {}; return { getItem: (k) => (k in d ? d[k] : null), setItem: (k, v) => { d[k] = String(v) } } }
+    const blocked = { getItem() { throw new Error("no") }, setItem() { throw new Error("no") } }
+    const t1 = new Date("2026-11-10T10:00:00Z"), t2 = new Date("2026-11-11T12:00:00Z"), t3 = new Date("2026-11-12T09:00:00Z")
+    const local = store(), session = store()
+    const first = m.beginVisit("k", { now: t1, local, session })
+    const unloaded = m.beginVisit("k", { now: t1, local, session }) // nothing stored until commit
+    first.commit()
+    const refresh = m.beginVisit("k", { now: t2, local, session }) // same tab: keeps the first visit's since
+    m.resetVisits()
+    const newTab = m.beginVisit("k", { now: t3, local, session: store() }) // new tab: the stored last visit
+    m.resetVisits()
+    const noStore = m.beginVisit("k", { now: t2, local: blocked, session: blocked })
+    noStore.commit()
+    const again = m.beginVisit("k", { now: t3, local: blocked, session: blocked })
+    console.log(JSON.stringify({
+      first: [first.since, first.fallback], unloaded: unloaded.fallback, refresh: [refresh.since, refresh.fallback],
+      newTab: [newTab.since, newTab.fallback], noStore: noStore.fallback, again: again.since,
+      junk: m.resolveSince("nonsense", t1), future: m.resolveSince("2030-01-01T00:00:00Z", t1).fallback,
+    }))
+    """)
+    assert isinstance(got, dict)
+    assert got["first"] == ["2026-11-03T10:00:00.000Z", True]
+    assert got["unloaded"] is True
+    assert got["refresh"] == ["2026-11-03T10:00:00.000Z", True]
+    assert got["newTab"] == ["2026-11-10T10:00:00.000Z", False]
+    assert got["noStore"] is True
+    assert got["again"] == "2026-11-04T12:00:00.000Z"  # in-memory visit, seven days before t2
+    assert got["junk"] == {"since": "2026-11-03T10:00:00.000Z", "fallback": True}
+    assert got["future"] is True
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_since_counts_and_words_the_line() -> None:
+    got = _since(r"""
+    const m = await import(process.argv[1])
+    const since = "2026-11-11T14:02:00.000Z"
+    const agents = [
+      { name: "a", created_at: "2026-11-11T15:00:00Z", key_locked_at: null },
+      { name: "b", created_at: "2026-11-01T15:00:00Z", key_locked_at: "2026-11-12T00:00:00Z" },
+      { name: "c", created_at: "2026-11-12T15:00:00Z", key_locked_at: null },
+    ]
+    const entries = Array.from({ length: 100 }, (_, i) => ({ id: String(i) }))
+    const flagged = [{ first_flag_at: "2026-11-01T00:00:00Z" }, { first_flag_at: "2026-11-12T00:00:00Z" }]
+    const audit = [
+      ...Array.from({ length: 4 }, () => ({ action: "entry.withdraw" })),
+      { action: "agent.activate" }, { action: "agent.register" }, { action: "agent_key.lock" },
+      ...Array.from({ length: 9 }, () => ({ action: "fleet.rename" })),
+    ]
+    const parts = m.adminParts({ since, agents, entries, flagged, audit })
+    const failed = m.adminParts({ since, agents, entries: null, flagged: undefined, audit: null })
+    const none = m.adminParts({ since, agents: [], entries: [], flagged: [], audit: [] })
+    const visit = { since, fallback: false }
+    console.log(JSON.stringify({
+      parts: parts.map((p) => p.text), failed: failed.map((p) => p.text), none,
+      head: m.sinceHead(visit, parts, "UTC"), nothing: m.sinceHead(visit, none, "UTC"),
+      fallback: m.sinceHead({ since, fallback: true }, parts), label: m.sinceLabel(since, "UTC"),
+      one: m.adminParts({ since, entries: [{}] }).map((p) => p.text),
+      pins: m.portalParts({ since, memories: 3, pins: [{ pinned_at: "2026-11-12T00:00:00Z" }, { pinned_at: "2026-01-01T00:00:00Z" }] }).map((p) => p.text),
+      full: m.portalParts({ since, memories: 100, memoriesFull: true }).map((p) => p.text),
+    }))
+    """)
+    assert isinstance(got, dict)
+    assert got["parts"] == [
+        "100+ new memories", "2 new agents", "1 key locked", "1 new flag", "4 withdrawals", "9 other admin actions",
+    ]  # fmt: skip
+    assert got["failed"] == ["2 new agents", "1 key locked"]
+    assert got["none"] == []
+    assert got["head"] == "Since Wed 11 Nov, 14:02: "
+    assert got["nothing"] == "Nothing new since Wed 11 Nov, 14:02."
+    assert got["fallback"] == "In the last 7 days: "
+    assert got["label"] == "Wed 11 Nov, 14:02"
+    assert got["one"] == ["1 new memory"]
+    assert got["pins"] == ["3 new memories", "1 new pin"]
+    assert got["full"] == ["100+ new memories"]
+
+
+def test_the_overview_reads_each_part_on_its_own_and_stores_the_visit_once_loaded() -> None:
+    js = (STATIC_DIR / "overview.js").read_text()
+    assert "hivemind.admin.lastSeen" in js
+    assert js.count("visit.commit()") == 1 and js.index("visit.commit()") > js.index("fill(root")
+    assert js.count("optional(") >= 4  # entries, flagged and audit reads each optional
+
+
 def test_the_shared_modules_import_nothing_admin_specific() -> None:
     """ADR 0091: these can be served to another front end as they are."""
     shared = {
@@ -494,6 +590,7 @@ def test_the_shared_modules_import_nothing_admin_specific() -> None:
         "csv.js",
         "explain.js",
         "memfilters.js",
+        "since.js",
     }
     for name in shared:
         js = (STATIC_DIR / name).read_text()

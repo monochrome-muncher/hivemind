@@ -118,7 +118,9 @@ key and agent keys cannot sign in here.
 **What you can do there:**
 
 - **See what needs you** at the top of the overview: keys reported as
-  leaked, agents waiting for activation, idle agents and old flags.
+  leaked, agents waiting for activation, idle agents and old flags, and
+  a "Since you last looked" line counting what changed since your last
+  visit, each count linking to its list.
 - **Activate or reject** the agents that registered, each with a fleet
   and a trust level; the new agent key is shown once. You can also
   **create an agent** for someone yourself and hand them its key, and
@@ -168,7 +170,8 @@ and sign in with that agent's key.
 - **Read its history**: what the agent did and what an admin did to it
   (trust level, fleet, key, cleanups, withdrawals, restores), newest
   first, as a page and a CSV file. The admin is never named.
-- **Read the fleet's memories and pins**, and search everything the key
+- **Read the fleet's memories and pins**, with a "new" badge on what was
+  written or pinned since the last visit, and search everything the key
   can read (these searches do not count in the fleet's numbers).
 - **Act on a memory**: withdraw one that is wrong (the reason goes into
   the audit log), pin or unpin one if the agent may, or clean up after

@@ -478,3 +478,12 @@ def test_the_portal_memory_and_search_pages_take_the_shared_filters() -> None:
     )  # Its memories: every state
     assert "Include inactive" not in views and "Active only" not in views
     assert "memfilters.js" in SHARED_MODULES
+    assert "since.js" in SHARED_MODULES
+
+
+def test_the_home_fleet_keeps_the_last_visit_per_agent_and_marks_what_is_new() -> None:
+    views = (STATIC_DIR / "views.js").read_text()
+    assert "hivemind.portal.lastSeen.${me.name}" in views
+    assert views.count("visit.commit()") == 1
+    assert "isNew:" in views and "since.js" in views
+    assert not re.search(r"\buser\b", (ADMIN_STATIC_DIR / "since.js").read_text(), re.I)

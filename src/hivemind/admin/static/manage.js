@@ -427,6 +427,14 @@ export function auditRow(nameOf) {
   return row;
 }
 
+/** A datetime-local value (local time, to the minute) for an ISO time in a hash; empty when it is not one. */
+function localTimeValue(iso) {
+  const d = new Date(iso || "");
+  if (!iso || Number.isNaN(d.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 export async function viewAudit(root) {
   await loadAgentsAndFleets().catch(() => undefined); // for fleet names only
   // A merged fleet is not in state.fleets, but audit rows still name it.
@@ -442,7 +450,7 @@ export async function viewAudit(root) {
   const target = h("input", { type: "search", placeholder: "Target (exact), e.g. an agent name or entry id", value: preset.get("target") || "" });
   const action = h("select", {}, h("option", { value: "", text: "All actions" }), AUDIT_ACTIONS.map((a) => h("option", { value: a, text: a })));
   if (AUDIT_ACTIONS.includes(preset.get("action"))) action.value = preset.get("action");
-  const since = h("input", { type: "datetime-local", title: "Since (local time)" });
+  const since = h("input", { type: "datetime-local", title: "Since (local time)", value: localTimeValue(preset.get("since")) });
   const apply = h("button", { type: "submit", class: "btn", text: "Apply" });
   const form = h("form", { class: "filters" }, subject, actor, target, action, since, apply);
   const tbody = h("tbody");
