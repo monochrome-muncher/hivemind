@@ -11,6 +11,7 @@ import { openEntry } from "./drawer.js";
 import { PIN_HEADERS, cursorPages, entryTable, feedbackTable, flaggedTable, pagedTable, pinRow } from "./lists.js";
 import { column } from "./csv.js";
 import { filterFields, memoryFilterFields } from "./memfilters.js";
+import { PORTAL_LIMIT, beginVisit, portalParts, sinceHead } from "./since.js";
 
 const select = (label, values, selected, anyText) => h("select", { "aria-label": label },
   h("option", { value: "", text: anyText }),
@@ -302,6 +303,10 @@ export async function viewHistory(root) {
 
 // --- home fleet ---------------------------------------------------------------------------
 
+const storage = (name) => { try { return window[name]; } catch { return null; } };
+const optionalRead = async (fn) => { try { return (await guarded(fn)) || null; } catch { return null; } };
+const isAfter = (iso, since) => Boolean(iso) && new Date(iso).getTime() >= new Date(since).getTime();
+
 export async function viewFleet(root) {
   const me = state.me;
   if (!me.home_fleet_id) {
@@ -309,10 +314,25 @@ export async function viewFleet(root) {
       card(null, h("p", { class: "muted", text: `${me.name} has no home fleet yet. The admin sets one when it activates the agent.` })));
     return;
   }
+  // Last visit per agent: Refresh keeps this visit's `since`, a later visit starts from the one stored here.
+  const visit = beginVisit(`hivemind.portal.lastSeen.${me.name}`, { local: storage("localStorage"), session: storage("sessionStorage") });
+  const { since } = visit;
+  const sinceLine = h("p", { class: "callout callout-info small since-line", hidden: true });
+  let pinsNow = null; // the pin list as last read
+  const paintSince = async () => {
+    // One read of what was written to the fleet since, so the count is exact up to a full page.
+    const written = await optionalRead(() => api("GET", "portal/entries", {
+      query: { fleet_id: me.home_fleet_id, scope: "fleet", created_from: since, limit: PORTAL_LIMIT },
+    }));
+    const parts = portalParts({ since, memories: written ? written.length : null, memoriesFull: Boolean(written) && written.length >= PORTAL_LIMIT, pins: pinsNow });
+    sinceLine.replaceChildren(sinceHead(visit, parts), parts.map((p) => p.text).join(", "), parts.length ? "." : "");
+    sinceLine.hidden = false;
+  };
   const pinsCard = h("div", {});
   const loadPins = async () => {
     const pins = await guarded(() => api("GET", "pins"));
     if (!pins) return;
+    pinsNow = pins.pins;
     const open = (id) => openEntry(id, () => { loadPins(); memories.load(true); });
     // One call, then reload the list; a refusal (the caps) shows as a toast in the service's words.
     const act = (label, method, done) => (pin) => h("button", {
@@ -338,7 +358,7 @@ export async function viewFleet(root) {
     const mayPin = canPin();
     pinsCard.replaceChildren(card(`Pinned (${pins.pins.length})`,
       table(mayPin ? [...PIN_HEADERS, ""] : PIN_HEADERS,
-        pins.pins.map((p) => pinRow(p, { onOpen: open, extra: mayPin ? actions : null })),
+        pins.pins.map((p) => pinRow(p, { onOpen: open, extra: mayPin ? actions : null, isNew: (pin) => isAfter(pin.pinned_at, since) })),
         "Nothing is pinned in this fleet.", { className: "entries" }),
       { flush: true }),
       h("p", { class: "muted small", text: mayPin ? `${PIN_REMINDER} Open a memory below to pin it.` : PIN_REMINDER }));
@@ -349,15 +369,19 @@ export async function viewFleet(root) {
     })),
     onOpen: (id) => openEntry(id, () => memories.load(true)),
     fleetName,
+    isNew: (item) => isAfter(item.created_at, since),
     emptyText: "Nobody has written to this fleet yet.",
     csvName: `${fleetName(me.home_fleet_id)}-fleet-memories`,
   });
 
   fill(root,
     pageHead(fleetName(me.home_fleet_id), "The active memories of its home fleet, newest first, and what the fleet pinned for every member to read.", refreshButton()),
+    sinceLine,
     pinsCard,
     h("section", { class: "agent-sec" }, h("div", { class: "section-head" }, h("h2", { text: "Fleet memories" })), memories.el));
   await Promise.all([loadPins().catch((err) => toast(err.message, true)), memories.load(true)]);
+  await paintSince();
+  visit.commit();
 }
 
 // --- search -------------------------------------------------------------------------------

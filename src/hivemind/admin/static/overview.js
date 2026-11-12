@@ -3,13 +3,14 @@
 
 import {
   api, h, state, loadAgentsAndFleets, fetchMetrics, fetchActivity, optional, pageHead, refreshButton, windowSelector,
-  card, stat, unavailable, fmtNum, fmtPct, fmtAgo, fmtTime, link, memoriesHref, feedbackHref, hooks, miniBar, fleetName, agentHref, fill,
+  card, stat, unavailable, fmtNum, fmtPct, fmtAgo, fmtTime, link, memoriesHref, feedbackHref, viewHref, auditHref, hooks, miniBar, fleetName, agentHref, fill,
 } from "./core.js";
 import { needsYouItems } from "./needs.js";
 import { pendingQueue } from "./manage.js";
 import { stackedBars } from "./charts.js";
 import { openEntry } from "./drawer.js";
 import { entryRow } from "./lists.js";
+import { ADMIN_LIMITS, FLAGGED_PAGE, adminParts, beginVisit, sinceHead } from "./since.js";
 
 const WRITES = [{ key: "writes", label: "Writes", cls: "s-writes" }];
 const VERDICTS = [
@@ -72,7 +73,48 @@ function needsYou(agents, metrics) {
     }, stat(label, fmtNum(count), { warn: true, hint })))));
 }
 
+const VISIT_KEY = "hivemind.admin.lastSeen";
+const storage = (name) => { try { return window[name]; } catch { return null; } };
+
+// Where each part of the "since" line leads. A day, not a moment, for the memory filter (it takes whole UTC days).
+const PART_HREF = (id, since) => ({
+  memories: () => memoriesHref({ state: "all", created_from: since.slice(0, 10) }),
+  agents: () => viewHref("agents"),
+  locked: () => viewHref("agents", { activity: "locked" }),
+  flags: () => viewHref("health"),
+  withdrawals: () => auditHref({ action: "entry.withdraw", since }),
+  actions: () => auditHref({ since }),
+})[id]();
+
+/** The flagged list (oldest flag first, 100 a page), up to ADMIN_LIMITS.flagged rows. */
+async function readFlagged() {
+  const rows = [];
+  while (rows.length < ADMIN_LIMITS.flagged) {
+    const page = await api("GET", "admin/flagged", { query: { limit: FLAGGED_PAGE, offset: rows.length } });
+    rows.push(...page);
+    if (page.length < FLAGGED_PAGE) break;
+  }
+  return rows;
+}
+
+/** What changed since the last visit: one line, each part linking to its list. A read that fails leaves its part out. */
+async function sinceCard(visit) {
+  const { since } = visit;
+  const [entries, flagged, audit] = await Promise.all([
+    optional(() => api("GET", "admin/entries", { query: { created_from: since, include_inactive: "true", limit: ADMIN_LIMITS.entries } })),
+    optional(readFlagged),
+    optional(() => api("GET", "admin/audit-log", { query: { since, limit: ADMIN_LIMITS.audit } })),
+  ]);
+  const parts = adminParts({ since, agents: state.agents, entries, flagged, audit });
+  const hint = "An agent's own withdrawals through its memory tools are not in the audit log: the withdrawal count covers the admin, the portal and successors.";
+  return h("p", { class: "callout callout-info since-line", "data-since": since },
+    sinceHead(visit, parts),
+    parts.flatMap((p, i) => [i ? ", " : null, link(p.text, PART_HREF(p.id, since), p.id === "withdrawals" ? { title: hint } : {})]),
+    parts.length ? "." : null);
+}
+
 export async function viewOverview(root) {
+  const visit = beginVisit(VISIT_KEY, { local: storage("localStorage"), session: storage("sessionStorage") });
   const [, metrics, activity, entries, audit] = await Promise.all([
     loadAgentsAndFleets(),
     fetchMetrics(),
@@ -89,10 +131,12 @@ export async function viewOverview(root) {
     ? pendingQueue(() => hooks.refresh())
     : null;
 
+  const sinceLine = await sinceCard(visit);
   fill(root, 
     pageHead("Overview", "Registrations waiting on you, and how the agents are using the pool.",
       windowSelector(() => hooks.refresh()), refreshButton()),
     needsYou(state.agents, metrics),
+    sinceLine,
     queue,
     h("div", { class: "stats" },
       stat("Active agents", fmtNum(active)),
@@ -104,4 +148,5 @@ export async function viewOverview(root) {
     activityCard(activity),
     h("div", { class: "grid-2" }, topAgents(activity), recentActions(audit)),
     newest(entries));
+  visit.commit();
 }
