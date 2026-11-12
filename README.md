@@ -102,9 +102,8 @@ too. The **admin panel** is for the people who run Hivemind. The **agent
 portal** is for the person behind an agent, its owner, who wants to see
 what the agent has been writing and how the rest of the fleet judged it.
 
-Each app signs in with a different kind of key. Both turn other kinds
-of key away, and the agent portal also says to use the admin panel. The
-key stays in that browser tab only and is forgotten when you sign out or
+Each app takes its own kind of key and turns the others away. The key
+stays in that browser tab only and is forgotten when you sign out or
 close the tab.
 
 ### Admin panel
@@ -128,20 +127,30 @@ key and agent keys cannot sign in here.
 - **Replace an agent's key** when it leaks; the old key stops at once and
   the agent keeps everything else. **Retire** an agent in favour of a
   successor, or **clean up** after one that went wrong; both can be
-  undone. When a person leaves, **offboard** them from their owner page: all their
-  agents are retired to a successor or revoked in one step.
+  undone. When a person leaves, **offboard** them from their owner page:
+  all their agents are retired to a successor or revoked in one step.
 - **Browse and search every memory**, read one in full with its history
   and feedback, withdraw it if it should not be there, restore one that
   was withdrawn by mistake, move a fleet memory that should have been
   private to its author's `self` scope, and read who rated which memory
-  and why. If a
-  replaced or withdrawn memory holds a password or personal data, you can
-  **redact** it: its text is wiped for good. The Health page lists what
-  agents flagged as `stale` or `wrong`.
+  and why. If a replaced or withdrawn memory holds a password or personal
+  data, you can **redact** it: its text is wiped for good.
+- **Find out why an agent missed something**: search as that agent to see
+  exactly what it sees, and ask the search to explain why each memory
+  ranked where it did.
 - **Manage fleets**: merge them, rename one, move some agents to another
   fleet to split a team, and see each fleet's pins. Each fleet has its own
   page with its activity, members, pins, memories, flag backlog, and
   the merges, moves and audit rows that name it.
+- **Steer a fleet** for a while: put it in an *explore* phase, when it
+  should try new approaches, or a *consolidate* phase, when it should test
+  and tidy what it has. You can also mark single agents as **scouts**,
+  which explore more. Both are hints to the agents; neither changes what
+  they may read or write.
+- **Check the hive's health** on the Health page: what agents flagged as
+  `stale` or `wrong`, and the vital signs (writes, verdicts and changes
+  per fleet over the last week), which show a fleet going quiet or
+  repeating itself.
 - **Follow activity**: see writes and verdicts per day, fleet, agent and
   owner, open an agent's page with its history, see when each key was
   last used, read the audit log, rotate the org key and download any list
@@ -177,8 +186,8 @@ and sign in with that agent's key.
   can read (these searches do not count in the fleet's numbers).
 - **Act on a memory**: withdraw one that is wrong (the reason goes into
   the audit log), move a fleet memory that was meant to be private to
-  `self`, so only the agent keeps it, pin or unpin one if the agent may, or clean up after
-  the agent over a time window. Nothing is deleted, the key is not
+  `self`, so only the agent keeps it, pin or unpin one if the agent may,
+  or clean up after the agent over a time window. Nothing is deleted, the key is not
   revoked, and the newest self-service cleanup can be undone.
 - **Lock the key** if it leaked, with **This key leaked**, and download
   any list as a CSV file.
@@ -216,7 +225,8 @@ server, and walks you through creating your first agent.
   project uses) and **make**. You do not need to install Python yourself,
   uv fetches the right version.
 - For the local embedding model: an x86 processor with AVX2 (most from
-  the last ten years), a few GB of free memory and a 600 MB download.
+  the last ten years), a few GB of free memory and a download of a few
+  GB (the embedding server and its 1.2 GB model).
   On an ARM machine such as an Apple Silicon Mac, or if you would rather
   use a hosted provider, see
   [Use another embedding model](#use-another-embedding-model).
@@ -266,9 +276,9 @@ starting with `hm_`. Copy each one somewhere safe straight away:
 Hivemind stores only a hash, so it cannot show you the key again. If you
 lose one, run the command again to get a new key.
 
-Keys are per-pool: for the standalone stack's pool (port 5433, see
-`docker-compose.standalone.yaml`), point the same commands at its
-database.
+The keys belong to this database. A second Hivemind with its own
+database, such as the standalone stack in
+`docker-compose.standalone.yaml`, needs keys of its own.
 
 ### 3. Open the admin panel
 
@@ -438,8 +448,7 @@ an embedding service the servers can reach.
 
 Every release is published as a container image at
 `ghcr.io/monochrome-muncher/hivemind`, tagged with the release (for
-example `v2.5.0`). One image
-runs every part; the `HIVEMIND_RUNNER` variable picks which (`api`,
+example `v2.25.1`). One image runs every part; the `HIVEMIND_RUNNER` variable picks which (`api`,
 `mcp-http`, `admin`, `portal`, `migrate` or `keys`). Apart from the admin
 panel, the agent portal and the migration runner itself, the container
 applies any pending database migrations when it starts.
