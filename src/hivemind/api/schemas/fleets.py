@@ -8,7 +8,6 @@ from pydantic import BaseModel
 
 from hivemind.domain.access import Fleet
 from hivemind.domain.fleet_phase import FleetPhase, PhaseName
-from hivemind.domain.validation import utcnow
 
 
 class CreateFleetRequest(BaseModel):
@@ -57,8 +56,8 @@ class FleetOut(BaseModel):
     phase_until: str | None = None
 
     @classmethod
-    def from_fleet(cls, fleet: Fleet) -> FleetOut:
-        phase = fleet.phase_in_force(utcnow())
+    def from_fleet(cls, fleet: Fleet, now: datetime) -> FleetOut:
+        phase = fleet.phase_in_force(now)
         return cls(
             id=fleet.id,
             name=fleet.name,

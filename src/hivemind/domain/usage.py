@@ -98,9 +98,22 @@ class RivalLifetime:
 
 
 @dataclass(frozen=True, slots=True)
+class Breathing:
+    """Activity in the last 7 days (ADR 0142): entries written, verdicts given, entries superseded
+    and entries withdrawn."""
+
+    writes: int
+    verdicts: int
+    supersessions: int
+    withdrawals: int
+
+
+@dataclass(frozen=True, slots=True)
 class FleetHealthUsage:
     """One fleet's health slice (``by_fleet`` lists every fleet)."""
 
+    active_entries: int
+    breathing_7d: Breathing
     sourced_share: Share
     flagged_backlog_14d: int
     orphaned_flagged: int
@@ -214,6 +227,7 @@ class HealthUsage:
     grounding_share: Share
     top3_agent_label_write_share: Top3Labels
     top3_agent_label_verdict_share: Top3Labels
+    breathing_7d: Breathing
     by_fleet: dict[str, FleetHealthUsage]
     role_activity_30d: dict[str, RoleActivity]
 

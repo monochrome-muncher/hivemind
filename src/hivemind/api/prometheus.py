@@ -308,6 +308,12 @@ def _health_families(health: HealthUsage) -> Iterator[GaugeMetricFamily]:
         ["tag"],
         health.gap_tag_counts,
     )
+    yield _gauge(
+        p + "breathing_7d",
+        "Writes, verdicts, supersessions and withdrawals of the last 7 days",
+        ["motion"],
+        asdict(health.breathing_7d),
+    )
     by_fleet = health.by_fleet
     sourced = GaugeMetricFamily(
         p + "fleet_sourced_ratio", "Sourced share per fleet (entries' fleet_id)", labels=["fleet"]
@@ -330,6 +336,21 @@ def _health_families(health: HealthUsage) -> Iterator[GaugeMetricFamily]:
             ["fleet"],
             {f: getattr(r, name) for f, r in by_fleet.items()},
         )
+    yield _gauge(
+        p + "fleet_active_entries",
+        "Active entries per fleet (entries' fleet_id)",
+        ["fleet"],
+        {f: r.active_entries for f, r in by_fleet.items()},
+    )
+    fleet_breathing = GaugeMetricFamily(
+        p + "fleet_breathing_7d",
+        "Writes, verdicts, supersessions and withdrawals of the last 7 days per fleet",
+        labels=["fleet", "motion"],
+    )
+    for fleet, row in by_fleet.items():
+        for motion, count in asdict(row.breathing_7d).items():
+            fleet_breathing.add_metric([fleet, motion], float(count))
+    yield fleet_breathing
     gap = GaugeMetricFamily(
         p + "fleet_gap_entries",
         "Active gap-tagged entries per fleet and tag",

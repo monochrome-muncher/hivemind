@@ -329,7 +329,7 @@ export function fleetPhaseCard(fleet, onDone) {
       h("div", { class: "row" },
         select, days, h("span", { class: "muted", text: "days" }),
         h("button", { type: "button", class: "btn btn-primary", text: "Set", onclick: onSet }), clear),
-      h("p", { class: "muted small", text: "Agents in this fleet see a one-line hint in hive_whoami and hive_pinned until the phase ends. Ranking is unchanged." })));
+      h("p", { class: "muted small", text: "Agents in this fleet see a one-line hint in hive_whoami and hive_pinned until the phase ends. Ranking is unchanged. The end date is in UTC." })));
 }
 
 const SCOUT_NOTE = "A scout gets a one-line hint in hive_whoami to explore: try less-tested rivals, use explore search, re-check old entries and write what it tried. It reads and writes exactly as before.";

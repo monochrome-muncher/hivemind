@@ -798,7 +798,8 @@ def test_service_monitors_scrape_the_api_and_the_mcp_runner() -> None:
     # Its own opt-in tree (the Operator's CRDs may not exist).
     assert "monitoring" not in _load(K8S / "optional" / "kustomization.yaml")["resources"]
     assert _load(K8S / "optional" / "monitoring" / "kustomization.yaml")["resources"] == [
-        "servicemonitor.yaml"
+        "servicemonitor.yaml",
+        "alerts.yaml",
     ]
     path = K8S / "optional" / "monitoring" / "servicemonitor.yaml"
     monitors = {d["metadata"]["name"]: d for d in yaml.safe_load_all(path.read_text())}
@@ -817,6 +818,31 @@ def test_service_monitors_scrape_the_api_and_the_mcp_runner() -> None:
         (endpoint,) = monitor["spec"]["endpoints"]
         assert endpoint["port"] in [p["name"] for p in service["spec"]["ports"]]
         assert endpoint["path"] == "/metrics"
+
+
+def test_vital_signs_alerts_are_info_hints_on_series_the_api_serves() -> None:
+    rule = _load(K8S / "optional" / "monitoring" / "alerts.yaml")
+    assert rule["kind"] == "PrometheusRule" and rule["metadata"]["name"] == "hivemind-vital-signs"
+    rules = {r["alert"]: r for group in rule["spec"]["groups"] for r in group["rules"]}
+    assert set(rules) == {
+        "HivemindFleetQuiet",
+        "HivemindEchoRising",
+        "HivemindRivalsLingering",
+        "HivemindFloatingGapGrowing",
+    }
+    assert {r["labels"]["severity"] for r in rules.values()} == {"info"}
+    assert all(r["annotations"]["description"] for r in rules.values())
+    exposed = (ROOT / "src" / "hivemind" / "api" / "prometheus.py").read_text()
+    for r in rules.values():
+        for series in re.findall(r"hivemind_health_\w+", r["expr"]):
+            assert series.removeprefix("hivemind_health_") in exposed, series
+
+
+def test_vital_signs_alert_thresholds_match_the_admin_panel() -> None:
+    rules = (K8S / "optional" / "monitoring" / "alerts.yaml").read_text()
+    js = (ROOT / "src" / "hivemind" / "admin" / "static" / "vitals.js").read_text()
+    assert "hivemind_health_echo_ratio) > 0.2" in rules and "echoRate: 0.2," in js
+    assert "> 60 * 86400" in rules and "alternativeAgeDays: 60," in js
 
 
 def test_grafana_dashboard_ships_with_the_monitoring_tree() -> None:

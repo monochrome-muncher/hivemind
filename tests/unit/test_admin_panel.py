@@ -706,6 +706,73 @@ def test_the_needs_you_row_lists_only_what_is_above_zero_locked_keys_first() -> 
     ]
 
 
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_vital_signs_bands_turn_to_watch_at_the_thresholds() -> None:
+    """ADR 0142: vitals.js run as it ships, on a calm hive and then on a troubled one."""
+    script = r"""
+    const { vitalSigns, VITAL_THRESHOLDS } = await import(process.argv[1])
+    const day = 86400
+    const share = (count, total) => ({ count, total, share: total ? count / total : null })
+    const rival = (count, days) => ({ count, median_age_seconds: count ? days * day : null })
+    const breathing = (writes, verdicts) => ({ writes, verdicts, supersessions: 0, withdrawals: 0 })
+    const calm = () => ({
+      entries: { active: 10 },
+      health: {
+        echo_rate: share(1, 10), topic_dispersion: [{ tag: "db", change: 0.05 }],
+        rival_lifetime: { alternative: rival(2, 60), conflict: rival(0), contested: rival(1, 30) },
+        grounding_share: share(4, 10), flagged_backlog_14d: 0,
+        by_fleet: { b: { active_entries: 3, breathing_7d: breathing(1, 0) }, a: { active_entries: 0, breathing_7d: breathing(0, 0) } },
+      },
+    })
+    const states = (m) => [m.collapsing, m.scattering, m.breathing].map((b) => b.state)
+    const troubled = calm()
+    troubled.health.echo_rate = share(3, 10)
+    troubled.health.topic_dispersion = [{ tag: "db", change: 0.06 }]
+    troubled.health.rival_lifetime = { alternative: rival(1, 61), conflict: rival(1, 31), contested: rival(1, 31) }
+    troubled.health.grounding_share = share(3, 10)
+    troubled.health.flagged_backlog_14d = 1
+    troubled.health.by_fleet.b.breathing_7d = breathing(0, 0)
+    const noAlternatives = calm()
+    noAlternatives.health.rival_lifetime.alternative = rival(0)
+    const emptyPool = calm()
+    emptyPool.entries.active = 0
+    emptyPool.health.rival_lifetime.alternative = rival(0)
+    const unknown = calm()
+    unknown.health.echo_rate = share(0, 0)
+    unknown.health.grounding_share = share(0, 0)
+    const stricter = vitalSigns(calm(), { ...VITAL_THRESHOLDS, echoRate: 0.05 })
+    console.log(JSON.stringify({
+      calm: states(vitalSigns(calm())),
+      troubled: states(vitalSigns(troubled)),
+      troubledSignals: [vitalSigns(troubled).collapsing, vitalSigns(troubled).scattering].map((b) => b.signals.map((s) => s.state)),
+      noAlternatives: vitalSigns(noAlternatives).collapsing.signals[2].state,
+      emptyPool: vitalSigns(emptyPool).collapsing.signals[2].state,
+      unknown: [vitalSigns(unknown).collapsing.signals[0], vitalSigns(unknown).collapsing.signals[3]],
+      stricter: stricter.collapsing.signals[0].state,
+      fleets: vitalSigns(calm()).breathing.fleets.map((f) => [f.name, f.state]),
+    }))
+    """
+    out = subprocess.run(
+        ["node", "--input-type=module", "-e", script, (STATIC_DIR / "vitals.js").as_uri()],
+        capture_output=True, text=True, check=True,
+    )  # fmt: skip
+    got = json.loads(out.stdout)
+    # Exactly at a threshold is still steady; the quiet fleet is the one with entries and no breath.
+    assert got["calm"] == ["Steady", "Steady", "Steady"]
+    assert got["troubled"] == ["Watch", "Watch", "Watch"]
+    assert got["troubledSignals"] == [["Watch"] * 2 + ["Steady"] + ["Watch"], ["Watch"] * 4]
+    assert got["noAlternatives"] == "Watch" and got["emptyPool"] == "Steady"
+    assert [s["value"] for s in got["unknown"]] == ["\u2014", "\u2014"]
+    assert [s["state"] for s in got["unknown"]] == ["Steady", "Steady"]
+    assert got["stricter"] == "Watch"
+    assert got["fleets"] == [["a", "Steady"], ["b", "Steady"]]
+
+
+def test_the_health_page_shows_the_vital_signs_above_the_fleet_health_card() -> None:
+    health = (STATIC_DIR / "health.js").read_text()
+    assert health.index("vitalSignsCard(metrics)") < health.index("healthCard(metrics.health)")
+
+
 def test_the_agents_page_and_health_page_read_the_filters_the_needs_row_links_to() -> None:
     manage = (STATIC_DIR / "manage.js").read_text()
     assert 'params.get("status")' in manage and 'params.get("activity")' in manage

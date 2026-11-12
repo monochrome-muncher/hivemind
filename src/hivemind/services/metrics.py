@@ -56,6 +56,10 @@ _HEALTH_FIELDS = (
     "gap_anomaly",
     "gap_open_question",
     "gap_dead_end",
+    "writes_7d",
+    "verdicts_7d",
+    "supersessions_7d",
+    "withdrawals_7d",
 )
 
 
@@ -336,6 +340,12 @@ class MetricsService:
                 **asdict(_share(health.top3_label_verdicts_30d, health.verdicts_30d)),
                 labels=health.verdict_labels_30d,
             ),
+            breathing_7d=usage.Breathing(
+                writes=total["writes_7d"],
+                verdicts=total["verdicts_7d"],
+                supersessions=total["supersessions_7d"],
+                withdrawals=total["withdrawals_7d"],
+            ),
             by_fleet={
                 fleet.name: self._fleet_health(by_id.get(fleet.id) or HealthCounts(fleet.id))
                 for fleet in fleets
@@ -349,6 +359,13 @@ class MetricsService:
     @staticmethod
     def _fleet_health(row: HealthCounts) -> usage.FleetHealthUsage:
         return usage.FleetHealthUsage(
+            active_entries=row.active_entries,
+            breathing_7d=usage.Breathing(
+                writes=row.writes_7d,
+                verdicts=row.verdicts_7d,
+                supersessions=row.supersessions_7d,
+                withdrawals=row.withdrawals_7d,
+            ),
             sourced_share=_share(row.sourced, row.sourceable),
             flagged_backlog_14d=row.flagged_backlog_14d,
             orphaned_flagged=row.orphaned_flagged,

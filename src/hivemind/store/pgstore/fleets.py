@@ -83,7 +83,7 @@ class FleetStore(PgConnections):
         assert renamed is not None  # the row is locked above
         return before, row_to_fleet(renamed)
 
-    async def set_fleet_phase(self, fleet_id: str, phase: FleetPhase | None) -> Fleet:
+    async def set_fleet_phase(self, fleet_id: str, phase: FleetPhase | None) -> tuple[Fleet, Fleet]:
         if not is_valid_uuid(fleet_id):
             raise UnknownFleet(f"unknown fleet: {fleet_id}")
         async with self._transaction() as conn:
@@ -102,7 +102,7 @@ class FleetStore(PgConnections):
                 phase.until if phase is not None else None,
             )
         assert updated is not None  # the row is locked above
-        return row_to_fleet(updated)
+        return row_to_fleet(row), row_to_fleet(updated)
 
     async def fleet_facts(self, fleet_id: str) -> FleetFacts:
         if not is_valid_uuid(fleet_id):

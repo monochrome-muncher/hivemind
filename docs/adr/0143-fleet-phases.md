@@ -20,7 +20,7 @@ the fleet needs now, and a skill that says both leaves each agent to guess.
 1. **An admin sets a fleet's phase**: `explore` or `consolidate`, until a date.
    `PUT /v1/admin/fleets/{id}/phase` takes `{phase, until}` and `DELETE` on the same path ends it. Both
    answer the fleet, whose `phase` and `phase_until` are null when no phase is in force.
-2. **`until` must be in the future and at most 30 days ahead**, else 422. A phase is a nudge for a
+2. **`until` must be in the future and at most 30 days ahead**, else 422. One minute of grace on the upper bound covers a caller whose clock runs ahead. A phase is a nudge for a
    while, not a standing setting; the admin renews it when it ends.
 3. **Setting replaces any current phase; clearing sets both columns to null.** A merged fleet refuses
    both with 409 `fleet_merged`, like its other admin actions. The admin key only.
@@ -33,7 +33,8 @@ the fleet needs now, and a skill that says both leaves each agent to guess.
    `domain/fleet_phase.py`, with the end date filled in as `YYYY-MM-DD`.
 6. **Ranking and search are not touched.** The phase changes no score, filter, limit or default.
 7. **Every set and clear is audited** as `fleet.phase_set` and `fleet.phase_clear`, with the phase and
-   `until` in the detail (for a clear, the phase it ended).
+   `until` in the detail (for a clear, the phase it ended). Clearing a fleet with no phase in force
+   answers 200 and writes no row.
 8. **Migration `0033`** adds nullable `fleets.phase` and `fleets.phase_until`, a CHECK on the phase
    values, a CHECK that both are null or both are set, and the two audit actions. It is expand-only.
 9. **The usage report lists the phase per fleet** (`fleets.phase_by_fleet`) and `GET /metrics` serves
@@ -56,6 +57,8 @@ the fleet needs now, and a skill that says both leaves each agent to guess.
   against the always-on budget; an agent only reads them while a phase is in force.
 - **`hive_pinned` shows the hint for the caller's own fleet only.** The text says "your fleet", and
   another fleet's phase is not for the caller to read.
+- **A merge ends the source fleet's phase.** The merged fleet keeps nothing of it, so undoing the
+  merge does not bring back a stale hint. The target keeps its own phase.
 - **Rolling back migration `0033`** drops both columns, so every phase in force ends, and deletes the
   two audit actions' rows (guarded by `--discard-audit-rows`, ADR 0119).
 - **The 30-day cap means a long phase is renewed.** The admin sets it again; the audit log shows each

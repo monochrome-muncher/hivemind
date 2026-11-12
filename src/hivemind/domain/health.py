@@ -29,14 +29,18 @@ def owner_key(alias: str | None) -> str | None:
 
 @dataclass(frozen=True, slots=True)
 class HealthCounts:
-    """Additive counters over one fleet's active entries (``fleet_id`` ``None``: no fleet); sum
-    the rows for fleet-wide numbers.
+    """Additive counters per fleet (``fleet_id`` ``None``: no fleet); sum the rows for fleet-wide
+    numbers. Everything is over active entries except the ``*_7d`` breathing counts (ADR 0142).
 
     ``sourceable``: org- and fleet-scope facts and insights, ``sourced`` those with a source;
     ``synthesizing``: insights linking at least two entries. ``flagged_backlog_14d``: oldest
     standing stale/wrong verdict over 14 days old; ``orphaned_flagged``: author revoked or silent
     30 days; ``floating_gap``: ``occurred_at`` and last feedback both over 90 days old.
-    ``gap_*`` count entries with that tag.
+    ``gap_*`` count entries with that tag; ``active_entries`` counts them all.
+
+    Breathing, over the 7 days before ``now``: ``writes_7d`` entries created (any state),
+    ``verdicts_7d`` verdicts on the fleet's entries, ``supersessions_7d`` entries superseded by a
+    successor written in the window, ``withdrawals_7d`` entries withdrawn.
     """
 
     fleet_id: str | None
@@ -50,6 +54,11 @@ class HealthCounts:
     gap_anomaly: int = 0
     gap_open_question: int = 0
     gap_dead_end: int = 0
+    active_entries: int = 0
+    writes_7d: int = 0
+    verdicts_7d: int = 0
+    supersessions_7d: int = 0
+    withdrawals_7d: int = 0
 
 
 # Entries tagged like this are the ones scouting should produce (ADR 0144).

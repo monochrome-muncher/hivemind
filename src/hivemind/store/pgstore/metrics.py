@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import datetime
+
+from asyncpg import Record
 
 from hivemind.domain.activity import (
     Activity,
@@ -82,7 +85,7 @@ SELECT day, sum(writes)::int AS writes, sum(helpful)::int AS helpful,
  GROUP BY day ORDER BY day
 """
 
-# Fleet health metrics; $1 is "now". Four statements share one snapshot (see
+# Fleet health metrics; $1 is "now". Five statements share one snapshot (see
 # ``fleet_health``), each dominated by a pass over the wide ``entries`` heap: fusing
 # them through a materialised CTE spills past work_mem and is slower. Windows are
 # hour-based so they ignore the server TimeZone.
@@ -120,7 +123,8 @@ WITH flagged AS (
                               AND fresh.entry_id IS NULL) AS floating,
            count(*) FILTER (WHERE 'anomaly' = ANY(e.tags)) AS gap_anomaly,
            count(*) FILTER (WHERE 'open-question' = ANY(e.tags)) AS gap_open_question,
-           count(*) FILTER (WHERE 'dead-end' = ANY(e.tags)) AS gap_dead_end
+           count(*) FILTER (WHERE 'dead-end' = ANY(e.tags)) AS gap_dead_end,
+           count(*) AS active
       FROM entries e
       LEFT JOIN fresh ON fresh.entry_id = e.id
       LEFT JOIN linking ON linking.from_id = e.id
@@ -131,7 +135,7 @@ WITH flagged AS (
            count(*) FILTER (WHERE fl.first_flag < $1::timestamptz - interval '336 hours'),
            count(*) FILTER (WHERE a.status = 'revoked'
                               OR lw.at < $1::timestamptz - interval '720 hours'),
-           0, 0, 0, 0
+           0, 0, 0, 0, 0
       FROM flagged fl
       LEFT JOIN agents a ON a.name = fl.author
       LEFT JOIN last_write lw ON lw.author = fl.author
@@ -141,8 +145,39 @@ SELECT fleet_id, sum(sourceable) AS sourceable, sum(sourced) AS sourced,
        sum(insights) AS insights, sum(synthesizing) AS synthesizing,
        sum(backlog) AS backlog, sum(orphaned) AS orphaned, sum(floating) AS floating,
        sum(gap_anomaly) AS gap_anomaly, sum(gap_open_question) AS gap_open_question,
-       sum(gap_dead_end) AS gap_dead_end
+       sum(gap_dead_end) AS gap_dead_end, sum(active) AS active
   FROM parts
+ GROUP BY fleet_id
+"""
+
+# The breathing counts (ADR 0142) per fleet of the entry concerned, over the 7 days (168 hours)
+# before $1, in any entry state. Revoked reporters' verdicts are left out (ADR 0067).
+HEALTH_BREATHING = f"""
+SELECT fleet_id, sum(writes) AS writes, sum(verdicts) AS verdicts,
+       sum(supersessions) AS supersessions, sum(withdrawals) AS withdrawals
+  FROM (
+    SELECT e.fleet_id,
+           count(*) FILTER (WHERE e.created_at BETWEEN $1::timestamptz - interval '168 hours'
+                                                   AND $1::timestamptz) AS writes,
+           0 AS verdicts, 0 AS supersessions,
+           count(*) FILTER (WHERE e.withdrawn_at BETWEEN $1::timestamptz - interval '168 hours'
+                                                     AND $1::timestamptz) AS withdrawals
+      FROM entries e
+     WHERE e.created_at >= $1::timestamptz - interval '168 hours'
+        OR e.withdrawn_at >= $1::timestamptz - interval '168 hours'
+     GROUP BY e.fleet_id
+    UNION ALL
+    SELECT e.fleet_id, 0, count(*), 0, 0
+      FROM feedbacks f JOIN entries e ON e.id = f.entry_id
+     WHERE f.updated_at BETWEEN $1::timestamptz - interval '168 hours' AND $1::timestamptz
+       AND {_RATING_COUNTS}
+     GROUP BY e.fleet_id
+    UNION ALL
+    SELECT s.fleet_id, 0, 0, count(*), 0
+      FROM entries n JOIN entries s ON s.superseded_by = n.id
+     WHERE n.created_at BETWEEN $1::timestamptz - interval '168 hours' AND $1::timestamptz
+     GROUP BY s.fleet_id
+  ) parts
  GROUP BY fleet_id
 """
 
@@ -363,6 +398,41 @@ SELECT extract(epoch FROM (n.created_at - min(f.updated_at)))::float8 AS seconds
 """
 
 
+def _numbers(row: Record | None) -> defaultdict[str, int]:
+    """A result row's figures, 0 for every column of a missing row."""
+    return defaultdict(int, dict(row) if row else {})
+
+
+def _health_counts(by_fleet: list[Record], breathing: list[Record]) -> tuple[HealthCounts, ...]:
+    """One ``HealthCounts`` per fleet that appears in either result."""
+    entries = {r["fleet_id"]: r for r in by_fleet}
+    recent = {r["fleet_id"]: r for r in breathing}
+    counts = []
+    for fleet_id in dict.fromkeys([*entries, *recent]):
+        a, b = _numbers(entries.get(fleet_id)), _numbers(recent.get(fleet_id))
+        counts.append(
+            HealthCounts(
+                fleet_id=str(fleet_id) if fleet_id is not None else None,
+                sourceable=int(a["sourceable"]),
+                sourced=int(a["sourced"]),
+                insights=int(a["insights"]),
+                synthesizing=int(a["synthesizing"]),
+                flagged_backlog_14d=int(a["backlog"]),
+                orphaned_flagged=int(a["orphaned"]),
+                floating_gap=int(a["floating"]),
+                gap_anomaly=int(a["gap_anomaly"]),
+                gap_open_question=int(a["gap_open_question"]),
+                gap_dead_end=int(a["gap_dead_end"]),
+                active_entries=int(a["active"]),
+                writes_7d=int(b["writes"]),
+                verdicts_7d=int(b["verdicts"]),
+                supersessions_7d=int(b["supersessions"]),
+                withdrawals_7d=int(b["withdrawals"]),
+            )
+        )
+    return tuple(counts)
+
+
 class MetricsStore(PgConnections):
     async def usage_counts(self) -> list[UsageCount]:
         async with self._connection() as conn:
@@ -389,6 +459,7 @@ class MetricsStore(PgConnections):
         ):
             await conn.execute("SET LOCAL jit = off")
             by_fleet = await conn.fetch(HEALTH_BY_FLEET, now)
+            breathing = await conn.fetch(HEALTH_BREATHING, now)
             scalars = await conn.fetchrow(HEALTH_SCALARS, now, ENTRY_ID_REF)
             corrections = await conn.fetch(HEALTH_CORRECTIONS, now)
             rivals = await conn.fetch(HEALTH_RIVALS, now)
@@ -404,22 +475,7 @@ class MetricsStore(PgConnections):
             for r in role_rows
         }
         return FleetHealth(
-            by_fleet=tuple(
-                HealthCounts(
-                    fleet_id=str(r["fleet_id"]) if r["fleet_id"] is not None else None,
-                    sourceable=int(r["sourceable"]),
-                    sourced=int(r["sourced"]),
-                    insights=int(r["insights"]),
-                    synthesizing=int(r["synthesizing"]),
-                    flagged_backlog_14d=int(r["backlog"]),
-                    orphaned_flagged=int(r["orphaned"]),
-                    floating_gap=int(r["floating"]),
-                    gap_anomaly=int(r["gap_anomaly"]),
-                    gap_open_question=int(r["gap_open_question"]),
-                    gap_dead_end=int(r["gap_dead_end"]),
-                )
-                for r in by_fleet
-            ),
+            by_fleet=_health_counts(by_fleet, breathing),
             helpful=int(scalars["helpful"]),
             helpful_with_note=int(scalars["helpful_noted"]),
             correction_latencies=tuple(float(r["seconds"]) for r in corrections),

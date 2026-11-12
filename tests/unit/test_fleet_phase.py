@@ -64,7 +64,12 @@ def test_an_until_that_is_not_in_the_future_is_refused(until: datetime) -> None:
 
 def test_an_until_more_than_thirty_days_ahead_is_refused() -> None:
     with pytest.raises(InvalidInput, match="at most 30 days"):
-        FleetPhase.starting(PhaseName.EXPLORE, _in(30) + timedelta(seconds=1), NOW)
+        FleetPhase.starting(PhaseName.EXPLORE, _in(30) + timedelta(minutes=1, seconds=1), NOW)
+
+
+def test_a_minute_of_clock_skew_is_allowed_at_the_limit() -> None:
+    ahead = _in(30) + timedelta(minutes=1)
+    assert FleetPhase.starting(PhaseName.EXPLORE, ahead, NOW).until == ahead
 
 
 def test_a_naive_until_means_utc_and_an_offset_is_converted() -> None:
@@ -142,9 +147,19 @@ async def test_clearing_ends_the_phase_and_audits_what_it_ended() -> None:
         "fleet.phase_clear",
         {"phase": "explore", "until": _in(8).isoformat()},
     )
+    audited = await world.audit()
     again = await world.access.clear_fleet_phase(fleet_id, ADMIN)
     assert again.phase is None
-    assert (await world.audit())[-1] == ("fleet.phase_clear", {})
+    assert await world.audit() == audited
+
+
+async def test_clearing_an_ended_phase_writes_no_row() -> None:
+    world = World()
+    fleet_id = await world.fleet()
+    await world.store.set_fleet_phase(fleet_id, FleetPhase(PhaseName.EXPLORE, NOW))
+    cleared = await world.access.clear_fleet_phase(fleet_id, ADMIN)
+    assert cleared.phase is None
+    assert await world.audit() == []
 
 
 async def test_a_refused_phase_changes_and_audits_nothing() -> None:
@@ -393,8 +408,20 @@ async def test_rest_whoami_and_pins_carry_the_phase_only_while_in_force() -> Non
         ended_whoami = await client.get("/v1/whoami", headers=alice_h)
         ended_pins = await client.get("/v1/pins", headers=alice_h)
         ended_fleets = await client.get("/v1/admin/fleets", headers=ADMIN_H)
-    assert "fleet_phase" not in bare_whoami.json()
-    assert "fleet_phase" not in bare_pins.json()
+    assert set(bare_whoami.json()) == {
+        "key_kind",
+        "name",
+        "status",
+        "trust_level",
+        "trust_level_name",
+        "home_fleet_id",
+        "home_fleet_name",
+        "can_read",
+        "can_write_scopes",
+        "inherits_from",
+        "key_last_used_at",
+    }
+    assert set(bare_pins.json()) == {"fleet_id", "pins"}
     expected = FleetPhase(PhaseName.EXPLORE, until).as_dict()
     assert whoami.json()["fleet_phase"]["hint"] == expected["hint"]
     assert whoami.json()["fleet_phase"]["phase"] == "explore"
@@ -450,3 +477,22 @@ async def test_the_usage_report_and_gauge_list_phases_in_force() -> None:
         if s.name == "hivemind_fleet_phase"
     ]
     assert gauge == [({"fleet": "exploring", "phase": "explore"}, 1.0)]
+
+
+async def test_rest_reads_a_non_utc_until_as_the_utc_date_in_the_hint() -> None:
+    store = MemoryStore(make_clock())
+    fleet = await store.create_fleet("platform")
+    end = (datetime.now(UTC) + timedelta(days=3)).replace(hour=1, minute=0, second=0, microsecond=0)
+    local = end.astimezone(timezone(timedelta(hours=-5)))
+    assert local.date() != end.date()
+    async with _client(store, {"alice-key": _agent(fleet.id)}) as client:
+        put = await client.put(
+            f"/v1/admin/fleets/{fleet.id}/phase",
+            json={"phase": "explore", "until": local.isoformat()},
+            headers=ADMIN_H,
+        )
+        whoami = await client.get("/v1/whoami", headers={"X-API-Key": "alice-key"})
+    assert put.status_code == 200
+    phase = whoami.json()["fleet_phase"]
+    assert datetime.fromisoformat(phase["until"]) == end
+    assert f"until {end.date().isoformat()}." in phase["hint"]

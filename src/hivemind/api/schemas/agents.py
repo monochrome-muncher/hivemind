@@ -139,7 +139,6 @@ class WhoamiOut(BaseModel):
     can_write_scopes: list[str]
     inherits_from: list[str]
     key_last_used_at: str | None = None
-    # ADR 0143: the home fleet's phase in force; left out of the reply without one.
     fleet_phase: FleetPhaseOut | None = None
     # ADR 0144: present only for a scout's own key.
     role: AgentRole | None = None
