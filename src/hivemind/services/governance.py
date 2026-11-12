@@ -57,7 +57,7 @@ class GovernanceService:
             own_name = credential.agent_name or credential.user_id
             detail["via"] = "author" if entry.author == own_name else "succession"
         await record_admin_action(
-            self._store, credential, AuditAction.ENTRY_WITHDRAW, entry_id, detail
+            self._store, credential, AuditAction.ENTRY_WITHDRAW, entry.id, detail
         )
         await self._pins.unpin_withdrawn(credential, entry)
         return withdrawn
@@ -76,7 +76,7 @@ class GovernanceService:
             self._store,
             credential,
             AuditAction.ENTRY_WITHDRAW,
-            entry_id,
+            entry.id,
             {"author": entry.author, "reason": reason, "via": "portal"},
         )
         await self._pins.unpin_withdrawn(credential, entry)

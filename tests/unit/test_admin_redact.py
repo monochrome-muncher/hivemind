@@ -239,3 +239,27 @@ async def test_restore_refuses_a_redacted_memory_with_its_own_code() -> None:
 def test_the_drawer_offers_restore_only_on_a_memory_that_is_not_redacted() -> None:
     drawer = (ADMIN_STATIC / "drawer.js").read_text()
     assert 'e.state === "withdrawn" && !e.redacted_at && config.restoreEntry' in drawer
+
+
+@pytest.mark.parametrize(
+    ("route", "headers"),
+    [("/v1/admin/entries/{}/withdraw", ADMIN), ("/v1/entries/{}/withdraw", ALICE)],
+)
+async def test_a_withdrawal_by_another_spelling_of_the_id_is_counted(
+    route: str, headers: dict[str, str]
+) -> None:
+    """The audit row names the memory by its canonical id, however the caller spelled it."""
+    app = make_hivemind_app()
+    entry = await _secret(app)
+    spelling = entry.id.replace("-", "").upper()
+    async with make_client(app) as client:
+        withdrawn = await client.post(
+            route.format(spelling), json={"reason": f"leaked {SECRET}"}, headers=headers
+        )
+        assert withdrawn.status_code == 200, withdrawn.text
+        resp = await client.post(
+            f"/v1/admin/entries/{entry.id}/redact", json=_body(entry.id), headers=ADMIN
+        )
+    assert resp.json()["withdraw_reasons"] == 1
+    (row,) = await app.store.list_audit(AuditFilters(action=AuditAction.ENTRY_WITHDRAW), 10)
+    assert row.target == entry.id
