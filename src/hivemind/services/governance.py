@@ -49,24 +49,14 @@ class GovernanceService:
         if not (credential.is_admin or owns):
             raise PermissionDenied("only the author or an admin may withdraw an entry")
         withdrawn = await self._withdraw(credential, entry, reason)
-        if credential.is_admin and not owns:
-            # An admin withdrawing someone else's entry is audited.
-            await record_admin_action(
-                self._store,
-                credential,
-                AuditAction.ENTRY_WITHDRAW,
-                entry_id,
-                {"author": entry.author, "reason": reason},
-            )
-        elif owns and entry.author != (credential.agent_name or credential.user_id):
-            # So is a successor withdrawing an inherited memory.
-            await record_admin_action(
-                self._store,
-                credential,
-                AuditAction.ENTRY_WITHDRAW,
-                entry_id,
-                {"author": entry.author, "reason": reason, "via": "succession"},
-            )
+        # Every withdrawal is audited (ADR 0141): by the admin, a successor or the author.
+        detail: dict[str, str | None] = {"author": entry.author, "reason": reason}
+        if owns:
+            own_name = credential.agent_name or credential.user_id
+            detail["via"] = "author" if entry.author == own_name else "succession"
+        await record_admin_action(
+            self._store, credential, AuditAction.ENTRY_WITHDRAW, entry_id, detail
+        )
         await self._pins.unpin_withdrawn(credential, entry)
         return withdrawn
 

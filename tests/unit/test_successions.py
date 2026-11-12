@@ -821,9 +821,10 @@ async def test_a_successors_withdrawal_of_an_inherited_memory_is_audited(w: Worl
     own = await w.entry("heir", "heir note")
     await retire(w)
     assert (await w.withdraw("heir", own.id)).status_code == 200
-    assert await w.audit(AuditAction.ENTRY_WITHDRAW) == []  # its own: unaudited, as before
+    (own_row,) = await w.audit(AuditAction.ENTRY_WITHDRAW)
+    assert own_row.detail["via"] == "author"  # its own (ADR 0141)
     assert (await w.withdraw("heir", inherited.id)).status_code == 200
-    (row,) = await w.audit(AuditAction.ENTRY_WITHDRAW)
+    row = (await w.audit(AuditAction.ENTRY_WITHDRAW))[0]
     assert row.target == inherited.id and row.actor == "heir"
     assert row.detail == {"author": "old", "reason": "obsolete", "via": "succession"}
 

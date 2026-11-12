@@ -342,7 +342,7 @@ async def test_portal_withdraw_takes_own_entries_with_a_reason_and_audits_them()
         again = await client.post(
             f"/v1/portal/entries/{in_blue.id}/withdraw", json={"reason": "again"}, headers=CAROL
         )
-        # Her own call to the data plane stays unaudited (SPEC §12.5).
+        # Her own call to the data plane is audited too, as the author (ADR 0141).
         plain = await client.post(
             f"/v1/entries/{mine.id}/withdraw", json={"reason": "mine"}, headers=CAROL
         )
@@ -359,9 +359,15 @@ async def test_portal_withdraw_takes_own_entries_with_a_reason_and_audits_them()
         (
             ActorKind.AGENT_KEY,
             "carol",
+            mine.id,
+            {"author": "carol", "reason": "mine", "via": "author"},
+        ),
+        (
+            ActorKind.AGENT_KEY,
+            "carol",
             in_blue.id,
             {"author": "carol", "reason": "the port moved", "via": "portal"},
-        )
+        ),
     ]
 
 

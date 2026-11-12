@@ -278,7 +278,7 @@ async def test_admin_withdrawing_anothers_entry_writes_one_row() -> None:
     assert row.detail == {"author": "alice", "reason": "wrong fleet"}
 
 
-async def test_author_withdrawing_own_entry_writes_nothing() -> None:
+async def test_author_withdrawing_own_entry_is_audited_as_the_author() -> None:
     store = MemoryStore(make_clock())
     entry = await store.create_entry(
         EntryDraft(kind=Kind.FACT, summary="x", author="alice", agent="a1")
@@ -286,11 +286,13 @@ async def test_author_withdrawing_own_entry_writes_nothing() -> None:
     await GovernanceService(store).withdraw(
         Credential(user_id="alice", agent_id="a1"), entry.id, "stale"
     )
-    assert await _rows(store) == []
+    (row,) = await _rows(store)
+    assert row.action is AuditAction.ENTRY_WITHDRAW and row.target == entry.id
+    assert row.detail == {"author": "alice", "reason": "stale", "via": "author"}
 
 
-async def test_admin_withdrawing_own_entry_writes_nothing() -> None:
-    """Authorship alone authorised it — no admin privilege was used."""
+async def test_admin_withdrawing_own_entry_is_audited_as_the_author() -> None:
+    """Authorship authorised it; the row says so with ``via: "author"`` (ADR 0141)."""
     store = MemoryStore(make_clock())
     entry = await store.create_entry(
         EntryDraft(kind=Kind.FACT, summary="x", author="admin", agent="a1")
@@ -298,7 +300,8 @@ async def test_admin_withdrawing_own_entry_writes_nothing() -> None:
     await GovernanceService(store).withdraw(
         Credential(user_id="admin", is_admin=True, key_id="abc"), entry.id, None
     )
-    assert await _rows(store) == []
+    (row,) = await _rows(store)
+    assert row.detail == {"author": "admin", "reason": None, "via": "author"}
 
 
 # -- no raw key in any audit row ----------------------------------------------

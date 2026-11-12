@@ -1,5 +1,7 @@
 # An append-only audit log of admin actions, with two actor kinds
 
+> **Amended by [ADR 0141](0141-every-withdrawal-is-audited.md):** every withdrawal is audited, an author's own included (`via: "author"`), so decision 7's exception for an author withdrawing its own entry no longer holds.
+
 > **Amended by [ADR 0119](0119-rollbacks-do-not-silently-erase-the-audit-log.md):** `hivemind-migrate --rollback` counts the audit rows (and revived keys) a rollback would destroy and refuses without an explicit flag; a rollback is audited as `schema.rollback`.
 
 > **Status note:** amended by [ADR 0076](0076-pin-integrity.md): a fourth actor kind, `agent_key`, and the actions `entry.pin` / `entry.unpin`. Amended by [ADR 0095](0095-agent-portal.md): a withdrawal through the agent portal is audited as `entry.withdraw` (actor kind `agent_key`, detail `via: "portal"`), although the author withdraws their own entry.
