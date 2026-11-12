@@ -151,6 +151,7 @@ export function normaliseEntry(x) {
     state: x.state || "active",
     feedback: fb && (fb.helpful || fb.stale || fb.wrong) ? fb : null,
     score: x.score,
+    explain: x.explain || null,
   };
 }
 

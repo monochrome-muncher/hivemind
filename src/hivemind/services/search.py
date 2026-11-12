@@ -32,7 +32,7 @@ from hivemind.embeddings import EmbeddingError
 from hivemind.ports import Embedder, Store
 from hivemind.retrieval.mmr import mmr_order
 from hivemind.retrieval.rrf import rrf_fuse
-from hivemind.retrieval.scoring import entry_score, feedback_quality
+from hivemind.retrieval.scoring import ScoreParts, feedback_quality, score_parts
 from hivemind.services.ownership import own_author_filter
 
 
@@ -42,6 +42,21 @@ class SimilarEntry:
 
     entry_id: str
     occurred_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class Explanation:
+    """How one hit's score came about (ADR 0137): the factors ``entry_score`` multiplied, where the
+    entry stood in each candidate stream (1-based, ``None`` when absent) and the feedback behind
+    the quality factor. Display only."""
+
+    parts: ScoreParts
+    keyword_rank: int | None
+    vector_rank: int | None
+    feedback: FeedbackCounts
+    flags_halved: bool
+    recency: RecencyHint
+    degraded: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +87,8 @@ class Hit:
     similar: tuple[SimilarEntry, ...] = ()
     # see_also targets changed since the link, at most 3 (ADR 0081); display only.
     upstream_changed: tuple[UpstreamChange, ...] = ()
+    # Only when the caller asked to explain the ranking (ADR 0137).
+    explain: Explanation | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +108,26 @@ class _ScoredCandidates:
     entries: list[Entry]
     scores: dict[str, float]
     feedback: dict[str, FeedbackSignals]
+    explanations: dict[str, Explanation]
+
+
+@dataclass(frozen=True, slots=True)
+class _Fusion:
+    """RRF-fused candidate scores, whether the vector stream was lost, and (when explaining) each
+    stream's ranks."""
+
+    scores: dict[str, float]
+    degraded: bool
+    keyword_ranks: Mapping[str, int] | None = None
+    vector_ranks: Mapping[str, int] | None = None
+
+
+def _ranks(ids: Sequence[str]) -> dict[str, int]:
+    """1-based rank of each id in a ranked list, its first when repeated."""
+    ranks: dict[str, int] = {}
+    for rank, entry_id in enumerate(ids, start=1):
+        ranks.setdefault(entry_id, rank)
+    return ranks
 
 
 NowFn = Callable[[], datetime]
@@ -164,12 +201,16 @@ class SearchService:
         recency: RecencyHint = RecencyHint.DEFAULT,
         explore: bool = False,
         count: bool = True,
+        explain: bool = False,
     ) -> SearchResult:
         """Hybrid query, compact hits best first. Embedder failure gives a keyword-only ``degraded``
         result (ADR 0048); first pages are counted per home fleet (ADR 0056), ``count=False`` skips
-        that (ADR 0080); ``recency`` (ADR 0073) and ``explore`` (ADR 0078) are per-call hints.
+        that (ADR 0080); ``recency`` (ADR 0073) and ``explore`` (ADR 0078) are per-call hints;
+        ``explain`` puts each hit's score factors on it (ADR 0137).
         """
-        result = await self._ranked(query, filters, limit, offset, visibility, recency, explore)
+        result = await self._ranked(
+            query, filters, limit, offset, visibility, recency, explore, explain
+        )
         if count and visibility is not None and not offset:
             # An empty degraded answer reflects the embedder, not the pool.
             empty = not result.hits and not result.degraded
@@ -194,6 +235,7 @@ class SearchService:
         visibility: Visibility | None,
         recency: RecencyHint,
         explore: bool = False,
+        explain: bool = False,
     ) -> SearchResult:
         """``search_result`` without the counting."""
         # Validate before any embedder or store call (ADR 0040).
@@ -204,12 +246,13 @@ class SearchService:
         offset = offset or 0
         applied = self._config.applied_hint(recency)
 
-        fused, degraded = await self._fused_candidates(query, filters, visibility)
-        if not fused:
+        fusion = await self._fused_candidates(query, filters, visibility, explain)
+        degraded = fusion.degraded
+        if not fusion.scores:
             return SearchResult([], degraded, applied)
 
-        entries, signals = await self._fetch_candidates(list(fused), visibility)
-        scored = self._score_candidates(entries, signals, fused, filters, recency)
+        entries, signals = await self._fetch_candidates(list(fusion.scores), visibility)
+        scored = self._score_candidates(entries, signals, fusion, filters, recency)
         # Run after the two concurrent reads above, never beside them (ADR 0059).
         ordered, similar = await self._rank_versions(scored, explore)
         page = ordered[offset : offset + limit]
@@ -228,10 +271,14 @@ class SearchService:
         return filters
 
     async def _fused_candidates(
-        self, query: str, filters: EntryFilters, visibility: Visibility | None
-    ) -> tuple[dict[str, float], bool]:
+        self,
+        query: str,
+        filters: EntryFilters,
+        visibility: Visibility | None,
+        explain: bool = False,
+    ) -> _Fusion:
         """RRF-fused candidate ids with scores (SPEC.md §6.2), and whether the vector stream was
-        lost."""
+        lost; with ``explain``, each stream's ranks too."""
         top_k = self._config.candidate_top_k
         # ``vector_ids`` is None when the embedder failed (ADR 0048).
         keyword_ids, vector_ids = await _gather(
@@ -243,7 +290,14 @@ class SearchService:
             k=self._config.rrf_k,
             weights=[self._config.weight_keyword, self._config.weight_vector],
         )
-        return fused, vector_ids is None
+        if not explain:
+            return _Fusion(fused, vector_ids is None)
+        return _Fusion(
+            fused,
+            vector_ids is None,
+            keyword_ranks=_ranks(keyword_ids),
+            vector_ranks=_ranks(vector_ids or []),
+        )
 
     async def _fetch_candidates(
         self, candidate_ids: list[str], visibility: Visibility | None
@@ -260,7 +314,7 @@ class SearchService:
         self,
         entries: Mapping[str, Entry],
         signals: Mapping[str, FeedbackSignals],
-        fused: Mapping[str, float],
+        fusion: _Fusion,
         filters: EntryFilters,
         recency: RecencyHint,
     ) -> _ScoredCandidates:
@@ -269,8 +323,10 @@ class SearchService:
         scored: list[Entry] = []
         entry_scores: dict[str, float] = {}
         entry_feedback: dict[str, FeedbackSignals] = {}
+        explanations: dict[str, Explanation] = {}
+        terms = self._config.recency_terms(recency)
         # Fused-rank order, not row order: ties are common and the stable sorts below keep it.
-        for entry in (entries[eid] for eid in fused if eid in entries):
+        for entry in (entries[eid] for eid in fusion.scores if eid in entries):
             if not filters.include_inactive and entry.state is not EntryState.ACTIVE:
                 continue
             entry_signals = signals.get(entry.id, NO_SIGNALS)
@@ -284,9 +340,8 @@ class SearchService:
                     confirmed=entry_signals.last_confirmed_at is not None
                 ),
             )
-            terms = self._config.recency_terms(recency)
-            score = entry_score(
-                fused[entry.id],
+            parts = score_parts(
+                fusion.scores[entry.id],
                 entry.importance,
                 entry.occurred_at,
                 quality,
@@ -296,9 +351,21 @@ class SearchService:
                 social_max=self._config.social_max,
                 narrow_importance=self._config.narrow_importance,
             )
-            entry_scores[entry.id] = score
+            entry_scores[entry.id] = parts.score
+            if fusion.keyword_ranks is not None and fusion.vector_ranks is not None:
+                explanations[entry.id] = Explanation(
+                    parts=parts,
+                    keyword_rank=fusion.keyword_ranks.get(entry.id),
+                    vector_rank=fusion.vector_ranks.get(entry.id),
+                    feedback=entry_signals.counts,
+                    flags_halved=self._config.confirmation_halves_flags
+                    and entry_signals.last_confirmed_at is not None
+                    and any(entry_signals.counts[1:]),
+                    recency=self._config.applied_hint(recency),
+                    degraded=fusion.degraded,
+                )
             scored.append(entry)
-        return _ScoredCandidates(scored, entry_scores, entry_feedback)
+        return _ScoredCandidates(scored, entry_scores, entry_feedback, explanations)
 
     async def _rank_versions(
         self, candidates: _ScoredCandidates, explore: bool
@@ -350,6 +417,7 @@ class SearchService:
                 with_state=filters.include_inactive,
                 similar=similar.get(entry.id, ()),
                 upstream_changed=upstream.get(entry.id, ()),
+                explain=candidates.explanations.get(entry.id),
             )
             for entry in page
         ]
@@ -449,6 +517,7 @@ class SearchService:
         with_state: bool = False,
         similar: tuple[SimilarEntry, ...] = (),
         upstream_changed: tuple[UpstreamChange, ...] = (),
+        explain: Explanation | None = None,
     ) -> Hit:
         return Hit(
             entry_id=entry.id,
@@ -469,6 +538,7 @@ class SearchService:
             state=entry.state if with_state else None,
             similar=similar,
             upstream_changed=upstream_changed,
+            explain=explain,
         )
 
 

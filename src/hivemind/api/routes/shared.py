@@ -106,9 +106,12 @@ async def run_search(
     *,
     fleet_id: str | None = None,
     count: bool = True,
+    explain: bool = False,
+    model: type[HitOut] = HitOut,
 ) -> list[HitOut]:
     """The search behind ``POST /v1/search`` and the admin search;
-    ``count=False`` keeps the latter out of the search counters."""
+    ``count=False`` keeps the latter out of the search counters, and
+    ``explain`` with the admin's ``model`` carries each hit's score parts."""
     filters = EntryFilters(
         kind=request.kind,
         tags=tuple(request.tags),
@@ -133,13 +136,14 @@ async def run_search(
         explore=request.explore,
         recency=request.recency or RecencyHint.DEFAULT,
         count=count,
+        explain=explain,
     )
     if result.recency is not RecencyHint.DEFAULT:
         response.headers[RECENCY_HEADER] = result.recency.value
     if result.degraded:
         response.headers[DEGRADED_HEADER] = DEGRADED_KEYWORD_ONLY
         prometheus.degraded_searches.inc()
-    return [HitOut.from_hit(h) for h in result.hits]
+    return [model.from_hit(h) for h in result.hits]
 
 
 async def pin_entry(

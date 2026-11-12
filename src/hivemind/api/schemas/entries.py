@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import math
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    SerializerFunctionWrapHandler,
+    field_validator,
+    model_serializer,
+)
 
 from hivemind.api.schemas.common import to_utc
 from hivemind.api.schemas.feedback import CorrectionOut, FeedbackCountsOut, FeedbackSummaryOut
@@ -16,7 +23,7 @@ from hivemind.domain.upstream import UpstreamChangeKind
 from hivemind.domain.validation import MAX_AGENT_NAME_CHARS, MAX_GET_IDS, MAX_LIMIT, MAX_OFFSET
 from hivemind.services.chain import EntryLinks
 from hivemind.services.read import EntryDetail
-from hivemind.services.search import Hit
+from hivemind.services.search import Explanation, Hit
 from hivemind.services.write import RelatedEntry
 from hivemind.services.write_warnings import WriteWarning
 from hivemind.wire import round_score
@@ -393,6 +400,111 @@ class HitOut(BaseModel):
         )
 
 
+class RecencyPartOut(BaseModel):
+    hint: RecencyHint
+    age_days: float
+    half_life_days: float | None  # null when the hint ignores age
+    decay: float  # 0.5 ** (age_days / half_life_days), before the floor
+    floor: float | None
+    floor_applied: bool
+    factor: float
+
+
+class FeedbackPartOut(BaseModel):
+    helpful: int
+    stale: int
+    wrong: int
+    flags_halved: bool  # a confirmation newer than every flag halves them (ADR 0106)
+    quality: float
+
+
+class SocialPartOut(BaseModel):
+    cap: float | None
+    cap_applied: bool
+    factor: float  # min(cap, quality)
+
+
+class ImportancePartOut(BaseModel):
+    value: int
+    factor: float
+
+
+class ExplainOut(BaseModel):
+    """The parts of one hit's score as the ranking multiplied them (ADR 0137): ``score`` is
+    ``fused * importance.factor * recency.factor * social.factor`` before its 4-figure rounding.
+    Admin search only; no agent surface carries it."""
+
+    mode: Literal["hybrid", "keyword_only"]
+    keyword_rank: int | None
+    vector_rank: int | None
+    fused: float
+    recency: RecencyPartOut
+    feedback: FeedbackPartOut
+    social: SocialPartOut
+    importance: ImportancePartOut
+    score: float
+
+    @classmethod
+    def from_explanation(cls, explanation: Explanation) -> ExplainOut:
+        p = explanation.parts
+        helpful, stale, wrong = explanation.feedback
+        return cls(
+            mode="keyword_only" if explanation.degraded else "hybrid",
+            keyword_rank=explanation.keyword_rank,
+            vector_rank=explanation.vector_rank,
+            fused=_part(p.fused),
+            recency=RecencyPartOut(
+                hint=explanation.recency,
+                age_days=_part(p.age_days),
+                half_life_days=_part(p.half_life_days) if math.isfinite(p.half_life_days) else None,
+                decay=_part(p.decay),
+                floor=p.recency_floor,
+                floor_applied=p.floor_applied,
+                factor=_part(p.recency_factor),
+            ),
+            feedback=FeedbackPartOut(
+                helpful=helpful,
+                stale=stale,
+                wrong=wrong,
+                flags_halved=explanation.flags_halved,
+                quality=_part(p.quality),
+            ),
+            social=SocialPartOut(
+                cap=p.social_max, cap_applied=p.cap_applied, factor=_part(p.social_factor)
+            ),
+            importance=ImportancePartOut(value=p.importance, factor=_part(p.importance_factor)),
+            score=round_score(p.score),
+        )
+
+
+def _part(value: float) -> float:
+    """A factor as shown: 6 significant figures, so the parts reproduce the 4-figure score."""
+    return float(f"{value:.6g}")
+
+
+class AdminHitOut(HitOut):
+    """A hit as the admin search answers it: ``HitOut`` plus ``explain`` when asked for (ADR 0137).
+    Left out of the JSON when absent, so an ordinary admin search is byte for byte a ``HitOut``
+    list."""
+
+    explain: ExplainOut | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_absent_explain(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        data: dict[str, Any] = handler(self)
+        if data.get("explain") is None:
+            data.pop("explain", None)
+        return data
+
+    @classmethod
+    def from_hit(cls, hit: Hit) -> AdminHitOut:
+        out = super().from_hit(hit)
+        assert isinstance(out, AdminHitOut)
+        if hit.explain is not None:
+            out.explain = ExplainOut.from_explanation(hit.explain)
+        return out
+
+
 class SearchRequest(BaseModel):
     """A hybrid search with filters (SPEC.md §5.1, §5.3)."""
 
@@ -450,6 +562,9 @@ class FleetSearchRequest(SearchRequest):
 
 class AdminSearchRequest(FleetSearchRequest):
     """``POST /v1/admin/search``: the fleet search, optionally run as one agent (``as_agent``,
-    ADR 0136). Admin only: the portal's request has no such field."""
+    ADR 0136) and with its ranking explained (``explain``, ADR 0137). Admin only: the portal's
+    request has neither field."""
 
     as_agent: str | None = Field(default=None, max_length=MAX_AGENT_NAME_CHARS)
+    # Each hit carries the parts of its score (ADR 0137).
+    explain: bool = False

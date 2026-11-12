@@ -1199,3 +1199,20 @@ The admin search sees every memory, so it finds what the agent cannot. Search as
    `fleet` or `org` scope, or restore a withdrawn memory (section 4).
 
 An as-agent search is not counted in the search counters and writes no audit row.
+
+## 16. Read the ranking of a production query (ADR 0137)
+
+To see why a memory ranked where it did, tick **Explain ranking** in the admin **Memories** view (or send
+`"explain": true` to `POST /v1/admin/search` with the admin key; add `as_agent` to explain that agent's own
+search). Each hit gets a line list under its row:
+
+- **Keyword** and **Vector** ranks: a memory found by both streams outranks one found by a single stream.
+  "Vector: unavailable" means the embedder failed and the answer is keyword-only (ADR 0048).
+- **Recency**: the factor, the memory's age, and whether the 0.8 floor applied (older than about ten days
+  all carry the floor). A named hint (`prefer_recent`, `ignore_age`) shows here.
+- **Feedback** and **Social cap**: the counts behind the quality factor, and whether the cap held it down.
+- **Importance** and the final **Score**.
+
+Use it on real queries before deciding the ranking needs a change, and compare with
+`docs/retrieval-experiments.md`. It changes nothing: the order is the same with it on or off, and agents
+never see it.

@@ -7,7 +7,9 @@ queries, a 4-dimension hash embedder), not pinned gates. The decision
 they led to is [ADR 0022](adr/0022-recency-floor-so-match-quality-is-the-sort-key.md).
 `make measure-experiments` re-runs the decay, recency-floor and `rrf_k`
 sweeps below and prints their tables; the default test run keeps only their
-guards.
+guards. To read the ranking of a live query instead, an operator uses the
+admin search's `explain` ([ADR 0137](adr/0137-admin-search-explains-the-ranking.md),
+ops runbook section 16).
 
 ## §4.4 Gate the recency term to temporal queries
 
