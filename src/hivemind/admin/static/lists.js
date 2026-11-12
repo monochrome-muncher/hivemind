@@ -26,7 +26,8 @@ const scopeText = (scope, fleetId, fleetName) => (fleetId ? `${scope} · ${fleet
  * `renderRow(row)` builds a <tr> (or several). Returns {el, tbody, load(reset)}: load(true)
  * starts again from the top, load(false) appends the next page; `fetchPage`
  * gets `fresh: true` on a reload from the top, the moment a caller should
- * read its filters (later pages and an export reuse them). With `csv`
+ * read its filters (later pages and an export reuse them), and `exporting: true`
+ * when the page is for the CSV export. With `csv`
  * ({columns, name, key}) it also offers every row under those filters as a
  * CSV file.
  */
@@ -71,7 +72,7 @@ export function pagedTable({ headers, className = "entries", fetchPage, renderRo
 
   const el = h("div", { class: "card" },
     h("div", { class: "card-body card-body-tight result-bar" }, status,
-      csv ? exportButton({ fetchPage, ...csv, generation: () => generation }) : null),
+      csv ? exportButton({ fetchPage: (page) => fetchPage({ ...page, exporting: true }), ...csv, generation: () => generation }) : null),
     h("div", { class: "table-wrap" }, h("table", { class: className },
       h("thead", {}, h("tr", {}, headers.map((t) => h("th", { text: t })))), tbody)),
     moreWrap);

@@ -894,6 +894,18 @@ def test_the_memory_browser_asks_for_the_explanation_and_draws_it_as_text() -> N
     assert "innerHTML" not in script
 
 
+def test_csv_exports_leave_the_explanation_out() -> None:
+    """The CSV has no column for it, so an export never asks the search for it."""
+    lists = (STATIC_DIR / "lists.js").read_text()
+    assert "fetchPage({ ...page, exporting: true })" in lists
+    portal_views = (STATIC_DIR.parent.parent / "portal" / "static" / "views.js").read_text()
+    assert "if (f.explain && !exporting) body.explain = true;" in portal_views
+    assert (
+        'fetchItems({ ...(applied || filters()), explain: "" }'
+        in (STATIC_DIR / "memories.js").read_text()
+    )
+
+
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
 def test_the_memory_filters_become_api_fields_with_whole_day_ranges() -> None:
     """memfilters.js run as it ships: the form values, the old hash keys and the day bounds."""
