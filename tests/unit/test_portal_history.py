@@ -578,3 +578,30 @@ async def test_a_role_change_shows_in_the_agents_history() -> None:
     summaries = {r["action"]: r["summary"] for r in await _history(app)}
     assert summaries["agent.role_set"] == "Marked as a scout"
     assert summaries["agent.role_clear"] == "No longer a scout"
+
+
+async def test_a_move_to_self_names_who_moved_it_and_shows_the_reason_for_own_memories() -> None:
+    app, blue, _red = await _seed()
+    by_admin = await _entry(app, "carol note the admin moved", scope="self", fleet_id=blue.id)
+    by_carol = await _entry(app, "carol note she moved", scope="self", fleet_id=blue.id)
+    inherited = await _entry(app, "old note", author="old", scope="self", fleet_id=blue.id)
+    for actor_kind, actor, entry, author, reason in (
+        (ActorKind.ADMIN_KEY, ADMIN_ACTOR, by_admin, "carol", "meant to be private"),
+        (ActorKind.AGENT_KEY, "carol", by_carol, "carol", "a scratch note"),
+        (ActorKind.AGENT_KEY, "carol", inherited, "old", "old's scratch"),
+    ):
+        await _row(
+            app,
+            actor_kind,
+            actor,
+            AuditAction.ENTRY_MOVE_TO_SELF,
+            entry.id,
+            {"author": author, "fleet_id": blue.id, "reason": reason, "earlier_versions": []},
+        )
+    rows = {r["reason"]: r for r in await _history(app) if r["action"] == "entry.move_to_self"}
+    assert rows["meant to be private"]["summary"] == "An admin moved a memory by this agent to self"
+    assert rows["meant to be private"]["by"] == "admin"
+    assert rows["a scratch note"]["summary"] == "Moved a memory to self"
+    assert rows["a scratch note"]["entry_id"] == by_carol.id
+    assert rows["old's scratch"]["summary"] == "Moved a memory inherited from old to self"
+    assert ADMIN_ACTOR not in json.dumps(rows)

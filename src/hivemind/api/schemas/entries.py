@@ -19,6 +19,7 @@ from hivemind.api.schemas.feedback import CorrectionOut, FeedbackCountsOut, Feed
 from hivemind.domain.entry import EntityKind, Entry, EntryState, ImportanceSource, Kind, SourceType
 from hivemind.domain.recency import RecencyHint
 from hivemind.domain.redaction import RedactOutcome
+from hivemind.domain.self_move import SelfMove
 from hivemind.domain.upstream import UpstreamChangeKind
 from hivemind.domain.validation import MAX_AGENT_NAME_CHARS, MAX_GET_IDS, MAX_LIMIT, MAX_OFFSET
 from hivemind.services.chain import EntryLinks
@@ -300,6 +301,37 @@ class RedactOut(BaseModel):
             feedback_notes=outcome.feedback_notes,
             flag_notes=outcome.flag_notes,
             withdraw_reasons=outcome.withdraw_reasons,
+        )
+
+
+class MoveToSelfRequest(BaseModel):
+    """A move of a fleet memory to `self` (ADR 0145). The reason is required; it defaults to empty
+    so the service refuses a missing one after the permission check (403 before 422)."""
+
+    reason: str = ""
+
+
+class RemovedPinOut(BaseModel):
+    fleet_id: str
+    entry_id: str
+
+
+class MoveToSelfOut(BaseModel):
+    """The memory, now `self`, the earlier versions by its author that moved with it, and the
+    pins removed from them."""
+
+    entry: EntryOut
+    earlier_versions: list[str]
+    unpinned: list[RemovedPinOut]
+
+    @classmethod
+    def from_move(cls, move: SelfMove) -> MoveToSelfOut:
+        return cls(
+            entry=EntryOut.from_entry(move.entry),
+            earlier_versions=list(move.earlier_versions),
+            unpinned=[
+                RemovedPinOut(fleet_id=p.fleet_id, entry_id=p.entry_id) for p in move.unpinned
+            ],
         )
 
 

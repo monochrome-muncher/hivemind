@@ -153,6 +153,18 @@ class MemoryState:
             and fb.updated_at > since
         ]
 
+    def _inherited(self, name: str) -> tuple[str, ...]:
+        """The agents handing down to ``name``, transitively. Callers hold the lock."""
+        found: set[str] = set()
+        frontier = [name]
+        while frontier:
+            current = frontier.pop()
+            for s in self._successions.values():
+                if s.successor == current and s.retired_agent not in found:
+                    found.add(s.retired_agent)
+                    frontier.append(s.retired_agent)
+        return tuple(sorted(found))
+
     def _refuse_merged(self, fleet_id: str | None) -> None:
         """``FleetMerged`` for a merged fleet (ADR 0107); an unknown id passes, as on Postgres.
         Caller holds the lock."""

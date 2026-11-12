@@ -32,6 +32,7 @@ from hivemind.domain.entry_restore import (
 from hivemind.domain.fleet_merge import FleetMergeRefused, FleetMoveRefused, UnknownFleetMerge
 from hivemind.domain.offboarding import OffboardChanged, UnknownOwner
 from hivemind.domain.redaction import RedactRefused
+from hivemind.domain.self_move import SelfMoveRefused
 from hivemind.domain.succession import AgentRetired, SuccessionRefused, UnknownSuccession
 from hivemind.embeddings import EmbeddingError
 from hivemind.services.errors import (
@@ -60,6 +61,7 @@ BUILDERS: dict[type[Exception], Callable[[], Exception]] = {
     UnknownOwner: lambda: UnknownOwner("no agent has the owner alias 'x'"),
     EntryNotActive: lambda: EntryNotActive("entry e1 is already withdrawn"),
     RedactRefused: lambda: RedactRefused("entry e1 is already redacted"),
+    SelfMoveRefused: lambda: SelfMoveRefused("entry e1 is withdrawn"),
     EntryNotWithdrawn: lambda: EntryNotWithdrawn("entry e1 is active, not withdrawn"),
     EntryRedacted: lambda: EntryRedacted("entry e1 was redacted"),
     RestoreViaCleanup: lambda: RestoreViaCleanup("withdrawn by cleanup c1; undo it"),

@@ -33,6 +33,8 @@ from hivemind.api.schemas import (
     FeedbackLogItemOut,
     FlaggedEntryOut,
     HitOut,
+    MoveToSelfOut,
+    MoveToSelfRequest,
     PinnedOut,
     PinsOut,
     RedactOut,
@@ -170,6 +172,20 @@ async def admin_restore(
     require_admin(credential, "the admin restore")
     return EntryOut.from_entry(
         await app.governance_service.restore(credential, entry_id, request.reason)
+    )
+
+
+@router.post("/admin/entries/{entry_id}/move-to-self", response_model=MoveToSelfOut)
+async def admin_move_to_self(
+    entry_id: str, request: MoveToSelfRequest, credential: CredentialDep, app: AppDep
+) -> MoveToSelfOut:
+    """Move an agent's active fleet memory to its `self` scope (ADR 0145). The reason is required;
+    the author's earlier fleet versions move with it and their pins are removed; 409 for a memory
+    that is not an active fleet memory or that replaced another agent's fleet memory. Audited as
+    ``entry.move_to_self``."""
+    require_admin(credential, "the admin move to self")
+    return MoveToSelfOut.from_move(
+        await app.governance_service.move_to_self(credential, entry_id, request.reason)
     )
 
 

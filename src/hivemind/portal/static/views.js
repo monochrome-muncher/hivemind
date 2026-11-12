@@ -93,7 +93,7 @@ export async function viewMemories(root) {
 
   fill(root,
     statusCard(me),
-    pageHead("Its memories", `Everything ${me.name} wrote${inherited(me)}, newest first, withdrawn and superseded ones included unless you pick a state. Open one to read it in full or withdraw it.`, refreshButton()),
+    pageHead("Its memories", `Everything ${me.name} wrote${inherited(me)}, newest first, withdrawn and superseded ones included unless you pick a state. Open one to read it in full, withdraw it, or move a fleet memory to self.`, refreshButton()),
     card(null, form, { className: "card-filters" }),
     memories.el);
   await memories.load(true);

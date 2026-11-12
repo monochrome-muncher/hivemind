@@ -35,7 +35,8 @@ from hivemind.store.migrate import (
     rollback as _guarded_rollback,
 )
 
-HEAD = "0034.agent-role"
+HEAD = "0035.entry-move-to-self"
+ID_0034 = "0034.agent-role"  # the head before 0035
 ID_0033 = "0033.fleet-phase"  # the head before 0034
 ID_0032 = "0032.entry-redact"  # the head before 0033
 ID_0031 = "0031.entry-restore"  # the head before 0032
@@ -84,19 +85,21 @@ CHAIN = [
     ID_0031,
     ID_0032,
     ID_0033,
+    ID_0034,
     HEAD,
 ]
 
 
 async def rollback(dsn: str, dim: int, count: int = 1, **confirm: bool) -> list[str]:
     """The per-migration tests below exercise what each older rollback does
-    to its own schema, so they step over `0034`, `0033`, `0032`, `0031`, `0030`, `0029`, `0028` and `0027` first (in
+    to its own schema, so they step over `0035`, `0034`, `0033`, `0032`, `0031`, `0030`, `0029`, `0028` and `0027` first (in
     one rollback, so no `schema.rollback` row is written), which have their
     own tests at the end of the file. A test that seeds rows a guard counts
     passes the matching confirmation flag (ADR 0119); the returned ids are
     those of the requested `count` migrations below `0027`."""
     steps = {
-        HEAD: 8,
+        HEAD: 9,
+        ID_0034: 8,
         ID_0033: 7,
         ID_0032: 6,
         ID_0031: 5,
@@ -1963,7 +1966,7 @@ async def test_0033_rolls_back_refused_without_the_flag_and_drops_the_columns() 
 
 async def test_0034_adds_the_role_column_with_its_check() -> None:
     dsn, dim = _dsn(), Settings().embedding_dim
-    await _start_at_head(dsn, dim)
+    await _start_at(dsn, dim, ID_0034)
     conn = await asyncpg.connect(dsn)
     try:
         column = await conn.fetchrow(
@@ -1995,17 +1998,17 @@ async def test_0034_adds_the_role_column_with_its_check() -> None:
 
 async def test_0034_rolls_back_refused_without_the_flag_and_drops_the_column() -> None:
     dsn, dim = _dsn(), Settings().embedding_dim
-    await _start_at_head(dsn, dim)
+    await _start_at(dsn, dim, ID_0034)
     await _insert_audit(dsn, "agent.role_set", "fleet.phase_set")
 
     with pytest.raises(RollbackRefused) as exc:
         await _guarded_rollback(dsn, dim, count=1)
-    assert HEAD in str(exc.value)
+    assert ID_0034 in str(exc.value)
     assert "agent.role_set" in str(exc.value)
     assert "--discard-audit-rows" in str(exc.value)
-    assert await current_schema_version(dsn) == HEAD
+    assert await current_schema_version(dsn) == ID_0034
 
-    assert await _guarded_rollback(dsn, dim, count=1, discard_audit_rows=True) == [HEAD]
+    assert await _guarded_rollback(dsn, dim, count=1, discard_audit_rows=True) == [ID_0034]
     assert await current_schema_version(dsn) == ID_0033
     assert await _audit_actions(dsn) == ["fleet.phase_set", "schema.rollback"]
     conn = await asyncpg.connect(dsn)
@@ -2021,6 +2024,71 @@ async def test_0034_rolls_back_refused_without_the_flag_and_drops_the_column() -
             await conn.execute(
                 "INSERT INTO audit_log (actor_kind, actor, action) "
                 "VALUES ('cli', 'x', 'agent.role_clear')"
+            )
+    finally:
+        await conn.close()
+    await migrate(dsn, dim)
+
+
+# ADR 0145: 0035 adds the `entry.move_to_self` audit action and its author index.
+
+
+async def test_0035_adds_the_move_to_self_action_and_its_index() -> None:
+    dsn, dim = _dsn(), Settings().embedding_dim
+    await _start_at_head(dsn, dim)
+    conn = await asyncpg.connect(dsn)
+    try:
+        assert (
+            await conn.fetchval(
+                "SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
+                "WHERE c.relname = 'audit_log_move_to_self_author_idx'"
+            )
+            is True
+        )
+        await conn.execute(
+            "INSERT INTO audit_log (actor_kind, actor, action, target) "
+            "VALUES ('admin_key', 'admin:1', 'entry.move_to_self', 't')"
+        )
+    finally:
+        await conn.close()
+
+
+async def test_rolling_back_0035_is_guarded_by_its_own_rows() -> None:
+    """The rollback drops the `entry.move_to_self` rows its older CHECK cannot hold, so it needs
+    `--discard-audit-rows`; the moved memories stay `self`."""
+    dsn, dim = _dsn(), Settings().embedding_dim
+    await _start_at_head(dsn, dim)
+    conn = await asyncpg.connect(dsn)
+    try:
+        await conn.execute("DELETE FROM audit_log")
+        await conn.execute(
+            "INSERT INTO entries (kind, summary, author, agent, scope, occurred_at) "
+            "VALUES ('fact', 'moved', 'a', 'a', 'self', now())"
+        )
+    finally:
+        await conn.close()
+    await _insert_audit(dsn, "entry.move_to_self", "fleet.merge")
+
+    with pytest.raises(RollbackRefused, match=r"entry\.move_to_self"):
+        await _guarded_rollback(dsn, dim, count=1)
+    assert await current_schema_version(dsn) == HEAD
+
+    assert await _guarded_rollback(dsn, dim, count=1, discard_audit_rows=True) == [HEAD]
+    assert await current_schema_version(dsn) == ID_0034
+    assert await _audit_actions(dsn) == ["fleet.merge", "schema.rollback"]
+    conn = await asyncpg.connect(dsn)
+    try:
+        assert await conn.fetchval("SELECT scope FROM entries WHERE author = 'a'") == "self"
+        assert (
+            await conn.fetchval(
+                "SELECT count(*) FROM pg_class WHERE relname = 'audit_log_move_to_self_author_idx'"
+            )
+            == 0
+        )
+        with pytest.raises(asyncpg.CheckViolationError):
+            await conn.execute(
+                "INSERT INTO audit_log (actor_kind, actor, action) "
+                "VALUES ('cli', 'x', 'entry.move_to_self')"
             )
     finally:
         await conn.close()

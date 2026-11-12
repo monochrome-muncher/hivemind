@@ -1,5 +1,6 @@
-"""Governance (SPEC.md §4.1, §8): withdrawal, restore and redaction, plus the one service object the
-surfaces hold; import feedback, pin and write names from their own modules."""
+"""Governance (SPEC.md §4.1, §8): withdrawal, restore, redaction and the move to `self`, plus the
+one service object the surfaces hold; import feedback, pin and write names from their own
+modules."""
 
 from __future__ import annotations
 
@@ -7,7 +8,7 @@ from datetime import timedelta
 
 from hivemind.config import SearchConfig
 from hivemind.domain.audit import AuditAction
-from hivemind.domain.entry import Entry
+from hivemind.domain.entry import Entry, EntryState
 from hivemind.domain.feedback import (
     FeedbackLogFilters,
     FeedbackLogItem,
@@ -17,9 +18,10 @@ from hivemind.domain.feedback import (
 )
 from hivemind.domain.pin import Pin, PinnedEntry
 from hivemind.domain.redaction import RedactOutcome
+from hivemind.domain.self_move import SelfMove
 from hivemind.domain.validation import MAX_REASON_CHARS, InvalidInput, check_text
 from hivemind.ports import Credential, Store
-from hivemind.services.audit import record_admin_action
+from hivemind.services.audit import audit_unpins, record_admin_action
 from hivemind.services.chain import get_visible_entry
 from hivemind.services.errors import EntryNotActive, EntryNotFound, PermissionDenied
 from hivemind.services.feedback import FeedbackOutcome, FeedbackService
@@ -79,6 +81,52 @@ class GovernanceService:
         )
         await self._pins.unpin_withdrawn(credential, entry)
         return withdrawn
+
+    async def move_to_self(
+        self, credential: Credential, entry_id: str, reason: str, via: str | None = None
+    ) -> SelfMove:
+        """Narrow an active fleet memory to `self` (ADR 0145): the admin, or the author or a
+        successor through the portal (``via: "portal"``). A reason is required; the move and the
+        pins it removed are audited."""
+        check_text(reason, "reason", MAX_REASON_CHARS)
+        if not reason.strip():
+            raise InvalidInput("reason is required")
+        entry = await self._visible(credential, entry_id)
+        if not (credential.is_admin or credential.owns(entry.author)):
+            raise PermissionDenied("only the author, a successor or an admin may move a memory")
+        if entry.state is not EntryState.ACTIVE:
+            raise EntryNotActive(
+                f"entry {entry.id} is {entry.state.value}; only an active memory can be moved"
+            )
+        try:
+            move = await self._store.move_entry_to_self(entry.id)
+        except KeyError as exc:
+            raise EntryNotFound(f"unknown entry: {entry.id}") from exc
+        detail: dict[str, object] = {
+            "author": entry.author,
+            "fleet_id": entry.fleet_id,
+            "reason": reason.strip(),
+            "earlier_versions": list(move.earlier_versions),
+        }
+        if via is not None:
+            detail["via"] = via
+        await record_admin_action(
+            self._store, credential, AuditAction.ENTRY_MOVE_TO_SELF, entry.id, detail
+        )
+        by_fleet: dict[str, list[str]] = {}
+        for pin in move.unpinned:
+            by_fleet.setdefault(pin.fleet_id, []).append(pin.entry_id)
+        for fleet_id, pin_ids in by_fleet.items():
+            await audit_unpins(
+                self._store,
+                credential,
+                entry.id,
+                fleet_id,
+                pin_ids,
+                reason="moved_to_self",
+                via=via,
+            )
+        return move
 
     async def restore(self, credential: Credential, entry_id: str, reason: str) -> Entry:
         """Put a withdrawn memory back, admin only (ADR 0124); the store refuses what the chain or

@@ -51,6 +51,8 @@ def audit_query(filters: AuditFilters, limit: int) -> tuple[str, list[Any]]:
             f"OR (action = 'entry.restore' AND detail->>'author' = ANY({names})) "
             # And 0032's, for a redaction.
             f"OR (action = 'entry.redact' AND detail->>'author' = ANY({names})) "
+            # And 0035's, for a move to self.
+            f"OR (action = 'entry.move_to_self' AND detail->>'author' = ANY({names})) "
             f"OR (action = 'fleet.move_agents' AND detail->'agents' ?| {names}) "
             f"OR (action IN ('agent.retire', 'agent.retire_undo') "
             f"AND detail->>'successor' = ANY({names})))"

@@ -132,7 +132,9 @@ key and agent keys cannot sign in here.
   agents are retired to a successor or revoked in one step.
 - **Browse and search every memory**, read one in full with its history
   and feedback, withdraw it if it should not be there, restore one that
-  was withdrawn by mistake, and read who rated which memory and why. If a
+  was withdrawn by mistake, move a fleet memory that should have been
+  private to its author's `self` scope, and read who rated which memory
+  and why. If a
   replaced or withdrawn memory holds a password or personal data, you can
   **redact** it: its text is wiped for good. The Health page lists what
   agents flagged as `stale` or `wrong`.
@@ -174,7 +176,8 @@ and sign in with that agent's key.
   written or pinned since the last visit, and search everything the key
   can read (these searches do not count in the fleet's numbers).
 - **Act on a memory**: withdraw one that is wrong (the reason goes into
-  the audit log), pin or unpin one if the agent may, or clean up after
+  the audit log), move a fleet memory that was meant to be private to
+  `self`, so only the agent keeps it, pin or unpin one if the agent may, or clean up after
   the agent over a time window. Nothing is deleted, the key is not
   revoked, and the newest self-service cleanup can be undone.
 - **Lock the key** if it leaked, with **This key leaked**, and download

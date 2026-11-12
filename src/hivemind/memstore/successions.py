@@ -19,18 +19,6 @@ from hivemind.memstore.state import MemoryState
 
 
 class SuccessionStore(MemoryState):
-    def _inherited(self, name: str) -> tuple[str, ...]:
-        """The agents handing down to ``name``, transitively. Callers hold the lock."""
-        found: set[str] = set()
-        frontier = [name]
-        while frontier:
-            current = frontier.pop()
-            for s in self._successions.values():
-                if s.successor == current and s.retired_agent not in found:
-                    found.add(s.retired_agent)
-                    frontier.append(s.retired_agent)
-        return tuple(sorted(found))
-
     async def retire_agent(self, retired: str, successor: str, by: str) -> Succession:
         if retired == successor:
             raise InvalidInput("an agent cannot be its own successor")

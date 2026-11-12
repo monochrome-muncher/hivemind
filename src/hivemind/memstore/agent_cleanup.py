@@ -8,7 +8,7 @@ from collections.abc import Collection, Sequence
 from dataclasses import replace
 from datetime import datetime
 
-from hivemind.domain.access import Visibility, entry_is_visible
+from hivemind.domain.access import SCOPE_FLEET, SCOPE_SELF, Visibility, entry_is_visible
 from hivemind.domain.agent_cleanup import (
     PREVIEW_RESTORE_LIMIT,
     PREVIEW_WITHDRAW_LIMIT,
@@ -256,6 +256,7 @@ class AgentCleanupStore(MemoryState):
                     and entry.state is EntryState.ACTIVE
                     and head is not None
                     and head.state is EntryState.ACTIVE
+                    and self._may_replace_again(entry, item.superseded_by)
                 ):
                     self._entries[item.entry_id] = replace(
                         entry, state=EntryState.SUPERSEDED, superseded_by=item.superseded_by
@@ -271,7 +272,10 @@ class AgentCleanupStore(MemoryState):
                 put, left = self._restore_pins(
                     fleet_id,
                     mine,
-                    lambda e: e.state in (EntryState.ACTIVE, EntryState.SUPERSEDED),
+                    lambda e: (
+                        e.scope == SCOPE_FLEET
+                        and e.state in (EntryState.ACTIVE, EntryState.SUPERSEDED)
+                    ),
                 )
                 restored_pins.extend(put)
                 skipped_pins.extend(left)
@@ -299,3 +303,13 @@ class AgentCleanupStore(MemoryState):
         cleanup_id = canonical_or_same(cleanup_id)
         with self._lock:
             return next((c for c in self._cleanups if c.id == cleanup_id), None)
+
+    def _may_replace_again(self, entry: Entry, successor_id: str) -> bool:
+        """A memory moved to `self` since (ADR 0145) is replaced again only by its owner's
+        version, as PgStore's ``CLEANUP_RESUPERSEDE``. Callers hold the lock."""
+        successor = self._entries.get(successor_id)
+        if entry.scope != SCOPE_SELF:
+            return True
+        return successor is not None and (
+            entry.author == successor.author or entry.author in self._inherited(successor.author)
+        )

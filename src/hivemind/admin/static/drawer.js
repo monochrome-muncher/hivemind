@@ -14,7 +14,8 @@
 // Likewise the pin hooks (pinStatus, pinEntry, unpinEntry): without pinStatus
 // the drawer shows no pin controls (ADR 0116). Redacting a withdrawn memory
 // (ADR 0125) is likewise offered only when the app passes redactEntry: the
-// admin panel does, the agent portal never does.
+// admin panel does, the agent portal never does. Moving a fleet memory to
+// `self` (ADR 0145) needs moveToSelf, and canWithdraw decides who sees it.
 
 import {
   $, h, toast, openModal, closeModal, fmtTime, fmtAgo, kindBadge, stateBadge, copyText, link, verdictBadge, chipButton,
@@ -27,6 +28,7 @@ const config = {
   reasonRequired: false, // whether a withdrawal needs a reason
   redactEntry: null, // (id, reason, confirm) => the answer ({feedback_notes, flag_notes}) when done (ADR 0125)
   restoreEntry: null, // (id, reason) => truthy when restored; without it there is no Restore button
+  moveToSelf: null, // (id, reason) => the answer ({earlier_versions, unpinned}) when moved
   pinStatus: null, // async (entry) => "pinnable" | "pinned" | null (no pin controls)
   pinEntry: null, // (id) => truthy when pinned
   unpinEntry: null, // (id) => the answer ({removed}) when done
@@ -141,6 +143,10 @@ function render(e) {
     ? h("button", { type: "button", class: "btn btn-danger", text: "Withdraw…", onclick: () => withdrawDialog(e) })
     : null;
 
+  const moveToSelf = e.state === "active" && e.scope === "fleet" && config.moveToSelf && config.canWithdraw(e)
+    ? h("button", { type: "button", class: "btn", text: "Move to self…", onclick: () => moveToSelfDialog(e) })
+    : null;
+
   const redact = e.state !== "active" && !e.redacted_at && config.redactEntry
     ? h("button", { type: "button", class: "btn btn-danger", text: "Redact…", onclick: () => redactDialog(e) })
     : null;
@@ -209,6 +215,11 @@ function render(e) {
     hist.superseded && hist.superseded.length ? related("Superseded versions", hist.superseded, "") : null,
 
     pinSection(e),
+
+    moveToSelf ? h("section", { class: "drawer-sec" },
+      h("h3", { text: "Move to self" }),
+      h("p", { class: "muted small", text: "For a memory written to the fleet that was meant to be private. It stays active for its author, and other agents stop seeing it. Unlike a withdrawal, the author keeps finding it." }),
+      moveToSelf) : null,
 
     withdraw ? h("section", { class: "drawer-sec drawer-danger" },
       h("h3", { text: "Withdraw" }),
@@ -297,6 +308,44 @@ function redactDialog(e) {
           if (n) todo.push(`${n} feedback ${n === 1 ? "note" : "notes"} (${done.flag_notes || 0} flag notes)`);
           if (w) todo.push(`${w} withdrawal ${w === 1 ? "reason" : "reasons"} in the audit log`);
           toast(todo.length ? `Memory redacted. Review ${todo.join(" and ")}: they may quote the text.` : "Memory redacted");
+          await show(e.id);
+          onChange();
+        },
+      },
+    ],
+  });
+}
+
+function moveToSelfDialog(e) {
+  const reason = h("textarea", {
+    id: "f-move-reason", rows: "3", maxlength: "500", required: true,
+    placeholder: "Why should only its author see this?",
+  });
+  openModal({
+    title: "Move this memory to self?",
+    body: [
+      h("p", { class: "plain", text: e.summary }),
+      h("p", { class: "muted small", text: `Among agents, only ${e.author} (and any successor it is retired in favour of) will see it. Its earlier versions by the same author move too, and their pins are removed. Ratings stay on it. A memory that replaced another agent's fleet memory cannot be moved. To share it again, the author supersedes it with a fleet memory. The reason is kept in the audit log.` }),
+      h("div", { class: "field" }, h("label", { for: "f-move-reason", text: "Reason" }), reason),
+    ],
+    actions: [
+      { label: "Cancel" },
+      {
+        label: "Move to self",
+        class: "btn-primary",
+        submit: true,
+        onClick: async () => {
+          const text = reason.value.trim();
+          if (!text) throw new Error("Say why it is being moved: the reason is kept in the audit log.");
+          const done = await config.moveToSelf(e.id, text);
+          if (!done) return;
+          closeModal();
+          const extra = [];
+          const v = done.earlier_versions.length;
+          const p = done.unpinned.length;
+          if (v) extra.push(`${v} earlier ${v === 1 ? "version" : "versions"} moved too`);
+          if (p) extra.push(`${p} ${p === 1 ? "pin" : "pins"} removed`);
+          toast(extra.length ? `Moved to self: ${extra.join(", ")}` : "Moved to self");
           await show(e.id);
           onChange();
         },

@@ -97,6 +97,7 @@ def referenced_entry_id(record: AuditRecord) -> str | None:
         AuditAction.ENTRY_WITHDRAW,
         AuditAction.ENTRY_RESTORE,
         AuditAction.ENTRY_REDACT,
+        AuditAction.ENTRY_MOVE_TO_SELF,
         AuditAction.ENTRY_PIN,
         AuditAction.ENTRY_UNPIN,
     ):
@@ -168,6 +169,7 @@ _UNPIN_REASONS = {
     "fleet_move_undo": "by an undone fleet move",
     "fleet_merge_undo": "by an undone fleet merge",
     "fleet_move": "by a fleet move",
+    "moved_to_self": "the memory was moved to self",
 }
 
 
@@ -276,6 +278,20 @@ def _summary(
             if author in ctx.agents:
                 reason = _text(d.get("reason"))
             text = f"An admin redacted a memory by {ctx.agent(author)}"
+        case AuditAction.ENTRY_MOVE_TO_SELF:
+            author = d.get("author")
+            if author in ctx.agents:
+                reason = _text(d.get("reason"))
+            if agent_acted and record.actor in ctx.agents:
+                text = (
+                    "Moved a memory to self"
+                    if author == record.actor
+                    else f"Moved a memory inherited from {ctx.agent(author)} to self"
+                )
+            elif agent_acted:
+                text = f"A memory by {ctx.agent(author)} was moved to self"
+            else:
+                text = f"An admin moved a memory by {ctx.agent(author)} to self"
         case AuditAction.ENTRY_PIN:
             text = "Pinned a memory"
             if isinstance(d.get("fleet_id"), str):

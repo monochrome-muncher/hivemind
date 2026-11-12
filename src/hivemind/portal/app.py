@@ -52,6 +52,7 @@ _ALLOWED = allowlist(
         ("GET", r"portal/flagged"),
         ("GET", r"portal/relied-on"),
         ("POST", r"portal/entries/[^/]+/withdraw"),
+        ("POST", r"portal/entries/[^/]+/move-to-self"),
         ("PUT", r"portal/entries/[^/]+/pin"),
         ("DELETE", r"portal/entries/[^/]+/pin"),
         # Agent self-service cleanup (ADR 0118).

@@ -333,6 +333,13 @@ curl -s -H "X-API-Key: $ADMIN_KEY" \
   detail `{author, previous_reason, reason}`). Rolling back `0031` deletes
   those rows (it needs `--discard-audit-rows`); the restored memories stay
   active.
+- **Moves to self are audited** (ADR 0145, migration `0035`): moving a
+  fleet memory to `self` from the admin panel or the portal writes
+  `entry.move_to_self` (target: the entry id, detail `{author, fleet_id,
+  reason, earlier_versions}`, `via: "portal"` from the portal) and one
+  `entry.unpin` per fleet whose pins it removed. Rolling back `0035`
+  deletes those rows (it needs `--discard-audit-rows`); the moved
+  memories stay `self`.
 - **Key locks are audited** (ADR 0117, migration `0025`): an agent locking
   its own key from the portal writes `agent_key.lock` with
   `actor_kind = agent_key`, the agent's name, the key fingerprint and
@@ -341,7 +348,7 @@ curl -s -H "X-API-Key: $ADMIN_KEY" \
   must stay dead.
 - **Rollbacks are audited and guarded** (ADR 0119, migration `0027`).
   Several shipped rollbacks (`0009`, `0014`, `0017`, `0019`, `0020`,
-  `0022`, `0023`, `0024`, `0025`, `0027`, `0029`, `0031`, `0032`, `0033`) delete the audit rows whose
+  `0022`, `0023`, `0024`, `0025`, `0027`, `0029`, `0031`, `0032`, `0033`, `0034`, `0035`) delete the audit rows whose
   action needs a wider `CHECK`, `0006`'s sets revoked agents back to
   `active` (reviving their key rows), and `0025`'s drops the lock mark, so
   locked keys work again. `make rollback` (`hivemind-migrate --rollback N`)

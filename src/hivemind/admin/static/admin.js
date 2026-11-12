@@ -135,6 +135,7 @@ configureDrawer({
   withdrawEntry: (id, reason) => guarded(() => api("POST", `admin/entries/${encodeURIComponent(id)}/withdraw`, { body: reason ? { reason } : {} })),
   redactEntry: (id, reason, confirm) => guarded(() => api("POST", `admin/entries/${encodeURIComponent(id)}/redact`, { body: { reason, confirm } })),
   restoreEntry: (id, reason) => guarded(() => api("POST", `admin/entries/${encodeURIComponent(id)}/restore`, { body: { reason } })),
+  moveToSelf: (id, reason) => guarded(() => api("POST", `admin/entries/${encodeURIComponent(id)}/move-to-self`, { body: { reason } })),
   fleetName,
   authorHref: (author) => agentHref(author),
   fleetHref: (fleet) => memoriesHref({ fleet }),

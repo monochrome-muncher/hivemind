@@ -9,7 +9,7 @@ from dataclasses import replace
 from datetime import datetime
 from typing import NamedTuple
 
-from hivemind.domain.access import Fleet, FleetExists, UnknownFleet
+from hivemind.domain.access import SCOPE_FLEET, Fleet, FleetExists, UnknownFleet
 from hivemind.domain.entry import Entry, EntryState
 from hivemind.domain.fleet_merge import (
     KIND_MOVE,
@@ -327,6 +327,7 @@ class FleetMergeStore(MemoryState):
             for d in mine
             if (e := self._entries.get(d.entry_id)) is not None
             and e.fleet_id == source.id
+            and e.scope == SCOPE_FLEET
             and (source.id, d.entry_id) not in self._pins
             and d.entry_id not in back_pinned
         ]
@@ -355,7 +356,7 @@ class FleetMergeStore(MemoryState):
         Callers hold the lock."""
         for fleet in (target,) if record.kind == KIND_MOVE else (source, target):
             mine = [d for d in record.dropped_pins if d.fleet_id == fleet.id]
-            put, left = self._restore_pins(fleet.id, mine, lambda e: True)
+            put, left = self._restore_pins(fleet.id, mine, lambda e: e.scope == SCOPE_FLEET)
             pins.restored.extend(put)
             pins.skipped.extend(left)
 
