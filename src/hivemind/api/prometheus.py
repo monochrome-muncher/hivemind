@@ -33,7 +33,7 @@ from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
 from prometheus_client.exposition import generate_latest
 from prometheus_client.registry import Collector
 
-from hivemind.domain.usage import HealthUsage, UsageReport
+from hivemind.domain.usage import FleetHealthUsage, HealthUsage, RivalLifetime, UsageReport
 from hivemind.http_metrics import UNMATCHED_ROUTE, ProcessMetrics, RequestMetrics
 
 logger = logging.getLogger(__name__)
@@ -185,23 +185,55 @@ def _optional(name: str, doc: str, value: float | None) -> Iterator[GaugeMetricF
         yield _gauge(name, doc, [], {"": value})
 
 
+_HEALTH = "hivemind_health_"
+
+
 def _health_families(health: HealthUsage) -> Iterator[GaugeMetricFamily]:
-    p = "hivemind_health_"
-    yield from _optional(
-        p + "helpful_with_note_ratio",
-        "Share of current helpful verdicts that carry a note",
-        health.helpful_with_note_share.share,
+    yield from _feedback_families(health)
+    yield from _balance_families(health)
+    yield from _rival_families(health.rival_lifetime)
+    yield from _topic_families(health)
+    yield from _fleet_families(health.by_fleet)
+    yield _nested_gauge(
+        _HEALTH + "role_activity_30d",
+        "Last 30 days of writes, writes tagged alternative or dead-end, supersessions written "
+        "and verdicts given, for scouts and for everyone else (ADR 0144)",
+        ["role", "motion"],
+        {role: asdict(activity) for role, activity in health.role_activity_30d.items()},
     )
-    yield from _optional(
-        p + "sourced_ratio",
-        "Share of active org- and fleet-scope facts and insights with at least one source",
-        health.sourced_share.share,
-    )
-    yield from _optional(
-        p + "correction_latency_p50_seconds",
-        "Median seconds from an entry's first stale/wrong verdict to its successor, last 90 days",
-        health.correction_latency_p50_seconds,
-    )
+
+
+def _nested_gauge(
+    name: str, doc: str, labels: list[str], values: Mapping[str, Mapping[str, float]]
+) -> GaugeMetricFamily:
+    """A gauge with two labels, from ``{first label: {second label: value}}``."""
+    family = GaugeMetricFamily(name, doc, labels=labels)
+    for outer, inner in values.items():
+        for key, value in inner.items():
+            family.add_metric([outer, key], float(value))
+    return family
+
+
+def _feedback_families(health: HealthUsage) -> Iterator[GaugeMetricFamily]:
+    """How verdicts are given and acted on, and what is left unchecked."""
+    for name, doc, share in (
+        (
+            "helpful_with_note_ratio",
+            "Share of current helpful verdicts that carry a note",
+            health.helpful_with_note_share.share,
+        ),
+        (
+            "sourced_ratio",
+            "Share of active org- and fleet-scope facts and insights with at least one source",
+            health.sourced_share.share,
+        ),
+        (
+            "correction_latency_p50_seconds",
+            "Median seconds from an entry's first stale/wrong verdict to its successor, last 90 days",
+            health.correction_latency_p50_seconds,
+        ),
+    ):
+        yield from _optional(_HEALTH + name, doc, share)
     for name, doc in (
         ("flagged_backlog_14d", "Active entries flagged stale or wrong more than 14 days ago"),
         (
@@ -211,117 +243,132 @@ def _health_families(health: HealthUsage) -> Iterator[GaugeMetricFamily]:
         ("floating_gap", "Active entries older than 90 days with no feedback in 90 days"),
         ("self_to_fleet_promotions", "Fleet entries superseding a self entry, last 90 days"),
     ):
-        yield _gauge(p + name, doc, [], {"": getattr(health, name)})
-    yield from _optional(
-        p + "top3_author_write_ratio",
-        "Share of the last 90 days' writes made by the three busiest authors",
-        health.top3_author_write_share.share,
-    )
-    yield from _optional(
-        p + "top3_reporter_verdict_ratio",
-        "Share of the last 90 days' verdicts given by the three busiest reporters",
-        health.top3_reporter_verdict_share.share,
-    )
-    yield from _optional(
-        p + "sibling_verdict_ratio",
-        "Share of the last 90 days' verdicts given to an entry by a sibling agent"
-        " (same self-reported owner alias, different agent)",
-        health.sibling_verdict_share.share,
-    )
-    yield from _optional(
-        p + "top3_owner_verdict_ratio",
-        "Share of the last 90 days' verdicts given by the three busiest owners"
-        " (self-reported owner aliases; no alias is its own owner)",
-        health.top3_owner_verdict_share.share,
-    )
-    yield from _optional(
-        p + "synthesis_ratio",
-        "Share of active insights with at least two see-also links",
-        health.synthesis_rate.share,
-    )
-    yield from _optional(
-        p + "supersessions_per_100_writes",
-        "Supersessions per 100 writes, last 90 days",
-        health.supersessions_per_100_writes.per_100,
-    )
-    yield from _optional(
-        p + "echo_ratio",
-        "Share of the newest sampled writes (30 days) with an earlier entry at cosine >= 0.9",
-        health.echo_rate.share,
-    )
-    yield from _optional(
-        p + "grounding_ratio",
-        "Share of new (30 days) fleet/org insights and decisions with a source that is not an entry",
-        health.grounding_share.share,
-    )
-    yield from _optional(
-        p + "top3_agent_label_write_ratio",
-        "Share of the last 30 days' writes under the three busiest agent labels",
-        health.top3_agent_label_write_share.share,
-    )
-    yield from _optional(
-        p + "top3_agent_label_verdict_ratio",
-        "Share of the last 30 days' verdicts under the three busiest agent labels",
-        health.top3_agent_label_verdict_share.share,
-    )
-    rival = health.rival_lifetime
+        yield _gauge(_HEALTH + name, doc, [], {"": getattr(health, name)})
+
+
+def _balance_families(health: HealthUsage) -> Iterator[GaugeMetricFamily]:
+    """Whether a few voices dominate, and whether the hive synthesises rather than echoes."""
+    for name, doc, share in (
+        (
+            "top3_author_write_ratio",
+            "Share of the last 90 days' writes made by the three busiest authors",
+            health.top3_author_write_share.share,
+        ),
+        (
+            "top3_reporter_verdict_ratio",
+            "Share of the last 90 days' verdicts given by the three busiest reporters",
+            health.top3_reporter_verdict_share.share,
+        ),
+        (
+            "sibling_verdict_ratio",
+            "Share of the last 90 days' verdicts given to an entry by a sibling agent"
+            " (same self-reported owner alias, different agent)",
+            health.sibling_verdict_share.share,
+        ),
+        (
+            "top3_owner_verdict_ratio",
+            "Share of the last 90 days' verdicts given by the three busiest owners"
+            " (self-reported owner aliases; no alias is its own owner)",
+            health.top3_owner_verdict_share.share,
+        ),
+        (
+            "synthesis_ratio",
+            "Share of active insights with at least two see-also links",
+            health.synthesis_rate.share,
+        ),
+        (
+            "supersessions_per_100_writes",
+            "Supersessions per 100 writes, last 90 days",
+            health.supersessions_per_100_writes.per_100,
+        ),
+        (
+            "echo_ratio",
+            "Share of the newest sampled writes (30 days) with an earlier entry at cosine >= 0.9",
+            health.echo_rate.share,
+        ),
+        (
+            "grounding_ratio",
+            "Share of new (30 days) fleet/org insights and decisions with a source that is not an entry",
+            health.grounding_share.share,
+        ),
+        (
+            "top3_agent_label_write_ratio",
+            "Share of the last 30 days' writes under the three busiest agent labels",
+            health.top3_agent_label_write_share.share,
+        ),
+        (
+            "top3_agent_label_verdict_ratio",
+            "Share of the last 30 days' verdicts under the three busiest agent labels",
+            health.top3_agent_label_verdict_share.share,
+        ),
+    ):
+        yield from _optional(_HEALTH + name, doc, share)
+
+
+def _rival_families(rival: RivalLifetime) -> Iterator[GaugeMetricFamily]:
+    by_kind = {
+        "alternative": rival.alternative,
+        "conflict": rival.conflict,
+        "contested": rival.contested,
+    }
     yield _gauge(
-        p + "rival_entries",
+        _HEALTH + "rival_entries",
         "Active alternative, Conflict: and contested entries",
         ["kind"],
-        {
-            "alternative": rival.alternative.count,
-            "conflict": rival.conflict.count,
-            "contested": rival.contested.count,
-        },
+        {kind: ages.count for kind, ages in by_kind.items()},
     )
     yield _gauge(
-        p + "rival_median_age_seconds",
+        _HEALTH + "rival_median_age_seconds",
         "Median age of those entries (no series while there are none)",
         ["kind"],
         {
             kind: ages.median_age_seconds
-            for kind, ages in (
-                ("alternative", rival.alternative),
-                ("conflict", rival.conflict),
-                ("contested", rival.contested),
-            )
+            for kind, ages in by_kind.items()
             if ages.median_age_seconds is not None
         },
     )
+
+
+def _topic_families(health: HealthUsage) -> Iterator[GaugeMetricFamily]:
     # Tags are user data and /metrics has no key: only the mean change leaves the process.
     dispersion = health.topic_dispersion
     yield _gauge(
-        p + "topic_tags_measured",
+        _HEALTH + "topic_tags_measured",
         "Busy tags with enough entries in both 30-day windows to measure dispersion",
         [],
         {"": len(dispersion)},
     )
     yield from _optional(
-        p + "topic_cosine_change",
+        _HEALTH + "topic_cosine_change",
         "Mean change of the pairwise cosine across the measured tags, last 30 days against the 30 before",
         sum(d.change for d in dispersion) / len(dispersion) if dispersion else None,
     )
     yield _gauge(
-        p + "gap_entries",
+        _HEALTH + "gap_entries",
         "Active entries tagged anomaly, open-question or dead-end",
         ["tag"],
         health.gap_tag_counts,
     )
     yield _gauge(
-        p + "breathing_7d",
+        _HEALTH + "breathing_7d",
         "Writes, verdicts, supersessions and withdrawals of the last 7 days",
         ["motion"],
         asdict(health.breathing_7d),
     )
-    by_fleet = health.by_fleet
-    sourced = GaugeMetricFamily(
-        p + "fleet_sourced_ratio", "Sourced share per fleet (entries' fleet_id)", labels=["fleet"]
+
+
+def _fleet_families(by_fleet: Mapping[str, FleetHealthUsage]) -> Iterator[GaugeMetricFamily]:
+    """The per-fleet figures, by the entries' ``fleet_id``."""
+    yield _gauge(
+        _HEALTH + "fleet_sourced_ratio",
+        "Sourced share per fleet (entries' fleet_id)",
+        ["fleet"],
+        {
+            f: r.sourced_share.share
+            for f, r in by_fleet.items()
+            if r.sourced_share.share is not None
+        },
     )
-    for fleet, row in by_fleet.items():
-        if row.sourced_share.share is not None:
-            sourced.add_metric([fleet], float(row.sourced_share.share))
-    yield sourced
     for name, doc in (
         ("flagged_backlog_14d", "Active entries flagged stale or wrong more than 14 days ago"),
         (
@@ -331,45 +378,29 @@ def _health_families(health: HealthUsage) -> Iterator[GaugeMetricFamily]:
         ("floating_gap", "Active entries older than 90 days with no feedback in 90 days"),
     ):
         yield _gauge(
-            p + "fleet_" + name,
+            _HEALTH + "fleet_" + name,
             doc + ", per fleet",
             ["fleet"],
             {f: getattr(r, name) for f, r in by_fleet.items()},
         )
     yield _gauge(
-        p + "fleet_active_entries",
+        _HEALTH + "fleet_active_entries",
         "Active entries per fleet (entries' fleet_id)",
         ["fleet"],
         {f: r.active_entries for f, r in by_fleet.items()},
     )
-    fleet_breathing = GaugeMetricFamily(
-        p + "fleet_breathing_7d",
+    yield _nested_gauge(
+        _HEALTH + "fleet_breathing_7d",
         "Writes, verdicts, supersessions and withdrawals of the last 7 days per fleet",
-        labels=["fleet", "motion"],
+        ["fleet", "motion"],
+        {f: asdict(r.breathing_7d) for f, r in by_fleet.items()},
     )
-    for fleet, row in by_fleet.items():
-        for motion, count in asdict(row.breathing_7d).items():
-            fleet_breathing.add_metric([fleet, motion], float(count))
-    yield fleet_breathing
-    gap = GaugeMetricFamily(
-        p + "fleet_gap_entries",
+    yield _nested_gauge(
+        _HEALTH + "fleet_gap_entries",
         "Active gap-tagged entries per fleet and tag",
-        labels=["fleet", "tag"],
+        ["fleet", "tag"],
+        {f: r.gap_tag_counts for f, r in by_fleet.items()},
     )
-    for fleet, row in by_fleet.items():
-        for tag, count in row.gap_tag_counts.items():
-            gap.add_metric([fleet, tag], float(count))
-    yield gap
-    role_activity = GaugeMetricFamily(
-        p + "role_activity_30d",
-        "Last 30 days of writes, writes tagged alternative or dead-end, supersessions written "
-        "and verdicts given, for scouts and for everyone else (ADR 0144)",
-        labels=["role", "motion"],
-    )
-    for role, activity in health.role_activity_30d.items():
-        for motion, count in asdict(activity).items():
-            role_activity.add_metric([role, motion], float(count))
-    yield role_activity
 
 
 class PrometheusMetrics:
