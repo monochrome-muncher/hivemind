@@ -124,10 +124,22 @@ class TopicDispersion(BaseModel):
     change: float
 
 
+class Breathing(BaseModel):
+    """Activity in the last 7 days (ADR 0142): entries written, verdicts
+    given, entries superseded, entries withdrawn."""
+
+    writes: int = 0
+    verdicts: int = 0
+    supersessions: int = 0
+    withdrawals: int = 0
+
+
 class FleetHealthMetrics(BaseModel):
     """The per-fleet part of the health report (ADR 0075), keyed by entries'
-    ``fleet_id``."""
+    ``fleet_id``. ``active_entries`` is what the fleet holds now."""
 
+    active_entries: int = 0
+    breathing_7d: Breathing = Breathing()
     sourced_share: Share = Share()
     flagged_backlog_14d: int = 0
     orphaned_flagged: int = 0
@@ -164,6 +176,7 @@ class HealthMetrics(BaseModel):
     grounding_share: Share = Share()
     top3_agent_label_write_share: LabelShare = LabelShare()
     top3_agent_label_verdict_share: LabelShare = LabelShare()
+    breathing_7d: Breathing = Breathing()
     by_fleet: dict[str, FleetHealthMetrics] = {}
 
 

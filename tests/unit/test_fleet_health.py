@@ -105,6 +105,11 @@ async def test_the_report_folds_the_store_aggregates() -> None:
     }
     assert health.by_fleet["blue"].sourced_share.share == 0.5
     assert health.by_fleet["blue"].gap_tag_counts["anomaly"] == 0  # superseded: not active
+    assert asdict(health.breathing_7d) == {
+        "writes": 3, "verdicts": 3, "supersessions": 1, "withdrawals": 0,
+    }  # fmt: skip
+    assert health.by_fleet["blue"].breathing_7d == health.breathing_7d
+    assert health.by_fleet["blue"].active_entries == 2
 
 
 async def test_owner_level_shares_reach_the_report_the_rest_body_and_the_gauges() -> None:
@@ -196,6 +201,14 @@ async def test_prometheus_exposes_the_health_gauges() -> None:
     assert got[("hivemind_health_gap_entries", (("tag", "dead-end"),))] == 1
     assert got[("hivemind_health_fleet_gap_entries", (("fleet", "blue"), ("tag", "dead-end")))] == 1
     assert got[("hivemind_health_sourced_ratio", ())] == 0.0
+    assert got[("hivemind_health_fleet_active_entries", (("fleet", "blue"),))] == 1
+    motions = ("writes", "verdicts", "supersessions", "withdrawals")
+    for motion in motions:
+        assert ("hivemind_health_breathing_7d", (("motion", motion),)) in got
+        assert (
+            "hivemind_health_fleet_breathing_7d",
+            (("fleet", "blue"), ("motion", motion)),
+        ) in got
     assert got[("hivemind_health_orphaned_flagged", ())] == 0
     # No verdicts yet: shares without a denominator have no series.
     assert ("hivemind_health_helpful_with_note_ratio", ()) not in got

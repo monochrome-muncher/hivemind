@@ -1165,6 +1165,165 @@
     },
     {
       "type": "row",
+      "title": "Vital signs (ADR 0142, observations only)",
+      "id": 31,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 68
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Echo rate and grounding share",
+      "id": 32,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Collapsing if echo rises above 0.2 or grounding falls below 0.4: lean towards exploring.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 69
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max(hivemind_health_echo_ratio{namespace=~\"$namespace\"})",
+          "legendFormat": "echo rate (30 days)",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max(hivemind_health_grounding_ratio{namespace=~\"$namespace\"})",
+          "legendFormat": "grounding share (30 days)",
+          "refId": "B"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Open rivals, median age",
+      "id": 33,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Scattering if alternatives wait over 60 days or Conflict and contested entries over 30: lean towards settling.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 69
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max by (kind) (hivemind_health_rival_median_age_seconds{namespace=~\"$namespace\"})",
+          "legendFormat": "{{kind}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Breathing, per fleet (7 days)",
+      "id": 34,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Writes and verdicts of the last 7 days. A fleet with active entries and neither is quiet.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 69
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max by (fleet) (hivemind_health_fleet_breathing_7d{namespace=~\"$namespace\",motion=\"writes\"})",
+          "legendFormat": "{{fleet}} writes",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max by (fleet) (hivemind_health_fleet_breathing_7d{namespace=~\"$namespace\",motion=\"verdicts\"})",
+          "legendFormat": "{{fleet}} verdicts",
+          "refId": "B"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "row",
       "title": "Pool",
       "id": 27,
       "collapsed": false,
@@ -1172,7 +1331,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 68
+        "y": 77
       },
       "panels": []
     },
@@ -1189,7 +1348,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 69
+        "y": 78
       },
       "fieldConfig": {
         "defaults": {
@@ -1231,7 +1390,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 69
+        "y": 78
       },
       "fieldConfig": {
         "defaults": {
@@ -1273,7 +1432,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 69
+        "y": 78
       },
       "fieldConfig": {
         "defaults": {

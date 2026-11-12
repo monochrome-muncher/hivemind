@@ -1,5 +1,6 @@
 # OPT-IN Prometheus Operator ServiceMonitors for hivemind-api and hivemind-mcp
-# (ADRs 0050, 0104) — a
+# (ADRs 0050, 0104) and the info-level vital-signs alerts (alerts.yaml, ADR
+# 0142) — a
 # SEPARATE tree: it needs the Operator's CRDs, and plain Prometheus uses the
 # pod annotations instead. Read servicemonitor.yaml's ADJUST notes first.
 #
@@ -16,6 +17,7 @@ kind: Kustomization
 namespace: hivemind
 resources:
   - servicemonitor.yaml
+  - alerts.yaml
 configMapGenerator:
   - name: hivemind-grafana-dashboard
     files:
