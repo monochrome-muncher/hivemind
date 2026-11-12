@@ -349,6 +349,13 @@ tr.clickable:focus-visible { outline: 2px solid var(--ring); outline-offset: -2p
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chips-sm { margin-top: 4px; }
 .chip { font-size: 12px; padding: 1px 8px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); overflow-wrap: anywhere; }
+.chip-button { font: inherit; font-size: 12px; cursor: pointer; }
+.chip-button:hover, .chip-button:focus-visible { border-color: var(--accent); color: var(--text); }
+.more-filters { width: 100%; }
+.more-filters > summary { cursor: pointer; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+.day-range { display: inline-flex; gap: 8px; align-items: center; }
+.day-field { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
+.day-field input { min-width: 0; }
 .badge-kind { background: var(--info-soft); color: var(--info); }
 .badge-kind-decision { background: var(--accent-soft); color: var(--accent-strong); }
 .badge-kind-insight { background: var(--ok-soft); color: var(--ok); }

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -22,6 +23,7 @@ from hivemind.api.routes.shared import (
     listed_with_counts,
     pin_entry,
     run_search,
+    to_utc,
     unpin_entry,
 )
 from hivemind.api.schemas import (
@@ -43,7 +45,7 @@ from hivemind.api.schemas import (
     PortalWithdrawRequest,
     UnpinOut,
 )
-from hivemind.domain.entry import EntryFilters, Kind
+from hivemind.domain.entry import EntryFilters, EntryState, Kind
 from hivemind.domain.feedback import FeedbackLogFilters, Verdict
 from hivemind.domain.validation import (
     MAX_LIMIT,
@@ -73,10 +75,16 @@ async def portal_list_entries(
     app: AppDep,
     kind: Annotated[Kind | None, Query()] = None,
     tags: Annotated[list[str] | None, Query()] = None,
+    entities: Annotated[list[str] | None, Query()] = None,
     scope: Annotated[str | None, Query()] = None,
     fleet_id: IdQuery = None,
     author: ActorQuery = None,
+    occurred_from: Annotated[datetime | None, Query()] = None,
+    occurred_to: Annotated[datetime | None, Query()] = None,
+    created_from: Annotated[datetime | None, Query()] = None,
+    created_to: Annotated[datetime | None, Query()] = None,
     include_inactive: bool = False,
+    state: Annotated[EntryState | None, Query()] = None,
     flagged: bool = False,
     limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = PORTAL_DEFAULT_LIMIT,
     offset: Annotated[int, Query(ge=0, le=MAX_OFFSET)] = 0,
@@ -89,10 +97,16 @@ async def portal_list_entries(
     filters = EntryFilters(
         kind=kind,
         tags=tuple(tags or ()),
+        entities=tuple(entities or ()),
         scope=scope,
         fleet_id=fleet_id,
         author=author,
+        occurred_from=to_utc(occurred_from),
+        occurred_to=to_utc(occurred_to),
+        created_from=to_utc(created_from),
+        created_to=to_utc(created_to),
         include_inactive=include_inactive,
+        state=state,
         flagged=flagged,
     )
     entries = await app.read_service.list(
@@ -121,6 +135,7 @@ async def portal_search(
         credential,
         response,
         fleet_id=request.fleet_id,
+        state=request.state,
         count=False,
         explain=request.explain,
         model=ExplainedHitOut,

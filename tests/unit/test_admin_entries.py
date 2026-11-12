@@ -239,6 +239,34 @@ async def test_admin_list_rows_carry_their_verdict_counts() -> None:
     assert rows[mine.id]["feedback"] is None
 
 
+async def test_admin_list_and_search_take_an_exact_state() -> None:
+    app, _blue, _red, _mine, in_blue, _in_red = await _seed()
+    await app.store.withdraw_entry(in_blue.id, None, by_user="alice")
+    async with make_client(app) as client:
+        listed = await client.get("/v1/admin/entries", params={"state": "withdrawn"}, headers=ADMIN)
+        searched = await client.post(
+            "/v1/admin/search", json={"query": "kaniko", "state": "withdrawn"}, headers=ADMIN
+        )
+        active = await client.get("/v1/admin/entries", params={"state": "active"}, headers=ADMIN)
+        bad = await client.get("/v1/admin/entries", params={"state": "gone"}, headers=ADMIN)
+    assert [e["id"] for e in listed.json()] == [in_blue.id]
+    assert [(h["entry_id"], h["state"]) for h in searched.json()] == [(in_blue.id, "withdrawn")]
+    assert in_blue.id not in {e["id"] for e in active.json()}
+    assert bad.status_code == 422
+
+
+async def test_the_data_plane_ignores_a_state_filter() -> None:
+    app, _blue, _red, _mine, in_blue, _in_red = await _seed()
+    await app.store.withdraw_entry(in_blue.id, None, by_user="alice")
+    async with make_client(app) as client:
+        listed = await client.get("/v1/entries", params={"state": "withdrawn"}, headers=ADMIN)
+        searched = await client.post(
+            "/v1/search", json={"query": "kaniko", "state": "withdrawn"}, headers=ADMIN
+        )
+    assert in_blue.id not in {e["id"] for e in listed.json()}
+    assert in_blue.id not in {h["entry_id"] for h in searched.json()}
+
+
 async def test_admin_search_sees_every_fleet_and_is_not_counted() -> None:
     app, _blue, red, *_ = await _seed()
     async with make_client(app) as client:

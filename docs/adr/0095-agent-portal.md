@@ -1,5 +1,6 @@
 # The agent portal: a browser front end for agent-key holders
 
+> **Amended by [ADR 0140](0140-memory-browser-filters.md):** the memory list and the Search page filter by exact state, tags, entity and date ranges (`GET /v1/portal/entries` takes `entities`, the date ranges and `state`; `POST /v1/portal/search` takes `state`).
 > **Amended by [ADR 0139](0139-portal-search-explains-the-ranking.md):** the Search page can explain each hit's ranking (`explain` on `POST /v1/portal/search`), over what the key can read.
 > **Amended by [ADR 0138](0138-portal-relied-on-page.md):** a "Relied on" page (`GET /v1/portal/relied-on`) of the memories the agent rated helpful that changed since.
 > **Extended by [ADR 0123](0123-agent-history.md):** a History page (`GET /v1/portal/history`) of what was done to and by the agent, without naming the admin.

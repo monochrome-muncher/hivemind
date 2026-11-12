@@ -481,6 +481,22 @@ async def test_inactive_entries_are_hidden_unless_asked(adapter: Adapter) -> Non
     assert await adapter.store.count_entries(EntryFilters(include_inactive=True)) == 3
 
 
+async def test_state_filter_matches_exactly_that_state(adapter: Adapter) -> None:
+    old = await write(adapter, "v1")
+    new = await write(adapter, "v2", supersedes=(old.id,))
+    gone = await write(adapter, "v3")
+    await adapter.store.withdraw_entry(gone.id, "no longer relevant", by_user="alice")
+
+    async def ids(**kw: object) -> set[str]:
+        return {e.id for e in await adapter.store.list_entries(EntryFilters(**kw))}  # type: ignore[arg-type]
+
+    assert await ids(state=EntryState.ACTIVE) == {new.id}
+    assert await ids(state=EntryState.SUPERSEDED) == {old.id}
+    assert await ids(state=EntryState.WITHDRAWN) == {gone.id}
+    assert await ids(state=EntryState.WITHDRAWN, include_inactive=True) == {gone.id}
+    assert await adapter.store.count_entries(EntryFilters(state=EntryState.SUPERSEDED)) == 1
+
+
 async def test_flagged_keeps_entries_reported_stale_or_wrong(adapter: Adapter) -> None:
     """ADR 0054: ``flagged`` keeps entries with a stale or wrong report, on
     list, count and both search streams; two reports do not duplicate a row."""

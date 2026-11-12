@@ -32,7 +32,8 @@ export function createClient({ storageKey, appName }) {
   async function apiRaw(method, path, { body, query, key } = {}) {
     const url = new URL(`/v1/${path}`, window.location.origin);
     for (const [k, v] of Object.entries(query || {})) {
-      if (v !== undefined && v !== null && v !== "" && v !== false) url.searchParams.set(k, v);
+      if (Array.isArray(v)) v.forEach((item) => url.searchParams.append(k, item));
+      else if (v !== undefined && v !== null && v !== "" && v !== false) url.searchParams.set(k, v);
     }
     const headers = { "X-API-Key": key || getKey() || memoryKey || "", Accept: "application/json" };
     if (body !== undefined) headers["Content-Type"] = "application/json";

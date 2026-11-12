@@ -71,8 +71,8 @@ def filter_conditions(
     params: list[Any] = []
     add = partial(add_clause, clauses, params)
 
-    if not filters.include_inactive and not filters.relied_on_changed:
-        clauses.append("state = 'active'")
+    if (required_state := filters.required_state) is not None:
+        add("state = ?", required_state.value)
     if filters.kind is not None:
         add("kind = ?", filters.kind.value)
     if filters.importance_source is not None:

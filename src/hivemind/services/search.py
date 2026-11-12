@@ -78,7 +78,7 @@ class Hit:
     feedback: FeedbackCounts = (0, 0, 0)
     # Last confirmation by a non-author with no flag since (SPEC §4.2); display only, never ranked.
     last_confirmed_at: datetime | None = None
-    # Evidence on the hit (SPEC §6.1), display only. ``state`` only under ``include_inactive``.
+    # Evidence on the hit (SPEC §6.1), display only. ``state`` only under ``include_inactive`` or a ``state`` filter.
     contested: bool = False
     correction: Correction | None = None
     supersedes: int = 0
@@ -327,7 +327,7 @@ class SearchService:
         terms = self._config.recency_terms(recency)
         # Fused-rank order, not row order: ties are common and the stable sorts below keep it.
         for entry in (entries[eid] for eid in fusion.scores if eid in entries):
-            if not filters.include_inactive and entry.state is not EntryState.ACTIVE:
+            if not filters.admits_state(entry.state):
                 continue
             entry_signals = signals.get(entry.id, NO_SIGNALS)
             entry_feedback[entry.id] = entry_signals
@@ -414,7 +414,7 @@ class SearchService:
                 entry,
                 candidates.scores[entry.id],
                 candidates.feedback[entry.id],
-                with_state=filters.include_inactive,
+                with_state=filters.shows_state,
                 similar=similar.get(entry.id, ()),
                 upstream_changed=upstream.get(entry.id, ()),
                 explain=candidates.explanations.get(entry.id),

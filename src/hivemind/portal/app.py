@@ -25,6 +25,7 @@ SHARED_MODULES = (
     "ui.js",
     "client.js",
     "lists.js",
+    "memfilters.js",
     "csv.js",
     "drawer.js",
     "charts.js",

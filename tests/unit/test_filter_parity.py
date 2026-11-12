@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 
-from hivemind.domain.entry import EntryFilters, Kind
+from hivemind.domain.entry import EntryFilters, EntryState, Kind
 from hivemind.domain.recency import RecencyHint
 from hivemind.mcp.app import McpHivemind, hive_list, hive_search
 from hivemind.ports import Credential
@@ -49,18 +49,18 @@ BASE = frozenset(
     }
 )
 
+# The admin and portal browsers add the fleet and the exact state (ADR 0140).
+BROWSING = BASE | {"fleet_id", "state"}
+
 # surface -> (accepted, deliberately not accepted)
 SURFACES: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     "POST /v1/search": (BASE, ALL - BASE),
-    "POST /v1/admin/search": (BASE | {"fleet_id"}, ALL - BASE - {"fleet_id"}),
-    "POST /v1/portal/search": (BASE | {"fleet_id"}, ALL - BASE - {"fleet_id"}),
+    "POST /v1/admin/search": (BROWSING, ALL - BROWSING),
+    "POST /v1/portal/search": (BROWSING, ALL - BROWSING),
     "GET /v1/entries": (BASE | {"relied_on_changed"}, ALL - BASE - {"relied_on_changed"}),
-    "GET /v1/admin/entries": (BASE | {"fleet_id"}, ALL - BASE - {"fleet_id"}),
-    # The portal list is narrower than the others: no entities, agent or date ranges.
-    "GET /v1/portal/entries": (
-        {"kind", "tags", "scope", "fleet_id", "author", "include_inactive", "flagged"},
-        ALL - {"kind", "tags", "scope", "fleet_id", "author", "include_inactive", "flagged"},
-    ),
+    "GET /v1/admin/entries": (BROWSING, ALL - BROWSING),
+    # The portal list has no ``agent`` filter.
+    "GET /v1/portal/entries": (BROWSING - {"agent"}, (ALL - BROWSING) | {"agent"}),
     "hive_search": (BASE, ALL - BASE),
     "hive_list": (BASE | {"relied_on_changed"}, ALL - BASE - {"relied_on_changed"}),
 }
@@ -84,6 +84,7 @@ VALUES: dict[str, Any] = {
     "include_inactive": True,
     "flagged": True,
     "relied_on_changed": True,
+    "state": EntryState.WITHDRAWN,
 }
 
 
@@ -108,7 +109,7 @@ def _wire(name: str, accepted: frozenset[str]) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for f in accepted:
         v = VALUES[f]
-        if isinstance(v, Kind):
+        if isinstance(v, Kind | EntryState):
             v = v.value
         elif isinstance(v, datetime):
             v = v.isoformat()

@@ -555,9 +555,11 @@ class RestoreRequest(BaseModel):
 
 
 class FleetSearchRequest(SearchRequest):
-    """A search plus a fleet filter: the admin search and the portal search."""
+    """A search plus a fleet and an exact state filter: the admin search and the portal
+    search (ADR 0140)."""
 
     fleet_id: str | None = None
+    state: EntryState | None = None
 
 
 class AdminSearchRequest(FleetSearchRequest):
