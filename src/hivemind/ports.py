@@ -6,7 +6,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Protocol, runtime_checkable
+from typing import NamedTuple, Protocol, runtime_checkable
 
 from hivemind.domain.access import (
     SCOPE_ORG,
@@ -74,6 +74,13 @@ class SupersedeConflict(Exception):
     def __init__(self, ids: list[str]) -> None:
         super().__init__("supersession targets not active: " + ", ".join(ids))
         self.ids = ids
+
+
+class VectorMatch(NamedTuple):
+    """One vector-stream candidate: the entry and its cosine similarity to the query."""
+
+    entry_id: str
+    similarity: float
 
 
 @runtime_checkable
@@ -306,9 +313,9 @@ class Store(Protocol):
         *,
         visibility: Visibility | None = None,
         min_similarity: float = 0.0,
-    ) -> list[str]:
-        """Entry IDs by embedding similarity, descending, leaving out cosine similarity <=
-        ``min_similarity`` (0 by default, ADR 0061; ADR 0062); ``visibility`` as in
+    ) -> list[VectorMatch]:
+        """Entries by embedding similarity, descending, each with its cosine similarity, leaving out
+        those <= ``min_similarity`` (0 by default, ADR 0061; ADR 0062); ``visibility`` as in
         ``list_entries``."""
         ...
 

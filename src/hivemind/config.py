@@ -36,6 +36,9 @@ PREFER_RECENT_FLOOR: float | None = 0.5
 # Vector similarity cut-off (ADR 0100), measured for Qwen3-Embedding: re-measure
 # (``make measure-threshold``) for another embedder. Empty env value = off.
 DEFAULT_VECTOR_MIN_SIMILARITY: float = 0.45
+# Cosine similarity from which a hit counts as a close match (ADR 0148), calibrated for
+# Qwen3-Embedding-8B; another embedder needs its own value. 0 = never add the loose note.
+DEFAULT_CLOSE_MATCH_SIMILARITY: float = 0.65
 # Task line before the search query (ADR 0097); tests/eval/query_instruction.py measures this text.
 DEFAULT_QUERY_INSTRUCTION = (
     "Given an agent's task or question, retrieve shared memory entries that answer it"
@@ -66,6 +69,8 @@ class SearchConfig:
     # Vector stream cut-off (ADR 0062, 0100): model-specific, in [0, 1). ``None`` = off (floor of 0,
     # ADR 0061).
     vector_min_similarity: float | None = DEFAULT_VECTOR_MIN_SIMILARITY
+    # Close-match bar for the search reply's loose note (ADR 0148): in [0, 1); 0 = no note.
+    close_match_similarity: float = DEFAULT_CLOSE_MATCH_SIMILARITY
     # Version grouping threshold (ADR 0074): off when ``None``, else in (0, 1); model-specific.
     version_group_min_similarity: float | None = None
     # Feedback quality (ADR 0063): each weight is where quality heads when every report gives
@@ -140,6 +145,9 @@ class SearchConfig:
         if threshold is not None and not (math.isfinite(threshold) and 0.0 <= threshold < 1.0):
             # 1 or more would empty every vector list.
             raise ValueError(f"vector_min_similarity must be in [0, 1) or None, got {threshold}")
+        close = self.close_match_similarity
+        if not (math.isfinite(close) and 0.0 <= close < 1.0):
+            raise ValueError(f"close_match_similarity must be in [0, 1), got {close}")
         check_query_instruction(self.query_instruction)
         group_cut = self.version_group_min_similarity
         if group_cut is not None and not (math.isfinite(group_cut) and 0.0 < group_cut < 1.0):
@@ -294,6 +302,8 @@ class Settings(BaseSettings):
     recency_floor: float | None = 0.8
     # See SearchConfig (ADR 0062, 0100). Unset = the default; empty or "none" = off.
     vector_min_similarity: float | None = DEFAULT_VECTOR_MIN_SIMILARITY
+    # See SearchConfig (ADR 0148).
+    close_match_similarity: float = DEFAULT_CLOSE_MATCH_SIMILARITY
     # See SearchConfig (ADR 0074). Empty or "none" = off.
     version_group_min_similarity: float | None = None
     # See SearchConfig (ADR 0063).
@@ -408,6 +418,7 @@ class Settings(BaseSettings):
             half_life_days=self.half_life_days,
             recency_floor=self.recency_floor,
             vector_min_similarity=self.vector_min_similarity,
+            close_match_similarity=self.close_match_similarity,
             version_group_min_similarity=self.version_group_min_similarity,
             quality_helpful_weight=self.quality_helpful_weight,
             quality_stale_weight=self.quality_stale_weight,

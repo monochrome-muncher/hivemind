@@ -60,6 +60,11 @@ data:
   # for Qwen3-Embedding. "" or "none" turns it off. For another embedder,
   # measure with `make measure-threshold` first.
   # HIVEMIND_VECTOR_MIN_SIMILARITY: "0.45"
+  # Close-match bar (ADR 0148): 0.65 when unset, calibrated for
+  # Qwen3-Embedding-8B. With no hit at or above it the search reply says the
+  # hits are loosely related. "0" turns that off; another embedder needs its
+  # own value.
+  # HIVEMIND_CLOSE_MATCH_SIMILARITY: "0.65"
   # Task line put before the search query for an instruction-aware embedder
   # such as Qwen3-Embedding (ADR 0097). On by default with "Given an agent's
   # task or question, retrieve shared memory entries that answer it". Set it

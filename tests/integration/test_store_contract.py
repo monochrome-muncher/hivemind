@@ -20,6 +20,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import asyncpg
 import pytest
@@ -142,6 +143,11 @@ async def adapter(request: pytest.FixtureRequest) -> AsyncIterator[Adapter]:
         return
     async for pg in _pg_adapter():
         yield pg
+
+
+async def vector_ids(store: Store, *args: Any, **kwargs: Any) -> list[str]:
+    """The ids of ``store.search_vector``, in order."""
+    return [m.entry_id for m in await store.search_vector(*args, **kwargs)]
 
 
 def draft(
@@ -519,7 +525,7 @@ async def test_flagged_keeps_entries_reported_stale_or_wrong(adapter: Adapter) -
     assert sorted(e.id for e in listed) == sorted(expected)
     assert await adapter.store.count_entries(flagged) == 2
     assert set(await adapter.store.search_keyword("billing", flagged, 10)) == expected
-    assert set(await adapter.store.search_vector(adapter.vec(0), flagged, 10)) == expected
+    assert set(await vector_ids(adapter.store, adapter.vec(0), flagged, 10)) == expected
 
 
 ME = ("u-me", "me")  # the (user, agent) a feedback row is keyed by
@@ -779,7 +785,7 @@ async def test_malformed_fleet_filter_matches_nothing(adapter: Adapter) -> None:
     assert await adapter.store.list_entries(bad) == []
     assert await adapter.store.count_entries(bad) == 0
     assert await adapter.store.search_keyword("fleet", bad, 10) == []
-    assert await adapter.store.search_vector(adapter.vec(1), bad, 10) == []
+    assert await vector_ids(adapter.store, adapter.vec(1), bad, 10) == []
 
 
 # -- visibility (ADR 0011, SPEC §12.2) ----------------------------------------------
@@ -871,7 +877,7 @@ async def test_vector_search_ranks_nearest_first(adapter: Adapter) -> None:
     probe = adapter.vec(1)
     probe[2] = 0.5
     await adapter.store.create_entry(draft("no vector"), None, None)  # never a vector hit
-    assert await adapter.store.search_vector(probe, EntryFilters(), 10) == [near.id, far.id]
+    assert await vector_ids(adapter.store, probe, EntryFilters(), 10) == [near.id, far.id]
 
 
 async def test_both_search_streams_apply_visibility(adapter: Adapter) -> None:
@@ -886,7 +892,7 @@ async def test_both_search_streams_apply_visibility(adapter: Adapter) -> None:
 
     async def seen(v: Visibility) -> tuple[set[str], set[str]]:
         keyword = await adapter.store.search_keyword("cohort", EntryFilters(), 10, visibility=v)
-        vector = await adapter.store.search_vector(adapter.vec(0), EntryFilters(), 10, visibility=v)
+        vector = await vector_ids(adapter.store, adapter.vec(0), EntryFilters(), 10, visibility=v)
         return set(keyword), set(vector)
 
     member = {org.id, mine.id, in_home.id}
@@ -984,7 +990,7 @@ async def test_vector_search_leaves_out_entries_with_no_positive_similarity(
     orthogonal = [0.0] * adapter.dim
     orthogonal[6] = 1.0
     await adapter.store.create_entry(draft("orthogonal"), orthogonal, "test-model")
-    assert await adapter.store.search_vector(adapter.vec(5, base=0.0), EntryFilters(), 10) == [
+    assert await vector_ids(adapter.store, adapter.vec(5, base=0.0), EntryFilters(), 10) == [
         near.id
     ]
 
@@ -1002,8 +1008,12 @@ async def test_vector_search_leaves_out_entries_at_or_below_min_similarity(
     far = await adapter.store.create_entry(draft("loose"), loose, "test-model")
     probe = adapter.vec(5, base=0.0)
     search = adapter.store.search_vector
-    assert await search(probe, EntryFilters(), 10, min_similarity=0.0) == [near.id, far.id]
-    assert await search(probe, EntryFilters(), 10, min_similarity=0.5) == [near.id]
+    matches = await search(probe, EntryFilters(), 10, min_similarity=0.0)
+    assert [m.entry_id for m in matches] == [near.id, far.id]
+    assert [m.similarity for m in matches] == pytest.approx([0.8, 0.3], abs=1e-3)
+    assert [m.entry_id for m in await search(probe, EntryFilters(), 10, min_similarity=0.5)] == [
+        near.id
+    ]
     assert await search(probe, EntryFilters(), 10, min_similarity=0.9) == []
 
 
@@ -1087,7 +1097,7 @@ async def test_redact_wipes_every_text_field_and_keeps_the_rest(adapter: Adapter
     assert await store.search_keyword("hunter2canary", everything, 10) == [linking.id]
     assert await store.search_keyword("redacted", everything, 10) == []
     assert await store.search_keyword("tag host", everything, 10) == []
-    assert secret.id not in await store.search_vector(adapter.vec(3, base=0.0), everything, 10)
+    assert secret.id not in await vector_ids(store, adapter.vec(3, base=0.0), everything, 10)
     assert (
         await store.list_entries(
             EntryFilters(entities=("hunter2canary-host",), include_inactive=True)
@@ -1147,7 +1157,7 @@ async def test_a_superseded_memory_can_be_redacted_and_keeps_its_chain(adapter: 
     assert pred.id == old.id and pred.summary == REDACTED_SUMMARY
     everything = EntryFilters(include_inactive=True)
     assert await store.search_keyword("hunter2canary", everything, 10) == []
-    assert old.id not in await store.search_vector(adapter.vec(3, base=0.0), everything, 10)
+    assert old.id not in await vector_ids(store, adapter.vec(3, base=0.0), everything, 10)
     with pytest.raises(RedactRefused, match="already redacted"):
         await store.redact_entry(old.id)
 
@@ -4772,7 +4782,7 @@ async def test_restore_puts_a_withdrawn_memory_back_and_search_finds_it(
     gone = await _state(adapter, entry.id)
     assert gone.state is EntryState.WITHDRAWN and gone.withdrawn_at is not None
     assert await store.search_keyword("kaniko", EntryFilters(), 10) == []
-    assert await store.search_vector(adapter.vec(4), EntryFilters(), 10) == [other.id]
+    assert await vector_ids(store, adapter.vec(4), EntryFilters(), 10) == [other.id]
 
     restoration = await store.restore_entry(entry.id)
 
@@ -4784,7 +4794,7 @@ async def test_restore_puts_a_withdrawn_memory_back_and_search_finds_it(
     assert replace(await _state(adapter, entry.id), embedding=None) == replace(back, embedding=None)
     # The embedding and the text index survived the withdrawal.
     assert await store.search_keyword("kaniko", EntryFilters(), 10) == [entry.id]
-    assert (await store.search_vector(adapter.vec(4), EntryFilters(), 10))[0] == entry.id
+    assert (await vector_ids(store, adapter.vec(4), EntryFilters(), 10))[0] == entry.id
 
 
 async def test_restore_refuses_what_is_not_withdrawn_and_what_is_unknown(

@@ -16,7 +16,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from hivemind.config import SearchConfig
+from hivemind.config import DEFAULT_CLOSE_MATCH_SIMILARITY, SearchConfig
 from hivemind.domain.access import AgentStatus, InvalidAgentStatus, KeyLocked, UnknownAgent
 from hivemind.domain.audit import ActorKind, AuditAction, AuditEvent
 from hivemind.domain.entry import (
@@ -247,6 +247,7 @@ def make_search_config(
     half_life_days: float = 30.0,
     rrf_k: int = 60,
     recency_floor: float | None = 0.8,
+    close_match_similarity: float = DEFAULT_CLOSE_MATCH_SIMILARITY,
 ) -> SearchConfig:
     """A ``SearchConfig`` with test-sized defaults.
 
@@ -276,6 +277,7 @@ def make_search_config(
         recency_floor=recency_floor,
         query_instruction="",
         vector_min_similarity=None,
+        close_match_similarity=close_match_similarity,
     )
 
 

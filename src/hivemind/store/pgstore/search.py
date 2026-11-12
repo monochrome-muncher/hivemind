@@ -7,6 +7,7 @@ import math
 from hivemind.domain.access import Visibility
 from hivemind.domain.entry import EntryFilters, SearchCount
 from hivemind.domain.validation import is_valid_uuid
+from hivemind.ports import VectorMatch
 from hivemind.store.pgstore.connection import PgConnections
 from hivemind.store.pgstore.sql_common import VECTOR_SEARCH_SETTINGS, filter_conditions
 from hivemind.store.pgstore.uuids import valid_uuids
@@ -124,10 +125,10 @@ class SearchStore(PgConnections):
         *,
         visibility: Visibility | None = None,
         min_similarity: float = 0.0,
-    ) -> list[str]:
-        """Ranked entry IDs by cosine distance (SPEC.md §6.2), approximate via the HNSW index (ADR
-        0025) under ``VECTOR_SEARCH_SETTINGS``. Entries at or below ``min_similarity`` are dropped
-        after the index scan: they sort last, so the result is the same (ADRs 0061, 0062)."""
+    ) -> list[VectorMatch]:
+        """Ranked entries with their cosine similarity (SPEC.md §6.2), approximate via the HNSW index
+        (ADR 0025) under ``VECTOR_SEARCH_SETTINGS``. Entries at or below ``min_similarity`` are
+        dropped after the index scan: they sort last, so the result is the same (ADRs 0061, 0062)."""
         clauses, params = filter_conditions(filters, visibility)
         clauses.append("embedding IS NOT NULL")
         vec_idx = len(params) + 1
@@ -141,7 +142,8 @@ class SearchStore(PgConnections):
         async with self._transaction() as conn:
             await conn.execute(VECTOR_SEARCH_SETTINGS)
             rows = await conn.fetch(sql, *params, embedding, limit)
-        return [str(r["id"]) for r in rows if 1.0 - r["distance"] > min_similarity]
+        matches = [VectorMatch(str(r["id"]), 1.0 - r["distance"]) for r in rows]
+        return [m for m in matches if m.similarity > min_similarity]
 
     async def similar_entries(
         self,

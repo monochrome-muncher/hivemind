@@ -20,6 +20,7 @@ from hivemind.domain.access import TrustLevel, Visibility
 from hivemind.domain.entry import EntryDraft, EntryFilters, ImportanceSource, Kind
 from hivemind.domain.feedback import Verdict
 from hivemind.memstore import MemoryStore
+from hivemind.ports import VectorMatch
 from hivemind.services.search import SearchService
 from tests.fakes import FIXED_NOW, make_clock, make_search_config
 
@@ -376,7 +377,7 @@ class TestDeterministicTies:
             return [first.id, second.id]
 
         async def vector(*args, **kwargs):
-            return [second.id, first.id]
+            return [VectorMatch(second.id, 0.9), VectorMatch(first.id, 0.8)]
 
         store.search_keyword = keyword  # type: ignore[method-assign]
         store.search_vector = vector  # type: ignore[method-assign]

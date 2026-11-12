@@ -96,7 +96,9 @@ class _Spy:
 
     async def search_result(self, query: str, filters: EntryFilters, *a: Any, **k: Any) -> Any:
         self.filters.append(filters)
-        return type("R", (), {"hits": [], "degraded": False, "recency": RecencyHint.DEFAULT})()
+        return type(
+            "R", (), {"hits": [], "degraded": False, "loose": False, "recency": RecencyHint.DEFAULT}
+        )()
 
     async def list(self, filters: EntryFilters, *a: Any, **k: Any) -> list[Any]:
         self.filters.append(filters)

@@ -432,6 +432,7 @@ def _hit(similar: tuple[SimilarEntry, ...]) -> Hit:
         agent="a",
         occurred_at=day(1),
         score=0.5,
+        match="both",
         similar=similar,
     )
 

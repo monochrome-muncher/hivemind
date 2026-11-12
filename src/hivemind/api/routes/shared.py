@@ -30,6 +30,9 @@ DEGRADED_KEYWORD_ONLY = "keyword-only"
 
 # Names a non-default recency hint (ADR 0073).
 RECENCY_HEADER = "X-Hivemind-Recency"
+# "loose" when no hit is a close match (ADR 0148).
+CLOSEST_HEADER = "X-Hivemind-Closest"
+CLOSEST_LOOSE = "loose"
 
 
 def check_cleanup_expectations(payload: AgentCleanupRequest | PortalCleanupRequest) -> None:
@@ -142,6 +145,8 @@ async def run_search(
     )
     if result.recency is not RecencyHint.DEFAULT:
         response.headers[RECENCY_HEADER] = result.recency.value
+    if result.loose:
+        response.headers[CLOSEST_HEADER] = CLOSEST_LOOSE
     if result.degraded:
         response.headers[DEGRADED_HEADER] = DEGRADED_KEYWORD_ONLY
         prometheus.degraded_searches.inc()

@@ -61,6 +61,10 @@ DEGRADED_NOTE = (
     "the embedding service is unavailable; these hits are keyword matches only, "
     "so related entries that share no words with the query may be missing"
 )
+CLOSEST_LOOSE = "loose"
+LOOSE_NOTE = (
+    "No hit is a close match; treat these as loosely related and check before relying on them."
+)
 ERR_UNAUTHENTICATED = "unauthenticated"  # ADR 0042: the key is gone / not resolvable
 ERR_KEY_LOCKED = "key_locked"  # locked from the portal; ask the admin for a new key
 ERR_INVALID_VERDICT = "invalid_verdict"
@@ -268,7 +272,8 @@ def _write_reply(written: WriteResult) -> dict[str, object]:
 
 
 def _search_reply(app: McpHivemind, result: SearchResult) -> dict[str, object]:
-    """The ``hive_search`` reply; reports a degraded search to the runner."""
+    """The ``hive_search`` reply; reports a degraded search to the runner and says when no hit is a
+    close match (ADR 0148)."""
     response: dict[str, object] = {
         "count": len(result.hits),
         "hits": [wire.hit_dict(h) for h in result.hits],
@@ -281,6 +286,9 @@ def _search_reply(app: McpHivemind, result: SearchResult) -> dict[str, object]:
         response["note"] = DEGRADED_NOTE
         if app.on_degraded_search is not None:
             app.on_degraded_search()
+    elif result.loose:
+        response["closest"] = CLOSEST_LOOSE
+        response["note"] = LOOSE_NOTE
     return response
 
 

@@ -383,6 +383,10 @@ _Avoid_: prompt, prefix (an entry is never prefixed)
 The cosine similarity an entry must exceed to be in the vector stream (`vector_min_similarity`, ADR 0062). 0.45 by default (ADR 0100); when off, the floor is 0 (ADR 0061). Model-specific. Does not apply to the keyword stream.
 _Avoid_: relevance threshold, minimum score (the final score is not thresholded), recency floor (that bounds the recency factor)
 
+**Close match**:
+A search hit whose `similarity` reaches `close_match_similarity` (ADR 0148). A search with hits and no close match is **loose**. Model-specific.
+_Avoid_: relevant hit, confidence (`similarity` is a cosine, not a probability)
+
 ### Entities (ADR 0016)
 
 **Extracted entity**:

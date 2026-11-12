@@ -305,7 +305,7 @@ async def _fused_by_id(store: MemoryStore, query: str) -> dict[str, float]:
         CONFIG.candidate_top_k,
     )
     return rrf_fuse(
-        [keyword, vector],
+        [keyword, [m.entry_id for m in vector]],
         k=CONFIG.rrf_k,
         weights=[CONFIG.weight_keyword, CONFIG.weight_vector],
     )

@@ -122,7 +122,9 @@ async def test_reads_do_not_fetch_the_stored_vector(pg) -> None:
     assert all(e.embedding is None for e in (await store.get_entries([entry.id])).values())
     listed = await store.list_entries(EntryFilters())
     assert listed and all(e.embedding is None for e in listed)
-    assert await store.search_vector(make_vec(dim, 3), EntryFilters(), 5) == [entry.id]
+    matches = await store.search_vector(make_vec(dim, 3), EntryFilters(), 5)
+    assert [m.entry_id for m in matches] == [entry.id]
+    assert matches[0].similarity == pytest.approx(1.0)
 
 
 async def test_concurrent_supersedes_of_one_head_exactly_one_wins(pg) -> None:

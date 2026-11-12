@@ -170,6 +170,10 @@ test-unit: ## Run unit tests only in parallel (no Postgres needed), with only CI
 measure-threshold: ## Measure a search similarity threshold with the configured embedder (ADR 0062; e.g. after `make vllm`; set HIVEMIND_EMBEDDING_DIM to the deployment's)
 	uv run python -m tests.eval.threshold
 
+.PHONY: measure-close-match
+measure-close-match: ## Measure the close-match bar for the search reply's loose note with the configured embedder (ADR 0148; set HIVEMIND_EMBEDDING_DIM to the deployment's)
+	uv run python -m tests.eval.close_match
+
 .PHONY: measure-ranking measure-versions measure-importance measure-query-instruction measure-embed-text measure-longmemeval measure-vector-index measure-experiments measure-flags
 measure-ranking: ## Measure the per-search recency hint variants (ADR 0073) against the shipped ranking with the configured embedder (e.g. after `make vllm`; set HIVEMIND_EMBEDDING_DIM to the deployment's)
 	uv run python -m tests.eval.ranking

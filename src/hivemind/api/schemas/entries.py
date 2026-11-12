@@ -24,7 +24,7 @@ from hivemind.domain.upstream import UpstreamChangeKind
 from hivemind.domain.validation import MAX_AGENT_NAME_CHARS, MAX_GET_IDS, MAX_LIMIT, MAX_OFFSET
 from hivemind.services.chain import EntryLinks
 from hivemind.services.read import EntryDetail
-from hivemind.services.search import Explanation, Hit
+from hivemind.services.search import Explanation, Hit, MatchKind
 from hivemind.services.write import RelatedEntry
 from hivemind.services.write_warnings import WriteWarning
 from hivemind.wire import round_score
@@ -378,6 +378,8 @@ class HitOut(BaseModel):
     agent: str
     occurred_at: datetime
     score: float  # 4 significant figures (SPEC §6.1)
+    match: MatchKind  # which candidate streams found it (ADR 0148)
+    similarity: float | None = None  # null unless the vector stream found it
     scope: str = "fleet"
     fleet_id: str | None = None  # a foreign entry: != the reader's home fleet (ADR 0036)
     feedback: FeedbackCountsOut | None = None  # null when all three counts are zero
@@ -402,6 +404,8 @@ class HitOut(BaseModel):
             agent=hit.agent,
             occurred_at=hit.occurred_at,
             score=round_score(hit.score),
+            match=hit.match,
+            similarity=hit.similarity,
             scope=hit.scope,
             fleet_id=hit.fleet_id,
             feedback=FeedbackCountsOut.from_counts(hit.feedback) if any(hit.feedback) else None,

@@ -6,8 +6,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
+from typing import Literal
 
 from hivemind.config import SearchConfig
 from hivemind.domain.access import SCOPE_FLEET, SCOPE_ORG, Visibility
@@ -29,11 +30,14 @@ from hivemind.domain.recency import RecencyHint
 from hivemind.domain.upstream import UPSTREAM_KINDS, UpstreamChange, upstream_changed
 from hivemind.domain.validation import check_pagination, check_query, utcnow
 from hivemind.embeddings import EmbeddingError
-from hivemind.ports import Embedder, Store
+from hivemind.ports import Embedder, Store, VectorMatch
 from hivemind.retrieval.mmr import mmr_order
 from hivemind.retrieval.rrf import rrf_fuse
 from hivemind.retrieval.scoring import ScoreParts, feedback_quality, score_parts
 from hivemind.services.ownership import own_author_filter
+
+# Which candidate streams found a hit (ADR 0148).
+MatchKind = Literal["both", "keyword", "vector"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +75,10 @@ class Hit:
     agent: str
     occurred_at: datetime
     score: float
+    match: MatchKind
+    # Cosine similarity to the query as shown (2 decimals), set when the vector stream found the
+    # entry (ADR 0148); display only.
+    similarity: float | None = None
     # Lets a privileged reader spot a foreign fleet's entry (ADR 0036).
     scope: str = SCOPE_FLEET
     fleet_id: str | None = None
@@ -93,12 +101,14 @@ class Hit:
 
 @dataclass(frozen=True, slots=True)
 class SearchResult:
-    """A page of hits; ``degraded`` when the page is keyword-only (ADR 0048)."""
+    """A page of hits; ``degraded`` when the page is keyword-only (ADR 0048), ``loose`` when no
+    hit on it is a close match (ADR 0148)."""
 
     hits: list[Hit]
     degraded: bool = False
     # The hint the scores were computed under (ADR 0073).
     recency: RecencyHint = RecencyHint.DEFAULT
+    loose: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,15 +119,19 @@ class _ScoredCandidates:
     scores: dict[str, float]
     feedback: dict[str, FeedbackSignals]
     explanations: dict[str, Explanation]
+    matches: Mapping[str, MatchKind]
+    similarities: Mapping[str, float]
 
 
 @dataclass(frozen=True, slots=True)
 class _Fusion:
-    """RRF-fused candidate scores, whether the vector stream was lost, and (when explaining) each
-    stream's ranks."""
+    """RRF-fused candidate scores, whether the vector stream was lost, which streams found each
+    candidate and its similarity, and (when explaining) each stream's ranks."""
 
     scores: dict[str, float]
     degraded: bool
+    matches: Mapping[str, MatchKind]
+    similarities: Mapping[str, float]
     keyword_ranks: Mapping[str, int] | None = None
     vector_ranks: Mapping[str, int] | None = None
 
@@ -128,6 +142,17 @@ def _ranks(ids: Sequence[str]) -> dict[str, int]:
     for rank, entry_id in enumerate(ids, start=1):
         ranks.setdefault(entry_id, rank)
     return ranks
+
+
+def round_similarity(similarity: float) -> float:
+    """A similarity as shown, 2 decimals (SPEC §6.1); the close-match bar is judged on this."""
+    return round(similarity, 2)
+
+
+def _match_kind(in_keyword: bool, in_vector: bool) -> MatchKind:
+    if in_keyword and in_vector:
+        return "both"
+    return "keyword" if in_keyword else "vector"
 
 
 NowFn = Callable[[], datetime]
@@ -257,7 +282,16 @@ class SearchService:
         ordered, similar = await self._rank_versions(scored, explore)
         page = ordered[offset : offset + limit]
         hits = await self._page_hits(page, scored, similar, filters, visibility)
-        return SearchResult(hits, degraded, applied)
+        loose = self._all_loose(hits, degraded)
+        return SearchResult(hits, degraded, applied, loose)
+
+    def _all_loose(self, hits: list[Hit], degraded: bool) -> bool:
+        """No hit on the page reaches the close-match bar as shown (ADR 0148); a degraded search has
+        no similarities to judge by."""
+        bar = self._config.close_match_similarity
+        if degraded or not hits or bar <= 0:
+            return False
+        return all(h.similarity is None or h.similarity < bar for h in hits)
 
     @staticmethod
     def _validated_filters(
@@ -280,24 +314,28 @@ class SearchService:
         """RRF-fused candidate ids with scores (SPEC.md §6.2), and whether the vector stream was
         lost; with ``explain``, each stream's ranks too."""
         top_k = self._config.candidate_top_k
-        # ``vector_ids`` is None when the embedder failed (ADR 0048).
-        keyword_ids, vector_ids = await _gather(
+        # ``vector_matches`` is None when the embedder failed (ADR 0048).
+        keyword_ids, vector_matches = await _gather(
             self._store.search_keyword(query, filters, top_k, visibility=visibility),
             self._vector_stream(query, filters, top_k, visibility),
         )
+        vector_ids = [m.entry_id for m in vector_matches or []]
         fused = rrf_fuse(
-            [keyword_ids, vector_ids or []],
+            [keyword_ids, vector_ids],
             k=self._config.rrf_k,
             weights=[self._config.weight_keyword, self._config.weight_vector],
         )
-        if not explain:
-            return _Fusion(fused, vector_ids is None)
-        return _Fusion(
+        keyword_found = set(keyword_ids)
+        vector_found = set(vector_ids)
+        base = _Fusion(
             fused,
-            vector_ids is None,
-            keyword_ranks=_ranks(keyword_ids),
-            vector_ranks=_ranks(vector_ids or []),
+            vector_matches is None,
+            {eid: _match_kind(eid in keyword_found, eid in vector_found) for eid in fused},
+            {m.entry_id: round_similarity(m.similarity) for m in vector_matches or []},
         )
+        if not explain:
+            return base
+        return replace(base, keyword_ranks=_ranks(keyword_ids), vector_ranks=_ranks(vector_ids))
 
     async def _fetch_candidates(
         self, candidate_ids: list[str], visibility: Visibility | None
@@ -365,7 +403,14 @@ class SearchService:
                     degraded=fusion.degraded,
                 )
             scored.append(entry)
-        return _ScoredCandidates(scored, entry_scores, entry_feedback, explanations)
+        return _ScoredCandidates(
+            scored,
+            entry_scores,
+            entry_feedback,
+            explanations,
+            fusion.matches,
+            fusion.similarities,
+        )
 
     async def _rank_versions(
         self, candidates: _ScoredCandidates, explore: bool
@@ -414,6 +459,8 @@ class SearchService:
                 entry,
                 candidates.scores[entry.id],
                 candidates.feedback[entry.id],
+                match=candidates.matches[entry.id],
+                similarity=candidates.similarities.get(entry.id),
                 with_state=filters.shows_state,
                 similar=similar.get(entry.id, ()),
                 upstream_changed=upstream.get(entry.id, ()),
@@ -491,7 +538,7 @@ class SearchService:
         filters: EntryFilters,
         top_k: int,
         visibility: Visibility | None,
-    ) -> list[str] | None:
+    ) -> list[VectorMatch] | None:
         """The vector stream, or None on an ``EmbeddingError`` (ADR 0048); store failures propagate.
         Only this stream carries the query instruction (ADR 0097)."""
         try:
@@ -514,6 +561,8 @@ class SearchService:
         score: float,
         signals: FeedbackSignals,
         *,
+        match: MatchKind,
+        similarity: float | None,
         with_state: bool = False,
         similar: tuple[SimilarEntry, ...] = (),
         upstream_changed: tuple[UpstreamChange, ...] = (),
@@ -528,6 +577,8 @@ class SearchService:
             agent=entry.agent,
             occurred_at=entry.occurred_at,
             score=score,
+            match=match,
+            similarity=similarity,
             scope=entry.scope,
             fleet_id=entry.fleet_id,
             feedback=signals.counts,
