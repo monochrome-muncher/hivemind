@@ -84,7 +84,7 @@ is unused.
 | [0072](0072-recency-profile-per-kind.md) | A recency profile per kind | Superseded by 0103; was amended by 0073 |
 | [0073](0073-a-recency-hint-on-search.md) | A recency hint on search | Accepted; on by default since 0101; amended by 0103 |
 | [0074](0074-group-unlinked-versions-at-read-time.md) | Group unlinked versions at read time | Accepted (off by default) |
-| [0075](0075-fleet-health-metrics.md) | Fleet health metrics: admin-only and observation-only | Extended by 0089 |
+| [0075](0075-fleet-health-metrics.md) | Fleet health metrics: admin-only and observation-only | Extended by 0089, 0142 |
 | [0076](0076-pin-integrity.md) | Pin integrity: audited pins and "changed since pinned" | Amended by 0079, 0096 |
 | [0077](0077-write-check-mode-and-warnings.md) | Writes can be checked first, and answer with advisory warnings | Amended by 0087, 0099 |
 | [0078](0078-explore-search.md) | Opt-in explore search | Accepted |
@@ -151,3 +151,4 @@ is unused.
 | [0139](0139-portal-search-explains-the-ranking.md) | The portal search can explain the ranking too | Accepted; amends 0137 and 0095, builds on 0033, `explain` on `POST /v1/portal/search` with the same parts over what the key can read (stream ranks count only readable memories); "Explain ranking" checkbox on the portal Search page; `AdminHitOut` renamed `ExplainedHitOut` |
 | [0140](0140-memory-browser-filters.md) | The memory browsers filter by exact state, tags, entity and dates | Accepted; amends 0080 and 0095, builds on 0011 and 0040, `state` on `GET /v1/admin/entries`, `POST /v1/admin/search`, `GET /v1/portal/entries` and `POST /v1/portal/search`, the portal list takes `entities` and the date ranges, clickable chips |
 | [0141](0141-every-withdrawal-is-audited.md) | Every withdrawal is audited | Accepted; amends 0027, builds on 0095 and 0113, an author's own withdrawal writes `entry.withdraw` with `via: "author"`, no new action, no migration |
+| [0142](0142-vital-signs.md) | Vital signs for the hive | Accepted; extends 0075, builds on 0050, 0067 and 0069, 7-day breathing counts (writes, verdicts, supersessions, withdrawals) per fleet in the health scan, `health.breathing_7d` and `hivemind_health_breathing_7d` gauges, a "Vital signs" card on the admin Health page (`vitals.js`, thresholds in one constant), optional `PrometheusRule` alerts at severity `info`, no migration, still admin-only and observation-only |

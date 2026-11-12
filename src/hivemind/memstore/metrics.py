@@ -35,6 +35,7 @@ from hivemind.memstore.state import MemoryState
 
 _DAYS_90 = timedelta(days=90)
 _DAYS_60 = timedelta(days=60)
+_DAYS_7 = timedelta(days=7)
 _DAYS_30 = timedelta(days=30)
 
 
@@ -229,11 +230,12 @@ class MetricsStore(MemoryState):
         for e in self._entries.values():
             if e.author not in last_write or e.created_at > last_write[e.author]:
                 last_write[e.author] = e.created_at
-        rows: dict[str | None, dict[str, int]] = {}
+        rows = self._breathing_by_fleet(now, live)
         for e in self._entries.values():
             if e.state is not EntryState.ACTIVE:
                 continue
             c = rows.setdefault(e.fleet_id, Counter())
+            c["active"] += 1
             if e.scope in (SCOPE_ORG, SCOPE_FLEET) and e.kind in (Kind.FACT, Kind.INSIGHT):
                 c["sourceable"] += 1
                 c["sourced"] += bool(e.sources)
@@ -263,9 +265,32 @@ class MetricsStore(MemoryState):
                 gap_anomaly=c["anomaly"],
                 gap_open_question=c["open_question"],
                 gap_dead_end=c["dead_end"],
+                active_entries=c["active"],
+                writes_7d=c["writes_7d"],
+                verdicts_7d=c["verdicts_7d"],
+                supersessions_7d=c["supersessions_7d"],
+                withdrawals_7d=c["withdrawals_7d"],
             )
             for fleet_id, c in rows.items()
         )
+
+    def _breathing_by_fleet(
+        self, now: datetime, live: list[Feedback]
+    ) -> dict[str | None, Counter[str]]:
+        """The 7-day writes, verdicts, supersessions and withdrawals per fleet of the entry
+        concerned, in any state. Callers hold the lock."""
+        since = now - _DAYS_7
+        rows: dict[str | None, Counter[str]] = {}
+        for e in self._entries.values():
+            c = rows.setdefault(e.fleet_id, Counter())
+            c["writes_7d"] += since <= e.created_at <= now
+            c["withdrawals_7d"] += e.withdrawn_at is not None and since <= e.withdrawn_at <= now
+            if e.superseded_by is not None and (successor := self._entries.get(e.superseded_by)):
+                c["supersessions_7d"] += since <= successor.created_at <= now
+        for fb in live:
+            if (entry := self._entries.get(fb.entry_id)) is not None:
+                rows[entry.fleet_id]["verdicts_7d"] += since <= (fb.updated_at or now) <= now
+        return {fleet_id: c for fleet_id, c in rows.items() if any(c.values())}
 
     def _owner_verdicts(self, in_window: list[Feedback]) -> tuple[Counter[str], int]:
         """The window's verdicts per owner (an unowned reporter counts for itself), and how

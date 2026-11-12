@@ -81,8 +81,9 @@ The SPEC §10 extensions (Tier 5) stay held until their triggers fire.
   converging, with each item's status. Its unbuilt items are candidates,
   not commitments.
 - **A hive that lives and breathes** ([docs/proposals/2026-11-12-living-hive-ideas.md](docs/proposals/2026-11-12-living-hive-ideas.md)):
-  fleet phases, scouts, vital signs and other ideas for keeping the
-  hive between collapse and scatter; candidates, not commitments.
+  fleet phases, scouts and other ideas for keeping the hive between
+  collapse and scatter; candidates, not commitments. Its vital signs
+  (§3) are built: [ADR 0142](docs/adr/0142-vital-signs.md).
 - **4.1 BM25** stays deferred; revisit only on observed keyword misses.
 
 ## Tier 1 — validate the core  *(shipped)*

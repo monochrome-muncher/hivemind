@@ -16,8 +16,8 @@ Layout:
   `secret-template.yaml`, which documents the CI-rendered Secret.
   `optional/` is the opt-in nginx Ingress + cert-manager Certificate,
   with `optional/networkpolicy/` (§2 step 6) and `optional/monitoring/`
-  (the Prometheus Operator ServiceMonitors and the Grafana dashboard,
-  §2 steps 7 and 8) under it; `admin/` and `portal/` are the admin panel
+  (the Prometheus Operator ServiceMonitors, the vital-signs alerts and the
+  Grafana dashboard, §2 steps 7 and 8) under it; `admin/` and `portal/` are the admin panel
   and the agent portal, each its own kustomization (§8 and §9). Every
   pod runs as non-root with a read-only root filesystem and a locked-down
   security context.
@@ -178,7 +178,15 @@ The operator flow (steps 1–4 are required, 5–8 optional):
    import the JSON (Dashboards > New > Import) and pick the Prometheus data
    source. The search panels smooth over the `Search window` variable
    (default 1h): those counters refresh about every 30 s. The MCP panels stay
-   empty while `HIVEMIND_MCP_METRICS_ENABLED` is off.
+   empty while `HIVEMIND_MCP_METRICS_ENABLED` is off. Its "Vital signs" row
+   shows the echo rate, grounding share, the age of open rivals and each
+   fleet's 7-day writes and verdicts (ADR 0142).
+   The same tree ships `alerts.yaml`, a `PrometheusRule` named
+   `hivemind-vital-signs` with four `info` alerts: a quiet fleet, a rising
+   echo rate, rivals lingering and a growing floating gap. They are hints
+   for the admin, not pages. Add your Operator's release label to it, as for
+   the ServiceMonitors; the thresholds are starting points that match the
+   admin panel's "Vital signs" card.
 
 ---
 
