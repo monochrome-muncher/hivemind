@@ -1,4 +1,4 @@
-"""Admin agent management: create, activate, rekey, update, revoke, retire."""
+"""Admin agent management: create, activate, rekey, update, set the role, revoke, retire."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from hivemind.api.routes.shared import (
 from hivemind.api.schemas import (
     ActivateAgentRequest,
     AdminAgentOut,
-    AgentOut,
+    AgentWithRoleOut,
     CreateAgentRequest,
     CreatedAgentOut,
     KeyIssuedOut,
@@ -23,6 +23,7 @@ from hivemind.api.schemas import (
     RetiredOut,
     RetirePreviewOut,
     RetireRequest,
+    SetAgentRoleRequest,
     SuccessionOut,
     UpdateAgentRequest,
 )
@@ -59,7 +60,7 @@ async def create_agent(
         payload.home_fleet_id,
         credential,
     )
-    return CreatedAgentOut(**AgentOut.from_agent(agent).model_dump(), key=key)
+    return CreatedAgentOut(**AgentWithRoleOut.from_agent(agent).model_dump(), key=key)
 
 
 @router.post("/admin/agents/{name}/activate", response_model=KeyIssuedOut)
@@ -91,10 +92,10 @@ async def replace_agent_key(
     return KeyIssuedOut(key=key)
 
 
-@router.patch("/admin/agents/{name}", response_model=AgentOut)
+@router.patch("/admin/agents/{name}", response_model=AgentWithRoleOut)
 async def update_agent(
     name: NameParam, payload: UpdateAgentRequest, credential: CredentialDep, app: AppDep
-) -> AgentOut:
+) -> AgentWithRoleOut:
     """Change an agent's trust level, home fleet and/or owner alias
     (admin-gated, ADRs 0011, 0122 — SPEC §5.1 ``PATCH /v1/admin/agents/{name}``).
     Demotion to ``untrusted`` (level 0) is *dormant* (key still
@@ -120,7 +121,32 @@ async def update_agent(
         home_fleet_id=payload.home_fleet_id,
         owner_alias=payload.owner_alias,
     )
-    return AgentOut.from_agent(agent)
+    return AgentWithRoleOut.from_agent(agent)
+
+
+@router.put("/admin/agents/{name}/role", response_model=AgentWithRoleOut)
+async def set_agent_role(
+    name: NameParam, payload: SetAgentRoleRequest, credential: CredentialDep, app: AppDep
+) -> AgentWithRoleOut:
+    """Mark an agent as a scout (admin-gated, audited ``agent.role_set``,
+    ADR 0144): its ``hive_whoami`` carries a one-line hint to explore. What
+    it may read and write is unchanged. A role it already has changes and
+    audits nothing. Any status but revoked (pending agents may be marked).
+    404 unknown agent, 409 ``invalid_status`` for a revoked agent, 422 an
+    unknown role."""
+    agent = await app.access_service.set_agent_role(name, payload.role, credential)
+    return AgentWithRoleOut.from_agent(agent)
+
+
+@router.delete("/admin/agents/{name}/role", response_model=AgentWithRoleOut)
+async def clear_agent_role(
+    name: NameParam, credential: CredentialDep, app: AppDep
+) -> AgentWithRoleOut:
+    """Take an agent's role away (admin-gated, audited ``agent.role_clear``,
+    ADR 0144); an agent with no role answers 200 and writes no audit row.
+    404 unknown agent."""
+    agent = await app.access_service.clear_agent_role(name, credential)
+    return AgentWithRoleOut.from_agent(agent)
 
 
 @router.post("/admin/agents/{name}/revoke")

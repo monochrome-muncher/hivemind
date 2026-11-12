@@ -32,6 +32,7 @@ from hivemind.domain.access import (
     UnknownSearchAgent,
     write_scopes_for,
 )
+from hivemind.domain.agent_role import AgentRole
 from hivemind.domain.audit import AuditAction, AuditFilters, AuditRecord
 from hivemind.domain.fleet_phase import FleetPhase, PhaseName
 from hivemind.domain.validation import (
@@ -368,6 +369,29 @@ class AccessService:
                 hook()
         return agent
 
+    async def set_agent_role(self, name: str, role: AgentRole, credential: Credential) -> Agent:
+        """Mark an agent with a role (ADR 0144); a role it already has changes and audits
+        nothing. ``InvalidAgentStatus`` for a revoked agent."""
+        require_admin(credential)
+        return await self._change_role(name, role, credential)
+
+    async def clear_agent_role(self, name: str, credential: Credential) -> Agent:
+        """Take an agent's role away (ADR 0144); an agent with none changes and audits nothing."""
+        require_admin(credential)
+        return await self._change_role(name, None, credential)
+
+    async def _change_role(
+        self, name: str, role: AgentRole | None, credential: Credential
+    ) -> Agent:
+        before, agent = await self._store.set_agent_role(name, role)
+        if role is not None and before.role is not role:
+            await self._audit(credential, AuditAction.AGENT_ROLE_SET, name, {"role": role.value})
+        elif role is None and before.role is not None:
+            await self._audit(
+                credential, AuditAction.AGENT_ROLE_CLEAR, name, {"role": before.role.value}
+            )
+        return agent
+
     async def update_agent(
         self,
         name: str,
@@ -501,6 +525,7 @@ class AccessService:
             inherits_from=credential.inherits_from if key_kind == "agent" else (),
             key_last_used_at=key_last_used,
             fleet_phase=fleet.phase_in_force(self._clock()) if fleet is not None else None,
+            role=agent.role if agent is not None else None,
         )
 
     async def home_fleet_phase(

@@ -35,7 +35,8 @@ from hivemind.store.migrate import (
     rollback as _guarded_rollback,
 )
 
-HEAD = "0033.fleet-phase"
+HEAD = "0034.agent-role"
+ID_0033 = "0033.fleet-phase"  # the head before 0034
 ID_0032 = "0032.entry-redact"  # the head before 0033
 ID_0031 = "0031.entry-restore"  # the head before 0032
 ID_0030 = "0030.audit-target-index"  # the head before 0031
@@ -82,20 +83,28 @@ CHAIN = [
     ID_0030,
     ID_0031,
     ID_0032,
+    ID_0033,
     HEAD,
 ]
 
 
 async def rollback(dsn: str, dim: int, count: int = 1, **confirm: bool) -> list[str]:
     """The per-migration tests below exercise what each older rollback does
-    to its own schema, so they step over `0033`, `0032`, `0031`, `0030`, `0029`, `0028` and `0027` first (in
+    to its own schema, so they step over `0034`, `0033`, `0032`, `0031`, `0030`, `0029`, `0028` and `0027` first (in
     one rollback, so no `schema.rollback` row is written), which have their
     own tests at the end of the file. A test that seeds rows a guard counts
     passes the matching confirmation flag (ADR 0119); the returned ids are
     those of the requested `count` migrations below `0027`."""
-    steps = {HEAD: 7, ID_0032: 6, ID_0031: 5, ID_0030: 4, ID_0029: 3, ID_0028: 2, ID_0027: 1}.get(
-        await current_schema_version(dsn)
-    )
+    steps = {
+        HEAD: 8,
+        ID_0033: 7,
+        ID_0032: 6,
+        ID_0031: 5,
+        ID_0030: 4,
+        ID_0029: 3,
+        ID_0028: 2,
+        ID_0027: 1,
+    }.get(await current_schema_version(dsn))
     if steps:
         await _guarded_rollback(dsn, dim, steps)
     return await _guarded_rollback(dsn, dim, count, **confirm)
@@ -1877,7 +1886,7 @@ async def test_0032_rolls_back_refused_without_the_flag_and_never_restores_text(
 
 async def test_0033_adds_the_phase_columns_with_their_checks() -> None:
     dsn, dim = _dsn(), Settings().embedding_dim
-    await _start_at_head(dsn, dim)
+    await _start_at(dsn, dim, ID_0033)
     conn = await asyncpg.connect(dsn)
     try:
         columns = await conn.fetch(
@@ -1917,17 +1926,17 @@ async def test_0033_adds_the_phase_columns_with_their_checks() -> None:
 
 async def test_0033_rolls_back_refused_without_the_flag_and_drops_the_columns() -> None:
     dsn, dim = _dsn(), Settings().embedding_dim
-    await _start_at_head(dsn, dim)
+    await _start_at(dsn, dim, ID_0033)
     await _insert_audit(dsn, "fleet.phase_set", "fleet.merge")
 
     with pytest.raises(RollbackRefused) as exc:
         await _guarded_rollback(dsn, dim, count=1)
-    assert HEAD in str(exc.value)
+    assert ID_0033 in str(exc.value)
     assert "fleet.phase_set" in str(exc.value)
     assert "--discard-audit-rows" in str(exc.value)
-    assert await current_schema_version(dsn) == HEAD
+    assert await current_schema_version(dsn) == ID_0033
 
-    assert await _guarded_rollback(dsn, dim, count=1, discard_audit_rows=True) == [HEAD]
+    assert await _guarded_rollback(dsn, dim, count=1, discard_audit_rows=True) == [ID_0033]
     assert await current_schema_version(dsn) == ID_0032
     assert await _audit_actions(dsn) == ["fleet.merge", "schema.rollback"]
     conn = await asyncpg.connect(dsn)
@@ -1943,6 +1952,75 @@ async def test_0033_rolls_back_refused_without_the_flag_and_drops_the_columns() 
             await conn.execute(
                 "INSERT INTO audit_log (actor_kind, actor, action) "
                 "VALUES ('cli', 'x', 'fleet.phase_clear')"
+            )
+    finally:
+        await conn.close()
+    await migrate(dsn, dim)
+
+
+# ADR 0144: 0034 adds the agent role column and the two role audit actions.
+
+
+async def test_0034_adds_the_role_column_with_its_check() -> None:
+    dsn, dim = _dsn(), Settings().embedding_dim
+    await _start_at_head(dsn, dim)
+    conn = await asyncpg.connect(dsn)
+    try:
+        column = await conn.fetchrow(
+            "SELECT data_type, is_nullable, column_default FROM information_schema.columns "
+            "WHERE table_name = 'agents' AND column_name = 'role'"
+        )
+        assert column is not None
+        assert (column["data_type"], column["is_nullable"], column["column_default"]) == (
+            "text",
+            "YES",
+            None,
+        )
+        await conn.execute(
+            "INSERT INTO agents (name, status, trust_level) VALUES ('a', 'pending', 0)"
+        )
+        await conn.execute("UPDATE agents SET role = 'scout' WHERE name = 'a'")
+        with pytest.raises(asyncpg.CheckViolationError):
+            await conn.execute("UPDATE agents SET role = 'queen' WHERE name = 'a'")
+        for action in ("agent.role_set", "agent.role_clear"):
+            await conn.execute(
+                "INSERT INTO audit_log (actor_kind, actor, action, target) "
+                f"VALUES ('admin_key', 'admin:1', '{action}', 'a')"
+            )
+        await conn.execute("DELETE FROM audit_log")
+        await conn.execute("DELETE FROM agents")
+    finally:
+        await conn.close()
+
+
+async def test_0034_rolls_back_refused_without_the_flag_and_drops_the_column() -> None:
+    dsn, dim = _dsn(), Settings().embedding_dim
+    await _start_at_head(dsn, dim)
+    await _insert_audit(dsn, "agent.role_set", "fleet.phase_set")
+
+    with pytest.raises(RollbackRefused) as exc:
+        await _guarded_rollback(dsn, dim, count=1)
+    assert HEAD in str(exc.value)
+    assert "agent.role_set" in str(exc.value)
+    assert "--discard-audit-rows" in str(exc.value)
+    assert await current_schema_version(dsn) == HEAD
+
+    assert await _guarded_rollback(dsn, dim, count=1, discard_audit_rows=True) == [HEAD]
+    assert await current_schema_version(dsn) == ID_0033
+    assert await _audit_actions(dsn) == ["fleet.phase_set", "schema.rollback"]
+    conn = await asyncpg.connect(dsn)
+    try:
+        assert (
+            await conn.fetchval(
+                "SELECT count(*) FROM information_schema.columns "
+                "WHERE table_name = 'agents' AND column_name = 'role'"
+            )
+            == 0
+        )
+        with pytest.raises(asyncpg.CheckViolationError):
+            await conn.execute(
+                "INSERT INTO audit_log (actor_kind, actor, action) "
+                "VALUES ('cli', 'x', 'agent.role_clear')"
             )
     finally:
         await conn.close()

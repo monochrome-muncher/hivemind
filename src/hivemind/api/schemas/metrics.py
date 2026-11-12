@@ -47,6 +47,7 @@ class AgentsMetrics(BaseModel):
     active: int
     revoked: int = 0
     by_trust_level: dict[str, int] = {}
+    by_role: dict[str, int] = {}
 
 
 class FleetSearchMetrics(BaseModel):
@@ -158,6 +159,15 @@ class FleetHealthMetrics(BaseModel):
     gap_tag_counts: dict[str, int] = {}
 
 
+class RoleActivityMetrics(BaseModel):
+    """What scouts, or everyone else, did in the last 30 days (ADR 0144)."""
+
+    writes: int = 0
+    alternative_or_dead_end_writes: int = 0
+    supersessions: int = 0
+    verdicts: int = 0
+
+
 class HealthMetrics(BaseModel):
     """Fleet health metrics (ADR 0075): admin-only and observation-only,
     never read by search, ranking, scoring, quality or the briefing. The
@@ -189,6 +199,7 @@ class HealthMetrics(BaseModel):
     top3_agent_label_verdict_share: LabelShare = LabelShare()
     breathing_7d: Breathing = Breathing()
     by_fleet: dict[str, FleetHealthMetrics] = {}
+    role_activity_30d: dict[str, RoleActivityMetrics] = {}
 
 
 class MetricsOut(BaseModel):

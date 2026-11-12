@@ -59,6 +59,7 @@ ADMIN_BODIES = {
     ("PATCH", "/v1/admin/agents/{name}"): {"trust_level": 1},
     ("POST", "/v1/admin/fleets/{source_id}/merge"): {"new_fleet_name": "c", "dry_run": False},
     ("PATCH", "/v1/admin/fleets/{fleet_id}"): {"name": "renamed"},
+    ("PUT", "/v1/admin/agents/{name}/role"): {"role": "scout"},
     ("PUT", "/v1/admin/fleets/{fleet_id}/phase"): {
         "phase": "explore",
         "until": "2099-01-01T00:00:00Z",

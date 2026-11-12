@@ -69,6 +69,8 @@ CREATE TABLE public.agents (
     owner_alias text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     activated_at timestamp with time zone,
+    role text,
+    CONSTRAINT agents_role_check CHECK ((role = 'scout'::text)),
     CONSTRAINT agents_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'active'::text, 'revoked'::text]))),
     CONSTRAINT agents_trust_level_check CHECK (((trust_level >= 0) AND (trust_level <= 3)))
 );
@@ -81,7 +83,7 @@ CREATE TABLE public.audit_log (
     action text NOT NULL,
     target text,
     detail jsonb DEFAULT '{}'::jsonb NOT NULL,
-    CONSTRAINT audit_log_action_check CHECK ((action = ANY (ARRAY['agent.register'::text, 'agent.activate'::text, 'agent.trust_level_set'::text, 'agent.home_fleet_set'::text, 'agent.revoke'::text, 'fleet.create'::text, 'org_key.rotate'::text, 'entry.withdraw'::text, 'admin_key.issue'::text, 'admin_key.revoke'::text, 'agent_key.issue'::text, 'entry.pin'::text, 'entry.unpin'::text, 'fleet.merge'::text, 'fleet.unmerge'::text, 'fleet.rename'::text, 'agent_key.replace'::text, 'agent.cleanup'::text, 'agent.cleanup_undo'::text, 'fleet.move_agents'::text, 'fleet.move_undo'::text, 'agent.retire'::text, 'agent.retire_undo'::text, 'agent_key.lock'::text, 'schema.rollback'::text, 'agent.owner_set'::text, 'entry.restore'::text, 'entry.redact'::text, 'fleet.phase_set'::text, 'fleet.phase_clear'::text]))),
+    CONSTRAINT audit_log_action_check CHECK ((action = ANY (ARRAY['agent.register'::text, 'agent.activate'::text, 'agent.trust_level_set'::text, 'agent.home_fleet_set'::text, 'agent.revoke'::text, 'fleet.create'::text, 'org_key.rotate'::text, 'entry.withdraw'::text, 'admin_key.issue'::text, 'admin_key.revoke'::text, 'agent_key.issue'::text, 'entry.pin'::text, 'entry.unpin'::text, 'fleet.merge'::text, 'fleet.unmerge'::text, 'fleet.rename'::text, 'agent_key.replace'::text, 'agent.cleanup'::text, 'agent.cleanup_undo'::text, 'fleet.move_agents'::text, 'fleet.move_undo'::text, 'agent.retire'::text, 'agent.retire_undo'::text, 'agent_key.lock'::text, 'schema.rollback'::text, 'agent.owner_set'::text, 'entry.restore'::text, 'entry.redact'::text, 'fleet.phase_set'::text, 'fleet.phase_clear'::text, 'agent.role_set'::text, 'agent.role_clear'::text]))),
     CONSTRAINT audit_log_actor_kind_check CHECK ((actor_kind = ANY (ARRAY['admin_key'::text, 'cli'::text, 'org_key'::text, 'agent_key'::text])))
 );
 

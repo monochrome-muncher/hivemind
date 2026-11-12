@@ -201,6 +201,10 @@ _Avoid_: fleet split (the use, not the act), agent migration, re-parenting (that
 An `explore` or `consolidate` setting an admin puts on a fleet until a date at most 30 days ahead. Its agents read a fixed one-line hint in `hive_whoami` and `hive_pinned` while it lasts; a phase past its date counts as none. A nudge only: it never changes ranking or search (ADR 0143).
 _Avoid_: mode, season, sprint
 
+**Scout**:
+An agent an admin has marked to explore more than the others. It reads a fixed one-line hint in its own `hive_whoami`; what it may read and write, ranking and search stay as they were. A hint, never a permission, and a successor does not inherit it (ADR 0144).
+_Avoid_: explorer, tester, role (a scout is the one role there is)
+
 **Merged fleet**:
 A fleet that was merged into another. Its record stays, marked with the fleet it went into; it takes no new agents, entries or pins and cannot be merged again (ADR 0107).
 _Avoid_: deleted fleet, archived fleet, closed fleet

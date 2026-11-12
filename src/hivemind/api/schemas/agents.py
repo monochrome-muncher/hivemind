@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from hivemind.api.schemas.common import RefStr
 from hivemind.api.schemas.fleets import FleetPhaseOut
 from hivemind.domain.access import KEY_LOCKED_MESSAGE, Agent, Standing, is_idle
+from hivemind.domain.agent_role import AgentRole
 
 
 class RegisterAgentRequest(BaseModel):
@@ -51,6 +52,12 @@ class UpdateAgentRequest(BaseModel):
     owner_alias: str | None = None
 
 
+class SetAgentRoleRequest(BaseModel):
+    """Mark an agent with a role (ADR 0144)."""
+
+    role: AgentRole
+
+
 class AgentOut(BaseModel):
     """A registered agent."""
 
@@ -75,7 +82,18 @@ class AgentOut(BaseModel):
         )
 
 
-class AdminAgentOut(AgentOut):
+class AgentWithRoleOut(AgentOut):
+    """An agent as the admin sees it: the record plus its role (ADR 0144), null when it has none.
+    Registration and the agent-facing replies stay ``AgentOut``."""
+
+    role: AgentRole | None = None
+
+    @classmethod
+    def from_agent(cls, agent: Agent) -> AgentWithRoleOut:
+        return cls(**AgentOut.from_agent(agent).model_dump(), role=agent.role)
+
+
+class AdminAgentOut(AgentWithRoleOut):
     """A row of ``GET /v1/admin/agents``: the agent plus when its key last
     worked and whether that makes it idle (ADR 0110). ``idle_after_days``
     is ``HIVEMIND_IDLE_AGENT_DAYS``, repeated so a panel can say it."""
@@ -89,7 +107,7 @@ class AdminAgentOut(AgentOut):
     @classmethod
     def from_admin_agent(cls, agent: Agent, *, now: datetime, idle_days: int) -> AdminAgentOut:
         return cls(
-            **AgentOut.from_agent(agent).model_dump(),
+            **AgentWithRoleOut.from_agent(agent).model_dump(),
             last_used_at=agent.last_used_at.isoformat() if agent.last_used_at else None,
             key_locked=agent.key_locked_at is not None,
             key_locked_at=agent.key_locked_at.isoformat() if agent.key_locked_at else None,
@@ -108,7 +126,7 @@ class RegisteredAgentOut(AgentOut):
     message: str
 
 
-class CreatedAgentOut(AgentOut):
+class CreatedAgentOut(AgentWithRoleOut):
     """The answer to ``POST /v1/admin/agents``: the new active
     agent plus its key, returned **once**."""
 
@@ -131,6 +149,9 @@ class WhoamiOut(BaseModel):
     inherits_from: list[str]
     key_last_used_at: str | None = None
     fleet_phase: FleetPhaseOut | None = None
+    # ADR 0144: present only for a scout's own key.
+    role: AgentRole | None = None
+    role_hint: str | None = None
 
     @classmethod
     def from_standing(cls, standing: Standing) -> WhoamiOut:

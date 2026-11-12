@@ -22,7 +22,10 @@ from hivemind.api.schemas import (
     LinkOut,
     RelatedOut,
     WarningOut,
+    WhoamiOut,
 )
+from hivemind.domain.access import AgentStatus, Standing, TrustLevel
+from hivemind.domain.agent_role import AgentRole, role_hint
 from hivemind.domain.entry import (
     EntityKind,
     Entry,
@@ -317,6 +320,25 @@ def test_fleet_phase_matches_the_contract_on_both_surfaces() -> None:
     }
     assert phase.as_dict() == table
     assert FleetPhaseOut.from_phase(phase).model_dump(mode="json") == table
+
+
+def test_a_scouts_whoami_matches_the_contract_on_both_surfaces() -> None:
+    standing = Standing(
+        key_kind="agent",
+        name="alice",
+        status=AgentStatus.ACTIVE,
+        trust_level=TrustLevel.CONTRIBUTOR,
+        home_fleet_id="f1",
+        home_fleet_name="platform",
+        can_read=("own", "home_fleet"),
+        can_write_scopes=("self", "fleet"),
+        role=AgentRole.SCOUT,
+    )
+    table = standing.as_dict()
+    assert table["role"] == "scout"
+    assert table["role_hint"] == role_hint(AgentRole.SCOUT, "platform")
+    assert WhoamiOut.from_standing(standing).model_dump(mode="json", exclude_unset=True) == table
+    assert "role" not in replace(standing, role=None).as_dict()
 
 
 def test_link_matches_the_contract_on_both_surfaces() -> None:

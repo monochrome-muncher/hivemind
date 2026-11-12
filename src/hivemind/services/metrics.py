@@ -27,9 +27,10 @@ from hivemind.domain.access import (
     Fleet,
     TrustLevel,
 )
+from hivemind.domain.agent_role import AgentRole
 from hivemind.domain.entry import ImportanceSource, Kind, SearchCount, UsageCount
 from hivemind.domain.feedback import FlagCount
-from hivemind.domain.health import Convergence, FleetHealth, HealthCounts
+from hivemind.domain.health import OTHER_AGENTS, Convergence, FleetHealth, HealthCounts
 from hivemind.ports import Store
 
 logger = logging.getLogger(__name__)
@@ -349,6 +350,10 @@ class MetricsService:
                 fleet.name: self._fleet_health(by_id.get(fleet.id) or HealthCounts(fleet.id))
                 for fleet in fleets
             },
+            role_activity_30d={
+                AgentRole.SCOUT.value: health.scout_activity_30d,
+                OTHER_AGENTS: health.other_activity_30d,
+            },
         )
 
     @staticmethod
@@ -375,7 +380,7 @@ class MetricsService:
         )
 
     def _agents_report(self, agents: Sequence[Agent]) -> usage.AgentsUsage:
-        """Agent counters: status totals and the trust-level distribution."""
+        """Agent counters: status totals, the trust-level distribution and the roles in use."""
         pending = sum(1 for agent in agents if agent.status is AgentStatus.PENDING)
         active = sum(1 for agent in agents if agent.status is AgentStatus.ACTIVE)
         revoked = sum(1 for agent in agents if agent.status is AgentStatus.REVOKED)
@@ -389,4 +394,10 @@ class MetricsService:
             active=active,
             revoked=revoked,
             by_trust_level=by_trust_level,
+            by_role={
+                role.value: sum(
+                    1 for a in agents if a.role is role and a.status is not AgentStatus.REVOKED
+                )
+                for role in AgentRole
+            },
         )

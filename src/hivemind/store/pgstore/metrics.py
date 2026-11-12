@@ -25,6 +25,7 @@ from hivemind.domain.health import (
     Convergence,
     FleetHealth,
     HealthCounts,
+    RoleActivity,
     TagDispersion,
 )
 from hivemind.store.pgstore.connection import PgConnections
@@ -350,6 +351,38 @@ SELECT b.tag, least(b.n_recent, $2) AS n_recent, least(b.n_before, $2) AS n_befo
  ORDER BY b.n DESC, b.tag COLLATE "C"
 """
 
+# The last 30 days of scouts (``scout``) and of everyone else (ADR 0144): writes, those tagged
+# ``alternative`` or ``dead-end``, supersessions (counted when the successor was written) and
+# verdicts. An author or reporter with no agent record counts with everyone else.
+HEALTH_ROLE_ACTIVITY = f"""
+WITH writes AS (
+    SELECT coalesce(r.role = 'scout', false) AS scout, count(*) AS total,
+           count(*) FILTER (WHERE e.tags && ARRAY['alternative', 'dead-end']) AS tagged
+      FROM entries e LEFT JOIN agents r ON r.name = e.author
+     WHERE e.created_at BETWEEN $1::timestamptz - interval '720 hours' AND $1::timestamptz
+     GROUP BY 1
+), supersessions AS (
+    SELECT coalesce(r.role = 'scout', false) AS scout, count(*) AS total
+      FROM entries succ
+      JOIN entries old ON old.superseded_by = succ.id
+      LEFT JOIN agents r ON r.name = succ.author
+     WHERE succ.created_at BETWEEN $1::timestamptz - interval '720 hours' AND $1::timestamptz
+     GROUP BY 1
+), verdicts AS (
+    SELECT coalesce(r.role = 'scout', false) AS scout, count(*) AS total
+      FROM feedbacks f LEFT JOIN agents r ON r.name = f."user"
+     WHERE f.updated_at BETWEEN $1::timestamptz - interval '720 hours' AND $1::timestamptz
+       AND {_RATING_COUNTS}
+     GROUP BY 1
+)
+SELECT g.scout, coalesce(w.total, 0) AS writes, coalesce(w.tagged, 0) AS tagged,
+       coalesce(s.total, 0) AS supersessions, coalesce(v.total, 0) AS verdicts
+  FROM (VALUES (true), (false)) g(scout)
+  LEFT JOIN writes w ON w.scout = g.scout
+  LEFT JOIN supersessions s ON s.scout = g.scout
+  LEFT JOIN verdicts v ON v.scout = g.scout
+"""
+
 # Per superseded entry flagged before its successor (written in the last 90 days)
 # existed: seconds from its first flag to the successor's ``created_at`` (ADR 0068).
 HEALTH_CORRECTIONS = f"""
@@ -430,7 +463,17 @@ class MetricsStore(PgConnections):
             scalars = await conn.fetchrow(HEALTH_SCALARS, now, ENTRY_ID_REF)
             corrections = await conn.fetch(HEALTH_CORRECTIONS, now)
             rivals = await conn.fetch(HEALTH_RIVALS, now)
+            role_rows = await conn.fetch(HEALTH_ROLE_ACTIVITY, now)
         assert scalars is not None
+        by_role = {
+            r["scout"]: RoleActivity(
+                writes=int(r["writes"]),
+                alternative_or_dead_end_writes=int(r["tagged"]),
+                supersessions=int(r["supersessions"]),
+                verdicts=int(r["verdicts"]),
+            )
+            for r in role_rows
+        }
         return FleetHealth(
             by_fleet=_health_counts(by_fleet, breathing),
             helpful=int(scalars["helpful"]),
@@ -458,6 +501,8 @@ class MetricsStore(PgConnections):
             verdicts_30d=int(scalars["verdicts30"]),
             top3_label_verdicts_30d=int(scalars["top_verdict_labels"]),
             verdict_labels_30d=int(scalars["verdict_labels"]),
+            scout_activity_30d=by_role[True],
+            other_activity_30d=by_role[False],
         )
 
     async def activity(self, since: datetime) -> Activity:

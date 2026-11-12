@@ -1310,3 +1310,46 @@ curl -s -X DELETE -H "X-API-Key: $ADMIN_KEY" \
 phase columns, so every phase in force ends, and deletes the
 `fleet.phase_set` and `fleet.phase_clear` audit rows (it refuses without
 `--discard-audit-rows`, section 4).
+
+## 19. Marking an agent as a scout (ADR 0144)
+
+A colony keeps a few bees for exploring while most forage what is known. You
+can do the same: mark an agent as a **scout** and it reads a one-line hint in
+`hive_whoami` asking it to try the less-tested of two rivals, search with
+`explore: true` when results look settled, re-check old unconfirmed entries
+and write what it tried, dead ends included. It needs the admin key.
+
+In the panel, open the agent's page and use the **Scout** card: **Make scout**
+or **Stop scouting**, each with a confirmation. The Agents list shows a
+**Scout** badge. Or call the API:
+
+```sh
+curl -s -X PUT -H "X-API-Key: $ADMIN_KEY" -H "Content-Type: application/json" \
+  -d '{"role": "scout"}' "https://hivemind.example/v1/admin/agents/<name>/role"
+curl -s -X DELETE -H "X-API-Key: $ADMIN_KEY" \
+  "https://hivemind.example/v1/admin/agents/<name>/role"
+```
+
+- **A hint, not a permission.** What the agent may read or write, ranking and
+  search do not change. Nothing checks that it explores.
+- **Who can be marked.** A pending or active agent. A revoked agent is
+  `409 invalid_status`. Marking a scout again, or clearing an agent with no
+  role, changes nothing and writes no audit row. An unknown agent is `404`.
+- **What it keeps and loses.** The role stays with the agent through a fleet
+  merge or move. Retiring an agent revokes it and leaves its role on the
+  record; the successor is not a scout unless you mark it.
+- **Is it working?** `GET /v1/metrics` counts the agents that are not revoked
+  by role (`agents.by_role`) and compares the last 30 days of scouts with
+  everyone else under `health.role_activity_30d`: writes, writes tagged
+  `alternative` or `dead-end`, supersessions written and verdicts given. The
+  Health page shows the same table. More alternatives, dead ends and
+  verdicts from the scouts is what scouting should look like. The gauges are
+  `hivemind_agents_by_role{role}` and
+  `hivemind_health_role_activity_30d{role,motion}`.
+- **Audit.** One `agent.role_set` or `agent.role_clear` row per change, with
+  the agent's name as target and `{role}` as detail (SPEC §12.5).
+
+**Rolling back the release.** `make rollback` past migration `0034` drops the
+role column, so every agent loses its role, and deletes the `agent.role_set`
+and `agent.role_clear` audit rows (it refuses without `--discard-audit-rows`,
+section 4).

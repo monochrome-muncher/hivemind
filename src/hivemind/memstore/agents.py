@@ -14,6 +14,7 @@ from hivemind.domain.access import (
     TrustLevel,
     UnknownAgent,
 )
+from hivemind.domain.agent_role import AgentRole
 from hivemind.domain.succession import AgentRetired
 from hivemind.memstore.state import MemoryState
 
@@ -144,5 +145,17 @@ class AgentStore(MemoryState):
             if agent is None:
                 raise UnknownAgent(f"unknown agent: {name}")
             updated = replace(agent, owner_alias=owner_alias)
+            self._agents[name] = updated
+            return agent, updated
+
+    async def set_agent_role(self, name: str, role: AgentRole | None) -> tuple[Agent, Agent]:
+        """Set or clear an agent's role (ADR 0144); returns (before, after)."""
+        with self._lock:
+            agent = self._agents.get(name)
+            if agent is None:
+                raise UnknownAgent(f"unknown agent: {name}")
+            if role is not None and agent.status is AgentStatus.REVOKED:
+                raise InvalidAgentStatus(name, agent.status, "set a role on")
+            updated = replace(agent, role=role)
             self._agents[name] = updated
             return agent, updated
