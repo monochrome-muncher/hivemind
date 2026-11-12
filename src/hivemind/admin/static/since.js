@@ -65,6 +65,9 @@ const noun = (n, one, many) => (n === 1 ? one : many);
 /** Audit actions the counts above already cover (the agents list, the locked keys): not "other admin actions". */
 export const COUNTED_ELSEWHERE = ["agent.register", "agent.activate", "agent_key.lock"];
 
+/** An admin action the "other admin actions" part counts: not a withdrawal, not counted above, not done with an agent key. */
+const isOtherAdminAction = (r) => r.action !== "entry.withdraw" && !COUNTED_ELSEWHERE.includes(r.action) && r.actor_kind !== "agent_key";
+
 // The flagged list is oldest flag first and the API pages by 100, so the Overview reads up to three pages.
 export const FLAGGED_PAGE = 100;
 export const ADMIN_LIMITS = { entries: 100, flagged: 3 * FLAGGED_PAGE, audit: 200 };
@@ -94,7 +97,7 @@ export function adminParts({ since, agents = null, entries = null, flagged = nul
   if (audit) {
     const full = audit.length >= ADMIN_LIMITS.audit;
     const withdrawals = audit.filter((r) => r.action === "entry.withdraw").length;
-    const other = audit.filter((r) => r.action !== "entry.withdraw" && !COUNTED_ELSEWHERE.includes(r.action)).length;
+    const other = audit.filter(isOtherAdminAction).length;
     add("withdrawals", countText(withdrawals, ADMIN_LIMITS.audit, full), "withdrawal", "withdrawals", withdrawals);
     add("actions", countText(other, ADMIN_LIMITS.audit, full), "other admin action", "other admin actions", other);
   }
