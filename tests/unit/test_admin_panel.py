@@ -81,6 +81,7 @@ def _panel(transport: httpx.AsyncBaseTransport) -> httpx.AsyncClient:
         ("POST", "admin/fleet-merges/abc/undo"),
         ("POST", "admin/agents/alice/retire"),
         ("POST", "admin/owners/jane.doe/offboard"),
+        ("POST", "admin/owners/ops/jane/offboard"),  # an alias may hold a slash
         ("GET", "admin/successions"),
         ("POST", "admin/successions/alice/undo"),
         ("POST", "admin/agents/bob/cleanup"),
@@ -248,7 +249,9 @@ async def test_every_allowlisted_call_names_a_real_api_route(front_end: str) -> 
         routes = _api_routes_from((await api.get("/openapi.json")).json())
     assert allowed
     for method, pattern in allowed:
-        assert (method, pattern.pattern) in routes, (method, pattern.pattern)
+        # ``[^/].*`` is a ``{name:path}`` parameter, which the OpenAPI document shows as ``{name}``.
+        path = pattern.pattern.replace("[^/].*", "[^/]+")
+        assert (method, path) in routes, (method, pattern.pattern)
 
 
 STATIC_TRAVERSALS = [
