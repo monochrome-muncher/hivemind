@@ -48,6 +48,7 @@ dev = [
 testpaths = ["tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 # Measurements print tables and are not gates; `make measure-vector-index`
 # runs them with `-m measurement` (the last -m wins over this one).
 addopts = "-q -m 'not measurement'"
