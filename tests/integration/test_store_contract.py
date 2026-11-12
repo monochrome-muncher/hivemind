@@ -73,7 +73,7 @@ from hivemind.domain.feedback import (
 )
 from hivemind.domain.fleet_merge import FleetMergeRefused, FleetMoveRefused, UnknownFleetMerge
 from hivemind.domain.fleet_phase import FleetPhase, PhaseName
-from hivemind.domain.health import HealthCounts
+from hivemind.domain.health import FleetHealth, HealthCounts
 from hivemind.domain.offboarding import (
     OffboardAction,
     OffboardChanged,
@@ -2362,10 +2362,12 @@ async def test_fleet_health_aggregates_hand_computed(adapter: Adapter) -> None:
 
     assert {r.fleet_id: r for r in health.by_fleet} == {
         none: hc(none, sourceable=6, sourced=1, insights=1, floating_gap=3, gap_anomaly=1,
-                 gap_open_question=1),
+                 gap_open_question=1, active_entries=8, writes_7d=11, verdicts_7d=6,
+                 supersessions_7d=3),
         blue_id: hc(blue_id, sourceable=3, sourced=1, insights=1, synthesizing=1, gap_anomaly=1,
-                    gap_dead_end=1),
-        red_id: hc(red_id, sourceable=2, sourced=1, flagged_backlog_14d=1, orphaned_flagged=1),
+                    gap_dead_end=1, active_entries=3, writes_7d=3, verdicts_7d=3),
+        red_id: hc(red_id, sourceable=2, sourced=1, flagged_backlog_14d=1, orphaned_flagged=1,
+                   active_entries=2, writes_7d=2, verdicts_7d=2),
     }  # fmt: skip
     assert (health.helpful, health.helpful_with_note) == (7, 4)
     assert sorted(health.correction_latencies) == [86400.0, 259200.0]
@@ -2384,6 +2386,44 @@ async def test_fleet_health_aggregates_hand_computed(adapter: Adapter) -> None:
     assert (gone.writes_90d, gone.verdicts_90d, gone.supersessions_90d) == (0, 0, 0)
     assert gone.correction_latencies == ()
     assert gone.top3_author_writes_90d == gone.authors_90d == 0
+
+
+async def test_fleet_health_breathing_counts_the_last_seven_days(adapter: Adapter) -> None:
+    """ADR 0142. Each count belongs to the fleet of the entry concerned: a verdict to the entry
+    it rates, a supersession to the entry that was superseded (not its successor), a
+    withdrawal to the entry withdrawn. A revoked reporter's verdict is left out."""
+    store = adapter.store
+    blue = await store.create_fleet("blue")
+    red = await store.create_fleet("red")
+    await store.register_agent("Ghost")
+    await store.activate_agent("Ghost", trust_level=TrustLevel.LURKER, home_fleet_id=red.id)
+    await store.revoke_agent("Ghost")
+    old_blue = await write(adapter, "old blue", scope="fleet", fleet_id=blue.id)
+    gone = await write(adapter, "gone", scope="fleet", fleet_id=red.id)
+    for entry in (old_blue, gone):
+        await _backdate(adapter, entry, entry.created_at - timedelta(days=30))
+    await store.withdraw_entry(gone.id, "wrong place", "bob")
+    rated = await write(adapter, "rated", scope="fleet", fleet_id=red.id)
+    await write(adapter, "replacement", scope="fleet", fleet_id=blue.id, supersedes=(old_blue.id,))
+    now = rated.created_at + timedelta(hours=1)
+    day = timedelta(days=1)
+    for user, at in (("Scout", now - day), ("Rival", now - 8 * day), ("Ghost", now - day)):
+        await store.record_feedback(Feedback(rated.id, user, user, Verdict.HELPFUL, None, at))
+
+    def breathing(health: FleetHealth) -> dict[str | None, tuple[int, int, int, int]]:
+        return {
+            r.fleet_id: (r.writes_7d, r.verdicts_7d, r.supersessions_7d, r.withdrawals_7d)
+            for r in health.by_fleet
+        }
+
+    assert breathing(await store.fleet_health(now)) == {
+        blue.id: (1, 0, 1, 0),
+        red.id: (1, 1, 0, 1),
+    }
+    assert breathing(await store.fleet_health(now + 8 * day)) == {
+        blue.id: (0, 0, 0, 0),
+        red.id: (0, 0, 0, 0),
+    }
 
 
 async def test_fleet_health_owner_level_verdicts_hand_computed(adapter: Adapter) -> None:

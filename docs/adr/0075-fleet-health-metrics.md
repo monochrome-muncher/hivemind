@@ -2,6 +2,8 @@
 
 > **Extended by [ADR 0089](0089-owner-level-rating-metrics.md):** sibling-verdict and owner-concentration figures join the `health` section. Everything below stands.
 
+> **Extended by [ADR 0142](0142-vital-signs.md):** 7-day breathing counts, a "Vital signs" card on the admin Health page and optional alerts join the health metrics. Everything below stands, except that entries now do carry a withdrawal time (`withdrawn_at`).
+
 Extends [ADR 0068](0068-rater-flag-confirmation-metric.md) and
 [ADR 0069](0069-cache-the-entry-scan-behind-the-usage-report.md).
 

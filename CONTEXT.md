@@ -449,6 +449,13 @@ _Avoid_: analytics, telemetry (that is the broader §10 story), dashboards (the 
 The `health` section of the usage report: observations of the pool (verdict notes, sources, correction speed, orphaned flags, concentration, owner-level sibling verdicts, synthesis) for the operator. Admin-only and never an input to search, ranking, scoring or the briefing (ADR 0075).
 _Avoid_: scorecard, KPIs, leaderboard (they invite agents to optimise the number)
 
+**Vital signs**:
+The admin panel's grouping of the fleet health metrics into three bands, each Steady or Watch: collapsing (members converging on one view), scattering (disagreements piling up untested) and breathing (is the hive alive). Admin-only and observation-only (ADR 0142).
+_Avoid_: score, health score, grade
+
+**Breathing**:
+The counts of writes, verdicts, supersessions and withdrawals over the last 7 days, per fleet and for the whole pool. A fleet with active entries and no writes and no verdicts is quiet (ADR 0142).
+
 **Scrape target**:
 The REST runner's unauthenticated `GET /metrics` in the Prometheus text format: the usage counters as gauges plus per-process request metrics (ADR 0050). The MCP HTTP runner serves its own, per-process series only, when enabled (ADR 0104). Kept off the public ingress.
 _Avoid_: metrics endpoint (ambiguous with `GET /v1/metrics`)

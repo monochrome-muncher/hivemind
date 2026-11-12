@@ -1,0 +1,75 @@
+# OPT-IN Prometheus Operator alerts on the vital signs of the hive (ADR 0142).
+# They are hints for the admin, not pages: severity is `info`, and nothing in
+# Hivemind reads them back (ADR 0075). They need the series the ServiceMonitors
+# in this tree scrape.
+#
+# The echo and rival thresholds here (0.2, 60 days) are the same starting
+# points as VITAL_THRESHOLDS in src/hivemind/admin/static/vitals.js, which
+# colours the admin panel's "Vital signs" card. Change them together.
+#
+# ADJUST before applying: most Operator installs only load rules carrying
+# their release label (kube-prometheus-stack: `release: <helm release name>`).
+# Add it under metadata.labels.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: hivemind-vital-signs
+  labels:
+    app.kubernetes.io/name: hivemind
+    app.kubernetes.io/component: monitoring
+spec:
+  groups:
+    - name: hivemind-vital-signs
+      rules:
+        - alert: HivemindFleetQuiet
+          expr: |
+            max by (namespace, fleet) (hivemind_health_fleet_active_entries) > 0
+            and
+            max by (namespace, fleet) (hivemind_health_fleet_breathing_7d{motion="writes"}) == 0
+            and
+            max by (namespace, fleet) (hivemind_health_fleet_breathing_7d{motion="verdicts"}) == 0
+          for: 1h
+          labels:
+            severity: info
+          annotations:
+            summary: Fleet {{ $labels.fleet }} has had no writes and no verdicts for 7 days
+            description: >-
+              The fleet holds active entries, but its agents have written and rated nothing
+              in a week, so it is not learning. Check that its agents are connected and
+              that they rate the entries they use.
+        - alert: HivemindEchoRising
+          expr: max by (namespace) (hivemind_health_echo_ratio) > 0.2
+          for: 1d
+          labels:
+            severity: info
+          annotations:
+            summary: More than a fifth of new writes repeat an earlier entry
+            description: >-
+              Members are converging on one view and restating what is already stored.
+              Set the busiest fleet's phase to Explore in the admin panel, or ask agents
+              to write alternatives and dead ends.
+        - alert: HivemindRivalsLingering
+          expr: >-
+            max by (namespace) (hivemind_health_rival_median_age_seconds{kind="alternative"})
+            > 60 * 86400
+          for: 1d
+          labels:
+            severity: info
+          annotations:
+            summary: Open alternatives have a median age over 60 days
+            description: >-
+              Disagreements are piling up untested. Set the fleet's phase to Consolidate
+              in the admin panel, or ask agents to test the rivals and supersede the losers.
+        - alert: HivemindFloatingGapGrowing
+          expr: >-
+            max by (namespace) (hivemind_health_floating_gap)
+            > max by (namespace) (hivemind_health_floating_gap offset 28d)
+          for: 1d
+          labels:
+            severity: info
+          annotations:
+            summary: More old entries have gone unchecked than 28 days ago
+            description: >-
+              Entries older than 90 days that nobody has rated lately are increasing.
+              Ask agents to rate what they rely on, or list these entries in the admin
+              panel and withdraw or supersede the stale ones.

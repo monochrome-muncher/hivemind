@@ -2,11 +2,12 @@
 // operator: nothing agent-facing reads these numbers.
 
 import {
-  api, h, state, guarded, parseHash, viewHref, fleetName, agentHref, fmtOf, fmtDuration, table, card, pageHead, refreshButton, fetchMetrics,
+  api, h, state, guarded, parseHash, viewHref, fleetName, agentHref, fmtOf, fmtDuration, fmtNum, table, card, pageHead, refreshButton, fetchMetrics,
   loadAgentsAndFleets, unavailable, fill, link,
 } from "./core.js";
 import { openEntry } from "./drawer.js";
 import { flaggedTable } from "./lists.js";
+import { vitalSigns, WATCH } from "./vitals.js";
 
 // The flagged list's filters (ADR 0093), as #/health?flags=old|orphaned&fleet=<id>.
 const FLAG_FILTERS = [
@@ -38,6 +39,37 @@ function dispersionTable(rows) {
       h("td", { text: d.tag }), h("td", { text: `${cos(d.recent_cosine)} · ${d.recent_entries} entries` }),
       h("td", { text: `${cos(d.before_cosine)} · ${d.before_entries} entries` }),
       h("td", { text: `${d.change > 0 ? "+" : ""}${cos(d.change)}` }))), "No tag has 5 entries in both windows yet."));
+}
+
+const vitalBadge = (state) => h("span", { class: state === WATCH ? "badge badge-pending" : "badge badge-active", text: state });
+
+const band = (title, state, advice, content) => h("div", { class: "card-body" },
+  h("h3", {}, title, " ", vitalBadge(state)),
+  content,
+  h("p", { class: "muted small", text: advice }));
+
+const signalsTable = (signals) => table(["Signal", "Now", "State"],
+  signals.map((s) => h("tr", {}, h("td", { text: s.label }), h("td", { text: s.value }), h("td", {}, vitalBadge(s.state)))), "");
+
+const breathingTable = (fleets) => table(["Fleet", "Writes", "Verdicts", "Supersessions", "Withdrawals", "State"],
+  fleets.map((f) => h("tr", {}, h("td", { text: f.name }), h("td", { text: fmtNum(f.writes) }), h("td", { text: fmtNum(f.verdicts) }),
+    h("td", { text: fmtNum(f.supersessions) }), h("td", { text: fmtNum(f.withdrawals) }), h("td", {}, vitalBadge(f.state)))), "No fleets yet.");
+
+// ADR 0142: the health numbers grouped into three bands. Observation only, like the card below.
+export function vitalSignsCard(metrics) {
+  const { collapsing, scattering, breathing } = vitalSigns(metrics);
+  return h("div", { class: "card" },
+    h("div", { class: "card-head" }, h("h2", { text: "Vital signs" })),
+    h("div", { class: "card-body" }, h("p", { class: "muted small", text: "The thresholds are starting points: tune them to your own hive. Breathing counts the last 7 days." })),
+    band("Collapsing: members converging on one view", collapsing.state,
+      "Lean towards exploring: set the fleet's phase to Explore on its fleet page, or ask agents for alternatives and dead ends.",
+      signalsTable(collapsing.signals)),
+    band("Scattering: disagreements piling up untested", scattering.state,
+      "Lean towards settling: set the fleet's phase to Consolidate on its fleet page, or ask agents to test rivals and fix flagged entries.",
+      signalsTable(scattering.signals)),
+    band("Breathing: is the hive alive", breathing.state,
+      "A quiet fleet is not learning: check its agents are connected and rating what they use.",
+      breathingTable(breathing.fleets)));
 }
 
 // ADR 0075: the fleet health metrics. Observation only for the operator; nothing
@@ -125,6 +157,7 @@ export async function viewHealth(root) {
   const flagged = flaggedList(root);
   fill(root,
     pageHead("Health", "Observations of the pool, for you only. Nothing ranks by these and no agent sees them.", refreshButton()),
+    metrics && metrics.health ? vitalSignsCard(metrics) : card("Vital signs", unavailable("Vital signs")),
     metrics && metrics.health ? healthCard(metrics.health) : card("Fleet health", unavailable("Fleet health")),
     ...flagged.els);
   await flagged.load();
