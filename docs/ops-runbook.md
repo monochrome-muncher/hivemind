@@ -326,7 +326,8 @@ curl -s -H "X-API-Key: $ADMIN_KEY" \
   memory withdrawn from the agent portal writes an `entry.withdraw` row
   with `actor_kind = agent_key`, the agent's name as actor and
   `via: "portal"` in `detail`. An agent withdrawing its own entry through
-  the API or `hive_withdraw` is not audited.
+  the API or `hive_withdraw` writes the same row with `via: "author"`
+  (ADR 0141).
 - **Restores are audited** (ADR 0124, migration `0031`): the admin putting
   a withdrawn memory back writes `entry.restore` (target: the entry id,
   detail `{author, previous_reason, reason}`). Rolling back `0031` deletes

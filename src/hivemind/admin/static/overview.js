@@ -106,10 +106,9 @@ async function sinceCard(visit) {
     optional(() => api("GET", "admin/audit-log", { query: { since, limit: ADMIN_LIMITS.audit } })),
   ]);
   const parts = adminParts({ since, agents: state.agents, entries, flagged, audit });
-  const hint = "An agent's own withdrawals through its memory tools are not in the audit log: the withdrawal count covers the admin, the portal and successors.";
   return h("p", { class: "callout callout-info since-line", "data-since": since },
     sinceHead(visit, parts),
-    parts.flatMap((p, i) => [i ? ", " : null, link(p.text, PART_HREF(p.id, since), p.id === "withdrawals" ? { title: hint } : {})]),
+    parts.flatMap((p, i) => [i ? ", " : null, link(p.text, PART_HREF(p.id, since))]),
     parts.length ? "." : null);
 }
 
