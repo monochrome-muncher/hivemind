@@ -164,7 +164,9 @@ class FleetMergeStore(MemoryState):
                 mine = self._searches.pop(source.id)
                 theirs = self._searches.get(target.id, (0, 0, 0))
                 self._searches[target.id] = tuple(a + b for a, b in zip(mine, theirs, strict=True))  # type: ignore[assignment]
-            self._fleets[source.id] = replace(source, merged_into=target.id, merged_at=now)
+            self._fleets[source.id] = replace(
+                source, merged_into=target.id, merged_at=now, phase=None
+            )
             record = FleetMergeRecord(
                 id=str(uuid.uuid4()),
                 source_fleet_id=source.id,

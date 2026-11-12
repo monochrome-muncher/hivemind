@@ -332,9 +332,10 @@ class Store(Protocol):
         unchanged). ``UnknownFleet``; ``FleetExists`` when another fleet has the name."""
         ...
 
-    async def set_fleet_phase(self, fleet_id: str, phase: FleetPhase | None) -> Fleet:
-        """Replace the fleet's phase, or clear it with ``None`` (ADR 0143); the fleet after.
-        ``UnknownFleet``; ``FleetMerged`` for a merged fleet, nothing written."""
+    async def set_fleet_phase(self, fleet_id: str, phase: FleetPhase | None) -> tuple[Fleet, Fleet]:
+        """Replace the fleet's phase, or clear it with ``None`` (ADR 0143); the fleet before and
+        after. ``UnknownFleet``; ``FleetMerged`` for a merged fleet, nothing written. A merge
+        clears the source's phase, so an undo does not bring it back."""
         ...
 
     # -- fleet merge (ADR 0107) ------------------------------------------------

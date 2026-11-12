@@ -15,6 +15,8 @@ from typing import Any
 from hivemind.domain.validation import InvalidInput
 
 MAX_PHASE_DAYS = 30
+# A caller's clock may run a little ahead of the server's.
+CLOCK_GRACE = timedelta(minutes=1)
 
 
 class PhaseName(StrEnum):
@@ -45,15 +47,15 @@ class FleetPhase:
     until: datetime
 
     @classmethod
-    def starting(cls, name: PhaseName, until: datetime, now: datetime) -> FleetPhase:
+    def starting(cls, kind: PhaseName, until: datetime, now: datetime) -> FleetPhase:
         """A phase beginning ``now``; ``InvalidInput`` unless ``until`` is later than ``now`` and
-        at most ``MAX_PHASE_DAYS`` days ahead. A naive ``until`` means UTC."""
+        at most ``MAX_PHASE_DAYS`` days ahead (plus a minute of clock grace). A naive ``until`` means UTC."""
         until = until.replace(tzinfo=UTC) if until.tzinfo is None else until.astimezone(UTC)
         if until <= now:
             raise InvalidInput("until must be in the future")
-        if until > now + timedelta(days=MAX_PHASE_DAYS):
+        if until > now + timedelta(days=MAX_PHASE_DAYS) + CLOCK_GRACE:
             raise InvalidInput(f"until must be at most {MAX_PHASE_DAYS} days ahead")
-        return cls(name, until)
+        return cls(kind, until)
 
     def in_force(self, now: datetime) -> bool:
         return self.until > now

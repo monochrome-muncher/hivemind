@@ -60,8 +60,8 @@ class AuditAction(StrEnum):
     SCHEMA_ROLLBACK = "schema.rollback"  # ADR 0119
     ENTRY_REDACT = "entry.redact"  # ADR 0125
     ENTRY_RESTORE = "entry.restore"  # ADR 0124
-    FLEET_PHASE_SET = "fleet.phase_set"  # ADR 0143
-    FLEET_PHASE_CLEAR = "fleet.phase_clear"  # ADR 0143
+    FLEET_PHASE_SET = "fleet.phase_set"
+    FLEET_PHASE_CLEAR = "fleet.phase_clear"
 
 
 # First 12 hex chars of the stored SHA-256 key hash, as `hivemind-keys list` shows. Non-secret.

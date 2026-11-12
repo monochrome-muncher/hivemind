@@ -2676,20 +2676,40 @@ async def test_set_and_clear_a_fleet_phase(adapter: Adapter) -> None:
     a, b = await _two_fleets(adapter)
     until = datetime.now(UTC) + timedelta(days=5)
     explore = FleetPhase(PhaseName.EXPLORE, until)
-    after = await store.set_fleet_phase(a, explore)
+    before, after = await store.set_fleet_phase(a, explore)
+    assert before.phase is None
     assert after.phase == explore
     assert await store.get_fleet(a) == after
     assert (await store.get_fleet(b)).phase is None  # type: ignore[union-attr]
-    replaced = await store.set_fleet_phase(a, FleetPhase(PhaseName.CONSOLIDATE, until))
+    was, replaced = await store.set_fleet_phase(a, FleetPhase(PhaseName.CONSOLIDATE, until))
+    assert was.phase == explore
     assert replaced.phase == FleetPhase(PhaseName.CONSOLIDATE, until)
     assert [f.phase for f in await store.list_fleets()] == [replaced.phase, None]
-    cleared = await store.set_fleet_phase(a, None)
+    was, cleared = await store.set_fleet_phase(a, None)
+    assert was.phase == replaced.phase
     assert cleared.phase is None
     assert await store.get_fleet(a) == cleared
     with pytest.raises(UnknownFleet):
         await store.set_fleet_phase(NO_SUCH_ID, explore)
     with pytest.raises(UnknownFleet):
         await store.set_fleet_phase("not-a-uuid", explore)
+
+
+async def test_a_merge_clears_the_source_phase_and_an_undo_does_not_bring_it_back(
+    adapter: Adapter,
+) -> None:
+    store = adapter.store
+    a, b = await _two_fleets(adapter)
+    until = datetime.now(UTC) + timedelta(days=5)
+    await store.set_fleet_phase(a, FleetPhase(PhaseName.EXPLORE, until))
+    target_phase = FleetPhase(PhaseName.CONSOLIDATE, until)
+    await store.set_fleet_phase(b, target_phase)
+    merged = await store.merge_fleets(a, target_fleet_id=b, merged_by="admin:1")
+    assert (await store.get_fleet(a)).phase is None  # type: ignore[union-attr]
+    await store.unmerge_fleet(merged.record.id)
+    restored = await store.get_fleet(a)
+    assert restored is not None and restored.merged_into is None and restored.phase is None
+    assert (await store.get_fleet(b)).phase == target_phase  # type: ignore[union-attr]
 
 
 async def test_a_merged_fleet_takes_no_phase(adapter: Adapter) -> None:

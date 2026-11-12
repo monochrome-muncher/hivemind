@@ -284,13 +284,16 @@ class AccessService:
             )
         return after
 
+    def now(self) -> datetime:
+        return self._clock()
+
     async def set_fleet_phase(
         self, fleet_id: str, name: PhaseName, until: datetime, credential: Credential
     ) -> Fleet:
         """Put a fleet in a phase until ``until``, replacing any phase it has (ADR 0143)."""
         require_admin(credential)
         phase = FleetPhase.starting(name, until, self._clock())
-        fleet = await self._store.set_fleet_phase(fleet_id, phase)
+        _, fleet = await self._store.set_fleet_phase(fleet_id, phase)
         await self._audit(
             credential,
             AuditAction.FLEET_PHASE_SET,
@@ -300,17 +303,18 @@ class AccessService:
         return fleet
 
     async def clear_fleet_phase(self, fleet_id: str, credential: Credential) -> Fleet:
-        """End a fleet's phase now (ADR 0143); audited with the phase it ended, as it was in
-        force or already over."""
+        """End a fleet's phase now (ADR 0143), audited with the phase it ended; a fleet with no
+        phase in force changes nothing and writes no row."""
         require_admin(credential)
-        before = await self._store.get_fleet(fleet_id)
-        fleet = await self._store.set_fleet_phase(fleet_id, None)
-        detail = (
-            {"phase": before.phase.name.value, "until": before.phase.until.isoformat()}
-            if before is not None and before.phase is not None
-            else {}
-        )
-        await self._audit(credential, AuditAction.FLEET_PHASE_CLEAR, fleet.id, detail)
+        before, fleet = await self._store.set_fleet_phase(fleet_id, None)
+        ended = before.phase_in_force(self._clock())
+        if ended is not None:
+            await self._audit(
+                credential,
+                AuditAction.FLEET_PHASE_CLEAR,
+                fleet.id,
+                {"phase": ended.name.value, "until": ended.until.isoformat()},
+            )
         return fleet
 
     async def set_trust_level(self, name: str, level: TrustLevel, credential: Credential) -> Agent:

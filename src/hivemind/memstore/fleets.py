@@ -44,7 +44,7 @@ class FleetStore(MemoryState):
             self._fleets[fleet_id] = after
             return before, after
 
-    async def set_fleet_phase(self, fleet_id: str, phase: FleetPhase | None) -> Fleet:
+    async def set_fleet_phase(self, fleet_id: str, phase: FleetPhase | None) -> tuple[Fleet, Fleet]:
         with self._lock:
             fleet = self._fleets.get(fleet_id)
             if fleet is None:
@@ -54,7 +54,7 @@ class FleetStore(MemoryState):
                 raise FleetMerged(fleet.id, fleet.merged_into, target.name if target else None)
             updated = replace(fleet, phase=phase)
             self._fleets[fleet_id] = updated
-            return updated
+            return fleet, updated
 
     async def fleet_facts(self, fleet_id: str) -> FleetFacts:
         with self._lock:
