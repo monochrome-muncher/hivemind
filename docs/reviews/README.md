@@ -14,5 +14,6 @@ Security, performance and design reviews of Hivemind, kept as a record of what w
 | 2026-10-10 | [Index measurements](2026-10-10-index-measurements.md) behind migration 0013 | v2.4.0 |
 | 2026-10-11 | [Post-2.5.0 review](2026-10-11-post-2.5.0-review.md) | after v2.5.0 |
 | 2026-11-11 | [Changes since 2.19.0](2026-11-11-changes-since-2.19.0.md): the readability refactor checked for behaviour changes, and every ADR reference in the shortened comments | v2.20.0 |
+| 2026-11-12 | [Memories as data, relevance, and self versus fleet](2026-11-12-memories-as-data-and-scope.md): how agents are told to weigh entries, what the search score means, why brainstorms reach the fleet, and a live check of [ADR 0146](../adr/0146-scope-by-evidence.md) | 88c4170 |
 
 Retrieval measurements live in [retrieval-experiments.md](../retrieval-experiments.md), and research proposals in [proposals/](../proposals/).

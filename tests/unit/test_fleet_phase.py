@@ -32,7 +32,8 @@ ORG = Credential(user_id="org", is_org=True, access_controlled=True)
 
 EXPLORE_HINT = (
     "Your fleet is exploring until 2026-11-20. On open-ended work, try explore: true, "
-    "write untested approaches as their own entries tagged alternative, write dead ends "
+    "write approaches someone could test as their own entries tagged alternative, saying "
+    "how to test them, write dead ends "
     "and open questions, and when the stakes are low try the less-tested of two rivals "
     "and report what you found."
 )
