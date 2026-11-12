@@ -81,7 +81,7 @@ CREATE TABLE public.audit_log (
     action text NOT NULL,
     target text,
     detail jsonb DEFAULT '{}'::jsonb NOT NULL,
-    CONSTRAINT audit_log_action_check CHECK ((action = ANY (ARRAY['agent.register'::text, 'agent.activate'::text, 'agent.trust_level_set'::text, 'agent.home_fleet_set'::text, 'agent.revoke'::text, 'fleet.create'::text, 'org_key.rotate'::text, 'entry.withdraw'::text, 'admin_key.issue'::text, 'admin_key.revoke'::text, 'agent_key.issue'::text, 'entry.pin'::text, 'entry.unpin'::text, 'fleet.merge'::text, 'fleet.unmerge'::text, 'fleet.rename'::text, 'agent_key.replace'::text, 'agent.cleanup'::text, 'agent.cleanup_undo'::text, 'fleet.move_agents'::text, 'fleet.move_undo'::text, 'agent.retire'::text, 'agent.retire_undo'::text, 'agent_key.lock'::text, 'schema.rollback'::text, 'agent.owner_set'::text, 'entry.restore'::text, 'entry.redact'::text]))),
+    CONSTRAINT audit_log_action_check CHECK ((action = ANY (ARRAY['agent.register'::text, 'agent.activate'::text, 'agent.trust_level_set'::text, 'agent.home_fleet_set'::text, 'agent.revoke'::text, 'fleet.create'::text, 'org_key.rotate'::text, 'entry.withdraw'::text, 'admin_key.issue'::text, 'admin_key.revoke'::text, 'agent_key.issue'::text, 'entry.pin'::text, 'entry.unpin'::text, 'fleet.merge'::text, 'fleet.unmerge'::text, 'fleet.rename'::text, 'agent_key.replace'::text, 'agent.cleanup'::text, 'agent.cleanup_undo'::text, 'fleet.move_agents'::text, 'fleet.move_undo'::text, 'agent.retire'::text, 'agent.retire_undo'::text, 'agent_key.lock'::text, 'schema.rollback'::text, 'agent.owner_set'::text, 'entry.restore'::text, 'entry.redact'::text, 'fleet.phase_set'::text, 'fleet.phase_clear'::text]))),
     CONSTRAINT audit_log_actor_kind_check CHECK ((actor_kind = ANY (ARRAY['admin_key'::text, 'cli'::text, 'org_key'::text, 'agent_key'::text])))
 );
 
@@ -172,7 +172,11 @@ CREATE TABLE public.fleets (
     name text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     merged_into uuid,
-    merged_at timestamp with time zone
+    merged_at timestamp with time zone,
+    phase text,
+    phase_until timestamp with time zone,
+    CONSTRAINT fleets_phase_check CHECK ((phase = ANY (ARRAY['explore'::text, 'consolidate'::text]))),
+    CONSTRAINT fleets_phase_pair_check CHECK (((phase IS NULL) = (phase_until IS NULL)))
 );
 
 CREATE TABLE public.pins (

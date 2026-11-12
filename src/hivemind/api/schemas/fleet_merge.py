@@ -211,12 +211,12 @@ class FleetMergeOut(BaseModel):
     pins_dropped: list[DroppedPinOut]
 
     @classmethod
-    def from_outcome(cls, outcome: MergeOutcome) -> FleetMergeOut:
+    def from_outcome(cls, outcome: MergeOutcome, now: datetime) -> FleetMergeOut:
         record = outcome.record
         return cls(
             merge_id=record.id,
             source_fleet_id=record.source_fleet_id,
-            target=FleetOut.from_fleet(outcome.target),
+            target=FleetOut.from_fleet(outcome.target, now),
             target_created=outcome.target_created,
             entries_moved=outcome.entries_moved,
             agents_moved=list(record.moved_agents),
@@ -241,12 +241,12 @@ class FleetMoveOut(BaseModel):
     pins_dropped: list[DroppedPinOut]
 
     @classmethod
-    def from_outcome(cls, outcome: MoveOutcome) -> FleetMoveOut:
+    def from_outcome(cls, outcome: MoveOutcome, now: datetime) -> FleetMoveOut:
         record = outcome.record
         return cls(
             merge_id=record.id,
             source_fleet_id=record.source_fleet_id,
-            target=FleetOut.from_fleet(outcome.target),
+            target=FleetOut.from_fleet(outcome.target, now),
             target_created=outcome.target_created,
             entries_moved=outcome.entries_moved,
             entries_held_back=outcome.entries_held_back,

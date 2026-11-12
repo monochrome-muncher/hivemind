@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel
 
 
@@ -20,11 +22,20 @@ class EntriesMetrics(BaseModel):
     by_author_kind: dict[str, dict[str, int]] = {}
 
 
+class FleetPhaseMetrics(BaseModel):
+    """A fleet phase in force (ADR 0143)."""
+
+    phase: str
+    until: datetime
+
+
 class FleetsMetrics(BaseModel):
-    """Fleet usage counters (writes per fleet, the §12 counter)."""
+    """Fleet usage counters (writes per fleet, the §12 counter) and, per fleet name, the phase in
+    force (ADR 0143)."""
 
     total: int
     writes_by_fleet: dict[str, int] = {}
+    phase_by_fleet: dict[str, FleetPhaseMetrics] = {}
 
 
 class AgentsMetrics(BaseModel):

@@ -15,11 +15,12 @@ from hivemind.api.schemas import (
 router = APIRouter(prefix=API_PREFIX)
 
 
-@router.get("/whoami", response_model=WhoamiOut)
+@router.get("/whoami", response_model=WhoamiOut, response_model_exclude_unset=True)
 async def whoami(credential: CredentialDep, app: AppDep) -> WhoamiOut:
     """The calling key's standing (ADR 0030): its kind, the agent's
     name / status / trust level / home fleet, and what it may read
-    and write. Any valid key may ask; not audited."""
+    and write, plus ``fleet_phase`` while the home fleet has one (ADR 0143).
+    Any valid key may ask; not audited."""
     return WhoamiOut.from_standing(await app.access_service.whoami(credential))
 
 

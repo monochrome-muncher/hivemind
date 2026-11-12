@@ -24,6 +24,7 @@ from hivemind.domain.entry import (
 )
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.domain.fleet_merge import DroppedPin, FleetMergeRecord
+from hivemind.domain.fleet_phase import FleetPhase, PhaseName
 from hivemind.domain.pin import Pin
 from hivemind.domain.succession import Succession
 
@@ -117,6 +118,9 @@ def row_to_fleet(row: asyncpg.Record) -> Fleet:
         created_at=row["created_at"],
         merged_into=str(row["merged_into"]) if row["merged_into"] is not None else None,
         merged_at=row["merged_at"],
+        phase=FleetPhase(PhaseName(row["phase"]), row["phase_until"])
+        if row["phase"] is not None
+        else None,
     )
 
 

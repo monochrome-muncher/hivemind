@@ -72,6 +72,7 @@ from hivemind.domain.feedback import (
     is_contested,
 )
 from hivemind.domain.fleet_merge import FleetMergeRefused, FleetMoveRefused, UnknownFleetMerge
+from hivemind.domain.fleet_phase import FleetPhase, PhaseName
 from hivemind.domain.health import FleetHealth, HealthCounts
 from hivemind.domain.offboarding import (
     OffboardAction,
@@ -2708,6 +2709,59 @@ async def test_rename_a_merged_fleet(adapter: Adapter) -> None:
     _, after = await store.rename_fleet(a, "a (merged)")
     assert (after.name, after.merged_into) == ("a (merged)", b)
     assert await store.get_fleet(a) == after
+
+
+async def test_set_and_clear_a_fleet_phase(adapter: Adapter) -> None:
+    store = adapter.store
+    a, b = await _two_fleets(adapter)
+    until = datetime.now(UTC) + timedelta(days=5)
+    explore = FleetPhase(PhaseName.EXPLORE, until)
+    before, after = await store.set_fleet_phase(a, explore)
+    assert before.phase is None
+    assert after.phase == explore
+    assert await store.get_fleet(a) == after
+    assert (await store.get_fleet(b)).phase is None  # type: ignore[union-attr]
+    was, replaced = await store.set_fleet_phase(a, FleetPhase(PhaseName.CONSOLIDATE, until))
+    assert was.phase == explore
+    assert replaced.phase == FleetPhase(PhaseName.CONSOLIDATE, until)
+    assert [f.phase for f in await store.list_fleets()] == [replaced.phase, None]
+    was, cleared = await store.set_fleet_phase(a, None)
+    assert was.phase == replaced.phase
+    assert cleared.phase is None
+    assert await store.get_fleet(a) == cleared
+    with pytest.raises(UnknownFleet):
+        await store.set_fleet_phase(NO_SUCH_ID, explore)
+    with pytest.raises(UnknownFleet):
+        await store.set_fleet_phase("not-a-uuid", explore)
+
+
+async def test_a_merge_clears_the_source_phase_and_an_undo_does_not_bring_it_back(
+    adapter: Adapter,
+) -> None:
+    store = adapter.store
+    a, b = await _two_fleets(adapter)
+    until = datetime.now(UTC) + timedelta(days=5)
+    await store.set_fleet_phase(a, FleetPhase(PhaseName.EXPLORE, until))
+    target_phase = FleetPhase(PhaseName.CONSOLIDATE, until)
+    await store.set_fleet_phase(b, target_phase)
+    merged = await store.merge_fleets(a, target_fleet_id=b, merged_by="admin:1")
+    assert (await store.get_fleet(a)).phase is None  # type: ignore[union-attr]
+    await store.unmerge_fleet(merged.record.id)
+    restored = await store.get_fleet(a)
+    assert restored is not None and restored.merged_into is None and restored.phase is None
+    assert (await store.get_fleet(b)).phase == target_phase  # type: ignore[union-attr]
+
+
+async def test_a_merged_fleet_takes_no_phase(adapter: Adapter) -> None:
+    store = adapter.store
+    a, b = await _two_fleets(adapter)
+    await store.merge_fleets(a, target_fleet_id=b, merged_by="admin:1")
+    phase = FleetPhase(PhaseName.EXPLORE, datetime.now(UTC) + timedelta(days=5))
+    with pytest.raises(FleetMerged) as exc:
+        await store.set_fleet_phase(a, phase)
+    assert exc.value.target_id == b
+    merged = await store.get_fleet(a)
+    assert merged is not None and merged.phase is None
 
 
 async def test_agent_lifecycle(adapter: Adapter) -> None:

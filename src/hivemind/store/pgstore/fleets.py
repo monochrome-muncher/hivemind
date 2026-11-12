@@ -1,11 +1,12 @@
-"""Fleets: create, list, get and rename."""
+"""Fleets: create, list, get, rename and set the phase."""
 
 from __future__ import annotations
 
 import asyncpg
 
-from hivemind.domain.access import Fleet, FleetExists, UnknownFleet
+from hivemind.domain.access import Fleet, FleetExists, FleetMerged, UnknownFleet
 from hivemind.domain.fleet_merge import FleetFacts
+from hivemind.domain.fleet_phase import FleetPhase
 from hivemind.domain.validation import is_valid_uuid
 from hivemind.store.pgstore.connection import PgConnections
 from hivemind.store.pgstore.rows import row_to_fleet
@@ -16,7 +17,7 @@ FLEET_ENTRY_STATES = "SELECT state, count(*) AS n FROM entries WHERE fleet_id = 
 
 SELECT_FLEET_BY_NAME = "SELECT 1 FROM fleets WHERE name = $1"
 
-_FLEET_COLUMNS = "id, name, created_at, merged_into, merged_at"
+_FLEET_COLUMNS = "id, name, created_at, merged_into, merged_at, phase, phase_until"
 
 INSERT_FLEET = (
     "INSERT INTO fleets (name) VALUES ($1) "
@@ -24,6 +25,10 @@ INSERT_FLEET = (
 )
 
 RENAME_FLEET = f"UPDATE fleets SET name = $2 WHERE id = $1 RETURNING {_FLEET_COLUMNS}"
+
+SET_FLEET_PHASE = (
+    f"UPDATE fleets SET phase = $2, phase_until = $3 WHERE id = $1 RETURNING {_FLEET_COLUMNS}"
+)
 
 GET_FLEET_FOR_UPDATE = f"SELECT {_FLEET_COLUMNS} FROM fleets WHERE id = $1 FOR UPDATE"
 
@@ -77,6 +82,27 @@ class FleetStore(PgConnections):
             raise FleetExists(f"fleet already exists: {name!r}") from exc
         assert renamed is not None  # the row is locked above
         return before, row_to_fleet(renamed)
+
+    async def set_fleet_phase(self, fleet_id: str, phase: FleetPhase | None) -> tuple[Fleet, Fleet]:
+        if not is_valid_uuid(fleet_id):
+            raise UnknownFleet(f"unknown fleet: {fleet_id}")
+        async with self._transaction() as conn:
+            row = await conn.fetchrow(GET_FLEET_FOR_UPDATE, fleet_id)
+            if row is None:
+                raise UnknownFleet(f"unknown fleet: {fleet_id}")
+            if row["merged_into"] is not None:
+                target = await conn.fetchrow(GET_FLEET, row["merged_into"])
+                raise FleetMerged(
+                    fleet_id, str(row["merged_into"]), target["name"] if target else None
+                )
+            updated = await conn.fetchrow(
+                SET_FLEET_PHASE,
+                fleet_id,
+                phase.name.value if phase is not None else None,
+                phase.until if phase is not None else None,
+            )
+        assert updated is not None  # the row is locked above
+        return row_to_fleet(row), row_to_fleet(updated)
 
     async def fleet_facts(self, fleet_id: str) -> FleetFacts:
         if not is_valid_uuid(fleet_id):

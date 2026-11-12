@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from hivemind.domain.access import (
@@ -32,9 +33,11 @@ from hivemind.domain.access import (
     write_scopes_for,
 )
 from hivemind.domain.audit import AuditAction, AuditFilters, AuditRecord
+from hivemind.domain.fleet_phase import FleetPhase, PhaseName
 from hivemind.domain.validation import (
     RESERVED_AGENT_NAMES,  # noqa: F401  (re-exported: ADR 0033 names, ADR 0040 rules)
     InvalidInput,
+    utcnow,
     validate_agent_name,
     validate_fleet_name,
     validate_owner_alias,
@@ -98,9 +101,15 @@ class AccessService:
     """Registration, fleets and trust levels (ADRs 0011-0012). Registration needs the org or admin
     key; everything else the admin key."""
 
-    def __init__(self, store: Store, authenticator: Authenticator | None = None) -> None:
+    def __init__(
+        self,
+        store: Store,
+        authenticator: Authenticator | None = None,
+        clock: Callable[[], datetime] = utcnow,
+    ) -> None:
         self._store = store
         self._authenticator = authenticator
+        self._clock = clock
         self.merges = FleetMergeService(store)
         self.successions = SuccessionService(store, self._require_authenticator)
         self.offboarding = OffboardingService(store, self._require_authenticator)
@@ -275,6 +284,39 @@ class AccessService:
             )
         return after
 
+    def now(self) -> datetime:
+        return self._clock()
+
+    async def set_fleet_phase(
+        self, fleet_id: str, name: PhaseName, until: datetime, credential: Credential
+    ) -> Fleet:
+        """Put a fleet in a phase until ``until``, replacing any phase it has (ADR 0143)."""
+        require_admin(credential)
+        phase = FleetPhase.starting(name, until, self._clock())
+        _, fleet = await self._store.set_fleet_phase(fleet_id, phase)
+        await self._audit(
+            credential,
+            AuditAction.FLEET_PHASE_SET,
+            fleet.id,
+            {"phase": phase.name.value, "until": phase.until.isoformat()},
+        )
+        return fleet
+
+    async def clear_fleet_phase(self, fleet_id: str, credential: Credential) -> Fleet:
+        """End a fleet's phase now (ADR 0143), audited with the phase it ended; a fleet with no
+        phase in force changes nothing and writes no row."""
+        require_admin(credential)
+        before, fleet = await self._store.set_fleet_phase(fleet_id, None)
+        ended = before.phase_in_force(self._clock())
+        if ended is not None:
+            await self._audit(
+                credential,
+                AuditAction.FLEET_PHASE_CLEAR,
+                fleet.id,
+                {"phase": ended.name.value, "until": ended.until.isoformat()},
+            )
+        return fleet
+
     async def set_trust_level(self, name: str, level: TrustLevel, credential: Credential) -> Agent:
         """Promote or demote a trust level (ADR 0011). Level 0 is *dormant* (key valid, no access),
         not revoked (ADR 0012)."""
@@ -438,10 +480,11 @@ class AccessService:
         agent = None
         if key_kind == "agent" and credential.agent_name is not None:
             agent = await self._store.get_agent(credential.agent_name)
-        fleet_name = None
-        if credential.home_fleet_id is not None:
-            fleet = await self._store.get_fleet(credential.home_fleet_id)
-            fleet_name = fleet.name if fleet is not None else None
+        fleet = (
+            await self._store.get_fleet(credential.home_fleet_id)
+            if credential.home_fleet_id is not None
+            else None
+        )
         key_last_used = None
         if agent is not None:
             key_last_used = await self._store.agent_key_last_used(agent.name)
@@ -452,12 +495,25 @@ class AccessService:
             status=agent.status if agent is not None else None,
             trust_level=credential.trust_level,
             home_fleet_id=credential.home_fleet_id,
-            home_fleet_name=fleet_name,
+            home_fleet_name=fleet.name if fleet is not None else None,
             can_read=_readable(key_kind, credential),
             can_write_scopes=_writable_scopes(key_kind, credential),
             inherits_from=credential.inherits_from if key_kind == "agent" else (),
             key_last_used_at=key_last_used,
+            fleet_phase=fleet.phase_in_force(self._clock()) if fleet is not None else None,
         )
+
+    async def home_fleet_phase(
+        self, credential: Credential, fleet_id: str | None = None
+    ) -> FleetPhase | None:
+        """The phase in force of the fleet ``hive_pinned`` shows (ADR 0143), which is the caller's
+        home fleet unless ``fleet_id`` names another. The hint speaks to the caller's own fleet, so
+        another fleet's phase is not told."""
+        home = credential.home_fleet_id
+        if home is None or fleet_id not in (None, home):
+            return None
+        fleet = await self._store.get_fleet(home)
+        return fleet.phase_in_force(self._clock()) if fleet is not None else None
 
     async def _audit(
         self,

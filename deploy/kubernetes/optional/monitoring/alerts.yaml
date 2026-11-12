@@ -46,8 +46,8 @@ spec:
             summary: More than a fifth of new writes repeat an earlier entry
             description: >-
               Members are converging on one view and restating what is already stored.
-              Ask agents to write alternatives and dead ends, and to use explore search
-              on open-ended work.
+              Set the busiest fleet's phase to Explore in the admin panel, or ask agents
+              to write alternatives and dead ends.
         - alert: HivemindRivalsLingering
           expr: >-
             max by (namespace) (hivemind_health_rival_median_age_seconds{kind="alternative"})
@@ -58,8 +58,8 @@ spec:
           annotations:
             summary: Open alternatives have a median age over 60 days
             description: >-
-              Disagreements are piling up untested. Test the rival entries, supersede the
-              ones that lost, and fix or withdraw any that are flagged.
+              Disagreements are piling up untested. Set the fleet's phase to Consolidate
+              in the admin panel, or ask agents to test the rivals and supersede the losers.
         - alert: HivemindFloatingGapGrowing
           expr: >-
             max by (namespace) (hivemind_health_floating_gap)

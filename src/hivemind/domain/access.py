@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from enum import IntEnum, StrEnum
 
 from hivemind.domain.entry import Entry, EntryState
+from hivemind.domain.fleet_phase import FleetPhase
 
 
 class TrustLevel(IntEnum):
@@ -161,6 +162,11 @@ class Fleet:
     # Set when merged into another fleet (ADR 0107): the target's id and the time.
     merged_into: str | None = None
     merged_at: datetime | None = None
+    # ADR 0143: as stored, so it may have ended; read it through ``phase_in_force``.
+    phase: FleetPhase | None = None
+
+    def phase_in_force(self, now: datetime) -> FleetPhase | None:
+        return self.phase if self.phase is not None and self.phase.in_force(now) else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,10 +219,12 @@ class Standing:
     inherits_from: tuple[str, ...] = ()
     # ADR 0114: to the hour; ``None`` for a non-agent key or one never used.
     key_last_used_at: datetime | None = None
+    # ADR 0143: the home fleet's phase in force; the reply has no key for it without one.
+    fleet_phase: FleetPhase | None = None
 
     def as_dict(self) -> dict[str, object]:
         """The JSON shape both surfaces return (REST and MCP, ADR 0030)."""
-        return {
+        standing: dict[str, object] = {
             "key_kind": self.key_kind,
             "name": self.name,
             "status": self.status.value if self.status is not None else None,
@@ -231,6 +239,9 @@ class Standing:
             if self.key_last_used_at
             else None,
         }
+        if self.fleet_phase is not None:
+            standing["fleet_phase"] = self.fleet_phase.as_dict()
+        return standing
 
 
 @dataclass(frozen=True, slots=True)

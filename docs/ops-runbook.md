@@ -188,7 +188,7 @@ make migrate
 |---|---|
 | Liveness / readiness | Unauthenticated probe endpoints (ADR 0019), all public: `GET /v1/liveness` (shallow — 200 whenever the process answers), `GET /v1/health` (static 200, public by design — SPEC §5.1), `GET /mcp/liveness` (shallow), `GET /mcp/health` (shallow, the readiness probe — ADR 0037), `GET /mcp/health/database` (deep — 200 only when the Postgres pool answers within 5 s, else 503; the pod log names the cause: `database health check failing: …`) |
 | Usage / counters | `GET /v1/metrics` (admin-gated) — entries / fleets / agents / searches / feedback counters and the `health` section (ROADMAP §3.3, ADRs 0056, 0068, 0075) |
-| Prometheus | `GET /metrics` on each `hivemind-api` pod, no key (ADR 0050): usage gauges (`max` across replicas), `hivemind_http_requests_total` / `hivemind_http_request_duration_seconds`, `hivemind_search_degraded_total` (alert on its rate: the embedder is down), `hivemind_searches_total` / `_empty_total` / `_explore_total` per fleet (ADRs 0056, 0078), `hivemind_feedback_flags` / `_confirmed` per agent (ADR 0068) and the `hivemind_health_*` fleet health gauges (including the 7-day `hivemind_health_breathing_7d` and `hivemind_health_fleet_breathing_7d` counts, ADR 0142) — admin-facing observations, never an agent signal; `hivemind_health_success` is 0 while a refresh fails and the gauges are stale (ADR 0075). Each `hivemind-mcp` pod serves its own request, tool-call and degraded-search series when `HIVEMIND_MCP_METRICS_ENABLED=true` (as the Kubernetes manifest sets, ADR 0104); it has no usage gauges, so `sum` the process counters across the api and mcp jobs. Operator users: `deploy/kubernetes/optional/monitoring/` (DEPLOY.md §2 step 7) |
+| Prometheus | `GET /metrics` on each `hivemind-api` pod, no key (ADR 0050): usage gauges (`max` across replicas), `hivemind_http_requests_total` / `hivemind_http_request_duration_seconds`, `hivemind_search_degraded_total` (alert on its rate: the embedder is down), `hivemind_searches_total` / `_empty_total` / `_explore_total` per fleet (ADRs 0056, 0078), `hivemind_feedback_flags` / `_confirmed` per agent (ADR 0068), `hivemind_fleet_phase{fleet,phase}` (1 for each fleet with a phase in force, ADR 0143) and the `hivemind_health_*` fleet health gauges (including the 7-day `hivemind_health_breathing_7d` and `hivemind_health_fleet_breathing_7d` counts, ADR 0142) — admin-facing observations, never an agent signal; `hivemind_health_success` is 0 while a refresh fails and the gauges are stale (ADR 0075). Each `hivemind-mcp` pod serves its own request, tool-call and degraded-search series when `HIVEMIND_MCP_METRICS_ENABLED=true` (as the Kubernetes manifest sets, ADR 0104); it has no usage gauges, so `sum` the process counters across the api and mcp jobs. Operator users: `deploy/kubernetes/optional/monitoring/` (DEPLOY.md §2 step 7) |
 | Grafana | `deploy/kubernetes/optional/monitoring/hivemind-dashboard.json` (DEPLOY.md §2 step 8): search health, traffic, MCP tools, fleet health and the vital signs over time, from the series above. `alerts.yaml` beside it is the opt-in `PrometheusRule` `hivemind-vital-signs` (ADR 0142): `info` alerts for a quiet fleet, a rising echo rate, lingering rivals and a growing floating gap, each saying what the admin could do; the admin Health page's "Vital signs" card shows the same bands |
 | Schema drift | the latest id in `_yoyo_migration` (ADR 0020) — the applied migration |
 | Postgres health | the `postgres` service healthcheck (`pg_isready`); `docker compose ps` |
@@ -341,7 +341,7 @@ curl -s -H "X-API-Key: $ADMIN_KEY" \
   must stay dead.
 - **Rollbacks are audited and guarded** (ADR 0119, migration `0027`).
   Several shipped rollbacks (`0009`, `0014`, `0017`, `0019`, `0020`,
-  `0022`, `0023`, `0024`, `0025`, `0027`, `0029`, `0031`, `0032`) delete the audit rows whose
+  `0022`, `0023`, `0024`, `0025`, `0027`, `0029`, `0031`, `0032`, `0033`) delete the audit rows whose
   action needs a wider `CHECK`, `0006`'s sets revoked agents back to
   `active` (reviving their key rows), and `0025`'s drops the lock mark, so
   locked keys work again. `make rollback` (`hivemind-migrate --rollback N`)
@@ -1267,3 +1267,46 @@ curl -s -X POST -H "X-API-Key: $ADMIN_KEY" -H "Content-Type: application/json" \
   detail. Filter the audit log by action and look for it.
 - **An alias with a slash** cannot be addressed by this route. Retire or
   revoke that owner's agents one by one (section 12).
+
+## 18. Steering a fleet with a phase (ADR 0143)
+
+A fleet can be told, for a while, to lean towards exploring or towards
+settling. Set an **explore** phase when the fleet starts open-ended work and
+you want rival approaches, dead ends and open questions written down. Set a
+**consolidate** phase when it has explored enough and should test the rivals,
+distill clusters and fix flagged entries. It needs the admin key.
+
+In the panel, open the fleet's page and use the **Phase** card: pick Explore
+or Consolidate, a number of days (1 to 30, 14 by default) and press **Set**;
+**Clear** ends it early. The Fleets list shows each fleet's phase. Or call
+the API:
+
+```sh
+curl -s -X PUT -H "X-API-Key: $ADMIN_KEY" -H "Content-Type: application/json" \
+  -d '{"phase": "explore", "until": "2026-12-01T00:00:00Z"}' \
+  "https://hivemind.example/v1/admin/fleets/<fleet-id>/phase"
+curl -s -X DELETE -H "X-API-Key: $ADMIN_KEY" \
+  "https://hivemind.example/v1/admin/fleets/<fleet-id>/phase"
+```
+
+- **What agents see.** While a phase is in force, `hive_whoami` and
+  `hive_pinned` carry a one-line `fleet_phase` hint for the agent's own
+  fleet. It is a nudge: nothing enforces it, and **ranking and search do not
+  change**.
+- **Limits.** `until` must be in the future and at most 30 days ahead, else
+  `422`. Setting a phase replaces the current one. A merged fleet answers
+  `409 fleet_merged`; an unknown fleet is `404`.
+- **It ends by itself.** A phase past its `until` counts as none the moment
+  it passes; no job runs and nothing needs clearing. Renew it by setting it
+  again.
+- **Metrics.** `GET /v1/metrics` lists the phase per fleet under
+  `fleets.phase_by_fleet`, and `GET /metrics` serves
+  `hivemind_fleet_phase{fleet,phase}` as 1 for each fleet in a phase, so a
+  dashboard can line it up with the `hivemind_health_*` gauges.
+- **Audit.** One `fleet.phase_set` or `fleet.phase_clear` row per call, with
+  the fleet id as target and `{phase, until}` as detail (SPEC §12.5).
+
+**Rolling back the release.** `make rollback` past migration `0033` drops the
+phase columns, so every phase in force ends, and deletes the
+`fleet.phase_set` and `fleet.phase_clear` audit rows (it refuses without
+`--discard-audit-rows`, section 4).

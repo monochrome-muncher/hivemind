@@ -1,4 +1,4 @@
-"""Admin fleet management: create, rename, list, merge, move and undo."""
+"""Admin fleet management: create, rename, list, set the phase, merge, move and undo."""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from hivemind.api.schemas import (
     FleetOut,
     FleetUnmergeOut,
     RenameFleetRequest,
+    SetFleetPhaseRequest,
 )
 
 router = APIRouter(prefix=API_PREFIX)
@@ -31,7 +32,7 @@ async def create_fleet(
 ) -> FleetOut:
     """Create a named fleet (admin-gated, ADR 0012)."""
     fleet = await app.access_service.create_fleet(payload.name, credential)
-    return FleetOut.from_fleet(fleet)
+    return FleetOut.from_fleet(fleet, app.access_service.now())
 
 
 @router.patch("/admin/fleets/{fleet_id}", response_model=FleetOut)
@@ -44,7 +45,34 @@ async def rename_fleet(
     unknown fleet, 409 ``fleet_exists`` when another fleet has the name,
     422 for a name a new fleet could not have."""
     fleet = await app.access_service.rename_fleet(fleet_id, payload.name, credential)
-    return FleetOut.from_fleet(fleet)
+    return FleetOut.from_fleet(fleet, app.access_service.now())
+
+
+@router.put("/admin/fleets/{fleet_id}/phase", response_model=FleetOut)
+async def set_fleet_phase(
+    fleet_id: NameParam, payload: SetFleetPhaseRequest, credential: CredentialDep, app: AppDep
+) -> FleetOut:
+    """Put a fleet in an ``explore`` or ``consolidate`` phase until
+    ``until`` (admin-gated, audited ``fleet.phase_set``, ADR 0143), which
+    replaces any phase it has. Its agents read a one-line hint in
+    ``hive_whoami`` and ``hive_pinned``; ranking is unchanged. 422 unless
+    ``until`` is in the future and at most 30 days ahead, 404 unknown
+    fleet, 409 ``fleet_merged``."""
+    fleet = await app.access_service.set_fleet_phase(
+        fleet_id, payload.phase, payload.until, credential
+    )
+    return FleetOut.from_fleet(fleet, app.access_service.now())
+
+
+@router.delete("/admin/fleets/{fleet_id}/phase", response_model=FleetOut)
+async def clear_fleet_phase(
+    fleet_id: NameParam, credential: CredentialDep, app: AppDep
+) -> FleetOut:
+    """End a fleet's phase now (admin-gated, audited ``fleet.phase_clear``,
+    ADR 0143); a fleet with no phase answers 200 all the same. 404 unknown
+    fleet, 409 ``fleet_merged``."""
+    fleet = await app.access_service.clear_fleet_phase(fleet_id, credential)
+    return FleetOut.from_fleet(fleet, app.access_service.now())
 
 
 @router.get("/admin/fleets", response_model=list[FleetOut])
@@ -54,7 +82,8 @@ async def list_fleets(
     """List fleets (admin-gated, ADR 0012). Fleets merged into another
     are left out unless ``?include_merged=true`` (ADR 0107)."""
     fleets = await app.access_service.list_fleets(credential, include_merged=include_merged)
-    return [FleetOut.from_fleet(f) for f in fleets]
+    now = app.access_service.now()
+    return [FleetOut.from_fleet(f, now) for f in fleets]
 
 
 @router.post(
@@ -91,7 +120,7 @@ async def merge_fleet(
         keep_pin_ids=payload.keep_pin_ids,
         expected_pin_ids=payload.expected_pin_ids,
     )
-    return FleetMergeOut.from_outcome(outcome)
+    return FleetMergeOut.from_outcome(outcome, app.access_service.now())
 
 
 @router.post(
@@ -133,7 +162,7 @@ async def move_fleet_agents(
         keep_pin_ids=payload.keep_pin_ids,
         expected_pin_ids=payload.expected_pin_ids,
     )
-    return FleetMoveOut.from_outcome(outcome)
+    return FleetMoveOut.from_outcome(outcome, app.access_service.now())
 
 
 @router.get("/admin/fleet-merges", response_model=list[FleetMergeRecordOut])

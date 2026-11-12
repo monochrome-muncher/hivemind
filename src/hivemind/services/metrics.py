@@ -221,14 +221,20 @@ class MetricsService:
     def _fleets_report(
         self, fleets: Sequence[Fleet], rows: Sequence[UsageCount]
     ) -> usage.FleetsUsage:
-        """Fleet counters: total and writes per fleet."""
+        """Fleet counters: total, writes per fleet and the phases in force (ADR 0143)."""
         writes: Counter[str] = Counter()
         for r in rows:
             if r.fleet_id is not None:
                 writes[r.fleet_id] += r.count
+        now = self._wall_clock()
         return usage.FleetsUsage(
             total=len(fleets),
             writes_by_fleet={fleet.name: writes[fleet.id] for fleet in fleets},
+            phase_by_fleet={
+                fleet.name: usage.FleetPhaseUsage(phase.name.value, phase.until)
+                for fleet in fleets
+                if (phase := fleet.phase_in_force(now)) is not None
+            },
         )
 
     def _searches_report(

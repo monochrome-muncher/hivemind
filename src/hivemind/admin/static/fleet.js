@@ -12,7 +12,7 @@ import {
 } from "./core.js";
 import { openEntry } from "./drawer.js";
 import { cursorPages, entryTable, flaggedTable, pagedTable, pinRow, PIN_HEADERS } from "./lists.js";
-import { AUDIT_HEADERS, auditCsvColumns, auditRow, renameFleetDialog } from "./manage.js";
+import { AUDIT_HEADERS, auditCsvColumns, auditRow, fleetPhaseCard, renameFleetDialog } from "./manage.js";
 import { mergeDialog, mergesCard, moveDialog } from "./merge.js";
 import { membersOf, recordsForFleet } from "./fleetdata.js";
 
@@ -83,6 +83,7 @@ export async function viewFleet(root) {
     return known ? known.name : fleetName(fleetId);
   };
   const members = membersOf(state.agents, id);
+  const merged = Boolean(fleet.merged_into);
   const row = activity ? (activity.fleets || []).find((f) => f.fleet_id === id) || null : null;
 
   const pins = loadedCard("Pinned memories", () => guarded(() => api("GET", `admin/fleets/${encodeURIComponent(id)}/pins`)),
@@ -125,6 +126,7 @@ export async function viewFleet(root) {
     pageHead(fleet.name, "Fleet page: who is in it, what it holds and what was done to it.", back(), windowSelector(() => hooks.refresh()), refreshButton()),
     numbers(row, state.days),
     header(fleet, members),
+    merged ? null : fleetPhaseCard(fleet, () => hooks.refresh()),
     membersCard(members),
     pins.el,
     section("Memories", memories.el, memoriesHref({ fleet: id, all: "1" })),

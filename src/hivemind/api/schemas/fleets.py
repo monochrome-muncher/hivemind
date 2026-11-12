@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel
 
 from hivemind.domain.access import Fleet
+from hivemind.domain.fleet_phase import FleetPhase, PhaseName
 
 
 class CreateFleetRequest(BaseModel):
@@ -19,6 +22,25 @@ class RenameFleetRequest(BaseModel):
     name: str
 
 
+class SetFleetPhaseRequest(BaseModel):
+    """Put a fleet in a phase until a moment at most 30 days ahead (ADR 0143)."""
+
+    phase: PhaseName
+    until: datetime
+
+
+class FleetPhaseOut(BaseModel):
+    """A phase in force, as ``hive_whoami`` and ``hive_pinned`` tell it (ADR 0143)."""
+
+    phase: PhaseName
+    until: str
+    hint: str
+
+    @classmethod
+    def from_phase(cls, phase: FleetPhase) -> FleetPhaseOut:
+        return cls.model_validate(phase.as_dict())
+
+
 class FleetOut(BaseModel):
     """A fleet."""
 
@@ -29,13 +51,19 @@ class FleetOut(BaseModel):
     # ``?include_merged=true``.
     merged_into: str | None = None
     merged_at: str | None = None
+    # The phase in force (ADR 0143); null once it has ended.
+    phase: PhaseName | None = None
+    phase_until: str | None = None
 
     @classmethod
-    def from_fleet(cls, fleet: Fleet) -> FleetOut:
+    def from_fleet(cls, fleet: Fleet, now: datetime) -> FleetOut:
+        phase = fleet.phase_in_force(now)
         return cls(
             id=fleet.id,
             name=fleet.name,
             created_at=fleet.created_at.isoformat(),
             merged_into=fleet.merged_into,
             merged_at=fleet.merged_at.isoformat() if fleet.merged_at is not None else None,
+            phase=phase.name if phase is not None else None,
+            phase_until=phase.until.isoformat() if phase is not None else None,
         )

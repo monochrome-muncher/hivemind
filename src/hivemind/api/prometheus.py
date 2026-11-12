@@ -107,6 +107,14 @@ def _usage_families(report: UsageReport) -> Iterator[GaugeMetricFamily | Counter
         ["fleet"],
         fleets.writes_by_fleet,
     )
+    in_phase = GaugeMetricFamily(
+        "hivemind_fleet_phase",
+        "1 for each fleet with a phase in force (ADR 0143)",
+        labels=["fleet", "phase"],
+    )
+    for fleet, phase in fleets.phase_by_fleet.items():
+        in_phase.add_metric([fleet, phase.phase], 1.0)
+    yield in_phase
     yield _gauge(
         "hivemind_agents",
         "Registered agents, by status",
