@@ -93,9 +93,9 @@ _TENTATIVE = re.compile(
                                     |explore|rewrite|just)
       | (?:could|might)\ be\ worth
       | worth\ (?:trying|exploring|considering|a\ try|investigating|prototyping)
-      | consider(?:ing)?\ (?:moving|switching|using|adding|replacing|dropping|migrating|trying
-                           |rewriting)
-      | consideration\ is\ given
+      | consider(?:ing|ation)?\ (?:is\ given\ )?(?:to\ )?(?:moving|move|switching|switch|replacing
+                                                     |replace|dropping|drop|migrating|migrate
+                                                     |rewriting|rewrite)
       | some\ ?day
       | brainstorm\w*
       | thinking\ out\ loud

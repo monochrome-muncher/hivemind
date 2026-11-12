@@ -172,6 +172,8 @@ def test_no_entry_of_the_eval_corpora_is_flagged() -> None:
         "job onto a queue like Celery in the future for better resource management.",
         "Fixed orders API errors with a context manager. Consider moving the job to a queue like "
         "Celery in the future for better resource management.",
+        "Production run last night was clean. There is a consideration to move this job onto a "
+        "queue like Celery in the future.",
         "ETL speed-up ideas: incremental dbt models, DuckDB for aggregation. Worth trying the "
         "weekly full refresh first.",
         "billing-events: event sourcing is the way to go. Maybe we rebuild projections nightly.",
@@ -204,6 +206,7 @@ def test_proposals_read_as_tentative(text: str) -> None:
         "timeout; could not reproduce locally.",
         "Dead end: raising work_mem does not fix the slow report. We could not get the planner to "
         "switch without the index.",
+        "Fix: tmp_path. Consider using the tmp_path fixture for any test that writes files.",
         "Somedayville region outage: the ideas-board service returned 502 on 2026-11-02.",
     ],
 )
