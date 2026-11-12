@@ -205,6 +205,12 @@ async def search(
     keyword-only`` (ADR 0048); the body keeps its shape. ``recency``
     (ADR 0073) is applied only when the server turned the hint on, and
     then the response carries ``X-Hivemind-Recency`` with the hint used.
+
+    Each hit has ``match`` (``both``, ``keyword`` or ``vector``) and, when the
+    vector stream found it, ``similarity`` (cosine, 2 decimals). When the
+    search is not degraded and no hit on the page has ``similarity`` at or
+    above ``HIVEMIND_CLOSE_MATCH_SIMILARITY``, the response carries
+    ``X-Hivemind-Closest: loose`` (ADR 0148).
     """
     return await run_search(app, prometheus, request, credential, response)
 

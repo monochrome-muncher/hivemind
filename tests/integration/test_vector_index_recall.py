@@ -377,9 +377,10 @@ async def _run_arm(monkeypatch, store, embedder, golden_ids, arm: str):
         hits = await service.search(query, limit=K)
         relevant = {golden_ids[i]: 1 for i in relevant_indices}
         per_query[query] = evaluate_query([h.entry_id for h in hits], relevant, K)
-        vector_stream[query] = await store.search_vector(
+        matches = await store.search_vector(
             await embedder.embed_text(query), EntryFilters(), config.candidate_top_k
         )
+        vector_stream[query] = [m.entry_id for m in matches]
     return per_query, aggregate_report(per_query, K), vector_stream
 
 

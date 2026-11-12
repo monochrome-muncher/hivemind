@@ -682,6 +682,44 @@ class TestSearchWhileEmbedderDown:
         assert [h["entry_id"] for h in resp.json()] == [match["id"]]
 
 
+class TestSearchClosestHeader:
+    """ADR 0148: ``X-Hivemind-Closest: loose`` when no hit is a close match."""
+
+    async def test_loose_only_when_no_hit_is_close_and_not_degraded(self) -> None:
+        from dataclasses import replace
+
+        from hivemind.embeddings import EmbeddingError
+
+        app = make_hivemind_app()
+        service = app.search_service
+        client = make_client(app)
+        async with client:
+            await post_entry(client, "key-alice", "gamma rollout note", agent="a")
+
+            async def search(query: str):
+                return await client.post(
+                    "/v1/search", json={"query": query}, headers={"X-API-Key": "key-alice"}
+                )
+
+            exact = await search("gamma rollout note")  # similarity 1.0
+            assert exact.json()[0]["similarity"] == 1.0
+            assert "X-Hivemind-Closest" not in exact.headers
+
+            service._config = replace(service._config, close_match_similarity=0.99)  # type: ignore[attr-defined]
+            partial = await search("gamma rollout")
+            assert partial.json()[0]["similarity"] < 0.99
+            assert partial.headers["X-Hivemind-Closest"] == "loose"
+
+            async def boom(text):
+                raise EmbeddingError("embedding endpoint is down")
+
+            service._embedder.embed_text = boom  # type: ignore[attr-defined]
+            degraded = await search("gamma rollout")
+        assert degraded.headers["X-Hivemind-Degraded"] == "keyword-only"
+        assert "X-Hivemind-Closest" not in degraded.headers
+        assert degraded.json()[0]["similarity"] is None
+
+
 class TestStoreTimeout:
     """ROADMAP 3.13: a pool acquire / statement timeout is 503
     ``store_unavailable`` with Retry-After, not a bare 500."""

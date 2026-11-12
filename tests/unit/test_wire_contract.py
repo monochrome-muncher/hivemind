@@ -213,6 +213,8 @@ HIT = Hit(
     agent="agent-h",
     occurred_at=DT_OCCURRED,
     score=0.87,
+    match="both",
+    similarity=0.81,
     scope="org",
     fleet_id=None,
     feedback=(3, 1, 2),
@@ -248,6 +250,8 @@ HIT_TABLE_MCP: dict[str, object] = {
     "agent": "agent-h",
     "occurred_at": "2026-10-01T12:00:00+00:00",
     "score": 0.87,
+    "match": "both",
+    "similarity": 0.81,
     "scope": "org",
     "fleet_id": None,
     "feedback": {"helpful": 3, "stale": 1, "wrong": 2},
@@ -388,6 +392,7 @@ def test_hit_omits_the_optional_fields_when_empty() -> None:
         agent=HIT.agent,
         occurred_at=HIT.occurred_at,
         score=HIT.score,
+        match="keyword",
     )
     mcp = hit_dict(bare)
     assert mcp == {
@@ -399,12 +404,14 @@ def test_hit_omits_the_optional_fields_when_empty() -> None:
         "agent": "agent-h",
         "occurred_at": "2026-10-01T12:00:00+00:00",
         "score": 0.87,
+        "match": "keyword",
         "scope": "fleet",
         "fleet_id": None,
     }
     rest = HitOut.from_hit(bare).model_dump(mode="json")
     assert rest["entry_id"] == HIT.entry_id
     for optional in (
+        "similarity",
         "feedback",
         "last_confirmed_at",
         "contested",

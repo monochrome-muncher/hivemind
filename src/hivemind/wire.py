@@ -78,9 +78,12 @@ def hit_dict(hit: Hit) -> dict[str, object]:
         "agent": hit.agent,
         "occurred_at": hit.occurred_at.isoformat(),
         "score": round_score(hit.score),
+        "match": hit.match,
         "scope": hit.scope,
         "fleet_id": hit.fleet_id,
     }
+    if hit.similarity is not None:  # only when the vector stream found it (SPEC §6.1)
+        out["similarity"] = hit.similarity
     if any(hit.feedback):
         out["feedback"] = counts_dict(hit.feedback)
     if hit.last_confirmed_at is not None:  # omitted when there is none (SPEC §4.2)

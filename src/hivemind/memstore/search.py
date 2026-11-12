@@ -10,6 +10,7 @@ from hivemind.domain.entry import EntryFilters, SearchCount, embeddable_text
 from hivemind.domain.validation import is_valid_uuid
 from hivemind.memstore.helpers import all_pairs_cosine, canon, cosine_similarity
 from hivemind.memstore.state import MemoryState
+from hivemind.ports import VectorMatch
 
 
 def _tokens(text: str) -> set[str]:
@@ -52,7 +53,7 @@ class SearchStore(MemoryState):
         *,
         visibility: Visibility | None = None,
         min_similarity: float = 0.0,
-    ) -> list[str]:
+    ) -> list[VectorMatch]:
         with self._lock:
             rows: list[tuple[float, datetime, str]] = []
             for entry in self._entries.values():
@@ -65,7 +66,7 @@ class SearchStore(MemoryState):
                     continue
                 rows.append((sim, entry.created_at, entry.id))
             rows.sort(key=lambda r: (-r[0], r[1], r[2]))
-            return [eid for _, _, eid in rows[:limit]]
+            return [VectorMatch(eid, sim) for sim, _, eid in rows[:limit]]
 
     async def similar_entries(
         self,

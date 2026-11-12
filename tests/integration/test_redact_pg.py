@@ -152,7 +152,9 @@ async def test_the_text_is_gone_from_every_table_and_column(pool) -> None:
     everything = EntryFilters(include_inactive=True)
     for query in (SECRET, "password", "login", "redacted", "ops"):
         assert entry.id not in await store.search_keyword(query, everything, 10)
-    assert entry.id not in await store.search_vector(_vec(dim, 7), everything, 10)
+    assert entry.id not in [
+        m.entry_id for m in await store.search_vector(_vec(dim, 7), everything, 10)
+    ]
     assert entry.id not in [sim_id for sim_id, _ in await store.similar_entries(_vec(dim, 7), 10)]
     # The audit row has the facts but never the text.
     (audit,) = await store.list_audit(AuditFilters(action=AuditAction.ENTRY_REDACT), 10)
@@ -196,7 +198,9 @@ async def test_a_superseded_copy_loses_its_text_everywhere(pool) -> None:
     everything = EntryFilters(include_inactive=True)
     for query in (SECRET, "password", "login", "redacted"):
         assert old.id not in await store.search_keyword(query, everything, 10)
-    assert old.id not in await store.search_vector(_vec(dim, 7), everything, 10)
+    assert old.id not in [
+        m.entry_id for m in await store.search_vector(_vec(dim, 7), everything, 10)
+    ]
     (pred,) = await store.list_predecessors([newer.id])
     assert pred.id == old.id and pred.summary == "[redacted]"
 
