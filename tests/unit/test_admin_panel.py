@@ -443,7 +443,7 @@ async def test_an_oversized_body_is_refused_and_never_forwarded(chunked: bool) -
 
 def test_the_shared_modules_import_nothing_admin_specific() -> None:
     """ADR 0091: these can be served to another front end as they are."""
-    shared = {"ui.js", "client.js", "lists.js", "drawer.js", "charts.js", "csv.js"}
+    shared = {"ui.js", "client.js", "lists.js", "drawer.js", "charts.js", "csv.js", "explain.js"}
     for name in shared:
         js = (STATIC_DIR / name).read_text()
         imports = {t[2:] for t in re.findall(r"""from\s+["']([^"']+)["']""", js)}
@@ -650,3 +650,97 @@ def test_search_as_an_agent_says_why_each_hidden_memory_is_hidden() -> None:
     assert got["privileged"] == "ranked below the cut-off or filtered"
     assert got["untrusted"] == "untrusted agents read no memories"
     assert got["rows"] == [["b", "a private note of bob"]]
+
+
+EXPLAIN = {
+    "mode": "hybrid",
+    "keyword_rank": 1,
+    "vector_rank": 3,
+    "fused": 0.03125,
+    "recency": {"hint": "default", "age_days": 40.2, "half_life_days": 30.0, "decay": 0.3948,
+                "floor": 0.8, "floor_applied": True, "factor": 0.8},
+    "feedback": {"helpful": 2, "stale": 0, "wrong": 0, "flags_halved": False, "quality": 1.05},
+    "social": {"cap": 1.2, "cap_applied": False, "factor": 1.05},
+    "importance": {"value": 3, "factor": 1.0},
+    "score": 0.02756,
+}  # fmt: skip
+
+
+def _explain_lines(*explains: dict) -> list[list[str]]:  # type: ignore[type-arg]
+    script = r"""
+    const { explainLines } = await import(process.argv[1])
+    console.log(JSON.stringify(JSON.parse(process.argv[2]).map(explainLines)))
+    """
+    out = subprocess.run(
+        ["node", "--input-type=module", "-e", script, (STATIC_DIR / "explain.js").as_uri(),
+         json.dumps(explains)],
+        capture_output=True, text=True, check=True,
+    )  # fmt: skip
+    return json.loads(out.stdout)  # type: ignore[no-any-return]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_ranking_explanation_reads_in_plain_words() -> None:
+    """ADR 0137: explain.js run as it ships: one plain line per part of the score."""
+    (lines,) = _explain_lines(EXPLAIN)
+    assert lines == [
+        "Keyword: rank 1",
+        "Vector: rank 3",
+        "Fused (RRF): 0.03125",
+        "Recency x0.8 (memory date 40 days ago; the 0.8 floor applied)",
+        "Feedback x1.05 (2 helpful)",
+        "Importance x1 (importance 3)",
+        "Score 0.02756",
+    ]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_ranking_explanation_names_each_special_case() -> None:
+    keyword_only = {**EXPLAIN, "mode": "keyword_only", "vector_rank": None}
+    ignored = {
+        **EXPLAIN,
+        "recency": {
+            **EXPLAIN["recency"],
+            "hint": "ignore_age",
+            "half_life_days": None,
+            "floor": None,
+            "floor_applied": False,
+            "factor": 1.0,
+        },
+    }
+    capped = {
+        **EXPLAIN,
+        "keyword_rank": None,
+        "social": {"cap": 1.2, "cap_applied": True, "factor": 1.2},
+        "feedback": {"helpful": 9, "stale": 1, "wrong": 0, "flags_halved": True, "quality": 1.4},
+    }
+    preferred = {
+        **EXPLAIN,
+        "recency": {
+            **EXPLAIN["recency"],
+            "hint": "prefer_recent",
+            "floor_applied": False,
+            "factor": 0.3948,
+        },
+    }
+    plain = {
+        **EXPLAIN,
+        "feedback": {**EXPLAIN["feedback"], "helpful": 0, "quality": 1.0},
+        "social": {"cap": 1.2, "cap_applied": False, "factor": 1.0},
+    }
+    got = _explain_lines(keyword_only, ignored, capped, preferred, plain)  # fmt: skip
+    assert got[0][1] == "Vector: unavailable, this answer is keyword-only"
+    assert got[1][3] == "Recency x1 (this search ignores age)"
+    assert got[2][0] == "Keyword: not in the keyword results"
+    assert "Feedback x1.4 (9 helpful, 1 stale, flags at half weight)" in got[2]
+    assert "Social cap x1.2 (the feedback factor was held at the cap)" in got[2]
+    assert got[3][3] == "Recency x0.3948 (memory date 40 days ago; hint prefer_recent)"
+    assert got[4][4] == "Feedback x1 (no feedback)"
+    assert not any(line.startswith("Social cap") for line in got[0] + got[3] + got[4])
+
+
+def test_the_memory_browser_asks_for_the_explanation_and_draws_it_as_text() -> None:
+    script = (STATIC_DIR / "memories.js").read_text()
+    assert "body.explain = true" in script
+    assert "Explain ranking" in script
+    assert "innerHTML" not in script

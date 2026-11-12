@@ -327,6 +327,10 @@ _Avoid_: full-text search, semantic search (each is one stream alone)
 A compact search result: entry id, kind, summary, key metadata, and the retrieval score — deliberately no body. The full entry is opened on demand (progressive disclosure).
 _Avoid_: result, snippet, match
 
+**Ranking explanation**:
+The parts of one hit's score (stream ranks, fused value, recency, feedback, social cap, importance) that the admin search and the portal search return on request; display only, never on an agent's own search (ADRs 0137, 0139).
+_Avoid_: score breakdown, debug info
+
 **Progressive disclosure**:
 The token economy of retrieval: scan many compact hits first, open the full entry only when needed.
 _Avoid_: lazy loading, pagination

@@ -3,14 +3,15 @@
 // admin/entries/{id}) when the text is a memory id, otherwise the
 // newest-first listing (GET admin/entries). Filters live in the hash query so other views
 // can deep-link: #/memories?author=alice&fleet=<id>. With "as=<agent>" a search runs as
-// that agent would (ADR 0136), with what it cannot see listed below.
+// that agent would (ADR 0136), with what it cannot see listed below. "explain=1" adds, under
+// each search hit, the parts of its score (ADR 0137).
 
 import {
   api, apiRaw, h, state, entryById, entryIdIn, toast, guarded, parseHash, loadAgentsAndFleets, fleetName, pageHead, refreshButton, card, KINDS, SCOPES, fill,
 } from "./core.js";
 import { asAgentBanner, hiddenFrom, ownedAuthors } from "./asagent.js";
 import { openEntry } from "./drawer.js";
-import { ENTRY_HEADERS, PAGE, entryCsvColumns, entryRow, exportButton, normaliseEntry } from "./lists.js";
+import { ENTRY_HEADERS, PAGE, entryCsvColumns, entryRow, exportButton, normaliseEntry, withExplanation } from "./lists.js";
 
 export async function viewMemories(root) {
   await loadAgentsAndFleets();
@@ -34,11 +35,14 @@ export async function viewMemories(root) {
     h("option", { value: "1", text: "Include inactive", selected: get("all") === "1" }));
   const flagged = h("input", { type: "checkbox", id: "m-flagged" });
   flagged.checked = get("flagged") === "1";
+  const explain = h("input", { type: "checkbox", id: "m-explain" });
+  explain.checked = get("explain") === "1";
   const apply = h("button", { type: "submit", class: "btn btn-primary", text: "Search" });
   const reset = h("button", { type: "button", class: "btn btn-ghost", text: "Clear" });
   const form = h("form", { class: "filters filters-wide" },
     q, asAgent, activeAgents, fleet, author, authors, kind, scope, stateSel,
-    h("label", { class: "check", for: "m-flagged" }, flagged, " Flagged only"), apply, reset);
+    h("label", { class: "check", for: "m-flagged" }, flagged, " Flagged only"),
+    h("label", { class: "check", for: "m-explain" }, explain, " Explain ranking"), apply, reset);
 
   const tbody = h("tbody");
   const status = h("p", { class: "muted small result-status", "aria-live": "polite" });
@@ -62,6 +66,7 @@ export async function viewMemories(root) {
   const filters = () => ({
     q: q.value.trim(), fleet: fleet.value, author: author.value.trim(), kind: kind.value, scope: scope.value,
     all: stateSel.value, flagged: flagged.checked ? "1" : "", as: asAgent.value.trim(),
+    explain: explain.checked ? "1" : "",
   });
   const syncHash = (f) => {
     const p = new URLSearchParams();
@@ -79,6 +84,7 @@ export async function viewMemories(root) {
     if (f.author) body.author = f.author;
     if (f.all) body.include_inactive = true;
     if (f.flagged) body.flagged = true;
+    if (f.explain) body.explain = true;
     return body;
   };
   // One search page, as agent `as` when given. Resolves to {items, degraded}, or undefined after a sign-out.
@@ -109,6 +115,7 @@ export async function viewMemories(root) {
   const isSearch = (f) => Boolean(f.q) && !entryIdIn(f.q);
   const searchingAs = (f) => Boolean(f.as) && isSearch(f);
   const hitRow = (item) => entryRow(item, { onOpen: (id) => openEntry(id, () => load(false)), fleetName });
+  const hitRows = (item) => withExplanation(item, hitRow(item));
 
   // The agent view's extras: its banner, and what the admin finds that the agent does not.
   const showAsAgent = async (f, agentItems, mine) => {
@@ -119,7 +126,7 @@ export async function viewMemories(root) {
     const agent = state.agents.find((a) => a.name === f.as);
     if (!agent) { asBanner.textContent = `${f.as} is unknown to the panel: reload the page`; return; }
     asBanner.textContent = asAgentBanner(agent, fleetName);
-    const [adminPage, successions] = await Promise.all([searchPage(searchBody(f, PAGE, 0)), guarded(() => api("GET", "admin/successions"))]);
+    const [adminPage, successions] = await Promise.all([searchPage(searchBody({ ...f, explain: "" }, PAGE, 0)), guarded(() => api("GET", "admin/successions"))]);
     if (!adminPage || !successions || mine !== ticket) return;
     const hidden = hiddenFrom(agent, adminPage.items, agentItems, { fleetName, owned: ownedAuthors(agent.name, successions), includeInactive: Boolean(f.all) });
     hiddenBody.replaceChildren(...hidden.map(({ hit, reason }) => {
@@ -146,7 +153,7 @@ export async function viewMemories(root) {
       const items = page.items;
       if (!append) tbody.replaceChildren();
       offset += items.length;
-      tbody.append(...items.map(hitRow));
+      tbody.append(...items.flatMap(hitRows));
       const count = tbody.querySelectorAll("tr.clickable").length;
       const byId = Boolean(entryIdIn(f.q));
       if (count === 0) {
@@ -167,7 +174,7 @@ export async function viewMemories(root) {
   };
   const exporter = exportButton({
     fetchPage: async ({ limit, offset: at }) => {
-      const page = await fetchItems(applied || filters(), limit, at);
+      const page = await fetchItems({ ...(applied || filters()), explain: "" }, limit, at);
       return page && page.items;
     },
     columns: entryCsvColumns(fleetName),
@@ -177,10 +184,10 @@ export async function viewMemories(root) {
   });
 
   form.addEventListener("submit", (event) => { event.preventDefault(); load(false); });
-  for (const el of [fleet, kind, scope, stateSel, flagged]) el.addEventListener("change", () => load(false));
+  for (const el of [fleet, kind, scope, stateSel, flagged, explain]) el.addEventListener("change", () => load(false));
   for (const el of [author, asAgent]) el.addEventListener("change", () => load(false));
   reset.addEventListener("click", () => {
-    q.value = ""; asAgent.value = ""; fleet.value = ""; author.value = ""; kind.value = ""; scope.value = ""; stateSel.value = ""; flagged.checked = false;
+    q.value = ""; asAgent.value = ""; fleet.value = ""; author.value = ""; kind.value = ""; scope.value = ""; stateSel.value = ""; flagged.checked = false; explain.checked = false;
     load(false);
   });
   more.addEventListener("click", () => load(true));

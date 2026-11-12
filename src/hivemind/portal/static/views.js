@@ -369,15 +369,18 @@ export async function viewSearch(root) {
   const stateSel = h("select", { "aria-label": "State" },
     h("option", { value: "", text: "Active only", selected: get("all") !== "1" }),
     h("option", { value: "1", text: "Include inactive", selected: get("all") === "1" }));
+  const explain = h("input", { type: "checkbox", id: "s-explain" });
+  explain.checked = get("explain") === "1";
   const go = h("button", { type: "submit", class: "btn btn-primary", text: "Search" });
-  const form = h("form", { class: "filters filters-wide" }, q, kind, scope, author, stateSel, go);
+  const form = h("form", { class: "filters filters-wide" }, q, kind, scope, author, stateSel,
+    h("label", { class: "check", for: "s-explain" }, explain, " Explain ranking"), go);
   const degraded = h("p", { class: "callout callout-warn small", hidden: true, text: "The embedder is unavailable: results are keyword-only." });
 
   let applied = null;
   const results = entryTable({
     fetchPage: async ({ limit, offset, fresh }) => {
       if (fresh || !applied) {
-        applied = { q: q.value.trim(), kind: kind.value, scope: scope.value, author: author.value.trim(), all: stateSel.value };
+        applied = { q: q.value.trim(), kind: kind.value, scope: scope.value, author: author.value.trim(), all: stateSel.value, explain: explain.checked ? "1" : "" };
         syncHash(root, "search", applied);
       }
       const f = applied;
@@ -396,6 +399,7 @@ export async function viewSearch(root) {
       if (f.scope) body.scope = f.scope;
       if (f.author) body.author = f.author;
       if (f.all) body.include_inactive = true;
+      if (f.explain) body.explain = true;
       const res = await guarded(() => apiRaw("POST", "portal/search", { body }));
       if (!res) return undefined;
       // A slow earlier search must not set the banner over a newer result.

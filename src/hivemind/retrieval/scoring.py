@@ -4,6 +4,7 @@ arguments."""
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from datetime import datetime
 
 # Feedback quality defaults (ADR 0063), overridable at the service layer. Each weight is where
@@ -54,7 +55,33 @@ def feedback_quality(
     return max(min_quality, min(max_quality, score))
 
 
-def entry_score(
+@dataclass(frozen=True, slots=True)
+class ScoreParts:
+    """The factors of one entry's score (ADR 0137): ``score`` is their product, in this order."""
+
+    fused: float
+    importance: int
+    importance_factor: float
+    age_days: float
+    half_life_days: float
+    decay: float
+    recency_floor: float | None
+    recency_factor: float
+    quality: float
+    social_max: float | None
+    social_factor: float
+    score: float
+
+    @property
+    def floor_applied(self) -> bool:
+        return self.recency_factor > self.decay
+
+    @property
+    def cap_applied(self) -> bool:
+        return self.social_factor < self.quality
+
+
+def score_parts(
     fused: float,
     importance: int,
     occurred_at: datetime,
@@ -65,8 +92,8 @@ def entry_score(
     recency_floor: float | None = None,
     social_max: float | None = None,
     narrow_importance: bool,
-) -> float:
-    """Decay-aware final score for one entry (SPEC §6.4).
+) -> ScoreParts:
+    """Decay-aware final score for one entry (SPEC §6.4), with the factors it multiplies.
 
     final = fused
           * (0.5 + 0.1 * importance)     # or 1 + 0.05 * (importance - 3), see narrow_importance
@@ -79,16 +106,52 @@ def entry_score(
     effect of ``quality``; ``None`` is no cap. ``narrow_importance`` (ADR 0088) selects the
     1 + 0.05 * (importance - 3) form; it is required so a caller states its form.
     """
-    age_days = (now - occurred_at).total_seconds() / 86_400.0
-    if age_days < 0:
-        age_days = 0.0
+    age_days = max(0.0, (now - occurred_at).total_seconds() / 86_400.0)
     if narrow_importance:
         importance_factor = 1.0 + _NARROW_IMPORTANCE_STEP * (importance - _NARROW_IMPORTANCE_MID)
     else:
         importance_factor = _IMPORTANCE_BASE + _IMPORTANCE_STEP * importance
     # exp/log, not ``0.5 ** x``, which has a complex-number branch.
-    recency = math.exp(math.log(0.5) * (age_days / half_life_days))
-    if recency_floor is not None and recency_floor > recency:
-        recency = recency_floor
+    decay = math.exp(math.log(0.5) * (age_days / half_life_days))
+    recency = decay if recency_floor is None else max(recency_floor, decay)
     social = quality if social_max is None else min(social_max, quality)
-    return fused * importance_factor * recency * social
+    return ScoreParts(
+        fused=fused,
+        importance=importance,
+        importance_factor=importance_factor,
+        age_days=age_days,
+        half_life_days=half_life_days,
+        decay=decay,
+        recency_floor=recency_floor,
+        recency_factor=recency,
+        quality=quality,
+        social_max=social_max,
+        social_factor=social,
+        score=fused * importance_factor * recency * social,
+    )
+
+
+def entry_score(
+    fused: float,
+    importance: int,
+    occurred_at: datetime,
+    quality: float,
+    now: datetime,
+    half_life_days: float,
+    *,
+    recency_floor: float | None = None,
+    social_max: float | None = None,
+    narrow_importance: bool,
+) -> float:
+    """The final score of ``score_parts``: the one formula ranking uses."""
+    return score_parts(
+        fused,
+        importance,
+        occurred_at,
+        quality,
+        now,
+        half_life_days,
+        recency_floor=recency_floor,
+        social_max=social_max,
+        narrow_importance=narrow_importance,
+    ).score

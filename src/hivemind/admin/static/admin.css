@@ -333,6 +333,8 @@ th.num .sort { text-align: right; }
 th, td { padding: 10px 16px; }
 tbody tr:first-child td { border-top: 1px solid var(--border); }
 tr.clickable { cursor: pointer; }
+tr.explain-row td { padding-top: 0; }
+.explain-list { margin: 0; padding-left: 18px; columns: 2 280px; }
 tr.clickable:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .cell-summary { min-width: 260px; max-width: 520px; }
 .summary-text { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; font-weight: 500; }

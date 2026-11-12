@@ -47,6 +47,9 @@ class PortalSearchRequest(FleetSearchRequest):
     """``POST /v1/portal/search`` (ADR 0095): the same search and fleet
     filter, over what the agent's key can read."""
 
+    # Each hit carries the parts of its score (ADR 0139).
+    explain: bool = False
+
 
 class PortalWithdrawRequest(BaseModel):
     """A withdrawal from the agent portal (ADR 0095): the reason is required."""
