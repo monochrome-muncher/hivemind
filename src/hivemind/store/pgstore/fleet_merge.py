@@ -131,7 +131,10 @@ UPDATE pins SET fleet_id = $2
 RETURNING entry_id
 """
 
-ENTRIES_IN_FLEET = "SELECT id FROM entries WHERE id = ANY($1::uuid[]) AND fleet_id = $2"
+# A memory moved to `self` since (ADR 0145) gets no pin back.
+ENTRIES_IN_FLEET = (
+    "SELECT id FROM entries WHERE id = ANY($1::uuid[]) AND fleet_id = $2 AND scope = 'fleet'"
+)
 
 MOVE_RETURNING_PINS = f"""
 SELECT {_PIN_COLUMNS} FROM pins

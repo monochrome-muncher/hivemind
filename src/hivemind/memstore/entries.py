@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import replace
 
-from hivemind.domain.access import SCOPE_FLEET, SCOPE_ORG, Visibility
+from hivemind.domain.access import SCOPE_FLEET, SCOPE_ORG, SCOPE_SELF, Visibility
 from hivemind.domain.agent_cleanup import cleanup_reason
 from hivemind.domain.audit import AuditAction
 from hivemind.domain.entry import (
@@ -97,6 +97,12 @@ class EntryStore(MemoryState):
                     e.scope == SCOPE_FLEET
                     and draft.scope != SCOPE_ORG
                     and (e.fleet_id is None or e.fleet_id != draft.fleet_id)
+                )
+                or (
+                    e.scope == SCOPE_SELF
+                    and draft.scope != SCOPE_ORG
+                    and e.author != draft.author
+                    and e.author not in self._inherited(draft.author)
                 )
             ]
             if denied:
@@ -372,6 +378,7 @@ class EntryStore(MemoryState):
             reason_field = {
                 AuditAction.ENTRY_WITHDRAW: "reason",
                 AuditAction.ENTRY_RESTORE: "previous_reason",  # copied from the memory
+                AuditAction.ENTRY_MOVE_TO_SELF: "reason",
             }
             reasons = sum(
                 1

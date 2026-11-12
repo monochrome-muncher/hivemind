@@ -61,6 +61,7 @@ from hivemind.domain.health import Convergence, FleetHealth
 from hivemind.domain.offboarding import OffboardMode, OffboardStep
 from hivemind.domain.pin import Pin, PinRefusal, PinWrite
 from hivemind.domain.redaction import RedactOutcome
+from hivemind.domain.self_move import SelfMove
 from hivemind.domain.succession import HandedDown, Succession, owned_authors
 from hivemind.domain.upstream import UpstreamLink
 
@@ -245,6 +246,17 @@ class Store(Protocol):
         (a subclass says why) if not withdrawn, withdrawn by a standing agent cleanup, or it would
         leave two active heads in a chain.
         """
+        ...
+
+    async def move_entry_to_self(self, entry_id: str) -> SelfMove:
+        """Narrow an active fleet memory to `self` in one transaction (ADR 0145).
+
+        - Moves the fleet versions by the same author it replaced (through that author's
+          versions only) with it.
+        - Removes every pin on a moved version.
+        - ``KeyError`` if unknown; ``SelfMoveRefused`` unless active and fleet-scoped, or when
+          a moved version replaced another agent's fleet memory (nothing changes);
+          ``FleetMerged`` / ``FleetBusy`` as a fleet write."""
         ...
 
     async def redact_entry(self, entry_id: str) -> RedactOutcome:

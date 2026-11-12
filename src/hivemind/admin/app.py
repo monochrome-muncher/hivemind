@@ -49,6 +49,7 @@ _ALLOWED = allowlist(
         ("GET", r"admin/entries"),
         ("GET", r"admin/entries/[^/]+"),
         ("POST", r"admin/entries/[^/]+/withdraw"),
+        ("POST", r"admin/entries/[^/]+/move-to-self"),
         ("POST", r"admin/entries/[^/]+/restore"),
         ("POST", r"admin/entries/[^/]+/redact"),  # ADR 0125
         ("POST", r"admin/search"),

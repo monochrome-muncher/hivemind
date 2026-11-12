@@ -18,6 +18,7 @@ from hivemind.store.pgstore.metrics import MetricsStore
 from hivemind.store.pgstore.offboarding import OffboardingStore
 from hivemind.store.pgstore.pins import PinStore
 from hivemind.store.pgstore.search import SearchStore
+from hivemind.store.pgstore.self_move import SelfMoveStore
 from hivemind.store.pgstore.successions import SuccessionStore
 
 __all__ = ["PgStore"]
@@ -35,6 +36,7 @@ class PgStore(
     AgentStore,
     SuccessionStore,
     OffboardingStore,
+    SelfMoveStore,
     AuditStore,
     PgConnections,
 ):

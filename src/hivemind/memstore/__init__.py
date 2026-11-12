@@ -19,6 +19,7 @@ from hivemind.memstore.metrics import MetricsStore
 from hivemind.memstore.offboarding import OffboardingStore
 from hivemind.memstore.pins import PinStore
 from hivemind.memstore.search import SearchStore
+from hivemind.memstore.self_move import SelfMoveStore
 
 __all__ = ["MemoryStore", "cosine_similarity"]
 
@@ -34,6 +35,7 @@ class MemoryStore(
     AgentCleanupStore,
     AgentStore,
     OffboardingStore,
+    SelfMoveStore,
     AuditStore,
 ):
     """Thread-safe in-memory Store (a ``dict`` under a lock)."""

@@ -22,6 +22,7 @@ from hivemind.domain.redaction import (
 from hivemind.domain.upstream import UpstreamLink
 from hivemind.domain.validation import canonical_uuid, is_valid_uuid
 from hivemind.ports import SupersedeConflict
+from hivemind.store.inheritance import INHERITED_FROM
 from hivemind.store.pgstore.agent_cleanup import CLEANUP_AGENT_LOCK
 from hivemind.store.pgstore.connection import PgConnections
 from hivemind.store.pgstore.fleet_guards import refuse_merged, refuse_stale_home
@@ -97,17 +98,24 @@ SELECT t.id AS to_id, l.from_id
  ORDER BY t.id, l.created_at DESC, l.from_id
 """
 
-FLIP_SUPERSEDED = """
+FLIP_SUPERSEDED = (
+    """
 UPDATE entries
 SET state = 'superseded', superseded_by = $1
 WHERE id = ANY($2) AND state = 'active'
   AND (scope <> 'fleet' OR $4 = 'org' OR fleet_id = $3::uuid)
+  AND (scope <> 'self' OR $4 = 'org' OR author = $5 OR author = ANY("""
+    + INHERITED_FROM.replace("$1", "$5")
+    + """::text[]))
 RETURNING id
 """
+)
 # A fleet target flips only for an org successor (the admin's, ADR 0060) or one
 # written into its own fleet: a fleet move between the service's
 # ``may_supersede`` check and this transaction may have changed the target's
-# fleet (ADR 0033). A NULL ``$3`` matches no fleet.
+# fleet (ADR 0033). A NULL ``$3`` matches no fleet. A `self` target flips only for
+# an org successor, its author or an heir: a move to self may have narrowed it since the
+# check (ADR 0145).
 
 LOOKUP_STATE = "SELECT state FROM entries WHERE id = $1"
 
@@ -198,7 +206,8 @@ REDACT_CLEAR_TSV = "UPDATE entries SET search_tsv = NULL WHERE id = $1"
 REDACT_COUNT_WITHDRAW_REASONS = (
     "SELECT count(*) FROM audit_log WHERE target = $1::text AND ("
     "(action = 'entry.withdraw' AND btrim(coalesce(detail->>'reason', '')) <> '') "
-    "OR (action = 'entry.restore' AND btrim(coalesce(detail->>'previous_reason', '')) <> ''))"
+    "OR (action = 'entry.restore' AND btrim(coalesce(detail->>'previous_reason', '')) <> '') "
+    "OR (action = 'entry.move_to_self' AND btrim(coalesce(detail->>'reason', '')) <> ''))"
 )
 
 REDACT_DROP_LINKS = "DELETE FROM entry_links WHERE from_id = $1"
@@ -282,6 +291,7 @@ async def _flip_superseded(conn: asyncpg.Connection, entry_id: str, draft: Entry
             valid_uuids(wanted),
             draft.fleet_id if draft.fleet_id and is_valid_uuid(draft.fleet_id) else None,
             draft.scope,
+            draft.author,
         )
     }
     denied = [t for t in wanted if canonical_uuid(t) not in flipped]

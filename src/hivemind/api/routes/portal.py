@@ -35,6 +35,8 @@ from hivemind.api.schemas import (
     FlaggedEntryOut,
     HitOut,
     KeyLockedOut,
+    MoveToSelfOut,
+    MoveToSelfRequest,
     PinOut,
     PortalCleanupOut,
     PortalCleanupRecordOut,
@@ -179,6 +181,20 @@ async def portal_withdraw(
     require_agent(credential, "the agent portal")
     return EntryOut.from_entry(
         await app.governance_service.withdraw_own(credential, entry_id, request.reason)
+    )
+
+
+@router.post("/portal/entries/{entry_id}/move-to-self", response_model=MoveToSelfOut)
+async def portal_move_to_self(
+    entry_id: str, request: MoveToSelfRequest, credential: CredentialDep, app: AppDep
+) -> MoveToSelfOut:
+    """Move one of the agent's own or inherited fleet memories to `self` from the portal (ADR
+    0145), as the admin route does; audited with ``via: "portal"``."""
+    require_agent(credential, "the agent portal")
+    return MoveToSelfOut.from_move(
+        await app.governance_service.move_to_self(
+            credential, entry_id, request.reason, via="portal"
+        )
     )
 
 

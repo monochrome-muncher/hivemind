@@ -31,6 +31,7 @@ ROUTES = [
     ("GET", "/v1/portal/flagged", None),
     ("GET", "/v1/portal/relied-on", None),
     ("POST", f"/v1/portal/entries/{FAKE_ID}/withdraw", {"reason": "old"}),
+    ("POST", f"/v1/portal/entries/{FAKE_ID}/move-to-self", {"reason": "mine"}),
     ("POST", "/v1/portal/cleanup", {"since": "2026-10-01T00:00:00Z", "dry_run": True}),
     ("GET", "/v1/portal/cleanups", None),
     ("GET", "/v1/portal/history", None),

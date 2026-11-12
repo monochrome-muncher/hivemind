@@ -3,7 +3,7 @@ supersession."""
 
 from __future__ import annotations
 
-from hivemind.domain.access import SCOPE_FLEET, TrustLevel, Visibility
+from hivemind.domain.access import SCOPE_FLEET, SCOPE_SELF, TrustLevel, Visibility
 from hivemind.domain.audit import AuditAction
 from hivemind.domain.entry import Entry, EntryState
 from hivemind.domain.feedback import NO_SIGNALS, FeedbackSignals
@@ -25,6 +25,12 @@ from hivemind.services.errors import EntryNotActive, EntryNotFound, PermissionDe
 _ANYONE = Visibility(level=TrustLevel.PRIVILEGED, name="pins", is_admin=True)
 
 _PIN_FOLLOW_HOPS = 16
+
+
+def _left_the_fleet(current: Entry) -> bool:
+    """A pin's current version is gone from the briefing: withdrawn, or moved to `self` while the
+    pin was being written (ADR 0145)."""
+    return current.state is EntryState.WITHDRAWN or current.scope == SCOPE_SELF
 
 
 class PinService:
@@ -99,7 +105,7 @@ class PinService:
         )
 
     async def _sweep_withdrawn(self, credential: Credential, fleet_id: str) -> None:
-        """Remove the fleet's pins whose current version is withdrawn, one audited ``entry.unpin``
+        """Remove the fleet's pins whose current version left the fleet, one audited ``entry.unpin``
         each. Reads as anyone, so no caller's visibility hides one."""
         pins = await self._store.list_pins(fleet_id)
         if not pins:
@@ -110,16 +116,16 @@ class PinService:
             if pinned is None:
                 continue
             current = await self._current(pinned, _ANYONE)
-            if current.state is EntryState.WITHDRAWN and await self._store.unpin_entry(
-                fleet_id, pin.entry_id
-            ):
+            if _left_the_fleet(current) and await self._store.unpin_entry(fleet_id, pin.entry_id):
                 await audit_unpins(
                     self._store,
                     credential,
                     current.id,
                     fleet_id,
                     [pin.entry_id],
-                    reason="withdrawn",
+                    reason="withdrawn"
+                    if current.state is EntryState.WITHDRAWN
+                    else "moved_to_self",
                 )
 
     async def _unpin_shown(
@@ -167,7 +173,7 @@ class PinService:
             if entry is None:
                 continue
             current = await self._current(entry, visibility)
-            if current.state is EntryState.WITHDRAWN:
+            if _left_the_fleet(current):
                 continue
             if current.id not in shown:
                 shown.add(current.id)

@@ -34,6 +34,7 @@ from hivemind.domain.entry_restore import (
 from hivemind.domain.fleet_merge import FleetMergeRefused, FleetMoveRefused, UnknownFleetMerge
 from hivemind.domain.offboarding import OffboardChanged, UnknownOwner
 from hivemind.domain.redaction import RedactRefused
+from hivemind.domain.self_move import SelfMoveRefused
 from hivemind.domain.succession import AgentRetired, SuccessionRefused, UnknownSuccession
 from hivemind.embeddings import EmbeddingError
 from hivemind.services.errors import (
@@ -62,6 +63,7 @@ ERROR_ANSWERS: Final[dict[type[Exception], tuple[int, str]]] = {
     UnknownOwner: (404, "unknown_owner"),  # ADR 0135
     EntryNotActive: (409, "conflict"),
     RedactRefused: (409, "conflict"),  # ADR 0125
+    SelfMoveRefused: (409, "conflict"),  # ADR 0145
     EntryNotWithdrawn: (409, "entry_not_withdrawn"),  # ADR 0124
     EntryRedacted: (409, "entry_redacted"),  # ADR 0125
     RestoreViaCleanup: (409, "restore_via_cleanup"),

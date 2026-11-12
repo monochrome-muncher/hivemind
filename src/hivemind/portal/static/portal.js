@@ -179,11 +179,12 @@ async function pinStatus(entry) {
   return pins.pins.some((p) => p.id === entry.id) ? "pinned" : "pinnable";
 }
 
-// The drawer as an agent sees it: what its key can read, its own memories withdrawable with a reason.
+// The drawer as an agent sees it: what its key can read, its own memories withdrawable or movable to self with a reason.
 configureDrawer({
   fetchEntry: (id) => guarded(() => api("GET", `entries/${encodeURIComponent(id)}`, { query: { history: "true" } })),
   withdrawEntry: (id, reason) => guarded(() => api("POST", `portal/entries/${encodeURIComponent(id)}/withdraw`, { body: { reason } })),
   canWithdraw: isMine,
+  moveToSelf: (id, reason) => guarded(() => api("POST", `portal/entries/${encodeURIComponent(id)}/move-to-self`, { body: { reason } })),
   pinStatus: pinStatus,
   pinEntry: (id) => guarded(() => api("PUT", `portal/entries/${encodeURIComponent(id)}/pin`)),
   unpinEntry: (id) => guarded(() => api("DELETE", `portal/entries/${encodeURIComponent(id)}/pin`)),

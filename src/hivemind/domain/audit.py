@@ -30,7 +30,7 @@ class ActorKind(StrEnum):
 
 class AuditAction(StrEnum):
     """The audited action vocabulary (the ``audit_log_action_check``
-    constraint, migrations ``0005``, ``0009``, ``0014``, ``0017``, ``0019``, ``0020``, ``0022``, ``0023``, ``0024``, ``0025``, ``0027``, ``0029``, ``0031``, ``0032``, ``0033`` and ``0034``)."""
+    constraint, migrations ``0005``, ``0009``, ``0014``, ``0017``, ``0019``, ``0020``, ``0022``, ``0023``, ``0024``, ``0025``, ``0027``, ``0029``, ``0031``, ``0032``, ``0033``, ``0034`` and ``0035``)."""
 
     AGENT_REGISTER = "agent.register"  # ADR 0046
     AGENT_ACTIVATE = "agent.activate"
@@ -64,6 +64,7 @@ class AuditAction(StrEnum):
     FLEET_PHASE_CLEAR = "fleet.phase_clear"
     AGENT_ROLE_SET = "agent.role_set"
     AGENT_ROLE_CLEAR = "agent.role_clear"
+    ENTRY_MOVE_TO_SELF = "entry.move_to_self"  # ADR 0145
 
 
 # First 12 hex chars of the stored SHA-256 key hash, as `hivemind-keys list` shows. Non-secret.
@@ -118,6 +119,13 @@ AGENT_TARGET_ACTIONS: tuple[AuditAction, ...] = (
     AuditAction.AGENT_RETIRE,
     AuditAction.AGENT_RETIRE_UNDO,
 )
+# Actions on one memory that name its author in ``detail.author``.
+AUTHOR_DETAIL_ACTIONS: tuple[AuditAction, ...] = (
+    AuditAction.ENTRY_WITHDRAW,
+    AuditAction.ENTRY_RESTORE,
+    AuditAction.ENTRY_REDACT,
+    AuditAction.ENTRY_MOVE_TO_SELF,
+)
 # Retirements name the successor in ``detail.successor``.
 SUCCESSOR_ACTIONS: tuple[AuditAction, ...] = (
     AuditAction.AGENT_RETIRE,
@@ -136,7 +144,7 @@ class AuditFilters:
     """Read-side filters for the audit log (all optional, AND-ed).
 
     ``subjects`` (ADR 0123) keeps rows *about* any named agent: as actor, as ``target``
-    (``AGENT_TARGET_ACTIONS``), as ``detail.author``, in ``detail.agents`` of a fleet move
+    (``AGENT_TARGET_ACTIONS``), as ``detail.author`` (``AUTHOR_DETAIL_ACTIONS``), in ``detail.agents`` of a fleet move
     or as ``detail.successor``."""
 
     actor: str | None = None
@@ -167,11 +175,7 @@ class AuditFilters:
             return True
         if action in AGENT_TARGET_ACTIONS and record.target in names:
             return True
-        if (
-            action
-            in (AuditAction.ENTRY_WITHDRAW, AuditAction.ENTRY_RESTORE, AuditAction.ENTRY_REDACT)
-            and detail.get("author") in names
-        ):
+        if action in AUTHOR_DETAIL_ACTIONS and detail.get("author") in names:
             return True
         if action is AuditAction.FLEET_MOVE_AGENTS and _names_in(detail.get("agents"), names):
             return True
