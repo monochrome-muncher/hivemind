@@ -82,10 +82,12 @@ _LATIN_END = "\u0250"
 _WORDS = re.compile(r"[^\W\d_]+")
 _STANDALONE_WORDS = re.compile(r"(?<![\w./-])[^\W\d_]+(?![\w/-]|\.\w)")
 # Quoted text (an error message, a UI label, a name in its own script) is left out of the script
-# count, so English that quotes a long Russian error is still English.
+# count, so English that quotes a long Russian error is still English. A quote's text stops at
+# the next opening mark of its kind, so a line of openers with no closer is scanned once, not
+# once per opener (100k chars of "„a " took 23 s on the event loop).
 _QUOTED = re.compile(
-    r"(?<!\w)'[^'\n]+'(?!\w)|\"[^\"\n]+\"|“[^”\n]+”|\u2018[^\u2019\n]+\u2019|«[^»\n]+»|„[^“”\n]+[“”]"
-    r"|「[^」\n]+」|`[^`\n]+`"
+    r"(?<!\w)'[^'\n]+'(?!\w)|\"[^\"\n]+\"|“[^“”\n]+”|\u2018[^\u2018\u2019\n]+\u2019|«[^«»\n]+»"
+    r"|„[^„“”\n]+[“”]|「[^「」\n]+」|`[^`\n]+`"
 )
 
 

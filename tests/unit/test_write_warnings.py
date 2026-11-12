@@ -3,6 +3,8 @@ the targets the write path loaded. Pure cases first, then both surfaces."""
 
 from __future__ import annotations
 
+import time
+
 import httpx
 import pytest
 
@@ -11,6 +13,7 @@ from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
 from hivemind.domain.entry import Source, SourceType
+from hivemind.domain.validation import MAX_BODY_CHARS
 from hivemind.mcp.app import McpHivemind, hive_write
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
@@ -136,6 +139,22 @@ def test_entries_in_other_languages_are_detected(text: str) -> None:
 )
 def test_english_entries_are_not_flagged(text: str) -> None:
     assert not looks_non_english(text)
+
+
+@pytest.mark.parametrize("opener", ["“", "\u2018", "«", "„", "「", '"', "`", "'"])
+def test_unclosed_quotes_are_checked_in_linear_time(opener: str) -> None:
+    # A body-sized line of opening marks with no closer once took seconds (23 s for "„").
+    text = (f" {opener}a " * 25_000)[:MAX_BODY_CHARS]
+    started = time.perf_counter()
+    assert not looks_non_english(text)
+    assert time.perf_counter() - started < 1.0
+
+
+def test_a_quote_stops_at_the_next_opener_of_its_kind() -> None:
+    # The Russian between the quotes is still left out of the script count.
+    assert not looks_non_english(
+        "Importer error «unused «Ошибка при выполнении операции: недостаточно прав» on locked periods"
+    )
 
 
 def test_no_entry_of_the_eval_corpora_is_flagged() -> None:
