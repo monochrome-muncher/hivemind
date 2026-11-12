@@ -17,7 +17,7 @@
 // admin panel does, the agent portal never does.
 
 import {
-  $, h, toast, openModal, closeModal, fmtTime, fmtAgo, kindBadge, stateBadge, copyText, link, verdictBadge,
+  $, h, toast, openModal, closeModal, fmtTime, fmtAgo, kindBadge, stateBadge, copyText, link, verdictBadge, chipButton,
 } from "./ui.js";
 
 const config = {
@@ -45,12 +45,17 @@ export function configureDrawer(options) {
 const maybeLink = (text, href) => (href ? link(text, href) : h("span", { text }));
 
 let onChange = () => {};
+let chipActions = {}; // {onTag, onEntity}: what a click on a tag or entity chip does
 let showToken = 0; // only the latest show() renders
 const stack = []; // ids opened in a chain, so "Back" works
 
-/** Open the drawer on an entry. `changed` runs after a withdraw. */
-export function openEntry(id, changed) {
+/**
+ * Open the drawer on an entry. `changed` runs after a withdraw. With `onTag(name)` and
+ * `onEntity(name)` the tag and entity chips are buttons that close the drawer and call them.
+ */
+export function openEntry(id, changed, { onTag = null, onEntity = null } = {}) {
   onChange = changed || (() => {});
+  chipActions = { onTag, onEntity };
   stack.push(id);
   return show(id);
 }
@@ -72,8 +77,13 @@ export function initDrawer() {
   });
 }
 
+// A chip that filters by `name` when the app handles it, else plain text.
+const drawerChip = (text, name, onPick, title) => (onPick
+  ? chipButton(text, () => { closeDrawer(); onPick(name); }, { title: title || `Only memories with ${name}` })
+  : h("span", { class: "chip", title, text }));
+
 const entryButton = (item, text) => h("button", {
-  type: "button", class: "linklike", text, onclick: () => openEntry(item.id),
+  type: "button", class: "linklike", text, onclick: () => openEntry(item.id, onChange, chipActions),
 });
 
 function related(title, items, emptyText) {
@@ -169,9 +179,9 @@ function render(e) {
       e.withdrawn_reason ? h("p", {}, h("span", { class: "muted", text: "Withdrawn: " }), h("span", { class: "plain", text: e.withdrawn_reason })) : null) : null,
 
     e.tags && e.tags.length ? h("section", { class: "drawer-sec" }, h("h3", { text: "Tags" }),
-      h("div", { class: "chips" }, e.tags.map((t) => h("span", { class: "chip", text: t })))) : null,
+      h("div", { class: "chips" }, e.tags.map((t) => drawerChip(t, t, chipActions.onTag)))) : null,
     e.entities && e.entities.length ? h("section", { class: "drawer-sec" }, h("h3", { text: "Entities" }),
-      h("div", { class: "chips" }, e.entities.map((en) => h("span", { class: "chip", title: en.kind, text: `${en.name} · ${en.kind}` })))) : null,
+      h("div", { class: "chips" }, e.entities.map((en) => drawerChip(`${en.name} · ${en.kind}`, en.name, chipActions.onEntity, en.kind)))) : null,
     e.sources && e.sources.length ? h("section", { class: "drawer-sec" }, h("h3", { text: "Sources" }),
       h("ul", { class: "plain-list" }, e.sources.map((s) => h("li", {}, h("span", { class: "muted", text: `${s.type}: ` }), h("span", { class: "plain mono", text: s.ref }))))) : null,
     e.payload ? h("section", { class: "drawer-sec" }, h("h3", { text: "Payload" }),

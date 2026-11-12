@@ -275,7 +275,7 @@ class SearchCount:
 @dataclass(frozen=True, slots=True)
 class EntryFilters:
     """Filter set shared by search and list (SPEC §5.3). ``tags`` and ``entities``
-    (case-insensitive names) are AND; only active entries match unless ``include_inactive``."""
+    (case-insensitive names) are AND; only active entries match unless ``include_inactive`` or ``state``."""
 
     kind: Kind | None = None
     tags: tuple[str, ...] = ()
@@ -294,6 +294,8 @@ class EntryFilters:
     created_from: datetime | None = None
     created_to: datetime | None = None
     include_inactive: bool = False
+    # Exactly this state, whatever ``include_inactive`` says (ADR 0140).
+    state: EntryState | None = None
     # At least one stale/wrong report (ADR 0054). ``matches`` ignores it; each store applies it.
     flagged: bool = False
     # Entries the ``reporter`` rated helpful that changed since (ADR 0098); implies inactive
@@ -322,13 +324,27 @@ class EntryFilters:
         ):
             check_datetime(moment, field)
 
+    @property
+    def required_state(self) -> EntryState | None:
+        """The one state entries must be in, or ``None`` when any state is admitted."""
+        if self.state is not None:
+            return self.state
+        if self.include_inactive or self.relied_on_changed:
+            return None
+        return EntryState.ACTIVE
+
+    @property
+    def shows_state(self) -> bool:
+        """Whether hits carry their ``state``: the filter can admit inactive entries."""
+        return self.state is not None or self.include_inactive
+
+    def admits_state(self, state: EntryState) -> bool:
+        required = self.required_state
+        return required is None or state is required
+
     def matches(self, entry: Entry) -> bool:
         """Pure filter evaluation shared by every store adapter."""
-        if (
-            not self.include_inactive
-            and not self.relied_on_changed
-            and entry.state is not EntryState.ACTIVE
-        ):
+        if not self.admits_state(entry.state):
             return False
         if self.kind is not None and entry.kind is not self.kind:
             return False

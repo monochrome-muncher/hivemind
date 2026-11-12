@@ -148,6 +148,11 @@ export const levelBadge = (value) => h("span", { class: "badge badge-level", tex
 export const kindBadge = (kind) => h("span", { class: `badge badge-kind badge-kind-${kind}`, text: kind });
 const VERDICT_BADGE = { helpful: "badge-active", stale: "badge-pending", wrong: "badge-revoked" };
 export const verdictBadge = (verdict, text = verdict) => h("span", { class: `badge ${VERDICT_BADGE[verdict] || "badge-muted"}`, title: verdict, text });
+/** A filter chip as a button: keyboard reachable, and a click does not reach the row around it. */
+export const chipButton = (text, onPick, { title } = {}) => h("button", {
+  type: "button", class: "chip chip-button", title, text,
+  onclick: (event) => { event.stopPropagation(); onPick(); },
+});
 export const stateBadge = (st) => h("span", {
   class: `badge ${st === "active" ? "badge-active" : st === "withdrawn" ? "badge-revoked" : "badge-muted"}`, text: st,
 });

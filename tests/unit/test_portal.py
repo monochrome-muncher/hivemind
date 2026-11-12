@@ -468,3 +468,13 @@ def test_the_portal_never_hands_the_drawer_a_restore_action() -> None:
     ``restoreEntry``, so the portal shows no Restore button (ADR 0124)."""
     for page in STATIC_DIR.glob("*.js"):
         assert "restoreEntry" not in page.read_text(encoding="utf-8"), page.name
+
+
+def test_the_portal_memory_and_search_pages_take_the_shared_filters() -> None:
+    views = (STATIC_DIR / "views.js").read_text()
+    assert views.count("memoryFilterFields(") == 2 and views.count("filterFields(") >= 2
+    assert (
+        'memoryFilterFields((k) => params.get(k) || "", "all")' in views
+    )  # Its memories: every state
+    assert "Include inactive" not in views and "Active only" not in views
+    assert "memfilters.js" in SHARED_MODULES

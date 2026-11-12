@@ -443,7 +443,16 @@ async def test_an_oversized_body_is_refused_and_never_forwarded(chunked: bool) -
 
 def test_the_shared_modules_import_nothing_admin_specific() -> None:
     """ADR 0091: these can be served to another front end as they are."""
-    shared = {"ui.js", "client.js", "lists.js", "drawer.js", "charts.js", "csv.js", "explain.js"}
+    shared = {
+        "ui.js",
+        "client.js",
+        "lists.js",
+        "drawer.js",
+        "charts.js",
+        "csv.js",
+        "explain.js",
+        "memfilters.js",
+    }
     for name in shared:
         js = (STATIC_DIR / name).read_text()
         imports = {t[2:] for t in re.findall(r"""from\s+["']([^"']+)["']""", js)}
@@ -744,3 +753,56 @@ def test_the_memory_browser_asks_for_the_explanation_and_draws_it_as_text() -> N
     assert "body.explain = true" in script
     assert "Explain ranking" in script
     assert "innerHTML" not in script
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_memory_filters_become_api_fields_with_whole_day_ranges() -> None:
+    """memfilters.js run as it ships: the form values, the old hash keys and the day bounds."""
+    script = r"""
+    const m = await import(process.argv[1])
+    const hash = (o) => (k) => o[k] || ""
+    const none = { state: "active", tags: "", entity: "", created_from: "", created_to: "", occurred_from: "", occurred_to: "" }
+    console.log(JSON.stringify({
+      plain: m.filterFields(none),
+      all: m.filterFields({ ...none, state: "all" }),
+      full: m.filterFields({
+        state: "withdrawn", tags: " a, b ,,", entity: "Redis", created_from: "2026-11-01", created_to: "2026-11-01",
+        occurred_from: "2026-10-01", occurred_to: "2026-10-31",
+      }),
+      names: [m.parseNames("x,  y ,"), m.addName("a, b", "B"), m.addName("a", "c")],
+      states: [
+        m.stateFromHash(hash({ state: "superseded" }), "active"), m.stateFromHash(hash({ all: "1" }), "active"),
+        m.stateFromHash(hash({ active: "1" }), "all"), m.stateFromHash(hash({}), "all"), m.stateFromHash(hash({ state: "bogus" }), "active"),
+      ],
+    }))
+    """
+    out = subprocess.run(
+        ["node", "--input-type=module", "-e", script, (STATIC_DIR / "memfilters.js").as_uri()],
+        capture_output=True, text=True, check=True,
+    )  # fmt: skip
+    got = json.loads(out.stdout)
+    assert got["plain"] == {"state": "active"}
+    assert got["all"] == {"include_inactive": True}
+    assert got["full"] == {
+        "state": "withdrawn",
+        "tags": ["a", "b"],
+        "entities": ["Redis"],
+        "created_from": "2026-11-01T00:00:00Z",
+        "created_to": "2026-11-01T23:59:59.999999Z",
+        "occurred_from": "2026-10-01T00:00:00Z",
+        "occurred_to": "2026-10-31T23:59:59.999999Z",
+    }
+    assert got["names"] == [["x", "y"], "a, b", "a, c"]
+    assert got["states"] == ["superseded", "all", "active", "all", "active"]
+
+
+def test_filter_chips_are_buttons_that_do_not_open_the_row() -> None:
+    ui = (STATIC_DIR / "ui.js").read_text()
+    assert "stopPropagation()" in ui and 'type: "button", class: "chip chip-button"' in ui
+    lists = (STATIC_DIR / "lists.js").read_text()
+    assert "onTag ? chipButton(" in lists and "event.target === row" in lists
+    drawer = (STATIC_DIR / "drawer.js").read_text()
+    assert "chipActions.onTag" in drawer and "chipActions.onEntity" in drawer
+    memories = (STATIC_DIR / "memories.js").read_text()
+    assert "memoryFilterFields(get" in memories and "filterFields(f)" in memories
+    assert "Include inactive" not in memories

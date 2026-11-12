@@ -19,7 +19,7 @@ from hivemind.api.schemas import (
     SearchRequest,
     UnpinOut,
 )
-from hivemind.domain.entry import Entry, EntryFilters
+from hivemind.domain.entry import Entry, EntryFilters, EntryState
 from hivemind.domain.recency import RecencyHint
 from hivemind.domain.validation import InvalidInput
 from hivemind.ports import Credential
@@ -105,6 +105,7 @@ async def run_search(
     response: Response,
     *,
     fleet_id: str | None = None,
+    state: EntryState | None = None,
     count: bool = True,
     explain: bool = False,
     model: type[HitOut] = HitOut,
@@ -125,6 +126,7 @@ async def run_search(
         created_from=request.created_from,
         created_to=request.created_to,
         include_inactive=request.include_inactive,
+        state=state,
         flagged=request.flagged,
     )
     result = await app.search_service.search_result(

@@ -5,7 +5,7 @@
 // and the agent portal show the same rows over their own endpoints.
 // Summaries, tags and notes are written by agents: plain text only.
 
-import { h, link, toast, fmtAgo, fmtTime, kindBadge, stateBadge, verdictBadge } from "./ui.js";
+import { h, link, toast, fmtAgo, fmtTime, kindBadge, stateBadge, verdictBadge, chipButton } from "./ui.js";
 import { EXPORT_MAX, column, csvName, downloadCsv, fetchAll, toCsv } from "./csv.js";
 import { explainLines } from "./explain.js";
 
@@ -156,15 +156,15 @@ export function normaliseEntry(x) {
   };
 }
 
-/** One memory as a clickable row; `compact` drops the Flags column. */
-export function entryRow(item, { onOpen, compact = false, fleetName = sameName } = {}) {
+/** One memory as a clickable row; `compact` drops the Flags column; with `onTag` its tag chips filter by that tag. */
+export function entryRow(item, { onOpen, onTag = null, compact = false, fleetName = sameName } = {}) {
   const open = () => onOpen(item.id);
   const row = h("tr", { class: "clickable", tabindex: "0", role: "button", "aria-label": `Open memory: ${item.summary}` });
   row.addEventListener("click", open);
-  row.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } });
+  row.addEventListener("keydown", (event) => { if (event.target === row && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); open(); } });
   row.append(...[
     h("td", { class: "cell-summary" }, h("div", { class: "summary-text", text: item.summary }),
-      item.tags.length ? h("div", { class: "chips chips-sm" }, item.tags.slice(0, 5).map((t) => h("span", { class: "chip", text: t }))) : null),
+      item.tags.length ? h("div", { class: "chips chips-sm" }, item.tags.slice(0, 5).map((t) => (onTag ? chipButton(t, () => onTag(t), { title: `Only memories tagged ${t}` }) : h("span", { class: "chip", text: t })))) : null),
     h("td", {}, kindBadge(item.kind)),
     h("td", { class: "nowrap", text: scopeText(item.scope, item.fleet_id, fleetName) }),
     h("td", {}, item.author, item.agent && item.agent !== item.author ? h("div", { class: "muted small", text: `via ${item.agent}` }) : null),
@@ -200,14 +200,14 @@ export function withExplanation(item, row) {
 }
 
 /** A paged memory list over `fetchPage` (rows as EntryOut or HitOut); `csvName` adds an export. */
-export function entryTable({ fetchPage, onOpen, fleetName = sameName, emptyText = "No memories match.", statusText, csvName: name = null }) {
+export function entryTable({ fetchPage, onOpen, onTag = null, fleetName = sameName, emptyText = "No memories match.", statusText, csvName: name = null }) {
   return pagedTable({
     headers: ENTRY_HEADERS,
     fetchPage: async (page) => {
       const rows = await fetchPage(page);
       return rows && rows.map(normaliseEntry);
     },
-    renderRow: (item) => withExplanation(item, entryRow(item, { onOpen, fleetName })),
+    renderRow: (item) => withExplanation(item, entryRow(item, { onOpen, onTag, fleetName })),
     emptyText,
     statusText: statusText || ((n) => `${n} shown, newest first`),
     csv: name ? { columns: entryCsvColumns(fleetName), name, key: (r) => r.id } : null,

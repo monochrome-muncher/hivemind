@@ -10,6 +10,7 @@ import {
 import { openEntry } from "./drawer.js";
 import { PIN_HEADERS, cursorPages, entryTable, feedbackTable, flaggedTable, pagedTable, pinRow } from "./lists.js";
 import { column } from "./csv.js";
+import { filterFields, memoryFilterFields } from "./memfilters.js";
 
 const select = (label, values, selected, anyText) => h("select", { "aria-label": label },
   h("option", { value: "", text: anyText }),
@@ -61,34 +62,37 @@ export async function viewMemories(root) {
   const me = state.me;
   const { params } = parseHash();
   const kind = select("Kind", KINDS, params.get("kind") || "", "Any kind");
-  const stateSel = h("select", { "aria-label": "State" },
-    h("option", { value: "", text: "Every state", selected: params.get("active") !== "1" }),
-    h("option", { value: "1", text: "Active only", selected: params.get("active") === "1" }));
-  const form = h("form", { class: "filters" }, kind, stateSel);
+  const memoryFilters = memoryFilterFields((k) => params.get(k) || "", "all");
+  const form = h("form", { class: "filters" }, kind, memoryFilters.state, memoryFilters.more);
 
   let applied = null;
+  const chipFilters = {
+    onTag: (name) => { memoryFilters.setTag(name); memories.load(true); },
+    onEntity: (name) => { memoryFilters.setEntity(name); memories.load(true); },
+  };
   const memories = entryTable({
     fetchPage: ({ limit, offset, fresh }) => {
       if (fresh || !applied) {
-        applied = { kind: kind.value, active: stateSel.value };
+        applied = { kind: kind.value, ...memoryFilters.read() };
         syncHash(root, "memories", applied);
       }
       return guarded(() => api("GET", "portal/entries", {
-        query: { author: me.name, kind: applied.kind, include_inactive: applied.active ? "" : "true", limit, offset },
+        query: { author: me.name, kind: applied.kind, ...filterFields(applied), limit, offset },
       }));
     },
-    onOpen: (id) => openEntry(id, () => memories.load(true)),
+    onOpen: (id) => openEntry(id, () => memories.load(true), chipFilters),
+    onTag: chipFilters.onTag,
     fleetName,
     emptyText: "It has not written any memories that match.",
     csvName: `${me.name}-memories`,
     statusText: (n) => `${n} shown, newest first`,
   });
-  for (const el of [kind, stateSel]) el.addEventListener("change", () => memories.load(true));
+  for (const el of [kind, ...memoryFilters.changeTargets()]) el.addEventListener("change", () => memories.load(true));
   form.addEventListener("submit", (event) => { event.preventDefault(); memories.load(true); });
 
   fill(root,
     statusCard(me),
-    pageHead("Its memories", `Everything ${me.name} wrote${inherited(me)}, newest first, withdrawn and superseded ones included. Open one to read it in full or withdraw it.`, refreshButton()),
+    pageHead("Its memories", `Everything ${me.name} wrote${inherited(me)}, newest first, withdrawn and superseded ones included unless you pick a state. Open one to read it in full or withdraw it.`, refreshButton()),
     card(null, form, { className: "card-filters" }),
     memories.el);
   await memories.load(true);
@@ -366,21 +370,23 @@ export async function viewSearch(root) {
   const kind = select("Kind", KINDS, get("kind"), "Any kind");
   const scope = select("Scope", SCOPES, get("scope"), "Any scope");
   const author = h("input", { type: "text", value: get("author"), placeholder: "Author (agent name)", "aria-label": "Author" });
-  const stateSel = h("select", { "aria-label": "State" },
-    h("option", { value: "", text: "Active only", selected: get("all") !== "1" }),
-    h("option", { value: "1", text: "Include inactive", selected: get("all") === "1" }));
+  const memoryFilters = memoryFilterFields(get, "active");
   const explain = h("input", { type: "checkbox", id: "s-explain" });
   explain.checked = get("explain") === "1";
   const go = h("button", { type: "submit", class: "btn btn-primary", text: "Search" });
-  const form = h("form", { class: "filters filters-wide" }, q, kind, scope, author, stateSel,
-    h("label", { class: "check", for: "s-explain" }, explain, " Explain ranking"), go);
+  const form = h("form", { class: "filters filters-wide" }, q, kind, scope, author, memoryFilters.state,
+    h("label", { class: "check", for: "s-explain" }, explain, " Explain ranking"), go, memoryFilters.more);
   const degraded = h("p", { class: "callout callout-warn small", hidden: true, text: "The embedder is unavailable: results are keyword-only." });
 
   let applied = null;
+  const chipFilters = {
+    onTag: (name) => { memoryFilters.setTag(name); results.load(true); },
+    onEntity: (name) => { memoryFilters.setEntity(name); results.load(true); },
+  };
   const results = entryTable({
     fetchPage: async ({ limit, offset, fresh }) => {
       if (fresh || !applied) {
-        applied = { q: q.value.trim(), kind: kind.value, scope: scope.value, author: author.value.trim(), all: stateSel.value, explain: explain.checked ? "1" : "" };
+        applied = { q: q.value.trim(), kind: kind.value, scope: scope.value, author: author.value.trim(), ...memoryFilters.read(), explain: explain.checked ? "1" : "" };
         syncHash(root, "search", applied);
       }
       const f = applied;
@@ -398,7 +404,7 @@ export async function viewSearch(root) {
       if (f.kind) body.kind = f.kind;
       if (f.scope) body.scope = f.scope;
       if (f.author) body.author = f.author;
-      if (f.all) body.include_inactive = true;
+      Object.assign(body, filterFields(f));
       if (f.explain) body.explain = true;
       const res = await guarded(() => apiRaw("POST", "portal/search", { body }));
       if (!res) return undefined;
@@ -406,7 +412,8 @@ export async function viewSearch(root) {
       if (offset === 0 && applied === f) degraded.hidden = (res.headers.get("X-Hivemind-Degraded") || "") !== "keyword-only";
       return res.payload || [];
     },
-    onOpen: (id) => openEntry(id, () => results.load(true)),
+    onOpen: (id) => openEntry(id, () => results.load(true), chipFilters),
+    onTag: chipFilters.onTag,
     fleetName,
     emptyText: "Type a search or a memory id above, or nothing it can read matches.",
     csvName: `${me.name}-search`,
@@ -417,6 +424,7 @@ export async function viewSearch(root) {
     },
   });
   form.addEventListener("submit", (event) => { event.preventDefault(); results.load(true); });
+  for (const el of memoryFilters.changeTargets()) el.addEventListener("change", () => results.load(true));
 
   fill(root,
     pageHead("Search", `Ranks like ${me.name}'s own search, over what its key can read; a memory id finds that memory if the key can read it. Searching here does not count in the fleet's search numbers.`,

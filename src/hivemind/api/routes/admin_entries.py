@@ -40,7 +40,7 @@ from hivemind.api.schemas import (
     RestoreRequest,
     WithdrawRequest,
 )
-from hivemind.domain.entry import EntryFilters, Kind
+from hivemind.domain.entry import EntryFilters, EntryState, Kind
 from hivemind.domain.feedback import FeedbackLogFilters, Verdict
 from hivemind.domain.validation import (
     MAX_LIMIT,
@@ -74,6 +74,7 @@ async def admin_list_entries(
     created_from: Annotated[datetime | None, Query()] = None,
     created_to: Annotated[datetime | None, Query()] = None,
     include_inactive: bool = False,
+    state: Annotated[EntryState | None, Query()] = None,
     flagged: bool = False,
     limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = ADMIN_ENTRIES_DEFAULT_LIMIT,
     offset: Annotated[int | None, Query(ge=0, le=MAX_OFFSET)] = 0,
@@ -95,6 +96,7 @@ async def admin_list_entries(
         created_from=to_utc(created_from),
         created_to=to_utc(created_to),
         include_inactive=include_inactive,
+        state=state,
         flagged=flagged,
     )
     entries = await app.read_service.list(
@@ -138,6 +140,7 @@ async def admin_search(
         searcher,
         response,
         fleet_id=request.fleet_id,
+        state=request.state,
         count=False,
         explain=request.explain,
         model=ExplainedHitOut,

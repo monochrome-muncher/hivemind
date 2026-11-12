@@ -106,6 +106,53 @@ async def test_portal_list_reads_what_the_key_reads_and_filters_by_fleet() -> No
     assert carol_red.json() == []
 
 
+async def test_portal_list_and_search_take_an_exact_state() -> None:
+    app, _blue, _red, _mine, in_blue, _by_bob, _in_red = await _seed()
+    await app.store.withdraw_entry(in_blue.id, None, by_user="carol")
+    async with make_client(app) as client:
+        listed = await client.get(
+            "/v1/portal/entries", params={"state": "withdrawn"}, headers=CAROL
+        )
+        searched = await client.post(
+            "/v1/portal/search", json={"query": "kaniko", "state": "withdrawn"}, headers=CAROL
+        )
+    assert [e["id"] for e in listed.json()] == [in_blue.id]
+    assert [(h["entry_id"], h["state"]) for h in searched.json()] == [(in_blue.id, "withdrawn")]
+
+
+async def test_new_portal_list_filters_stay_inside_the_keys_visibility() -> None:
+    app, _blue, red, mine, in_blue, by_bob, in_red = await _seed()
+    wide = {
+        "occurred_from": "2000-01-01T00:00:00Z",
+        "occurred_to": "2100-01-01T00:00:00Z",
+        "created_from": "2000-01-01T00:00:00Z",
+        "created_to": "2100-01-01T00:00:00Z",
+    }
+    async with make_client(app) as client:
+        carol = await client.get("/v1/portal/entries", params=wide, headers=CAROL)
+        carol_red = await client.get(
+            "/v1/portal/entries", params={**wide, "fleet_id": red.id}, headers=CAROL
+        )
+        carol_state = await client.get(
+            "/v1/portal/entries", params={**wide, "state": "active"}, headers=CAROL
+        )
+        pat = await client.get("/v1/portal/entries", params=wide, headers=PAT)
+        pat_by_carol = await client.get(
+            "/v1/portal/entries", params={**wide, "author": "carol"}, headers=PAT
+        )
+        none = await client.get(
+            "/v1/portal/entries",
+            params={"entities": "nothing-here", "created_to": "2000-01-01T00:00:00Z"},
+            headers=PAT,
+        )
+    assert {e["id"] for e in carol.json()} == {mine.id, in_blue.id, by_bob.id}
+    assert carol_red.json() == []
+    assert {e["id"] for e in carol_state.json()} == {mine.id, in_blue.id, by_bob.id}
+    assert {e["id"] for e in pat.json()} == {in_blue.id, by_bob.id, in_red.id}
+    assert mine.id not in {e["id"] for e in pat_by_carol.json()}
+    assert none.json() == []
+
+
 async def test_portal_list_rows_carry_their_verdict_counts() -> None:
     """The portal's Flags column reads them; a row nobody rated has none, as a search hit."""
     app, _blue, _red, mine, in_blue, _by_bob, _in_red = await _seed()
