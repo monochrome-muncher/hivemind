@@ -31,7 +31,7 @@ from hivemind.domain.agent_cleanup import (
 from hivemind.domain.agent_cleanup import undo_refusal as cleanup_undo_refusal
 from hivemind.domain.fleet_merge import DroppedPin
 from hivemind.domain.validation import is_valid_uuid
-from hivemind.store.inheritance import INHERITED_FROM
+from hivemind.store.inheritance import inherited_from
 from hivemind.store.pgstore.connection import (
     LONG_OP_TIMEOUT,
     MERGE_SETTINGS,
@@ -250,19 +250,15 @@ RETURNING id
 """
 
 # A memory moved to `self` since (ADR 0145) is replaced again only by its owner's version.
-CLEANUP_RESUPERSEDE = (
-    """
+CLEANUP_RESUPERSEDE = f"""
 UPDATE entries e SET state = 'superseded', superseded_by = r.successor
   FROM unnest($1::uuid[], $2::uuid[], $3::uuid[]) AS r(id, successor, head)
   JOIN entries n ON n.id = r.successor
  WHERE e.id = r.id AND e.state = 'active'
    AND EXISTS (SELECT 1 FROM entries s WHERE s.id = r.head AND s.state = 'active')
-   AND (e.scope <> 'self' OR e.author = n.author OR e.author = ANY("""
-    + INHERITED_FROM.replace("$1", "n.author")
-    + """::text[]))
+   AND (e.scope <> 'self' OR e.author = n.author OR e.author = ANY({inherited_from("n.author")}::text[]))
 RETURNING e.id
 """
-)
 
 CLEANUP_CLEAR_SET_ASIDE = (
     "UPDATE feedbacks SET set_aside_by = NULL WHERE set_aside_by = $1 RETURNING 1"
