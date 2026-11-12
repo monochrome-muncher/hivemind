@@ -408,7 +408,7 @@ export async function viewSearch(root) {
     onEntity: (name) => { memoryFilters.setEntity(name); results.load(true); },
   };
   const results = entryTable({
-    fetchPage: async ({ limit, offset, fresh }) => {
+    fetchPage: async ({ limit, offset, fresh, exporting }) => {
       if (fresh || !applied) {
         applied = { q: q.value.trim(), kind: kind.value, scope: scope.value, author: author.value.trim(), ...memoryFilters.read(), explain: explain.checked ? "1" : "" };
         syncHash(root, "search", applied);
@@ -429,7 +429,7 @@ export async function viewSearch(root) {
       if (f.scope) body.scope = f.scope;
       if (f.author) body.author = f.author;
       Object.assign(body, filterFields(f));
-      if (f.explain) body.explain = true;
+      if (f.explain && !exporting) body.explain = true; // the CSV has no column for it
       const res = await guarded(() => apiRaw("POST", "portal/search", { body }));
       if (!res) return undefined;
       // A slow earlier search must not set the banner over a newer result.
