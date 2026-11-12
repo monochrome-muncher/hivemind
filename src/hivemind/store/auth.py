@@ -45,6 +45,14 @@ _SELECT_CREDENTIAL = (
     "FROM credentials c LEFT JOIN agents a ON a.name = c.agent_name "
     "WHERE c.key_hash = $1"
 )
+# The same columns by agent name, for a credential built without its key (ADR 0136): the shape
+# ``_credential_from_row`` reads, with no key to be locked.
+_SELECT_AGENT_CREDENTIAL = (
+    "SELECT 'agent' AS kind, a.name AS user_id, a.name AS agent_id, a.name AS agent_name, "
+    "a.status AS agent_status, a.trust_level, a.home_fleet_id, false AS key_locked, "
+    f"{INHERITED_FROM_AGENT_ROW} AS inherits_from "
+    "FROM agents a WHERE a.name = $1"
+)
 # ADR 0110. The WHERE repeats the staleness test, so racing requests write once.
 _TOUCH_CREDENTIAL = (
     "UPDATE credentials SET last_used_at = now() WHERE key_hash = $1 "
@@ -119,7 +127,7 @@ _TRANSIENT_STORE_ERRORS = (
 )
 
 
-def _credential_from_row(row: asyncpg.Record, key_id: str) -> Credential | None:
+def _credential_from_row(row: asyncpg.Record, key_id: str | None) -> Credential | None:
     """The ``Credential`` a key row stands for by ``kind`` (ADR 0012), or ``None`` if not an
     identity (ADR 0039)."""
     kind = row["kind"]
@@ -216,6 +224,17 @@ class PgAuthenticator:
             # only the type, never its text. Permanent faults are not in the tuple and stay loud.
             raise StoreUnavailable(type(exc).__name__) from None
         return credential
+
+    async def credential_for_agent(self, name: str) -> Credential | None:
+        """What ``verify`` returns for the agent's key, minus the key itself (``key_id`` is
+        ``None``), or ``None`` unless the agent is active (ADR 0136)."""
+        try:
+            pool = await self._ensure_pool()
+            async with pool.acquire(timeout=self._acquire_timeout) as conn:
+                row = await conn.fetchrow(_SELECT_AGENT_CREDENTIAL, name)
+        except _TRANSIENT_STORE_ERRORS as exc:
+            raise StoreUnavailable(type(exc).__name__) from None
+        return None if row is None else _credential_from_row(row, None)
 
     async def issue_agent_key(self, agent_name: str) -> str:
         """Issue an agent key, returning the raw secret once. Under the agent row's lock and only

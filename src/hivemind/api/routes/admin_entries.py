@@ -122,11 +122,15 @@ async def admin_search(
     response: Response,
 ) -> list[HitOut]:
     """``POST /v1/search`` for the admin, with a ``fleet_id`` filter
-    (ADR 0080). Not counted in the search counters (ADR 0056); a
+    (ADR 0080). With ``as_agent`` it sees what that agent's own search
+    sees (ADR 0136). Not counted in the search counters (ADR 0056); a
     degraded answer still counts for ``GET /metrics``."""
     require_admin(credential, "the admin search")
+    searcher = credential
+    if request.as_agent is not None:
+        searcher = await app.access_service.credential_for_agent(credential, request.as_agent)
     return await run_search(
-        app, prometheus, request, credential, response, fleet_id=request.fleet_id, count=False
+        app, prometheus, request, searcher, response, fleet_id=request.fleet_id, count=False
     )
 
 

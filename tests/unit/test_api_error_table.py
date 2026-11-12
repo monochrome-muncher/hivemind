@@ -13,12 +13,14 @@ from fastapi import FastAPI
 from hivemind.api.deps import create_app
 from hivemind.api.errors import ERROR_ANSWERS
 from hivemind.domain.access import (
+    AgentNotActive,
     AgentStatus,
     FleetExists,
     FleetMerged,
     InvalidAgentStatus,
     UnknownAgent,
     UnknownFleet,
+    UnknownSearchAgent,
 )
 from hivemind.domain.agent_cleanup import AgentCleanupRefused, UnknownAgentCleanup
 from hivemind.domain.entry_restore import (
@@ -48,6 +50,7 @@ BUILDERS: dict[type[Exception], Callable[[], Exception]] = {
     PermissionDenied: lambda: PermissionDenied("no way"),
     EntryNotFound: lambda: EntryNotFound("unknown entry: e1"),
     UnknownAgent: lambda: UnknownAgent("unknown agent: a"),
+    UnknownSearchAgent: lambda: UnknownSearchAgent("unknown agent: a"),
     UnknownFleet: lambda: UnknownFleet("unknown fleet: f"),
     UnknownFleetMerge: lambda: UnknownFleetMerge("unknown merge: m"),
     UnknownAgentCleanup: lambda: UnknownAgentCleanup("unknown cleanup: c"),
@@ -65,6 +68,7 @@ BUILDERS: dict[type[Exception], Callable[[], Exception]] = {
     AgentCleanupRefused: lambda: AgentCleanupRefused("cleanup refused"),
     SuccessionRefused: lambda: SuccessionRefused("succession refused"),
     InvalidAgentStatus: lambda: InvalidAgentStatus("a", AgentStatus.ACTIVE, "activate"),
+    AgentNotActive: lambda: AgentNotActive("a", AgentStatus.REVOKED),
     AgentRetired: lambda: AgentRetired("a", "b"),
     NameTaken: lambda: NameTaken("name taken"),
     AgentIdentityRequired: lambda: AgentIdentityRequired("who are you"),
@@ -109,8 +113,10 @@ async def test_each_error_gets_its_status_code_and_message(error: type[Exception
         (lambda: PermissionDenied("no"), 403, "forbidden"),
         (lambda: FleetMoveRefused("m"), 409, "move_refused"),
         (lambda: FleetMergeRefused("m"), 409, "merge_refused"),
+        (lambda: UnknownSearchAgent("a"), 404, "unknown_agent"),
+        (lambda: AgentNotActive("a", AgentStatus.PENDING), 409, "agent_not_active"),
     ],
-    ids=["supersede", "permission", "move", "merge"],
+    ids=["supersede", "permission", "move", "merge", "unknown-search-agent", "not-active"],
 )
 async def test_the_most_specific_class_wins(
     make: Callable[[], Exception], status: int, code: str
@@ -124,6 +130,8 @@ def test_the_specific_classes_subclass_the_general_ones() -> None:
     # The precedence cases above only mean something while this holds.
     assert issubclass(SupersedeDenied, PermissionDenied)
     assert issubclass(FleetMoveRefused, FleetMergeRefused)
+    assert issubclass(UnknownSearchAgent, UnknownAgent)
+    assert issubclass(AgentNotActive, InvalidAgentStatus)
 
 
 async def test_embedding_failure_is_a_fixed_502_that_does_not_echo_the_detail(

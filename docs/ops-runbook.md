@@ -1181,3 +1181,21 @@ The Job uses the API's ConfigMap and Secret and sets
 destinations. Like every runner it migrates first, which is why
 it must use the image the Deployments run. If the Job stops, add
 `"--after", "<id>"` from its log to `args` and apply it again.
+
+## 15. An agent can't find a memory (ADR 0136)
+
+The admin search sees every memory, so it finds what the agent cannot. Search as the agent instead:
+
+1. Open **Memories** in the admin panel, type the words the agent searched for, and put the agent's
+   name in **As agent**. (Over the API: `POST /v1/admin/search` with `{"query": "...", "as_agent":
+   "<name>"}` and the admin key.) A 409 `agent_not_active` means the agent is pending or revoked and
+   cannot search at all; a 404 `unknown_agent` means the name is wrong.
+2. The main table is exactly what the agent's own search returns, in the same order. If the memory is
+   there, the agent's query or filters were the problem.
+3. If it is not, the **Hidden from <agent>** card lists it with the reason: a private note of another
+   author, a fleet that is not the agent's home fleet (only privileged agents read across fleets), a
+   withdrawn or superseded memory, an untrusted agent (reads nothing), or ranked below the cut-off.
+4. Fix the cause: change the agent's trust level or home fleet (ADR 0011), have the author write it at
+   `fleet` or `org` scope, or restore a withdrawn memory (section 4).
+
+An as-agent search is not counted in the search counters and writes no audit row.

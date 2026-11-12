@@ -19,6 +19,7 @@ from hivemind.domain.access import (
     SCOPE_RANK,
     SCOPE_SELF,
     Agent,
+    AgentNotActive,
     AgentStatus,
     Fleet,
     FleetMerged,
@@ -27,6 +28,7 @@ from hivemind.domain.access import (
     TrustLevel,
     UnknownAgent,
     UnknownFleet,
+    UnknownSearchAgent,
     write_scopes_for,
 )
 from hivemind.domain.audit import AuditAction, AuditFilters, AuditRecord
@@ -406,6 +408,18 @@ class AccessService:
         """The audit log, newest first (ADR 0027)."""
         require_admin(credential)
         return await self._store.list_audit(filters, limit)
+
+    async def credential_for_agent(self, credential: Credential, name: str) -> Credential:
+        """The credential an active agent searches with, for the admin's "search as" (ADR 0136):
+        ``UnknownSearchAgent`` or ``AgentNotActive`` when it has none. Never carries key material."""
+        require_admin(credential)
+        agent_credential = await self._require_authenticator().credential_for_agent(name)
+        if agent_credential is not None:
+            return agent_credential
+        agent = await self._store.get_agent(name)
+        if agent is None:
+            raise UnknownSearchAgent(f"unknown agent: {name}")
+        raise AgentNotActive(name, agent.status)
 
     async def whoami(self, credential: Credential) -> Standing:
         """What the calling key is and may do (``hive_whoami``, ADR 0030), derived from the rules

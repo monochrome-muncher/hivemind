@@ -16,7 +16,7 @@ differs, so fixing it turns the mark into a failure that asks for it to go.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 
 import asyncpg
@@ -172,6 +172,40 @@ async def test_issuing_again_replaces_the_key(adapter: Adapter) -> None:
     new = await adapter.auth.issue_agent_key("alice")
     assert await adapter.auth.verify(old) is None
     assert await adapter.auth.verify(new) is not None
+
+
+# -- credential without a key (ADR 0136) ------------------------------------------
+
+
+async def test_a_credential_built_without_a_key_is_what_verify_returns_minus_the_fingerprint(
+    adapter: Adapter,
+) -> None:
+    await adapter.agent("old")
+    key = await adapter.key("alice")
+    await adapter.store.retire_agent("old", "alice", "admin")
+    verified = await adapter.auth.verify(key)
+    assert verified is not None and verified.inherits_from == ("old",)
+    built = await adapter.auth.credential_for_agent("alice")
+    assert built == replace(verified, key_id=None)
+
+
+async def test_a_credential_built_without_a_key_ignores_a_key_lock(adapter: Adapter) -> None:
+    key = await adapter.key()
+    await adapter.auth.lock_agent_key("alice", key_id=await adapter.key_id(key))
+    built = await adapter.auth.credential_for_agent("alice")
+    assert built is not None and built.agent_name == "alice"
+
+
+@pytest.mark.parametrize("status", [AgentStatus.PENDING, AgentStatus.REVOKED])
+async def test_no_credential_is_built_for_a_non_active_agent(
+    adapter: Adapter, status: AgentStatus
+) -> None:
+    await adapter.agent("alice", status)
+    assert await adapter.auth.credential_for_agent("alice") is None
+
+
+async def test_no_credential_is_built_for_an_unknown_agent(adapter: Adapter) -> None:
+    assert await adapter.auth.credential_for_agent("ghost") is None
 
 
 # -- replace ----------------------------------------------------------------------

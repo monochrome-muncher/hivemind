@@ -733,6 +733,12 @@ class Authenticator(Protocol):
         key of an active agent raises ``KeyLocked`` (ADR 0117)."""
         ...
 
+    async def credential_for_agent(self, name: str) -> Credential | None:
+        """What ``verify`` returns for the agent's key, built from the agent's record instead of a
+        key (``key_id`` is ``None``; a locked key changes nothing). ``None`` unless the agent is
+        ``active``, whether unknown, pending or revoked (ADR 0136)."""
+        ...
+
     async def issue_agent_key(self, agent_name: str) -> str:
         """Issue an agent key; returns the raw secret once. ``UnknownAgent``; ``InvalidAgentStatus``
         unless ``active`` (ADR 0039). Replaces any stale key row: one live key per agent."""
