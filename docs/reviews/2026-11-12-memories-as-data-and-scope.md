@@ -155,3 +155,18 @@ A read-side note from the same runs: on the brainstorm, the 14B searched, got th
 - Option A is safe to ship: it keeps verified work in the fleet and gives strong models a place for ideas.
 - It does not fix weaker models. Option B (an advisory `tentative` warning on fleet writes with brainstorm wording, or on a `decision` with no "who decided") is the net that worked for language, and the Celery sentence above is a realistic test case for it.
 - Options C and D (match strength on hits, a "loosely related" hint) would address the Grafana misuse.
+
+## Options C and D built (added 2026-11-12, night)
+
+PR #417, ADR 0148: every search hit carries `match` (keyword, vector or both) and, when the vector stream found it, `similarity` (cosine to the query, 2 decimals). When no hit on the page reaches `HIVEMIND_CLOSE_MATCH_SIMILARITY`, `hive_search` adds `closest: "loose"` and a note asking the agent to treat the hits as loosely related and check before relying on them; REST sets `X-Hivemind-Closest: loose`.
+
+The bar, 0.65, was calibrated on Qwen3-Embedding-8B, the production embedder (Q8_0 on CPU, 1024 dimensions, query instruction on), over the sixteen-domain eval set with the new `make measure-close-match`. In one-domain pools it marks 73% of same-subject unanswered queries and 97% of off-subject ones loose, and 8.7% of vague answerable queries (0.6% of specific ones). Full table in the ADR.
+
+Qwen3-14B rerun, the brainstorm opener ("our nightly ETL takes about 5 hours, what could we do?") against the same two-entry pool, where the only hit is the unrelated Grafana fact. Three runs with the note, three with it turned off (`HIVEMIND_CLOSE_MATCH_SIMILARITY=0`; same agent text):
+
+| | Answer built on the Grafana hit | Set the hit aside, gave general advice | Searched more than once |
+|---|---|---|---|
+| Note off | 3 of 3 | 0 of 3 | 1 of 3 |
+| Note on | 0 of 3 as the answer; 2 of 3 mention it as a side point | 1 of 3 ("limited relevant information in the Hivemind") | 3 of 3 |
+
+The note moves the 14B from treating the loose hit as the answer toward treating it as weak, but does not stop it mentioning the hit. As with the earlier rules, frontier models are expected to follow it from text alone; this was not re-checked on them.
