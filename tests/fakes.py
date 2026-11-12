@@ -346,14 +346,44 @@ class FakeAuthenticator:
             and credential.agent_name is not None
             and key in self._issued_agent_keys.values()
         ):
-            # The successions an agent hands down are read per request, as the
-            # real adapter's one-query key check does (ADR 0113).
-            credential = replace(
-                credential, inherits_from=await self._store.inherited_authors(credential.agent_name)
-            )
+            # Trust, home fleet and successions are read per request from the
+            # agent's record, as the real adapter's one-query key check does
+            # (ADR 0113).
+            from_record = await self.credential_for_agent(credential.agent_name)
+            assert from_record is not None
+            credential = replace(from_record, key_id=credential.key_id)
         if credential is not None:
             self._record_use(key, credential)
         return credential
+
+    async def credential_for_agent(self, name: str) -> Credential | None:
+        """The credential of an active agent from its record, with no key (ADR 0136)."""
+        if not isinstance(self._store, MemoryStore):
+            return await self._registered_credential_for(name)
+        agent = await self._store.get_agent(name)
+        if agent is None or agent.status is not AgentStatus.ACTIVE:
+            return None
+        return Credential(
+            user_id=name,
+            agent_id=name,
+            agent_name=name,
+            access_controlled=True,
+            trust_level=agent.trust_level,
+            home_fleet_id=agent.home_fleet_id,
+            inherits_from=await self._store.inherited_authors(name),
+        )
+
+    async def _registered_credential_for(self, name: str) -> Credential | None:
+        """The pre-registered credential of ``name``, without its key, if its agent is active
+        (or no store is bound to say otherwise)."""
+        found = next((c for c in self._by_key.values() if c.agent_name == name), None)
+        if found is None:
+            return None
+        if self._store is not None:
+            agent = await self._store.get_agent(name)
+            if agent is None or agent.status is not AgentStatus.ACTIVE:
+                return None
+        return replace(found, key_id=None)
 
     def _record_use(self, key: str, credential: Credential) -> None:
         """Mirror ``PgAuthenticator``: stamp the key at most once an hour."""

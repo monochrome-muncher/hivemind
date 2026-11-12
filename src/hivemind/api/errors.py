@@ -16,11 +16,13 @@ from fastapi.responses import JSONResponse
 
 from hivemind.api.schemas import ErrorBody
 from hivemind.domain.access import (
+    AgentNotActive,
     FleetExists,
     FleetMerged,
     InvalidAgentStatus,
     UnknownAgent,
     UnknownFleet,
+    UnknownSearchAgent,
 )
 from hivemind.domain.agent_cleanup import AgentCleanupRefused, UnknownAgentCleanup
 from hivemind.domain.entry_restore import (
@@ -52,6 +54,7 @@ ERROR_ANSWERS: Final[dict[type[Exception], tuple[int, str]]] = {
     PermissionDenied: (403, "forbidden"),
     EntryNotFound: (404, "not_found"),
     UnknownAgent: (404, "not_found"),
+    UnknownSearchAgent: (404, "unknown_agent"),  # ADR 0136
     UnknownFleet: (404, "not_found"),
     UnknownFleetMerge: (404, "not_found"),
     UnknownAgentCleanup: (404, "not_found"),
@@ -71,6 +74,7 @@ ERROR_ANSWERS: Final[dict[type[Exception], tuple[int, str]]] = {
     SuccessionRefused: (409, "succession_refused"),
     OffboardChanged: (409, "offboard_changed"),  # ADR 0135
     InvalidAgentStatus: (409, "invalid_status"),
+    AgentNotActive: (409, "agent_not_active"),  # ADR 0136
     AgentRetired: (409, "agent_retired"),  # ADR 0113
     NameTaken: (409, "name_conflict"),
     AgentIdentityRequired: (422, "agent_identity_required"),

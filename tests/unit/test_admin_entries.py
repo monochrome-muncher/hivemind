@@ -49,7 +49,7 @@ async def _seed():  # type: ignore[no-untyped-def]
 
 # A valid request body for each admin route that takes one; the rest take none.
 ADMIN_BODIES = {
-    ("POST", "/v1/admin/search"): {"query": "kaniko"},
+    ("POST", "/v1/admin/search"): {"query": "kaniko", "as_agent": "alice"},
     ("POST", "/v1/admin/entries/{entry_id}/withdraw"): {},
     ("POST", "/v1/admin/entries/{entry_id}/redact"): {"reason": "leak", "confirm": FAKE_ID},
     ("POST", "/v1/admin/entries/{entry_id}/restore"): {"reason": "put back"},

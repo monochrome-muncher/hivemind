@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from hivemind.api.schemas.entries import AdminSearchRequest, EntryOut
+from hivemind.api.schemas.entries import EntryOut, FleetSearchRequest
 from hivemind.domain.history import HistoryItem
 from hivemind.services.read import ReliedOnItem
 
@@ -43,7 +43,7 @@ class PortalHistoryItemOut(BaseModel):
         )
 
 
-class PortalSearchRequest(AdminSearchRequest):
+class PortalSearchRequest(FleetSearchRequest):
     """``POST /v1/portal/search`` (ADR 0095): the same search and fleet
     filter, over what the agent's key can read."""
 
