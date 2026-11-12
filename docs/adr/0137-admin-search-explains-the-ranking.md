@@ -7,7 +7,7 @@ Extends [ADR 0080](0080-admin-memory-browser-and-activity.md) (the admin search)
 [ADR 0073](0073-a-recency-hint-on-search.md) (the recency hint) and [ADR 0048](0048-search-falls-back-to-keywords-when-the-embedder-is-down.md)
 (keyword-only search).
 
-Status: Accepted.
+Status: Accepted; amended by [ADR 0139](0139-portal-search-explains-the-ranking.md) (the portal search has it too).
 
 ## Context
 

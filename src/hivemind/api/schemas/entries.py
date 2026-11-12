@@ -432,7 +432,7 @@ class ImportancePartOut(BaseModel):
 class ExplainOut(BaseModel):
     """The parts of one hit's score as the ranking multiplied them (ADR 0137): ``score`` is
     ``fused * importance.factor * recency.factor * social.factor`` before its 4-figure rounding.
-    Admin search only; no agent surface carries it."""
+    Admin and portal searches only (ADRs 0137, 0139); no agent surface carries it."""
 
     mode: Literal["hybrid", "keyword_only"]
     keyword_rank: int | None
@@ -482,10 +482,10 @@ def _part(value: float) -> float:
     return float(f"{value:.6g}")
 
 
-class AdminHitOut(HitOut):
-    """A hit as the admin search answers it: ``HitOut`` plus ``explain`` when asked for (ADR 0137).
-    Left out of the JSON when absent, so an ordinary admin search is byte for byte a ``HitOut``
-    list."""
+class ExplainedHitOut(HitOut):
+    """A hit as the admin and portal searches answer it: ``HitOut`` plus ``explain`` when asked
+    for (ADRs 0137, 0139). Left out of the JSON when absent, so an ordinary search there is byte
+    for byte a ``HitOut`` list."""
 
     explain: ExplainOut | None = None
 
@@ -497,9 +497,9 @@ class AdminHitOut(HitOut):
         return data
 
     @classmethod
-    def from_hit(cls, hit: Hit) -> AdminHitOut:
+    def from_hit(cls, hit: Hit) -> ExplainedHitOut:
         out = super().from_hit(hit)
-        assert isinstance(out, AdminHitOut)
+        assert isinstance(out, ExplainedHitOut)
         if hit.explain is not None:
             out.explain = ExplainOut.from_explanation(hit.explain)
         return out

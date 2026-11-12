@@ -438,7 +438,7 @@ async def test_an_oversized_body_is_refused_and_never_forwarded(chunked: bool) -
 
 def test_the_shared_modules_import_nothing_admin_specific() -> None:
     """ADR 0091: these can be served to another front end as they are."""
-    shared = {"ui.js", "client.js", "lists.js", "drawer.js", "charts.js", "csv.js"}
+    shared = {"ui.js", "client.js", "lists.js", "drawer.js", "charts.js", "csv.js", "explain.js"}
     for name in shared:
         js = (STATIC_DIR / name).read_text()
         imports = {t[2:] for t in re.findall(r"""from\s+["']([^"']+)["']""", js)}

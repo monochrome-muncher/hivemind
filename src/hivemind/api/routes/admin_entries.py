@@ -27,9 +27,9 @@ from hivemind.api.routes.shared import (
 from hivemind.api.schemas import (
     ActivityOut,
     AdminEntryOut,
-    AdminHitOut,
     AdminSearchRequest,
     EntryOut,
+    ExplainedHitOut,
     FeedbackLogItemOut,
     FlaggedEntryOut,
     HitOut,
@@ -114,7 +114,7 @@ async def admin_get_entry(entry_id: str, credential: CredentialDep, app: AppDep)
     return await entry_detail(app, entry_id, credential, history=True, model=AdminEntryOut)
 
 
-@router.post("/admin/search", response_model=list[AdminHitOut])
+@router.post("/admin/search", response_model=list[ExplainedHitOut])
 async def admin_search(
     request: AdminSearchRequest,
     credential: CredentialDep,
@@ -140,7 +140,7 @@ async def admin_search(
         fleet_id=request.fleet_id,
         count=False,
         explain=request.explain,
-        model=AdminHitOut,
+        model=ExplainedHitOut,
     )
 
 

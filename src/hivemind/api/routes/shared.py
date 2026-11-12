@@ -109,9 +109,9 @@ async def run_search(
     explain: bool = False,
     model: type[HitOut] = HitOut,
 ) -> list[HitOut]:
-    """The search behind ``POST /v1/search`` and the admin search;
-    ``count=False`` keeps the latter out of the search counters, and
-    ``explain`` with the admin's ``model`` carries each hit's score parts."""
+    """The search behind ``POST /v1/search``, the admin and the portal searches;
+    ``count=False`` keeps the latter two out of the search counters, and
+    ``explain`` with ``ExplainedHitOut`` as ``model`` carries each hit's score parts."""
     filters = EntryFilters(
         kind=request.kind,
         tags=tuple(request.tags),
