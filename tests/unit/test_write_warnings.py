@@ -28,6 +28,7 @@ from hivemind.services.write_warnings import (
     is_entry_link,
     looks_non_english,
     near_duplicate_warning,
+    tentative_phrase,
 )
 from tests.eval.domains import DOMAINS
 from tests.eval.golden import golden_corpus
@@ -163,6 +164,66 @@ def test_no_entry_of_the_eval_corpora_is_flagged() -> None:
     assert [t for t in texts if looks_non_english(t)] == []
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        # The two Qwen3-14B entries from the 2026-11-12 live check (ADR 0147).
+        "Fixed orders API errors with a context manager. Consideration is given to moving this "
+        "job onto a queue like Celery in the future for better resource management.",
+        "Fixed orders API errors with a context manager. Consider moving the job to a queue like "
+        "Celery in the future for better resource management.",
+        "ETL speed-up ideas: incremental dbt models, DuckDB for aggregation. Worth trying the "
+        "weekly full refresh first.",
+        "billing-events: event sourcing is the way to go. Maybe we rebuild projections nightly.",
+        "Idea: replace the cron scheduler with Temporal so retries are durable.",
+        "What if we only did the full refresh weekly? Daily incrementals would cover most dashboards.",
+        "We could move the reconcile job to Celery someday to isolate its connections.",
+        "Brainstorm: ways to cut warehouse cost.",
+        "The warehouse cluster is probably badly sized; could be worth checking autoscaling too.",
+        "Random thought from the user: rename the billing-events service to ledger.",
+        "Auth service could use short-lived JWTs instead of sessions; we should try that next sprint.",
+        "Perhaps we should split the monorepo into per-team repos to cut CI time.",
+        "Thinking out loud: a read replica for reporting might take the load off the primary.",
+    ],
+)
+def test_proposals_read_as_tentative(text: str) -> None:
+    assert tentative_phrase(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Fix: use the tmp_path fixture. Not tried: lowering -n or serializing the tests; the root "
+        "cause is the shared path, so that would only hide it.",
+        "General lesson: when connection exhaustion lines up with a scheduled job, check its "
+        "session handling first. What did not need changing: pool or max_connections settings.",
+        "Decision: new services use Postgres 17. When to revisit: next quarter, or if volumes "
+        "outgrow logical replication, or if a service needs fan-out or replay.",
+        "Retries hide the race but do not fix it. To avoid this in the future, grep for /tmp paths.",
+        "Unexplained: the export job sometimes writes an empty file. It might be the S3 multipart "
+        "timeout; could not reproduce locally.",
+        "Dead end: raising work_mem does not fix the slow report. We could not get the planner to "
+        "switch without the index.",
+        "Somedayville region outage: the ideas-board service returned 502 on 2026-11-02.",
+    ],
+)
+def test_findings_do_not_read_as_tentative(text: str) -> None:
+    assert tentative_phrase(text) is None
+
+
+def test_no_entry_of_the_eval_corpora_reads_as_tentative() -> None:
+    texts = [f"{summary} {body or ''}" for d in DOMAINS for _, summary, _, body in d.entries]
+    texts += [summary for _, summary, _ in golden_corpus()]
+    assert [t for t in texts if tentative_phrase(t)] == []
+
+
+def test_the_tentative_check_is_linear_on_a_full_body() -> None:
+    text = ("we could " * 10_000)[:MAX_BODY_CHARS]
+    started = time.perf_counter()
+    assert tentative_phrase(text) is None
+    assert time.perf_counter() - started < 1.0
+
+
 async def _write(store: MemoryStore, cred: Credential, **kw: object) -> dict[str, object]:
     kw.setdefault("summary", "billing runs on node 20")
     kw.setdefault("kind", "fact")
@@ -194,6 +255,27 @@ async def test_not_english_warns_on_any_scope_and_in_check_mode() -> None:
     for extra in ({}, {"scope": "self"}, {"check": True}):
         result = await _write(MemoryStore(make_clock()), A, summary=norwegian, **extra)
         assert _codes(result) == ["not_english"]
+
+
+async def test_tentative_warns_on_shared_writes_and_checks_only() -> None:
+    idea = "orders job: maybe we move it to Celery someday"
+    for extra in ({}, {"check": True}):
+        result = await _write(MemoryStore(make_clock()), A, summary=idea, **extra)
+        assert _codes(result) == ["tentative"]
+        assert '"maybe we"' in result["warnings"][0]["message"]  # type: ignore[index]
+    private = await _write(MemoryStore(make_clock()), A, summary=idea, scope="self")
+    assert _codes(private) == []
+
+
+async def test_alternatives_and_open_questions_are_untested_on_purpose() -> None:
+    for tag in ("alternative", "open-question"):
+        result = await _write(
+            MemoryStore(make_clock()),
+            A,
+            summary="what if the pool runs in session mode",
+            tags=[tag],
+        )
+        assert "tentative" not in _codes(result)
 
 
 async def test_foreign_link_when_a_fleet_entry_relays_another_fleets_entry() -> None:
