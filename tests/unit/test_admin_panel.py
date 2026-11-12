@@ -377,13 +377,13 @@ def test_the_scripts_never_build_a_link_from_entry_data() -> None:
             js = js.replace("a.href = url;", "", 1)
         assert ".href =" not in js and 'setAttribute("href"' not in js, script.name
         for href in re.findall(r"\bhref:\s*([^,}]+)", js):
-            assert re.search(r"\b(?:memories|feedback|agent|owner|view)Href\(", href) or re.match(
-                r"""\s*(?:["'`]#|href\b|null)""", href
-            ), (script.name, href)
+            assert re.search(
+                r"\b(?:memories|feedback|agent|owner|fleet|view)Href\(", href
+            ) or re.match(r"""\s*(?:["'`]#|href\b|null)""", href), (script.name, href)
     # The href helpers build in-panel hash routes and nothing else.
     ui = (STATIC_DIR / "ui.js").read_text()
     assert "return `#/${view}" in ui
-    for helper in ("memoriesHref", "feedbackHref", "agentHref"):
+    for helper in ("memoriesHref", "feedbackHref", "agentHref", "ownerHref", "fleetHref"):
         assert re.search(rf"export const {helper} = \([^)]*\) => viewHref\(", ui), helper
 
 
@@ -439,6 +439,48 @@ async def test_an_oversized_body_is_refused_and_never_forwarded(chunked: bool) -
     assert resp.json()["error"]["code"] == "payload_too_large"
     assert ok.status_code == 201
     assert len(seen) == 1
+
+
+def test_the_fleet_page_is_routed_and_reads_only_allowlisted_fleet_routes() -> None:
+    admin = (STATIC_DIR / "admin.js").read_text()
+    assert 'import { viewFleet } from "./fleet.js";' in admin
+    assert "fleet: viewFleet" in admin
+    assert 'fleet: "fleets"' in admin  # the Fleets nav item stays lit
+    page = (STATIC_DIR / "fleet.js").read_text()
+    routes = set(re.findall(r'api\("GET", ["`](admin/[a-z-]+(?:/\$\{[^}]+\}/pins)?)', page))
+    assert routes == {
+        "admin/entries",
+        "admin/flagged",
+        "admin/audit-log",
+        "admin/fleets",
+        "admin/fleet-merges",
+        "admin/fleets/${encodeURIComponent(id)}/pins",
+    }
+    for name in ("agent.js", "owner.js", "manage.js", "stats.js"):
+        assert "fleetHref(" in (STATIC_DIR / name).read_text(), name
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_fleet_page_picks_its_members_and_merges() -> None:
+    script = r"""
+    const { recordsForFleet, membersOf } = await import(process.argv[1])
+    const merges = [
+      { id: "1", source_fleet_id: "a", target_fleet_id: "b" },
+      { id: "2", source_fleet_id: "c", target_fleet_id: "a" },
+      { id: "3", source_fleet_id: "c", target_fleet_id: "b" },
+    ]
+    const agents = [{ name: "zed", home_fleet_id: "a" }, { name: "amy", home_fleet_id: "a" }, { name: "bob", home_fleet_id: "b" }]
+    console.log(JSON.stringify({
+      merges: recordsForFleet(merges, "a").map((m) => m.id), members: membersOf(agents, "a").map((a) => a.name),
+    }))
+    """
+    out = subprocess.run(
+        ["node", "--input-type=module", "-e", script, (STATIC_DIR / "fleetdata.js").as_uri()],
+        capture_output=True, text=True, check=True,
+    )  # fmt: skip
+    got = json.loads(out.stdout)
+    assert got["merges"] == ["1", "2"]
+    assert got["members"] == ["amy", "zed"]
 
 
 def test_the_shared_modules_import_nothing_admin_specific() -> None:
