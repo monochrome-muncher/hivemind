@@ -33,6 +33,9 @@ _OPEN_QUESTION_SIMILARITY = 0.70
 # Tags that mark a gap or surprise waiting for an answer.
 _OPEN_TAGS = frozenset({"open-question", "anomaly"})
 
+# Tags of fleet entries that are untested on purpose (ADR 0146).
+_UNTESTED_BY_DESIGN = frozenset({"alternative", "open-question"})
+
 # A local path: a home directory (/home/x, /Users/x, ~/x) or a Windows
 # profile (C:\Users\x, C:/Users/x, or JSON-escaped C:\\Users\\x). Not
 # preceded by a word character or a path/URL character, so URLs
@@ -78,6 +81,30 @@ _FOREIGN_FUNCTION_WORDS = frozenset(
 )
 _MIN_FOREIGN_WORDS = 3
 _MIN_NON_LATIN_LETTERS = 20
+
+# Wording that proposes rather than reports (ADR 0147). Only phrases that a finding, dead end or
+# decision rarely needs: a bare "might", "could" or "in the future" is left out on purpose.
+_TENTATIVE = re.compile(
+    r"""\b(?:
+        what\ if
+      | maybe\ (?:we|you|i|they|someday|one\ day|later)
+      | perhaps\ we
+      | we\ (?:could|might|should)\ (?:try|consider|look\ at|move|switch|drop|use|add|replace
+                                    |explore|rewrite|just)
+      | (?:could|might)\ be\ worth
+      | worth\ (?:trying|exploring|considering|a\ try|investigating|prototyping)
+      | consider(?:ing|ation)?\ (?:is\ given\ )?(?:to\ )?(?:moving|move|switching|switch|replacing
+                                                     |replace|dropping|drop|migrating|migrate
+                                                     |rewriting|rewrite)
+      | some\ ?day
+      | brainstorm\w*
+      | thinking\ out\ loud
+      | just\ an\ idea
+      | random\ (?:thought|idea)
+    )\b
+    | \bidea:""",
+    re.IGNORECASE | re.VERBOSE,
+)
 _LATIN_END = "\u0250"
 _WORDS = re.compile(r"[^\W\d_]+")
 _STANDALONE_WORDS = re.compile(r"(?<![\w./-])[^\W\d_]+(?![\w/-]|\.\w)")
@@ -117,6 +144,12 @@ def looks_non_english(text: str) -> bool:
     foreign = sum(w.islower() and w in _FOREIGN_FUNCTION_WORDS for w in standalone)
     english = sum(w in _ENGLISH_FUNCTION_WORDS for w in words)
     return foreign >= _MIN_FOREIGN_WORDS and foreign > 2 * english
+
+
+def tentative_phrase(text: str) -> str | None:
+    """The first phrase in ``text`` that proposes an untested idea, if any."""
+    match = _TENTATIVE.search(text)
+    return match.group(0) if match else None
 
 
 def is_entry_link(source: Source) -> bool:
@@ -200,6 +233,7 @@ def write_warnings(
     found = (
         _local_path_warning(draft),
         _not_english_warning(draft),
+        _tentative_warning(draft),
         _foreign_link_warning(draft, linked),
         _backdated_successor_warning(occurred, superseded),
         _fresh_consolidation_warning(occurred, superseded),
@@ -229,6 +263,22 @@ def _not_english_warning(draft: EntryDraft) -> WriteWarning | None:
         "not in English: write it again in English (names, quotes and errors stay as they are), "
         "with 'supersedes' naming this entry if it was stored. "
         "Keep answering your user in the language they wrote in",
+    )
+
+
+def _tentative_warning(draft: EntryDraft) -> WriteWarning | None:
+    # An alternative or an open question is untested by design and belongs in the fleet.
+    if draft.scope not in (SCOPE_ORG, SCOPE_FLEET) or _UNTESTED_BY_DESIGN & set(draft.tags):
+        return None
+    phrase = tentative_phrase(f"{draft.summary}\n{draft.body or ''}")
+    if phrase is None:
+        return None
+    return WriteWarning(
+        "tentative",
+        f'reads as an untested idea ("{phrase}"): keep ideas, plans and brainstorms in self '
+        "until tested, then supersede that note with a fleet entry. If this is a finding with a "
+        "passing idea, leave the idea out or put it in a self note with see_also to this one; "
+        "if it was stored, supersede it without the idea",
     )
 
 
