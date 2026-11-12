@@ -312,6 +312,32 @@ async def test_only_the_key_and_content_headers_cross() -> None:
         assert dropped not in request.headers
 
 
+@pytest.mark.parametrize(("front_end", "path"), [("admin", "admin"), ("portal", "portal")])
+async def test_the_search_notices_cross_back_and_nothing_else(front_end: str, path: str) -> None:
+    """The memory browser and the portal show the keyword-only notice from these headers."""
+    notices = {
+        "X-Hivemind-Degraded": "keyword-only",
+        "X-Hivemind-Closest": "loose",
+        "X-Hivemind-Recency": "ignore_age",
+        "Retry-After": "2",
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json=[], headers={**notices, "Set-Cookie": "s=1", "X-Other": "y"}
+        )
+
+    create = {"admin": create_admin_app, "portal": portal_module.create_portal_app}[front_end]
+    app = create("http://hivemind-api.test", transport=httpx.MockTransport(handler))
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://panel.test"
+    ) as panel:
+        resp = await panel.post(f"/v1/{path}/search", json={"query": "q"}, headers=ADMIN)
+    assert {name: resp.headers.get(name) for name in notices} == notices
+    assert "set-cookie" not in resp.headers and "x-other" not in resp.headers
+    assert resp.headers["cache-control"] == "no-store"
+
+
 async def test_an_unreachable_api_is_a_502_in_the_api_error_shape(caplog) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("boom hm_admin", request=request)

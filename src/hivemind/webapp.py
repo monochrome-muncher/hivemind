@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
 from urllib.parse import quote
@@ -32,6 +32,14 @@ logger = logging.getLogger(__name__)
 Allowlist = tuple[tuple[str, re.Pattern[str]], ...]
 
 _FORWARDED_REQUEST_HEADERS = ("x-api-key", "content-type", "accept")
+# What the API says about an answer beside its body: a degraded or loose search, the recency hint
+# applied, and when to retry a 503.
+_RELAYED_RESPONSE_HEADERS = (
+    "retry-after",
+    "x-hivemind-closest",
+    "x-hivemind-degraded",
+    "x-hivemind-recency",
+)
 # The one allowlisted call the API answers without a key (SPEC §5.1).
 _PUBLIC_PATHS = frozenset({"health"})
 
@@ -173,7 +181,7 @@ class _ApiProxy:
                 request.method,
                 upstream_path,
                 params=str(request.query_params),
-                headers=_forwarded_headers(request),
+                headers=_picked(request.headers, _FORWARDED_REQUEST_HEADERS),
                 content=body,
             )
         except httpx.HTTPError as exc:
@@ -194,19 +202,16 @@ def _upstream_path(path: str) -> str | None:
     return "/v1/" + "/".join(quote(segment, safe="") for segment in segments)
 
 
-def _forwarded_headers(request: Request) -> dict[str, str]:
-    return {
-        name: value
-        for name in _FORWARDED_REQUEST_HEADERS
-        if (value := request.headers.get(name)) is not None
-    }
+def _picked(headers: Mapping[str, str], names: Iterable[str]) -> dict[str, str]:
+    return {name: value for name in names if (value := headers.get(name)) is not None}
 
 
 def _relay(upstream: httpx.Response) -> Response:
-    """The API's answer, marked uncacheable."""
+    """The API's answer with its ``_RELAYED_RESPONSE_HEADERS``, marked uncacheable."""
     response = Response(
         content=upstream.content,
         status_code=upstream.status_code,
+        headers=_picked(upstream.headers, _RELAYED_RESPONSE_HEADERS),
         media_type=upstream.headers.get("content-type"),
     )
     # Some bodies are raw keys (agent create or activate, key replace, org-key rotate).
