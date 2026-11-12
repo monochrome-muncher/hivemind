@@ -222,6 +222,7 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible { outline: 2px sol
 .field label.radio { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; font-weight: 400; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .row > input, .row > select { flex: 1; }
+.row > .phase-days { flex: 0 0 5rem; }
 .filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .filters input, .filters select { min-width: 150px; }
 

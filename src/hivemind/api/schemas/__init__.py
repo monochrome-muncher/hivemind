@@ -92,13 +92,20 @@ from hivemind.api.schemas.fleet_merge import (
     MergePinOut,
     MergeSideOut,
 )
-from hivemind.api.schemas.fleets import CreateFleetRequest, FleetOut, RenameFleetRequest
+from hivemind.api.schemas.fleets import (
+    CreateFleetRequest,
+    FleetOut,
+    FleetPhaseOut,
+    RenameFleetRequest,
+    SetFleetPhaseRequest,
+)
 from hivemind.api.schemas.metrics import (
     AgentsMetrics,
     AuthorShare,
     EntriesMetrics,
     FeedbackMetrics,
     FleetHealthMetrics,
+    FleetPhaseMetrics,
     FleetSearchMetrics,
     FleetsMetrics,
     HealthMetrics,
@@ -187,6 +194,8 @@ __all__ = [
     "FleetMovePreviewOut",
     "FleetMoveRequest",
     "FleetOut",
+    "FleetPhaseMetrics",
+    "FleetPhaseOut",
     "FleetSearchMetrics",
     "FleetSearchRequest",
     "FleetUnmergeOut",
@@ -234,6 +243,7 @@ __all__ = [
     "RivalLifetime",
     "SearchRequest",
     "SearchesMetrics",
+    "SetFleetPhaseRequest",
     "Share",
     "SimilarOut",
     "SourceModel",

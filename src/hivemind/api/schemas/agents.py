@@ -7,6 +7,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from hivemind.api.schemas.common import RefStr
+from hivemind.api.schemas.fleets import FleetPhaseOut
 from hivemind.domain.access import KEY_LOCKED_MESSAGE, Agent, Standing, is_idle
 
 
@@ -129,6 +130,8 @@ class WhoamiOut(BaseModel):
     can_write_scopes: list[str]
     inherits_from: list[str]
     key_last_used_at: str | None = None
+    # ADR 0143: the home fleet's phase in force; left out of the reply without one.
+    fleet_phase: FleetPhaseOut | None = None
 
     @classmethod
     def from_standing(cls, standing: Standing) -> WhoamiOut:

@@ -55,6 +55,7 @@ from hivemind.domain.fleet_merge import (
     MovePlan,
     UnmergeOutcome,
 )
+from hivemind.domain.fleet_phase import FleetPhase
 from hivemind.domain.health import Convergence, FleetHealth
 from hivemind.domain.offboarding import OffboardMode, OffboardStep
 from hivemind.domain.pin import Pin, PinRefusal, PinWrite
@@ -329,6 +330,11 @@ class Store(Protocol):
 
         Returns the fleet before and after (the same object, nothing written, when ``name`` is
         unchanged). ``UnknownFleet``; ``FleetExists`` when another fleet has the name."""
+        ...
+
+    async def set_fleet_phase(self, fleet_id: str, phase: FleetPhase | None) -> Fleet:
+        """Replace the fleet's phase, or clear it with ``None`` (ADR 0143); the fleet after.
+        ``UnknownFleet``; ``FleetMerged`` for a merged fleet, nothing written."""
         ...
 
     # -- fleet merge (ADR 0107) ------------------------------------------------

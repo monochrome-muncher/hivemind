@@ -6,6 +6,7 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+from hivemind.api.schemas.fleets import FleetPhaseOut
 from hivemind.domain.entry import EntryState, Kind
 from hivemind.domain.pin import ChangeReason, Pin, PinnedEntry
 
@@ -72,3 +73,5 @@ class PinsOut(BaseModel):
 
     fleet_id: str | None
     pins: list[PinnedOut]
+    # ADR 0143: the caller's own fleet's phase in force; left out of the reply without one.
+    fleet_phase: FleetPhaseOut | None = None

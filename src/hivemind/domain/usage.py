@@ -4,6 +4,7 @@ error at the seam, not a 500 at scrape time."""
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,11 +120,20 @@ class EntriesUsage:
 
 
 @dataclass(frozen=True, slots=True)
+class FleetPhaseUsage:
+    """A fleet phase in force (ADR 0143)."""
+
+    phase: str
+    until: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class FleetsUsage:
-    """Fleet usage counters (writes per fleet, the §12 counter)."""
+    """Fleet usage counters (writes per fleet, the §12 counter) and the phases in force."""
 
     total: int
     writes_by_fleet: dict[str, int]
+    phase_by_fleet: dict[str, FleetPhaseUsage]
 
 
 @dataclass(frozen=True, slots=True)

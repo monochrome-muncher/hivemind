@@ -197,6 +197,10 @@ _Avoid_: fleet consolidation, fleet migration, fleet deletion
 The admin act that moves some agents out of a fleet into another or a new one, together with the `fleet`-scoped memories they wrote there (and their pins). A memory goes only when the head of its supersession chain goes too. The source fleet stays an ordinary fleet; the agents that stay lose access to what leaves. Writes no memory, changes no key, is recorded and undone like a fleet merge (ADR 0112).
 _Avoid_: fleet split (the use, not the act), agent migration, re-parenting (that moves only the agent)
 
+**Fleet phase**:
+An `explore` or `consolidate` setting an admin puts on a fleet until a date at most 30 days ahead. Its agents read a fixed one-line hint in `hive_whoami` and `hive_pinned` while it lasts; a phase past its date counts as none. A nudge only: it never changes ranking or search (ADR 0143).
+_Avoid_: mode, season, sprint
+
 **Merged fleet**:
 A fleet that was merged into another. Its record stays, marked with the fleet it went into; it takes no new agents, entries or pins and cannot be merged again (ADR 0107).
 _Avoid_: deleted fleet, archived fleet, closed fleet

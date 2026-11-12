@@ -6,8 +6,9 @@ import uuid
 from collections import Counter
 from dataclasses import replace
 
-from hivemind.domain.access import Fleet, FleetExists, UnknownFleet
+from hivemind.domain.access import Fleet, FleetExists, FleetMerged, UnknownFleet
 from hivemind.domain.fleet_merge import FleetFacts
+from hivemind.domain.fleet_phase import FleetPhase
 from hivemind.memstore.state import MemoryState
 
 
@@ -42,6 +43,18 @@ class FleetStore(MemoryState):
             after = replace(before, name=name)
             self._fleets[fleet_id] = after
             return before, after
+
+    async def set_fleet_phase(self, fleet_id: str, phase: FleetPhase | None) -> Fleet:
+        with self._lock:
+            fleet = self._fleets.get(fleet_id)
+            if fleet is None:
+                raise UnknownFleet(f"unknown fleet: {fleet_id}")
+            if fleet.merged_into is not None:
+                target = self._fleets.get(fleet.merged_into)
+                raise FleetMerged(fleet.id, fleet.merged_into, target.name if target else None)
+            updated = replace(fleet, phase=phase)
+            self._fleets[fleet_id] = updated
+            return updated
 
     async def fleet_facts(self, fleet_id: str) -> FleetFacts:
         with self._lock:

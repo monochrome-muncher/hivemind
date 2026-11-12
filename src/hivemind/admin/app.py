@@ -54,9 +54,11 @@ _ALLOWED = allowlist(
         ("GET", r"admin/feedback"),
         ("GET", r"admin/fleets/[^/]+/pins"),
         ("GET", r"admin/flagged"),
-        # Fleet merge, rename and move (ADRs 0107, 0109, 0112).
+        # Fleet merge, rename, move and phase (ADRs 0107, 0109, 0112, 0143).
         ("POST", r"admin/fleets/[^/]+/merge"),
         ("PATCH", r"admin/fleets/[^/]+"),
+        ("PUT", r"admin/fleets/[^/]+/phase"),
+        ("DELETE", r"admin/fleets/[^/]+/phase"),
         ("POST", r"admin/fleets/[^/]+/move"),
         ("GET", r"admin/fleet-merges"),
         ("POST", r"admin/fleet-merges/[^/]+/undo"),

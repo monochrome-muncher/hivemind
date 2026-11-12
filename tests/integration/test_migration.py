@@ -35,7 +35,8 @@ from hivemind.store.migrate import (
     rollback as _guarded_rollback,
 )
 
-HEAD = "0032.entry-redact"
+HEAD = "0033.fleet-phase"
+ID_0032 = "0032.entry-redact"  # the head before 0033
 ID_0031 = "0031.entry-restore"  # the head before 0032
 ID_0030 = "0030.audit-target-index"  # the head before 0031
 ID_0029 = "0029.agent-owner-set"  # the head before 0030
@@ -80,18 +81,19 @@ CHAIN = [
     ID_0029,
     ID_0030,
     ID_0031,
+    ID_0032,
     HEAD,
 ]
 
 
 async def rollback(dsn: str, dim: int, count: int = 1, **confirm: bool) -> list[str]:
     """The per-migration tests below exercise what each older rollback does
-    to its own schema, so they step over `0032`, `0031`, `0030`, `0029`, `0028` and `0027` first (in
+    to its own schema, so they step over `0033`, `0032`, `0031`, `0030`, `0029`, `0028` and `0027` first (in
     one rollback, so no `schema.rollback` row is written), which have their
     own tests at the end of the file. A test that seeds rows a guard counts
     passes the matching confirmation flag (ADR 0119); the returned ids are
     those of the requested `count` migrations below `0027`."""
-    steps = {HEAD: 6, ID_0031: 5, ID_0030: 4, ID_0029: 3, ID_0028: 2, ID_0027: 1}.get(
+    steps = {HEAD: 7, ID_0032: 6, ID_0031: 5, ID_0030: 4, ID_0029: 3, ID_0028: 2, ID_0027: 1}.get(
         await current_schema_version(dsn)
     )
     if steps:
@@ -1790,7 +1792,7 @@ async def test_rollback_refuses_to_unlock_locked_keys_without_the_flag() -> None
 
 async def test_0032_adds_the_redaction_marker_and_the_audit_action() -> None:
     dsn, dim = _dsn(), Settings().embedding_dim
-    await _start_at_head(dsn, dim)
+    await _start_at(dsn, dim, ID_0032)
     conn = await asyncpg.connect(dsn)
     try:
         column = await conn.fetchrow(
@@ -1820,7 +1822,7 @@ async def test_0032_adds_the_redaction_marker_and_the_audit_action() -> None:
 
 async def test_0032_rolls_back_refused_without_the_flag_and_never_restores_text() -> None:
     dsn, dim = _dsn(), Settings().embedding_dim
-    await _start_at_head(dsn, dim)
+    await _start_at(dsn, dim, ID_0032)
     conn = await asyncpg.connect(dsn)
     try:
         await conn.execute(
@@ -1834,12 +1836,12 @@ async def test_0032_rolls_back_refused_without_the_flag_and_never_restores_text(
 
     with pytest.raises(RollbackRefused) as exc:
         await _guarded_rollback(dsn, dim, count=1)
-    assert HEAD in str(exc.value)
+    assert ID_0032 in str(exc.value)
     assert "entry.redact" in str(exc.value)
     assert "--discard-audit-rows" in str(exc.value)
-    assert await current_schema_version(dsn) == HEAD
+    assert await current_schema_version(dsn) == ID_0032
 
-    assert await _guarded_rollback(dsn, dim, count=1, discard_audit_rows=True) == [HEAD]
+    assert await _guarded_rollback(dsn, dim, count=1, discard_audit_rows=True) == [ID_0032]
     conn = await asyncpg.connect(dsn)
     try:
         # The marker is gone, the memory stays withdrawn with its stub (the
@@ -1864,6 +1866,83 @@ async def test_0032_rolls_back_refused_without_the_flag_and_never_restores_text(
             await conn.execute(
                 "INSERT INTO audit_log (actor_kind, actor, action) "
                 "VALUES ('cli', 'x', 'entry.redact')"
+            )
+    finally:
+        await conn.close()
+    await migrate(dsn, dim)
+
+
+# ADR 0143: 0033 adds the fleet phase columns and the two phase audit actions.
+
+
+async def test_0033_adds_the_phase_columns_with_their_checks() -> None:
+    dsn, dim = _dsn(), Settings().embedding_dim
+    await _start_at_head(dsn, dim)
+    conn = await asyncpg.connect(dsn)
+    try:
+        columns = await conn.fetch(
+            "SELECT column_name, data_type, is_nullable, column_default "
+            "FROM information_schema.columns WHERE table_name = 'fleets' "
+            "AND column_name IN ('phase', 'phase_until') ORDER BY column_name"
+        )
+        assert [
+            (c["column_name"], c["data_type"], c["is_nullable"], c["column_default"])
+            for c in columns
+        ] == [
+            ("phase", "text", "YES", None),
+            ("phase_until", "timestamp with time zone", "YES", None),
+        ]
+        await conn.execute("INSERT INTO fleets (name) VALUES ('plain')")
+        await conn.execute(
+            "INSERT INTO fleets (name, phase, phase_until) "
+            "VALUES ('exploring', 'explore', now() + interval '1 day')"
+        )
+        for bad in (
+            "INSERT INTO fleets (name, phase, phase_until) VALUES ('x', 'sprint', now())",
+            "INSERT INTO fleets (name, phase) VALUES ('x', 'explore')",
+            "INSERT INTO fleets (name, phase_until) VALUES ('x', now())",
+        ):
+            with pytest.raises(asyncpg.CheckViolationError):
+                await conn.execute(bad)
+        for action in ("fleet.phase_set", "fleet.phase_clear"):
+            await conn.execute(
+                "INSERT INTO audit_log (actor_kind, actor, action, target) "
+                f"VALUES ('admin_key', 'admin:1', '{action}', 't')"
+            )
+        await conn.execute("DELETE FROM audit_log")
+        await conn.execute("DELETE FROM fleets")
+    finally:
+        await conn.close()
+
+
+async def test_0033_rolls_back_refused_without_the_flag_and_drops_the_columns() -> None:
+    dsn, dim = _dsn(), Settings().embedding_dim
+    await _start_at_head(dsn, dim)
+    await _insert_audit(dsn, "fleet.phase_set", "fleet.merge")
+
+    with pytest.raises(RollbackRefused) as exc:
+        await _guarded_rollback(dsn, dim, count=1)
+    assert HEAD in str(exc.value)
+    assert "fleet.phase_set" in str(exc.value)
+    assert "--discard-audit-rows" in str(exc.value)
+    assert await current_schema_version(dsn) == HEAD
+
+    assert await _guarded_rollback(dsn, dim, count=1, discard_audit_rows=True) == [HEAD]
+    assert await current_schema_version(dsn) == ID_0032
+    assert await _audit_actions(dsn) == ["fleet.merge", "schema.rollback"]
+    conn = await asyncpg.connect(dsn)
+    try:
+        assert (
+            await conn.fetchval(
+                "SELECT count(*) FROM information_schema.columns "
+                "WHERE table_name = 'fleets' AND column_name IN ('phase', 'phase_until')"
+            )
+            == 0
+        )
+        with pytest.raises(asyncpg.CheckViolationError):
+            await conn.execute(
+                "INSERT INTO audit_log (actor_kind, actor, action) "
+                "VALUES ('cli', 'x', 'fleet.phase_clear')"
             )
     finally:
         await conn.close()

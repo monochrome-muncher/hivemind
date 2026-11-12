@@ -17,6 +17,7 @@ from hivemind.api.schemas import (
     CheckOut,
     EntryOut,
     FeedbackSummaryOut,
+    FleetPhaseOut,
     HitOut,
     LinkOut,
     RelatedOut,
@@ -33,6 +34,7 @@ from hivemind.domain.entry import (
     SourceType,
 )
 from hivemind.domain.feedback import Correction, Feedback, FeedbackSummary, Verdict
+from hivemind.domain.fleet_phase import FleetPhase, PhaseName
 from hivemind.domain.upstream import UpstreamChange, UpstreamChangeKind
 from hivemind.services.chain import EntryLinks
 from hivemind.services.search import Hit, SimilarEntry
@@ -304,6 +306,17 @@ def test_feedback_summary_matches_the_contract_on_both_surfaces() -> None:
         _norm(FeedbackSummaryOut.from_summary(FEEDBACK_SUMMARY).model_dump(mode="json"))
         == FEEDBACK_TABLE
     )
+
+
+def test_fleet_phase_matches_the_contract_on_both_surfaces() -> None:
+    phase = FleetPhase(PhaseName.EXPLORE, datetime(2026, 11, 20, 8, tzinfo=UTC))
+    table = {
+        "phase": "explore",
+        "until": "2026-11-20T08:00:00+00:00",
+        "hint": phase.hint,
+    }
+    assert phase.as_dict() == table
+    assert FleetPhaseOut.from_phase(phase).model_dump(mode="json") == table
 
 
 def test_link_matches_the_contract_on_both_surfaces() -> None:

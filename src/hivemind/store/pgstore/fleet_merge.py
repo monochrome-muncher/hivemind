@@ -53,7 +53,8 @@ from hivemind.store.pgstore.rows import dropped_json, row_to_fleet, row_to_merge
 from hivemind.store.pgstore.sql_common import VECTOR_SEARCH_SETTINGS
 
 LOCK_FLEETS = """
-SELECT f.id, f.name, f.created_at, f.merged_into, f.merged_at, t.name AS target_name
+SELECT f.id, f.name, f.created_at, f.merged_into, f.merged_at, f.phase, f.phase_until,
+       t.name AS target_name
   FROM fleets f LEFT JOIN fleets t ON t.id = f.merged_into
  WHERE f.id = ANY($1::uuid[]) ORDER BY f.id FOR UPDATE OF f
 """

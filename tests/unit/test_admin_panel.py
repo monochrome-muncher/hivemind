@@ -76,6 +76,8 @@ def _panel(transport: httpx.AsyncBaseTransport) -> httpx.AsyncClient:
         ("GET", "admin/flagged"),
         ("POST", "admin/fleets/abc/merge"),
         ("PATCH", "admin/fleets/abc"),
+        ("PUT", "admin/fleets/abc/phase"),
+        ("DELETE", "admin/fleets/abc/phase"),
         ("POST", "admin/fleets/abc/move"),
         ("GET", "admin/fleet-merges"),
         ("POST", "admin/fleet-merges/abc/undo"),
@@ -129,6 +131,9 @@ def test_the_admin_surface_is_forwarded(method: str, path: str) -> None:
         ("GET", "admin/fleets/abc/merge"),  # right path, wrong method
         ("POST", "admin/fleets//merge"),
         ("GET", "admin/fleets/abc/move"),  # right path, wrong method
+        ("GET", "admin/fleets/abc/phase"),  # right path, wrong method
+        ("POST", "admin/fleets/abc/phase"),
+        ("PUT", "admin/fleets//phase"),
         ("POST", "admin/fleets//move"),
         ("POST", "admin/fleets/abc/move/x"),
         ("POST", "admin/fleets/abc/merge/x"),

@@ -663,12 +663,14 @@ async def hive_pinned(app: McpHivemind, fleet_id: str | None = None) -> dict[str
     that was pinned. Either id unpins it. ``changed_since_pin`` is true (with
     ``change_reason`` ``superseded`` or ``flagged``, else null) when the entry
     was superseded or flagged stale or wrong after the pin; pinning again
-    acknowledges the change (ADR 0076)."""
+    acknowledges the change (ADR 0076). ``fleet_phase`` is there while your
+    own fleet has a phase in force (ADR 0143)."""
     try:
         pinned = await app.governance_service.pinned(app.credential, fleet_id)
+        phase = await app.access_service.home_fleet_phase(app.credential, fleet_id)
     except _SERVICE_ERRORS as exc:
         return _service_error(exc)
-    return {
+    reply: dict[str, object] = {
         "fleet_id": fleet_id or app.credential.home_fleet_id,
         "pins": [
             {
@@ -686,6 +688,9 @@ async def hive_pinned(app: McpHivemind, fleet_id: str | None = None) -> dict[str
             for p in pinned
         ],
     }
+    if phase is not None:
+        reply["fleet_phase"] = phase.as_dict()
+    return reply
 
 
 async def hive_feedback(

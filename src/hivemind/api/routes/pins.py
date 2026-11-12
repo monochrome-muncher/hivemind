@@ -12,6 +12,7 @@ from hivemind.api.routes.shared import (
     unpin_entry,
 )
 from hivemind.api.schemas import (
+    FleetPhaseOut,
     PinnedOut,
     PinOut,
     PinsOut,
@@ -38,15 +39,20 @@ async def unpin(entry_id: str, credential: CredentialDep, app: AppDep) -> UnpinO
     return await unpin_entry(app, credential, entry_id)
 
 
-@router.get("/pins", response_model=PinsOut)
+@router.get("/pins", response_model=PinsOut, response_model_exclude_unset=True)
 async def pins(
     credential: CredentialDep, app: AppDep, fleet_id: Annotated[str | None, Query()] = None
 ) -> PinsOut:
     """A fleet's pinned entries, newest pin first (ADR 0058): the
     caller's home fleet unless ``fleet_id`` names another. Entries the
-    caller may not read are left out."""
+    caller may not read are left out. ``fleet_phase`` is there while the
+    caller's own fleet has a phase in force (ADR 0143)."""
     pinned = await app.governance_service.pinned(credential, fleet_id)
-    return PinsOut(
+    phase = await app.access_service.home_fleet_phase(credential, fleet_id)
+    out = PinsOut(
         fleet_id=fleet_id or credential.home_fleet_id,
         pins=[PinnedOut.from_pinned(p) for p in pinned],
     )
+    if phase is not None:
+        out.fleet_phase = FleetPhaseOut.from_phase(phase)
+    return out

@@ -2,7 +2,7 @@
 // Everything API-sourced is rendered with textContent (see core.js).
 
 import {
-  api, guarded, h, LEVELS, hooks, state, toast, openModal, closeModal, showKeyOnce, fleetName, fmtAgo, fmtTime, fmtNum,
+  api, guarded, h, LEVELS, hooks, state, toast, openModal, closeModal, showKeyOnce, fleetName, fmtAgo, fmtTime, fmtDate, fmtNum,
   levelBadge, statusBadge, loadAgentsAndFleets, pageHead, refreshButton, table, card, link,
   fetchActivity, fetchMetrics, miniBar, parseHash, viewHref, unavailable, agentHref, ownerHref, optional, fill, fleetHref,
 } from "./core.js";
@@ -15,7 +15,7 @@ import { retireDialog, successionsCard } from "./retire.js";
 
 const AUDIT_ACTIONS = [
   "agent.register", "agent.activate", "agent.trust_level_set", "agent.home_fleet_set", "agent.owner_set", "agent.revoke",
-  "fleet.create", "fleet.rename", "fleet.merge", "fleet.unmerge", "fleet.move_agents", "fleet.move_undo", "org_key.rotate", "entry.withdraw", "entry.restore", "entry.redact", "entry.pin", "entry.unpin",
+  "fleet.create", "fleet.rename", "fleet.phase_set", "fleet.phase_clear", "fleet.merge", "fleet.unmerge", "fleet.move_agents", "fleet.move_undo", "org_key.rotate", "entry.withdraw", "entry.restore", "entry.redact", "entry.pin", "entry.unpin",
   "admin_key.issue", "admin_key.revoke", "agent_key.issue", "agent_key.replace", "agent_key.lock",
   "agent.cleanup", "agent.cleanup_undo", "agent.retire", "agent.retire_undo",
   "schema.rollback",
@@ -23,6 +23,8 @@ const AUDIT_ACTIONS = [
 const AUDIT_PAGE = 50;
 // Rows whose target is a memory: the id opens it in the drawer.
 const ENTRY_ROW_ACTIONS = ["entry.withdraw", "entry.restore", "entry.redact"];
+// Rows whose target is the fleet whose phase was set or cleared (ADR 0143).
+const FLEET_PHASE_ACTIONS = ["fleet.phase_set", "fleet.phase_clear"];
 // Rows whose target is the source fleet and whose detail names a target fleet.
 const FLEET_ROW_ACTIONS = ["fleet.merge", "fleet.unmerge", "fleet.move_agents", "fleet.move_undo"];
 
@@ -266,6 +268,70 @@ export function renameFleetDialog(fleet, onDone) {
   input.select();
 }
 
+const PHASES = [{ value: "explore", label: "Explore" }, { value: "consolidate", label: "Consolidate" }];
+const DEFAULT_PHASE_DAYS = 14;
+const MAX_PHASE_DAYS = 30;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const phaseLabel = (phase) => (PHASES.find((p) => p.value === phase) || { label: phase }).label;
+
+/** The phase in force as "Explore until 2026-12-01"; a fleet with none shows a dash (ADR 0143). */
+export function phaseSummary(fleet) {
+  return fleet.phase
+    ? h("span", { title: fmtTime(fleet.phase_until), text: `${phaseLabel(fleet.phase)} until ${fmtDate(fleet.phase_until)}` })
+    : h("span", { class: "muted", text: "—" });
+}
+
+/** The fleet page's phase card: what is in force and the control to set or clear it (ADR 0143). */
+export function fleetPhaseCard(fleet, onDone) {
+  const url = `admin/fleets/${encodeURIComponent(fleet.id)}/phase`;
+  const select = h("select", { id: "f-phase", "aria-label": "Phase" },
+    PHASES.map((p) => h("option", { value: p.value, selected: p.value === fleet.phase, text: p.label })));
+  const days = h("input", { id: "f-phase-days", class: "phase-days", type: "number", min: 1, max: MAX_PHASE_DAYS, step: 1, value: DEFAULT_PHASE_DAYS, "aria-label": "Days" });
+  const confirm = ({ title, body, label, onClick }) => openModal({
+    title,
+    body: h("p", { text: body }),
+    actions: [{ label: "Cancel" }, { label, class: "btn-primary", submit: true, onClick }],
+  });
+  const set = async () => {
+    const count = Number(days.value);
+    if (!Number.isInteger(count) || count < 1 || count > MAX_PHASE_DAYS) throw new Error(`Days must be a whole number from 1 to ${MAX_PHASE_DAYS}.`);
+    const until = new Date(Date.now() + count * DAY_MS).toISOString();
+    await guarded(() => api("PUT", url, { body: { phase: select.value, until } }));
+    closeModal();
+    toast(`${phaseLabel(select.value)} phase set for ${count} ${count === 1 ? "day" : "days"}`);
+    onDone();
+  };
+  const onSet = () => {
+    if (!fleet.phase) return set().catch((err) => toast(err.message, true));
+    return confirm({
+      title: "Replace the current phase?",
+      body: `${fleet.name} is in its ${phaseLabel(fleet.phase).toLowerCase()} phase until ${fmtDate(fleet.phase_until)}. The new phase replaces it.`,
+      label: "Replace",
+      onClick: set,
+    });
+  };
+  const onClear = () => confirm({
+    title: "Clear the phase?",
+    body: `${fleet.name} goes back to no phase. Its agents stop seeing the hint.`,
+    label: "Clear phase",
+    onClick: async () => {
+      await guarded(() => api("DELETE", url));
+      closeModal();
+      toast("Phase cleared");
+      onDone();
+    },
+  });
+  const clear = h("button", { type: "button", class: "btn", text: "Clear", disabled: !fleet.phase, onclick: onClear });
+  return card("Phase",
+    h("div", {},
+      h("p", {}, "In force: ", phaseSummary(fleet)),
+      h("div", { class: "row" },
+        select, days, h("span", { class: "muted", text: "days" }),
+        h("button", { type: "button", class: "btn btn-primary", text: "Set", onclick: onSet }), clear),
+      h("p", { class: "muted small", text: "Agents in this fleet see a one-line hint in hive_whoami and hive_pinned until the phase ends. Ranking is unchanged." })));
+}
+
 /** Fix the owner alias of any agent (ADR 0122): the Stats "users" tab groups by it. */
 function ownerDialog(agent, onDone) {
   const owner = h("input", { id: "f-owner-edit", maxlength: 128, autocomplete: "off", value: agent.owner_alias || "", placeholder: "e.g. jane.doe" });
@@ -375,7 +441,7 @@ export function auditRow(nameOf) {
     if (r.target && r.action === "fleet.rename") {
       return h("td", { title: r.target, text: (r.detail && r.detail.to) || nameOf(r.target) });
     }
-    if (r.target && FLEET_ROW_ACTIONS.includes(r.action)) {
+    if (r.target && (FLEET_ROW_ACTIONS.includes(r.action) || FLEET_PHASE_ACTIONS.includes(r.action))) {
       return h("td", { title: r.target, text: nameOf(r.target) });
     }
     if (r.target && ENTRY_ROW_ACTIONS.includes(r.action)) {
@@ -679,7 +745,7 @@ export async function viewFleets(root) {
     if (f.merged_into) {
       return h("tr", { class: "merged-fleet" },
         h("td", {}, link(f.name, fleetHref(f.id), { class: "link strong" }), " ", h("span", { class: "badge badge-muted", title: fmtTime(f.merged_at), text: `merged into ${fleetName(f.merged_into)}` })),
-        h("td", { colspan: 6, class: "muted", text: "Its memories, agents and pins moved to the fleet it was merged into." }),
+        h("td", { colspan: 7, class: "muted", text: "Its memories, agents and pins moved to the fleet it was merged into." }),
         h("td", { title: fmtTime(f.created_at), text: fmtAgo(f.created_at) }),
         h("td", {}, h("code", { title: f.id, text: f.id.slice(0, 8) })),
         h("td", { class: "actions" }, renameButton(f)));
@@ -692,6 +758,7 @@ export async function viewFleets(root) {
       h("td", { class: "num", text: x ? fmtNum(x.recent_writes) : "—" }),
       h("td", { title: x ? fmtTime(x.last_write_at) : "", text: x && x.last_write_at ? fmtAgo(x.last_write_at) : "—" }),
       h("td", { class: "num" }, pinCount(pins.get(f.id))),
+      h("td", {}, phaseSummary(f)),
       h("td", { title: fmtTime(f.created_at), text: fmtAgo(f.created_at) }),
       h("td", {}, h("code", { title: f.id, text: f.id.slice(0, 8) })),
       h("td", { class: "actions" }, renameButton(f), " ",
@@ -713,7 +780,7 @@ export async function viewFleets(root) {
     pageHead("Fleets", "Fleets partition the pool. They cannot be deleted, but one can be renamed, merged into another, or split by moving some agents out.", refreshButton()),
     card("New fleet", form),
     card(null, table(
-      ["Fleet", "Active agents", "Entries (active / all)", "Writers", `Writes (${state.days}d)`, "Last write", "Pins", "Created", "Id", ""],
+      ["Fleet", "Active agents", "Entries (active / all)", "Writers", `Writes (${state.days}d)`, "Last write", "Pins", "Phase", "Created", "Id", ""],
       rows, "No fleets yet. Create one before activating agents.", { className: "fleets-table" }), {
       flush: true,
       head: [h("label", { class: "check", for: "show-merged" }, mergedToggle, " Show merged fleets")],
