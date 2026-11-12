@@ -81,9 +81,16 @@ The SPEC §10 extensions (Tier 5) stay held until their triggers fire.
   converging, with each item's status. Its unbuilt items are candidates,
   not commitments.
 - **A hive that lives and breathes** ([docs/proposals/2026-11-12-living-hive-ideas.md](docs/proposals/2026-11-12-living-hive-ideas.md)):
-  fleet phases, scouts and other ideas for keeping the hive between
-  collapse and scatter; candidates, not commitments. Its vital signs
-  (§3) are built: [ADR 0142](docs/adr/0142-vital-signs.md).
+  ideas for keeping the hive between collapse and scatter. Its first
+  three are built: fleet phases, scouts and vital signs
+  ([ADRs 0142](docs/adr/0142-vital-signs.md), [0143](docs/adr/0143-fleet-phases.md),
+  [0144](docs/adr/0144-scouts.md)). The rest (§4 to §11) are candidates,
+  not commitments.
+- **Memories as data, and self versus fleet** ([docs/reviews/2026-11-12-memories-as-data-and-scope.md](docs/reviews/2026-11-12-memories-as-data-and-scope.md)):
+  options A to D are built (scope by evidence, the `tentative` warning,
+  match strength and the loose note; ADRs 0146 to 0148). E ("and may be
+  wrong" in the always-on text) and F (recording how the author held an
+  entry) are held.
 - **4.1 BM25** stays deferred; revisit only on observed keyword misses.
 
 ## Tier 1 — validate the core  *(shipped)*

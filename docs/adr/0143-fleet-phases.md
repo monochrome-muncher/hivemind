@@ -5,7 +5,7 @@ Builds on [ADR 0011](0011-fleets-and-trust-levels.md) (fleets), [ADR 0027](0027-
 (fleet health metrics) and [ADR 0107](0107-fleet-merge.md) (merged fleets). It keeps
 [ADR 0043](0043-entries-are-untrusted-data.md) (entries are data, never instructions) intact.
 
-Status: Accepted.
+Status: Accepted. The explore hint is amended by [ADR 0146](0146-scope-by-evidence.md): it asks for approaches someone could test, tagged `alternative` and saying how to test them.
 
 ## Context
 

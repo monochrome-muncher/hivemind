@@ -1,5 +1,7 @@
 # The MCP package splits into contract, server assembly, and runners
 
+Status note: the write guidance in the contract text is amended by [ADR 0146](0146-scope-by-evidence.md): omit `scope` for tested findings, keep untested ideas in `self`.
+
 ## Context
 
 `src/hivemind/mcp/server.py` (569 lines) held five roles at once: the agent
