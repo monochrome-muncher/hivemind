@@ -8,11 +8,11 @@
     "source": "github"
   },
   "websiteUrl": "https://github.com/monochrome-muncher/hivemind/blob/main/plugins/hivemind/README.md",
-  "version": "2.25.0",
+  "version": "2.25.1",
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/monochrome-muncher/hivemind:v2.25.0",
+      "identifier": "ghcr.io/monochrome-muncher/hivemind:v2.25.1",
       "transport": {
         "type": "streamable-http",
         "url": "http://localhost:8000/mcp",
