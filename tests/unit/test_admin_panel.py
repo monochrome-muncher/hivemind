@@ -543,6 +543,8 @@ def test_since_counts_and_words_the_line() -> None:
       ...Array.from({ length: 4 }, () => ({ action: "entry.withdraw" })),
       { action: "agent.activate" }, { action: "agent.register" }, { action: "agent_key.lock" },
       ...Array.from({ length: 9 }, () => ({ action: "fleet.rename" })),
+      // An agent's own pin or cleanup is not an admin action.
+      { action: "entry.pin", actor_kind: "agent_key" }, { action: "agent.cleanup", actor_kind: "agent_key" },
     ]
     const parts = m.adminParts({ since, agents, entries, flagged, audit })
     const failed = m.adminParts({ since, agents, entries: null, flagged: undefined, audit: null })
