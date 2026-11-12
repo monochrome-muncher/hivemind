@@ -27,10 +27,10 @@ from hivemind.domain.access import (
     Fleet,
     TrustLevel,
 )
-from hivemind.domain.agent_role import OTHER_AGENTS, AgentRole
+from hivemind.domain.agent_role import AgentRole
 from hivemind.domain.entry import ImportanceSource, Kind, SearchCount, UsageCount
 from hivemind.domain.feedback import FlagCount
-from hivemind.domain.health import Convergence, FleetHealth, HealthCounts
+from hivemind.domain.health import OTHER_AGENTS, Convergence, FleetHealth, HealthCounts
 from hivemind.ports import Store
 
 logger = logging.getLogger(__name__)

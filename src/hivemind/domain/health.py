@@ -61,6 +61,8 @@ class HealthCounts:
     withdrawals_7d: int = 0
 
 
+OTHER_AGENTS = "other"
+
 # Entries tagged like this are the ones scouting should produce (ADR 0144).
 EXPLORATORY_TAGS = frozenset({"alternative", "dead-end"})
 

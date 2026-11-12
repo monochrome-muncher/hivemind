@@ -376,7 +376,7 @@ export function scoutCard(agent, onDone) {
   return card("Scout",
     h("div", {},
       h("div", { class: "row" }, isScout ? scoutBadge(agent) : h("span", { class: "muted", text: "Not a scout" }), button),
-      h("p", { class: "muted small", text: SCOUT_NOTE })));
+      h("p", { class: "muted small", text: agent.status === "revoked" ? `${SCOUT_NOTE} The role stays on the record and comes back if the agent is re-activated.` : SCOUT_NOTE })));
 }
 
 /** Fix the owner alias of any agent (ADR 0122): the Stats "users" tab groups by it. */
@@ -689,8 +689,9 @@ export async function viewAgents(root) {
       ["Agent", "Status", "Trust level", "Home fleet", "Owner", "Entries", `Writes (${state.days}d)`, "Last write", "Flags confirmed", "Activated", "Last active", ""],
       shown.map((a) => {
         const x = act.get(a.name);
+        const badge = scoutBadge(a);
         return h("tr", {},
-          h("td", {}, link(a.name, agentHref(a.name), { class: "link strong" }), scoutBadge(a) ? [" ", scoutBadge(a)] : null),
+          h("td", {}, link(a.name, agentHref(a.name), { class: "link strong" }), badge ? [" ", badge] : null),
           h("td", {}, statusBadge(a.status), a.key_locked && a.status === "active" ? [" ", lockedBadge(a)] : null),
           h("td", {}, a.status === "pending" ? h("span", { class: "muted", text: "—" }) : levelBadge(a.trust_level)),
           h("td", {}, a.home_fleet_id ? link(fleetName(a.home_fleet_id), fleetHref(a.home_fleet_id)) : "—"),

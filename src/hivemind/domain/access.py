@@ -188,7 +188,6 @@ class Agent:
     key_created_at: datetime | None = None
     # When the key was locked from the portal; ``None`` = usable or no key.
     key_locked_at: datetime | None = None
-    # ADR 0144: a hint for the agent, never a permission.
     role: AgentRole | None = None
 
 
@@ -224,7 +223,6 @@ class Standing:
     key_last_used_at: datetime | None = None
     # ADR 0143: the home fleet's phase in force; the reply has no key for it without one.
     fleet_phase: FleetPhase | None = None
-    # ADR 0144: the agent's role; the reply has no key for it without one.
     role: AgentRole | None = None
 
     def as_dict(self) -> dict[str, object]:

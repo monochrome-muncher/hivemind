@@ -9,7 +9,6 @@ from __future__ import annotations
 from enum import StrEnum
 
 DEFAULT_FLEET_NAME = "your fleet"
-OTHER_AGENTS = "other"
 
 
 class AgentRole(StrEnum):
@@ -29,4 +28,4 @@ def role_hint(role: AgentRole, fleet_name: str | None) -> str:
     return _HINTS[role].format(fleet=fleet_name or DEFAULT_FLEET_NAME)
 
 
-__all__ = ["DEFAULT_FLEET_NAME", "OTHER_AGENTS", "AgentRole", "role_hint"]
+__all__ = ["DEFAULT_FLEET_NAME", "AgentRole", "role_hint"]

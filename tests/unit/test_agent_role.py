@@ -412,3 +412,27 @@ async def test_an_empty_pool_reports_no_scouts_and_no_activity() -> None:
     assert report.agents.by_role == {"scout": 0}
     assert report.health is not None
     assert report.health.role_activity_30d == {"scout": RoleActivity(), "other": RoleActivity()}
+
+
+ADMIN_AGENT_KEYS = {
+    "name",
+    "status",
+    "trust_level",
+    "home_fleet_id",
+    "owner_alias",
+    "created_at",
+    "activated_at",
+}
+
+
+async def test_registration_has_no_role_and_the_admin_replies_add_it() -> None:
+    store = MemoryStore(make_clock())
+    async with _client(store) as client:
+        registered = await client.post(
+            "/v1/agents", json={"name": "alice"}, headers={"X-API-Key": "hm_org"}
+        )
+        put = await client.put(
+            "/v1/admin/agents/alice/role", json={"role": "scout"}, headers=ADMIN_H
+        )
+    assert set(registered.json()) == ADMIN_AGENT_KEYS | {"already_registered", "message"}
+    assert set(put.json()) == ADMIN_AGENT_KEYS | {"role"}

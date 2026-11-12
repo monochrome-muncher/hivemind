@@ -9,11 +9,10 @@ Status: Accepted.
 
 ## Context
 
-A honeybee colony sends a small share of its bees out as scouts. The rest forage what is already known,
-and the scouts find the next patch. In March 1991 Thomas Seeley and Susan Visscher showed that the
-scouts are not random bees: it is their willingness to look elsewhere that keeps the colony from
-settling on a patch that has gone poor. Agents that share one memory tend to the same thing in the
-other direction. Everyone reads the same settled entries, and nobody has the job of trying the rival
+Honeybee colonies keep a small share of scouts that explore while most bees forage what is known
+(Seeley, Honeybee Democracy, 2010). March ("Exploration and exploitation in organizational learning",
+1991) found that organizations keep learning only if some members are slow to adopt the shared code.
+Agents that share one memory tend to the opposite. Everyone reads the same settled entries, and nobody has the job of trying the rival
 approach or re-checking the entry everyone relies on. A fleet phase (ADR 0143) asks the whole fleet to
 explore for a while, but there is no way to ask one agent, or a few, to do it all the time.
 

@@ -68,7 +68,6 @@ class AgentOut(BaseModel):
     owner_alias: str | None = None
     created_at: str | None = None
     activated_at: str | None = None
-    role: AgentRole | None = None
 
     @classmethod
     def from_agent(cls, agent: Agent) -> AgentOut:
@@ -80,11 +79,21 @@ class AgentOut(BaseModel):
             owner_alias=agent.owner_alias,
             created_at=agent.created_at.isoformat() if agent.created_at else None,
             activated_at=agent.activated_at.isoformat() if agent.activated_at else None,
-            role=agent.role,
         )
 
 
-class AdminAgentOut(AgentOut):
+class AgentWithRoleOut(AgentOut):
+    """An agent as the admin sees it: the record plus its role (ADR 0144), null when it has none.
+    Registration and the agent-facing replies stay ``AgentOut``."""
+
+    role: AgentRole | None = None
+
+    @classmethod
+    def from_agent(cls, agent: Agent) -> AgentWithRoleOut:
+        return cls(**AgentOut.from_agent(agent).model_dump(), role=agent.role)
+
+
+class AdminAgentOut(AgentWithRoleOut):
     """A row of ``GET /v1/admin/agents``: the agent plus when its key last
     worked and whether that makes it idle (ADR 0110). ``idle_after_days``
     is ``HIVEMIND_IDLE_AGENT_DAYS``, repeated so a panel can say it."""
@@ -98,7 +107,7 @@ class AdminAgentOut(AgentOut):
     @classmethod
     def from_admin_agent(cls, agent: Agent, *, now: datetime, idle_days: int) -> AdminAgentOut:
         return cls(
-            **AgentOut.from_agent(agent).model_dump(),
+            **AgentWithRoleOut.from_agent(agent).model_dump(),
             last_used_at=agent.last_used_at.isoformat() if agent.last_used_at else None,
             key_locked=agent.key_locked_at is not None,
             key_locked_at=agent.key_locked_at.isoformat() if agent.key_locked_at else None,
@@ -117,7 +126,7 @@ class RegisteredAgentOut(AgentOut):
     message: str
 
 
-class CreatedAgentOut(AgentOut):
+class CreatedAgentOut(AgentWithRoleOut):
     """The answer to ``POST /v1/admin/agents``: the new active
     agent plus its key, returned **once**."""
 

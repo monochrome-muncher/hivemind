@@ -216,7 +216,7 @@ def row_to_agent(row: asyncpg.Record) -> Agent:
         last_used_at=row.get("last_used_at"),
         key_created_at=row.get("key_created_at"),
         key_locked_at=row.get("key_locked_at"),
-        role=AgentRole(row["role"]) if row["role"] is not None else None,
+        role=AgentRole(role) if (role := row.get("role")) is not None else None,
     )
 
 
