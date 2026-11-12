@@ -97,6 +97,9 @@ export const auditHref = (filters = {}) => viewHref("audit", filters);
 /** An in-panel hash link to one agent's page. */
 export const agentHref = (name) => viewHref("agent", { name });
 
+/** An in-panel hash link to one owner's page (an owner alias, matched exactly). */
+export const ownerHref = (alias) => viewHref("owner", { alias });
+
 /** An <a> to an in-panel hash route (the href is built from our own params only). */
 export function link(text, href, props = {}) {
   return h("a", { href, class: "link", ...props }, text);
@@ -278,7 +281,7 @@ export function table(headers, rows, emptyText, { className = "" } = {}) {
 
 export function pageHead(title, subtitle, ...extra) {
   return h("div", { class: "page-head" },
-    h("div", {}, h("h1", { text: title }), subtitle ? h("p", { class: "muted", text: subtitle }) : null),
+    h("div", {}, h("h1", { text: title }), subtitle ? h("p", { class: "muted" }, subtitle) : null),
     h("div", { class: "page-actions" }, ...extra));
 }
 

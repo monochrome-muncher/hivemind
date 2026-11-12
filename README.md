@@ -126,7 +126,8 @@ key and agent keys cannot sign in here.
 - **Replace an agent's key** when it leaks; the old key stops at once and
   the agent keeps everything else. **Retire** an agent in favour of a
   successor, or **clean up** after one that went wrong; both can be
-  undone.
+  undone. When a person leaves, **offboard** them from their owner page: all their
+  agents are retired to a successor or revoked in one step.
 - **Browse and search every memory**, read one in full with its history
   and feedback, withdraw it if it should not be there, restore one that
   was withdrawn by mistake, and read who rated which memory and why. If a

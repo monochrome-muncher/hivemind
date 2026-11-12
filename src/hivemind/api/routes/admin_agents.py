@@ -18,6 +18,8 @@ from hivemind.api.schemas import (
     CreateAgentRequest,
     CreatedAgentOut,
     KeyIssuedOut,
+    OffboardingOut,
+    OffboardRequest,
     RetiredOut,
     RetirePreviewOut,
     RetireRequest,
@@ -25,6 +27,7 @@ from hivemind.api.schemas import (
     UpdateAgentRequest,
 )
 from hivemind.domain.access import TrustLevel
+from hivemind.domain.offboarding import OffboardMode
 
 router = APIRouter(prefix=API_PREFIX)
 
@@ -174,3 +177,29 @@ async def undo_succession(
     require_admin(credential, "undoing a retirement")
     succession = await app.access_service.successions.undo(retired, credential)
     return SuccessionOut.from_succession(succession)
+
+
+@router.post("/admin/owners/{alias}/offboard", response_model=OffboardingOut)
+async def offboard_owner(
+    alias: NameParam, payload: OffboardRequest, credential: CredentialDep, app: AppDep
+) -> OffboardingOut:
+    """Offboard an owner (admin-gated, ADR 0135): ``retire`` hands every one of their agents'
+    memories to ``successor`` as ``POST /v1/admin/agents/{name}/retire`` does, ``revoke`` revokes
+    them all; pending agents are rejected, revoked and retired ones skipped. The alias matches
+    exactly as stored. ``dry_run: true`` answers the plan per agent and changes nothing; otherwise
+    everything is applied in one transaction, audited per agent as ``agent.retire`` and
+    ``agent.revoke`` with ``offboarded_owner``. 404 ``unknown_owner`` / unknown successor, 409
+    ``invalid_status`` (the successor is not active) / ``succession_refused`` (the successor
+    belongs to the same owner, or a cycle), 409 ``offboard_changed`` when the agents are no longer planned as the
+    request's ``expected_agents`` (required when applying), 422 ``retire`` without or ``revoke`` with a
+    successor."""
+    require_admin(credential, "offboarding an owner")
+    offboarding = app.access_service.offboarding
+    mode = OffboardMode(payload.mode)
+    if payload.dry_run:
+        result = await offboarding.preview(alias, mode, payload.successor, credential)
+    else:
+        result = await offboarding.offboard(
+            alias, mode, payload.successor, payload.expected(), credential
+        )
+    return OffboardingOut.from_offboarding(result)

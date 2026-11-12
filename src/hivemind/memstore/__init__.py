@@ -16,9 +16,9 @@ from hivemind.memstore.fleet_merge import FleetMergeStore
 from hivemind.memstore.fleets import FleetStore
 from hivemind.memstore.helpers import cosine_similarity
 from hivemind.memstore.metrics import MetricsStore
+from hivemind.memstore.offboarding import OffboardingStore
 from hivemind.memstore.pins import PinStore
 from hivemind.memstore.search import SearchStore
-from hivemind.memstore.successions import SuccessionStore
 
 __all__ = ["MemoryStore", "cosine_similarity"]
 
@@ -33,7 +33,7 @@ class MemoryStore(
     FleetMergeStore,
     AgentCleanupStore,
     AgentStore,
-    SuccessionStore,
+    OffboardingStore,
     AuditStore,
 ):
     """Thread-safe in-memory Store (a ``dict`` under a lock)."""

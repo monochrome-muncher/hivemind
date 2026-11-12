@@ -4,7 +4,7 @@
 import {
   api, guarded, h, LEVELS, hooks, state, toast, openModal, closeModal, showKeyOnce, fleetName, fmtAgo, fmtTime, fmtNum,
   levelBadge, statusBadge, loadAgentsAndFleets, pageHead, refreshButton, table, card, link, memoriesHref,
-  fetchActivity, fetchMetrics, miniBar, parseHash, viewHref, unavailable, agentHref, optional, fill,
+  fetchActivity, fetchMetrics, miniBar, parseHash, viewHref, unavailable, agentHref, ownerHref, optional, fill,
 } from "./core.js";
 import { openEntry } from "./drawer.js";
 import { PIN_HEADERS, pinRow } from "./lists.js";
@@ -573,7 +573,7 @@ export async function viewAgents(root) {
           h("td", {}, statusBadge(a.status), a.key_locked && a.status === "active" ? [" ", lockedBadge(a)] : null),
           h("td", {}, a.status === "pending" ? h("span", { class: "muted", text: "—" }) : levelBadge(a.trust_level)),
           h("td", { text: fleetName(a.home_fleet_id) }),
-          h("td", { text: a.owner_alias || "—" }),
+          h("td", {}, a.owner_alias ? link(a.owner_alias, ownerHref(a.owner_alias)) : "—"),
           h("td", { class: "num", title: x ? `${x.active} active` : "", text: x ? fmtNum(x.entries) : "—" }),
           h("td", { class: "num" }, x ? h("div", { class: "inline-bar" }, h("span", { text: fmtNum(x.recent_writes) }), miniBar(x.recent_writes || 0, maxWrites)) : "—"),
           h("td", { title: x ? fmtTime(x.last_write_at) : "", text: x && x.last_write_at ? fmtAgo(x.last_write_at) : "—" }),

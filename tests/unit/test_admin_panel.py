@@ -80,6 +80,7 @@ def _panel(transport: httpx.AsyncBaseTransport) -> httpx.AsyncClient:
         ("GET", "admin/fleet-merges"),
         ("POST", "admin/fleet-merges/abc/undo"),
         ("POST", "admin/agents/alice/retire"),
+        ("POST", "admin/owners/jane.doe/offboard"),
         ("GET", "admin/successions"),
         ("POST", "admin/successions/alice/undo"),
         ("POST", "admin/agents/bob/cleanup"),
@@ -137,6 +138,10 @@ def test_the_admin_surface_is_forwarded(method: str, path: str) -> None:
         ("POST", "admin/fleet-merges//undo"),
         ("GET", "admin/agents/alice/retire"),  # right path, wrong method
         ("POST", "admin/agents//retire"),
+        ("POST", "admin/owners//offboard"),
+        ("POST", "admin/owners/jane/offboard/x"),
+        ("GET", "admin/owners/jane/offboard"),
+        ("GET", "admin/owners"),
         ("POST", "admin/agents/alice/retire/x"),
         ("POST", "admin/successions"),
         ("GET", "admin/successions/alice"),
@@ -372,7 +377,7 @@ def test_the_scripts_never_build_a_link_from_entry_data() -> None:
             js = js.replace("a.href = url;", "", 1)
         assert ".href =" not in js and 'setAttribute("href"' not in js, script.name
         for href in re.findall(r"\bhref:\s*([^,}]+)", js):
-            assert re.search(r"\b(?:memories|feedback|agent|view)Href\(", href) or re.match(
+            assert re.search(r"\b(?:memories|feedback|agent|owner|view)Href\(", href) or re.match(
                 r"""\s*(?:["'`]#|href\b|null)""", href
             ), (script.name, href)
     # The href helpers build in-panel hash routes and nothing else.

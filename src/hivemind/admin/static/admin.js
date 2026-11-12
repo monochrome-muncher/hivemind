@@ -28,13 +28,14 @@ import { viewStats } from "./stats.js";
 import { viewAgents, viewFleets, viewAudit, viewKeys } from "./manage.js";
 import { viewHealth } from "./health.js";
 import { viewAgent } from "./agent.js";
+import { viewOwner } from "./owner.js";
 
 const VIEWS = {
   overview: viewOverview, memories: viewMemories, feedback: viewFeedback, stats: viewStats, agents: viewAgents,
-  fleets: viewFleets, health: viewHealth, audit: viewAudit, keys: viewKeys, agent: viewAgent,
+  fleets: viewFleets, health: viewHealth, audit: viewAudit, keys: viewKeys, agent: viewAgent, owner: viewOwner,
 };
 // A detail page lights up the list it belongs to in the sidebar.
-const NAV_PARENT = { agent: "agents" };
+const NAV_PARENT = { agent: "agents", owner: "agents" };
 
 let renderToken = 0;
 let currentContainer = null;
