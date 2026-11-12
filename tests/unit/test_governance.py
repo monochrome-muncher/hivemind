@@ -474,3 +474,41 @@ def test_a_forwarding_method_keeps_its_targets_signature(target: type, name: str
     assert {p.name: (p.kind, p.default) for p in forwarded.values()} == {
         p.name: (p.kind, p.default) for p in wanted.values()
     }
+
+
+class _GoneAtTheWrite(MemoryStore):
+    """The memory disappears between the service's read and the store's write."""
+
+    async def move_entry_to_self(self, entry_id: str):  # type: ignore[no-untyped-def]
+        raise KeyError(entry_id)
+
+    async def restore_entry(self, entry_id: str):  # type: ignore[no-untyped-def]
+        raise KeyError(entry_id)
+
+    async def redact_entry(self, entry_id: str):  # type: ignore[no-untyped-def]
+        raise KeyError(entry_id)
+
+
+@pytest.mark.parametrize("action", ["move_to_self", "restore", "redact"])
+async def test_a_memory_gone_at_the_write_is_not_found_and_nothing_is_audited(
+    action: str,
+) -> None:
+    from hivemind.domain.audit import AuditFilters
+
+    store = _GoneAtTheWrite(make_clock())
+    admin = Credential(user_id="admin", is_admin=True, key_id="abcdef012345")
+    fleet = (await store.create_fleet("blue")).id
+    entry = await store.create_entry(
+        make_draft("gone soon", scope="fleet", fleet_id=fleet), [1.0, 0.0], "m"
+    )
+    if action != "move_to_self":
+        await store.withdraw_entry(entry.id, "obsolete", by_user="alice")
+    governance = GovernanceService(store)
+    calls = {
+        "move_to_self": lambda: governance.move_to_self(admin, entry.id, "private after all"),
+        "restore": lambda: governance.restore(admin, entry.id, "put back"),
+        "redact": lambda: governance.redact(admin, entry.id, "leaked a secret", entry.id),
+    }
+    with pytest.raises(EntryNotFound):
+        await calls[action]()
+    assert await store.list_audit(AuditFilters(), 10) == []

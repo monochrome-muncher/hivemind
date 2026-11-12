@@ -605,3 +605,23 @@ async def test_a_move_to_self_names_who_moved_it_and_shows_the_reason_for_own_me
     assert rows["a scratch note"]["entry_id"] == by_carol.id
     assert rows["old's scratch"]["summary"] == "Moved a memory inherited from old to self"
     assert ADMIN_ACTOR not in json.dumps(rows)
+
+
+@pytest.mark.parametrize(
+    "credential",
+    [
+        Credential(user_id="admin", agent_name="carol", is_admin=True, key_id="abcdef012345"),
+        Credential(user_id="org", agent_name="carol", is_org=True, access_controlled=True),
+        Credential(user_id="dev", access_controlled=True),
+    ],
+    ids=["admin", "org", "no-agent-name"],
+)
+async def test_the_history_service_itself_refuses_a_key_that_is_not_an_agents(
+    credential: Credential,
+) -> None:
+    """The route checks first; the service holds on its own (ADR 0123)."""
+    from hivemind.services.errors import PermissionDenied
+
+    app, _blue, _red = await _seed()
+    with pytest.raises(PermissionDenied, match="agent key"):
+        await app.access_service.history.list_own(credential, before=None, limit=50)

@@ -447,7 +447,7 @@ async def test_pg_verify_on_an_unreachable_database_raises_store_unavailable() -
         (asyncpg.exceptions.InvalidCatalogNameError(), False),
     ],
 )
-async def test_pg_verify_maps_only_transient_failures_to_store_unavailable(
+async def test_pg_key_and_agent_lookups_map_only_transient_failures_to_store_unavailable(
     error: BaseException, transient: bool
 ) -> None:
     """A permanent fault (wrong password, unmigrated pool, missing database)
@@ -464,3 +464,5 @@ async def test_pg_verify_maps_only_transient_failures_to_store_unavailable(
         await auth.verify("hm_whatever")
     if not transient:
         assert not isinstance(excinfo.value, StoreUnavailable)
+    with pytest.raises(expected):
+        await auth.credential_for_agent("alice")
