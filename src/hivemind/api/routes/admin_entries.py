@@ -180,8 +180,9 @@ async def admin_move_to_self(
     entry_id: str, request: MoveToSelfRequest, credential: CredentialDep, app: AppDep
 ) -> MoveToSelfOut:
     """Move an agent's active fleet memory to its `self` scope (ADR 0145). The reason is required;
-    the author's earlier fleet versions move with it and their pins are removed; 409 for a memory
-    that is not an active fleet memory or that replaced another agent's fleet memory. Audited as
+    its owners' earlier fleet versions (the author's and those it inherited, ADR 0149) move with it
+    and their pins are removed; 409 for a memory that is not an active fleet memory or that
+    replaced a fleet memory by anyone else. Audited as
     ``entry.move_to_self``."""
     require_admin(credential, "the admin move to self")
     return MoveToSelfOut.from_move(

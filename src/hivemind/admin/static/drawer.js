@@ -325,7 +325,7 @@ function moveToSelfDialog(e) {
     title: "Move this memory to self?",
     body: [
       h("p", { class: "plain", text: e.summary }),
-      h("p", { class: "muted small", text: `Among agents, only ${e.author} (and any successor it is retired in favour of) will see it. Its earlier versions by the same author move too, and their pins are removed. Ratings stay on it. A memory that replaced another agent's fleet memory cannot be moved. To share it again, the author supersedes it with a fleet memory. The reason is kept in the audit log.` }),
+      h("p", { class: "muted small", text: `Among agents, only ${e.author} (and any successor it is retired in favour of) will see it. Its earlier versions by the same author, or by an agent it took over from, move too, and their pins are removed. Ratings stay on it. A memory that replaced another agent's fleet memory cannot be moved. To share it again, the author supersedes it with a fleet memory. The reason is kept in the audit log.` }),
       h("div", { class: "field" }, h("label", { for: "f-move-reason", text: "Reason" }), reason),
     ],
     actions: [

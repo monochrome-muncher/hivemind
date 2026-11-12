@@ -29,11 +29,12 @@ class SelfMoveStore(MemoryState):
             refusal = self_move_refusal(key, head.state.value, head.scope)
             if refusal is not None:
                 raise refusal
-            own = self._own_fleet_versions(key, head.author)
+            owners = {head.author, *self._inherited(head.author)}
+            own = self._own_fleet_versions(key, owners)
             others = [
                 e.id
                 for e in self._entries.values()
-                if e.superseded_by in own and e.author != head.author and e.scope == SCOPE_FLEET
+                if e.superseded_by in own and e.author not in owners and e.scope == SCOPE_FLEET
             ]
             refusal = replaced_others_refusal(key, others)
             if refusal is not None:
@@ -49,7 +50,7 @@ class SelfMoveStore(MemoryState):
                 tuple(unpinned),
             )
 
-    def _own_fleet_versions(self, head_id: str, author: str) -> set[str]:
+    def _own_fleet_versions(self, head_id: str, owners: set[str]) -> set[str]:
         own = {head_id}
         frontier = [head_id]
         while frontier:
@@ -57,7 +58,7 @@ class SelfMoveStore(MemoryState):
             for e in self._entries.values():
                 if (
                     e.superseded_by == current
-                    and e.author == author
+                    and e.author in owners
                     and e.scope == SCOPE_FLEET
                     and e.id not in own
                 ):

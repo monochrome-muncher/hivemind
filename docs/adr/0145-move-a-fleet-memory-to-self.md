@@ -6,7 +6,7 @@ Amends [ADR 0001](0001-append-only-entries-with-explicit-supersession.md) (entri
 [ADR 0095](0095-agent-portal.md), [ADR 0096](0096-contributors-pin.md),
 [ADR 0113](0113-retire-an-agent-with-a-successor.md) and [ADR 0141](0141-every-withdrawal-is-audited.md).
 
-Status: Accepted.
+Status: Accepted. Points 3 and 4 amended by [ADR 0149](0149-move-to-self-follows-inheritance.md): the versions of every agent the author inherited from count as its own.
 
 ## Context
 

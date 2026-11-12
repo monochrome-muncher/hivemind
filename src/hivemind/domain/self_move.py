@@ -10,7 +10,7 @@ from hivemind.domain.entry import Entry
 
 class SelfMoveRefused(Exception):
     """The memory cannot be moved to `self` (409): it is not an active fleet memory, or it (or an
-    earlier version of it by its author) replaced another agent's fleet memory."""
+    earlier version of it by one of its owners) replaced a fleet memory by anyone else."""
 
 
 @dataclass(frozen=True, slots=True, order=True)
@@ -22,7 +22,7 @@ class RemovedPin:
 @dataclass(frozen=True, slots=True)
 class SelfMove:
     """A finished move. ``entry`` is the memory, now `self`. ``earlier_versions`` are the
-    versions by the same author it replaced, moved with it. ``unpinned`` are the pins removed from
+    versions by its owners (the author and those it inherited from) it replaced, moved with it. ``unpinned`` are the pins removed from
     every moved version."""
 
     entry: Entry
