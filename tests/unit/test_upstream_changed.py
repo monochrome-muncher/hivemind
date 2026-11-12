@@ -18,8 +18,15 @@ from hivemind.domain.upstream import (
 from hivemind.mcp.app import hive_search
 from hivemind.memstore import MemoryStore
 from hivemind.services.search import SearchService
-from tests.fakes import FIXED_NOW, FixedClock, make_clock, make_embedder, make_search_config
-from tests.unit.test_readable_feedback import WRITER, _rest_client, _surface
+from tests.fakes import (
+    FIXED_NOW,
+    FixedClock,
+    make_clock,
+    make_embedder,
+    make_search_config,
+    mcp_surface,
+)
+from tests.unit.test_readable_feedback import WRITER, _rest_client
 
 T0 = datetime(2026, 9, 1, tzinfo=UTC)
 VEC = [0.1, 0.1, 0.1, 0.1]
@@ -325,7 +332,7 @@ async def _withdrawn_upstream() -> tuple[MemoryStore, str]:
 async def test_mcp_hit_lists_the_change_and_omits_it_when_empty() -> None:
     store, base = await _withdrawn_upstream()
     await _put(store, "billing node standalone", kind=Kind.FACT, author="ann", scope="org")
-    reply = await hive_search(_surface(store, WRITER), query="billing node build")
+    reply = await hive_search(mcp_surface(store, WRITER), query="billing node build")
     by_summary = {h["summary"]: h for h in reply["hits"]}  # type: ignore[index,union-attr]
     assert set(by_summary) == {"billing node build", "billing node standalone"}
     assert by_summary["billing node build"]["upstream_changed"] == [
@@ -338,7 +345,7 @@ async def test_mcp_plain_hit_has_no_upstream_field() -> None:
     clock = make_clock()
     store = MemoryStore(clock)
     await _put(store, "billing node build", scope="org")
-    reply = await hive_search(_surface(store, WRITER), query="billing node build")
+    reply = await hive_search(mcp_surface(store, WRITER), query="billing node build")
     [hit] = reply["hits"]  # type: ignore[index,misc]
     assert "upstream_changed" not in hit
 

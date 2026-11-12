@@ -9,15 +9,16 @@ from hivemind.api.deps import create_app
 from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
-from hivemind.mcp.app import McpHivemind, hive_feedback, hive_write
+from hivemind.mcp.app import hive_feedback, hive_write
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
-from hivemind.services.access import AccessService
-from hivemind.services.governance import GovernanceService
-from hivemind.services.read import ReadService
-from hivemind.services.search import SearchService
-from hivemind.services.write import WriteService
-from tests.fakes import FakeAuthenticator, make_clock, make_embedder, make_search_config
+from tests.fakes import (
+    FakeAuthenticator,
+    make_clock,
+    make_embedder,
+    make_search_config,
+    mcp_surface,
+)
 
 
 def _agent(name: str, fleet: str) -> Credential:
@@ -36,22 +37,10 @@ PEER = _agent("peer", "fleet-a")
 OUTSIDER = _agent("outsider", "fleet-b")
 
 
-def _surface(store: MemoryStore, credential: Credential) -> McpHivemind:
-    clock, embedder, config = make_clock(), make_embedder(), make_search_config()
-    return McpHivemind(
-        store=store,
-        write_service=WriteService(store, embedder),
-        search_service=SearchService(store, embedder, config, now_fn=clock),
-        governance_service=GovernanceService(store),
-        read_service=ReadService(store, GovernanceService(store), config),
-        access_service=AccessService(store),
-        search_config=config,
-        credential=credential,
-    )
-
-
 async def _write(store: MemoryStore, credential: Credential, summary: str) -> str:
-    return str((await hive_write(_surface(store, credential), kind="fact", summary=summary))["id"])
+    return str(
+        (await hive_write(mcp_surface(store, credential), kind="fact", summary=summary))["id"]
+    )
 
 
 def _client(store: MemoryStore, credential: Credential) -> httpx.AsyncClient:
@@ -69,7 +58,7 @@ def _client(store: MemoryStore, credential: Credential) -> httpx.AsyncClient:
 async def test_mcp_single_own_entry_is_refused() -> None:
     store = MemoryStore(make_clock())
     mine = await _write(store, ME, "mine")
-    result = await hive_feedback(_surface(store, ME), mine, verdict="helpful")
+    result = await hive_feedback(mcp_surface(store, ME), mine, verdict="helpful")
     assert result["error"]["code"] == "permission_denied"  # type: ignore[index]
     assert "ADR 0065" in result["error"]["message"]  # type: ignore[index]
     assert await store.feedback_counts(mine) == (0, 0, 0)
@@ -78,7 +67,7 @@ async def test_mcp_single_own_entry_is_refused() -> None:
 async def test_mcp_someone_elses_entry_still_works() -> None:
     store = MemoryStore(make_clock())
     theirs = await _write(store, PEER, "theirs")
-    result = await hive_feedback(_surface(store, ME), theirs, verdict="helpful")
+    result = await hive_feedback(mcp_surface(store, ME), theirs, verdict="helpful")
     assert "error" not in result
     assert await store.feedback_counts(theirs) == (1, 0, 0)
 
@@ -87,7 +76,7 @@ async def test_mcp_batch_with_an_own_entry_records_nothing() -> None:
     store = MemoryStore(make_clock())
     mine = await _write(store, ME, "mine")
     theirs = await _write(store, PEER, "theirs")
-    result = await hive_feedback(_surface(store, ME), verdict="wrong", entry_ids=[theirs, mine])
+    result = await hive_feedback(mcp_surface(store, ME), verdict="wrong", entry_ids=[theirs, mine])
     assert result["error"]["code"] == "permission_denied"  # type: ignore[index]
     assert mine in result["error"]["message"]  # type: ignore[index]
     assert theirs not in result["error"]["message"]  # type: ignore[index]
@@ -98,7 +87,7 @@ async def test_mcp_batch_with_an_own_entry_records_nothing() -> None:
 async def test_batch_of_only_others_entries_works() -> None:
     store = MemoryStore(make_clock())
     ids = [await _write(store, PEER, f"fact {i}") for i in range(2)]
-    result = await hive_feedback(_surface(store, ME), verdict="helpful", entry_ids=ids)
+    result = await hive_feedback(mcp_surface(store, ME), verdict="helpful", entry_ids=ids)
     assert "error" not in result
     for entry_id in ids:
         assert await store.feedback_counts(entry_id) == (1, 0, 0)
@@ -108,9 +97,11 @@ async def test_an_unreadable_id_is_still_not_found_beside_an_own_one() -> None:
     store = MemoryStore(make_clock())
     mine = await _write(store, ME, "mine")
     theirs = await _write(store, OUTSIDER, "elsewhere")
-    result = await hive_feedback(_surface(store, ME), verdict="helpful", entry_ids=[mine, theirs])
+    result = await hive_feedback(
+        mcp_surface(store, ME), verdict="helpful", entry_ids=[mine, theirs]
+    )
     assert result["error"]["code"] == "not_found"  # type: ignore[index]
-    single = await hive_feedback(_surface(store, ME), theirs, verdict="helpful")
+    single = await hive_feedback(mcp_surface(store, ME), theirs, verdict="helpful")
     assert single["error"]["code"] == "not_found"  # type: ignore[index]
 
 

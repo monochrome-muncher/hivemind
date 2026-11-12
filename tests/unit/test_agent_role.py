@@ -22,12 +22,14 @@ from hivemind.mcp.app import McpHivemind, hive_whoami
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService, PermissionDenied
-from hivemind.services.governance import GovernanceService
 from hivemind.services.metrics import MetricsService
-from hivemind.services.read import ReadService
-from hivemind.services.search import SearchService
-from hivemind.services.write import WriteService
-from tests.fakes import FakeAuthenticator, make_clock, make_embedder, make_search_config
+from tests.fakes import (
+    FakeAuthenticator,
+    make_clock,
+    make_embedder,
+    make_search_config,
+    mcp_surface,
+)
 
 ADMIN = Credential(user_id="admin", is_admin=True, key_id="abcdef012345")
 ORG = Credential(user_id="org", is_org=True, access_controlled=True)
@@ -190,18 +192,7 @@ def _agent(fleet_id: str | None) -> Credential:
 
 
 def _surface(world: World, credential: Credential) -> McpHivemind:
-    clock, embedder, config = make_clock(), make_embedder(), make_search_config()
-    governance = GovernanceService(world.store)
-    return McpHivemind(
-        store=world.store,
-        write_service=WriteService(world.store, embedder),
-        search_service=SearchService(world.store, embedder, config, now_fn=clock),
-        governance_service=governance,
-        read_service=ReadService(world.store, governance, config),
-        access_service=world.access,
-        search_config=config,
-        credential=credential,
-    )
+    return mcp_surface(world.store, credential, access=world.access)
 
 
 async def test_whoami_carries_the_role_and_its_hint_only_for_a_scout() -> None:

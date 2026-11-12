@@ -19,8 +19,8 @@ from hivemind.domain.feedback import (
 from hivemind.mcp.app import hive_get, hive_search, hive_write
 from hivemind.memstore import MemoryStore
 from hivemind.services.search import SearchService
-from tests.fakes import FIXED_NOW, make_clock, make_embedder, make_search_config
-from tests.unit.test_readable_feedback import WRITER, _rest_client, _surface
+from tests.fakes import FIXED_NOW, make_clock, make_embedder, make_search_config, mcp_surface
+from tests.unit.test_readable_feedback import WRITER, _rest_client
 
 T0 = datetime(2026, 9, 1, tzinfo=UTC)
 
@@ -31,7 +31,7 @@ def _min(n: int) -> datetime:
 
 async def _fact(store: MemoryStore) -> str:
     entry = await hive_write(
-        _surface(store, WRITER), kind="fact", summary="billing runs on node 20"
+        mcp_surface(store, WRITER), kind="fact", summary="billing runs on node 20"
     )
     return str(entry["id"])
 
@@ -58,19 +58,19 @@ def test_the_rule_is_dates_only() -> None:
 async def test_mcp_hit_carries_last_confirmed_and_omits_it_when_absent() -> None:
     store = MemoryStore(make_clock())
     entry_id = await _fact(store)
-    [hit] = (await hive_search(_surface(store, WRITER), query="billing node"))["hits"]  # type: ignore[index]
+    [hit] = (await hive_search(mcp_surface(store, WRITER), query="billing node"))["hits"]  # type: ignore[index]
     assert "last_confirmed_at" not in hit
 
     await _report(store, entry_id, "lurker", Verdict.HELPFUL, None, 1)  # no note
-    [hit] = (await hive_search(_surface(store, WRITER), query="billing node"))["hits"]  # type: ignore[index]
+    [hit] = (await hive_search(mcp_surface(store, WRITER), query="billing node"))["hits"]  # type: ignore[index]
     assert "last_confirmed_at" not in hit
 
     await _report(store, entry_id, "lurker", Verdict.HELPFUL, "ran the deploy", 2)
-    [hit] = (await hive_search(_surface(store, WRITER), query="billing node"))["hits"]  # type: ignore[index]
+    [hit] = (await hive_search(mcp_surface(store, WRITER), query="billing node"))["hits"]  # type: ignore[index]
     assert hit["last_confirmed_at"] == _min(2).isoformat()
 
     await _report(store, entry_id, "other", Verdict.STALE, "moved", 3)
-    [hit] = (await hive_search(_surface(store, WRITER), query="billing node"))["hits"]  # type: ignore[index]
+    [hit] = (await hive_search(mcp_surface(store, WRITER), query="billing node"))["hits"]  # type: ignore[index]
     assert "last_confirmed_at" not in hit
 
 
@@ -91,17 +91,17 @@ async def test_rest_hit_carries_last_confirmed() -> None:
 async def test_mcp_get_and_batch_get_carry_last_confirmed() -> None:
     store = MemoryStore(make_clock())
     entry_id = await _fact(store)
-    bare = await hive_get(_surface(store, WRITER), entry_id)
+    bare = await hive_get(mcp_surface(store, WRITER), entry_id)
     assert "last_confirmed_at" not in bare["feedback"]  # type: ignore[operator]
 
     await _report(store, entry_id, "lurker", Verdict.HELPFUL, "ran it", 2)
-    one = await hive_get(_surface(store, WRITER), entry_id)
+    one = await hive_get(mcp_surface(store, WRITER), entry_id)
     assert one["feedback"]["last_confirmed_at"] == _min(2).isoformat()  # type: ignore[index]
-    [batched] = (await hive_get(_surface(store, WRITER), entry_ids=[entry_id]))["entries"]  # type: ignore[index]
+    [batched] = (await hive_get(mcp_surface(store, WRITER), entry_ids=[entry_id]))["entries"]  # type: ignore[index]
     assert batched["feedback"] == one["feedback"]
 
     await _report(store, entry_id, "other", Verdict.WRONG, None, 3)
-    after = await hive_get(_surface(store, WRITER), entry_id)
+    after = await hive_get(mcp_surface(store, WRITER), entry_id)
     assert "last_confirmed_at" not in after["feedback"]  # type: ignore[operator]
 
 

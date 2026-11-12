@@ -26,8 +26,14 @@ from hivemind.domain.entry import (
     Kind,
     embeddable_text,
 )
+from hivemind.mcp.app import McpHivemind
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential, KeyReplacement, Store, entry_embeddable_text
+from hivemind.services.access import AccessService
+from hivemind.services.governance import GovernanceService
+from hivemind.services.read import ReadService
+from hivemind.services.search import SearchService
+from hivemind.services.write import WriteService
 
 FIXED_NOW = datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC)
 
@@ -278,6 +284,24 @@ def make_search_config(
         query_instruction="",
         vector_min_similarity=None,
         close_match_similarity=close_match_similarity,
+    )
+
+
+def mcp_surface(
+    store: Store, credential: Credential, *, access: AccessService | None = None
+) -> McpHivemind:
+    """The MCP tools over ``store`` as ``credential``, wired as the server wires them."""
+    clock, embedder, config = make_clock(), make_embedder(), make_search_config()
+    governance = GovernanceService(store)
+    return McpHivemind(
+        store=store,
+        write_service=WriteService(store, embedder),
+        search_service=SearchService(store, embedder, config, now_fn=clock),
+        governance_service=governance,
+        read_service=ReadService(store, governance, config),
+        access_service=access or AccessService(store),
+        search_config=config,
+        credential=credential,
     )
 
 
