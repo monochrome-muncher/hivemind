@@ -3,7 +3,7 @@
 Amends [ADR 0029](0029-admin-panel-runner-with-a-browser-held-key.md)
 (what the panel covers and what its proxy forwards) and the "not a memory UI" line of SPEC §9.
 
-Status: Accepted. Extended by [ADR 0090](0090-admin-feedback-log.md) (the feedback log), [ADR 0092](0092-admin-fleet-pins.md) (fleet pins) and [ADR 0093](0093-admin-flag-backlog.md) (the flag backlog). Amended by [ADR 0124](0124-admin-restores-a-withdrawn-memory.md): the memory browser also restores a withdrawn memory. Amended by [ADR 0140](0140-memory-browser-filters.md): the memory browser filters by exact state, tags, entity and two date ranges. Extended by [ADR 0136](0136-admin-search-as-an-agent.md): the admin search can run as one agent.
+Status: Accepted. Extended by [ADR 0090](0090-admin-feedback-log.md) (the feedback log), [ADR 0092](0092-admin-fleet-pins.md) (fleet pins) and [ADR 0093](0093-admin-flag-backlog.md) (the flag backlog). Amended by [ADR 0124](0124-admin-restores-a-withdrawn-memory.md): the memory browser also restores a withdrawn memory. Amended by [ADR 0140](0140-memory-browser-filters.md): the memory browser filters by exact state, tags, entity and two date ranges. Extended by [ADR 0136](0136-admin-search-as-an-agent.md): the admin search can run as one agent. Extended by [ADR 0137](0137-admin-search-explains-the-ranking.md): the admin search can explain each hit's ranking.
 
 ## Context
 

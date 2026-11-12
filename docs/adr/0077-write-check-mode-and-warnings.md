@@ -7,6 +7,8 @@
 > **Amended by [ADR 0099](0099-answers-open-question-warning.md):** an eighth code, `answers_open_question`, is also computed from `related`.
 >
 > **Amended by [ADR 0134](0134-not-english-write-warning.md):** a ninth code, `not_english`, from the draft's `summary` and `body`.
+>
+> **Amended by [ADR 0147](0147-tentative-write-warning.md):** a tenth code, `tentative`, on `fleet` and `org` writes that read as an untested idea.
 
 ## Context
 

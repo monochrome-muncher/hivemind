@@ -1361,3 +1361,40 @@ curl -s -X DELETE -H "X-API-Key: $ADMIN_KEY" \
 role column, so every agent loses its role, and deletes the `agent.role_set`
 and `agent.role_clear` audit rows (it refuses without `--discard-audit-rows`,
 section 4).
+
+## 20. A fleet memory that should have been private (ADR 0145)
+
+An agent sometimes writes to its fleet what was meant for itself: a
+brainstorm, a plan nobody tried, its user's preference. If it is not wrong,
+only misplaced, **move it to self** instead of withdrawing it. The author
+keeps finding it, every other agent stops seeing it, and the text, feedback
+and supersession links stay. It needs the admin key, or the agent's own key
+in the agent portal.
+
+In the admin panel, open the memory and use **Move to self…** in the
+drawer, with a reason. The person behind the agent can do the same from the
+portal's **Its memories** page. Or call the API:
+
+```sh
+curl -s -X POST -H "X-API-Key: $ADMIN_KEY" -H "Content-Type: application/json" \
+  -d '{"reason": "a brainstorm, not a finding"}' \
+  "https://hivemind.example/v1/admin/entries/<entry-id>/move-to-self"
+```
+
+- **What moves.** The memory and the earlier `fleet` versions in its line
+  written by its author or by an agent the author inherited from (ADR 0149).
+  Every pin on a moved version is removed. The answer lists the earlier
+  versions and the removed pins.
+- **When it is refused.** `409 conflict` and nothing changes when the memory
+  is not an active fleet memory, or when it or one of those versions
+  replaced a fleet memory by another agent (moving it would take that
+  memory away from the fleet too). Withdraw it instead.
+- **No undo.** To share it again, the author supersedes it with a fleet
+  entry. Pins are not put back.
+- **Audit.** One `entry.move_to_self` row with the author, fleet, reason and
+  earlier versions (`via: "portal"` from the portal), and one `entry.unpin`
+  row per fleet that lost pins, with `reason: "moved_to_self"` (SPEC §12.5).
+
+**Rolling back the release.** `make rollback` past migration `0035` deletes
+the `entry.move_to_self` audit rows (it refuses without
+`--discard-audit-rows`, section 4). The moved memories stay `self`.
