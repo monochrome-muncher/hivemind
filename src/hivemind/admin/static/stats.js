@@ -4,7 +4,7 @@
 
 import {
   h, state, loadAgentsAndFleets, fetchMetrics, fetchActivity, pageHead, refreshButton, windowSelector, card, unavailable,
-  fmtNum, fmtAgo, fmtTime, fmtOf, link, memoriesHref, feedbackHref, hooks, miniBar, agentHref, ownerHref, fill,
+  fmtNum, fmtAgo, fmtTime, fmtOf, link, feedbackHref, hooks, miniBar, agentHref, ownerHref, fill, fleetHref,
 } from "./core.js";
 
 let tab = "fleets";
@@ -23,7 +23,7 @@ function fleetRows(activity, metrics) {
   const byFleet = (metrics && metrics.health && metrics.health.by_fleet) || {};
   return (activity.fleets || []).map((f) => ({
     name: f.fleet_id ? f.name : "(no fleet)",
-    href: f.fleet_id ? memoriesHref({ fleet: f.fleet_id }) : null,
+    href: f.fleet_id ? fleetHref(f.fleet_id) : null,
     agents: f.agents, entries: f.entries, active: f.active, writers: f.writers, recent_writes: f.recent_writes,
     last_write_at: f.last_write_at,
     health: byFleet[f.name] || null,

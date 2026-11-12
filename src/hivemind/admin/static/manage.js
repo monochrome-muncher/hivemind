@@ -3,8 +3,8 @@
 
 import {
   api, guarded, h, LEVELS, hooks, state, toast, openModal, closeModal, showKeyOnce, fleetName, fmtAgo, fmtTime, fmtNum,
-  levelBadge, statusBadge, loadAgentsAndFleets, pageHead, refreshButton, table, card, link, memoriesHref,
-  fetchActivity, fetchMetrics, miniBar, parseHash, viewHref, unavailable, agentHref, ownerHref, optional, fill,
+  levelBadge, statusBadge, loadAgentsAndFleets, pageHead, refreshButton, table, card, link,
+  fetchActivity, fetchMetrics, miniBar, parseHash, viewHref, unavailable, agentHref, ownerHref, optional, fill, fleetHref,
 } from "./core.js";
 import { openEntry } from "./drawer.js";
 import { PIN_HEADERS, pinRow } from "./lists.js";
@@ -237,7 +237,7 @@ function editDialog(agent, onDone) {
 }
 
 /** Rename a fleet. Its id never changes, so memories, pins and agents stay as they are. */
-function renameFleetDialog(fleet, onDone) {
+export function renameFleetDialog(fleet, onDone) {
   const input = h("input", { id: "f-fleet-rename", value: fleet.name, maxlength: 200, required: true, autocomplete: "off" });
   openModal({
     title: `Rename ${fleet.name}`,
@@ -572,7 +572,7 @@ export async function viewAgents(root) {
           h("td", {}, link(a.name, agentHref(a.name), { class: "link strong" })),
           h("td", {}, statusBadge(a.status), a.key_locked && a.status === "active" ? [" ", lockedBadge(a)] : null),
           h("td", {}, a.status === "pending" ? h("span", { class: "muted", text: "—" }) : levelBadge(a.trust_level)),
-          h("td", { text: fleetName(a.home_fleet_id) }),
+          h("td", {}, a.home_fleet_id ? link(fleetName(a.home_fleet_id), fleetHref(a.home_fleet_id)) : "—"),
           h("td", {}, a.owner_alias ? link(a.owner_alias, ownerHref(a.owner_alias)) : "—"),
           h("td", { class: "num", title: x ? `${x.active} active` : "", text: x ? fmtNum(x.entries) : "—" }),
           h("td", { class: "num" }, x ? h("div", { class: "inline-bar" }, h("span", { text: fmtNum(x.recent_writes) }), miniBar(x.recent_writes || 0, maxWrites)) : "—"),
@@ -670,14 +670,14 @@ export async function viewFleets(root) {
     const x = act.get(f.id);
     if (f.merged_into) {
       return h("tr", { class: "merged-fleet" },
-        h("td", {}, h("strong", { text: f.name }), " ", h("span", { class: "badge badge-muted", title: fmtTime(f.merged_at), text: `merged into ${fleetName(f.merged_into)}` })),
+        h("td", {}, link(f.name, fleetHref(f.id), { class: "link strong" }), " ", h("span", { class: "badge badge-muted", title: fmtTime(f.merged_at), text: `merged into ${fleetName(f.merged_into)}` })),
         h("td", { colspan: 6, class: "muted", text: "Its memories, agents and pins moved to the fleet it was merged into." }),
         h("td", { title: fmtTime(f.created_at), text: fmtAgo(f.created_at) }),
         h("td", {}, h("code", { title: f.id, text: f.id.slice(0, 8) })),
         h("td", { class: "actions" }, renameButton(f)));
     }
     return h("tr", {},
-      h("td", {}, x && x.entries ? link(f.name, memoriesHref({ fleet: f.id }), { class: "link strong" }) : h("strong", { text: f.name })),
+      h("td", {}, link(f.name, fleetHref(f.id), { class: "link strong" })),
       h("td", { class: "num", text: state.agents.filter((a) => a.status === "active" && a.home_fleet_id === f.id).length }),
       h("td", { class: "num", title: "Entries in this fleet: active of all", text: x ? `${fmtNum(x.active)} / ${fmtNum(x.entries)}` : (writes[f.name] ?? "—") }),
       h("td", { class: "num", text: x ? fmtNum(x.writers) : "—" }),

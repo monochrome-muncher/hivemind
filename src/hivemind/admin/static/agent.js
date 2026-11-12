@@ -12,7 +12,7 @@
 import {
   api, h, state, guarded, parseHash, loadAgentsAndFleets, fetchMetrics, fetchActivity, fleetName, pageHead, refreshButton,
   card, stat, statusBadge, levelBadge, fmtNum, fmtAgo, fmtTime, link, memoriesHref, feedbackHref, agentHref, ownerHref, hooks,
-  windowSelector, fill, auditHref, optional,
+  windowSelector, fill, auditHref, optional, fleetHref,
 } from "./core.js";
 import { openEntry } from "./drawer.js";
 import { cursorPages, entryTable, feedbackTable, pagedTable } from "./lists.js";
@@ -28,7 +28,7 @@ function profile(agent) {
         ? [" ", h("span", { class: "badge badge-revoked", title: "Its key was locked from the agent portal; replace the key", text: "key locked" })]
         : null)],
     ["Trust level", agent.status === "pending" ? h("span", { class: "muted", text: "—" }) : levelBadge(agent.trust_level)],
-    ["Home fleet", agent.home_fleet_id ? link(fleetName(agent.home_fleet_id), memoriesHref({ fleet: agent.home_fleet_id })) : "—"],
+    ["Home fleet", agent.home_fleet_id ? link(fleetName(agent.home_fleet_id), fleetHref(agent.home_fleet_id)) : "—"],
     ["Owner", agent.owner_alias ? link(agent.owner_alias, ownerHref(agent.owner_alias)) : "—"],
     ["Registered", h("span", { title: fmtTime(agent.created_at), text: agent.created_at ? fmtAgo(agent.created_at) : "—" })],
     ["Activated", h("span", { title: fmtTime(agent.activated_at), text: agent.activated_at ? fmtAgo(agent.activated_at) : "—" })],
