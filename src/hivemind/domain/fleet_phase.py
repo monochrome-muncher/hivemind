@@ -27,7 +27,8 @@ class PhaseName(StrEnum):
 _HINTS: dict[PhaseName, str] = {
     PhaseName.EXPLORE: (
         "Your fleet is exploring until {date}. On open-ended work, try explore: true, "
-        "write untested approaches as their own entries tagged alternative, write dead ends "
+        "write approaches someone could test as their own entries tagged alternative, saying "
+        "how to test them, write dead ends "
         "and open questions, and when the stakes are low try the less-tested of two rivals "
         "and report what you found."
     ),

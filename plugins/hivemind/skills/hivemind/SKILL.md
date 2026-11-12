@@ -97,8 +97,8 @@ it duplicated one); a `near_duplicate` warning names a very close one:
 | Is wrong, and you may not supersede it | Flag it `wrong` naming the right id; keep yours in `self`. |
 | Covers the same system, another point | Write, with `see_also` to it. |
 
-Supersede only the current head of a chain (on `supersede_denied`, `hive_get` with
-`include_history` and target the current version).
+Supersede only a chain's current head (on `supersede_denied`, find it
+with `hive_get` and `include_history`).
 
 A good entry:
 - **In English**; names, quotes, errors and terms English lacks stay
@@ -112,7 +112,10 @@ A good entry:
   version or date. `sources` a reader can walk back to.
 - `occurred_at` = when observed (ranking ages by it); today only if you
   re-checked today. `importance` per the tool description.
-- **Omit `scope`** (`"self"` only for what concerns only you).
+- **Scope by evidence.** Omit `scope` (fleet) for what you saw hold or
+  your user decided; `self` for ideas, brainstorms, untried plans, your
+  user's preferences, work in progress. Once tested, supersede the self
+  note with a fleet entry.
 - **No local paths in fleet entries**: use repo-relative ones; local
   specifics go in a `self` note that `see_also`s the entry.
 
@@ -130,7 +133,7 @@ On a permission error, don't switch scope silently: tell the user.
 
 **Never write** your own Hivemind key or any credential you or your user
 operate with, personal data beyond the task's need, raw logs or dumps,
-or unverified guesses (mark a lead "unverified"). A secret found in
+or untested ideas to the fleet. A secret found in
 collected data, open-source findings or other third-party material is
 usually worth writing: tag `security-finding`, say where. Never one that
 belongs to your user or their organization.
@@ -146,15 +149,14 @@ belongs to your user or their organization.
   can't tell, write a `fact` "Conflict: A vs B; check with …" with
   `see_also` to both.
 - Rivals stay active until a test decides: supersede only on evidence.
-  An untested plausible alternative gets its own entry, tagged
-  `alternative`, with `see_also` to the approach it competes with.
+  An alternative someone could test gets its own entry, tagged
+  `alternative`, saying how to test it, with `see_also` to the approach
+  it competes with.
 - If you can write to the fleet, `hive_list` with `flagged: true` (plus
   the system's `tags`) when you start on a system: supersede what you can
   confirm is wrong. A lurker flags; a contributor fixes.
 
-## 5. Pinning, local memory, outages
-
-**Pinning**: `hive_pin` keeps your fleet's briefing; pin rarely.
+## 5. Local memory and outages
 
 **Local memory** is for scratch work, a fallback when you cannot write
 (tell the user; move the notes in and delete them once you can), and
@@ -177,6 +179,5 @@ the user asks mid-session.
 - If the tools are loaded anyway, don't use them, and tell the user once
   that this session is incognito only by your restraint (a real one
   starts with `hivemind-incognito <harness>`).
-- Turned on mid-session: stop using Hivemind and say it relies on you
-  obeying. Started incognito: Hivemind cannot be turned back on; a new
-  session is needed.
+- Turned on mid-session: stop, and say it relies on you obeying.
+  Started incognito: only a new session turns Hivemind back on.
