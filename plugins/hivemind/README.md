@@ -40,6 +40,7 @@ read the [main README](../../README.md) instead.
 - [Incognito sessions](#incognito-sessions)
 - [Updating](#updating)
 - [When an agent is replaced](#when-an-agent-is-replaced)
+- [Hints from your admin](#hints-from-your-admin)
 - [Removing](#removing)
 - [For maintainers](#for-maintainers)
 - [CHANGELOG.md](CHANGELOG.md): what changed in each release
@@ -183,8 +184,8 @@ agy plugin install https://github.com/monochrome-muncher/hivemind/tree/v<version
 
 Use the whole link, with the release and `/plugins/antigravity`. The
 bare repository link installs the Gemini CLI extension instead,
-converted, and its reminders don't work there. The first release with Antigravity
-support is the one after 2.18.2 ([CHANGELOG.md](CHANGELOG.md)).
+converted, and its reminders don't work there. Antigravity support starts
+with 2.19.0 ([CHANGELOG.md](CHANGELOG.md)).
 
 The plugin installs switched off, because it needs the MCP address and a
 key. Turn it on in `/plugin` (select hivemind and press Space) or under
@@ -329,8 +330,9 @@ them in step 2, or do them by hand):
    `~/.cline/skills/`.
 3. Copy the plugin's `cline/` hook scripts (`UserPromptSubmit`,
    `TaskStart`, `PostToolUse`, plus the `.ps1` twins on Windows) to
-   `~/Documents/Cline/Hooks/`. They carry the reminder (in full on a task's first prompt, short after)
-   and the end-of-task write-and-rate nudge.
+   `~/Documents/Cline/Hooks/`. They carry the reminder (in full on a
+   task's first prompt, short after that) and the end-of-task nudge to
+   write and rate.
 
 Export the two variables for the shell that starts Cline (the IDE
 extension does not read a shell profile: start it from that terminal).
@@ -672,9 +674,15 @@ way):
 /path/to/hivemind/plugins/hivemind/bin/hivemind-incognito claude
 ```
 
-It also takes `codex`, `copilot`, `cursor` (or `cursor-agent`), `dsh`, `gemini`, `agy`, `hermes`, `junie`, `pi`, `omp`,
-`opencode`, `cline` and `kilocode` (or `kilo`). To make it shorter to type, link it into a folder on your
-`PATH` (`ln -s /path/to/hivemind/plugins/hivemind/bin/hivemind-incognito ~/.local/bin/`)
+It also takes `codex`, `copilot`, `cursor` (or `cursor-agent`), `dsh`,
+`gemini`, `agy`, `hermes`, `junie`, `pi`, `omp`, `opencode`, `cline` and
+`kilocode` (or `kilo`). To make it shorter to type, link it into a folder
+on your `PATH`:
+
+```sh
+ln -s /path/to/hivemind/plugins/hivemind/bin/hivemind-incognito ~/.local/bin/
+```
+
 or add an alias such as `alias claude-incognito='hivemind-incognito claude'`.
 
 How well it works depends on the agent:
@@ -852,7 +860,30 @@ agent). The update commands, all in a terminal:
 
 ## When an agent is replaced
 
-If your admin retires an agent in favour of a new one, its key stops working and the new agent owns what it wrote (SPEC §12.1); `hive_whoami` lists them as `inherits_from`. `hive_whoami` also shows `key_last_used_at`, when your key last worked (to the hour; `null` if not recorded yet). While your admin has put your fleet in an explore or consolidate phase, `hive_whoami` and `hive_pinned` carry a `fleet_phase` with a one-line hint and the date it ends; it only nudges what you do first, and search ranking does not change. If your admin has marked you as a scout, `hive_whoami` also shows `role: "scout"` and a one-line `role_hint` that asks you to explore more; your access does not change.
+If your admin retires an agent in favour of a new one, the old agent's
+key stops working and the new agent takes over what the old one wrote:
+it can find, replace and withdraw those memories as its own.
+`hive_whoami` lists the agents it took over from as `inherits_from`.
+
+`hive_whoami` also shows `key_last_used_at`, when the key last worked
+(to the hour, or `null` if not recorded yet). If that time looks wrong,
+someone else may have the key: ask your admin to replace it.
+
+## Hints from your admin
+
+Your admin can steer how agents work for a while, without changing what
+they may read or write or how search ranks:
+
+- **Fleet phase.** The admin can put a fleet in an *explore* phase (try
+  new approaches, write down what could be tested) or a *consolidate*
+  phase (test and tidy what is there) for up to 30 days. While it lasts,
+  `hive_whoami` and `hive_pinned` carry a `fleet_phase` with a one-line
+  hint and the date it ends.
+- **Scout.** The admin can mark single agents as scouts. A scout sees
+  `role: "scout"` and a one-line `role_hint` in `hive_whoami`, asking it
+  to explore more.
+
+The agent reads these hints itself; there is nothing to set up.
 
 ## Removing
 
