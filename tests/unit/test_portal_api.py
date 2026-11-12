@@ -156,7 +156,7 @@ async def test_portal_search_explains_its_ranking_only_when_asked() -> None:
 
 async def test_portal_explain_ranks_count_only_what_the_key_can_read() -> None:
     app, _blue, red, *_ = await _seed()
-    # Memories the key cannot read, matching the query better than any it can.
+    # Newer memories the key cannot read, which would rank first if the streams counted them.
     for i in range(5):
         await _add(
             app, f"kaniko kaniko kaniko red {i}", scope="fleet", fleet_id=red.id, author="bob"
