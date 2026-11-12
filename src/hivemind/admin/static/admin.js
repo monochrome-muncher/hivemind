@@ -8,7 +8,7 @@
 //   drawer.js    the memory detail drawer (configured below)
 //   charts.js    the SVG activity chart
 //   core.js      the admin session and shared state; re-exports ui.js and client.js
-//   overview.js  memories.js  feedback.js  stats.js  manage.js  health.js  agent.js   the views
+//   overview.js  memories.js  feedback.js  stats.js  manage.js  health.js  agent.js  owner.js  fleet.js   the views
 //
 // ui.js, client.js, lists.js, csv.js, drawer.js and charts.js import nothing
 // admin-specific, so another front end can serve them as they are.
@@ -29,13 +29,14 @@ import { viewAgents, viewFleets, viewAudit, viewKeys } from "./manage.js";
 import { viewHealth } from "./health.js";
 import { viewAgent } from "./agent.js";
 import { viewOwner } from "./owner.js";
+import { viewFleet } from "./fleet.js";
 
 const VIEWS = {
   overview: viewOverview, memories: viewMemories, feedback: viewFeedback, stats: viewStats, agents: viewAgents,
-  fleets: viewFleets, health: viewHealth, audit: viewAudit, keys: viewKeys, agent: viewAgent, owner: viewOwner,
+  fleets: viewFleets, health: viewHealth, audit: viewAudit, keys: viewKeys, agent: viewAgent, owner: viewOwner, fleet: viewFleet,
 };
 // A detail page lights up the list it belongs to in the sidebar.
-const NAV_PARENT = { agent: "agents", owner: "agents" };
+const NAV_PARENT = { agent: "agents", owner: "agents", fleet: "fleets" };
 
 let renderToken = 0;
 let currentContainer = null;

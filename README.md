@@ -135,7 +135,9 @@ key and agent keys cannot sign in here.
   **redact** it: its text is wiped for good. The Health page lists what
   agents flagged as `stale` or `wrong`.
 - **Manage fleets**: merge them, rename one, move some agents to another
-  fleet to split a team, and see each fleet's pins.
+  fleet to split a team, and see each fleet's pins. Each fleet has its own
+  page with its activity, members, pins, memories, flag backlog, and
+  the merges, moves and audit rows that name it.
 - **Follow activity**: see writes and verdicts per day, fleet, agent and
   owner, open an agent's page with its history, see when each key was
   last used, read the audit log, rotate the org key and download any list

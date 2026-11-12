@@ -6,7 +6,7 @@
 
 import {
   api, h, state, loadAgentsAndFleets, fetchActivity, fleetName, pageHead, refreshButton, card, stat, table, statusBadge, levelBadge,
-  fmtNum, fmtAgo, fmtTime, link, memoriesHref, agentHref, hooks, windowSelector, fill, optional, parseHash,
+  fmtNum, fmtAgo, fmtTime, link, memoriesHref, agentHref, hooks, windowSelector, fill, optional, parseHash, fleetHref,
 } from "./core.js";
 import { offboardDialog } from "./offboard.js";
 
@@ -16,7 +16,7 @@ function agentRow(agent, row, successors) {
     h("td", {}, link(agent.name, agentHref(agent.name), { class: "link strong" })),
     h("td", {}, statusBadge(agent.status), heir ? [" ", h("span", { class: "badge badge-muted", text: `retired to ${heir}` })] : null),
     h("td", {}, agent.status === "pending" ? h("span", { class: "muted", text: "—" }) : levelBadge(agent.trust_level)),
-    h("td", { text: fleetName(agent.home_fleet_id) }),
+    h("td", {}, agent.home_fleet_id ? link(fleetName(agent.home_fleet_id), fleetHref(agent.home_fleet_id)) : "—"),
     h("td", { class: "num", title: row ? `${row.active} active` : "", text: row ? `${fmtNum(row.entries)} / ${fmtNum(row.active)}` : "—" }),
     h("td", { class: "num", text: row ? fmtNum(row.recent_writes) : "—" }),
     h("td", { title: agent.last_used_at ? fmtTime(agent.last_used_at) : "", text: agent.last_used_at ? fmtAgo(agent.last_used_at) : "—" }),

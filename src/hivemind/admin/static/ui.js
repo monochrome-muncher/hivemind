@@ -97,6 +97,9 @@ export const auditHref = (filters = {}) => viewHref("audit", filters);
 /** An in-panel hash link to one agent's page. */
 export const agentHref = (name) => viewHref("agent", { name });
 
+/** An in-panel hash link to one fleet's page. */
+export const fleetHref = (id) => viewHref("fleet", { id });
+
 /** An in-panel hash link to one owner's page (an owner alias, matched exactly). */
 export const ownerHref = (alias) => viewHref("owner", { alias });
 
