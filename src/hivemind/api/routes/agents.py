@@ -19,7 +19,8 @@ router = APIRouter(prefix=API_PREFIX)
 async def whoami(credential: CredentialDep, app: AppDep) -> WhoamiOut:
     """The calling key's standing (ADR 0030): its kind, the agent's
     name / status / trust level / home fleet, and what it may read
-    and write, plus ``fleet_phase`` while the home fleet has one (ADR 0143).
+    and write, plus ``fleet_phase`` while the home fleet has one (ADR 0143)
+    and ``role`` with its hint for a scout (ADR 0144).
     Any valid key may ask; not audited."""
     return WhoamiOut.from_standing(await app.access_service.whoami(credential))
 

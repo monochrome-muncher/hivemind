@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from hivemind.api.schemas.common import RefStr
 from hivemind.api.schemas.fleets import FleetPhaseOut
 from hivemind.domain.access import KEY_LOCKED_MESSAGE, Agent, Standing, is_idle
+from hivemind.domain.agent_role import AgentRole
 
 
 class RegisterAgentRequest(BaseModel):
@@ -51,6 +52,12 @@ class UpdateAgentRequest(BaseModel):
     owner_alias: str | None = None
 
 
+class SetAgentRoleRequest(BaseModel):
+    """Mark an agent with a role (ADR 0144)."""
+
+    role: AgentRole
+
+
 class AgentOut(BaseModel):
     """A registered agent."""
 
@@ -61,6 +68,7 @@ class AgentOut(BaseModel):
     owner_alias: str | None = None
     created_at: str | None = None
     activated_at: str | None = None
+    role: AgentRole | None = None
 
     @classmethod
     def from_agent(cls, agent: Agent) -> AgentOut:
@@ -72,6 +80,7 @@ class AgentOut(BaseModel):
             owner_alias=agent.owner_alias,
             created_at=agent.created_at.isoformat() if agent.created_at else None,
             activated_at=agent.activated_at.isoformat() if agent.activated_at else None,
+            role=agent.role,
         )
 
 
@@ -132,6 +141,9 @@ class WhoamiOut(BaseModel):
     key_last_used_at: str | None = None
     # ADR 0143: the home fleet's phase in force; left out of the reply without one.
     fleet_phase: FleetPhaseOut | None = None
+    # ADR 0144: present only for a scout's own key.
+    role: AgentRole | None = None
+    role_hint: str | None = None
 
     @classmethod
     def from_standing(cls, standing: Standing) -> WhoamiOut:

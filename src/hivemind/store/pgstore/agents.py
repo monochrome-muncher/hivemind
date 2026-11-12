@@ -7,6 +7,7 @@ from datetime import datetime
 import asyncpg
 
 from hivemind.domain.access import Agent, AgentStatus, InvalidAgentStatus, TrustLevel, UnknownAgent
+from hivemind.domain.agent_role import AgentRole
 from hivemind.domain.succession import AgentRetired
 from hivemind.store.pgstore.connection import PgConnections
 from hivemind.store.pgstore.fleet_guards import refuse_merged
@@ -55,6 +56,8 @@ REVOKE_AGENT = (
 SET_AGENT_LEVEL = "UPDATE agents SET trust_level = $2 WHERE name = $1 RETURNING *"
 
 SET_AGENT_OWNER = "UPDATE agents SET owner_alias = $2 WHERE name = $1"
+
+SET_AGENT_ROLE = "UPDATE agents SET role = $2 WHERE name = $1"
 
 SET_AGENT_FLEET = "UPDATE agents SET home_fleet_id = $2 WHERE name = $1 RETURNING *"
 
@@ -166,3 +169,18 @@ class AgentStore(PgConnections):
         if row is None:
             raise RuntimeError(f"agent {name!r} vanished between check and update")
         return row_to_agent(existing), row_to_agent(row)
+
+    async def set_agent_role(self, name: str, role: AgentRole | None) -> tuple[Agent, Agent]:
+        """Set or clear an agent's role (ADR 0144); returns (before, after)."""
+        async with self._transaction() as conn:
+            existing = await conn.fetchrow(GET_AGENT_FOR_UPDATE, name)
+            if existing is None:
+                raise UnknownAgent(f"unknown agent: {name}")
+            before = row_to_agent(existing)
+            if role is not None and before.status is AgentStatus.REVOKED:
+                raise InvalidAgentStatus(name, before.status, "set a role on")
+            await conn.execute(SET_AGENT_ROLE, name, role.value if role is not None else None)
+            row = await conn.fetchrow(GET_AGENT, name)
+        if row is None:
+            raise RuntimeError(f"agent {name!r} vanished between check and update")
+        return before, row_to_agent(row)

@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import IntEnum, StrEnum
 
+from hivemind.domain.agent_role import AgentRole, role_hint
 from hivemind.domain.entry import Entry, EntryState
 from hivemind.domain.fleet_phase import FleetPhase
 
@@ -187,6 +188,8 @@ class Agent:
     key_created_at: datetime | None = None
     # When the key was locked from the portal; ``None`` = usable or no key.
     key_locked_at: datetime | None = None
+    # ADR 0144: a hint for the agent, never a permission.
+    role: AgentRole | None = None
 
 
 def is_idle(agent: Agent, now: datetime, idle_days: int) -> bool:
@@ -221,6 +224,8 @@ class Standing:
     key_last_used_at: datetime | None = None
     # ADR 0143: the home fleet's phase in force; the reply has no key for it without one.
     fleet_phase: FleetPhase | None = None
+    # ADR 0144: the agent's role; the reply has no key for it without one.
+    role: AgentRole | None = None
 
     def as_dict(self) -> dict[str, object]:
         """The JSON shape both surfaces return (REST and MCP, ADR 0030)."""
@@ -241,6 +246,9 @@ class Standing:
         }
         if self.fleet_phase is not None:
             standing["fleet_phase"] = self.fleet_phase.as_dict()
+        if self.role is not None:
+            standing["role"] = self.role.value
+            standing["role_hint"] = role_hint(self.role, self.home_fleet_name)
         return standing
 
 

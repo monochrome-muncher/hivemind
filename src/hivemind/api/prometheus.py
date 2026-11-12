@@ -24,6 +24,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable, Iterator, Mapping
+from dataclasses import asdict
 from typing import Any
 
 from fastapi import APIRouter, Response
@@ -125,6 +126,12 @@ def _usage_families(report: UsageReport) -> Iterator[GaugeMetricFamily | Counter
         "Registered agents, by trust level (all statuses)",
         ["trust_level"],
         agents.by_trust_level,
+    )
+    yield _gauge(
+        "hivemind_agents_by_role",
+        "Registered agents that are not revoked, by role (ADR 0144)",
+        ["role"],
+        agents.by_role,
     )
     by_fleet = report.searches.by_fleet
     searches = CounterMetricFamily(
@@ -332,6 +339,16 @@ def _health_families(health: HealthUsage) -> Iterator[GaugeMetricFamily]:
         for tag, count in row.gap_tag_counts.items():
             gap.add_metric([fleet, tag], float(count))
     yield gap
+    role_activity = GaugeMetricFamily(
+        p + "role_activity_30d",
+        "Last 30 days of writes, writes tagged alternative or dead-end, supersessions written "
+        "and verdicts given, for scouts and for everyone else (ADR 0144)",
+        labels=["role", "motion"],
+    )
+    for role, activity in health.role_activity_30d.items():
+        for motion, count in asdict(activity).items():
+            role_activity.add_metric([role, motion], float(count))
+    yield role_activity
 
 
 class PrometheusMetrics:

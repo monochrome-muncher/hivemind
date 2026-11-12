@@ -76,6 +76,25 @@ export function healthCard(health) {
     dispersionTable(health.topic_dispersion));
 }
 
+const ROLE_MOTIONS = [
+  ["writes", "Writes"],
+  ["alternative_or_dead_end_writes", "Tagged alternative or dead-end"],
+  ["supersessions", "Supersessions written"],
+  ["verdicts", "Verdicts given"],
+];
+
+/** Scouts against everyone else over the last 30 days (ADR 0144); observation only. */
+export function roleActivityCard(roles) {
+  const scouts = (roles && roles.scout) || {};
+  const others = (roles && roles.other) || {};
+  return card("Scouts and everyone else, last 30 days", h("div", {},
+    h("p", { class: "muted small", text: "Compare scouts with everyone else: more alternatives, dead ends and verdicts on less-tested entries is what scouting should look like." }),
+    table(["", "Scouts", "Everyone else"], ROLE_MOTIONS.map(([motion, label]) => h("tr", {},
+      h("td", { text: label }),
+      h("td", { class: "num", text: String(scouts[motion] || 0) }),
+      h("td", { class: "num", text: String(others[motion] || 0) }))), "")));
+}
+
 /**
  * The flag backlog (ADR 0093): active memories with a standing stale or
  * wrong verdict, oldest flag first, so the operator can chase the ones
@@ -126,6 +145,7 @@ export async function viewHealth(root) {
   fill(root,
     pageHead("Health", "Observations of the pool, for you only. Nothing ranks by these and no agent sees them.", refreshButton()),
     metrics && metrics.health ? healthCard(metrics.health) : card("Fleet health", unavailable("Fleet health")),
+    metrics && metrics.health ? roleActivityCard(metrics.health.role_activity_30d) : null,
     ...flagged.els);
   await flagged.load();
   setTimeout(flagged.reveal, 0); // after the router puts this view on the page

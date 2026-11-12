@@ -15,6 +15,7 @@ from hivemind.domain.activity import (
     ReceivedFeedback,
     ReporterActivity,
 )
+from hivemind.domain.agent_role import AgentRole
 from hivemind.domain.entry import Entry, EntryState, ImportanceSource, Kind, UsageCount
 from hivemind.domain.feedback import ORPHAN_SILENCE_DAYS, Feedback, Verdict
 from hivemind.domain.health import (
@@ -23,9 +24,11 @@ from hivemind.domain.health import (
     DISPERSION_TAGS,
     ECHO_SAMPLE,
     ECHO_THRESHOLD,
+    EXPLORATORY_TAGS,
     Convergence,
     FleetHealth,
     HealthCounts,
+    RoleActivity,
     TagDispersion,
     is_entry_ref,
     owner_key,
@@ -182,6 +185,7 @@ class MetricsStore(MemoryState):
                 if since30 <= (fb.updated_at or now) <= now and fb.agent.strip()
             )
             rival_ages = self._rival_ages(now, live)
+            scout_activity, other_activity = self._role_activity(now)
             return FleetHealth(
                 by_fleet=self._health_by_fleet(now, live, flagged),
                 helpful=len(helpful),
@@ -211,7 +215,31 @@ class MetricsStore(MemoryState):
                 verdicts_30d=sum(label_verdicts.values()),
                 top3_label_verdicts_30d=_top3(label_verdicts),
                 verdict_labels_30d=len(label_verdicts),
+                scout_activity_30d=scout_activity,
+                other_activity_30d=other_activity,
             )
+
+    def _role_activity(self, now: datetime) -> tuple[RoleActivity, RoleActivity]:
+        """The last 30 days of scouts and of everyone else, the same figures as ``PgStore``
+        (ADR 0144). Callers hold the lock."""
+        since = now - _DAYS_30
+        scouts = {name for name, a in self._agents.items() if a.role is AgentRole.SCOUT}
+        successors = Counter(e.superseded_by for e in self._entries.values() if e.superseded_by)
+        counts = {True: Counter[str](), False: Counter[str]()}
+        for e in self._entries.values():
+            if since <= e.created_at <= now:
+                c = counts[e.author in scouts]
+                c["writes"] += 1
+                c["tagged"] += bool(EXPLORATORY_TAGS.intersection(e.tags))
+                c["supersessions"] += successors[e.id]
+        for fb in self._live_feedback().values():
+            if since <= (fb.updated_at or now) <= now:
+                counts[fb.user in scouts]["verdicts"] += 1
+        scout, other = (
+            RoleActivity(c["writes"], c["tagged"], c["supersessions"], c["verdicts"])
+            for c in (counts[True], counts[False])
+        )
+        return scout, other
 
     def _health_by_fleet(
         self, now: datetime, live: list[Feedback], flagged: list[Feedback]

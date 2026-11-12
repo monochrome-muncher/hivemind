@@ -42,6 +42,8 @@ _ALLOWED = allowlist(
         ("POST", r"admin/agents/[^/]+/revoke"),
         ("POST", r"admin/agents/[^/]+/key"),
         ("PATCH", r"admin/agents/[^/]+"),
+        ("PUT", r"admin/agents/[^/]+/role"),
+        ("DELETE", r"admin/agents/[^/]+/role"),
         ("POST", r"admin/org-key/rotate"),
         # Memory browser: reads, withdraw, restore, redact; never the data plane's entry routes.
         ("GET", r"admin/entries"),

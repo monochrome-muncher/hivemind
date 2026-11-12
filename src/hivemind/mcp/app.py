@@ -817,7 +817,8 @@ async def hive_whoami(app: McpHivemind) -> dict[str, object]:
     """The calling key's standing (ADR 0030): what kind of key it is, the
     agent's name, status, trust level and home fleet, and what it may
     read and write. Any valid key may ask — the org key included, which
-    is how an agent learns it still has to register."""
+    is how an agent learns it still has to register. A scout also gets
+    ``role`` and a one-line ``role_hint`` (ADR 0144)."""
     try:
         standing = await app.access_service.whoami(app.credential)
     except _SERVICE_ERRORS as exc:

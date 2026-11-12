@@ -42,6 +42,7 @@ from hivemind.domain.agent_cleanup import (
     UnknownAgentCleanup,
     cleanup_reason,
 )
+from hivemind.domain.agent_role import AgentRole
 from hivemind.domain.audit import ActorKind, AuditAction, AuditEvent, AuditFilters
 from hivemind.domain.entry import (
     EntityKind,
@@ -73,7 +74,7 @@ from hivemind.domain.feedback import (
 )
 from hivemind.domain.fleet_merge import FleetMergeRefused, FleetMoveRefused, UnknownFleetMerge
 from hivemind.domain.fleet_phase import FleetPhase, PhaseName
-from hivemind.domain.health import HealthCounts
+from hivemind.domain.health import HealthCounts, RoleActivity
 from hivemind.domain.offboarding import (
     OffboardAction,
     OffboardChanged,
@@ -2541,6 +2542,57 @@ async def test_fleet_health_convergence_counters(adapter: Adapter) -> None:
     )
 
 
+async def test_role_activity_of_scouts_and_everyone_else_hand_computed(adapter: Adapter) -> None:
+    """ADR 0144: 30 days of writes, writes tagged alternative or dead-end, supersessions
+    written and verdicts of non-revoked reporters, split by the agent's own role."""
+    store = adapter.store
+    fleet = await store.create_fleet("blue")
+    for name in ("scout1", "scout2", "plain"):
+        await _agent_in(adapter, name, fleet.id)
+    await store.set_agent_role("scout1", AgentRole.SCOUT)
+    await store.set_agent_role("scout2", AgentRole.SCOUT)
+    await store.revoke_agent("scout2")  # keeps its role; its verdicts stop counting
+
+    async def make(summary: str, days: int, author: str, **kw: object) -> Entry:
+        e = await write(adapter, summary, author=author, occurred_at=None, **kw)
+        await _backdate(adapter, e, NOW - days * _DAY)
+        return e
+
+    s1 = await make("s1", 3, "scout1", tags=("alternative",))
+    s2 = await make("s2", 10, "scout1", tags=("dead-end", "anomaly"))
+    await make("s4", 5, "scout2")
+    p1 = await make("p1", 2, "plain", tags=("alternative",))
+    p2 = await make("p2", 4, "plain")
+    p3 = await make("p3", 6, "nobody")
+    old = await make("old", 40, "plain")
+    await make("n1", 1, "scout1", supersedes=(p2.id,))
+    await make("n2", 2, "plain", supersedes=(old.id,))
+
+    def verdict(entry: Entry, user: str, days: int) -> Feedback:
+        return Feedback(entry.id, user, user, Verdict.HELPFUL, None, NOW - days * _DAY)
+
+    for fb in (
+        verdict(p1, "scout1", 2),
+        verdict(p3, "scout1", 5),
+        verdict(s1, "scout1", 10),
+        verdict(s2, "scout1", 40),  # outside the 30 days
+        verdict(s1, "scout2", 3),  # revoked reporter
+        verdict(s1, "plain", 3),
+        verdict(s1, "admin", 4),  # no agent record
+    ):
+        await store.record_feedback(fb)
+
+    health = await store.fleet_health(NOW)
+    assert health.scout_activity_30d == RoleActivity(
+        writes=4, alternative_or_dead_end_writes=2, supersessions=1, verdicts=3
+    )
+    assert health.other_activity_30d == RoleActivity(
+        writes=4, alternative_or_dead_end_writes=1, supersessions=1, verdicts=2
+    )
+    gone = await store.fleet_health(NOW + 400 * _DAY)
+    assert (gone.scout_activity_30d, gone.other_activity_30d) == (RoleActivity(), RoleActivity())
+
+
 async def test_fleet_convergence_echo_and_dispersion(adapter: Adapter) -> None:
     """ADR 0075. Identical vectors have cosine 1, vectors with different hot
     positions the constant ``c`` below."""
@@ -2702,6 +2754,44 @@ async def test_a_merged_fleet_takes_no_phase(adapter: Adapter) -> None:
     assert exc.value.target_id == b
     merged = await store.get_fleet(a)
     assert merged is not None and merged.phase is None
+
+
+async def test_set_and_clear_an_agent_role(adapter: Adapter) -> None:
+    store = adapter.store
+    fleet = await store.create_fleet("blue")
+    await store.register_agent("alice")
+    pending_before, pending_after = await store.set_agent_role("alice", AgentRole.SCOUT)
+    assert (pending_before.role, pending_after.role) == (None, AgentRole.SCOUT)
+    await _agent_in(adapter, "bob", fleet.id)
+    assert (await store.get_agent("alice")).role is AgentRole.SCOUT  # type: ignore[union-attr]
+    assert (await store.get_agent("bob")).role is None  # type: ignore[union-attr]
+    assert [a.role for a in await store.list_agents()] == [AgentRole.SCOUT, None]
+    same_before, same_after = await store.set_agent_role("alice", AgentRole.SCOUT)
+    assert same_before == same_after
+    cleared_before, cleared_after = await store.set_agent_role("alice", None)
+    assert (cleared_before.role, cleared_after.role) == (AgentRole.SCOUT, None)
+    none_before, none_after = await store.set_agent_role("alice", None)
+    assert none_before == none_after
+    with pytest.raises(UnknownAgent):
+        await store.set_agent_role("nobody", AgentRole.SCOUT)
+
+
+async def test_a_revoked_agent_takes_no_role_and_a_role_it_had_can_be_cleared(
+    adapter: Adapter,
+) -> None:
+    store = adapter.store
+    fleet = await store.create_fleet("blue")
+    await _agent_in(adapter, "alice", fleet.id)
+    await _agent_in(adapter, "bob", fleet.id)
+    await store.set_agent_role("alice", AgentRole.SCOUT)
+    await store.revoke_agent("alice")
+    await store.revoke_agent("bob")
+    assert (await store.get_agent("alice")).role is AgentRole.SCOUT  # type: ignore[union-attr]
+    with pytest.raises(InvalidAgentStatus):
+        await store.set_agent_role("bob", AgentRole.SCOUT)
+    assert (await store.get_agent("bob")).role is None  # type: ignore[union-attr]
+    _, cleared = await store.set_agent_role("alice", None)
+    assert cleared.role is None
 
 
 async def test_agent_lifecycle(adapter: Adapter) -> None:

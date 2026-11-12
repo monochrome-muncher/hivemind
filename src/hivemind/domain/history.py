@@ -214,6 +214,10 @@ def _summary(
                 )
         case AuditAction.AGENT_OWNER_SET:
             text = "The owner recorded for it was changed"  # the aliases are not shown
+        case AuditAction.AGENT_ROLE_SET:
+            text = f"Marked as a {d.get('role')}"
+        case AuditAction.AGENT_ROLE_CLEAR:
+            text = f"No longer a {d.get('role')}"
         case AuditAction.AGENT_REVOKE:
             if d.get("via") == "retire":
                 text = f"Revoked when it was retired in favour of {ctx.agent(d.get('successor'))}"

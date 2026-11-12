@@ -11,6 +11,7 @@ import asyncpg
 
 from hivemind.domain.access import Agent, AgentStatus, Fleet, TrustLevel
 from hivemind.domain.agent_cleanup import AgentCleanupRecord, RestoredEntry
+from hivemind.domain.agent_role import AgentRole
 from hivemind.domain.audit import ActorKind, AuditAction, AuditRecord
 from hivemind.domain.entry import (
     EntityKind,
@@ -215,6 +216,7 @@ def row_to_agent(row: asyncpg.Record) -> Agent:
         last_used_at=row.get("last_used_at"),
         key_created_at=row.get("key_created_at"),
         key_locked_at=row.get("key_locked_at"),
+        role=AgentRole(row["role"]) if row["role"] is not None else None,
     )
 
 

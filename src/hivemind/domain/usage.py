@@ -6,6 +6,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
+from hivemind.domain.health import RoleActivity
+
 
 @dataclass(frozen=True, slots=True)
 class Share:
@@ -138,13 +140,15 @@ class FleetsUsage:
 
 @dataclass(frozen=True, slots=True)
 class AgentsUsage:
-    """Agent usage counters (SPEC §12, ADR 0012)."""
+    """Agent usage counters (SPEC §12, ADR 0012); ``by_role`` counts the agents that are not
+    revoked (ADR 0144)."""
 
     total: int
     pending: int
     active: int
     revoked: int
     by_trust_level: dict[str, int]
+    by_role: dict[str, int]
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,6 +215,7 @@ class HealthUsage:
     top3_agent_label_write_share: Top3Labels
     top3_agent_label_verdict_share: Top3Labels
     by_fleet: dict[str, FleetHealthUsage]
+    role_activity_30d: dict[str, RoleActivity]
 
 
 @dataclass(frozen=True, slots=True)

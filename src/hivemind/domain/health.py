@@ -52,6 +52,22 @@ class HealthCounts:
     gap_dead_end: int = 0
 
 
+# Entries tagged like this are the ones scouting should produce (ADR 0144).
+EXPLORATORY_TAGS = frozenset({"alternative", "dead-end"})
+
+
+@dataclass(frozen=True, slots=True)
+class RoleActivity:
+    """What one group of agents did in the last 30 days (ADR 0144): entries written, those tagged
+    ``alternative`` or ``dead-end``, supersessions written and verdicts given by non-revoked
+    reporters."""
+
+    writes: int = 0
+    alternative_or_dead_end_writes: int = 0
+    supersessions: int = 0
+    verdicts: int = 0
+
+
 @dataclass(frozen=True, slots=True)
 class FleetHealth:
     """Everything ``Store.fleet_health`` measures at one instant. The 90-day figures cover the 90
@@ -90,6 +106,9 @@ class FleetHealth:
     verdicts_30d: int = 0
     top3_label_verdicts_30d: int = 0
     verdict_labels_30d: int = 0
+    # ADR 0144: scouts against every other author and reporter, by the agent's own role.
+    scout_activity_30d: RoleActivity = RoleActivity()
+    other_activity_30d: RoleActivity = RoleActivity()
 
 
 # Bounds of the vector work (ADR 0075): echo sample size and similarity threshold, busiest tags

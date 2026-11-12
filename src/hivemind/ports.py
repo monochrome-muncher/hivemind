@@ -24,6 +24,7 @@ from hivemind.domain.agent_cleanup import (
     CleanupScan,
     CleanupUndoOutcome,
 )
+from hivemind.domain.agent_role import AgentRole
 from hivemind.domain.audit import ActorKind, AuditEvent, AuditFilters, AuditRecord
 from hivemind.domain.entry import (
     Entry,
@@ -538,6 +539,14 @@ class Store(Protocol):
         Returns the agent before and after, read under one row lock so the audit ``from`` is the
         value replaced; an equal alias changes nothing. The alias lives only on the agent row.
         ``UnknownAgent``."""
+        ...
+
+    async def set_agent_role(self, name: str, role: AgentRole | None) -> tuple[Agent, Agent]:
+        """Set an agent's role, or clear it with ``None``, any status (ADR 0144).
+
+        Returns the agent before and after, read under one row lock, so a caller can tell whether
+        anything changed; the same role changes nothing. A role is not set on a revoked agent:
+        ``InvalidAgentStatus``. ``UnknownAgent``."""
         ...
 
     # -- successions (ADR 0113) ------------------------------------------------

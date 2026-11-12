@@ -14,7 +14,7 @@ import { mergeDialog, mergesCard, moveDialog } from "./merge.js";
 import { retireDialog, successionsCard } from "./retire.js";
 
 const AUDIT_ACTIONS = [
-  "agent.register", "agent.activate", "agent.trust_level_set", "agent.home_fleet_set", "agent.owner_set", "agent.revoke",
+  "agent.register", "agent.activate", "agent.trust_level_set", "agent.home_fleet_set", "agent.owner_set", "agent.role_set", "agent.role_clear", "agent.revoke",
   "fleet.create", "fleet.rename", "fleet.phase_set", "fleet.phase_clear", "fleet.merge", "fleet.unmerge", "fleet.move_agents", "fleet.move_undo", "org_key.rotate", "entry.withdraw", "entry.restore", "entry.redact", "entry.pin", "entry.unpin",
   "admin_key.issue", "admin_key.revoke", "agent_key.issue", "agent_key.replace", "agent_key.lock",
   "agent.cleanup", "agent.cleanup_undo", "agent.retire", "agent.retire_undo",
@@ -332,6 +332,53 @@ export function fleetPhaseCard(fleet, onDone) {
       h("p", { class: "muted small", text: "Agents in this fleet see a one-line hint in hive_whoami and hive_pinned until the phase ends. Ranking is unchanged." })));
 }
 
+const SCOUT_NOTE = "A scout gets a one-line hint in hive_whoami to explore: try less-tested rivals, use explore search, re-check old entries and write what it tried. It reads and writes exactly as before.";
+
+export const scoutBadge = (agent) => (agent.role === "scout"
+  ? h("span", { class: "badge badge-level", title: "Marked as a scout", text: "Scout" })
+  : null);
+
+/** The agent page's Scout card: whether the agent is a scout, and the control to change that (ADR 0144). */
+export function scoutCard(agent, onDone) {
+  const url = `admin/agents/${encodeURIComponent(agent.name)}/role`;
+  const isScout = agent.role === "scout";
+  const confirm = ({ title, body, label, call, done }) => openModal({
+    title,
+    body: h("p", { text: body }),
+    actions: [{ label: "Cancel" }, {
+      label,
+      class: "btn-primary",
+      submit: true,
+      onClick: async () => {
+        await guarded(call);
+        closeModal();
+        toast(done);
+        onDone();
+      },
+    }],
+  });
+  const button = isScout
+    ? h("button", { type: "button", class: "btn", text: "Stop scouting", onclick: () => confirm({
+      title: "Stop scouting?",
+      body: `${agent.name} stops getting the scout hint in hive_whoami.`,
+      label: "Stop scouting",
+      call: () => api("DELETE", url),
+      done: `${agent.name} is no longer a scout`,
+    }) })
+    : h("button", { type: "button", class: "btn btn-primary", text: "Make scout", disabled: agent.status === "revoked",
+      title: agent.status === "revoked" ? "A revoked agent cannot be made a scout" : "", onclick: () => confirm({
+        title: "Make a scout?",
+        body: `${agent.name} gets a hint in hive_whoami to explore more. What it may read and write does not change.`,
+        label: "Make scout",
+        call: () => api("PUT", url, { body: { role: "scout" } }),
+        done: `${agent.name} is now a scout`,
+      }) });
+  return card("Scout",
+    h("div", {},
+      h("div", { class: "row" }, isScout ? scoutBadge(agent) : h("span", { class: "muted", text: "Not a scout" }), button),
+      h("p", { class: "muted small", text: SCOUT_NOTE })));
+}
+
 /** Fix the owner alias of any agent (ADR 0122): the Stats "users" tab groups by it. */
 function ownerDialog(agent, onDone) {
   const owner = h("input", { id: "f-owner-edit", maxlength: 128, autocomplete: "off", value: agent.owner_alias || "", placeholder: "e.g. jane.doe" });
@@ -643,7 +690,7 @@ export async function viewAgents(root) {
       shown.map((a) => {
         const x = act.get(a.name);
         return h("tr", {},
-          h("td", {}, link(a.name, agentHref(a.name), { class: "link strong" })),
+          h("td", {}, link(a.name, agentHref(a.name), { class: "link strong" }), scoutBadge(a) ? [" ", scoutBadge(a)] : null),
           h("td", {}, statusBadge(a.status), a.key_locked && a.status === "active" ? [" ", lockedBadge(a)] : null),
           h("td", {}, a.status === "pending" ? h("span", { class: "muted", text: "—" }) : levelBadge(a.trust_level)),
           h("td", {}, a.home_fleet_id ? link(fleetName(a.home_fleet_id), fleetHref(a.home_fleet_id)) : "—"),

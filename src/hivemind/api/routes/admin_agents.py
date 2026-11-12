@@ -1,4 +1,4 @@
-"""Admin agent management: create, activate, rekey, update, revoke, retire."""
+"""Admin agent management: create, activate, rekey, update, set the role, revoke, retire."""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ from hivemind.api.schemas import (
     RetiredOut,
     RetirePreviewOut,
     RetireRequest,
+    SetAgentRoleRequest,
     SuccessionOut,
     UpdateAgentRequest,
 )
@@ -120,6 +121,29 @@ async def update_agent(
         home_fleet_id=payload.home_fleet_id,
         owner_alias=payload.owner_alias,
     )
+    return AgentOut.from_agent(agent)
+
+
+@router.put("/admin/agents/{name}/role", response_model=AgentOut)
+async def set_agent_role(
+    name: NameParam, payload: SetAgentRoleRequest, credential: CredentialDep, app: AppDep
+) -> AgentOut:
+    """Mark an agent as a scout (admin-gated, audited ``agent.role_set``,
+    ADR 0144): its ``hive_whoami`` carries a one-line hint to explore. What
+    it may read and write is unchanged. A role it already has changes and
+    audits nothing. Any status but revoked (pending agents may be marked).
+    404 unknown agent, 409 ``invalid_status`` for a revoked agent, 422 an
+    unknown role."""
+    agent = await app.access_service.set_agent_role(name, payload.role, credential)
+    return AgentOut.from_agent(agent)
+
+
+@router.delete("/admin/agents/{name}/role", response_model=AgentOut)
+async def clear_agent_role(name: NameParam, credential: CredentialDep, app: AppDep) -> AgentOut:
+    """Take an agent's role away (admin-gated, audited ``agent.role_clear``,
+    ADR 0144); an agent with no role answers 200 and writes no audit row.
+    404 unknown agent."""
+    agent = await app.access_service.clear_agent_role(name, credential)
     return AgentOut.from_agent(agent)
 
 

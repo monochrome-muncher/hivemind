@@ -569,3 +569,12 @@ async def test_an_owner_change_shows_no_alias() -> None:
     (row,) = await _history(app)
     assert row["summary"] == "The owner recorded for it was changed"
     assert "jane.doe" not in json.dumps(row) and "secret-owner" not in json.dumps(row)
+
+
+async def test_a_role_change_shows_in_the_agents_history() -> None:
+    app, _blue, _red = await _seed()
+    for action in (AuditAction.AGENT_ROLE_SET, AuditAction.AGENT_ROLE_CLEAR):
+        await _row(app, ActorKind.ADMIN_KEY, ADMIN_ACTOR, action, "carol", {"role": "scout"})
+    summaries = {r["action"]: r["summary"] for r in await _history(app)}
+    assert summaries["agent.role_set"] == "Marked as a scout"
+    assert summaries["agent.role_clear"] == "No longer a scout"

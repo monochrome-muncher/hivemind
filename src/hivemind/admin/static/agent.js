@@ -16,7 +16,7 @@ import {
 } from "./core.js";
 import { openEntry } from "./drawer.js";
 import { cursorPages, entryTable, feedbackTable, pagedTable } from "./lists.js";
-import { AUDIT_HEADERS, agentButtons, auditCsvColumns, auditRow } from "./manage.js";
+import { AUDIT_HEADERS, agentButtons, auditCsvColumns, auditRow, scoutCard } from "./manage.js";
 
 function profile(agent) {
   if (!agent) {
@@ -114,6 +114,7 @@ export async function viewAgent(root) {
       link("All agents", "#/agents", { class: "link small" }), windowSelector(() => hooks.refresh()), refreshButton()),
     numbers(row, flags, state.days),
     profile(agent),
+    agent ? scoutCard(agent, () => hooks.refresh()) : null,
     section("Memories it wrote", memories, memoriesHref({ author: name, all: "1" })),
     section("Verdicts it gave", given, feedbackHref({ reporter: name })),
     section("Verdicts on its memories", received, feedbackHref({ author: name })),
