@@ -42,8 +42,12 @@ hivemind-as --list
 ```
 
 prints `<profile> (<harness>)` pairs, never keys. The launcher is
-`bin/hivemind-as` in the plugin folder (two levels above this skill's
-folder); if it is not on `PATH`, give its full path, or suggest
+`bin/hivemind-as` in the plugin folder, two levels above this skill's
+folder, or under `plugins/hivemind/` there when that folder holds the
+whole repository (Gemini CLI). Hermes keeps the plugin in
+`~/.hermes/plugins/hivemind`. Skills copied by hand have no launcher
+beside them: it is in a checkout of the Hivemind repository. If it is
+not on `PATH`, give its full path, or suggest
 `ln -s <plugin>/bin/hivemind-as ~/.local/bin/`. Without it,
 `ls ~/.config/hivemind/` shows the same file names.
 

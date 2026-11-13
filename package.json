@@ -19,6 +19,7 @@
   },
   "files": [
     "plugins/hivemind/package.json",
+    "plugins/hivemind/bin/",
     "plugins/hivemind/cordis.patch.yml",
     "plugins/hivemind/cline/",
     "plugins/hivemind/dsh/",

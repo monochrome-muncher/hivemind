@@ -484,6 +484,7 @@ def test_the_dsh_bundle_patch_points_at_real_files_and_reads_keys_from_env() -> 
     assert "hm_" not in patch  # no key ever lives in the bundle
     for included in manifest["files"]:  # type: ignore[union-attr]
         assert (PLUGIN / included).exists(), included
+    assert "bin/" in manifest["files"]  # type: ignore[operator]
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
@@ -1099,6 +1100,8 @@ def test_the_root_package_installs_the_dsh_bundle_from_a_git_url() -> None:
         PLUGIN / "skills" / "hivemind" / "SKILL.md",
         PLUGIN / "skills" / "hivemind-setup" / "SKILL.md",
         PLUGIN / "skills" / "hivemind-update" / "scripts" / "hivemind-drift.sh",
+        PLUGIN / "bin" / "hivemind-as",  # the hivemind-switch skill looks for it beside the skills
+        PLUGIN / "bin" / "hivemind-incognito",
         *SETUP_REFS.glob("*.md"),
         *UPDATE_REFS.glob("*.md"),
     ]
