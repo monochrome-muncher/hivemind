@@ -25,8 +25,10 @@ in the hivemind-setup skill.
   [y/N]". With no terminal it refuses and says to use `--force`. Ask the
   user to confirm, or to run it themselves; use `--force` only after
   they agree.
-- **The MCP server**: add this to `~/.hermes/config.yaml` (all profiles)
-  or the profile's own `config.yaml`, merging into the existing file.
+- **The MCP server**: add this to `~/.hermes/config.yaml` (the default
+  profile) and to each named profile's own
+  `~/.hermes/profiles/<name>/config.yaml` (a profile reads only its own),
+  merging into the existing file.
   `${VAR}` references are resolved from the environment at connection
   time, so the key never lands in the file:
 
