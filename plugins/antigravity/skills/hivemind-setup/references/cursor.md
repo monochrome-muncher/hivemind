@@ -1,8 +1,9 @@
 # Hivemind setup: Cursor
 
 Only for **Cursor** (the Cursor editor from Anysphere, and its
-`cursor-agent` CLI). If you have not confirmed that this is your harness,
-go back to "Which harness am I in?" in the hivemind-setup skill.
+`cursor-agent` CLI, which its installer now names `agent`). If you have
+not confirmed that this is your harness, go back to "Which harness am I
+in?" in the hivemind-setup skill.
 
 Checked live in November 2026 with the Cursor CLI 2026.11.05, signed in
 with a free account, and in its local-model mode (`cursor-agent-local
@@ -51,6 +52,7 @@ a function in the shell profile:
 ```sh
 cursor() { ( . ~/.config/hivemind/cursor.env; command cursor "$@" ); }
 cursor-agent() { ( . ~/.config/hivemind/cursor.env; command cursor-agent "$@" ); }
+agent() { ( . ~/.config/hivemind/cursor.env; command agent "$@" ); }
 ```
 
 (With Cursor as the only harness, sourcing the file from the profile is
@@ -181,7 +183,7 @@ machine.
 ## Incognito
 
 Cursor has no documented per-session MCP switch. `hivemind-incognito
-cursor` (or `cursor-agent`) sets `HIVEMIND_INCOGNITO=1`, so the
+cursor` (or `cursor-agent`, or `agent`) sets `HIVEMIND_INCOGNITO=1`, so the
 `sessionStart` hook says the incognito line, and removes `HIVEMIND_API_KEY`
 and `HIVEMIND_MCP_URL` from the session's environment, so the
 `${env:...}` references in `~/.cursor/mcp.json` resolve to nothing and the
