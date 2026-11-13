@@ -212,22 +212,24 @@ writes is one its update file passes to the drift check.
   checkout without symlink support the `skills` link is a plain file, so the
   skills would have to be copied by hand.
 
-- **Antigravity** (checked live with the CLI, `agy` 1.5.3 and 1.5.5, headless
+- **Antigravity** (checked live with the CLI, `agy` 1.5.3, 1.5.5 and 1.5.8, headless
   against a mock Gemini model: `modelProvider: "gemini"` in
   `~/.gemini/antigravity-cli/settings.json`, `GEMINI_API_KEY` and
   `GOOGLE_GEMINI_BASE_URL`; no Google sign-in is needed there).
   - *Install.* `agy plugin install <github-url>/tree/<ref>/plugins/antigravity`
     clones the repository and installs that folder at that ref, into
     `~/.gemini/config/plugins/hivemind` (the App and the IDE read the same
-    folder), copying the `skills` link as a real folder. Without the
+    folder), copying the `skills` link as a real folder up to 1.5.5. 1.5.8
+    refuses a folder holding a link that leads out of it ("symlink …
+    points outside"), from a GitHub link and from a local folder alike, so
+    the docs install a `cp -RL` copy of the folder from a clone. Without the
     subfolder it installs the repository root, converting the Gemini CLI
     extension there, and from `plugins/hivemind` it converts the Claude
     Code plugin; both conversions keep the Claude and Gemini hook shapes,
-    which Antigravity reads as two broken hook groups, so the docs name
-    the full link. `agy plugin validate --strict plugins/antigravity`
+    which Antigravity reads as two broken hook groups, so the docs install
+    the plugin's own folder. `agy plugin validate --strict plugins/antigravity`
     passes. On a Windows checkout without symlink support the `skills`
-    link is a plain file, so install from a Linux or macOS clone or the
-    GitHub link. Only github.com links work (1.5.5: any other host fails
+    link is a plain file, so install from a Linux or macOS clone. Only github.com links work (1.5.5: any other host fails
     with "failed to parse GitHub URL", and a `git+` URL is taken as a
     folder); from another Git server the docs clone the tag and install
     the folder, which Antigravity copies. Neither route leaves a record of
