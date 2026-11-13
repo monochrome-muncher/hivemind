@@ -664,7 +664,7 @@ user's agents (ADR 0150). Per harness:
 | Hermes | `-p <profile>`: Hermes sets `HERMES_HOME` to that profile and loads its `.env` over the environment; `default` passes `-p default`, which overrides a saved `hermes profile use` |
 | Junie, Antigravity | refused: the key lives in their own config, so a switch is persistent (the skill has the steps) |
 | DeepSeek Harness | the key file is exported, except in a folder whose `.env` names `HIVEMIND_*`: the bundle then reads `~/.dsh/.env` only, so any profile but `default` is refused |
-| every other harness, and `code`/`codium` for the editor extensions | `~/.config/hivemind/<stem>.<profile>.env` sourced and both variables exported (`cursor-agent` uses `cursor`, `kilo` uses `kilocode`) |
+| every other harness, and `code`/`codium` for the editor extensions | `~/.config/hivemind/<stem>.<profile>.env` sourced and both variables exported (`cursor-agent` and `agent` use `cursor`, `kilo` uses `kilocode`) |
 
 The launcher unsets the inherited key and URL before loading a profile,
 fails when the file leaves either unset, refuses a file other users can

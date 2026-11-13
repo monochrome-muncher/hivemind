@@ -79,7 +79,8 @@ not on `PATH`, give its full path, or suggest
    - **Hermes**: a Hermes profile of the same name (`hermes profile
      create <profile>`), with the two variables in
      `~/.hermes/profiles/<profile>/.env` (mode 600), and the hivemind
-     server entry in the root or the profile's `config.yaml`.
+     server entry in that profile's own `config.yaml`: a profile does
+     not read `~/.hermes/config.yaml`.
    - **Copilot CLI**: the server address is fixed in
      `~/.copilot/mcp-config.json`, so every profile must use the same
      Hivemind address.
