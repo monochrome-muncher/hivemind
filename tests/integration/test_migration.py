@@ -92,24 +92,15 @@ CHAIN = [
 
 async def rollback(dsn: str, dim: int, count: int = 1, **confirm: bool) -> list[str]:
     """The per-migration tests below exercise what each older rollback does
-    to its own schema, so they step over `0035`, `0034`, `0033`, `0032`, `0031`, `0030`, `0029`, `0028` and `0027` first (in
-    one rollback, so no `schema.rollback` row is written), which have their
-    own tests at the end of the file. A test that seeds rows a guard counts
-    passes the matching confirmation flag (ADR 0119); the returned ids are
-    those of the requested `count` migrations below `0027`."""
-    steps = {
-        HEAD: 9,
-        ID_0034: 8,
-        ID_0033: 7,
-        ID_0032: 6,
-        ID_0031: 5,
-        ID_0030: 4,
-        ID_0029: 3,
-        ID_0028: 2,
-        ID_0027: 1,
-    }.get(await current_schema_version(dsn))
-    if steps:
-        await _guarded_rollback(dsn, dim, steps)
+    to its own schema, so they first step over every migration above `0026`
+    (in one rollback, so no `schema.rollback` row is written); those have
+    their own tests at the end of the file. A test that seeds rows a guard
+    counts passes the matching confirmation flag (ADR 0119); the returned ids
+    are those of the requested `count` migrations from `0026` down."""
+    current = await current_schema_version(dsn)
+    above = CHAIN.index(current) - CHAIN.index(ID_0026) if current in CHAIN else 0
+    if above > 0:
+        await _guarded_rollback(dsn, dim, above)
     return await _guarded_rollback(dsn, dim, count, **confirm)
 
 
@@ -266,7 +257,8 @@ async def test_rollback_removes_the_latest_migration() -> None:
     """ADR 0020: a structural migration (not `0001`) ships a real
     rollback, and rolling one back undoes exactly what it did.
 
-    Peeled one at a time from the head: `0026` drops the self-service mark
+    Peeled one at a time from `0026` down (the ones above it have their own
+    tests at the end of the file): `0026` drops the self-service mark
     of the cleanup record (ADR 0118); `0025` drops the credential lock time
     and the key lock audit rows and narrows the audit CHECK back to `0024`'s
     list, keeping every key (ADR 0117); `0024` drops the successions and
