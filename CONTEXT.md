@@ -313,6 +313,10 @@ _Avoid_: Hivemind client (implies a library client), agent connector
 The admin-issued credential bound to one registered agent (ADR 0012, supersedes the ADR 0008 sub-key). Carries the agent's trust level and home fleet; it is what the MCP runners present so their writes carry verified provenance. One key per agent, returned once at activation.
 _Avoid_: sub-key (the ADR 0008 term), token, API key (that is the generic REST term; say "agent key")
 
+**Key profile**:
+A name on the user's own machine for one of their agents in one harness, so a session can start as the agent of the fleet it works for. Client-side only: the server sees an ordinary agent key (ADR 0150).
+_Avoid_: identity switch, linked keys (server-side linking was rejected)
+
 **Standing**:
 What a key is and may do right now: its kind (agent, org, admin), the agent's status, trust level and home fleet, when an agent key was last used, what it may read and which scopes it may write. Reported by `hive_whoami` (ADR 0030); it is a snapshot taken when the key is verified, so a promotion shows on the next request.
 _Avoid_: permissions, profile, role

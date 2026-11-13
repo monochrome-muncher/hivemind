@@ -38,6 +38,7 @@ read the [main README](../../README.md) instead.
 - [Setting it up by hand](#setting-it-up-by-hand)
 - [Reminders to write and rate](#reminders-to-write-and-rate)
 - [Incognito sessions](#incognito-sessions)
+- [Working in several fleets](#working-in-several-fleets)
 - [Updating](#updating)
 - [When an agent is replaced](#when-an-agent-is-replaced)
 - [Hints from your admin](#hints-from-your-admin)
@@ -326,7 +327,7 @@ them in step 2, or do them by hand):
    them from the environment; the key is never written into the file).
    The `cline` CLI (3.0.73) does not expand them, so Hivemind stays off
    there; see [the Cline setup notes](skills/hivemind-setup/references/cline.md).
-2. Copy the three skill folders from [`skills/`](skills/) to
+2. Copy the four skill folders from [`skills/`](skills/) to
    `~/.cline/skills/`.
 3. Copy the plugin's `cline/` hook scripts (`UserPromptSubmit`,
    `TaskStart`, `PostToolUse`, plus the `.ps1` twins on Windows) to
@@ -736,6 +737,47 @@ Both are incognito by restraint too, and the agent tells you so. A
 session that started incognito can't switch Hivemind back on; start a new
 one. [DEVELOPING.md](DEVELOPING.md#incognito) has the details for each
 agent.
+
+## Working in several fleets
+
+If you work for more than one team, for example your own and a client's
+that must stay confidential, you have one agent in each fleet, each with
+its own key. A **key profile** is a name for one of them, and
+`hivemind-as` starts your agent as that one:
+
+```sh
+hivemind-as client claude
+hivemind-as client codex "fix the flaky test"
+hivemind-as --list        # profile names only, never keys
+```
+
+Like `hivemind-incognito`, it is a file in this repository
+(`bin/hivemind-as`), so link it into a folder on your `PATH`. Each
+profile's key lives in `~/.config/hivemind/` (Claude Code:
+`claude.<profile>.json`, the others `<agent>.<profile>.env`); Hermes uses
+its own profiles. `default` is your usual setup, unchanged. Ask your
+agent to "add a Hivemind profile" and the **hivemind-switch** skill walks
+you through it without the key passing through the chat.
+
+To have the folder decide, list folders in `~/.config/hivemind/profiles`:
+
+```
+~/work/acme   client
+~/src         dev
+```
+
+and start with `hivemind-as auto claude`. Keeping each folder on one
+profile also keeps the notes an agent leaves in that folder in one
+fleet.
+
+Switching is always a new session: the conversation you are in already
+holds what the other fleet's memories said. Junie and Antigravity keep
+the key in their own settings, so there a switch lasts until you switch
+back (the skill has the steps), and an editor or desktop app that is
+already open keeps the key it started with. For a confidential fleet,
+ask your admin for a `contributor` agent: a `privileged` one reads every
+fleet. [ADR 0150](../../docs/adr/0150-key-profiles-on-the-client.md) has
+the reasons.
 
 ## Updating
 

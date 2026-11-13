@@ -47,7 +47,7 @@ const COMPACTED = " Context was just compacted: before continuing, write now (hi
 
 const SKILLS_DIR = fileURLToPath(new URL("../skills/", import.meta.url));
 // The skills this plugin provides, by folder name.
-const SKILLS = ["hivemind", "hivemind-setup", "hivemind-update"];
+const SKILLS = ["hivemind", "hivemind-setup", "hivemind-switch", "hivemind-update"];
 
 // OpenCode names an MCP tool <server>_<tool>, e.g. hivemind_hive_write.
 const WROTE = /(^|[^a-z])hive_write$/;

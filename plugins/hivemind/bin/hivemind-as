@@ -1,0 +1,155 @@
+#!/bin/sh
+# hivemind-as — start an agent harness as one of your Hivemind agents, so
+# each fleet you work in gets its own key (ADR 0150).
+#
+#   hivemind-as <profile> <harness> [harness arguments...]
+#   hivemind-as auto <harness> [args...]   the profile your folder map names
+#   hivemind-as --list                      profile names, never keys
+#   e.g.  hivemind-as client claude
+#         hivemind-as auto codex "fix the flaky test"
+#
+# A profile is one agent per harness, kept in ~/.config/hivemind/:
+#   <harness>.<profile>.env   export HIVEMIND_MCP_URL=... / HIVEMIND_API_KEY=...
+#   claude.<profile>.json     {"env": {...}} for Claude Code, passed with
+#                             --settings: settings.json's env beats the shell,
+#                             and --settings beats both and a project's own
+#   Hermes uses its own profiles (hermes -p <profile>).
+# "default" is what you have today: <harness>.env if it exists, else your
+# usual setup unchanged. `auto` reads ~/.config/hivemind/profiles, lines of
+# "<folder> <profile>"; the longest folder that holds the current one wins,
+# else default. Only that file you own picks a profile, never the project.
+#
+# The key is never printed or put on a command line. Keys inherited from the
+# launching shell are dropped first, so a profile file that lacks one fails
+# instead of quietly running as another agent.
+set -eu
+
+usage() {
+  echo "usage: hivemind-as <profile|auto|default> <harness> [args...] | hivemind-as --list" >&2
+  exit 2
+}
+note() { echo "hivemind-as: $*" >&2; }
+die() { note "$*"; exit 2; }
+
+dir=${HIVEMIND_CONFIG_DIR:-${HOME:?HOME is not set}/.config/hivemind}
+
+list_profiles() {
+  [ -d "$dir" ] || return 0
+  for f in "$dir"/*.env "$dir"/claude.*.json; do
+    [ -e "$f" ] || continue
+    name=$(basename "$f")
+    case "$name" in
+      *.*.env) stem=${name%.env}; echo "${stem#*.} (${stem%%.*})" ;;
+      *.env) echo "default (${name%.env})" ;;
+      claude.*.json) stem=${name%.json}; echo "${stem#claude.} (claude)" ;;
+    esac
+  done | sort -u
+}
+
+# Longest folder in the map that holds the current folder, at a path
+# boundary; "~/" is your home.
+profile_for_folder() {
+  map="$dir/profiles"
+  here=$(pwd -P)
+  best=default
+  best_len=0
+  [ -r "$map" ] || { echo "$best"; return; }
+  while IFS= read -r line || [ -n "$line" ]; do
+    line=$(printf '%s' "$line" | tr '\t' ' ' | sed 's/^ *//; s/ *$//')
+    case "$line" in ''|'#'*) continue ;; esac
+    profile=${line##* }
+    folder=$(printf '%s' "${line% *}" | sed 's/ *$//')
+    [ "$folder" != "$line" ] || continue
+    case "$folder" in "~"|"~/"*) folder="$HOME${folder#\~}" ;; esac
+    folder=${folder%/}
+    [ -d "$folder" ] && folder=$(cd "$folder" && pwd -P)
+    case "$here/" in
+      "$folder"/*)
+        if [ "${#folder}" -gt "$best_len" ]; then
+          best=$profile
+          best_len=${#folder}
+        fi
+        ;;
+    esac
+  done <"$map"
+  echo "$best"
+}
+
+private_file() {
+  [ -f "$1" ] || die "no profile file $1 (the hivemind-switch skill shows how to add one)"
+  if [ -n "$(find "$1" \( -perm -004 -o -perm -040 \) -print)" ]; then
+    die "$1 can be read by other users: chmod 600 it first"
+  fi
+}
+
+[ "$#" -ge 1 ] || usage
+if [ "$1" = "--list" ]; then
+  list_profiles
+  exit 0
+fi
+[ "$#" -ge 2 ] || usage
+profile=$1
+harness=$2
+shift 2
+[ "$profile" = auto ] && profile=$(profile_for_folder)
+case "$profile" in
+  ''|.*|*[!A-Za-z0-9._-]*) die "a profile name is letters, digits, '.', '_' or '-'" ;;
+esac
+note "profile $profile"
+export HIVEMIND_PROFILE="$profile"
+
+case "$(basename "$harness")" in
+  claude) stem=claude ;;
+  cursor|cursor-agent) stem=cursor ;;
+  kilo|kilocode) stem=kilocode ;;
+  code|code-insiders|codium) stem=code ;;
+  *) stem=$(basename "$harness") ;;
+esac
+
+case "$stem" in
+  hermes)
+    # Hermes loads each profile's own .env over the environment.
+    [ "$profile" = default ] || unset HIVEMIND_API_KEY HIVEMIND_MCP_URL
+    exec "$harness" -p "$profile" "$@"
+    ;;
+  junie)
+    die "Junie reads the key only from ~/.junie/mcp/mcp.json, so a switch rewrites that file and lasts until the next one: see the hivemind-switch skill"
+    ;;
+  dsh)
+    if [ "$profile" != default ] && grep -Eiqs '^[[:space:]]*(export[[:space:]]+)?HIVEMIND_[A-Za-z0-9_]*[[:space:]]*[=:]' .env; then
+      die "this folder's .env names HIVEMIND_* settings, so DeepSeek Harness would ignore the profile and use ~/.dsh/.env (your default agent): start it from another folder"
+    fi
+    ;;
+  agy)
+    die "Antigravity keeps the key in its own settings (/plugin > hivemind > Configure MCP servers), so a switch lasts until the next one: see the hivemind-switch skill"
+    ;;
+esac
+
+if [ "$profile" = default ]; then
+  file="$dir/$stem.env"
+  if [ "$stem" != claude ] && [ -f "$file" ]; then
+    private_file "$file"
+    unset HIVEMIND_API_KEY HIVEMIND_MCP_URL
+    # shellcheck disable=SC1090
+    . "$file"
+    export HIVEMIND_API_KEY HIVEMIND_MCP_URL
+  fi
+  exec "$harness" "$@"
+fi
+
+unset HIVEMIND_API_KEY HIVEMIND_MCP_URL
+if [ "$stem" = claude ]; then
+  file="$dir/claude.$profile.json"
+  private_file "$file"
+  grep -q '"HIVEMIND_API_KEY"' "$file" || die "$file has no HIVEMIND_API_KEY in its env block"
+  exec "$harness" --settings "$file" "$@"
+fi
+
+file="$dir/$stem.$profile.env"
+private_file "$file"
+# shellcheck disable=SC1090
+. "$file"
+[ -n "${HIVEMIND_API_KEY:-}" ] && [ -n "${HIVEMIND_MCP_URL:-}" ] ||
+  die "$file must set both HIVEMIND_MCP_URL and HIVEMIND_API_KEY"
+export HIVEMIND_API_KEY HIVEMIND_MCP_URL
+exec "$harness" "$@"

@@ -103,7 +103,7 @@ apply.)
   Codex asks the user to review and trust a new hook: tell them to
   approve it with `/hooks`. Hooks on Windows are reported as unsupported
   in some Codex releases; there the instruction block is the layer.
-- **Skills without the plugin:** copy the three skill folders into
+- **Skills without the plugin:** copy the four skill folders into
   `~/.agents/skills/`.
 
 ## Incognito

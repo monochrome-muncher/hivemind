@@ -10,6 +10,7 @@ to install or use it, read [README.md](README.md) instead.
 - [Harness quirks](#harness-quirks)
 - [The Stop hook and the post-compaction line](#the-stop-hook-and-the-post-compaction-line)
 - [Incognito](#incognito)
+- [Key profiles](#key-profiles)
 - [The drift check](#the-drift-check)
 - [Tests](#tests)
 - [Releasing](#releasing)
@@ -21,6 +22,7 @@ to install or use it, read [README.md](README.md) instead.
 | `skills/hivemind/` | The always-on rules: `hive_whoami` first, when to search, when and how to write, what never to write, local memory only as a fallback |
 | `skills/hivemind-setup/` | The guided setup. Harness-neutral itself: it works out its harness first (never from the model), then reads only that harness's file in `references/` |
 | `skills/hivemind-update/` | The update skill: checks for drift from the latest release, then follows its harness's file in `references/` to update the plugin and refresh the copies setup wrote outside it. Harness-neutral itself, like the setup skill |
+| `skills/hivemind-switch/` | The key-profile skill: who am I, which profiles exist, how to add one and switch, and the harnesses where a switch is persistent (ADR 0150) |
 | `skills/hivemind-update/scripts/hivemind-drift.sh` | The drift check ([below](#the-drift-check)) |
 | `skills/hivemind-setup/scripts/hivemind-session-start.sh` | The reminder text the startup hook prints, including its incognito variant |
 | `hooks/hooks.json` | A `SessionStart` hook (`startup`, `resume`, `clear`, `compact`, `fork`) that re-injects the reminder whenever the context is rebuilt (Claude Code, Codex), and a `Stop` hook (Claude Code, Codex). GitHub Copilot CLI and Junie read the same file (its Claude-style hooks format) |
@@ -36,6 +38,7 @@ to install or use it, read [README.md](README.md) instead.
 | `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json` | The plugin manifests for Claude Code (also read by GitHub Copilot CLI and Junie) and Codex, which point Codex at `skills/` and `hooks/hooks.json` |
 | `.cursor-plugin/plugin.json`, `cursor/hooks.json`, `cursor/rules/hivemind.mdc` | The Cursor plugin: the manifest points Cursor at `skills/`, at the Cursor-only hooks file (so it never parses the Claude-format `hooks/hooks.json`) and at the rules folder; the hook runs the startup script on `sessionStart`; the always-on rule holds the startup sentence, though Cursor did not load it in the live check, so setup also writes a user rule. No `mcp.json`: the user configures the server |
 | `bin/hivemind-incognito` | The incognito launcher ([below](#incognito)) |
+| `bin/hivemind-as` | The key-profile launcher ([below](#key-profiles)) |
 | `CHANGELOG.md` | What changed for agents in each release |
 | `../../package.json` (repository root) | Same package name as `plugins/hivemind/package.json`. Lets DeepSeek Harness, Pi and OpenCode install the plugin from the repository's Git URL (OpenCode loads `exports["./server"]`, else `main`) |
 | `../../gemini-extension.json`, `../../skills`, `../../hooks/hooks.json` (repository root) | The Gemini CLI extension, installed with `gemini extensions install <git-url>`: Gemini reads these three at the root of what it installs. `skills` is a link to `skills/` here; the hooks run the two scripts above as `SessionStart` and `AfterAgent` hooks |
@@ -646,6 +649,26 @@ hook prints the incognito text and the stop hook stays silent.
 The Claude Code switch was checked live with Claude Code 2.1.287 against
 a local listener: denying `plugin:hivemind:hivemind` or the URL stopped
 every request to the endpoint, while denying `hivemind` alone did not.
+
+## Key profiles
+
+`bin/hivemind-as <profile> <harness>` starts a harness as one of the
+user's agents (ADR 0150). Per harness:
+
+| Harness | How the profile reaches it |
+|---|---|
+| Claude Code | `--settings ~/.config/hivemind/claude.<profile>.json` (an `env` block). An `env` key in `~/.claude/settings.json` beats the launching shell, and `--settings` beats both and a project's settings (checked with 2.1.323) |
+| Hermes | `-p <profile>`: Hermes sets `HERMES_HOME` to that profile and loads its `.env` over the environment; `default` passes `-p default`, which overrides a saved `hermes profile use` |
+| Junie, Antigravity | refused: the key lives in their own config, so a switch is persistent (the skill has the steps) |
+| DeepSeek Harness | the key file is exported, except in a folder whose `.env` names `HIVEMIND_*`: the bundle then reads `~/.dsh/.env` only, so any profile but `default` is refused |
+| every other harness, and `code`/`codium` for the editor extensions | `~/.config/hivemind/<stem>.<profile>.env` sourced and both variables exported (`cursor-agent` uses `cursor`, `kilo` uses `kilocode`) |
+
+The launcher unsets the inherited key and URL before loading a profile,
+fails when the file leaves either unset, refuses a file other users can
+read, and sets `HIVEMIND_PROFILE`. `default` loads `<stem>.env` when it
+exists and otherwise changes nothing. `auto` takes the profile from the
+user's `~/.config/hivemind/profiles` (longest folder that holds the
+current one), never from the project.
 
 ## The drift check
 

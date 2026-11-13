@@ -66,7 +66,7 @@ Copilot lists the Hivemind repository's `.claude-plugin/marketplace.json`.
 Do not use `copilot plugin install <owner>/<repo>` or the `:path` form:
 Copilot calls direct installs deprecated, and the repository root is not
 a plugin. `copilot plugin list` and `copilot skill list` show the result.
-**Without the plugin**, copy the three skill folders into `~/.copilot/skills/`
+**Without the plugin**, copy the four skill folders into `~/.copilot/skills/`
 (or `~/.agents/skills/`).
 
 Only some servers' own `instructions` text reaches Copilot's system

@@ -58,7 +58,7 @@ harness, go back to "Which harness am I in?" in the hivemind-setup skill.
             Authorization: !!js '`Bearer ${process.env.HIVEMIND_API_KEY}`'
   ```
 
-  and copy the three skill folders into `~/.agents/skills/` (DSH scans it).
+  and copy the four skill folders into `~/.agents/skills/` (DSH scans it).
   This row has none of the bundle's guards: it reads `HIVEMIND_MCP_URL`
   from a project `.env` too (so a repository could redirect the key),
   and it connects in incognito sessions. Prefer the bundle.
