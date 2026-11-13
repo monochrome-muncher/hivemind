@@ -1,6 +1,6 @@
 {
   "name": "hivemind-agent-plugin",
-  "version": "2.25.1",
+  "version": "2.26.0",
   "description": "Hivemind agent plugin, installed from a local path: the DeepSeek Harness bundle (the Hivemind MCP server plus the hivemind, hivemind-setup, hivemind-update and hivemind-switch skills) and the Pi / Oh My Pi package (the skills plus the system-prompt reminder extension).",
   "private": true,
   "type": "module",
