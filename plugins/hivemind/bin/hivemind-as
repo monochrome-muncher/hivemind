@@ -100,7 +100,7 @@ export HIVEMIND_PROFILE="$profile"
 
 case "$(basename "$harness")" in
   claude) stem=claude ;;
-  cursor|cursor-agent) stem=cursor ;;
+  cursor|cursor-agent|agent) stem=cursor ;;
   kilo|kilocode) stem=kilocode ;;
   code|code-insiders|codium) stem=code ;;
   *) stem=$(basename "$harness") ;;
