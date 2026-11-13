@@ -217,6 +217,11 @@ hermes-scan: ## Run Hermes's install scan over the plugin and fail if Hermes wou
 	fi
 	python3 -I scripts/hermes-scan.py $(HERMES_SOURCE) plugins/hivemind
 
+.PHONY: sync-antigravity-skills
+sync-antigravity-skills: ## Copy plugins/hivemind/skills into plugins/antigravity/skills (Antigravity 1.5.8 refuses a link there; a unit test checks the copy)
+	rm -rf plugins/antigravity/skills
+	cp -R plugins/hivemind/skills plugins/antigravity/skills
+
 .PHONY: check
 check: ## Type-check + lint (mypy strict + ruff)
 	uv run mypy

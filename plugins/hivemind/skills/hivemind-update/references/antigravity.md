@@ -22,20 +22,26 @@ for the Git URL and save it as step 2 of the skill says.
 
 ## Update
 
-The user installs again from a copy of the plugin's folder at the tag
-from the `Latest:` line (`<address>` is the repository's Git URL).
-Antigravity 1.5.8 refuses the folder itself, and a GitHub link to it,
-because its `skills` is a link that leads out of it; `cp -RL` puts real
-files in its place:
+**From GitHub**, the user runs the install command again with the tag
+from the `Latest:` line:
+
+```sh
+agy plugin install https://github.com/<owner>/hivemind/tree/<tag>/plugins/antigravity
+```
+
+Keep the `/tree/<tag>/plugins/antigravity` part.
+
+**From any other Git server**, `agy plugin install` refuses the link
+(it only takes github.com links), so the user installs from a folder
+instead. Antigravity copies the folder, so the clone can go afterwards:
 
 ```sh
 git clone --depth 1 --branch <tag> <address> /tmp/hivemind-<tag>
-cp -RL /tmp/hivemind-<tag>/plugins/antigravity /tmp/hivemind-antigravity
-agy plugin install /tmp/hivemind-antigravity
-rm -rf /tmp/hivemind-<tag> /tmp/hivemind-antigravity
+agy plugin install /tmp/hivemind-<tag>/plugins/antigravity
+rm -rf /tmp/hivemind-<tag>
 ```
 
-Installing again replaces the plugin and keeps the stored
+Either way, installing again replaces the plugin and keeps the stored
 address and key, and the plugin stays on. **Do not uninstall first**:
 uninstalling deletes them, and the plugin then stays off until they are
 entered again in `/plugin`. Start a new session.

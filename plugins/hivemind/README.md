@@ -80,8 +80,8 @@ Use the URLs as shown. On a Git server other than GitHub, keep the
 `.git` at the end. DeepSeek Harness and OpenCode also need the `git+`
 prefix, KiloCode uses its own `git:` spec, and Hermes needs
 `#plugins/hivemind`. Don't paste a link with a trailing slash, or a
-`/tree/...` link copied from the browser. Antigravity installs from a
-copied folder instead, shown in its section.
+`/tree/...` link copied from the browser. Antigravity is the exception:
+it needs the `/tree/...` link shown in its section.
 
 ### Claude Code
 
@@ -180,26 +180,25 @@ This covers the Antigravity CLI (`agy`), the Antigravity App and the
 Antigravity IDE, which share their plugins. In a terminal:
 
 ```sh
-git clone --depth 1 --branch v<version> https://github.com/monochrome-muncher/hivemind /tmp/hivemind-v<version>
-cp -RL /tmp/hivemind-v<version>/plugins/antigravity /tmp/hivemind-antigravity
-agy plugin install /tmp/hivemind-antigravity
-rm -rf /tmp/hivemind-v<version> /tmp/hivemind-antigravity
+agy plugin install https://github.com/monochrome-muncher/hivemind/tree/v<version>/plugins/antigravity
 ```
 
-Antigravity 1.5.8 refuses to install the plugin's folder straight from
-GitHub, because the folder links to the skills it shares with the other
-harnesses; the copy puts real files there. Don't install the repository
-root: Antigravity installs the Gemini CLI extension there instead,
-converted, and its reminders don't work. Antigravity support starts
-with 2.19.0 ([CHANGELOG.md](CHANGELOG.md)).
+Use the whole link, with the release and `/plugins/antigravity`. The
+bare repository link installs the Gemini CLI extension instead,
+converted, and its reminders don't work there. Antigravity support starts
+with 2.19.0 ([CHANGELOG.md](CHANGELOG.md)); Antigravity 1.5.8 and later
+refuse 2.26.0 and earlier ("symlink … points outside"), so use a newer
+release there.
 
 The plugin installs switched off, because it needs the MCP address and a
 key. Turn it on in `/plugin` (select hivemind and press Space) or under
 Customizations > Installed in the App, and fill in both. The key field
 shows what you type, so make sure nobody is watching your screen.
 Antigravity keeps both values in `~/.gemini/config/config.json`, readable
-only by you. On another Git server, use its address in the `git clone`
-line.
+only by you. On a Git server other than GitHub, `agy plugin install`
+refuses the link, so clone the repository at the release tag and run
+`agy plugin install /path/to/hivemind/plugins/antigravity`. Antigravity
+copies the folder, so you can delete the clone afterwards.
 
 ### GitHub Copilot CLI
 

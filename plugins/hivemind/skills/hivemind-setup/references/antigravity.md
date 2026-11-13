@@ -6,34 +6,38 @@ Not Gemini CLI, which has its own file. If you have not confirmed that this
 is your harness, go back to "Which harness am I in?" in the hivemind-setup
 skill. Antigravity's system prompt starts "You are Antigravity".
 
-Checked with the Antigravity CLI 1.5.3 and 1.5.5. Check anything this
+Checked with the Antigravity CLI 1.5.3, 1.5.5 and 1.5.8. Check anything this
 file does not state with `agy plugin list` and `/plugin` rather than assuming.
 
 ## Connect
 
 **With the hivemind plugin** (the only supported route). The user installs
-a copy of the plugin's folder from the Hivemind repository at a release
-tag (`<address>` is the repository's Git URL, for example
-`https://github.com/<owner>/hivemind`). It is a shell command for them to
-run, not you:
+it from the plugin's folder in the Hivemind repository, pinned to a release
+tag. It is a shell command for them to run, not you:
+
+```sh
+agy plugin install https://github.com/<owner>/hivemind/tree/<tag>/plugins/antigravity
+```
+
+The `/tree/<tag>/plugins/antigravity` part matters. The bare repository URL
+installs the repository root, which Antigravity converts from the Gemini CLI
+extension there, with hooks that do not work. Do not use `agy plugin import`
+either: it converts the Claude Code or Gemini CLI copy the same way.
+Antigravity 1.5.8 and later refuse Hivemind 2.26.0 and earlier with
+"symlink … points outside"; a newer release installs.
+
+`agy plugin install` takes only github.com links. If the organization
+keeps Hivemind on another Git server, the user clones the release tag
+and installs from the folder (Antigravity copies it, so the clone can go
+afterwards):
 
 ```sh
 git clone --depth 1 --branch <tag> <address> /tmp/hivemind-<tag>
-cp -RL /tmp/hivemind-<tag>/plugins/antigravity /tmp/hivemind-antigravity
-agy plugin install /tmp/hivemind-antigravity
-rm -rf /tmp/hivemind-<tag> /tmp/hivemind-antigravity
+agy plugin install /tmp/hivemind-<tag>/plugins/antigravity
+rm -rf /tmp/hivemind-<tag>
 ```
 
-The plugin's `skills` is a link to the skills it shares with the other
-harnesses, and Antigravity 1.5.8 refuses to install a folder holding a link
-that leads out of it ("symlink … points outside"), from a GitHub link too;
-`cp -RL` puts real files in its place. Antigravity copies the folder, so
-both copies can go afterwards. Do not install the repository root or use
-`agy plugin import`: Antigravity converts the Gemini CLI or Claude Code
-copy there, with hooks that do not work.
-
-Antigravity keeps no record of that address, so unless it is the public
-GitHub repository, with approval save it
+Antigravity keeps no record of that address, so with approval save it
 as the only line of `~/.config/hivemind/plugin-source` (folder mode 700,
 no password or token in it): the hivemind-update skill compares with it.
 

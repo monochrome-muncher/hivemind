@@ -2991,11 +2991,22 @@ def test_no_plugin_file_holds_an_unchecked_copy_of_a_reminder_text() -> None:
 # -- Antigravity: the plugin's own files (checked live with agy 1.5.3) ----------
 
 
-def test_the_antigravity_plugin_shares_the_skills_and_points_at_its_files() -> None:
+def _tree(root: Path) -> dict[str, tuple[bytes, bool]]:
+    files = (p for p in sorted(root.rglob("*")) if p.is_file())
+    return {str(p.relative_to(root)): (p.read_bytes(), os.access(p, os.X_OK)) for p in files}
+
+
+def test_the_antigravity_skills_are_exact_copies_of_the_plugins() -> None:
+    """Real files, not a link: agy 1.5.8 refuses a plugin whose symlink points
+    outside its folder. `make sync-antigravity-skills` refreshes the copy."""
+    assert not (AGY / "skills").is_symlink()
+    assert _tree(AGY / "skills") == _tree(PLUGIN / "skills")
+
+
+def test_the_antigravity_plugin_points_at_its_files() -> None:
     """A folder of its own, because Antigravity reads hooks.json at the plugin
     root, a name GitHub Copilot CLI also reads in plugins/hivemind."""
     assert not (PLUGIN / "hooks.json").exists()
-    assert (AGY / "skills").is_symlink() and (AGY / "skills").resolve() == PLUGIN / "skills"
     manifest = _json(AGY / "plugin.json")
     assert manifest["description"] and manifest["displayName"] == "Hivemind"
     assert (AGY / str(manifest["logo"])).is_file()
