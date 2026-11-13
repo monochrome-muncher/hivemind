@@ -6,7 +6,7 @@ Not Gemini CLI, which has its own file. If you have not confirmed that this
 is your harness, go back to "Which harness am I in?" in the hivemind-setup
 skill. Antigravity's system prompt starts "You are Antigravity".
 
-Checked with the Antigravity CLI 1.5.3 and 1.5.5. Check anything this
+Checked with the Antigravity CLI 1.5.3, 1.5.5 and 1.5.8. Check anything this
 file does not state with `agy plugin list` and `/plugin` rather than assuming.
 
 ## Connect
@@ -23,6 +23,8 @@ The `/tree/<tag>/plugins/antigravity` part matters. The bare repository URL
 installs the repository root, which Antigravity converts from the Gemini CLI
 extension there, with hooks that do not work. Do not use `agy plugin import`
 either: it converts the Claude Code or Gemini CLI copy the same way.
+Antigravity 1.5.8 and later refuse Hivemind 2.26.0 and earlier with
+"symlink … points outside"; a newer release installs.
 
 `agy plugin install` takes only github.com links. If the organization
 keeps Hivemind on another Git server, the user clones the release tag
