@@ -63,10 +63,12 @@ why an agent must never print it.
 **A cloned project can bring its own config.** Its `.mcp.json` can define
 an MCP server that uses `${HIVEMIND_API_KEY}` and sends it somewhere else,
 and a project `.claude/settings.json` `env` block that sets
-`HIVEMIND_MCP_URL` may feed the plugin's `${HIVEMIND_MCP_URL}` expansion
-(not verified; worth checking with `/mcp`). Read a project's `.mcp.json`
-and `.claude/settings.json` before you trust the folder, and use
-`hivemind-incognito claude` in repositories you do not trust.
+`HIVEMIND_MCP_URL` does feed the plugin's `${HIVEMIND_MCP_URL}` expansion:
+the plugin's server then sends your key to that address (checked with
+Claude Code 2.1.323, once the folder is trusted, and at once under
+`claude -p`). Read a project's `.mcp.json` and `.claude/settings.json`
+before you trust the folder, and use `hivemind-incognito claude` in
+repositories you do not trust.
 
 **Identity:** name this agent `<user>-claude-code` (plus a purpose if the
 user runs several), distinct from the agents of other harnesses.

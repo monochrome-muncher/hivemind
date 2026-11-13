@@ -74,7 +74,9 @@ other harnesses.
 
 `hivemind-incognito hermes` sets `HIVEMIND_ENABLED=false`. It needs
 `enabled: ${HIVEMIND_ENABLED}` in the hivemind entry of
-`~/.hermes/config.yaml`. **Never put `HIVEMIND_ENABLED` in the Hermes env
+`~/.hermes/config.yaml` (or of the profile's own `config.yaml`; the
+launcher checks the profile named by `-p`, else the one `hermes profile
+use` saved). **Never put `HIVEMIND_ENABLED` in the Hermes env
 file** (`~/.hermes/.env` or a profile's `.env`): Hermes loads that file
 over the environment, so a value there overrides the launcher and the
 server stays on in incognito sessions. For normal sessions leave it unset

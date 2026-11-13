@@ -16,21 +16,19 @@
 #      the agent honouring layer 1 ("by restraint").
 #
 # Where the server is kept from loading (claude, codex, copilot, cline, dsh, gemini with the
-# extension, junie, pi, omp), and for cursor, where unsetting them is the whole switch, the
-# launcher also removes HIVEMIND_API_KEY and HIVEMIND_MCP_URL from the
-# child's environment (codex: the key only; gemini: both set empty; omp: the
-# URL set to "off"), so an agent with a shell cannot read the key or call the
-# REST API with it. Antigravity keeps its key in its own config (agy: every
-# Hivemind call is denied instead). Hermes, OpenCode and KiloCode
-# keep the variables (their switch or the plugin may still need them), except
-# that OpenCode and KiloCode drop them when OPENCODE_CONFIG_CONTENT or
-# KILO_CONFIG_CONTENT is already set and the overlay cannot be applied. Any
-# other launcher keeps them too, where the session is incognito by restraint only;
-# the README says so.
+# extension, junie, pi, omp, opencode, kilocode), and for cursor and the code editors,
+# where emptying them is the whole switch, the launcher also removes
+# HIVEMIND_API_KEY and HIVEMIND_MCP_URL from the child's environment (codex:
+# the key only; gemini and the editors: both set empty; omp: the URL set to
+# "off"), so an agent with a shell cannot read the key or call the REST API
+# with it. Antigravity keeps its key in its own config (agy: every Hivemind
+# call is denied instead). Hermes loads the key from its own .env, so it
+# stays there. Any other command keeps both, and the session is incognito by
+# restraint only; the README says so.
 set -eu
 
 if [ "$#" -lt 1 ]; then
-  echo "usage: hivemind-incognito <claude|codex|copilot|cursor|cursor-agent|dsh|gemini|agy|hermes|junie|pi|omp|opencode|cline|kilocode|kilo|other-command> [args...]" >&2
+  echo "usage: hivemind-incognito <claude|codex|copilot|cursor|cursor-agent|dsh|gemini|agy|hermes|junie|pi|omp|opencode|cline|kilocode|kilo|code|codium|other-command> [args...]" >&2
   exit 2
 fi
 harness=$1
@@ -40,6 +38,32 @@ note() { echo "hivemind-incognito: $*" >&2; }
 # JSON-escape a string for embedding between double quotes.
 json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 home_dir=${HOME:-}
+
+# The folder Hermes runs from: the profile named by -p/--profile, else the
+# one `hermes profile use` saved, else the root. Profile names are
+# case-insensitive, and "default" is the root.
+hermes_profile_dir() {
+  root=$1
+  shift
+  case "$(basename "$(dirname "$root")")" in profiles) echo "$root"; return ;; esac
+  profile=
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --) break ;;
+      -p|--profile) profile=${2:-}; break ;;
+      --profile=*) profile=${1#--profile=}; break ;;
+    esac
+    shift
+  done
+  if [ -z "$profile" ] && [ -r "$root/active_profile" ]; then
+    profile=$(tr -d '[:space:]' < "$root/active_profile")
+  fi
+  profile=$(printf '%s' "$profile" | tr '[:upper:]' '[:lower:]')
+  case "$profile" in
+    ''|default) echo "$root" ;;
+    *) echo "$root/profiles/$profile" ;;
+  esac
+}
 
 case "$(basename "$harness")" in
   claude)
@@ -141,16 +165,20 @@ PY
     # Hermes interpolates ${VAR} into the server config before reading
     # `enabled`, so a config with `enabled: ${HIVEMIND_ENABLED}` is off here.
     export HIVEMIND_ENABLED=false
-    config="${HERMES_HOME:-${home_dir:-.}/.hermes}/config.yaml"
-    if ! grep -q 'HIVEMIND_ENABLED' "$config" 2>/dev/null; then
-      note "$config does not gate the hivemind server on \${HIVEMIND_ENABLED}; the tools may still load (see the plugin README, Incognito sessions)"
+    # The server entry may sit in the root config (all profiles) or in the
+    # profile's own; both are checked.
+    root="${HERMES_HOME:-${home_dir:-.}/.hermes}"
+    profile_dir=$(hermes_profile_dir "$root" "$@")
+    if ! grep -qs 'HIVEMIND_ENABLED' "$root/config.yaml" "$profile_dir/config.yaml"; then
+      note "$profile_dir/config.yaml does not gate the hivemind server on \${HIVEMIND_ENABLED}; the tools may still load (see the plugin README, Incognito sessions)"
     fi
     # Hermes loads its .env over the environment, so a HIVEMIND_ENABLED
     # there would override the `false` above.
-    envfile="${HERMES_HOME:-${home_dir:-.}/.hermes}/.env"
-    if grep -Eq '^[[:space:]]*(export[[:space:]]+)?HIVEMIND_ENABLED[[:space:]]*=' "$envfile" 2>/dev/null; then
-      note "$envfile sets HIVEMIND_ENABLED, which overrides this launcher: remove that line, or the tools will load (see the plugin README, Incognito sessions)"
-    fi
+    for envfile in "$root/.env" "$profile_dir/.env"; do
+      if grep -Eq '^[[:space:]]*(export[[:space:]]+)?HIVEMIND_ENABLED[[:space:]]*=' "$envfile" 2>/dev/null; then
+        note "$envfile sets HIVEMIND_ENABLED, which overrides this launcher: remove that line, or the tools will load (see the plugin README, Incognito sessions)"
+      fi
+    done
     exec "$harness" "$@"
     ;;
   junie)
@@ -185,13 +213,14 @@ PY
   opencode)
     # The hivemind OpenCode plugin skips the server when HIVEMIND_INCOGNITO
     # is set. A server added by hand in opencode.json is disabled for this
-    # run through OpenCode's highest-precedence config overlay.
+    # run through OpenCode's highest-precedence config overlay. Neither needs
+    # the key or URL, and without them an `{env:...}` hand entry has nothing
+    # to send even when the overlay cannot be applied.
+    unset HIVEMIND_API_KEY HIVEMIND_MCP_URL
     if [ -z "${OPENCODE_CONFIG_CONTENT:-}" ]; then
       export OPENCODE_CONFIG_CONTENT='{"mcp":{"hivemind":{"enabled":false}}}'
     else
-      # Not merged here (no JSON editing in sh). Without the key and URL an
-      # `{env:...}` hand entry has nothing to send.
-      unset HIVEMIND_API_KEY HIVEMIND_MCP_URL
+      # Not merged here (no JSON editing in sh).
       note "OPENCODE_CONFIG_CONTENT is already set, so the disable overlay was not applied; the key and URL are unset, but a server with a literal key in config may still load"
     fi
     exec "$harness" "$@"
@@ -230,13 +259,23 @@ PY
     # highest-precedence config overlay. The overlay carries both shapes:
     # KiloCode 7.8 lowers a hand entry to the v1 shape (mcp.hivemind,
     # enabled), and the v2 form (mcp.servers, disabled) alone left it on.
+    unset HIVEMIND_API_KEY HIVEMIND_MCP_URL
     if [ -z "${KILO_CONFIG_CONTENT:-}" ]; then
       export KILO_CONFIG_CONTENT='{"mcp":{"hivemind":{"enabled":false},"servers":{"hivemind":{"disabled":true}}}}'
     else
       # Not merged here (no JSON editing in sh); see the opencode branch.
-      unset HIVEMIND_API_KEY HIVEMIND_MCP_URL
       note "KILO_CONFIG_CONTENT is already set, so the disable overlay was not applied; the key and URL are unset, but a server with a literal key in config may still load"
     fi
+    exec "$harness" "$@"
+    ;;
+  code|code-insiders|codium)
+    # The Cline and Kilo Code editor extensions read the editor's
+    # environment: with both variables empty, Cline's ${env:...} references
+    # name no server and the Kilo Code plugin registers none. Empty rather
+    # than unset, so the values also replace those of an editor that is
+    # already running and merges a new window's environment into its own.
+    export HIVEMIND_MCP_URL= HIVEMIND_API_KEY=
+    note "an editor window that is already open keeps its own environment: close it first, then start this one (incognito by restraint until then)"
     exec "$harness" "$@"
     ;;
   *)

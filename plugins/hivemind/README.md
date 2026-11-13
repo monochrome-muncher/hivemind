@@ -675,8 +675,8 @@ way):
 ```
 
 It also takes `codex`, `copilot`, `cursor` (or `cursor-agent`), `dsh`,
-`gemini`, `agy`, `hermes`, `junie`, `pi`, `omp`, `opencode`, `cline` and
-`kilocode` (or `kilo`). To make it shorter to type, link it into a folder
+`gemini`, `agy`, `hermes`, `junie`, `pi`, `omp`, `opencode`, `cline`,
+`kilocode` (or `kilo`) and `code` (or `codium`). To make it shorter to type, link it into a folder
 on your `PATH`:
 
 ```sh
@@ -692,13 +692,18 @@ How well it works depends on the agent:
   aren't loaded at all, and there is nothing to set up. For OpenCode
   and KiloCode that holds when the launcher can set its config overlay;
   if `OPENCODE_CONFIG_CONTENT` / `KILO_CONFIG_CONTENT` is already set, it
-  only unsets the key and URL and prints a note, and a server with the key
-  written in a config file may still load. For Gemini CLI it holds with
+  prints a note, and a server with the key written in a config file may
+  still load. For Gemini CLI it holds with
   `"experimental": { "extensionConfig": false }` set as described above.
 - **Cline**: the tools aren't loaded as long as the connection uses the
   `${env:…}` references described above. The launcher unsets the two
   variables, so the references stay unexpanded and the server never
   connects. The hooks say the incognito line; the skills stay installed.
+- **Cline and Kilo Code in VS Code**: start the editor through the
+  launcher, `hivemind-incognito code .` (or `codium`). It sets the key and
+  address empty for the editor. A VS Code window that is already open
+  keeps its own settings, so close it first; until then the session is
+  incognito by restraint (the launcher says so).
 - **Codex**: the tools aren't loaded, as long as the connection is in
   `~/.codex/config.toml` (or the project's `.codex/config.toml`) as
   described above.
@@ -719,8 +724,9 @@ How well it works depends on the agent:
   incognito text as extra guidelines.
 - **Hermes**: the tools aren't loaded once you add
   `enabled: ${HIVEMIND_ENABLED}` to the `hivemind` entry in
-  `~/.hermes/config.yaml`. Don't set `HIVEMIND_ENABLED` in
-  `~/.hermes/.env`, because that file overrides the launcher.
+  `~/.hermes/config.yaml` (or a profile's own `config.yaml`). Don't set
+  `HIVEMIND_ENABLED` in `~/.hermes/.env` or a profile's `.env`, because
+  that file overrides the launcher.
 - **Antigravity** (`agy`): the tools stay listed, but every call to them
   is refused for that session. The server still sees a connection at
   startup, with your key, because Antigravity can't switch one plugin off
