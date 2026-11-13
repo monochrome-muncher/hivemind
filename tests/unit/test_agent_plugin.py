@@ -988,6 +988,81 @@ def test_the_switch_skill_keeps_keys_and_fleets_apart() -> None:
     assert "never open a profile file" in flat
 
 
+@pytest.mark.parametrize(
+    ("args", "active", "checked"),
+    [
+        ((), None, ".hermes"),
+        (("-p", "Work"), None, ".hermes/profiles/work"),
+        (("chat", "--profile=ops"), None, ".hermes/profiles/ops"),
+        ((), "ops", ".hermes/profiles/ops"),
+        (("-p", "default"), "ops", ".hermes"),
+    ],
+)
+def test_launcher_checks_the_hermes_profile_the_session_runs_in(
+    tmp_path: Path, args: tuple[str, ...], active: str | None, checked: str
+) -> None:
+    """Hermes runs from the profile named by -p/--profile, else the one
+    `hermes profile use` saved; its config and .env are checked there."""
+    env = _fake_harness(tmp_path, "hermes")
+    root = tmp_path / ".hermes"
+    root.mkdir()
+    if active:
+        (root / "active_profile").write_text(f"{active}\n")
+    out = subprocess.run(
+        ["sh", str(LAUNCHER), "hermes", *args],
+        env=env,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert f"{tmp_path}/{checked}/config.yaml does not gate" in out.stderr
+    lines = out.stdout.splitlines()
+    assert lines[len(lines) - len(args) :] == list(args)  # passed through unchanged
+
+
+def test_launcher_accepts_a_gate_in_the_root_hermes_config_for_a_profile(tmp_path: Path) -> None:
+    env = _fake_harness(tmp_path, "hermes")
+    profile = tmp_path / ".hermes" / "profiles" / "ops"
+    profile.mkdir(parents=True)
+    (tmp_path / ".hermes" / "config.yaml").write_text("enabled: ${HIVEMIND_ENABLED}\n")
+    (profile / ".env").write_text("HIVEMIND_ENABLED=true\n")
+    out = subprocess.run(
+        ["sh", str(LAUNCHER), "hermes", "-p", "ops"],
+        env=env,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "does not gate" not in out.stderr
+    assert f"{profile}/.env sets HIVEMIND_ENABLED" in out.stderr
+
+
+@pytest.mark.parametrize("editor", ["code", "codium"])
+def test_launcher_empties_the_key_and_url_for_a_code_editor(tmp_path: Path, editor: str) -> None:
+    """The Cline and Kilo Code extensions read the editor's environment.
+    Empty, not unset, so a running editor's own values are replaced too."""
+    env = _fake_harness(tmp_path, editor)
+    (tmp_path / "bin" / editor).write_text(
+        "#!/bin/sh\n"
+        "u=${HIVEMIND_MCP_URL-unset}; k=${HIVEMIND_API_KEY-unset}\n"
+        'printf "%s\\n" "URL=${u:-set-empty}" "KEY=${k:-set-empty}" '
+        '"INCOGNITO=$HIVEMIND_INCOGNITO" "$@"\n'
+    )
+    env.update(HIVEMIND_MCP_URL="https://hm.example/mcp", HIVEMIND_API_KEY="hm_x")
+    out = subprocess.run(
+        ["sh", str(LAUNCHER), editor, "."],
+        env=env,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert out.stdout.splitlines() == ["URL=set-empty", "KEY=set-empty", "INCOGNITO=1", "."]
+    assert "already open" in out.stderr
+
+
 def test_launcher_starts_pi_with_the_key_and_url_unset(tmp_path: Path) -> None:
     """Pi connects through its built-in MCP client: the launcher only unsets
     the key and URL (the extension registers no server in an incognito
@@ -1902,7 +1977,13 @@ def test_launcher_keeps_oh_my_pi_and_gemini_from_contacting_the_server(
 
 @pytest.mark.parametrize(
     ("harness", "kept"),
-    [("cline", False), ("dsh", False), ("opencode", True), ("some-other-agent", True)],
+    [
+        ("cline", False),
+        ("dsh", False),
+        ("opencode", False),
+        ("kilo", False),
+        ("some-other-agent", True),
+    ],
 )
 def test_launcher_removes_the_key_and_url_only_where_the_server_is_kept_from_loading(
     tmp_path: Path, harness: str, kept: bool
@@ -2224,10 +2305,10 @@ def test_launcher_keeps_an_existing_config_overlay_but_drops_the_key(
     assert out.stdout.splitlines() == ["KEY=unset", "URL=unset", 'OVERLAY={"a":1}']
     assert f"{var} is already set" in out.stderr and "literal key" in out.stderr
     assert "hm_x" not in out.stderr
-    # Unset: the overlay is applied and the key stays (the plugin may need it).
+    # Unset: the overlay is applied, and nothing in the session needs the key.
     del env[var]
     fresh = _launch(tmp_path, env, harness)
-    assert fresh[0] == "KEY=hm_x" and "enabled" in fresh[2]
+    assert fresh[0] == "KEY=unset" and "enabled" in fresh[2]
 
 
 def test_the_root_package_also_serves_pi_and_opencode() -> None:

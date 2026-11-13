@@ -94,7 +94,10 @@ other harnesses.
 `HIVEMIND_API_KEY`, so the `${env:…}` references stay unexpanded and the
 server never connects, and the hooks see `HIVEMIND_INCOGNITO=1` and say the
 incognito line. The skills stay installed; the incognito line tells the
-agent to keep them quiet. A session started without the launcher is
+agent to keep them quiet. Hivemind runs in the extension, not the CLI, so
+start the editor through the launcher: `hivemind-incognito code .` (or
+`codium`) sets both variables empty for it. An editor window that is
+already open keeps its own environment, so close it first. A session started without the launcher is
 incognito by the same restraint only if the variables are unset.
 
 ## Removing
