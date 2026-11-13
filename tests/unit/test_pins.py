@@ -17,7 +17,6 @@ from hivemind.domain.audit import ActorKind, AuditAction, AuditFilters, AuditRec
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.domain.validation import MAX_PINS_PER_AGENT, MAX_PINS_PER_FLEET
 from hivemind.mcp.app import (
-    McpHivemind,
     hive_feedback,
     hive_pin,
     hive_pinned,
@@ -26,13 +25,15 @@ from hivemind.mcp.app import (
 )
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
-from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService
 from hivemind.services.pins import PinService
-from hivemind.services.read import ReadService
-from hivemind.services.search import SearchService
-from hivemind.services.write import WriteService
-from tests.fakes import FakeAuthenticator, make_clock, make_embedder, make_search_config
+from tests.fakes import (
+    FakeAuthenticator,
+    make_clock,
+    make_embedder,
+    make_search_config,
+    mcp_surface,
+)
 
 
 def _agent(name: str, level: TrustLevel, fleet: str = "fleet-a") -> Credential:
@@ -55,22 +56,8 @@ OUTSIDER = _agent("outsider", TrustLevel.CONTRIBUTOR, "fleet-b")
 ADMIN = Credential(user_id="admin", is_admin=True)
 
 
-def _surface(store: MemoryStore, credential: Credential) -> McpHivemind:
-    clock, embedder, config = make_clock(), make_embedder(), make_search_config()
-    return McpHivemind(
-        store=store,
-        write_service=WriteService(store, embedder),
-        search_service=SearchService(store, embedder, config, now_fn=clock),
-        governance_service=GovernanceService(store),
-        read_service=ReadService(store, GovernanceService(store), config),
-        access_service=AccessService(store),
-        search_config=config,
-        credential=credential,
-    )
-
-
 async def _write(store: MemoryStore, cred: Credential, summary: str, **kw: object) -> str:
-    result = await hive_write(_surface(store, cred), kind="decision", summary=summary, **kw)  # type: ignore[arg-type]
+    result = await hive_write(mcp_surface(store, cred), kind="decision", summary=summary, **kw)  # type: ignore[arg-type]
     assert "error" not in result, result
     return str(result["id"])
 
@@ -82,32 +69,32 @@ def _pinned_ids(result: dict[str, object]) -> list[str]:
 async def test_a_privileged_member_pins_and_every_member_reads_it() -> None:
     store = MemoryStore(make_clock())
     entry = await _write(store, DEV, "deploys freeze on Fridays")
-    pinned = await hive_pin(_surface(store, LEAD), entry)
+    pinned = await hive_pin(mcp_surface(store, LEAD), entry)
     assert pinned["pinned"] is True and pinned["fleet_id"] == "fleet-a"
     assert pinned["pinned_by"] == "lead"
-    briefing = await hive_pinned(_surface(store, DEV))
+    briefing = await hive_pinned(mcp_surface(store, DEV))
     assert briefing["fleet_id"] == "fleet-a"
     assert _pinned_ids(briefing) == [entry]
     pin = briefing["pins"][0]  # type: ignore[index]
     assert pin["summary"] == "deploys freeze on Fridays" and pin["state"] == "active"
     # Pinning again refreshes the one pin (ADR 0076).
-    again = await hive_pin(_surface(store, LEAD), entry)
+    again = await hive_pin(mcp_surface(store, LEAD), entry)
     assert again["entry_id"] == entry
-    assert _pinned_ids(await hive_pinned(_surface(store, DEV))) == [entry]
+    assert _pinned_ids(await hive_pinned(mcp_surface(store, DEV))) == [entry]
 
 
 async def test_contributors_and_privileged_members_and_admins_may_pin() -> None:
     store = MemoryStore(make_clock())
     entry = await _write(store, DEV, "a fleet decision")
-    mine = await hive_pin(_surface(store, DEV), entry)
+    mine = await hive_pin(mcp_surface(store, DEV), entry)
     assert mine["pinned"] is True and mine["pinned_by"] == "dev"
-    assert (await hive_pin(_surface(store, ADMIN), entry))["pinned"] is True
+    assert (await hive_pin(mcp_surface(store, ADMIN), entry))["pinned"] is True
 
 
 async def test_lurkers_and_other_fleets_may_not_pin_or_unpin() -> None:
     store = MemoryStore(make_clock())
     entry = await _write(store, DEV, "a fleet decision")
-    await hive_pin(_surface(store, DEV), entry)
+    await hive_pin(mcp_surface(store, DEV), entry)
     # A contributor of another fleet cannot even read the entry.
     for cred, code in (
         (LURKER, "permission_denied"),
@@ -115,26 +102,26 @@ async def test_lurkers_and_other_fleets_may_not_pin_or_unpin() -> None:
         (OTHER_LEAD, "permission_denied"),  # privileged: reads every fleet
     ):
         for unpin in (False, True):
-            denied = await hive_pin(_surface(store, cred), entry, unpin=unpin)
+            denied = await hive_pin(mcp_surface(store, cred), entry, unpin=unpin)
             assert denied["error"]["code"] == code, (cred.user_id, unpin)  # type: ignore[index]
-    assert _pinned_ids(await hive_pinned(_surface(store, DEV))) == [entry]
+    assert _pinned_ids(await hive_pinned(mcp_surface(store, DEV))) == [entry]
 
 
 async def test_a_member_unpins_someone_elses_pin() -> None:
     store = MemoryStore(make_clock())
     entry = await _write(store, LEAD, "outdated rule")
-    await hive_pin(_surface(store, LEAD), entry)
-    removed = await hive_pin(_surface(store, DEV), entry, unpin=True)
+    await hive_pin(mcp_surface(store, LEAD), entry)
+    removed = await hive_pin(mcp_surface(store, DEV), entry, unpin=True)
     assert removed["removed"] is True
-    assert (await hive_pinned(_surface(store, LEAD)))["pins"] == []
+    assert (await hive_pinned(mcp_surface(store, LEAD)))["pins"] == []
     again = await _write(store, DEV, "dev's own")
-    await hive_pin(_surface(store, DEV), again)
-    assert (await hive_pin(_surface(store, LEAD), again, unpin=True))["removed"] is True
+    await hive_pin(mcp_surface(store, DEV), again)
+    assert (await hive_pin(mcp_surface(store, LEAD), again, unpin=True))["removed"] is True
 
 
 async def test_an_agent_holds_a_bounded_number_of_pins() -> None:
     store = MemoryStore(make_clock())
-    dev = _surface(store, DEV)
+    dev = mcp_surface(store, DEV)
     ids = [await _write(store, DEV, f"decision {i}") for i in range(MAX_PINS_PER_AGENT + 2)]
     for entry in ids[:MAX_PINS_PER_AGENT]:
         assert (await hive_pin(dev, entry))["pinned"] is True
@@ -144,7 +131,7 @@ async def test_an_agent_holds_a_bounded_number_of_pins() -> None:
     # Re-pinning one of one's own pins is a refresh, within the cap.
     assert (await hive_pin(dev, ids[0]))["pinned"] is True
     # Another agent has its own count, and taking over a pin counts for the taker.
-    other = _surface(store, DEV2)
+    other = mcp_surface(store, DEV2)
     assert (await hive_pin(other, ids[MAX_PINS_PER_AGENT]))["pinned"] is True
     assert (await hive_pin(other, ids[0]))["pinned"] is True  # dev now holds two
     assert (await hive_pin(dev, ids[MAX_PINS_PER_AGENT + 1]))["pinned"] is True
@@ -157,24 +144,24 @@ async def test_an_agent_holds_a_bounded_number_of_pins() -> None:
 
 async def test_the_admin_is_exempt_from_the_agent_cap_but_not_the_fleet_cap() -> None:
     store = MemoryStore(make_clock())
-    admin = _surface(store, ADMIN)
+    admin = mcp_surface(store, ADMIN)
     ids = [await _write(store, DEV, f"decision {i}") for i in range(MAX_PINS_PER_FLEET + 1)]
     for entry in ids[:MAX_PINS_PER_FLEET]:
         assert (await hive_pin(admin, entry))["pinned"] is True
     full = await hive_pin(admin, ids[-1])
     assert "the fleet already has" in full["error"]["message"]  # type: ignore[index]
     # A full fleet refuses a member with the fleet message, not the agent one.
-    member = await hive_pin(_surface(store, DEV), ids[-1])
+    member = await hive_pin(mcp_surface(store, DEV), ids[-1])
     assert "the fleet already has" in member["error"]["message"]  # type: ignore[index]
     assert member["error"]["code"] == "invalid_input"  # type: ignore[index]
     # Unpinning frees a slot for a member.
     assert (await hive_pin(admin, ids[0], unpin=True))["removed"] is True
-    assert (await hive_pin(_surface(store, DEV), ids[-1]))["pinned"] is True
+    assert (await hive_pin(mcp_surface(store, DEV), ids[-1]))["pinned"] is True
 
 
 async def test_a_move_onto_a_new_version_counts_once_for_the_agent() -> None:
     store = MemoryStore(make_clock())
-    dev = _surface(store, DEV)
+    dev = mcp_surface(store, DEV)
     first = [await _write(store, DEV, f"rule {i}") for i in range(MAX_PINS_PER_AGENT)]
     for entry in first:
         await hive_pin(dev, entry)
@@ -184,7 +171,7 @@ async def test_a_move_onto_a_new_version_counts_once_for_the_agent() -> None:
     assert len((await hive_pinned(dev))["pins"]) == MAX_PINS_PER_AGENT  # type: ignore[arg-type]
     # A lead's pin moved onto a new version is dev's to hold afterwards: dev is full.
     lead_pin = await _write(store, LEAD, "lead rule")
-    await hive_pin(_surface(store, LEAD), lead_pin)
+    await hive_pin(mcp_surface(store, LEAD), lead_pin)
     newer = await _write(store, LEAD, "lead rule, revised", supersedes=[lead_pin])
     refused = await hive_pin(dev, newer)
     assert refused["error"]["code"] == "invalid_input"  # type: ignore[index]
@@ -194,13 +181,13 @@ async def test_a_move_onto_a_new_version_counts_once_for_the_agent() -> None:
 async def test_only_active_fleet_entries_can_be_pinned() -> None:
     store = MemoryStore(make_clock())
     own_note = await _write(store, LEAD, "my own note", scope="self")
-    result = await hive_pin(_surface(store, LEAD), own_note)
+    result = await hive_pin(mcp_surface(store, LEAD), own_note)
     assert result["error"]["code"] == "invalid_input"  # type: ignore[index]
     gone = await _write(store, LEAD, "soon withdrawn")
-    await hive_withdraw(_surface(store, LEAD), gone)
-    inactive = await hive_pin(_surface(store, LEAD), gone)
+    await hive_withdraw(mcp_surface(store, LEAD), gone)
+    inactive = await hive_pin(mcp_surface(store, LEAD), gone)
     assert inactive["error"]["code"] == "not_active"  # type: ignore[index]
-    missing = await hive_pin(_surface(store, LEAD), "00000000-0000-0000-0000-000000000000")
+    missing = await hive_pin(mcp_surface(store, LEAD), "00000000-0000-0000-0000-000000000000")
     assert missing["error"]["code"] == "not_found"  # type: ignore[index]
 
 
@@ -208,39 +195,39 @@ async def test_a_superseded_version_cannot_be_pinned_but_its_successor_can() -> 
     store = MemoryStore(make_clock())
     old = await _write(store, LEAD, "rule v1")
     new = await _write(store, LEAD, "rule v2", supersedes=[old])
-    refused = await hive_pin(_surface(store, LEAD), old)
+    refused = await hive_pin(mcp_surface(store, LEAD), old)
     assert refused["error"]["code"] == "not_active"  # type: ignore[index]
-    assert _pinned_ids(await hive_pinned(_surface(store, DEV))) == []
-    assert (await hive_pin(_surface(store, LEAD), new))["pinned"] is True
+    assert _pinned_ids(await hive_pinned(mcp_surface(store, DEV))) == []
+    assert (await hive_pin(mcp_surface(store, LEAD), new))["pinned"] is True
 
 
 async def test_an_org_entry_cannot_be_pinned_by_anyone() -> None:
     store = MemoryStore(make_clock())
     org = await _write(store, ADMIN, "org-wide note", scope="org", agent="admin-bot")
     for cred in (LEAD, ADMIN):
-        refused = await hive_pin(_surface(store, cred), org)
+        refused = await hive_pin(mcp_surface(store, cred), org)
         assert refused["error"]["code"] == "invalid_input", cred.user_id  # type: ignore[index]
         assert "only fleet entries" in refused["error"]["message"]  # type: ignore[index]
-    assert _pinned_ids(await hive_pinned(_surface(store, DEV))) == []
+    assert _pinned_ids(await hive_pinned(mcp_surface(store, DEV))) == []
 
 
 async def test_unpin_reports_whether_it_was_pinned() -> None:
     store = MemoryStore(make_clock())
     entry = await _write(store, LEAD, "pinned for a while")
-    lead = _surface(store, LEAD)
+    lead = mcp_surface(store, LEAD)
     await hive_pin(lead, entry)
     assert (await hive_pin(lead, entry, unpin=True))["removed"] is True
     assert (await hive_pin(lead, entry, unpin=True))["removed"] is False
-    assert (await hive_pinned(_surface(store, DEV)))["pins"] == []
+    assert (await hive_pinned(mcp_surface(store, DEV)))["pins"] == []
 
 
 async def test_a_pin_follows_supersession() -> None:
     store = MemoryStore(make_clock())
-    lead = _surface(store, LEAD)
+    lead = mcp_surface(store, LEAD)
     old = await _write(store, LEAD, "use runner pool A")
     await hive_pin(lead, old)
     new = await _write(store, DEV, "use runner pool B", supersedes=[old])
-    briefing = await hive_pinned(_surface(store, DEV))
+    briefing = await hive_pinned(mcp_surface(store, DEV))
     pin = briefing["pins"][0]  # type: ignore[index]
     assert (pin["id"], pin["pinned_id"]) == (new, old)
     assert pin["summary"] == "use runner pool B"
@@ -251,7 +238,7 @@ async def test_the_version_a_pin_shows_unpins_it_and_does_not_pin_twice() -> Non
     superseded, so that id must work for unpinning, and pinning it again
     must not add a second pin that shows the same entry twice."""
     store = MemoryStore(make_clock())
-    lead = _surface(store, LEAD)
+    lead = mcp_surface(store, LEAD)
     old = await _write(store, LEAD, "use runner pool A")
     await hive_pin(lead, old)
     new = await _write(store, DEV, "use runner pool B", supersedes=[old])
@@ -269,7 +256,7 @@ async def test_the_version_a_pin_shows_unpins_it_and_does_not_pin_twice() -> Non
 
 async def test_two_pins_that_lead_to_one_version_show_it_once() -> None:
     store = MemoryStore(make_clock())
-    lead = _surface(store, LEAD)
+    lead = mcp_surface(store, LEAD)
     a = await _write(store, LEAD, "rule A")
     b = await _write(store, LEAD, "rule B")
     await hive_pin(lead, a)
@@ -283,11 +270,11 @@ async def test_two_pins_that_lead_to_one_version_show_it_once() -> None:
 async def test_another_fleets_pins_are_empty_to_a_contributor() -> None:
     store = MemoryStore(make_clock())
     entry = await _write(store, LEAD, "fleet-a only")
-    await hive_pin(_surface(store, LEAD), entry)
-    assert (await hive_pinned(_surface(store, OUTSIDER), "fleet-a"))["pins"] == []
-    assert _pinned_ids(await hive_pinned(_surface(store, OTHER_LEAD), "fleet-a")) == [entry]
-    assert (await hive_pinned(_surface(store, OUTSIDER)))["pins"] == []  # own fleet: none
-    assert (await hive_pinned(_surface(store, ADMIN)))["pins"] == []  # no home fleet
+    await hive_pin(mcp_surface(store, LEAD), entry)
+    assert (await hive_pinned(mcp_surface(store, OUTSIDER), "fleet-a"))["pins"] == []
+    assert _pinned_ids(await hive_pinned(mcp_surface(store, OTHER_LEAD), "fleet-a")) == [entry]
+    assert (await hive_pinned(mcp_surface(store, OUTSIDER)))["pins"] == []  # own fleet: none
+    assert (await hive_pinned(mcp_surface(store, ADMIN)))["pins"] == []  # no home fleet
 
 
 async def test_pins_are_newest_first() -> None:
@@ -298,7 +285,7 @@ async def test_pins_are_newest_first() -> None:
         return clock()
 
     store = MemoryStore(ticking)
-    lead = _surface(store, LEAD)
+    lead = mcp_surface(store, LEAD)
     first = await _write(store, LEAD, "first")
     second = await _write(store, LEAD, "second")
     await hive_pin(lead, first)
@@ -342,7 +329,7 @@ async def _audit(store: MemoryStore) -> list[AuditRecord]:
 async def test_pin_and_unpin_write_audit_rows_without_a_key() -> None:
     store = MemoryStore(make_clock())
     entry = await _write(store, DEV, "deploys freeze on Fridays")
-    lead = _surface(store, LEAD)
+    lead = mcp_surface(store, LEAD)
     await hive_pin(lead, entry)
     await hive_pin(lead, entry, unpin=True)
     await hive_pin(lead, entry, unpin=True)  # nothing to remove: not audited
@@ -358,7 +345,7 @@ async def test_an_admin_pin_is_audited_under_the_admin_key_fingerprint() -> None
     store = MemoryStore(make_clock())
     entry = await _write(store, DEV, "an admin-pinned decision")
     admin = Credential(user_id="admin", is_admin=True, key_id="0123456789ab")
-    await hive_pin(_surface(store, admin), entry)
+    await hive_pin(mcp_surface(store, admin), entry)
     [row] = await _audit(store)
     assert (row.actor_kind, row.actor) == (ActorKind.ADMIN_KEY, "admin:0123456789ab")
 
@@ -366,14 +353,14 @@ async def test_an_admin_pin_is_audited_under_the_admin_key_fingerprint() -> None
 async def test_a_refused_pin_or_unpin_writes_no_audit_row() -> None:
     store = MemoryStore(make_clock())
     entry = await _write(store, DEV, "a fleet decision")
-    await hive_pin(_surface(store, LURKER), entry)
-    await hive_pin(_surface(store, LURKER), entry, unpin=True)
+    await hive_pin(mcp_surface(store, LURKER), entry)
+    await hive_pin(mcp_surface(store, LURKER), entry, unpin=True)
     assert await _audit(store) == []
 
 
 async def test_unpinning_by_the_shown_version_is_audited_once() -> None:
     store = MemoryStore(make_clock())
-    lead = _surface(store, LEAD)
+    lead = mcp_surface(store, LEAD)
     old = await _write(store, LEAD, "use runner pool A")
     await hive_pin(lead, old)
     new = await _write(store, DEV, "use runner pool B", supersedes=[old])
@@ -386,18 +373,18 @@ async def test_unpinning_by_the_shown_version_is_audited_once() -> None:
 async def test_a_fresh_pin_is_not_changed_since_pin() -> None:
     store = MemoryStore(make_clock())
     entry = await _write(store, LEAD, "use runner pool A")
-    await hive_pin(_surface(store, LEAD), entry)
-    pin = (await hive_pinned(_surface(store, DEV)))["pins"][0]  # type: ignore[index]
+    await hive_pin(mcp_surface(store, LEAD), entry)
+    pin = (await hive_pinned(mcp_surface(store, DEV)))["pins"][0]  # type: ignore[index]
     assert pin["changed_since_pin"] is False and pin["change_reason"] is None
 
 
 async def test_a_superseded_pin_is_changed_since_pin() -> None:
     store = MemoryStore(make_clock())
-    lead = _surface(store, LEAD)
+    lead = mcp_surface(store, LEAD)
     old = await _write(store, LEAD, "use runner pool A")
     await hive_pin(lead, old)
     await _write(store, DEV, "use runner pool B", supersedes=[old])
-    pin = (await hive_pinned(_surface(store, DEV)))["pins"][0]  # type: ignore[index]
+    pin = (await hive_pinned(mcp_surface(store, DEV)))["pins"][0]  # type: ignore[index]
     assert pin["changed_since_pin"] is True and pin["change_reason"] == "superseded"
 
 
@@ -408,16 +395,16 @@ async def test_a_stale_or_wrong_verdict_after_the_pin_flags_it() -> None:
     before = Feedback(entry, "dev", "dev", Verdict.STALE, updated_at=clock())
     await store.record_feedback(before)  # a verdict from before the pin
     clock.advance_days(1)
-    await hive_pin(_surface(store, LEAD), entry)
-    pin = (await hive_pinned(_surface(store, DEV)))["pins"][0]  # type: ignore[index]
+    await hive_pin(mcp_surface(store, LEAD), entry)
+    pin = (await hive_pinned(mcp_surface(store, DEV)))["pins"][0]  # type: ignore[index]
     assert pin["changed_since_pin"] is False
 
     clock.advance_days(1)
     await store.record_feedback(Feedback(entry, "ops", "ops", Verdict.HELPFUL, updated_at=clock()))
-    pin = (await hive_pinned(_surface(store, DEV)))["pins"][0]  # type: ignore[index]
+    pin = (await hive_pinned(mcp_surface(store, DEV)))["pins"][0]  # type: ignore[index]
     assert pin["changed_since_pin"] is False  # applause is not a change
     await store.record_feedback(Feedback(entry, "ops2", "ops2", Verdict.WRONG, updated_at=clock()))
-    pin = (await hive_pinned(_surface(store, DEV)))["pins"][0]  # type: ignore[index]
+    pin = (await hive_pinned(mcp_surface(store, DEV)))["pins"][0]  # type: ignore[index]
     assert pin["changed_since_pin"] is True and pin["change_reason"] == "flagged"
 
 
@@ -425,9 +412,9 @@ async def test_superseded_wins_over_flagged_and_the_rest_listing_carries_both() 
     clock = make_clock()
     store = MemoryStore(clock)
     old = await _write(store, LEAD, "use runner pool A")
-    await hive_pin(_surface(store, LEAD), old)
+    await hive_pin(mcp_surface(store, LEAD), old)
     steady = await _write(store, LEAD, "freeze on Fridays")
-    await hive_pin(_surface(store, LEAD), steady)
+    await hive_pin(mcp_surface(store, LEAD), steady)
     clock.advance_days(1)
     await store.record_feedback(Feedback(old, "ops", "ops", Verdict.STALE, updated_at=clock()))
     await _write(store, DEV, "use runner pool B", supersedes=[old])
@@ -455,7 +442,7 @@ async def test_an_agent_key_with_a_fingerprint_is_audited_by_name() -> None:
     assert keyed.audit_actor() == "lead"
     store = MemoryStore(make_clock())
     entry = await _write(store, DEV, "a keyed pin")
-    await hive_pin(_surface(store, keyed), entry)
+    await hive_pin(mcp_surface(store, keyed), entry)
     [row] = await _audit(store)
     assert (row.actor_kind, row.actor) == (ActorKind.AGENT_KEY, "lead")
 
@@ -463,7 +450,7 @@ async def test_an_agent_key_with_a_fingerprint_is_audited_by_name() -> None:
 async def test_repinning_acknowledges_a_change_and_moves_to_the_front() -> None:
     clock = make_clock()
     store = MemoryStore(clock)
-    lead = _surface(store, LEAD)
+    lead = mcp_surface(store, LEAD)
     old = await _write(store, LEAD, "use runner pool A")
     other = await _write(store, LEAD, "freeze on Fridays")
     await hive_pin(lead, old)
@@ -489,7 +476,7 @@ async def test_repinning_acknowledges_a_change_and_moves_to_the_front() -> None:
 async def test_repinning_a_flagged_entry_clears_the_flag() -> None:
     clock = make_clock()
     store = MemoryStore(clock)
-    lead = _surface(store, LEAD)
+    lead = mcp_surface(store, LEAD)
     entry = await _write(store, LEAD, "use runner pool A")
     await hive_pin(lead, entry)
     clock.advance_days(1)
@@ -507,11 +494,11 @@ async def test_a_verdict_right_after_a_pin_flags_it_when_the_store_clock_runs_ah
     clock = make_clock(datetime(2100, 1, 1, tzinfo=UTC))
     store = MemoryStore(clock)
     entry = await _write(store, LEAD, "use runner pool A")
-    await hive_pin(_surface(store, LEAD), entry)
+    await hive_pin(mcp_surface(store, LEAD), entry)
     clock.advance_days(1)
-    result = await hive_feedback(_surface(store, DEV), entry_id=entry, verdict="stale")
+    result = await hive_feedback(mcp_surface(store, DEV), entry_id=entry, verdict="stale")
     assert "error" not in result, result
-    assert (await hive_pinned(_surface(store, DEV)))["pins"][0]["change_reason"] == "flagged"  # type: ignore[index]
+    assert (await hive_pinned(mcp_surface(store, DEV)))["pins"][0]["change_reason"] == "flagged"  # type: ignore[index]
 
 
 async def test_a_repin_after_a_verdict_clears_it_when_the_store_clock_lags() -> None:
@@ -520,24 +507,24 @@ async def test_a_repin_after_a_verdict_clears_it_when_the_store_clock_lags() -> 
     clock = make_clock(datetime(2000, 1, 1, tzinfo=UTC))
     store = MemoryStore(clock)
     entry = await _write(store, LEAD, "use runner pool A")
-    await hive_pin(_surface(store, LEAD), entry)
+    await hive_pin(mcp_surface(store, LEAD), entry)
     clock.advance_days(1)
-    result = await hive_feedback(_surface(store, DEV), entry_id=entry, verdict="wrong")
+    result = await hive_feedback(mcp_surface(store, DEV), entry_id=entry, verdict="wrong")
     assert "error" not in result, result
     clock.advance_days(1)
-    await hive_pin(_surface(store, LEAD), entry)
-    assert (await hive_pinned(_surface(store, DEV)))["pins"][0]["changed_since_pin"] is False  # type: ignore[index]
+    await hive_pin(mcp_surface(store, LEAD), entry)
+    assert (await hive_pinned(mcp_surface(store, DEV)))["pins"][0]["changed_since_pin"] is False  # type: ignore[index]
 
 
 async def test_a_note_on_a_helpful_verdict_is_not_a_flag() -> None:
     clock = make_clock()
     store = MemoryStore(clock)
     entry = await _write(store, LEAD, "use runner pool A")
-    await hive_pin(_surface(store, LEAD), entry)
+    await hive_pin(mcp_surface(store, LEAD), entry)
     clock.advance_days(1)
     fb = Feedback(entry, "ops", "ops", Verdict.HELPFUL, note="worked", updated_at=clock())
     await store.record_feedback(fb)
-    assert (await hive_pinned(_surface(store, DEV)))["pins"][0]["changed_since_pin"] is False  # type: ignore[index]
+    assert (await hive_pinned(mcp_surface(store, DEV)))["pins"][0]["changed_since_pin"] is False  # type: ignore[index]
 
 
 async def test_a_revoked_reporters_verdict_does_not_flag() -> None:
@@ -545,13 +532,13 @@ async def test_a_revoked_reporters_verdict_does_not_flag() -> None:
     store = MemoryStore(clock)
     await store.register_agent("ghost", None)
     entry = await _write(store, LEAD, "use runner pool A")
-    await hive_pin(_surface(store, LEAD), entry)
+    await hive_pin(mcp_surface(store, LEAD), entry)
     clock.advance_days(1)
     await store.record_feedback(
         Feedback(entry, "ghost", "ghost", Verdict.STALE, updated_at=clock())
     )
     await store.revoke_agent("ghost")
-    assert (await hive_pinned(_surface(store, DEV)))["pins"][0]["changed_since_pin"] is False  # type: ignore[index]
+    assert (await hive_pinned(mcp_surface(store, DEV)))["pins"][0]["changed_since_pin"] is False  # type: ignore[index]
 
 
 # -- withdrawn entries leave the briefing (ADR 0096) --------------------------
@@ -560,8 +547,8 @@ async def test_a_revoked_reporters_verdict_does_not_flag() -> None:
 async def test_a_contributors_pin_is_audited_as_an_agent_key() -> None:
     store = MemoryStore(make_clock())
     entry = await _write(store, DEV, "a fleet decision")
-    await hive_pin(_surface(store, DEV2), entry)
-    await hive_pin(_surface(store, DEV2), entry, unpin=True)
+    await hive_pin(mcp_surface(store, DEV2), entry)
+    await hive_pin(mcp_surface(store, DEV2), entry, unpin=True)
     rows = list(reversed(await _audit(store)))
     assert [(r.action, r.actor_kind, r.actor) for r in rows] == [
         (AuditAction.ENTRY_PIN, ActorKind.AGENT_KEY, "dev2"),
@@ -574,10 +561,10 @@ async def test_withdrawing_a_pinned_entry_unpins_it_and_audits_the_withdrawer() 
     store = MemoryStore(make_clock())
     entry = await _write(store, DEV, "temporary rule")
     keep = await _write(store, DEV, "lasting rule")
-    await hive_pin(_surface(store, LEAD), entry)
-    await hive_pin(_surface(store, LEAD), keep)
-    assert (await hive_withdraw(_surface(store, DEV), entry))["state"] == "withdrawn"
-    assert _pinned_ids(await hive_pinned(_surface(store, DEV))) == [keep]
+    await hive_pin(mcp_surface(store, LEAD), entry)
+    await hive_pin(mcp_surface(store, LEAD), keep)
+    assert (await hive_withdraw(mcp_surface(store, DEV), entry))["state"] == "withdrawn"
+    assert _pinned_ids(await hive_pinned(mcp_surface(store, DEV))) == [keep]
     # The pin row is gone, not just hidden: it no longer counts toward the caps.
     assert [p.entry_id for p in await store.list_pins("fleet-a")] == [keep]
     unpins = [r for r in await _audit(store) if r.action is AuditAction.ENTRY_UNPIN]
@@ -589,18 +576,18 @@ async def test_withdrawing_a_pinned_entry_unpins_it_and_audits_the_withdrawer() 
 async def test_withdrawing_an_unpinned_entry_writes_no_unpin_row() -> None:
     store = MemoryStore(make_clock())
     entry = await _write(store, DEV, "never pinned")
-    await hive_withdraw(_surface(store, DEV), entry)
+    await hive_withdraw(mcp_surface(store, DEV), entry)
     assert [r for r in await _audit(store) if r.action is AuditAction.ENTRY_UNPIN] == []
 
 
 async def test_withdrawing_the_version_a_pin_followed_removes_that_pin() -> None:
     store = MemoryStore(make_clock())
     old = await _write(store, LEAD, "use runner pool A")
-    await hive_pin(_surface(store, LEAD), old)
+    await hive_pin(mcp_surface(store, LEAD), old)
     new = await _write(store, DEV, "use runner pool B", supersedes=[old])
-    assert _pinned_ids(await hive_pinned(_surface(store, DEV))) == [new]
-    await hive_withdraw(_surface(store, DEV), new)
-    assert (await hive_pinned(_surface(store, DEV)))["pins"] == []
+    assert _pinned_ids(await hive_pinned(mcp_surface(store, DEV))) == [new]
+    await hive_withdraw(mcp_surface(store, DEV), new)
+    assert (await hive_pinned(mcp_surface(store, DEV)))["pins"] == []
     assert await store.list_pins("fleet-a") == []
     [row] = [r for r in await _audit(store) if r.action is AuditAction.ENTRY_UNPIN]
     assert row.target == new
@@ -610,9 +597,9 @@ async def test_withdrawing_the_version_a_pin_followed_removes_that_pin() -> None
 async def test_an_admin_withdrawal_unpins_under_the_admin_key() -> None:
     store = MemoryStore(make_clock())
     entry = await _write(store, DEV, "a rule an admin retracts")
-    await hive_pin(_surface(store, LEAD), entry)
+    await hive_pin(mcp_surface(store, LEAD), entry)
     admin = Credential(user_id="admin", is_admin=True, key_id="0123456789ab")
-    assert (await hive_withdraw(_surface(store, admin), entry))["state"] == "withdrawn"
+    assert (await hive_withdraw(mcp_surface(store, admin), entry))["state"] == "withdrawn"
     rows = await _audit(store)
     unpin = next(r for r in rows if r.action is AuditAction.ENTRY_UNPIN)
     assert (unpin.actor_kind, unpin.actor) == (ActorKind.ADMIN_KEY, "admin:0123456789ab")
@@ -623,7 +610,7 @@ async def test_an_admin_withdrawal_unpins_under_the_admin_key() -> None:
 async def test_a_portal_withdrawal_unpins_too() -> None:
     store = MemoryStore(make_clock())
     entry = await _write(store, DEV, "withdrawn from the portal")
-    await hive_pin(_surface(store, LEAD), entry)
+    await hive_pin(mcp_surface(store, LEAD), entry)
     await GovernanceService(store).withdraw_own(DEV, entry, "obsolete")
     assert await store.list_pins("fleet-a") == []
     [row] = [r for r in await _audit(store) if r.action is AuditAction.ENTRY_UNPIN]
@@ -646,7 +633,7 @@ async def test_the_briefing_skips_a_withdrawn_entry_left_from_before() -> None:
     await store.pin_entry("fleet-a", keep, "lead", 10)
     await store.withdraw_entry(entry, "wrong", by_user="dev")  # the store alone: pin stays
     assert [p.entry_id for p in await store.list_pins("fleet-a")] == [keep, entry]
-    assert _pinned_ids(await hive_pinned(_surface(store, DEV))) == [keep]
+    assert _pinned_ids(await hive_pinned(mcp_surface(store, DEV))) == [keep]
 
 
 async def test_a_withdrawer_who_moved_fleets_still_unpins_other_authors_versions() -> None:
@@ -655,7 +642,7 @@ async def test_a_withdrawer_who_moved_fleets_still_unpins_other_authors_versions
     older pinned version another author wrote."""
     store = MemoryStore(make_clock())
     old = await _write(store, LEAD, "use runner pool A")
-    await hive_pin(_surface(store, LEAD), old)
+    await hive_pin(mcp_surface(store, LEAD), old)
     new = await _write(store, DEV, "use runner pool B", supersedes=[old])
     entry = await store.get_entry(new)
     assert entry is not None
@@ -668,7 +655,7 @@ async def test_a_withdrawer_who_moved_fleets_still_unpins_other_authors_versions
 
 async def test_a_leftover_withdrawn_pin_is_swept_on_the_next_pin_and_frees_the_cap() -> None:
     store = MemoryStore(make_clock())
-    dev = _surface(store, DEV)
+    dev = mcp_surface(store, DEV)
     ids = [await _write(store, DEV, f"rule {i}") for i in range(MAX_PINS_PER_AGENT + 1)]
     for entry in ids[:MAX_PINS_PER_AGENT]:
         await hive_pin(dev, entry)

@@ -10,15 +10,16 @@ from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
 from hivemind.domain.entry import EntryFilters
-from hivemind.mcp.app import McpHivemind, hive_feedback, hive_list, hive_search, hive_write
+from hivemind.mcp.app import hive_feedback, hive_list, hive_search, hive_write
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
-from hivemind.services.access import AccessService
-from hivemind.services.governance import GovernanceService
-from hivemind.services.read import ReadService
-from hivemind.services.search import SearchService
-from hivemind.services.write import WriteService
-from tests.fakes import FakeAuthenticator, make_clock, make_embedder, make_search_config
+from tests.fakes import (
+    FakeAuthenticator,
+    make_clock,
+    make_embedder,
+    make_search_config,
+    mcp_surface,
+)
 
 
 def _agent(name: str, level: TrustLevel) -> Credential:
@@ -36,23 +37,9 @@ WRITER = _agent("writer", TrustLevel.CONTRIBUTOR)
 LURKER = _agent("lurker", TrustLevel.LURKER)
 
 
-def _surface(store: MemoryStore, credential: Credential) -> McpHivemind:
-    clock, embedder, config = make_clock(), make_embedder(), make_search_config()
-    return McpHivemind(
-        store=store,
-        write_service=WriteService(store, embedder),
-        search_service=SearchService(store, embedder, config, now_fn=clock),
-        governance_service=GovernanceService(store),
-        read_service=ReadService(store, GovernanceService(store), config),
-        access_service=AccessService(store),
-        search_config=config,
-        credential=credential,
-    )
-
-
 async def _seed(store: MemoryStore) -> dict[str, str]:
     """Four billing entries: one stale, one wrong, one helpful, one untouched."""
-    writer, lurker = _surface(store, WRITER), _surface(store, LURKER)
+    writer, lurker = mcp_surface(store, WRITER), mcp_surface(store, LURKER)
     ids: dict[str, str] = {}
     for name in ("stale", "wrong", "helpful", "untouched"):
         entry = await hive_write(writer, kind="fact", summary=f"billing {name} fact")
@@ -65,16 +52,16 @@ async def _seed(store: MemoryStore) -> dict[str, str]:
 async def test_mcp_list_flagged_returns_stale_and_wrong_only() -> None:
     store = MemoryStore(make_clock())
     ids = await _seed(store)
-    result = await hive_list(_surface(store, WRITER), flagged=True)
+    result = await hive_list(mcp_surface(store, WRITER), flagged=True)
     assert {e["id"] for e in result["entries"]} == {ids["stale"], ids["wrong"]}  # type: ignore[index]
-    unfiltered = await hive_list(_surface(store, WRITER))
+    unfiltered = await hive_list(mcp_surface(store, WRITER))
     assert len(unfiltered["entries"]) == 4  # type: ignore[arg-type]
 
 
 async def test_mcp_search_flagged() -> None:
     store = MemoryStore(make_clock())
     ids = await _seed(store)
-    result = await hive_search(_surface(store, WRITER), query="billing fact", flagged=True)
+    result = await hive_search(mcp_surface(store, WRITER), query="billing fact", flagged=True)
     assert {h["id"] for h in result["hits"]} == {ids["stale"], ids["wrong"]}  # type: ignore[index]
 
 
@@ -83,12 +70,12 @@ async def test_flagged_hides_entries_already_superseded() -> None:
     store = MemoryStore(make_clock())
     ids = await _seed(store)
     await hive_write(
-        _surface(store, WRITER),
+        mcp_surface(store, WRITER),
         kind="fact",
         summary="billing fact, corrected",
         supersedes=[ids["stale"]],
     )
-    result = await hive_list(_surface(store, WRITER), flagged=True)
+    result = await hive_list(mcp_surface(store, WRITER), flagged=True)
     assert {e["id"] for e in result["entries"]} == {ids["wrong"]}  # type: ignore[index]
 
 

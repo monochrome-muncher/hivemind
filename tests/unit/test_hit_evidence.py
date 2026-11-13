@@ -19,8 +19,8 @@ from hivemind.domain.feedback import (
 from hivemind.mcp.app import hive_search, hive_write
 from hivemind.memstore import MemoryStore
 from hivemind.services.search import SearchService
-from tests.fakes import FIXED_NOW, make_clock, make_embedder, make_search_config
-from tests.unit.test_readable_feedback import WRITER, _rest_client, _surface
+from tests.fakes import FIXED_NOW, make_clock, make_embedder, make_search_config, mcp_surface
+from tests.unit.test_readable_feedback import WRITER, _rest_client
 
 T0 = datetime(2026, 9, 1, tzinfo=UTC)
 EVIDENCE = ("contested", "correction", "supersedes", "state")
@@ -31,7 +31,7 @@ def _min(n: int) -> datetime:
 
 
 async def _fact(store: MemoryStore, summary: str = "billing runs on node 20", **kw: object) -> str:
-    entry = await hive_write(_surface(store, WRITER), kind="fact", summary=summary, **kw)  # type: ignore[arg-type]
+    entry = await hive_write(mcp_surface(store, WRITER), kind="fact", summary=summary, **kw)  # type: ignore[arg-type]
     return str(entry["id"])
 
 
@@ -42,7 +42,7 @@ async def _report(
 
 
 async def _hits(store: MemoryStore, **kw: object) -> list[dict[str, object]]:
-    reply = await hive_search(_surface(store, WRITER), query="billing node", **kw)  # type: ignore[arg-type]
+    reply = await hive_search(mcp_surface(store, WRITER), query="billing node", **kw)  # type: ignore[arg-type]
     return reply["hits"]  # type: ignore[return-value,index]
 
 
