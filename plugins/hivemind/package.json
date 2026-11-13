@@ -13,6 +13,7 @@
     "omp"
   ],
   "files": [
+    "bin/",
     "cordis.patch.yml",
     "dsh/",
     "skills/",
