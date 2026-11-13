@@ -675,7 +675,7 @@ way):
 /path/to/hivemind/plugins/hivemind/bin/hivemind-incognito claude
 ```
 
-It also takes `codex`, `copilot`, `cursor` (or `cursor-agent`), `dsh`,
+It also takes `codex`, `copilot`, `cursor` (or `cursor-agent` or `agent`), `dsh`,
 `gemini`, `agy`, `hermes`, `junie`, `pi`, `omp`, `opencode`, `cline`,
 `kilocode` (or `kilo`) and `code` (or `codium`). To make it shorter to type, link it into a folder
 on your `PATH`:

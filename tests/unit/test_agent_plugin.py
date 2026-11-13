@@ -875,6 +875,14 @@ def test_hivemind_as_starts_a_harness_with_the_profiles_key(tmp_path: Path) -> N
     assert "profile client" in out.stderr and "hm_client" not in out.stderr
 
 
+@pytest.mark.parametrize("name", ["cursor-agent", "agent"])
+def test_hivemind_as_reads_the_cursor_profile_for_cursors_cli(tmp_path: Path, name: str) -> None:
+    env, config = _profiles(tmp_path, name)
+    _key_file(config / "cursor.client.env", "hm_client")
+    out = _switch(env, tmp_path, "client", name)
+    assert out.stdout.splitlines()[0] == "KEY=hm_client"
+
+
 def test_hivemind_as_never_falls_back_to_an_inherited_key(tmp_path: Path) -> None:
     """A profile file without a key must fail, not run as the shell's agent."""
     env, config = _profiles(tmp_path, "codex")
@@ -2113,7 +2121,7 @@ def test_cursor_variables_alone_keep_the_claude_shape() -> None:
     assert rule.startswith("---\n") and "alwaysApply: true" in rule.split("---\n")[1]
 
 
-@pytest.mark.parametrize("name", ["cursor", "cursor-agent"])
+@pytest.mark.parametrize("name", ["cursor", "cursor-agent", "agent"])
 def test_launcher_unsets_the_key_and_url_for_cursor(tmp_path: Path, name: str) -> None:
     """No per-session MCP switch: the `${env:...}` references resolve empty,
     and the launcher says the rest is incognito by restraint."""
