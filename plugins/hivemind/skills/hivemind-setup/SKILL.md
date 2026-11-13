@@ -170,7 +170,7 @@ and the header `Authorization: Bearer <HIVEMIND_API_KEY>`, taking the
 value from the environment (or a command or keychain option, if the
 harness has one) rather than writing the key inline. If the harness only
 accepts a literal key in its own user-private config file, `chmod 600` that
-file and never use a project-level one. Copy the skill folders (`hivemind`, `hivemind-setup`, `hivemind-update`) into the
+file and never use a project-level one. Copy the skill folders (`hivemind`, `hivemind-setup`, `hivemind-update`, `hivemind-switch`) into the
 harness's skills folder, if it has one.
 
 ### Key file
@@ -240,6 +240,8 @@ already shows an **active agent** whose name does not mention this
 harness, ask the user whether to share that identity or register a new
 one. Keep each harness's key in its own file or variable (see "Key
 file"; your harness's file names any per-harness variable it supports).
+A person with agents in several fleets keeps one profile per fleet: the
+**hivemind-switch** skill sets that up.
 
 **Registering again is safe, with the same name and the same owner alias.**
 A registration that is pending leaves you on the org key, so a new

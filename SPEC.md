@@ -315,6 +315,8 @@ A search may pass `explore: true` (REST body field; `hive_search` argument; defa
 
 Every key that authenticates records `credentials.last_used_at`, at most once an hour (ADR 0110); an agent sees its own key's value in `whoami` and the portal home (ADR 0114). The write is best effort and outside the request; it only feeds the admin agent list and changes no access.
 
+A person with agents in several fleets picks one per session on the client, with a **key profile** (ADR 0150): the plugin's `hivemind-as <profile> <harness>` launcher starts the harness with that agent's key. The server is unaware of profiles; a switch is a new session.
+
 No OAuth/SSO; keys are issued by the org operator via the admin surface (§12.4). (An org with an IdP is a later story.) This table supersedes ADR 0008's key kinds (`user`/`agent`/`admin`) — ADR 0012. The agent key is now the credential the MCP runners verify (ADRs 0009–0010).
 
 ### 8.2 Deployment (ADR 0026, superseding ADR 0007)

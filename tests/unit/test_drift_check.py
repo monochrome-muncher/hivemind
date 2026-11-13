@@ -145,9 +145,8 @@ def test_hand_copied_skills_and_hooks_are_compared(tmp_path: Path) -> None:
     latest = _release(tmp_path / "latest")
     installed = _install(tmp_path / "installed")
     skills = tmp_path / "cline-skills"
-    shutil.copytree(PLUGIN / "skills" / "hivemind", skills / "hivemind")
-    shutil.copytree(PLUGIN / "skills" / "hivemind-setup", skills / "hivemind-setup")
-    shutil.copytree(PLUGIN / "skills" / "hivemind-update", skills / "hivemind-update")
+    for name in ("hivemind", "hivemind-setup", "hivemind-switch", "hivemind-update"):
+        shutil.copytree(PLUGIN / "skills" / name, skills / name)
     (skills / "someone-elses-skill").mkdir()
     hooks = tmp_path / "Hooks"
     hooks.mkdir()
@@ -177,7 +176,7 @@ def test_hand_copied_skills_and_hooks_are_compared(tmp_path: Path) -> None:
 def test_copied_skills_alone_are_not_taken_for_an_installed_plugin(tmp_path: Path) -> None:
     latest = _release(tmp_path / "latest")
     home_skills = tmp_path / "home" / "skills"
-    for name in ("hivemind", "hivemind-setup", "hivemind-update"):
+    for name in ("hivemind", "hivemind-setup", "hivemind-switch", "hivemind-update"):
         shutil.copytree(PLUGIN / "skills" / name, home_skills / name)
     out = _drift(tmp_path, tmp_path / "home", "--latest", latest, "--skills", home_skills)
     assert out.returncode == 0, out.stdout

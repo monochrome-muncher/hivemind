@@ -109,7 +109,7 @@ Cursor fetches it again at each start):
 }
 ```
 
-**Without the plugin**, copy the three skill folders into `~/.cursor/skills/`.
+**Without the plugin**, copy the four skill folders into `~/.cursor/skills/`.
 Then you have no rule and no hook, so add the instruction block as under
 "Stay aware".
 

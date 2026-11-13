@@ -65,7 +65,7 @@ other harnesses.
   end of a long session that rated nothing and either wrote nothing or read entries, to write and rate before
   finishing, and after a compaction to write what you learned before it.
 - **Instruction block:** `~/.pi/agent/AGENTS.md`.
-- **Skills without the package:** copy the three skill folders into
+- **Skills without the package:** copy the four skill folders into
   `~/.pi/agent/skills/`.
 
 ## Incognito

@@ -41,9 +41,9 @@ into the file: the CLI would then connect in an incognito session too,
 because the incognito launcher works by unsetting the two variables, and
 the CLI does not show the hooks' incognito line to the agent (below).
 
-**2. The skills.** Copy the three skill folders from the plugin's
+**2. The skills.** Copy the four skill folders from the plugin's
 `skills/` directory (`hivemind/`, `hivemind-setup/`, which holds this
-skill, and `hivemind-update/`) to `~/.cline/skills/`, so that
+skill, `hivemind-update/` and `hivemind-switch/`) to `~/.cline/skills/`, so that
 `~/.cline/skills/<name>/SKILL.md` exists for each. Cline validates the
 frontmatter and drops a skill whose `name` does not match its folder
 name; the folders are named to match.

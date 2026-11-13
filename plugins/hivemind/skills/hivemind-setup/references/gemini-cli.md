@@ -25,7 +25,7 @@ shows it. Checked with Gemini CLI 0.63.
 **Moving from a setup by hand:** remove the `hivemind` entry under
 `mcpServers` in `~/.gemini/settings.json` (it would replace the
 extension's server), the two Hivemind hooks there, and the copied
-`hivemind`, `hivemind-setup` and `hivemind-update` folders in
+`hivemind`, `hivemind-setup`, `hivemind-update` and `hivemind-switch` folders in
 `~/.gemini/skills/`. Show the
 user each change and get approval first.
 
@@ -49,7 +49,7 @@ the SSE transport: do not use it). Merge into the existing file:
 `${HIVEMIND_API_KEY}` in `headers` is expanded from the environment
 (checked with Gemini CLI 0.63), so the key never lands in the file. Do not
 use `gemini mcp add --header "Authorization: Bearer …"`: it stores the
-literal key. Copy the three skill folders into `~/.gemini/skills/` (or
+literal key. Copy the four skill folders into `~/.gemini/skills/` (or
 `~/.agents/skills/`, which Gemini CLI also scans).
 
 **Trusted folders only.** Gemini CLI turns off **every** MCP server,

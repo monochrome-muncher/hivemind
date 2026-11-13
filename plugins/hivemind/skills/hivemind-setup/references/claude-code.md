@@ -135,7 +135,7 @@ So here:
   `${CLAUDE_PLUGIN_ROOT}` not being substituted in plugin hooks there: if
   no `HIVEMIND:` line appears at session start, the hook did not run, so
   use the instruction block.
-- **Skills without the plugin:** copy the three skill folders into
+- **Skills without the plugin:** copy the four skill folders into
   `~/.claude/skills/`.
 
 ## Incognito
