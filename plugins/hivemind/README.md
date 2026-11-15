@@ -187,9 +187,8 @@ Use the whole link, with the release and `/plugins/antigravity`. The
 bare repository link installs the Gemini CLI extension instead,
 converted, and its reminders don't work there. Antigravity support starts
 with 2.19.0 ([CHANGELOG.md](CHANGELOG.md)); Antigravity 1.5.8 and later
-refuse 2.26.0 and earlier ("symlink … points outside"), so use a newer
-release there. Until one is out, use `tree/main` in place of
-`tree/v<version>`.
+refuse 2.26.0 and earlier ("symlink … points outside"), so use 2.27.0
+or later there.
 
 The plugin installs switched off, because it needs the MCP address and a
 key. Turn it on in `/plugin` (select hivemind and press Space) or under
