@@ -20,13 +20,8 @@ from hivemind.domain.entry import Entry, EntryDraft, EntryFilters, Kind
 from hivemind.domain.feedback import Feedback, FeedbackSignals, Verdict
 from hivemind.embeddings import EmbeddingError
 from hivemind.memstore import MemoryStore
-from hivemind.services.search import (
-    Hit,
-    SearchService,
-    SimilarEntry,
-    apply_supersession_invariant,
-    group_versions,
-)
+from hivemind.retrieval.ordering import apply_supersession_invariant, group_versions
+from hivemind.services.search import Hit, SearchService, SimilarEntry
 from hivemind.wire import hit_dict
 from tests.fakes import FIXED_NOW, make_clock, make_search_config
 
