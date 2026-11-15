@@ -10,7 +10,6 @@ import httpx
 from hivemind.api.deps import create_app
 from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
-from hivemind.domain.access import TrustLevel
 from hivemind.domain.entry import EntryDraft, EntryFilters
 from hivemind.domain.validation import MAX_SEE_ALSO
 from hivemind.mcp.app import McpHivemind, hive_get, hive_withdraw, hive_write
@@ -22,23 +21,17 @@ from hivemind.services.governance import GovernanceService
 from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
 from hivemind.services.write import WriteService
-from tests.fakes import FakeAuthenticator, make_clock, make_embedder, make_search_config
+from tests.fakes import (
+    FakeAuthenticator,
+    agent_credential,
+    make_clock,
+    make_embedder,
+    make_search_config,
+)
 
-
-def _agent(name: str, fleet: str) -> Credential:
-    return Credential(
-        user_id=name,
-        agent_id=name,
-        agent_name=name,
-        access_controlled=True,
-        trust_level=TrustLevel.CONTRIBUTOR,
-        home_fleet_id=fleet,
-    )
-
-
-ALICE = _agent("alice", "fleet-a")
-BOB = _agent("bob", "fleet-a")
-CAROL = _agent("carol", "fleet-b")
+ALICE = agent_credential("alice", "fleet-a")
+BOB = agent_credential("bob", "fleet-a")
+CAROL = agent_credential("carol", "fleet-b")
 
 
 def _surface(store: MemoryStore, credential: Credential) -> McpHivemind:

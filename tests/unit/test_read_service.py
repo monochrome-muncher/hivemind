@@ -18,22 +18,10 @@ from hivemind.domain.validation import MAX_GET_IDS, InvalidInput
 from hivemind.ports import Credential
 from hivemind.services.read import EntryDetail, ReadService
 from hivemind.services.write import WriteService
-from tests.fakes import make_embedder, make_search_config, make_store
+from tests.fakes import agent_credential, make_embedder, make_search_config, make_store
 
-
-def agent(name: str, fleet: str, level: TrustLevel) -> Credential:
-    return Credential(
-        user_id=name,
-        agent_id=name,
-        agent_name=name,
-        access_controlled=True,
-        trust_level=level,
-        home_fleet_id=fleet,
-    )
-
-
-WRITER = agent("writer", "fleet-a", TrustLevel.CONTRIBUTOR)
-OUTSIDER = agent("outsider", "fleet-b", TrustLevel.LURKER)
+WRITER = agent_credential("writer", "fleet-a", TrustLevel.CONTRIBUTOR)
+OUTSIDER = agent_credential("outsider", "fleet-b", TrustLevel.LURKER)
 ADMIN = Credential(user_id="admin", is_admin=True)
 
 

@@ -11,29 +11,17 @@ from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
 from hivemind.mcp.app import hive_feedback, hive_list, hive_search, hive_write
 from hivemind.memstore import MemoryStore
-from hivemind.ports import Credential
 from tests.fakes import (
     FakeAuthenticator,
+    agent_credential,
     make_clock,
     make_embedder,
     make_search_config,
     mcp_surface,
 )
 
-
-def _agent(name: str, level: TrustLevel) -> Credential:
-    return Credential(
-        user_id=name,
-        agent_id=name,
-        agent_name=name,
-        access_controlled=True,
-        trust_level=level,
-        home_fleet_id="fleet-a",
-    )
-
-
-WRITER = _agent("writer", TrustLevel.CONTRIBUTOR)
-LURKER = _agent("lurker", TrustLevel.LURKER)
+WRITER = agent_credential("writer", "fleet-a")
+LURKER = agent_credential("lurker", "fleet-a", TrustLevel.LURKER)
 
 
 async def _seed(store: MemoryStore) -> dict[str, str]:

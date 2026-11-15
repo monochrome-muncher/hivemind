@@ -19,8 +19,15 @@ from hivemind.domain.feedback import (
 from hivemind.mcp.app import hive_search, hive_write
 from hivemind.memstore import MemoryStore
 from hivemind.services.search import SearchService
-from tests.fakes import FIXED_NOW, make_clock, make_embedder, make_search_config, mcp_surface
-from tests.unit.test_readable_feedback import WRITER, _rest_client
+from tests.fakes import (
+    FIXED_NOW,
+    make_agent_client,
+    make_clock,
+    make_embedder,
+    make_search_config,
+    mcp_surface,
+)
+from tests.unit.test_readable_feedback import WRITER
 
 T0 = datetime(2026, 9, 1, tzinfo=UTC)
 EVIDENCE = ("contested", "correction", "supersedes", "state")
@@ -165,7 +172,7 @@ async def test_state_shows_only_under_include_inactive() -> None:
 async def test_rest_hit_has_null_evidence_when_empty_and_the_fields_when_present() -> None:
     store = MemoryStore(make_clock())
     entry_id = await _fact(store)
-    async with _rest_client(store, WRITER) as client:
+    async with make_agent_client(store, WRITER) as client:
         [hit] = (await client.post("/v1/search", json={"query": "billing node"})).json()
         assert all(hit[k] is None for k in EVIDENCE)
         await _report(store, entry_id, "a", Verdict.HELPFUL, None, 1)

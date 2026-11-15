@@ -29,30 +29,19 @@ from hivemind.services.governance import GovernanceService
 from hivemind.services.pins import PinService
 from tests.fakes import (
     FakeAuthenticator,
+    agent_credential,
     make_clock,
     make_embedder,
     make_search_config,
     mcp_surface,
 )
 
-
-def _agent(name: str, level: TrustLevel, fleet: str = "fleet-a") -> Credential:
-    return Credential(
-        user_id=name,
-        agent_id=name,
-        agent_name=name,
-        access_controlled=True,
-        trust_level=level,
-        home_fleet_id=fleet,
-    )
-
-
-LEAD = _agent("lead", TrustLevel.PRIVILEGED)
-DEV = _agent("dev", TrustLevel.CONTRIBUTOR)
-LURKER = _agent("lurker", TrustLevel.LURKER)
-DEV2 = _agent("dev2", TrustLevel.CONTRIBUTOR)
-OTHER_LEAD = _agent("other-lead", TrustLevel.PRIVILEGED, "fleet-b")
-OUTSIDER = _agent("outsider", TrustLevel.CONTRIBUTOR, "fleet-b")
+LEAD = agent_credential("lead", "fleet-a", TrustLevel.PRIVILEGED)
+DEV = agent_credential("dev", "fleet-a")
+LURKER = agent_credential("lurker", "fleet-a", TrustLevel.LURKER)
+DEV2 = agent_credential("dev2", "fleet-a")
+OTHER_LEAD = agent_credential("other-lead", "fleet-b", TrustLevel.PRIVILEGED)
+OUTSIDER = agent_credential("outsider", "fleet-b")
 ADMIN = Credential(user_id="admin", is_admin=True)
 
 
@@ -646,7 +635,7 @@ async def test_a_withdrawer_who_moved_fleets_still_unpins_other_authors_versions
     new = await _write(store, DEV, "use runner pool B", supersedes=[old])
     entry = await store.get_entry(new)
     assert entry is not None
-    moved = _agent("dev", TrustLevel.CONTRIBUTOR, "fleet-b")  # cannot read fleet-a any more
+    moved = agent_credential("dev", "fleet-b")  # cannot read fleet-a any more
     await store.withdraw_entry(new, None, by_user="dev")
     removed = await PinService(store).unpin_withdrawn(moved, entry)
     assert removed == [old]

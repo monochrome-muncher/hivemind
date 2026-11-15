@@ -10,27 +10,11 @@ down, like the rest of the suite."""
 from __future__ import annotations
 
 import asyncpg
-import pytest
-from tests.pg import ensure_migrated, reset_tables
 
-from hivemind.config import Settings
 from hivemind.domain.entry import EntryDraft, Kind
-from hivemind.store import PgStore
 from hivemind.store.pgstore import fleet_merge as fleet_merge_sql
 
 ENTRIES = 6
-
-
-@pytest.fixture
-async def pool():
-    dsn = Settings().database_url
-    await ensure_migrated(dsn, Settings().embedding_dim)
-    await reset_tables(dsn)
-    store = PgStore(dsn)
-    try:
-        yield dsn, store
-    finally:
-        await store.close()
 
 
 def _draft(fleet_id: str, i: int) -> EntryDraft:
@@ -44,8 +28,8 @@ def _draft(fleet_id: str, i: int) -> EntryDraft:
     )
 
 
-async def test_no_index_on_entries_covers_fleet_id(pool) -> None:
-    dsn, _ = pool
+async def test_no_index_on_entries_covers_fleet_id(store_pool) -> None:
+    dsn, _ = store_pool
     conn = await asyncpg.connect(dsn)
     try:
         rows = await conn.fetch(
@@ -77,8 +61,8 @@ async def test_no_index_on_entries_covers_fleet_id(pool) -> None:
     )
 
 
-async def test_entries_keeps_the_free_room_a_hot_update_needs(pool) -> None:
-    dsn, _ = pool
+async def test_entries_keeps_the_free_room_a_hot_update_needs(store_pool) -> None:
+    dsn, _ = store_pool
     conn = await asyncpg.connect(dsn)
     try:
         options = await conn.fetchval(
@@ -89,7 +73,7 @@ async def test_entries_keeps_the_free_room_a_hot_update_needs(pool) -> None:
     assert "fillfactor=50" in (options or [])
 
 
-async def test_the_merge_undo_and_move_statements_are_hot_updates(pool) -> None:
+async def test_the_merge_undo_and_move_statements_are_hot_updates(store_pool) -> None:
     """Run the store's own statements on a connection of the test's, inside a
     transaction that is rolled back, and read `pg_stat_xact_user_tables`,
     which counts this transaction's updates at once. (The cumulative
@@ -99,7 +83,7 @@ async def test_the_merge_undo_and_move_statements_are_hot_updates(pool) -> None:
     the view includes the backend's pending counts, which reset when the
     backend flushes its stats while idle, so a delta across transactions
     can go negative.)"""
-    dsn, store = pool
+    dsn, store = store_pool
     source, target = (await store.create_fleet("a")).id, (await store.create_fleet("b")).id
     ids = [(await store.create_entry(_draft(source, i), None)).id for i in range(ENTRIES)]
     merge_id = (

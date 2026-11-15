@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncpg
 import pytest
-from tests.pg import ensure_migrated, reset_tables
+from tests.pg import ensure_migrated, exec_sql, fetch_rows, reset_tables
 
 from hivemind.config import Settings
 from hivemind.store import PgAuthenticator
@@ -55,22 +55,6 @@ def _dsn() -> str:
     return Settings().database_url
 
 
-async def _exec(dsn: str, sql: str) -> None:
-    conn = await asyncpg.connect(dsn)
-    try:
-        await conn.execute(sql)
-    finally:
-        await conn.close()
-
-
-async def _rows(dsn: str, sql: str) -> list[asyncpg.Record]:
-    conn = await asyncpg.connect(dsn)
-    try:
-        return list(await conn.fetch(sql))
-    finally:
-        await conn.close()
-
-
 @pytest.fixture
 async def dsn():
     dsn = _dsn()
@@ -93,7 +77,7 @@ async def test_bootstrap_stores_working_keys_in_the_secret(dsn: str) -> None:
         await auth.close()
     assert admin is not None and admin.is_admin
     assert org is not None and org.is_org
-    audit = await _rows(dsn, "SELECT actor, action FROM audit_log")
+    audit = await fetch_rows(dsn, "SELECT actor, action FROM audit_log")
     assert sorted((r["actor"], r["action"]) for r in audit) == [
         ("ci-bootstrap", "admin_key.issue"),
         ("ci-bootstrap", "org_key.rotate"),
@@ -102,11 +86,11 @@ async def test_bootstrap_stores_working_keys_in_the_secret(dsn: str) -> None:
 
 async def test_existing_secret_means_nothing_is_issued(dsn: str) -> None:
     old_org = await _rotate_org(dsn, actor="t")
-    await _exec(dsn, "TRUNCATE audit_log")
+    await exec_sql(dsn, "TRUNCATE audit_log")
     secrets = FakeSecrets(existing=True)
     assert await _bootstrap_secret(dsn, secrets, "hivemind-keys", actor="t") is False
     assert secrets.data == {"hivemind-keys": {}}
-    assert await _rows(dsn, "SELECT 1 FROM audit_log") == []
+    assert await fetch_rows(dsn, "SELECT 1 FROM audit_log") == []
     auth = PgAuthenticator(dsn)
     try:
         assert await auth.verify(old_org) is not None  # the org key was not rotated
@@ -116,12 +100,12 @@ async def test_existing_secret_means_nothing_is_issued(dsn: str) -> None:
 
 async def test_a_failed_secret_create_rolls_the_keys_back(dsn: str) -> None:
     old_org = await _rotate_org(dsn, actor="t")
-    before = await _rows(dsn, "SELECT key_hash, kind FROM credentials ORDER BY key_hash")
+    before = await fetch_rows(dsn, "SELECT key_hash, kind FROM credentials ORDER BY key_hash")
     with pytest.raises(KubeApiError):
         await _bootstrap_secret(dsn, FakeSecrets(fail_create=True), "hivemind-keys", actor="t")
-    after = await _rows(dsn, "SELECT key_hash, kind FROM credentials ORDER BY key_hash")
+    after = await fetch_rows(dsn, "SELECT key_hash, kind FROM credentials ORDER BY key_hash")
     assert after == before  # no orphan admin key, the org key unchanged
-    actions = [r["action"] for r in await _rows(dsn, "SELECT action FROM audit_log")]
+    actions = [r["action"] for r in await fetch_rows(dsn, "SELECT action FROM audit_log")]
     assert actions == ["org_key.rotate"]  # only the setup's own rotation
     auth = PgAuthenticator(dsn)
     try:
@@ -152,7 +136,7 @@ async def test_a_failed_commit_deletes_the_secret_again(dsn: str) -> None:
     with pytest.raises(_CommitLost):
         await _bootstrap_secret(dsn, secrets, "hivemind-keys", actor="t")
     assert secrets.deleted == ["hivemind-keys"] and secrets.data == {}
-    assert await _rows(dsn, "SELECT 1 FROM credentials") == []
+    assert await fetch_rows(dsn, "SELECT 1 FROM credentials") == []
 
 
 @pytest.mark.usefixtures("failing_commit")
@@ -168,4 +152,4 @@ async def test_a_secret_that_cannot_be_deleted_after_a_failed_commit_is_named(ds
     assert "hivemind-keys" in secrets.data  # still there, hence the message
     message = f"{exc.value} {exc.value.__cause__}"
     assert all(raw not in message for raw in secrets.data["hivemind-keys"].values())
-    assert await _rows(dsn, "SELECT 1 FROM credentials") == []
+    assert await fetch_rows(dsn, "SELECT 1 FROM credentials") == []

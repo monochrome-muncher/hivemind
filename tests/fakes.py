@@ -16,8 +16,18 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from hivemind.config import DEFAULT_CLOSE_MATCH_SIMILARITY, SearchConfig
-from hivemind.domain.access import AgentStatus, InvalidAgentStatus, KeyLocked, UnknownAgent
+import httpx
+
+from hivemind.api.deps import HivemindApp, create_app
+from hivemind.api.main import create_app_for_config
+from hivemind.config import DEFAULT_CLOSE_MATCH_SIMILARITY, SearchConfig, Settings
+from hivemind.domain.access import (
+    AgentStatus,
+    InvalidAgentStatus,
+    KeyLocked,
+    TrustLevel,
+    UnknownAgent,
+)
 from hivemind.domain.audit import ActorKind, AuditAction, AuditEvent
 from hivemind.domain.entry import (
     EntityKind,
@@ -244,6 +254,20 @@ class RecordingStore(MemoryStore):
             return await method(*args, **kwargs)
 
         return call
+
+
+def agent_credential(
+    name: str, fleet: str | None = None, level: TrustLevel = TrustLevel.CONTRIBUTOR
+) -> Credential:
+    """An access-controlled agent credential whose user, id and name are ``name``."""
+    return Credential(
+        user_id=name,
+        agent_id=name,
+        agent_name=name,
+        access_controlled=True,
+        trust_level=level,
+        home_fleet_id=fleet,
+    )
 
 
 def make_search_config(
@@ -530,3 +554,46 @@ def make_authenticator(
 ) -> FakeAuthenticator:
     """A ``FakeAuthenticator`` with the given pre-registered agent credentials."""
     return FakeAuthenticator(agent_credentials=agent_credentials)
+
+
+def make_client(app: HivemindApp) -> httpx.AsyncClient:
+    """A REST client over ``app`` at ``http://hivemind.test``."""
+    return httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(app)), base_url="http://hivemind.test"
+    )
+
+
+def make_rest_app(*, bind_store: bool = False) -> HivemindApp:
+    """A memory-backed ``HivemindApp``; ``bind_store`` gives the authenticator the
+    store, so keys work only while their agent is active."""
+    store = make_store()
+    return create_app_for_config(
+        Settings(),
+        store=store,
+        embedder=make_embedder(),
+        authenticator=FakeAuthenticator(store=store if bind_store else None),
+        search_config=make_search_config(),
+    )
+
+
+def make_store_client(
+    store: MemoryStore,
+    agents: dict[str, Credential] | None = None,
+    headers: dict[str, str] | None = None,
+) -> httpx.AsyncClient:
+    """A REST client at ``http://t`` over ``store``, with ``agents`` as the agent keys."""
+    app = create_app_for_config(
+        Settings(),
+        store=store,
+        embedder=make_embedder(),
+        authenticator=FakeAuthenticator(agent_credentials=agents),
+        search_config=make_search_config(),
+    )
+    return httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(app)), base_url="http://t", headers=headers
+    )
+
+
+def make_agent_client(store: MemoryStore, credential: Credential) -> httpx.AsyncClient:
+    """A ``make_store_client`` that sends ``credential``'s key on every request."""
+    return make_store_client(store, {"k": credential}, headers={"X-API-Key": "k"})

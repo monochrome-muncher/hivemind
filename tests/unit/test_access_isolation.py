@@ -32,6 +32,7 @@ from hivemind.services.search import SearchService
 from hivemind.services.write import WriteService
 from tests.fakes import (
     FakeAuthenticator,
+    agent_credential,
     make_clock,
     make_embedder,
     make_search_config,
@@ -40,21 +41,10 @@ from tests.fakes import (
 HOME, OTHER = "fleet-home", "fleet-other"
 
 
-def agent(name: str, level: TrustLevel = TrustLevel.CONTRIBUTOR, fleet: str = HOME) -> Credential:
-    return Credential(
-        user_id=name,
-        agent_id=name,
-        agent_name=name,
-        access_controlled=True,
-        trust_level=level,
-        home_fleet_id=fleet,
-    )
-
-
-ALICE = agent("alice")
-BOB = agent("bob")
-LURKER = agent("lurk", TrustLevel.LURKER)
-OUTSIDER = agent("carol", TrustLevel.PRIVILEGED, fleet=OTHER)  # reads every fleet
+ALICE = agent_credential("alice", HOME)
+BOB = agent_credential("bob", HOME)
+LURKER = agent_credential("lurk", HOME, TrustLevel.LURKER)
+OUTSIDER = agent_credential("carol", OTHER, TrustLevel.PRIVILEGED)  # reads every fleet
 ORG = Credential(user_id="org", is_org=True, access_controlled=True)
 ADMIN = Credential(user_id="admin", is_admin=True)
 
@@ -123,7 +113,7 @@ async def test_the_author_and_admin_still_get_it_and_fleet_rules_still_hold() ->
     assert (await hive_get(pool.as_(ADMIN), entry_id=str(secret["id"])))["id"] == secret["id"]
     assert (await hive_get(pool.as_(BOB), entry_id=str(shared["id"])))["id"] == shared["id"]
     # A lurker in another fleet may not; a privileged reader may (read-broad).
-    other_lurker = agent("dave", TrustLevel.LURKER, fleet=OTHER)
+    other_lurker = agent_credential("dave", OTHER, TrustLevel.LURKER)
     denied = await hive_get(pool.as_(other_lurker), entry_id=str(shared["id"]))
     assert denied["error"]["code"] == "not_found"  # type: ignore[index]
     assert (await hive_get(pool.as_(OUTSIDER), entry_id=str(shared["id"])))["id"] == shared["id"]

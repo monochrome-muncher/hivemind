@@ -13,13 +13,10 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncIterator
 
 import asyncpg
 import pytest
-from tests.pg import ensure_migrated, reset_tables
 
-from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
@@ -43,19 +40,6 @@ async def _last_used(dsn: str, key: str) -> asyncpg.Record | None:
 Env = tuple[str, PgStore, PgAuthenticator]
 
 
-@pytest.fixture
-async def env() -> AsyncIterator[Env]:
-    dsn = Settings().database_url
-    await ensure_migrated(dsn, Settings().embedding_dim)
-    await reset_tables(dsn)
-    store, auth = PgStore(dsn), PgAuthenticator(dsn)
-    try:
-        yield dsn, store, auth
-    finally:
-        await store.close()
-        await auth.close()
-
-
 async def _agent_key(store: PgStore, auth: PgAuthenticator) -> str:
     service = AccessService(store, auth)
     fleet = await service.create_fleet("f", ADMIN)
@@ -64,8 +48,8 @@ async def _agent_key(store: PgStore, auth: PgAuthenticator) -> str:
     return key
 
 
-async def test_first_check_stamps_and_a_second_within_the_hour_writes_nothing(env: Env) -> None:
-    dsn, store, auth = env
+async def test_first_check_stamps_and_a_second_within_the_hour_writes_nothing(pool: Env) -> None:
+    dsn, store, auth = pool
     key = await _agent_key(store, auth)
     row = await _last_used(dsn, key)
     assert row is not None and row["last_used_at"] is None
@@ -80,8 +64,8 @@ async def test_first_check_stamps_and_a_second_within_the_hour_writes_nothing(en
     assert again == stamped
 
 
-async def test_admin_keys_are_stamped_too(env: Env) -> None:
-    dsn, _, auth = env
+async def test_admin_keys_are_stamped_too(pool: Env) -> None:
+    dsn, _, auth = pool
     key = await auth.issue_admin_key()
     assert await auth.verify(key) is not None
     row = await _last_used(dsn, key)
@@ -89,9 +73,9 @@ async def test_admin_keys_are_stamped_too(env: Env) -> None:
 
 
 async def test_a_failing_stamp_does_not_fail_the_key_check(
-    env: Env, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    pool: Env, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    _, store, auth = env
+    _, store, auth = pool
     key = await _agent_key(store, auth)
     import hivemind.store.auth as auth_module
 
@@ -103,8 +87,8 @@ async def test_a_failing_stamp_does_not_fail_the_key_check(
     assert key not in caplog.text
 
 
-async def test_list_agents_carries_the_keys_last_use(env: Env) -> None:
-    _, store, auth = env
+async def test_list_agents_carries_the_keys_last_use(pool: Env) -> None:
+    _, store, auth = pool
     key = await _agent_key(store, auth)
     await store.register_agent("bob")
     assert {a.name: a.last_used_at for a in await store.list_agents()} == {
@@ -119,8 +103,8 @@ async def test_list_agents_carries_the_keys_last_use(env: Env) -> None:
     assert await store.agent_key_last_used("bob") is None
 
 
-async def test_a_locked_row_delays_the_check_by_about_a_second_not_longer(env: Env) -> None:
-    dsn, store, auth = env
+async def test_a_locked_row_delays_the_check_by_about_a_second_not_longer(pool: Env) -> None:
+    dsn, store, auth = pool
     key = await _agent_key(store, auth)
     holder = await asyncpg.connect(dsn)
     try:

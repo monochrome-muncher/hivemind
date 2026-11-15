@@ -11,7 +11,8 @@ from prometheus_client.parser import text_string_to_metric_families
 from hivemind.api.prometheus import PrometheusMetrics
 from hivemind.domain.entry import EntryDraft
 from hivemind.domain.feedback import Feedback, Verdict
-from tests.unit.test_api_endpoints import make_client, make_hivemind_app, post_entry
+from tests.fakes import make_client
+from tests.unit.test_api_endpoints import make_hivemind_app, post_entry
 
 
 def samples(text: str) -> dict[tuple[str, tuple[tuple[str, str], ...]], float]:

@@ -20,8 +20,8 @@ from hivemind.embeddings import EmbeddingError, OpenAICompatEmbedder
 from hivemind.extractor import ExtractorError, OpenAICompatExtractor
 from hivemind.mcp.app import hive_search, hive_write
 from hivemind.memstore import MemoryStore
-from tests.fakes import make_clock, make_search_config
-from tests.unit.test_api_endpoints import make_authenticator, make_client
+from tests.fakes import make_client, make_clock, make_search_config
+from tests.unit.test_api_endpoints import make_authenticator
 from tests.unit.test_mcp_app import ALICE, build_app
 
 KEY = "sk-SECRETKEYVALUE"

@@ -5,13 +5,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-import httpx
 import pytest
 from prometheus_client.parser import text_string_to_metric_families
 
-from hivemind.api.deps import create_app
-from hivemind.api.main import create_app_for_config
-from hivemind.config import Settings
 from hivemind.domain.access import AgentStatus, InvalidAgentStatus, TrustLevel, UnknownAgent
 from hivemind.domain.agent_role import AgentRole, role_hint
 from hivemind.domain.audit import AuditFilters
@@ -27,8 +23,7 @@ from hivemind.services.metrics import MetricsService
 from tests.fakes import (
     FakeAuthenticator,
     make_clock,
-    make_embedder,
-    make_search_config,
+    make_store_client,
     mcp_surface,
 )
 
@@ -242,19 +237,6 @@ async def test_a_role_changes_nothing_an_agent_may_read_or_write() -> None:
 # -- the REST routes --------------------------------------------------------------
 
 
-def _client(store: MemoryStore, agents: dict[str, Credential] | None = None) -> httpx.AsyncClient:
-    app = create_app_for_config(
-        Settings(),
-        store=store,
-        embedder=make_embedder(),
-        authenticator=FakeAuthenticator(agent_credentials=agents),
-        search_config=make_search_config(),
-    )
-    return httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=create_app(app)), base_url="http://t"
-    )
-
-
 async def _activated(store: MemoryStore, name: str = "alice") -> str:
     fleet = await store.create_fleet("platform")
     await store.register_agent(name, "owner")
@@ -265,7 +247,7 @@ async def _activated(store: MemoryStore, name: str = "alice") -> str:
 async def test_rest_sets_and_clears_a_role_and_the_agent_list_shows_it() -> None:
     store = MemoryStore(make_clock())
     await _activated(store)
-    async with _client(store) as client:
+    async with make_store_client(store) as client:
         put = await client.put(
             "/v1/admin/agents/alice/role", json={"role": "scout"}, headers=ADMIN_H
         )
@@ -290,7 +272,7 @@ async def test_rest_sets_and_clears_a_role_and_the_agent_list_shows_it() -> None
 async def test_rest_refuses_an_unknown_role_with_422(body: dict[str, object]) -> None:
     store = MemoryStore(make_clock())
     await _activated(store)
-    async with _client(store) as client:
+    async with make_store_client(store) as client:
         resp = await client.put("/v1/admin/agents/alice/role", json=body, headers=ADMIN_H)
     assert resp.status_code == 422
     assert (await store.get_agent("alice")).role is None  # type: ignore[union-attr]
@@ -302,7 +284,7 @@ async def test_rest_errors_for_unknown_revoked_and_unauthorised() -> None:
     await _activated_revoked(store)
     dev = Credential(user_id="dev", agent_name="dev", access_controlled=True)
     body = {"role": "scout"}
-    async with _client(store, {"dev-key": dev}) as client:
+    async with make_store_client(store, {"dev-key": dev}) as client:
         unknown = await client.put("/v1/admin/agents/nobody/role", json=body, headers=ADMIN_H)
         unknown_clear = await client.delete("/v1/admin/agents/nobody/role", headers=ADMIN_H)
         revoked = await client.put("/v1/admin/agents/gone/role", json=body, headers=ADMIN_H)
@@ -327,7 +309,7 @@ async def test_rest_whoami_and_mcp_whoami_agree() -> None:
     world = World()
     fleet_id = await world.agent()
     alice = _agent(fleet_id)
-    async with _client(world.store, {"alice-key": alice}) as client:
+    async with make_store_client(world.store, {"alice-key": alice}) as client:
         bare = (await client.get("/v1/whoami", headers={"X-API-Key": "alice-key"})).json()
         await client.put("/v1/admin/agents/alice/role", json={"role": "scout"}, headers=ADMIN_H)
         rest = (await client.get("/v1/whoami", headers={"X-API-Key": "alice-key"})).json()
@@ -377,7 +359,7 @@ async def test_the_usage_report_counts_roles_and_compares_scouts_with_the_rest()
         ),
     }
 
-    async with _client(store) as client:
+    async with make_store_client(store) as client:
         body = (await client.get("/v1/metrics", headers=ADMIN_H)).json()
         scrape = (await client.get("/metrics")).text
     assert body["agents"]["by_role"] == {"scout": 2}
@@ -419,7 +401,7 @@ ADMIN_AGENT_KEYS = {
 
 async def test_registration_has_no_role_and_the_admin_replies_add_it() -> None:
     store = MemoryStore(make_clock())
-    async with _client(store) as client:
+    async with make_store_client(store) as client:
         registered = await client.post(
             "/v1/agents", json={"name": "alice"}, headers={"X-API-Key": "hm_org"}
         )

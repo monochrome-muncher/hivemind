@@ -20,13 +20,13 @@ import json
 
 import asyncpg
 import pytest
-from tests.pg import ensure_migrated, reset_tables
+from tests.pg import exec_sql, fetch_rows
 
 from hivemind.config import Settings
 from hivemind.domain.access import InvalidAgentStatus, TrustLevel
 from hivemind.domain.audit import ActorKind
 from hivemind.services.access import AccessService
-from hivemind.store import PgAuthenticator, PgStore
+from hivemind.store import PgAuthenticator
 from hivemind.store.auth import key_hash
 from hivemind.store.keys import (
     AgentKeyExists,
@@ -41,35 +41,6 @@ from hivemind.store.keys import (
 from hivemind.store.migrate import migrate
 
 
-async def _exec(dsn: str, sql: str, *args: object) -> None:
-    conn = await asyncpg.connect(dsn)
-    try:
-        await conn.execute(sql, *args)
-    finally:
-        await conn.close()
-
-
-async def _fetch(dsn: str, sql: str, *args: object) -> list[asyncpg.Record]:
-    conn = await asyncpg.connect(dsn)
-    try:
-        return list(await conn.fetch(sql, *args))
-    finally:
-        await conn.close()
-
-
-@pytest.fixture
-async def env():
-    dsn = Settings().database_url
-    await ensure_migrated(dsn, Settings().embedding_dim)
-    await reset_tables(dsn)
-    store, auth = PgStore(dsn), PgAuthenticator(dsn)
-    try:
-        yield dsn, store, auth
-    finally:
-        await store.close()
-        await auth.close()
-
-
 async def _admin(dsn: str, auth: PgAuthenticator):
     credential = await auth.verify(await _issue_admin(dsn, actor="t"))
     assert credential is not None
@@ -80,10 +51,12 @@ async def _admin(dsn: str, auth: PgAuthenticator):
 
 
 @pytest.mark.parametrize("status", ["pending", "revoked"])
-async def test_verify_rejects_a_key_whose_agent_is_not_active(env, status) -> None:
-    dsn, _, auth = env
-    await _exec(dsn, "INSERT INTO agents (name, status, trust_level) VALUES ('bob', $1, 3)", status)
-    await _exec(
+async def test_verify_rejects_a_key_whose_agent_is_not_active(pool, status) -> None:
+    dsn, _, auth = pool
+    await exec_sql(
+        dsn, "INSERT INTO agents (name, status, trust_level) VALUES ('bob', $1, 3)", status
+    )
+    await exec_sql(
         dsn,
         "INSERT INTO credentials (key_hash, kind, user_id, agent_id, agent_name) "
         "VALUES ($1, 'agent', 'bob', 'bob', 'bob')",
@@ -92,9 +65,9 @@ async def test_verify_rejects_a_key_whose_agent_is_not_active(env, status) -> No
     assert await auth.verify("hm_stale") is None
 
 
-async def test_verify_rejects_an_agent_key_with_no_agent_record(env) -> None:
-    dsn, _, auth = env
-    await _exec(
+async def test_verify_rejects_an_agent_key_with_no_agent_record(pool) -> None:
+    dsn, _, auth = pool
+    await exec_sql(
         dsn,
         "INSERT INTO credentials (key_hash, kind, user_id, agent_id, agent_name) "
         "VALUES ($1, 'agent', 'ghost', 'ghost', 'ghost')",
@@ -103,8 +76,8 @@ async def test_verify_rejects_an_agent_key_with_no_agent_record(env) -> None:
     assert await auth.verify("hm_ghost") is None
 
 
-async def test_verify_resolves_an_active_agent_in_one_query(env) -> None:
-    dsn, store, auth = env
+async def test_verify_resolves_an_active_agent_in_one_query(pool) -> None:
+    dsn, store, auth = pool
     admin = await _admin(dsn, auth)
     service = AccessService(store, auth)
     fleet = await service.create_fleet("f", admin)
@@ -120,9 +93,9 @@ async def test_verify_resolves_an_active_agent_in_one_query(env) -> None:
 # -- AUTH-7c: retired key kinds are dead ----------------------------------------
 
 
-async def test_verify_rejects_pre_v2_user_and_nameless_agent_keys(env) -> None:
-    dsn, _, auth = env
-    await _exec(
+async def test_verify_rejects_pre_v2_user_and_nameless_agent_keys(pool) -> None:
+    dsn, _, auth = pool
+    await exec_sql(
         dsn,
         "INSERT INTO credentials (key_hash, kind, user_id, agent_id) VALUES "
         "($1, 'user', 'old', 'old-agent'), ($2, 'agent', 'old2', 'old2-agent')",
@@ -136,11 +109,11 @@ async def test_verify_rejects_pre_v2_user_and_nameless_agent_keys(env) -> None:
 # -- AUTH-1: activate vs revoke ---------------------------------------------------
 
 
-async def test_revoke_landing_between_activate_flip_and_key_issue(env) -> None:
+async def test_revoke_landing_between_activate_flip_and_key_issue(pool) -> None:
     """The deterministic interleaving from the review: activate flips the
     status, revoke runs to completion, then activate issues its key. The
     agent must end revoked with NO key, and activate must say so."""
-    dsn, store, auth = env
+    dsn, store, auth = pool
     admin = await _admin(dsn, auth)
     service = AccessService(store, auth)
     fleet = await service.create_fleet("f", admin)
@@ -171,13 +144,13 @@ async def test_revoke_landing_between_activate_flip_and_key_issue(env) -> None:
 
     agent = await store.get_agent("mallory")
     assert agent is not None and agent.status.value == "revoked"
-    assert await _fetch(dsn, "SELECT 1 FROM credentials WHERE agent_name = 'mallory'") == []
+    assert await fetch_rows(dsn, "SELECT 1 FROM credentials WHERE agent_name = 'mallory'") == []
 
 
 async def test_concurrent_activate_and_revoke_never_leave_a_live_key_on_a_revoked_agent(
-    env,
+    pool,
 ) -> None:
-    dsn, store, auth = env
+    dsn, store, auth = pool
     admin = await _admin(dsn, auth)
     service = AccessService(store, auth)
     fleet = await service.create_fleet("f", admin)
@@ -195,7 +168,7 @@ async def test_concurrent_activate_and_revoke_never_leave_a_live_key_on_a_revoke
             ), result
         agent = await store.get_agent(name)
         assert agent is not None
-        keys = await _fetch(dsn, "SELECT 1 FROM credentials WHERE agent_name = $1", name)
+        keys = await fetch_rows(dsn, "SELECT 1 FROM credentials WHERE agent_name = $1", name)
         if agent.status.value == "revoked":
             assert keys == [], f"round {round_no}: revoked agent holds a key"
         elif agent.status.value == "active":
@@ -208,27 +181,27 @@ async def test_concurrent_activate_and_revoke_never_leave_a_live_key_on_a_revoke
 # -- AUTH-2: one live key per agent --------------------------------------------------
 
 
-async def test_a_second_agent_key_row_is_refused_by_the_schema(env) -> None:
-    dsn, _, _ = env
+async def test_a_second_agent_key_row_is_refused_by_the_schema(pool) -> None:
+    dsn, _, _ = pool
     insert = (
         "INSERT INTO credentials (key_hash, kind, user_id, agent_id, agent_name) "
         "VALUES ($1, 'agent', 'bob', 'bob', 'bob')"
     )
-    await _exec(dsn, insert, "h1")
+    await exec_sql(dsn, insert, "h1")
     with pytest.raises(asyncpg.UniqueViolationError):
-        await _exec(dsn, insert, "h2")
+        await exec_sql(dsn, insert, "h2")
 
 
-async def test_cli_key_on_a_pending_agent_is_refused_without_activation(env) -> None:
-    dsn, store, _ = env
+async def test_cli_key_on_a_pending_agent_is_refused_without_activation(pool) -> None:
+    dsn, store, _ = pool
     await store.register_agent("bob")
     with pytest.raises(AgentNeedsActivation):
         await _issue_agent(dsn, "bob", actor="t")
-    assert await _fetch(dsn, "SELECT 1 FROM credentials WHERE agent_name = 'bob'") == []
+    assert await fetch_rows(dsn, "SELECT 1 FROM credentials WHERE agent_name = 'bob'") == []
 
 
-async def test_cli_does_not_restore_a_revoked_agents_stale_trust(env) -> None:
-    dsn, store, auth = env
+async def test_cli_does_not_restore_a_revoked_agents_stale_trust(pool) -> None:
+    dsn, store, auth = pool
     admin = await _admin(dsn, auth)
     service = AccessService(store, auth)
     fleet = await service.create_fleet("f", admin)
@@ -250,8 +223,8 @@ async def test_cli_does_not_restore_a_revoked_agents_stale_trust(env) -> None:
     assert credential is not None and credential.trust_level is TrustLevel.LURKER
 
 
-async def test_cli_activation_then_rest_activate_is_a_conflict_not_a_second_key(env) -> None:
-    dsn, store, auth = env
+async def test_cli_activation_then_rest_activate_is_a_conflict_not_a_second_key(pool) -> None:
+    dsn, store, auth = pool
     admin = await _admin(dsn, auth)
     service = AccessService(store, auth)
     fleet = await service.create_fleet("f", admin)
@@ -261,21 +234,23 @@ async def test_cli_activation_then_rest_activate_is_a_conflict_not_a_second_key(
     )
     with pytest.raises(InvalidAgentStatus):
         await service.activate("bob", TrustLevel.CONTRIBUTOR, fleet.id, admin)
-    audited = len(await _fetch(dsn, "SELECT 1 FROM audit_log"))
+    audited = len(await fetch_rows(dsn, "SELECT 1 FROM audit_log"))
     with pytest.raises(AgentKeyExists):
         await _issue_agent(dsn, "bob", actor="t")
-    assert len(await _fetch(dsn, "SELECT 1 FROM credentials WHERE agent_name = 'bob'")) == 1
-    assert len(await _fetch(dsn, "SELECT 1 FROM audit_log")) == audited  # a refusal records nothing
+    assert len(await fetch_rows(dsn, "SELECT 1 FROM credentials WHERE agent_name = 'bob'")) == 1
+    assert (
+        len(await fetch_rows(dsn, "SELECT 1 FROM audit_log")) == audited
+    )  # a refusal records nothing
 
 
 @pytest.mark.parametrize("revoke_by", ["service", "store"])
 async def test_reactivation_issues_a_fresh_key_and_replaces_a_stale_key_row(
-    env, revoke_by: str
+    pool, revoke_by: str
 ) -> None:
     """The old key stays dead. A crash between revoke's status flip and its
     key delete (``store``) leaves a dead key row; re-activation must still
     work (and replace it)."""
-    dsn, store, auth = env
+    dsn, store, auth = pool
     admin = await _admin(dsn, auth)
     service = AccessService(store, auth)
     fleet = await service.create_fleet("f", admin)
@@ -289,23 +264,23 @@ async def test_reactivation_issues_a_fresh_key_and_replaces_a_stale_key_row(
     assert new != old
     assert await auth.verify(old) is None
     assert await auth.verify(new) is not None
-    assert len(await _fetch(dsn, "SELECT 1 FROM credentials WHERE agent_name = 'bob'")) == 1
+    assert len(await fetch_rows(dsn, "SELECT 1 FROM credentials WHERE agent_name = 'bob'")) == 1
 
 
 # -- AUTH-3: one live org key ---------------------------------------------------------
 
 
-async def test_concurrent_org_rotations_leave_exactly_one_live_key(env) -> None:
-    dsn, _, auth = env
+async def test_concurrent_org_rotations_leave_exactly_one_live_key(pool) -> None:
+    dsn, _, auth = pool
     for _ in range(10):
         keys = await asyncio.gather(*(auth.rotate_org_key() for _ in range(4)))
         live = [k for k in keys if await auth.verify(k) is not None]
         assert len(live) == 1
-        assert len(await _fetch(dsn, "SELECT 1 FROM credentials WHERE kind = 'org'")) == 1
+        assert len(await fetch_rows(dsn, "SELECT 1 FROM credentials WHERE kind = 'org'")) == 1
 
 
-async def test_concurrent_cli_and_app_rotations_leave_exactly_one_live_key(env) -> None:
-    dsn, _, auth = env
+async def test_concurrent_cli_and_app_rotations_leave_exactly_one_live_key(pool) -> None:
+    dsn, _, auth = pool
     keys = await asyncio.gather(
         auth.rotate_org_key(), _rotate_org(dsn, actor="t"), auth.rotate_org_key()
     )
@@ -313,12 +288,12 @@ async def test_concurrent_cli_and_app_rotations_leave_exactly_one_live_key(env) 
     assert len(live) == 1
 
 
-async def test_a_second_org_key_row_is_refused_by_the_schema(env) -> None:
-    dsn, _, _ = env
+async def test_a_second_org_key_row_is_refused_by_the_schema(pool) -> None:
+    dsn, _, _ = pool
     insert = "INSERT INTO credentials (key_hash, kind, user_id) VALUES ($1, 'org', 'org')"
-    await _exec(dsn, insert, "o1")
+    await exec_sql(dsn, insert, "o1")
     with pytest.raises(asyncpg.UniqueViolationError):
-        await _exec(dsn, insert, "o2")
+        await exec_sql(dsn, insert, "o2")
 
 
 # -- CLI surface (main()) -------------------------------------------------------------
@@ -334,9 +309,9 @@ async def _cli(monkeypatch, *argv: str) -> None:
 
 
 async def test_cli_flags_on_an_active_agent_are_rejected_not_ignored(
-    env, monkeypatch, capsys
+    pool, monkeypatch, capsys
 ) -> None:
-    dsn, store, auth = env
+    dsn, store, auth = pool
     admin = await _admin(dsn, auth)
     service = AccessService(store, auth)
     fleet = await service.create_fleet("f", admin)
@@ -346,11 +321,11 @@ async def test_cli_flags_on_an_active_agent_are_rejected_not_ignored(
         await _cli(monkeypatch, "issue-agent", "--name", "bob", "--trust-level", "3")
     assert exc.value.code == 1
     assert "already active" in capsys.readouterr().err
-    assert await _fetch(dsn, "SELECT 1 FROM credentials WHERE agent_name = 'bob'") == []
+    assert await fetch_rows(dsn, "SELECT 1 FROM credentials WHERE agent_name = 'bob'") == []
 
 
-async def test_cli_bad_or_unknown_home_fleet_is_a_clean_error(env, monkeypatch, capsys) -> None:
-    _, store, _ = env
+async def test_cli_bad_or_unknown_home_fleet_is_a_clean_error(pool, monkeypatch, capsys) -> None:
+    _, store, _ = pool
     await store.register_agent("bob")
     with pytest.raises(SystemExit) as exc:
         await _cli(
@@ -382,8 +357,8 @@ async def test_cli_bad_or_unknown_home_fleet_is_a_clean_error(env, monkeypatch, 
     assert agent is not None and agent.status.value == "pending"
 
 
-async def test_cli_activates_a_pending_agent_through_main(env, monkeypatch, capsys) -> None:
-    dsn, store, auth = env
+async def test_cli_activates_a_pending_agent_through_main(pool, monkeypatch, capsys) -> None:
+    dsn, store, auth = pool
     admin = await _admin(dsn, auth)
     fleet = await AccessService(store, auth).create_fleet("f", admin)
     await store.register_agent("bob")
@@ -395,17 +370,19 @@ async def test_cli_activates_a_pending_agent_through_main(env, monkeypatch, caps
     assert credential is not None and credential.trust_level is TrustLevel.CONTRIBUTOR
 
 
-async def test_cli_list_marks_dead_rows_and_migrate_warns(env, monkeypatch, capsys, caplog) -> None:
+async def test_cli_list_marks_dead_rows_and_migrate_warns(
+    pool, monkeypatch, capsys, caplog
+) -> None:
     import logging
 
-    dsn, store, _ = env
+    dsn, store, _ = pool
     await store.register_agent("pend")
-    await _exec(
+    await exec_sql(
         dsn,
         "INSERT INTO credentials (key_hash, kind, user_id, agent_id, agent_name) VALUES "
         "('h-pend', 'agent', 'pend', 'pend', 'pend'), ('h-ghost', 'agent', 'g', 'g', 'g')",
     )
-    await _exec(
+    await exec_sql(
         dsn, "INSERT INTO credentials (key_hash, kind, user_id) VALUES ('h-user', 'user', 'u')"
     )
     await _cli(monkeypatch, "list")
@@ -416,9 +393,9 @@ async def test_cli_list_marks_dead_rows_and_migrate_warns(env, monkeypatch, caps
     assert any("3 credential row(s) are dead" in r.getMessage() for r in caplog.records)
 
 
-async def test_cli_refuses_a_home_fleet_that_was_merged(env) -> None:
+async def test_cli_refuses_a_home_fleet_that_was_merged(pool) -> None:
     """ADR 0107: a merged fleet takes no new agents, on the CLI path too."""
-    dsn, store, auth = env
+    dsn, store, auth = pool
     admin = await _admin(dsn, auth)
     service = AccessService(store, auth)
     old = await service.create_fleet("old", admin)
@@ -430,7 +407,7 @@ async def test_cli_refuses_a_home_fleet_that_was_merged(env) -> None:
             dsn, "bob", actor="t", trust_level=TrustLevel.LURKER, home_fleet_id=old.id
         )
     assert refused.value.target_id == new.id
-    assert await _fetch(dsn, "SELECT 1 FROM credentials WHERE agent_name = 'bob'") == []
+    assert await fetch_rows(dsn, "SELECT 1 FROM credentials WHERE agent_name = 'bob'") == []
     await _issue_agent(dsn, "bob", actor="t", trust_level=TrustLevel.LURKER, home_fleet_id=new.id)
 
 
@@ -449,8 +426,8 @@ async def _active_bob(dsn, store, auth):
     return service, admin, fleet, old
 
 
-async def test_replace_swaps_the_key_in_one_step_and_audits_both_fingerprints(env) -> None:
-    dsn, store, auth = env
+async def test_replace_swaps_the_key_in_one_step_and_audits_both_fingerprints(pool) -> None:
+    dsn, store, auth = pool
     service, admin, fleet, old = await _active_bob(dsn, store, auth)
     before = await store.get_agent("bob")
     new = await service.replace_agent_key("bob", admin)
@@ -461,8 +438,8 @@ async def test_replace_swaps_the_key_in_one_step_and_audits_both_fingerprints(en
     assert credential.trust_level is TrustLevel.CONTRIBUTOR
     assert credential.home_fleet_id == fleet.id
     assert await store.get_agent("bob") == before
-    assert len(await _fetch(dsn, "SELECT 1 FROM credentials WHERE agent_name = 'bob'")) == 1
-    [row] = await _fetch(dsn, "SELECT * FROM audit_log WHERE action = 'agent_key.replace'")
+    assert len(await fetch_rows(dsn, "SELECT 1 FROM credentials WHERE agent_name = 'bob'")) == 1
+    [row] = await fetch_rows(dsn, "SELECT * FROM audit_log WHERE action = 'agent_key.replace'")
     assert (row["actor_kind"], row["target"]) == ("admin_key", "bob")
     assert json.loads(row["detail"]) == {
         "old_key": key_hash(old)[:12],
@@ -472,27 +449,29 @@ async def test_replace_swaps_the_key_in_one_step_and_audits_both_fingerprints(en
 
 
 @pytest.mark.parametrize("status", ["pending", "revoked"])
-async def test_replace_refuses_a_non_active_agent_and_changes_nothing(env, status) -> None:
-    dsn, _, auth = env
-    await _exec(dsn, "INSERT INTO agents (name, status, trust_level) VALUES ('bob', $1, 1)", status)
+async def test_replace_refuses_a_non_active_agent_and_changes_nothing(pool, status) -> None:
+    dsn, _, auth = pool
+    await exec_sql(
+        dsn, "INSERT INTO agents (name, status, trust_level) VALUES ('bob', $1, 1)", status
+    )
     with pytest.raises(InvalidAgentStatus):
         await auth.replace_agent_key("bob", **_AUDIT)
-    assert await _fetch(dsn, "SELECT 1 FROM credentials") == []
+    assert await fetch_rows(dsn, "SELECT 1 FROM credentials") == []
 
 
-async def test_concurrent_replacements_leave_exactly_one_live_key(env) -> None:
-    dsn, store, auth = env
+async def test_concurrent_replacements_leave_exactly_one_live_key(pool) -> None:
+    dsn, store, auth = pool
     await _active_bob(dsn, store, auth)
     results = await asyncio.gather(*(auth.replace_agent_key("bob", **_AUDIT) for _ in range(4)))
     live = [r.raw_key for r in results if await auth.verify(r.raw_key) is not None]
     assert len(live) == 1
-    assert len(await _fetch(dsn, "SELECT 1 FROM credentials WHERE agent_name = 'bob'")) == 1
+    assert len(await fetch_rows(dsn, "SELECT 1 FROM credentials WHERE agent_name = 'bob'")) == 1
 
 
 async def _wait_for_lock_waiters(dsn: str, count: int) -> None:
     """Until ``count`` backends of this database wait on a lock."""
     for _ in range(200):
-        [row] = await _fetch(
+        [row] = await fetch_rows(
             dsn,
             "SELECT count(*) AS c FROM pg_stat_activity WHERE datname = current_database() "
             "AND wait_event_type = 'Lock' AND pid <> pg_backend_pid()",
@@ -505,14 +484,14 @@ async def _wait_for_lock_waiters(dsn: str, count: int) -> None:
 
 @pytest.mark.parametrize("first", ["replace", "revoke"])
 async def test_replace_racing_a_revoke_in_either_order_never_leaves_a_key_on_a_revoked_agent(
-    env, first
+    pool, first
 ) -> None:
     """Both operations queue behind a held row lock on the agent, in a forced
     order. Replace first: the key is replaced, then revoked away. Revoke first:
     the replace sees a revoked agent and is refused. Either way the agent ends
     revoked with no key row, neither key verifies, and each audit row exists
     exactly when its operation succeeded."""
-    dsn, store, auth = env
+    dsn, store, auth = pool
     service, admin, _, old = await _active_bob(dsn, store, auth)
 
     async def replace() -> str:
@@ -549,26 +528,28 @@ async def test_replace_racing_a_revoke_in_either_order_never_leaves_a_key_on_a_r
         assert isinstance(replaced, InvalidAgentStatus)
     agent = await store.get_agent("bob")
     assert agent is not None and agent.status.value == "revoked"
-    assert await _fetch(dsn, "SELECT 1 FROM credentials WHERE agent_name = 'bob'") == []
+    assert await fetch_rows(dsn, "SELECT 1 FROM credentials WHERE agent_name = 'bob'") == []
     assert await auth.verify(old) is None
     if isinstance(replaced, str):
         assert await auth.verify(replaced) is None
-    actions = [r["action"] for r in await _fetch(dsn, "SELECT action FROM audit_log ORDER BY id")]
+    actions = [
+        r["action"] for r in await fetch_rows(dsn, "SELECT action FROM audit_log ORDER BY id")
+    ]
     assert actions.count("agent.revoke") == 1
     assert actions.count("agent_key.replace") == (1 if isinstance(replaced, str) else 0)
 
 
 async def test_cli_rotate_agent_replaces_the_key_and_audits_as_cli(
-    env, monkeypatch, capsys
+    pool, monkeypatch, capsys
 ) -> None:
-    dsn, store, auth = env
+    dsn, store, auth = pool
     _, _, _, old = await _active_bob(dsn, store, auth)
     await _cli(monkeypatch, "rotate-agent", "--name", "bob")
     new = capsys.readouterr().out.strip()
     assert new != old
     assert await auth.verify(old) is None
     assert await auth.verify(new) is not None
-    [row] = await _fetch(dsn, "SELECT * FROM audit_log WHERE action = 'agent_key.replace'")
+    [row] = await fetch_rows(dsn, "SELECT * FROM audit_log WHERE action = 'agent_key.replace'")
     assert (row["actor_kind"], row["actor"], row["target"]) == ("cli", "t", "bob")
     assert json.loads(row["detail"]) == {
         "old_key": key_hash(old)[:12],
@@ -576,8 +557,8 @@ async def test_cli_rotate_agent_replaces_the_key_and_audits_as_cli(
     }
 
 
-async def test_cli_rotate_agent_refuses_non_active_and_unknown(env, monkeypatch, capsys) -> None:
-    dsn, store, _ = env
+async def test_cli_rotate_agent_refuses_non_active_and_unknown(pool, monkeypatch, capsys) -> None:
+    dsn, store, _ = pool
     await store.register_agent("bob")
     with pytest.raises(AgentNotActive):
         await _rotate_agent(dsn, "bob", actor="t")
@@ -589,5 +570,5 @@ async def test_cli_rotate_agent_refuses_non_active_and_unknown(env, monkeypatch,
         await _cli(monkeypatch, "rotate-agent", "--name", "ghost")
     assert exc.value.code == 1
     assert "no agent registered" in capsys.readouterr().err
-    assert await _fetch(dsn, "SELECT 1 FROM credentials") == []
-    assert await _fetch(dsn, "SELECT 1 FROM audit_log WHERE action = 'agent_key.replace'") == []
+    assert await fetch_rows(dsn, "SELECT 1 FROM credentials") == []
+    assert await fetch_rows(dsn, "SELECT 1 FROM audit_log WHERE action = 'agent_key.replace'") == []

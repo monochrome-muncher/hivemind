@@ -14,12 +14,8 @@ import json
 import re
 from dataclasses import asdict
 
-import httpx
 import pytest
 
-from hivemind.api.deps import HivemindApp, create_app
-from hivemind.api.main import create_app_for_config
-from hivemind.config import Settings
 from hivemind.domain import (
     ActorKind,
     AuditAction,
@@ -41,9 +37,9 @@ from hivemind.services.governance import GovernanceService
 from tests.fakes import (
     FakeAuthenticator,
     fake_key_id,
+    make_client,
     make_clock,
-    make_embedder,
-    make_search_config,
+    make_rest_app,
 )
 
 ADMIN_KEY = "hm_admin"
@@ -332,24 +328,8 @@ async def test_no_raw_key_appears_in_any_audit_row() -> None:
 # -- GET /v1/admin/audit-log ----------------------------------------------------
 
 
-def _app() -> HivemindApp:
-    return create_app_for_config(
-        Settings(),
-        store=MemoryStore(make_clock()),
-        embedder=make_embedder(),
-        authenticator=FakeAuthenticator(),
-        search_config=make_search_config(),
-    )
-
-
-def _client(app: HivemindApp) -> httpx.AsyncClient:
-    return httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=create_app(app)), base_url="http://hivemind.test"
-    )
-
-
 async def test_endpoint_requires_an_admin_key() -> None:
-    async with _client(_app()) as client:
+    async with make_client(make_rest_app()) as client:
         missing = await client.get("/v1/admin/audit-log")
         org = await client.get("/v1/admin/audit-log", headers={"X-API-Key": "hm_org"})
     assert missing.status_code == 401
@@ -358,10 +338,10 @@ async def test_endpoint_requires_an_admin_key() -> None:
 
 
 async def test_endpoint_lists_newest_first_with_filters() -> None:
-    app = _app()
+    app = make_rest_app()
     headers = {"X-API-Key": ADMIN_KEY}
     await app.store.register_agent("alice")
-    async with _client(app) as client:
+    async with make_client(app) as client:
         fleet = (
             await client.post("/v1/admin/fleets", json={"name": "data-eng"}, headers=headers)
         ).json()
@@ -419,7 +399,7 @@ async def test_since_out_of_range_after_its_offset_is_a_422() -> None:
     """``0001-01-01T00:00+14:00`` is year 0 in UTC: asyncpg cannot encode
     it, so it must be refused as input, not reach the store."""
     headers = {"X-API-Key": ADMIN_KEY}
-    async with _client(_app()) as client:
+    async with make_client(make_rest_app()) as client:
         resp = await client.get(
             "/v1/admin/audit-log", params={"since": "0001-01-01T00:00:00+14:00"}, headers=headers
         )

@@ -16,27 +16,16 @@ from hivemind.ports import Credential
 from hivemind.services.governance import GovernanceService
 from tests.fakes import (
     FakeAuthenticator,
+    agent_credential,
     make_embedder,
     make_search_config,
     mcp_surface,
 )
 
-
-def _agent(name: str, fleet: str, level: TrustLevel) -> Credential:
-    return Credential(
-        user_id=name,
-        agent_id=name,
-        agent_name=name,
-        access_controlled=True,
-        trust_level=level,
-        home_fleet_id=fleet,
-    )
-
-
-AUTHOR = _agent("author", "fleet-a", TrustLevel.CONTRIBUTOR)
-CONTRIBUTOR = _agent("peer", "fleet-a", TrustLevel.CONTRIBUTOR)
-LURKER = _agent("lurker", "fleet-a", TrustLevel.LURKER)
-FOREIGN_PRIVILEGED = _agent("roamer", "fleet-b", TrustLevel.PRIVILEGED)
+AUTHOR = agent_credential("author", "fleet-a", TrustLevel.CONTRIBUTOR)
+CONTRIBUTOR = agent_credential("peer", "fleet-a", TrustLevel.CONTRIBUTOR)
+LURKER = agent_credential("lurker", "fleet-a", TrustLevel.LURKER)
+FOREIGN_PRIVILEGED = agent_credential("roamer", "fleet-b", TrustLevel.PRIVILEGED)
 ADMIN = Credential(user_id="admin", agent_id="admin", is_admin=True)
 LEGACY = Credential(user_id="legacy", agent_id="legacy")  # no access control
 

@@ -8,33 +8,21 @@ import httpx
 from hivemind.api.deps import create_app
 from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
-from hivemind.domain.access import TrustLevel, Visibility
+from hivemind.domain.access import Visibility
 from hivemind.mcp.app import hive_withdraw, hive_write
 from hivemind.memstore import MemoryStore
-from hivemind.ports import Credential
 from tests.fakes import (
     FakeAuthenticator,
+    agent_credential,
     make_clock,
     make_embedder,
     make_search_config,
     mcp_surface,
 )
 
-
-def _agent(name: str, fleet: str, level: TrustLevel = TrustLevel.CONTRIBUTOR) -> Credential:
-    return Credential(
-        user_id=name,
-        agent_id=name,
-        agent_name=name,
-        access_controlled=True,
-        trust_level=level,
-        home_fleet_id=fleet,
-    )
-
-
-WRITER = _agent("writer", "fleet-a")
-PEER = _agent("peer", "fleet-a")
-OUTSIDER = _agent("outsider", "fleet-b")
+WRITER = agent_credential("writer", "fleet-a")
+PEER = agent_credential("peer", "fleet-a")
+OUTSIDER = agent_credential("outsider", "fleet-b")
 
 
 async def test_first_write_has_no_related_entries() -> None:

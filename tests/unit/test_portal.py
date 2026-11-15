@@ -24,7 +24,13 @@ from hivemind.domain.entry import EntryDraft, Kind
 from hivemind.memstore import MemoryStore
 from hivemind.portal.app import SHARED_MODULES, STATIC_DIR, create_portal_app, is_allowed
 from hivemind.ports import Credential
-from tests.fakes import FakeAuthenticator, make_clock, make_embedder, make_search_config
+from tests.fakes import (
+    FakeAuthenticator,
+    agent_credential,
+    make_clock,
+    make_embedder,
+    make_search_config,
+)
 
 AGENT = {"X-API-Key": "hm_agent_carol"}
 ADMIN = {"X-API-Key": "hm_admin"}
@@ -237,16 +243,6 @@ def test_the_portal_search_reads_an_id_through_the_key_bounded_read() -> None:
 
 
 def _fleet_api():
-    def agent(name: str, level: TrustLevel, fleet: str = "ops") -> Credential:
-        return Credential(
-            user_id=name,
-            agent_id=name,
-            agent_name=name,
-            access_controlled=True,
-            trust_level=level,
-            home_fleet_id=fleet,
-        )
-
     store = MemoryStore(make_clock())
     hivemind = create_app_for_config(
         Settings(),
@@ -254,10 +250,10 @@ def _fleet_api():
         embedder=make_embedder(),
         authenticator=FakeAuthenticator(
             agent_credentials={
-                "hm_agent_dev": agent("dev", TrustLevel.CONTRIBUTOR),
-                "hm_agent_lead": agent("lead", TrustLevel.PRIVILEGED),
-                "hm_agent_lurk": agent("lurk", TrustLevel.LURKER),
-                "hm_agent_away": agent("away", TrustLevel.CONTRIBUTOR, "other"),
+                "hm_agent_dev": agent_credential("dev", "ops"),
+                "hm_agent_lead": agent_credential("lead", "ops", TrustLevel.PRIVILEGED),
+                "hm_agent_lurk": agent_credential("lurk", "ops", TrustLevel.LURKER),
+                "hm_agent_away": agent_credential("away", "other"),
                 "hm_agent_heir": Credential(
                     user_id="heir",
                     agent_id="heir",

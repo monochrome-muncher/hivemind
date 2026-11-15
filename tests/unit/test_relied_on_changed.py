@@ -18,6 +18,7 @@ from hivemind.ports import Credential
 from tests.fakes import (
     FakeAuthenticator,
     FixedClock,
+    agent_credential,
     make_clock,
     make_embedder,
     make_search_config,
@@ -37,19 +38,12 @@ def _store() -> MemoryStore:
     return MemoryStore(TickingClock(make_clock()()))
 
 
-def _agent(name: str, level: TrustLevel = TrustLevel.CONTRIBUTOR) -> Credential:
-    return Credential(
-        user_id=name,
-        agent_id=name,
-        agent_name=name,
-        access_controlled=True,
-        trust_level=level,
-        home_fleet_id="fleet-a",
-    )
-
-
-AUTHOR, ME, OTHER = _agent("author"), _agent("me"), _agent("other")
-ME_DEMOTED = _agent("me", TrustLevel.UNTRUSTED)
+AUTHOR, ME, OTHER = (
+    agent_credential("author", "fleet-a"),
+    agent_credential("me", "fleet-a"),
+    agent_credential("other", "fleet-a"),
+)
+ME_DEMOTED = agent_credential("me", "fleet-a", TrustLevel.UNTRUSTED)
 ORG = Credential(user_id="org", is_org=True)
 ADMIN = Credential(user_id="admin", is_admin=True)
 

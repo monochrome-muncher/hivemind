@@ -8,49 +8,12 @@ working. Skips when Postgres is down, like the rest of the suite.
 
 from __future__ import annotations
 
-import pytest
-from tests.fakes import FakeEmbedder, make_search_config
-from tests.pg import ensure_migrated, reset_tables
+from tests.pg import pg_surface
 
-from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
-from hivemind.mcp.app import McpHivemind, hive_feedback, hive_get, hive_withdraw, hive_write
-from hivemind.ports import Credential
+from hivemind.mcp.app import hive_feedback, hive_get, hive_withdraw, hive_write
 from hivemind.services.access import AccessService
-from hivemind.services.governance import GovernanceService
-from hivemind.services.read import ReadService
-from hivemind.services.search import SearchService
-from hivemind.services.write import WriteService
-from hivemind.store import PgAuthenticator, PgStore
 from hivemind.store.keys import _issue_admin
-
-
-@pytest.fixture
-async def pool():
-    dsn = Settings().database_url
-    await ensure_migrated(dsn, Settings().embedding_dim)
-    await reset_tables(dsn)
-    store, auth = PgStore(dsn), PgAuthenticator(dsn)
-    try:
-        yield dsn, store, auth
-    finally:
-        await store.close()
-        await auth.close()
-
-
-def _surface(store: PgStore, credential: Credential) -> McpHivemind:
-    embedder = FakeEmbedder(dimension=Settings().embedding_dim)
-    config = make_search_config()
-    return McpHivemind(
-        read_service=ReadService(store, GovernanceService(store), config),
-        store=store,
-        write_service=WriteService(store, embedder),
-        search_service=SearchService(store, embedder, config),
-        governance_service=GovernanceService(store),
-        access_service=AccessService(store),
-        search_config=config,
-        credential=credential,
-    )
 
 
 async def test_two_contributors_with_their_own_keys(pool) -> None:
@@ -64,7 +27,7 @@ async def test_two_contributors_with_their_own_keys(pool) -> None:
         await store.register_agent(name, "owner")
         _, key = await access.activate(name, TrustLevel.CONTRIBUTOR, fleet.id, admin)
         creds[name] = await auth.verify(key)
-    alice, bob = _surface(store, creds["alice"]), _surface(store, creds["bob"])
+    alice, bob = pg_surface(store, creds["alice"]), pg_surface(store, creds["bob"])
 
     secret = await hive_write(alice, kind="fact", summary="alice private", scope="self")
     assert secret["author"] == "alice"

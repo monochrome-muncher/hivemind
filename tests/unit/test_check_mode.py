@@ -23,26 +23,15 @@ from hivemind.services.write import WriteService
 from tests.fakes import (
     FakeAuthenticator,
     FakeExtractor,
+    agent_credential,
     make_clock,
     make_embedder,
     make_search_config,
     mcp_surface,
 )
 
-
-def _agent(name: str, fleet: str) -> Credential:
-    return Credential(
-        user_id=name,
-        agent_id=name,
-        agent_name=name,
-        access_controlled=True,
-        trust_level=TrustLevel.CONTRIBUTOR,
-        home_fleet_id=fleet,
-    )
-
-
-WRITER = _agent("writer", "fleet-a")
-PEER = _agent("peer", "fleet-a")
+WRITER = agent_credential("writer", "fleet-a")
+PEER = agent_credential("peer", "fleet-a")
 
 
 class _CountingStore(MemoryStore):

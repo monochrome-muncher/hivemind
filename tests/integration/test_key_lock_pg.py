@@ -32,14 +32,6 @@ ADMIN = Credential(user_id="admin", is_admin=True, key_id="adminfinger1")
 Env = tuple[str, PgStore, PgAuthenticator, AccessService]
 
 
-async def _exec(dsn: str, sql: str, *args: object) -> None:
-    conn = await asyncpg.connect(dsn)
-    try:
-        await conn.execute(sql, *args)
-    finally:
-        await conn.close()
-
-
 @pytest.fixture
 async def env() -> AsyncIterator[Env]:
     dsn = Settings().database_url

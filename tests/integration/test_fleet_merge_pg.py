@@ -8,64 +8,18 @@ import asyncio
 
 import asyncpg
 import pytest
-from tests.fakes import FakeEmbedder, make_search_config
-from tests.pg import ensure_migrated, reset_tables, wait_until_blocked
+from tests.pg import fleet_draft, pg_surface, wait_until_blocked
 
 from hivemind.config import Settings
 from hivemind.domain.access import FleetBusy, FleetMerged, TrustLevel
 from hivemind.domain.audit import AuditFilters
 from hivemind.domain.entry import EntryDraft, Kind
 from hivemind.domain.fleet_merge import FleetMergeRefused
-from hivemind.mcp.app import McpHivemind, hive_get, hive_list, hive_whoami, hive_write
-from hivemind.ports import Credential
+from hivemind.mcp.app import hive_get, hive_list, hive_whoami, hive_write
 from hivemind.services.access import AccessService
-from hivemind.services.governance import GovernanceService
-from hivemind.services.read import ReadService
-from hivemind.services.search import SearchService
-from hivemind.services.write import WriteService
-from hivemind.store import PgAuthenticator, PgStore
 from hivemind.store.keys import _issue_admin
 from hivemind.store.pgstore import fleet_guards
 from hivemind.store.pgstore import fleet_merge as fleet_merge_sql
-
-
-@pytest.fixture
-async def pool():
-    dsn = Settings().database_url
-    await ensure_migrated(dsn, Settings().embedding_dim)
-    await reset_tables(dsn)
-    store, auth = PgStore(dsn), PgAuthenticator(dsn)
-    try:
-        yield dsn, store, auth
-    finally:
-        await store.close()
-        await auth.close()
-
-
-def _draft(fleet_id: str, summary: str, author: str = "amy") -> EntryDraft:
-    return EntryDraft(
-        kind=Kind.FACT,
-        summary=summary,
-        author=author,
-        agent=author,
-        scope="fleet",
-        fleet_id=fleet_id,
-    )
-
-
-def _surface(store: PgStore, credential: Credential) -> McpHivemind:
-    embedder = FakeEmbedder(dimension=Settings().embedding_dim)
-    config = make_search_config()
-    return McpHivemind(
-        read_service=ReadService(store, GovernanceService(store), config),
-        store=store,
-        write_service=WriteService(store, embedder),
-        search_service=SearchService(store, embedder, config),
-        governance_service=GovernanceService(store),
-        access_service=AccessService(store),
-        search_config=config,
-        credential=credential,
-    )
 
 
 async def _count(dsn: str, fleet_id: str) -> int:
@@ -81,7 +35,7 @@ async def _count(dsn: str, fleet_id: str) -> int:
 async def test_a_write_that_resolved_the_source_before_the_merge_cannot_land_in_it(pool) -> None:
     dsn, store, _ = pool
     source, target = (await store.create_fleet("a")).id, (await store.create_fleet("b")).id
-    stale = _draft(source, "resolved before the merge")  # the draft names the source fleet
+    stale = fleet_draft(source, "resolved before the merge")  # the draft names the source fleet
 
     await store.merge_fleets(source, target_fleet_id=target, merged_by="admin:1")
 
@@ -101,7 +55,7 @@ async def test_a_write_in_flight_across_the_merge_waits_and_is_then_refused(pool
     await merge.execute(
         "UPDATE fleets SET merged_into = $2, merged_at = now() WHERE id = $1", source, target
     )
-    write = asyncio.create_task(store.create_entry(_draft(source, "in flight"), None))
+    write = asyncio.create_task(store.create_entry(fleet_draft(source, "in flight"), None))
     pin = asyncio.create_task(store.pin_entry(source, target, "lead", 10))
     await wait_until_blocked(dsn, 2)
     assert not write.done() and not pin.done()  # both wait on the row lock
@@ -127,7 +81,7 @@ async def test_a_write_gives_up_with_a_retryable_error_when_a_merge_holds_the_fl
     try:
         started = asyncio.get_running_loop().time()
         with pytest.raises(FleetBusy, match="being merged or moved, retry"):
-            await store.create_entry(_draft(source, "waits too long"), None)
+            await store.create_entry(fleet_draft(source, "waits too long"), None)
         # It waited out the lock timeout (not a fast failure), then gave up
         # well before the shipped 3 s.
         assert 0.25 <= asyncio.get_running_loop().time() - started < 2
@@ -170,7 +124,7 @@ async def test_writers_racing_a_merge_never_leave_an_entry_in_the_source(pool) -
 
     async def write(i: int) -> str | None:
         try:
-            await store.create_entry(_draft(source, f"w{i}"), None)
+            await store.create_entry(fleet_draft(source, f"w{i}"), None)
             return "ok"
         except FleetMerged:
             return "merged"
@@ -196,17 +150,17 @@ async def test_agents_read_their_old_fleet_with_the_same_key_after_the_merge(poo
         _, keys[name] = await access.activate(name, TrustLevel.CONTRIBUTOR, fleet.id, admin)
     amy = await auth.verify(keys["amy"])
     assert amy is not None and amy.home_fleet_id == a.id
-    old = await hive_write(_surface(store, amy), kind="fact", summary="alpha knowledge")
+    old = await hive_write(pg_surface(store, amy), kind="fact", summary="alpha knowledge")
     bo = await auth.verify(keys["bo"])
     assert bo is not None
-    await hive_write(_surface(store, bo), kind="fact", summary="beta knowledge")
+    await hive_write(pg_surface(store, bo), kind="fact", summary="beta knowledge")
 
     await access.merges.merge(a.id, admin, target_fleet_id=b.id)
 
     amy_again = await auth.verify(keys["amy"])  # the same key, no credential cache
     assert amy_again is not None and amy_again.home_fleet_id == b.id
     assert amy_again.trust_level is TrustLevel.CONTRIBUTOR
-    surface = _surface(store, amy_again)
+    surface = pg_surface(store, amy_again)
     assert (await hive_get(surface, entry_id=str(old["id"])))["summary"] == "alpha knowledge"
     listed = await hive_list(surface)
     assert {e["summary"] for e in listed["entries"]} == {"alpha knowledge", "beta knowledge"}  # type: ignore[attr-defined, union-attr]
@@ -223,13 +177,13 @@ async def test_undo_after_post_merge_writes_and_the_chained_refusal(pool) -> Non
     a, b = await access.create_fleet("alpha", admin), await access.create_fleet("beta", admin)
     await store.register_agent("amy")
     await access.activate("amy", TrustLevel.CONTRIBUTOR, a.id, admin)
-    mine = await store.create_entry(_draft(a.id, "from alpha"), None)
-    pinned = await store.create_entry(_draft(a.id, "pinned in alpha"), None)
+    mine = await store.create_entry(fleet_draft(a.id, "from alpha"), None)
+    pinned = await store.create_entry(fleet_draft(a.id, "pinned in alpha"), None)
     await store.pin_entry(a.id, pinned.id, "amy", 10)
-    theirs = await store.create_entry(_draft(b.id, "from beta", "bo"), None)
+    theirs = await store.create_entry(fleet_draft(b.id, "from beta", "bo"), None)
 
     first = await access.merges.merge(a.id, admin, target_fleet_id=b.id)
-    late = await store.create_entry(_draft(b.id, "written after"), None)
+    late = await store.create_entry(fleet_draft(b.id, "written after"), None)
     chained = await access.merges.merge(b.id, admin, new_fleet_name="gamma")
     with pytest.raises(FleetMergeRefused):
         await access.merges.undo(first.record.id, admin)  # beta is merged since
@@ -253,8 +207,8 @@ async def test_a_duplicate_scan_the_server_cancels_is_reported_incomplete(
     _dsn, store, _auth = pool
     a, b = await store.create_fleet("alpha"), await store.create_fleet("beta")
     vec = [1.0] + [0.0] * (Settings().embedding_dim - 1)
-    await store.create_entry(_draft(a.id, "in alpha"), vec)
-    await store.create_entry(_draft(b.id, "in beta"), vec)
+    await store.create_entry(fleet_draft(a.id, "in alpha"), vec)
+    await store.create_entry(fleet_draft(b.id, "in beta"), vec)
     whole = await store.duplicate_pairs(a.id, b.id, 0.9, 100)
     assert (len(whole.pairs), whole.looked_up, whole.truncated) == (1, 1, False)
 
@@ -287,9 +241,9 @@ async def test_a_small_fleet_is_scanned_exactly_and_agrees_with_the_index_path(
         return v
 
     for i in range(3):
-        await store.create_entry(_draft(a.id, f"mine {i}"), vec(i))
-        await store.create_entry(_draft(b.id, f"theirs {i}"), vec(i))
-    await store.create_entry(_draft(a.id, "unmatched"), vec(7))
+        await store.create_entry(fleet_draft(a.id, f"mine {i}"), vec(i))
+        await store.create_entry(fleet_draft(b.id, f"theirs {i}"), vec(i))
+    await store.create_entry(fleet_draft(a.id, "unmatched"), vec(7))
 
     # Break the statement the other path would use, so each run proves its own.
     with monkeypatch.context() as m:
@@ -319,7 +273,7 @@ async def test_a_lock_wait_after_the_fleet_guard_is_fleet_busy_too(
     dsn, store, _ = pool
     monkeypatch.setattr(fleet_guards, "WRITE_LOCK_TIMEOUT", "300ms")
     fleet = (await store.create_fleet("a")).id
-    old = await store.create_entry(_draft(fleet, "old"), None)
+    old = await store.create_entry(fleet_draft(fleet, "old"), None)
     holder = await asyncpg.connect(dsn)
     tx = holder.transaction()
     await tx.start()
