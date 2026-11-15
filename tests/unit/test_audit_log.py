@@ -221,7 +221,7 @@ async def test_an_admin_registration_is_an_admin_key_row() -> None:
 async def test_reregistrations_refusals_and_reads_are_not_audited() -> None:
     """Re-registering (an idempotent answer), a refused name and the
     read-only listings change nothing, so they write no row."""
-    from hivemind.services.access import NameTaken
+    from hivemind.services.errors import NameTaken
 
     service, store, _, admin, _ = await _setup()
     org = Credential(user_id="org", is_org=True, access_controlled=True)

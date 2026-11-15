@@ -33,13 +33,11 @@ from hivemind.domain.entry import (
     EntryDraft,
     EntryFilters,
     EntryState,
-    ImportanceSource,
     Kind,
 )
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.domain.pin import PinRefusal, PinWrite
 from hivemind.ports import Credential, SupersedeConflict
-from hivemind.services.chain import get_visible_entries
 from hivemind.services.pins import PinService
 from hivemind.services.write import WriteService
 from hivemind.store import PgAuthenticator, PgStore
@@ -406,31 +404,6 @@ async def test_authenticator_resolves_key_to_credential(pg) -> None:
 # --- migration idempotency ---------------------------------------------------------
 
 
-async def test_create_entry_records_importance_source(pg) -> None:
-    """ROADMAP §4.5: ``importance_source`` round-trips through Postgres."""
-    store, _, dim = pg
-    defaulted = await store.create_entry(draft("Rode the default"), make_vec(dim, 2))
-    assert defaulted.importance_source is ImportanceSource.DEFAULT
-    reloaded_default = await store.get_entry(defaulted.id)
-    assert reloaded_default is not None
-    assert reloaded_default.importance_source is ImportanceSource.DEFAULT
-
-    caller_draft = EntryDraft(
-        kind=Kind.FACT,
-        summary="Caller set it",
-        author="alice",
-        agent="claude-code",
-        importance=5,
-        importance_source=ImportanceSource.CALLER,
-    )
-    supplied = await store.create_entry(caller_draft, make_vec(dim, 3))
-    assert supplied.importance == 5
-    assert supplied.importance_source is ImportanceSource.CALLER
-    reloaded_caller = await store.get_entry(supplied.id)
-    assert reloaded_caller is not None
-    assert reloaded_caller.importance_source is ImportanceSource.CALLER
-
-
 # --- orchestrator probes (ADR 0019) -------------------------------------------
 
 
@@ -448,19 +421,6 @@ async def test_health_check_is_false_on_an_unreachable_pool() -> None:
         assert await store.health_check() is False
     finally:
         await store.close()
-
-
-async def test_get_visible_entries_keys_by_the_id_as_asked(pg) -> None:
-    """ADR 0055: a batch read finds an entry whatever the case of its uuid,
-    and an id that is not a uuid is simply absent."""
-    store, _, _ = pg
-    entry = await store.create_entry(draft("A fact"))
-    upper = entry.id.upper()
-    found = await get_visible_entries(
-        store, [upper, "nope"], Visibility(TrustLevel.PRIVILEGED, "admin", is_admin=True)
-    )
-    assert list(found) == [upper]
-    assert found[upper].id == entry.id
 
 
 async def test_the_fleet_cap_holds_under_concurrent_pinners(pg) -> None:

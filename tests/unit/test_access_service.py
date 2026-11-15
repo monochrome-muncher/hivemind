@@ -20,12 +20,8 @@ from hivemind.domain.access import (
 )
 from hivemind.domain.validation import InvalidInput
 from hivemind.ports import Credential
-from hivemind.services.access import (
-    AccessService,
-    NameTaken,
-    PermissionDenied,
-    resolve_write_scope,
-)
+from hivemind.services.access import AccessService, resolve_write_scope
+from hivemind.services.errors import NameTaken, PermissionDenied
 from tests.fakes import FakeAuthenticator, make_store
 
 

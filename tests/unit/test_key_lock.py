@@ -21,7 +21,8 @@ from hivemind.domain.audit import ActorKind, AuditAction, AuditFilters
 from hivemind.mcp.http import BearerAuthMiddleware, current_credential
 from hivemind.mcp.server import build_server
 from hivemind.ports import Credential
-from hivemind.services.access import AccessService, PermissionDenied
+from hivemind.services.access import AccessService
+from hivemind.services.errors import PermissionDenied
 from tests.fakes import (
     FakeAuthenticator,
     fake_key_id,

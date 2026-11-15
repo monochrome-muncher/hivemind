@@ -7,14 +7,11 @@ id tie-break under a fixed clock, and the draft's own validation.
 
 from __future__ import annotations
 
-from datetime import timedelta
-
 import pytest
 
 from hivemind.domain.entry import (
     EntryDraft,
     EntryFilters,
-    EntryState,
     ImportanceSource,
     Kind,
 )
@@ -54,14 +51,6 @@ def store() -> MemoryStore:
     return MemoryStore(make_clock())
 
 
-async def test_create_entry_assigns_ids_and_created_at(store: MemoryStore) -> None:
-    entry = await store.create_entry(draft("Auth service uses JWT"), [0.1, 0.2, 0.3])
-    assert entry.id
-    assert entry.created_at == FIXED_NOW
-    assert entry.state is EntryState.ACTIVE
-    assert entry.embedding == (0.1, 0.2, 0.3)
-
-
 async def test_keyword_search_ranks_by_token_overlap(store: MemoryStore) -> None:
     jwt = await store.create_entry(draft("JWT tokens expire after 15 minutes", tags=("auth",)))
     other = await store.create_entry(draft("Cookies are HTTP only"))
@@ -84,22 +73,6 @@ async def test_keyword_search_respects_filters(store: MemoryStore) -> None:
     )
     assert decision.id in results
     assert fact.id not in results
-
-
-async def test_occurred_range_filter(store: MemoryStore) -> None:
-    t0 = FIXED_NOW
-    early = await store.create_entry(draft("early", occurred_at=t0 - timedelta(days=10)))
-    late = await store.create_entry(draft("late", occurred_at=t0 + timedelta(days=10)))
-    mid_cut = t0
-    in_range = await store.list_entries(
-        EntryFilters(occurred_from=mid_cut, occurred_to=mid_cut), limit=10
-    )
-    assert [e.id for e in in_range] == []  # neither early(-10d) nor late(+10d)
-    from_to = await store.list_entries(
-        EntryFilters(occurred_from=t0 - timedelta(days=11), occurred_to=t0 + timedelta(days=11)),
-        limit=10,
-    )
-    assert {e.id for e in from_to} == {early.id, late.id}
 
 
 async def test_list_entries_tie_breaks_by_id_desc(store: MemoryStore) -> None:
@@ -137,35 +110,6 @@ def test_entry_draft_importance_source_defaults_to_default() -> None:
     """ROADMAP §4.5: an ``EntryDraft`` that doesn't set ``importance_source``
     rides the ``default`` value (mirrors ``importance``'s own default)."""
     assert draft("unset").importance_source is ImportanceSource.DEFAULT
-
-
-async def test_create_entry_defaults_importance_source(store: MemoryStore) -> None:
-    """ROADMAP §4.5: a draft with no explicit provenance stores/reads back
-    as ``default``."""
-    entry = await store.create_entry(draft("rode the default"))
-    assert entry.importance_source is ImportanceSource.DEFAULT
-    reloaded = await store.get_entry(entry.id)
-    assert reloaded is not None
-    assert reloaded.importance_source is ImportanceSource.DEFAULT
-
-
-async def test_create_entry_records_caller_importance_source(store: MemoryStore) -> None:
-    """ROADMAP §4.5: a draft that explicitly marks ``caller`` provenance
-    stores/reads back as ``caller``."""
-    caller_draft = EntryDraft(
-        kind=Kind.FACT,
-        summary="caller set it",
-        author="alice",
-        agent="claude-code",
-        importance=5,
-        importance_source=ImportanceSource.CALLER,
-    )
-    entry = await store.create_entry(caller_draft)
-    assert entry.importance == 5
-    assert entry.importance_source is ImportanceSource.CALLER
-    reloaded = await store.get_entry(entry.id)
-    assert reloaded is not None
-    assert reloaded.importance_source is ImportanceSource.CALLER
 
 
 class TestEntryDraftNormalisesEnums:

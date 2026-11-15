@@ -48,8 +48,7 @@ from hivemind.ports import Authenticator, Credential, Store
 from hivemind.services.agent_cleanup import AgentCleanupService
 from hivemind.services.agent_history import AgentHistoryService
 from hivemind.services.audit import actor_kind_of, record_admin_action
-from hivemind.services.errors import NameTaken as NameTaken  # re-exported: defined in errors
-from hivemind.services.errors import PermissionDenied
+from hivemind.services.errors import NameTaken, PermissionDenied
 from hivemind.services.fleet_merge import FleetMergeService
 from hivemind.services.guards import require_admin
 from hivemind.services.offboarding import OffboardingService

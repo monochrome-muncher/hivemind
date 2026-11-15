@@ -15,7 +15,8 @@ from hivemind.config import Settings
 from hivemind.domain.access import AgentStatus, InvalidAgentStatus, TrustLevel, UnknownAgent
 from hivemind.domain.audit import AuditAction, AuditFilters
 from hivemind.ports import Credential
-from hivemind.services.access import AccessService, PermissionDenied
+from hivemind.services.access import AccessService
+from hivemind.services.errors import PermissionDenied
 from tests.fakes import (
     FakeAuthenticator,
     fake_key_id,

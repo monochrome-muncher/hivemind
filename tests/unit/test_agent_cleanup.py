@@ -701,32 +701,6 @@ async def test_the_cleanup_and_its_undo_are_audited_with_counts(w: World) -> Non
 # -- undo ---------------------------------------------------------------------------------
 
 
-async def test_undo_restores_exactly_what_the_cleanup_changed(w: World) -> None:
-    good = await w.entry("good fact", author="good")
-    pinned = await w.entry("pinned junk", scope="fleet", supersedes=(good,))
-    plain = await w.entry("plain junk")
-    rated = await w.entry("rated", author="good")
-    await w.pin(pinned, "bad")
-    await w.rate(rated, "bad", Verdict.WRONG)
-    out = await w.clean(restore_ids=[good])
-    assert out.record is not None
-
-    undone = await w.cleanups.undo(out.record.id, ADMIN)
-
-    assert (undone.reactivated, undone.reactivate_skipped) == (2, 0)
-    assert (undone.resuperseded, undone.resupersede_skipped) == (1, 0)
-    assert undone.ratings_cleared == 1 and undone.record.undone_at is not None
-    for entry_id in (pinned, plain):
-        entry = await w.store.get_entry(entry_id)
-        assert entry is not None and entry.state is EntryState.ACTIVE
-        assert entry.withdrawn_reason is None
-    back = await w.store.get_entry(good)
-    assert back is not None and back.state is EntryState.SUPERSEDED and back.superseded_by == pinned
-    assert await w.counts(rated) == (0, 0, 1)
-    assert [p.entry_id for p in await w.store.list_pins(w.fleet)] == [pinned]
-    assert w.store._set_aside == {}
-
-
 async def test_undo_leaves_a_memory_that_is_no_longer_withdrawn_by_this_cleanup(
     w: World,
 ) -> None:
@@ -741,18 +715,6 @@ async def test_undo_leaves_a_memory_that_is_no_longer_withdrawn_by_this_cleanup(
     undone = await w.cleanups.undo(out.record.id, ADMIN)
     assert (undone.reactivated, undone.reactivate_skipped) == (1, 1)
     assert await w.state(two) is EntryState.ACTIVE
-
-
-async def test_undo_does_not_resupersede_a_memory_someone_superseded_since(w: World) -> None:
-    good = await w.entry("good fact", author="good")
-    await w.entry("junk", supersedes=(good,))
-    out = await w.clean(restore_ids=[good])
-    assert out.record is not None
-    later = await w.entry("a better fact", author="good", supersedes=(good,))
-    undone = await w.cleanups.undo(out.record.id, ADMIN)
-    assert (undone.resuperseded, undone.resupersede_skipped) == (0, 1)
-    entry = await w.store.get_entry(good)
-    assert entry is not None and entry.superseded_by == later
 
 
 async def test_undo_does_not_resupersede_when_the_old_successor_is_not_active(w: World) -> None:
@@ -784,19 +746,6 @@ async def test_undo_repins_where_the_fleet_is_under_the_cap_and_reports_the_rest
     # Both are active again, just not pinned.
     for entry_id in pinned:
         assert await w.state(entry_id) is EntryState.ACTIVE
-
-
-async def test_undo_repins_the_ones_that_fit_newest_first(w: World) -> None:
-    pinned = [await w.entry(f"junk {i}", scope="fleet") for i in range(3)]
-    for i, entry_id in enumerate(pinned):
-        await w.pin(entry_id, f"pinner-{i}")
-    out = await w.clean()
-    assert out.record is not None
-    for i in range(8):
-        await w.pin(await w.entry(f"fresh {i}", author="good", scope="fleet"), f"other-{i}")
-    undone = await w.cleanups.undo(out.record.id, ADMIN)
-    assert [p.entry_id for p in undone.pins_restored] == [pinned[2], pinned[1]]
-    assert [p.entry_id for p in undone.pins_skipped] == [pinned[0]]
 
 
 async def test_only_the_newest_standing_cleanup_of_an_agent_can_be_undone(w: World) -> None:

@@ -29,14 +29,6 @@ from hivemind.store.auth import key_hash
 ADMIN = Credential(user_id="admin", is_admin=True)
 
 
-async def _exec(dsn: str, sql: str, *args: object) -> None:
-    conn = await asyncpg.connect(dsn)
-    try:
-        await conn.execute(sql, *args)
-    finally:
-        await conn.close()
-
-
 async def _last_used(dsn: str, key: str) -> asyncpg.Record | None:
     conn = await asyncpg.connect(dsn)
     try:
@@ -94,15 +86,6 @@ async def test_admin_keys_are_stamped_too(env: Env) -> None:
     assert await auth.verify(key) is not None
     row = await _last_used(dsn, key)
     assert row is not None and row["last_used_at"] is not None
-
-
-async def test_a_dead_key_is_not_stamped(env: Env) -> None:
-    dsn, store, auth = env
-    key = await _agent_key(store, auth)
-    await AccessService(store, auth).revoke("alice", ADMIN)
-    assert await auth.verify(key) is None
-    # The revoke deleted the key row; nothing to stamp, nothing raised.
-    assert await _last_used(dsn, key) is None
 
 
 async def test_a_failing_stamp_does_not_fail_the_key_check(

@@ -20,7 +20,8 @@ from hivemind.mcp.app import McpHivemind, hive_whoami
 from hivemind.mcp.server import build_server
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
-from hivemind.services.access import AccessService, PermissionDenied, resolve_write_scope
+from hivemind.services.access import AccessService, resolve_write_scope
+from hivemind.services.errors import PermissionDenied
 from hivemind.services.governance import GovernanceService
 from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService

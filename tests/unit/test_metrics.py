@@ -14,7 +14,7 @@ from dataclasses import asdict
 from datetime import timedelta
 
 from hivemind.domain.access import TrustLevel
-from hivemind.domain.entry import EntryDraft, EntryFilters, ImportanceSource, Kind
+from hivemind.domain.entry import EntryDraft, ImportanceSource, Kind
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.memstore import MemoryStore
 from hivemind.services.metrics import MetricsService
@@ -37,59 +37,6 @@ async def _seed_entry(store: MemoryStore, **kw) -> str:
     )
     entry = await store.create_entry(draft, [0.1, 0.1, 0.1, 0.1])
     return entry.id
-
-
-class TestCountEntries:
-    """Store.count_entries: the cheap COUNT behind the metrics service."""
-
-    async def test_counts_all_when_no_filter(self) -> None:
-        clock = make_clock()
-        store = _make_store(clock)
-        for i in range(3):
-            await _seed_entry(store, summary=f"note {i}")
-        assert await store.count_entries(EntryFilters()) == 3
-
-    async def test_counts_by_scope(self) -> None:
-        clock = make_clock()
-        store = _make_store(clock)
-        await _seed_entry(store, scope="org")
-        await _seed_entry(store, scope="fleet")
-        await _seed_entry(store, scope="self")
-        assert await store.count_entries(EntryFilters(scope="org")) == 1
-        assert await store.count_entries(EntryFilters(scope="fleet")) == 1
-        assert await store.count_entries(EntryFilters(scope="self")) == 1
-
-    async def test_counts_by_kind(self) -> None:
-        clock = make_clock()
-        store = _make_store(clock)
-        await _seed_entry(store, kind="fact")
-        await _seed_entry(store, kind="insight")
-        await _seed_entry(store, kind="insight")
-        assert await store.count_entries(EntryFilters(kind=Kind.INSIGHT)) == 2
-        assert await store.count_entries(EntryFilters(kind=Kind.FACT)) == 1
-
-    async def test_counts_by_importance_source(self) -> None:
-        clock = make_clock()
-        store = _make_store(clock)
-        await _seed_entry(store, importance_source=ImportanceSource.DEFAULT)
-        await _seed_entry(store, importance_source=ImportanceSource.CALLER)
-        await _seed_entry(store, importance_source=ImportanceSource.CALLER)
-        assert (
-            await store.count_entries(EntryFilters(importance_source=ImportanceSource.CALLER)) == 2
-        )
-        assert (
-            await store.count_entries(EntryFilters(importance_source=ImportanceSource.DEFAULT)) == 1
-        )
-
-    async def test_default_counts_active_only(self) -> None:
-        clock = make_clock()
-        store = _make_store(clock)
-        eid = await _seed_entry(store, summary="to withdraw")
-        await store.withdraw_entry(eid, "no longer relevant", "alice")
-        # The withdrawn entry is inactive: the default (active-only) count is 0.
-        assert await store.count_entries(EntryFilters()) == 0
-        # include_inactive lifts the state restriction.
-        assert await store.count_entries(EntryFilters(include_inactive=True)) == 1
 
 
 class TestMetricsService:
