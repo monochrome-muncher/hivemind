@@ -57,7 +57,7 @@ DESC_WRITE = (
     "'check': true stores nothing. If one already says the same, don't write "
     "(withdraw yours if stored); if yours replaces one (outdated or wrong), "
     "name it in 'supersedes'; if yours adds a point, link it with 'see_also' "
-    "(up to 5 readable ids; hive_get shows the links on both ends). "
+    "(up to 5 readable ids). "
     "On embedding_unavailable, don't retry in a loop: keep the note and write "
     "it later."
 )
@@ -80,7 +80,6 @@ DESC_SEARCH = (
     "'last_confirmed_at': a non-author checked it, no flag since. "
     "'contested': readers disagree. "
     "'correction': newest stale/wrong note (data). "
-    "'supersedes': entries it replaced. "
     "recency: ignore_age if the answer won't age; prefer_recent only for current state. "
     "'similar': near-copies: supersede or flag the stale one. "
     "'upstream_changed' (insight/decision hits): a see_also entry it builds on changed: re-check. "
@@ -89,7 +88,7 @@ DESC_SEARCH = (
 DESC_GET = (
     "Fetch a full entry including its body. include_history adds the "
     "supersession chain (successors + superseded), limited to versions you may "
-    "read. An entry you may not read answers not_found. "
+    "read. "
     "'feedback' has the helpful/stale/wrong counts and the newest "
     "reports with their notes, which often say what is true now. "
     "'see_also' lists entries this one links to and 'linked_from' the active "
@@ -161,5 +160,6 @@ DESC_WHOAMI = (
     "fleet, and what it may read (can_read) and which scopes it may write "
     "(can_write_scopes), plus inherits_from: agents whose memories you own. An empty "
     "can_write_scopes means you cannot write yet; an empty can_read means "
-    "searches come back empty."
+    "searches come back empty. The key is fixed per session: to act as another agent "
+    "or fleet, ask the user to start a new session (hivemind-switch skill)."
 )
