@@ -676,7 +676,8 @@ current one), never from the project.
 ## The drift check
 
 `hivemind-drift.sh` compares what is installed with the latest release
-and changes nothing. By default it reads the newest `vX.Y.Z` tag with
+and changes nothing. By default it reads the newest `vX.Y.Z` tag (`--ref`
+names another tag or branch) with
 `git ls-remote`, makes a shallow clone of it into a temporary folder
 (`--keep DIR` keeps it, `--latest DIR` uses a checkout instead) and
 removes the clone at exit. It never runs anything from the clone, and
