@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from contextlib import AbstractContextManager
 from dataclasses import replace
 from datetime import datetime
-from typing import NamedTuple, cast
+from typing import cast
 
 import asyncpg
 
@@ -25,11 +25,14 @@ from hivemind.domain.fleet_merge import (
     MergeOutcome,
     MoveOutcome,
     MovePlan,
+    PinsBack,
     UnknownFleetMerge,
     UnmergeOutcome,
     check_pins_unchanged,
     choose_pins,
+    dropped_pins,
     plan_pin_restore,
+    require_one_target,
     undo_refusal,
 )
 from hivemind.domain.pin import Pin
@@ -262,11 +265,6 @@ def _fleets_contention(refusal: type[Exception], verb: str) -> AbstractContextMa
     )
 
 
-def _require_one_target(target_fleet_id: str | None, new_fleet_name: str | None) -> None:
-    if (target_fleet_id is None) == (new_fleet_name is None):
-        raise InvalidInput("name exactly one of target_fleet_id and new_fleet_name")
-
-
 def _canonical_fleet_ids(
     source_id: str, target_fleet_id: str | None, into_itself: Exception
 ) -> tuple[str, str | None]:
@@ -319,17 +317,13 @@ async def _lock_fleet_pins(conn: asyncpg.Connection, source_id: str, target_flee
         await conn.execute(LOCK_FLEET_PINS, fid)
 
 
-async def _delete_dropped_pins(
+async def _deletedropped_pins(
     conn: asyncpg.Connection, dropped: Sequence[Pin], source_id: str, target_fleet_id: str
 ) -> None:
     for fid in (source_id, target_fleet_id):
         gone = [p.entry_id for p in dropped if p.fleet_id == fid]
         if gone:
             await conn.execute(DELETE_PINS_OF, fid, gone)
-
-
-def _dropped_pins(dropped: Sequence[Pin]) -> tuple[DroppedPin, ...]:
-    return tuple(DroppedPin(p.fleet_id, p.entry_id, p.pinned_by, p.pinned_at) for p in dropped)
 
 
 async def _record_merge(
@@ -454,18 +448,9 @@ async def _load_undoable_merge(conn: asyncpg.Connection, merge_id: str) -> Fleet
     return record
 
 
-class _PinsBack(NamedTuple):
-    """What an undo did with pins: how many returned, and the lists it reports."""
-
-    returned_count: int
-    restored: list[DroppedPin]
-    skipped: list[DroppedPin]
-    unpinned: list[DroppedPin]
-
-
 async def _return_moved_pins(
     conn: asyncpg.Connection, record: FleetMergeRecord, back: list[str]
-) -> _PinsBack:
+) -> PinsBack:
     """Undo of a move: the pins on the moved entries go home to the source, and the
     source's dropped pins are re-pinned, both under the source's cap."""
     src, tgt = record.source_fleet_id, record.target_fleet_id
@@ -503,11 +488,11 @@ async def _return_moved_pins(
             await conn.execute(DELETE_PINS_OF, tgt, [d.entry_id])
             unpinned.append(d)
         skipped.append(d)
-    return _PinsBack(sum(1 for d in put if d in returning), restored, skipped, unpinned)
+    return PinsBack(sum(1 for d in put if d in returning), restored, skipped, unpinned)
 
 
-async def _restore_dropped_pins(
-    conn: asyncpg.Connection, record: FleetMergeRecord, pins: _PinsBack
+async def _restoredropped_pins(
+    conn: asyncpg.Connection, record: FleetMergeRecord, pins: PinsBack
 ) -> None:
     """Re-pin the pins the merge or move dropped, fleet by fleet, into ``pins``."""
     src, tgt = record.source_fleet_id, record.target_fleet_id
@@ -567,7 +552,7 @@ class FleetMergeStore(PgConnections):
         expected_pin_ids: Sequence[str] | None = None,
         merged_by: str,
     ) -> MergeOutcome:
-        _require_one_target(target_fleet_id, new_fleet_name)
+        require_one_target(target_fleet_id, new_fleet_name)
         source_id, target_fleet_id = _canonical_fleet_ids(
             source_id, target_fleet_id, FleetMergeRefused("a fleet cannot be merged into itself")
         )
@@ -588,9 +573,9 @@ class FleetMergeStore(PgConnections):
                 agents = sorted(
                     r["name"] for r in await conn.fetch(MOVE_AGENTS, source_id, target_fleet_id)
                 )
-                await _delete_dropped_pins(conn, dropped, source_id, target_fleet_id)
+                await _deletedropped_pins(conn, dropped, source_id, target_fleet_id)
                 merged_at = await _fold_source_into_target(conn, source_id, target_fleet_id)
-                drops = _dropped_pins(dropped)
+                drops = dropped_pins(dropped)
                 await _record_merge(
                     conn,
                     merge_id=merge_id,
@@ -645,7 +630,7 @@ class FleetMergeStore(PgConnections):
         expected_pin_ids: Sequence[str] | None = None,
         moved_by: str,
     ) -> MoveOutcome:
-        _require_one_target(target_fleet_id, new_fleet_name)
+        require_one_target(target_fleet_id, new_fleet_name)
         names = sorted(set(agents))
         if not names:
             raise InvalidInput("name at least one agent to move")
@@ -676,11 +661,11 @@ class FleetMergeStore(PgConnections):
 
                 move_id = str(uuid.uuid4())
                 await _move_these_entries(conn, move_id, source_id, target_fleet_id, moving)
-                await _delete_dropped_pins(conn, dropped, source_id, target_fleet_id)
+                await _deletedropped_pins(conn, dropped, source_id, target_fleet_id)
                 await conn.execute(REKEY_THESE_PINS, source_id, target_fleet_id, moving)
                 await conn.fetch(MOVE_THESE_AGENTS, names, target_fleet_id, source_id)
                 moved_at = await conn.fetchval("SELECT clock_timestamp()")
-                drops = _dropped_pins(dropped)
+                drops = dropped_pins(dropped)
                 await _record_merge(
                     conn,
                     merge_id=move_id,
@@ -738,8 +723,8 @@ class FleetMergeStore(PgConnections):
                     pins = await _return_moved_pins(conn, record, back)
                 else:
                     returned = len(await conn.fetch(RETURN_PINS, merge_id, src, tgt))
-                    pins = _PinsBack(returned, [], [], [])
-                await _restore_dropped_pins(conn, record, pins)
+                    pins = PinsBack(returned, [], [], [])
+                await _restoredropped_pins(conn, record, pins)
                 if record.kind != KIND_MOVE:  # a move never marked its source
                     await conn.execute(CLEAR_MERGED, src)
                 undone_at = await conn.fetchval(MARK_UNDONE, merge_id)

@@ -6,11 +6,10 @@ import math
 
 from hivemind.domain.access import Visibility
 from hivemind.domain.entry import EntryFilters, SearchCount
-from hivemind.domain.validation import is_valid_uuid
+from hivemind.domain.validation import is_valid_uuid, valid_uuids
 from hivemind.ports import VectorMatch
 from hivemind.store.pgstore.connection import PgConnections
 from hivemind.store.pgstore.sql_common import VECTOR_SEARCH_SETTINGS, filter_conditions
-from hivemind.store.pgstore.uuids import valid_uuids
 
 # ADR 0074: every candidate pair from the stored vectors (no embedder call); rows without one drop
 # out.
