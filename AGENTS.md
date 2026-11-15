@@ -65,6 +65,26 @@ Environment: the service reads `HIVEMIND_*` env vars (see `src/hivemind/config.p
 - `tests/unit/`: hermetic unit tests (fakes in `tests/fakes.py`; no Postgres, no network). `tests/integration/`: Postgres-backed tests that skip when the database is down. `tests/eval/`: the retrieval eval (see Invariants).
 - Deployment: `Dockerfile` + `entrypoint.sh` (one image, runner chosen by `HIVEMIND_RUNNER`; the entrypoint runs migrations, ADR 0018), `deploy/kubernetes/` (kustomize; two replicas + a PDB per app-tier runner, ADR 0026), `.gitlab-ci.yml`, `config/` (environment profiles, ADR 0017). [DEPLOY.md](DEPLOY.md) and [docs/ops-runbook.md](docs/ops-runbook.md) are the operator docs.
 
+## Where to look (by task)
+
+[docs/code-tour.md](docs/code-tour.md) follows a request through the layers and names the file that holds each access rule; read it before an audit. For a task, start here:
+
+| Task | Start in | Usually also |
+|---|---|---|
+| Who may read, write or supersede an entry | `domain/access.py` (`entry_is_visible`, `may_supersede`, `write_scopes_for`) | the SQL twin `store/pgstore/sql_common.py` `visibility_clause`; `tests/unit/test_access_isolation.py`, `tests/integration/test_access_isolation_pg.py` |
+| A search ranks or filters wrongly | `services/search.py` (the steps) | `retrieval/scoring.py`, `retrieval/ordering.py`, `retrieval/rrf.py`; the candidate SQL in `store/pgstore/search.py` and its twin `memstore/search.py`; filters in `domain/entry.py` `EntryFilters` (`matches`) + its SQL twin `sql_common.py` `filter_conditions`; `tests/unit/test_filter_parity.py` checks what each surface puts in them |
+| A write is refused or warns | `services/write.py`, `services/write_warnings.py` | `services/drafts.py` (provenance), `domain/validation.py` (limits) |
+| A new field on an entry or hit | `domain/entry.py` | a migration, `store/pgstore/rows.py`, `memstore/`, `wire.py` + `api/schemas/` (`test_wire_contract.py`), `mcp/contract.py` if agents should know, SPEC §4 or §6.1 |
+| A new MCP tool argument or reply key | `mcp/app.py` | `mcp/contract.py` (description, always-on budget), the REST twin in `api/routes/` + `api/schemas/`, `plugins/hivemind/` skill text |
+| A new REST route | `api/routes/<area>.py` | `api/schemas/<area>.py`, the service; the admin or portal allowlist (`admin/app.py`, `portal/app.py`) if a front end calls it |
+| An error answers the wrong code | `api/errors.py` (REST), `mcp/errors.py` (MCP) | `services/errors.py`; `tests/unit/test_error_mapping.py` |
+| A new store method | `ports/<area>.py` | `store/pgstore/<area>.py`, `memstore/<area>.py`, a case in `tests/integration/test_store_contract.py` |
+| Fleet merge, move, cleanup, retirement, offboarding | `services/<area>.py` | the rules in `domain/<area>.py`, the SQL in `store/pgstore/<area>.py` |
+| The admin panel or portal shows something wrong | the page module named in the header of `admin/static/admin.js` or `portal/static/portal.js` | the proxy allowlist; `tests/unit/test_admin_panel.py`, `test_portal.py` |
+| Metrics, Prometheus series | `services/metrics.py` | `api/prometheus.py`, `mcp/metrics.py`, `http_metrics.py`; `domain/usage.py` |
+| A new setting | `config.py` `Settings` | `SearchConfig` for retrieval knobs; `config/.env.example`; README Configuration |
+| Agent plugin, hooks, skills | `plugins/hivemind/DEVELOPING.md` | `tests/unit/test_agent_plugin.py` |
+
 ## Rules
 
 - **Terminology is the glossary.** Use the canonical terms from CONTEXT.md. Say "supersede", never "update" or "overwrite" an entry (entries are immutable — ADR 0001). "Memory date" means `occurred_at`, not `created_at`.
