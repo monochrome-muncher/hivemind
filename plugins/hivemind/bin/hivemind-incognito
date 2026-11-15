@@ -104,7 +104,10 @@ PY
     # -c on a server that is not configured creates an invalid entry, so
     # only add it when a config.toml defines mcp_servers.hivemind: the user
     # one, or the project's .codex/config.toml. Both the table form and
-    # dotted keys count; spaces inside the brackets are allowed.
+    # dotted keys count; spaces inside the brackets are allowed. The URL
+    # lives in config.toml; the key is unset either way, so a project
+    # server that reads HIVEMIND_API_KEY gets nothing.
+    unset HIVEMIND_API_KEY
     found=0
     codex_home=${CODEX_HOME:-}
     if [ -z "$codex_home" ] && [ -n "$home_dir" ]; then codex_home="$home_dir/.codex"; fi
@@ -115,7 +118,6 @@ PY
       fi
     done
     if [ "$found" = 1 ]; then
-      unset HIVEMIND_API_KEY
       exec "$harness" -c 'mcp_servers.hivemind.enabled=false' "$@"
     fi
     note "no mcp_servers.hivemind in ~/.codex/config.toml or .codex/config.toml; starting without an override"

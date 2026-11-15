@@ -798,6 +798,17 @@ def test_launcher_disables_codex_only_when_configured(tmp_path: Path) -> None:
     assert lines[lines.index("-c") + 1] == "mcp_servers.hivemind.enabled=false"
 
 
+def test_launcher_unsets_the_codex_key_even_without_a_hivemind_entry(tmp_path: Path) -> None:
+    """A trusted project's .codex/config.toml can name another server that
+    reads HIVEMIND_API_KEY; an incognito session never needs the key."""
+    env = _fake_harness(tmp_path, "codex")
+    (tmp_path / "bin" / "codex").write_text(
+        '#!/bin/sh\nprintf "%s\\n" "KEY=${HIVEMIND_API_KEY:-unset}" "$@"\n'
+    )
+    env.update(HIVEMIND_API_KEY="hm_x")
+    assert _launch(tmp_path, env, "codex", "task") == ["KEY=unset", "task"]
+
+
 def test_launcher_turns_hermes_off_through_its_config_variable(tmp_path: Path) -> None:
     env = _fake_harness(tmp_path, "hermes")
     assert "ENABLED=false" in _launch(tmp_path, env, "hermes")
