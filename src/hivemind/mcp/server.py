@@ -18,13 +18,7 @@ from pydantic_core import to_json
 from hivemind.domain.access import KEY_LOCKED_MESSAGE, FleetBusy, KeyLocked
 from hivemind.mcp import contract
 from hivemind.mcp.app import (
-    ERR_FLEET_BUSY,
-    ERR_KEY_LOCKED,
-    ERR_STORE_UNAVAILABLE,
-    ERR_UNAUTHENTICATED,
-    STORE_UNAVAILABLE_MESSAGE,
     McpHivemind,
-    _error,
     hive_feedback,
     hive_get,
     hive_list,
@@ -35,6 +29,14 @@ from hivemind.mcp.app import (
     hive_whoami,
     hive_withdraw,
     hive_write,
+)
+from hivemind.mcp.errors import (
+    ERR_FLEET_BUSY,
+    ERR_KEY_LOCKED,
+    ERR_STORE_UNAVAILABLE,
+    ERR_UNAUTHENTICATED,
+    STORE_UNAVAILABLE_MESSAGE,
+    error_reply,
 )
 from hivemind.mcp.metrics import OUTCOME_ERROR, OUTCOME_OK, McpMetrics
 from hivemind.ports import Credential
@@ -170,19 +172,19 @@ def build_server(
         try:
             acting = await _acting_app(app, credential_provider, require_stored_keys)
             if acting is None:
-                return _error(
+                return error_reply(
                     ERR_UNAUTHENTICATED,
                     "this key is no longer valid (revoked or unknown); ask your admin",
                 )
             return await verb(acting, **kwargs)
         except KeyLocked:  # raised by the per-call re-verification
-            return _error(ERR_KEY_LOCKED, KEY_LOCKED_MESSAGE)
+            return error_reply(ERR_KEY_LOCKED, KEY_LOCKED_MESSAGE)
         except FleetBusy as exc:  # a fleet write waited for a merge (ADR 0107)
-            return _error(ERR_FLEET_BUSY, str(exc))
+            return error_reply(ERR_FLEET_BUSY, str(exc))
         except TimeoutError:
             # The database is busy, not the call wrong (ROADMAP 3.13).
             logger.warning("store call timed out during an MCP tool call")
-            return _error(ERR_STORE_UNAVAILABLE, STORE_UNAVAILABLE_MESSAGE)
+            return error_reply(ERR_STORE_UNAVAILABLE, STORE_UNAVAILABLE_MESSAGE)
 
     # The ten tools, registered explicitly (ADR 0085).
     register_tool(server, "hive_write", contract.DESC_WRITE, hive_write, dispatch, metrics)

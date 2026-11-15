@@ -13,9 +13,6 @@ import pytest
 from hivemind.domain.access import TrustLevel
 from hivemind.domain.entry import EntryFilters, EntryState
 from hivemind.mcp.app import (
-    ERR_AGENT_UNRESOLVED,
-    ERR_INVALID_INPUT,
-    ERR_PERMISSION_DENIED,
     McpHivemind,
     hive_feedback,
     hive_get,
@@ -25,6 +22,7 @@ from hivemind.mcp.app import (
     hive_withdraw,
     hive_write,
 )
+from hivemind.mcp.errors import ERR_AGENT_UNRESOLVED, ERR_INVALID_INPUT, ERR_PERMISSION_DENIED
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
