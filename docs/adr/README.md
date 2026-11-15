@@ -86,7 +86,7 @@ is unused.
 | [0074](0074-group-unlinked-versions-at-read-time.md) | Group unlinked versions at read time | Accepted (off by default) |
 | [0075](0075-fleet-health-metrics.md) | Fleet health metrics: admin-only and observation-only | Extended by 0089, 0142 |
 | [0076](0076-pin-integrity.md) | Pin integrity: audited pins and "changed since pinned" | Amended by 0079, 0096 |
-| [0077](0077-write-check-mode-and-warnings.md) | Writes can be checked first, and answer with advisory warnings | Amended by 0087, 0099, 0134, 0147 |
+| [0077](0077-write-check-mode-and-warnings.md) | Writes can be checked first, and answer with advisory warnings | Amended by 0087, 0099, 0134, 0147, 0152 |
 | [0078](0078-explore-search.md) | Opt-in explore search | Accepted |
 | [0079](0079-feedback-dates-on-the-database-clock.md) | Feedback is dated by the store's clock | Accepted |
 | [0080](0080-admin-memory-browser-and-activity.md) | The admin panel can read memories and show activity | Extended by 0090, 0092, 0093, 0136 (search as an agent), 0137 (explain ranking); amended by 0124 (restore), 0140 (filters) |
@@ -160,3 +160,4 @@ is unused.
 | [0148](0148-match-strength-on-search-hits.md) | A search hit says which streams found it and its cosine similarity, and the reply says when no hit is a close match | Accepted; builds on 0062, 0100 and 0102, `match` and `similarity` on every hit, `closest: "loose"` and a note (MCP) or `X-Hivemind-Closest` (REST) below `HIVEMIND_CLOSE_MATCH_SIMILARITY`, `Store.search_vector` returns `VectorMatch`, default calibrated for Qwen3-Embedding-8B |
 | [0149](0149-move-to-self-follows-inheritance.md) | Moving a memory to `self` takes the fleet versions of its author and of every agent the author inherited from; only another agent's version refuses it | Accepted; amends 0145 points 3 and 4, builds on 0113, no route, schema or audit-shape change |
 | [0150](0150-key-profiles-on-the-client.md) | One agent per fleet, chosen per session on the client: `hivemind-as <profile> <harness>` and a user-owned folder map, with a `hivemind-switch` skill | Accepted; builds on 0012, 0031 and 0035, no server change, a switch is always a new session, nothing in a project picks a profile, no always-on text |
+| [0152](0152-payload-fields-write-warning.md) | A write warns when its `payload` holds a field of the write itself that was left unset, so it was not applied | Accepted; amends 0077 §3, advisory `payload_fields` code, top-level exact keys only, fires only for an unset field (`scope` only when it differs from the applied one), no always-on text |
