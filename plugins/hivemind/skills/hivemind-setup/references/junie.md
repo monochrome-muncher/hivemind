@@ -7,7 +7,7 @@ back to "Which harness am I in?" in the hivemind-setup skill. Your system
 prompt says "You are Junie, an autonomous programmer developed by
 JetBrains".
 
-Checked with Junie CLI 26.9.7. Junie is young: check anything this file
+Checked with Junie CLI 26.9.7 and 26.11.1. Junie is young: check anything this file
 does not state with `/extensions` (the Installed tab) and the MCP view in
 the Junie TUI rather than assuming.
 

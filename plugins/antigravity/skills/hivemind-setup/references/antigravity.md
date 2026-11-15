@@ -24,7 +24,8 @@ installs the repository root, which Antigravity converts from the Gemini CLI
 extension there, with hooks that do not work. Do not use `agy plugin import`
 either: it converts the Claude Code or Gemini CLI copy the same way.
 Antigravity 1.5.8 and later refuse Hivemind 2.26.0 and earlier with
-"symlink … points outside"; a newer release installs.
+"symlink … points outside"; a newer release installs (until one is out,
+`tree/main` does).
 
 `agy plugin install` takes only github.com links. If the organization
 keeps Hivemind on another Git server, the user clones the release tag
