@@ -261,7 +261,7 @@ class FleetMergeStore(MemoryState):
                     pin = self._pins.pop(key)
                     self._pins[(source.id, key[1])] = replace(pin, fleet_id=source.id)
                 pins = PinsBack(len(returned_keys), [], [], [])
-            self._restoredropped_pins(record, source, target, pins)
+            self._restore_dropped_pins(record, source, target, pins)
             now = self._clock()
             if record.kind != KIND_MOVE:  # a move never marked its source
                 self._fleets[source.id] = replace(source, merged_into=None, merged_at=None)
@@ -333,7 +333,7 @@ class FleetMergeStore(MemoryState):
             skipped.append(d)
         return PinsBack(sum(1 for d in put if d in returning), restored, skipped, unpinned)
 
-    def _restoredropped_pins(
+    def _restore_dropped_pins(
         self, record: FleetMergeRecord, source: Fleet, target: Fleet, pins: PinsBack
     ) -> None:
         """Re-pin the pins the merge or move dropped, fleet by fleet, into ``pins``.
