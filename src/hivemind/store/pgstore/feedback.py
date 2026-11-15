@@ -23,11 +23,10 @@ from hivemind.domain.feedback import (
     last_confirmed,
     truncate_note,
 )
-from hivemind.domain.validation import canonical_uuid, is_valid_uuid
+from hivemind.domain.validation import canonical_uuid, canonical_uuids, is_valid_uuid
 from hivemind.store.pgstore.connection import PgConnections
 from hivemind.store.pgstore.rows import row_to_feedback
 from hivemind.store.pgstore.sql_common import _RATING_COUNTS, add_clause, visibility_clause
-from hivemind.store.pgstore.uuids import canonical_uuids
 
 # ``updated_at`` defaults to the database clock, like ``created_at`` (ADR 0079).
 UPSERT_FEEDBACK = """

@@ -7,7 +7,6 @@ from collections import Counter
 from collections.abc import Sequence
 from dataclasses import replace
 from datetime import datetime
-from typing import NamedTuple
 
 from hivemind.domain.access import SCOPE_FLEET, Fleet, FleetExists, UnknownFleet
 from hivemind.domain.entry import Entry, EntryState
@@ -22,23 +21,21 @@ from hivemind.domain.fleet_merge import (
     MergeOutcome,
     MoveOutcome,
     MovePlan,
+    PinsBack,
     UnknownFleetMerge,
     UnmergeOutcome,
     check_pins_unchanged,
     choose_pins,
+    dropped_pins,
     plan_move_entries,
     plan_pin_restore,
+    require_one_target,
     undo_refusal,
 )
 from hivemind.domain.pin import Pin
 from hivemind.domain.validation import InvalidInput, is_valid_uuid
 from hivemind.memstore.helpers import cosine_similarity
 from hivemind.memstore.state import MemoryState
-
-
-def _require_one_target(target_fleet_id: str | None, new_fleet_name: str | None) -> None:
-    if (target_fleet_id is None) == (new_fleet_name is None):
-        raise InvalidInput("name exactly one of target_fleet_id and new_fleet_name")
 
 
 def _canonical_fleet_ids(source_id: str, target_fleet_id: str | None) -> tuple[str, str | None]:
@@ -49,19 +46,6 @@ def _canonical_fleet_ids(source_id: str, target_fleet_id: str | None) -> tuple[s
     return str(uuid.UUID(source_id)), (
         str(uuid.UUID(target_fleet_id)) if target_fleet_id is not None else None
     )
-
-
-def _dropped_pins(dropped: Sequence[Pin]) -> tuple[DroppedPin, ...]:
-    return tuple(DroppedPin(p.fleet_id, p.entry_id, p.pinned_by, p.pinned_at) for p in dropped)
-
-
-class _PinsBack(NamedTuple):
-    """What an undo did with pins: how many returned, and the lists it reports."""
-
-    returned_count: int
-    restored: list[DroppedPin]
-    skipped: list[DroppedPin]
-    unpinned: list[DroppedPin]
 
 
 class FleetMergeStore(MemoryState):
@@ -131,7 +115,7 @@ class FleetMergeStore(MemoryState):
         expected_pin_ids: Sequence[str] | None = None,
         merged_by: str,
     ) -> MergeOutcome:
-        _require_one_target(target_fleet_id, new_fleet_name)
+        require_one_target(target_fleet_id, new_fleet_name)
         source_id, target_fleet_id = _canonical_fleet_ids(source_id, target_fleet_id)
         with self._lock:
             source, target = self._resolve_sides(
@@ -158,7 +142,7 @@ class FleetMergeStore(MemoryState):
             agents = sorted(a.name for a in self._agents.values() if a.home_fleet_id == source.id)
             for name in agents:
                 self._agents[name] = replace(self._agents[name], home_fleet_id=target.id)
-            drops = _dropped_pins(dropped)
+            drops = dropped_pins(dropped)
             rekeyed = self._rekey_pins(pins, kept, target.id)
             if source.id in self._searches:
                 mine = self._searches.pop(source.id)
@@ -200,7 +184,7 @@ class FleetMergeStore(MemoryState):
         expected_pin_ids: Sequence[str] | None = None,
         moved_by: str,
     ) -> MoveOutcome:
-        _require_one_target(target_fleet_id, new_fleet_name)
+        require_one_target(target_fleet_id, new_fleet_name)
         names = sorted(set(agents))
         if not names:
             raise InvalidInput("name at least one agent to move")
@@ -226,7 +210,7 @@ class FleetMergeStore(MemoryState):
                 self._entries[e.id] = replace(e, fleet_id=target.id)
             for name in names:
                 self._agents[name] = replace(self._agents[name], home_fleet_id=target.id)
-            drops = _dropped_pins(dropped)
+            drops = dropped_pins(dropped)
             rekeyed = self._rekey_pins(pins, kept, target.id)
             record = FleetMergeRecord(
                 id=str(uuid.uuid4()),
@@ -276,8 +260,8 @@ class FleetMergeStore(MemoryState):
                 for key in returned_keys:
                     pin = self._pins.pop(key)
                     self._pins[(source.id, key[1])] = replace(pin, fleet_id=source.id)
-                pins = _PinsBack(len(returned_keys), [], [], [])
-            self._restore_dropped_pins(record, source, target, pins)
+                pins = PinsBack(len(returned_keys), [], [], [])
+            self._restoredropped_pins(record, source, target, pins)
             now = self._clock()
             if record.kind != KIND_MOVE:  # a move never marked its source
                 self._fleets[source.id] = replace(source, merged_into=None, merged_at=None)
@@ -307,7 +291,7 @@ class FleetMergeStore(MemoryState):
 
     def _return_moved_pins(
         self, record: FleetMergeRecord, source: Fleet, target: Fleet, back: list[str]
-    ) -> _PinsBack:
+    ) -> PinsBack:
         """Undo of a move: the pins on the moved entries go home to the source, and the
         source's dropped pins are re-pinned, both under the source's cap. Callers hold the lock."""
         restored: list[DroppedPin] = []
@@ -347,10 +331,10 @@ class FleetMergeStore(MemoryState):
                 self._pins.pop((target.id, d.entry_id))
                 unpinned.append(d)
             skipped.append(d)
-        return _PinsBack(sum(1 for d in put if d in returning), restored, skipped, unpinned)
+        return PinsBack(sum(1 for d in put if d in returning), restored, skipped, unpinned)
 
-    def _restore_dropped_pins(
-        self, record: FleetMergeRecord, source: Fleet, target: Fleet, pins: _PinsBack
+    def _restoredropped_pins(
+        self, record: FleetMergeRecord, source: Fleet, target: Fleet, pins: PinsBack
     ) -> None:
         """Re-pin the pins the merge or move dropped, fleet by fleet, into ``pins``.
         Callers hold the lock."""

@@ -20,7 +20,7 @@ from hivemind.domain.redaction import (
     is_redaction_stub,
 )
 from hivemind.domain.upstream import UpstreamLink
-from hivemind.domain.validation import canonical_uuid, is_valid_uuid
+from hivemind.domain.validation import canonical_uuid, is_valid_uuid, valid_uuids
 from hivemind.ports import SupersedeConflict
 from hivemind.store.inheritance import inherited_from
 from hivemind.store.pgstore.agent_cleanup import CLEANUP_AGENT_LOCK
@@ -34,7 +34,6 @@ from hivemind.store.pgstore.sql_common import (
     readable_clause,
     visibility_clause,
 )
-from hivemind.store.pgstore.uuids import valid_uuids
 
 INSERT_ENTRY = """
 INSERT INTO entries (

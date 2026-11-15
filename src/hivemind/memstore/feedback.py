@@ -25,14 +25,9 @@ from hivemind.domain.feedback import (
     last_confirmed,
     truncate_note,
 )
-from hivemind.domain.validation import canonical_uuid, is_valid_uuid
+from hivemind.domain.validation import canonical_uuid, canonical_uuids, is_valid_uuid
 from hivemind.memstore.helpers import EPOCH, canonical_or_same, count_for
 from hivemind.memstore.state import MemoryState
-
-
-def _canonical_ids(ids: list[str]) -> list[str]:
-    """The distinct well-formed ids in canonical form, in order, as PgStore keys them."""
-    return list(dict.fromkeys(c for i in ids if (c := canonical_uuid(i)) is not None))
 
 
 def _signals_for(feedback: dict[tuple[str, str, str], Feedback], entry_id: str) -> FeedbackSignals:
@@ -104,7 +99,7 @@ class FeedbackStore(MemoryState):
         with self._lock:
             # Every well-formed id, known or not, keyed canonically, as on PgStore.
             live = self._live_feedback()
-            return {eid: count_for(live, eid) for eid in _canonical_ids(entry_ids)}
+            return {eid: count_for(live, eid) for eid in canonical_uuids(entry_ids)}
 
     async def relied_on_changes(
         self, entry_ids: list[str], reporter: tuple[str, str]
@@ -112,7 +107,7 @@ class FeedbackStore(MemoryState):
         with self._lock:
             return {
                 eid: change
-                for eid in _canonical_ids(entry_ids)
+                for eid in canonical_uuids(entry_ids)
                 if (change := self._relied_on_change(eid, reporter)) is not None
             }
 
@@ -125,7 +120,7 @@ class FeedbackStore(MemoryState):
     ) -> dict[str, FeedbackSignals]:
         with self._lock:
             live = self._live_feedback()
-            out = {eid: _signals_for(live, eid) for eid in _canonical_ids(entry_ids)}
+            out = {eid: _signals_for(live, eid) for eid in canonical_uuids(entry_ids)}
             if count_supersedes:
                 counts: dict[str, int] = {}
                 for entry in self._entries.values():

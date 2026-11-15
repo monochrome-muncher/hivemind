@@ -154,6 +154,17 @@ def canonical_uuid(value: str) -> str | None:
         return None
 
 
+def valid_uuids(ids: Iterable[str]) -> list[str]:
+    """Keep only the IDs that parse as UUIDs (others simply don't exist)."""
+    return [i for i in ids if is_valid_uuid(i)]
+
+
+def canonical_uuids(ids: Iterable[str]) -> list[str]:
+    """The distinct well-formed IDs in Postgres's canonical text form, in order
+    (Postgres reads upper-case and hyphen-less spellings as the same uuid)."""
+    return list(dict.fromkeys(c for i in ids if (c := canonical_uuid(i)) is not None))
+
+
 def check_id(value: str, field: str) -> str:
     check_text(value, field, MAX_ID_CHARS)
     return value

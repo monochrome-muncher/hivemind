@@ -7,6 +7,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from typing import NamedTuple
 
 from hivemind.domain.access import SCOPE_FLEET, Fleet
 from hivemind.domain.entry import Entry
@@ -56,6 +57,15 @@ class DroppedPin:
     entry_id: str
     pinned_by: str
     pinned_at: datetime
+
+
+class PinsBack(NamedTuple):
+    """What an undo did with pins: how many returned, and the lists it reports."""
+
+    returned_count: int
+    restored: list[DroppedPin]
+    skipped: list[DroppedPin]
+    unpinned: list[DroppedPin]
 
 
 @dataclass(frozen=True, slots=True)
@@ -192,6 +202,15 @@ def newest_first(pins: Iterable[Pin]) -> list[Pin]:
 def default_kept(pins: Iterable[Pin]) -> list[Pin]:
     """The pins the preview ticks: the newest ``MERGE_PIN_LIMIT``."""
     return newest_first(pins)[:MERGE_PIN_LIMIT]
+
+
+def require_one_target(target_fleet_id: str | None, new_fleet_name: str | None) -> None:
+    if (target_fleet_id is None) == (new_fleet_name is None):
+        raise InvalidInput("name exactly one of target_fleet_id and new_fleet_name")
+
+
+def dropped_pins(dropped: Sequence[Pin]) -> tuple[DroppedPin, ...]:
+    return tuple(DroppedPin(p.fleet_id, p.entry_id, p.pinned_by, p.pinned_at) for p in dropped)
 
 
 def check_pins_unchanged(
