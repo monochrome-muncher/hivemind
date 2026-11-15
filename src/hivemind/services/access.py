@@ -38,6 +38,7 @@ from hivemind.domain.fleet_phase import FleetPhase, PhaseName
 from hivemind.domain.validation import (
     RESERVED_AGENT_NAMES,  # noqa: F401  (re-exported: ADR 0033 names, ADR 0040 rules)
     InvalidInput,
+    canonical_uuid,
     utcnow,
     validate_agent_name,
     validate_fleet_name,
@@ -535,7 +536,7 @@ class AccessService:
         home fleet unless ``fleet_id`` names another. The hint speaks to the caller's own fleet, so
         another fleet's phase is not told."""
         home = credential.home_fleet_id
-        if home is None or fleet_id not in (None, home):
+        if home is None or (fleet_id is not None and canonical_uuid(fleet_id) != home):
             return None
         fleet = await self._store.get_fleet(home)
         return fleet.phase_in_force(self._clock()) if fleet is not None else None

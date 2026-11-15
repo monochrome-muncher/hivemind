@@ -294,6 +294,21 @@ async def test_pinned_carries_the_phase_for_the_callers_own_fleet() -> None:
     assert "fleet_phase" not in await hive_pinned(surface, fleet_id=other_id)
 
 
+async def test_pinned_reads_the_fleet_id_in_any_uuid_spelling() -> None:
+    world = World()
+    fleet_id = await world.fleet()
+    alice = await _agent_in(world, fleet_id)
+    surface = _surface(world, alice)
+    entry = await hive_write(surface, kind="decision", summary="freeze on Fridays")
+    await hive_pin(surface, str(entry["id"]))
+    until = datetime(2026, 11, 20, 8, tzinfo=UTC)
+    await world.access.set_fleet_phase(fleet_id, PhaseName.CONSOLIDATE, until, ADMIN)
+    for spelled in (fleet_id.upper(), fleet_id.replace("-", "")):
+        briefing = await hive_pinned(surface, fleet_id=spelled)
+        assert [p["id"] for p in briefing["pins"]] == [entry["id"]]  # type: ignore[attr-defined]
+        assert "fleet_phase" in briefing
+
+
 # -- the REST routes ------------------------------------------------------------
 
 ADMIN_H = {"X-API-Key": "hm_admin"}
