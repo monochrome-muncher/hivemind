@@ -188,7 +188,8 @@ bare repository link installs the Gemini CLI extension instead,
 converted, and its reminders don't work there. Antigravity support starts
 with 2.19.0 ([CHANGELOG.md](CHANGELOG.md)); Antigravity 1.5.8 and later
 refuse 2.26.0 and earlier ("symlink … points outside"), so use a newer
-release there.
+release there. Until one is out, use `tree/main` in place of
+`tree/v<version>`.
 
 The plugin installs switched off, because it needs the MCP address and a
 key. Turn it on in `/plugin` (select hivemind and press Space) or under
@@ -215,7 +216,7 @@ environment variable, so you add the MCP server once yourself (see
 [Setting it up by hand](#setting-it-up-by-hand)), or let the setup in
 step 2 do it. Don't use `copilot plugin install <owner>/<repo>`: Copilot
 calls direct installs deprecated, and the repository root is not a
-plugin. Checked with Copilot CLI 1.0.95.
+plugin. Checked with Copilot CLI 1.0.95 and 1.0.112.
 
 ### Hermes
 
@@ -259,7 +260,7 @@ file that keeps Junie aware of Hivemind. It does not bring a working
 connection: Junie does not fill in `${…}` variables in a server's address
 or header, so you put the address and key in `~/.junie/mcp/mcp.json` once
 (see [Setting it up by hand](#setting-it-up-by-hand)), or let the setup
-in step 2 do it. Checked with Junie CLI 26.9.7 (with a local copy of the
+in step 2 do it. Checked with Junie CLI 26.9.7 and 26.11.1 (with a local copy of the
 repository; GitHub addresses are documented by Junie but were not tried).
 The Junie plugin inside JetBrains IDEs and the JetBrains AI Assistant chat
 are not tested: see

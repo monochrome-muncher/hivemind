@@ -5,7 +5,7 @@ Only for **GitHub Copilot CLI** (GitHub's `copilot` CLI, the npm package
 agent). If you have not confirmed that this is your harness, go back to
 "Which harness am I in?" in the hivemind-setup skill.
 
-Checked with Copilot CLI 1.0.95. Its plugin and hook formats are young, so
+Checked with Copilot CLI 1.0.95 and 1.0.112. Its plugin and hook formats are young, so
 check anything this file does not state with `copilot mcp list` and
 `copilot skill list` rather than assuming.
 

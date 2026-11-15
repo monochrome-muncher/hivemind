@@ -118,7 +118,7 @@ say so, and that a running session keeps its old key until restarted:
 
 | Harness | Switch |
 |---|---|
-| Junie | rebuild `~/.junie/mcp/mcp.json` from the profile's key file (the command in hivemind-setup's `references/junie.md`, with `junie.<profile>.env`), then restart |
+| Junie | the user rebuilds `~/.junie/mcp/mcp.json` from the profile's key file (the command in hivemind-setup's `references/junie.md`, with `junie.<profile>.env` in place of `junie.env`; don't run it yourself, it reads the key), then restarts |
 | Antigravity | `/plugin` > hivemind > "Configure MCP servers…", enter the other key, new session |
 | Claude desktop app, IDE extensions | the `env` block of `~/.claude/settings.json`, then restart |
 | VS Code (Cline, Kilo Code), Cursor app | quit the editor, then start it with `hivemind-as <profile> code .` (or `cursor .`): an open window keeps its environment |
