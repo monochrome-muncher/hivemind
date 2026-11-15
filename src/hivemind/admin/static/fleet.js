@@ -12,7 +12,8 @@ import {
 } from "./core.js";
 import { openEntry } from "./drawer.js";
 import { cursorPages, entryTable, flaggedTable, pagedTable, pinRow, PIN_HEADERS } from "./lists.js";
-import { AUDIT_HEADERS, auditCsvColumns, auditRow, fleetPhaseCard, renameFleetDialog } from "./manage.js";
+import { AUDIT_HEADERS, auditCsvColumns, auditRow } from "./audit.js";
+import { fleetPhaseCard, renameFleetDialog } from "./fleets.js";
 import { mergeDialog, mergesCard, moveDialog } from "./merge.js";
 import { membersOf, recordsForFleet } from "./fleetdata.js";
 

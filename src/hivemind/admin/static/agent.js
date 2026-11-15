@@ -16,7 +16,8 @@ import {
 } from "./core.js";
 import { openEntry } from "./drawer.js";
 import { cursorPages, entryTable, feedbackTable, pagedTable } from "./lists.js";
-import { AUDIT_HEADERS, agentButtons, auditCsvColumns, auditRow, scoutCard } from "./manage.js";
+import { agentButtons, scoutCard } from "./agents.js";
+import { AUDIT_HEADERS, auditCsvColumns, auditRow } from "./audit.js";
 
 function profile(agent) {
   if (!agent) {

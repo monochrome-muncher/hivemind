@@ -6,7 +6,7 @@ import {
   card, stat, unavailable, fmtNum, fmtPct, fmtAgo, fmtTime, link, memoriesHref, feedbackHref, viewHref, auditHref, hooks, miniBar, fleetName, agentHref, fill,
 } from "./core.js";
 import { needsYouItems } from "./needs.js";
-import { pendingQueue } from "./manage.js";
+import { pendingQueue } from "./agents.js";
 import { stackedBars } from "./charts.js";
 import { openEntry } from "./drawer.js";
 import { entryRow } from "./lists.js";

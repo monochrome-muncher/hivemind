@@ -360,7 +360,7 @@ async def test_the_portal_serves_its_page_and_only_the_shared_admin_files() -> N
         shared = {name: await portal.get(f"/static/{name}") for name in SHARED_MODULES}
         admin_only = [
             await portal.get(f"/static/{name}")
-            for name in ("admin.js", "core.js", "manage.js", "index.html", "memories.js")
+            for name in ("admin.js", "core.js", "agents.js", "index.html", "memories.js")
         ]
         health = await portal.get("/healthz")
     assert page.status_code == own.status_code == health.status_code == 200

@@ -6,7 +6,8 @@
 //   views.js    the pages
 //   cleanup.js  the clean-up page (ADR 0118)
 // and the admin panel's shared modules, served as they are (ADR 0091):
-//   ui.js client.js lists.js csv.js drawer.js charts.js
+//   ui.js client.js lists.js memfilters.js csv.js drawer.js charts.js
+//   explain.js since.js
 //
 // Rules every module keeps: API data reaches the page through textContent
 // (h()) and never through an HTML-parsing sink; the agent key lives in
