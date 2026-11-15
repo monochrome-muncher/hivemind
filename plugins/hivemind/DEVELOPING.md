@@ -632,7 +632,7 @@ command), the session is incognito **by restraint**: the tools are
 loaded, the key and URL stay in the environment, and an agent with a
 shell could still call the REST API. The launcher unsets the key and URL
 only where the server is kept from loading (Claude Code, Copilot CLI,
-DeepSeek Harness, Junie, Pi, Oh My Pi, Gemini CLI, Cline, OpenCode, KiloCode; for Cursor and the code editors, where emptying them is the whole switch; for Codex, the key only).
+DeepSeek Harness, Junie, Pi, Oh My Pi, Gemini CLI, Cline, OpenCode, KiloCode; for Cursor and the code editors, where emptying them is the whole switch; for Codex, the key only, with or without its entry).
 Hermes loads the key from its own `.env`, and any other command may still need both (ADR 0035). A DeepSeek Harness session also stays incognito when a
 project `.env` names `HIVEMIND_*` variables: incognito is on if the
 process environment or `~/.dsh/.env` says so, and no project `.env` can
