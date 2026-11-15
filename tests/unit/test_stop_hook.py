@@ -260,7 +260,11 @@ def _antigravity_transcript(tmp_path: Path, calls: int, *hive_tools: str) -> Pat
 
 
 def _antigravity_stop(
-    tmp_path: Path, transcript: Path, env: dict[str, str] | None = None, cid: str = "c1"
+    tmp_path: Path,
+    transcript: Path,
+    env: dict[str, str] | None = None,
+    cid: str = "c1",
+    **extra: object,
 ) -> subprocess.CompletedProcess[str]:
     """Antigravity's Stop input is camelCase, and its hooks never see the
     plugin's key: the plugin hook passes --antigravity instead."""
@@ -270,6 +274,7 @@ def _antigravity_stop(
         "executionNum": 0,
         "terminationReason": "NO_TOOL_CALL",
         "fullyIdle": True,
+        **extra,
     }
     if env is None:
         env = _env(tmp_path)
@@ -291,6 +296,14 @@ def test_a_substantial_antigravity_session_is_blocked_once(tmp_path: Path) -> No
     assert (again.returncode, again.stdout) == (0, "")
     short = _antigravity_stop(tmp_path, _antigravity_transcript(tmp_path, 9), cid="c2")
     assert (short.returncode, short.stdout) == (0, "")
+
+
+def test_an_antigravity_continuation_never_blocks(tmp_path: Path) -> None:
+    """Antigravity 1.5.9 marks a turn a Stop hook kept going with
+    continuationActive, not stop_hook_active."""
+    transcript = _antigravity_transcript(tmp_path, 10)
+    out = _antigravity_stop(tmp_path, transcript, continuationActive=True)
+    assert (out.returncode, out.stdout) == (0, "")
 
 
 @pytest.mark.parametrize("tool", ["hive_write", "hive_feedback"])
