@@ -359,7 +359,7 @@ doesn't move, so changing it is how you update.
 
 ### Any other agent
 
-The skills work in any agent that reads `SKILL.md` files. Copy the three
+The skills work in any agent that reads `SKILL.md` files. Copy the four
 folders from [`skills/`](skills/) into the agent's skills folder (for
 example `~/.claude/skills/`, `~/.agents/skills/`, `~/.hermes/skills/` or
 `~/.pi/agent/skills/`), then go on to step 2. You will also have to add
@@ -761,7 +761,7 @@ hivemind-as --list        # profile names only, never keys
 
 Like `hivemind-incognito`, it is a file in this repository
 (`bin/hivemind-as`), so link it into a folder on your `PATH`. Each
-profile's key lives in `~/.config/hivemind/` (Claude Code:
+profile's key lives in `~/.config/hivemind/` (or `$HIVEMIND_CONFIG_DIR`; Claude Code:
 `claude.<profile>.json`, the others `<agent>.<profile>.env`); Hermes uses
 its own profiles. `default` is your usual setup, unchanged. Ask your
 agent to "add a Hivemind profile" and the **hivemind-switch** skill walks
