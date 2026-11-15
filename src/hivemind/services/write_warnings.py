@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from hivemind.domain.access import SCOPE_FLEET, SCOPE_ORG
 from hivemind.domain.entry import Entry, EntryDraft, EntryState, Source
 from hivemind.domain.health import is_entry_ref
+from hivemind.domain.validation import id_key
 
 if TYPE_CHECKING:
     from hivemind.services.write import RelatedEntry
@@ -177,11 +178,6 @@ def near_duplicate_warning(
     )
 
 
-def _id_key(entry_id: str) -> str:
-    """An entry id with case and hyphens folded away (uuid spellings)."""
-    return entry_id.replace("-", "").lower()
-
-
 def answers_open_question_warning(
     related: Sequence[RelatedEntry],
     draft_tags: Collection[str] = (),
@@ -192,14 +188,14 @@ def answers_open_question_warning(
     are not an answer). At most one warning, naming the closest."""
     if _OPEN_TAGS & set(draft_tags):
         return ()
-    skip = {_id_key(i) for i in linked}
+    skip = {id_key(i) for i in linked}
     candidates = [
         r
         for r in related
         if r.entry.state is EntryState.ACTIVE
         and _OPEN_TAGS & set(r.entry.tags)
         and r.similarity >= _OPEN_QUESTION_SIMILARITY
-        and _id_key(r.entry.id) not in skip
+        and id_key(r.entry.id) not in skip
     ]
     if not candidates:
         return ()

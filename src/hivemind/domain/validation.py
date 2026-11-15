@@ -140,6 +140,11 @@ def is_valid_uuid(value: str) -> bool:
     return True
 
 
+def id_key(entry_id: str) -> str:
+    """An entry id with case and hyphens folded away, so two uuid spellings compare equal."""
+    return entry_id.replace("-", "").lower()
+
+
 def canonical_uuid(value: str) -> str | None:
     """``value`` in Postgres's canonical ``uuid`` text form, or ``None``; compare ids read back
     from the database in this form."""

@@ -11,7 +11,7 @@ from dataclasses import dataclass, replace
 from hivemind.domain.access import Visibility, may_supersede
 from hivemind.domain.entry import Entry, EntryDraft, ExtractedEntity
 from hivemind.domain.feedback import FeedbackCounts
-from hivemind.domain.validation import InvalidInput
+from hivemind.domain.validation import InvalidInput, id_key
 from hivemind.ports import Embedder, Extractor, Store, SupersedeConflict
 from hivemind.services.chain import get_visible_entries
 from hivemind.services.errors import SupersedeDenied
@@ -28,11 +28,6 @@ logger = logging.getLogger("hivemind.services.governance")
 
 _SUPERSEDES_LOOKUP_CHUNK = 50  # ``supersedes`` targets per ``get_entries`` call, bounds memory
 RELATED_ON_WRITE_LIMIT = 3  # ADR 0052
-
-
-def _id_key(entry_id: str) -> str:
-    """An entry id with case and hyphens folded away (uuid spellings)."""
-    return entry_id.replace("-", "").lower()
 
 
 @dataclass(frozen=True, slots=True)
@@ -249,9 +244,9 @@ class WriteService:
         for i in range(0, len(target_ids), _SUPERSEDES_LOOKUP_CHUNK):
             chunk = target_ids[i : i + _SUPERSEDES_LOOKUP_CHUNK]
             # Postgres answers with canonical ids: match a target however it was spelled.
-            targets = {_id_key(e.id): e for e in (await self._store.get_entries(chunk)).values()}
+            targets = {id_key(e.id): e for e in (await self._store.get_entries(chunk)).values()}
             for target_id in chunk:
-                target = targets.get(_id_key(target_id))
+                target = targets.get(id_key(target_id))
                 if target is None or not may_supersede(
                     target, new_scope=draft.scope, new_fleet_id=draft.fleet_id, writer=writer
                 ):
