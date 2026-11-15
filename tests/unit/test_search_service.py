@@ -394,7 +394,7 @@ class TestDeterministicTies:
         from dataclasses import replace
 
         from hivemind.domain.entry import Entry
-        from hivemind.services.search import apply_supersession_invariant
+        from hivemind.retrieval.ordering import apply_supersession_invariant
 
         first = Entry(
             id="bbb", kind=Kind.FACT, summary="o", author="a", agent="a",

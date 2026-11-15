@@ -401,7 +401,7 @@ def test_explore_reorder_keeps_a_version_groups_display_order() -> None:
     from datetime import UTC, datetime
 
     from hivemind.domain.entry import Kind
-    from hivemind.services.search import explore_reorder
+    from hivemind.retrieval.ordering import explore_reorder
 
     def entry(eid: str, day: int) -> Entry:
         return Entry(
