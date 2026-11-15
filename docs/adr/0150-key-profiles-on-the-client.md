@@ -2,7 +2,7 @@
 
 Builds on [ADR 0012](0012-shared-org-key-with-admin-issued-agent-keys.md) (one agent, one key, one home fleet), [ADR 0031](0031-one-key-per-request-and-what-org-key-rotation-stops.md) (one key per request) and [ADR 0035](0035-incognito-sessions.md) (a client-side launcher with a branch per harness). Replaces the parked proposal `docs/proposals/2026-10-12-agent-key-switching.md`.
 
-Status: Accepted.
+Status: Accepted. Decision 6 amended by [ADR 0151](0151-whoami-says-a-switch-is-a-new-session.md): `hive_whoami`'s description says a switch is a new session.
 
 ## Context
 

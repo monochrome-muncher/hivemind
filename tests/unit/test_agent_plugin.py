@@ -104,6 +104,9 @@ def test_the_skill_carries_the_distillation_loop() -> None:
         "brainstorming: search with `explore: true`",
         "supersede only on evidence",
         "tagged `alternative`",
+        "untested ideas to the fleet (§4's `alternative` excepted)",
+        "A general question gets the general answer first",
+        "unless it fits the user's case",
     ):
         assert rule in flat, rule
 
@@ -121,6 +124,7 @@ def test_rules_moved_out_of_the_skill_live_in_the_tool_descriptions() -> None:
     assert "path|url|session|other" in contract.DESC_WRITE  # ADR 0105: sources named
     assert "verified:" in contract.DESC_FEEDBACK
     assert "Pin rarely" in contract.DESC_PIN
+    assert "ask the user to start a new session (hivemind-switch skill)" in contract.DESC_WHOAMI
 
 
 def test_the_skill_lists_every_tool_where_it_names_them() -> None:
@@ -456,6 +460,9 @@ def test_entries_are_written_in_english_and_never_set_the_reply_language() -> No
 # feedback notes, omitted scope, the verdict meanings) measures 17,708.
 # The language rules (ADR 0129) measure 17,878 after trimming the skill's
 # intro and the local-path examples the write warning already gives.
+# The switch clause on hive_whoami (ADR 0151) and the general-question rule
+# (ADR 0153) measure 17,956 after dropping sentences that other always-on
+# text or the server's own error replies already say.
 ALWAYS_ON_BUDGET = 18_000
 
 

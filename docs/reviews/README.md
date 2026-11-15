@@ -17,5 +17,6 @@ Security, performance and design reviews of Hivemind, kept as a record of what w
 | 2026-11-11 | [Changes from 2.21.0 to 2.23.0](2026-11-11-changes-2.21.0-to-2.23.0.md): the update skill, re-extraction and the `not_english` warning, with a fix for its false alarms | v2.23.0 |
 | 2026-11-12 | [Changes since 2.23.1](2026-11-12-changes-since-2.23.1.md): the admin panel and portal features of 2.24.0 (ADRs 0135 to 0141) | b627590 |
 | 2026-11-12 | [Memories as data, relevance, and self versus fleet](2026-11-12-memories-as-data-and-scope.md): how agents are told to weigh entries, what the search score means, why brainstorms reach the fleet, and a live check of [ADR 0146](../adr/0146-scope-by-evidence.md) | 88c4170 |
+| 2026-11-15 | [Plugins and skills review](2026-11-15-plugins-skills-review.md): docs against code, skill text against the server, weak-model failure modes (switching, payload stuffing, general questions answered through one incident), with live and simulated checks | e2bea82 |
 
 Retrieval measurements live in [retrieval-experiments.md](../retrieval-experiments.md), and research proposals in [proposals/](../proposals/).

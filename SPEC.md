@@ -216,7 +216,7 @@ REST is the canonical interface; the **MCP server is the primary agent-facing wr
 | `hive_pinned` | `GET /v1/pins` (the fleet's pinned briefing — ADR 0058) |
 | `hive_pin` | `PUT /v1/entries/{id}/pin`; with `unpin: true`, `DELETE /v1/entries/{id}/pin` (ADR 0058) |
 | `hive_register` | `POST /v1/agents` (org key only — the agent's first contact with Hivemind; §12.3) |
-| `hive_whoami` | `GET /v1/whoami` (any valid key — the key's kind, the agent's status, trust level and home fleet, when its key was last used, and what it may read and write; `fleet_phase` while the home fleet has a phase in force; `role` and `role_hint` for a scout; ADRs 0030, 0114, 0143, 0144) |
+| `hive_whoami` | `GET /v1/whoami` (any valid key — the key's kind, the agent's status, trust level and home fleet, when its key was last used, and what it may read and write; `fleet_phase` while the home fleet has a phase in force; `role` and `role_hint` for a scout; its description says the key is fixed per session, so acting as another agent is a new session; ADRs 0030, 0114, 0143, 0144, 0151) |
 
 **`hive_write` `sources` schema (ADR 0105).** The MCP `tools/list` schema for `hive_write`'s `sources` is typed to the entry model (§4.1): an array of `{type, ref}` with `type` constrained to `path|url|session|other`, `ref` required, and no additional properties — matching the REST surface's shape. It is a schema-only constraint: the runtime still accepts a loose object and a malformed source answers the structured `invalid_input` (not a raw SDK `is_error`), so the self-correcting error messages are unchanged.
 
