@@ -83,6 +83,7 @@ class TestWriteService:
         with pytest.raises(SupersedeDenied) as denied:
             await service.write(make_draft("x", supersedes=("missing-id",)), writer=writer)
         assert denied.value.ids == ["missing-id"]
+        assert "current head" in str(denied.value)
 
     async def test_a_huge_supersedes_list_is_looked_up_in_bounded_chunks(
         self, monkeypatch: pytest.MonkeyPatch

@@ -2,7 +2,7 @@
 
 Amends [ADR 0052](0052-writes-report-the-nearest-entries.md) §3 (no floor) and [ADR 0077](0077-write-check-mode-and-warnings.md) §3 (the warning codes) and §4. Adds a row to SPEC §4.1. Does not refuse, merge or supersede anything (ADR 0001).
 
-Status: Accepted. Always on, advisory only.
+Status: Accepted. Always on, advisory only. The skill line that pointed at the warning is gone ([ADR 0154](0154-the-skill-does-not-repeat-descriptions-or-replies.md)); the warning explains itself.
 
 ## Context
 

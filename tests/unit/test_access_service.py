@@ -112,6 +112,14 @@ async def test_reregister_active_same_alias_points_at_the_admin_for_the_key() ->
     assert "ask your admin for the agent key" in again.message
 
 
+async def test_reregister_revoked_says_to_ask_the_admin_or_rename() -> None:
+    service, _, _ = make_service()
+    await service.register("alice", org_credential(), owner_alias="john")
+    await service.revoke("alice", admin_credential())
+    again = await service.register("alice", org_credential(), owner_alias="john")
+    assert "revoked" in again.message and "different name" in again.message
+
+
 @pytest.mark.parametrize("status", ["pending", "active", "revoked"])
 @pytest.mark.parametrize("other_alias", ["mallory", None])
 async def test_reregister_with_another_alias_is_a_bare_name_taken(status, other_alias) -> None:
@@ -125,6 +133,7 @@ async def test_reregister_with_another_alias_is_a_bare_name_taken(status, other_
         await service.register("alice", org_credential(), owner_alias=other_alias)
     # Nothing about the other agent (its status, its alias) leaks.
     text = str(excinfo.value).lower()
+    assert "pick another name" in text
     assert "john" not in text
     for word in ("pending", "active", "revoked"):
         assert word not in text

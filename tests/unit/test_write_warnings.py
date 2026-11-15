@@ -241,7 +241,7 @@ async def test_local_path_warns_on_fleet_entries_only() -> None:
     store = MemoryStore(make_clock())
     fleet = await _write(store, A, body="checkout at /home/a/repo")
     assert _codes(fleet) == ["local_path"]
-    assert fleet["warnings"][0]["message"]  # type: ignore[index]
+    assert "self entry" in fleet["warnings"][0]["message"]  # type: ignore[index]
     summary = await _write(store, A, summary="fix in ~/repo/x.py", scope="fleet")
     assert _codes(summary) == ["local_path"]
     private = await _write(store, A, body="checkout at /home/a/repo", scope="self")

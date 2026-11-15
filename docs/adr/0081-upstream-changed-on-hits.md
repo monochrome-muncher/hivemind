@@ -2,7 +2,7 @@
 
 Adds to SPEC §6.1 (the evidence on a hit), built on the links of [ADR 0057](0057-see-also-links-between-entries.md) and the evidence fields of the PR #117 era ([ADR 0070](0070-one-capped-budget-for-social-signals.md) for the ranking budget). Does not change ranking, scoring or the order of any result.
 
-Status: Accepted. Display only, on every search.
+Status: Accepted. Display only, on every search. Decision 8 amended by [ADR 0154](0154-the-skill-does-not-repeat-descriptions-or-replies.md): the tool description keeps its clause, the skill line is gone.
 
 ## Context
 

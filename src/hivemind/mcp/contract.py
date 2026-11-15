@@ -13,9 +13,8 @@ INSTRUCTIONS = (
     "Hivemind is this organization's shared long-term memory for AI agents; "
     "use it as your memory, in preference to local memory files. "
     "At the start of every session (and after your context is compacted) call "
-    "hive_whoami to learn what you may read and write; if it shows the org "
-    "key (key_kind org) you are on the shared org key (not registered yet, or "
-    "registered and awaiting activation): follow the hivemind-setup skill "
+    "hive_whoami to learn what you may read and write; if it shows key_kind org, "
+    "you are not registered yet or await activation: follow the hivemind-setup skill "
     "(hive_register needs a name and owner alias from your user). "
     "Once per session, read your fleet's pinned briefing with hive_pinned. "
     "Recall with hive_search before non-trivial work. "
@@ -36,8 +35,7 @@ INSTRUCTIONS = (
 # Tool descriptions (SPEC §5.2 / §5.3), registered as the tool docs.
 DESC_WRITE = (
     "Write a distilled entry (fact|insight|decision) into the shared pool; "
-    "omit 'scope' to land at the highest scope your trust level "
-    "permits (self or fleet; an explicit out-of-permission scope is rejected). "
+    "omit 'scope' (self or fleet) to land at the highest scope your trust level permits. "
     "Write in English; names, quotes, errors and terms English lacks stay as "
     "they are. 'summary' (at most 280 chars) "
     "is the headline, embedded together with the start of "
@@ -57,9 +55,7 @@ DESC_WRITE = (
     "'check': true stores nothing. If one already says the same, don't write "
     "(withdraw yours if stored); if yours replaces one (outdated or wrong), "
     "name it in 'supersedes'; if yours adds a point, link it with 'see_also' "
-    "(up to 5 readable ids). "
-    "On embedding_unavailable, don't retry in a loop: keep the note and write "
-    "it later."
+    "(up to 5 readable ids)."
 )
 DESC_SEARCH = (
     "Hybrid (keyword + vector) search. Compact hits, no bodies; "
@@ -87,12 +83,11 @@ DESC_SEARCH = (
 )
 DESC_GET = (
     "Fetch a full entry including its body. include_history adds the "
-    "supersession chain (successors + superseded), limited to versions you may "
-    "read. "
+    "supersession chain (successors + superseded). "
     "'feedback' has the helpful/stale/wrong counts and the newest "
     "reports with their notes, which often say what is true now. "
     "'see_also' lists entries this one links to and 'linked_from' the active "
-    "entries that link to it, limited to what you may read. "
+    "entries that link to it. "
     "To open several hits at once, pass 'entry_ids' (up to 10) instead of "
     "'entry_id': the reply has 'entries' in the order asked and 'not_found' "
     "for ids you may not read."
@@ -109,8 +104,7 @@ DESC_LIST = (
     "Items are compact (no body): open with hive_get, or pass include_body: true."
 )
 DESC_WITHDRAW = (
-    "Withdraw an entry (retract without replacing). Only the author or an "
-    "admin may withdraw; an entry you may not read answers not_found."
+    "Withdraw an entry (retract without replacing). Only the author or an admin may withdraw."
 )
 DESC_PINNED = (
     "Your fleet's pinned entries: a short briefing its agents "
@@ -132,8 +126,7 @@ DESC_PIN = (
     "their canonical tags and aliases, and the go-to entries as see_also."
 )
 DESC_FEEDBACK = (
-    "Report helpful|stale|wrong on an entry your work tested (only "
-    "entries you may read; others answer not_found). The latest verdict per "
+    "Report helpful|stale|wrong on an entry your work tested. The latest verdict per "
     "(entry, user, agent) wins; readers of the entry see it with your note and "
     "name. helpful means your work used "
     "the entry and it held: say in the note what you checked (verified: ...). "
@@ -147,10 +140,7 @@ DESC_REGISTER = (
     "Register (or re-register) an agent. Gated on the org key "
     "(an admin key is rejected here); creates a 'pending' agent (level 0, no "
     "fleet). Registering the same name again with the same owner_alias is "
-    "safe: it returns the current status (already_registered, plus a message: "
-    "still pending / active, so ask your admin for the agent key / revoked). "
-    "A name that belongs to another owner is a name_conflict: pick a "
-    "different name."
+    "safe: the reply's message says where it stands and what to do."
 )
 
 
