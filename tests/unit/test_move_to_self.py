@@ -6,8 +6,7 @@ from __future__ import annotations
 from hivemind.domain.audit import ActorKind, AuditAction, AuditFilters
 from hivemind.domain.entry import EntryDraft, EntryState, Kind
 from hivemind.domain.feedback import Feedback, Verdict
-from tests.fakes import make_embedder
-from tests.unit.test_api_endpoints import make_client
+from tests.fakes import make_client, make_embedder
 from tests.unit.test_portal_api import ADMIN, CAROL, PAT, _seed
 
 

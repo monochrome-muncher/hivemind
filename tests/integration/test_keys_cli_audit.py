@@ -22,7 +22,7 @@ import sys
 
 import asyncpg
 import pytest
-from tests.pg import ensure_migrated, reset_tables
+from tests.pg import ensure_migrated, exec_sql, fetch_rows, reset_tables
 
 from hivemind.config import Settings
 from hivemind.domain import TrustLevel
@@ -51,35 +51,19 @@ async def _prepare(dsn: str) -> None:
     await reset_tables(dsn)
 
 
-async def _exec(dsn: str, sql: str) -> None:
-    conn = await asyncpg.connect(dsn)
-    try:
-        await conn.execute(sql)
-    finally:
-        await conn.close()
-
-
-async def _fetch(dsn: str, sql: str) -> list[asyncpg.Record]:
-    conn = await asyncpg.connect(dsn)
-    try:
-        return list(await conn.fetch(sql))
-    finally:
-        await conn.close()
-
-
 async def _register_agent(dsn: str, name: str) -> None:
     """Give a name an agent record: ``_issue_agent`` refuses unregistered
     names (ADR 0012 — keys are bound to registered names), so every test
     that issues an agent key registers the name first."""
     # ``name`` is a test-controlled literal, not user input.
-    await _exec(
+    await exec_sql(
         dsn,
         f"INSERT INTO agents (name, status, trust_level) VALUES ('{name}', 'active', 2)",
     )
 
 
 async def _audit_rows(dsn: str) -> list[asyncpg.Record]:
-    return await _fetch(
+    return await fetch_rows(
         dsn,
         "SELECT actor_kind, actor, action, target, detail FROM audit_log ORDER BY occurred_at",
     )
@@ -216,7 +200,7 @@ async def test_the_audit_row_shares_the_mutations_transaction(
     ):
         with pytest.raises(asyncpg.CheckViolationError):
             await command()
-    assert await _fetch(dsn, "SELECT 1 FROM credentials") == []
+    assert await fetch_rows(dsn, "SELECT 1 FROM credentials") == []
     assert await _audit_rows(dsn) == []
 
 
@@ -277,7 +261,7 @@ async def test_no_raw_key_appears_in_any_audit_row_on_either_path(dsn: str) -> N
         await store.close()
         await auth.close()
 
-    rows = await _fetch(dsn, "SELECT row_to_json(a)::text AS doc FROM audit_log a")
+    rows = await fetch_rows(dsn, "SELECT row_to_json(a)::text AS doc FROM audit_log a")
     assert len(rows) == 12  # 6 CLI rows + 5 admin-key rows + 1 registration
     docs = [r["doc"] for r in rows]
     for raw in raw_keys:
@@ -286,9 +270,9 @@ async def test_no_raw_key_appears_in_any_audit_row_on_either_path(dsn: str) -> N
             assert raw not in doc
             # Nor the secret part without its prefix.
             assert raw.removeprefix("hm_") not in doc
-    kinds = await _fetch(dsn, "SELECT actor_kind, count(*) AS n FROM audit_log GROUP BY 1")
+    kinds = await fetch_rows(dsn, "SELECT actor_kind, count(*) AS n FROM audit_log GROUP BY 1")
     assert {r["actor_kind"]: r["n"] for r in kinds} == {"cli": 6, "admin_key": 5, "org_key": 1}
-    [register] = await _fetch(
+    [register] = await fetch_rows(
         dsn, "SELECT actor, target, detail FROM audit_log WHERE action = 'agent.register'"
     )
     assert register["actor"] == f"org:{key_hash(org_key)[:12]}"
@@ -300,12 +284,14 @@ async def test_no_raw_key_appears_in_any_audit_row_on_either_path(dsn: str) -> N
 
 
 async def test_cli_revoke_sets_revoked_and_records_the_prior_status(dsn: str) -> None:
-    await _exec(dsn, "INSERT INTO agents (name, status, trust_level) VALUES ('alice', 'active', 2)")
+    await exec_sql(
+        dsn, "INSERT INTO agents (name, status, trust_level) VALUES ('alice', 'active', 2)"
+    )
     await _issue_agent(dsn, "alice", actor="john")
     await _revoke(dsn, "alice", actor="ops")
-    [status] = await _fetch(dsn, "SELECT status FROM agents WHERE name = 'alice'")
+    [status] = await fetch_rows(dsn, "SELECT status FROM agents WHERE name = 'alice'")
     assert status["status"] == "revoked"
-    assert await _fetch(dsn, "SELECT 1 FROM credentials WHERE agent_name = 'alice'") == []
+    assert await fetch_rows(dsn, "SELECT 1 FROM credentials WHERE agent_name = 'alice'") == []
     revoke_row = (await _audit_rows(dsn))[-1]
     assert revoke_row["action"] == "agent.revoke"
     assert json.loads(revoke_row["detail"]) == {"from": "active"}

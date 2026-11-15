@@ -22,8 +22,8 @@ from hivemind.domain.entry import EntryFilters, EntryState, Kind
 from hivemind.domain.recency import RecencyHint
 from hivemind.mcp.app import McpHivemind, hive_list, hive_search
 from hivemind.ports import Credential
-from tests.fakes import make_search_config
-from tests.unit.test_api_endpoints import make_client, make_hivemind_app
+from tests.fakes import make_client, make_search_config
+from tests.unit.test_api_endpoints import make_hivemind_app
 
 ALL = frozenset(f.name for f in fields(EntryFilters))
 

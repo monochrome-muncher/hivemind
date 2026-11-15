@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 
-from hivemind.api.deps import HivemindApp, create_app
+from hivemind.api.deps import HivemindApp
 from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
@@ -25,7 +25,13 @@ from hivemind.domain.entry import EntryDraft, EntryFilters
 from hivemind.domain.feedback import Verdict
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential, KeyReplacement
-from tests.fakes import make_clock, make_embedder, make_search_config, seed_entity_entries
+from tests.fakes import (
+    make_client,
+    make_clock,
+    make_embedder,
+    make_search_config,
+    seed_entity_entries,
+)
 
 
 class FakeAuthenticator:
@@ -114,11 +120,6 @@ def make_app_with_clock(clock) -> HivemindApp:
         authenticator=make_authenticator(),
         search_config=make_search_config(),
     )
-
-
-def make_client(app: HivemindApp) -> httpx.AsyncClient:
-    transport = httpx.ASGITransport(app=create_app(app))
-    return httpx.AsyncClient(transport=transport, base_url="http://hivemind.test")
 
 
 async def post_entry(

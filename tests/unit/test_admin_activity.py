@@ -16,8 +16,8 @@ from hivemind.domain.entry import EntryDraft, Kind
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.memstore import MemoryStore
 from hivemind.services.activity import ActivityService
-from tests.fakes import make_clock
-from tests.unit.test_api_endpoints import make_client, make_hivemind_app
+from tests.fakes import make_client, make_clock
+from tests.unit.test_api_endpoints import make_hivemind_app
 
 ADMIN = {"X-API-Key": "key-admin"}
 NOW = datetime(2026, 6, 10, 15, 30, tzinfo=UTC)

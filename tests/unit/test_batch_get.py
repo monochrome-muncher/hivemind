@@ -2,12 +2,7 @@
 
 from __future__ import annotations
 
-import httpx
-
-from hivemind.api.deps import create_app
-from hivemind.api.main import create_app_for_config
-from hivemind.config import Settings
-from hivemind.domain.access import TrustLevel, Visibility
+from hivemind.domain.access import Visibility
 from hivemind.domain.entry import Entry
 from hivemind.domain.feedback import Feedback, FeedbackCounts
 from hivemind.domain.validation import MAX_GET_IDS
@@ -15,28 +10,15 @@ from hivemind.mcp.app import hive_feedback, hive_get, hive_write
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from tests.fakes import (
-    FakeAuthenticator,
+    agent_credential,
+    make_agent_client,
     make_clock,
-    make_embedder,
-    make_search_config,
     mcp_surface,
 )
 
-
-def _agent(name: str, fleet: str) -> Credential:
-    return Credential(
-        user_id=name,
-        agent_id=name,
-        agent_name=name,
-        access_controlled=True,
-        trust_level=TrustLevel.CONTRIBUTOR,
-        home_fleet_id=fleet,
-    )
-
-
-READER = _agent("reader", "fleet-a")
-WRITER = _agent("writer", "fleet-a")
-OUTSIDER = _agent("outsider", "fleet-b")
+READER = agent_credential("reader", "fleet-a")
+WRITER = agent_credential("writer", "fleet-a")
+OUTSIDER = agent_credential("outsider", "fleet-b")
 
 
 async def _write(store: MemoryStore, credential: Credential, summary: str) -> str:
@@ -96,23 +78,11 @@ async def test_single_entry_get_is_unchanged() -> None:
     assert result["id"] == eid
 
 
-def _client(store: MemoryStore, credential: Credential) -> httpx.AsyncClient:
-    app = create_app_for_config(
-        Settings(),
-        store=store,
-        embedder=make_embedder(),
-        authenticator=FakeAuthenticator(agent_credentials={"k": credential}),
-        search_config=make_search_config(),
-    )
-    transport = httpx.ASGITransport(app=create_app(app))
-    return httpx.AsyncClient(transport=transport, base_url="http://t", headers={"X-API-Key": "k"})
-
-
 async def test_rest_reads_several_entries() -> None:
     store = MemoryStore(make_clock())
     a = await _write(store, READER, "first fact")
     theirs = await _write(store, OUTSIDER, "their fact")
-    async with _client(store, READER) as client:
+    async with make_agent_client(store, READER) as client:
         resp = await client.post("/v1/entries/get", json={"entry_ids": [a, theirs]})
         single = await client.get(f"/v1/entries/{a}")
     assert resp.status_code == 200
@@ -124,7 +94,7 @@ async def test_rest_reads_several_entries() -> None:
 
 async def test_rest_bounds() -> None:
     store = MemoryStore(make_clock())
-    async with _client(store, READER) as client:
+    async with make_agent_client(store, READER) as client:
         empty = await client.post("/v1/entries/get", json={"entry_ids": []})
         many = await client.post(
             "/v1/entries/get", json={"entry_ids": [f"i{n}" for n in range(MAX_GET_IDS + 1)]}

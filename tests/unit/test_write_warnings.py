@@ -32,7 +32,13 @@ from hivemind.services.write_warnings import (
 )
 from tests.eval.domains import DOMAINS
 from tests.eval.golden import golden_corpus
-from tests.fakes import FakeAuthenticator, make_clock, make_embedder, make_search_config
+from tests.fakes import (
+    FakeAuthenticator,
+    agent_credential,
+    make_clock,
+    make_embedder,
+    make_search_config,
+)
 
 
 @pytest.mark.parametrize(
@@ -72,21 +78,10 @@ def test_conservative_misses(text: str) -> None:
     assert not has_local_path(text)
 
 
-def _agent(name: str, fleet: str, level: TrustLevel = TrustLevel.CONTRIBUTOR) -> Credential:
-    return Credential(
-        user_id=name,
-        agent_id=name,
-        agent_name=name,
-        access_controlled=True,
-        trust_level=level,
-        home_fleet_id=fleet,
-    )
-
-
-A = _agent("a", "fleet-a")
-A2 = _agent("a2", "fleet-a")
-B = _agent("b", "fleet-b")
-LEAD = _agent("lead", "fleet-a", TrustLevel.PRIVILEGED)
+A = agent_credential("a", "fleet-a")
+A2 = agent_credential("a2", "fleet-a")
+B = agent_credential("b", "fleet-b")
+LEAD = agent_credential("lead", "fleet-a", TrustLevel.PRIVILEGED)
 
 
 def _surface(store: MemoryStore, credential: Credential, embedder: object = None) -> McpHivemind:

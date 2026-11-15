@@ -14,8 +14,8 @@ from hivemind.embeddings import EmbeddingError
 from hivemind.memstore import MemoryStore
 from hivemind.services.metrics import MetricsService
 from hivemind.services.search import SearchService
-from tests.fakes import make_clock, make_embedder, make_search_config
-from tests.unit.test_api_endpoints import make_client, make_hivemind_app
+from tests.fakes import make_client, make_clock, make_embedder, make_search_config
+from tests.unit.test_api_endpoints import make_hivemind_app
 from tests.unit.test_prometheus import samples
 
 

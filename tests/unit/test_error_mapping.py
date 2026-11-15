@@ -31,28 +31,23 @@ from hivemind.services.governance import GovernanceService
 from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
 from hivemind.services.write import WriteService
-from tests.fakes import FakeAuthenticator, make_clock, make_embedder, make_search_config
+from tests.fakes import (
+    FakeAuthenticator,
+    agent_credential,
+    make_clock,
+    make_embedder,
+    make_search_config,
+)
 
 NO_SUCH = "00000000-0000-4000-8000-00000000dead"
 ADMIN_CREDENTIAL = Credential(user_id="admin", is_admin=True)
 MERGED = "fleet {merged_fleet} was merged into 'new' (id {target_fleet}); retry against that fleet"
 
 
-def _agent(name: str, level: TrustLevel, fleet: str = "fleet-a") -> Credential:
-    return Credential(
-        user_id=name,
-        agent_id=name,
-        agent_name=name,
-        access_controlled=True,
-        trust_level=level,
-        home_fleet_id=fleet,
-    )
-
-
 CREDENTIALS = {
-    "k-lead": _agent("lead", TrustLevel.PRIVILEGED),
-    "k-dev": _agent("dev", TrustLevel.CONTRIBUTOR),
-    "k-lurker": _agent("lurker", TrustLevel.LURKER),
+    "k-lead": agent_credential("lead", "fleet-a", TrustLevel.PRIVILEGED),
+    "k-dev": agent_credential("dev", "fleet-a"),
+    "k-lurker": agent_credential("lurker", "fleet-a", TrustLevel.LURKER),
     "k-user": Credential(user_id="legacy"),  # a legacy key with no agent identity
 }
 
@@ -117,7 +112,7 @@ async def world() -> World:
     old = await store.create_fleet("old")
     new = await store.create_fleet("new")
     await AccessService(store).merges.merge(old.id, ADMIN_CREDENTIAL, target_fleet_id=new.id)
-    authenticator._by_key["k-stale"] = _agent("stale", TrustLevel.CONTRIBUTOR, old.id)
+    authenticator._by_key["k-stale"] = agent_credential("stale", old.id)
     return World(
         client,
         store,

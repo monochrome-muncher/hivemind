@@ -3,13 +3,8 @@ nothing recorded, on both surfaces."""
 
 from __future__ import annotations
 
-import httpx
 import pytest
 
-from hivemind.api.deps import create_app
-from hivemind.api.main import create_app_for_config
-from hivemind.config import Settings
-from hivemind.domain.access import TrustLevel
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.domain.validation import MAX_FEEDBACK_IDS
 from hivemind.mcp.app import hive_feedback, hive_write
@@ -17,29 +12,16 @@ from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.feedback import FeedbackService
 from tests.fakes import (
-    FakeAuthenticator,
     RecordingStore,
+    agent_credential,
+    make_agent_client,
     make_clock,
-    make_embedder,
-    make_search_config,
     mcp_surface,
 )
 
-
-def _agent(name: str, fleet: str) -> Credential:
-    return Credential(
-        user_id=name,
-        agent_id=name,
-        agent_name=name,
-        access_controlled=True,
-        trust_level=TrustLevel.CONTRIBUTOR,
-        home_fleet_id=fleet,
-    )
-
-
-WRITER = _agent("writer", "fleet-a")
-READER = _agent("reader", "fleet-a")
-OUTSIDER = _agent("outsider", "fleet-b")
+WRITER = agent_credential("writer", "fleet-a")
+READER = agent_credential("reader", "fleet-a")
+OUTSIDER = agent_credential("outsider", "fleet-b")
 
 
 async def _entries(store: MemoryStore, credential: Credential, n: int) -> list[str]:
@@ -110,22 +92,10 @@ async def test_a_bad_verdict_is_rejected_before_anything_is_recorded() -> None:
     assert await store.feedback_counts(eid) == (0, 0, 0)
 
 
-def _client(store: MemoryStore, credential: Credential) -> httpx.AsyncClient:
-    app = create_app_for_config(
-        Settings(),
-        store=store,
-        embedder=make_embedder(),
-        authenticator=FakeAuthenticator(agent_credentials={"k": credential}),
-        search_config=make_search_config(),
-    )
-    transport = httpx.ASGITransport(app=create_app(app))
-    return httpx.AsyncClient(transport=transport, base_url="http://t", headers={"X-API-Key": "k"})
-
-
 async def test_rest_batch_feedback() -> None:
     store = MemoryStore(make_clock())
     ids = await _entries(store, WRITER, 2)
-    async with _client(store, READER) as client:
+    async with make_agent_client(store, READER) as client:
         resp = await client.post(
             "/v1/feedback", json={"entry_ids": ids, "verdict": "helpful", "note": "n"}
         )
@@ -138,7 +108,7 @@ async def test_rest_batch_feedback_unreadable_is_404_and_records_nothing() -> No
     store = MemoryStore(make_clock())
     [ours] = await _entries(store, WRITER, 1)
     [theirs] = await _entries(store, OUTSIDER, 1)
-    async with _client(store, READER) as client:
+    async with make_agent_client(store, READER) as client:
         resp = await client.post(
             "/v1/feedback", json={"entry_ids": [ours, theirs], "verdict": "wrong"}
         )
@@ -148,7 +118,7 @@ async def test_rest_batch_feedback_unreadable_is_404_and_records_nothing() -> No
 
 async def test_rest_batch_feedback_bounds() -> None:
     store = MemoryStore(make_clock())
-    async with _client(store, READER) as client:
+    async with make_agent_client(store, READER) as client:
         empty = await client.post("/v1/feedback", json={"entry_ids": [], "verdict": "helpful"})
         many = await client.post(
             "/v1/feedback",

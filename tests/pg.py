@@ -24,7 +24,18 @@ import asyncio
 import asyncpg
 import pytest
 
+from hivemind.config import Settings
+from hivemind.domain.entry import EntryDraft, Kind
+from hivemind.mcp.app import McpHivemind
+from hivemind.ports import Credential
+from hivemind.services.access import AccessService
+from hivemind.services.governance import GovernanceService
+from hivemind.services.read import ReadService
+from hivemind.services.search import SearchService
+from hivemind.services.write import WriteService
+from hivemind.store import PgStore
 from hivemind.store import migrate as migrate_module
+from tests.fakes import FakeEmbedder, make_search_config
 
 _migrated: set[tuple[str, int]] = set()
 _tables: dict[str, list[str]] = {}
@@ -158,3 +169,46 @@ async def _fk_ordered_tables(conn: asyncpg.Connection) -> list[str]:
         ordered += ready
         remaining -= set(ready)
     return ordered
+
+
+async def exec_sql(dsn: str, sql: str, *args: object) -> None:
+    conn = await asyncpg.connect(dsn)
+    try:
+        await conn.execute(sql, *args)
+    finally:
+        await conn.close()
+
+
+async def fetch_rows(dsn: str, sql: str, *args: object) -> list[asyncpg.Record]:
+    conn = await asyncpg.connect(dsn)
+    try:
+        return list(await conn.fetch(sql, *args))
+    finally:
+        await conn.close()
+
+
+def fleet_draft(fleet_id: str, summary: str, author: str = "amy") -> EntryDraft:
+    return EntryDraft(
+        kind=Kind.FACT,
+        summary=summary,
+        author=author,
+        agent=author,
+        scope="fleet",
+        fleet_id=fleet_id,
+    )
+
+
+def pg_surface(store: PgStore, credential: Credential) -> McpHivemind:
+    """The MCP tools over ``store`` as ``credential``, embedding at the database's width."""
+    embedder = FakeEmbedder(dimension=Settings().embedding_dim)
+    config = make_search_config()
+    return McpHivemind(
+        read_service=ReadService(store, GovernanceService(store), config),
+        store=store,
+        write_service=WriteService(store, embedder),
+        search_service=SearchService(store, embedder, config),
+        governance_service=GovernanceService(store),
+        access_service=AccessService(store),
+        search_config=config,
+        credential=credential,
+    )

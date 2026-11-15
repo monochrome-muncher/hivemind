@@ -43,12 +43,13 @@ from hivemind.services.write import WriteService
 from tests.fakes import (
     CountingEmbedder,
     RecordingStore,
+    make_client,
     make_clock,
     make_embedder,
     make_search_config,
     minimal_draft,
 )
-from tests.unit.test_api_endpoints import make_authenticator, make_client, make_hivemind_app
+from tests.unit.test_api_endpoints import make_authenticator, make_hivemind_app
 from tests.unit.test_mcp_app import ALICE, ORG, build_app
 
 KEY = {"X-API-Key": "key-alice"}

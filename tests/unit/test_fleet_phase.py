@@ -5,13 +5,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta, timezone
 
-import httpx
 import pytest
 from prometheus_client.parser import text_string_to_metric_families
 
-from hivemind.api.deps import create_app
-from hivemind.api.main import create_app_for_config
-from hivemind.config import Settings
 from hivemind.domain.access import FleetMerged, TrustLevel, UnknownFleet
 from hivemind.domain.audit import AuditAction, AuditFilters
 from hivemind.domain.fleet_phase import MAX_PHASE_DAYS, FleetPhase, PhaseName
@@ -24,8 +20,7 @@ from hivemind.services.errors import PermissionDenied
 from tests.fakes import (
     FakeAuthenticator,
     make_clock,
-    make_embedder,
-    make_search_config,
+    make_store_client,
     mcp_surface,
 )
 
@@ -315,19 +310,6 @@ async def test_pinned_reads_the_fleet_id_in_any_uuid_spelling() -> None:
 ADMIN_H = {"X-API-Key": "hm_admin"}
 
 
-def _client(store: MemoryStore, agents: dict[str, Credential] | None = None) -> httpx.AsyncClient:
-    app = create_app_for_config(
-        Settings(),
-        store=store,
-        embedder=make_embedder(),
-        authenticator=FakeAuthenticator(agent_credentials=agents),
-        search_config=make_search_config(),
-    )
-    return httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=create_app(app)), base_url="http://t"
-    )
-
-
 def _soon(days: int) -> str:
     return (datetime.now(UTC) + timedelta(days=days)).isoformat()
 
@@ -336,7 +318,7 @@ async def test_rest_sets_and_clears_a_phase_and_the_fleet_lists_it() -> None:
     store = MemoryStore(make_clock())
     fleet = await store.create_fleet("platform")
     until = _soon(5)
-    async with _client(store) as client:
+    async with make_store_client(store) as client:
         put = await client.put(
             f"/v1/admin/fleets/{fleet.id}/phase",
             json={"phase": "consolidate", "until": until},
@@ -368,7 +350,7 @@ async def test_rest_sets_and_clears_a_phase_and_the_fleet_lists_it() -> None:
 async def test_rest_refuses_a_bad_phase_with_422(body: dict[str, str]) -> None:
     store = MemoryStore(make_clock())
     fleet = await store.create_fleet("platform")
-    async with _client(store) as client:
+    async with make_store_client(store) as client:
         resp = await client.put(f"/v1/admin/fleets/{fleet.id}/phase", json=body, headers=ADMIN_H)
     assert resp.status_code == 422
     stored = await store.get_fleet(fleet.id)
@@ -381,7 +363,7 @@ async def test_rest_errors_for_unknown_merged_and_unauthorised() -> None:
     await store.merge_fleets(old.id, target_fleet_id=new.id, merged_by="admin:1")
     dev = Credential(user_id="dev", agent_name="dev", access_controlled=True)
     body = {"phase": "explore", "until": _soon(3)}
-    async with _client(store, {"dev-key": dev}) as client:
+    async with make_store_client(store, {"dev-key": dev}) as client:
         unknown = await client.put("/v1/admin/fleets/nope/phase", json=body, headers=ADMIN_H)
         merged = await client.put(f"/v1/admin/fleets/{old.id}/phase", json=body, headers=ADMIN_H)
         merged_clear = await client.delete(f"/v1/admin/fleets/{old.id}/phase", headers=ADMIN_H)
@@ -403,7 +385,7 @@ async def test_rest_whoami_and_pins_carry_the_phase_only_while_in_force() -> Non
     fleet = await store.create_fleet("platform")
     alice = _agent(fleet.id)
     until = datetime.now(UTC) + timedelta(days=4)
-    async with _client(store, {"alice-key": alice}) as client:
+    async with make_store_client(store, {"alice-key": alice}) as client:
         alice_h = {"X-API-Key": "alice-key"}
         bare_whoami = await client.get("/v1/whoami", headers=alice_h)
         bare_pins = await client.get("/v1/pins", headers=alice_h)
@@ -449,7 +431,7 @@ async def test_the_rest_and_mcp_replies_agree() -> None:
     alice = await _agent_in(world, fleet.id)
     until = datetime.now(UTC) + timedelta(days=4)
     await store.set_fleet_phase(fleet.id, FleetPhase(PhaseName.CONSOLIDATE, until))
-    async with _client(store, {"alice-key": alice}) as client:
+    async with make_store_client(store, {"alice-key": alice}) as client:
         rest = (await client.get("/v1/whoami", headers={"X-API-Key": "alice-key"})).json()
         rest_pins = (await client.get("/v1/pins", headers={"X-API-Key": "alice-key"})).json()
     mcp = await hive_whoami(_surface(world, alice))
@@ -471,7 +453,7 @@ async def test_the_usage_report_and_gauge_list_phases_in_force() -> None:
     await store.set_fleet_phase(
         ended.id, FleetPhase(PhaseName.CONSOLIDATE, datetime.now(UTC) - timedelta(minutes=1))
     )
-    async with _client(store) as client:
+    async with make_store_client(store) as client:
         report = (await client.get("/v1/metrics", headers=ADMIN_H)).json()
         scrape = (await client.get("/metrics")).text
     phases = report["fleets"]["phase_by_fleet"]
@@ -493,7 +475,7 @@ async def test_rest_reads_a_non_utc_until_as_the_utc_date_in_the_hint() -> None:
     end = (datetime.now(UTC) + timedelta(days=3)).replace(hour=1, minute=0, second=0, microsecond=0)
     local = end.astimezone(timezone(timedelta(hours=-5)))
     assert local.date() != end.date()
-    async with _client(store, {"alice-key": _agent(fleet.id)}) as client:
+    async with make_store_client(store, {"alice-key": _agent(fleet.id)}) as client:
         put = await client.put(
             f"/v1/admin/fleets/{fleet.id}/phase",
             json={"phase": "explore", "until": local.isoformat()},

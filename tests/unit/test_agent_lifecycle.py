@@ -7,22 +7,16 @@ transition is refused, so an agent never holds two keys at once.
 
 from __future__ import annotations
 
-import httpx
 import pytest
 
-from hivemind.api.deps import HivemindApp, create_app
-from hivemind.api.main import create_app_for_config
-from hivemind.config import Settings
 from hivemind.domain.access import AgentStatus, InvalidAgentStatus, TrustLevel
 from hivemind.domain.audit import ActorKind, AuditAction, AuditEvent, AuditFilters
-from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
 from tests.fakes import (
     FakeAuthenticator,
-    make_clock,
-    make_embedder,
-    make_search_config,
+    make_client,
+    make_rest_app,
     make_store,
 )
 
@@ -99,29 +93,13 @@ async def test_revoke_records_the_status_it_came_from() -> None:
 # -- over HTTP: status codes -------------------------------------------------
 
 
-def _app() -> HivemindApp:
-    return create_app_for_config(
-        Settings(),
-        store=MemoryStore(make_clock()),
-        embedder=make_embedder(),
-        authenticator=FakeAuthenticator(),
-        search_config=make_search_config(),
-    )
-
-
-def _client(app: HivemindApp) -> httpx.AsyncClient:
-    return httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=create_app(app)), base_url="http://hivemind.test"
-    )
-
-
 async def test_http_status_codes_for_refused_transitions() -> None:
-    app = _app()
+    app = make_rest_app()
     headers = {"X-API-Key": "hm_admin"}
     await app.store.register_agent("alice")
     fleet = await app.store.create_fleet("data-eng")
     body = {"trust_level": 1, "home_fleet_id": fleet.id}
-    async with _client(app) as client:
+    async with make_client(app) as client:
         ok = await client.post("/v1/admin/agents/alice/activate", json=body, headers=headers)
         again = await client.post("/v1/admin/agents/alice/activate", json=body, headers=headers)
         revoked = await client.post("/v1/admin/agents/alice/revoke", headers=headers)
@@ -140,13 +118,13 @@ async def test_http_status_codes_for_refused_transitions() -> None:
 
 
 async def test_http_audit_log_pages_back_with_before() -> None:
-    app = _app()
+    app = make_rest_app()
     headers = {"X-API-Key": "hm_admin"}
     for n in range(5):
         await app.store.record_audit(
             AuditEvent(ActorKind.CLI, "john", AuditAction.FLEET_CREATE, f"f{n}")
         )
-    async with _client(app) as client:
+    async with make_client(app) as client:
         first = (
             await client.get("/v1/admin/audit-log", params={"limit": 2}, headers=headers)
         ).json()

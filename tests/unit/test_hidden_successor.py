@@ -9,7 +9,6 @@ import httpx
 from hivemind.api.deps import create_app
 from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
-from hivemind.domain.access import TrustLevel
 from hivemind.domain.entry import Entry, EntryDraft, EntryFilters, EntryState
 from hivemind.mcp.app import McpHivemind, hive_get, hive_list
 from hivemind.memstore import MemoryStore
@@ -19,25 +18,19 @@ from hivemind.services.governance import GovernanceService
 from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
 from hivemind.services.write import WriteService
-from tests.fakes import FakeAuthenticator, make_clock, make_embedder, make_search_config
-
-
-def _agent(name: str, fleet: str) -> Credential:
-    return Credential(
-        user_id=name,
-        agent_id=name,
-        agent_name=name,
-        access_controlled=True,
-        trust_level=TrustLevel.CONTRIBUTOR,
-        home_fleet_id=fleet,
-    )
-
+from tests.fakes import (
+    FakeAuthenticator,
+    agent_credential,
+    make_clock,
+    make_embedder,
+    make_search_config,
+)
 
 # A wrote E in fleet-1, then moved to fleet-2 (still reads E as its own);
 # B in fleet-1 superseded E with S, which A cannot read.
-A = _agent("alice", "fleet-2")
-B = _agent("bob", "fleet-1")
-C = _agent("carol", "fleet-1")
+A = agent_credential("alice", "fleet-2")
+B = agent_credential("bob", "fleet-1")
+C = agent_credential("carol", "fleet-1")
 
 
 async def _world() -> tuple[MemoryStore, Entry, Entry, Entry]:

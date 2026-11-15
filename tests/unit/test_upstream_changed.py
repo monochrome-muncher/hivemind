@@ -21,12 +21,13 @@ from hivemind.services.search import SearchService
 from tests.fakes import (
     FIXED_NOW,
     FixedClock,
+    make_agent_client,
     make_clock,
     make_embedder,
     make_search_config,
     mcp_surface,
 )
-from tests.unit.test_readable_feedback import WRITER, _rest_client
+from tests.unit.test_readable_feedback import WRITER
 
 T0 = datetime(2026, 9, 1, tzinfo=UTC)
 VEC = [0.1, 0.1, 0.1, 0.1]
@@ -352,13 +353,13 @@ async def test_mcp_plain_hit_has_no_upstream_field() -> None:
 
 async def test_rest_hit_lists_the_change_and_is_null_when_empty() -> None:
     store, base = await _withdrawn_upstream()
-    async with _rest_client(store, WRITER) as client:
+    async with make_agent_client(store, WRITER) as client:
         hits = (await client.post("/v1/search", json={"query": "billing node build"})).json()
     built = next(h for h in hits if h["summary"] == "billing node build")
     assert built["upstream_changed"] == [{"id": base, "change": "withdrawn"}]
 
     plain = MemoryStore(make_clock())
     await _put(plain, "billing node build", scope="org")
-    async with _rest_client(plain, WRITER) as client:
+    async with make_agent_client(plain, WRITER) as client:
         [hit] = (await client.post("/v1/search", json={"query": "billing node build"})).json()
     assert hit["upstream_changed"] is None

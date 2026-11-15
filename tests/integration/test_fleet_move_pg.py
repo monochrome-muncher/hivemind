@@ -8,63 +8,16 @@ import asyncio
 
 import asyncpg
 import pytest
-from tests.fakes import FakeEmbedder, make_search_config
-from tests.pg import ensure_migrated, reset_tables, wait_until_blocked
+from tests.pg import fleet_draft, pg_surface, wait_until_blocked
 
-from hivemind.config import Settings
 from hivemind.domain.access import FleetBusy, TrustLevel
 from hivemind.domain.audit import AuditFilters
-from hivemind.domain.entry import EntryDraft, Kind
 from hivemind.domain.fleet_merge import FleetMoveRefused
-from hivemind.mcp.app import McpHivemind, hive_get, hive_list, hive_whoami, hive_write
-from hivemind.ports import Credential
+from hivemind.mcp.app import hive_get, hive_list, hive_whoami, hive_write
 from hivemind.services.access import AccessService
-from hivemind.services.governance import GovernanceService
-from hivemind.services.read import ReadService
-from hivemind.services.search import SearchService
-from hivemind.services.write import WriteService
-from hivemind.store import PgAuthenticator, PgStore
+from hivemind.store import PgStore
 from hivemind.store.keys import _issue_admin
 from hivemind.store.pgstore import fleet_guards
-
-
-@pytest.fixture
-async def pool():
-    dsn = Settings().database_url
-    await ensure_migrated(dsn, Settings().embedding_dim)
-    await reset_tables(dsn)
-    store, auth = PgStore(dsn), PgAuthenticator(dsn)
-    try:
-        yield dsn, store, auth
-    finally:
-        await store.close()
-        await auth.close()
-
-
-def _draft(fleet_id: str, summary: str, author: str) -> EntryDraft:
-    return EntryDraft(
-        kind=Kind.FACT,
-        summary=summary,
-        author=author,
-        agent=author,
-        scope="fleet",
-        fleet_id=fleet_id,
-    )
-
-
-def _surface(store: PgStore, credential: Credential) -> McpHivemind:
-    embedder = FakeEmbedder(dimension=Settings().embedding_dim)
-    config = make_search_config()
-    return McpHivemind(
-        read_service=ReadService(store, GovernanceService(store), config),
-        store=store,
-        write_service=WriteService(store, embedder),
-        search_service=SearchService(store, embedder, config),
-        governance_service=GovernanceService(store),
-        access_service=AccessService(store),
-        search_config=config,
-        credential=credential,
-    )
 
 
 async def _count(dsn: str, fleet_id: str, author: str | None = None) -> int:
@@ -96,7 +49,7 @@ async def test_a_write_that_resolved_the_old_home_before_the_move_cannot_land_in
 ) -> None:
     dsn, store, _ = pool
     source, target = await _fleets_and_agents(store)
-    stale = _draft(source, "resolved before the move", "amy")  # names the old home fleet
+    stale = fleet_draft(source, "resolved before the move", "amy")  # names the old home fleet
 
     await store.move_agents(source, ["amy"], target_fleet_id=target, moved_by="admin:1")
 
@@ -104,7 +57,7 @@ async def test_a_write_that_resolved_the_old_home_before_the_move_cannot_land_in
         await store.create_entry(stale, None)
     assert await _count(dsn, source) == 0
     # The stayer's writes into the source go on as before.
-    await store.create_entry(_draft(source, "bob goes on", "bob"), None)
+    await store.create_entry(fleet_draft(source, "bob goes on", "bob"), None)
     assert await _count(dsn, source, "bob") == 1
 
 
@@ -119,8 +72,10 @@ async def test_a_write_in_flight_across_the_move_waits_and_is_then_refused(pool)
         "SELECT 1 FROM fleets WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE", [source, target]
     )
     await move.execute("UPDATE agents SET home_fleet_id = $1 WHERE name = 'amy'", target)
-    write = asyncio.create_task(store.create_entry(_draft(source, "in flight", "amy"), None))
-    stayer = asyncio.create_task(store.create_entry(_draft(source, "bob in flight", "bob"), None))
+    write = asyncio.create_task(store.create_entry(fleet_draft(source, "in flight", "amy"), None))
+    stayer = asyncio.create_task(
+        store.create_entry(fleet_draft(source, "bob in flight", "bob"), None)
+    )
     await wait_until_blocked(dsn, 2)
     assert not write.done() and not stayer.done()  # both wait on the source row
     await tx.commit()
@@ -146,7 +101,7 @@ async def test_a_write_into_the_target_waits_for_the_move_too(
     try:
         started = asyncio.get_running_loop().time()
         with pytest.raises(FleetBusy):
-            await store.create_entry(_draft(target, "waits too long", "cat"), None)
+            await store.create_entry(fleet_draft(target, "waits too long", "cat"), None)
         # It waited out the lock timeout (not a fast failure), then gave up.
         assert 0.25 <= asyncio.get_running_loop().time() - started < 2
     finally:
@@ -185,7 +140,7 @@ async def test_writers_racing_a_move_never_leave_a_mover_entry_in_the_source(poo
 
     async def write(author: str, i: int) -> str:
         try:
-            await store.create_entry(_draft(source, f"{author}{i}", author), None)
+            await store.create_entry(fleet_draft(source, f"{author}{i}", author), None)
             return "ok"
         except FleetBusy:
             return "busy"
@@ -208,7 +163,7 @@ async def test_a_move_and_a_home_fleet_change_of_a_mover_never_disagree(pool) ->
     dsn, store, _ = pool
     source, target = await _fleets_and_agents(store)
     other = (await store.create_fleet("c")).id
-    await store.create_entry(_draft(source, "amy's", "amy"), None)
+    await store.create_entry(fleet_draft(source, "amy's", "amy"), None)
     results = await asyncio.gather(
         store.move_agents(source, ["amy"], target_fleet_id=target, moved_by="admin:1"),
         store.set_agent_home_fleet("amy", other),
@@ -240,15 +195,15 @@ async def test_agents_read_what_they_wrote_with_the_same_key_after_the_move(pool
     amy = await auth.verify(keys["amy"])
     ann = await auth.verify(keys["ann"])
     assert amy is not None and ann is not None
-    mine = await hive_write(_surface(store, amy), kind="fact", summary="amy's alpha knowledge")
-    await hive_write(_surface(store, ann), kind="fact", summary="ann's alpha knowledge")
+    mine = await hive_write(pg_surface(store, amy), kind="fact", summary="amy's alpha knowledge")
+    await hive_write(pg_surface(store, ann), kind="fact", summary="ann's alpha knowledge")
 
     out = await access.merges.move(a.id, ["amy"], admin, target_fleet_id=b.id)
     assert out.entries_moved == 1 and out.entries_held_back == 0
 
     amy_again = await auth.verify(keys["amy"])  # the same key, no credential cache
     assert amy_again is not None and amy_again.home_fleet_id == b.id
-    surface = _surface(store, amy_again)
+    surface = pg_surface(store, amy_again)
     assert (await hive_get(surface, entry_id=str(mine["id"])))["summary"] == "amy's alpha knowledge"
     listed = await hive_list(surface)
     assert {e["summary"] for e in listed["entries"]} == {"amy's alpha knowledge"}  # type: ignore[attr-defined, union-attr]
@@ -258,7 +213,7 @@ async def test_agents_read_what_they_wrote_with_the_same_key_after_the_move(pool
     # The stayer no longer sees what amy wrote, and still sees her own.
     ann_again = await auth.verify(keys["ann"])
     assert ann_again is not None
-    seen = await hive_list(_surface(store, ann_again))
+    seen = await hive_list(pg_surface(store, ann_again))
     assert {e["summary"] for e in seen["entries"]} == {"ann's alpha knowledge"}  # type: ignore[attr-defined, union-attr]
 
 
@@ -271,13 +226,13 @@ async def test_undo_after_later_writes_and_the_audit_trail(pool) -> None:
     for name in ("amy", "ann"):
         await store.register_agent(name)
         await access.activate(name, TrustLevel.CONTRIBUTOR, a.id, admin)
-    v1 = await store.create_entry(_draft(a.id, "v1", "amy"), None)
-    pinned = await store.create_entry(_draft(a.id, "pinned", "amy"), None)
+    v1 = await store.create_entry(fleet_draft(a.id, "v1", "amy"), None)
+    pinned = await store.create_entry(fleet_draft(a.id, "pinned", "amy"), None)
     await store.pin_entry(a.id, pinned.id, "ann", 10)  # a stayer's pin on amy's memory
-    anns = await store.create_entry(_draft(a.id, "ann's", "ann"), None)
+    anns = await store.create_entry(fleet_draft(a.id, "ann's", "ann"), None)
 
     out = await access.merges.move(a.id, ["amy"], admin, target_fleet_id=b.id)
-    late = await store.create_entry(_draft(b.id, "written after", "amy"), None)
+    late = await store.create_entry(fleet_draft(b.id, "written after", "amy"), None)
     assert [p.entry_id for p in await store.list_pins(b.id)] == [pinned.id]
 
     undone = await access.merges.undo(out.record.id, admin)

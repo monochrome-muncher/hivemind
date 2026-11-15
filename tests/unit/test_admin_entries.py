@@ -17,8 +17,8 @@ from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.errors import PermissionDenied
 from hivemind.services.feedback import FeedbackService
-from tests.fakes import FIXED_NOW, FixedClock, make_embedder
-from tests.unit.test_api_endpoints import make_app_with_clock, make_client, make_hivemind_app
+from tests.fakes import FIXED_NOW, FixedClock, make_client, make_embedder
+from tests.unit.test_api_endpoints import make_app_with_clock, make_hivemind_app
 
 ADMIN = {"X-API-Key": "key-admin"}
 ADMIN_CRED = Credential(user_id="admin", is_admin=True, key_id="abcdef012345")

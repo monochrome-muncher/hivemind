@@ -17,8 +17,8 @@ from hivemind.domain.entry import EntryDraft, Kind, Source, SourceType
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.memstore import MemoryStore
 from hivemind.services.metrics import MetricsService
-from tests.fakes import make_clock
-from tests.unit.test_api_endpoints import make_client, make_hivemind_app
+from tests.fakes import make_client, make_clock
+from tests.unit.test_api_endpoints import make_hivemind_app
 
 VEC = [0.1, 0.1, 0.1, 0.1]
 ADMIN = {"X-API-Key": "key-admin"}

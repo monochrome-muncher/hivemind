@@ -6,53 +6,22 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-import httpx
-
-from hivemind.api.deps import create_app
-from hivemind.api.main import create_app_for_config
-from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
 from hivemind.domain.feedback import FEEDBACK_RECENT_LIMIT, Feedback, Verdict
 from hivemind.mcp.app import hive_feedback, hive_get, hive_search, hive_write
 from hivemind.memstore import MemoryStore
-from hivemind.ports import Credential
 from tests.fakes import (
-    FakeAuthenticator,
+    agent_credential,
+    make_agent_client,
     make_clock,
-    make_embedder,
-    make_search_config,
     mcp_surface,
 )
 
-
-def _agent(name: str, fleet: str, level: TrustLevel) -> Credential:
-    return Credential(
-        user_id=name,
-        agent_id=name,
-        agent_name=name,
-        access_controlled=True,
-        trust_level=level,
-        home_fleet_id=fleet,
-    )
-
-
-WRITER = _agent("writer", "fleet-a", TrustLevel.CONTRIBUTOR)
-LURKER = _agent("lurker", "fleet-a", TrustLevel.LURKER)
-OUTSIDER = _agent("outsider", "fleet-b", TrustLevel.CONTRIBUTOR)
+WRITER = agent_credential("writer", "fleet-a", TrustLevel.CONTRIBUTOR)
+LURKER = agent_credential("lurker", "fleet-a", TrustLevel.LURKER)
+OUTSIDER = agent_credential("outsider", "fleet-b", TrustLevel.CONTRIBUTOR)
 
 T0 = datetime(2026, 9, 1, tzinfo=UTC)
-
-
-def _rest_client(store: MemoryStore, credential: Credential) -> httpx.AsyncClient:
-    app = create_app_for_config(
-        Settings(),
-        store=store,
-        embedder=make_embedder(),
-        authenticator=FakeAuthenticator(agent_credentials={"k": credential}),
-        search_config=make_search_config(),
-    )
-    transport = httpx.ASGITransport(app=create_app(app))
-    return httpx.AsyncClient(transport=transport, base_url="http://t", headers={"X-API-Key": "k"})
 
 
 async def _flagged_entry(store: MemoryStore) -> str:
@@ -81,7 +50,7 @@ async def test_mcp_hit_without_feedback_leaves_the_counts_out() -> None:
 async def test_rest_hit_without_feedback_is_null() -> None:
     store = MemoryStore(make_clock())
     await hive_write(mcp_surface(store, WRITER), kind="fact", summary="billing runs on node 20")
-    async with _rest_client(store, WRITER) as client:
+    async with make_agent_client(store, WRITER) as client:
         resp = await client.post("/v1/search", json={"query": "billing node"})
     [hit] = resp.json()
     assert hit["feedback"] is None
@@ -98,7 +67,7 @@ async def test_mcp_hit_carries_feedback_counts() -> None:
 async def test_rest_hit_carries_feedback_counts() -> None:
     store = MemoryStore(make_clock())
     await _flagged_entry(store)
-    async with _rest_client(store, WRITER) as client:
+    async with make_agent_client(store, WRITER) as client:
         resp = await client.post("/v1/search", json={"query": "billing node"})
     [hit] = resp.json()
     assert hit["feedback"] == {"helpful": 0, "stale": 1, "wrong": 0}
@@ -129,7 +98,7 @@ async def test_mcp_get_shows_another_agents_note() -> None:
 async def test_rest_get_shows_another_agents_note() -> None:
     store = MemoryStore(make_clock())
     entry_id = await _flagged_entry(store)
-    async with _rest_client(store, WRITER) as client:
+    async with make_agent_client(store, WRITER) as client:
         resp = await client.get(f"/v1/entries/{entry_id}")
     feedback = resp.json()["feedback"]
     assert (feedback["helpful"], feedback["stale"], feedback["wrong"]) == (0, 1, 0)
@@ -178,7 +147,7 @@ async def test_get_keeps_a_correction_after_five_later_helpful_reports() -> None
     entry_id = await _flagged_entry(store)
     for i in range(FEEDBACK_RECENT_LIMIT):
         await hive_feedback(
-            mcp_surface(store, _agent(f"fan-{i}", "fleet-a", TrustLevel.LURKER)),
+            mcp_surface(store, agent_credential(f"fan-{i}", "fleet-a", TrustLevel.LURKER)),
             entry_id,
             verdict="helpful",
         )
@@ -206,7 +175,7 @@ async def test_feedback_stays_with_the_entrys_audience() -> None:
     entry_id = await _flagged_entry(store)
     result = await hive_get(mcp_surface(store, OUTSIDER), entry_id)
     assert result.get("error", {}).get("code") == "not_found"  # type: ignore[union-attr]
-    async with _rest_client(store, OUTSIDER) as client:
+    async with make_agent_client(store, OUTSIDER) as client:
         resp = await client.get(f"/v1/entries/{entry_id}")
     assert resp.status_code == 404
 
@@ -236,7 +205,7 @@ async def test_notes_are_stored_trimmed_and_a_blank_note_is_none() -> None:
     await hive_feedback(
         mcp_surface(store, LURKER), entry["id"], verdict="helpful", note="\u00a0 \u0085"
     )
-    peer = _agent("peer", "fleet-a", TrustLevel.CONTRIBUTOR)
+    peer = agent_credential("peer", "fleet-a", TrustLevel.CONTRIBUTOR)
     await hive_feedback(mcp_surface(store, peer), entry["id"], verdict="helpful", note=" ok ")
     rows = {fb.agent: fb.note for fb in await store.list_feedback(str(entry["id"]), 10)}
     assert rows == {"lurker": None, "peer": "ok"}

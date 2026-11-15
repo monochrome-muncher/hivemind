@@ -12,29 +12,17 @@ from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
 from hivemind.mcp.app import hive_search, hive_write
 from hivemind.memstore import MemoryStore
-from hivemind.ports import Credential
 from tests.fakes import (
     FakeAuthenticator,
+    agent_credential,
     make_clock,
     make_embedder,
     make_search_config,
     mcp_surface,
 )
 
-
-def _agent(name: str, fleet: str, level: TrustLevel) -> Credential:
-    return Credential(
-        user_id=name,
-        agent_id=name,
-        agent_name=name,
-        access_controlled=True,
-        trust_level=level,
-        home_fleet_id=fleet,
-    )
-
-
-WRITER = _agent("writer", "fleet-b", TrustLevel.CONTRIBUTOR)
-READER = _agent("reader", "fleet-a", TrustLevel.PRIVILEGED)
+WRITER = agent_credential("writer", "fleet-b", TrustLevel.CONTRIBUTOR)
+READER = agent_credential("reader", "fleet-a", TrustLevel.PRIVILEGED)
 
 
 async def test_mcp_hits_show_scope_and_fleet() -> None:

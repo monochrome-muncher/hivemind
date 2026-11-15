@@ -19,8 +19,8 @@ from hivemind.memstore import MemoryStore
 from hivemind.retrieval.mmr import mmr_order
 from hivemind.services.metrics import MetricsService
 from hivemind.services.search import SearchService
-from tests.fakes import make_clock, make_embedder
-from tests.unit.test_api_endpoints import make_client, make_hivemind_app, post_entry
+from tests.fakes import make_client, make_clock, make_embedder
+from tests.unit.test_api_endpoints import make_hivemind_app, post_entry
 from tests.unit.test_mcp_app import ALICE, build_app
 from tests.unit.test_prometheus import samples
 

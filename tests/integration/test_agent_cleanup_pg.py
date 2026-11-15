@@ -11,9 +11,8 @@ from datetime import UTC, datetime
 import asyncpg
 import pytest
 from tests.fakes import FakeAuthenticator
-from tests.pg import ensure_migrated, reset_tables, wait_until_blocked
+from tests.pg import wait_until_blocked
 
-from hivemind.config import Settings
 from hivemind.domain.access import AgentStatus, TrustLevel
 from hivemind.domain.agent_cleanup import AgentCleanupRefused, cleanup_reason
 from hivemind.domain.audit import AuditAction, AuditFilters
@@ -28,18 +27,6 @@ from hivemind.store.pgstore import agent_cleanup as pgstore_cleanup
 SINCE = datetime(2020, 1, 1, tzinfo=UTC)
 UNTIL = datetime(2100, 1, 1, tzinfo=UTC)
 ADMIN = Credential(user_id="admin", is_admin=True, key_id="abcdef012345")
-
-
-@pytest.fixture
-async def pool():
-    dsn = Settings().database_url
-    await ensure_migrated(dsn, Settings().embedding_dim)
-    await reset_tables(dsn)
-    store = PgStore(dsn)
-    try:
-        yield dsn, store
-    finally:
-        await store.close()
 
 
 def _draft(summary: str, author: str = "bad", **kwargs: object) -> EntryDraft:
@@ -65,11 +52,11 @@ async def _row(dsn: str, sql: str, *args: object):  # type: ignore[no-untyped-de
         await conn.close()
 
 
-async def test_a_concurrent_supersede_of_a_junk_memory_is_not_overwritten(pool) -> None:
+async def test_a_concurrent_supersede_of_a_junk_memory_is_not_overwritten(store_pool) -> None:
     """The cleanup waits for a writer that holds a junk memory's row, then reads
     what the writer left: a memory superseded in the meantime is no longer
     active, so it is not withdrawn (and its successor is not undone)."""
-    dsn, store = pool
+    dsn, store = store_pool
     keep = await _entry(store, "kept")
     taken = await _entry(store, "taken by a supersede")
     writer = await asyncpg.connect(dsn)
@@ -97,8 +84,8 @@ async def test_a_concurrent_supersede_of_a_junk_memory_is_not_overwritten(pool) 
     assert (row["state"], str(row["superseded_by"])) == ("superseded", str(successor))
 
 
-async def test_an_agents_rating_in_flight_waits_and_then_counts_again(pool) -> None:
-    dsn, store = pool
+async def test_an_agents_rating_in_flight_waits_and_then_counts_again(store_pool) -> None:
+    dsn, store = store_pool
     target = await _entry(store, "target", "good")
     await store.record_feedback(Feedback(target, "bad", "a", Verdict.WRONG, "n"))
     rater = await asyncpg.connect(dsn)
@@ -122,8 +109,8 @@ async def test_an_agents_rating_in_flight_waits_and_then_counts_again(pool) -> N
     assert row["verdict"] == "stale"
 
 
-async def test_a_rating_after_the_cleanup_clears_the_mark_in_the_database(pool) -> None:
-    dsn, store = pool
+async def test_a_rating_after_the_cleanup_clears_the_mark_in_the_database(store_pool) -> None:
+    dsn, store = store_pool
     target = await _entry(store, "target", "good")
     await store.record_feedback(Feedback(target, "bad", "a", Verdict.WRONG, "n"))
     out = await store.cleanup_agent("bad", SINCE, UNTIL, cleaned_by="admin:1")
@@ -135,8 +122,8 @@ async def test_a_rating_after_the_cleanup_clears_the_mark_in_the_database(pool) 
     assert await store.feedback_counts(target) == (0, 1, 0)
 
 
-async def test_two_cleanups_of_one_agent_at_once_never_withdraw_a_memory_twice(pool) -> None:
-    _, store = pool
+async def test_two_cleanups_of_one_agent_at_once_never_withdraw_a_memory_twice(store_pool) -> None:
+    _, store = store_pool
     ids = {await _entry(store, f"junk {i}") for i in range(30)}
     first, second = await asyncio.gather(
         store.cleanup_agent("bad", SINCE, UNTIL, cleaned_by="admin:1"),
@@ -148,8 +135,8 @@ async def test_two_cleanups_of_one_agent_at_once_never_withdraw_a_memory_twice(p
     assert len(await store.list_agent_cleanups(10)) == 1
 
 
-async def test_cleanups_of_different_agents_do_not_wait_on_each_other(pool) -> None:
-    _, store = pool
+async def test_cleanups_of_different_agents_do_not_wait_on_each_other(store_pool) -> None:
+    _, store = store_pool
     await _entry(store, "bad junk", "bad")
     await _entry(store, "worse junk", "worse")
     first, second = await asyncio.gather(
@@ -159,11 +146,11 @@ async def test_cleanups_of_different_agents_do_not_wait_on_each_other(pool) -> N
     assert (first.withdrawn, second.withdrawn) == (1, 1)
 
 
-async def test_the_agent_writing_while_it_is_cleaned_never_gets_a_half_state(pool) -> None:
+async def test_the_agent_writing_while_it_is_cleaned_never_gets_a_half_state(store_pool) -> None:
     """Writers keep writing while a cleanup runs. Every memory ends up either
     withdrawn by that cleanup (in its record) or active (written after its
     read), and an undo brings back exactly the recorded ones."""
-    dsn, store = pool
+    dsn, store = store_pool
     for i in range(20):
         await _entry(store, f"early {i}")
     writers = [asyncio.create_task(_entry(store, f"racing {i}")) for i in range(40)]
@@ -184,8 +171,8 @@ async def test_the_agent_writing_while_it_is_cleaned_never_gets_a_half_state(poo
     assert rows["n"] == 20 + len(written)
 
 
-async def test_a_cleanup_racing_the_agents_ratings_keeps_every_row(pool) -> None:
-    dsn, store = pool
+async def test_a_cleanup_racing_the_agents_ratings_keeps_every_row(store_pool) -> None:
+    dsn, store = store_pool
     targets = [await _entry(store, f"t{i}", "good") for i in range(20)]
     for t in targets:
         await store.record_feedback(Feedback(t, "bad", "a", Verdict.WRONG, "n"))
@@ -208,9 +195,9 @@ async def test_a_cleanup_racing_the_agents_ratings_keeps_every_row(pool) -> None
 
 
 async def test_a_lock_that_cannot_be_had_is_refused_not_waited_for_forever(
-    pool, monkeypatch: pytest.MonkeyPatch
+    store_pool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    dsn, store = pool
+    dsn, store = store_pool
     junk = await _entry(store, "junk")
     monkeypatch.setattr(
         pgstore_cleanup,
@@ -236,8 +223,8 @@ async def test_a_lock_that_cannot_be_had_is_refused_not_waited_for_forever(
     assert out.withdrawn == 1
 
 
-async def test_undo_leaves_a_memory_whose_withdrawal_is_no_longer_this_cleanups(pool) -> None:
-    dsn, store = pool
+async def test_undo_leaves_a_memory_whose_withdrawal_is_no_longer_this_cleanups(store_pool) -> None:
+    dsn, store = store_pool
     one, two = await _entry(store, "junk one"), await _entry(store, "junk two")
     out = await store.cleanup_agent("bad", SINCE, UNTIL, cleaned_by="admin:1")
     assert out.record is not None
@@ -256,8 +243,10 @@ async def test_undo_leaves_a_memory_whose_withdrawal_is_no_longer_this_cleanups(
     assert (row["state"], row["withdrawn_reason"], row["withdrawn_at"]) == ("active", None, None)
 
 
-async def test_the_cleanup_sets_withdrawn_at_and_the_reason_like_a_normal_withdraw(pool) -> None:
-    dsn, store = pool
+async def test_the_cleanup_sets_withdrawn_at_and_the_reason_like_a_normal_withdraw(
+    store_pool,
+) -> None:
+    dsn, store = store_pool
     junk = await _entry(store, "junk")
     out = await store.cleanup_agent("bad", SINCE, UNTIL, cleaned_by="admin:1")
     assert out.record is not None
@@ -269,9 +258,9 @@ async def test_the_cleanup_sets_withdrawn_at_and_the_reason_like_a_normal_withdr
 
 
 async def test_the_preview_cuts_its_lists_and_keeps_exact_totals(
-    pool, monkeypatch: pytest.MonkeyPatch
+    store_pool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _, store = pool
+    _, store = store_pool
     monkeypatch.setattr(pgstore_cleanup, "PREVIEW_WITHDRAW_LIMIT", 3)
     monkeypatch.setattr(pgstore_cleanup, "PREVIEW_RESTORE_LIMIT", 2)
     kept = [await _entry(store, f"good {i}", "good") for i in range(4)]
@@ -284,8 +273,8 @@ async def test_the_preview_cuts_its_lists_and_keeps_exact_totals(
     assert (len(scan.restorable), scan.restorable_total) == (2, 4)
 
 
-async def test_through_the_services_with_the_revoke_and_the_audit_rows(pool) -> None:
-    _, store = pool
+async def test_through_the_services_with_the_revoke_and_the_audit_rows(store_pool) -> None:
+    _, store = store_pool
     access = AccessService(store, FakeAuthenticator(store=store))
     fleet = await store.create_fleet("alpha")
     for name in ("bad", "good"):
@@ -347,11 +336,13 @@ async def test_through_the_services_with_the_revoke_and_the_audit_rows(pool) -> 
 # -- the agent cleans up its own work from the portal (ADR 0118) ------------------------
 
 
-async def test_a_self_service_and_an_admin_cleanup_of_an_owned_author_never_overlap(pool) -> None:
+async def test_a_self_service_and_an_admin_cleanup_of_an_owned_author_never_overlap(
+    store_pool,
+) -> None:
     """The portal cleanup of the successor takes the lock of every author it
     owns, so it waits for an admin cleanup of the retired agent: each memory is
     withdrawn by exactly one of the two records."""
-    _, store = pool
+    _, store = store_pool
     ids = {await _entry(store, f"old junk {i}", "old") for i in range(20)}
     ids |= {await _entry(store, f"successor junk {i}", "successor") for i in range(20)}
     own, admin = await asyncio.gather(
@@ -375,8 +366,8 @@ async def test_a_self_service_and_an_admin_cleanup_of_an_owned_author_never_over
             assert (await store.get_entry(entry_id)).withdrawn_reason == reason  # type: ignore[union-attr]
 
 
-async def test_the_portal_cleanup_through_the_services(pool) -> None:
-    _, store = pool
+async def test_the_portal_cleanup_through_the_services(store_pool) -> None:
+    _, store = store_pool
     access = AccessService(store, FakeAuthenticator(store=store))
     fleet = await store.create_fleet("alpha")
     for name in ("successor", "old", "good"):
@@ -441,10 +432,10 @@ async def test_the_portal_cleanup_through_the_services(pool) -> None:
     assert undo_row.detail["via"] == "portal" and undo_row.actor == "successor"
 
 
-async def test_a_dormant_level_0_agent_cannot_use_the_portal_cleanup(pool) -> None:
+async def test_a_dormant_level_0_agent_cannot_use_the_portal_cleanup(store_pool) -> None:
     """SPEC §12.2: at level 0 the agent can do nothing, so the preview does not
     list its memories and the apply and undo change nothing."""
-    _, store = pool
+    _, store = store_pool
     access = AccessService(store, FakeAuthenticator(store=store))
     fleet = await store.create_fleet("alpha")
     await store.register_agent("dormant")
@@ -472,11 +463,11 @@ async def test_a_dormant_level_0_agent_cannot_use_the_portal_cleanup(pool) -> No
     assert (await store.get_entry(mine)).state is EntryState.ACTIVE  # type: ignore[union-attr]
 
 
-async def test_an_undo_waits_for_the_cleanup_lock_of_each_author_it_withdrew(pool) -> None:
+async def test_an_undo_waits_for_the_cleanup_lock_of_each_author_it_withdrew(store_pool) -> None:
     """Undoing a self-service cleanup takes the lock of every author whose
     memories it withdrew, so it cannot interleave with an admin cleanup of the
     retired agent: whatever the order, nothing is left half-way."""
-    _, store = pool
+    _, store = store_pool
     ids = [await _entry(store, f"old junk {i}", "old") for i in range(10)]
     ids += [await _entry(store, f"successor junk {i}", "successor") for i in range(10)]
     own = await store.cleanup_agent(

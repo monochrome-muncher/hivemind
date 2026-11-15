@@ -14,8 +14,8 @@ from hivemind.domain.audit import ActorKind, AuditAction, AuditFilters
 from hivemind.domain.entry import EntryDraft, EntryState, Kind
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.ports import Credential
-from tests.fakes import FIXED_NOW, make_embedder
-from tests.unit.test_api_endpoints import make_client, make_hivemind_app
+from tests.fakes import FIXED_NOW, make_client, make_embedder
+from tests.unit.test_api_endpoints import make_hivemind_app
 
 ADMIN = {"X-API-Key": "key-admin"}
 ORG = {"X-API-Key": "key-org"}

@@ -6,12 +6,8 @@ the agent record is untouched; the audit row holds fingerprints, never a key.
 
 from __future__ import annotations
 
-import httpx
 import pytest
 
-from hivemind.api.deps import HivemindApp, create_app
-from hivemind.api.main import create_app_for_config
-from hivemind.config import Settings
 from hivemind.domain.access import AgentStatus, InvalidAgentStatus, TrustLevel, UnknownAgent
 from hivemind.domain.audit import AuditAction, AuditFilters
 from hivemind.ports import Credential
@@ -20,8 +16,8 @@ from hivemind.services.errors import PermissionDenied
 from tests.fakes import (
     FakeAuthenticator,
     fake_key_id,
-    make_embedder,
-    make_search_config,
+    make_client,
+    make_rest_app,
     make_store,
 )
 
@@ -100,30 +96,13 @@ async def test_the_audit_row_has_both_fingerprints_and_no_key() -> None:
 # -- over HTTP ---------------------------------------------------------------
 
 
-def _app() -> HivemindApp:
-    store = make_store()
-    return create_app_for_config(
-        Settings(),
-        store=store,
-        embedder=make_embedder(),
-        authenticator=FakeAuthenticator(store=store),
-        search_config=make_search_config(),
-    )
-
-
-def _client(app: HivemindApp) -> httpx.AsyncClient:
-    return httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=create_app(app)), base_url="http://hivemind.test"
-    )
-
-
 async def test_http_replace_status_codes_and_the_key_in_the_body() -> None:
-    app = _app()
+    app = make_rest_app(bind_store=True)
     admin = {"X-API-Key": "hm_admin"}
     await app.store.register_agent("alice")
     fleet = await app.store.create_fleet("data-eng")
     body = {"trust_level": 1, "home_fleet_id": fleet.id}
-    async with _client(app) as client:
+    async with make_client(app) as client:
         pending = await client.post("/v1/admin/agents/alice/key", headers=admin)
         issued = await client.post("/v1/admin/agents/alice/activate", json=body, headers=admin)
         org = await client.post("/v1/admin/agents/alice/key", headers={"X-API-Key": "hm_org"})

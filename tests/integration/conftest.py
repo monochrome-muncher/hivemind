@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 
 import pytest
 import yoyo.migrations
+from tests.pg import ensure_migrated, reset_tables
+
+from hivemind.config import Settings
+from hivemind.store import PgAuthenticator, PgStore
 
 _parsed: dict[tuple[str, int, int], tuple[dict[str, str], str, list[str]]] = {}
 _read_sql_migration = yoyo.migrations.read_sql_migration
@@ -42,3 +46,30 @@ def _parse_each_migration_file_once() -> Iterator[None]:
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(yoyo.migrations, "read_sql_migration", _read_sql_migration_once)
         yield
+
+
+@pytest.fixture
+async def pool() -> AsyncIterator[tuple[str, PgStore, PgAuthenticator]]:
+    """A migrated, emptied database: its DSN, a store and an authenticator on it."""
+    dsn = Settings().database_url
+    await ensure_migrated(dsn, Settings().embedding_dim)
+    await reset_tables(dsn)
+    store, auth = PgStore(dsn), PgAuthenticator(dsn)
+    try:
+        yield dsn, store, auth
+    finally:
+        await store.close()
+        await auth.close()
+
+
+@pytest.fixture
+async def store_pool() -> AsyncIterator[tuple[str, PgStore]]:
+    """A migrated, emptied database: its DSN and a store on it."""
+    dsn = Settings().database_url
+    await ensure_migrated(dsn, Settings().embedding_dim)
+    await reset_tables(dsn)
+    store = PgStore(dsn)
+    try:
+        yield dsn, store
+    finally:
+        await store.close()
