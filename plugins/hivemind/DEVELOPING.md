@@ -110,7 +110,7 @@ writes is one its update file passes to the drift check.
   mounts MCP tools as routes (`xd://mcp__hivemind_hivemind_hive_*`, or
   `xd://mcp__hivemind_hive_*` for a hand entry, which then replaces the
   plugin's) rather than as named tools; the agent finds them in its system
-  prompt. Checked with Oh My Pi 18.9.1.
+  prompt. Checked with Oh My Pi 18.9.1, and headless with 18.20.2.
   A plain `omp install` of the repository installs the root package: the
   extension and, through the root `skills` link, the skills, but no MCP
   server (the package route has no `.mcp.json`, and Oh My Pi has no
@@ -212,7 +212,7 @@ writes is one its update file passes to the drift check.
   checkout without symlink support the `skills` link is a plain file, so the
   skills would have to be copied by hand.
 
-- **Antigravity** (checked live with the CLI, `agy` 1.5.3, 1.5.5 and 1.5.8, headless
+- **Antigravity** (checked live with the CLI, `agy` 1.5.3, 1.5.5, 1.5.8 and 1.5.9, headless
   against a mock Gemini model: `modelProvider: "gemini"` in
   `~/.gemini/antigravity-cli/settings.json`, `GEMINI_API_KEY` and
   `GOOGLE_GEMINI_BASE_URL`; no Google sign-in is needed there).
@@ -267,10 +267,13 @@ writes is one its update file passes to the drift check.
     `Stop` takes `{"decision":"block","reason":...}` (the hooks reference
     says `"continue"`; 1.5.3 re-enters the loop with either) and sends the
     reason as a system message. Both fire in `agy -p`. There is no
-    compaction event.
+    compaction event. 1.5.9 sends `continuationActive` instead of
+    `stop_hook_active`, but it stayed `false` on the stop after a block
+    (only `executionNum` went up), so the once-per-session marker is what
+    keeps it to one reminder.
   - *Rule.* `rules/AGENTS.md` is put into every system prompt as a user
     rule while the plugin is on.
-- **Junie** (JetBrains' coding agent; checked with Junie CLI 26.9.7 on
+- **Junie** (JetBrains' coding agent; checked with Junie CLI 26.9.7 and 26.11.1 on
   Linux against a mock OpenAI-compatible model and a local
   `hivemind-mcp-http`).
   - *Install.* Junie reads Claude-style marketplaces, so the root
@@ -325,7 +328,8 @@ writes is one its update file passes to the drift check.
   - *Incognito.* `junie --mcp-default-locations=false` skips both
     `mcp.json` files, so the extension's `.mcp.json` tries
     `${HIVEMIND_MCP_URL}` literally and fails to connect, and no hive tools
-    load (the user's other MCP servers go too).
+    load (the user's other MCP servers go too). Rechecked with 26.11.1:
+    the extension's server tried localhost:80, and Hivemind got no request.
     `--ide-guidelines=<file>` prepends the file's content to the
     guidelines.
   - *Not verified.* The Junie plugin inside JetBrains IDEs (it has an MCP
@@ -341,7 +345,7 @@ writes is one its update file passes to the drift check.
     the `submit` tool. Junie's JVM reads `user.home`, which normally equals
     `$HOME`.
 
-- **GitHub Copilot CLI** (checked with 1.0.95, headless against a mock
+- **GitHub Copilot CLI** (checked with 1.0.95 and 1.0.112, headless against a mock
   OpenAI-compatible model: `COPILOT_PROVIDER_BASE_URL`, `COPILOT_MODEL`,
   `COPILOT_PROVIDER_API_KEY` and `copilot -p ... --allow-all-tools`; no
   GitHub login is needed there).
@@ -645,13 +649,16 @@ Setting only `HIVEMIND_INCOGNITO=1`, or turning incognito on during a
 session, is incognito by restraint, and the agent says so. A session
 started incognito cannot turn Hivemind back on.
 
-Copilot CLI's switch was checked live with 1.0.95: with it the model sees no
+Copilot CLI's switch was checked live with 1.0.95 and 1.0.112: with it the model sees no
 `hivemind-hive_*` tool, the Hivemind server gets no request, the startup
 hook prints the incognito text and the stop hook stays silent.
 
 The Claude Code switch was checked live with Claude Code 2.1.287 against
 a local listener: denying `plugin:hivemind:hivemind` or the URL stopped
 every request to the endpoint, while denying `hivemind` alone did not.
+Rechecked with 2.1.325, which stops at startup on a `--settings` that
+fails validation: the launcher's settings pass, and the server got no
+request.
 
 ## Key profiles
 
@@ -660,7 +667,7 @@ user's agents (ADR 0150). Per harness:
 
 | Harness | How the profile reaches it |
 |---|---|
-| Claude Code | `--settings ~/.config/hivemind/claude.<profile>.json` (an `env` block). An `env` key in `~/.claude/settings.json` beats the launching shell, and `--settings` beats both and a project's settings (checked with 2.1.323) |
+| Claude Code | `--settings ~/.config/hivemind/claude.<profile>.json` (an `env` block). An `env` key in `~/.claude/settings.json` beats the launching shell, and `--settings` beats both and a project's settings (checked with 2.1.323 and 2.1.325) |
 | Hermes | `-p <profile>`: Hermes sets `HERMES_HOME` to that profile and loads its `.env` over the environment; `default` passes `-p default`, which overrides a saved `hermes profile use` |
 | Junie, Antigravity | refused: the key lives in their own config, so a switch is persistent (the skill has the steps) |
 | DeepSeek Harness | the key file is exported, except in a folder whose `.env` names `HIVEMIND_*`: the bundle then reads `~/.dsh/.env` only, so any profile but `default` is refused |
