@@ -6,7 +6,6 @@ endpoint that cannot honour it fails as ``EmbeddingError``. Retries as in ``prov
 
 from __future__ import annotations
 
-import asyncio
 import math
 from array import array
 from collections.abc import Awaitable, Callable
@@ -16,16 +15,7 @@ import httpx
 
 from hivemind.config import Settings
 from hivemind.domain.entry import DEFAULT_PREFIX_TOKENS, EntryDraft, embeddable_text
-from hivemind.providers import (
-    clean_api_key,
-    clean_endpoint,
-    default_deadline,
-    post_with_retries,
-)
-
-
-async def _default_sleep(delay: float) -> None:
-    await asyncio.sleep(delay)
+from hivemind.providers import ProviderClient
 
 
 class EmbeddingError(Exception):
@@ -62,22 +52,20 @@ class OpenAICompatEmbedder:
         §7, ADR 0021). Retry *i* sleeps ``backoff * 2**i`` scaled by ``jitter`` ([0, 1) to [0.5x,
         1x]). ``deadline=None`` derives it (ADR 0041).
         """
-        self._owns_client = client is None
-        if client is None:
-            client = httpx.AsyncClient(timeout=timeout)
-        self._client = client
-        self._base_url = clean_endpoint(base_url).rstrip("/")
-        self._api_key = clean_api_key(api_key)
-        self._deadline = (
-            deadline if deadline is not None else default_deadline(timeout, retries, backoff)
+        self._provider = ProviderClient(
+            client,
+            base_url,
+            api_key,
+            timeout=timeout,
+            retries=retries,
+            backoff=backoff,
+            sleep=sleep,
+            deadline=deadline,
+            jitter=jitter,
         )
-        self._jitter = jitter
         self._model_name = model_name
         self._dim = dim
         self._prefix_tokens = prefix_tokens
-        self._retries = retries
-        self._backoff = backoff
-        self._sleep = sleep if sleep is not None else _default_sleep
 
     @classmethod
     def from_settings(cls, settings: Settings) -> OpenAICompatEmbedder:
@@ -95,7 +83,7 @@ class OpenAICompatEmbedder:
 
     @property
     def retries(self) -> int:
-        return self._retries
+        return self._provider.retries
 
     @property
     def dimension(self) -> int:
@@ -109,7 +97,7 @@ class OpenAICompatEmbedder:
 
     @property
     def base_url(self) -> str:
-        return self._base_url
+        return self._provider.base_url
 
     def entry_embeddable_text(self, draft: EntryDraft) -> str:
         """The exact text an entry is embedded from (SPEC.md §7, ADR 0021)."""
@@ -124,31 +112,19 @@ class OpenAICompatEmbedder:
 
     async def aclose(self) -> None:
         """Close the HTTP client if this embedder built it; idempotent."""
-        if self._owns_client:
-            self._owns_client = False
-            await self._client.aclose()
+        await self._provider.aclose()
 
     async def _embed(self, text: str) -> list[float]:
-        headers: dict[str, str] = {}
-        if self._api_key:
-            headers["Authorization"] = f"Bearer {self._api_key}"
         payload: dict[str, Any] = {
             "model": self._model_name,
             "input": text,
             "dimensions": self._dim,
         }
-        response = await post_with_retries(
-            self._client,
-            f"{self._base_url}/embeddings",
-            payload=payload,
-            headers=headers,
-            retries=self._retries,
-            backoff=self._backoff,
-            sleep=self._sleep,
-            deadline=self._deadline,
+        response = await self._provider.post(
+            "/embeddings",
+            payload,
             label="embeddings request",
             error=lambda message, status: EmbeddingError(message, status=status),
-            jitter=self._jitter,
         )
         vector = self._parse_response(response)
         if len(vector) != self._dim:

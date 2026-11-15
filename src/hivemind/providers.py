@@ -160,3 +160,73 @@ async def _attempts[E: Exception](
         give_up_level, "%s failed after %d attempt(s), giving up: %s", label, retries + 1, last
     )
     raise last
+
+
+async def _default_sleep(delay: float) -> None:
+    await asyncio.sleep(delay)
+
+
+class ProviderClient:
+    """The HTTP side of an OpenAI-compatible adapter: the client, the endpoint, the key and the
+    retry policy, behind ``post``.
+
+    ``client=None`` builds one this object owns (``aclose`` closes it; ``timeout`` applies only
+    then). An empty ``api_key`` sends no auth header. Retry *i* sleeps ``backoff * 2**i`` scaled by
+    ``jitter`` ([0, 1) to [0.5x, 1x]). ``deadline=None`` derives it (ADR 0041).
+    """
+
+    def __init__(
+        self,
+        client: httpx.AsyncClient | None,
+        base_url: str,
+        api_key: str,
+        *,
+        timeout: float,
+        retries: int,
+        backoff: float,
+        sleep: Sleep | None,
+        deadline: float | None,
+        jitter: Callable[[], float] | None,
+    ) -> None:
+        self._owns_client = client is None
+        self._client = client if client is not None else httpx.AsyncClient(timeout=timeout)
+        self.base_url = clean_endpoint(base_url).rstrip("/")
+        self._api_key = clean_api_key(api_key)
+        self.retries = retries
+        self._backoff = backoff
+        self._sleep = sleep if sleep is not None else _default_sleep
+        self._deadline = (
+            deadline if deadline is not None else default_deadline(timeout, retries, backoff)
+        )
+        self._jitter = jitter
+
+    async def post[E: Exception](
+        self,
+        path: str,
+        payload: dict[str, Any],
+        *,
+        label: str,
+        error: Callable[[str, int | None], E],
+        give_up_level: int = logging.ERROR,
+    ) -> httpx.Response:
+        headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
+        return await post_with_retries(
+            self._client,
+            f"{self.base_url}{path}",
+            payload=payload,
+            headers=headers,
+            retries=self.retries,
+            backoff=self._backoff,
+            sleep=self._sleep,
+            deadline=self._deadline,
+            label=label,
+            error=error,
+            give_up_level=give_up_level,
+            jitter=self._jitter,
+        )
+
+    async def aclose(self) -> None:
+        """Close the HTTP client if this object built it; idempotent."""
+        if self._owns_client:
+            self._owns_client = False
+            await self._client.aclose()
