@@ -13,6 +13,7 @@ from hivemind.domain.validation import (
     MAX_PINS_PER_AGENT,
     MAX_PINS_PER_FLEET,
     InvalidInput,
+    canonical_uuid,
     check_text,
 )
 from hivemind.ports import Credential, Store
@@ -161,7 +162,7 @@ class PinService:
         if fleet is None:
             return []
         check_text(fleet, "fleet_id", MAX_ID_CHARS)
-        pins = await self._store.list_pins(fleet)
+        pins = await self._store.list_pins(canonical_uuid(fleet) or fleet)
         if not pins:
             return []
         visibility = credential.visibility()
