@@ -84,6 +84,7 @@ convention).
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import os
 import random
@@ -180,6 +181,18 @@ _VOCABULARY = [
 ]
 
 
+@functools.cache
+def _token_vector(token: str, dimension: int) -> tuple[float, ...]:
+    """One token's share of a ``HashEmbedder`` vector: a signed byte of
+    ``sha256(f"{block}:{token}")`` per coordinate, 32 coordinates a block.
+    Cached because the corpus repeats a small vocabulary thousands of times."""
+    vec: list[float] = []
+    for block in range((dimension + 31) // 32):
+        digest = hashlib.sha256(f"{block}:{token}".encode()).digest()
+        vec.extend((1.0 if byte % 2 == 0 else -1.0) * (byte / 255.0) for byte in digest)
+    return tuple(vec[:dimension])
+
+
 class HashEmbedder:
     """``tests.fakes.FakeEmbedder``'s construction, widened to full rank.
 
@@ -207,15 +220,7 @@ class HashEmbedder:
     def _vector(self, text: str) -> list[float]:
         vec = [0.0] * self._dimension
         for token in text.lower().split():
-            for block in range((self._dimension + 31) // 32):
-                digest = hashlib.sha256(f"{block}:{token}".encode()).digest()
-                for offset in range(32):
-                    i = block * 32 + offset
-                    if i >= self._dimension:
-                        break
-                    byte = digest[offset]
-                    sign = 1.0 if byte % 2 == 0 else -1.0
-                    vec[i] += sign * (byte / 255.0)
+            vec = [v + t for v, t in zip(vec, _token_vector(token, self._dimension), strict=True)]
         norm = (sum(v * v for v in vec) ** 0.5) or 1.0
         return [v / norm for v in vec]
 
