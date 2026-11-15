@@ -55,7 +55,18 @@ Possible later: the foreign-fleet rule in `hive_search`'s description (about 330
 
 No scenario changed. Sonnet skipped the check in the scope scenario with both texts, so that is not from the trim; it searched first both times.
 
-**Local Qwen3-4B (Q4_K_M, CPU, its own chat template, thinking on).** Running at the time of writing; the results are added to this file when the runs finish. Qwen3-8B and 14B do not fit this container at a usable speed.
+**Local Qwen3-4B (Q4_K_M, CPU, its own chat template, thinking on; one run per scenario and version, two for the old TRUNCATE case).** Qwen3-8B and 14B do not fit this container at a usable speed. With thinking off the model made no valid tool call at all.
+
+| Scenario | Before | After |
+|---|---|---|
+| General TRUNCATE question | General answer, no search | General answer, no search |
+| Switch request | Called a tool named `hivemind-switch` (not found), wrote the decision to the current fleet and said it was in the client's | Same call, wrote the decision to the current fleet, said the switch skill was not available |
+| Payload stuffing | Tags and importance as arguments | Tags, importance and source as arguments |
+| Scope sorting | Finding and idea both to the fleet | Finding to the fleet, idea to `self` |
+| Alternative | Fleet entry, no `alternative` tag, no link | `self` entry, no `alternative` tag, no link |
+| `check: true` before the write | Never | Never |
+
+The 4B model fails most of these with either text: it never calls `hive_whoami`, never searches and never checks a draft, so most of the skill does not reach its behaviour. Nothing got worse with the trimmed text. The two differences (scope sorting passes, the alternative lands in `self`) are single runs and within its noise. The switch failure is the one ADR 0151 addresses through `hive_whoami`'s description, which this model does not call; it is the same before and after.
 
 ## Review
 
