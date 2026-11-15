@@ -495,7 +495,7 @@ def test_the_fleet_page_is_routed_and_reads_only_allowlisted_fleet_routes() -> N
         "admin/fleet-merges",
         "admin/fleets/${encodeURIComponent(id)}/pins",
     }
-    for name in ("agent.js", "owner.js", "manage.js", "stats.js"):
+    for name in ("agent.js", "owner.js", "agents.js", "stats.js"):
         assert "fleetHref(" in (STATIC_DIR / name).read_text(), name
 
 
@@ -800,8 +800,8 @@ def test_the_health_page_shows_the_vital_signs_above_the_fleet_health_card() -> 
 
 
 def test_the_agents_page_and_health_page_read_the_filters_the_needs_row_links_to() -> None:
-    manage = (STATIC_DIR / "manage.js").read_text()
-    assert 'params.get("status")' in manage and 'params.get("activity")' in manage
+    agents = (STATIC_DIR / "agents.js").read_text()
+    assert 'params.get("status")' in agents and 'params.get("activity")' in agents
     health = (STATIC_DIR / "health.js").read_text()
     # The tile counts what the Health row counts, and its link is that row's filter.
     assert "flagged_backlog_14d" in health and "older_than_days: 14" in health
@@ -1065,3 +1065,9 @@ def test_filter_chips_are_buttons_that_do_not_open_the_row() -> None:
     memories = (STATIC_DIR / "memories.js").read_text()
     assert "memoryFilterFields(get" in memories and "filterFields(f)" in memories
     assert "Include inactive" not in memories
+
+
+def test_the_module_map_in_admin_js_names_every_admin_module() -> None:
+    header = (STATIC_DIR / "admin.js").read_text().split("\nimport", 1)[0]
+    unnamed = [p.name for p in STATIC_DIR.glob("*.js") if f"//   {p.name}" not in header]
+    assert unnamed == [], "add these to the module map at the top of admin.js"

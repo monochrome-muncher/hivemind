@@ -1,17 +1,48 @@
 // Hivemind admin panel (ADR 0029): entry point, routing and session.
 //
-// The panel is plain ES modules served from this directory (no build step):
-//   ui.js        generic DOM helpers, formatting, badges, modal, layout pieces
-//   client.js    the API client (one key per tab, its own storage slot)
-//   lists.js     paged memory, feedback and flagged tables
-//   csv.js       CSV export of a list
-//   drawer.js    the memory detail drawer (configured below)
-//   charts.js    the SVG activity chart
-//   core.js      the admin session and shared state; re-exports ui.js and client.js
-//   overview.js  memories.js  feedback.js  stats.js  manage.js  health.js  agent.js  owner.js  fleet.js   the views
+// The panel is plain ES modules served from this directory (no build step).
 //
-// ui.js, client.js, lists.js, csv.js, drawer.js and charts.js import nothing
-// admin-specific, so another front end can serve them as they are.
+// Shared modules (import nothing admin-specific, ADR 0091), so the portal
+// serves them as they are:
+//   ui.js         generic DOM helpers, formatting, badges, modal, layout pieces
+//   client.js     the API client (one key per tab, its own storage slot)
+//   lists.js      paged memory, feedback and flagged tables
+//   memfilters.js the memory filters (state, tags, entity, dates)
+//   csv.js        CSV export of a list
+//   drawer.js     the memory detail drawer (configured below)
+//   charts.js     the SVG activity chart
+//   explain.js    "Explain ranking": a hit's score as plain lines
+//   since.js      "since you last looked" (last visit in browser storage)
+//
+// The admin session and core:
+//   admin.js      this file: entry point, routing, login
+//   core.js       the admin session and shared state; re-exports ui.js and client.js
+//
+// The views (pages):
+//   overview.js   the landing view: Needs you, pending queue, KPIs
+//   memories.js   search and the newest-first listing
+//   feedback.js   the Feedback log (who rated what)
+//   stats.js      Fleets, Agents and Users rolled up from activity
+//   agents.js     the Agents list, with its agent dialogs and Scout card
+//   fleets.js     the Fleets list, with rename, phase and pins
+//   audit.js      the audit log and its rows
+//   keys.js       rotating the org key
+//   health.js     fleet health (observation only)
+//   agent.js      one agent's page
+//   owner.js      one owner's page
+//   fleet.js      one fleet's page
+//
+// The dialogs and cards the views use:
+//   cleanup.js    cleaning up after a bad agent, and undoing it
+//   merge.js      merging fleets, moving agents, and undoing either
+//   retire.js     retiring an agent with a successor, and undoing it
+//   offboard.js   offboarding an owner
+//
+// Pure helpers (no DOM, so a test runs them as they ship):
+//   asagent.js    "Search as an agent"
+//   needs.js      what waits on the operator
+//   vitals.js     the vital signs of the hive
+//   fleetdata.js  what the fleet page works out of its lists
 //
 // Rules every module keeps: API data reaches the page through textContent
 // (h(), svg()) and never through an HTML-parsing sink; the admin key lives in
@@ -25,7 +56,10 @@ import { viewOverview } from "./overview.js";
 import { viewMemories } from "./memories.js";
 import { viewFeedback } from "./feedback.js";
 import { viewStats } from "./stats.js";
-import { viewAgents, viewFleets, viewAudit, viewKeys } from "./manage.js";
+import { viewAgents } from "./agents.js";
+import { viewFleets } from "./fleets.js";
+import { viewAudit } from "./audit.js";
+import { viewKeys } from "./keys.js";
 import { viewHealth } from "./health.js";
 import { viewAgent } from "./agent.js";
 import { viewOwner } from "./owner.js";
