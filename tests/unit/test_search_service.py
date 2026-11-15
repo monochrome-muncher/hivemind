@@ -270,7 +270,7 @@ class TestRecencyFloorConfig:
         with pytest.raises(ValueError, match="recency_floor"):
             SearchConfig(recency_floor=bad)
 
-    def test_one_is_allowed_and_means_no_decay_at_all(self) -> None:
+    def test_a_floor_of_one_is_allowed(self) -> None:
         assert SearchConfig(recency_floor=1.0).recency_floor == 1.0
 
     @pytest.mark.parametrize("bad", [0.0, -30.0])

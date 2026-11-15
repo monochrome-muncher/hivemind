@@ -21,7 +21,8 @@ from hivemind.domain.health import RoleActivity
 from hivemind.mcp.app import McpHivemind, hive_whoami
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
-from hivemind.services.access import AccessService, PermissionDenied
+from hivemind.services.access import AccessService
+from hivemind.services.errors import PermissionDenied
 from hivemind.services.metrics import MetricsService
 from tests.fakes import (
     FakeAuthenticator,

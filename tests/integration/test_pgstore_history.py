@@ -58,17 +58,6 @@ def _draft(summary: str, **kw) -> EntryDraft:
     )
 
 
-async def _chain(store, n: int = 4) -> list[str]:
-    ids: list[str] = []
-    for i in range(n):
-        supersedes = (ids[-1],) if ids else ()
-        e = await store.create_entry(
-            _draft(f"v{i}", supersedes=supersedes), VEC, embedding_model="fake"
-        )
-        ids.append(e.id)
-    return ids
-
-
 async def test_chain_walk_on_postgres_hides_an_invisible_middle_version(pg: PgStore) -> None:
     """ADR 0033 on the real store: v1 (org, alice) <- v2 (self, bob) <- v3
     (self, bob). alice must see v1 through the invisible v2 without ever

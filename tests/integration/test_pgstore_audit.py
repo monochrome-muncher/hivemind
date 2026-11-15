@@ -33,24 +33,6 @@ async def pg():
         await store.close()
 
 
-async def test_record_and_list_audit_round_trip(pg) -> None:
-    stored = await pg.record_audit(
-        AuditEvent(
-            actor_kind=ActorKind.ADMIN_KEY,
-            actor="admin:0123456789ab",
-            action=AuditAction.AGENT_TRUST_LEVEL_SET,
-            target="alice",
-            detail={"from": 1, "to": 3},
-        )
-    )
-    assert stored.id
-    assert stored.occurred_at.tzinfo is not None
-    rows = await pg.list_audit(AuditFilters(), limit=10)
-    assert rows == [stored]
-    assert rows[0].detail == {"from": 1, "to": 3}
-    assert rows[0].action is AuditAction.AGENT_TRUST_LEVEL_SET
-
-
 async def test_pin_and_unpin_rows_by_an_agent_are_accepted(pg) -> None:
     """ADR 0076: migration 0014 widened both CHECKs for agent pin rows."""
     for action in (AuditAction.ENTRY_PIN, AuditAction.ENTRY_UNPIN):

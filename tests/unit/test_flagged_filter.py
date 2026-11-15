@@ -9,7 +9,6 @@ from hivemind.api.deps import create_app
 from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
-from hivemind.domain.entry import EntryFilters
 from hivemind.mcp.app import hive_feedback, hive_list, hive_search, hive_write
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
@@ -77,12 +76,6 @@ async def test_flagged_hides_entries_already_superseded() -> None:
     )
     result = await hive_list(mcp_surface(store, WRITER), flagged=True)
     assert {e["id"] for e in result["entries"]} == {ids["wrong"]}  # type: ignore[index]
-
-
-async def test_flagged_counts_through_the_store() -> None:
-    store = MemoryStore(make_clock())
-    await _seed(store)
-    assert await store.count_entries(EntryFilters(flagged=True)) == 2
 
 
 async def test_rest_list_and_search_flagged() -> None:

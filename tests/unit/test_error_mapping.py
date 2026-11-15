@@ -643,12 +643,9 @@ def test_typed_errors_still_match_the_builtins_surfaces_catch() -> None:
     assert issubclass(errors.EntryNotActive, ValueError)
     assert issubclass(errors.AgentIdentityRequired, ValueError)
     assert issubclass(errors.SupersedeDenied, errors.PermissionDenied)
-    # NameTaken moved here; the old import path names the same class.
     from hivemind.domain import access as domain_access
-    from hivemind.services import access as services_access
 
     assert issubclass(errors.NameTaken, ValueError)
-    assert services_access.NameTaken is errors.NameTaken
     assert issubclass(domain_access.UnknownAgent, KeyError)
     assert issubclass(domain_access.UnknownFleet, KeyError)
     assert issubclass(domain_access.FleetExists, ValueError)

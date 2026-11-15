@@ -19,7 +19,8 @@ from hivemind.domain.validation import InvalidInput
 from hivemind.mcp.app import McpHivemind, hive_pin, hive_pinned, hive_whoami, hive_write
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
-from hivemind.services.access import AccessService, PermissionDenied
+from hivemind.services.access import AccessService
+from hivemind.services.errors import PermissionDenied
 from tests.fakes import (
     FakeAuthenticator,
     make_clock,

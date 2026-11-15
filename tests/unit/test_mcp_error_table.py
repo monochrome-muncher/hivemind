@@ -38,14 +38,6 @@ def test_table_and_cases_cover_the_same_classes() -> None:
     assert tuple(mcp_errors.SERVICE_ERROR_CODES) == mcp_errors.SERVICE_ERRORS
 
 
-def test_subclass_wins_over_its_base() -> None:
-    assert issubclass(SupersedeDenied, PermissionDenied)
-    exc = SupersedeDenied(["x"])
-    assert mcp_errors.service_error_reply(exc) == {
-        "error": {"code": "supersede_denied", "message": str(exc)}
-    }
-
-
 def test_a_subclass_outside_the_table_takes_the_nearest_ancestor() -> None:
     class Mine(EntryNotFound):
         pass

@@ -97,7 +97,7 @@ class TestConfig:
         with pytest.raises(ValueError, match="vector_min_similarity"):
             SearchConfig(vector_min_similarity=bad)
 
-    def test_zero_is_allowed_and_equals_off(self) -> None:
+    def test_zero_is_allowed(self) -> None:
         assert SearchConfig(vector_min_similarity=0.0).vector_min_similarity == 0.0
 
 
