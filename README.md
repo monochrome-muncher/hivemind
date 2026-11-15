@@ -494,6 +494,8 @@ remove a setting whose meaning changed.
 - [CONTEXT.md](CONTEXT.md): what each term means.
 - [docs/adr/](docs/adr/README.md): why each design decision was made.
 - [ROADMAP.md](ROADMAP.md): what is planned and what is on hold.
+- [docs/code-tour.md](docs/code-tour.md): reading or auditing the code,
+  following a request through it.
 - [AGENTS.md](AGENTS.md): working on the code (commands, layout, rules).
 
 ## Working on Hivemind
@@ -513,8 +515,10 @@ care about.
 
 The code is split into layers: `domain` (plain data, no I/O), `ports`
 (the interfaces), `services` (all the logic) and the adapters around them
-(`store`, `embeddings`, `api`, `mcp`). [AGENTS.md](AGENTS.md) has the
-full map and the checks a change has to pass. If you're contributing,
+(`store`, `embeddings`, `api`, `mcp`). [docs/code-tour.md](docs/code-tour.md)
+walks through them and shows where each access rule lives, and
+[AGENTS.md](AGENTS.md) has the full map and the checks a change has to
+pass. If you're contributing,
 start with [CONTRIBUTING.md](CONTRIBUTING.md) and the
 [Code of Conduct](CODE_OF_CONDUCT.md).
 
