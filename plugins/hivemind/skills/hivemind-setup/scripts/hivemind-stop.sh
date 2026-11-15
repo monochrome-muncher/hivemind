@@ -40,8 +40,9 @@ esac
 [ -t 0 ] && exit 0
 input="$(cat 2>/dev/null)" || exit 0
 
-# (b) Already continuing because of a stop hook.
-printf '%s' "$input" | grep -q '"stop_hook_active" *: *true' && exit 0
+# (b) Already continuing because of a stop hook (Antigravity 1.5.9+:
+# continuationActive).
+printf '%s' "$input" | grep -Eq '"(stop_hook_active|continuationActive|continuation_active)" *: *true' && exit 0
 [ "$cursor" = 1 ] && printf '%s' "$input" | grep -Eq '"loop_count" *: *[1-9]' && exit 0
 
 field() {
