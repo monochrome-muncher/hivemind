@@ -265,6 +265,77 @@ async def test_tentative_warns_on_shared_writes_and_checks_only() -> None:
     assert _codes(private) == []
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("tags", ["a"]),
+        ("sources", [{"type": "session", "ref": "current"}]),
+        ("supersedes", ["x"]),
+        ("see_also", ["x"]),
+        ("importance", 4),
+        ("occurred_at", "2026-05-01T00:00:00+00:00"),
+        ("scope", "self"),
+    ],
+)
+async def test_payload_field_warns_when_its_argument_is_unset(field: str, value: object) -> None:
+    for extra in ({}, {"check": True}):
+        result = await _write(MemoryStore(make_clock()), A, payload={field: value}, **extra)
+        assert _codes(result) == ["payload_fields"]
+        assert f"payload holds {field}:" in result["warnings"][0]["message"]  # type: ignore[index]
+
+
+async def test_payload_fields_names_every_field_in_a_stable_order() -> None:
+    payload = {"tags": ["a"], "sources": [], "scope": "self", "importance": 3, "x": 1}
+    result = await _write(MemoryStore(make_clock()), A, payload=payload)
+    assert _codes(result) == ["payload_fields"]
+    assert result["warnings"][0]["message"].startswith(  # type: ignore[index]
+        "payload holds scope, tags, sources, importance: "
+    )
+
+
+async def test_payload_fields_stay_quiet_when_the_argument_was_set() -> None:
+    store = MemoryStore(make_clock())
+    older = await _write(store, A, summary="older")
+    result = await _write(
+        store,
+        A,
+        payload={
+            "tags": ["aws"],
+            "sources": [],
+            "supersedes": [],
+            "see_also": [],
+            "importance": 5,
+            "occurred_at": "2026-05-01T00:00:00+00:00",
+            "scope": "fleet",
+        },
+        tags=["real"],
+        sources=[{"type": "url", "ref": "https://x/1"}],
+        supersedes=[older["id"]],
+        see_also=[older["id"]],
+        importance=2,
+        occurred_at="2026-06-01T00:00:00+00:00",
+    )
+    assert "payload_fields" not in _codes(result)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"count": 3},
+        {"meta": {"tags": ["a"], "scope": "self"}},
+        {"Tags": ["a"], "SCOPE": "self"},
+        {"scope": "fleet"},
+        {"scope": "galaxy"},
+        {"scope": 3},
+    ],
+)
+async def test_payload_fields_ignore_other_keys_and_a_scope_that_was_applied(
+    payload: dict[str, object],
+) -> None:
+    result = await _write(MemoryStore(make_clock()), A, payload=payload)
+    assert "payload_fields" not in _codes(result)
+
+
 async def test_alternatives_and_open_questions_are_untested_on_purpose() -> None:
     for tag in ("alternative", "open-question"):
         result = await _write(

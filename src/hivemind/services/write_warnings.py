@@ -9,8 +9,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
-from hivemind.domain.access import SCOPE_FLEET, SCOPE_ORG
-from hivemind.domain.entry import Entry, EntryDraft, EntryState, Source
+from hivemind.domain.access import SCOPE_FLEET, SCOPE_ORG, SCOPE_RANK
+from hivemind.domain.entry import Entry, EntryDraft, EntryState, ImportanceSource, Source
 from hivemind.domain.health import is_entry_ref
 from hivemind.domain.validation import id_key
 
@@ -230,6 +230,7 @@ def write_warnings(
         _local_path_warning(draft),
         _not_english_warning(draft),
         _tentative_warning(draft),
+        _payload_fields_warning(draft),
         _foreign_link_warning(draft, linked),
         _backdated_successor_warning(occurred, superseded),
         _fresh_consolidation_warning(occurred, superseded),
@@ -275,6 +276,28 @@ def _tentative_warning(draft: EntryDraft) -> WriteWarning | None:
         "until tested, then supersede that note with a fleet entry. If this is a finding with a "
         "passing idea, leave the idea out or put it in a self note with see_also to this one; "
         "if it was stored, supersede it without the idea",
+    )
+
+
+def _payload_fields_warning(draft: EntryDraft) -> WriteWarning | None:
+    payload = draft.payload or {}
+    scope = payload.get("scope")
+    unapplied = {
+        "scope": scope in SCOPE_RANK and scope != draft.scope,
+        "tags": not draft.tags,
+        "sources": not draft.sources,
+        "supersedes": not draft.supersedes,
+        "see_also": not draft.see_also,
+        "importance": draft.importance_source is ImportanceSource.DEFAULT,
+        "occurred_at": draft.occurred_at is None,
+    }
+    fields = [name for name, unset in unapplied.items() if unset and name in payload]
+    if not fields:
+        return None
+    return WriteWarning(
+        "payload_fields",
+        f"payload holds {', '.join(fields)}: these are fields of the write itself and were not "
+        "applied; pass them as their own arguments, and if it was stored, supersede it with them",
     )
 
 
