@@ -113,13 +113,15 @@ def test_the_skill_carries_the_distillation_loop() -> None:
 
 def test_rules_moved_out_of_the_skill_live_in_the_tool_descriptions() -> None:
     """Rules the skill hands to the tool descriptions, which every session
-    loads too (including harnesses without the skill)."""
+    loads too (including harnesses without the skill). ADR 0154: the skill
+    does not repeat them."""
     from hivemind.mcp import contract
 
+    assert "'upstream_changed'" in contract.DESC_SEARCH and "re-check" in contract.DESC_SEARCH
+    assert "(fact|insight|decision)" in contract.DESC_WRITE
     assert "home_fleet_id is foreign" in contract.DESC_SEARCH
     assert "ask your user before bringing the finding home" in contract.DESC_SEARCH
     assert "a thin result proves nothing" in contract.DESC_SEARCH
-    assert "don't retry in a loop" in contract.DESC_WRITE
     assert "5 = outage" in contract.DESC_WRITE
     assert "path|url|session|other" in contract.DESC_WRITE  # ADR 0105: sources named
     assert "verified:" in contract.DESC_FEEDBACK
@@ -463,6 +465,8 @@ def test_entries_are_written_in_english_and_never_set_the_reply_language() -> No
 # The switch clause on hive_whoami (ADR 0151) and the general-question rule
 # (ADR 0153) measure 17,956 after dropping sentences that other always-on
 # text or the server's own error replies already say.
+# ADR 0154 measures 17,107 after dropping what a tool description or the
+# server's reply already says.
 ALWAYS_ON_BUDGET = 18_000
 
 

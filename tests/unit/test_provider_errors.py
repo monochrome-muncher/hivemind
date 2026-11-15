@@ -180,6 +180,7 @@ class TestKeyNeverLeaks:
         written = await hive_write(app, kind="fact", summary="s")
         assert written["error"]["code"] == "embedding_unavailable", written  # type: ignore[index]
         assert KEY not in json.dumps(written)
+        assert "don't retry in a loop" in written["error"]["message"]  # type: ignore[index]
         # ADR 0048: search falls back to keyword-only instead of an error.
         found = await hive_search(app, query="q")
         assert found["degraded"] == "keyword_only", found

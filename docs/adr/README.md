@@ -90,13 +90,13 @@ is unused.
 | [0078](0078-explore-search.md) | Opt-in explore search | Accepted |
 | [0079](0079-feedback-dates-on-the-database-clock.md) | Feedback is dated by the store's clock | Accepted |
 | [0080](0080-admin-memory-browser-and-activity.md) | The admin panel can read memories and show activity | Extended by 0090, 0092, 0093, 0136 (search as an agent), 0137 (explain ranking); amended by 0124 (restore), 0140 (filters) |
-| [0081](0081-upstream-changed-on-hits.md) | A hit shows when an entry it links to changed | Accepted |
+| [0081](0081-upstream-changed-on-hits.md) | A hit shows when an entry it links to changed | Accepted; decision 8 amended by 0154 |
 | [0082](0082-dev-mode-credentials-sit-at-trust-level-zero.md) | Dev-mode credentials sit at trust level 0 when the pool requires stored keys | Accepted (off by default) |
 | [0083](0083-the-entry-read-path-is-serviced.md) | The entry-read path is serviced | Accepted |
 | [0084](0084-the-wire-contract-is-single-sourced-and-the-usage-report-is-typed.md) | The wire contract is single-sourced, and the usage report is typed | Accepted |
 | [0085](0085-the-mcp-package-splits-into-contract-server-and-runners.md) | The MCP package splits into contract, server assembly, and runners | Accepted; write guidance amended by 0146 |
 | [0086](0086-key-hashes-stay-sha-256.md) | Key hashes stay SHA-256 (the KDF upgrade is held) | Accepted |
-| [0087](0087-near-duplicate-write-warning.md) | A write warns when its nearest entry is a near-duplicate | Accepted |
+| [0087](0087-near-duplicate-write-warning.md) | A write warns when its nearest entry is a near-duplicate | Accepted; skill line amended by 0154 |
 | [0088](0088-narrow-importance.md) | A narrower importance factor, so one importance step stays below the peer cap | Accepted |
 | [0089](0089-owner-level-rating-metrics.md) | Owner-level rating metrics: sibling verdicts and owner concentration | Accepted; admin-only, observation-only |
 | [0090](0090-admin-feedback-log.md) | The admin panel shows who rated what | Accepted; admin-only, observation-only |
@@ -163,3 +163,4 @@ is unused.
 | [0151](0151-whoami-says-a-switch-is-a-new-session.md) | `hive_whoami`'s description says the key is fixed per session and a switch is a new session the user starts (hivemind-switch skill) | Accepted; amends 0150 decision 6, paid for by trimming always-on text that said nothing new |
 | [0152](0152-payload-fields-write-warning.md) | A write warns when its `payload` holds a field of the write itself that was left unset, so it was not applied | Accepted; amends 0077 §3, advisory `payload_fields` code, top-level exact keys only, fires only for an unset field (`scope` only when it differs from the applied one), no always-on text |
 | [0153](0153-general-questions-get-general-answers.md) | A general question gets the general answer first; a memory about one system or incident is a labelled aside unless it fits the user's case | Accepted; skill text only, builds on 0043 and 0148, no server change |
+| [0154](0154-the-skill-does-not-repeat-descriptions-or-replies.md) | The skill does not repeat what a tool description or the server's reply says; advice for one error lives in that error's message | Accepted; amends 0081 decision 8 and 0087's skill line, MCP `embedding_unavailable` message carries the retry advice, always-on text 17,107 B, budget unchanged |

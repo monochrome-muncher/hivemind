@@ -28,7 +28,7 @@ ERR_AGENT_UNRESOLVED = "agent_unresolved"
 ERR_SUPERSEDE_DENIED = "supersede_denied"
 ERR_FLEET_MERGED = "fleet_merged"
 ERR_FLEET_BUSY = "fleet_busy"  # a merge holds the fleet: retry in a few seconds
-ERR_EMBEDDING_UNAVAILABLE = "embedding_unavailable"  # provider down or misconfigured: retry later
+ERR_EMBEDDING_UNAVAILABLE = "embedding_unavailable"  # provider down or misconfigured
 ERR_UNAUTHENTICATED = "unauthenticated"  # ADR 0042: the key is gone / not resolvable
 ERR_KEY_LOCKED = "key_locked"  # locked from the portal; ask the admin for a new key
 ERR_INVALID_VERDICT = "invalid_verdict"
@@ -45,7 +45,9 @@ def embedding_unavailable_reply(exc: EmbeddingError) -> dict[str, object]:
     """A fixed message; the sanitized detail is logged server-side."""
     logger.warning("embedding unavailable: %s", exc)
     return error_reply(
-        ERR_EMBEDDING_UNAVAILABLE, "the embedding service is unavailable; retry later"
+        ERR_EMBEDDING_UNAVAILABLE,
+        "the embedding service is unavailable; don't retry in a loop: keep the entry locally "
+        "and write it later",
     )
 
 

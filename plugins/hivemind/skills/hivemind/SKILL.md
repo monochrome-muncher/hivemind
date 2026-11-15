@@ -24,7 +24,6 @@ Call it first, and again after compaction or a cleared context.
 | `unauthenticated`/`key_locked`/401 | The key no longer works. Stop calling `hive_*`, tell the user once, follow hivemind-setup, "Key rejected". Do not register again. |
 | `trust_level: 0` | Demoted: searches return nothing, writes fail. Ask the user to have the admin raise it. |
 | `can_write_scopes: ["self"]` (lurker) | Recall a lot; write to `self`. Tell the user once that you can read but not contribute: ask the admin to make `<name>` a contributor. |
-| `can_write_scopes` has `"fleet"` | Full participation. |
 | `key_kind: "admin"` or `"legacy"` | Not an agent key: warn that writes are not attributed to an agent. |
 
 **Catch up once per session** (not after compaction, not for a quick
@@ -51,9 +50,7 @@ you, and before writing.
 - No relevant hits after one rephrase: a gap; stop searching.
 - `hive_get` the promising hits in one call. Read a hit's `correction`
   and `feedback` notes first. Open `see_also` and
-  `linked_from` entries that bear on the task. A hit with
-  `upstream_changed` rests on a changed entry: re-check it before
-  relying on it.
+  `linked_from` entries that bear on the task.
 - `score` is findability, not truth. Before a consequential step, check
   an old, unconfirmed or single-source entry against the system when
   that is cheap.
@@ -87,7 +84,7 @@ new, write nothing.
 **Check your draft first** (`hive_write` with `check: true` stores
 nothing; a reply with an `id` was stored), fix what its `warnings` name
 and act on the nearest entry in `related` (withdraw yours if stored and
-it duplicated one); a `near_duplicate` warning names a very close one:
+it duplicated one):
 
 | The nearest entry | Do |
 |---|---|
@@ -96,13 +93,11 @@ it duplicated one); a `near_duplicate` warning names a very close one:
 | Is wrong, and you may not supersede it | Flag it `wrong` naming the right id; keep yours in `self`. |
 | Covers the same system, another point | Write, with `see_also` to it. |
 
-Supersede only a chain's current head (on `supersede_denied`, find it
-with `hive_get` and `include_history`).
+On `supersede_denied`, `hive_get` the target with `include_history`:
+supersede its newest successor if it has one, else flag it.
 
 A good entry:
-- **In English**; names, quotes, errors and terms English lacks stay
-  as they are.
-- `kind`: `fact`, `insight` (long form in `body`) or `decision`.
+- **In English**, with the exceptions in the tool description.
 - `summary` in the searcher's words: system, symptom or exact error,
   then the answer. Search matches summary and the start of `body`;
   **tags filter, they are not searched**, so key words go in the text.
@@ -115,8 +110,7 @@ A good entry:
   your user decided; `self` for ideas, brainstorms, untried plans, your
   user's preferences, work in progress. Once tested, supersede the self
   note with a fleet entry.
-- **No local paths in fleet entries**: use repo-relative ones; local
-  specifics go in a `self` note that `see_also`s the entry.
+- **No local paths in fleet entries**: use repo-relative ones.
 
 **Distill.** When three or more active entries answer one question,
 write one `insight` from their evidence, not their summaries: keep
