@@ -10,7 +10,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from hivemind.domain.audit import ActorKind, AuditAction, AuditEvent, AuditRecord
-from hivemind.ports import Credential, Store
+from hivemind.ports import AuditPort, Credential
 
 
 def actor_kind_of(credential: Credential) -> ActorKind:
@@ -20,7 +20,7 @@ def actor_kind_of(credential: Credential) -> ActorKind:
 
 
 async def record_admin_action(
-    store: Store,
+    store: AuditPort,
     credential: Credential,
     action: AuditAction,
     target: str | None,
@@ -41,7 +41,7 @@ async def record_admin_action(
 
 
 async def audit_unpins(
-    store: Store,
+    store: AuditPort,
     credential: Credential,
     target: str,
     fleet_id: str,

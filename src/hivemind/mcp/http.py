@@ -20,7 +20,7 @@ from hivemind.http_metrics import UNMATCHED_ROUTE, RequestMetrics
 from hivemind.mcp.app import McpHivemind
 from hivemind.mcp.metrics import McpMetrics
 from hivemind.mcp.server import build_server
-from hivemind.ports import Authenticator, Credential, Embedder, Store
+from hivemind.ports import Authenticator, Credential, Embedder, HealthPort, Store
 from hivemind.services.wiring import build_services, log_startup
 
 logger = logging.getLogger(__name__)
@@ -179,7 +179,7 @@ class ProbeRouter:
     key in any label; without, a 404.
     """
 
-    def __init__(self, app: ASGIApp, store: Store, metrics: McpMetrics | None = None) -> None:
+    def __init__(self, app: ASGIApp, store: HealthPort, metrics: McpMetrics | None = None) -> None:
         self._app = app
         self._store = store
         self._metrics = metrics

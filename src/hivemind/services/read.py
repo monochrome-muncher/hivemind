@@ -20,7 +20,7 @@ from hivemind.domain.feedback import (
     ReliedOnChange,
 )
 from hivemind.domain.validation import MAX_GET_IDS, InvalidInput
-from hivemind.ports import Credential, Store
+from hivemind.ports import Credential, EntryFeedbackPort
 from hivemind.services.chain import (
     EntryLinks,
     entries_links,
@@ -69,7 +69,7 @@ class ReadService:
 
     def __init__(
         self,
-        store: Store,
+        store: EntryFeedbackPort,
         governance: GovernanceService | None = None,
         search_config: SearchConfig | None = None,
     ) -> None:

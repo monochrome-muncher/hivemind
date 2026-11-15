@@ -14,7 +14,7 @@ from dataclasses import dataclass, replace
 from hivemind.domain.access import Visibility, entry_is_visible
 from hivemind.domain.entry import Entry, EntryState
 from hivemind.domain.validation import MAX_ID_CHARS, MAX_LIMIT, MAX_SUPERSEDES, canonical_uuid
-from hivemind.ports import Store
+from hivemind.ports import EntryPort
 
 # Defensive cap on one chain walk against corrupt data (chains are short, SPEC.md §6.3).
 _MAX_SUPERSEDE_HOPS = 256
@@ -29,7 +29,9 @@ def _can_name_entry(entry_id: str) -> bool:
     return "\x00" not in entry_id and len(entry_id) <= MAX_ID_CHARS
 
 
-async def get_visible_entry(store: Store, entry_id: str, visibility: Visibility) -> Entry | None:
+async def get_visible_entry(
+    store: EntryPort, entry_id: str, visibility: Visibility
+) -> Entry | None:
     """The entry if ``visibility`` may read it, else ``None`` (ADR 0033): "not visible" and "does
     not exist" are the same answer, so an id reveals nothing, not even existence."""
     if not _can_name_entry(entry_id):
@@ -41,7 +43,7 @@ async def get_visible_entry(store: Store, entry_id: str, visibility: Visibility)
 
 
 async def get_visible_entries(
-    store: Store, entry_ids: list[str], visibility: Visibility
+    store: EntryPort, entry_ids: list[str], visibility: Visibility
 ) -> dict[str, Entry]:
     """``get_visible_entry`` for several ids in one store read (ADR 0055); unreadable ids are
     absent."""
@@ -59,7 +61,7 @@ async def get_visible_entries(
 
 
 async def hide_unseen_successors(
-    store: Store, entries: Sequence[Entry], visibility: Visibility
+    store: EntryPort, entries: Sequence[Entry], visibility: Visibility
 ) -> list[Entry]:
     """``entries`` with ``superseded_by`` cleared where the successor is unreadable (ADR 0033), so
     a reader never gets an id it cannot open. One batched store read."""
@@ -101,7 +103,7 @@ def _links_of(outgoing: list[str], incoming: list[str], found: dict[str, Entry])
     )
 
 
-async def entry_links(store: Store, entry_id: str, visibility: Visibility) -> EntryLinks:
+async def entry_links(store: EntryPort, entry_id: str, visibility: Visibility) -> EntryLinks:
     """The entries ``entry_id`` links to and the active ones linking to it, limited to what
     ``visibility`` may read (ADR 0057); an unreadable one is left out as if the link did not
     exist."""
@@ -113,7 +115,7 @@ async def entry_links(store: Store, entry_id: str, visibility: Visibility) -> En
 
 
 async def entries_links(
-    store: Store, entry_ids: list[str], visibility: Visibility
+    store: EntryPort, entry_ids: list[str], visibility: Visibility
 ) -> dict[str, EntryLinks]:
     """``entry_links`` for several entries, two store reads however many (ADR 0059)."""
     if not entry_ids:
@@ -125,7 +127,7 @@ async def entries_links(
 
 
 async def supersession_chain(
-    store: Store,
+    store: EntryPort,
     entry: Entry,
     *,
     visibility: Visibility | None = None,

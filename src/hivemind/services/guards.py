@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from hivemind.domain.access import Agent, UnknownAgent
-from hivemind.ports import Credential, Store
+from hivemind.ports import AgentPort, Credential
 from hivemind.services.errors import PermissionDenied
 
 
@@ -12,7 +12,7 @@ def require_admin(credential: Credential) -> None:
         raise PermissionDenied("this action requires an admin key (ADR 0012)")
 
 
-async def require_agent(store: Store, name: str) -> Agent:
+async def require_agent(store: AgentPort, name: str) -> Agent:
     agent = await store.get_agent(name)
     if agent is None:
         raise UnknownAgent(f"unknown agent: {name}")

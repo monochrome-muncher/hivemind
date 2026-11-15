@@ -216,7 +216,8 @@ async def test_prometheus_exposes_the_health_gauges() -> None:
 
 
 _ALLOWED = {
-    "ports.py",
+    "ports/feedback.py",
+    "ports/metrics.py",
     "memstore/metrics.py",
     "store/pgstore/metrics.py",
     "services/metrics.py",
