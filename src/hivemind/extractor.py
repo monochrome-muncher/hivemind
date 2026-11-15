@@ -7,7 +7,6 @@ failure as "no facets" (ADR 0016).
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import re
@@ -25,12 +24,7 @@ from hivemind.domain.entry import (
     ExtractedEntity,
     embeddable_text,
 )
-from hivemind.providers import (
-    clean_api_key,
-    clean_endpoint,
-    default_deadline,
-    post_with_retries,
-)
+from hivemind.providers import ProviderClient
 
 logger = logging.getLogger(__name__)
 
@@ -199,10 +193,6 @@ _RESPONSE_FORMAT: dict[str, Any] = {
 _UNSUPPORTED_STATUSES = frozenset({400, 422})
 
 
-async def _default_sleep(delay: float) -> None:
-    await asyncio.sleep(delay)
-
-
 class ExtractorError(Exception):
     """No validated facets; ``status`` is the HTTP status, ``None`` for validation failures."""
 
@@ -239,21 +229,19 @@ class OpenAICompatExtractor:
         derives it (ADR 0041). ``structured_output`` asks the endpoint for schema-guided JSON; an
         endpoint that rejects it is served plain from then on (ADR 0133).
         """
-        self._owns_client = client is None
-        if client is None:
-            client = httpx.AsyncClient(timeout=timeout)
-        self._client = client
-        self._base_url = clean_endpoint(base_url).rstrip("/")
-        self._api_key = clean_api_key(api_key)
-        self._deadline = (
-            deadline if deadline is not None else default_deadline(timeout, retries, backoff)
+        self._provider = ProviderClient(
+            client,
+            base_url,
+            api_key,
+            timeout=timeout,
+            retries=retries,
+            backoff=backoff,
+            sleep=sleep,
+            deadline=deadline,
+            jitter=jitter,
         )
-        self._jitter = jitter
         self._model_name = model_name
         self._prefix_tokens = prefix_tokens
-        self._retries = retries
-        self._backoff = backoff
-        self._sleep = sleep if sleep is not None else _default_sleep
         self._structured_output = structured_output
         self._sends_response_format = structured_output
 
@@ -273,7 +261,7 @@ class OpenAICompatExtractor:
 
     @property
     def retries(self) -> int:
-        return self._retries
+        return self._provider.retries
 
     @property
     def model_name(self) -> str:
@@ -282,7 +270,7 @@ class OpenAICompatExtractor:
 
     @property
     def base_url(self) -> str:
-        return self._base_url
+        return self._provider.base_url
 
     async def extract_entry(self, draft: EntryDraft) -> tuple[ExtractedEntity, ...]:
         """Extract entity facets from the entry's embeddable text (SPEC §13.1)."""
@@ -291,9 +279,7 @@ class OpenAICompatExtractor:
 
     async def aclose(self) -> None:
         """Close the HTTP client if this extractor built it; idempotent."""
-        if self._owns_client:
-            self._owns_client = False
-            await self._client.aclose()
+        await self._provider.aclose()
 
     async def _extract(self, text: str) -> tuple[ExtractedEntity, ...]:
         if not self._sends_response_format:
@@ -324,23 +310,13 @@ class OpenAICompatExtractor:
         )
 
     async def _post(self, payload: dict[str, Any]) -> httpx.Response:
-        headers: dict[str, str] = {}
-        if self._api_key:
-            headers["Authorization"] = f"Bearer {self._api_key}"
-        return await post_with_retries(
-            self._client,
-            f"{self._base_url}/chat/completions",
-            payload=payload,
-            headers=headers,
-            retries=self._retries,
-            backoff=self._backoff,
-            sleep=self._sleep,
-            deadline=self._deadline,
+        return await self._provider.post(
+            "/chat/completions",
+            payload,
             label="extractor request",
             error=lambda message, status: ExtractorError(message, status=status),
             # Best-effort (ADR 0016): a failure never blocks the write.
             give_up_level=logging.WARNING,
-            jitter=self._jitter,
         )
 
     def _payload(self, text: str, *, response_format: bool = False) -> dict[str, Any]:
