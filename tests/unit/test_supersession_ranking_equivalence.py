@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from hivemind.domain.entry import Entry, Kind
-from hivemind.services.search import apply_supersession_invariant
+from hivemind.retrieval.ordering import apply_supersession_invariant
 
 T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
