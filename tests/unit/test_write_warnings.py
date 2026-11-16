@@ -327,6 +327,8 @@ async def test_payload_fields_stay_quiet_when_the_argument_was_set() -> None:
         {"scope": "fleet"},
         {"scope": "galaxy"},
         {"scope": 3},
+        {"scope": ["self"]},
+        {"scope": {"self": 1}},
     ],
 )
 async def test_payload_fields_ignore_other_keys_and_a_scope_that_was_applied(
