@@ -563,8 +563,19 @@ async def test_unverified_keeps_active_tagged_entries_without_a_standing_confirm
     await rate(reconfirmed, "u", Verdict.HELPFUL, T0 + hour, note)
     await rate(tie, "u", Verdict.HELPFUL, T0, note)
     await rate(tie, "v", Verdict.STALE, T0, None)
+    fleet = await adapter.store.create_fleet("blue")
+    await adapter.store.register_agent("Scout")
+    await adapter.store.activate_agent(
+        "Scout", trust_level=TrustLevel.LURKER, home_fleet_id=fleet.id
+    )
+    by_revoked = await tagged("confirmed only by a revoked agent")
+    revoked_flag = await tagged("confirmed, then flagged by a revoked agent")
+    await rate(by_revoked, "Scout", Verdict.HELPFUL, T0, note)
+    await rate(revoked_flag, "u", Verdict.HELPFUL, T0, note)
+    await rate(revoked_flag, "Scout", Verdict.WRONG, T0 + hour, None)
+    await adapter.store.revoke_agent("Scout")
 
-    expected = {bare.id, unnoted.id, flagged_after.id, tie.id}
+    expected = {bare.id, unnoted.id, flagged_after.id, tie.id, by_revoked.id}
     filters = EntryFilters(unverified=True)
     assert {e.id for e in await adapter.store.list_entries(filters)} == expected
     assert await adapter.store.count_entries(filters) == len(expected)

@@ -18,7 +18,13 @@ from hivemind.domain.access import (
 from hivemind.domain.agent_cleanup import AgentCleanupRecord
 from hivemind.domain.audit import AuditRecord
 from hivemind.domain.entry import Entry, EntryFilters, EntryState
-from hivemind.domain.feedback import Feedback, ReliedOnChange, Verdict, still_unverified
+from hivemind.domain.feedback import (
+    UNVERIFIED_TAG,
+    Feedback,
+    ReliedOnChange,
+    Verdict,
+    still_unverified,
+)
 from hivemind.domain.fleet_merge import DroppedPin, FleetMergeRecord, plan_pin_restore
 from hivemind.domain.pin import Pin
 from hivemind.domain.succession import Succession
@@ -92,9 +98,9 @@ class MemoryState:
 
     def _still_unverified(self, entry: Entry) -> bool:
         """An active entry with the ``unverified`` tag and no confirmation. Callers hold the lock."""
-        return entry.state is EntryState.ACTIVE and still_unverified(
-            entry.tags, last_confirmed_at(self._live_feedback(), entry.id)
-        )
+        if entry.state is not EntryState.ACTIVE or UNVERIFIED_TAG not in entry.tags:
+            return False
+        return still_unverified(entry.tags, last_confirmed_at(self._live_feedback(), entry.id))
 
     def _relied_on_changed(self, entry: Entry, reporter: tuple[str, str] | None) -> bool:
         """ADR 0098, as PgStore's clause: something changed since the reporter's helpful row.

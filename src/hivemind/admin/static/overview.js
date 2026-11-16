@@ -44,6 +44,7 @@ function newest(entries) {
   const rows = entries.map((e) => entryRow({
     id: e.id, kind: e.kind, summary: e.summary, tags: e.tags || [], scope: e.scope, fleet_id: e.fleet_id, author: e.author,
     agent: e.agent, when: e.created_at, state: e.state, feedback: null,
+    last_confirmed_at: (e.feedback && e.feedback.last_confirmed_at) || null,
   }, { onOpen: (id) => openEntry(id, () => hooks.refresh()), compact: true, fleetName }));
   return card("Newest memories", h("div", { class: "table-wrap" }, h("table", { class: "entries" },
     h("thead", {}, h("tr", {}, ["Memory", "Kind", "Scope", "Author", "Written", "State"].map((t) => h("th", { text: t })))),
