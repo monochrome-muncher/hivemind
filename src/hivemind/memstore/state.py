@@ -18,12 +18,12 @@ from hivemind.domain.access import (
 from hivemind.domain.agent_cleanup import AgentCleanupRecord
 from hivemind.domain.audit import AuditRecord
 from hivemind.domain.entry import Entry, EntryFilters, EntryState
-from hivemind.domain.feedback import Feedback, ReliedOnChange, Verdict
+from hivemind.domain.feedback import Feedback, ReliedOnChange, Verdict, still_unverified
 from hivemind.domain.fleet_merge import DroppedPin, FleetMergeRecord, plan_pin_restore
 from hivemind.domain.pin import Pin
 from hivemind.domain.succession import Succession
 from hivemind.domain.validation import utcnow
-from hivemind.memstore.helpers import copy_entry, count_for
+from hivemind.memstore.helpers import copy_entry, count_for, last_confirmed_at
 
 
 class MemoryState:
@@ -78,15 +78,23 @@ class MemoryState:
         }
 
     def _matches(self, entry: Entry, filters: EntryFilters) -> bool:
-        """``filters.matches`` plus ``flagged`` (ADR 0054) and ``relied_on_changed`` (ADR 0098),
-        which read feedback rows. Callers hold the lock."""
+        """``filters.matches`` plus ``flagged`` (ADR 0054), ``unverified`` and
+        ``relied_on_changed`` (ADR 0098), which read feedback rows. Callers hold the lock."""
         if not filters.matches(copy_entry(entry)):
             return False
         if filters.flagged:
             _, stale, wrong = count_for(self._live_feedback(), entry.id)
             if stale + wrong == 0:
                 return False
+        if filters.unverified and not self._still_unverified(entry):
+            return False
         return not filters.relied_on_changed or self._relied_on_changed(entry, filters.reporter)
+
+    def _still_unverified(self, entry: Entry) -> bool:
+        """An active entry with the ``unverified`` tag and no confirmation. Callers hold the lock."""
+        return entry.state is EntryState.ACTIVE and still_unverified(
+            entry.tags, last_confirmed_at(self._live_feedback(), entry.id)
+        )
 
     def _relied_on_changed(self, entry: Entry, reporter: tuple[str, str] | None) -> bool:
         """ADR 0098, as PgStore's clause: something changed since the reporter's helpful row.

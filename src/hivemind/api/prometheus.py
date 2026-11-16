@@ -376,6 +376,7 @@ def _fleet_families(by_fleet: Mapping[str, FleetHealthUsage]) -> Iterator[GaugeM
             "Active flagged entries whose author is revoked or silent for 30 days",
         ),
         ("floating_gap", "Active entries older than 90 days with no feedback in 90 days"),
+        ("unverified", "Active entries tagged unverified and not yet confirmed"),
     ):
         yield _gauge(
             _HEALTH + "fleet_" + name,

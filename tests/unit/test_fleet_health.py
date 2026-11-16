@@ -184,12 +184,14 @@ async def test_rest_metrics_carry_health_for_the_admin_key_only() -> None:
     assert denied.status_code == 403
     assert body["health"]["sourced_share"] == {"count": 0, "total": 0, "share": None}
     assert body["health"]["by_fleet"]["blue"]["floating_gap"] == 0
+    assert body["health"]["by_fleet"]["blue"]["unverified"] == 0
 
 
 async def test_prometheus_exposes_the_health_gauges() -> None:
     app = make_hivemind_app()
     fleet = await app.store.create_fleet("blue")
     await _write(app.store, "tagged", scope="fleet", fleet_id=fleet.id, tags=("dead-end",))
+    await _write(app.store, "claim", scope="fleet", fleet_id=fleet.id, tags=("unverified",))
     client = make_client(app)
     async with client:
         text = (await client.get("/metrics")).text
@@ -201,7 +203,8 @@ async def test_prometheus_exposes_the_health_gauges() -> None:
     assert got[("hivemind_health_gap_entries", (("tag", "dead-end"),))] == 1
     assert got[("hivemind_health_fleet_gap_entries", (("fleet", "blue"), ("tag", "dead-end")))] == 1
     assert got[("hivemind_health_sourced_ratio", ())] == 0.0
-    assert got[("hivemind_health_fleet_active_entries", (("fleet", "blue"),))] == 1
+    assert got[("hivemind_health_fleet_active_entries", (("fleet", "blue"),))] == 2
+    assert got[("hivemind_health_fleet_unverified", (("fleet", "blue"),))] == 1
     motions = ("writes", "verdicts", "supersessions", "withdrawals")
     for motion in motions:
         assert ("hivemind_health_breathing_7d", (("motion", motion),)) in got

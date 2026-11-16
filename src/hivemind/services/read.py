@@ -16,6 +16,7 @@ from hivemind.domain.entry import Entry, EntryFilters, Kind
 from hivemind.domain.feedback import (
     NO_CHANGE_FOUND,
     FeedbackCounts,
+    FeedbackSignals,
     FeedbackSummary,
     ReliedOnChange,
 )
@@ -195,6 +196,10 @@ class ReadService:
         """Live feedback counts per entry in one store read (for ``relied_on_changed`` list
         items)."""
         return await self._store.quality_counts([e.id for e in entries])
+
+    async def feedback_signals(self, entries: Sequence[Entry]) -> dict[str, FeedbackSignals]:
+        """Live counts and last-confirmed dates per entry in one store read (for list rows)."""
+        return await self._store.feedback_signals([e.id for e in entries])
 
     async def _feedback_summary(self, entry_id: str) -> FeedbackSummary:
         if self._governance is None:

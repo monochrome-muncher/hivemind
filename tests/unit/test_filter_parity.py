@@ -49,18 +49,23 @@ BASE = frozenset(
     }
 )
 
-# The admin and portal browsers add the fleet and the exact state (ADR 0140).
+# The admin and portal browsers add the fleet and the exact state (ADR 0140); their lists also
+# take ``unverified``, which no search does.
 BROWSING = BASE | {"fleet_id", "state"}
+LISTING = BROWSING | {"unverified"}
 
 # surface -> (accepted, deliberately not accepted)
 SURFACES: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     "POST /v1/search": (BASE, ALL - BASE),
     "POST /v1/admin/search": (BROWSING, ALL - BROWSING),
     "POST /v1/portal/search": (BROWSING, ALL - BROWSING),
-    "GET /v1/entries": (BASE | {"relied_on_changed"}, ALL - BASE - {"relied_on_changed"}),
-    "GET /v1/admin/entries": (BROWSING, ALL - BROWSING),
+    "GET /v1/entries": (
+        BASE | {"relied_on_changed", "unverified"},
+        ALL - BASE - {"relied_on_changed", "unverified"},
+    ),
+    "GET /v1/admin/entries": (LISTING, ALL - LISTING),
     # The portal list has no ``agent`` filter.
-    "GET /v1/portal/entries": (BROWSING - {"agent"}, (ALL - BROWSING) | {"agent"}),
+    "GET /v1/portal/entries": (LISTING - {"agent"}, (ALL - LISTING) | {"agent"}),
     "hive_search": (BASE, ALL - BASE),
     "hive_list": (BASE | {"relied_on_changed"}, ALL - BASE - {"relied_on_changed"}),
 }
@@ -84,6 +89,7 @@ VALUES: dict[str, Any] = {
     "include_inactive": True,
     "flagged": True,
     "relied_on_changed": True,
+    "unverified": True,
     "state": EntryState.WITHDRAWN,
 }
 

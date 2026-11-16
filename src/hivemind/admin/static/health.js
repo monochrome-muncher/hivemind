@@ -51,9 +51,10 @@ const band = (title, state, advice, content) => h("div", { class: "card-body" },
 const signalsTable = (signals) => table(["Signal", "Now", "State"],
   signals.map((s) => h("tr", {}, h("td", { text: s.label }), h("td", { text: s.value }), h("td", {}, vitalBadge(s.state)))), "");
 
-const breathingTable = (fleets) => table(["Fleet", "Writes", "Verdicts", "Supersessions", "Withdrawals", "State"],
+const breathingTable = (fleets) => table(["Fleet", "Writes", "Verdicts", "Supersessions", "Withdrawals", "Unverified", "State"],
   fleets.map((f) => h("tr", {}, h("td", { text: f.name }), h("td", { text: fmtNum(f.writes) }), h("td", { text: fmtNum(f.verdicts) }),
-    h("td", { text: fmtNum(f.supersessions) }), h("td", { text: fmtNum(f.withdrawals) }), h("td", {}, vitalBadge(f.state)))), "No fleets yet.");
+    h("td", { text: fmtNum(f.supersessions) }), h("td", { text: fmtNum(f.withdrawals) }), h("td", { title: "Active memories tagged unverified that no other agent has confirmed", text: fmtNum(f.unverified) }),
+    h("td", {}, vitalBadge(f.state)))), "No fleets yet.");
 
 // ADR 0142: the health numbers grouped into three bands. Observation only, like the card below.
 export function vitalSignsCard(metrics) {

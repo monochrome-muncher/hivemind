@@ -153,6 +153,7 @@ async def list_entries(
     created_to: Annotated[datetime | None, Query()] = None,
     include_inactive: bool = False,
     flagged: bool = False,
+    unverified: bool = False,
     relied_on_changed: bool = False,
     limit: Annotated[int | None, Query(ge=1, le=MAX_LIMIT)] = None,
     offset: Annotated[int | None, Query(ge=0, le=MAX_OFFSET)] = 0,
@@ -178,6 +179,7 @@ async def list_entries(
         created_to=to_utc(created_to),
         include_inactive=include_inactive,
         flagged=flagged,
+        unverified=unverified,
         relied_on_changed=relied_on_changed,
     )
     entries = await app.read_service.list(

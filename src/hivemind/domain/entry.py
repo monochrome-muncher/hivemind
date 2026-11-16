@@ -298,6 +298,9 @@ class EntryFilters:
     state: EntryState | None = None
     # At least one stale/wrong report (ADR 0054). ``matches`` ignores it; each store applies it.
     flagged: bool = False
+    # Active entries tagged ``unverified`` with no standing confirmation; ``matches`` ignores it
+    # (it reads feedback), each store applies it.
+    unverified: bool = False
     # Entries the ``reporter`` rated helpful that changed since (ADR 0098); implies inactive
     # entries are listed. ``reporter`` is the (user, agent) feedback key, filled from the
     # credential. ``matches`` only relaxes the state check; each store applies the rest.

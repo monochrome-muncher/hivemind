@@ -424,6 +424,19 @@ def test_entry_content_is_declared_untrusted_data_everywhere() -> None:
     assert (ROOT / "docs" / "adr" / "0043-entries-are-untrusted-data.md").is_file()
 
 
+def test_untested_claims_are_tagged_unverified() -> None:
+    """ADR 0156: the write description asks for the tag where every harness reads it, and the skill
+    says what ends it."""
+    from hivemind.domain.feedback import UNVERIFIED_TAG
+    from hivemind.mcp.contract import DESC_WRITE
+
+    assert f"did not test '{UNVERIFIED_TAG}'" in DESC_WRITE
+    flat = " ".join(SKILL.split())
+    assert f"**Tag `{UNVERIFIED_TAG}`** a claim you did not see hold" in flat
+    assert "a confirming `helpful` or a successor without the tag clears it" in flat
+    assert (ROOT / "docs" / "adr" / "0156-unverified-tag-convention.md").is_file()
+
+
 def test_entries_are_written_in_english_and_never_set_the_reply_language() -> None:
     """ADR 0129: one shared language keeps entries findable by every agent,
     and an entry in another language must not pull the agent's replies into
@@ -466,7 +479,7 @@ def test_entries_are_written_in_english_and_never_set_the_reply_language() -> No
 # (ADR 0153) measure 17,956 after dropping sentences that other always-on
 # text or the server's own error replies already say.
 # ADR 0154 measures 17,107 after dropping what a tool description or the
-# server's reply already says.
+# server's reply already says. The `unverified` tag (ADR 0156) measures 17,394.
 ALWAYS_ON_BUDGET = 18_000
 
 

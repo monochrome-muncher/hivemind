@@ -56,10 +56,10 @@ function scattering(health, t) {
   return { state: worst(signals), signals };
 }
 
-/** One row per fleet; a fleet with active entries but no writes and no verdicts in 7 days is quiet. */
+/** One row per fleet, with its count of unverified entries (observed, never a reason to Watch); a fleet with active entries but no writes and no verdicts in 7 days is quiet. */
 function breathing(health) {
   const fleets = Object.entries(health.by_fleet)
-    .map(([name, f]) => ({ name, ...f.breathing_7d, state: stateOf(f.active_entries > 0 && f.breathing_7d.writes === 0 && f.breathing_7d.verdicts === 0) }))
+    .map(([name, f]) => ({ name, ...f.breathing_7d, unverified: f.unverified || 0, state: stateOf(f.active_entries > 0 && f.breathing_7d.writes === 0 && f.breathing_7d.verdicts === 0) }))
     .sort((a, b) => a.name.localeCompare(b.name));
   return { state: worst(fleets), fleets };
 }

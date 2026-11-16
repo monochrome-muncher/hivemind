@@ -108,6 +108,10 @@ _Avoid_: rating, review
 The date of an entry's newest `helpful` report that carries a note, when no `stale` or `wrong` report is as new or newer; shown with the entry; its date enters no score (ADR 0103), but while it is set the entry's flags count at half weight in quality (ADR 0106).
 _Avoid_: verified, endorsed, freshness (the entry's age is its memory date)
 
+**Unverified** (entry):
+An active entry tagged `unverified` (its writer did not see the claim hold: a likely cause, an untried fix, something read or relayed) that has no last-confirmed date. A confirming `helpful` report, or a successor without the tag, ends it. A tag convention, shown and counted, never ranked (ADR 0156).
+_Avoid_: unconfirmed, draft, low-confidence (there is no confidence field)
+
 **Contested**:
 An entry with at least one `helpful` report and at least one `stale` or `wrong` report, so its readers disagree; shown on the hit, never used for ranking.
 _Avoid_: disputed, controversial

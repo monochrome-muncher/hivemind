@@ -119,6 +119,7 @@ class FleetHealthUsage:
     orphaned_flagged: int
     floating_gap: int
     gap_tag_counts: dict[str, int]
+    unverified: int
 
 
 @dataclass(frozen=True, slots=True)

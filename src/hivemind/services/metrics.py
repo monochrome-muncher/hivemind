@@ -377,6 +377,7 @@ class MetricsService:
                     "gap_dead_end": row.gap_dead_end,
                 }
             ),
+            unverified=row.unverified,
         )
 
     def _agents_report(self, agents: Sequence[Agent]) -> usage.AgentsUsage:

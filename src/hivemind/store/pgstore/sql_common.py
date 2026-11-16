@@ -7,6 +7,7 @@ from typing import Any
 
 from hivemind.domain.access import TrustLevel, Visibility
 from hivemind.domain.entry import EntryFilters
+from hivemind.domain.feedback import UNVERIFIED_TAG
 from hivemind.domain.validation import is_valid_uuid
 
 # Every ``Entry`` column except ``embedding``: no reader needs the stored
@@ -47,15 +48,36 @@ afterwards and a narrow-visibility reader can starve RRF's vector list.
 stated explicitly; untuned for now (ADR 0025).
 """
 
+
 # ADR 0067: a revoked agent's reports are left out of every feedback read
 # (the rows stay, so re-activation brings them back). ``agents.name`` is
 # unique, so this is an index probe; a reporter with no agent record counts.
 # ADR 0111: so are the rows an admin cleanup set aside (``set_aside_by``).
 # Every read of ``feedbacks`` as ``f`` uses this one condition.
-_RATING_COUNTS = (
-    "f.set_aside_by IS NULL AND "
-    "NOT EXISTS (SELECT 1 FROM agents a WHERE a.name = f.\"user\" AND a.status = 'revoked')"
-)
+def rating_counts(alias: str) -> str:
+    """The condition a ``feedbacks`` row read as ``alias`` must meet to count."""
+    return (
+        f"{alias}.set_aside_by IS NULL AND "
+        f"NOT EXISTS (SELECT 1 FROM agents a WHERE a.name = {alias}.\"user\" AND a.status = 'revoked')"
+    )
+
+
+_RATING_COUNTS = rating_counts("f")
+
+
+def unverified_condition(entry: str) -> str:
+    """Whether the entry read as ``entry`` still carries the ``unverified`` tag unconfirmed:
+    ``domain.feedback.still_unverified``. A confirmation is a noted ``helpful`` row newer than
+    every ``stale``/``wrong`` row (``last_confirmed``)."""
+    return (
+        f"('{UNVERIFIED_TAG}' = ANY({entry}.tags) AND NOT EXISTS ("
+        f"SELECT 1 FROM feedbacks h WHERE h.entry_id = {entry}.id AND h.verdict = 'helpful'"
+        r" AND coalesce(h.note, '') ~ '\S' AND " + rating_counts("h") + " AND NOT EXISTS ("
+        f"SELECT 1 FROM feedbacks f WHERE f.entry_id = {entry}.id"
+        " AND f.verdict IN ('stale', 'wrong') AND f.updated_at >= h.updated_at AND "
+        + _RATING_COUNTS
+        + ")))"
+    )
 
 
 def filter_conditions(
@@ -111,6 +133,9 @@ def filter_conditions(
             "EXISTS (SELECT 1 FROM feedbacks f WHERE f.entry_id = entries.id"
             " AND f.verdict IN ('stale', 'wrong') AND " + _RATING_COUNTS + ")"
         )
+
+    if filters.unverified:
+        clauses.append(f"entries.state = 'active' AND {unverified_condition('entries')}")
 
     if filters.relied_on_changed:
         clauses.append(_relied_on_changed_clause(filters.reporter, params))

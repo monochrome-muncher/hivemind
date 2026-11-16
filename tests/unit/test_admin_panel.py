@@ -747,7 +747,7 @@ def test_the_vital_signs_bands_turn_to_watch_at_the_thresholds() -> None:
         echo_rate: share(1, 10), topic_dispersion: [{ tag: "db", change: 0.05 }],
         rival_lifetime: { alternative: rival(2, 60), conflict: rival(0), contested: rival(1, 30) },
         grounding_share: share(4, 10), flagged_backlog_14d: 0,
-        by_fleet: { b: { active_entries: 3, breathing_7d: breathing(1, 0) }, a: { active_entries: 0, breathing_7d: breathing(0, 0) } },
+        by_fleet: { b: { active_entries: 3, unverified: 5, breathing_7d: breathing(1, 0) }, a: { active_entries: 0, breathing_7d: breathing(0, 0) } },
       },
     })
     const states = (m) => [m.collapsing, m.scattering, m.breathing].map((b) => b.state)
@@ -775,7 +775,7 @@ def test_the_vital_signs_bands_turn_to_watch_at_the_thresholds() -> None:
       emptyPool: vitalSigns(emptyPool).collapsing.signals[2].state,
       unknown: [vitalSigns(unknown).collapsing.signals[0], vitalSigns(unknown).collapsing.signals[3]],
       stricter: stricter.collapsing.signals[0].state,
-      fleets: vitalSigns(calm()).breathing.fleets.map((f) => [f.name, f.state]),
+      fleets: vitalSigns(calm()).breathing.fleets.map((f) => [f.name, f.state, f.unverified]),
     }))
     """
     out = subprocess.run(
@@ -791,7 +791,8 @@ def test_the_vital_signs_bands_turn_to_watch_at_the_thresholds() -> None:
     assert [s["value"] for s in got["unknown"]] == ["\u2014", "\u2014"]
     assert [s["state"] for s in got["unknown"]] == ["Steady", "Steady"]
     assert got["stricter"] == "Watch"
-    assert got["fleets"] == [["a", "Steady"], ["b", "Steady"]]
+    # The unverified count is shown, never a reason to Watch.
+    assert got["fleets"] == [["a", "Steady", 0], ["b", "Steady", 5]]
 
 
 def test_the_health_page_shows_the_vital_signs_above_the_fleet_health_card() -> None:

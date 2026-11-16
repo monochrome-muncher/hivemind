@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -31,6 +32,15 @@ def last_confirmed(
     if newest_flag_at is not None and newest_noted_helpful_at <= newest_flag_at:
         return None
     return newest_noted_helpful_at
+
+
+# Agents tag a claim they did not check themselves with this.
+UNVERIFIED_TAG = "unverified"
+
+
+def still_unverified(tags: Iterable[str], last_confirmed_at: datetime | None) -> bool:
+    """Whether an active entry's ``unverified`` tag still stands: no confirmation yet."""
+    return UNVERIFIED_TAG in tags and last_confirmed_at is None
 
 
 @dataclass(frozen=True, slots=True)
