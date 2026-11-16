@@ -283,7 +283,7 @@ def _payload_fields_warning(draft: EntryDraft) -> WriteWarning | None:
     payload = draft.payload or {}
     scope = payload.get("scope")
     unapplied = {
-        "scope": scope in SCOPE_RANK and scope != draft.scope,
+        "scope": isinstance(scope, str) and scope in SCOPE_RANK and scope != draft.scope,
         "tags": not draft.tags,
         "sources": not draft.sources,
         "supersedes": not draft.supersedes,
