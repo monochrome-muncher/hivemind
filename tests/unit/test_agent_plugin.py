@@ -127,7 +127,7 @@ def test_rules_moved_out_of_the_skill_live_in_the_tool_descriptions() -> None:
     assert "path|url|session|other" in contract.DESC_WRITE  # ADR 0105: sources named
     assert "verified:" in contract.DESC_FEEDBACK
     assert "Pin rarely" in contract.DESC_PIN
-    assert "ask the user to start a new session (hivemind-switch skill)" in contract.DESC_WHOAMI
+    assert "fixed per session (to switch: hivemind-switch skill)" in contract.DESC_WHOAMI
 
 
 def test_the_skill_lists_every_tool_where_it_names_them() -> None:
@@ -491,6 +491,7 @@ def test_entries_are_written_in_english_and_never_set_the_reply_language() -> No
 # ADR 0154 measures 17,107 after dropping what a tool description or the
 # server's reply already says. "And may be wrong" in the reminder and the server
 # instructions (ADR 0155) measures 17,142; the `unverified` tag (ADR 0156) 17,429.
+# Trimming the weak-model clauses on hive_whoami and hive_search (ADR 0158) measures 17,270.
 ALWAYS_ON_BUDGET = 18_000
 
 

@@ -2,7 +2,7 @@
 
 Builds on [ADR 0062](0062-a-similarity-threshold-for-the-vector-stream.md) and [ADR 0100](0100-vector-similarity-cut-off-on-by-default.md) (the vector stream's similarity), and [ADR 0102](0102-trim-search-hit-score-and-empty-feedback.md) (compact hits). Changes the `Store.search_vector` port, the search hit (SPEC §6.1) and the search reply. Ranking is unchanged.
 
-Status: Accepted.
+Status: Accepted; decision 6 amended by [ADR 0158](0158-agent-text-drops-weak-model-clauses.md): the description no longer repeats the reply's loose note.
 
 ## Context
 

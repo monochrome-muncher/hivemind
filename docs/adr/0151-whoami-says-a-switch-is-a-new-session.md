@@ -2,7 +2,7 @@
 
 Amends [ADR 0150](0150-key-profiles-on-the-client.md) decision 6 ("it costs no always-on text"). Backs decision 3 (a switch is a new session) with one clause in a tool description, the text every harness shows.
 
-Status: Accepted.
+Status: Accepted; decision 1 amended by [ADR 0158](0158-agent-text-drops-weak-model-clauses.md): the description keeps the fact, not the how-to.
 
 ## Context
 
