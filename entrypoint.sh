@@ -1,7 +1,7 @@
 #!/bin/sh
 # Hivemind image entrypoint (Kubernetes + docker-compose).
 #
-# Runs the idempotent migration (ADR 0013) before the runner; owned here,
+# Runs the idempotent migration (ADR 0020) before the runner; owned here,
 # not in an initContainer (ADR 0018). A dim mismatch (ADR 0015) or an
 # unreachable DB fails LOUDLY and the pod never serves. No retry here: the
 # restart policy (k8s) / depends_on healthcheck (compose) owns recovery.

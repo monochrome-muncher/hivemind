@@ -443,7 +443,7 @@ def test_untested_claims_are_tagged_unverified() -> None:
     assert f"did not test '{UNVERIFIED_TAG}'" in DESC_WRITE
     flat = " ".join(SKILL.split())
     assert f"**Tag `{UNVERIFIED_TAG}`** a claim you did not see hold" in flat
-    assert "a confirming `helpful` or a successor without the tag clears it" in flat
+    assert "a confirming `helpful` with a note or a successor without the tag clears it" in flat
     assert (ROOT / "docs" / "adr" / "0156-unverified-tag-convention.md").is_file()
 
 

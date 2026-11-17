@@ -45,9 +45,12 @@ a header name to an environment variable, has the same limit; a literal
 `chmod 600 ~/.codex/config.toml` and never use a project file).
 
 The hivemind plugin (`codex plugin marketplace add
-<git-url-of-the-hivemind-repo>`, then install `hivemind` from `/plugins`)
+<git-url-of-the-hivemind-repo>`, then install `hivemind` from `/plugins`, or run
+`codex plugin add hivemind@hivemind`)
 adds the skills and the startup hook; the server entry above is still
-needed.
+needed. Without it Codex lists a `hivemind` entry from the plugin with an
+unexpanded `${HIVEMIND_MCP_URL}` that cannot connect; with the entry in
+`config.toml`, yours wins.
 
 **Identity:** name this agent `<user>-codex`, distinct from the agents of
 other harnesses.
