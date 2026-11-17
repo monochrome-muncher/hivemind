@@ -37,6 +37,7 @@
 //   merge.js      merging fleets, moving agents, and undoing either
 //   retire.js     retiring an agent with a successor, and undoing it
 //   offboard.js   offboarding an owner
+//   menu.js       the "More" dropdown on an agent row
 //
 // Pure helpers (no DOM, so a test runs them as they ship):
 //   asagent.js    "Search as an agent"

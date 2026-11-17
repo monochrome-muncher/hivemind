@@ -6,6 +6,7 @@ import {
 } from "./core.js";
 import { cleanupDialog, cleanupsCard } from "./cleanup.js";
 import { retireDialog, successionsCard } from "./retire.js";
+import { menu } from "./menu.js";
 
 // --- shared agent actions --------------------------------------------------------
 
@@ -184,16 +185,30 @@ function replaceKeyDialog(agent, onDone) {
   });
 }
 
+const RENAME_WARNING = "Renaming rewrites every memory this agent wrote and may take a while for a busy agent. Its key keeps working, and the old name stays reserved: no agent can register under it. Past audit rows keep the old name.";
+
+/** One dialog for what an admin may correct on any agent: name and owner alias, plus trust level and home fleet while it is active. */
 function editDialog(agent, onDone) {
-  const level = levelSelect(agent.trust_level);
-  const fleet = fleetPicker(agent.home_fleet_id);
+  const active = agent.status === "active";
+  const name = h("input", { id: "f-agent-name", maxlength: 63, autocomplete: "off", spellcheck: "false", value: agent.name });
+  const owner = h("input", { id: "f-owner-edit", maxlength: 128, autocomplete: "off", value: agent.owner_alias || "", placeholder: "e.g. jane.doe" });
+  const level = active ? levelSelect(agent.trust_level) : null;
+  const fleet = active ? fleetPicker(agent.home_fleet_id) : null;
+  const renameWarning = h("p", { class: "callout callout-warn small", text: RENAME_WARNING, hidden: true });
+  name.addEventListener("input", () => { renameWarning.hidden = name.value.trim() === agent.name; });
+  // What the server holds now: a retry after a failed rename must not send the saved changes again.
+  const saved = { trust_level: agent.trust_level, home_fleet_id: agent.home_fleet_id, owner_alias: agent.owner_alias || "" };
+  let patched = false;
   openModal({
     title: `Edit ${agent.name}`,
     body: [
-      h("div", { class: "field" }, h("label", { for: "f-level", text: "Trust level" }), level,
-        h("span", { class: "hint", text: "Demoting to 0 makes the agent dormant: its key stays valid but it can do nothing." })),
-      fleet.el,
-      h("p", { class: "muted small", text: "Moving an agent never moves the entries it already wrote." }),
+      h("div", { class: "field" }, h("label", { for: "f-agent-name", text: "Name" }), name, renameWarning),
+      h("div", { class: "field" }, h("label", { for: "f-owner-edit", text: "Owner alias" }), owner,
+        h("span", { class: "hint", text: "Fixes a typo or a changed alias. The agent and its memories stay as they are; only the grouping by owner (Stats, Agents) follows the new alias." })),
+      active ? h("div", { class: "field" }, h("label", { for: "f-level", text: "Trust level" }), level,
+        h("span", { class: "hint", text: "Demoting to 0 makes the agent dormant: its key stays valid but it can do nothing." })) : null,
+      active ? fleet.el : null,
+      active ? h("p", { class: "muted small", text: "Moving an agent never moves the entries it already wrote." }) : null,
     ],
     actions: [
       { label: "Cancel" },
@@ -202,19 +217,39 @@ function editDialog(agent, onDone) {
         class: "btn-primary",
         submit: true,
         onClick: async () => {
-          const body = {};
-          if (Number(level.value) !== agent.trust_level) body.trust_level = Number(level.value);
-          const fleetId = await fleet.resolve();
-          if (fleetId !== agent.home_fleet_id) body.home_fleet_id = fleetId;
-          if (Object.keys(body).length === 0) { closeModal(); return; }
-          await guarded(() => api("PATCH", `admin/agents/${encodeURIComponent(agent.name)}`, { body }));
+          const next = name.value.trim();
+          const ownerAlias = owner.value.trim();
+          if (!next) throw new Error("Enter the name.");
+          if (!ownerAlias && saved.owner_alias) throw new Error("Enter the owner alias.");
+          const wanted = ownerAlias ? { owner_alias: ownerAlias } : {};
+          if (active) {
+            wanted.trust_level = Number(level.value);
+            wanted.home_fleet_id = await fleet.resolve();
+          }
+          const changes = Object.fromEntries(Object.entries(wanted).filter(([key, value]) => value !== saved[key]));
+          const encoded = encodeURIComponent(agent.name);
+          if (Object.keys(changes).length) {
+            await guarded(() => api("PATCH", `admin/agents/${encoded}`, { body: changes }));
+            Object.assign(saved, changes);
+            patched = true;
+          }
+          if (next !== agent.name) {
+            try {
+              await guarded(() => api("POST", `admin/agents/${encoded}/rename`, { body: { name: next } }));
+            } catch (err) {
+              if (!patched) throw err;
+              throw new Error(`The other changes were saved; the rename was not: ${err.message}`);
+            }
+          }
           closeModal();
-          toast(`${agent.name} updated`);
-          onDone();
+          toast(next === agent.name ? `${agent.name} updated` : `${agent.name} is now ${next}`);
+          if (next !== agent.name && parseHash().view === "agent") window.location.hash = agentHref(next);
+          else onDone();
         },
       },
     ],
   });
+  name.select();
 }
 
 const SCOUT_NOTE = "A scout gets a one-line hint in hive_whoami to explore: try less-tested rivals, use explore search, re-check old entries and write what it tried. It reads and writes exactly as before.";
@@ -264,90 +299,47 @@ export function scoutCard(agent, onDone) {
       h("p", { class: "muted small", text: agent.status === "revoked" ? `${SCOUT_NOTE} The role stays on the record and comes back if the agent is re-activated.` : SCOUT_NOTE })));
 }
 
-/** Fix the owner alias of any agent (ADR 0122): the Stats "users" tab groups by it. */
-function ownerDialog(agent, onDone) {
-  const owner = h("input", { id: "f-owner-edit", maxlength: 128, autocomplete: "off", value: agent.owner_alias || "", placeholder: "e.g. jane.doe" });
-  openModal({
-    title: `Owner of ${agent.name}`,
-    body: [
-      h("div", { class: "field" }, h("label", { for: "f-owner-edit", text: "Owner alias" }), owner,
-        h("span", { class: "hint", text: "Fixes a typo or a changed alias. The agent and its memories stay as they are; only the grouping by owner (Stats, Agents) follows the new alias." })),
-    ],
-    actions: [
-      { label: "Cancel" },
-      {
-        label: "Save",
-        class: "btn-primary",
-        submit: true,
-        onClick: async () => {
-          const ownerAlias = owner.value.trim();
-          if (!ownerAlias) throw new Error("Enter the owner alias.");
-          if (ownerAlias === (agent.owner_alias || "")) { closeModal(); return; }
-          await guarded(() => api("PATCH", `admin/agents/${encodeURIComponent(agent.name)}`, { body: { owner_alias: ownerAlias } }));
-          closeModal();
-          toast(`${agent.name} now belongs to ${ownerAlias}`);
-          onDone();
-        },
-      },
-    ],
-  });
-  owner.select();
+const CLEANUP_TITLE = "Withdraw what this agent wrote in a time window and set its ratings aside";
+
+/** What else can be done to `agent` now, besides Edit…: label, handler and whether it is destructive. */
+function otherActions(agent, refresh) {
+  const activate = { label: "Activate", primary: true, onClick: () => activateDialog(agent, refresh) };
+  const reject = { label: "Reject", danger: true, onClick: () => revokeDialog(agent, refresh) };
+  const replaceKey = { label: "Replace key", onClick: () => replaceKeyDialog(agent, refresh) };
+  const cleanup = { label: "Clean up…", title: CLEANUP_TITLE, onClick: () => cleanupDialog(agent, refresh) };
+  const revoke = { label: "Revoke", danger: true, onClick: () => revokeDialog(agent, refresh) };
+  const retire = { label: "Retire…", title: "Hand its memories to a successor and revoke it", danger: agent.status === "active", onClick: () => retireDialog(agent, refresh) };
+  const reactivate = { label: "Re-activate", onClick: () => activateDialog(agent, refresh) };
+  if (agent.status === "pending") return [activate, reject];
+  if (agent.status === "active") return [replaceKey, cleanup, revoke, retire];
+  if (agent.status === "revoked") return [cleanup, reactivate, retire];
+  return [];
 }
 
-/** Give any agent a new name (ADR 0159): the server rewrites every copy of it and the key keeps working. */
-function renameDialog(agent, onDone) {
-  const name = h("input", { id: "f-agent-rename", maxlength: 63, autocomplete: "off", spellcheck: "false", value: agent.name });
-  openModal({
-    title: `Rename ${agent.name}`,
-    body: [
-      h("div", { class: "field" }, h("label", { for: "f-agent-rename", text: "New name" }), name,
-        h("span", { class: "hint", text: "Its key keeps working and its memories, ratings and pins follow the new name. The old name stays reserved: no agent can register under it. Past audit rows keep the old name." })),
-    ],
-    actions: [
-      { label: "Cancel" },
-      {
-        label: "Rename",
-        class: "btn-primary",
-        submit: true,
-        onClick: async () => {
-          const next = name.value.trim();
-          if (!next) throw new Error("Enter the new name.");
-          if (next === agent.name) { closeModal(); return; }
-          await guarded(() => api("POST", `admin/agents/${encodeURIComponent(agent.name)}/rename`, { body: { name: next } }));
-          closeModal();
-          toast(`${agent.name} is now ${next}`);
-          if (parseHash().view === "agent") window.location.hash = agentHref(next);
-          else onDone();
-        },
-      },
-    ],
-  });
-  name.select();
-}
+const editButton = (agent, refresh) => h("button", { type: "button", class: "btn btn-sm", text: "Edit…", title: "Change the name, owner alias, trust level or home fleet", onclick: () => editDialog(agent, refresh) });
 
-/** The buttons for what can be done to `agent` now (activate, edit, revoke…). */
+const actionButton = ({ label, title, primary, danger, onClick }) => h("button", {
+  type: "button", class: `btn btn-sm${primary ? " btn-primary" : ""}${danger ? " btn-danger" : ""}`, text: label, title, onclick: onClick,
+});
+
+/** Every action on `agent` as its own button (the agent page). */
 export function agentButtons(agent, refresh) {
-  const buttons = [];
-  if (agent.status === "pending") {
-    buttons.push(h("button", { type: "button", class: "btn btn-primary btn-sm", text: "Activate", onclick: () => activateDialog(agent, refresh) }));
-    buttons.push(h("button", { type: "button", class: "btn btn-danger btn-sm", text: "Reject", onclick: () => revokeDialog(agent, refresh) }));
-  } else if (agent.status === "active") {
-    buttons.push(h("button", { type: "button", class: "btn btn-sm", text: "Edit", onclick: () => editDialog(agent, refresh) }));
-    buttons.push(h("button", { type: "button", class: "btn btn-sm", text: "Replace key", onclick: () => replaceKeyDialog(agent, refresh) }));
-    buttons.push(h("button", { type: "button", class: "btn btn-sm", text: "Clean up…", title: "Withdraw what this agent wrote in a time window and set its ratings aside", onclick: () => cleanupDialog(agent, refresh) }));
-    buttons.push(h("button", { type: "button", class: "btn btn-danger btn-sm", text: "Revoke", onclick: () => revokeDialog(agent, refresh) }));
-    buttons.push(h("button", { type: "button", class: "btn btn-danger btn-sm", text: "Retire…", title: "Hand its memories to a successor and revoke it", onclick: () => retireDialog(agent, refresh) }));
-  } else if (agent.status === "revoked") {
-    buttons.push(h("button", { type: "button", class: "btn btn-sm", text: "Clean up…", title: "Withdraw what this agent wrote in a time window and set its ratings aside", onclick: () => cleanupDialog(agent, refresh) }));
-    buttons.push(h("button", { type: "button", class: "btn btn-sm", text: "Re-activate", onclick: () => activateDialog(agent, refresh) }));
-    buttons.push(h("button", { type: "button", class: "btn btn-sm", text: "Retire…", title: "Hand its memories to a successor", onclick: () => retireDialog(agent, refresh) }));
-  }
-  buttons.push(h("button", { type: "button", class: "btn btn-sm", text: "Rename", title: "Give the agent a new name", onclick: () => renameDialog(agent, refresh) }));
-  buttons.push(h("button", { type: "button", class: "btn btn-sm", text: "Edit owner", title: "Correct the owner alias", onclick: () => ownerDialog(agent, refresh) }));
-  return buttons;
+  return [editButton(agent, refresh), ...otherActions(agent, refresh).map(actionButton)];
 }
 
-export const agentActions = (agent, refresh) => h("td", { class: "actions" }, agentButtons(agent, refresh));
+/**
+ * A list row's controls: Edit… and a More menu. A pending agent's Activate stays a
+ * button of its own, because it is what the pending queue is for.
+ */
+export function agentActions(agent, refresh) {
+  const [first, ...rest] = otherActions(agent, refresh);
+  const primary = first && first.primary ? first : null;
+  const inMenu = primary ? rest : [first, ...rest].filter(Boolean);
+  return h("td", { class: "actions" },
+    primary ? actionButton(primary) : null,
+    editButton(agent, refresh),
+    inMenu.length ? menu("More", inMenu) : null);
+}
 
 export function pendingQueue(refresh) {
   const pending = state.agents
