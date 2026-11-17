@@ -22,4 +22,5 @@ The cost is one indexed read of the agent row per rating request. Withdrawals an
 ## Consequences
 
 - A rating sent in the instant of a rename gets `fleet_busy` and succeeds on retry under the new name.
+- A rating now waits at most 3 seconds for any lock, as an entry write does (ADR 0107): one on a memory that a cleanup, merge or move holds answers `fleet_busy` instead of waiting for it.
 - Renaming back to a former name no longer depends on what happened during the first rename.
