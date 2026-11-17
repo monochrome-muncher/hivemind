@@ -1077,3 +1077,13 @@ def test_the_module_map_in_admin_js_names_every_admin_module() -> None:
     header = (STATIC_DIR / "admin.js").read_text().split("\nimport", 1)[0]
     unnamed = [p.name for p in STATIC_DIR.glob("*.js") if f"//   {p.name}" not in header]
     assert unnamed == [], "add these to the module map at the top of admin.js"
+
+
+def test_agent_rows_offer_edit_and_a_more_menu_in_place_of_every_button() -> None:
+    agents = (STATIC_DIR / "agents.js").read_text()
+    for gone in ("ownerDialog", "renameDialog", '"Edit owner"', 'text: "Rename"'):
+        assert gone not in agents, gone
+    assert 'menu("More", inMenu)' in agents
+    menu = (STATIC_DIR / "menu.js").read_text()
+    for needed in ('popover: "auto"', '"aria-haspopup"', '"aria-expanded"', 'role: "menuitem"'):
+        assert needed in menu, needed

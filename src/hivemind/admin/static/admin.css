@@ -194,7 +194,8 @@ tbody tr:hover { background: var(--surface-2); }
 td.actions { text-align: right; white-space: nowrap; }
 /* The Fleets table has ten columns (with merged rows): tighter cells keep it inside its card. */
 .fleets-table th, .fleets-table td { padding-left: 10px; padding-right: 10px; }
-td.actions .btn + .btn { margin-left: 6px; }
+td.actions .btn + .btn, td.actions .menu-wrap { margin-left: 6px; }
+.menu-wrap { display: inline-block; }
 .empty { padding: 28px 18px; text-align: center; color: var(--muted); }
 .group-row td { background: var(--surface-2); font-weight: 600; font-size: 12.5px; padding-top: 6px; padding-bottom: 6px; }
 .nowrap { white-space: nowrap; }
@@ -241,6 +242,20 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible { outline: 2px sol
 .btn-danger-solid:hover { opacity: 0.9; background: var(--danger); }
 .btn-ghost { background: transparent; }
 .btn-sm { padding: 4px 10px; font-size: 12.5px; }
+.menu {
+  position: fixed; inset: auto; margin: 0; padding: 4px; min-width: 160px;
+  background: var(--surface); color: var(--text); border: 1px solid var(--border);
+  border-radius: 8px; box-shadow: var(--shadow), 0 8px 24px rgb(0 0 0 / 18%);
+}
+.menu:popover-open { display: grid; }
+.menu-item {
+  font: inherit; font-size: 13px; text-align: left; cursor: pointer;
+  padding: 6px 10px; border: 0; border-radius: 6px; background: transparent; color: inherit;
+}
+.menu-item:hover, .menu-item:focus-visible { background: var(--surface-2); outline: 0; }
+.menu-item:focus-visible { box-shadow: inset 0 0 0 2px var(--ring); }
+.menu-item-danger { color: var(--danger); }
+.menu-item-danger:hover, .menu-item-danger:focus-visible { background: var(--danger-soft); }
 .btn-block { width: 100%; }
 .form-error { color: var(--danger); background: var(--danger-soft); border-radius: 8px; padding: 8px 10px; margin: 0; font-size: 13px; }
 

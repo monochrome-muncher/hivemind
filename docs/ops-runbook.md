@@ -283,8 +283,8 @@ hash is stored (a leaked database never leaks usable keys, SPEC §8.1).
 | Replace an agent's key | `hivemind-keys rotate-agent --name alice` / `POST /v1/admin/agents/alice/key` / the admin panel's "Replace key" | the old key stops working on the agent's next request and the new key is shown **once**; status, level, fleet and memories stay as they are; only for an `active` agent (a revoked one is re-activated instead; ADR 0108) |
 | A locked key (the person behind the agent pressed **This key leaked** in the portal, ADR 0117) | the Agents page shows a "key locked" badge; `GET /v1/admin/agents` has `key_locked`; `hivemind-keys list` marks the key | the key fails every request with `key_locked` while the agent stays `active`. Replace the key (row above) to let the agent back in; revoking works too. The lock is audited `agent_key.lock` (actor: the agent's name, `via: "portal"`) |
 | Revoke an agent key | `hivemind-keys revoke --name alice` / `POST /v1/admin/agents/alice/revoke` | the agent's key is dead and its status is `revoked`; the **name stays reserved**; on a `pending` agent this rejects the registration (ADRs 0012, 0028) |
-| Correct an agent's owner alias (a typo made it a second owner in Stats) | `PATCH /v1/admin/agents/{name}` with `{"owner_alias": "..."}` / the admin panel's "Edit owner" (Agents list or the agent page) | any status; the Stats "users" tab, the Agents list and the health owner figures follow at once, because the alias is read from the agent record. Audited as `agent.owner_set` with `{from, to}`; the same value changes nothing. Old `agent.register` audit rows keep the alias as it was typed. No CLI command: `hivemind-keys` has no trust-level or home-fleet command either (ADR 0122) |
-| Rename an agent (a typo, a reorganisation) | `POST /v1/admin/agents/{name}/rename` with `{"name": "..."}` / the admin panel's "Rename" / `hivemind-keys rename-agent OLD NEW` | any status; the key keeps working and the memories, ratings and pins follow. Section 21 |
+| Correct an agent's owner alias (a typo made it a second owner in Stats) | `PATCH /v1/admin/agents/{name}` with `{"owner_alias": "..."}` / the admin panel's "Edit…" (Agents list or the agent page; the Owner alias field) | any status; the Stats "users" tab, the Agents list and the health owner figures follow at once, because the alias is read from the agent record. Audited as `agent.owner_set` with `{from, to}`; the same value changes nothing. Old `agent.register` audit rows keep the alias as it was typed. No CLI command: `hivemind-keys` has no trust-level or home-fleet command either (ADR 0122) |
+| Rename an agent (a typo, a reorganisation) | `POST /v1/admin/agents/{name}/rename` with `{"name": "..."}` / the admin panel's "Edit…" (the Name field) / `hivemind-keys rename-agent OLD NEW` | any status; the key keeps working and the memories, ratings and pins follow. Section 21 |
 | Demote an agent | `PATCH /v1/admin/agents/{name}` (trust level → 0) | the agent is *dormant* (key still valid, no access) — distinct from revocation |
 
 > **Rotating the org key closes registration** (ADR 0031): every prior
@@ -1408,7 +1408,7 @@ transaction, and the agent's key keeps working, so the person behind the
 agent changes nothing. The agent sees the new name in `hive_whoami` on its
 next call. It needs the admin key.
 
-In the panel press **Rename** on the agent's row or page. Or call the API,
+In the panel press **Edit…** on the agent's row or page and change the Name. Or call the API,
 or run the break-glass command on the database host:
 
 ```sh
