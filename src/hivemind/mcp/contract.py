@@ -66,8 +66,7 @@ DESC_SEARCH = (
     "are display-only). If embedding is down, hits are "
     "keyword-only (degraded: keyword_only), so a thin result proves nothing. "
     "'match' is keyword|vector|both; 'similarity' (vector-found only) is the "
-    "cosine to the query. closest: loose = no hit is a close match: treat "
-    "hits as loosely related and verify before relying. "
+    "cosine to the query. "
     "A hit's 'feedback' (absent: none) counts helpful/stale/wrong reports: "
     "hive_get a stale or wrong hit to read why. A hit whose "
     "fleet_id differs from your home_fleet_id is foreign (privileged agents "
@@ -151,6 +150,5 @@ DESC_WHOAMI = (
     "fleet, and what it may read (can_read) and which scopes it may write "
     "(can_write_scopes), plus inherits_from: agents whose memories you own. An empty "
     "can_write_scopes means you cannot write yet; an empty can_read means "
-    "searches come back empty. The key is fixed per session: to act as another agent "
-    "or fleet, ask the user to start a new session (hivemind-switch skill)."
+    "searches come back empty. The key is fixed per session (to switch: hivemind-switch skill)."
 )
