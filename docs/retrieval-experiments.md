@@ -378,7 +378,7 @@ improve.
 
 *(tools at the time: `tests/eval/confirmation.py`, `make measure-confirmation`, both since removed; the
 embedding-free slices in `test_social_scenarios.py` and
-`test_aged_currency.py`)* `HIVEMIND_RECENCY_FROM_CONFIRMATION` is off by
+`test_aged_currency.py`)* `HIVEMIND_RECENCY_FROM_CONFIRMATION` was off by
 default. With it on, the social factor is `min(social_max, quality ×
 r_conf / r_occ)`, where `r_conf` ages the entry from its "last confirmed"
 date. Everything below is the hash embedder or no embedder at all: it
@@ -477,11 +477,11 @@ the setting stays off and the default does not change.
 
 > **Removed (ADR 0103).** The per-kind profiles were re-measured on 2026-10-21 with the Qwen3 embedders, came out worse, and were taken out. The results below are kept as history; `tests/eval/confirmation.py` is now `tests/eval/ranking.py` and no longer measures it.
 
-*(tools: `tests/eval/confirmation.py` variants, `make measure-ranking`;
-`tests/eval/test_kind_profile.py` for the age-varied fixture)*
-`HIVEMIND_RECENCY_BY_KIND` is unset by default. Set to
+*(tools at the time: `tests/eval/confirmation.py` variants, `make measure-ranking`;
+`tests/eval/test_kind_profile.py` for the age-varied fixture, since removed)*
+`HIVEMIND_RECENCY_BY_KIND` was unset by default. Set to
 `insight=180,decision=365` (or `insight=90,decision=180`), decisions and
-insights age by a longer half-life while facts keep 30 days, under the same
+insights aged by a longer half-life while facts keep 30 days, under the same
 0.8 floor. The pass rule is ADR 0071's: no domain's or the pooled hit@5 or
 MRR drops by more than 0.01, and the timeless slice improves. Everything
 below is the hash embedder: **machinery only, not evidence**.

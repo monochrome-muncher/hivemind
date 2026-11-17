@@ -44,7 +44,7 @@ ask the user.
 | Claude Code | `references/claude-code.md` |
 | Codex | `references/codex.md` |
 | GitHub Copilot CLI (`copilot`) | `references/copilot-cli.md` |
-| Cursor (`cursor`, `cursor-agent`) | `references/cursor.md` |
+| Cursor (`cursor`, `cursor-agent`, `agent`) | `references/cursor.md` |
 | Gemini CLI | `references/gemini-cli.md` |
 | Antigravity (`agy`, the App or the IDE) | `references/antigravity.md` |
 | DeepSeek Harness (`dsh`) | `references/deepseek-harness.md` |

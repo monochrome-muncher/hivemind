@@ -1,7 +1,7 @@
 """The REST routes (SPEC §5.1): thin, validation and service calls only; business rules live in
 the services.
 
-Typed service errors propagate to the table in ``errors.py``; a route catches one only where its
+Typed service errors propagate to the table in ``api/errors.py``; a route catches one only where its
 answer differs (``create_entry``: ``invalid_entry``).
 """
 

@@ -23,6 +23,7 @@
     "plugins/hivemind/cordis.patch.yml",
     "plugins/hivemind/cline/",
     "plugins/hivemind/dsh/",
+    "plugins/hivemind/junie/",
     "plugins/hivemind/skills/",
     "plugins/hivemind/extensions/",
     "plugins/hivemind/opencode/"
