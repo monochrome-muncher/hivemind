@@ -2,7 +2,7 @@
 
 Amends [ADR 0077](0077-write-check-mode-and-warnings.md) §3 (the warning codes) and backs [ADR 0146](0146-scope-by-evidence.md) (scope by evidence) with a check in the write reply, the way [ADR 0134](0134-not-english-write-warning.md) backs the English rule. Adds a row to SPEC §4.1. Refuses, rewrites and moves nothing.
 
-Status: Accepted. Advisory only.
+Status: Superseded by [ADR 0157](0157-tentative-write-warning-removed.md): the warning is removed.
 
 ## Context
 

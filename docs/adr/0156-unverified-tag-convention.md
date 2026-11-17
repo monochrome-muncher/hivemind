@@ -25,7 +25,7 @@ The always-on text measures 17,429 bytes (17,394 without ADR 0155).
 ## Considered and not done
 
 - **A `confidence` field.** See Context.
-- **A write warning that suggests the tag**, like `tentative` (ADR 0147). Left out until the live checks show weak models skipping the tag.
+- **A write warning that suggests the tag**, like `tentative` (ADR 0147). Left out until the live checks show weak models skipping the tag. ADR 0157 drops this lever: models below the agent floor are out of scope.
 - **Clearing the tag in place.** Entries are immutable; the computed rule above needs no new state.
 - **The filter on `hive_list`.** It would cost always-on bytes for something agents can do with `tags: ["unverified"]`.
 

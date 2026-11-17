@@ -88,9 +88,10 @@ The SPEC §10 extensions (Tier 5) stay held until their triggers fire.
   not commitments.
 - **Memories as data, and self versus fleet** ([docs/reviews/2026-11-12-memories-as-data-and-scope.md](docs/reviews/2026-11-12-memories-as-data-and-scope.md)):
   options A to D are built (scope by evidence, the `tentative` warning,
-  match strength and the loose note; ADRs 0146 to 0148). E ("and may be
-  wrong" in the always-on text) and F (recording how the author held an
-  entry) are held.
+  match strength and the loose note; ADRs 0146 to 0148); the `tentative`
+  warning was removed again (ADR 0157). E ("and may be wrong" in the
+  always-on text) and F (the `unverified` tag) are built too (ADRs 0155,
+  0156).
 - **4.1 BM25** stays deferred; revisit only on observed keyword misses.
 
 ## Tier 1 — validate the core  *(shipped)*

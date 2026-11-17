@@ -8,7 +8,7 @@
 >
 > **Amended by [ADR 0134](0134-not-english-write-warning.md):** a ninth code, `not_english`, from the draft's `summary` and `body`.
 >
-> **Amended by [ADR 0147](0147-tentative-write-warning.md):** a tenth code, `tentative`, on `fleet` and `org` writes that read as an untested idea.
+> **Amended by [ADR 0147](0147-tentative-write-warning.md):** a tenth code, `tentative`, on `fleet` and `org` writes that read as an untested idea; removed again by [ADR 0157](0157-tentative-write-warning-removed.md).
 >
 > **Amended by [ADR 0152](0152-payload-fields-write-warning.md):** an eleventh code, `payload_fields`, when a top-level key of `payload` names an unset field of the write itself.
 
