@@ -49,12 +49,12 @@ is unused.
 | [0036](0036-foreign-entries-use-dont-relay.md) | Foreign entries: use, don't relay — an agent rule, not a server rule | Accepted |
 | [0037](0037-readiness-is-shallow-the-database-probe-is-separate.md) | Readiness is shallow; the database probe is a separate endpoint | Accepted |
 | [0039](0039-key-lifecycle-is-atomic-and-registration-is-owned.md) | Key lifecycle is atomic, keys are unique by schema, and a registration is owned by its alias | Accepted |
-| [0040](0040-input-bounds-and-agent-name-rules.md) | Input bounds, NUL rejection and agent-name rules | Amended by 0045 |
+| [0040](0040-input-bounds-and-agent-name-rules.md) | Input bounds, NUL rejection and agent-name rules | Amended by 0045, 0159 (a name an agent left in a rename stays reserved) |
 | [0041](0041-provider-call-deadline-jitter-and-typed-embedder-errors.md) | Provider calls: an overall deadline, jittered backoff, and typed embedder errors | Amended by 0048 |
 | [0042](0042-mcp-credential-is-reverified-per-call-and-fails-closed.md) | The MCP credential is re-verified on every call and a missing one fails closed | Accepted |
 | [0043](0043-entries-are-untrusted-data.md) | Entries are untrusted data: framing in the instructions and the skill, not in the payload | Accepted |
 | [0044](0044-key-bootstrap-writes-the-secret-directly.md) | The first-run key bootstrap writes the Kubernetes Secret itself | Accepted |
-| [0045](0045-agent-names-are-unique-ignoring-case.md) | Agent names are unique ignoring case | Accepted |
+| [0045](0045-agent-names-are-unique-ignoring-case.md) | Agent names are unique ignoring case | Accepted; amended by 0159 (former names are reserved too) |
 | [0046](0046-registrations-are-audited.md) | Registrations are audited | Accepted |
 | [0047](0047-keyword-stream-matches-any-term.md) | The keyword stream matches any query term | Amended by 0049 |
 | [0048](0048-search-falls-back-to-keywords-when-the-embedder-is-down.md) | Search falls back to keywords when the embedder is down | Accepted |
@@ -131,8 +131,8 @@ is unused.
 | [0119](0119-rollbacks-do-not-silently-erase-the-audit-log.md) | Rollbacks do not silently erase the audit log | Accepted; amends 0020, 0027, migration 0027, `hivemind-migrate --rollback` refuses without `--discard-audit-rows` / `--revive-revoked-keys` / `--unlock-locked-keys`, audited `schema.rollback` |
 | [0120](0120-admin-creates-an-agent-for-its-owner.md) | An admin creates an agent for its owner | Accepted; amended by 0122; touches 0012, 0029, 0039, 0046, `POST /v1/admin/agents` and the panel's New agent, no migration, audited as `agent.register` + `agent.activate` |
 | [0121](0121-overview-needs-you-row.md) | The Overview opens with a "Needs you" row | Accepted; touches 0029, 0093, 0110, 0117, admin panel only (new `needs.js`, Agents page filters in the hash), no new endpoint, no migration |
-| [0122](0122-admin-corrects-an-agents-owner-alias.md) | An admin corrects an agent's owner alias | Accepted; amends 0011, 0120, `PATCH /v1/admin/agents/{name}` gains `owner_alias`, migration 0029, audited `agent.owner_set`, stats follow because the alias lives only on the agent row |
-| [0123](0123-agent-history.md) | One agent's history, in the admin panel and in the agent portal | Accepted; builds on 0027, 0095, 0113, 0118, migration 0030 (audit-log indexes), audit-log `target` and `subject` filters, `GET /v1/portal/history`, agent key only, the admin is never named |
+| [0122](0122-admin-corrects-an-agents-owner-alias.md) | An admin corrects an agent's owner alias | Accepted; touched by 0159 (the name can be renamed too); amends 0011, 0120, `PATCH /v1/admin/agents/{name}` gains `owner_alias`, migration 0029, audited `agent.owner_set`, stats follow because the alias lives only on the agent row |
+| [0123](0123-agent-history.md) | One agent's history, in the admin panel and in the agent portal | Accepted; builds on 0027, 0095, 0113, 0118, migration 0030 (audit-log indexes), audit-log `target` and `subject` filters, `GET /v1/portal/history`, agent key only, the admin is never named; amended by 0159 (former names count as the agent) |
 | [0124](0124-admin-restores-a-withdrawn-memory.md) | The admin restores one withdrawn memory | Accepted; amends 0001, 0080, migration 0031, `POST /v1/admin/entries/{id}/restore`, audited `entry.restore`, pins not restored, refuses cleanup withdrawals and chain conflicts |
 | [0125](0125-redact-a-withdrawn-memory.md) | Redact a withdrawn or superseded memory that holds a secret | Accepted; amends 0001, migration 0032, `POST /v1/admin/entries/{id}/redact`, admin only, irreversible, audited `entry.redact`, no undo path may reactivate a redacted memory |
 | [0126](0126-no-index-on-entries-fleet-id-so-fleet-moves-are-hot.md) | No index on `entries.fleet_id`, so fleet moves are HOT updates | Accepted; amends 0107 and 0112, migration 0028, `entries` fillfactor 50, optional `VACUUM FULL entries` in the runbook |
@@ -168,3 +168,4 @@ is unused.
 | [0156](0156-unverified-tag-convention.md) | Agents tag untested claims `unverified`; the admin panel and portal badge and filter them, vital signs count them per fleet | Accepted; tag convention, no new field, ranking unchanged; builds on 0103, 0142, 0146 |
 | [0157](0157-tentative-write-warning-removed.md) | The `tentative` write warning is removed; scope by evidence stays as text, `not_english` stays | Accepted; supersedes 0147, amends 0077 §3; agent models below a 26-27B open model are out of scope |
 | [0158](0158-agent-text-drops-weak-model-clauses.md) | `hive_whoami` keeps "the key is fixed per session" without the how-to; `hive_search` no longer repeats the loose-match note | Accepted; amends 0151 decision 1 and 0148 decision 6; always-on text 17,270 B |
+| [0159](0159-admin-renames-an-agent.md) | An admin renames an agent | Accepted; amends 0040, 0045 (former names stay reserved), 0122, 0123 (history follows former names), `POST /v1/admin/agents/{name}/rename` and `hivemind-keys rename-agent`, migration 0036 (`agent_former_names`), audited `agent.rename`, the key keeps working, every stored copy of the name is rewritten in one transaction |

@@ -4,6 +4,8 @@ Amends [ADR 0011](0011-fleets-and-trust-levels.md) and [ADR 0120](0120-admin-cre
 
 Status: Accepted. Asked for by Monochrome on 2026-11-07.
 
+> **Status note:** [ADR 0159](0159-admin-renames-an-agent.md) lets the admin rename the agent itself, which this ADR had no way to do; the owner alias stays on the agent row only and a rename does not touch it.
+
 ## Context
 
 Since ADR 0120 the admin types the owner alias by hand when creating an agent. A typo there creates a second owner in the panel's Stats "users" tab (a user is an owner alias; there are no accounts), and nothing could fix it: `PATCH /v1/admin/agents/{name}` changed only the trust level and the home fleet.

@@ -4,6 +4,8 @@ Builds on [ADR 0027](0027-audit-log-of-admin-actions.md) (the audit log), [ADR 0
 
 Status: Accepted.
 
+> **Status note:** amended by [ADR 0159](0159-admin-renames-an-agent.md): the history of a renamed agent includes the rows written under its former names (and those of the agents it inherits from), and shows the rename.
+
 ## Context
 
 "What happened to agent X" meant paging the whole audit log. `GET /v1/admin/audit-log` filtered by actor, action, time and a paging cursor only, and the table had indexes on `actor` and `occurred_at` alone. The rows about an agent come in several shapes: the agent's own key as the actor (portal withdrawals, pins, key lock, a self-service cleanup), the agent's name as the target of an `agent.*` or `agent_key.*` action, an `entry.withdraw` whose target is the memory's id and whose `detail.author` is the agent, a `fleet.move_agents` that names the agents it moved in `detail.agents` (its target is the source fleet), and a retirement that names the successor in `detail.successor`. Neither the admin's agent page (ADR 0091) nor the portal showed any of it.

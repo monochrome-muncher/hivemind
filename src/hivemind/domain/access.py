@@ -56,6 +56,11 @@ class UnknownAgent(KeyError):
     """No agent has this name (404 ``not_found``). A ``KeyError``, so ``str(exc)`` is quoted."""
 
 
+class AgentNameTaken(ValueError):
+    """A rename's new name is held by another agent, as its name or a former name of it (ADRs
+    0045, 0159). The service answers it as ``NameTaken``."""
+
+
 class UnknownSearchAgent(UnknownAgent):
     """The admin search named an agent that does not exist (404 ``unknown_agent``, ADR 0136)."""
 
@@ -95,8 +100,9 @@ class FleetMerged(Exception):
 
 class FleetBusy(TimeoutError):
     """A fleet write gave up: it timed out on the fleet's row lock (a merge or move holds it, ADRs
-    0107, 0112), or its author's home fleet changed during the write (ADR 0112). A
-    ``TimeoutError``, so surfaces answer a retryable 503 ``fleet_busy``."""
+    0107, 0112), its author's home fleet changed during the write (ADR 0112), or the author was
+    renamed during it (ADR 0159). A ``TimeoutError``, so surfaces answer a retryable 503
+    ``fleet_busy``."""
 
     def __init__(self, fleet_id: str, detail: str | None = None) -> None:
         super().__init__(

@@ -1,6 +1,6 @@
 # Input bounds, NUL rejection and agent-name rules
 
-> **Status note:** amended by [ADR 0045](0045-agent-names-are-unique-ignoring-case.md): agent names are unique ignoring case; the format rule is unchanged.
+> **Status note:** amended by [ADR 0045](0045-agent-names-are-unique-ignoring-case.md): agent names are unique ignoring case; the format rule is unchanged. Amended by [ADR 0159](0159-admin-renames-an-agent.md): a name an agent left in a rename stays reserved, so registration refuses it like a name in use.
 
 ## Context
 

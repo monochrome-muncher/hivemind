@@ -70,7 +70,7 @@ DEAD_CREDENTIAL_PREDICATE = (
     "(SELECT 1 FROM agents a WHERE a.name = c.agent_name AND a.status = 'active'))))"
 )
 COUNT_DEAD_CREDENTIALS = f"SELECT count(*) FROM credentials c WHERE {DEAD_CREDENTIAL_PREDICATE}"
-_LOCK_AGENT = "SELECT status FROM agents WHERE name = $1 FOR UPDATE"
+_LOCK_AGENT = "SELECT status FROM agents WHERE name = $1 FOR NO KEY UPDATE"
 _DELETE_AGENT_KEYS = "DELETE FROM credentials WHERE kind = 'agent' AND agent_name = $1"
 _INSERT_AUDIT = (
     "INSERT INTO audit_log (actor_kind, actor, action, target, detail) "

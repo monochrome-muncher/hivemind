@@ -9,7 +9,7 @@ an audit column.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
 
@@ -20,6 +20,7 @@ from hivemind.domain.access import (
     SCOPE_RANK,
     SCOPE_SELF,
     Agent,
+    AgentNameTaken,
     AgentNotActive,
     AgentStatus,
     Fleet,
@@ -47,7 +48,7 @@ from hivemind.domain.validation import (
 from hivemind.ports import Authenticator, Credential, Store
 from hivemind.services.agent_cleanup import AgentCleanupService
 from hivemind.services.agent_history import AgentHistoryService
-from hivemind.services.audit import actor_kind_of, record_admin_action
+from hivemind.services.audit import actor_kind_of, record_admin_action, with_former_names
 from hivemind.services.errors import NameTaken, PermissionDenied
 from hivemind.services.fleet_merge import FleetMergeService
 from hivemind.services.guards import require_admin
@@ -118,6 +119,8 @@ class AccessService:
         self.cleanups = AgentCleanupService(store, revoke=self.revoke, revocable=self.revocable)
         # Called after an owner alias changes, to drop cached owner-level figures (ADR 0122).
         self.on_owner_change: list[Callable[[], None]] = []
+        # Called after an agent is renamed, to drop cached figures keyed by its name (ADR 0159).
+        self.on_agent_rename: list[Callable[[], None]] = []
 
     def _require_authenticator(self) -> Authenticator:
         """The authenticator for key management (absent in dev mode)."""
@@ -369,6 +372,27 @@ class AccessService:
                 hook()
         return agent
 
+    async def rename_agent(self, name: str, new_name: str, credential: Credential) -> Agent:
+        """Give an agent a new name, any status (ADR 0159). The new name is checked as a
+        registration's (ADRs 0040, 0045) and may not be a name another agent left; the name it
+        already has writes no audit row, a case-only change does."""
+        require_admin(credential)
+        validate_agent_name(new_name)
+        try:
+            before, agent = await self._store.rename_agent(name, new_name)
+        except AgentNameTaken:
+            raise NameTaken(_NAME_TAKEN) from None
+        if before.name != agent.name:
+            await self._audit(
+                credential,
+                AuditAction.AGENT_RENAME,
+                agent.name,
+                {"from": before.name, "to": agent.name},
+            )
+            for hook in self.on_agent_rename:
+                hook()
+        return agent
+
     async def set_agent_role(self, name: str, role: AgentRole, credential: Credential) -> Agent:
         """Mark an agent with a role (ADR 0144); a role it already has changes and audits
         nothing. ``InvalidAgentStatus`` for a revoked agent."""
@@ -473,8 +497,13 @@ class AccessService:
     async def list_audit(
         self, credential: Credential, filters: AuditFilters, limit: int
     ) -> list[AuditRecord]:
-        """The audit log, newest first (ADR 0027)."""
+        """The audit log, newest first (ADR 0027); a ``subject`` agent's former names count as it
+        (ADR 0159)."""
         require_admin(credential)
+        if filters.subjects:
+            filters = replace(
+                filters, subjects=await with_former_names(self._store, filters.subjects)
+            )
         return await self._store.list_audit(filters, limit)
 
     async def credential_for_agent(self, credential: Credential, name: str) -> Credential:

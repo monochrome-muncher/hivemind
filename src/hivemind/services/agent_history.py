@@ -37,8 +37,12 @@ class AgentHistoryService:
             raise PermissionDenied(
                 "a dormant (untrusted, level 0) agent can do nothing; ask your admin"
             )
+        predecessors = tuple(credential.inherits_from)
+        former = await self._store.former_agent_names((name, *predecessors))
+        own_former = former[name]
+        inherited = (*predecessors, *(left for p in predecessors for left in former[p]))
         records = await self._store.list_audit(
-            AuditFilters(subjects=(name, *credential.inherits_from), before=before), limit
+            AuditFilters(subjects=(name, *own_former, *inherited), before=before), limit
         )
         visibility = credential.visibility()
         fleet_ids = {
@@ -56,7 +60,8 @@ class AgentHistoryService:
         readable = await get_visible_entries(self._store, entry_ids, visibility)
         ctx = HistoryContext(
             me=name,
-            inherited=tuple(credential.inherits_from),
+            former=own_former,
+            inherited=inherited,
             fleet_names=fleet_names,
             readable_entries=frozenset(readable),
         )

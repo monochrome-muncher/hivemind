@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from hivemind.domain.pin import Pin, PinRefusal, PinWrite, pin_refusal
 from hivemind.domain.validation import is_valid_uuid
 from hivemind.store.pgstore.connection import PgConnections
-from hivemind.store.pgstore.fleet_guards import refuse_merged, refuse_stale_home
+from hivemind.store.pgstore.fleet_guards import refuse_merged, refuse_stale_author
 from hivemind.store.pgstore.pin_common import _PIN_COLUMNS, _PIN_ORDER, LOCK_FLEET_PINS
 from hivemind.store.pgstore.rows import row_to_pin
 
@@ -41,7 +41,7 @@ class PinStore(PgConnections):
         async with self._write_transaction(fleet_id) as conn:
             # Fleet row first, then the pin lock: the order a merge takes them.
             await refuse_merged(conn, fleet_id)
-            await refuse_stale_home(conn, fleet_id, pinned_by)
+            await refuse_stale_author(conn, fleet_id, pinned_by)
             await conn.execute(LOCK_FLEET_PINS, fleet_id)
             # Decide before deleting: a refusal leaves the pins as they were.
             fleet_pins = [row_to_pin(r) for r in await conn.fetch(LIST_PINS, fleet_id)]

@@ -58,6 +58,7 @@ ADMIN_BODIES = {
     ("POST", "/v1/admin/agents"): {"name": "x", "owner_alias": "o", "home_fleet_id": FAKE_ID},
     ("POST", "/v1/admin/agents/{name}/activate"): {"trust_level": 1, "home_fleet_id": FAKE_ID},
     ("PATCH", "/v1/admin/agents/{name}"): {"trust_level": 1},
+    ("POST", "/v1/admin/agents/{name}/rename"): {"name": "renamed"},
     ("POST", "/v1/admin/fleets/{source_id}/merge"): {"new_fleet_name": "c", "dry_run": False},
     ("PATCH", "/v1/admin/fleets/{fleet_id}"): {"name": "renamed"},
     ("PUT", "/v1/admin/agents/{name}/role"): {"role": "scout"},

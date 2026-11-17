@@ -80,6 +80,7 @@ ROLLBACK_AUDIT_DELETES: dict[str, AuditDeletion] = {
     "0033.fleet-phase": AuditDeletion(("fleet.phase_set", "fleet.phase_clear")),
     "0034.agent-role": AuditDeletion(("agent.role_set", "agent.role_clear")),
     "0035.entry-move-to-self": AuditDeletion(("entry.move_to_self",)),
+    "0036.agent-rename": AuditDeletion(("agent.rename",)),
 }
 
 _COUNT_AUDIT_ROWS = (

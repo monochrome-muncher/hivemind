@@ -25,7 +25,7 @@ from hivemind.store.pgstore.successions import INSERT_SUCCESSION, REVOKE_ACTIVE_
 # The owner's rows and the successor's, locked together in name order so two offboardings (or a
 # retirement) cannot deadlock.
 LOCK_OWNER_AND_SUCCESSOR = (
-    "SELECT * FROM agents WHERE owner_alias = $1 OR name = $2 ORDER BY name FOR UPDATE"
+    "SELECT * FROM agents WHERE owner_alias = $1 OR name = $2 ORDER BY name FOR NO KEY UPDATE"
 )
 
 STANDING_SUCCESSIONS = (

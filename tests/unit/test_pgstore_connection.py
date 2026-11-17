@@ -104,7 +104,7 @@ async def test_a_return_inside_the_transaction_commits() -> None:
         {"fleet_id": "fleet", "entry_id": str(uuid.uuid4()), "pinned_by": "ann", "pinned_at": None}
         for _ in range(10)
     ]
-    store, pool, log = _store(rows=pins)
+    store, pool, log = _store(fetchval=None, rows=pins)
     assert await store.pin_entry("fleet", VALID_ID, "bob", limit=10) is PinRefusal.FLEET
     assert log[0:2] == ["acquire", "begin"]
     assert log[-2:] == ["commit", "release"]

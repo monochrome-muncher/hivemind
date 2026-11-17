@@ -51,6 +51,9 @@ class MemoryState:
         self._key_last_used: dict[str, datetime] = {}
         self._key_locked: dict[str, datetime] = {}
         self._key_created: dict[str, datetime] = {}
+        # Names agents left in a rename (ADR 0159) -> the agent's current name, oldest first;
+        # Postgres: agent_former_names
+        self._former_names: dict[str, str] = {}
         self._audit: list[AuditRecord] = []  # append-only (ADR 0027)
         self._pins: dict[tuple[str, str], Pin] = {}  # (fleet, entry), ADR 0058
         self._successions: dict[str, Succession] = {}  # retired agent, ADR 0113
@@ -187,20 +190,23 @@ class MemoryState:
             target = self._fleets.get(fleet.merged_into)
             raise FleetMerged(fleet.id, fleet.merged_into, target.name if target else None)
 
-    def _refuse_stale_home(self, fleet_id: str | None, author: str) -> None:
-        """``FleetBusy`` when a move changed the author's home fleet mid-write (ADR 0112). Caller
-        holds the lock."""
+    def _refuse_stale_author(self, fleet_id: str | None, author: str) -> None:
+        """``FleetBusy`` when a rename (ADR 0159) or a move (ADR 0112) changed the author mid-write.
+        Caller holds the lock."""
         agent = self._agents.get(author)
-        if (
-            fleet_id is not None
-            and agent is not None
-            and agent.home_fleet_id is not None
-            and agent.home_fleet_id != fleet_id
-        ):
+        if agent is None:
+            if self._was_renamed(author):
+                raise FleetBusy(fleet_id or "", "the agent was renamed during this write; retry")
+            return
+        if fleet_id is not None and agent.home_fleet_id not in (None, fleet_id):
             raise FleetBusy(
                 fleet_id,
                 f"the home fleet of {author} changed during this write, retry in a few seconds",
             )
+
+    def _was_renamed(self, author: str) -> bool:
+        folded = author.lower()
+        return any(n.lower() == folded for n in (*self._agents, *self._former_names))
 
     def _restore_pins(
         self, fleet_id: str, pins: Sequence[DroppedPin], may_pin: Callable[[Entry], bool]

@@ -8,6 +8,7 @@ Usage:
     hivemind-keys [--actor NAME] issue-admin
     hivemind-keys issue-agent --name alice [--trust-level N --home-fleet ID]
     hivemind-keys rotate-agent --name alice   (replace an active agent's key, ADR 0108)
+    hivemind-keys rename-agent alice alice-2   (the key keeps working, ADR 0159)
     hivemind-keys rotate-org
     hivemind-keys bootstrap-secret [--secret hivemind-keys]   (in-cluster, ADR 0044)
     hivemind-keys revoke --name alice
@@ -31,11 +32,18 @@ from typing import NoReturn, Protocol
 import asyncpg
 
 from hivemind.config import load_settings
-from hivemind.domain.access import AgentStatus, TrustLevel
+from hivemind.domain.access import (
+    AgentNameTaken,
+    AgentStatus,
+    FleetBusy,
+    TrustLevel,
+    UnknownAgent,
+)
 from hivemind.domain.audit import ActorKind, AuditAction, key_fingerprint
 from hivemind.domain.succession import AgentRetired
-from hivemind.domain.validation import is_valid_uuid
+from hivemind.domain.validation import InvalidInput, is_valid_uuid, validate_agent_name
 from hivemind.store.auth import DEAD_CREDENTIAL_PREDICATE, ORG_KEY_LOCK, key_hash
+from hivemind.store.pgstore.agent_rename import rename_agent_rows
 
 _ISSUE_ADMIN = "INSERT INTO credentials (key_hash, kind, user_id) VALUES ($1, 'admin', $2)"
 _ISSUE_AGENT = (
@@ -61,7 +69,7 @@ _INSERT_AUDIT = (
     "VALUES ($1, $2, $3, $4, $5::jsonb)"
 )
 _HAS_AGENT_KEY = "SELECT 1 FROM credentials WHERE kind = 'agent' AND agent_name = $1"
-_AGENT_STATUS_FOR_UPDATE = "SELECT status FROM agents WHERE name = $1 FOR UPDATE"
+_AGENT_STATUS_FOR_UPDATE = "SELECT status FROM agents WHERE name = $1 FOR NO KEY UPDATE"
 _ACTIVATE = (
     "UPDATE agents SET status = 'active', trust_level = $2, home_fleet_id = $3, "
     "activated_at = now() WHERE name = $1"
@@ -258,6 +266,29 @@ async def _rotate_agent(dsn: str, name: str, *, actor: str | None = None) -> str
     finally:
         await conn.close()
     return raw_key
+
+
+async def _rename_agent(dsn: str, old: str, new: str, *, actor: str | None = None) -> bool:
+    """Rename an agent as the admin REST route does (ADR 0159), in one transaction, audited
+    as ``agent.rename``; the key keeps working. ``False``, nothing audited, for the same name.
+    ``InvalidInput``, ``UnknownAgent``, ``AgentNameTaken``, ``FleetBusy`` (lock contention)."""
+    validate_agent_name(new)
+    renamed = old != new
+    conn = await asyncpg.connect(dsn)
+    try:
+        async with conn.transaction():
+            await rename_agent_rows(conn, old, new)
+            if renamed:
+                await _audit(
+                    conn,
+                    actor or default_actor(),
+                    AuditAction.AGENT_RENAME,
+                    new,
+                    {"from": old, "to": new},
+                )
+    finally:
+        await conn.close()
+    return renamed
 
 
 async def _rotate_org(dsn: str, *, actor: str | None = None) -> str:
@@ -472,6 +503,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     rotate_agent.add_argument("--name", required=True)
 
+    rename_agent = sub.add_parser(
+        "rename-agent",
+        help="give an agent a new name; its key keeps working, the old name stays reserved "
+        "(ADR 0159)",
+    )
+    rename_agent.add_argument("old_name")
+    rename_agent.add_argument("new_name")
+
     sub.add_parser(
         "rotate-org",
         help="rotate the shared org key (closes registration; active agents unaffected)",
@@ -599,6 +638,26 @@ def _run_rotate_agent(args: argparse.Namespace, dsn: str, actor: str) -> None:
         )
 
 
+def _run_rename_agent(args: argparse.Namespace, dsn: str, actor: str) -> None:
+    try:
+        renamed = asyncio.run(_rename_agent(dsn, args.old_name, args.new_name, actor=actor))
+    except InvalidInput as exc:
+        _fail(str(exc))
+    except UnknownAgent:
+        _fail(f"no agent registered as {args.old_name!r}")
+    except FleetBusy as exc:
+        _fail(f"{exc}")
+    except AgentNameTaken:
+        _fail(
+            f"the name {args.new_name!r} is taken: another agent holds it, in any case, or "
+            "left it in a rename"
+        )
+    if renamed:
+        print(f"renamed agent {args.old_name} to {args.new_name} (its key keeps working)")
+    else:
+        print(f"agent {args.old_name} already has that name; nothing to do")
+
+
 def _run_rotate_org(args: argparse.Namespace, dsn: str, actor: str) -> None:
     _print_key(
         "New org key (the previous one stops working)",
@@ -655,6 +714,7 @@ _COMMANDS: dict[str, Callable[[argparse.Namespace, str, str], None]] = {
     "issue-admin": _run_issue_admin,
     "issue-agent": _run_issue_agent,
     "rotate-agent": _run_rotate_agent,
+    "rename-agent": _run_rename_agent,
     "rotate-org": _run_rotate_org,
     "bootstrap-secret": _run_bootstrap_secret,
     "list": _run_list,

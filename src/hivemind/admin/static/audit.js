@@ -8,7 +8,7 @@ import { openEntry } from "./drawer.js";
 import { column } from "./csv.js";
 
 const AUDIT_ACTIONS = [
-  "agent.register", "agent.activate", "agent.trust_level_set", "agent.home_fleet_set", "agent.owner_set", "agent.role_set", "agent.role_clear", "agent.revoke",
+  "agent.register", "agent.activate", "agent.trust_level_set", "agent.home_fleet_set", "agent.owner_set", "agent.rename", "agent.role_set", "agent.role_clear", "agent.revoke",
   "fleet.create", "fleet.rename", "fleet.phase_set", "fleet.phase_clear", "fleet.merge", "fleet.unmerge", "fleet.move_agents", "fleet.move_undo", "org_key.rotate", "entry.withdraw", "entry.restore", "entry.redact", "entry.move_to_self", "entry.pin", "entry.unpin",
   "admin_key.issue", "admin_key.revoke", "agent_key.issue", "agent_key.replace", "agent_key.lock",
   "agent.cleanup", "agent.cleanup_undo", "agent.retire", "agent.retire_undo",

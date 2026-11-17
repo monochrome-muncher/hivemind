@@ -2,6 +2,8 @@
 
 Amends ADR 0040 (the agent-name rules); does not change its format rule.
 
+> **Status note:** amended by [ADR 0159](0159-admin-renames-an-agent.md): the names an agent left in a rename are reserved too, compared ignoring case, and refused at registration like a name in use.
+
 ## Context
 
 ADR 0040 allows upper-case letters in agent names and compares only the

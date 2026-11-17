@@ -284,6 +284,7 @@ hash is stored (a leaked database never leaks usable keys, SPEC §8.1).
 | A locked key (the person behind the agent pressed **This key leaked** in the portal, ADR 0117) | the Agents page shows a "key locked" badge; `GET /v1/admin/agents` has `key_locked`; `hivemind-keys list` marks the key | the key fails every request with `key_locked` while the agent stays `active`. Replace the key (row above) to let the agent back in; revoking works too. The lock is audited `agent_key.lock` (actor: the agent's name, `via: "portal"`) |
 | Revoke an agent key | `hivemind-keys revoke --name alice` / `POST /v1/admin/agents/alice/revoke` | the agent's key is dead and its status is `revoked`; the **name stays reserved**; on a `pending` agent this rejects the registration (ADRs 0012, 0028) |
 | Correct an agent's owner alias (a typo made it a second owner in Stats) | `PATCH /v1/admin/agents/{name}` with `{"owner_alias": "..."}` / the admin panel's "Edit owner" (Agents list or the agent page) | any status; the Stats "users" tab, the Agents list and the health owner figures follow at once, because the alias is read from the agent record. Audited as `agent.owner_set` with `{from, to}`; the same value changes nothing. Old `agent.register` audit rows keep the alias as it was typed. No CLI command: `hivemind-keys` has no trust-level or home-fleet command either (ADR 0122) |
+| Rename an agent (a typo, a reorganisation) | `POST /v1/admin/agents/{name}/rename` with `{"name": "..."}` / the admin panel's "Rename" / `hivemind-keys rename-agent OLD NEW` | any status; the key keeps working and the memories, ratings and pins follow. Section 21 |
 | Demote an agent | `PATCH /v1/admin/agents/{name}` (trust level → 0) | the agent is *dormant* (key still valid, no access) — distinct from revocation |
 
 > **Rotating the org key closes registration** (ADR 0031): every prior
@@ -295,7 +296,7 @@ hash is stored (a leaked database never leaks usable keys, SPEC §8.1).
 ### Audit trail of key and admin actions (ADR 0027)
 
 Every mutating `hivemind-keys` command (`issue-admin`, `revoke-admin`,
-`rotate-org`, `rotate-agent`, `issue-agent`, `revoke`, `bootstrap-secret`;
+`rotate-org`, `rotate-agent`, `rename-agent`, `issue-agent`, `revoke`, `bootstrap-secret`;
 not `list`) and every admin REST action writes a row to the audit log
 (SPEC §12.5). Read it with the
 admin key:
@@ -1398,3 +1399,43 @@ curl -s -X POST -H "X-API-Key: $ADMIN_KEY" -H "Content-Type: application/json" \
 **Rolling back the release.** `make rollback` past migration `0035` deletes
 the `entry.move_to_self` audit rows (it refuses without
 `--discard-audit-rows`, section 4). The moved memories stay `self`.
+
+## 21. Renaming an agent (ADR 0159)
+
+The name is the agent's identity: its memories, ratings, pins and key all
+carry it. A rename rewrites every one of those copies in a single
+transaction, and the agent's key keeps working, so the person behind the
+agent changes nothing. The agent sees the new name in `hive_whoami` on its
+next call. It needs the admin key.
+
+In the panel press **Rename** on the agent's row or page. Or call the API,
+or run the break-glass command on the database host:
+
+```sh
+curl -s -X POST -H "X-API-Key: $ADMIN_KEY" -H "Content-Type: application/json" \
+  -d '{"name": "robert"}' "https://hivemind.example/v1/admin/agents/bob/rename"
+
+hivemind-keys rename-agent bob robert
+```
+
+- **Any status**, retired agents included. The new name is checked as a
+  registration's: `422` for a bad or reserved name, `409 name_conflict`
+  when another agent holds it in any case or left it in a rename, `404`
+  for an unknown agent. A change of case (`bob` to `Bob`) is a rename; the
+  name the agent already has answers `200` and writes nothing.
+- **The old name stays reserved for good.** Nobody can register it or be
+  renamed to it, because the audit log and the history keep the old name.
+  The agent itself can take it back with another rename.
+- **What stays.** Audit rows keep the old name (the history of the agent
+  follows it), and so do memory texts that mention it.
+- **Big agents.** The rename rewrites each memory the agent wrote, so an
+  agent with very many memories takes longer; it runs in one transaction.
+- **Audit.** One `agent.rename` row, target the new name, detail
+  `{from, to}` (a `cli` row from the command; SPEC §12.5).
+- **Do not rename during a rolling release.** A pod from before this
+  release does not know the reservation.
+
+**Rolling back the release.** `make rollback` past migration `0036` drops the
+reserved former names, so those names can be registered again, and deletes
+the `agent.rename` audit rows (it refuses without `--discard-audit-rows`,
+section 4). The agents keep their new names.

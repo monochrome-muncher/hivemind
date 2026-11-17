@@ -7,6 +7,7 @@ area holds its SQL and store methods; ``PgStore`` composes them on ``connection.
 from __future__ import annotations
 
 from hivemind.store.pgstore.agent_cleanup import AgentCleanupStore
+from hivemind.store.pgstore.agent_rename import AgentRenameStore
 from hivemind.store.pgstore.agents import AgentStore
 from hivemind.store.pgstore.audit import AuditStore
 from hivemind.store.pgstore.connection import PgConnections
@@ -34,6 +35,7 @@ class PgStore(
     FleetMergeStore,
     AgentCleanupStore,
     AgentStore,
+    AgentRenameStore,
     SuccessionStore,
     OffboardingStore,
     SelfMoveStore,

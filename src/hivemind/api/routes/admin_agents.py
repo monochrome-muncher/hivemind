@@ -1,4 +1,4 @@
-"""Admin agent management: create, activate, rekey, update, set the role, revoke, retire."""
+"""Admin agent management: create, activate, rekey, update, rename, set the role, revoke, retire."""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from hivemind.api.schemas import (
     KeyIssuedOut,
     OffboardingOut,
     OffboardRequest,
+    RenameAgentRequest,
     RetiredOut,
     RetirePreviewOut,
     RetireRequest,
@@ -121,6 +122,23 @@ async def update_agent(
         home_fleet_id=payload.home_fleet_id,
         owner_alias=payload.owner_alias,
     )
+    return AgentWithRoleOut.from_agent(agent)
+
+
+@router.post("/admin/agents/{name}/rename", response_model=AgentWithRoleOut)
+async def rename_agent(
+    name: NameParam, payload: RenameAgentRequest, credential: CredentialDep, app: AppDep
+) -> AgentWithRoleOut:
+    """Give an agent a new name (admin-gated, audited ``agent.rename``,
+    ADR 0159): the name is rewritten everywhere it is stored, in one
+    transaction, and the agent's key keeps working. Any status. The new
+    name is checked as a registration's: 422 ``invalid_input`` when it is
+    malformed or reserved, 409 ``name_conflict`` when another agent holds
+    it in any case or left it in a rename (the name it leaves is reserved
+    too); an agent's own earlier names and a case-only change are allowed.
+    The name it already has answers 200 and writes no audit row. 404
+    unknown agent."""
+    agent = await app.access_service.rename_agent(name, payload.name, credential)
     return AgentWithRoleOut.from_agent(agent)
 
 

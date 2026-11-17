@@ -52,6 +52,13 @@ class UpdateAgentRequest(BaseModel):
     owner_alias: str | None = None
 
 
+class RenameAgentRequest(BaseModel):
+    """The new name for an agent (``POST /v1/admin/agents/{name}/rename``, ADR 0159); the
+    service checks it as a registration's name."""
+
+    name: str
+
+
 class SetAgentRoleRequest(BaseModel):
     """Mark an agent with a role (ADR 0144)."""
 

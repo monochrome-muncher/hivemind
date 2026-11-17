@@ -294,6 +294,37 @@ function ownerDialog(agent, onDone) {
   owner.select();
 }
 
+/** Give any agent a new name (ADR 0159): the server rewrites every copy of it and the key keeps working. */
+function renameDialog(agent, onDone) {
+  const name = h("input", { id: "f-agent-rename", maxlength: 63, autocomplete: "off", spellcheck: "false", value: agent.name });
+  openModal({
+    title: `Rename ${agent.name}`,
+    body: [
+      h("div", { class: "field" }, h("label", { for: "f-agent-rename", text: "New name" }), name,
+        h("span", { class: "hint", text: "Its key keeps working and its memories, ratings and pins follow the new name. The old name stays reserved: no agent can register under it. Past audit rows keep the old name." })),
+    ],
+    actions: [
+      { label: "Cancel" },
+      {
+        label: "Rename",
+        class: "btn-primary",
+        submit: true,
+        onClick: async () => {
+          const next = name.value.trim();
+          if (!next) throw new Error("Enter the new name.");
+          if (next === agent.name) { closeModal(); return; }
+          await guarded(() => api("POST", `admin/agents/${encodeURIComponent(agent.name)}/rename`, { body: { name: next } }));
+          closeModal();
+          toast(`${agent.name} is now ${next}`);
+          if (parseHash().view === "agent") window.location.hash = agentHref(next);
+          else onDone();
+        },
+      },
+    ],
+  });
+  name.select();
+}
+
 /** The buttons for what can be done to `agent` now (activate, edit, revoke…). */
 export function agentButtons(agent, refresh) {
   const buttons = [];
@@ -311,6 +342,7 @@ export function agentButtons(agent, refresh) {
     buttons.push(h("button", { type: "button", class: "btn btn-sm", text: "Re-activate", onclick: () => activateDialog(agent, refresh) }));
     buttons.push(h("button", { type: "button", class: "btn btn-sm", text: "Retire…", title: "Hand its memories to a successor", onclick: () => retireDialog(agent, refresh) }));
   }
+  buttons.push(h("button", { type: "button", class: "btn btn-sm", text: "Rename", title: "Give the agent a new name", onclick: () => renameDialog(agent, refresh) }));
   buttons.push(h("button", { type: "button", class: "btn btn-sm", text: "Edit owner", title: "Correct the owner alias", onclick: () => ownerDialog(agent, refresh) }));
   return buttons;
 }

@@ -8,6 +8,7 @@ both tie-break on ``created_at`` then ``id``. ``created_at`` comes from the inje
 from __future__ import annotations
 
 from hivemind.memstore.agent_cleanup import AgentCleanupStore
+from hivemind.memstore.agent_rename import AgentRenameStore
 from hivemind.memstore.agents import AgentStore
 from hivemind.memstore.audit import AuditStore
 from hivemind.memstore.entries import EntryStore
@@ -34,6 +35,7 @@ class MemoryStore(
     FleetMergeStore,
     AgentCleanupStore,
     AgentStore,
+    AgentRenameStore,
     OffboardingStore,
     SelfMoveStore,
     AuditStore,
