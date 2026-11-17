@@ -7,7 +7,15 @@ import asyncpg
 from hivemind.domain.access import FleetBusy, FleetMerged
 from hivemind.domain.validation import is_valid_uuid
 
-AGENT_HOME = "SELECT home_fleet_id FROM agents WHERE name = $1"
+# Key-share-locked: a rename (which takes the row FOR UPDATE) waits for the write, or the write finds
+# the name gone (ADR 0159).
+AGENT_HOME = "SELECT home_fleet_id FROM agents WHERE name = $1 FOR KEY SHARE"
+
+# Folded: a case-only rename (``bob`` to ``Bob``) reserves no former name, yet leaves ``bob`` gone.
+WAS_RENAMED = (
+    "SELECT EXISTS (SELECT 1 FROM agents WHERE lower(name) = lower($1)) "
+    "OR EXISTS (SELECT 1 FROM agent_former_names WHERE lower(name) = lower($1))"
+)
 
 WRITE_LOCK_TIMEOUT = "3s"  # how long a fleet write waits for a merge before a 503
 
@@ -33,15 +41,19 @@ async def refuse_merged(conn: asyncpg.Connection, fleet_id: str | None) -> None:
         raise FleetMerged(fleet_id, str(row["merged_into"]), row["target_name"])
 
 
-async def refuse_stale_home(conn: asyncpg.Connection, fleet_id: str | None, author: str) -> None:
-    """ADR 0112: a fleet write by ``author`` that resolved its home before a move committed
-    must not land in the old home (``FleetBusy``). Call after the fleet's share lock;
-    an author that is no registered agent is not checked."""
-    if fleet_id is None:
-        return
+async def refuse_stale_author(conn: asyncpg.Connection, fleet_id: str | None, author: str) -> None:
+    """``FleetBusy`` (retryable) when a rename or a move changed ``author`` during the write: ADR
+    0159 (the name is gone) and ADR 0112 (a fleet write by ``author`` that resolved its home before
+    a move committed must not land in the old home). Call after the fleet's share lock; an author
+    that is no registered agent is not checked."""
+    await conn.execute(f"SET LOCAL lock_timeout = '{WRITE_LOCK_TIMEOUT}'")
     home = await conn.fetchrow(AGENT_HOME, author)
+    if home is None:
+        if await conn.fetchval(WAS_RENAMED, author):
+            raise FleetBusy(fleet_id or "", "the agent was renamed during this write; retry")
+        return
     if (
-        home is not None
+        fleet_id is not None
         and home["home_fleet_id"] is not None
         and str(home["home_fleet_id"]) != fleet_id
     ):

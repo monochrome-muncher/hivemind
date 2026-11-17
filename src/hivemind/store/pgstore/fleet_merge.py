@@ -183,9 +183,7 @@ COUNT_MOVER_ENTRIES = (
     "WHERE fleet_id = $1 AND scope = 'fleet' AND author = ANY($2::text[])"
 )
 
-LOCK_AGENTS = (
-    "SELECT name, home_fleet_id FROM agents WHERE name = ANY($1::text[]) ORDER BY name FOR UPDATE"
-)
+LOCK_AGENTS = "SELECT name, home_fleet_id FROM agents WHERE name = ANY($1::text[]) ORDER BY name FOR NO KEY UPDATE"
 
 MOVE_THESE_ENTRIES = (
     "UPDATE entries SET fleet_id = $2 WHERE fleet_id = $1 AND id = ANY($3::uuid[]) RETURNING id"

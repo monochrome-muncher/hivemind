@@ -29,6 +29,9 @@ class AgentStore(MemoryState):
             for agent in self._agents.values():
                 if agent.name.lower() == name.lower():
                     return agent
+            for left, holder in self._former_names.items():
+                if left.lower() == name.lower():
+                    return self._agents[holder]  # ADR 0159: the name stays reserved
             agent = Agent(
                 name=name,
                 status=AgentStatus.PENDING,

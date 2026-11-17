@@ -13,7 +13,7 @@ from hivemind.store.pgstore.connection import PgConnections
 from hivemind.store.pgstore.rows import row_to_succession
 
 LOCK_AGENT_ROWS = (
-    "SELECT name, status FROM agents WHERE name = ANY($1::text[]) ORDER BY name FOR UPDATE"
+    "SELECT name, status FROM agents WHERE name = ANY($1::text[]) ORDER BY name FOR NO KEY UPDATE"
 )
 
 _SUCCESSION_COLUMNS = 'retired_agent, successor, "by", at'

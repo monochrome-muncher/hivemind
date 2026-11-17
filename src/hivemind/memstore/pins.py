@@ -29,7 +29,7 @@ class PinStore(MemoryState):
         replaces = [canonical_or_same(r) for r in replaces]
         with self._lock:
             self._refuse_merged(fleet_id)
-            self._refuse_stale_home(fleet_id, pinned_by)
+            self._refuse_stale_author(fleet_id, pinned_by)
             fleet_pins = [p for (f, _), p in self._pins.items() if f == fleet_id]
             refusal = pin_refusal(
                 fleet_pins, entry_id, pinned_by, limit, agent_limit, replaces, also_owned_by

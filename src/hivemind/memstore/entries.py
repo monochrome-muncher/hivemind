@@ -81,8 +81,8 @@ class EntryStore(MemoryState):
         )
         with self._lock:
             self._refuse_merged(draft.fleet_id)
-            if draft.scope == SCOPE_FLEET:
-                self._refuse_stale_home(draft.fleet_id, draft.author)
+            fleet_id = draft.fleet_id if draft.scope == SCOPE_FLEET else None
+            self._refuse_stale_author(fleet_id, draft.author)
             # Atomic (ADR 0034): every target must be active, or nothing is written. Any uuid
             # spelling names its entry, as in Postgres; a malformed id is denied.
             wanted = list(dict.fromkeys(draft.supersedes))

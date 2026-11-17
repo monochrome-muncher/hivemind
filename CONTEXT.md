@@ -277,6 +277,10 @@ _Avoid_: transferred memories (nothing is rewritten), migrated memories
 The unique, durable name chosen at registration and used as an agent's author: 1–63 ASCII letters, digits, `.`, `_` or `-`, starting with a letter or digit, and never a reserved identity (`admin`, `org`, `dev`, `shared`) in any case (ADR 0040).
 _Avoid_: username, handle, agent id (the agent id is part of the key's record)
 
+**Former name**:
+A name an agent left when an admin renamed it (ADR 0159). It stays reserved, ignoring case, so no agent can register or be renamed to it; only the agent that left it may take it back. The audit log keeps rows under it, and the agent's history includes them.
+_Avoid_: old name, alias (an alias is the owner's)
+
 **Owner alias**:
 The human name or address (username or email) an agent self-reports at registration, or the admin gives when creating the agent for its owner (ADR 0120), so the admin can deliver its agent key out-of-band (ADR 0012). The admin can correct it later (ADR 0122). A contact field on the agent record, kept nowhere else, and not a per-entry provenance claim.
 _Avoid_: author (that is the entry's verified writer), user, account
@@ -290,7 +294,7 @@ The single credential gating the admin surface: agent/fleet listing, activation,
 _Avoid_: operator key, root key, superuser
 
 **Audit log**:
-The append-only record of admin-surface actions and of the few agent and CLI actions that change standing or shared state (agent registration, activation, trust-level, home-fleet and owner-alias changes, revocation, key issuance and replacement, org-key rotation, fleet merges and moves, cleanups, pins, admin and portal withdrawals, moves to self, restores and redactions, schema rollbacks) — distinct from an entry's provenance and its supersession chain, neither of which this term describes.
+The append-only record of admin-surface actions and of the few agent and CLI actions that change standing or shared state (agent registration, activation, trust-level, home-fleet and owner-alias changes, renames, revocation, key issuance and replacement, org-key rotation, fleet merges and moves, cleanups, pins, admin and portal withdrawals, moves to self, restores and redactions, schema rollbacks) — distinct from an entry's provenance and its supersession chain, neither of which this term describes.
 
 **Agent history**:
 The audit-log rows about one agent: its own actions, the admin's actions on it, withdrawals of its memories and the fleet moves and retirements that name it. The admin panel shows them in full; the agent portal shows its agent's, and those of the agents it inherits from, without naming the admin (ADR 0123).

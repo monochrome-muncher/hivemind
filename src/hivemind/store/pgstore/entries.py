@@ -25,7 +25,7 @@ from hivemind.ports import SupersedeConflict
 from hivemind.store.inheritance import inherited_from
 from hivemind.store.pgstore.agent_cleanup import CLEANUP_AGENT_LOCK
 from hivemind.store.pgstore.connection import PgConnections
-from hivemind.store.pgstore.fleet_guards import refuse_merged, refuse_stale_home
+from hivemind.store.pgstore.fleet_guards import refuse_merged, refuse_stale_author
 from hivemind.store.pgstore.rows import encode_entities, encode_sources, row_to_entry
 from hivemind.store.pgstore.sql_common import (
     _ENTRY_COLUMNS,
@@ -312,8 +312,8 @@ class EntryStore(PgConnections):
 
         async with self._write_transaction(draft.fleet_id) as conn:
             await refuse_merged(conn, draft.fleet_id)
-            if draft.scope == SCOPE_FLEET:
-                await refuse_stale_home(conn, draft.fleet_id, draft.author)
+            fleet_id = draft.fleet_id if draft.scope == SCOPE_FLEET else None
+            await refuse_stale_author(conn, fleet_id, draft.author)
             row = await _insert_entry(
                 conn,
                 entry_id,

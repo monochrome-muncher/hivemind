@@ -16,18 +16,30 @@ from hivemind.store.pgstore.successions import GET_SUCCESSION, LOCK_AGENT_ROWS
 
 GET_AGENT = "SELECT * FROM agents WHERE name = $1"
 
-GET_AGENT_FOR_UPDATE = "SELECT * FROM agents WHERE name = $1 FOR UPDATE"
+# Never held across a change of name, so a write that key-share-locks the row (ADR 0159) does not
+# wait for it; the rename itself takes FOR UPDATE.
+GET_AGENT_FOR_UPDATE = "SELECT * FROM agents WHERE name = $1 FOR NO KEY UPDATE"
 
 # Agent names are ASCII (ADR 0040), so lower() is their case fold. The oldest
 # holder wins when legacy case variants already coexist (ADR 0045).
 GET_AGENT_FOLDED = "SELECT * FROM agents WHERE lower(name) = lower($1) ORDER BY created_at LIMIT 1"
 
+# Names an agent has left stay reserved (ADR 0159): the agent that holds the name now, whatever the
+# case, read in one statement so a rename committing between two reads cannot free the name.
+FORMER_NAME_HOLDER = (
+    "SELECT a.* FROM agent_former_names f JOIN agents a ON a.name = f.agent "
+    "WHERE lower(f.name) = lower($1)"
+)
+
 # Serialises registrations of one case-folded name (`Bob` and `bob` cannot both pass the check).
 AGENT_NAME_LOCK = "SELECT pg_advisory_xact_lock(hashtext('hivemind:agent-name:' || lower($1)))"
 
+# Never inserts a name an agent has left (ADR 0159), whatever the reads before it saw.
 INSERT_AGENT = (
     "INSERT INTO agents (name, owner_alias, status, trust_level) "
-    "VALUES ($1, $2, 'pending', 0) ON CONFLICT (name) DO NOTHING RETURNING *"
+    "SELECT $1::text, $2::text, 'pending', 0 WHERE NOT EXISTS "
+    "(SELECT 1 FROM agent_former_names WHERE lower(name) = lower($1::text)) "
+    "ON CONFLICT (name) DO NOTHING RETURNING *"
 )
 
 # Key use (ADR 0110) rides along; one key per agent (ADR 0039), so the join adds no rows.
@@ -65,13 +77,16 @@ SET_AGENT_FLEET = "UPDATE agents SET home_fleet_id = $2 WHERE name = $1 RETURNIN
 class AgentStore(PgConnections):
     async def register_agent(self, name: str, owner_alias: str | None = None) -> Agent:
         """Register an agent idempotently (SPEC §12.3): an existing record, a racing duplicate
-        or a case-only variant comes back unchanged (ADRs 0039, 0045); a new one is ``pending``."""
+        or a case-only variant comes back unchanged (ADRs 0039, 0045), as does the agent that
+        left the name behind in a rename (ADR 0159); a new one is ``pending``."""
         async with self._connection() as conn:
             row = await conn.fetchrow(GET_AGENT, name)
             if row is None:
                 async with conn.transaction():
                     await conn.execute(AGENT_NAME_LOCK, name)
                     row = await conn.fetchrow(GET_AGENT_FOLDED, name)
+                    if row is None:
+                        row = await conn.fetchrow(FORMER_NAME_HOLDER, name)
                     if row is None:
                         row = await conn.fetchrow(INSERT_AGENT, name, owner_alias)
                     if row is None:

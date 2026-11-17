@@ -61,6 +61,12 @@ CREATE TABLE public.agent_cleanups (
     self_service boolean DEFAULT false NOT NULL
 );
 
+CREATE TABLE public.agent_former_names (
+    name text NOT NULL,
+    agent text NOT NULL,
+    renamed_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
 CREATE TABLE public.agents (
     name text NOT NULL,
     status text DEFAULT 'pending'::text NOT NULL,
@@ -83,7 +89,7 @@ CREATE TABLE public.audit_log (
     action text NOT NULL,
     target text,
     detail jsonb DEFAULT '{}'::jsonb NOT NULL,
-    CONSTRAINT audit_log_action_check CHECK ((action = ANY (ARRAY['agent.register'::text, 'agent.activate'::text, 'agent.trust_level_set'::text, 'agent.home_fleet_set'::text, 'agent.revoke'::text, 'fleet.create'::text, 'org_key.rotate'::text, 'entry.withdraw'::text, 'admin_key.issue'::text, 'admin_key.revoke'::text, 'agent_key.issue'::text, 'entry.pin'::text, 'entry.unpin'::text, 'fleet.merge'::text, 'fleet.unmerge'::text, 'fleet.rename'::text, 'agent_key.replace'::text, 'agent.cleanup'::text, 'agent.cleanup_undo'::text, 'fleet.move_agents'::text, 'fleet.move_undo'::text, 'agent.retire'::text, 'agent.retire_undo'::text, 'agent_key.lock'::text, 'schema.rollback'::text, 'agent.owner_set'::text, 'entry.restore'::text, 'entry.redact'::text, 'fleet.phase_set'::text, 'fleet.phase_clear'::text, 'agent.role_set'::text, 'agent.role_clear'::text, 'entry.move_to_self'::text]))),
+    CONSTRAINT audit_log_action_check CHECK ((action = ANY (ARRAY['agent.register'::text, 'agent.activate'::text, 'agent.trust_level_set'::text, 'agent.home_fleet_set'::text, 'agent.revoke'::text, 'fleet.create'::text, 'org_key.rotate'::text, 'entry.withdraw'::text, 'admin_key.issue'::text, 'admin_key.revoke'::text, 'agent_key.issue'::text, 'entry.pin'::text, 'entry.unpin'::text, 'fleet.merge'::text, 'fleet.unmerge'::text, 'fleet.rename'::text, 'agent_key.replace'::text, 'agent.cleanup'::text, 'agent.cleanup_undo'::text, 'fleet.move_agents'::text, 'fleet.move_undo'::text, 'agent.retire'::text, 'agent.retire_undo'::text, 'agent_key.lock'::text, 'schema.rollback'::text, 'agent.owner_set'::text, 'entry.restore'::text, 'entry.redact'::text, 'fleet.phase_set'::text, 'fleet.phase_clear'::text, 'agent.role_set'::text, 'agent.role_clear'::text, 'entry.move_to_self'::text, 'agent.rename'::text]))),
     CONSTRAINT audit_log_actor_kind_check CHECK ((actor_kind = ANY (ARRAY['admin_key'::text, 'cli'::text, 'org_key'::text, 'agent_key'::text])))
 );
 
@@ -249,6 +255,10 @@ ALTER TABLE ONLY public.successions
     ADD CONSTRAINT successions_pkey PRIMARY KEY (retired_agent);
 
 CREATE INDEX agent_cleanups_agent_idx ON public.agent_cleanups USING btree (agent, cleaned_at DESC);
+
+CREATE INDEX agent_former_names_agent_idx ON public.agent_former_names USING btree (agent);
+
+CREATE UNIQUE INDEX agent_former_names_name_key ON public.agent_former_names USING btree (lower(name));
 
 CREATE INDEX agents_fleet_idx ON public.agents USING btree (home_fleet_id);
 

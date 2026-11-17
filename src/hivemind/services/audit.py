@@ -10,7 +10,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from hivemind.domain.audit import ActorKind, AuditAction, AuditEvent, AuditRecord
-from hivemind.ports import AuditPort, Credential
+from hivemind.ports import AgentPort, AuditPort, Credential
 
 
 def actor_kind_of(credential: Credential) -> ActorKind:
@@ -60,3 +60,10 @@ async def audit_unpins(
     if via is not None:
         detail["via"] = via
     return await record_admin_action(store, credential, AuditAction.ENTRY_UNPIN, target, detail)
+
+
+async def with_former_names(store: AgentPort, names: Sequence[str]) -> tuple[str, ...]:
+    """``names`` and the names those agents left in a rename, so the history keeps the rows written
+    before it (ADRs 0123, 0159)."""
+    former = await store.former_agent_names(names)
+    return (*names, *(left for name in names for left in former[name]))

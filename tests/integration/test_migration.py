@@ -35,7 +35,8 @@ from hivemind.store.migrate import (
     rollback as _guarded_rollback,
 )
 
-HEAD = "0035.entry-move-to-self"
+HEAD = "0036.agent-rename"
+ID_0035 = "0035.entry-move-to-self"  # the head before 0036
 ID_0034 = "0034.agent-role"  # the head before 0035
 ID_0033 = "0033.fleet-phase"  # the head before 0034
 ID_0032 = "0032.entry-redact"  # the head before 0033
@@ -86,6 +87,7 @@ CHAIN = [
     ID_0032,
     ID_0033,
     ID_0034,
+    ID_0035,
     HEAD,
 ]
 
@@ -2027,7 +2029,7 @@ async def test_0034_rolls_back_refused_without_the_flag_and_drops_the_column() -
 
 async def test_0035_adds_the_move_to_self_action_and_its_index() -> None:
     dsn, dim = _dsn(), Settings().embedding_dim
-    await _start_at_head(dsn, dim)
+    await _start_at(dsn, dim, ID_0035)
     conn = await asyncpg.connect(dsn)
     try:
         assert (
@@ -2049,7 +2051,7 @@ async def test_rolling_back_0035_is_guarded_by_its_own_rows() -> None:
     """The rollback drops the `entry.move_to_self` rows its older CHECK cannot hold, so it needs
     `--discard-audit-rows`; the moved memories stay `self`."""
     dsn, dim = _dsn(), Settings().embedding_dim
-    await _start_at_head(dsn, dim)
+    await _start_at(dsn, dim, ID_0035)
     conn = await asyncpg.connect(dsn)
     try:
         await conn.execute("DELETE FROM audit_log")
@@ -2063,9 +2065,9 @@ async def test_rolling_back_0035_is_guarded_by_its_own_rows() -> None:
 
     with pytest.raises(RollbackRefused, match=r"entry\.move_to_self"):
         await _guarded_rollback(dsn, dim, count=1)
-    assert await current_schema_version(dsn) == HEAD
+    assert await current_schema_version(dsn) == ID_0035
 
-    assert await _guarded_rollback(dsn, dim, count=1, discard_audit_rows=True) == [HEAD]
+    assert await _guarded_rollback(dsn, dim, count=1, discard_audit_rows=True) == [ID_0035]
     assert await current_schema_version(dsn) == ID_0034
     assert await _audit_actions(dsn) == ["fleet.merge", "schema.rollback"]
     conn = await asyncpg.connect(dsn)
@@ -2081,6 +2083,51 @@ async def test_rolling_back_0035_is_guarded_by_its_own_rows() -> None:
             await conn.execute(
                 "INSERT INTO audit_log (actor_kind, actor, action) "
                 "VALUES ('cli', 'x', 'entry.move_to_self')"
+            )
+    finally:
+        await conn.close()
+    await migrate(dsn, dim)
+
+
+# ADR 0159: 0036 adds the former-name reservations and the `agent.rename` audit action.
+
+
+async def test_0036_adds_the_former_names_table_and_the_rename_action() -> None:
+    dsn, dim = _dsn(), Settings().embedding_dim
+    await _start_at_head(dsn, dim)
+    conn = await asyncpg.connect(dsn)
+    try:
+        await conn.execute("INSERT INTO agent_former_names (name, agent) VALUES ('Old', 'new')")
+        with pytest.raises(asyncpg.UniqueViolationError):
+            await conn.execute("INSERT INTO agent_former_names (name, agent) VALUES ('old', 'x')")
+        await conn.execute(
+            "INSERT INTO audit_log (actor_kind, actor, action, target) "
+            "VALUES ('admin_key', 'admin:1', 'agent.rename', 'new')"
+        )
+    finally:
+        await conn.close()
+
+
+async def test_rolling_back_0036_is_guarded_by_its_own_rows() -> None:
+    """The rollback drops the `agent.rename` rows its older CHECK cannot hold, so it needs
+    `--discard-audit-rows`; the agents keep their new names and the reservations go."""
+    dsn, dim = _dsn(), Settings().embedding_dim
+    await _start_at_head(dsn, dim)
+    await _insert_audit(dsn, "agent.rename", "fleet.merge")
+
+    with pytest.raises(RollbackRefused, match=r"agent\.rename"):
+        await _guarded_rollback(dsn, dim, count=1)
+    assert await current_schema_version(dsn) == HEAD
+
+    assert await _guarded_rollback(dsn, dim, count=1, discard_audit_rows=True) == [HEAD]
+    assert await current_schema_version(dsn) == ID_0035
+    conn = await asyncpg.connect(dsn)
+    try:
+        assert await conn.fetchval("SELECT to_regclass('agent_former_names')") is None
+        with pytest.raises(asyncpg.CheckViolationError):
+            await conn.execute(
+                "INSERT INTO audit_log (actor_kind, actor, action) "
+                "VALUES ('cli', 'x', 'agent.rename')"
             )
     finally:
         await conn.close()

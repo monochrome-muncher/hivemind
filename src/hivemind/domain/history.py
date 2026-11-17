@@ -40,14 +40,16 @@ class HistoryContext:
     inherited: tuple[str, ...]
     fleet_names: Mapping[str, str]
     readable_entries: frozenset[str]
+    former: tuple[str, ...] = ()  # the names it left in a rename (ADR 0159)
 
     @property
     def agents(self) -> tuple[str, ...]:
-        return (self.me, *self.inherited)
+        return (self.me, *self.former, *self.inherited)
 
     def agent(self, name: object) -> str:
-        """``this agent`` for the agent itself, a predecessor's name, else a generic phrase."""
-        if name == self.me:
+        """``this agent`` for the agent itself (under any name it had), a predecessor's name, else
+        a generic phrase."""
+        if name == self.me or (isinstance(name, str) and name in self.former):
             return THIS_AGENT
         if isinstance(name, str) and name in self.inherited:
             return name
@@ -216,6 +218,8 @@ def _summary(
                 )
         case AuditAction.AGENT_OWNER_SET:
             text = "The owner recorded for it was changed"  # the aliases are not shown
+        case AuditAction.AGENT_RENAME:
+            text = f"Renamed from {_text(d.get('from'))} to {_text(d.get('to'))}"
         case AuditAction.AGENT_ROLE_SET:
             text = f"Marked as a {d.get('role')}"
         case AuditAction.AGENT_ROLE_CLEAR:

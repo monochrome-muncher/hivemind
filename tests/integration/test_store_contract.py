@@ -28,6 +28,7 @@ from tests.pg import ensure_migrated, reset_tables
 
 from hivemind.config import Settings
 from hivemind.domain.access import (
+    AgentNameTaken,
     AgentStatus,
     FleetBusy,
     FleetExists,
@@ -3001,6 +3002,153 @@ async def test_set_agent_owner_alias_returns_before_and_after(adapter: Adapter) 
     ]
     with pytest.raises(UnknownAgent, match="unknown agent: ghost"):
         await store.set_agent_owner_alias("ghost", "x")
+
+
+async def test_rename_agent_rewrites_every_copy_of_the_name(adapter: Adapter) -> None:
+    """ADR 0159: the entries it wrote, its ratings, pins and successions follow the new name; an
+    ``agent`` label that was not the name stays as reported."""
+    store = adapter.store
+    red, _ = await _people(adapter)
+    theirs = await store.create_entry(draft("heir's", author="heir", agent="heir"))
+    mine = await store.create_entry(draft("mine", author="old", agent="old", scope="self"))
+    labelled = await store.create_entry(draft("labelled", author="old", agent="claude-code"))
+    shared = await store.create_entry(
+        draft("shared", author="old", agent="old", scope="fleet", fleet_id=red)
+    )
+    await store.record_feedback(Feedback(theirs.id, "old", "old", Verdict.HELPFUL, updated_at=T0))
+    await store.pin_entry(red, shared.id, "old", limit=5)
+
+    before, after = await store.rename_agent("old", "older")
+
+    assert (before.name, after.name) == ("old", "older")
+    assert after.status is AgentStatus.ACTIVE and after.created_at == before.created_at
+    assert await store.get_agent("old") is None
+    assert await store.get_agent("older") == after
+    stored = await store.get_entries([mine.id, labelled.id, shared.id])
+    assert {(e.author, e.agent) for e in stored.values()} == {
+        ("older", "older"),
+        ("older", "claude-code"),
+    }
+    assert [(f.user, f.agent) for f in await store.list_feedback(theirs.id, 10)] == [
+        ("older", "older")
+    ]
+    assert [p.pinned_by for p in await store.list_pins(red)] == ["older"]
+
+    await store.retire_agent("older", "heir", "admin:1")
+    await store.rename_agent("heir", "heir-2")
+    succession = await store.get_succession("older")
+    assert succession is not None and succession.successor == "heir-2"
+    await store.rename_agent("older", "oldest")
+    succession = await store.get_succession("oldest")
+    assert succession is not None and succession.successor == "heir-2"
+    assert await store.get_succession("older") is None
+    assert await store.inherited_authors("heir-2") == ("oldest",)
+    assert await store.former_agent_names(["oldest", "heir-2", "old"]) == {
+        "oldest": ("old", "older"),
+        "heir-2": ("heir",),
+        "old": (),
+    }
+
+
+async def test_rename_agent_refuses_a_name_another_agent_holds_or_left(adapter: Adapter) -> None:
+    store = adapter.store
+    await store.register_agent("alice")
+    await store.register_agent("bob")
+    for taken in ("bob", "BOB", "Bob"):
+        with pytest.raises(AgentNameTaken):
+            await store.rename_agent("alice", taken)
+    assert (await store.get_agent("alice")) is not None  # nothing moved
+
+    await store.rename_agent("alice", "carol")
+    for left in ("alice", "ALICE", "Alice"):
+        with pytest.raises(AgentNameTaken):
+            await store.rename_agent("bob", left)
+    assert (await store.get_agent("bob")) is not None
+    with pytest.raises(UnknownAgent, match="unknown agent: ghost"):
+        await store.rename_agent("ghost", "casper")
+    with pytest.raises(UnknownAgent):
+        await store.rename_agent("alice", "dave")  # it is carol now
+
+
+async def test_rename_agent_back_to_an_own_former_name_and_case_only(adapter: Adapter) -> None:
+    store = adapter.store
+    await store.register_agent("alice")
+    await store.rename_agent("alice", "carol")
+    assert await store.former_agent_names(["carol"]) == {"carol": ("alice",)}
+
+    back_before, back = await store.rename_agent("carol", "alice")  # the name is its own again
+    assert (back_before.name, back.name) == ("carol", "alice")
+    assert await store.former_agent_names(["alice"]) == {"alice": ("carol",)}
+
+    _, cased = await store.rename_agent("alice", "Alice")  # a case-only change is a rename
+    assert cased.name == "Alice"
+    assert await store.get_agent("alice") is None and await store.get_agent("Alice") == cased
+    assert await store.former_agent_names(["Alice"]) == {"Alice": ("carol",)}
+
+    same_before, same_after = await store.rename_agent("Alice", "Alice")
+    assert same_before == same_after
+    assert await store.former_agent_names(["Alice"]) == {"Alice": ("carol",)}
+
+
+async def test_a_case_only_rename_reserves_nothing_and_a_later_rename_still_works(
+    adapter: Adapter,
+) -> None:
+    """bob -> Bob -> x: the case-only step leaves no former name, so the next step's reservation
+    cannot collide with it; both spellings stay unavailable throughout."""
+    store = adapter.store
+    await store.register_agent("bob", "jane")
+    await store.rename_agent("bob", "Bob")
+    assert await store.former_agent_names(["Bob"]) == {"Bob": ()}
+    assert (await store.register_agent("BOB", "jane")).name == "Bob"  # still in use
+
+    await store.rename_agent("Bob", "x")
+    assert await store.former_agent_names(["x"]) == {"x": ("Bob",)}
+    for left in ("bob", "BOB", "Bob"):
+        assert (await store.register_agent(left, "jane")).name == "x"  # reserved, not registered
+    assert [a.name for a in await store.list_agents()] == ["x"]
+    await store.register_agent("y")
+    with pytest.raises(AgentNameTaken):
+        await store.rename_agent("y", "BOB")
+
+
+async def test_a_name_an_agent_left_cannot_be_registered_again(adapter: Adapter) -> None:
+    store = adapter.store
+    await store.register_agent("alice", "jane")
+    await store.rename_agent("alice", "carol")
+    for left in ("alice", "ALICE"):
+        holder = await store.register_agent(left, "jane")
+        assert holder.name == "carol"  # the caller sees a different name: not registered
+    assert [a.name for a in await store.list_agents()] == ["carol"]
+
+
+async def test_a_write_under_a_name_that_was_renamed_is_refused(adapter: Adapter) -> None:
+    """The window after a rename commits: a request still authenticated as the old name must not
+    land an entry or a pin under it. The error is retryable (``FleetBusy``)."""
+    store = adapter.store
+    red = (await store.create_fleet("red")).id
+    await _active(adapter, "alice", red)
+    await store.rename_agent("alice", "carol")
+    with pytest.raises(FleetBusy, match="renamed during this write"):
+        await store.create_entry(draft("late", author="alice", scope="self"))
+    kept = await store.create_entry(
+        draft("fleet note", author="carol", scope="fleet", fleet_id=red)
+    )
+    with pytest.raises(FleetBusy, match="renamed during this write"):
+        await store.pin_entry(red, kept.id, "alice", limit=5)
+    # An author that is no registered agent (the admin key's) is not checked.
+    await store.create_entry(draft("by admin", author="admin", agent="admin"))
+    await store.rename_agent("carol", "alice")  # back: the name is current again
+    await store.create_entry(draft("again", author="alice", scope="self"))
+
+
+async def test_a_write_under_the_spelling_a_case_only_rename_left_is_refused(
+    adapter: Adapter,
+) -> None:
+    store = adapter.store
+    await _active(adapter, "bob", (await store.create_fleet("red")).id)
+    await store.rename_agent("bob", "Bob")
+    with pytest.raises(FleetBusy, match="renamed during this write"):
+        await store.create_entry(draft("late", author="bob", scope="self"))
 
 
 async def test_agents_list_by_name(adapter: Adapter) -> None:

@@ -42,6 +42,7 @@ _ALLOWED = allowlist(
         ("POST", r"admin/agents/[^/]+/revoke"),
         ("POST", r"admin/agents/[^/]+/key"),
         ("PATCH", r"admin/agents/[^/]+"),
+        ("POST", r"admin/agents/[^/]+/rename"),
         ("PUT", r"admin/agents/[^/]+/role"),
         ("DELETE", r"admin/agents/[^/]+/role"),
         ("POST", r"admin/org-key/rotate"),
