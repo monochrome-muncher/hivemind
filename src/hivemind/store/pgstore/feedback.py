@@ -7,6 +7,8 @@ from datetime import datetime
 from functools import partial
 from typing import Any
 
+import asyncpg
+
 from hivemind.domain.access import Visibility
 from hivemind.domain.entry import EntryState, Kind
 from hivemind.domain.feedback import (
@@ -25,6 +27,7 @@ from hivemind.domain.feedback import (
 )
 from hivemind.domain.validation import canonical_uuid, canonical_uuids, is_valid_uuid
 from hivemind.store.pgstore.connection import PgConnections
+from hivemind.store.pgstore.fleet_guards import refuse_stale_author
 from hivemind.store.pgstore.rows import row_to_feedback
 from hivemind.store.pgstore.sql_common import _RATING_COUNTS, add_clause, visibility_clause
 
@@ -39,6 +42,13 @@ SET verdict = EXCLUDED.verdict,
     set_aside_by = NULL
 RETURNING updated_at
 """
+
+
+async def _refuse_renamed_raters(conn: asyncpg.Connection, feedbacks: list[Feedback]) -> None:
+    """A rating by a name that a rename left would be filed under no agent (ADR 0160)."""
+    for rater in sorted({f.user for f in feedbacks}):
+        await refuse_stale_author(conn, None, rater)
+
 
 # Informative rows before bare helpful ones (ADR 0064), newest first.
 _FEEDBACK_ORDER = (
@@ -218,7 +228,8 @@ class FeedbackStore(PgConnections):
 
     async def record_feedback(self, feedback: Feedback) -> Feedback:
         """Upsert a feedback verdict (one row per entry+user+agent)."""
-        async with self._connection() as conn:
+        async with self._write_transaction(None) as conn:
+            await _refuse_renamed_raters(conn, [feedback])
             updated_at = await conn.fetchval(
                 UPSERT_FEEDBACK,
                 feedback.entry_id,
@@ -234,7 +245,8 @@ class FeedbackStore(PgConnections):
         """Upsert several feedback rows in one transaction."""
         if not feedbacks:
             return []
-        async with self._transaction() as conn:
+        async with self._write_transaction(None) as conn:
+            await _refuse_renamed_raters(conn, feedbacks)
             # The transaction's start time: the stamp for rows without their own ``updated_at``.
             now = await conn.fetchval("SELECT now()")
             await conn.executemany(

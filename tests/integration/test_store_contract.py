@@ -3141,6 +3141,28 @@ async def test_a_write_under_a_name_that_was_renamed_is_refused(adapter: Adapter
     await store.create_entry(draft("again", author="alice", scope="self"))
 
 
+async def test_a_rating_under_a_name_that_was_renamed_is_refused(adapter: Adapter) -> None:
+    """A rating filed under the old name would count twice and block renaming back (ADR 0160)."""
+    store = adapter.store
+    red = (await store.create_fleet("red")).id
+    await _active(adapter, "alice", red)
+    await _active(adapter, "zed", red)
+    theirs = await store.create_entry(draft("zed's", author="zed", agent="zed"))
+    await store.rename_agent("alice", "carol")
+    late = Feedback(theirs.id, "alice", "alice", Verdict.HELPFUL, updated_at=T0)
+    with pytest.raises(FleetBusy, match="renamed during this write"):
+        await store.record_feedback(late)
+    with pytest.raises(FleetBusy, match="renamed during this write"):
+        await store.record_feedback_many([late])
+    await store.record_feedback(Feedback(theirs.id, "carol", "carol", Verdict.WRONG))
+    await store.record_feedback(Feedback(theirs.id, "admin", "admin", Verdict.HELPFUL))
+    await store.rename_agent("carol", "alice")
+    assert {(f.user, f.verdict) for f in await store.list_feedback(theirs.id, 10)} == {
+        ("alice", Verdict.WRONG),
+        ("admin", Verdict.HELPFUL),
+    }
+
+
 async def test_a_write_under_the_spelling_a_case_only_rename_left_is_refused(
     adapter: Adapter,
 ) -> None:

@@ -71,6 +71,8 @@ class FeedbackStore(MemoryState):
 
     async def record_feedback_many(self, feedbacks: list[Feedback]) -> list[Feedback]:
         with self._lock:
+            for rater in sorted({fb.user for fb in feedbacks}):
+                self._refuse_stale_author(None, rater)
             now = self._clock()  # one stamp per call, like a transaction's now()
             stored = [replace(fb, updated_at=fb.updated_at or now) for fb in feedbacks]
             for fb in stored:
