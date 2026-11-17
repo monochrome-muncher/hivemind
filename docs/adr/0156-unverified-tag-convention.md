@@ -20,7 +20,7 @@ A structured confidence field was rejected: agents tend to set such a field to "
 4. The admin memory browser and the portal show an "unverified" badge on such rows and offer an "Unverified only" filter (`unverified=true` on `GET /v1/entries`, `/v1/admin/entries` and `/v1/portal/entries`; not on search and not on `hive_list`). List rows carry `last_confirmed_at` in their `feedback` object for the badge.
 5. Vital signs count still-unverified entries per fleet (`health.by_fleet.<fleet>.unverified`, Prometheus `hivemind_health_fleet_unverified`). It is shown in the breathing rows and never switches a fleet to Watch.
 
-The always-on text measures 17,394 bytes without ADR 0155 and 17,429 with it.
+The always-on text measures 17,429 bytes (17,394 without ADR 0155).
 
 ## Considered and not done
 
