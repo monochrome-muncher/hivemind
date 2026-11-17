@@ -64,7 +64,10 @@ export async function viewMemories(root) {
   const { params } = parseHash();
   const kind = select("Kind", KINDS, params.get("kind") || "", "Any kind");
   const memoryFilters = memoryFilterFields((k) => params.get(k) || "", "all");
-  const form = h("form", { class: "filters" }, kind, memoryFilters.state, memoryFilters.more);
+  const unverified = h("input", { type: "checkbox", id: "m-unverified" });
+  unverified.checked = params.get("unverified") === "1";
+  const form = h("form", { class: "filters" }, kind, memoryFilters.state,
+    h("label", { class: "check", for: "m-unverified" }, unverified, " Unverified only"), memoryFilters.more);
 
   let applied = null;
   const chipFilters = {
@@ -74,11 +77,11 @@ export async function viewMemories(root) {
   const memories = entryTable({
     fetchPage: ({ limit, offset, fresh }) => {
       if (fresh || !applied) {
-        applied = { kind: kind.value, ...memoryFilters.read() };
+        applied = { kind: kind.value, ...memoryFilters.read(), unverified: unverified.checked ? "1" : "" };
         syncHash(root, "memories", applied);
       }
       return guarded(() => api("GET", "portal/entries", {
-        query: { author: me.name, kind: applied.kind, ...filterFields(applied), limit, offset },
+        query: { author: me.name, kind: applied.kind, ...filterFields(applied), unverified: applied.unverified ? "true" : "", limit, offset },
       }));
     },
     onOpen: (id) => openEntry(id, () => memories.load(true), chipFilters),
@@ -88,7 +91,7 @@ export async function viewMemories(root) {
     csvName: `${me.name}-memories`,
     statusText: (n) => `${n} shown, newest first`,
   });
-  for (const el of [kind, ...memoryFilters.changeTargets()]) el.addEventListener("change", () => memories.load(true));
+  for (const el of [kind, unverified, ...memoryFilters.changeTargets()]) el.addEventListener("change", () => memories.load(true));
   form.addEventListener("submit", (event) => { event.preventDefault(); memories.load(true); });
 
   fill(root,

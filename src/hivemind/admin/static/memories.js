@@ -34,6 +34,8 @@ export async function viewMemories(root) {
   const memoryFilters = memoryFilterFields(get, "active");
   const flagged = h("input", { type: "checkbox", id: "m-flagged" });
   flagged.checked = get("flagged") === "1";
+  const unverified = h("input", { type: "checkbox", id: "m-unverified" });
+  unverified.checked = get("unverified") === "1";
   const explain = h("input", { type: "checkbox", id: "m-explain" });
   explain.checked = get("explain") === "1";
   const apply = h("button", { type: "submit", class: "btn btn-primary", text: "Search" });
@@ -41,6 +43,7 @@ export async function viewMemories(root) {
   const form = h("form", { class: "filters filters-wide" },
     q, asAgent, activeAgents, fleet, author, authors, kind, scope, memoryFilters.state,
     h("label", { class: "check", for: "m-flagged" }, flagged, " Flagged only"),
+    h("label", { class: "check", for: "m-unverified" }, unverified, " Unverified only"),
     h("label", { class: "check", for: "m-explain" }, explain, " Explain ranking"), apply, reset,
     memoryFilters.more);
 
@@ -65,7 +68,7 @@ export async function viewMemories(root) {
 
   const filters = () => ({
     q: q.value.trim(), fleet: fleet.value, author: author.value.trim(), kind: kind.value, scope: scope.value,
-    ...memoryFilters.read(), flagged: flagged.checked ? "1" : "", as: asAgent.value.trim(),
+    ...memoryFilters.read(), flagged: flagged.checked ? "1" : "", unverified: unverified.checked ? "1" : "", as: asAgent.value.trim(),
     explain: explain.checked ? "1" : "",
   });
   const syncHash = (f) => {
@@ -106,7 +109,7 @@ export async function viewMemories(root) {
     if (f.q) return searchPage(searchBody(f, limit, offset), f.as);
     const query = {
       kind: f.kind, scope: f.scope, fleet_id: f.fleet, author: f.author, ...filterFields(f),
-      flagged: f.flagged ? "true" : "", limit, offset,
+      flagged: f.flagged ? "true" : "", unverified: f.unverified ? "true" : "", limit, offset,
     };
     const res = await guarded(() => api("GET", "admin/entries", { query }));
     return res && { items: res.map(normaliseEntry), degraded: false };
@@ -163,7 +166,7 @@ export async function viewMemories(root) {
         tbody.replaceChildren(h("tr", {}, h("td", { class: "empty", colspan: 7, text: empty })));
       }
       status.textContent = byId ? (count ? "The memory with this id (the filters do not apply to an id)" : "")
-        : f.q ? `${count} result${count === 1 ? "" : "s"}, best match first` : `${count} shown, newest first`;
+        : f.q ? `${count} result${count === 1 ? "" : "s"}, best match first${f.unverified ? " (Unverified only applies to lists, not to a search)" : ""}` : `${count} shown, newest first`;
       moreWrap.hidden = items.length < PAGE;
       if (!append) await showAsAgent(f, items, mine);
     } catch (err) {
@@ -186,10 +189,10 @@ export async function viewMemories(root) {
   });
 
   form.addEventListener("submit", (event) => { event.preventDefault(); load(false); });
-  for (const el of [fleet, kind, scope, flagged, explain, ...memoryFilters.changeTargets()]) el.addEventListener("change", () => load(false));
+  for (const el of [fleet, kind, scope, flagged, unverified, explain, ...memoryFilters.changeTargets()]) el.addEventListener("change", () => load(false));
   for (const el of [author, asAgent]) el.addEventListener("change", () => load(false));
   reset.addEventListener("click", () => {
-    q.value = ""; asAgent.value = ""; fleet.value = ""; author.value = ""; kind.value = ""; scope.value = ""; memoryFilters.clear(); flagged.checked = false; explain.checked = false;
+    q.value = ""; asAgent.value = ""; fleet.value = ""; author.value = ""; kind.value = ""; scope.value = ""; memoryFilters.clear(); flagged.checked = false; unverified.checked = false; explain.checked = false;
     load(false);
   });
   more.addEventListener("click", () => load(true));

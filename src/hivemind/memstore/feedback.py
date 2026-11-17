@@ -22,28 +22,21 @@ from hivemind.domain.feedback import (
     FlaggedEntry,
     ReliedOnChange,
     Verdict,
-    last_confirmed,
     truncate_note,
 )
 from hivemind.domain.validation import canonical_uuid, canonical_uuids, is_valid_uuid
-from hivemind.memstore.helpers import EPOCH, canonical_or_same, count_for
+from hivemind.memstore.helpers import EPOCH, canonical_or_same, count_for, last_confirmed_at
 from hivemind.memstore.state import MemoryState
 
 
 def _signals_for(feedback: dict[tuple[str, str, str], Feedback], entry_id: str) -> FeedbackSignals:
     helpful, stale, wrong = count_for(feedback, entry_id)
-    noted: list[datetime] = []
-    flags: list[datetime] = []
     flagged: list[Feedback] = []
     flagged_notes: list[Feedback] = []
     for fb in feedback.values():
         if fb.entry_id != entry_id:
             continue
-        if fb.verdict is Verdict.HELPFUL:
-            if fb.note and fb.note.strip() and fb.updated_at is not None:
-                noted.append(fb.updated_at)
-        else:
-            flags.append(fb.updated_at or EPOCH)
+        if fb.verdict is not Verdict.HELPFUL:
             flagged.append(fb)
             if fb.note and fb.note.strip():
                 flagged_notes.append(fb)
@@ -63,7 +56,7 @@ def _signals_for(feedback: dict[tuple[str, str, str], Feedback], entry_id: str) 
         helpful,
         stale,
         wrong,
-        last_confirmed(max(noted, default=None), max(flags, default=None)),
+        last_confirmed_at(feedback, entry_id),
         correction,
         newest_flag_at=max(
             (fb.updated_at for fb in flagged if fb.updated_at is not None), default=None

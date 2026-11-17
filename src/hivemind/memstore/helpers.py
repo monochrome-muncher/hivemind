@@ -8,7 +8,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 from hivemind.domain.entry import Entry
-from hivemind.domain.feedback import Feedback, FeedbackCounts, Verdict
+from hivemind.domain.feedback import Feedback, FeedbackCounts, Verdict, last_confirmed
 from hivemind.domain.validation import canonical_uuid, is_valid_uuid
 
 # Sort key for a feedback row that has no timestamp (fixtures only).
@@ -73,3 +73,20 @@ def count_for(feedback: dict[tuple[str, str, str], Feedback], entry_id: str) -> 
         elif fb.verdict is Verdict.WRONG:
             wrong += 1
     return (helpful, stale, wrong)
+
+
+def last_confirmed_at(
+    feedback: dict[tuple[str, str, str], Feedback], entry_id: str
+) -> datetime | None:
+    """``last_confirmed`` over the entry's rows in ``feedback``."""
+    noted: list[datetime] = []
+    flags: list[datetime] = []
+    for fb in feedback.values():
+        if fb.entry_id != entry_id:
+            continue
+        if fb.verdict is Verdict.HELPFUL:
+            if fb.note and fb.note.strip() and fb.updated_at is not None:
+                noted.append(fb.updated_at)
+        else:
+            flags.append(fb.updated_at or EPOCH)
+    return last_confirmed(max(noted, default=None), max(flags, default=None))

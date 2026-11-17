@@ -20,6 +20,7 @@ from hivemind.api.schemas import (
     UnpinOut,
 )
 from hivemind.domain.entry import Entry, EntryFilters, EntryState
+from hivemind.domain.feedback import NO_SIGNALS
 from hivemind.domain.recency import RecencyHint
 from hivemind.domain.validation import InvalidInput
 from hivemind.ports import Credential
@@ -87,15 +88,21 @@ async def entry_detail(
 async def listed_with_counts(
     app: HivemindApp, entries: Sequence[Entry], model: type[EntryOut]
 ) -> list[EntryOut]:
-    """A browsing list's rows with their verdict counts (no notes), for the admin panel's and the
-    portal's Flags column; ``feedback`` stays null when nobody rated the entry, as on a search hit."""
-    counts = await app.read_service.feedback_counts(entries) if entries else {}
+    """A browsing list's rows with their verdict counts (no notes) and last-confirmed date, for the
+    admin panel's and the portal's Flags column and unverified badge; ``feedback`` stays null when
+    nobody rated the entry, as on a search hit."""
+    signals = await app.read_service.feedback_signals(entries) if entries else {}
     rows = []
     for entry in entries:
         row = model.from_entry(entry)
-        helpful, stale, wrong = counts.get(entry.id, (0, 0, 0))
-        if helpful or stale or wrong:
-            row.feedback = FeedbackSummaryOut(helpful=helpful, stale=stale, wrong=wrong)
+        rated = signals.get(entry.id, NO_SIGNALS)
+        if any(rated.counts):
+            row.feedback = FeedbackSummaryOut(
+                helpful=rated.helpful,
+                stale=rated.stale,
+                wrong=rated.wrong,
+                last_confirmed_at=rated.last_confirmed_at,
+            )
         rows.append(row)
     return rows
 

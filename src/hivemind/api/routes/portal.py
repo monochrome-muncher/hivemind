@@ -88,6 +88,7 @@ async def portal_list_entries(
     include_inactive: bool = False,
     state: Annotated[EntryState | None, Query()] = None,
     flagged: bool = False,
+    unverified: bool = False,
     limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = PORTAL_DEFAULT_LIMIT,
     offset: Annotated[int, Query(ge=0, le=MAX_OFFSET)] = 0,
 ) -> list[EntryOut]:
@@ -110,6 +111,7 @@ async def portal_list_entries(
         include_inactive=include_inactive,
         state=state,
         flagged=flagged,
+        unverified=unverified,
     )
     entries = await app.read_service.list(
         filters, limit=limit, offset=offset, visibility=credential.visibility()

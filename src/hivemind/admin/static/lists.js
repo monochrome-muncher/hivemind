@@ -152,10 +152,18 @@ export function normaliseEntry(x) {
     occurred_at: x.occurred_at,
     state: x.state || "active",
     feedback: fb && (fb.helpful || fb.stale || fb.wrong) ? fb : null,
+    last_confirmed_at: x.last_confirmed_at || (fb && fb.last_confirmed_at) || null,
     score: x.score,
     explain: x.explain || null,
   };
 }
+
+const UNVERIFIED_TAG = "unverified";
+
+/** An active memory tagged `unverified` that no other agent has confirmed since (the server's rule for the vital-signs count). */
+const stillUnverified = (item) => item.state === "active" && item.tags.includes(UNVERIFIED_TAG) && !item.last_confirmed_at;
+
+const unverifiedBadge = () => h("span", { class: "badge badge-pending", title: "Its writer did not check this claim, and no other agent has confirmed it", text: UNVERIFIED_TAG });
 
 /** The small "new" badge `isNew` rows carry (inside an existing cell, so no column changes). */
 const newBadge = (title) => h("span", { class: "badge badge-level", title, text: "new" });
@@ -169,9 +177,10 @@ export function entryRow(item, { onOpen, onTag = null, compact = false, fleetNam
   row.addEventListener("keydown", (event) => { if (event.target === row && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); open(); } });
   row.append(...[
     h("td", { class: "cell-summary" },
-      isNew && isNew(item)
-        ? h("div", { class: "summary-text" }, newBadge("Written since you last looked"), " ", item.summary)
-        : h("div", { class: "summary-text", text: item.summary }),
+      h("div", { class: "summary-text" },
+        isNew && isNew(item) ? [newBadge("Written since you last looked"), " "] : null,
+        stillUnverified(item) ? [unverifiedBadge(), " "] : null,
+        item.summary),
       item.tags.length ? h("div", { class: "chips chips-sm" }, item.tags.slice(0, 5).map((t) => (onTag ? chipButton(t, () => onTag(t), { title: `Only memories tagged ${t}` }) : h("span", { class: "chip", text: t })))) : null),
     h("td", {}, kindBadge(item.kind)),
     h("td", { class: "nowrap", text: scopeText(item.scope, item.fleet_id, fleetName) }),

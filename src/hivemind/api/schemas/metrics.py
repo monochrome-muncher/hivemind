@@ -157,6 +157,7 @@ class FleetHealthMetrics(BaseModel):
     orphaned_flagged: int = 0
     floating_gap: int = 0
     gap_tag_counts: dict[str, int] = {}
+    unverified: int = 0
 
 
 class RoleActivityMetrics(BaseModel):

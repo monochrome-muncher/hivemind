@@ -30,7 +30,11 @@ from hivemind.domain.health import (
 )
 from hivemind.store.pgstore.connection import PgConnections
 from hivemind.store.pgstore.rows import ages
-from hivemind.store.pgstore.sql_common import _RATING_COUNTS, VECTOR_SEARCH_SETTINGS
+from hivemind.store.pgstore.sql_common import (
+    _RATING_COUNTS,
+    VECTOR_SEARCH_SETTINGS,
+    unverified_condition,
+)
 
 # The grouped usage counters: one scan instead of one COUNT per figure.
 USAGE_COUNTS = """
@@ -124,6 +128,7 @@ WITH flagged AS (
            count(*) FILTER (WHERE 'anomaly' = ANY(e.tags)) AS gap_anomaly,
            count(*) FILTER (WHERE 'open-question' = ANY(e.tags)) AS gap_open_question,
            count(*) FILTER (WHERE 'dead-end' = ANY(e.tags)) AS gap_dead_end,
+           count(*) FILTER (WHERE {unverified_condition("e")}) AS unverified,
            count(*) AS active
       FROM entries e
       LEFT JOIN fresh ON fresh.entry_id = e.id
@@ -135,7 +140,7 @@ WITH flagged AS (
            count(*) FILTER (WHERE fl.first_flag < $1::timestamptz - interval '336 hours'),
            count(*) FILTER (WHERE a.status = 'revoked'
                               OR lw.at < $1::timestamptz - interval '720 hours'),
-           0, 0, 0, 0, 0
+           0, 0, 0, 0, 0, 0
       FROM flagged fl
       LEFT JOIN agents a ON a.name = fl.author
       LEFT JOIN last_write lw ON lw.author = fl.author
@@ -145,7 +150,8 @@ SELECT fleet_id, sum(sourceable) AS sourceable, sum(sourced) AS sourced,
        sum(insights) AS insights, sum(synthesizing) AS synthesizing,
        sum(backlog) AS backlog, sum(orphaned) AS orphaned, sum(floating) AS floating,
        sum(gap_anomaly) AS gap_anomaly, sum(gap_open_question) AS gap_open_question,
-       sum(gap_dead_end) AS gap_dead_end, sum(active) AS active
+       sum(gap_dead_end) AS gap_dead_end, sum(unverified) AS unverified,
+       sum(active) AS active
   FROM parts
  GROUP BY fleet_id
 """
@@ -423,6 +429,7 @@ def _health_counts(by_fleet: list[Record], breathing: list[Record]) -> tuple[Hea
                 gap_anomaly=int(a["gap_anomaly"]),
                 gap_open_question=int(a["gap_open_question"]),
                 gap_dead_end=int(a["gap_dead_end"]),
+                unverified=int(a["unverified"]),
                 active_entries=int(a["active"]),
                 writes_7d=int(b["writes"]),
                 verdicts_7d=int(b["verdicts"]),

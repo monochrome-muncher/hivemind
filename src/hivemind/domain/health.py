@@ -36,7 +36,8 @@ class HealthCounts:
     ``synthesizing``: insights linking at least two entries. ``flagged_backlog_14d``: oldest
     standing stale/wrong verdict over 14 days old; ``orphaned_flagged``: author revoked or silent
     30 days; ``floating_gap``: ``occurred_at`` and last feedback both over 90 days old.
-    ``gap_*`` count entries with that tag; ``active_entries`` counts them all.
+    ``gap_*`` count entries with that tag; ``unverified`` those tagged ``unverified`` with no standing
+    confirmation; ``active_entries`` counts them all.
 
     Breathing, over the 7 days before ``now``: ``writes_7d`` entries created (any state),
     ``verdicts_7d`` verdicts on the fleet's entries, ``supersessions_7d`` entries superseded by a
@@ -54,6 +55,7 @@ class HealthCounts:
     gap_anomaly: int = 0
     gap_open_question: int = 0
     gap_dead_end: int = 0
+    unverified: int = 0
     active_entries: int = 0
     writes_7d: int = 0
     verdicts_7d: int = 0

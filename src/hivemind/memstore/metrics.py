@@ -280,6 +280,7 @@ class MetricsStore(MemoryState):
             c["anomaly"] += "anomaly" in e.tags
             c["open_question"] += "open-question" in e.tags
             c["dead_end"] += "dead-end" in e.tags
+            c["unverified"] += self._still_unverified(e)
         return tuple(
             HealthCounts(
                 fleet_id=fleet_id,
@@ -293,6 +294,7 @@ class MetricsStore(MemoryState):
                 gap_anomaly=c["anomaly"],
                 gap_open_question=c["open_question"],
                 gap_dead_end=c["dead_end"],
+                unverified=c["unverified"],
                 active_entries=c["active"],
                 writes_7d=c["writes_7d"],
                 verdicts_7d=c["verdicts_7d"],

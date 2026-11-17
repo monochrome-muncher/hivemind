@@ -110,6 +110,10 @@ A good entry:
   your user decided; `self` for ideas, brainstorms, untried plans, your
   user's preferences, work in progress. Once tested, supersede the self
   note with a fleet entry.
+- **Tag `unverified`** a claim you did not see hold: a likely cause, a
+  fix not yet confirmed, what you read or were told. A reader whose work
+  tests one rates it; a confirming `helpful` or a successor without the
+  tag clears it.
 - **No local paths in fleet entries**: use repo-relative ones.
 
 **Distill.** When three or more active entries answer one question,

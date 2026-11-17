@@ -528,6 +528,61 @@ async def test_flagged_keeps_entries_reported_stale_or_wrong(adapter: Adapter) -
     assert set(await vector_ids(adapter.store, adapter.vec(0), flagged, 10)) == expected
 
 
+async def test_unverified_keeps_active_tagged_entries_without_a_standing_confirmation(
+    adapter: Adapter,
+) -> None:
+    """``unverified`` keeps active entries tagged ``unverified`` whose last confirmation (a noted
+    helpful newer than every flag) is missing, on list and count; the fleet's vital-signs count
+    is the same set."""
+    hour = timedelta(hours=1)
+
+    async def tagged(summary: str) -> Entry:
+        return await write(adapter, summary, tags=("unverified",))
+
+    bare = await tagged("never rated")
+    unnoted = await tagged("helpful without a note")
+    confirmed = await tagged("confirmed")
+    flagged_after = await tagged("flagged after the confirmation")
+    reconfirmed = await tagged("confirmed after the flag")
+    tie = await tagged("confirmed and flagged at once")
+    old = await tagged("replaced")
+    await write(adapter, "no tag")
+    await write(adapter, "replacement", supersedes=(old.id,))
+    note = "checked it"
+
+    async def rate(
+        entry: Entry, who: str, verdict: Verdict, at: datetime, text: str | None
+    ) -> None:
+        await adapter.store.record_feedback(Feedback(entry.id, who, who, verdict, text, at))
+
+    await rate(unnoted, "u", Verdict.HELPFUL, T0, None)
+    await rate(confirmed, "u", Verdict.HELPFUL, T0, note)
+    await rate(flagged_after, "u", Verdict.HELPFUL, T0, note)
+    await rate(flagged_after, "v", Verdict.STALE, T0 + hour, None)
+    await rate(reconfirmed, "v", Verdict.WRONG, T0, None)
+    await rate(reconfirmed, "u", Verdict.HELPFUL, T0 + hour, note)
+    await rate(tie, "u", Verdict.HELPFUL, T0, note)
+    await rate(tie, "v", Verdict.STALE, T0, None)
+    fleet = await adapter.store.create_fleet("blue")
+    await adapter.store.register_agent("Scout")
+    await adapter.store.activate_agent(
+        "Scout", trust_level=TrustLevel.LURKER, home_fleet_id=fleet.id
+    )
+    by_revoked = await tagged("confirmed only by a revoked agent")
+    revoked_flag = await tagged("confirmed, then flagged by a revoked agent")
+    await rate(by_revoked, "Scout", Verdict.HELPFUL, T0, note)
+    await rate(revoked_flag, "u", Verdict.HELPFUL, T0, note)
+    await rate(revoked_flag, "Scout", Verdict.WRONG, T0 + hour, None)
+    await adapter.store.revoke_agent("Scout")
+
+    expected = {bare.id, unnoted.id, flagged_after.id, tie.id, by_revoked.id}
+    filters = EntryFilters(unverified=True)
+    assert {e.id for e in await adapter.store.list_entries(filters)} == expected
+    assert await adapter.store.count_entries(filters) == len(expected)
+    health = await adapter.store.fleet_health(T0 + 2 * hour)
+    assert sum(r.unverified for r in health.by_fleet) == len(expected)
+
+
 ME = ("u-me", "me")  # the (user, agent) a feedback row is keyed by
 
 
