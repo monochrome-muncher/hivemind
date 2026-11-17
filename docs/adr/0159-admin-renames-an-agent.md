@@ -2,7 +2,7 @@
 
 Amends [ADR 0040](0040-input-bounds-and-agent-name-rules.md) and [ADR 0045](0045-agent-names-are-unique-ignoring-case.md) (a name an agent left stays reserved), [ADR 0122](0122-admin-corrects-an-agents-owner-alias.md) (the sibling correction, whose shape this follows) and [ADR 0123](0123-agent-history.md) (the history follows former names). Touches [ADR 0027](0027-audit-log-of-admin-actions.md), [ADR 0109](0109-rename-a-fleet.md) and [ADR 0119](0119-rollbacks-do-not-silently-erase-the-audit-log.md). Amends SPEC §5.1 and §12.5.
 
-Status: Accepted. Asked for by Monochrome on 2026-11-17.
+Status: Accepted. Asked for by Monochrome on 2026-11-17. Decision 8 amended by [ADR 0160](0160-ratings-are-guarded-against-a-racing-rename.md): ratings take the same guard as entries and pins.
 
 ## Context
 

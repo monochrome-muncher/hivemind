@@ -238,6 +238,7 @@ function editDialog(agent, onDone) {
               await guarded(() => api("POST", `admin/agents/${encoded}/rename`, { body: { name: next } }));
             } catch (err) {
               if (!patched) throw err;
+              onDone(); // the page behind the dialog shows what was saved, even if the admin cancels
               throw new Error(`The other changes were saved; the rename was not: ${err.message}`);
             }
           }
