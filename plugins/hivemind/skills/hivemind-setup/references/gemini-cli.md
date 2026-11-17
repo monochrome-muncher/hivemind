@@ -18,9 +18,9 @@ gemini extensions install https://<git-server>/<owner>/hivemind.git
 ```
 
 It brings the MCP server (built from `HIVEMIND_MCP_URL` and
-`HIVEMIND_API_KEY` in the environment Gemini CLI starts with), both
+`HIVEMIND_API_KEY` in the environment Gemini CLI starts with), the
 skills, and the two hooks under "Stay aware". `gemini extensions list`
-shows it. Checked with Gemini CLI 0.63.
+shows it. Checked with Gemini CLI 0.63 and 0.68.0.
 
 **Moving from a setup by hand:** remove the `hivemind` entry under
 `mcpServers` in `~/.gemini/settings.json` (it would replace the

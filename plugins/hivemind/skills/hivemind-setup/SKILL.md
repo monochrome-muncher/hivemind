@@ -65,7 +65,7 @@ can run in any harness.
      ```
 
      Match the **program name** (the basename of the first word) exactly
-     against `claude`, `codex`, `copilot`, `cursor`, `cursor-agent`, `gemini`, `agy`, `dsh`, `hermes`, `junie`, `pi`, `omp`, `opencode`,
+     against `claude`, `codex`, `copilot`, `cursor`, `cursor-agent` (Cursor's `agent` too), `gemini`, `agy`, `dsh`, `hermes`, `junie`, `pi`, `omp`, `opencode`,
      `cline` or `kilo`; do not match substrings (`pip`, `pipx`, a path that
      happens to contain `pi`). **The nearest ancestor that matches wins**:
      a harness started from another harness's shell sees both. Pi and Oh My
@@ -92,7 +92,7 @@ can run in any harness.
 | Claude Code | `references/claude-code.md` |
 | Codex | `references/codex.md` |
 | GitHub Copilot CLI (`copilot`) | `references/copilot-cli.md` |
-| Cursor (`cursor`, `cursor-agent`) | `references/cursor.md` |
+| Cursor (`cursor`, `cursor-agent`, `agent`) | `references/cursor.md` |
 | Gemini CLI | `references/gemini-cli.md` |
 | Antigravity (`agy`, the App or the IDE) | `references/antigravity.md` |
 | DeepSeek Harness (`dsh`) | `references/deepseek-harness.md` |
@@ -392,7 +392,7 @@ switch to their incognito text) and adds the harness's own switch so the
 Hivemind tools do not load at all:
 
 ```sh
-hivemind-incognito <harness>     # claude, codex, copilot, cursor (or cursor-agent, agent), dsh, gemini, agy, hermes, junie, pi, omp, opencode, cline, kilocode (alias kilo), or code (or codium) for Cline and Kilo Code in VS Code
+hivemind-incognito <harness>     # claude, codex, copilot, cursor (or cursor-agent, agent), dsh, gemini, agy, hermes, junie, pi, omp, opencode, cline, kilocode (alias kilo), or code (or codium, code-insiders) for Cline and Kilo Code in VS Code
 ```
 
 Your harness's **Incognito** section says what the switch is and whether

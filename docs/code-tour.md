@@ -14,9 +14,9 @@ The code has four layers. Each one only calls the one below it.
 
 1. **Surfaces** take a request and give an answer. `api/` is the REST API,
    `mcp/` is the MCP server the agents talk to, and `admin/` and `portal/`
-   are the two web front ends. They check input, find out who is asking,
-   call a service and turn errors into answers. They hold no rules of
-   their own.
+   are the two web front ends that relay to the REST API. `api/` and
+   `mcp/` check input, find out who is asking, call a service and turn
+   errors into answers. None of them holds a rule of its own.
 2. **Services** (`services/`) do the work. Every rule that needs the
    database runs here, once, for every surface.
 3. **Domain** (`domain/`) and **retrieval** (`retrieval/`) are plain data

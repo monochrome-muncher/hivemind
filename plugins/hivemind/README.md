@@ -679,7 +679,7 @@ way):
 
 It also takes `codex`, `copilot`, `cursor` (or `cursor-agent` or `agent`), `dsh`,
 `gemini`, `agy`, `hermes`, `junie`, `pi`, `omp`, `opencode`, `cline`,
-`kilocode` (or `kilo`) and `code` (or `codium`). To make it shorter to type, link it into a folder
+`kilocode` (or `kilo`) and `code` (or `codium` or `code-insiders`). To make it shorter to type, link it into a folder
 on your `PATH`:
 
 ```sh

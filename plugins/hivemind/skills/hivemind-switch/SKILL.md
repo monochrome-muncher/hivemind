@@ -121,7 +121,7 @@ say so, and that a running session keeps its old key until restarted:
 | Junie | the user rebuilds `~/.junie/mcp/mcp.json` from the profile's key file (the command in hivemind-setup's `references/junie.md`, with `junie.<profile>.env` in place of `junie.env`; don't run it yourself, it reads the key), then restarts |
 | Antigravity | `/plugin` > hivemind > "Configure MCP servers…", enter the other key, new session |
 | Claude desktop app, IDE extensions | the `env` block of `~/.claude/settings.json`, then restart |
-| VS Code (Cline, Kilo Code), Cursor app | quit the editor, then start it with `hivemind-as <profile> code .` (or `cursor .`): an open window keeps its environment |
+| VS Code (Cline, Kilo Code), Cursor app | quit the editor, then start it with `hivemind-as <profile> code .` (Cursor app: `hivemind-as <profile> cursor .`): an open window keeps its environment |
 | DeepSeek Harness | the launcher refuses in a folder whose `.env` names `HIVEMIND_*` (DSH would fall back to `~/.dsh/.env`, the default agent) |
 
 After the switch, the new session's `hive_whoami` should show the other

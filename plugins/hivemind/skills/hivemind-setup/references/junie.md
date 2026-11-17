@@ -41,7 +41,7 @@ user's own file instead.
 
 The server **must be named `hivemind`**: the incognito launcher and the
 guidelines refer to that name. Once the entry exists, Junie shows the
-plugin's own server as "mcp (ignored due to conflict)", which is right.
+plugin's own server as "Conflict: using user mcp.json — ignoring extension hivemind@github-monochrome-muncher-hivemind" in `/mcp`, which is right.
 Never put the key in a project's `.junie/mcp/mcp.json`: a project file is
 for the repository, not for secrets.
 
