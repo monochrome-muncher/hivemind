@@ -185,8 +185,11 @@ The operator flow (steps 1–4 are required, 5–8 optional):
    `hivemind-vital-signs` with four `info` alerts: a quiet fleet, a rising
    echo rate, rivals lingering and a growing floating gap. They are hints
    for the admin, not pages. Add your Operator's release label to it, as for
-   the ServiceMonitors; the thresholds are starting points that match the
-   admin panel's "Vital signs" card.
+   the ServiceMonitors. The thresholds are starting points: the echo rate
+   (0.2) and rival age (60 days) match the admin panel's "Vital signs"
+   card; the quiet-fleet alert (7 days without activity) and the
+   floating-gap alert (larger than 28 days earlier) have no counterpart
+   there.
 
 ---
 
