@@ -5,6 +5,10 @@
   "author": {
     "name": "Hivemind"
   },
+  "homepage": "https://github.com/monochrome-muncher/hivemind/tree/main/plugins/hivemind#readme",
+  "repository": "https://github.com/monochrome-muncher/hivemind",
+  "license": "MIT",
+  "logo": "assets/logo.svg",
   "keywords": ["memory", "knowledge", "mcp", "hivemind"],
   "skills": "./skills/",
   "rules": "./cursor/rules/",

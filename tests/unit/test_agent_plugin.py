@@ -2152,6 +2152,21 @@ def test_the_cursor_plugin_route_is_cursor_only() -> None:
     )
 
 
+def test_the_cursor_manifest_has_what_the_marketplace_page_shows() -> None:
+    """The Cursor Marketplace wants relative paths inside the plugin and
+    shows the logo, homepage, repository and license."""
+    manifest = _json(PLUGIN / ".cursor-plugin" / "plugin.json")
+    assert manifest["repository"] == "https://github.com/monochrome-muncher/hivemind"
+    assert manifest["homepage"].startswith(manifest["repository"])
+    assert manifest["license"] == "MIT"
+    logo = PLUGIN / manifest["logo"]
+    assert logo.read_bytes() == (ROOT / "docs" / "images" / "hivemind-icon.svg").read_bytes()
+    for field in ("logo", "skills", "rules", "hooks"):
+        path = manifest[field]
+        assert not path.startswith("/") and ".." not in path, field
+        assert (PLUGIN / path).exists(), field
+
+
 def test_cursor_variables_alone_keep_the_claude_shape() -> None:
     """A Claude Code started in Cursor's terminal may inherit CURSOR_VERSION:
     only the Cursor hook's --cursor argument switches the shape."""
@@ -2200,10 +2215,14 @@ def test_the_cursor_reference_is_complete() -> None:
     assert "~/.cursor/plugins/local-marketplaces.json" in text and "~/.cursor/skills/" in text
     assert "~/.cursor/rules/hivemind.mdc" in text and "alwaysApply: true" in text
     assert "additional_context" in text and "hivemind-incognito" in text
-    # The user stop hook must point where the local-folder install puts the script.
-    stop = "$HOME/.cursor/plugins/local/hivemind/skills/hivemind-setup/scripts/hivemind-stop.sh"
-    assert f'"command": "sh \\"{stop}\\" --cursor"' in text
-    assert (PLUGIN / stop.split("/hivemind/", 1)[1]).is_file()
+    # A marketplace install lives in a folder named after its commit, so the
+    # user stop hook runs a copy at a fixed place, and the update check covers it.
+    assert "Copy `scripts/hivemind-stop.sh` from this skill's folder" in text
+    assert '"command": "sh \\"$HOME/.cursor/hooks/hivemind-stop.sh\\" --cursor"' in text
+    update = (UPDATE_REFS / "cursor.md").read_text()
+    copied = "skills/hivemind-setup/scripts/hivemind-stop.sh"
+    assert f"--copy ~/.cursor/hooks/hivemind-stop.sh={copied}" in update
+    assert (PLUGIN / copied).is_file()
     assert "hm_" not in text.replace("hm_…", "")
 
 
