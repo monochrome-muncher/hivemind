@@ -22,6 +22,8 @@ from typing import Any
 import pytest
 import yaml
 
+from hivemind.mcp.metrics import FAILURE_CODES
+
 ROOT = Path(__file__).resolve().parents[2]
 K8S = ROOT / "deploy" / "kubernetes"
 WORKLOADS = [
@@ -861,6 +863,12 @@ def test_grafana_dashboard_ships_with_the_monitoring_tree() -> None:
     assert ns["includeAll"] is False and ns["multi"] is False and "allValue" not in ns
     # Every query is scoped by the namespace variable and reads a Hivemind series.
     assert all('namespace=~"$namespace"' in e and "hivemind_" in e for e in exprs)
+    # The tool panels split server failures from refusals by the same codes the runner names.
+    failures = "|".join(sorted(FAILURE_CODES))
+    tool_exprs = [e for e in exprs if 'outcome="error"' in e or "code=~" in e]
+    assert tool_exprs and all(
+        f'code=~"{failures}"' in e or f'code!~"{failures}"' in e for e in tool_exprs
+    )
     # The pool-wide counters repeat on every api replica: never summed raw.
     for e in exprs:
         if "hivemind_searches" in e:
