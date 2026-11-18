@@ -18,8 +18,9 @@ from starlette.testclient import TestClient
 
 from hivemind.config import Settings
 from hivemind.embeddings import EmbeddingError
+from hivemind.mcp import errors as mcp_errors
 from hivemind.mcp.http import build_http_app
-from hivemind.mcp.metrics import McpMetrics
+from hivemind.mcp.metrics import McpMetrics, error_code_label
 from hivemind.mcp.server import build_server
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
@@ -155,7 +156,10 @@ def test_a_keyed_tool_call_is_counted_as_a_request_and_a_tool_call() -> None:
         (("method", "POST"), ("route", "/mcp"), ("status", "200")),
     )
     assert got[request] == 1
-    tool = ("hivemind_mcp_tool_calls_total", (("outcome", "ok"), ("tool", "hive_whoami")))
+    tool = (
+        "hivemind_mcp_tool_calls_total",
+        (("code", "none"), ("outcome", "ok"), ("tool", "hive_whoami")),
+    )
     assert got[tool] == 1
 
 
@@ -207,14 +211,23 @@ async def test_an_odd_method_is_labelled_other() -> None:
     assert got[key] == 2
 
 
-async def test_tool_calls_are_counted_by_outcome() -> None:
+def _tool_calls(tool: str, outcome: str, code: str) -> tuple[str, tuple[tuple[str, str], ...]]:
+    return (
+        "hivemind_mcp_tool_calls_total",
+        (("code", code), ("outcome", outcome), ("tool", tool)),
+    )
+
+
+async def test_tool_calls_are_counted_by_outcome_and_code() -> None:
     metrics = McpMetrics()
     server = build_server(make_app(ALICE), metrics=metrics)
     await server.call_tool("hive_whoami", {})
-    await server.call_tool("hive_get", {"id": "no-such-entry"})
+    await server.call_tool("hive_get", {"entry_id": "no-such-entry"})
+    await server.call_tool("hive_feedback", {"entry_id": "x", "verdict": "meh"})
     got = samples(metrics.render().decode())
-    assert got[("hivemind_mcp_tool_calls_total", (("outcome", "ok"), ("tool", "hive_whoami")))] == 1
-    assert got[("hivemind_mcp_tool_calls_total", (("outcome", "error"), ("tool", "hive_get")))] == 1
+    assert got[_tool_calls("hive_whoami", "ok", "none")] == 1
+    assert got[_tool_calls("hive_get", "error", "not_found")] == 1
+    assert got[_tool_calls("hive_feedback", "error", "invalid_verdict")] == 1
     assert got[("hivemind_mcp_tool_duration_seconds_count", (("tool", "hive_whoami"),))] == 1
 
 
@@ -232,9 +245,18 @@ async def test_a_raising_tool_is_counted_as_an_error_and_reraised() -> None:
     assert isinstance(raised.value.__cause__, RuntimeError)
     assert str(raised.value.__cause__) == "boom"
     got = samples(metrics.render().decode())
-    assert (
-        got[("hivemind_mcp_tool_calls_total", (("outcome", "error"), ("tool", "hive_list")))] == 1
-    )
+    assert got[_tool_calls("hive_list", "error", "raised")] == 1
+
+
+def test_an_unknown_error_code_is_labelled_other() -> None:
+    assert error_code_label({"error": {"code": "made_up", "message": "x"}}) == "other"
+    assert error_code_label({"error": {"code": "not_found", "message": "x"}}) == "not_found"
+    assert error_code_label({"entry_id": "x"}) is None
+
+
+def test_every_mcp_error_code_is_a_label_value() -> None:
+    declared = {v for k, v in vars(mcp_errors).items() if k.startswith("ERR_")}
+    assert declared == mcp_errors.ERROR_CODES
 
 
 async def test_without_metrics_the_server_works_unchanged() -> None:

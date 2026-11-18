@@ -36,6 +36,25 @@ ERR_NAME_CONFLICT = "name_conflict"
 ERR_STORE_UNAVAILABLE = "store_unavailable"  # a store call timed out: retry shortly
 STORE_UNAVAILABLE_MESSAGE = "the database is busy or unreachable; retry shortly"
 
+ERROR_CODES = frozenset(
+    {
+        ERR_INVALID_INPUT,
+        ERR_NOT_FOUND,
+        ERR_PERMISSION_DENIED,
+        ERR_NOT_ACTIVE,
+        ERR_AGENT_UNRESOLVED,
+        ERR_SUPERSEDE_DENIED,
+        ERR_FLEET_MERGED,
+        ERR_FLEET_BUSY,
+        ERR_EMBEDDING_UNAVAILABLE,
+        ERR_UNAUTHENTICATED,
+        ERR_KEY_LOCKED,
+        ERR_INVALID_VERDICT,
+        ERR_NAME_CONFLICT,
+        ERR_STORE_UNAVAILABLE,
+    }
+)
+
 
 def error_reply(code: str, message: str) -> dict[str, object]:
     return {"error": {"code": code, "message": message}}

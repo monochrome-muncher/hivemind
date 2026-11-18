@@ -644,13 +644,13 @@
     },
     {
       "type": "timeseries",
-      "title": "Tool error share",
+      "title": "Tool failure share",
       "id": 16,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "",
+      "description": "Calls that failed on the server side: the database timed out (store_unavailable), the embedder was down (embedding_unavailable) or the tool raised. Refusals of bad or disallowed calls are in \"Tool refusals per minute, by code\" (ADR 0161).",
       "gridPos": {
         "h": 8,
         "w": 8,
@@ -670,7 +670,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "(sum by (tool) (rate(hivemind_mcp_tool_calls_total{namespace=~\"$namespace\",outcome=\"error\"}[$__rate_interval])) or 0 * sum by (tool) (rate(hivemind_mcp_tool_calls_total{namespace=~\"$namespace\"}[$__rate_interval]))) / sum by (tool) (rate(hivemind_mcp_tool_calls_total{namespace=~\"$namespace\"}[$__rate_interval]))",
+          "expr": "(sum by (tool) (rate(hivemind_mcp_tool_calls_total{namespace=~\"$namespace\",code=~\"embedding_unavailable|raised|store_unavailable\"}[$__rate_interval])) or 0 * sum by (tool) (rate(hivemind_mcp_tool_calls_total{namespace=~\"$namespace\"}[$__rate_interval]))) / sum by (tool) (rate(hivemind_mcp_tool_calls_total{namespace=~\"$namespace\"}[$__rate_interval]))",
           "legendFormat": "{{tool}}",
           "refId": "A"
         }
@@ -728,6 +728,49 @@
       }
     },
     {
+      "type": "timeseries",
+      "title": "Tool refusals per minute, by code",
+      "id": 35,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Calls answered with an error code that is the caller's to fix: rating its own memory is permission_denied on hive_feedback (ADR 0065), fleet_busy is a retry during a merge or rename. Expected in small numbers; a steady rise on one code points at agent text worth fixing.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 43
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "60 * sum by (tool, code) (rate(hivemind_mcp_tool_calls_total{namespace=~\"$namespace\",outcome=\"error\",code!~\"embedding_unavailable|raised|store_unavailable\"}[$__rate_interval]))",
+          "legendFormat": "{{tool}} {{code}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
       "type": "row",
       "title": "Fleet health (ADR 0075, observations only)",
       "id": 18,
@@ -736,7 +779,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 43
+        "y": 51
       },
       "panels": []
     },
@@ -753,7 +796,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 44
+        "y": 52
       },
       "fieldConfig": {
         "defaults": {
@@ -824,7 +867,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 44
+        "y": 52
       },
       "fieldConfig": {
         "defaults": {
@@ -884,7 +927,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 44
+        "y": 52
       },
       "fieldConfig": {
         "defaults": {
@@ -926,7 +969,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 52
+        "y": 60
       },
       "fieldConfig": {
         "defaults": {
@@ -1006,7 +1049,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 52
+        "y": 60
       },
       "fieldConfig": {
         "defaults": {
@@ -1048,7 +1091,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 52
+        "y": 60
       },
       "fieldConfig": {
         "defaults": {
@@ -1090,7 +1133,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 60
+        "y": 68
       },
       "fieldConfig": {
         "defaults": {
@@ -1132,7 +1175,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 60
+        "y": 68
       },
       "fieldConfig": {
         "defaults": {
@@ -1172,7 +1215,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 68
+        "y": 76
       },
       "panels": []
     },
@@ -1189,7 +1232,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 69
+        "y": 77
       },
       "fieldConfig": {
         "defaults": {
@@ -1242,7 +1285,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 69
+        "y": 77
       },
       "fieldConfig": {
         "defaults": {
@@ -1284,7 +1327,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 69
+        "y": 77
       },
       "fieldConfig": {
         "defaults": {
@@ -1331,7 +1374,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 77
+        "y": 85
       },
       "panels": []
     },
@@ -1348,7 +1391,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 78
+        "y": 86
       },
       "fieldConfig": {
         "defaults": {
@@ -1390,7 +1433,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 78
+        "y": 86
       },
       "fieldConfig": {
         "defaults": {
@@ -1432,7 +1475,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 78
+        "y": 86
       },
       "fieldConfig": {
         "defaults": {

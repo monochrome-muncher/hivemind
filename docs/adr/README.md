@@ -113,7 +113,7 @@ is unused.
 | [0101](0101-recency-hint-on-by-default.md) | The recency hint is on by default | Accepted; amends 0073, `HIVEMIND_RECENCY_HINT=false` turns it off |
 | [0102](0102-trim-search-hit-score-and-empty-feedback.md) | Search hits round `score` and omit all-zero `feedback` | Accepted; display only, ranking unchanged |
 | [0103](0103-remove-confirmation-clock-and-per-kind-recency.md) | Remove the confirmation clock and the recency profile per kind | Accepted; supersedes 0071 and 0072, amended by 0106, default ranking unchanged |
-| [0104](0104-mcp-runner-serves-process-metrics.md) | The MCP HTTP runner serves per-process metrics | Accepted; amends 0050, no usage series, `sum` across api and mcp |
+| [0104](0104-mcp-runner-serves-process-metrics.md) | The MCP HTTP runner serves per-process metrics | Accepted; amends 0050, no usage series, `sum` across api and mcp; tool-call labels amended by 0161 |
 | [0105](0105-mcp-hive-write-sources-schema-typed.md) | The MCP `hive_write` `sources` schema is typed, validated leniently | Accepted; schema-only, keeps structured `invalid_input` |
 | [0106](0106-confirmation-halves-older-flags.md) | A confirmation newer than every flag halves those flags | Accepted; amends 0063, 0070, 0103 (I3, new I7), `HIVEMIND_CONFIRMATION_HALVES_FLAGS=false` turns it off |
 | [0107](0107-fleet-merge.md) | Merge fleets into one home fleet | Accepted; amends 0011, touches 0058 and 0096, migration 0017, admin only, undoable; extended by 0112, speed amended by 0126 |
@@ -170,3 +170,4 @@ is unused.
 | [0158](0158-agent-text-drops-weak-model-clauses.md) | `hive_whoami` keeps "the key is fixed per session" without the how-to; `hive_search` no longer repeats the loose-match note | Accepted; amends 0151 decision 1 and 0148 decision 6; always-on text 17,270 B |
 | [0159](0159-admin-renames-an-agent.md) | An admin renames an agent | Accepted; decision 8 amended by 0160 (ratings guarded too); amends 0040, 0045 (former names stay reserved), 0122, 0123 (history follows former names), `POST /v1/admin/agents/{name}/rename` and `hivemind-keys rename-agent`, migration 0036 (`agent_former_names`), audited `agent.rename`, the key keeps working, every stored copy of the name is rewritten in one transaction |
 | [0160](0160-ratings-are-guarded-against-a-racing-rename.md) | A rating by a name that a rename left is refused as `fleet_busy`, as an entry or pin is | Accepted; amends 0159 decision 8 |
+| [0161](0161-mcp-tool-calls-carry-their-error-code.md) | MCP tool calls are counted by error code, so the dashboard splits refusals from server failures | Accepted; amends 0104 decision 2 (`code` label on `hivemind_mcp_tool_calls_total`) |

@@ -2,7 +2,7 @@
 
 Amends [ADR 0050](0050-prometheus-scrape-endpoint.md) (its consequence that the MCP runners serve no `/metrics`, for `hivemind-mcp-http`) and adds to [ADR 0019](0019-unauthenticated-orchestrator-probe-endpoints.md)'s unauthenticated surface.
 
-Status: Accepted. The stdio runners (`hivemind-mcp`, `hivemind-mcp-pg`) still serve nothing.
+Status: Accepted. The stdio runners (`hivemind-mcp`, `hivemind-mcp-pg`) still serve nothing. Decision 2 amended by [ADR 0161](0161-mcp-tool-calls-carry-their-error-code.md): the tool-call counter also carries a `code` label.
 
 ## Context
 

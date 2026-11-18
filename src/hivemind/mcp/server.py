@@ -38,7 +38,7 @@ from hivemind.mcp.errors import (
     STORE_UNAVAILABLE_MESSAGE,
     error_reply,
 )
-from hivemind.mcp.metrics import OUTCOME_ERROR, OUTCOME_OK, McpMetrics
+from hivemind.mcp.metrics import CODE_RAISED, McpMetrics, error_code_label
 from hivemind.ports import Credential
 
 logger = logging.getLogger(__name__)
@@ -94,7 +94,8 @@ def register_tool(
 
     The reply is one compact JSON ``TextContent`` with no output schema: the SDK default (indent-2
     text, duplicate ``structuredContent``, an empty schema) would all land in the agent's context.
-    With ``metrics``, an error reply or a raise counts as ``error`` (the raise propagates)."""
+    With ``metrics``, an error reply counts under its code and a raise as ``raised`` (the raise
+    propagates)."""
 
     async def _tool(*args: Any, **kwargs: Any) -> list[TextContent]:
         started = time.perf_counter()
@@ -102,11 +103,10 @@ def register_tool(
             result = await dispatch(verb, **kwargs)
         except Exception:
             if metrics is not None:
-                metrics.record_tool(name, OUTCOME_ERROR, time.perf_counter() - started)
+                metrics.record_tool(name, CODE_RAISED, time.perf_counter() - started)
             raise
         if metrics is not None:
-            outcome = OUTCOME_ERROR if isinstance(result.get("error"), dict) else OUTCOME_OK
-            metrics.record_tool(name, outcome, time.perf_counter() - started)
+            metrics.record_tool(name, error_code_label(result), time.perf_counter() - started)
         return [TextContent(type="text", text=to_json(result).decode())]
 
     # The schema comes from the closure's signature at decoration time: the verb's minus ``app``,
