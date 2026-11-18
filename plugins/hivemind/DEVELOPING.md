@@ -36,7 +36,7 @@ to install or use it, read [README.md](README.md) instead.
 | `junie/incognito.md` | The incognito text (`INCOGNITO_TEXT`) that `hivemind-incognito junie` passes to Junie as extra guidelines |
 | `cline/` | The Cline hooks: `UserPromptSubmit` (the stay-aware line: in full on a task's first prompt, short on later ones), `TaskStart` and `PostToolUse` (the end-of-task write-and-rate nudge), each with a `.ps1` twin for Windows |
 | `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json` | The plugin manifests for Claude Code (also read by GitHub Copilot CLI and Junie) and Codex, which point Codex at `skills/` and `hooks/hooks.json` |
-| `.cursor-plugin/plugin.json`, `cursor/hooks.json`, `cursor/rules/hivemind.mdc` | The Cursor plugin: the manifest points Cursor at `skills/`, at the Cursor-only hooks file (so it never parses the Claude-format `hooks/hooks.json`) and at the rules folder; the hook runs the startup script on `sessionStart`; the always-on rule holds the startup sentence, though Cursor did not load it in the live check, so setup also writes a user rule. No `mcp.json`: the user configures the server |
+| `.cursor-plugin/plugin.json`, `cursor/hooks.json`, `cursor/rules/hivemind.mdc`, `assets/logo.svg` | The Cursor plugin: the manifest points Cursor at `skills/`, at the Cursor-only hooks file (so it never parses the Claude-format `hooks/hooks.json`) and at the rules folder; the hook runs the startup script on `sessionStart`; the always-on rule holds the startup sentence, though Cursor did not load it in the live check, so setup also writes a user rule. No `mcp.json`: the user configures the server. The logo is for the Cursor Marketplace page |
 | `bin/hivemind-incognito` | The incognito launcher ([below](#incognito)) |
 | `bin/hivemind-as` | The key-profile launcher ([below](#key-profiles)) |
 | `CHANGELOG.md` | What changed for agents in each release |
@@ -64,7 +64,7 @@ reminder that survives compaction and new sessions.
 | Gemini CLI | the extension's `gemini-extension.json` (a `hivemind` entry in `~/.gemini/settings.json` replaces it) | the extension | the `GEMINI.md` instruction block, plus the extension's `SessionStart` hook |
 | Antigravity | `../antigravity/mcp_config.json`, with the URL and key filled in when the user turns the plugin on (stored in `~/.gemini/config/config.json`) | the plugin | the plugin's always-on rule, plus its `SessionStart` hook |
 | GitHub Copilot CLI | the user's `~/.copilot/mcp-config.json` (the whole `url` cannot come from the environment; the key can) | the plugin | the plugin's `SessionStart` hook, plus the `~/.copilot/copilot-instructions.md` instruction block |
-| Cursor | the user's `~/.cursor/mcp.json` with `${env:…}` references (plugin MCP variables are set by team admins, so the plugin ships none) | the plugin (a local plugin in `~/.cursor/plugins/local/hivemind`) | the user rule `~/.cursor/rules/hivemind.mdc` that setup writes (the plugin's own rule never loaded in the live check), plus the plugin's `sessionStart` hook and the user `stop` hook in `~/.cursor/hooks.json` |
+| Cursor | the user's `~/.cursor/mcp.json` with `${env:…}` references (plugin MCP variables are set by team admins, so the plugin ships none) | the plugin (a local plugin in `~/.cursor/plugins/local/hivemind`, or from a marketplace) | the user rule `~/.cursor/rules/hivemind.mdc` that setup writes (the plugin's own rule never loaded in the live check), plus the plugin's `sessionStart` hook and the user `stop` hook in `~/.cursor/hooks.json`, which runs a copy of the stop script in `~/.cursor/hooks/` |
 | Junie | the user's `~/.junie/mcp/mcp.json` with the literal URL and key (Junie expands no `${VAR}`) | the plugin (installed from the Claude Code marketplace) | the plugin's `guidelines/hivemind.md` (always in the guidelines), plus the `Stop` hook |
 
 Everything the setup skill tells an agent to do for one harness lives in
@@ -414,12 +414,18 @@ writes is one its update file passes to the drift check.
     `.cursor-plugin/marketplace.json` (`name`, `owner`, `plugins[].source`
     as a path) serves both it and team marketplaces; Cursor looks for
     `<source>/.cursor-plugin/plugin.json`, then `.claude-plugin/plugin.json`.
-    A public Marketplace listing is reviewed and Hivemind has none.
+    The public Cursor Marketplace takes the same files: the repository
+    link goes in through cursor.com/marketplace/publish, Cursor reviews
+    it by hand, and a listing is pinned to a commit, so each release
+    needs Cursor to review and re-sync it. Hivemind has no listing yet.
   - *Manifest.* A path field replaces folder discovery for that
     component. Cursor would parse `hooks/hooks.json` by default (it
     converts the Claude format), so the manifest sets `hooks` to
     `./cursor/hooks.json`, `rules` to `./cursor/rules/` and `skills` to
-    `./skills/`. There is no `mcp.json`.
+    `./skills/`. There is no `mcp.json`. `logo` (`assets/logo.svg`, a copy
+    of `docs/images/hivemind-icon.svg`), `homepage`, `repository` and
+    `license` are for the Marketplace page; paths in the manifest stay
+    relative and inside the plugin, as the Marketplace requires.
   - *MCP server.* The user's `~/.cursor/mcp.json` entry reads
     `${env:HIVEMIND_MCP_URL}` and `${env:HIVEMIND_API_KEY}`; the CLI
     expands both (checked live). Tools are called through a meta tool:
@@ -446,8 +452,10 @@ writes is one its update file passes to the drift check.
     runs in an interactive session when signed in (not with `-p`, not in
     local-model mode), with `transcript_path`
     (`~/.cursor/projects/<slug>/agent-transcripts/<id>/<id>.jsonl`, Claude-like
-    `tool_use` records) and `loop_count`. Setup points it at
-    `hivemind-stop.sh --cursor` in the local plugin folder, which answers
+    `tool_use` records) and `loop_count`. Setup copies `hivemind-stop.sh`
+    to `~/.cursor/hooks/` and points the hook at that copy with `--cursor`,
+    because a marketplace install lives under a folder named after its
+    commit; the update check compares the copy (`--copy`). The script answers
     `{"followup_message": ...}`; Cursor sends that as the next message and
     the following stop has `loop_count: 1`, which the script skips.
 

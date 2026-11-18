@@ -71,12 +71,13 @@ then call `hive_whoami`. In the
 editor, Settings, MCP shows the server and its tools.
 
 **The plugin** adds the skills and a `sessionStart` hook (see "Stay
-aware"). Cursor installs plugins from the Cursor Marketplace (a public
-listing is reviewed, and Hivemind has none yet), from a team marketplace
+aware"). Cursor installs plugins from the Cursor Marketplace (if Hivemind
+is listed there, that is the simplest route: install it from the
+marketplace panel), from a team marketplace
 (an admin uses "Import from Repo" with the Git URL of the Hivemind
 repository, which has a `.cursor-plugin/marketplace.json`), or from the
-local folder `~/.cursor/plugins/local/`. For one user, the local folder is
-the route (checked live). Cursor refuses a symlink there that points
+local folder `~/.cursor/plugins/local/`. Without a listing, the local
+folder is the route for one user (checked live). Cursor refuses a symlink there that points
 outside that folder, so the clone goes inside it, in a folder starting
 with a dot (Cursor skips those), and a relative link names the plugin.
 These are shell commands for the user to run, not you:
@@ -156,7 +157,11 @@ machine.
   a `HIVEMIND:` line appears at the start of a new conversation.
 - **Stop reminder:** a plugin's `stop` hook never ran in the live check,
   but a user one does, in an interactive session when signed in (not with
-  `-p`, and not in local-model mode). With the plugin in the local folder,
+  `-p`, and not in local-model mode). A marketplace install keeps the
+  plugin in a folder named after its commit, which changes with every
+  update, so the user hook runs a copy of the script at a fixed place.
+  Copy `scripts/hivemind-stop.sh` from this skill's folder to
+  `~/.cursor/hooks/hivemind-stop.sh` (create the folder if needed), then
   add this to the user file `~/.cursor/hooks.json` (merge it into the
   `hooks` there if the file exists):
 
@@ -166,7 +171,7 @@ machine.
     "hooks": {
       "stop": [
         {
-          "command": "sh \"$HOME/.cursor/plugins/local/hivemind/skills/hivemind-setup/scripts/hivemind-stop.sh\" --cursor"
+          "command": "sh \"$HOME/.cursor/hooks/hivemind-stop.sh\" --cursor"
         }
       ]
     }

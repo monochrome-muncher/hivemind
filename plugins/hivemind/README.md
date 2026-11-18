@@ -43,6 +43,7 @@ read the [main README](../../README.md) instead.
 - [When an agent is replaced](#when-an-agent-is-replaced)
 - [Hints from your admin](#hints-from-your-admin)
 - [Removing](#removing)
+- [Privacy](#privacy)
 - [For maintainers](#for-maintainers)
 - [CHANGELOG.md](CHANGELOG.md): what changed in each release
 
@@ -131,7 +132,8 @@ Cursor Marketplace has no Hivemind listing yet.
 In the check, Cursor did not load a plugin's always-on rule or run a
 plugin's stop hook, so the setup in step 2 also adds a user rule
 (`~/.cursor/rules/hivemind.mdc`) and a user stop hook
-(`~/.cursor/hooks.json`).
+(`~/.cursor/hooks.json`, running a copy of the stop script in
+`~/.cursor/hooks/`, so it keeps working wherever the plugin lives).
 
 The plugin brings the skills and a startup hook. It does not bring the
 connection: Cursor sets a plugin's MCP variables from a team admin's
@@ -884,7 +886,9 @@ agent). The update commands, all in a terminal:
 - **Cursor**: run `git pull` in your clone (or, if you checked out a
   release tag, `git fetch --tags` and check out the new one), then
   restart Cursor or run "Developer: Reload Window". If you copied the
-  folder instead of linking it, copy it again.
+  folder instead of linking it, copy it again. Then ask the agent to
+  "Update Hivemind", which refreshes the rule and the stop script in
+  `~/.cursor/hooks/`.
 - **Junie**: in the Junie prompt, `/extensions`, open the Installed tab
   and pick Update on hivemind (an extension from a local folder refreshes
   when Junie starts). Then start a new session.
@@ -955,8 +959,9 @@ First uninstall the plugin, in a terminal:
   then `copilot mcp remove hivemind`.
 - **Cursor**: delete the `hivemind` link and the `.hivemind-src` clone
   from `~/.cursor/plugins/local/`, the `hivemind` entry from
-  `~/.cursor/mcp.json`, the rule `~/.cursor/rules/hivemind.mdc` and the
-  stop hook that runs `hivemind-stop.sh` in `~/.cursor/hooks.json`.
+  `~/.cursor/mcp.json`, the rule `~/.cursor/rules/hivemind.mdc`, the
+  stop hook that runs `hivemind-stop.sh` in `~/.cursor/hooks.json` and
+  the script `~/.cursor/hooks/hivemind-stop.sh`.
 - **Junie**: in `/extensions`, uninstall hivemind from the Installed tab,
   then delete the `hivemind` entry from `~/.junie/mcp/mcp.json`.
 - **Hermes**: `hermes plugins remove hivemind`, then delete the
@@ -984,6 +989,18 @@ Depending on the agent, that is `CLAUDE.md`, `AGENTS.md`,
 `~/.omp/agent/AGENTS.md`. You may also want to delete your key file,
 any connection settings you added by hand, and
 `~/.config/hivemind/plugin-source` if an update saved one.
+
+## Privacy
+
+The plugin collects nothing and has no telemetry. Its hooks and scripts
+run on your machine and contact no server. The only server the plugin
+connects your agent to is the Hivemind server you set up, which your
+organization runs.
+What gets stored there is what your agent writes, and your
+organization's admin controls it. The stop reminder reads the session's
+transcript on your machine to decide whether to remind the agent, and
+sends nothing anywhere. When you ask for an update, the update check
+fetches the Hivemind repository with `git` to compare against it.
 
 ## For maintainers
 
