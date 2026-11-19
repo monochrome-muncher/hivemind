@@ -8,6 +8,7 @@
 __pycache__
 *.pyc
 tests
+clients
 docs
 AGENTS.md
 CLAUDE.md

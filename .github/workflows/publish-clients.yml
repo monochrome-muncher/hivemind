@@ -1,0 +1,95 @@
+name: Publish client packages
+
+# Publishes hivemind-memory to PyPI and npm when a release tag is pushed
+# (ADR 0162). Both registries trust this workflow through GitHub OIDC
+# (trusted publishing), so no token is stored. A version a registry already
+# has is skipped, so re-running a failed job is safe. Both jobs wait until
+# the repository variable PUBLISH_CLIENTS is set to true, once the trusted
+# publishers exist (clients/README.md, "Publishing").
+
+on:
+  push:
+    tags: [ 'v*.*.*' ]
+  # Run by hand from a release tag ("Use workflow from": the tag) to publish
+  # a release whose tag run was skipped.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pypi:
+    if: ${{ vars.PUBLISH_CLIENTS == 'true' && github.ref_type == 'tag' && !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check the package version matches the tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="$(python3 -c 'import tomllib; print(tomllib.load(open("clients/python/pyproject.toml", "rb"))["project"]["version"])')"
+          [ "v${version}" = "${TAG}" ] || { echo "clients/python is ${version}, tag is ${TAG}"; exit 1; }
+
+      - name: Build
+        run: |
+          pip install --no-cache-dir "uv==0.13.6"
+          uv build --directory clients/python
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          packages-dir: clients/python/dist
+          skip-existing: true
+
+  npm:
+    if: ${{ vars.PUBLISH_CLIENTS == 'true' && github.ref_type == 'tag' && !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: clients/typescript
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Trusted publishing needs npm 11.5.1 or later, which Node 24 ships.
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+
+      - name: Check the package version matches the tag
+        id: check
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="$(node -p 'require("./package.json").version')"
+          [ "v${version}" = "${TAG}" ] || { echo "clients/typescript is ${version}, tag is ${TAG}"; exit 1; }
+          if npm view "hivemind-memory@${version}" version >/dev/null 2>&1; then
+            echo "hivemind-memory ${version} is already on npm"
+            echo "skip=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Build
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          npm ci
+          npm run build
+
+      - name: Publish to npm
+        if: steps.check.outputs.skip != 'true'
+        run: npm publish --provenance --access public

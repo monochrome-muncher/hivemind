@@ -217,6 +217,13 @@ hermes-scan: ## Run Hermes's install scan over the plugin and fail if Hermes wou
 	fi
 	python3 -I scripts/hermes-scan.py $(HERMES_SOURCE) plugins/hivemind
 
+.PHONY: sync-client-text
+sync-client-text: ## Copy the hivemind skill and the Stop hook's reminder into the hivemind-memory packages (a unit test checks the copies)
+	for dir in clients/python/src/hivemind_memory/text clients/typescript/text; do \
+		cp plugins/hivemind/skills/hivemind/SKILL.md $$dir/skill.md; \
+		sed -n "s/^text='\\(.*\\)'$$/\\1/p" plugins/hivemind/skills/hivemind-setup/scripts/hivemind-stop.sh | tr -d '\n' > $$dir/reminder.txt; \
+	done
+
 .PHONY: sync-antigravity-skills
 sync-antigravity-skills: ## Copy plugins/hivemind/skills into plugins/antigravity/skills (Antigravity 1.5.8 refuses a link there; a unit test checks the copy)
 	rm -rf plugins/antigravity/skills
@@ -225,10 +232,10 @@ sync-antigravity-skills: ## Copy plugins/hivemind/skills into plugins/antigravit
 .PHONY: check
 check: ## Type-check + lint (mypy strict + ruff)
 	uv run mypy
-	uv run ruff check src tests
-	uv run ruff format --check src tests
+	uv run ruff check src tests clients
+	uv run ruff format --check src tests clients
 
 .PHONY: format
 format: ## Auto-format + fix lint issues
-	uv run ruff format src tests
-	uv run ruff check --fix src tests
+	uv run ruff format src tests clients
+	uv run ruff check --fix src tests clients

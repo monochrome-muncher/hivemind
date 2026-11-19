@@ -112,3 +112,74 @@ jobs:
       # queued tests from busy ones (`worksteal`).
       - name: Run the test suite
         run: uv run pytest -rs -n auto --maxprocesses=4 --dist worksteal
+
+  clients:
+    # The hivemind-memory packages (ADR 0162): their unit tests on the oldest
+    # supported Python and Node, then a live run of both against the real HTTP
+    # MCP runner on the throwaway service database.
+    name: Client packages
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.7-pg16@sha256:0dd3149a06e4579a0d70d8fef9945636cd514005e7237deb27f9b67886f8dc4f
+        env:
+          POSTGRES_DB: hivemind
+          POSTGRES_USER: hivemind
+          POSTGRES_PASSWORD: hivemind
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hivemind"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+    env:
+      HIVEMIND_DATABASE_URL: postgresql://hivemind:hivemind@localhost:5432/hivemind
+      HIVEMIND_EMBEDDING_DIM: "512"
+      CLIENT_PYTHON: "3.10"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv and Python
+        run: |
+          pip install --no-cache-dir "uv==${UV_VERSION}"
+          uv python install "${PYTHON_VERSION}" "${CLIENT_PYTHON}"
+
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "20"
+
+      - name: Install the server and the packages
+        run: |
+          uv sync --locked
+          uv venv --python "${CLIENT_PYTHON}" clients/python/.venv
+          (cd clients/python && VIRTUAL_ENV=.venv uv pip install -e ".[langchain]" --group test mypy)
+          npm ci --prefix clients/typescript
+
+      - name: Type-check
+        run: |
+          (cd clients/python && .venv/bin/python -m mypy src)
+          npm run typecheck --prefix clients/typescript
+
+      - name: Unit tests
+        run: |
+          (cd clients/python && .venv/bin/python -m pytest -q)
+          npm test --prefix clients/typescript
+
+      - name: Start the HTTP MCP runner
+        run: |
+          uv run hivemind-migrate
+          uv run python clients/live_server.py --port 8765 --env-file "${RUNNER_TEMP}/live.env" &
+          for _ in $(seq 30); do
+            [ -s "${RUNNER_TEMP}/live.env" ] && curl -sf -o /dev/null http://127.0.0.1:8765/mcp/health && break
+            sleep 1
+          done
+
+      - name: Live tests
+        run: |
+          set -a; . "${RUNNER_TEMP}/live.env"; set +a
+          export HIVEMIND_LIVE=1
+          (cd clients/python && .venv/bin/python -m pytest -q tests/test_live.py)
+          npm test --prefix clients/typescript
