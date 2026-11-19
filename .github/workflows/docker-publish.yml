@@ -138,7 +138,7 @@ jobs:
       contents: read
       id-token: write
     env:
-      MCP_PUBLISHER_VERSION: v1.8.6
+      MCP_PUBLISHER_VERSION: v1.8.9
       REGISTRY_URL: https://registry.modelcontextprotocol.io
 
     steps:

@@ -1131,7 +1131,7 @@
       "description": "",
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 8,
         "x": 0,
         "y": 68
       },
@@ -1173,8 +1173,8 @@
       "description": "",
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
+        "w": 8,
+        "x": 8,
         "y": 68
       },
       "fieldConfig": {
@@ -1192,6 +1192,48 @@
             "uid": "${datasource}"
           },
           "expr": "max by (fleet) (hivemind_health_fleet_sourced_ratio{namespace=~\"$namespace\"})",
+          "legendFormat": "{{fleet}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Unverified memories, per fleet",
+      "id": 36,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Active memories tagged unverified that no other agent has confirmed yet (ADR 0156). The admin panel's Memories page lists them under \"Unverified only\".",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 68
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max by (fleet) (hivemind_health_fleet_unverified{namespace=~\"$namespace\"})",
           "legendFormat": "{{fleet}}",
           "refId": "A"
         }

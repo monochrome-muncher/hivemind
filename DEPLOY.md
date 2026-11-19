@@ -907,7 +907,8 @@ edit the policies).
 - traffic: requests, 5xx share, 401s, and p50 and p95 latency per route;
 - MCP tool calls: rate, server failure share, refusals by error code, and
   p95 latency;
-- the fleet health gauges over time;
+- the fleet health gauges over time, with each fleet's flag backlog,
+  sourced share and unverified memories;
 - a "Vital signs" row: the echo rate, the grounding share, the age of open
   rivals and each fleet's 7-day writes and verdicts.
 

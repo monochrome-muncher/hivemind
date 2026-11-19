@@ -172,4 +172,5 @@ is unused.
 | [0160](0160-ratings-are-guarded-against-a-racing-rename.md) | A rating by a name that a rename left is refused as `fleet_busy`, as an entry or pin is | Accepted; amends 0159 decision 8 |
 | [0161](0161-mcp-tool-calls-carry-their-error-code.md) | MCP tool calls are counted by error code, so the dashboard splits refusals from server failures | Accepted; amends 0104 decision 2 (`code` label on `hivemind_mcp_tool_calls_total`) |
 | [0162](0162-python-and-npm-client-packages.md) | Python and npm packages, `hivemind-memory`, for agents built outside the supported harnesses | Accepted; MCP clients of the hostable endpoint (0010) with the contract text (0085), async, LangChain and Vercel AI SDK adapters as extras, versions in lockstep, OIDC publishing on the tag |
+| [0163](0163-client-skill-copy-drops-plugin-only-lines.md) | The packages' copy of the `hivemind` skill drops the lines about the plugin's setup skill and incognito | Accepted; amends 0162 decision 6 |
 | [0164](0164-client-packages-type-the-replies.md) | The client packages type the tools' replies; the live tests check the shapes against the real server | Accepted; builds on 0162 |

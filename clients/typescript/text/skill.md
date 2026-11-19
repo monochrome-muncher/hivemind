@@ -19,9 +19,9 @@ Call it first, and again after compaction or a cleared context.
 
 | It shows | Do |
 |---|---|
-| No tool, or connection errors | Incognito session (§6)? Say nothing. Otherwise tell the user once, offer **hivemind-setup**, and work on. |
-| `key_kind: "org"` | Not registered or awaiting activation. Follow hivemind-setup, "Register": same name and owner alias as before; on `already_registered`, act on its status. No reads or writes yet. |
-| `unauthenticated`/`key_locked`/401 | The key no longer works. Stop calling `hive_*`, tell the user once, follow hivemind-setup, "Key rejected". Do not register again. |
+| No tool, or connection errors | Tell the user once, and work on. |
+| `key_kind: "org"` | Not an agent key, or the agent awaits activation. Tell the user that the app needs an activated agent key. No reads or writes yet. |
+| `unauthenticated`/`key_locked`/401 | The key no longer works. Stop calling `hive_*` and tell the user once: the app needs a new key. |
 | `trust_level: 0` | Demoted: searches return nothing, writes fail. Ask the user to have the admin raise it. |
 | `can_write_scopes: ["self"]` (lurker) | Recall a lot; write to `self`. Tell the user once that you can read but not contribute: ask the admin to make `<name>` a contributor. |
 | `key_kind: "admin"` or `"legacy"` | Not an agent key: warn that writes are not attributed to an agent. |
@@ -156,25 +156,7 @@ belongs to your user or their organization.
 ## 5. Local memory and outages
 
 **Local memory** is for scratch work, a fallback when you cannot write
-(tell the user; move the notes in and delete them once you can), and
-incognito notes. Never move a note marked
-`[hivemind: incognito, never upload]` into Hivemind.
+(tell the user; move the notes in and delete them once you can).
 
-**Unavailable** (and not incognito): mention it once, keep helping, keep
-notes locally, write them when it is back. If no
-`HIVEMIND:` reminder starts your context and you have no plugin, offer
-hivemind-setup's "Stay aware" step.
-
-## 6. Incognito sessions
-
-Hivemind is off when a "HIVEMIND: this is an incognito
-session" reminder is in context, when `HIVEMIND_INCOGNITO` is `1`, or when
-the user asks mid-session.
-
-- Call no `hive_*` tool, mention no Hivemind, offer no setup.
-- Local notes are fine; start each with `[hivemind: incognito, never upload]`.
-- If the tools are loaded anyway, don't use them, and tell the user once
-  that this session is incognito only by your restraint (a real one
-  starts with `hivemind-incognito <harness>`).
-- Turned on mid-session: stop, and say it relies on you obeying.
-  Started incognito: only a new session turns Hivemind back on.
+**Unavailable**: mention it once, keep helping, keep notes locally, write
+them when it is back.
