@@ -70,6 +70,6 @@ The design holds up. Both packages are small, readable and close to each other; 
 
 | Finding | Pull request |
 |---|---|
-| P1, P2 | Fix and harden client publishing |
-| E1, E2 | Report a locked key and align error handling |
-| D1-D5, A1-A5 | Runnable client quickstarts and typed options |
+| P1, P2 | #482, fix and harden client publishing |
+| E1, E2 | #483, report a locked key and align error handling |
+| D1-D5, A1-A5 | #484, runnable quickstarts and typed options (also types `anthropicTools()` so the loop type-checks against the Anthropic SDK) |
