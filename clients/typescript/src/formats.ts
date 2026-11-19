@@ -1,0 +1,27 @@
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+}
+
+export interface AnthropicTool {
+  name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+}
+
+export interface OpenAITool {
+  type: "function";
+  function: { name: string; description: string; parameters: Record<string, unknown> };
+}
+
+export function toAnthropic(tools: readonly ToolDefinition[]): AnthropicTool[] {
+  return tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema }));
+}
+
+export function toOpenAI(tools: readonly ToolDefinition[]): OpenAITool[] {
+  return tools.map((t) => ({
+    type: "function",
+    function: { name: t.name, description: t.description, parameters: t.inputSchema },
+  }));
+}

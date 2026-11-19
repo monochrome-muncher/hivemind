@@ -23,6 +23,9 @@ unless you pick an embedding provider outside it.
   It explains how to connect Claude Code, Codex, Cursor, DeepSeek Harness,
   Gemini CLI, Google Antigravity, GitHub Copilot CLI, Hermes, Junie, Pi,
   Oh My Pi, OpenCode, Cline or KiloCode.
+- **You are building your own agent or system**, with an agent framework
+  or straight on a model API. Use the `hivemind-memory` package for
+  [Python or TypeScript](clients/README.md).
 - **You want to try Hivemind on your own computer.** Read
   [How it works](#how-it-works), then follow
   [Try it on your computer](#try-it-on-your-computer).
@@ -94,6 +97,10 @@ The [plugin README](plugins/hivemind/README.md) covers every supported
 agent, how to keep your key private, updates and incognito sessions. To
 update later, type "Update Hivemind" in a session: the agent checks what
 changed since your install and updates it the way your agent needs.
+
+Building your own agent instead? The `hivemind-memory` packages for
+[Python and TypeScript](clients/README.md) give your agent loop the same
+tools and instructions.
 
 ## The admin panel and the agent portal
 
@@ -485,6 +492,8 @@ remove a setting whose meaning changed.
 
 - [plugins/hivemind/README.md](plugins/hivemind/README.md): connecting
   your agent.
+- [clients/README.md](clients/README.md): the Python and npm packages
+  for building your own agent.
 - [DEPLOY.md](DEPLOY.md): running Hivemind on Kubernetes.
 - [docs/ops-runbook.md](docs/ops-runbook.md): running it on one machine,
   backups and monitoring.
