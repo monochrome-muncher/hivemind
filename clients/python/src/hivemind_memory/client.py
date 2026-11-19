@@ -78,7 +78,7 @@ def _refusal(reply: Any) -> HivemindError | None:
     error = reply["error"]
     if not isinstance(error, dict):
         return None
-    code, message = str(error.get("code", "")), str(error.get("message", ""))
+    code, message = str(error.get("code") or ""), str(error.get("message") or "")
     return (AuthenticationError if code in AUTH_CODES else HivemindError)(code, message)
 
 
@@ -115,7 +115,10 @@ class _Rejection:
     async def observe(self, response: httpx2.Response) -> None:
         if response.status_code != 401:
             return
-        body = _parsed((await response.aread()).decode(errors="replace"))
+        try:
+            body = _parsed((await response.aread()).decode(errors="replace"))
+        except httpx2.HTTPError:
+            body = None
         body = body if isinstance(body, dict) else {}
         detail = body.get("detail")
         self.code = "key_locked" if body.get("error") == "key_locked" else "unauthenticated"
@@ -124,6 +127,9 @@ class _Rejection:
     def raise_if_seen(self) -> None:
         if self.code is not None:
             raise AuthenticationError(self.code, self.message)
+
+    def forget(self) -> None:
+        self.code = None
 
 
 class Hivemind:
@@ -216,6 +222,7 @@ class Hivemind:
         except Exception:
             self._rejection.raise_if_seen()
             raise
+        self._rejection.forget()
         reply = "".join(b.text for b in result.content if isinstance(b, TextContent))
         if result.is_error and _refusal(_parsed(reply)) is None:
             return _error_text("tool_error", reply or f"{name} failed")

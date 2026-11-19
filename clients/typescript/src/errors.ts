@@ -27,7 +27,7 @@ export function refusal(reply: unknown): HivemindError | undefined {
     return undefined;
   }
   const { code, message } = error as { code?: unknown; message?: unknown };
-  return errorFromEnvelope(String(code ?? ""), String(message ?? ""));
+  return errorFromEnvelope(String(code || ""), String(message || ""));
 }
 
 /** The server's 401 body is `{"error": "key_locked" | "unauthorized", "detail": ...}`. */

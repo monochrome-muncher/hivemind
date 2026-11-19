@@ -63,6 +63,10 @@ class Rejection {
       throw await this.seen;
     }
   }
+
+  forget(): void {
+    this.seen = undefined;
+  }
 }
 
 export class Hivemind implements AsyncDisposable {
@@ -123,6 +127,7 @@ export class Hivemind implements AsyncDisposable {
       await this.rejection.throwIfSeen();
       throw error;
     }
+    this.rejection.forget();
     const blocks = (result.content ?? []) as { type: string; text?: string }[];
     const text = blocks.map((b) => (b.type === "text" ? (b.text ?? "") : "")).join("");
     if (result.isError && !refusal(parsed(text))) {
