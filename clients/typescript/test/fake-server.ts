@@ -6,6 +6,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 
 export const GOOD_KEY = "hm_good";
 export const LOCKED_KEY = "hm_locked";
+export const LOCKED_DETAIL = "this key is locked; ask an admin for a new one";
 export const INSTRUCTIONS = "Fake server instructions.";
 
 export interface Call {
@@ -41,7 +42,7 @@ function bearer(req: IncomingMessage): string | undefined {
   return req.headers.authorization?.replace(/^Bearer /, "");
 }
 
-function build(calls: Call[], key: string | undefined): Server {
+function build(calls: Call[]): Server {
   const server = new Server(
     { name: "fake-hivemind", version: "0.0.0" },
     { capabilities: { tools: {} }, instructions: INSTRUCTIONS },
@@ -50,15 +51,21 @@ function build(calls: Call[], key: string | undefined): Server {
   server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
     const args = (params.arguments ?? {}) as Record<string, unknown>;
     calls.push({ name: params.name, args });
-    if (key === LOCKED_KEY) {
-      return reply({ error: { code: "key_locked", message: "locked" } });
-    }
     switch (params.name) {
       case "hive_whoami":
         return reply({ key_kind: "agent", name: "fake-agent" });
       case "hive_search":
         return reply({ count: 1, hits: [{ id: "e1", summary: String(args.query) }] });
       case "hive_get":
+        if (args.entry_id === "crash") {
+          return { content: [{ type: "text", text: "Error executing tool hive_get" }], isError: true };
+        }
+        if (args.entry_id === "split") {
+          return { content: [{ type: "text", text: '{"id":' }, { type: "text", text: '"split"}' }] };
+        }
+        if (args.entry_id === "list") {
+          return reply([1, 2]);
+        }
         return reply({ error: { code: "not_found", message: "no such entry" } });
       case "hive_write":
         return reply({ id: "e2", kind: args.kind });
@@ -73,8 +80,10 @@ export async function startFakeHive(): Promise<FakeHive> {
   const calls: Call[] = [];
   const http: HttpServer = createServer((req, res) => {
     const key = bearer(req);
-    if (key !== GOOD_KEY && key !== LOCKED_KEY) {
-      res.writeHead(401, { "content-type": "application/json" }).end('{"error":"unauthorized"}');
+    if (key !== GOOD_KEY) {
+      const error = key === LOCKED_KEY ? "key_locked" : "unauthorized";
+      const detail = key === LOCKED_KEY ? LOCKED_DETAIL : "a key is required";
+      res.writeHead(401, { "content-type": "application/json" }).end(JSON.stringify({ error, detail }));
       return;
     }
     const chunks: Buffer[] = [];
@@ -82,7 +91,7 @@ export async function startFakeHive(): Promise<FakeHive> {
     req.on("end", async () => {
       const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : undefined;
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
-      const server = build(calls, key);
+      const server = build(calls);
       res.on("close", () => void server.close());
       await server.connect(transport);
       await transport.handleRequest(req, res, body);

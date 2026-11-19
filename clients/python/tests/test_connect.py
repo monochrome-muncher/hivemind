@@ -3,7 +3,15 @@ from __future__ import annotations
 import pytest
 
 from hivemind_memory import AuthenticationError, Hivemind
-from tests.conftest import GOOD_KEY, SERVER_INSTRUCTIONS, Connected, HttpServer, build_fake_server
+from tests.conftest import (
+    GOOD_KEY,
+    LOCKED_DETAIL,
+    LOCKED_KEY,
+    SERVER_INSTRUCTIONS,
+    Connected,
+    HttpServer,
+    build_fake_server,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -57,6 +65,16 @@ async def test_a_401_raises_authentication_error(http_server: HttpServer) -> Non
         with pytest.raises(AuthenticationError):
             async with Hivemind.connect(url, "not-the-key"):
                 pass
+
+
+async def test_a_locked_key_raises_key_locked_with_the_servers_message(
+    http_server: HttpServer,
+) -> None:
+    async with http_server() as url:
+        with pytest.raises(AuthenticationError) as caught:
+            async with Hivemind.connect(url, LOCKED_KEY):
+                pass
+    assert (caught.value.code, caught.value.message) == ("key_locked", LOCKED_DETAIL)
 
 
 @pytest.mark.parametrize("code", ["unauthenticated", "key_locked"])

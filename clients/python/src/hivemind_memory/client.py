@@ -26,6 +26,7 @@ URL_ENV = "HIVEMIND_MCP_URL"
 KEY_ENV = "HIVEMIND_API_KEY"
 
 _TIMEOUT = httpx2.Timeout(30.0, read=300.0)
+_REJECTED = "the server rejected the API key (HTTP 401)"
 
 
 def _setting(value: str | None, env_name: str, what: str) -> str:
@@ -63,6 +64,13 @@ def _model_arguments(arguments: Mapping[str, Any] | str) -> dict[str, Any]:
     return parsed
 
 
+def _parsed(text: str) -> Any:
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return None
+
+
 def _refusal(reply: Any) -> HivemindError | None:
     """The error behind a reply that is the ``{"error": {"code", "message"}}`` envelope."""
     if not isinstance(reply, dict) or set(reply) != {"error"}:
@@ -70,7 +78,7 @@ def _refusal(reply: Any) -> HivemindError | None:
     error = reply["error"]
     if not isinstance(error, dict):
         return None
-    code, message = str(error.get("code", "")), str(error.get("message", ""))
+    code, message = str(error.get("code") or ""), str(error.get("message") or "")
     return (AuthenticationError if code in AUTH_CODES else HivemindError)(code, message)
 
 
@@ -95,20 +103,33 @@ async def _without_task_group_wrapping() -> AsyncIterator[None]:
 
 
 class _Rejection:
-    """Remembers that the server answered 401: the MCP SDK reports it only as a generic error."""
+    """Remembers why the server answered 401: the MCP SDK reports it only as a generic error.
+
+    The body is ``{"error": "key_locked" | "unauthorized", "detail": ...}``.
+    """
 
     def __init__(self) -> None:
-        self.seen = False
+        self.code: str | None = None
+        self.message = ""
 
     async def observe(self, response: httpx2.Response) -> None:
-        if response.status_code == 401:
-            self.seen = True
+        if response.status_code != 401:
+            return
+        try:
+            body = _parsed((await response.aread()).decode(errors="replace"))
+        except httpx2.HTTPError:
+            body = None
+        body = body if isinstance(body, dict) else {}
+        detail = body.get("detail")
+        self.code = "key_locked" if body.get("error") == "key_locked" else "unauthenticated"
+        self.message = detail if isinstance(detail, str) and detail else _REJECTED
 
     def raise_if_seen(self) -> None:
-        if self.seen:
-            raise AuthenticationError(
-                "unauthenticated", "the server rejected the API key (HTTP 401)"
-            )
+        if self.code is not None:
+            raise AuthenticationError(self.code, self.message)
+
+    def forget(self) -> None:
+        self.code = None
 
 
 class Hivemind:
@@ -194,25 +215,26 @@ class Hivemind:
                 break
         self.whoami = await self.call("hive_whoami")
 
-    async def _call_text(self, name: str, arguments: Mapping[str, Any]) -> tuple[str, bool]:
+    async def _call_text(self, name: str, arguments: Mapping[str, Any]) -> str:
+        """The reply text; a failed call that is not already the error envelope is wrapped in one."""
         try:
             result = await self._client.call_tool(name, dict(arguments))
         except Exception:
             self._rejection.raise_if_seen()
             raise
+        self._rejection.forget()
         reply = "".join(b.text for b in result.content if isinstance(b, TextContent))
-        return reply, bool(result.is_error)
+        if result.is_error and _refusal(_parsed(reply)) is None:
+            return _error_text("tool_error", reply or f"{name} failed")
+        return reply
 
     async def _tool(self, tool: str, /, **arguments: Any) -> dict[str, Any]:
         return await self.call(tool, _present(arguments))
 
     async def call(self, name: str, arguments: Mapping[str, Any] | None = None) -> dict[str, Any]:
         """Call a tool and return its JSON reply; a refusal raises :class:`HivemindError`."""
-        reply_text, is_error = await self._call_text(name, arguments or {})
-        try:
-            reply = json.loads(reply_text)
-        except json.JSONDecodeError:
-            raise HivemindError("tool_error" if is_error else "invalid_reply", reply_text) from None
+        reply_text = await self._call_text(name, arguments or {})
+        reply = _parsed(reply_text)
         if (error := _refusal(reply)) is not None:
             raise error
         if not isinstance(reply, dict):
@@ -230,7 +252,7 @@ class Hivemind:
             parsed = _model_arguments(arguments)
         except ValueError as exc:
             return _error_text("invalid_input", str(exc))
-        return (await self._call_text(name, parsed))[0]
+        return await self._call_text(name, parsed)
 
     def instructions(self) -> str:
         """The server's instructions, then the ``hivemind`` skill: the system prompt for an agent."""

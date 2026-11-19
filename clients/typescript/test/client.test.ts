@@ -3,7 +3,7 @@ import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import { readFileSync } from "node:fs";
 import { AuthenticationError, Hivemind, HivemindError, REMINDER } from "../dist/index.js";
 import { aiSdkTools, systemPrompt } from "../dist/ai-sdk.js";
-import { GOOD_KEY, INSTRUCTIONS, LOCKED_KEY, startFakeHive, type FakeHive } from "./fake-server.js";
+import { GOOD_KEY, INSTRUCTIONS, LOCKED_DETAIL, LOCKED_KEY, startFakeHive, type FakeHive } from "./fake-server.js";
 
 const ENV = ["HIVEMIND_MCP_URL", "HIVEMIND_API_KEY"] as const;
 
@@ -61,10 +61,11 @@ describe("connect", () => {
     await assert.rejects(Hivemind.connect({ url: fake.url, apiKey: "hm_bad" }), AuthenticationError);
   });
 
-  it("throws AuthenticationError on a key_locked envelope", async () => {
+  it("throws key_locked with the server's message for a locked key", async () => {
     await assert.rejects(Hivemind.connect({ url: fake.url, apiKey: LOCKED_KEY }), (e: unknown) => {
       assert.ok(e instanceof AuthenticationError);
       assert.equal(e.code, "key_locked");
+      assert.equal(e.message, LOCKED_DETAIL);
       return true;
     });
   });
@@ -92,6 +93,19 @@ describe("calls", () => {
     assert.equal(JSON.parse(await hive.runTool("hive_search", '{"query":"x"}')).count, 1);
     assert.equal(JSON.parse(await hive.runTool("hive_nothing", {})).error.code, "invalid_input");
     assert.equal(JSON.parse(await hive.runTool("hive_search", "{oops")).error.code, "invalid_input");
+  });
+
+  it("wraps a failed call outside the envelope as tool_error", async () => {
+    await using hive = await connect();
+    const text = await hive.runTool("hive_get", { entry_id: "crash" });
+    assert.deepEqual(JSON.parse(text).error, { code: "tool_error", message: "Error executing tool hive_get" });
+    await assert.rejects(hive.get("crash"), (e: unknown) => e instanceof HivemindError && e.code === "tool_error");
+  });
+
+  it("joins the text blocks of a reply and refuses a reply that is not an object", async () => {
+    await using hive = await connect();
+    assert.deepEqual(await hive.get("split"), { id: "split" });
+    await assert.rejects(hive.get("list"), (e: unknown) => e instanceof HivemindError && e.code === "invalid_reply");
   });
 
   it("typed methods send only defined arguments", async () => {
