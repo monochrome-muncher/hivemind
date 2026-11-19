@@ -102,7 +102,7 @@ A key belongs to one agent, and one `Hivemind` object uses one key. To act as an
 
 ## Errors
 
-A refusal from the server throws `HivemindError`, with the server's code in `.code` (`not_found`, `permission_denied`, `invalid_input`, and so on). A rejected or locked key throws `AuthenticationError`, a subclass, from `connect()` (HTTP 401, or the codes `unauthenticated` and `key_locked`). Network and protocol failures are ordinary errors from the MCP SDK.
+A refusal from the server throws `HivemindError`, with the server's code in `.code` (`not_found`, `permission_denied`, `invalid_input`, and so on). A rejected or locked key throws `AuthenticationError`, a subclass, with the code `unauthenticated` or `key_locked` and the server's message, from `connect()` or any later call. A failed call that carries no code becomes `tool_error`. Network and protocol failures are ordinary errors from the MCP SDK.
 
 ```ts
 import { HivemindError } from "hivemind-memory";

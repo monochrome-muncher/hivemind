@@ -100,7 +100,7 @@ A client acts as the agent its key belongs to, and the server records that agent
 
 ## Errors
 
-A tool that refuses a call raises `HivemindError`, with `.code` (such as `not_found`, `permission_denied`, `invalid_input`) and `.message`. A key that is unknown or locked raises `AuthenticationError`, a subclass, when connecting, and whenever the server answers HTTP 401 or `unauthenticated` or `key_locked` later. A missing URL or key raises `ValueError` and names the variable.
+A tool that refuses a call raises `HivemindError`, with `.code` (such as `not_found`, `permission_denied`, `invalid_input`) and `.message`. A key that is unknown or locked raises `AuthenticationError`, a subclass, with the code `unauthenticated` or `key_locked` and the server's message, when connecting or on any later call. A failed call that carries no code becomes `tool_error`. A missing URL or key raises `ValueError` and names the variable.
 
 ```python
 from hivemind_memory import HivemindError

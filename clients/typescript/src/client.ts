@@ -1,6 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { AuthenticationError, HivemindError, errorFromEnvelope } from "./errors.js";
+import { HivemindError, refusal, rejectedKey } from "./errors.js";
 import { toAnthropic, toOpenAI, type AnthropicTool, type OpenAITool, type ToolDefinition } from "./formats.js";
 import { REMINDER, VERSION, skillBody } from "./text.js";
 import type {
@@ -38,13 +38,37 @@ function errorText(code: string, message: string): string {
   return JSON.stringify({ error: { code, message } });
 }
 
-function isUnauthorized(error: unknown): boolean {
-  return typeof error === "object" && error !== null && (error as { code?: unknown }).code === 401;
+function parsed(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Keeps why the server answered 401: the MCP SDK reports only the status. */
+class Rejection {
+  private seen: Promise<HivemindError> | undefined;
+
+  readonly fetch = async (url: string | URL, init?: RequestInit): Promise<Response> => {
+    const response = await fetch(url, init);
+    if (response.status === 401) {
+      this.seen = rejectedKey(response.clone());
+    }
+    return response;
+  };
+
+  async throwIfSeen(): Promise<void> {
+    if (this.seen) {
+      throw await this.seen;
+    }
+  }
 }
 
 export class Hivemind implements AsyncDisposable {
   private constructor(
     private readonly client: Client,
+    private readonly rejection: Rejection,
     readonly tools: readonly ToolDefinition[],
     private serverInstructions: string,
     private current: Reply,
@@ -59,8 +83,10 @@ export class Hivemind implements AsyncDisposable {
     const url = setting(options.url, "HIVEMIND_MCP_URL");
     const apiKey = setting(options.apiKey, "HIVEMIND_API_KEY");
     const client = new Client({ name: "hivemind-memory", version: VERSION });
+    const rejection = new Rejection();
     const transport = new StreamableHTTPClientTransport(new URL(url), {
       requestInit: { headers: { Authorization: `Bearer ${apiKey}` } },
+      fetch: rejection.fetch,
     });
     try {
       await client.connect(transport);
@@ -70,14 +96,12 @@ export class Hivemind implements AsyncDisposable {
         description: t.description ?? "",
         inputSchema: t.inputSchema as Record<string, unknown>,
       }));
-      const hive = new Hivemind(client, tools, client.getInstructions() ?? "", {});
+      const hive = new Hivemind(client, rejection, tools, client.getInstructions() ?? "", {});
       await hive.refreshWhoami();
       return hive;
     } catch (error) {
       await client.close().catch(() => undefined);
-      if (isUnauthorized(error)) {
-        throw new AuthenticationError("unauthenticated", "the server rejected the API key (HTTP 401)");
-      }
+      await rejection.throwIfSeen();
       throw error;
     }
   }
@@ -90,34 +114,33 @@ export class Hivemind implements AsyncDisposable {
     await this.close();
   }
 
+  /** The reply text; a failed call that is not already the error envelope is wrapped in one. */
   private async callText(name: string, args: Record<string, unknown>): Promise<string> {
-    const result = await this.client.callTool({ name, arguments: args });
-    const first = (result.content as { type: string; text?: string }[] | undefined)?.[0];
-    const text = first?.type === "text" ? (first.text ?? "") : "";
-    if (result.isError) {
-      try {
-        JSON.parse(text);
-        return text;
-      } catch {
-        return errorText("tool_error", text || `${name} failed`);
-      }
+    let result: Awaited<ReturnType<Client["callTool"]>>;
+    try {
+      result = await this.client.callTool({ name, arguments: args });
+    } catch (error) {
+      await this.rejection.throwIfSeen();
+      throw error;
+    }
+    const blocks = (result.content ?? []) as { type: string; text?: string }[];
+    const text = blocks.map((b) => (b.type === "text" ? (b.text ?? "") : "")).join("");
+    if (result.isError && !refusal(parsed(text))) {
+      return errorText("tool_error", text || `${name} failed`);
     }
     return text;
   }
 
   async call(name: string, args: Record<string, unknown> = {}): Promise<Reply> {
-    const text = await this.callText(name, args);
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      throw new HivemindError("invalid_reply", `${name} answered with text that is not JSON`);
+    const reply = parsed(await this.callText(name, args));
+    const error = refusal(reply);
+    if (error) {
+      throw error;
     }
-    const envelope = (parsed as { error?: { code?: string; message?: string } } | null)?.error;
-    if (envelope && typeof envelope === "object") {
-      throw errorFromEnvelope(envelope.code ?? "tool_error", envelope.message ?? "");
+    if (typeof reply !== "object" || reply === null || Array.isArray(reply)) {
+      throw new HivemindError("invalid_reply", `${name} did not answer with a JSON object`);
     }
-    return parsed as Reply;
+    return reply as Reply;
   }
 
   /** For model loops: the reply JSON text, and an error envelope as text rather than a throw. */
@@ -125,18 +148,17 @@ export class Hivemind implements AsyncDisposable {
     if (!this.tools.some((t) => t.name === name)) {
       return errorText("invalid_input", `unknown tool ${name}`);
     }
-    let parsed: unknown = args;
+    let input: unknown = args;
     if (typeof args === "string") {
-      try {
-        parsed = args.trim() === "" ? {} : JSON.parse(args);
-      } catch {
+      input = args.trim() === "" ? {} : parsed(args);
+      if (input === undefined) {
         return errorText("invalid_input", `arguments for ${name} are not valid JSON`);
       }
     }
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    if (typeof input !== "object" || input === null || Array.isArray(input)) {
       return errorText("invalid_input", `arguments for ${name} must be a JSON object`);
     }
-    return this.callText(name, parsed as Record<string, unknown>);
+    return this.callText(name, input as Record<string, unknown>);
   }
 
   async refreshWhoami(): Promise<Reply> {

@@ -50,6 +50,24 @@ async def test_run_tool_answers_an_unknown_tool_with_invalid_input(connected: Co
         assert reply["error"]["code"] == "invalid_input"
 
 
+async def test_a_failed_call_outside_the_envelope_reaches_the_model_as_tool_error(
+    connected: Connected,
+) -> None:
+    async with connected() as hive:
+        reply = json.loads(await hive.run_tool("hive_get", {"entry_id": "crash"}))
+        assert reply["error"]["code"] == "tool_error"
+        assert reply["error"]["message"] == "Error executing tool hive_get"
+
+
+async def test_call_raises_tool_error_for_a_failed_call_outside_the_envelope(
+    connected: Connected,
+) -> None:
+    async with connected() as hive:
+        with pytest.raises(HivemindError) as caught:
+            await hive.get("crash")
+        assert caught.value.code == "tool_error"
+
+
 @pytest.mark.parametrize("arguments", ["{not json", "[1, 2]"])
 async def test_run_tool_answers_bad_arguments_with_invalid_input(
     connected: Connected, arguments: str
