@@ -13,7 +13,7 @@ Both packages carry the server's version, and ship copies of the `hivemind` skil
 
 ## Publishing
 
-Pushing a release tag `vX.Y.Z` runs `.github/workflows/publish-clients.yml`, which publishes both packages with trusted publishing (GitHub OIDC, no stored token). It does nothing until the repository variable `PUBLISH_CLIENTS` is `true`, and it skips a version a registry already has, so a re-run is safe.
+Pushing a release tag `vX.Y.Z` runs `.github/workflows/publish-clients.yml`, which publishes both packages with trusted publishing (GitHub OIDC, no stored token). One job builds both packages without access to the publishing token; the PyPI and npm jobs only upload what it built. It does nothing until the repository variable `PUBLISH_CLIENTS` is `true`, and it skips a version a registry already has, so a re-run is safe.
 
 ### One-time setup
 
