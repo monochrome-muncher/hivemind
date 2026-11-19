@@ -275,9 +275,6 @@ class Visibility:
     def owns(self, author: str) -> bool:
         return author == self.name or author in self.inherited
 
-    def entry_visible(self, entry: Entry) -> bool:
-        return entry_is_visible(entry, self)
-
 
 def entry_is_visible(entry: Entry, v: Visibility) -> bool:
     """The visibility predicate (SPEC §12.2, ADR 0011), which every store adapter must match
