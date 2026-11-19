@@ -1,9 +1,37 @@
-# Hivemind — Ops Runbook (Tier 3.1)
+# Hivemind ops runbook
 
-> **What this document is:** the operational story for running Hivemind in
-> production — deployment, backups, monitoring / health, and the key
-> issuance / rotation story (defined by ADR 0012). It links to the ADRs /
-> SPEC for the *reasoning*; it owns the *how*.
+This runbook is for the people who run Hivemind. Sections 1, 2, 3 and 5
+cover running it on one machine with Docker Compose: setup, backups,
+monitoring and recovery. Kubernetes has its own guide,
+[DEPLOY.md](../DEPLOY.md). The rest applies to any deployment: keys (4),
+the embedding dimension (6) and the admin tasks (7 to 21). Those use the
+admin panel, the `hivemind-keys` command or the REST API with the admin
+key, which work the same on Kubernetes (reach the API through
+`kubectl port-forward` or the admin Ingress, DEPLOY.md §2 step 5). The
+ADRs and SPEC.md hold the reasons; this runbook holds the steps.
+
+**Running it:** [1. Deployment](#1-deployment-single-node-docker-compose) ·
+[2. Backups](#2-backups-single-node-postgres) ·
+[3. Monitoring](#3-monitoring--health) ·
+[4. Keys](#4-key-issuance--rotation-adr-0012) ·
+[5. Disaster recovery](#5-disaster-recovery-full) ·
+[6. Embedding dimension](#6-embedding-dimension-deploy-time-decision-adr-0005--adr-0015)
+
+**Admin tasks:** [7. Merge fleets](#7-merging-fleets-adr-0107) ·
+[8. Rename a fleet](#8-renaming-a-fleet-adr-0109) ·
+[9. Find idle agents](#9-finding-idle-agents-adr-0110) ·
+[10. Clean up after a bad agent](#10-cleaning-up-after-a-bad-agent-adr-0111) ·
+[11. Move agents or split a fleet](#11-moving-agents-to-another-fleet--splitting-a-fleet-adr-0112) ·
+[12. Retire an agent](#12-retiring-an-agent-with-a-successor-adr-0113) ·
+[13. A secret got into a memory](#13-a-secret-or-personal-data-got-into-a-memory-adr-0125) ·
+[14. Re-extract entity names](#14-re-extracting-entity-names-adr-0131) ·
+[15. An agent can't find a memory](#15-an-agent-cant-find-a-memory-adr-0136) ·
+[16. Read a query's ranking](#16-read-the-ranking-of-a-production-query-adr-0137) ·
+[17. When someone leaves](#17-when-someone-leaves-adr-0135) ·
+[18. Fleet phases](#18-steering-a-fleet-with-a-phase-adr-0143) ·
+[19. Scouts](#19-marking-an-agent-as-a-scout-adr-0144) ·
+[20. Move a fleet memory to self](#20-a-fleet-memory-that-should-have-been-private-adr-0145) ·
+[21. Rename an agent](#21-renaming-an-agent-adr-0159)
 
 ## 1. Deployment (single-node, docker-compose)
 

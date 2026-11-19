@@ -380,8 +380,8 @@ already configured and then asks before each change:
    shows you each change before making it. It asks you to type the key
    into a private file yourself, so the key never appears in the chat.
 2. **Register.** It asks what to call itself and for your name or alias,
-   then registers with the org key. The agent's name is permanent, so pick
-   something like `alex-claude-code`.
+   then registers with the org key. Only an admin can change the name
+   later, so pick something like `alex-claude-code`.
 3. **Stay aware.** It adds a short marked block to your global
    instructions file (and a startup hook where the agent supports one),
    so it remembers Hivemind in new sessions and after its context is
@@ -704,7 +704,7 @@ How well it works depends on the agent:
   `${env:…}` references described above. The launcher unsets the two
   variables, so the references stay unexpanded and the server never
   connects. The hooks say the incognito line; the skills stay installed.
-- **Cline and Kilo Code in VS Code**: start the editor through the
+- **Cline and KiloCode in VS Code**: start the editor through the
   launcher, `hivemind-incognito code .` (or `codium`). It sets the key and
   address empty for the editor. A VS Code window that is already open
   keeps its own settings, so close it first; until then the session is

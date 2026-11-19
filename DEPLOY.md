@@ -1,11 +1,23 @@
-# Hivemind — Production Deployment (Kubernetes + GitLab CI/CD)
+# Deploying Hivemind on Kubernetes
 
-Single source of truth for **deploying Hivemind to a Kubernetes cluster**
-via GitLab CI/CD: **2 replicas** of the API and 2 of the MCP runner
-(ADR 0026, for availability) against **one** Postgres node (ADR 0007).
-The single-node **docker** ops story lives in
-[docs/ops-runbook.md](docs/ops-runbook.md) — this file is the k8s story
-and the two do not overlap.
+This guide deploys Hivemind to a Kubernetes cluster from GitLab CI/CD:
+**2 replicas** each of the API, the MCP runner and the agent portal
+(ADR 0026, for availability) and one of the admin panel, against **one**
+Postgres node (ADR 0007). Without GitLab, the same steps run by hand
+([Without GitLab](#without-gitlab)). Running Hivemind on one machine with
+Docker Compose is in [docs/ops-runbook.md](docs/ops-runbook.md), which
+also has the step-by-step admin tasks (merging fleets, cleaning up after
+an agent, offboarding) that apply here too.
+
+**Contents:** [1. Prerequisites](#1-prerequisites) ·
+[2. Quickstart](#2-quickstart) ·
+[3. Manual steps checklist](#3-manual-steps-checklist) ·
+[4. Key and credential rotation](#4-key--credential-rotation-reference) ·
+[5. Upgrades](#5-upgrades) ·
+[6. Troubleshooting](#6-troubleshooting) ·
+[7. RBAC](#7-rbac) ·
+[8. Admin panel](#8-admin-panel-hivemind-admin-adr-0029) ·
+[9. Agent portal](#9-agent-portal-hivemind-portal-adr-0095)
 
 Layout:
 
@@ -68,6 +80,16 @@ is the single source of truth for secrets).
 ---
 
 ## 2. Quickstart
+
+Before the first deploy, point
+[`deploy/kubernetes/configmap.yaml`](deploy/kubernetes/configmap.yaml) at
+your embedding service: `HIVEMIND_EMBEDDING_ENDPOINT`,
+`HIVEMIND_EMBEDDING_MODEL` and `HIVEMIND_EMBEDDING_DIM` (the shipped values
+assume an in-cluster vLLM Service named `vllm` serving
+Qwen3-Embedding-0.6B at 1024 dimensions), and, if you use entity
+extraction, `HIVEMIND_EXTRACTOR_ENDPOINT` and `HIVEMIND_EXTRACTOR_MODEL`.
+The dimension is fixed by the first migration (§5). The other values are
+the ranking defaults; leave them unless an ADR says otherwise.
 
 The operator flow (steps 1–4 are required, 5–8 optional):
 
@@ -199,9 +221,10 @@ The operator flow (steps 1–4 are required, 5–8 optional):
 
 1. Provision the Postgres database + pgvector (one-time).
 2. Stand up the embedding endpoint (and, optionally, the chat endpoint
-   for extraction) reachable from the cluster.
+   for extraction) reachable from the cluster, and put its address,
+   model and dimension in `deploy/kubernetes/configmap.yaml` (§2).
 3. Set the four GitLab CI/CD variables (§1).
-4. **First pipeline** (`git push`) — then:
+4. **First pipeline** (`git push`), then:
 5. Fetch `ADMIN_KEY` / `ORG_KEY` from the `hivemind-keys` Secret and
    distribute them (§2 step 4).
 6. (Optional) apply the opt-in Ingress with the real hostname/issuer.
@@ -220,6 +243,42 @@ The operator flow (steps 1–4 are required, 5–8 optional):
 - First-run key bootstrap (deploy job, **only** when `hivemind-keys`
   does not exist).
 - Rollouts (`kubectl rollout status` on the api, mcp, admin and portal Deployments).
+
+### Without GitLab
+
+The deploy job in [`.gitlab-ci.yml`](.gitlab-ci.yml) is a short list of
+`kubectl` commands, so any CI system, or a person with `kubectl` access
+and the RBAC in §7, can run the same steps. Use the published image
+instead of building one, and run the commands from a checkout of the same
+release tag, so the manifests match the image:
+
+```bash
+git checkout v<version>
+export IMAGE=ghcr.io/monochrome-muncher/hivemind:v<version>
+
+# Once: the namespace (§7), then the ConfigMap you edited (§2).
+kubectl apply -f deploy/kubernetes/namespace.yaml
+kubectl -n hivemind apply -f deploy/kubernetes/configmap.yaml
+
+# The app Secret. Keep the values in a private file outside the checkout
+# (chmod 600), one KEY=value per line: HIVEMIND_DATABASE_URL, HIVEMIND_EMBEDDING_API_KEY,
+# HIVEMIND_EXTRACTOR_API_KEY and HIVEMIND_MIGRATE_DATABASE_URL (the last
+# three may be empty).
+kubectl -n hivemind create secret generic hivemind-secrets \
+  --from-env-file=$HOME/hivemind-secrets.env --dry-run=client -o yaml \
+  | kubectl -n hivemind apply -f -
+
+# First run only (it skips itself once the hivemind-keys Secret exists).
+sh scripts/ci-bootstrap-keys.sh
+
+# The app, the admin panel and the portal.
+for dir in deploy/kubernetes deploy/kubernetes/admin deploy/kubernetes/portal; do
+  kubectl kustomize "$dir" | sed "s|hivemind:0.0.0|$IMAGE|g" | kubectl -n hivemind apply -f -
+done
+```
+
+Then fetch the keys as in §2 step 4. To upgrade, check out the new tag,
+set `IMAGE` to it and run the last command again.
 
 ---
 
@@ -254,7 +313,7 @@ first-run bootstrap Job records itself as `ci-bootstrap`.
 - **Then** — store it: update the k8s Secret `hivemind-keys`
   (`kubectl -n hivemind patch secret hivemind-keys -p
   '{"stringData":{"ORG_KEY":"<new>"}}'`) — or delete the Secret and re-run
-  the bootstrap (§2 step 4).
+  the bootstrap (§2 step 3), which also issues a new admin key.
 - **Blast radius** — only registration: anyone still holding the old
   org key gets a 401 on their **next** registration attempt. Active agents
   authenticate with their own agent keys and are **not** affected. No
@@ -626,8 +685,13 @@ and org-key rotation, plus daily activity and stats, the fleet health
 metrics, a memory browser with search, withdrawal (ADR 0080), restore
 (ADR 0124) and redaction (ADR 0125), the feedback log (ADR 0090), each
 fleet's pins (ADR 0092), the flag backlog (ADR 0093) and CSV export
-(ADR 0094). The root [README](README.md) describes it from a user's point
-of view. Admin keys stay CLI-only.
+(ADR 0094). It also renames an agent (ADR 0159), offboards a person who
+leaves (ADR 0135), searches as one agent with each hit's ranking
+explained (ADRs 0136, 0137), sets fleet phases and scouts (ADRs 0143,
+0144) and moves a fleet memory to its author's `self` scope (ADR 0145).
+The root [README](README.md) describes it from a user's point of view,
+and [docs/ops-runbook.md](docs/ops-runbook.md) sections 7 to 21 give the
+steps for each task. Admin keys stay CLI-only.
 
 **What it needs.** One env var: `HIVEMIND_ADMIN_API_URL`, the base URL of
 the hivemind-api deployment (in-cluster: `http://hivemind-api:8000`). For
@@ -682,7 +746,8 @@ used, its home fleet's memories and pins, a "Needs attention" page of the
 agent's flagged memories (ADR 0115), a "Relied on" page of the memories it
 rated helpful that changed since (ADR 0138), a History page of what was done to
 and by the agent (ADR 0123), and a search over everything the key can
-read. They can withdraw the agent's own memories, pin or unpin
+read. They can withdraw the agent's own memories, move a fleet memory
+of the agent's to its `self` scope (ADR 0145), pin or unpin
 entries as the agent (same rights and limits as `hive_pin`), lock a
 leaked key, and clean up the agent's own work over a time window with
 undo (ADR 0118); all of it is audited with `via: "portal"`. Admin and
@@ -743,6 +808,7 @@ drawer, with `?history=true`), `GET /v1/pins`, `GET /v1/health` and the
 portal's own routes: `GET /v1/portal/entries`, `POST /v1/portal/search`,
 `GET /v1/portal/feedback`, `GET /v1/portal/flagged`, `GET /v1/portal/relied-on`,
 `POST /v1/portal/entries/{id}/withdraw`,
+`POST /v1/portal/entries/{id}/move-to-self`,
 `PUT`/`DELETE /v1/portal/entries/{id}/pin`, `POST /v1/portal/cleanup`,
 `GET /v1/portal/cleanups`, `POST /v1/portal/cleanups/{id}/undo`,
 `GET /v1/portal/history` and
