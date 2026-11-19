@@ -1,7 +1,7 @@
 """TDD: the trust-level visibility matrix (SPEC §12.2, ADR 0011).
 
-Tests the pure predicate ``entry_is_visible`` (and its ``Visibility``
-wrapper) at the domain seam — no store, no I/O. Covers the full matrix:
+Tests the pure predicate ``entry_is_visible``
+at the domain seam — no store, no I/O. Covers the full matrix:
 each trust level x each entry scope, plus the admin bypass, the
 "self is private even at L3" rule, and the "own fleet entries follow the
 agent" rule (entries stay in the fleet they were written into).
@@ -273,12 +273,3 @@ class TestAgentSupersession:
         assert not may_supersede(
             target, new_scope=new_scope, new_fleet_id=FL_A, writer=vis(3, "bob", home=FL_A)
         )
-
-
-class TestVisibilityWrapper:
-    def test_wrapper_delegates(self) -> None:
-        v = vis(1, "alice", home=FL_A)
-        e = make_entry(scope="fleet", author="bob", fleet_id=FL_A)
-        assert v.entry_visible(e) is True
-        e2 = make_entry(scope="fleet", author="bob", fleet_id=FL_B)
-        assert v.entry_visible(e2) is False

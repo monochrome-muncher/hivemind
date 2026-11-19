@@ -206,10 +206,6 @@ class EntryDraft:
             return utcnow()
         return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
-    @property
-    def supersedes_ids(self) -> tuple[str, ...]:
-        return self.supersedes
-
 
 @dataclass(frozen=True, slots=True)
 class Entry:
