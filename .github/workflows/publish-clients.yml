@@ -119,4 +119,5 @@ jobs:
             echo "hivemind-memory ${version} is already on npm"
             exit 0
           fi
-          npm publish "dist/hivemind-memory-${version}.tgz" --ignore-scripts --provenance --access public
+          # The ./ makes npm read a file: "dist/x.tgz" alone is a GitHub owner/repo.
+          npm publish "./dist/hivemind-memory-${version}.tgz" --ignore-scripts --provenance --access public
