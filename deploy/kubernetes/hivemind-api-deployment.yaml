@@ -39,7 +39,7 @@ spec:
         prometheus.io/port: "8000"
         prometheus.io/path: /metrics
     spec:
-      # The entrypoint runs the idempotent migration (ADR 0013) before the
+      # The entrypoint runs the idempotent migration (ADR 0020) before the
       # runner (ADR 0018: no init container). A dim mismatch (ADR 0015) or an
       # unreachable DB fails it LOUDLY and the pod crash-loops; the restart
       # policy owns recovery.
