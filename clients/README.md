@@ -11,7 +11,7 @@ To start, you need what an agent plugin user needs: the MCP address of your orga
 
 ## For maintainers
 
-Both packages carry the server's version, and ship copies of the `hivemind` skill and the Stop hook's reminder. After changing either, run `make sync-client-text`; a unit test fails until the copies match.
+Both packages carry the server's version, and ship copies of the `hivemind` skill and the Stop hook's reminder. The skill copy leaves out what only the plugin has (the setup skill, incognito sessions), as `sync_text.py` lists ([ADR 0163](../docs/adr/0163-client-skill-copy-drops-plugin-only-lines.md)). After changing either, run `make sync-client-text`; a unit test fails until the copies match, and the script fails if a passage it rewords has changed.
 
 `live_server.py` starts the real HTTP MCP runner with a fresh contributor agent for the packages' live tests. CI's **Client packages** job runs them.
 
