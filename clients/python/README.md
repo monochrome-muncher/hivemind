@@ -21,23 +21,34 @@ export HIVEMIND_API_KEY=...
 ```
 
 ```python
+import asyncio
+
 from hivemind_memory import Hivemind
 
-async with Hivemind.connect() as hive:
-    print(hive.whoami)
-    hits = await hive.search("how do we deploy the billing service")
-    entry = await hive.write("fact", "The billing service deploys from the release branch.")
+
+async def main() -> None:
+    async with Hivemind.connect() as hive:
+        print(hive.whoami)
+        hits = await hive.search("how do we deploy the billing service")
+        print(hits["count"], [hit["summary"] for hit in hits["hits"]])
+        entry = await hive.write("fact", "The billing service deploys from the release branch.")
+        print(entry["id"])
+
+
+asyncio.run(main())
 ```
 
 Arguments win over the variables: `Hivemind.connect(url, api_key)`. Connecting opens the session, lists the tools and calls `hive_whoami`; the answer is `hive.whoami`. If you cannot use `async with`, call `hive = await Hivemind.open()` and `await hive.close()` when you are done.
 
-There is one method per tool: `whoami` (as `refresh_whoami`), `search`, `get`, `list`, `pinned`, `write`, `feedback`, `withdraw`, `pin` and `register`. `get` and `feedback` take an id or a list of ids first; the rest take the tool's arguments as keywords. They send only the ones you set, and return the reply as a dict. For the details of each tool, read `hive.tools` or the [spec](https://github.com/monochrome-muncher/hivemind/blob/main/SPEC.md).
+There is one method per tool: `whoami` (as `refresh_whoami`), `search`, `get`, `list`, `pinned`, `write`, `feedback`, `withdraw`, `pin` and `register`. `get` and `feedback` take an id or a list of ids first; the rest take the tool's arguments as keywords. They send only the ones you set, and return the reply as a dict. `kind`, `verdict` and `recency` take the values in the `EntryKind`, `Verdict` and `Recency` types. What each argument means and what comes back is in the tool descriptions, `hive.tools`, which are also what the model reads; the [spec](https://github.com/monochrome-muncher/hivemind/blob/main/SPEC.md#52-mcp-tools-the-agents-mental-model--ten-verbs) has the same in one place.
 
 ## A loop with the Anthropic Messages API
 
-This is a sketch, not an app. `instructions()` is the system prompt, `anthropic_tools()` the tool list, and `run_tool()` runs what the model asked for.
+`instructions()` is the system prompt, `anthropic_tools()` the tool list, and `run_tool()` runs what the model asked for. When the model stops calling tools, the loop sends the end-of-task reminder once and lets the model answer it.
 
 ```python
+import asyncio
+
 import anthropic
 from hivemind_memory import Hivemind
 
@@ -46,6 +57,7 @@ async def run(task: str) -> None:
     model = anthropic.AsyncAnthropic()
     async with Hivemind.connect() as hive:
         messages = [{"role": "user", "content": task}]
+        reminded = False
         while True:
             reply = await model.messages.create(
                 model="claude-sonnet-5-5",
@@ -57,7 +69,11 @@ async def run(task: str) -> None:
             messages.append({"role": "assistant", "content": reply.content})
             calls = [block for block in reply.content if block.type == "tool_use"]
             if not calls:
-                break
+                if reminded:
+                    return
+                messages.append({"role": "user", "content": hive.reminder()})
+                reminded = True
+                continue
             results = [
                 {
                     "type": "tool_result",
@@ -67,6 +83,9 @@ async def run(task: str) -> None:
                 for call in calls
             ]
             messages.append({"role": "user", "content": results})
+
+
+asyncio.run(run("Find out how the billing service deploys."))
 ```
 
 `run_tool()` takes the arguments as the model wrote them, a dict or a JSON string, and returns the reply as text. A refusal comes back as text too, for example `{"error": {"code": "not_found", ...}}`, so the model sees the code and can react. An unknown tool name or unparseable arguments come back as an `invalid_input` error the same way.
@@ -75,7 +94,7 @@ async def run(task: str) -> None:
 
 ## The end-of-task reminder
 
-When a task ends, send `hive.reminder()` to the model as one more user turn, once, and let it make its last tool calls. It asks the agent to write what another agent could reuse and to rate the entries its work tested. In the loop above, that means appending `{"role": "user", "content": hive.reminder()}` when the model stops calling tools for the first time, running the loop once more, and then finishing. `hivemind_memory.REMINDER` is the same text as a constant.
+When a task ends, send `hive.reminder()` to the model as one more user turn, once, and let it make its last tool calls, as the loop above does. It asks the agent to write what another agent could reuse and to rate the entries its work tested. `hivemind_memory.REMINDER` is the same text as a constant.
 
 ## LangChain and LangGraph
 
@@ -88,7 +107,7 @@ async with Hivemind.connect() as hive:
     system = system_message(hive)  # a SystemMessage with hive.instructions()
 ```
 
-The tools work in a LangChain agent and in LangGraph. Like `run_tool()`, they return refusals as text.
+The tools work in a LangChain agent and in LangGraph. They are async only, so call them with `ainvoke` or run them in an async agent; `invoke` raises `NotImplementedError`. Like `run_tool()`, they return refusals as text.
 
 ## Other frameworks
 
@@ -110,6 +129,8 @@ try:
 except HivemindError as error:
     print(error.code, error.message)
 ```
+
+Network and HTTP failures (an unreachable server, a 503 while the database is busy) raise the errors of `httpx2` and the MCP SDK unchanged, from the methods and from `run_tool()` alike.
 
 ## Development
 
