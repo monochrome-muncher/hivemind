@@ -869,6 +869,8 @@ def test_grafana_dashboard_ships_with_the_monitoring_tree() -> None:
     assert tool_exprs and all(
         f'code=~"{failures}"' in e or f'code!~"{failures}"' in e for e in tool_exprs
     )
+    # Unverified memories (ADR 0156) have a per-fleet panel, as on the admin Health page.
+    assert any("hivemind_health_fleet_unverified" in e for e in exprs)
     # The pool-wide counters repeat on every api replica: never summed raw.
     for e in exprs:
         if "hivemind_searches" in e:
