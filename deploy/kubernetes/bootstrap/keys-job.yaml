@@ -3,7 +3,7 @@
 # not exist. Not in any kustomization (one-shot); the script substitutes
 # the `hivemind:0.0.0` placeholder.
 #
-# It migrates (idempotent, ADR 0013), then `hivemind-keys bootstrap-secret`
+# It migrates (idempotent, ADR 0020), then `hivemind-keys bootstrap-secret`
 # issues the first admin key, rotates the org key and writes both into the
 # `hivemind-keys` Secret via the Kubernetes API (ADR 0044). NO KEY IS EVER
 # PRINTED, so log shippers never capture one.

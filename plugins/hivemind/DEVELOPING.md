@@ -42,7 +42,7 @@ to install or use it, read [README.md](README.md) instead.
 | `CHANGELOG.md` | What changed for agents in each release |
 | `../../package.json` (repository root) | Same package name as `plugins/hivemind/package.json`. Lets DeepSeek Harness, Pi and OpenCode install the plugin from the repository's Git URL (OpenCode loads `exports["./server"]`, else `main`) |
 | `../../gemini-extension.json`, `../../skills`, `../../hooks/hooks.json` (repository root) | The Gemini CLI extension, installed with `gemini extensions install <git-url>`: Gemini reads these three at the root of what it installs. `skills` is a link to `skills/` here; the hooks run the two scripts above as `SessionStart` and `AfterAgent` hooks |
-| `../antigravity/` | The Antigravity plugin, a folder of its own (it installs as `hivemind`): `plugin.json`, `mcp_config.json` (the server, with the URL and key as install-time variables), `hooks.json` (the two scripts above, with `--antigravity`), `rules/AGENTS.md` (the instruction block's text, always on), `assets/logo.svg`, and `skills`, a link to `skills/` here. It lives apart because Antigravity reads `hooks.json` at the plugin root, a name GitHub Copilot CLI also reads in this folder |
+| `../antigravity/` | The Antigravity plugin, a folder of its own (it installs as `hivemind`): `plugin.json`, `mcp_config.json` (the server, with the URL and key as install-time variables), `hooks.json` (the two scripts above, with `--antigravity`), `rules/AGENTS.md` (the instruction block's text, always on), `assets/logo.svg`, and `skills`, a real copy of `skills/` here (`make sync-antigravity-skills`). It lives apart because Antigravity reads `hooks.json` at the plugin root, a name GitHub Copilot CLI also reads in this folder |
 | `../../.claude-plugin/`, `../../.agents/plugins/` (repository root) | The marketplaces Claude Code, Codex and Oh My Pi install from. GitHub Copilot CLI reads the root `.claude-plugin/marketplace.json` and the plugin's `.claude-plugin/plugin.json` too, so it needs no manifest of its own. Cursor reads the root `.cursor-plugin/marketplace.json` and the plugin's `.cursor-plugin/plugin.json` |
 
 ## How each harness gets each piece
@@ -580,11 +580,13 @@ The script counts seven transcript formats:
 - **OpenCode.** OpenCode has no hook that can hold a stop, so the plugin
   (`opencode/hivemind.js`) counts each session's calls in
   `tool.execute.after` (MCP tools are named `hivemind_hive_write`) and, on
-  the `session.idle` event of a long top-level session that wrote
+  the `session.idle` event (or, as KiloCode sends them, a
+  `session.execution.succeeded`, `.failed` or non-shutdown `.interrupted`
+  event) of a long top-level session that wrote
   nothing, or read entries and rated none, sends the reminder once with `client.session.promptAsync`,
   using the agent and model of the session's last message (from
   `chat.message`). A subagent's session (one with a `parentID`) is left
-  alone. After `session.compacted`, the next
+  alone. After `session.compacted` (KiloCode: `session.compaction.ended`), the next
   `experimental.chat.system.transform` for that session adds the
   post-compaction sentence once. Checked live with OpenCode 1.19.0
   (`opencode serve`, which the TUI also uses) against a mock model: three
@@ -682,7 +684,8 @@ user's agents (ADR 0150). Per harness:
 | every other harness, and `code`/`codium` for the editor extensions | `~/.config/hivemind/<stem>.<profile>.env` sourced and both variables exported (`cursor-agent` and `agent` use `cursor`, `kilo` uses `kilocode`) |
 
 The launcher unsets the inherited key and URL before loading a profile,
-fails when the file leaves either unset, refuses a file other users can
+fails when the file leaves either unset (a Claude Code profile must hold
+the key; its URL may also come from `~/.claude/settings.json`), refuses a file other users can
 read, and sets `HIVEMIND_PROFILE`. `default` loads `<stem>.env` when it
 exists and otherwise changes nothing. `auto` takes the profile from the
 user's `~/.config/hivemind/profiles` (longest folder that holds the
