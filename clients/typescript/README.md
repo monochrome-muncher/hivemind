@@ -4,7 +4,7 @@ A client for [Hivemind](https://github.com/monochrome-muncher/hivemind/blob/main
 
 It talks to the server's MCP endpoint (`/mcp`) and gives you three things: one method per `hive_*` tool, the tool definitions in the shape your model API wants, and the text an agent needs to use Hivemind well (the server instructions, the Hivemind skill, and the end-of-task reminder).
 
-Node 20 or later, ESM only, types included.
+Node 22 or later, ESM only, types included.
 
 ## Install
 
