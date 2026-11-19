@@ -18,5 +18,9 @@ Security, performance and design reviews of Hivemind, kept as a record of what w
 | 2026-11-12 | [Changes since 2.23.1](2026-11-12-changes-since-2.23.1.md): the admin panel and portal features of 2.24.0 (ADRs 0135 to 0141) | b627590 |
 | 2026-11-12 | [Memories as data, relevance, and self versus fleet](2026-11-12-memories-as-data-and-scope.md): how agents are told to weigh entries, what the search score means, why brainstorms reach the fleet, and a live check of [ADR 0146](../adr/0146-scope-by-evidence.md) | 88c4170 |
 | 2026-11-15 | [Plugins and skills review](2026-11-15-plugins-skills-review.md): docs against code, skill text against the server, weak-model failure modes (switching, payload stuffing, general questions answered through one incident), with live and simulated checks | e2bea82 |
+| 2026-11-15 | [Always-on text trim](2026-11-15-always-on-trim.md): what the always-on text can lose without making agents worse ([ADR 0154](../adr/0154-the-skill-does-not-repeat-descriptions-or-replies.md)) | dba48fd |
+| 2026-11-16 | ["May be wrong" and the `unverified` tag](2026-11-16-may-be-wrong-and-unverified.md): a live check of [ADRs 0155](../adr/0155-always-on-text-says-entries-may-be-wrong.md) and [0156](../adr/0156-unverified-tag-convention.md) | PRs 462, 463 |
+| 2026-11-17 | [What Hivemind carries for weak agent models](2026-11-17-weak-model-accommodations.md): what exists mainly for small models, and what could go | 348fd71 |
+| 2026-11-19 | [Full review of v2.30.0](2026-11-19-full-review.md): bugs, security, performance, refactors, tests, migrations, deploy, metrics and docs; drift fixed in #478, dead helpers removed in #479 | 2eeac4f |
 
 Retrieval measurements live in [retrieval-experiments.md](../retrieval-experiments.md), and research proposals in [proposals/](../proposals/).
