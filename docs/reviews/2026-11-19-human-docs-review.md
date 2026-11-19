@@ -45,7 +45,7 @@ The weak spot is the operator side. A person deploying Hivemind for an organizat
 
 ## Larger items, for the owner to decide
 
-These are restructures rather than fixes, so they are not in this PR.
+These are restructures rather than fixes, so they were not in the first PR (#487). The owner chose L1 and L2; they are done in a follow-up PR (plain voice in DEPLOY.md and the runbook, and DEPLOY.md §10 Monitoring). L3 is left as it is.
 
 **L1. DEPLOY.md and the runbook in plain voice.** Both docs use em dashes heavily, bold for emphasis mid-sentence, "LOUD", "single source of truth", and an ADR number in most sentences. They are accurate, but they read like design notes, not instructions. A pass in the READMEs' voice would keep every fact and command, move ADR numbers to the end of a paragraph or a "Why" line, and drop the em dashes. It is mechanical but touches most of 130 KB, so it is worth a yes first.
 

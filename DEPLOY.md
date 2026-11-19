@@ -1,13 +1,17 @@
 # Deploying Hivemind on Kubernetes
 
-This guide deploys Hivemind to a Kubernetes cluster from GitLab CI/CD:
-**2 replicas** each of the API, the MCP runner and the agent portal
-(ADR 0026, for availability) and one of the admin panel, against **one**
-Postgres node (ADR 0007). Without GitLab, the same steps run by hand
+This guide deploys Hivemind to a Kubernetes cluster from GitLab CI/CD. You
+get **2 replicas** (copies) each of the API, the MCP runner and the agent
+portal, so a pod can restart without an outage, and one replica of the
+admin panel. They all use **one** Postgres node (ADRs 0026 and 0007).
+Without GitLab, you run the same steps by hand
 ([Without GitLab](#without-gitlab)). Running Hivemind on one machine with
 Docker Compose is in [docs/ops-runbook.md](docs/ops-runbook.md), which
 also has the step-by-step admin tasks (merging fleets, cleaning up after
 an agent, offboarding) that apply here too.
+
+Numbers like "ADR 0026" point to an architecture decision record in
+[docs/adr/](docs/adr/README.md), which explains why a choice was made.
 
 **Contents:** [1. Prerequisites](#1-prerequisites) ·
 [2. Quickstart](#2-quickstart) ·
@@ -16,66 +20,71 @@ an agent, offboarding) that apply here too.
 [5. Upgrades](#5-upgrades) ·
 [6. Troubleshooting](#6-troubleshooting) ·
 [7. RBAC](#7-rbac) ·
-[8. Admin panel](#8-admin-panel-hivemind-admin-adr-0029) ·
-[9. Agent portal](#9-agent-portal-hivemind-portal-adr-0095)
+[8. Admin panel](#8-admin-panel-hivemind-admin) ·
+[9. Agent portal](#9-agent-portal-hivemind-portal) ·
+[10. Monitoring](#10-monitoring)
 
 Layout:
 
-- [`deploy/kubernetes/`](deploy/kubernetes/) — the kustomize tree:
-  namespace, ConfigMap, two 2-replica Deployments with a
+- [`deploy/kubernetes/`](deploy/kubernetes/): the kustomize tree. It has
+  the namespace, the ConfigMap, two 2-replica Deployments with a
   `maxSurge: 1` / `maxUnavailable: 0` rollout, two ClusterIP Services,
-  two `minAvailable: 1` PodDisruptionBudgets (ADR 0026), and
-  `secret-template.yaml`, which documents the CI-rendered Secret.
-  `optional/` is the opt-in nginx Ingress + cert-manager Certificate,
-  with `optional/networkpolicy/` (§2 step 6) and `optional/monitoring/`
-  (the Prometheus Operator ServiceMonitors, the vital-signs alerts and the
-  Grafana dashboard, §2 steps 7 and 8) under it; `admin/` and `portal/` are the admin panel
-  and the agent portal, each its own kustomization (§8 and §9). Every
-  pod runs as non-root with a read-only root filesystem and a locked-down
-  security context.
-- [`.gitlab-ci.yml`](.gitlab-ci.yml) — the pipeline (test → build →
-  deploy); the first-run key bootstrap is
-  [`scripts/ci-bootstrap-keys.sh`](scripts/ci-bootstrap-keys.sh) +
-  [`deploy/kubernetes/bootstrap/`](deploy/kubernetes/bootstrap/) (ADR 0044)
+  two `minAvailable: 1` PodDisruptionBudgets, and `secret-template.yaml`,
+  which documents the Secret that CI renders. Every pod runs as non-root
+  with a read-only root filesystem and a locked-down security context.
+  The subfolders are:
+  - `optional/` is the opt-in nginx Ingress and cert-manager Certificate.
+    Under it, `optional/networkpolicy/` holds the NetworkPolicies (§2
+    step 6) and `optional/monitoring/` holds the Prometheus Operator
+    ServiceMonitors, the vital-signs alerts and the Grafana dashboard
+    (§10).
+  - `admin/` and `portal/` are the admin panel and the agent portal. Each
+    is its own kustomization (§8 and §9).
+
+  (ADR 0026 explains the replica and PodDisruptionBudget choices.)
+- [`.gitlab-ci.yml`](.gitlab-ci.yml): the pipeline (test, build, deploy).
+  The first-run key bootstrap is
+  [`scripts/ci-bootstrap-keys.sh`](scripts/ci-bootstrap-keys.sh) with
+  [`deploy/kubernetes/bootstrap/`](deploy/kubernetes/bootstrap/) (ADR 0044).
 
 ---
 
 ## 1. Prerequisites
 
-What the **org provides** (the app itself needs nothing else):
+Your organization provides these. The app itself needs nothing else.
 
 | Prerequisite | Detail |
 |---|---|
-| Postgres 16+ with the `vector` extension (pgvector **>= 0.8**) | A dedicated database + user whose credentials allow `CREATE EXTENSION vector` (DB user is a superuser, or the extension is pre-installed). pgvector 0.8+ is required (`hnsw.iterative_scan`, ADR 0025) and `HIVEMIND_EMBEDDING_DIM` must be **<= 2000** (HNSW's limit); `hivemind-migrate` fails with an actionable message otherwise. On an older pgvector upgrade the package/image, then `ALTER EXTENSION vector UPDATE;`. |
-| A vLLM (or any OpenAI-compatible) **embedding** endpoint reachable from the cluster | e.g. an in-cluster vLLM Service (`http://vllm:8000/v1`); any OpenAI-compatible endpoint works (ADR 0005). |
-| (Optional) an OpenAI-compatible **chat** endpoint for entity extraction | ADR 0016 — optional + best-effort. **Off by default**: an empty `HIVEMIND_EXTRACTOR_ENDPOINT` + empty key = zero LLM cost, entries land with empty `entities`. |
-| GitLab: the **Kubernetes agent pre-configured** | The deploy job just runs `kubectl` — no kubeconfig wiring in `.gitlab-ci.yml`. |
+| Postgres 16+ with the `vector` extension (pgvector **>= 0.8**) | A dedicated database and user. The credentials must allow `CREATE EXTENSION vector`: either the DB user is a superuser, or the extension is already installed. You need pgvector 0.8 or newer (it provides `hnsw.iterative_scan`), and `HIVEMIND_EMBEDDING_DIM` must be **<= 2000**, which is the limit of the HNSW index. Otherwise `hivemind-migrate` fails with a message that says what to do. On an older pgvector, upgrade the package or image, then run `ALTER EXTENSION vector UPDATE;`. (ADR 0025) |
+| A vLLM (or any OpenAI-compatible) **embedding** endpoint reachable from the cluster | For example an in-cluster vLLM Service (`http://vllm:8000/v1`). Any OpenAI-compatible endpoint works. (ADR 0005) |
+| (Optional) an OpenAI-compatible **chat** endpoint for entity extraction | Optional, and best effort. It is **off by default**: an empty `HIVEMIND_EXTRACTOR_ENDPOINT` and an empty key cost nothing, and entries land with empty `entities`. (ADR 0016) |
+| GitLab: the **Kubernetes agent pre-configured** | The deploy job just runs `kubectl`. There is no kubeconfig wiring in `.gitlab-ci.yml`. |
 | GitLab: the CI/CD variables below | See the table. |
 
 **Required GitLab CI/CD variables:**
 
 | Variable | Masked? / Protected? | Meaning |
 |---|---|---|
-| `K8S_IMAGE` | no / no | Registry image prefix, e.g. `registry.gitlab.com/<group>/<project>/hivemind`. The pipeline builds/pushes `$K8S_IMAGE:$CI_COMMIT_SHORT_SHA` and the deploy job substitutes it for the `hivemind:0.0.0` placeholder in the manifests. |
-| `K8S_SECRET_DATABASE_URL` | **yes / yes** | The Postgres DSN, e.g. `postgresql://hivemind:hivemind@pg.hivemind.svc:5432/hivemind`. |
-| `K8S_SECRET_EMBEDDING_API_KEY` | **yes / yes** | The embedding credential. **May be empty** (self-hosted vLLM without auth). |
-| `K8S_SECRET_EXTRACTOR_API_KEY` | **yes / yes** | The extractor credential. **May be empty** (extraction off, ADR 0016 — safe). |
-| `K8S_SECRET_MIGRATE_DATABASE_URL` | **yes / yes** (optional) | A direct Postgres DSN for `hivemind-migrate` only, needed when `K8S_SECRET_DATABASE_URL` points at a transaction-mode PgBouncer (the migration's session advisory lock cannot live there; `docs/ops-runbook.md`). Unset = migrate through `K8S_SECRET_DATABASE_URL`. |
+| `K8S_IMAGE` | no / no | The registry image prefix, for example `registry.gitlab.com/<group>/<project>/hivemind`. The pipeline builds and pushes `$K8S_IMAGE:$CI_COMMIT_SHORT_SHA`, and the deploy job puts it in place of the `hivemind:0.0.0` placeholder in the manifests. |
+| `K8S_SECRET_DATABASE_URL` | **yes / yes** | The Postgres DSN (connection string), for example `postgresql://hivemind:hivemind@pg.hivemind.svc:5432/hivemind`. |
+| `K8S_SECRET_EMBEDDING_API_KEY` | **yes / yes** | The embedding credential. **It may be empty** (a self-hosted vLLM without auth). |
+| `K8S_SECRET_EXTRACTOR_API_KEY` | **yes / yes** | The extractor credential. **It may be empty**, which turns extraction off and is safe. (ADR 0016) |
+| `K8S_SECRET_MIGRATE_DATABASE_URL` | **yes / yes** (optional) | A direct Postgres DSN for `hivemind-migrate` only. You need it when `K8S_SECRET_DATABASE_URL` points at a transaction-mode PgBouncer, because the migration's session advisory lock cannot live there (see `docs/ops-runbook.md`). If you leave it unset, the migration runs through `K8S_SECRET_DATABASE_URL`. |
 
 **Mark every `K8S_SECRET_*` variable _Protected_ as well as Masked,
 and protect the default branch and the `production` environment.** An
-unprotected variable is injected into every pipeline, including merge-request
-pipelines from unprotected branches — and an MR author controls
-`.gitlab-ci.yml` itself, so the `rules:` that keep `deploy` on the default
-branch are no barrier; masking is easy to evade. A protected variable is only
-exposed to protected branches/tags. (The empty-allowed variables still need
-to exist, empty, for the same reason.)
+unprotected variable is injected into every pipeline, including
+merge-request pipelines from unprotected branches. A merge request author
+controls `.gitlab-ci.yml` itself, so the `rules:` that keep `deploy` on the
+default branch are no barrier, and masking is easy to evade. A protected
+variable is only exposed to protected branches and tags. (The variables
+that may be empty still need to exist, empty, for the same reason.)
 
-All `K8S_SECRET_*` values (three, plus the optional migrate DSN) are rendered by the deploy job into the
-`hivemind-secrets` Secret (the in-tree
+The deploy job renders all the `K8S_SECRET_*` values (three, plus the
+optional migrate DSN) into the `hivemind-secrets` Secret. The in-tree
 [`deploy/kubernetes/secret-template.yaml`](deploy/kubernetes/secret-template.yaml)
-documents the shape — it is deliberately NOT in the kustomization, so CI
-is the single source of truth for secrets).
+documents its shape. It is deliberately not in the kustomization, so CI is
+the only place that creates this Secret.
 
 ---
 
@@ -84,165 +93,144 @@ is the single source of truth for secrets).
 Before the first deploy, point
 [`deploy/kubernetes/configmap.yaml`](deploy/kubernetes/configmap.yaml) at
 your embedding service: `HIVEMIND_EMBEDDING_ENDPOINT`,
-`HIVEMIND_EMBEDDING_MODEL` and `HIVEMIND_EMBEDDING_DIM` (the shipped values
-assume an in-cluster vLLM Service named `vllm` serving
-Qwen3-Embedding-0.6B at 1024 dimensions), and, if you use entity
-extraction, `HIVEMIND_EXTRACTOR_ENDPOINT` and `HIVEMIND_EXTRACTOR_MODEL`.
-The dimension is fixed by the first migration (§5). The other values are
-the ranking defaults; leave them unless an ADR says otherwise.
+`HIVEMIND_EMBEDDING_MODEL` and `HIVEMIND_EMBEDDING_DIM`. The shipped values
+assume an in-cluster vLLM Service named `vllm` that serves
+Qwen3-Embedding-0.6B at 1024 dimensions. If you use entity extraction, also
+set `HIVEMIND_EXTRACTOR_ENDPOINT` and `HIVEMIND_EXTRACTOR_MODEL`.
+The first migration fixes the dimension (§5). The other values are the
+ranking defaults. Leave them unless an ADR says otherwise.
 
-The operator flow (steps 1–4 are required, 5–8 optional):
+The operator flow has eight steps. Steps 1 to 4 are required, and steps 5
+to 8 are optional:
 
-1. **Local dev** — `cp config/.env.example .env.local` (the master
-   template is `config/.env.example`; the profile files — `.env.local`,
-   `.env.staging`, `.env.production`, `.env.test` — are selected by the
-   `ENVIRONMENT` env var (ADR 0017), and real environment variables always
-   win over file values). Production/k8s never reads a profile file —
-   values come from the ConfigMap + Secret.
+1. **Local dev.** Run `cp config/.env.example .env.local`. The master
+   template is `config/.env.example`. The profile files (`.env.local`,
+   `.env.staging`, `.env.production`, `.env.test`) are selected by the
+   `ENVIRONMENT` env var, and real environment variables always win over
+   file values (ADR 0017). Production on Kubernetes never reads a profile
+   file: the values come from the ConfigMap and the Secret.
 2. **Set the three masked GitLab variables** (`K8S_SECRET_DATABASE_URL`,
-   `K8S_SECRET_EMBEDDING_API_KEY`, `K8S_SECRET_EXTRACTOR_API_KEY`; plus
-   `K8S_SECRET_MIGRATE_DATABASE_URL` behind a transaction-mode PgBouncer) + the
-   `K8S_IMAGE` variable (GitLab → Settings → CI/CD → Variables).
-3. **First `git push`** — the pipeline builds + deploys + **boots the
-   keys automatically** (the deploy job's idempotent first-run bootstrap,
-   `scripts/ci-bootstrap-keys.sh`, ADR 0044). A one-shot Job, under its own
-   ServiceAccount (`deploy/kubernetes/bootstrap/rbac.yaml`: create Secrets,
-   get/delete `hivemind-keys`), runs `hivemind-keys bootstrap-secret`, which
+   `K8S_SECRET_EMBEDDING_API_KEY`, `K8S_SECRET_EXTRACTOR_API_KEY`) and the
+   `K8S_IMAGE` variable. Behind a transaction-mode PgBouncer, also set
+   `K8S_SECRET_MIGRATE_DATABASE_URL`. In GitLab, go to Settings > CI/CD >
+   Variables.
+3. **First `git push`.** The pipeline builds the image, deploys it and
+   **boots the keys automatically**. The deploy job runs an idempotent
+   first-run bootstrap, `scripts/ci-bootstrap-keys.sh`. It starts a
+   one-shot Job under its own ServiceAccount
+   (`deploy/kubernetes/bootstrap/rbac.yaml`: create Secrets, get and delete
+   `hivemind-keys`). The Job runs `hivemind-keys bootstrap-secret`, which
    issues the admin key, rotates the org key and writes both straight into
    the `hivemind-keys` Secret. No key is printed, so the Job log and your
    log shipper never hold one. The keys are committed only after the Secret
-   was created, so a failed run leaves nothing behind: fix the cause (the
-   script prints the Job log) and re-run the pipeline. One exception: if the
-   Job log says the commit failed and the Secret could not be deleted, follow
-   its steps and delete that Secret first. Otherwise the re-run sees the
-   Secret, skips the bootstrap and goes green with keys that do not work. The script deletes
-   the Job and the RBAC objects when it is done; the deploy identity needs
-   permission to create that Role and RoleBinding. If you bootstrapped
-   before ADR 0044, the old Job printed the keys: treat your log store as
-   key-bearing, or rotate both keys (§4).
-4. **Fetch the generated keys** and hand them out (the raw keys live
-   ONLY in the k8s Secret `hivemind-keys` — GitLab stays key-free):
+   was created, so a failed run leaves nothing behind. Fix the cause (the
+   script prints the Job log) and re-run the pipeline. There is one
+   exception: if the Job log says the commit failed and the Secret could
+   not be deleted, follow its steps and delete that Secret first.
+   Otherwise the re-run sees the Secret, skips the bootstrap and goes green
+   with keys that do not work. The script deletes the Job and the RBAC
+   objects when it is done, so the deploy identity needs permission to
+   create that Role and RoleBinding. If you bootstrapped before the
+   bootstrap wrote the Secret directly, the old Job printed the keys. Treat
+   your log store as key-bearing, or rotate both keys (§4). Why it works
+   this way: ADR 0044.
+4. **Fetch the generated keys** and hand them out. The raw keys live only
+   in the Kubernetes Secret `hivemind-keys`. GitLab stays key-free.
 
    ```bash
    kubectl -n hivemind get secret hivemind-keys -o jsonpath='{.data.ADMIN_KEY}' | base64 -d
    kubectl -n hivemind get secret hivemind-keys -o jsonpath='{.data.ORG_KEY}'   | base64 -d
    ```
 
-   Distribution: **admin key** → operators (admin surface + key
-   management); **org key** → the registration surface (`hive_register`
-   / `POST /v1/agents`); **agent keys** are issued per agent, either via
-   `hivemind-keys issue-agent --name <agent>` (an active agent with no key; for a pending or revoked one add `--trust-level N --home-fleet <fleet-id>`, ADR 0039), the admin REST surface
-   `POST /v1/admin/agents/{name}/activate` (returns the key **once**), or
-   the **admin panel** (§8), which the same pipeline deploys. For an owner
-   who has not registered, the admin can create the agent directly with
-   **New agent** on the panel's Agents page or `POST /v1/admin/agents`
-   (owner alias, agent name, trust level, home fleet; the key is shown
-   **once**, ADR 0120).
-5. **(Optional)** external reachability — apply the opt-in Ingress:
+   Hand them out like this:
+
+   - The **admin key** goes to operators (the admin surface and key
+     management).
+   - The **org key** goes to the registration surface (`hive_register` or
+     `POST /v1/agents`).
+   - **Agent keys** are issued per agent. You have three ways to do it.
+     You can run `hivemind-keys issue-agent --name <agent>`, which gives
+     you an active agent with no key; for a pending or revoked agent, add
+     `--trust-level N --home-fleet <fleet-id>` (ADR 0039). You can call
+     the admin REST endpoint `POST /v1/admin/agents/{name}/activate`, which
+     returns the key **once**. Or you can use the **admin panel** (§8),
+     which the same pipeline deploys.
+   - For an owner who has not registered, the admin can create the agent
+     directly. Use **New agent** on the panel's Agents page, or
+     `POST /v1/admin/agents` (owner alias, agent name, trust level, home
+     fleet). The key is shown **once** (ADR 0120).
+5. **(Optional)** External reachability. Apply the opt-in Ingress:
 
    ```bash
    kubectl kustomize deploy/kubernetes/optional | kubectl -n hivemind apply -f -
    ```
 
-   (after setting the real hostname + issuer in
-   `deploy/kubernetes/optional/ingress.yaml`). The tree has a second
-   Ingress, `hivemind-admin-api`, that keeps the admin REST surface
-   (`/v1/admin/*` and the admin-only `/v1/metrics`), the agent portal's routes (`/v1/portal/*`, which the portal calls in-cluster, §9) and the unauthenticated Prometheus target (`/metrics`, ADR 0050; scrape the pods directly) off the internet: it answers 403 to every source outside
-   its `allowlist-source-range` (default `127.0.0.1/32`, nobody). Operators
-   use the admin panel (§8) or `kubectl port-forward`; to admit an operator
-   network, put its CIDRs in both source-range annotations. The main
-   Ingress rate-limits each client IP (20 req/s with a burst of 5x, 100 open
-   connections; nginx answers 503 above that); raise the limits if many
-   agents share one egress IP.
-6. **(Optional)** example NetworkPolicies — a separate tree,
+   First set the real hostname and issuer in
+   `deploy/kubernetes/optional/ingress.yaml`. The tree has a second
+   Ingress, `hivemind-admin-api`. It keeps three things off the internet:
+   the admin REST surface (`/v1/admin/*` and the admin-only
+   `/v1/metrics`), the agent portal's routes (`/v1/portal/*`, which the
+   portal calls in-cluster, §9) and the unauthenticated Prometheus target
+   (`/metrics`; scrape the pods directly). It answers 403 to every source
+   outside its `allowlist-source-range` (default `127.0.0.1/32`, which
+   admits nobody). Operators use the admin panel (§8) or
+   `kubectl port-forward`. To admit an operator network, put its CIDRs in
+   both source-range annotations. The main Ingress rate-limits each client
+   IP (20 req/s with a burst of 5x, and 100 open connections; nginx
+   answers 503 above that). Raise the limits if many agents share one
+   egress IP. (ADR 0050 covers the `/metrics` target.)
+6. **(Optional)** Example NetworkPolicies, in a separate tree,
    `deploy/kubernetes/optional/networkpolicy/`. **Edit the namespace
-   selector first**: it allows ingress only from the namespace
-   `ingress-nginx`; with any other controller namespace the policies cut
-   external traffic off. Needs a CNI that enforces NetworkPolicy; apply with
+   selector first.** It allows ingress only from the namespace
+   `ingress-nginx`, so with any other controller namespace the policies
+   cut external traffic off. You need a CNI (the cluster's network plugin)
+   that enforces NetworkPolicy. Apply them with
    `kubectl kustomize deploy/kubernetes/optional/networkpolicy | kubectl -n hivemind apply -f -`.
    The stricter **default-deny egress** policy is its own tree,
-   `deploy/kubernetes/optional/networkpolicy/egress/`: it lets the api, mcp,
-   admin and portal pods and the re-extraction Job reach only DNS, Postgres, the embedding/extractor
-   endpoints and `hivemind-api` (needed by the panel and the portal; the
-   rule admits all four, which is harmless). Replace its placeholder
-   `192.0.2.x` addresses with yours first; unedited, it fails closed and the
-   pods cannot reach Postgres.
-7. **(Optional)** Prometheus scraping (ADRs 0050, 0104). `GET /metrics` is
-   served with no key by the `hivemind-api` pods (usage gauges and request
-   series) and by the `hivemind-mcp` pods (their own request, tool-call and
-   degraded-search series only), so Prometheus must scrape them in-cluster
-   (never through the public Ingress, which sends only `/mcp` to the MCP
-   Service). The MCP endpoint is off unless `HIVEMIND_MCP_METRICS_ENABLED=true`
-   (the shipped manifest sets it). It reveals request volume and latency,
-   per-tool call mix and error share, the count of 401s (an outsider could
-   watch a key-guessing run) and the degraded-search count, never an agent,
-   fleet, owner, key or argument. If the MCP port is reachable from outside
-   some other way (a LoadBalancer, a compose host port behind a TLS proxy),
-   leave it off or block `/metrics` in the proxy.
-   Plain Prometheus with the usual `kubernetes-pods` job finds both by their
-   `prometheus.io/*` annotations. The Prometheus Operator ignores those:
-   apply the ServiceMonitors in `deploy/kubernetes/optional/monitoring/`
-   (add your Operator's release label first), or write your own that
-   selects `app.kubernetes.io/component: api` or `mcp` as well as the name
-   label. Every Hivemind Service carries `app.kubernetes.io/name: hivemind`,
-   so a selector on the name alone also scrapes the admin panel and the
-   portal, which have no `/metrics`. `sum` the process counters across the
-   two jobs. With the optional NetworkPolicies, Prometheus must run in the
-   `monitoring` namespace (or edit the policies).
-8. **(Optional)** Grafana dashboard. `deploy/kubernetes/optional/monitoring/hivemind-dashboard.json`
-   shows search health (the share of searches finding nothing, per fleet;
-   keyword-only searches; explore share), traffic (requests, 5xx share,
-   401s, p50/p95 latency per route), MCP tool calls (rate, server failure
-   share, refusals by error code, p95 latency) and the fleet health gauges over time, so a release can be
-   compared with the one before it by moving the time range. The same tree
-   ships it as a ConfigMap labelled `grafana_dashboard: "1"`, which the
-   Grafana sidecar of kube-prometheus-stack loads on its own; elsewhere,
-   import the JSON (Dashboards > New > Import) and pick the Prometheus data
-   source. The search panels smooth over the `Search window` variable
-   (default 1h): those counters refresh about every 30 s. The MCP panels stay
-   empty while `HIVEMIND_MCP_METRICS_ENABLED` is off. Its "Vital signs" row
-   shows the echo rate, grounding share, the age of open rivals and each
-   fleet's 7-day writes and verdicts (ADR 0142).
-   The same tree ships `alerts.yaml`, a `PrometheusRule` named
-   `hivemind-vital-signs` with four `info` alerts: a quiet fleet, a rising
-   echo rate, rivals lingering and a growing floating gap. They are hints
-   for the admin, not pages. Add your Operator's release label to it, as for
-   the ServiceMonitors. The thresholds are starting points: the echo rate
-   (0.2) and rival age (60 days) match the admin panel's "Vital signs"
-   card; the quiet-fleet alert (7 days without activity) and the
-   floating-gap alert (larger than 28 days earlier) have no counterpart
-   there.
+   `deploy/kubernetes/optional/networkpolicy/egress/`. It lets the api,
+   mcp, admin and portal pods and the re-extraction Job reach only DNS,
+   Postgres, the embedding and extractor endpoints, and `hivemind-api`
+   (the panel and the portal need it; the rule admits all four, which is
+   harmless). Replace its placeholder `192.0.2.x` addresses with yours
+   first. Unedited, it fails closed and the pods cannot reach Postgres.
+7. **(Optional)** Prometheus scraping. The `hivemind-api` and
+   `hivemind-mcp` pods serve `GET /metrics` with no key, and Prometheus
+   must scrape them from inside the cluster. See [§10](#10-monitoring).
+8. **(Optional)** The Grafana dashboard and the `hivemind-vital-signs`
+   alerts, both shipped in `deploy/kubernetes/optional/monitoring/`. See
+   [§10](#10-monitoring).
 
 ---
 
 ## 3. Manual steps checklist
 
-**Human-only actions** (everything else is automatic):
+**Only a person can do these** (everything else is automatic):
 
-1. Provision the Postgres database + pgvector (one-time).
+1. Provision the Postgres database and pgvector (one time).
 2. Stand up the embedding endpoint (and, optionally, the chat endpoint
-   for extraction) reachable from the cluster, and put its address,
+   for extraction) so the cluster can reach it. Put its address,
    model and dimension in `deploy/kubernetes/configmap.yaml` (§2).
 3. Set the four GitLab CI/CD variables (§1).
-4. **First pipeline** (`git push`), then:
-5. Fetch `ADMIN_KEY` / `ORG_KEY` from the `hivemind-keys` Secret and
+4. Run the **first pipeline** (`git push`), then:
+5. Fetch `ADMIN_KEY` and `ORG_KEY` from the `hivemind-keys` Secret and
    distribute them (§2 step 4).
-6. (Optional) apply the opt-in Ingress with the real hostname/issuer.
-7. (Optional) apply the NetworkPolicies, and set up scraping and the
-   Grafana dashboard (§2 steps 6 to 8).
+6. (Optional) Apply the opt-in Ingress with the real hostname and issuer.
+7. (Optional) Apply the NetworkPolicies (§2 step 6), and set up scraping,
+   the Grafana dashboard and the alerts (§10).
 
 **What is automatic** (never do these by hand):
 
-- Schema migration — the **entrypoint's** `hivemind-migrate` pre-step on
-  every pod start (ADR 0018 — single source of truth; advisory-locked so
-  concurrent replicas are safe, ADR 0020; a dim mismatch fails LOUDLY,
-  ADR 0015).
-- Image build + push (build stage).
-- Rendering of `hivemind-secrets` from the `K8S_SECRET_*` variables
-  (deploy job, every deploy).
-- First-run key bootstrap (deploy job, **only** when `hivemind-keys`
+- Schema migration. The entrypoint runs `hivemind-migrate` as a pre-step on
+  every pod start, under an advisory lock, so concurrent replicas are safe.
+  A dimension mismatch fails right away and says so (ADRs 0018, 0020 and
+  0015).
+- Image build and push (the build stage).
+- Rendering of `hivemind-secrets` from the `K8S_SECRET_*` variables (the
+  deploy job, on every deploy).
+- First-run key bootstrap (the deploy job, **only** when `hivemind-keys`
   does not exist).
-- Rollouts (`kubectl rollout status` on the api, mcp, admin and portal Deployments).
+- Rollouts (`kubectl rollout status` on the api, mcp, admin and portal
+  Deployments).
 
 ### Without GitLab
 
@@ -284,17 +272,17 @@ set `IMAGE` to it and run the last command again.
 
 ## 4. Key & credential rotation reference
 
-Rotate **one credential at a time** (no double-rotation — verify each
-rotation before starting the next; two simultaneous rotations make a
-failure undiagnosable).
+Rotate **one credential at a time**. Verify each rotation before you start
+the next. Two rotations at once make a failure impossible to diagnose.
 
-Every `hivemind-keys` rotation below is recorded in the audit log
-(ADR 0027, SPEC §12.5) under the name you pass as `--actor` (before the
-subcommand; default: the OS user — `hivemind` in the image, so pass it):
+Every `hivemind-keys` rotation below is recorded in the audit log, under
+the name you pass as `--actor`. Put it before the subcommand. The default
+is the OS user, which is `hivemind` in the image, so pass your own name:
 `hivemind-keys --actor <you> rotate-org`. The value is unverified, which
 is why those rows are marked `actor_kind = cli`. Check what happened with
 `GET /v1/admin/audit-log` (admin key; `docs/ops-runbook.md` §4). The
-first-run bootstrap Job records itself as `ci-bootstrap`.
+first-run bootstrap Job records itself as `ci-bootstrap`. (ADR 0027,
+SPEC §12.5.)
 
 | Credential | Rotate via | When |
 |---|---|---|
@@ -307,108 +295,114 @@ first-run bootstrap Job records itself as `ci-bootstrap`.
 
 ### 4.1 Org key
 
-- **How** — `hivemind-keys rotate-org` (atomic delete + insert; it
-  closes registration to every prior copy, ADR 0031). The new raw key is
-  printed **once**.
-- **Then** — store it: update the k8s Secret `hivemind-keys`
+- **How:** run `hivemind-keys rotate-org`. It deletes and inserts in one
+  step, and it closes registration to every earlier copy of the key. The
+  new raw key is printed **once**. (ADR 0031)
+- **Then:** store it. Update the Kubernetes Secret `hivemind-keys`
   (`kubectl -n hivemind patch secret hivemind-keys -p
-  '{"stringData":{"ORG_KEY":"<new>"}}'`) — or delete the Secret and re-run
+  '{"stringData":{"ORG_KEY":"<new>"}}'`). Or delete the Secret and re-run
   the bootstrap (§2 step 3), which also issues a new admin key.
-- **Blast radius** — only registration: anyone still holding the old
+- **Blast radius:** only registration. Anyone still holding the old
   org key gets a 401 on their **next** registration attempt. Active agents
   authenticate with their own agent keys and are **not** affected. No
-  data impact.
-- **Verify** — a registration call with the new org key succeeds; the old
-  key now 401s.
+  data is affected.
+- **Verify:** a registration call with the new org key succeeds, and the
+  old key now gets a 401.
 
 ### 4.2 Admin key
 
-- **How** — `hivemind-keys issue-admin` (prints the new key once) →
-  distribute → `hivemind-keys --actor <you> revoke-admin --key <old raw
-  key>` or `--hash <sha256 from hivemind-keys list>` (exactly one of the
-  two is required; a unique >=12-hex fingerprint prefix is accepted).
-  Always use the CLI: it records the revocation in the
-  audit log (ADR 0027), which raw SQL against `credentials` would bypass.
-- **Blast radius** — only the admin surface (fleet/level management,
-  key rotation) loses the old key; data-plane verbs are unaffected.
-- **Verify** — admin call with the new key works; the old key 401s.
+- **How:** run `hivemind-keys issue-admin`, which prints the new key once.
+  Distribute the new key. Then run `hivemind-keys --actor <you>
+  revoke-admin --key <old raw key>` or `--hash <sha256 from hivemind-keys
+  list>`. Exactly one of the two is required, and a unique fingerprint
+  prefix of at least 12 hex characters is accepted. Always use the CLI: it
+  records the revocation in the audit log, which raw SQL against
+  `credentials` would bypass. (ADR 0027)
+- **Blast radius:** only the admin surface (fleet and level management,
+  key rotation) loses the old key. The data-plane verbs are unaffected.
+- **Verify:** an admin call with the new key works, and the old key gets a
+  401.
 
 ### 4.3 Agent keys
 
-- **How, replacing the key**: `hivemind-keys rotate-agent --name <agent>`
-  (or "Replace key" in the admin panel, or
+- **How, replacing the key:** run `hivemind-keys rotate-agent --name
+  <agent>` (or use "Replace key" in the admin panel, or
   `POST /v1/admin/agents/{name}/key`). The old key stops working on the
-  agent's next request, the new one is shown **once**, and the agent
-  stays `active` with the same level, fleet and memories (ADR 0108). Give
-  the new key to the owner out of band. Only for an `active` agent.
-- **How, cutting the agent off**: `hivemind-keys revoke --name <agent>` (the agent becomes
-  `revoked` and the name **stays reserved**; re-activation issues a NEW
-  key — ADRs 0012, 0028). Re-issue via the admin surface
-  `POST /v1/admin/agents/{name}/activate` (or the admin panel). Activating
-  an agent that is still `active` is refused (409): one key per agent,
-  so revoke first.
-- **Blast radius** — only that agent's verbs (its writes/reads/feedback).
-- **Verify** — the agent's next request 401s with the old key and works
-  with the new one.
+  agent's next request, and the new one is shown **once**. The agent
+  stays `active` with the same level, fleet and memories. Give the new
+  key to the owner out of band. This works only for an `active` agent.
+  (ADR 0108)
+- **How, cutting the agent off:** run `hivemind-keys revoke --name
+  <agent>`. The agent becomes `revoked` and the name **stays reserved**.
+  Re-activation issues a NEW key: use the admin endpoint
+  `POST /v1/admin/agents/{name}/activate` (or the admin panel).
+  Activating an agent that is still `active` is refused (409), because
+  each agent has one key, so revoke first. (ADRs 0012 and 0028)
+- **Blast radius:** only that agent's verbs (its writes, reads and
+  feedback).
+- **Verify:** the agent's next request gets a 401 with the old key and
+  works with the new one.
 
 ### 4.4 DSN (`HIVEMIND_DATABASE_URL`)
 
-- **How** — change the DB password at the Postgres provider → update
-  `K8S_SECRET_DATABASE_URL` → **next deploy** re-renders the Secret +
-  rolling restart (env is read at process start, so the rollout IS the
-  apply step).
-- **Blast radius** — nothing works with the old DSN; both Deployments
+- **How:** change the DB password at the Postgres provider, then update
+  `K8S_SECRET_DATABASE_URL`. The **next deploy** re-renders the Secret and
+  restarts the pods one by one. Processes read their environment only at
+  start, so the rollout is the step that applies the change.
+- **Blast radius:** nothing works with the old DSN, and both Deployments
   roll.
-- **Verify** — rollout completes, `GET /v1/health` 200, `hivemind-keys
-  list` succeeds from a pod.
-- **Failure mode** — a dead DSN = **total outage** (all verbs).
+- **Verify:** the rollout completes, `GET /v1/health` returns 200, and
+  `hivemind-keys list` succeeds from a pod.
+- **Failure mode:** a dead DSN is a **total outage** (all verbs).
 
 ### 4.5 Embedding API key / endpoint
 
-- **How** — rotate at the provider → update `K8S_SECRET_EMBEDDING_API_KEY`
-  → next deploy re-renders the Secret + rolling restart.
-- **Failure mode** — a dead embedder **FAILS WRITES** once the ADR 0014
-  retry budget is exhausted (`EmbeddingError`; the entry is NOT
-  persisted — embeddings are NOT best-effort, unlike extraction). Reads
-  still work (keyword + existing vectors).
+- **How:** rotate the key at the provider, then update
+  `K8S_SECRET_EMBEDDING_API_KEY`. The next deploy re-renders the Secret
+  and restarts the pods one by one.
+- **Failure mode:** a dead embedder **makes writes fail** once the retry
+  budget is exhausted. You see an `EmbeddingError`, and the entry is **not**
+  saved. Embeddings are not best effort, unlike extraction. Reads still
+  work (keyword search plus the existing vectors). (ADR 0014)
 
 ### 4.6 Extractor API key / endpoint
 
-- **How** — rotate at the chat provider → update
-  `K8S_SECRET_EXTRACTOR_API_KEY` (or leave it empty + empty endpoint =
-  extraction off, zero cost). Next deploy re-renders the Secret + rolling
-  restart.
-- **Failure mode** — a dead extractor = entries land **WITHOUT entity
-  facets** (best-effort, ADR 0016). The write still succeeds; the
-  observable symptom is **empty `entities`**, not an error.
-- **Older entries** — after a change of extractor model or prompt, or an
-  outage, `hivemind-reextract` fills in or renames the entities of stored
-  entries: [docs/ops-runbook.md §14](docs/ops-runbook.md) (ADR 0131).
+- **How:** rotate the key at the chat provider, then update
+  `K8S_SECRET_EXTRACTOR_API_KEY`. Or leave it empty and also leave the
+  endpoint empty, which turns extraction off at zero cost. The next deploy
+  re-renders the Secret and restarts the pods one by one.
+- **Failure mode:** with a dead extractor, entries land **without entity
+  facets**. Extraction is best effort, so the write still succeeds. The
+  symptom you can see is **empty `entities`**, not an error. (ADR 0016)
+- **Older entries:** after you change the extractor model or prompt, or
+  after an outage, `hivemind-reextract` fills in or renames the entities of
+  stored entries. See [docs/ops-runbook.md §14](docs/ops-runbook.md) (ADR
+  0131).
 
 ---
 
 ## 5. Upgrades
 
-- A normal deploy is just a new image tag: the entrypoint applies any
-  outstanding migrations on every pod start (ADR 0018, ADR 0020), under
-  a Postgres advisory lock, so many replicas may start at once and
-  exactly one migrates. An image whose migration chain is **older** than
-  the pool applies nothing and never rolls the schema back.
+- A normal deploy is just a new image tag. The entrypoint applies any
+  outstanding migrations on every pod start, under a Postgres advisory
+  lock, so many replicas may start at once and exactly one migrates. An
+  image whose migration chain is **older** than the pool applies nothing
+  and never rolls the schema back. (ADRs 0018 and 0020)
 - **Does a release carry a migration?** Compare the chain between the two
   tags: `git diff --stat v<old> v<new> -- src/hivemind/store/migrations/`.
-  No output means no schema change. Even when there is one, there is no
-  manual step: the entrypoint applies it. What each migration adds is in
-  the `Server` column of the release's row in
+  No output means no schema change. Even when there is one, you have no
+  manual step, because the entrypoint applies it. What each migration adds
+  is in the `Server` column of the release's row in
   [plugins/hivemind/CHANGELOG.md](plugins/hivemind/CHANGELOG.md).
 - **Agents pick up server-side changes on their own.** Tool descriptions,
   the MCP server instructions and `hive_whoami` come from the server, so
   upgrading the server updates what every agent sees. The agent plugin's
-  skills and hook update separately, per harness
-  (`plugins/hivemind/README.md`, "Update"; what changed for agents in
-  each release is in `plugins/hivemind/CHANGELOG.md`).
+  skills and hook update separately, per harness (see "Update" in
+  `plugins/hivemind/README.md`; what changed for agents in each release is
+  in `plugins/hivemind/CHANGELOG.md`).
 - **Deploy every runner project together whenever a migration lands.**
   The runners are separate deployments (and, under GitLab AutoDevOps,
-  separate projects) sharing one pool, so a migration from one runs
+  separate projects) that share one pool, so a migration from one runs
   against the other's still-deployed code. Releases that only change
   config need not be synchronised. Schema changes follow
   **expand-and-contract** (SPEC §8.6): additive within a release, and a
@@ -417,17 +411,17 @@ first-run bootstrap Job records itself as `ci-bootstrap`.
   removes a setting, a deployment that still sets it starts normally,
   even with `HIVEMIND_STRICT_ENV=true`, and logs `Removed HIVEMIND_*
   environment variable(s) are ignored` with the names. Delete them from
-  the ConfigMap or Secret when convenient. 2.12.0 removes
-  `HIVEMIND_RECENCY_FROM_CONFIRMATION` and `HIVEMIND_RECENCY_BY_KIND`
-  (ADR 0103); both were off by default, so ranking does not change.
-- **Derived images add layers only — never an `ENTRYPOINT`.** An
-  air-gapped high-side image built `FROM` this one (e.g. to install
+  the ConfigMap or Secret when convenient. Release 2.12.0 removes
+  `HIVEMIND_RECENCY_FROM_CONFIRMATION` and `HIVEMIND_RECENCY_BY_KIND`. Both
+  were off by default, so ranking does not change. (ADR 0103)
+- **Derived images add layers only, never an `ENTRYPOINT`.** An
+  air-gapped high-side image built `FROM` this one (for example to install
   custom CA certificates) inherits the migrations and the entrypoint.
-  Setting its own `ENTRYPOINT` or `CMD` **silently skips the migration
-  pre-step** — the same trap as the key-bootstrap Job below, but with no
-  error until the first query hits a missing object. The image runs as
-  UID 10001, so a layer that installs files system-wide must switch user
-  and back:
+  If it sets its own `ENTRYPOINT` or `CMD`, the migration pre-step is
+  **skipped without any message**. This is the same trap as the
+  key-bootstrap Job below, and you get no error until the first query hits
+  a missing object. The image runs as UID 10001, so a layer that installs
+  files system-wide must switch user and back:
 
   ```dockerfile
   FROM <registry>/hivemind:<sha>
@@ -436,24 +430,25 @@ first-run bootstrap Job records itself as `ci-bootstrap`.
   RUN update-ca-certificates
   USER 10001:10001
   ```
-- A **dim mismatch is a LOUD failure at pod startup** (ADR 0015): the
-  entrypoint's `hivemind-migrate` step exits non-zero naming both dims
-  and both fixes — the pod never starts, never a silent no-op. The check
-  runs right after the advisory lock is taken and before any DDL, so two
-  replicas configured with different dims cannot both pass on a fresh pool.
-- Changing the embedding **model/dim** is an operator migration (new
-  pool or re-embedding — ADR 0005), never a config flip.
+- A **dimension mismatch stops the pod at startup.** The entrypoint's
+  `hivemind-migrate` step exits non-zero and names both dimensions and both
+  fixes. The pod never starts, so you cannot miss it. The check runs right
+  after the advisory lock is taken and before any DDL, so two replicas
+  configured with different dims cannot both pass on a fresh pool.
+  (ADR 0015)
+- Changing the embedding **model or dimension** is an operator migration
+  (a new pool, or re-embedding), never a config flip. (ADR 0005)
 - To **roll back** an incremental schema change, use the migration's
-  `.rollback.sql` through `hivemind-migrate --rollback N` (ADR 0020). It
+  `.rollback.sql` through `hivemind-migrate --rollback N`. It
   refuses to erase audit rows, revive revoked keys or unlock locked keys
   unless you pass `--discard-audit-rows`, `--revive-revoked-keys` or
-  `--unlock-locked-keys`; stop the app tier first (ADR 0119,
-  `docs/ops-runbook.md` §4). Rollbacks are defined for structural
-  changes only; reversing a populated column drop or a backfill is a
-  restore from backup (`docs/ops-runbook.md`). Rolling back `0032` does
-  not bring redacted text back (ADR 0125).
-- If the pool lags the deployed chain (e.g. pods were added before a
-  migration ran), run the migration one-off:
+  `--unlock-locked-keys`. Stop the app tier first (`docs/ops-runbook.md`
+  §4). Rollbacks are defined for structural changes only. Reversing a
+  populated column drop or a backfill is a restore from backup
+  (`docs/ops-runbook.md`). Rolling back `0032` does not bring redacted text
+  back. (ADRs 0020, 0119 and 0125)
+- If the pool lags the deployed chain (for example, pods were added before
+  a migration ran), run the migration one-off:
 
   ```bash
   kubectl -n hivemind run hivemind-migrate --rm -i --restart=Never \
@@ -461,36 +456,40 @@ first-run bootstrap Job records itself as `ci-bootstrap`.
     --overrides='{"spec":{"containers":[{"name":"hivemind-migrate","image":"<registry>/hivemind:<sha>","env":[{"name":"HIVEMIND_RUNNER","value":"migrate"}],"envFrom":[{"secretRef":{"name":"hivemind-secrets"}},{"configMapRef":{"name":"hivemind-config"}}]}]}}'
   ```
 
-  (`kubectl run` has no `--env-from`; the ConfigMap is injected too so the
-  run sees the real `HIVEMIND_EMBEDDING_DIM`.) Simpler when the Deployments
-  are healthy: `kubectl -n hivemind exec deploy/hivemind-api -- hivemind-migrate`.
+  (`kubectl run` has no `--env-from`, so the ConfigMap is injected too.
+  That way the run sees the real `HIVEMIND_EMBEDDING_DIM`.) It is simpler
+  when the Deployments are healthy:
+  `kubectl -n hivemind exec deploy/hivemind-api -- hivemind-migrate`.
 
 ### Upgrading from 1.2.x to 2.0.0
 
-Historical — today's upgrades follow the bullets above, and each
+This is history. Today's upgrades follow the bullets above, and each
 release's row in [plugins/hivemind/CHANGELOG.md](plugins/hivemind/CHANGELOG.md)
 (the `Server` column) names what operators must do. If you are still
-upgrading from 1.2.x, do these before the first 2.0.0 pod starts: find
-credentials that stop working with the "Dead credentials" SQL in
-`docs/ops-runbook.md` §4 (pre-v2 `user` keys, name-less agent keys and
-keys of pending or revoked agents no longer authenticate, ADR 0039) and
-re-issue anything a live client still uses; ensure pgvector 0.8+ and
-`HIVEMIND_EMBEDDING_DIM` ≤ 2000 (§1); mark the `K8S_SECRET_*` variables
-Protected and apply the RBAC in §7. Rolling back to 1.2.x after
-migrations `0007`/`0008` ran is schema-safe, but the duplicate keys
-`0007` deleted stay deleted, and the 1.2.x pods accept the dead
-credentials again.
+upgrading from 1.2.x, do these before the first 2.0.0 pod starts:
+
+- Find credentials that stop working, using the "Dead credentials" SQL in
+  `docs/ops-runbook.md` §4. Pre-v2 `user` keys, name-less agent keys and
+  keys of pending or revoked agents no longer authenticate (ADR 0039).
+  Re-issue anything a live client still uses.
+- Make sure you have pgvector 0.8+ and `HIVEMIND_EMBEDDING_DIM` <= 2000
+  (§1).
+- Mark the `K8S_SECRET_*` variables Protected and apply the RBAC in §7.
+
+Rolling back to 1.2.x after migrations `0007` and `0008` ran is
+schema-safe, but the duplicate keys `0007` deleted stay deleted, and the
+1.2.x pods accept the dead credentials again.
 
 ### Graceful shutdown (`terminationGracePeriodSeconds`)
 
 Both Deployments set **`terminationGracePeriodSeconds: 150`** plus a
-**5-second `preStop` sleep**. With more than one replica a rolling
-deploy terminates pods routinely, so these are ordinary-path settings,
-not edge-case insurance.
+**5-second `preStop` sleep**. With more than one replica, a rolling
+deploy terminates pods routinely, so these settings matter on every
+deploy, not only in rare cases.
 
-uvicorn handles SIGTERM itself — stop accepting, drain the in-flight
-requests, then shut down — and nothing bounds that drain, so the grace
-period is the only real deadline: when it expires the container is
+uvicorn handles SIGTERM itself: it stops accepting requests, drains the
+in-flight ones, then shuts down. Nothing bounds that drain, so the grace
+period is the only real deadline. When it expires, the container is
 SIGKILLed with whatever is still in flight. 150s covers the slowest
 single request, a write (`hive_write` / `POST /v1/entries`), which
 embeds and then extracts in sequence, each under its own bounded retry
@@ -502,37 +501,37 @@ budget (ADR 0014):
 | extractor | 1 + `HIVEMIND_EXTRACTOR_RETRIES` (2) = 3 | `HIVEMIND_EXTRACTOR_TIMEOUT` (30s) | 0.5s + 1.0s | 91.5s |
 | **worst-case write path** | | | | **123.0s** |
 
-Plus the 5s `preStop` sleep and two pooled Postgres round-trips,
-rounded up to **150s** for margin. The `preStop` sleep exists because on
-pod deletion the SIGTERM and the EndpointSlice removal happen
-concurrently: until deregistration reaches kube-proxy — and the nginx
-ingress controller, which routes straight to pod IPs — a terminating pod
-can still be handed new requests it would refuse.
+Add the 5s `preStop` sleep and two pooled Postgres round-trips, and round
+up to **150s** for margin. The `preStop` sleep exists because, when a pod
+is deleted, the SIGTERM and the EndpointSlice removal happen at the same
+time. Until the removal reaches kube-proxy and the nginx ingress
+controller (which routes straight to pod IPs), a terminating pod can still
+be handed new requests that it would refuse.
 
-**If you raise a retry budget or timeout, raise this.** Each leg costs
-`(retries + 1) x timeout + 0.5 x (2^retries - 1)` seconds; sum the two
-legs, add the 5s `preStop`, then round up — in *both*
-`deploy/kubernetes/*-deployment.yaml`. Worked example:
+**If you raise a retry budget or timeout, raise this too.** Each leg costs
+`(retries + 1) x timeout + 0.5 x (2^retries - 1)` seconds. Sum the two
+legs, add the 5s `preStop`, then round up. Make the change in *both*
+`deploy/kubernetes/*-deployment.yaml`. For example,
 `HIVEMIND_EXTRACTOR_RETRIES=4` makes the extractor leg 157.5s and the
-write path 189s, so the grace period needs to go to **~240s**. Leaving
-it stale is not a crash — it is a SIGKILL that drops a write the caller
-was told nothing about. (Each leg also runs under
-`HIVEMIND_EMBEDDING_DEADLINE` / `HIVEMIND_EXTRACTOR_DEADLINE`, ADR 0041;
-setting one lower shortens the worst case, and a value below the
-matching `_TIMEOUT` is a startup error.)
+write path 189s, so the grace period needs to go to **~240s**. If you
+leave it stale, nothing crashes. Instead a SIGKILL drops a write, and the
+caller is told nothing about it. Each leg also runs under
+`HIVEMIND_EMBEDDING_DEADLINE` / `HIVEMIND_EXTRACTOR_DEADLINE`. Setting one
+lower shortens the worst case, and a value below the matching `_TIMEOUT`
+is a startup error. (ADR 0041)
 
-### Probe endpoints (ADR 0019)
+### Probe endpoints
 
-Five **unauthenticated** orchestrator endpoints (served outside the
-auth middleware — k8s probes carry no credential):
+Five **unauthenticated** orchestrator endpoints are served outside the
+auth middleware, because Kubernetes probes carry no credential (ADR 0019):
 
 | Endpoint | Depth | Semantics |
 |---|---|---|
 | `GET /mcp/liveness` (mcp runner) | shallow | 200 whenever the process answers |
-| `GET /mcp/health` (mcp runner) | shallow | 200 whenever the process answers — the readiness probe. It does **not** check the database: all replicas share it, so a DB outage would pull every pod out of service at once (ADR 0037) |
-| `GET /mcp/health/database` (mcp runner) | deep | 200 when the Postgres pool answers within 5 s; else 503. For people and monitoring; no probe uses it. The pod log names the cause once per outage (`database health check failing: <exception>`) |
+| `GET /mcp/health` (mcp runner) | shallow | 200 whenever the process answers. This is the readiness probe. It does **not** check the database: all replicas share it, so a DB outage would pull every pod out of service at once (ADR 0037) |
+| `GET /mcp/health/database` (mcp runner) | deep | 200 when the Postgres pool answers within 5 s, otherwise 503. It is for people and monitoring, and no probe uses it. The pod log names the cause once per outage (`database health check failing: <exception>`) |
 | `GET /v1/liveness` (REST API) | shallow | 200 whenever the process answers |
-| `GET /v1/health` (REST API) | static | unchanged — static 200, public by design (SPEC §5.1); the REST surface intentionally has no deep DB probe in v1 |
+| `GET /v1/health` (REST API) | static | A static 200, public by design (SPEC §5.1). The REST surface intentionally has no deep DB probe in v1 |
 
 ---
 
@@ -540,37 +539,38 @@ auth middleware — k8s probes carry no credential):
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| 401 on every agent call | an active agent: its agent key was revoked or mistyped. A not-yet-activated agent: a stale org key (after a rotation that wasn't distributed) | active: re-activate it for a new key (§4.3); pending: re-fetch `ORG_KEY` from the `hivemind-keys` Secret (§4.1) |
-| app container CrashLooping on the entrypoint's migrate pre-step | dim mismatch (ADR 0015) — the log names both dims + both fixes | `make pg-reset` equivalent (fresh pool) or set `HIVEMIND_EMBEDDING_DIM` to the pool's dim |
-| `Unknown HIVEMIND_* environment variable(s)` WARNING at startup | either a typo'd or stale `HIVEMIND_*` var (ADR 0024) — e.g. a renamed knob (ADR 0021's `_PREFIX_CHARS` → `_PREFIX_TOKENS`) left set under its old name — or a variable the platform injected (GitLab Auto DevOps; Kubernetes service links such as `HIVEMIND_API_SERVICE_HOST`) | a typo: fix it per the suggestion. A platform variable: ignore it, or set `enableServiceLinks: false` on the pod to drop the service-link ones. Startup only **fails** on this when `HIVEMIND_STRICT_ENV=true` (ADR 0032) |
-| `Removed HIVEMIND_* environment variable(s) are ignored` WARNING at startup | a setting this release removed is still set, e.g. `HIVEMIND_RECENCY_FROM_CONFIRMATION` or `HIVEMIND_RECENCY_BY_KIND` (ADR 0103). Harmless: the value is ignored and startup never fails on it | delete it from the ConfigMap or Secret (§5) |
-| A scrape of `hivemind-mcp` fails with 401 or 404 | 401: an older image without `/metrics` (ADR 0104), or a wrong path (e.g. through the Ingress's `/mcp` prefix, or a ServiceMonitor `path` other than `/metrics`). 404: `HIVEMIND_MCP_METRICS_ENABLED` is not `true` (it is off by default) | roll the MCP pods to the current image; set `HIVEMIND_MCP_METRICS_ENABLED=true` (the shipped Deployment does); scrape the pod port 8088 at `/metrics` (§2 step 7, or `deploy/kubernetes/optional/monitoring/`). Do not give Prometheus a key |
-| MCP session drops after ~60s | nginx default `proxy-read-timeout` killing the SSE stream (classic pitfall) | apply the opt-in Ingress with the SSE annotations (`deploy/kubernetes/optional/ingress.yaml`) |
-| entries have empty `entities` | extractor off (empty endpoint — by design) OR extractor dead (best-effort, ADR 0016) | check `HIVEMIND_EXTRACTOR_ENDPOINT` + `K8S_SECRET_EXTRACTOR_API_KEY`; §4.6 |
-| writes failing with `EmbeddingError` | embedder dead (ADR 0014 retry budget exhausted) | §4.5 |
-| a write dropped mid-flight during a deploy (client sees a reset, no entry lands) | `terminationGracePeriodSeconds` no longer covers the retry budgets — the pod was SIGKILLed while still draining | recompute the sum in §5 and raise it in both Deployments |
-| `hivemind-secrets` missing values | CI variable changed but no redeploy yet | re-run the pipeline (the deploy job re-renders the Secret every deploy) |
+| 401 on every agent call | An active agent: its agent key was revoked or mistyped. A not-yet-activated agent: a stale org key (after a rotation that was not distributed) | Active: re-activate it for a new key (§4.3). Pending: fetch `ORG_KEY` again from the `hivemind-keys` Secret (§4.1) |
+| The app container crash-loops on the entrypoint's migrate pre-step | A dimension mismatch. The log names both dims and both fixes. (ADR 0015) | Do the equivalent of `make pg-reset` (a fresh pool), or set `HIVEMIND_EMBEDDING_DIM` to the pool's dim |
+| `Unknown HIVEMIND_* environment variable(s)` WARNING at startup | Either a mistyped or stale `HIVEMIND_*` variable, for example a renamed knob (`_PREFIX_CHARS` became `_PREFIX_TOKENS`) still set under its old name, or a variable the platform injected (GitLab Auto DevOps, or Kubernetes service links such as `HIVEMIND_API_SERVICE_HOST`). (ADRs 0021 and 0024) | A typo: fix it as the message suggests. A platform variable: ignore it, or set `enableServiceLinks: false` on the pod to drop the service-link ones. Startup only **fails** on this when `HIVEMIND_STRICT_ENV=true` (ADR 0032) |
+| `Removed HIVEMIND_* environment variable(s) are ignored` WARNING at startup | A setting this release removed is still set, for example `HIVEMIND_RECENCY_FROM_CONFIRMATION` or `HIVEMIND_RECENCY_BY_KIND`. It is harmless: the value is ignored and startup never fails on it. (ADR 0103) | Delete it from the ConfigMap or Secret (§5) |
+| A scrape of `hivemind-mcp` fails with 401 or 404 | 401: an older image without `/metrics`, or a wrong path (for example through the Ingress's `/mcp` prefix, or a ServiceMonitor `path` other than `/metrics`). 404: `HIVEMIND_MCP_METRICS_ENABLED` is not `true` (it is off by default). (ADR 0104) | Roll the MCP pods to the current image. Set `HIVEMIND_MCP_METRICS_ENABLED=true` (the shipped Deployment does). Scrape the pod port 8088 at `/metrics` (§10, or `deploy/kubernetes/optional/monitoring/`). Do not give Prometheus a key |
+| The MCP session drops after about 60s | The nginx default `proxy-read-timeout` kills the SSE stream | Apply the opt-in Ingress with the SSE annotations (`deploy/kubernetes/optional/ingress.yaml`) |
+| Entries have empty `entities` | The extractor is off (an empty endpoint, which is by design), or the extractor is dead (it is best effort). (ADR 0016) | Check `HIVEMIND_EXTRACTOR_ENDPOINT` and `K8S_SECRET_EXTRACTOR_API_KEY`; see §4.6 |
+| Writes fail with `EmbeddingError` | The embedder is dead and its retry budget is exhausted. (ADR 0014) | See §4.5 |
+| A write dropped mid-flight during a deploy (the client sees a reset, no entry lands) | `terminationGracePeriodSeconds` no longer covers the retry budgets, so the pod was SIGKILLed while it was still draining | Recompute the sum in §5 and raise it in both Deployments |
+| `hivemind-secrets` is missing values | A CI variable changed but there has been no redeploy yet | Re-run the pipeline (the deploy job re-renders the Secret on every deploy) |
 
 **Two-Secret ownership rule (do not cross the boundary):** CI owns
 `hivemind-secrets` (the `K8S_SECRET_*` values, re-rendered on
-every deploy); the first-run bootstrap owns `hivemind-keys` (the
-generated ADMIN_KEY / ORG_KEY). The bootstrap step (`scripts/ci-bootstrap-keys.sh`)
-deliberately skips when `hivemind-keys` exists, so a secret re-render
-never wipes the generated keys.
+every deploy). The first-run bootstrap owns `hivemind-keys` (the
+generated ADMIN_KEY and ORG_KEY). The bootstrap step
+(`scripts/ci-bootstrap-keys.sh`) deliberately skips when `hivemind-keys`
+exists, so re-rendering a secret never wipes the generated keys.
 
 ---
 
 ## 7. RBAC
 
-Minimal ServiceAccount + Role for the GitLab Kubernetes agent's deploy
-ServiceAccount (the verbs `.gitlab-ci.yml` actually uses). The org's k8s agent must run as this ServiceAccount
-(SA token or mounted kubeconfig).
+This is a minimal ServiceAccount and Role for the GitLab Kubernetes
+agent's deploy ServiceAccount. It grants the verbs `.gitlab-ci.yml`
+actually uses. The org's Kubernetes agent must run as this ServiceAccount
+(through its SA token or a mounted kubeconfig).
 
-**The namespace is created once by an operator** (`kubectl apply -f
-deploy/kubernetes/namespace.yaml`): `namespaces` are cluster-scoped, so a
-namespaced Role cannot grant them. The pipeline's own
-`kubectl apply -f namespace.yaml` is then a no-op that needs only `get` +
-`patch` on that one namespace, granted by the small ClusterRole below
+**An operator creates the namespace once**
+(`kubectl apply -f deploy/kubernetes/namespace.yaml`). Namespaces are
+cluster-scoped, so a namespaced Role cannot grant them. The pipeline's own
+`kubectl apply -f namespace.yaml` is then a no-op that needs only `get` and
+`patch` on that one namespace. The small ClusterRole below grants those
 (`resourceNames` limits it to `hivemind`).
 
 ```yaml
@@ -672,32 +672,53 @@ subjects:
     namespace: hivemind
 ```
 
-## 8. Admin panel (`hivemind-admin`, ADR 0029)
+## 8. Admin panel (`hivemind-admin`)
 
-A browser front end for the admin surface: a "Needs you" row on the
-Overview (ADR 0121), the pending-agent queue, activation with the key
-shown once, creating an agent for its owner (ADR 0120), agents (replace a
-key, ADR 0108; see who is idle, ADR 0110; clean up after a bad one,
-ADR 0111; retire one in favour of a successor, ADR 0113; correct the
-owner alias, ADR 0122; read its history, ADR 0123), fleets (merge,
-ADR 0107; rename; move agents to split a team, ADR 0112), the audit log
-and org-key rotation, plus daily activity and stats, the fleet health
-metrics, a memory browser with search, withdrawal (ADR 0080), restore
-(ADR 0124) and redaction (ADR 0125), the feedback log (ADR 0090), each
-fleet's pins (ADR 0092), the flag backlog (ADR 0093) and CSV export
-(ADR 0094). It also renames an agent (ADR 0159), offboards a person who
-leaves (ADR 0135), searches as one agent with each hit's ranking
-explained (ADRs 0136, 0137), sets fleet phases and scouts (ADRs 0143,
-0144) and moves a fleet memory to its author's `self` scope (ADR 0145).
-The root [README](README.md) describes it from a user's point of view,
-and [docs/ops-runbook.md](docs/ops-runbook.md) sections 7 to 21 give the
-steps for each task. Admin keys stay CLI-only.
+The admin panel is a browser front end for the admin surface. With it you
+can do the following.
+
+- See a "Needs you" row on the Overview. (ADR 0121)
+- Work the pending-agent queue, and activate an agent with its key shown
+  once.
+- Create an agent for its owner. (ADR 0120)
+- Manage agents:
+  - replace a key (ADR 0108);
+  - see who is idle (ADR 0110);
+  - clean up after a bad one (ADR 0111);
+  - retire one in favour of a successor (ADR 0113);
+  - correct the owner alias (ADR 0122);
+  - read its history (ADR 0123);
+  - rename it (ADR 0159);
+  - offboard a person who leaves (ADR 0135).
+- Manage fleets:
+  - merge them (ADR 0107);
+  - rename one;
+  - move agents to split a team (ADR 0112);
+  - set fleet phases and scouts (ADRs 0143 and 0144);
+  - see each fleet's pins (ADR 0092).
+- Browse memories, with search:
+  - withdraw one (ADR 0080);
+  - restore one (ADR 0124);
+  - redact one (ADR 0125);
+  - move a fleet memory to its author's `self` scope (ADR 0145);
+  - search as one agent, with each hit's ranking explained (ADRs 0136 and
+    0137).
+- Read the feedback log. (ADR 0090)
+- Work the flag backlog. (ADR 0093)
+- Export lists as CSV. (ADR 0094)
+- Read the audit log, rotate the org key, and see daily activity, stats
+  and the fleet health metrics.
+
+The root [README](README.md) describes it from a user's point of view, and
+[docs/ops-runbook.md](docs/ops-runbook.md) sections 7 to 21 give the
+steps for each task. Admin keys stay CLI-only. Why the panel is built this
+way: ADR 0029.
 
 **What it needs.** One env var: `HIVEMIND_ADMIN_API_URL`, the base URL of
 the hivemind-api deployment (in-cluster: `http://hivemind-api:8000`). For
 an https URL behind an internal CA, also set `HIVEMIND_ADMIN_API_CA_BUNDLE`
-to a mounted PEM file. It holds **no DSN and no Secret**, never talks to
-Postgres, and the entrypoint skips the migration step for it.
+to a mounted PEM file. The panel holds **no DSN and no Secret**, never
+talks to Postgres, and the entrypoint skips the migration step for it.
 
 **Deploying it.** It is its own kustomization, so it works as a separate
 GitLab project on the same image:
@@ -707,8 +728,9 @@ kubectl kustomize deploy/kubernetes/admin \
   | sed "s|hivemind:0.0.0|$IMAGE|g" | kubectl -n hivemind apply -f -
 ```
 
-The in-repo `.gitlab-ci.yml` deploy job runs exactly this as step 5. One
-replica, no PDB: it is stateless and only operators use it.
+The in-repo `.gitlab-ci.yml` deploy job runs exactly this as step 5. It
+runs one replica and has no PodDisruptionBudget, because the panel is
+stateless and only operators use it.
 
 **Reaching it.** It is an operator tool, so keep it off the public
 internet:
@@ -718,90 +740,103 @@ kubectl -n hivemind port-forward svc/hivemind-admin 8080:8080
 # then open http://localhost:8080 and sign in with the admin key
 ```
 
-or route an **internal-only** ingress host to `hivemind-admin:8080`.
+Or route an **internal-only** ingress host to `hivemind-admin:8080`.
 The panel holds the admin key in the browser tab's `sessionStorage`
 (cleared on sign-out or when the tab closes), so serve it over TLS
 wherever it is not `localhost`.
 
-**Locally:** `make up` (panel on `:8089`) or `make api` + `make admin`
-(`:8080`) — the docker story is in [docs/ops-runbook.md](docs/ops-runbook.md)
-§1 and the root [README](README.md), "Try it on your computer".
+**Locally:** run `make up` (panel on `:8089`) or `make api` plus
+`make admin` (`:8080`). The Docker steps are in
+[docs/ops-runbook.md](docs/ops-runbook.md) §1 and in the root
+[README](README.md), "Try it on your computer".
 
-**What it forwards.** The admin endpoints the panel uses (a subset of
-`/v1/admin/*` — browsing memories, activity, the audit log, fleet and
-agent management, key rotation; never the data plane), `GET /v1/metrics`
-and `GET /v1/health`. Anything else is a 404 from the panel itself. It
-forwards `X-API-Key`, `Content-Type` and `Accept` and nothing else, marks
-every forwarded response `Cache-Control: no-store`, and never logs a
-header or a body. `GET /healthz` is its own probe and does not call the
-API.
+**What it forwards.** The panel forwards the admin endpoints it uses (a
+subset of `/v1/admin/*`: browsing memories, activity, the audit log, fleet
+and agent management and key rotation, but never the data plane),
+`GET /v1/metrics` and `GET /v1/health`. Anything else is a 404 from the
+panel itself. It forwards `X-API-Key`, `Content-Type` and `Accept` and
+nothing else, marks every forwarded response `Cache-Control: no-store`, and
+never logs a header or a body. `GET /healthz` is its own probe and does not
+call the API.
 
 
-## 9. Agent portal (`hivemind-portal`, ADR 0095)
+## 9. Agent portal (`hivemind-portal`)
 
-A browser front end for the people behind the agents. Someone signs in
-with one agent's key and sees what that agent wrote (withdrawn and
-superseded included), the verdicts it gave and got, when the key was last
-used, its home fleet's memories and pins, a "Needs attention" page of the
-agent's flagged memories (ADR 0115), a "Relied on" page of the memories it
-rated helpful that changed since (ADR 0138), a History page of what was done to
-and by the agent (ADR 0123), and a search over everything the key can
-read. They can withdraw the agent's own memories, move a fleet memory
-of the agent's to its `self` scope (ADR 0145), pin or unpin
-entries as the agent (same rights and limits as `hive_pin`), lock a
-leaked key, and clean up the agent's own work over a time window with
-undo (ADR 0118); all of it is audited with `via: "portal"`. Admin and
-org keys are turned away (§8 is for the admin key), and portal searches
-are left out of the search counters. The root [README](README.md)
-describes it from a user's point of view.
+The agent portal is a browser front end for the people behind the agents.
+Someone signs in with one agent's key. They see:
+
+- what that agent wrote (withdrawn and superseded entries included), the
+  verdicts it gave and got, when the key was last used, and its home
+  fleet's memories and pins;
+- a "Needs attention" page of the agent's flagged memories (ADR 0115);
+- a "Relied on" page of the memories it rated helpful that changed since
+  (ADR 0138);
+- a History page of what was done to and by the agent (ADR 0123);
+- a search over everything the key can read.
+
+They can also:
+
+- withdraw the agent's own memories;
+- move a fleet memory of the agent's to its `self` scope (ADR 0145);
+- pin or unpin entries as the agent (same rights and limits as
+  `hive_pin`);
+- lock a leaked key;
+- clean up the agent's own work over a time window, with undo (ADR 0118).
+
+All of it is audited with `via: "portal"`. Admin and org keys are turned
+away (§8 is for the admin key), and portal searches are left out of the
+search counters. The root [README](README.md) describes it from a user's
+point of view. Why the portal is built this way: ADR 0095.
 
 **What it needs.** One env var: `HIVEMIND_PORTAL_API_URL`, the base URL of
 the hivemind-api deployment (in-cluster: `http://hivemind-api:8000`). For
 an https URL behind an internal CA, also set `HIVEMIND_PORTAL_API_CA_BUNDLE`
-to a mounted PEM file. Like the panel it holds **no DSN and no Secret**,
+to a mounted PEM file. Like the panel, it holds **no DSN and no Secret**,
 never talks to Postgres, and the entrypoint skips the migration step for
 it. Upgrade `hivemind-api` first, or together: an older API answers 404 to
 the portal's own routes.
 
-**Deploying it.** Its own kustomization, on the same image:
+**Deploying it.** It is its own kustomization, on the same image:
 
 ```bash
 kubectl kustomize deploy/kubernetes/portal \
   | sed "s|hivemind:0.0.0|$IMAGE|g" | kubectl -n hivemind apply -f -
 ```
 
-The in-repo `.gitlab-ci.yml` deploy job runs exactly this as step 6. Two
-replicas with a `minAvailable: 1` PodDisruptionBudget and a
-`maxUnavailable: 0` rollout, as for the API (ADR 0026), because people
-other than the operator use it. It is stateless: the key lives in the
+The in-repo `.gitlab-ci.yml` deploy job runs exactly this as step 6. It
+runs two replicas with a `minAvailable: 1` PodDisruptionBudget and a
+`maxUnavailable: 0` rollout, as for the API, because people other than the
+operator use it (ADR 0026). It is stateless: the key lives in the
 browser tab, so any replica serves any request.
 
-**Reaching it.** Behind an **internal** ingress only, never a public one:
-an agent key is a credential, and the portal shows everything the key can
-read. `deploy/kubernetes/portal/ingress-internal.example.yaml` is a
-starting point that no kustomization applies. Before applying it with
+**Reaching it.** Put it behind an **internal** ingress only, never a
+public one. An agent key is a credential, and the portal shows everything
+the key can read.
+`deploy/kubernetes/portal/ingress-internal.example.yaml` is a
+starting point that no kustomization applies. Before you apply it with
 `kubectl -n hivemind apply -f`, set its `ingressClassName` to your
 internal ingress class, replace the placeholder host and TLS secret, and
 replace the `127.0.0.1/32` source range (which admits nobody) with your
-internal network's ranges. Serve it over TLS: the browser sends the agent
-key on every request. With the example NetworkPolicies (§2 step 6), edit
-the `hivemind-portal` policy's namespace when the internal controller
-runs somewhere other than `ingress-nginx`. For a quick look:
+internal network's ranges. Serve it over TLS, because the browser sends
+the agent key on every request. With the example NetworkPolicies (§2
+step 6), edit the `hivemind-portal` policy's namespace when the internal
+controller runs somewhere other than `ingress-nginx`. For a quick look:
 
 ```bash
 kubectl -n hivemind port-forward svc/hivemind-portal 8080:8080
 # then open http://localhost:8080 and sign in with an agent key
 ```
 
-**Which key.** The agent's own key, the one its harness uses (from
+**Which key.** Use the agent's own key, the one its harness uses (from
 activation or `hivemind-keys issue-agent`). The portal keeps it in the
 tab's `sessionStorage` under its own name, separate from the admin
-panel's, and holds one key at a time: to look at another agent, sign out
+panel's, and holds one key at a time. To look at another agent, sign out
 and sign in with that agent's key.
 
-**Locally:** `make up` (portal on `:8090`) or `make api` + `make portal`
-(`:8081`) — the docker story is in [docs/ops-runbook.md](docs/ops-runbook.md)
-§1 and the root [README](README.md), "Try it on your computer".
+**Locally:** run `make up` (portal on `:8090`) or `make api` plus
+`make portal` (`:8081`). The Docker steps are in
+[docs/ops-runbook.md](docs/ops-runbook.md) §1 and in the root
+[README](README.md), "Try it on your computer".
 
 **What it forwards.** `GET /v1/whoami`, `GET /v1/entries/{id}` (the
 drawer, with `?history=true`), `GET /v1/pins`, `GET /v1/health` and the
@@ -812,9 +847,97 @@ portal's own routes: `GET /v1/portal/entries`, `POST /v1/portal/search`,
 `PUT`/`DELETE /v1/portal/entries/{id}/pin`, `POST /v1/portal/cleanup`,
 `GET /v1/portal/cleanups`, `POST /v1/portal/cleanups/{id}/undo`,
 `GET /v1/portal/history` and
-`POST /v1/portal/key/lock`. Anything else, the data plane's writes and
-its counted search included, is a 404 from the portal itself. Headers,
+`POST /v1/portal/key/lock`. Anything else is a 404 from the portal itself,
+including the data plane's writes and its counted search. Headers,
 caching and logging are as for the panel: `X-API-Key`, `Content-Type`
 and `Accept` only, `Cache-Control: no-store`, no header or body logged,
 and `GET /healthz` as its own probe. The portal serves the panel's shared
-front-end modules (ADR 0091) by exact name and none of its other files.
+front-end modules by exact name and none of its other files. (ADR 0091)
+
+## 10. Monitoring
+
+Monitoring is optional. It has two parts: Prometheus reads metrics from
+the pods, and Grafana draws them. The files are in
+`deploy/kubernetes/optional/monitoring/`. These are the steps that
+[§2](#2-quickstart) lists as steps 7 and 8.
+
+### What is scraped
+
+`GET /metrics` is served with no key by two sets of pods:
+
+- the `hivemind-api` pods, with usage gauges and request series;
+- the `hivemind-mcp` pods, with their own request, tool-call and
+  degraded-search series only.
+
+Prometheus must scrape them in-cluster, never through the public Ingress,
+which sends only `/mcp` to the MCP Service. The MCP endpoint is off unless
+`HIVEMIND_MCP_METRICS_ENABLED=true` (the shipped manifest sets it).
+
+The metrics reveal request volume and latency, the per-tool call mix and
+error share, the count of 401s (an outsider could watch a key-guessing
+run) and the degraded-search count. They never reveal an agent, fleet,
+owner, key or argument. If the MCP port is reachable from outside some
+other way (a LoadBalancer, or a compose host port behind a TLS proxy),
+leave the endpoint off or block `/metrics` in the proxy. (ADRs 0050 and
+0104)
+
+### Plain Prometheus and the Prometheus Operator
+
+Plain Prometheus with the usual `kubernetes-pods` job finds both sets of
+pods by their `prometheus.io/*` annotations.
+
+The Prometheus Operator ignores those annotations. Apply the
+ServiceMonitors in `deploy/kubernetes/optional/monitoring/` (add your
+Operator's release label first), or write your own that selects
+`app.kubernetes.io/component: api` or `mcp` as well as the name label.
+Every Hivemind Service carries `app.kubernetes.io/name: hivemind`, so a
+selector on the name alone also scrapes the admin panel and the portal,
+which have no `/metrics`.
+
+`sum` the process counters across the two jobs. With the optional
+NetworkPolicies, Prometheus must run in the `monitoring` namespace (or
+edit the policies).
+
+### The Grafana dashboard
+
+`deploy/kubernetes/optional/monitoring/hivemind-dashboard.json` shows:
+
+- search health: the share of searches finding nothing, per fleet;
+  keyword-only searches; the explore share;
+- traffic: requests, 5xx share, 401s, and p50 and p95 latency per route;
+- MCP tool calls: rate, server failure share, refusals by error code, and
+  p95 latency;
+- the fleet health gauges over time;
+- a "Vital signs" row: the echo rate, the grounding share, the age of open
+  rivals and each fleet's 7-day writes and verdicts.
+
+You can compare a release with the one before it by moving the time range.
+
+The same tree ships the dashboard as a ConfigMap labelled
+`grafana_dashboard: "1"`, which the Grafana sidecar of kube-prometheus-stack
+loads on its own. Elsewhere, import the JSON (Dashboards > New > Import)
+and pick the Prometheus data source. The search panels smooth over the
+`Search window` variable (default 1h), because those counters refresh about
+every 30 s. The MCP panels stay empty while `HIVEMIND_MCP_METRICS_ENABLED`
+is off. (ADR 0142)
+
+### Alerts
+
+The same tree ships `alerts.yaml`, a `PrometheusRule` named
+`hivemind-vital-signs`. It has four `info` alerts: a quiet fleet, a rising
+echo rate, rivals lingering and a growing floating gap. They are hints for
+the admin, not pages. Add your Operator's release label to it, as you did
+for the ServiceMonitors.
+
+The thresholds are starting points. The echo rate (0.2) and the rival age
+(60 days) match the admin panel's "Vital signs" card. The quiet-fleet alert
+(7 days without activity) and the floating-gap alert (larger than 28 days
+earlier) have no counterpart there. (ADR 0142)
+
+### What to watch after an upgrade
+
+After an upgrade, open the dashboard and move the time range so the new
+release sits beside the one before it. Four things are worth a look: the
+share of searches finding nothing, keyword-only (degraded) searches, the
+5xx share, and the MCP tool failure share. A jump in any of them right
+after a release tells you where to start.
