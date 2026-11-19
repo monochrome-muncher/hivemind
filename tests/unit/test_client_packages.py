@@ -1,5 +1,6 @@
 """The `hivemind-memory` packages in clients/ stay in step with the server and the plugin
-(ADR 0162): the same version, and byte-identical copies of the skill and the reminder."""
+(ADR 0162): the same version, byte-identical copies of the skill and the reminder, and the
+repository npm checks a provenance bundle against."""
 
 from __future__ import annotations
 
@@ -44,6 +45,15 @@ def test_the_npm_package_and_its_lockfile_have_the_server_version() -> None:
     lock = json.loads((CLIENTS / "typescript" / "package-lock.json").read_text())
     assert (package["name"], package["version"]) == ("hivemind-memory", semver)
     assert (lock["version"], lock["packages"][""]["version"]) == (semver, semver)
+
+
+def test_the_npm_package_names_this_repository_for_provenance() -> None:
+    package = json.loads((CLIENTS / "typescript" / "package.json").read_text())
+    assert package["repository"] == {
+        "type": "git",
+        "url": "git+https://github.com/monochrome-muncher/hivemind.git",
+        "directory": "clients/typescript",
+    }
 
 
 @pytest.mark.parametrize("text_dir", TEXT_DIRS, ids=["python", "typescript"])
