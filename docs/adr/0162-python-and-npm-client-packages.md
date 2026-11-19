@@ -2,7 +2,7 @@
 
 Builds on [ADR 0010](0010-hostable-multi-agent-streamable-http-mcp-runner-with-per-request-credentials.md) (the hostable MCP endpoint), [ADR 0085](0085-the-mcp-package-splits-into-contract-server-and-runners.md) (the agent contract: server instructions and tool descriptions) and [ADR 0161](0161-mcp-tool-calls-carry-their-error-code.md) (error codes on tool replies). Contrasts with [ADR 0150](0150-key-profiles-on-the-client.md) (key profiles), which it does not use.
 
-Status: Accepted. Asked for on 2026-11-19, design agreed with the owner the same day.
+Status: Accepted. Asked for on 2026-11-19, design agreed with the owner the same day. Decision 6 amended by [ADR 0163](0163-client-skill-copy-drops-plugin-only-lines.md): the skill copy drops its plugin-only lines.
 
 ## Context
 

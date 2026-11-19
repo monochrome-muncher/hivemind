@@ -218,11 +218,8 @@ hermes-scan: ## Run Hermes's install scan over the plugin and fail if Hermes wou
 	python3 -I scripts/hermes-scan.py $(HERMES_SOURCE) plugins/hivemind
 
 .PHONY: sync-client-text
-sync-client-text: ## Copy the hivemind skill and the Stop hook's reminder into the hivemind-memory packages (a unit test checks the copies)
-	for dir in clients/python/src/hivemind_memory/text clients/typescript/text; do \
-		cp plugins/hivemind/skills/hivemind/SKILL.md $$dir/skill.md; \
-		sed -n "s/^text='\\(.*\\)'$$/\\1/p" plugins/hivemind/skills/hivemind-setup/scripts/hivemind-stop.sh | tr -d '\n' > $$dir/reminder.txt; \
-	done
+sync-client-text: ## Copy the hivemind skill, without its plugin-only lines, and the Stop hook's reminder into the hivemind-memory packages (a unit test checks the copies)
+	uv run python clients/sync_text.py
 
 .PHONY: sync-antigravity-skills
 sync-antigravity-skills: ## Copy plugins/hivemind/skills into plugins/antigravity/skills (Antigravity 1.5.8 refuses a link there; a unit test checks the copy)
