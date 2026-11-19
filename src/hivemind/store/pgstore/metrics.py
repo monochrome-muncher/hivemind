@@ -15,6 +15,7 @@ from hivemind.domain.activity import (
     ReporterActivity,
 )
 from hivemind.domain.entry import ImportanceSource, Kind, UsageCount
+from hivemind.domain.feedback import UNVERIFIED_TAG
 from hivemind.domain.health import (
     DISPERSION_CAP,
     DISPERSION_MIN,
@@ -128,7 +129,6 @@ WITH flagged AS (
            count(*) FILTER (WHERE 'anomaly' = ANY(e.tags)) AS gap_anomaly,
            count(*) FILTER (WHERE 'open-question' = ANY(e.tags)) AS gap_open_question,
            count(*) FILTER (WHERE 'dead-end' = ANY(e.tags)) AS gap_dead_end,
-           count(*) FILTER (WHERE {unverified_condition("e")}) AS unverified,
            count(*) AS active
       FROM entries e
       LEFT JOIN fresh ON fresh.entry_id = e.id
@@ -140,7 +140,7 @@ WITH flagged AS (
            count(*) FILTER (WHERE fl.first_flag < $1::timestamptz - interval '336 hours'),
            count(*) FILTER (WHERE a.status = 'revoked'
                               OR lw.at < $1::timestamptz - interval '720 hours'),
-           0, 0, 0, 0, 0, 0
+           0, 0, 0, 0, 0
       FROM flagged fl
       LEFT JOIN agents a ON a.name = fl.author
       LEFT JOIN last_write lw ON lw.author = fl.author
@@ -150,10 +150,19 @@ SELECT fleet_id, sum(sourceable) AS sourceable, sum(sourced) AS sourced,
        sum(insights) AS insights, sum(synthesizing) AS synthesizing,
        sum(backlog) AS backlog, sum(orphaned) AS orphaned, sum(floating) AS floating,
        sum(gap_anomaly) AS gap_anomaly, sum(gap_open_question) AS gap_open_question,
-       sum(gap_dead_end) AS gap_dead_end, sum(unverified) AS unverified,
+       sum(gap_dead_end) AS gap_dead_end,
        sum(active) AS active
   FROM parts
  GROUP BY fleet_id
+"""
+
+# Active entries still ``unverified`` (ADR 0156) per fleet, apart from HEALTH_BY_FLEET: the tag
+# filter lets the tags GIN index find the few tagged entries instead of checking every active one.
+HEALTH_UNVERIFIED = f"""
+SELECT e.fleet_id, count(*) AS unverified
+  FROM entries e
+ WHERE e.state = 'active' AND e.tags @> ARRAY['{UNVERIFIED_TAG}'] AND {unverified_condition("e")}
+ GROUP BY e.fleet_id
 """
 
 # The breathing counts (ADR 0142) per fleet of the entry concerned, over the 7 days (168 hours)
@@ -409,10 +418,14 @@ def _numbers(row: Record | None) -> defaultdict[str, int]:
     return defaultdict(int, dict(row) if row else {})
 
 
-def _health_counts(by_fleet: list[Record], breathing: list[Record]) -> tuple[HealthCounts, ...]:
-    """One ``HealthCounts`` per fleet that appears in either result."""
+def _health_counts(
+    by_fleet: list[Record], breathing: list[Record], unverified: list[Record]
+) -> tuple[HealthCounts, ...]:
+    """One ``HealthCounts`` per fleet that appears in either result (an unverified entry is
+    active, so its fleet is in ``by_fleet``)."""
     entries = {r["fleet_id"]: r for r in by_fleet}
     recent = {r["fleet_id"]: r for r in breathing}
+    still = {r["fleet_id"]: int(r["unverified"]) for r in unverified}
     counts = []
     for fleet_id in dict.fromkeys([*entries, *recent]):
         a, b = _numbers(entries.get(fleet_id)), _numbers(recent.get(fleet_id))
@@ -429,7 +442,7 @@ def _health_counts(by_fleet: list[Record], breathing: list[Record]) -> tuple[Hea
                 gap_anomaly=int(a["gap_anomaly"]),
                 gap_open_question=int(a["gap_open_question"]),
                 gap_dead_end=int(a["gap_dead_end"]),
-                unverified=int(a["unverified"]),
+                unverified=still.get(fleet_id, 0),
                 active_entries=int(a["active"]),
                 writes_7d=int(b["writes"]),
                 verdicts_7d=int(b["verdicts"]),
@@ -467,6 +480,7 @@ class MetricsStore(PgConnections):
             await conn.execute("SET LOCAL jit = off")
             by_fleet = await conn.fetch(HEALTH_BY_FLEET, now)
             breathing = await conn.fetch(HEALTH_BREATHING, now)
+            unverified = await conn.fetch(HEALTH_UNVERIFIED)
             scalars = await conn.fetchrow(HEALTH_SCALARS, now, ENTRY_ID_REF)
             corrections = await conn.fetch(HEALTH_CORRECTIONS, now)
             rivals = await conn.fetch(HEALTH_RIVALS, now)
@@ -482,7 +496,7 @@ class MetricsStore(PgConnections):
             for r in role_rows
         }
         return FleetHealth(
-            by_fleet=_health_counts(by_fleet, breathing),
+            by_fleet=_health_counts(by_fleet, breathing, unverified),
             helpful=int(scalars["helpful"]),
             helpful_with_note=int(scalars["helpful_noted"]),
             correction_latencies=tuple(float(r["seconds"]) for r in corrections),
