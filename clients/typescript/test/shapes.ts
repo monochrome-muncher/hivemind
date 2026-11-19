@@ -1,0 +1,136 @@
+import assert from "node:assert/strict";
+import type {
+  CheckReply,
+  Entries,
+  Entry,
+  EntryDetail,
+  Feedback,
+  Hit,
+  ListItem,
+  ListReply,
+  PinnedReply,
+  SearchReply,
+  WhoAmI,
+  WriteReply,
+} from "../dist/index.js";
+
+/** Every key of `T`, marked as the type declares it; the compiler keeps the lists complete. */
+type Keys<T> = { [K in keyof Required<T>]: {} extends Pick<T, K> ? "optional" : "required" };
+
+/** The reply has every required key and no key the type does not declare. */
+export function assertShape(reply: object, declared: Readonly<Record<string, "optional" | "required">>): void {
+  const present = Object.keys(reply);
+  const missing = Object.keys(declared).filter((k) => declared[k] === "required" && !present.includes(k));
+  const unknown = present.filter((k) => !(k in declared));
+  assert.deepEqual({ missing, unknown }, { missing: [], unknown: [] });
+}
+
+const ENTRY: Keys<Entry> = {
+  id: "required",
+  kind: "required",
+  summary: "required",
+  author: "required",
+  agent: "required",
+  body: "required",
+  payload: "required",
+  sources: "required",
+  tags: "required",
+  importance: "required",
+  importance_source: "required",
+  scope: "required",
+  fleet_id: "required",
+  state: "required",
+  superseded_by: "required",
+  withdrawn_reason: "required",
+  withdrawn_at: "required",
+  entities: "required",
+  entities_model: "required",
+  occurred_at: "required",
+  created_at: "required",
+};
+
+export const SHAPES = {
+  entry: ENTRY,
+  whoami: {
+    key_kind: "required",
+    name: "required",
+    status: "required",
+    trust_level: "required",
+    trust_level_name: "required",
+    home_fleet_id: "required",
+    home_fleet_name: "required",
+    can_read: "required",
+    can_write_scopes: "required",
+    inherits_from: "required",
+    key_last_used_at: "required",
+    fleet_phase: "optional",
+    role: "optional",
+    role_hint: "optional",
+  } satisfies Keys<WhoAmI>,
+  check: { checked: "required", related: "required", warnings: "required" } satisfies Keys<CheckReply>,
+  write: { ...ENTRY, related: "required", warnings: "required" } satisfies Keys<WriteReply>,
+  search: {
+    count: "required",
+    hits: "required",
+    recency: "optional",
+    degraded: "optional",
+    closest: "optional",
+    note: "optional",
+  } satisfies Keys<SearchReply>,
+  hit: {
+    id: "required",
+    kind: "required",
+    summary: "required",
+    tags: "required",
+    author: "required",
+    agent: "required",
+    occurred_at: "required",
+    score: "required",
+    match: "required",
+    scope: "required",
+    fleet_id: "required",
+    similarity: "optional",
+    feedback: "optional",
+    last_confirmed_at: "optional",
+    contested: "optional",
+    correction: "optional",
+    supersedes: "optional",
+    state: "optional",
+    similar: "optional",
+    upstream_changed: "optional",
+  } satisfies Keys<Hit>,
+  detail: {
+    ...ENTRY,
+    feedback: "required",
+    see_also: "required",
+    linked_from: "required",
+    successors: "optional",
+    superseded: "optional",
+  } satisfies Keys<EntryDetail>,
+  feedback: {
+    helpful: "required",
+    stale: "required",
+    wrong: "required",
+    recent: "required",
+    last_confirmed_at: "optional",
+  } satisfies Keys<Feedback>,
+  entries: { entries: "required", not_found: "required" } satisfies Keys<Entries>,
+  list: { count: "required", entries: "required" } satisfies Keys<ListReply>,
+  listItem: {
+    id: "required",
+    kind: "required",
+    summary: "required",
+    tags: "required",
+    author: "required",
+    agent: "required",
+    occurred_at: "required",
+    created_at: "required",
+    scope: "required",
+    fleet_id: "required",
+    state: "required",
+    superseded_by: "required",
+    body: "optional",
+    feedback: "optional",
+  } satisfies Keys<ListItem>,
+  pinned: { fleet_id: "required", pins: "required", fleet_phase: "optional" } satisfies Keys<PinnedReply>,
+} as const;

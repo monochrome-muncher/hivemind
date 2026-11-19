@@ -87,7 +87,7 @@ async def test_an_unusable_key_in_whoami_raises_authentication_error(code: str) 
 
 async def test_connect_keeps_whoami_tools_and_instructions(connected: Connected) -> None:
     async with connected() as hive:
-        assert hive.whoami == {"key_kind": "agent", "name": "fake-agent"}
+        assert dict(hive.whoami) == {"key_kind": "agent", "name": "fake-agent"}
         assert [tool["name"] for tool in hive.tools] == ["hive_whoami", "hive_search", "hive_get"]
         assert hive.instructions().startswith(SERVER_INSTRUCTIONS)
 

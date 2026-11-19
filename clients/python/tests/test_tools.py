@@ -142,8 +142,9 @@ async def test_typed_methods_send_only_the_arguments_given(
 
 async def test_whoami_can_be_refreshed(connected: Connected) -> None:
     async with connected() as hive:
-        hive.whoami = {}
+        before = hive.whoami
         assert (await hive.refresh_whoami())["key_kind"] == "agent"
+        assert hive.whoami is not before
         assert hive.whoami["name"] == "fake-agent"
 
 
