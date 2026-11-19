@@ -7,7 +7,7 @@ export interface ToolDefinition {
 export interface AnthropicTool {
   name: string;
   description: string;
-  input_schema: Record<string, unknown>;
+  input_schema: { type: "object"; [key: string]: unknown };
 }
 
 export interface OpenAITool {
@@ -16,7 +16,7 @@ export interface OpenAITool {
 }
 
 export function toAnthropic(tools: readonly ToolDefinition[]): AnthropicTool[] {
-  return tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema }));
+  return tools.map((t) => ({ name: t.name, description: t.description, input_schema: { ...t.inputSchema, type: "object" } }));
 }
 
 export function toOpenAI(tools: readonly ToolDefinition[]): OpenAITool[] {

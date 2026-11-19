@@ -7,7 +7,7 @@ import os
 import sys
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
-from typing import Any
+from typing import Any, Literal
 
 import httpx2
 from mcp import Client
@@ -21,6 +21,10 @@ from hivemind_memory.formats import ToolDefinitions, ToolSpecs, anthropic_tools,
 
 if sys.version_info < (3, 11):
     from exceptiongroup import BaseExceptionGroup
+
+EntryKind = Literal["fact", "insight", "decision"]
+Verdict = Literal["helpful", "stale", "wrong"]
+Recency = Literal["default", "prefer_recent", "ignore_age"]
 
 URL_ENV = "HIVEMIND_MCP_URL"
 KEY_ENV = "HIVEMIND_API_KEY"
@@ -280,7 +284,7 @@ class Hivemind:
         *,
         limit: int | None = None,
         offset: int | None = None,
-        kind: str | None = None,
+        kind: EntryKind | None = None,
         tags: Sequence[str] | None = None,
         entities: Sequence[str] | None = None,
         scope: str | None = None,
@@ -293,7 +297,7 @@ class Hivemind:
         include_inactive: bool | None = None,
         flagged: bool | None = None,
         explore: bool | None = None,
-        recency: str | None = None,
+        recency: Recency | None = None,
     ) -> dict[str, Any]:
         """Hybrid search over the pool: compact hits, no bodies."""
         return await self._tool(
@@ -328,7 +332,7 @@ class Hivemind:
     async def list(
         self,
         *,
-        kind: str | None = None,
+        kind: EntryKind | None = None,
         tags: Sequence[str] | None = None,
         entities: Sequence[str] | None = None,
         scope: str | None = None,
@@ -372,7 +376,7 @@ class Hivemind:
 
     async def write(
         self,
-        kind: str,
+        kind: EntryKind,
         summary: str,
         *,
         body: str | None = None,
@@ -408,7 +412,7 @@ class Hivemind:
     async def feedback(
         self,
         entry: str | Sequence[str],
-        verdict: str,
+        verdict: Verdict,
         *,
         note: str | None = None,
         agent: str | None = None,
