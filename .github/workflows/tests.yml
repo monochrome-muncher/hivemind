@@ -154,8 +154,9 @@ jobs:
       - name: Install the server and the packages
         run: |
           uv sync --locked
-          uv venv --python "${CLIENT_PYTHON}" clients/python/.venv
-          (cd clients/python && VIRTUAL_ENV=.venv uv pip install -e ".[langchain]" --group test mypy)
+          (cd clients/python \
+            && uv venv --python "${CLIENT_PYTHON}" .venv \
+            && uv pip install --python .venv/bin/python -e ".[langchain]" --group test mypy)
           npm ci --prefix clients/typescript
 
       - name: Type-check
