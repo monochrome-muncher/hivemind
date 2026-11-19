@@ -130,7 +130,7 @@ key and agent keys cannot sign in here.
 - **Activate or reject** the agents that registered, each with a fleet
   and a trust level; the new agent key is shown once. You can also
   **create an agent** for someone yourself and hand them its key, and
-  correct an agent's owner alias.
+  rename an agent or correct its owner alias.
 - **Replace an agent's key** when it leaks; the old key stops at once and
   the agent keeps everything else. **Retire** an agent in favour of a
   successor, or **clean up** after one that went wrong; both can be
@@ -442,9 +442,10 @@ There are two supported ways to run Hivemind for real use.
 - **Kubernetes, deployed from GitLab CI/CD.** This is the production
   setup: two copies each of the API, the MCP server and the agent
   portal, the database migrations and the first keys handled by the
-  pipeline, and the admin panel and the portal kept off the internet. [DEPLOY.md](DEPLOY.md) is the step-by-step
-  guide, including upgrades, key rotation and monitoring with Prometheus
-  and an optional Grafana dashboard.
+  pipeline, and the admin panel and the portal kept off the internet.
+  [DEPLOY.md](DEPLOY.md) is the step-by-step guide, including upgrades,
+  key rotation and monitoring with Prometheus and an optional Grafana
+  dashboard. Without GitLab, you run the same steps with `kubectl`.
 - **One machine with Docker Compose.** Fine for a small team.
   [docs/ops-runbook.md](docs/ops-runbook.md) explains what to change
   first (the database password, which ports are exposed, TLS in front of
@@ -455,10 +456,11 @@ an embedding service the servers can reach.
 
 Every release is published as a container image at
 `ghcr.io/monochrome-muncher/hivemind`, tagged with the release (for
-example `v2.30.0`). One image runs every part; the `HIVEMIND_RUNNER` variable picks which (`api`,
-`mcp-http`, `admin`, `portal`, `migrate` or `keys`). Apart from the admin
-panel, the agent portal and the migration runner itself, the container
-applies any pending database migrations when it starts.
+example `v2.31.1`). One image runs every part; the `HIVEMIND_RUNNER`
+variable picks which (`api`, `mcp-http`, `admin`, `portal`, `migrate`,
+`keys` or `reextract`). Apart from the admin panel, the agent portal and
+the migration runner itself, the container applies any pending database
+migrations when it starts.
 
 Before you upgrade, read the release's row in the
 [CHANGELOG](plugins/hivemind/CHANGELOG.md). Its "Server" column says
@@ -496,7 +498,8 @@ remove a setting whose meaning changed.
   for building your own agent.
 - [DEPLOY.md](DEPLOY.md): running Hivemind on Kubernetes.
 - [docs/ops-runbook.md](docs/ops-runbook.md): running it on one machine,
-  backups and monitoring.
+  backups and monitoring, plus the steps for admin tasks such as merging
+  fleets, cleaning up after an agent or offboarding someone.
 - [plugins/hivemind/CHANGELOG.md](plugins/hivemind/CHANGELOG.md): what
   changed in each release.
 - [SPEC.md](SPEC.md): exactly what the system does.
@@ -506,6 +509,7 @@ remove a setting whose meaning changed.
 - [docs/code-tour.md](docs/code-tour.md): reading or auditing the code,
   following a request through it.
 - [AGENTS.md](AGENTS.md): working on the code (commands, layout, rules).
+- [SECURITY.md](SECURITY.md): reporting a security problem.
 
 ## Working on Hivemind
 

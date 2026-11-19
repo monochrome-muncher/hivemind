@@ -23,5 +23,6 @@ Security, performance and design reviews of Hivemind, kept as a record of what w
 | 2026-11-17 | [What Hivemind carries for weak agent models](2026-11-17-weak-model-accommodations.md): what exists mainly for small models, and what could go | 348fd71 |
 | 2026-11-19 | [Full review of v2.30.0](2026-11-19-full-review.md): bugs, security, performance, refactors, tests, migrations, deploy, metrics and docs; drift fixed in #478, dead helpers removed in #479 | 2eeac4f |
 | 2026-11-19 | [Review of the `hivemind-memory` client packages](2026-11-19-client-packages-review.md): code, publishing, and the READMEs read by a person and used by an agent, with the quickstarts run against a local server | f2a633d |
+| 2026-11-19 | [Review of the human-facing docs](2026-11-19-human-docs-review.md): the READMEs, DEPLOY.md, the ops runbook and the CHANGELOG read by a newcomer; operator gaps fixed, plain-voice and CHANGELOG restructures left to the owner | dcfcd70 |
 
 Retrieval measurements live in [retrieval-experiments.md](../retrieval-experiments.md), and research proposals in [proposals/](../proposals/).
