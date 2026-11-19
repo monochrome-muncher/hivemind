@@ -7,7 +7,7 @@ import os
 import sys
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
-from typing import Any, Literal
+from typing import Any, Literal, cast, overload
 
 import httpx2
 from mcp import Client
@@ -18,13 +18,29 @@ from hivemind_memory import text
 from hivemind_memory._version import __version__
 from hivemind_memory.errors import AUTH_CODES, AuthenticationError, HivemindError
 from hivemind_memory.formats import ToolDefinitions, ToolSpecs, anthropic_tools, openai_tools
+from hivemind_memory.replies import (
+    BatchFeedbackReply,
+    CheckReply,
+    Entries,
+    Entry,
+    EntryDetail,
+    EntryKind,
+    FeedbackReply,
+    ListReply,
+    PinnedReply,
+    PinReply,
+    Recency,
+    RegisterReply,
+    SearchReply,
+    Verdict,
+    WhoAmI,
+    WriteReply,
+)
 
 if sys.version_info < (3, 11):
     from exceptiongroup import BaseExceptionGroup
 
-EntryKind = Literal["fact", "insight", "decision"]
-Verdict = Literal["helpful", "stale", "wrong"]
-Recency = Literal["default", "prefer_recent", "ignore_age"]
+EntryIds = list[str] | tuple[str, ...]
 
 URL_ENV = "HIVEMIND_MCP_URL"
 KEY_ENV = "HIVEMIND_API_KEY"
@@ -143,7 +159,7 @@ class Hivemind:
         self._client = client
         self._rejection = rejection
         self._stack: AsyncExitStack | None = None
-        self.whoami: dict[str, Any] = {}
+        self.whoami = cast(WhoAmI, {})
         self.tools: ToolDefinitions = []
 
     @classmethod
@@ -217,7 +233,7 @@ class Hivemind:
             cursor = page.next_cursor
             if cursor is None:
                 break
-        self.whoami = await self.call("hive_whoami")
+        await self.refresh_whoami()
 
     async def _call_text(self, name: str, arguments: Mapping[str, Any]) -> str:
         """The reply text; a failed call that is not already the error envelope is wrapped in one."""
@@ -273,9 +289,9 @@ class Hivemind:
     def openai_tools(self) -> ToolSpecs:
         return openai_tools(self.tools)
 
-    async def refresh_whoami(self) -> dict[str, Any]:
+    async def refresh_whoami(self) -> WhoAmI:
         """Ask ``hive_whoami`` again, for example after an admin changed the key's trust."""
-        self.whoami = await self.call("hive_whoami")
+        self.whoami = cast(WhoAmI, await self.call("hive_whoami"))
         return self.whoami
 
     async def search(
@@ -298,9 +314,9 @@ class Hivemind:
         flagged: bool | None = None,
         explore: bool | None = None,
         recency: Recency | None = None,
-    ) -> dict[str, Any]:
+    ) -> SearchReply:
         """Hybrid search over the pool: compact hits, no bodies."""
-        return await self._tool(
+        reply = await self._tool(
             "hive_search",
             query=query,
             limit=limit,
@@ -320,14 +336,20 @@ class Hivemind:
             explore=explore,
             recency=recency,
         )
+        return cast(SearchReply, reply)
 
+    @overload
+    async def get(self, entry: str, *, include_history: bool | None = None) -> EntryDetail: ...
+    @overload
+    async def get(self, entry: EntryIds) -> Entries: ...
     async def get(
         self, entry: str | Sequence[str], *, include_history: bool | None = None
-    ) -> dict[str, Any]:
+    ) -> EntryDetail | Entries:
         """One entry in full by id, or up to 10 from a list of ids."""
-        return await self._tool(
+        reply = await self._tool(
             "hive_get", **_entry_arguments(entry), include_history=include_history
         )
+        return cast(EntryDetail | Entries, reply)
 
     async def list(
         self,
@@ -348,9 +370,9 @@ class Hivemind:
         limit: int | None = None,
         offset: int | None = None,
         include_body: bool | None = None,
-    ) -> dict[str, Any]:
+    ) -> ListReply:
         """Filter entries without a query."""
-        return await self._tool(
+        reply = await self._tool(
             "hive_list",
             kind=kind,
             tags=tags,
@@ -369,11 +391,48 @@ class Hivemind:
             offset=offset,
             include_body=include_body,
         )
+        return cast(ListReply, reply)
 
-    async def pinned(self, *, fleet_id: str | None = None) -> dict[str, Any]:
+    async def pinned(self, *, fleet_id: str | None = None) -> PinnedReply:
         """A fleet's pinned entries."""
-        return await self._tool("hive_pinned", fleet_id=fleet_id)
+        return cast(PinnedReply, await self._tool("hive_pinned", fleet_id=fleet_id))
 
+    @overload
+    async def write(
+        self,
+        kind: EntryKind,
+        summary: str,
+        *,
+        body: str | None = None,
+        payload: Mapping[str, Any] | None = None,
+        sources: Sequence[Mapping[str, str]] | None = None,
+        tags: Sequence[str] | None = None,
+        occurred_at: str | None = None,
+        importance: int | None = None,
+        scope: str | None = None,
+        supersedes: Sequence[str] | None = None,
+        agent: str | None = None,
+        see_also: Sequence[str] | None = None,
+        check: Literal[False] | None = None,
+    ) -> WriteReply: ...
+    @overload
+    async def write(
+        self,
+        kind: EntryKind,
+        summary: str,
+        *,
+        body: str | None = None,
+        payload: Mapping[str, Any] | None = None,
+        sources: Sequence[Mapping[str, str]] | None = None,
+        tags: Sequence[str] | None = None,
+        occurred_at: str | None = None,
+        importance: int | None = None,
+        scope: str | None = None,
+        supersedes: Sequence[str] | None = None,
+        agent: str | None = None,
+        see_also: Sequence[str] | None = None,
+        check: Literal[True],
+    ) -> CheckReply: ...
     async def write(
         self,
         kind: EntryKind,
@@ -390,9 +449,9 @@ class Hivemind:
         agent: str | None = None,
         see_also: Sequence[str] | None = None,
         check: bool | None = None,
-    ) -> dict[str, Any]:
-        """Write an entry (``fact``, ``insight`` or ``decision``)."""
-        return await self._tool(
+    ) -> WriteReply | CheckReply:
+        """Write an entry (``fact``, ``insight`` or ``decision``); ``check=True`` stores nothing."""
+        reply = await self._tool(
             "hive_write",
             kind=kind,
             summary=summary,
@@ -408,7 +467,21 @@ class Hivemind:
             see_also=see_also,
             check=check,
         )
+        return cast(WriteReply | CheckReply, reply)
 
+    @overload
+    async def feedback(
+        self, entry: str, verdict: Verdict, *, note: str | None = None, agent: str | None = None
+    ) -> FeedbackReply: ...
+    @overload
+    async def feedback(
+        self,
+        entry: EntryIds,
+        verdict: Verdict,
+        *,
+        note: str | None = None,
+        agent: str | None = None,
+    ) -> BatchFeedbackReply: ...
     async def feedback(
         self,
         entry: str | Sequence[str],
@@ -416,20 +489,22 @@ class Hivemind:
         *,
         note: str | None = None,
         agent: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> FeedbackReply | BatchFeedbackReply:
         """Rate an entry by id, or up to 16 from a list, ``helpful``, ``stale`` or ``wrong``."""
-        return await self._tool(
+        reply = await self._tool(
             "hive_feedback", **_entry_arguments(entry), verdict=verdict, note=note, agent=agent
         )
+        return cast(FeedbackReply | BatchFeedbackReply, reply)
 
-    async def withdraw(self, entry_id: str, reason: str | None = None) -> dict[str, Any]:
-        """Retract an entry without replacing it."""
-        return await self._tool("hive_withdraw", entry_id=entry_id, reason=reason)
+    async def withdraw(self, entry_id: str, reason: str | None = None) -> Entry:
+        """Retract an entry without replacing it; the reply is the withdrawn entry."""
+        return cast(Entry, await self._tool("hive_withdraw", entry_id=entry_id, reason=reason))
 
-    async def pin(self, entry_id: str, *, unpin: bool | None = None) -> dict[str, Any]:
+    async def pin(self, entry_id: str, *, unpin: bool | None = None) -> PinReply:
         """Pin a fleet entry to its fleet's briefing, or unpin it."""
-        return await self._tool("hive_pin", entry_id=entry_id, unpin=unpin)
+        return cast(PinReply, await self._tool("hive_pin", entry_id=entry_id, unpin=unpin))
 
-    async def register(self, name: str, *, owner_alias: str | None = None) -> dict[str, Any]:
+    async def register(self, name: str, *, owner_alias: str | None = None) -> RegisterReply:
         """Register an agent (an org key only)."""
-        return await self._tool("hive_register", name=name, owner_alias=owner_alias)
+        reply = await self._tool("hive_register", name=name, owner_alias=owner_alias)
+        return cast(RegisterReply, reply)

@@ -4,17 +4,30 @@ import { HivemindError, refusal, rejectedKey } from "./errors.js";
 import { toAnthropic, toOpenAI, type AnthropicTool, type OpenAITool, type ToolDefinition } from "./formats.js";
 import { REMINDER, VERSION, skillBody } from "./text.js";
 import type {
+  BatchFeedbackReply,
+  CheckReply,
+  Entries,
+  Entry,
+  EntryDetail,
+  EntryKind,
   FeedbackOptions,
+  FeedbackReply,
   GetOptions,
   ListOptions,
+  ListReply,
   PinOptions,
+  PinReply,
   PinnedOptions,
+  PinnedReply,
   RegisterOptions,
+  RegisterReply,
   Reply,
   SearchOptions,
+  SearchReply,
   Verdict,
+  WhoAmI,
   WriteOptions,
-  EntryKind,
+  WriteReply,
 } from "./types.js";
 
 export interface ConnectOptions {
@@ -75,11 +88,11 @@ export class Hivemind implements AsyncDisposable {
     private readonly rejection: Rejection,
     readonly tools: readonly ToolDefinition[],
     private serverInstructions: string,
-    private current: Reply,
+    private current: WhoAmI,
   ) {}
 
   /** The key's standing from the last hive_whoami. */
-  get whoami(): Reply {
+  get whoami(): WhoAmI {
     return this.current;
   }
 
@@ -100,7 +113,7 @@ export class Hivemind implements AsyncDisposable {
         description: t.description ?? "",
         inputSchema: t.inputSchema as Record<string, unknown>,
       }));
-      const hive = new Hivemind(client, rejection, tools, client.getInstructions() ?? "", {});
+      const hive = new Hivemind(client, rejection, tools, client.getInstructions() ?? "", {} as WhoAmI);
       await hive.refreshWhoami();
       return hive;
     } catch (error) {
@@ -166,49 +179,66 @@ export class Hivemind implements AsyncDisposable {
     return this.callText(name, input as Record<string, unknown>);
   }
 
-  async refreshWhoami(): Promise<Reply> {
-    this.current = await this.call("hive_whoami", {});
+  async refreshWhoami(): Promise<WhoAmI> {
+    this.current = (await this.call("hive_whoami", {})) as unknown as WhoAmI;
     return this.current;
   }
 
-  search(query: string, options: SearchOptions = {}): Promise<Reply> {
-    return this.call("hive_search", defined({ query, ...options }));
+  private typed<T>(name: string, args: Record<string, unknown>): Promise<T> {
+    return this.call(name, defined(args)) as Promise<unknown> as Promise<T>;
+  }
+
+  search(query: string, options: SearchOptions = {}): Promise<SearchReply> {
+    return this.typed("hive_search", { query, ...options });
   }
 
   /** One entry by id, or up to 10 at once when given a list of ids. */
-  get(entryId: string | string[], options: GetOptions = {}): Promise<Reply> {
+  get(entryId: string, options?: GetOptions): Promise<EntryDetail>;
+  get(entryIds: string[]): Promise<Entries>;
+  get(entryId: string | string[], options: GetOptions = {}): Promise<EntryDetail | Entries> {
     const target = typeof entryId === "string" ? { entry_id: entryId } : { entry_ids: entryId };
-    return this.call("hive_get", defined({ ...target, ...options }));
+    return this.typed("hive_get", { ...target, ...options });
   }
 
-  list(options: ListOptions = {}): Promise<Reply> {
-    return this.call("hive_list", defined({ ...options }));
+  list(options: ListOptions = {}): Promise<ListReply> {
+    return this.typed("hive_list", { ...options });
   }
 
-  pinned(options: PinnedOptions = {}): Promise<Reply> {
-    return this.call("hive_pinned", defined({ ...options }));
+  pinned(options: PinnedOptions = {}): Promise<PinnedReply> {
+    return this.typed("hive_pinned", { ...options });
   }
 
-  write(kind: EntryKind, summary: string, options: WriteOptions = {}): Promise<Reply> {
-    return this.call("hive_write", defined({ kind, summary, ...options }));
+  /** Writes an entry; with `check: true` it stores nothing and reports what a write would. */
+  write(kind: EntryKind, summary: string, options: WriteOptions & { check: true }): Promise<CheckReply>;
+  write(kind: EntryKind, summary: string, options?: WriteOptions & { check?: false }): Promise<WriteReply>;
+  write(kind: EntryKind, summary: string, options?: WriteOptions): Promise<WriteReply | CheckReply>;
+  write(kind: EntryKind, summary: string, options: WriteOptions = {}): Promise<WriteReply | CheckReply> {
+    return this.typed("hive_write", { kind, summary, ...options });
   }
 
   /** One verdict for an entry, or for up to 16 entries when given a list of ids. */
-  feedback(entryId: string | string[], verdict: Verdict, options: FeedbackOptions = {}): Promise<Reply> {
+  feedback(entryId: string, verdict: Verdict, options?: FeedbackOptions): Promise<FeedbackReply>;
+  feedback(entryIds: string[], verdict: Verdict, options?: FeedbackOptions): Promise<BatchFeedbackReply>;
+  feedback(
+    entryId: string | string[],
+    verdict: Verdict,
+    options: FeedbackOptions = {},
+  ): Promise<FeedbackReply | BatchFeedbackReply> {
     const target = typeof entryId === "string" ? { entry_id: entryId } : { entry_ids: entryId };
-    return this.call("hive_feedback", defined({ ...target, verdict, ...options }));
+    return this.typed("hive_feedback", { ...target, verdict, ...options });
   }
 
-  withdraw(entryId: string, reason?: string): Promise<Reply> {
-    return this.call("hive_withdraw", defined({ entry_id: entryId, reason }));
+  /** Retracts an entry without replacing it; the reply is the withdrawn entry. */
+  withdraw(entryId: string, reason?: string): Promise<Entry> {
+    return this.typed("hive_withdraw", { entry_id: entryId, reason });
   }
 
-  pin(entryId: string, options: PinOptions = {}): Promise<Reply> {
-    return this.call("hive_pin", defined({ entry_id: entryId, ...options }));
+  pin(entryId: string, options: PinOptions = {}): Promise<PinReply> {
+    return this.typed("hive_pin", { entry_id: entryId, ...options });
   }
 
-  register(name: string, options: RegisterOptions = {}): Promise<Reply> {
-    return this.call("hive_register", defined({ name, ...options }));
+  register(name: string, options: RegisterOptions = {}): Promise<RegisterReply> {
+    return this.typed("hive_register", { name, ...options });
   }
 
   /** The server's instructions, then the hivemind skill: the system-prompt text for an agent. */
