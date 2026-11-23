@@ -492,6 +492,19 @@ def test_github_workflow_hardening() -> None:
             assert "github.event_name != 'pull_request'" in job.get("if", ""), name
 
 
+def test_image_push_is_retried_once_and_signed_from_either_attempt() -> None:
+    wf = yaml.safe_load((ROOT / ".github" / "workflows" / "docker-publish.yml").read_text())
+    steps = {step.get("id"): step for step in wf["jobs"]["publish"]["steps"] if "id" in step}
+    first, retry = steps["build-and-push"], steps["build-and-push-retry"]
+    assert first["continue-on-error"] is True
+    assert retry["if"] == "steps.build-and-push.outcome == 'failure'"
+    assert retry["uses"] == first["uses"]
+    assert retry["with"] == first["with"]
+    sign = next(s for s in wf["jobs"]["publish"]["steps"] if "cosign sign" in s.get("run", ""))
+    assert "build-and-push.outputs.digest" in sign["env"]["DIGEST"]
+    assert "build-and-push-retry.outputs.digest" in sign["env"]["DIGEST"]
+
+
 def test_mcp_registry_publish_runs_on_release_tags_after_the_image() -> None:
     wf = yaml.safe_load((ROOT / ".github" / "workflows" / "docker-publish.yml").read_text())
     job = wf["jobs"]["mcp-registry"]
