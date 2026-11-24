@@ -458,7 +458,7 @@ an embedding service the servers can reach.
 
 Every release is published as a container image at
 `ghcr.io/monochrome-muncher/hivemind`, tagged with the release (for
-example `v2.31.2`). One image runs every part; the `HIVEMIND_RUNNER`
+example `v2.31.3`). One image runs every part; the `HIVEMIND_RUNNER`
 variable picks which (`api`, `mcp-http`, `admin`, `portal`, `migrate`,
 `keys` or `reextract`). Apart from the admin panel, the agent portal and
 the migration runner itself, the container applies any pending database
