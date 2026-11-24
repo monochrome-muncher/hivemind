@@ -11,6 +11,7 @@ import { openEntry } from "./drawer.js";
 import { PIN_HEADERS, cursorPages, entryTable, feedbackTable, flaggedTable, pagedTable, pinRow } from "./lists.js";
 import { column } from "./csv.js";
 import { filterFields, memoryFilterFields } from "./memfilters.js";
+import { fleetActivityCard } from "./fleetchart.js";
 import { PORTAL_LIMIT, beginVisit, portalParts, sinceHead } from "./since.js";
 
 const select = (label, values, selected, anyText) => h("select", { "aria-label": label },
@@ -332,6 +333,7 @@ export async function viewFleet(root) {
     sinceLine.hidden = false;
   };
   const pinsCard = h("div", {});
+  const activity = fleetActivityCard((days) => guarded(() => api("GET", "portal/fleet-activity", { query: { days } })), { canRead: me.trust_level > 0 });
   const loadPins = async () => {
     const pins = await guarded(() => api("GET", "pins"));
     if (!pins) return;
@@ -380,9 +382,10 @@ export async function viewFleet(root) {
   fill(root,
     pageHead(fleetName(me.home_fleet_id), "The active memories of its home fleet, newest first, and what the fleet pinned for every member to read.", refreshButton()),
     sinceLine,
+    activity.el,
     pinsCard,
     h("section", { class: "agent-sec" }, h("div", { class: "section-head" }, h("h2", { text: "Fleet memories" })), memories.el));
-  await Promise.all([loadPins().catch((err) => toast(err.message, true)), memories.load(true)]);
+  await Promise.all([loadPins().catch((err) => toast(err.message, true)), memories.load(true), activity.load()]);
   await paintSince();
   visit.commit();
 }

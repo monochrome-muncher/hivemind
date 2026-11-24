@@ -10,6 +10,7 @@ from hivemind.config import SearchConfig, Settings, redact_url
 from hivemind.ports import Authenticator, Embedder, Extractor, Store
 from hivemind.services.access import AccessService
 from hivemind.services.activity import ActivityService
+from hivemind.services.fleet_activity import FleetActivityService
 from hivemind.services.governance import GovernanceService
 from hivemind.services.metrics import DEFAULT_ENTRY_COUNTS_TTL, MetricsService
 from hivemind.services.read import ReadService
@@ -29,6 +30,7 @@ class Services:
     access_service: AccessService
     metrics_service: MetricsService
     activity_service: ActivityService
+    fleet_activity_service: FleetActivityService
 
 
 def build_services(
@@ -52,14 +54,20 @@ def build_services(
     access_service = AccessService(store, authenticator)
     metrics_service = MetricsService(store, entry_counts_ttl=metrics_entry_counts_ttl)
     activity_service = ActivityService(store, ttl=metrics_entry_counts_ttl)
+    fleet_activity_service = FleetActivityService(store, ttl=metrics_entry_counts_ttl)
+    drop_cached = [
+        metrics_service.invalidate,
+        activity_service.invalidate,
+        fleet_activity_service.invalidate,
+    ]
     # A merge or undo moves entries between fleets: drop the cached scans.
-    access_service.merges.on_change += [metrics_service.invalidate, activity_service.invalidate]
+    access_service.merges.on_change += drop_cached
     # So does a cleanup and its undo.
-    access_service.cleanups.on_change += [metrics_service.invalidate, activity_service.invalidate]
+    access_service.cleanups.on_change += drop_cached
     # A corrected owner alias regroups the owner-level health figures.
-    access_service.on_owner_change += [metrics_service.invalidate, activity_service.invalidate]
+    access_service.on_owner_change += drop_cached
     # A renamed agent changes the names in the cached per-agent figures.
-    access_service.on_agent_rename += [metrics_service.invalidate, activity_service.invalidate]
+    access_service.on_agent_rename += drop_cached
     return Services(
         search_config=search_config,
         write_service=WriteService(store, embedder, extractor),
@@ -69,6 +77,7 @@ def build_services(
         access_service=access_service,
         metrics_service=metrics_service,
         activity_service=activity_service,
+        fleet_activity_service=fleet_activity_service,
     )
 
 

@@ -61,6 +61,8 @@ _ALLOWED = allowlist(
         ("POST", r"portal/cleanups/[^/]+/undo"),
         # History page (ADR 0123).
         ("GET", r"portal/history"),
+        # The home page's fleet activity chart (ADR 0165).
+        ("GET", r"portal/fleet-activity"),
         # Locks the signed-in key, nothing else.
         ("POST", r"portal/key/lock"),
     )

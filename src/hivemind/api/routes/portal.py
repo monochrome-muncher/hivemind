@@ -41,6 +41,7 @@ from hivemind.api.schemas import (
     PortalCleanupOut,
     PortalCleanupRecordOut,
     PortalCleanupRequest,
+    PortalFleetActivityOut,
     PortalHistoryItemOut,
     PortalReliedOnOut,
     PortalSearchRequest,
@@ -59,6 +60,8 @@ from hivemind.ports import Credential
 router = APIRouter(prefix=API_PREFIX)
 
 PORTAL_DEFAULT_LIMIT = 50
+DEFAULT_FLEET_ACTIVITY_DAYS = 30
+MAX_FLEET_ACTIVITY_DAYS = 90
 
 
 def require_agent(credential: Credential, what: str) -> None:
@@ -294,6 +297,21 @@ async def portal_cleanups(credential: CredentialDep, app: AppDep) -> list[Portal
     require_agent(credential, "the agent portal")
     views = await app.access_service.cleanups.list_own(credential)
     return [PortalCleanupRecordOut.from_view(v) for v in views]
+
+
+@router.get("/portal/fleet-activity", response_model=PortalFleetActivityOut)
+async def portal_fleet_activity(
+    credential: CredentialDep,
+    app: AppDep,
+    days: Annotated[int, Query(ge=1, le=MAX_FLEET_ACTIVITY_DAYS)] = DEFAULT_FLEET_ACTIVITY_DAYS,
+) -> PortalFleetActivityOut:
+    """Per agent of the key's home fleet and UTC day, the memories it wrote and the verdicts it
+    gave, on entries this key can read (ADR 0165). Activity only: agents by name, never ranked.
+    No agents when the key has no home fleet (``fleet_id`` is ``null``) or can read nothing
+    (level 0). Agent keys only."""
+    require_agent(credential, "the agent portal")
+    report = await app.fleet_activity_service.report(credential.visibility(), days)
+    return PortalFleetActivityOut(**report)
 
 
 @router.get("/portal/history", response_model=list[PortalHistoryItemOut])

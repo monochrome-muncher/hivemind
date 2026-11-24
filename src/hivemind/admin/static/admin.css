@@ -39,6 +39,15 @@
   --s-helpful: #2f9e6b;
   --s-stale: #d49a1c;
   --s-wrong: #d4493b;
+  /* The fixed categorical order of the portal's line charts (ADR 0165). */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #6250d6;
+  --series-other: #8b94a1;
   --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 8%);
   --radius: 10px;
   --honeycomb: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='34.64' height='60'%3E%3Cpath d='M17.32 0 34.64 10v20L17.32 40 0 30V10zM17.32 40v20' fill='none' stroke='%23c99a4a' stroke-opacity='.16'/%3E%3C/svg%3E");
@@ -74,6 +83,14 @@
     --s-helpful: #5fcf95;
     --s-stale: #f1c152;
     --s-wrong: #ff8a7a;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #0ca30c;
+    --series-7: #9085e9;
+    --series-other: #7f8896;
     --shadow: 0 1px 2px rgb(0 0 0 / 50%);
     --honeycomb: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='34.64' height='60'%3E%3Cpath d='M17.32 0 34.64 10v20L17.32 40 0 30V10zM17.32 40v20' fill='none' stroke='%23ffb33f' stroke-opacity='.07'/%3E%3C/svg%3E");
     --glow: radial-gradient(ellipse at 50% 35%, rgb(255 179 63 / 10%), transparent 60%);

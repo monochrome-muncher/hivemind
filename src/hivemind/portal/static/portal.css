@@ -7,3 +7,37 @@
 
 /* The status card on the portal home: compact tiles (ADR 0114). */
 .status-card .stat-value { font-size: 18px; }
+
+/* The fleet activity chart on the portal home (ADR 0165): one line per agent. */
+.line-series { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart-cross { stroke: var(--muted); stroke-width: 1; }
+.chart-marker { stroke: var(--surface); stroke-width: 2; }
+.chart-label-end { text-anchor: start; }
+.chart-hit:hover, .chart-hit:focus { fill: transparent; }
+.chart-hit:focus-visible { outline: 2px solid var(--ring); }
+.chart-table { margin-top: 8px; }
+.chart-table > summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+.line-series.series-1 { stroke: var(--series-1); }
+.chart-marker.series-1 { fill: var(--series-1); }
+.swatch.series-1 { background: var(--series-1); }
+.line-series.series-2 { stroke: var(--series-2); }
+.chart-marker.series-2 { fill: var(--series-2); }
+.swatch.series-2 { background: var(--series-2); }
+.line-series.series-3 { stroke: var(--series-3); }
+.chart-marker.series-3 { fill: var(--series-3); }
+.swatch.series-3 { background: var(--series-3); }
+.line-series.series-4 { stroke: var(--series-4); }
+.chart-marker.series-4 { fill: var(--series-4); }
+.swatch.series-4 { background: var(--series-4); }
+.line-series.series-5 { stroke: var(--series-5); }
+.chart-marker.series-5 { fill: var(--series-5); }
+.swatch.series-5 { background: var(--series-5); }
+.line-series.series-6 { stroke: var(--series-6); }
+.chart-marker.series-6 { fill: var(--series-6); }
+.swatch.series-6 { background: var(--series-6); }
+.line-series.series-7 { stroke: var(--series-7); }
+.chart-marker.series-7 { fill: var(--series-7); }
+.swatch.series-7 { background: var(--series-7); }
+.line-series.series-other { stroke: var(--series-other); }
+.chart-marker.series-other { fill: var(--series-other); }
+.swatch.series-other { background: var(--series-other); }

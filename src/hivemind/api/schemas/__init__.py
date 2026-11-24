@@ -134,6 +134,9 @@ from hivemind.api.schemas.offboarding import (
 )
 from hivemind.api.schemas.pins import PinnedOut, PinOut, PinsOut, UnpinOut
 from hivemind.api.schemas.portal import (
+    PortalAgentActivityOut,
+    PortalAgentDayOut,
+    PortalFleetActivityOut,
     PortalHistoryItemOut,
     PortalReliedOnOut,
     PortalSearchRequest,
@@ -228,9 +231,12 @@ __all__ = [
     "PinOut",
     "PinnedOut",
     "PinsOut",
+    "PortalAgentActivityOut",
+    "PortalAgentDayOut",
     "PortalCleanupOut",
     "PortalCleanupRecordOut",
     "PortalCleanupRequest",
+    "PortalFleetActivityOut",
     "PortalHistoryItemOut",
     "PortalReliedOnOut",
     "PortalSearchRequest",

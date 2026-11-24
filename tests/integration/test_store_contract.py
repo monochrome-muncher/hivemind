@@ -19,7 +19,7 @@ import math
 import uuid
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import asyncpg
@@ -39,6 +39,7 @@ from hivemind.domain.access import (
     UnknownFleet,
     Visibility,
 )
+from hivemind.domain.activity import FleetActivity
 from hivemind.domain.agent_cleanup import (
     AgentCleanupRefused,
     UnknownAgentCleanup,
@@ -3439,6 +3440,122 @@ async def test_activity_aggregates_hand_computed(adapter: Adapter) -> None:
 async def test_activity_of_an_empty_pool(adapter: Adapter) -> None:
     got = await adapter.store.activity(T0)
     assert got.authors == got.reporters == got.received == got.days == ()
+
+
+async def test_fleet_activity_counts_member_writes_and_ratings_per_day(adapter: Adapter) -> None:
+    """ADR 0165: only members of the fleet, only entries the reader may read, per UTC day from
+    ``since``; a re-rating counts on its latest day, set-aside and revoked raters are left out, a
+    quiet active member is counted and a revoked one with writes is a row."""
+    store = adapter.store
+    blue = (await store.create_fleet("blue")).id
+    red = (await store.create_fleet("red")).id
+    for name in ("alice", "bob", "cara", "dan"):
+        await _active(adapter, name, blue)
+    await _active(adapter, "eve", red)
+    since = datetime(2030, 1, 10, tzinfo=UTC)
+    until = since + timedelta(days=30)
+    day0, day1 = since.date(), (since + timedelta(days=1)).date()
+
+    async def make(author: str, at: datetime, **more: object) -> Entry:
+        e = await write(adapter, f"{author} {at.isoformat()}", author=author, **more)
+        await _backdate(adapter, e, at)
+        return e
+
+    await make("alice", since - timedelta(minutes=1))
+    await make("alice", until)  # the window is over
+    await make("cara", until + timedelta(days=3))
+    await make("alice", since + timedelta(hours=1))
+    await make("alice", since + timedelta(hours=23, minutes=59), scope="fleet", fleet_id=blue)
+    gone = await make("alice", since + timedelta(days=1, hours=2))
+    await store.withdraw_entry(gone.id, None, "alice")
+    secret = await make("bob", since + timedelta(hours=5), scope="self")
+    await make("dan", since + timedelta(days=1), scope="fleet", fleet_id=blue)
+    await make("eve", since + timedelta(hours=1))
+    await make("outsider", since + timedelta(hours=1))
+    shared = await make("zoe", since - timedelta(days=30))
+
+    async def rate(entry: Entry, user: str, at: datetime) -> None:
+        await store.record_feedback(Feedback(entry.id, user, user, Verdict.HELPFUL, None, at))
+
+    await rate(shared, "alice", since + timedelta(days=1, hours=1))
+    await rate(shared, "alice", since + timedelta(days=1, hours=3))  # the same rating, re-given
+    await rate(gone, "bob", since + timedelta(hours=2))
+    await rate(secret, "bob", since + timedelta(hours=3))  # bob's own private memory: not alice's
+    await rate(shared, "bob", since - timedelta(days=1))  # before the window
+    await rate(shared, "eve", since + timedelta(hours=1))  # not a member
+    await rate(shared, "cara", until)  # after the window
+    await rate(shared, "dan", since + timedelta(days=1))
+    await store.revoke_agent("dan")
+
+    def rows(got: FleetActivity) -> dict[tuple[str, date], tuple[int, int]]:
+        return {(r.agent, r.day): (r.writes, r.ratings) for r in got.days}
+
+    alice = Visibility(TrustLevel.CONTRIBUTOR, "alice", home_fleet_id=blue)
+    got = await store.fleet_activity(blue, since, until, alice)
+    assert rows(got) == {
+        ("alice", day0): (2, 0),
+        ("alice", day1): (1, 1),
+        ("bob", day0): (0, 1),  # bob's private memory is not alice's to read, nor its rating
+        ("dan", day1): (1, 0),  # revoked: its write stays, its rating is left out
+    }
+    assert got.quiet == 1  # cara
+
+    admin = Visibility(TrustLevel.PRIVILEGED, "root", is_admin=True)
+    assert rows(await store.fleet_activity(blue, since, until, admin))[("bob", day0)] == (1, 2)
+
+
+async def test_fleet_activity_leaves_out_ratings_an_agent_cleanup_set_aside(
+    adapter: Adapter,
+) -> None:
+    """ADR 0111: the rows a cleanup sets aside leave the chart, as they leave every feedback read."""
+    store = adapter.store
+    blue = (await store.create_fleet("blue")).id
+    await _active(adapter, "bad", blue)
+    theirs = await write(adapter, "theirs", author="good")
+    await _rate(adapter, theirs.id, "bad", Verdict.STALE, at=T0)
+    reader = Visibility(TrustLevel.CONTRIBUTOR, "bad", home_fleet_id=blue)
+    got = await store.fleet_activity(blue, T0 - timedelta(days=1), T0 + timedelta(days=1), reader)
+    assert [(r.agent, r.ratings) for r in got.days] == [("bad", 1)]
+    await _clean(adapter)
+    got = await store.fleet_activity(blue, T0 - timedelta(days=1), T0 + timedelta(days=1), reader)
+    assert got == FleetActivity(quiet=1)
+
+
+async def test_fleet_activity_for_an_heir_and_for_a_level_three_key(adapter: Adapter) -> None:
+    """An heir reads the retired agent's private memories (ADR 0113); level 3 reads other fleets' memories."""
+    store = adapter.store
+    blue = (await store.create_fleet("blue")).id
+    green = (await store.create_fleet("green")).id
+    await _active(adapter, "old", blue)
+    await _active(adapter, "heir", blue)
+    for summary, author, more in (
+        ("old private", "old", {"scope": "self"}),
+        ("heir fleet", "heir", {"scope": "fleet", "fleet_id": blue}),
+    ):
+        await _backdate(adapter, await write(adapter, summary, author=author, **more), T0)
+    await store.retire_agent("old", "heir", "admin:1")
+    since, until = T0 - timedelta(days=1), T0 + timedelta(days=1)
+
+    async def writes(reader: Visibility) -> dict[str, int]:
+        got = await store.fleet_activity(blue, since, until, reader)
+        return {r.agent: r.writes for r in got.days}
+
+    assert await writes(Visibility(TrustLevel.CONTRIBUTOR, "heir", blue)) == {"heir": 1}
+    heir = Visibility(TrustLevel.CONTRIBUTOR, "heir", blue, inherited=("old",))
+    assert await writes(heir) == {"heir": 1, "old": 1}
+    assert await writes(Visibility(TrustLevel.CONTRIBUTOR, "zed", green)) == {}
+    assert await writes(Visibility(TrustLevel.PRIVILEGED, "pat", green)) == {"heir": 1}
+
+
+async def test_fleet_activity_of_a_fleet_without_activity_or_members(adapter: Adapter) -> None:
+    store = adapter.store
+    blue = (await store.create_fleet("blue")).id
+    reader = Visibility(TrustLevel.CONTRIBUTOR, "alice", home_fleet_id=blue)
+    assert await store.fleet_activity(blue, T0, T0 + timedelta(days=1), reader) == FleetActivity()
+    await _active(adapter, "alice", blue)
+    assert await store.fleet_activity(blue, T0, T0 + timedelta(days=1), reader) == FleetActivity(
+        quiet=1
+    )
 
 
 # -- fleet merge (ADR 0107) -------------------------------------------------------------
