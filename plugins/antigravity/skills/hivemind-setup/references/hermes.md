@@ -53,6 +53,10 @@ in the hivemind-setup skill.
 - After editing the MCP config or the env file, `/reload-mcp` reloads the
   servers without a full restart; if `hive_whoami` still shows the old
   key, restart Hermes.
+- Hermes needs its `mcp` Python package for any MCP server. If
+  `hermes mcp test hivemind` says the `mcp` Python SDK is not installed,
+  the user runs `hermes setup` to add MCP support (checked with v0.23.3,
+  whose plugin install creates a fresh environment without it).
 
 **Identity:** name this agent `<user>-hermes`, distinct from the agents of
 other harnesses.

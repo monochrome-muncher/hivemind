@@ -66,7 +66,7 @@ can run in any harness.
 
      Match the **program name** (the basename of the first word) exactly
      against `claude`, `codex`, `copilot`, `cursor`, `cursor-agent` (Cursor's `agent` too), `gemini`, `agy`, `dsh`, `hermes`, `junie`, `pi`, `omp`, `opencode`,
-     `cline` or `kilo`; do not match substrings (`pip`, `pipx`, a path that
+     `cline`, `kilo` or `kilocode`; do not match substrings (`pip`, `pipx`, a path that
      happens to contain `pi`). **The nearest ancestor that matches wins**:
      a harness started from another harness's shell sees both. Pi and Oh My
      Pi both run a package called `pi-coding-agent`, so that name alone
@@ -215,8 +215,9 @@ terminal.
 Only with the **org key** (`hive_whoami` says `key_kind: "org"`).
 
 1. **Ask the user** for:
-   - the agent name: unique in the organization and permanent (names are
-     never released, even after revocation). Suggest something like
+   - the agent name: unique in the organization, and only an admin can
+     change it later (a name is never released, even after revocation or
+     a rename). Suggest something like
      `<user>-<harness>-<purpose>`, e.g. `john-claude-code-infra`. It must be
      1-63 ASCII characters (letters, digits, `.`, `_`, `-`), start with a
      letter or digit, and not be a reserved name (`admin`, `org`, `dev`,
@@ -261,8 +262,9 @@ status (plus a message):
 
 A `name_conflict` error means the name belongs to someone else, or you
 gave a different (or no) owner alias for it: if the user is sure the name
-is theirs, retry with the exact alias they used the first time; otherwise
-ask for another name. An `invalid_input` error means the name breaks the
+is theirs, retry with the exact alias they used the first time; if that
+fails too, the admin may have renamed the registration, so ask the admin
+before choosing another name. An `invalid_input` error means the name breaks the
 rule in step 1 (or the alias is malformed): pick a conforming name.
 
 After registering, suggest that the user keeps the name and alias (for

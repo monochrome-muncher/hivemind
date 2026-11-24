@@ -132,4 +132,4 @@ npm ci
 npm test
 ```
 
-`npm test` builds the package and runs the unit tests against a fake MCP server. `test/live.test.ts` runs against a real server when `HIVEMIND_LIVE=1`, `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY` are set. The skill and reminder under `text/` are copies of the plugin's files; do not edit them here.
+`npm test` builds the package and runs the unit tests against a fake MCP server. `test/live.test.ts` runs against a real server when `HIVEMIND_LIVE=1`, `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY` are set. The skill and reminder under `text/` are generated from the plugin's files by `make sync-client-text`; do not edit them here.

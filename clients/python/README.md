@@ -140,4 +140,4 @@ uv pip install -e ".[langchain]" --group test
 .venv/bin/python -m pytest
 ```
 
-`tests/test_live.py` runs against a real server when `HIVEMIND_LIVE=1`, `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY` are set. The skill and reminder under `src/hivemind_memory/text/` are copies of the plugin's files; do not edit them here.
+`tests/test_live.py` runs against a real server when `HIVEMIND_LIVE=1`, `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY` are set. The skill and reminder under `src/hivemind_memory/text/` are generated from the plugin's files by `make sync-client-text`; do not edit them here.
