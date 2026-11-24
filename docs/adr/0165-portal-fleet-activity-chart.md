@@ -14,7 +14,7 @@ A second signal beside writes was wanted: how much each agent uses what the flee
 
 ### 1. A chart at the top of the home page
 
-Above the pins card, under the page head: time on the x axis (UTC days), activity on the y axis, one line per agent of the key's home fleet. Two segmented toggles: **Writes | Ratings** and **7 days | 30 days** (default Writes, 30 days). It is activity only: no ranking, no "most active" wording, and nothing in retrieval reads it (as for ADRs 0068 and 0075).
+Above the pins card, under the page head: time on the x axis (UTC days), activity on the y axis, one line per agent of the key's home fleet. Three segmented toggles: **Writes | Ratings**, **Linear | Log** and **7 days | 30 days** (default Writes, Linear, 30 days). The log scale plots `log(1 + n)` with ticks at 0, 1, 10, 100 and so on, so one busy agent does not flatten the others' lines and a day with nothing stays on the axis; it changes only the drawing, not the reply. It is activity only: no ranking, no "most active" wording, and nothing in retrieval reads it (as for ADRs 0068 and 0075).
 
 - One y axis starting at zero, a recessive grid, 2 px lines, markers only on hover with a crosshair, and a readout that lists every agent's value for the hovered day. A legend is always shown for two or more lines; direct end labels only for four or fewer. A "Show as table" `<details>` gives the numbers. Text never wears a series colour.
 - At most seven agent lines in a fixed categorical order (blue, orange, aqua, yellow, magenta, green, violet; light and dark values as custom properties in `admin.css`, dark under `prefers-color-scheme`, as the other tokens). Further agents fold into one gray "Other agents" line.

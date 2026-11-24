@@ -221,6 +221,27 @@ def test_end_labels_never_overlap(tmp_path: Path) -> None:
     assert low == [186, 198]
 
 
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_log_scale_keeps_zero_on_the_axis_and_ticks_powers_of_ten(tmp_path: Path) -> None:
+    script = """
+    const { yScale } = await import(process.argv[1])
+    const log = yScale(340, "log")
+    const linear = yScale(340, "linear")
+    console.log(JSON.stringify({
+      log: { ticks: log.ticks, zero: log.at(0), top: log.at(1000), ten: log.at(10) },
+      linear: { ticks: linear.ticks, half: linear.at(linear.ticks[2]) },
+      quiet: yScale(0, "log").ticks,
+    }))
+    """
+    got = _chart_script(tmp_path, script)
+    assert got["log"]["ticks"] == [0, 1, 10, 100, 1000]  # type: ignore[index]
+    assert got["log"]["zero"] == 0  # type: ignore[index]
+    assert got["log"]["top"] == 1  # type: ignore[index]
+    assert 0.3 < got["log"]["ten"] < 0.4  # type: ignore[index]  # log(11)/log(1001)
+    assert got["linear"] == {"ticks": [0, 125, 250, 375, 500], "half": 0.5}  # type: ignore[comparison-overlap]
+    assert got["quiet"] == [0, 1, 10]  # type: ignore[comparison-overlap]
+
+
 # -- the service: one day, zero totals and the cache ------------------------------------
 
 
