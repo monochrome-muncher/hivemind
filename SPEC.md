@@ -483,6 +483,7 @@ This section supersedes the flat-pool commitment of §1 and the "no trust tiers"
 | `POST /v1/admin/agents` | Register and activate an agent for its owner; **returns the agent key once** (§12.3, ADR 0120) |
 | `POST /v1/admin/agents/{name}/activate` | Set level + home fleet; **returns the agent key once** (§12.3) |
 | `PATCH /v1/admin/agents/{name}` | Change level / home fleet / owner alias (demotion to `untrusted` = dormant; ADR 0122) |
+| `POST /v1/admin/agents/{name}/rename` | Rename an agent in any status; the old name stays reserved (ADR 0159, §5.1) |
 | `PUT /v1/admin/agents/{name}/role` / `DELETE /v1/admin/agents/{name}/role` | Mark an agent as a scout or take the role away (ADR 0144) |
 | `POST /v1/admin/agents/{name}/key` | Replace an active agent's key; **returns the new key once** (§12.3, ADR 0108) |
 | `POST /v1/admin/agents/{name}/revoke` | Kill the key, status → `revoked` (name stays reserved; re-activation issues a *new* key). On a pending agent: reject the registration |

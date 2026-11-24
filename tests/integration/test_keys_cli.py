@@ -2,7 +2,7 @@
 
 These exercise the ``hivemind-keys`` CLI's async SQL functions against
 the live dev Postgres (the CLI's seam — ``main()`` is a thin argparse
-wrapper over them). They cover the rotation story DEPLOY.md §5
+wrapper over them). They cover the rotation story DEPLOY.md §4.2
 documents: admin-key rotation (issue a new key, distribute it, then
 ``revoke-admin`` the old one) and ``rotate-org`` (which closes registration, ADR 0031).
 
@@ -77,7 +77,7 @@ async def test_issue_agent_for_unregistered_name_refuses(pg) -> None:
         await _issue_agent(dsn, "never-registered-agent", actor="test")
 
 
-# --- revoke-admin (the admin-key rotation half, DEPLOY.md §5) ------------------
+# --- revoke-admin (the admin-key rotation half, DEPLOY.md §4.2) ------------------
 
 
 async def test_revoke_admin_by_raw_key_kills_only_that_key(pg) -> None:

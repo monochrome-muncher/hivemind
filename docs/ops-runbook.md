@@ -316,7 +316,8 @@ Each `hivemind-mcp` pod serves its own request, tool-call and
 degraded-search series when `HIVEMIND_MCP_METRICS_ENABLED=true`, as the
 Kubernetes manifest sets it (ADR 0104). The tool-call series is
 `hivemind_mcp_tool_calls_total{tool,outcome,code}`, where `code` is
-`none`, `raised` or the reply's error code (ADR 0161). An mcp pod has no
+`none`, `raised`, the reply's error code, or `other` for a code the
+server does not know (ADR 0161). An mcp pod has no
 usage gauges, so `sum` the process counters across the api and mcp jobs.
 If you run the Kubernetes setup, see `deploy/kubernetes/optional/monitoring/`
 (DEPLOY.md §10).
@@ -484,7 +485,7 @@ curl -s -H "X-API-Key: $ADMIN_KEY" \
   migration `0025`.)
 - **Rollbacks are audited and guarded.** Several shipped rollbacks
   (`0009`, `0014`, `0017`, `0019`, `0020`, `0022`, `0023`, `0024`, `0025`,
-  `0027`, `0029`, `0031`, `0032`, `0033`, `0034`, `0035`) delete the audit
+  `0027`, `0029`, `0031`, `0032`, `0033`, `0034`, `0035`, `0036`) delete the audit
   rows whose action needs a wider `CHECK`. The rollback of `0006` sets
   revoked agents back to `active`, which revives their key rows. The
   rollback of `0025` drops the lock mark, so locked keys work again.
