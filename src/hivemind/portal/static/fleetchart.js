@@ -1,5 +1,6 @@
 // Hivemind agent portal (ADR 0165): the home page's fleet activity chart.
-// One line per agent of the key's home fleet, time on the x axis (UTC days), one y axis from zero.
+// One line per agent of the key's home fleet, time on the x axis (UTC days), one y axis from zero,
+// linear or logarithmic.
 // Activity only: nothing here ranks agents or reads back into retrieval. Every label is set
 // through textContent (h(), svg()).
 
@@ -10,6 +11,7 @@ export const MAX_LINES = 7;
 export const OTHER_NAME = "Other agents";
 export const METRICS = [["writes", "Writes"], ["ratings", "Ratings"]];
 export const WINDOWS = [7, 30];
+export const SCALES = [["linear", "Linear"], ["log", "Log"]];
 
 const END_LABEL_MAX_SERIES = 4;
 const W = 720;
@@ -53,30 +55,45 @@ export function spreadLabels(ys, gap, min, max) {
   return out;
 }
 
+/**
+ * The y axis for values up to `max`: its ticks and where a value sits on it, from 0 (bottom) to 1
+ * (top). The log scale plots log(1 + v), so a day with nothing stays on the axis, and its top is
+ * the next power of ten, ticked at 0, 1, 10, 100 and so on.
+ */
+export function yScale(max, scale) {
+  if (scale !== "log") {
+    const top = niceMax(max);
+    return { ticks: [0, 1, 2, 3, 4].map((i) => (top / 4) * i), at: (v) => v / top };
+  }
+  const top = 10 ** Math.max(1, Math.ceil(Math.log10(Math.max(1, max))));
+  const ticks = [0];
+  for (let t = 1; t <= top; t *= 10) ticks.push(t);
+  return { ticks, at: (v) => Math.log10(1 + v) / Math.log10(1 + top) };
+}
+
 const shortDay = (day) => day.slice(5); // MM-DD
 const clip = (name) => (name.length > 14 ? `${name.slice(0, 13)}…` : name);
 
 /** The SVG line chart of `series` over `days` (ISO dates), with a crosshair readout and a legend. */
-export function lineChart({ days, series, title }) {
+export function lineChart({ days, series, title, scale = "linear" }) {
   const direct = series.length <= END_LABEL_MAX_SERIES;
   const right = direct ? END_LABEL_ROOM : 8;
   const innerW = W - LEFT - right;
   const innerH = H - TOP - BOTTOM;
-  const max = niceMax(Math.max(0, ...series.flatMap((s) => s.values)));
+  const axis = yScale(Math.max(0, ...series.flatMap((s) => s.values)), scale);
   const step = days.length > 1 ? innerW / (days.length - 1) : 0;
   const x = (i) => (days.length > 1 ? LEFT + i * step : LEFT + innerW / 2);
-  const y = (v) => TOP + innerH - (v / max) * innerH;
+  const y = (v) => TOP + innerH - axis.at(v) * innerH;
 
-  const summary = `${title}, ${days[0]} to ${days[days.length - 1]}: ${series.map((s) => `${s.name} ${s.values.reduce((a, b) => a + b, 0)}`).join(", ")}.`;
+  const summary = `${title}${scale === "log" ? " (log scale)" : ""}, ${days[0]} to ${days[days.length - 1]}: ${series.map((s) => `${s.name} ${s.values.reduce((a, b) => a + b, 0)}`).join(", ")}.`;
   const readout = h("p", { class: "chart-readout muted small", "aria-live": "polite", text: summary });
   const root = svg("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart", role: "group", "aria-label": summary, preserveAspectRatio: "xMidYMid meet" });
 
-  for (let i = 0; i <= 4; i++) {
-    const v = (max / 4) * i;
+  axis.ticks.forEach((v, i) => {
     root.append(
       svg("line", { x1: LEFT, x2: W - right, y1: y(v), y2: y(v), class: i === 0 ? "chart-axis" : "chart-grid" }),
       svg("text", { x: LEFT - 6, y: y(v) + 4, class: "chart-label chart-label-y", text: Number.isInteger(v) ? String(v) : v.toFixed(1) }));
-  }
+  });
   const every = Math.max(1, Math.ceil(days.length / 6));
   days.forEach((day, i) => {
     if (i % every !== 0 && i !== days.length - 1) return;
@@ -162,6 +179,7 @@ function segmented(label, options, get, set) {
 export function fleetActivityCard(fetchReport, { canRead = true } = {}) {
   let metric = "writes";
   let days = 30;
+  let scale = "linear";
   let report = null;
   let failure = null;
   let token = 0;
@@ -173,6 +191,7 @@ export function fleetActivityCard(fetchReport, { canRead = true } = {}) {
       body.replaceChildren(failure.status === 404 ? unavailable("Fleet activity") : h("p", { class: "muted", text: "Could not load fleet activity." }));
       return;
     }
+    if (!report) return; // still loading
     const note = h("p", { class: "muted small note", text: quietNote(report.quiet) + COUNTING_NOTE });
     if (report.agents.length === 0) {
       body.replaceChildren(h("p", { class: "muted", text: `No writes or ratings in this fleet in the last ${report.days} days.` }), note);
@@ -181,7 +200,7 @@ export function fleetActivityCard(fetchReport, { canRead = true } = {}) {
     const series = chartSeries(report.agents, metric);
     const dayList = report.agents[0].daily.map((d) => d.day);
     const label = METRICS.find(([key]) => key === metric)[1];
-    body.replaceChildren(lineChart({ days: dayList, series, title: `${label} per day` }), asTable(dayList, series), note);
+    body.replaceChildren(lineChart({ days: dayList, series, title: `${label} per day`, scale }), asTable(dayList, series), note);
   };
   const load = async () => {
     const mine = ++token;
@@ -195,6 +214,7 @@ export function fleetActivityCard(fetchReport, { canRead = true } = {}) {
     paint();
   };
   const metricToggle = segmented("Measure", METRICS, () => metric, (value) => { metric = value; paint(); });
+  const scaleToggle = segmented("Y axis scale", SCALES, () => scale, (value) => { scale = value; paint(); });
   const windowToggle = segmented("Time window", WINDOWS.map((d) => [d, `${d} days`]), () => days, (value) => { days = value; load(); });
-  return { el: card("Activity per agent", body, { head: [h("div", { class: "row tight" }, metricToggle, windowToggle)] }), load };
+  return { el: card("Activity per agent", body, { head: [h("div", { class: "row tight" }, metricToggle, scaleToggle, windowToggle)] }), load };
 }
