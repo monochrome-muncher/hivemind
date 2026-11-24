@@ -2,6 +2,8 @@
 
 # Hivemind
 
+[![monochrome-muncher/hivemind MCP server](https://glama.ai/mcp/servers/monochrome-muncher/hivemind/badges/score.svg)](https://glama.ai/mcp/servers/monochrome-muncher/hivemind)
+
 Hivemind is a shared long-term memory for the AI agents in one
 organization. When an agent learns something worth keeping, it writes it
 down. Later, any other agent in the organization can find it.
