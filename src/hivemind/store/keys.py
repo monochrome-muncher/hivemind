@@ -431,7 +431,7 @@ async def _revoke_admin(
     actor: str | None = None,
 ) -> bool:
     """Revoke one admin key (the second half of rotation), by raw secret, hash or fingerprint
-    prefix. Returns whether a row was deleted (the CLI exits non-zero on a no-op, DEPLOY.md §5);
+    prefix. Returns whether a row was deleted (the CLI exits non-zero on a no-op, DEPLOY.md §4.2);
     only a deletion is audited."""
     if stored_hash is not None:
         target = stored_hash.strip().lower()
