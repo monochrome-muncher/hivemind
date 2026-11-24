@@ -22,6 +22,18 @@ It brings the MCP server (built from `HIVEMIND_MCP_URL` and
 skills, and the two hooks under "Stay aware". `gemini extensions list`
 shows it. Checked with Gemini CLI 0.63 and 0.68.0.
 
+**Gemini CLI 0.70.0 to 0.71.1 cannot install from a Git URL.** Every Git
+install fails there with `Use of "GIT_CONFIG_SYSTEM" is not permitted
+without enabling allowUnsafeConfigPaths` (a Gemini CLI bug, for any
+extension: google-gemini/gemini-cli#30416). Until a fixed release, the
+user clones the repository and links the clone instead (checked with
+0.71.1); `git pull` in that folder then updates it:
+
+```sh
+git clone https://<git-server>/<owner>/hivemind.git ~/hivemind
+gemini extensions link ~/hivemind
+```
+
 **Moving from a setup by hand:** remove the `hivemind` entry under
 `mcpServers` in `~/.gemini/settings.json` (it would replace the
 extension's server), the two Hivemind hooks there, and the copied

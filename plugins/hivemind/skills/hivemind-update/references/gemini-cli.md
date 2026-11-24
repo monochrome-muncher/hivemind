@@ -20,7 +20,17 @@ setup copied them).
 
 With the extension: `gemini extensions update hivemind`. An install
 pinned with `--ref` does not move: `gemini extensions uninstall hivemind`,
-then install again with the new ref. Start a new session.
+then install again with the new ref. A linked extension is updated with
+`git pull` in its folder. Start a new session.
+
+Gemini CLI 0.70.0 to 0.71.1 cannot update an extension installed from a
+Git URL: the update prints `Failed to check for updates ... Use of
+"GIT_CONFIG_SYSTEM" is not permitted without enabling
+allowUnsafeConfigPaths` and then says the extension is already up to
+date, which is wrong (a Gemini CLI bug: google-gemini/gemini-cli#30416).
+The installed version keeps working. To update anyway, the user runs
+`gemini extensions uninstall hivemind`, clones the repository and runs
+`gemini extensions link` on the clone (hivemind-setup, Gemini CLI).
 
 Without the extension, copy the new skill folders over the old ones. The
 hooks in `~/.gemini/settings.json` run the scripts inside the copied
