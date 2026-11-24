@@ -7,10 +7,13 @@ from datetime import datetime
 
 from asyncpg import Record
 
+from hivemind.domain.access import AgentStatus, Visibility
 from hivemind.domain.activity import (
     Activity,
+    AgentDayActivity,
     AuthorActivity,
     DayActivity,
+    FleetActivity,
     ReceivedFeedback,
     ReporterActivity,
 )
@@ -35,6 +38,7 @@ from hivemind.store.pgstore.sql_common import (
     _RATING_COUNTS,
     VECTOR_SEARCH_SETTINGS,
     unverified_condition,
+    visibility_clause,
 )
 
 # The grouped usage counters: one scan instead of one COUNT per figure.
@@ -88,6 +92,29 @@ SELECT day, sum(writes)::int AS writes, sum(helpful)::int AS helpful,
       FROM feedbacks f WHERE f.updated_at >= $1 AND {_RATING_COUNTS}
   ) t
  GROUP BY day ORDER BY day
+"""
+
+FLEET_MEMBERS = "SELECT name, status FROM agents WHERE home_fleet_id = $1"
+
+# The portal's fleet chart (ADR 0165): $1 members, $2 the window's first UTC midnight, $3 its end
+# (exclusive), more parameters for the visibility clause on ``e``. The writes use ``entries_author_created_idx``;
+# no index serves the ratings by rater and time, so they are bounded by ``updated_at`` in the window and
+# the member list and read through the entry's primary key.
+FLEET_ACTIVITY = f"""
+WITH writes AS (
+    SELECT e.author AS agent, (e.created_at AT TIME ZONE 'UTC')::date AS day, count(*)::int AS writes
+      FROM entries e
+     WHERE e.author = ANY($1::text[]) AND e.created_at >= $2::timestamptz AND e.created_at < $3::timestamptz{{visible}}
+     GROUP BY 1, 2
+), ratings AS (
+    SELECT f."user" AS agent, (f.updated_at AT TIME ZONE 'UTC')::date AS day, count(*)::int AS ratings
+      FROM feedbacks f JOIN entries e ON e.id = f.entry_id
+     WHERE f."user" = ANY($1::text[]) AND f.updated_at >= $2::timestamptz AND f.updated_at < $3::timestamptz
+       AND {_RATING_COUNTS}{{visible}}
+     GROUP BY 1, 2
+)
+SELECT agent, day, coalesce(w.writes, 0) AS writes, coalesce(r.ratings, 0) AS ratings
+  FROM writes w FULL JOIN ratings r USING (agent, day)
 """
 
 # Fleet health metrics; $1 is "now". Five statements share one snapshot (see
@@ -580,6 +607,25 @@ class MetricsStore(PgConnections):
                 )
                 for r in days
             ),
+        )
+
+    async def fleet_activity(
+        self, fleet_id: str, since: datetime, until: datetime, visibility: Visibility
+    ) -> FleetActivity:
+        async with self._connection() as conn:
+            members = await conn.fetch(FLEET_MEMBERS, fleet_id)
+            names = [r["name"] for r in members]
+            params: list[object] = [names, since, until]
+            clause = visibility_clause(visibility, params, "e.")
+            visible = f" AND {clause}" if clause else ""
+            rows = await conn.fetch(FLEET_ACTIVITY.format(visible=visible), *params)
+        active = {r["name"] for r in members if r["status"] == AgentStatus.ACTIVE}
+        return FleetActivity(
+            days=tuple(
+                AgentDayActivity(r["agent"], r["day"], int(r["writes"]), int(r["ratings"]))
+                for r in rows
+            ),
+            quiet=len(active - {r["agent"] for r in rows}),
         )
 
     async def fleet_convergence(self, now: datetime) -> Convergence:

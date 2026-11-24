@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel
@@ -41,6 +41,33 @@ class PortalHistoryItemOut(BaseModel):
             reason=item.reason,
             entry_id=item.entry_id,
         )
+
+
+class PortalAgentDayOut(BaseModel):
+    day: date
+    writes: int
+    ratings: int
+
+
+class PortalAgentActivityOut(BaseModel):
+    """One agent of the home fleet: its window totals and one row per UTC day."""
+
+    name: str
+    writes: int
+    ratings: int
+    daily: list[PortalAgentDayOut]
+
+
+class PortalFleetActivityOut(BaseModel):
+    """``GET /v1/portal/fleet-activity`` (ADR 0165): the home fleet's agents that wrote or rated
+    in the window, by name, and how many active agents did neither (``quiet``). ``fleet_id`` is
+    ``null`` and ``agents`` empty when the key has no home fleet."""
+
+    fleet_id: str | None
+    days: int
+    since: datetime
+    quiet: int
+    agents: list[PortalAgentActivityOut]
 
 
 class PortalSearchRequest(FleetSearchRequest):

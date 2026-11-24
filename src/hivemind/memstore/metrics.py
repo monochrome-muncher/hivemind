@@ -7,11 +7,20 @@ from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from typing import NamedTuple
 
-from hivemind.domain.access import SCOPE_FLEET, SCOPE_ORG, SCOPE_SELF, AgentStatus
+from hivemind.domain.access import (
+    SCOPE_FLEET,
+    SCOPE_ORG,
+    SCOPE_SELF,
+    AgentStatus,
+    Visibility,
+    entry_is_visible,
+)
 from hivemind.domain.activity import (
     Activity,
+    AgentDayActivity,
     AuthorActivity,
     DayActivity,
+    FleetActivity,
     ReceivedFeedback,
     ReporterActivity,
 )
@@ -402,6 +411,40 @@ class MetricsStore(MemoryState):
                 received=_received_feedback(entries, live),
                 days=_daily_activity(entries, live, since, now),
             )
+
+    async def fleet_activity(
+        self, fleet_id: str, since: datetime, until: datetime, visibility: Visibility
+    ) -> FleetActivity:
+        """The same rows as ``PgStore`` (ADR 0165), in plain loops."""
+        with self._lock:
+            members = {a.name: a for a in self._agents.values() if a.home_fleet_id == fleet_id}
+            per_day: dict[tuple[str, date], Counter[str]] = {}
+            for e in self._entries.values():
+                if (
+                    e.author in members
+                    and since <= e.created_at < until
+                    and entry_is_visible(e, visibility)
+                ):
+                    key = (e.author, e.created_at.astimezone(UTC).date())
+                    per_day.setdefault(key, Counter())["writes"] += 1
+            for fb in self._live_feedback().values():
+                entry = self._entries.get(fb.entry_id)
+                at = fb.updated_at or self._clock()
+                if (
+                    fb.user in members
+                    and since <= at < until
+                    and entry is not None
+                    and entry_is_visible(entry, visibility)
+                ):
+                    key = (fb.user, at.astimezone(UTC).date())
+                    per_day.setdefault(key, Counter())["ratings"] += 1
+            rows = tuple(
+                AgentDayActivity(agent, day, c["writes"], c["ratings"])
+                for (agent, day), c in sorted(per_day.items())
+                if c["writes"] + c["ratings"] > 0
+            )
+            active = {n for n, a in members.items() if a.status is AgentStatus.ACTIVE}
+            return FleetActivity(days=rows, quiet=len(active - {r.agent for r in rows}))
 
     async def fleet_convergence(self, now: datetime) -> Convergence:
         """The same figures as ``PgStore`` (ADR 0075), with exact cosines."""

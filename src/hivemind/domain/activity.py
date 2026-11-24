@@ -62,3 +62,22 @@ class Activity:
     reporters: tuple[ReporterActivity, ...] = ()
     received: tuple[ReceivedFeedback, ...] = ()
     days: tuple[DayActivity, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class AgentDayActivity:
+    """One agent on one UTC day: memories it wrote and verdicts it gave."""
+
+    agent: str
+    day: date
+    writes: int
+    ratings: int
+
+
+@dataclass(frozen=True, slots=True)
+class FleetActivity:
+    """What ``Store.fleet_activity`` returns: a row for each (member, day) with any activity and
+    how many active members had none in the window."""
+
+    days: tuple[AgentDayActivity, ...] = ()
+    quiet: int = 0

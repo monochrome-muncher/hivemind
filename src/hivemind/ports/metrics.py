@@ -5,7 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Protocol, runtime_checkable
 
-from hivemind.domain.activity import Activity
+from hivemind.domain.access import Visibility
+from hivemind.domain.activity import Activity, FleetActivity
 from hivemind.domain.entry import (
     UsageCount,
 )
@@ -36,6 +37,17 @@ class MetricsPort(Protocol):
 
         Revoked reporters (ADR 0067) and set-aside verdicts (ADR 0111) are left out. Observation
         only. Both adapters must agree."""
+        ...
+
+    async def fleet_activity(
+        self, fleet_id: str, since: datetime, until: datetime, visibility: Visibility
+    ) -> FleetActivity:
+        """The portal's fleet chart (ADR 0165): per member of ``fleet_id`` (any status) and UTC day
+        from ``since`` up to (not including) ``until``, the memories it wrote (any state, ``created_at``) and the verdicts it gave
+        (its latest day, ``updated_at``), both only on entries ``visibility`` can read, in any
+        order; quiet days have no row. Ratings follow the rules of the activity view: revoked
+        raters (ADR 0067) and set-aside verdicts (ADR 0111) are left out. ``quiet`` counts the
+        active members with no row. Observation only. Both adapters must agree."""
         ...
 
     async def fleet_convergence(self, now: datetime) -> Convergence:

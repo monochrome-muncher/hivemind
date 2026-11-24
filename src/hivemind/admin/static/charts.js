@@ -7,7 +7,7 @@ const W = 720;
 const H = 190;
 const M = { left: 34, right: 6, top: 8, bottom: 22 };
 
-function niceMax(value) {
+export function niceMax(value) {
   if (value <= 4) return 4;
   const pow = 10 ** Math.floor(Math.log10(value));
   for (const step of [1, 2, 2.5, 5, 10]) if (step * pow >= value) return step * pow;

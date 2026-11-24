@@ -20,6 +20,7 @@ from hivemind.domain.validation import MAX_REQUEST_BODY_BYTES, InvalidInput
 from hivemind.ports import Authenticator, Credential, Embedder, Store
 from hivemind.services.access import AccessService
 from hivemind.services.activity import ActivityService
+from hivemind.services.fleet_activity import FleetActivityService
 from hivemind.services.governance import GovernanceService
 from hivemind.services.metrics import MetricsService
 from hivemind.services.read import ReadService
@@ -47,6 +48,7 @@ class HivemindApp:
     access_service: AccessService
     metrics_service: MetricsService
     activity_service: ActivityService
+    fleet_activity_service: FleetActivityService
     # Dev-mode credentials sit at trust level 0 (ADR 0082).
     require_stored_keys: bool = False
     # Days without key use before an agent shows as idle (ADR 0110).

@@ -4,6 +4,7 @@
 //   portal.js   this file: sign-in, routing, the drawer's configuration
 //   session.js  the agent-key session and who the key belongs to
 //   views.js    the pages
+//   fleetchart.js  the home page's fleet activity chart (ADR 0165)
 //   cleanup.js  the clean-up page (ADR 0118)
 // and the admin panel's shared modules, served as they are (ADR 0091):
 //   ui.js client.js lists.js memfilters.js csv.js drawer.js charts.js
