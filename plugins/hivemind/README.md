@@ -154,6 +154,11 @@ also give it the repository URL on its Plugins page, or ask the agent to
 install it. A GitHub URL works there as is. A URL from another Git
 server must end in `.git`.
 
+DSH never checks a plugin installed from a Git URL for a newer version,
+and its Plugins page has no update button for it, with or without a
+`#v<version>` pin. To update, run the command under
+[Updating by hand](#updating-by-hand).
+
 A plugin belongs to one profile; if you use DSH in more than one
 (terminal, Desktop app), install it in each.
 
@@ -878,10 +883,13 @@ agent). The update commands, all in a terminal:
   hooks until you do.
 - **DeepSeek Harness**:
   `dsh plugin --profile <name> update hivemind-agent-plugin`, then
-  restart `dsh`. If you added it with `#v<version>`, run `add` again with
-  the new version instead. From a local copy, run `git pull` in it. If
-  you installed it before 2.0.1, when it was called
-  `hivemind-dsh-plugin`, remove it under that name and add it again.
+  restart `dsh`. This is the only way to update it: DSH's Plugins page
+  doesn't offer the update. For the Desktop app's profile
+  (`--profile desktop`), quit the app fully first. If you added it with
+  `#v<version>`, run `add` again with the new version instead. From a
+  local copy, run `git pull` in it. If you installed it before 2.0.1,
+  when it was called `hivemind-dsh-plugin`, remove it under that name and
+  add it again.
 - **Gemini CLI**: `gemini extensions update hivemind`. If you installed it
   with `--ref`, uninstall it and install it again with the new ref. Then
   ask the agent to "Update Hivemind", which refreshes the block in

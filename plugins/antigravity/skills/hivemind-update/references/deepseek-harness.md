@@ -29,7 +29,11 @@ installed it in.
 - Installed from the Git URL or npm: `dsh plugin --profile <name> update
   hivemind-agent-plugin`. A Git URL pinned with `#v<version>` stays put,
   so run `add` again with the new tag (`dsh plugin --profile <name> add
-  git+<address>#<tag>`): that replaces the pin.
+  git+<address>#<tag>`): that replaces the pin. Run it in a terminal:
+  DSH never checks a Git install for updates, and its Plugins page
+  offers no update for one, pinned to a tag or not (checked with DSH
+  0.2.2-rc.5). For the Desktop app's profile (`desktop`), the user
+  quits the app fully first.
 - Installed from a checkout: `git pull` in the checkout (the profile
   links it).
 - Installed before 2.0.1, the package is named `hivemind-dsh-plugin`:
