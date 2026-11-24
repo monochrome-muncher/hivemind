@@ -1252,6 +1252,30 @@ def test_opencode_plugin_goes_incognito() -> None:
     assert manual["cfg"]["mcp"]["hivemind"]["enabled"] is False
 
 
+_OPENCODE_ONE_SYSTEM_MESSAGE_SCRIPT = """
+const def = (await import(process.argv[1])).default
+const v1 = await def.server({})
+const out = { system: ["base prompt"] }
+await v1["experimental.chat.system.transform"]({ model: {} }, out)
+const hooks = {}
+await def.setup({ session: { hook: async (name, cb) => { hooks[name] = cb } } })
+const event = { sessionID: "s1", system: [{ type: "text", text: "base prompt" }] }
+await hooks["context"](event)
+console.log(JSON.stringify({ v1: out.system, v2: event.system }))
+"""
+
+
+@needs_node
+def test_opencode_plugin_adds_no_second_system_message() -> None:
+    """Many chat templates refuse a second system message with a 400, and
+    OpenCode sends each entry of the system list as its own message."""
+    r = _node(_OPENCODE_ONE_SYSTEM_MESSAGE_SCRIPT, OPENCODE_PLUGIN, HIVEMIND_API_KEY="k")
+    [v1] = r["v1"]
+    [v2] = r["v2"]
+    assert v1.startswith("base prompt\n\n" + STAY_AWARE_CORE)
+    assert v2["type"] == "text" and v2["text"] == v1
+
+
 # The v2 half of the dual export: setup(ctx) registers the same behaviour on
 # v2's domains (mcp/skill transforms, session+tool hooks, the event stream).
 # The mock ctx records every registration and the prompts it receives; the

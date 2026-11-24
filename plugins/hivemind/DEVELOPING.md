@@ -128,7 +128,10 @@ writes is one its update file passes to the drift check.
   / `chat.message` / `tool.execute.after` / `event` become v2's
   `ctx.mcp.transform` + `ctx.skill.transform` / `ctx.session.hook("context")`
   (`event.system` takes `{type, text}` parts) / nothing / `ctx.tool.hook(
-  "execute.after")` / `ctx.event.subscribe`. v2 MCP servers use `disabled`
+  "execute.after")` / `ctx.event.subscribe`. The reminder joins the last
+  entry of the system list (v2: the last text part) instead of adding one:
+  OpenCode and KiloCode send each entry as its own system message, and many
+  chat templates answer a second one with a 400. v2 MCP servers use `disabled`
   (v1 `enabled`); v2 config uses the `plugins` key and migrates a v1
   `plugin` entry, while v1 only warns about `plugins` and does not load
   it; v2 has no `session.idle`: an execution ends with
