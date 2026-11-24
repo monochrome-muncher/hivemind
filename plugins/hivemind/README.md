@@ -176,6 +176,17 @@ skills and the reminders.
 Add `--ref v<version>` to stay on one release. This works from
 `v2.6.0` on; 2.5.0 and older came out before the extension existed.
 
+Gemini CLI 0.70.0 to 0.71.1 can't install or update any extension from a
+Git URL (the error mentions `GIT_CONFIG_SYSTEM`; it's a Gemini CLI bug,
+[google-gemini/gemini-cli#30416](https://github.com/google-gemini/gemini-cli/issues/30416)).
+With those versions, clone the repository and link the clone; `git pull`
+in that folder updates it:
+
+```sh
+git clone https://github.com/monochrome-muncher/hivemind.git ~/hivemind
+gemini extensions link ~/hivemind
+```
+
 ### Antigravity
 
 This covers the Antigravity CLI (`agy`), the Antigravity App and the
