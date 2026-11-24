@@ -20,7 +20,7 @@ from hivemind.services.activity import window_start
 
 CACHE_SIZE = 256
 
-_CacheKey = tuple[str, TrustLevel, str | None, tuple[str, ...], int, date]
+_CacheKey = tuple[Visibility, int, date]
 
 
 class FleetActivityService:
@@ -59,14 +59,7 @@ class FleetActivityService:
             visibility.level == TrustLevel.UNTRUSTED and not visibility.is_admin
         ):
             return _report(fleet_id, days, since, 0, [], [])
-        key: _CacheKey = (
-            visibility.name,
-            visibility.level,
-            fleet_id,
-            visibility.inherited,
-            days,
-            now.date(),
-        )
+        key: _CacheKey = (visibility, days, now.date())
         hit = self._cache.get(key)
         if hit is not None and self._clock() - hit[0] < self._ttl:
             return hit[1]
@@ -93,13 +86,12 @@ def _report(
     by_agent: dict[str, dict[date, AgentDayActivity]] = {}
     for row in rows:
         by_agent.setdefault(row.agent, {})[row.day] = row
-    agents = [_agent_row(name, by_agent[name], window) for name in sorted(by_agent)]
     return {
         "fleet_id": fleet_id,
         "days": days,
         "since": since,
         "quiet": quiet,
-        "agents": [a for a in agents if a["writes"] + a["ratings"] > 0],
+        "agents": [_agent_row(name, by_agent[name], window) for name in sorted(by_agent)],
     }
 
 

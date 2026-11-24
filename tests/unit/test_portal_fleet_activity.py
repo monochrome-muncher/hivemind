@@ -12,7 +12,6 @@ import pytest
 
 from hivemind.admin.app import STATIC_DIR as ADMIN_STATIC
 from hivemind.domain.access import TrustLevel, Visibility
-from hivemind.domain.activity import AgentDayActivity, FleetActivity
 from hivemind.domain.entry import EntryDraft, Kind
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.memstore import MemoryStore
@@ -259,14 +258,11 @@ class _CountingStore(MemoryStore):
         super().__init__(make_clock())
         self.reads = 0
         self.fail = False
-        self.zero_rows: tuple[AgentDayActivity, ...] = ()
 
     async def fleet_activity(self, fleet_id, since, until, visibility):  # type: ignore[no-untyped-def]
         self.reads += 1
         if self.fail:
             raise RuntimeError("down")
-        if self.zero_rows:
-            return FleetActivity(days=self.zero_rows, quiet=0)
         return await super().fleet_activity(fleet_id, since, until, visibility)
 
 
@@ -314,10 +310,3 @@ async def test_the_cache_is_bounded() -> None:
     for i in range(CACHE_SIZE + 5):
         await service.report(_key(f"k{i}"), 30)
     assert len(service._cache) == CACHE_SIZE
-
-
-async def test_an_agent_whose_totals_are_zero_is_not_listed() -> None:
-    store = _CountingStore()
-    store.zero_rows = (AgentDayActivity("ghost", FIXED_NOW.date(), 0, 0),)
-    report = await _service(store, [0.0]).report(_key("a"), 7)
-    assert report["agents"] == []

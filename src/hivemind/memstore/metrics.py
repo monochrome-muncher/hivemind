@@ -441,7 +441,6 @@ class MetricsStore(MemoryState):
             rows = tuple(
                 AgentDayActivity(agent, day, c["writes"], c["ratings"])
                 for (agent, day), c in sorted(per_day.items())
-                if c["writes"] + c["ratings"] > 0
             )
             active = {n for n, a in members.items() if a.status is AgentStatus.ACTIVE}
             return FleetActivity(days=rows, quiet=len(active - {r.agent for r in rows}))
