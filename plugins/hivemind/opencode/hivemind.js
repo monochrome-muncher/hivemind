@@ -102,6 +102,21 @@ function reminder() {
   return `${CORE} ${process.env.HIVEMIND_API_KEY ? CONFIGURED : NOT_CONFIGURED}`;
 }
 
+// OpenCode sends each entry of the system list as its own system message,
+// and many chat templates answer a second one with a 400. So the reminder
+// joins the last entry instead of adding one.
+function appendToSystem(system, text) {
+  if (system.length === 0) system.push(text);
+  else system[system.length - 1] += `\n\n${text}`;
+}
+
+// The same for v2's { type, text } parts.
+function appendToSystemParts(system, text) {
+  const last = system.at(-1);
+  if (last?.type === "text") system[system.length - 1] = { ...last, text: `${last.text}\n\n${text}` };
+  else system.push({ type: "text", text });
+}
+
 function nudges() {
   return !incognito() && Boolean(process.env.HIVEMIND_API_KEY);
 }
@@ -208,7 +223,7 @@ async function server({ client } = {}) {
       const s = input?.sessionID ? state(input.sessionID) : undefined;
       const extra = s?.compacted && nudges() ? COMPACTED : "";
       if (s) s.compacted = false;
-      output.system.push(reminder() + extra);
+      appendToSystem(output.system, reminder() + extra);
     },
     "chat.message": async (input) => {
       if (!input?.sessionID) return;
@@ -310,7 +325,7 @@ async function setup(ctx) {
     const s = id ? state(id) : undefined;
     const extra = s?.compacted && nudges() ? COMPACTED : "";
     if (s) s.compacted = false;
-    event.system.push({ type: "text", text: reminder() + extra });
+    appendToSystemParts(event.system, reminder() + extra);
   });
 
   // Tool counting. KiloCode's v2 context has no tool domain.
