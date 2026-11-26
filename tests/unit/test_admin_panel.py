@@ -1128,7 +1128,7 @@ def test_the_bar_chart_axis_ticks_whole_counts_and_labels_days_without_crowding(
     const { niceScale, xLabelDays } = await import(process.argv[1])
     console.log(JSON.stringify({
       empty: niceScale(0), small: niceScale(3), mid: niceScale(31), big: niceScale(1234),
-      month: xLabelDays(30, 440), week: xLabelDays(7, 640), one: xLabelDays(1, 440),
+      month: xLabelDays(30, 440), week: xLabelDays(7, 640), one: xLabelDays(1, 440), none: xLabelDays(0, 440),
     }))
     """
     out = subprocess.run(
@@ -1144,4 +1144,5 @@ def test_the_bar_chart_axis_ticks_whole_counts_and_labels_days_without_crowding(
     gaps = [b - a for a, b in zip(got["month"], got["month"][1:], strict=False)]
     assert min(gaps) >= max(gaps[:-1])  # the last label never crowds the one before it
     assert got["week"] == [0, 1, 2, 3, 4, 5, 6]
+    assert got["none"] == []
     assert got["one"] == [0]

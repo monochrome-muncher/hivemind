@@ -26,5 +26,6 @@ Security, performance and design reviews of Hivemind, kept as a record of what w
 | 2026-11-19 | [Review of the human-facing docs](2026-11-19-human-docs-review.md): the READMEs, DEPLOY.md, the ops runbook and the CHANGELOG read by a newcomer; operator gaps fixed, plain-voice and CHANGELOG restructures left to the owner | dcfcd70 |
 | 2026-11-24 | [Changes from 2.31.0 to 2.32.1](2026-11-24-review-2-31-0-to-2-32-1.md): the portal fleet activity chart (ADR 0165), the OpenCode single system message fix and the Docker push retry; ADR 0165 drift fixed, cache key tidied | 586ccb8 |
 | 2026-11-26 | [Refactoring review](2026-11-26-refactoring-review.md): duplicated rules across the surfaces, untyped store errors, hand-written route guards, test wiring and large files; fixed in #516 to #524 and the shared test builders PR | d9b4438 |
+| 2026-11-26 | [Changes since 2.32.3](2026-11-26-review-2-32-3-to-latest.md): the MCP schema bounds (ADR 0166), the refactors #516 to #525 checked for behaviour changes, and the admin panel and portal refresh with the stacked fleet chart (ADR 0167), timed at 600k entries | 21ae5c4 |
 
 Retrieval measurements live in [retrieval-experiments.md](../retrieval-experiments.md), and research proposals in [proposals/](../proposals/).

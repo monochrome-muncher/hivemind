@@ -108,7 +108,6 @@ async def update_agent(
     entries (they stay in the fleet they were written into; a fleet
     move, ADR 0112, takes them along).
     """
-    # The key first: a non-admin must not learn whether a fleet exists.
     if (
         payload.trust_level is None
         and payload.home_fleet_id is None
