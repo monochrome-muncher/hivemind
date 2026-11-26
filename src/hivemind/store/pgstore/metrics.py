@@ -107,13 +107,17 @@ WITH writes AS (
      WHERE e.author = ANY($1::text[]) AND e.created_at >= $2::timestamptz AND e.created_at < $3::timestamptz{{visible}}
      GROUP BY 1, 2
 ), ratings AS (
-    SELECT f."user" AS agent, (f.updated_at AT TIME ZONE 'UTC')::date AS day, count(*)::int AS ratings
+    SELECT f."user" AS agent, (f.updated_at AT TIME ZONE 'UTC')::date AS day,
+           count(*) FILTER (WHERE f.verdict = 'helpful')::int AS helpful,
+           count(*) FILTER (WHERE f.verdict = 'stale')::int AS stale,
+           count(*) FILTER (WHERE f.verdict = 'wrong')::int AS wrong
       FROM feedbacks f JOIN entries e ON e.id = f.entry_id
      WHERE f."user" = ANY($1::text[]) AND f.updated_at >= $2::timestamptz AND f.updated_at < $3::timestamptz
        AND {_RATING_COUNTS}{{visible}}
      GROUP BY 1, 2
 )
-SELECT agent, day, coalesce(w.writes, 0) AS writes, coalesce(r.ratings, 0) AS ratings
+SELECT agent, day, coalesce(w.writes, 0) AS writes, coalesce(r.helpful, 0) AS helpful,
+       coalesce(r.stale, 0) AS stale, coalesce(r.wrong, 0) AS wrong
   FROM writes w FULL JOIN ratings r USING (agent, day)
 """
 
@@ -622,7 +626,14 @@ class MetricsStore(PgConnections):
         active = {r["name"] for r in members if r["status"] == AgentStatus.ACTIVE}
         return FleetActivity(
             days=tuple(
-                AgentDayActivity(r["agent"], r["day"], int(r["writes"]), int(r["ratings"]))
+                AgentDayActivity(
+                    r["agent"],
+                    r["day"],
+                    int(r["writes"]),
+                    int(r["helpful"]),
+                    int(r["stale"]),
+                    int(r["wrong"]),
+                )
                 for r in rows
             ),
             quiet=len(active - {r["agent"] for r in rows}),

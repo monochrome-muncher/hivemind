@@ -2,7 +2,7 @@
 
 Amends [ADR 0095](0095-agent-portal.md) (a route and a section on the home page). Builds on and extends [ADR 0080](0080-admin-memory-browser-and-activity.md) and [ADR 0090](0090-admin-feedback-log.md) (what they kept admin-only for raters), [ADR 0051](0051-feedback-is-readable.md), [ADR 0011](0011-fleets-and-trust-levels.md) (the visibility rule), [ADR 0067](0067-a-revoked-agents-feedback-no-longer-counts.md) and [ADR 0111](0111-agent-cleanup.md) (which ratings count). Amends SPEC §5.1.
 
-Status: Accepted.
+Status: Accepted; amended by [0167](0167-fleet-activity-as-stacked-bars.md): the lines and the log scale are now bars stacked by agent, and the reply gains the fleet-wide verdict mix.
 
 ## Context
 

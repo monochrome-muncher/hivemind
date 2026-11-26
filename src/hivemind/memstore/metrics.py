@@ -437,9 +437,9 @@ class MetricsStore(MemoryState):
                     and entry_is_visible(entry, visibility)
                 ):
                     key = (fb.user, at.astimezone(UTC).date())
-                    per_day.setdefault(key, Counter())["ratings"] += 1
+                    per_day.setdefault(key, Counter())[fb.verdict.value] += 1
             rows = tuple(
-                AgentDayActivity(agent, day, c["writes"], c["ratings"])
+                AgentDayActivity(agent, day, c["writes"], c["helpful"], c["stale"], c["wrong"])
                 for (agent, day), c in sorted(per_day.items())
             )
             active = {n for n, a in members.items() if a.status is AgentStatus.ACTIVE}

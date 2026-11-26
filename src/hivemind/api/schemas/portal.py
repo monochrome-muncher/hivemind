@@ -58,15 +58,23 @@ class PortalAgentActivityOut(BaseModel):
     daily: list[PortalAgentDayOut]
 
 
+class PortalVerdictsOut(BaseModel):
+    helpful: int
+    stale: int
+    wrong: int
+
+
 class PortalFleetActivityOut(BaseModel):
-    """``GET /v1/portal/fleet-activity`` (ADR 0165): the home fleet's agents that wrote or rated
-    in the window, by name, and how many active agents did neither (``quiet``). ``fleet_id`` is
-    ``null`` and ``agents`` empty when the key has no home fleet."""
+    """``GET /v1/portal/fleet-activity`` (ADRs 0165, 0167): the home fleet's agents that wrote or
+    rated in the window, by name, how many active agents did neither (``quiet``) and the mix of
+    the fleet's verdicts over the window (``verdicts``, never per agent). ``fleet_id`` is ``null``
+    and ``agents`` empty when the key has no home fleet."""
 
     fleet_id: str | None
     days: int
     since: datetime
     quiet: int
+    verdicts: PortalVerdictsOut
     agents: list[PortalAgentActivityOut]
 
 

@@ -136,6 +136,21 @@ async def test_ratings_count_on_readable_entries_on_the_latest_day_and_not_when_
     assert by_name["alice"]["ratings"] == 1
 
 
+async def test_the_verdict_mix_is_for_the_whole_fleet_never_per_agent() -> None:
+    app, _blue = await _app()
+    first, second = await _write(app, "alice"), await _write(app, "alice")
+    await _rate(app, first, "bob")
+    await _rate(app, second, "carol")
+    await app.store.record_feedback(
+        Feedback(first.id, "carol", "carol", Verdict.STALE, None, FIXED_NOW)
+    )
+    async with make_client(app) as client:
+        resp = await client.get("/v1/portal/fleet-activity", params={"days": 1}, headers=CAROL)
+    body = resp.json()
+    assert body["verdicts"] == {"helpful": 2, "stale": 1, "wrong": 0}
+    assert all("helpful" not in agent for agent in body["agents"])
+
+
 async def test_a_key_without_a_home_fleet_gets_no_agents() -> None:
     app, _blue = await _app()
     async with make_client(app) as client:
@@ -192,7 +207,7 @@ def test_every_agent_keeps_its_colour_when_the_measure_flips(tmp_path: Path) -> 
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
-def test_more_than_seven_agents_fold_the_least_active_into_one_gray_line(tmp_path: Path) -> None:
+def test_more_than_seven_agents_fold_the_least_active_into_one_gray_stack(tmp_path: Path) -> None:
     script = (
         AGENTS_JS
         + """
@@ -210,35 +225,17 @@ def test_more_than_seven_agents_fold_the_least_active_into_one_gray_line(tmp_pat
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
-def test_end_labels_never_overlap(tmp_path: Path) -> None:
+def test_the_verdict_split_rounds_each_share(tmp_path: Path) -> None:
     script = """
-    const { spreadLabels } = await import(process.argv[1])
-    console.log(JSON.stringify([spreadLabels([50, 50, 51, 200], 12, 14, 198), spreadLabels([196, 198], 12, 14, 198)]))
+    const { verdictSplit } = await import(process.argv[1])
+    console.log(JSON.stringify([verdictSplit({ helpful: 6, stale: 2, wrong: 1 }), verdictSplit({ helpful: 0, stale: 0, wrong: 0 })]))
     """
-    close, low = _chart_script(tmp_path, script)  # type: ignore[misc]
-    assert close == [50, 62, 74, 198]
-    assert low == [186, 198]
-
-
-@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
-def test_the_log_scale_keeps_zero_on_the_axis_and_ticks_powers_of_ten(tmp_path: Path) -> None:
-    script = """
-    const { yScale } = await import(process.argv[1])
-    const log = yScale(340, "log")
-    const linear = yScale(340, "linear")
-    console.log(JSON.stringify({
-      log: { ticks: log.ticks, zero: log.at(0), top: log.at(1000), ten: log.at(10) },
-      linear: { ticks: linear.ticks, half: linear.at(linear.ticks[2]) },
-      quiet: yScale(0, "log").ticks,
-    }))
-    """
-    got = _chart_script(tmp_path, script)
-    assert got["log"]["ticks"] == [0, 1, 10, 100, 1000]  # type: ignore[index]
-    assert got["log"]["zero"] == 0  # type: ignore[index]
-    assert got["log"]["top"] == 1  # type: ignore[index]
-    assert 0.3 < got["log"]["ten"] < 0.4  # type: ignore[index]  # log(11)/log(1001)
-    assert got["linear"] == {"ticks": [0, 125, 250, 375, 500], "half": 0.5}  # type: ignore[comparison-overlap]
-    assert got["quiet"] == [0, 1, 10]  # type: ignore[comparison-overlap]
+    split, empty = _chart_script(tmp_path, script)  # type: ignore[misc]
+    assert split["total"] == 9
+    assert [(p["key"], p["count"], p["share"]) for p in split["parts"]] == [
+        ("helpful", 6, 67), ("stale", 2, 22), ("wrong", 1, 11),
+    ]  # fmt: skip
+    assert empty["total"] == 0 and {p["share"] for p in empty["parts"]} == {0}
 
 
 # -- the service: one day, zero totals and the cache ------------------------------------
