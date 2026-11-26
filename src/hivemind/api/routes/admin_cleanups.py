@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
-from hivemind.api.routes.params import API_PREFIX, AppDep, CredentialDep, NameParam
+from hivemind.api.routes.params import (
+    API_PREFIX,
+    AppDep,
+    CredentialDep,
+    NameParam,
+    require_admin_key,
+)
 from hivemind.api.routes.shared import (
     check_cleanup_expectations,
-    require_admin,
 )
 from hivemind.api.schemas import (
     AgentCleanupOut,
@@ -20,7 +25,7 @@ from hivemind.domain.validation import (
     utcnow,
 )
 
-router = APIRouter(prefix=API_PREFIX)
+router = APIRouter(prefix=API_PREFIX, dependencies=[Depends(require_admin_key)])
 
 
 @router.post(
@@ -42,7 +47,6 @@ async def cleanup_agent(
     that is not restorable. With nothing to clean the answer is 200 with
     zero counts and no ``cleanup_id``. 404 unknown agent, 422 empty window or
     a missing ``expected_*`` count on an apply."""
-    require_admin(credential, "cleaning up after an agent")
     cleanups = app.access_service.cleanups
     if payload.dry_run:
         preview = await cleanups.preview(name, credential, since=payload.since, until=payload.until)
@@ -68,7 +72,6 @@ async def list_agent_cleanups(
 ) -> list[AgentCleanupRecordOut]:
     """Recorded agent cleanups, newest first (admin-gated, ADR 0111), each
     with whether it can be undone now."""
-    require_admin(credential, "the agent cleanups")
     views = await app.access_service.cleanups.list_cleanups(credential)
     return [AgentCleanupRecordOut.from_view(v) for v in views]
 
@@ -83,7 +86,6 @@ async def undo_agent_cleanup(
     marks are cleared and its pins are restored where the fleet has room.
     It does not un-revoke the agent. Only the newest standing cleanup of
     an agent can be undone (409 ``cleanup_refused``)."""
-    require_admin(credential, "undoing an agent cleanup")
     outcome = await app.access_service.cleanups.undo(cleanup_id, credential)
     return AgentCleanupUndoOut.from_outcome(
         outcome,

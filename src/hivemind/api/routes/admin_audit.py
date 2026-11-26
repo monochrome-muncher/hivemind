@@ -6,9 +6,16 @@ from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
-from hivemind.api.routes.params import API_PREFIX, ActorQuery, AppDep, CredentialDep, IdQuery
+from hivemind.api.routes.params import (
+    API_PREFIX,
+    ActorQuery,
+    AppDep,
+    CredentialDep,
+    IdQuery,
+    require_admin_key,
+)
 from hivemind.api.routes.shared import (
     to_utc,
 )
@@ -21,7 +28,7 @@ from hivemind.domain.validation import (
     InvalidInput,
 )
 
-router = APIRouter(prefix=API_PREFIX)
+router = APIRouter(prefix=API_PREFIX, dependencies=[Depends(require_admin_key)])
 
 # GET /v1/admin/audit-log page size (ADR 0027): default and hard ceiling.
 AUDIT_LOG_DEFAULT_LIMIT = 100

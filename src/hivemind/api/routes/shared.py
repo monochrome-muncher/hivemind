@@ -52,11 +52,6 @@ def to_utc(value: datetime | None) -> datetime | None:
     return value
 
 
-def require_admin(credential: Credential, what: str) -> None:
-    if not credential.is_admin:
-        raise api_error(403, "forbidden", f"{what} requires an admin key")
-
-
 async def entry_detail(
     app: HivemindApp,
     entry_id: str,

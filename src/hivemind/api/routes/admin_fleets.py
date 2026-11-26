@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
-from hivemind.api.routes.params import API_PREFIX, AppDep, CredentialDep, NameParam
-from hivemind.api.routes.shared import (
-    require_admin,
+from hivemind.api.routes.params import (
+    API_PREFIX,
+    AppDep,
+    CredentialDep,
+    NameParam,
+    require_admin_key,
 )
 from hivemind.api.schemas import (
     CreateFleetRequest,
@@ -23,7 +26,7 @@ from hivemind.api.schemas import (
     SetFleetPhaseRequest,
 )
 
-router = APIRouter(prefix=API_PREFIX)
+router = APIRouter(prefix=API_PREFIX, dependencies=[Depends(require_admin_key)])
 
 
 @router.post("/admin/fleets", response_model=FleetOut, status_code=201)
@@ -102,7 +105,6 @@ async def merge_fleet(
     ``keep_pin_ids`` (422); ``expected_pin_ids`` (the pins the preview showed)
     refuses the merge when they changed since (409 ``merge_refused``). 404 unknown fleet, 409 ``fleet_merged`` /
     ``merge_refused`` / ``fleet_exists``."""
-    require_admin(credential, "merging fleets")
     merges = app.access_service.merges
     if payload.dry_run:
         preview = await merges.preview(
@@ -142,7 +144,6 @@ async def move_fleet_agents(
     404 unknown fleet, 409 ``fleet_merged`` / ``move_refused`` (also an
     agent that is not in the fleet, named in the message) /
     ``fleet_exists``. Undo is the merge undo route."""
-    require_admin(credential, "moving agents between fleets")
     merges = app.access_service.merges
     if payload.dry_run:
         preview = await merges.preview_move(
@@ -169,7 +170,6 @@ async def move_fleet_agents(
 async def list_fleet_merges(credential: CredentialDep, app: AppDep) -> list[FleetMergeRecordOut]:
     """Recorded fleet merges and moves (``kind``), newest first
     (admin-gated, ADR 0107, 0112), each with whether it can be undone now."""
-    require_admin(credential, "the fleet merges")
     views = await app.access_service.merges.list_merges(credential)
     return [FleetMergeRecordOut.from_view(v) for v in views]
 
@@ -184,6 +184,5 @@ async def undo_fleet_merge(
     Only the newest standing merge or move involving the target (and, for
     a move, its source) can be undone (409 ``merge_refused`` /
     ``move_refused``)."""
-    require_admin(credential, "undoing a fleet merge")
     outcome = await app.access_service.merges.undo(merge_id, credential)
     return FleetUnmergeOut.from_outcome(outcome)

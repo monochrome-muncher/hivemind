@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from hivemind.api.deps import api_error
-from hivemind.api.routes.params import API_PREFIX, AppDep, CredentialDep, NameParam
-from hivemind.api.routes.shared import (
-    require_admin,
+from hivemind.api.routes.params import (
+    API_PREFIX,
+    AppDep,
+    CredentialDep,
+    NameParam,
+    require_admin_key,
 )
 from hivemind.api.schemas import (
     ActivateAgentRequest,
@@ -31,7 +34,7 @@ from hivemind.api.schemas import (
 from hivemind.domain.access import TrustLevel
 from hivemind.domain.offboarding import OffboardMode
 
-router = APIRouter(prefix=API_PREFIX)
+router = APIRouter(prefix=API_PREFIX, dependencies=[Depends(require_admin_key)])
 
 
 @router.get("/admin/agents", response_model=list[AdminAgentOut])
@@ -106,7 +109,6 @@ async def update_agent(
     move, ADR 0112, takes them along).
     """
     # The key first: a non-admin must not learn whether a fleet exists.
-    require_admin(credential, "changing an agent")
     if (
         payload.trust_level is None
         and payload.home_fleet_id is None
@@ -193,7 +195,6 @@ async def retire_agent(
     404 unknown agent, 409 ``invalid_status`` (the successor is not
     active, the agent is pending) / ``succession_refused`` (already
     retired, or a cycle), 422 the same agent twice."""
-    require_admin(credential, "retiring an agent")
     successions = app.access_service.successions
     if payload.dry_run:
         preview = await successions.preview(name, payload.successor, credential)
@@ -205,7 +206,6 @@ async def retire_agent(
 @router.get("/admin/successions", response_model=list[SuccessionOut])
 async def list_successions(credential: CredentialDep, app: AppDep) -> list[SuccessionOut]:
     """Standing successions, newest first (admin-gated, ADR 0113)."""
-    require_admin(credential, "the successions")
     rows = await app.access_service.successions.list_successions(credential)
     return [SuccessionOut.from_succession(s) for s in rows]
 
@@ -218,7 +218,6 @@ async def undo_succession(
     0113): the successor stops owning the memories. The retired agent
     stays revoked; activating it again issues a new key. 404 when no
     succession retires that agent."""
-    require_admin(credential, "undoing a retirement")
     succession = await app.access_service.successions.undo(retired, credential)
     return SuccessionOut.from_succession(succession)
 
@@ -237,7 +236,6 @@ async def offboard_owner(
     belongs to the same owner, or a cycle), 409 ``offboard_changed`` when the agents are no longer planned as the
     request's ``expected_agents`` (required when applying), 422 ``retire`` without or ``revoke`` with a
     successor."""
-    require_admin(credential, "offboarding an owner")
     offboarding = app.access_service.offboarding
     mode = OffboardMode(payload.mode)
     if payload.dry_run:

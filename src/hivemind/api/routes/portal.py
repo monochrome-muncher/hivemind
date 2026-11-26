@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Query, Response
+from fastapi import APIRouter, Depends, Query, Response
 
 from hivemind.api.deps import api_error
 from hivemind.api.routes.params import (
@@ -17,6 +17,7 @@ from hivemind.api.routes.params import (
     IdQuery,
     NameParam,
     PrometheusDep,
+    require_agent_key,
 )
 from hivemind.api.routes.shared import (
     check_cleanup_expectations,
@@ -55,23 +56,12 @@ from hivemind.domain.validation import (
     MAX_OFFSET,
     utcnow,
 )
-from hivemind.ports import Credential
 
-router = APIRouter(prefix=API_PREFIX)
+router = APIRouter(prefix=API_PREFIX, dependencies=[Depends(require_agent_key)])
 
 PORTAL_DEFAULT_LIMIT = 50
 DEFAULT_FLEET_ACTIVITY_DAYS = 30
 MAX_FLEET_ACTIVITY_DAYS = 90
-
-
-def require_agent(credential: Credential, what: str) -> None:
-    # An active agent's own key: not admin, org or a dev-mode identity (no agent name).
-    if credential.is_admin or credential.is_org or credential.agent_name is None:
-        raise api_error(
-            403,
-            "forbidden",
-            f"{what} requires an agent key, not the admin or org key",
-        )
 
 
 @router.get("/portal/entries", response_model=list[EntryOut])
@@ -99,7 +89,6 @@ async def portal_list_entries(
     the browsing subset of the ``GET /v1/entries`` filters plus
     ``fleet_id``, so the portal can show the home fleet alone even to a
     privileged agent."""
-    require_agent(credential, "the agent portal")
     filters = EntryFilters(
         kind=kind,
         tags=tuple(tags or ()),
@@ -134,7 +123,6 @@ async def portal_search(
     with a ``fleet_id`` filter. Not counted in the search counters, so
     a person browsing does not move the agents' search numbers. With
     ``explain`` each hit carries the parts of its score (ADR 0139)."""
-    require_agent(credential, "the agent portal")
     return await run_search(
         app,
         prometheus,
@@ -162,7 +150,6 @@ async def portal_feedback(
     """The agent's side of the feedback log (ADR 0095): the verdicts it
     ``given``, or the verdicts its own memories ``received``, newest
     first, on entries its key can read."""
-    require_agent(credential, "the agent portal")
     name = credential.agent_name
     filters = FeedbackLogFilters(
         reporter=name if direction == "given" else None,
@@ -183,7 +170,6 @@ async def portal_withdraw(
     """Withdraw one of the agent's own entries from the portal (ADR
     0095): a reason is required and the withdrawal is audited as
     ``entry.withdraw`` with ``via: "portal"``."""
-    require_agent(credential, "the agent portal")
     return EntryOut.from_entry(
         await app.governance_service.withdraw_own(credential, entry_id, request.reason)
     )
@@ -195,7 +181,6 @@ async def portal_move_to_self(
 ) -> MoveToSelfOut:
     """Move one of the agent's own or inherited fleet memories to `self` from the portal (ADR
     0145), as the admin route does; audited with ``via: "portal"``."""
-    require_agent(credential, "the agent portal")
     return MoveToSelfOut.from_move(
         await app.governance_service.move_to_self(
             credential, entry_id, request.reason, via="portal"
@@ -214,7 +199,6 @@ async def portal_flagged(
     standing ``stale`` or ``wrong`` verdict, oldest flag first (ADR
     0115): ``GET /v1/admin/flagged`` narrowed to what the agent owns,
     on entries its key can read."""
-    require_agent(credential, "the agent portal")
     items = await app.governance_service.flag_backlog(
         credential, own=True, limit=limit, offset=offset
     )
@@ -233,7 +217,6 @@ async def portal_relied_on(
     0138): the rows ``GET /v1/entries?relied_on_changed=true`` gives this key (ADR 0098), newest
     memory first, each with its verdict counts and what changed. The successor's id shows only
     if the key can read it. Agent keys only."""
-    require_agent(credential, "the agent portal")
     items = await app.read_service.relied_on_changed(
         credential, kind=kind, limit=limit, offset=offset
     )
@@ -245,14 +228,12 @@ async def portal_relied_on(
 async def portal_pin(entry_id: str, credential: CredentialDep, app: AppDep) -> PinOut:
     """Pin an entry from the portal with ``PUT /v1/entries/{id}/pin``'s
     rights, caps and errors (ADR 0116); the audit row says ``via: "portal"``."""
-    require_agent(credential, "the agent portal")
     return await pin_entry(app, credential, entry_id, via="portal")
 
 
 @router.delete("/portal/entries/{entry_id}/pin", response_model=UnpinOut)
 async def portal_unpin(entry_id: str, credential: CredentialDep, app: AppDep) -> UnpinOut:
     """Unpin an entry from the portal (ADR 0116), audited ``via: "portal"``."""
-    require_agent(credential, "the agent portal")
     return await unpin_entry(app, credential, entry_id, via="portal")
 
 
@@ -271,7 +252,6 @@ async def portal_cleanup(
     ``expected_*`` totals on the apply. Audited ``agent.cleanup`` with
     ``via: "portal"``. 403 ``forbidden`` for a dormant (level 0) agent
     (SPEC §12.2)."""
-    require_agent(credential, "the agent portal")
     cleanups = app.access_service.cleanups
     if payload.dry_run:
         preview = await cleanups.preview_own(credential, since=payload.since, until=payload.until)
@@ -294,7 +274,6 @@ async def portal_cleanups(credential: CredentialDep, app: AppDep) -> list[Portal
     """The signed-in agent's cleanups, newest first, the admin's too (ADR
     0118), each with whether the agent can undo it now. 403 ``forbidden``
     for a dormant (level 0) agent (SPEC §12.2)."""
-    require_agent(credential, "the agent portal")
     views = await app.access_service.cleanups.list_own(credential)
     return [PortalCleanupRecordOut.from_view(v) for v in views]
 
@@ -309,7 +288,6 @@ async def portal_fleet_activity(
     gave, on entries this key can read (ADR 0165). Activity only: agents by name, never ranked.
     No agents when the key has no home fleet (``fleet_id`` is ``null``) or can read nothing
     (level 0). Agent keys only."""
-    require_agent(credential, "the agent portal")
     report = await app.fleet_activity_service.report(credential.visibility(), days)
     return PortalFleetActivityOut(**report)
 
@@ -328,7 +306,6 @@ async def portal_history(
     id only if it can still read the entry. ``before`` is the last row's
     ``id`` for the next page. 403 ``forbidden`` for a dormant (level 0)
     agent (SPEC §12.2). Agent keys only."""
-    require_agent(credential, "the agent portal")
     items = await app.access_service.history.list_own(
         credential, before=str(before) if before is not None else None, limit=limit
     )
@@ -344,7 +321,6 @@ async def portal_undo_cleanup(
     for an admin's, 404 for any other agent's, 409 ``cleanup_refused``
     when a newer one stands; also 403 for a dormant, level 0 agent, SPEC
     §12.2). Audited ``agent.cleanup_undo`` with ``via: "portal"``."""
-    require_agent(credential, "the agent portal")
     outcome = await app.access_service.cleanups.undo_own(cleanup_id, credential)
     return AgentCleanupUndoOut.from_outcome(outcome, note=None)
 
@@ -357,7 +333,6 @@ async def portal_lock_key(credential: CredentialDep, app: AppDep) -> KeyLockedOu
     ratings, trust and fleet are untouched. 409 ``key_not_locked`` if the key
     was replaced or locked in the meantime. Audited ``agent_key.lock``
     with ``via: "portal"``. Agent keys only."""
-    require_agent(credential, "locking a key")
     locked = await app.access_service.lock_own_key(credential)
     if not locked:  # replaced or locked between the key check and the lock
         raise api_error(

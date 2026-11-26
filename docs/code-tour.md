@@ -45,10 +45,10 @@ Every call carries one API key. Only its SHA-256 hash is stored
   the agent's name, trust level and home fleet. `Credential.visibility()`
   turns it into the `Visibility` every read is checked against.
 
-Admin-only and agent-only routes say so at the top of the route:
-`require_admin` in `api/routes/shared.py`, `require_agent` in
-`api/routes/portal.py`. Inside the services the same checks are
-`services/guards.py`.
+Admin-only and agent-only routes say so on their router:
+`require_admin_key` and `require_agent_key` in `api/routes/params.py` are
+router dependencies, so a wrong key gets 403 before a well-formed body is
+checked. Inside the services the same checks are `services/guards.py`.
 
 ## Who may see and change what
 

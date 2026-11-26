@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Query, Response
+from fastapi import APIRouter, Depends, Query, Response
 
 from hivemind.api.deps import api_error
 from hivemind.api.routes.params import (
@@ -16,11 +16,11 @@ from hivemind.api.routes.params import (
     IdQuery,
     NameParam,
     PrometheusDep,
+    require_admin_key,
 )
 from hivemind.api.routes.shared import (
     entry_detail,
     listed_with_counts,
-    require_admin,
     run_search,
     to_utc,
 )
@@ -50,7 +50,7 @@ from hivemind.domain.validation import (
 )
 from hivemind.services.activity import DEFAULT_DAYS, MAX_DAYS, MIN_DAYS
 
-router = APIRouter(prefix=API_PREFIX)
+router = APIRouter(prefix=API_PREFIX, dependencies=[Depends(require_admin_key)])
 
 # GET /v1/admin/entries default page size (ADR 0080); the ceiling is MAX_LIMIT.
 ADMIN_ENTRIES_DEFAULT_LIMIT = 50
@@ -85,7 +85,6 @@ async def admin_list_entries(
     """List/filter entries as the admin sees them (ADR 0080): every
     scope of every fleet, newest first, with the ``GET /v1/entries``
     filters plus ``fleet_id``."""
-    require_admin(credential, "the admin entry list")
     filters = EntryFilters(
         kind=kind,
         tags=tuple(tags or ()),
@@ -116,7 +115,6 @@ async def admin_list_entries(
 async def admin_get_entry(entry_id: str, credential: CredentialDep, app: AppDep) -> EntryOut:
     """One entry with its feedback, links and history always filled
     (ADR 0080): ``GET /v1/entries/{id}?history=true`` for the admin."""
-    require_admin(credential, "the admin entry read")
     return await entry_detail(app, entry_id, credential, history=True, model=AdminEntryOut)
 
 
@@ -133,7 +131,6 @@ async def admin_search(
     sees (ADR 0136). With ``explain`` each hit carries the parts of its
     score (ADR 0137). Not counted in the search counters (ADR 0056); a
     degraded answer still counts for ``GET /metrics``."""
-    require_admin(credential, "the admin search")
     searcher = credential
     if request.as_agent is not None:
         searcher = await app.access_service.credential_for_agent(credential, request.as_agent)
@@ -157,7 +154,6 @@ async def admin_withdraw(
 ) -> EntryOut:
     """Withdraw an entry as the admin (ADR 0080): the same call as
     ``POST /v1/entries/{id}/withdraw``, audited as ``entry.withdraw``."""
-    require_admin(credential, "the admin withdraw")
     return EntryOut.from_entry(
         await app.governance_service.withdraw(credential, entry_id, request.reason)
     )
@@ -171,7 +167,6 @@ async def admin_restore(
     is required; pins are not restored; 409 for a memory that is not
     withdrawn, was withdrawn by a standing agent cleanup, or would leave
     two current versions in a chain. Audited as ``entry.restore``."""
-    require_admin(credential, "the admin restore")
     return EntryOut.from_entry(
         await app.governance_service.restore(credential, entry_id, request.reason)
     )
@@ -186,7 +181,6 @@ async def admin_move_to_self(
     and their pins are removed; 409 for a memory that is not an active fleet memory or that
     replaced a fleet memory by anyone else. Audited as
     ``entry.move_to_self``."""
-    require_admin(credential, "the admin move to self")
     return MoveToSelfOut.from_move(
         await app.governance_service.move_to_self(credential, entry_id, request.reason)
     )
@@ -200,7 +194,6 @@ async def admin_redact(
     ``confirm`` is the memory id typed back (422 otherwise). 404 unknown,
     409 active (withdraw it first) or already redacted. Audited as ``entry.redact``;
     the answer counts the feedback notes left to review."""
-    require_admin(credential, "the admin redact")
     return RedactOut.from_outcome(
         await app.governance_service.redact(credential, entry_id, request.reason, request.confirm)
     )
@@ -208,13 +201,11 @@ async def admin_redact(
 
 @router.get("/admin/activity", response_model=ActivityOut)
 async def admin_activity(
-    credential: CredentialDep,
     app: AppDep,
     days: Annotated[int, Query(ge=MIN_DAYS, le=MAX_DAYS)] = DEFAULT_DAYS,
 ) -> ActivityOut:
     """Who wrote and who reported, per agent, fleet and UTC day over
     the last ``days`` days (ADR 0080). Observation only."""
-    require_admin(credential, "the activity view")
     return ActivityOut(**await app.activity_service.report(days))
 
 
@@ -233,7 +224,6 @@ async def admin_feedback(
     """Who gave which verdict on which entry, newest first: every
     feedback row of every fleet, each with the entry it rates.
     Observation only, like the activity view."""
-    require_admin(credential, "the feedback log")
     filters = FeedbackLogFilters(
         reporter=reporter,
         verdict=verdict,
@@ -262,7 +252,6 @@ async def admin_flagged(
     whether the author is still around. ``older_than_days`` keeps
     entries first flagged more than that many days ago; ``orphaned`` keeps
     entries with no owner. Observation only, like the health metrics."""
-    require_admin(credential, "the flag backlog")
     items = await app.governance_service.flag_backlog(
         credential,
         fleet_id=fleet_id,
@@ -279,7 +268,6 @@ async def admin_fleet_pins(fleet_id: NameParam, credential: CredentialDep, app: 
     """One fleet's pinned entries as the admin sees them: ``GET /v1/pins``
     for any fleet, newest pin first, each with why it changed since it
     was pinned. 404 for a fleet that does not exist."""
-    require_admin(credential, "the fleet pins")
     if await app.store.get_fleet(fleet_id) is None:
         raise api_error(404, "not_found", f"unknown fleet: {fleet_id}")
     pinned = await app.governance_service.pinned(credential, fleet_id)
