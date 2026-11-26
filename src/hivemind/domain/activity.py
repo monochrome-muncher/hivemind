@@ -66,12 +66,18 @@ class Activity:
 
 @dataclass(frozen=True, slots=True)
 class AgentDayActivity:
-    """One agent on one UTC day: memories it wrote and verdicts it gave."""
+    """One agent on one UTC day: memories it wrote and verdicts it gave, by verdict."""
 
     agent: str
     day: date
     writes: int
-    ratings: int
+    helpful: int = 0
+    stale: int = 0
+    wrong: int = 0
+
+    @property
+    def ratings(self) -> int:
+        return self.helpful + self.stale + self.wrong
 
 
 @dataclass(frozen=True, slots=True)

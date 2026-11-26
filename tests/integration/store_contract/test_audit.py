@@ -318,6 +318,18 @@ async def test_fleet_activity_counts_member_writes_and_ratings_per_day(adapter: 
     assert rows(await store.fleet_activity(blue, since, until, admin))[("bob", day0)] == (1, 2)
 
 
+async def test_fleet_activity_splits_ratings_by_verdict(adapter: Adapter) -> None:
+    store = adapter.store
+    blue = (await store.create_fleet("blue")).id
+    await _active(adapter, "rater", blue)
+    for i, verdict in enumerate((Verdict.HELPFUL, Verdict.HELPFUL, Verdict.STALE, Verdict.WRONG)):
+        entry = await write(adapter, f"note {i}", author="writer")
+        await _rate(adapter, entry.id, "rater", verdict, at=T0)
+    reader = Visibility(TrustLevel.CONTRIBUTOR, "rater", home_fleet_id=blue)
+    got = await store.fleet_activity(blue, T0 - timedelta(days=1), T0 + timedelta(days=1), reader)
+    assert [(r.helpful, r.stale, r.wrong, r.ratings) for r in got.days] == [(2, 1, 1, 4)]
+
+
 async def test_fleet_activity_leaves_out_ratings_an_agent_cleanup_set_aside(
     adapter: Adapter,
 ) -> None:

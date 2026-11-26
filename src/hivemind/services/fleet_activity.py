@@ -91,6 +91,10 @@ def _report(
         "days": days,
         "since": since,
         "quiet": quiet,
+        "verdicts": {
+            verdict: sum(getattr(row, verdict) for row in rows)
+            for verdict in ("helpful", "stale", "wrong")
+        },
         "agents": [_agent_row(name, by_agent[name], window) for name in sorted(by_agent)],
     }
 

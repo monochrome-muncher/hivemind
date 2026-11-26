@@ -3,42 +3,38 @@
 .who-name { font-weight: 600; overflow-wrap: anywhere; }
 @media (max-width: 760px) {
   .who { padding: 0; }
+  .activity-parts { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* The status card on the portal home: compact tiles (ADR 0114). */
 .status-card .stat-value { font-size: 18px; }
 
-/* The fleet activity chart on the portal home (ADR 0165): one line per agent. */
-.chart-figure > svg.chart { width: 100%; height: auto; }
-.line-series { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
-.chart-cross { stroke: var(--muted); stroke-width: 1; }
-.chart-marker { stroke: var(--surface); stroke-width: 2; }
-.chart-label-end { text-anchor: start; }
-.chart-hit:hover, .chart-hit:focus { fill: transparent; }
-.chart-hit:focus-visible { outline: 2px solid var(--ring); }
-.chart-table { margin-top: 8px; }
+/* The fleet activity card on the portal home (ADRs 0165, 0167): bars stacked by agent. */
+.chart-table { margin-top: 16px; }
 .chart-table > summary { cursor: pointer; font-size: 13px; color: var(--muted); }
-.line-series.series-1 { stroke: var(--series-1); }
-.chart-marker.series-1 { fill: var(--series-1); }
-.swatch.series-1 { background: var(--series-1); }
-.line-series.series-2 { stroke: var(--series-2); }
-.chart-marker.series-2 { fill: var(--series-2); }
-.swatch.series-2 { background: var(--series-2); }
-.line-series.series-3 { stroke: var(--series-3); }
-.chart-marker.series-3 { fill: var(--series-3); }
-.swatch.series-3 { background: var(--series-3); }
-.line-series.series-4 { stroke: var(--series-4); }
-.chart-marker.series-4 { fill: var(--series-4); }
-.swatch.series-4 { background: var(--series-4); }
-.line-series.series-5 { stroke: var(--series-5); }
-.chart-marker.series-5 { fill: var(--series-5); }
-.swatch.series-5 { background: var(--series-5); }
-.line-series.series-6 { stroke: var(--series-6); }
-.chart-marker.series-6 { fill: var(--series-6); }
-.swatch.series-6 { background: var(--series-6); }
-.line-series.series-7 { stroke: var(--series-7); }
-.chart-marker.series-7 { fill: var(--series-7); }
-.swatch.series-7 { background: var(--series-7); }
-.line-series.series-other { stroke: var(--series-other); }
-.chart-marker.series-other { fill: var(--series-other); }
-.swatch.series-other { background: var(--series-other); }
+.activity-parts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 40px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
+.activity-part h3 { font-size: 13px; margin: 0 0 12px; }
+.agent-totals { display: grid; gap: 8px; }
+.agent-total { display: grid; grid-template-columns: minmax(90px, 150px) 1fr 44px; gap: 12px; align-items: center; font-size: 13px; }
+.agent-total-name { display: inline-flex; align-items: center; gap: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.split-bar { display: flex; gap: 2px; height: 12px; border-radius: 6px; overflow: hidden; }
+.split-seg { flex-basis: 0; min-width: 3px; }
+.split-seg.s-helpful { background: var(--s-helpful); }
+.split-seg.s-stale { background: var(--s-stale); }
+.split-seg.s-wrong { background: var(--s-wrong); }
+.bar-seg.series-1 { fill: var(--series-1); }
+.swatch.series-1, .bar-fill.series-fill-1 { background: var(--series-1); }
+.bar-seg.series-2 { fill: var(--series-2); }
+.swatch.series-2, .bar-fill.series-fill-2 { background: var(--series-2); }
+.bar-seg.series-3 { fill: var(--series-3); }
+.swatch.series-3, .bar-fill.series-fill-3 { background: var(--series-3); }
+.bar-seg.series-4 { fill: var(--series-4); }
+.swatch.series-4, .bar-fill.series-fill-4 { background: var(--series-4); }
+.bar-seg.series-5 { fill: var(--series-5); }
+.swatch.series-5, .bar-fill.series-fill-5 { background: var(--series-5); }
+.bar-seg.series-6 { fill: var(--series-6); }
+.swatch.series-6, .bar-fill.series-fill-6 { background: var(--series-6); }
+.bar-seg.series-7 { fill: var(--series-7); }
+.swatch.series-7, .bar-fill.series-fill-7 { background: var(--series-7); }
+.bar-seg.series-other { fill: var(--series-other); }
+.swatch.series-other, .bar-fill.series-fill-other { background: var(--series-other); }

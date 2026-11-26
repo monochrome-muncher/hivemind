@@ -40,7 +40,7 @@
   --s-helpful: #2f9e6b;
   --s-stale: #d49a1c;
   --s-wrong: #d4493b;
-  /* The fixed categorical order of the portal's line charts (ADR 0165). */
+  /* The fixed categorical order of the portal's per-agent colours (ADRs 0165, 0167). */
   --series-1: #2a78d6;
   --series-2: #eb6834;
   --series-3: #1baf7a;
