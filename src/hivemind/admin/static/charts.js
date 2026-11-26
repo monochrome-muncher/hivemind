@@ -10,14 +10,6 @@ const FALLBACK_WIDTH = 640;
 const X_LABEL_PX = 64;
 const MAX_BAR_PX = 28;
 
-/** The old four-tick top of a linear axis; the portal's line chart still uses it. */
-export function niceMax(value) {
-  if (value <= 4) return 4;
-  const pow = 10 ** Math.floor(Math.log10(value));
-  for (const step of [1, 2, 2.5, 5, 10]) if (step * pow >= value) return step * pow;
-  return 10 * pow;
-}
-
 /** A count axis up to `max`: whole-number ticks 1, 2 or 5 times a power of ten apart, at most `intervals` of them. */
 export function niceScale(max, intervals = 4) {
   const raw = Math.max(1, max) / intervals;
@@ -36,6 +28,7 @@ export function dayLabel(day) {
 
 /** The indexes of the days that get an x label: evenly spaced, always the last, never crowding it. */
 export function xLabelDays(count, width) {
+  if (count <= 0) return [];
   const every = Math.max(1, Math.ceil(count / Math.max(1, Math.floor(width / X_LABEL_PX))));
   const picked = [];
   for (let i = 0; i < count; i += every) if (count - 1 - i >= every || i === count - 1) picked.push(i);
