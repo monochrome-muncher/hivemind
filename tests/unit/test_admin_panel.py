@@ -1120,3 +1120,27 @@ def test_agent_rows_offer_edit_and_a_more_menu_in_place_of_every_button() -> Non
     menu = (STATIC_DIR / "menu.js").read_text()
     for needed in ('popover: "auto"', '"aria-haspopup"', '"aria-expanded"', 'role: "menuitem"'):
         assert needed in menu, needed
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_bar_chart_axis_ticks_whole_counts_and_labels_days_without_crowding() -> None:
+    script = r"""
+    const { niceScale, xLabelDays } = await import(process.argv[1])
+    console.log(JSON.stringify({
+      empty: niceScale(0), small: niceScale(3), mid: niceScale(31), big: niceScale(1234),
+      month: xLabelDays(30, 440), week: xLabelDays(7, 640), one: xLabelDays(1, 440),
+    }))
+    """
+    out = subprocess.run(
+        ["node", "--input-type=module", "-e", script, (STATIC_DIR / "charts.js").as_uri()],
+        capture_output=True, text=True, check=True,
+    )  # fmt: skip
+    got = json.loads(out.stdout)
+    assert got["empty"] == {"top": 1, "ticks": [0, 1]}
+    assert got["small"] == {"top": 3, "ticks": [0, 1, 2, 3]}
+    assert got["mid"] == {"top": 40, "ticks": [0, 10, 20, 30, 40]}
+    assert got["big"] == {"top": 1500, "ticks": [0, 500, 1000, 1500]}
+    assert got["month"][-1] == 29 and len(got["month"]) <= 440 // 64 + 1
+    assert all(b - a >= 3 for a, b in zip(got["month"], got["month"][1:], strict=False))
+    assert got["week"] == [0, 1, 2, 3, 4, 5, 6]
+    assert got["one"] == [0]
