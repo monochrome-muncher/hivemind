@@ -3,7 +3,7 @@ STORE-2, STORE-3; migration 0008).
 
 The two 0008 indexes must actually be *used* by the queries they were added
 for (EXPLAIN), not merely exist; ``list_predecessors`` and ``usage_counts``
-agree with the in-memory store in ``test_store_contract.py``. Skips cleanly
+agree with the in-memory store in ``tests/integration/store_contract/``. Skips cleanly
 when the DB is unreachable.
 """
 

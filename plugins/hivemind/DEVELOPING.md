@@ -746,7 +746,7 @@ Git Bash compares by hand. Tests: `tests/unit/test_drift_check.py`
 
 ## Tests
 
-`tests/unit/test_agent_plugin.py` keeps the plugin, the server and the
+`tests/unit/agent_plugin/` keeps the plugin, the server and the
 docs in step. Among other things it checks that:
 
 - every MCP tool is named in the `hivemind` skill, which stays under 10 KB;
@@ -763,7 +763,7 @@ docs in step. Among other things it checks that:
   canonical text in `REMINDER_COPIES` and every file it lists;
 - CHANGELOG.md has a row for the current version, and README.md links it.
 
-Run it with `uv run pytest tests/unit/test_agent_plugin.py`. Some tests
+Run it with `uv run pytest tests/unit/agent_plugin`. Some tests
 need `node` or `python3` and skip without them.
 
 `make hermes-scan` runs Hermes's own install scan over the plugin and
