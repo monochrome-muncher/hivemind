@@ -10,8 +10,8 @@ import pytest
 from hivemind.domain.access import TrustLevel
 from hivemind.domain.entry import ImportanceSource, Kind, Source, SourceType
 from hivemind.ports import Credential
-from hivemind.services.access import resolve_write_scope
 from hivemind.services.drafts import DEFAULT_IMPORTANCE, entry_draft
+from hivemind.services.errors import AgentIdentityRequired
 
 AGENT = Credential(
     user_id="scout",
@@ -39,7 +39,7 @@ def _draft(credential: Credential, **overrides: object):  # type: ignore[no-unty
         "see_also": [],
     }
     args.update(overrides)
-    return entry_draft(credential, resolve_write_scope(credential), **args)  # type: ignore[arg-type]
+    return entry_draft(credential, None, **args)  # type: ignore[arg-type]
 
 
 def test_omitted_importance_is_the_default() -> None:
@@ -98,3 +98,12 @@ def test_naive_occurred_at_is_normalised_to_utc() -> None:
     resolved = draft.resolved_occurred_at()
     assert resolved.tzinfo is not None
     assert resolved == naive.replace(tzinfo=UTC)
+
+
+def test_no_agent_identity_is_refused() -> None:
+    with pytest.raises(AgentIdentityRequired, match="agent identity is required"):
+        _draft(LEGACY, agent=None)
+
+
+def test_a_keys_own_agent_identity_needs_no_agent_argument() -> None:
+    assert _draft(AGENT, agent=None).agent == "scout"

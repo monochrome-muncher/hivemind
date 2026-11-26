@@ -18,6 +18,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 
 import asyncpg
 import pytest
@@ -106,6 +109,15 @@ async def rollback(dsn: str, dim: int, count: int = 1, **confirm: bool) -> list[
     return await _guarded_rollback(dsn, dim, count, **confirm)
 
 
+@asynccontextmanager
+async def _connected(dsn: str) -> AsyncIterator[asyncpg.Connection]:
+    conn = await asyncpg.connect(dsn)
+    try:
+        yield conn
+    finally:
+        await conn.close()
+
+
 def _dsn() -> str:
     return Settings().database_url
 
@@ -117,11 +129,8 @@ async def _start_at(dsn: str, dim: int, version: str) -> None:
     await _start_at_head(dsn, dim)
     above = CHAIN[CHAIN.index(version) + 1 :]
     assert await _guarded_rollback(dsn, dim, len(above)) == list(reversed(above))
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         await conn.execute("DELETE FROM audit_log")
-    finally:
-        await conn.close()
 
 
 async def _require_postgres(dsn: str) -> None:
@@ -134,11 +143,8 @@ async def _require_postgres(dsn: str) -> None:
 
 async def _reset_chain(dsn: str) -> None:
     """Drop the whole public schema so the next migrate starts cold."""
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         await conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public")
-    finally:
-        await conn.close()
 
 
 async def _start_at_head(dsn: str, dim: int) -> None:
@@ -151,16 +157,13 @@ async def _start_at_head(dsn: str, dim: int) -> None:
     about the cold start itself still call `_reset_chain`.
     """
     await ensure_migrated(dsn, dim)
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         tables = await conn.fetch(
             "SELECT quote_ident(tablename) AS t FROM pg_tables "
             "WHERE schemaname = 'public' AND tablename NOT LIKE '\\_yoyo\\_%' "
             "AND tablename <> 'yoyo_lock'"
         )
         await conn.execute("TRUNCATE " + ", ".join(r["t"] for r in tables) + " RESTART IDENTITY")
-    finally:
-        await conn.close()
 
 
 async def test_migrate_applies_the_chain_and_reports_its_head() -> None:
@@ -176,8 +179,7 @@ async def test_migrate_applies_the_chain_and_reports_its_head() -> None:
     await migrate(dsn, dim)
     assert await current_schema_version(dsn) == HEAD
 
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         # One row per migration in the chain (ADR 0020).
         assert await conn.fetchval("SELECT count(*) FROM _yoyo_migration") == len(CHAIN)
         # 0013: the two new indexes exist and valid; the superseded one is gone.
@@ -186,8 +188,6 @@ async def test_migrate_applies_the_chain_and_reports_its_head() -> None:
                 "SELECT indisvalid FROM pg_index WHERE indexrelid = to_regclass($1)", index
             )
         assert await conn.fetchval("SELECT to_regclass('entry_links_to_idx')") is None
-    finally:
-        await conn.close()
 
 
 async def test_concurrent_migrators_are_serialised_by_the_advisory_lock() -> None:
@@ -216,13 +216,10 @@ async def test_concurrent_migrators_are_serialised_by_the_advisory_lock() -> Non
     assert not failures, f"concurrent migrators failed: {failures}"
 
     assert await current_schema_version(dsn) == HEAD
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         # Each migration applied exactly once, not once per migrator.
         assert await conn.fetchval("SELECT count(*) FROM _yoyo_migration") == len(CHAIN)
         assert await conn.fetchval("SELECT to_regclass('entries') IS NOT NULL")
-    finally:
-        await conn.close()
 
 
 async def test_migrate_releases_the_lock_for_the_next_caller() -> None:
@@ -235,8 +232,7 @@ async def test_migrate_releases_the_lock_for_the_next_caller() -> None:
     await migrate(dsn, dim)
     await asyncio.wait_for(migrate(dsn, dim), timeout=30)
 
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         held = await conn.fetchval(
             "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' "
             "AND database = (SELECT oid FROM pg_database WHERE datname = current_database()) "
@@ -244,8 +240,6 @@ async def test_migrate_releases_the_lock_for_the_next_caller() -> None:
             MIGRATION_LOCK_KEY,
         )
         assert held == 0, "advisory lock still held after migrate returned"
-    finally:
-        await conn.close()
 
 
 async def test_current_schema_version_is_none_when_unmigrated() -> None:
@@ -255,488 +249,537 @@ async def test_current_schema_version_is_none_when_unmigrated() -> None:
     assert await current_schema_version(dsn) is None
 
 
-async def test_rollback_removes_the_latest_migration() -> None:
-    """ADR 0020: a structural migration (not `0001`) ships a real
-    rollback, and rolling one back undoes exactly what it did.
+Hook = Callable[[asyncpg.Connection], Awaitable[None]]
 
-    Peeled one at a time from `0026` down (the ones above it have their own
-    tests at the end of the file): `0026` drops the self-service mark
-    of the cleanup record (ADR 0118); `0025` drops the credential lock time
-    and the key lock audit rows and narrows the audit CHECK back to `0024`'s
-    list, keeping every key (ADR 0117); `0024` drops the successions and
-    the retirement audit rows and narrows the audit CHECK back to `0023`'s list
-    (ADR 0113); `0023` drops the move record kind
-    and the move audit rows, and narrows the audit CHECK back to `0022`'s list
-    (ADR 0112); `0022` drops the agent cleanup
-    record, the `set_aside_by` mark (the ratings stay) and the cleanup audit
-    rows (ADR 0111); `0021` drops the credential last-use time (ADR 0110) and
-    touches no key; `0020` deletes the key replacement
-    audit rows and narrows the audit CHECK back (ADR 0108); `0019` deletes the rename audit
-    rows and narrows the audit CHECK back (ADR 0109); `0017` drops the fleet merge
-    record and its two tables, the `merged_into` marker and the merge audit
-    rows (ADR 0107); `0016` drops the withdrawal time
-    (ADR 0098) and keeps the state and reason; `0015` drops the explore search
-    counter (ADR 0078); `0014` deletes the pin audit rows
-    and narrows the audit CHECKs back (ADR 0076); `0013` swaps the "see also" index
-    back and drops the agent list index; `0012` drops the pins (ADR 0058);
-    `0011` drops the "see also" links
-    (ADR 0057); `0010` drops the search counters
-    (ADR 0056); `0009` deletes the registration
-    rows and narrows the audit CHECKs back (ADR 0046); `0008` drops its three indexes
-    (PERF-1 / STORE-3) and nothing else; `0007` drops only its two unique
-    credential indexes (ADR 0039); `0006` narrows the agent status
-    CHECK back (ADR 0028); `0005` drops the (empty) audit log
-    (ADR 0027) and nothing else; `0004` drops the HNSW vector
-    index (ADR 0025) and leaves the `embedding` column alone; `0003`
-    then drops the named CHECK constraint it added and leaves `0001` +
-    `0002` (and the `importance_source` column itself) in place.
+
+@dataclass(frozen=True)
+class RollbackStep:
+    """One migration peeled off by the rollback walk, newest first.
+
+    ``seed`` runs before the rollback (rows the migration or the guard acts on, and the
+    constraints that must still hold); ``check`` runs after it and sees the older schema.
+    """
+
+    rolls_back: str
+    head_after: str
+    purpose: str
+    confirm: Mapping[str, bool] = field(default_factory=dict)
+    seed: Hook | None = None
+    check: Hook | None = None
+
+
+async def _seed_0026(conn: asyncpg.Connection) -> None:
+    await conn.execute(
+        "INSERT INTO agent_cleanups (agent, since, until, cleaned_by, self_service) "
+        "VALUES ('bad', now(), now(), 'bad', true)"
+    )
+
+
+async def _check_0026(conn: asyncpg.Connection) -> None:
+    assert (
+        await conn.fetchval(
+            "SELECT count(*) FROM information_schema.columns "
+            "WHERE table_name = 'agent_cleanups' AND column_name = 'self_service'"
+        )
+        == 0
+    )
+    assert await conn.fetchval("SELECT count(*) FROM agent_cleanups") == 1
+    await conn.execute("DELETE FROM agent_cleanups")
+
+
+async def _seed_0025(conn: asyncpg.Connection) -> None:
+    await conn.execute(
+        "INSERT INTO credentials (key_hash, kind, user_id, agent_id, agent_name, locked_at) "
+        "VALUES ('h-locked', 'agent', 'a', 'a', 'a', now())"
+    )
+    await conn.execute(
+        "INSERT INTO audit_log (actor_kind, actor, action, target) "
+        "VALUES ('agent_key', 'a', 'agent_key.lock', 'a'), "
+        "('admin_key', 'admin:1', 'agent.retire', 'a')"
+    )
+
+
+async def _check_0025(conn: asyncpg.Connection) -> None:
+    assert await conn.fetchval("SELECT count(*) FROM credentials") == 1  # the key is kept
+    assert (
+        await conn.fetchval(
+            "SELECT count(*) FROM information_schema.columns "
+            "WHERE table_name = 'credentials' AND column_name = 'locked_at'"
+        )
+        == 0
+    )
+    assert [r["action"] for r in await conn.fetch("SELECT action FROM audit_log")] == [
+        "agent.retire"
+    ]
+    with pytest.raises(asyncpg.CheckViolationError):
+        await conn.execute(
+            "INSERT INTO audit_log (actor_kind, actor, action) "
+            "VALUES ('agent_key', 'a', 'agent_key.lock')"
+        )
+    await conn.execute("DELETE FROM credentials")
+    await conn.execute("DELETE FROM audit_log")
+
+
+async def _seed_0024(conn: asyncpg.Connection) -> None:
+    await conn.execute(
+        "INSERT INTO successions (retired_agent, successor, \"by\") VALUES ('a', 'b', 'x')"
+    )
+    await conn.execute(
+        "INSERT INTO audit_log (actor_kind, actor, action, target) "
+        "VALUES ('admin_key', 'admin:1', 'agent.retire', 'a'), "
+        "('admin_key', 'admin:1', 'agent.retire_undo', 'a'), "
+        "('admin_key', 'admin:1', 'agent_key.replace', 'r')"
+    )
+
+
+async def _check_0024(conn: asyncpg.Connection) -> None:
+    assert await conn.fetchval("SELECT to_regclass('successions')") is None
+    assert [r["action"] for r in await conn.fetch("SELECT action FROM audit_log")] == [
+        "agent_key.replace"
+    ]
+    with pytest.raises(asyncpg.CheckViolationError):
+        await conn.execute(
+            "INSERT INTO audit_log (actor_kind, actor, action) "
+            "VALUES ('admin_key', 'admin:1', 'agent.retire')"
+        )
+    await conn.execute("DELETE FROM audit_log")
+
+
+async def _seed_0023(conn: asyncpg.Connection) -> None:
+    await conn.execute(
+        "INSERT INTO audit_log (actor_kind, actor, action, target) "
+        "VALUES ('admin_key', 'admin:1', 'agent_key.replace', 'a'), "
+        "('admin_key', 'admin:1', 'agent.cleanup', 'bad'), "
+        "('admin_key', 'admin:1', 'agent.cleanup_undo', 'bad'), "
+        "('admin_key', 'admin:1', 'fleet.rename', 'f'), "
+        "('admin_key', 'admin:1', 'fleet.merge', 'f'), "
+        "('admin_key', 'admin:1', 'fleet.move_agents', 'f'), "
+        "('admin_key', 'admin:1', 'fleet.create', 'f')"
+    )
+    await conn.execute(
+        "INSERT INTO entries (id, kind, summary, author, agent, occurred_at) "
+        "VALUES ('00000000-0000-0000-0000-000000000001', 'fact', 'e', 'bad', 'x', now())"
+    )
+    await conn.execute(
+        'INSERT INTO feedbacks (entry_id, "user", agent, verdict, set_aside_by) '
+        "VALUES ('00000000-0000-0000-0000-000000000001', 'bad', 'x', 'wrong', gen_random_uuid())"
+    )
+    await conn.execute(
+        "INSERT INTO agent_cleanups (agent, since, until, cleaned_by) "
+        "VALUES ('bad', now(), now(), 'admin:1')"
+    )
+
+
+async def _check_0023(conn: asyncpg.Connection) -> None:
+    assert (
+        await conn.fetchval(
+            "SELECT count(*) FROM information_schema.columns "
+            "WHERE table_name = 'fleet_merges' AND column_name = 'kind'"
+        )
+        == 0
+    )
+    assert sorted(r["action"] for r in await conn.fetch("SELECT action FROM audit_log")) == [
+        "agent.cleanup",
+        "agent.cleanup_undo",
+        "agent_key.replace",
+        "fleet.create",
+        "fleet.merge",
+        "fleet.rename",
+    ]
+    with pytest.raises(asyncpg.CheckViolationError):
+        await conn.execute(
+            "INSERT INTO audit_log (actor_kind, actor, action) "
+            "VALUES ('admin_key', 'admin:1', 'fleet.move_agents')"
+        )
+
+
+async def _check_0022(conn: asyncpg.Connection) -> None:
+    has_column = "SELECT count(*) FROM information_schema.columns WHERE column_name = $1"
+    assert await conn.fetchval(has_column, "set_aside_by") == 0
+    assert await conn.fetchval("SELECT to_regclass('agent_cleanups')") is None
+    assert await conn.fetchval("SELECT count(*) FROM feedbacks") == 1  # the rating is kept
+    assert sorted(r["action"] for r in await conn.fetch("SELECT action FROM audit_log")) == [
+        "agent_key.replace",
+        "fleet.create",
+        "fleet.merge",
+        "fleet.rename",
+    ]
+    with pytest.raises(asyncpg.CheckViolationError):
+        await conn.execute(
+            "INSERT INTO audit_log (actor_kind, actor, action) "
+            "VALUES ('admin_key', 'admin:1', 'agent.cleanup')"
+        )
+    await conn.execute("DELETE FROM feedbacks")
+    await conn.execute("DELETE FROM entries")
+
+
+async def _check_0020(conn: asyncpg.Connection) -> None:
+    assert [r["action"] for r in await conn.fetch("SELECT action FROM audit_log")] == [
+        "fleet.rename",
+        "fleet.merge",
+        "fleet.create",
+    ]
+    with pytest.raises(asyncpg.CheckViolationError):
+        await conn.execute(
+            "INSERT INTO audit_log (actor_kind, actor, action) "
+            "VALUES ('admin_key', 'admin:1', 'agent_key.replace')"
+        )
+
+
+async def _check_0019(conn: asyncpg.Connection) -> None:
+    assert [r["action"] for r in await conn.fetch("SELECT action FROM audit_log")] == [
+        "fleet.merge",
+        "fleet.create",
+    ]
+    with pytest.raises(asyncpg.CheckViolationError):
+        await conn.execute(
+            "INSERT INTO audit_log (actor_kind, actor, action) "
+            "VALUES ('admin_key', 'admin:1', 'fleet.rename')"
+        )
+
+
+async def _check_0017(conn: asyncpg.Connection) -> None:
+    has_column = "SELECT count(*) FROM information_schema.columns WHERE column_name = $1"
+    assert await conn.fetchval(has_column, "merged_into") == 0
+    assert await conn.fetchval(has_column, "merged_at") == 0
+    for table in ("fleet_merges", "fleet_merge_entries"):
+        assert await conn.fetchval("SELECT to_regclass($1)", table) is None
+    assert [r["action"] for r in await conn.fetch("SELECT action FROM audit_log")] == [
+        "fleet.create"
+    ]
+    with pytest.raises(asyncpg.CheckViolationError):
+        await conn.execute(
+            "INSERT INTO audit_log (actor_kind, actor, action) "
+            "VALUES ('admin_key', 'admin:1', 'fleet.merge')"
+        )
+    await conn.execute("DELETE FROM audit_log")
+
+
+async def _check_0016(conn: asyncpg.Connection) -> None:
+    has_column = "SELECT count(*) FROM information_schema.columns WHERE column_name = $1"
+    assert await conn.fetchval(has_column, "withdrawn_at") == 0
+    assert await conn.fetchval(has_column, "withdrawn_reason") == 1  # only the time goes
+
+
+async def _seed_0015(conn: asyncpg.Connection) -> None:
+    await conn.execute(
+        "INSERT INTO search_counts (fleet_id, searches, empty, explore) VALUES ('', 2, 1, 1)"
+    )
+    with pytest.raises(asyncpg.CheckViolationError):  # explore never exceeds searches
+        await conn.execute("UPDATE search_counts SET explore = 3")
+
+
+async def _check_0015(conn: asyncpg.Connection) -> None:
+    # Only the explore column goes; the other counters stay.
+    row = await conn.fetchrow("SELECT * FROM search_counts")
+    assert row is not None and dict(row) == {"fleet_id": "", "searches": 2, "empty": 1}
+    await conn.execute("DELETE FROM search_counts")
+
+
+async def _seed_0014(conn: asyncpg.Connection) -> None:
+    await conn.execute(
+        "INSERT INTO audit_log (actor_kind, actor, action, target) VALUES "
+        "('agent_key', 'lead', 'entry.pin', 'e1'), "
+        "('agent_key', 'lead', 'entry.unpin', 'e1'), "
+        "('org_key', 'org:abc', 'agent.register', 'alice')"
+    )
+
+
+async def _check_0014(conn: asyncpg.Connection) -> None:
+    rows = await conn.fetch("SELECT action FROM audit_log")
+    assert [r["action"] for r in rows] == ["agent.register"]  # only 0014's rows go
+    with pytest.raises(asyncpg.CheckViolationError):
+        await conn.execute(
+            "INSERT INTO audit_log (actor_kind, actor, action) "
+            "VALUES ('agent_key', 'lead', 'entry.pin')"
+        )
+    await conn.execute("DELETE FROM audit_log")
+
+
+async def _check_0013(conn: asyncpg.Connection) -> None:
+    assert await conn.fetchval("SELECT to_regclass('entry_links_to_idx')") is not None
+    for index in ("entry_links_to_created_idx", "entries_agent_created_idx"):
+        assert await conn.fetchval("SELECT to_regclass($1)", index) is None
+
+
+async def _check_0012(conn: asyncpg.Connection) -> None:
+    assert await conn.fetchval("SELECT to_regclass('pins')") is None
+
+
+async def _seed_0011(conn: asyncpg.Connection) -> None:
+    with pytest.raises(asyncpg.CheckViolationError):  # no entry links to itself
+        await conn.execute(
+            "INSERT INTO entry_links (from_id, to_id) VALUES "
+            "('00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001')"
+        )
+
+
+async def _check_0011(conn: asyncpg.Connection) -> None:
+    assert await conn.fetchval("SELECT to_regclass('entry_links')") is None
+
+
+async def _seed_0010(conn: asyncpg.Connection) -> None:
+    await conn.execute("INSERT INTO search_counts (fleet_id, searches, empty) VALUES ('', 2, 1)")
+    with pytest.raises(asyncpg.CheckViolationError):  # empty never exceeds searches
+        await conn.execute("UPDATE search_counts SET empty = 3")
+
+
+async def _check_0010(conn: asyncpg.Connection) -> None:
+    assert await conn.fetchval("SELECT to_regclass('search_counts')") is None
+
+
+async def _seed_0009(conn: asyncpg.Connection) -> None:
+    await conn.execute(
+        "INSERT INTO audit_log (actor_kind, actor, action, target) VALUES "
+        "('org_key', 'org:abc', 'agent.register', 'alice'), "
+        "('admin_key', 'admin:abc', 'agent.activate', 'alice')"
+    )
+
+
+async def _check_0009(conn: asyncpg.Connection) -> None:
+    rows = await conn.fetch("SELECT action FROM audit_log")
+    assert [r["action"] for r in rows] == ["agent.activate"]  # only 0009's rows go
+    with pytest.raises(asyncpg.CheckViolationError):
+        await conn.execute(
+            "INSERT INTO audit_log (actor_kind, actor, action) "
+            "VALUES ('org_key', 'org:abc', 'agent.register')"
+        )
+    await conn.execute("DELETE FROM audit_log")
+
+
+async def _check_0008(conn: asyncpg.Connection) -> None:
+    for index in (
+        "entries_superseded_by_idx",
+        "entries_created_at_id_idx",
+        "entries_author_created_idx",
+    ):
+        assert await conn.fetchval("SELECT to_regclass($1)", index) is None
+
+
+async def _check_0007(conn: asyncpg.Connection) -> None:
+    for index in ("credentials_one_agent_key", "credentials_one_org_key"):
+        assert await conn.fetchval("SELECT to_regclass($1)", index) is None
+
+
+async def _check_0005(conn: asyncpg.Connection) -> None:
+    assert await conn.fetchval("SELECT to_regclass('audit_log')") is None
+    # The rest of the schema is untouched.
+    assert await conn.fetchval("SELECT to_regclass('entries_embedding_hnsw_idx')") is not None
+
+
+async def _check_0004(conn: asyncpg.Connection) -> None:
+    index = await conn.fetchval("SELECT to_regclass('entries_embedding_hnsw_idx')")
+    assert index is None
+    # The indexed column is untouched — an index holds nothing the
+    # table does not, which is what makes this rollback legal.
+    column = await conn.fetchval(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_name = 'entries' AND column_name = 'embedding'"
+    )
+    assert column is not None
+
+
+async def _check_0003(conn: asyncpg.Connection) -> None:
+    constraint = await conn.fetchval(
+        "SELECT 1 FROM pg_constraint WHERE conname = 'entries_importance_source_check'"
+    )
+    assert constraint is None
+    # The column itself is untouched — only 0002's rollback drops it.
+    column = await conn.fetchval(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_name = 'entries' AND column_name = 'importance_source'"
+    )
+    assert column is not None
+
+
+_DISCARD_AUDIT_ROWS = {"discard_audit_rows": True}
+
+# Newest first, so each step starts from the schema the one before it left.
+ROLLBACK_STEPS = (
+    RollbackStep(
+        ID_0026,
+        ID_0025,
+        "drops the self-service mark of the cleanup record (ADR 0118)",
+        seed=_seed_0026,
+        check=_check_0026,
+    ),
+    RollbackStep(
+        ID_0025,
+        PREV,
+        "drops the credential lock time and the key lock audit rows, narrows the audit CHECK "
+        "back to 0024's list, keeps every key (ADR 0117)",
+        confirm={"discard_audit_rows": True, "unlock_locked_keys": True},
+        seed=_seed_0025,
+        check=_check_0025,
+    ),
+    RollbackStep(
+        PREV,
+        "0023.fleet-move",
+        "drops the successions and the retirement audit rows, narrows the audit CHECK back "
+        "to 0023's list (ADR 0113)",
+        confirm=_DISCARD_AUDIT_ROWS,
+        seed=_seed_0024,
+        check=_check_0024,
+    ),
+    RollbackStep(
+        "0023.fleet-move",
+        "0022.agent-cleanup",
+        "drops the move record kind and the move audit rows, narrows the audit CHECK back "
+        "to 0022's list (ADR 0112)",
+        confirm=_DISCARD_AUDIT_ROWS,
+        seed=_seed_0023,
+        check=_check_0023,
+    ),
+    RollbackStep(
+        "0022.agent-cleanup",
+        "0021.credential-last-used",
+        "drops the agent cleanup record, the set_aside_by mark (the ratings stay) and the "
+        "cleanup audit rows (ADR 0111)",
+        confirm=_DISCARD_AUDIT_ROWS,
+        check=_check_0022,
+    ),
+    RollbackStep(
+        "0021.credential-last-used",
+        "0020.agent-key-replace",
+        "drops the credential last-use time (ADR 0110) and touches no key",
+    ),
+    RollbackStep(
+        "0020.agent-key-replace",
+        "0019.fleet-rename",
+        "deletes the key replacement audit rows and narrows the audit CHECK back (ADR 0108)",
+        confirm=_DISCARD_AUDIT_ROWS,
+        check=_check_0020,
+    ),
+    RollbackStep(
+        "0019.fleet-rename",
+        "0017.fleet-merge",
+        "deletes the rename audit rows and narrows the audit CHECK back (ADR 0109)",
+        confirm=_DISCARD_AUDIT_ROWS,
+        check=_check_0019,
+    ),
+    RollbackStep(
+        "0017.fleet-merge",
+        "0016.entry-withdrawn-at",
+        "drops the fleet merge record and its two tables, the merged_into marker and the "
+        "merge audit rows (ADR 0107)",
+        confirm=_DISCARD_AUDIT_ROWS,
+        check=_check_0017,
+    ),
+    RollbackStep(
+        "0016.entry-withdrawn-at",
+        "0015.search-counts-explore",
+        "drops the withdrawal time (ADR 0098) and keeps the state and reason",
+        check=_check_0016,
+    ),
+    RollbackStep(
+        "0015.search-counts-explore",
+        "0014.pin-audit",
+        "drops the explore search counter (ADR 0078)",
+        seed=_seed_0015,
+        check=_check_0015,
+    ),
+    RollbackStep(
+        "0014.pin-audit",
+        "0013.see-also-and-agent-indexes",
+        "deletes the pin audit rows and narrows the audit CHECKs back (ADR 0076)",
+        confirm=_DISCARD_AUDIT_ROWS,
+        seed=_seed_0014,
+        check=_check_0014,
+    ),
+    RollbackStep(
+        "0013.see-also-and-agent-indexes",
+        "0012.pins",
+        "swaps the see-also index back and drops the agent list index",
+        check=_check_0013,
+    ),
+    RollbackStep(
+        "0012.pins",
+        "0011.entry-links",
+        "drops the pins (ADR 0058)",
+        check=_check_0012,
+    ),
+    RollbackStep(
+        "0011.entry-links",
+        "0010.search-counts",
+        "drops the see-also links (ADR 0057)",
+        seed=_seed_0011,
+        check=_check_0011,
+    ),
+    RollbackStep(
+        "0010.search-counts",
+        "0009.audit-register",
+        "drops the search counters (ADR 0056)",
+        seed=_seed_0010,
+        check=_check_0010,
+    ),
+    RollbackStep(
+        "0009.audit-register",
+        "0008.history-and-list-indexes",
+        "deletes the registration rows and narrows the audit CHECKs back (ADR 0046)",
+        confirm=_DISCARD_AUDIT_ROWS,
+        seed=_seed_0009,
+        check=_check_0009,
+    ),
+    RollbackStep(
+        "0008.history-and-list-indexes",
+        "0007.credential-uniqueness",
+        "drops its three indexes (PERF-1 / STORE-3) and nothing else",
+        check=_check_0008,
+    ),
+    RollbackStep(
+        "0007.credential-uniqueness",
+        "0006.agent-revoked-status",
+        "drops only its two unique credential indexes (ADR 0039)",
+        check=_check_0007,
+    ),
+    RollbackStep(
+        "0006.agent-revoked-status",
+        "0005.audit-log",
+        "narrows the agent status CHECK back (ADR 0028)",
+    ),
+    RollbackStep(
+        "0005.audit-log",
+        "0004.hnsw-vector-index",
+        "drops the (empty) audit log (ADR 0027) and nothing else",
+        check=_check_0005,
+    ),
+    RollbackStep(
+        "0004.hnsw-vector-index",
+        "0003.importance-source-check",
+        "drops the HNSW vector index (ADR 0025) and leaves the embedding column alone",
+        check=_check_0004,
+    ),
+    RollbackStep(
+        "0003.importance-source-check",
+        "0002.importance-source",
+        "drops the named CHECK constraint it added and leaves 0001 + 0002 (and the "
+        "importance_source column itself) in place",
+        check=_check_0003,
+    ),
+)
+
+
+async def test_rollback_removes_the_latest_migration() -> None:
+    """ADR 0020: a structural migration (not `0001`) ships a real rollback, and
+    rolling one back undoes exactly what it did.
+
+    Peeled one at a time from `0026` down (the ones above it have their own tests
+    at the end of the file); each step of `ROLLBACK_STEPS` says what its rollback
+    undoes.
     """
     dsn, dim = _dsn(), Settings().embedding_dim
     await _start_at_head(dsn, dim)
 
-    conn = await asyncpg.connect(dsn)
-    try:
-        await conn.execute(
-            "INSERT INTO agent_cleanups (agent, since, until, cleaned_by, self_service) "
-            "VALUES ('bad', now(), now(), 'bad', true)"
-        )
-    finally:
-        await conn.close()
-    assert await rollback(dsn, dim, count=1) == [ID_0026]
-    assert await current_schema_version(dsn) == ID_0025
-    conn = await asyncpg.connect(dsn)
-    try:
-        assert (
-            await conn.fetchval(
-                "SELECT count(*) FROM information_schema.columns "
-                "WHERE table_name = 'agent_cleanups' AND column_name = 'self_service'"
-            )
-            == 0
-        )
-        assert await conn.fetchval("SELECT count(*) FROM agent_cleanups") == 1
-        await conn.execute("DELETE FROM agent_cleanups")
-    finally:
-        await conn.close()
-
-    conn = await asyncpg.connect(dsn)
-    try:
-        await conn.execute(
-            "INSERT INTO credentials (key_hash, kind, user_id, agent_id, agent_name, locked_at) "
-            "VALUES ('h-locked', 'agent', 'a', 'a', 'a', now())"
-        )
-        await conn.execute(
-            "INSERT INTO audit_log (actor_kind, actor, action, target) "
-            "VALUES ('agent_key', 'a', 'agent_key.lock', 'a'), "
-            "('admin_key', 'admin:1', 'agent.retire', 'a')"
-        )
-    finally:
-        await conn.close()
-    rolled = await rollback(dsn, dim, count=1, discard_audit_rows=True, unlock_locked_keys=True)
-    assert rolled == [ID_0025]
-    assert await current_schema_version(dsn) == PREV
-    conn = await asyncpg.connect(dsn)
-    try:
-        assert await conn.fetchval("SELECT count(*) FROM credentials") == 1  # the key is kept
-        assert (
-            await conn.fetchval(
-                "SELECT count(*) FROM information_schema.columns "
-                "WHERE table_name = 'credentials' AND column_name = 'locked_at'"
-            )
-            == 0
-        )
-        assert [r["action"] for r in await conn.fetch("SELECT action FROM audit_log")] == [
-            "agent.retire"
-        ]
-        with pytest.raises(asyncpg.CheckViolationError):
-            await conn.execute(
-                "INSERT INTO audit_log (actor_kind, actor, action) "
-                "VALUES ('agent_key', 'a', 'agent_key.lock')"
-            )
-        await conn.execute("DELETE FROM credentials")
-        await conn.execute("DELETE FROM audit_log")
-    finally:
-        await conn.close()
-
-    conn = await asyncpg.connect(dsn)
-    try:
-        await conn.execute(
-            "INSERT INTO successions (retired_agent, successor, \"by\") VALUES ('a', 'b', 'x')"
-        )
-        await conn.execute(
-            "INSERT INTO audit_log (actor_kind, actor, action, target) "
-            "VALUES ('admin_key', 'admin:1', 'agent.retire', 'a'), "
-            "('admin_key', 'admin:1', 'agent.retire_undo', 'a'), "
-            "('admin_key', 'admin:1', 'agent_key.replace', 'r')"
-        )
-    finally:
-        await conn.close()
-    rolled = await rollback(dsn, dim, count=1, discard_audit_rows=True)
-    assert rolled == [PREV]
-    assert await current_schema_version(dsn) == "0023.fleet-move"
-    conn = await asyncpg.connect(dsn)
-    try:
-        assert await conn.fetchval("SELECT to_regclass('successions')") is None
-        assert [r["action"] for r in await conn.fetch("SELECT action FROM audit_log")] == [
-            "agent_key.replace"
-        ]
-        with pytest.raises(asyncpg.CheckViolationError):
-            await conn.execute(
-                "INSERT INTO audit_log (actor_kind, actor, action) "
-                "VALUES ('admin_key', 'admin:1', 'agent.retire')"
-            )
-        await conn.execute("DELETE FROM audit_log")
-    finally:
-        await conn.close()
-
-    conn = await asyncpg.connect(dsn)
-    try:
-        await conn.execute(
-            "INSERT INTO audit_log (actor_kind, actor, action, target) "
-            "VALUES ('admin_key', 'admin:1', 'agent_key.replace', 'a'), "
-            "('admin_key', 'admin:1', 'agent.cleanup', 'bad'), "
-            "('admin_key', 'admin:1', 'agent.cleanup_undo', 'bad'), "
-            "('admin_key', 'admin:1', 'fleet.rename', 'f'), "
-            "('admin_key', 'admin:1', 'fleet.merge', 'f'), "
-            "('admin_key', 'admin:1', 'fleet.move_agents', 'f'), "
-            "('admin_key', 'admin:1', 'fleet.create', 'f')"
-        )
-        await conn.execute(
-            "INSERT INTO entries (id, kind, summary, author, agent, occurred_at) "
-            "VALUES ('00000000-0000-0000-0000-000000000001', 'fact', 'e', 'bad', 'x', now())"
-        )
-        await conn.execute(
-            'INSERT INTO feedbacks (entry_id, "user", agent, verdict, set_aside_by) '
-            "VALUES ('00000000-0000-0000-0000-000000000001', 'bad', 'x', 'wrong', gen_random_uuid())"
-        )
-        await conn.execute(
-            "INSERT INTO agent_cleanups (agent, since, until, cleaned_by) "
-            "VALUES ('bad', now(), now(), 'admin:1')"
-        )
-    finally:
-        await conn.close()
-    rolled = await rollback(dsn, dim, count=1, discard_audit_rows=True)
-    assert rolled == ["0023.fleet-move"]
-    assert await current_schema_version(dsn) == "0022.agent-cleanup"
-    conn = await asyncpg.connect(dsn)
-    try:
-        assert (
-            await conn.fetchval(
-                "SELECT count(*) FROM information_schema.columns "
-                "WHERE table_name = 'fleet_merges' AND column_name = 'kind'"
-            )
-            == 0
-        )
-        assert sorted(r["action"] for r in await conn.fetch("SELECT action FROM audit_log")) == [
-            "agent.cleanup",
-            "agent.cleanup_undo",
-            "agent_key.replace",
-            "fleet.create",
-            "fleet.merge",
-            "fleet.rename",
-        ]
-        with pytest.raises(asyncpg.CheckViolationError):
-            await conn.execute(
-                "INSERT INTO audit_log (actor_kind, actor, action) "
-                "VALUES ('admin_key', 'admin:1', 'fleet.move_agents')"
-            )
-    finally:
-        await conn.close()
-    rolled = await rollback(dsn, dim, count=1, discard_audit_rows=True)
-    assert rolled == ["0022.agent-cleanup"]
-    assert await current_schema_version(dsn) == "0021.credential-last-used"
-    conn = await asyncpg.connect(dsn)
-    try:
-        has_column = "SELECT count(*) FROM information_schema.columns WHERE column_name = $1"
-        assert await conn.fetchval(has_column, "set_aside_by") == 0
-        assert await conn.fetchval("SELECT to_regclass('agent_cleanups')") is None
-        assert await conn.fetchval("SELECT count(*) FROM feedbacks") == 1  # the rating is kept
-        assert sorted(r["action"] for r in await conn.fetch("SELECT action FROM audit_log")) == [
-            "agent_key.replace",
-            "fleet.create",
-            "fleet.merge",
-            "fleet.rename",
-        ]
-        with pytest.raises(asyncpg.CheckViolationError):
-            await conn.execute(
-                "INSERT INTO audit_log (actor_kind, actor, action) "
-                "VALUES ('admin_key', 'admin:1', 'agent.cleanup')"
-            )
-        await conn.execute("DELETE FROM feedbacks")
-        await conn.execute("DELETE FROM entries")
-    finally:
-        await conn.close()
-    rolled = await rollback(dsn, dim, count=1)
-    assert rolled == ["0021.credential-last-used"]
-    assert await current_schema_version(dsn) == "0020.agent-key-replace"
-    rolled = await rollback(dsn, dim, count=1, discard_audit_rows=True)
-    assert rolled == ["0020.agent-key-replace"]
-    assert await current_schema_version(dsn) == "0019.fleet-rename"
-    conn = await asyncpg.connect(dsn)
-    try:
-        assert [r["action"] for r in await conn.fetch("SELECT action FROM audit_log")] == [
-            "fleet.rename",
-            "fleet.merge",
-            "fleet.create",
-        ]
-        with pytest.raises(asyncpg.CheckViolationError):
-            await conn.execute(
-                "INSERT INTO audit_log (actor_kind, actor, action) "
-                "VALUES ('admin_key', 'admin:1', 'agent_key.replace')"
-            )
-    finally:
-        await conn.close()
-    rolled = await rollback(dsn, dim, count=1, discard_audit_rows=True)
-    assert rolled == ["0019.fleet-rename"]
-    assert await current_schema_version(dsn) == "0017.fleet-merge"
-    conn = await asyncpg.connect(dsn)
-    try:
-        assert [r["action"] for r in await conn.fetch("SELECT action FROM audit_log")] == [
-            "fleet.merge",
-            "fleet.create",
-        ]
-        with pytest.raises(asyncpg.CheckViolationError):
-            await conn.execute(
-                "INSERT INTO audit_log (actor_kind, actor, action) "
-                "VALUES ('admin_key', 'admin:1', 'fleet.rename')"
-            )
-    finally:
-        await conn.close()
-    rolled = await rollback(dsn, dim, count=1, discard_audit_rows=True)
-    assert rolled == ["0017.fleet-merge"]
-    assert await current_schema_version(dsn) == "0016.entry-withdrawn-at"
-    conn = await asyncpg.connect(dsn)
-    try:
-        has_column = "SELECT count(*) FROM information_schema.columns WHERE column_name = $1"
-        assert await conn.fetchval(has_column, "merged_into") == 0
-        assert await conn.fetchval(has_column, "merged_at") == 0
-        for table in ("fleet_merges", "fleet_merge_entries"):
-            assert await conn.fetchval("SELECT to_regclass($1)", table) is None
-        assert [r["action"] for r in await conn.fetch("SELECT action FROM audit_log")] == [
-            "fleet.create"
-        ]
-        with pytest.raises(asyncpg.CheckViolationError):
-            await conn.execute(
-                "INSERT INTO audit_log (actor_kind, actor, action) "
-                "VALUES ('admin_key', 'admin:1', 'fleet.merge')"
-            )
-        await conn.execute("DELETE FROM audit_log")
-    finally:
-        await conn.close()
-    rolled = await rollback(dsn, dim, count=1)
-    assert rolled == ["0016.entry-withdrawn-at"]
-    assert await current_schema_version(dsn) == "0015.search-counts-explore"
-    conn = await asyncpg.connect(dsn)
-    try:
-        has_column = "SELECT count(*) FROM information_schema.columns WHERE column_name = $1"
-        assert await conn.fetchval(has_column, "withdrawn_at") == 0
-        assert await conn.fetchval(has_column, "withdrawn_reason") == 1  # only the time goes
-    finally:
-        await conn.close()
-
-    conn = await asyncpg.connect(dsn)
-    try:
-        await conn.execute(
-            "INSERT INTO search_counts (fleet_id, searches, empty, explore) VALUES ('', 2, 1, 1)"
-        )
-        with pytest.raises(asyncpg.CheckViolationError):  # explore never exceeds searches
-            await conn.execute("UPDATE search_counts SET explore = 3")
-    finally:
-        await conn.close()
-    rolled = await rollback(dsn, dim, count=1)
-    assert rolled == ["0015.search-counts-explore"]
-    assert await current_schema_version(dsn) == "0014.pin-audit"
-    conn = await asyncpg.connect(dsn)
-    try:
-        # Only the explore column goes; the other counters stay.
-        row = await conn.fetchrow("SELECT * FROM search_counts")
-        assert row is not None and dict(row) == {"fleet_id": "", "searches": 2, "empty": 1}
-        await conn.execute("DELETE FROM search_counts")
-    finally:
-        await conn.close()
-
-    conn = await asyncpg.connect(dsn)
-    try:
-        await conn.execute(
-            "INSERT INTO audit_log (actor_kind, actor, action, target) VALUES "
-            "('agent_key', 'lead', 'entry.pin', 'e1'), "
-            "('agent_key', 'lead', 'entry.unpin', 'e1'), "
-            "('org_key', 'org:abc', 'agent.register', 'alice')"
-        )
-    finally:
-        await conn.close()
-    rolled = await rollback(dsn, dim, count=1, discard_audit_rows=True)
-    assert rolled == ["0014.pin-audit"]
-    assert await current_schema_version(dsn) == "0013.see-also-and-agent-indexes"
-    conn = await asyncpg.connect(dsn)
-    try:
-        rows = await conn.fetch("SELECT action FROM audit_log")
-        assert [r["action"] for r in rows] == ["agent.register"]  # only 0014's rows go
-        with pytest.raises(asyncpg.CheckViolationError):
-            await conn.execute(
-                "INSERT INTO audit_log (actor_kind, actor, action) "
-                "VALUES ('agent_key', 'lead', 'entry.pin')"
-            )
-        await conn.execute("DELETE FROM audit_log")
-    finally:
-        await conn.close()
-
-    rolled = await rollback(dsn, dim, count=1)
-    assert rolled == ["0013.see-also-and-agent-indexes"]
-    assert await current_schema_version(dsn) == "0012.pins"
-    conn = await asyncpg.connect(dsn)
-    try:
-        assert await conn.fetchval("SELECT to_regclass('entry_links_to_idx')") is not None
-        for index in ("entry_links_to_created_idx", "entries_agent_created_idx"):
-            assert await conn.fetchval("SELECT to_regclass($1)", index) is None
-    finally:
-        await conn.close()
-
-    rolled = await rollback(dsn, dim, count=1)
-    assert rolled == ["0012.pins"]
-    assert await current_schema_version(dsn) == "0011.entry-links"
-    conn = await asyncpg.connect(dsn)
-    try:
-        assert await conn.fetchval("SELECT to_regclass('pins')") is None
-    finally:
-        await conn.close()
-
-    conn = await asyncpg.connect(dsn)
-    try:
-        with pytest.raises(asyncpg.CheckViolationError):  # no entry links to itself
-            await conn.execute(
-                "INSERT INTO entry_links (from_id, to_id) VALUES "
-                "('00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001')"
-            )
-    finally:
-        await conn.close()
-    rolled = await rollback(dsn, dim, count=1)
-    assert rolled == ["0011.entry-links"]
-    assert await current_schema_version(dsn) == "0010.search-counts"
-    conn = await asyncpg.connect(dsn)
-    try:
-        assert await conn.fetchval("SELECT to_regclass('entry_links')") is None
-    finally:
-        await conn.close()
-
-    conn = await asyncpg.connect(dsn)
-    try:
-        await conn.execute(
-            "INSERT INTO search_counts (fleet_id, searches, empty) VALUES ('', 2, 1)"
-        )
-        with pytest.raises(asyncpg.CheckViolationError):  # empty never exceeds searches
-            await conn.execute("UPDATE search_counts SET empty = 3")
-    finally:
-        await conn.close()
-    rolled = await rollback(dsn, dim, count=1)
-    assert rolled == ["0010.search-counts"]
-    assert await current_schema_version(dsn) == "0009.audit-register"
-    conn = await asyncpg.connect(dsn)
-    try:
-        assert await conn.fetchval("SELECT to_regclass('search_counts')") is None
-    finally:
-        await conn.close()
-
-    conn = await asyncpg.connect(dsn)
-    try:
-        await conn.execute(
-            "INSERT INTO audit_log (actor_kind, actor, action, target) VALUES "
-            "('org_key', 'org:abc', 'agent.register', 'alice'), "
-            "('admin_key', 'admin:abc', 'agent.activate', 'alice')"
-        )
-    finally:
-        await conn.close()
-    rolled = await rollback(dsn, dim, count=1, discard_audit_rows=True)
-    assert rolled == ["0009.audit-register"]
-    assert await current_schema_version(dsn) == "0008.history-and-list-indexes"
-    conn = await asyncpg.connect(dsn)
-    try:
-        rows = await conn.fetch("SELECT action FROM audit_log")
-        assert [r["action"] for r in rows] == ["agent.activate"]  # only 0009's rows go
-        with pytest.raises(asyncpg.CheckViolationError):
-            await conn.execute(
-                "INSERT INTO audit_log (actor_kind, actor, action) "
-                "VALUES ('org_key', 'org:abc', 'agent.register')"
-            )
-        await conn.execute("DELETE FROM audit_log")
-    finally:
-        await conn.close()
-
-    rolled = await rollback(dsn, dim, count=1)
-    assert rolled == ["0008.history-and-list-indexes"]
-    assert await current_schema_version(dsn) == "0007.credential-uniqueness"
-    conn = await asyncpg.connect(dsn)
-    try:
-        for index in (
-            "entries_superseded_by_idx",
-            "entries_created_at_id_idx",
-            "entries_author_created_idx",
-        ):
-            assert await conn.fetchval("SELECT to_regclass($1)", index) is None
-    finally:
-        await conn.close()
-
-    rolled = await rollback(dsn, dim, count=1)
-    assert rolled == ["0007.credential-uniqueness"]
-    assert await current_schema_version(dsn) == "0006.agent-revoked-status"
-    conn = await asyncpg.connect(dsn)
-    try:
-        for index in ("credentials_one_agent_key", "credentials_one_org_key"):
-            assert await conn.fetchval("SELECT to_regclass($1)", index) is None
-    finally:
-        await conn.close()
-
-    rolled = await rollback(dsn, dim, count=1)
-    assert rolled == ["0006.agent-revoked-status"]
-    assert await current_schema_version(dsn) == "0005.audit-log"
-
-    rolled = await rollback(dsn, dim, count=1)
-    assert rolled == ["0005.audit-log"]
-    assert await current_schema_version(dsn) == "0004.hnsw-vector-index"
-
-    conn = await asyncpg.connect(dsn)
-    try:
-        assert await conn.fetchval("SELECT to_regclass('audit_log')") is None
-        # The rest of the schema is untouched.
-        assert await conn.fetchval("SELECT to_regclass('entries_embedding_hnsw_idx')") is not None
-    finally:
-        await conn.close()
-
-    rolled = await rollback(dsn, dim, count=1)
-    assert rolled == ["0004.hnsw-vector-index"]
-    assert await current_schema_version(dsn) == "0003.importance-source-check"
-
-    conn = await asyncpg.connect(dsn)
-    try:
-        index = await conn.fetchval("SELECT to_regclass('entries_embedding_hnsw_idx')")
-        assert index is None
-        # The indexed column is untouched — an index holds nothing the
-        # table does not, which is what makes this rollback legal.
-        column = await conn.fetchval(
-            "SELECT 1 FROM information_schema.columns "
-            "WHERE table_name = 'entries' AND column_name = 'embedding'"
-        )
-        assert column is not None
-    finally:
-        await conn.close()
-
-    rolled = await rollback(dsn, dim, count=1)
-    assert rolled == ["0003.importance-source-check"]
-    assert await current_schema_version(dsn) == "0002.importance-source"
-
-    conn = await asyncpg.connect(dsn)
-    try:
-        constraint = await conn.fetchval(
-            "SELECT 1 FROM pg_constraint WHERE conname = 'entries_importance_source_check'"
-        )
-        assert constraint is None
-        # The column itself is untouched — only 0002's rollback drops it.
-        column = await conn.fetchval(
-            "SELECT 1 FROM information_schema.columns "
-            "WHERE table_name = 'entries' AND column_name = 'importance_source'"
-        )
-        assert column is not None
-    finally:
-        await conn.close()
+    for step in ROLLBACK_STEPS:
+        if step.seed:
+            async with _connected(dsn) as conn:
+                await step.seed(conn)
+        rolled = await rollback(dsn, dim, count=1, **step.confirm)
+        assert rolled == [step.rolls_back]
+        assert await current_schema_version(dsn) == step.head_after
+        if step.check:
+            async with _connected(dsn) as conn:
+                await step.check(conn)
 
 
 async def test_rollback_refuses_to_drop_the_initial_schema() -> None:
@@ -802,15 +845,12 @@ async def test_migrate_fails_loudly_on_dim_mismatch() -> None:
 
     # No partial state, and the lock is released after the failure.
     assert await current_embedding_dim(dsn) == pool_dim
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         held = await conn.fetchval(
             "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' "
             "AND database = (SELECT oid FROM pg_database WHERE datname = current_database())"
         )
         assert held == 0
-    finally:
-        await conn.close()
 
 
 async def test_0015_adds_the_explore_counter_over_existing_search_counts() -> None:
@@ -821,18 +861,14 @@ async def test_0015_adds_the_explore_counter_over_existing_search_counts() -> No
     await rollback(dsn, dim, count=11)
     assert await current_schema_version(dsn) == "0014.pin-audit"
 
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         await conn.execute(
             "INSERT INTO search_counts (fleet_id, searches, empty) VALUES ('', 5, 2), ('f1', 1, 0)"
         )
-    finally:
-        await conn.close()
 
     await migrate(dsn, dim)
     assert await current_schema_version(dsn) == HEAD
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         rows = await conn.fetch(
             "SELECT fleet_id, searches, empty, explore FROM search_counts ORDER BY fleet_id"
         )
@@ -840,8 +876,6 @@ async def test_0015_adds_the_explore_counter_over_existing_search_counts() -> No
         with pytest.raises(asyncpg.CheckViolationError):  # never more explore than searches
             await conn.execute("UPDATE search_counts SET explore = 6 WHERE fleet_id = ''")
         await conn.execute("DELETE FROM search_counts")
-    finally:
-        await conn.close()
 
 
 async def test_0006_backfills_revoked_and_rolls_back_without_loss() -> None:
@@ -854,8 +888,7 @@ async def test_0006_backfills_revoked_and_rolls_back_without_loss() -> None:
     await rollback(dsn, dim, count=20)  # 0026, 0025, 0024 down to 0006
     assert await current_schema_version(dsn) == "0005.audit-log"
 
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         await conn.execute(
             "INSERT INTO agents (name, status, trust_level) VALUES "
             "('keyed', 'active', 2), ('keyless', 'active', 2), ('waiting', 'pending', 0)"
@@ -864,27 +897,21 @@ async def test_0006_backfills_revoked_and_rolls_back_without_loss() -> None:
             "INSERT INTO credentials (key_hash, kind, user_id, agent_id, agent_name) "
             "VALUES ('h-keyed', 'agent', 'keyed', 'keyed', 'keyed')"
         )
-    finally:
-        await conn.close()
 
     await migrate(dsn, dim)  # applies 0006 to 0024
     statuses = "SELECT name, status FROM agents ORDER BY name"
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         assert [tuple(r) for r in await conn.fetch(statuses)] == [
             ("keyed", "active"),
             ("keyless", "revoked"),
             ("waiting", "pending"),
         ]
         await conn.execute("UPDATE agents SET status = 'revoked' WHERE name = 'waiting'")
-    finally:
-        await conn.close()
 
     await rollback(
         dsn, dim, count=20
     )  # 0026, 0025, 0024, 0023, 0022, 0021, 0020, 0019, 0017, 0016, 0015, 0014, 0013, 0012, 0011, 0010, 0009, 0008, 0007, then 0006
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         assert [tuple(r) for r in await conn.fetch(statuses)] == [
             ("keyed", "active"),
             ("keyless", "active"),
@@ -894,8 +921,6 @@ async def test_0006_backfills_revoked_and_rolls_back_without_loss() -> None:
             await conn.execute("UPDATE agents SET status = 'revoked' WHERE name = 'keyed'")
         await conn.execute("DELETE FROM credentials")
         await conn.execute("DELETE FROM agents")
-    finally:
-        await conn.close()
 
 
 async def test_0007_dedupes_keeping_the_newest_then_enforces_uniqueness() -> None:
@@ -911,8 +936,7 @@ async def test_0007_dedupes_keeping_the_newest_then_enforces_uniqueness() -> Non
     )  # 0026, 0025, 0024, 0023, 0022, 0021, 0020, 0019, 0017, 0016, 0015, 0014, 0013, 0012, 0011, 0010, 0009, 0008 (indexes) then 0007
     assert await current_schema_version(dsn) == "0006.agent-revoked-status"
 
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         await conn.execute(
             "INSERT INTO credentials (key_hash, kind, user_id, agent_id, agent_name, created_at) "
             "VALUES ('a-old', 'agent', 'bob', 'bob', 'bob', '2026-01-01'), "
@@ -926,12 +950,9 @@ async def test_0007_dedupes_keeping_the_newest_then_enforces_uniqueness() -> Non
             "('o-old', 'org', 'org', '2026-01-01'), ('o-new', 'org', 'org', '2026-02-01'), "
             "('u1', 'user', 'legacy', '2026-01-01'), ('u2', 'user', 'legacy', '2026-01-02')"
         )
-    finally:
-        await conn.close()
 
     await migrate(dsn, dim)
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         rows = await conn.fetch("SELECT key_hash FROM credentials ORDER BY key_hash")
         assert [r["key_hash"] for r in rows] == ["a-new", "c-only", "o-new", "tie-b", "u1", "u2"]
         with pytest.raises(asyncpg.UniqueViolationError):
@@ -943,27 +964,21 @@ async def test_0007_dedupes_keeping_the_newest_then_enforces_uniqueness() -> Non
             await conn.execute(
                 "INSERT INTO credentials (key_hash, kind, user_id) VALUES ('y', 'org', 'o')"
             )
-    finally:
-        await conn.close()
 
     await rollback(
         dsn, dim, count=19
     )  # 0026, 0025, 0024, 0023, 0022, 0021, 0020, 0019, 0017, 0016, 0015, 0014, 0013, 0012, 0011, 0010, 0009, 0008 (indexes) then 0007
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         assert await conn.fetchval("SELECT to_regclass('credentials_one_agent_key')") is None
         assert await conn.fetchval("SELECT to_regclass('credentials_one_org_key')") is None
         assert await conn.fetchval("SELECT count(*) FROM credentials") == 6
-    finally:
-        await conn.close()
     await migrate(dsn, dim)
 
 
 async def _backend_count(dsn: str, application: str) -> int:
     """Open backends that identify themselves as ``application`` (set through
     the DSN), so another client of the database does not change the count."""
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         return int(
             await conn.fetchval(
                 "SELECT count(*) FROM pg_stat_activity "
@@ -971,8 +986,6 @@ async def _backend_count(dsn: str, application: str) -> int:
                 application,
             )
         )
-    finally:
-        await conn.close()
 
 
 async def test_migrate_and_rollback_leave_no_connection_open() -> None:
@@ -1002,23 +1015,17 @@ async def test_migrate_fails_loudly_on_an_invalid_hnsw_index() -> None:
     await _reset_chain(dsn)
     await migrate(dsn, dim)
 
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         await conn.execute(
             "UPDATE pg_index SET indisvalid = false "
             "WHERE indexrelid = 'entries_embedding_hnsw_idx'::regclass"
         )
-    finally:
-        await conn.close()
 
     with pytest.raises(RuntimeError, match=r"INVALID.*REINDEX INDEX CONCURRENTLY"):
         await migrate(dsn, dim)
 
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         await conn.execute("REINDEX INDEX CONCURRENTLY entries_embedding_hnsw_idx")
-    finally:
-        await conn.close()
     await migrate(dsn, dim)  # repaired: clean again
 
 
@@ -1105,35 +1112,26 @@ async def test_0016_backfills_withdrawn_entries_and_rolls_back_without_loss() ->
     )  # 0026, 0025, 0024, 0023, 0022, 0021, 0020, 0019, 0017, then 0016
     assert await current_schema_version(dsn) == "0015.search-counts-explore"
 
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         await conn.execute(
             "INSERT INTO entries (kind, summary, author, agent, state, withdrawn_reason, occurred_at) "
             "VALUES ('fact', 'gone', 'a', 'x', 'withdrawn', 'obsolete', now()), "
             "('fact', 'live', 'a', 'x', 'active', NULL, now())"
         )
-    finally:
-        await conn.close()
 
     await migrate(dsn, dim)
     assert await current_schema_version(dsn) == HEAD
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         rows = await conn.fetch("SELECT summary, withdrawn_at FROM entries ORDER BY summary")
         by_summary = {r["summary"]: r["withdrawn_at"] for r in rows}
         assert by_summary["gone"] is not None and by_summary["live"] is None
-    finally:
-        await conn.close()
 
     await rollback(dsn, dim, count=10)
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         assert await conn.fetchval("SELECT count(*) FROM entries") == 2  # no row lost
         row = await conn.fetchrow("SELECT withdrawn_reason FROM entries WHERE summary = 'gone'")
         assert row is not None and row["withdrawn_reason"] == "obsolete"
         await conn.execute("DELETE FROM entries")
-    finally:
-        await conn.close()
     await migrate(dsn, dim)
 
 
@@ -1148,16 +1146,12 @@ async def test_0017_adds_the_merge_columns_and_tables_and_rolls_back_without_los
     await rollback(dsn, dim, count=9)  # 0026, 0025, 0024, 0023, 0022, 0021, 0020, 0019, then 0017
     assert await current_schema_version(dsn) == "0016.entry-withdrawn-at"
 
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         await conn.execute("INSERT INTO fleets (name) VALUES ('old')")
-    finally:
-        await conn.close()
 
     await migrate(dsn, dim)
     assert await current_schema_version(dsn) == HEAD
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         row = await conn.fetchrow("SELECT merged_into, merged_at FROM fleets WHERE name = 'old'")
         assert row is not None and (row["merged_into"], row["merged_at"]) == (None, None)
         merge_id = await conn.fetchval(
@@ -1187,19 +1181,14 @@ async def test_0017_adds_the_merge_columns_and_tables_and_rolls_back_without_los
             "[]",
             None,
         )
-    finally:
-        await conn.close()
 
     await rollback(
         dsn, dim, count=9, discard_audit_rows=True
     )  # 0026, 0025, 0024, 0023, 0022, 0021, 0020, 0019, then 0017
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         assert await conn.fetchval("SELECT count(*) FROM fleets") == 1
         assert await conn.fetchval("SELECT count(*) FROM audit_log") == 0
         await conn.execute("DELETE FROM fleets")
-    finally:
-        await conn.close()
     await migrate(dsn, dim)
 
 
@@ -1212,8 +1201,7 @@ async def test_0020_takes_the_key_replace_action_and_rolls_back_dropping_only_it
     await rollback(dsn, dim, count=6)  # 0026, 0025, 0024, 0023, 0022, then 0021
     assert await current_schema_version(dsn) == "0020.agent-key-replace"
 
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         await conn.execute(
             "INSERT INTO audit_log (actor_kind, actor, action, target, detail) VALUES "
             "('admin_key', 'admin:1', 'agent_key.replace', 'a', "
@@ -1225,12 +1213,9 @@ async def test_0020_takes_the_key_replace_action_and_rolls_back_dropping_only_it
             "INSERT INTO credentials (key_hash, kind, user_id, agent_id, agent_name) "
             "VALUES ('h-a', 'agent', 'a', 'a', 'a')"
         )
-    finally:
-        await conn.close()
 
     assert await rollback(dsn, dim, count=1, discard_audit_rows=True) == ["0020.agent-key-replace"]
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         assert [
             r["action"] for r in await conn.fetch("SELECT action FROM audit_log ORDER BY action")
         ] == [
@@ -1245,8 +1230,6 @@ async def test_0020_takes_the_key_replace_action_and_rolls_back_dropping_only_it
             )
         await conn.execute("DELETE FROM audit_log")
         await conn.execute("DELETE FROM credentials")
-    finally:
-        await conn.close()
     await migrate(dsn, dim)
 
 
@@ -1262,8 +1245,7 @@ async def test_0022_adds_the_set_aside_mark_and_the_cleanup_table_and_rolls_back
     assert await current_schema_version(dsn) == "0021.credential-last-used"
 
     entry = "00000000-0000-0000-0000-000000000002"
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         await conn.execute(
             "INSERT INTO entries (id, kind, summary, author, agent, occurred_at) "
             "VALUES ($1, 'fact', 'e', 'good', 'x', now())",
@@ -1273,13 +1255,10 @@ async def test_0022_adds_the_set_aside_mark_and_the_cleanup_table_and_rolls_back
             "INSERT INTO feedbacks (entry_id, \"user\", agent, verdict) VALUES ($1, 'bad', 'x', 'wrong')",
             entry,
         )
-    finally:
-        await conn.close()
 
     await migrate(dsn, dim)
     assert await current_schema_version(dsn) == HEAD
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         assert await conn.fetchval("SELECT set_aside_by FROM feedbacks") is None
         cleanup_id = await conn.fetchval(
             "INSERT INTO agent_cleanups (agent, since, until, cleaned_by) "
@@ -1306,19 +1285,14 @@ async def test_0022_adds_the_set_aside_mark_and_the_cleanup_table_and_rolls_back
                 "VALUES ('admin_key', 'admin:1', $1)",
                 action,
             )
-    finally:
-        await conn.close()
 
     await rollback(dsn, dim, count=5, discard_audit_rows=True)  # 0026, 0025, 0024, 0023, then 0022
     assert await current_schema_version(dsn) == "0021.credential-last-used"
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         assert await conn.fetchval("SELECT count(*) FROM feedbacks") == 1  # the rating is kept
         assert await conn.fetchval("SELECT count(*) FROM audit_log") == 0
         await conn.execute("DELETE FROM feedbacks")
         await conn.execute("DELETE FROM entries")
-    finally:
-        await conn.close()
     await migrate(dsn, dim)
 
 
@@ -1331,8 +1305,7 @@ async def test_0021_adds_a_nullable_last_use_and_rolls_back_without_touching_key
     await rollback(dsn, dim, count=6)  # 0026, 0025, 0024, 0023, 0022, then 0021
     assert await current_schema_version(dsn) == "0020.agent-key-replace"
 
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         await conn.execute(
             "INSERT INTO agents (name, status, trust_level) VALUES "
             "('live', 'active', 1), ('waiting', 'pending', 0)"
@@ -1348,13 +1321,10 @@ async def test_0021_adds_a_nullable_last_use_and_rolls_back_without_touching_key
         await conn.execute(
             "INSERT INTO credentials (key_hash, kind, user_id) VALUES ('h-old', 'admin', 'admin')"
         )
-    finally:
-        await conn.close()
 
     await migrate(dsn, dim)  # applies 0021 up to the head
     assert await current_schema_version(dsn) == HEAD
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         stamps = {
             r["key_hash"]: r["last_used_at"]
             for r in await conn.fetch("SELECT key_hash, last_used_at FROM credentials")
@@ -1363,13 +1333,10 @@ async def test_0021_adds_a_nullable_last_use_and_rolls_back_without_touching_key
         assert stamps["h-live"] is not None
         assert stamps["h-old"] is None
         assert stamps["h-wait"] is None  # a key of a non-active agent
-    finally:
-        await conn.close()
 
     await rollback(dsn, dim, count=6)  # 0026, 0025, 0024, 0023, 0022, then 0021
     assert await current_schema_version(dsn) == "0020.agent-key-replace"
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         assert await conn.fetchval("SELECT count(*) FROM credentials") == 3  # no key lost
         assert (
             await conn.fetchval(
@@ -1380,8 +1347,6 @@ async def test_0021_adds_a_nullable_last_use_and_rolls_back_without_touching_key
         )
         await conn.execute("DELETE FROM credentials")
         await conn.execute("DELETE FROM agents")
-    finally:
-        await conn.close()
     await migrate(dsn, dim)
 
 
@@ -1396,19 +1361,15 @@ async def test_0023_adds_the_move_kind_and_rolls_back_keeping_merge_records() ->
     await rollback(dsn, dim, count=4)  # 0026, 0025, 0024, then 0023
     assert await current_schema_version(dsn) == "0022.agent-cleanup"
 
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         old_merge = await conn.fetchval(
             "INSERT INTO fleet_merges (source_fleet_id, target_fleet_id, merged_by) "
             "VALUES (gen_random_uuid(), gen_random_uuid(), 'admin:1') RETURNING id"
         )
-    finally:
-        await conn.close()
 
     await migrate(dsn, dim)
     assert await current_schema_version(dsn) == HEAD
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         assert await conn.fetchval("SELECT kind FROM fleet_merges WHERE id = $1", old_merge) == (
             "merge"
         )
@@ -1442,13 +1403,10 @@ async def test_0023_adds_the_move_kind_and_rolls_back_keeping_merge_records() ->
                 "VALUES ('admin_key', 'admin:1', $1)",
                 action,
             )
-    finally:
-        await conn.close()
 
     await rollback(dsn, dim, count=4, discard_audit_rows=True)  # 0026, 0025, 0024, then 0023
     assert await current_schema_version(dsn) == "0022.agent-cleanup"
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         assert [str(r["id"]) for r in await conn.fetch("SELECT id FROM fleet_merges")] == [
             str(old_merge)
         ]
@@ -1468,8 +1426,6 @@ async def test_0023_adds_the_move_kind_and_rolls_back_keeping_merge_records() ->
         await conn.execute("DELETE FROM audit_log")
         await conn.execute("DELETE FROM fleet_merges")
         await conn.execute("DELETE FROM agent_cleanups")
-    finally:
-        await conn.close()
     await migrate(dsn, dim)
 
 
@@ -1482,8 +1438,7 @@ async def test_0024_adds_successions_and_the_retire_audit_actions() -> None:
     dsn, dim = _dsn(), Settings().embedding_dim
     await _start_at_head(dsn, dim)
     assert await current_schema_version(dsn) == HEAD
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         await conn.execute(
             "INSERT INTO agents (name, status, trust_level) VALUES ('a', 'revoked', 2)"
         )
@@ -1514,16 +1469,13 @@ async def test_0024_adds_successions_and_the_retire_audit_actions() -> None:
                 "VALUES ('admin_key', 'admin:1', $1)",
                 action,
             )
-    finally:
-        await conn.close()
     assert await rollback(dsn, dim, count=3, discard_audit_rows=True) == [
         ID_0026,
         ID_0025,
         PREV,
     ]  # 0026, 0025, then 0024
     assert await current_schema_version(dsn) == "0023.fleet-move"
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         assert await conn.fetchval("SELECT to_regclass('successions')") is None
         assert sorted(r["action"] for r in await conn.fetch("SELECT action FROM audit_log")) == [
             "agent.cleanup",
@@ -1539,8 +1491,6 @@ async def test_0024_adds_successions_and_the_retire_audit_actions() -> None:
         await conn.execute("DELETE FROM audit_log")
         assert await conn.fetchval("SELECT count(*) FROM agents") == 1
         await conn.execute("DELETE FROM agents")
-    finally:
-        await conn.close()
     await migrate(dsn, dim)
 
 
@@ -1553,19 +1503,15 @@ async def test_0025_adds_a_nullable_lock_time_and_rolls_back_without_touching_ke
     assert await rollback(dsn, dim, count=2) == [ID_0026, ID_0025]
     assert await current_schema_version(dsn) == PREV
 
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         await conn.execute(
             "INSERT INTO credentials (key_hash, kind, user_id, agent_id, agent_name) "
             "VALUES ('h-old', 'agent', 'a', 'a', 'a')"
         )
-    finally:
-        await conn.close()
 
     await migrate(dsn, dim)
     assert await current_schema_version(dsn) == HEAD
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         assert await conn.fetchval("SELECT locked_at FROM credentials") is None
         await conn.execute("UPDATE credentials SET locked_at = now()")
         for action in ("agent_key.lock", "agent_key.replace", "agent.retire"):
@@ -1573,15 +1519,12 @@ async def test_0025_adds_a_nullable_lock_time_and_rolls_back_without_touching_ke
                 "INSERT INTO audit_log (actor_kind, actor, action) VALUES ('agent_key', 'a', $1)",
                 action,
             )
-    finally:
-        await conn.close()
 
     assert await rollback(dsn, dim, count=2, discard_audit_rows=True, unlock_locked_keys=True) == [
         ID_0026,
         ID_0025,
     ]
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         assert await conn.fetchval("SELECT count(*) FROM credentials") == 1  # no key lost
         assert sorted(r["action"] for r in await conn.fetch("SELECT action FROM audit_log")) == [
             "agent.retire",
@@ -1589,8 +1532,6 @@ async def test_0025_adds_a_nullable_lock_time_and_rolls_back_without_touching_ke
         ]
         await conn.execute("DELETE FROM credentials")
         await conn.execute("DELETE FROM audit_log")
-    finally:
-        await conn.close()
     await migrate(dsn, dim)
 
 
@@ -1601,26 +1542,20 @@ _ID_0006 = "0006.agent-revoked-status"
 
 
 async def _audit_actions(dsn: str) -> list[str]:
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         return [
             r["action"] for r in await conn.fetch("SELECT action FROM audit_log ORDER BY action")
         ]
-    finally:
-        await conn.close()
 
 
 async def _insert_audit(dsn: str, *actions: str) -> None:
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         for action in actions:
             await conn.execute(
                 "INSERT INTO audit_log (actor_kind, actor, action, target) "
                 "VALUES ('admin_key', 'admin:1', $1, 't')",
                 action,
             )
-    finally:
-        await conn.close()
 
 
 async def test_rollback_refuses_to_delete_audit_rows_without_the_flag() -> None:
@@ -1675,15 +1610,12 @@ async def test_rolling_back_0027_is_guarded_by_its_own_rows() -> None:
 
     assert await _guarded_rollback(dsn, dim, count=1, discard_audit_rows=True) == [ID_0027]
     assert await _audit_actions(dsn) == []
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         with pytest.raises(asyncpg.CheckViolationError):
             await conn.execute(
                 "INSERT INTO audit_log (actor_kind, actor, action) "
                 "VALUES ('cli', 'x', 'schema.rollback')"
             )
-    finally:
-        await conn.close()
 
 
 async def test_a_rollback_that_leaves_0027_applied_writes_a_schema_rollback_row() -> None:
@@ -1698,13 +1630,10 @@ async def test_a_rollback_that_leaves_0027_applied_writes_a_schema_rollback_row(
     await ensure_migrated(dsn, dim)
     assert await rollback_via_runner(dsn, dim, discard=True) == [HEAD]
 
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         rows = await conn.fetch(
             "SELECT actor_kind, actor, action, target, detail::text AS detail FROM audit_log"
         )
-    finally:
-        await conn.close()
     assert [r["action"] for r in rows] == ["schema.rollback", "schema.rollback"]
     assert {(r["actor_kind"], r["target"]) for r in rows} == {("cli", HEAD)}
     assert all(r["actor"] for r in rows)
@@ -1723,8 +1652,7 @@ async def rollback_via_runner(dsn: str, dim: int, *, discard: bool = False) -> l
 async def test_rollback_refuses_to_revive_the_keys_of_revoked_agents() -> None:
     dsn, dim = _dsn(), Settings().embedding_dim
     await _start_at(dsn, dim, ID_0027)
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         await conn.execute(
             "INSERT INTO agents (name, status, trust_level) VALUES "
             "('gone', 'revoked', 2), ('live', 'active', 2)"
@@ -1734,8 +1662,6 @@ async def test_rollback_refuses_to_revive_the_keys_of_revoked_agents() -> None:
             "('h-gone', 'agent', 'gone', 'gone', 'gone'), "
             "('h-live', 'agent', 'live', 'live', 'live')"
         )
-    finally:
-        await conn.close()
     count = CHAIN.index(ID_0027) + 1 - CHAIN.index(_ID_0006)  # nothing above 0027 is applied here
 
     with pytest.raises(RollbackRefused) as exc:
@@ -1752,20 +1678,16 @@ async def test_rollback_refuses_to_revive_the_keys_of_revoked_agents() -> None:
         dsn, dim, count=count - 1, discard_audit_rows=True, revive_revoked_keys=True
     )
     assert rolled[-1] == _ID_0006
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         assert await conn.fetchval("SELECT status FROM agents WHERE name = 'gone'") == "active"
         await conn.execute("DELETE FROM credentials")
         await conn.execute("DELETE FROM agents")
-    finally:
-        await conn.close()
 
 
 async def test_rollback_refuses_to_unlock_locked_keys_without_the_flag() -> None:
     dsn, dim = _dsn(), Settings().embedding_dim
     await _start_at(dsn, dim, ID_0027)
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         await conn.execute(
             "INSERT INTO agents (name, status, trust_level) VALUES ('a', 'active', 2)"
         )
@@ -1773,8 +1695,6 @@ async def test_rollback_refuses_to_unlock_locked_keys_without_the_flag() -> None
             "INSERT INTO credentials (key_hash, kind, user_id, agent_id, agent_name, locked_at) "
             "VALUES ('h-locked', 'agent', 'a', 'a', 'a', now())"
         )
-    finally:
-        await conn.close()
 
     with pytest.raises(RollbackRefused) as exc:
         await _guarded_rollback(dsn, dim, count=3)  # 0027, 0026, 0025
@@ -1786,11 +1706,8 @@ async def test_rollback_refuses_to_unlock_locked_keys_without_the_flag() -> None
     # A chain that stops above 0025 does not count them.
     assert await _guarded_rollback(dsn, dim, count=2) == [ID_0027, ID_0026]
     assert await _guarded_rollback(dsn, dim, count=1, unlock_locked_keys=True) == [ID_0025]
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         assert await conn.fetchval("SELECT count(*) FROM credentials") == 1  # the key is kept
-    finally:
-        await conn.close()
 
 
 # ADR 0125: 0032 adds the redaction marker and the `entry.redact` audit action.
@@ -1799,8 +1716,7 @@ async def test_rollback_refuses_to_unlock_locked_keys_without_the_flag() -> None
 async def test_0032_adds_the_redaction_marker_and_the_audit_action() -> None:
     dsn, dim = _dsn(), Settings().embedding_dim
     await _start_at(dsn, dim, ID_0032)
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         column = await conn.fetchrow(
             "SELECT data_type, is_nullable, column_default FROM information_schema.columns "
             "WHERE table_name = 'entries' AND column_name = 'redacted_at'"
@@ -1822,22 +1738,17 @@ async def test_0032_adds_the_redaction_marker_and_the_audit_action() -> None:
             "INSERT INTO audit_log (actor_kind, actor, action, target) "
             "VALUES ('admin_key', 'admin:1', 'entry.redact', 't')"
         )
-    finally:
-        await conn.close()
 
 
 async def test_0032_rolls_back_refused_without_the_flag_and_never_restores_text() -> None:
     dsn, dim = _dsn(), Settings().embedding_dim
     await _start_at(dsn, dim, ID_0032)
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         await conn.execute(
             "INSERT INTO entries (kind, summary, author, agent, state, withdrawn_reason, "
             "occurred_at, redacted_at) VALUES ('fact', '[redacted]', 'a', 'a', 'withdrawn', "
             "'[redacted]', now(), now())"
         )
-    finally:
-        await conn.close()
     await _insert_audit(dsn, "entry.redact", "entry.redact")
 
     with pytest.raises(RollbackRefused) as exc:
@@ -1848,8 +1759,7 @@ async def test_0032_rolls_back_refused_without_the_flag_and_never_restores_text(
     assert await current_schema_version(dsn) == ID_0032
 
     assert await _guarded_rollback(dsn, dim, count=1, discard_audit_rows=True) == [ID_0032]
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         # The marker is gone, the memory stays withdrawn with its stub (the
         # text is not coming back), and the older CHECK refuses the action.
         row = await conn.fetchrow(
@@ -1873,8 +1783,6 @@ async def test_0032_rolls_back_refused_without_the_flag_and_never_restores_text(
                 "INSERT INTO audit_log (actor_kind, actor, action) "
                 "VALUES ('cli', 'x', 'entry.redact')"
             )
-    finally:
-        await conn.close()
     await migrate(dsn, dim)
 
 
@@ -1884,8 +1792,7 @@ async def test_0032_rolls_back_refused_without_the_flag_and_never_restores_text(
 async def test_0033_adds_the_phase_columns_with_their_checks() -> None:
     dsn, dim = _dsn(), Settings().embedding_dim
     await _start_at(dsn, dim, ID_0033)
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         columns = await conn.fetch(
             "SELECT column_name, data_type, is_nullable, column_default "
             "FROM information_schema.columns WHERE table_name = 'fleets' "
@@ -1917,8 +1824,6 @@ async def test_0033_adds_the_phase_columns_with_their_checks() -> None:
             )
         await conn.execute("DELETE FROM audit_log")
         await conn.execute("DELETE FROM fleets")
-    finally:
-        await conn.close()
 
 
 async def test_0033_rolls_back_refused_without_the_flag_and_drops_the_columns() -> None:
@@ -1936,8 +1841,7 @@ async def test_0033_rolls_back_refused_without_the_flag_and_drops_the_columns() 
     assert await _guarded_rollback(dsn, dim, count=1, discard_audit_rows=True) == [ID_0033]
     assert await current_schema_version(dsn) == ID_0032
     assert await _audit_actions(dsn) == ["fleet.merge", "schema.rollback"]
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         assert (
             await conn.fetchval(
                 "SELECT count(*) FROM information_schema.columns "
@@ -1950,8 +1854,6 @@ async def test_0033_rolls_back_refused_without_the_flag_and_drops_the_columns() 
                 "INSERT INTO audit_log (actor_kind, actor, action) "
                 "VALUES ('cli', 'x', 'fleet.phase_clear')"
             )
-    finally:
-        await conn.close()
     await migrate(dsn, dim)
 
 
@@ -1961,8 +1863,7 @@ async def test_0033_rolls_back_refused_without_the_flag_and_drops_the_columns() 
 async def test_0034_adds_the_role_column_with_its_check() -> None:
     dsn, dim = _dsn(), Settings().embedding_dim
     await _start_at(dsn, dim, ID_0034)
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         column = await conn.fetchrow(
             "SELECT data_type, is_nullable, column_default FROM information_schema.columns "
             "WHERE table_name = 'agents' AND column_name = 'role'"
@@ -1986,8 +1887,6 @@ async def test_0034_adds_the_role_column_with_its_check() -> None:
             )
         await conn.execute("DELETE FROM audit_log")
         await conn.execute("DELETE FROM agents")
-    finally:
-        await conn.close()
 
 
 async def test_0034_rolls_back_refused_without_the_flag_and_drops_the_column() -> None:
@@ -2005,8 +1904,7 @@ async def test_0034_rolls_back_refused_without_the_flag_and_drops_the_column() -
     assert await _guarded_rollback(dsn, dim, count=1, discard_audit_rows=True) == [ID_0034]
     assert await current_schema_version(dsn) == ID_0033
     assert await _audit_actions(dsn) == ["fleet.phase_set", "schema.rollback"]
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         assert (
             await conn.fetchval(
                 "SELECT count(*) FROM information_schema.columns "
@@ -2019,8 +1917,6 @@ async def test_0034_rolls_back_refused_without_the_flag_and_drops_the_column() -
                 "INSERT INTO audit_log (actor_kind, actor, action) "
                 "VALUES ('cli', 'x', 'agent.role_clear')"
             )
-    finally:
-        await conn.close()
     await migrate(dsn, dim)
 
 
@@ -2030,8 +1926,7 @@ async def test_0034_rolls_back_refused_without_the_flag_and_drops_the_column() -
 async def test_0035_adds_the_move_to_self_action_and_its_index() -> None:
     dsn, dim = _dsn(), Settings().embedding_dim
     await _start_at(dsn, dim, ID_0035)
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         assert (
             await conn.fetchval(
                 "SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
@@ -2043,8 +1938,6 @@ async def test_0035_adds_the_move_to_self_action_and_its_index() -> None:
             "INSERT INTO audit_log (actor_kind, actor, action, target) "
             "VALUES ('admin_key', 'admin:1', 'entry.move_to_self', 't')"
         )
-    finally:
-        await conn.close()
 
 
 async def test_rolling_back_0035_is_guarded_by_its_own_rows() -> None:
@@ -2052,15 +1945,12 @@ async def test_rolling_back_0035_is_guarded_by_its_own_rows() -> None:
     `--discard-audit-rows`; the moved memories stay `self`."""
     dsn, dim = _dsn(), Settings().embedding_dim
     await _start_at(dsn, dim, ID_0035)
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         await conn.execute("DELETE FROM audit_log")
         await conn.execute(
             "INSERT INTO entries (kind, summary, author, agent, scope, occurred_at) "
             "VALUES ('fact', 'moved', 'a', 'a', 'self', now())"
         )
-    finally:
-        await conn.close()
     await _insert_audit(dsn, "entry.move_to_self", "fleet.merge")
 
     with pytest.raises(RollbackRefused, match=r"entry\.move_to_self"):
@@ -2070,8 +1960,7 @@ async def test_rolling_back_0035_is_guarded_by_its_own_rows() -> None:
     assert await _guarded_rollback(dsn, dim, count=1, discard_audit_rows=True) == [ID_0035]
     assert await current_schema_version(dsn) == ID_0034
     assert await _audit_actions(dsn) == ["fleet.merge", "schema.rollback"]
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         assert await conn.fetchval("SELECT scope FROM entries WHERE author = 'a'") == "self"
         assert (
             await conn.fetchval(
@@ -2084,8 +1973,6 @@ async def test_rolling_back_0035_is_guarded_by_its_own_rows() -> None:
                 "INSERT INTO audit_log (actor_kind, actor, action) "
                 "VALUES ('cli', 'x', 'entry.move_to_self')"
             )
-    finally:
-        await conn.close()
     await migrate(dsn, dim)
 
 
@@ -2095,8 +1982,7 @@ async def test_rolling_back_0035_is_guarded_by_its_own_rows() -> None:
 async def test_0036_adds_the_former_names_table_and_the_rename_action() -> None:
     dsn, dim = _dsn(), Settings().embedding_dim
     await _start_at_head(dsn, dim)
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         await conn.execute("INSERT INTO agent_former_names (name, agent) VALUES ('Old', 'new')")
         with pytest.raises(asyncpg.UniqueViolationError):
             await conn.execute("INSERT INTO agent_former_names (name, agent) VALUES ('old', 'x')")
@@ -2104,8 +1990,6 @@ async def test_0036_adds_the_former_names_table_and_the_rename_action() -> None:
             "INSERT INTO audit_log (actor_kind, actor, action, target) "
             "VALUES ('admin_key', 'admin:1', 'agent.rename', 'new')"
         )
-    finally:
-        await conn.close()
 
 
 async def test_rolling_back_0036_is_guarded_by_its_own_rows() -> None:
@@ -2121,22 +2005,18 @@ async def test_rolling_back_0036_is_guarded_by_its_own_rows() -> None:
 
     assert await _guarded_rollback(dsn, dim, count=1, discard_audit_rows=True) == [HEAD]
     assert await current_schema_version(dsn) == ID_0035
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         assert await conn.fetchval("SELECT to_regclass('agent_former_names')") is None
         with pytest.raises(asyncpg.CheckViolationError):
             await conn.execute(
                 "INSERT INTO audit_log (actor_kind, actor, action) "
                 "VALUES ('cli', 'x', 'agent.rename')"
             )
-    finally:
-        await conn.close()
     await migrate(dsn, dim)
 
 
 async def _fleet_index_and_fillfactor(dsn: str) -> tuple[int, list[str] | None]:
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         indexes = await conn.fetchval(
             "SELECT count(*) FROM pg_indexes WHERE tablename = 'entries' "
             "AND indexname = 'entries_fleet_idx'"
@@ -2145,8 +2025,6 @@ async def _fleet_index_and_fillfactor(dsn: str) -> tuple[int, list[str] | None]:
             "SELECT reloptions FROM pg_class WHERE oid = 'public.entries'::regclass"
         )
         return int(indexes), options
-    finally:
-        await conn.close()
 
 
 async def test_0028_drops_the_fleet_index_and_the_rollback_restores_it() -> None:
@@ -2158,11 +2036,8 @@ async def test_0028_drops_the_fleet_index_and_the_rollback_restores_it() -> None
     assert await _guarded_rollback(dsn, dim, count=1) == [ID_0028]
     assert await current_schema_version(dsn) == ID_0027
     assert await _fleet_index_and_fillfactor(dsn) == (1, None)
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         rows = await conn.fetch("SELECT action, target FROM audit_log")
-    finally:
-        await conn.close()
     assert [(r["action"], r["target"]) for r in rows] == [("schema.rollback", ID_0028)]
 
     # A re-apply is clean, and so is a second drop / set on an applied state.
@@ -2178,14 +2053,11 @@ async def test_0029_widens_the_audit_check_and_rolls_back_to_0028() -> None:
     row because `0027` stays applied (ADR 0119)."""
     dsn, dim = _dsn(), Settings().embedding_dim
     await _start_at(dsn, dim, ID_0029)
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         await conn.execute(
             "INSERT INTO agents (name, owner_alias, status, trust_level) "
             "VALUES ('a', 'jane.doe', 'active', 2)"
         )
-    finally:
-        await conn.close()
     await _insert_audit(dsn, "agent.owner_set", "agent_key.lock")
 
     with pytest.raises(RollbackRefused, match=r"agent\.owner_set"):
@@ -2195,8 +2067,7 @@ async def test_0029_widens_the_audit_check_and_rolls_back_to_0028() -> None:
     assert await _guarded_rollback(dsn, dim, count=1, discard_audit_rows=True) == [ID_0029]
     assert await current_schema_version(dsn) == ID_0028
     assert await _audit_actions(dsn) == ["agent_key.lock", "schema.rollback"]
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         assert await conn.fetchval("SELECT owner_alias FROM agents") == "jane.doe"
         with pytest.raises(asyncpg.CheckViolationError):
             await conn.execute(
@@ -2205,16 +2076,11 @@ async def test_0029_widens_the_audit_check_and_rolls_back_to_0028() -> None:
             )
         await conn.execute("DELETE FROM audit_log")
         await conn.execute("DELETE FROM agents")
-    finally:
-        await conn.close()
     await migrate(dsn, dim)
     await _insert_audit(dsn, "agent.owner_set")
     assert await _audit_actions(dsn) == ["agent.owner_set"]
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         await conn.execute("DELETE FROM audit_log")
-    finally:
-        await conn.close()
 
 
 async def test_rolling_back_0031_is_guarded_by_its_own_rows() -> None:
@@ -2232,15 +2098,12 @@ async def test_rolling_back_0031_is_guarded_by_its_own_rows() -> None:
     assert await _guarded_rollback(dsn, dim, count=1, discard_audit_rows=True) == [ID_0031]
     assert await current_schema_version(dsn) == ID_0030
     assert await _audit_actions(dsn) == ["fleet.merge", "schema.rollback"]
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         with pytest.raises(asyncpg.CheckViolationError):
             await conn.execute(
                 "INSERT INTO audit_log (actor_kind, actor, action) "
                 "VALUES ('cli', 'x', 'entry.restore')"
             )
-    finally:
-        await conn.close()
 
 
 async def test_0030_builds_the_audit_indexes_and_its_rollback_drops_them() -> None:
@@ -2257,13 +2120,10 @@ async def test_0030_builds_the_audit_indexes_and_its_rollback_drops_them() -> No
         "SELECT c.relname FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
         "WHERE i.indisvalid AND c.relname = ANY($1::text[]) ORDER BY c.relname"
     )
-    conn = await asyncpg.connect(dsn)
-    try:
+    async with _connected(dsn) as conn:
         assert [r[0] for r in await conn.fetch(sql, names)] == sorted(names)
         assert await _guarded_rollback(dsn, dim, count=2) == [ID_0031, ID_0030]
         assert await conn.fetch(sql, names) == []
         assert await current_schema_version(dsn) == ID_0029
         await migrate(dsn, dim)
         assert [r[0] for r in await conn.fetch(sql, names)] == sorted(names)
-    finally:
-        await conn.close()

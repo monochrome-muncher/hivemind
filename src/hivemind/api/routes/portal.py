@@ -24,7 +24,6 @@ from hivemind.api.routes.shared import (
     listed_with_counts,
     pin_entry,
     run_search,
-    to_utc,
     unpin_entry,
 )
 from hivemind.api.schemas import (
@@ -49,6 +48,7 @@ from hivemind.api.schemas import (
     PortalWithdrawRequest,
     UnpinOut,
 )
+from hivemind.api.schemas.common import to_utc
 from hivemind.domain.entry import EntryFilters, EntryState, Kind
 from hivemind.domain.feedback import FeedbackLogFilters, Verdict
 from hivemind.domain.validation import (

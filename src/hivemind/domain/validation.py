@@ -112,7 +112,7 @@ def check_datetime(value: datetime | None, field: str) -> None:
     if value is None:
         return
     try:
-        utc = value.astimezone(UTC) if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        utc = as_utc(value).astimezone(UTC)
     except (OverflowError, ValueError) as exc:
         raise InvalidInput(f"{field} is out of range") from exc
     if not MIN_DATETIME <= utc < MAX_DATETIME:
@@ -121,6 +121,11 @@ def check_datetime(value: datetime | None, field: str) -> None:
 
 def utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+def as_utc(value: datetime) -> datetime:
+    """``value`` as an aware datetime: a naive one means UTC (SPEC §6.4), an aware one is kept."""
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value
 
 
 # What asyncpg's ``uuid`` codec accepts; ``uuid.UUID`` is laxer and asyncpg answers the extras

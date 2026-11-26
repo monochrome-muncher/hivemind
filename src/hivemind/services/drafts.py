@@ -13,7 +13,8 @@ from typing import Any
 from hivemind.domain.entry import EntryDraft, ImportanceSource, Kind, Source
 from hivemind.domain.validation import MAX_IDENTITY_CHARS, check_text
 from hivemind.ports import Credential
-from hivemind.services.access import WriteResolution
+from hivemind.services.access import resolve_write_scope
+from hivemind.services.errors import AgentIdentityRequired
 
 # The importance an entry gets when the writer gives none (ROADMAP §4.5).
 DEFAULT_IMPORTANCE = 3
@@ -21,9 +22,9 @@ DEFAULT_IMPORTANCE = 3
 
 def entry_draft(
     credential: Credential,
-    resolution: WriteResolution,
+    requested_scope: str | None,
     *,
-    agent: str,
+    agent: str | None,
     kind: Kind,
     summary: str,
     body: str | None,
@@ -36,12 +37,20 @@ def entry_draft(
     see_also: Sequence[str],
 ) -> EntryDraft:
     """A validated draft for ``credential``'s write (SPEC §4.1). ``author`` is the key's
-    registered name (ADRs 0012, 0033), never the caller's say; omitted importance gets the default
-    with ``importance_source=default``."""
+    registered name (ADRs 0012, 0033), never the caller's say; ``requested_scope`` (``None`` for the
+    level's default) goes through ``resolve_write_scope``; omitted importance gets the default
+    with ``importance_source=default``. ``agent`` is the self-reported identity, used when the key
+    carries none; with neither, ``AgentIdentityRequired``."""
+    resolved_agent = credential.agent_id or agent
+    if resolved_agent is None:
+        raise AgentIdentityRequired(
+            "agent identity is required: use an agent sub-key or pass 'agent'"
+        )
+    resolution = resolve_write_scope(credential, requested_scope)
     if credential.agent_id is None:
         # A self-reported agent is free text every reader sees; a key's own identity may be a legacy
         # name.
-        check_text(agent, "agent", MAX_IDENTITY_CHARS)
+        check_text(resolved_agent, "agent", MAX_IDENTITY_CHARS)
     if importance is None:
         importance, importance_source = DEFAULT_IMPORTANCE, ImportanceSource.DEFAULT
     else:
@@ -50,7 +59,7 @@ def entry_draft(
         kind=kind,
         summary=summary,
         author=credential.agent_name or credential.user_id,
-        agent=agent,
+        agent=resolved_agent,
         body=body,
         payload=payload,
         sources=sources,

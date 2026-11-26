@@ -217,7 +217,7 @@ CASES: list[tuple[str, Rest, tuple[int, str, str], Mcp, tuple[str, str]]] = [
         lambda w: mcp.hive_feedback(w.mcp("k-user"), w.org_entry, "helpful"),
         (
             "agent_unresolved",
-            "the caller's agent identity must be resolved before recording feedback",
+            "the caller's agent identity must be resolved before recording feedback (SPEC.md §8.1)",
         ),
     ),
     (

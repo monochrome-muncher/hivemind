@@ -616,19 +616,22 @@ def resolve_write_scope(
 ) -> WriteResolution:
     """Resolve and validate the write scope (ADR 0011). Omitted gives the level's maximum (L1
     ``self``, L2/L3 ``fleet``, admin ``org``); an explicit scope may not exceed it. ``fleet`` needs
-    a home fleet, so the admin key may not write it (ADR 0060)."""
+    a home fleet, so the admin key may not write it (ADR 0060). A scope outside ``self|fleet|org``
+    is ``InvalidInput``, not a permission problem."""
+    wanted = None if requested_scope is None else requested_scope.strip().lower()
+    if wanted is not None and wanted not in SCOPE_RANK:
+        raise InvalidInput(
+            f"scope must be 'self', 'fleet' or 'org', got {requested_scope!r}; "
+            "omit it for your default"
+        )
     if not credential.can_write():
         raise PermissionDenied("level 0 (untrusted) agents may not write (ADR 0011)")
     max_scope = credential.max_write_scope()
-    if requested_scope is None:
-        scope = max_scope
-    else:
-        scope = requested_scope
-        if SCOPE_RANK.get(scope, 99) > SCOPE_RANK.get(max_scope, 99):
-            raise PermissionDenied(
-                f"trust level {credential.trust_level.value} may not write "
-                f"scope '{scope}' (ADR 0011)"
-            )
+    scope = max_scope if wanted is None else wanted
+    if SCOPE_RANK[scope] > SCOPE_RANK[max_scope]:
+        raise PermissionDenied(
+            f"trust level {credential.trust_level.value} may not write scope '{scope}' (ADR 0011)"
+        )
     if scope == SCOPE_FLEET and credential.is_admin:
         # The admin key has no fleet: a fleet entry would reach no fleet (ADR 0060).
         raise PermissionDenied(

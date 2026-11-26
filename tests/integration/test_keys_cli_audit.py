@@ -27,7 +27,7 @@ from tests.pg import ensure_migrated, exec_sql, fetch_rows, reset_tables
 from hivemind.config import Settings
 from hivemind.domain import TrustLevel
 from hivemind.services.access import AccessService
-from hivemind.store import PgAuthenticator, PgStore
+from hivemind.store import PgAuthenticator, PgStore, credential_sql
 from hivemind.store import keys as keys_cli
 from hivemind.store.auth import key_hash
 from hivemind.store.keys import (
@@ -188,8 +188,8 @@ async def test_the_audit_row_shares_the_mutations_transaction(
     # `$1 || 'x'` turns 'cli' into 'clix', which the named CHECK rejects.
     await _register_agent(dsn, "alice")
     monkeypatch.setattr(
-        keys_cli,
-        "_INSERT_AUDIT",
+        credential_sql,
+        "INSERT_AUDIT",
         "INSERT INTO audit_log (actor_kind, actor, action, target, detail) "
         "VALUES ($1 || 'x', $2, $3, $4, $5::jsonb)",
     )

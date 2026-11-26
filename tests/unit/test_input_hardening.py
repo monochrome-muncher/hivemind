@@ -73,6 +73,7 @@ BAD_DRAFTS = {
     "nul payload nested key": {"payload": {"a": [{"k\x00": 1}]}},
     "nan payload": {"payload": {"a": float("nan")}},
     "huge payload": {"payload": {"a": "x" * 70_000}},
+    "blank source ref": {"sources": (Source(SourceType.URL, "  "),)},
     "nul source ref": {"sources": (Source(SourceType.URL, "u\x00"),)},
     "many sources": {"sources": tuple(Source(SourceType.URL, f"u{i}") for i in range(33))},
     "many supersedes": {"supersedes": tuple(str(i) for i in range(17))},

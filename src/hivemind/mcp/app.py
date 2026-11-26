@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Annotated, Any
 
 from pydantic import WithJsonSchema
@@ -26,10 +26,9 @@ from hivemind.domain.entry import (
 )
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.domain.recency import RecencyHint, parse_recency_hint
-from hivemind.domain.validation import MAX_SEE_ALSO, check_pagination
+from hivemind.domain.validation import MAX_SEE_ALSO, as_utc, check_pagination
 from hivemind.embeddings import EmbeddingError
 from hivemind.mcp.errors import (
-    ERR_AGENT_UNRESOLVED,
     ERR_INVALID_INPUT,
     ERR_INVALID_VERDICT,
     ERR_NOT_FOUND,
@@ -39,9 +38,9 @@ from hivemind.mcp.errors import (
     service_error_reply,
 )
 from hivemind.ports import Credential, Store
-from hivemind.services.access import AccessService, resolve_write_scope
+from hivemind.services.access import AccessService
 from hivemind.services.drafts import entry_draft
-from hivemind.services.feedback import FeedbackService, reporter_agent
+from hivemind.services.feedback import FeedbackService
 from hivemind.services.governance import GovernanceService
 from hivemind.services.pins import PinService
 from hivemind.services.read import ReadService
@@ -112,9 +111,7 @@ def _parse_dt(value: str | None, field_name: str) -> datetime | None:
         parsed = datetime.fromisoformat(value)
     except ValueError as exc:
         raise ValueError(f"{field_name} must be an ISO-8601 timestamp, got {value!r}") from exc
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return parsed
+    return as_utc(parsed)
 
 
 def _kind(value: str) -> Kind:
@@ -178,10 +175,7 @@ def _parse_sources(raw: list[dict[str, str]] | None) -> tuple[Source, ...]:
             raise ValueError(
                 f"source type must be one of path|url|session|other, got {item.get('type')!r}"
             ) from exc
-        ref = item.get("ref")
-        if not ref or not ref.strip():
-            raise ValueError("source 'ref' must be a non-blank string")
-        parsed.append(Source(type=source_type, ref=ref))
+        parsed.append(Source(type=source_type, ref=item.get("ref") or ""))
     return tuple(parsed)
 
 
@@ -202,7 +196,7 @@ def _build_filters(
     relied_on_changed: bool = False,
 ) -> EntryFilters:
     """Parse the shared filter parameters into ``EntryFilters`` (SPEC §5.3)."""
-    filters = EntryFilters(
+    return EntryFilters(
         kind=_parse_kind(kind),
         tags=tuple(tags or ()),
         entities=tuple(entities or ()),
@@ -217,30 +211,18 @@ def _build_filters(
         flagged=flagged,
         relied_on_changed=relied_on_changed,
     )
-    filters.validate()  # caller input, unlike service-built filters
-    return filters
 
 
-def _feedback_precheck(
-    app: McpHivemind, verdict: str | None, agent: str | None
-) -> Verdict | dict[str, object]:
-    """The ``Verdict``, or the error reply, after checking the reporter's agent identity (SPEC
-    §8.1)."""
+def _parse_verdict(verdict: str | None) -> Verdict | dict[str, object]:
+    """The ``Verdict``, or the ``invalid_verdict`` error reply."""
     try:
-        parsed = Verdict((verdict or "").strip().lower())
+        return Verdict((verdict or "").strip().lower())
     except ValueError:
         return error_reply(
             ERR_INVALID_VERDICT,
             f"verdict must be helpful|stale|wrong, got {verdict!r}: helpful if the entry held, "
             "stale if it is outdated, wrong if it never held; details go in note",
         )
-    if reporter_agent(app.credential, agent) is None:
-        # The service's AgentIdentityRequired condition, checked up front.
-        return error_reply(
-            ERR_AGENT_UNRESOLVED,
-            "the caller's agent identity must be resolved before recording feedback",
-        )
-    return parsed
 
 
 def _check_reply(checked: CheckResult) -> dict[str, object]:
@@ -346,28 +328,14 @@ async def hive_write(
     ``invalid_input`` (a typo is not a trust-level problem).
     """
     cred = app.credential
-    wanted_scope = None if scope is None else scope.strip().lower()
-    if wanted_scope is not None and wanted_scope not in (SCOPE_SELF, SCOPE_FLEET, SCOPE_ORG):
-        return error_reply(
-            ERR_INVALID_INPUT,
-            f"scope must be 'self', 'fleet' or 'org', got {scope!r}; omit it for your default",
-        )
-    resolved_agent = cred.agent_id or agent
-    if resolved_agent is None:
-        return error_reply(
-            ERR_AGENT_UNRESOLVED,
-            "agent identity is required: use an agent sub-key or pass 'agent'",
-        )
     try:
         # Pure parsing, no I/O: a ValueError here is malformed input.
         parsed_kind = _kind(kind)
         parsed_sources = _parse_sources(sources)
-        # Scope and author come from the credential.
-        resolution = resolve_write_scope(cred, wanted_scope)
         draft = entry_draft(
             cred,
-            resolution,
-            agent=resolved_agent,
+            scope,
+            agent=agent,
             kind=parsed_kind,
             summary=summary,
             body=body,
@@ -721,7 +689,7 @@ async def hive_feedback(
     entry_id = entry_id.strip()
     if not entry_id:
         return error_reply(ERR_INVALID_INPUT, "entry_id is required (pass a hit's id)")
-    parsed_verdict = _feedback_precheck(app, verdict, agent)
+    parsed_verdict = _parse_verdict(verdict)
     if not isinstance(parsed_verdict, Verdict):
         return parsed_verdict
     try:
@@ -760,7 +728,7 @@ async def _hive_feedback_many(
     note: str | None,
     agent: str | None,
 ) -> dict[str, object]:
-    parsed_verdict = _feedback_precheck(app, verdict, agent)
+    parsed_verdict = _parse_verdict(verdict)
     if not isinstance(parsed_verdict, Verdict):
         return parsed_verdict
     try:

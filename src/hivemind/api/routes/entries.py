@@ -13,7 +13,6 @@ from hivemind.api.routes.params import API_PREFIX, AppDep, CredentialDep, Promet
 from hivemind.api.routes.shared import (
     entry_detail,
     run_search,
-    to_utc,
 )
 from hivemind.api.schemas import (
     CheckOut,
@@ -27,14 +26,15 @@ from hivemind.api.schemas import (
     WarningOut,
     WithdrawRequest,
 )
+from hivemind.api.schemas.common import to_utc
 from hivemind.domain.entry import EntryFilters, Kind, Source
 from hivemind.domain.validation import (
     MAX_LIMIT,
     MAX_OFFSET,
     InvalidInput,
 )
-from hivemind.services.access import resolve_write_scope
 from hivemind.services.drafts import entry_draft
+from hivemind.services.errors import AgentIdentityRequired
 
 router = APIRouter(prefix=API_PREFIX)
 
@@ -60,20 +60,12 @@ async def create_entry(
     from the agent sub-key, or the self-reported value for plain
     user keys. Entries are immutable once created (ADR 0001).
     """
-    agent = credential.agent_id or payload.agent
-    if agent is None:
-        raise api_error(
-            422,
-            "agent_identity_required",
-            "agent identity is required: use an agent sub-key or pass 'agent'",
-        )
     try:
-        # Pure parsing: a ValueError here is a malformed draft; an out-of-permission scope is a 403.
-        resolution = resolve_write_scope(credential, payload.scope)
+        # A ValueError is a malformed draft; a missing identity or a forbidden scope keeps its code.
         draft = entry_draft(
             credential,
-            resolution,
-            agent=agent,
+            payload.scope,
+            agent=payload.agent,
             kind=payload.kind,
             summary=payload.summary,
             body=payload.body,
@@ -85,6 +77,8 @@ async def create_entry(
             supersedes=payload.supersedes,
             see_also=payload.see_also,
         )
+    except AgentIdentityRequired:  # a ValueError, but its own 422 code
+        raise
     except ValueError as exc:
         raise api_error(422, "invalid_entry", str(exc)) from exc
     try:
