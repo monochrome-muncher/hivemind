@@ -1,6 +1,6 @@
 """``Credential.key_id`` threading from ``PgAuthenticator.verify`` into the
 audit actor (ADR 0027; the pool is faked — no live Postgres). The audit log
-at the ``Store`` seam is in ``tests/integration/test_store_contract.py``.
+at the ``Store`` seam is in ``tests/integration/store_contract/``.
 """
 
 from __future__ import annotations

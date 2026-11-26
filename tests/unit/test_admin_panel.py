@@ -632,6 +632,7 @@ def test_the_shared_modules_import_nothing_admin_specific() -> None:
         "client.js",
         "lists.js",
         "drawer.js",
+        "cleanupblocks.js",
         "charts.js",
         "csv.js",
         "explain.js",
@@ -845,6 +846,38 @@ def test_a_memory_id_in_the_search_box_reads_that_memory() -> None:
     assert got["missing"] == []
     assert got["signedOut"] is True
     assert got["other"] == 503
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_shared_text_and_confirm_helpers_behave_as_the_dialogs_expect() -> None:
+    """ui.js run as it ships: the plural with its thousands separators, the datetime-local
+    value, and the typed confirmation that trims what was typed and throws the dialog's text."""
+    script = r"""
+    globalThis.Node = class { setAttribute() {} append() {} }
+    globalThis.document = { createElement: () => new Node() }
+    const ui = await import(process.argv[1])
+    const confirm = ui.typedConfirm({ id: "x", expected: "bob" })
+    const attempt = (typed, c = confirm) => {
+      c.input.value = typed
+      try { c.check(); return "ok" } catch (err) { return err.message }
+    }
+    const spaced = ui.typedConfirm({ id: "y", expected: " bob ", message: "Say it." })
+    console.log(JSON.stringify({
+      plurals: [ui.plural(1, "memory", "memories"), ui.plural(2, "pin"), ui.plural(1234, "agent")],
+      local: ui.localInputValue(new Date(2026, 0, 5, 7, 3)),
+      typed: [attempt("bob"), attempt("  bob "), attempt("rob")],
+      spaced: [attempt("bob", spaced), attempt("rob", spaced)],
+    }))
+    """
+    out = subprocess.run(
+        ["node", "--input-type=module", "-e", script, (STATIC_DIR / "ui.js").as_uri()],
+        capture_output=True, text=True, check=True,
+    )  # fmt: skip
+    got = json.loads(out.stdout)
+    assert got["plurals"] == ["1 memory", "2 pins", f"{1234:,} agents"]
+    assert got["local"] == "2026-01-05T07:03"
+    assert got["typed"] == ["ok", "ok", "Type \u201cbob\u201d to confirm."]
+    assert got["spaced"] == ["ok", "Say it."]
 
 
 def test_the_memory_browser_reads_an_id_through_the_admin_entry_read() -> None:

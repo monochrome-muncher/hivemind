@@ -62,6 +62,20 @@ export function svg(tag, props = {}, ...children) {
 
 export const $ = (id) => document.getElementById(id);
 
+export function showLogin(message) {
+  $("shell").hidden = true;
+  $("login").hidden = false;
+  const errorEl = $("login-error");
+  errorEl.textContent = message || "";
+  errorEl.hidden = !message;
+  $("login-key").focus();
+}
+
+export function showShell() {
+  $("login").hidden = true;
+  $("shell").hidden = false;
+}
+
 /** Replace `el`'s children, skipping null/false (replaceChildren would print "null"). */
 export function fill(el, ...children) {
   el.replaceChildren(...children.flat().filter((c) => c !== null && c !== undefined && c !== false));
@@ -135,7 +149,15 @@ export function fmtAgo(iso) {
   return "just now";
 }
 
+/** A Date as the value of a datetime-local input (local time, to the minute). */
+export function localInputValue(date) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 export const fmtNum = (n) => (n == null ? "—" : Number(n).toLocaleString());
+/** "1 memory", "2 memories": the count formatted with fmtNum, then the matching word. */
+export const plural = (n, one, many = `${one}s`) => `${fmtNum(n)} ${n === 1 ? one : many}`;
 export const fmtPct = (share) => (share == null ? "—" : `${Math.round(share * 1000) / 10}%`);
 export const fmtOf = (x) => (x && x.total ? `${fmtPct(x.share)} (${x.count} of ${x.total})` : "—");
 
@@ -247,6 +269,24 @@ export function closeModal() {
   const modal = $("modal");
   $("modal-body").replaceChildren(); // drop any key from the DOM
   if (modal.open) modal.close();
+}
+
+/**
+ * The "type X to confirm" field of a destructive dialog. `field` goes into the dialog body
+ * (`hidden` until a preview is read), `input` is the text box, and `check()` throws when what
+ * was typed, trimmed, is not `expected` (also trimmed, so an alias stored with spaces can be
+ * confirmed). `note` shows between the label and the box; `message` replaces the error text.
+ */
+export function typedConfirm({ id, expected, label = `Type “${expected}” to confirm`, message = `Type “${expected}” to confirm.`, note = null, hidden = false }) {
+  const input = h("input", { id, autocomplete: "off", spellcheck: "false", placeholder: expected, "aria-label": `Type ${expected} to confirm` });
+  const field = h("div", { class: "field", hidden }, h("label", { for: id, text: label }), note, input);
+  return {
+    field,
+    input,
+    check() {
+      if (input.value.trim() !== expected.trim()) throw new Error(message);
+    },
+  };
 }
 
 /** The one place a raw key is ever shown. It is not stored anywhere. */

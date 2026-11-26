@@ -5,68 +5,24 @@
 // it writes no memory.
 
 import {
-  api, guarded, h, hooks, toast, openModal, closeModal, fmtAgo, fmtNum, fmtTime, fleetName, card, table, kindBadge,
+  api, guarded, h, hooks, toast, openModal, closeModal, fmtAgo, fmtTime, fleetName, card, table, plural, localInputValue, typedConfirm,
 } from "./core.js";
-import { openEntry } from "./drawer.js";
+import { cleanupBlocks } from "./cleanupblocks.js";
 
-const pad = (n) => String(n).padStart(2, "0");
-/** A Date as the value of a datetime-local input (local time). */
-const localValue = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-const plural = (n, one, many = `${one}s`) => `${fmtNum(n)} ${n === 1 ? one : many}`;
-
-const entryRow = (e, extra = []) => h("li", {},
-  kindBadge(e.kind),
-  h("span", {},
-    h("a", { href: "#", class: "link", text: e.summary, onclick: (ev) => { ev.preventDefault(); openEntry(e.id, () => {}); } }), " ",
-    h("span", { class: "muted small", text: `${e.author} · ${e.scope}${e.fleet_id ? ` · ${fleetName(e.fleet_id)}` : ""} · written ${fmtAgo(e.created_at)}` }), ...extra));
-
-function withdrawBlock(preview) {
-  return h("div", { class: "field" },
-    h("label", { text: `Memories to withdraw (${fmtNum(preview.withdraw_total)})` }),
-    h("span", { class: "hint", text: "Active memories this agent wrote in the window, in any scope. They are withdrawn with the reason “admin cleanup” and taken off any fleet briefing. An undo puts them back." }),
-    preview.withdraw.length
-      ? h("div", { class: "modal-scroll cleanup-list" }, h("ul", { class: "merge-list" }, preview.withdraw.map((e) => entryRow(e))))
-      : h("span", { class: "muted small", text: "None." }),
-    preview.withdraw_truncated
-      ? h("span", { class: "hint", text: `Showing the newest ${fmtNum(preview.withdraw.length)}. All ${fmtNum(preview.withdraw_total)} are withdrawn.` })
-      : null,
-    preview.pins_total ? h("span", { class: "hint", text: `${plural(preview.pins_total, "pin")} on these memories will be removed.` }) : null);
-}
-
-function ratingsBlock(preview) {
-  const parts = Object.entries(preview.ratings_by_verdict).map(([v, n]) => `${fmtNum(n)} ${v}`);
-  return h("div", { class: "field" },
-    h("label", { text: `Ratings to set aside (${fmtNum(preview.ratings_total)})` }),
-    h("span", { class: "hint", text: "Its ratings last written in the window stop counting towards rankings, flags and metrics. The rows are kept, and rating the same memory again brings one back." }),
-    preview.ratings_total ? h("span", { class: "small", text: parts.join(", ") }) : h("span", { class: "muted small", text: "None." }));
-}
-
-/** The restorable memories, each ticked by default. */
-function restoreBlock(preview) {
-  const boxes = preview.restorable.map((e) => ({ e, box: h("input", { type: "checkbox", value: e.id, checked: true }) }));
-  const count = h("strong");
-  const sync = () => { count.textContent = `${boxes.filter((b) => b.box.checked).length} of ${fmtNum(preview.restorable_total)}`; };
-  for (const b of boxes) b.box.addEventListener("change", sync);
-  sync();
-  const items = boxes.map(({ e, box }) => h("li", {},
-    h("label", { class: "check" }, box,
-      h("span", {}, h("strong", { text: e.summary }), " ",
-        h("span", { class: "muted small", text: `${e.author} · ${e.scope} · written ${fmtAgo(e.created_at)}` })))));
-  return {
-    el: h("div", { class: "field" },
-      h("label", {}, "Memories to bring back: ", count),
-      h("span", { class: "hint", text: "Memories this agent replaced with its own memories that are now withdrawn, including through a chain of its own replacements. A ticked one becomes active again. An undo replaces it again." }),
-      boxes.length ? h("div", { class: "modal-scroll cleanup-list" }, h("ul", { class: "merge-list" }, items)) : h("span", { class: "muted small", text: "None." }),
-      preview.restorable_truncated
-        ? h("span", { class: "hint", text: `Showing the newest ${fmtNum(boxes.length)} of ${fmtNum(preview.restorable_total)}; the others stay superseded.` })
-        : null),
-    chosen: () => boxes.filter((b) => b.box.checked).map((b) => b.e.id),
-  };
-}
+const { withdrawBlock, ratingsBlock, restoreBlock } = cleanupBlocks({
+  fleetName,
+  words: {
+    withdrawHint: "Active memories this agent wrote in the window, in any scope. They are withdrawn with the reason “admin cleanup” and taken off any fleet briefing. An undo puts them back.",
+    ratingsLabel: "Ratings to set aside",
+    ratingsHint: "Its ratings last written in the window stop counting towards rankings, flags and metrics. The rows are kept, and rating the same memory again brings one back.",
+    restoreLabel: "Memories to bring back",
+    restoreHint: "Memories this agent replaced with its own memories that are now withdrawn, including through a chain of its own replacements. A ticked one becomes active again. An undo replaces it again.",
+  },
+});
 
 /** Open the clean-up dialog for `agent`. `onDone` runs after a cleanup. */
 export function cleanupDialog(agent, onDone) {
-  const since = h("input", { type: "datetime-local", id: "cl-since", value: localValue(new Date(Date.now() - 24 * 3600 * 1000)) });
+  const since = h("input", { type: "datetime-local", id: "cl-since", value: localInputValue(new Date(Date.now() - 24 * 3600 * 1000)) });
   const until = h("input", { type: "datetime-local", id: "cl-until", title: "Leave empty for now" });
   const previewButton = h("button", { type: "button", class: "btn btn-sm", text: "Preview" });
   const holder = h("div");
@@ -77,9 +33,7 @@ export function cleanupDialog(agent, onDone) {
     h("span", { class: "hint", text: revoked
       ? "This agent is already revoked, so only the cleanup runs."
       : "Revokes its key after the cleanup, as its own entry in the audit log. An undo does not un-revoke it." }));
-  const confirm = h("input", { id: "cl-confirm", autocomplete: "off", placeholder: agent.name, "aria-label": `Type ${agent.name} to confirm` });
-  const confirmField = h("div", { class: "field", hidden: true },
-    h("label", { for: "cl-confirm", text: `Type “${agent.name}” to confirm` }), confirm);
+  const confirm = typedConfirm({ id: "cl-confirm", expected: agent.name, hidden: true });
   let current = null; // { preview, restore }
   let ticket = 0;
 
@@ -92,7 +46,7 @@ export function cleanupDialog(agent, onDone) {
   const run = async () => {
     const mine = ++ticket;
     current = null;
-    confirmField.hidden = true;
+    confirm.field.hidden = true;
     let window;
     try { window = bounds(); } catch (err) { holder.replaceChildren(h("p", { class: "form-error", text: err.message })); return; }
     holder.replaceChildren(h("p", { class: "muted", text: `Looking at what ${agent.name} wrote…` }));
@@ -105,7 +59,7 @@ export function cleanupDialog(agent, onDone) {
         h("p", { class: "small muted", text: `Window: ${fmtTime(preview.since)} to ${fmtTime(preview.until)}. Memories count by when they were written, ratings by when they were last changed.` }),
         ...(preview.nothing_to_clean ? [h("p", { class: "callout small", text: "This agent wrote nothing and rated nothing in this window." })] : []),
         withdrawBlock(preview), ratingsBlock(preview), restore.el);
-      confirmField.hidden = false;
+      confirm.field.hidden = false;
     } catch (err) {
       if (mine === ticket) holder.replaceChildren(h("p", { class: "form-error", text: err.message }));
     }
@@ -114,8 +68,8 @@ export function cleanupDialog(agent, onDone) {
   const reset = () => {
     ticket += 1;
     current = null;
-    confirmField.hidden = true;
-    confirm.value = "";
+    confirm.field.hidden = true;
+    confirm.input.value = "";
     holder.replaceChildren();
   };
   since.addEventListener("input", reset);
@@ -131,7 +85,7 @@ export function cleanupDialog(agent, onDone) {
         h("label", { for: "cl-since", text: "From (local time)" }), since,
         h("label", { for: "cl-until", text: "Until (empty is now)" }), until,
         h("div", { class: "row" }, previewButton)),
-      holder, revokeField, confirmField,
+      holder, revokeField, confirm.field,
     ],
     actions: [
       { label: "Cancel", class: "btn-ghost" },
@@ -141,7 +95,7 @@ export function cleanupDialog(agent, onDone) {
         submit: true,
         onClick: async () => {
           if (!current) throw new Error("Preview the cleanup first.");
-          if (confirm.value.trim() !== agent.name) throw new Error(`Type “${agent.name}” to confirm.`);
+          confirm.check();
           const { preview, restore } = current;
           if (preview.nothing_to_clean && !alsoRevoke.checked) throw new Error("Nothing to clean up in this window.");
           const body = {

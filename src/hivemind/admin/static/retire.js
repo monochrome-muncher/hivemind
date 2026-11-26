@@ -4,10 +4,8 @@
 // Retiring revokes the agent's key; the successor then owns every memory the agent wrote.
 
 import {
-  api, guarded, h, hooks, state, toast, openModal, closeModal, fmtAgo, fmtNum, fmtTime, card, table,
+  api, guarded, h, hooks, state, toast, openModal, closeModal, fmtAgo, fmtTime, card, table, plural, typedConfirm,
 } from "./core.js";
-
-const plural = (n, one, many) => `${fmtNum(n)} ${n === 1 ? one : many}`;
 
 function previewBlock(preview) {
   const lines = [
@@ -38,17 +36,15 @@ export function retireDialog(agent, onDone) {
     h("option", { value: "", text: "Choose a successor…" }),
     others.map((a) => h("option", { value: a.name, text: a.name })));
   const holder = h("div");
-  const confirm = h("input", { id: "rt-confirm", autocomplete: "off", placeholder: agent.name, "aria-label": `Type ${agent.name} to confirm` });
-  const confirmField = h("div", { class: "field", hidden: true },
-    h("label", { for: "rt-confirm", text: `Type “${agent.name}” to confirm` }), confirm);
+  const confirm = typedConfirm({ id: "rt-confirm", expected: agent.name, hidden: true });
   let current = null;
   let ticket = 0;
 
   const preview = async () => {
     const mine = ++ticket;
     current = null;
-    confirmField.hidden = true;
-    confirm.value = "";
+    confirm.field.hidden = true;
+    confirm.input.value = "";
     if (!select.value) { holder.replaceChildren(); return; }
     holder.replaceChildren(h("p", { class: "muted", text: "Counting what passes over…" }));
     try {
@@ -56,7 +52,7 @@ export function retireDialog(agent, onDone) {
       if (mine !== ticket || !result) return;
       current = select.value;
       holder.replaceChildren(...previewBlock(result));
-      confirmField.hidden = false;
+      confirm.field.hidden = false;
     } catch (err) {
       if (mine === ticket) holder.replaceChildren(h("p", { class: "form-error", text: err.message }));
     }
@@ -69,7 +65,7 @@ export function retireDialog(agent, onDone) {
     body: [
       h("p", { class: "muted", text: "Hands everything this agent wrote to another agent and revokes the agent." }),
       h("div", { class: "field" }, h("label", { for: "rt-successor", text: "Successor" }), select),
-      holder, confirmField,
+      holder, confirm.field,
     ],
     actions: [
       { label: "Cancel", class: "btn-ghost" },
@@ -79,7 +75,7 @@ export function retireDialog(agent, onDone) {
         submit: true,
         onClick: async () => {
           if (!current) throw new Error("Choose a successor and read the preview first.");
-          if (confirm.value.trim() !== agent.name) throw new Error(`Type “${agent.name}” to confirm.`);
+          confirm.check();
           const done = await guarded(() => api("POST", `admin/agents/${encodeURIComponent(agent.name)}/retire`, { body: { successor: current, dry_run: false } }));
           if (!done) return;
           closeModal();

@@ -28,7 +28,7 @@ from hivemind.domain.upstream import UpstreamLink
 from hivemind.domain.validation import canonical_uuid, is_valid_uuid
 from hivemind.memstore.helpers import EPOCH, canon, canonical_or_same, copy_entry
 from hivemind.memstore.state import MemoryState
-from hivemind.ports import SupersedeConflict
+from hivemind.ports import EntryNotActiveConflict, SupersedeConflict, UnknownEntry
 
 
 def _with_state(
@@ -250,14 +250,16 @@ class EntryStore(MemoryState):
 
     async def withdraw_entry(self, entry_id: str, reason: str | None, by_user: str) -> Entry:
         if not is_valid_uuid(entry_id):
-            raise KeyError(entry_id)
+            raise UnknownEntry(entry_id)
         key = str(uuid.UUID(entry_id))
         with self._lock:
             entry = self._entries.get(key)
             if entry is None:
-                raise KeyError(entry_id)
+                raise UnknownEntry(entry_id)
             if entry.state is not EntryState.ACTIVE:
-                raise ValueError(f"entry {entry_id} is not active (state={entry.state.value})")
+                raise EntryNotActiveConflict(
+                    f"entry {entry_id} is not active (state={entry.state.value})"
+                )
             now = self._clock()
             updated = replace(
                 _with_state(entry, EntryState.WITHDRAWN, withdrawn_reason=reason),
@@ -269,12 +271,12 @@ class EntryStore(MemoryState):
 
     async def restore_entry(self, entry_id: str) -> Restoration:
         if not is_valid_uuid(entry_id):
-            raise KeyError(entry_id)
+            raise UnknownEntry(entry_id)
         key = str(uuid.UUID(entry_id))
         with self._lock:
             entry = self._entries.get(key)
             if entry is None:
-                raise KeyError(entry_id)
+                raise UnknownEntry(entry_id)
             standing = next(
                 (
                     c.id
@@ -337,12 +339,12 @@ class EntryStore(MemoryState):
 
     async def redact_entry(self, entry_id: str) -> RedactOutcome:
         if not is_valid_uuid(entry_id):
-            raise KeyError(entry_id)
+            raise UnknownEntry(entry_id)
         key = str(uuid.UUID(entry_id))
         with self._lock:
             entry = self._entries.get(key)
             if entry is None:
-                raise KeyError(entry_id)
+                raise UnknownEntry(entry_id)
             if entry.redacted_at is not None:
                 raise RedactRefused(f"entry {entry_id} is already redacted")
             if entry.state is EntryState.ACTIVE:

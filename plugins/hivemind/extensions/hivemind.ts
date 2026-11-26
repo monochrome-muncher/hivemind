@@ -32,7 +32,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 // The common core is shared, byte for byte, with the Claude Code/Codex
 // SessionStart hook (skills/hivemind-setup/scripts/hivemind-session-start.sh)
 // and the Hermes plugin (__init__.py). Keep the three in step —
-// tests/unit/test_agent_plugin.py checks it.
+// tests/unit/agent_plugin/ checks it.
 const CORE =
 	"HIVEMIND: your organization's Hivemind is your long-term memory. " +
 	"Follow the hivemind skill (load it now if it is not in context). " +
@@ -56,7 +56,7 @@ const INCOGNITO =
 	"HIVEMIND: this is an incognito session, so Hivemind is completely off. Do not call any hive_* tool, and do not mention Hivemind or offer to set it up. You may keep local notes; start each one with [hivemind: incognito, never upload] so that no later session uploads it. If hive_* tools are loaded anyway, still do not use them, and tell the user once that the tools are loaded, so this session is incognito only by your own restraint.";
 
 // Shared byte for byte with skills/hivemind-setup/scripts/hivemind-stop.sh
-// and hivemind-session-start.sh; tests/unit/test_agent_plugin.py checks it.
+// and hivemind-session-start.sh; tests/unit/agent_plugin/ checks it.
 const STOP_REMINDER =
 	"HIVEMIND: before finishing, write to Hivemind (hive_write) what another agent could reuse from this task, and rate the entries your work tested (hive_feedback). If nothing is new, write nothing and just finish.";
 

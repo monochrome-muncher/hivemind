@@ -45,10 +45,10 @@ Every call carries one API key. Only its SHA-256 hash is stored
   the agent's name, trust level and home fleet. `Credential.visibility()`
   turns it into the `Visibility` every read is checked against.
 
-Admin-only and agent-only routes say so at the top of the route:
-`require_admin` in `api/routes/shared.py`, `require_agent` in
-`api/routes/portal.py`. Inside the services the same checks are
-`services/guards.py`.
+Admin-only and agent-only routes say so on their router:
+`require_admin_key` and `require_agent_key` in `api/routes/params.py` are
+router dependencies, so a wrong key gets 403 before a well-formed body is
+checked. Inside the services the same checks are `services/guards.py`.
 
 ## Who may see and change what
 
@@ -58,7 +58,7 @@ they are all in `domain/access.py`:
 - `entry_is_visible` is the visibility matrix: who may read an entry, by
   its scope (`self`, `fleet`, `org`) and the reader's trust level. Postgres
   applies the same rule in SQL (`store/pgstore/sql_common.py`,
-  `visibility_clause`); `tests/integration/test_store_contract.py` runs
+  `visibility_clause`); `tests/integration/store_contract/` runs
   the same cases against both.
 - `may_supersede` says who may replace an entry with a new version, so a
   new version never reaches fewer readers than the old one.
@@ -146,7 +146,7 @@ feedback, fleets, and so on) keeps its SQL next to the code that runs it.
 - `tests/unit/`: everything that needs no database, including the
   access rules, the scoring and the front-end modules.
 - `tests/integration/`: the same behaviour against Postgres.
-  `test_store_contract.py` holds the Postgres and in-memory stores to the
+  `store_contract/` holds the Postgres and in-memory stores to the
   same contract, and `test_access_isolation_pg.py` (with
   `tests/unit/test_access_isolation.py`) tries to read and change other
   people's entries through every route.

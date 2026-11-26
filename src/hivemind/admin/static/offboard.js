@@ -2,9 +2,7 @@
 // Everything API-sourced is rendered with textContent (see core.js). The dialog always
 // previews first (dry_run) and asks for the owner alias before it applies anything.
 
-import { api, guarded, h, state, toast, openModal, closeModal, fmtNum, table } from "./core.js";
-
-const plural = (n, one, many) => `${fmtNum(n)} ${n === 1 ? one : many}`;
+import { api, guarded, h, state, toast, openModal, closeModal, plural, table, typedConfirm } from "./core.js";
 
 const ACTION_TEXT = {
   retire: (a, successor) => `Retire to ${successor}`,
@@ -47,9 +45,7 @@ export function offboardDialog(owner, onDone) {
     others.map((a) => h("option", { value: a.name, text: `${a.name}${a.owner_alias ? ` (${a.owner_alias})` : ""}` })));
   const successorField = h("div", { class: "field" }, h("label", { for: "ob-successor", text: "Successor (an active agent of another owner)" }), select);
   const holder = h("div");
-  const confirm = h("input", { id: "ob-confirm", autocomplete: "off", placeholder: owner, "aria-label": `Type ${owner} to confirm` });
-  const confirmField = h("div", { class: "field", hidden: true },
-    h("label", { for: "ob-confirm", text: `Type “${owner}” to confirm` }), confirm);
+  const confirm = typedConfirm({ id: "ob-confirm", expected: owner, hidden: true });
   let current = null;
   let ticket = 0;
   let notice = null;
@@ -61,8 +57,8 @@ export function offboardDialog(owner, onDone) {
     const mine = ++ticket;
     current = null;
     successorField.hidden = chosenMode() === "revoke";
-    confirmField.hidden = true;
-    confirm.value = "";
+    confirm.field.hidden = true;
+    confirm.input.value = "";
     if (chosenMode() === "retire" && !select.value) { holder.replaceChildren(); return; }
     holder.replaceChildren(h("p", { class: "muted", text: "Working out what happens to each agent…" }));
     try {
@@ -72,7 +68,7 @@ export function offboardDialog(owner, onDone) {
       current = { ...body, expected_agents: result.agents.map((a) => ({ name: a.name, action: a.action })) };
       holder.replaceChildren(...(notice ? [h("p", { class: "form-error", text: notice })] : []), ...previewBlock(result));
       notice = null;
-      confirmField.hidden = false;
+      confirm.field.hidden = false;
     } catch (err) {
       if (mine === ticket) holder.replaceChildren(h("p", { class: "form-error", text: err.message }));
     }
@@ -86,7 +82,7 @@ export function offboardDialog(owner, onDone) {
     body: [
       h("p", { class: "muted", text: "For when this owner leaves: handles every agent registered under this owner alias in one step. An alias is a self-reported label, so check the list before you confirm." }),
       h("div", { class: "field" }, retire, revoke),
-      successorField, holder, confirmField,
+      successorField, holder, confirm.field,
     ],
     actions: [
       { label: "Cancel", class: "btn-ghost" },
@@ -96,8 +92,7 @@ export function offboardDialog(owner, onDone) {
         submit: true,
         onClick: async () => {
           if (!current) throw new Error(chosenMode() === "retire" ? "Choose a successor and read the preview first." : "Read the preview first.");
-          // The alias exactly as stored: it may have surrounding spaces.
-          if (confirm.value !== owner) throw new Error(`Type “${owner}” to confirm.`);
+          confirm.check();
           let done;
           try {
             done = await guarded(() => api("POST", `admin/owners/${encodeURIComponent(owner)}/offboard`, { body: { ...current, dry_run: false } }));

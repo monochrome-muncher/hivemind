@@ -23,7 +23,7 @@
 //
 // The reminder texts are shared byte for byte with the Claude Code/Codex
 // SessionStart hook, the Hermes plugin and the Pi extension; the tests in
-// tests/unit/test_agent_plugin.py hold them in step. Never prints the key.
+// tests/unit/agent_plugin/ hold them in step. Never prints the key.
 //
 // OpenCode v1 and v2 have different plugin APIs, and a plugin that only
 // speaks one loads nothing in the other (v2 rejects a v1 function export

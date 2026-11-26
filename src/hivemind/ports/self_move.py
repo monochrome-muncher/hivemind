@@ -17,7 +17,7 @@ class SelfMovePort(Protocol):
         - Moves the fleet versions by the same author it replaced (through that author's
           versions only) with it.
         - Removes every pin on a moved version.
-        - ``KeyError`` if unknown; ``SelfMoveRefused`` unless active and fleet-scoped, or when
+        - ``UnknownEntry`` if unknown; ``SelfMoveRefused`` unless active and fleet-scoped, or when
           a moved version replaced another agent's fleet memory (nothing changes);
           ``FleetMerged`` / ``FleetBusy`` as a fleet write."""
         ...

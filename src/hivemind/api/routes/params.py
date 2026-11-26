@@ -7,7 +7,7 @@ from typing import Annotated
 from fastapi import Depends, Path, Query
 from pydantic import AfterValidator
 
-from hivemind.api.deps import HivemindApp, get_app, get_prometheus, require_credential
+from hivemind.api.deps import HivemindApp, api_error, get_app, get_prometheus, require_credential
 from hivemind.api.prometheus import PrometheusMetrics
 from hivemind.domain.validation import MAX_ID_CHARS, MAX_IDENTITY_CHARS, check_no_nul
 from hivemind.ports import Credential
@@ -17,6 +17,19 @@ API_PREFIX = "/v1"
 CredentialDep = Annotated[Credential, Depends(require_credential)]
 AppDep = Annotated[HivemindApp, Depends(get_app)]
 PrometheusDep = Annotated[PrometheusMetrics, Depends(get_prometheus)]
+
+
+async def require_admin_key(credential: CredentialDep) -> None:
+    if not credential.is_admin:
+        raise api_error(403, "forbidden", "this route requires an admin key")
+
+
+async def require_agent_key(credential: CredentialDep) -> None:
+    """An active agent's own key: not admin, org or a dev-mode identity (no agent name)."""
+    if credential.is_admin or credential.is_org or credential.agent_name is None:
+        raise api_error(
+            403, "forbidden", "the agent portal requires an agent key, not the admin or org key"
+        )
 
 
 def _no_nul(value: str | None) -> str | None:

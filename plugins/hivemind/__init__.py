@@ -38,7 +38,7 @@ SKILLS_DIR = PLUGIN_DIR / "skills"
 # The common core is shared, byte for byte, with the Claude Code/Codex
 # SessionStart hook (skills/hivemind-setup/scripts/hivemind-session-start.sh)
 # and the Pi extension (extensions/hivemind.ts). Keep the three in step —
-# tests/unit/test_agent_plugin.py checks it.
+# tests/unit/agent_plugin/ checks it.
 _CORE = (
     "HIVEMIND: your organization's Hivemind is your long-term memory. "
     "Follow the hivemind skill (load it now if it is not in context). "

@@ -1,6 +1,6 @@
 """Restoring a withdrawn memory on Postgres (ADR 0124): the races at the store
 seam. The refusals and the round trip run against both adapters in
-``test_store_contract.py``; here concurrent callers meet the row lock."""
+``tests/integration/store_contract/test_entry_restore.py``; here concurrent callers meet the row lock."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator
 
 import asyncpg
 import pytest
-from tests.integration.test_store_contract import (
+from tests.integration.store_contract.helpers import (
     WIDE_SINCE,
     WIDE_UNTIL,
     Adapter,

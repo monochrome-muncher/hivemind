@@ -2,7 +2,7 @@
 seam over ``MemoryStore``: the same operation as the admin's cleanup (ADR
 0111) limited to the signed-in agent, with the memories of the agents retired
 in its favour, no revoke, and an undo that only reaches cleanups the agent ran
-itself. The store-level behavior is in ``test_store_contract.py``."""
+itself. The store-level behavior is in ``tests/integration/store_contract/``."""
 
 from __future__ import annotations
 

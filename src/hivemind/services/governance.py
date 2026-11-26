@@ -20,7 +20,7 @@ from hivemind.domain.pin import Pin, PinnedEntry
 from hivemind.domain.redaction import RedactOutcome
 from hivemind.domain.self_move import SelfMove
 from hivemind.domain.validation import MAX_REASON_CHARS, InvalidInput, check_text
-from hivemind.ports import Credential, Store
+from hivemind.ports import Credential, EntryNotActiveConflict, Store, UnknownEntry
 from hivemind.services.audit import audit_unpins, record_admin_action
 from hivemind.services.chain import get_visible_entry
 from hivemind.services.errors import EntryNotActive, EntryNotFound, PermissionDenied
@@ -100,7 +100,7 @@ class GovernanceService:
             )
         try:
             move = await self._store.move_entry_to_self(entry.id)
-        except KeyError as exc:
+        except UnknownEntry as exc:
             raise EntryNotFound(f"unknown entry: {entry.id}") from exc
         detail: dict[str, object] = {
             "author": entry.author,
@@ -139,7 +139,7 @@ class GovernanceService:
         entry = await self._visible(credential, entry_id)
         try:
             restoration = await self._store.restore_entry(entry.id)
-        except KeyError as exc:
+        except UnknownEntry as exc:
             raise EntryNotFound(f"unknown entry: {entry.id}") from exc
         await record_admin_action(
             self._store,
@@ -170,7 +170,7 @@ class GovernanceService:
             raise InvalidInput("confirm must be the id of the memory being redacted")
         try:
             outcome = await self._store.redact_entry(entry.id)
-        except KeyError as exc:
+        except UnknownEntry as exc:
             raise EntryNotFound(f"unknown entry: {entry.id}") from exc
         await record_admin_action(
             self._store,
@@ -203,9 +203,9 @@ class GovernanceService:
             )
         try:
             return await self._store.withdraw_entry(entry.id, reason, by_user=credential.user_id)
-        except KeyError as exc:  # the store's "unknown entry"
+        except UnknownEntry as exc:
             raise EntryNotFound(f"unknown entry: {entry.id}") from exc
-        except ValueError as exc:  # the store's "not active": a concurrent withdraw won the race
+        except EntryNotActiveConflict as exc:  # a concurrent withdraw won the race
             raise EntryNotActive(str(exc)) from exc
 
     async def record_feedback(

@@ -2,7 +2,7 @@
 // Everything API-sourced is rendered with textContent (see core.js).
 
 import {
-  api, guarded, h, toast, fleetName, fmtTime, loadAgentsAndFleets, pageHead, parseHash, optional, fill,
+  api, guarded, h, toast, fleetName, fmtTime, localInputValue, loadAgentsAndFleets, pageHead, parseHash, optional, fill,
 } from "./core.js";
 import { openEntry } from "./drawer.js";
 import { column } from "./csv.js";
@@ -95,8 +95,7 @@ export function auditRow(nameOf) {
 function localTimeValue(iso) {
   const d = new Date(iso || "");
   if (!iso || Number.isNaN(d.getTime())) return "";
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return localInputValue(d);
 }
 
 export async function viewAudit(root) {

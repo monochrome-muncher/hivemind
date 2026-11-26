@@ -1,6 +1,6 @@
 """The ``relied_on_changed`` list filter (ADR 0098) through both surfaces on
 ``MemoryStore``: what an agent rated helpful and that has since changed.
-The per-store semantics are pinned in ``test_store_contract.py``."""
+The per-store semantics are pinned in ``tests/integration/store_contract/``."""
 
 from __future__ import annotations
 

@@ -44,11 +44,6 @@ def check_cleanup_expectations(payload: AgentCleanupRequest | PortalCleanupReque
         )
 
 
-def require_admin(credential: Credential, what: str) -> None:
-    if not credential.is_admin:
-        raise api_error(403, "forbidden", f"{what} requires an admin key")
-
-
 async def entry_detail(
     app: HivemindApp,
     entry_id: str,
