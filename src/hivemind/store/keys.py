@@ -21,7 +21,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import getpass
-import json
 import os
 import secrets
 import sys
@@ -42,41 +41,38 @@ from hivemind.domain.access import (
 from hivemind.domain.audit import ActorKind, AuditAction, key_fingerprint
 from hivemind.domain.succession import AgentRetired
 from hivemind.domain.validation import InvalidInput, is_valid_uuid, validate_agent_name
-from hivemind.store.auth import DEAD_CREDENTIAL_PREDICATE, ORG_KEY_LOCK, key_hash
+from hivemind.store.auth import key_hash
+from hivemind.store.credential_sql import (
+    DEAD_CREDENTIAL_PREDICATE,
+    DELETE_AGENT_KEYS,
+    DELETE_AGENT_KEYS_RETURNING,
+    DELETE_ORG_KEYS,
+    ISSUE_ADMIN_KEY,
+    ISSUE_AGENT_KEY,
+    ISSUE_ORG_KEY,
+    LOCK_AGENT_STATUS,
+    ORG_KEY_LOCK,
+    insert_audit,
+)
 from hivemind.store.pgstore.agent_rename import rename_agent_rows
 
-_ISSUE_ADMIN = "INSERT INTO credentials (key_hash, kind, user_id) VALUES ($1, 'admin', $2)"
-_ISSUE_AGENT = (
-    "INSERT INTO credentials (key_hash, kind, user_id, agent_id, agent_name) "
-    "VALUES ($1, 'agent', $2, $2, $2)"
-)
-_ISSUE_ORG = "INSERT INTO credentials (key_hash, kind, user_id) VALUES ($1, 'org', $2)"
-_DELETE_ORG = "DELETE FROM credentials WHERE kind = 'org'"
 _LIST = (
     "SELECT c.key_hash, c.kind, c.user_id, c.agent_name, (c.locked_at IS NOT NULL) AS locked, "
     f"{DEAD_CREDENTIAL_PREDICATE} AS dead FROM credentials c ORDER BY c.created_at"
 )
 # Share-lock the row so a merge cannot commit between this check and the activation (ADR 0107).
 _FLEET_FOR_SHARE = "SELECT merged_into FROM fleets WHERE id = $1 FOR SHARE"
-_REVOKE_AGENT = "DELETE FROM credentials WHERE kind = 'agent' AND agent_name = $1"
 _REVOKE_ADMIN = "DELETE FROM credentials WHERE kind = 'admin' AND key_hash = $1"
 _ADMIN_HASHES_BY_PREFIX = (
     "SELECT key_hash FROM credentials WHERE kind = 'admin' AND starts_with(key_hash, $1)"
 )
 _MIN_HASH_PREFIX = 12  # the fingerprint `hivemind-keys list` prints
-_INSERT_AUDIT = (
-    "INSERT INTO audit_log (actor_kind, actor, action, target, detail) "
-    "VALUES ($1, $2, $3, $4, $5::jsonb)"
-)
 _HAS_AGENT_KEY = "SELECT 1 FROM credentials WHERE kind = 'agent' AND agent_name = $1"
-_AGENT_STATUS_FOR_UPDATE = "SELECT status FROM agents WHERE name = $1 FOR NO KEY UPDATE"
 _ACTIVATE = (
     "UPDATE agents SET status = 'active', trust_level = $2, home_fleet_id = $3, "
     "activated_at = now() WHERE name = $1"
 )
 _SUCCESSOR_OF = "SELECT successor FROM successions WHERE retired_agent = $1"
-_DELETE_AGENT_KEYS = "DELETE FROM credentials WHERE kind = 'agent' AND agent_name = $1"
-_DELETE_AGENT_KEYS_RETURNING = _DELETE_AGENT_KEYS + " RETURNING key_hash"
 _SET_REVOKED = "UPDATE agents SET status = 'revoked' WHERE name = $1"
 
 
@@ -151,14 +147,7 @@ async def _audit(
     detail: Mapping[str, str | None] | None = None,
 ) -> None:
     """Append a ``cli`` audit row in the mutation's transaction (ADR 0027). Takes no key."""
-    await conn.execute(
-        _INSERT_AUDIT,
-        ActorKind.CLI.value,
-        actor,
-        action.value,
-        target,
-        json.dumps(detail or {}),
-    )
+    await insert_audit(conn, ActorKind.CLI, actor, action, target, detail)
 
 
 async def _issue_admin(dsn: str, *, actor: str | None = None) -> str:
@@ -178,7 +167,7 @@ async def _insert_admin(conn: asyncpg.Connection, raw_key: str, actor: str) -> N
     """Store ``raw_key`` as an admin key and audit it, on ``conn``'s open
     transaction."""
     stored_hash = key_hash(raw_key)
-    await conn.execute(_ISSUE_ADMIN, stored_hash, "admin")
+    await conn.execute(ISSUE_ADMIN_KEY, stored_hash, "admin")
     await _audit(conn, actor, AuditAction.ADMIN_KEY_ISSUE, key_fingerprint(stored_hash))
 
 
@@ -206,7 +195,7 @@ async def _issue_agent(
                 if home_fleet_id is not None and is_valid_uuid(home_fleet_id)
                 else None
             )
-            status = await conn.fetchval(_AGENT_STATUS_FOR_UPDATE, name)
+            status = await conn.fetchval(LOCK_AGENT_STATUS, name)
             if status is None:
                 raise AgentNotRegistered(name)
             if (successor := await conn.fetchval(_SUCCESSOR_OF, name)) is not None:
@@ -224,14 +213,14 @@ async def _issue_agent(
                     raise UnknownFleet(home_fleet_id)
                 if fleet["merged_into"] is not None:
                     raise FleetMergedError(home_fleet_id, str(fleet["merged_into"]))
-                await conn.execute(_DELETE_AGENT_KEYS, name)  # stale rows, if any
+                await conn.execute(DELETE_AGENT_KEYS, name)  # stale rows, if any
                 await conn.execute(_ACTIVATE, name, trust_level.value, home_fleet_id)
                 detail = {
                     "from": status,
                     "trust_level": str(trust_level.value),
                     "home_fleet_id": home_fleet_id,
                 }
-            await conn.execute(_ISSUE_AGENT, key_hash(raw_key), name)
+            await conn.execute(ISSUE_AGENT_KEY, key_hash(raw_key), name)
             await _audit(conn, actor or default_actor(), AuditAction.AGENT_KEY_ISSUE, name, detail)
     finally:
         await conn.close()
@@ -246,13 +235,13 @@ async def _rotate_agent(dsn: str, name: str, *, actor: str | None = None) -> str
     conn = await asyncpg.connect(dsn)
     try:
         async with conn.transaction():
-            status = await conn.fetchval(_AGENT_STATUS_FOR_UPDATE, name)
+            status = await conn.fetchval(LOCK_AGENT_STATUS, name)
             if status is None:
                 raise AgentNotRegistered(name)
             if status != AgentStatus.ACTIVE:
                 raise AgentNotActive(name, status)
-            old = await conn.fetch(_DELETE_AGENT_KEYS_RETURNING, name)
-            await conn.execute(_ISSUE_AGENT, new_hash, name)
+            old = await conn.fetch(DELETE_AGENT_KEYS_RETURNING, name)
+            await conn.execute(ISSUE_AGENT_KEY, new_hash, name)
             await _audit(
                 conn,
                 actor or default_actor(),
@@ -307,8 +296,8 @@ async def _replace_org(conn: asyncpg.Connection, raw_key: str, actor: str) -> No
     """Make ``raw_key`` the only org key and audit it, on ``conn``'s open
     transaction."""
     await conn.execute(ORG_KEY_LOCK)
-    await conn.execute(_DELETE_ORG)
-    await conn.execute(_ISSUE_ORG, key_hash(raw_key), "org")
+    await conn.execute(DELETE_ORG_KEYS)
+    await conn.execute(ISSUE_ORG_KEY, key_hash(raw_key), "org")
     await _audit(conn, actor, AuditAction.ORG_KEY_ROTATE, None)
 
 
@@ -410,12 +399,12 @@ async def _revoke(dsn: str, name: str, *, actor: str | None = None) -> None:
     conn = await asyncpg.connect(dsn)
     try:
         async with conn.transaction():
-            prior = await conn.fetchval(_AGENT_STATUS_FOR_UPDATE, name)
+            prior = await conn.fetchval(LOCK_AGENT_STATUS, name)
             if prior is None:
                 raise AgentNotRegistered(name)
             if prior == AgentStatus.REVOKED:
                 raise AgentAlreadyRevoked(name)
-            await conn.execute(_REVOKE_AGENT, name)
+            await conn.execute(DELETE_AGENT_KEYS, name)
             await conn.execute(_SET_REVOKED, name)
             detail = {"from": prior}
             await _audit(conn, actor or default_actor(), AuditAction.AGENT_REVOKE, name, detail)
