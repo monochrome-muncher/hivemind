@@ -12,13 +12,13 @@ from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
 from hivemind.mcp.app import hive_search, hive_write
 from hivemind.memstore import MemoryStore
+from tests.builders import mcp_app
 from tests.fakes import (
     FakeAuthenticator,
     agent_credential,
     make_clock,
     make_embedder,
     make_search_config,
-    mcp_surface,
 )
 
 WRITER = agent_credential("writer", "fleet-b", TrustLevel.CONTRIBUTOR)
@@ -27,8 +27,8 @@ READER = agent_credential("reader", "fleet-a", TrustLevel.PRIVILEGED)
 
 async def test_mcp_hits_show_scope_and_fleet() -> None:
     store = MemoryStore(make_clock())
-    await hive_write(mcp_surface(store, WRITER), kind="fact", summary="billing runs on node 20")
-    result = await hive_search(mcp_surface(store, READER), query="billing node")
+    await hive_write(mcp_app(store, WRITER), kind="fact", summary="billing runs on node 20")
+    result = await hive_search(mcp_app(store, READER), query="billing node")
     [hit] = result["hits"]  # type: ignore[index]
     assert (hit["scope"], hit["fleet_id"]) == ("fleet", "fleet-b")
     assert hit["fleet_id"] != READER.home_fleet_id  # a foreign entry
@@ -36,7 +36,7 @@ async def test_mcp_hits_show_scope_and_fleet() -> None:
 
 async def test_rest_hits_show_scope_and_fleet() -> None:
     store = MemoryStore(make_clock())
-    await hive_write(mcp_surface(store, WRITER), kind="fact", summary="billing runs on node 20")
+    await hive_write(mcp_app(store, WRITER), kind="fact", summary="billing runs on node 20")
     app = create_app_for_config(
         Settings(),
         store=store,

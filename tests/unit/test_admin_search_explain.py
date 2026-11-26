@@ -195,7 +195,7 @@ def test_the_agent_facing_hit_shapes_never_carry_the_explanation() -> None:
     from hivemind.retrieval.scoring import score_parts
     from hivemind.services.search import Explanation
     from hivemind.wire import hit_dict
-    from tests.unit.test_wire_contract import HIT
+    from tests.builders import HIT
 
     parts = score_parts(0.02, 3, FIXED_NOW, 1.0, FIXED_NOW, 30.0, narrow_importance=True)
     explained = with_fields(

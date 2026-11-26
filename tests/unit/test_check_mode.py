@@ -15,6 +15,7 @@ from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.mcp.app import hive_write
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
+from tests.builders import mcp_app
 from tests.fakes import (
     FakeAuthenticator,
     FakeExtractor,
@@ -22,7 +23,6 @@ from tests.fakes import (
     make_clock,
     make_embedder,
     make_search_config,
-    mcp_surface,
 )
 
 WRITER = agent_credential("writer", "fleet-a")
@@ -44,10 +44,10 @@ async def _count(store: MemoryStore) -> int:
 async def test_check_stores_nothing_and_reports_related_and_warnings() -> None:
     store = MemoryStore(make_clock())
     original = await hive_write(
-        mcp_surface(store, PEER), kind="fact", summary="billing on node 20", tags=["billing"]
+        mcp_app(store, PEER), kind="fact", summary="billing on node 20", tags=["billing"]
     )
     result = await hive_write(
-        mcp_surface(store, WRITER),
+        mcp_app(store, WRITER),
         kind="fact",
         summary="billing on node 20",
         body="see /home/w/x",
@@ -65,7 +65,7 @@ async def test_check_leaves_out_the_entries_it_supersedes_like_a_write() -> None
     are superseded by then); a check must not hold them either, or it tells
     the writer to withdraw over the entry it is replacing."""
     store = MemoryStore(make_clock())
-    surface = mcp_surface(store, WRITER)
+    surface = mcp_app(store, WRITER)
     old = await hive_write(surface, kind="fact", summary="billing runs on node 20")
     other = await hive_write(surface, kind="fact", summary="billing runs on node 18 in staging")
     args = {"kind": "fact", "summary": "billing runs on node 22", "supersedes": [old["id"]]}
@@ -79,7 +79,7 @@ async def test_check_leaves_out_the_entries_it_supersedes_like_a_write() -> None
 
 async def test_check_raises_what_a_write_would() -> None:
     store = MemoryStore(make_clock())
-    surface = mcp_surface(store, WRITER)
+    surface = mcp_app(store, WRITER)
     for kwargs, code in [
         ({"supersedes": ["00000000-0000-0000-0000-000000000000"]}, "supersede_denied"),
         ({"see_also": ["00000000-0000-0000-0000-000000000000"]}, "invalid_input"),
@@ -104,10 +104,7 @@ async def test_check_does_not_run_the_extractor() -> None:
 
     store = MemoryStore(make_clock())
     extractor = Spy()
-    embedder, config, clock = make_embedder(), make_search_config(), make_clock()
-    app = mcp_surface(
-        store, WRITER, embedder=embedder, extractor=extractor, config=config, clock=clock
-    )
+    app = mcp_app(store, WRITER, extractor=extractor)
     await hive_write(app, kind="fact", summary="Postgres on node 20", check=True)
     assert extractor.calls == 0
     assert await _count(store) == 0
@@ -118,16 +115,16 @@ async def test_check_does_not_run_the_extractor() -> None:
 async def test_related_carries_tags_feedback_and_same_author() -> None:
     store = _CountingStore(make_clock())
     mine = await hive_write(
-        mcp_surface(store, WRITER),
+        mcp_app(store, WRITER),
         kind="fact",
         summary="billing on node 20",
         tags=["billing", "ops"],
     )
-    theirs = await hive_write(mcp_surface(store, PEER), kind="fact", summary="billing on node 20")
+    theirs = await hive_write(mcp_app(store, PEER), kind="fact", summary="billing on node 20")
     for user, verdict in [("u1", Verdict.HELPFUL), ("u2", Verdict.HELPFUL), ("u3", Verdict.STALE)]:
         await store.record_feedback(Feedback(str(theirs["id"]), user, "ag", verdict, None))
     store.quality_calls = 0
-    result = await hive_write(mcp_surface(store, WRITER), kind="fact", summary="billing on node 20")
+    result = await hive_write(mcp_app(store, WRITER), kind="fact", summary="billing on node 20")
     by_id = {r["id"]: r for r in result["related"]}  # type: ignore[union-attr]
     assert by_id[mine["id"]]["same_author"] is True
     assert by_id[mine["id"]]["tags"] == ["billing", "ops"]
@@ -140,7 +137,7 @@ async def test_related_carries_tags_feedback_and_same_author() -> None:
 async def test_rest_check_returns_200_without_an_entry() -> None:
     store = MemoryStore(make_clock())
     original = await hive_write(
-        mcp_surface(store, PEER), kind="fact", summary="billing on node 20", tags=["t"]
+        mcp_app(store, PEER), kind="fact", summary="billing on node 20", tags=["t"]
     )
     app = create_app_for_config(
         Settings(),
@@ -190,8 +187,8 @@ async def test_check_and_write_agree_on_permission_denied_over_mcp() -> None:
     for cred in (LURKER, ADMIN):
         store = MemoryStore(make_clock())
         args = {"kind": "fact", "summary": "s", "scope": "fleet"}
-        checked = await hive_write(mcp_surface(store, cred), check=True, **args)  # type: ignore[arg-type]
-        real = await hive_write(mcp_surface(store, cred), **args)  # type: ignore[arg-type]
+        checked = await hive_write(mcp_app(store, cred), check=True, **args)  # type: ignore[arg-type]
+        real = await hive_write(mcp_app(store, cred), **args)  # type: ignore[arg-type]
         assert checked == real
         assert checked["error"]["code"] == "permission_denied"  # type: ignore[index]
         assert await _count(store) == 0
@@ -238,10 +235,10 @@ async def test_rest_check_and_write_fail_alike() -> None:
 
 async def test_a_successful_check_leaves_targets_and_links_untouched() -> None:
     store = MemoryStore(make_clock())
-    old = await hive_write(mcp_surface(store, WRITER), kind="fact", summary="old fact")
-    linked = await hive_write(mcp_surface(store, WRITER), kind="fact", summary="other fact")
+    old = await hive_write(mcp_app(store, WRITER), kind="fact", summary="old fact")
+    linked = await hive_write(mcp_app(store, WRITER), kind="fact", summary="other fact")
     result = await hive_write(
-        mcp_surface(store, WRITER),
+        mcp_app(store, WRITER),
         kind="fact",
         summary="new fact",
         supersedes=[str(old["id"])],
@@ -266,8 +263,8 @@ class _BrokenCountsStore(MemoryStore):
 
 async def test_failed_feedback_counts_keep_the_related_list() -> None:
     store = _BrokenCountsStore(make_clock())
-    original = await hive_write(mcp_surface(store, PEER), kind="fact", summary="billing on node 20")
-    result = await hive_write(mcp_surface(store, WRITER), kind="fact", summary="billing on node 20")
+    original = await hive_write(mcp_app(store, PEER), kind="fact", summary="billing on node 20")
+    result = await hive_write(mcp_app(store, WRITER), kind="fact", summary="billing on node 20")
     [related] = result["related"]  # type: ignore[misc]
     assert related["id"] == original["id"]
     assert related["feedback"] == {"helpful": 0, "stale": 0, "wrong": 0}

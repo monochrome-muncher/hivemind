@@ -38,7 +38,6 @@ def main() -> None:
         require_stored_keys=settings.require_stored_keys,
     )
     app = McpHivemind.from_services(
-        store,
         services,
         credential=Credential(user_id="dev", agent_id="hivemind-mcp").effective(
             settings.require_stored_keys
@@ -107,7 +106,7 @@ async def _serve_pg(
         authenticator=authenticator,
         require_stored_keys=settings.require_stored_keys,
     )
-    app = McpHivemind.from_services(store, services, credential=credential)
+    app = McpHivemind.from_services(services, credential=credential)
 
     async def current_credential() -> Credential | None:
         # Re-verified on EVERY call (ADR 0042): revocation, demotion or re-homing applies at once.

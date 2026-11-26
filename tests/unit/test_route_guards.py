@@ -8,8 +8,8 @@ from fastapi.routing import APIRoute
 
 from hivemind.api.deps import create_app
 from hivemind.api.routes.params import require_admin_key, require_agent_key
+from tests.builders import make_hivemind_app
 from tests.fakes import make_client
-from tests.unit.test_api_endpoints import make_hivemind_app
 
 
 def _calls(dependant: Dependant) -> set[object]:

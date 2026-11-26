@@ -22,8 +22,8 @@ from hivemind.domain.entry import EntryFilters, EntryState, Kind
 from hivemind.domain.recency import RecencyHint
 from hivemind.mcp.app import McpHivemind, hive_list, hive_search
 from hivemind.ports import Credential
-from tests.fakes import make_client, make_search_config
-from tests.unit.test_api_endpoints import make_hivemind_app
+from tests.builders import make_hivemind_app
+from tests.fakes import make_client
 
 ALL = frozenset(f.name for f in fields(EntryFilters))
 
@@ -152,14 +152,12 @@ async def _rest(method: str, path: str, params: dict[str, Any], key: str) -> Ent
 def _mcp_app(spy: _Spy) -> McpHivemind:
     return McpHivemind(
         read_service=spy,  # type: ignore[arg-type]
-        store=None,  # type: ignore[arg-type]
         write_service=None,  # type: ignore[arg-type]
         search_service=spy,  # type: ignore[arg-type]
         governance_service=None,  # type: ignore[arg-type]
         access_service=None,  # type: ignore[arg-type]
         feedback_service=None,  # type: ignore[arg-type]
         pin_service=None,  # type: ignore[arg-type]
-        search_config=make_search_config(),
         credential=Credential(user_id="alice", agent_id="agent-1"),
     )
 

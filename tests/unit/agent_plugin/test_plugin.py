@@ -19,6 +19,7 @@ import pytest
 import yaml
 
 from hivemind.domain.access import Standing, TrustLevel
+from tests.builders import EXPECTED_TOOLS
 from tests.unit.agent_plugin.common import (
     AGY,
     HOOK,
@@ -33,7 +34,6 @@ from tests.unit.agent_plugin.common import (
     _load_hermes_plugin,
     _pi_extension_text,
 )
-from tests.unit.test_mcp_server import EXPECTED_TOOLS
 
 SKILL = (PLUGIN / "skills" / "hivemind" / "SKILL.md").read_text()
 

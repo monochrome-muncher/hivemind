@@ -18,11 +18,11 @@ from hivemind.ports import Credential
 from hivemind.services.access import AccessService
 from hivemind.services.errors import PermissionDenied
 from hivemind.services.fleet_merge import FleetMergeService
+from tests.builders import mcp_app
 from tests.fakes import (
     FakeAuthenticator,
     make_clock,
     make_store_client,
-    mcp_surface,
 )
 
 NOW = datetime(2026, 11, 12, 9, 30, tzinfo=UTC)
@@ -215,7 +215,7 @@ def _agent(fleet_id: str | None, level: TrustLevel = TrustLevel.CONTRIBUTOR) -> 
 
 
 def _surface(world: World, credential: Credential) -> McpHivemind:
-    return mcp_surface(world.store, credential, access=world.access)
+    return mcp_app(world.store, credential, access=world.access)
 
 
 async def _agent_in(world: World, fleet_id: str) -> Credential:

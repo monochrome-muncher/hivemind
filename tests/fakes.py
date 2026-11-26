@@ -36,20 +36,8 @@ from hivemind.domain.entry import (
     Kind,
     embeddable_text,
 )
-from hivemind.mcp.app import McpHivemind
 from hivemind.memstore import MemoryStore
-from hivemind.ports import (
-    Authenticator,
-    Credential,
-    Embedder,
-    Extractor,
-    KeyReplacement,
-    Store,
-    entry_embeddable_text,
-)
-from hivemind.services.access import AccessService
-from hivemind.services.search import SearchService
-from hivemind.services.wiring import build_services
+from hivemind.ports import Credential, KeyReplacement, Store, entry_embeddable_text
 
 FIXED_NOW = datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC)
 
@@ -315,32 +303,6 @@ def make_search_config(
         vector_min_similarity=None,
         close_match_similarity=close_match_similarity,
     )
-
-
-def mcp_surface(
-    store: Store,
-    credential: Credential,
-    *,
-    access: AccessService | None = None,
-    embedder: Embedder | None = None,
-    extractor: Extractor | None = None,
-    config: SearchConfig | None = None,
-    clock: Callable[[], datetime] | None = None,
-    authenticator: Authenticator | None = None,
-) -> McpHivemind:
-    """The MCP tools over ``store`` as ``credential``, wired as the server wires them; ``access``
-    stands in for the built access service, ``clock`` times the search recency."""
-    embedder = embedder or make_embedder()
-    config = config or make_search_config()
-    services = build_services(
-        store, embedder, config, extractor=extractor, authenticator=authenticator
-    )
-    services = replace(
-        services,
-        search_service=SearchService(store, embedder, config, now_fn=clock or make_clock()),
-        access_service=access or services.access_service,
-    )
-    return McpHivemind.from_services(store, services, credential)
 
 
 def make_entry_clocks(n: int) -> list[FixedClock]:

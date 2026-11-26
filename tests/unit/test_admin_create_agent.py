@@ -17,8 +17,8 @@ from hivemind.ports import Credential
 from hivemind.services.access import AccessService
 from hivemind.services.errors import NameTaken, PermissionDenied
 from hivemind.services.fleet_merge import FleetMergeService
+from tests.builders import make_hivemind_app
 from tests.fakes import FakeAuthenticator, make_client, make_store
-from tests.unit.test_api_endpoints import make_hivemind_app
 
 
 def admin() -> Credential:

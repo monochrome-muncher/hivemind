@@ -13,18 +13,23 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-import httpx
 import pytest
 
 from hivemind.api.deps import HivemindApp
 from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
-from hivemind.domain.audit import ActorKind, AuditAction, AuditFilters
+from hivemind.domain.audit import AuditAction, AuditFilters
 from hivemind.domain.entry import EntryDraft, EntryFilters
 from hivemind.domain.feedback import Verdict
 from hivemind.memstore import MemoryStore
-from hivemind.ports import Credential, KeyReplacement
+from hivemind.ports import Credential
+from tests.builders import (
+    make_app_with_clock,
+    make_hivemind_app,
+    make_rest_authenticator,
+    post_entry,
+)
 from tests.fakes import (
     make_client,
     make_clock,
@@ -32,106 +37,6 @@ from tests.fakes import (
     make_search_config,
     seed_entity_entries,
 )
-
-
-class FakeAuthenticator:
-    """Dict-backed Authenticator (SPEC.md §8.1, ADR 0012): user + agent
-    sub-keys + key management (the full ``Authenticator`` port)."""
-
-    def __init__(self, keys: dict[str, Credential]) -> None:
-        self._keys = keys
-        self._org_key: str | None = None
-
-    async def verify(self, key: str) -> Credential | None:
-        return self._keys.get(key)
-
-    async def issue_agent_key(self, agent_name: str) -> str:
-        raw_key = f"hm_agent_{agent_name}"
-        self._keys[raw_key] = Credential(
-            user_id=agent_name, agent_name=agent_name, access_controlled=True
-        )
-        return raw_key
-
-    async def replace_agent_key(
-        self, agent_name: str, *, audit_actor_kind: ActorKind, audit_actor: str
-    ) -> KeyReplacement:
-        old = f"hm_agent_{agent_name}"
-        had_old = self._keys.pop(old, None) is not None
-        new = f"{old}_2"
-        self._keys[new] = Credential(
-            user_id=agent_name, agent_name=agent_name, access_controlled=True
-        )
-        return KeyReplacement(new, "n" * 12, "o" * 12 if had_old else None)
-
-    async def lock_agent_key(self, agent_name: str, *, key_id: str) -> bool:
-        return False
-
-    async def revoke_agent_key(self, agent_name: str) -> None:
-        raw_key = f"hm_agent_{agent_name}"
-        self._keys.pop(raw_key, None)
-
-    async def rotate_org_key(self) -> str:
-        if self._org_key is not None:
-            self._keys.pop(self._org_key, None)
-        self._org_key = "hm_org"
-        self._keys[self._org_key] = Credential(user_id="org", is_org=True, access_controlled=True)
-        return self._org_key
-
-    def add_key(self, raw_key: str, credential: Credential) -> None:
-        """Test helper: register a credential under a raw key directly."""
-        self._keys[raw_key] = credential
-
-    async def issue_admin_key(self) -> str:
-        raw_key = "hm_admin_new"
-        self._keys[raw_key] = Credential(user_id="admin", is_admin=True)
-        return raw_key
-
-
-def make_authenticator() -> FakeAuthenticator:
-    return FakeAuthenticator(
-        keys={
-            "key-alice": Credential(user_id="alice", agent_id="agent-alice"),
-            "key-bob": Credential(user_id="bob", agent_id="agent-bob"),
-            "key-alice-user": Credential(user_id="alice"),
-            "key-admin": Credential(user_id="ops", agent_id="admin-agent", is_admin=True),
-            # v2 access-model keys (ADRs 0011-0012):
-            "key-org": Credential(user_id="org", is_org=True, access_controlled=True),
-        }
-    )
-
-
-def make_hivemind_app() -> HivemindApp:
-    """A full HivemindApp wired from fakes: real services, fake ports."""
-    return create_app_for_config(
-        Settings(),
-        store=MemoryStore(make_clock()),
-        embedder=make_embedder(),
-        authenticator=make_authenticator(),
-        search_config=make_search_config(),
-    )
-
-
-def make_app_with_clock(clock) -> HivemindApp:
-    """A HivemindApp over a caller-controlled clock (for created_at tests)."""
-    return create_app_for_config(
-        Settings(),
-        store=MemoryStore(clock),
-        embedder=make_embedder(),
-        authenticator=make_authenticator(),
-        search_config=make_search_config(),
-    )
-
-
-async def post_entry(
-    client: httpx.AsyncClient,
-    key: str,
-    summary: str,
-    **body: object,
-) -> dict:
-    payload = {"kind": "fact", "summary": summary, **body}
-    resp = await client.post("/v1/entries", json=payload, headers={"X-API-Key": key})
-    assert resp.status_code == 201, resp.text
-    return resp.json()
 
 
 class TestHealth:
@@ -497,7 +402,7 @@ class TestSupersessionInvariants:
             Settings(),
             store=MemoryStore(clock),
             embedder=make_embedder(),
-            authenticator=make_authenticator(),
+            authenticator=make_rest_authenticator(),
             search_config=make_search_config(),
         )
         client = make_client(app)

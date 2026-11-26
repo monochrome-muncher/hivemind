@@ -21,7 +21,6 @@ from hivemind.api.deps import create_app
 from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
 from hivemind.domain.access import FleetBusy, TrustLevel
-from hivemind.domain.validation import utcnow
 from hivemind.mcp import app as mcp
 from hivemind.mcp.app import McpHivemind
 from hivemind.mcp.server import build_server
@@ -30,13 +29,13 @@ from hivemind.ports import Credential, EntryNotActiveConflict, UnknownEntry
 from hivemind.services.fleet_merge import FleetMergeService
 from hivemind.services.governance import GovernanceService
 from hivemind.services.pins import PinService
+from tests.builders import mcp_app
 from tests.fakes import (
     FakeAuthenticator,
     agent_credential,
     make_clock,
     make_embedder,
     make_search_config,
-    mcp_surface,
 )
 
 NO_SUCH = "00000000-0000-4000-8000-00000000dead"
@@ -66,14 +65,10 @@ class World:
     target_fleet: str = ""
 
     def mcp(self, key: str) -> McpHivemind:
-        embedder, config = make_embedder(), make_search_config()
-        return mcp_surface(
+        return mcp_app(
             self.store,
             self.authenticator._by_key[key],
-            embedder=embedder,
-            config=config,
             authenticator=self.authenticator,
-            clock=utcnow,
         )
 
 

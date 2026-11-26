@@ -43,7 +43,7 @@ from hivemind.services.errors import (
     PermissionDenied,
     SupersedeDenied,
 )
-from tests.unit.test_api_endpoints import make_hivemind_app
+from tests.builders import make_hivemind_app
 
 # One instance of each class in the table; the classes that build their own
 # message from other arguments are made here.

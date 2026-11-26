@@ -31,7 +31,8 @@ from hivemind.mcp.app import McpHivemind
 from hivemind.ports import Credential
 from hivemind.store import PgStore
 from hivemind.store import migrate as migrate_module
-from tests.fakes import FakeEmbedder, make_search_config, mcp_surface
+from tests.builders import mcp_app
+from tests.fakes import FakeEmbedder
 
 _migrated: set[tuple[str, int]] = set()
 _tables: dict[str, list[str]] = {}
@@ -197,6 +198,4 @@ def fleet_draft(fleet_id: str, summary: str, author: str = "amy") -> EntryDraft:
 def pg_surface(store: PgStore, credential: Credential) -> McpHivemind:
     """The MCP tools over ``store`` as ``credential``, embedding at the database's width."""
     embedder = FakeEmbedder(dimension=Settings().embedding_dim)
-    return mcp_surface(
-        store, credential, embedder=embedder, config=make_search_config(), clock=utcnow
-    )
+    return mcp_app(store, credential, utcnow, embedder=embedder)

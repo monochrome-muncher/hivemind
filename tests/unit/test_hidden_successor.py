@@ -15,13 +15,13 @@ from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.feedback import FeedbackService
 from hivemind.services.read import ReadService
+from tests.builders import mcp_app
 from tests.fakes import (
     FakeAuthenticator,
     agent_credential,
     make_clock,
     make_embedder,
     make_search_config,
-    mcp_surface,
 )
 
 # A wrote E in fleet-1, then moved to fleet-2 (still reads E as its own);
@@ -142,8 +142,7 @@ def _with(entry: Entry, **changes: object) -> Entry:
 
 
 def _surface(store: MemoryStore, credential: Credential) -> McpHivemind:
-    clock, embedder, config = make_clock(), make_embedder(), make_search_config()
-    return mcp_surface(store, credential, embedder=embedder, config=config, clock=clock)
+    return mcp_app(store, credential)
 
 
 async def test_mcp_get_and_list_drop_a_hidden_successor() -> None:

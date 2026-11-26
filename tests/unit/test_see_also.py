@@ -16,13 +16,13 @@ from hivemind.mcp.app import McpHivemind, hive_get, hive_withdraw, hive_write
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.chain import MAX_LINKED_FROM
+from tests.builders import mcp_app
 from tests.fakes import (
     FakeAuthenticator,
     agent_credential,
     make_clock,
     make_embedder,
     make_search_config,
-    mcp_surface,
 )
 
 ALICE = agent_credential("alice", "fleet-a")
@@ -31,8 +31,7 @@ CAROL = agent_credential("carol", "fleet-b")
 
 
 def _surface(store: MemoryStore, credential: Credential) -> McpHivemind:
-    clock, embedder, config = make_clock(), make_embedder(), make_search_config()
-    return mcp_surface(store, credential, embedder=embedder, config=config, clock=clock)
+    return mcp_app(store, credential)
 
 
 async def _write(store: MemoryStore, cred: Credential, summary: str, **kw: object) -> str:

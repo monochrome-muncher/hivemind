@@ -25,21 +25,13 @@ from pathlib import Path
 import pytest
 
 from hivemind.config import load_settings
-
-
-def _clear_hivemind_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Drop every HIVEMIND_* / ENVIRONMENT var this process inherited."""
-    import os
-
-    for name in list(os.environ):
-        if name.startswith("HIVEMIND_") or name == "ENVIRONMENT":
-            monkeypatch.delenv(name, raising=False)
+from tests.builders import clear_hivemind_env
 
 
 def test_unknown_variable_is_rejected_in_strict_mode(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _clear_hivemind_env(monkeypatch)
+    clear_hivemind_env(monkeypatch)
     monkeypatch.setenv("HIVEMIND_STRICT_ENV", "true")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HIVEMIND_NONSENSE", "1")
@@ -53,7 +45,7 @@ def test_unknown_variable_error_names_it_without_a_bogus_suggestion(
     """A name with no close relative gets no "did you mean" (regression:
     matching on the full name let the shared HIVEMIND_ prefix alone push
     unrelated names like RUNNER over difflib's similarity cutoff)."""
-    _clear_hivemind_env(monkeypatch)
+    clear_hivemind_env(monkeypatch)
     monkeypatch.setenv("HIVEMIND_STRICT_ENV", "true")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HIVEMIND_NONSENSE", "1")
@@ -69,7 +61,7 @@ def test_renamed_variable_suggests_its_replacement(
     failure mode this check exists for: the old name now fails loudly
     and points at the new one, instead of silently keeping the default.
     """
-    _clear_hivemind_env(monkeypatch)
+    clear_hivemind_env(monkeypatch)
     monkeypatch.setenv("HIVEMIND_STRICT_ENV", "true")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HIVEMIND_EMBEDDING_PREFIX_CHARS", "500")
@@ -80,7 +72,7 @@ def test_renamed_variable_suggests_its_replacement(
 def test_multiple_unknown_variables_are_all_named(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _clear_hivemind_env(monkeypatch)
+    clear_hivemind_env(monkeypatch)
     monkeypatch.setenv("HIVEMIND_STRICT_ENV", "true")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HIVEMIND_FOO", "1")
@@ -104,7 +96,7 @@ def test_multiple_unknown_variables_are_all_named(
 def test_each_allowlisted_variable_is_accepted_alone(
     name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _clear_hivemind_env(monkeypatch)
+    clear_hivemind_env(monkeypatch)
     monkeypatch.setenv("HIVEMIND_STRICT_ENV", "true")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv(name, "some-value")
@@ -117,7 +109,7 @@ def test_realistic_production_environment_loads_cleanly(
     """The exact posture the task calls out: HIVEMIND_RUNNER / HOST / PORT
     (all non-Settings-field, pod-wide variables) alongside real settings.
     """
-    _clear_hivemind_env(monkeypatch)
+    clear_hivemind_env(monkeypatch)
     monkeypatch.setenv("HIVEMIND_STRICT_ENV", "true")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HIVEMIND_RUNNER", "api")
@@ -135,7 +127,7 @@ def test_realistic_production_environment_loads_cleanly(
 def test_a_known_settings_field_env_var_is_never_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _clear_hivemind_env(monkeypatch)
+    clear_hivemind_env(monkeypatch)
     monkeypatch.setenv("HIVEMIND_STRICT_ENV", "true")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HIVEMIND_QUALITY_MIN", "0.3")
@@ -147,7 +139,7 @@ def test_social_max_env_var_reaches_the_search_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """ADR 0070: ``HIVEMIND_SOCIAL_MAX`` is a known field and defaults to 1.2."""
-    _clear_hivemind_env(monkeypatch)
+    clear_hivemind_env(monkeypatch)
     monkeypatch.chdir(tmp_path)
     assert load_settings().search_config().social_max == 1.2
     monkeypatch.setenv("HIVEMIND_SOCIAL_MAX", "1.5")
@@ -161,7 +153,7 @@ def test_pool_max_size_env_var_is_accepted_and_reaches_settings(
     the multi-replica-readiness pool-size knobs) are real ``Settings``
     fields, so their ``HIVEMIND_*`` spellings must load, not be rejected
     as unknown."""
-    _clear_hivemind_env(monkeypatch)
+    clear_hivemind_env(monkeypatch)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv(
         "HIVEMIND_DATABASE_URL", "postgresql://hivemind:hivemind@localhost:5432/hivemind"
@@ -176,7 +168,7 @@ def test_unknown_variable_in_the_profile_file_is_also_rejected_in_strict_mode(
 ) -> None:
     """A typo in the profile file (ADR 0017) is the same silent no-op as
     a typo in a real env var, so it gets the same loud rejection."""
-    _clear_hivemind_env(monkeypatch)
+    clear_hivemind_env(monkeypatch)
     monkeypatch.setenv("HIVEMIND_STRICT_ENV", "true")
     (tmp_path / ".env.local").write_text("HIVEMIND_TOTALLY_MADE_UP=1\n")
     monkeypatch.chdir(tmp_path)
@@ -192,7 +184,7 @@ def test_bare_settings_construction_is_never_checked(
     unaffected by stray HIVEMIND_* vars in the ambient environment."""
     from hivemind.config import Settings
 
-    _clear_hivemind_env(monkeypatch)
+    clear_hivemind_env(monkeypatch)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HIVEMIND_NONSENSE", "1")
     Settings()  # must not raise
@@ -204,7 +196,7 @@ def test_bare_settings_construction_is_never_checked(
 def test_by_default_an_unknown_variable_warns_and_startup_continues(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    _clear_hivemind_env(monkeypatch)
+    clear_hivemind_env(monkeypatch)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HIVEMIND_EMBEDDING_PREFIX_CHARS", "500")
     with caplog.at_level("WARNING", logger="hivemind.config"):
@@ -227,7 +219,7 @@ def test_an_unknown_variables_value_is_never_logged_or_raised(
     """A mistyped key variable (``..._APIKEY``) holds a real key; the check
     names it and nothing more. Its value may come from the environment or
     from the profile file."""
-    _clear_hivemind_env(monkeypatch)
+    clear_hivemind_env(monkeypatch)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HIVEMIND_EMBEDDING_APIKEY", SECRET)
     (tmp_path / ".env.local").write_text(f"HIVEMIND_EXTRACTOR_APIKEY={SECRET}-file\n")
@@ -252,7 +244,7 @@ def test_platform_injected_variables_do_not_stop_startup(
 ) -> None:
     """The shapes Kubernetes service links produce for Services named
     hivemind-api / hivemind-mcp, plus an Auto DevOps-style extra."""
-    _clear_hivemind_env(monkeypatch)
+    clear_hivemind_env(monkeypatch)
     monkeypatch.chdir(tmp_path)
     for name, value in {
         "HIVEMIND_API_SERVICE_HOST": "10.0.0.12",
@@ -271,7 +263,7 @@ def test_platform_injected_variables_do_not_stop_startup(
 def test_no_warning_when_every_variable_is_known(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    _clear_hivemind_env(monkeypatch)
+    clear_hivemind_env(monkeypatch)
     monkeypatch.setenv("HIVEMIND_STRICT_ENV", "true")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HIVEMIND_RUNNER", "api")
@@ -283,7 +275,7 @@ def test_no_warning_when_every_variable_is_known(
 
 @pytest.mark.parametrize("value", ["true", "TRUE", "1", "yes", "on"])
 def test_strict_mode_spellings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str) -> None:
-    _clear_hivemind_env(monkeypatch)
+    clear_hivemind_env(monkeypatch)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HIVEMIND_STRICT_ENV", value)
     monkeypatch.setenv("HIVEMIND_NONSENSE", "1")
@@ -295,7 +287,7 @@ def test_strict_mode_spellings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, 
 def test_non_strict_spellings_only_warn(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str
 ) -> None:
-    _clear_hivemind_env(monkeypatch)
+    clear_hivemind_env(monkeypatch)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HIVEMIND_STRICT_ENV", value)
     monkeypatch.setenv("HIVEMIND_NONSENSE", "1")
@@ -305,7 +297,7 @@ def test_non_strict_spellings_only_warn(
 def test_strict_mode_can_come_from_the_profile_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _clear_hivemind_env(monkeypatch)
+    clear_hivemind_env(monkeypatch)
     (tmp_path / ".env.local").write_text("HIVEMIND_STRICT_ENV=true\nHIVEMIND_MADE_UP=1\n")
     monkeypatch.chdir(tmp_path)
     with pytest.raises(RuntimeError, match="HIVEMIND_MADE_UP"):
@@ -315,7 +307,7 @@ def test_strict_mode_can_come_from_the_profile_file(
 def test_a_real_env_var_overrides_strict_mode_in_the_profile_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _clear_hivemind_env(monkeypatch)
+    clear_hivemind_env(monkeypatch)
     (tmp_path / ".env.local").write_text("HIVEMIND_STRICT_ENV=true\nHIVEMIND_MADE_UP=1\n")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HIVEMIND_STRICT_ENV", "false")
@@ -329,7 +321,7 @@ def test_a_removed_ranking_variable_is_ignored_with_one_warning_even_when_strict
     """ADR 0103: the two retired ranking options still in a deployment's
     config must not stop startup under HIVEMIND_STRICT_ENV; they warn once
     and change nothing."""
-    _clear_hivemind_env(monkeypatch)
+    clear_hivemind_env(monkeypatch)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HIVEMIND_STRICT_ENV", "true")
     baseline = load_settings().search_config()
@@ -348,7 +340,7 @@ def test_a_removed_ranking_variable_is_ignored_with_one_warning_even_when_strict
 def test_both_removed_ranking_variables_share_one_warning(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    _clear_hivemind_env(monkeypatch)
+    clear_hivemind_env(monkeypatch)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HIVEMIND_STRICT_ENV", "true")
     monkeypatch.setenv("HIVEMIND_RECENCY_FROM_CONFIRMATION", "false")
@@ -361,7 +353,7 @@ def test_both_removed_ranking_variables_share_one_warning(
 def test_a_removed_ranking_variable_in_the_profile_file_is_ignored_when_strict(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    _clear_hivemind_env(monkeypatch)
+    clear_hivemind_env(monkeypatch)
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".env.local").write_text(
         "HIVEMIND_STRICT_ENV=true\nHIVEMIND_RECENCY_BY_KIND=insight=180\n"

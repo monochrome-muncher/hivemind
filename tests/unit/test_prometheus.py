@@ -6,22 +6,12 @@ from datetime import timedelta
 
 import httpx
 from fastapi import FastAPI
-from prometheus_client.parser import text_string_to_metric_families
 
 from hivemind.api.prometheus import PrometheusMetrics
 from hivemind.domain.entry import EntryDraft
 from hivemind.domain.feedback import Feedback, Verdict
+from tests.builders import make_hivemind_app, post_entry, samples
 from tests.fakes import make_client
-from tests.unit.test_api_endpoints import make_hivemind_app, post_entry
-
-
-def samples(text: str) -> dict[tuple[str, tuple[tuple[str, str], ...]], float]:
-    """Every sample of a scrape, keyed by (name, sorted labels)."""
-    return {
-        (s.name, tuple(sorted(s.labels.items()))): s.value
-        for family in text_string_to_metric_families(text)
-        for s in family.samples
-    }
 
 
 async def test_metrics_is_prometheus_text_without_a_key() -> None:

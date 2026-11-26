@@ -25,13 +25,13 @@ from hivemind.mcp.app import (
 from hivemind.mcp.server import build_server
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
+from tests.builders import mcp_app
 from tests.fakes import (
     FakeAuthenticator,
     agent_credential,
     make_clock,
     make_embedder,
     make_search_config,
-    mcp_surface,
 )
 
 HOME, OTHER = "fleet-home", "fleet-other"
@@ -55,8 +55,8 @@ class Pool:
         self.config = make_search_config()
 
     def as_(self, credential: Credential) -> McpHivemind:
-        return mcp_surface(
-            self.store, credential, embedder=self.embedder, config=self.config, clock=self.clock
+        return mcp_app(
+            self.store, credential, self.clock, embedder=self.embedder, config=self.config
         )
 
 

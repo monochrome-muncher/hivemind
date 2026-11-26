@@ -11,8 +11,8 @@ from hivemind.domain.audit import AuditAction, AuditFilters
 from hivemind.domain.entry import EntityKind, EntryDraft, ExtractedEntity, Kind
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.portal.app import STATIC_DIR as PORTAL_STATIC
+from tests.builders import make_hivemind_app
 from tests.fakes import make_client, make_embedder
-from tests.unit.test_api_endpoints import make_hivemind_app
 
 ADMIN = {"X-API-Key": "key-admin"}
 ALICE = {"X-API-Key": "key-alice"}

@@ -24,8 +24,8 @@ from hivemind.mcp.metrics import McpMetrics, error_code_label
 from hivemind.mcp.server import build_server
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
-from tests.fakes import make_embedder
-from tests.unit.test_mcp_http import ALICE, FakeAuthenticator, make_app
+from tests.builders import HTTP_ALICE, StaticAuthenticator, make_mcp_app
+from tests.fakes import make_clock, make_embedder
 
 Samples = dict[tuple[str, tuple[tuple[str, str], ...]], float]
 
@@ -56,7 +56,7 @@ def _app(
         Settings(mcp_metrics_enabled=enabled),
         MemoryStore(),
         embedder or make_embedder(),
-        authenticator or FakeAuthenticator(KEYS),
+        authenticator or StaticAuthenticator(KEYS),
     )
 
 
@@ -184,7 +184,7 @@ def test_a_degraded_search_through_the_app_is_counted() -> None:
 
 
 async def test_an_authenticator_timeout_is_503_and_counted() -> None:
-    class SlowAuth(FakeAuthenticator):
+    class SlowAuth(StaticAuthenticator):
         async def verify(self, key: str) -> Credential | None:
             raise TimeoutError
 
@@ -220,7 +220,7 @@ def _tool_calls(tool: str, outcome: str, code: str) -> tuple[str, tuple[tuple[st
 
 async def test_tool_calls_are_counted_by_outcome_and_code() -> None:
     metrics = McpMetrics()
-    server = build_server(make_app(ALICE), metrics=metrics)
+    server = build_server(make_mcp_app(HTTP_ALICE), metrics=metrics)
     await server.call_tool("hive_whoami", {})
     await server.call_tool("hive_get", {"entry_id": "no-such-entry"})
     await server.call_tool("hive_feedback", {"entry_id": "x", "verdict": "meh"})
@@ -233,12 +233,13 @@ async def test_tool_calls_are_counted_by_outcome_and_code() -> None:
 
 async def test_a_raising_tool_is_counted_as_an_error_and_reraised() -> None:
     metrics = McpMetrics()
-    app = make_app(ALICE)
+    store = MemoryStore(make_clock())
+    app = make_mcp_app(HTTP_ALICE, store)
 
     async def broken(*_args: Any, **_kwargs: Any) -> Any:
         raise RuntimeError("boom")
 
-    app.store.list_entries = broken  # type: ignore[method-assign]
+    store.list_entries = broken  # type: ignore[method-assign]
     server = build_server(app, metrics=metrics)
     with pytest.raises(ToolError, match="hive_list") as raised:
         await server.call_tool("hive_list", {})
@@ -260,6 +261,6 @@ def test_every_mcp_error_code_is_a_label_value() -> None:
 
 
 async def test_without_metrics_the_server_works_unchanged() -> None:
-    server = build_server(make_app(ALICE))
+    server = build_server(make_mcp_app(HTTP_ALICE))
     result = await server.call_tool("hive_whoami", {})
     assert "trust_level" in json.loads(result.content[0].text)

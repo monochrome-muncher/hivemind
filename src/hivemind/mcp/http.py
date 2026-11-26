@@ -300,7 +300,6 @@ def build_http_app(
         require_stored_keys=settings.require_stored_keys,
     )
     template = McpHivemind.from_services(
-        store,
         services,
         # Never used to act: the provider fails closed (ADR 0042). Should that regress, this is
         # level 0 and access-controlled, not the legacy full-access identity.

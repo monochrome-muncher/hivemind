@@ -38,12 +38,11 @@ from hivemind.domain.entry import (
     Source,
     SourceType,
 )
-from hivemind.domain.feedback import Correction, Feedback, FeedbackSummary, Verdict
+from hivemind.domain.feedback import Feedback, FeedbackSummary, Verdict
 from hivemind.domain.fleet_phase import FleetPhase, PhaseName
 from hivemind.domain.pin import Pin, PinnedEntry
-from hivemind.domain.upstream import UpstreamChange, UpstreamChangeKind
 from hivemind.services.chain import EntryLinks
-from hivemind.services.search import Hit, SimilarEntry
+from hivemind.services.search import Hit
 from hivemind.services.write import RelatedEntry
 from hivemind.services.write_warnings import WriteWarning
 from hivemind.wire import (
@@ -58,11 +57,7 @@ from hivemind.wire import (
     related_dict,
     warning_dict,
 )
-
-DT_OCCURRED = datetime(2026, 10, 1, 12, 0, 0, tzinfo=UTC)
-DT_CREATED = datetime(2026, 10, 2, 12, 0, 0, tzinfo=UTC)
-DT_CONFIRMED = datetime(2026, 10, 3, 12, 0, 0, tzinfo=UTC)
-DT_REPORT = datetime(2026, 10, 4, 12, 0, 0, tzinfo=UTC)
+from tests.builders import DT_CONFIRMED, DT_CREATED, DT_OCCURRED, DT_REPORT, HIT
 
 ENTRY = Entry(
     id="11111111-1111-4111-8111-111111111111",
@@ -209,39 +204,6 @@ RELATED_TABLE: dict[str, object] = {
 WARNING = WriteWarning(code="a_code", message="what to do about it")
 WARNING_TABLE: dict[str, object] = {"code": "a_code", "message": "what to do about it"}
 
-HIT = Hit(
-    entry_id="22222222-2222-4222-8222-222222222222",
-    kind=Kind.INSIGHT,
-    summary="hit summary",
-    tags=("tag-h",),
-    author="author-h",
-    agent="agent-h",
-    occurred_at=DT_OCCURRED,
-    score=0.87,
-    match="both",
-    similarity=0.81,
-    scope="org",
-    fleet_id=None,
-    feedback=(3, 1, 2),
-    last_confirmed_at=DT_CONFIRMED,
-    contested=True,
-    correction=Correction(
-        verdict=Verdict.STALE,
-        note="correction note",
-        reporter="reporter-c",
-        updated_at=DT_REPORT,
-    ),
-    supersedes=2,
-    state=EntryState.ACTIVE,
-    similar=(
-        SimilarEntry(entry_id="33333333-3333-4333-8333-333333333333", occurred_at=DT_CREATED),
-    ),
-    upstream_changed=(
-        UpstreamChange(
-            id="44444444-4444-4444-8444-444444444444", change=UpstreamChangeKind.SUPERSEDED
-        ),
-    ),
-)
 
 # Search hits: same fields on both surfaces, one deliberate naming
 # divergence — the MCP hit is keyed by ``id`` (agents fetch with

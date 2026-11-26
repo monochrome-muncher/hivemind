@@ -24,8 +24,8 @@ from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.retrieval.scoring import entry_score
 from hivemind.services.search import SearchService
-from tests.fakes import FIXED_NOW, make_clock, make_embedder, make_search_config, mcp_surface
-from tests.unit.test_api_endpoints import make_authenticator, make_hivemind_app, post_entry
+from tests.builders import make_hivemind_app, make_rest_authenticator, mcp_app, post_entry
+from tests.fakes import FIXED_NOW, make_clock, make_embedder, make_search_config
 
 NOW = FIXED_NOW
 OFF = SearchConfig(recency_hint_enabled=False)
@@ -361,7 +361,7 @@ def _api(enabled: bool) -> tuple[object, httpx.AsyncClient]:
         Settings(),
         store=MemoryStore(make_clock()),
         embedder=make_embedder(),
-        authenticator=make_authenticator(),
+        authenticator=make_rest_authenticator(),
         search_config=replace(make_search_config(), recency_hint_enabled=enabled),
     )
     transport = httpx.ASGITransport(app=create_app(app))
@@ -436,14 +436,9 @@ async def test_rest_setting_on_names_the_applied_hint_in_a_header() -> None:
 
 
 def _mcp(enabled: bool, store: MemoryStore) -> McpHivemind:
-    embedder = make_embedder()
     config = replace(make_search_config(), recency_hint_enabled=enabled)
-    return mcp_surface(
-        store,
-        Credential(user_id="alice", agent_id="agent-1"),
-        embedder=embedder,
-        config=config,
-        clock=lambda: NOW,
+    return mcp_app(
+        store, Credential(user_id="alice", agent_id="agent-1"), lambda: NOW, config=config
     )
 
 

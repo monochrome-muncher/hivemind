@@ -22,11 +22,11 @@ from hivemind.services.errors import PermissionDenied
 from hivemind.services.fleet_merge import FleetMergeService
 from hivemind.services.metrics import MetricsService
 from hivemind.services.successions import SuccessionService
+from tests.builders import mcp_app
 from tests.fakes import (
     FakeAuthenticator,
     make_clock,
     make_store_client,
-    mcp_surface,
 )
 
 ADMIN = Credential(user_id="admin", is_admin=True, key_id="abcdef012345")
@@ -192,7 +192,7 @@ def _agent(fleet_id: str | None) -> Credential:
 
 
 def _surface(world: World, credential: Credential) -> McpHivemind:
-    return mcp_surface(world.store, credential, access=world.access)
+    return mcp_app(world.store, credential, access=world.access)
 
 
 async def test_whoami_carries_the_role_and_its_hint_only_for_a_scout() -> None:

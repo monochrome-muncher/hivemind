@@ -18,8 +18,8 @@ from hivemind.memstore import MemoryStore
 from hivemind.portal.app import STATIC_DIR as PORTAL_STATIC
 from hivemind.ports import Credential
 from hivemind.services.fleet_activity import CACHE_SIZE, FleetActivityService
+from tests.builders import make_hivemind_app
 from tests.fakes import FIXED_NOW, make_client, make_clock, make_embedder
-from tests.unit.test_api_endpoints import make_hivemind_app
 
 CAROL = {"X-API-Key": "key-carol"}
 LONE = {"X-API-Key": "key-lone"}  # no home fleet

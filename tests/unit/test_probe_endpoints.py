@@ -25,8 +25,8 @@ from hivemind.config import Settings
 from hivemind.mcp.http import ProbeRouter, build_http_app
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
+from tests.builders import StaticAuthenticator
 from tests.fakes import make_embedder
-from tests.unit.test_mcp_http import FakeAuthenticator
 
 
 class _RecordingApp:
@@ -154,8 +154,8 @@ async def test_non_http_scopes_pass_through() -> None:
 # --- build_http_app wiring (probes live OUTSIDE the auth middleware) ---------
 
 
-def _make_authenticator() -> FakeAuthenticator:
-    return FakeAuthenticator({"key-alice": Credential(user_id="alice", agent_id="agent-a")})
+def _make_authenticator() -> StaticAuthenticator:
+    return StaticAuthenticator({"key-alice": Credential(user_id="alice", agent_id="agent-a")})
 
 
 async def test_build_http_app_serves_probes_without_a_key() -> None:

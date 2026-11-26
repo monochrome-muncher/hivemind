@@ -19,10 +19,8 @@ from hivemind.memstore import MemoryStore
 from hivemind.retrieval.mmr import mmr_order
 from hivemind.services.metrics import MetricsService
 from hivemind.services.search import SearchService
+from tests.builders import ALICE, make_hivemind_app, mcp_app, post_entry, samples
 from tests.fakes import make_client, make_clock, make_embedder
-from tests.unit.test_api_endpoints import make_hivemind_app, post_entry
-from tests.unit.test_mcp_app import ALICE, build_app
-from tests.unit.test_prometheus import samples
 
 # --------------------------------------------------------------------------- #
 # the pure MMR order
@@ -275,9 +273,9 @@ def test_explore_lambda_env_var_reaches_the_search_config(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:  # type: ignore[no-untyped-def]
     from hivemind.config import load_settings
-    from tests.unit.test_env_var_validation import _clear_hivemind_env
+    from tests.builders import clear_hivemind_env
 
-    _clear_hivemind_env(monkeypatch)
+    clear_hivemind_env(monkeypatch)
     monkeypatch.chdir(tmp_path)
     assert load_settings().search_config().explore_lambda == 0.7
     monkeypatch.setenv("HIVEMIND_EXPLORE_LAMBDA", "0.5")
@@ -371,24 +369,24 @@ async def test_rest_explore_search_is_counted_in_the_metrics_report() -> None:
 
 
 @pytest.fixture
-def mcp_app() -> McpHivemind:
+def explore_mcp() -> McpHivemind:
     clock = make_clock()
-    return build_app(MemoryStore(clock), ALICE, clock)
+    return mcp_app(MemoryStore(clock), ALICE, clock)
 
 
-async def test_mcp_explore_is_an_argument_and_defaults_off(mcp_app: McpHivemind) -> None:
+async def test_mcp_explore_is_an_argument_and_defaults_off(explore_mcp: McpHivemind) -> None:
     for i in range(3):
-        await hive_write(mcp_app, kind="fact", summary=f"cohort note {i}")
-    plain = await hive_search(mcp_app, query="cohort note")
-    off = await hive_search(mcp_app, query="cohort note", explore=False)
-    on = await hive_search(mcp_app, query="cohort note", explore=True)
+        await hive_write(explore_mcp, kind="fact", summary=f"cohort note {i}")
+    plain = await hive_search(explore_mcp, query="cohort note")
+    off = await hive_search(explore_mcp, query="cohort note", explore=False)
+    on = await hive_search(explore_mcp, query="cohort note", explore=True)
     assert [h["id"] for h in plain["hits"]] == [h["id"] for h in off["hits"]]
     assert "error" not in on
     assert sorted(h["id"] for h in on["hits"]) == sorted(h["id"] for h in plain["hits"])
 
 
 async def test_mcp_tool_schema_has_explore_as_an_optional_boolean() -> None:
-    server = build_server(build_app(MemoryStore(make_clock()), ALICE, make_clock()))
+    server = build_server(mcp_app(MemoryStore(make_clock()), ALICE, make_clock()))
     tools = {t.name: t for t in await server.list_tools()}
     schema = tools["hive_search"].input_schema
     assert schema["properties"]["explore"]["type"] == "boolean"

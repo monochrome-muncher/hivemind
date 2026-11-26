@@ -25,25 +25,11 @@ from hivemind.mcp.app import (
 from hivemind.mcp.errors import ERR_AGENT_UNRESOLVED, ERR_INVALID_INPUT, ERR_PERMISSION_DENIED
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
-from tests.fakes import (
-    make_clock,
-    make_embedder,
-    make_search_config,
-    mcp_surface,
-    seed_entity_entries,
-)
+from tests.builders import ALICE, ORG, mcp_app
+from tests.fakes import make_clock, seed_entity_entries
 
-ALICE = Credential(user_id="alice", agent_id="agent-1")
 BOB = Credential(user_id="bob", agent_id="agent-2")
 ADMIN = Credential(user_id="ops", agent_id="admin-agent", is_admin=True)
-ORG = Credential(user_id="org", is_org=True, access_controlled=True)
-
-
-def build_app(store: MemoryStore, credential: Credential, clock) -> McpHivemind:
-    """Assemble a ``McpHivemind`` over a shared store (deterministic clock)."""
-    embedder = make_embedder()
-    config = make_search_config()
-    return mcp_surface(store, credential, embedder=embedder, config=config, clock=clock)
 
 
 @pytest.fixture
@@ -58,7 +44,7 @@ def store(clock) -> MemoryStore:
 
 @pytest.fixture
 def app(store, clock) -> McpHivemind:
-    return build_app(store, ALICE, clock)
+    return mcp_app(store, ALICE, clock=clock)
 
 
 # --------------------------------------------------------------------------- #
@@ -66,7 +52,7 @@ def app(store, clock) -> McpHivemind:
 # --------------------------------------------------------------------------- #
 
 
-async def test_hive_write_persists_entry(app: McpHivemind) -> None:
+async def test_hive_write_persists_entry(app: McpHivemind, store: MemoryStore) -> None:
     result = await hive_write(
         app, kind="fact", summary="Auth uses JWT", body="Tokens expire in 15 min"
     )
@@ -76,7 +62,7 @@ async def test_hive_write_persists_entry(app: McpHivemind) -> None:
     assert result["author"] == "alice"  # from the acting credential
     assert result["agent"] == "agent-1"
 
-    stored = await app.store.get_entry(result["id"])
+    stored = await store.get_entry(result["id"])
     assert stored is not None
     assert stored.summary == "Auth uses JWT"
     assert stored.body == "Tokens expire in 15 min"
@@ -84,7 +70,7 @@ async def test_hive_write_persists_entry(app: McpHivemind) -> None:
 
 
 async def test_hive_write_refuses_the_org_key(store: MemoryStore, clock) -> None:  # type: ignore[no-untyped-def]
-    org_app = build_app(store, ORG, clock)  # access-controlled, trust level 0: writes nothing
+    org_app = mcp_app(store, ORG, clock=clock)  # access-controlled, trust level 0: writes nothing
     # The org key carries no agent identity: a write names one to reach the trust
     # check, and without it is refused earlier.
     result = await hive_write(org_app, kind="fact", summary="from the org key", agent="someone")
@@ -94,13 +80,13 @@ async def test_hive_write_refuses_the_org_key(store: MemoryStore, clock) -> None
     assert await store.list_entries(EntryFilters(include_inactive=True), 10) == []
 
 
-async def test_hive_write_supersedes_target(app: McpHivemind) -> None:
+async def test_hive_write_supersedes_target(app: McpHivemind, store: MemoryStore) -> None:
     first = await hive_write(app, kind="fact", summary="Token expiry 15 min")
     second = await hive_write(
         app, kind="fact", summary="Token expiry 30 min", supersedes=[first["id"]]
     )
     assert "error" not in second
-    old = await app.store.get_entry(first["id"])
+    old = await store.get_entry(first["id"])
     assert old is not None
     assert old.state.value == "superseded"
     assert old.superseded_by == second["id"]
@@ -181,7 +167,7 @@ async def test_hive_write_omitted_scope_defaults_to_max_permitted() -> None:
     clock = make_clock()
     store = MemoryStore(clock)
     cred, fleet_id = await _l2_agent(store, clock)
-    app = build_app(store, cred, clock)
+    app = mcp_app(store, cred, clock=clock)
     result = await hive_write(app, kind="fact", summary="omitted scope probe")
     assert "error" not in result, result
     assert result["scope"] == "fleet"
@@ -193,7 +179,7 @@ async def test_hive_write_l2_explicit_org_scope_denied() -> None:
     clock = make_clock()
     store = MemoryStore(clock)
     cred, _ = await _l2_agent(store, clock)
-    app = build_app(store, cred, clock)
+    app = mcp_app(store, cred, clock=clock)
     result = await hive_write(app, kind="fact", summary="org probe", scope="org")
     assert result["error"]["code"] == ERR_PERMISSION_DENIED
 
@@ -203,7 +189,7 @@ async def test_hive_write_scope_typo_is_invalid_input() -> None:
     (matching REST's 422), not a permission error."""
     clock = make_clock()
     store = MemoryStore(clock)
-    app = build_app(store, ALICE, clock)
+    app = mcp_app(store, ALICE, clock=clock)
     result = await hive_write(app, kind="fact", summary="scope typo", scope="global")
     assert result["error"]["code"] == ERR_INVALID_INPUT
 
@@ -212,7 +198,7 @@ async def test_hive_write_blank_source_ref_is_invalid_input() -> None:
     """A blank source ref is a dead pointer: non-blank required."""
     clock = make_clock()
     store = MemoryStore(clock)
-    app = build_app(store, ALICE, clock)
+    app = mcp_app(store, ALICE, clock=clock)
     result = await hive_write(
         app, kind="fact", summary="dead pointer", sources=[{"type": "url", "ref": "   "}]
     )
@@ -223,7 +209,7 @@ async def test_hive_write_legacy_omitted_scope_stays_org() -> None:
     """Legacy (v1) credentials keep the flat pool: omitted scope -> org."""
     clock = make_clock()
     store = MemoryStore(clock)
-    app = build_app(store, ALICE, clock)
+    app = mcp_app(store, ALICE, clock=clock)
     result = await hive_write(app, kind="fact", summary="legacy probe")
     assert "error" not in result
     assert result["scope"] == "org"
@@ -408,9 +394,9 @@ async def test_hive_list_is_paginated(app: McpHivemind) -> None:
 
 
 async def test_hive_withdraw_enforces_author_rule(store: MemoryStore, clock) -> None:
-    alice_app = build_app(store, ALICE, clock)
-    bob_app = build_app(store, BOB, clock)
-    admin_app = build_app(store, ADMIN, clock)
+    alice_app = mcp_app(store, ALICE, clock=clock)
+    bob_app = mcp_app(store, BOB, clock=clock)
+    admin_app = mcp_app(store, ADMIN, clock=clock)
 
     mine = await hive_write(alice_app, kind="fact", summary="alice's entry")
     # The author may withdraw their own entry.
@@ -438,20 +424,22 @@ async def test_hive_withdraw_enforces_author_rule(store: MemoryStore, clock) -> 
 # --------------------------------------------------------------------------- #
 
 
-async def test_hive_feedback_records_verdict(app: McpHivemind) -> None:
-    entry = await hive_write(build_app(app.store, BOB, make_clock()), kind="fact", summary="a fact")
+async def test_hive_feedback_records_verdict(app: McpHivemind, store: MemoryStore) -> None:
+    entry = await hive_write(mcp_app(store, BOB, make_clock()), kind="fact", summary="a fact")
     result = await hive_feedback(app, entry["id"], verdict="helpful", note="useful")
     assert "error" not in result
     assert result["verdict"] == "helpful"
     assert "quality" in result
     # (helpful, stale, wrong)
-    assert await app.store.feedback_counts(entry["id"]) == (1, 0, 0)
+    assert await store.feedback_counts(entry["id"]) == (1, 0, 0)
 
 
-async def test_hive_feedback_echoes_the_note_as_stored(app: McpHivemind) -> None:
+async def test_hive_feedback_echoes_the_note_as_stored(
+    app: McpHivemind, store: MemoryStore
+) -> None:
     """The reply's ``note`` is the stored note (trimmed; ``None`` when only
     whitespace), the same as its ``feedback.note``, on one id and on many."""
-    bob = build_app(app.store, BOB, make_clock())
+    bob = mcp_app(store, BOB, make_clock())
     first = await hive_write(bob, kind="fact", summary="a fact")
     second = await hive_write(bob, kind="fact", summary="another fact")
     one = await hive_feedback(app, first["id"], verdict="stale", note="  moved  ")
@@ -470,8 +458,10 @@ async def test_hive_feedback_rejects_unknown_verdict(app: McpHivemind) -> None:
     assert result.get("error", {}).get("code") == "invalid_verdict"
 
 
-async def test_hive_feedback_takes_any_case_and_padded_ids(app: McpHivemind) -> None:
-    entry = await hive_write(build_app(app.store, BOB, make_clock()), kind="fact", summary="a fact")
+async def test_hive_feedback_takes_any_case_and_padded_ids(
+    app: McpHivemind, store: MemoryStore
+) -> None:
+    entry = await hive_write(mcp_app(store, BOB, make_clock()), kind="fact", summary="a fact")
     one = await hive_feedback(app, f" {entry['id']} ", verdict=" Helpful ")
     assert one["verdict"] == "helpful"
     many = await hive_feedback(app, entry_ids=[f"{entry['id']}\n"], verdict="STALE")
@@ -494,9 +484,7 @@ async def test_hive_write_user_key_without_agent_is_rejected() -> None:
     fabricated ``unknown`` identity (n3)."""
     clock = make_clock()
     store = MemoryStore(clock)
-    user_key_app = build_app(
-        store, Credential(user_id="alice"), clock
-    )  # plain user key: no agent_id
+    user_key_app = mcp_app(store, Credential(user_id="alice"), clock)  # plain user key: no agent_id
     result = await hive_write(user_key_app, kind="fact", summary="needs an agent")
     assert result.get("error", {}).get("code") == ERR_AGENT_UNRESOLVED
 
@@ -504,7 +492,7 @@ async def test_hive_write_user_key_without_agent_is_rejected() -> None:
 async def test_hive_write_user_key_with_self_reported_agent() -> None:
     clock = make_clock()
     store = MemoryStore(clock)
-    user_key_app = build_app(store, Credential(user_id="alice"), clock)
+    user_key_app = mcp_app(store, Credential(user_id="alice"), clock)
     result = await hive_write(
         user_key_app, kind="fact", summary="self-reported", agent="claude-code"
     )
@@ -512,21 +500,25 @@ async def test_hive_write_user_key_with_self_reported_agent() -> None:
     assert result["agent"] == "claude-code"
 
 
-async def test_hive_feedback_user_key_self_reports_agent(app: McpHivemind) -> None:
+async def test_hive_feedback_user_key_self_reports_agent(
+    app: McpHivemind, store: MemoryStore
+) -> None:
     """SPEC.md §8.1: a plain user key self-reports the agent (m5)."""
     clock = make_clock()
-    store = app.store
-    user_key_app = build_app(store, Credential(user_id="alice"), clock)
-    entry = await hive_write(build_app(store, BOB, clock), kind="fact", summary="a fact")
+    store = store
+    user_key_app = mcp_app(store, Credential(user_id="alice"), clock)
+    entry = await hive_write(mcp_app(store, BOB, clock=clock), kind="fact", summary="a fact")
     result = await hive_feedback(user_key_app, entry["id"], verdict="helpful", agent="claude-code")
     assert "error" not in result
     assert result["feedback"]["agent"] == "claude-code"
 
 
-async def test_hive_feedback_user_key_without_agent_is_rejected(app: McpHivemind) -> None:
+async def test_hive_feedback_user_key_without_agent_is_rejected(
+    app: McpHivemind, store: MemoryStore
+) -> None:
     clock = make_clock()
-    store = app.store
-    user_key_app = build_app(store, Credential(user_id="alice"), clock)
+    store = store
+    user_key_app = mcp_app(store, Credential(user_id="alice"), clock)
     entry = await hive_write(user_key_app, kind="fact", summary="a fact", agent="claude-code")
     result = await hive_feedback(user_key_app, entry["id"], verdict="stale")
     assert result.get("error", {}).get("code") == ERR_AGENT_UNRESOLVED
@@ -555,17 +547,17 @@ async def test_hive_search_offset_paginates(app: McpHivemind) -> None:
 # hive_search / hive_list: entity facets (ADR 0016, SPEC §13) ----------------- #
 
 
-async def test_hive_search_filters_by_entities(app: McpHivemind) -> None:
+async def test_hive_search_filters_by_entities(app: McpHivemind, store: MemoryStore) -> None:
     """ADR 0016 / SPEC §13: the tool passes ``entities`` through to the filter
     (AND-semantics and case-insensitivity are pinned on the REST surface and
     in the Store contract)."""
-    ids = await seed_entity_entries(app.store)
+    ids = await seed_entity_entries(store)
     result = await hive_search(app, query="postgres pool", entities=["postgres"])
     assert [h["id"] for h in result["hits"]] == [ids["a"]]
 
 
-async def test_hive_list_filters_by_entities(app: McpHivemind) -> None:
-    ids = await seed_entity_entries(app.store)
+async def test_hive_list_filters_by_entities(app: McpHivemind, store: MemoryStore) -> None:
+    ids = await seed_entity_entries(store)
     result = await hive_list(app, entities=["auth-service"])
     assert [e["id"] for e in result["entries"]] == [ids["a"]]
 
@@ -576,7 +568,7 @@ class TestHiveRegister:
     async def test_register_with_org_key_creates_pending(self) -> None:
         clock = make_clock()
         store = MemoryStore(clock)
-        app = build_app(store, ORG, clock)
+        app = mcp_app(store, ORG, clock=clock)
         result = await hive_register(app, "alice")
         assert "error" not in result
         assert result["name"] == "alice"
@@ -588,7 +580,7 @@ class TestHiveRegister:
         # surface also accepts an admin key; the MCP verb does not).
         clock = make_clock()
         store = MemoryStore(clock)
-        app = build_app(store, ADMIN, clock)
+        app = mcp_app(store, ADMIN, clock=clock)
         result = await hive_register(app, "bob")
         assert result["error"]["code"] == ERR_PERMISSION_DENIED
 
@@ -596,7 +588,7 @@ class TestHiveRegister:
         # A plain agent key (not org/admin) may not register (ADR 0012).
         clock = make_clock()
         store = MemoryStore(clock)
-        app = build_app(store, ALICE, clock)
+        app = mcp_app(store, ALICE, clock=clock)
         result = await hive_register(app, "alice")
         assert result["error"]["code"] == ERR_PERMISSION_DENIED
 
@@ -606,7 +598,7 @@ class TestHiveRegister:
         await store.register_agent("alice", "john")
         fleet = await store.create_fleet("data-eng")
         await store.activate_agent("alice", trust_level=TrustLevel.LURKER, home_fleet_id=fleet.id)
-        return build_app(store, ORG, clock)
+        return mcp_app(store, ORG, clock=clock)
 
     async def test_register_active_name_of_another_alias_conflicts(self) -> None:
         app = await self._active_alice()
@@ -625,7 +617,7 @@ class TestHiveRegister:
 
     async def test_reregister_own_pending_name_reports_pending(self) -> None:
         clock = make_clock()
-        app = build_app(MemoryStore(clock), ORG, clock)
+        app = mcp_app(MemoryStore(clock), ORG, clock)
         first = await hive_register(app, "alice", owner_alias="john")
         assert (first["status"], first["already_registered"]) == ("pending", False)
         again = await hive_register(app, "alice", owner_alias="john")
