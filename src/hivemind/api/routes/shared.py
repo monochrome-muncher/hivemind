@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import UTC, datetime
 
 from fastapi import Response
 
@@ -43,13 +42,6 @@ def check_cleanup_expectations(payload: AgentCleanupRequest | PortalCleanupReque
             "expected_withdraw and expected_ratings (the preview's totals) are required "
             "when dry_run is false; preview first"
         )
-
-
-def to_utc(value: datetime | None) -> datetime | None:
-    """Naive query-param datetimes are assumed UTC (SPEC.md §6.4)."""
-    if isinstance(value, datetime) and value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value
 
 
 def require_admin(credential: Credential, what: str) -> None:

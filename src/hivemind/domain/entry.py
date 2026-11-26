@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
@@ -18,6 +18,7 @@ from hivemind.domain.validation import (
     MAX_SOURCES,
     MAX_SUPERSEDES,
     InvalidInput,
+    as_utc,
     check_datetime,
     check_filter_values,
     check_id,
@@ -187,6 +188,8 @@ class EntryDraft:
         if len(self.sources) > MAX_SOURCES:
             raise InvalidInput(f"at most {MAX_SOURCES} sources (got {len(self.sources)})")
         for source in self.sources:
+            if not source.ref.strip():
+                raise InvalidInput("source 'ref' must be a non-blank string")
             check_text(source.ref, "source ref", MAX_SOURCE_REF_CHARS)
         if len(self.supersedes) > MAX_SUPERSEDES:
             raise InvalidInput(f"at most {MAX_SUPERSEDES} supersedes targets")
@@ -205,7 +208,7 @@ class EntryDraft:
         value = self.occurred_at
         if value is None:
             return utcnow()
-        return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        return as_utc(value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -305,8 +308,9 @@ class EntryFilters:
     reporter: tuple[str, str] | None = None
 
     def validate(self) -> None:
-        """Bounds for filters from caller input (ADR 0040); service-built filters skip it,
-        so a legacy stored value never fails an internal query."""
+        """Bounds for filters from caller input (ADR 0040). The read and search services validate
+        the caller's filters; filters they build themselves skip it, so a legacy stored value never
+        fails an internal query."""
         check_filter_values(self.tags, "tags")
         check_filter_values(self.entities, "entities")
         for field, value in (

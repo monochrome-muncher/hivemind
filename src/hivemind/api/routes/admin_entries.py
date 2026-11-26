@@ -22,7 +22,6 @@ from hivemind.api.routes.shared import (
     listed_with_counts,
     require_admin,
     run_search,
-    to_utc,
 )
 from hivemind.api.schemas import (
     ActivityOut,
@@ -42,6 +41,7 @@ from hivemind.api.schemas import (
     RestoreRequest,
     WithdrawRequest,
 )
+from hivemind.api.schemas.common import to_utc
 from hivemind.domain.entry import EntryFilters, EntryState, Kind
 from hivemind.domain.feedback import FeedbackLogFilters, Verdict
 from hivemind.domain.validation import (
