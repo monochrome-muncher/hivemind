@@ -1141,6 +1141,7 @@ def test_the_bar_chart_axis_ticks_whole_counts_and_labels_days_without_crowding(
     assert got["mid"] == {"top": 40, "ticks": [0, 10, 20, 30, 40]}
     assert got["big"] == {"top": 1500, "ticks": [0, 500, 1000, 1500]}
     assert got["month"][-1] == 29 and len(got["month"]) <= 440 // 64 + 1
-    assert all(b - a >= 3 for a, b in zip(got["month"], got["month"][1:], strict=False))
+    gaps = [b - a for a, b in zip(got["month"], got["month"][1:], strict=False)]
+    assert min(gaps) >= max(gaps[:-1])  # the last label never crowds the one before it
     assert got["week"] == [0, 1, 2, 3, 4, 5, 6]
     assert got["one"] == [0]

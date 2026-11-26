@@ -38,7 +38,7 @@ export function dayLabel(day) {
 export function xLabelDays(count, width) {
   const every = Math.max(1, Math.ceil(count / Math.max(1, Math.floor(width / X_LABEL_PX))));
   const picked = [];
-  for (let i = 0; i < count; i += every) if (count - 1 - i >= every / 2 || i === count - 1) picked.push(i);
+  for (let i = 0; i < count; i += every) if (count - 1 - i >= every || i === count - 1) picked.push(i);
   if (picked[picked.length - 1] !== count - 1) picked.push(count - 1);
   return picked;
 }
@@ -76,7 +76,7 @@ export function stackedBars({ daily, series, title, showTitle = true }) {
 
   const tooltipFor = (i) => h("div", { class: "chart-tip", role: "presentation" },
     h("div", { class: "chart-tip-day", text: dayLabel(daily[i].day) }),
-    [...series].reverse().map((s) => h("div", { class: "chart-tip-row" },
+    [...series].reverse().filter((s) => series.length <= 3 || value(daily[i], s) > 0).map((s) => h("div", { class: "chart-tip-row" },
       h("span", { class: `swatch ${s.cls}`, "aria-hidden": "true" }), h("span", { text: s.label }), h("span", { class: "num", text: value(daily[i], s) }))),
     series.length > 1 ? h("div", { class: "chart-tip-row chart-tip-total" }, h("span"), h("span", { text: "Total" }), h("span", { class: "num", text: totals[i] })) : null);
 
