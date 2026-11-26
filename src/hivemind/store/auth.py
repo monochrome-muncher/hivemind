@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import logging
 import secrets
 import time
@@ -22,6 +21,17 @@ from hivemind.domain.access import (
 )
 from hivemind.domain.audit import ActorKind, AuditAction, key_fingerprint
 from hivemind.ports import Credential, KeyReplacement
+from hivemind.store.credential_sql import (
+    DELETE_AGENT_KEYS,
+    DELETE_AGENT_KEYS_RETURNING,
+    DELETE_ORG_KEYS,
+    ISSUE_ADMIN_KEY,
+    ISSUE_AGENT_KEY,
+    ISSUE_ORG_KEY,
+    LOCK_AGENT_STATUS,
+    ORG_KEY_LOCK,
+    insert_audit,
+)
 from hivemind.store.inheritance import INHERITED_FROM_AGENT_ROW
 from hivemind.store.pool import PoolTimeouts, make_pool
 
@@ -63,32 +73,6 @@ _LOCK_AGENT_KEY = (
     "UPDATE credentials SET locked_at = now() WHERE kind = 'agent' AND agent_name = $1 "
     "AND starts_with(key_hash, $2) AND locked_at IS NULL RETURNING key_hash"
 )
-# Rows ``verify`` can never resolve (ADR 0039): inert, but live again on a rollback to a release
-# that does not join ``agents``.
-DEAD_CREDENTIAL_PREDICATE = (
-    "(c.kind = 'user' OR (c.kind = 'agent' AND (c.agent_name IS NULL OR NOT EXISTS "
-    "(SELECT 1 FROM agents a WHERE a.name = c.agent_name AND a.status = 'active'))))"
-)
-COUNT_DEAD_CREDENTIALS = f"SELECT count(*) FROM credentials c WHERE {DEAD_CREDENTIAL_PREDICATE}"
-_LOCK_AGENT = "SELECT status FROM agents WHERE name = $1 FOR NO KEY UPDATE"
-_DELETE_AGENT_KEYS = "DELETE FROM credentials WHERE kind = 'agent' AND agent_name = $1"
-_INSERT_AUDIT = (
-    "INSERT INTO audit_log (actor_kind, actor, action, target, detail) "
-    "VALUES ($1, $2, $3, $4, $5::jsonb)"
-)
-_DELETE_AGENT_KEYS_RETURNING = _DELETE_AGENT_KEYS + " RETURNING key_hash"
-# Serialises org-key rotation (API and CLI): the second waits, then deletes the first's row.
-ORG_KEY_LOCK = "SELECT pg_advisory_xact_lock(hashtext('hivemind:org-key'))"
-
-# Key management (ADR 0012).
-_ISSUE_AGENT_KEY = (
-    "INSERT INTO credentials (key_hash, kind, user_id, agent_id, agent_name) "
-    "VALUES ($1, 'agent', $2, $2, $2)"
-)
-_REVOKE_AGENT_KEY = "DELETE FROM credentials WHERE kind = 'agent' AND agent_name = $1"
-_ISSUE_ADMIN_KEY = "INSERT INTO credentials (key_hash, kind, user_id) VALUES ($1, 'admin', $2)"
-_ISSUE_ORG_KEY = "INSERT INTO credentials (key_hash, kind, user_id) VALUES ($1, 'org', $2)"
-_DELETE_ORG_KEY = "DELETE FROM credentials WHERE kind = 'org'"
 
 
 def _generate_key() -> str:
@@ -242,13 +226,13 @@ class PgAuthenticator:
         pool = await self._ensure_pool()
         raw_key = _generate_key()
         async with pool.acquire(timeout=self._acquire_timeout) as conn, conn.transaction():
-            status = await conn.fetchval(_LOCK_AGENT, agent_name)
+            status = await conn.fetchval(LOCK_AGENT_STATUS, agent_name)
             if status is None:
                 raise UnknownAgent(f"unknown agent: {agent_name}")
             if status != AgentStatus.ACTIVE:
                 raise InvalidAgentStatus(agent_name, AgentStatus(status), "issue a key for")
-            await conn.execute(_DELETE_AGENT_KEYS, agent_name)
-            await conn.execute(_ISSUE_AGENT_KEY, key_hash(raw_key), agent_name)
+            await conn.execute(DELETE_AGENT_KEYS, agent_name)
+            await conn.execute(ISSUE_AGENT_KEY, key_hash(raw_key), agent_name)
         return raw_key
 
     async def replace_agent_key(
@@ -261,25 +245,25 @@ class PgAuthenticator:
         raw_key = _generate_key()
         new_hash = key_hash(raw_key)
         async with pool.acquire(timeout=self._acquire_timeout) as conn, conn.transaction():
-            status = await conn.fetchval(_LOCK_AGENT, agent_name)
+            status = await conn.fetchval(LOCK_AGENT_STATUS, agent_name)
             if status is None:
                 raise UnknownAgent(f"unknown agent: {agent_name}")
             if status != AgentStatus.ACTIVE:
                 raise InvalidAgentStatus(agent_name, AgentStatus(status), "replace the key of")
-            old = await conn.fetch(_DELETE_AGENT_KEYS_RETURNING, agent_name)
-            await conn.execute(_ISSUE_AGENT_KEY, new_hash, agent_name)
+            old = await conn.fetch(DELETE_AGENT_KEYS_RETURNING, agent_name)
+            await conn.execute(ISSUE_AGENT_KEY, new_hash, agent_name)
             replacement = KeyReplacement(
                 raw_key,
                 key_fingerprint(new_hash),
                 key_fingerprint(old[0]["key_hash"]) if old else None,
             )
-            await conn.execute(
-                _INSERT_AUDIT,
-                audit_actor_kind.value,
+            await insert_audit(
+                conn,
+                audit_actor_kind,
                 audit_actor,
-                AuditAction.AGENT_KEY_REPLACE.value,
+                AuditAction.AGENT_KEY_REPLACE,
                 agent_name,
-                json.dumps({"old_key": replacement.old_key_id, "new_key": replacement.new_key_id}),
+                {"old_key": replacement.old_key_id, "new_key": replacement.new_key_id},
             )
         return replacement
 
@@ -290,13 +274,13 @@ class PgAuthenticator:
             locked = await conn.fetchrow(_LOCK_AGENT_KEY, agent_name, key_id)
             if locked is None:
                 return False
-            await conn.execute(
-                _INSERT_AUDIT,
-                ActorKind.AGENT_KEY.value,
+            await insert_audit(
+                conn,
+                ActorKind.AGENT_KEY,
                 agent_name,
-                AuditAction.AGENT_KEY_LOCK.value,
+                AuditAction.AGENT_KEY_LOCK,
                 agent_name,
-                json.dumps({"key": key_fingerprint(locked["key_hash"]), "via": "portal"}),
+                {"key": key_fingerprint(locked["key_hash"]), "via": "portal"},
             )
         return True
 
@@ -305,9 +289,9 @@ class PgAuthenticator:
         pool = await self._ensure_pool()
         async with pool.acquire(timeout=self._acquire_timeout) as conn, conn.transaction():
             # Same row lock as issuance (ADR 0039): a racing re-activation's fresh key stays.
-            status = await conn.fetchval(_LOCK_AGENT, agent_name)
+            status = await conn.fetchval(LOCK_AGENT_STATUS, agent_name)
             if status is None or status == "revoked":
-                await conn.execute(_REVOKE_AGENT_KEY, agent_name)
+                await conn.execute(DELETE_AGENT_KEYS, agent_name)
 
     async def rotate_org_key(self) -> str:
         """Rotate the org key (ADR 0031), returning the new secret once; prior org keys stop
@@ -316,8 +300,8 @@ class PgAuthenticator:
         raw_key = _generate_key()
         async with pool.acquire(timeout=self._acquire_timeout) as conn, conn.transaction():
             await conn.execute(ORG_KEY_LOCK)
-            await conn.execute(_DELETE_ORG_KEY)
-            await conn.execute(_ISSUE_ORG_KEY, key_hash(raw_key), "org")
+            await conn.execute(DELETE_ORG_KEYS)
+            await conn.execute(ISSUE_ORG_KEY, key_hash(raw_key), "org")
         return raw_key
 
     async def issue_admin_key(self) -> str:
@@ -325,5 +309,5 @@ class PgAuthenticator:
         pool = await self._ensure_pool()
         raw_key = _generate_key()
         async with pool.acquire(timeout=self._acquire_timeout) as conn:
-            await conn.execute(_ISSUE_ADMIN_KEY, key_hash(raw_key), "admin")
+            await conn.execute(ISSUE_ADMIN_KEY, key_hash(raw_key), "admin")
         return raw_key
