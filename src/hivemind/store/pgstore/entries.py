@@ -21,7 +21,7 @@ from hivemind.domain.redaction import (
 )
 from hivemind.domain.upstream import UpstreamLink
 from hivemind.domain.validation import canonical_uuid, is_valid_uuid, valid_uuids
-from hivemind.ports import SupersedeConflict
+from hivemind.ports import EntryNotActiveConflict, SupersedeConflict, UnknownEntry
 from hivemind.store.inheritance import inherited_from
 from hivemind.store.pgstore.agent_cleanup import CLEANUP_AGENT_LOCK
 from hivemind.store.pgstore.connection import PgConnections
@@ -461,37 +461,37 @@ class EntryStore(PgConnections):
     async def withdraw_entry(self, entry_id: str, reason: str | None, by_user: str) -> Entry:
         """Flip an entry to ``withdrawn`` (SPEC.md §4.1).
 
-        ``KeyError`` if unknown, ``ValueError`` if not active. Only the
+        ``UnknownEntry`` if unknown, ``EntryNotActiveConflict`` if not active. Only the
         reason is persisted (there is no ``withdrawn_by`` column).
         """
         if not is_valid_uuid(entry_id):
-            raise KeyError(f"unknown entry: {entry_id}")
+            raise UnknownEntry(f"unknown entry: {entry_id}")
         async with self._connection() as conn:
             existing = await conn.fetchrow(LOOKUP_STATE, entry_id)
             if existing is None:
-                raise KeyError(f"unknown entry: {entry_id}")
+                raise UnknownEntry(f"unknown entry: {entry_id}")
             if existing["state"] != "active":
-                raise ValueError(f"entry {entry_id} is {existing['state']}, not active")
+                raise EntryNotActiveConflict(f"entry {entry_id} is {existing['state']}, not active")
             row = await conn.fetchrow(WITHDRAW, entry_id, reason)
             if row is None:
                 # A concurrent flip won the guarded UPDATE: re-read to say why.
                 state = await conn.fetchrow(LOOKUP_STATE, entry_id)
                 if state is None:
-                    raise KeyError(f"unknown entry: {entry_id}")
-                raise ValueError(f"entry {entry_id} is {state['state']}, not active")
+                    raise UnknownEntry(f"unknown entry: {entry_id}")
+                raise EntryNotActiveConflict(f"entry {entry_id} is {state['state']}, not active")
         return row_to_entry(row)
 
     async def redact_entry(self, entry_id: str) -> RedactOutcome:
         """Wipe the text of a withdrawn memory for good (ADR 0125): one
         transaction, every free-text field, the embedding and the keyword
-        column. ``KeyError`` if unknown; ``RedactRefused`` if active or
+        column. ``UnknownEntry`` if unknown; ``RedactRefused`` if active or
         already redacted."""
         if not is_valid_uuid(entry_id):
-            raise KeyError(f"unknown entry: {entry_id}")
+            raise UnknownEntry(f"unknown entry: {entry_id}")
         async with self._transaction() as conn:
             existing = await conn.fetchrow(REDACT_LOCK, entry_id)
             if existing is None:
-                raise KeyError(f"unknown entry: {entry_id}")
+                raise UnknownEntry(f"unknown entry: {entry_id}")
             if existing["redacted_at"] is not None:
                 raise RedactRefused(f"entry {entry_id} is already redacted")
             if existing["state"] == "active":
@@ -517,16 +517,16 @@ class EntryStore(PgConnections):
         """Put a withdrawn entry back (ADR 0124), in one transaction that
         locks the row, checks the refusals and updates it."""
         if not is_valid_uuid(entry_id):
-            raise KeyError(f"unknown entry: {entry_id}")
+            raise UnknownEntry(f"unknown entry: {entry_id}")
         async with self._transaction() as conn:
             await conn.execute(RESTORE_LOCK)
             author = await conn.fetchval(RESTORE_AUTHOR, entry_id)
             if author is None:
-                raise KeyError(f"unknown entry: {entry_id}")
+                raise UnknownEntry(f"unknown entry: {entry_id}")
             await conn.execute(CLEANUP_AGENT_LOCK, author)
             existing = await conn.fetchrow(RESTORE_LOCK_ROW, entry_id)
             if existing is None:
-                raise KeyError(f"unknown entry: {entry_id}")
+                raise UnknownEntry(f"unknown entry: {entry_id}")
             reason = existing["withdrawn_reason"]
             standing = None
             chain = None

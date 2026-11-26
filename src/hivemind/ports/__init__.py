@@ -8,7 +8,12 @@ from hivemind.ports.agents import AgentPort
 from hivemind.ports.audit import AuditPort
 from hivemind.ports.auth import Authenticator, Credential, KeyReplacement
 from hivemind.ports.embedding import Embedder, entry_embeddable_text
-from hivemind.ports.entries import EntryPort, SupersedeConflict
+from hivemind.ports.entries import (
+    EntryNotActiveConflict,
+    EntryPort,
+    SupersedeConflict,
+    UnknownEntry,
+)
 from hivemind.ports.extraction import Extractor
 from hivemind.ports.feedback import FeedbackPort
 from hivemind.ports.fleet_merge import FleetMergePort
@@ -30,6 +35,7 @@ __all__ = [
     "Credential",
     "Embedder",
     "EntryFeedbackPort",
+    "EntryNotActiveConflict",
     "EntryPort",
     "Extractor",
     "FeedbackPort",
@@ -45,6 +51,7 @@ __all__ = [
     "Store",
     "SuccessionPort",
     "SupersedeConflict",
+    "UnknownEntry",
     "VectorMatch",
     "entry_embeddable_text",
 ]

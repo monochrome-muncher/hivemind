@@ -14,6 +14,7 @@ from hivemind.domain.self_move import (
     self_move_refusal,
 )
 from hivemind.domain.validation import is_valid_uuid
+from hivemind.ports import UnknownEntry
 from hivemind.store.inheritance import inherited_from
 from hivemind.store.pgstore.agent_cleanup import CLEANUP_AGENT_LOCK
 from hivemind.store.pgstore.connection import PgConnections
@@ -60,11 +61,11 @@ SELECT_MOVED = "SELECT " + _ENTRY_COLUMNS + " FROM entries WHERE id = $1"
 class SelfMoveStore(PgConnections):
     async def move_entry_to_self(self, entry_id: str) -> SelfMove:
         if not is_valid_uuid(entry_id):
-            raise KeyError(f"unknown entry: {entry_id}")
+            raise UnknownEntry(f"unknown entry: {entry_id}")
         async with self._connection() as conn:
             seen = await conn.fetchrow(LOOKUP, entry_id)
         if seen is None:
-            raise KeyError(f"unknown entry: {entry_id}")
+            raise UnknownEntry(f"unknown entry: {entry_id}")
         fleet_id = str(seen["fleet_id"]) if seen["fleet_id"] is not None else None
         author = seen["author"]
         async with self._write_transaction(fleet_id) as conn:
@@ -72,7 +73,7 @@ class SelfMoveStore(PgConnections):
             await refuse_merged(conn, fleet_id)
             head = await conn.fetchrow(LOCK_HEAD, entry_id)
             if head is None:
-                raise KeyError(f"unknown entry: {entry_id}")
+                raise UnknownEntry(f"unknown entry: {entry_id}")
             refusal = self_move_refusal(entry_id, head["state"], head["scope"])
             if refusal is not None:
                 raise refusal
