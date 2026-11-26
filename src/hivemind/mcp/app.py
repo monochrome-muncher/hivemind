@@ -17,6 +17,7 @@ from hivemind import wire
 from hivemind.config import SearchConfig
 from hivemind.domain.access import SCOPE_FLEET, SCOPE_ORG, SCOPE_SELF
 from hivemind.domain.entry import (
+    SUMMARY_MAX_CHARS,
     Entry,
     EntryFilters,
     Kind,
@@ -25,7 +26,7 @@ from hivemind.domain.entry import (
 )
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.domain.recency import RecencyHint, parse_recency_hint
-from hivemind.domain.validation import check_pagination
+from hivemind.domain.validation import MAX_SEE_ALSO, check_pagination
 from hivemind.embeddings import EmbeddingError
 from hivemind.mcp.errors import (
     ERR_AGENT_UNRESOLVED,
@@ -111,18 +112,42 @@ def _parse_dt(value: str | None, field_name: str) -> datetime | None:
     return parsed
 
 
-def _parse_kind(value: str | None) -> Kind | None:
-    if value is None:
-        return None
+def _kind(value: str) -> Kind:
     try:
-        return Kind(value)
+        return Kind(value.strip().lower())
     except ValueError as exc:
-        raise ValueError(f"kind must be one of fact|insight|decision, got {value!r}") from exc
+        raise ValueError(
+            f"kind must be one of fact|insight|decision, got {value!r}; labels go in tags"
+        ) from exc
 
 
-# The exposed ``hive_write`` ``sources`` schema (ADR 0105). The runtime type stays a loose
-# ``dict[str, str]`` so a malformed source reaches ``_parse_sources`` and answers ``invalid_input``,
-# not a raw SDK ``is_error``.
+def _parse_kind(value: str | None) -> Kind | None:
+    return None if value is None else _kind(value)
+
+
+def _clean_ids(ids: list[str] | None) -> list[str]:
+    return [i.strip() for i in ids or ()]
+
+
+# The exposed schemas state each bound the server checks, so clients and agents see it before the
+# call. The runtime types stay loose so a bad value reaches the tool's own check and answers
+# ``invalid_input``, not a raw SDK ``is_error``.
+def _optional(schema: dict[str, Any]) -> WithJsonSchema:
+    return WithJsonSchema({"anyOf": [schema, {"type": "null"}]})
+
+
+_KINDS: dict[str, Any] = {"type": "string", "enum": [k.value for k in Kind]}
+_KIND_SCHEMA = WithJsonSchema(_KINDS)
+_KIND_FILTER_SCHEMA = _optional(_KINDS)
+_SUMMARY_SCHEMA = WithJsonSchema({"type": "string", "maxLength": SUMMARY_MAX_CHARS})
+_WRITE_SCOPE_SCHEMA = _optional({"type": "string", "enum": [SCOPE_SELF, SCOPE_FLEET, SCOPE_ORG]})
+_IMPORTANCE_SCHEMA = _optional({"type": "integer", "minimum": 1, "maximum": 5})
+_VERDICT_SCHEMA = _optional({"type": "string", "enum": [v.value for v in Verdict]})
+_SEE_ALSO_SCHEMA = _optional(
+    {"type": "array", "items": {"type": "string"}, "maxItems": MAX_SEE_ALSO}
+)
+
+# ``hive_write`` ``sources`` (ADR 0105).
 _SOURCES_ITEMS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -176,7 +201,7 @@ def _build_filters(
         kind=_parse_kind(kind),
         tags=tuple(tags or ()),
         entities=tuple(entities or ()),
-        scope=scope,
+        scope=None if scope is None else scope.strip().lower(),
         author=author,
         agent=agent,
         occurred_from=_parse_dt(occurred_from, "occurred_from"),
@@ -192,15 +217,17 @@ def _build_filters(
 
 
 def _feedback_precheck(
-    app: McpHivemind, verdict: str, agent: str | None
+    app: McpHivemind, verdict: str | None, agent: str | None
 ) -> Verdict | dict[str, object]:
     """The ``Verdict``, or the error reply, after checking the reporter's agent identity (SPEC
     §8.1)."""
     try:
-        parsed = Verdict(verdict)
+        parsed = Verdict((verdict or "").strip().lower())
     except ValueError:
         return error_reply(
-            ERR_INVALID_VERDICT, f"verdict must be helpful|stale|wrong, got {verdict!r}"
+            ERR_INVALID_VERDICT,
+            f"verdict must be helpful|stale|wrong, got {verdict!r}: helpful if the entry held, "
+            "stale if it is outdated, wrong if it never held; details go in note",
         )
     if reporter_agent(app.credential, agent) is None:
         # The service's AgentIdentityRequired condition, checked up front.
@@ -263,18 +290,18 @@ async def _list_reply(
 
 async def hive_write(
     app: McpHivemind,
-    kind: str,
-    summary: str,
+    kind: Annotated[str, _KIND_SCHEMA],
+    summary: Annotated[str, _SUMMARY_SCHEMA],
     body: str | None = None,
     payload: dict[str, Any] | None = None,
     sources: Annotated[list[dict[str, str]] | None, WithJsonSchema(_SOURCES_FIELD_SCHEMA)] = None,
     tags: list[str] | None = None,
     occurred_at: str | None = None,
-    importance: int | None = None,
-    scope: str | None = None,
+    importance: Annotated[int | None, _IMPORTANCE_SCHEMA] = None,
+    scope: Annotated[str | None, _WRITE_SCOPE_SCHEMA] = None,
     supersedes: list[str] | None = None,
     agent: str | None = None,
-    see_also: list[str] | None = None,
+    see_also: Annotated[list[str] | None, _SEE_ALSO_SCHEMA] = None,
     check: bool = False,
 ) -> dict[str, object]:
     """Write a distilled entry into the shared pool (SPEC §4.1, §5.2).
@@ -314,9 +341,11 @@ async def hive_write(
     ``invalid_input`` (a typo is not a trust-level problem).
     """
     cred = app.credential
-    if scope is not None and scope not in (SCOPE_SELF, SCOPE_FLEET, SCOPE_ORG):
+    wanted_scope = None if scope is None else scope.strip().lower()
+    if wanted_scope is not None and wanted_scope not in (SCOPE_SELF, SCOPE_FLEET, SCOPE_ORG):
         return error_reply(
-            ERR_INVALID_INPUT, f"scope must be 'self', 'fleet' or 'org', got {scope!r}"
+            ERR_INVALID_INPUT,
+            f"scope must be 'self', 'fleet' or 'org', got {scope!r}; omit it for your default",
         )
     resolved_agent = cred.agent_id or agent
     if resolved_agent is None:
@@ -326,10 +355,10 @@ async def hive_write(
         )
     try:
         # Pure parsing, no I/O: a ValueError here is malformed input.
-        parsed_kind = Kind(kind)
+        parsed_kind = _kind(kind)
         parsed_sources = _parse_sources(sources)
         # Scope and author come from the credential.
-        resolution = resolve_write_scope(cred, scope)
+        resolution = resolve_write_scope(cred, wanted_scope)
         draft = entry_draft(
             cred,
             resolution,
@@ -342,8 +371,8 @@ async def hive_write(
             tags=tags or (),
             occurred_at=_parse_dt(occurred_at, "occurred_at"),
             importance=importance,
-            supersedes=supersedes or (),
-            see_also=see_also or (),
+            supersedes=_clean_ids(supersedes),
+            see_also=_clean_ids(see_also),
         )
     except SERVICE_ERRORS as exc:
         return service_error_reply(exc)
@@ -366,7 +395,7 @@ async def hive_search(
     query: str,
     limit: int | None = None,
     offset: int | None = None,
-    kind: str | None = None,
+    kind: Annotated[str | None, _KIND_FILTER_SCHEMA] = None,
     tags: list[str] | None = None,
     entities: list[str] | None = None,
     scope: str | None = None,
@@ -468,12 +497,13 @@ async def hive_get(
     ``not_found`` for ids that name nothing the caller may read.
     """
     if entry_ids is not None:
-        if entry_id or include_history:
+        if entry_id.strip() or include_history:
             return error_reply(
                 ERR_INVALID_INPUT, "entry_ids cannot be combined with entry_id or include_history"
             )
-        return await _hive_get_many(app, entry_ids)
-    if not entry_id or not entry_id.strip():
+        return await _hive_get_many(app, _clean_ids(entry_ids))
+    entry_id = entry_id.strip()
+    if not entry_id:
         return error_reply(ERR_INVALID_INPUT, "entry_id is required (pass a hit's id)")
     try:
         detail = await app.read_service.entry(
@@ -484,7 +514,10 @@ async def hive_get(
     except SERVICE_ERRORS as exc:
         return service_error_reply(exc)
     if detail is None:
-        return error_reply(ERR_NOT_FOUND, f"unknown entry: {entry_id}")
+        return error_reply(
+            ERR_NOT_FOUND,
+            f"unknown entry: {entry_id}; copy the 'id' of a hit, 'related' or 'see_also' exactly",
+        )
     result = wire.entry_dict(detail.entry)
     result["feedback"] = wire.feedback_dict(detail.feedback)
     result.update(wire.links_dict(detail.links))
@@ -514,7 +547,7 @@ async def _hive_get_many(app: McpHivemind, entry_ids: list[str]) -> dict[str, ob
 
 async def hive_list(
     app: McpHivemind,
-    kind: str | None = None,
+    kind: Annotated[str | None, _KIND_FILTER_SCHEMA] = None,
     tags: list[str] | None = None,
     entities: list[str] | None = None,
     scope: str | None = None,
@@ -661,7 +694,7 @@ async def hive_pinned(app: McpHivemind, fleet_id: str | None = None) -> dict[str
 async def hive_feedback(
     app: McpHivemind,
     entry_id: str = "",
-    verdict: str = "",
+    verdict: Annotated[str | None, _VERDICT_SCHEMA] = None,
     note: str | None = None,
     agent: str | None = None,
     entry_ids: list[str] | None = None,
@@ -677,10 +710,11 @@ async def hive_feedback(
     recorded.
     """
     if entry_ids is not None:
-        if entry_id:
+        if entry_id.strip():
             return error_reply(ERR_INVALID_INPUT, "pass entry_id or entry_ids, not both")
-        return await _hive_feedback_many(app, entry_ids, verdict, note, agent)
-    if not entry_id or not entry_id.strip():
+        return await _hive_feedback_many(app, _clean_ids(entry_ids), verdict, note, agent)
+    entry_id = entry_id.strip()
+    if not entry_id:
         return error_reply(ERR_INVALID_INPUT, "entry_id is required (pass a hit's id)")
     parsed_verdict = _feedback_precheck(app, verdict, agent)
     if not isinstance(parsed_verdict, Verdict):
@@ -717,7 +751,7 @@ async def hive_feedback(
 async def _hive_feedback_many(
     app: McpHivemind,
     entry_ids: list[str],
-    verdict: str,
+    verdict: str | None,
     note: str | None,
     agent: str | None,
 ) -> dict[str, object]:

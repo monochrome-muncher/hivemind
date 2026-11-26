@@ -478,6 +478,22 @@ async def test_hive_feedback_rejects_unknown_verdict(app: McpHivemind) -> None:
     assert result.get("error", {}).get("code") == "invalid_verdict"
 
 
+async def test_hive_feedback_takes_any_case_and_padded_ids(app: McpHivemind) -> None:
+    entry = await hive_write(build_app(app.store, BOB, make_clock()), kind="fact", summary="a fact")
+    one = await hive_feedback(app, f" {entry['id']} ", verdict=" Helpful ")
+    assert one["verdict"] == "helpful"
+    many = await hive_feedback(app, entry_ids=[f"{entry['id']}\n"], verdict="STALE")
+    assert many["verdict"] == "stale"
+
+
+async def test_hive_feedback_without_verdict_names_the_choices(app: McpHivemind) -> None:
+    entry = await hive_write(app, kind="fact", summary="a fact")
+    result = await hive_feedback(app, entry["id"])
+    error = result["error"]
+    assert error["code"] == "invalid_verdict"  # type: ignore[index]
+    assert "helpful|stale|wrong" in error["message"]  # type: ignore[index]
+
+
 # --------------------------------------------------------------------------- #
 # Review-fix seams (SPEC.md §5.2/§5.3/§8.1)
 # --------------------------------------------------------------------------- #
@@ -624,3 +640,58 @@ class TestHiveRegister:
         assert (again["status"], again["already_registered"]) == ("pending", True)
         squat = await hive_register(app, "alice", owner_alias="mallory")
         assert squat["error"]["code"] == "name_conflict"
+
+
+# --------------------------------------------------------------------------- #
+# Refusals that say how to fix the call
+# --------------------------------------------------------------------------- #
+
+
+async def test_hive_write_takes_kind_and_scope_in_any_case(app: McpHivemind) -> None:
+    result = await hive_write(app, kind=" Insight ", summary="s", scope="SELF")
+    assert (result["kind"], result["scope"]) == ("insight", "self")
+
+
+async def test_hive_write_unknown_kind_lists_the_kinds(app: McpHivemind) -> None:
+    result = await hive_write(app, kind="dead-end", summary="s")
+    assert result["error"] == {  # type: ignore[comparison-overlap]
+        "code": ERR_INVALID_INPUT,
+        "message": "kind must be one of fact|insight|decision, got 'dead-end'; labels go in tags",
+    }
+
+
+async def test_hive_write_long_summary_says_where_details_go(app: McpHivemind) -> None:
+    result = await hive_write(app, kind="fact", summary="x" * 281)
+    error = result["error"]
+    assert error["code"] == ERR_INVALID_INPUT  # type: ignore[index]
+    assert "at most 280 characters (got 281)" in error["message"]  # type: ignore[index]
+    assert "into body" in error["message"]  # type: ignore[index]
+
+
+async def test_hive_write_links_padded_see_also_ids(app: McpHivemind) -> None:
+    target = await hive_write(app, kind="fact", summary="target")
+    result = await hive_write(app, kind="fact", summary="linker", see_also=[f" {target['id']} "])
+    assert "error" not in result
+
+
+async def test_hive_get_strips_padded_ids(app: McpHivemind) -> None:
+    entry = await hive_write(app, kind="fact", summary="a fact")
+    one = await hive_get(app, f"{entry['id']}\n")
+    assert one["id"] == entry["id"]
+    many = await hive_get(app, entry_ids=[f" {entry['id']}"])
+    assert [e["id"] for e in many["entries"]] == [entry["id"]]  # type: ignore[attr-defined]
+
+
+async def test_hive_get_unknown_id_says_to_copy_it_exactly(app: McpHivemind) -> None:
+    result = await hive_get(app, "00000000-0000-0000-0000-000000000000")
+    error = result["error"]
+    assert error["code"] == "not_found"  # type: ignore[index]
+    assert error["message"].startswith(  # type: ignore[index]
+        "unknown entry: 00000000-0000-0000-0000-000000000000; copy the 'id'"
+    )
+
+
+async def test_hive_list_scope_filter_takes_any_case(app: McpHivemind) -> None:
+    await hive_write(app, kind="fact", summary="a self fact", scope="self")
+    result = await hive_list(app, scope=" Self ")
+    assert result["count"] == 1

@@ -35,7 +35,7 @@ def new_entry_id() -> str:
 
 
 # SPEC §4.1: the summary is a short blurb, not a body.
-_SUMMARY_MAX_CHARS = 280
+SUMMARY_MAX_CHARS = 280
 
 # Extracted entity names are bounded display strings (ADR 0016).
 _ENTITY_NAME_MAX_CHARS = 128
@@ -163,9 +163,10 @@ class EntryDraft:
             )
         if not self.summary.strip():
             raise ValueError("summary must be non-empty")
-        if len(self.summary) > _SUMMARY_MAX_CHARS:
+        if len(self.summary) > SUMMARY_MAX_CHARS:
             raise ValueError(
-                f"summary must be at most {_SUMMARY_MAX_CHARS} characters (got {len(self.summary)})"
+                f"summary must be at most {SUMMARY_MAX_CHARS} characters (got {len(self.summary)}): "
+                "keep one headline and move the details into body"
             )
         if not self.author.strip():
             raise ValueError("author must be non-empty")

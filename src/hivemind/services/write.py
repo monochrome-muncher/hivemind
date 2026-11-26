@@ -232,7 +232,10 @@ class WriteService:
         found = await get_visible_entries(self._store, wanted, writer)
         missing = [t for t in wanted if t not in found]
         if missing:
-            raise InvalidInput(f"unknown see_also entries: {', '.join(missing)}")
+            raise InvalidInput(
+                f"unknown see_also entries: {', '.join(missing)}; link only entries you can read, "
+                "by the 'id' of a hit or 'related', copied exactly"
+            )
         resolved = replace(draft, see_also=tuple(dict.fromkeys(found[t].id for t in wanted)))
         return resolved, list({found[t].id: found[t] for t in wanted}.values())
 
