@@ -24,6 +24,8 @@ Fix options:
 - (a) Send `verdicts` only when at least three members other than the reader rated in the window, and show "Too few raters to show a mix" otherwise. This is a small change in the service, with a test.
 - (b) Keep the behaviour and correct the ADR 0167 consequence line.
 
+Decision (2026-11-26): (b). The pull request that adds this review corrects the ADR 0167 consequence line.
+
 ### 2. Nit: an orphaned comment in `update_agent`
 
 `api/routes/admin_agents.py:111` says "The key first: a non-admin must not learn whether a fleet exists." The admin check it described moved to the router dependency in #521 (`admin_agents.py:37`). The comment now sits above a 422 check it has nothing to do with. Delete it.

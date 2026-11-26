@@ -19,4 +19,4 @@ With five or more agents, the per-agent lines of ADR 0165 cross each other on al
 
 - The height of a bar shows the fleet's trend, and its colours show who did the work, without lines crossing.
 - A person who relied on the log scale to see quiet agents next to a busy one now reads them in the per-agent rows instead.
-- A fleet member can see the fleet's verdict mix, but not the mix of any single agent.
+- A fleet member sees the fleet's verdict mix, never a per-agent one. In a small fleet the mix can still show one agent's verdicts: when only one member rated in the window, or in a fleet of two, where a member can subtract its own. This is accepted: ADR 0051 already names the newest raters of a readable entry, so a verdict is not a secret.
