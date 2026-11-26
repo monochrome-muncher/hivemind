@@ -17,6 +17,7 @@ from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
 from hivemind.services.errors import PermissionDenied
+from hivemind.services.fleet_merge import FleetMergeService
 from tests.fakes import (
     FakeAuthenticator,
     make_clock,
@@ -106,6 +107,7 @@ class World:
     def __init__(self) -> None:
         self.store = MemoryStore(make_clock())
         self.access = AccessService(self.store, FakeAuthenticator(), clock=lambda: NOW)
+        self.merges = FleetMergeService(self.store)
 
     async def fleet(self, name: str = "platform") -> str:
         return (await self.access.create_fleet(name, ADMIN)).id
@@ -190,7 +192,7 @@ async def test_only_the_admin_key_may_set_or_clear(who: Credential) -> None:
 async def test_a_merged_fleet_refuses_a_phase() -> None:
     world = World()
     source, target = await world.fleet("old"), await world.fleet("new")
-    await world.access.merges.merge(source, ADMIN, target_fleet_id=target)
+    await world.merges.merge(source, ADMIN, target_fleet_id=target)
     with pytest.raises(FleetMerged):
         await world.access.set_fleet_phase(source, PhaseName.EXPLORE, _in(2), ADMIN)
     with pytest.raises(FleetMerged):

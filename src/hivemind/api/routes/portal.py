@@ -157,9 +157,7 @@ async def portal_feedback(
         verdict=verdict,
         entry_id=entry_id,
     )
-    items = await app.governance_service.feedback_log(
-        credential, filters, limit=limit, offset=offset
-    )
+    items = await app.feedback_service.feedback_log(credential, filters, limit=limit, offset=offset)
     return [FeedbackLogItemOut.from_item(i) for i in items]
 
 
@@ -199,7 +197,7 @@ async def portal_flagged(
     standing ``stale`` or ``wrong`` verdict, oldest flag first (ADR
     0115): ``GET /v1/admin/flagged`` narrowed to what the agent owns,
     on entries its key can read."""
-    items = await app.governance_service.flag_backlog(
+    items = await app.feedback_service.flag_backlog(
         credential, own=True, limit=limit, offset=offset
     )
     return [FlaggedEntryOut.from_flagged(i) for i in items]
@@ -252,7 +250,7 @@ async def portal_cleanup(
     ``expected_*`` totals on the apply. Audited ``agent.cleanup`` with
     ``via: "portal"``. 403 ``forbidden`` for a dormant (level 0) agent
     (SPEC §12.2)."""
-    cleanups = app.access_service.cleanups
+    cleanups = app.cleanup_service
     if payload.dry_run:
         preview = await cleanups.preview_own(credential, since=payload.since, until=payload.until)
         return AgentCleanupPreviewOut.from_preview(preview)
@@ -274,7 +272,7 @@ async def portal_cleanups(credential: CredentialDep, app: AppDep) -> list[Portal
     """The signed-in agent's cleanups, newest first, the admin's too (ADR
     0118), each with whether the agent can undo it now. 403 ``forbidden``
     for a dormant (level 0) agent (SPEC §12.2)."""
-    views = await app.access_service.cleanups.list_own(credential)
+    views = await app.cleanup_service.list_own(credential)
     return [PortalCleanupRecordOut.from_view(v) for v in views]
 
 
@@ -306,7 +304,7 @@ async def portal_history(
     id only if it can still read the entry. ``before`` is the last row's
     ``id`` for the next page. 403 ``forbidden`` for a dormant (level 0)
     agent (SPEC §12.2). Agent keys only."""
-    items = await app.access_service.history.list_own(
+    items = await app.history_service.list_own(
         credential, before=str(before) if before is not None else None, limit=limit
     )
     return [PortalHistoryItemOut.from_item(i) for i in items]
@@ -321,7 +319,7 @@ async def portal_undo_cleanup(
     for an admin's, 404 for any other agent's, 409 ``cleanup_refused``
     when a newer one stands; also 403 for a dormant, level 0 agent, SPEC
     §12.2). Audited ``agent.cleanup_undo`` with ``via: "portal"``."""
-    outcome = await app.access_service.cleanups.undo_own(cleanup_id, credential)
+    outcome = await app.cleanup_service.undo_own(cleanup_id, credential)
     return AgentCleanupUndoOut.from_outcome(outcome, note=None)
 
 

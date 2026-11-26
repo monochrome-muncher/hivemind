@@ -157,6 +157,8 @@ def _mcp_app(spy: _Spy) -> McpHivemind:
         search_service=spy,  # type: ignore[arg-type]
         governance_service=None,  # type: ignore[arg-type]
         access_service=None,  # type: ignore[arg-type]
+        feedback_service=None,  # type: ignore[arg-type]
+        pin_service=None,  # type: ignore[arg-type]
         search_config=make_search_config(),
         credential=Credential(user_id="alice", agent_id="agent-1"),
     )

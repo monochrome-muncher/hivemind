@@ -34,6 +34,7 @@ from hivemind.ports import Credential
 from hivemind.services.access import AccessService
 from hivemind.services.errors import PermissionDenied
 from hivemind.services.governance import GovernanceService
+from hivemind.services.pins import PinService
 from tests.fakes import (
     FakeAuthenticator,
     fake_key_id,
@@ -249,7 +250,7 @@ async def test_withdraw_audit_failure_raises() -> None:
         EntryDraft(kind=Kind.FACT, summary="x", author="alice", agent="a1")
     )
     with pytest.raises(RuntimeError, match="audit_log is unwritable"):
-        await GovernanceService(store).withdraw(
+        await GovernanceService(store, PinService(store)).withdraw(
             Credential(user_id="admin", is_admin=True, key_id="abc"), entry.id, "bad"
         )
     # Not atomic, as for the fleets above: the withdrawal stands.
@@ -266,7 +267,7 @@ async def test_admin_withdrawing_anothers_entry_writes_one_row() -> None:
         EntryDraft(kind=Kind.FACT, summary="x", author="alice", agent="a1")
     )
     admin = Credential(user_id="admin", is_admin=True, key_id="0123456789ab")
-    await GovernanceService(store).withdraw(admin, entry.id, "wrong fleet")
+    await GovernanceService(store, PinService(store)).withdraw(admin, entry.id, "wrong fleet")
     [row] = await _rows(store)
     assert row.action is AuditAction.ENTRY_WITHDRAW
     assert row.actor == "admin:0123456789ab"
@@ -279,7 +280,7 @@ async def test_author_withdrawing_own_entry_is_audited_as_the_author() -> None:
     entry = await store.create_entry(
         EntryDraft(kind=Kind.FACT, summary="x", author="alice", agent="a1")
     )
-    await GovernanceService(store).withdraw(
+    await GovernanceService(store, PinService(store)).withdraw(
         Credential(user_id="alice", agent_id="a1"), entry.id, "stale"
     )
     (row,) = await _rows(store)
@@ -293,7 +294,7 @@ async def test_admin_withdrawing_own_entry_is_audited_as_the_author() -> None:
     entry = await store.create_entry(
         EntryDraft(kind=Kind.FACT, summary="x", author="admin", agent="a1")
     )
-    await GovernanceService(store).withdraw(
+    await GovernanceService(store, PinService(store)).withdraw(
         Credential(user_id="admin", is_admin=True, key_id="abc"), entry.id, None
     )
     (row,) = await _rows(store)

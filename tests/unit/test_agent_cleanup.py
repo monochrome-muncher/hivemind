@@ -28,6 +28,7 @@ from hivemind.domain.validation import InvalidInput
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
+from hivemind.services.agent_cleanup import AgentCleanupService
 from hivemind.services.errors import PermissionDenied
 from tests.fakes import FakeAuthenticator, make_embedder, make_search_config
 
@@ -55,7 +56,9 @@ class World:
         self.store = MemoryStore(self.clock)
         self.authenticator = FakeAuthenticator(store=self.store)
         self.access = AccessService(self.store, self.authenticator)
-        self.cleanups = self.access.cleanups
+        self.cleanups = AgentCleanupService(
+            self.store, revoke=self.access.revoke, revocable=self.access.revocable
+        )
         self.fleet = ""
 
     async def setup(self) -> World:
@@ -587,7 +590,8 @@ async def test_an_agent_that_is_already_revoked_is_left_alone(w: World) -> None:
 
 async def test_also_revoke_without_an_authenticator_refuses_before_anything_changes() -> None:
     store = MemoryStore(TickingClock())
-    service = AccessService(store).cleanups  # no authenticator: dev mode
+    access = AccessService(store)  # no authenticator: dev mode
+    service = AgentCleanupService(store, revoke=access.revoke, revocable=access.revocable)
     await store.register_agent("bad")
     await store.activate_agent("bad", trust_level=TrustLevel.CONTRIBUTOR, home_fleet_id="f")
     entry = await store.create_entry(
@@ -922,11 +926,11 @@ async def test_a_cleanup_and_an_undo_drop_the_cached_metrics_and_activity_scans(
         )
     await services.activity_service.report()
     assert services.activity_service._cache  # warm
-    out = await services.access_service.cleanups.cleanup("bad", ADMIN, since=T0, until=FAR)
+    out = await services.cleanup_service.cleanup("bad", ADMIN, since=T0, until=FAR)
     assert out.record is not None
     assert not services.activity_service._cache
     await services.activity_service.report()
-    await services.access_service.cleanups.undo(out.record.id, ADMIN)
+    await services.cleanup_service.undo(out.record.id, ADMIN)
     assert not services.activity_service._cache
 
 

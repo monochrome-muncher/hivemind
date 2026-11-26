@@ -25,12 +25,13 @@ from hivemind.mcp.app import (
 from hivemind.mcp.errors import ERR_AGENT_UNRESOLVED, ERR_INVALID_INPUT, ERR_PERMISSION_DENIED
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
-from hivemind.services.access import AccessService
-from hivemind.services.governance import GovernanceService
-from hivemind.services.read import ReadService
-from hivemind.services.search import SearchService
-from hivemind.services.write import WriteService
-from tests.fakes import make_clock, make_embedder, make_search_config, seed_entity_entries
+from tests.fakes import (
+    make_clock,
+    make_embedder,
+    make_search_config,
+    mcp_surface,
+    seed_entity_entries,
+)
 
 ALICE = Credential(user_id="alice", agent_id="agent-1")
 BOB = Credential(user_id="bob", agent_id="agent-2")
@@ -42,16 +43,7 @@ def build_app(store: MemoryStore, credential: Credential, clock) -> McpHivemind:
     """Assemble a ``McpHivemind`` over a shared store (deterministic clock)."""
     embedder = make_embedder()
     config = make_search_config()
-    return McpHivemind(
-        read_service=ReadService(store, GovernanceService(store), config),
-        store=store,
-        write_service=WriteService(store, embedder),
-        search_service=SearchService(store, embedder, config, now_fn=clock),
-        governance_service=GovernanceService(store),
-        access_service=AccessService(store),
-        search_config=config,
-        credential=credential,
-    )
+    return mcp_surface(store, credential, embedder=embedder, config=config, clock=clock)
 
 
 @pytest.fixture

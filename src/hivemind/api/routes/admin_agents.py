@@ -195,7 +195,7 @@ async def retire_agent(
     404 unknown agent, 409 ``invalid_status`` (the successor is not
     active, the agent is pending) / ``succession_refused`` (already
     retired, or a cycle), 422 the same agent twice."""
-    successions = app.access_service.successions
+    successions = app.succession_service
     if payload.dry_run:
         preview = await successions.preview(name, payload.successor, credential)
         return RetirePreviewOut.from_preview(preview)
@@ -206,7 +206,7 @@ async def retire_agent(
 @router.get("/admin/successions", response_model=list[SuccessionOut])
 async def list_successions(credential: CredentialDep, app: AppDep) -> list[SuccessionOut]:
     """Standing successions, newest first (admin-gated, ADR 0113)."""
-    rows = await app.access_service.successions.list_successions(credential)
+    rows = await app.succession_service.list_successions(credential)
     return [SuccessionOut.from_succession(s) for s in rows]
 
 
@@ -218,7 +218,7 @@ async def undo_succession(
     0113): the successor stops owning the memories. The retired agent
     stays revoked; activating it again issues a new key. 404 when no
     succession retires that agent."""
-    succession = await app.access_service.successions.undo(retired, credential)
+    succession = await app.succession_service.undo(retired, credential)
     return SuccessionOut.from_succession(succession)
 
 
@@ -236,7 +236,7 @@ async def offboard_owner(
     belongs to the same owner, or a cycle), 409 ``offboard_changed`` when the agents are no longer planned as the
     request's ``expected_agents`` (required when applying), 422 ``retire`` without or ``revoke`` with a
     successor."""
-    offboarding = app.access_service.offboarding
+    offboarding = app.offboarding_service
     mode = OffboardMode(payload.mode)
     if payload.dry_run:
         result = await offboarding.preview(alias, mode, payload.successor, credential)

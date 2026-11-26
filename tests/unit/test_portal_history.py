@@ -624,4 +624,4 @@ async def test_the_history_service_itself_refuses_a_key_that_is_not_an_agents(
 
     app, _blue, _red = await _seed()
     with pytest.raises(PermissionDenied, match="agent key"):
-        await app.access_service.history.list_own(credential, before=None, limit=50)
+        await app.history_service.list_own(credential, before=None, limit=50)

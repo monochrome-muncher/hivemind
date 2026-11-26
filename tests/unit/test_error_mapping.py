@@ -21,22 +21,22 @@ from hivemind.api.deps import create_app
 from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
 from hivemind.domain.access import FleetBusy, TrustLevel
+from hivemind.domain.validation import utcnow
 from hivemind.mcp import app as mcp
 from hivemind.mcp.app import McpHivemind
 from hivemind.mcp.server import build_server
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential, EntryNotActiveConflict, UnknownEntry
-from hivemind.services.access import AccessService
+from hivemind.services.fleet_merge import FleetMergeService
 from hivemind.services.governance import GovernanceService
-from hivemind.services.read import ReadService
-from hivemind.services.search import SearchService
-from hivemind.services.write import WriteService
+from hivemind.services.pins import PinService
 from tests.fakes import (
     FakeAuthenticator,
     agent_credential,
     make_clock,
     make_embedder,
     make_search_config,
+    mcp_surface,
 )
 
 NO_SUCH = "00000000-0000-4000-8000-00000000dead"
@@ -67,15 +67,13 @@ class World:
 
     def mcp(self, key: str) -> McpHivemind:
         embedder, config = make_embedder(), make_search_config()
-        return McpHivemind(
-            store=self.store,
-            write_service=WriteService(self.store, embedder),
-            search_service=SearchService(self.store, embedder, config),
-            governance_service=GovernanceService(self.store, config),
-            read_service=ReadService(self.store, GovernanceService(self.store, config), config),
-            access_service=AccessService(self.store, self.authenticator),
-            search_config=config,
-            credential=self.authenticator._by_key[key],
+        return mcp_surface(
+            self.store,
+            self.authenticator._by_key[key],
+            embedder=embedder,
+            config=config,
+            authenticator=self.authenticator,
+            clock=utcnow,
         )
 
 
@@ -111,7 +109,7 @@ async def world() -> World:
     fleet = await store.create_fleet("alpha")
     old = await store.create_fleet("old")
     new = await store.create_fleet("new")
-    await AccessService(store).merges.merge(old.id, ADMIN_CREDENTIAL, target_fleet_id=new.id)
+    await FleetMergeService(store).merge(old.id, ADMIN_CREDENTIAL, target_fleet_id=new.id)
     authenticator._by_key["k-stale"] = agent_credential("stale", old.id)
     return World(
         client,
@@ -669,14 +667,14 @@ UNEXPECTED: list[tuple[str, Rest, Mcp | None, str, str]] = [
         "pin",
         lambda w: w.client.put(f"/v1/entries/{w.fleet_entry}/pin", headers=_h("k-lead")),
         lambda w: mcp.hive_pin(w.mcp("k-lead"), w.fleet_entry),
-        "governance_service",
+        "pin_service",
         "pin",
     ),
     (
         "unpin",
         lambda w: w.client.delete(f"/v1/entries/{w.fleet_entry}/pin", headers=_h("k-lead")),
         lambda w: mcp.hive_pin(w.mcp("k-lead"), w.fleet_entry, unpin=True),
-        "governance_service",
+        "pin_service",
         "unpin",
     ),
     (
@@ -687,7 +685,7 @@ UNEXPECTED: list[tuple[str, Rest, Mcp | None, str, str]] = [
             headers=_h("k-dev"),
         ),
         lambda w: mcp.hive_feedback(w.mcp("k-dev"), w.fleet_entry, "helpful"),
-        "governance_service",
+        "feedback_service",
         "record_feedback",
     ),
     (
@@ -698,7 +696,7 @@ UNEXPECTED: list[tuple[str, Rest, Mcp | None, str, str]] = [
             headers=_h("k-dev"),
         ),
         lambda w: mcp.hive_feedback(w.mcp("k-dev"), verdict="helpful", entry_ids=[w.fleet_entry]),
-        "governance_service",
+        "feedback_service",
         "record_feedback_many",
     ),
     (
@@ -836,7 +834,7 @@ async def test_a_store_race_on_withdraw_becomes_the_typed_errors(
     the unknown-entry message is the usual one."""
     from hivemind.services.errors import EntryNotActive, EntryNotFound
 
-    service = GovernanceService(world.store, make_search_config())
+    service = GovernanceService(world.store, PinService(world.store))
     credential = world.authenticator._by_key["k-dev"]
     text = _RACE_NOT_ACTIVE.format(id=world.fleet_entry)
 

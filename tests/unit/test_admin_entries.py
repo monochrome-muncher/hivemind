@@ -515,7 +515,7 @@ async def test_the_feedback_log_service_follows_the_callers_visibility() -> None
         trust_level=TrustLevel.LURKER,
         home_fleet_id=blue.id,
     )
-    rows = await app.governance_service.feedback_log(
+    rows = await app.feedback_service.feedback_log(
         lurker, FeedbackLogFilters(reporter="zed"), limit=10
     )
     assert [r.feedback.entry_id for r in rows] == [in_blue.id]
@@ -664,5 +664,5 @@ async def test_the_flag_backlog_service_follows_the_callers_visibility() -> None
         trust_level=TrustLevel.LURKER,
         home_fleet_id=blue.id,
     )
-    rows = await app.governance_service.flag_backlog(lurker, limit=10)
+    rows = await app.feedback_service.flag_backlog(lurker, limit=10)
     assert [r.entry_id for r in rows] == [in_blue.id]

@@ -38,12 +38,18 @@ from hivemind.domain.entry import (
 )
 from hivemind.mcp.app import McpHivemind
 from hivemind.memstore import MemoryStore
-from hivemind.ports import Credential, KeyReplacement, Store, entry_embeddable_text
+from hivemind.ports import (
+    Authenticator,
+    Credential,
+    Embedder,
+    Extractor,
+    KeyReplacement,
+    Store,
+    entry_embeddable_text,
+)
 from hivemind.services.access import AccessService
-from hivemind.services.governance import GovernanceService
-from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
-from hivemind.services.write import WriteService
+from hivemind.services.wiring import build_services
 
 FIXED_NOW = datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC)
 
@@ -312,21 +318,29 @@ def make_search_config(
 
 
 def mcp_surface(
-    store: Store, credential: Credential, *, access: AccessService | None = None
+    store: Store,
+    credential: Credential,
+    *,
+    access: AccessService | None = None,
+    embedder: Embedder | None = None,
+    extractor: Extractor | None = None,
+    config: SearchConfig | None = None,
+    clock: Callable[[], datetime] | None = None,
+    authenticator: Authenticator | None = None,
 ) -> McpHivemind:
-    """The MCP tools over ``store`` as ``credential``, wired as the server wires them."""
-    clock, embedder, config = make_clock(), make_embedder(), make_search_config()
-    governance = GovernanceService(store)
-    return McpHivemind(
-        store=store,
-        write_service=WriteService(store, embedder),
-        search_service=SearchService(store, embedder, config, now_fn=clock),
-        governance_service=governance,
-        read_service=ReadService(store, governance, config),
-        access_service=access or AccessService(store),
-        search_config=config,
-        credential=credential,
+    """The MCP tools over ``store`` as ``credential``, wired as the server wires them; ``access``
+    stands in for the built access service, ``clock`` times the search recency."""
+    embedder = embedder or make_embedder()
+    config = config or make_search_config()
+    services = build_services(
+        store, embedder, config, extractor=extractor, authenticator=authenticator
     )
+    services = replace(
+        services,
+        search_service=SearchService(store, embedder, config, now_fn=clock or make_clock()),
+        access_service=access or services.access_service,
+    )
+    return McpHivemind.from_services(store, services, credential)
 
 
 def make_entry_clocks(n: int) -> list[FixedClock]:

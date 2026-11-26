@@ -7,7 +7,6 @@ Seams under test: ``WriteService`` (embed-then-persist) and
 from __future__ import annotations
 
 import asyncio
-import inspect
 
 import pytest
 
@@ -317,7 +316,7 @@ class TestGovernanceService:
 
     @pytest.fixture
     def governance(self, store: MemoryStore) -> GovernanceService:
-        return GovernanceService(store)
+        return GovernanceService(store, PinService(store))
 
     async def test_author_can_withdraw_own_entry(
         self, store: MemoryStore, governance: GovernanceService
@@ -363,7 +362,7 @@ class TestGovernanceService:
 
     async def test_record_feedback_upserts_per_reporter(self) -> None:
         store = MemoryStore(make_clock())
-        governance = GovernanceService(store)
+        governance = FeedbackService(store)
         entry = await store.create_entry(make_draft("a fact"))
         cred = Credential(user_id="bob", agent_id="agent-9")
 
@@ -376,11 +375,9 @@ class TestGovernanceService:
         await governance.record_feedback(other, entry.id, Verdict.STALE)
         assert await store.feedback_counts(entry.id) == (0, 1, 1)
 
-    async def test_record_feedback_unknown_entry_raises(
-        self, governance: GovernanceService
-    ) -> None:
+    async def test_record_feedback_unknown_entry_raises(self, store: MemoryStore) -> None:
         with pytest.raises(EntryNotFound):
-            await governance.record_feedback(
+            await FeedbackService(store).record_feedback(
                 Credential(user_id="bob", agent_id="agent-9"),
                 "nope",
                 Verdict.HELPFUL,
@@ -388,7 +385,7 @@ class TestGovernanceService:
 
     async def test_quality_reflects_feedback(self) -> None:
         store = MemoryStore(make_clock())
-        governance = GovernanceService(store)
+        governance = FeedbackService(store)
         entry = await store.create_entry(make_draft("a fact"))
         assert await governance.quality(entry.id) == pytest.approx(1.0)
 
@@ -410,14 +407,13 @@ async def test_feedback_quality_uses_configured_weights() -> None:
     """
     from hivemind.config import SearchConfig
     from hivemind.memstore import MemoryStore
-    from hivemind.services.governance import GovernanceService
 
     store = MemoryStore(make_clock())
     entry = await store.create_entry(make_draft("a fact"))
 
     # A config with a much heavier wrong-weight changes the reported quality.
     custom = SearchConfig(quality_wrong_weight=0.9, quality_min=0.0)
-    governance = GovernanceService(store, custom)
+    governance = FeedbackService(store, custom)
     await governance.record_feedback(
         Credential(user_id="u1", agent_id="a1"), entry.id, Verdict.WRONG
     )
@@ -426,17 +422,16 @@ async def test_feedback_quality_uses_configured_weights() -> None:
 
     # The default-config service reports a different value for the same
     # feedback (1 - 1.0/3 = 0.6667), proving the weights come from config.
-    default_gov = GovernanceService(store)
+    default_gov = FeedbackService(store)
     assert await default_gov.quality(entry.id) == pytest.approx(2 / 3)
 
 
 async def test_feedback_accepts_self_reported_agent() -> None:
     """SPEC.md §8.1: a plain user key self-reports the agent instance."""
     from hivemind.memstore import MemoryStore
-    from hivemind.services.governance import GovernanceService
 
     store = MemoryStore(make_clock())
-    governance = GovernanceService(store)
+    governance = FeedbackService(store)
     entry = await store.create_entry(make_draft("a fact", author="carol"))  # not alice's (ADR 0065)
 
     # A plain user key (no agent_id) + a self-reported agent succeeds.
@@ -449,33 +444,6 @@ async def test_feedback_accepts_self_reported_agent() -> None:
     # No credential agent AND no self-reported agent -> AgentIdentityRequired.
     with pytest.raises(AgentIdentityRequired, match="agent identity"):
         await governance.record_feedback(Credential(user_id="bob"), entry.id, Verdict.STALE)
-
-
-@pytest.mark.parametrize(
-    ("target", "name"),
-    [
-        (FeedbackService, name)
-        for name in (
-            "record_feedback",
-            "record_feedback_many",
-            "feedback_summary",
-            "feedback_summaries",
-            "quality",
-            "feedback_log",
-            "flag_backlog",
-        )
-    ]
-    + [(PinService, name) for name in ("pin", "unpin", "pinned")],
-)
-def test_a_forwarding_method_keeps_its_targets_signature(target: type, name: str) -> None:
-    """mypy checks the types of a forwarded call, not that a default here
-    equals the target's, so a drifted default would silently change what a
-    caller who omits the argument gets."""
-    forwarded = inspect.signature(getattr(GovernanceService, name)).parameters
-    wanted = inspect.signature(getattr(target, name)).parameters
-    assert {p.name: (p.kind, p.default) for p in forwarded.values()} == {
-        p.name: (p.kind, p.default) for p in wanted.values()
-    }
 
 
 class _GoneAtTheWrite(MemoryStore):
@@ -505,7 +473,7 @@ async def test_a_memory_gone_at_the_write_is_not_found_and_nothing_is_audited(
     )
     if action != "move_to_self":
         await store.withdraw_entry(entry.id, "obsolete", by_user="alice")
-    governance = GovernanceService(store)
+    governance = GovernanceService(store, PinService(store))
     calls = {
         "move_to_self": lambda: governance.move_to_self(admin, entry.id, "private after all"),
         "restore": lambda: governance.restore(admin, entry.id, "put back"),
@@ -524,6 +492,6 @@ class _RejectsTheWithdraw(MemoryStore):
 async def test_invalid_input_from_the_store_is_not_reported_as_not_active() -> None:
     store = _RejectsTheWithdraw(make_clock())
     entry = await store.create_entry(make_draft("to withdraw"), [1.0, 0.0], "m")
-    governance = GovernanceService(store)
+    governance = GovernanceService(store, PinService(store))
     with pytest.raises(InvalidInput):
         await governance.withdraw(Credential(user_id="alice", agent_id="agent-1"), entry.id)

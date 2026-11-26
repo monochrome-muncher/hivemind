@@ -16,22 +16,19 @@ from hivemind.api.deps import create_app
 from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
 from hivemind.domain.access import AgentStatus, TrustLevel
-from hivemind.mcp.app import McpHivemind, hive_whoami
+from hivemind.mcp.app import hive_whoami
 from hivemind.mcp.server import build_server
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService, resolve_write_scope
 from hivemind.services.errors import PermissionDenied
-from hivemind.services.governance import GovernanceService
-from hivemind.services.read import ReadService
-from hivemind.services.search import SearchService
-from hivemind.services.write import WriteService
 from tests.fakes import (
     FakeAuthenticator,
     make_clock,
     make_embedder,
     make_search_config,
     make_store,
+    mcp_surface,
 )
 
 ADMIN = Credential(user_id="admin", is_admin=True)
@@ -164,15 +161,13 @@ async def test_mcp_whoami_tool_returns_the_standing() -> None:
     fleet = await access.create_fleet("platform", ADMIN)
     await store.register_agent("alice", "john")
     await store.activate_agent("alice", trust_level=TrustLevel.LURKER, home_fleet_id=fleet.id)
-    app = McpHivemind(
-        store=store,
-        write_service=WriteService(store, embedder),
-        search_service=SearchService(store, embedder, config, now_fn=clock),
-        governance_service=GovernanceService(store),
-        read_service=ReadService(store, GovernanceService(store), config),
-        access_service=access,
-        search_config=config,
-        credential=agent(TrustLevel.LURKER, fleet.id),
+    app = mcp_surface(
+        store,
+        agent(TrustLevel.LURKER, fleet.id),
+        embedder=embedder,
+        config=config,
+        clock=clock,
+        access=access,
     )
     direct = await hive_whoami(app)
     assert direct["status"] == "active"
@@ -235,15 +230,12 @@ async def test_rest_and_mcp_whoami_carry_the_agent_keys_last_use() -> None:
 
     clock = make_clock()
     config = make_search_config()
-    mcp_app = McpHivemind(
-        store=store,
-        write_service=WriteService(store, make_embedder()),
-        search_service=SearchService(store, make_embedder(), config, now_fn=clock),
-        governance_service=GovernanceService(store),
-        read_service=ReadService(store, GovernanceService(store), config),
-        access_service=AccessService(store, FakeAuthenticator()),
-        search_config=config,
-        credential=agent(TrustLevel.LURKER, fleet.id),
+    mcp_app = mcp_surface(
+        store,
+        agent(TrustLevel.LURKER, fleet.id),
+        config=config,
+        clock=clock,
+        access=AccessService(store, FakeAuthenticator()),
     )
     assert (await hive_whoami(mcp_app))["key_last_used_at"] == used.isoformat()
     result = await build_server(mcp_app).call_tool("hive_whoami", {})

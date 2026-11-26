@@ -32,6 +32,7 @@ from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
 from hivemind.services.errors import PermissionDenied
+from hivemind.services.fleet_merge import FleetMergeService
 from tests.fakes import FakeAuthenticator, make_embedder, make_search_config
 
 ADMIN = Credential(user_id="admin", is_admin=True, key_id="abcdef012345")
@@ -55,7 +56,7 @@ class World:
     def __init__(self) -> None:
         self.store = MemoryStore(TickingClock())
         self.access = AccessService(self.store)
-        self.merges = self.access.merges
+        self.merges = FleetMergeService(self.store)
 
     async def fleet(self, name: str) -> str:
         return (await self.store.create_fleet(name)).id

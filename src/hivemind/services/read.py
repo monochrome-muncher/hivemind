@@ -32,8 +32,7 @@ from hivemind.services.chain import (
     supersession_chain,
 )
 from hivemind.services.errors import AgentIdentityRequired
-from hivemind.services.feedback import reporter_agent
-from hivemind.services.governance import GovernanceService
+from hivemind.services.feedback import FeedbackService, reporter_agent
 from hivemind.services.ownership import own_author_filter
 
 
@@ -71,11 +70,11 @@ class ReadService:
     def __init__(
         self,
         store: EntryFeedbackPort,
-        governance: GovernanceService | None = None,
+        feedback: FeedbackService | None = None,
         search_config: SearchConfig | None = None,
     ) -> None:
         self._store = store
-        self._governance = governance
+        self._feedback = feedback
         self._search_config = search_config or SearchConfig()
 
     async def entry(
@@ -202,11 +201,11 @@ class ReadService:
         return await self._store.feedback_signals([e.id for e in entries])
 
     async def _feedback_summary(self, entry_id: str) -> FeedbackSummary:
-        if self._governance is None:
-            raise InvalidInput("the read service is wired without governance")
-        return await self._governance.feedback_summary(entry_id)
+        if self._feedback is None:
+            raise InvalidInput("the read service is wired without feedback")
+        return await self._feedback.feedback_summary(entry_id)
 
     async def _feedback_summaries(self, entry_ids: Sequence[str]) -> dict[str, FeedbackSummary]:
-        if self._governance is None:
-            raise InvalidInput("the read service is wired without governance")
-        return await self._governance.feedback_summaries(list(entry_ids))
+        if self._feedback is None:
+            raise InvalidInput("the read service is wired without feedback")
+        return await self._feedback.feedback_summaries(list(entry_ids))

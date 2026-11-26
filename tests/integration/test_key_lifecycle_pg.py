@@ -26,6 +26,7 @@ from hivemind.config import Settings
 from hivemind.domain.access import InvalidAgentStatus, TrustLevel
 from hivemind.domain.audit import ActorKind
 from hivemind.services.access import AccessService
+from hivemind.services.fleet_merge import FleetMergeService
 from hivemind.store import PgAuthenticator
 from hivemind.store.auth import key_hash
 from hivemind.store.keys import (
@@ -400,7 +401,7 @@ async def test_cli_refuses_a_home_fleet_that_was_merged(pool) -> None:
     service = AccessService(store, auth)
     old = await service.create_fleet("old", admin)
     new = await service.create_fleet("new", admin)
-    await service.merges.merge(old.id, admin, target_fleet_id=new.id)
+    await FleetMergeService(store).merge(old.id, admin, target_fleet_id=new.id)
     await store.register_agent("bob")
     with pytest.raises(FleetMergedError) as refused:
         await _issue_agent(

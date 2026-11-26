@@ -47,7 +47,7 @@ async def pins(
     caller's home fleet unless ``fleet_id`` names another. Entries the
     caller may not read are left out. ``fleet_phase`` is there while the
     caller's own fleet has a phase in force (ADR 0143)."""
-    pinned = await app.governance_service.pinned(credential, fleet_id)
+    pinned = await app.pin_service.pinned(credential, fleet_id)
     phase = await app.access_service.home_fleet_phase(credential, fleet_id)
     out = PinsOut(
         fleet_id=fleet_id or credential.home_fleet_id,

@@ -20,6 +20,7 @@ from hivemind.domain.entry import EntryDraft, EntryState, Kind
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
+from hivemind.services.agent_cleanup import AgentCleanupService
 from hivemind.services.errors import PermissionDenied
 from hivemind.store import PgStore
 from hivemind.store.pgstore import agent_cleanup as pgstore_cleanup
@@ -276,6 +277,7 @@ async def test_the_preview_cuts_its_lists_and_keeps_exact_totals(
 async def test_through_the_services_with_the_revoke_and_the_audit_rows(store_pool) -> None:
     _, store = store_pool
     access = AccessService(store, FakeAuthenticator(store=store))
+    cleanups = AgentCleanupService(store, revoke=access.revoke, revocable=access.revocable)
     fleet = await store.create_fleet("alpha")
     for name in ("bad", "good"):
         await store.register_agent(name)
@@ -298,9 +300,9 @@ async def test_through_the_services_with_the_revoke_and_the_audit_rows(store_poo
     await store.pin_entry(fleet.id, junk, "bad", 10)
     await store.record_feedback(Feedback(good, "bad", "a", Verdict.WRONG, "n"))
 
-    preview = await access.cleanups.preview("bad", ADMIN, since=SINCE, until=UNTIL)
+    preview = await cleanups.preview("bad", ADMIN, since=SINCE, until=UNTIL)
     assert preview.scan.withdraw_total == 1 and preview.scan.ratings_total == 1
-    out = await access.cleanups.cleanup(
+    out = await cleanups.cleanup(
         "bad",
         ADMIN,
         since=SINCE,
@@ -324,7 +326,7 @@ async def test_through_the_services_with_the_revoke_and_the_audit_rows(store_poo
     assert [r.target for r in by_action[AuditAction.AGENT_REVOKE]] == ["bad"]
     assert [r.detail["reason"] for r in by_action[AuditAction.ENTRY_UNPIN]] == ["agent_cleanup"]
 
-    undone = await access.cleanups.undo(out.record.id, ADMIN)
+    undone = await cleanups.undo(out.record.id, ADMIN)
     assert undone.reactivated == 1 and undone.resuperseded == 1 and undone.ratings_cleared == 1
     assert (await store.get_agent("bad")).status is AgentStatus.REVOKED  # type: ignore[union-attr]
     assert [
@@ -369,6 +371,7 @@ async def test_a_self_service_and_an_admin_cleanup_of_an_owned_author_never_over
 async def test_the_portal_cleanup_through_the_services(store_pool) -> None:
     _, store = store_pool
     access = AccessService(store, FakeAuthenticator(store=store))
+    cleanups = AgentCleanupService(store, revoke=access.revoke, revocable=access.revocable)
     fleet = await store.create_fleet("alpha")
     for name in ("successor", "old", "good"):
         await store.register_agent(name)
@@ -387,10 +390,10 @@ async def test_the_portal_cleanup_through_the_services(store_pool) -> None:
     await store.record_feedback(Feedback(good, "successor", "a", Verdict.WRONG, "n"))
     await store.record_feedback(Feedback(good, "good", "a", Verdict.HELPFUL, "n"))
 
-    preview = await access.cleanups.preview_own(agent, since=SINCE, until=UNTIL)
+    preview = await cleanups.preview_own(agent, since=SINCE, until=UNTIL)
     assert preview.scan.withdraw_total == 2 and preview.scan.ratings_total == 1
     assert preview.scan.restorable_total == 1
-    out = await access.cleanups.cleanup_own(
+    out = await cleanups.cleanup_own(
         agent,
         since=SINCE,
         until=UNTIL,
@@ -415,14 +418,14 @@ async def test_the_portal_cleanup_through_the_services(store_pool) -> None:
         "portal",
     )
 
-    admin_out = await access.cleanups.cleanup(
+    admin_out = await cleanups.cleanup(
         "good", ADMIN, since=SINCE, until=UNTIL, expected_withdraw=1, expected_ratings=1
     )
     assert admin_out.record is not None and not admin_out.record.self_service
-    views = await access.cleanups.list_own(agent)
+    views = await cleanups.list_own(agent)
     assert [(v.record.id, v.undoable) for v in views] == [(out.record.id, True)]
 
-    undone = await access.cleanups.undo_own(out.record.id, agent)
+    undone = await cleanups.undo_own(out.record.id, agent)
     # `good` was withdrawn by the admin's cleanup of its author meanwhile: it is
     # not put back under the old junk, and the undo says it skipped it.
     assert (undone.reactivated, undone.resupersede_skipped, undone.ratings_cleared) == (2, 1, 1)
@@ -437,6 +440,7 @@ async def test_a_dormant_level_0_agent_cannot_use_the_portal_cleanup(store_pool)
     list its memories and the apply and undo change nothing."""
     _, store = store_pool
     access = AccessService(store, FakeAuthenticator(store=store))
+    cleanups = AgentCleanupService(store, revoke=access.revoke, revocable=access.revocable)
     fleet = await store.create_fleet("alpha")
     await store.register_agent("dormant")
     await store.activate_agent(
@@ -451,15 +455,15 @@ async def test_a_dormant_level_0_agent_cannot_use_the_portal_cleanup(store_pool)
         home_fleet_id=fleet.id,
     )
     with pytest.raises(PermissionDenied):
-        await access.cleanups.preview_own(agent, since=SINCE, until=UNTIL)
+        await cleanups.preview_own(agent, since=SINCE, until=UNTIL)
     with pytest.raises(PermissionDenied):
-        await access.cleanups.cleanup_own(
+        await cleanups.cleanup_own(
             agent, since=SINCE, until=UNTIL, expected_withdraw=1, expected_ratings=0
         )
     with pytest.raises(PermissionDenied):
-        await access.cleanups.list_own(agent)
+        await cleanups.list_own(agent)
     with pytest.raises(PermissionDenied):
-        await access.cleanups.undo_own("00000000-0000-4000-8000-000000000001", agent)
+        await cleanups.undo_own("00000000-0000-4000-8000-000000000001", agent)
     assert (await store.get_entry(mine)).state is EntryState.ACTIVE  # type: ignore[union-attr]
 
 
