@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from hivemind.domain.entry import Entry
 from hivemind.domain.feedback import FeedbackCounts, FeedbackSummary
+from hivemind.domain.pin import Pin, PinnedEntry
 from hivemind.services.chain import EntryLinks
 from hivemind.services.search import Hit
 from hivemind.services.write import RelatedEntry
@@ -174,3 +175,27 @@ def feedback_dict(summary: FeedbackSummary) -> dict[str, object]:
     if summary.last_confirmed_at is not None:  # omitted when there is none (SPEC §4.2)
         out["last_confirmed_at"] = summary.last_confirmed_at.isoformat()
     return out
+
+
+def pin_dict(pin: Pin) -> dict[str, object]:
+    return {
+        "entry_id": pin.entry_id,
+        "fleet_id": pin.fleet_id,
+        "pinned_by": pin.pinned_by,
+        "pinned_at": pin.pinned_at.isoformat(),
+    }
+
+
+def pinned_dict(pinned: PinnedEntry) -> dict[str, object]:
+    return {
+        "id": pinned.entry.id,
+        "pinned_id": pinned.pin.entry_id,
+        "kind": pinned.entry.kind.value,
+        "summary": pinned.entry.summary,
+        "author": pinned.entry.author,
+        "state": pinned.entry.state.value,
+        "pinned_by": pinned.pin.pinned_by,
+        "pinned_at": pinned.pin.pinned_at.isoformat(),
+        "changed_since_pin": pinned.changed_since_pin,
+        "change_reason": pinned.change_reason,
+    }

@@ -20,6 +20,8 @@ from hivemind.api.schemas import (
     FleetPhaseOut,
     HitOut,
     LinkOut,
+    PinnedOut,
+    PinOut,
     RelatedOut,
     WarningOut,
     WhoamiOut,
@@ -38,6 +40,7 @@ from hivemind.domain.entry import (
 )
 from hivemind.domain.feedback import Correction, Feedback, FeedbackSummary, Verdict
 from hivemind.domain.fleet_phase import FleetPhase, PhaseName
+from hivemind.domain.pin import Pin, PinnedEntry
 from hivemind.domain.upstream import UpstreamChange, UpstreamChangeKind
 from hivemind.services.chain import EntryLinks
 from hivemind.services.search import Hit, SimilarEntry
@@ -50,6 +53,8 @@ from hivemind.wire import (
     link_dict,
     links_dict,
     list_item_dict,
+    pin_dict,
+    pinned_dict,
     related_dict,
     warning_dict,
 )
@@ -444,3 +449,47 @@ def test_hit_feedback_is_left_out_only_when_all_counts_are_zero() -> None:
             zip(("helpful", "stale", "wrong"), counts, strict=True)
         )
         assert HitOut.from_hit(some).feedback is not None
+
+
+PIN = Pin(
+    fleet_id="fleet-1",
+    entry_id=ENTRY.id,
+    pinned_by="alice",
+    pinned_at=DT_REPORT,
+)
+PIN_TABLE: dict[str, object] = {
+    "entry_id": ENTRY.id,
+    "fleet_id": "fleet-1",
+    "pinned_by": "alice",
+    "pinned_at": "2026-10-04T12:00:00+00:00",
+}
+
+
+def test_pin_matches_the_contract_on_both_surfaces() -> None:
+    assert pin_dict(PIN) == PIN_TABLE
+    assert _norm(PinOut.from_pin(PIN).model_dump(mode="json")) == PIN_TABLE
+
+
+def test_pinned_entry_matches_the_contract_on_both_surfaces() -> None:
+    pinned = PinnedEntry(pin=PIN, entry=ENTRY, change_reason="flagged")
+    table = {
+        "id": ENTRY.id,
+        "pinned_id": ENTRY.id,
+        "kind": ENTRY.kind.value,
+        "summary": ENTRY.summary,
+        "author": ENTRY.author,
+        "state": ENTRY.state.value,
+        "pinned_by": "alice",
+        "pinned_at": "2026-10-04T12:00:00+00:00",
+        "changed_since_pin": True,
+        "change_reason": "flagged",
+    }
+    assert pinned_dict(pinned) == table
+    assert _norm(PinnedOut.from_pinned(pinned).model_dump(mode="json")) == table
+
+
+def test_an_unchanged_pinned_entry_has_a_null_change_reason_on_both_surfaces() -> None:
+    pinned = PinnedEntry(pin=PIN, entry=ENTRY)
+    assert pinned_dict(pinned)["changed_since_pin"] is False
+    assert pinned_dict(pinned)["change_reason"] is None
+    assert PinnedOut.from_pinned(pinned).model_dump(mode="json")["change_reason"] is None
