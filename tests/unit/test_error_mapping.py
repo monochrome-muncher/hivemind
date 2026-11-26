@@ -25,7 +25,7 @@ from hivemind.mcp import app as mcp
 from hivemind.mcp.app import McpHivemind
 from hivemind.mcp.server import build_server
 from hivemind.memstore import MemoryStore
-from hivemind.ports import Credential
+from hivemind.ports import Credential, EntryNotActiveConflict, UnknownEntry
 from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService
 from hivemind.services.read import ReadService
@@ -832,7 +832,7 @@ async def test_a_store_race_on_withdraw_becomes_the_typed_errors(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The store can still refuse after the service's pre-checks (a concurrent
-    withdraw): its KeyError / ValueError become EntryNotFound / EntryNotActive,
+    withdraw): its typed UnknownEntry / EntryNotActiveConflict become EntryNotFound / EntryNotActive,
     the unknown-entry message is the usual one."""
     from hivemind.services.errors import EntryNotActive, EntryNotFound
 
@@ -841,7 +841,7 @@ async def test_a_store_race_on_withdraw_becomes_the_typed_errors(
     text = _RACE_NOT_ACTIVE.format(id=world.fleet_entry)
 
     async def not_active(*_a: Any, **_k: Any) -> None:
-        raise ValueError(text)
+        raise EntryNotActiveConflict(text)
 
     monkeypatch.setattr(world.store, "withdraw_entry", not_active)
     with pytest.raises(EntryNotActive) as active:
@@ -849,16 +849,16 @@ async def test_a_store_race_on_withdraw_becomes_the_typed_errors(
     assert str(active.value) == text
 
     async def unknown(*_a: Any, **_k: Any) -> None:
-        raise KeyError("unknown entry: gone")
+        raise UnknownEntry("unknown entry: gone")
 
     monkeypatch.setattr(world.store, "withdraw_entry", unknown)
     with pytest.raises(EntryNotFound) as missing:
         await service.withdraw(credential, world.fleet_entry)
-    # The store's KeyError text is quoted; the service words it as every other
+    # The store's UnknownEntry text is quoted; the service words it as every other
     # unknown entry, which is what REST has always sent.
     assert str(missing.value) == f"unknown entry: {world.fleet_entry}"
 
-    # Wire results of the ValueError race: REST 409 conflict, MCP not_active.
+    # Wire results of the not-active race: REST 409 conflict, MCP not_active.
     monkeypatch.setattr(world.store, "withdraw_entry", not_active)
     resp = await world.client.post(
         f"/v1/entries/{world.fleet_entry}/withdraw", json={}, headers=_h("k-dev")
