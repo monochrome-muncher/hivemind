@@ -34,6 +34,7 @@ import asyncpg
 from hivemind.config import load_settings
 from hivemind.domain.audit import ActorKind, AuditAction
 from hivemind.store import migration_context
+from hivemind.store.credential_sql import COUNT_DEAD_CREDENTIALS, insert_audit
 
 logger = logging.getLogger(__name__)
 
@@ -90,10 +91,6 @@ _COUNT_LOCKED_KEYS = "SELECT count(*) FROM credentials WHERE locked_at IS NOT NU
 _COUNT_REVOKED_KEYS = (
     "SELECT count(*) FROM credentials c JOIN agents a ON a.name = c.agent_name "
     "WHERE c.kind = 'agent' AND a.status = 'revoked'"
-)
-_INSERT_ROLLBACK_AUDIT = (
-    "INSERT INTO audit_log (actor_kind, actor, action, target, detail) "
-    "VALUES ($1, $2, $3, $4, $5::jsonb)"
 )
 
 
@@ -262,13 +259,8 @@ async def _record_rollback(
     if discarded is not None:
         detail["discarded_audit_rows"] = discarded
     if applied:
-        await conn.execute(
-            _INSERT_ROLLBACK_AUDIT,
-            ActorKind.CLI.value,
-            default_actor(),
-            AuditAction.SCHEMA_ROLLBACK.value,
-            rolled[0],
-            json.dumps(detail),
+        await insert_audit(
+            conn, ActorKind.CLI, default_actor(), AuditAction.SCHEMA_ROLLBACK, rolled[0], detail
         )
     else:
         logger.warning(
@@ -411,7 +403,6 @@ async def _warn_dead_credentials(dsn: str) -> None:
     """One-time startup WARNING counting credential rows that can no longer
     authenticate (ADR 0039), so operators notice and delete them. Purely
     informational: never raises."""
-    from hivemind.store.auth import COUNT_DEAD_CREDENTIALS
 
     try:
         conn = await asyncpg.connect(dsn)
