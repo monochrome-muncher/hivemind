@@ -3,7 +3,6 @@
 // this only words it.
 
 const num = (x) => String(Number(Number(x).toPrecision(4)));
-const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 const keywordLine = (e) => `Keyword: ${e.keyword_rank == null ? "not in the keyword results" : `rank ${e.keyword_rank}`}`;
 
@@ -14,7 +13,7 @@ function vectorLine(e) {
 
 function memoryAge(days) {
   const whole = Math.round(days);
-  return whole === 0 ? "memory date today" : `memory date ${plural(whole, "day")} ago`;
+  return whole === 0 ? "memory date today" : `memory date ${whole} ${whole === 1 ? "day" : "days"} ago`;
 }
 
 function recencyLine({ recency: r }) {

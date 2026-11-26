@@ -5,7 +5,7 @@
 // apply. Neither writes a memory or changes a key.
 
 import {
-  api, guarded, h, hooks, state, toast, openModal, closeModal, fmtAgo, fmtNum, fmtTime, link, memoriesHref, card, table,
+  api, guarded, h, hooks, state, toast, openModal, closeModal, fmtAgo, fmtNum, fmtTime, link, memoriesHref, card, table, plural, typedConfirm,
 } from "./core.js";
 import { openEntry } from "./drawer.js";
 
@@ -103,9 +103,7 @@ export function mergeDialog(source, onDone) {
   const newName = h("input", { id: "mg-new", placeholder: "new fleet name", hidden: true, autocomplete: "off" });
   const previewButton = h("button", { type: "button", class: "btn btn-sm", text: "Preview" });
   const holder = h("div");
-  const confirm = h("input", { id: "mg-confirm", autocomplete: "off", placeholder: source.name, "aria-label": `Type ${source.name} to confirm` });
-  const confirmField = h("div", { class: "field", hidden: true },
-    h("label", { for: "mg-confirm", text: `Type “${source.name}” to confirm` }), confirm);
+  const confirm = typedConfirm({ id: "mg-confirm", expected: source.name, hidden: true });
   let current = null; // { body, checklist }
   let ticket = 0;
 
@@ -121,7 +119,7 @@ export function mergeDialog(source, onDone) {
   const run = async () => {
     const mine = ++ticket;
     current = null;
-    confirmField.hidden = true;
+    confirm.field.hidden = true;
     let target;
     try { target = targetBody(); } catch (err) { holder.replaceChildren(h("p", { class: "form-error", text: err.message })); return; }
     holder.replaceChildren(h("p", { class: "muted", text: "Looking at both fleets…" }));
@@ -135,7 +133,7 @@ export function mergeDialog(source, onDone) {
         h("p", { class: "callout callout-warn small" },
           `${source.name} gives up all its memories and agents to ${preview.target.name}. Agents keep their keys and read the merged pool from their next request. ${lockNote(totalOf(preview.source.entries))} You can undo it from the list of merges.`),
         ...[checklist && checklist.el, duplicatesBlock(preview)].filter(Boolean));
-      confirmField.hidden = false;
+      confirm.field.hidden = false;
     } catch (err) {
       if (mine === ticket) holder.replaceChildren(h("p", { class: "form-error", text: err.message }));
     }
@@ -144,8 +142,8 @@ export function mergeDialog(source, onDone) {
   const reset = () => {
     ticket += 1;
     current = null;
-    confirmField.hidden = true;
-    confirm.value = "";
+    confirm.field.hidden = true;
+    confirm.input.value = "";
     holder.replaceChildren();
   };
   select.addEventListener("change", () => {
@@ -164,7 +162,7 @@ export function mergeDialog(source, onDone) {
     body: [
       h("div", { class: "field" }, h("label", { for: "mg-target", text: "Merge into" }),
         h("div", { class: "row" }, select, newName, previewButton)),
-      holder, confirmField,
+      holder, confirm.field,
     ],
     actions: [
       { label: "Cancel", class: "btn-ghost" },
@@ -174,7 +172,7 @@ export function mergeDialog(source, onDone) {
         submit: true,
         onClick: async () => {
           if (!current) throw new Error("Preview the merge first.");
-          if (confirm.value.trim() !== source.name) throw new Error(`Type “${source.name}” to confirm.`);
+          confirm.check();
           const body = { ...current.target, dry_run: false };
           if (current.checklist) {
             body.expected_pin_ids = current.checklist.shown();
@@ -191,7 +189,6 @@ export function mergeDialog(source, onDone) {
   });
 }
 
-const plural = (n, one, many = `${one}s`) => `${fmtNum(n)} ${n === 1 ? one : many}`;
 
 /** Open the "Move agents…" dialog for `source`: pick agents of that fleet and a target. */
 export function moveDialog(source, onDone) {
@@ -209,9 +206,7 @@ export function moveDialog(source, onDone) {
       h("label", { class: "check" }, box, h("span", {}, h("strong", { text: a.name }), " ",
         h("span", { class: "muted small", text: a.status === "active" ? `level ${a.trust_level}` : a.status }))))))
     : h("p", { class: "muted small", text: "No agent has this fleet as its home fleet." });
-  const confirm = h("input", { id: "mv-confirm", autocomplete: "off", placeholder: source.name, "aria-label": `Type ${source.name} to confirm` });
-  const confirmField = h("div", { class: "field", hidden: true },
-    h("label", { for: "mv-confirm", text: `Type “${source.name}” to confirm` }), confirm);
+  const confirm = typedConfirm({ id: "mv-confirm", expected: source.name, hidden: true });
   let current = null; // { body, checklist, agents }
   let ticket = 0;
 
@@ -230,14 +225,14 @@ export function moveDialog(source, onDone) {
   const reset = () => {
     ticket += 1;
     current = null;
-    confirmField.hidden = true;
-    confirm.value = "";
+    confirm.field.hidden = true;
+    confirm.input.value = "";
     holder.replaceChildren();
   };
   const run = async () => {
     const mine = ++ticket;
     current = null;
-    confirmField.hidden = true;
+    confirm.field.hidden = true;
     let body;
     try { body = targetBody(); } catch (err) { holder.replaceChildren(h("p", { class: "form-error", text: err.message })); return; }
     holder.replaceChildren(h("p", { class: "muted", text: "Looking at what would move…" }));
@@ -259,7 +254,7 @@ export function moveDialog(source, onDone) {
             : ` No agent stays in ${source.name}.`,
           ` Keys do not change. ${lockNote(preview.leaving)} You can undo it from the list below the fleets.`),
         checklist && checklist.el);
-      confirmField.hidden = false;
+      confirm.field.hidden = false;
     } catch (err) {
       if (mine === ticket) holder.replaceChildren(h("p", { class: "form-error", text: err.message }));
     }
@@ -281,7 +276,7 @@ export function moveDialog(source, onDone) {
       h("div", { class: "field" }, h("label", { text: "Agents to move" }), agentList),
       h("div", { class: "field" }, h("label", { for: "mv-target", text: "Move them into" }),
         h("div", { class: "row" }, select, newName, previewButton)),
-      holder, confirmField,
+      holder, confirm.field,
     ],
     actions: [
       { label: "Cancel", class: "btn-ghost" },
@@ -291,7 +286,7 @@ export function moveDialog(source, onDone) {
         submit: true,
         onClick: async () => {
           if (!current) throw new Error("Preview the move first.");
-          if (confirm.value.trim() !== source.name) throw new Error(`Type “${source.name}” to confirm.`);
+          confirm.check();
           const body = { ...current.body, dry_run: false };
           if (current.checklist) {
             body.expected_pin_ids = current.checklist.shown();
