@@ -14,17 +14,18 @@ from hivemind.domain.self_move import (
 from hivemind.domain.validation import canonical_uuid
 from hivemind.memstore.helpers import copy_entry
 from hivemind.memstore.state import MemoryState
+from hivemind.ports import UnknownEntry
 
 
 class SelfMoveStore(MemoryState):
     async def move_entry_to_self(self, entry_id: str) -> SelfMove:
         key = canonical_uuid(entry_id)
         if key is None:
-            raise KeyError(entry_id)
+            raise UnknownEntry(entry_id)
         with self._lock:
             head = self._entries.get(key)
             if head is None:
-                raise KeyError(entry_id)
+                raise UnknownEntry(entry_id)
             self._refuse_merged(head.fleet_id)
             refusal = self_move_refusal(key, head.state.value, head.scope)
             if refusal is not None:

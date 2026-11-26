@@ -94,7 +94,7 @@ from hivemind.domain.succession import (
 )
 from hivemind.domain.validation import InvalidInput
 from hivemind.memstore import MemoryStore, cosine_similarity
-from hivemind.ports import Store, SupersedeConflict
+from hivemind.ports import EntryNotActiveConflict, Store, SupersedeConflict, UnknownEntry
 from hivemind.store import PgStore
 
 T0 = datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC)
@@ -276,7 +276,7 @@ async def test_uuid_spellings_postgres_rejects_read_as_absent(
     assert await store.feedback_counts(odd) == (0, 0, 0)
     assert await store.list_feedback(odd, 5) == []
     assert await store.get_fleet(odd) is None
-    with pytest.raises(KeyError):
+    with pytest.raises(UnknownEntry):
         await store.withdraw_entry(odd, None, by_user="alice")
 
 
@@ -1082,9 +1082,9 @@ async def test_withdraw(adapter: Adapter) -> None:
     withdrawn = await adapter.store.withdraw_entry(entry.id, "obsolete", by_user="alice")
     assert withdrawn.state is EntryState.WITHDRAWN
     assert withdrawn.withdrawn_reason == "obsolete"
-    with pytest.raises(ValueError):
+    with pytest.raises(EntryNotActiveConflict):
         await adapter.store.withdraw_entry(entry.id, None, by_user="alice")
-    with pytest.raises(KeyError):
+    with pytest.raises(UnknownEntry):
         await adapter.store.withdraw_entry(NO_SUCH_ID, None, by_user="alice")
 
 
@@ -1190,9 +1190,9 @@ async def test_redact_refuses_what_it_should(adapter: Adapter) -> None:
     with pytest.raises(RedactRefused, match="already redacted"):
         await store.redact_entry(gone.id)
 
-    with pytest.raises(KeyError):
+    with pytest.raises(UnknownEntry):
         await store.redact_entry(NO_SUCH_ID)
-    with pytest.raises(KeyError):
+    with pytest.raises(UnknownEntry):
         await store.redact_entry("not-a-uuid")
 
 
@@ -5012,9 +5012,9 @@ async def test_withdraw_accepts_any_uuid_spelling(adapter: Adapter) -> None:
     a = await write(adapter, "a")
     withdrawn = await store.withdraw_entry(a.id.upper(), "gone", "boss")
     assert withdrawn.id == a.id and withdrawn.state is EntryState.WITHDRAWN
-    with pytest.raises(ValueError):
+    with pytest.raises(EntryNotActiveConflict):
         await store.withdraw_entry(a.id.replace("-", ""), None, "boss")
-    with pytest.raises(KeyError):
+    with pytest.raises(UnknownEntry):
         await store.withdraw_entry("not-a-uuid", None, "boss")
 
 
@@ -5151,7 +5151,7 @@ async def test_restore_refuses_what_is_not_withdrawn_and_what_is_unknown(
     with pytest.raises(EntryNotWithdrawn):
         await store.restore_entry(old.id)
     for bad in (NO_SUCH_ID, "not-a-uuid"):
-        with pytest.raises(KeyError):
+        with pytest.raises(UnknownEntry):
             await store.restore_entry(bad)
     assert (await _state(adapter, active.id)).state is EntryState.ACTIVE
     assert (await _state(adapter, old.id)).state is EntryState.SUPERSEDED
@@ -5502,9 +5502,9 @@ async def test_move_to_self_refuses_what_is_not_an_active_fleet_memory(adapter: 
     for entry_id in (private.id, gone.id, legacy.id):
         with pytest.raises(SelfMoveRefused):
             await store.move_entry_to_self(entry_id)
-    with pytest.raises(KeyError):
+    with pytest.raises(UnknownEntry):
         await store.move_entry_to_self(str(uuid.uuid4()))
-    with pytest.raises(KeyError):
+    with pytest.raises(UnknownEntry):
         await store.move_entry_to_self("not-a-uuid")
 
 

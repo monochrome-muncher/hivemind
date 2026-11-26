@@ -28,6 +28,15 @@ class SupersedeConflict(Exception):
         self.ids = ids
 
 
+class UnknownEntry(KeyError):
+    """An entry method was given an id naming no entry (or not a UUID)."""
+
+
+class EntryNotActiveConflict(ValueError):
+    """``withdraw_entry`` found the entry not active; the governance service maps it to
+    ``EntryNotActive``."""
+
+
 @runtime_checkable
 class EntryPort(Protocol):
     """Entry writes, reads and lifecycle (withdraw, restore, redact)."""
@@ -115,7 +124,7 @@ class EntryPort(Protocol):
     async def withdraw_entry(self, entry_id: str, reason: str | None, by_user: str) -> Entry:
         """Flip an active entry to ``withdrawn`` (SPEC §4.1); persists the reason, not ``by_user``.
 
-        ``KeyError`` if unknown, ``ValueError`` if not active."""
+        ``UnknownEntry`` if unknown, ``EntryNotActiveConflict`` if not active."""
         ...
 
     async def redact_entry(self, entry_id: str) -> RedactOutcome:
@@ -128,7 +137,7 @@ class EntryPort(Protocol):
         - Returns the memory now, the count of feedback notes (and stale/wrong flag notes among
           them) left unedited, and of audit rows holding a withdrawal reason (``entry.withdraw``
           ``reason``, ``entry.restore`` ``previous_reason``).
-        - Allowed on ``withdrawn`` or ``superseded``. ``KeyError`` if unknown; ``RedactRefused`` if
+        - Allowed on ``withdrawn`` or ``superseded``. ``UnknownEntry`` if unknown; ``RedactRefused`` if
           active or already redacted.
         - Every path that reactivates a withdrawn memory skips a redacted one."""
         ...
@@ -137,7 +146,7 @@ class EntryPort(Protocol):
         """Put a withdrawn entry back to ``active``, clearing its withdrawal reason and time (ADR
         0124); pins are not restored.
 
-        State check and update are one atomic step. ``KeyError`` if unknown; ``RestoreRefused``
+        State check and update are one atomic step. ``UnknownEntry`` if unknown; ``RestoreRefused``
         (a subclass says why) if not withdrawn, withdrawn by a standing agent cleanup, or it would
         leave two active heads in a chain.
         """

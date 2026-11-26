@@ -14,8 +14,9 @@ import pytest
 from hivemind.domain.access import TrustLevel, Visibility
 from hivemind.domain.entry import EntryDraft, EntryFilters, Kind
 from hivemind.domain.feedback import Verdict
+from hivemind.domain.validation import InvalidInput
 from hivemind.memstore import MemoryStore
-from hivemind.ports import Credential
+from hivemind.ports import Credential, UnknownEntry
 from hivemind.services.errors import (
     AgentIdentityRequired,
     EntryNotActive,
@@ -481,13 +482,13 @@ class _GoneAtTheWrite(MemoryStore):
     """The memory disappears between the service's read and the store's write."""
 
     async def move_entry_to_self(self, entry_id: str):  # type: ignore[no-untyped-def]
-        raise KeyError(entry_id)
+        raise UnknownEntry(entry_id)
 
     async def restore_entry(self, entry_id: str):  # type: ignore[no-untyped-def]
-        raise KeyError(entry_id)
+        raise UnknownEntry(entry_id)
 
     async def redact_entry(self, entry_id: str):  # type: ignore[no-untyped-def]
-        raise KeyError(entry_id)
+        raise UnknownEntry(entry_id)
 
 
 @pytest.mark.parametrize("action", ["move_to_self", "restore", "redact"])
@@ -513,3 +514,16 @@ async def test_a_memory_gone_at_the_write_is_not_found_and_nothing_is_audited(
     with pytest.raises(EntryNotFound):
         await calls[action]()
     assert await store.list_audit(AuditFilters(), 10) == []
+
+
+class _RejectsTheWithdraw(MemoryStore):
+    async def withdraw_entry(self, entry_id: str, reason: str | None, by_user: str):  # type: ignore[no-untyped-def]
+        raise InvalidInput("reason is malformed")
+
+
+async def test_invalid_input_from_the_store_is_not_reported_as_not_active() -> None:
+    store = _RejectsTheWithdraw(make_clock())
+    entry = await store.create_entry(make_draft("to withdraw"), [1.0, 0.0], "m")
+    governance = GovernanceService(store)
+    with pytest.raises(InvalidInput):
+        await governance.withdraw(Credential(user_id="alice", agent_id="agent-1"), entry.id)
