@@ -4,10 +4,9 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
-from hivemind.api.deps import api_error
-from hivemind.api.routes.params import API_PREFIX, AppDep, CredentialDep
+from hivemind.api.routes.params import API_PREFIX, AppDep, require_admin_key
 from hivemind.api.schemas import (
     AgentsMetrics,
     EntriesMetrics,
@@ -38,14 +37,12 @@ async def liveness() -> HealthOut:
     return HealthOut(status="ok")
 
 
-@router.get("/metrics", response_model=MetricsOut)
-async def metrics(credential: CredentialDep, app: AppDep) -> MetricsOut:
+@router.get("/metrics", response_model=MetricsOut, dependencies=[Depends(require_admin_key)])
+async def metrics(app: AppDep) -> MetricsOut:
     """Usage counters (ROADMAP §3.3, Tier 3). Admin-gated: the report
     is operational data (usage volume, fleet writes, trust-level
     distribution, pending-agent count). Makes the SPEC §10
     usage-based triggers measurable (pair with the §1.1 eval harness)."""
-    if not credential.is_admin:
-        raise api_error(403, "forbidden", "metrics requires an admin key")
     report = await app.metrics_service.usage_report()
     return MetricsOut(
         entries=EntriesMetrics(**asdict(report.entries)),
