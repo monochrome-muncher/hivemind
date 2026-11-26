@@ -136,6 +136,11 @@ def _mcp_err(result: dict[str, Any]) -> tuple[str, str]:
     return result["error"]["code"], result["error"]["message"]
 
 
+SEE_ALSO_UNKNOWN = (
+    f"unknown see_also entries: {NO_SUCH}; link only entries you can read, "
+    "by the 'id' of a hit or 'related', copied exactly"
+)
+
 Rest = Callable[[World], Awaitable[httpx.Response]]
 Mcp = Callable[[World], Awaitable[dict[str, Any]]]
 
@@ -367,9 +372,9 @@ CASES: list[tuple[str, Rest, tuple[int, str, str], Mcp, tuple[str, str]]] = [
             json={"kind": "fact", "summary": "s", "see_also": [NO_SUCH]},
             headers=_h("k-dev"),
         ),
-        (422, "invalid_entry", f"unknown see_also entries: {NO_SUCH}"),
+        (422, "invalid_entry", SEE_ALSO_UNKNOWN),
         lambda w: mcp.hive_write(w.mcp("k-dev"), "fact", "s", see_also=[NO_SUCH]),
-        ("invalid_input", f"unknown see_also entries: {NO_SUCH}"),
+        ("invalid_input", SEE_ALSO_UNKNOWN),
     ),
     (
         "register a taken name",

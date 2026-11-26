@@ -73,7 +73,7 @@ from pathlib import Path
 from typing import Any
 
 from hivemind.config import SearchConfig
-from hivemind.domain.entry import _SUMMARY_MAX_CHARS, EntryDraft, Kind
+from hivemind.domain.entry import SUMMARY_MAX_CHARS, EntryDraft, Kind
 from hivemind.domain.recency import RecencyHint
 from hivemind.domain.validation import MAX_BODY_CHARS
 from hivemind.memstore import MemoryStore
@@ -93,7 +93,6 @@ PER_TYPE_ENV = "EVAL_LONGMEMEVAL_PER_TYPE"
 CACHE_ENV = "EVAL_EMBED_CACHE"
 JSON_ENV = "EVAL_LONGMEMEVAL_JSON"
 LIMIT = 10
-SUMMARY_MAX_CHARS = _SUMMARY_MAX_CHARS
 METRICS = (
     "recall_any_5",
     "recall_all_5",

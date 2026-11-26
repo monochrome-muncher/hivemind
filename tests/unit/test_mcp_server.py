@@ -289,6 +289,37 @@ async def test_hive_write_sources_schema_is_typed() -> None:
     assert items["properties"]["type"]["enum"] == ["path", "url", "session", "other"]
 
 
+async def test_schemas_state_the_bounds_the_server_checks() -> None:
+    tools = {t.name: t for t in await build_server(make_app()).list_tools()}
+    write = tools["hive_write"].input_schema["properties"]
+    assert write["kind"] == {"enum": ["fact", "insight", "decision"], "type": "string"}
+    assert write["summary"] == {"maxLength": 280, "type": "string"}
+    assert write["scope"] == {"enum": ["self", "fleet", "org"], "type": "string"}
+    assert write["importance"] == {"maximum": 5, "minimum": 1, "type": "integer"}
+    assert write["see_also"]["maxItems"] == 5
+    verdict = tools["hive_feedback"].input_schema["properties"]["verdict"]
+    assert verdict == {"enum": ["helpful", "stale", "wrong"], "type": "string"}
+    for name in ("hive_search", "hive_list"):
+        kind = tools[name].input_schema["properties"]["kind"]
+        assert kind == {"enum": ["fact", "insight", "decision"], "type": "string"}
+
+
+async def test_values_outside_the_schema_still_get_a_structured_refusal() -> None:
+    """The schema only advertises the bounds: a value outside them reaches the tool's own check,
+    so the agent gets the readable refusal and the metrics count it."""
+    server = build_server(make_app())
+    for tool, args, code in (
+        ("hive_write", {"kind": "note", "summary": "s"}, "invalid_input"),
+        ("hive_write", {"kind": "fact", "summary": "x" * 281}, "invalid_input"),
+        ("hive_write", {"kind": "fact", "summary": "s", "scope": "team"}, "invalid_input"),
+        ("hive_write", {"kind": "fact", "summary": "s", "importance": 9}, "invalid_input"),
+        ("hive_feedback", {"entry_id": "e", "verdict": "verified"}, "invalid_verdict"),
+    ):
+        result = await server.call_tool(tool, args)
+        assert result.is_error is False
+        assert json.loads(result.content[0].text)["error"]["code"] == code
+
+
 async def test_hive_write_malformed_source_is_structured_invalid_input() -> None:
     """A malformed source still answers the structured ``invalid_input``
     envelope (not a raw SDK ``is_error``), because the runtime stays lenient
