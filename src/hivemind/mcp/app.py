@@ -618,13 +618,7 @@ async def hive_pin(app: McpHivemind, entry_id: str, unpin: bool = False) -> dict
         pin = await app.pin_service.pin(app.credential, entry_id)
     except SERVICE_ERRORS as exc:
         return service_error_reply(exc)
-    return {
-        "entry_id": pin.entry_id,
-        "pinned": True,
-        "fleet_id": pin.fleet_id,
-        "pinned_by": pin.pinned_by,
-        "pinned_at": pin.pinned_at.isoformat(),
-    }
+    return {**wire.pin_dict(pin), "pinned": True}
 
 
 async def hive_pinned(app: McpHivemind, fleet_id: str | None = None) -> dict[str, object]:
@@ -643,21 +637,7 @@ async def hive_pinned(app: McpHivemind, fleet_id: str | None = None) -> dict[str
         return service_error_reply(exc)
     reply: dict[str, object] = {
         "fleet_id": fleet_id or app.credential.home_fleet_id,
-        "pins": [
-            {
-                "id": p.entry.id,
-                "pinned_id": p.pin.entry_id,
-                "kind": p.entry.kind.value,
-                "summary": p.entry.summary,
-                "author": p.entry.author,
-                "state": p.entry.state.value,
-                "pinned_by": p.pin.pinned_by,
-                "pinned_at": p.pin.pinned_at.isoformat(),
-                "changed_since_pin": p.changed_since_pin,
-                "change_reason": p.change_reason,
-            }
-            for p in pinned
-        ],
+        "pins": [wire.pinned_dict(p) for p in pinned],
     }
     if phase is not None:
         reply["fleet_phase"] = phase.as_dict()

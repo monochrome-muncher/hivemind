@@ -1,6 +1,6 @@
 """Unit tests for MemoryStore (the reference Store implementation).
 
-What both adapters share lives in ``tests/integration/test_store_contract.py``;
+What both adapters share lives in ``tests/integration/store_contract/``;
 this file keeps what only the in-memory store pins: its keyword ranking, the
 id tie-break under a fixed clock, and the draft's own validation.
 """

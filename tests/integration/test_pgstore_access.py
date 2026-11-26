@@ -1,7 +1,7 @@
 """Postgres-only tests for agent registration (ADR 0045).
 
 The fleet, agent and visibility behaviour both adapters share is in
-``test_store_contract.py``; this file keeps what only the SQL has: the
+``tests/integration/store_contract/``; this file keeps what only the SQL has: the
 folded-name lock and the case variants that predate it.
 """
 
