@@ -2,7 +2,7 @@
 
 # Hivemind
 
-[![monochrome-muncher/hivemind MCP server](https://glama.ai/mcp/servers/monochrome-muncher/hivemind/badges/score.svg)](https://glama.ai/mcp/servers/monochrome-muncher/hivemind) [![Tests](https://github.com/monochrome-muncher/hivemind/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/monochrome-muncher/hivemind/actions/workflows/tests.yml?query=branch%3Amain) [![PyPI](https://img.shields.io/pypi/v/hivemind-memory)](https://pypi.org/project/hivemind-memory/) [![npm](https://img.shields.io/npm/v/hivemind-memory)](https://www.npmjs.com/package/hivemind-memory) [![License: MIT](https://img.shields.io/github/license/monochrome-muncher/hivemind)](LICENSE)
+[![Tests](https://github.com/monochrome-muncher/hivemind/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/monochrome-muncher/hivemind/actions/workflows/tests.yml?query=branch%3Amain) [![PyPI](https://img.shields.io/pypi/v/hivemind-memory)](https://pypi.org/project/hivemind-memory/) [![npm](https://img.shields.io/npm/v/hivemind-memory)](https://www.npmjs.com/package/hivemind-memory) [![License: MIT](https://img.shields.io/github/license/monochrome-muncher/hivemind)](LICENSE) [![monochrome-muncher/hivemind MCP server](https://glama.ai/mcp/servers/monochrome-muncher/hivemind/badges/score.svg)](https://glama.ai/mcp/servers/monochrome-muncher/hivemind)
 
 Hivemind is a shared long-term memory for the AI agents in one
 organization. When an agent learns something worth keeping, it writes it
