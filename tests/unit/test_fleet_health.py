@@ -1,7 +1,7 @@
 """Fleet health metrics (ADR 0075): the report shape, the cache, the
 Prometheus gauges and the "observation only" rule. The aggregates
 themselves are pinned with hand-computed values by
-``tests/integration/test_store_contract.py``."""
+``tests/integration/store_contract/``."""
 
 from __future__ import annotations
 

@@ -3,7 +3,7 @@
 ``FakeAuthenticator`` re-implements the status gate, key replacement, the
 portal key lock and the once-an-hour last-use stamp, and many unit tests
 lean on that. These cases hold it to what ``PgAuthenticator`` does, the
-way ``test_store_contract.py`` does for ``MemoryStore``: each case goes
+way ``tests/integration/store_contract/`` does for ``MemoryStore``: each case goes
 through the ``Authenticator`` port only, and moves an agent's status
 through the ``Store``.
 
